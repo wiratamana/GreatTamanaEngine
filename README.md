@@ -95,7 +95,7 @@ build\Debug\GreatTamanaEngine.exe
 Early foundation stage. Architecture and abstractions are still being
 established. Window/Renderer/Game scaffolding is in place, and event handling
 now flows through `EventTranslator`/`InputState` as described above instead of
-raw SDL events reaching `Game` directly. Vulkan-Headers and volk are now
-fetched by CMake (see above); the actual Vulkan renderer (device/swapchain/
-etc.) has not been implemented yet — the current `Renderer` still uses
-SDL's own `SDL_Renderer` for the clear/present loop.
+raw SDL events reaching `Game` directly. `Renderer` now owns a real Vulkan
+pipeline (instance/device/swapchain/command buffers, using dynamic rendering)
+instead of SDL's `SDL_Renderer` - basic initialization boilerplate laid down
+ahead of adding the Dear ImGui Vulkan backend next.
