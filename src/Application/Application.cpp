@@ -51,6 +51,9 @@ int Application::Run()
 
             if (event->type == EventType::Quit) {
                 running = false;
+            } else if (event->type == EventType::WindowResized) {
+                const auto& resized = std::get<WindowResizedEventData>(event->data);
+                m_renderer.OnResize(resized.width, resized.height);
             }
 
             inputState.Apply(*event);

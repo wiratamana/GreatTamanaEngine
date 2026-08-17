@@ -1,6 +1,7 @@
 ﻿#include "Window.h"
 
 #include <SDL3/SDL.h>
+#include <SDL3/SDL_vulkan.h>
 
 #include <stdexcept>
 #include <utility>
@@ -43,6 +44,31 @@ Window& Window::operator=(Window&& other) noexcept
         m_height = other.m_height;
     }
     return *this;
+}
+
+std::vector<std::string> Window::VulkanInstanceExtensions()
+{
+    Uint32 count = 0;
+    char const* const* extensions = SDL_Vulkan_GetInstanceExtensions(&count);
+    if (extensions == nullptr) {
+        throw std::runtime_error(std::string("SDL_Vulkan_GetInstanceExtensions failed: ") + SDL_GetError());
+    }
+
+    std::vector<std::string> result;
+    result.reserve(count);
+    for (Uint32 i = 0; i < count; ++i) {
+        result.emplace_back(extensions[i]);
+    }
+    return result;
+}
+
+VkSurfaceKHR Window::CreateVulkanSurface(VkInstance instance) const
+{
+    VkSurfaceKHR surface = nullptr;
+    if (!SDL_Vulkan_CreateSurface(m_window, instance, nullptr, &surface)) {
+        throw std::runtime_error(std::string("SDL_Vulkan_CreateSurface failed: ") + SDL_GetError());
+    }
+    return surface;
 }
 
 } // namespace gte

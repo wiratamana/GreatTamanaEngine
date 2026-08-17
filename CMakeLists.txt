@@ -47,6 +47,14 @@ add_executable(GreatTamanaEngine
     src/Window/Window.h
     src/Renderer/Renderer.cpp
     src/Renderer/Renderer.h
+    src/Renderer/Vulkan/VulkanInstance.cpp
+    src/Renderer/Vulkan/VulkanInstance.h
+    src/Renderer/Vulkan/VulkanSurface.cpp
+    src/Renderer/Vulkan/VulkanSurface.h
+    src/Renderer/Vulkan/VulkanDevice.cpp
+    src/Renderer/Vulkan/VulkanDevice.h
+    src/Renderer/Vulkan/VulkanSwapchain.cpp
+    src/Renderer/Vulkan/VulkanSwapchain.h
     src/Game/Game.cpp
     src/Game/Game.h
 )
