@@ -17,6 +17,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(FetchSDL3)
+include(FetchVulkan)
 
 # Downloads (if not already present) and stages SDL3 for Windows:
 #   include/SDL3/*.h  - headers
@@ -24,6 +25,14 @@ include(FetchSDL3)
 #   lib/SDL3.lib      - import library, for linking
 # Also defines the SDL3::SDL3 imported target used below.
 fetch_sdl3()
+
+# Downloads (if not already present) and stages Vulkan for Windows, with no
+# Vulkan SDK installation required on the machine:
+#   include/vulkan/*.h, include/vk_video/*.h - official Vulkan-Headers
+#   third_party/volk/volk.h, volk.c          - volk meta-loader (dynamically
+#                                               loads vulkan-1.dll at runtime)
+# Also defines the Vulkan::Headers and volk targets used below.
+fetch_vulkan()
 
 add_executable(GreatTamanaEngine
     src/main.cpp
@@ -46,7 +55,7 @@ target_include_directories(GreatTamanaEngine PRIVATE
     "${CMAKE_SOURCE_DIR}/src"
 )
 
-target_link_libraries(GreatTamanaEngine PRIVATE SDL3::SDL3)
+target_link_libraries(GreatTamanaEngine PRIVATE SDL3::SDL3 volk)
 
 # Ensures SDL3.dll is copied next to the built .exe after every build.
 sdl3_copy_runtime_dll(GreatTamanaEngine)

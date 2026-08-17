@@ -8,3 +8,9 @@
 /include/SDL3/
 /lib/SDL3.lib
 /SDL3.dll
+
+# Vulkan artifacts fetched by cmake/FetchVulkan.cmake (regenerated
+# automatically on configure — see CMakeLists.txt / cmake/FetchVulkan.cmake)
+/include/vulkan/
+/include/vk_video/
+/third_party/volk/

@@ -70,6 +70,16 @@ Prerequisites:
   gitignored — every clone fetches its own copy, so nothing SDL-related is
   committed to the repo. Subsequent configures reuse what was already
   downloaded and don't need the network again.
+- Vulkan is likewise not vendored, and **no Vulkan SDK installation is
+  required**. CMake fetches the official `Vulkan-Headers`
+  (https://github.com/KhronosGroup/Vulkan-Headers) into `include/vulkan` and
+  `include/vk_video`, plus `volk` (https://github.com/zeux/volk) — a tiny
+  meta-loader — into `third_party/volk` (see `cmake/FetchVulkan.cmake`).
+  volk resolves all Vulkan function pointers by dynamically loading
+  `vulkan-1.dll` at runtime, so there's nothing to link against or copy next
+  to the .exe: any machine with a Vulkan-capable GPU driver installed already
+  has `vulkan-1.dll` on its normal DLL search path. These are gitignored too,
+  same as SDL3.
 
 ```
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
@@ -85,4 +95,7 @@ build\Debug\GreatTamanaEngine.exe
 Early foundation stage. Architecture and abstractions are still being
 established. Window/Renderer/Game scaffolding is in place, and event handling
 now flows through `EventTranslator`/`InputState` as described above instead of
-raw SDL events reaching `Game` directly.
+raw SDL events reaching `Game` directly. Vulkan-Headers and volk are now
+fetched by CMake (see above); the actual Vulkan renderer (device/swapchain/
+etc.) has not been implemented yet — the current `Renderer` still uses
+SDL's own `SDL_Renderer` for the clear/present loop.
