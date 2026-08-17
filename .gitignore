@@ -1,0 +1,10 @@
+﻿# CMake build trees
+/build/
+/build_test/
+/out/
+
+# SDL3 artifacts fetched by cmake/FetchSDL3.cmake (regenerated automatically
+# on configure — see CMakeLists.txt / cmake/FetchSDL3.cmake)
+/include/SDL3/
+/lib/SDL3.lib
+/SDL3.dll

@@ -16,5 +16,9 @@ Instructions for LLM/AI agents working on this codebase.
   in destructors, so lifetime is tied to object scope and cleanup is
   automatic and exception/error-safe. Avoid manual/explicit cleanup calls
   scattered through the code — wrap raw resources in owning types instead.
+- **Namespace**: Every new script (every class/function/type this project
+  defines) must live inside the `gte` namespace (short for Great Tamana
+  Engine), e.g. `namespace gte { class Window { ... }; }`. This keeps engine
+  symbols from colliding with SDL's or third-party globals.
 
 This document will be extended as more conventions are established.
