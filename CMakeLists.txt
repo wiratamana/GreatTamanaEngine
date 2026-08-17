@@ -29,6 +29,11 @@ add_executable(GreatTamanaEngine
     src/main.cpp
     src/Application/Application.cpp
     src/Application/Application.h
+    src/Application/EventTranslator.cpp
+    src/Application/EventTranslator.h
+    src/Event/Event.h
+    src/Input/InputState.cpp
+    src/Input/InputState.h
     src/Window/Window.cpp
     src/Window/Window.h
     src/Renderer/Renderer.cpp

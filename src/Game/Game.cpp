@@ -4,9 +4,17 @@
 
 namespace gte {
 
-void Game::Update(double /*deltaSeconds*/)
+void Game::OnEvent(const Event& /*event*/)
 {
-    // Game/simulation logic goes here.
+    // Discrete/one-shot event handling goes here (react to a single key
+    // press, window resize, etc). event.type tells you which alternative of
+    // event.data is active - see Event.h.
+}
+
+void Game::Update(double /*deltaSeconds*/, const InputState& /*input*/)
+{
+    // Game/simulation logic goes here. Poll `input` for continuous state,
+    // e.g. `if (input.IsKeyDown(KeyCode::W)) { ... }` for held-key movement.
 }
 
 void Game::Render(Renderer& renderer)
