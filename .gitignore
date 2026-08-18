@@ -3,6 +3,10 @@
 /build_test/
 /out/
 
+# Local-machine-only build tool shim (e.g. a fetched ninja.exe for dev boxes
+# missing a build tool) - not part of the project, never committed.
+/build_tools/
+
 # SDL3 artifacts fetched by cmake/FetchSDL3.cmake (regenerated automatically
 # on configure — see CMakeLists.txt / cmake/FetchSDL3.cmake)
 /include/SDL3/
@@ -14,3 +18,7 @@
 /include/vulkan/
 /include/vk_video/
 /third_party/volk/
+
+# Dear ImGui artifacts fetched by cmake/FetchImGui.cmake (regenerated
+# automatically on configure — see CMakeLists.txt / cmake/FetchImGui.cmake)
+/third_party/imgui/

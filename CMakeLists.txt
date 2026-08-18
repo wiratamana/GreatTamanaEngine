@@ -9,7 +9,7 @@ if(NOT WIN32)
         "Building on this platform is not supported.")
 endif()
 
-project(GreatTamanaEngine LANGUAGES CXX)
+project(GreatTamanaEngine LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -18,6 +18,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(FetchSDL3)
 include(FetchVulkan)
+include(FetchImGui)
 
 # Downloads (if not already present) and stages SDL3 for Windows:
 #   include/SDL3/*.h  - headers
@@ -33,6 +34,14 @@ fetch_sdl3()
 #                                               loads vulkan-1.dll at runtime)
 # Also defines the Vulkan::Headers and volk targets used below.
 fetch_vulkan()
+
+# Downloads (if not already present) and stages Dear ImGui for Windows (core
+# + SDL3/Vulkan backends), routed through this project's volk loader:
+#   third_party/imgui/*.h, *.cpp                          - core library
+#   third_party/imgui/backends/imgui_impl_sdl3.h/.cpp     - SDL3 platform backend
+#   third_party/imgui/backends/imgui_impl_vulkan.h/.cpp   - Vulkan renderer backend
+# Also defines the imgui target used below.
+fetch_imgui()
 
 add_executable(GreatTamanaEngine
     src/main.cpp
@@ -63,7 +72,7 @@ target_include_directories(GreatTamanaEngine PRIVATE
     "${CMAKE_SOURCE_DIR}/src"
 )
 
-target_link_libraries(GreatTamanaEngine PRIVATE SDL3::SDL3 volk)
+target_link_libraries(GreatTamanaEngine PRIVATE SDL3::SDL3 volk imgui)
 
 # Ensures SDL3.dll is copied next to the built .exe after every build.
 sdl3_copy_runtime_dll(GreatTamanaEngine)
