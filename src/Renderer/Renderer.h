@@ -1,19 +1,18 @@
 ﻿#pragma once
 
 #include "Buffer.h"
+#include "FramePresenter.h"
+#include "FrameRecorder.h"
+#include "GpuResourceFactory.h"
 #include "Memory/GpuMemoryTracker.h"
 #include "Mesh.h"
 #include "Pipeline.h"
-#include "RenderTarget.h"
 #include "RenderTexture.h"
 #include "Vulkan/VulkanAllocator.h"
 #include "Vulkan/VulkanDevice.h"
-#include "Vulkan/VulkanFrameSync.h"
 #include "Vulkan/VulkanInstance.h"
 #include "Vulkan/VulkanSurface.h"
-#include "Vulkan/VulkanSwapchain.h"
 
-#include <array>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -25,26 +24,39 @@ namespace gte {
 class Window;
 
 // Owns the entire Vulkan pipeline for a Window: instance, surface, device,
-// swapchain, command buffers, and the per-frame synchronization objects
-// needed to clear the swapchain and present it. Acquired piece-by-piece in
-// the constructor (each piece itself RAII-owned - see Vulkan/*), released
-// automatically in reverse order in the destructor.
+// and allocator (acquired piece-by-piece in the constructor, each piece
+// itself RAII-owned - see Vulkan/*), plus three collaborators that do the
+// actual work and are released automatically, in reverse order, in the
+// destructor:
+//   - FramePresenter (FramePresenter.h): owns the swapchain and every
+//     per-frame/per-image synchronization object, and implements
+//     Present()/RenderOffscreen()'s actual Vulkan recording/submission.
+//   - GpuResourceFactory (GpuResourceFactory.h): the Buffer/RenderTexture/
+//     Pipeline/Mesh factories, GPU memory tracking, and ImmediateSubmit().
+//   - FrameRecorder (FrameRecorder.h): this frame's clear color plus the
+//     queued Submit() draw list, and the dynamic-rendering command
+//     sequence shared by Present()/RenderOffscreen() to record it.
+// Renderer itself is now just a thin façade: every public method below
+// simply forwards to whichever collaborator actually implements it, so
+// Game/main code is completely unaffected by this split - every signature
+// is identical to before.
 //
 // Public API is intentionally still just Clear()/Present(), matching the
-// previous SDL_Renderer-backed version, so Game/main code did not need to
+// original SDL_Renderer-backed version, so Game/main code did not need to
 // change for this swap. Clear() only records the desired clear color;
 // the actual clear happens as part of Present() (Vulkan has no equivalent
 // of an immediate "clear now" call outside of a recorded command buffer).
 //
-// Also owns the machinery to render into an off-screen RenderTexture
-// instead of the swapchain (RenderOffscreen()/CreateRenderTexture()) - the
-// primitive behind Unity-style Editor "Game"/"Scene" panels: a camera
-// renders into a RenderTexture, which the Editor then displays inside an
-// ImGui::Image() panel, while a final/release build (no Editor compiled
-// in) instead renders the same scene straight into the swapchain via
-// Present(), fullscreen, with no Editor/ImGui involved at all. Callers
-// (Game, a future Editor module, ...) never touch raw Vulkan handles for
-// this - RenderTarget/RenderTexture are the abstraction boundary.
+// Also owns (via FramePresenter/GpuResourceFactory) the machinery to render
+// into an off-screen RenderTexture instead of the swapchain
+// (RenderOffscreen()/CreateRenderTexture()) - the primitive behind
+// Unity-style Editor "Game"/"Scene" panels: a camera renders into a
+// RenderTexture, which the Editor then displays inside an ImGui::Image()
+// panel, while a final/release build (no Editor compiled in) instead
+// renders the same scene straight into the swapchain via Present(),
+// fullscreen, with no Editor/ImGui involved at all. Callers (Game, a future
+// Editor module, ...) never touch raw Vulkan handles for this -
+// RenderTarget/RenderTexture are the abstraction boundary.
 class Renderer {
 public:
     explicit Renderer(Window& window);
@@ -53,7 +65,14 @@ public:
     Renderer(const Renderer&) = delete;
     Renderer& operator=(const Renderer&) = delete;
 
-    Renderer(Renderer&& other) noexcept;
+    // Every member below is itself a properly move-safe RAII type (and
+    // none of them hold a reference/pointer to each other - see
+    // FramePresenter.h's class comment), so a plain member-wise move is
+    // correct here. NOTE: if a raw Vulkan handle is ever added directly to
+    // Renderer (rather than inside one of its collaborators), this would
+    // need to become a hand-written move again, same as
+    // operator=(Renderer&&) below.
+    Renderer(Renderer&& other) noexcept = default;
     Renderer& operator=(Renderer&& other) noexcept;
 
     // Sets the color the render target will be cleared to on the next
@@ -143,19 +162,19 @@ public:
     // items queued last frame via Submit() (see below) so this frame always
     // starts from an empty queue. Also guards against a queue growing
     // unbounded across frames where nothing ever consumes it (e.g. a
-    // minimized window with no Editor - see RecordClearAndTransition).
+    // minimized window with no Editor).
     void BeginFrame();
 
     // Queues one draw call - a Pipeline plus the Mesh to draw with it - to
     // be recorded the next time this frame's contents are actually recorded
-    // (whichever of RenderOffscreen()/Present() runs RecordClearAndTransition
-    // first this frame). This is the seam that lets Game record draws
-    // without ever touching a VkCommandBuffer or knowing Vulkan exists at
-    // all: Game holds onto Pipeline/Mesh objects (built via
-    // CreatePipeline()/CreateMesh()) and just calls this once per object it
-    // wants drawn each frame - Renderer is the only thing that ever issues
-    // the actual vkCmdBindPipeline/vkCmdBindVertexBuffers/vkCmdDraw calls.
-    // Not persistent - must be called again every frame an object should be
+    // (whichever of RenderOffscreen()/Present() runs first this frame).
+    // This is the seam that lets Game record draws without ever touching a
+    // VkCommandBuffer or knowing Vulkan exists at all: Game holds onto
+    // Pipeline/Mesh objects (built via CreatePipeline()/CreateMesh()) and
+    // just calls this once per object it wants drawn each frame - Renderer
+    // is the only thing that ever issues the actual
+    // vkCmdBindPipeline/vkCmdBindVertexBuffers/vkCmdDraw calls. Not
+    // persistent - must be called again every frame an object should be
     // drawn (there is no retained scene graph yet).
     void Submit(const Pipeline& pipeline, const Mesh& mesh);
 
@@ -195,7 +214,7 @@ public:
     // (e.g. Dear ImGui's Vulkan backend, owned by the Editor module) to
     // initialize its own pipeline against the exact same device/swapchain -
     // without Renderer ever needing to know that consumer exists, and
-    // without exposing VulkanInstance/VulkanDevice/VulkanSwapchain
+    // without exposing VulkanInstance/VulkanDevice/FramePresenter
     // themselves to callers outside this class.
     struct VulkanContextInfo {
         std::uint32_t apiVersion = 0;
@@ -216,86 +235,28 @@ public:
     void OnResize(int width, int height);
 
 private:
-    static constexpr std::uint32_t kMaxFramesInFlight = 2;
-
-    void CreateCommandObjects();
-    void RecreateSwapchain();
-
-    // Shared by Present() (target = current swapchain image) and
-    // RenderOffscreen() (target = a RenderTexture): records the
-    // undefined->color-attachment barrier, the dynamic-rendering
-    // clear+recordExtra, and the final transition to `finalLayout`
-    // (VK_IMAGE_LAYOUT_PRESENT_SRC_KHR for the swapchain,
-    // VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL for a RenderTexture).
-    void RecordClearAndTransition(VkCommandBuffer cmd, const RenderTarget& target, VkImageLayout finalLayout,
-        const std::function<void(VkCommandBuffer)>& recordExtra);
-
-    // One queued Submit() call's worth of plain Vulkan handles - deliberately
-    // NOT a reference/pointer to the Pipeline/Mesh themselves (those are
-    // owned by whoever called Submit(), typically Game, and must outlive
-    // the RecordClearAndTransition() call that consumes this - which is
-    // always true within a single frame, since Submit() is called from
-    // Game::Render() and consumed later that same frame).
-    struct DrawItem {
-        VkPipeline pipeline = VK_NULL_HANDLE;
-        VkBuffer vertexBuffer = VK_NULL_HANDLE;
-        std::uint32_t vertexCount = 0;
-    };
-
     VulkanInstance m_instance;
     VulkanSurface m_surface;
     VulkanDevice m_device;
     // Declared (and thus destroyed, per reverse-declaration-order RAII
-    // teardown) right after m_device and before m_swapchain: relative order
-    // vs. m_swapchain doesn't matter (the allocator never touches it), but
-    // it MUST be destroyed before m_device/m_instance are, since VMA holds
-    // handles derived from both.
+    // teardown) right after m_device: relative order vs. m_presenter
+    // doesn't matter (the allocator never touches the swapchain), but it
+    // MUST be destroyed before m_device/m_instance are, since VMA holds
+    // handles derived from both, and it must outlive m_resources
+    // (declared after it below), which uses it.
     VulkanAllocator m_allocator;
-    VulkanSwapchain m_swapchain;
 
-    // All per-frame/per-image semaphores and fences (see VulkanFrameSync) -
-    // declared after m_swapchain (its constructor needs
-    // m_swapchain.ImageCount()) so it is destroyed, in
-    // reverse-declaration-order RAII teardown, before m_swapchain/
-    // m_allocator/m_device/m_surface/m_instance, but after
-    // m_memoryTracker/m_drawQueue/etc. below. Its per-swapchain-image
-    // semaphores are rebuilt (RecreateRenderFinishedSemaphores()) whenever
-    // the swapchain itself is recreated - see RecreateSwapchain().
-    VulkanFrameSync m_frameSync;
+    // Swapchain + per-frame sync objects + the actual Present()/
+    // RenderOffscreen() Vulkan recording/submission - see FramePresenter.h.
+    FramePresenter m_presenter;
 
-    // Owned via shared_ptr (not by value) so it can be handed out to every
-    // Buffer/RenderTexture this Renderer creates without any risk of
-    // dangling if Renderer itself (and thus m_allocator) is later moved -
-    // see GpuMemoryTracker's class comment. Declaration order relative to
-    // the Vulkan objects above/below is irrelevant: this owns no Vulkan
-    // handles itself, and shared_ptr keeps it alive as long as anything
-    // (including a live Buffer/RenderTexture) still references it.
-    std::shared_ptr<GpuMemoryTracker> m_memoryTracker = std::make_shared<GpuMemoryTracker>();
+    // Buffer/RenderTexture/Pipeline/Mesh factories + GPU memory tracking +
+    // ImmediateSubmit() - see GpuResourceFactory.h.
+    GpuResourceFactory m_resources;
 
-    VkCommandPool m_commandPool = VK_NULL_HANDLE;
-    std::array<VkCommandBuffer, kMaxFramesInFlight> m_commandBuffers{};
-
-    // Separate command buffer for RenderOffscreen() (paired with
-    // m_frameSync.OffscreenFence()), so off-screen rendering (Editor
-    // panels) never contends with the swapchain's own per-frame-in-flight
-    // command buffers/fences.
-    VkCommandBuffer m_offscreenCommandBuffer = VK_NULL_HANDLE;
-
-    std::uint32_t m_currentFrame = 0;
-
-    float m_clearColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
-
-    bool m_resizeRequested = false;
-    int m_pendingWidth = 0;
-    int m_pendingHeight = 0;
-
-    // This frame's queued Submit() calls - see Submit()/BeginFrame()/
-    // RecordClearAndTransition. Cleared at the top of every frame
-    // (BeginFrame()) AND immediately after being recorded
-    // (RecordClearAndTransition), so a frame is never drawn twice (e.g.
-    // RenderOffscreen() then Present() in the same Editor-build frame) and
-    // never silently accumulates across frames where nothing consumes it.
-    std::vector<DrawItem> m_drawQueue;
+    // This frame's clear color + queued Submit() draw list - see
+    // FrameRecorder.h.
+    FrameRecorder m_frameRecorder;
 };
 
 } // namespace gte

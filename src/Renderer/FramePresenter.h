@@ -1,0 +1,112 @@
+﻿#pragma once
+
+#include "FrameRecorder.h"
+#include "RenderTarget.h"
+#include "RenderTexture.h"
+#include "Vulkan/VulkanFrameSync.h"
+#include "Vulkan/VulkanSwapchain.h"
+
+#include <array>
+#include <cstdint>
+#include <functional>
+
+namespace gte {
+
+// Owns the swapchain, every per-frame/per-image synchronization object (see
+// VulkanFrameSync), and the command buffers (one set per frame-in-flight
+// for Present(), plus a dedicated one for RenderOffscreen() - see
+// VulkanFrameSync's class comment for why the offscreen path doesn't share
+// the per-frame objects) needed to actually record and submit a frame's
+// Vulkan work. This is the part of the old monolithic Renderer that
+// literally talks to vkAcquireNextImageKHR/vkQueueSubmit/vkQueuePresentKHR -
+// Present()/RenderOffscreen() below are moved here verbatim from the old
+// Renderer::Present()/RenderOffscreen()/RecreateSwapchain().
+//
+// Does NOT own the VkPhysicalDevice/VkDevice/VkSurfaceKHR/VkQueue handles
+// passed in - all must outlive this object (same convention as
+// VulkanSwapchain itself not owning the device/surface passed to it). DOES
+// own its swapchain, frame-sync objects, and command pool/buffers for its
+// entire lifetime.
+//
+// Present()/RenderOffscreen() both take a FrameRecorder& parameter rather
+// than storing one, so this class never holds a reference/pointer to
+// anything outside itself across calls - the only reason Renderer's own
+// move constructor can stay a plain defaulted member-wise move (see
+// Renderer.h) without risking a dangling cross-collaborator reference after
+// a move.
+class FramePresenter {
+public:
+    FramePresenter(VkPhysicalDevice physicalDevice, VkDevice device, VkSurfaceKHR surface,
+        std::uint32_t graphicsQueueFamily, std::uint32_t presentQueueFamily, VkQueue graphicsQueue,
+        VkQueue presentQueue, int width, int height);
+    ~FramePresenter();
+
+    FramePresenter(const FramePresenter&) = delete;
+    FramePresenter& operator=(const FramePresenter&) = delete;
+
+    FramePresenter(FramePresenter&& other) noexcept;
+    // Assumes the caller (Renderer::operator=(&&)) has already waited for
+    // the device to go idle before this runs, since it may destroy this
+    // presenter's current swapchain/command pool - see Renderer.cpp. This
+    // class has no standalone way to know when that wait is safe to skip,
+    // so it doesn't attempt it itself.
+    FramePresenter& operator=(FramePresenter&& other) noexcept;
+
+    // The color format this swapchain actually negotiated at runtime - see
+    // Renderer::ColorFormat().
+    VkFormat ColorFormat() const noexcept { return m_swapchain.ImageFormat(); }
+
+    // Current swapchain image count - see Renderer::GetVulkanContextInfo().
+    std::uint32_t ImageCount() const noexcept { return m_swapchain.ImageCount(); }
+
+    // How many frames this presenter keeps in flight - see
+    // Renderer::GetVulkanContextInfo().
+    static constexpr std::uint32_t FramesInFlight() noexcept { return kFramesInFlight; }
+
+    // See Renderer::OnResize().
+    void OnResize(int width, int height);
+
+    // See Renderer::Present(). frameRecorder supplies the clear color and
+    // queued Submit() draws recorded into this frame - see FrameRecorder.h.
+    void Present(FrameRecorder& frameRecorder, const std::function<void(VkCommandBuffer)>& recordExtra);
+
+    // See Renderer::RenderOffscreen().
+    void RenderOffscreen(FrameRecorder& frameRecorder, RenderTexture& target,
+        const std::function<void(VkCommandBuffer)>& recordExtra);
+
+private:
+    static constexpr std::uint32_t kFramesInFlight = 2;
+
+    void CreateCommandObjects();
+    void RecreateSwapchain();
+    void Destroy() noexcept;
+
+    VkDevice m_device = VK_NULL_HANDLE;
+    VkQueue m_graphicsQueue = VK_NULL_HANDLE;
+    VkQueue m_presentQueue = VK_NULL_HANDLE;
+    std::uint32_t m_graphicsQueueFamily = 0;
+
+    VulkanSwapchain m_swapchain;
+    // Per-frame/per-image semaphores/fences, and the dedicated offscreen
+    // fence - see VulkanFrameSync.h. Its per-swapchain-image semaphores are
+    // rebuilt (RecreateRenderFinishedSemaphores()) whenever the swapchain
+    // itself is recreated - see RecreateSwapchain().
+    VulkanFrameSync m_frameSync;
+
+    VkCommandPool m_commandPool = VK_NULL_HANDLE;
+    std::array<VkCommandBuffer, kFramesInFlight> m_commandBuffers{};
+
+    // Separate command buffer for RenderOffscreen() (paired with
+    // m_frameSync.OffscreenFence()), so off-screen rendering (Editor
+    // panels) never contends with the swapchain's own per-frame-in-flight
+    // command buffers/fences.
+    VkCommandBuffer m_offscreenCommandBuffer = VK_NULL_HANDLE;
+
+    std::uint32_t m_currentFrame = 0;
+
+    bool m_resizeRequested = false;
+    int m_pendingWidth = 0;
+    int m_pendingHeight = 0;
+};
+
+} // namespace gte

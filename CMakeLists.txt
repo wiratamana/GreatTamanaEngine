@@ -86,6 +86,12 @@ add_executable(GreatTamanaEngine
     src/Window/Window.h
     src/Renderer/Renderer.cpp
     src/Renderer/Renderer.h
+    src/Renderer/FramePresenter.cpp
+    src/Renderer/FramePresenter.h
+    src/Renderer/FrameRecorder.cpp
+    src/Renderer/FrameRecorder.h
+    src/Renderer/GpuResourceFactory.cpp
+    src/Renderer/GpuResourceFactory.h
     src/Renderer/Buffer.cpp
     src/Renderer/Buffer.h
     src/Renderer/Mesh.h
