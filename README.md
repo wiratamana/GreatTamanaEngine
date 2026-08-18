@@ -52,6 +52,43 @@ SDL_Event -> EventTranslator -> gte::Event -> InputState.Apply() + Game::OnEvent
   discrete/one-shot reactions (window resized, a key just pressed, quit) —
   as opposed to the continuous polling done via `InputState` in `Update()`.
 
+### Rendering
+
+`Renderer` (`src/Renderer/Renderer.h/.cpp`) owns a real Vulkan pipeline built
+on top of a set of small RAII wrappers under `src/Renderer/Vulkan/`
+(`VulkanInstance` -> `VulkanSurface` -> `VulkanDevice` -> `VulkanSwapchain`),
+using **dynamic rendering** (no `VkRenderPass`/`VkFramebuffer`) instead of
+SDL's `SDL_Renderer`. Its public surface is still just `Clear()`/`Present()`,
+plus `RenderOffscreen()`/`CreateRenderTexture()` for drawing into an
+off-screen `RenderTexture` instead of the swapchain — the primitive behind
+the Editor's Unity-style "Game"/"Scene" panels (a camera renders into a
+`RenderTexture`, which the Editor displays inside an `ImGui::Image()` panel).
+Vulkan itself is accessed exclusively through **volk** (a dynamic meta-loader,
+see Building below) — nothing in the engine links a classic Vulkan loader
+import lib or calls `vulkan.h` functions directly without going through it.
+
+### Editor / Debug UI
+
+An optional in-engine Editor module lives under `src/Editor/`, gated by the
+`GTE_ENABLE_EDITOR` CMake option (`ON` by default). `Application` only ever
+talks to the `IEditorLayer` interface (`src/Editor/EditorLayer.h`); exactly
+one of two implementations gets compiled in, selected purely by which `.cpp`
+CMake adds:
+
+- **`ImGuiEditorLayer`** (real, `GTE_ENABLE_EDITOR=ON`) — owns the Dear ImGui
+  context plus its SDL3 and Vulkan backends (routed through volk), and a
+  `RenderTexture` that Game's camera renders into for the "Game" panel.
+- **`NullEditorLayer`** (`GTE_ENABLE_EDITOR=OFF`) — every method is a no-op;
+  `GameViewTarget()` always returns `nullptr`, meaning "render straight to
+  the swapchain, fullscreen". This is what makes `-DGTE_ENABLE_EDITOR=OFF` a
+  genuine release/final-game build: no ImGui fetch, no ImGui sources
+  compiled, no ImGui symbols linked at all — not just a runtime flag.
+
+`Game` never depends on the Editor at all, in either direction — that's what
+keeps turning the Editor off a zero-touch operation for gameplay code.
+Hierarchy/Inspector/Scene panels are the natural next additions once there's
+an actual scene to inspect; currently only the "Game" panel exists.
+
 ## Building
 
 Windows only, for now.
@@ -80,6 +117,18 @@ Prerequisites:
   to the .exe: any machine with a Vulkan-capable GPU driver installed already
   has `vulkan-1.dll` on its normal DLL search path. These are gitignored too,
   same as SDL3.
+- The **Vulkan Memory Allocator (VMA)** header
+  (https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator) is
+  fetched the same way, into `third_party/vma/vk_mem_alloc.h` (see
+  `cmake/FetchVMA.cmake`), and gitignored like everything else above. This
+  currently only stages the header and defines an interface target for
+  engine code to link against later — no engine allocation code uses it yet
+  (see Status below).
+- Dear ImGui (core + its SDL3/Vulkan backends) is fetched the same way, into
+  `third_party/imgui/` (see `cmake/FetchImGui.cmake`), but **only** when
+  `GTE_ENABLE_EDITOR` is `ON` (the default) — a build configured with
+  `-DGTE_ENABLE_EDITOR=OFF` never touches the network for this and never
+  compiles a single ImGui source file.
 
 ```
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
@@ -92,10 +141,28 @@ build\Debug\GreatTamanaEngine.exe
 
 ## Status
 
-Early foundation stage. Architecture and abstractions are still being
-established. Window/Renderer/Game scaffolding is in place, and event handling
-now flows through `EventTranslator`/`InputState` as described above instead of
-raw SDL events reaching `Game` directly. `Renderer` now owns a real Vulkan
-pipeline (instance/device/swapchain/command buffers, using dynamic rendering)
-instead of SDL's `SDL_Renderer` - basic initialization boilerplate laid down
-ahead of adding the Dear ImGui Vulkan backend next.
+Early foundation stage, but past the basic-scaffolding phase for several
+pieces:
+
+- Window/Renderer/Game scaffolding is in place, and event handling flows
+  through `EventTranslator`/`InputState` as described above instead of raw
+  SDL events reaching `Game` directly.
+- `Renderer` owns a real Vulkan pipeline (instance/device/swapchain/command
+  buffers, using dynamic rendering) instead of SDL's `SDL_Renderer`, including
+  off-screen rendering into a `RenderTexture` for Editor panels.
+- The Editor module is wired up end-to-end: Dear ImGui's SDL3 + Vulkan
+  backends are integrated behind `IEditorLayer`, with a working "Game" panel
+  that displays Game's camera output via a `RenderTexture`. Toggling
+  `GTE_ENABLE_EDITOR` fully includes/excludes it, down to CMake never
+  fetching or compiling ImGui at all when it's off.
+- GPU memory is currently allocated by hand (`RenderTexture` calls
+  `vkAllocateMemory`/`vkBindImageMemory`/`vkFreeMemory` directly, with its own
+  small `FindMemoryType()` helper) — there's exactly one allocation site today.
+  **VMA integration is in progress** (`vma-integration` branch):
+  `cmake/FetchVMA.cmake` fetches and stages `vk_mem_alloc.h` and defines a
+  `vma` target, verified to fetch/configure/compile cleanly against this
+  project's volk-based Vulkan headers — but it isn't linked into the engine
+  or used by any allocation yet. Next up: a `VulkanAllocator` RAII wrapper
+  owning a `VmaAllocator`, and migrating `RenderTexture` (and future
+  buffer/texture types) onto `vmaCreateImage`/`vmaCreateBuffer` instead of the
+  manual memory-type lookup + alloc/bind/free dance.
