@@ -38,13 +38,22 @@ std::optional<Event> EventTranslator::Translate(const SDL_Event& sdlEvent)
 
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
     case SDL_EVENT_MOUSE_BUTTON_UP: {
+        const MouseButton button = TranslateMouseButton(sdlEvent.button.button);
+        if (button == MouseButton::Unknown) {
+            // An SDL button code this engine doesn't map to anything (e.g. an
+            // exotic extra mouse button) - deliberately dropped rather than
+            // aliased to a real button like Left, so it can never masquerade
+            // as a Left-button press/release. See MouseButton::Unknown.
+            return std::nullopt;
+        }
+
         Event event;
         event.type = (sdlEvent.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
             ? EventType::MouseButtonDown
             : EventType::MouseButtonUp;
 
         MouseButtonEventData data;
-        data.button = TranslateMouseButton(sdlEvent.button.button);
+        data.button = button;
         data.x = sdlEvent.button.x;
         data.y = sdlEvent.button.y;
         event.data = data;
@@ -162,7 +171,7 @@ MouseButton EventTranslator::TranslateMouseButton(Uint8 sdlButton)
     case SDL_BUTTON_RIGHT: return MouseButton::Right;
     case SDL_BUTTON_X1: return MouseButton::X1;
     case SDL_BUTTON_X2: return MouseButton::X2;
-    default: return MouseButton::Left;
+    default: return MouseButton::Unknown;
     }
 }
 

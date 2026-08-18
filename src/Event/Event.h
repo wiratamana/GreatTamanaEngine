@@ -29,7 +29,15 @@ enum class KeyCode {
 
 // Engine-owned mouse button identifiers, decoupled from SDL's button indices.
 enum class MouseButton {
-    Left = 0,
+    // Returned by EventTranslator for a button code it doesn't recognize.
+    // Never actually delivered in an Event - EventTranslator::Translate()
+    // filters an unrecognized mouse button out entirely (returns
+    // std::nullopt) rather than letting it alias to a real button like
+    // Left, so an unmapped/exotic mouse button can never masquerade as a
+    // Left-button press/release.
+    Unknown = 0,
+
+    Left,
     Middle,
     Right,
     X1,
@@ -65,7 +73,7 @@ struct MouseMoveEventData {
 };
 
 struct MouseButtonEventData {
-    MouseButton button = MouseButton::Left;
+    MouseButton button = MouseButton::Unknown;
     float x = 0.0f;
     float y = 0.0f;
 };
