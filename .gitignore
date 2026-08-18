@@ -28,6 +28,11 @@
 # cmake/FetchVMA.cmake)
 /third_party/vma/
 
+# GoogleTest artifacts fetched by cmake/FetchGTest.cmake (regenerated
+# automatically on configure when GTE_BUILD_TESTS is ON — see
+# CMakeLists.txt / cmake/FetchGTest.cmake / tests/CMakeLists.txt)
+/third_party/googletest/
+
 # Compiled shader binaries (SPIR-V) built from src/Shaders/*.vert/*.frag by
 # cmake/CompileShaders.cmake (glslc) - regenerated automatically on every
 # build into "<exe dir>/shaders/", never committed. Only the GLSL source is
