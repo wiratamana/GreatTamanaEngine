@@ -8,6 +8,7 @@
 #include "RenderTexture.h"
 #include "Vulkan/VulkanAllocator.h"
 #include "Vulkan/VulkanDevice.h"
+#include "Vulkan/VulkanFrameSync.h"
 #include "Vulkan/VulkanInstance.h"
 #include "Vulkan/VulkanSurface.h"
 #include "Vulkan/VulkanSwapchain.h"
@@ -218,8 +219,6 @@ private:
     static constexpr std::uint32_t kMaxFramesInFlight = 2;
 
     void CreateCommandObjects();
-    void CreateSyncObjects();
-    void DestroySyncObjects() noexcept;
     void RecreateSwapchain();
 
     // Shared by Present() (target = current swapchain image) and
@@ -254,6 +253,16 @@ private:
     VulkanAllocator m_allocator;
     VulkanSwapchain m_swapchain;
 
+    // All per-frame/per-image semaphores and fences (see VulkanFrameSync) -
+    // declared after m_swapchain (its constructor needs
+    // m_swapchain.ImageCount()) so it is destroyed, in
+    // reverse-declaration-order RAII teardown, before m_swapchain/
+    // m_allocator/m_device/m_surface/m_instance, but after
+    // m_memoryTracker/m_drawQueue/etc. below. Its per-swapchain-image
+    // semaphores are rebuilt (RecreateRenderFinishedSemaphores()) whenever
+    // the swapchain itself is recreated - see RecreateSwapchain().
+    VulkanFrameSync m_frameSync;
+
     // Owned via shared_ptr (not by value) so it can be handed out to every
     // Buffer/RenderTexture this Renderer creates without any risk of
     // dangling if Renderer itself (and thus m_allocator) is later moved -
@@ -265,18 +274,12 @@ private:
 
     VkCommandPool m_commandPool = VK_NULL_HANDLE;
     std::array<VkCommandBuffer, kMaxFramesInFlight> m_commandBuffers{};
-    std::array<VkSemaphore, kMaxFramesInFlight> m_imageAvailableSemaphores{};
-    std::array<VkFence, kMaxFramesInFlight> m_inFlightFences{};
-    // One per swapchain image (not per frame-in-flight) - required so a
-    // semaphore is never re-signaled while a previous present using it may
-    // still be in flight. See VulkanSwapchain::ImageCount().
-    std::vector<VkSemaphore> m_renderFinishedSemaphores;
 
-    // Separate command buffer + fence for RenderOffscreen(), so off-screen
-    // rendering (Editor panels) never contends with the swapchain's own
-    // per-frame-in-flight command buffers/fences.
+    // Separate command buffer for RenderOffscreen() (paired with
+    // m_frameSync.OffscreenFence()), so off-screen rendering (Editor
+    // panels) never contends with the swapchain's own per-frame-in-flight
+    // command buffers/fences.
     VkCommandBuffer m_offscreenCommandBuffer = VK_NULL_HANDLE;
-    VkFence m_offscreenFence = VK_NULL_HANDLE;
 
     std::uint32_t m_currentFrame = 0;
 

@@ -31,12 +31,12 @@ Renderer::Renderer(Window& window)
     , m_swapchain(m_device.Physical(), m_device.Native(), m_surface.Native(),
                   m_device.GraphicsQueueFamily(), m_device.PresentQueueFamily(),
                   window.Width(), window.Height())
+    , m_frameSync(m_device.Native(), kMaxFramesInFlight, m_swapchain.ImageCount())
 {
     m_pendingWidth = window.Width();
     m_pendingHeight = window.Height();
 
     CreateCommandObjects();
-    CreateSyncObjects();
 }
 
 Renderer::~Renderer()
@@ -44,13 +44,13 @@ Renderer::~Renderer()
     if (m_device.Native() != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(m_device.Native());
     }
-    DestroySyncObjects();
     if (m_commandPool != VK_NULL_HANDLE) {
         vkDestroyCommandPool(m_device.Native(), m_commandPool, nullptr);
         m_commandPool = VK_NULL_HANDLE;
     }
-    // m_swapchain, m_device, m_surface, m_instance clean themselves up
-    // automatically after this destructor body, in reverse declaration order.
+    // m_frameSync, m_swapchain, m_device, m_surface, m_instance clean
+    // themselves up automatically after this destructor body, in reverse
+    // declaration order.
 }
 
 Renderer::Renderer(Renderer&& other) noexcept
@@ -59,14 +59,11 @@ Renderer::Renderer(Renderer&& other) noexcept
     , m_device(std::move(other.m_device))
     , m_allocator(std::move(other.m_allocator))
     , m_swapchain(std::move(other.m_swapchain))
+    , m_frameSync(std::move(other.m_frameSync))
     , m_memoryTracker(std::move(other.m_memoryTracker))
     , m_commandPool(std::exchange(other.m_commandPool, VK_NULL_HANDLE))
     , m_commandBuffers(other.m_commandBuffers)
-    , m_imageAvailableSemaphores(other.m_imageAvailableSemaphores)
-    , m_inFlightFences(other.m_inFlightFences)
-    , m_renderFinishedSemaphores(std::move(other.m_renderFinishedSemaphores))
     , m_offscreenCommandBuffer(std::exchange(other.m_offscreenCommandBuffer, VK_NULL_HANDLE))
-    , m_offscreenFence(std::exchange(other.m_offscreenFence, VK_NULL_HANDLE))
     , m_currentFrame(other.m_currentFrame)
     , m_resizeRequested(other.m_resizeRequested)
     , m_pendingWidth(other.m_pendingWidth)
@@ -74,8 +71,6 @@ Renderer::Renderer(Renderer&& other) noexcept
     , m_drawQueue(std::move(other.m_drawQueue))
 {
     other.m_commandBuffers.fill(VK_NULL_HANDLE);
-    other.m_imageAvailableSemaphores.fill(VK_NULL_HANDLE);
-    other.m_inFlightFences.fill(VK_NULL_HANDLE);
     for (int i = 0; i < 4; ++i) {
         m_clearColor[i] = other.m_clearColor[i];
     }
@@ -87,7 +82,6 @@ Renderer& Renderer::operator=(Renderer&& other) noexcept
         if (m_device.Native() != VK_NULL_HANDLE) {
             vkDeviceWaitIdle(m_device.Native());
         }
-        DestroySyncObjects();
         if (m_commandPool != VK_NULL_HANDLE) {
             vkDestroyCommandPool(m_device.Native(), m_commandPool, nullptr);
             m_commandPool = VK_NULL_HANDLE;
@@ -98,19 +92,14 @@ Renderer& Renderer::operator=(Renderer&& other) noexcept
         m_device = std::move(other.m_device);
         m_allocator = std::move(other.m_allocator);
         m_swapchain = std::move(other.m_swapchain);
+        m_frameSync = std::move(other.m_frameSync);
         m_memoryTracker = std::move(other.m_memoryTracker);
 
         m_commandPool = std::exchange(other.m_commandPool, VK_NULL_HANDLE);
         m_commandBuffers = other.m_commandBuffers;
-        m_imageAvailableSemaphores = other.m_imageAvailableSemaphores;
-        m_inFlightFences = other.m_inFlightFences;
-        m_renderFinishedSemaphores = std::move(other.m_renderFinishedSemaphores);
         other.m_commandBuffers.fill(VK_NULL_HANDLE);
-        other.m_imageAvailableSemaphores.fill(VK_NULL_HANDLE);
-        other.m_inFlightFences.fill(VK_NULL_HANDLE);
 
         m_offscreenCommandBuffer = std::exchange(other.m_offscreenCommandBuffer, VK_NULL_HANDLE);
-        m_offscreenFence = std::exchange(other.m_offscreenFence, VK_NULL_HANDLE);
 
         m_currentFrame = other.m_currentFrame;
         for (int i = 0; i < 4; ++i) {
@@ -174,63 +163,6 @@ void Renderer::CreateCommandObjects()
     }
 }
 
-void Renderer::CreateSyncObjects()
-{
-    VkSemaphoreCreateInfo semaphoreInfo{};
-    semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-
-    VkFenceCreateInfo fenceInfo{};
-    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-
-    for (std::uint32_t i = 0; i < kMaxFramesInFlight; ++i) {
-        if (vkCreateSemaphore(m_device.Native(), &semaphoreInfo, nullptr, &m_imageAvailableSemaphores[i]) != VK_SUCCESS ||
-            vkCreateFence(m_device.Native(), &fenceInfo, nullptr, &m_inFlightFences[i]) != VK_SUCCESS) {
-            throw std::runtime_error("Failed to create per-frame semaphore/fence");
-        }
-    }
-
-    m_renderFinishedSemaphores.resize(m_swapchain.ImageCount(), VK_NULL_HANDLE);
-    for (auto& semaphore : m_renderFinishedSemaphores) {
-        if (vkCreateSemaphore(m_device.Native(), &semaphoreInfo, nullptr, &semaphore) != VK_SUCCESS) {
-            throw std::runtime_error("Failed to create per-image render-finished semaphore");
-        }
-    }
-
-    // Starts signaled, same reasoning as m_inFlightFences: the first
-    // RenderOffscreen() call must not block waiting on a fence that was
-    // never submitted.
-    if (vkCreateFence(m_device.Native(), &fenceInfo, nullptr, &m_offscreenFence) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to create offscreen fence");
-    }
-}
-
-void Renderer::DestroySyncObjects() noexcept
-{
-    for (auto& semaphore : m_renderFinishedSemaphores) {
-        if (semaphore != VK_NULL_HANDLE) {
-            vkDestroySemaphore(m_device.Native(), semaphore, nullptr);
-        }
-    }
-    m_renderFinishedSemaphores.clear();
-
-    for (std::uint32_t i = 0; i < kMaxFramesInFlight; ++i) {
-        if (m_imageAvailableSemaphores[i] != VK_NULL_HANDLE) {
-            vkDestroySemaphore(m_device.Native(), m_imageAvailableSemaphores[i], nullptr);
-            m_imageAvailableSemaphores[i] = VK_NULL_HANDLE;
-        }
-        if (m_inFlightFences[i] != VK_NULL_HANDLE) {
-            vkDestroyFence(m_device.Native(), m_inFlightFences[i], nullptr);
-            m_inFlightFences[i] = VK_NULL_HANDLE;
-        }
-    }
-
-    if (m_offscreenFence != VK_NULL_HANDLE) {
-        vkDestroyFence(m_device.Native(), m_offscreenFence, nullptr);
-        m_offscreenFence = VK_NULL_HANDLE;
-    }
-}
-
 void Renderer::RecreateSwapchain()
 {
     if (m_pendingWidth <= 0 || m_pendingHeight <= 0) {
@@ -242,25 +174,11 @@ void Renderer::RecreateSwapchain()
 
     vkDeviceWaitIdle(m_device.Native());
 
-    // Per-swapchain-image semaphores must be resized alongside the
-    // swapchain, since the image count can change (or just to be safe).
-    for (auto& semaphore : m_renderFinishedSemaphores) {
-        if (semaphore != VK_NULL_HANDLE) {
-            vkDestroySemaphore(m_device.Native(), semaphore, nullptr);
-        }
-    }
-    m_renderFinishedSemaphores.clear();
-
     m_swapchain.Recreate(m_pendingWidth, m_pendingHeight);
 
-    VkSemaphoreCreateInfo semaphoreInfo{};
-    semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-    m_renderFinishedSemaphores.resize(m_swapchain.ImageCount(), VK_NULL_HANDLE);
-    for (auto& semaphore : m_renderFinishedSemaphores) {
-        if (vkCreateSemaphore(m_device.Native(), &semaphoreInfo, nullptr, &semaphore) != VK_SUCCESS) {
-            throw std::runtime_error("Failed to recreate per-image render-finished semaphore");
-        }
-    }
+    // Per-swapchain-image semaphores must be rebuilt alongside the
+    // swapchain, since the image count can change (or just to be safe).
+    m_frameSync.RecreateRenderFinishedSemaphores(m_swapchain.ImageCount());
 
     m_resizeRequested = false;
 }
@@ -405,13 +323,13 @@ void Renderer::Present(const std::function<void(VkCommandBuffer)>& recordExtra)
         }
     }
 
-    const VkFence fence = m_inFlightFences[m_currentFrame];
+    const VkFence fence = m_frameSync.InFlightFence(m_currentFrame);
     vkWaitForFences(m_device.Native(), 1, &fence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
 
     std::uint32_t imageIndex = 0;
     const VkResult acquireResult = vkAcquireNextImageKHR(
         m_device.Native(), m_swapchain.Native(), std::numeric_limits<std::uint64_t>::max(),
-        m_imageAvailableSemaphores[m_currentFrame], VK_NULL_HANDLE, &imageIndex);
+        m_frameSync.ImageAvailableSemaphore(m_currentFrame), VK_NULL_HANDLE, &imageIndex);
 
     if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR) {
         RecreateSwapchain();
@@ -443,8 +361,8 @@ void Renderer::Present(const std::function<void(VkCommandBuffer)>& recordExtra)
         throw std::runtime_error("vkEndCommandBuffer failed");
     }
 
-    const VkSemaphore waitSemaphore = m_imageAvailableSemaphores[m_currentFrame];
-    const VkSemaphore signalSemaphore = m_renderFinishedSemaphores[imageIndex];
+    const VkSemaphore waitSemaphore = m_frameSync.ImageAvailableSemaphore(m_currentFrame);
+    const VkSemaphore signalSemaphore = m_frameSync.RenderFinishedSemaphore(imageIndex);
     const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 
     VkSubmitInfo submitInfo{};
@@ -482,8 +400,9 @@ void Renderer::Present(const std::function<void(VkCommandBuffer)>& recordExtra)
 
 void Renderer::RenderOffscreen(RenderTexture& target, const std::function<void(VkCommandBuffer)>& recordExtra)
 {
-    vkWaitForFences(m_device.Native(), 1, &m_offscreenFence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
-    vkResetFences(m_device.Native(), 1, &m_offscreenFence);
+    const VkFence offscreenFence = m_frameSync.OffscreenFence();
+    vkWaitForFences(m_device.Native(), 1, &offscreenFence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
+    vkResetFences(m_device.Native(), 1, &offscreenFence);
 
     vkResetCommandBuffer(m_offscreenCommandBuffer, 0);
 
@@ -504,12 +423,12 @@ void Renderer::RenderOffscreen(RenderTexture& target, const std::function<void(V
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &m_offscreenCommandBuffer;
 
-    if (vkQueueSubmit(m_device.GraphicsQueue(), 1, &submitInfo, m_offscreenFence) != VK_SUCCESS) {
+    if (vkQueueSubmit(m_device.GraphicsQueue(), 1, &submitInfo, offscreenFence) != VK_SUCCESS) {
         throw std::runtime_error("vkQueueSubmit failed (offscreen)");
     }
 
     // Synchronous for now - see the declaration comment in Renderer.h.
-    vkWaitForFences(m_device.Native(), 1, &m_offscreenFence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
+    vkWaitForFences(m_device.Native(), 1, &offscreenFence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
 }
 
 VkFormat Renderer::ColorFormat() const noexcept

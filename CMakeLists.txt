@@ -108,6 +108,8 @@ add_executable(GreatTamanaEngine
     src/Renderer/Vulkan/VulkanSwapchain.h
     src/Renderer/Vulkan/VulkanAllocator.cpp
     src/Renderer/Vulkan/VulkanAllocator.h
+    src/Renderer/Vulkan/VulkanFrameSync.cpp
+    src/Renderer/Vulkan/VulkanFrameSync.h
     src/Editor/EditorLayer.h
     src/Game/Game.cpp
     src/Game/Game.h
