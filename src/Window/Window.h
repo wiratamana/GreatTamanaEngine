@@ -26,7 +26,11 @@ namespace gte {
 // entire lifetime: acquired in the constructor, released in the destructor.
 class Window {
 public:
-    Window(const std::string& title, int width, int height);
+    // resizable defaults to true so the window (and its OS maximize
+    // button) behaves like a normal desktop window out of the box - pass
+    // false for cases that genuinely want a fixed-size window (e.g. a
+    // splash/about dialog later).
+    Window(const std::string& title, int width, int height, bool resizable = true);
     ~Window();
 
     Window(const Window&) = delete;

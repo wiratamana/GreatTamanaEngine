@@ -58,6 +58,8 @@ Renderer::Renderer(Renderer&& other) noexcept
     , m_imageAvailableSemaphores(other.m_imageAvailableSemaphores)
     , m_inFlightFences(other.m_inFlightFences)
     , m_renderFinishedSemaphores(std::move(other.m_renderFinishedSemaphores))
+    , m_offscreenCommandBuffer(std::exchange(other.m_offscreenCommandBuffer, VK_NULL_HANDLE))
+    , m_offscreenFence(std::exchange(other.m_offscreenFence, VK_NULL_HANDLE))
     , m_currentFrame(other.m_currentFrame)
     , m_resizeRequested(other.m_resizeRequested)
     , m_pendingWidth(other.m_pendingWidth)
@@ -96,6 +98,9 @@ Renderer& Renderer::operator=(Renderer&& other) noexcept
         other.m_commandBuffers.fill(VK_NULL_HANDLE);
         other.m_imageAvailableSemaphores.fill(VK_NULL_HANDLE);
         other.m_inFlightFences.fill(VK_NULL_HANDLE);
+
+        m_offscreenCommandBuffer = std::exchange(other.m_offscreenCommandBuffer, VK_NULL_HANDLE);
+        m_offscreenFence = std::exchange(other.m_offscreenFence, VK_NULL_HANDLE);
 
         m_currentFrame = other.m_currentFrame;
         for (int i = 0; i < 4; ++i) {
@@ -143,6 +148,19 @@ void Renderer::CreateCommandObjects()
     if (vkAllocateCommandBuffers(m_device.Native(), &allocInfo, m_commandBuffers.data()) != VK_SUCCESS) {
         throw std::runtime_error("vkAllocateCommandBuffers failed");
     }
+
+    // Separate command buffer for RenderOffscreen() - see the member
+    // comment in Renderer.h for why this doesn't share the per-frame ones
+    // above.
+    VkCommandBufferAllocateInfo offscreenAllocInfo{};
+    offscreenAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    offscreenAllocInfo.commandPool = m_commandPool;
+    offscreenAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    offscreenAllocInfo.commandBufferCount = 1;
+
+    if (vkAllocateCommandBuffers(m_device.Native(), &offscreenAllocInfo, &m_offscreenCommandBuffer) != VK_SUCCESS) {
+        throw std::runtime_error("vkAllocateCommandBuffers failed (offscreen)");
+    }
 }
 
 void Renderer::CreateSyncObjects()
@@ -167,6 +185,13 @@ void Renderer::CreateSyncObjects()
             throw std::runtime_error("Failed to create per-image render-finished semaphore");
         }
     }
+
+    // Starts signaled, same reasoning as m_inFlightFences: the first
+    // RenderOffscreen() call must not block waiting on a fence that was
+    // never submitted.
+    if (vkCreateFence(m_device.Native(), &fenceInfo, nullptr, &m_offscreenFence) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create offscreen fence");
+    }
 }
 
 void Renderer::DestroySyncObjects() noexcept
@@ -187,6 +212,11 @@ void Renderer::DestroySyncObjects() noexcept
             vkDestroyFence(m_device.Native(), m_inFlightFences[i], nullptr);
             m_inFlightFences[i] = VK_NULL_HANDLE;
         }
+    }
+
+    if (m_offscreenFence != VK_NULL_HANDLE) {
+        vkDestroyFence(m_device.Native(), m_offscreenFence, nullptr);
+        m_offscreenFence = VK_NULL_HANDLE;
     }
 }
 
@@ -224,10 +254,9 @@ void Renderer::RecreateSwapchain()
     m_resizeRequested = false;
 }
 
-void Renderer::RecordClearCommands(VkCommandBuffer cmd, std::uint32_t imageIndex)
+void Renderer::RecordClearAndTransition(VkCommandBuffer cmd, const RenderTarget& target, VkImageLayout finalLayout,
+    const std::function<void(VkCommandBuffer)>& recordExtra)
 {
-    VkImage image = m_swapchain.Image(imageIndex);
-
     // Dynamic rendering (no VkRenderPass/VkFramebuffer) means WE are
     // responsible for the layout transitions a render pass would normally
     // have done implicitly.
@@ -241,7 +270,7 @@ void Renderer::RecordClearCommands(VkCommandBuffer cmd, std::uint32_t imageIndex
     toColorAttachment.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     toColorAttachment.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     toColorAttachment.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    toColorAttachment.image = image;
+    toColorAttachment.image = target.image;
     toColorAttachment.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
     VkDependencyInfo toColorAttachmentDep{};
@@ -252,7 +281,7 @@ void Renderer::RecordClearCommands(VkCommandBuffer cmd, std::uint32_t imageIndex
 
     VkRenderingAttachmentInfo colorAttachment{};
     colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    colorAttachment.imageView = m_swapchain.ImageView(imageIndex);
+    colorAttachment.imageView = target.imageView;
     colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -262,38 +291,51 @@ void Renderer::RecordClearCommands(VkCommandBuffer cmd, std::uint32_t imageIndex
 
     VkRenderingInfo renderingInfo{};
     renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
-    renderingInfo.renderArea = { { 0, 0 }, m_swapchain.Extent() };
+    renderingInfo.renderArea = { { 0, 0 }, target.extent };
     renderingInfo.layerCount = 1;
     renderingInfo.colorAttachmentCount = 1;
     renderingInfo.pColorAttachments = &colorAttachment;
 
     vkCmdBeginRendering(cmd, &renderingInfo);
-    // Future draw calls (engine geometry, then Dear ImGui's
-    // ImGui_ImplVulkan_RenderDrawData()) get recorded here, between
-    // vkCmdBeginRendering/vkCmdEndRendering.
+    // Engine geometry, then optionally an overlay (Dear ImGui's
+    // ImGui_ImplVulkan_RenderDrawData(), a debug UI, ...) gets recorded
+    // here via recordExtra, between vkCmdBeginRendering/vkCmdEndRendering.
+    if (recordExtra) {
+        recordExtra(cmd);
+    }
     vkCmdEndRendering(cmd);
 
-    VkImageMemoryBarrier2 toPresent{};
-    toPresent.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-    toPresent.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-    toPresent.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-    toPresent.dstStageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
-    toPresent.dstAccessMask = VK_ACCESS_2_NONE;
-    toPresent.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    toPresent.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    toPresent.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    toPresent.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    toPresent.image = image;
-    toPresent.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+    VkImageMemoryBarrier2 toFinal{};
+    toFinal.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    toFinal.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+    toFinal.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+    toFinal.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    toFinal.newLayout = finalLayout;
+    toFinal.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toFinal.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toFinal.image = target.image;
+    toFinal.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
-    VkDependencyInfo toPresentDep{};
-    toPresentDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-    toPresentDep.imageMemoryBarrierCount = 1;
-    toPresentDep.pImageMemoryBarriers = &toPresent;
-    vkCmdPipelineBarrier2(cmd, &toPresentDep);
+    if (finalLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+        // Off-screen path (RenderOffscreen): the next thing to touch this
+        // image is a fragment shader sampling it (e.g. ImGui::Image()).
+        toFinal.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+        toFinal.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+    } else {
+        // Swapchain path (Present): nothing further touches the image on
+        // our side before the presentation engine takes it.
+        toFinal.dstStageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
+        toFinal.dstAccessMask = VK_ACCESS_2_NONE;
+    }
+
+    VkDependencyInfo toFinalDep{};
+    toFinalDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    toFinalDep.imageMemoryBarrierCount = 1;
+    toFinalDep.pImageMemoryBarriers = &toFinal;
+    vkCmdPipelineBarrier2(cmd, &toFinalDep);
 }
 
-void Renderer::Present()
+void Renderer::Present(const std::function<void(VkCommandBuffer)>& recordExtra)
 {
     if (m_pendingWidth <= 0 || m_pendingHeight <= 0) {
         return; // Minimized - nothing to draw this frame.
@@ -333,7 +375,12 @@ void Renderer::Present()
         throw std::runtime_error("vkBeginCommandBuffer failed");
     }
 
-    RecordClearCommands(cmd, imageIndex);
+    RenderTarget target;
+    target.image = m_swapchain.Image(imageIndex);
+    target.imageView = m_swapchain.ImageView(imageIndex);
+    target.extent = m_swapchain.Extent();
+    target.format = m_swapchain.ImageFormat();
+    RecordClearAndTransition(cmd, target, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, recordExtra);
 
     if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
         throw std::runtime_error("vkEndCommandBuffer failed");
@@ -374,6 +421,58 @@ void Renderer::Present()
     }
 
     m_currentFrame = (m_currentFrame + 1) % kMaxFramesInFlight;
+}
+
+void Renderer::RenderOffscreen(RenderTexture& target, const std::function<void(VkCommandBuffer)>& recordExtra)
+{
+    vkWaitForFences(m_device.Native(), 1, &m_offscreenFence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
+    vkResetFences(m_device.Native(), 1, &m_offscreenFence);
+
+    vkResetCommandBuffer(m_offscreenCommandBuffer, 0);
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    if (vkBeginCommandBuffer(m_offscreenCommandBuffer, &beginInfo) != VK_SUCCESS) {
+        throw std::runtime_error("vkBeginCommandBuffer failed (offscreen)");
+    }
+
+    RecordClearAndTransition(m_offscreenCommandBuffer, target.Target(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, recordExtra);
+
+    if (vkEndCommandBuffer(m_offscreenCommandBuffer) != VK_SUCCESS) {
+        throw std::runtime_error("vkEndCommandBuffer failed (offscreen)");
+    }
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &m_offscreenCommandBuffer;
+
+    if (vkQueueSubmit(m_device.GraphicsQueue(), 1, &submitInfo, m_offscreenFence) != VK_SUCCESS) {
+        throw std::runtime_error("vkQueueSubmit failed (offscreen)");
+    }
+
+    // Synchronous for now - see the declaration comment in Renderer.h.
+    vkWaitForFences(m_device.Native(), 1, &m_offscreenFence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
+}
+
+RenderTexture Renderer::CreateRenderTexture(int width, int height, VkFormat format) const
+{
+    return RenderTexture(m_device.Physical(), m_device.Native(), width, height, format);
+}
+
+Renderer::VulkanContextInfo Renderer::GetVulkanContextInfo() const
+{
+    VulkanContextInfo info;
+    info.apiVersion = VK_API_VERSION_1_3; // matches VulkanInstance::CreateInstance's VkApplicationInfo::apiVersion
+    info.instance = m_instance.Native();
+    info.physicalDevice = m_device.Physical();
+    info.device = m_device.Native();
+    info.graphicsQueueFamily = m_device.GraphicsQueueFamily();
+    info.graphicsQueue = m_device.GraphicsQueue();
+    info.colorFormat = m_swapchain.ImageFormat();
+    info.imageCount = m_swapchain.ImageCount();
+    info.minImageCount = kMaxFramesInFlight; // matches what this Renderer actually keeps in flight
+    return info;
 }
 
 } // namespace gte

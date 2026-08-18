@@ -7,8 +7,10 @@ namespace gte {
 
 class Renderer;
 
-// Sits on top of Window/Renderer and has no direct knowledge of SDL.
-// All engine/game logic lives here (and in whatever this grows into).
+// Sits on top of Window/Renderer and has no direct knowledge of SDL, Vulkan
+// beyond the Renderer abstraction, or the (optional) Editor module - Game
+// has no idea an Editor even exists. All engine/game logic lives here (and
+// in whatever this grows into).
 class Game {
 public:
     Game() = default;
@@ -20,6 +22,13 @@ public:
     void OnEvent(const Event& event);
 
     void Update(double deltaSeconds, const InputState& input);
+
+    // Sets the clear color and (eventually) records gameplay draw calls.
+    // Deliberately does NOT call Renderer::Present()/RenderOffscreen()
+    // itself - *where* this frame ends up (the swapchain, fullscreen, or an
+    // Editor's off-screen "Game view" RenderTexture) is decided by
+    // Application (the composition root), not by Game. See
+    // Application::Run().
     void Render(Renderer& renderer);
 };
 

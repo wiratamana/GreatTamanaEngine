@@ -8,11 +8,12 @@
 
 namespace gte {
 
-Window::Window(const std::string& title, int width, int height)
+Window::Window(const std::string& title, int width, int height, bool resizable)
     : m_width(width)
     , m_height(height)
 {
-    m_window = SDL_CreateWindow(title.c_str(), width, height, 0);
+    const SDL_WindowFlags flags = resizable ? SDL_WINDOW_RESIZABLE : 0;
+    m_window = SDL_CreateWindow(title.c_str(), width, height, flags);
     if (m_window == nullptr) {
         throw std::runtime_error(std::string("Failed to create SDL window: ") + SDL_GetError());
     }

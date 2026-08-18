@@ -22,9 +22,9 @@ void Game::Render(Renderer& renderer)
     // Placeholder: clear to a dark blue-grey each frame.
     renderer.Clear(20, 20, 30, 255);
 
-    // Draw calls go here.
-
-    renderer.Present();
+    // Draw calls go here. Application decides afterwards whether this frame
+    // is presented straight to the swapchain or rendered into an Editor's
+    // off-screen "Game view" texture - see Application::Run().
 }
 
 } // namespace gte
