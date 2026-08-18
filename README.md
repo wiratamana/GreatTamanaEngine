@@ -70,10 +70,22 @@ GPU memory is allocated exclusively through **VMA** (Vulkan Memory
 Allocator, see Building below) via `VulkanAllocator`
 (`src/Renderer/Vulkan/VulkanAllocator.h/.cpp`) — an RAII wrapper owning a
 single `VmaAllocator` that `Renderer` creates once alongside its
-instance/device and hands to every GPU resource type (`RenderTexture` today)
-to create its images/buffers through (`vmaCreateImage`/`vmaCreateBuffer`)
-instead of each one hand-rolling its own memory-type lookup and
-alloc/bind/free calls.
+instance/device and hands to every GPU resource type
+(`RenderTexture`/`Buffer` today) to create its images/buffers through
+(`vmaCreateImage`/`vmaCreateBuffer`) instead of each one hand-rolling its own
+memory-type lookup and alloc/bind/free calls. `Buffer`
+(`src/Renderer/Buffer.h/.cpp`) is the general-purpose GPU buffer primitive
+for vertex/index/uniform/staging data, created via
+`Renderer::CreateBuffer()`/`CreateDeviceLocalBuffer()` — see
+`BufferMemoryUsage` (`Buffer.h`) for the `GpuOnly` (device-local,
+not CPU-mappable) vs. `CpuToGpu`/`GpuToCpu` (persistently host-mapped)
+distinction. `Renderer::CreateDeviceLocalBuffer()` covers the common
+"static GPU-only buffer initialized once" case (vertex/index buffers) by
+uploading through a temporary staging `Buffer` and copying it in via
+`Renderer::ImmediateSubmit()` — a general one-time-submit-and-wait command
+buffer helper, also reusable for future one-off GPU work (e.g. image layout
+transitions, mipmap generation) outside the per-frame `Present()`/
+`RenderOffscreen()` recording.
 
 ### Editor / Debug UI
 
@@ -129,7 +141,7 @@ Prerequisites:
   (https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator) is
   fetched the same way, into `third_party/vma/vk_mem_alloc.h` (see
   `cmake/FetchVMA.cmake`), and gitignored like everything else above. Every
-  GPU allocation in the engine (`RenderTexture` today) goes through the
+  GPU allocation in the engine (`RenderTexture`/`Buffer`) goes through the
   `vma` target via `VulkanAllocator` (`src/Renderer/Vulkan/VulkanAllocator.h/.cpp`)
   — see Rendering above and Status below.
 - Dear ImGui (core + its SDL3/Vulkan backends) is fetched the same way, into
@@ -164,11 +176,16 @@ pieces:
   `GTE_ENABLE_EDITOR` fully includes/excludes it, down to CMake never
   fetching or compiling ImGui at all when it's off.
 - GPU memory allocation goes through **VMA** (Vulkan Memory Allocator) via
-  the new `VulkanAllocator` RAII wrapper (`src/Renderer/Vulkan/`) — `Renderer`
-  owns a single `VmaAllocator`, and `RenderTexture` now creates its `VkImage`
-  through `vmaCreateImage`/`vmaDestroyImage` instead of the manual
-  `FindMemoryType()` + `vkAllocateMemory`/`vkBindImageMemory`/`vkFreeMemory`
-  dance it used to do by hand. Verified building cleanly both with
-  `GTE_ENABLE_EDITOR` `ON` and `OFF`. Future GPU resource types (vertex/
-  index/uniform/staging buffers) should follow the same pattern via
-  `vmaCreateBuffer` once they're added.
+  the `VulkanAllocator` RAII wrapper (`src/Renderer/Vulkan/`) — `Renderer`
+  owns a single `VmaAllocator`. `RenderTexture` creates its `VkImage` through
+  `vmaCreateImage`/`vmaDestroyImage`, and the new `Buffer`
+  (`src/Renderer/Buffer.h/.cpp`) creates `VkBuffer`s through
+  `vmaCreateBuffer`/`vmaDestroyBuffer` — both replacing what used to be a
+  manual `FindMemoryType()` + `vkAllocateMemory`/`vkBindMemory`/`vkFreeMemory`
+  dance. `Renderer::CreateBuffer()`/`CreateDeviceLocalBuffer()` cover
+  host-mapped (uniform/staging) and device-local-via-staging-upload
+  (vertex/index) buffers respectively; `Renderer::ImmediateSubmit()` is the
+  reusable one-shot command buffer helper behind the latter. Verified with a
+  runtime smoke test (mapped-buffer round-trip + a full staging-buffer ->
+  device-local-buffer copy) actually executing against a live Vulkan device,
+  and building cleanly with both `GTE_ENABLE_EDITOR` `ON` and `OFF`.

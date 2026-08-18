@@ -2,6 +2,7 @@
 
 #include "../Window/Window.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
@@ -463,6 +464,82 @@ void Renderer::RenderOffscreen(RenderTexture& target, const std::function<void(V
 RenderTexture Renderer::CreateRenderTexture(int width, int height, VkFormat format) const
 {
     return RenderTexture(m_allocator.Native(), m_device.Native(), width, height, format);
+}
+
+Buffer Renderer::CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, BufferMemoryUsage memoryUsage) const
+{
+    return Buffer(m_allocator.Native(), size, usage, memoryUsage);
+}
+
+Buffer Renderer::CreateDeviceLocalBuffer(const void* data, VkDeviceSize size, VkBufferUsageFlags usage) const
+{
+    Buffer staging = CreateBuffer(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, BufferMemoryUsage::CpuToGpu);
+    staging.Upload(data, static_cast<std::size_t>(size));
+
+    Buffer deviceLocal = CreateBuffer(size, usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemoryUsage::GpuOnly);
+
+    ImmediateSubmit([&](VkCommandBuffer cmd) {
+        VkBufferCopy copyRegion{};
+        copyRegion.size = size;
+        vkCmdCopyBuffer(cmd, staging.Native(), deviceLocal.Native(), 1, &copyRegion);
+    });
+    // staging goes out of scope here and is destroyed - the copy above has
+    // already completed (ImmediateSubmit blocks until the GPU is done).
+
+    return deviceLocal;
+}
+
+void Renderer::ImmediateSubmit(const std::function<void(VkCommandBuffer)>& recordFn) const
+{
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.commandPool = m_commandPool;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandBufferCount = 1;
+
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    if (vkAllocateCommandBuffers(m_device.Native(), &allocInfo, &cmd) != VK_SUCCESS) {
+        throw std::runtime_error("Renderer::ImmediateSubmit: vkAllocateCommandBuffers failed.");
+    }
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    if (vkBeginCommandBuffer(cmd, &beginInfo) != VK_SUCCESS) {
+        vkFreeCommandBuffers(m_device.Native(), m_commandPool, 1, &cmd);
+        throw std::runtime_error("Renderer::ImmediateSubmit: vkBeginCommandBuffer failed.");
+    }
+
+    recordFn(cmd);
+
+    if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
+        vkFreeCommandBuffers(m_device.Native(), m_commandPool, 1, &cmd);
+        throw std::runtime_error("Renderer::ImmediateSubmit: vkEndCommandBuffer failed.");
+    }
+
+    VkFenceCreateInfo fenceInfo{};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    VkFence fence = VK_NULL_HANDLE;
+    if (vkCreateFence(m_device.Native(), &fenceInfo, nullptr, &fence) != VK_SUCCESS) {
+        vkFreeCommandBuffers(m_device.Native(), m_commandPool, 1, &cmd);
+        throw std::runtime_error("Renderer::ImmediateSubmit: vkCreateFence failed.");
+    }
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &cmd;
+
+    if (vkQueueSubmit(m_device.GraphicsQueue(), 1, &submitInfo, fence) != VK_SUCCESS) {
+        vkDestroyFence(m_device.Native(), fence, nullptr);
+        vkFreeCommandBuffers(m_device.Native(), m_commandPool, 1, &cmd);
+        throw std::runtime_error("Renderer::ImmediateSubmit: vkQueueSubmit failed.");
+    }
+
+    vkWaitForFences(m_device.Native(), 1, &fence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
+
+    vkDestroyFence(m_device.Native(), fence, nullptr);
+    vkFreeCommandBuffers(m_device.Native(), m_commandPool, 1, &cmd);
 }
 
 Renderer::VulkanContextInfo Renderer::GetVulkanContextInfo() const

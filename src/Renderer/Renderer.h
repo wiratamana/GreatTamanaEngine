@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+#include "Buffer.h"
 #include "RenderTarget.h"
 #include "RenderTexture.h"
 #include "Vulkan/VulkanAllocator.h"
@@ -83,6 +84,30 @@ public:
     // Editor module, ...) never need direct access to the
     // VkPhysicalDevice/VkDevice this Renderer owns internally.
     RenderTexture CreateRenderTexture(int width, int height, VkFormat format = VK_FORMAT_B8G8R8A8_UNORM) const;
+
+    // Factory for GPU buffers (vertex/index/uniform/staging), so callers
+    // never need direct access to the VmaAllocator this Renderer owns
+    // internally. See BufferMemoryUsage (Buffer.h) for how memoryUsage
+    // picks between device-local and host-mapped allocation.
+    Buffer CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, BufferMemoryUsage memoryUsage) const;
+
+    // Convenience for the common "static GPU-only buffer initialized once"
+    // case (vertex/index buffers, immutable uniform data, ...): uploads
+    // `data` into a temporary host-visible staging Buffer, then records and
+    // submits a one-shot command buffer (see ImmediateSubmit() below) that
+    // copies it into a freshly created BufferMemoryUsage::GpuOnly Buffer of
+    // the requested usage, and blocks until that copy finishes before
+    // returning it. `usage` should NOT include VK_BUFFER_USAGE_TRANSFER_DST_BIT
+    // - it's added automatically.
+    Buffer CreateDeviceLocalBuffer(const void* data, VkDeviceSize size, VkBufferUsageFlags usage) const;
+
+    // Records a one-time-submit command buffer (recordFn), submits it to
+    // the graphics queue, and blocks until it finishes. The primitive
+    // behind CreateDeviceLocalBuffer() above, but also useful directly for
+    // future one-off GPU work (image layout transitions, mipmap
+    // generation, ...) that doesn't belong inside Present()/
+    // RenderOffscreen()'s per-frame recording.
+    void ImmediateSubmit(const std::function<void(VkCommandBuffer)>& recordFn) const;
 
     // Read-only snapshot of this Renderer's core Vulkan handles + swapchain
     // format/image count, for an external Vulkan-based rendering backend

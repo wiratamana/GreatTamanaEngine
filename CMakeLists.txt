@@ -85,6 +85,8 @@ add_executable(GreatTamanaEngine
     src/Window/Window.h
     src/Renderer/Renderer.cpp
     src/Renderer/Renderer.h
+    src/Renderer/Buffer.cpp
+    src/Renderer/Buffer.h
     src/Renderer/RenderTarget.h
     src/Renderer/RenderTexture.cpp
     src/Renderer/RenderTexture.h
