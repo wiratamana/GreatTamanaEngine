@@ -58,6 +58,7 @@ Renderer::Renderer(Renderer&& other) noexcept
     , m_device(std::move(other.m_device))
     , m_allocator(std::move(other.m_allocator))
     , m_swapchain(std::move(other.m_swapchain))
+    , m_memoryTracker(std::move(other.m_memoryTracker))
     , m_commandPool(std::exchange(other.m_commandPool, VK_NULL_HANDLE))
     , m_commandBuffers(other.m_commandBuffers)
     , m_imageAvailableSemaphores(other.m_imageAvailableSemaphores)
@@ -95,6 +96,7 @@ Renderer& Renderer::operator=(Renderer&& other) noexcept
         m_device = std::move(other.m_device);
         m_allocator = std::move(other.m_allocator);
         m_swapchain = std::move(other.m_swapchain);
+        m_memoryTracker = std::move(other.m_memoryTracker);
 
         m_commandPool = std::exchange(other.m_commandPool, VK_NULL_HANDLE);
         m_commandBuffers = other.m_commandBuffers;
@@ -461,22 +463,28 @@ void Renderer::RenderOffscreen(RenderTexture& target, const std::function<void(V
     vkWaitForFences(m_device.Native(), 1, &m_offscreenFence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
 }
 
-RenderTexture Renderer::CreateRenderTexture(int width, int height, VkFormat format) const
+RenderTexture Renderer::CreateRenderTexture(int width, int height, VkFormat format, const char* debugName) const
 {
-    return RenderTexture(m_allocator.Native(), m_device.Native(), width, height, format);
+    return RenderTexture(m_allocator.Native(), m_memoryTracker, m_device.Native(), width, height, format, debugName);
 }
 
-Buffer Renderer::CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, BufferMemoryUsage memoryUsage) const
+Buffer Renderer::CreateBuffer(
+    VkDeviceSize size, VkBufferUsageFlags usage, BufferMemoryUsage memoryUsage, const char* debugName) const
 {
-    return Buffer(m_allocator.Native(), size, usage, memoryUsage);
+    return Buffer(m_allocator.Native(), m_memoryTracker, size, usage, memoryUsage, debugName);
 }
 
-Buffer Renderer::CreateDeviceLocalBuffer(const void* data, VkDeviceSize size, VkBufferUsageFlags usage) const
+Buffer Renderer::CreateDeviceLocalBuffer(
+    const void* data, VkDeviceSize size, VkBufferUsageFlags usage, const char* debugName) const
 {
+    // The staging buffer is intentionally unnamed (nullptr) - it's a
+    // throwaway that never outlives this function, so it's never worth
+    // showing up as a named entry in a future Memory panel.
     Buffer staging = CreateBuffer(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, BufferMemoryUsage::CpuToGpu);
     staging.Upload(data, static_cast<std::size_t>(size));
 
-    Buffer deviceLocal = CreateBuffer(size, usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemoryUsage::GpuOnly);
+    Buffer deviceLocal =
+        CreateBuffer(size, usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemoryUsage::GpuOnly, debugName);
 
     ImmediateSubmit([&](VkCommandBuffer cmd) {
         VkBufferCopy copyRegion{};
@@ -555,6 +563,16 @@ Renderer::VulkanContextInfo Renderer::GetVulkanContextInfo() const
     info.imageCount = m_swapchain.ImageCount();
     info.minImageCount = kMaxFramesInFlight; // matches what this Renderer actually keeps in flight
     return info;
+}
+
+GpuMemoryTracker::Totals Renderer::GetMemoryTotals() const
+{
+    return m_memoryTracker->GetTotals();
+}
+
+std::vector<GpuMemoryTracker::Entry> Renderer::GetMemoryResources() const
+{
+    return m_memoryTracker->GetAllResources();
 }
 
 } // namespace gte

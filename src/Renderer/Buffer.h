@@ -1,8 +1,10 @@
 ﻿#pragma once
 
+#include "Memory/GpuMemoryTracker.h"
 #include "Vulkan/VulkanAllocator.h"
 
 #include <cstddef>
+#include <memory>
 
 namespace gte {
 
@@ -34,9 +36,19 @@ enum class BufferMemoryUsage {
 // rather than directly, same convention as RenderTexture.
 //
 // Does NOT own the VmaAllocator passed in - it must outlive this Buffer.
+//
+// Registers itself with a GpuMemoryTracker (see Memory/GpuMemoryTracker.h)
+// on construction and deregisters on destruction, so the engine always
+// knows exactly how much memory is live and where (GPU-only/host-visible/
+// shared) without needing a debugger or an external tool.
 class Buffer {
 public:
-    Buffer(VmaAllocator allocator, VkDeviceSize size, VkBufferUsageFlags usage, BufferMemoryUsage memoryUsage);
+    // debugName is optional and Editor-only (see GpuMemoryTracker) - a
+    // plain, cheap `const char*` rather than a std::string, so passing one
+    // costs nothing beyond a pointer copy even when it IS used, and the
+    // pointed-to string is never stored anywhere outside the Editor build.
+    Buffer(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDeviceSize size,
+        VkBufferUsageFlags usage, BufferMemoryUsage memoryUsage, const char* debugName = nullptr);
     ~Buffer();
 
     Buffer(const Buffer&) = delete;
@@ -58,10 +70,18 @@ public:
     // otherwise.
     void Upload(const void* data, std::size_t size, std::size_t offset = 0);
 
+    // Handle into the GpuMemoryTracker this Buffer is registered with -
+    // valid for this Buffer's entire lifetime, kInvalidGpuResourceHandle
+    // once moved-from.
+    GpuResourceHandle Handle() const noexcept { return m_handle; }
+
 private:
     void Destroy() noexcept;
 
     VmaAllocator m_allocator = VK_NULL_HANDLE;
+    std::shared_ptr<GpuMemoryTracker> m_tracker;
+    GpuResourceHandle m_handle;
+
     VkBuffer m_buffer = VK_NULL_HANDLE;
     VmaAllocation m_allocation = VK_NULL_HANDLE;
     VkDeviceSize m_size = 0;

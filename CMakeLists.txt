@@ -87,6 +87,9 @@ add_executable(GreatTamanaEngine
     src/Renderer/Renderer.h
     src/Renderer/Buffer.cpp
     src/Renderer/Buffer.h
+    src/Renderer/Memory/GpuResourceHandle.h
+    src/Renderer/Memory/GpuMemoryTracker.cpp
+    src/Renderer/Memory/GpuMemoryTracker.h
     src/Renderer/RenderTarget.h
     src/Renderer/RenderTexture.cpp
     src/Renderer/RenderTexture.h
@@ -115,6 +118,14 @@ if(GTE_ENABLE_EDITOR)
 else()
     target_sources(GreatTamanaEngine PRIVATE src/Editor/NullEditorLayer.cpp)
 endif()
+
+# Exposes GTE_ENABLE_EDITOR to C++ code as an actual preprocessor macro
+# (1 or 0), not just a CMake-time source-selection switch - needed by
+# src/Renderer/Memory/GpuMemoryTracker.h, which uses `#if GTE_ENABLE_EDITOR`
+# to compile debug-name storage into the binary ONLY for Editor builds (see
+# AGENTS.md, "GPU resource memory tracking"). $<BOOL:...> normalizes
+# CMake's ON/OFF (or TRUE/FALSE/1/0/...) into a plain 1 or 0.
+target_compile_definitions(GreatTamanaEngine PRIVATE GTE_ENABLE_EDITOR=$<BOOL:${GTE_ENABLE_EDITOR}>)
 
 target_include_directories(GreatTamanaEngine PRIVATE
     "${CMAKE_SOURCE_DIR}/src"

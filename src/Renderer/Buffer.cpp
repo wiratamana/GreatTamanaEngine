@@ -7,8 +7,10 @@
 
 namespace gte {
 
-Buffer::Buffer(VmaAllocator allocator, VkDeviceSize size, VkBufferUsageFlags usage, BufferMemoryUsage memoryUsage)
+Buffer::Buffer(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDeviceSize size,
+    VkBufferUsageFlags usage, BufferMemoryUsage memoryUsage, const char* debugName)
     : m_allocator(allocator)
+    , m_tracker(std::move(tracker))
     , m_size(size)
 {
     VkBufferCreateInfo bufferInfo{};
@@ -41,6 +43,20 @@ Buffer::Buffer(VmaAllocator allocator, VkDeviceSize size, VkBufferUsageFlags usa
     // above (CpuToGpu/GpuToCpu) - stays valid for this Buffer's entire
     // lifetime, unmapped automatically by vmaDestroyBuffer().
     m_mappedData = allocationInfo.pMappedData;
+
+    // Registers this exact allocation with the tracker - see AGENTS.md
+    // ("GPU resource memory tracking"): the record must reflect the actual
+    // allocation VMA gave us (allocationInfo.size, and the real memory
+    // location it landed in), not just the requested `size`/memoryUsage.
+    const GpuMemoryLocation location = ClassifyGpuMemoryLocation(m_allocator, m_allocation);
+    m_handle = m_tracker->Track(GpuResourceType::Buffer, location, allocationInfo.size);
+#if GTE_ENABLE_EDITOR
+    if (debugName != nullptr) {
+        m_tracker->SetDebugName(m_handle, debugName);
+    }
+#else
+    (void)debugName;
+#endif
 }
 
 Buffer::~Buffer()
@@ -50,6 +66,8 @@ Buffer::~Buffer()
 
 Buffer::Buffer(Buffer&& other) noexcept
     : m_allocator(std::exchange(other.m_allocator, VK_NULL_HANDLE))
+    , m_tracker(std::move(other.m_tracker))
+    , m_handle(std::exchange(other.m_handle, kInvalidGpuResourceHandle))
     , m_buffer(std::exchange(other.m_buffer, VK_NULL_HANDLE))
     , m_allocation(std::exchange(other.m_allocation, VK_NULL_HANDLE))
     , m_size(std::exchange(other.m_size, VkDeviceSize{ 0 }))
@@ -62,6 +80,8 @@ Buffer& Buffer::operator=(Buffer&& other) noexcept
     if (this != &other) {
         Destroy();
         m_allocator = std::exchange(other.m_allocator, VK_NULL_HANDLE);
+        m_tracker = std::move(other.m_tracker);
+        m_handle = std::exchange(other.m_handle, kInvalidGpuResourceHandle);
         m_buffer = std::exchange(other.m_buffer, VK_NULL_HANDLE);
         m_allocation = std::exchange(other.m_allocation, VK_NULL_HANDLE);
         m_size = std::exchange(other.m_size, VkDeviceSize{ 0 });
@@ -82,6 +102,9 @@ void Buffer::Upload(const void* data, std::size_t size, std::size_t offset)
 void Buffer::Destroy() noexcept
 {
     if (m_buffer != VK_NULL_HANDLE) {
+        m_tracker->Untrack(m_handle);
+        m_handle = kInvalidGpuResourceHandle;
+
         vmaDestroyBuffer(m_allocator, m_buffer, m_allocation);
         m_buffer = VK_NULL_HANDLE;
         m_allocation = VK_NULL_HANDLE;

@@ -6,8 +6,11 @@
 
 namespace gte {
 
-RenderTexture::RenderTexture(VmaAllocator allocator, VkDevice device, int width, int height, VkFormat format)
+RenderTexture::RenderTexture(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDevice device,
+    int width, int height, VkFormat format, const char* debugName)
     : m_allocator(allocator)
+    , m_tracker(std::move(tracker))
+    , m_debugName(debugName)
     , m_device(device)
     , m_format(format)
 {
@@ -21,6 +24,9 @@ RenderTexture::~RenderTexture()
 
 RenderTexture::RenderTexture(RenderTexture&& other) noexcept
     : m_allocator(std::exchange(other.m_allocator, VK_NULL_HANDLE))
+    , m_tracker(std::move(other.m_tracker))
+    , m_handle(std::exchange(other.m_handle, kInvalidGpuResourceHandle))
+    , m_debugName(std::exchange(other.m_debugName, nullptr))
     , m_device(std::exchange(other.m_device, VK_NULL_HANDLE))
     , m_format(other.m_format)
     , m_image(std::exchange(other.m_image, VK_NULL_HANDLE))
@@ -36,6 +42,9 @@ RenderTexture& RenderTexture::operator=(RenderTexture&& other) noexcept
     if (this != &other) {
         Destroy();
         m_allocator = std::exchange(other.m_allocator, VK_NULL_HANDLE);
+        m_tracker = std::move(other.m_tracker);
+        m_handle = std::exchange(other.m_handle, kInvalidGpuResourceHandle);
+        m_debugName = std::exchange(other.m_debugName, nullptr);
         m_device = std::exchange(other.m_device, VK_NULL_HANDLE);
         m_format = other.m_format;
         m_image = std::exchange(other.m_image, VK_NULL_HANDLE);
@@ -93,9 +102,23 @@ void RenderTexture::Create(int width, int height)
     VmaAllocationCreateInfo allocCreateInfo{};
     allocCreateInfo.usage = VMA_MEMORY_USAGE_AUTO;
 
-    if (vmaCreateImage(m_allocator, &imageInfo, &allocCreateInfo, &m_image, &m_allocation, nullptr) != VK_SUCCESS) {
+    VmaAllocationInfo allocationInfo{};
+    if (vmaCreateImage(m_allocator, &imageInfo, &allocCreateInfo, &m_image, &m_allocation, &allocationInfo) !=
+        VK_SUCCESS) {
         throw std::runtime_error("RenderTexture: vmaCreateImage failed.");
     }
+
+    // Registers this exact allocation - see AGENTS.md ("GPU resource
+    // memory tracking"). Called from here (not just the constructor) so a
+    // Resize() (Destroy() + Create()) always re-tracks with a fresh handle
+    // reflecting the NEW size - the tracker never holds a stale record.
+    const GpuMemoryLocation location = ClassifyGpuMemoryLocation(m_allocator, m_allocation);
+    m_handle = m_tracker->Track(GpuResourceType::Texture, location, allocationInfo.size);
+#if GTE_ENABLE_EDITOR
+    if (m_debugName != nullptr) {
+        m_tracker->SetDebugName(m_handle, m_debugName);
+    }
+#endif
 
     VkImageViewCreateInfo viewInfo{};
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -141,6 +164,9 @@ void RenderTexture::Destroy() noexcept
         m_imageView = VK_NULL_HANDLE;
     }
     if (m_image != VK_NULL_HANDLE) {
+        m_tracker->Untrack(m_handle);
+        m_handle = kInvalidGpuResourceHandle;
+
         vmaDestroyImage(m_allocator, m_image, m_allocation);
         m_image = VK_NULL_HANDLE;
         m_allocation = VK_NULL_HANDLE;

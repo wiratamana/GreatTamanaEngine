@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "Buffer.h"
+#include "Memory/GpuMemoryTracker.h"
 #include "RenderTarget.h"
 #include "RenderTexture.h"
 #include "Vulkan/VulkanAllocator.h"
@@ -12,6 +13,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <vector>
 
 namespace gte {
@@ -82,14 +84,18 @@ public:
 
     // Factory for off-screen render targets, so callers (Game, a future
     // Editor module, ...) never need direct access to the
-    // VkPhysicalDevice/VkDevice this Renderer owns internally.
-    RenderTexture CreateRenderTexture(int width, int height, VkFormat format = VK_FORMAT_B8G8R8A8_UNORM) const;
+    // VkPhysicalDevice/VkDevice this Renderer owns internally. debugName is
+    // optional/Editor-only - see RenderTexture's constructor comment.
+    RenderTexture CreateRenderTexture(int width, int height, VkFormat format = VK_FORMAT_B8G8R8A8_UNORM,
+        const char* debugName = nullptr) const;
 
     // Factory for GPU buffers (vertex/index/uniform/staging), so callers
     // never need direct access to the VmaAllocator this Renderer owns
     // internally. See BufferMemoryUsage (Buffer.h) for how memoryUsage
-    // picks between device-local and host-mapped allocation.
-    Buffer CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, BufferMemoryUsage memoryUsage) const;
+    // picks between device-local and host-mapped allocation. debugName is
+    // optional/Editor-only - see Buffer's constructor comment.
+    Buffer CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, BufferMemoryUsage memoryUsage,
+        const char* debugName = nullptr) const;
 
     // Convenience for the common "static GPU-only buffer initialized once"
     // case (vertex/index buffers, immutable uniform data, ...): uploads
@@ -98,8 +104,11 @@ public:
     // copies it into a freshly created BufferMemoryUsage::GpuOnly Buffer of
     // the requested usage, and blocks until that copy finishes before
     // returning it. `usage` should NOT include VK_BUFFER_USAGE_TRANSFER_DST_BIT
-    // - it's added automatically.
-    Buffer CreateDeviceLocalBuffer(const void* data, VkDeviceSize size, VkBufferUsageFlags usage) const;
+    // - it's added automatically. debugName is optional/Editor-only, and
+    // applies to the returned (destination) Buffer - the temporary staging
+    // Buffer is unnamed, since it's gone before this call even returns.
+    Buffer CreateDeviceLocalBuffer(
+        const void* data, VkDeviceSize size, VkBufferUsageFlags usage, const char* debugName = nullptr) const;
 
     // Records a one-time-submit command buffer (recordFn), submits it to
     // the graphics queue, and blocks until it finishes. The primitive
@@ -108,6 +117,17 @@ public:
     // generation, ...) that doesn't belong inside Present()/
     // RenderOffscreen()'s per-frame recording.
     void ImmediateSubmit(const std::function<void(VkCommandBuffer)>& recordFn) const;
+
+    // Aggregate live-memory totals across every Buffer/RenderTexture this
+    // Renderer has ever created and not yet destroyed - see
+    // Memory/GpuMemoryTracker.h. O(1); safe to call every frame if desired
+    // (e.g. a future Editor "Memory" panel's header).
+    GpuMemoryTracker::Totals GetMemoryTotals() const;
+
+    // Full per-object snapshot of every currently-live GPU resource - the
+    // primitive behind a Unity-Memory-Profiler-style listing. Carries no
+    // names (see GpuMemoryTracker::GetDebugName(), Editor-only, for that).
+    std::vector<GpuMemoryTracker::Entry> GetMemoryResources() const;
 
     // Read-only snapshot of this Renderer's core Vulkan handles + swapchain
     // format/image count, for an external Vulkan-based rendering backend
@@ -161,6 +181,15 @@ private:
     // handles derived from both.
     VulkanAllocator m_allocator;
     VulkanSwapchain m_swapchain;
+
+    // Owned via shared_ptr (not by value) so it can be handed out to every
+    // Buffer/RenderTexture this Renderer creates without any risk of
+    // dangling if Renderer itself (and thus m_allocator) is later moved -
+    // see GpuMemoryTracker's class comment. Declaration order relative to
+    // the Vulkan objects above/below is irrelevant: this owns no Vulkan
+    // handles itself, and shared_ptr keeps it alive as long as anything
+    // (including a live Buffer/RenderTexture) still references it.
+    std::shared_ptr<GpuMemoryTracker> m_memoryTracker = std::make_shared<GpuMemoryTracker>();
 
     VkCommandPool m_commandPool = VK_NULL_HANDLE;
     std::array<VkCommandBuffer, kMaxFramesInFlight> m_commandBuffers{};

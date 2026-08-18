@@ -7,7 +7,7 @@ namespace gte {
 void Game::OnEvent(const Event& /*event*/)
 {
     // Discrete/one-shot event handling goes here (react to a single key
-    // press, window resize, etc). event.type tells you which alternative of
+    // press, window resized, etc). event.type tells you which alternative of
     // event.data is active - see Event.h.
 }
 
