@@ -23,6 +23,9 @@ Renderer::Renderer(Window& window)
     : m_instance("GreatTamanaEngine", Window::VulkanInstanceExtensions(), kEnableValidation)
     , m_surface(m_instance.Native(), window)
     , m_device(m_instance.Native(), m_surface.Native())
+    // VK_API_VERSION_1_3 matches VulkanInstance::CreateInstance's
+    // VkApplicationInfo::apiVersion (see also GetVulkanContextInfo() below).
+    , m_allocator(m_instance.Native(), m_device.Physical(), m_device.Native(), VK_API_VERSION_1_3)
     , m_swapchain(m_device.Physical(), m_device.Native(), m_surface.Native(),
                   m_device.GraphicsQueueFamily(), m_device.PresentQueueFamily(),
                   window.Width(), window.Height())
@@ -52,6 +55,7 @@ Renderer::Renderer(Renderer&& other) noexcept
     : m_instance(std::move(other.m_instance))
     , m_surface(std::move(other.m_surface))
     , m_device(std::move(other.m_device))
+    , m_allocator(std::move(other.m_allocator))
     , m_swapchain(std::move(other.m_swapchain))
     , m_commandPool(std::exchange(other.m_commandPool, VK_NULL_HANDLE))
     , m_commandBuffers(other.m_commandBuffers)
@@ -88,6 +92,7 @@ Renderer& Renderer::operator=(Renderer&& other) noexcept
         m_instance = std::move(other.m_instance);
         m_surface = std::move(other.m_surface);
         m_device = std::move(other.m_device);
+        m_allocator = std::move(other.m_allocator);
         m_swapchain = std::move(other.m_swapchain);
 
         m_commandPool = std::exchange(other.m_commandPool, VK_NULL_HANDLE);
@@ -457,7 +462,7 @@ void Renderer::RenderOffscreen(RenderTexture& target, const std::function<void(V
 
 RenderTexture Renderer::CreateRenderTexture(int width, int height, VkFormat format) const
 {
-    return RenderTexture(m_device.Physical(), m_device.Native(), width, height, format);
+    return RenderTexture(m_allocator.Native(), m_device.Native(), width, height, format);
 }
 
 Renderer::VulkanContextInfo Renderer::GetVulkanContextInfo() const

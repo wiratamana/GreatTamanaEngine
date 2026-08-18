@@ -1,13 +1,13 @@
 ﻿#pragma once
 
 #include "RenderTarget.h"
-
-#include <volk.h>
+#include "Vulkan/VulkanAllocator.h"
 
 namespace gte {
 
 // RAII wrapper around an off-screen, sampleable color-attachment Vulkan
-// image: owns the VkImage, its backing VkDeviceMemory, a VkImageView, and a
+// image: owns the VkImage, its backing VmaAllocation (GPU memory, sub-
+// allocated by VMA - see Vulkan/VulkanAllocator.h), a VkImageView, and a
 // VkSampler for its entire lifetime - created in the constructor, destroyed
 // in the destructor. This is the engine's "camera render target" primitive
 // (a Unity-style RenderTexture). Intended uses:
@@ -19,9 +19,9 @@ namespace gte {
 //     scene straight into the swapchain via Renderer::Present(), fullscreen.
 //   - Future off-screen effects (shadow maps, post-processing chains, etc).
 //
-// Does NOT own the VkPhysicalDevice/VkDevice passed in - both must outlive
-// this texture. Not tied to the swapchain or its frame-in-flight count:
-// a RenderTexture is rendered into synchronously, on demand, via
+// Does NOT own the VmaAllocator/VkDevice passed in - both must outlive this
+// texture. Not tied to the swapchain or its frame-in-flight count: a
+// RenderTexture is rendered into synchronously, on demand, via
 // Renderer::RenderOffscreen() (see Renderer.h) rather than every frame in
 // lockstep with presentation.
 class RenderTexture {
@@ -30,7 +30,7 @@ public:
     // swapchain format this engine already prefers (see
     // VulkanSwapchain.cpp's ChooseSurfaceFormat) - override if a caller
     // needs something else (e.g. an HDR intermediate format later).
-    RenderTexture(VkPhysicalDevice physicalDevice, VkDevice device,
+    RenderTexture(VmaAllocator allocator, VkDevice device,
         int width, int height, VkFormat format = VK_FORMAT_B8G8R8A8_UNORM);
     ~RenderTexture();
 
@@ -64,12 +64,12 @@ private:
     void Create(int width, int height);
     void Destroy() noexcept;
 
-    VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
+    VmaAllocator m_allocator = VK_NULL_HANDLE;
     VkDevice m_device = VK_NULL_HANDLE;
     VkFormat m_format = VK_FORMAT_B8G8R8A8_UNORM;
 
     VkImage m_image = VK_NULL_HANDLE;
-    VkDeviceMemory m_memory = VK_NULL_HANDLE;
+    VmaAllocation m_allocation = VK_NULL_HANDLE;
     VkImageView m_imageView = VK_NULL_HANDLE;
     VkSampler m_sampler = VK_NULL_HANDLE;
     VkExtent2D m_extent{};

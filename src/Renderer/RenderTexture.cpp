@@ -6,27 +6,8 @@
 
 namespace gte {
 
-namespace {
-
-std::uint32_t FindMemoryType(VkPhysicalDevice physicalDevice, std::uint32_t typeBits, VkMemoryPropertyFlags properties)
-{
-    VkPhysicalDeviceMemoryProperties memProperties{};
-    vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
-
-    for (std::uint32_t i = 0; i < memProperties.memoryTypeCount; ++i) {
-        const bool typeSupported = (typeBits & (1u << i)) != 0;
-        const bool hasProperties = (memProperties.memoryTypes[i].propertyFlags & properties) == properties;
-        if (typeSupported && hasProperties) {
-            return i;
-        }
-    }
-    throw std::runtime_error("RenderTexture: failed to find a suitable Vulkan memory type.");
-}
-
-} // namespace
-
-RenderTexture::RenderTexture(VkPhysicalDevice physicalDevice, VkDevice device, int width, int height, VkFormat format)
-    : m_physicalDevice(physicalDevice)
+RenderTexture::RenderTexture(VmaAllocator allocator, VkDevice device, int width, int height, VkFormat format)
+    : m_allocator(allocator)
     , m_device(device)
     , m_format(format)
 {
@@ -39,11 +20,11 @@ RenderTexture::~RenderTexture()
 }
 
 RenderTexture::RenderTexture(RenderTexture&& other) noexcept
-    : m_physicalDevice(std::exchange(other.m_physicalDevice, VK_NULL_HANDLE))
+    : m_allocator(std::exchange(other.m_allocator, VK_NULL_HANDLE))
     , m_device(std::exchange(other.m_device, VK_NULL_HANDLE))
     , m_format(other.m_format)
     , m_image(std::exchange(other.m_image, VK_NULL_HANDLE))
-    , m_memory(std::exchange(other.m_memory, VK_NULL_HANDLE))
+    , m_allocation(std::exchange(other.m_allocation, VK_NULL_HANDLE))
     , m_imageView(std::exchange(other.m_imageView, VK_NULL_HANDLE))
     , m_sampler(std::exchange(other.m_sampler, VK_NULL_HANDLE))
     , m_extent(other.m_extent)
@@ -54,11 +35,11 @@ RenderTexture& RenderTexture::operator=(RenderTexture&& other) noexcept
 {
     if (this != &other) {
         Destroy();
-        m_physicalDevice = std::exchange(other.m_physicalDevice, VK_NULL_HANDLE);
+        m_allocator = std::exchange(other.m_allocator, VK_NULL_HANDLE);
         m_device = std::exchange(other.m_device, VK_NULL_HANDLE);
         m_format = other.m_format;
         m_image = std::exchange(other.m_image, VK_NULL_HANDLE);
-        m_memory = std::exchange(other.m_memory, VK_NULL_HANDLE);
+        m_allocation = std::exchange(other.m_allocation, VK_NULL_HANDLE);
         m_imageView = std::exchange(other.m_imageView, VK_NULL_HANDLE);
         m_sampler = std::exchange(other.m_sampler, VK_NULL_HANDLE);
         m_extent = other.m_extent;
@@ -105,27 +86,15 @@ void RenderTexture::Create(int width, int height)
     imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
-    if (vkCreateImage(m_device, &imageInfo, nullptr, &m_image) != VK_SUCCESS) {
-        throw std::runtime_error("RenderTexture: vkCreateImage failed.");
-    }
+    // VMA_MEMORY_USAGE_AUTO lets VMA pick the right memory type from the
+    // image's usage flags (device-local here, since it's a color attachment)
+    // - replaces the manual FindMemoryType()/vkAllocateMemory()/
+    // vkBindImageMemory() dance this used to do by hand.
+    VmaAllocationCreateInfo allocCreateInfo{};
+    allocCreateInfo.usage = VMA_MEMORY_USAGE_AUTO;
 
-    VkMemoryRequirements memRequirements{};
-    vkGetImageMemoryRequirements(m_device, m_image, &memRequirements);
-
-    VkMemoryAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize = memRequirements.size;
-    allocInfo.memoryTypeIndex =
-        FindMemoryType(m_physicalDevice, memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-    if (vkAllocateMemory(m_device, &allocInfo, nullptr, &m_memory) != VK_SUCCESS) {
-        vkDestroyImage(m_device, m_image, nullptr);
-        m_image = VK_NULL_HANDLE;
-        throw std::runtime_error("RenderTexture: vkAllocateMemory failed.");
-    }
-
-    if (vkBindImageMemory(m_device, m_image, m_memory, 0) != VK_SUCCESS) {
-        throw std::runtime_error("RenderTexture: vkBindImageMemory failed.");
+    if (vmaCreateImage(m_allocator, &imageInfo, &allocCreateInfo, &m_image, &m_allocation, nullptr) != VK_SUCCESS) {
+        throw std::runtime_error("RenderTexture: vmaCreateImage failed.");
     }
 
     VkImageViewCreateInfo viewInfo{};
@@ -172,12 +141,9 @@ void RenderTexture::Destroy() noexcept
         m_imageView = VK_NULL_HANDLE;
     }
     if (m_image != VK_NULL_HANDLE) {
-        vkDestroyImage(m_device, m_image, nullptr);
+        vmaDestroyImage(m_allocator, m_image, m_allocation);
         m_image = VK_NULL_HANDLE;
-    }
-    if (m_memory != VK_NULL_HANDLE) {
-        vkFreeMemory(m_device, m_memory, nullptr);
-        m_memory = VK_NULL_HANDLE;
+        m_allocation = VK_NULL_HANDLE;
     }
 }
 

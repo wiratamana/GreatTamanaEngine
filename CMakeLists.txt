@@ -49,11 +49,10 @@ fetch_vulkan()
 # Downloads (if not already present) and stages the Vulkan Memory Allocator
 # (VMA) header for Windows:
 #   third_party/vma/vk_mem_alloc.h - single-header allocator library
-# Also defines the `vma` INTERFACE target used by future engine code. Not
-# linked into GreatTamanaEngine yet - nothing uses it yet (see FetchVMA.cmake
-# for the plan: a future translation unit adds `#define VMA_IMPLEMENTATION`
-# above `#include <vk_mem_alloc.h>` once a real VulkanAllocator wrapper is
-# written).
+# Also defines the `vma` INTERFACE target, linked into GreatTamanaEngine
+# below and used by src/Renderer/Vulkan/VulkanAllocator.h/.cpp (which owns
+# the actual VmaAllocator) and src/Renderer/RenderTexture.cpp (which
+# allocates its VkImage through it via vmaCreateImage()).
 fetch_vma()
 
 # Dear ImGui itself is only fetched/built at all when the Editor is enabled
@@ -97,6 +96,8 @@ add_executable(GreatTamanaEngine
     src/Renderer/Vulkan/VulkanDevice.h
     src/Renderer/Vulkan/VulkanSwapchain.cpp
     src/Renderer/Vulkan/VulkanSwapchain.h
+    src/Renderer/Vulkan/VulkanAllocator.cpp
+    src/Renderer/Vulkan/VulkanAllocator.h
     src/Editor/EditorLayer.h
     src/Game/Game.cpp
     src/Game/Game.h
@@ -117,7 +118,7 @@ target_include_directories(GreatTamanaEngine PRIVATE
     "${CMAKE_SOURCE_DIR}/src"
 )
 
-target_link_libraries(GreatTamanaEngine PRIVATE SDL3::SDL3 volk)
+target_link_libraries(GreatTamanaEngine PRIVATE SDL3::SDL3 volk vma)
 
 # Ensures SDL3.dll is copied next to the built .exe after every build.
 sdl3_copy_runtime_dll(GreatTamanaEngine)

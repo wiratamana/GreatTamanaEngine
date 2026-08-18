@@ -2,6 +2,7 @@
 
 #include "RenderTarget.h"
 #include "RenderTexture.h"
+#include "Vulkan/VulkanAllocator.h"
 #include "Vulkan/VulkanDevice.h"
 #include "Vulkan/VulkanInstance.h"
 #include "Vulkan/VulkanSurface.h"
@@ -128,6 +129,12 @@ private:
     VulkanInstance m_instance;
     VulkanSurface m_surface;
     VulkanDevice m_device;
+    // Declared (and thus destroyed, per reverse-declaration-order RAII
+    // teardown) right after m_device and before m_swapchain: relative order
+    // vs. m_swapchain doesn't matter (the allocator never touches it), but
+    // it MUST be destroyed before m_device/m_instance are, since VMA holds
+    // handles derived from both.
+    VulkanAllocator m_allocator;
     VulkanSwapchain m_swapchain;
 
     VkCommandPool m_commandPool = VK_NULL_HANDLE;

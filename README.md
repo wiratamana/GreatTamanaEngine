@@ -66,6 +66,14 @@ the Editor's Unity-style "Game"/"Scene" panels (a camera renders into a
 Vulkan itself is accessed exclusively through **volk** (a dynamic meta-loader,
 see Building below) — nothing in the engine links a classic Vulkan loader
 import lib or calls `vulkan.h` functions directly without going through it.
+GPU memory is allocated exclusively through **VMA** (Vulkan Memory
+Allocator, see Building below) via `VulkanAllocator`
+(`src/Renderer/Vulkan/VulkanAllocator.h/.cpp`) — an RAII wrapper owning a
+single `VmaAllocator` that `Renderer` creates once alongside its
+instance/device and hands to every GPU resource type (`RenderTexture` today)
+to create its images/buffers through (`vmaCreateImage`/`vmaCreateBuffer`)
+instead of each one hand-rolling its own memory-type lookup and
+alloc/bind/free calls.
 
 ### Editor / Debug UI
 
@@ -120,10 +128,10 @@ Prerequisites:
 - The **Vulkan Memory Allocator (VMA)** header
   (https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator) is
   fetched the same way, into `third_party/vma/vk_mem_alloc.h` (see
-  `cmake/FetchVMA.cmake`), and gitignored like everything else above. This
-  currently only stages the header and defines an interface target for
-  engine code to link against later — no engine allocation code uses it yet
-  (see Status below).
+  `cmake/FetchVMA.cmake`), and gitignored like everything else above. Every
+  GPU allocation in the engine (`RenderTexture` today) goes through the
+  `vma` target via `VulkanAllocator` (`src/Renderer/Vulkan/VulkanAllocator.h/.cpp`)
+  — see Rendering above and Status below.
 - Dear ImGui (core + its SDL3/Vulkan backends) is fetched the same way, into
   `third_party/imgui/` (see `cmake/FetchImGui.cmake`), but **only** when
   `GTE_ENABLE_EDITOR` is `ON` (the default) — a build configured with
@@ -155,14 +163,12 @@ pieces:
   that displays Game's camera output via a `RenderTexture`. Toggling
   `GTE_ENABLE_EDITOR` fully includes/excludes it, down to CMake never
   fetching or compiling ImGui at all when it's off.
-- GPU memory is currently allocated by hand (`RenderTexture` calls
-  `vkAllocateMemory`/`vkBindImageMemory`/`vkFreeMemory` directly, with its own
-  small `FindMemoryType()` helper) — there's exactly one allocation site today.
-  **VMA integration is in progress** (`vma-integration` branch):
-  `cmake/FetchVMA.cmake` fetches and stages `vk_mem_alloc.h` and defines a
-  `vma` target, verified to fetch/configure/compile cleanly against this
-  project's volk-based Vulkan headers — but it isn't linked into the engine
-  or used by any allocation yet. Next up: a `VulkanAllocator` RAII wrapper
-  owning a `VmaAllocator`, and migrating `RenderTexture` (and future
-  buffer/texture types) onto `vmaCreateImage`/`vmaCreateBuffer` instead of the
-  manual memory-type lookup + alloc/bind/free dance.
+- GPU memory allocation goes through **VMA** (Vulkan Memory Allocator) via
+  the new `VulkanAllocator` RAII wrapper (`src/Renderer/Vulkan/`) — `Renderer`
+  owns a single `VmaAllocator`, and `RenderTexture` now creates its `VkImage`
+  through `vmaCreateImage`/`vmaDestroyImage` instead of the manual
+  `FindMemoryType()` + `vkAllocateMemory`/`vkBindImageMemory`/`vkFreeMemory`
+  dance it used to do by hand. Verified building cleanly both with
+  `GTE_ENABLE_EDITOR` `ON` and `OFF`. Future GPU resource types (vertex/
+  index/uniform/staging buffers) should follow the same pattern via
+  `vmaCreateBuffer` once they're added.
