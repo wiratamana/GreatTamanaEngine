@@ -29,6 +29,7 @@ option(GTE_ENABLE_EDITOR "Build with in-engine Editor/Debug UI (Dear ImGui)" ON)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(FetchSDL3)
 include(FetchVulkan)
+include(FetchVMA)
 
 # Downloads (if not already present) and stages SDL3 for Windows:
 #   include/SDL3/*.h  - headers
@@ -44,6 +45,16 @@ fetch_sdl3()
 #                                               loads vulkan-1.dll at runtime)
 # Also defines the Vulkan::Headers and volk targets used below.
 fetch_vulkan()
+
+# Downloads (if not already present) and stages the Vulkan Memory Allocator
+# (VMA) header for Windows:
+#   third_party/vma/vk_mem_alloc.h - single-header allocator library
+# Also defines the `vma` INTERFACE target used by future engine code. Not
+# linked into GreatTamanaEngine yet - nothing uses it yet (see FetchVMA.cmake
+# for the plan: a future translation unit adds `#define VMA_IMPLEMENTATION`
+# above `#include <vk_mem_alloc.h>` once a real VulkanAllocator wrapper is
+# written).
+fetch_vma()
 
 # Dear ImGui itself is only fetched/built at all when the Editor is enabled
 # - a release build configured with -DGTE_ENABLE_EDITOR=OFF never touches

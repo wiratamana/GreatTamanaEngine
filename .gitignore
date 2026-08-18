@@ -22,3 +22,8 @@
 # Dear ImGui artifacts fetched by cmake/FetchImGui.cmake (regenerated
 # automatically on configure — see CMakeLists.txt / cmake/FetchImGui.cmake)
 /third_party/imgui/
+
+# Vulkan Memory Allocator artifacts fetched by cmake/FetchVMA.cmake
+# (regenerated automatically on configure — see CMakeLists.txt /
+# cmake/FetchVMA.cmake)
+/third_party/vma/
