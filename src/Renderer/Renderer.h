@@ -82,11 +82,28 @@ public:
     // frames-in-flight) if it ever shows up as a bottleneck.
     void RenderOffscreen(RenderTexture& target, const std::function<void(VkCommandBuffer)>& recordExtra = {});
 
+    // The color format this Renderer's swapchain actually negotiated at
+    // runtime (see VulkanSwapchain.cpp's ChooseSurfaceFormat) - the single
+    // shared source of truth every default-format RenderTexture (and every
+    // pipeline built against it) should agree on, so the same pipeline can
+    // legally draw into either the swapchain or an off-screen RenderTexture
+    // created with CreateRenderTexture()'s default format below. See
+    // AGENTS.md ("Render Target Format Matching").
+    VkFormat ColorFormat() const noexcept;
+
     // Factory for off-screen render targets, so callers (Game, a future
     // Editor module, ...) never need direct access to the
-    // VkPhysicalDevice/VkDevice this Renderer owns internally. debugName is
+    // VkPhysicalDevice/VkDevice this Renderer owns internally. `format`
+    // defaults to VK_FORMAT_UNDEFINED, meaning "match ColorFormat() exactly"
+    // (resolved in Renderer.cpp) - this is what guarantees a pipeline built
+    // once against ColorFormat() can render into either the swapchain or a
+    // default-format RenderTexture without a VkPipelineRenderingCreateInfo
+    // mismatch. Only pass an explicit format for a target that's
+    // deliberately different (e.g. a future HDR intermediate) and will have
+    // its own dedicated pipeline variant built for that exact format. See
+    // AGENTS.md ("Render Target Format Matching"). debugName is
     // optional/Editor-only - see RenderTexture's constructor comment.
-    RenderTexture CreateRenderTexture(int width, int height, VkFormat format = VK_FORMAT_B8G8R8A8_UNORM,
+    RenderTexture CreateRenderTexture(int width, int height, VkFormat format = VK_FORMAT_UNDEFINED,
         const char* debugName = nullptr) const;
 
     // Factory for GPU buffers (vertex/index/uniform/staging), so callers

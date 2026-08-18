@@ -84,4 +84,43 @@ whenever touching GPU resource lifetime code:
   but the C++ wrapper objects can relocate). Any new GPU resource type
   added later should follow this same pattern, not invent its own.
 
+## Render Target Format Matching
+
+Vulkan pipelines are built against an exact color format
+(`VkPipelineRenderingCreateInfo::pColorAttachmentFormats`, since this engine
+uses dynamic rendering - no `VkRenderPass`/`VkFramebuffer`) - binding a
+pipeline built for one format to a target that actually has a different
+format is invalid per the spec, and can silently misrender or crash
+depending on the driver instead of failing loudly. Follow these rules
+whenever adding a real graphics pipeline or a new render target:
+
+- **`Renderer::ColorFormat()`** (`src/Renderer/Renderer.h/.cpp`) is the
+  single source of truth for "the" color format this engine renders with -
+  whatever `VulkanSwapchain` actually negotiated at runtime (see
+  `ChooseSurfaceFormat` in `VulkanSwapchain.cpp`), which can legitimately
+  differ across GPUs/drivers. Never hardcode a `VkFormat` literal (e.g.
+  `VK_FORMAT_B8G8R8A8_UNORM`) into a pipeline's
+  `VkPipelineRenderingCreateInfo` or into a `RenderTexture` you expect to
+  share a pipeline with the swapchain - read it from `Renderer::ColorFormat()`
+  instead.
+- **`Renderer::CreateRenderTexture()`'s `format` parameter defaults to
+  `VK_FORMAT_UNDEFINED`**, meaning "match `ColorFormat()` exactly" (resolved
+  internally in `Renderer.cpp`, not baked into the default argument as a
+  literal) - this is what lets a single pipeline built once against
+  `ColorFormat()` legally draw into either the swapchain or a default-format
+  `RenderTexture` (e.g. the Editor's "Game" view). Only pass an explicit
+  format when a target is deliberately different (e.g. a future HDR
+  intermediate or a shadow map) - that target needs its own dedicated
+  pipeline variant built for its exact format, never the default pipeline.
+- **`Renderer::RecordClearAndTransition()` asserts (debug builds only) that
+  every target it's given has `target.format == ColorFormat()`.** This is
+  the one recording path shared by `Present()` and `RenderOffscreen()`, so
+  it's the natural place a future pipeline-bound draw call (recorded via
+  `recordExtra`) runs - the assert exists to catch a format mismatch loudly,
+  right there, instead of a confusing validation-layer warning (or silent
+  misrendering on a driver that happens to tolerate it). A deliberately
+  different-format target (see above) needs its own recording path rather
+  than going through this assert unmodified - don't weaken or delete the
+  assert to make a special case fit.
+
 This document will be extended as more conventions are established.

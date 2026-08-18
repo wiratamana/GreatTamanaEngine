@@ -2,6 +2,7 @@
 
 #include "../Window/Window.h"
 
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -265,6 +266,19 @@ void Renderer::RecreateSwapchain()
 void Renderer::RecordClearAndTransition(VkCommandBuffer cmd, const RenderTarget& target, VkImageLayout finalLayout,
     const std::function<void(VkCommandBuffer)>& recordExtra)
 {
+    // Fail fast (debug builds only) if this target's format doesn't match
+    // ColorFormat() - the shared default every pipeline is expected to be
+    // built against (see AGENTS.md, "Render Target Format Matching"). A
+    // target that's deliberately a different format needs its own dedicated
+    // pipeline variant recorded through recordExtra; this catches a mismatch
+    // right here, at the one recording path shared by Present()/
+    // RenderOffscreen(), instead of a confusing validation-layer warning (or
+    // silent misrendering on a driver that happens to tolerate it) once real
+    // pipelines exist. Compiled out entirely in release (NDEBUG) - zero cost.
+    assert(target.format == ColorFormat() &&
+        "Renderer::RecordClearAndTransition: target format does not match Renderer::ColorFormat() - "
+        "any pipeline recorded via recordExtra here must have been built for THIS target's exact format.");
+
     // Dynamic rendering (no VkRenderPass/VkFramebuffer) means WE are
     // responsible for the layout transitions a render pass would normally
     // have done implicitly.
@@ -463,9 +477,22 @@ void Renderer::RenderOffscreen(RenderTexture& target, const std::function<void(V
     vkWaitForFences(m_device.Native(), 1, &m_offscreenFence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
 }
 
+VkFormat Renderer::ColorFormat() const noexcept
+{
+    return m_swapchain.ImageFormat();
+}
+
 RenderTexture Renderer::CreateRenderTexture(int width, int height, VkFormat format, const char* debugName) const
 {
-    return RenderTexture(m_allocator.Native(), m_memoryTracker, m_device.Native(), width, height, format, debugName);
+    // VK_FORMAT_UNDEFINED (the default - see Renderer.h) means "match
+    // ColorFormat() exactly", not "let Vulkan pick" - resolved here rather
+    // than baking a hardcoded literal into the default argument, so this
+    // always tracks whatever the swapchain actually negotiated at runtime
+    // (see VulkanSwapchain.cpp's ChooseSurfaceFormat), even if that differs
+    // across GPUs/drivers. See AGENTS.md ("Render Target Format Matching").
+    const VkFormat resolvedFormat = (format == VK_FORMAT_UNDEFINED) ? ColorFormat() : format;
+    return RenderTexture(
+        m_allocator.Native(), m_memoryTracker, m_device.Native(), width, height, resolvedFormat, debugName);
 }
 
 Buffer Renderer::CreateBuffer(
@@ -559,7 +586,7 @@ Renderer::VulkanContextInfo Renderer::GetVulkanContextInfo() const
     info.device = m_device.Native();
     info.graphicsQueueFamily = m_device.GraphicsQueueFamily();
     info.graphicsQueue = m_device.GraphicsQueue();
-    info.colorFormat = m_swapchain.ImageFormat();
+    info.colorFormat = ColorFormat(); // single source of truth - see ColorFormat()'s comment in Renderer.h
     info.imageCount = m_swapchain.ImageCount();
     info.minImageCount = kMaxFramesInFlight; // matches what this Renderer actually keeps in flight
     return info;
