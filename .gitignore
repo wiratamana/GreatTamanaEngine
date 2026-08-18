@@ -27,3 +27,9 @@
 # (regenerated automatically on configure — see CMakeLists.txt /
 # cmake/FetchVMA.cmake)
 /third_party/vma/
+
+# Compiled shader binaries (SPIR-V) built from src/Shaders/*.vert/*.frag by
+# cmake/CompileShaders.cmake (glslc) - regenerated automatically on every
+# build into "<exe dir>/shaders/", never committed. Only the GLSL source is
+# version-controlled.
+*.spv

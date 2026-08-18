@@ -1,6 +1,7 @@
 ﻿#include "Game.h"
 
 #include "../Renderer/Renderer.h"
+#include "../Renderer/Vertex.h"
 
 namespace gte {
 
@@ -19,12 +20,31 @@ void Game::Update(double /*deltaSeconds*/, const InputState& /*input*/)
 
 void Game::Render(Renderer& renderer)
 {
-    // Placeholder: clear to a dark blue-grey each frame.
     renderer.Clear(20, 20, 30, 255);
 
-    // Draw calls go here. Application decides afterwards whether this frame
-    // is presented straight to the swapchain or rendered into an Editor's
-    // off-screen "Game view" texture - see Application::Run().
+    // Lazily build the hardcoded "hello triangle" GPU resources on first
+    // use - see the member comments in Game.h. Shader source lives at
+    // src/Shaders/Triangle.vert/.frag (version-controlled); compiled to
+    // SPIR-V at build time by cmake/CompileShaders.cmake into
+    // "<exe dir>/shaders/*.spv" (gitignored - see .gitignore).
+    if (!m_trianglePipeline.has_value()) {
+        m_trianglePipeline =
+            renderer.CreatePipeline("shaders/Triangle.vert.spv", "shaders/Triangle.frag.spv");
+
+        // Clip-space positions (Vulkan NDC: +Y is down) - one red, one
+        // green, one blue vertex, so the rasterizer's interpolation across
+        // the triangle is visible.
+        const Vertex vertices[3] = {
+            { { 0.0f, -0.5f }, { 1.0f, 0.0f, 0.0f } },
+            { { 0.5f, 0.5f }, { 0.0f, 1.0f, 0.0f } },
+            { { -0.5f, 0.5f }, { 0.0f, 0.0f, 1.0f } },
+        };
+        m_triangleMesh = renderer.CreateMesh(vertices, sizeof(vertices), 3, "TriangleMesh");
+    }
+
+    // Queue this frame's draw - Renderer is the only thing that ever turns
+    // this into actual vkCmd* calls (see Renderer::Submit()).
+    renderer.Submit(*m_trianglePipeline, *m_triangleMesh);
 }
 
 } // namespace gte

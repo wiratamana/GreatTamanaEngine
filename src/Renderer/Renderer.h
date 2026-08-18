@@ -2,6 +2,8 @@
 
 #include "Buffer.h"
 #include "Memory/GpuMemoryTracker.h"
+#include "Mesh.h"
+#include "Pipeline.h"
 #include "RenderTarget.h"
 #include "RenderTexture.h"
 #include "Vulkan/VulkanAllocator.h"
@@ -14,6 +16,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace gte {
@@ -135,6 +138,46 @@ public:
     // RenderOffscreen()'s per-frame recording.
     void ImmediateSubmit(const std::function<void(VkCommandBuffer)>& recordFn) const;
 
+    // Call once per frame, before Game::Update()/Render() - clears any draw
+    // items queued last frame via Submit() (see below) so this frame always
+    // starts from an empty queue. Also guards against a queue growing
+    // unbounded across frames where nothing ever consumes it (e.g. a
+    // minimized window with no Editor - see RecordClearAndTransition).
+    void BeginFrame();
+
+    // Queues one draw call - a Pipeline plus the Mesh to draw with it - to
+    // be recorded the next time this frame's contents are actually recorded
+    // (whichever of RenderOffscreen()/Present() runs RecordClearAndTransition
+    // first this frame). This is the seam that lets Game record draws
+    // without ever touching a VkCommandBuffer or knowing Vulkan exists at
+    // all: Game holds onto Pipeline/Mesh objects (built via
+    // CreatePipeline()/CreateMesh()) and just calls this once per object it
+    // wants drawn each frame - Renderer is the only thing that ever issues
+    // the actual vkCmdBindPipeline/vkCmdBindVertexBuffers/vkCmdDraw calls.
+    // Not persistent - must be called again every frame an object should be
+    // drawn (there is no retained scene graph yet).
+    void Submit(const Pipeline& pipeline, const Mesh& mesh);
+
+    // Factory for graphics pipelines, so callers never need direct access
+    // to the VkDevice this Renderer owns internally, and always get a
+    // pipeline built against the exact color format this Renderer actually
+    // renders with (see ColorFormat() and AGENTS.md, "Render Target Format
+    // Matching"). vertexShaderSpirvPath/fragmentShaderSpirvPath point at
+    // compiled SPIR-V binaries - see cmake/CompileShaders.cmake, which
+    // compiles src/Shaders/*.vert/*.frag into "<exe dir>/shaders/*.spv" at
+    // build time.
+    Pipeline CreatePipeline(const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath) const;
+
+    // Factory for meshes (currently: a vertex buffer + vertex count, no
+    // index buffer - see Mesh.h), so callers never need direct access to
+    // the VmaAllocator this Renderer owns internally. vertexData/
+    // vertexDataSize describe a plain CPU-side array of Vertex (Vertex.h);
+    // uploaded once via CreateDeviceLocalBuffer(), same as any other
+    // static GPU-only buffer. debugName is optional/Editor-only - see
+    // Buffer's constructor comment.
+    Mesh CreateMesh(const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount,
+        const char* debugName = nullptr) const;
+
     // Aggregate live-memory totals across every Buffer/RenderTexture this
     // Renderer has ever created and not yet destroyed - see
     // Memory/GpuMemoryTracker.h. O(1); safe to call every frame if desired
@@ -188,6 +231,18 @@ private:
     void RecordClearAndTransition(VkCommandBuffer cmd, const RenderTarget& target, VkImageLayout finalLayout,
         const std::function<void(VkCommandBuffer)>& recordExtra);
 
+    // One queued Submit() call's worth of plain Vulkan handles - deliberately
+    // NOT a reference/pointer to the Pipeline/Mesh themselves (those are
+    // owned by whoever called Submit(), typically Game, and must outlive
+    // the RecordClearAndTransition() call that consumes this - which is
+    // always true within a single frame, since Submit() is called from
+    // Game::Render() and consumed later that same frame).
+    struct DrawItem {
+        VkPipeline pipeline = VK_NULL_HANDLE;
+        VkBuffer vertexBuffer = VK_NULL_HANDLE;
+        std::uint32_t vertexCount = 0;
+    };
+
     VulkanInstance m_instance;
     VulkanSurface m_surface;
     VulkanDevice m_device;
@@ -230,6 +285,14 @@ private:
     bool m_resizeRequested = false;
     int m_pendingWidth = 0;
     int m_pendingHeight = 0;
+
+    // This frame's queued Submit() calls - see Submit()/BeginFrame()/
+    // RecordClearAndTransition. Cleared at the top of every frame
+    // (BeginFrame()) AND immediately after being recorded
+    // (RecordClearAndTransition), so a frame is never drawn twice (e.g.
+    // RenderOffscreen() then Present() in the same Editor-build frame) and
+    // never silently accumulates across frames where nothing consumes it.
+    std::vector<DrawItem> m_drawQueue;
 };
 
 } // namespace gte

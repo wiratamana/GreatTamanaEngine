@@ -30,6 +30,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(FetchSDL3)
 include(FetchVulkan)
 include(FetchVMA)
+include(CompileShaders)
 
 # Downloads (if not already present) and stages SDL3 for Windows:
 #   include/SDL3/*.h  - headers
@@ -87,6 +88,10 @@ add_executable(GreatTamanaEngine
     src/Renderer/Renderer.h
     src/Renderer/Buffer.cpp
     src/Renderer/Buffer.h
+    src/Renderer/Mesh.h
+    src/Renderer/Pipeline.cpp
+    src/Renderer/Pipeline.h
+    src/Renderer/Vertex.h
     src/Renderer/Memory/GpuResourceHandle.h
     src/Renderer/Memory/GpuMemoryTracker.cpp
     src/Renderer/Memory/GpuMemoryTracker.h
@@ -107,6 +112,13 @@ add_executable(GreatTamanaEngine
     src/Game/Game.cpp
     src/Game/Game.h
 )
+
+# Compiles the engine's GLSL shader sources to SPIR-V at build time (see
+# cmake/CompileShaders.cmake) - staged into "<exe dir>/shaders/" next to the
+# built .exe, never committed as a binary (see .gitignore). Pipeline.cpp
+# loads these compiled .spv files by relative path at runtime.
+gte_add_shader(GreatTamanaEngine src/Shaders/Triangle.vert)
+gte_add_shader(GreatTamanaEngine src/Shaders/Triangle.frag)
 
 # Exactly one of these two gets compiled in, depending on GTE_ENABLE_EDITOR -
 # both define the same gte::CreateEditorLayer() factory function (see

@@ -76,6 +76,10 @@ int Application::Run()
 
         m_editorLayer->NewFrame();
 
+        // Clears last frame's queued Submit() draw items before Game gets a
+        // chance to queue this frame's - see Renderer::BeginFrame().
+        m_renderer.BeginFrame();
+
         m_game.Update(deltaSeconds, inputState);
         // Game only clears/draws here - it never decides *where* that ends
         // up (swapchain vs. an off-screen texture); see below.

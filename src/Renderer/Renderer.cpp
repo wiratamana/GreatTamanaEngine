@@ -71,6 +71,7 @@ Renderer::Renderer(Renderer&& other) noexcept
     , m_resizeRequested(other.m_resizeRequested)
     , m_pendingWidth(other.m_pendingWidth)
     , m_pendingHeight(other.m_pendingHeight)
+    , m_drawQueue(std::move(other.m_drawQueue))
 {
     other.m_commandBuffers.fill(VK_NULL_HANDLE);
     other.m_imageAvailableSemaphores.fill(VK_NULL_HANDLE);
@@ -118,6 +119,7 @@ Renderer& Renderer::operator=(Renderer&& other) noexcept
         m_resizeRequested = other.m_resizeRequested;
         m_pendingWidth = other.m_pendingWidth;
         m_pendingHeight = other.m_pendingHeight;
+        m_drawQueue = std::move(other.m_drawQueue);
     }
     return *this;
 }
@@ -319,9 +321,42 @@ void Renderer::RecordClearAndTransition(VkCommandBuffer cmd, const RenderTarget&
     renderingInfo.pColorAttachments = &colorAttachment;
 
     vkCmdBeginRendering(cmd, &renderingInfo);
-    // Engine geometry, then optionally an overlay (Dear ImGui's
+
+    // Engine (Game) geometry queued via Submit() this frame - recorded
+    // first, before any overlay, so an Editor's ImGui chrome always draws
+    // on top of it. Cleared right after being recorded so a second
+    // RecordClearAndTransition() call later in the SAME frame (e.g.
+    // Present()'s editor-chrome-only pass, after RenderOffscreen() already
+    // drew the queue into the Game view texture) never redraws it - see
+    // the m_drawQueue member comment in Renderer.h.
+    if (!m_drawQueue.empty()) {
+        VkViewport viewport{};
+        viewport.x = 0.0f;
+        viewport.y = 0.0f;
+        viewport.width = static_cast<float>(target.extent.width);
+        viewport.height = static_cast<float>(target.extent.height);
+        viewport.minDepth = 0.0f;
+        viewport.maxDepth = 1.0f;
+        vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+        VkRect2D scissor{};
+        scissor.offset = { 0, 0 };
+        scissor.extent = target.extent;
+        vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+        for (const DrawItem& item : m_drawQueue) {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, item.pipeline);
+            const VkDeviceSize offset = 0;
+            vkCmdBindVertexBuffers(cmd, 0, 1, &item.vertexBuffer, &offset);
+            vkCmdDraw(cmd, item.vertexCount, 1, 0, 0);
+        }
+
+        m_drawQueue.clear();
+    }
+
+    // Then optionally an overlay (Dear ImGui's
     // ImGui_ImplVulkan_RenderDrawData(), a debug UI, ...) gets recorded
-    // here via recordExtra, between vkCmdBeginRendering/vkCmdEndRendering.
+    // here via recordExtra, still between vkCmdBeginRendering/vkCmdEndRendering.
     if (recordExtra) {
         recordExtra(cmd);
     }
@@ -575,6 +610,34 @@ void Renderer::ImmediateSubmit(const std::function<void(VkCommandBuffer)>& recor
 
     vkDestroyFence(m_device.Native(), fence, nullptr);
     vkFreeCommandBuffers(m_device.Native(), m_commandPool, 1, &cmd);
+}
+
+void Renderer::BeginFrame()
+{
+    m_drawQueue.clear();
+}
+
+void Renderer::Submit(const Pipeline& pipeline, const Mesh& mesh)
+{
+    DrawItem item;
+    item.pipeline = pipeline.Native();
+    item.vertexBuffer = mesh.VertexBuffer();
+    item.vertexCount = mesh.VertexCount();
+    m_drawQueue.push_back(item);
+}
+
+Pipeline Renderer::CreatePipeline(
+    const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath) const
+{
+    return Pipeline(m_device.Native(), ColorFormat(), vertexShaderSpirvPath, fragmentShaderSpirvPath);
+}
+
+Mesh Renderer::CreateMesh(
+    const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount, const char* debugName) const
+{
+    Buffer vertexBuffer =
+        CreateDeviceLocalBuffer(vertexData, vertexDataSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, debugName);
+    return Mesh(std::move(vertexBuffer), vertexCount);
 }
 
 Renderer::VulkanContextInfo Renderer::GetVulkanContextInfo() const
