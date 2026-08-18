@@ -6,8 +6,8 @@ namespace gte {
 
 // Plain, non-owning description of "a place to render color into" for a
 // single Renderer pass: either the swapchain image for the current frame,
-// or a RenderTexture's backing image (see RenderTexture.h). Renderer's
-// internal draw recording (RecordClearAndTransition) works against this
+// or a RenderTexture's backing image (see RenderTexture.h). FrameRecorder's
+// internal draw recording (RecordFrame) works against this
 // alone, so it never needs two copies of the same clear/barrier logic for
 // "drawing to the window" vs. "drawing to an off-screen texture".
 //

@@ -112,7 +112,7 @@ whenever adding a real graphics pipeline or a new render target:
   format when a target is deliberately different (e.g. a future HDR
   intermediate or a shadow map) - that target needs its own dedicated
   pipeline variant built for its exact format, never the default pipeline.
-- **`Renderer::RecordClearAndTransition()` asserts (debug builds only) that
+- **`FrameRecorder::RecordFrame()` asserts (debug builds only) that
   every target it's given has `target.format == ColorFormat()`.** This is
   the one recording path shared by `Present()` and `RenderOffscreen()`, so
   it's the natural place a future pipeline-bound draw call (recorded via

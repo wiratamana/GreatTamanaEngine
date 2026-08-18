@@ -92,7 +92,7 @@ Pipeline::Pipeline(VkDevice device, VkFormat colorFormat, const std::string& ver
         inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
         // Actual viewport/scissor rectangles are supplied per-draw via
-        // vkCmdSetViewport/vkCmdSetScissor (see Renderer::RecordClearAndTransition)
+        // vkCmdSetViewport/vkCmdSetScissor (see FrameRecorder::RecordFrame)
         // since this same Pipeline can draw into targets of different sizes
         // (the swapchain vs. an Editor RenderTexture) - only the counts
         // matter here.
