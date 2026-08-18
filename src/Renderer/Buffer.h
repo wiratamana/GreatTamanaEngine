@@ -67,7 +67,10 @@ public:
 
     // Copies `size` bytes from `data` into this buffer's mapped memory at
     // `offset`. Only valid for buffers with non-null MappedData() - throws
-    // otherwise.
+    // std::runtime_error otherwise. Also throws std::out_of_range if
+    // `offset + size` would write past this buffer's actual Size() - this is
+    // checked explicitly (rather than left as a caller responsibility)
+    // because memcpy has no idea how large the destination allocation is.
     void Upload(const void* data, std::size_t size, std::size_t offset = 0);
 
     // Handle into the GpuMemoryTracker this Buffer is registered with -

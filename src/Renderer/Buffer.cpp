@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstring>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 namespace gte {
@@ -95,6 +96,19 @@ void Buffer::Upload(const void* data, std::size_t size, std::size_t offset)
     if (m_mappedData == nullptr) {
         throw std::runtime_error(
             "Buffer::Upload: buffer is not host-mapped (was it created with BufferMemoryUsage::GpuOnly?).");
+    }
+    // Guard against writing past the end of this buffer's actual allocation -
+    // offset/size are plain caller-supplied values with nothing else
+    // validating them before the memcpy below, so a mistake here would
+    // otherwise silently corrupt whatever host-visible memory happens to
+    // follow this allocation instead of failing loudly right at the call
+    // that got it wrong. The offset > m_size check comes first so the size
+    // comparison below can never underflow (size_t is unsigned).
+    const auto bufferSize = static_cast<std::size_t>(m_size);
+    if (offset > bufferSize || size > bufferSize - offset) {
+        throw std::out_of_range(
+            "Buffer::Upload: offset (" + std::to_string(offset) + ") + size (" + std::to_string(size) +
+            ") exceeds this buffer's size (" + std::to_string(bufferSize) + " bytes).");
     }
     std::memcpy(static_cast<std::uint8_t*>(m_mappedData) + offset, data, size);
 }
