@@ -110,6 +110,7 @@ add_library(gte_core STATIC
     src/ECS/ComponentStorage.h
     src/ECS/Registry.h
     src/ECS/Components/Transform.h
+    src/ECS/Components/MeshRenderer.h
     src/Application/Application.cpp
     src/Application/Application.h
     src/Application/EventTranslator.cpp
@@ -130,6 +131,9 @@ add_library(gte_core STATIC
     src/Renderer/Buffer.cpp
     src/Renderer/Buffer.h
     src/Renderer/Mesh.h
+    src/Renderer/MeshHandle.h
+    src/Renderer/PipelineHandle.h
+    src/Renderer/ResourcePool.h
     src/Renderer/Pipeline.cpp
     src/Renderer/Pipeline.h
     src/Renderer/Vertex.h
@@ -154,6 +158,8 @@ add_library(gte_core STATIC
     src/Editor/EditorLayer.h
     src/Game/Game.cpp
     src/Game/Game.h
+    src/Game/RenderSystem.cpp
+    src/Game/RenderSystem.h
 )
 
 # Exactly one of these two gets compiled in, depending on GTE_ENABLE_EDITOR -

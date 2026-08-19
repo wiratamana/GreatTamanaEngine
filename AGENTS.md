@@ -150,11 +150,15 @@ lifetime code:
   never carry virtual behavior of their own.** `Transform`
   (`src/ECS/Components/Transform.h`) is the pattern to copy: fields only,
   plus at most small pure-math helper methods (`LocalToWorldMatrix()`). A
-  component that needs a live GPU resource (e.g. a future `MeshRenderer`)
-  must reference it by handle/value data (e.g. a mesh/material handle),
-  never by embedding a `Buffer`/`RenderTexture`/raw Vulkan handle directly -
-  the RAII-owning object stays behind `Renderer`, exactly as GPU resources
-  are already addressed by `GpuResourceHandle` rather than a raw pointer.
+  component that needs a live GPU resource - `MeshRenderer`
+  (`src/ECS/Components/MeshRenderer.h`) is the first one - must reference it
+  by handle/value data (`MeshHandle`/`PipelineHandle`,
+  `src/Renderer/MeshHandle.h`/`PipelineHandle.h`), never by embedding a
+  `Buffer`/`RenderTexture`/`Mesh`/`Pipeline`/raw Vulkan handle directly - the
+  RAII-owning object stays behind a `ResourcePool<T, HandleT>`
+  (`src/Renderer/ResourcePool.h`, owned by `RenderSystem` - see below),
+  exactly as GPU resources are already addressed by `GpuResourceHandle`
+  rather than a raw pointer.
 - **`ComponentStorage<T>` is a sparse set, addressed by `Entity::index`
   directly - never a hash lookup.** Adding/removing/querying a component is
   O(1) array indexing (`m_sparse`/`m_dense`), and `Remove()` uses
@@ -182,6 +186,19 @@ lifetime code:
   when adding a new component type or Registry method: hand-built `Entity`
   values and plain component structs are enough, following the same
   Tier-1-testability rule already established below.
+- **Only `RenderSystem` (`src/Game/RenderSystem.h/.cpp`) is allowed to
+  depend on both the ECS world (`Registry`/`Transform`/`MeshRenderer`) AND
+  `Renderer`/`Mesh`/`Pipeline` - the same "only one layer crosses this
+  boundary" rule this file already applies to SDL (see "Coding Guidelines",
+  Clean Architecture: only `Application` touches SDL directly). `Renderer`
+  itself must never gain a dependency on ECS in either direction -
+  `Renderer::Submit()` takes a plain `Mat4`, never an `Entity`/`Registry`.
+  `RenderSystem::CollectRenderables(Registry&)` is the pure ECS -> plain-data
+  (`DrawCommand`: `MeshHandle`/`PipelineHandle`/`Mat4`, no live Mesh/Pipeline/
+  Renderer involved) step - keep it that way when extending it, and put any
+  new Renderer-touching logic in `RenderSystem::Draw()` (or a sibling
+  non-pure method) instead, so `CollectRenderables()` stays Tier-1-testable
+  (see `tests/Game/RenderSystemTests.cpp`).
 
 ## Testability & Regression Safety
 

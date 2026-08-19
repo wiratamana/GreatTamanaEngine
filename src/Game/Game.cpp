@@ -2,6 +2,8 @@
 
 #include "../Renderer/Renderer.h"
 #include "../Renderer/Vertex.h"
+#include "ECS/Components/MeshRenderer.h"
+#include "ECS/Components/Transform.h"
 
 namespace gte {
 
@@ -18,33 +20,60 @@ void Game::Update(double /*deltaSeconds*/, const InputState& /*input*/)
     // e.g. `if (input.IsKeyDown(KeyCode::W)) { ... }` for held-key movement.
 }
 
+void Game::EnsureDemoSceneBuilt(Renderer& renderer)
+{
+    if (m_demoSceneBuilt) {
+        return;
+    }
+    m_demoSceneBuilt = true;
+
+    // Shader source lives at src/Shaders/Triangle.vert/.frag (version-
+    // controlled); compiled to SPIR-V at build time by
+    // cmake/CompileShaders.cmake into "<exe dir>/shaders/*.spv" (gitignored
+    // - see .gitignore). Registered with RenderSystem (not kept as a raw
+    // Pipeline member here) so a MeshRenderer component can reference it by
+    // handle - see RenderSystem.h.
+    const PipelineHandle trianglePipeline = m_renderSystem.RegisterPipeline(
+        renderer.CreatePipeline("shaders/Triangle.vert.spv", "shaders/Triangle.frag.spv"));
+
+    // Clip-space positions (Vulkan NDC: +Y is down) - one red, one green,
+    // one blue vertex, so the rasterizer's interpolation across the
+    // triangle is visible. Shared by every demo entity below - each one
+    // only differs in its Transform, proving the push-constant model
+    // matrix (see Renderer/Pipeline.cpp, Shaders/Triangle.vert) actually
+    // moves the SAME mesh data to a different place on screen.
+    const Vertex vertices[3] = {
+        { { 0.0f, -0.5f }, { 1.0f, 0.0f, 0.0f } },
+        { { 0.5f, 0.5f }, { 0.0f, 1.0f, 0.0f } },
+        { { -0.5f, 0.5f }, { 0.0f, 0.0f, 1.0f } },
+    };
+    const MeshHandle triangleMesh =
+        m_renderSystem.RegisterMesh(renderer.CreateMesh(vertices, sizeof(vertices), 3, "TriangleMesh"));
+
+    // Three entities sharing the one mesh/pipeline above, spaced left/
+    // center/right purely via Transform.position - proves RenderSystem
+    // actually iterates every MeshRenderer (not just redrawing a single
+    // hardcoded thing) and that each entity's world matrix independently
+    // affects where it ends up on screen.
+    const float positions[3] = { -0.6f, 0.0f, 0.6f };
+    for (const float x : positions) {
+        const Entity entity = m_registry.CreateEntity();
+
+        Transform& transform = m_registry.AddComponent<Transform>(entity);
+        transform.position = Vec3{ x, 0.0f, 0.0f };
+        transform.scale = Vec3{ 0.4f, 0.4f, 0.4f };
+
+        m_registry.AddComponent<MeshRenderer>(entity, MeshRenderer{ triangleMesh, trianglePipeline });
+    }
+}
+
 void Game::Render(Renderer& renderer)
 {
     renderer.Clear(20, 20, 30, 255);
 
-    // Lazily build the hardcoded "hello triangle" GPU resources on first
-    // use - see the member comments in Game.h. Shader source lives at
-    // src/Shaders/Triangle.vert/.frag (version-controlled); compiled to
-    // SPIR-V at build time by cmake/CompileShaders.cmake into
-    // "<exe dir>/shaders/*.spv" (gitignored - see .gitignore).
-    if (!m_trianglePipeline.has_value()) {
-        m_trianglePipeline =
-            renderer.CreatePipeline("shaders/Triangle.vert.spv", "shaders/Triangle.frag.spv");
+    EnsureDemoSceneBuilt(renderer);
 
-        // Clip-space positions (Vulkan NDC: +Y is down) - one red, one
-        // green, one blue vertex, so the rasterizer's interpolation across
-        // the triangle is visible.
-        const Vertex vertices[3] = {
-            { { 0.0f, -0.5f }, { 1.0f, 0.0f, 0.0f } },
-            { { 0.5f, 0.5f }, { 0.0f, 1.0f, 0.0f } },
-            { { -0.5f, 0.5f }, { 0.0f, 0.0f, 1.0f } },
-        };
-        m_triangleMesh = renderer.CreateMesh(vertices, sizeof(vertices), 3, "TriangleMesh");
-    }
-
-    // Queue this frame's draw - Renderer is the only thing that ever turns
-    // this into actual vkCmd* calls (see Renderer::Submit()).
-    renderer.Submit(*m_trianglePipeline, *m_triangleMesh);
+    m_renderSystem.Draw(m_registry, renderer);
 }
 
 } // namespace gte

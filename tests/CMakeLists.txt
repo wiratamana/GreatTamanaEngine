@@ -57,6 +57,18 @@
 #                                            DestroyEntity() clearing every
 #                                            pool, and Transform (the first
 #                                            real component).
+#   - Renderer/ResourcePoolTests.cpp         - ResourcePool<T, HandleT>'s
+#                                            generic insert/remove/lookup +
+#                                            generation-guard semantics (see
+#                                            AGENTS.md, "Entity-Component-
+#                                            System"), backing MeshHandle/
+#                                            PipelineHandle.
+#   - Game/RenderSystemTests.cpp             - RenderSystem::CollectRenderables(),
+#                                            the pure ECS -> DrawCommand step
+#                                            (no Renderer/live GPU involved) -
+#                                            RenderSystem::Draw() itself is
+#                                            Tier 2 (needs a live Renderer),
+#                                            see the note below.
 #
 # Note that the test BINARY still dynamically depends on SDL3.dll at process
 # load time regardless of the above (gte_core's Window.cpp references SDL
@@ -87,6 +99,7 @@ add_executable(GreatTamanaEngineTests
     Input/InputStateTests.cpp
     Application/EventTranslatorTests.cpp
     Renderer/VertexTests.cpp
+    Renderer/ResourcePoolTests.cpp
     Math/Vec2Tests.cpp
     Math/Vec3Tests.cpp
     Math/Mat4Tests.cpp
@@ -94,6 +107,7 @@ add_executable(GreatTamanaEngineTests
     ECS/EntityManagerTests.cpp
     ECS/ComponentStorageTests.cpp
     ECS/RegistryTests.cpp
+    Game/RenderSystemTests.cpp
 )
 
 target_link_libraries(GreatTamanaEngineTests PRIVATE

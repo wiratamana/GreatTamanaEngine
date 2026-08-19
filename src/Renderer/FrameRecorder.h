@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+#include "../Math/Mat4.h"
 #include "Mesh.h"
 #include "Pipeline.h"
 #include "RenderTarget.h"
@@ -43,10 +44,14 @@ public:
     // Renderer::BeginFrame().
     void BeginFrame();
 
-    // Queues one draw call - a Pipeline plus the Mesh to draw with it - to
-    // be recorded the next time RecordFrame() runs. See Renderer::Submit()
-    // for the full seam this is part of.
-    void Submit(const Pipeline& pipeline, const Mesh& mesh);
+    // Queues one draw call - a Pipeline plus the Mesh to draw with it, plus
+    // the world matrix to draw it with (pushed to the shader via
+    // vkCmdPushConstants - see Pipeline.h's push constant range and
+    // Shaders/Triangle.vert) - to be recorded the next time RecordFrame()
+    // runs. Defaults to Mat4::Identity() so existing callers that don't
+    // care about a transform are unaffected. See Renderer::Submit() for the
+    // full seam this is part of.
+    void Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix = Mat4::Identity());
 
     // Records the undefined->color-attachment barrier, the dynamic-
     // rendering clear + every queued Submit() draw + recordExtra, and the
@@ -74,11 +79,15 @@ private:
     // owned by whoever called Submit(), typically Game, and must outlive
     // the RecordFrame() call that consumes this - which is always true
     // within a single frame, since Submit() is called from Game::Render()
-    // and consumed later that same frame).
+    // and consumed later that same frame). `layout` is needed alongside
+    // `pipeline` because vkCmdPushConstants() takes a VkPipelineLayout, not
+    // a VkPipeline - see Pipeline::Layout().
     struct DrawItem {
         VkPipeline pipeline = VK_NULL_HANDLE;
+        VkPipelineLayout layout = VK_NULL_HANDLE;
         VkBuffer vertexBuffer = VK_NULL_HANDLE;
         std::uint32_t vertexCount = 0;
+        Mat4 model = Mat4::Identity(); // Mat4's default ctor is all-zero, NOT identity - see Math/Mat4.h.
     };
 
     std::array<float, 4> m_clearColor{ 0.0f, 0.0f, 0.0f, 1.0f };

@@ -17,12 +17,14 @@ void FrameRecorder::BeginFrame()
     m_drawQueue.clear();
 }
 
-void FrameRecorder::Submit(const Pipeline& pipeline, const Mesh& mesh)
+void FrameRecorder::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix)
 {
     DrawItem item;
     item.pipeline = pipeline.Native();
+    item.layout = pipeline.Layout();
     item.vertexBuffer = mesh.VertexBuffer();
     item.vertexCount = mesh.VertexCount();
+    item.model = modelMatrix;
     m_drawQueue.push_back(item);
 }
 
@@ -105,6 +107,7 @@ void FrameRecorder::RecordFrame(VkCommandBuffer cmd, const RenderTarget& target,
 
         for (const DrawItem& item : m_drawQueue) {
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, item.pipeline);
+            vkCmdPushConstants(cmd, item.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(float) * 16, item.model.Data());
             const VkDeviceSize offset = 0;
             vkCmdBindVertexBuffers(cmd, 0, 1, &item.vertexBuffer, &offset);
             vkCmdDraw(cmd, item.vertexCount, 1, 0, 0);
