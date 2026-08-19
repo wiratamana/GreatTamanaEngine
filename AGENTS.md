@@ -1,4 +1,4 @@
-﻿# AGENTS.md
+# AGENTS.md
 
 Instructions for LLM/AI agents working on this codebase.
 
@@ -199,6 +199,70 @@ lifetime code:
   new Renderer-touching logic in `RenderSystem::Draw()` (or a sibling
   non-pure method) instead, so `CollectRenderables()` stays Tier-1-testable
   (see `tests/Game/RenderSystemTests.cpp`).
+
+## Editor Module Structure
+
+`src/Editor/` is the Editor/Debug UI seam described in "Coding Guidelines"
+(Clean Architecture) - the same boundary role `EventTranslator` plays for
+SDL in the Application layer, but for ImGui. The boundary is the **folder,
+compiled only under `GTE_ENABLE_EDITOR`** - not a single file. Only
+`EditorLayer.h` (the pure `IEditorLayer` interface) and
+`NullEditorLayer.cpp` (the release-build no-op implementation) must stay
+completely free of ImGui/SDL/Vulkan-beyond-forward-declares; every other
+file under `src/Editor/` is compiled exclusively when `GTE_ENABLE_EDITOR` is
+ON (see `CMakeLists.txt`'s `target_sources(gte_core PRIVATE ...)` inside
+that `if()` block) and is just as free to include ImGui/SDL headers
+directly as `ImGuiEditorLayer.cpp` itself:
+
+- **`ImGuiEditorLayer.cpp`** is the Editor's composition root, not a
+  monolith holding every panel: it owns the ImGui context, the SDL3/Vulkan
+  backend lifecycle, the Game-view `RenderTexture`, and the shared
+  `EditorContext` (below) - `BuildUI()` just calls out, in a fixed,
+  deliberate order, to `DockLayout.cpp` and each `Panels/*.cpp` builder.
+- **`EditorContext.h`** is a small plain-data struct (no behavior of its
+  own, same philosophy as ECS components - see "Entity-Component-System"
+  below) holding everything that needs to be shared across panels/frames:
+  the Game-view ImGui descriptor, the "Game" panel's desired render-texture
+  extent, the current Hierarchy/Inspector selection, the exit-requested
+  flag, and the dock-layout-ensured latch. Passed by reference into every
+  panel/dock-layout function.
+- **`DockLayout.h/.cpp`** builds the top menu bar + full-viewport DockSpace
+  and the one-shot default Unity-style layout (Hierarchy left, Inspector
+  right, Scene/Game tabbed center) - see its own comments for why rebuilding
+  that layout must stay strictly one-shot, never re-checked every frame,
+  or the user could never drag a panel loose from the default arrangement.
+- **`Panels/HierarchyPanel.*`, `InspectorPanel.*`, `ScenePanel.*`,
+  `GamePanel.*`** are each a single free function (`BuildXPanel(...)`)
+  taking `EditorContext&` (plus `Registry&` where a panel needs the ECS
+  world) - not classes, and NOT implementations of any common
+  `IEditorPanel` interface. There is deliberately no polymorphic
+  panel list/registry here: the dock layout above already addresses each
+  panel by its literal, hardcoded name, so nothing ever needs to iterate
+  over "the panels" generically - `ImGuiEditorLayer::BuildUI()` calls each
+  one explicitly, by name, in a fixed order. Don't introduce an
+  `IEditorPanel` abstraction preemptively; only reach for one if a genuine,
+  stated requirement for runtime-registered/plugin panels shows up later.
+- A **future panel that genuinely needs its own persistent state across
+  frames** (e.g. a Console's scrollback buffer) may become a small class
+  instead of a free function - it still gets called explicitly by name from
+  `ImGuiEditorLayer::BuildUI()`, exactly like the stateless ones, with no
+  interface needed for it either.
+- **Vulkan types (e.g. `EditorContext::gameViewDescriptor`,
+  `VkExtent2D`) are fine to use directly anywhere in this folder** - this is
+  not an architectural leak. `Renderer`'s own public API
+  (`Renderer::GetVulkanContextInfo()`, `RenderTexture::Extent()`/`View()`/
+  `Sampler()`) already hands out plain Vulkan handles on purpose, precisely
+  so "an external Vulkan-based rendering backend... owned by the Editor
+  module" (see `Renderer.h`) - i.e. Dear ImGui's own Vulkan backend - can
+  use them directly; there is exactly one rendering backend in this engine
+  and no plan to swap it, so wrapping these handles in a fake neutral type
+  would add indirection with no real decoupling benefit. The boundary that
+  actually matters and must stay intact is that `Renderer`'s *internal*
+  RAII wrapper types (`VulkanInstance`, `VulkanDevice`, `VulkanSwapchain`,
+  `VulkanAllocator`, `FramePresenter`, `FrameRecorder`, `GpuResourceFactory`
+  - everything under `Renderer/Vulkan/` plus Renderer's private
+  collaborators) never leak outside `Renderer`, and that `Game`/ECS never
+  see a Vulkan type in either direction (see `RenderSystem`'s rule below).
 
 ## Testability & Regression Safety
 

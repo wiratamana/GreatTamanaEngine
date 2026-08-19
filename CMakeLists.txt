@@ -1,4 +1,4 @@
-﻿cmake_minimum_required(VERSION 3.19)
+cmake_minimum_required(VERSION 3.19)
 
 # --- Platform gate -----------------------------------------------------
 # This build currently only supports Windows. Everything else is a quick,
@@ -162,12 +162,31 @@ add_library(gte_core STATIC
     src/Game/RenderSystem.h
 )
 
-# Exactly one of these two gets compiled in, depending on GTE_ENABLE_EDITOR -
-# both define the same gte::CreateEditorLayer() factory function (see
-# src/Editor/EditorLayer.h), so there's never an ODR conflict and
-# Application never needs to know which one it linked against.
+# Exactly one of these two branches gets compiled in, depending on
+# GTE_ENABLE_EDITOR - both define the same gte::CreateEditorLayer() factory
+# function (see src/Editor/EditorLayer.h), so there's never an ODR conflict
+# and Application never needs to know which one it linked against.
+#
+# Every file listed in the GTE_ENABLE_EDITOR branch below (besides
+# ImGuiEditorLayer.cpp itself) is part of the same Editor/ImGui boundary -
+# DockLayout.* and Panels/*.* are only ever compiled here, alongside it, and
+# are just as free to include ImGui/SDL headers directly - see AGENTS.md,
+# "Editor Module Structure".
 if(GTE_ENABLE_EDITOR)
-    target_sources(gte_core PRIVATE src/Editor/ImGuiEditorLayer.cpp)
+    target_sources(gte_core PRIVATE
+        src/Editor/EditorContext.h
+        src/Editor/DockLayout.h
+        src/Editor/DockLayout.cpp
+        src/Editor/Panels/HierarchyPanel.h
+        src/Editor/Panels/HierarchyPanel.cpp
+        src/Editor/Panels/InspectorPanel.h
+        src/Editor/Panels/InspectorPanel.cpp
+        src/Editor/Panels/ScenePanel.h
+        src/Editor/Panels/ScenePanel.cpp
+        src/Editor/Panels/GamePanel.h
+        src/Editor/Panels/GamePanel.cpp
+        src/Editor/ImGuiEditorLayer.cpp
+    )
     target_link_libraries(gte_core PRIVATE imgui)
 else()
     target_sources(gte_core PRIVATE src/Editor/NullEditorLayer.cpp)
