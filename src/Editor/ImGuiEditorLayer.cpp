@@ -239,18 +239,28 @@ private:
 
     // Hosts a full-viewport, invisible window carrying the top menu bar
     // (File > Exit, ...) and the DockSpace every other panel below docks
-    // into. Building the default Hierarchy/Inspector/Scene+Game layout
-    // happens the first time this DockSpace node doesn't already exist (a
-    // machine with no imgui.ini yet), AND again if any of the panels this
-    // layout is responsible for placing has never actually been docked
-    // anywhere (e.g. an imgui.ini saved by an OLDER build of this engine,
-    // from before "Hierarchy"/"Inspector"/"Scene" existed, already contains
-    // a dockspace node - so the first check alone would wrongly consider
-    // the layout "already built" and leave these brand-new panels as tiny
-    // undocked floating windows forever). Once every one of these panels
-    // has a real dock (whether from this default layout or the user
-    // dragging it somewhere themselves afterwards), this never stomps on
-    // that arrangement again.
+    // into. Building the default Hierarchy/Inspector/Scene+Game layout is a
+    // ONE-SHOT repair, latched by m_dockLayoutEnsured (see
+    // DefaultDockLayoutIsNeeded() below) - once every one of
+    // these panels is confirmed to have a real dock (whether from this
+    // default layout or an already-valid saved imgui.ini), this NEVER
+    // touches the docking system again for the rest of the process.
+    //
+    // This one-shot-ness is not just an optimization - it's required for
+    // correctness. Dragging a tab to split/detach it (e.g. pulling "Scene"
+    // away from "Game") makes Dear ImGui briefly report that window's
+    // DockId as 0 WHILE THE DRAG IS STILL IN PROGRESS, before the drop
+    // target is chosen - a naive "rebuild the default layout whenever any
+    // of our panels has DockId == 0" check run every frame would catch
+    // exactly that transient mid-drag state and immediately call
+    // DockBuilderRemoveNode() + redock everything back to the default
+    // layout, cancelling the user's drag before they can ever complete it.
+    // That made splitting/undocking ANY of these panels look completely
+    // impossible. Checking only until the layout is confirmed once (then
+    // never again) fixes this while still auto-repairing a stale
+    // imgui.ini saved by an older build of this engine, from before these
+    // panels existed (which would otherwise leave them as permanent tiny
+    // undocked floating windows).
     void BuildDockspaceAndMenuBar()
     {
         const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -287,27 +297,53 @@ private:
         const ImGuiID dockspaceId = ImGui::GetID("EditorDockSpace");
         ImGui::DockSpace(dockspaceId, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_PassthruCentralNode);
 
-        if (DefaultDockLayoutIsNeeded(dockspaceId)) {
-            BuildDefaultDockLayout(dockspaceId, viewport->WorkSize);
+        // See the class-level comment above for why this whole block only
+        // ever runs until m_dockLayoutEnsured latches true, never again
+        // after that - this is what lets the user freely drag/split/
+        // undock any panel afterwards without ever fighting this code.
+        if (!m_dockLayoutEnsured) {
+            bool allPanelsAccountedFor = true;
+            for (const char* panelName : { "Hierarchy", "Inspector", "Scene", "Game" }) {
+                // A panel that has never called Begin() yet this session
+                // (e.g. this is the very first frame ever, before this same
+                // BuildUI() call reaches BuildHierarchyPanel()/etc.) doesn't
+                // exist as an ImGuiWindow yet - we can't yet be sure whether
+                // it'll end up docked or not, so don't latch "ensured" on
+                // this frame; just wait and check again next frame instead.
+                if (ImGui::FindWindowByName(panelName) == nullptr) {
+                    allPanelsAccountedFor = false;
+                    break;
+                }
+            }
+
+            if (DefaultDockLayoutIsNeeded(dockspaceId)) {
+                BuildDefaultDockLayout(dockspaceId, viewport->WorkSize);
+                m_dockLayoutEnsured = true; // We just fixed it ourselves - trust it, never recheck.
+            } else if (allPanelsAccountedFor) {
+                // Nothing needed fixing AND we've actually observed a real,
+                // live window for all four panels with a real dock already
+                // (e.g. a valid saved imgui.ini) - safe to stop checking
+                // forever.
+                m_dockLayoutEnsured = true;
+            }
+            // else: not enough information yet (some panel hasn't had its
+            // first Begin() this session) - leave m_dockLayoutEnsured false
+            // and re-evaluate next frame.
         }
 
         ImGui::End();
     }
 
-    // See BuildDockspaceAndMenuBar()'s comment for why this is more than
-    // just "does the node exist yet".
+    // True if the dockspace node itself doesn't exist yet, OR if any of our
+    // four panels currently exists as a window but has never actually been
+    // docked (DockId == 0) - see BuildDockspaceAndMenuBar()'s comment for
+    // why this is checked only until latched, never on every frame forever.
     static bool DefaultDockLayoutIsNeeded(ImGuiID dockspaceId)
     {
         if (ImGui::DockBuilderGetNode(dockspaceId) == nullptr) {
             return true;
         }
         for (const char* panelName : { "Hierarchy", "Inspector", "Scene", "Game" }) {
-            // A panel that has never called Begin() yet this session (e.g.
-            // this is the very first frame ever) doesn't exist as an
-            // ImGuiWindow at all - DockBuilderDockWindow() below still
-            // works fine against it purely by name in that case, so only
-            // an EXISTING-but-undocked window (DockId == 0) forces a
-            // rebuild here.
             const ImGuiWindow* window = ImGui::FindWindowByName(panelName);
             if (window != nullptr && window->DockId == 0) {
                 return true;
@@ -478,6 +514,13 @@ private:
     // initial size.
     VkExtent2D m_desiredExtent{};
     VkDescriptorSet m_gameViewDescriptor = VK_NULL_HANDLE;
+
+    // Latches true the first time every one of Hierarchy/Inspector/Scene/
+    // Game is confirmed to have a real dock (see BuildDockspaceAndMenuBar()'s
+    // comment) - once true, BuildDockspaceAndMenuBar() never touches the
+    // docking system again for the rest of the process, which is what lets
+    // the user freely drag/split/undock any panel afterwards.
+    bool m_dockLayoutEnsured = false;
 
     // Hierarchy/Inspector selection state - kInvalidEntity means "nothing
     // selected", shown by the Inspector as "No entity selected."
