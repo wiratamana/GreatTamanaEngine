@@ -263,6 +263,27 @@ directly as `ImGuiEditorLayer.cpp` itself:
   - everything under `Renderer/Vulkan/` plus Renderer's private
   collaborators) never leak outside `Renderer`, and that `Game`/ECS never
   see a Vulkan type in either direction (see `RenderSystem`'s rule below).
+- **`IEditorLayer::WantsCaptureMouse()`/`WantsCaptureKeyboard()` gate every
+  translated mouse/keyboard `Event` before it ever reaches
+  `InputState`/`Game::OnEvent()`.** `Application::Run()` checks these
+  (backed by `ImGuiIO::WantCaptureMouse`/`WantCaptureKeyboard` in
+  `ImGuiEditorLayer`, always `false` in `NullEditorLayer`) so
+  clicking/dragging/typing into the Editor's own ImGui panels never ALSO
+  registers as gameplay input underneath them - the classic
+  ImGui-in-a-game-engine "click-through" problem. This is deliberately NOT
+  solved with a separate Editor-side event broadcaster/receiver system:
+  Dear ImGui already does all the hard part itself (per-frame, internal
+  topmost-window-wins hit-testing/focus/modal-exclusivity across every one
+  of its own panels, via the one `ImGuiContext` `ProcessEvent()`/
+  `NewFrame()` already feed) - there is nothing left for engine code to
+  arbitrate between ImGui's own panels. The only genuinely missing piece
+  was ImGui-vs-gameplay leakage, and two `bool` query methods (mirroring
+  the existing `WantsExit()` pattern) are enough to close that gap; don't
+  reintroduce a broadcaster/registry to solve a problem ImGui already owns.
+  `Quit`/`WindowResized` events bypass this check entirely (see
+  `Application::Run()`) - they aren't gameplay input in this sense, and
+  Renderer/the Editor's own resize handling must always see them regardless
+  of what the Editor UI currently wants captured.
 
 ## Testability & Regression Safety
 

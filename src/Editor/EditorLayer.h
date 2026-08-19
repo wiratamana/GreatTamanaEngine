@@ -18,8 +18,10 @@ class Renderer;
 
 // Abstraction boundary between engine-core (Application/Renderer/Game) and
 // the optional Editor/Debug UI. Dear ImGui-backed in real builds, but
-// nothing outside src/Editor/ImGuiEditorLayer.cpp ever includes an ImGui
-// header - Application only ever talks to this interface.
+// nothing outside src/Editor/ (specifically: nothing outside whichever
+// files there are only ever compiled under GTE_ENABLE_EDITOR - see
+// AGENTS.md, "Editor Module Structure") ever includes an ImGui header -
+// Application only ever talks to this interface.
 //
 // Game never depends on this at all, in either direction: Game has no idea
 // the Editor exists, and the Editor only ever *observes*/edits Game/Renderer
@@ -101,6 +103,24 @@ public:
     // same way a Quit event/closing the OS window does. Always false for
     // NullEditorLayer (a release build has no such menu to click).
     virtual bool WantsExit() const = 0;
+
+    // True if the Editor UI currently wants exclusive use of mouse input
+    // this frame (e.g. the cursor is over an ImGui panel/widget, dragging a
+    // slider, resizing a dock border, ...). Application checks this before
+    // forwarding a translated mouse Event to InputState::Apply()/
+    // Game::OnEvent(), so clicking/dragging inside the Editor's own panels
+    // never also registers as gameplay input underneath them - the classic
+    // ImGui-in-a-game-engine "click-through" problem. Backed by
+    // ImGuiIO::WantCaptureMouse in the real implementation. Always false
+    // for NullEditorLayer - a release build has no Editor UI that could
+    // ever want mouse input, so Game always sees every mouse event, exactly
+    // as if no Editor existed.
+    virtual bool WantsCaptureMouse() const = 0;
+
+    // Same idea as WantsCaptureMouse(), but for keyboard input (e.g. a
+    // future ImGui text field currently has keyboard focus). Backed by
+    // ImGuiIO::WantCaptureKeyboard. Always false for NullEditorLayer.
+    virtual bool WantsCaptureKeyboard() const = 0;
 };
 
 // Constructs the real ImGui-backed editor layer, or the inert Null one,

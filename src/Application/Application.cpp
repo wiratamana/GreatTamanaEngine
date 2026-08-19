@@ -66,8 +66,33 @@ int Application::Run()
                 m_editorLayer->OnWindowResized(resized.width, resized.height);
             }
 
-            inputState.Apply(*event);
-            m_game.OnEvent(*event);
+            // Withhold mouse/keyboard events the Editor UI itself wants this
+            // frame (e.g. the cursor is over an ImGui panel, a slider is
+            // being dragged, a text field has keyboard focus, ...) from
+            // ever reaching gameplay - otherwise clicking/typing into the
+            // Editor's own panels would ALSO register as gameplay input
+            // underneath them (the classic ImGui-in-a-game-engine
+            // "click-through" problem). WantsCaptureMouse()/
+            // WantsCaptureKeyboard() are always false for NullEditorLayer,
+            // so a release build forwards every event to Game exactly as
+            // before this check existed. Quit/WindowResized above are
+            // handled unconditionally regardless of this - they aren't
+            // input Game reacts to via InputState/OnEvent() in this sense,
+            // and Renderer/the Editor's own resize handling must always see
+            // them either way.
+            const bool isMouseEvent = event->type == EventType::MouseMoved
+                || event->type == EventType::MouseButtonDown
+                || event->type == EventType::MouseButtonUp
+                || event->type == EventType::MouseWheel;
+            const bool isKeyboardEvent = event->type == EventType::KeyDown || event->type == EventType::KeyUp;
+
+            const bool consumedByEditorUI = (isMouseEvent && m_editorLayer->WantsCaptureMouse())
+                || (isKeyboardEvent && m_editorLayer->WantsCaptureKeyboard());
+
+            if (!consumedByEditorUI) {
+                inputState.Apply(*event);
+                m_game.OnEvent(*event);
+            }
         }
 
         const Uint64 nowTicksNs = SDL_GetTicksNS();

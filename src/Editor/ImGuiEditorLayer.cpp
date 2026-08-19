@@ -244,6 +244,24 @@ public:
 
     bool WantsExit() const override { return m_ctx.exitRequested; }
 
+    // Backed directly by ImGuiIO::WantCaptureMouse/WantCaptureKeyboard -
+    // ImGui already recomputes these every frame (as of the last
+    // NewFrame()/ProcessEvent() calls) from its own internal hover/focus/
+    // active-widget state, so there is nothing else to track here. See
+    // IEditorLayer::WantsCaptureMouse()/WantsCaptureKeyboard() for why
+    // Application checks these before forwarding input to Game.
+    bool WantsCaptureMouse() const override
+    {
+        ImGui::SetCurrentContext(m_context);
+        return ImGui::GetIO().WantCaptureMouse;
+    }
+
+    bool WantsCaptureKeyboard() const override
+    {
+        ImGui::SetCurrentContext(m_context);
+        return ImGui::GetIO().WantCaptureKeyboard;
+    }
+
 private:
     void ReleaseGameViewDescriptor()
     {
