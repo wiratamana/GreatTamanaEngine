@@ -104,6 +104,12 @@ add_library(gte_core STATIC
     src/Math/Mat4.h
     src/Math/Quat.cpp
     src/Math/Quat.h
+    src/ECS/Entity.h
+    src/ECS/EntityManager.cpp
+    src/ECS/EntityManager.h
+    src/ECS/ComponentStorage.h
+    src/ECS/Registry.h
+    src/ECS/Components/Transform.h
     src/Application/Application.cpp
     src/Application/Application.h
     src/Application/EventTranslator.cpp

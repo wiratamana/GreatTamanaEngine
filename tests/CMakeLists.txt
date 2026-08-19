@@ -42,6 +42,21 @@
 #   - Math/QuatTests.cpp                   - Quat multiply/slerp/nlerp/
 #                                            axis-angle/matrix and Euler
 #                                            round-trip conversions.
+#   - ECS/EntityManagerTests.cpp            - EntityManager's Create()/
+#                                            Destroy()/IsAlive() handle
+#                                            allocation+recycling+generation
+#                                            semantics.
+#   - ECS/ComponentStorageTests.cpp          - ComponentStorage<T>'s
+#                                            sparse-set Add()/Remove()/Has()/
+#                                            Get() and swap-with-last
+#                                            removal, fed with hand-built
+#                                            Entity values.
+#   - ECS/RegistryTests.cpp                  - Registry gluing EntityManager
+#                                            + ComponentStorage<T> together:
+#                                            multi-component-type entities,
+#                                            DestroyEntity() clearing every
+#                                            pool, and Transform (the first
+#                                            real component).
 #
 # Note that the test BINARY still dynamically depends on SDL3.dll at process
 # load time regardless of the above (gte_core's Window.cpp references SDL
@@ -76,6 +91,9 @@ add_executable(GreatTamanaEngineTests
     Math/Vec3Tests.cpp
     Math/Mat4Tests.cpp
     Math/QuatTests.cpp
+    ECS/EntityManagerTests.cpp
+    ECS/ComponentStorageTests.cpp
+    ECS/RegistryTests.cpp
 )
 
 target_link_libraries(GreatTamanaEngineTests PRIVATE

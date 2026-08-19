@@ -123,6 +123,66 @@ whenever adding a real graphics pipeline or a new render target:
   than going through this assert unmodified - don't weaken or delete the
   assert to make a special case fit.
 
+## Entity-Component-System (ECS)
+
+The engine's Scene/World data model lives under `src/ECS/`: `Entity`
+(`src/ECS/Entity.h`), `EntityManager` (`src/ECS/EntityManager.h/.cpp`),
+`ComponentStorage<T>` (`src/ECS/ComponentStorage.h`), and `Registry`
+(`src/ECS/Registry.h`), which owns one of each. This was deliberately rolled
+by hand (not via a third-party library like EnTT) so the engine keeps
+ownership of its core gameplay data model, the same way its math library
+(`src/Math/`) was written from scratch rather than depending on GLM (see
+`MathTypes.h`). Follow these rules whenever touching entity/component
+lifetime code:
+
+- **Identify entities by handle, never by pointer or string.** `Entity` is a
+  cheap 8-byte POD (index + generation), generated automatically by
+  `EntityManager::Create()` - calling code never invents/assigns its own id.
+  This is the exact same shape and rationale as `GpuResourceHandle` (see
+  "GPU Resource Memory Tracking" above): cheap to copy/store/compare by the
+  thousands, and the `generation` field guards against a stale `Entity`
+  silently referring to a different entity that was later created in the
+  same (reused) slot - `EntityManager::Create()`/`Destroy()` use the exact
+  same slot + free-list + generation-bump pattern as
+  `GpuMemoryTracker::Track()`/`Untrack()`, on purpose, so there is only one
+  such pattern in the codebase to understand, not two subtly different ones.
+- **Components are plain data, never GPU/SDL-resource-owning types, and
+  never carry virtual behavior of their own.** `Transform`
+  (`src/ECS/Components/Transform.h`) is the pattern to copy: fields only,
+  plus at most small pure-math helper methods (`LocalToWorldMatrix()`). A
+  component that needs a live GPU resource (e.g. a future `MeshRenderer`)
+  must reference it by handle/value data (e.g. a mesh/material handle),
+  never by embedding a `Buffer`/`RenderTexture`/raw Vulkan handle directly -
+  the RAII-owning object stays behind `Renderer`, exactly as GPU resources
+  are already addressed by `GpuResourceHandle` rather than a raw pointer.
+- **`ComponentStorage<T>` is a sparse set, addressed by `Entity::index`
+  directly - never a hash lookup.** Adding/removing/querying a component is
+  O(1) array indexing (`m_sparse`/`m_dense`), and `Remove()` uses
+  swap-with-last to keep the dense array packed for cache-friendly
+  iteration - dense iteration order is therefore NOT stable across a
+  `Remove()` call, never rely on it. `Registry` picks each component type's
+  numeric id via a per-type function-local static counter
+  (`detail::ComponentTypeId<T>()`), not `std::type_index`/RTTI, so
+  `Registry::Storage<T>()`/`AddComponent<T>()`/etc. stay a plain array
+  lookup rather than a hash on every call - the same "no hashing on the hot
+  path" philosophy as `GpuMemoryTracker`'s handle-indexed slot array.
+- **`Registry::DestroyEntity()` must remove the entity from EVERY pool it
+  has ever touched, not just the ones a caller happens to think of.** This
+  is why `Registry` keeps a homogeneous `std::vector<std::unique_ptr<IComponentPool>>`
+  and calls `IComponentPool::Remove()` (the type-erased virtual, not the
+  typed `ComponentStorage<T>::Remove()`) on every pool before destroying the
+  entity itself - an entity is never left with a dangling/orphaned component
+  in some pool this forgot about. Any new component-holding structure added
+  later must go through this same `IComponentPool` path, not invent a
+  separate destroy-time cleanup step.
+- **A `Registry`/`EntityManager`/`ComponentStorage<T>` is Tier-1-testable by
+  construction, and must stay that way.** None of them touch a live
+  `VkDevice`/`VmaAllocator`/SDL window - see `tests/ECS/` (`EntityManagerTests.cpp`,
+  `ComponentStorageTests.cpp`, `RegistryTests.cpp`) for the pattern to copy
+  when adding a new component type or Registry method: hand-built `Entity`
+  values and plain component structs are enough, following the same
+  Tier-1-testability rule already established below.
+
 ## Testability & Regression Safety
 
 - **Design new logic to be Tier-1-testable whenever the underlying problem
