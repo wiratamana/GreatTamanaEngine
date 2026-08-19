@@ -64,10 +64,10 @@ off-screen `RenderTexture` instead of the swapchain — the primitive behind
 the Editor's Unity-style "Game"/"Scene" panels (a camera renders into a
 `RenderTexture`, which the Editor displays inside an `ImGui::Image()` panel).
 Vulkan itself is accessed exclusively through **volk** (a dynamic meta-loader,
-see Building below) — nothing in the engine links a classic Vulkan loader
+see `BUILDING.md`) — nothing in the engine links a classic Vulkan loader
 import lib or calls `vulkan.h` functions directly without going through it.
 GPU memory is allocated exclusively through **VMA** (Vulkan Memory
-Allocator, see Building below) via `VulkanAllocator`
+Allocator, see `BUILDING.md`) via `VulkanAllocator`
 (`src/Renderer/Vulkan/VulkanAllocator.h/.cpp`) — an RAII wrapper owning a
 single `VmaAllocator` that `Renderer` creates once alongside its
 instance/device and hands to every GPU resource type
@@ -111,99 +111,11 @@ an actual scene to inspect; currently only the "Game" panel exists.
 
 ## Building
 
-Windows only, for now.
-
-Prerequisites:
-
-- **CMake 3.19+**
-- **A C++20 toolchain CMake can generate for**, e.g. one of:
-  - Visual Studio 2017+ (with the "Desktop development with C++" workload)
-  - Ninja + MSVC/clang
-  - MinGW-w64 (g++) + mingw32-make or Ninja
-- `SDL3` is not vendored in this repo — CMake downloads the official prebuilt
-  SDL3 headers/DLL/import lib straight from the SDL GitHub releases
-  (https://github.com/libsdl-org/SDL) into `include/`, `SDL3.dll`, and
-  `lib/SDL3.lib` on first configure (see `cmake/FetchSDL3.cmake`). These are
-  gitignored — every clone fetches its own copy, so nothing SDL-related is
-  committed to the repo. Subsequent configures reuse what was already
-  downloaded and don't need the network again.
-- Vulkan is likewise not vendored, and **no Vulkan SDK installation is
-  required**. CMake fetches the official `Vulkan-Headers`
-  (https://github.com/KhronosGroup/Vulkan-Headers) into `include/vulkan` and
-  `include/vk_video`, plus `volk` (https://github.com/zeux/volk) — a tiny
-  meta-loader — into `third_party/volk` (see `cmake/FetchVulkan.cmake`).
-  volk resolves all Vulkan function pointers by dynamically loading
-  `vulkan-1.dll` at runtime, so there's nothing to link against or copy next
-  to the .exe: any machine with a Vulkan-capable GPU driver installed already
-  has `vulkan-1.dll` on its normal DLL search path. These are gitignored too,
-  same as SDL3.
-- The **Vulkan Memory Allocator (VMA)** header
-  (https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator) is
-  fetched the same way, into `third_party/vma/vk_mem_alloc.h` (see
-  `cmake/FetchVMA.cmake`), and gitignored like everything else above. Every
-  GPU allocation in the engine (`RenderTexture`/`Buffer`) goes through the
-  `vma` target via `VulkanAllocator` (`src/Renderer/Vulkan/VulkanAllocator.h/.cpp`)
-  — see Rendering above and Status below.
-- Dear ImGui (core + its SDL3/Vulkan backends) is fetched the same way, into
-  `third_party/imgui/` (see `cmake/FetchImGui.cmake`), but **only** when
-  `GTE_ENABLE_EDITOR` is `ON` (the default) — a build configured with
-  `-DGTE_ENABLE_EDITOR=OFF` never touches the network for this and never
-  compiles a single ImGui source file.
-
-```
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64
-cmake --build build --config Debug
-build\Debug\GreatTamanaEngine.exe
-```
-
-(swap the `-G` generator for whatever matches your installed toolchain, e.g.
-`-G Ninja` or `-G "MinGW Makefiles"`)
+See **[BUILDING.md](BUILDING.md)** for prerequisites and build instructions.
 
 ## Testing
 
-Every engine source file except `src/main.cpp` is compiled into a static
-library, `gte_core` (see `CMakeLists.txt`) - both the real executable
-(`GreatTamanaEngine`) and the unit test suite (`GreatTamanaEngineTests`,
-below) link against it, so tests always exercise the exact same compiled
-engine code the shipped `.exe` does.
-
-`GreatTamanaEngineTests` (`tests/`) is a [GoogleTest](https://github.com/google/googletest)
-suite, gated by the `GTE_BUILD_TESTS` CMake option (`ON` by default, same
-"zero-touch when off" philosophy as `GTE_ENABLE_EDITOR`). GoogleTest itself
-is not vendored either - it's fetched/built the same way as SDL3/Vulkan/VMA/
-ImGui (see `cmake/FetchGTest.cmake`), staged into `third_party/googletest/`
-and gitignored.
-
-```
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64
-cmake --build build --config Debug
-ctest --test-dir build -C Debug --output-on-failure
-```
-
-(or just run `build\Debug\GreatTamanaEngineTests.exe` directly)
-
-Every test currently in the suite is deliberately "Tier 1": pure logic, with
-no live Vulkan device, GPU, or SDL window/video subsystem required to run -
-safe on any machine/CI runner, GPU or not:
-
-- `Memory/GpuResourceHandleTests.cpp` / `Memory/GpuMemoryTrackerTests.cpp` -
-  `GpuResourceHandle` value semantics and `GpuMemoryTracker`'s Track()/
-  Untrack()/totals/snapshot bookkeeping, including generation-counted
-  handle-reuse safety and (Editor builds only) debug names.
-- `Input/InputStateTests.cpp` - `InputState`'s held/just-pressed/
-  just-released/delta semantics, fed with hand-built `gte::Event` values.
-- `Application/EventTranslatorTests.cpp` - the `SDL_Event` -> `gte::Event`
-  mapping, using hand-built `SDL_Event` values (no `SDL_Init()` needed).
-- `Renderer/VertexTests.cpp` - `Vertex`'s Vulkan binding/attribute
-  description metadata.
-
-Testing `Buffer`/`RenderTexture`/`Pipeline`/`GpuResourceFactory` properly
-needs a real `VkDevice`+`VmaAllocator` (and, as `VulkanDevice` is written
-today, a real `VkSurfaceKHR` to query present support) - a "Tier 2" of
-GPU-backed integration tests, most likely via a headless `VK_EXT_headless_surface`-based
-fixture that `GTEST_SKIP()`s cleanly on a GPU-less machine, is a documented
-follow-up (see the comment in `tests/CMakeLists.txt`) rather than
-implemented yet.
+See **[TESTING.md](TESTING.md)** for how to build and run the test suite.
 
 ## Status
 
