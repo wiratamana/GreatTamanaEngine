@@ -123,4 +123,46 @@ whenever adding a real graphics pipeline or a new render target:
   than going through this assert unmodified - don't weaken or delete the
   assert to make a special case fit.
 
+## Testability & Regression Safety
+
+- **Design new logic to be Tier-1-testable whenever the underlying problem
+  allows it.** Follow the split already established in `tests/CMakeLists.txt`:
+  "Tier 1" code is pure logic that operates on plain data/enums/structs and
+  needs no live `VkDevice`/`VmaAllocator`/`VkSurfaceKHR`/SDL window - see
+  `EventTranslator` (takes a plain `SDL_Event` struct), `InputState` (takes
+  plain `gte::Event` values), and `GpuMemoryTracker` (takes plain enums + a
+  byte count, never a real `VmaAllocation`) for the pattern to copy. Before
+  wiring new logic directly into a GPU/SDL-owning class, ask whether it can
+  instead be extracted as a small pure function/class that takes
+  already-resolved plain values - if it can, do that, then add its test under
+  `tests/<Layer>/` (mirroring the folder it lives in under `src/`), not "if
+  there's time".
+- **Every change to Tier 1 code must come with a matching test change.**
+  Adding a new branch/case to `EventTranslator`, `InputState`,
+  `GpuMemoryTracker`, `GpuResourceHandle`, `Vertex`, or any future Tier 1
+  module must add or update the corresponding file in `tests/` in the same
+  change - never leave a new code path with zero coverage in a module that
+  already has a test file. Fixing a bug in one of these files must add a
+  regression test that fails before the fix and passes after it, not just a
+  code change.
+- **Run the actual test suite before considering any change to `gte_core`
+  done - a successful build is not enough.** Build `GreatTamanaEngineTests`
+  and run it (e.g. `ctest` from the build directory, or the built `.exe`
+  directly) after any change under `src/` - a change can compile cleanly
+  while still silently breaking `InputState`'s held/pressed/released
+  semantics, `EventTranslator`'s mappings, or `GpuMemoryTracker`'s
+  bookkeeping. Treat any newly-failing test as a real regression to fix, not
+  something to work around by loosening the test's expectation without
+  understanding why it failed.
+- **GPU-dependent ("Tier 2") code - `Buffer`, `RenderTexture`, `Pipeline`,
+  `GpuResourceFactory`, `FramePresenter`, `FrameRecorder`, everything under
+  `Renderer/Vulkan/` - has no automated test coverage yet** (see the "Tier 2"
+  note in `tests/CMakeLists.txt`). Until the documented headless-surface
+  `GpuTestFixture` follow-up exists, changes here still need to actually be
+  built and run against a real GPU/window before being considered safe -
+  "it compiles" is not sufficient verification for this code. Prefer
+  contributing to that fixture (or extracting more logic out of these
+  classes into Tier-1-testable pure functions, per the point above) over
+  letting this gap grow indefinitely.
+
 This document will be extended as more conventions are established.
