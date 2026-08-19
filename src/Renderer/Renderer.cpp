@@ -127,9 +127,9 @@ void Renderer::BeginFrame()
     m_frameRecorder.BeginFrame();
 }
 
-void Renderer::Submit(const Pipeline& pipeline, const Mesh& mesh)
+void Renderer::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix)
 {
-    m_frameRecorder.Submit(pipeline, mesh);
+    m_frameRecorder.Submit(pipeline, mesh, modelMatrix);
 }
 
 Pipeline Renderer::CreatePipeline(

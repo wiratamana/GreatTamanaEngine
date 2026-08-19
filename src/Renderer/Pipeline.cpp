@@ -131,10 +131,19 @@ Pipeline::Pipeline(VkDevice device, VkFormat colorFormat, const std::string& ver
         dynamicState.dynamicStateCount = static_cast<std::uint32_t>(std::size(dynamicStates));
         dynamicState.pDynamicStates = dynamicStates;
 
-        // No descriptor sets/push constants yet - see the class comment in
-        // Pipeline.h.
+        // One push constant range: a single mat4 "model" matrix, vertex
+        // stage only - see the class comment in Pipeline.h and
+        // Shaders/Triangle.vert's matching `layout(push_constant)` block.
+        // Still no descriptor sets.
+        VkPushConstantRange pushConstantRange{};
+        pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        pushConstantRange.offset = 0;
+        pushConstantRange.size = sizeof(float) * 16; // one Mat4 (Math/Mat4.h) - column-major, matches GLSL mat4 layout.
+
         VkPipelineLayoutCreateInfo layoutInfo{};
         layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        layoutInfo.pushConstantRangeCount = 1;
+        layoutInfo.pPushConstantRanges = &pushConstantRange;
 
         if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &m_layout) != VK_SUCCESS) {
             throw std::runtime_error("Pipeline: vkCreatePipelineLayout failed.");
