@@ -31,6 +31,17 @@
 #                                            construct or translate one).
 #   - Renderer/VertexTests.cpp             - Vertex's Vulkan binding/
 #                                            attribute description metadata.
+#   - Math/Vec2Tests.cpp, Vec3Tests.cpp    - Vec2/Vec3 arithmetic and
+#                                            geometric ops (dot/cross/
+#                                            length/normalize/lerp), using
+#                                            exact hand-computed values.
+#   - Math/Mat4Tests.cpp                   - Mat4 multiply/transpose/
+#                                            inverse/LookAtLH/
+#                                            PerspectiveFovLH_ZO, using
+#                                            hand-verified exact values.
+#   - Math/QuatTests.cpp                   - Quat multiply/slerp/nlerp/
+#                                            axis-angle/matrix and Euler
+#                                            round-trip conversions.
 #
 # Note that the test BINARY still dynamically depends on SDL3.dll at process
 # load time regardless of the above (gte_core's Window.cpp references SDL
@@ -61,6 +72,10 @@ add_executable(GreatTamanaEngineTests
     Input/InputStateTests.cpp
     Application/EventTranslatorTests.cpp
     Renderer/VertexTests.cpp
+    Math/Vec2Tests.cpp
+    Math/Vec3Tests.cpp
+    Math/Mat4Tests.cpp
+    Math/QuatTests.cpp
 )
 
 target_link_libraries(GreatTamanaEngineTests PRIVATE

@@ -96,6 +96,14 @@ endif()
 # apart (e.g. differing compile flags) the way a naively-duplicated file
 # list could.
 add_library(gte_core STATIC
+    src/Math/MathTypes.h
+    src/Math/Vec2.h
+    src/Math/Vec3.h
+    src/Math/Vec4.h
+    src/Math/Mat4.cpp
+    src/Math/Mat4.h
+    src/Math/Quat.cpp
+    src/Math/Quat.h
     src/Application/Application.cpp
     src/Application/Application.h
     src/Application/EventTranslator.cpp

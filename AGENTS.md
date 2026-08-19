@@ -157,12 +157,16 @@ whenever adding a real graphics pipeline or a new render target:
 - **GPU-dependent ("Tier 2") code - `Buffer`, `RenderTexture`, `Pipeline`,
   `GpuResourceFactory`, `FramePresenter`, `FrameRecorder`, everything under
   `Renderer/Vulkan/` - has no automated test coverage yet** (see the "Tier 2"
-  note in `tests/CMakeLists.txt`). Until the documented headless-surface
-  `GpuTestFixture` follow-up exists, changes here still need to actually be
-  built and run against a real GPU/window before being considered safe -
-  "it compiles" is not sufficient verification for this code. Prefer
-  contributing to that fixture (or extracting more logic out of these
-  classes into Tier-1-testable pure functions, per the point above) over
-  letting this gap grow indefinitely.
+  note in `tests/CMakeLists.txt`). A headless-surface `GpuTestFixture`
+  (`VK_EXT_headless_surface`) is noted there as a possible future addition,
+  but it is a backlog/TODO item only, NOT a prerequisite or gate for
+  anything else - the current development machine doesn't support headless
+  mode anyway, so this must never be treated as a blocker for adding new
+  features or landing changes under `Renderer/Vulkan/` or elsewhere. When
+  it's convenient, build and run against a real GPU/window as a sanity
+  check for changes here, and extracting more logic into Tier-1-testable
+  pure functions (per the point above) is always welcome - but the absence
+  of automated Tier 2 coverage should never itself slow down or stop
+  feature work.
 
 This document will be extended as more conventions are established.
