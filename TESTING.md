@@ -35,6 +35,28 @@ safe on any machine/CI runner, GPU or not:
   mapping, using hand-built `SDL_Event` values (no `SDL_Init()` needed).
 - `Renderer/VertexTests.cpp` - `Vertex`'s Vulkan binding/attribute
   description metadata.
+- `Renderer/ResourcePoolTests.cpp` - the generic `ResourcePool<T, HandleT>`
+  slot-map's insert/remove/lookup and generation-guard semantics (backing
+  `MeshHandle`/`PipelineHandle` - see `README.md`, "Entity-Component-System").
+- `Math/Vec2Tests.cpp` / `Math/Vec3Tests.cpp` - `Vec2`/`Vec3` arithmetic and
+  geometric ops (dot/cross/length/normalize/lerp), using exact hand-computed
+  values.
+- `Math/Mat4Tests.cpp` - `Mat4` multiply/transpose/inverse/`LookAtLH`/
+  `PerspectiveFovLH_ZO`, using hand-verified exact values.
+- `Math/QuatTests.cpp` - `Quat` multiply/slerp/nlerp/axis-angle/matrix and
+  Euler round-trip conversions.
+- `ECS/EntityManagerTests.cpp` - `EntityManager`'s Create()/Destroy()/
+  IsAlive() handle allocation/recycling/generation semantics.
+- `ECS/ComponentStorageTests.cpp` - `ComponentStorage<T>`'s sparse-set
+  Add()/Remove()/Has()/Get() and swap-with-last removal, fed with
+  hand-built `Entity` values.
+- `ECS/RegistryTests.cpp` - `Registry` gluing `EntityManager` +
+  `ComponentStorage<T>` together: multi-component-type entities,
+  DestroyEntity() clearing every pool, and `Transform`.
+- `Game/RenderSystemTests.cpp` - `RenderSystem::CollectRenderables()`, the
+  pure ECS -> `DrawCommand` step (every entity with a `MeshRenderer` becomes
+  one draw command, using its `Transform`'s world matrix if present) - needs
+  nothing but a `Registry`, no live Renderer/GPU device at all.
 
 Testing `Buffer`/`RenderTexture`/`Pipeline`/`GpuResourceFactory` properly
 needs a real `VkDevice`+`VmaAllocator` (and, as `VulkanDevice` is written

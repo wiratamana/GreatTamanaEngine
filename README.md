@@ -52,6 +52,15 @@ SDL_Event -> EventTranslator -> gte::Event -> InputState.Apply() + Game::OnEvent
   discrete/one-shot reactions (window resized, a key just pressed, quit) —
   as opposed to the continuous polling done via `InputState` in `Update()`.
 
+### Math
+
+`src/Math/` (`Vec2`/`Vec3`/`Vec4`/`Mat4`/`Quat`) is a from-scratch math
+library — no GLM dependency, the same "own the core data model" philosophy
+as the hand-rolled ECS below. `Mat4` is column-major/column-vector (matches
+GLSL's `mat4` layout exactly, so `Mat4::Data()` uploads to a push
+constant/uniform with zero transpose) and the engine's coordinate system is
+left-handed, Y-up, Z-forward.
+
 ### Rendering
 
 `Renderer` (`src/Renderer/Renderer.h/.cpp`) owns a real Vulkan pipeline built
@@ -85,7 +94,50 @@ uploading through a temporary staging `Buffer` and copying it in via
 `Renderer::ImmediateSubmit()` — a general one-time-submit-and-wait command
 buffer helper, also reusable for future one-off GPU work (e.g. image layout
 transitions, mipmap generation) outside the per-frame `Present()`/
-`RenderOffscreen()` recording.
+`RenderOffscreen()` recording. `Mesh`/`Pipeline` themselves are still
+returned by value from `Renderer::CreateMesh()`/`CreatePipeline()`
+unchanged — `Renderer` has zero knowledge that an ECS exists; see
+"Entity-Component-System" below for how something else (`RenderSystem`)
+owns/addresses them by handle. `Pipeline` also now carries one push
+constant range (a single `mat4 model`, vertex stage), and
+`Renderer::Submit()`/`FrameRecorder::Submit()` take an optional model
+matrix (`Mat4::Identity()` by default) recorded via `vkCmdPushConstants`
+right before each draw — see `Shaders/Triangle.vert`'s matching
+`layout(push_constant)` block.
+
+### Entity-Component-System (ECS)
+
+The engine's Scene/World data model lives under `src/ECS/`: `Entity`
+(cheap, generational index+id, never a pointer/string), `EntityManager`
+(id allocation/recycling), `ComponentStorage<T>` (a sparse-set pool per
+component type), and `Registry` (owns one of each). Rolled by hand rather
+than via a third-party library (EnTT), the same "own the core data model"
+choice as `src/Math/` not depending on GLM. `Transform`
+(`ECS/Components/Transform.h`) and `MeshRenderer`
+(`ECS/Components/MeshRenderer.h`) are the two components that exist today —
+both plain data, no behavior, no GPU/SDL ownership of their own.
+`MeshRenderer` references a mesh/pipeline purely by handle
+(`MeshHandle`/`PipelineHandle`, `src/Renderer/MeshHandle.h`/
+`PipelineHandle.h`) — the exact same cheap, generational, index+generation
+shape as `Entity` and `GpuResourceHandle`, minted by a generic
+`ResourcePool<T, HandleT>` (`src/Renderer/ResourcePool.h`) rather than ever
+embedding a live `Mesh`/`Pipeline` in a component.
+
+`RenderSystem` (`src/Game/RenderSystem.h/.cpp`) is the one piece of the
+engine allowed to depend on both the ECS world and `Renderer` — the same
+"only one layer crosses this boundary" rule this engine already applies to
+SDL (only `Application` touches it directly). `Renderer` itself never
+depends on ECS in any way: `Submit()` takes a plain `Mat4`, never an
+`Entity`/`Registry`. `RenderSystem::CollectRenderables()` is a pure
+function (every entity with a `MeshRenderer` becomes one `DrawCommand`,
+using its `Transform`'s world matrix if present) that needs nothing but a
+`Registry` — no live Renderer/GPU device — so it's unit-tested exactly like
+the rest of ECS (see `TESTING.md`). `RenderSystem::Draw()` is the one
+non-pure step that resolves those handles against its own
+`ResourcePool<Mesh, MeshHandle>`/`ResourcePool<Pipeline, PipelineHandle>`
+and calls `Renderer::Submit()`. `Game` no longer holds a hardcoded
+`Pipeline`/`Mesh` pair at all — it owns a `Registry` + `RenderSystem` and
+just creates entities/components.
 
 ### Editor / Debug UI
 
@@ -136,7 +188,7 @@ pieces:
 - GPU memory allocation goes through **VMA** (Vulkan Memory Allocator) via
   the `VulkanAllocator` RAII wrapper (`src/Renderer/Vulkan/`) — `Renderer`
   owns a single `VmaAllocator`. `RenderTexture` creates its `VkImage` through
-  `vmaCreateImage`/`vmaDestroyImage`, and the new `Buffer`
+  `vmaCreateImage`/`vmaDestroyImage`, and `Buffer`
   (`src/Renderer/Buffer.h/.cpp`) creates `VkBuffer`s through
   `vmaCreateBuffer`/`vmaDestroyBuffer` — both replacing what used to be a
   manual `FindMemoryType()` + `vkAllocateMemory`/`vkBindMemory`/`vkFreeMemory`
@@ -147,3 +199,29 @@ pieces:
   runtime smoke test (mapped-buffer round-trip + a full staging-buffer ->
   device-local-buffer copy) actually executing against a live Vulkan device,
   and building cleanly with both `GTE_ENABLE_EDITOR` `ON` and `OFF`.
+- A from-scratch **Math library** (`src/Math/`: `Vec2`/`Vec3`/`Vec4`/`Mat4`/
+  `Quat`) backs everything above and below — no GLM dependency. Fully
+  unit-tested (multiply/transpose/inverse/`LookAtLH`/`PerspectiveFovLH_ZO`,
+  `Quat` slerp/nlerp/axis-angle/Euler round-trips) against hand-verified
+  exact values.
+- A hand-rolled **Entity-Component-System** (`src/ECS/`: `Entity`/
+  `EntityManager`/`ComponentStorage<T>`/`Registry`) is the engine's Scene/
+  World data model — no third-party ECS library (EnTT), same "own the core
+  data model" choice as Math. `Transform` and `MeshRenderer` are the two
+  components that exist today. Fully unit-tested, including
+  generation-guarded stale-handle safety.
+- The ECS is wired all the way into actual rendering, not just present as
+  inert data: `RenderSystem` (`src/Game/RenderSystem.h/.cpp`) is the one
+  class allowed to depend on both the ECS world and `Renderer` — `Renderer`
+  itself gained zero ECS awareness in the process. A generic
+  `ResourcePool<T, HandleT>` (`src/Renderer/ResourcePool.h`) mints
+  generational `MeshHandle`/`PipelineHandle` values a `MeshRenderer`
+  component can safely hold instead of ever embedding a live GPU resource.
+  `Pipeline` carries a push-constant `mat4 model`, threaded through
+  `Renderer::Submit()`/`FrameRecorder` down to `vkCmdPushConstants`, so each
+  entity's `Transform` genuinely drives where it's drawn. `Game` builds a
+  small demo scene (three entities sharing one mesh/pipeline, positioned via
+  `Transform` alone) proving the whole ECS -> `RenderSystem` -> `Renderer`
+  pipeline end to end — verified both by the test suite
+  (`RenderSystem::CollectRenderables()`'s pure ECS -> draw-command logic)
+  and visually (three independently-positioned triangles on screen).
