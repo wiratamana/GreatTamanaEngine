@@ -30,11 +30,25 @@ namespace {
 //     already uses (see Renderer::GetVulkanContextInfo())
 //   - a RenderTexture ("the Game view") that Game's camera renders into
 //     each frame instead of the swapchain - see GameViewTarget() - kept in
-//     sync with the OS window's size via OnWindowResized()
+//     sync with the "Game" ImGui panel's own content-region size (Unity's
+//     "Free Aspect" behavior), NOT the OS window's size: resizing the
+//     floating/docked Game panel resizes the render target to match
+//     exactly, so the whole scene is always visible, however the panel is
+//     resized or shaped. Size tracking works like this:
+//       - BuildUI() reads the panel's current ImGui::GetContentRegionAvail()
+//         every frame and stores it as m_desiredExtent.
+//       - GameViewTarget() (called earlier next frame, before Game::Render())
+//         compares m_desiredExtent against the texture's actual current
+//         extent and resizes it first if they differ - never mid-frame
+//         after this frame's ImGui::Image() call has already been recorded
+//         (see GameViewTarget() for why that would be unsafe).
+//     This introduces at most one frame of lag between a resize and the
+//     texture catching up, imperceptible in practice.
 class ImGuiEditorLayer final : public IEditorLayer {
 public:
     ImGuiEditorLayer(Window& window, Renderer& renderer)
         : m_gameView(renderer.CreateRenderTexture(window.Width(), window.Height()))
+        , m_desiredExtent{ static_cast<std::uint32_t>(window.Width()), static_cast<std::uint32_t>(window.Height()) }
     {
         const Renderer::VulkanContextInfo context = renderer.GetVulkanContextInfo();
         m_device = context.device;
@@ -99,36 +113,15 @@ public:
         ImGui_ImplSDL3_ProcessEvent(&event);
     }
 
-    void OnWindowResized(int width, int height) override
+    void OnWindowResized(int /*width*/, int /*height*/) override
     {
-        if (width <= 0 || height <= 0) {
-            // Minimized (or otherwise zero-sized) - nothing sensible to
-            // resize to yet. Keep displaying the last valid texture; the
-            // next real resize will catch up.
-            return;
-        }
-
-        const VkExtent2D current = m_gameView.Extent();
-        if (current.width == static_cast<std::uint32_t>(width) &&
-            current.height == static_cast<std::uint32_t>(height)) {
-            return; // Already the right size - nothing to do.
-        }
-
-        // The old VkImage/VkImageView are about to be destroyed by
-        // Resize() - make sure nothing GPU-side (a previous frame's
-        // swapchain draw still sampling this texture via ImGui, or an
-        // off-screen render still in flight) is still touching them
-        // first. Resizes are rare/user-driven (a window drag), so a full
-        // device stall here is the simplest correct thing - not a
-        // per-frame cost.
-        if (m_device != VK_NULL_HANDLE) {
-            vkDeviceWaitIdle(m_device);
-        }
-
-        ReleaseGameViewDescriptor();
-        m_gameView.Resize(width, height);
-        // A new ImGui descriptor for the resized texture is (re)created
-        // lazily in BuildUI() the next time it's needed.
+        // The Game-view RenderTexture no longer tracks the OS window's size
+        // at all - it tracks the "Game" ImGui panel's own content-region
+        // size instead (see the class comment and GameViewTarget() below),
+        // so an OS window resize by itself is not a reason to resize it.
+        // Kept as a no-op (rather than removed) purely to satisfy
+        // IEditorLayer's interface - NullEditorLayer's version already does
+        // the same.
     }
 
     void NewFrame() override
@@ -141,6 +134,30 @@ public:
 
     RenderTexture* GameViewTarget() override
     {
+        // Apply whatever panel size BuildUI() captured LAST frame, before
+        // Game renders this frame - never mid/after-frame, since that could
+        // destroy the VkImage/VkImageView an already-recorded ImGui::Image()
+        // draw call (from this same frame) still references. Doing it here,
+        // right before Application calls Renderer::RenderOffscreen(), is the
+        // earliest point in the frame where it's both needed (Game is about
+        // to render into this) and safe (last frame's ImGui draw data was
+        // already submitted/executed before this frame started).
+        if (m_desiredExtent.width > 0 && m_desiredExtent.height > 0) {
+            const VkExtent2D current = m_gameView.Extent();
+            if (current.width != m_desiredExtent.width || current.height != m_desiredExtent.height) {
+                // Resizes are rare/user-driven (dragging the panel's
+                // border), so a full device stall here is the simplest
+                // correct thing - not a per-frame cost. Same reasoning
+                // OnWindowResized used to apply for OS window resizes.
+                if (m_device != VK_NULL_HANDLE) {
+                    vkDeviceWaitIdle(m_device);
+                }
+                ReleaseGameViewDescriptor();
+                m_gameView.Resize(static_cast<int>(m_desiredExtent.width), static_cast<int>(m_desiredExtent.height));
+                // A new ImGui descriptor for the resized texture is
+                // (re)created lazily in BuildUI() the next time it's needed.
+            }
+        }
         return &m_gameView;
     }
 
@@ -149,18 +166,36 @@ public:
         ImGui::SetCurrentContext(m_context);
 
         // Lazily (re)create the ImGui-side descriptor for the Game view
-        // texture - needed on first use, and again after OnWindowResized()
+        // texture - needed on first use, and again after GameViewTarget()
         // invalidated the previous one.
         if (m_gameViewDescriptor == VK_NULL_HANDLE) {
             m_gameViewDescriptor = ImGui_ImplVulkan_AddTexture(
                 m_gameView.Sampler(), m_gameView.View(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }
 
-        ImGui::Begin("Game");
-        const VkExtent2D extent = m_gameView.Extent();
+        // No scrollbars: the image is always drawn at exactly the panel's
+        // available content size (see below), so it never overflows the
+        // panel and a scrollbar would only ever be visual noise.
+        ImGui::Begin("Game", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+
+        // The panel's current content-region size, in pixels - this is what
+        // the Game-view RenderTexture should become. Stored for
+        // GameViewTarget() to apply at the very start of next frame (see
+        // its comment for why it can't safely happen mid-frame here).
+        const ImVec2 avail = ImGui::GetContentRegionAvail();
+        if (avail.x >= 1.0f && avail.y >= 1.0f) {
+            m_desiredExtent.width = static_cast<std::uint32_t>(avail.x);
+            m_desiredExtent.height = static_cast<std::uint32_t>(avail.y);
+        }
+
+        // Always draw at exactly the panel's available size (never the
+        // texture's own, possibly one-frame-stale, extent) - this is what
+        // makes it behave like Unity's "Free Aspect" Game view: the image
+        // fills the panel exactly, whatever size/aspect it's resized to,
+        // with no leftover space and nothing overflowing it.
         ImGui::Image(
             static_cast<ImTextureID>(reinterpret_cast<intptr_t>(m_gameViewDescriptor)),
-            ImVec2(static_cast<float>(extent.width), static_cast<float>(extent.height)));
+            avail);
         ImGui::End();
     }
 
@@ -183,6 +218,12 @@ private:
     VkDevice m_device = VK_NULL_HANDLE;
     ImGuiContext* m_context = nullptr;
     RenderTexture m_gameView;
+    // Size (in pixels) the "Game" panel's content region actually was as of
+    // last frame's BuildUI() - what GameViewTarget() resizes m_gameView to
+    // at the start of the next frame. Initialized to the OS window's
+    // startup size so the very first frame (before BuildUI() has ever run)
+    // doesn't see a spurious mismatch against m_gameView's own initial size.
+    VkExtent2D m_desiredExtent{};
     VkDescriptorSet m_gameViewDescriptor = VK_NULL_HANDLE;
 };
 

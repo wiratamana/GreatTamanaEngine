@@ -51,11 +51,12 @@ public:
 
     // Called when the OS window is resized (Application forwards this
     // straight from the same WindowResized event Renderer::OnResize()
-    // reacts to). The real implementation resizes its Game-view
-    // RenderTexture to match, so the Editor's "Game" panel keeps tracking
-    // the window's size - Null impl no-ops. Safe to call mid-frame (before
-    // this frame's rendering happens), never while a previous frame's GPU
-    // work might still be reading the old texture.
+    // reacts to). The real implementation no-ops: the Game-view
+    // RenderTexture tracks the "Game" panel's own content-region size
+    // instead of the OS window's size (Unity-style "Free Aspect" - see
+    // GameViewTarget()/BuildUI() in ImGuiEditorLayer), so an OS window
+    // resize by itself is not a reason to resize it. Kept in the interface
+    // only in case a future implementation needs it - Null impl no-ops too.
     virtual void OnWindowResized(int width, int height) = 0;
 
     // Starts a new UI frame. Call once per frame, before Game's
@@ -65,7 +66,11 @@ public:
     // The render target Game's gameplay camera should draw into THIS
     // frame: a RenderTexture the editor wants to display inside a "Game"
     // panel, or nullptr meaning "render straight to the swapchain,
-    // fullscreen" (what the Null implementation always returns).
+    // fullscreen" (what the Null implementation always returns). The real
+    // implementation also resizes this texture here (if the "Game" panel's
+    // content-region size changed since last frame's BuildUI()) before
+    // returning it - the last safe/needed point to do so, since Game is
+    // about to render into it. See ImGuiEditorLayer's class comment.
     virtual RenderTexture* GameViewTarget() = 0;
 
     // Builds every editor panel for this frame (currently just "Game";
