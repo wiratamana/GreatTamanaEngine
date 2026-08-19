@@ -1,4 +1,4 @@
-﻿# AGENTS.md
+# AGENTS.md
 
 Instructions for LLM/AI agents working on this codebase.
 
@@ -245,5 +245,37 @@ lifetime code:
   pure functions (per the point above) is always welcome - but the absence
   of automated Tier 2 coverage should never itself slow down or stop
   feature work.
+
+## Git Workflow
+
+- **Never commit directly to `dev`, `main`, or any `release/*` branch - this
+  is an IRON RULE, no exceptions.** Every change lands on its own dedicated
+  branch first: `fix/{short-description}` for a bug fix, or
+  `feature/{short-description}` for a new feature/enhancement (a docs-only or
+  process/governance change - like this very section - counts as a
+  `feature/` too). Do the task's actual work (edits, builds, tests) on that
+  branch, and commit only once, at the end, when the task is complete and
+  verified (matches "Testability & Regression Safety" above) - never commit
+  mid-task, and never commit directly on `dev`/`main`/`release/*` under any
+  circumstance.
+- **Before touching a single file for a new task, check the current branch
+  and working tree state first** (`git status`/`git branch`):
+  - If already on `dev`/`main`/`release/*` with a CLEAN working tree,
+    immediately create and switch to a fresh `fix/{name}` or `feature/{name}`
+    branch (`git switch -c ...`) before making any edit - do this
+    automatically as part of starting the task, no need to ask first.
+  - If the current branch is NOT `dev` (or whatever the task's expected base
+    branch is) AND the working tree already has uncommitted changes sitting
+    there from unrelated prior work, FAIL IMMEDIATELY - do not switch
+    branches, do not commit anything, do not proceed with the new task's
+    edits at all. Prompt the user to commit (or stash/discard) those pending
+    changes first instead - silently carrying unrelated uncommitted work
+    onto a new branch would mix two unrelated changes together.
+- **"push to dev"**, said by the user, is a specific, distinct instruction
+  with an exact meaning: merge the current working branch into `dev`, push
+  `dev` to the remote, then switch back to `dev` locally afterwards -
+  resetting to a clean base-branch state so the next task starts fresh. This
+  merge-then-push-then-reset sequence is the ONLY sanctioned way a change
+  ever actually reaches `dev`.
 
 This document will be extended as more conventions are established.
