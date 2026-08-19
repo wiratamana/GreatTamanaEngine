@@ -8,6 +8,20 @@
 
 namespace gte {
 
+namespace {
+
+// Aspect ratio (width / height) of a render target, for
+// RenderSystem::Draw()/Game::Render() - see Application::Run() below. Falls
+// back to a square (1.0f) for a degenerate/zero-height extent (e.g. a
+// render target caught mid-resize, or a minimized window) rather than
+// dividing by zero.
+float AspectRatioOf(int width, int height) noexcept
+{
+    return height > 0 ? static_cast<float>(width) / static_cast<float>(height) : 1.0f;
+}
+
+} // namespace
+
 Application::SdlContext::SdlContext()
 {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
@@ -26,6 +40,8 @@ Application::Application(const std::string& title, int width, int height)
     , m_renderer(m_window)
     , m_editorLayer(CreateEditorLayer(m_window, m_renderer))
     , m_game()
+    , m_windowWidth(width)
+    , m_windowHeight(height)
 {
 }
 
@@ -59,6 +75,8 @@ int Application::Run()
                 running = false;
             } else if (event->type == EventType::WindowResized) {
                 const auto& resized = std::get<WindowResizedEventData>(event->data);
+                m_windowWidth = resized.width;
+                m_windowHeight = resized.height;
                 m_renderer.OnResize(resized.width, resized.height);
                 // Keeps the Editor's Game-view RenderTexture tracking the
                 // window's size (no-op in a release build) - see
@@ -106,23 +124,53 @@ int Application::Run()
         m_renderer.BeginFrame();
 
         m_game.Update(deltaSeconds, inputState);
-        // Game only clears/draws here - it never decides *where* that ends
-        // up (swapchain vs. an off-screen texture); see below.
-        m_game.Render(m_renderer);
 
-        // Ask the Editor where Game's frame should actually land: an
-        // off-screen RenderTexture it wants to display in a "Game" panel
-        // (Editor build), or nullptr meaning "the swapchain, fullscreen"
-        // (release build - see NullEditorLayer). This is the one seam that
-        // decides Unity-style Editor-vs-final-build rendering, and it lives
-        // here in Application (the composition root), not in Game.
-        if (RenderTexture* gameTarget = m_editorLayer->GameViewTarget()) {
+        // Ask the Editor where Game's frame(s) should actually land this
+        // frame: an off-screen RenderTexture per visible panel ("Game"
+        // and/or "Scene", each independently - an Editor build), or nullptr
+        // for either/both meaning "not currently visible, don't bother" (a
+        // hidden/inactive dock tab) or "no Editor at all" (a release build -
+        // see NullEditorLayer). This is the one seam that decides
+        // Unity-style Editor-vs-final-build rendering, and it lives here in
+        // Application (the composition root), not in Game.
+        //
+        // Game::Render() (clear + queue this frame's draws, see Game.h) is
+        // called once per VISIBLE target, immediately followed by the
+        // RenderOffscreen() call that consumes/clears that queue into it -
+        // see FrameRecorder.h for why a target must consume the queue
+        // before the next Render() call re-queues it for a different
+        // target/aspect ratio. If "Scene" and "Game" are tabbed together,
+        // only one of these two runs (at zero extra GPU cost for the
+        // hidden one); split apart, both run, each into its own
+        // RenderTexture/aspect ratio.
+        RenderTexture* gameTarget = m_editorLayer->GameViewTarget();
+        RenderTexture* sceneTarget = m_editorLayer->SceneViewTarget();
+
+        if (gameTarget != nullptr) {
+            const VkExtent2D extent = gameTarget->Extent();
+            m_game.Render(m_renderer, AspectRatioOf(static_cast<int>(extent.width), static_cast<int>(extent.height)));
             m_renderer.RenderOffscreen(*gameTarget);
         }
+        if (sceneTarget != nullptr) {
+            const VkExtent2D extent = sceneTarget->Extent();
+            m_game.Render(m_renderer, AspectRatioOf(static_cast<int>(extent.width), static_cast<int>(extent.height)));
+            m_renderer.RenderOffscreen(*sceneTarget);
+        }
+        if (gameTarget == nullptr && sceneTarget == nullptr) {
+            // No Editor at all (release build - always takes this path), or
+            // an Editor build where both "Game" and "Scene" happen to be
+            // hidden simultaneously (a rare edge case - see
+            // EditorContext::gameViewVisible/sceneViewVisible) - render
+            // straight to the swapchain instead, at the OS window's own
+            // aspect ratio, exactly like a release build always did before
+            // "Scene" got its own RenderTexture.
+            m_game.Render(m_renderer, AspectRatioOf(m_windowWidth, m_windowHeight));
+        }
+
         // Build every editor panel (Hierarchy/Inspector/Scene/Game/menu
-        // bar) now that the Game view texture (if any) has this frame's
-        // contents. Passes Game's ECS world so Hierarchy/Inspector can
-        // list/edit it - see Game::GetRegistry().
+        // bar) now that the Game/Scene view textures (if any) have this
+        // frame's contents. Passes Game's ECS world so Hierarchy/Inspector
+        // can list/edit it - see Game::GetRegistry().
         m_editorLayer->BuildUI(m_game.GetRegistry());
 
         // File > Exit (or any other future programmatic "close" UI action)
@@ -132,8 +180,8 @@ int Application::Run()
         }
 
         // Present the swapchain. In an Editor build this draws the editor's
-        // own ImGui chrome (which itself displays the Game view above) via
-        // the recordExtra hook; in a release build recordExtra is
+        // own ImGui chrome (which itself displays the Game/Scene views
+        // above) via the recordExtra hook; in a release build recordExtra is
         // effectively a no-op (NullEditorLayer::Render does nothing) and
         // this just presents whatever Game rendered straight into the
         // swapchain moments ago.

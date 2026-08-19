@@ -30,12 +30,18 @@ public:
     void Update(double deltaSeconds, const InputState& input);
 
     // Sets the clear color and, via RenderSystem::Draw(), queues this
-    // frame's draw calls for every entity that has a MeshRenderer. Does NOT
-    // call Renderer::Present()/RenderOffscreen() itself - *where* this frame
-    // ends up (the swapchain, fullscreen, or an Editor's off-screen "Game
-    // view" RenderTexture) is decided by Application (the composition
-    // root), not by Game. See Application::Run().
-    void Render(Renderer& renderer);
+    // frame's draw calls for every entity that has a MeshRenderer, viewed
+    // through whichever entity has an active Camera component (see
+    // ECS/Components/Camera.h) - `aspectWidthOverHeight` is the aspect
+    // ratio of whichever render target this call's draws will land in (a
+    // Game view and a Scene view, each with their own RenderTexture/aspect,
+    // can each call this once per frame - see RenderSystem::Draw()). Does
+    // NOT call Renderer::Present()/RenderOffscreen() itself - *where* this
+    // frame ends up (the swapchain, fullscreen, or one of the Editor's
+    // off-screen "Game view"/"Scene view" RenderTextures) is decided by
+    // Application (the composition root), not by Game. See
+    // Application::Run().
+    void Render(Renderer& renderer, float aspectWidthOverHeight);
 
     // Read-only-in-spirit access to the ECS World for the Editor's
     // Hierarchy/Inspector panels (src/Editor/ImGuiEditorLayer.cpp) to
@@ -48,13 +54,15 @@ public:
 
 private:
     // Lazily builds the demo scene - three entities sharing one triangle
-    // Mesh/Pipeline, spaced left/center/right purely via Transform - on the
-    // first Render() call (needs a Renderer to build GPU resources
-    // through). Proves the ECS -> RenderSystem -> Renderer pipeline end to
-    // end: multiple entities, one shared mesh/pipeline, independently
-    // positioned via push-constant model matrices. Will be replaced by a
-    // real scene/asset-loading system once there's more than a hardcoded
-    // demo scene.
+    // Mesh/Pipeline, spaced left/center/right purely via Transform, plus one
+    // Camera entity positioned back along -Z looking at them - on the first
+    // Render() call (needs a Renderer to build GPU resources through).
+    // Proves the ECS -> RenderSystem -> Renderer pipeline end to end:
+    // multiple entities, one shared mesh/pipeline, independently positioned
+    // via push-constant model matrices, all viewed through a real
+    // view-projection matrix rather than vertices authored directly in clip
+    // space. Will be replaced by a real scene/asset-loading system once
+    // there's more than a hardcoded demo scene.
     void EnsureDemoSceneBuilt(Renderer& renderer);
 
     Registry m_registry;

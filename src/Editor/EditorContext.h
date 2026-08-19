@@ -26,12 +26,17 @@ namespace gte {
 // rationale.
 struct EditorContext {
     // The ImGui-side descriptor for the Game-view RenderTexture, created
-    // lazily by ImGuiEditorLayer::BuildUI() - shared read-only by
-    // ScenePanel and GamePanel (both currently display the same Game view -
-    // see Panels/ScenePanel.h's "IMPORTANT LIMITATION" note). Never
+    // lazily by ImGuiEditorLayer::BuildUI() - read by GamePanel only. Never
     // interpreted by engine code, just handed straight to ImGui::Image() as
     // an opaque texture id.
     VkDescriptorSet gameViewDescriptor = VK_NULL_HANDLE;
+
+    // The Scene-view equivalent of gameViewDescriptor above, for its own,
+    // separate RenderTexture (see ImGuiEditorLayer's class comment and
+    // EditorLayer.h's SceneViewTarget()) - read by ScenePanel only. "Game"
+    // and "Scene" each display their own texture now; they no longer share
+    // one.
+    VkDescriptorSet sceneViewDescriptor = VK_NULL_HANDLE;
 
     // Size (in pixels) the "Game" panel's content region actually was as of
     // last frame's GamePanel::Build() (Panels/GamePanel.cpp) - what
@@ -41,6 +46,30 @@ struct EditorContext {
     // (before BuildUI() has ever run) doesn't see a spurious mismatch
     // against the texture's own initial size.
     VkExtent2D desiredExtent{};
+
+    // The Scene-view equivalent of desiredExtent above, written by
+    // ScenePanel::Build() and applied by
+    // ImGuiEditorLayer::SceneViewTarget() - kept completely independent of
+    // desiredExtent so "Game" and "Scene" can each be resized/split to a
+    // different size without affecting the other's RenderTexture.
+    VkExtent2D desiredSceneExtent{};
+
+    // True if the "Game"/"Scene" panel's ImGui::Begin() call actually
+    // returned true last frame (Panels/GamePanel.cpp/ScenePanel.cpp) - i.e.
+    // the panel is genuinely visible this frame (an active, undocked, or
+    // split-open tab), as opposed to an inactive tab hidden behind the
+    // other one. Read by ImGuiEditorLayer::GameViewTarget()/
+    // SceneViewTarget() to decide whether to bother resizing/returning that
+    // RenderTexture at all this frame - Application then skips the matching
+    // Renderer::RenderOffscreen() call entirely when the target comes back
+    // nullptr, so a hidden panel costs nothing to render. Initialized to
+    // true so the very first frame (before BuildUI() has ever run) still
+    // renders both views, same "safe default, corrected next frame" pattern
+    // as desiredExtent above. If "Scene" and "Game" are tabbed together,
+    // exactly one of these two is ever true at a time; if the user splits
+    // them apart, both are true simultaneously.
+    bool gameViewVisible = true;
+    bool sceneViewVisible = true;
 
     // Hierarchy/Inspector selection state - kInvalidEntity means "nothing
     // selected", shown by InspectorPanel as "No entity selected." Written by

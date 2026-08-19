@@ -111,6 +111,7 @@ add_library(gte_core STATIC
     src/ECS/Registry.h
     src/ECS/Components/Transform.h
     src/ECS/Components/MeshRenderer.h
+    src/ECS/Components/Camera.h
     src/Application/Application.cpp
     src/Application/Application.h
     src/Application/EventTranslator.cpp

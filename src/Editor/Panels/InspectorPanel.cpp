@@ -1,6 +1,7 @@
 #include "InspectorPanel.h"
 
 #include "../EditorContext.h"
+#include "../../ECS/Components/Camera.h"
 #include "../../ECS/Components/MeshRenderer.h"
 #include "../../ECS/Components/Transform.h"
 #include "../../ECS/Registry.h"
@@ -43,6 +44,15 @@ void BuildInspectorPanel(Registry& registry, EditorContext& ctx)
             ImGui::Text("Pipeline handle: index %u, generation %u",
                 meshRenderer->pipeline.index, meshRenderer->pipeline.generation);
             ImGui::EndDisabled();
+        }
+    }
+
+    if (Camera* camera = registry.TryGetComponent<Camera>(ctx.selectedEntity)) {
+        if (ImGui::CollapsingHeader("Camera", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::Checkbox("Active", &camera->active);
+            ImGui::DragFloat("Field of View (Y)", &camera->fovYDegrees, 0.5f, 1.0f, 179.0f);
+            ImGui::DragFloat("Near Z", &camera->nearZ, 0.01f, 0.001f, camera->farZ - 0.01f);
+            ImGui::DragFloat("Far Z", &camera->farZ, 1.0f, camera->nearZ + 0.01f);
         }
     }
 

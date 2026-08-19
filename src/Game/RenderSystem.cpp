@@ -1,4 +1,4 @@
-﻿#include "RenderSystem.h"
+#include "RenderSystem.h"
 
 #include "Renderer/Renderer.h"
 
@@ -26,13 +26,41 @@ std::vector<DrawCommand> RenderSystem::CollectRenderables(Registry& registry)
     return commands;
 }
 
-void RenderSystem::Draw(Registry& registry, Renderer& renderer)
+Mat4 RenderSystem::ResolveActiveCameraViewProjection(Registry& registry, float aspectWidthOverHeight)
 {
+    ComponentStorage<Camera>& cameras = registry.Storage<Camera>();
+
+    for (std::size_t i = 0; i < cameras.Size(); ++i) {
+        const Camera& camera = cameras.ComponentAt(i);
+        if (!camera.active) {
+            continue;
+        }
+
+        const Entity entity = cameras.EntityAt(i);
+        Transform transform; // Identity (origin, no rotation) if this camera entity has no Transform of its own.
+        if (const Transform* found = registry.TryGetComponent<Transform>(entity)) {
+            transform = *found;
+        }
+
+        return camera.ProjectionMatrix(aspectWidthOverHeight) * Camera::ViewMatrix(transform);
+    }
+
+    // No active Camera anywhere in the Registry - Identity() is the
+    // multiplicative no-op, so every draw's clip-space position ends up
+    // being exactly its model matrix's output, matching this engine's
+    // original (pre-Camera) triangle-demo behavior.
+    return Mat4::Identity();
+}
+
+void RenderSystem::Draw(Registry& registry, Renderer& renderer, float aspectWidthOverHeight)
+{
+    const Mat4 viewProjection = ResolveActiveCameraViewProjection(registry, aspectWidthOverHeight);
+
     for (const DrawCommand& command : CollectRenderables(registry)) {
         const Mesh* mesh = m_meshes.TryGet(command.mesh);
         const Pipeline* pipeline = m_pipelines.TryGet(command.pipeline);
         if (mesh != nullptr && pipeline != nullptr) {
-            renderer.Submit(*pipeline, *mesh, command.model);
+            renderer.Submit(*pipeline, *mesh, command.model, viewProjection);
         }
     }
 }

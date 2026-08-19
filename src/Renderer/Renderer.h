@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "../Math/Mat4.h"
 #include "Buffer.h"
@@ -167,21 +167,28 @@ public:
     void BeginFrame();
 
     // Queues one draw call - a Pipeline plus the Mesh to draw with it, plus
-    // the world matrix to draw it with (defaults to Mat4::Identity(),
-    // pushed to the shader via vkCmdPushConstants - see Pipeline.h's push
-    // constant range) - to be recorded the next time this frame's contents
-    // are actually recorded (whichever of RenderOffscreen()/Present() runs
-    // first this frame). This is the seam that lets Game/RenderSystem
-    // record draws without ever touching a VkCommandBuffer or knowing
-    // Vulkan exists at all: the caller holds onto Pipeline/Mesh objects
-    // (built via CreatePipeline()/CreateMesh()) and just calls this once
-    // per object it wants drawn each frame - Renderer is the only thing
-    // that ever issues the actual vkCmdBindPipeline/vkCmdPushConstants/
-    // vkCmdBindVertexBuffers/vkCmdDraw calls. Not persistent - must be
-    // called again every frame an object should be drawn (there is no
-    // retained scene graph inside Renderer itself - see
-    // src/Game/RenderSystem.h for where that now lives, one layer up).
-    void Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix = Mat4::Identity());
+    // the world matrix to draw it with (defaults to Mat4::Identity()) and
+    // the view-projection matrix of whichever camera this draw's target is
+    // being rendered through (also defaults to Mat4::Identity(), meaning
+    // "no camera" - vertices land directly in clip space, this engine's
+    // original pre-Camera triangle-demo behavior) - both pushed to the
+    // shader via vkCmdPushConstants (see Pipeline.h's push constant range)
+    // as `pc.viewProj * pc.model * vec4(position, 0.0, 1.0)`. This is the
+    // seam that lets Game/RenderSystem record draws without ever touching a
+    // VkCommandBuffer or knowing Vulkan exists at all: the caller holds
+    // onto Pipeline/Mesh objects (built via CreatePipeline()/CreateMesh())
+    // and just calls this once per object it wants drawn each frame -
+    // Renderer is the only thing that ever issues the actual
+    // vkCmdBindPipeline/vkCmdPushConstants/vkCmdBindVertexBuffers/vkCmdDraw
+    // calls. Not persistent - must be called again every frame an object
+    // should be drawn (there is no retained scene graph inside Renderer
+    // itself - see src/Game/RenderSystem.h for where that now lives, one
+    // layer up). Called once per VISIBLE render target per frame (e.g. once
+    // for the Editor's "Game" view, again for its "Scene" view) with that
+    // target's own aspect-ratio-derived viewProjMatrix - see
+    // RenderSystem::Draw().
+    void Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix = Mat4::Identity(),
+        const Mat4& viewProjMatrix = Mat4::Identity());
 
     // Factory for graphics pipelines, so callers never need direct access
     // to the VkDevice this Renderer owns internally, and always get a

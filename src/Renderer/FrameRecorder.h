@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "../Math/Mat4.h"
 #include "Mesh.h"
@@ -45,13 +45,15 @@ public:
     void BeginFrame();
 
     // Queues one draw call - a Pipeline plus the Mesh to draw with it, plus
-    // the world matrix to draw it with (pushed to the shader via
-    // vkCmdPushConstants - see Pipeline.h's push constant range and
-    // Shaders/Triangle.vert) - to be recorded the next time RecordFrame()
-    // runs. Defaults to Mat4::Identity() so existing callers that don't
-    // care about a transform are unaffected. See Renderer::Submit() for the
-    // full seam this is part of.
-    void Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix = Mat4::Identity());
+    // the world matrix (pushed to the shader via vkCmdPushConstants - see
+    // Pipeline.h's push constant range and Shaders/Triangle.vert) and the
+    // view-projection matrix of whichever camera this recording's target is
+    // being rendered through - to be recorded the next time RecordFrame()
+    // runs. Both default to Mat4::Identity() so existing callers that don't
+    // care about a transform/camera are unaffected. See Renderer::Submit()
+    // for the full seam this is part of.
+    void Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix = Mat4::Identity(),
+        const Mat4& viewProjMatrix = Mat4::Identity());
 
     // Records the undefined->color-attachment barrier, the dynamic-
     // rendering clear + every queued Submit() draw + recordExtra, and the
@@ -88,6 +90,7 @@ private:
         VkBuffer vertexBuffer = VK_NULL_HANDLE;
         std::uint32_t vertexCount = 0;
         Mat4 model = Mat4::Identity(); // Mat4's default ctor is all-zero, NOT identity - see Math/Mat4.h.
+        Mat4 viewProj = Mat4::Identity(); // The active camera's view-projection matrix at Submit() time - see Renderer::Submit().
     };
 
     std::array<float, 4> m_clearColor{ 0.0f, 0.0f, 0.0f, 1.0f };

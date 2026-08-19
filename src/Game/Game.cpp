@@ -1,7 +1,8 @@
-﻿#include "Game.h"
+#include "Game.h"
 
 #include "../Renderer/Renderer.h"
 #include "../Renderer/Vertex.h"
+#include "ECS/Components/Camera.h"
 #include "ECS/Components/MeshRenderer.h"
 #include "ECS/Components/Transform.h"
 
@@ -36,12 +37,14 @@ void Game::EnsureDemoSceneBuilt(Renderer& renderer)
     const PipelineHandle trianglePipeline = m_renderSystem.RegisterPipeline(
         renderer.CreatePipeline("shaders/Triangle.vert.spv", "shaders/Triangle.frag.spv"));
 
-    // Clip-space positions (Vulkan NDC: +Y is down) - one red, one green,
-    // one blue vertex, so the rasterizer's interpolation across the
-    // triangle is visible. Shared by every demo entity below - each one
-    // only differs in its Transform, proving the push-constant model
-    // matrix (see Renderer/Pipeline.cpp, Shaders/Triangle.vert) actually
-    // moves the SAME mesh data to a different place on screen.
+    // Mesh-local positions on the XY plane (z=0) - one red, one green, one
+    // blue vertex, so the rasterizer's interpolation across the triangle is
+    // visible. Shared by every demo entity below - each one only differs in
+    // its Transform, proving the push-constant model matrix (see
+    // Renderer/Pipeline.cpp, Shaders/Triangle.vert) actually moves the SAME
+    // mesh data to a different place in the world, all seen through the one
+    // Camera entity created below (see Shaders/Triangle.vert's
+    // `pc.viewProj * pc.model * vec4(inPosition, 0.0, 1.0)`).
     const Vertex vertices[3] = {
         { { 0.0f, -0.5f }, { 1.0f, 0.0f, 0.0f } },
         { { 0.5f, 0.5f }, { 0.0f, 1.0f, 0.0f } },
@@ -65,15 +68,27 @@ void Game::EnsureDemoSceneBuilt(Renderer& renderer)
 
         m_registry.AddComponent<MeshRenderer>(entity, MeshRenderer{ triangleMesh, trianglePipeline });
     }
+
+    // One Camera entity, sitting back along -Z (behind the triangles above,
+    // which all sit at z=0) with an identity rotation - Quat::Identity()
+    // rotates Vec3::Forward() to (0,0,1), so this looks straight down +Z at
+    // the origin, exactly where the triangles are (see Camera::ViewMatrix()
+    // in ECS/Components/Camera.h). Proves RenderSystem actually resolves a
+    // real view-projection matrix from an ECS entity rather than the
+    // Mat4::Identity() fallback for "no Camera in the scene at all".
+    const Entity cameraEntity = m_registry.CreateEntity();
+    Transform& cameraTransform = m_registry.AddComponent<Transform>(cameraEntity);
+    cameraTransform.position = Vec3{ 0.0f, 0.0f, -5.0f };
+    m_registry.AddComponent<Camera>(cameraEntity);
 }
 
-void Game::Render(Renderer& renderer)
+void Game::Render(Renderer& renderer, float aspectWidthOverHeight)
 {
     renderer.Clear(20, 20, 30, 255);
 
     EnsureDemoSceneBuilt(renderer);
 
-    m_renderSystem.Draw(m_registry, renderer);
+    m_renderSystem.Draw(m_registry, renderer, aspectWidthOverHeight);
 }
 
 } // namespace gte

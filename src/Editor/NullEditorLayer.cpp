@@ -18,6 +18,7 @@ public:
     void OnWindowResized(int /*width*/, int /*height*/) override { }
     void NewFrame() override { }
     RenderTexture* GameViewTarget() override { return nullptr; }
+    RenderTexture* SceneViewTarget() override { return nullptr; }
     void BuildUI(Registry& /*registry*/) override { }
     void Render(VkCommandBuffer /*cmd*/) override { }
     bool WantsExit() const override { return false; }

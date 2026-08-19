@@ -1,4 +1,4 @@
-﻿# Testing
+# Testing
 
 Every engine source file except `src/main.cpp` is compiled into a static
 library, `gte_core` (see `CMakeLists.txt`) - both the real executable
@@ -53,10 +53,16 @@ safe on any machine/CI runner, GPU or not:
 - `ECS/RegistryTests.cpp` - `Registry` gluing `EntityManager` +
   `ComponentStorage<T>` together: multi-component-type entities,
   DestroyEntity() clearing every pool, and `Transform`.
-- `Game/RenderSystemTests.cpp` - `RenderSystem::CollectRenderables()`, the
-  pure ECS -> `DrawCommand` step (every entity with a `MeshRenderer` becomes
-  one draw command, using its `Transform`'s world matrix if present) - needs
-  nothing but a `Registry`, no live Renderer/GPU device at all.
+- `ECS/CameraTests.cpp` - `Camera`'s pure math helpers, `ProjectionMatrix()`/
+  `ViewMatrix()`, checked directly against `Mat4::PerspectiveFovLH_ZO()`/
+  `LookAtLH()`.
+- `Game/RenderSystemTests.cpp` - `RenderSystem::CollectRenderables()` (the
+  pure ECS -> `DrawCommand` step: every entity with a `MeshRenderer` becomes
+  one draw command, using its `Transform`'s world matrix if present) and
+  `RenderSystem::ResolveActiveCameraViewProjection()` (the pure ECS -> camera
+  view-projection step: the first entity with an active `Camera` becomes a
+  combined view-projection matrix, `Mat4::Identity()` if none exists) - both
+  need nothing but a `Registry`, no live Renderer/GPU device at all.
 
 Testing `Buffer`/`RenderTexture`/`Pipeline`/`GpuResourceFactory` properly
 needs a real `VkDevice`+`VmaAllocator` (and, as `VulkanDevice` is written

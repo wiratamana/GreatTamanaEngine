@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <memory>
 #include <string>
@@ -54,6 +54,17 @@ private:
     // need to relate to Game's at all.
     std::unique_ptr<IEditorLayer> m_editorLayer;
     Game m_game;
+
+    // Current OS window size, kept up to date by the same WindowResized
+    // event Renderer::OnResize()/m_editorLayer->OnWindowResized() react to
+    // (Window's own Width()/Height() only ever reflect its CONSTRUCTION
+    // size, never a later resize) - used only as the aspect ratio for the
+    // release-build ("no Editor, straight to the swapchain") rendering path
+    // in Run(); the Editor build's Game/Scene views each use their own
+    // RenderTexture's aspect ratio instead (see
+    // IEditorLayer::GameViewTarget()/SceneViewTarget()).
+    int m_windowWidth = 0;
+    int m_windowHeight = 0;
 };
 
 } // namespace gte

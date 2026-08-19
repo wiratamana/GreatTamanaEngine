@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <volk.h>
 
@@ -19,9 +19,12 @@ namespace gte {
 // still no descriptor sets, and viewport/scissor left as dynamic state so
 // the exact same pipeline can draw into either the swapchain or an Editor
 // RenderTexture, whatever size each currently is. DOES carry one push
-// constant range: a single mat4 "model" matrix (vertex stage only, offset
-// 0, 64 bytes) - see RenderSystem.h/FrameRecorder.h for how a per-draw
-// world matrix reaches this via vkCmdPushConstants, and Shaders/
+// constant range: a "model" matrix followed immediately by a "viewProj"
+// matrix (vertex stage only, offset 0, 128 bytes total - the guaranteed
+// minimum maxPushConstantsSize on every conformant Vulkan implementation,
+// so this never needs a per-GPU size check) - see RenderSystem.h/
+// FrameRecorder.h for how a per-draw world matrix and the active Camera's
+// view-projection matrix reach this via vkCmdPushConstants, and Shaders/
 // Triangle.vert for the matching `layout(push_constant)` block. Grow this
 // further (a real shader/material system, descriptor sets for
 // textures/uniforms, multiple vertex formats, ...) once there's more than

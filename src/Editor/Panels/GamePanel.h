@@ -11,7 +11,11 @@ struct EditorContext;
 // here, mid-frame). This is what makes the Game-view RenderTexture always
 // match exactly this panel's own current size/shape (Unity's "Free Aspect"
 // behavior), whatever ScenePanel (or any other panel) happens to be sized
-// at. Called once per frame by ImGuiEditorLayer::BuildUI(), after
+// at - "Game" has its own RenderTexture (ctx.gameViewDescriptor), entirely
+// separate from ScenePanel's. Also writes ctx.gameViewVisible from
+// ImGui::Begin()'s return value, so a hidden/inactive "Game" tab is skipped
+// entirely by GameViewTarget() next frame - see EditorContext::gameViewVisible.
+// Called once per frame by ImGuiEditorLayer::BuildUI(), after
 // BuildScenePanel().
 void BuildGamePanel(EditorContext& ctx);
 

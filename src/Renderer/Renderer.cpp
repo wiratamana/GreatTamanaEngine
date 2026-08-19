@@ -1,4 +1,4 @@
-﻿#include "Renderer.h"
+#include "Renderer.h"
 
 #include "../Window/Window.h"
 
@@ -127,9 +127,9 @@ void Renderer::BeginFrame()
     m_frameRecorder.BeginFrame();
 }
 
-void Renderer::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix)
+void Renderer::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix, const Mat4& viewProjMatrix)
 {
-    m_frameRecorder.Submit(pipeline, mesh, modelMatrix);
+    m_frameRecorder.Submit(pipeline, mesh, modelMatrix, viewProjMatrix);
 }
 
 Pipeline Renderer::CreatePipeline(

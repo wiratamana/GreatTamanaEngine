@@ -1,4 +1,4 @@
-﻿# tests/CMakeLists.txt
+# tests/CMakeLists.txt
 #
 # GreatTamanaEngineTests - GoogleTest-based unit test suite for gte_core (see
 # the root CMakeLists.txt, which only add_subdirectory()'s this when
@@ -57,15 +57,23 @@
 #                                            DestroyEntity() clearing every
 #                                            pool, and Transform (the first
 #                                            real component).
+#   - ECS/CameraTests.cpp                    - Camera's pure math helpers
+#                                            (ProjectionMatrix()/ViewMatrix()),
+#                                            checked against
+#                                            Mat4::PerspectiveFovLH_ZO()/
+#                                            LookAtLH() directly.
 #   - Renderer/ResourcePoolTests.cpp         - ResourcePool<T, HandleT>'s
 #                                            generic insert/remove/lookup +
 #                                            generation-guard semantics (see
 #                                            AGENTS.md, "Entity-Component-
 #                                            System"), backing MeshHandle/
 #                                            PipelineHandle.
-#   - Game/RenderSystemTests.cpp             - RenderSystem::CollectRenderables(),
-#                                            the pure ECS -> DrawCommand step
-#                                            (no Renderer/live GPU involved) -
+#   - Game/RenderSystemTests.cpp             - RenderSystem::CollectRenderables()
+#                                            (the pure ECS -> DrawCommand step)
+#                                            and ResolveActiveCameraViewProjection()
+#                                            (the pure ECS -> camera
+#                                            view-projection step) - no
+#                                            Renderer/live GPU involved.
 #                                            RenderSystem::Draw() itself is
 #                                            Tier 2 (needs a live Renderer),
 #                                            see the note below.
@@ -107,6 +115,7 @@ add_executable(GreatTamanaEngineTests
     ECS/EntityManagerTests.cpp
     ECS/ComponentStorageTests.cpp
     ECS/RegistryTests.cpp
+    ECS/CameraTests.cpp
     Game/RenderSystemTests.cpp
 )
 

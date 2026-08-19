@@ -192,13 +192,42 @@ lifetime code:
   boundary" rule this file already applies to SDL (see "Coding Guidelines",
   Clean Architecture: only `Application` touches SDL directly). `Renderer`
   itself must never gain a dependency on ECS in either direction -
-  `Renderer::Submit()` takes a plain `Mat4`, never an `Entity`/`Registry`.
+  `Renderer::Submit()` takes plain `Mat4`s, never an `Entity`/`Registry`.
   `RenderSystem::CollectRenderables(Registry&)` is the pure ECS -> plain-data
   (`DrawCommand`: `MeshHandle`/`PipelineHandle`/`Mat4`, no live Mesh/Pipeline/
   Renderer involved) step - keep it that way when extending it, and put any
   new Renderer-touching logic in `RenderSystem::Draw()` (or a sibling
   non-pure method) instead, so `CollectRenderables()` stays Tier-1-testable
   (see `tests/Game/RenderSystemTests.cpp`).
+- **`Camera` (`src/ECS/Components/Camera.h`) never bakes an aspect ratio
+  into itself.** `ProjectionMatrix(aspectWidthOverHeight)` always takes the
+  aspect ratio as a parameter, resolved fresh by whoever is about to draw
+  (`RenderSystem::ResolveActiveCameraViewProjection(Registry&,
+  aspectWidthOverHeight)`), because the SAME `Camera` entity can legitimately
+  render into multiple differently-sized/shaped targets in the same frame
+  (the Editor's "Game" and "Scene" panels, each with their own
+  `RenderTexture` - see "Editor Module Structure" below). Never cache a
+  `Camera`'s resolved projection matrix keyed only by the component itself -
+  always re-resolve it per render target/aspect ratio. `ViewMatrix()` is
+  built from a plain `Transform` (via `Mat4::LookAtLH`, looking down its
+  rotated `Vec3::Forward()`) rather than a bespoke eye/target/up API, so a
+  camera entity is edited exactly like any other entity (Transform in the
+  Inspector) - don't add a separate eye/target/up field set to `Camera`
+  itself. `RenderSystem::ResolveActiveCameraViewProjection()` picks the
+  FIRST entity (in `ComponentStorage<Camera>` order) with `active == true`
+  and falls back to `Mat4::Identity()` if none exists - this is what
+  preserves the engine's original "vertices already authored directly in
+  clip space" behavior for a scene that hasn't added a `Camera` yet; don't
+  change this fallback without checking `Shaders/Triangle.vert`'s
+  `pc.viewProj * pc.model * ...` still makes sense for it. `Pipeline`'s one
+  push constant range now carries a `model` `Mat4` immediately followed by a
+  `viewProj` `Mat4` (128 bytes total - the guaranteed minimum
+  `maxPushConstantsSize` on every conformant Vulkan implementation, see
+  "Render Target Format Matching" above for the same "match the GPU side
+  exactly" philosophy applied here) - grow this only by moving to a uniform
+  buffer/descriptor set instead of growing the push constant range further,
+  since 128 bytes is the only size guaranteed to fit everywhere without a
+  per-GPU limit check.
 
 ## Editor Module Structure
 
@@ -216,16 +245,29 @@ directly as `ImGuiEditorLayer.cpp` itself:
 
 - **`ImGuiEditorLayer.cpp`** is the Editor's composition root, not a
   monolith holding every panel: it owns the ImGui context, the SDL3/Vulkan
-  backend lifecycle, the Game-view `RenderTexture`, and the shared
-  `EditorContext` (below) - `BuildUI()` just calls out, in a fixed,
-  deliberate order, to `DockLayout.cpp` and each `Panels/*.cpp` builder.
+  backend lifecycle, TWO `RenderTexture`s (`m_gameView`/`m_sceneView` - one
+  per panel, never shared), and the shared `EditorContext` (below) -
+  `BuildUI()` just calls out, in a fixed, deliberate order, to
+  `DockLayout.cpp` and each `Panels/*.cpp` builder.
 - **`EditorContext.h`** is a small plain-data struct (no behavior of its
   own, same philosophy as ECS components - see "Entity-Component-System"
   below) holding everything that needs to be shared across panels/frames:
-  the Game-view ImGui descriptor, the "Game" panel's desired render-texture
-  extent, the current Hierarchy/Inspector selection, the exit-requested
-  flag, and the dock-layout-ensured latch. Passed by reference into every
-  panel/dock-layout function.
+  the Game-view/Scene-view ImGui descriptors, each panel's own desired
+  render-texture extent (`desiredExtent`/`desiredSceneExtent`) and visibility
+  flag (`gameViewVisible`/`sceneViewVisible`), the current Hierarchy/
+  Inspector selection, the exit-requested flag, and the dock-layout-ensured
+  latch. Passed by reference into every panel/dock-layout function.
+- **`gameViewVisible`/`sceneViewVisible` are written from `ImGui::Begin()`'s
+  own return value** (`Panels/GamePanel.cpp`/`ScenePanel.cpp`) - `false`
+  whenever that panel is an inactive/hidden dock tab (or collapsed), not
+  just "exists somewhere" - and read by
+  `ImGuiEditorLayer::GameViewTarget()`/`SceneViewTarget()` at the START of
+  the NEXT frame to return `nullptr` outright for a currently-invisible
+  panel, which is what makes `Application::Run()` skip that view's
+  `Renderer::RenderOffscreen()` pass entirely (real GPU savings, not just a
+  cosmetic skip) whenever "Scene"/"Game" are tabbed together and only one is
+  actually on screen. A future panel with its own `RenderTexture` should
+  follow this exact same pattern rather than always rendering unconditionally.
 - **`DockLayout.h/.cpp`** builds the top menu bar + full-viewport DockSpace
   and the one-shot default Unity-style layout (Hierarchy left, Inspector
   right, Scene/Game tabbed center) - see its own comments for why rebuilding

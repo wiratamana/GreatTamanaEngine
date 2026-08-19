@@ -4,15 +4,19 @@ namespace gte {
 
 struct EditorContext;
 
-// Placeholder Scene view. IMPORTANT LIMITATION: the engine has no separate
-// editor scene camera yet (no Camera component/view-projection matrix at
-// all - see README.md, "Rendering"), so this just displays the SAME texture
-// as GamePanel (ctx.gameViewDescriptor) for now. Deliberately does NOT touch
-// ctx.desiredExtent (only GamePanel does), so resizing this panel alone
-// never resizes the real Game-view RenderTexture - a real,
-// independently-orbitable Scene camera is a natural follow-up once Camera
-// exists as an ECS component. Called once per frame by
-// ImGuiEditorLayer::BuildUI(), before BuildGamePanel().
+// The Scene view - its own RenderTexture (ctx.sceneViewDescriptor),
+// independent of GamePanel's (ctx.gameViewDescriptor). Both currently show
+// the identical scene through whatever entity has the active Camera
+// component (see ECS/Components/Camera.h) - there is no independently-
+// orbitable EDITOR-only camera yet, so "Scene" and "Game" always agree on
+// viewpoint, but each has its own RenderTexture sized to its own panel's
+// aspect ratio (see ImGuiEditorLayer::SceneViewTarget()), and each is only
+// actually rendered into when its own panel is visible (see
+// EditorContext::sceneViewVisible - a real, independently-orbitable Scene
+// camera remains a natural follow-up, at which point this becomes genuinely
+// different from "Game" rather than just a second render of the same
+// viewpoint). Called once per frame by ImGuiEditorLayer::BuildUI(), before
+// BuildGamePanel().
 void BuildScenePanel(EditorContext& ctx);
 
 } // namespace gte

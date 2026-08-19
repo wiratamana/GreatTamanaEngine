@@ -70,8 +70,10 @@ using **dynamic rendering** (no `VkRenderPass`/`VkFramebuffer`) instead of
 SDL's `SDL_Renderer`. Its public surface is still just `Clear()`/`Present()`,
 plus `RenderOffscreen()`/`CreateRenderTexture()` for drawing into an
 off-screen `RenderTexture` instead of the swapchain — the primitive behind
-the Editor's Unity-style "Game"/"Scene" panels (a camera renders into a
-`RenderTexture`, which the Editor displays inside an `ImGui::Image()` panel).
+the Editor's Unity-style "Game"/"Scene" panels, each with its OWN
+`RenderTexture` now (see "Editor / Debug UI" below) that the entity holding
+the active `Camera` component renders into, which the Editor then displays
+inside its own `ImGui::Image()` panel.
 Vulkan itself is accessed exclusively through **volk** (a dynamic meta-loader,
 see `BUILDING.md`) — nothing in the engine links a classic Vulkan loader
 import lib or calls `vulkan.h` functions directly without going through it.
@@ -98,12 +100,18 @@ transitions, mipmap generation) outside the per-frame `Present()`/
 returned by value from `Renderer::CreateMesh()`/`CreatePipeline()`
 unchanged — `Renderer` has zero knowledge that an ECS exists; see
 "Entity-Component-System" below for how something else (`RenderSystem`)
-owns/addresses them by handle. `Pipeline` also now carries one push
-constant range (a single `mat4 model`, vertex stage), and
-`Renderer::Submit()`/`FrameRecorder::Submit()` take an optional model
-matrix (`Mat4::Identity()` by default) recorded via `vkCmdPushConstants`
-right before each draw — see `Shaders/Triangle.vert`'s matching
-`layout(push_constant)` block.
+owns/addresses them by handle. `Pipeline` carries one push constant range: a
+`mat4 model` immediately followed by a `mat4 viewProj` (vertex stage, 128
+bytes total — the guaranteed minimum `maxPushConstantsSize` on every
+conformant Vulkan implementation), and `Renderer::Submit()`/
+`FrameRecorder::Submit()` take an optional model matrix AND an optional
+view-projection matrix (both `Mat4::Identity()` by default) recorded via
+`vkCmdPushConstants` right before each draw as
+`pc.viewProj * pc.model * vec4(position, 0.0, 1.0)` — see
+`Shaders/Triangle.vert`'s matching `layout(push_constant)` block. A scene
+with no active `Camera` pushes an identity `viewProj`, preserving this
+engine's original "vertices already authored directly in clip space"
+triangle-demo behavior.
 
 ### Entity-Component-System (ECS)
 
@@ -113,31 +121,43 @@ The engine's Scene/World data model lives under `src/ECS/`: `Entity`
 component type), and `Registry` (owns one of each). Rolled by hand rather
 than via a third-party library (EnTT), the same "own the core data model"
 choice as `src/Math/` not depending on GLM. `Transform`
-(`ECS/Components/Transform.h`) and `MeshRenderer`
-(`ECS/Components/MeshRenderer.h`) are the two components that exist today —
-both plain data, no behavior, no GPU/SDL ownership of their own.
+(`ECS/Components/Transform.h`), `MeshRenderer`
+(`ECS/Components/MeshRenderer.h`), and `Camera` (`ECS/Components/Camera.h`)
+are the three components that exist today —
+all plain data, no behavior beyond small pure-math helpers, no GPU/SDL
+ownership of their own.
 `MeshRenderer` references a mesh/pipeline purely by handle
 (`MeshHandle`/`PipelineHandle`, `src/Renderer/MeshHandle.h`/
 `PipelineHandle.h`) — the exact same cheap, generational, index+generation
 shape as `Entity` and `GpuResourceHandle`, minted by a generic
 `ResourcePool<T, HandleT>` (`src/Renderer/ResourcePool.h`) rather than ever
-embedding a live `Mesh`/`Pipeline` in a component.
+embedding a live `Mesh`/`Pipeline` in a component. `Camera` is
+perspective-only for now (`fovYDegrees`/`nearZ`/`farZ`/`active`), with two
+pure-math helpers — `ProjectionMatrix(aspect)` (via
+`Mat4::PerspectiveFovLH_ZO`) and the static `ViewMatrix(transform)` (via
+`Mat4::LookAtLH`, looking down the `Transform`'s rotated `Vec3::Forward()`)
+— rather than a bespoke eye/target/up triple, so a camera entity is edited
+exactly like any other (Transform in the Inspector, same as everything
+else).
 
 `RenderSystem` (`src/Game/RenderSystem.h/.cpp`) is the one piece of the
 engine allowed to depend on both the ECS world and `Renderer` — the same
 "only one layer crosses this boundary" rule this engine already applies to
 SDL (only `Application` touches it directly). `Renderer` itself never
-depends on ECS in any way: `Submit()` takes a plain `Mat4`, never an
-`Entity`/`Registry`. `RenderSystem::CollectRenderables()` is a pure
-function (every entity with a `MeshRenderer` becomes one `DrawCommand`,
-using its `Transform`'s world matrix if present) that needs nothing but a
-`Registry` — no live Renderer/GPU device — so it's unit-tested exactly like
-the rest of ECS (see `TESTING.md`). `RenderSystem::Draw()` is the one
-non-pure step that resolves those handles against its own
-`ResourcePool<Mesh, MeshHandle>`/`ResourcePool<Pipeline, PipelineHandle>`
-and calls `Renderer::Submit()`. `Game` no longer holds a hardcoded
-`Pipeline`/`Mesh` pair at all — it owns a `Registry` + `RenderSystem` and
-just creates entities/components.
+depends on ECS in any way: `Submit()` takes plain `Mat4`s, never an
+`Entity`/`Registry`. `RenderSystem::CollectRenderables()` (every entity with
+a `MeshRenderer` becomes one `DrawCommand`, using its `Transform`'s world
+matrix if present) and `RenderSystem::ResolveActiveCameraViewProjection()`
+(the first entity with an active `Camera` becomes a combined
+view-projection matrix, `Mat4::Identity()` if none exists) are both pure
+functions that need nothing but a `Registry` — no live Renderer/GPU device —
+so both are unit-tested exactly like the rest of ECS (see `TESTING.md`).
+`RenderSystem::Draw()` is the one non-pure step that resolves DrawCommand
+handles against its own `ResourcePool<Mesh, MeshHandle>`/
+`ResourcePool<Pipeline, PipelineHandle>` and calls `Renderer::Submit()` with
+both the per-object model matrix and the resolved view-projection matrix.
+`Game` no longer holds a hardcoded `Pipeline`/`Mesh` pair at all — it owns a
+`Registry` + `RenderSystem` and just creates entities/components.
 
 ### Editor / Debug UI
 
@@ -150,9 +170,11 @@ CMake adds:
 - **`ImGuiEditorLayer`** (real, `GTE_ENABLE_EDITOR=ON`) — owns the Dear ImGui
   context (fetched from ImGui's **docking** branch — see
   `cmake/FetchImGui.cmake` — with `ImGuiConfigFlags_DockingEnable` set) plus
-  its SDL3 and Vulkan backends (routed through volk), and a `RenderTexture`
-  that Game's camera renders into for the "Game"/"Scene" panels. Lays out a
-  Unity-style default arrangement the first time it runs (built once via the
+  its SDL3 and Vulkan backends (routed through volk), and TWO
+  `RenderTexture`s — one for "Game", one for "Scene" — that Game's camera
+  renders into independently, each tracking its own panel's content-region
+  size/aspect ratio (Unity's "Free Aspect" behavior). Lays out a Unity-style
+  default arrangement the first time it runs (built once via the
   `DockBuilder` API, then left to the user/`imgui.ini` afterwards): a
   full-viewport `DockSpace` with a top menu bar (`File > Exit`, wired to
   `IEditorLayer::WantsExit()` so `Application::Run()` can end its main loop
@@ -161,18 +183,30 @@ CMake adds:
   the remaining center — drag the "Scene" tab out to split it side-by-side
   with "Game" at any time, exactly like Unity. "Hierarchy" lists every entity
   that has a `Transform` (via `Game::GetRegistry()` — the Editor's only,
-  read/write, view into Game's ECS world) and lets you select one; "Inspector"
-  shows/edits the selected entity's `Transform` (position/rotation/scale) and
-  displays its `MeshRenderer` handles read-only. **Current limitation:**
-  there is no dedicated editor scene camera yet (no `Camera`
-  component/view-projection matrix at all), so "Scene" simply displays the
-  same texture as "Game" for now — a real, independently-orbitable Scene
-  camera is a natural follow-up once `Camera` exists as an ECS component.
+  read/write, view into Game's ECS world), tags one with "(Camera)" if it
+  also has a `Camera` component, and lets you select one; "Inspector"
+  shows/edits the selected entity's `Transform` (position/rotation/scale),
+  `Camera` (active/field of view/near-far planes) if present, and displays
+  its `MeshRenderer` handles read-only.
+  **Visibility-driven rendering:** `IEditorLayer::GameViewTarget()`/
+  `SceneViewTarget()` each return `nullptr` (skipping that view's
+  `Renderer::RenderOffscreen()` pass entirely) whenever `ImGui::Begin()`
+  reported that panel wasn't actually visible last frame (an inactive dock
+  tab hidden behind the other one) — while "Scene"/"Game" are tabbed
+  together, only the active tab is ever rendered, at zero extra GPU cost for
+  the hidden one; split them apart and both become visible/rendered
+  simultaneously, each into its own `RenderTexture`.
+  **Remaining limitation:** "Scene" and "Game" both show the SAME
+  viewpoint — whatever entity currently has the active `Camera` — just
+  through their own separate `RenderTexture`/aspect ratio now, rather than
+  literally sharing one texture. There is still no independently-orbitable
+  EDITOR-only Scene camera; that remains a natural follow-up.
 - **`NullEditorLayer`** (`GTE_ENABLE_EDITOR=OFF`) — every method is a no-op;
-  `GameViewTarget()` always returns `nullptr`, meaning "render straight to
-  the swapchain, fullscreen". This is what makes `-DGTE_ENABLE_EDITOR=OFF` a
-  genuine release/final-game build: no ImGui fetch, no ImGui sources
-  compiled, no ImGui symbols linked at all — not just a runtime flag.
+  `GameViewTarget()`/`SceneViewTarget()` always return `nullptr`, meaning
+  "render straight to the swapchain, fullscreen". This is what makes
+  `-DGTE_ENABLE_EDITOR=OFF` a genuine release/final-game build: no ImGui
+  fetch, no ImGui sources compiled, no ImGui symbols linked at all — not
+  just a runtime flag.
 
 `Game` never depends on the Editor at all, in either direction — that's what
 keeps turning the Editor off a zero-touch operation for gameplay code; the
@@ -203,13 +237,15 @@ pieces:
   SDL3 + Vulkan backends are integrated behind `IEditorLayer`, with a full
   Unity-style docked layout — top menu bar (`File > Exit`), "Hierarchy"
   (left), "Inspector" (right), and "Scene"/"Game" tabbed in the center, all
-  freely rearrangeable/splittable via ImGui docking. "Game" displays Game's
-  camera output via a `RenderTexture` ("Scene" shares the same texture for
-  now — see "Editor / Debug UI" above for why); "Hierarchy"/"Inspector" list
-  and edit entities/components straight from Game's ECS world via
-  `Game::GetRegistry()`. Toggling `GTE_ENABLE_EDITOR` fully includes/excludes
-  the whole module, down to CMake never fetching or compiling ImGui at all
-  when it's off.
+  freely rearrangeable/splittable via ImGui docking. "Game" and "Scene" each
+  display Game's camera output via their OWN `RenderTexture` now (each
+  tracking its own panel's size/aspect ratio independently), and each is
+  only actually rendered into when its own panel is visible — tabbed
+  together, only the active one costs any GPU time; split apart, both do;
+  "Hierarchy"/"Inspector" list and edit entities/components straight from
+  Game's ECS world via `Game::GetRegistry()`. Toggling `GTE_ENABLE_EDITOR`
+  fully includes/excludes the whole module, down to CMake never fetching or
+  compiling ImGui at all when it's off.
 - GPU memory allocation goes through **VMA** (Vulkan Memory Allocator) via
   the `VulkanAllocator` RAII wrapper (`src/Renderer/Vulkan/`) — `Renderer`
   owns a single `VmaAllocator`. `RenderTexture` creates its `VkImage` through
@@ -232,8 +268,8 @@ pieces:
 - A hand-rolled **Entity-Component-System** (`src/ECS/`: `Entity`/
   `EntityManager`/`ComponentStorage<T>`/`Registry`) is the engine's Scene/
   World data model — no third-party ECS library (EnTT), same "own the core
-  data model" choice as Math. `Transform` and `MeshRenderer` are the two
-  components that exist today. Fully unit-tested, including
+  data model" choice as Math. `Transform`, `MeshRenderer`, and `Camera` are
+  the three components that exist today. Fully unit-tested, including
   generation-guarded stale-handle safety.
 - The ECS is wired all the way into actual rendering, not just present as
   inert data: `RenderSystem` (`src/Game/RenderSystem.h/.cpp`) is the one
@@ -242,11 +278,18 @@ pieces:
   `ResourcePool<T, HandleT>` (`src/Renderer/ResourcePool.h`) mints
   generational `MeshHandle`/`PipelineHandle` values a `MeshRenderer`
   component can safely hold instead of ever embedding a live GPU resource.
-  `Pipeline` carries a push-constant `mat4 model`, threaded through
-  `Renderer::Submit()`/`FrameRecorder` down to `vkCmdPushConstants`, so each
-  entity's `Transform` genuinely drives where it's drawn. `Game` builds a
-  small demo scene (three entities sharing one mesh/pipeline, positioned via
-  `Transform` alone) proving the whole ECS -> `RenderSystem` -> `Renderer`
-  pipeline end to end — verified both by the test suite
-  (`RenderSystem::CollectRenderables()`'s pure ECS -> draw-command logic)
-  and visually (three independently-positioned triangles on screen).
+  `Pipeline` carries a push-constant `mat4 model` immediately followed by a
+  `mat4 viewProj`, threaded through `Renderer::Submit()`/`FrameRecorder`
+  down to `vkCmdPushConstants`, so each entity's `Transform` genuinely
+  drives where it's drawn AND a real `Camera` entity genuinely drives how
+  the whole scene is viewed (rather than vertices sitting directly in clip
+  space). `Game` builds a small demo scene (three entities sharing one
+  mesh/pipeline, positioned via `Transform` alone, plus one `Camera` entity
+  sitting back along -Z looking at them) proving the whole ECS ->
+  `RenderSystem` -> `Renderer` pipeline end to end — verified both by the
+  test suite (`RenderSystem::CollectRenderables()`'s pure ECS ->
+  draw-command logic, `RenderSystem::ResolveActiveCameraViewProjection()`'s
+  pure ECS -> camera logic, and `Camera`'s own `ProjectionMatrix()`/
+  `ViewMatrix()` math) and visually (three independently-positioned
+  triangles on screen, seen through a real perspective camera, in both the
+  "Game" and "Scene" panels' own separate `RenderTexture`s).

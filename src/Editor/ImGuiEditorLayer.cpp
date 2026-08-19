@@ -35,24 +35,29 @@
 //   - the SDL3 platform backend (input) and Vulkan renderer backend
 //     (drawing), wired to the exact same device/swapchain format Renderer
 //     already uses (see Renderer::GetVulkanContextInfo())
-//   - a RenderTexture ("the Game view") that Game's camera renders into
-//     each frame instead of the swapchain - see GameViewTarget() - kept in
-//     sync with the "Game" ImGui panel's own content-region size (Unity's
-//     "Free Aspect" behavior), NOT the OS window's size: resizing the
-//     floating/docked Game panel resizes the render target to match
-//     exactly, so the whole scene is always visible, however the panel is
-//     resized or shaped. Size tracking works like this:
-//       - GamePanel::Build() (Panels/GamePanel.cpp) reads the panel's
-//         current ImGui::GetContentRegionAvail() every frame and stores it
-//         as m_ctx.desiredExtent.
-//       - GameViewTarget() (called earlier next frame, before
-//         Game::Render()) compares m_ctx.desiredExtent against the
-//         texture's actual current extent and resizes it first if they
+//   - TWO RenderTextures - m_gameView ("the Game view") and m_sceneView
+//     ("the Scene view") - that Game's camera renders into each frame
+//     instead of the swapchain, one per panel, each tracking that panel's
+//     OWN content-region size (Unity's "Free Aspect" behavior) rather than
+//     the OS window's size or each other's. Size tracking works like this,
+//     mirrored independently for each view:
+//       - GamePanel::Build()/ScenePanel::Build() (Panels/*.cpp) reads the
+//         panel's current ImGui::GetContentRegionAvail() every frame it's
+//         actually visible and stores it as m_ctx.desiredExtent/
+//         desiredSceneExtent, and also stores whether ImGui::Begin()
+//         reported the panel visible at all as
+//         m_ctx.gameViewVisible/sceneViewVisible.
+//       - GameViewTarget()/SceneViewTarget() (called earlier next frame,
+//         before Game::Render()) return nullptr outright if that panel
+//         wasn't visible last frame (skipping a RenderOffscreen() pass
+//         nobody would see), otherwise compare the desired extent against
+//         the texture's actual current extent and resize it first if they
 //         differ - never mid-frame after this frame's ImGui::Image() call
 //         has already been recorded (see GameViewTarget() for why that
 //         would be unsafe).
-//     This introduces at most one frame of lag between a resize and the
-//     texture catching up, imperceptible in practice.
+//     This introduces at most one frame of lag between a resize (or a
+//     visibility change) and the texture catching up, imperceptible in
+//     practice.
 //
 // The overall panel layout (built once via DockLayout.cpp's
 // BuildDockspaceAndMenuBar()/BuildDefaultDockLayout(), then left entirely to
@@ -61,17 +66,20 @@
 // "Hierarchy" docked left, "Inspector" docked right, and "Scene"/"Game"
 // tabbed together in the remaining center - the user can drag the "Scene"
 // tab out to split it side-by-side with "Game" (or anywhere else) at any
-// time, exactly like Unity's Scene/Game tabs.
+// time, exactly like Unity's Scene/Game tabs. Application::Run() renders
+// into whichever of GameViewTarget()/SceneViewTarget() come back non-null
+// each frame: while tabbed together, exactly one is visible (so only that
+// one is actually rendered, at zero extra GPU cost for the hidden one);
+// split apart, both are visible and BOTH get rendered, each into its own
+// RenderTexture at its own panel's size/aspect.
 //
-// IMPORTANT LIMITATION: the engine has no separate editor scene camera yet
-// (no Camera component/view-projection matrix at all - see README.md,
-// "Rendering") - "Scene" therefore just displays the SAME m_gameView
-// texture as "Game" for now (see Panels/ScenePanel.cpp). Only "Game"'s own
-// content region drives m_ctx.desiredExtent/GameViewTarget()'s resize, so
-// resizing "Scene" alone never resizes the real Game-view RenderTexture.
-// Splitting "Scene" out from "Game" today just gives two views of the
-// identical image - a real, independently-orbitable Scene camera is a
-// natural follow-up once Camera exists as an ECS component.
+// REMAINING LIMITATION: "Scene" and "Game" both show the SAME viewpoint -
+// whatever entity currently has the active Camera component (see
+// ECS/Components/Camera.h) - just each through its own RenderTexture/aspect
+// now, rather than literally sharing one texture as before Camera existed.
+// There is still no independently-orbitable EDITOR-only Scene camera; that
+// remains a natural follow-up once there's a reason to look at the scene
+// from a different angle than the gameplay camera itself.
 #include <imgui.h>
 #include <backends/imgui_impl_sdl3.h>
 #include <backends/imgui_impl_vulkan.h>
@@ -88,12 +96,14 @@ namespace {
 class ImGuiEditorLayer final : public IEditorLayer {
 public:
     ImGuiEditorLayer(Window& window, Renderer& renderer)
-        : m_gameView(renderer.CreateRenderTexture(window.Width(), window.Height()))
+        : m_gameView(renderer.CreateRenderTexture(window.Width(), window.Height(), VK_FORMAT_UNDEFINED, "GameView"))
+        , m_sceneView(renderer.CreateRenderTexture(window.Width(), window.Height(), VK_FORMAT_UNDEFINED, "SceneView"))
     {
-        // See EditorContext::desiredExtent for why this is initialized to
-        // the OS window's startup size here.
+        // See EditorContext::desiredExtent/desiredSceneExtent for why both
+        // are initialized to the OS window's startup size here.
         m_ctx.desiredExtent = VkExtent2D{
             static_cast<std::uint32_t>(window.Width()), static_cast<std::uint32_t>(window.Height()) };
+        m_ctx.desiredSceneExtent = m_ctx.desiredExtent;
 
         const Renderer::VulkanContextInfo context = renderer.GetVulkanContextInfo();
         m_device = context.device;
@@ -124,7 +134,8 @@ public:
         // Let the backend create/own its own descriptor pool instead of us
         // managing a VkDescriptorPool ourselves - see the DescriptorPoolSize
         // comment in imgui_impl_vulkan.h. Sized generously enough for the
-        // font atlas plus our own AddTexture() call below for the Game view.
+        // font atlas plus our own AddTexture() calls below for the Game/
+        // Scene views.
         initInfo.DescriptorPoolSize = 64;
         initInfo.MinImageCount = context.minImageCount;
         initInfo.ImageCount = context.imageCount;
@@ -146,13 +157,14 @@ public:
         ImGui::SetCurrentContext(m_context);
 
         // Make sure the GPU is done with anything ImGui's Vulkan backend
-        // (or our own AddTexture() descriptor) might still be referencing
+        // (or our own AddTexture() descriptors) might still be referencing
         // before tearing any of it down.
         if (m_device != VK_NULL_HANDLE) {
             vkDeviceWaitIdle(m_device);
         }
 
         ReleaseGameViewDescriptor();
+        ReleaseSceneViewDescriptor();
         ImGui_ImplVulkan_Shutdown();
         ImGui_ImplSDL3_Shutdown();
         ImGui::DestroyContext(m_context);
@@ -166,13 +178,13 @@ public:
 
     void OnWindowResized(int /*width*/, int /*height*/) override
     {
-        // The Game-view RenderTexture no longer tracks the OS window's size
-        // at all - it tracks the "Game" ImGui panel's own content-region
-        // size instead (see the class comment and GameViewTarget() below),
-        // so an OS window resize by itself is not a reason to resize it.
-        // Kept as a no-op (rather than removed) purely to satisfy
-        // IEditorLayer's interface - NullEditorLayer's version already does
-        // the same.
+        // Neither the Game-view nor Scene-view RenderTexture tracks the OS
+        // window's size at all - each tracks its own ImGui panel's own
+        // content-region size instead (see the class comment and
+        // GameViewTarget()/SceneViewTarget() below), so an OS window resize
+        // by itself is not a reason to resize either of them. Kept as a
+        // no-op (rather than removed) purely to satisfy IEditorLayer's
+        // interface - NullEditorLayer's version already does the same.
     }
 
     void NewFrame() override
@@ -185,6 +197,13 @@ public:
 
     RenderTexture* GameViewTarget() override
     {
+        // Not visible last frame (inactive tab behind "Scene", or
+        // collapsed) - see EditorContext::gameViewVisible - skip rendering
+        // into it entirely this frame; nobody would see it anyway.
+        if (!m_ctx.gameViewVisible) {
+            return nullptr;
+        }
+
         // Apply whatever panel size GamePanel::Build() captured LAST frame
         // (Panels/GamePanel.cpp), before Game renders this frame - never
         // mid/after-frame, since that could destroy the VkImage/VkImageView
@@ -214,19 +233,48 @@ public:
         return &m_gameView;
     }
 
+    RenderTexture* SceneViewTarget() override
+    {
+        // Same visibility-gated/resize-on-demand pattern as
+        // GameViewTarget() above, applied to the Scene view's own, entirely
+        // separate RenderTexture/EditorContext fields - see
+        // EditorContext::sceneViewVisible/desiredSceneExtent.
+        if (!m_ctx.sceneViewVisible) {
+            return nullptr;
+        }
+
+        if (m_ctx.desiredSceneExtent.width > 0 && m_ctx.desiredSceneExtent.height > 0) {
+            const VkExtent2D current = m_sceneView.Extent();
+            if (current.width != m_ctx.desiredSceneExtent.width || current.height != m_ctx.desiredSceneExtent.height) {
+                if (m_device != VK_NULL_HANDLE) {
+                    vkDeviceWaitIdle(m_device);
+                }
+                ReleaseSceneViewDescriptor();
+                m_sceneView.Resize(static_cast<int>(m_ctx.desiredSceneExtent.width),
+                    static_cast<int>(m_ctx.desiredSceneExtent.height));
+            }
+        }
+        return &m_sceneView;
+    }
+
     void BuildUI(Registry& registry) override
     {
         ImGui::SetCurrentContext(m_context);
 
         BuildDockspaceAndMenuBar(m_ctx);
 
-        // Lazily (re)create the ImGui-side descriptor for the Game view
-        // texture - needed on first use, and again after GameViewTarget()
-        // invalidated the previous one. Shared by both ScenePanel and
-        // GamePanel (see the class comment's "IMPORTANT LIMITATION" note).
+        // Lazily (re)create the ImGui-side descriptors for the Game/Scene
+        // view textures - needed on first use, and again after
+        // GameViewTarget()/SceneViewTarget() invalidated the previous one
+        // (a resize). Each panel now owns its own descriptor/texture - see
+        // the class comment's "REMAINING LIMITATION" note.
         if (m_ctx.gameViewDescriptor == VK_NULL_HANDLE) {
             m_ctx.gameViewDescriptor = ImGui_ImplVulkan_AddTexture(
                 m_gameView.Sampler(), m_gameView.View(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        }
+        if (m_ctx.sceneViewDescriptor == VK_NULL_HANDLE) {
+            m_ctx.sceneViewDescriptor = ImGui_ImplVulkan_AddTexture(
+                m_sceneView.Sampler(), m_sceneView.View(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }
 
         BuildHierarchyPanel(registry, m_ctx);
@@ -271,9 +319,18 @@ private:
         }
     }
 
+    void ReleaseSceneViewDescriptor()
+    {
+        if (m_ctx.sceneViewDescriptor != VK_NULL_HANDLE) {
+            ImGui_ImplVulkan_RemoveTexture(m_ctx.sceneViewDescriptor);
+            m_ctx.sceneViewDescriptor = VK_NULL_HANDLE;
+        }
+    }
+
     VkDevice m_device = VK_NULL_HANDLE;
     ImGuiContext* m_context = nullptr;
     RenderTexture m_gameView;
+    RenderTexture m_sceneView;
 
     // Shared state read/written by DockLayout.cpp's
     // BuildDockspaceAndMenuBar() and every Panels/*.cpp builder called from

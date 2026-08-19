@@ -36,16 +36,18 @@ class Renderer;
 // anywhere that calls into this interface:
 //   - ImGuiEditorLayer (src/Editor/ImGuiEditorLayer.cpp) - the real thing:
 //     owns the ImGui context (docking branch), the SDL3 + Vulkan backends,
-//     a RenderTexture Game's camera renders into for the "Game"/"Scene"
-//     panels, and the Unity-style docked layout (Hierarchy left, Inspector
-//     right, Scene/Game tabbed center, top menu bar). Only compiled when
-//     GTE_ENABLE_EDITOR is ON.
+//     TWO RenderTextures Game's camera renders into - one for the "Game"
+//     panel, one for the "Scene" panel, each tracking that panel's own
+//     content-region size/aspect independently (see GameViewTarget()/
+//     SceneViewTarget() below) - and the Unity-style docked layout
+//     (Hierarchy left, Inspector right, Scene/Game tabbed center, top menu
+//     bar). Only compiled when GTE_ENABLE_EDITOR is ON.
 //   - NullEditorLayer (src/Editor/NullEditorLayer.cpp) - every method is a
-//     no-op and GameViewTarget() always returns nullptr, meaning "render
-//     straight to the swapchain" - i.e. a release build behaves exactly as
-//     if no Editor/ImGui ever existed. Compiled instead when
-//     GTE_ENABLE_EDITOR is OFF, with zero ImGui code or linkage anywhere
-//     in the binary.
+//     no-op and GameViewTarget()/SceneViewTarget() always return nullptr,
+//     meaning "render straight to the swapchain" - i.e. a release build
+//     behaves exactly as if no Editor/ImGui ever existed. Compiled instead
+//     when GTE_ENABLE_EDITOR is OFF, with zero ImGui code or linkage
+//     anywhere in the binary.
 class IEditorLayer {
 public:
     virtual ~IEditorLayer() = default;
@@ -58,12 +60,13 @@ public:
 
     // Called when the OS window is resized (Application forwards this
     // straight from the same WindowResized event Renderer::OnResize()
-    // reacts to). The real implementation no-ops: the Game-view
-    // RenderTexture tracks the "Game" panel's own content-region size
+    // reacts to). The real implementation no-ops: the Game-view/Scene-view
+    // RenderTextures track their own ImGui panel's content-region size
     // instead of the OS window's size (Unity-style "Free Aspect" - see
-    // GameViewTarget()/BuildUI() in ImGuiEditorLayer), so an OS window
-    // resize by itself is not a reason to resize it. Kept in the interface
-    // only in case a future implementation needs it - Null impl no-ops too.
+    // GameViewTarget()/SceneViewTarget()/BuildUI() in ImGuiEditorLayer), so
+    // an OS window resize by itself is not a reason to resize either of
+    // them. Kept in the interface only in case a future implementation
+    // needs it - Null impl no-ops too.
     virtual void OnWindowResized(int width, int height) = 0;
 
     // Starts a new UI frame. Call once per frame, before Game's
@@ -71,14 +74,32 @@ public:
     virtual void NewFrame() = 0;
 
     // The render target Game's gameplay camera should draw into THIS
-    // frame: a RenderTexture the editor wants to display inside a "Game"
-    // panel, or nullptr meaning "render straight to the swapchain,
-    // fullscreen" (what the Null implementation always returns). The real
-    // implementation also resizes this texture here (if the "Game" panel's
-    // content-region size changed since last frame's BuildUI()) before
-    // returning it - the last safe/needed point to do so, since Game is
-    // about to render into it. See ImGuiEditorLayer's class comment.
+    // frame for the "Game" panel: a RenderTexture, or nullptr meaning
+    // "don't bother rendering a Game view this frame" - either because
+    // there's no Editor at all (render straight to the swapchain,
+    // fullscreen instead - what the Null implementation always returns), or
+    // because the real implementation's "Game" panel is not currently
+    // visible (e.g. it's an inactive tab behind "Scene" - see
+    // Panels/GamePanel.cpp/EditorContext::gameViewVisible) - skipping a
+    // RenderOffscreen() pass nobody would ever see. The real implementation
+    // also resizes this texture here (if the "Game" panel's content-region
+    // size changed since last frame's BuildUI()) before returning it - the
+    // last safe/needed point to do so, since Game is about to render into
+    // it. See ImGuiEditorLayer's class comment.
     virtual RenderTexture* GameViewTarget() = 0;
+
+    // The Scene-view equivalent of GameViewTarget() above - its own,
+    // separate RenderTexture (never the same one as the Game view - each
+    // panel can be a different size/aspect, e.g. split side-by-side), or
+    // nullptr under the exact same two circumstances: no Editor at all, or
+    // the real implementation's "Scene" panel isn't currently visible (see
+    // Panels/ScenePanel.cpp/EditorContext::sceneViewVisible). Application
+    // calls this and GameViewTarget() independently each frame and renders
+    // into whichever one(s) come back non-null - if "Scene" and "Game" are
+    // tabbed together, exactly one is ever visible at a time (so only that
+    // one gets rendered); if the user has split them apart, BOTH are
+    // visible and BOTH get rendered.
+    virtual RenderTexture* SceneViewTarget() = 0;
 
     // Builds every editor panel for this frame - top menu bar (File > Exit,
     // ...), Hierarchy (left), Inspector (right), and Scene/Game (tabbed,
@@ -87,8 +108,9 @@ public:
     // view both at once). `registry` is Game's ECS world (see
     // Game::GetRegistry()) - Hierarchy lists its entities, Inspector
     // edits the selected one's components. Call after Game has finished
-    // rendering into GameViewTarget() (if any), so the "Game"/"Scene"
-    // panels have fresh contents to display this frame.
+    // rendering into GameViewTarget()/SceneViewTarget() (whichever came back
+    // non-null), so the "Game"/"Scene" panels have fresh contents to
+    // display this frame.
     virtual void BuildUI(Registry& registry) = 0;
 
     // Records this frame's UI draw data into cmd. Called from inside

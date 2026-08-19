@@ -1,6 +1,7 @@
-﻿#include "FrameRecorder.h"
+#include "FrameRecorder.h"
 
 #include <cassert>
+#include <cstring>
 
 namespace gte {
 
@@ -17,7 +18,7 @@ void FrameRecorder::BeginFrame()
     m_drawQueue.clear();
 }
 
-void FrameRecorder::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix)
+void FrameRecorder::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix, const Mat4& viewProjMatrix)
 {
     DrawItem item;
     item.pipeline = pipeline.Native();
@@ -25,6 +26,7 @@ void FrameRecorder::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat
     item.vertexBuffer = mesh.VertexBuffer();
     item.vertexCount = mesh.VertexCount();
     item.model = modelMatrix;
+    item.viewProj = viewProjMatrix;
     m_drawQueue.push_back(item);
 }
 
@@ -107,7 +109,23 @@ void FrameRecorder::RecordFrame(VkCommandBuffer cmd, const RenderTarget& target,
 
         for (const DrawItem& item : m_drawQueue) {
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, item.pipeline);
-            vkCmdPushConstants(cmd, item.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(float) * 16, item.model.Data());
+
+            // Matches Shaders/Triangle.vert's `layout(push_constant) uniform
+            // PushConstants { mat4 model; mat4 viewProj; } pc;` exactly -
+            // model first (offset 0, 64 bytes), viewProj right after
+            // (offset 64, 64 bytes), 128 bytes total - the guaranteed
+            // minimum maxPushConstantsSize on every conformant Vulkan
+            // implementation (see Pipeline.cpp's VkPushConstantRange), so
+            // this never needs a per-GPU size check.
+            struct PushConstants {
+                float model[16];
+                float viewProj[16];
+            } pushConstants;
+            std::memcpy(pushConstants.model, item.model.Data(), sizeof(pushConstants.model));
+            std::memcpy(pushConstants.viewProj, item.viewProj.Data(), sizeof(pushConstants.viewProj));
+            vkCmdPushConstants(
+                cmd, item.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushConstants), &pushConstants);
+
             const VkDeviceSize offset = 0;
             vkCmdBindVertexBuffers(cmd, 0, 1, &item.vertexBuffer, &offset);
             vkCmdDraw(cmd, item.vertexCount, 1, 0, 0);
