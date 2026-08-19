@@ -1,4 +1,4 @@
-﻿# GreatTamanaEngine
+# GreatTamanaEngine
 
 A raw game engine built from scratch.
 
@@ -148,8 +148,26 @@ one of two implementations gets compiled in, selected purely by which `.cpp`
 CMake adds:
 
 - **`ImGuiEditorLayer`** (real, `GTE_ENABLE_EDITOR=ON`) — owns the Dear ImGui
-  context plus its SDL3 and Vulkan backends (routed through volk), and a
-  `RenderTexture` that Game's camera renders into for the "Game" panel.
+  context (fetched from ImGui's **docking** branch — see
+  `cmake/FetchImGui.cmake` — with `ImGuiConfigFlags_DockingEnable` set) plus
+  its SDL3 and Vulkan backends (routed through volk), and a `RenderTexture`
+  that Game's camera renders into for the "Game"/"Scene" panels. Lays out a
+  Unity-style default arrangement the first time it runs (built once via the
+  `DockBuilder` API, then left to the user/`imgui.ini` afterwards): a
+  full-viewport `DockSpace` with a top menu bar (`File > Exit`, wired to
+  `IEditorLayer::WantsExit()` so `Application::Run()` can end its main loop
+  the same way closing the OS window does), **"Hierarchy"** docked left,
+  **"Inspector"** docked right, and **"Scene"**/**"Game"** tabbed together in
+  the remaining center — drag the "Scene" tab out to split it side-by-side
+  with "Game" at any time, exactly like Unity. "Hierarchy" lists every entity
+  that has a `Transform` (via `Game::GetRegistry()` — the Editor's only,
+  read/write, view into Game's ECS world) and lets you select one; "Inspector"
+  shows/edits the selected entity's `Transform` (position/rotation/scale) and
+  displays its `MeshRenderer` handles read-only. **Current limitation:**
+  there is no dedicated editor scene camera yet (no `Camera`
+  component/view-projection matrix at all), so "Scene" simply displays the
+  same texture as "Game" for now — a real, independently-orbitable Scene
+  camera is a natural follow-up once `Camera` exists as an ECS component.
 - **`NullEditorLayer`** (`GTE_ENABLE_EDITOR=OFF`) — every method is a no-op;
   `GameViewTarget()` always returns `nullptr`, meaning "render straight to
   the swapchain, fullscreen". This is what makes `-DGTE_ENABLE_EDITOR=OFF` a
@@ -157,9 +175,10 @@ CMake adds:
   compiled, no ImGui symbols linked at all — not just a runtime flag.
 
 `Game` never depends on the Editor at all, in either direction — that's what
-keeps turning the Editor off a zero-touch operation for gameplay code.
-Hierarchy/Inspector/Scene panels are the natural next additions once there's
-an actual scene to inspect; currently only the "Game" panel exists.
+keeps turning the Editor off a zero-touch operation for gameplay code; the
+Editor only ever *observes*/edits Game's ECS world through
+`Game::GetRegistry()`, a public accessor Game exposes without knowing or
+caring who calls it.
 
 ## Building
 
@@ -180,11 +199,17 @@ pieces:
 - `Renderer` owns a real Vulkan pipeline (instance/device/swapchain/command
   buffers, using dynamic rendering) instead of SDL's `SDL_Renderer`, including
   off-screen rendering into a `RenderTexture` for Editor panels.
-- The Editor module is wired up end-to-end: Dear ImGui's SDL3 + Vulkan
-  backends are integrated behind `IEditorLayer`, with a working "Game" panel
-  that displays Game's camera output via a `RenderTexture`. Toggling
-  `GTE_ENABLE_EDITOR` fully includes/excludes it, down to CMake never
-  fetching or compiling ImGui at all when it's off.
+- The Editor module is wired up end-to-end: Dear ImGui (docking branch)'s
+  SDL3 + Vulkan backends are integrated behind `IEditorLayer`, with a full
+  Unity-style docked layout — top menu bar (`File > Exit`), "Hierarchy"
+  (left), "Inspector" (right), and "Scene"/"Game" tabbed in the center, all
+  freely rearrangeable/splittable via ImGui docking. "Game" displays Game's
+  camera output via a `RenderTexture` ("Scene" shares the same texture for
+  now — see "Editor / Debug UI" above for why); "Hierarchy"/"Inspector" list
+  and edit entities/components straight from Game's ECS world via
+  `Game::GetRegistry()`. Toggling `GTE_ENABLE_EDITOR` fully includes/excludes
+  the whole module, down to CMake never fetching or compiling ImGui at all
+  when it's off.
 - GPU memory allocation goes through **VMA** (Vulkan Memory Allocator) via
   the `VulkanAllocator` RAII wrapper (`src/Renderer/Vulkan/`) — `Renderer`
   owns a single `VmaAllocator`. `RenderTexture` creates its `VkImage` through

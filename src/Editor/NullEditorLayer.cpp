@@ -1,4 +1,4 @@
-﻿#include "EditorLayer.h"
+#include "EditorLayer.h"
 
 // Compiled instead of ImGuiEditorLayer.cpp when GTE_ENABLE_EDITOR is OFF
 // (see CMakeLists.txt) - this file, and this file alone, is what a
@@ -18,8 +18,9 @@ public:
     void OnWindowResized(int /*width*/, int /*height*/) override { }
     void NewFrame() override { }
     RenderTexture* GameViewTarget() override { return nullptr; }
-    void BuildUI() override { }
+    void BuildUI(Registry& /*registry*/) override { }
     void Render(VkCommandBuffer /*cmd*/) override { }
+    bool WantsExit() const override { return false; }
 };
 
 } // namespace

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "../Event/Event.h"
 #include "../Input/InputState.h"
@@ -36,6 +36,15 @@ public:
     // view" RenderTexture) is decided by Application (the composition
     // root), not by Game. See Application::Run().
     void Render(Renderer& renderer);
+
+    // Read-only-in-spirit access to the ECS World for the Editor's
+    // Hierarchy/Inspector panels (src/Editor/ImGuiEditorLayer.cpp) to
+    // observe/edit - the exact "Editor only ever *observes* Game ... through
+    // its existing public accessors" boundary the class comment above (and
+    // EditorLayer.h) already documents. Non-const because the Inspector
+    // panel edits component fields (e.g. dragging a Transform's position) in
+    // place; Game itself never calls this on its own registry.
+    Registry& GetRegistry() noexcept { return m_registry; }
 
 private:
     // Lazily builds the demo scene - three entities sharing one triangle

@@ -1,4 +1,4 @@
-﻿#include "Application.h"
+#include "Application.h"
 
 #include "EventTranslator.h"
 
@@ -94,10 +94,17 @@ int Application::Run()
         if (RenderTexture* gameTarget = m_editorLayer->GameViewTarget()) {
             m_renderer.RenderOffscreen(*gameTarget);
         }
+        // Build every editor panel (Hierarchy/Inspector/Scene/Game/menu
+        // bar) now that the Game view texture (if any) has this frame's
+        // contents. Passes Game's ECS world so Hierarchy/Inspector can
+        // list/edit it - see Game::GetRegistry().
+        m_editorLayer->BuildUI(m_game.GetRegistry());
 
-        // Build every editor panel (currently just "Game") now that its
-        // texture (if any) has this frame's contents.
-        m_editorLayer->BuildUI();
+        // File > Exit (or any other future programmatic "close" UI action)
+        // ends the loop exactly like a Quit event/closing the OS window.
+        if (m_editorLayer->WantsExit()) {
+            running = false;
+        }
 
         // Present the swapchain. In an Editor build this draws the editor's
         // own ImGui chrome (which itself displays the Game view above) via

@@ -1,5 +1,6 @@
-﻿#pragma once
+#pragma once
 
+#include "../ECS/Registry.h"
 #include "../Renderer/RenderTexture.h"
 
 #include <memory>
@@ -21,8 +22,10 @@ class Renderer;
 // header - Application only ever talks to this interface.
 //
 // Game never depends on this at all, in either direction: Game has no idea
-// the Editor exists, and the Editor only ever *observes* Game/Renderer
-// through their existing public accessors (never the other way around).
+// the Editor exists, and the Editor only ever *observes*/edits Game/Renderer
+// through their existing public accessors (never the other way around) -
+// e.g. Game::GetRegistry() is what lets the Hierarchy/Inspector panels below
+// see and edit the ECS world without Game gaining any Editor awareness.
 // That is what makes turning the Editor off (GTE_ENABLE_EDITOR=OFF in
 // CMakeLists.txt) a genuinely zero-touch operation for gameplay code.
 //
@@ -30,9 +33,11 @@ class Renderer;
 // (see CMakeLists.txt) - never both at once, so there's no #ifdef soup
 // anywhere that calls into this interface:
 //   - ImGuiEditorLayer (src/Editor/ImGuiEditorLayer.cpp) - the real thing:
-//     owns the ImGui context, the SDL3 + Vulkan backends, and a
-//     RenderTexture Game's camera renders into for the "Game" panel. Only
-//     compiled when GTE_ENABLE_EDITOR is ON.
+//     owns the ImGui context (docking branch), the SDL3 + Vulkan backends,
+//     a RenderTexture Game's camera renders into for the "Game"/"Scene"
+//     panels, and the Unity-style docked layout (Hierarchy left, Inspector
+//     right, Scene/Game tabbed center, top menu bar). Only compiled when
+//     GTE_ENABLE_EDITOR is ON.
 //   - NullEditorLayer (src/Editor/NullEditorLayer.cpp) - every method is a
 //     no-op and GameViewTarget() always returns nullptr, meaning "render
 //     straight to the swapchain" - i.e. a release build behaves exactly as
@@ -73,17 +78,29 @@ public:
     // about to render into it. See ImGuiEditorLayer's class comment.
     virtual RenderTexture* GameViewTarget() = 0;
 
-    // Builds every editor panel for this frame (currently just "Game";
-    // Hierarchy/Inspector/Scene follow once there's a scene to inspect).
-    // Call after Game has finished rendering into GameViewTarget() (if
-    // any), so the "Game" panel has fresh contents to display this frame.
-    virtual void BuildUI() = 0;
+    // Builds every editor panel for this frame - top menu bar (File > Exit,
+    // ...), Hierarchy (left), Inspector (right), and Scene/Game (tabbed,
+    // center) inside a full-viewport ImGui docking DockSpace, so the user
+    // can freely rearrange/split them (e.g. drag Scene and Game apart to
+    // view both at once). `registry` is Game's ECS world (see
+    // Game::GetRegistry()) - Hierarchy lists its entities, Inspector
+    // edits the selected one's components. Call after Game has finished
+    // rendering into GameViewTarget() (if any), so the "Game"/"Scene"
+    // panels have fresh contents to display this frame.
+    virtual void BuildUI(Registry& registry) = 0;
 
     // Records this frame's UI draw data into cmd. Called from inside
     // Renderer::Present()'s recordExtra hook - i.e. while the swapchain
     // image is already bound as the current dynamic-rendering color
     // attachment.
     virtual void Render(VkCommandBuffer cmd) = 0;
+
+    // True the frame after the user picked File > Exit (or any other
+    // programmatic "please close the application" UI action) - checked by
+    // Application::Run() once per frame to end its main loop cleanly, the
+    // same way a Quit event/closing the OS window does. Always false for
+    // NullEditorLayer (a release build has no such menu to click).
+    virtual bool WantsExit() const = 0;
 };
 
 // Constructs the real ImGui-backed editor layer, or the inert Null one,
