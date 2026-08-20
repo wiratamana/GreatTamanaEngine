@@ -21,14 +21,18 @@ Renderer::Renderer(Window& window)
     : m_instance("GreatTamanaEngine", Window::VulkanInstanceExtensions(), kEnableValidation)
     , m_surface(m_instance.Native(), window)
     , m_device(m_instance.Native(), m_surface.Native())
+    , m_depthFormat(m_device.PickDepthFormat())
+    // m_memoryTracker uses its default member initializer (see Renderer.h) -
+    // constructed here implicitly, before m_presenter/m_resources below,
+    // both of which receive a copy of the SAME shared_ptr.
     // VK_API_VERSION_1_3 matches VulkanInstance::CreateInstance's
     // VkApplicationInfo::apiVersion (see also GetVulkanContextInfo() below).
     , m_allocator(m_instance.Native(), m_device.Physical(), m_device.Native(), VK_API_VERSION_1_3)
     , m_presenter(m_device.Physical(), m_device.Native(), m_surface.Native(), m_device.GraphicsQueueFamily(),
           m_device.PresentQueueFamily(), m_device.GraphicsQueue(), m_device.PresentQueue(), window.Width(),
-          window.Height())
+          window.Height(), m_allocator.Native(), m_depthFormat, m_memoryTracker)
     , m_resources(m_device.Native(), m_allocator.Native(), m_device.GraphicsQueue(), m_device.GraphicsQueueFamily(),
-          std::make_shared<GpuMemoryTracker>())
+          m_depthFormat, m_memoryTracker)
 {
 }
 
@@ -59,6 +63,8 @@ Renderer& Renderer::operator=(Renderer&& other) noexcept
         m_instance = std::move(other.m_instance);
         m_surface = std::move(other.m_surface);
         m_device = std::move(other.m_device);
+        m_depthFormat = other.m_depthFormat;
+        m_memoryTracker = std::move(other.m_memoryTracker);
         m_allocator = std::move(other.m_allocator);
         m_presenter = std::move(other.m_presenter);
         m_resources = std::move(other.m_resources);
@@ -90,6 +96,11 @@ void Renderer::RenderOffscreen(RenderTexture& target, const std::function<void(V
 VkFormat Renderer::ColorFormat() const noexcept
 {
     return m_presenter.ColorFormat();
+}
+
+VkFormat Renderer::DepthFormat() const noexcept
+{
+    return m_depthFormat;
 }
 
 RenderTexture Renderer::CreateRenderTexture(int width, int height, VkFormat format, const char* debugName) const

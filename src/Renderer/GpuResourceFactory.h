@@ -32,7 +32,7 @@ namespace gte {
 class GpuResourceFactory {
 public:
     GpuResourceFactory(VkDevice device, VmaAllocator allocator, VkQueue graphicsQueue,
-        std::uint32_t graphicsQueueFamily, std::shared_ptr<GpuMemoryTracker> memoryTracker);
+        std::uint32_t graphicsQueueFamily, VkFormat depthFormat, std::shared_ptr<GpuMemoryTracker> memoryTracker);
     ~GpuResourceFactory();
 
     GpuResourceFactory(const GpuResourceFactory&) = delete;
@@ -86,6 +86,17 @@ private:
     VkDevice m_device = VK_NULL_HANDLE;
     VmaAllocator m_allocator = VK_NULL_HANDLE;
     VkQueue m_graphicsQueue = VK_NULL_HANDLE;
+
+    // The single depth format every RenderTexture/Pipeline this factory
+    // creates is built against - always exactly Renderer::DepthFormat()
+    // (VulkanDevice::PickDepthFormat()), stored once here rather than
+    // threaded through every CreateRenderTexture()/CreatePipeline() call
+    // (unlike colorFormat, which a caller can deliberately override per
+    // RenderTexture - see CreateRenderTexture() above - depth never needs
+    // that: it's never sampled/displayed, so there's no reason for it to
+    // ever differ from the one shared format). See AGENTS.md ("Render
+    // Target Format Matching").
+    VkFormat m_depthFormat = VK_FORMAT_UNDEFINED;
 
     // Owned via shared_ptr (not by value) so it can be handed out to every
     // Buffer/RenderTexture this factory creates without any risk of

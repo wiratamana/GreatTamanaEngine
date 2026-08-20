@@ -8,10 +8,11 @@
 namespace gte {
 
 GpuResourceFactory::GpuResourceFactory(VkDevice device, VmaAllocator allocator, VkQueue graphicsQueue,
-    std::uint32_t graphicsQueueFamily, std::shared_ptr<GpuMemoryTracker> memoryTracker)
+    std::uint32_t graphicsQueueFamily, VkFormat depthFormat, std::shared_ptr<GpuMemoryTracker> memoryTracker)
     : m_device(device)
     , m_allocator(allocator)
     , m_graphicsQueue(graphicsQueue)
+    , m_depthFormat(depthFormat)
     , m_memoryTracker(std::move(memoryTracker))
 {
     VkCommandPoolCreateInfo poolInfo{};
@@ -33,6 +34,7 @@ GpuResourceFactory::GpuResourceFactory(GpuResourceFactory&& other) noexcept
     : m_device(std::exchange(other.m_device, VK_NULL_HANDLE))
     , m_allocator(std::exchange(other.m_allocator, VK_NULL_HANDLE))
     , m_graphicsQueue(std::exchange(other.m_graphicsQueue, VK_NULL_HANDLE))
+    , m_depthFormat(other.m_depthFormat)
     , m_memoryTracker(std::move(other.m_memoryTracker))
     , m_commandPool(std::exchange(other.m_commandPool, VK_NULL_HANDLE))
 {
@@ -46,6 +48,7 @@ GpuResourceFactory& GpuResourceFactory::operator=(GpuResourceFactory&& other) no
         m_device = std::exchange(other.m_device, VK_NULL_HANDLE);
         m_allocator = std::exchange(other.m_allocator, VK_NULL_HANDLE);
         m_graphicsQueue = std::exchange(other.m_graphicsQueue, VK_NULL_HANDLE);
+        m_depthFormat = other.m_depthFormat;
         m_memoryTracker = std::move(other.m_memoryTracker);
         m_commandPool = std::exchange(other.m_commandPool, VK_NULL_HANDLE);
     }
@@ -63,7 +66,7 @@ void GpuResourceFactory::Destroy() noexcept
 RenderTexture GpuResourceFactory::CreateRenderTexture(
     int width, int height, VkFormat format, const char* debugName) const
 {
-    return RenderTexture(m_allocator, m_memoryTracker, m_device, width, height, format, debugName);
+    return RenderTexture(m_allocator, m_memoryTracker, m_device, width, height, format, m_depthFormat, debugName);
 }
 
 Buffer GpuResourceFactory::CreateBuffer(
@@ -151,7 +154,7 @@ void GpuResourceFactory::ImmediateSubmit(const std::function<void(VkCommandBuffe
 Pipeline GpuResourceFactory::CreatePipeline(
     VkFormat colorFormat, const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath) const
 {
-    return Pipeline(m_device, colorFormat, vertexShaderSpirvPath, fragmentShaderSpirvPath);
+    return Pipeline(m_device, colorFormat, m_depthFormat, vertexShaderSpirvPath, fragmentShaderSpirvPath);
 }
 
 Mesh GpuResourceFactory::CreateMesh(

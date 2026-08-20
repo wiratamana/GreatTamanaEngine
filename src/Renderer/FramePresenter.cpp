@@ -9,11 +9,15 @@ namespace gte {
 
 FramePresenter::FramePresenter(VkPhysicalDevice physicalDevice, VkDevice device, VkSurfaceKHR surface,
     std::uint32_t graphicsQueueFamily, std::uint32_t presentQueueFamily, VkQueue graphicsQueue,
-    VkQueue presentQueue, int width, int height)
+    VkQueue presentQueue, int width, int height, VmaAllocator allocator, VkFormat depthFormat,
+    std::shared_ptr<GpuMemoryTracker> memoryTracker)
     : m_device(device)
     , m_graphicsQueue(graphicsQueue)
     , m_presentQueue(presentQueue)
     , m_graphicsQueueFamily(graphicsQueueFamily)
+    , m_allocator(allocator)
+    , m_depthFormat(depthFormat)
+    , m_memoryTracker(std::move(memoryTracker))
     , m_swapchain(physicalDevice, device, surface, graphicsQueueFamily, presentQueueFamily, width, height)
     , m_frameSync(device, kFramesInFlight, m_swapchain.ImageCount())
 {
@@ -21,6 +25,7 @@ FramePresenter::FramePresenter(VkPhysicalDevice physicalDevice, VkDevice device,
     m_pendingHeight = height;
 
     CreateCommandObjects();
+    CreateDepthBuffers();
 }
 
 FramePresenter::~FramePresenter()
@@ -33,8 +38,12 @@ FramePresenter::FramePresenter(FramePresenter&& other) noexcept
     , m_graphicsQueue(std::exchange(other.m_graphicsQueue, VK_NULL_HANDLE))
     , m_presentQueue(std::exchange(other.m_presentQueue, VK_NULL_HANDLE))
     , m_graphicsQueueFamily(other.m_graphicsQueueFamily)
+    , m_allocator(std::exchange(other.m_allocator, VK_NULL_HANDLE))
+    , m_depthFormat(other.m_depthFormat)
+    , m_memoryTracker(std::move(other.m_memoryTracker))
     , m_swapchain(std::move(other.m_swapchain))
     , m_frameSync(std::move(other.m_frameSync))
+    , m_depthBuffers(std::move(other.m_depthBuffers))
     , m_commandPool(std::exchange(other.m_commandPool, VK_NULL_HANDLE))
     , m_commandBuffers(other.m_commandBuffers)
     , m_offscreenCommandBuffer(std::exchange(other.m_offscreenCommandBuffer, VK_NULL_HANDLE))
@@ -55,8 +64,12 @@ FramePresenter& FramePresenter::operator=(FramePresenter&& other) noexcept
         m_graphicsQueue = std::exchange(other.m_graphicsQueue, VK_NULL_HANDLE);
         m_presentQueue = std::exchange(other.m_presentQueue, VK_NULL_HANDLE);
         m_graphicsQueueFamily = other.m_graphicsQueueFamily;
+        m_allocator = std::exchange(other.m_allocator, VK_NULL_HANDLE);
+        m_depthFormat = other.m_depthFormat;
+        m_memoryTracker = std::move(other.m_memoryTracker);
         m_swapchain = std::move(other.m_swapchain);
         m_frameSync = std::move(other.m_frameSync);
+        m_depthBuffers = std::move(other.m_depthBuffers);
         m_commandPool = std::exchange(other.m_commandPool, VK_NULL_HANDLE);
         m_commandBuffers = other.m_commandBuffers;
         other.m_commandBuffers.fill(VK_NULL_HANDLE);
@@ -75,8 +88,8 @@ void FramePresenter::Destroy() noexcept
         vkDestroyCommandPool(m_device, m_commandPool, nullptr);
         m_commandPool = VK_NULL_HANDLE;
     }
-    // m_frameSync, m_swapchain clean themselves up automatically right
-    // after this, in reverse declaration order.
+    // m_depthBuffers, m_frameSync, m_swapchain clean themselves up
+    // automatically right after this, in reverse declaration order.
 }
 
 void FramePresenter::CreateCommandObjects()
@@ -114,6 +127,17 @@ void FramePresenter::CreateCommandObjects()
     }
 }
 
+void FramePresenter::CreateDepthBuffers()
+{
+    const VkExtent2D extent = m_swapchain.Extent();
+    m_depthBuffers.clear();
+    m_depthBuffers.reserve(m_swapchain.ImageCount());
+    for (std::uint32_t i = 0; i < m_swapchain.ImageCount(); ++i) {
+        m_depthBuffers.emplace_back(m_allocator, m_memoryTracker, m_device, static_cast<int>(extent.width),
+            static_cast<int>(extent.height), m_depthFormat);
+    }
+}
+
 void FramePresenter::OnResize(int width, int height)
 {
     m_pendingWidth = width;
@@ -137,6 +161,11 @@ void FramePresenter::RecreateSwapchain()
     // Per-swapchain-image semaphores must be rebuilt alongside the
     // swapchain, since the image count can change (or just to be safe).
     m_frameSync.RecreateRenderFinishedSemaphores(m_swapchain.ImageCount());
+
+    // Same reasoning for the per-swapchain-image depth buffers - a
+    // genuinely new size (and possibly image count) means genuinely new
+    // depth images, not a resize-in-place.
+    CreateDepthBuffers();
 
     m_resizeRequested = false;
 }
@@ -181,12 +210,22 @@ void FramePresenter::Present(FrameRecorder& frameRecorder, const std::function<v
         throw std::runtime_error("vkBeginCommandBuffer failed");
     }
 
+    // Depth buffer paired with THIS swapchain image - see the class comment
+    // in FramePresenter.h for why indexing by imageIndex (not
+    // m_currentFrame) is what makes this safe with no extra synchronization.
+    const DepthBuffer& depthBuffer = m_depthBuffers[imageIndex];
+
     RenderTarget target;
     target.image = m_swapchain.Image(imageIndex);
     target.imageView = m_swapchain.ImageView(imageIndex);
     target.extent = m_swapchain.Extent();
     target.format = m_swapchain.ImageFormat();
-    frameRecorder.RecordFrame(cmd, target, ColorFormat(), VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, recordExtra);
+    target.depthImage = depthBuffer.Image();
+    target.depthImageView = depthBuffer.View();
+    target.depthFormat = depthBuffer.Format();
+    target.depthHasStencil = depthBuffer.HasStencilComponent();
+    frameRecorder.RecordFrame(
+        cmd, target, ColorFormat(), m_depthFormat, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, recordExtra);
 
     if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
         throw std::runtime_error("vkEndCommandBuffer failed");
@@ -244,7 +283,7 @@ void FramePresenter::RenderOffscreen(
         throw std::runtime_error("vkBeginCommandBuffer failed (offscreen)");
     }
 
-    frameRecorder.RecordFrame(m_offscreenCommandBuffer, target.Target(), ColorFormat(),
+    frameRecorder.RecordFrame(m_offscreenCommandBuffer, target.Target(), ColorFormat(), m_depthFormat,
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, recordExtra);
 
     if (vkEndCommandBuffer(m_offscreenCommandBuffer) != VK_SUCCESS) {

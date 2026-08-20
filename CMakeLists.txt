@@ -156,6 +156,8 @@ add_library(gte_core STATIC
     src/Renderer/Memory/GpuMemoryTracker.h
     src/Renderer/RenderTarget.h
     src/Renderer/RenderTexture.cpp
+    src/Renderer/DepthBuffer.cpp
+    src/Renderer/DepthBuffer.h
     src/Renderer/RenderTexture.h
     src/Renderer/Vulkan/VulkanInstance.cpp
     src/Renderer/Vulkan/VulkanInstance.h

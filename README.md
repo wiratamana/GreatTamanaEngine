@@ -107,11 +107,28 @@ conformant Vulkan implementation), and `Renderer::Submit()`/
 `FrameRecorder::Submit()` take an optional model matrix AND an optional
 view-projection matrix (both `Mat4::Identity()` by default) recorded via
 `vkCmdPushConstants` right before each draw as
-`pc.viewProj * pc.model * vec4(position, 0.0, 1.0)` — see
+`pc.viewProj * pc.model * vec4(position, 1.0)` — see
 `Shaders/Triangle.vert`'s matching `layout(push_constant)` block. A scene
 with no active `Camera` pushes an identity `viewProj`, preserving this
 engine's original "vertices already authored directly in clip space"
 triangle-demo behavior.
+Every render target (the swapchain, or a `RenderTexture`) is paired with a
+real **`DepthBuffer`** (`src/Renderer/DepthBuffer.h/.cpp`) at a format
+queried once from the physical device (`VulkanDevice::PickDepthFormat()`,
+surfaced as `Renderer::DepthFormat()` — the exact depth counterpart to
+`ColorFormat()`, same "Render Target Format Matching" discipline), and
+`Pipeline` always depth-tests/writes (`VK_COMPARE_OP_LESS`). The swapchain
+gets one `DepthBuffer` per swapchain image (`FramePresenter`, indexed by
+swapchain image index rather than frame-in-flight slot — the same "a
+just-acquired image is guaranteed free to reuse" guarantee
+`VulkanFrameSync`'s render-finished semaphores already rely on); each
+`RenderTexture` (Editor "Game"/"Scene" views) owns one companion
+`DepthBuffer` of its own, resized alongside its color image. This is what
+actually makes real (non-coplanar) 3D geometry — the built-in primitive
+shapes below — render correctly occluded instead of drawing in whatever
+order it happened to be submitted in; the engine's original hardcoded
+triangle demo never exposed this gap since its geometry was always flat and
+non-overlapping in screen space.
 
 ### Entity-Component-System (ECS)
 

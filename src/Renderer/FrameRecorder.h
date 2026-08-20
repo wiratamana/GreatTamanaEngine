@@ -55,17 +55,23 @@ public:
     void Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix = Mat4::Identity(),
         const Mat4& viewProjMatrix = Mat4::Identity());
 
-    // Records the undefined->color-attachment barrier, the dynamic-
-    // rendering clear + every queued Submit() draw + recordExtra, and the
-    // final transition to `finalLayout` - shared by FramePresenter::Present()
-    // (target = the current swapchain image, finalLayout =
-    // VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) and FramePresenter::RenderOffscreen()
-    // (target = a RenderTexture, finalLayout =
-    // VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL).
+    // Records the undefined->color-attachment (and undefined->depth-
+    // attachment) barriers, the dynamic-rendering clear + every queued
+    // Submit() draw + recordExtra, and the final transition to
+    // `finalLayout` - shared by FramePresenter::Present() (target = the
+    // current swapchain image, finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)
+    // and FramePresenter::RenderOffscreen() (target = a RenderTexture,
+    // finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL).
     //
-    // expectedFormat is asserted (debug builds only) against target.format -
-    // see AGENTS.md ("Render Target Format Matching") - the caller passes
-    // whatever Renderer::ColorFormat() currently is.
+    // expectedFormat/expectedDepthFormat are asserted (debug builds only)
+    // against target.format/target.depthFormat - see AGENTS.md ("Render
+    // Target Format Matching") - the caller passes whatever
+    // Renderer::ColorFormat()/Renderer::DepthFormat() currently are.
+    //
+    // The depth attachment is always cleared (loadOp = CLEAR, clearValue =
+    // 1.0 - the far plane) and its contents discarded afterwards (storeOp =
+    // DONT_CARE) - nothing ever samples a depth buffer built this way, it
+    // exists purely for this one draw pass's own occlusion testing.
     //
     // Clears the queued draw list right after recording it (NOT at the top
     // of this call) so a second RecordFrame() call later in the SAME frame
@@ -73,7 +79,7 @@ public:
     // already drew the queue into the Game view texture) never redraws it -
     // see BeginFrame()/Submit() above.
     void RecordFrame(VkCommandBuffer cmd, const RenderTarget& target, VkFormat expectedFormat,
-        VkImageLayout finalLayout, const std::function<void(VkCommandBuffer)>& recordExtra);
+        VkFormat expectedDepthFormat, VkImageLayout finalLayout, const std::function<void(VkCommandBuffer)>& recordExtra);
 
 private:
     // One queued Submit() call's worth of plain Vulkan handles - deliberately

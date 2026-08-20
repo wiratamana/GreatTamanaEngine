@@ -115,6 +115,17 @@ public:
     // AGENTS.md ("Render Target Format Matching").
     VkFormat ColorFormat() const noexcept;
 
+    // The depth-buffer format every pipeline/DepthBuffer this Renderer
+    // creates is built against (see VulkanDevice::PickDepthFormat() - the
+    // single source of truth, queried once from the physical device rather
+    // than hardcoded). The exact depth counterpart to ColorFormat() above -
+    // see AGENTS.md ("Render Target Format Matching"). Every render target
+    // this engine draws into (the swapchain, or an off-screen RenderTexture)
+    // has its own real DepthBuffer at this format, so real (non-coplanar)
+    // 3D geometry - the built-in primitive shapes (Renderer/Primitives/
+    // PrimitiveMeshGenerator.h) - is correctly depth-tested/occluded.
+    VkFormat DepthFormat() const noexcept;
+
     // Factory for off-screen render targets, so callers (Game, a future
     // Editor module, ...) never need direct access to the
     // VkPhysicalDevice/VkDevice this Renderer owns internally. `format`
@@ -274,6 +285,25 @@ private:
     VulkanInstance m_instance;
     VulkanSurface m_surface;
     VulkanDevice m_device;
+
+    // Computed once, right after m_device exists (VulkanDevice::
+    // PickDepthFormat() needs its physical device) - see DepthFormat()
+    // above. Declared here (not lower) so it's already initialized by the
+    // time m_presenter/m_resources below are constructed, both of which
+    // need it.
+    VkFormat m_depthFormat = VK_FORMAT_UNDEFINED;
+
+    // The ONE GpuMemoryTracker shared by both m_presenter (its per-
+    // swapchain-image DepthBuffers) and m_resources (every Buffer/
+    // RenderTexture/its own DepthBuffer created through it) - constructed
+    // here (no dependencies of its own) so both collaborators below get the
+    // SAME instance rather than two independent ones, which would silently
+    // split GetMemoryTotals()/GetMemoryResources() across two disjoint
+    // tallies instead of one accurate whole-engine picture. See
+    // GpuMemoryTracker's own class comment for why this is owned via
+    // shared_ptr in the first place.
+    std::shared_ptr<GpuMemoryTracker> m_memoryTracker = std::make_shared<GpuMemoryTracker>();
+
     // Declared (and thus destroyed, per reverse-declaration-order RAII
     // teardown) right after m_device: relative order vs. m_presenter
     // doesn't matter (the allocator never touches the swapchain), but it

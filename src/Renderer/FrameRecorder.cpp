@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstring>
+#include <iterator>
 
 namespace gte {
 
@@ -31,21 +32,23 @@ void FrameRecorder::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat
 }
 
 void FrameRecorder::RecordFrame(VkCommandBuffer cmd, const RenderTarget& target, VkFormat expectedFormat,
-    VkImageLayout finalLayout, const std::function<void(VkCommandBuffer)>& recordExtra)
+    VkFormat expectedDepthFormat, VkImageLayout finalLayout, const std::function<void(VkCommandBuffer)>& recordExtra)
 {
     // Fail fast (debug builds only) if this target's format doesn't match
-    // Renderer::ColorFormat() - the shared default every pipeline is
-    // expected to be built against (see AGENTS.md, "Render Target Format
-    // Matching"). A target that's deliberately a different format needs its
-    // own dedicated pipeline variant recorded through recordExtra; this
-    // catches a mismatch right here, at the one recording path shared by
-    // Present()/RenderOffscreen(), instead of a confusing validation-layer
-    // warning (or silent misrendering on a driver that happens to tolerate
-    // it) once real pipelines exist. Compiled out entirely in release
-    // (NDEBUG) - zero cost.
+    // Renderer::ColorFormat()/DepthFormat() - the shared defaults every
+    // pipeline is expected to be built against (see AGENTS.md, "Render
+    // Target Format Matching"). A target that's deliberately a different
+    // format needs its own dedicated pipeline variant recorded through
+    // recordExtra; this catches a mismatch right here, at the one recording
+    // path shared by Present()/RenderOffscreen(), instead of a confusing
+    // validation-layer warning (or silent misrendering on a driver that
+    // happens to tolerate it). Compiled out entirely in release (NDEBUG) -
+    // zero cost.
     assert(target.format == expectedFormat &&
         "FrameRecorder::RecordFrame: target format does not match Renderer::ColorFormat() - "
         "any pipeline recorded via recordExtra here must have been built for THIS target's exact format.");
+    assert(target.depthFormat == expectedDepthFormat &&
+        "FrameRecorder::RecordFrame: target depth format does not match Renderer::DepthFormat().");
 
     // Dynamic rendering (no VkRenderPass/VkFramebuffer) means WE are
     // responsible for the layout transitions a render pass would normally
@@ -63,11 +66,37 @@ void FrameRecorder::RecordFrame(VkCommandBuffer cmd, const RenderTarget& target,
     toColorAttachment.image = target.image;
     toColorAttachment.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
-    VkDependencyInfo toColorAttachmentDep{};
-    toColorAttachmentDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-    toColorAttachmentDep.imageMemoryBarrierCount = 1;
-    toColorAttachmentDep.pImageMemoryBarriers = &toColorAttachment;
-    vkCmdPipelineBarrier2(cmd, &toColorAttachmentDep);
+    // Depth image aspect mask/layout must match whatever it actually is
+    // (depth-only vs. combined depth+stencil - see DepthBuffer::
+    // HasStencilComponent()). Old layout is UNDEFINED here too - always
+    // valid when the attachment's own loadOp is CLEAR (see below), which
+    // discards whatever was in it beforehand anyway.
+    const VkImageAspectFlags depthAspectMask =
+        VK_IMAGE_ASPECT_DEPTH_BIT | (target.depthHasStencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0);
+    const VkImageLayout depthAttachmentLayout =
+        target.depthHasStencil ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+
+    VkImageMemoryBarrier2 toDepthAttachment{};
+    toDepthAttachment.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    toDepthAttachment.srcStageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+    toDepthAttachment.srcAccessMask = VK_ACCESS_2_NONE;
+    toDepthAttachment.dstStageMask =
+        VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+    toDepthAttachment.dstAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    toDepthAttachment.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    toDepthAttachment.newLayout = depthAttachmentLayout;
+    toDepthAttachment.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toDepthAttachment.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toDepthAttachment.image = target.depthImage;
+    toDepthAttachment.subresourceRange = { depthAspectMask, 0, 1, 0, 1 };
+
+    const VkImageMemoryBarrier2 toAttachmentBarriers[] = { toColorAttachment, toDepthAttachment };
+
+    VkDependencyInfo toAttachmentDep{};
+    toAttachmentDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    toAttachmentDep.imageMemoryBarrierCount = static_cast<std::uint32_t>(std::size(toAttachmentBarriers));
+    toAttachmentDep.pImageMemoryBarriers = toAttachmentBarriers;
+    vkCmdPipelineBarrier2(cmd, &toAttachmentDep);
 
     VkRenderingAttachmentInfo colorAttachment{};
     colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
@@ -79,12 +108,24 @@ void FrameRecorder::RecordFrame(VkCommandBuffer cmd, const RenderTarget& target,
         { m_clearColor[0], m_clearColor[1], m_clearColor[2], m_clearColor[3] }
     };
 
+    VkRenderingAttachmentInfo depthAttachment{};
+    depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    depthAttachment.imageView = target.depthImageView;
+    depthAttachment.imageLayout = depthAttachmentLayout;
+    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    // Nothing ever samples this depth buffer afterwards (see the
+    // declaration comment in FrameRecorder.h) - DONT_CARE lets the driver
+    // skip writing it back out where the hardware supports that.
+    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depthAttachment.clearValue.depthStencil = { 1.0f, 0 }; // 1.0 == the far plane (see Pipeline's VK_COMPARE_OP_LESS).
+
     VkRenderingInfo renderingInfo{};
     renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
     renderingInfo.renderArea = { { 0, 0 }, target.extent };
     renderingInfo.layerCount = 1;
     renderingInfo.colorAttachmentCount = 1;
     renderingInfo.pColorAttachments = &colorAttachment;
+    renderingInfo.pDepthAttachment = &depthAttachment;
 
     vkCmdBeginRendering(cmd, &renderingInfo);
 
@@ -170,6 +211,11 @@ void FrameRecorder::RecordFrame(VkCommandBuffer cmd, const RenderTarget& target,
     toFinalDep.imageMemoryBarrierCount = 1;
     toFinalDep.pImageMemoryBarriers = &toFinal;
     vkCmdPipelineBarrier2(cmd, &toFinalDep);
+
+    // The depth image is never touched again after this pass (see the
+    // declaration comment in FrameRecorder.h) - no final transition needed;
+    // the next RecordFrame() call against it starts over from
+    // VK_IMAGE_LAYOUT_UNDEFINED via loadOp = CLEAR again either way.
 }
 
 } // namespace gte

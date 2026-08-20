@@ -1,32 +1,49 @@
 ﻿#pragma once
 
+#include "DepthBuffer.h"
 #include "FrameRecorder.h"
+#include "Memory/GpuMemoryTracker.h"
 #include "RenderTarget.h"
 #include "RenderTexture.h"
+#include "Vulkan/VulkanAllocator.h"
 #include "Vulkan/VulkanFrameSync.h"
 #include "Vulkan/VulkanSwapchain.h"
 
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <memory>
+#include <vector>
 
 namespace gte {
 
 // Owns the swapchain, every per-frame/per-image synchronization object (see
-// VulkanFrameSync), and the command buffers (one set per frame-in-flight
-// for Present(), plus a dedicated one for RenderOffscreen() - see
+// VulkanFrameSync), the command buffers (one set per frame-in-flight for
+// Present(), plus a dedicated one for RenderOffscreen() - see
 // VulkanFrameSync's class comment for why the offscreen path doesn't share
-// the per-frame objects) needed to actually record and submit a frame's
-// Vulkan work. This is the part of the old monolithic Renderer that
-// literally talks to vkAcquireNextImageKHR/vkQueueSubmit/vkQueuePresentKHR -
+// the per-frame objects), and one DepthBuffer PER SWAPCHAIN IMAGE (see
+// DepthBuffer.h) needed to actually record and submit a frame's Vulkan
+// work. This is the part of the old monolithic Renderer that literally
+// talks to vkAcquireNextImageKHR/vkQueueSubmit/vkQueuePresentKHR -
 // Present()/RenderOffscreen() below are moved here verbatim from the old
 // Renderer::Present()/RenderOffscreen()/RecreateSwapchain().
 //
-// Does NOT own the VkPhysicalDevice/VkDevice/VkSurfaceKHR/VkQueue handles
-// passed in - all must outlive this object (same convention as
-// VulkanSwapchain itself not owning the device/surface passed to it). DOES
-// own its swapchain, frame-sync objects, and command pool/buffers for its
-// entire lifetime.
+// Depth buffers are indexed by SWAPCHAIN IMAGE INDEX (the same index
+// vkAcquireNextImageKHR returns), not by frame-in-flight slot - this is
+// deliberate, not arbitrary: vkAcquireNextImageKHR's own semaphore already
+// guarantees a given swapchain image (and therefore whatever is paired with
+// it) is genuinely free to write again before returning that index (see
+// VulkanFrameSync::RenderFinishedSemaphore()'s own comment for the exact
+// same reasoning applied to render-finished semaphores) - reusing that same
+// guarantee for depth buffers avoids having to separately reason about
+// frames-in-flight potentially overlapping on the GPU (kFramesInFlight can
+// legitimately differ from the swapchain's own image count).
+//
+// Does NOT own the VkPhysicalDevice/VkDevice/VkSurfaceKHR/VkQueue/
+// VmaAllocator handles passed in - all must outlive this object (same
+// convention as VulkanSwapchain itself not owning the device/surface passed
+// to it). DOES own its swapchain, frame-sync objects, per-swapchain-image
+// DepthBuffers, and command pool/buffers for its entire lifetime.
 //
 // Present()/RenderOffscreen() both take a FrameRecorder& parameter rather
 // than storing one, so this class never holds a reference/pointer to
@@ -38,7 +55,8 @@ class FramePresenter {
 public:
     FramePresenter(VkPhysicalDevice physicalDevice, VkDevice device, VkSurfaceKHR surface,
         std::uint32_t graphicsQueueFamily, std::uint32_t presentQueueFamily, VkQueue graphicsQueue,
-        VkQueue presentQueue, int width, int height);
+        VkQueue presentQueue, int width, int height, VmaAllocator allocator, VkFormat depthFormat,
+        std::shared_ptr<GpuMemoryTracker> memoryTracker);
     ~FramePresenter();
 
     FramePresenter(const FramePresenter&) = delete;
@@ -78,6 +96,7 @@ private:
     static constexpr std::uint32_t kFramesInFlight = 2;
 
     void CreateCommandObjects();
+    void CreateDepthBuffers();
     void RecreateSwapchain();
     void Destroy() noexcept;
 
@@ -86,12 +105,25 @@ private:
     VkQueue m_presentQueue = VK_NULL_HANDLE;
     std::uint32_t m_graphicsQueueFamily = 0;
 
+    // Needed to (re)build m_depthBuffers below whenever the swapchain
+    // itself is (re)created - not owned (must outlive this object, same
+    // convention as everything else this class doesn't own).
+    VmaAllocator m_allocator = VK_NULL_HANDLE;
+    VkFormat m_depthFormat = VK_FORMAT_UNDEFINED;
+    std::shared_ptr<GpuMemoryTracker> m_memoryTracker;
+
     VulkanSwapchain m_swapchain;
     // Per-frame/per-image semaphores/fences, and the dedicated offscreen
     // fence - see VulkanFrameSync.h. Its per-swapchain-image semaphores are
     // rebuilt (RecreateRenderFinishedSemaphores()) whenever the swapchain
     // itself is recreated - see RecreateSwapchain().
     VulkanFrameSync m_frameSync;
+
+    // One DepthBuffer per swapchain image (see the class comment for why
+    // this is indexed by swapchain image index, not frame-in-flight slot) -
+    // rebuilt alongside the swapchain in RecreateSwapchain(), same as
+    // m_frameSync's render-finished semaphores.
+    std::vector<DepthBuffer> m_depthBuffers;
 
     VkCommandPool m_commandPool = VK_NULL_HANDLE;
     std::array<VkCommandBuffer, kFramesInFlight> m_commandBuffers{};

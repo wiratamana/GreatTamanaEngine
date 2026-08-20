@@ -226,6 +226,29 @@ void VulkanDevice::CreateLogicalDevice()
     vkGetDeviceQueue(m_device, m_presentFamily, 0, &m_presentQueue);
 }
 
+VkFormat VulkanDevice::PickDepthFormat() const
+{
+    // Depth-only first (see the declaration comment in VulkanDevice.h for
+    // why) - combined depth+stencil formats only as a fallback.
+    const VkFormat candidates[] = {
+        VK_FORMAT_D32_SFLOAT,
+        VK_FORMAT_D32_SFLOAT_S8_UINT,
+        VK_FORMAT_D24_UNORM_S8_UINT,
+    };
+
+    for (const VkFormat candidate : candidates) {
+        VkFormatProperties properties{};
+        vkGetPhysicalDeviceFormatProperties(m_physicalDevice, candidate, &properties);
+        if (properties.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) {
+            return candidate;
+        }
+    }
+
+    throw std::runtime_error(
+        "VulkanDevice::PickDepthFormat: no supported depth/stencil attachment format found "
+        "(none of D32_SFLOAT/D32_SFLOAT_S8_UINT/D24_UNORM_S8_UINT) - should be impossible per the Vulkan spec.");
+}
+
 void VulkanDevice::Destroy() noexcept
 {
     if (m_device != VK_NULL_HANDLE) {

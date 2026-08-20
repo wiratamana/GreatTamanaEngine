@@ -195,6 +195,24 @@ whenever adding a real graphics pipeline or a new render target:
   different-format target (see above) needs its own recording path rather
   than going through this assert unmodified - don't weaken or delete the
   assert to make a special case fit.
+- **This same discipline applies to DEPTH, not just color.**
+  `Renderer::DepthFormat()` (`VulkanDevice::PickDepthFormat()`, queried once
+  from the physical device rather than hardcoded) is depth's equivalent of
+  `Renderer::ColorFormat()` - every `Pipeline` is built with
+  `VkPipelineRenderingCreateInfo::depthAttachmentFormat` set to it, and every
+  render target (the swapchain's own per-image `DepthBuffer`s in
+  `FramePresenter`, or a `RenderTexture`'s own companion `DepthBuffer` - see
+  `src/Renderer/DepthBuffer.h`) is created at that exact same format.
+  `FrameRecorder::RecordFrame()` asserts `target.depthFormat ==
+  DepthFormat()` right alongside its existing color-format assert, for
+  exactly the same reason. This was added specifically because the engine's
+  original hardcoded triangle demo was always flat/coplanar (no real
+  occlusion to get wrong), so a genuinely 3D, depth-tested render target
+  (needed once the built-in primitive shapes - `Renderer/Primitives/
+  PrimitiveMeshGenerator.h` - introduced real overlapping-in-screen-space
+  geometry) never existed until now - don't reintroduce a render target or
+  pipeline that skips a depth attachment/depth test, even for something that
+  "looks flat," without a specific reason.
 
 ## Entity-Component-System (ECS)
 

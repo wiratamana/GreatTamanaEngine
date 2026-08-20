@@ -43,9 +43,19 @@ VkShaderModule CreateShaderModule(VkDevice device, const std::vector<char>& spir
     return module;
 }
 
+// True for a combined depth+stencil format - see VulkanDevice::
+// PickDepthFormat() (which always prefers a depth-only format when the
+// device supports one) and DepthBuffer::HasStencilComponent() (the same
+// check, applied to an actual live DepthBuffer rather than a bare format).
+bool DepthFormatHasStencil(VkFormat format)
+{
+    return format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT ||
+        format == VK_FORMAT_D16_UNORM_S8_UINT;
+}
+
 } // namespace
 
-Pipeline::Pipeline(VkDevice device, VkFormat colorFormat, const std::string& vertexShaderSpirvPath,
+Pipeline::Pipeline(VkDevice device, VkFormat colorFormat, VkFormat depthFormat, const std::string& vertexShaderSpirvPath,
     const std::string& fragmentShaderSpirvPath)
     : m_device(device)
 {
@@ -115,6 +125,20 @@ Pipeline::Pipeline(VkDevice device, VkFormat colorFormat, const std::string& ver
         multisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
         multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
+        // Standard "closer to the camera wins" depth test/write - see the
+        // class comment in Pipeline.h for why this is unconditional (every
+        // render target this pipeline draws into is always paired with a
+        // real DepthBuffer now). VK_COMPARE_OP_LESS matches this engine's
+        // [0,1] (near=0, far=1) depth range - see Math/Mat4.h's
+        // PerspectiveFovLH_ZO.
+        VkPipelineDepthStencilStateCreateInfo depthStencil{};
+        depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+        depthStencil.depthTestEnable = VK_TRUE;
+        depthStencil.depthWriteEnable = VK_TRUE;
+        depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+        depthStencil.depthBoundsTestEnable = VK_FALSE;
+        depthStencil.stencilTestEnable = VK_FALSE;
+
         VkPipelineColorBlendAttachmentState colorBlendAttachment{};
         colorBlendAttachment.blendEnable = VK_FALSE;
         colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
@@ -150,12 +174,20 @@ Pipeline::Pipeline(VkDevice device, VkFormat colorFormat, const std::string& ver
         }
 
         // Dynamic rendering (no VkRenderPass/VkFramebuffer) - this pipeline
-        // must be built against the exact color format it will actually
-        // draw into. See AGENTS.md ("Render Target Format Matching").
+        // must be built against the exact color AND depth format it will
+        // actually draw into. See AGENTS.md ("Render Target Format
+        // Matching"). stencilAttachmentFormat is only set for a combined
+        // depth+stencil format (DepthFormatHasStencil() above) - this
+        // engine has no stencil use today, but the spec requires this field
+        // to match the image's actual format whenever it also carries a
+        // stencil aspect.
+        const bool depthHasStencil = DepthFormatHasStencil(depthFormat);
         VkPipelineRenderingCreateInfo renderingInfo{};
         renderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
         renderingInfo.colorAttachmentCount = 1;
         renderingInfo.pColorAttachmentFormats = &colorFormat;
+        renderingInfo.depthAttachmentFormat = depthFormat;
+        renderingInfo.stencilAttachmentFormat = depthHasStencil ? depthFormat : VK_FORMAT_UNDEFINED;
 
         VkGraphicsPipelineCreateInfo pipelineInfo{};
         pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -167,6 +199,7 @@ Pipeline::Pipeline(VkDevice device, VkFormat colorFormat, const std::string& ver
         pipelineInfo.pViewportState = &viewportState;
         pipelineInfo.pRasterizationState = &rasterizer;
         pipelineInfo.pMultisampleState = &multisample;
+        pipelineInfo.pDepthStencilState = &depthStencil;
         pipelineInfo.pColorBlendState = &colorBlend;
         pipelineInfo.pDynamicState = &dynamicState;
         pipelineInfo.layout = m_layout;

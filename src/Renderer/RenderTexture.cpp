@@ -7,12 +7,13 @@
 namespace gte {
 
 RenderTexture::RenderTexture(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDevice device,
-    int width, int height, VkFormat format, const char* debugName)
+    int width, int height, VkFormat format, VkFormat depthFormat, const char* debugName)
     : m_allocator(allocator)
     , m_tracker(std::move(tracker))
     , m_debugName(debugName)
     , m_device(device)
     , m_format(format)
+    , m_depthFormat(depthFormat)
 {
     Create(width, height);
 }
@@ -29,11 +30,13 @@ RenderTexture::RenderTexture(RenderTexture&& other) noexcept
     , m_debugName(std::exchange(other.m_debugName, nullptr))
     , m_device(std::exchange(other.m_device, VK_NULL_HANDLE))
     , m_format(other.m_format)
+    , m_depthFormat(other.m_depthFormat)
     , m_image(std::exchange(other.m_image, VK_NULL_HANDLE))
     , m_allocation(std::exchange(other.m_allocation, VK_NULL_HANDLE))
     , m_imageView(std::exchange(other.m_imageView, VK_NULL_HANDLE))
     , m_sampler(std::exchange(other.m_sampler, VK_NULL_HANDLE))
     , m_extent(other.m_extent)
+    , m_depthBuffer(std::move(other.m_depthBuffer))
 {
 }
 
@@ -47,11 +50,13 @@ RenderTexture& RenderTexture::operator=(RenderTexture&& other) noexcept
         m_debugName = std::exchange(other.m_debugName, nullptr);
         m_device = std::exchange(other.m_device, VK_NULL_HANDLE);
         m_format = other.m_format;
+        m_depthFormat = other.m_depthFormat;
         m_image = std::exchange(other.m_image, VK_NULL_HANDLE);
         m_allocation = std::exchange(other.m_allocation, VK_NULL_HANDLE);
         m_imageView = std::exchange(other.m_imageView, VK_NULL_HANDLE);
         m_sampler = std::exchange(other.m_sampler, VK_NULL_HANDLE);
         m_extent = other.m_extent;
+        m_depthBuffer = std::move(other.m_depthBuffer);
     }
     return *this;
 }
@@ -69,6 +74,12 @@ RenderTarget RenderTexture::Target() const noexcept
     target.imageView = m_imageView;
     target.extent = m_extent;
     target.format = m_format;
+    if (m_depthBuffer) {
+        target.depthImage = m_depthBuffer->Image();
+        target.depthImageView = m_depthBuffer->View();
+        target.depthFormat = m_depthBuffer->Format();
+        target.depthHasStencil = m_depthBuffer->HasStencilComponent();
+    }
     return target;
 }
 
@@ -151,10 +162,21 @@ void RenderTexture::Create(int width, int height)
     if (vkCreateSampler(m_device, &samplerInfo, nullptr, &m_sampler) != VK_SUCCESS) {
         throw std::runtime_error("RenderTexture: vkCreateSampler failed.");
     }
+
+    // This RenderTexture's own companion depth buffer - see the class
+    // comment for why one (rather than several, as the swapchain needs) is
+    // safe here. debugName is left null for the depth side - the "Memory"
+    // panel already distinguishes it from the color image by its size/type,
+    // and this avoids needing a second static-storage-duration string per
+    // named RenderTexture.
+    m_depthBuffer =
+        std::make_unique<DepthBuffer>(m_allocator, m_tracker, m_device, width, height, m_depthFormat);
 }
 
 void RenderTexture::Destroy() noexcept
 {
+    m_depthBuffer.reset();
+
     if (m_sampler != VK_NULL_HANDLE) {
         vkDestroySampler(m_device, m_sampler, nullptr);
         m_sampler = VK_NULL_HANDLE;

@@ -35,6 +35,24 @@ public:
     VkPhysicalDevice Physical() const noexcept { return m_physicalDevice; }
     VkDevice Native() const noexcept { return m_device; }
 
+    // Picks the best depth-buffer format this physical device actually
+    // supports as a depth/stencil attachment (queried via
+    // vkGetPhysicalDeviceFormatProperties(), never assumed) - the single
+    // source of truth every depth-tested Pipeline/DepthBuffer is built
+    // against, the exact same "ask the device, don't hardcode a literal"
+    // discipline Renderer::ColorFormat() already applies to the swapchain's
+    // surface format (see AGENTS.md, "Render Target Format Matching").
+    // Prefers a depth-only format (VK_FORMAT_D32_SFLOAT) when available -
+    // simpler layout/aspect-mask handling than a combined depth+stencil
+    // format, and this engine has no stencil use today - falling back to a
+    // combined depth+stencil format only if that isn't supported (rare on
+    // desktop GPUs). Throws std::runtime_error if this device somehow
+    // supports none of the candidates, which the Vulkan spec guarantees
+    // cannot happen (at least one of D16_UNORM/X8_D24_UNORM_PACK32/
+    // D32_SFLOAT must support this usage on every conformant
+    // implementation).
+    VkFormat PickDepthFormat() const;
+
     VkQueue GraphicsQueue() const noexcept { return m_graphicsQueue; }
     VkQueue PresentQueue() const noexcept { return m_presentQueue; }
     std::uint32_t GraphicsQueueFamily() const noexcept { return m_graphicsFamily; }
