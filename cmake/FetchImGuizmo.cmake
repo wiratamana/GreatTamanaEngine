@@ -39,6 +39,13 @@
 #       previous fetch staged correctly triggers a fresh re-download instead
 #       of silently reusing the wrong version.
 #
+# ImGuizmo.cpp is patched immediately after staging (see
+# _imguizmo_apply_gte_patches() below) to fix a genuine upstream bug: an
+# in-progress SCALE/ROTATE gizmo drag freezes solid the instant the mouse
+# cursor leaves the SetRect() rectangle (e.g. dragging out past the Scene
+# panel's edge), unlike TRANSLATE, which keeps tracking fine - see that
+# function's own comment for the full root-cause explanation.
+#
 # Defines one target:
 #   imguizmo   - STATIC library compiling ImGuizmo.cpp; publicly links the
 #                `imgui` target (ImGuizmo.cpp/.h include imgui.h and
@@ -170,6 +177,60 @@ function(_imguizmo_download_and_extract_ref ref_name out_root_dir)
     set(${out_root_dir} "${_root}" PARENT_SCOPE)
 endfunction()
 
+# _imguizmo_apply_gte_patches(<staged_cpp_path>)
+#
+# Patches a freshly-staged ImGuizmo.cpp to fix a genuine upstream bug found
+# while integrating the Scene-view transform gizmo: while a manipulation is
+# ALREADY in progress (gContext.mbUsing == true), HandleScale()/
+# HandleRotation() unconditionally also require gContext.mbMouseOver (an
+# ImGui window-hover flag) before doing anything at all - which silently
+# FREEZES an in-progress scale/rotate drag the instant the mouse cursor
+# leaves the ImGuizmo::SetRect() rectangle (e.g. dragging out past the
+# Scene panel's edge). HandleTranslation() has no such bug: it only
+# requires hover to START a brand-new manipulation (via its own
+# GetMoveType(), which separately checks `gContext.mbUsing ||
+# !gContext.mbMouseOver` and bails to MT_NONE - i.e. hover only gates
+# picking a NEW handle, never continuing one already grabbed) - never to
+# CONTINUE one already in progress. This patch makes HandleScale()/
+# HandleRotation() match that same, correct, Translate-only-checks-hover-
+# to-start pattern, by only requiring mbMouseOver when NOT already
+# gContext.mbUsing.
+#
+# Applied here (rather than hand-editing third_party/imguizmo/ImGuizmo.cpp
+# directly) so the fix survives IMGUIZMO_FORCE_REDOWNLOAD/a clean checkout/
+# CI re-fetching a pristine copy from GitHub - third_party/ is gitignored,
+# nothing under it is ever committed (see this file's own header comment).
+# Each of the two expected snippets is searched for BEFORE being replaced,
+# and a message(WARNING ...) is raised (never a silent no-op) if either is
+# missing - e.g. IMGUIZMO_RELEASE_TAG points at a future revision where
+# upstream rewords/fixes this differently - so a stale/ineffective patch
+# never ships unnoticed.
+function(_imguizmo_apply_gte_patches staged_cpp_path)
+    file(READ "${staged_cpp_path}" _src)
+
+    set(_scale_from "if((!Intersects(op, SCALE) && !Intersects(op, SCALEU)) || type != MT_NONE || !gContext.mbMouseOver)")
+    set(_scale_to "if((!Intersects(op, SCALE) && !Intersects(op, SCALEU)) || type != MT_NONE || (!gContext.mbMouseOver && !gContext.mbUsing)) // GreatTamanaEngine patch - see cmake/FetchImGuizmo.cmake's _imguizmo_apply_gte_patches()")
+
+    set(_rotate_from "if(!Intersects(op, ROTATE) || type != MT_NONE || !gContext.mbMouseOver)")
+    set(_rotate_to "if(!Intersects(op, ROTATE) || type != MT_NONE || (!gContext.mbMouseOver && !gContext.mbUsing)) // GreatTamanaEngine patch - see cmake/FetchImGuizmo.cmake's _imguizmo_apply_gte_patches()")
+
+    string(FIND "${_src}" "${_scale_from}" _scale_pos)
+    if(_scale_pos EQUAL -1)
+        message(WARNING "imguizmo: HandleScale()'s expected mbMouseOver gate text was not found - the scale-drag-freezes-outside-viewport patch was NOT applied. ImGuizmo's source may have changed upstream; re-check cmake/FetchImGuizmo.cmake's _imguizmo_apply_gte_patches().")
+    else()
+        string(REPLACE "${_scale_from}" "${_scale_to}" _src "${_src}")
+    endif()
+
+    string(FIND "${_src}" "${_rotate_from}" _rotate_pos)
+    if(_rotate_pos EQUAL -1)
+        message(WARNING "imguizmo: HandleRotation()'s expected mbMouseOver gate text was not found - the rotate-drag-freezes-outside-viewport patch was NOT applied. ImGuizmo's source may have changed upstream; re-check cmake/FetchImGuizmo.cmake's _imguizmo_apply_gte_patches().")
+    else()
+        string(REPLACE "${_rotate_from}" "${_rotate_to}" _src "${_src}")
+    endif()
+
+    file(WRITE "${staged_cpp_path}" "${_src}")
+endfunction()
+
 function(_imguizmo_download_and_stage resolved_ref)
     _imguizmo_download_and_extract_ref("${resolved_ref}" _root)
 
@@ -196,6 +257,8 @@ function(_imguizmo_download_and_stage resolved_ref)
     foreach(_f ${_core_files})
         file(COPY "${_src_dir}/${_f}" DESTINATION "${CMAKE_SOURCE_DIR}/third_party/imguizmo")
     endforeach()
+
+    _imguizmo_apply_gte_patches("${CMAKE_SOURCE_DIR}/third_party/imguizmo/ImGuizmo.cpp")
 
     file(WRITE "${CMAKE_SOURCE_DIR}/third_party/imguizmo/.gte_fetched_ref" "${resolved_ref}")
 
