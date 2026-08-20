@@ -55,23 +55,50 @@ public:
     void Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix = Mat4::Identity(),
         const Mat4& viewProjMatrix = Mat4::Identity());
 
-    // Records the undefined->color-attachment (and undefined->depth-
-    // attachment) barriers, the dynamic-rendering clear + every queued
-    // Submit() draw + recordExtra, and the final transition to
-    // `finalLayout` - shared by FramePresenter::Present() (target = the
-    // current swapchain image, finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)
-    // and FramePresenter::RenderOffscreen() (target = a RenderTexture,
+    // True if at least one Submit() call is currently queued (i.e. not yet
+    // consumed by a RecordFrame() call this frame). FramePresenter::Present()
+    // uses this to decide whether the CURRENT swapchain Present() pass will
+    // actually draw real, depth-tested engine geometry directly into the
+    // swapchain image - true in a release build (no Editor at all - Game
+    // always queues straight into the swapchain's own draw list there), or
+    // the rare Editor edge case where both "Game" and "Scene" panels are
+    // simultaneously hidden - versus false in the common Editor case, where
+    // Game's geometry is queued and consumed entirely by the two
+    // RenderOffscreen() calls into "Game"/"Scene" BEFORE Present() ever runs,
+    // leaving Present() with nothing but Dear ImGui's own (never depth-
+    // tested) chrome to draw. This is what lets the swapchain's own per-image
+    // DepthBuffers (see FramePresenter.h) be allocated lazily instead of
+    // unconditionally, saving real GPU memory in the common Editor case
+    // where they'd otherwise sit around bound/cleared every frame without
+    // ever being depth-tested against.
+    bool HasQueuedDraws() const noexcept { return !m_drawQueue.empty(); }
+
+    // Records the undefined->color-attachment (and, when target carries a
+    // real depth image, undefined->depth-attachment) barriers, the dynamic-
+    // rendering clear + every queued Submit() draw + recordExtra, and the
+    // final transition to `finalLayout` - shared by
+    // FramePresenter::Present() (target = the current swapchain image,
+    // finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) and
+    // FramePresenter::RenderOffscreen() (target = a RenderTexture,
     // finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL).
     //
-    // expectedFormat/expectedDepthFormat are asserted (debug builds only)
-    // against target.format/target.depthFormat - see AGENTS.md ("Render
+    // expectedFormat is asserted (debug builds only) against target.format;
+    // expectedDepthFormat likewise against target.depthFormat, but ONLY
+    // when target.depthImage != VK_NULL_HANDLE - see AGENTS.md ("Render
     // Target Format Matching") - the caller passes whatever
     // Renderer::ColorFormat()/Renderer::DepthFormat() currently are.
     //
-    // The depth attachment is always cleared (loadOp = CLEAR, clearValue =
-    // 1.0 - the far plane) and its contents discarded afterwards (storeOp =
-    // DONT_CARE) - nothing ever samples a depth buffer built this way, it
-    // exists purely for this one draw pass's own occlusion testing.
+    // target.depthImage == VK_NULL_HANDLE means "skip the depth attachment
+    // for this pass entirely" (no barrier, no depth clear,
+    // VkRenderingInfo::pDepthAttachment left NULL) - used by
+    // FramePresenter::Present() on a frame where HasQueuedDraws() above is
+    // false (see its own comment), since a pipeline that itself requires a
+    // real depth attachment is never actually bound in that case anyway.
+    // Whenever a real depth image IS supplied, it's always cleared
+    // (loadOp = CLEAR, clearValue = 1.0 - the far plane) and its contents
+    // discarded afterwards (storeOp = DONT_CARE) - nothing ever samples a
+    // depth buffer built this way, it exists purely for this one draw
+    // pass's own occlusion testing.
     //
     // Clears the queued draw list right after recording it (NOT at the top
     // of this call) so a second RecordFrame() call later in the SAME frame

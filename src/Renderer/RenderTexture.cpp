@@ -1,4 +1,4 @@
-﻿#include "RenderTexture.h"
+#include "RenderTexture.h"
 
 #include <cstdint>
 #include <stdexcept>
@@ -7,10 +7,11 @@
 namespace gte {
 
 RenderTexture::RenderTexture(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDevice device,
-    int width, int height, VkFormat format, VkFormat depthFormat, const char* debugName)
+    int width, int height, VkFormat format, VkFormat depthFormat, const char* debugName, const char* depthDebugName)
     : m_allocator(allocator)
     , m_tracker(std::move(tracker))
     , m_debugName(debugName)
+    , m_depthDebugName(depthDebugName)
     , m_device(device)
     , m_format(format)
     , m_depthFormat(depthFormat)
@@ -28,6 +29,7 @@ RenderTexture::RenderTexture(RenderTexture&& other) noexcept
     , m_tracker(std::move(other.m_tracker))
     , m_handle(std::exchange(other.m_handle, kInvalidGpuResourceHandle))
     , m_debugName(std::exchange(other.m_debugName, nullptr))
+    , m_depthDebugName(std::exchange(other.m_depthDebugName, nullptr))
     , m_device(std::exchange(other.m_device, VK_NULL_HANDLE))
     , m_format(other.m_format)
     , m_depthFormat(other.m_depthFormat)
@@ -48,6 +50,7 @@ RenderTexture& RenderTexture::operator=(RenderTexture&& other) noexcept
         m_tracker = std::move(other.m_tracker);
         m_handle = std::exchange(other.m_handle, kInvalidGpuResourceHandle);
         m_debugName = std::exchange(other.m_debugName, nullptr);
+        m_depthDebugName = std::exchange(other.m_depthDebugName, nullptr);
         m_device = std::exchange(other.m_device, VK_NULL_HANDLE);
         m_format = other.m_format;
         m_depthFormat = other.m_depthFormat;
@@ -124,7 +127,7 @@ void RenderTexture::Create(int width, int height)
     // Resize() (Destroy() + Create()) always re-tracks with a fresh handle
     // reflecting the NEW size - the tracker never holds a stale record.
     const GpuMemoryLocation location = ClassifyGpuMemoryLocation(m_allocator, m_allocation);
-    m_handle = m_tracker->Track(GpuResourceType::Texture, location, allocationInfo.size);
+    m_handle = m_tracker->Track(GpuResourceType::Texture, location, allocationInfo.size, m_format);
 #if GTE_ENABLE_EDITOR
     if (m_debugName != nullptr) {
         m_tracker->SetDebugName(m_handle, m_debugName);
@@ -165,12 +168,13 @@ void RenderTexture::Create(int width, int height)
 
     // This RenderTexture's own companion depth buffer - see the class
     // comment for why one (rather than several, as the swapchain needs) is
-    // safe here. debugName is left null for the depth side - the "Memory"
-    // panel already distinguishes it from the color image by its size/type,
-    // and this avoids needing a second static-storage-duration string per
-    // named RenderTexture.
-    m_depthBuffer =
-        std::make_unique<DepthBuffer>(m_allocator, m_tracker, m_device, width, height, m_depthFormat);
+    // safe here. Named via m_depthDebugName (if the caller supplied one) so
+    // it shows up as an identifiable engine-owned texture in the Editor's
+    // "Memory" panel instead of "(unnamed)" - see RenderTexture's
+    // constructor comment for the naming convention (e.g. "GameView" /
+    // "GameViewDepth").
+    m_depthBuffer = std::make_unique<DepthBuffer>(
+        m_allocator, m_tracker, m_device, width, height, m_depthFormat, m_depthDebugName);
 }
 
 void RenderTexture::Destroy() noexcept

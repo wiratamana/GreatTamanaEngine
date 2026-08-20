@@ -47,8 +47,16 @@ void FrameRecorder::RecordFrame(VkCommandBuffer cmd, const RenderTarget& target,
     assert(target.format == expectedFormat &&
         "FrameRecorder::RecordFrame: target format does not match Renderer::ColorFormat() - "
         "any pipeline recorded via recordExtra here must have been built for THIS target's exact format.");
-    assert(target.depthFormat == expectedDepthFormat &&
+    // Only enforced when this target actually carries a depth image -
+    // target.depthImage == VK_NULL_HANDLE deliberately means "skip the depth
+    // attachment for this pass entirely" (see below) - e.g.
+    // FramePresenter::Present() lazily skips allocating/binding the
+    // swapchain's own depth buffers on a frame where nothing but Dear
+    // ImGui's own (never depth-tested) chrome is being drawn into it.
+    assert((target.depthImage == VK_NULL_HANDLE || target.depthFormat == expectedDepthFormat) &&
         "FrameRecorder::RecordFrame: target depth format does not match Renderer::DepthFormat().");
+
+    const bool hasDepth = target.depthImage != VK_NULL_HANDLE;
 
     // Dynamic rendering (no VkRenderPass/VkFramebuffer) means WE are
     // responsible for the layout transitions a render pass would normally
@@ -70,7 +78,8 @@ void FrameRecorder::RecordFrame(VkCommandBuffer cmd, const RenderTarget& target,
     // (depth-only vs. combined depth+stencil - see DepthBuffer::
     // HasStencilComponent()). Old layout is UNDEFINED here too - always
     // valid when the attachment's own loadOp is CLEAR (see below), which
-    // discards whatever was in it beforehand anyway.
+    // discards whatever was in it beforehand anyway. Only built/used when
+    // hasDepth is true - see below.
     const VkImageAspectFlags depthAspectMask =
         VK_IMAGE_ASPECT_DEPTH_BIT | (target.depthHasStencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0);
     const VkImageLayout depthAttachmentLayout =
@@ -90,11 +99,20 @@ void FrameRecorder::RecordFrame(VkCommandBuffer cmd, const RenderTarget& target,
     toDepthAttachment.image = target.depthImage;
     toDepthAttachment.subresourceRange = { depthAspectMask, 0, 1, 0, 1 };
 
-    const VkImageMemoryBarrier2 toAttachmentBarriers[] = { toColorAttachment, toDepthAttachment };
+    // Only include the depth barrier when this target actually has a depth
+    // image (hasDepth) - a target with none (see above) skips it entirely,
+    // since there's nothing to transition.
+    VkImageMemoryBarrier2 toAttachmentBarriers[2];
+    toAttachmentBarriers[0] = toColorAttachment;
+    std::uint32_t toAttachmentBarrierCount = 1;
+    if (hasDepth) {
+        toAttachmentBarriers[1] = toDepthAttachment;
+        toAttachmentBarrierCount = 2;
+    }
 
     VkDependencyInfo toAttachmentDep{};
     toAttachmentDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-    toAttachmentDep.imageMemoryBarrierCount = static_cast<std::uint32_t>(std::size(toAttachmentBarriers));
+    toAttachmentDep.imageMemoryBarrierCount = toAttachmentBarrierCount;
     toAttachmentDep.pImageMemoryBarriers = toAttachmentBarriers;
     vkCmdPipelineBarrier2(cmd, &toAttachmentDep);
 
@@ -125,7 +143,14 @@ void FrameRecorder::RecordFrame(VkCommandBuffer cmd, const RenderTarget& target,
     renderingInfo.layerCount = 1;
     renderingInfo.colorAttachmentCount = 1;
     renderingInfo.pColorAttachments = &colorAttachment;
-    renderingInfo.pDepthAttachment = &depthAttachment;
+    // NULL when this target has no depth image (see hasDepth above) - a
+    // pipeline that itself requires a real depth attachment (e.g. this
+    // engine's own Pipeline, built with depthAttachmentFormat =
+    // Renderer::DepthFormat()) is never actually bound/drawn with in that
+    // case anyway, since m_drawQueue is guaranteed empty whenever the caller
+    // chose not to supply a depth image - see
+    // FrameRecorder::HasQueuedDraws()'s own comment.
+    renderingInfo.pDepthAttachment = hasDepth ? &depthAttachment : nullptr;
 
     vkCmdBeginRendering(cmd, &renderingInfo);
 
@@ -142,7 +167,6 @@ void FrameRecorder::RecordFrame(VkCommandBuffer cmd, const RenderTarget& target,
         viewport.minDepth = 0.0f;
         viewport.maxDepth = 1.0f;
         vkCmdSetViewport(cmd, 0, 1, &viewport);
-
         VkRect2D scissor{};
         scissor.offset = { 0, 0 };
         scissor.extent = target.extent;

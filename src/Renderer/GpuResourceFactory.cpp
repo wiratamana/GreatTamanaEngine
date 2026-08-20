@@ -64,9 +64,10 @@ void GpuResourceFactory::Destroy() noexcept
 }
 
 RenderTexture GpuResourceFactory::CreateRenderTexture(
-    int width, int height, VkFormat format, const char* debugName) const
+    int width, int height, VkFormat format, const char* debugName, const char* depthDebugName) const
 {
-    return RenderTexture(m_allocator, m_memoryTracker, m_device, width, height, format, m_depthFormat, debugName);
+    return RenderTexture(
+        m_allocator, m_memoryTracker, m_device, width, height, format, m_depthFormat, debugName, depthDebugName);
 }
 
 Buffer GpuResourceFactory::CreateBuffer(

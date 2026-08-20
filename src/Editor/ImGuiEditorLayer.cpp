@@ -104,8 +104,10 @@ namespace {
 class ImGuiEditorLayer final : public IEditorLayer {
 public:
     ImGuiEditorLayer(Window& window, Renderer& renderer)
-        : m_gameView(renderer.CreateRenderTexture(window.Width(), window.Height(), VK_FORMAT_UNDEFINED, "GameView"))
-        , m_sceneView(renderer.CreateRenderTexture(window.Width(), window.Height(), VK_FORMAT_UNDEFINED, "SceneView"))
+        : m_gameView(renderer.CreateRenderTexture(
+              window.Width(), window.Height(), VK_FORMAT_UNDEFINED, "GameView", "GameViewDepth"))
+        , m_sceneView(renderer.CreateRenderTexture(
+              window.Width(), window.Height(), VK_FORMAT_UNDEFINED, "SceneView", "SceneViewDepth"))
     {
         // See EditorContext::desiredExtent/desiredSceneExtent for why both
         // are initialized to the OS window's startup size here.

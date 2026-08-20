@@ -1,4 +1,4 @@
-#include "DepthBuffer.h"
+﻿#include "DepthBuffer.h"
 
 #include <stdexcept>
 #include <utility>
@@ -99,7 +99,7 @@ void DepthBuffer::Create(int width, int height)
     // just the constructor) so a Resize() (Destroy() + Create()) always
     // reflects the NEW size under a fresh handle, never a stale one.
     const GpuMemoryLocation location = ClassifyGpuMemoryLocation(m_allocator, m_allocation);
-    m_handle = m_tracker->Track(GpuResourceType::Texture, location, allocationInfo.size);
+    m_handle = m_tracker->Track(GpuResourceType::Texture, location, allocationInfo.size, m_format);
 #if GTE_ENABLE_EDITOR
     if (m_debugName != nullptr) {
         m_tracker->SetDebugName(m_handle, m_debugName);

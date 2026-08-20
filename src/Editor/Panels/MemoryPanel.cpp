@@ -61,9 +61,10 @@ void BuildGpuTrackedSection(Renderer& renderer)
 
     constexpr ImGuiTableFlags tableFlags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg
         | ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY;
-    if (ImGui::BeginTable("MemoryResourcesTable", 4, tableFlags, ImVec2(0.0f, 200.0f))) {
+    if (ImGui::BeginTable("MemoryResourcesTable", 5, tableFlags, ImVec2(0.0f, 200.0f))) {
         ImGui::TableSetupColumn("Name");
         ImGui::TableSetupColumn("Type");
+        ImGui::TableSetupColumn("Format");
         ImGui::TableSetupColumn("Location");
         ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, 90.0f);
         ImGui::TableHeadersRow();
@@ -78,9 +79,12 @@ void BuildGpuTrackedSection(Renderer& renderer)
             ImGui::TextUnformatted(ToString(row.type));
 
             ImGui::TableSetColumnIndex(2);
-            ImGui::TextUnformatted(ToString(row.location));
+            ImGui::TextUnformatted(ToString(row.format).c_str());
 
             ImGui::TableSetColumnIndex(3);
+            ImGui::TextUnformatted(ToString(row.location));
+
+            ImGui::TableSetColumnIndex(4);
             ImGui::TextUnformatted(FormatBytes(row.sizeBytes).c_str());
         }
 

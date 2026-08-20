@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "DepthBuffer.h"
 #include "FrameRecorder.h"
@@ -22,9 +22,10 @@ namespace gte {
 // Present(), plus a dedicated one for RenderOffscreen() - see
 // VulkanFrameSync's class comment for why the offscreen path doesn't share
 // the per-frame objects), and one DepthBuffer PER SWAPCHAIN IMAGE (see
-// DepthBuffer.h) needed to actually record and submit a frame's Vulkan
-// work. This is the part of the old monolithic Renderer that literally
-// talks to vkAcquireNextImageKHR/vkQueueSubmit/vkQueuePresentKHR -
+// DepthBuffer.h, allocated LAZILY - see m_depthBuffers below) needed to
+// actually record and submit a frame's Vulkan work. This is the part of the
+// old monolithic Renderer that literally talks to
+// vkAcquireNextImageKHR/vkQueueSubmit/vkQueuePresentKHR -
 // Present()/RenderOffscreen() below are moved here verbatim from the old
 // Renderer::Present()/RenderOffscreen()/RecreateSwapchain().
 //
@@ -97,6 +98,11 @@ private:
 
     void CreateCommandObjects();
     void CreateDepthBuffers();
+    // Lazily creates m_depthBuffers (via CreateDepthBuffers()) the first
+    // time they're actually needed - a no-op if they already exist. See
+    // Present()/m_depthBuffers' own comment for why "actually needed" isn't
+    // simply "always", unlike a RenderTexture's own companion DepthBuffer.
+    void EnsureDepthBuffersForSwapchain();
     void RecreateSwapchain();
     void Destroy() noexcept;
 
@@ -120,9 +126,22 @@ private:
     VulkanFrameSync m_frameSync;
 
     // One DepthBuffer per swapchain image (see the class comment for why
-    // this is indexed by swapchain image index, not frame-in-flight slot) -
-    // rebuilt alongside the swapchain in RecreateSwapchain(), same as
-    // m_frameSync's render-finished semaphores.
+    // this is indexed by swapchain image index, not frame-in-flight slot).
+    // Deliberately EMPTY until EnsureDepthBuffersForSwapchain() first
+    // creates them (see Present()) - unlike a RenderTexture's own companion
+    // DepthBuffer (always real geometry drawn into it), the swapchain's
+    // Present() pass, in the common Editor case, draws NOTHING but Dear
+    // ImGui's own (never depth-tested) chrome - Game's actual geometry is
+    // consumed entirely by the two RenderOffscreen() calls into "Game"/
+    // "Scene" before Present() ever runs (see Application::Run()). Rather
+    // than unconditionally pay ~1 window-resolution-sized depth image PER
+    // swapchain image for a pass that then never depth-tests anything, these
+    // are only ever allocated once a frame is actually found to need one -
+    // see FrameRecorder::HasQueuedDraws(). Once created, kept alive for the
+    // rest of this FramePresenter's lifetime and rebuilt alongside the
+    // swapchain in RecreateSwapchain() (same as m_frameSync's render-
+    // finished semaphores) - but RecreateSwapchain() itself only rebuilds
+    // them if they already existed, never creates them from scratch.
     std::vector<DepthBuffer> m_depthBuffers;
 
     VkCommandPool m_commandPool = VK_NULL_HANDLE;

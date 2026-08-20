@@ -40,10 +40,21 @@ GpuMemoryLocation ClassifyGpuMemoryLocation(VmaAllocator allocator, VmaAllocatio
 // enough to answer "how much memory, of what kind, is live right now"
 // essentially for free. See AGENTS.md for why names are handled completely
 // separately (below, Editor-only).
+//
+// `format` is VK_FORMAT_UNDEFINED for a Buffer (format is meaningless for a
+// raw byte buffer) and the resource's actual VkImageCreateInfo::format for a
+// Texture (e.g. VK_FORMAT_B8G8R8A8_UNORM for a color RenderTexture,
+// VK_FORMAT_D32_SFLOAT for a DepthBuffer) - a plain POD enum value, not a
+// string/name, so it stays in this always-compiled record rather than the
+// Editor-only debug-name table below (see AGENTS.md, "GPU Resource Memory
+// Tracking" - only human-readable *names* are Editor-only, not this kind of
+// classification data, which the Editor's "Memory" panel needs in every
+// build the panel itself is compiled into to show a "Format" column).
 struct GpuResourceRecord {
     GpuResourceType type = GpuResourceType::Buffer;
     GpuMemoryLocation location = GpuMemoryLocation::GpuOnly;
     VkDeviceSize sizeBytes = 0;
+    VkFormat format = VK_FORMAT_UNDEFINED;
 };
 
 // Registry of every currently-live GPU allocation (Buffer/RenderTexture),
@@ -72,7 +83,9 @@ public:
 
     // Registers a newly created resource and returns the handle the caller
     // (Buffer/RenderTexture) must hold onto and pass back to Untrack() when
-    // that exact allocation goes away.
+    // that exact allocation goes away. `format` is only meaningful for
+    // GpuResourceType::Texture (VK_FORMAT_UNDEFINED, the default, is correct
+    // for a Buffer - see GpuResourceRecord::format above).
     //
     // IMPORTANT: any lifecycle method that destroys and recreates the
     // underlying VMA allocation (e.g. RenderTexture::Resize()) is creating
@@ -81,7 +94,8 @@ public:
     // same operation - see AGENTS.md ("GPU resource memory tracking"). The
     // record here must always reflect the CURRENT actual allocation, never
     // a stale snapshot from whenever the resource was first constructed.
-    GpuResourceHandle Track(GpuResourceType type, GpuMemoryLocation location, VkDeviceSize sizeBytes);
+    GpuResourceHandle Track(GpuResourceType type, GpuMemoryLocation location, VkDeviceSize sizeBytes,
+        VkFormat format = VK_FORMAT_UNDEFINED);
 
     // Removes a resource's record. Safe to call with an already-untracked
     // or otherwise invalid handle (no-op).

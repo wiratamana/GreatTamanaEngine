@@ -1,4 +1,4 @@
-﻿// Unit tests for GpuMemoryTracker (src/Renderer/Memory/GpuMemoryTracker.h) -
+// Unit tests for GpuMemoryTracker (src/Renderer/Memory/GpuMemoryTracker.h) -
 // exercises the pure bookkeeping logic (Track()/Untrack()/GetTotals()/
 // GetAllResources(), generation-counted handle reuse, and - only in a
 // GTE_ENABLE_EDITOR build - debug names) entirely in isolation. None of this
@@ -172,6 +172,27 @@ TEST(GpuMemoryTrackerTest, GetAllResources_ReflectsOnlyCurrentlyLiveEntries)
     EXPECT_TRUE(std::none_of(live.begin(), live.end(), [&](const auto& e) { return e.handle == b; }));
     EXPECT_TRUE(std::any_of(live.begin(), live.end(), [&](const auto& e) { return e.handle == a; }));
     EXPECT_TRUE(std::any_of(live.begin(), live.end(), [&](const auto& e) { return e.handle == c; }));
+}
+
+TEST(GpuMemoryTrackerTest, Track_DefaultsFormatToUndefinedWhenNotSpecified)
+{
+    GpuMemoryTracker tracker;
+    const GpuResourceHandle handle = tracker.Track(GpuResourceType::Buffer, GpuMemoryLocation::GpuOnly, 1024);
+
+    const std::vector<GpuMemoryTracker::Entry> live = tracker.GetAllResources();
+    ASSERT_EQ(live.size(), 1u);
+    EXPECT_EQ(live.front().handle, handle);
+    EXPECT_EQ(live.front().record.format, VK_FORMAT_UNDEFINED);
+}
+
+TEST(GpuMemoryTrackerTest, Track_RecordsTheSuppliedFormatForATexture)
+{
+    GpuMemoryTracker tracker;
+    tracker.Track(GpuResourceType::Texture, GpuMemoryLocation::GpuOnly, 2048, VK_FORMAT_D32_SFLOAT);
+
+    const std::vector<GpuMemoryTracker::Entry> live = tracker.GetAllResources();
+    ASSERT_EQ(live.size(), 1u);
+    EXPECT_EQ(live.front().record.format, VK_FORMAT_D32_SFLOAT);
 }
 
 #if GTE_ENABLE_EDITOR

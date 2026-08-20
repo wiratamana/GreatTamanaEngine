@@ -103,7 +103,8 @@ VkFormat Renderer::DepthFormat() const noexcept
     return m_depthFormat;
 }
 
-RenderTexture Renderer::CreateRenderTexture(int width, int height, VkFormat format, const char* debugName) const
+RenderTexture Renderer::CreateRenderTexture(
+    int width, int height, VkFormat format, const char* debugName, const char* depthDebugName) const
 {
     // VK_FORMAT_UNDEFINED (the default - see Renderer.h) means "match
     // ColorFormat() exactly", not "let Vulkan pick" - resolved here (the one
@@ -113,7 +114,7 @@ RenderTexture Renderer::CreateRenderTexture(int width, int height, VkFormat form
     // (see VulkanSwapchain.cpp's ChooseSurfaceFormat), even if that differs
     // across GPUs/drivers. See AGENTS.md ("Render Target Format Matching").
     const VkFormat resolvedFormat = (format == VK_FORMAT_UNDEFINED) ? ColorFormat() : format;
-    return m_resources.CreateRenderTexture(width, height, resolvedFormat, debugName);
+    return m_resources.CreateRenderTexture(width, height, resolvedFormat, debugName, depthDebugName);
 }
 
 Buffer Renderer::CreateBuffer(

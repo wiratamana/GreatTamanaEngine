@@ -1,5 +1,6 @@
-﻿#include "FramePresenter.h"
+#include "FramePresenter.h"
 
+#include <cstddef>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -25,7 +26,11 @@ FramePresenter::FramePresenter(VkPhysicalDevice physicalDevice, VkDevice device,
     m_pendingHeight = height;
 
     CreateCommandObjects();
-    CreateDepthBuffers();
+    // m_depthBuffers is deliberately NOT created here - see its own comment
+    // in FramePresenter.h for why the swapchain's own depth buffers are
+    // allocated lazily (EnsureDepthBuffersForSwapchain(), called from
+    // Present() only once a frame is actually found to need one) rather
+    // than unconditionally up front.
 }
 
 FramePresenter::~FramePresenter()
@@ -129,12 +134,45 @@ void FramePresenter::CreateCommandObjects()
 
 void FramePresenter::CreateDepthBuffers()
 {
+    // Engine-owned depth buffers, one per swapchain image (see the class
+    // comment in FramePresenter.h for why indexed by image index) - named
+    // here (rather than left "(unnamed)" in the Editor's "Memory" panel) so
+    // they're identifiable at a glance instead of showing up as anonymous
+    // GPU textures. debugName must have static storage duration (see
+    // DepthBuffer's constructor comment) - a fixed table of string literals
+    // covers every swapchain image count this engine could realistically
+    // negotiate (2-4 in practice); an index beyond the table falls back to
+    // unnamed rather than risking a dangling pointer from a computed name.
+    static const char* kSwapchainDepthNames[] = {
+        "SwapchainDepth[0]",
+        "SwapchainDepth[1]",
+        "SwapchainDepth[2]",
+        "SwapchainDepth[3]",
+        "SwapchainDepth[4]",
+        "SwapchainDepth[5]",
+        "SwapchainDepth[6]",
+        "SwapchainDepth[7]",
+    };
+    constexpr std::size_t kNamedCount = sizeof(kSwapchainDepthNames) / sizeof(kSwapchainDepthNames[0]);
+
     const VkExtent2D extent = m_swapchain.Extent();
     m_depthBuffers.clear();
     m_depthBuffers.reserve(m_swapchain.ImageCount());
     for (std::uint32_t i = 0; i < m_swapchain.ImageCount(); ++i) {
+        const char* debugName = (i < kNamedCount) ? kSwapchainDepthNames[i] : nullptr;
         m_depthBuffers.emplace_back(m_allocator, m_memoryTracker, m_device, static_cast<int>(extent.width),
-            static_cast<int>(extent.height), m_depthFormat);
+            static_cast<int>(extent.height), m_depthFormat, debugName);
+    }
+}
+
+void FramePresenter::EnsureDepthBuffersForSwapchain()
+{
+    // No-op once they already exist - see m_depthBuffers' own comment in
+    // FramePresenter.h for why they're deliberately not created eagerly in
+    // the constructor. Called from Present() only on a frame that's
+    // actually found to need one (FrameRecorder::HasQueuedDraws()).
+    if (m_depthBuffers.empty()) {
+        CreateDepthBuffers();
     }
 }
 
@@ -164,8 +202,14 @@ void FramePresenter::RecreateSwapchain()
 
     // Same reasoning for the per-swapchain-image depth buffers - a
     // genuinely new size (and possibly image count) means genuinely new
-    // depth images, not a resize-in-place.
-    CreateDepthBuffers();
+    // depth images, not a resize-in-place. Only rebuilds them if they
+    // already existed, though (see m_depthBuffers' own comment in
+    // FramePresenter.h) - never creates them from scratch here; a
+    // presenter that never actually needed them stays that way across a
+    // resize too.
+    if (!m_depthBuffers.empty()) {
+        CreateDepthBuffers();
+    }
 
     m_resizeRequested = false;
 }
@@ -201,6 +245,21 @@ void FramePresenter::Present(FrameRecorder& frameRecorder, const std::function<v
 
     vkResetFences(m_device, 1, &fence);
 
+    // Whether THIS frame's swapchain pass will actually draw real, depth-
+    // tested engine geometry directly into the swapchain image, rather than
+    // just Dear ImGui's own (never depth-tested) chrome - see
+    // FrameRecorder::HasQueuedDraws()'s own comment for the two cases where
+    // this is true (a release build with no Editor at all, or the rare
+    // Editor edge case where both "Game" and "Scene" panels are
+    // simultaneously hidden) versus the common Editor case where it's
+    // false. Decided BEFORE beginning command buffer recording below, since
+    // EnsureDepthBuffersForSwapchain() is a plain host-side Vulkan resource
+    // creation call, not itself part of what gets recorded.
+    const bool needsDepth = frameRecorder.HasQueuedDraws();
+    if (needsDepth) {
+        EnsureDepthBuffersForSwapchain();
+    }
+
     const VkCommandBuffer cmd = m_commandBuffers[m_currentFrame];
     vkResetCommandBuffer(cmd, 0);
 
@@ -210,20 +269,26 @@ void FramePresenter::Present(FrameRecorder& frameRecorder, const std::function<v
         throw std::runtime_error("vkBeginCommandBuffer failed");
     }
 
-    // Depth buffer paired with THIS swapchain image - see the class comment
-    // in FramePresenter.h for why indexing by imageIndex (not
-    // m_currentFrame) is what makes this safe with no extra synchronization.
-    const DepthBuffer& depthBuffer = m_depthBuffers[imageIndex];
-
     RenderTarget target;
     target.image = m_swapchain.Image(imageIndex);
     target.imageView = m_swapchain.ImageView(imageIndex);
     target.extent = m_swapchain.Extent();
     target.format = m_swapchain.ImageFormat();
-    target.depthImage = depthBuffer.Image();
-    target.depthImageView = depthBuffer.View();
-    target.depthFormat = depthBuffer.Format();
-    target.depthHasStencil = depthBuffer.HasStencilComponent();
+    if (needsDepth) {
+        // Depth buffer paired with THIS swapchain image - see the class
+        // comment in FramePresenter.h for why indexing by imageIndex (not
+        // m_currentFrame) is what makes this safe with no extra
+        // synchronization.
+        const DepthBuffer& depthBuffer = m_depthBuffers[imageIndex];
+        target.depthImage = depthBuffer.Image();
+        target.depthImageView = depthBuffer.View();
+        target.depthFormat = depthBuffer.Format();
+        target.depthHasStencil = depthBuffer.HasStencilComponent();
+    }
+    // else: target.depthImage/depthImageView stay VK_NULL_HANDLE and
+    // target.depthFormat stays VK_FORMAT_UNDEFINED (RenderTarget's own
+    // defaults) - FrameRecorder::RecordFrame() treats a VK_NULL_HANDLE
+    // depthImage as "skip the depth attachment for this pass entirely".
     frameRecorder.RecordFrame(
         cmd, target, ColorFormat(), m_depthFormat, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, recordExtra);
 

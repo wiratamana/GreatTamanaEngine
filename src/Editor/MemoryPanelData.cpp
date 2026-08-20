@@ -17,6 +17,7 @@ std::vector<MemoryRow> BuildMemoryRows(const std::vector<GpuMemoryTracker::Entry
         row.type = entry.record.type;
         row.location = entry.record.location;
         row.sizeBytes = entry.record.sizeBytes;
+        row.format = entry.record.format;
         rows.push_back(std::move(row));
     }
 
@@ -71,6 +72,29 @@ const char* ToString(GpuMemoryLocation location)
         return "Shared (zero-copy)";
     }
     return "Unknown";
+}
+
+std::string ToString(VkFormat format)
+{
+    switch (format) {
+    case VK_FORMAT_UNDEFINED:
+        return "-"; // Buffer row - format doesn't apply.
+    case VK_FORMAT_B8G8R8A8_UNORM:
+        return "Texture (BGRA8 UNORM)";
+    case VK_FORMAT_R8G8B8A8_UNORM:
+        return "Texture (RGBA8 UNORM)";
+    case VK_FORMAT_D32_SFLOAT:
+        return "Depth Texture (D32 Float, no stencil)";
+    case VK_FORMAT_D32_SFLOAT_S8_UINT:
+        return "Depth+Stencil Texture (D32 Float + S8 UInt)";
+    case VK_FORMAT_D24_UNORM_S8_UINT:
+        return "Depth+Stencil Texture (D24 UNORM + S8 UInt)";
+    default:
+        break;
+    }
+    char buffer[32];
+    std::snprintf(buffer, sizeof(buffer), "VkFormat(%d)", static_cast<int>(format));
+    return std::string(buffer);
 }
 
 std::vector<HeapBudgetRow> BuildHeapBudgetRows(const std::vector<VmaBudget>& budgets)

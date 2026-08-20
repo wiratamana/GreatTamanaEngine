@@ -44,8 +44,11 @@ public:
     // See Renderer::CreateRenderTexture(). `format` here must already be
     // fully resolved - VK_FORMAT_UNDEFINED-as-"match ColorFormat()" is
     // resolved by Renderer itself, since only Renderer (via FramePresenter)
-    // knows ColorFormat().
-    RenderTexture CreateRenderTexture(int width, int height, VkFormat format, const char* debugName) const;
+    // knows ColorFormat(). depthDebugName optionally names the companion
+    // DepthBuffer separately from the color image's debugName - see
+    // RenderTexture's constructor comment.
+    RenderTexture CreateRenderTexture(
+        int width, int height, VkFormat format, const char* debugName, const char* depthDebugName = nullptr) const;
 
     // See Renderer::CreateBuffer().
     Buffer CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, BufferMemoryUsage memoryUsage,

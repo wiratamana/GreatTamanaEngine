@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "DepthBuffer.h"
 #include "Memory/GpuMemoryTracker.h"
@@ -48,14 +48,19 @@ public:
     // depthFormat should always be exactly Renderer::DepthFormat() - see
     // AGENTS.md ("Render Target Format Matching").
     //
-    // debugName is optional and Editor-only (see GpuMemoryTracker) - a
-    // plain, cheap `const char*` rather than a std::string. Must have
-    // static storage duration (e.g. a string literal) if provided: this
-    // RenderTexture stores the pointer itself (not a copy) so Resize() can
-    // re-attach the same name to the fresh handle it creates.
+    // debugName/depthDebugName are optional and Editor-only (see
+    // GpuMemoryTracker) - plain, cheap `const char*` rather than a
+    // std::string. Must have static storage duration (e.g. a string
+    // literal) if provided: this RenderTexture stores each pointer itself
+    // (not a copy) so Resize() can re-attach the same names to the fresh
+    // handles it creates. debugName names the color image; depthDebugName
+    // separately names its companion DepthBuffer (e.g. "GameView" /
+    // "GameViewDepth") - left null (the default) if the depth side isn't
+    // worth naming individually.
     RenderTexture(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDevice device, int width,
         int height, VkFormat format = VK_FORMAT_B8G8R8A8_UNORM,
-        VkFormat depthFormat = VK_FORMAT_D32_SFLOAT, const char* debugName = nullptr);
+        VkFormat depthFormat = VK_FORMAT_D32_SFLOAT, const char* debugName = nullptr,
+        const char* depthDebugName = nullptr);
     ~RenderTexture();
 
     RenderTexture(const RenderTexture&) = delete;
@@ -103,6 +108,7 @@ private:
     std::shared_ptr<GpuMemoryTracker> m_tracker;
     GpuResourceHandle m_handle;
     const char* m_debugName = nullptr;
+    const char* m_depthDebugName = nullptr;
 
     VkDevice m_device = VK_NULL_HANDLE;
     VkFormat m_format = VK_FORMAT_B8G8R8A8_UNORM;

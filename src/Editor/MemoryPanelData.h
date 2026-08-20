@@ -24,6 +24,10 @@ struct MemoryRow {
     GpuResourceType type = GpuResourceType::Buffer;
     GpuMemoryLocation location = GpuMemoryLocation::GpuOnly;
     VkDeviceSize sizeBytes = 0;
+    // VK_FORMAT_UNDEFINED for a Buffer (format is meaningless there) - the
+    // resource's actual VkFormat for a Texture. See ToString(VkFormat)
+    // below for how this becomes the panel's "Format" column text.
+    VkFormat format = VK_FORMAT_UNDEFINED;
 };
 
 // Builds one MemoryRow per entry in `entries`, naming each via `nameLookup`
@@ -50,6 +54,19 @@ std::string FormatBytes(std::uint64_t bytes);
 // BuildMemoryRows()/FormatBytes() above.
 const char* ToString(GpuResourceType type);
 const char* ToString(GpuMemoryLocation location);
+
+// Human-readable label for the panel's "Format" column - covers every
+// VkFormat this engine's own Texture resources actually use today
+// (RenderTexture's color image - VK_FORMAT_B8G8R8A8_UNORM/
+// VK_FORMAT_R8G8B8A8_UNORM - and DepthBuffer's depth/depth+stencil formats -
+// VK_FORMAT_D32_SFLOAT/VK_FORMAT_D32_SFLOAT_S8_UINT/
+// VK_FORMAT_D24_UNORM_S8_UINT, see VulkanDevice::PickDepthFormat()), plus
+// VK_FORMAT_UNDEFINED for a Buffer row (format doesn't apply to a raw byte
+// buffer). Falls back to a generic "VkFormat(<N>)" label for anything else
+// rather than a plain string literal, since that path needs the numeric
+// value baked in - hence returning std::string here rather than
+// `const char*` like the two overloads above.
+std::string ToString(VkFormat format);
 
 // One display-ready row for the Editor's "Memory" panel's VMA heap budget
 // section - the REAL, driver-reported usage/budget for one Vulkan memory

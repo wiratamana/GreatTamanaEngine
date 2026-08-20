@@ -138,8 +138,11 @@ public:
     // its own dedicated pipeline variant built for that exact format. See
     // AGENTS.md ("Render Target Format Matching"). debugName is
     // optional/Editor-only - see RenderTexture's constructor comment.
+    // depthDebugName likewise optionally names the companion DepthBuffer
+    // separately (e.g. "GameView" / "GameViewDepth") - left null if the
+    // depth side isn't worth naming individually.
     RenderTexture CreateRenderTexture(int width, int height, VkFormat format = VK_FORMAT_UNDEFINED,
-        const char* debugName = nullptr) const;
+        const char* debugName = nullptr, const char* depthDebugName = nullptr) const;
 
     // Factory for GPU buffers (vertex/index/uniform/staging), so callers
     // never need direct access to the VmaAllocator this Renderer owns
