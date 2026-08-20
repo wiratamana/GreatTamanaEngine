@@ -109,7 +109,7 @@ void BuildScenePanel(Registry& registry, EditorContext& ctx, EditorCamera& camer
             if (registry.IsAlive(ctx.selectedEntity)) {
                 if (Transform* transform = registry.TryGetComponent<Transform>(ctx.selectedEntity)) {
                     const float aspect = imageSize.y > 0.0f ? (imageSize.x / imageSize.y) : 1.0f;
-                    ManipulateTransformGizmo(ctx.gizmoOperation, camera.View(), camera.Projection(aspect),
+                    ManipulateTransformGizmo(ctx.gizmoOperation, camera.View(), camera.GizmoProjection(aspect),
                         imageMin.x, imageMin.y, imageSize.x, imageSize.y, *transform);
                 }
             }

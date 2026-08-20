@@ -62,8 +62,33 @@ public:
     // ManipulateTransformGizmo(), which needs them individually (ImGuizmo's
     // own Manipulate() signature takes view/projection as two separate
     // float[16]s, unlike RenderSystem::Draw()'s combined view-projection).
+    // NOTE: use GizmoProjection() below, NOT this Projection(), when
+    // feeding ImGuizmo - see its own comment for why the two must differ.
     Mat4 View() const noexcept { return Camera::ViewMatrix(m_transform); }
     Mat4 Projection(float aspectWidthOverHeight) const noexcept { return m_camera.ProjectionMatrix(aspectWidthOverHeight); }
+
+    // Same field of view/near/far as Projection() above, but WITHOUT the
+    // Vulkan-clip-space Y flip Camera::ProjectionMatrix() always bakes in
+    // (see its own comment) - built directly via Mat4::PerspectiveFovLH_ZO()
+    // with flipY=false instead of reusing Camera::ProjectionMatrix(). This
+    // is the one ImGuizmo actually needs: ImGuizmo does its own NDC ->
+    // screen-space conversion internally assuming the OPENGL convention
+    // (NDC +Y maps to the TOP of its given rect - see ImGuizmo.cpp's
+    // worldToPos(), `trans.y = 1.f - trans.y`), which is the OPPOSITE of
+    // Vulkan's own raw clip-space convention (NDC +Y maps to the BOTTOM of
+    // the viewport) that Projection()'s flipY=true is specifically there to
+    // compensate for when Renderer/FrameRecorder actually rasterize with
+    // it. Feeding Projection()'s already-flipped matrix into ImGuizmo would
+    // flip Y a SECOND time on top of ImGuizmo's own conversion, mirroring
+    // the whole gizmo vertically relative to what's actually on screen -
+    // exactly the "gizmo position doesn't match the triangle, arrow points
+    // the wrong way" symptom this was added to fix. See
+    // Panels/ScenePanel.cpp's call to ManipulateTransformGizmo().
+    Mat4 GizmoProjection(float aspectWidthOverHeight) const noexcept
+    {
+        return Mat4::PerspectiveFovLH_ZO(
+            DegToRad(m_camera.fovYDegrees), aspectWidthOverHeight, m_camera.nearZ, m_camera.farZ, /*flipY=*/false);
+    }
 
     // Combined projection * view matrix for a render target of the given
     // aspect ratio - what ImGuiEditorLayer::SceneViewProjection() hands
