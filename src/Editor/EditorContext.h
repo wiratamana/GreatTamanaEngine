@@ -71,6 +71,18 @@ struct EditorContext {
     bool gameViewVisible = true;
     bool sceneViewVisible = true;
 
+    // Whether a Scene-view camera drag (pan/rotate - see EditorCamera.h) is
+    // currently "captured": it started with the mouse actually pressed down
+    // while hovering the Scene panel's image (ScenePanel.cpp), so it keeps
+    // responding to mouse movement even if the cursor later drifts outside
+    // the image mid-drag, ending only once the corresponding button is
+    // released - exactly like Unity's own Scene view camera controls (and
+    // like a normal OS drag/resize gesture in general). Written/read
+    // entirely by ScenePanel.cpp; EditorCamera itself never touches ImGui
+    // and has no idea this exists.
+    bool sceneCameraPanning = false;
+    bool sceneCameraRotating = false;
+
     // Hierarchy/Inspector selection state - kInvalidEntity means "nothing
     // selected", shown by InspectorPanel as "No entity selected." Written by
     // HierarchyPanel, read by InspectorPanel.

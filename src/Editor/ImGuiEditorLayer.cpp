@@ -1,12 +1,12 @@
 #include "EditorLayer.h"
 
 #include "DockLayout.h"
+#include "EditorCamera.h"
 #include "EditorContext.h"
 #include "Panels/GamePanel.h"
 #include "Panels/HierarchyPanel.h"
 #include "Panels/InspectorPanel.h"
 #include "Panels/ScenePanel.h"
-
 #include "../Renderer/Renderer.h"
 #include "../Window/Window.h"
 
@@ -76,14 +76,14 @@
 // one is actually rendered, at zero extra GPU cost for the hidden one);
 // split apart, both are visible and BOTH get rendered, each into its own
 // RenderTexture at its own panel's size/aspect.
-//
-// REMAINING LIMITATION: "Scene" and "Game" both show the SAME viewpoint -
-// whatever entity currently has the active Camera component (see
-// ECS/Components/Camera.h) - just each through its own RenderTexture/aspect
-// now, rather than literally sharing one texture as before Camera existed.
-// There is still no independently-orbitable EDITOR-only Scene camera; that
-// remains a natural follow-up once there's a reason to look at the scene
-// from a different angle than the gameplay camera itself.
+// "Game" still shows the scene through whatever ECS entity currently has
+// the active Camera component (see ECS/Components/Camera.h), but "Scene"
+// now shows it through its OWN independently-orbitable EditorCamera
+// (m_sceneCamera - see EditorCamera.h) instead - Unity-style middle-drag
+// pan / wheel dolly / right-drag look, handled entirely in
+// Panels/ScenePanel.cpp (the one place that reads ImGui's mouse state) -
+// see SceneViewProjection() below for how Application actually wires this
+// in ahead of RenderSystem::Draw().
 #include <imgui.h>
 #include <backends/imgui_impl_sdl3.h>
 #include <backends/imgui_impl_vulkan.h>
@@ -289,6 +289,16 @@ public:
         return &m_sceneView;
     }
 
+    // See IEditorLayer::SceneViewProjection() - m_sceneCamera is updated
+    // once per frame from Panels/ScenePanel.cpp's mouse handling during
+    // BuildUI() below, so this always reflects (up to one frame of lag,
+    // same as every other Scene/Game-view field in EditorContext) whatever
+    // the user last panned/rotated/dollied it to.
+    Mat4 SceneViewProjection(float aspectWidthOverHeight) const override
+    {
+        return m_sceneCamera.ViewProjection(aspectWidthOverHeight);
+    }
+
     void BuildUI(Registry& registry) override
     {
         ImGui::SetCurrentContext(m_context);
@@ -298,8 +308,7 @@ public:
         // Lazily (re)create the ImGui-side descriptors for the Game/Scene
         // view textures - needed on first use, and again after
         // GameViewTarget()/SceneViewTarget() invalidated the previous one
-        // (a resize). Each panel now owns its own descriptor/texture - see
-        // the class comment's "REMAINING LIMITATION" note.
+        // (a resize). Each panel owns its own descriptor/texture.
         if (m_ctx.gameViewDescriptor == VK_NULL_HANDLE) {
             m_ctx.gameViewDescriptor = ImGui_ImplVulkan_AddTexture(
                 m_gameView.Sampler(), m_gameView.View(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -311,7 +320,7 @@ public:
 
         BuildHierarchyPanel(registry, m_ctx);
         BuildInspectorPanel(registry, m_ctx);
-        BuildScenePanel(m_ctx);
+        BuildScenePanel(m_ctx, m_sceneCamera);
         BuildGamePanel(m_ctx);
     }
 
@@ -405,6 +414,12 @@ private:
     ImGuiContext* m_context = nullptr;
     RenderTexture m_gameView;
     RenderTexture m_sceneView;
+
+    // The Scene view's own, independently-orbitable camera (see
+    // EditorCamera.h) - updated once per frame by Panels/ScenePanel.cpp
+    // (called from BuildUI() above) from that panel's own mouse input, and
+    // read back by SceneViewProjection() above.
+    EditorCamera m_sceneCamera;
 
     // True once Render(cmd) has actually run THIS frame (reset to false at
     // the top of every NewFrame()) - see RenderPlatformWindows() for why

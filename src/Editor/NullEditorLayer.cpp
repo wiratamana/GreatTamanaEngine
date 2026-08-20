@@ -19,6 +19,7 @@ public:
     void NewFrame() override { }
     RenderTexture* GameViewTarget() override { return nullptr; }
     RenderTexture* SceneViewTarget() override { return nullptr; }
+    Mat4 SceneViewProjection(float /*aspectWidthOverHeight*/) const override { return Mat4::Identity(); }
     void BuildUI(Registry& /*registry*/) override { }
     void Render(VkCommandBuffer /*cmd*/) override { }
     void RenderPlatformWindows() override { }

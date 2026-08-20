@@ -77,6 +77,14 @@
 #                                            RenderSystem::Draw() itself is
 #                                            Tier 2 (needs a live Renderer),
 #                                            see the note below.
+#   - Editor/EditorCameraTests.cpp           - EditorCamera's pure pan/
+#                                            rotate/dolly math (see
+#                                            src/Editor/EditorCamera.h) -
+#                                            no ImGui/SDL/Vulkan involved.
+#                                            Only built when GTE_ENABLE_EDITOR
+#                                            is ON (see below), since
+#                                            EditorCamera itself is only
+#                                            compiled into gte_core then.
 #
 # Note that the test BINARY still dynamically depends on SDL3.dll at process
 # load time regardless of the above (gte_core's Window.cpp references SDL
@@ -100,8 +108,7 @@
 # runner that has one. Left as a documented follow-up rather than
 # implemented here, since it needs its own fixture/CMake wiring
 # (GTE_BUILD_GPU_TESTS or similar) rather than being bolted onto Tier 1.
-
-add_executable(GreatTamanaEngineTests
+set(GTE_TEST_SOURCES
     Memory/GpuResourceHandleTests.cpp
     Memory/GpuMemoryTrackerTests.cpp
     Input/InputStateTests.cpp
@@ -118,6 +125,22 @@ add_executable(GreatTamanaEngineTests
     ECS/CameraTests.cpp
     Game/RenderSystemTests.cpp
 )
+
+# Editor/EditorCamera.h/.cpp (see src/Editor/EditorCamera.h) is only
+# compiled into gte_core when GTE_ENABLE_EDITOR is ON - the whole
+# src/Editor/ folder besides EditorLayer.h/NullEditorLayer.cpp is gated on
+# it (see the root CMakeLists.txt's "Editor Module Structure" comment) -
+# so its test file follows the exact same "zero-touch when off" rule: a
+# GTE_ENABLE_EDITOR=OFF configure never even tries to compile/link a test
+# against a class that doesn't exist in that build. EditorCamera itself is
+# still genuinely Tier 1 (see its own file comment) - this guard is purely
+# about it not being COMPILED IN at all when the Editor is off, not about
+# it needing a live Vulkan/SDL/ImGui dependency.
+if(GTE_ENABLE_EDITOR)
+    list(APPEND GTE_TEST_SOURCES Editor/EditorCameraTests.cpp)
+endif()
+
+add_executable(GreatTamanaEngineTests ${GTE_TEST_SOURCES})
 
 target_link_libraries(GreatTamanaEngineTests PRIVATE
     gte_core

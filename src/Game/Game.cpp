@@ -82,13 +82,17 @@ void Game::EnsureDemoSceneBuilt(Renderer& renderer)
     m_registry.AddComponent<Camera>(cameraEntity);
 }
 
-void Game::Render(Renderer& renderer, float aspectWidthOverHeight)
+void Game::Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* viewProjectionOverride)
 {
     renderer.Clear(20, 20, 30, 255);
 
     EnsureDemoSceneBuilt(renderer);
 
-    m_renderSystem.Draw(m_registry, renderer, aspectWidthOverHeight);
+    if (viewProjectionOverride != nullptr) {
+        m_renderSystem.Draw(m_registry, renderer, *viewProjectionOverride);
+    } else {
+        m_renderSystem.Draw(m_registry, renderer, aspectWidthOverHeight);
+    }
 }
 
 } // namespace gte

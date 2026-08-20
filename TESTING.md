@@ -63,6 +63,12 @@ safe on any machine/CI runner, GPU or not:
   view-projection step: the first entity with an active `Camera` becomes a
   combined view-projection matrix, `Mat4::Identity()` if none exists) - both
   need nothing but a `Registry`, no live Renderer/GPU device at all.
+- `Editor/EditorCameraTests.cpp` - `EditorCamera`'s pure pan/dolly/rotate
+  math and pitch clamping (`src/Editor/EditorCamera.h`) - no ImGui/SDL/
+  Vulkan involved despite living under `src/Editor/`. Only built when
+  `GTE_ENABLE_EDITOR` is `ON` (see `tests/CMakeLists.txt`), since
+  `EditorCamera` itself is only compiled into `gte_core` then - same
+  "zero-touch when off" rule as the Editor module itself.
 
 Testing `Buffer`/`RenderTexture`/`Pipeline`/`GpuResourceFactory` properly
 needs a real `VkDevice`+`VmaAllocator` (and, as `VulkanDevice` is written

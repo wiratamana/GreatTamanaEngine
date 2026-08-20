@@ -176,6 +176,8 @@ add_library(gte_core STATIC
 if(GTE_ENABLE_EDITOR)
     target_sources(gte_core PRIVATE
         src/Editor/EditorContext.h
+        src/Editor/EditorCamera.h
+        src/Editor/EditorCamera.cpp
         src/Editor/DockLayout.h
         src/Editor/DockLayout.cpp
         src/Editor/Panels/HierarchyPanel.h

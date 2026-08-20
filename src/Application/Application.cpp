@@ -159,7 +159,15 @@ int Application::Run()
         }
         if (sceneTarget != nullptr) {
             const VkExtent2D extent = sceneTarget->Extent();
-            m_game.Render(m_renderer, AspectRatioOf(static_cast<int>(extent.width), static_cast<int>(extent.height)));
+            const float aspect = AspectRatioOf(static_cast<int>(extent.width), static_cast<int>(extent.height));
+            // Unlike the Game view above, the Scene view renders through
+            // the Editor's OWN independently-orbitable camera (see
+            // src/Editor/EditorCamera.h) rather than whatever ECS entity
+            // currently has the active Camera component - see
+            // IEditorLayer::SceneViewProjection()/Game::Render()'s
+            // viewProjectionOverride parameter.
+            const Mat4 sceneViewProjection = m_editorLayer->SceneViewProjection(aspect);
+            m_game.Render(m_renderer, aspect, &sceneViewProjection);
             m_renderer.RenderOffscreen(*sceneTarget);
         }
         if (gameTarget == nullptr && sceneTarget == nullptr) {

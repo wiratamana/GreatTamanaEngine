@@ -54,8 +54,11 @@ Mat4 RenderSystem::ResolveActiveCameraViewProjection(Registry& registry, float a
 
 void RenderSystem::Draw(Registry& registry, Renderer& renderer, float aspectWidthOverHeight)
 {
-    const Mat4 viewProjection = ResolveActiveCameraViewProjection(registry, aspectWidthOverHeight);
+    Draw(registry, renderer, ResolveActiveCameraViewProjection(registry, aspectWidthOverHeight));
+}
 
+void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& viewProjection)
+{
     for (const DrawCommand& command : CollectRenderables(registry)) {
         const Mesh* mesh = m_meshes.TryGet(command.mesh);
         const Pipeline* pipeline = m_pipelines.TryGet(command.pipeline);

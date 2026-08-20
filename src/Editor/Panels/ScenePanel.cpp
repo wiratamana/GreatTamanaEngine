@@ -1,5 +1,6 @@
 #include "ScenePanel.h"
 
+#include "../EditorCamera.h"
 #include "../EditorContext.h"
 
 #include <imgui.h>
@@ -8,7 +9,7 @@
 
 namespace gte {
 
-void BuildScenePanel(EditorContext& ctx)
+void BuildScenePanel(EditorContext& ctx, EditorCamera& camera)
 {
     // ImGui::Begin() returns false when this panel isn't actually visible
     // right now (e.g. it's an inactive tab behind "Game", or collapsed) -
@@ -38,6 +39,44 @@ void BuildScenePanel(EditorContext& ctx)
             ImGui::Image(
                 static_cast<ImTextureID>(reinterpret_cast<intptr_t>(ctx.sceneViewDescriptor)),
                 avail);
+
+            // Unity-style Scene camera controls (see EditorCamera.h for the
+            // actual pan/rotate/dolly math, deliberately kept ImGui-free) -
+            // this is the one place that reads ImGui's own mouse state and
+            // feeds it in as plain values.
+            //
+            // Middle/right-mouse drags only ever START responding while the
+            // cursor is actually hovering the Scene image itself (so
+            // clicking/dragging elsewhere in the Editor never moves this
+            // camera), but once started, they keep responding even if the
+            // cursor drifts outside the image mid-drag - ctx.sceneCameraPanning/
+            // Rotating "captures" this across frames - ending only once the
+            // corresponding button is released, exactly like Unity's own
+            // Scene view (and like a normal OS drag gesture in general).
+            const bool hovered = ImGui::IsItemHovered();
+
+            if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Middle)) {
+                ctx.sceneCameraPanning = true;
+            }
+            if (ImGui::IsMouseReleased(ImGuiMouseButton_Middle)) {
+                ctx.sceneCameraPanning = false;
+            }
+
+            if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+                ctx.sceneCameraRotating = true;
+            }
+            if (ImGui::IsMouseReleased(ImGuiMouseButton_Right)) {
+                ctx.sceneCameraRotating = false;
+            }
+
+            const ImGuiIO& io = ImGui::GetIO();
+            const Vec2 mouseDelta{ io.MouseDelta.x, io.MouseDelta.y };
+            // The wheel only dollies the camera while actually hovering the
+            // Scene image - otherwise scrolling e.g. the Hierarchy list
+            // sitting right next to it would also dolly this camera.
+            const float scrollDelta = hovered ? io.MouseWheel : 0.0f;
+
+            camera.Update(mouseDelta, scrollDelta, ctx.sceneCameraPanning, ctx.sceneCameraRotating);
         }
     }
     ImGui::End();

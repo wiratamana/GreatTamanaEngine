@@ -92,6 +92,18 @@ public:
     // whatever is currently loaded.
     void Draw(Registry& registry, Renderer& renderer, float aspectWidthOverHeight);
 
+    // Explicit-view-projection overload of Draw() above, for a caller that
+    // already has its own view-projection matrix to render with instead of
+    // resolving one from the ECS Camera component - namely
+    // ImGuiEditorLayer's Scene view, which renders through its own
+    // independently-orbitable EditorCamera (see
+    // src/Editor/EditorCamera.h) rather than whatever ECS entity has the
+    // active Camera component (that's still what the float-aspect overload
+    // above, used by the Game view, resolves via
+    // ResolveActiveCameraViewProjection()). The float-aspect overload above
+    // is implemented purely in terms of this one.
+    void Draw(Registry& registry, Renderer& renderer, const Mat4& viewProjection);
+
 private:
     ResourcePool<Mesh, MeshHandle> m_meshes;
     ResourcePool<Pipeline, PipelineHandle> m_pipelines;

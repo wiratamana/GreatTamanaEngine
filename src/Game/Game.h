@@ -30,18 +30,27 @@ public:
     void Update(double deltaSeconds, const InputState& input);
 
     // Sets the clear color and, via RenderSystem::Draw(), queues this
-    // frame's draw calls for every entity that has a MeshRenderer, viewed
-    // through whichever entity has an active Camera component (see
-    // ECS/Components/Camera.h) - `aspectWidthOverHeight` is the aspect
-    // ratio of whichever render target this call's draws will land in (a
-    // Game view and a Scene view, each with their own RenderTexture/aspect,
-    // can each call this once per frame - see RenderSystem::Draw()). Does
-    // NOT call Renderer::Present()/RenderOffscreen() itself - *where* this
-    // frame ends up (the swapchain, fullscreen, or one of the Editor's
-    // off-screen "Game view"/"Scene view" RenderTextures) is decided by
-    // Application (the composition root), not by Game. See
-    // Application::Run().
-    void Render(Renderer& renderer, float aspectWidthOverHeight);
+    // frame's draw calls for every entity that has a MeshRenderer.
+    // `aspectWidthOverHeight` is the aspect ratio of whichever render
+    // target this call's draws will land in (a Game view and a Scene view,
+    // each with their own RenderTexture/aspect, can each call this once per
+    // frame - see RenderSystem::Draw()). By default (viewProjectionOverride
+    // == nullptr) the view-projection matrix is resolved from whichever ECS
+    // entity has the active Camera component (see ECS/Components/Camera.h)
+    // - what the Editor's "Game" view uses. Passing a non-null
+    // viewProjectionOverride instead renders with THAT matrix verbatim,
+    // bypassing ECS camera resolution entirely - what the Editor's "Scene"
+    // view uses instead, to render through its own independently-
+    // orbitable EditorCamera (src/Editor/EditorCamera.h) rather than
+    // whatever ECS entity happens to be the active gameplay Camera. Game
+    // itself has no idea the Editor/EditorCamera exist either way - this is
+    // just a plain Mat4*, decided by Application (the composition root),
+    // same spirit as everything else in this comment. Does NOT call
+    // Renderer::Present()/RenderOffscreen() itself - *where* this frame
+    // ends up (the swapchain, fullscreen, or one of the Editor's off-screen
+    // "Game view"/"Scene view" RenderTextures) is decided by Application
+    // too. See Application::Run().
+    void Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* viewProjectionOverride = nullptr);
 
     // Read-only-in-spirit access to the ECS World for the Editor's
     // Hierarchy/Inspector panels (src/Editor/ImGuiEditorLayer.cpp) to

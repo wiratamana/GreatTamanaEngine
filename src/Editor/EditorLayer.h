@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../ECS/Registry.h"
+#include "../Math/Mat4.h"
 #include "../Renderer/RenderTexture.h"
 
 #include <memory>
@@ -100,6 +101,22 @@ public:
     // one gets rendered); if the user has split them apart, BOTH are
     // visible and BOTH get rendered.
     virtual RenderTexture* SceneViewTarget() = 0;
+
+    // The combined projection * view matrix "Scene" should be rendered
+    // with THIS frame, for a render target of the given aspect ratio -
+    // Application passes this straight to Game::Render()'s
+    // viewProjectionOverride parameter for the Scene view specifically,
+    // in place of whatever ECS entity currently has the active Camera
+    // component (which is what the Game view still uses - see
+    // RenderSystem::ResolveActiveCameraViewProjection()). Backed by the
+    // real implementation's own independently-orbitable EditorCamera (see
+    // EditorCamera.h and Panels/ScenePanel.cpp for its Unity-style pan/
+    // rotate/dolly mouse controls) - always Mat4::Identity() for
+    // NullEditorLayer, though it is never actually consulted there in
+    // practice, since SceneViewTarget() above always returns nullptr for
+    // it (so Application never renders a Scene view at all in a release
+    // build).
+    virtual Mat4 SceneViewProjection(float aspectWidthOverHeight) const = 0;
 
     // Builds every editor panel for this frame - top menu bar (File > Exit,
     // ...), Hierarchy (left), Inspector (right), and Scene/Game (tabbed,

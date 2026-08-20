@@ -196,11 +196,22 @@ CMake adds:
   together, only the active tab is ever rendered, at zero extra GPU cost for
   the hidden one; split them apart and both become visible/rendered
   simultaneously, each into its own `RenderTexture`.
-  **Remaining limitation:** "Scene" and "Game" both show the SAME
-  viewpoint — whatever entity currently has the active `Camera` — just
-  through their own separate `RenderTexture`/aspect ratio now, rather than
-  literally sharing one texture. There is still no independently-orbitable
-  EDITOR-only Scene camera; that remains a natural follow-up.
+  **Independent Scene camera:** "Game" still renders through whichever ECS
+  entity currently has the active `Camera` component
+  (`RenderSystem::ResolveActiveCameraViewProjection()`), but "Scene" now
+  renders through its own independently-orbitable `EditorCamera`
+  (`src/Editor/EditorCamera.h`) instead — Unity-style middle-mouse-drag pan
+  (camera-local X/Y), mouse-wheel dolly (camera-local Z), and right-mouse-
+  drag look (yaw around world up, pitch around camera-local right, clamped
+  to ±89°), read from ImGui's mouse state in `Panels/ScenePanel.cpp` and fed
+  into `EditorCamera::Update()` as plain values — `EditorCamera` itself has
+  no ImGui/SDL/Vulkan dependency at all, so it is Tier-1-testable like the
+  rest of the engine (see `tests/Editor/EditorCameraTests.cpp`).
+  `Application::Run()` passes `IEditorLayer::SceneViewProjection()`'s result
+  straight into `Game::Render()`'s `viewProjectionOverride` parameter for
+  the Scene view specifically, bypassing ECS camera resolution for that
+  view only — `Game` itself has no idea the Editor or `EditorCamera` exist
+  either way.
 - **`NullEditorLayer`** (`GTE_ENABLE_EDITOR=OFF`) — every method is a no-op;
   `GameViewTarget()`/`SceneViewTarget()` always return `nullptr`, meaning
   "render straight to the swapchain, fullscreen". This is what makes
@@ -246,6 +257,15 @@ pieces:
   Game's ECS world via `Game::GetRegistry()`. Toggling `GTE_ENABLE_EDITOR`
   fully includes/excludes the whole module, down to CMake never fetching or
   compiling ImGui at all when it's off.
+- "Scene" now has its own independently-orbitable Editor-only camera
+  (`EditorCamera`, `src/Editor/EditorCamera.h`) with Unity-style
+  middle-drag pan / wheel dolly / right-drag look controls, wired through
+  a new `IEditorLayer::SceneViewProjection()` and
+  `Game::Render()`'s `viewProjectionOverride` parameter — "Game" is
+  unaffected and still renders through the ECS's own active `Camera`
+  component. Fully unit-tested (pan/dolly/rotate math, pitch clamping,
+  `ViewProjection()`) despite living under `src/Editor/`, since it has no
+  ImGui/SDL/Vulkan dependency at all — see `tests/Editor/EditorCameraTests.cpp`.
 - GPU memory allocation goes through **VMA** (Vulkan Memory Allocator) via
   the `VulkanAllocator` RAII wrapper (`src/Renderer/Vulkan/`) — `Renderer`
   owns a single `VmaAllocator`. `RenderTexture` creates its `VkImage` through
