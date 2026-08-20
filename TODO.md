@@ -14,6 +14,23 @@ that haven't been started yet at all.
 
 ## Editor / Debug UI
 
+- **Per-entity Hierarchy context menu (Delete/Rename/Duplicate).**
+  "Hierarchy" now has a right-click "Create 3D Object" menu
+  (`Game::CreatePrimitiveEntity()`, see `README.md`) via
+  `ImGui::BeginPopupContextWindow()`, but it opens the same way whether the
+  right-click landed on empty space or an existing entity row - there is no
+  separate per-entity menu yet (Unity's own right-click-on-a-GameObject
+  menu has "Rename"/"Duplicate"/"Delete" alongside its own "3D Object"
+  submenu). "Rename" also needs a Name component first (entities are
+  identified purely by numeric index today - see
+  `ECS/Components/Transform.h`) - a small, self-contained, likely-useful
+  addition on its own (also helpful for a future scene file's
+  readability). Deliberately deferred rather than folded into the initial
+  "Create 3D Object" work - this engine has no way to destroy an entity's
+  GPU-side mesh/pipeline registration mid-session yet either
+  (`RenderSystem`'s `ResourcePool<Mesh, MeshHandle>`/
+  `ResourcePool<Pipeline, PipelineHandle>` support `Remove()`, but nothing
+  calls it today), so "Delete" needs that reasoned through first.
 - **Click-to-select via ray casting + a Scene-view outline highlight.**
   Today, picking an entity by clicking directly on it inside "Scene" is not
   implemented - selection only happens via "Hierarchy" (see
@@ -127,18 +144,29 @@ unblock the most follow-on work:
 
 - **Scene serialization (save/load a scene to/from a file, e.g. JSON).**
   Right now the Editor lets you live-edit entities via the gizmo/Inspector,
-  but `Game.cpp` hardcodes its demo entities in C++ - there's no way to
-  persist or reload a scene. Likely the single highest-leverage next
+  and can now also spawn new ones from scratch via "Hierarchy" -> "Create 3D
+  Object" (`Game::CreatePrimitiveEntity()`, see `README.md`) - but there is
+  still no way to persist or reload the result; `Game.cpp`'s own demo
+  entities remain hardcoded in C++. Likely the single highest-leverage next
   engine-level feature: a pure `Registry` <-> text-format read/write, fitting
   this engine's existing Tier-1-testability doctrine, that turns every other
   item below into something you can actually author instead of hardcode.
+  "Create 3D Object" is exactly the tool needed to build a non-trivial test
+  scene to exercise save/modify/load against once this lands.
 - **A minimal asset pipeline: real mesh loading (OBJ/glTF) + textures.**
-  Today there is exactly one hardcoded triangle mesh and one shader pair
-  (`Shaders/Triangle.vert/.frag`) - no model loader, no texture/material
-  system. Needs a mesh loader feeding `Renderer::CreateMesh()`, and a basic
-  textured pipeline (descriptor set + sampler, following the same
-  `Renderer::ColorFormat()`-style "single source of truth" discipline
-  already used elsewhere).
+  Today there is one hardcoded triangle mesh, five procedurally-generated
+  built-in primitive shapes (`PrimitiveMeshGenerator` - Cube/Sphere/Capsule/
+  Cone/Plane, see `README.md`), and one shader pair
+  (`Shaders/Triangle.vert/.frag`) - still no model loader, no texture/
+  material system, and no index buffer support (`Mesh`/`GpuResourceFactory`
+  only ever build a plain, non-indexed vertex buffer - see `Mesh.h` - which
+  is why `PrimitiveMeshGenerator` duplicates vertices across every
+  triangle/face rather than sharing them; a real mesh loader would want
+  indexing for both memory and CPU-generation-time reasons). Needs a mesh
+  loader feeding `Renderer::CreateMesh()` (or a future indexed variant of
+  it), and a basic textured pipeline (descriptor set + sampler, following
+  the same `Renderer::ColorFormat()`-style "single source of truth"
+  discipline already used elsewhere).
 - **Transform parenting / hierarchy.** `Transform`
   (`src/ECS/Components/Transform.h`) is flat today - no parent/child
   relationship, which is why ImGuizmo's `LOCAL` space is currently identical

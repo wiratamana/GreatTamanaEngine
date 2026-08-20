@@ -453,6 +453,29 @@ pieces:
   `ViewMatrix()` math) and visually (three independently-positioned
   triangles on screen, seen through a real perspective camera, in both the
   "Game" and "Scene" panels' own separate `RenderTexture`s).
+- The engine can now create real, non-flat 3D geometry instead of only the
+  one hardcoded 2D-on-the-XY-plane triangle: `Vertex::position` grew from a
+  `vec2` to a `vec3` (`src/Renderer/Vertex.h`, `Shaders/Triangle.vert`
+  updated to match), and a new `PrimitiveMeshGenerator`
+  (`src/Renderer/Primitives/PrimitiveMeshGenerator.h/.cpp`) generates
+  Unity-equivalent built-in primitive shapes — Cube, Sphere, Capsule, Cone,
+  Plane — as plain CPU-side vertex data, entirely independent of any GPU
+  device/Renderer/ECS (Tier-1-tested against hand-derived geometric
+  invariants — bounding box, distance from center/core segment — see
+  `tests/Renderer/PrimitiveMeshGeneratorTests.cpp`). Each vertex's color
+  bakes a simple fixed-direction "faux-lit" shade (flat per-face for
+  Cube/Cone/Plane, smooth per-vertex for Sphere/Capsule) rather than a flat
+  placeholder gray, so a freshly spawned shape actually reads as 3D despite
+  the engine's one unlit vertex-color shader. `Game::CreatePrimitiveEntity()`
+  (a RUNTIME API, not Editor-only — this engine's equivalent of Unity's
+  `GameObject.CreatePrimitive()`) spawns a `Transform` + `MeshRenderer`
+  entity from one of these shapes, reusing one shared `Pipeline` and one
+  shared `Mesh` per shape across every instance, exactly like the existing
+  demo triangles share theirs. The Editor's "Hierarchy" panel exposes this
+  via a Unity-style right-click **"Create 3D Object"** menu that spawns and
+  immediately selects the new entity — the first concrete way to build up a
+  non-hardcoded scene in the Editor, and the planned way to exercise scene
+  serialization (see `TODO.md`) once that lands.
 
 ## Roadmap
 
