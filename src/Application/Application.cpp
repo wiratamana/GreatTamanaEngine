@@ -198,10 +198,13 @@ int Application::Run()
 
         // Build every editor panel (Hierarchy/Inspector/Scene/Game/Memory/menu
         // bar) now that the Game/Scene view textures (if any) have this
-        // frame's contents. Passes Game's ECS world (Hierarchy/Inspector) and
+        // frame's contents. Passes Game itself (Hierarchy/Inspector observe/
+        // edit its ECS world via Game::GetRegistry(), and Hierarchy's
+        // "Create 3D Object" menu spawns entities via
+        // Game::CreatePrimitiveEntity() - see IEditorLayer::BuildUI()) and
         // Renderer itself (Memory - see Renderer::GetMemoryTotals()/
-        // GetMemoryResources()) - see Game::GetRegistry().
-        m_editorLayer->BuildUI(m_game.GetRegistry(), m_renderer);
+        // GetMemoryResources()).
+        m_editorLayer->BuildUI(m_game, m_renderer);
 
         // File > Exit (or any other future programmatic "close" UI action)
         // ends the loop exactly like a Quit event/closing the OS window.

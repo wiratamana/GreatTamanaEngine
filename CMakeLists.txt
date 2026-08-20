@@ -149,6 +149,8 @@ add_library(gte_core STATIC
     src/Renderer/Pipeline.cpp
     src/Renderer/Pipeline.h
     src/Renderer/Vertex.h
+    src/Renderer/Primitives/PrimitiveMeshGenerator.cpp
+    src/Renderer/Primitives/PrimitiveMeshGenerator.h
     src/Renderer/Memory/GpuResourceHandle.h
     src/Renderer/Memory/GpuMemoryTracker.cpp
     src/Renderer/Memory/GpuMemoryTracker.h

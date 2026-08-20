@@ -10,6 +10,7 @@
 #include "Panels/MemoryPanel.h"
 #include "Panels/ScenePanel.h"
 #include "TransformGizmo.h"
+#include "../Game/Game.h"
 #include "../Renderer/Renderer.h"
 #include "../Window/Window.h"
 
@@ -313,9 +314,11 @@ public:
         return m_sceneCamera.ViewProjection(aspectWidthOverHeight);
     }
 
-    void BuildUI(Registry& registry, Renderer& renderer) override
+    void BuildUI(Game& game, Renderer& renderer) override
     {
         ImGui::SetCurrentContext(m_context);
+
+        Registry& registry = game.GetRegistry();
 
         BuildDockspaceAndMenuBar(m_ctx);
 
@@ -332,7 +335,7 @@ public:
                 m_sceneView.Sampler(), m_sceneView.View(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }
 
-        BuildHierarchyPanel(registry, m_ctx);
+        BuildHierarchyPanel(game, renderer, m_ctx);
         BuildInspectorPanel(registry, m_ctx);
         BuildScenePanel(registry, m_ctx, m_sceneCamera);
         BuildGamePanel(m_ctx);

@@ -3,7 +3,10 @@
 #include "../Event/Event.h"
 #include "../Input/InputState.h"
 #include "ECS/Registry.h"
+#include "Renderer/Primitives/PrimitiveMeshGenerator.h"
 #include "RenderSystem.h"
+
+#include <array>
 
 namespace gte {
 
@@ -61,6 +64,24 @@ public:
     // place; Game itself never calls this on its own registry.
     Registry& GetRegistry() noexcept { return m_registry; }
 
+    // Spawns a new entity built from one of the engine's built-in primitive
+    // shapes (PrimitiveType - see Renderer/Primitives/
+    // PrimitiveMeshGenerator.h): a Transform at the origin (identity
+    // rotation/scale) plus a MeshRenderer referencing that shape's mesh -
+    // this engine's equivalent of Unity's GameObject.CreatePrimitive(), and
+    // deliberately a RUNTIME/Game-level operation rather than an Editor-only
+    // one (a real game could call this to spawn primitives too, exactly like
+    // Unity's own API is not editor-only). The Editor's "Hierarchy" right-
+    // click "Create 3D Object" menu (src/Editor/Panels/HierarchyPanel.cpp)
+    // is just the first caller of it. Needs `renderer` to build/upload the
+    // shape's GPU mesh the first time that particular PrimitiveType is ever
+    // requested (see EnsurePrimitiveMesh() below); every subsequent call for
+    // the SAME PrimitiveType reuses the already-uploaded mesh, exactly like
+    // the demo scene's three triangle entities already share one Mesh/
+    // Pipeline pair (see EnsureDemoSceneBuilt()) - only Transform differs
+    // per instance.
+    Entity CreatePrimitiveEntity(Renderer& renderer, PrimitiveType type);
+
 private:
     // Lazily builds the demo scene - three entities sharing one triangle
     // Mesh/Pipeline, spaced left/center/right purely via Transform, plus one
@@ -74,9 +95,34 @@ private:
     // there's more than a hardcoded demo scene.
     void EnsureDemoSceneBuilt(Renderer& renderer);
 
+    // Lazily creates (once) the one shared unlit Pipeline every entity this
+    // engine draws currently uses - the demo triangles AND every primitive
+    // entity from CreatePrimitiveEntity() alike - so a primitive can be
+    // spawned before EnsureDemoSceneBuilt() ever runs (e.g. the very first
+    // frame's Hierarchy right-click) without depending on the demo scene's
+    // own lazy-init order. Extracted out of EnsureDemoSceneBuilt() rather
+    // than duplicated, so there is exactly one Pipeline (and one
+    // PipelineHandle) for the whole process's lifetime, same "share, don't
+    // duplicate" spirit as EnsurePrimitiveMesh() below.
+    PipelineHandle EnsureDefaultPipeline(Renderer& renderer);
+
+    // Lazily creates (once per distinct PrimitiveType) and thereafter
+    // reuses that shape's GPU mesh - every "Create Cube" click shares the
+    // exact same MeshHandle, only each entity's own Transform differs,
+    // exactly mirroring Unity's own built-in primitives (every Cube you
+    // create shares one built-in mesh asset) and this engine's existing
+    // demo-scene triangles (see EnsureDemoSceneBuilt()).
+    MeshHandle EnsurePrimitiveMesh(Renderer& renderer, PrimitiveType type);
+
     Registry m_registry;
     RenderSystem m_renderSystem;
     bool m_demoSceneBuilt = false;
+
+    PipelineHandle m_defaultPipeline;
+
+    // Indexed by static_cast<std::size_t>(PrimitiveType) - kInvalidMeshHandle
+    // (the array's default-constructed value) means "not generated yet".
+    std::array<MeshHandle, 5> m_primitiveMeshes;
 };
 
 } // namespace gte

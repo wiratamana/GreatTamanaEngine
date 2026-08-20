@@ -31,6 +31,14 @@
 #                                            construct or translate one).
 #   - Renderer/VertexTests.cpp             - Vertex's Vulkan binding/
 #                                            attribute description metadata.
+#   - Renderer/PrimitiveMeshGeneratorTests.cpp - PrimitiveMeshGenerator's
+#                                            pure geometry generation
+#                                            (Cube/Sphere/Capsule/Cone/Plane)
+#                                            - checked against hand-derived
+#                                            geometric invariants (surface
+#                                            distance from center/core
+#                                            segment, bounding box, ...), no
+#                                            GPU/Renderer/ECS involved.
 #   - Math/Vec2Tests.cpp, Vec3Tests.cpp    - Vec2/Vec3 arithmetic and
 #                                            geometric ops (dot/cross/
 #                                            length/normalize/lerp), using
@@ -125,6 +133,7 @@ set(GTE_TEST_SOURCES
     Input/InputStateTests.cpp
     Application/EventTranslatorTests.cpp
     Renderer/VertexTests.cpp
+    Renderer/PrimitiveMeshGeneratorTests.cpp
     Renderer/ResourcePoolTests.cpp
     Math/Vec2Tests.cpp
     Math/Vec3Tests.cpp

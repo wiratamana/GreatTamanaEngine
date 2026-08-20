@@ -1,6 +1,5 @@
 #pragma once
 
-#include "../ECS/Registry.h"
 #include "../Math/Mat4.h"
 #include "../Renderer/RenderTexture.h"
 
@@ -16,6 +15,7 @@ namespace gte {
 
 class Window;
 class Renderer;
+class Game;
 
 // Abstraction boundary between engine-core (Application/Renderer/Game) and
 // the optional Editor/Debug UI. Dear ImGui-backed in real builds, but
@@ -123,16 +123,25 @@ public:
     // center), and Memory (bottom, a Unity-Memory-Profiler-style GPU memory
     // panel - see Panels/MemoryPanel.cpp) inside a full-viewport ImGui
     // docking DockSpace, so the user can freely rearrange/split them (e.g.
-    // drag Scene and Game apart to view both at once). `registry` is Game's
-    // ECS world (see Game::GetRegistry()) - Hierarchy lists its entities,
-    // Inspector edits the selected one's components. `renderer` is the same
-    // Renderer this Editor was constructed with (see CreateEditorLayer()
-    // below) - Memory reads its GetMemoryTotals()/GetMemoryResources() to
-    // show live GPU memory usage; no other panel touches it. Call after
-    // Game has finished rendering into GameViewTarget()/SceneViewTarget()
+    // drag Scene and Game apart to view both at once). `game` is the same
+    // Game Application owns - Hierarchy lists its ECS world's entities
+    // (Game::GetRegistry()) and spawns new primitive entities via
+    // Game::CreatePrimitiveEntity() (its "Create 3D Object" context menu -
+    // see Panels/HierarchyPanel.cpp), Inspector edits the selected entity's
+    // components. Taking `Game&` here (rather than pre-extracting just
+    // Registry&, as before Create 3D Object existed) does not widen what the
+    // Editor can see: every panel still only ever calls Game's own small,
+    // deliberate public API (GetRegistry()/CreatePrimitiveEntity()), never
+    // anything Game keeps private (RenderSystem, Mesh/Pipeline pools, ...) -
+    // see Game.h's class comment. `renderer` is the same Renderer this
+    // Editor was constructed with (see CreateEditorLayer() below) - Memory
+    // reads its GetMemoryTotals()/GetMemoryResources() to show live GPU
+    // memory usage, and CreatePrimitiveEntity() needs it to build/upload
+    // that shape's GPU mesh the first time it's requested. Call after Game
+    // has finished rendering into GameViewTarget()/SceneViewTarget()
     // (whichever came back non-null), so the "Game"/"Scene" panels have
     // fresh contents to display this frame.
-    virtual void BuildUI(Registry& registry, Renderer& renderer) = 0;
+    virtual void BuildUI(Game& game, Renderer& renderer) = 0;
 
     // Records this frame's UI draw data into cmd. Called from inside
     // Renderer::Present()'s recordExtra hook - i.e. while the swapchain

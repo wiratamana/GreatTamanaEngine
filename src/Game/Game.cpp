@@ -6,6 +6,8 @@
 #include "ECS/Components/MeshRenderer.h"
 #include "ECS/Components/Transform.h"
 
+#include <cstddef>
+
 namespace gte {
 
 void Game::OnEvent(const Event& /*event*/)
@@ -21,6 +23,43 @@ void Game::Update(double /*deltaSeconds*/, const InputState& /*input*/)
     // e.g. `if (input.IsKeyDown(KeyCode::W)) { ... }` for held-key movement.
 }
 
+PipelineHandle Game::EnsureDefaultPipeline(Renderer& renderer)
+{
+    if (!m_defaultPipeline.IsValid()) {
+        // Shader source lives at src/Shaders/Triangle.vert/.frag (version-
+        // controlled); compiled to SPIR-V at build time by
+        // cmake/CompileShaders.cmake into "<exe dir>/shaders/*.spv" (gitignored
+        // - see .gitignore). Registered with RenderSystem (not kept as a raw
+        // Pipeline member here) so a MeshRenderer component can reference it
+        // by handle - see RenderSystem.h.
+        m_defaultPipeline = m_renderSystem.RegisterPipeline(
+            renderer.CreatePipeline("shaders/Triangle.vert.spv", "shaders/Triangle.frag.spv"));
+    }
+    return m_defaultPipeline;
+}
+
+MeshHandle Game::EnsurePrimitiveMesh(Renderer& renderer, PrimitiveType type)
+{
+    MeshHandle& cached = m_primitiveMeshes[static_cast<std::size_t>(type)];
+    if (!cached.IsValid()) {
+        const std::vector<Vertex> vertices = PrimitiveMeshGenerator::Generate(type);
+        cached = m_renderSystem.RegisterMesh(renderer.CreateMesh(vertices.data(),
+            vertices.size() * sizeof(Vertex), static_cast<std::uint32_t>(vertices.size()), ToString(type)));
+    }
+    return cached;
+}
+
+Entity Game::CreatePrimitiveEntity(Renderer& renderer, PrimitiveType type)
+{
+    const PipelineHandle pipeline = EnsureDefaultPipeline(renderer);
+    const MeshHandle mesh = EnsurePrimitiveMesh(renderer, type);
+
+    const Entity entity = m_registry.CreateEntity();
+    m_registry.AddComponent<Transform>(entity); // Identity Transform - spawns at the world origin, like Unity.
+    m_registry.AddComponent<MeshRenderer>(entity, MeshRenderer{ mesh, pipeline });
+    return entity;
+}
+
 void Game::EnsureDemoSceneBuilt(Renderer& renderer)
 {
     if (m_demoSceneBuilt) {
@@ -28,14 +67,7 @@ void Game::EnsureDemoSceneBuilt(Renderer& renderer)
     }
     m_demoSceneBuilt = true;
 
-    // Shader source lives at src/Shaders/Triangle.vert/.frag (version-
-    // controlled); compiled to SPIR-V at build time by
-    // cmake/CompileShaders.cmake into "<exe dir>/shaders/*.spv" (gitignored
-    // - see .gitignore). Registered with RenderSystem (not kept as a raw
-    // Pipeline member here) so a MeshRenderer component can reference it by
-    // handle - see RenderSystem.h.
-    const PipelineHandle trianglePipeline = m_renderSystem.RegisterPipeline(
-        renderer.CreatePipeline("shaders/Triangle.vert.spv", "shaders/Triangle.frag.spv"));
+    const PipelineHandle trianglePipeline = EnsureDefaultPipeline(renderer);
 
     // Mesh-local positions on the XY plane (z=0) - one red, one green, one
     // blue vertex, so the rasterizer's interpolation across the triangle is
@@ -44,11 +76,11 @@ void Game::EnsureDemoSceneBuilt(Renderer& renderer)
     // Renderer/Pipeline.cpp, Shaders/Triangle.vert) actually moves the SAME
     // mesh data to a different place in the world, all seen through the one
     // Camera entity created below (see Shaders/Triangle.vert's
-    // `pc.viewProj * pc.model * vec4(inPosition, 0.0, 1.0)`).
+    // `pc.viewProj * pc.model * vec4(inPosition, 1.0)`).
     const Vertex vertices[3] = {
-        { { 0.0f, -0.5f }, { 1.0f, 0.0f, 0.0f } },
-        { { 0.5f, 0.5f }, { 0.0f, 1.0f, 0.0f } },
-        { { -0.5f, 0.5f }, { 0.0f, 0.0f, 1.0f } },
+        { { 0.0f, -0.5f, 0.0f }, { 1.0f, 0.0f, 0.0f } },
+        { { 0.5f, 0.5f, 0.0f }, { 0.0f, 1.0f, 0.0f } },
+        { { -0.5f, 0.5f, 0.0f }, { 0.0f, 0.0f, 1.0f } },
     };
     const MeshHandle triangleMesh =
         m_renderSystem.RegisterMesh(renderer.CreateMesh(vertices, sizeof(vertices), 3, "TriangleMesh"));

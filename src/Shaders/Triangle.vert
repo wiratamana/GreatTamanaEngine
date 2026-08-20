@@ -23,13 +23,18 @@ layout(push_constant) uniform PushConstants {
     mat4 viewProj;
 } pc;
 
-layout(location = 0) in vec2 inPosition;
+// inPosition is a real 3D position (see Renderer/Vertex.h) - the engine's
+// first hardcoded triangle demo authors z=0 explicitly rather than this
+// shader assuming/padding it, so this same layout also serves genuine 3D
+// geometry (the built-in primitive shapes - see Renderer/Primitives/
+// PrimitiveMeshGenerator.h) with no shader variant needed.
+layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inColor;
 
 layout(location = 0) out vec3 fragColor;
 
 void main()
 {
-    gl_Position = pc.viewProj * pc.model * vec4(inPosition, 0.0, 1.0);
+    gl_Position = pc.viewProj * pc.model * vec4(inPosition, 1.0);
     fragColor = inColor;
 }
