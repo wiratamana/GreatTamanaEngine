@@ -26,10 +26,18 @@ float AspectRatioOf(int width, int height) noexcept
 
 Application::SdlContext::SdlContext()
 {
+#if GTE_ENABLE_EDITOR
     // Must be installed before SDL_Init() - indeed, before literally any SDL
-    // call - see SdlMemoryTracker's own doc comment for why. This
-    // constructor is the one place this engine ever calls SDL_Init().
+    // call - see SdlMemoryTracker's own doc comment for why. Gated behind
+    // GTE_ENABLE_EDITOR (not installed at all in a release build) since the
+    // only consumer of these numbers is the Editor's "Memory" panel - a
+    // release build would otherwise pay real per-allocation tracking
+    // overhead (an extra pointer-arithmetic header + atomic increment on
+    // EVERY SDL_malloc/calloc/realloc/free call, for the rest of the
+    // process's lifetime) for a feature nothing in that build can ever
+    // display. See AGENTS.md ("CPU Dependency Memory Tracking").
     SdlMemoryTracker::Install();
+#endif
 
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         throw std::runtime_error(std::string("SDL_Init failed: ") + SDL_GetError());

@@ -20,15 +20,24 @@ namespace gte {
 // allocator than whatever SDL_malloc() originally served that pointer.
 // Application::SdlContext's constructor (Application.cpp) - the one place
 // this engine ever calls SDL_Init() - installs this first, before SDL_Init()
-// itself, for exactly this reason.
+// itself, for exactly this reason - but ONLY inside an `#if GTE_ENABLE_EDITOR`
+// block: a release build's Application never calls Install() at all, so SDL
+// uses its own untouched default allocator with zero interception and zero
+// per-allocation overhead, exactly as if this class didn't exist. The class
+// itself still compiles in every build (see below) purely so it stays
+// available/testable in a GTE_ENABLE_EDITOR=OFF configuration too (see
+// tests/Memory/SdlMemoryTrackerTests.cpp, which is NOT Editor-gated) -
+// compiling does not mean installed/active. See AGENTS.md ("CPU Dependency
+// Memory Tracking") for this exact rule.
 //
 // Not an instance/RAII type like GpuMemoryTracker: SDL_malloc_func and
 // friends (SDL3/SDL_stdinc.h) carry no userdata parameter, so there is
 // nowhere to stash a `this` pointer - the counters here are necessarily
 // static/process-global, the same constraint SDL's own
 // SDL_GetNumAllocations() already has. Always compiled (unlike
-// ImGuiMemoryTracker, src/Editor/ImGuiMemoryTracker.h) since SDL is used
-// regardless of GTE_ENABLE_EDITOR.
+// ImGuiMemoryTracker, src/Editor/ImGuiMemoryTracker.h, whose install call
+// site already naturally lives in Editor-only compiled code) since SDL
+// itself is used regardless of GTE_ENABLE_EDITOR.
 class SdlMemoryTracker {
 public:
     // Installs the tracking allocator via SDL_SetMemoryFunctions(). Safe to

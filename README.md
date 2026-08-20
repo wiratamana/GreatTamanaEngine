@@ -271,8 +271,9 @@ CMake adds:
   (`src/Renderer/Memory/GpuMemoryTracker.h`) was already carrying every
   frame for every `Buffer`/`RenderTexture` this engine creates — no new
   bookkeeping was needed there, only a UI to surface it.
-  **`SdlMemoryTracker`** (`src/Memory/SdlMemoryTracker.h`, always compiled —
-  SDL is used regardless of `GTE_ENABLE_EDITOR`) and **`ImGuiMemoryTracker`**
+  **`SdlMemoryTracker`** (`src/Memory/SdlMemoryTracker.h`, class always
+  compiled — SDL is used regardless of `GTE_ENABLE_EDITOR` — so it stays
+  available/testable in every build config) and **`ImGuiMemoryTracker`**
   (`src/Editor/ImGuiMemoryTracker.h`, Editor-only) each install a
   byte-counting wrapper around their respective library's own allocator
   (`SDL_SetMemoryFunctions()`/`ImGui::SetAllocatorFunctions()`) — installed
@@ -281,10 +282,16 @@ CMake adds:
   `ImGuiEditorLayer`'s constructor, before `ImGui::CreateContext()`) since
   both APIs document that swapping allocators later risks a free() using a
   different allocator than whatever alloc() originally served that pointer.
-  Both are static/process-global (SDL's and ImGui's allocator callbacks
-  carry no `this`-sized userdata to do otherwise) and Tier-1-tested despite
-  touching a third-party library's own allocator directly — see
-  `tests/Memory/SdlMemoryTrackerTests.cpp`/
+  **Neither is actually installed/active in a release build**
+  (`-DGTE_ENABLE_EDITOR=OFF`): `ImGuiEditorLayer` itself never compiles into
+  that build (`NullEditorLayer` replaces it), and `Application::SdlContext`'s
+  call to `SdlMemoryTracker::Install()` is explicitly wrapped in
+  `#if GTE_ENABLE_EDITOR` for the same reason — a release build has no
+  "Memory" panel to show these numbers and must not pay their real
+  per-allocation tracking cost for nothing. Both are static/process-global
+  (SDL's and ImGui's allocator callbacks carry no `this`-sized userdata to do
+  otherwise) and Tier-1-tested despite touching a third-party library's own
+  allocator directly — see `tests/Memory/SdlMemoryTrackerTests.cpp`/
   `tests/Editor/ImGuiMemoryTrackerTests.cpp` and AGENTS.md ("CPU Dependency
   Memory Tracking") for the full rationale, including why calling
   `SDL_malloc()`/`ImGui::MemAlloc()` directly in a test needs neither
@@ -364,11 +371,17 @@ pieces:
   now covering CPU AND GPU memory across three sections: **"CPU (Engine
   Dependencies)"** — exact, measured (not estimated) live byte/allocation
   totals for SDL and Dear ImGui specifically, via `SdlMemoryTracker`
-  (`src/Memory/SdlMemoryTracker.h`, always compiled) and `ImGuiMemoryTracker`
-  (`src/Editor/ImGuiMemoryTracker.h`, Editor-only), each installing a
-  byte-counting wrapper around that library's own allocator
-  (`SDL_SetMemoryFunctions()`/`ImGui::SetAllocatorFunctions()`) before its
-  very first call; **"GPU (Tracked by Engine)"** — aggregate totals
+  (`src/Memory/SdlMemoryTracker.h`, class always compiled for testability)
+  and `ImGuiMemoryTracker` (`src/Editor/ImGuiMemoryTracker.h`, Editor-only),
+  each installing a byte-counting wrapper around that library's own
+  allocator (`SDL_SetMemoryFunctions()`/`ImGui::SetAllocatorFunctions()`)
+  before its very first call — but neither actually installed/active in a
+  release build (`-DGTE_ENABLE_EDITOR=OFF`): the install call site is
+  explicitly `#if GTE_ENABLE_EDITOR`-gated (`SdlMemoryTracker`) or simply
+  never compiled at all (`ImGuiMemoryTracker`, via `NullEditorLayer`
+  replacing `ImGuiEditorLayer` entirely), so a shipped game pays zero
+  per-allocation tracking overhead for a panel it doesn't have; **"GPU
+  (Tracked by Engine)"** — aggregate totals
   (`Renderer::GetMemoryTotals()`) plus a sortable, biggest-first table of
   every currently-live GPU resource (`Renderer::GetMemoryResources()`) with
   its debug name/type/memory location/size (needed zero new bookkeeping —

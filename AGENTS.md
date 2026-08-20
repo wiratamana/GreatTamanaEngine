@@ -109,6 +109,23 @@ dependency:
   `ImGuiEditorLayer`'s constructor (`ImGuiEditorLayer.cpp`), before
   `ImGui::CreateContext()`. A future tracker for a new dependency must find
   and hook that same "first call" point, not an approximate/later one.
+- **The production `Install()` call site must itself be gated behind
+  `#if GTE_ENABLE_EDITOR`, even if the tracker CLASS compiles in every
+  build.** These trackers exist purely to feed the Editor's "Memory" panel -
+  a release/shipped build has no panel to display them and must not pay
+  their real per-allocation cost (an extra header write + atomic increment
+  on EVERY single alloc/free of that dependency, for the rest of the
+  process's lifetime) for nothing. `ImGuiMemoryTracker::Install()` gets this
+  for free (its call site, `ImGuiEditorLayer`'s constructor, is only ever
+  compiled when `GTE_ENABLE_EDITOR` is ON in the first place - see "Editor
+  Module Structure"). `SdlMemoryTracker::Install()` does NOT get this for
+  free, since `Application.cpp` compiles in every build - its call site in
+  `Application::SdlContext`'s constructor is explicitly wrapped in
+  `#if GTE_ENABLE_EDITOR` for exactly this reason. A future tracker for a
+  dependency used outside `src/Editor/` (i.e. one whose install call site
+  isn't naturally Editor-only compiled) must add this same explicit guard at
+  its call site - don't assume "the class only matters to the Editor" is
+  enough on its own to keep it out of a release build's runtime behavior.
 - **`Install()` must be idempotent.** Both trackers guard themselves with a
   local `static bool installed` - calling `Install()` more than once (e.g.
   from a test, or if a future call site is added) is always a safe no-op, so
