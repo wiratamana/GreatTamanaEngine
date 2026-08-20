@@ -213,13 +213,37 @@ public:
     // Aggregate live-memory totals across every Buffer/RenderTexture this
     // Renderer has ever created and not yet destroyed - see
     // Memory/GpuMemoryTracker.h. O(1); safe to call every frame if desired
-    // (e.g. a future Editor "Memory" panel's header).
+    // (e.g. the Editor's "Memory" panel header - see Panels/MemoryPanel.cpp).
     GpuMemoryTracker::Totals GetMemoryTotals() const;
 
     // Full per-object snapshot of every currently-live GPU resource - the
-    // primitive behind a Unity-Memory-Profiler-style listing. Carries no
-    // names (see GpuMemoryTracker::GetDebugName(), Editor-only, for that).
+    // primitive behind a Unity-Memory-Profiler-style listing (see the
+    // Editor's "Memory" panel, Panels/MemoryPanel.cpp). Carries no names
+    // (see GetMemoryDebugName() below, Editor-only, for that).
     std::vector<GpuMemoryTracker::Entry> GetMemoryResources() const;
+
+#if GTE_ENABLE_EDITOR
+    // Editor-only: the human-readable debug name (if any) attached to a
+    // still-live GPU resource handle via CreateBuffer()/CreateRenderTexture()/
+    // CreateMesh()'s debugName parameter - forwards straight to
+    // GpuMemoryTracker::GetDebugName(). Returns an empty string for an
+    // unnamed/invalid/unknown handle. Compiled out entirely when
+    // GTE_ENABLE_EDITOR is OFF, exactly like GpuMemoryTracker's own
+    // debug-name storage (see AGENTS.md, "GPU Resource Memory Tracking").
+    const std::string& GetMemoryDebugName(GpuResourceHandle handle) const;
+#endif
+
+    // The REAL, driver-reported memory usage/budget for every Vulkan memory
+    // heap on this device (see VulkanAllocator::GetHeapBudgets()) - distinct
+    // from GetMemoryTotals()/GetMemoryResources() above, which only tally
+    // what THIS engine's own Buffer/RenderTexture objects requested.
+    // Comparing the two together (see the Editor's "Memory" panel,
+    // Panels/MemoryPanel.cpp) is how you tell whether GpuMemoryTracker
+    // accounts for everything a real GPU tool (or Task Manager's dedicated
+    // GPU memory column) would report, or whether something else - the
+    // swapchain's own images, ImGui's Vulkan backend, driver/loader
+    // overhead - isn't tracked yet.
+    std::vector<VmaBudget> GetVmaHeapBudgets() const;
 
     // Read-only snapshot of this Renderer's core Vulkan handles + swapchain
     // format/image count, for an external Vulkan-based rendering backend

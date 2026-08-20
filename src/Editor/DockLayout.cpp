@@ -23,7 +23,7 @@ bool DefaultDockLayoutIsNeeded(ImGuiID dockspaceId)
     if (ImGui::DockBuilderGetNode(dockspaceId) == nullptr) {
         return true;
     }
-    for (const char* panelName : { "Hierarchy", "Inspector", "Scene", "Game" }) {
+    for (const char* panelName : { "Hierarchy", "Inspector", "Scene", "Game", "Memory" }) {
         const ImGuiWindow* window = ImGui::FindWindowByName(panelName);
         if (window != nullptr && window->DockId == 0) {
             return true;
@@ -37,10 +37,17 @@ bool DefaultDockLayoutIsNeeded(ImGuiID dockspaceId)
 //   |          |         (menu bar)             |          |
 //   | Hierarchy|      Scene | Game (tabs)        | Inspector|
 //   |  (left)  |         (center)                |  (right) |
+//   |          +---------------------------------+          |
+//   |          |             Memory (bottom)      |          |
 //   +----------+-------------------------------+----------+
 // "Scene" and "Game" are docked into the SAME center node (as tabs) - the
 // user can drag the "Scene" tab out to split it away from "Game" at any
-// time afterwards (see BuildDockspaceAndMenuBar()'s comment).
+// time afterwards (see BuildDockspaceAndMenuBar()'s comment). "Memory"
+// (Unity-Memory-Profiler-style GPU memory panel, see Panels/MemoryPanel.cpp)
+// gets its own full-width strip along the bottom, mirroring where Unity's
+// own Profiler window normally lives - split off the dockspace BEFORE the
+// left/right panels below so it spans the complete width rather than just
+// the center column.
 void BuildDefaultDockLayout(ImGuiID dockspaceId, ImVec2 size)
 {
     ImGui::DockBuilderRemoveNode(dockspaceId);
@@ -48,6 +55,7 @@ void BuildDefaultDockLayout(ImGuiID dockspaceId, ImVec2 size)
     ImGui::DockBuilderSetNodeSize(dockspaceId, size);
 
     ImGuiID center = dockspaceId;
+    const ImGuiID bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.25f, nullptr, &center);
     const ImGuiID left = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.20f, nullptr, &center);
     const ImGuiID right = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.28f, nullptr, &center);
 
@@ -55,10 +63,10 @@ void BuildDefaultDockLayout(ImGuiID dockspaceId, ImVec2 size)
     ImGui::DockBuilderDockWindow("Inspector", right);
     ImGui::DockBuilderDockWindow("Scene", center);
     ImGui::DockBuilderDockWindow("Game", center);
+    ImGui::DockBuilderDockWindow("Memory", bottom);
 
     ImGui::DockBuilderFinish(dockspaceId);
 }
-
 } // namespace
 
 void BuildDockspaceAndMenuBar(EditorContext& ctx)
@@ -119,7 +127,7 @@ void BuildDockspaceAndMenuBar(EditorContext& ctx)
     // undocked floating windows).
     if (!ctx.dockLayoutEnsured) {
         bool allPanelsAccountedFor = true;
-        for (const char* panelName : { "Hierarchy", "Inspector", "Scene", "Game" }) {
+        for (const char* panelName : { "Hierarchy", "Inspector", "Scene", "Game", "Memory" }) {
             // A panel that has never called Begin() yet this session (e.g.
             // this is the very first frame ever, before this same
             // BuildUI() call reaches BuildHierarchyPanel()/etc.) doesn't

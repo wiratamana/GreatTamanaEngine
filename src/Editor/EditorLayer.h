@@ -119,16 +119,20 @@ public:
     virtual Mat4 SceneViewProjection(float aspectWidthOverHeight) const = 0;
 
     // Builds every editor panel for this frame - top menu bar (File > Exit,
-    // ...), Hierarchy (left), Inspector (right), and Scene/Game (tabbed,
-    // center) inside a full-viewport ImGui docking DockSpace, so the user
-    // can freely rearrange/split them (e.g. drag Scene and Game apart to
-    // view both at once). `registry` is Game's ECS world (see
-    // Game::GetRegistry()) - Hierarchy lists its entities, Inspector
-    // edits the selected one's components. Call after Game has finished
-    // rendering into GameViewTarget()/SceneViewTarget() (whichever came back
-    // non-null), so the "Game"/"Scene" panels have fresh contents to
-    // display this frame.
-    virtual void BuildUI(Registry& registry) = 0;
+    // ...), Hierarchy (left), Inspector (right), Scene/Game (tabbed,
+    // center), and Memory (bottom, a Unity-Memory-Profiler-style GPU memory
+    // panel - see Panels/MemoryPanel.cpp) inside a full-viewport ImGui
+    // docking DockSpace, so the user can freely rearrange/split them (e.g.
+    // drag Scene and Game apart to view both at once). `registry` is Game's
+    // ECS world (see Game::GetRegistry()) - Hierarchy lists its entities,
+    // Inspector edits the selected one's components. `renderer` is the same
+    // Renderer this Editor was constructed with (see CreateEditorLayer()
+    // below) - Memory reads its GetMemoryTotals()/GetMemoryResources() to
+    // show live GPU memory usage; no other panel touches it. Call after
+    // Game has finished rendering into GameViewTarget()/SceneViewTarget()
+    // (whichever came back non-null), so the "Game"/"Scene" panels have
+    // fresh contents to display this frame.
+    virtual void BuildUI(Registry& registry, Renderer& renderer) = 0;
 
     // Records this frame's UI draw data into cmd. Called from inside
     // Renderer::Present()'s recordExtra hook - i.e. while the swapchain

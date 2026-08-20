@@ -169,4 +169,16 @@ std::vector<GpuMemoryTracker::Entry> Renderer::GetMemoryResources() const
     return m_resources.GetMemoryResources();
 }
 
+#if GTE_ENABLE_EDITOR
+const std::string& Renderer::GetMemoryDebugName(GpuResourceHandle handle) const
+{
+    return m_resources.GetMemoryDebugName(handle);
+}
+#endif
+
+std::vector<VmaBudget> Renderer::GetVmaHeapBudgets() const
+{
+    return m_allocator.GetHeapBudgets();
+}
+
 } // namespace gte

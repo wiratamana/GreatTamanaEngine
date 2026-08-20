@@ -231,8 +231,64 @@ CMake adds:
   (`Quat::FromEulerDegrees()`) and ImGuizmo's, which would otherwise fight
   the mouse mid-drag. Left-click-to-select an entity by ray-casting into
   the Scene view (with a highlighted outline around the picked mesh) is a
-  deliberately deferred follow-up — see "Known Limitations & Planned Work"
-  below; for now, selection is manual, via "Hierarchy" only.
+  deliberately deferred follow-up — see `TODO.md` ("Editor / Debug UI");
+  for now, selection is manual, via "Hierarchy" only.
+  **Memory panel:** a Unity-Memory-Profiler-style **"Memory"** panel
+  (`src/Editor/Panels/MemoryPanel.cpp`, docked full-width along the bottom —
+  see `DockLayout.cpp`) shows exactly what's contributing to memory usage
+  right now, across three sections: **"CPU (Engine Dependencies)"** — exact
+  live byte/allocation totals for SDL and Dear ImGui specifically
+  (`SdlMemoryTracker`/`ImGuiMemoryTracker`, below — each installs a
+  byte-counting wrapper around that library's own allocator, so these are
+  measured, not estimated); **"GPU (Tracked by Engine)"** — a header of
+  aggregate totals (`Renderer::GetMemoryTotals()` — total bytes, buffer vs.
+  texture bytes/count, device-local vs. host-visible vs. shared bytes)
+  followed by a sortable table of every currently-live GPU resource
+  (`Renderer::GetMemoryResources()`), biggest first, each row showing its
+  debug name (if any — `Renderer::GetMemoryDebugName()`, Editor-only, empty/
+  "(unnamed)" otherwise), type (Buffer/Texture), memory location, and size;
+  and **"GPU Heap Budgets (Driver-Reported)"** — the REAL, driver-reported
+  usage/budget for every Vulkan memory heap (`Renderer::GetVmaHeapBudgets()`,
+  via `vmaGetHeapBudgets()`), fetched straight from VMA rather than tallied
+  by this engine, letting you directly compare "what GpuMemoryTracker thinks
+  is live" against "what the driver/Task Manager actually reports" for the
+  same heap. Each heap row's "VMA Allocated" column shows not just a byte
+  count but the full `VmaStatistics` story behind it — e.g. "64.00 MB across
+  1 block (3 sub-allocations)" — since a `GpuMemoryTracker` total that looks
+  much smaller than VMA's own block size isn't a tracking gap: VMA reserves
+  whole `VkDeviceMemory` blocks up front (avoiding a slow, per-resource
+  `vkAllocateMemory` call, and staying under `maxMemoryAllocationCount`) and
+  sub-allocates individual resources out of them, so a block is often mostly
+  unused headroom, not "missing" memory. The row-shaping logic itself
+  (sorting, name resolution, human-readable byte formatting, heap-budget
+  reshaping) lives in
+  `src/Editor/MemoryPanelData.h/.cpp` as plain, ImGui-free functions
+  (`BuildMemoryRows()`/`BuildHeapBudgetRows()`/`FormatBytes()`/`ToString()`),
+  Tier-1-tested exactly like `EditorCamera` despite living under
+  `src/Editor/` (see `tests/Editor/MemoryPanelDataTests.cpp`) — the panel
+  itself (`Panels/MemoryPanel.cpp`) is a thin ImGui-table wrapper around
+  them. The GPU section is the primitive the underlying `GpuMemoryTracker`
+  (`src/Renderer/Memory/GpuMemoryTracker.h`) was already carrying every
+  frame for every `Buffer`/`RenderTexture` this engine creates — no new
+  bookkeeping was needed there, only a UI to surface it.
+  **`SdlMemoryTracker`** (`src/Memory/SdlMemoryTracker.h`, always compiled —
+  SDL is used regardless of `GTE_ENABLE_EDITOR`) and **`ImGuiMemoryTracker`**
+  (`src/Editor/ImGuiMemoryTracker.h`, Editor-only) each install a
+  byte-counting wrapper around their respective library's own allocator
+  (`SDL_SetMemoryFunctions()`/`ImGui::SetAllocatorFunctions()`) — installed
+  before that library's very first call
+  (`Application::SdlContext`'s constructor, before `SDL_Init()`;
+  `ImGuiEditorLayer`'s constructor, before `ImGui::CreateContext()`) since
+  both APIs document that swapping allocators later risks a free() using a
+  different allocator than whatever alloc() originally served that pointer.
+  Both are static/process-global (SDL's and ImGui's allocator callbacks
+  carry no `this`-sized userdata to do otherwise) and Tier-1-tested despite
+  touching a third-party library's own allocator directly — see
+  `tests/Memory/SdlMemoryTrackerTests.cpp`/
+  `tests/Editor/ImGuiMemoryTrackerTests.cpp` and AGENTS.md ("CPU Dependency
+  Memory Tracking") for the full rationale, including why calling
+  `SDL_malloc()`/`ImGui::MemAlloc()` directly in a test needs neither
+  `SDL_Init()` nor a live `ImGuiContext`.
 - **`NullEditorLayer`** (`GTE_ENABLE_EDITOR=OFF`) — every method is a no-op;
   `GameViewTarget()`/`SceneViewTarget()` always return `nullptr`, meaning
   "render straight to the swapchain, fullscreen". This is what makes
@@ -301,8 +357,42 @@ pieces:
   engine's own convention and ImGuizmo's that would otherwise visibly fight
   the mouse mid-drag. Click-to-select via ray casting + a Scene-view outline
   highlight for the picked entity is a deliberately deferred follow-up — see
-  "Known Limitations & Planned Work" below; selection today is manual, via
+  `TODO.md` ("Editor / Debug UI"); selection today is manual, via
   "Hierarchy" only.
+- The Editor now has a Unity-Memory-Profiler-style **"Memory"** panel
+  (`src/Editor/Panels/MemoryPanel.cpp`, docked full-width along the bottom),
+  now covering CPU AND GPU memory across three sections: **"CPU (Engine
+  Dependencies)"** — exact, measured (not estimated) live byte/allocation
+  totals for SDL and Dear ImGui specifically, via `SdlMemoryTracker`
+  (`src/Memory/SdlMemoryTracker.h`, always compiled) and `ImGuiMemoryTracker`
+  (`src/Editor/ImGuiMemoryTracker.h`, Editor-only), each installing a
+  byte-counting wrapper around that library's own allocator
+  (`SDL_SetMemoryFunctions()`/`ImGui::SetAllocatorFunctions()`) before its
+  very first call; **"GPU (Tracked by Engine)"** — aggregate totals
+  (`Renderer::GetMemoryTotals()`) plus a sortable, biggest-first table of
+  every currently-live GPU resource (`Renderer::GetMemoryResources()`) with
+  its debug name/type/memory location/size (needed zero new bookkeeping —
+  `GpuMemoryTracker`, see below, already carried all of this data every
+  frame; only the debug-name forwarding, `Renderer::GetMemoryDebugName()`,
+  was new here); and **"GPU Heap Budgets (Driver-Reported)"** — the REAL,
+  driver-reported usage/budget for every Vulkan memory heap
+  (`Renderer::GetVmaHeapBudgets()`, via VMA's `vmaGetHeapBudgets()`), the
+  cross-check for whether the "Tracked by Engine" section plausibly accounts
+  for everything a real GPU tool/Task Manager would report - each heap row
+  also shows the `VmaStatistics` story behind its "VMA Allocated" bytes
+  (`FormatBlockSummary()` - e.g. "64.00 MB across 1 block (3
+  sub-allocations)"), since VMA reserves whole `VkDeviceMemory` blocks up
+  front and sub-allocates resources out of them, so a much-smaller
+  `GpuMemoryTracker` total is expected block-reservation headroom, not a
+  tracking gap. All of the
+  row-shaping logic (`BuildMemoryRows()`/`BuildHeapBudgetRows()`/
+  `FormatBytes()`/`ToString()`, `src/Editor/MemoryPanelData.h/.cpp`) plus
+  both CPU trackers are Tier-1-tested despite living under `src/Editor/`
+  (`SdlMemoryTracker` lives outside it, in `src/Memory/`, and is tested the
+  same way) - same as `EditorCamera` - see
+  `tests/Editor/MemoryPanelDataTests.cpp`,
+  `tests/Memory/SdlMemoryTrackerTests.cpp`, and
+  `tests/Editor/ImGuiMemoryTrackerTests.cpp`.
 - GPU memory allocation goes through **VMA** (Vulkan Memory Allocator) via
   the `VulkanAllocator` RAII wrapper (`src/Renderer/Vulkan/`) — `Renderer`
   owns a single `VmaAllocator`. `RenderTexture` creates its `VkImage` through
@@ -351,45 +441,8 @@ pieces:
   triangles on screen, seen through a real perspective camera, in both the
   "Game" and "Scene" panels' own separate `RenderTexture`s).
 
-## Known Limitations & Planned Work
+## Roadmap
 
-- **Click-to-select via ray casting + a Scene-view outline highlight.**
-  Today, picking an entity by clicking directly on it inside "Scene" is not
-  implemented — selection only happens via "Hierarchy" (see
-  `EditorContext::selectedEntity`). Adding it needs a real ray/triangle
-  intersection test against each `MeshRenderer`'s actual mesh data (i.e. this
-  engine's first real collider/picking system, since there is no collision/
-  physics layer at all yet), plus a Scene-view-only outline post-process
-  shader pass to actually highlight whatever gets picked. Deliberately
-  deferred as its own follow-up rather than folded into the transform-gizmo
-  work above (see "Editor / Debug UI") — meaningfully heavier
-  (mesh-level intersection math, a new picking/collider abstraction, and a
-  new render pass) and orthogonal to it: the gizmo already works fine driven
-  purely by a "Hierarchy" selection in the meantime.
-- **Long-term: replace ImGuizmo with a homegrown transform gizmo.**
-  ImGuizmo (`third_party/imguizmo/`, `cmake/FetchImGuizmo.cmake`) currently
-  backs the Scene-view translate/rotate/scale gizmo (see "Editor / Debug
-  UI" above), and works correctly today - `IMGUIZMO_RELEASE_TAG` is pinned
-  to a specific commit SHA (not the `master` branch) specifically so this
-  stays true: a moving branch could silently change ImGuizmo's public
-  API/behavior underneath this engine on a future fetch (a real, separate
-  risk from - and compounding - the two hand-diagnosed upstream bugs this
-  integration already had to work around: a Vulkan-vs-OpenGL clip-space Y
-  convention mismatch, fixed via `EditorCamera::GizmoProjection()`; and
-  HandleScale()/HandleRotation() freezing an in-progress drag the instant
-  the cursor left the Scene panel, fixed via a source patch applied by
-  `_imguizmo_apply_gte_patches()` in `cmake/FetchImGuizmo.cmake`). Pinning
-  removes the "silently changes underneath us" risk, but not the underlying
-  reason it came up in the first place: depending on a second library with
-  its own coordinate/interaction conventions to reconcile with, for
-  something this engine's own `Math`/`Renderer` already has every primitive
-  needed for (screen-space projection, ray-plane intersection, `ImDrawList`
-  rendering via Dear ImGui, which stays either way). Rolling a homegrown
-  gizmo (translate first, then scale, then rotate - roughly the increasing
-  order of implementation difficulty) would fit the same "own the core data
-  model" philosophy already applied to `src/Math/` (no GLM) and `src/ECS/`
-  (no EnTT), and permanently remove this entire class of integration bug
-  rather than continuing to patch around it. Deliberately NOT undertaken
-  now - real, multi-day effort better spent on higher-priority engine work
-  at this early a stage - kept here as a known, intentional future
-  direction rather than a forgotten TODO.
+See **[TODO.md](TODO.md)** for known limitations, deliberately deferred
+follow-ups (Editor and Memory Profiler), and longer-term engine roadmap
+ideas.

@@ -1,4 +1,4 @@
-﻿// Defining VMA_IMPLEMENTATION before vk_mem_alloc.h is first included in
+// Defining VMA_IMPLEMENTATION before vk_mem_alloc.h is first included in
 // this translation unit (via VulkanAllocator.h below) is what compiles VMA's
 // actual implementation here - exactly one .cpp in the whole project must do
 // this. See VulkanAllocator.h for the VMA_STATIC_VULKAN_FUNCTIONS/
@@ -60,6 +60,17 @@ void VulkanAllocator::Destroy() noexcept
         vmaDestroyAllocator(m_allocator);
         m_allocator = VK_NULL_HANDLE;
     }
+}
+
+std::vector<VmaBudget> VulkanAllocator::GetHeapBudgets() const
+{
+    const VkPhysicalDeviceMemoryProperties* memoryProperties = nullptr;
+    vmaGetMemoryProperties(m_allocator, &memoryProperties);
+
+    VmaBudget budgets[VK_MAX_MEMORY_HEAPS];
+    vmaGetHeapBudgets(m_allocator, budgets);
+
+    return std::vector<VmaBudget>(budgets, budgets + memoryProperties->memoryHeapCount);
 }
 
 } // namespace gte

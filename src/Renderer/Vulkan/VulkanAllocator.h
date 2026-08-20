@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <volk.h>
 
@@ -24,6 +24,7 @@
 #include <vk_mem_alloc.h>
 
 #include <cstdint>
+#include <vector>
 
 namespace gte {
 
@@ -50,6 +51,17 @@ public:
     VulkanAllocator& operator=(VulkanAllocator&& other) noexcept;
 
     VmaAllocator Native() const noexcept { return m_allocator; }
+
+    // Returns one VmaBudget entry per memory heap on this device (see
+    // vmaGetHeapBudgets()) - the REAL, driver-reported current usage/budget
+    // for each heap (via VK_EXT_memory_budget if the driver supports it, an
+    // estimate otherwise), as opposed to GpuMemoryTracker's tally
+    // (src/Renderer/Memory/GpuMemoryTracker.h) of just this engine's own
+    // tracked Buffer/RenderTexture resources. Cheap - a single
+    // vmaGetHeapBudgets() call, no allocation beyond the returned vector -
+    // safe to call every frame (see its own doc comment in vk_mem_alloc.h:
+    // "fast to calculate... suitable to be called every frame").
+    std::vector<VmaBudget> GetHeapBudgets() const;
 
 private:
     void Destroy() noexcept;

@@ -1,0 +1,53 @@
+#pragma once
+
+#include <SDL3/SDL_stdinc.h>
+
+#include <cstdint>
+
+namespace gte {
+
+// Byte-counting wrapper around SDL's own malloc/calloc/realloc/free (see
+// SDL_SetMemoryFunctions(), SDL3/SDL_stdinc.h) - the CPU-memory counterpart
+// to GpuMemoryTracker (src/Renderer/Memory/GpuMemoryTracker.h): "how much
+// memory is SDL itself using right now", surfaced by the Editor's "Memory"
+// panel (src/Editor/Panels/MemoryPanel.cpp) as its own named bucket,
+// separate from GPU memory and from the engine's general heap usage.
+//
+// MUST be installed before the very first SDL call of any kind - see
+// SDL_SetMemoryFunctions()'s own doc comment ("usually this needs to be the
+// first call made into the SDL library"): swapping allocators after SDL has
+// already allocated something risks a later SDL_free() using a DIFFERENT
+// allocator than whatever SDL_malloc() originally served that pointer.
+// Application::SdlContext's constructor (Application.cpp) - the one place
+// this engine ever calls SDL_Init() - installs this first, before SDL_Init()
+// itself, for exactly this reason.
+//
+// Not an instance/RAII type like GpuMemoryTracker: SDL_malloc_func and
+// friends (SDL3/SDL_stdinc.h) carry no userdata parameter, so there is
+// nowhere to stash a `this` pointer - the counters here are necessarily
+// static/process-global, the same constraint SDL's own
+// SDL_GetNumAllocations() already has. Always compiled (unlike
+// ImGuiMemoryTracker, src/Editor/ImGuiMemoryTracker.h) since SDL is used
+// regardless of GTE_ENABLE_EDITOR.
+class SdlMemoryTracker {
+public:
+    // Installs the tracking allocator via SDL_SetMemoryFunctions(). Safe to
+    // call more than once - every call after the first is a no-op, so
+    // callers never need to guard their own call site.
+    static void Install();
+
+    // Live totals across every still-outstanding SDL_malloc/calloc/realloc
+    // allocation - O(1), safe to call every frame (e.g. from the Editor's
+    // "Memory" panel). Both are 0 if Install() was never called (SDL's
+    // default allocator is used, untracked).
+    static std::uint64_t LiveBytes() noexcept;
+    static std::uint64_t LiveAllocationCount() noexcept;
+
+private:
+    static void* SDLCALL TrackedMalloc(std::size_t size);
+    static void* SDLCALL TrackedCalloc(std::size_t nmemb, std::size_t size);
+    static void* SDLCALL TrackedRealloc(void* mem, std::size_t size);
+    static void SDLCALL TrackedFree(void* mem);
+};
+
+} // namespace gte

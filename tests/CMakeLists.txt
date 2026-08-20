@@ -85,6 +85,16 @@
 #                                            is ON (see below), since
 #                                            EditorCamera itself is only
 #                                            compiled into gte_core then.
+#   - Editor/MemoryPanelDataTests.cpp        - the Editor "Memory" panel's
+#                                            pure data-shaping logic
+#                                            (BuildMemoryRows()/FormatBytes()/
+#                                            ToString() - see
+#                                            src/Editor/MemoryPanelData.h) -
+#                                            no ImGui/Renderer/live GPU
+#                                            involved. Only built when
+#                                            GTE_ENABLE_EDITOR is ON, same
+#                                            reason as EditorCameraTests.cpp
+#                                            above.
 #
 # Note that the test BINARY still dynamically depends on SDL3.dll at process
 # load time regardless of the above (gte_core's Window.cpp references SDL
@@ -111,6 +121,7 @@
 set(GTE_TEST_SOURCES
     Memory/GpuResourceHandleTests.cpp
     Memory/GpuMemoryTrackerTests.cpp
+    Memory/SdlMemoryTrackerTests.cpp
     Input/InputStateTests.cpp
     Application/EventTranslatorTests.cpp
     Renderer/VertexTests.cpp
@@ -137,7 +148,11 @@ set(GTE_TEST_SOURCES
 # about it not being COMPILED IN at all when the Editor is off, not about
 # it needing a live Vulkan/SDL/ImGui dependency.
 if(GTE_ENABLE_EDITOR)
-    list(APPEND GTE_TEST_SOURCES Editor/EditorCameraTests.cpp)
+    list(APPEND GTE_TEST_SOURCES
+        Editor/EditorCameraTests.cpp
+        Editor/ImGuiMemoryTrackerTests.cpp
+        Editor/MemoryPanelDataTests.cpp
+    )
 endif()
 
 add_executable(GreatTamanaEngineTests ${GTE_TEST_SOURCES})
@@ -147,6 +162,17 @@ target_link_libraries(GreatTamanaEngineTests PRIVATE
     GTest::gtest
     GTest::gtest_main
 )
+
+# Editor/ImGuiMemoryTrackerTests.cpp (above) includes <imgui.h> directly -
+# gte_core links imgui PRIVATE (see the root CMakeLists.txt), so that
+# include path isn't propagated transitively to consumers of gte_core; this
+# test executable needs its own link against the imgui target for its
+# include directories. Only linked when GTE_ENABLE_EDITOR is ON, since the
+# imgui target itself only exists then (matching every other GTE_ENABLE_EDITOR
+# guard in this file).
+if(GTE_ENABLE_EDITOR)
+    target_link_libraries(GreatTamanaEngineTests PRIVATE imgui)
+endif()
 
 # See the file-level comment above for why this is still needed even though
 # no test here ever calls SDL_Init().

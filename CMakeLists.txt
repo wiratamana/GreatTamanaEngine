@@ -121,6 +121,8 @@ add_library(gte_core STATIC
     src/ECS/Components/Transform.h
     src/ECS/Components/MeshRenderer.h
     src/ECS/Components/Camera.h
+    src/Memory/SdlMemoryTracker.h
+    src/Memory/SdlMemoryTracker.cpp
     src/Application/Application.cpp
     src/Application/Application.h
     src/Application/EventTranslator.cpp
@@ -191,6 +193,10 @@ if(GTE_ENABLE_EDITOR)
         src/Editor/TransformGizmo.cpp
         src/Editor/DockLayout.h
         src/Editor/DockLayout.cpp
+        src/Editor/ImGuiMemoryTracker.h
+        src/Editor/ImGuiMemoryTracker.cpp
+        src/Editor/MemoryPanelData.h
+        src/Editor/MemoryPanelData.cpp
         src/Editor/Panels/HierarchyPanel.h
         src/Editor/Panels/HierarchyPanel.cpp
         src/Editor/Panels/InspectorPanel.h
@@ -199,6 +205,8 @@ if(GTE_ENABLE_EDITOR)
         src/Editor/Panels/ScenePanel.cpp
         src/Editor/Panels/GamePanel.h
         src/Editor/Panels/GamePanel.cpp
+        src/Editor/Panels/MemoryPanel.h
+        src/Editor/Panels/MemoryPanel.cpp
         src/Editor/ImGuiEditorLayer.cpp
     )
     target_link_libraries(gte_core PRIVATE imgui imguizmo)

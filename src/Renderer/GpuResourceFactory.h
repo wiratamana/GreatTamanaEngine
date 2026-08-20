@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "Buffer.h"
 #include "Memory/GpuMemoryTracker.h"
@@ -71,6 +71,14 @@ public:
     // See Renderer::GetMemoryTotals()/GetMemoryResources().
     GpuMemoryTracker::Totals GetMemoryTotals() const;
     std::vector<GpuMemoryTracker::Entry> GetMemoryResources() const;
+
+#if GTE_ENABLE_EDITOR
+    // See Renderer::GetMemoryDebugName() - Editor-only, forwards straight to
+    // GpuMemoryTracker::GetDebugName(). Compiled out entirely when
+    // GTE_ENABLE_EDITOR is OFF, same as GpuMemoryTracker's own debug-name
+    // storage (see AGENTS.md, "GPU Resource Memory Tracking").
+    const std::string& GetMemoryDebugName(GpuResourceHandle handle) const;
+#endif
 
 private:
     void Destroy() noexcept;

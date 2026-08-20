@@ -29,6 +29,11 @@ safe on any machine/CI runner, GPU or not:
   `GpuResourceHandle` value semantics and `GpuMemoryTracker`'s Track()/
   Untrack()/totals/snapshot bookkeeping, including generation-counted
   handle-reuse safety and (Editor builds only) debug names.
+- `Memory/SdlMemoryTrackerTests.cpp` - `SdlMemoryTracker`'s byte-counting
+  wrapper around `SDL_malloc`/`calloc`/`realloc`/`free`, exercised by calling
+  those functions directly (no `SDL_Init()`/video subsystem needed - see
+  AGENTS.md, "CPU Dependency Memory Tracking"). Always built (SDL is used
+  regardless of `GTE_ENABLE_EDITOR`).
 - `Input/InputStateTests.cpp` - `InputState`'s held/just-pressed/
   just-released/delta semantics, fed with hand-built `gte::Event` values.
 - `Application/EventTranslatorTests.cpp` - the `SDL_Event` -> `gte::Event`
@@ -69,6 +74,21 @@ safe on any machine/CI runner, GPU or not:
   `GTE_ENABLE_EDITOR` is `ON` (see `tests/CMakeLists.txt`), since
   `EditorCamera` itself is only compiled into `gte_core` then - same
   "zero-touch when off" rule as the Editor module itself.
+- `Editor/MemoryPanelDataTests.cpp` - the Editor "Memory" panel's pure
+  data-shaping logic (`BuildMemoryRows()`/`FormatBytes()`/`ToString()`,
+  `src/Editor/MemoryPanelData.h`) - sorting/naming/byte-formatting only, no
+  ImGui/Renderer/live GPU device involved. Only built when `GTE_ENABLE_EDITOR`
+  is `ON`, same reason as `Editor/EditorCameraTests.cpp` above. Also covers
+  `BuildHeapBudgetRows()` (reshapes `VmaBudget` entries into plain rows for
+  the panel's "GPU Heap Budgets" section - no live `VmaAllocator` needed) and
+  `FormatBlockSummary()` (the "VMA Allocated" column's block/sub-allocation
+  count wording, including singular vs. plural phrasing).
+- `Editor/ImGuiMemoryTrackerTests.cpp` - `ImGuiMemoryTracker`'s byte-counting
+  wrapper around Dear ImGui's own `MemAlloc()`/`MemFree()`, exercised by
+  calling those functions directly (no live `ImGuiContext`/window needed -
+  see AGENTS.md, "CPU Dependency Memory Tracking"). Only built when
+  `GTE_ENABLE_EDITOR` is `ON`, same reason as `Editor/EditorCameraTests.cpp`
+  above.
 
 Testing `Buffer`/`RenderTexture`/`Pipeline`/`GpuResourceFactory` properly
 needs a real `VkDevice`+`VmaAllocator` (and, as `VulkanDevice` is written

@@ -1,4 +1,4 @@
-﻿#include "GpuResourceFactory.h"
+#include "GpuResourceFactory.h"
 
 #include <cstddef>
 #include <limits>
@@ -171,5 +171,12 @@ std::vector<GpuMemoryTracker::Entry> GpuResourceFactory::GetMemoryResources() co
 {
     return m_memoryTracker->GetAllResources();
 }
+
+#if GTE_ENABLE_EDITOR
+const std::string& GpuResourceFactory::GetMemoryDebugName(GpuResourceHandle handle) const
+{
+    return m_memoryTracker->GetDebugName(handle);
+}
+#endif
 
 } // namespace gte

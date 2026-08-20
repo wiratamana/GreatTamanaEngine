@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "../Vulkan/VulkanAllocator.h"
 #include "GpuResourceHandle.h"
@@ -50,8 +50,8 @@ struct GpuResourceRecord {
 // addressed by a cheap GpuResourceHandle rather than a pointer or string.
 // Backed by a dense slot-map array (indexed directly by handle.index, not a
 // hash map) so both random lookup and full iteration over potentially
-// thousands of live resources (e.g. for a future Editor "Memory" panel) stay
-// fast and cache-friendly.
+// thousands of live resources (e.g. the Editor's "Memory" panel - see
+// src/Editor/Panels/MemoryPanel.cpp) stay fast and cache-friendly.
 //
 // Not thread-safe (matches the rest of this single-threaded engine).
 //
@@ -107,12 +107,14 @@ public:
     };
     // Snapshot of every currently-live resource. Always available (even
     // outside the Editor) since it carries no names/strings - just cheap
-    // PODs - intended for a future Editor "Memory" panel to consume.
+    // PODs - consumed by the Editor's "Memory" panel (see
+    // src/Editor/Panels/MemoryPanel.cpp).
     std::vector<Entry> GetAllResources() const;
 
 #if GTE_ENABLE_EDITOR
     // Editor-only: attaches/reads a human-readable label for a handle,
-    // purely for display in a future Memory panel. Stored in a completely
+    // displayed by the Editor's "Memory" panel (see
+    // src/Editor/Panels/MemoryPanel.cpp). Stored in a completely
     // separate table from the hot GpuResourceRecord data above (see
     // AGENTS.md) - compiled out ENTIRELY (not just unused/empty) when
     // GTE_ENABLE_EDITOR is OFF, so a release build carries zero string cost

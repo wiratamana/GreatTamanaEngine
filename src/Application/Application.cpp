@@ -2,6 +2,8 @@
 
 #include "EventTranslator.h"
 
+#include "../Memory/SdlMemoryTracker.h"
+
 #include <SDL3/SDL.h>
 
 #include <stdexcept>
@@ -24,6 +26,11 @@ float AspectRatioOf(int width, int height) noexcept
 
 Application::SdlContext::SdlContext()
 {
+    // Must be installed before SDL_Init() - indeed, before literally any SDL
+    // call - see SdlMemoryTracker's own doc comment for why. This
+    // constructor is the one place this engine ever calls SDL_Init().
+    SdlMemoryTracker::Install();
+
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         throw std::runtime_error(std::string("SDL_Init failed: ") + SDL_GetError());
     }
@@ -181,11 +188,12 @@ int Application::Run()
             m_game.Render(m_renderer, AspectRatioOf(m_windowWidth, m_windowHeight));
         }
 
-        // Build every editor panel (Hierarchy/Inspector/Scene/Game/menu
+        // Build every editor panel (Hierarchy/Inspector/Scene/Game/Memory/menu
         // bar) now that the Game/Scene view textures (if any) have this
-        // frame's contents. Passes Game's ECS world so Hierarchy/Inspector
-        // can list/edit it - see Game::GetRegistry().
-        m_editorLayer->BuildUI(m_game.GetRegistry());
+        // frame's contents. Passes Game's ECS world (Hierarchy/Inspector) and
+        // Renderer itself (Memory - see Renderer::GetMemoryTotals()/
+        // GetMemoryResources()) - see Game::GetRegistry().
+        m_editorLayer->BuildUI(m_game.GetRegistry(), m_renderer);
 
         // File > Exit (or any other future programmatic "close" UI action)
         // ends the loop exactly like a Quit event/closing the OS window.

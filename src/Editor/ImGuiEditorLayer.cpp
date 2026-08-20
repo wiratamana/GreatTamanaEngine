@@ -3,9 +3,11 @@
 #include "DockLayout.h"
 #include "EditorCamera.h"
 #include "EditorContext.h"
+#include "ImGuiMemoryTracker.h"
 #include "Panels/GamePanel.h"
 #include "Panels/HierarchyPanel.h"
 #include "Panels/InspectorPanel.h"
+#include "Panels/MemoryPanel.h"
 #include "Panels/ScenePanel.h"
 #include "TransformGizmo.h"
 #include "../Renderer/Renderer.h"
@@ -112,6 +114,11 @@ public:
 
         const Renderer::VulkanContextInfo context = renderer.GetVulkanContextInfo();
         m_device = context.device;
+
+        // Must be installed before ImGui::CreateContext() below - see
+        // ImGuiMemoryTracker's own doc comment for why (some of a context's
+        // internal state is allocated the moment it's created).
+        ImGuiMemoryTracker::Install();
 
         IMGUI_CHECKVERSION();
         m_context = ImGui::CreateContext();
@@ -306,7 +313,7 @@ public:
         return m_sceneCamera.ViewProjection(aspectWidthOverHeight);
     }
 
-    void BuildUI(Registry& registry) override
+    void BuildUI(Registry& registry, Renderer& renderer) override
     {
         ImGui::SetCurrentContext(m_context);
 
@@ -329,6 +336,7 @@ public:
         BuildInspectorPanel(registry, m_ctx);
         BuildScenePanel(registry, m_ctx, m_sceneCamera);
         BuildGamePanel(m_ctx);
+        BuildMemoryPanel(m_ctx, renderer);
     }
 
     void Render(VkCommandBuffer cmd) override
