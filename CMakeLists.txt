@@ -76,8 +76,17 @@ if(GTE_ENABLE_EDITOR)
     #   third_party/imgui/*.h, *.cpp                          - core library
     #   third_party/imgui/backends/imgui_impl_sdl3.h/.cpp     - SDL3 platform backend
     #   third_party/imgui/backends/imgui_impl_vulkan.h/.cpp   - Vulkan renderer backend
-    # Also defines the imgui target used below.
     fetch_imgui()
+
+    include(FetchImGuizmo)
+
+    # Downloads (if not already present) and stages ImGuizmo (the Editor's
+    # Scene-view 3D transform gizmo widget - translate/rotate/scale
+    # manipulators), built directly on top of Dear ImGui:
+    #   third_party/imguizmo/ImGuizmo.h/.cpp - gizmo widget core
+    # Also defines the imguizmo target used below. Must come after
+    # fetch_imgui() since it links against the imgui target.
+    fetch_imguizmo()
 endif()
 
 # GoogleTest is only fetched/built at all when GTE_BUILD_TESTS is ON - see
@@ -190,7 +199,7 @@ if(GTE_ENABLE_EDITOR)
         src/Editor/Panels/GamePanel.cpp
         src/Editor/ImGuiEditorLayer.cpp
     )
-    target_link_libraries(gte_core PRIVATE imgui)
+    target_link_libraries(gte_core PRIVATE imgui imguizmo)
 else()
     target_sources(gte_core PRIVATE src/Editor/NullEditorLayer.cpp)
 endif()

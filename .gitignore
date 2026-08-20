@@ -1,4 +1,4 @@
-﻿# CMake build trees
+# CMake build trees
 /build/
 /build_test/
 /out/
@@ -22,6 +22,10 @@
 # Dear ImGui artifacts fetched by cmake/FetchImGui.cmake (regenerated
 # automatically on configure — see CMakeLists.txt / cmake/FetchImGui.cmake)
 /third_party/imgui/
+
+# ImGuizmo artifacts fetched by cmake/FetchImGuizmo.cmake (regenerated
+# automatically on configure — see CMakeLists.txt / cmake/FetchImGuizmo.cmake)
+/third_party/imguizmo/
 
 # Vulkan Memory Allocator artifacts fetched by cmake/FetchVMA.cmake
 # (regenerated automatically on configure — see CMakeLists.txt /
