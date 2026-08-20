@@ -7,6 +7,7 @@
 #include "Panels/HierarchyPanel.h"
 #include "Panels/InspectorPanel.h"
 #include "Panels/ScenePanel.h"
+#include "TransformGizmo.h"
 #include "../Renderer/Renderer.h"
 #include "../Window/Window.h"
 
@@ -225,6 +226,12 @@ public:
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();
+
+        // Required by ImGuizmo before any Manipulate() call this frame
+        // (Panels/ScenePanel.cpp, via TransformGizmo.h) - see
+        // BeginGizmoFrame()'s own comment for why this is called right
+        // here rather than from BuildUI() below.
+        BeginGizmoFrame();
     }
 
     RenderTexture* GameViewTarget() override
@@ -320,7 +327,7 @@ public:
 
         BuildHierarchyPanel(registry, m_ctx);
         BuildInspectorPanel(registry, m_ctx);
-        BuildScenePanel(m_ctx, m_sceneCamera);
+        BuildScenePanel(registry, m_ctx, m_sceneCamera);
         BuildGamePanel(m_ctx);
     }
 

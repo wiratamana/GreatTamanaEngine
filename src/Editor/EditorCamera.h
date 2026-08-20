@@ -57,6 +57,14 @@ public:
     // = scrolled away from the user, i.e. "zoom/dolly in").
     void Update(Vec2 mouseDelta, float scrollDelta, bool middleMouseDown, bool rightMouseDown) noexcept;
 
+    // View and projection matrices, kept SEPARATE (never pre-multiplied) -
+    // what Panels/ScenePanel.cpp hands to TransformGizmo.h's
+    // ManipulateTransformGizmo(), which needs them individually (ImGuizmo's
+    // own Manipulate() signature takes view/projection as two separate
+    // float[16]s, unlike RenderSystem::Draw()'s combined view-projection).
+    Mat4 View() const noexcept { return Camera::ViewMatrix(m_transform); }
+    Mat4 Projection(float aspectWidthOverHeight) const noexcept { return m_camera.ProjectionMatrix(aspectWidthOverHeight); }
+
     // Combined projection * view matrix for a render target of the given
     // aspect ratio - what ImGuiEditorLayer::SceneViewProjection() hands
     // straight to RenderSystem::Draw() for the Scene view, in place of
@@ -65,7 +73,7 @@ public:
     // (see ECS/Components/Camera.h) rather than duplicating that math here.
     Mat4 ViewProjection(float aspectWidthOverHeight) const noexcept
     {
-        return m_camera.ProjectionMatrix(aspectWidthOverHeight) * Camera::ViewMatrix(m_transform);
+        return Projection(aspectWidthOverHeight) * View();
     }
 
     const Transform& GetTransform() const noexcept { return m_transform; }

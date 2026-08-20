@@ -2,6 +2,9 @@
 
 #include "../EditorCamera.h"
 #include "../EditorContext.h"
+#include "../TransformGizmo.h"
+#include "../../ECS/Components/Transform.h"
+#include "../../ECS/Registry.h"
 
 #include <imgui.h>
 
@@ -9,7 +12,7 @@
 
 namespace gte {
 
-void BuildScenePanel(EditorContext& ctx, EditorCamera& camera)
+void BuildScenePanel(Registry& registry, EditorContext& ctx, EditorCamera& camera)
 {
     // ImGui::Begin() returns false when this panel isn't actually visible
     // right now (e.g. it's an inactive tab behind "Game", or collapsed) -
@@ -39,6 +42,14 @@ void BuildScenePanel(EditorContext& ctx, EditorCamera& camera)
             ImGui::Image(
                 static_cast<ImTextureID>(reinterpret_cast<intptr_t>(ctx.sceneViewDescriptor)),
                 avail);
+
+            // The Scene image's own on-screen pixel rect - both the gizmo
+            // (ManipulateTransformGizmo()) and its top-left switcher overlay
+            // (DrawGizmoOperationSwitcher()) below are positioned/clipped
+            // against this, never against the whole "Scene" window (which
+            // also includes its title bar/tab strip).
+            const ImVec2 imageMin = ImGui::GetItemRectMin();
+            const ImVec2 imageSize = ImGui::GetItemRectSize();
 
             // Unity-style Scene camera controls (see EditorCamera.h for the
             // actual pan/rotate/dolly math, deliberately kept ImGui-free) -
@@ -77,6 +88,31 @@ void BuildScenePanel(EditorContext& ctx, EditorCamera& camera)
             const float scrollDelta = hovered ? io.MouseWheel : 0.0f;
 
             camera.Update(mouseDelta, scrollDelta, ctx.sceneCameraPanning, ctx.sceneCameraRotating);
+
+            // Unity's own top-left Move/Rotate/Scale switcher, overlaid on
+            // top of the Scene image - drawn AFTER the camera-control hover
+            // check above (so `hovered`/IsItemHovered() above still refers
+            // to the Image() item, never one of these buttons), but BEFORE
+            // the gizmo below so the gizmo's own handles/lines always paint
+            // over it in the rare case they visually overlap.
+            ImGui::SetCursorScreenPos(ImVec2(imageMin.x + 8.0f, imageMin.y + 8.0f));
+            DrawGizmoOperationSwitcher(ctx.gizmoOperation);
+
+            // The Unity-style translate/rotate/scale gizmo itself, for
+            // whichever entity is currently selected in the Hierarchy
+            // (ctx.selectedEntity) - only drawn/manipulated when it's alive
+            // and actually has a Transform to edit (e.g. nothing selected
+            // yet, or the selected entity was destroyed elsewhere). Uses
+            // THIS Scene camera's own view/projection (never the gameplay
+            // Camera entity's - see EditorCamera.h), so the gizmo always
+            // lines up with whatever this panel is currently showing.
+            if (registry.IsAlive(ctx.selectedEntity)) {
+                if (Transform* transform = registry.TryGetComponent<Transform>(ctx.selectedEntity)) {
+                    const float aspect = imageSize.y > 0.0f ? (imageSize.x / imageSize.y) : 1.0f;
+                    ManipulateTransformGizmo(ctx.gizmoOperation, camera.View(), camera.Projection(aspect),
+                        imageMin.x, imageMin.y, imageSize.x, imageSize.y, *transform);
+                }
+            }
         }
     }
     ImGui::End();

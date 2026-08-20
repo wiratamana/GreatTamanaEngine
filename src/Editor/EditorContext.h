@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../ECS/Entity.h"
+#include "TransformGizmo.h"
 
 #include <volk.h>
 
@@ -87,6 +88,14 @@ struct EditorContext {
     // selected", shown by InspectorPanel as "No entity selected." Written by
     // HierarchyPanel, read by InspectorPanel.
     Entity selectedEntity = kInvalidEntity;
+
+    // Which gizmo manipulation ScenePanel's top-left Move/Rotate/Scale
+    // switcher (TransformGizmo.h's DrawGizmoOperationSwitcher()) is
+    // currently set to, and therefore what ManipulateTransformGizmo() does
+    // with ctx.selectedEntity's Transform this frame (see
+    // Panels/ScenePanel.cpp). Translate is Unity's own default for a
+    // freshly-opened scene.
+    GizmoOperation gizmoOperation = GizmoOperation::Translate;
 
     // Set by File > Exit (see DockLayout.cpp's BuildDockspaceAndMenuBar());
     // read once per frame by ImGuiEditorLayer::WantsExit().

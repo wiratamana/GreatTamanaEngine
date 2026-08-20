@@ -187,6 +187,8 @@ if(GTE_ENABLE_EDITOR)
         src/Editor/EditorContext.h
         src/Editor/EditorCamera.h
         src/Editor/EditorCamera.cpp
+        src/Editor/TransformGizmo.h
+        src/Editor/TransformGizmo.cpp
         src/Editor/DockLayout.h
         src/Editor/DockLayout.cpp
         src/Editor/Panels/HierarchyPanel.h

@@ -212,6 +212,27 @@ CMake adds:
   the Scene view specifically, bypassing ECS camera resolution for that
   view only — `Game` itself has no idea the Editor or `EditorCamera` exist
   either way.
+  **Transform gizmo:** whichever entity is currently selected in "Hierarchy"
+  gets a Unity-style translate/rotate/scale gizmo drawn directly over
+  "Scene" (never "Game") via **ImGuizmo** (`third_party/imguizmo/`, fetched
+  the same way as Dear ImGui itself — see `cmake/FetchImGuizmo.cmake`,
+  wrapped by `src/Editor/TransformGizmo.h/.cpp`), plus a top-left
+  Move/Rotate/Scale switcher overlay (`EditorContext::gizmoOperation`,
+  `DrawGizmoOperationSwitcher()`). Always manipulates in ImGuizmo's `LOCAL`
+  space (identical to `WORLD` today, since `Transform` has no
+  parent-hierarchy field yet), using the Scene view's own `EditorCamera`
+  (never the gameplay `Camera` entity's view/projection — see above).
+  `ManipulateTransformGizmo()` decomposes the manipulated 4x4 matrix back
+  into position/rotation/scale by hand rather than via
+  `ImGuizmo::DecomposeMatrixToComponents()` — translation/scale are read
+  straight off the matrix's own columns, and rotation goes through
+  `Quat::FromMat4()` on the (unscaled) rotation columns, sidestepping any
+  Euler-angle-order mismatch between this engine's own convention
+  (`Quat::FromEulerDegrees()`) and ImGuizmo's, which would otherwise fight
+  the mouse mid-drag. Left-click-to-select an entity by ray-casting into
+  the Scene view (with a highlighted outline around the picked mesh) is a
+  deliberately deferred follow-up — see "Known Limitations & Planned Work"
+  below; for now, selection is manual, via "Hierarchy" only.
 - **`NullEditorLayer`** (`GTE_ENABLE_EDITOR=OFF`) — every method is a no-op;
   `GameViewTarget()`/`SceneViewTarget()` always return `nullptr`, meaning
   "render straight to the swapchain, fullscreen". This is what makes
@@ -266,6 +287,22 @@ pieces:
   component. Fully unit-tested (pan/dolly/rotate math, pitch clamping,
   `ViewProjection()`) despite living under `src/Editor/`, since it has no
   ImGui/SDL/Vulkan dependency at all — see `tests/Editor/EditorCameraTests.cpp`.
+- "Scene" also now has a Unity-style translate/rotate/scale **transform
+  gizmo** via **ImGuizmo** (`src/Editor/TransformGizmo.h/.cpp`,
+  `third_party/imguizmo/` — fetched the same way as Dear ImGui itself, see
+  `cmake/FetchImGuizmo.cmake`) for whichever entity is currently selected in
+  "Hierarchy", plus a top-left Move/Rotate/Scale switcher overlay
+  (`EditorContext::gizmoOperation`). `ManipulateTransformGizmo()` writes the
+  dragged result straight back into that entity's `Transform`, decomposed by
+  hand rather than via `ImGuizmo::DecomposeMatrixToComponents()` — the
+  manipulated matrix's translation/scale are read straight off its own
+  columns, and rotation goes through `Quat::FromMat4()` on the (unscaled)
+  rotation columns, sidestepping any Euler-angle-order mismatch between this
+  engine's own convention and ImGuizmo's that would otherwise visibly fight
+  the mouse mid-drag. Click-to-select via ray casting + a Scene-view outline
+  highlight for the picked entity is a deliberately deferred follow-up — see
+  "Known Limitations & Planned Work" below; selection today is manual, via
+  "Hierarchy" only.
 - GPU memory allocation goes through **VMA** (Vulkan Memory Allocator) via
   the `VulkanAllocator` RAII wrapper (`src/Renderer/Vulkan/`) — `Renderer`
   owns a single `VmaAllocator`. `RenderTexture` creates its `VkImage` through
@@ -313,3 +350,19 @@ pieces:
   `ViewMatrix()` math) and visually (three independently-positioned
   triangles on screen, seen through a real perspective camera, in both the
   "Game" and "Scene" panels' own separate `RenderTexture`s).
+
+## Known Limitations & Planned Work
+
+- **Click-to-select via ray casting + a Scene-view outline highlight.**
+  Today, picking an entity by clicking directly on it inside "Scene" is not
+  implemented — selection only happens via "Hierarchy" (see
+  `EditorContext::selectedEntity`). Adding it needs a real ray/triangle
+  intersection test against each `MeshRenderer`'s actual mesh data (i.e. this
+  engine's first real collider/picking system, since there is no collision/
+  physics layer at all yet), plus a Scene-view-only outline post-process
+  shader pass to actually highlight whatever gets picked. Deliberately
+  deferred as its own follow-up rather than folded into the transform-gizmo
+  work above (see "Editor / Debug UI") — meaningfully heavier
+  (mesh-level intersection math, a new picking/collider abstraction, and a
+  new render pass) and orthogonal to it: the gizmo already works fine driven
+  purely by a "Hierarchy" selection in the meantime.
