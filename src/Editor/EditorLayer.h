@@ -119,6 +119,21 @@ public:
     // attachment.
     virtual void Render(VkCommandBuffer cmd) = 0;
 
+    // Updates/renders every extra OS window currently created because a
+    // panel was dragged outside the main viewport (Dear ImGui "multi-
+    // viewport"/"platform windows" - see the ImGuiConfigFlags_ViewportsEnable
+    // discussion in ImGuiEditorLayer's class comment). Call once per frame,
+    // AFTER the main swapchain has been fully presented (i.e. after
+    // Renderer::Present() returns) - each such window owns its own,
+    // completely independent Vulkan swapchain, so it has nothing to do with,
+    // and does not need to happen before/inside, the main window's own
+    // present. No-ops for NullEditorLayer (a release build has no Editor UI,
+    // so nothing can ever have been dragged outside a main window that
+    // doesn't even show one), and also safely no-ops on any frame where
+    // Render() above never actually ran (e.g. the main OS window was
+    // minimized that frame) - see ImGuiEditorLayer::RenderPlatformWindows().
+    virtual void RenderPlatformWindows() = 0;
+
     // True the frame after the user picked File > Exit (or any other
     // programmatic "please close the application" UI action) - checked by
     // Application::Run() once per frame to end its main loop cleanly, the

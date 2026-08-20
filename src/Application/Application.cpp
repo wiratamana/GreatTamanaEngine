@@ -50,6 +50,12 @@ Application::~Application() = default;
 int Application::Run()
 {
     bool running = true;
+    // Identifies Application's own main game window among possibly several
+    // real SDL windows (once Dear ImGui's multi-viewport feature creates
+    // extra ones for panels dragged outside it) - see the mainWindowId doc
+    // comment on EventTranslator::Translate(). Fetched once: an SDL window's
+    // ID never changes over its lifetime.
+    const Uint32 mainWindowId = m_window.Id();
     Uint64 lastTicksNs = SDL_GetTicksNS();
 
     InputState inputState;
@@ -66,7 +72,7 @@ int Application::Run()
             // a release build (NullEditorLayer).
             m_editorLayer->ProcessEvent(sdlEvent);
 
-            const std::optional<Event> event = EventTranslator::Translate(sdlEvent);
+            const std::optional<Event> event = EventTranslator::Translate(sdlEvent, mainWindowId);
             if (!event.has_value()) {
                 continue;
             }
@@ -186,6 +192,15 @@ int Application::Run()
         // this just presents whatever Game rendered straight into the
         // swapchain moments ago.
         m_renderer.Present([this](VkCommandBuffer cmd) { m_editorLayer->Render(cmd); });
+
+        // Update/present any panel the user has dragged outside the main OS
+        // window (Dear ImGui multi-viewport/"platform windows" - a no-op in
+        // a release build, see NullEditorLayer::RenderPlatformWindows()).
+        // Deliberately AFTER the main swapchain Present() above: each such
+        // window owns its own, completely independent Vulkan swapchain, so
+        // there is no ordering requirement against the main window's own
+        // present - see IEditorLayer::RenderPlatformWindows().
+        m_editorLayer->RenderPlatformWindows();
     }
 
     return 0;

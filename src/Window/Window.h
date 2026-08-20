@@ -1,5 +1,6 @@
-﻿#pragma once
+#pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -40,6 +41,20 @@ public:
     Window& operator=(Window&& other) noexcept;
 
     SDL_Window* Native() const noexcept { return m_window; }
+
+    // This window's SDL window ID (SDL_GetWindowID()) - returned as a plain
+    // std::uint32_t (SDL's own Uint32/SDL_WindowID are typedef'd to exactly
+    // this) so this header still never needs to include an SDL header.
+    // Every SDL keyboard/mouse/window event carries the ID of the specific
+    // SDL window it actually happened on (sdlEvent.key.windowID, etc.) -
+    // once Dear ImGui's multi-viewport feature is enabled (see
+    // ImGuiEditorLayer), MORE THAN ONE SDL window can exist at a time (any
+    // panel dragged outside the main window becomes its own extra SDL
+    // window, owned/managed entirely by imgui_impl_sdl3.cpp), so
+    // EventTranslator uses this to tell "this event happened on Application's
+    // own main game window" apart from "this event happened on one of
+    // ImGui's own extra platform windows" (see EventTranslator::Translate()).
+    std::uint32_t Id() const noexcept;
 
     int Width() const noexcept { return m_width; }
     int Height() const noexcept { return m_height; }

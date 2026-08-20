@@ -21,6 +21,7 @@ public:
     RenderTexture* SceneViewTarget() override { return nullptr; }
     void BuildUI(Registry& /*registry*/) override { }
     void Render(VkCommandBuffer /*cmd*/) override { }
+    void RenderPlatformWindows() override { }
     bool WantsExit() const override { return false; }
     bool WantsCaptureMouse() const override { return false; }
     bool WantsCaptureKeyboard() const override { return false; }

@@ -31,7 +31,11 @@
 // Owns:
 //   - the ImGui context itself (docking branch - see cmake/FetchImGui.cmake)
 //     with ImGuiConfigFlags_DockingEnable set, so every panel below can be
-//     freely dragged/split/tabbed by the user, Unity-style.
+//     freely dragged/split/tabbed by the user, Unity-style, PLUS
+//     ImGuiConfigFlags_ViewportsEnable set, so any of those same panels can
+//     also be dragged clean OUTSIDE the main OS window onto the desktop or
+//     another monitor (each becoming its own real, independently movable OS
+//     window) - see the constructor and RenderPlatformWindows() below.
 //   - the SDL3 platform backend (input) and Vulkan renderer backend
 //     (drawing), wired to the exact same device/swapchain format Renderer
 //     already uses (see Renderer::GetVulkanContextInfo())
@@ -113,11 +117,35 @@ public:
         ImGui::SetCurrentContext(m_context);
         ImGui::StyleColorsDark();
 
-        // Docking (NOT multi-viewport/platform windows - those stay off:
-        // this Editor only docks panels within the one OS window) is what
-        // lets Hierarchy/Inspector/Scene/Game be freely rearranged/split -
-        // see the class comment above.
-        ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+        // Docking lets Hierarchy/Inspector/Scene/Game be freely rearranged/
+        // split within the one OS window - see the class comment above.
+        // Viewports (multi-viewport/"platform windows") ADDITIONALLY lets
+        // any panel be dragged OUTSIDE the main OS window entirely, onto the
+        // desktop or another monitor, Unity/Unreal-style: each becomes its
+        // own real OS window, backed by its own SDL3 window (created/
+        // destroyed automatically by imgui_impl_sdl3.cpp's platform
+        // callbacks - registered unconditionally by ImGui_ImplSDL3_InitForVulkan()
+        // below, regardless of this flag) and its own Vulkan swapchain
+        // (created/destroyed automatically by imgui_impl_vulkan.cpp's
+        // renderer callbacks - registered by ImGui_ImplVulkan_Init() below,
+        // see ImGui_ImplVulkan_InitMultiViewportSupport()). What actually
+        // updates/presents those extra windows every frame is
+        // RenderPlatformWindows() below, called once per frame from
+        // Application::Run() right after the main swapchain is presented.
+        ImGuiIO& io = ImGui::GetIO();
+        io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+        io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+
+        // Platform windows are separate, undocked OS windows - give them an
+        // opaque background and square corners (matching a normal OS
+        // window) instead of inheriting the main viewport's themed
+        // rounded/semi-transparent look, exactly as Dear ImGui's own
+        // demo/examples recommend whenever ViewportsEnable is on.
+        {
+            ImGuiStyle& style = ImGui::GetStyle();
+            style.WindowRounding = 0.0f;
+            style.Colors[ImGuiCol_WindowBg].w = 1.0f;
+        }
 
         if (!ImGui_ImplSDL3_InitForVulkan(window.Native())) {
             ImGui::DestroyContext(m_context);
@@ -189,6 +217,10 @@ public:
 
     void NewFrame() override
     {
+        // See RenderPlatformWindows()/m_frameRendered below for why this is
+        // reset here, at the very start of every frame.
+        m_frameRendered = false;
+
         ImGui::SetCurrentContext(m_context);
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplSDL3_NewFrame();
@@ -288,6 +320,48 @@ public:
         ImGui::SetCurrentContext(m_context);
         ImGui::Render();
         ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+
+        // Marks THIS frame as having actually reached ImGui::Render()/
+        // EndFrame() - see RenderPlatformWindows() below for why this
+        // matters (Application::Run() calls that unconditionally every
+        // frame, even ones where Renderer::Present() skipped calling this
+        // very method entirely, e.g. a minimized window).
+        m_frameRendered = true;
+    }
+
+    void RenderPlatformWindows() override
+    {
+        ImGui::SetCurrentContext(m_context);
+
+        // Nothing to do if this frame never actually reached Render()
+        // above (e.g. the OS window is currently minimized, so
+        // Renderer::Present() bailed out before ever invoking the
+        // recordExtra hook that calls Render()) - ImGui::Render()/
+        // EndFrame() was never called this frame, and calling
+        // UpdatePlatformWindows()/RenderPlatformWindowsDefault() without
+        // that happening first would hit an internal Dear ImGui assert
+        // ("Forgot to call Render() or EndFrame() ...").
+        if (!m_frameRendered) {
+            return;
+        }
+
+        // Actually creates/resizes/destroys the extra real OS windows +
+        // their own Vulkan swapchains for every ImGui window currently
+        // dragged outside the main viewport (see
+        // ImGui_ImplVulkan_InitMultiViewportSupport()/
+        // ImGui_ImplSDL3_InitMultiViewportSupport(), wired up automatically
+        // back in the constructor), then records+submits+presents each of
+        // them - completely independent of, and unrelated to, the main
+        // swapchain Renderer::Present() just presented. A no-op whenever
+        // ImGuiConfigFlags_ViewportsEnable isn't set (never the case here -
+        // see the constructor - but this mirrors every official Dear ImGui
+        // backend example's own guard, and keeps this method safe to call
+        // unconditionally even if that ever changes).
+        ImGuiIO& io = ImGui::GetIO();
+        if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+            ImGui::UpdatePlatformWindows();
+            ImGui::RenderPlatformWindowsDefault();
+        }
     }
 
     bool WantsExit() const override { return m_ctx.exitRequested; }
@@ -331,6 +405,11 @@ private:
     ImGuiContext* m_context = nullptr;
     RenderTexture m_gameView;
     RenderTexture m_sceneView;
+
+    // True once Render(cmd) has actually run THIS frame (reset to false at
+    // the top of every NewFrame()) - see RenderPlatformWindows() for why
+    // this guard exists.
+    bool m_frameRendered = false;
 
     // Shared state read/written by DockLayout.cpp's
     // BuildDockspaceAndMenuBar() and every Panels/*.cpp builder called from

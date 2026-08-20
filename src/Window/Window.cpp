@@ -1,4 +1,4 @@
-﻿#include "Window.h"
+#include "Window.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
@@ -61,6 +61,11 @@ std::vector<std::string> Window::VulkanInstanceExtensions()
         result.emplace_back(extensions[i]);
     }
     return result;
+}
+
+std::uint32_t Window::Id() const noexcept
+{
+    return static_cast<std::uint32_t>(SDL_GetWindowID(m_window));
 }
 
 VkSurfaceKHR Window::CreateVulkanSurface(VkInstance instance) const

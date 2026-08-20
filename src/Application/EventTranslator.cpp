@@ -1,11 +1,14 @@
-﻿#include "EventTranslator.h"
+#include "EventTranslator.h"
 
 namespace gte {
 
-std::optional<Event> EventTranslator::Translate(const SDL_Event& sdlEvent)
+std::optional<Event> EventTranslator::Translate(const SDL_Event& sdlEvent, Uint32 mainWindowId)
 {
     switch (sdlEvent.type) {
     case SDL_EVENT_QUIT: {
+        // No per-window ID on this event at all - closing the app always
+        // ends the whole process, regardless of which window (if any)
+        // triggered it. See the mainWindowId doc comment in EventTranslator.h.
         Event event;
         event.type = EventType::Quit;
         return event;
@@ -13,6 +16,10 @@ std::optional<Event> EventTranslator::Translate(const SDL_Event& sdlEvent)
 
     case SDL_EVENT_KEY_DOWN:
     case SDL_EVENT_KEY_UP: {
+        if (sdlEvent.key.windowID != mainWindowId) {
+            return std::nullopt;
+        }
+
         Event event;
         event.type = (sdlEvent.type == SDL_EVENT_KEY_DOWN) ? EventType::KeyDown : EventType::KeyUp;
 
@@ -24,6 +31,10 @@ std::optional<Event> EventTranslator::Translate(const SDL_Event& sdlEvent)
     }
 
     case SDL_EVENT_MOUSE_MOTION: {
+        if (sdlEvent.motion.windowID != mainWindowId) {
+            return std::nullopt;
+        }
+
         Event event;
         event.type = EventType::MouseMoved;
 
@@ -38,6 +49,10 @@ std::optional<Event> EventTranslator::Translate(const SDL_Event& sdlEvent)
 
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
     case SDL_EVENT_MOUSE_BUTTON_UP: {
+        if (sdlEvent.button.windowID != mainWindowId) {
+            return std::nullopt;
+        }
+
         const MouseButton button = TranslateMouseButton(sdlEvent.button.button);
         if (button == MouseButton::Unknown) {
             // An SDL button code this engine doesn't map to anything (e.g. an
@@ -61,6 +76,10 @@ std::optional<Event> EventTranslator::Translate(const SDL_Event& sdlEvent)
     }
 
     case SDL_EVENT_MOUSE_WHEEL: {
+        if (sdlEvent.wheel.windowID != mainWindowId) {
+            return std::nullopt;
+        }
+
         Event event;
         event.type = EventType::MouseWheel;
 
@@ -72,6 +91,15 @@ std::optional<Event> EventTranslator::Translate(const SDL_Event& sdlEvent)
     }
 
     case SDL_EVENT_WINDOW_RESIZED: {
+        // Crucial once Dear ImGui multi-viewport is enabled: an extra ImGui
+        // platform window being resized must NOT resize the game's own
+        // swapchain/RenderTextures - only Application's own main window
+        // resizing does. See the mainWindowId doc comment in
+        // EventTranslator.h.
+        if (sdlEvent.window.windowID != mainWindowId) {
+            return std::nullopt;
+        }
+
         Event event;
         event.type = EventType::WindowResized;
 
