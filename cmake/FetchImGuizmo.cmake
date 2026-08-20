@@ -18,15 +18,19 @@
 # 3D transform gizmo, not those.
 #
 # Downloading works straight from GitHub's codeload archive URL, same
-# approach as FetchImGui.cmake, resolved against BOTH possible archive
-# layouts since IMGUIZMO_RELEASE_TAG may name a branch (master, the default)
-# or a tag/"latest" (a real release):
+# approach as FetchImGui.cmake, resolved against THREE possible archive
+# layouts since IMGUIZMO_RELEASE_TAG may name a branch, a tag/"latest" (a
+# real release), or - the DEFAULT, see below - a pinned commit SHA:
 #   - branch : https://github.com/<owner>/<repo>/archive/refs/heads/<ref>.zip
 #   - tag    : https://github.com/<owner>/<repo>/archive/refs/tags/<ref>.zip
-# The branch URL is tried first (since the default, "master", is a branch),
-# falling back to the tag URL if that 404s - so an explicit release tag
-# (e.g. "1.83") or "latest" (resolved via the GitHub releases API) also
-# works unchanged.
+#   - commit : https://github.com/<owner>/<repo>/archive/<ref>.zip (GitHub's
+#              bare form - a commit isn't under refs/heads/ or refs/tags/,
+#              so this is the only one of the three that resolves one)
+# The branch URL is tried first, falling back to the tag URL and then the
+# bare/commit URL in turn if each 404s - so an explicit release tag (e.g.
+# "1.83"), "latest" (resolved via the GitHub releases API), or a raw commit
+# SHA (the default - see IMGUIZMO_RELEASE_TAG below) all keep working
+# through the exact same fetch function.
 #
 # Staged into this repo (all gitignored, regenerated automatically on
 # configure - see .gitignore):
@@ -58,10 +62,22 @@
 # Tunable cache variables:
 #   IMGUIZMO_RELEASE_TAG      - Git ref to fetch from
 #                                 CedricGuillemet/ImGuizmo: a branch (e.g.
-#                                 "master"), a tag (e.g. "1.83"), or "latest"
+#                                 "master"), a tag (e.g. "1.83"), "latest"
 #                                 (resolved to the newest tagged release via
-#                                 the GitHub releases API). Defaults to
-#                                 "master".
+#                                 the GitHub releases API), or a full/
+#                                 abbreviated commit SHA. Defaults to a
+#                                 PINNED commit SHA (see the `set()` call
+#                                 below) rather than "master" - "master" is
+#                                 a moving target that could silently change
+#                                 ImGuizmo's public API/behavior underneath
+#                                 this engine on a future fetch with zero
+#                                 warning (a genuinely different risk from,
+#                                 and on top of, the known-bug patch below
+#                                 possibly no longer matching upstream's
+#                                 wording); pinning removes that risk
+#                                 entirely; bump this deliberately (and
+#                                 re-verify _imguizmo_apply_gte_patches()
+#                                 still matches) to move to a newer commit.
 #   IMGUIZMO_FORCE_REDOWNLOAD - Set to ON to force re-fetching even if
 #                                 already present and already matching
 #                                 IMGUIZMO_RELEASE_TAG.
@@ -70,8 +86,13 @@ if(NOT WIN32)
     message(FATAL_ERROR "FetchImGuizmo.cmake only supports Windows. Not supported on this platform.")
 endif()
 
-set(IMGUIZMO_RELEASE_TAG "master" CACHE STRING
-    "ImGuizmo git ref to fetch: a branch (e.g. 'master'), a tag (e.g. '1.83'), or 'latest'.")
+# Pinned to a specific commit (not "master") deliberately - see
+# IMGUIZMO_RELEASE_TAG's own doc comment above for why. This is the commit
+# at the tip of master as of integrating the Scene-view transform gizmo;
+# override via -DIMGUIZMO_RELEASE_TAG=... (a branch, a tag, "latest", or
+# another commit SHA) if a deliberate upgrade is ever needed.
+set(IMGUIZMO_RELEASE_TAG "18cef5e031d8c6973d80284c67f60549fafd78c1" CACHE STRING
+    "ImGuizmo git ref to fetch: a branch (e.g. 'master'), a tag (e.g. '1.83'), 'latest', or a commit SHA (the default - pinned deliberately, see this file's header comment).")
 option(IMGUIZMO_FORCE_REDOWNLOAD
     "Force re-downloading/re-extracting ImGuizmo even if it already appears to be present and matching IMGUIZMO_RELEASE_TAG."
     OFF)
@@ -128,9 +149,13 @@ endfunction()
 # Downloads GitHub's plain codeload archive for a concrete
 # CedricGuillemet/ImGuizmo ref and extracts it, returning the single
 # top-level folder GitHub always wraps archive contents in. <ref_name> may
-# be a branch (tried first, since the default "master" is a branch) or a
-# tag (tried as a fallback) - this way both branch names and release
-# tags/"latest" keep working through the same function.
+# be a branch (tried first, since the default "master" is a branch), a tag,
+# or a full/abbreviated commit SHA (tried last, via GitHub's bare
+# "/archive/<ref>.zip" form - the only one of the three that resolves a
+# commit hash, since a commit isn't under refs/heads/ or refs/tags/) - this
+# way branch names, release tags/"latest", AND a pinned commit hash
+# (IMGUIZMO_RELEASE_TAG's default - see this file's header comment) all
+# keep working through the same function.
 function(_imguizmo_download_and_extract_ref ref_name out_root_dir)
     set(_work_dir "${CMAKE_BINARY_DIR}/_imguizmo_fetch")
     file(MAKE_DIRECTORY "${_work_dir}")
@@ -139,6 +164,7 @@ function(_imguizmo_download_and_extract_ref ref_name out_root_dir)
 
     set(_heads_url "https://github.com/CedricGuillemet/ImGuizmo/archive/refs/heads/${ref_name}.zip")
     set(_tags_url "https://github.com/CedricGuillemet/ImGuizmo/archive/refs/tags/${ref_name}.zip")
+    set(_commit_url "https://github.com/CedricGuillemet/ImGuizmo/archive/${ref_name}.zip")
 
     message(STATUS "imguizmo: downloading ${_heads_url}")
     file(DOWNLOAD "${_heads_url}" "${_zip_path}"
@@ -158,8 +184,18 @@ function(_imguizmo_download_and_extract_ref ref_name out_root_dir)
         )
         list(GET _dl_status 0 _dl_code)
         if(NOT _dl_code EQUAL 0)
-            list(GET _dl_status 1 _dl_msg)
-            message(FATAL_ERROR "imguizmo: failed to download ref '${ref_name}' as either a branch or a tag: ${_dl_msg}")
+            message(STATUS "imguizmo: '${ref_name}' is not a tag (refs/tags) either - retrying as a bare ref (commit SHA or anything else GitHub's plain /archive/ endpoint accepts)")
+            file(DOWNLOAD "${_commit_url}" "${_zip_path}"
+                HTTPHEADER "User-Agent: GreatTamanaEngine-CMake"
+                STATUS _dl_status
+                TLS_VERIFY ON
+                SHOW_PROGRESS
+            )
+            list(GET _dl_status 0 _dl_code)
+            if(NOT _dl_code EQUAL 0)
+                list(GET _dl_status 1 _dl_msg)
+                message(FATAL_ERROR "imguizmo: failed to download ref '${ref_name}' as a branch, a tag, or a bare/commit ref: ${_dl_msg}")
+            endif()
         endif()
     endif()
 

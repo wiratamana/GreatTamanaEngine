@@ -366,3 +366,30 @@ pieces:
   (mesh-level intersection math, a new picking/collider abstraction, and a
   new render pass) and orthogonal to it: the gizmo already works fine driven
   purely by a "Hierarchy" selection in the meantime.
+- **Long-term: replace ImGuizmo with a homegrown transform gizmo.**
+  ImGuizmo (`third_party/imguizmo/`, `cmake/FetchImGuizmo.cmake`) currently
+  backs the Scene-view translate/rotate/scale gizmo (see "Editor / Debug
+  UI" above), and works correctly today - `IMGUIZMO_RELEASE_TAG` is pinned
+  to a specific commit SHA (not the `master` branch) specifically so this
+  stays true: a moving branch could silently change ImGuizmo's public
+  API/behavior underneath this engine on a future fetch (a real, separate
+  risk from - and compounding - the two hand-diagnosed upstream bugs this
+  integration already had to work around: a Vulkan-vs-OpenGL clip-space Y
+  convention mismatch, fixed via `EditorCamera::GizmoProjection()`; and
+  HandleScale()/HandleRotation() freezing an in-progress drag the instant
+  the cursor left the Scene panel, fixed via a source patch applied by
+  `_imguizmo_apply_gte_patches()` in `cmake/FetchImGuizmo.cmake`). Pinning
+  removes the "silently changes underneath us" risk, but not the underlying
+  reason it came up in the first place: depending on a second library with
+  its own coordinate/interaction conventions to reconcile with, for
+  something this engine's own `Math`/`Renderer` already has every primitive
+  needed for (screen-space projection, ray-plane intersection, `ImDrawList`
+  rendering via Dear ImGui, which stays either way). Rolling a homegrown
+  gizmo (translate first, then scale, then rotate - roughly the increasing
+  order of implementation difficulty) would fit the same "own the core data
+  model" philosophy already applied to `src/Math/` (no GLM) and `src/ECS/`
+  (no EnTT), and permanently remove this entire class of integration bug
+  rather than continuing to patch around it. Deliberately NOT undertaken
+  now - real, multi-day effort better spent on higher-priority engine work
+  at this early a stage - kept here as a known, intentional future
+  direction rather than a forgotten TODO.
