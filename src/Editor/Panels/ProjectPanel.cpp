@@ -275,10 +275,15 @@ void ProjectPanel::CreateNewFolder()
 
 void ProjectPanel::DeleteSelected(EditorContext& ctx)
 {
-    const std::string selectedDisplay = ctx.selection.SelectedAssetRelativePath();
-    if (selectedDisplay.empty()) {
+    // Guarded by Selection::HasAssetSelection() itself (not just the
+    // disabled menu item in RenderContextMenu()) - a genuine no-op rather
+    // than acting on a stale/no-longer-highlighted path if this were ever
+    // reached in a state where Kind() isn't Asset.
+    if (!ctx.selection.HasAssetSelection()) {
         return;
     }
+
+    const std::string selectedDisplay = ctx.selection.SelectedAssetRelativePath();
 
     const std::filesystem::path target = m_rootPath / Utf8ToPath(selectedDisplay);
 
@@ -318,7 +323,7 @@ void ProjectPanel::RenderContextMenu(EditorContext& ctx, const char* popupId)
             CreateNewFolder();
         }
         ImGui::Separator();
-        const bool hasSelection = !ctx.selection.SelectedAssetRelativePath().empty();
+        const bool hasSelection = ctx.selection.HasAssetSelection();
         if (ImGui::MenuItem("Delete Selected", nullptr, false, hasSelection && m_rootExists)) {
             DeleteSelected(ctx);
         }

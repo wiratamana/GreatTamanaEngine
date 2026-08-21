@@ -47,7 +47,12 @@ bool Selection::IsEntitySelected(Entity entity) const
 
 bool Selection::IsAssetSelected(const std::string& relativePath) const
 {
-    return m_assetRelativePath == relativePath;
+    return m_kind == InspectorSelectionKind::Asset && m_assetRelativePath == relativePath;
+}
+
+bool Selection::HasAssetSelection() const
+{
+    return m_kind == InspectorSelectionKind::Asset && !m_assetRelativePath.empty();
 }
 
 } // namespace gte

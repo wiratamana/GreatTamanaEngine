@@ -26,6 +26,7 @@ TEST(SelectionTest, DefaultsToNoneWithNoEntityOrAssetSelected)
     EXPECT_TRUE(selection.SelectedAssetAbsolutePath().empty());
     EXPECT_TRUE(selection.SelectedAssetRelativePath().empty());
     EXPECT_FALSE(selection.SelectedAssetIsDirectory());
+    EXPECT_FALSE(selection.HasAssetSelection());
 }
 
 TEST(SelectionTest, SelectEntityMakesItTheCurrentEntitySelectionAndInspectorSource)
@@ -40,20 +41,27 @@ TEST(SelectionTest, SelectEntityMakesItTheCurrentEntitySelectionAndInspectorSour
     EXPECT_TRUE(selection.IsEntitySelected(entity));
 }
 
-TEST(SelectionTest, SelectEntityLeavesAnyExistingAssetSelectionUntouched)
+TEST(SelectionTest, SelectEntityLeavesAssetFieldsIntactButUnhighlightsThemImmediately)
 {
     Selection selection;
     selection.SelectAsset("C:/Project/rock.png", "rock.png", /*isDirectory=*/false);
 
     selection.SelectEntity(Entity{ 7, 1 });
 
-    // Kind() flips to Entity (Inspector now shows the entity), but the
-    // Project selection itself is never cleared by picking an entity - see
-    // Selection.h's class comment (mirrors Unity's own behavior).
+    // Kind() flips to Entity (Inspector now shows the entity), and the
+    // underlying Project selection fields are never cleared by picking an
+    // entity (SelectedAssetRelativePath()/AbsolutePath() still return what
+    // was last picked in Project) - but IsAssetSelected()/
+    // HasAssetSelection() must immediately report nothing selected, since
+    // both are gated on Kind(). This is the actual bug-fix behavior: no two
+    // panels may ever show a highlight at the same time (see Selection.h's
+    // class comment) - ProjectPanel must never keep its own separate
+    // "am I still highlighted" state to defeat this.
     EXPECT_EQ(selection.Kind(), InspectorSelectionKind::Entity);
     EXPECT_EQ(selection.SelectedAssetRelativePath(), "rock.png");
     EXPECT_EQ(selection.SelectedAssetAbsolutePath(), "C:/Project/rock.png");
-    EXPECT_TRUE(selection.IsAssetSelected("rock.png"));
+    EXPECT_FALSE(selection.IsAssetSelected("rock.png"));
+    EXPECT_FALSE(selection.HasAssetSelection());
 }
 
 TEST(SelectionTest, SelectAssetMakesItTheCurrentAssetSelectionAndInspectorSource)
@@ -67,9 +75,10 @@ TEST(SelectionTest, SelectAssetMakesItTheCurrentAssetSelectionAndInspectorSource
     EXPECT_EQ(selection.SelectedAssetRelativePath(), "Textures");
     EXPECT_TRUE(selection.SelectedAssetIsDirectory());
     EXPECT_TRUE(selection.IsAssetSelected("Textures"));
+    EXPECT_TRUE(selection.HasAssetSelection());
 }
 
-TEST(SelectionTest, SelectAssetLeavesAnyExistingEntitySelectionUntouched)
+TEST(SelectionTest, SelectAssetLeavesEntityFieldIntactButUnhighlightsItImmediately)
 {
     Selection selection;
     const Entity entity{ 2, 1 };
@@ -77,12 +86,14 @@ TEST(SelectionTest, SelectAssetLeavesAnyExistingEntitySelectionUntouched)
 
     selection.SelectAsset("C:/Project/rock.png", "rock.png", /*isDirectory=*/false);
 
-    // Kind() flips to Asset, but the entity selection itself is never
-    // cleared by picking a Project asset - SelectedEntity() still returns
-    // it (IsEntitySelected() is separately gated on Kind(), see the next
-    // test below).
+    // Kind() flips to Asset, and SelectedEntity() still returns the entity
+    // (the underlying field is never cleared by picking a Project asset),
+    // but IsEntitySelected() must immediately report it not selected, since
+    // it's gated on Kind() - HierarchyPanel must never keep its own
+    // separate "am I still highlighted" state to defeat this.
     EXPECT_EQ(selection.Kind(), InspectorSelectionKind::Asset);
     EXPECT_EQ(selection.SelectedEntity(), entity);
+    EXPECT_FALSE(selection.IsEntitySelected(entity));
 }
 
 TEST(SelectionTest, IsEntitySelectedIsFalseWhenAnAssetIsCurrentlyOnTop)
@@ -94,20 +105,36 @@ TEST(SelectionTest, IsEntitySelectedIsFalseWhenAnAssetIsCurrentlyOnTop)
 
     // The entity is still "remembered" (SelectedEntity() still returns it),
     // but IsEntitySelected() is gated on Kind() == Entity - Hierarchy no
-    // longer highlights it once an asset is on top, matching Unity.
+    // longer highlights it once an asset is on top.
     EXPECT_EQ(selection.SelectedEntity(), entity);
     EXPECT_FALSE(selection.IsEntitySelected(entity));
 }
 
-TEST(SelectionTest, IsAssetSelectedStaysTrueRegardlessOfWhichKindIsCurrentlyOnTop)
+TEST(SelectionTest, IsAssetSelectedIsFalseWhenAnEntityIsCurrentlyOnTop)
 {
     Selection selection;
     selection.SelectAsset("C:/Project/rock.png", "rock.png", /*isDirectory=*/false);
     selection.SelectEntity(Entity{ 9, 1 });
 
-    // Project's own row highlight is deliberately NOT gated on Kind() - see
-    // Selection.h's IsAssetSelected() doc comment.
-    EXPECT_TRUE(selection.IsAssetSelected("rock.png"));
+    // The regression this test guards against: Project's own row highlight
+    // must disappear the instant an entity becomes the active selection -
+    // IsAssetSelected() is gated on Kind() == Asset for exactly this reason.
+    EXPECT_FALSE(selection.IsAssetSelected("rock.png"));
+    EXPECT_FALSE(selection.HasAssetSelection());
+}
+
+TEST(SelectionTest, HasAssetSelectionIsFalseForTheProjectRootItself)
+{
+    Selection selection;
+
+    // An empty relativePath means the Project root itself (see SelectAsset()'s
+    // doc comment) - selected/highlighted like any other row, but never a
+    // valid "Delete Selected" target.
+    selection.SelectAsset("C:/Project", "", /*isDirectory=*/true);
+
+    EXPECT_EQ(selection.Kind(), InspectorSelectionKind::Asset);
+    EXPECT_TRUE(selection.IsAssetSelected(""));
+    EXPECT_FALSE(selection.HasAssetSelection());
 }
 
 TEST(SelectionTest, ClearAssetIfPathIsNoOpWhenPathDoesNotMatch)

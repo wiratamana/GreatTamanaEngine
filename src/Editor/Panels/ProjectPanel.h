@@ -43,9 +43,14 @@ struct EditorContext;
 // Editor's "Inspector" panel show that entry's metadata (and, for a
 // supported image file, a live texture preview - see
 // Panels/InspectorPanel.cpp) the same way selecting an entity in
-// "Hierarchy" makes Inspector show its components. The two selections
-// (ECS entity vs. Project asset) are otherwise completely independent -
-// see InspectorSelectionKind's own doc comment.
+// "Hierarchy" makes Inspector show its components. The underlying entity/
+// asset selection fields are otherwise independent (see
+// InspectorSelectionKind's own doc comment) - but this panel's own row
+// highlight (RenderRightPaneEntry()) goes through Selection::
+// IsAssetSelected(), which is gated on Kind() == Asset, so picking an
+// entity in Hierarchy immediately un-highlights whatever was selected here
+// - this panel must never keep its own separate "am I still highlighted"
+// state to defeat that.
 //
 // This is a CLASS, not a free-function panel builder like
 // HierarchyPanel/InspectorPanel/etc. (see AGENTS.md, "Editor Module
