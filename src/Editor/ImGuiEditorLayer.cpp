@@ -9,6 +9,7 @@
 #include "Panels/InspectorPanel.h"
 #include "Panels/MemoryPanel.h"
 #if GTE_ENABLE_PROJECT_PANEL
+#include "AssetPreviewTexture.h"
 #include "Panels/ProjectPanel.h"
 #endif
 #include "Panels/ScenePanel.h"
@@ -207,6 +208,14 @@ public:
 
         ReleaseGameViewDescriptor();
         ReleaseSceneViewDescriptor();
+#if GTE_ENABLE_PROJECT_PANEL
+        // Must release its own GPU texture/ImGui descriptor BEFORE
+        // ImGui_ImplVulkan_Shutdown() below - member destruction order
+        // alone would run AFTER Shutdown() (m_assetPreview is declared
+        // further down than m_context), which is too late (see
+        // AssetPreviewTexture::Reset()'s own comment).
+        m_assetPreview.Reset();
+#endif
         ImGui_ImplVulkan_Shutdown();
         ImGui_ImplSDL3_Shutdown();
         ImGui::DestroyContext(m_context);
@@ -370,12 +379,16 @@ public:
         }
 
         BuildHierarchyPanel(game, renderer, m_ctx);
+#if GTE_ENABLE_PROJECT_PANEL
+        BuildInspectorPanel(registry, m_ctx, renderer, m_assetPreview);
+#else
         BuildInspectorPanel(registry, m_ctx);
+#endif
         BuildScenePanel(registry, m_ctx, m_sceneCamera);
         BuildGamePanel(m_ctx);
         BuildMemoryPanel(m_ctx, renderer);
 #if GTE_ENABLE_PROJECT_PANEL
-        m_projectPanel.Build();
+        m_projectPanel.Build(m_ctx);
 #endif
     }
 
@@ -489,6 +502,14 @@ private:
     // GTE_ENABLE_EDITOR - see the root CMakeLists.txt) - ProcessEvent()
     // above feeds it SDL_EVENT_DROP_FILE, BuildUI() below calls its Build().
     ProjectPanel m_projectPanel;
+
+    // Backs the Inspector's live image-preview thumbnail (see
+    // Panels/InspectorPanel.cpp's BuildAssetInspector()) whenever the
+    // Project selection is a decodable image file - see
+    // AssetPreviewTexture.h. Explicitly Reset() in the destructor above
+    // BEFORE ImGui_ImplVulkan_Shutdown(), not left to member-destruction
+    // order alone (which would run too late).
+    AssetPreviewTexture m_assetPreview;
 #endif
 
     // Shared state read/written by DockLayout.cpp's

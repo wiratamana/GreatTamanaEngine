@@ -3,9 +3,31 @@
 #include "../ECS/Entity.h"
 #include "TransformGizmo.h"
 
+#include <string>
+
 #include <volk.h>
 
 namespace gte {
+
+// Which "thing" the Inspector should currently display - an ECS entity
+// (Hierarchy selection, EditorContext::selectedEntity) or a Project-panel
+// file/folder (Project selection, EditorContext::selectedAsset* below) -
+// whichever the user picked most recently. The two selections are
+// otherwise completely independent and neither is ever cleared by picking
+// the other - this only tracks which one is currently "on top" for
+// InspectorPanel to show, exactly like Unity: clicking an entity in
+// Hierarchy while an asset was selected in Project doesn't forget the
+// Project selection, it just stops being what Inspector displays (and vice
+// versa). Only ever becomes Asset when GTE_ENABLE_PROJECT_PANEL is ON (see
+// Panels/ProjectPanel.cpp) - otherwise nothing ever sets it to anything but
+// None/Entity. A free enum (not nested in EditorContext), same convention
+// as GizmoOperation (TransformGizmo.h), so every panel can write
+// `InspectorSelectionKind::Entity` unqualified.
+enum class InspectorSelectionKind {
+    None,
+    Entity,
+    Asset,
+};
 
 // Plain shared state passed by reference into every Editor panel/dock-layout
 // function (see DockLayout.h, Panels/*.h) - the free-function equivalent of
@@ -84,10 +106,35 @@ struct EditorContext {
     bool sceneCameraPanning = false;
     bool sceneCameraRotating = false;
 
+    // Which selection (an ECS entity or a Project asset) InspectorPanel
+    // should currently display - see InspectorSelectionKind above.
+    InspectorSelectionKind inspectorSelectionKind = InspectorSelectionKind::None;
+
     // Hierarchy/Inspector selection state - kInvalidEntity means "nothing
-    // selected", shown by InspectorPanel as "No entity selected." Written by
-    // HierarchyPanel, read by InspectorPanel.
+    // selected". Written by HierarchyPanel, read by InspectorPanel (only
+    // actually shown when inspectorSelectionKind above is Entity).
     Entity selectedEntity = kInvalidEntity;
+
+    // The Project panel's most recently selected file/folder - the
+    // ABSOLUTE path on disk (never just ProjectEntry::relativePath alone -
+    // see ProjectPanelData.h), so InspectorPanel can gather metadata/
+    // attempt an image preview without needing to know Project's own root
+    // folder itself. Empty means nothing has ever been selected in Project
+    // this session. Written by Panels/ProjectPanel.cpp (only compiled when
+    // GTE_ENABLE_PROJECT_PANEL is ON), read by BuildInspectorPanel() only
+    // when inspectorSelectionKind above is Asset.
+    std::string selectedAssetAbsolutePath;
+
+    // The same entry's relativePath (see ProjectEntry) - purely for
+    // display (a short, Project-root-relative label) alongside the
+    // metadata/preview InspectorPanel builds from selectedAssetAbsolutePath
+    // above; never itself used to resolve/open the file.
+    std::string selectedAssetRelativePath;
+
+    // Whether the Project selection above is a folder rather than a file -
+    // InspectorPanel skips any image-preview attempt entirely for a folder
+    // (see AssetInspectorData.h's IsSupportedImageExtension()).
+    bool selectedAssetIsDirectory = false;
 
     // Which gizmo manipulation ScenePanel's top-left Move/Rotate/Scale
     // switcher (TransformGizmo.h's DrawGizmoOperationSwitcher()) is

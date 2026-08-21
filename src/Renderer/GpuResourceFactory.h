@@ -5,6 +5,7 @@
 #include "Mesh.h"
 #include "Pipeline.h"
 #include "RenderTexture.h"
+#include "Texture2D.h"
 #include "Vulkan/VulkanAllocator.h"
 
 #include <cstdint>
@@ -70,6 +71,13 @@ public:
     // See Renderer::CreateMesh().
     Mesh CreateMesh(const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount,
         const char* debugName = nullptr) const;
+
+    // See Renderer::CreateTexture2D(). `pixelsRgba8` must be
+    // width*height*4 tightly-packed bytes (e.g. straight out of
+    // stbi_load(..., desired_channels=4)) - uploaded via a temporary
+    // staging Buffer + ImmediateSubmit(), the same pattern
+    // CreateDeviceLocalBuffer() above already uses.
+    Texture2D CreateTexture2D(const void* pixelsRgba8, int width, int height, const char* debugName = nullptr) const;
 
     // See Renderer::GetMemoryTotals()/GetMemoryResources().
     GpuMemoryTracker::Totals GetMemoryTotals() const;

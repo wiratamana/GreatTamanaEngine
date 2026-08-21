@@ -1,5 +1,6 @@
 #include "ProjectPanel.h"
 
+#include "../EditorContext.h"
 #include "../MemoryPanelData.h" // FormatBytes() - reused for the file-size tooltip below.
 
 #include <imgui.h>
@@ -104,6 +105,17 @@ void ProjectPanel::SetStatus(const std::string& message, bool isError)
     m_statusSetTime = std::chrono::steady_clock::now();
 }
 
+void ProjectPanel::SetAssetSelection(EditorContext& ctx, const std::string& relativePath, bool isDirectory)
+{
+    m_selectedRelativePath = relativePath;
+
+    ctx.selectedAssetRelativePath = relativePath;
+    ctx.selectedAssetAbsolutePath =
+        PathToUtf8(relativePath.empty() ? m_rootPath : (m_rootPath / Utf8ToPath(relativePath)));
+    ctx.selectedAssetIsDirectory = isDirectory;
+    ctx.inspectorSelectionKind = InspectorSelectionKind::Asset;
+}
+
 void ProjectPanel::RecordFolderDropZone(const std::string& relativePath)
 {
     const ImVec2 min = ImGui::GetItemRectMin();
@@ -111,7 +123,7 @@ void ProjectPanel::RecordFolderDropZone(const std::string& relativePath)
     m_folderDropZones.push_back(FolderDropZone{ relativePath, Rect{ min.x, min.y, max.x - min.x, max.y - min.y } });
 }
 
-void ProjectPanel::RenderLeftPaneFolder(const ProjectEntry& entry)
+void ProjectPanel::RenderLeftPaneFolder(EditorContext& ctx, const ProjectEntry& entry)
 {
     if (!entry.isDirectory) {
         return; // Left pane is folders-only, like Unity/Explorer's own tree.
@@ -133,12 +145,12 @@ void ProjectPanel::RenderLeftPaneFolder(const ProjectEntry& entry)
 
     if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen()) {
         m_currentFolderRelativePath = entry.relativePath;
-        m_selectedRelativePath = entry.relativePath;
+        SetAssetSelection(ctx, entry.relativePath, true);
     }
 
     if (hasSubfolders && open) {
         for (const ProjectEntry& child : entry.children) {
-            RenderLeftPaneFolder(child);
+            RenderLeftPaneFolder(ctx, child);
         }
         ImGui::TreePop();
     }
@@ -146,7 +158,7 @@ void ProjectPanel::RenderLeftPaneFolder(const ProjectEntry& entry)
     ImGui::PopID();
 }
 
-void ProjectPanel::RenderLeftPane()
+void ProjectPanel::RenderLeftPane(EditorContext& ctx)
 {
     ImGuiTreeNodeFlags rootFlags
         = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_DefaultOpen;
@@ -159,12 +171,12 @@ void ProjectPanel::RenderLeftPane()
 
     if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen()) {
         m_currentFolderRelativePath.clear();
-        m_selectedRelativePath.clear();
+        SetAssetSelection(ctx, std::string(), true);
     }
 
     if (rootOpen) {
         for (const ProjectEntry& entry : m_tree) {
-            RenderLeftPaneFolder(entry);
+            RenderLeftPaneFolder(ctx, entry);
         }
         ImGui::TreePop();
     }
@@ -204,7 +216,7 @@ void ProjectPanel::RenderBreadcrumb()
     }
 }
 
-void ProjectPanel::RenderRightPaneEntry(const ProjectEntry& entry)
+void ProjectPanel::RenderRightPaneEntry(EditorContext& ctx, const ProjectEntry& entry)
 {
     ImGui::PushID(entry.relativePath.c_str());
 
@@ -221,9 +233,9 @@ void ProjectPanel::RenderRightPaneEntry(const ProjectEntry& entry)
         // "open" action as clicking it in the left pane, so both panes
         // always agree on what's open.
         m_currentFolderRelativePath = entry.relativePath;
-        m_selectedRelativePath = entry.relativePath;
+        SetAssetSelection(ctx, entry.relativePath, true);
     } else if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
-        m_selectedRelativePath = entry.relativePath;
+        SetAssetSelection(ctx, entry.relativePath, entry.isDirectory);
     }
 
     if (!entry.isDirectory && ImGui::IsItemHovered()) {
@@ -233,7 +245,7 @@ void ProjectPanel::RenderRightPaneEntry(const ProjectEntry& entry)
     ImGui::PopID();
 }
 
-void ProjectPanel::RenderRightPane()
+void ProjectPanel::RenderRightPane(EditorContext& ctx)
 {
     RenderBreadcrumb();
     ImGui::Separator();
@@ -245,7 +257,7 @@ void ProjectPanel::RenderRightPane()
     }
 
     for (const ProjectEntry& entry : *children) {
-        RenderRightPaneEntry(entry);
+        RenderRightPaneEntry(ctx, entry);
     }
 }
 
@@ -264,7 +276,7 @@ void ProjectPanel::CreateNewFolder()
     }
 }
 
-void ProjectPanel::DeleteSelected()
+void ProjectPanel::DeleteSelected(EditorContext& ctx)
 {
     if (m_selectedRelativePath.empty()) {
         return;
@@ -284,6 +296,18 @@ void ProjectPanel::DeleteSelected()
         SetStatus("Deleted \"" + selectedDisplay + "\".", false);
     }
 
+    // If the deleted item was also whatever ctx (InspectorPanel) currently
+    // has as its Asset selection, clear that too - otherwise Inspector
+    // would keep showing metadata for something that just stopped
+    // existing until the user picks something else.
+    if (ctx.inspectorSelectionKind == InspectorSelectionKind::Asset
+        && ctx.selectedAssetRelativePath == selectedDisplay) {
+        ctx.selectedAssetAbsolutePath.clear();
+        ctx.selectedAssetRelativePath.clear();
+        ctx.selectedAssetIsDirectory = false;
+        ctx.inspectorSelectionKind = InspectorSelectionKind::None;
+    }
+
     // The deleted item might have been the currently open folder itself
     // (or an ancestor of it) - ReconcileCurrentFolderAfterRescan() (run as
     // part of the rescan below) walks m_currentFolderRelativePath back up
@@ -292,7 +316,7 @@ void ProjectPanel::DeleteSelected()
     m_needsRescan = true;
 }
 
-void ProjectPanel::RenderContextMenu(const char* popupId)
+void ProjectPanel::RenderContextMenu(EditorContext& ctx, const char* popupId)
 {
     if (ImGui::BeginPopupContextWindow(popupId)) {
         if (ImGui::MenuItem("Refresh")) {
@@ -304,13 +328,13 @@ void ProjectPanel::RenderContextMenu(const char* popupId)
         ImGui::Separator();
         const bool hasSelection = !m_selectedRelativePath.empty();
         if (ImGui::MenuItem("Delete Selected", nullptr, false, hasSelection && m_rootExists)) {
-            DeleteSelected();
+            DeleteSelected(ctx);
         }
         ImGui::EndPopup();
     }
 }
 
-void ProjectPanel::Build()
+void ProjectPanel::Build(EditorContext& ctx)
 {
     EnsureRootAndMaybeRescan();
 
@@ -342,8 +366,8 @@ void ProjectPanel::Build()
             const float paneAreaHeight = std::max(ImGui::GetContentRegionAvail().y - kFooterReserve, 40.0f);
 
             ImGui::BeginChild("ProjectLeftPane", ImVec2(m_leftPaneWidth, paneAreaHeight), true);
-            RenderLeftPane();
-            RenderContextMenu("ProjectLeftPaneContextMenu");
+            RenderLeftPane(ctx);
+            RenderContextMenu(ctx, "ProjectLeftPaneContextMenu");
             {
                 const ImVec2 childPos = ImGui::GetWindowPos();
                 const ImVec2 childSize = ImGui::GetWindowSize();
@@ -362,8 +386,8 @@ void ProjectPanel::Build()
             ImGui::SameLine();
 
             ImGui::BeginChild("ProjectRightPane", ImVec2(0.0f, paneAreaHeight), true);
-            RenderRightPane();
-            RenderContextMenu("ProjectRightPaneContextMenu");
+            RenderRightPane(ctx);
+            RenderContextMenu(ctx, "ProjectRightPaneContextMenu");
             {
                 const ImVec2 childPos = ImGui::GetWindowPos();
                 const ImVec2 childSize = ImGui::GetWindowSize();

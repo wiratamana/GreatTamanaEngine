@@ -166,6 +166,8 @@ add_library(gte_core STATIC
     src/Renderer/GpuResourceFactory.h
     src/Renderer/Buffer.cpp
     src/Renderer/Buffer.h
+    src/Renderer/Texture2D.cpp
+    src/Renderer/Texture2D.h
     src/Renderer/Mesh.h
     src/Renderer/MeshHandle.h
     src/Renderer/PipelineHandle.h
@@ -250,6 +252,10 @@ if(GTE_ENABLE_EDITOR)
             src/Editor/ProjectPanelData.cpp
             src/Editor/Panels/ProjectPanel.h
             src/Editor/Panels/ProjectPanel.cpp
+            src/Editor/AssetInspectorData.h
+            src/Editor/AssetInspectorData.cpp
+            src/Editor/AssetPreviewTexture.h
+            src/Editor/AssetPreviewTexture.cpp
         )
     endif()
 else()

@@ -9,6 +9,7 @@
 #include "Mesh.h"
 #include "Pipeline.h"
 #include "RenderTexture.h"
+#include "Texture2D.h"
 #include "Vulkan/VulkanAllocator.h"
 #include "Vulkan/VulkanDevice.h"
 #include "Vulkan/VulkanInstance.h"
@@ -223,6 +224,16 @@ public:
     // Buffer's constructor comment.
     Mesh CreateMesh(const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount,
         const char* debugName = nullptr) const;
+
+    // Factory for a static, immutable, CPU-authored texture (e.g. a decoded
+    // PNG/JPEG asset - see src/Editor/AssetPreviewTexture.h, the first
+    // consumer of this) built once from already-decoded RGBA8 pixel data,
+    // as opposed to CreateRenderTexture() above (a resizable target
+    // rendered into every frame). `pixelsRgba8` must be
+    // width*height*4 tightly-packed bytes (e.g. straight out of
+    // stbi_load(..., desired_channels=4)). debugName is optional/
+    // Editor-only - see Buffer's constructor comment. See Texture2D.h.
+    Texture2D CreateTexture2D(const void* pixelsRgba8, int width, int height, const char* debugName = nullptr) const;
 
     // Aggregate live-memory totals across every Buffer/RenderTexture this
     // Renderer has ever created and not yet destroyed - see

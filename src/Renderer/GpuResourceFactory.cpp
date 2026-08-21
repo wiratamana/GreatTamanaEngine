@@ -166,6 +166,59 @@ Mesh GpuResourceFactory::CreateMesh(
     return Mesh(std::move(vertexBuffer), vertexCount);
 }
 
+Texture2D GpuResourceFactory::CreateTexture2D(
+    const void* pixelsRgba8, int width, int height, const char* debugName) const
+{
+    Texture2D texture(m_allocator, m_memoryTracker, m_device, width, height, debugName);
+
+    const auto safeWidth = static_cast<VkDeviceSize>(texture.Width());
+    const auto safeHeight = static_cast<VkDeviceSize>(texture.Height());
+    const VkDeviceSize size = safeWidth * safeHeight * 4;
+
+    // Unnamed - same reasoning as CreateDeviceLocalBuffer()'s own staging
+    // buffer above: a throwaway that never outlives this function.
+    Buffer staging = CreateBuffer(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, BufferMemoryUsage::CpuToGpu);
+    staging.Upload(pixelsRgba8, static_cast<std::size_t>(size));
+
+    ImmediateSubmit([&](VkCommandBuffer cmd) {
+        VkImageMemoryBarrier toTransferDst{};
+        toTransferDst.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        toTransferDst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        toTransferDst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        toTransferDst.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        toTransferDst.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        toTransferDst.image = texture.Image();
+        toTransferDst.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+        toTransferDst.srcAccessMask = 0;
+        toTransferDst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+            nullptr, 1, &toTransferDst);
+
+        VkBufferImageCopy copyRegion{};
+        copyRegion.bufferOffset = 0;
+        copyRegion.bufferRowLength = 0;
+        copyRegion.bufferImageHeight = 0;
+        copyRegion.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+        copyRegion.imageOffset = { 0, 0, 0 };
+        copyRegion.imageExtent = { static_cast<std::uint32_t>(texture.Width()),
+            static_cast<std::uint32_t>(texture.Height()), 1 };
+        vkCmdCopyBufferToImage(
+            cmd, staging.Native(), texture.Image(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+
+        VkImageMemoryBarrier toShaderRead = toTransferDst;
+        toShaderRead.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        toShaderRead.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        toShaderRead.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        toShaderRead.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0,
+            nullptr, 0, nullptr, 1, &toShaderRead);
+    });
+    // staging goes out of scope here and is destroyed - the copy above has
+    // already completed (ImmediateSubmit blocks until the GPU is done).
+
+    return texture;
+}
+
 GpuMemoryTracker::Totals GpuResourceFactory::GetMemoryTotals() const
 {
     return m_memoryTracker->GetTotals();

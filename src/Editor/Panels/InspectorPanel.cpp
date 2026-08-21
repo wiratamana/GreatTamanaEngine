@@ -6,17 +6,26 @@
 #include "../../ECS/Components/Transform.h"
 #include "../../ECS/Registry.h"
 
+#if GTE_ENABLE_PROJECT_PANEL
+#include "../AssetInspectorData.h"
+#include "../AssetPreviewTexture.h"
+#include "../MemoryPanelData.h" // FormatBytes() - reused for the asset size field below.
+#include "../ProjectPanelData.h" // Utf8ToPath()
+#include "../../Renderer/Renderer.h"
+#endif
+
 #include <imgui.h>
+
+#include <cstdint>
 
 namespace gte {
 
-void BuildInspectorPanel(Registry& registry, EditorContext& ctx)
-{
-    ImGui::Begin("Inspector");
+namespace {
 
+void BuildEntityInspector(Registry& registry, EditorContext& ctx)
+{
     if (!registry.IsAlive(ctx.selectedEntity)) {
         ImGui::TextDisabled("No entity selected.");
-        ImGui::End();
         return;
     }
 
@@ -55,6 +64,80 @@ void BuildInspectorPanel(Registry& registry, EditorContext& ctx)
             ImGui::DragFloat("Far Z", &camera->farZ, 1.0f, camera->nearZ + 0.01f);
         }
     }
+}
+
+#if GTE_ENABLE_PROJECT_PANEL
+void BuildAssetInspector(EditorContext& ctx, Renderer& renderer, AssetPreviewTexture& assetPreview)
+{
+    const AssetMetadata metadata = BuildAssetMetadata(Utf8ToPath(ctx.selectedAssetAbsolutePath));
+
+    ImGui::Text("%s", metadata.name.empty() ? "(Project root)" : metadata.name.c_str());
+    ImGui::TextDisabled(
+        "%s", ctx.selectedAssetRelativePath.empty() ? "(root)" : ctx.selectedAssetRelativePath.c_str());
+    ImGui::Separator();
+
+    if (!metadata.exists) {
+        ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.2f, 1.0f), "This item no longer exists on disk.");
+        return;
+    }
+
+    // Attempt a live texture preview first - only for a FILE whose
+    // extension is a format AssetPreviewTexture/stb_image can actually
+    // decode. Falls back to plain metadata below for a folder, an
+    // unsupported extension, or a file that fails to decode (corrupt/
+    // truncated/...) - exactly like every other failure mode in this
+    // Editor degrades to a status/message rather than a crash.
+    if (!metadata.isDirectory && IsSupportedImageExtension(metadata.extension)) {
+        if (const std::optional<AssetPreviewTexture::Preview> preview =
+                assetPreview.Resolve(renderer, ctx.selectedAssetAbsolutePath)) {
+            const float availableWidth = ImGui::GetContentRegionAvail().x;
+            const float aspect = preview->height > 0
+                ? static_cast<float>(preview->width) / static_cast<float>(preview->height)
+                : 1.0f;
+            const float displayWidth = availableWidth;
+            const float displayHeight = aspect > 0.0f ? displayWidth / aspect : displayWidth;
+
+            ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(preview->descriptor)),
+                ImVec2(displayWidth, displayHeight));
+            ImGui::Text("%d x %d pixels", preview->width, preview->height);
+            ImGui::Separator();
+        } else {
+            ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.2f, 1.0f), "Failed to load image preview.");
+            ImGui::Separator();
+        }
+    }
+
+    ImGui::Text("Type: %s",
+        metadata.isDirectory ? "Folder" : (metadata.extension.empty() ? "File" : metadata.extension.c_str()));
+    if (!metadata.isDirectory) {
+        ImGui::Text("Size: %s", FormatBytes(metadata.sizeBytes).c_str());
+    }
+    if (metadata.hasLastWriteTime) {
+        ImGui::Text("Last modified: %s", metadata.lastWriteTimeText.c_str());
+    }
+    ImGui::TextWrapped("Path: %s", ctx.selectedAssetAbsolutePath.c_str());
+}
+#endif
+
+} // namespace
+
+#if GTE_ENABLE_PROJECT_PANEL
+void BuildInspectorPanel(Registry& registry, EditorContext& ctx, Renderer& renderer, AssetPreviewTexture& assetPreview)
+#else
+void BuildInspectorPanel(Registry& registry, EditorContext& ctx)
+#endif
+{
+    ImGui::Begin("Inspector");
+
+#if GTE_ENABLE_PROJECT_PANEL
+    if (ctx.inspectorSelectionKind == InspectorSelectionKind::Asset && !ctx.selectedAssetAbsolutePath.empty()) {
+        BuildAssetInspector(ctx, renderer, assetPreview);
+        ImGui::End();
+        return;
+    }
+#endif
+
+    BuildEntityInspector(registry, ctx);
 
     ImGui::End();
 }

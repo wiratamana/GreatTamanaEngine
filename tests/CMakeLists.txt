@@ -190,6 +190,7 @@ if(GTE_ENABLE_EDITOR)
     if(GTE_ENABLE_PROJECT_PANEL)
         list(APPEND GTE_TEST_SOURCES
             Editor/ProjectPanelDataTests.cpp
+            Editor/AssetInspectorDataTests.cpp
         )
     endif()
 endif()

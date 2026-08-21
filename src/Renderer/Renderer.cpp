@@ -156,6 +156,11 @@ Mesh Renderer::CreateMesh(
     return m_resources.CreateMesh(vertexData, vertexDataSize, vertexCount, debugName);
 }
 
+Texture2D Renderer::CreateTexture2D(const void* pixelsRgba8, int width, int height, const char* debugName) const
+{
+    return m_resources.CreateTexture2D(pixelsRgba8, width, height, debugName);
+}
+
 Renderer::VulkanContextInfo Renderer::GetVulkanContextInfo() const
 {
     VulkanContextInfo info;
