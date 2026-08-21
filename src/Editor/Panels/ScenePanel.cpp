@@ -100,14 +100,16 @@ void BuildScenePanel(Registry& registry, EditorContext& ctx, EditorCamera& camer
 
             // The Unity-style translate/rotate/scale gizmo itself, for
             // whichever entity is currently selected in the Hierarchy
-            // (ctx.selectedEntity) - only drawn/manipulated when it's alive
-            // and actually has a Transform to edit (e.g. nothing selected
-            // yet, or the selected entity was destroyed elsewhere). Uses
-            // THIS Scene camera's own view/projection (never the gameplay
-            // Camera entity's - see EditorCamera.h), so the gizmo always
-            // lines up with whatever this panel is currently showing.
-            if (registry.IsAlive(ctx.selectedEntity)) {
-                if (Transform* transform = registry.TryGetComponent<Transform>(ctx.selectedEntity)) {
+            // (ctx.selection.SelectedEntity()) - only drawn/manipulated when
+            // it's alive and actually has a Transform to edit (e.g. nothing
+            // selected yet, or the selected entity was destroyed
+            // elsewhere). Uses THIS Scene camera's own view/projection
+            // (never the gameplay Camera entity's - see EditorCamera.h), so
+            // the gizmo always lines up with whatever this panel is
+            // currently showing.
+            const Entity selectedEntity = ctx.selection.SelectedEntity();
+            if (registry.IsAlive(selectedEntity)) {
+                if (Transform* transform = registry.TryGetComponent<Transform>(selectedEntity)) {
                     const float aspect = imageSize.y > 0.0f ? (imageSize.x / imageSize.y) : 1.0f;
                     ManipulateTransformGizmo(ctx.gizmoOperation, camera.View(), camera.GizmoProjection(aspect),
                         imageMin.x, imageMin.y, imageSize.x, imageSize.y, *transform);

@@ -50,10 +50,9 @@ void BuildHierarchyPanel(Game& game, Renderer& renderer, EditorContext& ctx)
             std::snprintf(label, sizeof(label), "Entity %u", entity.index);
         }
 
-        const bool isSelected = (entity == ctx.selectedEntity && ctx.inspectorSelectionKind == InspectorSelectionKind::Entity);
+        const bool isSelected = ctx.selection.IsEntitySelected(entity);
         if (ImGui::Selectable(label, isSelected)) {
-            ctx.selectedEntity = entity;
-            ctx.inspectorSelectionKind = InspectorSelectionKind::Entity;
+            ctx.selection.SelectEntity(entity);
         }
     }
 
@@ -74,8 +73,7 @@ void BuildHierarchyPanel(Game& game, Renderer& renderer, EditorContext& ctx)
                     // Select the freshly spawned entity immediately - same
                     // as Unity, so Inspector shows it without an extra
                     // click in Hierarchy.
-                    ctx.selectedEntity = game.CreatePrimitiveEntity(renderer, type);
-                    ctx.inspectorSelectionKind = InspectorSelectionKind::Entity;
+                    ctx.selection.SelectEntity(game.CreatePrimitiveEntity(renderer, type));
                 }
             }
             ImGui::EndMenu();

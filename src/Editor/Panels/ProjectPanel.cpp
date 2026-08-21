@@ -107,13 +107,10 @@ void ProjectPanel::SetStatus(const std::string& message, bool isError)
 
 void ProjectPanel::SetAssetSelection(EditorContext& ctx, const std::string& relativePath, bool isDirectory)
 {
-    m_selectedRelativePath = relativePath;
-
-    ctx.selectedAssetRelativePath = relativePath;
-    ctx.selectedAssetAbsolutePath =
-        PathToUtf8(relativePath.empty() ? m_rootPath : (m_rootPath / Utf8ToPath(relativePath)));
-    ctx.selectedAssetIsDirectory = isDirectory;
-    ctx.inspectorSelectionKind = InspectorSelectionKind::Asset;
+    ctx.selection.SelectAsset(
+        PathToUtf8(relativePath.empty() ? m_rootPath : (m_rootPath / Utf8ToPath(relativePath))),
+        relativePath,
+        isDirectory);
 }
 
 void ProjectPanel::RecordFolderDropZone(const std::string& relativePath)
@@ -220,7 +217,7 @@ void ProjectPanel::RenderRightPaneEntry(EditorContext& ctx, const ProjectEntry& 
 {
     ImGui::PushID(entry.relativePath.c_str());
 
-    const bool isSelected = (entry.relativePath == m_selectedRelativePath);
+    const bool isSelected = ctx.selection.IsAssetSelected(entry.relativePath);
     const std::string label = entry.isDirectory ? ("[Folder] " + entry.name) : entry.name;
     ImGui::Selectable(label.c_str(), isSelected);
 
@@ -278,12 +275,12 @@ void ProjectPanel::CreateNewFolder()
 
 void ProjectPanel::DeleteSelected(EditorContext& ctx)
 {
-    if (m_selectedRelativePath.empty()) {
+    const std::string selectedDisplay = ctx.selection.SelectedAssetRelativePath();
+    if (selectedDisplay.empty()) {
         return;
     }
 
-    const std::string selectedDisplay = m_selectedRelativePath;
-    const std::filesystem::path target = m_rootPath / Utf8ToPath(m_selectedRelativePath);
+    const std::filesystem::path target = m_rootPath / Utf8ToPath(selectedDisplay);
 
     std::error_code ec;
     const std::uintmax_t removedCount = std::filesystem::remove_all(target, ec);
@@ -296,23 +293,18 @@ void ProjectPanel::DeleteSelected(EditorContext& ctx)
         SetStatus("Deleted \"" + selectedDisplay + "\".", false);
     }
 
-    // If the deleted item was also whatever ctx (InspectorPanel) currently
-    // has as its Asset selection, clear that too - otherwise Inspector
-    // would keep showing metadata for something that just stopped
-    // existing until the user picks something else.
-    if (ctx.inspectorSelectionKind == InspectorSelectionKind::Asset
-        && ctx.selectedAssetRelativePath == selectedDisplay) {
-        ctx.selectedAssetAbsolutePath.clear();
-        ctx.selectedAssetRelativePath.clear();
-        ctx.selectedAssetIsDirectory = false;
-        ctx.inspectorSelectionKind = InspectorSelectionKind::None;
-    }
+    // If the deleted item was also whatever Project (or Inspector) currently
+    // has selected, clear that too via Selection's own gate-keeper method -
+    // otherwise Inspector would keep showing metadata for something that
+    // just stopped existing until the user picks something else, and
+    // Project's own row highlight/hasSelection would keep pointing at a
+    // relativePath that no longer resolves to anything.
+    ctx.selection.ClearAssetIfPath(selectedDisplay);
 
     // The deleted item might have been the currently open folder itself
     // (or an ancestor of it) - ReconcileCurrentFolderAfterRescan() (run as
     // part of the rescan below) walks m_currentFolderRelativePath back up
     // to whatever still exists, so it's left alone here.
-    m_selectedRelativePath.clear();
     m_needsRescan = true;
 }
 
@@ -326,7 +318,7 @@ void ProjectPanel::RenderContextMenu(EditorContext& ctx, const char* popupId)
             CreateNewFolder();
         }
         ImGui::Separator();
-        const bool hasSelection = !m_selectedRelativePath.empty();
+        const bool hasSelection = !ctx.selection.SelectedAssetRelativePath().empty();
         if (ImGui::MenuItem("Delete Selected", nullptr, false, hasSelection && m_rootExists)) {
             DeleteSelected(ctx);
         }

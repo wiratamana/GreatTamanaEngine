@@ -346,8 +346,25 @@ directly as `ImGuiEditorLayer.cpp` itself:
   the Game-view/Scene-view ImGui descriptors, each panel's own desired
   render-texture extent (`desiredExtent`/`desiredSceneExtent`) and visibility
   flag (`gameViewVisible`/`sceneViewVisible`), the current Hierarchy/
-  Inspector selection, the exit-requested flag, and the dock-layout-ensured
-  latch. Passed by reference into every panel/dock-layout function.
+  Inspector selection (`EditorContext::selection`, see `Selection.h` below),
+  the exit-requested flag, and the dock-layout-ensured latch. Passed by
+  reference into every panel/dock-layout function.
+- **`Selection.h/.cpp`** is the single gate-keeper for every Hierarchy-entity
+  / Project-asset selection change - `HierarchyPanel`/`ProjectPanel` never
+  assign `EditorContext::selection`'s fields directly; they only ever call
+  `Selection::SelectEntity()`/`SelectAsset()`/`ClearAssetIfPath()`, and every
+  reader (`InspectorPanel`, `ScenePanel`'s gizmo) goes through its
+  `Kind()`/`SelectedEntity()`/`SelectedAssetAbsolutePath()`/etc. accessors
+  rather than reading a raw field. Deliberately pure logic with zero ImGui/
+  SDL/Vulkan dependency (Tier-1-testable - see `tests/Editor/
+  SelectionTests.cpp` - and "Testability & Regression Safety" below), and
+  deliberately just a plain gate-keeper with no history/undo of its own -
+  this is what gives a future Command-pattern implementation (undo-able
+  selection changes, then edits in general) exactly one choke point to route
+  through, instead of several panels each writing selection state directly
+  (see `TODO.md`, "Editor / Debug UI"). Any future selectable "thing" (e.g. a
+  multi-select set) should extend this same class rather than adding a new
+  ad hoc field to `EditorContext` directly.
 - **`gameViewVisible`/`sceneViewVisible` are written from `ImGui::Begin()`'s
   own return value** (`Panels/GamePanel.cpp`/`ScenePanel.cpp`) - `false`
   whenever that panel is an inactive/hidden dock tab (or collapsed), not

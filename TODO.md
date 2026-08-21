@@ -34,7 +34,7 @@ that haven't been started yet at all.
 - **Click-to-select via ray casting + a Scene-view outline highlight.**
   Today, picking an entity by clicking directly on it inside "Scene" is not
   implemented - selection only happens via "Hierarchy" (see
-  `EditorContext::selectedEntity`). Adding it needs a real ray/triangle
+  `Selection::SelectEntity()`, `src/Editor/Selection.h`). Adding it needs a real ray/triangle
   intersection test against each `MeshRenderer`'s actual mesh data (i.e. this
   engine's first real collider/picking system, since there is no collision/
   physics layer at all yet), plus a Scene-view-only outline post-process
@@ -44,6 +44,16 @@ that haven't been started yet at all.
   (mesh-level intersection math, a new picking/collider abstraction, and a
   new render pass) and orthogonal to it: the gizmo already works fine driven
   purely by a "Hierarchy" selection in the meantime.
+- **Command pattern (undo/redo) for Editor edits.** `Selection`
+  (`src/Editor/Selection.h`) is now the single gate-keeper for every
+  Hierarchy-entity/Project-asset selection change (`SelectEntity()`/
+  `SelectAsset()`/`ClearAssetIfPath()`) - deliberately centralized so a
+  future `Command`/`ICommand` abstraction (`SelectEntityCommand`, then
+  presumably `MoveEntityCommand`/`CreateEntityCommand`/`DeleteEntityCommand`,
+  ...) has exactly one choke point to route selection changes through for
+  undo/redo, rather than several panels each writing selection state
+  directly. Not implemented yet - `Selection` itself is deliberately just
+  the gate-keeper, with no undo/redo history of its own.
 - **Long-term: replace ImGuizmo with a homegrown transform gizmo.**
   ImGuizmo (`third_party/imguizmo/`, `cmake/FetchImGuizmo.cmake`) currently
   backs the Scene-view translate/rotate/scale gizmo, and works correctly

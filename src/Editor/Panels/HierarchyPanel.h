@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 namespace gte {
 
@@ -9,8 +9,9 @@ struct EditorContext;
 // Lists every entity that has a Transform (this engine's ECS has no
 // separate "GameObject"/name concept yet - see ECS/Components/Transform.h -
 // so a Transform is the closest thing to "something that belongs in the
-// Hierarchy", the same role it plays in Unity). Clicking an entry writes
-// ctx.selectedEntity, which InspectorPanel then displays/edits.
+// Hierarchy", the same role it plays in Unity). Clicking an entry calls
+// ctx.selection.SelectEntity() (see Selection.h), which InspectorPanel then
+// displays/edits.
 //
 // Right-clicking empty space in the panel opens a Unity-style "Create 3D
 // Object" context menu (Cube/Sphere/Capsule/Cone/Plane) that spawns a new

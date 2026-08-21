@@ -10,15 +10,15 @@ class AssetPreviewTexture;
 #endif
 
 // Shows/edits whichever selection is currently "on top" - see
-// EditorContext::inspectorSelectionKind:
-//   - Entity (ctx.selectedEntity, from Hierarchy) - Transform fields
-//     directly editable (position/scale as-is, rotation shown/edited as
-//     Euler degrees and converted back to the stored Quat - see
+// ctx.selection.Kind() (Selection.h):
+//   - Entity (ctx.selection.SelectedEntity(), from Hierarchy) - Transform
+//     fields directly editable (position/scale as-is, rotation shown/edited
+//     as Euler degrees and converted back to the stored Quat - see
 //     Math/Quat.h's FromEulerDegrees()/ToEulerDegrees()); MeshRenderer's
 //     handles are shown read-only (no asset-picker UI exists yet to let a
 //     user reassign them).
-//   - Asset (ctx.selectedAssetAbsolutePath, from Project - only reachable
-//     when GTE_ENABLE_PROJECT_PANEL is ON) - plain file/folder metadata
+//   - Asset (ctx.selection.SelectedAssetAbsolutePath(), from Project - only
+//     reachable when GTE_ENABLE_PROJECT_PANEL is ON) - plain file/folder metadata
 //     (name/extension/size/last-modified, via AssetInspectorData.h), PLUS
 //     a live texture preview (via AssetPreviewTexture + `renderer`) if the
 //     selected file decodes as a supported image; falls back to

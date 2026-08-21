@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../ECS/Entity.h"
+#include "Selection.h"
 #include "TransformGizmo.h"
 
 #include <string>
@@ -8,26 +8,6 @@
 #include <volk.h>
 
 namespace gte {
-
-// Which "thing" the Inspector should currently display - an ECS entity
-// (Hierarchy selection, EditorContext::selectedEntity) or a Project-panel
-// file/folder (Project selection, EditorContext::selectedAsset* below) -
-// whichever the user picked most recently. The two selections are
-// otherwise completely independent and neither is ever cleared by picking
-// the other - this only tracks which one is currently "on top" for
-// InspectorPanel to show, exactly like Unity: clicking an entity in
-// Hierarchy while an asset was selected in Project doesn't forget the
-// Project selection, it just stops being what Inspector displays (and vice
-// versa). Only ever becomes Asset when GTE_ENABLE_PROJECT_PANEL is ON (see
-// Panels/ProjectPanel.cpp) - otherwise nothing ever sets it to anything but
-// None/Entity. A free enum (not nested in EditorContext), same convention
-// as GizmoOperation (TransformGizmo.h), so every panel can write
-// `InspectorSelectionKind::Entity` unqualified.
-enum class InspectorSelectionKind {
-    None,
-    Entity,
-    Asset,
-};
 
 // Plain shared state passed by reference into every Editor panel/dock-layout
 // function (see DockLayout.h, Panels/*.h) - the free-function equivalent of
@@ -106,40 +86,22 @@ struct EditorContext {
     bool sceneCameraPanning = false;
     bool sceneCameraRotating = false;
 
-    // Which selection (an ECS entity or a Project asset) InspectorPanel
-    // should currently display - see InspectorSelectionKind above.
-    InspectorSelectionKind inspectorSelectionKind = InspectorSelectionKind::None;
-
-    // Hierarchy/Inspector selection state - kInvalidEntity means "nothing
-    // selected". Written by HierarchyPanel, read by InspectorPanel (only
-    // actually shown when inspectorSelectionKind above is Entity).
-    Entity selectedEntity = kInvalidEntity;
-
-    // The Project panel's most recently selected file/folder - the
-    // ABSOLUTE path on disk (never just ProjectEntry::relativePath alone -
-    // see ProjectPanelData.h), so InspectorPanel can gather metadata/
-    // attempt an image preview without needing to know Project's own root
-    // folder itself. Empty means nothing has ever been selected in Project
-    // this session. Written by Panels/ProjectPanel.cpp (only compiled when
-    // GTE_ENABLE_PROJECT_PANEL is ON), read by BuildInspectorPanel() only
-    // when inspectorSelectionKind above is Asset.
-    std::string selectedAssetAbsolutePath;
-
-    // The same entry's relativePath (see ProjectEntry) - purely for
-    // display (a short, Project-root-relative label) alongside the
-    // metadata/preview InspectorPanel builds from selectedAssetAbsolutePath
-    // above; never itself used to resolve/open the file.
-    std::string selectedAssetRelativePath;
-
-    // Whether the Project selection above is a folder rather than a file -
-    // InspectorPanel skips any image-preview attempt entirely for a folder
-    // (see AssetInspectorData.h's IsSupportedImageExtension()).
-    bool selectedAssetIsDirectory = false;
+    // The single gate-keeper for every Hierarchy-entity / Project-asset
+    // selection in the Editor (see Selection.h) - HierarchyPanel/
+    // ProjectPanel only ever change what's selected through this object's
+    // own methods (SelectEntity()/SelectAsset()/ClearAssetIfPath()), never
+    // by assigning fields directly, so there is exactly one place in the
+    // codebase that ever writes "the selection changed" - useful right now
+    // for InspectorPanel/ScenePanel to read back, and set up specifically
+    // so a future Command-pattern implementation (undo-able selection
+    // changes) has one obvious choke point to route through instead of
+    // reinventing its own.
+    Selection selection;
 
     // Which gizmo manipulation ScenePanel's top-left Move/Rotate/Scale
     // switcher (TransformGizmo.h's DrawGizmoOperationSwitcher()) is
     // currently set to, and therefore what ManipulateTransformGizmo() does
-    // with ctx.selectedEntity's Transform this frame (see
+    // with the current Hierarchy selection's Transform this frame (see
     // Panels/ScenePanel.cpp). Translate is Unity's own default for a
     // freshly-opened scene.
     GizmoOperation gizmoOperation = GizmoOperation::Translate;

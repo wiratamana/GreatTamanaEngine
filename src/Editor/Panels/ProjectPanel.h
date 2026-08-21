@@ -31,18 +31,19 @@ struct EditorContext;
 //   - RIGHT ("contents"): the immediate children (files AND subfolders) of
 //     whichever folder is currently open, behind a small breadcrumb
 //     showing the open folder's path. A single click just selects an entry
-//     (m_selectedRelativePath, for Delete/highlight); double-clicking a
-//     subfolder there navigates INTO it (same as Explorer).
+//     (the Project selection - see Selection.h's SelectedAssetRelativePath(),
+//     for Delete/highlight); double-clicking a subfolder there navigates
+//     INTO it (same as Explorer).
 // A draggable splitter (m_leftPaneWidth) sits between them, exactly like a
 // normal Explorer/Unity window.
 //
 // **Inspector integration:** selecting ANY entry (a folder in either pane,
-// or a file in the right pane) also writes ctx.selectedAsset*/
-// ctx.inspectorSelectionKind (see EditorContext.h and SetAssetSelection()
-// below) - this is what makes the Editor's "Inspector" panel show that
-// entry's metadata (and, for a supported image file, a live texture
-// preview - see Panels/InspectorPanel.cpp) the same way selecting an entity
-// in "Hierarchy" makes Inspector show its components. The two selections
+// or a file in the right pane) also calls ctx.selection.SelectAsset() (see
+// Selection.h and SetAssetSelection() below) - this is what makes the
+// Editor's "Inspector" panel show that entry's metadata (and, for a
+// supported image file, a live texture preview - see
+// Panels/InspectorPanel.cpp) the same way selecting an entity in
+// "Hierarchy" makes Inspector show its components. The two selections
 // (ECS entity vs. Project asset) are otherwise completely independent -
 // see InspectorSelectionKind's own doc comment.
 //
@@ -80,7 +81,7 @@ public:
     // frame from ImGuiEditorLayer::BuildUI() (gated behind
     // `#if GTE_ENABLE_PROJECT_PANEL`). `ctx` is written whenever the user
     // selects an entry (see the class comment above) so InspectorPanel can
-    // show it - see EditorContext::selectedAssetAbsolutePath.
+    // show it - see Selection::SelectedAssetAbsolutePath().
     void Build(EditorContext& ctx);
 
     // Called by ImGuiEditorLayer::ProcessEvent() whenever the OS reports a
@@ -127,13 +128,12 @@ private:
     void CreateNewFolder();
     void DeleteSelected(EditorContext& ctx);
 
-    // Writes `relativePath`/`isDirectory` into both this panel's own
-    // selection (m_selectedRelativePath) AND ctx's asset-inspector fields
-    // (ctx.selectedAsset*/ctx.inspectorSelectionKind) - the one place that
-    // does both together, so every selection site below (left-pane folder
-    // click, right-pane single/double-click, the "Project" root node)
-    // can never let the two drift apart. `relativePath` empty means the
-    // Project root itself.
+    // Writes `relativePath`/`isDirectory` into ctx.selection (via
+    // Selection::SelectAsset() - see Selection.h) - the one place that does
+    // this, so every selection site below (left-pane folder click,
+    // right-pane single/double-click, the "Project" root node) can never
+    // drift from what Selection itself considers the current Project
+    // selection. `relativePath` empty means the Project root itself.
     void SetAssetSelection(EditorContext& ctx, const std::string& relativePath, bool isDirectory);
 
     std::filesystem::path m_rootPath;
@@ -152,16 +152,14 @@ private:
     // degrades gracefully instead of showing a permanently empty pane.
     std::string m_currentFolderRelativePath;
 
-    // The currently selected entry's OWN relativePath (see ProjectEntry) -
-    // never a pointer/index into m_tree, so a rescan that reshuffles/drops
-    // entries can never leave this dangling; it just stops matching
-    // anything (see RenderRightPaneEntry()/RenderLeftPaneFolder()). Distinct
-    // from m_currentFolderRelativePath: selecting a file (or a subfolder,
-    // via a single click) in the right pane does NOT navigate into it -
-    // only double-clicking a subfolder there, or clicking a folder in the
-    // left pane, does. Kept in sync with EditorContext::
-    // selectedAssetRelativePath by SetAssetSelection() above.
-    std::string m_selectedRelativePath;
+    // The currently selected entry's OWN relativePath is no longer kept
+    // here at all - Selection (ctx.selection, see Selection.h) is the sole
+    // source of truth (SelectedAssetRelativePath()), so a rescan that
+    // reshuffles/drops entries can never leave a duplicate copy dangling.
+    // Distinct from m_currentFolderRelativePath: selecting a file (or a
+    // subfolder, via a single click) in the right pane does NOT navigate
+    // into it - only double-clicking a subfolder there, or clicking a
+    // folder in the left pane, does.
 
     // The draggable splitter's left-pane width, in pixels - persisted
     // across frames like a normal Explorer/Unity window remembers its own

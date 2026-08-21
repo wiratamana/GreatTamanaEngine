@@ -12,7 +12,7 @@ class Registry;
 // whatever ECS entity currently has the active Camera component - THAT is
 // still what "Game" renders through - and now a Unity-style translate/
 // rotate/scale gizmo (see TransformGizmo.h) for whichever entity is
-// currently selected in the Hierarchy (ctx.selectedEntity), plus a top-left
+// currently selected in the Hierarchy (ctx.selection.SelectedEntity()), plus a top-left
 // Move/Rotate/Scale switcher overlay. Each panel has its own RenderTexture
 // sized to its own panel's aspect ratio (see
 // ImGuiEditorLayer::SceneViewTarget()), and each is only actually rendered
@@ -21,7 +21,7 @@ class Registry;
 // into `camera.Update()` as plain values - EditorCamera itself has no ImGui
 // dependency at all (see its own class comment). `registry` is Game's ECS
 // world (see Game::GetRegistry()) - needed here (unlike before) purely to
-// look up ctx.selectedEntity's Transform for the gizmo. Called once per
+// look up ctx.selection.SelectedEntity()'s Transform for the gizmo. Called once per
 // frame by ImGuiEditorLayer::BuildUI(), before BuildGamePanel().
 void BuildScenePanel(Registry& registry, EditorContext& ctx, EditorCamera& camera);
 

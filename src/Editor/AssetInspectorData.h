@@ -26,7 +26,7 @@ struct AssetMetadata {
 };
 
 // Gathers AssetMetadata for `absolutePath` (a real, absolute filesystem
-// path - see EditorContext::selectedAssetAbsolutePath). Every filesystem
+// path - see Selection::SelectedAssetAbsolutePath()). Every filesystem
 // call uses the std::error_code-taking overload, so a path that's vanished
 // (or become unreadable) between being selected and this being called
 // simply comes back with `exists = false` rather than throwing. Never

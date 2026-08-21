@@ -24,15 +24,17 @@ namespace {
 
 void BuildEntityInspector(Registry& registry, EditorContext& ctx)
 {
-    if (!registry.IsAlive(ctx.selectedEntity)) {
+    const Entity entity = ctx.selection.SelectedEntity();
+
+    if (!registry.IsAlive(entity)) {
         ImGui::TextDisabled("No entity selected.");
         return;
     }
 
-    ImGui::Text("Entity %u (generation %u)", ctx.selectedEntity.index, ctx.selectedEntity.generation);
+    ImGui::Text("Entity %u (generation %u)", entity.index, entity.generation);
     ImGui::Separator();
 
-    if (Transform* transform = registry.TryGetComponent<Transform>(ctx.selectedEntity)) {
+    if (Transform* transform = registry.TryGetComponent<Transform>(entity)) {
         if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
             ImGui::DragFloat3("Position", &transform->position.x, 0.01f);
 
@@ -45,7 +47,7 @@ void BuildEntityInspector(Registry& registry, EditorContext& ctx)
         }
     }
 
-    if (MeshRenderer* meshRenderer = registry.TryGetComponent<MeshRenderer>(ctx.selectedEntity)) {
+    if (MeshRenderer* meshRenderer = registry.TryGetComponent<MeshRenderer>(entity)) {
         if (ImGui::CollapsingHeader("Mesh Renderer", ImGuiTreeNodeFlags_DefaultOpen)) {
             ImGui::BeginDisabled();
             ImGui::Text("Mesh handle:     index %u, generation %u",
@@ -56,7 +58,7 @@ void BuildEntityInspector(Registry& registry, EditorContext& ctx)
         }
     }
 
-    if (Camera* camera = registry.TryGetComponent<Camera>(ctx.selectedEntity)) {
+    if (Camera* camera = registry.TryGetComponent<Camera>(entity)) {
         if (ImGui::CollapsingHeader("Camera", ImGuiTreeNodeFlags_DefaultOpen)) {
             ImGui::Checkbox("Active", &camera->active);
             ImGui::DragFloat("Field of View (Y)", &camera->fovYDegrees, 0.5f, 1.0f, 179.0f);
@@ -69,11 +71,13 @@ void BuildEntityInspector(Registry& registry, EditorContext& ctx)
 #if GTE_ENABLE_PROJECT_PANEL
 void BuildAssetInspector(EditorContext& ctx, Renderer& renderer, AssetPreviewTexture& assetPreview)
 {
-    const AssetMetadata metadata = BuildAssetMetadata(Utf8ToPath(ctx.selectedAssetAbsolutePath));
+    const std::string& absolutePath = ctx.selection.SelectedAssetAbsolutePath();
+    const std::string& relativePath = ctx.selection.SelectedAssetRelativePath();
+
+    const AssetMetadata metadata = BuildAssetMetadata(Utf8ToPath(absolutePath));
 
     ImGui::Text("%s", metadata.name.empty() ? "(Project root)" : metadata.name.c_str());
-    ImGui::TextDisabled(
-        "%s", ctx.selectedAssetRelativePath.empty() ? "(root)" : ctx.selectedAssetRelativePath.c_str());
+    ImGui::TextDisabled("%s", relativePath.empty() ? "(root)" : relativePath.c_str());
     ImGui::Separator();
 
     if (!metadata.exists) {
@@ -88,8 +92,7 @@ void BuildAssetInspector(EditorContext& ctx, Renderer& renderer, AssetPreviewTex
     // truncated/...) - exactly like every other failure mode in this
     // Editor degrades to a status/message rather than a crash.
     if (!metadata.isDirectory && IsSupportedImageExtension(metadata.extension)) {
-        if (const std::optional<AssetPreviewTexture::Preview> preview =
-                assetPreview.Resolve(renderer, ctx.selectedAssetAbsolutePath)) {
+        if (const std::optional<AssetPreviewTexture::Preview> preview = assetPreview.Resolve(renderer, absolutePath)) {
             const float availableWidth = ImGui::GetContentRegionAvail().x;
             const float aspect = preview->height > 0
                 ? static_cast<float>(preview->width) / static_cast<float>(preview->height)
@@ -115,7 +118,7 @@ void BuildAssetInspector(EditorContext& ctx, Renderer& renderer, AssetPreviewTex
     if (metadata.hasLastWriteTime) {
         ImGui::Text("Last modified: %s", metadata.lastWriteTimeText.c_str());
     }
-    ImGui::TextWrapped("Path: %s", ctx.selectedAssetAbsolutePath.c_str());
+    ImGui::TextWrapped("Path: %s", absolutePath.c_str());
 }
 #endif
 
@@ -130,7 +133,7 @@ void BuildInspectorPanel(Registry& registry, EditorContext& ctx)
     ImGui::Begin("Inspector");
 
 #if GTE_ENABLE_PROJECT_PANEL
-    if (ctx.inspectorSelectionKind == InspectorSelectionKind::Asset && !ctx.selectedAssetAbsolutePath.empty()) {
+    if (ctx.selection.Kind() == InspectorSelectionKind::Asset && !ctx.selection.SelectedAssetAbsolutePath().empty()) {
         BuildAssetInspector(ctx, renderer, assetPreview);
         ImGui::End();
         return;

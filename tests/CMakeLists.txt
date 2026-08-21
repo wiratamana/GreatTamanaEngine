@@ -93,6 +93,15 @@
 #                                            is ON (see below), since
 #                                            EditorCamera itself is only
 #                                            compiled into gte_core then.
+#   - Editor/SelectionTests.cpp               - Selection's pure
+#                                            SelectEntity()/SelectAsset()/
+#                                            ClearAssetIfPath()/Kind() gate-
+#                                            keeper logic (see
+#                                            src/Editor/Selection.h) - no
+#                                            ImGui/SDL/Vulkan involved. Only
+#                                            built when GTE_ENABLE_EDITOR is
+#                                            ON, same reason as
+#                                            EditorCameraTests.cpp above.
 #   - Editor/MemoryPanelDataTests.cpp        - the Editor "Memory" panel's
 #                                            pure data-shaping logic
 #                                            (BuildMemoryRows()/FormatBytes()/
@@ -175,6 +184,7 @@ set(GTE_TEST_SOURCES
 if(GTE_ENABLE_EDITOR)
     list(APPEND GTE_TEST_SOURCES
         Editor/EditorCameraTests.cpp
+        Editor/SelectionTests.cpp
         Editor/ImGuiMemoryTrackerTests.cpp
         Editor/MemoryPanelDataTests.cpp
     )
