@@ -182,4 +182,61 @@ std::filesystem::path MakeUniqueDestinationPath(
     return firstAttempt;
 }
 
+const ProjectEntry* FindEntryByRelativePath(const std::vector<ProjectEntry>& tree, const std::string& relativePath)
+{
+    if (relativePath.empty()) {
+        return nullptr; // The root has no ProjectEntry of its own - see this function's doc comment.
+    }
+
+    for (const ProjectEntry& entry : tree) {
+        if (entry.relativePath == relativePath) {
+            return &entry;
+        }
+
+        // Only recurse into a subtree whose relativePath is a genuine
+        // path-PREFIX of the target (followed by a '/'), never a same-named
+        // sibling - e.g. looking for "Sub2/x" must never recurse into "Sub".
+        const bool isGenuinePrefix = relativePath.size() > entry.relativePath.size()
+            && relativePath.compare(0, entry.relativePath.size(), entry.relativePath) == 0
+            && relativePath[entry.relativePath.size()] == '/';
+        if (entry.isDirectory && isGenuinePrefix) {
+            const ProjectEntry* found = FindEntryByRelativePath(entry.children, relativePath);
+            if (found != nullptr) {
+                return found;
+            }
+        }
+    }
+
+    return nullptr;
+}
+
+std::string ParentRelativePath(const std::string& relativePath)
+{
+    const std::size_t lastSlash = relativePath.find_last_of('/');
+    if (lastSlash == std::string::npos) {
+        return std::string(); // Top-level entry (or already empty) - its parent is the Project root itself.
+    }
+    return relativePath.substr(0, lastSlash);
+}
+
+std::optional<std::string> ResolveDropTarget(const std::vector<FolderDropZone>& zones, float x, float y,
+    const Rect& leftPaneRect, const Rect& rightPaneRect, const std::string& currentFolderRelativePath)
+{
+    for (const FolderDropZone& zone : zones) {
+        if (zone.rect.Contains(x, y)) {
+            return zone.relativePath;
+        }
+    }
+
+    if (rightPaneRect.Contains(x, y)) {
+        return currentFolderRelativePath;
+    }
+
+    if (leftPaneRect.Contains(x, y)) {
+        return std::string(); // Project root.
+    }
+
+    return std::nullopt;
+}
+
 } // namespace gte

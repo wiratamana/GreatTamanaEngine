@@ -216,5 +216,143 @@ TEST_F(ProjectPanelDataTest, MakeUniqueDestinationPath_WorksForExtensionlessName
     EXPECT_EQ(MakeUniqueDestinationPath(m_root, "New Folder"), m_root / "New Folder (1)");
 }
 
+// --- FindEntryByRelativePath() ----------------------------------------------
+
+TEST_F(ProjectPanelDataTest, FindEntryByRelativePath_EmptyPathReturnsNullptr)
+{
+    const std::vector<ProjectEntry> tree = ScanProjectDirectory(m_root);
+    EXPECT_EQ(FindEntryByRelativePath(tree, std::string()), nullptr);
+}
+
+TEST_F(ProjectPanelDataTest, FindEntryByRelativePath_FindsTopLevelEntry)
+{
+    WriteFile(m_root / "top.txt", "x");
+    const std::vector<ProjectEntry> tree = ScanProjectDirectory(m_root);
+
+    const ProjectEntry* found = FindEntryByRelativePath(tree, "top.txt");
+    ASSERT_NE(found, nullptr);
+    EXPECT_EQ(found->name, "top.txt");
+}
+
+TEST_F(ProjectPanelDataTest, FindEntryByRelativePath_FindsDeeplyNestedEntry)
+{
+    std::filesystem::create_directories(m_root / "A" / "B");
+    WriteFile(m_root / "A" / "B" / "nested.txt", "x");
+    const std::vector<ProjectEntry> tree = ScanProjectDirectory(m_root);
+
+    const ProjectEntry* found = FindEntryByRelativePath(tree, "A/B/nested.txt");
+    ASSERT_NE(found, nullptr);
+    EXPECT_EQ(found->name, "nested.txt");
+    EXPECT_FALSE(found->isDirectory);
+}
+
+TEST_F(ProjectPanelDataTest, FindEntryByRelativePath_NeverConfusesASimilarlyNamedSibling)
+{
+    std::filesystem::create_directories(m_root / "Sub");
+    std::filesystem::create_directories(m_root / "Sub2" / "x");
+    const std::vector<ProjectEntry> tree = ScanProjectDirectory(m_root);
+
+    const ProjectEntry* found = FindEntryByRelativePath(tree, "Sub2/x");
+    ASSERT_NE(found, nullptr);
+    EXPECT_EQ(found->relativePath, "Sub2/x");
+}
+
+TEST_F(ProjectPanelDataTest, FindEntryByRelativePath_ReturnsNullptrForSomethingThatDoesNotExist)
+{
+    const std::vector<ProjectEntry> tree = ScanProjectDirectory(m_root);
+    EXPECT_EQ(FindEntryByRelativePath(tree, "Ghost/Nested"), nullptr);
+}
+
+// --- ParentRelativePath() ----------------------------------------------------
+
+TEST(ProjectPanelDataParentPathTest, EmptyInputReturnsEmpty)
+{
+    EXPECT_EQ(ParentRelativePath(""), "");
+}
+
+TEST(ProjectPanelDataParentPathTest, TopLevelEntryReturnsEmpty)
+{
+    EXPECT_EQ(ParentRelativePath("top.txt"), "");
+}
+
+TEST(ProjectPanelDataParentPathTest, OneLevelNestedReturnsItsParent)
+{
+    EXPECT_EQ(ParentRelativePath("Sub/nested.txt"), "Sub");
+}
+
+TEST(ProjectPanelDataParentPathTest, MultiLevelNestedReturnsImmediateParentOnly)
+{
+    EXPECT_EQ(ParentRelativePath("A/B/C.txt"), "A/B");
+}
+
+// --- ResolveDropTarget() -----------------------------------------------------
+
+TEST(ProjectPanelDataResolveDropTargetTest, PrefersASpecificFolderZoneOverEitherPaneFallback)
+{
+    const std::vector<FolderDropZone> zones = {
+        FolderDropZone{ "Sub", Rect{ 0.0f, 0.0f, 100.0f, 20.0f } },
+    };
+    const Rect leftPane{ 0.0f, 0.0f, 200.0f, 400.0f };
+    const Rect rightPane{ 200.0f, 0.0f, 200.0f, 400.0f };
+
+    const std::optional<std::string> target = ResolveDropTarget(zones, 10.0f, 10.0f, leftPane, rightPane, "Other");
+
+    ASSERT_TRUE(target.has_value());
+    EXPECT_EQ(*target, "Sub");
+}
+
+TEST(ProjectPanelDataResolveDropTargetTest, FallsBackToCurrentFolderWhenInRightPaneButNotOnARow)
+{
+    const std::vector<FolderDropZone> zones = {
+        FolderDropZone{ "Sub", Rect{ 0.0f, 0.0f, 100.0f, 20.0f } }, // Only exists in the left pane's x-range.
+    };
+    const Rect leftPane{ 0.0f, 0.0f, 200.0f, 400.0f };
+    const Rect rightPane{ 200.0f, 0.0f, 200.0f, 400.0f };
+
+    const std::optional<std::string> target
+        = ResolveDropTarget(zones, 250.0f, 100.0f, leftPane, rightPane, "OpenFolder");
+
+    ASSERT_TRUE(target.has_value());
+    EXPECT_EQ(*target, "OpenFolder");
+}
+
+TEST(ProjectPanelDataResolveDropTargetTest, FallsBackToRootWhenInLeftPaneButNotOnARow)
+{
+    const std::vector<FolderDropZone> zones;
+    const Rect leftPane{ 0.0f, 0.0f, 200.0f, 400.0f };
+    const Rect rightPane{ 200.0f, 0.0f, 200.0f, 400.0f };
+
+    const std::optional<std::string> target = ResolveDropTarget(zones, 50.0f, 300.0f, leftPane, rightPane, "OpenFolder");
+
+    ASSERT_TRUE(target.has_value());
+    EXPECT_EQ(*target, ""); // The Project root.
+}
+
+TEST(ProjectPanelDataResolveDropTargetTest, ReturnsNulloptWhenOutsideBothPanes)
+{
+    const std::vector<FolderDropZone> zones;
+    const Rect leftPane{ 0.0f, 0.0f, 200.0f, 400.0f };
+    const Rect rightPane{ 200.0f, 0.0f, 200.0f, 400.0f };
+
+    const std::optional<std::string> target
+        = ResolveDropTarget(zones, 500.0f, 500.0f, leftPane, rightPane, "OpenFolder");
+
+    EXPECT_FALSE(target.has_value());
+}
+
+TEST(ProjectPanelDataResolveDropTargetTest, RectBoundaryIsInclusive)
+{
+    const std::vector<FolderDropZone> zones = {
+        FolderDropZone{ "Sub", Rect{ 10.0f, 10.0f, 100.0f, 50.0f } },
+    };
+    const Rect leftPane{ 0.0f, 0.0f, 1.0f, 1.0f };
+    const Rect rightPane{ 0.0f, 0.0f, 1.0f, 1.0f };
+
+    // Exactly on the zone's bottom-right corner.
+    const std::optional<std::string> target = ResolveDropTarget(zones, 110.0f, 60.0f, leftPane, rightPane, "");
+    ASSERT_TRUE(target.has_value());
+    EXPECT_EQ(*target, "Sub");
+}
+
 } // namespace
 } // namespace gte

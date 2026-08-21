@@ -9,26 +9,41 @@
 
 namespace gte {
 
-// Unity-style "Project" panel: a live view of a "Project" folder living
-// right next to the built .exe (created automatically the first time this
-// panel runs, if missing - see EnsureProjectRootExists() in
-// ProjectPanelData.h), PLUS the ability to import a file/folder into it by
-// dragging it in from the OS (Windows Explorer, ...) - see
-// HandleExternalFileDrop() below. Only compiled/used when
-// GTE_ENABLE_PROJECT_PANEL is ON (see the root CMakeLists.txt) - the whole
-// point of that separate switch (distinct from GTE_ENABLE_EDITOR) is that
-// this feature touches the real filesystem and is still actively evolving,
-// so it can be turned off independently of the rest of the Editor.
+// Unity/Windows-Explorer-style two-pane "Project" panel: a live view of a
+// "Project" folder living right next to the built .exe (created
+// automatically the first time this panel runs, if missing - see
+// EnsureProjectRootExists() in ProjectPanelData.h), PLUS the ability to
+// import a file/folder into it by dragging it in from the OS (Windows
+// Explorer, ...) - see HandleExternalFileDrop() below. Only compiled/used
+// when GTE_ENABLE_PROJECT_PANEL is ON (see the root CMakeLists.txt) - the
+// whole point of that separate switch (distinct from GTE_ENABLE_EDITOR) is
+// that this feature touches the real filesystem and is still actively
+// evolving, so it can be turned off independently of the rest of the
+// Editor.
+//
+// **Two panes, like Unity/Explorer:**
+//   - LEFT ("folder tree"): every directory in "Project", recursively,
+//     folders only (no files) - clicking one both selects it AND makes it
+//     the "open"/current folder (m_currentFolderRelativePath), same as
+//     clicking a folder in Explorer's left tree.
+//   - RIGHT ("contents"): the immediate children (files AND subfolders) of
+//     whichever folder is currently open, behind a small breadcrumb
+//     showing the open folder's path. A single click just selects an entry
+//     (m_selectedRelativePath, for Delete/highlight); double-clicking a
+//     subfolder there navigates INTO it (same as Explorer).
+// A draggable splitter (m_leftPaneWidth) sits between them, exactly like a
+// normal Explorer/Unity window.
 //
 // This is a CLASS, not a free-function panel builder like
 // HierarchyPanel/InspectorPanel/etc. (see AGENTS.md, "Editor Module
 // Structure": "a future panel that genuinely needs its own persistent state
 // across frames... may become a small class instead of a free function") -
 // it genuinely needs to remember several things across frames: the root
-// path, its own last-known on-screen rect (for hit-testing an external OS
-// drop - see HandleExternalFileDrop()), a throttled/cached scan of the
-// directory tree, the currently selected entry, and a transient status
-// message. It is still called explicitly by name from
+// path, both panes' own last-known on-screen rects and every folder row's
+// own on-screen hit-box (for hit-testing an external OS drop - see
+// HandleExternalFileDrop()), a throttled/cached scan of the directory tree,
+// which folder is currently open vs. selected, the splitter position, and a
+// transient status message. It is still called explicitly by name from
 // ImGuiEditorLayer::BuildUI()/ProcessEvent(), exactly like every
 // free-function panel - there is no IEditorPanel interface here either.
 //
@@ -36,12 +51,13 @@ namespace gte {
 // across frames, or holds a pointer/reference into a previous scan's tree -
 // only ever a plain ProjectEntry snapshot (rebuilt wholesale by
 // ScanProjectDirectory() on a throttle - see EnsureRootAndMaybeRescan())
-// plus a plain std::string for the current selection (its OWN
+// plus plain std::strings for the current selection/open folder (their OWN
 // relativePath, never a pointer into the tree). This is what makes "the
 // user deletes something inside Project externally while the Editor is
-// running" a complete non-event: the next scan just quietly omits it, and a
+// running" a complete non-event: the next scan just quietly omits it, a
 // selection that no longer resolves to anything simply stops being
-// highlighted/resolves to the Project root (see ResolveDropTargetDirectory())
+// highlighted, and an open folder that vanished is walked back up to its
+// nearest still-existing ancestor (see ReconcileCurrentFolderAfterRescan())
 // - there is nothing anywhere holding a stale handle that could ever be
 // dereferenced.
 class ProjectPanel {
@@ -63,24 +79,36 @@ public:
     // the absolute path (UTF-8, as SDL always provides) of the dropped
     // file/folder on disk.
     //
-    // A no-op if that position doesn't fall within this panel's own
-    // last-known on-screen rect (recorded during Build() - i.e. the drop
-    // landed somewhere else entirely, not on "Project"), or if the Project
-    // root itself doesn't currently exist and couldn't be recreated. Copies
-    // (never moves) the dropped item into whichever folder is currently
-    // selected in "Project" (or the Project root, if nothing/a file is
-    // selected - see ResolveDropTargetDirectory()), auto-renaming to avoid
-    // clobbering an existing same-named item (see MakeUniqueDestinationPath()).
-    // Never throws - every failure (source vanished before the copy could
-    // start, a permissions error mid-copy, ...) is reported only as a
-    // transient in-panel status message (see Build()), exactly like every
-    // other failure mode this panel handles.
+    // Resolves the actual destination folder via ProjectPanelData's
+    // ResolveDropTarget() (see its own doc comment for the exact
+    // left-pane/right-pane/specific-folder-row priority rules) using
+    // whatever this panel recorded while rendering its LAST visible frame -
+    // a no-op if that resolves to nothing at all (the drop landed outside
+    // both panes entirely - the toolbar, the splitter, ...), or if the
+    // Project root itself doesn't currently exist and couldn't be
+    // recreated. Copies (never moves) the dropped item into the resolved
+    // folder, auto-renaming to avoid clobbering an existing same-named item
+    // (see MakeUniqueDestinationPath()). Never throws - every failure
+    // (source vanished before the copy could start, a permissions error
+    // mid-copy, ...) is reported only as a transient in-panel status
+    // message (see Build()), exactly like every other failure mode this
+    // panel handles.
     void HandleExternalFileDrop(float screenX, float screenY, const std::string& sourcePathUtf8);
 
 private:
     void EnsureRootAndMaybeRescan();
-    void RenderEntry(const ProjectEntry& entry);
-    void RenderContextMenu();
+    void ReconcileCurrentFolderAfterRescan();
+
+    void RenderLeftPane();
+    void RenderLeftPaneFolder(const ProjectEntry& entry);
+    void RenderRightPane();
+    void RenderRightPaneEntry(const ProjectEntry& entry);
+    void RenderBreadcrumb();
+    void RenderContextMenu(const char* popupId);
+    void RecordFolderDropZone(const std::string& relativePath);
+
+    const std::vector<ProjectEntry>* CurrentFolderChildren() const;
+
     void SetStatus(const std::string& message, bool isError);
     void CreateNewFolder();
     void DeleteSelected();
@@ -92,23 +120,42 @@ private:
     std::chrono::steady_clock::time_point m_lastScanTime{};
     bool m_needsRescan = true;
 
+    // Which folder is currently "open" - its immediate children are what
+    // the right pane shows (empty string means the Project root itself).
+    // Written by clicking a folder in the left pane, or double-clicking a
+    // subfolder in the right pane. Reconciled after every rescan (see
+    // ReconcileCurrentFolderAfterRescan()) by walking up to the nearest
+    // still-existing ancestor, so a deleted-out-from-under-you open folder
+    // degrades gracefully instead of showing a permanently empty pane.
+    std::string m_currentFolderRelativePath;
+
     // The currently selected entry's OWN relativePath (see ProjectEntry) -
     // never a pointer/index into m_tree, so a rescan that reshuffles/drops
     // entries can never leave this dangling; it just stops matching
-    // anything (see RenderEntry()) or gracefully resolves to the Project
-    // root (see ResolveDropTargetDirectory()).
+    // anything (see RenderRightPaneEntry()/RenderLeftPaneFolder()). Distinct
+    // from m_currentFolderRelativePath: selecting a file (or a subfolder,
+    // via a single click) in the right pane does NOT navigate into it -
+    // only double-clicking a subfolder there, or clicking a folder in the
+    // left pane, does.
     std::string m_selectedRelativePath;
 
-    // This panel's own last-known on-screen rect (absolute desktop/screen
-    // coordinates, matching how HandleExternalFileDrop()'s screenX/screenY
-    // are computed) and whether it was actually visible last frame -
-    // recorded at the top of Build(), read by HandleExternalFileDrop() to
-    // hit-test an incoming OS drop.
+    // The draggable splitter's left-pane width, in pixels - persisted
+    // across frames like a normal Explorer/Unity window remembers its own
+    // split position for the session. Clamped every frame in Build() to
+    // stay sane as the window itself is resized.
+    float m_leftPaneWidth = 220.0f;
+
+    // Every folder row's own on-screen hit-box for whichever frame was last
+    // rendered (left-pane tree rows AND right-pane subfolder rows alike),
+    // plus each pane's own overall rect - rebuilt from scratch at the start
+    // of every visible Build() call, read by HandleExternalFileDrop() (via
+    // ProjectPanelData::ResolveDropTarget()) to route an incoming OS drop
+    // to the right specific folder.
+    std::vector<FolderDropZone> m_folderDropZones;
+    Rect m_leftPaneRect;
+    Rect m_rightPaneRect;
+
     bool m_panelVisible = false;
-    float m_panelScreenX = 0.0f;
-    float m_panelScreenY = 0.0f;
-    float m_panelScreenWidth = 0.0f;
-    float m_panelScreenHeight = 0.0f;
 
     // A short-lived line shown at the bottom of the panel after an
     // operation (import/New Folder/Delete/a failure) - self-clears a few

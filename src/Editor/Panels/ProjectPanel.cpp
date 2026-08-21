@@ -6,6 +6,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <exception>
 #include <system_error>
 
@@ -15,6 +16,17 @@ namespace {
 
 constexpr std::chrono::milliseconds kRescanInterval{ 500 };
 constexpr std::chrono::milliseconds kStatusMessageLifetime{ 4000 };
+
+constexpr float kSplitterWidth = 6.0f;
+constexpr float kMinPaneWidth = 100.0f;
+constexpr float kFooterReserve = 26.0f; // Space always left below both panes for the status line.
+
+bool HasSubfolders(const ProjectEntry& entry)
+{
+    return std::any_of(entry.children.begin(), entry.children.end(), [](const ProjectEntry& child) {
+        return child.isDirectory;
+    });
+}
 
 } // namespace
 
@@ -47,8 +59,42 @@ void ProjectPanel::EnsureRootAndMaybeRescan()
     m_rootExists = EnsureProjectRootExists(m_rootPath);
     m_tree = m_rootExists ? ScanProjectDirectory(m_rootPath) : std::vector<ProjectEntry>{};
 
+    ReconcileCurrentFolderAfterRescan();
+
     m_lastScanTime = now;
     m_needsRescan = false;
+}
+
+void ProjectPanel::ReconcileCurrentFolderAfterRescan()
+{
+    if (!m_rootExists) {
+        m_currentFolderRelativePath.clear();
+        return;
+    }
+
+    // Walk up to the nearest ancestor that still exists as a directory in
+    // the freshly-scanned tree - covers both "the open folder itself was
+    // deleted" and "it was replaced by a same-named file" without ever
+    // leaving the right pane stuck showing a folder that no longer exists.
+    // Terminates: the Project root itself (empty relativePath) is always
+    // considered valid, so this can never loop forever.
+    while (!m_currentFolderRelativePath.empty()) {
+        const ProjectEntry* found = FindEntryByRelativePath(m_tree, m_currentFolderRelativePath);
+        if (found != nullptr && found->isDirectory) {
+            return;
+        }
+        m_currentFolderRelativePath = ParentRelativePath(m_currentFolderRelativePath);
+    }
+}
+
+const std::vector<ProjectEntry>* ProjectPanel::CurrentFolderChildren() const
+{
+    if (m_currentFolderRelativePath.empty()) {
+        return &m_tree;
+    }
+
+    const ProjectEntry* folder = FindEntryByRelativePath(m_tree, m_currentFolderRelativePath);
+    return (folder != nullptr && folder->isDirectory) ? &folder->children : &m_tree;
 }
 
 void ProjectPanel::SetStatus(const std::string& message, bool isError)
@@ -58,43 +104,154 @@ void ProjectPanel::SetStatus(const std::string& message, bool isError)
     m_statusSetTime = std::chrono::steady_clock::now();
 }
 
-void ProjectPanel::RenderEntry(const ProjectEntry& entry)
+void ProjectPanel::RecordFolderDropZone(const std::string& relativePath)
 {
-    ImGui::PushID(entry.relativePath.c_str());
+    const ImVec2 min = ImGui::GetItemRectMin();
+    const ImVec2 max = ImGui::GetItemRectMax();
+    m_folderDropZones.push_back(FolderDropZone{ relativePath, Rect{ min.x, min.y, max.x - min.x, max.y - min.y } });
+}
 
-    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
-    if (entry.relativePath == m_selectedRelativePath) {
-        flags |= ImGuiTreeNodeFlags_Selected;
+void ProjectPanel::RenderLeftPaneFolder(const ProjectEntry& entry)
+{
+    if (!entry.isDirectory) {
+        return; // Left pane is folders-only, like Unity/Explorer's own tree.
     }
 
-    if (entry.isDirectory) {
-        const bool open = ImGui::TreeNodeEx(entry.name.c_str(), flags);
-        if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen()) {
-            m_selectedRelativePath = entry.relativePath;
-        }
-        if (open) {
-            for (const ProjectEntry& child : entry.children) {
-                RenderEntry(child);
-            }
-            ImGui::TreePop();
-        }
-    } else {
+    ImGui::PushID(entry.relativePath.c_str());
+
+    const bool hasSubfolders = HasSubfolders(entry);
+    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
+    if (entry.relativePath == m_currentFolderRelativePath) {
+        flags |= ImGuiTreeNodeFlags_Selected;
+    }
+    if (!hasSubfolders) {
         flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_Bullet;
-        ImGui::TreeNodeEx(entry.name.c_str(), flags);
-        if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
-            m_selectedRelativePath = entry.relativePath;
+    }
+
+    const bool open = ImGui::TreeNodeEx(entry.name.c_str(), flags);
+    RecordFolderDropZone(entry.relativePath);
+
+    if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen()) {
+        m_currentFolderRelativePath = entry.relativePath;
+        m_selectedRelativePath = entry.relativePath;
+    }
+
+    if (hasSubfolders && open) {
+        for (const ProjectEntry& child : entry.children) {
+            RenderLeftPaneFolder(child);
         }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("%s", FormatBytes(entry.sizeBytes).c_str());
-        }
+        ImGui::TreePop();
     }
 
     ImGui::PopID();
 }
 
+void ProjectPanel::RenderLeftPane()
+{
+    ImGuiTreeNodeFlags rootFlags
+        = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_DefaultOpen;
+    if (m_currentFolderRelativePath.empty()) {
+        rootFlags |= ImGuiTreeNodeFlags_Selected;
+    }
+
+    const bool rootOpen = ImGui::TreeNodeEx("Project", rootFlags);
+    RecordFolderDropZone(std::string());
+
+    if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen()) {
+        m_currentFolderRelativePath.clear();
+        m_selectedRelativePath.clear();
+    }
+
+    if (rootOpen) {
+        for (const ProjectEntry& entry : m_tree) {
+            RenderLeftPaneFolder(entry);
+        }
+        ImGui::TreePop();
+    }
+}
+
+void ProjectPanel::RenderBreadcrumb()
+{
+    if (ImGui::SmallButton("Project")) {
+        m_currentFolderRelativePath.clear();
+    }
+
+    std::string accumulated;
+    std::size_t start = 0;
+    int segmentIndex = 0;
+    while (start <= m_currentFolderRelativePath.size() && start != std::string::npos) {
+        const std::size_t slash = m_currentFolderRelativePath.find('/', start);
+        const std::string segment
+            = m_currentFolderRelativePath.substr(start, slash == std::string::npos ? std::string::npos : slash - start);
+        if (segment.empty()) {
+            break; // Nothing left to walk (m_currentFolderRelativePath was empty - already just "Project" above).
+        }
+        accumulated = accumulated.empty() ? segment : accumulated + "/" + segment;
+
+        ImGui::SameLine();
+        ImGui::TextUnformatted("/");
+        ImGui::SameLine();
+        ImGui::PushID(segmentIndex++);
+        if (ImGui::SmallButton(segment.c_str())) {
+            m_currentFolderRelativePath = accumulated;
+        }
+        ImGui::PopID();
+
+        if (slash == std::string::npos) {
+            break;
+        }
+        start = slash + 1;
+    }
+}
+
+void ProjectPanel::RenderRightPaneEntry(const ProjectEntry& entry)
+{
+    ImGui::PushID(entry.relativePath.c_str());
+
+    const bool isSelected = (entry.relativePath == m_selectedRelativePath);
+    const std::string label = entry.isDirectory ? ("[Folder] " + entry.name) : entry.name;
+    ImGui::Selectable(label.c_str(), isSelected);
+
+    if (entry.isDirectory) {
+        RecordFolderDropZone(entry.relativePath);
+    }
+
+    if (entry.isDirectory && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+        // Double-click a subfolder here to navigate INTO it - the same
+        // "open" action as clicking it in the left pane, so both panes
+        // always agree on what's open.
+        m_currentFolderRelativePath = entry.relativePath;
+        m_selectedRelativePath = entry.relativePath;
+    } else if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
+        m_selectedRelativePath = entry.relativePath;
+    }
+
+    if (!entry.isDirectory && ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("%s", FormatBytes(entry.sizeBytes).c_str());
+    }
+
+    ImGui::PopID();
+}
+
+void ProjectPanel::RenderRightPane()
+{
+    RenderBreadcrumb();
+    ImGui::Separator();
+
+    const std::vector<ProjectEntry>* children = CurrentFolderChildren();
+    if (children == nullptr || children->empty()) {
+        ImGui::TextDisabled("(empty - drag files in from Explorer, or right-click for options)");
+        return;
+    }
+
+    for (const ProjectEntry& entry : *children) {
+        RenderRightPaneEntry(entry);
+    }
+}
+
 void ProjectPanel::CreateNewFolder()
 {
-    const std::filesystem::path targetDir = ResolveDropTargetDirectory(m_rootPath, m_selectedRelativePath);
+    const std::filesystem::path targetDir = ResolveDropTargetDirectory(m_rootPath, m_currentFolderRelativePath);
     const std::filesystem::path destination = MakeUniqueDestinationPath(targetDir, Utf8ToPath("New Folder"));
 
     std::error_code ec;
@@ -127,13 +284,17 @@ void ProjectPanel::DeleteSelected()
         SetStatus("Deleted \"" + selectedDisplay + "\".", false);
     }
 
+    // The deleted item might have been the currently open folder itself
+    // (or an ancestor of it) - ReconcileCurrentFolderAfterRescan() (run as
+    // part of the rescan below) walks m_currentFolderRelativePath back up
+    // to whatever still exists, so it's left alone here.
     m_selectedRelativePath.clear();
     m_needsRescan = true;
 }
 
-void ProjectPanel::RenderContextMenu()
+void ProjectPanel::RenderContextMenu(const char* popupId)
 {
-    if (ImGui::BeginPopupContextWindow("ProjectContextMenu")) {
+    if (ImGui::BeginPopupContextWindow(popupId)) {
         if (ImGui::MenuItem("Refresh")) {
             m_needsRescan = true;
         }
@@ -155,18 +316,6 @@ void ProjectPanel::Build()
 
     m_panelVisible = ImGui::Begin("Project");
     if (m_panelVisible) {
-        // Recorded every visible frame so HandleExternalFileDrop() always
-        // hit-tests against THIS frame's actual rect - correct even if the
-        // user just moved/resized/undocked the panel, or dragged it onto
-        // its own OS window via ImGui's multi-viewport feature (GetWindowPos()
-        // returns absolute desktop coordinates either way).
-        const ImVec2 pos = ImGui::GetWindowPos();
-        const ImVec2 size = ImGui::GetWindowSize();
-        m_panelScreenX = pos.x;
-        m_panelScreenY = pos.y;
-        m_panelScreenWidth = size.x;
-        m_panelScreenHeight = size.y;
-
         if (ImGui::Button("Refresh")) {
             m_needsRescan = true;
         }
@@ -180,22 +329,51 @@ void ProjectPanel::Build()
                 ImVec4(1.0f, 0.55f, 0.2f, 1.0f), "The \"Project\" folder is missing and could not be (re)created:");
             ImGui::TextWrapped("%s", PathToUtf8(m_rootPath).c_str());
             ImGui::TextDisabled("(check that this location is writable, then click Refresh)");
-        } else if (m_tree.empty()) {
-            ImGui::TextDisabled("(empty - drag files in from Explorer, or right-click for options)");
         } else {
-            for (const ProjectEntry& entry : m_tree) {
-                RenderEntry(entry);
-            }
-        }
+            m_folderDropZones.clear();
 
-        // Right-click ANYWHERE in the panel (empty space or an existing
-        // row alike, same as HierarchyPanel's own context menu - see its
-        // comment) for Refresh/New Folder/Delete Selected.
-        RenderContextMenu();
+            // Clamp the splitter to stay sane as the window itself is
+            // resized (e.g. never wider than the window, never so narrow
+            // either pane becomes unusable).
+            const float totalAvailWidth = ImGui::GetContentRegionAvail().x;
+            const float maxLeftWidth = std::max(kMinPaneWidth, totalAvailWidth - kMinPaneWidth - kSplitterWidth);
+            m_leftPaneWidth = std::clamp(m_leftPaneWidth, kMinPaneWidth, maxLeftWidth);
+
+            const float paneAreaHeight = std::max(ImGui::GetContentRegionAvail().y - kFooterReserve, 40.0f);
+
+            ImGui::BeginChild("ProjectLeftPane", ImVec2(m_leftPaneWidth, paneAreaHeight), true);
+            RenderLeftPane();
+            RenderContextMenu("ProjectLeftPaneContextMenu");
+            {
+                const ImVec2 childPos = ImGui::GetWindowPos();
+                const ImVec2 childSize = ImGui::GetWindowSize();
+                m_leftPaneRect = Rect{ childPos.x, childPos.y, childSize.x, childSize.y };
+            }
+            ImGui::EndChild();
+
+            ImGui::SameLine();
+            ImGui::Button("##ProjectPaneSplitter", ImVec2(kSplitterWidth, paneAreaHeight));
+            if (ImGui::IsItemActive()) {
+                m_leftPaneWidth += ImGui::GetIO().MouseDelta.x;
+            }
+            if (ImGui::IsItemHovered() || ImGui::IsItemActive()) {
+                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+            }
+            ImGui::SameLine();
+
+            ImGui::BeginChild("ProjectRightPane", ImVec2(0.0f, paneAreaHeight), true);
+            RenderRightPane();
+            RenderContextMenu("ProjectRightPaneContextMenu");
+            {
+                const ImVec2 childPos = ImGui::GetWindowPos();
+                const ImVec2 childSize = ImGui::GetWindowSize();
+                m_rightPaneRect = Rect{ childPos.x, childPos.y, childSize.x, childSize.y };
+            }
+            ImGui::EndChild();
+        }
 
         if (!m_statusMessage.empty()) {
             if (std::chrono::steady_clock::now() - m_statusSetTime < kStatusMessageLifetime) {
-                ImGui::Separator();
                 const ImVec4 color
                     = m_statusIsError ? ImVec4(1.0f, 0.4f, 0.4f, 1.0f) : ImVec4(0.6f, 0.85f, 0.6f, 1.0f);
                 ImGui::TextColored(color, "%s", m_statusMessage.c_str());
@@ -212,14 +390,20 @@ void ProjectPanel::HandleExternalFileDrop(float screenX, float screenY, const st
     if (!m_panelVisible || sourcePathUtf8.empty()) {
         return; // "Project" isn't even on screen this frame - not this panel's business.
     }
-    if (screenX < m_panelScreenX || screenX > m_panelScreenX + m_panelScreenWidth || screenY < m_panelScreenY
-        || screenY > m_panelScreenY + m_panelScreenHeight) {
-        return; // Dropped somewhere else entirely.
-    }
 
     if (!m_rootExists) {
+        // The two panes/drop zones below aren't meaningfully rendered at
+        // all this frame (see Build()) when the root is missing - nothing
+        // sensible to hit-test against, so this is the one case handled
+        // before even trying.
         SetStatus("Cannot import - the \"Project\" folder is missing.", true);
         return;
+    }
+
+    const std::optional<std::string> target = ResolveDropTarget(
+        m_folderDropZones, screenX, screenY, m_leftPaneRect, m_rightPaneRect, m_currentFolderRelativePath);
+    if (!target.has_value()) {
+        return; // Landed outside both panes entirely - not this panel's business.
     }
 
     try {
@@ -231,7 +415,7 @@ void ProjectPanel::HandleExternalFileDrop(float screenX, float screenY, const st
             return;
         }
 
-        const std::filesystem::path targetDir = ResolveDropTargetDirectory(m_rootPath, m_selectedRelativePath);
+        const std::filesystem::path targetDir = ResolveDropTargetDirectory(m_rootPath, *target);
         const std::filesystem::path destination = MakeUniqueDestinationPath(targetDir, source.filename());
 
         std::error_code isDirEc;
