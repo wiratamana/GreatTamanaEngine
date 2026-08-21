@@ -128,6 +128,20 @@
 #                                            AND GTE_ENABLE_PROJECT_PANEL are
 #                                            both ON, same reason as
 #                                            EditorCameraTests.cpp above.
+#   - Assets/AssetTypesTests.cpp           - Guid value semantics/generation/
+#                                            string round-trip, AssetFlags bit
+#                                            ops, and AssetTypeFromExtension()
+#                                            (src/Assets/AssetTypes.h).
+#   - Assets/GtaFileTests.cpp               - WriteGtaFile()/ReadGtaHeader()/
+#                                            ReadGtaFile() round-tripping the
+#                                            *.gta binary format's 64-byte
+#                                            header + metadata/payload
+#                                            sections (src/Assets/GtaFile.h).
+#   - Assets/AssetDatabaseTests.cpp         - AssetDatabase's directory scan
+#                                            (RefreshFromDirectory()), import
+#                                            (ImportAsset()/ImportRawFile()),
+#                                            and Guid/path lookups
+#                                            (src/Assets/AssetDatabase.h).
 #
 # Note that the test BINARY still dynamically depends on SDL3.dll at process
 # load time regardless of the above (gte_core's Window.cpp references SDL
@@ -153,6 +167,9 @@
 # (GTE_BUILD_GPU_TESTS or similar) rather than being bolted onto Tier 1.
 set(GTE_TEST_SOURCES
     Memory/GpuResourceHandleTests.cpp
+    Assets/AssetTypesTests.cpp
+    Assets/GtaFileTests.cpp
+    Assets/AssetDatabaseTests.cpp
     Memory/GpuMemoryTrackerTests.cpp
     Memory/SdlMemoryTrackerTests.cpp
     Input/InputStateTests.cpp

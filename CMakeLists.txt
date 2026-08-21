@@ -155,6 +155,12 @@ add_library(gte_core STATIC
     src/ECS/Components/Transform.h
     src/ECS/Components/MeshRenderer.h
     src/ECS/Components/Camera.h
+    src/Assets/AssetTypes.h
+    src/Assets/AssetTypes.cpp
+    src/Assets/GtaFile.h
+    src/Assets/GtaFile.cpp
+    src/Assets/AssetDatabase.h
+    src/Assets/AssetDatabase.cpp
     src/Memory/SdlMemoryTracker.h
     src/Memory/SdlMemoryTracker.cpp
     src/Application/Application.cpp
