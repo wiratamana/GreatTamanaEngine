@@ -53,6 +53,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(FetchSDL3)
 include(FetchVulkan)
 include(FetchVMA)
+include(FetchSTB)
 include(CompileShaders)
 
 # Downloads (if not already present) and stages SDL3 for Windows:
@@ -78,6 +79,13 @@ fetch_vulkan()
 # VmaAllocator) and src/Renderer/RenderTexture.cpp (which allocates its
 # VkImage through it via vmaCreateImage()).
 fetch_vma()
+
+# Downloads (if not already present) and stages stb_image.h for Windows:
+#   third_party/stb/stb_image.h - single-header image loading library
+#   (PNG/JPEG/BMP/GIF/TGA/PSD/HDR/...), used for loading image assets (e.g.
+#   textures imported via the Editor's Project panel).
+# Also defines the `stb_image` INTERFACE target, linked into gte_core below.
+fetch_stb()
 
 # Dear ImGui itself is only fetched/built at all when the Editor is enabled
 # - a release build configured with -DGTE_ENABLE_EDITOR=OFF never touches
@@ -275,11 +283,11 @@ target_compile_definitions(gte_core PUBLIC GTE_ENABLE_PROJECT_PANEL=$<BOOL:${GTE
 # PUBLIC (not PRIVATE) for the same reason as the compile definition above:
 # any consumer of gte_core (GreatTamanaEngine's main.cpp, and every test in
 # GreatTamanaEngineTests) #includes engine headers that transitively need
-# SDL3/volk/vma's include directories and, ultimately, their libraries at
-# final-link time - PUBLIC is what propagates both automatically instead of
-# every consumer having to repeat them.
+# SDL3/volk/vma/stb_image's include directories and, ultimately, their
+# libraries at final-link time - PUBLIC is what propagates both
+# automatically instead of every consumer having to repeat them.
 target_include_directories(gte_core PUBLIC "${CMAKE_SOURCE_DIR}/src")
-target_link_libraries(gte_core PUBLIC SDL3::SDL3 volk vma)
+target_link_libraries(gte_core PUBLIC SDL3::SDL3 volk vma stb_image)
 
 # --- Final executable ----------------------------------------------------
 add_executable(GreatTamanaEngine src/main.cpp)

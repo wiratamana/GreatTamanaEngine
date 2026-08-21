@@ -32,6 +32,10 @@
 # cmake/FetchVMA.cmake)
 /third_party/vma/
 
+# stb_image.h fetched by cmake/FetchSTB.cmake (regenerated automatically on
+# configure — see CMakeLists.txt / cmake/FetchSTB.cmake)
+/third_party/stb/
+
 # GoogleTest artifacts fetched by cmake/FetchGTest.cmake (regenerated
 # automatically on configure when GTE_BUILD_TESTS is ON — see
 # CMakeLists.txt / cmake/FetchGTest.cmake / tests/CMakeLists.txt)
