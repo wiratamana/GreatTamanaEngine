@@ -1,5 +1,6 @@
 #include "AssetPreviewTexture.h"
 
+#include "ProjectPanelData.h" // Utf8ToPath() - see ReadFileBytes() below.
 #include "../Renderer/Renderer.h"
 #include "../Renderer/Texture2D.h"
 
@@ -15,9 +16,54 @@
 #include <backends/imgui_impl_vulkan.h>
 
 #include <exception>
+#include <fstream>
 #include <system_error>
+#include <vector>
 
 namespace gte {
+
+namespace {
+
+// Reads `absolutePath` (UTF-8) fully into memory, or returns std::nullopt
+// on any failure (missing file, permissions, ...) - never throws.
+//
+// Deliberately NOT stbi_load(path.c_str(), ...): stb_image's own file-path
+// entry point opens the file via the C runtime's narrow-char fopen(),
+// which on Windows interprets that byte string using the process's
+// current ANSI CODE PAGE, not UTF-8 - so any non-ASCII byte sequence (e.g.
+// a Japanese filename, UTF-8-encoded by PathToUtf8() - see
+// ProjectPanelData.h) is misinterpreted and fopen() silently fails to
+// resolve the file, even though the file genuinely exists (this is exactly
+// why AssetMetadata's size/last-write-time - built via std::filesystem,
+// which DOES go through the wide-char Win32 API under MSVC's STL -
+// resolve correctly while stbi_load() itself reported "failed to load").
+// Constructing an std::ifstream from a std::filesystem::path (rather than
+// a raw std::string/const char*) sidesteps this entirely - MSVC's STL
+// overload for that specific constructor already opens the file via the
+// wide-char API - then handing stb_image the raw bytes via
+// stbi_load_from_memory() (see Resolve() below) needs no path/fopen
+// involvement on stb_image's side at all.
+std::optional<std::vector<unsigned char>> ReadFileBytes(const std::string& absolutePathUtf8)
+{
+    std::ifstream file(Utf8ToPath(absolutePathUtf8), std::ios::binary | std::ios::ate);
+    if (!file) {
+        return std::nullopt;
+    }
+
+    const std::streamoff size = file.tellg();
+    if (size < 0) {
+        return std::nullopt;
+    }
+    file.seekg(0, std::ios::beg);
+
+    std::vector<unsigned char> bytes(static_cast<std::size_t>(size));
+    if (!bytes.empty() && !file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size))) {
+        return std::nullopt;
+    }
+    return bytes;
+}
+
+} // namespace
 
 AssetPreviewTexture::~AssetPreviewTexture()
 {
@@ -78,10 +124,21 @@ std::optional<AssetPreviewTexture::Preview> AssetPreviewTexture::Resolve(
         m_cachedWriteTime = writeTime;
     }
 
+    // Read the file ourselves (Unicode-path-safe - see ReadFileBytes()'s
+    // own comment) and decode from the in-memory buffer via
+    // stbi_load_from_memory(), rather than handing stb_image the path
+    // directly - stb_image's own path-based stbi_load() cannot open a
+    // non-ASCII (e.g. Japanese) path correctly on Windows.
+    const std::optional<std::vector<unsigned char>> fileBytes = ReadFileBytes(absolutePath);
+    if (!fileBytes.has_value()) {
+        return std::nullopt;
+    }
+
     int width = 0;
     int height = 0;
     int sourceChannels = 0;
-    unsigned char* pixels = stbi_load(absolutePath.c_str(), &width, &height, &sourceChannels, 4);
+    unsigned char* pixels = stbi_load_from_memory(fileBytes->data(), static_cast<int>(fileBytes->size()), &width,
+        &height, &sourceChannels, 4);
     if (pixels == nullptr || width <= 0 || height <= 0) {
         if (pixels != nullptr) {
             stbi_image_free(pixels);

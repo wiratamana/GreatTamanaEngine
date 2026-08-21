@@ -162,6 +162,47 @@ public:
             style.Colors[ImGuiCol_WindowBg].w = 1.0f;
         }
 
+        // Dear ImGui's built-in default font (ProggyClean) has no CJK
+        // glyphs at all - any Japanese/Chinese/Korean text (e.g. a
+        // non-ASCII filename shown in "Project"/"Inspector" - see
+        // Panels/ProjectPanel.cpp/InspectorPanel.cpp) would otherwise
+        // render as an unbroken run of fallback "?" glyphs, even though the
+        // underlying UTF-8 string data itself is perfectly correct (see
+        // AGENTS.md-adjacent PathToUtf8()/Utf8ToPath() in
+        // ProjectPanelData.h). Try a handful of CJK-capable fonts Windows
+        // ships by default (in preference order), covering Basic Latin +
+        // Hiragana/Katakana + a common Kanji set via
+        // GetGlyphRangesJapanese() - falls back to the plain built-in font
+        // only if none of them could be found/loaded (e.g. a minimal
+        // Windows installation missing these). This engine deliberately
+        // does NOT bundle its own CJK font (unlike stb_image/VMA/ImGui
+        // itself): most CJK typefaces are not freely redistributable,
+        // whereas every Windows install already ships one of these. Must
+        // happen here, before ImGui_ImplVulkan_Init() below - the font
+        // atlas texture is built/uploaded lazily on the first frame, but
+        // every AddFont*() call must happen before that, never after.
+        {
+            const ImWchar* japaneseRanges = io.Fonts->GetGlyphRangesJapanese();
+            constexpr const char* kCandidateCjkFonts[] = {
+                "C:\\Windows\\Fonts\\meiryo.ttc",   // Meiryo - Windows Vista+, good general CJK coverage.
+                "C:\\Windows\\Fonts\\YuGothM.ttc",  // Yu Gothic Medium - Windows 8.1+.
+                "C:\\Windows\\Fonts\\msgothic.ttc", // MS Gothic - present on virtually every Windows version.
+            };
+            ImFont* cjkFont = nullptr;
+            for (const char* fontPath : kCandidateCjkFonts) {
+                cjkFont = io.Fonts->AddFontFromFileTTF(fontPath, 16.0f, nullptr, japaneseRanges);
+                if (cjkFont != nullptr) {
+                    break;
+                }
+            }
+            if (cjkFont == nullptr) {
+                // None of the candidates above could be found/loaded -
+                // fall back to Dear ImGui's own built-in font (ASCII/
+                // Latin-1 only, the behavior this engine already had).
+                io.Fonts->AddFontDefault();
+            }
+        }
+
         if (!ImGui_ImplSDL3_InitForVulkan(window.Native())) {
             ImGui::DestroyContext(m_context);
             throw std::runtime_error("ImGui_ImplSDL3_InitForVulkan failed.");
