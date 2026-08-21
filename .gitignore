@@ -36,6 +36,11 @@
 # configure — see CMakeLists.txt / cmake/FetchSTB.cmake)
 /third_party/stb/
 
+# KTX-Software prebuilt SDK (headers + ktx.lib + ktx.dll) fetched by
+# cmake/FetchKTX.cmake (regenerated automatically on configure — see
+# CMakeLists.txt / cmake/FetchKTX.cmake)
+/third_party/ktx/
+
 # GoogleTest artifacts fetched by cmake/FetchGTest.cmake (regenerated
 # automatically on configure when GTE_BUILD_TESTS is ON — see
 # CMakeLists.txt / cmake/FetchGTest.cmake / tests/CMakeLists.txt)

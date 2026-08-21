@@ -54,6 +54,7 @@ include(FetchSDL3)
 include(FetchVulkan)
 include(FetchVMA)
 include(FetchSTB)
+include(FetchKTX)
 include(CompileShaders)
 
 # Downloads (if not already present) and stages SDL3 for Windows:
@@ -86,6 +87,15 @@ fetch_vma()
 #   textures imported via the Editor's Project panel).
 # Also defines the `stb_image` INTERFACE target, linked into gte_core below.
 fetch_stb()
+
+# Builds KTX-Software from source in-tree (headers + a STATIC `ktx` library,
+# with Basis Universal/astc-encoder support baked in - no ktx.dll needed at
+# runtime) - see cmake/FetchKTX.cmake for the full reasoning (KTX-Software's
+# GitHub Releases only ship an NSIS .exe installer for Windows, no plain
+# .zip SDK, so a from-source build is the only non-interactive option):
+#   third_party/ktx/   - KTX-Software's full source tree
+# Also defines the KTX::ktx target, linked into gte_core below.
+fetch_ktx()
 
 # Dear ImGui itself is only fetched/built at all when the Editor is enabled
 # - a release build configured with -DGTE_ENABLE_EDITOR=OFF never touches
@@ -291,11 +301,11 @@ target_compile_definitions(gte_core PUBLIC GTE_ENABLE_PROJECT_PANEL=$<BOOL:${GTE
 # PUBLIC (not PRIVATE) for the same reason as the compile definition above:
 # any consumer of gte_core (GreatTamanaEngine's main.cpp, and every test in
 # GreatTamanaEngineTests) #includes engine headers that transitively need
-# SDL3/volk/vma/stb_image's include directories and, ultimately, their
+# SDL3/volk/vma/stb_image/KTX's include directories and, ultimately, their
 # libraries at final-link time - PUBLIC is what propagates both
 # automatically instead of every consumer having to repeat them.
 target_include_directories(gte_core PUBLIC "${CMAKE_SOURCE_DIR}/src")
-target_link_libraries(gte_core PUBLIC SDL3::SDL3 volk vma stb_image)
+target_link_libraries(gte_core PUBLIC SDL3::SDL3 volk vma stb_image KTX::ktx)
 
 # --- Final executable ----------------------------------------------------
 add_executable(GreatTamanaEngine src/main.cpp)
@@ -312,6 +322,10 @@ gte_add_shader(GreatTamanaEngine src/Shaders/Triangle.frag)
 
 # Ensures SDL3.dll is copied next to the built .exe after every build.
 sdl3_copy_runtime_dll(GreatTamanaEngine)
+
+# Note: no equivalent ktx_copy_runtime_dll() call is needed - KTX-Software is
+# built from source as a STATIC library (see cmake/FetchKTX.cmake), so there
+# is no ktx.dll to stage next to the built .exe at all.
 
 # --- Unit tests ------------------------------------------------------------
 # See tests/CMakeLists.txt for GreatTamanaEngineTests itself (links against
