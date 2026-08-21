@@ -164,6 +164,8 @@ add_library(gte_core STATIC
     src/Assets/StbImageImpl.cpp
     src/Assets/Ktx2Encoder.h
     src/Assets/Ktx2Encoder.cpp
+    src/Assets/Ktx2Decoder.h
+    src/Assets/Ktx2Decoder.cpp
     src/Assets/AssetImporter.h
     src/Assets/AssetImporter.cpp
     src/Memory/SdlMemoryTracker.h

@@ -150,6 +150,13 @@
 #                                            the statically-linked libktx) -
 #                                            no GPU device involved
 #                                            (src/Assets/Ktx2Encoder.h).
+#   - Assets/Ktx2DecoderTests.cpp           - DecodeKtx2ToRgba8() round-
+#                                            tripping against
+#                                            EncodeImageBytesToKtx2()'s own
+#                                            output (pixel-exact), plus
+#                                            malformed/empty input rejection
+#                                            - no GPU device involved
+#                                            (src/Assets/Ktx2Decoder.h).
 #   - Assets/AssetImporterTests.cpp         - IsImportableAsKtx2Texture()'s
 #                                            extension gating and
 #                                            ImportAssetFile()'s PNG/JPG ->
@@ -185,6 +192,7 @@ set(GTE_TEST_SOURCES
     Assets/GtaFileTests.cpp
     Assets/AssetDatabaseTests.cpp
     Assets/Ktx2EncoderTests.cpp
+    Assets/Ktx2DecoderTests.cpp
     Assets/AssetImporterTests.cpp
     Memory/GpuMemoryTrackerTests.cpp
     Memory/SdlMemoryTrackerTests.cpp

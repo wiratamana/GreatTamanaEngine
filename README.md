@@ -229,16 +229,33 @@ registry that tracks every one of them:
   fails to actually decode (corrupt/truncated), the import degrades
   gracefully to a plain copy too, rather than failing outright. No Basis
   Universal supercompression yet (the immediate goal was format
-  *unification*, not compression ratio — see `TODO.md`), and there is no
-  consumption path back out yet either (nothing reads a `*.gta`'s KTX2
-  payload back into a sampled `Texture2D` for a shader to bind — also see
-  `TODO.md`). `Assets/StbImageImpl.cpp` is now the ONE translation unit in
-  the entire engine that compiles stb_image's implementation (moved out of
-  the Editor-only `AssetPreviewTexture.cpp`, which still uses stb_image's
-  declarations for its own live Inspector preview of a plain, not-yet-
-  imported image file) — this had to live in an always-compiled module
-  since the import pipeline needs real image decoding in every build
-  configuration, not just when the Editor is enabled.
+  *unification*, not compression ratio — see `TODO.md`), and there is still
+  no GAMEPLAY consumption path (nothing yet lets a `MeshRenderer`/material
+  reference a `*.gta` texture by `Guid` and have it bound to an actual
+  shader descriptor — see `TODO.md`). `Assets/StbImageImpl.cpp` is now the
+  ONE translation unit in the entire engine that compiles stb_image's
+  implementation (moved out of the Editor-only `AssetPreviewTexture.cpp`,
+  which still uses stb_image's declarations for its own live Inspector
+  preview of a plain, not-yet-imported image file) — this had to live in an
+  always-compiled module since the import pipeline needs real image
+  decoding in every build configuration, not just when the Editor is
+  enabled.
+- **`*.gta` → pixels, the other direction** (`Assets/Ktx2Decoder.h/.cpp`) —
+  `DecodeKtx2ToRgba8()` decodes a KTX2 container's bytes (e.g. straight out
+  of a `*.gta` `AssetType::Texture` asset's own payload) back into plain
+  RGBA8 pixels, the exact inverse of `EncodeImageBytesToKtx2()` above, and
+  pixel-exact round-trip-tested against it (see
+  `tests/Assets/Ktx2DecoderTests.cpp`). This is what lets the Editor's
+  "Inspector" panel show a live texture preview for a `*.gta`-wrapped
+  texture the same way it already does for a plain, not-yet-imported
+  PNG/JPEG — selecting a `*.gta` asset whose own header confirms
+  `AssetType::Texture` (`AssetPreviewTexture::Resolve()`, see "Editor /
+  Debug UI" below) decodes its KTX2 payload instead of calling stb_image,
+  then lands in the exact same `Renderer::CreateTexture2D()` RGBA8-upload
+  path either way. Only understands the single, uncompressed
+  `VK_FORMAT_R8G8B8A8_UNORM` container this engine's own encoder actually
+  produces today, by design — a future Basis-Universal-supercompressed
+  `*.gta` would need a matching transcode path added here (see `TODO.md`).
 
 ### Editor / Debug UI
 
@@ -639,11 +656,19 @@ pieces:
   decodes it and re-encodes it as an uncompressed KTX2 container (via the
   statically-linked KTX-Software library), wraps it as a `*.gta`
   (`AssetType::Texture`), and registers it immediately - every other file
-  extension still imports as a plain, unmodified copy. Fully unit-tested
+  extension still imports as a plain, unmodified copy. The Editor's
+  "Inspector" panel shows a live texture preview for a selected `*.gta`
+  asset the same way it already does for a plain, not-yet-imported
+  PNG/JPEG (`Assets/Ktx2Decoder.h/.cpp`'s `DecodeKtx2ToRgba8()`, the
+  pixel-exact inverse of the encode step, feeds the exact same
+  `Renderer::CreateTexture2D()` upload path `AssetPreviewTexture` already
+  used) - a `*.gta` wrapping anything other than a texture just falls back
+  to plain file metadata, with no spurious error message. Fully unit-tested
   (`*.gta` header/round-trip I/O, `AssetDatabase`'s scan/import/lookup
-  behavior, and the PNG/JPG -> KTX2 encode step itself, all genuinely
-  Tier 1 - no GPU device/ImGui/SDL involved) and verified building/passing
-  its full test suite with `GTE_ENABLE_EDITOR` both `ON` and `OFF`.
+  behavior, and the PNG/JPG <-> KTX2 encode/decode steps themselves, all
+  genuinely Tier 1 - no GPU device/ImGui/SDL involved) and verified
+  building/passing its full test suite with `GTE_ENABLE_EDITOR` both `ON`
+  and `OFF`.
 
 ## Roadmap
 

@@ -44,26 +44,6 @@ that haven't been started yet at all.
   (mesh-level intersection math, a new picking/collider abstraction, and a
   new render pass) and orthogonal to it: the gizmo already works fine driven
   purely by a "Hierarchy" selection in the meantime.
-- **Inspector live preview for a *.gta-wrapped KTX2 texture.** Since
-  `AssetImporter::ImportAssetFile()` (`src/Assets/AssetImporter.h`) landed,
-  a dropped PNG/JPG/etc. no longer lands in "Project" under its original
-  extension - it's decoded, re-encoded as KTX2, and wrapped as a `*.gta`
-  (`AssetType::Texture`) instead. `InspectorPanel`'s existing live image
-  preview (`AssetPreviewTexture`, gated on
-  `AssetInspectorData::IsSupportedImageExtension()`) only recognizes the
-  ORIGINAL stb_image-decodable extensions, so selecting a freshly-imported
-  `*.gta` texture today falls back to plain file metadata (name/size/last
-  modified) rather than a live pixel preview - not a regression (nothing
-  crashes, and the asset genuinely did import and IS tracked by
-  `AssetDatabase`), just a UX gap versus the OLD "drop a PNG, see it
-  immediately" experience. Closing it needs a small KTX2 DECODE path (read
-  the `*.gta`'s payload bytes, `ktxTexture2_CreateFromMemory()`, hand its
-  level-0 image data to `Texture2D`/`AssetPreviewTexture` the same way a
-  decoded stb_image buffer is today) - deliberately deferred as its own,
-  separable follow-up rather than folded into the initial import-gating
-  work, since the encode (this engine writing KTX2) and decode (this engine
-  reading its own KTX2 back out for a GPU preview) paths are independent
-  pieces of work with no shared risk.
 - **Command pattern (undo/redo) for Editor edits.** `Selection`
   (`src/Editor/Selection.h`) is now the single gate-keeper for every
   Hierarchy-entity/Project-asset selection change (`SelectEntity()`/
@@ -183,32 +163,33 @@ unblock the most follow-on work:
   item below into something you can actually author instead of hardcode.
   "Create 3D Object" is exactly the tool needed to build a non-trivial test
   scene to exercise save/modify/load against once this lands.
-- **A minimal asset pipeline: real mesh loading (OBJ/glTF) + GPU-side texture
-  loading from a *.gta.** The IMPORT half of texture handling now exists -
-  dropping a PNG/JPG into "Project" decodes+re-encodes it as KTX2 and wraps
-  it as a `*.gta` (`AssetType::Texture`), tracked by `AssetDatabase` (see
-  `src/Assets/AssetImporter.h`/`AssetDatabase.h` and this file's own
-  "Inspector live preview for a *.gta-wrapped KTX2 texture" item above) -
-  but there is still no consumption path: nothing yet reads a `*.gta`'s
-  KTX2 payload back out and uploads it as an actual sampled `Texture2D` for
-  a material/shader to bind (today's only GPU-texture upload path,
-  `Renderer::CreateTexture2D()`/`GpuResourceFactory`, only ever takes
-  already-decoded RGBA8 pixels straight from `AssetPreviewTexture`'s own
-  stb_image call - see `src/Renderer/Texture2D.h`). There is also still one
-  hardcoded triangle mesh, five procedurally-generated built-in primitive
-  shapes (`PrimitiveMeshGenerator` - Cube/Sphere/Capsule/Cone/Plane, see
-  `README.md`), and one shader pair (`Shaders/Triangle.vert/.frag`) - no
-  model loader, no material system, and no index buffer support (`Mesh`/
-  `GpuResourceFactory` only ever build a plain, non-indexed vertex buffer -
-  see `Mesh.h` - which is why `PrimitiveMeshGenerator` duplicates vertices
-  across every triangle/face rather than sharing them; a real mesh loader
-  would want indexing for both memory and CPU-generation-time reasons).
-  Needs a mesh loader feeding `Renderer::CreateMesh()` (or a future indexed
-  variant of it, likely wrapped as a `*.gta` too - `AssetType::Mesh` already
-  exists for this, see `src/Assets/AssetTypes.h`), and a basic textured
-  pipeline (descriptor set + sampler, following the same
-  `Renderer::ColorFormat()`-style "single source of truth" discipline
-  already used elsewhere).
+- **A minimal asset pipeline: real mesh loading (OBJ/glTF) + a real,
+  shader-bindable texture from a *.gta.** The IMPORT half of texture
+  handling now exists - dropping a PNG/JPG into "Project" decodes+
+  re-encodes it as KTX2 and wraps it as a `*.gta` (`AssetType::Texture`),
+  tracked by `AssetDatabase` (see `src/Assets/AssetImporter.h`/
+  `AssetDatabase.h`) - and so does a DISPLAY path good enough for the
+  Editor's own "Inspector" panel (`Ktx2Decoder.h`'s `DecodeKtx2ToRgba8()` +
+  the existing `Renderer::CreateTexture2D()` CPU-pixel upload, see
+  `AssetPreviewTexture.cpp`) - but there is still no GAMEPLAY consumption
+  path: nothing yet lets a `MeshRenderer`/material reference a `*.gta`
+  texture by `Guid` and have `RenderSystem` resolve + bind it to an actual
+  descriptor set for a shader to sample from (today's rendering is still
+  unlit vertex-color only - see `Shaders/Triangle.vert/.frag` - there is no
+  texture-sampling pipeline variant or descriptor-set plumbing at all yet).
+  There is also still one hardcoded triangle mesh, five procedurally-
+  generated built-in primitive shapes (`PrimitiveMeshGenerator` - Cube/
+  Sphere/Capsule/Cone/Plane, see `README.md`), and no model loader, material
+  system, or index buffer support (`Mesh`/`GpuResourceFactory` only ever
+  build a plain, non-indexed vertex buffer - see `Mesh.h` - which is why
+  `PrimitiveMeshGenerator` duplicates vertices across every triangle/face
+  rather than sharing them; a real mesh loader would want indexing for both
+  memory and CPU-generation-time reasons). Needs a mesh loader feeding
+  `Renderer::CreateMesh()` (or a future indexed variant of it, likely
+  wrapped as a `*.gta` too - `AssetType::Mesh` already exists for this, see
+  `src/Assets/AssetTypes.h`), and a basic textured pipeline (descriptor set
+  + sampler, following the same `Renderer::ColorFormat()`-style "single
+  source of truth" discipline already used elsewhere).
 - **Transform parenting / hierarchy.** `Transform`
   (`src/ECS/Components/Transform.h`) is flat today - no parent/child
   relationship, which is why ImGuizmo's `LOCAL` space is currently identical

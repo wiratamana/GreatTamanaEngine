@@ -12,12 +12,23 @@ namespace gte {
 class Renderer;
 class Texture2D;
 
-// Decodes an on-disk image file (PNG/JPEG/BMP/TGA/GIF/PSD/HDR/PNM - see
-// AssetInspectorData.h's IsSupportedImageExtension()) via stb_image and
-// uploads it to a GPU Texture2D (Renderer.h) wrapped in an ImGui descriptor
-// set, for the Editor's "Inspector" panel to display via ImGui::Image()
-// when a Project-panel image asset is selected (see
-// Panels/InspectorPanel.cpp).
+// Decodes an on-disk image asset via stb_image and uploads it to a GPU
+// Texture2D (Renderer.h) wrapped in an ImGui descriptor set, for the
+// Editor's "Inspector" panel to display via ImGui::Image() when a
+// Project-panel image asset is selected (see Panels/InspectorPanel.cpp).
+// Handles TWO kinds of on-disk image asset:
+//   - A plain, not-yet-imported image file (PNG/JPEG/BMP/TGA/GIF/PSD/HDR/
+//     PNM - see AssetInspectorData.h's IsSupportedImageExtension()),
+//     decoded directly via stb_image - same as always.
+//   - A *.gta-wrapped KTX2 texture (AssetType::Texture - see
+//     src/Assets/AssetTypes.h/GtaFile.h), i.e. the result of
+//     AssetImporter::ImportAssetFile() gating a dropped PNG/JPG through the
+//     KTX2 import pipeline (src/Assets/AssetImporter.h): its payload is
+//     read via ReadGtaFile() and decoded via Ktx2Decoder.h's
+//     DecodeKtx2ToRgba8() instead of stb_image, but lands in the exact same
+//     RGBA8-pixels-in, GPU-texture-out path either way - the Inspector
+//     shows a live preview for a freshly-imported texture asset exactly the
+//     same way it already did for the original PNG/JPG before import.
 //
 // src/Assets/StbImageImpl.cpp (not this file) is the ONE place in the
 // entire engine that includes stb_image with STB_IMAGE_IMPLEMENTATION
@@ -57,11 +68,12 @@ public:
     };
 
     // Returns this asset's decoded/uploaded preview, or std::nullopt if
-    // `absolutePath` doesn't currently decode as a supported image at all
-    // (missing file, unsupported/corrupt content, ...) - the caller
-    // (InspectorPanel) is expected to fall back to plain AssetMetadata in
-    // that case, exactly like every other failure mode in this Editor
-    // degrades to a status message rather than a crash.
+    // `absolutePath` doesn't currently decode as a supported image (a plain
+    // file) or a Texture-type *.gta at all (missing file, unsupported/
+    // corrupt content, a *.gta that isn't AssetType::Texture, ...) - the
+    // caller (InspectorPanel) is expected to fall back to plain
+    // AssetMetadata in that case, exactly like every other failure mode in
+    // this Editor degrades to a status message rather than a crash.
     std::optional<Preview> Resolve(Renderer& renderer, const std::string& absolutePath);
 
     // Releases the currently-cached GPU texture/ImGui descriptor (if any),

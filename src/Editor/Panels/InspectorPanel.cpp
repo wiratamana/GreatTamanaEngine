@@ -11,6 +11,8 @@
 #include "../AssetPreviewTexture.h"
 #include "../MemoryPanelData.h" // FormatBytes() - reused for the asset size field below.
 #include "../ProjectPanelData.h" // Utf8ToPath()
+#include "../../Assets/AssetTypes.h" // AssetType
+#include "../../Assets/GtaFile.h" // ReadGtaHeader()
 #include "../../Renderer/Renderer.h"
 #endif
 
@@ -85,13 +87,27 @@ void BuildAssetInspector(EditorContext& ctx, Renderer& renderer, AssetPreviewTex
         return;
     }
 
-    // Attempt a live texture preview first - only for a FILE whose
-    // extension is a format AssetPreviewTexture/stb_image can actually
-    // decode. Falls back to plain metadata below for a folder, an
-    // unsupported extension, or a file that fails to decode (corrupt/
-    // truncated/...) - exactly like every other failure mode in this
-    // Editor degrades to a status/message rather than a crash.
-    if (!metadata.isDirectory && IsSupportedImageExtension(metadata.extension)) {
+    // Attempt a live texture preview first - for a FILE whose extension is
+    // either a format AssetPreviewTexture/stb_image can decode directly, OR
+    // a *.gta whose own header (peeked here, cheaply - see
+    // GtaFile.h's ReadGtaHeader()) confirms it's actually AssetType::Texture
+    // (the result of AssetImporter::ImportAssetFile() gating a dropped
+    // PNG/JPG through the KTX2 pipeline - see src/Assets/AssetImporter.h).
+    // A *.gta wrapping something other than a texture (a future Mesh/
+    // Scene/... asset) is deliberately NOT treated as "should have
+    // previewed but failed" - it just falls through to plain metadata
+    // below, exactly like any other non-image extension, with no spurious
+    // "failed to load" message. Falls back to plain metadata below for a
+    // folder, an unsupported extension, or a file that fails to decode
+    // (corrupt/truncated/...) - exactly like every other failure mode in
+    // this Editor degrades to a status/message rather than a crash.
+    bool attemptPreview = !metadata.isDirectory && IsSupportedImageExtension(metadata.extension);
+    if (!attemptPreview && !metadata.isDirectory && metadata.extension == ".gta") {
+        const std::optional<GtaHeader> header = ReadGtaHeader(Utf8ToPath(absolutePath));
+        attemptPreview = header.has_value() && header->Type() == AssetType::Texture;
+    }
+
+    if (attemptPreview) {
         if (const std::optional<AssetPreviewTexture::Preview> preview = assetPreview.Resolve(renderer, absolutePath)) {
             const float availableWidth = ImGui::GetContentRegionAvail().x;
             const float aspect = preview->height > 0
