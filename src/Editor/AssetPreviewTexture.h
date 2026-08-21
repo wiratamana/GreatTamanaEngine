@@ -19,10 +19,12 @@ class Texture2D;
 // when a Project-panel image asset is selected (see
 // Panels/InspectorPanel.cpp).
 //
-// AssetPreviewTexture.cpp is the ONE place in the entire engine that
-// includes stb_image with STB_IMAGE_IMPLEMENTATION defined - matches this
-// project's VMA_IMPLEMENTATION/single-definition convention for
-// single-header third-party libraries (see cmake/FetchVMA.cmake).
+// src/Assets/StbImageImpl.cpp (not this file) is the ONE place in the
+// entire engine that includes stb_image with STB_IMAGE_IMPLEMENTATION
+// defined - see its own comment for why that moved out of this Editor-only
+// file into an always-compiled module. Matches this project's
+// VMA_IMPLEMENTATION/single-definition convention for single-header
+// third-party libraries (see cmake/FetchVMA.cmake).
 //
 // Caches only the SINGLE most-recently-resolved texture (never a full
 // path->texture map) - Inspector only ever shows one selection at a time,

@@ -4,13 +4,14 @@
 #include "../Renderer/Renderer.h"
 #include "../Renderer/Texture2D.h"
 
-// The ONE place in the entire engine that compiles stb_image's
-// implementation - see this file's own doc comment in AssetPreviewTexture.h
-// and cmake/FetchSTB.cmake. Every other translation unit that needs image
-// decoding must go through THIS class rather than including stb_image.h
-// with STB_IMAGE_IMPLEMENTATION itself (that would be an ODR violation -
-// multiple definitions of every stbi_* function across translation units).
-#define STB_IMAGE_IMPLEMENTATION
+// stb_image's actual implementation (STB_IMAGE_IMPLEMENTATION) lives in
+// src/Assets/StbImageImpl.cpp instead - an always-compiled module (no
+// GTE_ENABLE_EDITOR dependency), since the PNG/JPEG -> KTX2 import pipeline
+// (src/Assets/Ktx2Encoder.h) needs real image decoding in every build
+// configuration, not just an Editor build. This file only needs stb_image's
+// DECLARATIONS (no implementation macro) - defining STB_IMAGE_IMPLEMENTATION
+// here too would be an ODR violation (multiple definitions of every stbi_*
+// function across translation units).
 #include <stb_image.h>
 
 #include <backends/imgui_impl_vulkan.h>

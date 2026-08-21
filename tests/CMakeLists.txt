@@ -142,6 +142,20 @@
 #                                            (ImportAsset()/ImportRawFile()),
 #                                            and Guid/path lookups
 #                                            (src/Assets/AssetDatabase.h).
+#   - Assets/Ktx2EncoderTests.cpp           - EncodeImageBytesToKtx2()/
+#                                            EncodeImageFileToKtx2() decoding
+#                                            a source image (via stb_image)
+#                                            and re-encoding it as an
+#                                            in-memory KTX2 container (via
+#                                            the statically-linked libktx) -
+#                                            no GPU device involved
+#                                            (src/Assets/Ktx2Encoder.h).
+#   - Assets/AssetImporterTests.cpp         - IsImportableAsKtx2Texture()'s
+#                                            extension gating and
+#                                            ImportAssetFile()'s PNG/JPG ->
+#                                            KTX2 -> *.gta conversion vs.
+#                                            plain-copy-fallback behavior
+#                                            (src/Assets/AssetImporter.h).
 #
 # Note that the test BINARY still dynamically depends on SDL3.dll at process
 # load time regardless of the above (gte_core's Window.cpp references SDL
@@ -170,6 +184,8 @@ set(GTE_TEST_SOURCES
     Assets/AssetTypesTests.cpp
     Assets/GtaFileTests.cpp
     Assets/AssetDatabaseTests.cpp
+    Assets/Ktx2EncoderTests.cpp
+    Assets/AssetImporterTests.cpp
     Memory/GpuMemoryTrackerTests.cpp
     Memory/SdlMemoryTrackerTests.cpp
     Input/InputStateTests.cpp

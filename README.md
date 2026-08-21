@@ -176,6 +176,70 @@ both the per-object model matrix and the resolved view-projection matrix.
 `Game` no longer holds a hardcoded `Pipeline`/`Mesh` pair at all — it owns a
 `Registry` + `RenderSystem` and just creates entities/components.
 
+### Asset Pipeline
+
+`src/Assets/` is a small, always-compiled engine-level module (no
+`GTE_ENABLE_EDITOR` dependency at all — it's used regardless of whether the
+Editor is built in) implementing this engine's unified binary asset
+container format, `*.gta` ("Great Tamana Asset"), and the in-memory
+registry that tracks every one of them:
+
+- **`*.gta` file format** (`Assets/GtaFile.h/.cpp`) — every asset, of every
+  kind (image, 3D model, and whatever else follows), is wrapped in the same
+  64-byte common header: a 16-byte `"GREATTAMANAASSET"` magic, an
+  `AssetType` (`Assets/AssetTypes.h` — `Texture`/`Mesh`/`Material`/`Shader`/
+  `Audio`/`Scene`/`Text`/`Font`/`Animation`/`Prefab`/`Other`; `Text` is
+  deliberately unimplemented for now — plain text files are untouched by
+  this pipeline), a format version, a 128-bit `Guid`, an `AssetFlags`
+  bitmask (`Compressed`/`Encrypted`), and a payload offset separating an
+  opaque metadata byte range from the asset's actual binary payload.
+  `ReadGtaHeader()` reads only those 64 bytes, so indexing a whole directory
+  of `*.gta` files — even ones with huge texture/mesh payloads — never
+  touches their bulk data at all. Unlike Unity's `AssetDatabase` (a `*.meta`
+  sidecar file per asset), each asset's `Guid` lives **inside its own
+  file's header** — there is no separate file that can ever drift out of
+  sync with the asset it identifies.
+- **`AssetDatabase`** (`Assets/AssetDatabase.h/.cpp`) — the Unity-
+  `AssetDatabase`-style in-memory registry of every tracked `*.gta` asset.
+  `RefreshFromDirectory()` recursively scans a directory tree and rebuilds
+  the whole `Guid`↔path index from what it finds (tolerating corrupt files
+  and `Guid` collisions gracefully — the same "rebuilt from disk each time"
+  philosophy already used by `ProjectPanelData::ScanProjectDirectory()`);
+  `ImportAsset()`/`ImportRawFile()` write a new `*.gta` and register it
+  immediately (reusing an existing asset's `Guid` when overwriting it in
+  place, so a scene's cross-reference to it survives a re-import); and
+  `FindByGuid()`/`FindByPath()`/`GetAssetsOfType()` are the lookup surface a
+  future scene-serialization system will resolve asset references through
+  (see `TODO.md`).
+- **PNG/JPG → KTX2 import gating** (`Assets/Ktx2Encoder.h/.cpp`,
+  `Assets/AssetImporter.h/.cpp`) — the Editor's "Project" panel drag-and-drop
+  import (see "Editor / Debug UI" below) now GATES every dropped file
+  through `AssetImporter::ImportAssetFile()`: a source image extension
+  `IsImportableAsKtx2Texture()` recognizes (PNG/JPEG/BMP/TGA/GIF/PSD/HDR/
+  PIC/PNM — stb_image's own supported formats) is decoded via stb_image and
+  re-encoded as a single-mip, uncompressed KTX2 container
+  (`VK_FORMAT_R8G8B8A8_UNORM`) via the statically-linked KTX-Software
+  library (see `BUILDING.md`), then wrapped as a `*.gta`
+  (`AssetType::Texture`) and registered with a `ProjectPanel`-owned
+  `AssetDatabase` immediately — this is what makes the engine actually
+  "know about" the resulting texture asset the instant it's imported, fully
+  queryable by `Guid`/path with no separate rescan needed. Every other
+  extension still lands as a plain, byte-for-byte, unmodified file copy —
+  and if a file merely *looks* like a supported image by extension but
+  fails to actually decode (corrupt/truncated), the import degrades
+  gracefully to a plain copy too, rather than failing outright. No Basis
+  Universal supercompression yet (the immediate goal was format
+  *unification*, not compression ratio — see `TODO.md`), and there is no
+  consumption path back out yet either (nothing reads a `*.gta`'s KTX2
+  payload back into a sampled `Texture2D` for a shader to bind — also see
+  `TODO.md`). `Assets/StbImageImpl.cpp` is now the ONE translation unit in
+  the entire engine that compiles stb_image's implementation (moved out of
+  the Editor-only `AssetPreviewTexture.cpp`, which still uses stb_image's
+  declarations for its own live Inspector preview of a plain, not-yet-
+  imported image file) — this had to live in an always-compiled module
+  since the import pipeline needs real image decoding in every build
+  configuration, not just when the Editor is enabled.
+
 ### Editor / Debug UI
 
 An optional in-engine Editor module lives under `src/Editor/`, gated by the
@@ -567,6 +631,19 @@ pieces:
   immediately selects the new entity — the first concrete way to build up a
   non-hardcoded scene in the Editor, and the planned way to exercise scene
   serialization (see `TODO.md`) once that lands.
+- A unified binary asset container format, `*.gta` ("Great Tamana Asset" -
+  see "Asset Pipeline" above), plus an `AssetDatabase`
+  (`src/Assets/AssetDatabase.h/.cpp`) tracking every one found under a
+  directory tree by its embedded `Guid`. The Editor's "Project" panel
+  drag-and-drop import now GATES on file type: dropping a PNG/JPEG/etc.
+  decodes it and re-encodes it as an uncompressed KTX2 container (via the
+  statically-linked KTX-Software library), wraps it as a `*.gta`
+  (`AssetType::Texture`), and registers it immediately - every other file
+  extension still imports as a plain, unmodified copy. Fully unit-tested
+  (`*.gta` header/round-trip I/O, `AssetDatabase`'s scan/import/lookup
+  behavior, and the PNG/JPG -> KTX2 encode step itself, all genuinely
+  Tier 1 - no GPU device/ImGui/SDL involved) and verified building/passing
+  its full test suite with `GTE_ENABLE_EDITOR` both `ON` and `OFF`.
 
 ## Roadmap
 

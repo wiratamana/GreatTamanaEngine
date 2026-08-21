@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../ProjectPanelData.h"
+#include "../../Assets/AssetDatabase.h"
 
 #include <chrono>
 #include <filesystem>
@@ -60,7 +61,9 @@ struct EditorContext;
 // path, both panes' own last-known on-screen rects and every folder row's
 // own on-screen hit-box (for hit-testing an external OS drop - see
 // HandleExternalFileDrop()), a throttled/cached scan of the directory tree,
-// which folder is currently open vs. selected, the splitter position, and a
+// an AssetDatabase tracking every *.gta asset found in it (see
+// GetAssetDatabase()), which folder is currently open vs. selected, the
+// splitter position, and a
 // transient status message. It is still called explicitly by name from
 // ImGuiEditorLayer::BuildUI()/ProcessEvent(), exactly like every
 // free-function panel - there is no IEditorPanel interface here either.
@@ -106,14 +109,34 @@ public:
     // a no-op if that resolves to nothing at all (the drop landed outside
     // both panes entirely - the toolbar, the splitter, ...), or if the
     // Project root itself doesn't currently exist and couldn't be
-    // recreated. Copies (never moves) the dropped item into the resolved
-    // folder, auto-renaming to avoid clobbering an existing same-named item
-    // (see MakeUniqueDestinationPath()). Never throws - every failure
-    // (source vanished before the copy could start, a permissions error
-    // mid-copy, ...) is reported only as a transient in-panel status
-    // message (see Build()), exactly like every other failure mode this
-    // panel handles.
+    // recreated. A dropped FILE is routed through AssetImporter::
+    // ImportAssetFile() (see AssetImporter.h): a source image extension it
+    // recognizes (PNG/JPG/...) is decoded and re-encoded as a KTX2
+    // container, wrapped as a *.gta (AssetType::Texture) at the resolved
+    // destination and registered with GetAssetDatabase() immediately -
+    // every other extension still lands as a plain, unmodified file copy
+    // (see README.md: "text file can stay still for now"). A dropped
+    // FOLDER is still just copied recursively, unchanged - AssetImporter
+    // only ever deals with single files. Either way, auto-renames to avoid
+    // clobbering an existing same-named item (see
+    // MakeUniqueDestinationPath()). Never throws - every failure (source
+    // vanished before the import could start, a permissions error
+    // mid-copy, a corrupt image that fails to decode - see
+    // AssetImporter::ImportAssetFile()'s own graceful fallback, ...) is
+    // reported only as a transient in-panel status message (see Build()),
+    // exactly like every other failure mode this panel handles.
     void HandleExternalFileDrop(float screenX, float screenY, const std::string& sourcePathUtf8);
+
+    // The engine-wide registry of every *.gta asset currently tracked under
+    // "Project" (see AssetDatabase.h) - kept in sync with the real
+    // filesystem on the same throttle as the folder tree itself (see
+    // EnsureRootAndMaybeRescan()), and updated immediately by
+    // HandleExternalFileDrop() whenever a dropped image gets converted.
+    // Exposed read-only for a future consumer (e.g. a scene-serialization
+    // system resolving a texture reference by Guid - see TODO.md) that
+    // needs to look up what's currently tracked without triggering its own
+    // rescan.
+    const AssetDatabase& GetAssetDatabase() const noexcept { return m_assetDatabase; }
 
 private:
     void EnsureRootAndMaybeRescan();
@@ -147,6 +170,10 @@ private:
     std::vector<ProjectEntry> m_tree;
     std::chrono::steady_clock::time_point m_lastScanTime{};
     bool m_needsRescan = true;
+
+    // See GetAssetDatabase()'s own doc comment above - rebuilt wholesale by
+    // EnsureRootAndMaybeRescan() on the exact same throttle as m_tree.
+    AssetDatabase m_assetDatabase;
 
     // Which folder is currently "open" - its immediate children are what
     // the right pane shows (empty string means the Project root itself).

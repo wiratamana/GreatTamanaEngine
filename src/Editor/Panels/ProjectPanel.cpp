@@ -1,6 +1,7 @@
 #include "ProjectPanel.h"
 
 #include "../EditorContext.h"
+#include "../../Assets/AssetImporter.h"
 #include "../MemoryPanelData.h" // FormatBytes() - reused for the file-size tooltip below.
 
 #include <imgui.h>
@@ -8,6 +9,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <cctype>
 #include <exception>
 #include <system_error>
 
@@ -59,6 +61,15 @@ void ProjectPanel::EnsureRootAndMaybeRescan()
     // requiring an engine restart.
     m_rootExists = EnsureProjectRootExists(m_rootPath);
     m_tree = m_rootExists ? ScanProjectDirectory(m_rootPath) : std::vector<ProjectEntry>{};
+
+    // Rebuilds the *.gta guid<->path index from whatever's actually on
+    // disk right now, on the exact same throttle as m_tree above - see
+    // GetAssetDatabase()'s own doc comment (ProjectPanel.h).
+    if (m_rootExists) {
+        m_assetDatabase.RefreshFromDirectory(m_rootPath);
+    } else {
+        m_assetDatabase.Clear();
+    }
 
     ReconcileCurrentFolderAfterRescan();
 
@@ -437,23 +448,45 @@ void ProjectPanel::HandleExternalFileDrop(float screenX, float screenY, const st
         }
 
         const std::filesystem::path targetDir = ResolveDropTargetDirectory(m_rootPath, *target);
-        const std::filesystem::path destination = MakeUniqueDestinationPath(targetDir, source.filename());
 
         std::error_code isDirEc;
         const bool sourceIsDirectory = std::filesystem::is_directory(source, isDirEc) && !isDirEc;
 
-        std::error_code copyEc;
-        if (sourceIsDirectory) {
-            std::filesystem::copy(source, destination, std::filesystem::copy_options::recursive, copyEc);
-        } else {
-            std::filesystem::copy_file(source, destination, std::filesystem::copy_options::none, copyEc);
+        // For a file that's about to be gated into a *.gta wrapper (see
+        // AssetImporter::ImportAssetFile() below), the uniqueness check
+        // must collide against an EXISTING "name.gta" (e.g. a previously-
+        // imported texture), not the source's own "name.png" - otherwise
+        // re-dropping "rock.png" after "rock.gta" already exists would
+        // resolve to "rock.gta" directly (a silent overwrite) instead of
+        // "rock (1).gta".
+        std::filesystem::path desiredName = source.filename();
+        if (!sourceIsDirectory) {
+            std::string extension = PathToUtf8(source.extension());
+            std::transform(extension.begin(), extension.end(), extension.begin(),
+                [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (IsImportableAsKtx2Texture(extension)) {
+                desiredName.replace_extension(".gta");
+            }
         }
+        const std::filesystem::path destination = MakeUniqueDestinationPath(targetDir, desiredName);
 
-        if (copyEc) {
-            SetStatus("Failed to import \"" + PathToUtf8(source.filename()) + "\": " + copyEc.message(), true);
+        if (sourceIsDirectory) {
+            std::error_code copyEc;
+            std::filesystem::copy(source, destination, std::filesystem::copy_options::recursive, copyEc);
+            if (copyEc) {
+                SetStatus("Failed to import \"" + PathToUtf8(source.filename()) + "\": " + copyEc.message(), true);
+            } else {
+                SetStatus("Imported \"" + PathToUtf8(destination.filename()) + "\" into Project.", false);
+                m_needsRescan = true;
+            }
         } else {
-            SetStatus("Imported \"" + PathToUtf8(destination.filename()) + "\" into Project.", false);
-            m_needsRescan = true;
+            // Files are gated through AssetImporter - see
+            // HandleExternalFileDrop()'s own doc comment (ProjectPanel.h).
+            const AssetImportResult result = ImportAssetFile(m_assetDatabase, source, destination);
+            SetStatus(result.message, !result.success);
+            if (result.success) {
+                m_needsRescan = true;
+            }
         }
     } catch (const std::exception& e) {
         // Same belt-and-braces reasoning as ScanProjectDirectory() - every

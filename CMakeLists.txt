@@ -161,6 +161,11 @@ add_library(gte_core STATIC
     src/Assets/GtaFile.cpp
     src/Assets/AssetDatabase.h
     src/Assets/AssetDatabase.cpp
+    src/Assets/StbImageImpl.cpp
+    src/Assets/Ktx2Encoder.h
+    src/Assets/Ktx2Encoder.cpp
+    src/Assets/AssetImporter.h
+    src/Assets/AssetImporter.cpp
     src/Memory/SdlMemoryTracker.h
     src/Memory/SdlMemoryTracker.cpp
     src/Application/Application.cpp
