@@ -8,6 +8,9 @@
 #include "Panels/HierarchyPanel.h"
 #include "Panels/InspectorPanel.h"
 #include "Panels/MemoryPanel.h"
+#if GTE_ENABLE_PROJECT_PANEL
+#include "Panels/ProjectPanel.h"
+#endif
 #include "Panels/ScenePanel.h"
 #include "TransformGizmo.h"
 #include "../Game/Game.h"
@@ -213,6 +216,35 @@ public:
     {
         ImGui::SetCurrentContext(m_context);
         ImGui_ImplSDL3_ProcessEvent(&event);
+
+#if GTE_ENABLE_PROJECT_PANEL
+        // An OS-level file/folder drag-and-drop (Windows Explorer, ...)
+        // landing on ANY of this process's windows - the main window, or an
+        // ImGui multi-viewport "platform window" (see the class comment
+        // above) - is routed straight to ProjectPanel, entirely independent
+        // of ImGui's own (widget-to-widget) drag-and-drop, which this event
+        // has nothing to do with. event.drop.x/y are window-RELATIVE, so
+        // they're converted to absolute desktop/screen coordinates here
+        // (matching what ImGui::GetWindowPos() reports - see
+        // ProjectPanel::Build()) by adding the source window's own screen
+        // position, before ProjectPanel decides whether that position
+        // actually falls within its own last-known on-screen rect.
+        if (event.type == SDL_EVENT_DROP_FILE) {
+            float screenX = event.drop.x;
+            float screenY = event.drop.y;
+
+            SDL_Window* dropWindow = SDL_GetWindowFromID(event.drop.windowID);
+            if (dropWindow != nullptr) {
+                int windowX = 0;
+                int windowY = 0;
+                SDL_GetWindowPosition(dropWindow, &windowX, &windowY);
+                screenX += static_cast<float>(windowX);
+                screenY += static_cast<float>(windowY);
+            }
+
+            m_projectPanel.HandleExternalFileDrop(screenX, screenY, event.drop.data != nullptr ? event.drop.data : "");
+        }
+#endif
     }
 
     void OnWindowResized(int /*width*/, int /*height*/) override
@@ -342,6 +374,9 @@ public:
         BuildScenePanel(registry, m_ctx, m_sceneCamera);
         BuildGamePanel(m_ctx);
         BuildMemoryPanel(m_ctx, renderer);
+#if GTE_ENABLE_PROJECT_PANEL
+        m_projectPanel.Build();
+#endif
     }
 
     void Render(VkCommandBuffer cmd) override
@@ -445,6 +480,16 @@ private:
     // the top of every NewFrame()) - see RenderPlatformWindows() for why
     // this guard exists.
     bool m_frameRendered = false;
+
+#if GTE_ENABLE_PROJECT_PANEL
+    // The Editor's Unity-style "Project" panel (see Panels/ProjectPanel.h) -
+    // a live view of a "Project" folder next to the built .exe, plus
+    // external drag-and-drop file import. Only compiled/present at all when
+    // GTE_ENABLE_PROJECT_PANEL is ON (a separate switch from
+    // GTE_ENABLE_EDITOR - see the root CMakeLists.txt) - ProcessEvent()
+    // above feeds it SDL_EVENT_DROP_FILE, BuildUI() below calls its Build().
+    ProjectPanel m_projectPanel;
+#endif
 
     // Shared state read/written by DockLayout.cpp's
     // BuildDockspaceAndMenuBar() and every Panels/*.cpp builder called from

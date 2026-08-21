@@ -313,6 +313,37 @@ CMake adds:
   Memory Tracking") for the full rationale, including why calling
   `SDL_malloc()`/`ImGui::MemAlloc()` directly in a test needs neither
   `SDL_Init()` nor a live `ImGuiContext`.
+- **Project panel:** a Unity-style **"Project"** panel
+  (`src/Editor/Panels/ProjectPanel.h/.cpp`, docked alongside "Memory" along
+  the bottom — see `DockLayout.cpp`), gated by its own `GTE_ENABLE_PROJECT_PANEL`
+  switch (separate from `GTE_ENABLE_EDITOR` — see `BUILDING.md`), showing a
+  live, recursive view of a real **"Project" folder created automatically
+  next to the built `.exe`** (`SDL_GetBasePath()` + `"Project"`) if it
+  doesn't already exist. The tree is rebuilt from disk on a throttle (twice a
+  second, or immediately after any operation below) rather than caching
+  filesystem handles/pointers across frames, so anything deleted
+  *externally* (Explorer, git, another process) while the Editor is running
+  is simply gone from the next scan — never a dangling reference the Editor
+  could crash on. Right-click for **Refresh**/**New Folder**/**Delete
+  Selected**, or **drag a file (or folder) in from Windows Explorer**
+  straight onto the panel to copy it into whichever folder is currently
+  selected (auto-renaming — `"name (1).ext"`, `"name (2).ext"`, ... — rather
+  than clobbering an existing same-named item). The OS-level drop itself
+  (`SDL_EVENT_DROP_FILE`, entirely separate from ImGui's own widget-to-widget
+  drag-and-drop) is caught in `ImGuiEditorLayer::ProcessEvent()` and handed
+  to `ProjectPanel::HandleExternalFileDrop()` with the drop's absolute
+  desktop coordinates, which only acts if that position actually falls
+  within the panel's own last-known on-screen rect. Every filesystem
+  operation (`ScanProjectDirectory()`/`EnsureProjectRootExists()`/
+  `ResolveDropTargetDirectory()`/`MakeUniqueDestinationPath()`, plus the
+  `PathToUtf8()`/`Utf8ToPath()` UTF-8-safe path helpers so non-ASCII
+  filenames display and round-trip correctly) lives in pure, ImGui-free
+  `src/Editor/ProjectPanelData.h/.cpp`, Tier-1-tested against a real temp
+  directory (see `tests/Editor/ProjectPanelDataTests.cpp`) exactly like
+  `MemoryPanelData` above — `Panels/ProjectPanel.cpp` itself (the one place
+  holding cross-frame state: the cached tree, current selection, panel rect,
+  a transient status message) is a thin class wrapper around them, never
+  unit-tested directly, same division of labor as the "Memory" panel.
 - **`NullEditorLayer`** (`GTE_ENABLE_EDITOR=OFF`) — every method is a no-op;
   `GameViewTarget()`/`SceneViewTarget()` always return `nullptr`, meaning
   "render straight to the swapchain, fullscreen". This is what makes
@@ -423,6 +454,26 @@ pieces:
   `tests/Editor/MemoryPanelDataTests.cpp`,
   `tests/Memory/SdlMemoryTrackerTests.cpp`, and
   `tests/Editor/ImGuiMemoryTrackerTests.cpp`.
+- The Editor now has a Unity-style **"Project"** panel
+  (`src/Editor/Panels/ProjectPanel.h/.cpp`, docked alongside "Memory" along
+  the bottom), gated by its own `GTE_ENABLE_PROJECT_PANEL` switch (a build
+  can disable just this panel independently of the rest of the Editor - see
+  `BUILDING.md`). Shows a live, recursive view of a real **"Project" folder
+  auto-created next to the built `.exe`**, rebuilt from disk on a throttle
+  rather than caching filesystem handles across frames (so anything deleted
+  *externally* while the Editor is running just quietly disappears from the
+  next scan, never a dangling reference to crash on), plus **drag-and-drop
+  import**: drag a file/folder in from Windows Explorer straight onto the
+  panel to copy it into whichever folder is currently selected
+  (auto-renaming to avoid clobbering an existing item), caught via the raw
+  `SDL_EVENT_DROP_FILE` OS event (`ImGuiEditorLayer::ProcessEvent()`) -
+  entirely separate from ImGui's own widget drag-and-drop. Right-click for
+  Refresh/New Folder/Delete Selected. All the actual filesystem logic
+  (`ScanProjectDirectory()`/`EnsureProjectRootExists()`/
+  `ResolveDropTargetDirectory()`/`MakeUniqueDestinationPath()`/
+  `PathToUtf8()`/`Utf8ToPath()`) lives in pure, ImGui-free
+  `src/Editor/ProjectPanelData.h/.cpp`, Tier-1-tested against a real temp
+  directory - see `tests/Editor/ProjectPanelDataTests.cpp`.
 - GPU memory allocation goes through **VMA** (Vulkan Memory Allocator) via
   the `VulkanAllocator` RAII wrapper (`src/Renderer/Vulkan/`) — `Renderer`
   owns a single `VmaAllocator`. `RenderTexture` creates its `VkImage` through

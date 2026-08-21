@@ -103,6 +103,22 @@
 #                                            GTE_ENABLE_EDITOR is ON, same
 #                                            reason as EditorCameraTests.cpp
 #                                            above.
+#   - Editor/ProjectPanelDataTests.cpp        - the Editor "Project" panel's
+#                                            pure data-shaping/filesystem
+#                                            logic (ScanProjectDirectory()/
+#                                            EnsureProjectRootExists()/
+#                                            ResolveDropTargetDirectory()/
+#                                            MakeUniqueDestinationPath()/
+#                                            PathToUtf8()/Utf8ToPath() - see
+#                                            src/Editor/ProjectPanelData.h) -
+#                                            no ImGui/Renderer/live GPU/SDL
+#                                            video involved, though it DOES
+#                                            touch a real temp directory the
+#                                            test itself creates/tears down.
+#                                            Only built when GTE_ENABLE_EDITOR
+#                                            AND GTE_ENABLE_PROJECT_PANEL are
+#                                            both ON, same reason as
+#                                            EditorCameraTests.cpp above.
 #
 # Note that the test BINARY still dynamically depends on SDL3.dll at process
 # load time regardless of the above (gte_core's Window.cpp references SDL
@@ -162,6 +178,20 @@ if(GTE_ENABLE_EDITOR)
         Editor/ImGuiMemoryTrackerTests.cpp
         Editor/MemoryPanelDataTests.cpp
     )
+
+    # ProjectPanelData.h/.cpp (see src/Editor/ProjectPanelData.h) is only
+    # compiled into gte_core when GTE_ENABLE_PROJECT_PANEL is ALSO ON (a
+    # separate switch from GTE_ENABLE_EDITOR - see the root CMakeLists.txt) -
+    # same "zero-touch when off" rule as EditorCameraTests.cpp above.
+    # ProjectPanelData's own functions are genuinely Tier 1 despite touching
+    # the real filesystem: they take/return plain paths/strings and operate
+    # against a real temp directory the test itself creates/tears down, with
+    # no ImGui/Renderer/live-Vulkan-device/SDL-video involved at all.
+    if(GTE_ENABLE_PROJECT_PANEL)
+        list(APPEND GTE_TEST_SOURCES
+            Editor/ProjectPanelDataTests.cpp
+        )
+    endif()
 endif()
 
 add_executable(GreatTamanaEngineTests ${GTE_TEST_SOURCES})

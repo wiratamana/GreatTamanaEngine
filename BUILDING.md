@@ -1,4 +1,4 @@
-﻿# Building
+# Building
 
 Windows only, for now.
 
@@ -38,6 +38,13 @@ Prerequisites:
   `GTE_ENABLE_EDITOR` is `ON` (the default) — a build configured with
   `-DGTE_ENABLE_EDITOR=OFF` never touches the network for this and never
   compiles a single ImGui source file.
+- The Editor's Unity-style "Project" panel (a live file browser rooted at a
+  "Project" folder created next to the built `.exe`, plus drag-and-drop
+  import from Windows Explorer — see `README.md`, "Editor / Debug UI") is
+  gated by its OWN switch, `GTE_ENABLE_PROJECT_PANEL` (`ON` by default),
+  separate from `GTE_ENABLE_EDITOR` — pass `-DGTE_ENABLE_PROJECT_PANEL=OFF`
+  to build the rest of the Editor without it. Only meaningful when
+  `GTE_ENABLE_EDITOR` is also `ON`.
 
 ```
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64

@@ -26,6 +26,22 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # NullEditorLayer.cpp (inert no-op, this OFF).
 option(GTE_ENABLE_EDITOR "Build with in-engine Editor/Debug UI (Dear ImGui)" ON)
 
+# Master switch for the Editor's Unity-style "Project" panel (a live view of
+# a "Project" folder created next to the built .exe, plus external
+# drag-and-drop file import - see src/Editor/Panels/ProjectPanel.h/.cpp and
+# src/Editor/ProjectPanelData.h/.cpp). Kept as its OWN switch, separate from
+# GTE_ENABLE_EDITOR above, because this is a newer, still-evolving feature
+# (live filesystem access from inside the Editor, plus OS-level drag-and-
+# drop) that a developer may want to disable independently while it's
+# fleshed out further, without giving up the rest of the Editor - flipping
+# this OFF removes the panel and every bit of its filesystem access
+# entirely, with no #ifdef soup anywhere else (just the small, explicit
+# `#if GTE_ENABLE_PROJECT_PANEL` guards in ImGuiEditorLayer.cpp/
+# DockLayout.cpp). Only meaningful when GTE_ENABLE_EDITOR is also ON - the
+# Project panel is part of the ImGui-backed Editor UI and doesn't exist
+# without it.
+option(GTE_ENABLE_PROJECT_PANEL "Build the Editor's Project panel (Project-folder file browser + drag-and-drop import)" ON)
+
 # Master switch for the GoogleTest-based unit test suite (tests/) - see
 # cmake/FetchGTest.cmake and tests/CMakeLists.txt. Turning this OFF means a
 # configure never touches the network for GoogleTest and never compiles a
@@ -214,6 +230,20 @@ if(GTE_ENABLE_EDITOR)
         src/Editor/ImGuiEditorLayer.cpp
     )
     target_link_libraries(gte_core PRIVATE imgui imguizmo)
+
+    # The "Project" panel (see GTE_ENABLE_PROJECT_PANEL above) is
+    # independently toggleable even within an Editor build - only
+    # compiled/linked in when ALSO on. ProjectPanelData.h/.cpp is the pure,
+    # Tier-1-testable logic (see tests/Editor/ProjectPanelDataTests.cpp);
+    # Panels/ProjectPanel.h/.cpp is the ImGui-facing class itself.
+    if(GTE_ENABLE_PROJECT_PANEL)
+        target_sources(gte_core PRIVATE
+            src/Editor/ProjectPanelData.h
+            src/Editor/ProjectPanelData.cpp
+            src/Editor/Panels/ProjectPanel.h
+            src/Editor/Panels/ProjectPanel.cpp
+        )
+    endif()
 else()
     target_sources(gte_core PRIVATE src/Editor/NullEditorLayer.cpp)
 endif()
@@ -233,6 +263,14 @@ endif()
 # every consumer of gte_core, regardless of what gte_core itself was
 # actually built with, and Editor-only behavior could never be tested.
 target_compile_definitions(gte_core PUBLIC GTE_ENABLE_EDITOR=$<BOOL:${GTE_ENABLE_EDITOR}>)
+
+# Same idea as GTE_ENABLE_EDITOR's compile definition immediately above -
+# exposes GTE_ENABLE_PROJECT_PANEL to C++ code as an actual 1/0 preprocessor
+# macro, needed by ImGuiEditorLayer.cpp/DockLayout.cpp's own
+# `#if GTE_ENABLE_PROJECT_PANEL` guards. PUBLIC for the same reason: this
+# header-level guard must be seen identically by gte_core itself and by
+# GreatTamanaEngineTests (see tests/Editor/ProjectPanelDataTests.cpp).
+target_compile_definitions(gte_core PUBLIC GTE_ENABLE_PROJECT_PANEL=$<BOOL:${GTE_ENABLE_PROJECT_PANEL}>)
 
 # PUBLIC (not PRIVATE) for the same reason as the compile definition above:
 # any consumer of gte_core (GreatTamanaEngine's main.cpp, and every test in
