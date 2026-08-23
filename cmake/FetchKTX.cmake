@@ -150,7 +150,73 @@ function(_ktx_download_and_stage)
     # remove it.
     file(COPY "${_root}/" DESTINATION "${CMAKE_SOURCE_DIR}/third_party/ktx")
 
+    _ktx_apply_gte_patches("${CMAKE_SOURCE_DIR}/third_party/ktx/lib")
+
     message(STATUS "KTX-Software: staged -> ${CMAKE_SOURCE_DIR}/third_party/ktx")
+endfunction()
+
+# _ktx_apply_gte_patches(<staged_lib_dir>)
+#
+# Patches a freshly-staged lib/writer2.c to fix a genuine upstream bug found
+# while integrating the PNG/JPEG -> KTX2 import pipeline: inside
+# ktxTexture2_WriteToStream()'s DEBUG-only sanity check, `pos` is declared as
+# a 64-bit ktx_size_t but is then passed to dststr->getpos() cast to
+# (ktx_off_t*) - and ktx_off_t is only 32 bits wide on Windows. getpos() only
+# ever writes the low 4 bytes of `pos`; the high 4 bytes are left as
+# whatever garbage happened to be on the stack, so the subsequent
+# `assert(pos == ...)` compares a real value against one containing random
+# high bits - producing a FALSE assertion failure on an otherwise perfectly
+# valid KTX2 file. This has nothing to do with actual data corruption; the
+# written file is fine, only this debug-only comparison is broken.
+#
+# Applied here (rather than hand-editing third_party/ktx/lib/writer2.c
+# directly) so the fix survives KTX_FORCE_REDOWNLOAD/a clean checkout/CI
+# re-fetching a pristine copy from GitHub - third_party/ is gitignored,
+# nothing under it is ever committed (see this file's own header comment).
+# Each expected snippet is searched for BEFORE being replaced, and a
+# message(WARNING ...) is raised (never a silent no-op) if it's missing -
+# e.g. KTX_RELEASE_TAG is bumped to a future version where upstream
+# rewrites or already fixed this differently - so a stale/ineffective patch
+# never ships unnoticed.
+function(_ktx_apply_gte_patches staged_lib_dir)
+    set(_writer2_path "${staged_lib_dir}/writer2.c")
+    file(READ "${_writer2_path}" _src)
+
+    set(_decl_from "#if defined(DEBUG) || DUMP_IMAGE
+        ktx_size_t pos;
+#endif")
+    set(_decl_to "#if defined(DEBUG) || DUMP_IMAGE
+        ktx_off_t pos; // GreatTamanaEngine patch - see cmake/FetchKTX.cmake's _ktx_apply_gte_patches()
+#endif")
+
+    set(_check_from "        result = dststr->getpos(dststr, (ktx_off_t*)&pos);
+        // Could fail if stdout is a pipe
+        if (result == KTX_SUCCESS)
+            assert(pos == private->_levelIndex[level].byteOffset + baseOffset);
+        else
+            assert(result == KTX_FILE_ISPIPE);")
+    set(_check_to "        result = dststr->getpos(dststr, &pos); // GreatTamanaEngine patch - see cmake/FetchKTX.cmake's _ktx_apply_gte_patches()
+        // Could fail if stdout is a pipe
+        if (result == KTX_SUCCESS)
+            assert((ktx_size_t)pos == private->_levelIndex[level].byteOffset + baseOffset);
+        else
+            assert(result == KTX_FILE_ISPIPE);")
+
+    string(FIND "${_src}" "${_decl_from}" _decl_pos)
+    if(_decl_pos EQUAL -1)
+        message(WARNING "ktx: expected `ktx_size_t pos;` declaration text was not found in writer2.c - the pos/ktx_off_t type-mismatch patch was NOT applied. KTX-Software's source may have changed upstream; re-check cmake/FetchKTX.cmake's _ktx_apply_gte_patches().")
+    else()
+        string(REPLACE "${_decl_from}" "${_decl_to}" _src "${_src}")
+    endif()
+
+    string(FIND "${_src}" "${_check_from}" _check_pos)
+    if(_check_pos EQUAL -1)
+        message(WARNING "ktx: expected getpos()/assert() text was not found in writer2.c - the pos/ktx_off_t type-mismatch patch was NOT applied. KTX-Software's source may have changed upstream; re-check cmake/FetchKTX.cmake's _ktx_apply_gte_patches().")
+    else()
+        string(REPLACE "${_check_from}" "${_check_to}" _src "${_src}")
+    endif()
+
+    file(WRITE "${_writer2_path}" "${_src}")
 endfunction()
 
 # _ktx_find_bash()
