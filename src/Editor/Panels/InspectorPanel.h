@@ -25,9 +25,14 @@ class AssetPreviewMesh;
 //     selected file decodes as a supported image, OR a live, auto-rotating
 //     3D mesh preview (via AssetPreviewMesh + `renderer`) if it's a *.gta
 //     AssetType::Mesh file (the result of importing a .pmx - see
-//     src/Assets/AssetImporter.h); falls back to metadata-only for anything
-//     else (a folder, a non-image/non-mesh file, or a file that fails to
-//     decode/parse).
+//     src/Assets/AssetImporter.h), OR a decoded metadata-only summary
+//     (model name, frame range, and bone/morph/camera/light/shadow/IK
+//     keyframe counts + the actual bone name list - no GPU/live preview,
+//     just MotionFile.h's DecodeMotionDataFromBytes()) if it's a *.gta
+//     AssetType::Animation file (the result of importing a .vmd - see
+//     src/Assets/VmdLoader.h); falls back to metadata-only for anything
+//     else (a folder, a non-image/non-mesh/non-animation file, or a file
+//     that fails to decode/parse).
 // Called once per frame by ImGuiEditorLayer::BuildUI(), after
 // BuildHierarchyPanel(). `renderer`/`assetPreview`/`assetPreviewMesh` only
 // exist in this signature when GTE_ENABLE_PROJECT_PANEL is ON - see

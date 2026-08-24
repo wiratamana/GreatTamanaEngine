@@ -13,7 +13,8 @@
 #include "../MemoryPanelData.h" // FormatBytes() - reused for the asset size field below.
 #include "../ProjectPanelData.h" // Utf8ToPath()
 #include "../../Assets/AssetTypes.h" // AssetType, AssetFlags, Guid
-#include "../../Assets/GtaFile.h" // ReadGtaHeader()
+#include "../../Assets/GtaFile.h" // ReadGtaHeader()/ReadGtaFile()
+#include "../../Assets/MotionFile.h" // DecodeMotionDataFromBytes()
 #include "../../Renderer/Renderer.h"
 #endif
 
@@ -22,6 +23,8 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <string>
+#include <vector>
 
 namespace gte {
 
@@ -200,6 +203,139 @@ void BuildGtaMeshMetadata(
     ImGui::Text("On-disk Size (.gta): %s", FormatBytes(fileSizeBytes).c_str());
 }
 
+// The Animation-asset equivalent of BuildGtaTextureMetadata()/
+// BuildGtaMeshMetadata() above - shown when the selected *.gta wraps
+// AssetType::Animation (the result of importing a .vmd motion file - see
+// src/Assets/VmdLoader.h/AssetImporter.h). Unlike the Texture/Mesh cases,
+// there is no live GPU preview for a motion (a flat keyframe list has
+// nothing to rasterize/render), so this is always the FULL story for an
+// Animation asset - no separate "viewer" pane ever exists alongside it (see
+// BuildAssetInspector() below, which never puts an Animation selection
+// through the preview/splitter layout at all). `motion` is decoded straight
+// from the *.gta's own PAYLOAD bytes (MotionFile.h's
+// DecodeMotionDataFromBytes()) by the caller - std::nullopt when that
+// payload is corrupt/truncated despite a valid *.gta header, in which case
+// every OTHER field here (still read straight from the 64-byte header, no
+// decode required) is shown anyway.
+void BuildGtaAnimationMetadata(const GtaHeader& header, std::uintmax_t fileSizeBytes, const std::optional<MotionData>& motion)
+{
+    ImGui::TextColored(ImVec4(0.55f, 0.75f, 1.0f, 1.0f), "GTA Asset Metadata");
+    ImGui::Text("Asset Type: %s", AssetTypeLabel(header.Type()));
+    ImGui::Text("Format Version: %llu", static_cast<unsigned long long>(header.version));
+    ImGui::Text("GUID: %s", header.Id().ToString().c_str());
+    ImGui::Text("Flags: %s", AssetFlagsLabel(header.Flags()).c_str());
+
+    const std::uint64_t metadataSize
+        = header.payloadOffset >= sizeof(GtaHeader) ? header.payloadOffset - sizeof(GtaHeader) : 0;
+    const std::uint64_t payloadSize = fileSizeBytes >= header.payloadOffset ? fileSizeBytes - header.payloadOffset : 0;
+
+    ImGui::Separator();
+    if (motion.has_value()) {
+        if (!motion->modelName.empty()) {
+            ImGui::Text("Target Model Name: %s", motion->modelName.c_str());
+        }
+
+        // Frame range across every track combined (bone/morph/camera/
+        // light/shadow/IK - whichever ones this particular .vmd actually
+        // populated) - a quick "how long is this motion" hint without
+        // needing a full playback/scrubbing UI (see TODO.md: no
+        // interpolation evaluation/keyframe playback exists anywhere in
+        // this engine yet).
+        bool hasAnyFrame = false;
+        std::uint32_t minFrame = 0;
+        std::uint32_t maxFrame = 0;
+        auto scanFrames = [&](const auto& list) {
+            for (const auto& kf : list) {
+                if (!hasAnyFrame) {
+                    minFrame = kf.frame;
+                    maxFrame = kf.frame;
+                    hasAnyFrame = true;
+                } else {
+                    minFrame = std::min(minFrame, kf.frame);
+                    maxFrame = std::max(maxFrame, kf.frame);
+                }
+            }
+        };
+        scanFrames(motion->boneKeyframes);
+        scanFrames(motion->morphKeyframes);
+        scanFrames(motion->cameraKeyframes);
+        scanFrames(motion->lightKeyframes);
+        scanFrames(motion->shadowKeyframes);
+        scanFrames(motion->ikKeyframes);
+        if (hasAnyFrame) {
+            ImGui::Text("Frame Range: %u - %u (VMD's fixed 30fps grid)", minFrame, maxFrame);
+        }
+
+        // Distinct bone names this motion actually drives - matched by
+        // NAME against a target model's own SkeletonData::bones at
+        // playback time (see MotionData.h's own doc comment); nothing here
+        // resolves that yet, but the plain name list is still useful to
+        // eyeball which rig a motion expects.
+        std::vector<std::string> uniqueBoneNames;
+        uniqueBoneNames.reserve(motion->boneKeyframes.size());
+        for (const auto& kf : motion->boneKeyframes) {
+            uniqueBoneNames.push_back(kf.boneName);
+        }
+        std::sort(uniqueBoneNames.begin(), uniqueBoneNames.end());
+        uniqueBoneNames.erase(std::unique(uniqueBoneNames.begin(), uniqueBoneNames.end()), uniqueBoneNames.end());
+
+        ImGui::Text("Bone Keyframes: %llu (%llu unique bones)",
+            static_cast<unsigned long long>(motion->boneKeyframes.size()),
+            static_cast<unsigned long long>(uniqueBoneNames.size()));
+        ImGui::Text("Morph Keyframes: %llu", static_cast<unsigned long long>(motion->morphKeyframes.size()));
+        ImGui::Text("Camera Keyframes: %llu", static_cast<unsigned long long>(motion->cameraKeyframes.size()));
+        ImGui::Text("Light Keyframes: %llu", static_cast<unsigned long long>(motion->lightKeyframes.size()));
+        ImGui::Text("Shadow Keyframes: %llu", static_cast<unsigned long long>(motion->shadowKeyframes.size()));
+        ImGui::Text("IK Keyframes: %llu", static_cast<unsigned long long>(motion->ikKeyframes.size()));
+
+        // A small, scrollable, collapsible detail section listing every
+        // distinct bone name this motion drives - same "CollapsingHeader/
+        // TreeNode for optional detail" shape as BuildEntityInspector()'s
+        // own component sections above. Collapsed by default so a motion
+        // with hundreds of bones doesn't dominate the metadata list.
+        if (!uniqueBoneNames.empty() && ImGui::TreeNode("Bone Names")) {
+            ImGui::BeginChild(
+                "InspectorAnimationBoneNames", ImVec2(0, 150.0f), true, ImGuiWindowFlags_HorizontalScrollbar);
+            for (const auto& name : uniqueBoneNames) {
+                ImGui::TextUnformatted(name.c_str());
+            }
+            ImGui::EndChild();
+            ImGui::TreePop();
+        }
+
+        // Same idea for morph names, when present (a facial/expression
+        // motion rather than a body motion).
+        std::vector<std::string> uniqueMorphNames;
+        uniqueMorphNames.reserve(motion->morphKeyframes.size());
+        for (const auto& kf : motion->morphKeyframes) {
+            uniqueMorphNames.push_back(kf.morphName);
+        }
+        std::sort(uniqueMorphNames.begin(), uniqueMorphNames.end());
+        uniqueMorphNames.erase(std::unique(uniqueMorphNames.begin(), uniqueMorphNames.end()), uniqueMorphNames.end());
+        if (!uniqueMorphNames.empty() && ImGui::TreeNode("Morph Names")) {
+            ImGui::BeginChild(
+                "InspectorAnimationMorphNames", ImVec2(0, 100.0f), true, ImGuiWindowFlags_HorizontalScrollbar);
+            for (const auto& name : uniqueMorphNames) {
+                ImGui::TextUnformatted(name.c_str());
+            }
+            ImGui::EndChild();
+            ImGui::TreePop();
+        }
+
+        ImGui::Separator();
+    }
+    // Every *.gta AssetType::Animation payload today is the exact same
+    // layout MotionFile.h's EncodeMotionDataToBytes() produces (see that
+    // file) - model name + bone/morph/camera/light/shadow/IK keyframe
+    // tracks, no metadata section used (unlike AssetType::Mesh).
+    ImGui::Text("Motion Format: Bone/Morph/Camera/Light/Shadow/IK Keyframes (GTEMOTN1)");
+    ImGui::Text("Payload Size: %s", FormatBytes(payloadSize).c_str());
+    if (metadataSize > 0) {
+        ImGui::Text("Metadata Size: %s", FormatBytes(metadataSize).c_str());
+    }
+    ImGui::Text("On-disk Size (.gta): %s", FormatBytes(fileSizeBytes).c_str());
+}
+
 // Plain OS filesystem metadata (AssetInspectorData.h) - name/extension say
 // nothing about how a *.gta's own payload is structured, only what the
 // filesystem itself reports.
@@ -342,6 +478,22 @@ void BuildAssetInspector(
     const std::optional<GtaHeader> gtaHeader = isGta ? ReadGtaHeader(Utf8ToPath(absolutePath)) : std::nullopt;
     const bool isGtaTexture = gtaHeader.has_value() && gtaHeader->Type() == AssetType::Texture;
     const bool isGtaMesh = gtaHeader.has_value() && gtaHeader->Type() == AssetType::Mesh;
+    const bool isGtaAnimation = gtaHeader.has_value() && gtaHeader->Type() == AssetType::Animation;
+
+    // Decode the motion data straight out of the *.gta's own PAYLOAD bytes
+    // whenever the header confirms AssetType::Animation - there is no GPU
+    // preview to gate this behind (unlike the texture/mesh cases below),
+    // this is just a plain binary decode (MotionFile.h's
+    // DecodeMotionDataFromBytes()), so it always runs up front. std::nullopt
+    // if the full *.gta can't be read at all or its payload is corrupt/
+    // truncated despite a valid header - BuildGtaAnimationMetadata() still
+    // shows every OTHER (header-derived) field in that case.
+    std::optional<MotionData> motionData;
+    if (isGtaAnimation) {
+        if (const std::optional<GtaFileData> gtaFile = ReadGtaFile(Utf8ToPath(absolutePath)); gtaFile.has_value()) {
+            motionData = DecodeMotionDataFromBytes(gtaFile->payload);
+        }
+    }
 
     // Attempt a live texture preview for a FILE whose extension is either a
     // format AssetPreviewTexture/stb_image can decode directly, OR a *.gta
@@ -436,6 +588,9 @@ void BuildAssetInspector(
     } else if (isGtaMesh) {
         ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.2f, 1.0f), "Failed to load mesh preview.");
         ImGui::Separator();
+    } else if (isGtaAnimation && !motionData.has_value()) {
+        ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.2f, 1.0f), "Failed to decode motion data.");
+        ImGui::Separator();
     }
     if (isGtaTexture && gtaHeader.has_value()) {
         // The pixel preview failed (corrupt/truncated KTX2 payload, etc.)
@@ -445,6 +600,9 @@ void BuildAssetInspector(
         ImGui::Separator();
     } else if (isGtaMesh && gtaHeader.has_value()) {
         BuildGtaMeshMetadata(*gtaHeader, metadata.sizeBytes, std::nullopt);
+        ImGui::Separator();
+    } else if (isGtaAnimation && gtaHeader.has_value()) {
+        BuildGtaAnimationMetadata(*gtaHeader, metadata.sizeBytes, motionData);
         ImGui::Separator();
     }
     BuildPlainFileMetadata(metadata, absolutePath);
