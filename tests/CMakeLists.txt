@@ -177,6 +177,14 @@
 #                                            smoke test against a real,
 #                                            non-vendored MMD model (GTEST_SKIP()s
 #                                            everywhere that model isn't present).
+#   - Assets/MeshFileTests.cpp               - EncodeMeshDataToBytes()/
+#                                            DecodeMeshDataFromBytes()
+#                                            round-tripping the *.gta
+#                                            AssetType::Mesh payload's binary
+#                                            layout, plus malformed/truncated/
+#                                            empty input rejection - no GPU
+#                                            device involved (src/Assets/
+#                                            MeshFile.h).
 #
 # Note that the test BINARY still dynamically depends on SDL3.dll at process
 # load time regardless of the above (gte_core's Window.cpp references SDL
@@ -209,6 +217,7 @@ set(GTE_TEST_SOURCES
     Assets/Ktx2DecoderTests.cpp
     Assets/AssetImporterTests.cpp
     Assets/PmxLoaderTests.cpp
+    Assets/MeshFileTests.cpp
     Memory/GpuMemoryTrackerTests.cpp
     Memory/SdlMemoryTrackerTests.cpp
     Input/InputStateTests.cpp

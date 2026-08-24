@@ -184,6 +184,9 @@ add_library(gte_core STATIC
     src/Assets/AssetImporter.cpp
     src/Assets/PmxLoader.h
     src/Assets/PmxLoader.cpp
+    src/Assets/MeshData.h
+    src/Assets/MeshFile.h
+    src/Assets/MeshFile.cpp
     src/Memory/SdlMemoryTracker.h
     src/Memory/SdlMemoryTracker.cpp
     src/Application/Application.cpp

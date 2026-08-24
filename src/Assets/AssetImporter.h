@@ -21,15 +21,30 @@ struct AssetImportResult {
     // failed to actually decode).
     bool convertedToKtx2 = false;
 
+    // True if `sourcePath` was gated into the .pmx -> MeshData -> *.gta
+    // (AssetType::Mesh) pipeline instead (see IsImportableAsMeshAsset()/
+    // ImportAssetFile()'s own doc comment below). Mutually exclusive with
+    // convertedToKtx2 - a given source file only ever matches ONE of the
+    // two gating predicates.
+    bool convertedToMeshAsset = false;
+
     // Where the imported item actually ended up on disk - a *.gta path
-    // when convertedToKtx2 is true, otherwise wherever `preferredDestinationPath`
-    // (ImportAssetFile()'s own parameter) said to put it.
+    // when convertedToKtx2 or convertedToMeshAsset is true, otherwise
+    // wherever `preferredDestinationPath` (ImportAssetFile()'s own
+    // parameter) said to put it.
     std::filesystem::path finalPath;
 
-    // Only meaningful when convertedToKtx2 is true - the fresh (or reused,
-    // on re-import - see AssetDatabase::ImportAsset()) Guid this asset is
-    // now tracked under. Guid::Invalid() otherwise.
+    // Only meaningful when convertedToKtx2 or convertedToMeshAsset is true -
+    // the fresh (or reused, on re-import - see AssetDatabase::ImportAsset())
+    // Guid this asset is now tracked under. Guid::Invalid() otherwise.
     Guid guid;
+
+    // Only meaningful when convertedToMeshAsset is true - the mesh's raw
+    // vertex/triangle counts, for a caller that wants to report them (e.g.
+    // the Editor's "Project" panel import status line) without re-reading
+    // and re-decoding the *.gta payload it just wrote.
+    std::size_t meshVertexCount = 0;
+    std::size_t meshTriangleCount = 0;
 
     std::string message; // Human-readable status - always set, success or failure.
 };
@@ -48,27 +63,42 @@ struct AssetImportResult {
 // on a higher one" rule applies here).
 bool IsImportableAsKtx2Texture(const std::string& extensionLowercaseWithDot);
 
+// True if `extensionLowercaseWithDot` names a source 3D model format this
+// engine's import pipeline knows how to parse into a MeshData (see
+// MeshData.h) - today just MikuMikuDance's ".pmx" (via PmxLoader.h/saba's
+// PMXFile reader - see FetchSaba.cmake). A future OBJ/glTF importer would
+// extend this same predicate (and ImportAssetFile()'s matching branch
+// below) rather than inventing a separate gating function - this is the
+// mesh-import equivalent of IsImportableAsKtx2Texture() above, same
+// Tier-1-testable pure-predicate shape.
+bool IsImportableAsMeshAsset(const std::string& extensionLowercaseWithDot);
+
 // Imports `sourcePath` (a single FILE - never a directory; the caller is
 // responsible for handling directory imports itself, e.g. a recursive
 // filesystem copy) into the Project.
 //
-// The gating rule this function exists for: if `sourcePath`'s extension is
-// one IsImportableAsKtx2Texture() recognizes, its pixels are decoded and
-// re-encoded as a KTX2 container (Ktx2Encoder.h's EncodeImageFileToKtx2()),
-// then wrapped as a *.gta (AssetType::Texture) at
-// `preferredDestinationPath` with its extension replaced by ".gta", via
-// `database.ImportAsset()` - this is what makes the engine actually "know
-// about" the resulting asset immediately: it's already queryable through
-// `database` (FindByGuid()/FindByPath()) by the time this function
-// returns, with no separate RefreshFromDirectory() call needed. Every OTHER
-// extension is imported completely unchanged - a plain byte-for-byte file
-// copy to `preferredDestinationPath` exactly as given, no *.gta wrapping at
-// all (see README.md: "text file can stay still for now" - this is what
-// keeps that true for every non-image asset).
+// The gating rules this function exists for, checked in order:
+//   1. If `sourcePath`'s extension is one IsImportableAsMeshAsset()
+//      recognizes, it's parsed into a MeshData (PmxLoader.h today),
+//      serialized via MeshFile.h's EncodeMeshDataToBytes(), and wrapped as a
+//      *.gta (AssetType::Mesh) at `preferredDestinationPath` with its
+//      extension replaced by ".gta", via `database.ImportAsset()`.
+//   2. Otherwise, if it's one IsImportableAsKtx2Texture() recognizes, its
+//      pixels are decoded and re-encoded as a KTX2 container (Ktx2Encoder.h's
+//      EncodeImageFileToKtx2()), then wrapped as a *.gta (AssetType::Texture)
+//      the same way.
+// Either branch is what makes the engine actually "know about" the
+// resulting asset immediately: it's already queryable through `database`
+// (FindByGuid()/FindByPath()) by the time this function returns, with no
+// separate RefreshFromDirectory() call needed. Every OTHER extension is
+// imported completely unchanged - a plain byte-for-byte file copy to
+// `preferredDestinationPath` exactly as given, no *.gta wrapping at all (see
+// README.md: "text file can stay still for now" - this is what keeps that
+// true for every non-mesh, non-image asset).
 //
-// If `sourcePath` merely LOOKS like a supported image by extension but
-// fails to actually decode (corrupt/truncated/not really an image despite
-// its extension), this falls back to a plain copy too (at
+// If `sourcePath` merely LOOKS like a supported mesh/image by extension but
+// fails to actually parse/decode (corrupt/truncated/not really that format
+// despite its extension), this falls back to a plain copy too (at
 // `preferredDestinationPath`'s ORIGINAL extension, unchanged), rather than
 // failing the whole import outright - exactly like every other degrade-
 // gracefully failure mode already established in this Editor (see

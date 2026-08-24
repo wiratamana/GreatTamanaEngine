@@ -1,6 +1,8 @@
 #include "AssetImporter.h"
 
 #include "Ktx2Encoder.h"
+#include "MeshFile.h"
+#include "PmxLoader.h"
 
 #include <algorithm>
 #include <array>
@@ -77,10 +79,52 @@ bool IsImportableAsKtx2Texture(const std::string& extensionLowercaseWithDot)
         kSupported.begin(), kSupported.end(), [&](const char* ext) { return extensionLowercaseWithDot == ext; });
 }
 
+bool IsImportableAsMeshAsset(const std::string& extensionLowercaseWithDot)
+{
+    return extensionLowercaseWithDot == ".pmx";
+}
+
 AssetImportResult ImportAssetFile(
     AssetDatabase& database, const std::filesystem::path& sourcePath, const std::filesystem::path& preferredDestinationPath)
 {
     const std::string extension = ToLowerAscii(PathToUtf8(sourcePath.extension()));
+
+    if (IsImportableAsMeshAsset(extension)) {
+        const PmxLoadResult loaded = LoadPmxModel(PathToUtf8(sourcePath));
+        if (loaded.success) {
+            std::filesystem::path gtaPath = preferredDestinationPath;
+            gtaPath.replace_extension(".gta");
+
+            const std::vector<std::uint8_t> payload = EncodeMeshDataToBytes(loaded.mesh);
+            const std::optional<Guid> guid = database.ImportAsset(gtaPath, AssetType::Mesh, std::vector<std::uint8_t>{}, payload);
+
+            AssetImportResult result;
+            if (guid.has_value()) {
+                result.success = true;
+                result.convertedToMeshAsset = true;
+                result.finalPath = gtaPath;
+                result.guid = *guid;
+                result.meshVertexCount = loaded.mesh.positions.size();
+                result.meshTriangleCount = loaded.mesh.indices.size() / 3;
+                result.message = "Imported \"" + PathToUtf8(sourcePath.filename()) + "\" as a mesh ("
+                    + std::to_string(result.meshVertexCount) + " vertices, " + std::to_string(result.meshTriangleCount)
+                    + " triangles) -> \"" + PathToUtf8(gtaPath.filename()) + "\".";
+            } else {
+                result.success = false;
+                result.message
+                    = "Parsed \"" + PathToUtf8(sourcePath.filename()) + "\" but failed to write its *.gta wrapper.";
+            }
+            return result;
+        }
+
+        // The extension claimed this was a supported mesh format, but it
+        // failed to actually parse (corrupt/truncated/not really a .pmx
+        // despite its extension) - degrade gracefully to a plain copy
+        // rather than failing the whole import outright, same fallback
+        // shape as the KTX2 branch below.
+        return ImportAsPlainCopy(
+            sourcePath, preferredDestinationPath, "Could not parse as a mesh, imported as-is instead. ");
+    }
 
     if (IsImportableAsKtx2Texture(extension)) {
         if (const std::optional<Ktx2EncodeResult> encoded = EncodeImageFileToKtx2(sourcePath); encoded.has_value()) {

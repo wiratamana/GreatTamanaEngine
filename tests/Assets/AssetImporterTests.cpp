@@ -7,6 +7,7 @@
 
 #include "Assets/AssetImporter.h"
 
+#include <cstring>
 #include <fstream>
 
 #include <gtest/gtest.h>
@@ -65,6 +66,69 @@ std::vector<std::uint8_t> BuildMinimal2x2Bmp()
     return bytes;
 }
 
+// Same hand-built minimal-.pmx-file approach as PmxLoaderTests.cpp's
+// BuildMinimalTrianglePmx() (see that file's own comment for the exact
+// binary layout being reproduced here) - duplicated rather than shared,
+// matching this test suite's existing convention of small, self-contained
+// fixtures (see BuildMinimal2x2Bmp() above).
+void PmxU8(std::vector<std::uint8_t>& bytes, std::uint8_t v) { bytes.push_back(v); }
+
+void PmxU32(std::vector<std::uint8_t>& bytes, std::uint32_t v)
+{
+    for (int i = 0; i < 4; ++i) {
+        bytes.push_back(static_cast<std::uint8_t>((v >> (8 * i)) & 0xFF));
+    }
+}
+
+void PmxF32(std::vector<std::uint8_t>& bytes, float v)
+{
+    std::uint32_t bits;
+    std::memcpy(&bits, &v, sizeof(bits));
+    PmxU32(bytes, bits);
+}
+
+void PmxVertex(std::vector<std::uint8_t>& bytes, float px, float py, float pz, float nx, float ny, float nz, float u, float v)
+{
+    PmxF32(bytes, px); PmxF32(bytes, py); PmxF32(bytes, pz);
+    PmxF32(bytes, nx); PmxF32(bytes, ny); PmxF32(bytes, nz);
+    PmxF32(bytes, u); PmxF32(bytes, v);
+    PmxU8(bytes, 0); // PMXVertexWeight::BDEF1
+    PmxU8(bytes, 0); // bone index (boneIndexSize == 1 below), unused
+    PmxF32(bytes, 0.0f); // edge magnitude
+}
+
+std::vector<std::uint8_t> BuildMinimalTrianglePmx()
+{
+    std::vector<std::uint8_t> bytes;
+
+    PmxU8(bytes, 'P'); PmxU8(bytes, 'M'); PmxU8(bytes, 'X'); PmxU8(bytes, ' ');
+    PmxF32(bytes, 2.0f);
+    PmxU8(bytes, 8);
+    PmxU8(bytes, 1); // encode: UTF-8
+    PmxU8(bytes, 0); // addUVNum
+    PmxU8(bytes, 1); PmxU8(bytes, 1); PmxU8(bytes, 1); PmxU8(bytes, 1); PmxU8(bytes, 1); PmxU8(bytes, 1);
+
+    PmxU32(bytes, 0); PmxU32(bytes, 0); PmxU32(bytes, 0); PmxU32(bytes, 0); // info strings, all empty
+
+    PmxU32(bytes, 3); // vertex count
+    PmxVertex(bytes, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f);
+    PmxVertex(bytes, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f);
+    PmxVertex(bytes, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 1.0f);
+
+    PmxU32(bytes, 3); // raw index count (ReadFace() divides by 3 for face count)
+    PmxU8(bytes, 0); PmxU8(bytes, 1); PmxU8(bytes, 2);
+
+    PmxU32(bytes, 0); // textures
+    PmxU32(bytes, 0); // materials
+    PmxU32(bytes, 0); // bones
+    PmxU32(bytes, 0); // morphs
+    PmxU32(bytes, 0); // display frames
+    PmxU32(bytes, 0); // rigidbodies
+    PmxU32(bytes, 0); // joints
+
+    return bytes;
+}
+
 class AssetImporterTest : public ::testing::Test {
 protected:
     void SetUp() override
@@ -116,6 +180,21 @@ TEST(IsImportableAsKtx2TextureTest, RejectsNonImageExtensions)
     EXPECT_FALSE(IsImportableAsKtx2Texture(".obj"));
     EXPECT_FALSE(IsImportableAsKtx2Texture(".gta"));
     EXPECT_FALSE(IsImportableAsKtx2Texture(""));
+}
+
+// --- IsImportableAsMeshAsset() -----------------------------------------------
+
+TEST(IsImportableAsMeshAssetTest, RecognizesPmx)
+{
+    EXPECT_TRUE(IsImportableAsMeshAsset(".pmx"));
+}
+
+TEST(IsImportableAsMeshAssetTest, RejectsNonMeshExtensions)
+{
+    EXPECT_FALSE(IsImportableAsMeshAsset(".txt"));
+    EXPECT_FALSE(IsImportableAsMeshAsset(".png"));
+    EXPECT_FALSE(IsImportableAsMeshAsset(".gta"));
+    EXPECT_FALSE(IsImportableAsMeshAsset(""));
 }
 
 // --- ImportAssetFile() ------------------------------------------------------
@@ -198,6 +277,55 @@ TEST_F(AssetImporterTest, CreatesMissingDestinationDirectoriesForAPlainCopy)
 
     const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "Nested" / "Deeper" / "notes.txt");
     ASSERT_TRUE(result.success);
+
+    std::error_code ec;
+    EXPECT_TRUE(std::filesystem::exists(result.finalPath, ec));
+}
+
+TEST_F(AssetImporterTest, ConvertsAValidPmxToMeshWrappedGta)
+{
+    const std::filesystem::path source = m_root / "model.pmx";
+    WriteBinaryFile(source, BuildMinimalTrianglePmx());
+
+    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "Imported" / "model.pmx");
+
+    ASSERT_TRUE(result.success) << result.message;
+    EXPECT_TRUE(result.convertedToMeshAsset);
+    EXPECT_FALSE(result.convertedToKtx2);
+    EXPECT_EQ(result.finalPath.extension(), ".gta");
+    EXPECT_TRUE(result.guid.IsValid());
+    EXPECT_EQ(result.meshVertexCount, 3u);
+    EXPECT_EQ(result.meshTriangleCount, 1u);
+
+    std::error_code ec;
+    EXPECT_TRUE(std::filesystem::exists(result.finalPath, ec));
+    EXPECT_FALSE(std::filesystem::exists(m_root / "Imported" / "model.pmx", ec)); // No plain-copy byproduct left behind.
+}
+
+TEST_F(AssetImporterTest, ConvertedMeshAssetIsImmediatelyTrackedByTheDatabase)
+{
+    const std::filesystem::path source = m_root / "model.pmx";
+    WriteBinaryFile(source, BuildMinimalTrianglePmx());
+
+    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "model.pmx");
+    ASSERT_TRUE(result.success) << result.message;
+
+    const AssetRecord* record = m_db.FindByGuid(result.guid);
+    ASSERT_NE(record, nullptr);
+    EXPECT_EQ(record->type, AssetType::Mesh);
+}
+
+TEST_F(AssetImporterTest, CorruptPmxExtensionFallsBackToPlainCopy)
+{
+    const std::filesystem::path source = m_root / "fake.pmx"; // Named like a PMX model, but not really one.
+    WriteFile(source, "this is not a real PMX file");
+
+    const std::filesystem::path destination = m_root / "Imported" / "fake.pmx";
+    const AssetImportResult result = ImportAssetFile(m_db, source, destination);
+
+    ASSERT_TRUE(result.success);
+    EXPECT_FALSE(result.convertedToMeshAsset);
+    EXPECT_EQ(result.finalPath, destination);
 
     std::error_code ec;
     EXPECT_TRUE(std::filesystem::exists(result.finalPath, ec));
