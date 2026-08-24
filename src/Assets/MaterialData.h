@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AssetTypes.h"
 #include "../Math/Vec3.h"
 #include "../Math/Vec4.h"
 
@@ -19,6 +20,37 @@ enum class SphereTextureMode : std::uint8_t {
     Multiply,
     Add,
     SubTexture,
+};
+
+// One texture slot referenced by a PMX material (see MaterialData::textures
+// below) - carries BOTH the raw, resolved-at-import-time source file path
+// AND (once actually imported) the stable Guid of the *.gta
+// AssetType::Texture asset that source file was turned into.
+//
+// PmxLoader.h's LoadPmxModel() only ever fills `sourcePath` (see
+// PmxLoader.cpp's ResolveTexturePath()) - it has no AssetDatabase dependency
+// and never writes any *.gta file itself, so `guid` always starts out
+// Guid::Invalid() there. AssetImporter.cpp's mesh-import branch is what
+// actually decodes/re-encodes `sourcePath` as its own standalone *.gta
+// Texture asset (the exact same KTX2 pipeline a plain dropped PNG/JPEG
+// already goes through - see Ktx2Encoder.h) and fills in `guid` with the
+// result - this is what makes the imported model's own *.gta a
+// self-contained, Project-relative reference instead of ever pointing back
+// out at the original source .pmx's own folder on disk (which may not even
+// exist on whatever machine later loads the model).
+//
+// A consumer resolving a material's texture at runtime (see
+// Game::EnsureMeshAsset(), src/Game/Game.cpp) must go through `guid` and an
+// AssetDatabase lookup ONLY - never `sourcePath` directly - and must treat
+// Guid::Invalid() (the source image was missing/undecodable at import time,
+// see sourcePath's own doc comment) exactly like "no texture", the same
+// degrade-gracefully convention every other best-effort asset lookup in
+// this engine already follows. `sourcePath` itself is kept around purely as
+// import-time diagnostic/debug information (e.g. a future Inspector detail
+// view) - it is NEVER read by anything at runtime.
+struct MaterialTextureRef {
+    std::string sourcePath;
+    Guid guid = Guid::Invalid();
 };
 
 // Plain, engine-native material data - the "Materials / Textures" half of
@@ -78,18 +110,13 @@ struct Material {
 };
 
 struct MaterialData {
-    // Absolute filesystem paths (UTF-8), resolved ONCE at PMX-import time
-    // against the source .pmx file's own directory (see PmxLoader.cpp) -
-    // deliberately NOT the raw relative path a .pmx itself stores: a *.gta
-    // this engine writes is meant to be loadable standalone, with no
-    // knowledge of where its original source .pmx lived on disk, so the
-    // resolution has to happen exactly once, at import time, while that
-    // directory is still known. An entry may point at a file that no
-    // longer exists (moved/deleted since import, or the .pmx referenced a
-    // texture that was never actually present) - a consumer (e.g.
-    // Game::EnsureMeshAsset()) must handle a failed decode of one of these
-    // paths gracefully rather than assuming every entry is loadable.
-    std::vector<std::string> textures;
+    // One entry per PMX texture record - see MaterialTextureRef's own doc
+    // comment above for the sourcePath/guid split. An entry may have
+    // guid == Guid::Invalid() (never imported - the source file was
+    // missing/undecodable, or this MaterialData predates texture-import
+    // support) - a consumer must handle that gracefully rather than
+    // assuming every entry resolves to a real texture asset.
+    std::vector<MaterialTextureRef> textures;
 
     std::vector<Material> materials;
 };

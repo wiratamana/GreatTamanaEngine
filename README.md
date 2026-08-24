@@ -362,6 +362,35 @@ registry that tracks every one of them:
   (`src/Game/Game.h`) for the exact naming rule (a part is named after its
   originating PMX material when that material itself has a name — see the
   new `Name` component, `src/ECS/Components/Name.h`).
+  **Materials/textures are imported as real, Guid-referenced `*.gta` assets,
+  never a raw filesystem path baked into the model.** `PmxLoader.h` extracts
+  a `.pmx`'s material list + texture references into a `MaterialData`
+  (`src/Assets/MaterialData.h`) whose `MaterialTextureRef` entries carry
+  BOTH a `sourcePath` (the texture's resolved-at-import-time absolute path,
+  kept purely as import-time diagnostic information — never read again
+  afterwards) and a `Guid`. `AssetImporter.cpp`'s
+  `ImportPmxMaterialTextures()` decodes/re-encodes every one of those
+  source paths as its own standalone `*.gta` `AssetType::Texture` asset
+  (the exact same KTX2 pipeline a plain dropped PNG/JPEG already goes
+  through) into a `"<meshFileStem>_Textures"` folder sitting right next to
+  the model's own destination Mesh `*.gta`, and fills in each
+  `MaterialTextureRef::guid` with the result — this is what closes the
+  model previously carrying a machine-local absolute path (e.g. pointing
+  back out at wherever the original source `.pmx`'s own texture folder
+  lived on the importing machine) baked directly into its `*.gta`, which
+  would silently break/dangle on any other machine or once the source
+  files moved. `Game::EnsureMeshAsset()` (`src/Game/Game.cpp`) now resolves
+  a material's texture PURELY by `Guid`, through a fresh `AssetDatabase`
+  scan rooted at the Mesh `*.gta`'s own directory (guaranteed to also
+  cover its sibling `"..._Textures"` folder) — the exact same "asset
+  manager resolves a stable id to wherever the asset actually lives"
+  convention Unity's own `AssetDatabase` uses, and already established in
+  this engine by `Guid`/`AssetDatabase` (see this section's own opening
+  paragraph, above) —
+  rather than ever reading `MaterialTextureRef::sourcePath` at load time.
+  A texture slot that fails to import (missing/undecodable source file at
+  import time) simply stays `Guid::Invalid()` and degrades to the
+  untextured "grey clay" submesh, same as before.
 - **MikuMikuDance (`.vmd`) motion import → Animation `*.gta`**
   (`Assets/VmdLoader.h/.cpp`, `Assets/MotionData.h`, `Assets/MotionFile.h/.cpp`,
   `Assets/AssetImporter.h/.cpp`) — the motion-import equivalent of the `.pmx`
@@ -1039,6 +1068,28 @@ pieces:
   regenerating an existing `*.gta` without driving the Editor UI, and the
   full test suite (342 tests) still passes. Still NOT done: sphere-map/toon
   shading (parsed into `Material` but never sampled) — see `TODO.md`.
+  **UPDATE (this session): a material's texture is no longer decoded
+  straight off the ORIGINAL `.pmx` source folder — it's imported as its own
+  `*.gta` `AssetType::Texture` asset, referenced purely by `Guid`.** This
+  closed a real "referencing an asset from outside the Project" problem:
+  `MaterialTextureRef::sourcePath` above used to be read directly by
+  `Game::EnsureMaterialTexture()` at spawn time, meaning a Mesh `*.gta`
+  would silently fail to render its textures the moment it was loaded on
+  any machine other than the one it was imported on (or once the original
+  `.pmx`'s own folder moved/was deleted). `AssetImporter.cpp`'s new
+  `ImportPmxMaterialTextures()` now decodes/re-encodes every material
+  texture as its own KTX2-wrapped `*.gta` (into a
+  `"<meshFileStem>_Textures"` folder next to the Mesh `*.gta` itself) and
+  fills in `MaterialTextureRef::guid`; `Game::EnsureMaterialTexture()`
+  (`src/Game/Game.cpp`) now takes a `Guid` and resolves it through a fresh
+  `AssetDatabase` scan of the mesh's own directory, decoding the resolved
+  Texture `*.gta`'s KTX2 payload via `Ktx2Decoder.h` — the exact same
+  Guid-based "asset manager resolves an id to wherever it actually lives"
+  convention this engine's own `AssetDatabase` already established for
+  every other `*.gta` asset, applied consistently here too. Verified
+  end-to-end against the same real Furina model via the `--reimport` CLI
+  (all 10 of its textures import as their own `*.gta` assets and resolve
+  correctly by `Guid`), and the full test suite (363 tests) still passes.
 - **A multi-part model now instantiates as a real parent/child hierarchy,
   not flat independent siblings, and both the model and its parts get real
   display names.** `Game::CreateMeshEntityFromGtaFile()` (`src/Game/Game.cpp`)

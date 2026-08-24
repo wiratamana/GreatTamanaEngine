@@ -128,7 +128,12 @@ MaterialData ConvertMaterialData(const saba::PMXFile& pmxFile, const std::string
     const std::filesystem::path pmxDirectory = Utf8ToPath(filePath).parent_path();
     out.textures.reserve(pmxFile.m_textures.size());
     for (const auto& texture : pmxFile.m_textures) {
-        out.textures.push_back(ResolveTexturePath(pmxDirectory, texture.m_textureName));
+        // guid is left Guid::Invalid() here - LoadPmxModel() itself never
+        // writes any *.gta file; AssetImporter.cpp's mesh-import branch is
+        // what actually imports this source path as a real Texture asset
+        // and fills in the guid - see MaterialTextureRef's own doc comment
+        // (MaterialData.h).
+        out.textures.push_back(MaterialTextureRef{ ResolveTexturePath(pmxDirectory, texture.m_textureName), Guid::Invalid() });
     }
 
     out.materials.reserve(pmxFile.m_materials.size());

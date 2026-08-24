@@ -245,6 +245,11 @@ unblock the most follow-on work:
   present. `CreateMeshEntityFromGtaFile()` now returns the ROOT entity
   (previously the first part) - the caller (Hierarchy/Scene drag-and-drop)
   selects exactly the entity that represents the whole instantiated model.
+  **UPDATE (this session): a material's texture is no longer read from the
+  raw, machine-local absolute path `ResolveTexturePath()` produced above -
+  see the "~~A PMX material's texture referenced by a raw, machine-local
+  filesystem path...~~ - DONE" bullet further down for the full Guid-based
+  replacement.**
 - **TODO (explicitly deferred - do this next): Real MMD skinning/animation
   runtime (pose evaluation, morph blending, physics simulation, `.vmd`
   keyframe interpolation/playback).** A spawned mesh entity
@@ -293,6 +298,23 @@ unblock the most follow-on work:
 - **~~PMX material/texture import~~ - DONE, see the "minimal asset pipeline"
   bullet above** (`MaterialData.h`, `MaterialTexture.h`,
   `VertexLayout::PositionNormalUv`, `Shaders/TexturedMesh.vert/.frag`).
+- **~~A PMX material's texture referenced by a raw, machine-local
+  filesystem path baked into the mesh - not good~~ - DONE, see the "minimal
+  asset pipeline" bullet's UPDATE above.** A material's texture is now
+  imported as its own standalone `*.gta` `AssetType::Texture` asset (into a
+  `"<meshFileStem>_Textures"` folder next to the Mesh `*.gta`, via
+  `AssetImporter.cpp`'s `ImportPmxMaterialTextures()`) and referenced purely
+  by `Guid` (`MaterialTextureRef::guid`, `src/Assets/MaterialData.h`) -
+  `Game::EnsureMaterialTexture()` resolves it through a fresh
+  `AssetDatabase` scan rather than ever reading the original absolute
+  source path again. This closes the exact gap the "minimal asset pipeline"
+  bullet's original `ResolveTexturePath()`-based approach left open (a
+  Mesh `*.gta` silently failing to render its textures once moved to a
+  different machine, or once its source `.pmx`'s own texture folder was
+  deleted) - the same Guid-based "asset manager resolves an id to wherever
+  it actually lives" convention this engine's `AssetDatabase` already uses
+  for every other asset kind, now applied consistently to material textures
+  too.
 - **Verify MMD's own coordinate/winding convention once wired into real
   gameplay rendering.** `PmxLoader.h` is explicit that it performs NO axis/
   winding remapping - MMD's own authoring convention may not exactly match

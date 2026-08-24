@@ -25,12 +25,86 @@ std::string PathToUtf8(const std::filesystem::path& path)
     return std::string(reinterpret_cast<const char*>(u8.data()), u8.size());
 }
 
+// The exact inverse of PathToUtf8() above - same std::u8string round-trip
+// PmxLoader.cpp's own Utf8ToPath() uses, duplicated here for the same
+// "src/Assets/ never depends on src/Editor/" reasoning IsImportableAsKtx2Texture()'s
+// own doc comment gives. Needed to turn a MaterialTextureRef::sourcePath
+// (always UTF-8 - see PmxLoader.cpp's ResolveTexturePath()) back into a
+// real std::filesystem::path for ImportPmxMaterialTextures() below.
+std::filesystem::path Utf8ToPath(const std::string& utf8)
+{
+    return std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(utf8.data()), utf8.size()));
+}
+
 std::string ToLowerAscii(const std::string& s)
 {
     std::string result = s;
     std::transform(
         result.begin(), result.end(), result.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return result;
+}
+
+// Imports every resolvable texture a just-parsed .pmx model's materials
+// reference (see MaterialData::textures/MaterialTextureRef, MaterialData.h)
+// as its OWN standalone *.gta AssetType::Texture asset, sitting right next
+// to the model's own destination Mesh *.gta (in a
+// "<meshFileStem>_Textures" sibling folder) - this is what makes the
+// engine's runtime mesh/texture loading (Game::EnsureMeshAsset(),
+// src/Game/Game.cpp) resolve every material's texture purely by Guid
+// through an AssetDatabase, instead of ever reaching back out to wherever
+// the original source .pmx's own texture folder happened to live on THIS
+// machine (which may not even exist on whatever machine later loads the
+// resulting Mesh *.gta - the exact "referencing a texture from outside the
+// Project" problem this function exists to close).
+//
+// Mutates `materials` in place, filling in each MaterialTextureRef::guid
+// that was successfully imported - a slot whose sourcePath is empty, whose
+// source file no longer exists on disk, or that fails to decode as a
+// supported image is simply left at Guid::Invalid() (the same "missing
+// texture" degrade-gracefully convention MaterialData::textures' own doc
+// comment already documents), never treated as a hard failure of the
+// overall .pmx import. Never throws.
+void ImportPmxMaterialTextures(
+    AssetDatabase& database, MaterialData& materials, const std::filesystem::path& meshGtaPath)
+{
+    if (materials.textures.empty()) {
+        return;
+    }
+
+    const std::filesystem::path texturesDirectory
+        = meshGtaPath.parent_path() / (PathToUtf8(meshGtaPath.stem()) + "_Textures");
+
+    for (std::size_t i = 0; i < materials.textures.size(); ++i) {
+        MaterialTextureRef& textureRef = materials.textures[i];
+        if (textureRef.sourcePath.empty()) {
+            continue; // No texture in this slot at all - nothing to import.
+        }
+
+        const std::filesystem::path sourcePath = Utf8ToPath(textureRef.sourcePath);
+
+        std::error_code existsEc;
+        if (!std::filesystem::is_regular_file(sourcePath, existsEc) || existsEc) {
+            continue; // Referenced texture file is missing on disk - leave guid invalid.
+        }
+
+        const std::optional<Ktx2EncodeResult> encoded = EncodeImageFileToKtx2(sourcePath);
+        if (!encoded.has_value()) {
+            continue; // Not actually decodable as a supported image - leave guid invalid.
+        }
+
+        // "<index>_<originalStem>.gta" - the index prefix keeps two
+        // different source folders' same-named textures (e.g. two
+        // materials both referencing "diffuse.png") from colliding once
+        // they all land flattened in the one texturesDirectory.
+        const std::filesystem::path textureGtaPath
+            = texturesDirectory / (std::to_string(i) + "_" + PathToUtf8(sourcePath.stem()) + ".gta");
+
+        const std::optional<Guid> guid
+            = database.ImportAsset(textureGtaPath, AssetType::Texture, std::vector<std::uint8_t>{}, encoded->ktx2Bytes);
+        if (guid.has_value()) {
+            textureRef.guid = *guid;
+        }
+    }
 }
 
 AssetImportResult ImportAsPlainCopy(const std::filesystem::path& sourcePath,
@@ -98,10 +172,20 @@ AssetImportResult ImportAssetFile(
     const std::string extension = ToLowerAscii(PathToUtf8(sourcePath.extension()));
 
     if (IsImportableAsMeshAsset(extension)) {
-        const PmxLoadResult loaded = LoadPmxModel(PathToUtf8(sourcePath));
+        PmxLoadResult loaded = LoadPmxModel(PathToUtf8(sourcePath));
         if (loaded.success) {
             std::filesystem::path gtaPath = preferredDestinationPath;
             gtaPath.replace_extension(".gta");
+
+            // Imports every material's referenced texture as its own
+            // *.gta AssetType::Texture asset (see
+            // ImportPmxMaterialTextures()'s own doc comment above) and
+            // fills in loaded.materials.textures[*].guid accordingly -
+            // MUST happen before EncodeRigDataToBytes() below, so the
+            // RigFileData this mesh's *.gta metadata gets built from
+            // already carries the resolved Guids, never the original
+            // machine-local absolute source paths.
+            ImportPmxMaterialTextures(database, loaded.materials, gtaPath);
 
             const std::vector<std::uint8_t> payload = EncodeMeshDataToBytes(loaded.mesh);
 

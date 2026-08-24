@@ -34,6 +34,13 @@ public:
 
     void I32(std::int32_t v) { U32(static_cast<std::uint32_t>(v)); }
 
+    void U64(std::uint64_t v)
+    {
+        U32(static_cast<std::uint32_t>(v & 0xFFFFFFFFull));
+        U32(static_cast<std::uint32_t>((v >> 32) & 0xFFFFFFFFull));
+    }
+
+
     void F32(float v)
     {
         std::uint32_t bits;
@@ -96,6 +103,14 @@ public:
     }
 
     std::int32_t I32() { return static_cast<std::int32_t>(U32()); }
+
+    std::uint64_t U64()
+    {
+        const std::uint64_t lo = U32();
+        const std::uint64_t hi = U32();
+        return lo | (hi << 32);
+    }
+
 
     float F32()
     {
@@ -553,8 +568,10 @@ bool ReadPhysics(BinaryReader& r, PhysicsData* out)
 void WriteMaterialData(BinaryWriter& w, const MaterialData& materials)
 {
     w.U32(static_cast<std::uint32_t>(materials.textures.size()));
-    for (const auto& texturePath : materials.textures) {
-        w.String(texturePath);
+    for (const auto& textureRef : materials.textures) {
+        w.String(textureRef.sourcePath);
+        w.U64(textureRef.guid.low);
+        w.U64(textureRef.guid.high);
     }
 
     w.U32(static_cast<std::uint32_t>(materials.materials.size()));
@@ -585,7 +602,11 @@ bool ReadMaterialData(BinaryReader& r, MaterialData* out)
     out->textures.clear();
     out->textures.reserve(textureCount);
     for (std::uint32_t i = 0; i < textureCount && r.Ok(); ++i) {
-        out->textures.push_back(r.String());
+        MaterialTextureRef textureRef;
+        textureRef.sourcePath = r.String();
+        textureRef.guid.low = r.U64();
+        textureRef.guid.high = r.U64();
+        out->textures.push_back(std::move(textureRef));
     }
 
     const std::uint32_t materialCount = r.U32();

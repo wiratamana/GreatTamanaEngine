@@ -103,6 +103,22 @@ RigFileData BuildSampleRigData()
     joint.rotateUpperLimit = Vec3(1.0f, 0.0f, 0.0f);
     rig.physics.joints.push_back(joint);
 
+    // --- Materials / textures (Guid-referenced texture slots) ---
+    MaterialTextureRef importedTexture;
+    importedTexture.sourcePath = "C:\\Source\\body.png"; // Diagnostic only - never read at load time.
+    importedTexture.guid = Guid::Parse("0123456789abcdef0123456789abcdef");
+    rig.materials.textures.push_back(importedTexture);
+
+    MaterialTextureRef unresolvedTexture; // Never actually imported - guid stays Guid::Invalid().
+    unresolvedTexture.sourcePath = "C:\\Source\\missing.png";
+    rig.materials.textures.push_back(unresolvedTexture);
+
+    Material material;
+    material.name = "Body";
+    material.textureIndex = 0;
+    material.indexCount = 6;
+    rig.materials.materials.push_back(material);
+
     return rig;
 }
 
@@ -172,6 +188,18 @@ TEST(RigFileTest, EncodeThenDecodeRoundTripsSkinWeightsBonesMorphsAndPhysics)
     EXPECT_EQ(decoded->physics.joints[0].name, "J0");
     EXPECT_EQ(decoded->physics.joints[0].type, JointType::Hinge);
     EXPECT_EQ(decoded->physics.joints[0].rigidBodyBIndex, -1);
+
+    // --- Materials / textures ---
+    ASSERT_EQ(decoded->materials.textures.size(), 2u);
+    EXPECT_EQ(decoded->materials.textures[0].sourcePath, "C:\\Source\\body.png");
+    EXPECT_EQ(decoded->materials.textures[0].guid, Guid::Parse("0123456789abcdef0123456789abcdef"));
+    EXPECT_EQ(decoded->materials.textures[1].sourcePath, "C:\\Source\\missing.png");
+    EXPECT_FALSE(decoded->materials.textures[1].guid.IsValid());
+
+    ASSERT_EQ(decoded->materials.materials.size(), 1u);
+    EXPECT_EQ(decoded->materials.materials[0].name, "Body");
+    EXPECT_EQ(decoded->materials.materials[0].textureIndex, 0);
+    EXPECT_EQ(decoded->materials.materials[0].indexCount, 6u);
 }
 
 TEST(RigFileTest, EncodesAllEmptyRigDataAsAHeaderOnlyBlobThatDecodesBackToEmpty)
@@ -186,6 +214,8 @@ TEST(RigFileTest, EncodesAllEmptyRigDataAsAHeaderOnlyBlobThatDecodesBackToEmpty)
     EXPECT_TRUE(decoded->morphs.morphs.empty());
     EXPECT_TRUE(decoded->physics.rigidBodies.empty());
     EXPECT_TRUE(decoded->physics.joints.empty());
+    EXPECT_TRUE(decoded->materials.textures.empty());
+    EXPECT_TRUE(decoded->materials.materials.empty());
 }
 
 TEST(RigFileTest, DecodeFailsOnEmptyBytes)

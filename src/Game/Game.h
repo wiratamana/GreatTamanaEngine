@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../Assets/AssetTypes.h"
 #include "../Event/Event.h"
 #include "../Input/InputState.h"
 #include "ECS/Registry.h"
@@ -14,6 +15,7 @@
 namespace gte {
 
 class Renderer;
+class AssetDatabase;
 
 // Sits on top of Window/Renderer and has no direct knowledge of SDL, or of
 // Vulkan beyond the Renderer abstraction. Owns the ECS World (m_registry)
@@ -205,16 +207,27 @@ private:
     // PipelineHandle from it.
     PipelineHandle EnsureTexturedMeshPipeline(Renderer& renderer);
 
-    // Lazily decodes/uploads (once per distinct absolute texture path, then
-    // cached in m_materialTextureCache) a PMX material's diffuse texture
-    // file straight off disk (see ImageFileDecoder.h) into a MaterialTexture
-    // (Renderer/MaterialTexture.h) - shared across every submesh/model that
-    // happens to reference the exact same texture file. Returns
-    // kInvalidTextureHandle (never throws) if `absoluteTexturePath` is
-    // empty or fails to decode (missing/corrupt file - see
-    // MaterialData::textures' own doc comment for why this is expected to
-    // legitimately happen sometimes).
-    TextureHandle EnsureMaterialTexture(Renderer& renderer, const std::string& absoluteTexturePath);
+    // Lazily decodes/uploads (once per distinct Guid, then cached in
+    // m_materialTextureCache) a PMX material's diffuse texture into a
+    // MaterialTexture (Renderer/MaterialTexture.h) - shared across every
+    // submesh/model that happens to reference the exact same texture
+    // asset. Resolves `textureGuid` through `database` (an AssetDatabase
+    // freshly scanned over the mesh's own directory - see
+    // EnsureMeshAsset()) into that Texture *.gta's absolute path, reads it
+    // via ReadGtaFile(), and decodes its KTX2 payload via
+    // Ktx2Decoder.h's DecodeKtx2ToRgba8() - the exact same asset-by-Guid
+    // resolution path the Editor's own Inspector preview
+    // (AssetPreviewTexture) uses for a *.gta Texture asset, so a material's
+    // texture is loaded through the SAME "asset manager resolves an id to
+    // its actual location" convention as every other *.gta asset in this
+    // engine, never a raw filesystem path baked into the mesh itself (see
+    // MaterialTextureRef's own doc comment, MaterialData.h). Returns
+    // kInvalidTextureHandle (never throws) if `textureGuid` is
+    // Guid::Invalid(), isn't currently tracked by `database`, or fails to
+    // decode (missing/corrupt/moved *.gta - see MaterialData::textures' own
+    // doc comment for why this is expected to legitimately happen
+    // sometimes).
+    TextureHandle EnsureMaterialTexture(Renderer& renderer, const AssetDatabase& database, const Guid& textureGuid);
 
     // One per entity CreateMeshEntityFromGtaFile() should spawn (as a CHILD
     // of that call's own root entity) for a given *.gta asset - see
@@ -261,16 +274,18 @@ private:
     // Keyed by absolute *.gta filesystem path (UTF-8) - see
     // EnsureMeshAsset()/CreateMeshEntityFromGtaFile() above. A plain
     // std::string key (rather than a Guid) since the caller (HierarchyPanel/
-    // ScenePanel's drag-and-drop target) only ever has a filesystem path
-    // in hand, not an AssetDatabase lookup - Game itself never depends on
-    // AssetDatabase/Editor code (see AGENTS.md, Clean Architecture).
+    // ScenePanel's drag-and-drop target) only ever has a filesystem path in
+    // hand, never a Guid - Game does use AssetDatabase now (see
+    // EnsureMeshAsset()), just never any Editor-only code (see AGENTS.md,
+    // Clean Architecture).
     std::unordered_map<std::string, std::vector<MeshAssetPart>> m_meshAssetCache;
 
-    // Keyed by absolute texture filesystem path (UTF-8) - see
-    // EnsureMaterialTexture() above. Shared across every model/material
-    // that references the same texture file (e.g. a body texture reused by
-    // several materials in one .pmx).
-    std::unordered_map<std::string, TextureHandle> m_materialTextureCache;
+    // Keyed by the texture's own Guid (see EnsureMaterialTexture() above) -
+    // shared across every model/material that references the same texture
+    // asset (e.g. a body texture reused by several materials in one .pmx),
+    // regardless of which mesh's own local AssetDatabase scan first
+    // resolved it.
+    std::unordered_map<Guid, TextureHandle> m_materialTextureCache;
 };
 
 } // namespace gte

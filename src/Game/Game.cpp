@@ -1,8 +1,9 @@
 #include "Game.h"
 
+#include "../Assets/AssetDatabase.h"
 #include "../Assets/AssetTypes.h"
 #include "../Assets/GtaFile.h"
-#include "../Assets/ImageFileDecoder.h"
+#include "../Assets/Ktx2Decoder.h"
 #include "../Assets/MaterialData.h"
 #include "../Assets/MeshFile.h"
 #include "../Assets/RigFile.h"
@@ -132,28 +133,41 @@ PipelineHandle Game::EnsureTexturedMeshPipeline(Renderer& renderer)
     return m_texturedMeshPipeline;
 }
 
-TextureHandle Game::EnsureMaterialTexture(Renderer& renderer, const std::string& absoluteTexturePath)
+TextureHandle Game::EnsureMaterialTexture(Renderer& renderer, const AssetDatabase& database, const Guid& textureGuid)
 {
-    if (absoluteTexturePath.empty()) {
+    if (!textureGuid.IsValid()) {
         return kInvalidTextureHandle;
     }
 
-    if (const auto found = m_materialTextureCache.find(absoluteTexturePath); found != m_materialTextureCache.end()) {
+    if (const auto found = m_materialTextureCache.find(textureGuid); found != m_materialTextureCache.end()) {
         return found->second;
     }
 
-    const std::optional<DecodedImageRgba8> decoded = DecodeImageFileToRgba8(absoluteTexturePath);
-    if (!decoded.has_value()) {
-        // Missing/corrupt/undecodable file - see MaterialData::textures'
-        // own doc comment. Deliberately NOT cached as a failure, so a
-        // texture that shows up later on disk (or is fixed) can succeed on
-        // a subsequent spawn without restarting the process.
+    const AssetRecord* record = database.FindByGuid(textureGuid);
+    if (record == nullptr || record->type != AssetType::Texture) {
+        // Not currently tracked as a real Texture asset (moved/deleted
+        // since import, or this *.gta predates texture-import support) -
+        // see MaterialData::textures' own doc comment. Deliberately NOT
+        // cached as a failure, so a texture that shows up later (or is
+        // fixed) can succeed on a subsequent spawn without restarting the
+        // process.
         return kInvalidTextureHandle;
     }
 
-    const TextureHandle handle = m_renderSystem.RegisterTexture(renderer.CreateMaterialTexture2D(decoded->pixels.data(),
-        static_cast<int>(decoded->width), static_cast<int>(decoded->height), "MaterialTexture"));
-    m_materialTextureCache.emplace(absoluteTexturePath, handle);
+    const std::optional<GtaFileData> gta = ReadGtaFile(Utf8PathFromGamePath(record->gtaPath));
+    if (!gta.has_value()) {
+        return kInvalidTextureHandle;
+    }
+
+    const std::optional<Ktx2DecodeResult> decoded = DecodeKtx2ToRgba8(gta->payload);
+    if (!decoded.has_value()) {
+        return kInvalidTextureHandle;
+    }
+
+    const TextureHandle handle = m_renderSystem.RegisterTexture(renderer.CreateMaterialTexture2D(
+        decoded->rgba8Pixels.data(), static_cast<int>(decoded->width), static_cast<int>(decoded->height),
+        "MaterialTexture"));
+    m_materialTextureCache.emplace(textureGuid, handle);
     return handle;
 }
 
@@ -185,6 +199,22 @@ const std::vector<Game::MeshAssetPart>& Game::EnsureMeshAsset(Renderer& renderer
     MaterialData materials;
     if (const std::optional<RigFileData> rig = DecodeRigDataFromBytes(gta->metadata); rig.has_value()) {
         materials = rig->materials;
+    }
+
+    // Every material's texture is referenced purely by Guid (see
+    // MaterialTextureRef, MaterialData.h) - resolving one to an actual
+    // *.gta Texture asset's absolute path needs a real AssetDatabase scan.
+    // A fresh, purely local AssetDatabase (never persisted/shared with the
+    // Editor's own ProjectPanel) scanned over this mesh *.gta's own parent
+    // directory is enough: AssetImporter.cpp always writes every material
+    // texture this model references into a "<meshFileStem>_Textures"
+    // sibling folder right next to the mesh's own *.gta (see
+    // AssetImporter.cpp's ImportPmxMaterialTextures()), so a recursive scan
+    // rooted there is guaranteed to find them regardless of how deep inside
+    // the Project this particular model happens to live.
+    AssetDatabase textureDatabase;
+    if (!materials.textures.empty()) {
+        textureDatabase.RefreshFromDirectory(Utf8PathFromGamePath(absoluteGtaPath).parent_path());
     }
 
     // --- Partition MeshData::indices into "textured" (one submesh per
@@ -222,7 +252,8 @@ const std::vector<Game::MeshAssetPart>& Game::EnsureMeshAsset(Renderer& renderer
         TextureHandle texture = kInvalidTextureHandle;
         if (material.textureIndex >= 0
             && static_cast<std::size_t>(material.textureIndex) < materials.textures.size()) {
-            texture = EnsureMaterialTexture(renderer, materials.textures[static_cast<std::size_t>(material.textureIndex)]);
+            const Guid& textureGuid = materials.textures[static_cast<std::size_t>(material.textureIndex)].guid;
+            texture = EnsureMaterialTexture(renderer, textureDatabase, textureGuid);
         }
 
         if (texture.IsValid() && count > 0) {

@@ -48,9 +48,10 @@ struct RigFileData {
 // length-prefixed with a uint32_t count/byte-length immediately before it,
 // so a reader never needs to know a section's size in advance):
 //
-//   8 bytes  : magic ("GTERIG02", no null terminator - exactly 8 bytes;
-//              bumped from the original "GTERIG01" when the materials
-//              section below was added - an old "GTERIG01" blob now fails
+//   8 bytes  : magic ("GTERIG03", no null terminator - exactly 8 bytes;
+//              bumped from "GTERIG02" when each texture slot gained a Guid
+//              alongside its source path - see MaterialTextureRef in
+//              MaterialData.h - an old "GTERIG01"/"GTERIG02" blob now fails
 //              to decode (returns std::nullopt) rather than silently
 //              misreading past its own end, same "never silently
 //              misinterpret an older layout" spirit as AssetTypes.h's own
@@ -70,8 +71,14 @@ struct RigFileData {
 //              record (two strings + fixed fields) rigid body records
 //   uint32_t : joints count, followed by that many fixed-shape-per-record
 //              (two strings + fixed fields) joint records
-//   uint32_t : texture count, followed by that many length-prefixed UTF-8
-//              absolute-path strings (MaterialData::textures)
+//   uint32_t : texture count, followed by that many texture slot records
+//              (MaterialData::textures / MaterialTextureRef) - each a
+//              length-prefixed UTF-8 source-path string (import-time
+//              diagnostic only - see MaterialTextureRef's own doc comment,
+//              never read at runtime) followed by a 16-byte Guid
+//              (low uint64 then high uint64) - Guid::Invalid() (all-zero)
+//              when that texture was never actually imported as its own
+//              *.gta asset
 //   uint32_t : materials count, followed by that many variable-size
 //              material records (two strings, fixed color/texture-index/
 //              toon fields, then the material's own indexCount)
@@ -80,7 +87,7 @@ struct RigFileData {
 // RigFileData; Decode only fails (returns std::nullopt) on a genuinely
 // malformed/truncated/wrong-magic blob - never throws, same failure
 // contract as MeshFile.h's own DecodeMeshDataFromBytes().
-inline constexpr char kRigFileMagic[8] = { 'G', 'T', 'E', 'R', 'I', 'G', '0', '2' };
+inline constexpr char kRigFileMagic[8] = { 'G', 'T', 'E', 'R', 'I', 'G', '0', '3' };
 
 std::vector<std::uint8_t> EncodeRigDataToBytes(const RigFileData& rig);
 
