@@ -1,11 +1,6 @@
-// Unit tests for src/Assets/AssetImporter.h - IsImportableAsKtx2Texture()'s
-// pure extension gating, and ImportAssetFile()'s PNG/JPG -> KTX2 -> *.gta
-// conversion vs. plain-copy-fallback behavior. Touches a real temp
-// directory (created/torn down by the fixture below) but no GPU/SDL/ImGui
-// at all - "Tier 1" per tests/CMakeLists.txt's own taxonomy. Always built -
-// src/Assets/ has no GTE_ENABLE_EDITOR/GTE_ENABLE_PROJECT_PANEL dependency.
-
 #include "Assets/AssetImporter.h"
+
+#include "Assets/RigFile.h"
 
 #include <cstring>
 #include <fstream>
@@ -296,11 +291,41 @@ TEST_F(AssetImporterTest, ConvertsAValidPmxToMeshWrappedGta)
     EXPECT_TRUE(result.guid.IsValid());
     EXPECT_EQ(result.meshVertexCount, 3u);
     EXPECT_EQ(result.meshTriangleCount, 1u);
+    // BuildMinimalTrianglePmx() deliberately defines no bones/morphs/rigid
+    // bodies/joints - a boneless import is still a normal success (see
+    // AssetImportResult's own doc comment) - but every vertex still carries
+    // skinning data (BDEF1, unconditionally present per the PMX format).
+    EXPECT_EQ(result.skinnedVertexCount, 3u);
+    EXPECT_EQ(result.boneCount, 0u);
+    EXPECT_EQ(result.morphCount, 0u);
+    EXPECT_EQ(result.rigidBodyCount, 0u);
+    EXPECT_EQ(result.jointCount, 0u);
 
     std::error_code ec;
     EXPECT_TRUE(std::filesystem::exists(result.finalPath, ec));
     EXPECT_FALSE(std::filesystem::exists(m_root / "Imported" / "model.pmx", ec)); // No plain-copy byproduct left behind.
 }
+
+TEST_F(AssetImporterTest, ConvertedMeshAssetsMetadataDecodesBackToItsRigData)
+{
+    const std::filesystem::path source = m_root / "model.pmx";
+    WriteBinaryFile(source, BuildMinimalTrianglePmx());
+
+    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "model.pmx");
+    ASSERT_TRUE(result.success) << result.message;
+
+    const std::optional<GtaFileData> gta = ReadGtaFile(result.finalPath);
+    ASSERT_TRUE(gta.has_value());
+    EXPECT_EQ(gta->header.Type(), AssetType::Mesh);
+
+    const std::optional<RigFileData> rig = DecodeRigDataFromBytes(gta->metadata);
+    ASSERT_TRUE(rig.has_value());
+    EXPECT_EQ(rig->skinWeights.size(), 3u); // 1:1 with the mesh's own vertex count.
+    EXPECT_TRUE(rig->skeleton.bones.empty());
+    EXPECT_TRUE(rig->morphs.morphs.empty());
+    EXPECT_TRUE(rig->physics.rigidBodies.empty());
+}
+
 
 TEST_F(AssetImporterTest, ConvertedMeshAssetIsImmediatelyTrackedByTheDatabase)
 {

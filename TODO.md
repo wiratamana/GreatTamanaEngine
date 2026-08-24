@@ -203,23 +203,32 @@ unblock the most follow-on work:
   `Game`-side, mirroring `CreatePrimitiveEntity()`. A future OBJ/glTF loader
   would produce the exact same `MeshData`/`*.gta` shape `PmxLoader` already
   does (see `src/Assets/MeshData.h`), so none of this work is PMX-specific.
-- **Real MMD skinning/animation (bones, morphs, `.vmd` motion playback).**
-  `PmxLoader.h`/`MeshFile.h` only extract a `.pmx`'s raw vertex geometry
-  (positions/normals/UVs/indices) today - saba's own `PMXFile` parser
-  (`cmake/FetchSaba.cmake`) already reads the file's bones/morphs/materials/
-  rigid bodies/joints too, but nothing in this engine surfaces or stores any
-  of that yet. Real bone-deformed rendering (a T-posed/A-posed import
-  actually posing/animating) needs saba's `PMXModel`/`MMDNode`/`MMDIkSolver`/
-  `MMDMorph` runtime layer - which itself needs `MMDPhysics` (rigid-body
-  jiggle bones, physics-after-deform), which needs Bullet (NOT fetched
-  today - deliberately out of scope for this session's curated saba subset,
-  see `cmake/FetchSaba.cmake`'s header comment) - plus a `.vmd` motion file
+- **Real MMD skinning/animation runtime (pose evaluation, morph blending,
+  physics simulation, `.vmd` motion playback).** The DATA side of this is no
+  longer a gap: `PmxLoader.h` now extracts per-vertex skin weights (all of
+  BDEF1/BDEF2/BDEF4/SDEF/QDEF - `MeshData::skinWeights`), the full bone
+  hierarchy including IK chains (`Assets/SkeletonData.h`), all seven morph
+  kinds (`Assets/MorphData.h`), and rigid bodies/joints
+  (`Assets/PhysicsData.h`), all round-tripped through `Assets/RigFile.h`
+  into the `*.gta`'s metadata section - see README.md's own entry for the
+  full rundown. What's still missing is the RUNTIME that actually DOES
+  anything with that data: real bone-deformed rendering (a T-posed/A-posed
+  import actually posing/animating) needs an IK solver (evaluating the
+  `Bone::ikLinks`/`ikTargetBoneIndex`/`ikAngleLimitRadians` this session
+  added) and a morph blender (applying `Morph::positionOffsets`/etc. at a
+  runtime weight) - saba's own `PMXModel`/`MMDNode`/`MMDIkSolver`/`MMDMorph`
+  layer does this and could be a reference, though it also expects its own
+  `MMDPhysics` (rigid-body jiggle bones, physics-after-deform) wired in,
+  which needs Bullet (NOT fetched today - deliberately out of scope, see
+  `cmake/FetchSaba.cmake`'s header comment) to actually simulate the
+  `RigidBody`/`Joint` data this session extracts. A `.vmd` motion file
   loader (`saba::VMDAnimation`/`VMDCameraAnimation`, also not vendored yet)
-  to actually drive it over time. A real skeletal-animation vertex
-  format/shader (bone indices + weights, GPU skinning or CPU pre-skin) would
-  also be needed on the rendering side - today's engine has no skinning
-  concept anywhere. A large, multi-session effort; this session deliberately
-  scoped down to "extract vertices/normals/UVs for a static preview" only.
+  would be needed to actually drive bones/morphs over time. A real
+  skeletal-animation vertex format/shader (bone indices + weights, GPU
+  skinning or CPU pre-skin, consuming `MeshData::skinWeights` directly)
+  would also be needed on the rendering side - today's engine has no
+  skinning concept anywhere in `Renderer`/`Pipeline`/`Vertex`. Still a
+  large, multi-session effort even with the data-extraction half done.
 - **PMX material/texture import.** `MeshData`/`MeshFile` carry no material
   data at all - a `.pmx`'s per-face material list (diffuse/specular/
   ambient color, a diffuse texture reference, optional sphere-map/toon

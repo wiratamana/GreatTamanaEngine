@@ -46,6 +46,20 @@ struct AssetImportResult {
     std::size_t meshVertexCount = 0;
     std::size_t meshTriangleCount = 0;
 
+    // Only meaningful when convertedToMeshAsset is true - counts of the
+    // rig data (see RigFile.h) bundled into the same *.gta's metadata
+    // section alongside the mesh payload: how many bones/morphs/rigid
+    // bodies/joints the source .pmx actually defined (all zero for a
+    // boneless/riggless static mesh - that's a normal, successful import,
+    // not a failure). skinnedVertexCount is always == meshVertexCount for
+    // a PMX import (see PmxLoader.h's PmxLoadResult::mesh doc comment) -
+    // reported separately anyway so a caller never needs to assume that.
+    std::size_t skinnedVertexCount = 0;
+    std::size_t boneCount = 0;
+    std::size_t morphCount = 0;
+    std::size_t rigidBodyCount = 0;
+    std::size_t jointCount = 0;
+
     std::string message; // Human-readable status - always set, success or failure.
 };
 
@@ -82,7 +96,14 @@ bool IsImportableAsMeshAsset(const std::string& extensionLowercaseWithDot);
 //      recognizes, it's parsed into a MeshData (PmxLoader.h today),
 //      serialized via MeshFile.h's EncodeMeshDataToBytes(), and wrapped as a
 //      *.gta (AssetType::Mesh) at `preferredDestinationPath` with its
-//      extension replaced by ".gta", via `database.ImportAsset()`.
+//      extension replaced by ".gta", via `database.ImportAsset()`. The same
+//      PmxLoader.h call also extracts per-vertex skinning weights plus the
+//      model's bones/morphs/rigid-body-and-joint physics setup (see
+//      SkeletonData.h/MorphData.h/PhysicsData.h) - RigFile.h's
+//      EncodeRigDataToBytes() serializes ALL of that into the *.gta's
+//      METADATA section (see GtaFile.h), alongside the unchanged MeshFile.h
+//      payload in the same file. A boneless/riggless .pmx still imports
+//      successfully; its rig section simply encodes as all-empty.
 //   2. Otherwise, if it's one IsImportableAsKtx2Texture() recognizes, its
 //      pixels are decoded and re-encoded as a KTX2 container (Ktx2Encoder.h's
 //      EncodeImageFileToKtx2()), then wrapped as a *.gta (AssetType::Texture)

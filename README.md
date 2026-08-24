@@ -281,11 +281,29 @@ registry that tracks every one of them:
   as a `*.gta` (`AssetType::Mesh`) via `AssetDatabase::ImportAsset()`, same as
   the texture pipeline. A file that merely *looks* like a `.pmx` by extension
   but fails to actually parse degrades gracefully to a plain copy, same
-  convention as a corrupt image. No bones/morphs/materials/rigid bodies/
-  joints are extracted or stored yet (saba's own `PMXFile` parser reads them,
-  but `PmxLoader`/`MeshFile` deliberately don't surface them) — this is
-  vertex-geometry import only; see `TODO.md` for real skinning/animation and
-  material/texture import as explicit follow-ups.
+  convention as a corrupt image.
+  **Bone weights/skinning, bones, morphs, and rigid-body/joint physics** are
+  now extracted too (this was previously an explicit gap — see `TODO.md`'s
+  history): `LoadPmxModel()` additionally returns a `SkeletonData`
+  (`Assets/SkeletonData.h` — the bone hierarchy, including IK chains/limits
+  and append/fixed-axis/local-axis bones), a `MorphData`
+  (`Assets/MorphData.h` — all seven PMX morph kinds: Position/UV/Bone/
+  Material/Group/Flip/Impulse), and a `PhysicsData` (`Assets/PhysicsData.h`
+  — rigid bodies and joints, DATA only, no simulation backend), plus
+  per-vertex `VertexSkinWeights` bundled straight into `MeshData` itself
+  (covering all of BDEF1/BDEF2/BDEF4/SDEF/QDEF). `MeshFile.h`'s own
+  position/normal/UV/index binary layout is unchanged; the new skin
+  weights/bones/morphs/physics instead round-trip through a sibling format,
+  `Assets/RigFile.h`'s `EncodeRigDataToBytes()`/`DecodeRigDataFromBytes()`,
+  which `AssetImporter.cpp` stores in the same `*.gta`'s METADATA section
+  (see `GtaFile.h`'s `GtaFileData::metadata` — previously always empty for a
+  Mesh asset) alongside the unchanged mesh payload. A boneless/riggless
+  `.pmx` still imports successfully with an all-empty rig section. This is
+  still import/data-extraction only — no GPU skinning, IK solving, morph
+  blending, or physics simulation happens anywhere in this engine yet (no
+  Bullet or equivalent backend is vendored); see `TODO.md` for that
+  remaining runtime work, and material/texture import as another explicit
+  follow-up.
 
 ### Editor / Debug UI
 
@@ -752,6 +770,30 @@ pieces:
   and no GAMEPLAY consumption path yet (only the Editor's own Inspector
   preview renders it; nothing yet spawns a `MeshRenderer` entity from an
   imported Mesh asset) - see `TODO.md`.
+- **PMX bone weights/skinning, bones, morphs, and rigid-body/joint physics
+  import** — closes the "no bones/morphs/materials/rigid bodies" gap the
+  previous entry called out. `PmxLoader::LoadPmxModel()` now also extracts:
+  per-vertex skin weights covering all of BDEF1/BDEF2/BDEF4/SDEF/QDEF
+  (bundled straight into `MeshData::skinWeights` — see `Assets/MeshData.h`),
+  the full bone hierarchy including IK chains/limits and append/fixed-axis/
+  local-axis bones (`Assets/SkeletonData.h`), all seven PMX morph kinds —
+  Position/UV/Bone/Material/Group/Flip/Impulse (`Assets/MorphData.h`), and
+  rigid bodies + joints (`Assets/PhysicsData.h`, DATA only — no Bullet or
+  equivalent simulation backend is vendored). A new sibling binary format,
+  `Assets/RigFile.h`'s `EncodeRigDataToBytes()`/`DecodeRigDataFromBytes()`,
+  serializes all of that into the `*.gta`'s previously-always-empty
+  METADATA section (`AssetImporter.cpp`), alongside the unchanged
+  `MeshFile.h` geometry payload — so a boneless/riggless `.pmx` still
+  imports exactly as before, and a rigged one now carries its full rig data
+  along for free. Verified against the same real ~30k-vertex MMD model as
+  the previous entry, which turned out to carry 387 bones, 63 morphs, 267
+  rigid bodies, and 368 joints — all now correctly parsed end-to-end (see
+  `tests/Assets/PmxLoaderTests.cpp`'s `PmxLoaderRealModelSmokeTest`), plus
+  hand-built binary fixtures exercising every weight type/bone flag/morph
+  kind/physics shape individually (`tests/Assets/RigFileTests.cpp` for the
+  new binary format's own round-trip). Still import/data-extraction only —
+  no GPU skinning, IK solving, morph blending, or physics simulation
+  happens anywhere in this engine yet; see `TODO.md`.
 
 ## Roadmap
 

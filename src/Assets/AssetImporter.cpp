@@ -3,6 +3,7 @@
 #include "Ktx2Encoder.h"
 #include "MeshFile.h"
 #include "PmxLoader.h"
+#include "RigFile.h"
 
 #include <algorithm>
 #include <array>
@@ -96,7 +97,15 @@ AssetImportResult ImportAssetFile(
             gtaPath.replace_extension(".gta");
 
             const std::vector<std::uint8_t> payload = EncodeMeshDataToBytes(loaded.mesh);
-            const std::optional<Guid> guid = database.ImportAsset(gtaPath, AssetType::Mesh, std::vector<std::uint8_t>{}, payload);
+
+            RigFileData rig;
+            rig.skinWeights = loaded.mesh.skinWeights;
+            rig.skeleton = loaded.skeleton;
+            rig.morphs = loaded.morphs;
+            rig.physics = loaded.physics;
+            const std::vector<std::uint8_t> metadata = EncodeRigDataToBytes(rig);
+
+            const std::optional<Guid> guid = database.ImportAsset(gtaPath, AssetType::Mesh, metadata, payload);
 
             AssetImportResult result;
             if (guid.has_value()) {
@@ -106,9 +115,16 @@ AssetImportResult ImportAssetFile(
                 result.guid = *guid;
                 result.meshVertexCount = loaded.mesh.positions.size();
                 result.meshTriangleCount = loaded.mesh.indices.size() / 3;
+                result.skinnedVertexCount = loaded.mesh.skinWeights.size();
+                result.boneCount = loaded.skeleton.bones.size();
+                result.morphCount = loaded.morphs.morphs.size();
+                result.rigidBodyCount = loaded.physics.rigidBodies.size();
+                result.jointCount = loaded.physics.joints.size();
                 result.message = "Imported \"" + PathToUtf8(sourcePath.filename()) + "\" as a mesh ("
                     + std::to_string(result.meshVertexCount) + " vertices, " + std::to_string(result.meshTriangleCount)
-                    + " triangles) -> \"" + PathToUtf8(gtaPath.filename()) + "\".";
+                    + " triangles, " + std::to_string(result.boneCount) + " bones, " + std::to_string(result.morphCount)
+                    + " morphs, " + std::to_string(result.rigidBodyCount) + " rigid bodies, "
+                    + std::to_string(result.jointCount) + " joints) -> \"" + PathToUtf8(gtaPath.filename()) + "\".";
             } else {
                 result.success = false;
                 result.message

@@ -185,6 +185,16 @@
 #                                            empty input rejection - no GPU
 #                                            device involved (src/Assets/
 #                                            MeshFile.h).
+#   - Assets/RigFileTests.cpp                - EncodeRigDataToBytes()/
+#                                            DecodeRigDataFromBytes()
+#                                            round-tripping the *.gta
+#                                            AssetType::Mesh METADATA
+#                                            section's binary layout (per-
+#                                            vertex skin weights, bones,
+#                                            morphs, rigid bodies/joints),
+#                                            plus malformed/truncated/empty
+#                                            input rejection - no GPU device
+#                                            involved (src/Assets/RigFile.h).
 #
 # Note that the test BINARY still dynamically depends on SDL3.dll at process
 # load time regardless of the above (gte_core's Window.cpp references SDL
@@ -218,6 +228,7 @@ set(GTE_TEST_SOURCES
     Assets/AssetImporterTests.cpp
     Assets/PmxLoaderTests.cpp
     Assets/MeshFileTests.cpp
+    Assets/RigFileTests.cpp
     Memory/GpuMemoryTrackerTests.cpp
     Memory/SdlMemoryTrackerTests.cpp
     Input/InputStateTests.cpp
