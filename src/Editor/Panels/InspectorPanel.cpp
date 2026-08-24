@@ -3,6 +3,7 @@
 #include "../EditorContext.h"
 #include "../../ECS/Components/Camera.h"
 #include "../../ECS/Components/MeshRenderer.h"
+#include "../../ECS/Components/Name.h"
 #include "../../ECS/Components/Transform.h"
 #include "../../ECS/Registry.h"
 #include "../../ECS/TransformHierarchy.h"
@@ -41,6 +42,23 @@ void BuildEntityInspector(Registry& registry, EditorContext& ctx)
     }
 
     ImGui::Text("Entity %u (generation %u)", entity.index, entity.generation);
+
+    // Optional editable display Name (ECS/Components/Name.h) - an entity
+    // with none yet gets one lazily the moment its name is actually edited
+    // here, rather than every entity paying for one up front.
+    {
+        Name* name = registry.TryGetComponent<Name>(entity);
+        char nameBuffer[256];
+        std::snprintf(nameBuffer, sizeof(nameBuffer), "%s", name != nullptr ? name->value.c_str() : "");
+        if (ImGui::InputText("Name", nameBuffer, sizeof(nameBuffer))) {
+            if (name != nullptr) {
+                name->value = nameBuffer;
+            } else {
+                registry.AddComponent<Name>(entity, Name{ std::string(nameBuffer) });
+            }
+        }
+    }
+
     ImGui::Separator();
 
     if (Transform* transform = registry.TryGetComponent<Transform>(entity)) {

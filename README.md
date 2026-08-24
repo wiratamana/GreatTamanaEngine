@@ -157,8 +157,10 @@ component type), and `Registry` (owns one of each). Rolled by hand rather
 than via a third-party library (EnTT), the same "own the core data model"
 choice as `src/Math/` not depending on GLM. `Transform`
 (`ECS/Components/Transform.h`), `MeshRenderer`
-(`ECS/Components/MeshRenderer.h`), and `Camera` (`ECS/Components/Camera.h`)
-are the three components that exist today —
+(`ECS/Components/MeshRenderer.h`), `Camera` (`ECS/Components/Camera.h`), and
+`Name` (`ECS/Components/Name.h` — a single optional `std::string value`,
+used purely as a display label wherever one exists) are the four components
+that exist today —
 all plain data, no behavior beyond small pure-math helpers, no GPU/SDL
 ownership of their own.
 `Transform` now carries a real parent/child relationship, Unity's own
@@ -351,7 +353,15 @@ registry that tracks every one of them:
   (see "Rendering" above and "Editor / Debug UI" below for the Editor's own
   drag-and-drop trigger for it) — but always in its ORIGINAL BIND POSE,
   since none of the skinning/IK/morph/physics evaluation this paragraph
-  describes actually runs yet.
+  describes actually runs yet. A multi-part (multi-material) model spawns as
+  a real parent/child hierarchy, not a flat list of independent siblings:
+  one plain, empty ROOT entity (`Transform` only) named after the `*.gta`
+  file itself, with every submesh "part" entity attached under it — see
+  "Entity-Component-System" below for `Transform`'s own parent/child
+  support, and `Game::CreateMeshEntityFromGtaFile()`'s own doc comment
+  (`src/Game/Game.h`) for the exact naming rule (a part is named after its
+  originating PMX material when that material itself has a name — see the
+  new `Name` component, `src/ECS/Components/Name.h`).
 - **MikuMikuDance (`.vmd`) motion import → Animation `*.gta`**
   (`Assets/VmdLoader.h/.cpp`, `Assets/MotionData.h`, `Assets/MotionFile.h/.cpp`,
   `Assets/AssetImporter.h/.cpp`) — the motion-import equivalent of the `.pmx`
@@ -436,8 +446,13 @@ CMake adds:
   (`Panels/ScenePanel.cpp`) to
   instantiate it, Unity's own "drag a model into the scene" convention — both
   drop targets just call `Game::CreateMeshEntityFromGtaFile()` and select the
-  freshly spawned entity. Dropping anything other than a valid `*.gta`
-  `AssetType::Mesh` file is silently ignored (see "Asset Pipeline" above).
+  freshly spawned ROOT entity — for a multi-part model this selects the one
+  entity that represents the whole thing, exactly like dropping onto an
+  entity row spawns the whole model as that row's single CHILD (its own
+  parts stay nested under their own model root, never spliced directly under
+  the drop target as loose siblings). Dropping anything other than a valid
+  `*.gta` `AssetType::Mesh` file is silently ignored (see "Asset Pipeline"
+  above).
   **Visibility-driven rendering:** `IEditorLayer::GameViewTarget()`/
   `SceneViewTarget()` each return `nullptr` (skipping that view's
   `Renderer::RenderOffscreen()` pass entirely) whenever `ImGui::Begin()`
@@ -830,8 +845,9 @@ pieces:
 - A hand-rolled **Entity-Component-System** (`src/ECS/`: `Entity`/
   `EntityManager`/`ComponentStorage<T>`/`Registry`) is the engine's Scene/
   World data model — no third-party ECS library (EnTT), same "own the core
-  data model" choice as Math. `Transform`, `MeshRenderer`, and `Camera` are
-  the three components that exist today. `Transform` now carries a real
+  data model" choice as Math. `Transform`, `MeshRenderer`, `Camera`, and
+  `Name` (a single optional display-label string, `src/ECS/Components/Name.h`)
+  are the four components that exist today. `Transform` now carries a real
   parent/child hierarchy (`parent`/`siblingIndex` fields, plus
   `ECS/TransformHierarchy.h/.cpp`'s `ComputeWorldMatrix()`/`SetParent()`/
   `GetChildren()`/`SetSiblingIndex()`) - a parented entity's world transform
@@ -1023,6 +1039,33 @@ pieces:
   regenerating an existing `*.gta` without driving the Editor UI, and the
   full test suite (342 tests) still passes. Still NOT done: sphere-map/toon
   shading (parsed into `Material` but never sampled) — see `TODO.md`.
+- **A multi-part model now instantiates as a real parent/child hierarchy,
+  not flat independent siblings, and both the model and its parts get real
+  display names.** `Game::CreateMeshEntityFromGtaFile()` (`src/Game/Game.cpp`)
+  now creates one plain, empty ROOT entity first (a `Transform` only — no
+  `MeshRenderer`, so it never renders anything by itself), named after the
+  source `*.gta` FILE itself (its own filename minus extension — e.g.
+  "Furina.gta" spawns a root named "Furina"), then attaches every submesh
+  "part" entity under it via `ECS/TransformHierarchy.h`'s `SetParent()` —
+  moving/rotating/scaling the root now moves the whole model together,
+  Unity's own "a multi-material import gets one root GameObject with a
+  child per submesh" convention. A new plain-data `Name` component
+  (`src/ECS/Components/Name.h`) is what carries a display name: each
+  TEXTURED part is named after its own originating PMX `Material::name`
+  (`MeshAssetPart::name`, threaded through from `RigFileData::materials`)
+  whenever that material actually has a non-empty name, while the combined
+  untextured "grey clay" part (which can merge more than one material) is
+  left without a `Name` at all. "Hierarchy" (`Panels/HierarchyPanel.cpp`)
+  and "Inspector" (`Panels/InspectorPanel.cpp`, which now also has an
+  editable "Name" text field for ANY selected entity) both show a `Name`
+  component's value in place of the usual synthesized "Entity %u" label
+  whenever one is present, falling back to that same synthesized label
+  otherwise. `CreateMeshEntityFromGtaFile()` now returns the ROOT entity
+  (previously the first part) — the Hierarchy/Scene drag-and-drop targets
+  (see "Editor / Debug UI" above) select exactly the one entity that
+  represents the whole freshly instantiated model. Verified against the
+  same real Furina model (32 materials) already used elsewhere in this
+  README, and the full test suite (363 tests) still passes.
 
 ## Roadmap
 

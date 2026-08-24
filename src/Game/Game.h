@@ -85,31 +85,49 @@ public:
     // per instance.
     Entity CreatePrimitiveEntity(Renderer& renderer, PrimitiveType type);
 
-    // Spawns one-or-more new entities from an imported *.gta AssetType::Mesh
-    // file (see src/Assets/MeshFile.h/PmxLoader.h - the result of importing
-    // a MikuMikuDance .pmx model via the Editor's "Project" panel) at
-    // `absoluteGtaPath` - this engine's answer to "drag a model asset into
-    // Hierarchy/Scene to instantiate it", the Mesh-asset equivalent of
-    // CreatePrimitiveEntity() above. Every spawned entity gets an identical
-    // identity Transform (scale/rotation, world origin), exactly like
-    // CreatePrimitiveEntity() - the caller (a future Inspector edit, or a
-    // real scene file) is responsible for moving them anywhere else. (This
-    // engine's Transform has no parent-hierarchy concept yet - see
-    // Transform.h - so a multi-material model's several submesh entities
-    // are independent siblings, not parent/children, for now.)
+    // Spawns a whole hierarchy of entities from an imported *.gta
+    // AssetType::Mesh file (see src/Assets/MeshFile.h/PmxLoader.h - the
+    // result of importing a MikuMikuDance .pmx model via the Editor's
+    // "Project" panel) at `absoluteGtaPath` - this engine's answer to "drag
+    // a model asset into Hierarchy/Scene to instantiate it", the Mesh-asset
+    // equivalent of CreatePrimitiveEntity() above.
     //
-    // MORE THAN ONE entity is spawned when the source .pmx defines
+    // A multi-part model (see below for what "part" means) is spawned as a
+    // real parent/child hierarchy (ECS/TransformHierarchy.h/Transform.h),
+    // not a flat list of independent siblings: ONE plain, empty ROOT entity
+    // (an identity Transform only - no MeshRenderer of its own, so it never
+    // renders anything by itself) is created first, named after the asset
+    // FILE itself (`absoluteGtaPath`'s own filename, minus its ".gta"
+    // extension - e.g. "Miku.gta" spawns a root named "Miku"), and every
+    // part entity below is attached under it via SetParent() - moving/
+    // rotating/scaling the root moves the WHOLE model together, exactly
+    // like dragging a multi-material FBX/glTF model into a Unity scene
+    // creates one root GameObject with a child per submesh. Every part
+    // entity keeps an identity LOCAL Transform (so it renders exactly where
+    // it always did - the root itself starts at the world origin too); the
+    // caller (a future Inspector edit, or a real scene file) is responsible
+    // for moving the ROOT anywhere else afterwards - moving it alone is
+    // enough to move every part with it.
+    //
+    // MORE THAN ONE part entity is spawned when the source .pmx defines
     // materials with a resolvable diffuse texture (see MaterialData.h): one
-    // entity PER DISTINCT "untextured" combined submesh (there is at most
-    // one of these - every material with no resolvable texture is merged
-    // into a single combined Mesh, rendered exactly like a pre-material-
-    // import model always was, via the plain "grey clay" Mesh.vert/.frag
-    // pipeline) PLUS one entity per material that DOES have a resolvable
-    // texture, each with its own MeshRenderer::texture bound and rendered
-    // through the textured TexturedMesh.vert/.frag pipeline (see
-    // Pipeline.h's VertexLayout::PositionNormalUv). A materialless mesh
-    // (or one whose *.gta predates this engine's material-import support)
-    // still spawns exactly the one untextured entity it always did.
+    // part PER DISTINCT "untextured" combined submesh (there is at most one
+    // of these - every material with no resolvable texture is merged into a
+    // single combined Mesh, rendered exactly like a pre-material-import
+    // model always was, via the plain "grey clay" Mesh.vert/.frag pipeline)
+    // PLUS one part per material that DOES have a resolvable texture, each
+    // with its own MeshRenderer::texture bound and rendered through the
+    // textured TexturedMesh.vert/.frag pipeline (see Pipeline.h's
+    // VertexLayout::PositionNormalUv). A materialless mesh (or one whose
+    // *.gta predates this engine's material-import support) still spawns
+    // exactly the one untextured part it always did (as the root's only
+    // child). Each TEXTURED part is named after the PMX material it came
+    // from (Material::name - see MaterialData.h) whenever that material
+    // actually has a non-empty name; the combined untextured part (which
+    // may merge more than one material into one submesh) and any part whose
+    // originating material has no name are left with no Name component at
+    // all - "Hierarchy" then falls back to its usual synthesized "Entity
+    // %u" label for that entity (see Panels/HierarchyPanel.cpp).
     //
     // The mesh's positions/normals/UVs/triangle indices (split per-material
     // this way) plus every distinct diffuse texture are uploaded ONCE per
@@ -125,19 +143,19 @@ public:
     // evaluates it at runtime yet, so this always renders the model's
     // original bind pose exactly as authored).
     //
-    // Returns kInvalidEntity (never throws) if `absoluteGtaPath` doesn't
-    // currently resolve to a valid, non-empty *.gta AssetType::Mesh file
-    // (missing file, bad magic/wrong asset type, corrupt/truncated payload,
-    // or zero vertices/triangles) - the caller (HierarchyPanel/ScenePanel's
-    // drag-and-drop target) should simply ignore the drop in that case,
-    // same "degrade gracefully" convention as every other Editor
-    // drag-and-drop path (see AGENTS.md, "Editor Module Structure").
-    // Otherwise returns the FIRST entity spawned (arbitrary but
-    // deterministic order - untextured combined submesh first, if any, then
-    // one per textured material in MaterialData::materials order) - a
+    // Returns kInvalidEntity (never throws, and creates NO entities at all)
+    // if `absoluteGtaPath` doesn't currently resolve to a valid, non-empty
+    // *.gta AssetType::Mesh file (missing file, bad magic/wrong asset type,
+    // corrupt/truncated payload, or zero vertices/triangles) - the caller
+    // (HierarchyPanel/ScenePanel's drag-and-drop target) should simply
+    // ignore the drop in that case, same "degrade gracefully" convention as
+    // every other Editor drag-and-drop path (see AGENTS.md, "Editor Module
+    // Structure"). Otherwise returns the newly created ROOT entity - a
     // caller that only keeps one handle (e.g. to select it in the
-    // Hierarchy) gets a reasonable one; the rest are still live entities in
-    // the Registry either way.
+    // Hierarchy, or to move/parent the whole model elsewhere) gets exactly
+    // the one that represents the whole instantiated model, Unity's own
+    // "the thing you dragged in is the root you select" convention; every
+    // part is still a live child entity in the Registry either way.
     Entity CreateMeshEntityFromGtaFile(Renderer& renderer, const std::string& absoluteGtaPath);
 
 private:
@@ -198,14 +216,23 @@ private:
     // legitimately happen sometimes).
     TextureHandle EnsureMaterialTexture(Renderer& renderer, const std::string& absoluteTexturePath);
 
-    // One per entity CreateMeshEntityFromGtaFile() should spawn for a given
-    // *.gta asset - see EnsureMeshAsset() below.
+    // One per entity CreateMeshEntityFromGtaFile() should spawn (as a CHILD
+    // of that call's own root entity) for a given *.gta asset - see
+    // EnsureMeshAsset() below.
     struct MeshAssetPart {
         MeshHandle mesh;
         // kInvalidTextureHandle means "untextured - draw via
         // EnsureMeshPipeline()'s pipeline"; otherwise draw via
         // EnsureTexturedMeshPipeline()'s pipeline with this texture bound.
         TextureHandle texture;
+        // The originating PMX material's own name (Material::name - see
+        // MaterialData.h), or empty when this part has no single
+        // originating material with a usable name (the combined untextured
+        // submesh, which may merge more than one material together, or a
+        // material whose own name PMX left blank) - see
+        // CreateMeshEntityFromGtaFile()'s own doc comment (Game.h) for what
+        // an empty name here means for the spawned entity.
+        std::string name;
     };
 
     // Decodes (once per distinct `absoluteGtaPath`, then cached in

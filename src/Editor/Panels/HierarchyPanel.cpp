@@ -2,6 +2,7 @@
 
 #include "../EditorContext.h"
 #include "../../ECS/Components/Camera.h"
+#include "../../ECS/Components/Name.h"
 #include "../../ECS/Components/Transform.h"
 #include "../../ECS/Registry.h"
 #include "../../ECS/TransformHierarchy.h"
@@ -38,12 +39,18 @@ constexpr std::array<PrimitiveType, 5> kCreatableShapes = {
 // child of this row".
 constexpr float kReorderBandFraction = 0.25f;
 
-// Builds this entity's own "Entity %u" (or "Entity %u (Camera)") label -
-// the exact same text the old flat list used, just factored out so the
-// recursive tree renderer below can reuse it for both the label and the
-// drag tooltip.
+// Builds this entity's own display label: its Name component's own value
+// (see ECS/Components/Name.h - set e.g. by Game::CreateMeshEntityFromGtaFile()
+// for a spawned model's root/parts) when present and non-empty, otherwise
+// the synthesized "Entity %u" (or "Entity %u (Camera)") label this engine
+// has always shown - factored out so the recursive tree renderer below can
+// reuse it for both the label and the drag tooltip.
 std::string BuildEntityLabel(Registry& registry, Entity entity)
 {
+    if (const Name* name = registry.TryGetComponent<Name>(entity); name != nullptr && !name->value.empty()) {
+        return registry.HasComponent<Camera>(entity) ? (name->value + " (Camera)") : name->value;
+    }
+
     char label[32];
     if (registry.HasComponent<Camera>(entity)) {
         std::snprintf(label, sizeof(label), "Entity %u (Camera)", entity.index);

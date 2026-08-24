@@ -11,7 +11,9 @@
 #include "../Renderer/Vertex.h"
 #include "ECS/Components/Camera.h"
 #include "ECS/Components/MeshRenderer.h"
+#include "ECS/Components/Name.h"
 #include "ECS/Components/Transform.h"
+#include "ECS/TransformHierarchy.h"
 
 #include <cstddef>
 #include <filesystem>
@@ -36,6 +38,18 @@ namespace {
 std::filesystem::path Utf8PathFromGamePath(const std::string& utf8)
 {
     return std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(utf8.data()), utf8.size()));
+}
+
+// The exact inverse of Utf8PathFromGamePath() above - same std::u8string
+// round-trip PmxLoader.cpp's own PathToUtf8() uses, duplicated here for the
+// same "src/Assets/ and src/Game/ never depend on src/Editor/" reasoning.
+// Used by CreateMeshEntityFromGtaFile() below to turn `absoluteGtaPath`'s
+// own filename-minus-extension back into a UTF-8 std::string for the
+// spawned root entity's Name component.
+std::string PathToUtf8(const std::filesystem::path& path)
+{
+    const std::u8string u8 = path.u8string();
+    return std::string(reinterpret_cast<const char*>(u8.data()), u8.size());
 }
 
 } // namespace
@@ -182,6 +196,10 @@ const std::vector<Game::MeshAssetPart>& Game::EnsureMeshAsset(Renderer& renderer
         std::size_t start = 0;
         std::size_t count = 0;
         TextureHandle texture;
+        // Straight copy of the originating Material::name - see
+        // MeshAssetPart::name's own doc comment (Game.h) for what an empty
+        // value here ends up meaning for the spawned entity.
+        std::string name;
     };
     std::vector<std::uint32_t> untexturedIndices;
     std::vector<TexturedSlice> texturedSlices;
@@ -208,7 +226,7 @@ const std::vector<Game::MeshAssetPart>& Game::EnsureMeshAsset(Renderer& renderer
         }
 
         if (texture.IsValid() && count > 0) {
-            texturedSlices.push_back(TexturedSlice{ start, count, texture });
+            texturedSlices.push_back(TexturedSlice{ start, count, texture, material.name });
         } else if (count > 0) {
             untexturedIndices.insert(untexturedIndices.end(), mesh->indices.begin() + static_cast<std::ptrdiff_t>(start),
                 mesh->indices.begin() + static_cast<std::ptrdiff_t>(start + count));
@@ -245,7 +263,7 @@ const std::vector<Game::MeshAssetPart>& Game::EnsureMeshAsset(Renderer& renderer
             vertices.size() * sizeof(MeshVertex), static_cast<std::uint32_t>(vertices.size()),
             untexturedIndices.data(), untexturedIndices.size() * sizeof(std::uint32_t),
             static_cast<std::uint32_t>(untexturedIndices.size()), "ImportedMesh"));
-        parts.push_back(MeshAssetPart{ handle, kInvalidTextureHandle });
+        parts.push_back(MeshAssetPart{ handle, kInvalidTextureHandle, std::string() });
     }
 
     // --- Textured submeshes (position+normal+UV) - one shared vertex
@@ -279,7 +297,7 @@ const std::vector<Game::MeshAssetPart>& Game::EnsureMeshAsset(Renderer& renderer
                 texturedVertices.size() * sizeof(MeshVertexUv), static_cast<std::uint32_t>(texturedVertices.size()),
                 sliceIndices.data(), sliceIndices.size() * sizeof(std::uint32_t),
                 static_cast<std::uint32_t>(sliceIndices.size()), "ImportedTexturedMesh"));
-            parts.push_back(MeshAssetPart{ handle, slice.texture });
+            parts.push_back(MeshAssetPart{ handle, slice.texture, slice.name });
         }
     }
 
@@ -294,20 +312,48 @@ Entity Game::CreateMeshEntityFromGtaFile(Renderer& renderer, const std::string& 
         return kInvalidEntity;
     }
 
-    Entity firstEntity = kInvalidEntity;
+    // Root entity: a plain Transform-only entity (no MeshRenderer of its
+    // own, so RenderSystem::CollectRenderables() never draws it directly -
+    // see Game.h's own doc comment on this function) named after the asset
+    // FILE itself - `absoluteGtaPath`'s own filename, minus its extension
+    // (e.g. "Miku.gta" -> "Miku"). Every part below becomes its CHILD, so
+    // moving/rotating/scaling THIS entity moves the whole multi-part model
+    // together.
+    const Entity root = m_registry.CreateEntity();
+    m_registry.AddComponent<Transform>(root); // Identity Transform - spawns at the world origin, like Unity.
+    m_registry.AddComponent<Name>(root, Name{ PathToUtf8(Utf8PathFromGamePath(absoluteGtaPath).stem()) });
+
     for (const MeshAssetPart& part : parts) {
         const PipelineHandle pipeline =
             part.texture.IsValid() ? EnsureTexturedMeshPipeline(renderer) : EnsureMeshPipeline(renderer);
 
         const Entity entity = m_registry.CreateEntity();
-        m_registry.AddComponent<Transform>(entity); // Identity Transform - spawns at the world origin, like Unity.
+        // Identity LOCAL Transform, relative to `root` above (set as parent
+        // right below via SetParent()) - renders at exactly the same place
+        // it always did, since `root` itself starts out at the world
+        // origin with no rotation/scale.
+        m_registry.AddComponent<Transform>(entity);
         m_registry.AddComponent<MeshRenderer>(entity, MeshRenderer{ part.mesh, pipeline, part.texture });
-
-        if (!firstEntity.IsValid()) {
-            firstEntity = entity;
+        if (!part.name.empty()) {
+            // Named after the originating PMX material (see
+            // MeshAssetPart::name's own doc comment, Game.h) - an empty
+            // name (the combined untextured submesh, or a material PMX
+            // itself left unnamed) deliberately leaves this entity without
+            // a Name component at all, so "Hierarchy" falls back to its
+            // usual synthesized "Entity %u" label for it.
+            m_registry.AddComponent<Name>(entity, Name{ part.name });
         }
+
+        // worldPositionStays=true is a no-op here in practice (both `root`
+        // and `entity` start out at an identity world transform), but is
+        // still the semantically correct call - this is a real attach, not
+        // just field assignment, and SetParent() is also what appends this
+        // part as `root`'s next sibling-ordered child (MoveToLastSibling())
+        // so "Hierarchy" lists every part in a stable, deterministic order.
+        SetParent(m_registry, entity, root, /*worldPositionStays=*/true);
     }
-    return firstEntity;
+
+    return root;
 }
 
 void Game::EnsureDemoSceneBuilt(Renderer& renderer)

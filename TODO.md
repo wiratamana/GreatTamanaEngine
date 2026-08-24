@@ -222,6 +222,29 @@ unblock the most follow-on work:
   exact same `MeshData`/`MaterialData`/`*.gta` shape `PmxLoader` already does
   (see `src/Assets/MeshData.h`/`MaterialData.h`), so none of this work is
   PMX-specific.
+  **UPDATE (this session): multi-part model instantiation now spawns a real
+  parent/child hierarchy instead of flat siblings.** Now that `Transform`
+  carries a real parent/child relationship (see "~~Transform parenting /
+  hierarchy~~ - DONE" below), `Game::CreateMeshEntityFromGtaFile()` no longer
+  spawns a textured/multi-material model's several submesh entities as
+  independent siblings - it first creates one plain, empty ROOT entity (a
+  `Transform` only, no `MeshRenderer`, so it never renders anything itself),
+  named after the source `*.gta` FILE itself (its own filename minus
+  extension, e.g. "Furina.gta" -> "Furina" - see the new `Name` component,
+  `src/ECS/Components/Name.h`), then attaches every submesh "part" entity
+  under it via `ECS/TransformHierarchy.h`'s `SetParent()` - moving/rotating/
+  scaling the root now moves the whole model together, Unity's own "a
+  multi-material import gets one root GameObject with a child per submesh"
+  convention. Each TEXTURED part is additionally named after its own
+  originating PMX `Material::name` (`MeshAssetPart::name`, threaded through
+  from `RigFileData::materials`) whenever that material actually has a
+  non-empty name; "Hierarchy" (`Panels/HierarchyPanel.cpp`'s
+  `BuildEntityLabel()`) and "Inspector" (`Panels/InspectorPanel.cpp`, now
+  with an editable "Name" field for ANY entity) both show a `Name` component's
+  value in place of the usual synthesized "Entity %u" label whenever one is
+  present. `CreateMeshEntityFromGtaFile()` now returns the ROOT entity
+  (previously the first part) - the caller (Hierarchy/Scene drag-and-drop)
+  selects exactly the entity that represents the whole instantiated model.
 - **TODO (explicitly deferred - do this next): Real MMD skinning/animation
   runtime (pose evaluation, morph blending, physics simulation, `.vmd`
   keyframe interpolation/playback).** A spawned mesh entity
