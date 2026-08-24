@@ -106,6 +106,28 @@ safe on any machine/CI runner, GPU or not:
   camera's own full world transform - so a parented `Camera` follows its
   parent too - `Mat4::Identity()` if none exists) - both
   need nothing but a `Registry`, no live Renderer/GPU device at all.
+- `Animation/SkeletonPoseTests.cpp` - `ComputeSkinningMatrices()`'s
+  (`src/Animation/SkeletonPose.h`) forward-kinematics bone-pose evaluation:
+  all-identity offsets produce identity matrices, a rotated parent correctly
+  swings a child bone, a translation offset moves a bone relative to its own
+  bind pose, and a malformed/cyclic parent chain terminates and produces
+  finite (non-NaN/Inf) matrices rather than hanging - no ECS/GPU/Renderer
+  involved.
+- `Animation/MotionSamplerTests.cpp` - `GroupAndSortBoneTracksByName()`/
+  `ResolveBoneTracksToSkeleton()`/`SampleBoneTrack()`/`SampleAnimationPose()`
+  (`src/Animation/MotionSampler.h`): per-bone frame sorting, the bone-NAME
+  resolution between a motion and a skeleton that tolerates a mismatch in
+  EITHER direction (an unmatched skeleton bone stays at bind pose, an
+  unmatched motion track is simply dropped - the "bones/weights in the
+  animation file and the model file don't necessarily match" problem this
+  module exists to handle), and keyframe interpolation/clamping at the
+  track's edges.
+- `Animation/VertexSkinningTests.cpp` - `SkinVertices()`
+  (`src/Animation/VertexSkinning.h`)'s CPU per-vertex bone blending:
+  no-skin-weights-at-all leaves vertices at bind pose, BDEF1/BDEF2-shaped
+  weights apply/blend the expected bone transforms, unused influence slots
+  are ignored regardless of weight type, and no-valid-influence-at-all
+  degrades to the bind pose rather than collapsing to the origin.
 - `Editor/EditorCameraTests.cpp` - `EditorCamera`'s pure pan/dolly/rotate
   math and pitch clamping (`src/Editor/EditorCamera.h`) - no ImGui/SDL/
   Vulkan involved despite living under `src/Editor/`. Only built when
