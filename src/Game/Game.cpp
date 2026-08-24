@@ -2,7 +2,10 @@
 
 #include "../Assets/AssetTypes.h"
 #include "../Assets/GtaFile.h"
+#include "../Assets/ImageFileDecoder.h"
+#include "../Assets/MaterialData.h"
 #include "../Assets/MeshFile.h"
+#include "../Assets/RigFile.h"
 #include "../Renderer/MeshVertex.h"
 #include "../Renderer/Renderer.h"
 #include "../Renderer/Vertex.h"
@@ -100,63 +103,211 @@ PipelineHandle Game::EnsureMeshPipeline(Renderer& renderer)
     return m_meshPipeline;
 }
 
-MeshHandle Game::EnsureMeshAsset(Renderer& renderer, const std::string& absoluteGtaPath)
+PipelineHandle Game::EnsureTexturedMeshPipeline(Renderer& renderer)
 {
+    if (!m_texturedMeshPipeline.IsValid()) {
+        // Shader source lives at src/Shaders/TexturedMesh.vert/.frag - see
+        // VertexLayout::PositionNormalUv's own comment in Pipeline.h.
+        // `useMaterialTexture = true` wires this Pipeline's VkPipelineLayout
+        // up with GpuResourceFactory::MaterialDescriptorSetLayout(), so any
+        // MaterialTexture's descriptor set (see EnsureMaterialTexture()
+        // below) can be bound against it.
+        m_texturedMeshPipeline = m_renderSystem.RegisterPipeline(renderer.CreatePipeline(
+            "shaders/TexturedMesh.vert.spv", "shaders/TexturedMesh.frag.spv", VertexLayout::PositionNormalUv, true));
+    }
+    return m_texturedMeshPipeline;
+}
+
+TextureHandle Game::EnsureMaterialTexture(Renderer& renderer, const std::string& absoluteTexturePath)
+{
+    if (absoluteTexturePath.empty()) {
+        return kInvalidTextureHandle;
+    }
+
+    if (const auto found = m_materialTextureCache.find(absoluteTexturePath); found != m_materialTextureCache.end()) {
+        return found->second;
+    }
+
+    const std::optional<DecodedImageRgba8> decoded = DecodeImageFileToRgba8(absoluteTexturePath);
+    if (!decoded.has_value()) {
+        // Missing/corrupt/undecodable file - see MaterialData::textures'
+        // own doc comment. Deliberately NOT cached as a failure, so a
+        // texture that shows up later on disk (or is fixed) can succeed on
+        // a subsequent spawn without restarting the process.
+        return kInvalidTextureHandle;
+    }
+
+    const TextureHandle handle = m_renderSystem.RegisterTexture(renderer.CreateMaterialTexture2D(decoded->pixels.data(),
+        static_cast<int>(decoded->width), static_cast<int>(decoded->height), "MaterialTexture"));
+    m_materialTextureCache.emplace(absoluteTexturePath, handle);
+    return handle;
+}
+
+const std::vector<Game::MeshAssetPart>& Game::EnsureMeshAsset(Renderer& renderer, const std::string& absoluteGtaPath)
+{
+    static const std::vector<MeshAssetPart> kEmpty;
+
     if (const auto found = m_meshAssetCache.find(absoluteGtaPath); found != m_meshAssetCache.end()) {
         return found->second;
     }
 
     const std::optional<GtaFileData> gta = ReadGtaFile(Utf8PathFromGamePath(absoluteGtaPath));
     if (!gta.has_value() || gta->header.Type() != AssetType::Mesh) {
-        return kInvalidMeshHandle; // Missing file, bad magic, or not a Mesh asset - see CreateMeshEntityFromGtaFile().
+        return kEmpty; // Missing file, bad magic, or not a Mesh asset - see CreateMeshEntityFromGtaFile().
     }
 
     const std::optional<MeshData> mesh = DecodeMeshDataFromBytes(gta->payload);
     if (!mesh.has_value() || mesh->positions.empty() || mesh->indices.size() < 3) {
-        return kInvalidMeshHandle; // Corrupt/truncated payload, or an empty mesh.
+        return kEmpty; // Corrupt/truncated payload, or an empty mesh.
     }
 
-    // Build the GPU-side MeshVertex array (position+normal) from the
-    // decoded MeshData - substituting Vec3::Up() for any vertex whose
-    // normal is missing, same defensive fallback
-    // AssetPreviewMesh::EnsureMeshUploaded() already uses for the
-    // Inspector's own mesh preview (see TODO.md's own note on a smarter
-    // future fallback).
-    std::vector<MeshVertex> vertices(mesh->positions.size());
-    const bool hasNormals = mesh->normals.size() == mesh->positions.size();
-    for (std::size_t i = 0; i < mesh->positions.size(); ++i) {
-        const Vec3& p = mesh->positions[i];
-        vertices[i].position[0] = p.x;
-        vertices[i].position[1] = p.y;
-        vertices[i].position[2] = p.z;
-        const Vec3 n = hasNormals ? mesh->normals[i] : Vec3::Up();
-        vertices[i].normal[0] = n.x;
-        vertices[i].normal[1] = n.y;
-        vertices[i].normal[2] = n.z;
+    // Materials/textures are optional metadata (see RigFile.h) - absent
+    // (decode failure) for a *.gta imported before this engine supported
+    // them (an old "GTERIG01" blob - see RigFile.h's own magic-version
+    // comment), or a materialless .pmx (decodes fine, just with an empty
+    // MaterialData). Either way, an empty `materials.materials` below
+    // degrades to the single combined, untextured submesh this engine
+    // always rendered before material import support existed.
+    MaterialData materials;
+    if (const std::optional<RigFileData> rig = DecodeRigDataFromBytes(gta->metadata); rig.has_value()) {
+        materials = rig->materials;
     }
 
-    const MeshHandle handle = m_renderSystem.RegisterMesh(renderer.CreateMesh(vertices.data(),
-        vertices.size() * sizeof(MeshVertex), static_cast<std::uint32_t>(vertices.size()), mesh->indices.data(),
-        mesh->indices.size() * sizeof(std::uint32_t), static_cast<std::uint32_t>(mesh->indices.size()),
-        "ImportedMesh"));
+    // --- Partition MeshData::indices into "textured" (one submesh per
+    // material with a resolvable diffuse texture) vs. "untextured" (every
+    // other material, merged into ONE combined submesh) index ranges - see
+    // Material::indexCount's own doc comment (MaterialData.h) for why
+    // materials always own a contiguous run of the index list.
+    struct TexturedSlice {
+        std::size_t start = 0;
+        std::size_t count = 0;
+        TextureHandle texture;
+    };
+    std::vector<std::uint32_t> untexturedIndices;
+    std::vector<TexturedSlice> texturedSlices;
 
-    m_meshAssetCache.emplace(absoluteGtaPath, handle);
-    return handle;
+    std::size_t cursor = 0;
+    for (const Material& material : materials.materials) {
+        std::size_t start = cursor;
+        std::size_t count = material.indexCount;
+        if (start > mesh->indices.size()) {
+            start = mesh->indices.size();
+            count = 0;
+        } else if (start + count > mesh->indices.size()) {
+            // A corrupt/mismatched *.gta whose material index counts don't
+            // actually sum to the mesh's own index count - clamp rather
+            // than read out of range.
+            count = mesh->indices.size() - start;
+        }
+        cursor = start + count;
+
+        TextureHandle texture = kInvalidTextureHandle;
+        if (material.textureIndex >= 0
+            && static_cast<std::size_t>(material.textureIndex) < materials.textures.size()) {
+            texture = EnsureMaterialTexture(renderer, materials.textures[static_cast<std::size_t>(material.textureIndex)]);
+        }
+
+        if (texture.IsValid() && count > 0) {
+            texturedSlices.push_back(TexturedSlice{ start, count, texture });
+        } else if (count > 0) {
+            untexturedIndices.insert(untexturedIndices.end(), mesh->indices.begin() + static_cast<std::ptrdiff_t>(start),
+                mesh->indices.begin() + static_cast<std::ptrdiff_t>(start + count));
+        }
+    }
+    // Anything past the last material's own run (normally nothing when
+    // materials cover the whole mesh - the common PMX case; everything,
+    // when `materials.materials` is empty - a materialless mesh, or a
+    // *.gta imported before material support existed) is untextured too.
+    if (cursor < mesh->indices.size()) {
+        untexturedIndices.insert(
+            untexturedIndices.end(), mesh->indices.begin() + static_cast<std::ptrdiff_t>(cursor), mesh->indices.end());
+    }
+
+    std::vector<MeshAssetPart> parts;
+
+    // --- Untextured combined submesh (position+normal only, exactly this
+    // engine's original pre-material-import Mesh/Pipeline shape).
+    if (!untexturedIndices.empty()) {
+        std::vector<MeshVertex> vertices(mesh->positions.size());
+        const bool hasNormals = mesh->normals.size() == mesh->positions.size();
+        for (std::size_t i = 0; i < mesh->positions.size(); ++i) {
+            const Vec3& p = mesh->positions[i];
+            vertices[i].position[0] = p.x;
+            vertices[i].position[1] = p.y;
+            vertices[i].position[2] = p.z;
+            const Vec3 n = hasNormals ? mesh->normals[i] : Vec3::Up();
+            vertices[i].normal[0] = n.x;
+            vertices[i].normal[1] = n.y;
+            vertices[i].normal[2] = n.z;
+        }
+
+        const MeshHandle handle = m_renderSystem.RegisterMesh(renderer.CreateMesh(vertices.data(),
+            vertices.size() * sizeof(MeshVertex), static_cast<std::uint32_t>(vertices.size()),
+            untexturedIndices.data(), untexturedIndices.size() * sizeof(std::uint32_t),
+            static_cast<std::uint32_t>(untexturedIndices.size()), "ImportedMesh"));
+        parts.push_back(MeshAssetPart{ handle, kInvalidTextureHandle });
+    }
+
+    // --- Textured submeshes (position+normal+UV) - one shared vertex
+    // buffer built once here, re-uploaded per submesh Mesh (see Game.h's
+    // own doc comment on CreateMeshEntityFromGtaFile() for why this
+    // duplication is an acceptable, simple trade-off for now).
+    if (!texturedSlices.empty()) {
+        std::vector<MeshVertexUv> texturedVertices(mesh->positions.size());
+        const bool hasNormals = mesh->normals.size() == mesh->positions.size();
+        const bool hasUvs = mesh->uvs.size() == mesh->positions.size();
+        for (std::size_t i = 0; i < mesh->positions.size(); ++i) {
+            const Vec3& p = mesh->positions[i];
+            texturedVertices[i].position[0] = p.x;
+            texturedVertices[i].position[1] = p.y;
+            texturedVertices[i].position[2] = p.z;
+            const Vec3 n = hasNormals ? mesh->normals[i] : Vec3::Up();
+            texturedVertices[i].normal[0] = n.x;
+            texturedVertices[i].normal[1] = n.y;
+            texturedVertices[i].normal[2] = n.z;
+            const Vec2 uv = hasUvs ? mesh->uvs[i] : Vec2::Zero();
+            texturedVertices[i].uv[0] = uv.x;
+            texturedVertices[i].uv[1] = uv.y;
+        }
+
+        for (const TexturedSlice& slice : texturedSlices) {
+            const std::vector<std::uint32_t> sliceIndices(
+                mesh->indices.begin() + static_cast<std::ptrdiff_t>(slice.start),
+                mesh->indices.begin() + static_cast<std::ptrdiff_t>(slice.start + slice.count));
+
+            const MeshHandle handle = m_renderSystem.RegisterMesh(renderer.CreateMesh(texturedVertices.data(),
+                texturedVertices.size() * sizeof(MeshVertexUv), static_cast<std::uint32_t>(texturedVertices.size()),
+                sliceIndices.data(), sliceIndices.size() * sizeof(std::uint32_t),
+                static_cast<std::uint32_t>(sliceIndices.size()), "ImportedTexturedMesh"));
+            parts.push_back(MeshAssetPart{ handle, slice.texture });
+        }
+    }
+
+    const auto inserted = m_meshAssetCache.emplace(absoluteGtaPath, std::move(parts));
+    return inserted.first->second;
 }
 
 Entity Game::CreateMeshEntityFromGtaFile(Renderer& renderer, const std::string& absoluteGtaPath)
 {
-    const MeshHandle mesh = EnsureMeshAsset(renderer, absoluteGtaPath);
-    if (!mesh.IsValid()) {
+    const std::vector<MeshAssetPart>& parts = EnsureMeshAsset(renderer, absoluteGtaPath);
+    if (parts.empty()) {
         return kInvalidEntity;
     }
 
-    const PipelineHandle pipeline = EnsureMeshPipeline(renderer);
+    Entity firstEntity = kInvalidEntity;
+    for (const MeshAssetPart& part : parts) {
+        const PipelineHandle pipeline =
+            part.texture.IsValid() ? EnsureTexturedMeshPipeline(renderer) : EnsureMeshPipeline(renderer);
 
-    const Entity entity = m_registry.CreateEntity();
-    m_registry.AddComponent<Transform>(entity); // Identity Transform - spawns at the world origin, like Unity.
-    m_registry.AddComponent<MeshRenderer>(entity, MeshRenderer{ mesh, pipeline });
-    return entity;
+        const Entity entity = m_registry.CreateEntity();
+        m_registry.AddComponent<Transform>(entity); // Identity Transform - spawns at the world origin, like Unity.
+        m_registry.AddComponent<MeshRenderer>(entity, MeshRenderer{ part.mesh, pipeline, part.texture });
+
+        if (!firstEntity.IsValid()) {
+            firstEntity = entity;
+        }
+    }
+    return firstEntity;
 }
 
 void Game::EnsureDemoSceneBuilt(Renderer& renderer)

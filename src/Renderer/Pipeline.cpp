@@ -57,7 +57,7 @@ bool DepthFormatHasStencil(VkFormat format)
 } // namespace
 
 Pipeline::Pipeline(VkDevice device, VkFormat colorFormat, VkFormat depthFormat, const std::string& vertexShaderSpirvPath,
-    const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout)
+    const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout, VkDescriptorSetLayout materialSetLayout)
     : m_device(device)
 {
     const std::vector<char> vertSpirv = ReadFile(vertexShaderSpirvPath);
@@ -89,16 +89,35 @@ Pipeline::Pipeline(VkDevice device, VkFormat colorFormat, VkFormat depthFormat, 
         stages[1].pName = "main";
 
         // Which binding/attribute description to build against - see
-        // VertexLayout's own comment in Pipeline.h. Both structs happen to
-        // produce the same SHAPE (one binding, two vec3 attributes) but
-        // with different per-attribute semantics/offsets - selected here,
-        // once, rather than duplicating this whole constructor per layout.
-        const VkVertexInputBindingDescription binding = vertexLayout == VertexLayout::PositionNormal
-            ? MeshVertex::BindingDescription()
-            : Vertex::BindingDescription();
-        const std::array<VkVertexInputAttributeDescription, 2> attributes = vertexLayout == VertexLayout::PositionNormal
-            ? MeshVertex::AttributeDescriptions()
-            : Vertex::AttributeDescriptions();
+        // VertexLayout's own comment in Pipeline.h. Each layout's own
+        // struct (Vertex.h/MeshVertex.h) knows its own binding/attributes;
+        // a plain std::vector (rather than a fixed-size std::array, which
+        // would need to be the same size for every layout) lets this one
+        // code path serve all three without duplicating the constructor
+        // per layout.
+        VkVertexInputBindingDescription binding{};
+        std::vector<VkVertexInputAttributeDescription> attributes;
+        switch (vertexLayout) {
+        case VertexLayout::PositionNormal: {
+            binding = MeshVertex::BindingDescription();
+            const auto layoutAttributes = MeshVertex::AttributeDescriptions();
+            attributes.assign(layoutAttributes.begin(), layoutAttributes.end());
+            break;
+        }
+        case VertexLayout::PositionNormalUv: {
+            binding = MeshVertexUv::BindingDescription();
+            const auto layoutAttributes = MeshVertexUv::AttributeDescriptions();
+            attributes.assign(layoutAttributes.begin(), layoutAttributes.end());
+            break;
+        }
+        case VertexLayout::PositionColor:
+        default: {
+            binding = Vertex::BindingDescription();
+            const auto layoutAttributes = Vertex::AttributeDescriptions();
+            attributes.assign(layoutAttributes.begin(), layoutAttributes.end());
+            break;
+        }
+        }
 
         VkPipelineVertexInputStateCreateInfo vertexInput{};
         vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -168,7 +187,10 @@ Pipeline::Pipeline(VkDevice device, VkFormat colorFormat, VkFormat depthFormat, 
         // One push constant range: a "model" Mat4 immediately followed by a
         // "viewProj" Mat4, vertex stage only - see the class comment in
         // Pipeline.h and Shaders/Triangle.vert's matching
-        // `layout(push_constant)` block. Still no descriptor sets.
+        // `layout(push_constant)` block. PLUS, when `materialSetLayout` is
+        // non-VK_NULL_HANDLE (VertexLayout::PositionNormalUv only - see
+        // that enumerator's own comment), one descriptor set (set = 0) for
+        // a single combined-image-sampler.
         VkPushConstantRange pushConstantRange{};
         pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
         pushConstantRange.offset = 0;
@@ -178,6 +200,10 @@ Pipeline::Pipeline(VkDevice device, VkFormat colorFormat, VkFormat depthFormat, 
         layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         layoutInfo.pushConstantRangeCount = 1;
         layoutInfo.pPushConstantRanges = &pushConstantRange;
+        if (materialSetLayout != VK_NULL_HANDLE) {
+            layoutInfo.setLayoutCount = 1;
+            layoutInfo.pSetLayouts = &materialSetLayout;
+        }
 
         if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &m_layout) != VK_SUCCESS) {
             throw std::runtime_error("Pipeline: vkCreatePipelineLayout failed.");

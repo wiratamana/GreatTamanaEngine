@@ -920,6 +920,33 @@ pieces:
   remains explicitly deferred, see `TODO.md`). Verified against the real
   ~31k-vertex/~39k-triangle MMD model already used elsewhere in this
   session's testing, and the full test suite (342 tests) still passes.
+- **A dropped Mesh `*.gta` can now render its ORIGINAL PMX MATERIALS/
+  TEXTURES, not just flat "grey clay"** — closes the "no material/texture
+  import" gap the two entries above used to call out. `PmxLoader.h`/
+  `RigFile.h` now extract a `.pmx`'s material list + texture references into
+  a new `MaterialData` (`src/Assets/MaterialData.h`), resolving every
+  texture reference to an absolute file path (relative to the source
+  `.pmx`'s own directory) once, at import time. `Game::EnsureMeshAsset()`
+  (`src/Game/Game.cpp`) now splits a Mesh asset's index buffer into one
+  submesh PER MATERIAL: a material with no resolvable diffuse texture is
+  still merged into the single untextured "grey clay" submesh exactly as
+  before, while a material that DOES have one gets its own submesh, decoded
+  straight off disk (`Assets/ImageFileDecoder.h` — no `*.gta`-texture-asset
+  wrapping needed for this) and uploaded as a `MaterialTexture`
+  (`Renderer/MaterialTexture.h`) — a `Texture2D` bundled with a
+  ready-to-bind `VkDescriptorSet`, built against the one shared
+  `GpuResourceFactory::MaterialDescriptorSetLayout()` every textured
+  `Pipeline` (`VertexLayout::PositionNormalUv`, `Shaders/
+  TexturedMesh.vert/.frag`) is also built against, so the two are always
+  binding-compatible. `MeshRenderer` gained an optional `TextureHandle`;
+  `RenderSystem`/`Renderer::Submit()`/`FrameRecorder` thread the resolved
+  `VkDescriptorSet` through to a `vkCmdBindDescriptorSets` call right before
+  each textured draw. Verified against the same real ~31k-vertex Furina
+  model (32 materials, 10 distinct textures resolved) via a headless
+  `--reimport <source> <dest.gta>` CLI mode added to `main.cpp` for
+  regenerating an existing `*.gta` without driving the Editor UI, and the
+  full test suite (342 tests) still passes. Still NOT done: sphere-map/toon
+  shading (parsed into `Material` but never sampled) — see `TODO.md`.
 
 ## Roadmap
 

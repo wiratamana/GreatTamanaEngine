@@ -139,15 +139,17 @@ void Renderer::BeginFrame()
     m_frameRecorder.BeginFrame();
 }
 
-void Renderer::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix, const Mat4& viewProjMatrix)
+void Renderer::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix, const Mat4& viewProjMatrix,
+    VkDescriptorSet materialDescriptorSet)
 {
-    m_frameRecorder.Submit(pipeline, mesh, modelMatrix, viewProjMatrix);
+    m_frameRecorder.Submit(pipeline, mesh, modelMatrix, viewProjMatrix, materialDescriptorSet);
 }
 
-Pipeline Renderer::CreatePipeline(
-    const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout) const
+Pipeline Renderer::CreatePipeline(const std::string& vertexShaderSpirvPath,
+    const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout, bool useMaterialTexture) const
 {
-    return m_resources.CreatePipeline(ColorFormat(), vertexShaderSpirvPath, fragmentShaderSpirvPath, vertexLayout);
+    return m_resources.CreatePipeline(
+        ColorFormat(), vertexShaderSpirvPath, fragmentShaderSpirvPath, vertexLayout, useMaterialTexture);
 }
 
 Mesh Renderer::CreateMesh(
@@ -165,6 +167,12 @@ Mesh Renderer::CreateMesh(const void* vertexData, VkDeviceSize vertexDataSize, s
 Texture2D Renderer::CreateTexture2D(const void* pixelsRgba8, int width, int height, const char* debugName) const
 {
     return m_resources.CreateTexture2D(pixelsRgba8, width, height, debugName);
+}
+
+MaterialTexture Renderer::CreateMaterialTexture2D(
+    const void* pixelsRgba8, int width, int height, const char* debugName) const
+{
+    return m_resources.CreateMaterialTexture2D(pixelsRgba8, width, height, debugName);
 }
 
 Renderer::VulkanContextInfo Renderer::GetVulkanContextInfo() const

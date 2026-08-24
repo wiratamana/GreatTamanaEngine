@@ -67,6 +67,13 @@ struct AssetImportResult {
     std::size_t rigidBodyCount = 0;
     std::size_t jointCount = 0;
 
+    // Only meaningful when convertedToMeshAsset is true - how many
+    // materials/textures the source .pmx actually defined (see
+    // MaterialData.h) - zero materials for a materialless mesh is a normal,
+    // successful import, not a failure.
+    std::size_t materialCount = 0;
+    std::size_t textureCount = 0;
+
     // Only meaningful when convertedToMotionAsset is true - counts of the
     // motion data (see MotionData.h) the source .vmd actually defined: how
     // many bone/morph/camera/light/shadow/IK keyframes it carried (all zero

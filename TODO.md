@@ -198,17 +198,30 @@ unblock the most follow-on work:
   onto either "Hierarchy" or the "Scene" viewport
   (`Panels/HierarchyPanel.cpp`/`ScenePanel.cpp`'s `BeginDragDropTarget()`)
   instantiates it - Unity's own "drag a model into the scene" convention.
-  Still NOT done: nothing yet lets a `MeshRenderer`/material reference a
-  `*.gta` TEXTURE by `Guid` and have it bound to a shader descriptor (see
-  "PMX material/texture import" below - there is no descriptor-set/sampler
-  plumbing anywhere in `Renderer`/`Pipeline` yet, so every imported mesh
-  renders as flat greyish "clay" regardless of its source textures), and
-  the spawned mesh is always rendered in its ORIGINAL BIND POSE - no
-  skinning/animation is evaluated at all yet (see "Real MMD skinning/
-  animation runtime" below, which is explicitly deferred). A future OBJ/
-  glTF loader would produce the exact same `MeshData`/`*.gta` shape
-  `PmxLoader` already does (see `src/Assets/MeshData.h`), so none of this
-  work is PMX-specific.
+  **UPDATE (this session): PMX material/texture import + textured rendering
+  now exist.** `PmxLoader.h`/`RigFile.h` now extract a `.pmx`'s material list
+  and texture references into `MaterialData` (`src/Assets/MaterialData.h`),
+  resolving each texture path to an absolute file at import time (see
+  `PmxLoader.cpp`'s `ResolveTexturePath()`); `Game::EnsureMeshAsset()`
+  (`src/Game/Game.cpp`) now splits an imported mesh's index buffer into one
+  submesh per material, decodes each textured material's diffuse image
+  straight off disk (`Assets/ImageFileDecoder.h`, no `*.gta`-wrapping
+  needed), and uploads it as a `MaterialTexture` (`Renderer/MaterialTexture.h`
+  - a `Texture2D` plus a ready-to-bind `VkDescriptorSet`) via a new
+  `Pipeline`/`VertexLayout::PositionNormalUv`/`Shaders/TexturedMesh.vert/.frag`
+  path (`GpuResourceFactory::MaterialDescriptorSetLayout()` is the one shared
+  descriptor-set-layout both the pipeline and every texture's descriptor set
+  are built against). A material with no resolvable texture still renders via
+  the original untextured "grey clay" `Mesh.vert/.frag` pipeline, so a
+  materialless mesh (or a `*.gta` imported before this landed) is unaffected.
+  Still NOT done: sphere-map/toon shading (`Material::sphereTextureIndex`/
+  `toonTextureIndex` are parsed but never sampled), and the spawned mesh is
+  still always rendered in its ORIGINAL BIND POSE - no skinning/animation is
+  evaluated at all yet (see "Real MMD skinning/animation runtime" below,
+  which is explicitly deferred). A future OBJ/glTF loader would produce the
+  exact same `MeshData`/`MaterialData`/`*.gta` shape `PmxLoader` already does
+  (see `src/Assets/MeshData.h`/`MaterialData.h`), so none of this work is
+  PMX-specific.
 - **TODO (explicitly deferred - do this next): Real MMD skinning/animation
   runtime (pose evaluation, morph blending, physics simulation, `.vmd`
   keyframe interpolation/playback).** A spawned mesh entity
@@ -254,18 +267,9 @@ unblock the most follow-on work:
   side - today's engine has no skinning concept anywhere in
   `Renderer`/`Pipeline`/`Vertex`. Still a large, multi-session effort even
   with the data-extraction half done for both model and motion.
-- **PMX material/texture import.** `MeshData`/`MeshFile` carry no material
-  data at all - a `.pmx`'s per-face material list (diffuse/specular/
-  ambient color, a diffuse texture reference, optional sphere-map/toon
-  shading - `saba::PMXMaterial`, read by `PMXFile` but discarded by
-  `PmxLoader`) is dropped entirely on import today, so an imported model's
-  actual surface appearance (skin/hair/cloth texturing) can't be
-  reconstructed even once real gameplay rendering exists - only its bare
-  grey-clay shape can (see `AssetPreviewMesh`'s fixed-color shading). Needs
-  a `MaterialData`-shaped extension to `MeshData`/`MeshFile` (per-material
-  index ranges into the index buffer, plus texture references resolved
-  against the `.pmx`'s own sibling texture files/`AssetDatabase`), and ties
-  into the same textured-pipeline work above.
+- **~~PMX material/texture import~~ - DONE, see the "minimal asset pipeline"
+  bullet above** (`MaterialData.h`, `MaterialTexture.h`,
+  `VertexLayout::PositionNormalUv`, `Shaders/TexturedMesh.vert/.frag`).
 - **Verify MMD's own coordinate/winding convention once wired into real
   gameplay rendering.** `PmxLoader.h` is explicit that it performs NO axis/
   winding remapping - MMD's own authoring convention may not exactly match

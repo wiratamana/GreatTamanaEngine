@@ -4,10 +4,12 @@
 #include "../Input/InputState.h"
 #include "ECS/Registry.h"
 #include "Renderer/Primitives/PrimitiveMeshGenerator.h"
+#include "Renderer/TextureHandle.h"
 #include "RenderSystem.h"
 #include <array>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace gte {
 
@@ -83,31 +85,45 @@ public:
     // per instance.
     Entity CreatePrimitiveEntity(Renderer& renderer, PrimitiveType type);
 
-    // Spawns a new entity from an imported *.gta AssetType::Mesh file (see
-    // src/Assets/MeshFile.h/PmxLoader.h - the result of importing a
-    // MikuMikuDance .pmx model via the Editor's "Project" panel) at
+    // Spawns one-or-more new entities from an imported *.gta AssetType::Mesh
+    // file (see src/Assets/MeshFile.h/PmxLoader.h - the result of importing
+    // a MikuMikuDance .pmx model via the Editor's "Project" panel) at
     // `absoluteGtaPath` - this engine's answer to "drag a model asset into
     // Hierarchy/Scene to instantiate it", the Mesh-asset equivalent of
-    // CreatePrimitiveEntity() above. Spawns at the world origin with an
-    // identity Transform (scale/rotation), exactly like
+    // CreatePrimitiveEntity() above. Every spawned entity gets an identical
+    // identity Transform (scale/rotation, world origin), exactly like
     // CreatePrimitiveEntity() - the caller (a future Inspector edit, or a
-    // real scene file) is responsible for moving it anywhere else.
+    // real scene file) is responsible for moving them anywhere else. (This
+    // engine's Transform has no parent-hierarchy concept yet - see
+    // Transform.h - so a multi-material model's several submesh entities
+    // are independent siblings, not parent/children, for now.)
     //
-    // The mesh's positions/normals/triangle indices are uploaded ONCE per
-    // distinct `absoluteGtaPath` and cached (see m_meshAssetCache below) - a
-    // second entity spawned from the SAME asset (e.g. dragging it into
-    // Hierarchy twice) reuses the already-uploaded GPU mesh, exactly like
-    // EnsurePrimitiveMesh() already does per PrimitiveType. Rendered through
-    // a plain, unlit-but-normal-shaded "grey clay" pipeline (Shaders/
-    // Mesh.vert/.frag, position+normal only - see EnsureMeshPipeline()/
-    // Renderer::CreatePipeline()'s VertexLayout::PositionNormal) since a
-    // *.gta Mesh payload carries no material/texture data yet (see TODO.md,
-    // "PMX material/texture import") and this model has no bone/morph
+    // MORE THAN ONE entity is spawned when the source .pmx defines
+    // materials with a resolvable diffuse texture (see MaterialData.h): one
+    // entity PER DISTINCT "untextured" combined submesh (there is at most
+    // one of these - every material with no resolvable texture is merged
+    // into a single combined Mesh, rendered exactly like a pre-material-
+    // import model always was, via the plain "grey clay" Mesh.vert/.frag
+    // pipeline) PLUS one entity per material that DOES have a resolvable
+    // texture, each with its own MeshRenderer::texture bound and rendered
+    // through the textured TexturedMesh.vert/.frag pipeline (see
+    // Pipeline.h's VertexLayout::PositionNormalUv). A materialless mesh
+    // (or one whose *.gta predates this engine's material-import support)
+    // still spawns exactly the one untextured entity it always did.
+    //
+    // The mesh's positions/normals/UVs/triangle indices (split per-material
+    // this way) plus every distinct diffuse texture are uploaded ONCE per
+    // distinct `absoluteGtaPath`/texture path and cached (see
+    // m_meshAssetCache/m_materialTextureCache below) - a second call for the
+    // SAME asset (e.g. dragging it into Hierarchy twice) reuses the
+    // already-uploaded GPU resources, exactly like EnsurePrimitiveMesh()
+    // already does per PrimitiveType; only new ENTITIES (and their
+    // Transforms) are created each time. This model has no bone/morph
     // deformation applied yet either (see TODO.md, "Real MMD skinning/
-    // animation runtime" - the skeleton/skin-weight DATA already
-    // round-trips through the same *.gta's metadata section via
-    // RigFile.h, but nothing evaluates it at runtime yet, so this always
-    // renders the model's original bind pose exactly as authored).
+    // animation runtime" - the skeleton/skin-weight DATA already round-trips
+    // through the same *.gta's metadata section via RigFile.h, but nothing
+    // evaluates it at runtime yet, so this always renders the model's
+    // original bind pose exactly as authored).
     //
     // Returns kInvalidEntity (never throws) if `absoluteGtaPath` doesn't
     // currently resolve to a valid, non-empty *.gta AssetType::Mesh file
@@ -116,6 +132,12 @@ public:
     // drag-and-drop target) should simply ignore the drop in that case,
     // same "degrade gracefully" convention as every other Editor
     // drag-and-drop path (see AGENTS.md, "Editor Module Structure").
+    // Otherwise returns the FIRST entity spawned (arbitrary but
+    // deterministic order - untextured combined submesh first, if any, then
+    // one per textured material in MaterialData::materials order) - a
+    // caller that only keeps one handle (e.g. to select it in the
+    // Hierarchy) gets a reasonable one; the rest are still live entities in
+    // the Registry either way.
     Entity CreateMeshEntityFromGtaFile(Renderer& renderer, const std::string& absoluteGtaPath);
 
 private:
@@ -151,22 +173,50 @@ private:
     MeshHandle EnsurePrimitiveMesh(Renderer& renderer, PrimitiveType type);
 
     // Lazily creates (once) the one shared "grey clay" Pipeline every
-    // imported mesh entity from CreateMeshEntityFromGtaFile() uses (Shaders/
-    // Mesh.vert/.frag, VertexLayout::PositionNormal) - a completely separate
-    // Pipeline/PipelineHandle from EnsureDefaultPipeline() above, since it's
-    // built against a different vertex layout (see Pipeline.h's
-    // VertexLayout) and cannot legally draw a position+color Mesh (or vice
-    // versa).
+    // UNTEXTURED imported-mesh submesh uses (Shaders/Mesh.vert/.frag,
+    // VertexLayout::PositionNormal) - a completely separate Pipeline/
+    // PipelineHandle from EnsureDefaultPipeline() above, since it's built
+    // against a different vertex layout (see Pipeline.h's VertexLayout)
+    // and cannot legally draw a position+color Mesh (or vice versa).
     PipelineHandle EnsureMeshPipeline(Renderer& renderer);
 
-    // Decodes/uploads (once per distinct `absoluteGtaPath`, then cached) the
-    // MeshData payload of a *.gta AssetType::Mesh file into a real, indexed
-    // GPU Mesh (MeshVertex/Renderer::CreateMesh()'s indexed overload) - the
-    // actual work behind CreateMeshEntityFromGtaFile() above. Returns
-    // kInvalidMeshHandle (never throws) for anything that doesn't resolve to
-    // a valid, non-empty Mesh *.gta - see CreateMeshEntityFromGtaFile()'s
-    // own doc comment for the exact failure cases.
-    MeshHandle EnsureMeshAsset(Renderer& renderer, const std::string& absoluteGtaPath);
+    // Lazily creates (once) the one shared TEXTURED Pipeline every textured
+    // imported-mesh submesh uses (Shaders/TexturedMesh.vert/.frag,
+    // VertexLayout::PositionNormalUv, useMaterialTexture = true) - see
+    // EnsureMeshPipeline() above for why this is a separate Pipeline/
+    // PipelineHandle from it.
+    PipelineHandle EnsureTexturedMeshPipeline(Renderer& renderer);
+
+    // Lazily decodes/uploads (once per distinct absolute texture path, then
+    // cached in m_materialTextureCache) a PMX material's diffuse texture
+    // file straight off disk (see ImageFileDecoder.h) into a MaterialTexture
+    // (Renderer/MaterialTexture.h) - shared across every submesh/model that
+    // happens to reference the exact same texture file. Returns
+    // kInvalidTextureHandle (never throws) if `absoluteTexturePath` is
+    // empty or fails to decode (missing/corrupt file - see
+    // MaterialData::textures' own doc comment for why this is expected to
+    // legitimately happen sometimes).
+    TextureHandle EnsureMaterialTexture(Renderer& renderer, const std::string& absoluteTexturePath);
+
+    // One per entity CreateMeshEntityFromGtaFile() should spawn for a given
+    // *.gta asset - see EnsureMeshAsset() below.
+    struct MeshAssetPart {
+        MeshHandle mesh;
+        // kInvalidTextureHandle means "untextured - draw via
+        // EnsureMeshPipeline()'s pipeline"; otherwise draw via
+        // EnsureTexturedMeshPipeline()'s pipeline with this texture bound.
+        TextureHandle texture;
+    };
+
+    // Decodes (once per distinct `absoluteGtaPath`, then cached in
+    // m_meshAssetCache) a *.gta AssetType::Mesh file's MeshData payload +
+    // RigFileData metadata (for its MaterialData - see RigFile.h) into one
+    // GPU MeshAssetPart per entity CreateMeshEntityFromGtaFile() should
+    // spawn - the actual work behind that function. Returns an empty
+    // vector (never throws) for anything that doesn't resolve to a valid,
+    // non-empty Mesh *.gta - see CreateMeshEntityFromGtaFile()'s own doc
+    // comment for the exact failure cases.
+    const std::vector<MeshAssetPart>& EnsureMeshAsset(Renderer& renderer, const std::string& absoluteGtaPath);
 
     Registry m_registry;
     RenderSystem m_renderSystem;
@@ -179,6 +229,7 @@ private:
     std::array<MeshHandle, 5> m_primitiveMeshes;
 
     PipelineHandle m_meshPipeline;
+    PipelineHandle m_texturedMeshPipeline;
 
     // Keyed by absolute *.gta filesystem path (UTF-8) - see
     // EnsureMeshAsset()/CreateMeshEntityFromGtaFile() above. A plain
@@ -186,7 +237,13 @@ private:
     // ScenePanel's drag-and-drop target) only ever has a filesystem path
     // in hand, not an AssetDatabase lookup - Game itself never depends on
     // AssetDatabase/Editor code (see AGENTS.md, Clean Architecture).
-    std::unordered_map<std::string, MeshHandle> m_meshAssetCache;
+    std::unordered_map<std::string, std::vector<MeshAssetPart>> m_meshAssetCache;
+
+    // Keyed by absolute texture filesystem path (UTF-8) - see
+    // EnsureMaterialTexture() above. Shared across every model/material
+    // that references the same texture file (e.g. a body texture reused by
+    // several materials in one .pmx).
+    std::unordered_map<std::string, TextureHandle> m_materialTextureCache;
 };
 
 } // namespace gte

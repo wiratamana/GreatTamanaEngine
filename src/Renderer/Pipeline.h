@@ -28,6 +28,20 @@ enum class VertexLayout {
     // carries no per-vertex color (see src/Assets/MeshData.h), only a real
     // per-vertex normal.
     PositionNormal,
+
+    // Position+normal+UV (MeshVertex.h's MeshVertexUv) - for an imported,
+    // indexed, TEXTURED mesh submesh (a per-material slice of a *.gta
+    // AssetType::Mesh's triangle-index list whose material references a
+    // resolvable diffuse texture - see Game::EnsureMeshAsset(),
+    // src/Game/Game.h/.cpp), via Shaders/TexturedMesh.vert/.frag. Unlike
+    // the other two layouts above, a Pipeline built with this layout ALSO
+    // carries a descriptor-set-layout for a single combined-image-sampler
+    // (set = 0, binding = 0) in its VkPipelineLayout - see
+    // Pipeline's constructor `materialSetLayout` parameter and
+    // GpuResourceFactory::MaterialDescriptorSetLayout() - so a per-submesh
+    // MaterialTexture's own VkDescriptorSet (Renderer/MaterialTexture.h)
+    // can be bound before each draw (see FrameRecorder::RecordFrame()).
+    PositionNormalUv,
 };
 
 // RAII wrapper around a VkPipeline + its VkPipelineLayout, built for dynamic
@@ -69,8 +83,17 @@ public:
     // src/Shaders/*.vert/*.frag into "<exe dir>/shaders/*.spv" at build
     // time (gitignored; only the GLSL source is version-controlled). NOT
     // paths to GLSL source.
+    // `materialSetLayout` is only meaningful (non-VK_NULL_HANDLE) for
+    // VertexLayout::PositionNormalUv - see that enumerator's own comment -
+    // and must be GpuResourceFactory::MaterialDescriptorSetLayout() exactly,
+    // so every MaterialTexture's descriptor set (allocated against that
+    // exact same layout) stays binding-compatible with this Pipeline's
+    // layout. Left VK_NULL_HANDLE (the default) for every other vertex
+    // layout, which then builds a VkPipelineLayout with no descriptor sets
+    // at all, exactly as before this parameter existed.
     Pipeline(VkDevice device, VkFormat colorFormat, VkFormat depthFormat, const std::string& vertexShaderSpirvPath,
-        const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor);
+        const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor,
+        VkDescriptorSetLayout materialSetLayout = VK_NULL_HANDLE);
     ~Pipeline();
 
     Pipeline(const Pipeline&) = delete;

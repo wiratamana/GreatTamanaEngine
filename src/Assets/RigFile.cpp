@@ -550,6 +550,71 @@ bool ReadPhysics(BinaryReader& r, PhysicsData* out)
     return r.Ok();
 }
 
+void WriteMaterialData(BinaryWriter& w, const MaterialData& materials)
+{
+    w.U32(static_cast<std::uint32_t>(materials.textures.size()));
+    for (const auto& texturePath : materials.textures) {
+        w.String(texturePath);
+    }
+
+    w.U32(static_cast<std::uint32_t>(materials.materials.size()));
+    for (const auto& material : materials.materials) {
+        w.String(material.name);
+        w.String(material.englishName);
+        w.Vec4Val(material.diffuse);
+        w.Vec3Val(material.specular);
+        w.F32(material.specularPower);
+        w.Vec3Val(material.ambient);
+        w.Bool(material.bothFacesVisible);
+        w.Bool(material.drawEdge);
+        w.Vec4Val(material.edgeColor);
+        w.F32(material.edgeSize);
+        w.I32(material.textureIndex);
+        w.I32(material.sphereTextureIndex);
+        w.U8(static_cast<std::uint8_t>(material.sphereMode));
+        w.Bool(material.useSharedToon);
+        w.I32(material.toonTextureIndex);
+        w.U8(material.sharedToonIndex);
+        w.U32(material.indexCount);
+    }
+}
+
+bool ReadMaterialData(BinaryReader& r, MaterialData* out)
+{
+    const std::uint32_t textureCount = r.U32();
+    out->textures.clear();
+    out->textures.reserve(textureCount);
+    for (std::uint32_t i = 0; i < textureCount && r.Ok(); ++i) {
+        out->textures.push_back(r.String());
+    }
+
+    const std::uint32_t materialCount = r.U32();
+    out->materials.clear();
+    out->materials.reserve(materialCount);
+    for (std::uint32_t i = 0; i < materialCount && r.Ok(); ++i) {
+        Material material;
+        material.name = r.String();
+        material.englishName = r.String();
+        material.diffuse = r.Vec4Val();
+        material.specular = r.Vec3Val();
+        material.specularPower = r.F32();
+        material.ambient = r.Vec3Val();
+        material.bothFacesVisible = r.Bool();
+        material.drawEdge = r.Bool();
+        material.edgeColor = r.Vec4Val();
+        material.edgeSize = r.F32();
+        material.textureIndex = r.I32();
+        material.sphereTextureIndex = r.I32();
+        material.sphereMode = static_cast<SphereTextureMode>(r.U8());
+        material.useSharedToon = r.Bool();
+        material.toonTextureIndex = r.I32();
+        material.sharedToonIndex = r.U8();
+        material.indexCount = r.U32();
+        out->materials.push_back(std::move(material));
+    }
+
+    return r.Ok();
+}
 } // namespace
 
 std::vector<std::uint8_t> EncodeRigDataToBytes(const RigFileData& rig)
@@ -562,6 +627,7 @@ std::vector<std::uint8_t> EncodeRigDataToBytes(const RigFileData& rig)
     WriteBones(w, rig.skeleton.bones);
     WriteMorphs(w, rig.morphs.morphs);
     WritePhysics(w, rig.physics);
+    WriteMaterialData(w, rig.materials);
 
     return bytes;
 }
@@ -588,6 +654,9 @@ std::optional<RigFileData> DecodeRigDataFromBytes(const std::vector<std::uint8_t
         return std::nullopt;
     }
     if (!ReadPhysics(r, &rig.physics)) {
+        return std::nullopt;
+    }
+    if (!ReadMaterialData(r, &rig.materials)) {
         return std::nullopt;
     }
 

@@ -201,9 +201,14 @@ public:
     // layer up). Called once per VISIBLE render target per frame (e.g. once
     // for the Editor's "Game" view, again for its "Scene" view) with that
     // target's own aspect-ratio-derived viewProjMatrix - see
-    // RenderSystem::Draw().
+    // RenderSystem::Draw(). `materialDescriptorSet` (default VK_NULL_HANDLE)
+    // is bound as descriptor set 0 before the draw when non-null - only
+    // meaningful (and expected to be set) for a Pipeline built with
+    // VertexLayout::PositionNormalUv/useMaterialTexture (see Pipeline.h) -
+    // see RenderSystem::Draw() for how a MeshRenderer's optional
+    // TextureHandle resolves into this.
     void Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix = Mat4::Identity(),
-        const Mat4& viewProjMatrix = Mat4::Identity());
+        const Mat4& viewProjMatrix = Mat4::Identity(), VkDescriptorSet materialDescriptorSet = VK_NULL_HANDLE);
 
     // Factory for graphics pipelines, so callers never need direct access
     // to the VkDevice this Renderer owns internally, and always get a
@@ -216,9 +221,12 @@ public:
     // VertexLayout::PositionColor - every existing call site is unaffected;
     // pass VertexLayout::PositionNormal for a pipeline meant to draw a Mesh
     // built from the indexed CreateMesh() overload below (e.g.
-    // Game::CreateMeshEntityFromGtaFile()'s own pipeline).
+    // Game::CreateMeshEntityFromGtaFile()'s own pipeline), or
+    // VertexLayout::PositionNormalUv (with `useMaterialTexture` = true) for
+    // one meant to sample a per-submesh MaterialTexture - see
+    // CreateMaterialTexture2D() below.
     Pipeline CreatePipeline(const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath,
-        VertexLayout vertexLayout = VertexLayout::PositionColor) const;
+        VertexLayout vertexLayout = VertexLayout::PositionColor, bool useMaterialTexture = false) const;
 
     // Factory for meshes: a vertex buffer + vertex count, NO index buffer -
     // see Mesh.h's non-indexed constructor. So callers never need direct
@@ -253,6 +261,16 @@ public:
     // stbi_load(..., desired_channels=4)). debugName is optional/
     // Editor-only - see Buffer's constructor comment. See Texture2D.h.
     Texture2D CreateTexture2D(const void* pixelsRgba8, int width, int height, const char* debugName = nullptr) const;
+
+    // Like CreateTexture2D() above, but for a texture meant to be SAMPLED
+    // by one of this engine's own Pipelines (a PMX material's diffuse
+    // texture - see Game::EnsureMeshAsset(), src/Game/Game.cpp) rather than
+    // merely displayed via ImGui::Image(): also allocates and writes the
+    // VkDescriptorSet a VertexLayout::PositionNormalUv Pipeline expects
+    // bound at descriptor set 0 (see Renderer/MaterialTexture.h and
+    // Submit()'s own `materialDescriptorSet` parameter above).
+    MaterialTexture CreateMaterialTexture2D(
+        const void* pixelsRgba8, int width, int height, const char* debugName = nullptr) const;
 
     // Aggregate live-memory totals across every Buffer/RenderTexture this
     // Renderer has ever created and not yet destroyed - see

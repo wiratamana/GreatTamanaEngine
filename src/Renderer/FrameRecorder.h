@@ -51,9 +51,11 @@ public:
     // being rendered through - to be recorded the next time RecordFrame()
     // runs. Both default to Mat4::Identity() so existing callers that don't
     // care about a transform/camera are unaffected. See Renderer::Submit()
-    // for the full seam this is part of.
+    // for the full seam this is part of. `materialDescriptorSet` (default
+    // VK_NULL_HANDLE) is bound as descriptor set 0 right before this draw
+    // when non-null - see Renderer::Submit()'s own matching parameter.
     void Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix = Mat4::Identity(),
-        const Mat4& viewProjMatrix = Mat4::Identity());
+        const Mat4& viewProjMatrix = Mat4::Identity(), VkDescriptorSet materialDescriptorSet = VK_NULL_HANDLE);
 
     // True if at least one Submit() call is currently queued (i.e. not yet
     // consumed by a RecordFrame() call this frame). FramePresenter::Present()
@@ -129,6 +131,9 @@ private:
         std::uint32_t indexCount = 0;
         Mat4 model = Mat4::Identity(); // Mat4's default ctor is all-zero, NOT identity - see Math/Mat4.h.
         Mat4 viewProj = Mat4::Identity(); // The active camera's view-projection matrix at Submit() time - see Renderer::Submit().
+        // VK_NULL_HANDLE means "no material texture to bind" - see
+        // Submit()'s own `materialDescriptorSet` parameter above.
+        VkDescriptorSet materialDescriptorSet = VK_NULL_HANDLE;
     };
 
     std::array<float, 4> m_clearColor{ 0.0f, 0.0f, 0.0f, 1.0f };

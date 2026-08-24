@@ -110,6 +110,7 @@ AssetImportResult ImportAssetFile(
             rig.skeleton = loaded.skeleton;
             rig.morphs = loaded.morphs;
             rig.physics = loaded.physics;
+            rig.materials = loaded.materials;
             const std::vector<std::uint8_t> metadata = EncodeRigDataToBytes(rig);
 
             const std::optional<Guid> guid = database.ImportAsset(gtaPath, AssetType::Mesh, metadata, payload);
@@ -127,11 +128,15 @@ AssetImportResult ImportAssetFile(
                 result.morphCount = loaded.morphs.morphs.size();
                 result.rigidBodyCount = loaded.physics.rigidBodies.size();
                 result.jointCount = loaded.physics.joints.size();
+                result.materialCount = loaded.materials.materials.size();
+                result.textureCount = loaded.materials.textures.size();
                 result.message = "Imported \"" + PathToUtf8(sourcePath.filename()) + "\" as a mesh ("
                     + std::to_string(result.meshVertexCount) + " vertices, " + std::to_string(result.meshTriangleCount)
                     + " triangles, " + std::to_string(result.boneCount) + " bones, " + std::to_string(result.morphCount)
                     + " morphs, " + std::to_string(result.rigidBodyCount) + " rigid bodies, "
-                    + std::to_string(result.jointCount) + " joints) -> \"" + PathToUtf8(gtaPath.filename()) + "\".";
+                    + std::to_string(result.jointCount) + " joints, " + std::to_string(result.materialCount)
+                    + " materials, " + std::to_string(result.textureCount) + " textures) -> \""
+                    + PathToUtf8(gtaPath.filename()) + "\".";
             } else {
                 result.success = false;
                 result.message

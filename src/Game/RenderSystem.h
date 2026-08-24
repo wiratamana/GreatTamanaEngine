@@ -5,11 +5,13 @@
 #include "ECS/Components/Transform.h"
 #include "ECS/Registry.h"
 #include "Math/Mat4.h"
+#include "Renderer/MaterialTexture.h"
 #include "Renderer/Mesh.h"
 #include "Renderer/MeshHandle.h"
 #include "Renderer/Pipeline.h"
 #include "Renderer/PipelineHandle.h"
 #include "Renderer/ResourcePool.h"
+#include "Renderer/TextureHandle.h"
 
 #include <vector>
 
@@ -18,15 +20,16 @@ namespace gte {
 class Renderer;
 
 // One queued draw call's worth of PLAIN data, extracted from the ECS world -
-// a MeshHandle/PipelineHandle pair (never a Mesh&/Pipeline* - see
-// ECS/Components/MeshRenderer.h) plus the world matrix to draw it with.
-// Carries no live Renderer/Vulkan state at all, which is what keeps
-// RenderSystem::CollectRenderables() callable with nothing but a Registry -
-// no live GPU device, no Renderer, no ResourcePool needed - see AGENTS.md
-// ("Testability & Regression Safety").
+// a MeshHandle/PipelineHandle/TextureHandle triple (never a Mesh&/Pipeline*/
+// MaterialTexture* - see ECS/Components/MeshRenderer.h) plus the world
+// matrix to draw it with. Carries no live Renderer/Vulkan state at all,
+// which is what keeps RenderSystem::CollectRenderables() callable with
+// nothing but a Registry - no live GPU device, no Renderer, no ResourcePool
+// needed - see AGENTS.md ("Testability & Regression Safety").
 struct DrawCommand {
     MeshHandle mesh;
     PipelineHandle pipeline;
+    TextureHandle texture; // kInvalidTextureHandle (the default) means "no material texture" - see MeshRenderer::texture.
     Mat4 model = Mat4::Identity(); // Mat4's own default ctor is all-zero, NOT identity - see Math/Mat4.h.
 };
 
@@ -38,20 +41,23 @@ struct DrawCommand {
 // Entity/Registry), matching the same "only Application knows about SDL"
 // boundary rule this engine already applies elsewhere.
 //
-// Owns the actual Mesh/Pipeline objects Game creates via
-// Renderer::CreateMesh()/CreatePipeline() - still returned BY VALUE exactly
-// as before (Renderer's own factory API is completely unchanged) - addressed
-// by the MeshHandle/PipelineHandle a MeshRenderer component can safely hold
-// instead of ever embedding a Mesh/Pipeline directly.
+// Owns the actual Mesh/Pipeline/MaterialTexture objects Game creates via
+// Renderer::CreateMesh()/CreatePipeline()/CreateMaterialTexture2D() - still
+// returned BY VALUE exactly as before (Renderer's own factory API is
+// unaffected in shape) - addressed by the MeshHandle/PipelineHandle/
+// TextureHandle a MeshRenderer component can safely hold instead of ever
+// embedding one of these directly.
 class RenderSystem {
 public:
     RenderSystem() = default;
 
-    // Takes ownership of a Mesh/Pipeline Game already created via
-    // Renderer::CreateMesh()/CreatePipeline(), returning the handle a
-    // MeshRenderer component should store.
+    // Takes ownership of a Mesh/Pipeline/MaterialTexture Game already
+    // created via Renderer::CreateMesh()/CreatePipeline()/
+    // CreateMaterialTexture2D(), returning the handle a MeshRenderer
+    // component should store.
     MeshHandle RegisterMesh(Mesh&& mesh) { return m_meshes.Insert(std::move(mesh)); }
     PipelineHandle RegisterPipeline(Pipeline&& pipeline) { return m_pipelines.Insert(std::move(pipeline)); }
+    TextureHandle RegisterTexture(MaterialTexture&& texture) { return m_textures.Insert(std::move(texture)); }
 
     // Pure data-collection step: every entity with a MeshRenderer becomes
     // one DrawCommand, using its Transform's LocalToWorldMatrix() if present
@@ -79,17 +85,21 @@ public:
     static Mat4 ResolveActiveCameraViewProjection(Registry& registry, float aspectWidthOverHeight);
 
     // Resolves each DrawCommand's handles against this RenderSystem's own
-    // Mesh/Pipeline pools and submits it to `renderer` - the one step that
-    // actually needs a live Renderer, called once per frame PER VISIBLE
-    // render target from Game::Render() (a Game view and a Scene view, each
-    // with their own RenderTexture/aspect ratio, both showing the identical
-    // scene through whatever the active Camera currently is - see
-    // Application::Run()). `aspectWidthOverHeight` is the aspect ratio of
-    // whichever render target this call's draws will land in - see
-    // ResolveActiveCameraViewProjection() above. A DrawCommand whose handle
-    // no longer resolves (e.g. a future unloaded mesh) is silently skipped
-    // rather than asserting - draws are inherently best-effort against
-    // whatever is currently loaded.
+    // Mesh/Pipeline/MaterialTexture pools and submits it to `renderer` - the
+    // one step that actually needs a live Renderer, called once per frame
+    // PER VISIBLE render target from Game::Render() (a Game view and a
+    // Scene view, each with their own RenderTexture/aspect ratio, both
+    // showing the identical scene through whatever the active Camera
+    // currently is - see Application::Run()). `aspectWidthOverHeight` is the
+    // aspect ratio of whichever render target this call's draws will land
+    // in - see ResolveActiveCameraViewProjection() above. A DrawCommand
+    // whose mesh/pipeline handle no longer resolves (e.g. a future unloaded
+    // mesh) is silently skipped rather than asserting - draws are
+    // inherently best-effort against whatever is currently loaded. A
+    // DrawCommand whose texture handle doesn't resolve (either
+    // kInvalidTextureHandle - the normal untextured case - or a stale
+    // handle) simply draws with no material texture bound (VK_NULL_HANDLE -
+    // see Renderer::Submit()'s own `materialDescriptorSet` parameter).
     void Draw(Registry& registry, Renderer& renderer, float aspectWidthOverHeight);
 
     // Explicit-view-projection overload of Draw() above, for a caller that
@@ -107,6 +117,7 @@ public:
 private:
     ResourcePool<Mesh, MeshHandle> m_meshes;
     ResourcePool<Pipeline, PipelineHandle> m_pipelines;
+    ResourcePool<MaterialTexture, TextureHandle> m_textures;
 };
 
 } // namespace gte

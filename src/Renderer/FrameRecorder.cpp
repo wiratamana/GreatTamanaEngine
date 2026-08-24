@@ -19,7 +19,8 @@ void FrameRecorder::BeginFrame()
     m_drawQueue.clear();
 }
 
-void FrameRecorder::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix, const Mat4& viewProjMatrix)
+void FrameRecorder::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix,
+    const Mat4& viewProjMatrix, VkDescriptorSet materialDescriptorSet)
 {
     DrawItem item;
     item.pipeline = pipeline.Native();
@@ -32,6 +33,7 @@ void FrameRecorder::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat
     }
     item.model = modelMatrix;
     item.viewProj = viewProjMatrix;
+    item.materialDescriptorSet = materialDescriptorSet;
     m_drawQueue.push_back(item);
 }
 
@@ -194,6 +196,16 @@ void FrameRecorder::RecordFrame(VkCommandBuffer cmd, const RenderTarget& target,
             std::memcpy(pushConstants.viewProj, item.viewProj.Data(), sizeof(pushConstants.viewProj));
             vkCmdPushConstants(
                 cmd, item.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushConstants), &pushConstants);
+            // Bind this draw's material texture (a per-submesh diffuse
+            // texture - see Renderer/MaterialTexture.h), when it has one -
+            // only a Pipeline built with VertexLayout::PositionNormalUv
+            // actually declares descriptor set 0, so this is skipped
+            // entirely for every other pipeline (materialDescriptorSet
+            // stays VK_NULL_HANDLE - see Submit() above).
+            if (item.materialDescriptorSet != VK_NULL_HANDLE) {
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, item.layout, 0, 1,
+                    &item.materialDescriptorSet, 0, nullptr);
+            }
 
             const VkDeviceSize offset = 0;
             vkCmdBindVertexBuffers(cmd, 0, 1, &item.vertexBuffer, &offset);

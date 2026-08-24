@@ -2,6 +2,8 @@
 
 #include <Saba/Model/MMD/PMXFile.h>
 
+#include <filesystem>
+
 namespace gte {
 
 namespace {
@@ -17,6 +19,124 @@ Quat ToQuat(const glm::quat& q) { return Quat(q.x, q.y, q.z, q.w); }
 bool HasBoneFlag(saba::PMXBoneFlags flags, saba::PMXBoneFlags bit)
 {
     return (static_cast<std::uint16_t>(flags) & static_cast<std::uint16_t>(bit)) != 0;
+}
+
+// --- Materials / Textures --------------------------------------------------
+
+// std::filesystem::path(const std::string&) goes through the OS's native
+// narrow encoding (the current ANSI codepage on Windows), NOT UTF-8 - same
+// pitfall Game.cpp's own Utf8PathFromGamePath() helper exists to avoid (see
+// that file's comment). `filePath` here is already UTF-8 (LoadPmxModel()'s
+// own parameter contract - see PmxLoader.h), so it must go through the
+// std::u8string round-trip too, same as PathToUtf8()/Utf8ToPath() do
+// elsewhere in this engine (AssetImporter.cpp/Game.cpp) - duplicated locally
+// rather than shared, for the same "src/Assets/ never depends on
+// src/Editor/" reasoning AssetImporter.cpp's own PathToUtf8() comment gives.
+std::filesystem::path Utf8ToPath(const std::string& utf8)
+{
+    return std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(utf8.data()), utf8.size()));
+}
+
+std::string PathToUtf8(const std::filesystem::path& path)
+{
+    const std::u8string u8 = path.u8string();
+    return std::string(reinterpret_cast<const char*>(u8.data()), u8.size());
+}
+
+// Resolves one PMX texture record (a path RELATIVE to the .pmx file itself,
+// using whatever separator the authoring tool happened to write - PMX does
+// not mandate forward slashes) into an ABSOLUTE, UTF-8 path - see
+// MaterialData::textures' own doc comment for why this has to happen here,
+// at import time, rather than later. std::filesystem::path's own operator/
+// treats a backslash exactly like a forward slash on Windows (this engine's
+// only target platform - see AGENTS.md), so no manual separator rewriting
+// is needed. Does NOT check the resolved path actually exists - a dangling
+// reference (moved/deleted texture, or one the .pmx references but never
+// shipped) is left for a later consumer (Game::EnsureMeshAsset()) to
+// discover and degrade gracefully from, exactly like every other
+// best-effort file lookup in this engine.
+std::string ResolveTexturePath(const std::filesystem::path& pmxDirectory, const std::string& rawTextureName)
+{
+    if (rawTextureName.empty()) {
+        return std::string();
+    }
+    const std::filesystem::path resolved = pmxDirectory / Utf8ToPath(rawTextureName);
+    return PathToUtf8(resolved.lexically_normal());
+}
+
+SphereTextureMode ConvertSphereMode(saba::PMXSphereMode mode)
+{
+    switch (mode) {
+    case saba::PMXSphereMode::None: return SphereTextureMode::Disabled;
+    case saba::PMXSphereMode::Mul: return SphereTextureMode::Multiply;
+    case saba::PMXSphereMode::Add: return SphereTextureMode::Add;
+    case saba::PMXSphereMode::SubTexture: return SphereTextureMode::SubTexture;
+    }
+    return SphereTextureMode::Disabled;
+}
+
+bool HasDrawModeFlag(saba::PMXDrawModeFlags flags, saba::PMXDrawModeFlags bit)
+{
+    return (static_cast<std::uint8_t>(flags) & static_cast<std::uint8_t>(bit)) != 0;
+}
+
+Material ConvertMaterial(const saba::PMXMaterial& material)
+{
+    Material out;
+    out.name = material.m_name;
+    out.englishName = material.m_englishName;
+
+    out.diffuse = ToVec4(material.m_diffuse);
+    out.specular = ToVec3(material.m_specular);
+    out.specularPower = material.m_specularPower;
+    out.ambient = ToVec3(material.m_ambient);
+
+    out.bothFacesVisible = HasDrawModeFlag(material.m_drawMode, saba::PMXDrawModeFlags::BothFace);
+    out.drawEdge = HasDrawModeFlag(material.m_drawMode, saba::PMXDrawModeFlags::DrawEdge);
+    out.edgeColor = ToVec4(material.m_edgeColor);
+    out.edgeSize = material.m_edgeSize;
+
+    out.textureIndex = material.m_textureIndex;
+    out.sphereTextureIndex = material.m_sphereTextureIndex;
+    out.sphereMode = ConvertSphereMode(material.m_sphereMode);
+
+    out.useSharedToon = material.m_toonMode == saba::PMXToonMode::Common;
+    if (out.useSharedToon) {
+        // saba stores the shared toon index directly in m_toonTextureIndex
+        // for PMXToonMode::Common (0-9, toon01.bmp..toon10.bmp) - never a
+        // MaterialData::textures index in that case.
+        out.sharedToonIndex = static_cast<std::uint8_t>(material.m_toonTextureIndex);
+    } else {
+        out.toonTextureIndex = material.m_toonTextureIndex;
+    }
+
+    out.indexCount = static_cast<std::uint32_t>(material.m_numFaceVertices);
+
+    return out;
+}
+
+// Converts the WHOLE texture list + material list together (rather than
+// two independent per-record converters like ConvertBone()/ConvertMorph()
+// above) purely because texture PATH RESOLUTION (see ResolveTexturePath()
+// above) needs `filePath`'s own directory, which only LoadPmxModel() itself
+// has in hand - every other Convert*() function in this file is a pure,
+// context-free per-record mapping.
+MaterialData ConvertMaterialData(const saba::PMXFile& pmxFile, const std::string& filePath)
+{
+    MaterialData out;
+
+    const std::filesystem::path pmxDirectory = Utf8ToPath(filePath).parent_path();
+    out.textures.reserve(pmxFile.m_textures.size());
+    for (const auto& texture : pmxFile.m_textures) {
+        out.textures.push_back(ResolveTexturePath(pmxDirectory, texture.m_textureName));
+    }
+
+    out.materials.reserve(pmxFile.m_materials.size());
+    for (const auto& material : pmxFile.m_materials) {
+        out.materials.push_back(ConvertMaterial(material));
+    }
+
+    return out;
 }
 
 // --- Vertex skin weights (BDEF1/BDEF2/BDEF4/SDEF/QDEF) ------------------
@@ -371,6 +491,8 @@ PmxLoadResult LoadPmxModel(const std::string& filePath)
         result.physics.joints.push_back(ConvertJoint(joint));
     }
 
+    result.materials = ConvertMaterialData(pmxFile, filePath);
+
     result.success = true;
     result.message = "Loaded PMX file: " + filePath
         + " (" + std::to_string(vertexCount) + " vertices, "
@@ -378,7 +500,9 @@ PmxLoadResult LoadPmxModel(const std::string& filePath)
         + std::to_string(result.skeleton.bones.size()) + " bones, "
         + std::to_string(result.morphs.morphs.size()) + " morphs, "
         + std::to_string(result.physics.rigidBodies.size()) + " rigid bodies, "
-        + std::to_string(result.physics.joints.size()) + " joints)";
+        + std::to_string(result.physics.joints.size()) + " joints, "
+        + std::to_string(result.materials.materials.size()) + " materials, "
+        + std::to_string(result.materials.textures.size()) + " textures)";
     return result;
 }
 

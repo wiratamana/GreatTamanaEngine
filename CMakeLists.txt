@@ -189,6 +189,9 @@ add_library(gte_core STATIC
     src/Assets/PmxLoader.cpp
     src/Assets/VmdLoader.h
     src/Assets/VmdLoader.cpp
+    src/Assets/MaterialData.h
+    src/Assets/ImageFileDecoder.h
+    src/Assets/ImageFileDecoder.cpp
     src/Assets/MeshData.h
     src/Assets/SkeletonData.h
     src/Assets/MorphData.h
@@ -223,6 +226,8 @@ add_library(gte_core STATIC
     src/Renderer/Buffer.h
     src/Renderer/Texture2D.cpp
     src/Renderer/Texture2D.h
+    src/Renderer/TextureHandle.h
+    src/Renderer/MaterialTexture.h
     src/Renderer/Mesh.h
     src/Renderer/MeshHandle.h
     src/Renderer/PipelineHandle.h
@@ -390,6 +395,15 @@ gte_add_shader(GreatTamanaEngine src/Shaders/Triangle.frag)
 # trigger a spawn - see Panels/HierarchyPanel.cpp/ScenePanel.cpp) is built.
 gte_add_shader(GreatTamanaEngine src/Shaders/Mesh.vert)
 gte_add_shader(GreatTamanaEngine src/Shaders/Mesh.frag)
+
+# The TEXTURED half of that same "imported mesh" draw path (src/Renderer/
+# MeshVertex.h's MeshVertexUv, Pipeline.h's VertexLayout::PositionNormalUv,
+# Game::EnsureMeshAsset() - src/Game/Game.h/.cpp) - a per-material PMX
+# submesh whose material resolves to a real texture file uses this pair
+# instead of Mesh.vert/.frag above. Unconditional for the same reason as
+# Mesh.vert/.frag above.
+gte_add_shader(GreatTamanaEngine src/Shaders/TexturedMesh.vert)
+gte_add_shader(GreatTamanaEngine src/Shaders/TexturedMesh.frag)
 
 # The Inspector's Mesh Asset 3D preview viewer (src/Editor/AssetPreviewMesh.h)
 # needs its own small shader pair, compiled/staged the exact same way as

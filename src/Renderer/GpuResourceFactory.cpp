@@ -23,6 +23,46 @@ GpuResourceFactory::GpuResourceFactory(VkDevice device, VmaAllocator allocator, 
     if (vkCreateCommandPool(m_device, &poolInfo, nullptr, &m_commandPool) != VK_SUCCESS) {
         throw std::runtime_error("GpuResourceFactory: vkCreateCommandPool failed");
     }
+
+    // The one shared material descriptor-set-layout - a single combined-
+    // image-sampler, fragment stage only (see MaterialDescriptorSetLayout()'s
+    // own comment in GpuResourceFactory.h).
+    VkDescriptorSetLayoutBinding samplerBinding{};
+    samplerBinding.binding = 0;
+    samplerBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    samplerBinding.descriptorCount = 1;
+    samplerBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    VkDescriptorSetLayoutCreateInfo setLayoutInfo{};
+    setLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    setLayoutInfo.bindingCount = 1;
+    setLayoutInfo.pBindings = &samplerBinding;
+
+    if (vkCreateDescriptorSetLayout(m_device, &setLayoutInfo, nullptr, &m_materialSetLayout) != VK_SUCCESS) {
+        vkDestroyCommandPool(m_device, m_commandPool, nullptr);
+        throw std::runtime_error("GpuResourceFactory: vkCreateDescriptorSetLayout failed");
+    }
+
+    // Generously sized for every material texture this process is ever
+    // likely to load in one run (a single richly-materialed PMX model can
+    // easily have several dozen) - individual sets are never freed (see
+    // MaterialTexture.h), only the whole pool at once, in Destroy().
+    constexpr std::uint32_t kMaxMaterialTextures = 4096;
+    VkDescriptorPoolSize poolSize{};
+    poolSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    poolSize.descriptorCount = kMaxMaterialTextures;
+
+    VkDescriptorPoolCreateInfo poolCreateInfo{};
+    poolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolCreateInfo.maxSets = kMaxMaterialTextures;
+    poolCreateInfo.poolSizeCount = 1;
+    poolCreateInfo.pPoolSizes = &poolSize;
+
+    if (vkCreateDescriptorPool(m_device, &poolCreateInfo, nullptr, &m_materialDescriptorPool) != VK_SUCCESS) {
+        vkDestroyDescriptorSetLayout(m_device, m_materialSetLayout, nullptr);
+        vkDestroyCommandPool(m_device, m_commandPool, nullptr);
+        throw std::runtime_error("GpuResourceFactory: vkCreateDescriptorPool failed");
+    }
 }
 
 GpuResourceFactory::~GpuResourceFactory()
@@ -37,6 +77,8 @@ GpuResourceFactory::GpuResourceFactory(GpuResourceFactory&& other) noexcept
     , m_depthFormat(other.m_depthFormat)
     , m_memoryTracker(std::move(other.m_memoryTracker))
     , m_commandPool(std::exchange(other.m_commandPool, VK_NULL_HANDLE))
+    , m_materialSetLayout(std::exchange(other.m_materialSetLayout, VK_NULL_HANDLE))
+    , m_materialDescriptorPool(std::exchange(other.m_materialDescriptorPool, VK_NULL_HANDLE))
 {
 }
 
@@ -51,12 +93,22 @@ GpuResourceFactory& GpuResourceFactory::operator=(GpuResourceFactory&& other) no
         m_depthFormat = other.m_depthFormat;
         m_memoryTracker = std::move(other.m_memoryTracker);
         m_commandPool = std::exchange(other.m_commandPool, VK_NULL_HANDLE);
+        m_materialSetLayout = std::exchange(other.m_materialSetLayout, VK_NULL_HANDLE);
+        m_materialDescriptorPool = std::exchange(other.m_materialDescriptorPool, VK_NULL_HANDLE);
     }
     return *this;
 }
 
 void GpuResourceFactory::Destroy() noexcept
 {
+    if (m_materialDescriptorPool != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(m_device, m_materialDescriptorPool, nullptr);
+        m_materialDescriptorPool = VK_NULL_HANDLE;
+    }
+    if (m_materialSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(m_device, m_materialSetLayout, nullptr);
+        m_materialSetLayout = VK_NULL_HANDLE;
+    }
     if (m_commandPool != VK_NULL_HANDLE) {
         vkDestroyCommandPool(m_device, m_commandPool, nullptr);
         m_commandPool = VK_NULL_HANDLE;
@@ -153,9 +205,11 @@ void GpuResourceFactory::ImmediateSubmit(const std::function<void(VkCommandBuffe
 }
 
 Pipeline GpuResourceFactory::CreatePipeline(VkFormat colorFormat, const std::string& vertexShaderSpirvPath,
-    const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout) const
+    const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout, bool useMaterialTexture) const
 {
-    return Pipeline(m_device, colorFormat, m_depthFormat, vertexShaderSpirvPath, fragmentShaderSpirvPath, vertexLayout);
+    const VkDescriptorSetLayout materialSetLayout = useMaterialTexture ? m_materialSetLayout : VK_NULL_HANDLE;
+    return Pipeline(m_device, colorFormat, m_depthFormat, vertexShaderSpirvPath, fragmentShaderSpirvPath, vertexLayout,
+        materialSetLayout);
 }
 
 Mesh GpuResourceFactory::CreateMesh(
@@ -227,6 +281,40 @@ Texture2D GpuResourceFactory::CreateTexture2D(
     // already completed (ImmediateSubmit blocks until the GPU is done).
 
     return texture;
+}
+
+MaterialTexture GpuResourceFactory::CreateMaterialTexture2D(
+    const void* pixelsRgba8, int width, int height, const char* debugName) const
+{
+    Texture2D texture = CreateTexture2D(pixelsRgba8, width, height, debugName);
+
+    VkDescriptorSetAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocInfo.descriptorPool = m_materialDescriptorPool;
+    allocInfo.descriptorSetCount = 1;
+    allocInfo.pSetLayouts = &m_materialSetLayout;
+
+    VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
+    if (vkAllocateDescriptorSets(m_device, &allocInfo, &descriptorSet) != VK_SUCCESS) {
+        throw std::runtime_error("GpuResourceFactory::CreateMaterialTexture2D: vkAllocateDescriptorSets failed "
+            "(consider raising GpuResourceFactory.cpp's kMaxMaterialTextures).");
+    }
+
+    VkDescriptorImageInfo imageInfo{};
+    imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    imageInfo.imageView = texture.View();
+    imageInfo.sampler = texture.Sampler();
+
+    VkWriteDescriptorSet write{};
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = descriptorSet;
+    write.dstBinding = 0;
+    write.descriptorCount = 1;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    write.pImageInfo = &imageInfo;
+    vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
+
+    return MaterialTexture{ std::move(texture), descriptorSet };
 }
 
 GpuMemoryTracker::Totals GpuResourceFactory::GetMemoryTotals() const

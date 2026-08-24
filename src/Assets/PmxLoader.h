@@ -1,5 +1,6 @@
 #pragma once
 
+#include "MaterialData.h"
 #include "MeshData.h"
 #include "MorphData.h"
 #include "PhysicsData.h"
@@ -38,6 +39,15 @@ struct PmxLoadResult {
     // only; no physics simulation happens anywhere in this engine yet (see
     // PhysicsData.h's own file comment).
     PhysicsData physics;
+
+    // The model's material list + the (resolved-to-absolute-path) texture
+    // files those materials reference (see MaterialData.h) - empty
+    // `materials.materials` for a materialless .pmx (rare, but not
+    // rejected). Enables Game::EnsureMeshAsset() (src/Game/Game.cpp) to
+    // split an imported mesh's triangle-index list into one contiguous,
+    // independently-texturable slice per material instead of always
+    // drawing the whole thing as one untextured "grey clay" blob.
+    MaterialData materials;
 
     std::string message; // Human-readable status - always set, success or failure.
 };

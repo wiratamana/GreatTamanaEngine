@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Buffer.h"
+#include "MaterialTexture.h"
 #include "Memory/GpuMemoryTracker.h"
 #include "Mesh.h"
 #include "Pipeline.h"
@@ -65,9 +66,13 @@ public:
     // See Renderer::CreatePipeline(). `colorFormat` here is always exactly
     // Renderer::ColorFormat(), passed in by Renderer since only Renderer
     // knows it. `vertexLayout` defaults to VertexLayout::PositionColor -
-    // see Pipeline.h.
+    // see Pipeline.h. `useMaterialTexture`, when true, passes this
+    // factory's own persistent MaterialDescriptorSetLayout() through to
+    // Pipeline's constructor - meaningful (and expected to be true) only
+    // when vertexLayout is VertexLayout::PositionNormalUv.
     Pipeline CreatePipeline(VkFormat colorFormat, const std::string& vertexShaderSpirvPath,
-        const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor) const;
+        const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor,
+        bool useMaterialTexture = false) const;
 
     // See Renderer::CreateMesh() (non-indexed overload).
     Mesh CreateMesh(const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount,
@@ -87,6 +92,30 @@ public:
     // staging Buffer + ImmediateSubmit(), the same pattern
     // CreateDeviceLocalBuffer() above already uses.
     Texture2D CreateTexture2D(const void* pixelsRgba8, int width, int height, const char* debugName = nullptr) const;
+
+    // The ONE descriptor-set-layout (a single combined-image-sampler,
+    // fragment stage, set = 0 binding = 0) every VertexLayout::
+    // PositionNormalUv Pipeline is built with (see CreatePipeline()'s
+    // `useMaterialTexture` above) AND every MaterialTexture's own
+    // VkDescriptorSet (see CreateMaterialTexture2D() below) is allocated
+    // against - created once, for this factory's entire lifetime, in the
+    // constructor, so any Pipeline/MaterialTexture pair built through this
+    // factory is always binding-compatible with each other.
+    VkDescriptorSetLayout MaterialDescriptorSetLayout() const noexcept { return m_materialSetLayout; }
+
+    // Like CreateTexture2D() above, but ALSO allocates (from this
+    // factory's own persistent m_materialDescriptorPool) and writes a
+    // VkDescriptorSet - built against MaterialDescriptorSetLayout() above -
+    // pointing at the freshly-created Texture2D's view/sampler, bundled
+    // together as a MaterialTexture (see Renderer/MaterialTexture.h). This
+    // is what Game::EnsureMeshAsset() uses for a PMX material's diffuse
+    // texture (src/Game/Game.cpp), as opposed to CreateTexture2D() above,
+    // which the Editor's Inspector preview (AssetPreviewTexture.h) uses for
+    // a texture that's only ever displayed via ImGui::Image() (its own,
+    // separate ImGui-owned descriptor set), never sampled by one of this
+    // engine's own Pipelines.
+    MaterialTexture CreateMaterialTexture2D(
+        const void* pixelsRgba8, int width, int height, const char* debugName = nullptr) const;
 
     // See Renderer::GetMemoryTotals()/GetMemoryResources().
     GpuMemoryTracker::Totals GetMemoryTotals() const;
@@ -128,6 +157,15 @@ private:
     // own per-frame/offscreen command buffers, so a buffer/mesh upload can
     // never contend with in-flight presentation work.
     VkCommandPool m_commandPool = VK_NULL_HANDLE;
+
+    // See MaterialDescriptorSetLayout()/CreateMaterialTexture2D() above -
+    // both created once in the constructor, destroyed together in
+    // Destroy(). m_materialDescriptorPool is sized generously (see
+    // GpuResourceFactory.cpp) for every material texture this process is
+    // ever likely to load; individual VkDescriptorSets allocated from it
+    // are never individually freed (see MaterialTexture.h's own comment).
+    VkDescriptorSetLayout m_materialSetLayout = VK_NULL_HANDLE;
+    VkDescriptorPool m_materialDescriptorPool = VK_NULL_HANDLE;
 };
 
 } // namespace gte

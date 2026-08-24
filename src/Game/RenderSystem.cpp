@@ -20,7 +20,7 @@ std::vector<DrawCommand> RenderSystem::CollectRenderables(Registry& registry)
             model = transform->LocalToWorldMatrix();
         }
 
-        commands.push_back(DrawCommand{ meshRenderer.mesh, meshRenderer.pipeline, model });
+        commands.push_back(DrawCommand{ meshRenderer.mesh, meshRenderer.pipeline, meshRenderer.texture, model });
     }
 
     return commands;
@@ -63,7 +63,10 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& view
         const Mesh* mesh = m_meshes.TryGet(command.mesh);
         const Pipeline* pipeline = m_pipelines.TryGet(command.pipeline);
         if (mesh != nullptr && pipeline != nullptr) {
-            renderer.Submit(*pipeline, *mesh, command.model, viewProjection);
+            const MaterialTexture* materialTexture = m_textures.TryGet(command.texture);
+            const VkDescriptorSet descriptorSet =
+                materialTexture != nullptr ? materialTexture->descriptorSet : VK_NULL_HANDLE;
+            renderer.Submit(*pipeline, *mesh, command.model, viewProjection, descriptorSet);
         }
     }
 }
