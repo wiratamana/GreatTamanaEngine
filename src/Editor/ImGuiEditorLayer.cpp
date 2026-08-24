@@ -9,6 +9,7 @@
 #include "Panels/InspectorPanel.h"
 #include "Panels/MemoryPanel.h"
 #if GTE_ENABLE_PROJECT_PANEL
+#include "AssetPreviewMesh.h"
 #include "AssetPreviewTexture.h"
 #include "Panels/ProjectPanel.h"
 #endif
@@ -250,12 +251,13 @@ public:
         ReleaseGameViewDescriptor();
         ReleaseSceneViewDescriptor();
 #if GTE_ENABLE_PROJECT_PANEL
-        // Must release its own GPU texture/ImGui descriptor BEFORE
+        // Must release its own GPU texture/ImGui descriptor(s) BEFORE
         // ImGui_ImplVulkan_Shutdown() below - member destruction order
-        // alone would run AFTER Shutdown() (m_assetPreview is declared
-        // further down than m_context), which is too late (see
+        // alone would run AFTER Shutdown() (m_assetPreview/m_assetPreviewMesh
+        // are declared further down than m_context), which is too late (see
         // AssetPreviewTexture::Reset()'s own comment).
         m_assetPreview.Reset();
+        m_assetPreviewMesh.Reset();
 #endif
         ImGui_ImplVulkan_Shutdown();
         ImGui_ImplSDL3_Shutdown();
@@ -421,7 +423,7 @@ public:
 
         BuildHierarchyPanel(game, renderer, m_ctx);
 #if GTE_ENABLE_PROJECT_PANEL
-        BuildInspectorPanel(registry, m_ctx, renderer, m_assetPreview);
+        BuildInspectorPanel(registry, m_ctx, renderer, m_assetPreview, m_assetPreviewMesh);
 #else
         BuildInspectorPanel(registry, m_ctx);
 #endif
@@ -551,6 +553,14 @@ private:
     // BEFORE ImGui_ImplVulkan_Shutdown(), not left to member-destruction
     // order alone (which would run too late).
     AssetPreviewTexture m_assetPreview;
+
+    // The Mesh-asset equivalent of m_assetPreview above - backs the
+    // Inspector's live, auto-rotating 3D mesh preview (see
+    // Panels/InspectorPanel.cpp's BuildAssetInspector()) whenever the
+    // Project selection is a *.gta AssetType::Mesh file - see
+    // AssetPreviewMesh.h. Also explicitly Reset() in the destructor above,
+    // same reasoning as m_assetPreview.
+    AssetPreviewMesh m_assetPreviewMesh;
 #endif
 
     // Shared state read/written by DockLayout.cpp's

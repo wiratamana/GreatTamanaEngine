@@ -300,6 +300,8 @@ if(GTE_ENABLE_EDITOR)
             src/Editor/AssetInspectorData.cpp
             src/Editor/AssetPreviewTexture.h
             src/Editor/AssetPreviewTexture.cpp
+            src/Editor/AssetPreviewMesh.h
+            src/Editor/AssetPreviewMesh.cpp
         )
     endif()
 else()
@@ -363,6 +365,19 @@ target_link_libraries(GreatTamanaEngine PRIVATE gte_core)
 # never renders anything, see tests/CMakeLists.txt.
 gte_add_shader(GreatTamanaEngine src/Shaders/Triangle.vert)
 gte_add_shader(GreatTamanaEngine src/Shaders/Triangle.frag)
+
+# The Inspector's Mesh Asset 3D preview viewer (src/Editor/AssetPreviewMesh.h)
+# needs its own small shader pair, compiled/staged the exact same way as
+# Triangle.vert/frag above - see that file's class comment for why it needs
+# a dedicated pipeline/vertex layout rather than reusing
+# Renderer::CreatePipeline()'s built-in one. Only compiled/staged when
+# GTE_ENABLE_PROJECT_PANEL is ON, since AssetPreviewMesh.cpp - the only thing
+# that ever loads these - isn't compiled into gte_core otherwise (see
+# GTE_ENABLE_PROJECT_PANEL's target_sources() block above).
+if(GTE_ENABLE_PROJECT_PANEL)
+    gte_add_shader(GreatTamanaEngine src/Shaders/MeshPreview.vert)
+    gte_add_shader(GreatTamanaEngine src/Shaders/MeshPreview.frag)
+endif()
 
 # Ensures SDL3.dll is copied next to the built .exe after every build.
 sdl3_copy_runtime_dll(GreatTamanaEngine)

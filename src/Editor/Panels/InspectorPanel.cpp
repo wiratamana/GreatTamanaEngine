@@ -8,6 +8,7 @@
 
 #if GTE_ENABLE_PROJECT_PANEL
 #include "../AssetInspectorData.h"
+#include "../AssetPreviewMesh.h"
 #include "../AssetPreviewTexture.h"
 #include "../MemoryPanelData.h" // FormatBytes() - reused for the asset size field below.
 #include "../ProjectPanelData.h" // Utf8ToPath()
@@ -164,6 +165,41 @@ void BuildGtaTextureMetadata(
     ImGui::Text("On-disk Size (.gta): %s", FormatBytes(fileSizeBytes).c_str());
 }
 
+// The Mesh-asset equivalent of BuildGtaTextureMetadata() above - shown when
+// the selected *.gta wraps AssetType::Mesh (the result of importing a .pmx
+// model - see src/Assets/AssetImporter.h). `preview` (AssetPreviewMesh's own
+// result) supplies the vertex/triangle counts; std::nullopt when the live
+// 3D preview itself failed to render (a corrupt/truncated payload despite a
+// valid header), in which case every OTHER field here is still shown.
+void BuildGtaMeshMetadata(
+    const GtaHeader& header, std::uintmax_t fileSizeBytes, const std::optional<AssetPreviewMesh::Preview>& preview)
+{
+    ImGui::TextColored(ImVec4(0.55f, 0.75f, 1.0f, 1.0f), "GTA Asset Metadata");
+    ImGui::Text("Asset Type: %s", AssetTypeLabel(header.Type()));
+    ImGui::Text("Format Version: %llu", static_cast<unsigned long long>(header.version));
+    ImGui::Text("GUID: %s", header.Id().ToString().c_str());
+    ImGui::Text("Flags: %s", AssetFlagsLabel(header.Flags()).c_str());
+
+    const std::uint64_t metadataSize
+        = header.payloadOffset >= sizeof(GtaHeader) ? header.payloadOffset - sizeof(GtaHeader) : 0;
+    const std::uint64_t payloadSize = fileSizeBytes >= header.payloadOffset ? fileSizeBytes - header.payloadOffset : 0;
+
+    ImGui::Separator();
+    if (preview.has_value()) {
+        ImGui::Text("Vertices: %llu", static_cast<unsigned long long>(preview->vertexCount));
+        ImGui::Text("Triangles: %llu", static_cast<unsigned long long>(preview->triangleCount));
+    }
+    // Every *.gta AssetType::Mesh payload today is the exact same layout
+    // MeshFile.h's EncodeMeshDataToBytes() produces (see that file) - plain
+    // positions/normals/UVs/indices, no materials/bones/morphs yet.
+    ImGui::Text("Mesh Format: Positions + Normals + UVs + Indices (GTEMESH1)");
+    ImGui::Text("Payload Size: %s", FormatBytes(payloadSize).c_str());
+    if (metadataSize > 0) {
+        ImGui::Text("Metadata Size: %s", FormatBytes(metadataSize).c_str());
+    }
+    ImGui::Text("On-disk Size (.gta): %s", FormatBytes(fileSizeBytes).c_str());
+}
+
 // Plain OS filesystem metadata (AssetInspectorData.h) - name/extension say
 // nothing about how a *.gta's own payload is structured, only what the
 // filesystem itself reports.
@@ -231,7 +267,56 @@ void BuildTextureViewer(const AssetMetadata& metadata, const AssetPreviewTexture
     ImGui::EndChild();
 }
 
-void BuildAssetInspector(EditorContext& ctx, Renderer& renderer, AssetPreviewTexture& assetPreview)
+// The Mesh-asset equivalent of BuildTextureViewer() above - same contain-fit
+// layout against the same dark backdrop, but the "image" is a LIVE,
+// continuously-rerendered, auto-rotating 3D view of the mesh (see
+// AssetPreviewMesh.h) rather than a static decoded texture - so this is
+// called fresh every frame the viewer is visible, unlike the texture
+// preview (which just redisplays whatever AssetPreviewTexture cached).
+// Shows a vertex/triangle-count overlay in the corner instead of pixel
+// dimensions, matching this asset type's own metadata (see
+// BuildGtaMeshMetadata() above).
+void BuildMeshViewer(const AssetMetadata& metadata, const AssetPreviewMesh::Preview& preview)
+{
+    ImGui::BeginChild(
+        "InspectorPreviewViewer", ImVec2(0, 0), false, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+
+    ImGui::TextUnformatted(metadata.name.c_str());
+    ImGui::Separator();
+
+    const ImVec2 avail = ImGui::GetContentRegionAvail();
+    if (avail.x > 1.0f && avail.y > 1.0f) {
+        const float aspect
+            = preview.height > 0 ? static_cast<float>(preview.width) / static_cast<float>(preview.height) : 1.0f;
+
+        float displayWidth = avail.x;
+        float displayHeight = aspect > 0.0f ? displayWidth / aspect : displayWidth;
+        if (displayHeight > avail.y) {
+            displayHeight = avail.y;
+            displayWidth = displayHeight * aspect;
+        }
+
+        const ImVec2 origin = ImGui::GetCursorScreenPos();
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
+        drawList->AddRectFilled(origin, ImVec2(origin.x + avail.x, origin.y + avail.y), IM_COL32(35, 35, 35, 255));
+
+        const float offsetX = (avail.x - displayWidth) * 0.5f;
+        const float offsetY = (avail.y - displayHeight) * 0.5f;
+        ImGui::SetCursorScreenPos(ImVec2(origin.x + offsetX, origin.y + offsetY));
+        ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(preview.descriptor)),
+            ImVec2(displayWidth, displayHeight));
+
+        char overlay[64];
+        std::snprintf(overlay, sizeof(overlay), "%llu verts, %llu tris", static_cast<unsigned long long>(preview.vertexCount),
+            static_cast<unsigned long long>(preview.triangleCount));
+        drawList->AddText(ImVec2(origin.x + 6.0f, origin.y + avail.y - 20.0f), IM_COL32(255, 255, 255, 255), overlay);
+    }
+
+    ImGui::EndChild();
+}
+
+void BuildAssetInspector(
+    EditorContext& ctx, Renderer& renderer, AssetPreviewTexture& assetPreview, AssetPreviewMesh& assetPreviewMesh)
 {
     const std::string& absolutePath = ctx.selection.SelectedAssetAbsolutePath();
     const std::string& relativePath = ctx.selection.SelectedAssetRelativePath();
@@ -249,38 +334,57 @@ void BuildAssetInspector(EditorContext& ctx, Renderer& renderer, AssetPreviewTex
 
     // Peek this file's *.gta header (cheap - see GtaFile.h's
     // ReadGtaHeader()) whenever the extension is ".gta" at all, regardless
-    // of whether it turns out to be a texture - this is what lets the
+    // of whether it turns out to be a texture/mesh - this is what lets the
     // metadata section below show real GTA-format fields (GUID/AssetType/
     // flags/payload size) for ANY *.gta asset, not only ones that also
-    // happen to preview as an image.
+    // happen to preview as an image or a mesh.
     const bool isGta = !metadata.isDirectory && metadata.extension == ".gta";
     const std::optional<GtaHeader> gtaHeader = isGta ? ReadGtaHeader(Utf8ToPath(absolutePath)) : std::nullopt;
     const bool isGtaTexture = gtaHeader.has_value() && gtaHeader->Type() == AssetType::Texture;
+    const bool isGtaMesh = gtaHeader.has_value() && gtaHeader->Type() == AssetType::Mesh;
 
     // Attempt a live texture preview for a FILE whose extension is either a
     // format AssetPreviewTexture/stb_image can decode directly, OR a *.gta
     // confirmed above to actually wrap AssetType::Texture (the result of
     // AssetImporter::ImportAssetFile() gating a dropped PNG/JPG through the
     // KTX2 import pipeline - see src/Assets/AssetImporter.h). A *.gta
-    // wrapping something other than a texture (a future Mesh/Scene/...
-    // asset) is deliberately NOT treated as "should have previewed but
-    // failed" - it just falls through to plain metadata below, exactly
-    // like any other non-image extension, with no spurious "failed to
-    // load" message.
-    const bool attemptPreview = !metadata.isDirectory && (IsSupportedImageExtension(metadata.extension) || isGtaTexture);
+    // wrapping something other than a texture (Mesh/Scene/...) is
+    // deliberately NOT treated as "should have previewed but failed" - it
+    // just falls through to plain metadata below, exactly like any other
+    // non-image extension, with no spurious "failed to load" message.
+    const bool attemptTexturePreview = !metadata.isDirectory && (IsSupportedImageExtension(metadata.extension) || isGtaTexture);
 
     std::optional<AssetPreviewTexture::Preview> preview;
-    if (attemptPreview) {
+    if (attemptTexturePreview) {
         preview = assetPreview.Resolve(renderer, absolutePath);
     }
 
-    if (preview.has_value()) {
+    // Attempt a live 3D mesh preview whenever the *.gta header confirms
+    // AssetType::Mesh - rendered at (roughly) the Inspector's current
+    // remaining content size, well before the exact bottom-viewer height is
+    // known (see AssetPreviewMesh.h's own comment: unlike a static texture,
+    // this is a genuine render, but the result is still just displayed
+    // contain-fit/scaled afterwards by BuildMeshViewer() below, exactly
+    // like BuildTextureViewer() already does regardless of a texture's own
+    // native resolution - so an approximate render target size here is
+    // perfectly fine, no second render needed once the final split layout
+    // is known).
+    std::optional<AssetPreviewMesh::Preview> meshPreview;
+    if (isGtaMesh && !metadata.isDirectory) {
+        const ImVec2 avail = ImGui::GetContentRegionAvail();
+        meshPreview = assetPreviewMesh.Render(
+            renderer, absolutePath, static_cast<int>(avail.x), static_cast<int>(avail.y));
+    }
+
+    if (preview.has_value() || meshPreview.has_value()) {
         // Unity-style split layout: a scrollable metadata list on top, a
-        // user-draggable splitter, then the texture viewer pinned to the
-        // BOTTOM of the panel. ctx.inspectorPreviewHeight (EditorContext.h)
-        // is the persisted (across frames/selections) pixel height of the
-        // bottom viewer, adjusted live below by dragging the splitter -
-        // exactly like Unity's own Inspector preview pane.
+        // user-draggable splitter, then the texture/mesh viewer pinned to
+        // the BOTTOM of the panel. ctx.inspectorPreviewHeight
+        // (EditorContext.h) is the persisted (across frames/selections)
+        // pixel height of the bottom viewer, adjusted live below by
+        // dragging the splitter - exactly like Unity's own Inspector
+        // preview pane. Shared between the texture and mesh preview cases -
+        // only one of the two is ever non-null for a given selection.
         constexpr float kSplitterThickness = 6.0f;
         constexpr float kMinPreviewHeight = 100.0f;
         constexpr float kMinMetadataHeight = 80.0f;
@@ -293,6 +397,9 @@ void BuildAssetInspector(EditorContext& ctx, Renderer& renderer, AssetPreviewTex
         ImGui::BeginChild("InspectorMetadataRegion", ImVec2(0, metadataHeight), false);
         if (isGtaTexture && gtaHeader.has_value()) {
             BuildGtaTextureMetadata(*gtaHeader, metadata.sizeBytes, preview);
+            ImGui::Separator();
+        } else if (isGtaMesh && gtaHeader.has_value()) {
+            BuildGtaMeshMetadata(*gtaHeader, metadata.sizeBytes, meshPreview);
             ImGui::Separator();
         }
         BuildPlainFileMetadata(metadata, absolutePath);
@@ -315,12 +422,19 @@ void BuildAssetInspector(EditorContext& ctx, Renderer& renderer, AssetPreviewTex
             ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
         }
 
-        BuildTextureViewer(metadata, *preview);
+        if (preview.has_value()) {
+            BuildTextureViewer(metadata, *preview);
+        } else {
+            BuildMeshViewer(metadata, *meshPreview);
+        }
         return;
     }
 
-    if (attemptPreview) {
+    if (attemptTexturePreview) {
         ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.2f, 1.0f), "Failed to load image preview.");
+        ImGui::Separator();
+    } else if (isGtaMesh) {
+        ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.2f, 1.0f), "Failed to load mesh preview.");
         ImGui::Separator();
     }
     if (isGtaTexture && gtaHeader.has_value()) {
@@ -328,6 +442,9 @@ void BuildAssetInspector(EditorContext& ctx, Renderer& renderer, AssetPreviewTex
         // but the header itself is still valid - show what the header
         // alone can tell us rather than nothing at all.
         BuildGtaTextureMetadata(*gtaHeader, metadata.sizeBytes, std::nullopt);
+        ImGui::Separator();
+    } else if (isGtaMesh && gtaHeader.has_value()) {
+        BuildGtaMeshMetadata(*gtaHeader, metadata.sizeBytes, std::nullopt);
         ImGui::Separator();
     }
     BuildPlainFileMetadata(metadata, absolutePath);
@@ -337,7 +454,8 @@ void BuildAssetInspector(EditorContext& ctx, Renderer& renderer, AssetPreviewTex
 } // namespace
 
 #if GTE_ENABLE_PROJECT_PANEL
-void BuildInspectorPanel(Registry& registry, EditorContext& ctx, Renderer& renderer, AssetPreviewTexture& assetPreview)
+void BuildInspectorPanel(Registry& registry, EditorContext& ctx, Renderer& renderer, AssetPreviewTexture& assetPreview,
+    AssetPreviewMesh& assetPreviewMesh)
 #else
 void BuildInspectorPanel(Registry& registry, EditorContext& ctx)
 #endif
@@ -346,7 +464,7 @@ void BuildInspectorPanel(Registry& registry, EditorContext& ctx)
 
 #if GTE_ENABLE_PROJECT_PANEL
     if (ctx.selection.Kind() == InspectorSelectionKind::Asset && !ctx.selection.SelectedAssetAbsolutePath().empty()) {
-        BuildAssetInspector(ctx, renderer, assetPreview);
+        BuildAssetInspector(ctx, renderer, assetPreview, assetPreviewMesh);
         ImGui::End();
         return;
     }

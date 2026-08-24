@@ -455,16 +455,17 @@ void ProjectPanel::HandleExternalFileDrop(float screenX, float screenY, const st
         // For a file that's about to be gated into a *.gta wrapper (see
         // AssetImporter::ImportAssetFile() below), the uniqueness check
         // must collide against an EXISTING "name.gta" (e.g. a previously-
-        // imported texture), not the source's own "name.png" - otherwise
-        // re-dropping "rock.png" after "rock.gta" already exists would
-        // resolve to "rock.gta" directly (a silent overwrite) instead of
+        // imported texture/mesh), not the source's own "name.png"/"name.pmx"
+        // - otherwise re-dropping "rock.png" (or "model.pmx") after
+        // "rock.gta" ("model.gta") already exists would resolve to
+        // "rock.gta" directly (a silent overwrite) instead of
         // "rock (1).gta".
         std::filesystem::path desiredName = source.filename();
         if (!sourceIsDirectory) {
             std::string extension = PathToUtf8(source.extension());
             std::transform(extension.begin(), extension.end(), extension.begin(),
                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-            if (IsImportableAsKtx2Texture(extension)) {
+            if (IsImportableAsKtx2Texture(extension) || IsImportableAsMeshAsset(extension)) {
                 desiredName.replace_extension(".gta");
             }
         }
