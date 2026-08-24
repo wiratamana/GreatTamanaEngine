@@ -171,15 +171,15 @@ unblock the most follow-on work:
   `*.gta` (`AssetType::Mesh`, see `src/Assets/PmxLoader.h`/`MeshFile.h`/
   `AssetImporter.h`) - both tracked by `AssetDatabase`. A `.vmd` motion file
   now imports the same way too (`AssetType::Animation`, see
-  `src/Assets/VmdLoader.h`/`MotionFile.h`), but has NO display/preview path
-  in the Editor at all yet (unlike the texture/mesh cases below) - there is
-  nothing to visually preview about a flat keyframe list without an actual
-  playback/scrubbing UI, which doesn't exist yet either. Both texture and
-  mesh (not motion) also now have a DISPLAY path good enough for the
-  Editor's own "Inspector" panel
+  `src/Assets/VmdLoader.h`/`MotionFile.h`). All three now have a DISPLAY
+  path good enough for the Editor's own "Inspector" panel
   (`Ktx2Decoder.h`'s `DecodeKtx2ToRgba8()` for textures,
-  `AssetPreviewMesh.cpp`'s own small Vulkan pipeline for meshes) - but there
-  is still NO GAMEPLAY consumption path for either: nothing yet lets a
+  `AssetPreviewMesh.cpp`'s own small Vulkan pipeline for meshes,
+  `BuildGtaAnimationMetadata()`'s plain `MotionFile.h` decode - no GPU
+  preview, just a decoded model-name/frame-range/per-track-keyframe-count/
+  bone-and-morph-name-list summary, since a flat keyframe list has nothing
+  to rasterize - for motions) - but there is still NO GAMEPLAY consumption
+  path for any of them: nothing yet lets a
   `MeshRenderer`/material reference a `*.gta` texture by `Guid` and have it
   bound to a shader descriptor (today's rendering is still unlit
   vertex-color only - see `Shaders/Triangle.vert/.frag` - no

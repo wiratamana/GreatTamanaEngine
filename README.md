@@ -548,6 +548,24 @@ CMake adds:
   something else (a future `Scene`/`Material`/... asset) — it just falls
   through to plain file metadata, exactly like a non-image/non-mesh
   extension always has.
+- **Inspector animation metadata (no live preview):** selecting a
+  `AssetType::Animation` asset (the result of importing a `.vmd` — see
+  "Asset Pipeline" above) shows a decoded metadata summary instead of a
+  live viewer — a flat keyframe list has nothing to rasterize, so there is
+  no bottom-pinned preview pane/splitter for this asset type at all, unlike
+  the texture/mesh cases above. `BuildGtaAnimationMetadata()`
+  (`Panels/InspectorPanel.cpp`) decodes the `*.gta`'s payload directly via
+  `MotionFile.h`'s `DecodeMotionDataFromBytes()` (a plain CPU-side binary
+  decode, no GPU involved) and shows: the VMD's own target model name (when
+  set), the combined frame range across every populated track, per-track
+  keyframe counts (bone/morph/camera/light/shadow/IK), the number of
+  distinct bones/morphs actually driven, and a collapsible ("TreeNode",
+  collapsed by default so a several-hundred-bone motion doesn't dominate the
+  panel) scrollable list of every distinct bone/morph name — handy for
+  eyeballing which rig a motion expects without leaving the Inspector. Falls
+  back to header-only fields + a "Failed to decode motion data" notice if
+  the payload is corrupt/truncated despite a valid `*.gta` header, same
+  degrade-gracefully convention as the texture/mesh cases.
 - **`NullEditorLayer`** (`GTE_ENABLE_EDITOR=OFF`) — every method is a no-op;
   `GameViewTarget()`/`SceneViewTarget()` always return `nullptr`, meaning
   "render straight to the swapchain, fullscreen". This is what makes
