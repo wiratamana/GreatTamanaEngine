@@ -250,6 +250,24 @@ lifetime code:
   (`src/Renderer/ResourcePool.h`, owned by `RenderSystem` - see below),
   exactly as GPU resources are already addressed by `GpuResourceHandle`
   rather than a raw pointer.
+- **A component that references ANOTHER entity (e.g. `Transform::parent`)
+  stays plain data too - the logic that actually WALKS that reference lives
+  in a separate free-function module, never on the component itself.**
+  `Transform::parent` (an `Entity`, `kInvalidEntity` by default) plus
+  `Transform::siblingIndex` are exactly this: plain fields, no different in
+  kind from `position`/`rotation`/`scale` above. Resolving a full WORLD
+  transform by walking the parent chain, cycle-safe reparenting, and sibling
+  reordering all live in `src/ECS/TransformHierarchy.h/.cpp` instead
+  (`ComputeWorldMatrix()`/`ComputeWorldTransform()`, `SetParent()`,
+  `GetChildren()`/`SetSiblingIndex()`) - free functions that take a
+  `Registry&` plus plain `Entity` values, same shape as `RenderSystem`'s own
+  ECS-bridging functions below, just bridging ECS-to-ECS instead of
+  ECS-to-Renderer. This keeps `Transform` itself trivially copyable/
+  Tier-1-testable-by-construction while still allowing genuinely non-trivial
+  hierarchy logic (cycle detection, world-position-preserving reparenting) to
+  exist somewhere sensible - never add a Registry-dependent method to
+  `Transform` (or any other component) directly, follow this same
+  free-function pattern instead.
 - **`ComponentStorage<T>` is a sparse set, addressed by `Entity::index`
   directly - never a hash lookup.** Adding/removing/querying a component is
   O(1) array indexing (`m_sparse`/`m_dense`), and `Remove()` uses

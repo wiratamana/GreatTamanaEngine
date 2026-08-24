@@ -161,6 +161,28 @@ choice as `src/Math/` not depending on GLM. `Transform`
 are the three components that exist today —
 all plain data, no behavior beyond small pure-math helpers, no GPU/SDL
 ownership of their own.
+`Transform` now carries a real parent/child relationship, Unity's own
+`Transform.parent`/`GetSiblingIndex()` shape: a `parent` `Entity` field
+(`kInvalidEntity` — the default — means "world space, no parent", exactly
+matching every `Transform`'s behavior before this existed) and a
+`siblingIndex` used purely for display/ordering (which order "Hierarchy"
+lists siblings in). `position`/`rotation`/`scale` are always PARENT-RELATIVE
+now (Unity's own `localPosition`/`localRotation`/`localScale` semantics) —
+`Transform::LocalToWorldMatrix()` itself only ever composes this one
+entity's own local T/R/S (components stay plain data with no `Registry`
+dependency of their own, per this file's own philosophy above); actually
+resolving a full WORLD transform by walking the parent chain, cycle-safe
+reparenting, and sibling reordering all live in a new sibling module,
+`src/ECS/TransformHierarchy.h/.cpp` — `ComputeWorldMatrix()`/
+`ComputeWorldTransform()` (walk parent -> parent -> ... -> root, composing
+`parentWorld * local` at each level), `IsDescendantOf()` (cycle detection),
+`GetChildren()` (the direct-child list a Hierarchy tree needs, sorted by
+`siblingIndex`, dangling-parent-safe), `SetParent()` (cycle-safe attach/
+detach with an optional world-position-preserving conversion — Unity's own
+`Transform.SetParent(parent, worldPositionStays)` default), and
+`SetSiblingIndex()`/`MoveToLastSibling()` (reordering). All pure functions
+needing nothing but a `Registry` (no Renderer/GPU/ImGui), so this whole
+module is Tier-1-testable exactly like the rest of ECS (see `TESTING.md`).
 `MeshRenderer` references a mesh/pipeline purely by handle
 (`MeshHandle`/`PipelineHandle`, `src/Renderer/MeshHandle.h`/
 `PipelineHandle.h`) — the exact same cheap, generational, index+generation
@@ -173,7 +195,8 @@ pure-math helpers — `ProjectionMatrix(aspect)` (via
 `Mat4::LookAtLH`, looking down the `Transform`'s rotated `Vec3::Forward()`)
 — rather than a bespoke eye/target/up triple, so a camera entity is edited
 exactly like any other (Transform in the Inspector, same as everything
-else).
+else) — including following a parent, since `RenderSystem` resolves its
+full WORLD transform (below) before building its view matrix.
 
 `RenderSystem` (`src/Game/RenderSystem.h/.cpp`) is the one piece of the
 engine allowed to depend on both the ECS world and `Renderer` — the same
@@ -181,11 +204,14 @@ engine allowed to depend on both the ECS world and `Renderer` — the same
 SDL (only `Application` touches it directly). `Renderer` itself never
 depends on ECS in any way: `Submit()` takes plain `Mat4`s, never an
 `Entity`/`Registry`. `RenderSystem::CollectRenderables()` (every entity with
-a `MeshRenderer` becomes one `DrawCommand`, using its `Transform`'s world
-matrix if present) and `RenderSystem::ResolveActiveCameraViewProjection()`
+a `MeshRenderer` becomes one `DrawCommand`, using `TransformHierarchy.h`'s
+`ComputeWorldMatrix()` — its `Transform`'s local matrix composed all the way
+up its parent chain, if any) and `RenderSystem::ResolveActiveCameraViewProjection()`
 (the first entity with an active `Camera` becomes a combined
-view-projection matrix, `Mat4::Identity()` if none exists) are both pure
-functions that need nothing but a `Registry` — no live Renderer/GPU device —
+view-projection matrix, resolved from that camera entity's own full WORLD
+transform the same way, `Mat4::Identity()` if no active `Camera` exists at
+all) are both pure functions that need nothing but a `Registry` — no live
+Renderer/GPU device —
 so both are unit-tested exactly like the rest of ECS (see `TESTING.md`).
 `RenderSystem::Draw()` is the one non-pure step that resolves DrawCommand
 handles against its own `ResourcePool<Mesh, MeshHandle>`/
@@ -379,19 +405,35 @@ CMake adds:
   the same way closing the OS window does), **"Hierarchy"** docked left,
   **"Inspector"** docked right, and **"Scene"**/**"Game"** tabbed together in
   the remaining center — drag the "Scene" tab out to split it side-by-side
-  with "Game" at any time, exactly like Unity. "Hierarchy" lists every entity
-  that has a `Transform` (via `Game::GetRegistry()` — the Editor's only,
+  with "Game" at any time, exactly like Unity. "Hierarchy" renders a real,
+  indented parent/child TREE (via `ECS/TransformHierarchy.h`'s `GetChildren()`,
+  walked recursively from the root entities down) of every entity that has a
+  `Transform` (via `Game::GetRegistry()` — the Editor's only,
   read/write, view into Game's ECS world), tags one with "(Camera)" if it
   also has a `Camera` component, and lets you select one; "Inspector"
-  shows/edits the selected entity's `Transform` (position/rotation/scale),
-  `Camera` (active/field of view/near-far planes) if present, and displays
-  its `MeshRenderer` handles read-only.
+  shows/edits the selected entity's `Transform` (local position/rotation/
+  scale, plus its current parent - if any - and a one-click "Unparent"
+  button), `Camera` (active/field of view/near-far planes) if present, and
+  displays its `MeshRenderer` handles read-only.
+  **Hierarchy drag-and-drop attach/detach/reorder:** dragging one entity row
+  onto another row's MIDDLE ~50% reparents it as that row's new last child
+  (`ECS/TransformHierarchy.h`'s `SetParent()`, world position preserved so it
+  never visually jumps in "Scene"/"Game" - Unity's own `SetParent()`
+  default); dragging onto a row's TOP/BOTTOM ~25% instead REORDERS it as a
+  sibling immediately before/after that row (`SetParent()` to the same
+  parent, then `SetSiblingIndex()`); dragging onto empty panel space detaches
+  it back to the scene root. `Transform`'s own `parent`/`siblingIndex` fields
+  (see "Entity-Component-System" above) are what a child's world transform is
+  actually computed from - a parented mesh (or `Camera`) genuinely follows
+  its parent's movement now, exactly like Unity.
   **Drag-and-drop instantiation:** a file dragged out of "Project" (see the
   Project panel below — `Panels/ProjectPanel.cpp`'s `BeginDragDropSource()`,
   payload = the file's absolute path,
   `EditorContext::kProjectAssetDragDropPayloadType`) can be dropped onto
-  either "Hierarchy" (anywhere in the panel — `Panels/HierarchyPanel.cpp`) or
-  directly onto the "Scene" viewport image (`Panels/ScenePanel.cpp`) to
+  either "Hierarchy" (anywhere in the panel, or directly onto an entity row
+  to spawn it as that entity's CHILD instead of at the scene root —
+  `Panels/HierarchyPanel.cpp`) or directly onto the "Scene" viewport image
+  (`Panels/ScenePanel.cpp`) to
   instantiate it, Unity's own "drag a model into the scene" convention — both
   drop targets just call `Game::CreateMeshEntityFromGtaFile()` and select the
   freshly spawned entity. Dropping anything other than a valid `*.gta`
@@ -427,8 +469,17 @@ CMake adds:
   wrapped by `src/Editor/TransformGizmo.h/.cpp`), plus a top-left
   Move/Rotate/Scale switcher overlay (`EditorContext::gizmoOperation`,
   `DrawGizmoOperationSwitcher()`). Always manipulates in ImGuizmo's `LOCAL`
-  space (identical to `WORLD` today, since `Transform` has no
-  parent-hierarchy field yet), using the Scene view's own `EditorCamera`
+  space; now that `Transform` carries a real parent/child relationship (see
+  "Entity-Component-System" above), `ManipulateTransformGizmo()` manipulates
+  in WORLD space (`parentWorld * transform's own local matrix`, `parentWorld`
+  resolved by the caller via `TransformHierarchy.h`'s `ComputeWorldMatrix()` —
+  `Mat4::Identity()` for a root/unparented entity) and converts the result
+  back into the selected entity's own LOCAL fields afterwards
+  (`parentWorld`'s inverse times the manipulated world matrix) — for a root
+  entity this is exactly the original "manipulate the local matrix directly"
+  behavior, unchanged; for a parented entity, the gizmo now stays correctly
+  aligned with wherever it's actually drawn instead of silently fighting the
+  parent transform. Uses the Scene view's own `EditorCamera`
   (never the gameplay `Camera` entity's view/projection — see above).
   `ManipulateTransformGizmo()` decomposes the manipulated 4x4 matrix back
   into position/rotation/scale by hand rather than via
@@ -668,6 +719,25 @@ pieces:
   highlight for the picked entity is a deliberately deferred follow-up — see
   `TODO.md` ("Editor / Debug UI"); selection today is manual, via
   "Hierarchy" only.
+- **Transform now supports a real parent/child hierarchy**, Unity's own
+  `Transform.parent`/`GetSiblingIndex()` shape (`ECS/Components/Transform.h`'s
+  `parent`/`siblingIndex` fields, `ECS/TransformHierarchy.h/.cpp`'s
+  `ComputeWorldMatrix()`/`SetParent()`/`GetChildren()`/`SetSiblingIndex()` -
+  fully Tier-1-tested, see `tests/ECS/TransformHierarchyTests.cpp`). A
+  parented entity's `RenderSystem`-resolved world transform - and a parented
+  `Camera`'s view matrix - now genuinely follow their parent, closing the
+  "Transform is flat today" gap `TODO.md` used to call out. "Hierarchy" lists
+  every entity as a real indented tree instead of flat, with Unity-style
+  drag-and-drop: drop onto another row's middle band to attach as its child
+  (world position preserved), onto its top/bottom band to reorder as a
+  sibling, or onto empty panel space to detach back to the scene root - see
+  "Editor / Debug UI" above. The Scene-view transform gizmo (below) and
+  Inspector's "Parent"/"Unparent" control were both updated to match.
+- The Scene-view transform gizmo now manipulates in WORLD space and converts
+  back to the selected entity's own LOCAL `Transform` fields via its
+  parent's resolved world matrix (`ComputeWorldMatrix()` above), so it stays
+  correctly aligned for a parented entity - previously ImGuizmo's `LOCAL`
+  space was always identical to `WORLD`, since no hierarchy existed yet.
 - The Editor now has a Unity-Memory-Profiler-style **"Memory"** panel
   (`src/Editor/Panels/MemoryPanel.cpp`, docked full-width along the bottom),
   now covering CPU AND GPU memory across three sections: **"CPU (Engine
@@ -761,7 +831,13 @@ pieces:
   `EntityManager`/`ComponentStorage<T>`/`Registry`) is the engine's Scene/
   World data model — no third-party ECS library (EnTT), same "own the core
   data model" choice as Math. `Transform`, `MeshRenderer`, and `Camera` are
-  the three components that exist today. Fully unit-tested, including
+  the three components that exist today. `Transform` now carries a real
+  parent/child hierarchy (`parent`/`siblingIndex` fields, plus
+  `ECS/TransformHierarchy.h/.cpp`'s `ComputeWorldMatrix()`/`SetParent()`/
+  `GetChildren()`/`SetSiblingIndex()`) - a parented entity's world transform
+  is composed all the way up its parent chain, cycle-safely, and "Hierarchy"
+  exposes it as a real drag-and-drop tree (see "Editor / Debug UI" below).
+  Fully unit-tested, including
   generation-guarded stale-handle safety.
 - The ECS is wired all the way into actual rendering, not just present as
   inert data: `RenderSystem` (`src/Game/RenderSystem.h/.cpp`) is the one

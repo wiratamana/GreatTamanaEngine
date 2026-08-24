@@ -291,12 +291,27 @@ unblock the most follow-on work:
   weighted vertex normals from the index buffer's own winding would be a
   more correct fallback than a single fixed direction, whenever that
   actually comes up.
-- **Transform parenting / hierarchy.** `Transform`
-  (`src/ECS/Components/Transform.h`) is flat today - no parent/child
-  relationship, which is why ImGuizmo's `LOCAL` space is currently identical
-  to `WORLD` (see `README.md`). Adding a parent `Entity` reference (or
-  index) with `LocalToWorldMatrix()` walking up the chain is relatively
-  contained and unblocks real scene graphs.
+- **~~Transform parenting / hierarchy~~ - DONE.** `Transform`
+  (`src/ECS/Components/Transform.h`) now carries a real `parent` `Entity`
+  field (`kInvalidEntity` = world space, matching every Transform's old
+  behavior) plus a `siblingIndex` for display/reorder purposes, Unity's own
+  `Transform.parent`/`GetSiblingIndex()` shape. Walking the parent chain to
+  resolve a full world transform (cycle-safely), reparenting (with an
+  optional world-position-preserving conversion, Unity's own
+  `SetParent(parent, worldPositionStays)` default), and sibling reordering
+  all live in a new sibling module, `src/ECS/TransformHierarchy.h/.cpp`
+  (`ComputeWorldMatrix()`/`ComputeWorldTransform()`, `IsDescendantOf()`,
+  `SetParent()`, `GetChildren()`, `SetSiblingIndex()`/`MoveToLastSibling()`) -
+  pure functions needing nothing but a `Registry`, fully Tier-1-tested (see
+  `tests/ECS/TransformHierarchyTests.cpp`). `RenderSystem::CollectRenderables()`/
+  `ResolveActiveCameraViewProjection()` now resolve each entity's/camera's
+  FULL world transform this way, so a parented mesh or camera genuinely
+  follows its parent. "Hierarchy" now renders a real indented tree (via
+  `GetChildren()`) with Unity-style drag-and-drop to attach/detach/reorder,
+  and the Scene-view transform gizmo now manipulates in world space and
+  converts back through the parent's world matrix - ImGuizmo's `LOCAL` space
+  is no longer identical to `WORLD` for a parented/rotated entity (see
+  `README.md`). This unblocks real scene graphs.
 - **Basic collision/physics primitives.** No collision/physics layer exists
   at all yet - a prerequisite for click-to-select raycasting (above) and for
   any real gameplay. Start minimal: AABB/sphere colliders + a simple

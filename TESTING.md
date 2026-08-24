@@ -85,15 +85,26 @@ safe on any machine/CI runner, GPU or not:
 - `ECS/RegistryTests.cpp` - `Registry` gluing `EntityManager` +
   `ComponentStorage<T>` together: multi-component-type entities,
   DestroyEntity() clearing every pool, and `Transform`.
+- `ECS/TransformHierarchyTests.cpp` - `ECS/TransformHierarchy.h`'s
+  `ComputeWorldMatrix()`/`ComputeWorldTransform()` (parent-chain composition,
+  including a dead/dangling parent falling back gracefully), `IsDescendantOf()`
+  (cycle detection), `SetParent()` (cycle rejection, missing-`Transform`
+  rejection, and both the world-position-preserving and as-authored
+  reparenting behaviors), and `GetChildren()`/`SetSiblingIndex()`/
+  `MoveToLastSibling()` (sibling ordering/reordering) - all pure functions
+  needing nothing but a `Registry`.
 - `ECS/CameraTests.cpp` - `Camera`'s pure math helpers, `ProjectionMatrix()`/
   `ViewMatrix()`, checked directly against `Mat4::PerspectiveFovLH_ZO()`/
   `LookAtLH()`.
 - `Game/RenderSystemTests.cpp` - `RenderSystem::CollectRenderables()` (the
   pure ECS -> `DrawCommand` step: every entity with a `MeshRenderer` becomes
-  one draw command, using its `Transform`'s world matrix if present) and
-  `RenderSystem::ResolveActiveCameraViewProjection()` (the pure ECS -> camera
-  view-projection step: the first entity with an active `Camera` becomes a
-  combined view-projection matrix, `Mat4::Identity()` if none exists) - both
+  one draw command, using `ECS/TransformHierarchy.h`'s `ComputeWorldMatrix()`
+  - its `Transform`'s world matrix, composed up its parent chain if any, if
+  present) and `RenderSystem::ResolveActiveCameraViewProjection()` (the pure
+  ECS -> camera view-projection step: the first entity with an active
+  `Camera` becomes a combined view-projection matrix resolved from that
+  camera's own full world transform - so a parented `Camera` follows its
+  parent too - `Mat4::Identity()` if none exists) - both
   need nothing but a `Registry`, no live Renderer/GPU device at all.
 - `Editor/EditorCameraTests.cpp` - `EditorCamera`'s pure pan/dolly/rotate
   math and pitch clamping (`src/Editor/EditorCamera.h`) - no ImGui/SDL/
