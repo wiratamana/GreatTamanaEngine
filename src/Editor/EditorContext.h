@@ -9,6 +9,22 @@
 
 namespace gte {
 
+// Shared ImGui drag-and-drop payload type identifier for "a file path
+// dragged out of the Project panel" (see Panels/ProjectPanel.cpp's
+// RenderRightPaneEntry() - the drag SOURCE - and Panels/HierarchyPanel.cpp/
+// ScenePanel.cpp - the drag TARGETs that spawn a new entity from it via
+// Game::CreateMeshEntityFromGtaFile()). ImGui payload types are matched by
+// exact string content between BeginDragDropSource()'s SetDragDropPayload()
+// and BeginDragDropTarget()'s AcceptDragDropPayload(), so this one shared
+// constant is what keeps both sides from ever silently drifting apart.
+// Lives here (rather than in ProjectPanelData.h) so it's visible to every
+// panel regardless of whether GTE_ENABLE_PROJECT_PANEL is on - only the drag
+// SOURCE (ProjectPanel) is gated behind that switch; the drag TARGETs guard
+// their own use of it behind the same `#if GTE_ENABLE_PROJECT_PANEL` instead.
+// The payload itself is the dragged file's absolute filesystem path, UTF-8
+// encoded, NUL-terminated (see ProjectPanelData.h's PathToUtf8()).
+inline constexpr const char* kProjectAssetDragDropPayloadType = "GTE_PROJECT_ASSET_PATH";
+
 // Plain shared state passed by reference into every Editor panel/dock-layout
 // function (see DockLayout.h, Panels/*.h) - the free-function equivalent of
 // what used to be ImGuiEditorLayer's own private member variables before the

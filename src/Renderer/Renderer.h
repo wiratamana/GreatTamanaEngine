@@ -212,17 +212,36 @@ public:
     // Matching"). vertexShaderSpirvPath/fragmentShaderSpirvPath point at
     // compiled SPIR-V binaries - see cmake/CompileShaders.cmake, which
     // compiles src/Shaders/*.vert/*.frag into "<exe dir>/shaders/*.spv" at
-    // build time.
-    Pipeline CreatePipeline(const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath) const;
+    // build time. `vertexLayout` (see Pipeline.h's VertexLayout) defaults to
+    // VertexLayout::PositionColor - every existing call site is unaffected;
+    // pass VertexLayout::PositionNormal for a pipeline meant to draw a Mesh
+    // built from the indexed CreateMesh() overload below (e.g.
+    // Game::CreateMeshEntityFromGtaFile()'s own pipeline).
+    Pipeline CreatePipeline(const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath,
+        VertexLayout vertexLayout = VertexLayout::PositionColor) const;
 
-    // Factory for meshes (currently: a vertex buffer + vertex count, no
-    // index buffer - see Mesh.h), so callers never need direct access to
-    // the VmaAllocator this Renderer owns internally. vertexData/
+    // Factory for meshes: a vertex buffer + vertex count, NO index buffer -
+    // see Mesh.h's non-indexed constructor. So callers never need direct
+    // access to the VmaAllocator this Renderer owns internally. vertexData/
     // vertexDataSize describe a plain CPU-side array of Vertex (Vertex.h);
     // uploaded once via CreateDeviceLocalBuffer(), same as any other
     // static GPU-only buffer. debugName is optional/Editor-only - see
     // Buffer's constructor comment.
     Mesh CreateMesh(const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount,
+        const char* debugName = nullptr) const;
+
+    // Indexed overload of CreateMesh() above - for a real imported mesh
+    // whose CPU-side data already came with a triangle-index list (see
+    // src/Assets/MeshData.h::indices), e.g. a decoded *.gta AssetType::Mesh
+    // payload. `vertexData`/`vertexDataSize` describe a plain CPU-side array
+    // of MeshVertex (MeshVertex.h) here, NOT Vertex - a Pipeline this Mesh
+    // is drawn with must have been built with VertexLayout::PositionNormal
+    // (see CreatePipeline() above) for the two to actually agree on layout.
+    // Both the vertex AND index buffers are uploaded via
+    // CreateDeviceLocalBuffer(), same as the non-indexed overload.
+    // debugName is optional/Editor-only and applies to BOTH buffers.
+    Mesh CreateMesh(const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount,
+        const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount,
         const char* debugName = nullptr) const;
 
     // Factory for a static, immutable, CPU-authored texture (e.g. a decoded

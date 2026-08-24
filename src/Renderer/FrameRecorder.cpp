@@ -26,6 +26,10 @@ void FrameRecorder::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat
     item.layout = pipeline.Layout();
     item.vertexBuffer = mesh.VertexBuffer();
     item.vertexCount = mesh.VertexCount();
+    if (mesh.HasIndexBuffer()) {
+        item.indexBuffer = mesh.IndexBuffer();
+        item.indexCount = mesh.IndexCount();
+    }
     item.model = modelMatrix;
     item.viewProj = viewProjMatrix;
     m_drawQueue.push_back(item);
@@ -193,7 +197,15 @@ void FrameRecorder::RecordFrame(VkCommandBuffer cmd, const RenderTarget& target,
 
             const VkDeviceSize offset = 0;
             vkCmdBindVertexBuffers(cmd, 0, 1, &item.vertexBuffer, &offset);
-            vkCmdDraw(cmd, item.vertexCount, 1, 0, 0);
+            if (item.indexBuffer != VK_NULL_HANDLE) {
+                // A real imported mesh (see Mesh's indexed constructor) -
+                // vkCmdDrawIndexed() shares its vertices across triangles
+                // instead of duplicating them per-triangle.
+                vkCmdBindIndexBuffer(cmd, item.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+                vkCmdDrawIndexed(cmd, item.indexCount, 1, 0, 0, 0);
+            } else {
+                vkCmdDraw(cmd, item.vertexCount, 1, 0, 0);
+            }
         }
 
         m_drawQueue.clear();

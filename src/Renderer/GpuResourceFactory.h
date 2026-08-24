@@ -64,13 +64,22 @@ public:
 
     // See Renderer::CreatePipeline(). `colorFormat` here is always exactly
     // Renderer::ColorFormat(), passed in by Renderer since only Renderer
-    // knows it.
+    // knows it. `vertexLayout` defaults to VertexLayout::PositionColor -
+    // see Pipeline.h.
     Pipeline CreatePipeline(VkFormat colorFormat, const std::string& vertexShaderSpirvPath,
-        const std::string& fragmentShaderSpirvPath) const;
+        const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor) const;
 
-    // See Renderer::CreateMesh().
+    // See Renderer::CreateMesh() (non-indexed overload).
     Mesh CreateMesh(const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount,
         const char* debugName = nullptr) const;
+
+    // See Renderer::CreateMesh() (indexed overload) - builds BOTH a vertex
+    // buffer and an index buffer, one CreateDeviceLocalBuffer() upload each,
+    // and returns a Mesh built via Mesh's indexed constructor.
+    Mesh CreateMesh(const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount,
+        const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount,
+        const char* debugName = nullptr) const;
+
 
     // See Renderer::CreateTexture2D(). `pixelsRgba8` must be
     // width*height*4 tightly-packed bytes (e.g. straight out of

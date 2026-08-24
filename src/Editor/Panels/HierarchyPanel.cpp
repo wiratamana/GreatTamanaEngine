@@ -9,9 +9,11 @@
 
 #include <imgui.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdio>
+#include <string>
 
 namespace gte {
 
@@ -59,6 +61,35 @@ void BuildHierarchyPanel(Game& game, Renderer& renderer, EditorContext& ctx)
     if (transforms.Size() == 0) {
         ImGui::TextDisabled("(no entities)");
     }
+
+#if GTE_ENABLE_PROJECT_PANEL
+    // Drop target for a Project-panel asset drag (see Panels/ProjectPanel.cpp's
+    // RenderRightPaneEntry(), the drag source) - lets a *.gta Mesh asset be
+    // dragged straight from "Project" onto "Hierarchy" to instantiate it as
+    // a new entity, Unity's own "drag a model into Hierarchy" convention.
+    // An invisible button spanning the rest of the panel gives this a real
+    // rect to attach a drop target to - BeginDragDropTarget() alone only
+    // ever attaches to the MOST RECENTLY SUBMITTED item, and the entity
+    // list above may be empty (or may not fill the whole panel).
+    {
+        ImVec2 dropTargetSize = ImGui::GetContentRegionAvail();
+        dropTargetSize.x = std::max(dropTargetSize.x, 1.0f);
+        dropTargetSize.y = std::max(dropTargetSize.y, 1.0f);
+        ImGui::InvisibleButton("HierarchyAssetDropTarget", dropTargetSize);
+        if (ImGui::BeginDragDropTarget()) {
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kProjectAssetDragDropPayloadType)) {
+                const std::string absolutePath(static_cast<const char*>(payload->Data));
+                const Entity spawned = game.CreateMeshEntityFromGtaFile(renderer, absolutePath);
+                if (spawned.IsValid()) {
+                    // Same "select what you just created" convention as
+                    // "Create 3D Object" below.
+                    ctx.selection.SelectEntity(spawned);
+                }
+            }
+            ImGui::EndDragDropTarget();
+        }
+    }
+#endif
 
     // Unity-style right-click context menu: BeginPopupContextWindow() with
     // no ImGuiPopupFlags_NoOpenOverItems opens on ANY right-click inside

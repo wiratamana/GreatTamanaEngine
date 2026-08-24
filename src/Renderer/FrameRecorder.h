@@ -122,6 +122,11 @@ private:
         VkPipelineLayout layout = VK_NULL_HANDLE;
         VkBuffer vertexBuffer = VK_NULL_HANDLE;
         std::uint32_t vertexCount = 0;
+        // VK_NULL_HANDLE means "this Mesh had no index buffer" (see
+        // Mesh::HasIndexBuffer()) - RecordFrame() below issues a plain
+        // vkCmdDraw() in that case, vkCmdDrawIndexed() otherwise.
+        VkBuffer indexBuffer = VK_NULL_HANDLE;
+        std::uint32_t indexCount = 0;
         Mat4 model = Mat4::Identity(); // Mat4's default ctor is all-zero, NOT identity - see Math/Mat4.h.
         Mat4 viewProj = Mat4::Identity(); // The active camera's view-projection matrix at Submit() time - see Renderer::Submit().
     };

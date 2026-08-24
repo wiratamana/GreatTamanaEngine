@@ -6,6 +6,30 @@
 
 namespace gte {
 
+// Which per-vertex GPU layout a Pipeline expects its bound Mesh's vertex
+// buffer to already be in - see Vertex.h (PositionColor) and MeshVertex.h
+// (PositionNormal). A Mesh itself carries no notion of "its own" vertex
+// layout (see Mesh.h - it's just a VkBuffer + a count); it is entirely up to
+// whoever builds a Pipeline/Mesh PAIR to make sure both agree on this, the
+// same way AGENTS.md's "Render Target Format Matching" already requires a
+// Pipeline and the render target it draws into to agree on their exact
+// color/depth format.
+enum class VertexLayout {
+    // This engine's original position+color layout (Vertex.h) - every
+    // built-in primitive shape (Renderer/Primitives/PrimitiveMeshGenerator.h)
+    // and the original hardcoded triangle demo use this, via Triangle.vert/
+    // .frag. The default, for backward compatibility with every existing
+    // Renderer::CreatePipeline() call site.
+    PositionColor,
+
+    // Position+normal (MeshVertex.h) - for an imported, indexed mesh asset
+    // (a *.gta AssetType::Mesh - see Game::CreateMeshEntityFromGtaFile(),
+    // src/Game/Game.h/.cpp), via Shaders/Mesh.vert/.frag. Such an asset
+    // carries no per-vertex color (see src/Assets/MeshData.h), only a real
+    // per-vertex normal.
+    PositionNormal,
+};
+
 // RAII wrapper around a VkPipeline + its VkPipelineLayout, built for dynamic
 // rendering (no VkRenderPass/VkFramebuffer) against an exact color AND
 // depth format. Owns both for its entire lifetime: created in the
@@ -23,9 +47,10 @@ namespace gte {
 // (non-coplanar) 3D geometry is correctly occluded instead of drawing in
 // whatever order it happened to be submitted in.
 //
-// Deliberately minimal today: one hardcoded vertex format (see Vertex.h),
-// still no descriptor sets, and viewport/scissor left as dynamic state so
-// the exact same pipeline can draw into either the swapchain or an Editor
+// `vertexLayout` (see VertexLayout above) selects which vertex
+// binding/attribute description this pipeline is built against - still no
+// descriptor sets, and viewport/scissor left as dynamic state so the exact
+// same pipeline can draw into either the swapchain or an Editor
 // RenderTexture, whatever size each currently is. DOES carry one push
 // constant range: a "model" matrix followed immediately by a "viewProj"
 // matrix (vertex stage only, offset 0, 128 bytes total - the guaranteed
@@ -33,10 +58,10 @@ namespace gte {
 // so this never needs a per-GPU size check) - see RenderSystem.h/
 // FrameRecorder.h for how a per-draw world matrix and the active Camera's
 // view-projection matrix reach this via vkCmdPushConstants, and Shaders/
-// Triangle.vert for the matching `layout(push_constant)` block. Grow this
-// further (a real shader/material system, descriptor sets for
-// textures/uniforms, multiple vertex formats, ...) once there's more than
-// one hardcoded triangle mesh to draw.
+// Triangle.vert/Mesh.vert for the matching `layout(push_constant)` block,
+// shared identically by both vertex layouts. Grow this further (a real
+// shader/material system, descriptor sets for textures/uniforms, ...) once
+// there's more than these two hardcoded vertex layouts to draw.
 class Pipeline {
 public:
     // vertexShaderSpirvPath/fragmentShaderSpirvPath point at compiled
@@ -45,7 +70,7 @@ public:
     // time (gitignored; only the GLSL source is version-controlled). NOT
     // paths to GLSL source.
     Pipeline(VkDevice device, VkFormat colorFormat, VkFormat depthFormat, const std::string& vertexShaderSpirvPath,
-        const std::string& fragmentShaderSpirvPath);
+        const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor);
     ~Pipeline();
 
     Pipeline(const Pipeline&) = delete;

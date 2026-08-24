@@ -145,15 +145,21 @@ void Renderer::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& mo
 }
 
 Pipeline Renderer::CreatePipeline(
-    const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath) const
+    const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout) const
 {
-    return m_resources.CreatePipeline(ColorFormat(), vertexShaderSpirvPath, fragmentShaderSpirvPath);
+    return m_resources.CreatePipeline(ColorFormat(), vertexShaderSpirvPath, fragmentShaderSpirvPath, vertexLayout);
 }
 
 Mesh Renderer::CreateMesh(
     const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount, const char* debugName) const
 {
     return m_resources.CreateMesh(vertexData, vertexDataSize, vertexCount, debugName);
+}
+
+Mesh Renderer::CreateMesh(const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount,
+    const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount, const char* debugName) const
+{
+    return m_resources.CreateMesh(vertexData, vertexDataSize, vertexCount, indexData, indexDataSize, indexCount, debugName);
 }
 
 Texture2D Renderer::CreateTexture2D(const void* pixelsRgba8, int width, int height, const char* debugName) const

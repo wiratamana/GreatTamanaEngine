@@ -232,6 +232,25 @@ void ProjectPanel::RenderRightPaneEntry(EditorContext& ctx, const ProjectEntry& 
     const std::string label = entry.isDirectory ? ("[Folder] " + entry.name) : entry.name;
     ImGui::Selectable(label.c_str(), isSelected);
 
+    // Lets a file be dragged straight out of "Project" onto "Hierarchy"/
+    // "Scene" to instantiate it (see EditorContext.h's
+    // kProjectAssetDragDropPayloadType and Game::CreateMeshEntityFromGtaFile())
+    // - Unity's own "drag a model asset into the scene" convention. The
+    // payload is the file's absolute filesystem path, UTF-8 encoded - the
+    // same representation ReadGtaFile()/AssetPreviewMesh::Render() already
+    // expect - so the receiving panel never needs to know this panel's own
+    // m_rootPath to resolve it. Only non-directory entries are draggable;
+    // only a *.gta AssetType::Mesh file is currently understood on the
+    // receiving end, but any OTHER file is simply ignored there (see
+    // Game::CreateMeshEntityFromGtaFile()'s own "degrade gracefully"
+    // contract), so this doesn't need its own extension check here.
+    if (!entry.isDirectory && ImGui::BeginDragDropSource()) {
+        const std::string absolutePathUtf8 = PathToUtf8(m_rootPath / Utf8ToPath(entry.relativePath));
+        ImGui::SetDragDropPayload(
+            kProjectAssetDragDropPayloadType, absolutePathUtf8.c_str(), absolutePathUtf8.size() + 1);
+        ImGui::TextUnformatted(entry.name.c_str());
+        ImGui::EndDragDropSource();
+    }
     if (entry.isDirectory) {
         RecordFolderDropZone(entry.relativePath);
     }

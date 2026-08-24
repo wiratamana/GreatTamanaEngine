@@ -112,6 +112,24 @@ view-projection matrix (both `Mat4::Identity()` by default) recorded via
 with no active `Camera` pushes an identity `viewProj`, preserving this
 engine's original "vertices already authored directly in clip space"
 triangle-demo behavior.
+`Mesh` (`src/Renderer/Mesh.h`) now optionally carries a real INDEX buffer
+alongside its vertex buffer (a second, indexed constructor — the original
+non-indexed one is unchanged and still what every built-in primitive shape
+uses), and `Pipeline` (`src/Renderer/Pipeline.h/.cpp`) picks its vertex
+binding/attribute description via a `VertexLayout` enum —
+`PositionColor` (the original `Vertex.h`, the default, used everywhere
+today except below) or `PositionNormal` (a new `MeshVertex.h`: position +
+a real per-vertex normal, no color). `FrameRecorder` issues
+`vkCmdDrawIndexed` instead of `vkCmdDraw` whenever the submitted `Mesh` has
+an index buffer. This is what lets a real imported mesh (see "Asset
+Pipeline" below) be drawn through the SAME shared `Renderer`/`RenderSystem`
+path as everything else — a `*.gta` `AssetType::Mesh` payload's
+positions/normals/triangle indices are uploaded as-is (no per-triangle
+vertex duplication) and rendered via a small, always-compiled "grey clay"
+shader pair (`Shaders/Mesh.vert/.frag` — fixed-direction lambert + ambient,
+no textures yet, since a Mesh asset carries no material data — see "Asset
+Pipeline" below), through `Game::CreateMeshEntityFromGtaFile()`
+(`src/Game/Game.h/.cpp` — mirrors `CreatePrimitiveEntity()` below).
 Every render target (the swapchain, or a `RenderTexture`) is paired with a
 real **`DepthBuffer`** (`src/Renderer/DepthBuffer.h/.cpp`) at a format
 queried once from the physical device (`VulkanDevice::PickDepthFormat()`,
@@ -302,8 +320,12 @@ registry that tracks every one of them:
   still import/data-extraction only — no GPU skinning, IK solving, morph
   blending, or physics simulation happens anywhere in this engine yet (no
   Bullet or equivalent backend is vendored); see `TODO.md` for that
-  remaining runtime work, and material/texture import as another explicit
-  follow-up.
+  follow-up. A Mesh `*.gta` CAN now be spawned as a real, rendered
+  `Transform`+`MeshRenderer` entity via `Game::CreateMeshEntityFromGtaFile()`
+  (see "Rendering" above and "Editor / Debug UI" below for the Editor's own
+  drag-and-drop trigger for it) — but always in its ORIGINAL BIND POSE,
+  since none of the skinning/IK/morph/physics evaluation this paragraph
+  describes actually runs yet.
 - **MikuMikuDance (`.vmd`) motion import → Animation `*.gta`**
   (`Assets/VmdLoader.h/.cpp`, `Assets/MotionData.h`, `Assets/MotionFile.h/.cpp`,
   `Assets/AssetImporter.h/.cpp`) — the motion-import equivalent of the `.pmx`
@@ -364,6 +386,16 @@ CMake adds:
   shows/edits the selected entity's `Transform` (position/rotation/scale),
   `Camera` (active/field of view/near-far planes) if present, and displays
   its `MeshRenderer` handles read-only.
+  **Drag-and-drop instantiation:** a file dragged out of "Project" (see the
+  Project panel below — `Panels/ProjectPanel.cpp`'s `BeginDragDropSource()`,
+  payload = the file's absolute path,
+  `EditorContext::kProjectAssetDragDropPayloadType`) can be dropped onto
+  either "Hierarchy" (anywhere in the panel — `Panels/HierarchyPanel.cpp`) or
+  directly onto the "Scene" viewport image (`Panels/ScenePanel.cpp`) to
+  instantiate it, Unity's own "drag a model into the scene" convention — both
+  drop targets just call `Game::CreateMeshEntityFromGtaFile()` and select the
+  freshly spawned entity. Dropping anything other than a valid `*.gta`
+  `AssetType::Mesh` file is silently ignored (see "Asset Pipeline" above).
   **Visibility-driven rendering:** `IEditorLayer::GameViewTarget()`/
   `SceneViewTarget()` each return `nullptr` (skipping that view's
   `Renderer::RenderOffscreen()` pass entirely) whenever `ImGui::Begin()`
@@ -864,6 +896,30 @@ pieces:
   extraction only, same as the model importer — no interpolation evaluation,
   keyframe playback, or wiring onto a model's own `SkeletonData`/`MorphData`
   by name happens anywhere in this engine yet; see `TODO.md`.
+- **A dropped Mesh `*.gta` can now be instantiated AND actually rendered** —
+  closes the "no gameplay consumption path" gap the PMX-import entry above
+  used to call out. `Mesh` (`src/Renderer/Mesh.h`) gained a real, optional
+  index buffer (a second, indexed constructor; the original non-indexed one
+  is unchanged), `Pipeline` (`src/Renderer/Pipeline.h/.cpp`) gained a
+  `VertexLayout` selector (`PositionColor` — the original `Vertex.h` — vs.
+  `PositionNormal` — a new `MeshVertex.h` carrying a real per-vertex normal
+  instead of a color), and `FrameRecorder` now issues `vkCmdDrawIndexed`
+  whenever the submitted `Mesh` has one. `Game::CreateMeshEntityFromGtaFile()`
+  (mirroring `CreatePrimitiveEntity()`) decodes a Mesh `*.gta`'s payload,
+  uploads it once (cached per absolute path), and spawns a
+  `Transform`+`MeshRenderer` entity for it, drawn through a shared,
+  always-compiled "grey clay" pipeline (`Shaders/Mesh.vert/.frag` —
+  fixed-direction lambert + ambient; no textures, since a Mesh asset carries
+  no material data yet). The Editor wires this up as real drag-and-drop:
+  dragging a file out of "Project" (`Panels/ProjectPanel.cpp`'s
+  `BeginDragDropSource()`) onto either "Hierarchy" or directly onto the
+  "Scene" viewport image (`Panels/HierarchyPanel.cpp`/`ScenePanel.cpp`'s
+  `BeginDragDropTarget()`) instantiates and selects it, Unity's own "drag a
+  model into the scene" convention. The spawned entity always renders in its
+  ORIGINAL BIND POSE — no skinning/morph/IK evaluation runs yet (that
+  remains explicitly deferred, see `TODO.md`). Verified against the real
+  ~31k-vertex/~39k-triangle MMD model already used elsewhere in this
+  session's testing, and the full test suite (342 tests) still passes.
 
 ## Roadmap
 

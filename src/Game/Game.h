@@ -5,8 +5,9 @@
 #include "ECS/Registry.h"
 #include "Renderer/Primitives/PrimitiveMeshGenerator.h"
 #include "RenderSystem.h"
-
 #include <array>
+#include <string>
+#include <unordered_map>
 
 namespace gte {
 
@@ -82,6 +83,41 @@ public:
     // per instance.
     Entity CreatePrimitiveEntity(Renderer& renderer, PrimitiveType type);
 
+    // Spawns a new entity from an imported *.gta AssetType::Mesh file (see
+    // src/Assets/MeshFile.h/PmxLoader.h - the result of importing a
+    // MikuMikuDance .pmx model via the Editor's "Project" panel) at
+    // `absoluteGtaPath` - this engine's answer to "drag a model asset into
+    // Hierarchy/Scene to instantiate it", the Mesh-asset equivalent of
+    // CreatePrimitiveEntity() above. Spawns at the world origin with an
+    // identity Transform (scale/rotation), exactly like
+    // CreatePrimitiveEntity() - the caller (a future Inspector edit, or a
+    // real scene file) is responsible for moving it anywhere else.
+    //
+    // The mesh's positions/normals/triangle indices are uploaded ONCE per
+    // distinct `absoluteGtaPath` and cached (see m_meshAssetCache below) - a
+    // second entity spawned from the SAME asset (e.g. dragging it into
+    // Hierarchy twice) reuses the already-uploaded GPU mesh, exactly like
+    // EnsurePrimitiveMesh() already does per PrimitiveType. Rendered through
+    // a plain, unlit-but-normal-shaded "grey clay" pipeline (Shaders/
+    // Mesh.vert/.frag, position+normal only - see EnsureMeshPipeline()/
+    // Renderer::CreatePipeline()'s VertexLayout::PositionNormal) since a
+    // *.gta Mesh payload carries no material/texture data yet (see TODO.md,
+    // "PMX material/texture import") and this model has no bone/morph
+    // deformation applied yet either (see TODO.md, "Real MMD skinning/
+    // animation runtime" - the skeleton/skin-weight DATA already
+    // round-trips through the same *.gta's metadata section via
+    // RigFile.h, but nothing evaluates it at runtime yet, so this always
+    // renders the model's original bind pose exactly as authored).
+    //
+    // Returns kInvalidEntity (never throws) if `absoluteGtaPath` doesn't
+    // currently resolve to a valid, non-empty *.gta AssetType::Mesh file
+    // (missing file, bad magic/wrong asset type, corrupt/truncated payload,
+    // or zero vertices/triangles) - the caller (HierarchyPanel/ScenePanel's
+    // drag-and-drop target) should simply ignore the drop in that case,
+    // same "degrade gracefully" convention as every other Editor
+    // drag-and-drop path (see AGENTS.md, "Editor Module Structure").
+    Entity CreateMeshEntityFromGtaFile(Renderer& renderer, const std::string& absoluteGtaPath);
+
 private:
     // Lazily builds the demo scene - three entities sharing one triangle
     // Mesh/Pipeline, spaced left/center/right purely via Transform, plus one
@@ -114,6 +150,24 @@ private:
     // demo-scene triangles (see EnsureDemoSceneBuilt()).
     MeshHandle EnsurePrimitiveMesh(Renderer& renderer, PrimitiveType type);
 
+    // Lazily creates (once) the one shared "grey clay" Pipeline every
+    // imported mesh entity from CreateMeshEntityFromGtaFile() uses (Shaders/
+    // Mesh.vert/.frag, VertexLayout::PositionNormal) - a completely separate
+    // Pipeline/PipelineHandle from EnsureDefaultPipeline() above, since it's
+    // built against a different vertex layout (see Pipeline.h's
+    // VertexLayout) and cannot legally draw a position+color Mesh (or vice
+    // versa).
+    PipelineHandle EnsureMeshPipeline(Renderer& renderer);
+
+    // Decodes/uploads (once per distinct `absoluteGtaPath`, then cached) the
+    // MeshData payload of a *.gta AssetType::Mesh file into a real, indexed
+    // GPU Mesh (MeshVertex/Renderer::CreateMesh()'s indexed overload) - the
+    // actual work behind CreateMeshEntityFromGtaFile() above. Returns
+    // kInvalidMeshHandle (never throws) for anything that doesn't resolve to
+    // a valid, non-empty Mesh *.gta - see CreateMeshEntityFromGtaFile()'s
+    // own doc comment for the exact failure cases.
+    MeshHandle EnsureMeshAsset(Renderer& renderer, const std::string& absoluteGtaPath);
+
     Registry m_registry;
     RenderSystem m_renderSystem;
     bool m_demoSceneBuilt = false;
@@ -123,6 +177,16 @@ private:
     // Indexed by static_cast<std::size_t>(PrimitiveType) - kInvalidMeshHandle
     // (the array's default-constructed value) means "not generated yet".
     std::array<MeshHandle, 5> m_primitiveMeshes;
+
+    PipelineHandle m_meshPipeline;
+
+    // Keyed by absolute *.gta filesystem path (UTF-8) - see
+    // EnsureMeshAsset()/CreateMeshEntityFromGtaFile() above. A plain
+    // std::string key (rather than a Guid) since the caller (HierarchyPanel/
+    // ScenePanel's drag-and-drop target) only ever has a filesystem path
+    // in hand, not an AssetDatabase lookup - Game itself never depends on
+    // AssetDatabase/Editor code (see AGENTS.md, Clean Architecture).
+    std::unordered_map<std::string, MeshHandle> m_meshAssetCache;
 };
 
 } // namespace gte

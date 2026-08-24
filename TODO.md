@@ -178,40 +178,46 @@ unblock the most follow-on work:
   `BuildGtaAnimationMetadata()`'s plain `MotionFile.h` decode - no GPU
   preview, just a decoded model-name/frame-range/per-track-keyframe-count/
   bone-and-morph-name-list summary, since a flat keyframe list has nothing
-  to rasterize - for motions) - but there is still NO GAMEPLAY consumption
-  path for any of them: nothing yet lets a
-  `MeshRenderer`/material reference a `*.gta` texture by `Guid` and have it
-  bound to a shader descriptor (today's rendering is still unlit
-  vertex-color only - see `Shaders/Triangle.vert/.frag` - no
-  texture-sampling pipeline variant or descriptor-set plumbing exists), and
-  nothing yet lets a `*.gta` Mesh asset be spawned as an actual
-  `Transform`+`MeshRenderer` entity the way `Game::CreatePrimitiveEntity()`
-  spawns a built-in primitive shape. The blocker for the latter is the same
-  one called out below: `Mesh`/`GpuResourceFactory`/`Renderer::Submit()`/
-  `FrameRecorder` only ever build/draw a plain, NON-INDEXED vertex buffer
-  (see `Mesh.h`) - a real imported mesh (PMX or a future OBJ/glTF) needs
-  indexed drawing for both memory and CPU-generation-time reasons, unlike
-  `PrimitiveMeshGenerator`'s current duplicated-per-triangle vertices.
-  `AssetPreviewMesh` (this session's Inspector 3D viewer) already proves
-  indexed rendering works on this Vulkan backend, but deliberately as its
-  OWN separate, Editor-only pipeline/vertex layout (position+normal, no
-  color/UV) - it does NOT extend the shared `Mesh`/`Pipeline`/`Vertex`
-  types, so none of this plumbing is reusable for gameplay as-is. Needs: (1)
-  real index-buffer support added to the shared `Mesh`/`Renderer::CreateMesh()`/
-  `Renderer::Submit()`/`FrameRecorder` path (`vkCmdDrawIndexed`, mirroring
-  what `AssetPreviewMesh` already does bespoke); (2) a gameplay vertex
-  format that actually carries normal/UV (today's shared `Vertex` is
-  position+color only - see `Vertex.h`'s own comment anticipating this); (3)
-  a basic textured/lit pipeline (descriptor set + sampler, following the
-  same `Renderer::ColorFormat()`-style "single source of truth" discipline
-  used elsewhere) a `MeshRenderer` can actually be drawn with; and (4) a
-  "spawn an entity from an imported `*.gta` Mesh asset" entry point,
-  `Game`-side, mirroring `CreatePrimitiveEntity()`. A future OBJ/glTF loader
-  would produce the exact same `MeshData`/`*.gta` shape `PmxLoader` already
-  does (see `src/Assets/MeshData.h`), so none of this work is PMX-specific.
-- **Real MMD skinning/animation runtime (pose evaluation, morph blending,
-  physics simulation, `.vmd` keyframe interpolation/playback).** The DATA
-  side of this is no longer a gap, for EITHER half of MMD import: `PmxLoader.h`
+  to rasterize - for motions).
+  GAMEPLAY consumption of a Mesh asset is now real too, as of this session:
+  `Mesh` gained an optional index buffer (`Mesh.h`'s indexed constructor,
+  `Renderer::CreateMesh()`'s indexed overload, `FrameRecorder`'s
+  `vkCmdDrawIndexed` path - see `AGENTS.md` if that section still describes
+  "no index buffer support" for `Mesh`, that needs updating too),
+  `Pipeline` gained a `VertexLayout` selector (`PositionColor` - the
+  original `Vertex.h` - vs. `PositionNormal` - the new `MeshVertex.h`, for
+  an imported mesh's real per-vertex normal instead of a per-vertex color),
+  and `Game::CreateMeshEntityFromGtaFile()` (mirroring
+  `CreatePrimitiveEntity()`) decodes a `*.gta` Mesh payload, uploads it
+  (cached per absolute path), and spawns a `Transform`+`MeshRenderer`
+  entity for it, drawn through a shared, always-compiled "grey clay"
+  pipeline (`Shaders/Mesh.vert/.frag` - fixed-direction lambert + ambient,
+  no textures). The Editor wires this up as drag-and-drop: dragging a file
+  out of "Project" (`Panels/ProjectPanel.cpp`'s `BeginDragDropSource()`,
+  payload = absolute path, see `EditorContext::kProjectAssetDragDropPayloadType`)
+  onto either "Hierarchy" or the "Scene" viewport
+  (`Panels/HierarchyPanel.cpp`/`ScenePanel.cpp`'s `BeginDragDropTarget()`)
+  instantiates it - Unity's own "drag a model into the scene" convention.
+  Still NOT done: nothing yet lets a `MeshRenderer`/material reference a
+  `*.gta` TEXTURE by `Guid` and have it bound to a shader descriptor (see
+  "PMX material/texture import" below - there is no descriptor-set/sampler
+  plumbing anywhere in `Renderer`/`Pipeline` yet, so every imported mesh
+  renders as flat greyish "clay" regardless of its source textures), and
+  the spawned mesh is always rendered in its ORIGINAL BIND POSE - no
+  skinning/animation is evaluated at all yet (see "Real MMD skinning/
+  animation runtime" below, which is explicitly deferred). A future OBJ/
+  glTF loader would produce the exact same `MeshData`/`*.gta` shape
+  `PmxLoader` already does (see `src/Assets/MeshData.h`), so none of this
+  work is PMX-specific.
+- **TODO (explicitly deferred - do this next): Real MMD skinning/animation
+  runtime (pose evaluation, morph blending, physics simulation, `.vmd`
+  keyframe interpolation/playback).** A spawned mesh entity
+  (`Game::CreateMeshEntityFromGtaFile()`, see the asset-pipeline bullet
+  above) renders today, but only ever in its ORIGINAL BIND POSE - dragging
+  in both a Mesh `*.gta` and an Animation `*.gta` does NOT yet make the
+  model move; there is no code anywhere that reads an Animation asset back
+  out and drives a Mesh entity with it. The DATA side of this is no longer
+  a gap, for EITHER half of MMD import: `PmxLoader.h`
   extracts per-vertex skin weights (all of BDEF1/BDEF2/BDEF4/SDEF/QDEF -
   `MeshData::skinWeights`), the full bone hierarchy including IK chains
   (`Assets/SkeletonData.h`), all seven morph kinds (`Assets/MorphData.h`),

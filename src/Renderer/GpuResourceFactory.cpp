@@ -152,10 +152,10 @@ void GpuResourceFactory::ImmediateSubmit(const std::function<void(VkCommandBuffe
     vkFreeCommandBuffers(m_device, m_commandPool, 1, &cmd);
 }
 
-Pipeline GpuResourceFactory::CreatePipeline(
-    VkFormat colorFormat, const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath) const
+Pipeline GpuResourceFactory::CreatePipeline(VkFormat colorFormat, const std::string& vertexShaderSpirvPath,
+    const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout) const
 {
-    return Pipeline(m_device, colorFormat, m_depthFormat, vertexShaderSpirvPath, fragmentShaderSpirvPath);
+    return Pipeline(m_device, colorFormat, m_depthFormat, vertexShaderSpirvPath, fragmentShaderSpirvPath, vertexLayout);
 }
 
 Mesh GpuResourceFactory::CreateMesh(
@@ -164,6 +164,16 @@ Mesh GpuResourceFactory::CreateMesh(
     Buffer vertexBuffer =
         CreateDeviceLocalBuffer(vertexData, vertexDataSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, debugName);
     return Mesh(std::move(vertexBuffer), vertexCount);
+}
+
+Mesh GpuResourceFactory::CreateMesh(const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount,
+    const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount, const char* debugName) const
+{
+    Buffer vertexBuffer =
+        CreateDeviceLocalBuffer(vertexData, vertexDataSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, debugName);
+    Buffer indexBuffer =
+        CreateDeviceLocalBuffer(indexData, indexDataSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, debugName);
+    return Mesh(std::move(vertexBuffer), vertexCount, std::move(indexBuffer), indexCount);
 }
 
 Texture2D GpuResourceFactory::CreateTexture2D(

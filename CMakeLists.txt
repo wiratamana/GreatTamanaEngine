@@ -230,6 +230,7 @@ add_library(gte_core STATIC
     src/Renderer/Pipeline.cpp
     src/Renderer/Pipeline.h
     src/Renderer/Vertex.h
+    src/Renderer/MeshVertex.h
     src/Renderer/Primitives/PrimitiveMeshGenerator.cpp
     src/Renderer/Primitives/PrimitiveMeshGenerator.h
     src/Renderer/Memory/GpuResourceHandle.h
@@ -378,6 +379,17 @@ target_link_libraries(GreatTamanaEngine PRIVATE gte_core)
 # never renders anything, see tests/CMakeLists.txt.
 gte_add_shader(GreatTamanaEngine src/Shaders/Triangle.vert)
 gte_add_shader(GreatTamanaEngine src/Shaders/Triangle.frag)
+
+# The shared "imported mesh" draw path (src/Renderer/MeshVertex.h,
+# Pipeline.h's VertexLayout::PositionNormal, Game::CreateMeshEntityFromGtaFile()
+# - src/Game/Game.h/.cpp) needs its own shader pair, compiled/staged the
+# exact same way as Triangle.vert/frag above. Unconditional (not gated
+# behind GTE_ENABLE_PROJECT_PANEL, unlike MeshPreview.vert/frag below) -
+# Game.cpp (which loads these) is always compiled into gte_core, regardless
+# of whether the Editor's "Project" panel (today's only way to actually
+# trigger a spawn - see Panels/HierarchyPanel.cpp/ScenePanel.cpp) is built.
+gte_add_shader(GreatTamanaEngine src/Shaders/Mesh.vert)
+gte_add_shader(GreatTamanaEngine src/Shaders/Mesh.frag)
 
 # The Inspector's Mesh Asset 3D preview viewer (src/Editor/AssetPreviewMesh.h)
 # needs its own small shader pair, compiled/staged the exact same way as

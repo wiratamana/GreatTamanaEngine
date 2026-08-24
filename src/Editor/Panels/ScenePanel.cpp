@@ -5,15 +5,18 @@
 #include "../TransformGizmo.h"
 #include "../../ECS/Components/Transform.h"
 #include "../../ECS/Registry.h"
+#include "../../Game/Game.h"
 
 #include <imgui.h>
 
 #include <cstdint>
+#include <string>
 
 namespace gte {
 
-void BuildScenePanel(Registry& registry, EditorContext& ctx, EditorCamera& camera)
+void BuildScenePanel(Game& game, Renderer& renderer, EditorContext& ctx, EditorCamera& camera)
 {
+    Registry& registry = game.GetRegistry();
     // ImGui::Begin() returns false when this panel isn't actually visible
     // right now (e.g. it's an inactive tab behind "Game", or collapsed) -
     // stashed in ctx.sceneViewVisible for
@@ -42,6 +45,23 @@ void BuildScenePanel(Registry& registry, EditorContext& ctx, EditorCamera& camer
             ImGui::Image(
                 static_cast<ImTextureID>(reinterpret_cast<intptr_t>(ctx.sceneViewDescriptor)),
                 avail);
+
+#if GTE_ENABLE_PROJECT_PANEL
+            // Same Project-panel-asset drag-and-drop target as
+            // Panels/HierarchyPanel.cpp, attached to the Scene image itself
+            // instead - lets a *.gta Mesh asset be dropped straight into the
+            // 3D viewport to instantiate it.
+            if (ImGui::BeginDragDropTarget()) {
+                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kProjectAssetDragDropPayloadType)) {
+                    const std::string absolutePath(static_cast<const char*>(payload->Data));
+                    const Entity spawned = game.CreateMeshEntityFromGtaFile(renderer, absolutePath);
+                    if (spawned.IsValid()) {
+                        ctx.selection.SelectEntity(spawned);
+                    }
+                }
+                ImGui::EndDragDropTarget();
+            }
+#endif
 
             // The Scene image's own on-screen pixel rect - both the gizmo
             // (ManipulateTransformGizmo()) and its top-left switcher overlay

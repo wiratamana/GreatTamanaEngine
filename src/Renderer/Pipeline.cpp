@@ -1,5 +1,6 @@
 #include "Pipeline.h"
 
+#include "MeshVertex.h"
 #include "Vertex.h"
 
 #include <array>
@@ -56,7 +57,7 @@ bool DepthFormatHasStencil(VkFormat format)
 } // namespace
 
 Pipeline::Pipeline(VkDevice device, VkFormat colorFormat, VkFormat depthFormat, const std::string& vertexShaderSpirvPath,
-    const std::string& fragmentShaderSpirvPath)
+    const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout)
     : m_device(device)
 {
     const std::vector<char> vertSpirv = ReadFile(vertexShaderSpirvPath);
@@ -87,8 +88,17 @@ Pipeline::Pipeline(VkDevice device, VkFormat colorFormat, VkFormat depthFormat, 
         stages[1].module = fragModule;
         stages[1].pName = "main";
 
-        const VkVertexInputBindingDescription binding = Vertex::BindingDescription();
-        const std::array<VkVertexInputAttributeDescription, 2> attributes = Vertex::AttributeDescriptions();
+        // Which binding/attribute description to build against - see
+        // VertexLayout's own comment in Pipeline.h. Both structs happen to
+        // produce the same SHAPE (one binding, two vec3 attributes) but
+        // with different per-attribute semantics/offsets - selected here,
+        // once, rather than duplicating this whole constructor per layout.
+        const VkVertexInputBindingDescription binding = vertexLayout == VertexLayout::PositionNormal
+            ? MeshVertex::BindingDescription()
+            : Vertex::BindingDescription();
+        const std::array<VkVertexInputAttributeDescription, 2> attributes = vertexLayout == VertexLayout::PositionNormal
+            ? MeshVertex::AttributeDescriptions()
+            : Vertex::AttributeDescriptions();
 
         VkPipelineVertexInputStateCreateInfo vertexInput{};
         vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;

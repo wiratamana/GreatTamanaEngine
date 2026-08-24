@@ -427,7 +427,7 @@ public:
 #else
         BuildInspectorPanel(registry, m_ctx);
 #endif
-        BuildScenePanel(registry, m_ctx, m_sceneCamera);
+        BuildScenePanel(game, renderer, m_ctx, m_sceneCamera);
         BuildGamePanel(m_ctx);
         BuildMemoryPanel(m_ctx, renderer);
 #if GTE_ENABLE_PROJECT_PANEL
