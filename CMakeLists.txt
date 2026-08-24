@@ -174,6 +174,16 @@ add_library(gte_core STATIC
     src/ECS/Components/Transform.h
     src/ECS/Components/MeshRenderer.h
     src/ECS/Components/Camera.h
+    src/ECS/Components/Name.h
+    src/ECS/Components/MeshAssetSource.h
+    src/ECS/Components/SkeletalAnimator.h
+    src/Animation/BoneLocalOffset.h
+    src/Animation/SkeletonPose.h
+    src/Animation/SkeletonPose.cpp
+    src/Animation/MotionSampler.h
+    src/Animation/MotionSampler.cpp
+    src/Animation/VertexSkinning.h
+    src/Animation/VertexSkinning.cpp
     src/Assets/AssetTypes.h
     src/Assets/AssetTypes.cpp
     src/Assets/GtaFile.h

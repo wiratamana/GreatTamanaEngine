@@ -1,8 +1,14 @@
 #pragma once
 
+#include "../Animation/MotionSampler.h"
 #include "../Assets/AssetTypes.h"
+#include "../Assets/MeshData.h"
+#include "../Assets/MotionData.h"
+#include "../Assets/SkeletonData.h"
 #include "../Event/Event.h"
 #include "../Input/InputState.h"
+#include "../Math/Vec2.h"
+#include "../Math/Vec3.h"
 #include "ECS/Registry.h"
 #include "Renderer/Primitives/PrimitiveMeshGenerator.h"
 #include "Renderer/TextureHandle.h"
@@ -160,6 +166,64 @@ public:
     // part is still a live child entity in the Registry either way.
     Entity CreateMeshEntityFromGtaFile(Renderer& renderer, const std::string& absoluteGtaPath);
 
+    // Assigns/replaces the SkeletalAnimator component on `targetEntity` (a
+    // live entity spawned by CreateMeshEntityFromGtaFile() - i.e. one that
+    // carries a MeshAssetSource component, see ECS/Components/
+    // MeshAssetSource.h) so it plays back `absoluteAnimationGtaPath`'s
+    // motion (a *.gta AssetType::Animation - see Assets/VmdLoader.h/
+    // MotionFile.h) against its own model's skeleton
+    // (Assets/SkeletonData.h), driving every one of that model's mesh
+    // parts with real bone-deformed positions/normals from the next
+    // Update() call onward - this is what makes a spawned MMD model
+    // actually animate instead of always rendering its original bind pose
+    // (see TODO.md, "Real MMD skinning/animation runtime").
+    //
+    // HOW A BONE/WEIGHT MISMATCH BETWEEN THE MODEL AND THE MOTION IS
+    // HANDLED: a `.vmd` motion is authored independently of any one
+    // model's own bone numbering - it names every bone it drives by a
+    // human-authored NAME STRING, not an index (see MotionData.h's own
+    // file comment) - so the SAME motion is routinely replayed against a
+    // model whose skeleton doesn't exactly match the one it was authored
+    // against (different bone COUNT, different NAMES for extra/renamed
+    // bones, a different subset of "helper"/twist bones, ...). This engine
+    // resolves the two purely by NAME (see Animation/MotionSampler.h's
+    // ResolveBoneTracksToSkeleton()), and tolerates a mismatch in EITHER
+    // direction rather than failing: a skeleton bone with no matching
+    // motion track simply never receives any animated offset and stays
+    // exactly at its authored bind pose for the whole clip (see
+    // Animation/BoneLocalOffset.h's own doc comment) - it does not go
+    // missing, jitter, or snap to the origin; a motion bone track whose
+    // name doesn't match ANY bone in the skeleton is simply never applied
+    // to anything. No "closest name" fuzzy-matching or index-based
+    // fallback is attempted - an exact name match is the only thing MMD
+    // authoring tools themselves rely on, so that's the only contract this
+    // engine honors too. Per-vertex skin WEIGHTS never need any such
+    // reconciliation at all - they already reference bone INDICES within
+    // this model's own SkeletonData (produced by the same PmxLoader.cpp
+    // import, always internally consistent - see MeshData::skinWeights)
+    // and are never touched by which motion (if any) ends up playing.
+    //
+    // Returns false (no component added/changed) if `targetEntity` isn't a
+    // live entity with a MeshAssetSource component, its own model has no
+    // skeleton/skin-weight data at all (a boneless mesh, or one imported
+    // before rig extraction existed), or `absoluteAnimationGtaPath` doesn't
+    // currently resolve to a valid, non-empty *.gta AssetType::Animation
+    // file - same "degrade gracefully, never throw" convention as
+    // CreateMeshEntityFromGtaFile(). Calling this again for an entity that
+    // is already animating (e.g. to switch clips) simply replaces its
+    // SkeletalAnimator state, restarting playback from frame 0.
+    //
+    // KNOWN LIMITATION (documented, not an oversight - see TODO.md): every
+    // entity spawned from the SAME `absoluteGtaPath` shares the exact same
+    // underlying GPU mesh buffers (see EnsureMeshAsset()'s own doc
+    // comment) - playing DIFFERENT animations (or the same animation at
+    // different times) on two simultaneously-alive instances of the same
+    // model will visibly fight over those shared buffers, since both write
+    // into them every frame. Fine for today's "one animated instance at a
+    // time" use case; per-instance GPU mesh buffers for a rigged model are
+    // a natural follow-up once that actually comes up.
+    bool PlayAnimationOnEntity(Entity targetEntity, const std::string& absoluteAnimationGtaPath);
+
 private:
     // Lazily builds the demo scene - three entities sharing one triangle
     // Mesh/Pipeline, spaced left/center/right purely via Transform, plus one
@@ -258,6 +322,42 @@ private:
     // comment for the exact failure cases.
     const std::vector<MeshAssetPart>& EnsureMeshAsset(Renderer& renderer, const std::string& absoluteGtaPath);
 
+    // The CPU-side "bind pose + rig" data kept around (see
+    // m_meshSkinningCache below) for a model that actually has skinning
+    // data, so a LATER PlayAnimationOnEntity() call can re-skin it every
+    // frame - built once by EnsureMeshAsset() alongside its GPU
+    // MeshAssetParts above. `uvs` mirrors bindPositions.size() (zero-filled
+    // where the source mesh has none) purely so the SAME skinned output can
+    // be reformatted into either MeshVertex (untextured parts) or
+    // MeshVertexUv (textured parts) with no extra branching at update time.
+    struct SkinnedMeshData {
+        std::vector<Vec3> bindPositions;
+        std::vector<Vec3> bindNormals;
+        std::vector<Vec2> uvs;
+        std::vector<VertexSkinWeights> skinWeights;
+        SkeletonData skeleton;
+    };
+    // Decodes (once per distinct `absoluteAnimationGtaPath`, then cached in
+    // m_animationClipCache) a *.gta AssetType::Animation file's MotionData
+    // payload. Returns nullptr (never throws) if the file doesn't resolve
+    // to a valid, non-empty Animation *.gta - see PlayAnimationOnEntity()'s
+    // own doc comment for the exact failure cases.
+    const MotionData* EnsureAnimationClip(const std::string& absoluteAnimationGtaPath);
+
+    // Advances every live SkeletalAnimator's own playback frame by
+    // `deltaSeconds` (VMD's fixed 30fps grid, scaled by that animator's own
+    // `speed`, looping back to frame 0 once `loop` is set and the clip's
+    // own last bone-keyframe frame is passed), re-evaluates its model's
+    // full bone pose (Animation/SkeletonPose.h's ComputeSkinningMatrices())
+    // and CPU-skins its bind-pose vertex data (Animation/VertexSkinning.h's
+    // SkinVertices()) accordingly, then re-uploads every one of that
+    // model's mesh parts' GPU vertex buffers via Mesh::UpdateVertexData()
+    // (see RenderSystem::TryGetMesh()) - called once per frame from
+    // Update(), never per render target (unlike Render() below, which runs
+    // once per visible Game/Scene view - a model's pose only needs
+    // computing once per frame regardless of how many views display it).
+    void UpdateSkeletalAnimators(double deltaSeconds);
+
     Registry m_registry;
     RenderSystem m_renderSystem;
     bool m_demoSceneBuilt = false;
@@ -286,6 +386,30 @@ private:
     // regardless of which mesh's own local AssetDatabase scan first
     // resolved it.
     std::unordered_map<Guid, TextureHandle> m_materialTextureCache;
+
+    // Keyed by absolute Mesh *.gta filesystem path (same convention as
+    // m_meshAssetCache) - present ONLY for a model that actually has a
+    // non-empty skeleton + a matching per-vertex skin-weight count (see
+    // EnsureMeshAsset()'s own updated doc comment). This is the CPU-side
+    // "bind pose + rig" data Game::UpdateSkeletalAnimators() re-skins from
+    // every frame - never duplicated per spawned entity/instance, only per
+    // distinct asset path (see SkeletalAnimator's own doc comment,
+    // ECS/Components/SkeletalAnimator.h, for the one documented consequence
+    // of this sharing).
+    std::unordered_map<std::string, SkinnedMeshData> m_meshSkinningCache;
+
+    // Keyed by absolute Animation *.gta filesystem path - decoded once (see
+    // EnsureAnimationClip()) and reused by every SkeletalAnimator that
+    // references the same clip.
+    std::unordered_map<std::string, MotionData> m_animationClipCache;
+
+    // Keyed by "<meshGtaPath>\x1F<animationGtaPath>" (see
+    // ResolvedAnimationBindingCacheKey()) - the bone-NAME resolution between
+    // one specific model's skeleton and one specific motion's own bone
+    // tracks (see Animation/MotionSampler.h's ResolveBoneTracksToSkeleton())
+    // is computed once per distinct pair, then reused every frame
+    // afterwards by every SkeletalAnimator playing that same combination.
+    std::unordered_map<std::string, ResolvedAnimationBinding> m_resolvedAnimationBindingCache;
 };
 
 } // namespace gte

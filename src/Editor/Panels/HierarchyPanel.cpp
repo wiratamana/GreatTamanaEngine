@@ -139,15 +139,26 @@ void RenderEntityNode(Game& game, Renderer& renderer, EditorContext& ctx, Regist
 #if GTE_ENABLE_PROJECT_PANEL
         // Same Project-panel-asset drag-and-drop as the panel-wide target
         // in BuildHierarchyPanel() below, but dropped directly onto a row
-        // instead - spawns the asset as a CHILD of `entity` rather than at
-        // the scene root, Unity's own "drag a model onto another GameObject
-        // in Hierarchy to parent it" convention.
+        // instead. Two different outcomes depending on what was dropped
+        // (and onto what): dropping a Mesh *.gta spawns it as a CHILD of
+        // `entity` (Unity's own "drag a model onto another GameObject in
+        // Hierarchy to parent it" convention); dropping an ANIMATION *.gta
+        // directly onto an already-rigged model's own row instead PLAYS
+        // that clip on it (Game::PlayAnimationOnEntity()) rather than
+        // spawning anything new - Unity's own "drag an AnimationClip onto
+        // a rigged GameObject" convention. PlayAnimationOnEntity() is tried
+        // FIRST and only ever succeeds for a real Animation asset dropped
+        // onto a model that actually has skinning data, so this never
+        // changes any existing Mesh-drop behavior - it just silently does
+        // nothing and falls through to the spawn attempt otherwise.
         if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kProjectAssetDragDropPayloadType)) {
             const std::string absolutePath(static_cast<const char*>(payload->Data));
-            const Entity spawned = game.CreateMeshEntityFromGtaFile(renderer, absolutePath);
-            if (spawned.IsValid()) {
-                SetParent(registry, spawned, entity, /*worldPositionStays=*/true);
-                ctx.selection.SelectEntity(spawned);
+            if (!game.PlayAnimationOnEntity(entity, absolutePath)) {
+                const Entity spawned = game.CreateMeshEntityFromGtaFile(renderer, absolutePath);
+                if (spawned.IsValid()) {
+                    SetParent(registry, spawned, entity, /*worldPositionStays=*/true);
+                    ctx.selection.SelectEntity(spawned);
+                }
             }
         }
 #endif

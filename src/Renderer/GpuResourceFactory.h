@@ -85,6 +85,20 @@ public:
         const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount,
         const char* debugName = nullptr) const;
 
+    // Like CreateMesh() (indexed overload) above, but the VERTEX buffer is
+    // built as a host-visible, persistently-mapped BufferMemoryUsage::
+    // CpuToGpu buffer (initialized with `vertexData` immediately, then
+    // re-writable afterwards via Mesh::UpdateVertexData()) instead of an
+    // immutable device-local one - for a rigged mesh whose vertex
+    // positions/normals need to be re-uploaded every frame as its pose
+    // animates (see Game::UpdateSkeletalAnimators(), src/Game/Game.cpp).
+    // The INDEX buffer is still built via CreateDeviceLocalBuffer() exactly
+    // like CreateMesh() - a mesh's triangle topology never changes as it
+    // animates, only its vertex positions/normals do.
+    Mesh CreateSkinnedMesh(const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount,
+        const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount,
+        const char* debugName = nullptr) const;
+
 
     // See Renderer::CreateTexture2D(). `pixelsRgba8` must be
     // width*height*4 tightly-packed bytes (e.g. straight out of

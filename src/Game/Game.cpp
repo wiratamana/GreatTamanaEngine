@@ -1,21 +1,28 @@
 #include "Game.h"
 
+#include "../Animation/MotionSampler.h"
+#include "../Animation/SkeletonPose.h"
+#include "../Animation/VertexSkinning.h"
 #include "../Assets/AssetDatabase.h"
 #include "../Assets/AssetTypes.h"
 #include "../Assets/GtaFile.h"
 #include "../Assets/Ktx2Decoder.h"
 #include "../Assets/MaterialData.h"
 #include "../Assets/MeshFile.h"
+#include "../Assets/MotionFile.h"
 #include "../Assets/RigFile.h"
 #include "../Renderer/MeshVertex.h"
 #include "../Renderer/Renderer.h"
 #include "../Renderer/Vertex.h"
 #include "ECS/Components/Camera.h"
+#include "ECS/Components/MeshAssetSource.h"
 #include "ECS/Components/MeshRenderer.h"
 #include "ECS/Components/Name.h"
+#include "ECS/Components/SkeletalAnimator.h"
 #include "ECS/Components/Transform.h"
 #include "ECS/TransformHierarchy.h"
 
+#include <cmath>
 #include <cstddef>
 #include <filesystem>
 #include <optional>
@@ -53,6 +60,9 @@ std::string PathToUtf8(const std::filesystem::path& path)
     return std::string(reinterpret_cast<const char*>(u8.data()), u8.size());
 }
 
+// VMD's own fixed frame grid - see MotionData.h's own file comment.
+constexpr float kVmdFramesPerSecond = 30.0f;
+
 } // namespace
 
 void Game::OnEvent(const Event& /*event*/)
@@ -62,10 +72,12 @@ void Game::OnEvent(const Event& /*event*/)
     // event.data is active - see Event.h.
 }
 
-void Game::Update(double /*deltaSeconds*/, const InputState& /*input*/)
+void Game::Update(double deltaSeconds, const InputState& /*input*/)
 {
     // Game/simulation logic goes here. Poll `input` for continuous state,
     // e.g. `if (input.IsKeyDown(KeyCode::W)) { ... }` for held-key movement.
+
+    UpdateSkeletalAnimators(deltaSeconds);
 }
 
 PipelineHandle Game::EnsureDefaultPipeline(Renderer& renderer)
@@ -189,17 +201,29 @@ const std::vector<Game::MeshAssetPart>& Game::EnsureMeshAsset(Renderer& renderer
         return kEmpty; // Corrupt/truncated payload, or an empty mesh.
     }
 
-    // Materials/textures are optional metadata (see RigFile.h) - absent
-    // (decode failure) for a *.gta imported before this engine supported
-    // them (an old "GTERIG01" blob - see RigFile.h's own magic-version
-    // comment), or a materialless .pmx (decodes fine, just with an empty
-    // MaterialData). Either way, an empty `materials.materials` below
-    // degrades to the single combined, untextured submesh this engine
-    // always rendered before material import support existed.
+    // Materials/textures AND rig (skeleton/skin-weights) are optional
+    // metadata (see RigFile.h) - absent (decode failure) for a *.gta
+    // imported before this engine supported them (an old "GTERIG01"/
+    // "GTERIG02" blob - see RigFile.h's own magic-version comment), or a
+    // materialless/boneless .pmx (decodes fine, just with empty
+    // MaterialData/SkeletonData). Kept in this OUTER scope (unlike the
+    // original single-purpose `if` this replaced) so both `materials`
+    // (below) and the skeleton/skin-weight extraction further down can
+    // both read from the same decoded `rig`.
     MaterialData materials;
-    if (const std::optional<RigFileData> rig = DecodeRigDataFromBytes(gta->metadata); rig.has_value()) {
+    std::optional<RigFileData> rig = DecodeRigDataFromBytes(gta->metadata);
+    if (rig.has_value()) {
         materials = rig->materials;
     }
+
+    // A model is "skinned" (animatable via Game::PlayAnimationOnEntity())
+    // only when it carries BOTH a real bone hierarchy AND a per-vertex skin
+    // weight for every vertex - see SkinnedMeshData's own doc comment
+    // (Game.h). A boneless/riggless mesh (or one imported before rig
+    // extraction existed) renders exactly as it always did: a plain,
+    // immutable, device-local Mesh built via Renderer::CreateMesh().
+    const bool skinned = rig.has_value() && !rig->skeleton.bones.empty()
+        && rig->skinWeights.size() == mesh->positions.size();
 
     // Every material's texture is referenced purely by Guid (see
     // MaterialTextureRef, MaterialData.h) - resolving one to an actual
@@ -274,11 +298,16 @@ const std::vector<Game::MeshAssetPart>& Game::EnsureMeshAsset(Renderer& renderer
 
     std::vector<MeshAssetPart> parts;
 
+    const bool hasNormals = mesh->normals.size() == mesh->positions.size();
+    const bool hasUvs = mesh->uvs.size() == mesh->positions.size();
+
     // --- Untextured combined submesh (position+normal only, exactly this
-    // engine's original pre-material-import Mesh/Pipeline shape).
+    // engine's original pre-material-import Mesh/Pipeline shape) - built as
+    // a CPU-writable Mesh (Renderer::CreateSkinnedMesh()) instead of the
+    // usual immutable one whenever `skinned` is true, so
+    // Game::UpdateSkeletalAnimators() can re-upload it every frame.
     if (!untexturedIndices.empty()) {
         std::vector<MeshVertex> vertices(mesh->positions.size());
-        const bool hasNormals = mesh->normals.size() == mesh->positions.size();
         for (std::size_t i = 0; i < mesh->positions.size(); ++i) {
             const Vec3& p = mesh->positions[i];
             vertices[i].position[0] = p.x;
@@ -290,21 +319,26 @@ const std::vector<Game::MeshAssetPart>& Game::EnsureMeshAsset(Renderer& renderer
             vertices[i].normal[2] = n.z;
         }
 
-        const MeshHandle handle = m_renderSystem.RegisterMesh(renderer.CreateMesh(vertices.data(),
-            vertices.size() * sizeof(MeshVertex), static_cast<std::uint32_t>(vertices.size()),
-            untexturedIndices.data(), untexturedIndices.size() * sizeof(std::uint32_t),
-            static_cast<std::uint32_t>(untexturedIndices.size()), "ImportedMesh"));
+        Mesh gpuMesh = skinned
+            ? renderer.CreateSkinnedMesh(vertices.data(), vertices.size() * sizeof(MeshVertex),
+                  static_cast<std::uint32_t>(vertices.size()), untexturedIndices.data(),
+                  untexturedIndices.size() * sizeof(std::uint32_t),
+                  static_cast<std::uint32_t>(untexturedIndices.size()), "ImportedMesh")
+            : renderer.CreateMesh(vertices.data(), vertices.size() * sizeof(MeshVertex),
+                  static_cast<std::uint32_t>(vertices.size()), untexturedIndices.data(),
+                  untexturedIndices.size() * sizeof(std::uint32_t),
+                  static_cast<std::uint32_t>(untexturedIndices.size()), "ImportedMesh");
+        const MeshHandle handle = m_renderSystem.RegisterMesh(std::move(gpuMesh));
         parts.push_back(MeshAssetPart{ handle, kInvalidTextureHandle, std::string() });
     }
 
     // --- Textured submeshes (position+normal+UV) - one shared vertex
     // buffer built once here, re-uploaded per submesh Mesh (see Game.h's
     // own doc comment on CreateMeshEntityFromGtaFile() for why this
-    // duplication is an acceptable, simple trade-off for now).
+    // duplication is an acceptable, simple trade-off for now). Same
+    // skinned/CreateSkinnedMesh() choice as the untextured branch above.
     if (!texturedSlices.empty()) {
         std::vector<MeshVertexUv> texturedVertices(mesh->positions.size());
-        const bool hasNormals = mesh->normals.size() == mesh->positions.size();
-        const bool hasUvs = mesh->uvs.size() == mesh->positions.size();
         for (std::size_t i = 0; i < mesh->positions.size(); ++i) {
             const Vec3& p = mesh->positions[i];
             texturedVertices[i].position[0] = p.x;
@@ -324,12 +358,37 @@ const std::vector<Game::MeshAssetPart>& Game::EnsureMeshAsset(Renderer& renderer
                 mesh->indices.begin() + static_cast<std::ptrdiff_t>(slice.start),
                 mesh->indices.begin() + static_cast<std::ptrdiff_t>(slice.start + slice.count));
 
-            const MeshHandle handle = m_renderSystem.RegisterMesh(renderer.CreateMesh(texturedVertices.data(),
-                texturedVertices.size() * sizeof(MeshVertexUv), static_cast<std::uint32_t>(texturedVertices.size()),
-                sliceIndices.data(), sliceIndices.size() * sizeof(std::uint32_t),
-                static_cast<std::uint32_t>(sliceIndices.size()), "ImportedTexturedMesh"));
+            Mesh gpuMesh = skinned
+                ? renderer.CreateSkinnedMesh(texturedVertices.data(), texturedVertices.size() * sizeof(MeshVertexUv),
+                      static_cast<std::uint32_t>(texturedVertices.size()), sliceIndices.data(),
+                      sliceIndices.size() * sizeof(std::uint32_t), static_cast<std::uint32_t>(sliceIndices.size()),
+                      "ImportedTexturedMesh")
+                : renderer.CreateMesh(texturedVertices.data(), texturedVertices.size() * sizeof(MeshVertexUv),
+                      static_cast<std::uint32_t>(texturedVertices.size()), sliceIndices.data(),
+                      sliceIndices.size() * sizeof(std::uint32_t), static_cast<std::uint32_t>(sliceIndices.size()),
+                      "ImportedTexturedMesh");
+            const MeshHandle handle = m_renderSystem.RegisterMesh(std::move(gpuMesh));
             parts.push_back(MeshAssetPart{ handle, slice.texture, slice.name });
         }
+    }
+
+    // Keep the bind-pose CPU data (+ skeleton) around for
+    // Game::UpdateSkeletalAnimators() to re-skin every frame - see
+    // SkinnedMeshData's own doc comment (Game.h). `uvs` is populated
+    // regardless of whether any textured part actually exists (cheap, and
+    // keeps this shape uniform) - see its own doc comment.
+    if (skinned) {
+        SkinnedMeshData skinData;
+        skinData.bindPositions = mesh->positions;
+        skinData.bindNormals.resize(mesh->positions.size());
+        skinData.uvs.resize(mesh->positions.size());
+        for (std::size_t i = 0; i < mesh->positions.size(); ++i) {
+            skinData.bindNormals[i] = hasNormals ? mesh->normals[i] : Vec3::Up();
+            skinData.uvs[i] = hasUvs ? mesh->uvs[i] : Vec2::Zero();
+        }
+        skinData.skinWeights = rig->skinWeights;
+        skinData.skeleton = rig->skeleton;
+        m_meshSkinningCache.emplace(absoluteGtaPath, std::move(skinData));
     }
 
     const auto inserted = m_meshAssetCache.emplace(absoluteGtaPath, std::move(parts));
@@ -349,10 +408,14 @@ Entity Game::CreateMeshEntityFromGtaFile(Renderer& renderer, const std::string& 
     // FILE itself - `absoluteGtaPath`'s own filename, minus its extension
     // (e.g. "Miku.gta" -> "Miku"). Every part below becomes its CHILD, so
     // moving/rotating/scaling THIS entity moves the whole multi-part model
-    // together.
+    // together. Also carries a MeshAssetSource (see ECS/Components/
+    // MeshAssetSource.h) recording exactly which *.gta this model came
+    // from - PlayAnimationOnEntity() looks this back up to find the
+    // model's own cached skinning/rig data.
     const Entity root = m_registry.CreateEntity();
     m_registry.AddComponent<Transform>(root); // Identity Transform - spawns at the world origin, like Unity.
     m_registry.AddComponent<Name>(root, Name{ PathToUtf8(Utf8PathFromGamePath(absoluteGtaPath).stem()) });
+    m_registry.AddComponent<MeshAssetSource>(root, MeshAssetSource{ absoluteGtaPath });
 
     for (const MeshAssetPart& part : parts) {
         const PipelineHandle pipeline =
@@ -385,6 +448,164 @@ Entity Game::CreateMeshEntityFromGtaFile(Renderer& renderer, const std::string& 
     }
 
     return root;
+}
+
+const MotionData* Game::EnsureAnimationClip(const std::string& absoluteAnimationGtaPath)
+{
+    if (const auto found = m_animationClipCache.find(absoluteAnimationGtaPath);
+        found != m_animationClipCache.end()) {
+        return &found->second;
+    }
+
+    const std::optional<GtaFileData> gta = ReadGtaFile(Utf8PathFromGamePath(absoluteAnimationGtaPath));
+    if (!gta.has_value() || gta->header.Type() != AssetType::Animation) {
+        return nullptr; // Missing file, bad magic, or not an Animation asset.
+    }
+
+    std::optional<MotionData> motion = DecodeMotionDataFromBytes(gta->payload);
+    if (!motion.has_value()) {
+        return nullptr; // Corrupt/truncated payload.
+    }
+
+    const auto inserted = m_animationClipCache.emplace(absoluteAnimationGtaPath, std::move(*motion));
+    return &inserted.first->second;
+}
+
+bool Game::PlayAnimationOnEntity(Entity targetEntity, const std::string& absoluteAnimationGtaPath)
+{
+    if (!m_registry.IsAlive(targetEntity)) {
+        return false;
+    }
+
+    const MeshAssetSource* source = m_registry.TryGetComponent<MeshAssetSource>(targetEntity);
+    if (source == nullptr) {
+        return false; // Not a model root spawned by CreateMeshEntityFromGtaFile().
+    }
+
+    const auto skinIt = m_meshSkinningCache.find(source->gtaPath);
+    if (skinIt == m_meshSkinningCache.end() || skinIt->second.skeleton.bones.empty()) {
+        return false; // A boneless/riggless model - nothing to animate.
+    }
+
+    if (EnsureAnimationClip(absoluteAnimationGtaPath) == nullptr) {
+        return false;
+    }
+
+    SkeletalAnimator& animator = m_registry.AddComponent<SkeletalAnimator>(targetEntity);
+    animator.meshGtaPath = source->gtaPath;
+    animator.animationGtaPath = absoluteAnimationGtaPath;
+    animator.frame = 0.0f;
+    animator.speed = 1.0f;
+    animator.playing = true;
+    animator.loop = true;
+    return true;
+}
+
+void Game::UpdateSkeletalAnimators(double deltaSeconds)
+{
+    ComponentStorage<SkeletalAnimator>& animators = m_registry.Storage<SkeletalAnimator>();
+
+    for (std::size_t i = 0; i < animators.Size(); ++i) {
+        SkeletalAnimator& animator = animators.ComponentAt(i);
+        if (!animator.playing || animator.animationGtaPath.empty()) {
+            continue;
+        }
+
+        const auto meshIt = m_meshSkinningCache.find(animator.meshGtaPath);
+        if (meshIt == m_meshSkinningCache.end()) {
+            continue; // Its model's own skinning data isn't (or is no longer) cached - nothing to do.
+        }
+        const SkinnedMeshData& skinData = meshIt->second;
+
+        const auto animIt = m_animationClipCache.find(animator.animationGtaPath);
+        if (animIt == m_animationClipCache.end()) {
+            continue; // Its clip isn't (or is no longer) cached.
+        }
+        const MotionData& motion = animIt->second;
+
+        // Resolved once per distinct (mesh, animation) pair, then reused
+        // every frame afterwards - see ResolvedAnimationBinding's own doc
+        // comment (Animation/MotionSampler.h) for the actual bone-NAME
+        // resolution/mismatch-tolerance logic.
+        const std::string bindingKey = animator.meshGtaPath + '\x1F' + animator.animationGtaPath;
+        auto bindingIt = m_resolvedAnimationBindingCache.find(bindingKey);
+        if (bindingIt == m_resolvedAnimationBindingCache.end()) {
+            bindingIt = m_resolvedAnimationBindingCache
+                            .emplace(bindingKey, ResolveBoneTracksToSkeleton(skinData.skeleton, motion))
+                            .first;
+        }
+        const ResolvedAnimationBinding& binding = bindingIt->second;
+
+        animator.frame += static_cast<float>(deltaSeconds) * kVmdFramesPerSecond * animator.speed;
+        if (binding.lastFrame > 0) {
+            const float loopLength = static_cast<float>(binding.lastFrame) + 1.0f;
+            if (animator.loop) {
+                animator.frame = std::fmod(animator.frame, loopLength);
+                if (animator.frame < 0.0f) {
+                    animator.frame += loopLength;
+                }
+            } else if (animator.frame > static_cast<float>(binding.lastFrame)) {
+                animator.frame = static_cast<float>(binding.lastFrame);
+                animator.playing = false;
+            }
+        }
+
+        const std::vector<BoneLocalOffset> pose = SampleAnimationPose(binding, animator.frame);
+        const std::vector<Mat4> skinningMatrices = ComputeSkinningMatrices(skinData.skeleton, pose);
+
+        std::vector<Vec3> skinnedPositions;
+        std::vector<Vec3> skinnedNormals;
+        SkinVertices(skinData.bindPositions, skinData.bindNormals, skinData.skinWeights, skinningMatrices,
+            skinnedPositions, skinnedNormals);
+
+        const auto partsIt = m_meshAssetCache.find(animator.meshGtaPath);
+        if (partsIt == m_meshAssetCache.end()) {
+            continue;
+        }
+
+        // Re-upload EVERY one of this model's mesh parts - each part's own
+        // GPU vertex buffer holds a full copy of the whole model's vertex
+        // data (see EnsureMeshAsset()'s own doc comments), so all of them
+        // need the same freshly-skinned positions/normals, just reformatted
+        // per part's own vertex layout (MeshVertex for an untextured part,
+        // MeshVertexUv - with `skinData.uvs` folded back in - for a
+        // textured one, chosen purely by MeshAssetPart::texture validity,
+        // exactly like CreateMeshEntityFromGtaFile() already picks a
+        // part's Pipeline).
+        for (const MeshAssetPart& part : partsIt->second) {
+            Mesh* gpuMesh = m_renderSystem.TryGetMesh(part.mesh);
+            if (gpuMesh == nullptr) {
+                continue;
+            }
+
+            if (part.texture.IsValid()) {
+                std::vector<MeshVertexUv> vertices(skinnedPositions.size());
+                for (std::size_t v = 0; v < skinnedPositions.size(); ++v) {
+                    vertices[v].position[0] = skinnedPositions[v].x;
+                    vertices[v].position[1] = skinnedPositions[v].y;
+                    vertices[v].position[2] = skinnedPositions[v].z;
+                    vertices[v].normal[0] = skinnedNormals[v].x;
+                    vertices[v].normal[1] = skinnedNormals[v].y;
+                    vertices[v].normal[2] = skinnedNormals[v].z;
+                    const Vec2& uv = skinData.uvs[v];
+                    vertices[v].uv[0] = uv.x;
+                    vertices[v].uv[1] = uv.y;
+                }
+                gpuMesh->UpdateVertexData(vertices.data(), vertices.size() * sizeof(MeshVertexUv));
+            } else {
+                std::vector<MeshVertex> vertices(skinnedPositions.size());
+                for (std::size_t v = 0; v < skinnedPositions.size(); ++v) {
+                    vertices[v].position[0] = skinnedPositions[v].x;
+                    vertices[v].position[1] = skinnedPositions[v].y;
+                    vertices[v].position[2] = skinnedPositions[v].z;
+                    vertices[v].normal[0] = skinnedNormals[v].x;
+                    vertices[v].normal[1] = skinnedNormals[v].y;
+                    vertices[v].normal[2] = skinnedNormals[v].z;
+                }
+                gpuMesh->UpdateVertexData(vertices.data(), vertices.size() * sizeof(MeshVertex));
+            }
+        }
+    }
 }
 
 void Game::EnsureDemoSceneBuilt(Renderer& renderer)

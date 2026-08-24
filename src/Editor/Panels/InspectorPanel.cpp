@@ -4,6 +4,7 @@
 #include "../../ECS/Components/Camera.h"
 #include "../../ECS/Components/MeshRenderer.h"
 #include "../../ECS/Components/Name.h"
+#include "../../ECS/Components/SkeletalAnimator.h"
 #include "../../ECS/Components/Transform.h"
 #include "../../ECS/Registry.h"
 #include "../../ECS/TransformHierarchy.h"
@@ -108,6 +109,23 @@ void BuildEntityInspector(Registry& registry, EditorContext& ctx)
             ImGui::DragFloat("Field of View (Y)", &camera->fovYDegrees, 0.5f, 1.0f, 179.0f);
             ImGui::DragFloat("Near Z", &camera->nearZ, 0.01f, 0.001f, camera->farZ - 0.01f);
             ImGui::DragFloat("Far Z", &camera->farZ, 1.0f, camera->nearZ + 0.01f);
+        }
+    }
+
+    // Shown only for a model root entity currently playing back a motion
+    // (see Game::PlayAnimationOnEntity(), src/Game/Game.cpp) - a plain
+    // playback-state readout/control panel, Unity's own Animator component
+    // inspector in spirit (though far simpler - no state machine here, just
+    // a single clip path + play/loop/speed/frame).
+    if (SkeletalAnimator* animator = registry.TryGetComponent<SkeletalAnimator>(entity)) {
+        if (ImGui::CollapsingHeader("Skeletal Animator", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::TextWrapped("Clip: %s",
+                animator->animationGtaPath.empty() ? "(none)" : animator->animationGtaPath.c_str());
+            ImGui::Checkbox("Playing", &animator->playing);
+            ImGui::SameLine();
+            ImGui::Checkbox("Loop", &animator->loop);
+            ImGui::DragFloat("Speed", &animator->speed, 0.01f, 0.0f, 5.0f);
+            ImGui::Text("Frame: %.1f", animator->frame);
         }
     }
 }

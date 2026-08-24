@@ -274,6 +274,9 @@ set(GTE_TEST_SOURCES
     ECS/CameraTests.cpp
     ECS/TransformHierarchyTests.cpp
     Game/RenderSystemTests.cpp
+    Animation/SkeletonPoseTests.cpp
+    Animation/MotionSamplerTests.cpp
+    Animation/VertexSkinningTests.cpp
 )
 
 # Editor/EditorCamera.h/.cpp (see src/Editor/EditorCamera.h) is only

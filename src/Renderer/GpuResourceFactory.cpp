@@ -230,6 +230,26 @@ Mesh GpuResourceFactory::CreateMesh(const void* vertexData, VkDeviceSize vertexD
     return Mesh(std::move(vertexBuffer), vertexCount, std::move(indexBuffer), indexCount);
 }
 
+Mesh GpuResourceFactory::CreateSkinnedMesh(const void* vertexData, VkDeviceSize vertexDataSize,
+    std::uint32_t vertexCount, const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount,
+    const char* debugName) const
+{
+    // Host-visible + persistently mapped (BufferMemoryUsage::CpuToGpu),
+    // unlike CreateMesh()'s device-local vertex buffer - initialized with
+    // the bind pose right away, then re-written every frame afterwards via
+    // Mesh::UpdateVertexData() (see Game::UpdateSkeletalAnimators()).
+    Buffer vertexBuffer = CreateBuffer(vertexDataSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, BufferMemoryUsage::CpuToGpu,
+        debugName);
+    vertexBuffer.Upload(vertexData, static_cast<std::size_t>(vertexDataSize));
+
+    // The index buffer never changes as a mesh animates - keep it static/
+    // device-local exactly like CreateMesh()'s own indexed overload.
+    Buffer indexBuffer =
+        CreateDeviceLocalBuffer(indexData, indexDataSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, debugName);
+
+    return Mesh(std::move(vertexBuffer), vertexCount, std::move(indexBuffer), indexCount);
+}
+
 Texture2D GpuResourceFactory::CreateTexture2D(
     const void* pixelsRgba8, int width, int height, const char* debugName) const
 {

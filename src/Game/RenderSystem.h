@@ -59,6 +59,15 @@ public:
     PipelineHandle RegisterPipeline(Pipeline&& pipeline) { return m_pipelines.Insert(std::move(pipeline)); }
     TextureHandle RegisterTexture(MaterialTexture&& texture) { return m_textures.Insert(std::move(texture)); }
 
+    // Direct, mutable access to an already-registered Mesh by handle -
+    // needed by Game::UpdateSkeletalAnimators() (src/Game/Game.cpp) to call
+    // Mesh::UpdateVertexData() on a rigged model's parts every frame as its
+    // pose animates. Returns nullptr for an invalid/stale/never-registered
+    // handle (best-effort, same "never assert on a bad handle" convention
+    // as Draw() below) - the caller should simply skip that part for this
+    // frame rather than crash.
+    Mesh* TryGetMesh(MeshHandle handle) { return m_meshes.TryGet(handle); }
+
     // Pure data-collection step: every entity with a MeshRenderer becomes
     // one DrawCommand, using ECS/TransformHierarchy.h's ComputeWorldMatrix()
     // (its Transform's LocalToWorldMatrix() composed all the way up its

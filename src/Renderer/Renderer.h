@@ -252,6 +252,15 @@ public:
         const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount,
         const char* debugName = nullptr) const;
 
+    // See GpuResourceFactory::CreateSkinnedMesh() for the full reasoning -
+    // same shape as the indexed CreateMesh() overload above, but the
+    // returned Mesh's vertex buffer is CPU-writable afterwards via
+    // Mesh::UpdateVertexData(), for a rigged model whose pose changes
+    // every frame (see Game::UpdateSkeletalAnimators(), src/Game/Game.cpp).
+    Mesh CreateSkinnedMesh(const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount,
+        const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount,
+        const char* debugName = nullptr) const;
+
     // Factory for a static, immutable, CPU-authored texture (e.g. a decoded
     // PNG/JPEG asset - see src/Editor/AssetPreviewTexture.h, the first
     // consumer of this) built once from already-decoded RGBA8 pixel data,

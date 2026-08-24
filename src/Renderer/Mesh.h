@@ -2,6 +2,7 @@
 
 #include "Buffer.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <utility>
@@ -60,6 +61,20 @@ public:
     bool HasIndexBuffer() const noexcept { return m_indexBuffer.has_value(); }
     VkBuffer IndexBuffer() const noexcept { return m_indexBuffer->Native(); }
     std::uint32_t IndexCount() const noexcept { return m_indexCount; }
+
+    // Overwrites this Mesh's ENTIRE vertex buffer with `data` (`size` bytes
+    // - must exactly match this Mesh's own vertex buffer size, i.e.
+    // whatever vertexDataSize was originally passed to
+    // Renderer::CreateSkinnedMesh()) - the CPU vertex-skinning update path
+    // (see Game::UpdateSkeletalAnimators(), src/Game/Game.cpp): a rigged
+    // model's Mesh is built via CreateSkinnedMesh() (a host-visible,
+    // persistently-mapped vertex buffer - unlike the immutable, device-
+    // local one CreateMesh() builds) specifically so this can be called
+    // once per frame with freshly bone-deformed positions/normals. Throws
+    // (via Buffer::Upload()) if this Mesh's own vertex buffer isn't
+    // actually CPU-writable - only call this on a Mesh built via
+    // CreateSkinnedMesh(), never one built via CreateMesh().
+    void UpdateVertexData(const void* data, std::size_t size) { m_vertexBuffer.Upload(data, size); }
 
 private:
     Buffer m_vertexBuffer;

@@ -164,6 +164,13 @@ Mesh Renderer::CreateMesh(const void* vertexData, VkDeviceSize vertexDataSize, s
     return m_resources.CreateMesh(vertexData, vertexDataSize, vertexCount, indexData, indexDataSize, indexCount, debugName);
 }
 
+Mesh Renderer::CreateSkinnedMesh(const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount,
+    const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount, const char* debugName) const
+{
+    return m_resources.CreateSkinnedMesh(
+        vertexData, vertexDataSize, vertexCount, indexData, indexDataSize, indexCount, debugName);
+}
+
 Texture2D Renderer::CreateTexture2D(const void* pixelsRgba8, int width, int height, const char* debugName) const
 {
     return m_resources.CreateTexture2D(pixelsRgba8, width, height, debugName);
