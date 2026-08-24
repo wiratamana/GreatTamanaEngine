@@ -117,6 +117,21 @@ struct EditorContext {
     // the process, which is what lets the user freely drag/split/undock any
     // panel afterwards.
     bool dockLayoutEnsured = false;
+
+    // Persisted (across frames AND across selection changes) pixel height
+    // of the Inspector's Unity-style bottom "texture viewer" strip, when the
+    // current Inspector selection is a previewable image/texture asset (see
+    // Panels/InspectorPanel.cpp's BuildAssetInspector()). Deliberately lives
+    // here rather than as InspectorPanel-local state, since InspectorPanel
+    // is a stateless free function (see AGENTS.md, "Editor Module
+    // Structure") - this is its one piece of genuinely cross-frame state,
+    // the same role EditorContext already plays for every other
+    // panel-persisted value above. Adjusted live by dragging the splitter
+    // between the metadata list and the viewer; clamped to sane bounds
+    // every frame in BuildAssetInspector() itself rather than here, since
+    // the valid range depends on the Inspector panel's current on-screen
+    // height, which only BuildAssetInspector() (mid-ImGui-layout) knows.
+    float inspectorPreviewHeight = 260.0f;
 };
 
 } // namespace gte
