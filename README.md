@@ -1117,6 +1117,52 @@ pieces:
   represents the whole freshly instantiated model. Verified against the
   same real Furina model (32 materials) already used elsewhere in this
   README, and the full test suite (363 tests) still passes.
+- **A spawned MMD model can now actually be ANIMATED from an imported `.vmd`
+  motion — the first real animation runtime, not just import.** A new,
+  always-compiled `src/Animation/` module provides the pure math this needs
+  with zero ECS/GPU/Renderer dependency (fully Tier-1-tested — see
+  `tests/Animation/`): `SkeletonPose.h`'s `ComputeSkinningMatrices()` (
+  forward-kinematics-only bone-pose evaluation — walks each bone's parent
+  chain, cycle-safely, producing a model-space skinning matrix per bone with
+  the inverse bind pose already folded in), `MotionSampler.h` (linear/slerp
+  keyframe sampling, plus the bone-NAME resolution described below), and
+  `VertexSkinning.h`'s `SkinVertices()` (CPU-side per-vertex blending of up
+  to 4 bone influences, treating SDEF/QDEF exactly like BDEF2/BDEF4 per
+  those weight types' own documented equivalence). **The bone/weight
+  mismatch problem** — a `.vmd` motion is authored independently of any one
+  model's own bone numbering, so the same motion is routinely replayed
+  against a model whose skeleton doesn't exactly match the one it was
+  authored against — is handled by `MotionSampler.h`'s
+  `ResolveBoneTracksToSkeleton()`, which matches every motion bone track
+  against the target model's own `SkeletonData::bones` purely by NAME and
+  tolerates a mismatch in EITHER direction: an unmatched skeleton bone
+  simply stays at its authored bind pose for the whole clip, and an
+  unmatched motion track is simply never applied to anything — never a
+  failure, never a fuzzy-match guess. `Game::PlayAnimationOnEntity()`
+  (`src/Game/Game.h/.cpp`) wires this onto a model spawned by
+  `CreateMeshEntityFromGtaFile()` (now also tagged with a new
+  `MeshAssetSource` component recording which `*.gta` it came from) via a
+  new `SkeletalAnimator` component (`src/ECS/Components/SkeletalAnimator.h`)
+  — `Game::UpdateSkeletalAnimators()` runs once per frame, advancing every
+  live animator, resolving its pose, CPU-skinning its model's cached bind-
+  pose vertex data, and re-uploading the result into that model's mesh
+  parts' GPU vertex buffers via a new `Mesh::UpdateVertexData()`. This is
+  possible because a RIGGED mesh's `Mesh` is now built via a new
+  `Renderer::CreateSkinnedMesh()` (a host-visible, persistently-mapped
+  vertex buffer, re-writable every frame — the index buffer stays static,
+  since topology never changes as a mesh animates); a boneless/riggless
+  mesh is completely unaffected, still built via the original, immutable
+  `CreateMesh()`. The Editor's "Hierarchy" drag-and-drop now tries
+  `PlayAnimationOnEntity()` first when a Project asset is dropped onto an
+  existing entity row (falling back to the usual spawn-as-child behavior
+  otherwise), so dropping an Animation `*.gta` straight onto an
+  already-spawned rigged model plays it; "Inspector" gained a minimal
+  "Skeletal Animator" section (play/pause, loop, speed, current frame).
+  Deliberately FORWARD-KINEMATICS ONLY for this first pass — no IK solving,
+  morph blending, physics simulation, or true bezier interpolation yet (see
+  `TODO.md`). Verified against the real Furina model plus a real
+  690-bone-keyframe `.vmd` motion, and the full test suite (377 tests)
+  still passes.
 
 ## Roadmap
 

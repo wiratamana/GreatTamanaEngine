@@ -295,6 +295,70 @@ unblock the most follow-on work:
   side - today's engine has no skinning concept anywhere in
   `Renderer`/`Pipeline`/`Vertex`. Still a large, multi-session effort even
   with the data-extraction half done for both model and motion.
+  **UPDATE (this session): a real, if deliberately partial, animation
+  RUNTIME now exists - a spawned rigged model can actually move.** A new,
+  always-compiled `src/Animation/` module (`BoneLocalOffset.h`,
+  `SkeletonPose.h/.cpp`, `MotionSampler.h/.cpp`, `VertexSkinning.h/.cpp` -
+  fully Tier-1-tested, no ECS/GPU/Renderer dependency at all, see
+  `tests/Animation/`) provides: forward-kinematics-only bone-pose evaluation
+  (`ComputeSkinningMatrices()` - walks each bone's parent chain, cycle-safe,
+  producing a ready-to-use model-space skinning matrix per bone that already
+  folds in the inverse bind pose); linear/slerp keyframe sampling
+  (`SampleBoneTrack()`/`SampleAnimationPose()` - a deliberate, documented
+  simplification vs. the real MMD bezier curves `BoneKeyframe::interpolation`
+  still carries, unevaluated); and CPU vertex skinning
+  (`SkinVertices()` - blends up to 4 bone influences per vertex, treating
+  SDEF/QDEF exactly like BDEF2/BDEF4 per those weight types' own documented
+  equivalence). **The exact "bones/weights in the animation file and the
+  model file itself don't necessarily match" problem this whole feature has
+  to handle** is solved by `MotionSampler.h`'s `ResolveBoneTracksToSkeleton()`:
+  every motion bone track is matched against the target model's own
+  `SkeletonData::bones` purely by NAME (the only contract a `.vmd` and a
+  `.pmx` actually share - see `MotionData.h`'s own file comment), and a
+  mismatch in EITHER direction degrades gracefully rather than failing - an
+  unmatched skeleton bone simply stays at its authored bind pose for the
+  whole clip, and an unmatched motion track is simply never applied to
+  anything; no fuzzy-name-matching or index-based fallback is attempted.
+  `Game::PlayAnimationOnEntity()` (`src/Game/Game.h/.cpp`) wires this onto a
+  model spawned by `CreateMeshEntityFromGtaFile()` (which now also tags its
+  root entity with a new `MeshAssetSource` component recording which `*.gta`
+  it came from - `src/ECS/Components/MeshAssetSource.h`) via a new
+  `SkeletalAnimator` component (`src/ECS/Components/SkeletalAnimator.h`,
+  playback frame/speed/loop/playing only - no live skeleton/motion data
+  duplicated per entity, just path-string keys back into `Game`'s own
+  caches); `Game::UpdateSkeletalAnimators()` runs once per frame from
+  `Game::Update()`, advancing every live animator's frame, resolving its
+  pose, CPU-skinning its model's cached bind-pose vertex data, and
+  re-uploading the result into every one of that model's mesh parts' GPU
+  vertex buffers via a new `Mesh::UpdateVertexData()` - which only exists at
+  all because a RIGGED mesh's `Mesh` is now built via a new
+  `Renderer::CreateSkinnedMesh()`/`GpuResourceFactory::CreateSkinnedMesh()`
+  (a host-visible, persistently-mapped `BufferMemoryUsage::CpuToGpu` vertex
+  buffer, re-writable every frame, vs. the immutable device-local one
+  `CreateMesh()` still builds for everything else - the INDEX buffer stays
+  static either way, since topology never changes as a mesh animates). The
+  Editor's "Hierarchy" panel drag-and-drop (`Panels/HierarchyPanel.cpp`) now
+  tries `PlayAnimationOnEntity()` FIRST when an asset is dropped onto an
+  existing entity row, falling back to the usual spawn-as-child behavior
+  only if that fails (e.g. the dropped file isn't actually an Animation
+  asset, or the target has no rig) - so dropping an Animation `*.gta`
+  straight onto an already-spawned rigged model plays it, Unity's own "drag
+  an AnimationClip onto a rigged GameObject" convention. "Inspector" also
+  gained a minimal "Skeletal Animator" section (play/pause, loop, speed,
+  current frame) for a selected entity that has one. Still explicitly NOT
+  done, same as before: IK solving (an IK-target bone still just moves
+  exactly as keyframed, with no chain-solving), morph blending, physics
+  simulation, and true bezier interpolation. Also a newly-documented
+  limitation of this specific implementation: since a rigged model's GPU
+  mesh buffers are still shared across every entity spawned from the SAME
+  `*.gta` (see the "minimal asset pipeline" bullet above), two
+  SIMULTANEOUSLY-animated instances of the same model file currently fight
+  over those same buffers (last-updated-this-frame wins) - fine for today's
+  single-instance use case; per-instance GPU buffers for a rigged model are
+  a natural follow-up once that's actually needed. Verified against the real
+  Furina model + a real 690-bone-keyframe `.vmd` motion already used
+  elsewhere in this project's own testing, and the full test suite (377
+  tests) still passes.
 - **~~PMX material/texture import~~ - DONE, see the "minimal asset pipeline"
   bullet above** (`MaterialData.h`, `MaterialTexture.h`,
   `VertexLayout::PositionNormalUv`, `Shaders/TexturedMesh.vert/.frag`).
