@@ -97,6 +97,20 @@ fetch_stb()
 # Also defines the KTX::ktx target, linked into gte_core below.
 fetch_ktx()
 
+# Downloads (if not already present) and stages saba's raw PMX-model-file
+# reading layer (Saba/Base/*, Saba/Model/MMD/{PMXFile,MMDFileString,
+# SjisToUnicode}.*) plus its one real header dependency, glm - used to parse
+# MMD (MikuMikuDance) .pmx model files and extract vertex positions/normals/
+# UVs (see src/Assets/PmxLoader.h/.cpp). See cmake/FetchSaba.cmake for the
+# full reasoning (why only this curated subset is vendored, not saba's
+# Bullet-dependent skinning/physics runtime or its GLFW/ImGui-based viewer):
+#   third_party/saba/src/   - saba's curated source subset (+ full LICENCE)
+#   third_party/glm/glm/    - glm's header-only include tree
+# Also defines the `saba_pmx` (STATIC) and `glm` (INTERFACE) targets, linked
+# into gte_core below.
+include(FetchSaba)
+fetch_saba()
+
 # Dear ImGui itself is only fetched/built at all when the Editor is enabled
 # - a release build configured with -DGTE_ENABLE_EDITOR=OFF never touches
 # the network for this, never compiles a single ImGui source file, and
@@ -168,6 +182,8 @@ add_library(gte_core STATIC
     src/Assets/Ktx2Decoder.cpp
     src/Assets/AssetImporter.h
     src/Assets/AssetImporter.cpp
+    src/Assets/PmxLoader.h
+    src/Assets/PmxLoader.cpp
     src/Memory/SdlMemoryTracker.h
     src/Memory/SdlMemoryTracker.cpp
     src/Application/Application.cpp
@@ -319,6 +335,18 @@ target_compile_definitions(gte_core PUBLIC GTE_ENABLE_PROJECT_PANEL=$<BOOL:${GTE
 # automatically instead of every consumer having to repeat them.
 target_include_directories(gte_core PUBLIC "${CMAKE_SOURCE_DIR}/src")
 target_link_libraries(gte_core PUBLIC SDL3::SDL3 volk vma stb_image KTX::ktx)
+
+# PRIVATE (not PUBLIC) deliberately: saba_pmx/glm are an implementation
+# detail confined entirely to src/Assets/PmxLoader.cpp (see FetchSaba.cmake's
+# header comment) - PmxLoader.h's own public API only ever exposes this
+# engine's plain gte::Vec3/Vec2 types, never a saba:: or glm:: type, so no
+# consumer of gte_core needs saba_pmx's or glm's include directories
+# propagated to it. CMake still statically links saba_pmx's/glm's object
+# code into any final binary that links gte_core regardless of this
+# PRIVATE-ness (PUBLIC vs PRIVATE only changes usage-requirement
+# propagation, not whether a STATIC library's own archive gets linked
+# transitively).
+target_link_libraries(gte_core PRIVATE saba_pmx)
 
 # --- Final executable ----------------------------------------------------
 add_executable(GreatTamanaEngine src/main.cpp)

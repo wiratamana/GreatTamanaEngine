@@ -41,6 +41,12 @@
 # CMakeLists.txt / cmake/FetchKTX.cmake)
 /third_party/ktx/
 
+# saba (curated PMX-file-reading subset) and its glm header-only dependency,
+# fetched by cmake/FetchSaba.cmake (regenerated automatically on configure —
+# see CMakeLists.txt / cmake/FetchSaba.cmake)
+/third_party/saba/
+/third_party/glm/
+
 # GoogleTest artifacts fetched by cmake/FetchGTest.cmake (regenerated
 # automatically on configure when GTE_BUILD_TESTS is ON — see
 # CMakeLists.txt / cmake/FetchGTest.cmake / tests/CMakeLists.txt)

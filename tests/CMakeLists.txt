@@ -163,6 +163,20 @@
 #                                            KTX2 -> *.gta conversion vs.
 #                                            plain-copy-fallback behavior
 #                                            (src/Assets/AssetImporter.h).
+#   - Assets/PmxLoaderTests.cpp              - LoadPmxModel()'s extraction of
+#                                            vertex positions/normals/UVs/
+#                                            triangle indices from a MikuMiku
+#                                            Dance .pmx model file, against a
+#                                            hand-built minimal binary fixture
+#                                            (BuildMinimalTrianglePmx(), same
+#                                            "construct the exact binary
+#                                            format by hand" approach as
+#                                            GtaFileTests.cpp) - no GPU device
+#                                            involved (src/Assets/PmxLoader.h).
+#                                            Also includes one machine-gated
+#                                            smoke test against a real,
+#                                            non-vendored MMD model (GTEST_SKIP()s
+#                                            everywhere that model isn't present).
 #
 # Note that the test BINARY still dynamically depends on SDL3.dll at process
 # load time regardless of the above (gte_core's Window.cpp references SDL
@@ -194,6 +208,7 @@ set(GTE_TEST_SOURCES
     Assets/Ktx2EncoderTests.cpp
     Assets/Ktx2DecoderTests.cpp
     Assets/AssetImporterTests.cpp
+    Assets/PmxLoaderTests.cpp
     Memory/GpuMemoryTrackerTests.cpp
     Memory/SdlMemoryTrackerTests.cpp
     Input/InputStateTests.cpp
