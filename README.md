@@ -304,6 +304,36 @@ registry that tracks every one of them:
   Bullet or equivalent backend is vendored); see `TODO.md` for that
   remaining runtime work, and material/texture import as another explicit
   follow-up.
+- **MikuMikuDance (`.vmd`) motion import → Animation `*.gta`**
+  (`Assets/VmdLoader.h/.cpp`, `Assets/MotionData.h`, `Assets/MotionFile.h/.cpp`,
+  `Assets/AssetImporter.h/.cpp`) — the motion-import equivalent of the `.pmx`
+  model pipeline above, for MMD's companion animation format. A dropped
+  `.vmd` file (`IsImportableAsMotionAsset()`) is parsed via
+  `VmdLoader::LoadVmdMotion()`, which wraps `saba::ReadVMDFile()` — the same
+  curated `benikabocha/saba` subset the `.pmx` importer already vendors, now
+  additionally compiling `Model/MMD/VMDFile.{h,cpp}` (see
+  `cmake/FetchSaba.cmake`). `LoadVmdMotion()` extracts every VMD track into a
+  plain, engine-native `MotionData` (`src/Assets/MotionData.h`): bone
+  keyframes (per-bone translation/rotation offset + raw bezier interpolation
+  bytes, addressed by NAME rather than a model-specific index — a `.vmd` is
+  authored independently of any one model's own bone numbering), morph
+  (blend-shape weight) keyframes, and the camera/light/shadow/IK tracks a
+  camera-work `.vmd` carries instead (any/all of these lists may legitimately
+  be empty, depending on what kind of motion was imported). `MotionFile.h`'s
+  `EncodeMotionDataToBytes()` serializes all of that into a simple,
+  engine-private flat binary layout (magic + length-prefixed sections per
+  track, mirroring `RigFile.h`'s own shape) and wraps it as a `*.gta`
+  (`AssetType::Animation`) via `AssetDatabase::ImportAsset()` — as the
+  PAYLOAD this time (a motion has no separate mesh geometry to keep a
+  metadata/payload split for), same overall pipeline shape as the texture/
+  mesh importers. A file that merely *looks* like a `.vmd` by extension but
+  fails to actually parse degrades gracefully to a plain copy, same
+  convention as a corrupt image/PMX file. Verified end-to-end against a real,
+  non-vendored MMD motion file (see
+  `tests/Assets/VmdLoaderTests.cpp`'s `VmdLoaderRealMotionSmokeTest`), plus a
+  hand-built binary fixture covering every track. Still import/data-
+  extraction only — no interpolation evaluation/keyframe playback happens
+  anywhere in this engine yet; see `TODO.md` for that remaining runtime work.
 
 ### Editor / Debug UI
 
@@ -794,6 +824,28 @@ pieces:
   new binary format's own round-trip). Still import/data-extraction only —
   no GPU skinning, IK solving, morph blending, or physics simulation
   happens anywhere in this engine yet; see `TODO.md`.
+- **MikuMikuDance (`.vmd`) motion import** — the model importer's companion:
+  a dropped `.vmd` motion file now goes through the exact same "gate on file
+  type, parse into an engine-native struct, wrap as `*.gta`" pipeline as
+  `.pmx`, via a new `Assets/VmdLoader.h/.cpp` (wrapping
+  [benikabocha/saba](https://github.com/benikabocha/saba)'s
+  `Model/MMD/VMDFile.{h,cpp}` — newly added to the already-vendored curated
+  saba subset, see `cmake/FetchSaba.cmake`) and a new `Assets/MotionData.h`/
+  `Assets/MotionFile.h/.cpp`. Extracts every VMD track: bone keyframes
+  (translation/rotation offset + raw bezier interpolation bytes, addressed
+  by bone NAME rather than a model-specific index, matching how a `.vmd` is
+  actually authored/reused across different models), morph keyframes, and
+  the camera/light/shadow/IK-enable tracks a camera-work `.vmd` carries
+  instead — wrapped as a new `AssetType::Animation` `*.gta`. Verified against
+  the real motion file this integration was tested with (a 690-bone-keyframe
+  character motion, `ChatanyaraKuushanku_bassui260717a.vmd`) via a machine-
+  gated smoke test (`tests/Assets/VmdLoaderTests.cpp`'s
+  `VmdLoaderRealMotionSmokeTest`), plus hand-built binary fixtures exercising
+  every track (`BuildRichVmd()`) and `Assets/MotionFile.h`'s own encode/
+  decode round-trip (`tests/Assets/MotionFileTests.cpp`). Import/data-
+  extraction only, same as the model importer — no interpolation evaluation,
+  keyframe playback, or wiring onto a model's own `SkeletonData`/`MorphData`
+  by name happens anywhere in this engine yet; see `TODO.md`.
 
 ## Roadmap
 

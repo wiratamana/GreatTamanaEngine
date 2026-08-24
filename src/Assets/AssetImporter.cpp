@@ -2,8 +2,10 @@
 
 #include "Ktx2Encoder.h"
 #include "MeshFile.h"
+#include "MotionFile.h"
 #include "PmxLoader.h"
 #include "RigFile.h"
+#include "VmdLoader.h"
 
 #include <algorithm>
 #include <array>
@@ -85,6 +87,11 @@ bool IsImportableAsMeshAsset(const std::string& extensionLowercaseWithDot)
     return extensionLowercaseWithDot == ".pmx";
 }
 
+bool IsImportableAsMotionAsset(const std::string& extensionLowercaseWithDot)
+{
+    return extensionLowercaseWithDot == ".vmd";
+}
+
 AssetImportResult ImportAssetFile(
     AssetDatabase& database, const std::filesystem::path& sourcePath, const std::filesystem::path& preferredDestinationPath)
 {
@@ -140,6 +147,54 @@ AssetImportResult ImportAssetFile(
         // shape as the KTX2 branch below.
         return ImportAsPlainCopy(
             sourcePath, preferredDestinationPath, "Could not parse as a mesh, imported as-is instead. ");
+    }
+
+    if (IsImportableAsMotionAsset(extension)) {
+        const VmdLoadResult loaded = LoadVmdMotion(PathToUtf8(sourcePath));
+        if (loaded.success) {
+            std::filesystem::path gtaPath = preferredDestinationPath;
+            gtaPath.replace_extension(".gta");
+
+            const std::vector<std::uint8_t> payload = EncodeMotionDataToBytes(loaded.motion);
+
+            const std::optional<Guid> guid
+                = database.ImportAsset(gtaPath, AssetType::Animation, std::vector<std::uint8_t>{}, payload);
+
+            AssetImportResult result;
+            if (guid.has_value()) {
+                result.success = true;
+                result.convertedToMotionAsset = true;
+                result.finalPath = gtaPath;
+                result.guid = *guid;
+                result.motionBoneKeyframeCount = loaded.motion.boneKeyframes.size();
+                result.motionMorphKeyframeCount = loaded.motion.morphKeyframes.size();
+                result.motionCameraKeyframeCount = loaded.motion.cameraKeyframes.size();
+                result.motionLightKeyframeCount = loaded.motion.lightKeyframes.size();
+                result.motionShadowKeyframeCount = loaded.motion.shadowKeyframes.size();
+                result.motionIkKeyframeCount = loaded.motion.ikKeyframes.size();
+                result.message = "Imported \"" + PathToUtf8(sourcePath.filename()) + "\" as a motion ("
+                    + std::to_string(result.motionBoneKeyframeCount) + " bone keyframes, "
+                    + std::to_string(result.motionMorphKeyframeCount) + " morph keyframes, "
+                    + std::to_string(result.motionCameraKeyframeCount) + " camera keyframes, "
+                    + std::to_string(result.motionLightKeyframeCount) + " light keyframes, "
+                    + std::to_string(result.motionShadowKeyframeCount) + " shadow keyframes, "
+                    + std::to_string(result.motionIkKeyframeCount) + " IK keyframes) -> \""
+                    + PathToUtf8(gtaPath.filename()) + "\".";
+            } else {
+                result.success = false;
+                result.message
+                    = "Parsed \"" + PathToUtf8(sourcePath.filename()) + "\" but failed to write its *.gta wrapper.";
+            }
+            return result;
+        }
+
+        // The extension claimed this was a supported motion format, but it
+        // failed to actually parse (corrupt/truncated/not really a .vmd
+        // despite its extension) - degrade gracefully to a plain copy
+        // rather than failing the whole import outright, same fallback
+        // shape as the mesh/KTX2 branches.
+        return ImportAsPlainCopy(
+            sourcePath, preferredDestinationPath, "Could not parse as a motion, imported as-is instead. ");
     }
 
     if (IsImportableAsKtx2Texture(extension)) {

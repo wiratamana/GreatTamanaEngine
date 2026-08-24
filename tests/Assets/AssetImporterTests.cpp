@@ -1,5 +1,6 @@
 #include "Assets/AssetImporter.h"
 
+#include "Assets/MotionFile.h"
 #include "Assets/RigFile.h"
 
 #include <cstring>
@@ -120,6 +121,33 @@ std::vector<std::uint8_t> BuildMinimalTrianglePmx()
     PmxU32(bytes, 0); // display frames
     PmxU32(bytes, 0); // rigidbodies
     PmxU32(bytes, 0); // joints
+    return bytes;
+}
+
+// Same hand-built minimal-.vmd-file approach as VmdLoaderTests.cpp's
+// BuildMinimalOneBoneKeyframeVmd() (see that file's own comment for the
+// exact binary layout being reproduced here) - duplicated rather than
+// shared, matching this test suite's existing convention of small, self-
+// contained fixtures.
+void VmdFixedStr(std::vector<std::uint8_t>& bytes, const std::string& s, std::size_t length)
+{
+    for (std::size_t i = 0; i < length; ++i) {
+        bytes.push_back(i < s.size() ? static_cast<std::uint8_t>(s[i]) : 0);
+    }
+}
+
+std::vector<std::uint8_t> BuildMinimalOneBoneKeyframeVmd()
+{
+    std::vector<std::uint8_t> bytes;
+    VmdFixedStr(bytes, "Vocaloid Motion Data 0002", 30);
+    VmdFixedStr(bytes, "TestModel", 20);
+
+    PmxU32(bytes, 1); // motion count
+    VmdFixedStr(bytes, "Bone1", 15);
+    PmxU32(bytes, 5); // frame
+    PmxF32(bytes, 1.0f); PmxF32(bytes, 2.0f); PmxF32(bytes, 3.0f); // translate
+    PmxF32(bytes, 0.0f); PmxF32(bytes, 0.0f); PmxF32(bytes, 0.0f); PmxF32(bytes, 1.0f); // quaternion (identity)
+    bytes.insert(bytes.end(), 64, 0); // interpolation, all zero
 
     return bytes;
 }
@@ -190,6 +218,21 @@ TEST(IsImportableAsMeshAssetTest, RejectsNonMeshExtensions)
     EXPECT_FALSE(IsImportableAsMeshAsset(".png"));
     EXPECT_FALSE(IsImportableAsMeshAsset(".gta"));
     EXPECT_FALSE(IsImportableAsMeshAsset(""));
+}
+
+// --- IsImportableAsMotionAsset() --------------------------------------------
+
+TEST(IsImportableAsMotionAssetTest, RecognizesVmd)
+{
+    EXPECT_TRUE(IsImportableAsMotionAsset(".vmd"));
+}
+
+TEST(IsImportableAsMotionAssetTest, RejectsNonMotionExtensions)
+{
+    EXPECT_FALSE(IsImportableAsMotionAsset(".txt"));
+    EXPECT_FALSE(IsImportableAsMotionAsset(".pmx"));
+    EXPECT_FALSE(IsImportableAsMotionAsset(".gta"));
+    EXPECT_FALSE(IsImportableAsMotionAsset(""));
 }
 
 // --- ImportAssetFile() ------------------------------------------------------
@@ -350,6 +393,79 @@ TEST_F(AssetImporterTest, CorruptPmxExtensionFallsBackToPlainCopy)
 
     ASSERT_TRUE(result.success);
     EXPECT_FALSE(result.convertedToMeshAsset);
+    EXPECT_EQ(result.finalPath, destination);
+
+    std::error_code ec;
+    EXPECT_TRUE(std::filesystem::exists(result.finalPath, ec));
+}
+
+TEST_F(AssetImporterTest, ConvertsAValidVmdToMotionWrappedGta)
+{
+    const std::filesystem::path source = m_root / "motion.vmd";
+    WriteBinaryFile(source, BuildMinimalOneBoneKeyframeVmd());
+
+    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "Imported" / "motion.vmd");
+
+    ASSERT_TRUE(result.success) << result.message;
+    EXPECT_TRUE(result.convertedToMotionAsset);
+    EXPECT_FALSE(result.convertedToMeshAsset);
+    EXPECT_FALSE(result.convertedToKtx2);
+    EXPECT_EQ(result.finalPath.extension(), ".gta");
+    EXPECT_TRUE(result.guid.IsValid());
+    EXPECT_EQ(result.motionBoneKeyframeCount, 1u);
+    EXPECT_EQ(result.motionMorphKeyframeCount, 0u);
+    EXPECT_EQ(result.motionCameraKeyframeCount, 0u);
+    EXPECT_EQ(result.motionLightKeyframeCount, 0u);
+    EXPECT_EQ(result.motionShadowKeyframeCount, 0u);
+    EXPECT_EQ(result.motionIkKeyframeCount, 0u);
+
+    std::error_code ec;
+    EXPECT_TRUE(std::filesystem::exists(result.finalPath, ec));
+    EXPECT_FALSE(std::filesystem::exists(m_root / "Imported" / "motion.vmd", ec)); // No plain-copy byproduct left behind.
+}
+
+TEST_F(AssetImporterTest, ConvertedMotionAssetsPayloadDecodesBackToItsMotionData)
+{
+    const std::filesystem::path source = m_root / "motion.vmd";
+    WriteBinaryFile(source, BuildMinimalOneBoneKeyframeVmd());
+
+    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "motion.vmd");
+    ASSERT_TRUE(result.success) << result.message;
+
+    const std::optional<GtaFileData> gta = ReadGtaFile(result.finalPath);
+    ASSERT_TRUE(gta.has_value());
+    EXPECT_EQ(gta->header.Type(), AssetType::Animation);
+
+    const std::optional<MotionData> motion = DecodeMotionDataFromBytes(gta->payload);
+    ASSERT_TRUE(motion.has_value());
+    ASSERT_EQ(motion->boneKeyframes.size(), 1u);
+    EXPECT_EQ(motion->boneKeyframes[0].boneName, "Bone1");
+    EXPECT_EQ(motion->modelName, "TestModel");
+}
+
+TEST_F(AssetImporterTest, ConvertedMotionAssetIsImmediatelyTrackedByTheDatabase)
+{
+    const std::filesystem::path source = m_root / "motion.vmd";
+    WriteBinaryFile(source, BuildMinimalOneBoneKeyframeVmd());
+
+    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "motion.vmd");
+    ASSERT_TRUE(result.success) << result.message;
+
+    const AssetRecord* record = m_db.FindByGuid(result.guid);
+    ASSERT_NE(record, nullptr);
+    EXPECT_EQ(record->type, AssetType::Animation);
+}
+
+TEST_F(AssetImporterTest, CorruptVmdExtensionFallsBackToPlainCopy)
+{
+    const std::filesystem::path source = m_root / "fake.vmd"; // Named like a VMD motion, but not really one.
+    WriteFile(source, "this is not a real VMD file");
+
+    const std::filesystem::path destination = m_root / "Imported" / "fake.vmd";
+    const AssetImportResult result = ImportAssetFile(m_db, source, destination);
+
+    ASSERT_TRUE(result.success);
+    EXPECT_FALSE(result.convertedToMotionAsset);
     EXPECT_EQ(result.finalPath, destination);
 
     std::error_code ec;

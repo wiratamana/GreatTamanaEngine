@@ -163,7 +163,7 @@
 #                                            KTX2 -> *.gta conversion vs.
 #                                            plain-copy-fallback behavior
 #                                            (src/Assets/AssetImporter.h).
-#   - Assets/PmxLoaderTests.cpp              - LoadPmxModel()'s extraction of
+#   Assets/PmxLoaderTests.cpp              - LoadPmxModel()'s extraction of
 #                                            vertex positions/normals/UVs/
 #                                            triangle indices from a MikuMiku
 #                                            Dance .pmx model file, against a
@@ -177,7 +177,23 @@
 #                                            smoke test against a real,
 #                                            non-vendored MMD model (GTEST_SKIP()s
 #                                            everywhere that model isn't present).
-#   - Assets/MeshFileTests.cpp               - EncodeMeshDataToBytes()/
+#   Assets/VmdLoaderTests.cpp               - LoadVmdMotion()'s extraction of
+#                                            bone/morph/camera/light/shadow/IK
+#                                            keyframe tracks from a MikuMiku
+#                                            Dance .vmd motion file, against
+#                                            hand-built minimal/rich binary
+#                                            fixtures (BuildMinimalOneBoneKeyframeVmd()/
+#                                            BuildRichVmd(), same "construct
+#                                            the exact binary format by hand"
+#                                            approach as PmxLoaderTests.cpp) -
+#                                            no GPU device involved
+#                                            (src/Assets/VmdLoader.h). Also
+#                                            includes one machine-gated smoke
+#                                            test against a real, non-vendored
+#                                            MMD motion (GTEST_SKIP()s
+#                                            everywhere that motion isn't
+#                                            present).
+#   Assets/MeshFileTests.cpp               - EncodeMeshDataToBytes()/
 #                                            DecodeMeshDataFromBytes()
 #                                            round-tripping the *.gta
 #                                            AssetType::Mesh payload's binary
@@ -185,7 +201,17 @@
 #                                            empty input rejection - no GPU
 #                                            device involved (src/Assets/
 #                                            MeshFile.h).
-#   - Assets/RigFileTests.cpp                - EncodeRigDataToBytes()/
+#   Assets/MotionFileTests.cpp              - EncodeMotionDataToBytes()/
+#                                            DecodeMotionDataFromBytes()
+#                                            round-tripping the *.gta
+#                                            AssetType::Animation payload's
+#                                            binary layout (model name plus
+#                                            bone/morph/camera/light/shadow/
+#                                            IK keyframe tracks), plus
+#                                            malformed/truncated/empty input
+#                                            rejection - no GPU device
+#                                            involved (src/Assets/MotionFile.h).
+#   Assets/RigFileTests.cpp                - EncodeRigDataToBytes()/
 #                                            DecodeRigDataFromBytes()
 #                                            round-tripping the *.gta
 #                                            AssetType::Mesh METADATA
@@ -227,7 +253,9 @@ set(GTE_TEST_SOURCES
     Assets/Ktx2DecoderTests.cpp
     Assets/AssetImporterTests.cpp
     Assets/PmxLoaderTests.cpp
+    Assets/VmdLoaderTests.cpp
     Assets/MeshFileTests.cpp
+    Assets/MotionFileTests.cpp
     Assets/RigFileTests.cpp
     Memory/GpuMemoryTrackerTests.cpp
     Memory/SdlMemoryTrackerTests.cpp

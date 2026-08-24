@@ -169,8 +169,14 @@ unblock the most follow-on work:
   KTX2 and wraps it as a `*.gta` (`AssetType::Texture`), and dropping a
   MikuMikuDance `.pmx` model parses its vertex geometry and wraps it as a
   `*.gta` (`AssetType::Mesh`, see `src/Assets/PmxLoader.h`/`MeshFile.h`/
-  `AssetImporter.h`) - both tracked by `AssetDatabase`. Both also now have a
-  DISPLAY path good enough for the Editor's own "Inspector" panel
+  `AssetImporter.h`) - both tracked by `AssetDatabase`. A `.vmd` motion file
+  now imports the same way too (`AssetType::Animation`, see
+  `src/Assets/VmdLoader.h`/`MotionFile.h`), but has NO display/preview path
+  in the Editor at all yet (unlike the texture/mesh cases below) - there is
+  nothing to visually preview about a flat keyframe list without an actual
+  playback/scrubbing UI, which doesn't exist yet either. Both texture and
+  mesh (not motion) also now have a DISPLAY path good enough for the
+  Editor's own "Inspector" panel
   (`Ktx2Decoder.h`'s `DecodeKtx2ToRgba8()` for textures,
   `AssetPreviewMesh.cpp`'s own small Vulkan pipeline for meshes) - but there
   is still NO GAMEPLAY consumption path for either: nothing yet lets a
@@ -204,31 +210,44 @@ unblock the most follow-on work:
   would produce the exact same `MeshData`/`*.gta` shape `PmxLoader` already
   does (see `src/Assets/MeshData.h`), so none of this work is PMX-specific.
 - **Real MMD skinning/animation runtime (pose evaluation, morph blending,
-  physics simulation, `.vmd` motion playback).** The DATA side of this is no
-  longer a gap: `PmxLoader.h` now extracts per-vertex skin weights (all of
-  BDEF1/BDEF2/BDEF4/SDEF/QDEF - `MeshData::skinWeights`), the full bone
-  hierarchy including IK chains (`Assets/SkeletonData.h`), all seven morph
-  kinds (`Assets/MorphData.h`), and rigid bodies/joints
-  (`Assets/PhysicsData.h`), all round-tripped through `Assets/RigFile.h`
-  into the `*.gta`'s metadata section - see README.md's own entry for the
-  full rundown. What's still missing is the RUNTIME that actually DOES
-  anything with that data: real bone-deformed rendering (a T-posed/A-posed
-  import actually posing/animating) needs an IK solver (evaluating the
-  `Bone::ikLinks`/`ikTargetBoneIndex`/`ikAngleLimitRadians` this session
-  added) and a morph blender (applying `Morph::positionOffsets`/etc. at a
-  runtime weight) - saba's own `PMXModel`/`MMDNode`/`MMDIkSolver`/`MMDMorph`
-  layer does this and could be a reference, though it also expects its own
-  `MMDPhysics` (rigid-body jiggle bones, physics-after-deform) wired in,
-  which needs Bullet (NOT fetched today - deliberately out of scope, see
-  `cmake/FetchSaba.cmake`'s header comment) to actually simulate the
-  `RigidBody`/`Joint` data this session extracts. A `.vmd` motion file
-  loader (`saba::VMDAnimation`/`VMDCameraAnimation`, also not vendored yet)
-  would be needed to actually drive bones/morphs over time. A real
-  skeletal-animation vertex format/shader (bone indices + weights, GPU
-  skinning or CPU pre-skin, consuming `MeshData::skinWeights` directly)
-  would also be needed on the rendering side - today's engine has no
-  skinning concept anywhere in `Renderer`/`Pipeline`/`Vertex`. Still a
-  large, multi-session effort even with the data-extraction half done.
+  physics simulation, `.vmd` keyframe interpolation/playback).** The DATA
+  side of this is no longer a gap, for EITHER half of MMD import: `PmxLoader.h`
+  extracts per-vertex skin weights (all of BDEF1/BDEF2/BDEF4/SDEF/QDEF -
+  `MeshData::skinWeights`), the full bone hierarchy including IK chains
+  (`Assets/SkeletonData.h`), all seven morph kinds (`Assets/MorphData.h`),
+  and rigid bodies/joints (`Assets/PhysicsData.h`), all round-tripped through
+  `Assets/RigFile.h` into the Mesh `*.gta`'s metadata section; and
+  `VmdLoader.h` now extracts a `.vmd` motion's bone/morph/camera/light/
+  shadow/IK keyframe tracks (`Assets/MotionData.h`), round-tripped through
+  `Assets/MotionFile.h` into an Animation `*.gta` - see README.md's own
+  entries for the full rundown of both. What's still missing is the RUNTIME
+  that actually DOES anything with that data: real bone-deformed rendering
+  (a T-posed/A-posed import actually posing/animating) needs an IK solver
+  (evaluating the `Bone::ikLinks`/`ikTargetBoneIndex`/`ikAngleLimitRadians`
+  PmxLoader already extracts) and a morph blender (applying
+  `Morph::positionOffsets`/etc. at a runtime weight) - saba's own
+  `PMXModel`/`MMDNode`/`MMDIkSolver`/`MMDMorph` layer does this and could be
+  a reference, though it also expects its own `MMDPhysics` (rigid-body
+  jiggle bones, physics-after-deform) wired in, which needs Bullet (NOT
+  fetched today - deliberately out of scope, see `cmake/FetchSaba.cmake`'s
+  header comment) to actually simulate the `RigidBody`/`Joint` data already
+  extracted. On the motion side specifically: `MotionData`'s bone/morph
+  keyframes are addressed by NAME (matching how a `.vmd` is actually
+  authored/reused across different models), so a playback system first
+  needs a name -> `SkeletonData::bones`/`MorphData::morphs` INDEX resolution
+  step (nothing here performs that today - see `MotionData.h`'s own doc
+  comment) before it can drive anything; then an actual bezier-curve
+  evaluator for `BoneKeyframe::interpolation`/`CameraKeyframe::interpolation`
+  (currently kept as raw, undecoded bytes - see those fields' own comments)
+  and a frame-timeline scrubber/player (saba's own higher-level
+  `VMDAnimation`/`VMDCameraAnimation` runtime, built ON TOP of the
+  `VMDFile.h` reader this engine already vendors, is NOT vendored and could
+  be a reference for this). A real skeletal-animation vertex format/shader
+  (bone indices + weights, GPU skinning or CPU pre-skin, consuming
+  `MeshData::skinWeights` directly) would also be needed on the rendering
+  side - today's engine has no skinning concept anywhere in
+  `Renderer`/`Pipeline`/`Vertex`. Still a large, multi-session effort even
+  with the data-extraction half done for both model and motion.
 - **PMX material/texture import.** `MeshData`/`MeshFile` carry no material
   data at all - a `.pmx`'s per-face material list (diffuse/specular/
   ambient color, a diffuse texture reference, optional sphere-map/toon

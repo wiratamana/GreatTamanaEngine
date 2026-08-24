@@ -97,13 +97,16 @@ fetch_stb()
 # Also defines the KTX::ktx target, linked into gte_core below.
 fetch_ktx()
 
-# Downloads (if not already present) and stages saba's raw PMX-model-file
-# reading layer (Saba/Base/*, Saba/Model/MMD/{PMXFile,MMDFileString,
-# SjisToUnicode}.*) plus its one real header dependency, glm - used to parse
-# MMD (MikuMikuDance) .pmx model files and extract vertex positions/normals/
-# UVs (see src/Assets/PmxLoader.h/.cpp). See cmake/FetchSaba.cmake for the
-# full reasoning (why only this curated subset is vendored, not saba's
-# Bullet-dependent skinning/physics runtime or its GLFW/ImGui-based viewer):
+# Downloads (if not already present) and stages saba's raw PMX-model-file +
+# VMD-motion-file reading layer (Saba/Base/*, Saba/Model/MMD/{PMXFile,VMDFile,
+# MMDFileString,SjisToUnicode}.*) plus its one real header dependency, glm -
+# used to parse MMD (MikuMikuDance) .pmx model files and extract vertex
+# positions/normals/UVs/bones/morphs/physics (see src/Assets/PmxLoader.h/.cpp)
+# and .vmd motion files and extract bone/morph/camera/light/shadow/IK
+# keyframe tracks (see src/Assets/VmdLoader.h/.cpp). See cmake/FetchSaba.cmake
+# for the full reasoning (why only this curated subset is vendored, not
+# saba's Bullet-dependent skinning/physics runtime or its GLFW/ImGui-based
+# viewer):
 #   third_party/saba/src/   - saba's curated source subset (+ full LICENCE)
 #   third_party/glm/glm/    - glm's header-only include tree
 # Also defines the `saba_pmx` (STATIC) and `glm` (INTERFACE) targets, linked
@@ -184,12 +187,17 @@ add_library(gte_core STATIC
     src/Assets/AssetImporter.cpp
     src/Assets/PmxLoader.h
     src/Assets/PmxLoader.cpp
+    src/Assets/VmdLoader.h
+    src/Assets/VmdLoader.cpp
     src/Assets/MeshData.h
     src/Assets/SkeletonData.h
     src/Assets/MorphData.h
     src/Assets/PhysicsData.h
+    src/Assets/MotionData.h
     src/Assets/MeshFile.h
     src/Assets/MeshFile.cpp
+    src/Assets/MotionFile.h
+    src/Assets/MotionFile.cpp
     src/Assets/RigFile.h
     src/Assets/RigFile.cpp
     src/Memory/SdlMemoryTracker.h
@@ -347,15 +355,15 @@ target_include_directories(gte_core PUBLIC "${CMAKE_SOURCE_DIR}/src")
 target_link_libraries(gte_core PUBLIC SDL3::SDL3 volk vma stb_image KTX::ktx)
 
 # PRIVATE (not PUBLIC) deliberately: saba_pmx/glm are an implementation
-# detail confined entirely to src/Assets/PmxLoader.cpp (see FetchSaba.cmake's
-# header comment) - PmxLoader.h's own public API only ever exposes this
-# engine's plain gte::Vec3/Vec2 types, never a saba:: or glm:: type, so no
-# consumer of gte_core needs saba_pmx's or glm's include directories
-# propagated to it. CMake still statically links saba_pmx's/glm's object
-# code into any final binary that links gte_core regardless of this
-# PRIVATE-ness (PUBLIC vs PRIVATE only changes usage-requirement
-# propagation, not whether a STATIC library's own archive gets linked
-# transitively).
+# detail confined entirely to src/Assets/PmxLoader.cpp/VmdLoader.cpp (see
+# FetchSaba.cmake's header comment) - PmxLoader.h's/VmdLoader.h's own public
+# APIs only ever expose this engine's plain gte::Vec3/Quat/MeshData/
+# MotionData types, never a saba:: or glm:: type, so no consumer of gte_core
+# needs saba_pmx's or glm's include directories propagated to it. CMake still
+# statically links saba_pmx's/glm's object code into any final binary that
+# links gte_core regardless of this PRIVATE-ness (PUBLIC vs PRIVATE only
+# changes usage-requirement propagation, not whether a STATIC library's own
+# archive gets linked transitively).
 target_link_libraries(gte_core PRIVATE saba_pmx)
 
 # --- Final executable ----------------------------------------------------

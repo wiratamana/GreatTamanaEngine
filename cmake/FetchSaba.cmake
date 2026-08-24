@@ -40,6 +40,22 @@
 #                                        src/Assets/PmxLoader.cpp reads to
 #                                        build this engine's own plain
 #                                        Vec3/Vec2 arrays.
+#   Saba/Model/MMD/VMDFile.h/.cpp     - the actual .vmd (motion) binary
+#                                        parser (ReadVMDFile()) - VMDMotion/
+#                                        VMDMorph/VMDCamera/VMDLight/
+#                                        VMDShadow/VMDIk are exactly what
+#                                        src/Assets/VmdLoader.cpp reads to
+#                                        build this engine's own plain
+#                                        MotionData (src/Assets/MotionData.h)
+#                                        bone/morph/camera/light/shadow/IK
+#                                        keyframe tracks. Needs no extra
+#                                        dependency beyond what PMXFile.h/.cpp
+#                                        above already pulls in (MMDFileString.h
+#                                        for its fixed-size on-disk bone/morph/
+#                                        model-name strings, Saba/Base/File.h
+#                                        for its buffered reader, Saba/Base/
+#                                        Log.h - patched, see below - for its
+#                                        SABA_WARN() diagnostics).
 #   Saba/Base/Log.h                   - PATCHED (see _saba_apply_gte_patches()
 #                                        below): upstream's version pulls in
 #                                        spdlog (a whole extra vendored
@@ -63,12 +79,18 @@
 #
 # NOT vendored/compiled at all: Model/MMD/{MMDModel,MMDNode,MMDIkSolver,
 # MMDMorph,MMDMaterial,MMDPhysics,MMDCamera,PMDFile,PMDModel,VMDAnimation,
-# VMDCameraAnimation,VMDFile,VPDFile}.*, Model/OBJ/*, Model/XFile/* - these
-# make up saba's skeletal-animation/physics runtime and its other model
-# format readers, none of which this integration needs yet. A future session
-# adding real bone-deformed skinning/animation playback would extend this
-# curated list (and, at that point, also need to fetch+build Bullet, exactly
-# as saba's own CMakeLists.txt does).
+# VMDCameraAnimation,VPDFile}.*, Model/OBJ/*, Model/XFile/* - these make up
+# saba's skeletal-animation/physics runtime and its other model format
+# readers, none of which this integration needs yet (VMDFile.h/.cpp - the
+# raw .vmd FILE READER, as opposed to VMDAnimation.h/.cpp's higher-level
+# playback/interpolation runtime built on top of it - IS vendored/compiled,
+# see the curated list above; this line's "VMDFile" entry from the original
+# integration was removed once VmdLoader.h/.cpp started needing it). A
+# future session adding real bone-deformed skinning/animation PLAYBACK
+# (rather than just parsing a .vmd's raw keyframe data, which this
+# integration already does) would extend this curated list further (and, at
+# that point, also need to fetch+build Bullet, exactly as saba's own
+# CMakeLists.txt does).
 #
 # saba has ONE actual third-party header dependency for the subset above:
 # glm (https://github.com/g-truc/glm, header-only) - PMXFile.h #includes
@@ -409,6 +431,8 @@ function(fetch_saba)
             "${CMAKE_SOURCE_DIR}/third_party/saba/src/Saba/Model/MMD/MMDFileString.h"
             "${CMAKE_SOURCE_DIR}/third_party/saba/src/Saba/Model/MMD/PMXFile.cpp"
             "${CMAKE_SOURCE_DIR}/third_party/saba/src/Saba/Model/MMD/PMXFile.h"
+            "${CMAKE_SOURCE_DIR}/third_party/saba/src/Saba/Model/MMD/VMDFile.cpp"
+            "${CMAKE_SOURCE_DIR}/third_party/saba/src/Saba/Model/MMD/VMDFile.h"
         )
         target_include_directories(saba_pmx PUBLIC
             "${CMAKE_SOURCE_DIR}/third_party/saba/src"
