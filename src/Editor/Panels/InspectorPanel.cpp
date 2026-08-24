@@ -5,6 +5,7 @@
 #include "../../ECS/Components/MeshRenderer.h"
 #include "../../ECS/Components/Transform.h"
 #include "../../ECS/Registry.h"
+#include "../../ECS/TransformHierarchy.h"
 
 #if GTE_ENABLE_PROJECT_PANEL
 #include "../AssetInspectorData.h"
@@ -52,6 +53,23 @@ void BuildEntityInspector(Registry& registry, EditorContext& ctx)
             }
 
             ImGui::DragFloat3("Scale", &transform->scale.x, 0.01f);
+
+            // Read-only "Parent" info + a one-click "Unparent" (Unity's own
+            // Transform.SetParent(null)) - the Inspector-side complement to
+            // "Hierarchy"'s own drag-and-drop attach/detach (see
+            // Panels/HierarchyPanel.h). Reparenting itself (choosing a NEW
+            // parent) is still drag-and-drop-only in "Hierarchy" - there's
+            // no entity picker widget in this engine yet to pick one from
+            // here.
+            if (transform->parent.IsValid() && registry.IsAlive(transform->parent)) {
+                ImGui::Text("Parent: Entity %u", transform->parent.index);
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Unparent")) {
+                    SetParent(registry, entity, kInvalidEntity);
+                }
+            } else {
+                ImGui::TextDisabled("Parent: (none)");
+            }
         }
     }
 

@@ -1,5 +1,6 @@
 #include "RenderSystem.h"
 
+#include "ECS/TransformHierarchy.h"
 #include "Renderer/Renderer.h"
 
 namespace gte {
@@ -15,10 +16,13 @@ std::vector<DrawCommand> RenderSystem::CollectRenderables(Registry& registry)
         const Entity entity = renderers.EntityAt(i);
         const MeshRenderer& meshRenderer = renderers.ComponentAt(i);
 
-        Mat4 model = Mat4::Identity();
-        if (const Transform* transform = registry.TryGetComponent<Transform>(entity)) {
-            model = transform->LocalToWorldMatrix();
-        }
+        // ComputeWorldMatrix() (ECS/TransformHierarchy.h) walks this
+        // entity's whole parent chain, composing parentWorld * local at
+        // every level - for an entity with no parent (or no Transform at
+        // all) this is exactly transform->LocalToWorldMatrix()/
+        // Mat4::Identity(), the same fallback this used to compute inline
+        // before parenting existed.
+        const Mat4 model = ComputeWorldMatrix(registry, entity);
 
         commands.push_back(DrawCommand{ meshRenderer.mesh, meshRenderer.pipeline, meshRenderer.texture, model });
     }
@@ -37,9 +41,16 @@ Mat4 RenderSystem::ResolveActiveCameraViewProjection(Registry& registry, float a
         }
 
         const Entity entity = cameras.EntityAt(i);
-        Transform transform; // Identity (origin, no rotation) if this camera entity has no Transform of its own.
-        if (const Transform* found = registry.TryGetComponent<Transform>(entity)) {
-            transform = *found;
+
+        // ComputeWorldTransform() (ECS/TransformHierarchy.h) resolves this
+        // camera entity's Transform through its whole parent chain first -
+        // a Camera parented under a moving entity (e.g. a vehicle) now
+        // genuinely follows it, matching Unity's own behavior. Falls back
+        // to an identity Transform (origin, no rotation) when this camera
+        // entity has no Transform of its own at all, same as before.
+        Transform transform;
+        if (registry.TryGetComponent<Transform>(entity) != nullptr) {
+            transform = ComputeWorldTransform(registry, entity);
         }
 
         return camera.ProjectionMatrix(aspectWidthOverHeight) * Camera::ViewMatrix(transform);

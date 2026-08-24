@@ -5,6 +5,7 @@
 #include "../TransformGizmo.h"
 #include "../../ECS/Components/Transform.h"
 #include "../../ECS/Registry.h"
+#include "../../ECS/TransformHierarchy.h"
 #include "../../Game/Game.h"
 
 #include <imgui.h>
@@ -131,8 +132,16 @@ void BuildScenePanel(Game& game, Renderer& renderer, EditorContext& ctx, EditorC
             if (registry.IsAlive(selectedEntity)) {
                 if (Transform* transform = registry.TryGetComponent<Transform>(selectedEntity)) {
                     const float aspect = imageSize.y > 0.0f ? (imageSize.x / imageSize.y) : 1.0f;
+                    // The gizmo manipulates in WORLD space (see
+                    // TransformGizmo.h's own doc comment) - resolve the
+                    // selected entity's PARENT's world matrix (Identity()
+                    // for a root/unparented entity) so a parented entity's
+                    // gizmo lines up with where it's actually drawn.
+                    const Mat4 parentWorld = (transform->parent.IsValid() && registry.IsAlive(transform->parent))
+                        ? ComputeWorldMatrix(registry, transform->parent)
+                        : Mat4::Identity();
                     ManipulateTransformGizmo(ctx.gizmoOperation, camera.View(), camera.GizmoProjection(aspect),
-                        imageMin.x, imageMin.y, imageSize.x, imageSize.y, *transform);
+                        imageMin.x, imageMin.y, imageSize.x, imageSize.y, *transform, parentWorld);
                 }
             }
         }

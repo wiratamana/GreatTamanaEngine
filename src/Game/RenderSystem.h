@@ -60,12 +60,13 @@ public:
     TextureHandle RegisterTexture(MaterialTexture&& texture) { return m_textures.Insert(std::move(texture)); }
 
     // Pure data-collection step: every entity with a MeshRenderer becomes
-    // one DrawCommand, using its Transform's LocalToWorldMatrix() if present
-    // (Mat4::Identity() otherwise - an entity can have a MeshRenderer with
-    // no Transform and just draws at the origin). Touches nothing but
-    // `registry` - no Renderer, no live GPU resources - so this alone is
-    // Tier-1-testable (see tests/Game/RenderSystemTests.cpp) even though
-    // RenderSystem as a whole is not (it owns real Mesh/Pipeline objects).
+    // one DrawCommand, using ECS/TransformHierarchy.h's ComputeWorldMatrix()
+    // (its Transform's LocalToWorldMatrix() composed all the way up its
+    // parent chain, if any - Mat4::Identity() if it has no Transform at
+    // all). Touches nothing but `registry` - no Renderer, no live GPU
+    // resources - so this alone is Tier-1-testable (see
+    // tests/Game/RenderSystemTests.cpp) even though RenderSystem as a whole
+    // is not (it owns real Mesh/Pipeline objects).
     static std::vector<DrawCommand> CollectRenderables(Registry& registry);
 
     // Pure camera-resolution step, the Camera equivalent of

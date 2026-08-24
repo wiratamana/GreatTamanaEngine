@@ -272,6 +272,7 @@ set(GTE_TEST_SOURCES
     ECS/ComponentStorageTests.cpp
     ECS/RegistryTests.cpp
     ECS/CameraTests.cpp
+    ECS/TransformHierarchyTests.cpp
     Game/RenderSystemTests.cpp
 )
 

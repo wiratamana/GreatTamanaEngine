@@ -169,6 +169,8 @@ add_library(gte_core STATIC
     src/ECS/EntityManager.h
     src/ECS/ComponentStorage.h
     src/ECS/Registry.h
+    src/ECS/TransformHierarchy.h
+    src/ECS/TransformHierarchy.cpp
     src/ECS/Components/Transform.h
     src/ECS/Components/MeshRenderer.h
     src/ECS/Components/Camera.h

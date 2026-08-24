@@ -100,6 +100,31 @@ TEST(RenderSystemTest, MultipleEntitiesEachProduceTheirOwnDrawCommand)
     }
 }
 
+TEST(RenderSystemTest, EntityWithParentUsesComposedWorldMatrix)
+{
+    Registry registry;
+
+    const Entity parent = registry.CreateEntity();
+    Transform& parentTransform = registry.AddComponent<Transform>(parent);
+    parentTransform.position = Vec3{ 5.0f, 0.0f, 0.0f };
+
+    const Entity child = registry.CreateEntity();
+    Transform& childTransform = registry.AddComponent<Transform>(child);
+    childTransform.position = Vec3{ 1.0f, 0.0f, 0.0f };
+    childTransform.parent = parent;
+
+    const MeshHandle meshHandle{ 1, 1 };
+    const PipelineHandle pipelineHandle{ 2, 1 };
+    registry.AddComponent<MeshRenderer>(child, MeshRenderer{ meshHandle, pipelineHandle });
+
+    const std::vector<DrawCommand> commands = RenderSystem::CollectRenderables(registry);
+
+    ASSERT_EQ(commands.size(), 1u);
+    const Mat4 expected = parentTransform.LocalToWorldMatrix() * childTransform.LocalToWorldMatrix();
+    EXPECT_TRUE(ApproximatelyEqual(commands[0].model, expected));
+    EXPECT_FALSE(ApproximatelyEqual(commands[0].model, childTransform.LocalToWorldMatrix()));
+}
+
 TEST(RenderSystemTest, ResolveActiveCameraViewProjectionWithNoCameraReturnsIdentity)
 {
     Registry registry;
@@ -151,6 +176,29 @@ TEST(RenderSystemTest, ResolveActiveCameraViewProjectionUsesIdentityTransformWhe
     const Mat4 viewProjection = RenderSystem::ResolveActiveCameraViewProjection(registry, aspect);
 
     const Mat4 expected = camera.ProjectionMatrix(aspect) * Camera::ViewMatrix(Transform{});
+    EXPECT_TRUE(ApproximatelyEqual(viewProjection, expected));
+}
+
+TEST(RenderSystemTest, ResolveActiveCameraViewProjectionFollowsParentTransform)
+{
+    Registry registry;
+
+    const Entity parent = registry.CreateEntity();
+    Transform& parentTransform = registry.AddComponent<Transform>(parent);
+    parentTransform.position = Vec3{ 0.0f, 0.0f, -5.0f };
+
+    const Entity cameraEntity = registry.CreateEntity();
+    Transform& cameraTransform = registry.AddComponent<Transform>(cameraEntity);
+    cameraTransform.parent = parent; // Camera itself has an identity LOCAL transform.
+    Camera& camera = registry.AddComponent<Camera>(cameraEntity);
+
+    const float aspect = 16.0f / 9.0f;
+    const Mat4 viewProjection = RenderSystem::ResolveActiveCameraViewProjection(registry, aspect);
+
+    // The camera's WORLD transform should equal its parent's (identity
+    // local offset composed on top) - i.e. exactly as if the camera itself
+    // sat at the parent's position/rotation directly.
+    const Mat4 expected = camera.ProjectionMatrix(aspect) * Camera::ViewMatrix(parentTransform);
     EXPECT_TRUE(ApproximatelyEqual(viewProjection, expected));
 }
 

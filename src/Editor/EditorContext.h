@@ -25,6 +25,17 @@ namespace gte {
 // encoded, NUL-terminated (see ProjectPanelData.h's PathToUtf8()).
 inline constexpr const char* kProjectAssetDragDropPayloadType = "GTE_PROJECT_ASSET_PATH";
 
+// Shared ImGui drag-and-drop payload type identifier for "an entity row
+// dragged within the Hierarchy panel itself" (see Panels/HierarchyPanel.cpp)
+// - both the attach/detach (reparent) and reorder halves of Hierarchy
+// drag-and-drop use this one payload type; which behavior happens is
+// decided by WHERE within the drop target's rect the entity was released
+// (see HierarchyPanel.cpp's own comment), not by a different payload type
+// per behavior. The payload itself is a single plain gte::Entity value
+// (trivially copyable - see Entity.h), never a pointer/index into anything
+// that could dangle.
+inline constexpr const char* kHierarchyEntityDragDropPayloadType = "GTE_HIERARCHY_ENTITY";
+
 // Plain shared state passed by reference into every Editor panel/dock-layout
 // function (see DockLayout.h, Panels/*.h) - the free-function equivalent of
 // what used to be ImGuiEditorLayer's own private member variables before the

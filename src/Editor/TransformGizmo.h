@@ -49,11 +49,25 @@ void DrawGizmoOperationSwitcher(GizmoOperation& operation);
 // ImGuizmo::SetDrawlist() (called internally) defaults to appending to
 // whichever window's ImDrawList is current.
 //
-// Always LOCAL-space manipulation (see TransformGizmo.cpp for why) -
-// identical to WORLD-space for an unrotated object, which covers every
-// entity today since Transform has no parent-hierarchy field yet (see
-// Transform.h) - LOCAL vs. WORLD only actually differs once something is
-// rotated, and LOCAL is what Unity itself defaults a new scene to.
+// `parentWorld` is `transform`'s OWN parent's fully-resolved world matrix
+// (ECS/TransformHierarchy.h's ComputeWorldMatrix(registry, parentEntity),
+// or Mat4::Identity() - the default - for a root/unparented entity, i.e.
+// every entity before Transform gained a parent-hierarchy field). This
+// engine has no Registry/ECS dependency in this file at all (see the class
+// comment below), so the caller (ScenePanel.cpp, which already has a
+// Registry in hand) resolves it and passes it in rather than this function
+// reaching for it itself. The gizmo manipulates in WORLD space
+// (parentWorld * transform's own local matrix) and converts the result back
+// into `transform`'s own LOCAL fields afterwards (parentWorld's inverse *
+// the manipulated world matrix) - for a root entity (parentWorld ==
+// Identity()) this is exactly the old "manipulate transform.
+// LocalToWorldMatrix() directly" behavior, unchanged.
+//
+// Always LOCAL-space manipulation from ImGuizmo's own point of view
+// (ImGuizmo::LOCAL, i.e. the gizmo's handles are oriented along `transform`'s
+// own rotated axes rather than the world axes) - orthogonal to the
+// world-vs-parent-local conversion above; see TransformGizmo.cpp for why
+// ImGuizmo::LOCAL was chosen.
 //
 // Returns true while the user is actively dragging the gizmo this frame
 // (ImGuizmo::Manipulate()'s own return value) - `transform` has already been
@@ -62,6 +76,6 @@ void DrawGizmoOperationSwitcher(GizmoOperation& operation);
 // something else while a drag is in progress), nothing in this engine reads
 // it yet.
 bool ManipulateTransformGizmo(GizmoOperation operation, const Mat4& view, const Mat4& projection, float rectX,
-    float rectY, float rectWidth, float rectHeight, Transform& transform);
+    float rectY, float rectWidth, float rectHeight, Transform& transform, const Mat4& parentWorld = Mat4::Identity());
 
 } // namespace gte

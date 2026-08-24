@@ -2,6 +2,7 @@
 
 #include "../Math/Quat.h"
 #include "../Math/Vec3.h"
+#include "../Math/Vec4.h"
 
 #include <imgui.h>
 #include <ImGuizmo.h>
@@ -66,7 +67,7 @@ void DrawGizmoOperationSwitcher(GizmoOperation& operation)
 }
 
 bool ManipulateTransformGizmo(GizmoOperation operation, const Mat4& view, const Mat4& projection, float rectX,
-    float rectY, float rectWidth, float rectHeight, Transform& transform)
+    float rectY, float rectWidth, float rectHeight, Transform& transform, const Mat4& parentWorld)
 {
     // Appends to the CURRENT window's ImDrawList (see this function's own
     // header comment) - ScenePanel.cpp calls this while "Scene" is still
@@ -80,9 +81,16 @@ bool ManipulateTransformGizmo(GizmoOperation operation, const Mat4& view, const 
     // plain, mutable float[16], never Mat4::Data() directly (that's
     // `const float*`). Column-major layout is bit-identical to gte::Mat4's
     // own (see Mat4.h), so a straight memcpy is all that's needed - no
-    // transpose, no repacking.
+    // transpose, no repacking. Manipulated in WORLD space (parentWorld *
+    // transform's own local matrix - see this function's own header
+    // comment) rather than `transform`'s local matrix directly, so a
+    // parented entity's gizmo actually lines up with where it's really
+    // drawn in "Scene" (RenderSystem draws it via
+    // ECS/TransformHierarchy.h's ComputeWorldMatrix(), the exact same
+    // parentWorld * local composition).
+    const Mat4 worldMatrix = parentWorld * transform.LocalToWorldMatrix();
     float matrix[16];
-    std::memcpy(matrix, transform.LocalToWorldMatrix().Data(), sizeof(matrix));
+    std::memcpy(matrix, worldMatrix.Data(), sizeof(matrix));
 
     const bool manipulated = ImGuizmo::Manipulate(
         view.Data(), projection.Data(), ToImGuizmoOperation(operation), ImGuizmo::LOCAL, matrix);
@@ -101,7 +109,14 @@ bool ManipulateTransformGizmo(GizmoOperation operation, const Mat4& view, const 
         // manipulated matrix's raw columns and going through
         // Quat::FromMat4() instead sidesteps Euler order entirely - plain
         // linear algebra, exact (up to float error) regardless of either
-        // library's Euler convention:
+        // library's Euler convention.
+        //
+        // `matrix` is the manipulated WORLD matrix - convert back to
+        // `transform`'s own LOCAL space first (parentWorld's inverse *
+        // world), THEN decompose that into position/rotation/scale, so a
+        // parented entity's Transform fields stay correctly relative to
+        // its parent (for a root entity, parentWorld == Identity() and
+        // this is a no-op, exactly the previous behavior):
         //   - translation is column 3, verbatim.
         //   - Transform::LocalToWorldMatrix() builds T * R * S (see
         //     Mat4::TRS()), so columns 0/1/2 are the rotation's own
@@ -109,9 +124,18 @@ bool ManipulateTransformGizmo(GizmoOperation operation, const Mat4& view, const 
         //     scale.x/y/z respectively - each column's own length IS that
         //     axis's scale, and dividing it back out recovers the pure
         //     rotation basis.
-        const Vec3 col0{ matrix[0], matrix[1], matrix[2] };
-        const Vec3 col1{ matrix[4], matrix[5], matrix[6] };
-        const Vec3 col2{ matrix[8], matrix[9], matrix[10] };
+        Mat4 manipulatedWorld;
+        std::memcpy(manipulatedWorld.columns, matrix, sizeof(matrix));
+
+        Mat4 parentInverse;
+        if (!parentWorld.TryInverse(parentInverse)) {
+            parentInverse = Mat4::Identity();
+        }
+        const Mat4 local = parentInverse * manipulatedWorld;
+
+        const Vec3 col0{ local(0, 0), local(1, 0), local(2, 0) };
+        const Vec3 col1{ local(0, 1), local(1, 1), local(2, 1) };
+        const Vec3 col2{ local(0, 2), local(1, 2), local(2, 2) };
 
         const Vec3 scale{ Length(col0), Length(col1), Length(col2) };
 
@@ -120,7 +144,7 @@ bool ManipulateTransformGizmo(GizmoOperation operation, const Mat4& view, const 
         rotationOnly.columns[1] = Vec4(scale.y > kEpsilon ? col1 / scale.y : Vec3::Up(), 0.0f);
         rotationOnly.columns[2] = Vec4(scale.z > kEpsilon ? col2 / scale.z : Vec3::Forward(), 0.0f);
 
-        transform.position = Vec3{ matrix[12], matrix[13], matrix[14] };
+        transform.position = Vec3{ local(0, 3), local(1, 3), local(2, 3) };
         transform.rotation = Quat::FromMat4(rotationOnly);
         transform.scale = scale;
     }
