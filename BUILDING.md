@@ -33,6 +33,24 @@ Prerequisites:
   GPU allocation in the engine (`RenderTexture`/`Buffer`) goes through the
   `vma` target via `VulkanAllocator` (`src/Renderer/Vulkan/VulkanAllocator.h/.cpp`)
   — see Rendering (in `README.md`) and Status (in `README.md`) for details.
+- A curated subset of [benikabocha/saba](https://github.com/benikabocha/saba)
+  (MikuMikuDance `.pmx` model file reading only — see `README.md`, "Asset
+  Pipeline") plus its one real dependency, **glm** (header-only), are
+  likewise fetched automatically on first configure — no submodule, no
+  network access needed on later configures — into `third_party/saba/` and
+  `third_party/glm/` (see `cmake/FetchSaba.cmake`), and gitignored like
+  everything else above. `SABA_RELEASE_TAG`/`GLM_RELEASE_TAG` (both pinned
+  to a specific commit/tag by default, not a moving branch) and
+  `SABA_FORCE_REDOWNLOAD`/`GLM_FORCE_REDOWNLOAD` are tunable via `-D...` the
+  same way every other `Fetch*.cmake` module's cache variables are.
+- **`glslc`** must already be installed and on `PATH` (it is NOT fetched
+  automatically, unlike everything else above — see `cmake/CompileShaders.cmake`'s
+  own header comment for why: it's a build-time-only developer tool, never
+  shipped/needed at runtime). Get it from either the
+  [Vulkan SDK](https://vulkan.lunarg.com/) or a standalone Shaderc install
+  (e.g. `scoop install shaderc` on Windows) — needed to compile every
+  `src/Shaders/*.vert`/`*.frag` (including the Editor's Mesh Asset preview
+  shaders, `Shaders/MeshPreview.vert/.frag`) to SPIR-V at build time.
 - Dear ImGui (core + its SDL3/Vulkan backends) is fetched the same way, into
   `third_party/imgui/` (see `cmake/FetchImGui.cmake`), but **only** when
   `GTE_ENABLE_EDITOR` is `ON` (the default) — a build configured with

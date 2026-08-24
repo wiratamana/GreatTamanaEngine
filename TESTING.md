@@ -34,6 +34,33 @@ safe on any machine/CI runner, GPU or not:
   those functions directly (no `SDL_Init()`/video subsystem needed - see
   AGENTS.md, "CPU Dependency Memory Tracking"). Always built (SDL is used
   regardless of `GTE_ENABLE_EDITOR`).
+- `Assets/AssetTypesTests.cpp` - `Guid` value semantics/generation/string
+  round-trip, `AssetFlags` bit ops, and `AssetTypeFromExtension()`.
+- `Assets/GtaFileTests.cpp` - `WriteGtaFile()`/`ReadGtaHeader()`/
+  `ReadGtaFile()` round-tripping the `*.gta` binary format's 64-byte header +
+  metadata/payload sections.
+- `Assets/AssetDatabaseTests.cpp` - `AssetDatabase`'s directory scan
+  (`RefreshFromDirectory()`), import (`ImportAsset()`/`ImportRawFile()`), and
+  `Guid`/path lookups.
+- `Assets/Ktx2EncoderTests.cpp` / `Assets/Ktx2DecoderTests.cpp` -
+  `EncodeImageBytesToKtx2()`/`EncodeImageFileToKtx2()` and
+  `DecodeKtx2ToRgba8()` round-tripping a decoded source image through an
+  in-memory KTX2 container (via the statically-linked libktx) and back,
+  pixel-exact, plus malformed/empty input rejection - no GPU device
+  involved.
+- `Assets/AssetImporterTests.cpp` - `IsImportableAsKtx2Texture()`/
+  `IsImportableAsMeshAsset()`'s extension gating, and `ImportAssetFile()`'s
+  PNG/JPG -> KTX2 -> `*.gta` and `.pmx` -> Mesh -> `*.gta` conversions vs.
+  their respective plain-copy-fallback behavior on a corrupt source file.
+- `Assets/PmxLoaderTests.cpp` - `LoadPmxModel()`'s extraction of vertex
+  positions/normals/UVs/triangle indices from a MikuMikuDance `.pmx` model
+  file, against a hand-built minimal binary fixture (same "construct the
+  exact binary format by hand" approach as `GtaFileTests.cpp`), plus one
+  machine-gated smoke test against a real, non-vendored MMD model
+  (`GTEST_SKIP()`s everywhere that model isn't present on disk).
+- `Assets/MeshFileTests.cpp` - `EncodeMeshDataToBytes()`/
+  `DecodeMeshDataFromBytes()` round-tripping the `*.gta` `AssetType::Mesh`
+  payload's binary layout, plus malformed/truncated/empty input rejection.
 - `Input/InputStateTests.cpp` - `InputState`'s held/just-pressed/
   just-released/delta semantics, fed with hand-built `gte::Event` values.
 - `Application/EventTranslatorTests.cpp` - the `SDL_Event` -> `gte::Event`
@@ -96,7 +123,11 @@ today, a real `VkSurfaceKHR` to query present support) - a "Tier 2" of
 GPU-backed integration tests, most likely via a headless `VK_EXT_headless_surface`-based
 fixture that `GTEST_SKIP()`s cleanly on a GPU-less machine, is a documented
 follow-up (see the comment in `tests/CMakeLists.txt`) rather than
-implemented yet.
+implemented yet. `src/Editor/AssetPreviewMesh.cpp`/`AssetPreviewTexture.cpp`
+(the Inspector's live texture/3D-mesh previews) fall into this same
+untested-for-now Tier 2 bucket, for the same reason - both need a real
+`VkDevice`/`ImGuiContext` to render anything at all, so they're presently
+only verified manually (see `README.md`, "Editor / Debug UI").
 
 See `README.md` for the overall architecture and `BUILDING.md` for how to
 build the engine itself.

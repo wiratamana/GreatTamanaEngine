@@ -163,33 +163,96 @@ unblock the most follow-on work:
   item below into something you can actually author instead of hardcode.
   "Create 3D Object" is exactly the tool needed to build a non-trivial test
   scene to exercise save/modify/load against once this lands.
-- **A minimal asset pipeline: real mesh loading (OBJ/glTF) + a real,
-  shader-bindable texture from a *.gta.** The IMPORT half of texture
-  handling now exists - dropping a PNG/JPG into "Project" decodes+
-  re-encodes it as KTX2 and wraps it as a `*.gta` (`AssetType::Texture`),
-  tracked by `AssetDatabase` (see `src/Assets/AssetImporter.h`/
-  `AssetDatabase.h`) - and so does a DISPLAY path good enough for the
-  Editor's own "Inspector" panel (`Ktx2Decoder.h`'s `DecodeKtx2ToRgba8()` +
-  the existing `Renderer::CreateTexture2D()` CPU-pixel upload, see
-  `AssetPreviewTexture.cpp`) - but there is still no GAMEPLAY consumption
-  path: nothing yet lets a `MeshRenderer`/material reference a `*.gta`
-  texture by `Guid` and have `RenderSystem` resolve + bind it to an actual
-  descriptor set for a shader to sample from (today's rendering is still
-  unlit vertex-color only - see `Shaders/Triangle.vert/.frag` - there is no
-  texture-sampling pipeline variant or descriptor-set plumbing at all yet).
-  There is also still one hardcoded triangle mesh, five procedurally-
-  generated built-in primitive shapes (`PrimitiveMeshGenerator` - Cube/
-  Sphere/Capsule/Cone/Plane, see `README.md`), and no model loader, material
-  system, or index buffer support (`Mesh`/`GpuResourceFactory` only ever
-  build a plain, non-indexed vertex buffer - see `Mesh.h` - which is why
-  `PrimitiveMeshGenerator` duplicates vertices across every triangle/face
-  rather than sharing them; a real mesh loader would want indexing for both
-  memory and CPU-generation-time reasons). Needs a mesh loader feeding
-  `Renderer::CreateMesh()` (or a future indexed variant of it, likely
-  wrapped as a `*.gta` too - `AssetType::Mesh` already exists for this, see
-  `src/Assets/AssetTypes.h`), and a basic textured pipeline (descriptor set
-  + sampler, following the same `Renderer::ColorFormat()`-style "single
-  source of truth" discipline already used elsewhere).
+- **A minimal asset pipeline: real mesh loading + a real, shader-bindable
+  texture from a *.gta.** The IMPORT half of both texture AND mesh handling
+  now exists - dropping a PNG/JPG into "Project" decodes+re-encodes it as
+  KTX2 and wraps it as a `*.gta` (`AssetType::Texture`), and dropping a
+  MikuMikuDance `.pmx` model parses its vertex geometry and wraps it as a
+  `*.gta` (`AssetType::Mesh`, see `src/Assets/PmxLoader.h`/`MeshFile.h`/
+  `AssetImporter.h`) - both tracked by `AssetDatabase`. Both also now have a
+  DISPLAY path good enough for the Editor's own "Inspector" panel
+  (`Ktx2Decoder.h`'s `DecodeKtx2ToRgba8()` for textures,
+  `AssetPreviewMesh.cpp`'s own small Vulkan pipeline for meshes) - but there
+  is still NO GAMEPLAY consumption path for either: nothing yet lets a
+  `MeshRenderer`/material reference a `*.gta` texture by `Guid` and have it
+  bound to a shader descriptor (today's rendering is still unlit
+  vertex-color only - see `Shaders/Triangle.vert/.frag` - no
+  texture-sampling pipeline variant or descriptor-set plumbing exists), and
+  nothing yet lets a `*.gta` Mesh asset be spawned as an actual
+  `Transform`+`MeshRenderer` entity the way `Game::CreatePrimitiveEntity()`
+  spawns a built-in primitive shape. The blocker for the latter is the same
+  one called out below: `Mesh`/`GpuResourceFactory`/`Renderer::Submit()`/
+  `FrameRecorder` only ever build/draw a plain, NON-INDEXED vertex buffer
+  (see `Mesh.h`) - a real imported mesh (PMX or a future OBJ/glTF) needs
+  indexed drawing for both memory and CPU-generation-time reasons, unlike
+  `PrimitiveMeshGenerator`'s current duplicated-per-triangle vertices.
+  `AssetPreviewMesh` (this session's Inspector 3D viewer) already proves
+  indexed rendering works on this Vulkan backend, but deliberately as its
+  OWN separate, Editor-only pipeline/vertex layout (position+normal, no
+  color/UV) - it does NOT extend the shared `Mesh`/`Pipeline`/`Vertex`
+  types, so none of this plumbing is reusable for gameplay as-is. Needs: (1)
+  real index-buffer support added to the shared `Mesh`/`Renderer::CreateMesh()`/
+  `Renderer::Submit()`/`FrameRecorder` path (`vkCmdDrawIndexed`, mirroring
+  what `AssetPreviewMesh` already does bespoke); (2) a gameplay vertex
+  format that actually carries normal/UV (today's shared `Vertex` is
+  position+color only - see `Vertex.h`'s own comment anticipating this); (3)
+  a basic textured/lit pipeline (descriptor set + sampler, following the
+  same `Renderer::ColorFormat()`-style "single source of truth" discipline
+  used elsewhere) a `MeshRenderer` can actually be drawn with; and (4) a
+  "spawn an entity from an imported `*.gta` Mesh asset" entry point,
+  `Game`-side, mirroring `CreatePrimitiveEntity()`. A future OBJ/glTF loader
+  would produce the exact same `MeshData`/`*.gta` shape `PmxLoader` already
+  does (see `src/Assets/MeshData.h`), so none of this work is PMX-specific.
+- **Real MMD skinning/animation (bones, morphs, `.vmd` motion playback).**
+  `PmxLoader.h`/`MeshFile.h` only extract a `.pmx`'s raw vertex geometry
+  (positions/normals/UVs/indices) today - saba's own `PMXFile` parser
+  (`cmake/FetchSaba.cmake`) already reads the file's bones/morphs/materials/
+  rigid bodies/joints too, but nothing in this engine surfaces or stores any
+  of that yet. Real bone-deformed rendering (a T-posed/A-posed import
+  actually posing/animating) needs saba's `PMXModel`/`MMDNode`/`MMDIkSolver`/
+  `MMDMorph` runtime layer - which itself needs `MMDPhysics` (rigid-body
+  jiggle bones, physics-after-deform), which needs Bullet (NOT fetched
+  today - deliberately out of scope for this session's curated saba subset,
+  see `cmake/FetchSaba.cmake`'s header comment) - plus a `.vmd` motion file
+  loader (`saba::VMDAnimation`/`VMDCameraAnimation`, also not vendored yet)
+  to actually drive it over time. A real skeletal-animation vertex
+  format/shader (bone indices + weights, GPU skinning or CPU pre-skin) would
+  also be needed on the rendering side - today's engine has no skinning
+  concept anywhere. A large, multi-session effort; this session deliberately
+  scoped down to "extract vertices/normals/UVs for a static preview" only.
+- **PMX material/texture import.** `MeshData`/`MeshFile` carry no material
+  data at all - a `.pmx`'s per-face material list (diffuse/specular/
+  ambient color, a diffuse texture reference, optional sphere-map/toon
+  shading - `saba::PMXMaterial`, read by `PMXFile` but discarded by
+  `PmxLoader`) is dropped entirely on import today, so an imported model's
+  actual surface appearance (skin/hair/cloth texturing) can't be
+  reconstructed even once real gameplay rendering exists - only its bare
+  grey-clay shape can (see `AssetPreviewMesh`'s fixed-color shading). Needs
+  a `MaterialData`-shaped extension to `MeshData`/`MeshFile` (per-material
+  index ranges into the index buffer, plus texture references resolved
+  against the `.pmx`'s own sibling texture files/`AssetDatabase`), and ties
+  into the same textured-pipeline work above.
+- **Verify MMD's own coordinate/winding convention once wired into real
+  gameplay rendering.** `PmxLoader.h` is explicit that it performs NO axis/
+  winding remapping - MMD's own authoring convention may not exactly match
+  this engine's left-handed/Y-up/Z-forward one (`src/Math/MathTypes.h`).
+  `AssetPreviewMesh`'s Inspector viewer has sidestepped ever needing to know
+  by disabling backface culling entirely (`VK_CULL_MODE_NONE` - see its own
+  comment) and using a fixed, non-interactive camera, so a genuinely wrong
+  winding/axis convention could still be silently masked today. This needs
+  actually checking (and, if needed, correcting - most likely a one-time
+  fix-up inside `PmxLoader.cpp` itself, not per-consumer) before any
+  gameplay-facing rendering (culling enabled, arbitrary camera angles) is
+  built on top of it.
+- **Smarter fallback than a hardcoded up-vector for missing normals.**
+  `AssetPreviewMesh::EnsureMeshUploaded()` substitutes `Vec3::Up()` for
+  every vertex when a decoded `MeshData`'s `normals` array doesn't match its
+  `positions` count (defensive - saba's own PMX parser always emits one
+  normal per vertex today, so this doesn't trigger in practice yet, but a
+  future mesh source might genuinely lack normals). Computing real face-
+  weighted vertex normals from the index buffer's own winding would be a
+  more correct fallback than a single fixed direction, whenever that
+  actually comes up.
 - **Transform parenting / hierarchy.** `Transform`
   (`src/ECS/Components/Transform.h`) is flat today - no parent/child
   relationship, which is why ImGuizmo's `LOCAL` space is currently identical

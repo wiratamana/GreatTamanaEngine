@@ -256,6 +256,36 @@ registry that tracks every one of them:
   `VK_FORMAT_R8G8B8A8_UNORM` container this engine's own encoder actually
   produces today, by design — a future Basis-Universal-supercompressed
   `*.gta` would need a matching transcode path added here (see `TODO.md`).
+- **MikuMikuDance (`.pmx`) model import → Mesh `*.gta`** (`Assets/PmxLoader.h/.cpp`,
+  `Assets/MeshData.h`, `Assets/MeshFile.h/.cpp`, `Assets/AssetImporter.h/.cpp`) —
+  the mesh equivalent of the PNG/JPG → KTX2 pipeline above. A dropped `.pmx`
+  file (`IsImportableAsMeshAsset()`) is parsed via `PmxLoader::LoadPmxModel()`,
+  which wraps `saba::ReadPMXFile()` — a **curated subset** of
+  [benikabocha/saba](https://github.com/benikabocha/saba) (its raw
+  `Base/File`/`Base/UnicodeUtil`/`Model/MMD/{PMXFile,MMDFileString,
+  SjisToUnicode}` file-reading layer only — deliberately NOT saba's
+  Bullet-dependent skinning/physics runtime or its GLFW/ImGui viewer, and NOT
+  its own spdlog dependency, patched out post-fetch — see
+  `cmake/FetchSaba.cmake`'s header comment for the full reasoning), fetched
+  the same "no submodule, download+stage on first configure" way as SDL3/
+  Vulkan/VMA/ImGui, alongside its one real dependency, **glm** (header-only,
+  used only inside `PmxLoader.cpp` — no `saba::`/`glm::` type ever crosses
+  `PmxLoader.h`'s own public API, which only ever exposes this engine's plain
+  `Vec3`/`Vec2`/`MeshData`). `LoadPmxModel()` extracts per-vertex
+  positions/normals/UVs plus triangle indices into a plain `MeshData`
+  (`src/Assets/MeshData.h` — the shared shape any future mesh importer,
+  e.g. OBJ/glTF, would also produce), which `MeshFile.h`'s
+  `EncodeMeshDataToBytes()` serializes into a simple, engine-private flat
+  binary layout (magic + counts + tightly-packed position/normal/uv/index
+  arrays — the mesh equivalent of `Ktx2Encoder`'s KTX2 container) and wraps
+  as a `*.gta` (`AssetType::Mesh`) via `AssetDatabase::ImportAsset()`, same as
+  the texture pipeline. A file that merely *looks* like a `.pmx` by extension
+  but fails to actually parse degrades gracefully to a plain copy, same
+  convention as a corrupt image. No bones/morphs/materials/rigid bodies/
+  joints are extracted or stored yet (saba's own `PMXFile` parser reads them,
+  but `PmxLoader`/`MeshFile` deliberately don't surface them) — this is
+  vertex-geometry import only; see `TODO.md` for real skinning/animation and
+  material/texture import as explicit follow-ups.
 
 ### Editor / Debug UI
 
@@ -438,6 +468,38 @@ CMake adds:
   both panes' rects/splitter position, a transient status message) is a
   thin class wrapper around them, never unit-tested directly, same division
   of labor as the "Memory" panel.
+- **Inspector asset preview (texture + 3D mesh):** selecting a `*.gta` asset
+  in "Project" makes "Inspector" show that file's real GTA-format metadata
+  (GUID/`AssetType`/flags/payload size) in a scrollable region on top, a
+  draggable splitter, then a Unity-style live preview pinned to the BOTTOM
+  (`EditorContext::inspectorPreviewHeight`, shared by both preview kinds —
+  see `Panels/InspectorPanel.cpp`'s `BuildAssetInspector()`). A
+  `AssetType::Texture` asset (or any plain, not-yet-imported image file)
+  gets `AssetPreviewTexture`'s contain-fit static image, decoded/uploaded
+  once and cached until the selected path or its last-write-time changes
+  (`src/Editor/AssetPreviewTexture.h/.cpp`). A `AssetType::Mesh` asset (the
+  result of importing a `.pmx` — see "Asset Pipeline" above) instead gets
+  `AssetPreviewMesh`'s LIVE, auto-rotating 3D view
+  (`src/Editor/AssetPreviewMesh.h/.cpp`) — re-rendered every call (the spin
+  is driven directly off `ImGui::GetTime()`, no per-frame state to track),
+  auto-framed to the mesh's own bounding sphere, lit with a small,
+  self-contained shader pair (`Shaders/MeshPreview.vert/.frag` — a
+  position+normal vertex layout and fixed-direction lambert shading,
+  deliberately separate from the engine's shared position+color `Vertex`/
+  `Pipeline`/`Renderer::CreateMesh()`/`Submit()`, which have no normal
+  attribute or index-buffer support at all). `AssetPreviewMesh` builds its
+  own `VkPipeline`/`VkPipelineLayout` directly and records its own indexed
+  draw call via a `Renderer::RenderOffscreen()` `recordExtra` callback — the
+  same "an external Vulkan-based rendering backend owned by the Editor
+  module" pattern Dear ImGui's own backend already uses (see AGENTS.md,
+  "Editor Module Structure") — rather than extending the shared pipeline.
+  Only the uploaded GPU vertex/index buffers and bounding sphere are
+  cached per selected asset; the `VkPipeline` itself is built once and
+  reused across every mesh asset selected afterwards. Neither preview kind
+  is treated as "should have worked but failed" for a `*.gta` wrapping
+  something else (a future `Scene`/`Material`/... asset) — it just falls
+  through to plain file metadata, exactly like a non-image/non-mesh
+  extension always has.
 - **`NullEditorLayer`** (`GTE_ENABLE_EDITOR=OFF`) — every method is a no-op;
   `GameViewTarget()`/`SceneViewTarget()` always return `nullptr`, meaning
   "render straight to the swapchain, fullscreen". This is what makes
@@ -669,6 +731,27 @@ pieces:
   genuinely Tier 1 - no GPU device/ImGui/SDL involved) and verified
   building/passing its full test suite with `GTE_ENABLE_EDITOR` both `ON`
   and `OFF`.
+- **MikuMikuDance (`.pmx`) model import**, the same "gate on file type"
+  pipeline extended to a second asset kind: dropping a `.pmx` file now
+  parses it via a curated, from-scratch-fetched subset of
+  [benikabocha/saba](https://github.com/benikabocha/saba) (`PmxLoader.h/.cpp`,
+  `cmake/FetchSaba.cmake` — no Bullet/skinning-runtime/viewer vendored, and
+  its own spdlog dependency patched out), extracts per-vertex positions/
+  normals/UVs plus triangle indices into a plain `MeshData`
+  (`src/Assets/MeshData.h`), and wraps it as a `*.gta` (`AssetType::Mesh`)
+  via a new `MeshFile.h/.cpp` binary format — the mesh equivalent of
+  `Ktx2Encoder`. The Editor's "Inspector" panel shows a LIVE, auto-rotating
+  3D preview for a selected Mesh asset (`AssetPreviewMesh.h/.cpp`, its own
+  small position+normal Vulkan pipeline built directly in the Editor layer —
+  `Shaders/MeshPreview.vert/.frag`), pinned to the bottom exactly like the
+  existing texture viewer, above a metadata panel showing the mesh's real
+  vertex/triangle counts. Verified end-to-end against a real, large MMD
+  model (~30k vertices/~37k triangles) in addition to hand-built binary
+  fixtures. Vertex-geometry import only for now — no bones/morphs/
+  materials/textures/rigid bodies, no real skinning or VMD motion playback,
+  and no GAMEPLAY consumption path yet (only the Editor's own Inspector
+  preview renders it; nothing yet spawns a `MeshRenderer` entity from an
+  imported Mesh asset) - see `TODO.md`.
 
 ## Roadmap
 
