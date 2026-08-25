@@ -182,6 +182,8 @@ add_library(gte_core STATIC
     src/Animation/SkeletonPose.cpp
     src/Animation/IkSolver.h
     src/Animation/IkSolver.cpp
+    src/Animation/AppendBoneSolver.h
+    src/Animation/AppendBoneSolver.cpp
     src/Animation/MotionSampler.h
     src/Animation/MotionSampler.cpp
     src/Animation/VertexSkinning.h

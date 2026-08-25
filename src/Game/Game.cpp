@@ -1,5 +1,6 @@
 #include "Game.h"
 
+#include "../Animation/AppendBoneSolver.h"
 #include "../Animation/IkSolver.h"
 #include "../Animation/MotionSampler.h"
 #include "../Animation/SkeletonPose.h"
@@ -562,6 +563,17 @@ void Game::UpdateSkeletalAnimators(double deltaSeconds)
         // (so the final skinning matrices reflect the solved thigh/knee
         // rotations too).
         SolveIkChains(skinData.skeleton, pose);
+        // Many higher-quality rigs (this engine's own real-world test
+        // model included) skin the mesh to a SEPARATE "D-bone" chain that
+        // inherits ("appends"/"grants") its rotation from the main FK/IK
+        // bone rather than being skinned to that main bone directly (see
+        // Animation/AppendBoneSolver.h's own file comment for the full
+        // "why") - without this pass, an otherwise-correctly-IK-solved leg
+        // still renders completely frozen, since the vertices are weighted
+        // to bones this solve never touched. Must run AFTER SolveIkChains()
+        // (so an append source that's also an IK link carries its
+        // IK-solved rotation) and BEFORE ComputeSkinningMatrices().
+        ApplyAppendInheritance(skinData.skeleton, pose);
         const std::vector<Mat4> skinningMatrices = ComputeSkinningMatrices(skinData.skeleton, pose);
 
         std::vector<Vec3> skinnedPositions;

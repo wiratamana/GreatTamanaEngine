@@ -276,6 +276,7 @@ set(GTE_TEST_SOURCES
     Game/RenderSystemTests.cpp
     Animation/SkeletonPoseTests.cpp
     Animation/IkSolverTests.cpp
+    Animation/AppendBoneSolverTests.cpp
     Animation/MotionSamplerTests.cpp
     Animation/VertexSkinningTests.cpp
 )
