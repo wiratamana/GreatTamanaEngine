@@ -1,0 +1,123 @@
+#pragma once
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+
+namespace gte::Profiling {
+
+// Fixed capacity of the per-frame CPU scope aggregation table (see
+// FrameProfiler::RecordCpuScope()) - a handful of named systems today
+// (Application::PollEvents, Game::Update, AnimationSystem::Update,
+// RenderSystem::CollectRenderables/Draw, Renderer::RenderOffscreen x2,
+// IEditorLayer::BuildUI, Renderer::Present - see PROFILER_STRATEGY_v2.md,
+// Phase 1), nowhere near the kind of count that would ever need a growable
+// container. A frame with more than this many DISTINCT scope names simply
+// drops the overflow rather than allocating - see
+// FrameProfiler::RecordCpuScope()'s own comment.
+inline constexpr std::size_t kMaxCpuScopesPerFrame = 64;
+
+// How many frames of history the ring buffer (FrameProfiler) keeps -
+// enough for a frame-time graph (PROFILER_STRATEGY_v2.md, Phase 2) to show
+// a few seconds' worth at a typical frame rate, without unbounded growth.
+// Storage for this is allocated exactly once, as part of FrameProfiler's
+// own static-duration singleton state - never per-frame (see
+// PROFILER_STRATEGY_v2.md, Step 3a's "no heap allocation in the per-frame
+// hot path" rule).
+inline constexpr std::size_t kMaxFrameHistory = 300;
+
+// One CPU-side named scope's aggregated cost FOR THE CURRENT FRAME ONLY -
+// deliberately a FLAT (not a nested-tree) model: every ScopeTimer
+// construction/destruction pair sharing the same `name`, no matter how
+// deeply nested inside another scope, contributes to the SAME entry,
+// summed. See PROFILER_STRATEGY_v2.md's Phase 0 "hierarchy vs. flat list"
+// design decision for the full reasoning, and its own documented
+// limitation: a scope that (directly or indirectly) calls itself within
+// the same frame would have its self-time double-counted under this
+// model - a known, accepted v1 limitation (no current call site
+// recurses).
+struct CpuScopeSample {
+    // A string literal (or otherwise static-storage-duration) pointer -
+    // never owned/copied, and never gated behind GTE_ENABLE_EDITOR (unlike
+    // a GPU resource's cosmetic debug name - see AGENTS.md, "GPU Resource
+    // Memory Tracking") because a scope name is the PRIMARY payload here,
+    // needed in every build, including a future headless benchmark run
+    // with no Editor compiled in at all. See ScopeTimer.h.
+    const char* name = nullptr;
+    double totalMilliseconds = 0.0;
+    std::uint32_t callCount = 0;
+};
+
+// Whether a per-frame GPU-side measurement (a named pass's timing, or its
+// draw-call/triangle count) actually has a real value this frame. Never
+// collapse "didn't run" or "not supported on this device" into a bare
+// numeric 0 - see PROFILER_STRATEGY_v2.md, Step 3a's tri-state rule and
+// its own "no data this frame" constraint (Step 2.3). Not wired to
+// anything real yet as of Phase 0/1 (Phase 4/5 are what actually call
+// FrameProfiler::SetGpuPassSample()/SetMemorySnapshot() with a real
+// value) - the storage/API exists now so those later phases have
+// somewhere correct to write into without redesigning this data model.
+enum class GpuSampleStatus : std::uint8_t {
+    Absent,      // This pass simply didn't run this frame (e.g. a hidden Editor panel) - not measured, not zero.
+    Present,     // A real measurement exists - read the sibling value(s).
+    Unsupported, // The device/build can't produce this measurement at all (e.g. no GPU timestamp support).
+};
+
+// A small, FIXED, named enumeration of GPU passes (deliberately NOT an
+// arbitrarily-nestable tree - see PROFILER_STRATEGY_v2.md, Phase 4) -
+// today's engine has exactly this many distinct offscreen/swapchain
+// recording passes per frame (see Application::Run()).
+enum class GpuPass : std::uint8_t {
+    GameView = 0,
+    SceneView = 1,
+    Present = 2,
+};
+inline constexpr std::size_t kGpuPassCount = 3;
+
+// One named GPU pass's measurement for the current frame - see GpuPass/
+// GpuSampleStatus above. `milliseconds`/`drawCallCount`/`triangleCount`
+// are only meaningful when `status == GpuSampleStatus::Present`.
+struct GpuPassSample {
+    GpuSampleStatus status = GpuSampleStatus::Absent;
+    double milliseconds = 0.0;
+    std::uint32_t drawCallCount = 0;
+    std::uint32_t triangleCount = 0;
+};
+
+// A plain, Vulkan-free copy of GpuMemoryTracker::Totals's shape
+// (src/Renderer/Memory/GpuMemoryTracker.h) - deliberately NOT that type
+// itself, so this always-compiled, Editor/Renderer-independent module
+// (see PROFILER_STRATEGY_v2.md, Phase 0's own "no Vulkan, no ImGui, no
+// Editor dependency at all" goal) never needs to include a single Vulkan
+// header. Phase 5's actual per-frame sampling step is the one place that
+// converts between the two, once it exists.
+struct MemorySnapshot {
+    GpuSampleStatus status = GpuSampleStatus::Absent;
+    std::uint64_t totalBytes = 0;
+    std::uint64_t bufferBytes = 0;
+    std::uint64_t textureBytes = 0;
+    std::uint64_t gpuOnlyBytes = 0;
+    std::uint64_t cpuOnlyBytes = 0;
+    std::uint64_t sharedBytes = 0;
+    std::uint64_t bufferCount = 0;
+    std::uint64_t textureCount = 0;
+};
+
+// One whole frame's worth of profiling data - exactly what FrameProfiler's
+// ring buffer stores one of, per frame. Every field is plain/POD and
+// fixed-size (std::array, never a growable container) - see
+// PROFILER_STRATEGY_v2.md, Step 3a's "no heap allocation in the per-frame
+// hot path" rule.
+struct FrameSample {
+    std::uint64_t frameIndex = 0;
+    double cpuFrameMilliseconds = 0.0;
+
+    std::array<CpuScopeSample, kMaxCpuScopesPerFrame> cpuScopes{};
+    std::size_t cpuScopeCount = 0;
+
+    std::array<GpuPassSample, kGpuPassCount> gpuPasses{};
+
+    MemorySnapshot memory{};
+};
+
+} // namespace gte::Profiling

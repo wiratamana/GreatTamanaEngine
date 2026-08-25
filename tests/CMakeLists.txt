@@ -221,6 +221,26 @@
 #                                            plus malformed/truncated/empty
 #                                            input rejection - no GPU device
 #                                            involved (src/Assets/RigFile.h).
+#   Profiling/FrameProfilerTests.cpp        - FrameProfiler's BeginFrame()/
+#                                            EndFrame()/RecordCpuScope()/
+#                                            SetGpuPassSample()/
+#                                            SetMemorySnapshot() ring-buffer
+#                                            and flat-aggregation bookkeeping
+#                                            (src/Profiling/FrameProfiler.h) -
+#                                            fed entirely with hand-called
+#                                            timings, no live clock/Vulkan/
+#                                            SDL involved. Always built
+#                                            (this module has no
+#                                            GTE_ENABLE_EDITOR dependency at
+#                                            all - see AGENTS.md, "Profiling").
+#   Profiling/ScopeTimerTests.cpp           - ScopeTimer/GTE_PROFILE_SCOPE's
+#                                            actual RAII behavior (records a
+#                                            real positive duration, nests
+#                                            correctly, and skips entirely
+#                                            when capture is disabled) -
+#                                            src/Profiling/ScopeTimer.h.
+#                                            Always built, same reason as
+#                                            above.
 #
 # Note that the test BINARY still dynamically depends on SDL3.dll at process
 # load time regardless of the above (gte_core's Window.cpp references SDL
@@ -259,6 +279,8 @@ set(GTE_TEST_SOURCES
     Assets/RigFileTests.cpp
     Memory/GpuMemoryTrackerTests.cpp
     Memory/SdlMemoryTrackerTests.cpp
+    Profiling/FrameProfilerTests.cpp
+    Profiling/ScopeTimerTests.cpp
     Input/InputStateTests.cpp
     Application/EventTranslatorTests.cpp
     Renderer/VertexTests.cpp

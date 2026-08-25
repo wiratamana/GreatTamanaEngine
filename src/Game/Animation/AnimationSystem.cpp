@@ -4,6 +4,7 @@
 #include "../../Animation/VertexSkinning.h"
 #include "../../ECS/Components/MeshAssetSource.h"
 #include "../../ECS/Components/SkeletalAnimator.h"
+#include "../../Profiling/ScopeTimer.h"
 #include "../../Renderer/Mesh.h"
 #include "../../Renderer/MeshVertex.h"
 #include "../Instantiation/MeshInstantiationSystem.h"
@@ -53,6 +54,8 @@ bool AnimationSystem::Play(Registry& registry, Entity targetEntity, const std::s
 
 void AnimationSystem::Update(Registry& registry, double deltaSeconds)
 {
+    GTE_PROFILE_SCOPE("AnimationSystem::Update");
+
     ComponentStorage<SkeletalAnimator>& animators = registry.Storage<SkeletalAnimator>();
 
     for (std::size_t i = 0; i < animators.Size(); ++i) {

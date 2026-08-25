@@ -3,6 +3,8 @@
 #include "EventTranslator.h"
 
 #include "../Memory/SdlMemoryTracker.h"
+#include "../Profiling/FrameProfiler.h"
+#include "../Profiling/ScopeTimer.h"
 
 #include <SDL3/SDL.h>
 
@@ -76,61 +78,71 @@ int Application::Run()
     InputState inputState;
 
     while (running) {
+        // Brackets the WHOLE frame for the Profiling module (src/Profiling/)
+        // - see PROFILER_STRATEGY_v2.md, Phase 1. A true no-op (frame count
+        // doesn't advance) whenever GTE_ENABLE_PROFILER is off or the
+        // runtime capture-enabled flag is false - see
+        // Profiling::FrameProfiler.
+        Profiling::FrameProfiler::Instance().BeginFrame();
+
         // Clear last frame's transient "just pressed/released" flags and
         // per-frame mouse/wheel deltas before this frame's events arrive.
         inputState.BeginFrame();
 
-        SDL_Event sdlEvent;
-        while (SDL_PollEvent(&sdlEvent)) {
-            // Editor gets first look at every raw event (its own SDL3
-            // backend tracks mouse/keyboard for ImGui widgets) - a no-op in
-            // a release build (NullEditorLayer).
-            m_editorLayer->ProcessEvent(sdlEvent);
+        {
+            GTE_PROFILE_SCOPE("Application::PollEvents");
+            SDL_Event sdlEvent;
+            while (SDL_PollEvent(&sdlEvent)) {
+                // Editor gets first look at every raw event (its own SDL3
+                // backend tracks mouse/keyboard for ImGui widgets) - a no-op in
+                // a release build (NullEditorLayer).
+                m_editorLayer->ProcessEvent(sdlEvent);
 
-            const std::optional<Event> event = EventTranslator::Translate(sdlEvent, mainWindowId);
-            if (!event.has_value()) {
-                continue;
-            }
+                const std::optional<Event> event = EventTranslator::Translate(sdlEvent, mainWindowId);
+                if (!event.has_value()) {
+                    continue;
+                }
 
-            if (event->type == EventType::Quit) {
-                running = false;
-            } else if (event->type == EventType::WindowResized) {
-                const auto& resized = std::get<WindowResizedEventData>(event->data);
-                m_windowWidth = resized.width;
-                m_windowHeight = resized.height;
-                m_renderer.OnResize(resized.width, resized.height);
-                // Keeps the Editor's Game-view RenderTexture tracking the
-                // window's size (no-op in a release build) - see
-                // ImGuiEditorLayer::OnWindowResized.
-                m_editorLayer->OnWindowResized(resized.width, resized.height);
-            }
+                if (event->type == EventType::Quit) {
+                    running = false;
+                } else if (event->type == EventType::WindowResized) {
+                    const auto& resized = std::get<WindowResizedEventData>(event->data);
+                    m_windowWidth = resized.width;
+                    m_windowHeight = resized.height;
+                    m_renderer.OnResize(resized.width, resized.height);
+                    // Keeps the Editor's Game-view RenderTexture tracking the
+                    // window's size (no-op in a release build) - see
+                    // ImGuiEditorLayer::OnWindowResized.
+                    m_editorLayer->OnWindowResized(resized.width, resized.height);
+                }
 
-            // Withhold mouse/keyboard events the Editor UI itself wants this
-            // frame (e.g. the cursor is over an ImGui panel, a slider is
-            // being dragged, a text field has keyboard focus, ...) from
-            // ever reaching gameplay - otherwise clicking/typing into the
-            // Editor's own panels would ALSO register as gameplay input
-            // underneath them (the classic ImGui-in-a-game-engine
-            // "click-through" problem). WantsCaptureMouse()/
-            // WantsCaptureKeyboard() are always false for NullEditorLayer,
-            // so a release build forwards every event to Game exactly as
-            // before this check existed. Quit/WindowResized above are
-            // handled unconditionally regardless of this - they aren't
-            // input Game reacts to via InputState/OnEvent() in this sense,
-            // and Renderer/the Editor's own resize handling must always see
-            // them either way.
-            const bool isMouseEvent = event->type == EventType::MouseMoved
-                || event->type == EventType::MouseButtonDown
-                || event->type == EventType::MouseButtonUp
-                || event->type == EventType::MouseWheel;
-            const bool isKeyboardEvent = event->type == EventType::KeyDown || event->type == EventType::KeyUp;
+                // Withhold mouse/keyboard events the Editor UI itself wants this
+                // frame (e.g. the cursor is over an ImGui panel, a slider is
+                // being dragged, a text field has keyboard focus, ...) from
+                // ever reaching gameplay - otherwise clicking/typing into the
+                // Editor's own panels would ALSO register as gameplay input
+                // underneath them (the classic ImGui-in-a-game-engine
+                // "click-through" problem). WantsCaptureMouse()/
+                // WantsCaptureKeyboard() are always false for NullEditorLayer,
+                // so a release build forwards every event to Game exactly as
+                // before this check existed. Quit/WindowResized above are
+                // handled unconditionally regardless of this - they aren't
+                // input Game reacts to via InputState/OnEvent() in this sense,
+                // and Renderer/the Editor's own resize handling must always see
+                // them either way.
+                const bool isMouseEvent = event->type == EventType::MouseMoved
+                    || event->type == EventType::MouseButtonDown
+                    || event->type == EventType::MouseButtonUp
+                    || event->type == EventType::MouseWheel;
+                const bool isKeyboardEvent = event->type == EventType::KeyDown || event->type == EventType::KeyUp;
 
-            const bool consumedByEditorUI = (isMouseEvent && m_editorLayer->WantsCaptureMouse())
-                || (isKeyboardEvent && m_editorLayer->WantsCaptureKeyboard());
+                const bool consumedByEditorUI = (isMouseEvent && m_editorLayer->WantsCaptureMouse())
+                    || (isKeyboardEvent && m_editorLayer->WantsCaptureKeyboard());
 
-            if (!consumedByEditorUI) {
-                inputState.Apply(*event);
-                m_game.OnEvent(*event);
+                if (!consumedByEditorUI) {
+                    inputState.Apply(*event);
+                    m_game.OnEvent(*event);
+                }
             }
         }
 
@@ -144,7 +156,10 @@ int Application::Run()
         // chance to queue this frame's - see Renderer::BeginFrame().
         m_renderer.BeginFrame();
 
-        m_game.Update(deltaSeconds, inputState);
+        {
+            GTE_PROFILE_SCOPE("Game::Update");
+            m_game.Update(deltaSeconds, inputState);
+        }
 
         // Ask the Editor where Game's frame(s) should actually land this
         // frame: an off-screen RenderTexture per visible panel ("Game"
@@ -170,6 +185,7 @@ int Application::Run()
         if (gameTarget != nullptr) {
             const VkExtent2D extent = gameTarget->Extent();
             m_game.Render(m_renderer, AspectRatioOf(static_cast<int>(extent.width), static_cast<int>(extent.height)));
+            GTE_PROFILE_SCOPE("Renderer::RenderOffscreen(GameView)");
             m_renderer.RenderOffscreen(*gameTarget);
         }
         if (sceneTarget != nullptr) {
@@ -183,6 +199,7 @@ int Application::Run()
             // viewProjectionOverride parameter.
             const Mat4 sceneViewProjection = m_editorLayer->SceneViewProjection(aspect);
             m_game.Render(m_renderer, aspect, &sceneViewProjection);
+            GTE_PROFILE_SCOPE("Renderer::RenderOffscreen(SceneView)");
             m_renderer.RenderOffscreen(*sceneTarget);
         }
         if (gameTarget == nullptr && sceneTarget == nullptr) {
@@ -204,7 +221,10 @@ int Application::Run()
         // Game::CreatePrimitiveEntity() - see IEditorLayer::BuildUI()) and
         // Renderer itself (Memory - see Renderer::GetMemoryTotals()/
         // GetMemoryResources()).
-        m_editorLayer->BuildUI(m_game, m_renderer);
+        {
+            GTE_PROFILE_SCOPE("IEditorLayer::BuildUI");
+            m_editorLayer->BuildUI(m_game, m_renderer);
+        }
 
         // File > Exit (or any other future programmatic "close" UI action)
         // ends the loop exactly like a Quit event/closing the OS window.
@@ -218,7 +238,10 @@ int Application::Run()
         // effectively a no-op (NullEditorLayer::Render does nothing) and
         // this just presents whatever Game rendered straight into the
         // swapchain moments ago.
-        m_renderer.Present([this](VkCommandBuffer cmd) { m_editorLayer->Render(cmd); });
+        {
+            GTE_PROFILE_SCOPE("Renderer::Present");
+            m_renderer.Present([this](VkCommandBuffer cmd) { m_editorLayer->Render(cmd); });
+        }
 
         // Update/present any panel the user has dragged outside the main OS
         // window (Dear ImGui multi-viewport/"platform windows" - a no-op in
@@ -228,6 +251,8 @@ int Application::Run()
         // there is no ordering requirement against the main window's own
         // present - see IEditorLayer::RenderPlatformWindows().
         m_editorLayer->RenderPlatformWindows();
+
+        Profiling::FrameProfiler::Instance().EndFrame();
     }
 
     return 0;

@@ -5,6 +5,7 @@
 #include "ECS/Components/Camera.h"
 #include "ECS/Components/MeshRenderer.h"
 #include "ECS/Components/Transform.h"
+#include "Profiling/ScopeTimer.h"
 
 namespace gte {
 
@@ -17,6 +18,8 @@ void Game::OnEvent(const Event& /*event*/)
 
 void Game::Update(double deltaSeconds, const InputState& /*input*/)
 {
+    GTE_PROFILE_SCOPE("Game::Update");
+
     // Game/simulation logic goes here. Poll `input` for continuous state,
     // e.g. `if (input.IsKeyDown(KeyCode::W)) { ... }` for held-key movement.
 

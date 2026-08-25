@@ -157,6 +157,103 @@ dependency:
   `Install()`'s process-global state persists across every test in the same
   binary.
 
+## Profiling
+
+`src/Profiling/` (`ProfilingTypes.h`, `FrameProfiler.h/.cpp`, `ScopeTimer.h`)
+is the engine's CPU scope-timer instrumentation module - always compiled
+(no `GTE_ENABLE_EDITOR` dependency at all, same tier as `src/Animation/`/
+`src/Assets/`), gated by its OWN separate `GTE_ENABLE_PROFILER` CMake option
+(`ON` by default - see `CMakeLists.txt`). See `PROFILER_STRATEGY_v2.md` for
+the full multi-phase plan this module is Phase 0/1 of. Follow these rules
+whenever touching profiling instrumentation, or adding a new call site:
+
+- **`GTE_PROFILE_SCOPE("Name")` (`src/Profiling/ScopeTimer.h`) is the
+  ONLY way to add a new CPU profiling call site - never call
+  `FrameProfiler::RecordCpuScope()` directly, and never construct a
+  `Profiling::ScopeTimer` by hand outside that macro.** It expands to a
+  single local RAII object whose destructor fires at the natural end of
+  the enclosing block - the same "acquire in constructor, release in
+  destructor" discipline this file already mandates for every other
+  resource (see "Coding Guidelines", RAII). `name` MUST be a string
+  literal (or otherwise static-storage-duration) `const char*` - it is
+  compared against every other scope's name via pointer/`strcmp()`
+  equality every time (see `FrameProfiler::RecordCpuScope()`), so a
+  temporary/stack-lifetime string would be a use-after-free risk for zero
+  benefit. Never gate a scope name behind `GTE_ENABLE_EDITOR` - unlike a
+  GPU resource's cosmetic debug name (see "GPU Resource Memory Tracking"
+  above), a scope name is the PRIMARY payload here, needed in every build
+  including a future headless benchmark run with no Editor compiled in at
+  all.
+- **The CPU scope model is deliberately FLAT, not a nested tree.** Every
+  `GTE_PROFILE_SCOPE(name)` call anywhere in a frame - no matter how deeply
+  nested inside another scope - contributes to the SAME name-keyed entry
+  in that frame's `FrameSample::cpuScopes` (see `ProfilingTypes.h`),
+  summed. This is a deliberate simplification (see
+  `PROFILER_STRATEGY_v2.md`, Phase 0's own "hierarchy vs. flat list"
+  design decision), not a limitation to work around - don't add parent/
+  child tracking to `FrameProfiler` without first re-reading that
+  document's own reasoning. Its one accepted, documented consequence: a
+  scope that (directly or indirectly) calls itself within the same frame
+  would have its self-time double-counted - fine today since no
+  instrumented call site recurses, but don't be surprised by it if one
+  ever does.
+- **`SDL_GetPerformanceCounter()`/`SDL_GetPerformanceFrequency()` is the
+  ONE clock this whole module uses** (`ScopeTimer.h`, `FrameProfiler.cpp`)
+  - never `std::chrono`, never a platform-specific API. SDL is already the
+  one platform-abstraction layer this engine depends on for everything
+  else timing-adjacent (`Application::Run()`'s own frame-delta
+  computation), and is always linked regardless of `GTE_ENABLE_EDITOR` -
+  see `PROFILER_STRATEGY_v2.md`, Step 3a.
+- **Nothing in the per-frame hot path (a `ScopeTimer` construction/
+  destruction, `FrameProfiler::RecordCpuScope()`, the ring buffer itself)
+  may allocate on the heap.** `FrameSample::cpuScopes` and
+  `FrameProfiler`'s own history ring buffer are both fixed-size
+  `std::array`s, populated via plain POD writes - never
+  `std::vector::push_back` past a reserved capacity, never a
+  `std::string`. An allocator call has real, variable latency that would
+  otherwise get baked into the very durations being measured, which a
+  profiler must never itself exhibit - see `PROFILER_STRATEGY_v2.md`,
+  Step 3a.
+- **The on/off switch is genuinely two layers, and both matter.**
+  `GTE_ENABLE_PROFILER=OFF` (a CMake option, `PUBLIC`-defined exactly like
+  `GTE_ENABLE_EDITOR`/`GTE_ENABLE_PROJECT_PANEL` - see `CMakeLists.txt`)
+  compiles `ScopeTimer`'s constructor/destructor down to a true empty
+  no-op with zero clock reads at all - the "genuinely zero cost" release
+  branch. `FrameProfiler::SetCaptureEnabled(false)` (a runtime flag,
+  independent of the compile-time switch) instead skips the clock
+  read/ring-buffer write on every already-compiled-in `ScopeTimer` - the
+  switch a future Editor "Profiler" panel/benchmark-mode CLI flag flips at
+  runtime without needing a second build. Never conflate the two, and
+  never remove either layer to simplify - see `PROFILER_STRATEGY_v2.md`,
+  Phase 0b.
+- **`FrameProfiler` (the data model + ring buffer) always compiles in,
+  regardless of `GTE_ENABLE_PROFILER`** - only `ScopeTimer`'s body is
+  gated. This is the exact same "the class stays available/testable even
+  when its production call site is gated off" precedent `SdlMemoryTracker`
+  already established (see "CPU Dependency Memory Tracking" above) -
+  don't wrap `FrameProfiler.h/.cpp` themselves in `#if GTE_ENABLE_PROFILER`.
+- **`FrameProfiler::Instance()` is a process-wide singleton, same as
+  `SdlMemoryTracker`'s static state** - not thread-safe (this engine is
+  explicitly single-threaded throughout, see `GpuMemoryTracker`'s own
+  class comment), and no thread-local/job-system-aware infrastructure
+  should be added speculatively (see `PROFILER_STRATEGY_v2.md`'s own scope
+  refusals). A test that touches `FrameProfiler::Instance()` must call
+  `ResetForTesting()` before (and after) its own assertions, mirroring the
+  "never assume a pristine baseline, since process-global state persists
+  across every test in the same binary" convention already established
+  for `SdlMemoryTracker`/`ImGuiMemoryTracker` - see
+  `tests/Profiling/FrameProfilerTests.cpp`/`ScopeTimerTests.cpp`.
+- **A GPU-side or memory measurement that doesn't have a real value this
+  frame is tagged `GpuSampleStatus::Absent`/`Unsupported`, never defaulted
+  to a bare numeric `0`.** (`ProfilingTypes.h`'s `GpuSampleStatus`,
+  `GpuPassSample`, `MemorySnapshot`.) A hidden Editor panel's pass not
+  running this frame must never look, on a future graph/table, like it ran
+  and cost nothing - see `PROFILER_STRATEGY_v2.md`, Step 2.3/3a. This
+  tri-state is currently unused by any real producer (Phase 0/1 only wire
+  up CPU scope timers) - a future Phase 3/4/5 addition must set a real
+  status through `FrameProfiler::SetGpuPassSample()`/`SetMemorySnapshot()`
+  rather than inventing a second "is this real" convention.
+
 ## Render Target Format Matching
 
 Vulkan pipelines are built against an exact color format

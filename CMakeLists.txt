@@ -49,6 +49,25 @@ option(GTE_ENABLE_PROJECT_PANEL "Build the Editor's Project panel (Project-folde
 # as GTE_ENABLE_EDITOR above.
 option(GTE_BUILD_TESTS "Build the GreatTamanaEngineTests unit test suite (GoogleTest)" ON)
 
+# Master switch for the always-compiled Profiling module (src/Profiling/) -
+# CPU scope timers (ScopeTimer/FrameProfiler) instrumenting a handful of
+# existing per-frame call sites (Application::Run(), Game::Update(),
+# AnimationSystem::Update(), RenderSystem::CollectRenderables()/Draw(),
+# Renderer::RenderOffscreen()/Present(), IEditorLayer::BuildUI() - see
+# PROFILER_STRATEGY_v2.md, Phase 1). Turning this OFF compiles every
+# GTE_PROFILE_SCOPE() call site (src/Profiling/ScopeTimer.h) down to a
+# literal no-op with zero clock reads - the "genuinely zero cost, not just
+# small" branch a true minimal-size release build can opt into (see
+# AGENTS.md, "Profiling"). The underlying FrameProfiler data model/ring
+# buffer (src/Profiling/FrameProfiler.h/.cpp) stays compiled in either way
+# (same "class always compiles, only its production call sites are gated"
+# precedent as SdlMemoryTracker - see AGENTS.md, "CPU Dependency Memory
+# Tracking") so it stays available/testable in a GTE_ENABLE_PROFILER=OFF
+# configuration too. A SEPARATE runtime capture-enabled flag
+# (FrameProfiler::SetCaptureEnabled()) exists for turning capture on/off at
+# runtime without a second build - see PROFILER_STRATEGY_v2.md, Phase 0b.
+option(GTE_ENABLE_PROFILER "Compile in CPU scope-timer profiling instrumentation" ON)
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(FetchSDL3)
 include(FetchVulkan)
@@ -304,6 +323,10 @@ add_library(gte_core STATIC
     src/Game/Game.h
     src/Game/RenderSystem.cpp
     src/Game/RenderSystem.h
+    src/Profiling/ProfilingTypes.h
+    src/Profiling/FrameProfiler.h
+    src/Profiling/FrameProfiler.cpp
+    src/Profiling/ScopeTimer.h
 )
 
 # Exactly one of these two branches gets compiled in, depending on
@@ -393,6 +416,14 @@ target_compile_definitions(gte_core PUBLIC GTE_ENABLE_EDITOR=$<BOOL:${GTE_ENABLE
 # header-level guard must be seen identically by gte_core itself and by
 # GreatTamanaEngineTests (see tests/Editor/ProjectPanelDataTests.cpp).
 target_compile_definitions(gte_core PUBLIC GTE_ENABLE_PROJECT_PANEL=$<BOOL:${GTE_ENABLE_PROJECT_PANEL}>)
+
+# Same idea again - exposes GTE_ENABLE_PROFILER to C++ code as an actual
+# 1/0 preprocessor macro, needed by src/Profiling/ScopeTimer.h's own
+# `#if GTE_ENABLE_PROFILER` guard (see AGENTS.md, "Profiling"). PUBLIC for
+# the same reason as the two definitions above: GreatTamanaEngineTests
+# (tests/Profiling/FrameProfilerTests.cpp/ScopeTimerTests.cpp) must see the
+# exact same macro value gte_core itself was built with.
+target_compile_definitions(gte_core PUBLIC GTE_ENABLE_PROFILER=$<BOOL:${GTE_ENABLE_PROFILER}>)
 
 # PUBLIC (not PRIVATE) for the same reason as the compile definition above:
 # any consumer of gte_core (GreatTamanaEngine's main.cpp, and every test in

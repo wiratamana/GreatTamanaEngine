@@ -1,12 +1,15 @@
 #include "RenderSystem.h"
 
 #include "ECS/TransformHierarchy.h"
+#include "Profiling/ScopeTimer.h"
 #include "Renderer/Renderer.h"
 
 namespace gte {
 
 std::vector<DrawCommand> RenderSystem::CollectRenderables(Registry& registry)
 {
+    GTE_PROFILE_SCOPE("RenderSystem::CollectRenderables");
+
     std::vector<DrawCommand> commands;
 
     ComponentStorage<MeshRenderer>& renderers = registry.Storage<MeshRenderer>();
@@ -70,6 +73,8 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, float aspectWidt
 
 void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& viewProjection)
 {
+    GTE_PROFILE_SCOPE("RenderSystem::Draw");
+
     for (const DrawCommand& command : CollectRenderables(registry)) {
         const Mesh* mesh = m_meshes.TryGet(command.mesh);
         const Pipeline* pipeline = m_pipelines.TryGet(command.pipeline);
