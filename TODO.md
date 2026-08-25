@@ -14,6 +14,25 @@ that haven't been started yet at all.
 
 ## Editor / Debug UI
 
+- **Bone Viewer: live posed-skeleton overlay (not just bind pose).** The new
+  "Bone Viewer" debug window (`src/Editor/BoneViewerWindow.h/.cpp`, opened via
+  the Inspector's "Model" section - see `README.md`, "Editor / Debug UI")
+  always shows a model's ORIGINAL BIND POSE, deliberately independent of
+  `Game`'s own animation-runtime state - it reads straight from the source
+  `*.gta` file, the same way `AssetPreviewMesh` does. It does NOT currently
+  reflect wherever a live `SkeletalAnimator` (see `ECS/Components/
+  SkeletalAnimator.h`) might actually be posing the SAME entity's GPU mesh
+  into right now, which would be genuinely useful for the exact debugging
+  scenario this window exists for (comparing an animation's expected bone
+  motion against where a bone actually ends up). Doing this would mean
+  either reading back `Game`'s per-frame `ComputeSkinningMatrices()` result
+  for the target entity (see `Animation/SkeletonPose.h`) or re-running the
+  same pose evaluation independently inside the window itself against
+  whichever `SkeletalAnimator`/clip is currently playing - deliberately
+  deferred rather than folded into the initial bind-pose-only version, since
+  the static view already covers the immediate "does this model's bone
+  hierarchy/naming look right" debugging need.
+
 - **Per-entity Hierarchy context menu (Delete/Rename/Duplicate).**
   "Hierarchy" now has a right-click "Create 3D Object" menu
   (`Game::CreatePrimitiveEntity()`, see `README.md`) via

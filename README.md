@@ -693,6 +693,43 @@ CMake adds:
   back to header-only fields + a "Failed to decode motion data" notice if
   the payload is corrupt/truncated despite a valid `*.gta` header, same
   degrade-gracefully convention as the texture/mesh cases.
+- **Bone Viewer (debug tool for imported MMD skeletons):** the Inspector's
+  "Model" section — shown for any entity carrying a `MeshAssetSource`
+  component, i.e. the ROOT of a model spawned via
+  `Game::CreateMeshEntityFromGtaFile()` (see "Asset Pipeline" above) — has an
+  "Open Bone Viewer" button that opens a Unity-"Avatar configuration"-style
+  floating debug window (`src/Editor/BoneViewerWindow.h/.cpp`), independent of
+  the main docked layout (it can be dragged clean outside the main OS window
+  too, like any other panel, since `ImGuiConfigFlags_ViewportsEnable` is
+  already on). It reads the model's source `*.gta` straight off disk (the
+  same `GtaFile.h`/`MeshFile.h`/`RigFile.h` path `AssetPreviewMesh` already
+  uses — no dependency on `Game`'s own animation-runtime caches) and shows,
+  side by side: a LEFT-hand bone hierarchy TREE, walked "starting from root"
+  down through every bone's children (mirroring "Hierarchy"'s own
+  `GetChildren()`-based entity tree), and a RIGHT-hand live 3D viewport
+  rendering the model's original BIND POSE (its own small Vulkan pipeline,
+  reusing `AssetPreviewMesh`'s `MeshPreview.vert/.frag` shader pair) through a
+  user-orbitable camera (left-drag rotate, wheel dolly, middle-drag pan,
+  "Reset View" auto-frames to the mesh's bounding sphere). Every skeleton
+  bone is drawn as a small gizmo dot plus a line to its parent, projected
+  through the exact view/projection matrix used to render the mesh so it
+  always lines up pixel-perfectly; a bone's name is shown on hover, for any
+  bone matching a live search filter (which also prunes the tree to just the
+  matching branches, Unity-Hierarchy-search-style), or permanently via a
+  "Show All Names" toggle. Selection is shared between the tree and the
+  viewport — clicking a tree row (or a bone's dot directly in the 3D view)
+  highlights it in both, and double-clicking a tree row re-centers the
+  camera on that bone — exactly the tool needed to eyeball whether an
+  imported model's bone hierarchy/naming actually looks right, and to figure
+  out why an imported model + animation pairing doesn't line up (e.g. a
+  renamed/missing bone `Animation/MotionSampler.h`'s
+  `ResolveBoneTracksToSkeleton()` never finds a match for). Always shows the
+  BIND pose, not whatever a live `SkeletalAnimator` might currently be
+  posing the same entity into — a live posed-skeleton overlay is a natural,
+  separate follow-up (see `TODO.md`). Gated behind `GTE_ENABLE_PROJECT_PANEL`
+  like `AssetPreviewMesh` itself, purely because it reuses that same shader
+  pair (only staged under that switch) — nothing about the feature itself is
+  Project-panel-specific.
 - **`NullEditorLayer`** (`GTE_ENABLE_EDITOR=OFF`) — every method is a no-op;
   `GameViewTarget()`/`SceneViewTarget()` always return `nullptr`, meaning
   "render straight to the swapchain, fullscreen". This is what makes
@@ -1163,6 +1200,22 @@ pieces:
   `TODO.md`). Verified against the real Furina model plus a real
   690-bone-keyframe `.vmd` motion, and the full test suite (377 tests)
   still passes.
+
+- **A new "Bone Viewer" debug window helps diagnose imported-model/animation
+  bone mismatches.** The Inspector's "Model" section (shown for any entity
+  spawned via `Game::CreateMeshEntityFromGtaFile()`) now has an "Open Bone
+  Viewer" button that opens a Unity-"Avatar configuration"-style floating
+  window (`src/Editor/BoneViewerWindow.h/.cpp`, gated behind
+  `GTE_ENABLE_PROJECT_PANEL` like `AssetPreviewMesh`) showing the model's
+  BIND-POSE mesh in a user-orbitable 3D viewport next to a real, indented
+  bone hierarchy tree ("starting from root", mirroring "Hierarchy"'s own
+  entity tree) — every bone is drawn as a gizmo dot + a line to its parent,
+  with its name shown on hover/search-match, and selection is shared between
+  the tree and the viewport (click either one; double-click a tree row to
+  re-center the camera on it). Reads straight from the source `*.gta` file
+  (the same path `AssetPreviewMesh` already uses), independent of `Game`'s
+  own animation-runtime caches. See `README.md`'s own "Editor / Debug UI"
+  section above for the full rundown.
 
 ## Roadmap
 
