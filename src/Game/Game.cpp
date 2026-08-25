@@ -1,9 +1,7 @@
 #include "Game.h"
 
-#include "../Animation/AppendBoneSolver.h"
-#include "../Animation/IkSolver.h"
+#include "../Animation/AnimationPoseEvaluator.h"
 #include "../Animation/MotionSampler.h"
-#include "../Animation/SkeletonPose.h"
 #include "../Animation/VertexSkinning.h"
 #include "../Assets/AssetDatabase.h"
 #include "../Assets/AssetTypes.h"
@@ -552,29 +550,15 @@ void Game::UpdateSkeletalAnimators(double deltaSeconds)
             }
         }
 
-        std::vector<BoneLocalOffset> pose = SampleAnimationPose(binding, animator.frame);
-        // A VMD dance motion keyframes an invisible IK TARGET bone at the
-        // foot (MMD's own 左足ＩＫ/右足ＩＫ), never the thigh/knee bones
-        // directly - without this pass those bones would stay at bind pose
-        // for the whole clip (see Animation/IkSolver.h's own file comment
-        // for the full "why" and how this CCD solve works). Must run AFTER
-        // SampleAnimationPose() (so `pose` holds the IK bone's own animated
-        // position to solve toward) and BEFORE ComputeSkinningMatrices()
-        // (so the final skinning matrices reflect the solved thigh/knee
-        // rotations too).
-        SolveIkChains(skinData.skeleton, pose);
-        // Many higher-quality rigs (this engine's own real-world test
-        // model included) skin the mesh to a SEPARATE "D-bone" chain that
-        // inherits ("appends"/"grants") its rotation from the main FK/IK
-        // bone rather than being skinned to that main bone directly (see
-        // Animation/AppendBoneSolver.h's own file comment for the full
-        // "why") - without this pass, an otherwise-correctly-IK-solved leg
-        // still renders completely frozen, since the vertices are weighted
-        // to bones this solve never touched. Must run AFTER SolveIkChains()
-        // (so an append source that's also an IK link carries its
-        // IK-solved rotation) and BEFORE ComputeSkinningMatrices().
-        ApplyAppendInheritance(skinData.skeleton, pose);
-        const std::vector<Mat4> skinningMatrices = ComputeSkinningMatrices(skinData.skeleton, pose);
+        // Sample -> IK-solve -> append/grant-inherit -> forward-kinematics,
+        // in that exact, correctness-critical fixed order - see
+        // Animation/AnimationPoseEvaluator.h's own file comment for the
+        // full "why" behind each step's position in this sequence. Pulled
+        // out into one shared, tested function so this ordering has
+        // exactly one place to live instead of being reproduced by hand at
+        // every call site (e.g. a future Bone Viewer live-pose overlay -
+        // see TODO.md).
+        const std::vector<Mat4> skinningMatrices = EvaluateAnimatedSkinningPose(skinData.skeleton, binding, animator.frame);
 
         std::vector<Vec3> skinnedPositions;
         std::vector<Vec3> skinnedNormals;

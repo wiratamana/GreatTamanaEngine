@@ -178,6 +178,8 @@ add_library(gte_core STATIC
     src/ECS/Components/MeshAssetSource.h
     src/ECS/Components/SkeletalAnimator.h
     src/Animation/BoneLocalOffset.h
+    src/Animation/BoneChainResolver.h
+    src/Animation/BonePoseMath.h
     src/Animation/SkeletonPose.h
     src/Animation/SkeletonPose.cpp
     src/Animation/IkSolver.h
@@ -186,6 +188,8 @@ add_library(gte_core STATIC
     src/Animation/AppendBoneSolver.cpp
     src/Animation/MotionSampler.h
     src/Animation/MotionSampler.cpp
+    src/Animation/AnimationPoseEvaluator.h
+    src/Animation/AnimationPoseEvaluator.cpp
     src/Animation/VertexSkinning.h
     src/Animation/VertexSkinning.cpp
     src/Assets/AssetTypes.h

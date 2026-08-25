@@ -1264,6 +1264,34 @@ pieces:
   morph blending, physics simulation, and true bezier interpolation (see
   `TODO.md`).
 
+- **Skeletal animation pose resolution refactored into shared, reusable
+  primitives — `Game.cpp`/`Game.h` got measurably smaller as a result.**
+  `SkeletonPose.cpp`'s whole-skeleton world-matrix walk, `AppendBoneSolver.cpp`'s
+  append/grant-source walk, and `IkSolver.cpp`'s per-iteration single-bone
+  world-matrix query each used to hand-roll their own cycle-guarded
+  ancestor-chain recursion (in three different styles) and their own copy of
+  the bind-relative local-transform formula. Both are now pulled out into
+  two new, generic, Tier-1-tested files: `Animation/BoneChainResolver.h`
+  (`ResolveBoneChain()` — a memoized, whole-skeleton walk; `ResolveSingleBoneChain()`
+  — a deliberately non-memoized, single-bone-at-a-time walk, since `IkSolver`'s
+  CCD loop mutates the very pose being queried mid-solve) and
+  `Animation/BonePoseMath.h`'s `ComputeBoneLocalMatrix()`. A new
+  `Animation/AnimationPoseEvaluator.h`'s `EvaluateAnimatedSkinningPose()`
+  also now owns the correctness-critical `SampleAnimationPose()` ->
+  `SolveIkChains()` -> `ApplyAppendInheritance()` -> `ComputeSkinningMatrices()`
+  ordering as one tested function, rather than that sequence being
+  reproduced by hand inside `Game::UpdateSkeletalAnimators()` (previously
+  the only call site) — `Game.cpp` now drops 3 direct `Animation/` includes
+  and collapses that whole sequence into a single call, with nothing left
+  to reorder incorrectly at a future second call site (e.g. the Bone
+  Viewer's planned live-pose overlay — see `TODO.md`). Purely an internal
+  refactor — every pre-existing `SkeletonPose`/`IkSolver`/`AppendBoneSolver`
+  test passes unchanged, proving behavior wasn't altered — plus new
+  dedicated tests for the extracted primitives and a genuine
+  ordering-regression test for the new evaluator (see `TESTING.md`). Full
+  test suite (400 tests, 1 pre-existing machine-gated smoke test skipped)
+  passes.
+
 - **A new "Bone Viewer" debug window helps diagnose imported-model/animation
   bone mismatches.** The Inspector's "Model" section (shown for any entity
   spawned via `Game::CreateMeshEntityFromGtaFile()`) now has an "Open Bone

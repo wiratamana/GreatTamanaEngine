@@ -1,5 +1,7 @@
 #include "IkSolver.h"
 
+#include "BoneChainResolver.h"
+#include "BonePoseMath.h"
 #include "../Math/Mat4.h"
 #include "../Math/Quat.h"
 
@@ -24,60 +26,27 @@ constexpr float kFallbackMaxAnglePerStep = 0.0698131701f; // 4 degrees, in radia
 constexpr float kMinDirectionLengthSq = 1e-10f;
 constexpr float kMinAngleRadians = 1e-5f;
 
-// Duplicates SkeletonPose.cpp's own bind-relative local-transform formula
-// (see SkeletonPose.h's file comment for the derivation) rather than
-// sharing it, on purpose: SkeletonPose::ComputeSkinningMatrices() computes
-// EVERY bone's world matrix ONCE per call via one memoized pass (O(bone
-// count) total) - exactly right for "evaluate the whole skeleton's final
-// pose", but wasteful for what THIS file needs, which is a handful of
-// single-bone world-position/rotation queries PER CCD ITERATION, where the
-// bones actually queried keep changing (any link bone's own rotation may
-// have just been updated by the very iteration in progress). Recomputing
-// one bone's world matrix from scratch (walking its own ancestor chain,
-// with the same cycle guard) is O(chain depth) - trivial for the shallow
-// (2-4 bone) chains a real leg/arm IK ever has, and always reflects
-// whatever `pose` holds RIGHT NOW, including any change this same solve
-// already made to an earlier link/iteration.
-Mat4 ComputeBoneWorldMatrixRecursive(const SkeletonData& skeleton, const std::vector<BoneLocalOffset>& pose,
-    std::int32_t boneIndex, std::vector<std::uint8_t>& visiting)
+// A single bone's CURRENT world matrix, re-derived fresh from `pose` every
+// call by walking only that bone's own ancestor chain
+// (BoneChainResolver.h's ResolveSingleBoneChain()) - deliberately NOT
+// memoized across calls, unlike SkeletonPose.cpp's whole-skeleton pass:
+// `pose` is mutated by THIS solver's own CCD loop between successive
+// queries (rotating an earlier link bone changes every later query's answer
+// for the effector/next link), so caching a bone's world matrix across
+// calls would return a stale answer - see SolveIkChains()'s own call site
+// comments below for exactly when a fresh query is needed. Shares the exact
+// same bind-relative local-transform formula SkeletonPose.cpp uses
+// (BonePoseMath.h's ComputeBoneLocalMatrix()), so the two can never
+// silently drift out of sync with each other.
+Mat4 ComputeBoneWorldMatrix(
+    const SkeletonData& skeleton, const std::vector<BoneLocalOffset>& pose, std::int32_t boneIndex)
 {
-    const std::size_t count = skeleton.bones.size();
-    if (boneIndex < 0 || static_cast<std::size_t>(boneIndex) >= count) {
-        return Mat4::Identity();
-    }
-
-    const std::size_t index = static_cast<std::size_t>(boneIndex);
-    if (visiting[index] != 0) {
-        // Cyclic parent chain (malformed data) - break the cycle instead of
-        // recursing forever, same convention as SkeletonPose.cpp.
-        return Mat4::Identity();
-    }
-    visiting[index] = 1;
-
-    const Bone& bone = skeleton.bones[index];
-    const BoneLocalOffset offset = index < pose.size() ? pose[index] : BoneLocalOffset{};
-
-    Vec3 parentBindPosition = Vec3::Zero();
-    Mat4 parentWorld = Mat4::Identity();
-    if (bone.parentBoneIndex >= 0 && static_cast<std::size_t>(bone.parentBoneIndex) < count
-        && static_cast<std::size_t>(bone.parentBoneIndex) != index) {
-        const std::size_t parentIndex = static_cast<std::size_t>(bone.parentBoneIndex);
-        parentBindPosition = skeleton.bones[parentIndex].position;
-        parentWorld = ComputeBoneWorldMatrixRecursive(skeleton, pose, bone.parentBoneIndex, visiting);
-    }
-
-    const Vec3 localBindOffset = bone.position - parentBindPosition;
-    const Mat4 local = Mat4::TRS(localBindOffset + offset.translation, offset.rotation, Vec3::One());
-    const Mat4 world = parentWorld * local;
-
-    visiting[index] = 0; // Allow this bone to be visited again from a sibling/later query.
-    return world;
-}
-
-Mat4 ComputeBoneWorldMatrix(const SkeletonData& skeleton, const std::vector<BoneLocalOffset>& pose, std::int32_t boneIndex)
-{
-    std::vector<std::uint8_t> visiting(skeleton.bones.size(), 0);
-    return ComputeBoneWorldMatrixRecursive(skeleton, pose, boneIndex, visiting);
+    return ResolveSingleBoneChain<Mat4>(skeleton, boneIndex, Mat4::Identity(),
+        [&](std::size_t index) -> std::int32_t { return skeleton.bones[index].parentBoneIndex; },
+        [&](std::size_t index, const Mat4& parentWorld) -> Mat4 {
+            const BoneLocalOffset offset = index < pose.size() ? pose[index] : BoneLocalOffset{};
+            return parentWorld * ComputeBoneLocalMatrix(skeleton, index, offset);
+        });
 }
 
 // Clamps `rotation` (a TOTAL rotation from bind pose - see

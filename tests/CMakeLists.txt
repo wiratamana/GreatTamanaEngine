@@ -274,10 +274,13 @@ set(GTE_TEST_SOURCES
     ECS/CameraTests.cpp
     ECS/TransformHierarchyTests.cpp
     Game/RenderSystemTests.cpp
+    Animation/BoneChainResolverTests.cpp
+    Animation/BonePoseMathTests.cpp
     Animation/SkeletonPoseTests.cpp
     Animation/IkSolverTests.cpp
     Animation/AppendBoneSolverTests.cpp
     Animation/MotionSamplerTests.cpp
+    Animation/AnimationPoseEvaluatorTests.cpp
     Animation/VertexSkinningTests.cpp
 )
 

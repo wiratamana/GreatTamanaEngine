@@ -106,6 +106,23 @@ safe on any machine/CI runner, GPU or not:
   camera's own full world transform - so a parented `Camera` follows its
   parent too - `Mat4::Identity()` if none exists) - both
   need nothing but a `Registry`, no live Renderer/GPU device at all.
+- `Animation/BoneChainResolverTests.cpp` - the shared, generic "walk a
+  per-bone single-index chain, cycle-safe" primitive
+  (`src/Animation/BoneChainResolver.h`) `SkeletonPose`/`AppendBoneSolver`/
+  `IkSolver` all build on: `ResolveBoneChain()`'s whole-skeleton memoized
+  walk (parent-chain accumulation, each node resolved exactly once, a
+  cyclic chain terminating with a root-value fallback instead of hanging)
+  and `ResolveSingleBoneChain()`'s per-call, deliberately non-memoized
+  single-bone query (reflecting an external state change between two
+  successive calls, out-of-range/cyclic input degrading gracefully) - pure
+  generic logic, with no bone-specific behavior of its own.
+- `Animation/BonePoseMathTests.cpp` - `ComputeBoneLocalMatrix()`'s
+  (`src/Animation/BonePoseMath.h`) shared bind-relative local-transform
+  formula, the one both `SkeletonPose.cpp` and `IkSolver.cpp` build their
+  own world-matrix walk on top of: a root bone's local matrix is its own
+  bind position plus its offset, a child bone's is relative to its
+  parent's bind position, and a self-referencing/out-of-range parent index
+  is treated as "no parent" rather than misbehaving.
 - `Animation/SkeletonPoseTests.cpp` - `ComputeSkinningMatrices()`'s
   (`src/Animation/SkeletonPose.h`) forward-kinematics bone-pose evaluation:
   all-identity offsets produce identity matrices, a rotated parent correctly
@@ -142,6 +159,17 @@ safe on any machine/CI runner, GPU or not:
   animation file and the model file don't necessarily match" problem this
   module exists to handle), and keyframe interpolation/clamping at the
   track's edges.
+- `Animation/AnimationPoseEvaluatorTests.cpp` - `EvaluateAnimatedSkinningPose()`
+  (`src/Animation/AnimationPoseEvaluator.h`), the one function that composes
+  `SampleAnimationPose()` -> `SolveIkChains()` -> `ApplyAppendInheritance()` ->
+  `ComputeSkinningMatrices()` in that exact, correctness-critical fixed order
+  (previously reproduced by hand inside `Game::UpdateSkeletalAnimators()`,
+  `src/Game/Game.cpp`, the only call site): matches calling the four steps
+  manually in the documented order, a genuine ORDERING regression test (an
+  appended "D-bone" must inherit its source's IK-SOLVED rotation, not its
+  raw bind-pose one - this fails if a future edit ever reorders IK solving
+  and append inheritance), and a skeleton with neither IK nor append bones
+  still produces plain forward kinematics.
 - `Animation/VertexSkinningTests.cpp` - `SkinVertices()`
   (`src/Animation/VertexSkinning.h`)'s CPU per-vertex bone blending:
   no-skin-weights-at-all leaves vertices at bind pose, BDEF1/BDEF2-shaped
