@@ -156,10 +156,13 @@ int Application::Run()
         // chance to queue this frame's - see Renderer::BeginFrame().
         m_renderer.BeginFrame();
 
-        {
-            GTE_PROFILE_SCOPE("Game::Update");
-            m_game.Update(deltaSeconds, inputState);
-        }
+        // Game::Update() itself is already wrapped in
+        // GTE_PROFILE_SCOPE("Game::Update") (see src/Game/Game.cpp) - not
+        // wrapped again here too, since the flat, name-keyed CPU scope
+        // aggregation model (see AGENTS.md, "Profiling") would otherwise
+        // double-count identically-named nested scopes rather than
+        // measuring the same call twice for no reason.
+        m_game.Update(deltaSeconds, inputState);
 
         // Ask the Editor where Game's frame(s) should actually land this
         // frame: an off-screen RenderTexture per visible panel ("Game"
