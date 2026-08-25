@@ -327,6 +327,8 @@ add_library(gte_core STATIC
     src/Profiling/FrameProfiler.h
     src/Profiling/FrameProfiler.cpp
     src/Profiling/ScopeTimer.h
+    src/Profiling/FrameGraphData.h
+    src/Profiling/FrameGraphData.cpp
 )
 
 # Exactly one of these two branches gets compiled in, depending on

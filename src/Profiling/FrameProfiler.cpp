@@ -147,4 +147,19 @@ void FrameProfiler::ResetForTesting() noexcept
     m_historyCount = 0;
 }
 
+void FrameProfiler::OverrideLastFrameCpuMillisecondsForTesting(double milliseconds) noexcept
+{
+    if (m_historyCount == 0) {
+        return;
+    }
+
+    // m_historyHead already points PAST the most recently written slot (see
+    // EndFrame()'s own m_historyHead = (m_historyHead + 1) % kMaxFrameHistory
+    // advance) - so the most recent entry sits one slot behind it, wrapping,
+    // exactly mirroring HistoryAt(m_historyCount - 1)'s own physical-index
+    // math without needing a non-const HistoryAt() overload.
+    const std::size_t mostRecentPhysicalIndex = (m_historyHead + kMaxFrameHistory - 1) % kMaxFrameHistory;
+    m_history[mostRecentPhysicalIndex].cpuFrameMilliseconds = milliseconds;
+}
+
 } // namespace gte::Profiling

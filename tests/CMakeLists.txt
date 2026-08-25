@@ -241,6 +241,27 @@
 #                                            src/Profiling/ScopeTimer.h.
 #                                            Always built, same reason as
 #                                            above.
+#   Profiling/FrameGraphDataTests.cpp       - Phase 2's pure "FrameProfiler
+#                                            history -> plottable points"
+#                                            reshape (BuildFrameGraphPoints()/
+#                                            ComputeCpuMillisecondsRange()/
+#                                            ComputeGpuMillisecondsRange() -
+#                                            src/Profiling/FrameGraphData.h) -
+#                                            exact frame-index ordering
+#                                            (including ring-buffer
+#                                            wraparound), all three GPU
+#                                            passes/tri-states round-tripping
+#                                            without cross-contamination, an
+#                                            Absent/Unsupported sample never
+#                                            being mistaken for real data
+#                                            even when it carries a stale
+#                                            non-zero value, an out-of-range
+#                                            GpuPass reporting no data rather
+#                                            than reading out of bounds, and
+#                                            an in-progress (not yet
+#                                            EndFrame()'d) frame never being
+#                                            observed. Always built, same
+#                                            reason as the two entries above.
 #
 # Note that the test BINARY still dynamically depends on SDL3.dll at process
 # load time regardless of the above (gte_core's Window.cpp references SDL
@@ -281,6 +302,7 @@ set(GTE_TEST_SOURCES
     Memory/SdlMemoryTrackerTests.cpp
     Profiling/FrameProfilerTests.cpp
     Profiling/ScopeTimerTests.cpp
+    Profiling/FrameGraphDataTests.cpp
     Input/InputStateTests.cpp
     Application/EventTranslatorTests.cpp
     Renderer/VertexTests.cpp

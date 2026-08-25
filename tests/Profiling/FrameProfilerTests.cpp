@@ -224,5 +224,31 @@ TEST_F(FrameProfilerTest, LastCompletedFrameOnEmptyHistoryIsSafeDefault)
     EXPECT_EQ(frame.cpuScopeCount, 0u);
 }
 
+TEST_F(FrameProfilerTest, OverrideLastFrameCpuMillisecondsForTestingReplacesOnlyTheMostRecentEntry)
+{
+    FrameProfiler& profiler = FrameProfiler::Instance();
+    profiler.BeginFrame();
+    profiler.EndFrame();
+    const double firstFrameOriginalCpuMilliseconds = profiler.HistoryAt(0).cpuFrameMilliseconds;
+
+    profiler.BeginFrame();
+    profiler.EndFrame();
+
+    profiler.OverrideLastFrameCpuMillisecondsForTesting(12.5);
+
+    ASSERT_EQ(profiler.HistoryCount(), 2u);
+    // The FIRST frame's real, measured value must be completely untouched -
+    // only the most recently completed entry is ever overridden.
+    EXPECT_DOUBLE_EQ(profiler.HistoryAt(0).cpuFrameMilliseconds, firstFrameOriginalCpuMilliseconds);
+    EXPECT_DOUBLE_EQ(profiler.HistoryAt(1).cpuFrameMilliseconds, 12.5);
+}
+
+TEST_F(FrameProfilerTest, OverrideLastFrameCpuMillisecondsForTestingOnEmptyHistoryIsNoOp)
+{
+    FrameProfiler& profiler = FrameProfiler::Instance();
+    profiler.OverrideLastFrameCpuMillisecondsForTesting(99.0); // No frame completed yet - must not crash.
+    EXPECT_EQ(profiler.HistoryCount(), 0u);
+}
+
 } // namespace
 } // namespace gte::Profiling

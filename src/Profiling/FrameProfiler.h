@@ -122,6 +122,23 @@ public:
     // FrameProfiler's history surviving across test cases.
     void ResetForTesting() noexcept;
 
+    // Test-only: overwrites the MOST RECENTLY COMPLETED history entry's
+    // cpuFrameMilliseconds with an exact, caller-chosen value - a no-op if
+    // history is empty. EndFrame() always computes this field from real
+    // elapsed wall-clock time (see FrameProfiler.cpp's ElapsedMilliseconds())
+    // with no way for a caller to inject a literal value beforehand, which
+    // makes writing a genuinely deterministic, bit-exact regression test
+    // against a KNOWN cpu time impossible without this hook (see
+    // tests/Profiling/FrameGraphDataTests.cpp, which needs exactly that to
+    // test ComputeCpuMillisecondsRange()'s min/max scan against known
+    // values rather than real, inherently-jittery timing). Only ever
+    // touches the already-pushed history entry - never the in-progress
+    // frame, never any other retained entry, and never any of
+    // BeginFrame()/EndFrame()/RecordCpuScope()/SetGpuPassSample()/
+    // SetMemorySnapshot()'s own real-time behavior - so every other test
+    // already written against this class remains completely unaffected.
+    void OverrideLastFrameCpuMillisecondsForTesting(double milliseconds) noexcept;
+
 private:
     FrameProfiler() = default;
 

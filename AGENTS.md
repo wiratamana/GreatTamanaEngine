@@ -242,7 +242,16 @@ whenever touching profiling instrumentation, or adding a new call site:
   "never assume a pristine baseline, since process-global state persists
   across every test in the same binary" convention already established
   for `SdlMemoryTracker`/`ImGuiMemoryTracker` - see
-  `tests/Profiling/FrameProfilerTests.cpp`/`ScopeTimerTests.cpp`.
+  `tests/Profiling/FrameProfilerTests.cpp`/`ScopeTimerTests.cpp`. A test
+  needing a fully deterministic, KNOWN `cpuFrameMilliseconds` value (rather
+  than whatever real `SDL_GetPerformanceCounter()`-measured duration a
+  `BeginFrame()`/`EndFrame()` pair happens to produce) should use
+  `FrameProfiler::OverrideLastFrameCpuMillisecondsForTesting()` - another
+  narrowly-scoped, clearly-`ForTesting`-suffixed method in the same spirit
+  as `ResetForTesting()`, added specifically so
+  `tests/Profiling/FrameGraphDataTests.cpp` could assert exact, bit-precise
+  min/max values instead of depending on real, inherently-jittery timing
+  (e.g. via `SDL_Delay()`) to separate one frame's duration from another's.
 - **A GPU-side or memory measurement that doesn't have a real value this
   frame is tagged `GpuSampleStatus::Absent`/`Unsupported`, never defaulted
   to a bare numeric `0`.** (`ProfilingTypes.h`'s `GpuSampleStatus`,
@@ -253,6 +262,21 @@ whenever touching profiling instrumentation, or adding a new call site:
   up CPU scope timers) - a future Phase 3/4/5 addition must set a real
   status through `FrameProfiler::SetGpuPassSample()`/`SetMemorySnapshot()`
   rather than inventing a second "is this real" convention.
+- **`src/Profiling/FrameGraphData.h/.cpp`** (Phase 2 -
+  `PHASE2_FRAME_GRAPH_DATA_STRATEGY_v3.md`) is the one place
+  `FrameProfiler`'s ring buffer gets reshaped into plottable points -
+  `BuildFrameGraphPoints()` (history -> an ordered `FrameGraphPoint` array,
+  each carrying `frameIndex`/`cpuMilliseconds`/all three `GpuPassSample`
+  entries verbatim) plus `ComputeCpuMillisecondsRange()`/
+  `ComputeGpuMillisecondsRange()` (a Y-axis min/max helper that correctly
+  ignores `Absent`/`Unsupported` GPU entries, branching only on `status`,
+  never on whatever numeric value happens to be stored alongside it).
+  Always-compiled and ImGui-free, exactly like `FrameProfiler` itself (no
+  `GTE_ENABLE_EDITOR`/`GTE_ENABLE_PROFILER` dependency at all) - a future
+  consumer (Phase 6's benchmark-mode CSV exporter, Phase 7's Editor
+  "Profiler" panel, or any other future graph/export need) must call these
+  functions rather than re-deriving the same history-walk/tri-state-scan
+  logic a second time.
 
 ## Render Target Format Matching
 
