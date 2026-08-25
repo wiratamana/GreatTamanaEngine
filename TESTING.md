@@ -106,6 +106,36 @@ safe on any machine/CI runner, GPU or not:
   camera's own full world transform - so a parented `Camera` follows its
   parent too - `Mat4::Identity()` if none exists) - both
   need nothing but a `Registry`, no live Renderer/GPU device at all.
+- `Game/EntityInstantiatorTests.cpp` - `EntityInstantiator.h`'s
+  `Instantiate()` (`src/Game/Instantiation/`): hand-built `EntityBlueprint`
+  values in, asserting the resulting entity/component (`Transform`/
+  `MeshRenderer`/`Name`/`MeshAssetSource`) and parent-child structure - no
+  Renderer/GPU device involved.
+- `Game/MeshVertexPackingTests.cpp` - `PackMeshVertices()`/`PackMeshVertexUvs()`
+  (`src/Game/Instantiation/MeshVertexPacking.h`): exact field-copy
+  correctness, plus the missing-normals/missing-uvs fallback behavior - the
+  two pure functions that replaced four hand-copied vertex-packing loops
+  across `Game.cpp`.
+- `Game/MeshMaterialPartitionerTests.cpp` - `PartitionMeshMaterials()`
+  (`src/Game/Instantiation/MeshMaterialPartitioner.h`): materials summing
+  exactly to the mesh's index count, materials summing to LESS (leftover
+  bucket), a corrupt file whose materials over-claim past the index count
+  (clamping), and zero materials at all (everything falls into one leftover
+  bucket).
+- `Game/SkeletalRigCacheTests.cpp` - `SkeletalRigCache`'s
+  (`src/Game/Animation/SkeletalRigCache.h`) Register()/TryGet() register/
+  lookup/miss behavior over plain `SkinnedMeshData`.
+- `Game/AnimationClipCacheTests.cpp` - `AnimationClipCache`'s
+  (`src/Game/Animation/AnimationClipCache.h`) `GetOrLoad()`/`TryGet()`
+  against a real temp-directory `*.gta` `AssetType::Animation` file (same
+  convention as `Assets/AssetDatabaseTests.cpp`), including the wrong-
+  asset-type and missing-file failure cases.
+- `Game/ResolvedAnimationBindingCacheTests.cpp` - `ResolvedAnimationBindingCache`'s
+  (`src/Game/Animation/ResolvedAnimationBindingCache.h`) cache hit/miss
+  behavior with the new `AnimationBindingKey` struct key (replacing the old
+  hand-concatenated `meshPath + '\x1F' + animationPath` string key),
+  including a regression case proving two different mesh/animation pairs
+  can never collide the way a naive string join could.
 - `Animation/BoneChainResolverTests.cpp` - the shared, generic "walk a
   per-bone single-index chain, cycle-safe" primitive
   (`src/Animation/BoneChainResolver.h`) `SkeletonPose`/`AppendBoneSolver`/

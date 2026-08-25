@@ -274,6 +274,12 @@ set(GTE_TEST_SOURCES
     ECS/CameraTests.cpp
     ECS/TransformHierarchyTests.cpp
     Game/RenderSystemTests.cpp
+    Game/EntityInstantiatorTests.cpp
+    Game/MeshVertexPackingTests.cpp
+    Game/MeshMaterialPartitionerTests.cpp
+    Game/SkeletalRigCacheTests.cpp
+    Game/AnimationClipCacheTests.cpp
+    Game/ResolvedAnimationBindingCacheTests.cpp
     Animation/BoneChainResolverTests.cpp
     Animation/BonePoseMathTests.cpp
     Animation/SkeletonPoseTests.cpp

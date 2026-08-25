@@ -279,6 +279,27 @@ add_library(gte_core STATIC
     src/Renderer/Vulkan/VulkanFrameSync.cpp
     src/Renderer/Vulkan/VulkanFrameSync.h
     src/Editor/EditorLayer.h
+    src/Game/Instantiation/EntityBlueprint.h
+    src/Game/Instantiation/EntityInstantiator.cpp
+    src/Game/Instantiation/EntityInstantiator.h
+    src/Game/Instantiation/MeshVertexPacking.cpp
+    src/Game/Instantiation/MeshVertexPacking.h
+    src/Game/Instantiation/MeshMaterialPartitioner.cpp
+    src/Game/Instantiation/MeshMaterialPartitioner.h
+    src/Game/Instantiation/PrimitiveGpuCatalog.cpp
+    src/Game/Instantiation/PrimitiveGpuCatalog.h
+    src/Game/Instantiation/MaterialTextureGpuCache.cpp
+    src/Game/Instantiation/MaterialTextureGpuCache.h
+    src/Game/Instantiation/MeshAssetGpuCatalog.cpp
+    src/Game/Instantiation/MeshAssetGpuCatalog.h
+    src/Game/Instantiation/MeshInstantiationSystem.cpp
+    src/Game/Instantiation/MeshInstantiationSystem.h
+    src/Game/Animation/SkeletalRigCache.h
+    src/Game/Animation/AnimationClipCache.cpp
+    src/Game/Animation/AnimationClipCache.h
+    src/Game/Animation/ResolvedAnimationBindingCache.h
+    src/Game/Animation/AnimationSystem.cpp
+    src/Game/Animation/AnimationSystem.h
     src/Game/Game.cpp
     src/Game/Game.h
     src/Game/RenderSystem.cpp

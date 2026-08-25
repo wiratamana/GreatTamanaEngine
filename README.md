@@ -200,27 +200,34 @@ exactly like any other (Transform in the Inspector, same as everything
 else) — including following a parent, since `RenderSystem` resolves its
 full WORLD transform (below) before building its view matrix.
 
-`RenderSystem` (`src/Game/RenderSystem.h/.cpp`) is the one piece of the
-engine allowed to depend on both the ECS world and `Renderer` — the same
-"only one layer crosses this boundary" rule this engine already applies to
-SDL (only `Application` touches it directly). `Renderer` itself never
-depends on ECS in any way: `Submit()` takes plain `Mat4`s, never an
-`Entity`/`Registry`. `RenderSystem::CollectRenderables()` (every entity with
-a `MeshRenderer` becomes one `DrawCommand`, using `TransformHierarchy.h`'s
-`ComputeWorldMatrix()` — its `Transform`'s local matrix composed all the way
-up its parent chain, if any) and `RenderSystem::ResolveActiveCameraViewProjection()`
-(the first entity with an active `Camera` becomes a combined
-view-projection matrix, resolved from that camera entity's own full WORLD
-transform the same way, `Mat4::Identity()` if no active `Camera` exists at
-all) are both pure functions that need nothing but a `Registry` — no live
-Renderer/GPU device —
+`RenderSystem` (`src/Game/RenderSystem.h/.cpp`) was the first, and remains
+the primary, piece of the engine allowed to depend on both the ECS world and
+`Renderer` — the same "only one layer crosses this boundary" rule this
+engine already applies to SDL (only `Application` touches it directly).
+`Renderer` itself never depends on ECS in any way: `Submit()` takes plain
+`Mat4`s, never an `Entity`/`Registry`. `RenderSystem::CollectRenderables()`
+(every entity with a `MeshRenderer` becomes one `DrawCommand`, using
+`TransformHierarchy.h`'s `ComputeWorldMatrix()` — its `Transform`'s local
+matrix composed all the way up its parent chain, if any) and
+`RenderSystem::ResolveActiveCameraViewProjection()` (the first entity with
+an active `Camera` becomes a combined view-projection matrix, resolved from
+that camera entity's own full WORLD transform the same way,
+`Mat4::Identity()` if no active `Camera` exists at all) are both pure
+functions that need nothing but a `Registry` — no live Renderer/GPU device —
 so both are unit-tested exactly like the rest of ECS (see `TESTING.md`).
 `RenderSystem::Draw()` is the one non-pure step that resolves DrawCommand
 handles against its own `ResourcePool<Mesh, MeshHandle>`/
 `ResourcePool<Pipeline, PipelineHandle>` and calls `Renderer::Submit()` with
 both the per-object model matrix and the resolved view-projection matrix.
-`Game` no longer holds a hardcoded `Pipeline`/`Mesh` pair at all — it owns a
-`Registry` + `RenderSystem` and just creates entities/components.
+Two more systems now share this same "allowed to touch both ECS and
+Renderer" seam alongside it — `MeshInstantiationSystem`
+(`src/Game/Instantiation/MeshInstantiationSystem.h/.cpp`, entity/mesh
+spawning) and `AnimationSystem` (`src/Game/Animation/AnimationSystem.h/.cpp`,
+skeletal animation playback) — see "Status" below for the full rundown of
+that refactor and AGENTS.md's "Entity-Component-System" section for the
+architectural rule itself. `Game` no longer holds a hardcoded `Pipeline`/
+`Mesh` pair, or any instantiation/animation logic of its own, at all — it
+owns a `Registry` plus these three systems and just forwards to them.
 
 ### Asset Pipeline
 
@@ -1307,6 +1314,54 @@ pieces:
   (the same path `AssetPreviewMesh` already uses), independent of `Game`'s
   own animation-runtime caches. See `README.md`'s own "Editor / Debug UI"
   section above for the full rundown.
+- **`Game.cpp` cleaned back up into a thin composition root - the "god
+  object" (ten distinct responsibilities: pipeline/mesh caches, `.gta`
+  decode, material-texture resolution, entity spawning, animation clip
+  loading, per-frame skinning) it had accumulated is now split into
+  dedicated, single-responsibility, independently testable modules under
+  two new folders.** `src/Game/Instantiation/` holds everything behind
+  primitive/imported-mesh spawning: `EntityBlueprint.h` (a tiny, inert
+  "what to spawn" data shape - one node for a primitive, a root+children
+  tree for a multi-part model), `EntityInstantiator.h/.cpp` (the ONE shared
+  function that turns a blueprint into live entities/components, used by
+  both spawn paths instead of two hand-duplicated blocks),
+  `MeshVertexPacking.h/.cpp` and `MeshMaterialPartitioner.h/.cpp` (the pure
+  vertex-packing/material-index-range math that used to be copy-pasted
+  inline, now shared with the animation re-upload path too), and the
+  GPU-facing `PrimitiveGpuCatalog.h/.cpp`/`MaterialTextureGpuCache.h/.cpp`/
+  `MeshAssetGpuCatalog.h/.cpp`, all orchestrated by
+  `MeshInstantiationSystem.h/.cpp` (what `Game::CreatePrimitiveEntity()`/
+  `CreateMeshEntityFromGtaFile()` now just forward into). `src/Game/Animation/`
+  holds the animation side: `SkeletalRigCache.h`/`AnimationClipCache.h/.cpp`/
+  `ResolvedAnimationBindingCache.h` (three small, explicitly-owned caches
+  replacing `Game`'s old anonymous private members - including fixing a real
+  fragility, a hand-concatenated `meshPath + '\x1F' + animationPath` string
+  cache key, into a proper `AnimationBindingKey` struct with its own hash/
+  equality, so two different mesh/animation pairs can never collide), all
+  owned by `AnimationSystem.h/.cpp` (what `Game::PlayAnimationOnEntity()`/
+  the per-frame skeletal-animator update now forward into). The previously
+  IMPLICIT coupling between mesh loading and animation (mesh loading quietly
+  wrote into a private `Game` member animation quietly read back out of) is
+  now an explicit, visible-in-code hand-off:
+  `Game::CreateMeshEntityFromGtaFile()` calls
+  `MeshInstantiationSystem::TryGetSkinnedMeshData()` and, if the freshly
+  spawned model is skinned, hands that data to
+  `AnimationSystem::RegisterSkinnedMesh()` right there at the call site.
+  `Game`'s three public methods (`CreatePrimitiveEntity()`,
+  `CreateMeshEntityFromGtaFile()`, `PlayAnimationOnEntity()`) kept their
+  exact pre-refactor signatures/behavior throughout, so no Editor call site
+  (`Panels/HierarchyPanel.cpp`/`ScenePanel.cpp`) needed to change at all.
+  Every newly-pure module shipped with its own Tier-1 tests in the same step
+  it was introduced (`tests/Game/EntityInstantiatorTests.cpp`,
+  `MeshVertexPackingTests.cpp`, `MeshMaterialPartitionerTests.cpp`,
+  `SkeletalRigCacheTests.cpp`, `AnimationClipCacheTests.cpp`,
+  `ResolvedAnimationBindingCacheTests.cpp`) - the GPU-touching catalogs
+  themselves remain "Tier 2, no automated coverage yet", same accepted
+  bucket as `Buffer`/`RenderTexture`/`Pipeline` (see `TESTING.md`). See
+  AGENTS.md's "Entity-Component-System" section for the updated
+  architectural rule naming `MeshInstantiationSystem`/`AnimationSystem`
+  alongside `RenderSystem`. Full test suite (434 tests, 1 pre-existing
+  machine-gated smoke test skipped) passes.
 
 ## Roadmap
 

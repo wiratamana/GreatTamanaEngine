@@ -344,19 +344,39 @@ lifetime code:
   when adding a new component type or Registry method: hand-built `Entity`
   values and plain component structs are enough, following the same
   Tier-1-testability rule already established below.
-- **Only `RenderSystem` (`src/Game/RenderSystem.h/.cpp`) is allowed to
-  depend on both the ECS world (`Registry`/`Transform`/`MeshRenderer`) AND
-  `Renderer`/`Mesh`/`Pipeline` - the same "only one layer crosses this
-  boundary" rule this file already applies to SDL (see "Coding Guidelines",
-  Clean Architecture: only `Application` touches SDL directly). `Renderer`
-  itself must never gain a dependency on ECS in either direction -
-  `Renderer::Submit()` takes plain `Mat4`s, never an `Entity`/`Registry`.
+- **Only `RenderSystem` (`src/Game/RenderSystem.h/.cpp`), `MeshInstantiationSystem`
+  (`src/Game/Instantiation/MeshInstantiationSystem.h/.cpp`), and `AnimationSystem`
+  (`src/Game/Animation/AnimationSystem.h/.cpp`) are allowed to depend on both the ECS
+  world (`Registry`/`Transform`/`MeshRenderer`) AND `Renderer`/`Mesh`/
+  `Pipeline` - the same "only one layer crosses this boundary" rule this
+  file already applies to SDL (see "Coding Guidelines", Clean Architecture:
+  only `Application` touches SDL directly). This is not three unrelated
+  exceptions: `Game` itself already crossed this boundary directly before
+  its own instantiation/animation logic was extracted out of `Game.cpp`
+  (see `GameInstantiationRefactorProposal.txt`) - `MeshInstantiationSystem`
+  (spawning primitives/imported meshes, built on `PrimitiveGpuCatalog`/
+  `MeshAssetGpuCatalog`/`EntityInstantiator`) and `AnimationSystem` (playing
+  back skeletal animation, built on `SkeletalRigCache`/`AnimationClipCache`/
+  `ResolvedAnimationBindingCache`) are `Game`'s own legitimate dual
+  dependency decomposed into two named, focused sub-systems it owns, not a
+  new architectural violation. `Renderer` itself must never gain a
+  dependency on ECS in either direction - `Renderer::Submit()` takes plain
+  `Mat4`s, never an `Entity`/`Registry`.
   `RenderSystem::CollectRenderables(Registry&)` is the pure ECS -> plain-data
   (`DrawCommand`: `MeshHandle`/`PipelineHandle`/`Mat4`, no live Mesh/Pipeline/
   Renderer involved) step - keep it that way when extending it, and put any
   new Renderer-touching logic in `RenderSystem::Draw()` (or a sibling
   non-pure method) instead, so `CollectRenderables()` stays Tier-1-testable
-  (see `tests/Game/RenderSystemTests.cpp`).
+  (see `tests/Game/RenderSystemTests.cpp`). The same "keep the pure part
+  pure" discipline applies to the other two: `EntityInstantiator`/
+  `MeshVertexPacking`/`MeshMaterialPartitioner` (used by
+  `MeshInstantiationSystem`) and the three animation caches above (used by
+  `AnimationSystem`) all need nothing but plain data/a `Registry` and are
+  Tier-1-tested under `tests/Game/`, while the GPU-touching catalogs
+  (`PrimitiveGpuCatalog`/`MaterialTextureGpuCache`/`MeshAssetGpuCatalog`)
+  fall into the same "Tier 2, no automated coverage yet" bucket as
+  `RenderSystem::Draw()` itself (see "Testability & Regression Safety"
+  below).
 - **`Camera` (`src/ECS/Components/Camera.h`) never bakes an aspect ratio
   into itself.** `ProjectionMatrix(aspectWidthOverHeight)` always takes the
   aspect ratio as a parameter, resolved fresh by whoever is about to draw
