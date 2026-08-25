@@ -1,5 +1,6 @@
 #include "Game.h"
 
+#include "../Animation/IkSolver.h"
 #include "../Animation/MotionSampler.h"
 #include "../Animation/SkeletonPose.h"
 #include "../Animation/VertexSkinning.h"
@@ -550,7 +551,17 @@ void Game::UpdateSkeletalAnimators(double deltaSeconds)
             }
         }
 
-        const std::vector<BoneLocalOffset> pose = SampleAnimationPose(binding, animator.frame);
+        std::vector<BoneLocalOffset> pose = SampleAnimationPose(binding, animator.frame);
+        // A VMD dance motion keyframes an invisible IK TARGET bone at the
+        // foot (MMD's own 左足ＩＫ/右足ＩＫ), never the thigh/knee bones
+        // directly - without this pass those bones would stay at bind pose
+        // for the whole clip (see Animation/IkSolver.h's own file comment
+        // for the full "why" and how this CCD solve works). Must run AFTER
+        // SampleAnimationPose() (so `pose` holds the IK bone's own animated
+        // position to solve toward) and BEFORE ComputeSkinningMatrices()
+        // (so the final skinning matrices reflect the solved thigh/knee
+        // rotations too).
+        SolveIkChains(skinData.skeleton, pose);
         const std::vector<Mat4> skinningMatrices = ComputeSkinningMatrices(skinData.skeleton, pose);
 
         std::vector<Vec3> skinnedPositions;

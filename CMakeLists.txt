@@ -180,6 +180,8 @@ add_library(gte_core STATIC
     src/Animation/BoneLocalOffset.h
     src/Animation/SkeletonPose.h
     src/Animation/SkeletonPose.cpp
+    src/Animation/IkSolver.h
+    src/Animation/IkSolver.cpp
     src/Animation/MotionSampler.h
     src/Animation/MotionSampler.cpp
     src/Animation/VertexSkinning.h

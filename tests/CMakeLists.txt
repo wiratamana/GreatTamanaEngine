@@ -275,6 +275,7 @@ set(GTE_TEST_SOURCES
     ECS/TransformHierarchyTests.cpp
     Game/RenderSystemTests.cpp
     Animation/SkeletonPoseTests.cpp
+    Animation/IkSolverTests.cpp
     Animation/MotionSamplerTests.cpp
     Animation/VertexSkinningTests.cpp
 )
