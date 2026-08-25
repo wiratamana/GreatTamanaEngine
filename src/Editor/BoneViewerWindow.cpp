@@ -138,6 +138,9 @@ void BoneViewerWindow::Reset()
     m_texWidth = 0;
     m_texHeight = 0;
     m_bones.clear();
+    m_boneChildren.clear();
+    m_rootBoneIndices.clear();
+    m_selectedBoneIndex = -1;
     m_cachedPath.clear();
     m_cachedWriteTime = std::filesystem::file_time_type{};
     m_cachedIsValid = false;
@@ -330,6 +333,9 @@ bool BoneViewerWindow::EnsureDataLoaded(Renderer& renderer, const std::string& a
     m_vertexCount = 0;
     m_indexCount = 0;
     m_bones.clear();
+    m_boneChildren.clear();
+    m_rootBoneIndices.clear();
+    m_selectedBoneIndex = -1; // A bone index from whatever was loaded before means nothing for a new asset.
 
     m_cachedPath = absoluteGtaPath;
     m_cachedIsValid = false;
@@ -359,6 +365,7 @@ bool BoneViewerWindow::EnsureDataLoaded(Renderer& renderer, const std::string& a
             }
         }
     }
+    RebuildBoneHierarchyIndex();
 
     std::vector<PreviewVertex> vertices(mesh->positions.size());
     const bool hasNormals = mesh->normals.size() == mesh->positions.size();
@@ -453,6 +460,102 @@ Vec3 BoneViewerWindow::ComputeEyePosition() const noexcept
     return m_camTarget + dirFromTargetToEye * m_camDistance;
 }
 
+void BoneViewerWindow::RebuildBoneHierarchyIndex()
+{
+    m_boneChildren.assign(m_bones.size(), {});
+    m_rootBoneIndices.clear();
+    for (std::size_t i = 0; i < m_bones.size(); ++i) {
+        const std::int32_t parent = m_bones[i].parentIndex;
+        if (parent >= 0 && static_cast<std::size_t>(parent) < m_bones.size()) {
+            m_boneChildren[static_cast<std::size_t>(parent)].push_back(static_cast<std::int32_t>(i));
+        } else {
+            m_rootBoneIndices.push_back(static_cast<std::int32_t>(i));
+        }
+    }
+}
+
+bool BoneViewerWindow::BoneMatchesFilterRecursive(std::int32_t boneIndex, const std::string& lowerFilter, int depth) const
+{
+    if (boneIndex < 0 || static_cast<std::size_t>(boneIndex) >= m_bones.size()
+        || depth > static_cast<int>(m_bones.size())) {
+        return false;
+    }
+    if (ToLower(m_bones[static_cast<std::size_t>(boneIndex)].name).find(lowerFilter) != std::string::npos) {
+        return true;
+    }
+    for (const std::int32_t child : m_boneChildren[static_cast<std::size_t>(boneIndex)]) {
+        if (BoneMatchesFilterRecursive(child, lowerFilter, depth + 1)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void BoneViewerWindow::RenderBoneTreeNode(std::int32_t boneIndex, const std::string& lowerFilter, int depth)
+{
+    if (boneIndex < 0 || static_cast<std::size_t>(boneIndex) >= m_bones.size()
+        || depth > static_cast<int>(m_bones.size())) {
+        return;
+    }
+
+    // Unity-style search-box filtering: a bone with neither a matching name
+    // NOR any matching descendant is hidden from the tree entirely, rather
+    // than merely un-highlighted - keeps a deep search result actually
+    // findable instead of buried under hundreds of unrelated rows.
+    if (!lowerFilter.empty() && !BoneMatchesFilterRecursive(boneIndex, lowerFilter, 0)) {
+        return;
+    }
+
+    const BoneEntry& bone = m_bones[static_cast<std::size_t>(boneIndex)];
+    const std::vector<std::int32_t>& children = m_boneChildren[static_cast<std::size_t>(boneIndex)];
+
+    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_OpenOnDoubleClick
+        | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_DefaultOpen;
+    if (children.empty()) {
+        flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+    }
+    if (m_selectedBoneIndex == boneIndex) {
+        flags |= ImGuiTreeNodeFlags_Selected;
+    }
+
+    const std::string label = bone.name.empty() ? ("Bone " + std::to_string(boneIndex)) : bone.name;
+
+    ImGui::PushID(boneIndex);
+    const bool opened = ImGui::TreeNodeEx(label.c_str(), flags);
+
+    if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
+        m_selectedBoneIndex = boneIndex;
+        // Double-clicking a row re-centers the orbit camera on that bone
+        // (keeping the current distance/angle) - a quick way to jump to a
+        // bone buried deep in a large skeleton without hunting for its dot
+        // in the 3D view first.
+        if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+            m_camTarget = bone.position;
+        }
+    }
+
+    if (opened && !children.empty()) {
+        for (const std::int32_t child : children) {
+            RenderBoneTreeNode(child, lowerFilter, depth + 1);
+        }
+        ImGui::TreePop();
+    }
+
+    ImGui::PopID();
+}
+
+void BoneViewerWindow::BuildBoneTreePane(const std::string& lowerFilter)
+{
+    if (m_bones.empty()) {
+        ImGui::TextDisabled("(no bones)");
+        return;
+    }
+    for (const std::int32_t root : m_rootBoneIndices) {
+        RenderBoneTreeNode(root, lowerFilter, 0);
+    }
+}
+
+
 void BoneViewerWindow::Build(Registry& registry, Renderer& renderer)
 {
     if (!m_open) {
@@ -513,113 +616,111 @@ void BoneViewerWindow::Build(Registry& registry, Renderer& renderer)
     }
     ImGui::Separator();
 
+    const std::string lowerFilter = ToLower(std::string(m_searchBuffer));
+
+    // --- Left pane: bone hierarchy tree, "starting from root" ---------------
+    // Unity/Omniverse-Inspector-style: a real indented tree, walked from
+    // m_rootBoneIndices down through m_boneChildren (see
+    // RebuildBoneHierarchyIndex()) - the same "GetChildren()-based recursive
+    // tree" shape as "Hierarchy"'s own entity tree (Panels/HierarchyPanel.cpp),
+    // just for bones instead of entities.
+    constexpr float kSplitterThickness = 6.0f;
+    constexpr float kMinTreeWidth = 150.0f;
+    constexpr float kMinViewportWidth = 200.0f;
+    const float fullWidth = ImGui::GetContentRegionAvail().x;
+    const float maxTreeWidth = std::max(kMinTreeWidth, fullWidth - kSplitterThickness - kMinViewportWidth);
+    m_treeWidth = Clamp(m_treeWidth, kMinTreeWidth, maxTreeWidth);
+
+    ImGui::BeginChild("BoneViewerTree", ImVec2(m_treeWidth, 0.0f), true);
+    BuildBoneTreePane(lowerFilter);
+    ImGui::EndChild();
+
+    // The draggable splitter itself - same thin scrollbar-grip-styled button
+    // as Panels/InspectorPanel.cpp's own preview splitter, just resizing
+    // horizontally instead of vertically.
+    ImGui::SameLine();
+    ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ScrollbarGrab));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImGui::GetStyleColorVec4(ImGuiCol_ScrollbarGrabHovered));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImGui::GetStyleColorVec4(ImGuiCol_ScrollbarGrabActive));
+    ImGui::Button("##BoneViewerTreeSplitter", ImVec2(kSplitterThickness, -1.0f));
+    ImGui::PopStyleColor(3);
+    if (ImGui::IsItemActive()) {
+        m_treeWidth += ImGui::GetIO().MouseDelta.x;
+    }
+    if (ImGui::IsItemHovered() || ImGui::IsItemActive()) {
+        ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+    }
+    ImGui::SameLine();
+
+    // --- Right pane: the live 3D viewport -------------------------------------
+    ImGui::BeginChild(
+        "BoneViewerViewport", ImVec2(0.0f, 0.0f), false, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+
     const ImVec2 avail = ImGui::GetContentRegionAvail();
-    if (avail.x < 1.0f || avail.y < 1.0f) {
-        ImGui::End();
-        return;
-    }
+    if (avail.x >= 1.0f && avail.y >= 1.0f) {
+        const int width = std::max(1, static_cast<int>(avail.x));
+        const int height = std::max(1, static_cast<int>(avail.y));
+        EnsureRenderTexture(renderer, width, height);
 
-    const int width = std::max(1, static_cast<int>(avail.x));
-    const int height = std::max(1, static_cast<int>(avail.y));
-    EnsureRenderTexture(renderer, width, height);
+        const Vec3 eye = ComputeEyePosition();
+        const Mat4 view = Mat4::LookAtLH(eye, m_camTarget, Vec3::Up());
+        const float aspect = static_cast<float>(width) / static_cast<float>(height);
+        const float fovYRadians = DegToRad(45.0f);
+        const float nearZ = std::max(0.01f, m_boundsRadius * 0.01f);
+        const float farZ = m_camDistance + m_boundsRadius * 6.0f + 10.0f;
+        const Mat4 proj = Mat4::PerspectiveFovLH_ZO(fovYRadians, aspect, nearZ, farZ, /*flipY=*/true);
+        const Mat4 viewProj = proj * view;
 
-    const Vec3 eye = ComputeEyePosition();
-    const Mat4 view = Mat4::LookAtLH(eye, m_camTarget, Vec3::Up());
-    const float aspect = static_cast<float>(width) / static_cast<float>(height);
-    const float fovYRadians = DegToRad(45.0f);
-    const float nearZ = std::max(0.01f, m_boundsRadius * 0.01f);
-    const float farZ = m_camDistance + m_boundsRadius * 6.0f + 10.0f;
-    const Mat4 proj = Mat4::PerspectiveFovLH_ZO(fovYRadians, aspect, nearZ, farZ, /*flipY=*/true);
-    const Mat4 viewProj = proj * view;
+        struct PushConstants {
+            float model[16];
+            float viewProj[16];
+        } pushConstants;
+        std::memcpy(pushConstants.model, Mat4::Identity().Data(), sizeof(pushConstants.model));
+        std::memcpy(pushConstants.viewProj, viewProj.Data(), sizeof(pushConstants.viewProj));
 
-    struct PushConstants {
-        float model[16];
-        float viewProj[16];
-    } pushConstants;
-    std::memcpy(pushConstants.model, Mat4::Identity().Data(), sizeof(pushConstants.model));
-    std::memcpy(pushConstants.viewProj, viewProj.Data(), sizeof(pushConstants.viewProj));
+        // Neutral dark backdrop - same reasoning as AssetPreviewMesh's own
+        // Clear() call (this only affects THIS RenderOffscreen() call, see
+        // that class's own comment for why sharing Renderer's one Clear()
+        // color is safe).
+        renderer.Clear(30, 32, 38, 255);
 
-    // Neutral dark backdrop - same reasoning as AssetPreviewMesh's own
-    // Clear() call (this only affects THIS RenderOffscreen() call, see that
-    // class's own comment for why sharing Renderer's one Clear() color is
-    // safe).
-    renderer.Clear(30, 32, 38, 255);
+        const VkPipeline pipeline = m_pipeline;
+        const VkPipelineLayout layout = m_pipelineLayout;
+        const VkBuffer vertexBuffer = m_vertexBuffer->Native();
+        const VkBuffer indexBuffer = m_indexBuffer->Native();
+        const std::uint32_t indexCount = m_indexCount;
+        const VkExtent2D extent = m_renderTexture->Extent();
 
-    const VkPipeline pipeline = m_pipeline;
-    const VkPipelineLayout layout = m_pipelineLayout;
-    const VkBuffer vertexBuffer = m_vertexBuffer->Native();
-    const VkBuffer indexBuffer = m_indexBuffer->Native();
-    const std::uint32_t indexCount = m_indexCount;
-    const VkExtent2D extent = m_renderTexture->Extent();
+        renderer.RenderOffscreen(*m_renderTexture, [&](VkCommandBuffer cmd) {
+            VkViewport viewport{};
+            viewport.width = static_cast<float>(extent.width);
+            viewport.height = static_cast<float>(extent.height);
+            viewport.minDepth = 0.0f;
+            viewport.maxDepth = 1.0f;
+            vkCmdSetViewport(cmd, 0, 1, &viewport);
 
-    renderer.RenderOffscreen(*m_renderTexture, [&](VkCommandBuffer cmd) {
-        VkViewport viewport{};
-        viewport.width = static_cast<float>(extent.width);
-        viewport.height = static_cast<float>(extent.height);
-        viewport.minDepth = 0.0f;
-        viewport.maxDepth = 1.0f;
-        vkCmdSetViewport(cmd, 0, 1, &viewport);
+            VkRect2D scissor{};
+            scissor.extent = extent;
+            vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-        VkRect2D scissor{};
-        scissor.extent = extent;
-        vkCmdSetScissor(cmd, 0, 1, &scissor);
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+            vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushConstants), &pushConstants);
 
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-        vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushConstants), &pushConstants);
+            const VkDeviceSize offset = 0;
+            vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer, &offset);
+            vkCmdBindIndexBuffer(cmd, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexed(cmd, indexCount, 1, 0, 0, 0);
+        });
 
-        const VkDeviceSize offset = 0;
-        vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer, &offset);
-        vkCmdBindIndexBuffer(cmd, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-        vkCmdDrawIndexed(cmd, indexCount, 1, 0, 0, 0);
-    });
+        const ImVec2 imageMin = ImGui::GetCursorScreenPos();
+        ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(m_descriptor)), avail);
+        const ImVec2 imageMax(imageMin.x + avail.x, imageMin.y + avail.y);
+        const bool hovered = ImGui::IsItemHovered();
 
-    const ImVec2 imageMin = ImGui::GetCursorScreenPos();
-    ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(m_descriptor)), avail);
-    const ImVec2 imageMax(imageMin.x + avail.x, imageMin.y + avail.y);
-    const bool hovered = ImGui::IsItemHovered();
-
-    // --- Orbit camera input (applied to what NEXT frame renders - see this
-    // window's own class comment for why this one-frame lag mirrors
-    // Panels/ScenePanel.cpp's EditorCamera handling) -----------------------
-    if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-        m_rotating = true;
-    }
-    if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
-        m_rotating = false;
-    }
-    if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Middle)) {
-        m_panning = true;
-    }
-    if (ImGui::IsMouseReleased(ImGuiMouseButton_Middle)) {
-        m_panning = false;
-    }
-
-    const ImGuiIO& io = ImGui::GetIO();
-    if (m_rotating) {
-        m_camYawDeg += io.MouseDelta.x * 0.3f;
-        m_camPitchDeg = Clamp(m_camPitchDeg + io.MouseDelta.y * 0.3f, -85.0f, 85.0f);
-    }
-    if (m_panning) {
-        const Vec3 forward = Normalize(m_camTarget - eye);
-        Vec3 right = Normalize(Cross(Vec3::Up(), forward));
-        if (LengthSquared(right) < kEpsilon) {
-            right = Vec3::Right();
-        }
-        const Vec3 camUp = Cross(forward, right);
-        const float panSpeed = m_camDistance * 0.0015f;
-        m_camTarget += right * (-io.MouseDelta.x * panSpeed) + camUp * (io.MouseDelta.y * panSpeed);
-    }
-    if (hovered && io.MouseWheel != 0.0f) {
-        m_camDistance = std::max(m_boundsRadius * 0.05f, m_camDistance - io.MouseWheel * (m_camDistance * 0.15f));
-    }
-
-    // --- Bone gizmo overlay --------------------------------------------------
-    if (!m_bones.empty()) {
-        ImDrawList* drawList = ImGui::GetWindowDrawList();
-        drawList->PushClipRect(imageMin, imageMax, true);
-
-        const std::string filter = ToLower(std::string(m_searchBuffer));
-
+        // Project every bone to screen space up front - shared by hit-
+        // testing (hover/click below) AND the overlay drawing pass
+        // (further below), computed with THIS frame's viewProj so
+        // everything stays pixel-aligned with what was just rendered.
         std::vector<ImVec2> screenPositions(m_bones.size());
         std::vector<char> onScreen(m_bones.size(), 0);
         for (std::size_t i = 0; i < m_bones.size(); ++i) {
@@ -630,59 +731,131 @@ void BoneViewerWindow::Build(Registry& registry, Renderer& renderer)
             }
         }
 
-        // Lines to parent first, so every dot/label below always paints
-        // over them.
-        for (std::size_t i = 0; i < m_bones.size(); ++i) {
-            const std::int32_t parent = m_bones[i].parentIndex;
-            if (parent < 0 || static_cast<std::size_t>(parent) >= m_bones.size()) {
-                continue;
-            }
-            if (!onScreen[i] || !onScreen[static_cast<std::size_t>(parent)]) {
-                continue;
-            }
-            drawList->AddLine(
-                screenPositions[static_cast<std::size_t>(parent)], screenPositions[i], IM_COL32(70, 200, 100, 200), 2.0f);
-        }
-
-        // Nearest on-screen bone to the mouse cursor (within a small pixel
-        // radius) gets its name shown on hover, Unity-Avatar-view-style.
-        const ImVec2 mousePos = ImGui::GetMousePos();
+        // Nearest on-screen bone dot to the mouse cursor (within a small
+        // pixel radius) - what both the hover-name-reveal and a direct
+        // viewport click (below) hit-test against.
         int hoveredBoneIndex = -1;
-        float hoveredDistSq = 144.0f; // 12px radius.
-        for (std::size_t i = 0; i < m_bones.size(); ++i) {
-            if (!onScreen[i]) {
-                continue;
-            }
-            const float dx = mousePos.x - screenPositions[i].x;
-            const float dy = mousePos.y - screenPositions[i].y;
-            const float distSq = dx * dx + dy * dy;
-            if (distSq < hoveredDistSq) {
-                hoveredDistSq = distSq;
-                hoveredBoneIndex = static_cast<int>(i);
-            }
-        }
-
-        for (std::size_t i = 0; i < m_bones.size(); ++i) {
-            if (!onScreen[i]) {
-                continue;
-            }
-            const bool matchesFilter = !filter.empty() && ToLower(m_bones[i].name).find(filter) != std::string::npos;
-            const bool isHovered = hovered && (static_cast<int>(i) == hoveredBoneIndex);
-            const ImU32 dotColor = matchesFilter ? IM_COL32(255, 215, 60, 255)
-                : (isHovered ? IM_COL32(255, 255, 255, 255) : IM_COL32(90, 230, 130, 255));
-            drawList->AddCircleFilled(screenPositions[i], isHovered ? 5.0f : 3.5f, dotColor);
-
-            if (m_showAllNames || matchesFilter || isHovered) {
-                const ImVec2 textPos(screenPositions[i].x + 7.0f, screenPositions[i].y - 7.0f);
-                const ImVec2 textSize = ImGui::CalcTextSize(m_bones[i].name.c_str());
-                drawList->AddRectFilled(ImVec2(textPos.x - 2.0f, textPos.y - 1.0f),
-                    ImVec2(textPos.x + textSize.x + 2.0f, textPos.y + textSize.y + 1.0f), IM_COL32(0, 0, 0, 160));
-                drawList->AddText(textPos, IM_COL32(255, 255, 255, 255), m_bones[i].name.c_str());
+        if (hovered) {
+            const ImVec2 mousePos = ImGui::GetMousePos();
+            float hoveredDistSq = 144.0f; // 12px radius.
+            for (std::size_t i = 0; i < m_bones.size(); ++i) {
+                if (!onScreen[i]) {
+                    continue;
+                }
+                const float dx = mousePos.x - screenPositions[i].x;
+                const float dy = mousePos.y - screenPositions[i].y;
+                const float distSq = dx * dx + dy * dy;
+                if (distSq < hoveredDistSq) {
+                    hoveredDistSq = distSq;
+                    hoveredBoneIndex = static_cast<int>(i);
+                }
             }
         }
 
-        drawList->PopClipRect();
+        // --- Orbit camera input / direct-click bone selection (applied to
+        // what NEXT frame renders - see this window's own class comment for
+        // why this one-frame lag mirrors Panels/ScenePanel.cpp's
+        // EditorCamera handling) ---------------------------------------------
+        if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+            if (hoveredBoneIndex >= 0) {
+                // Clicked directly on a bone's gizmo dot - select it
+                // (mirrors clicking its row in the tree pane) instead of
+                // starting an orbit-camera drag.
+                m_selectedBoneIndex = hoveredBoneIndex;
+            } else {
+                m_rotating = true;
+            }
+        }
+        if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+            m_rotating = false;
+        }
+        if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Middle)) {
+            m_panning = true;
+        }
+        if (ImGui::IsMouseReleased(ImGuiMouseButton_Middle)) {
+            m_panning = false;
+        }
+
+        const ImGuiIO& io = ImGui::GetIO();
+        if (m_rotating) {
+            m_camYawDeg += io.MouseDelta.x * 0.3f;
+            m_camPitchDeg = Clamp(m_camPitchDeg + io.MouseDelta.y * 0.3f, -85.0f, 85.0f);
+        }
+        if (m_panning) {
+            const Vec3 forward = Normalize(m_camTarget - eye);
+            Vec3 right = Normalize(Cross(Vec3::Up(), forward));
+            if (LengthSquared(right) < kEpsilon) {
+                right = Vec3::Right();
+            }
+            const Vec3 camUp = Cross(forward, right);
+            const float panSpeed = m_camDistance * 0.0015f;
+            m_camTarget += right * (-io.MouseDelta.x * panSpeed) + camUp * (io.MouseDelta.y * panSpeed);
+        }
+        if (hovered && io.MouseWheel != 0.0f) {
+            m_camDistance = std::max(m_boundsRadius * 0.05f, m_camDistance - io.MouseWheel * (m_camDistance * 0.15f));
+        }
+
+        // --- Bone gizmo overlay ------------------------------------------------
+        if (!m_bones.empty()) {
+            ImDrawList* drawList = ImGui::GetWindowDrawList();
+            drawList->PushClipRect(imageMin, imageMax, true);
+
+            // Lines to parent first, so every dot/label below always paints
+            // over them.
+            for (std::size_t i = 0; i < m_bones.size(); ++i) {
+                const std::int32_t parent = m_bones[i].parentIndex;
+                if (parent < 0 || static_cast<std::size_t>(parent) >= m_bones.size()) {
+                    continue;
+                }
+                if (!onScreen[i] || !onScreen[static_cast<std::size_t>(parent)]) {
+                    continue;
+                }
+                drawList->AddLine(screenPositions[static_cast<std::size_t>(parent)], screenPositions[i],
+                    IM_COL32(70, 200, 100, 200), 2.0f);
+            }
+
+            for (std::size_t i = 0; i < m_bones.size(); ++i) {
+                if (!onScreen[i]) {
+                    continue;
+                }
+                const bool matchesFilter =
+                    !lowerFilter.empty() && ToLower(m_bones[i].name).find(lowerFilter) != std::string::npos;
+                const bool isHovered = hovered && (static_cast<int>(i) == hoveredBoneIndex);
+                const bool isSelected = (static_cast<int>(i) == m_selectedBoneIndex);
+
+                // Selected beats hovered beats search-match beats the
+                // plain default - the same layered-priority convention
+                // "Hierarchy"'s own selection highlight uses relative to
+                // hover, just with one more tier (search match) here.
+                ImU32 dotColor = IM_COL32(90, 230, 130, 255);
+                if (matchesFilter) {
+                    dotColor = IM_COL32(255, 215, 60, 255);
+                }
+                if (isHovered) {
+                    dotColor = IM_COL32(255, 255, 255, 255);
+                }
+                if (isSelected) {
+                    dotColor = IM_COL32(255, 140, 0, 255);
+                }
+                drawList->AddCircleFilled(screenPositions[i], isSelected ? 6.0f : (isHovered ? 5.0f : 3.5f), dotColor);
+                if (isSelected) {
+                    drawList->AddCircle(screenPositions[i], 9.0f, IM_COL32(255, 140, 0, 255), 0, 2.0f);
+                }
+
+                if (m_showAllNames || matchesFilter || isHovered || isSelected) {
+                    const ImVec2 textPos(screenPositions[i].x + 7.0f, screenPositions[i].y - 7.0f);
+                    const ImVec2 textSize = ImGui::CalcTextSize(m_bones[i].name.c_str());
+                    drawList->AddRectFilled(ImVec2(textPos.x - 2.0f, textPos.y - 1.0f),
+                        ImVec2(textPos.x + textSize.x + 2.0f, textPos.y + textSize.y + 1.0f), IM_COL32(0, 0, 0, 160));
+                    drawList->AddText(textPos, IM_COL32(255, 255, 255, 255), m_bones[i].name.c_str());
+                }
+            }
+
+            drawList->PopClipRect();
+        }
     }
+
+    ImGui::EndChild();
 
     ImGui::End();
 }

@@ -150,6 +150,17 @@ private:
     // "no bone/skeleton data" message in that case).
     std::vector<BoneEntry> m_bones;
 
+    // Child-index adjacency derived from every BoneEntry::parentIndex above
+    // (m_boneChildren[i] lists every bone whose parentIndex == i) plus the
+    // list of ROOT bones (parentIndex invalid/out of range) - the two things
+    // BuildBoneTreePane()/RenderBoneTreeNode() need to walk the skeleton as a
+    // real indented tree "start from root", mirroring "Hierarchy"'s own
+    // GetChildren()-based tree (see Panels/HierarchyPanel.cpp). Rebuilt once
+    // per (re)load, right alongside m_bones itself - see
+    // RebuildBoneHierarchyIndex().
+    std::vector<std::vector<std::int32_t>> m_boneChildren;
+    std::vector<std::int32_t> m_rootBoneIndices;
+
     // Bounding sphere of the currently-uploaded mesh (model-local space) -
     // used by FrameCameraToBounds() to auto-frame the orbit camera whenever
     // a new model is loaded.
@@ -188,13 +199,64 @@ private:
     // Avatar configuration screen - see the attached reference screenshot)
     // - a bone whose name contains this (case-insensitively) as a
     // substring is drawn highlighted/always-labeled; every other bone is
-    // still drawn as a plain gizmo dot, labeled only on hover.
+    // still drawn as a plain gizmo dot, labeled only on hover. Also filters
+    // the bone TREE pane (see BuildBoneTreePane()) - a bone with no
+    // matching name AND no matching descendant is hidden from the tree
+    // entirely while a filter is active, same "search prunes the tree"
+    // convention Unity's own Hierarchy search box uses.
     char m_searchBuffer[128] = {};
 
     // When true, every bone's name is drawn permanently instead of only on
     // hover/search-match - handy for a small enough skeleton, toggled via
     // the window's own toolbar checkbox.
     bool m_showAllNames = false;
+
+    // Index into m_bones of whichever bone is currently selected in the
+    // tree pane (or clicked directly on its gizmo dot in the viewport) - -1
+    // for "none selected". Drawn as a distinctly-colored, larger gizmo dot
+    // in the viewport (see Build()'s overlay-drawing section) and a
+    // highlighted row in the tree - the two views of the same selection,
+    // exactly like "Hierarchy" and "Scene" share one Selection in the main
+    // Editor (see Selection.h) - reset to -1 whenever a different model is
+    // (re)loaded, since a bone index from one skeleton means nothing in
+    // another.
+    int m_selectedBoneIndex = -1;
+
+    // Persisted (across frames) pixel width of the tree pane, adjusted live
+    // by dragging the splitter between it and the 3D viewport - same
+    // "persist across frames, clamp to sane bounds every Build() call"
+    // convention as EditorContext::inspectorPreviewHeight (see
+    // Panels/InspectorPanel.cpp's BuildAssetInspector()).
+    float m_treeWidth = 260.0f;
+
+    // Rebuilds m_boneChildren/m_rootBoneIndices from m_bones' own
+    // parentIndex fields - called once right after m_bones itself is
+    // (re)populated in EnsureDataLoaded().
+    void RebuildBoneHierarchyIndex();
+
+    // True if `boneIndex` itself, or ANY of its descendants (recursively),
+    // has a name containing `lowerFilter` as a case-insensitive substring -
+    // what decides whether an ancestor bone stays visible in the tree while
+    // a search filter is active, even if the ancestor's OWN name doesn't
+    // match (so the path down to a deeply-nested match is never hidden).
+    // `depth` is a defensive recursion-depth guard against a malformed/
+    // cyclic parentIndex chain (see Assets/SkeletonData.h's own bones
+    // being "never assumed sorted/acyclic") - capped at m_bones.size(),
+    // the maximum depth a genuinely acyclic skeleton could ever have.
+    bool BoneMatchesFilterRecursive(std::int32_t boneIndex, const std::string& lowerFilter, int depth) const;
+
+    // Renders `boneIndex` (and, if expanded, every descendant) as one
+    // indented ImGui tree node, wiring up row selection (single-click) and
+    // camera re-centering (double-click) - the tree-pane equivalent of
+    // Panels/HierarchyPanel.cpp's RenderEntityNode(). Same recursion-depth
+    // guard as BoneMatchesFilterRecursive() above.
+    void RenderBoneTreeNode(std::int32_t boneIndex, const std::string& lowerFilter, int depth);
+
+    // Renders every root bone (see m_rootBoneIndices) as the top level of a
+    // real indented hierarchy tree, "starting from root" - the left-hand
+    // pane of this window, alongside the 3D viewport on the right (see
+    // Build()).
+    void BuildBoneTreePane(const std::string& lowerFilter);
 };
 
 } // namespace gte
