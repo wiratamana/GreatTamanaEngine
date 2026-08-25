@@ -113,6 +113,26 @@ safe on any machine/CI runner, GPU or not:
   bind pose, and a malformed/cyclic parent chain terminates and produces
   finite (non-NaN/Inf) matrices rather than hanging - no ECS/GPU/Renderer
   involved.
+- `Animation/IkSolverTests.cpp` - `SolveIkChains()`'s
+  (`src/Animation/IkSolver.h`) Cyclic-Coordinate-Descent IK solve: a
+  non-IK bone's offsets are left untouched, moving an IK target bone
+  genuinely bends a 2-bone thigh/knee chain and the effector converges onto
+  the target (checked against `ComputeSkinningMatrices()`'s own resolved
+  world positions), a configured per-link angle limit (e.g. a knee
+  restricted to one axis) is respected, and malformed/out-of-range IK data
+  (bad target/link indices) doesn't crash or hang.
+- `Animation/AppendBoneSolverTests.cpp` - `ApplyAppendInheritance()`'s
+  (`src/Animation/AppendBoneSolver.h`) PMX append/grant bone-rotation
+  inheritance: a non-append bone is left untouched, a full-weight (1.0)
+  append-rotate bone ends up with exactly its source bone's rotation (the
+  real-world "D-bone" rig pattern this feature exists for - see the file's
+  own header comment), a partial weight blends strictly between identity
+  and the source rotation, append-translate adds a weighted-scaled source
+  translation, a negative weight produces an inverse-like rotation (a
+  shoulder-cancel bone), a cascading append chain (A -> B appends from A ->
+  C appends from B's own already-appended total) resolves in dependency
+  order rather than a blind flat pass, and malformed/self-referencing
+  append data doesn't crash or hang.
 - `Animation/MotionSamplerTests.cpp` - `GroupAndSortBoneTracksByName()`/
   `ResolveBoneTracksToSkeleton()`/`SampleBoneTrack()`/`SampleAnimationPose()`
   (`src/Animation/MotionSampler.h`): per-bone frame sorting, the bone-NAME

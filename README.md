@@ -348,12 +348,18 @@ registry that tracks every one of them:
   still import/data-extraction only — no GPU skinning, IK solving, morph
   blending, or physics simulation happens anywhere in this engine yet (no
   Bullet or equivalent backend is vendored); see `TODO.md` for that
-  follow-up. A Mesh `*.gta` CAN now be spawned as a real, rendered
+  follow-up. **UPDATE: CPU skinning and IK solving are no longer a gap —
+  see "Status" below's "A spawned MMD model can now actually be ANIMATED"
+  entry and its own "IK solving AND PMX append/grant bone inheritance"
+  update for `Animation/IkSolver.h`/`Animation/AppendBoneSolver.h` — morph
+  blending and physics simulation are still the only remaining gaps this
+  sentence originally called out.** A Mesh `*.gta` CAN now be spawned as a
+  real, rendered
   `Transform`+`MeshRenderer` entity via `Game::CreateMeshEntityFromGtaFile()`
   (see "Rendering" above and "Editor / Debug UI" below for the Editor's own
-  drag-and-drop trigger for it) — but always in its ORIGINAL BIND POSE,
-  since none of the skinning/IK/morph/physics evaluation this paragraph
-  describes actually runs yet. A multi-part (multi-material) model spawns as
+  drag-and-drop trigger for it) — but always in its ORIGINAL BIND POSE
+  until `Game::PlayAnimationOnEntity()` is also called on it (see "Status"
+  below) — morph/physics evaluation still never runs. A multi-part (multi-material) model spawns as
   a real parent/child hierarchy, not a flat list of independent siblings:
   one plain, empty ROOT entity (`Transform` only) named after the `*.gta`
   file itself, with every submesh "part" entity attached under it — see
@@ -1200,6 +1206,63 @@ pieces:
   `TODO.md`). Verified against the real Furina model plus a real
   690-bone-keyframe `.vmd` motion, and the full test suite (377 tests)
   still passes.
+  **UPDATE (this session): IK solving AND PMX append/grant bone
+  inheritance are now both implemented — a real MMD dance motion's legs
+  actually animate now, closing the two-part gap this bullet's own
+  "FORWARD-KINEMATICS ONLY" caveat used to call out.** Two DISTINCT,
+  additive fixes were needed, discovered in that order against this same
+  real Furina model + `.vmd` motion:
+  1. **IK solving** (`src/Animation/IkSolver.h/.cpp`'s `SolveIkChains()`) —
+     a VMD dance motion never keyframes a leg's thigh/knee bones directly;
+     it keyframes an invisible IK TARGET bone at the foot instead (MMD's
+     own 左足ＩＫ/右足ＩＫ, already extracted into `SkeletonData::Bone::
+     isIk`/`ikLinks`/`ikTargetBoneIndex`/`ikIterationCount`/
+     `ikAngleLimitRadians` by `PmxLoader`/`RigFile`, but never evaluated
+     anywhere before this). `SolveIkChains()` is a Cyclic-Coordinate-Descent
+     (CCD) solver: for each IK bone, it iterates its own `ikLinks`
+     (nearest-to-effector first, PMX's own storage order) up to
+     `ikIterationCount` times, each step rotating a link bone (clamped to
+     `ikAngleLimitRadians` per step) to swing its effector bone toward
+     wherever the IK bone itself was animated to, then clamping a
+     constrained link's (e.g. a knee limited to one axis) total
+     bind-relative rotation to its own PMX angle limits when present. Called
+     from `Game::UpdateSkeletalAnimators()` right after
+     `SampleAnimationPose()` and before `ComputeSkinningMatrices()`.
+     Deliberately NOT a bit-perfect reimplementation of MMD's own IK solver
+     (no dedicated single-axis "solve on this plane only" fast path) — a
+     pragmatic, visually-close approximation, same spirit as
+     `MotionSampler.h`'s own linear/slerp interpolation standing in for true
+     MMD bezier curves.
+  2. **Append/grant bone inheritance** (`src/Animation/AppendBoneSolver.h/.cpp`'s
+     `ApplyAppendInheritance()`) — even with IK solving correct, the legs
+     STILL didn't visibly move, because this real-world model (like many
+     higher-quality MMD rigs) skins its mesh to a SEPARATE, parallel
+     "D-bone" chain (左足D/左ひざD/左足首D and the right-leg equivalents)
+     that's supposed to inherit ("append"/"grant") its rotation from the
+     corresponding main FK/IK bone via PMX's `Bone::appendRotate`/
+     `appendBoneIndex`/`appendWeight` fields — also already extracted, also
+     never evaluated anywhere before this. `ApplyAppendInheritance()`
+     resolves every appended bone's rotation/translation from its source
+     bone in dependency order (a cycle-safe recursive resolve, so a
+     cascading append chain resolves correctly), blending rotation via
+     `Slerp(Identity, source, weight)` (correct for negative weights too,
+     e.g. a shoulder-cancel bone) and translation via a scaled add. Called
+     right after `SolveIkChains()` (so an append source that's also an IK
+     link carries its IK-solved rotation) and before
+     `ComputeSkinningMatrices()`.
+  Both were diagnosed with a standalone, throwaway diagnostic tool (not
+  committed) built directly against the engine's own compiled
+  `libgte_core.a` and run against the real Furina model + motion —
+  confirming the IK solve alone already converges the ankle onto its target
+  almost exactly, and that the append-inheritance fix alone moves ~1989
+  left-leg-D-bone-weighted vertices by an average of 2.3–4.3 units across
+  sampled frames while leaving unrelated geometry (8441 head vertices) at
+  EXACTLY 0.0 delta — proof the fix is both real/large and correctly
+  scoped. Fully unit-tested (`tests/Animation/IkSolverTests.cpp`,
+  `tests/Animation/AppendBoneSolverTests.cpp`), full test suite (388 tests,
+  1 pre-existing machine-gated smoke test skipped) passes. Still NOT done:
+  morph blending, physics simulation, and true bezier interpolation (see
+  `TODO.md`).
 
 - **A new "Bone Viewer" debug window helps diagnose imported-model/animation
   bone mismatches.** The Inspector's "Model" section (shown for any entity

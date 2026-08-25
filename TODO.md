@@ -378,6 +378,50 @@ unblock the most follow-on work:
   Furina model + a real 690-bone-keyframe `.vmd` motion already used
   elsewhere in this project's own testing, and the full test suite (377
   tests) still passes.
+  **UPDATE (this session): IK solving AND PMX append/grant bone inheritance
+  are now both implemented - closes the two biggest remaining pieces of
+  "Still explicitly NOT done" above (only morph blending, physics
+  simulation, and true bezier interpolation remain).** Discovered as TWO
+  separate, additive bugs against this same real Furina model + motion (a
+  user report that "the legs don't animate" even after the first fix was
+  applied):
+  1. `src/Animation/IkSolver.h/.cpp`'s `SolveIkChains()` - a real
+     Cyclic-Coordinate-Descent (CCD) solver evaluating `Bone::isIk`/
+     `ikLinks`/`ikTargetBoneIndex`/`ikIterationCount`/`ikAngleLimitRadians`
+     (`SkeletonData.h`, extracted since the "PMX bone weights/skinning..."
+     entry further down but never evaluated until now): a VMD dance motion
+     keyframes an invisible IK TARGET bone at the foot (MMD's own
+     左足ＩＫ/右足ＩＫ), never the thigh/knee bones directly, so without
+     this pass those bones stayed at bind pose for the whole clip - the
+     literal "legs stay completely still" symptom. Called from
+     `Game::UpdateSkeletalAnimators()` between `SampleAnimationPose()` and
+     `ComputeSkinningMatrices()`.
+  2. `src/Animation/AppendBoneSolver.h/.cpp`'s `ApplyAppendInheritance()` -
+     even with IK solving correct, this same real model's legs STILL didn't
+     visibly move, because (like many higher-quality MMD rigs) it skins its
+     mesh to a separate, parallel "D-bone" chain (左足D/左ひざD/左足首D and
+     the right-leg equivalents) that inherits ("appends"/"grants") its
+     rotation from the corresponding main FK/IK bone via PMX's
+     `Bone::appendRotate`/`appendBoneIndex`/`appendWeight` fields - also
+     already extracted, also never evaluated anywhere before this.
+     Resolves every appended bone's rotation/translation from its source in
+     dependency order (cycle-safe, so a cascading append chain resolves
+     correctly), rotation via `Slerp(Identity, source, weight)` (correct
+     for negative weights too, e.g. a shoulder-cancel bone) and translation
+     via a scaled add. Called right after `SolveIkChains()`.
+  Both fixes were verified with a standalone, throwaway diagnostic tool
+  (not committed) built directly against the engine's own compiled
+  `libgte_core.a` and run against the real model+motion: the IK solve
+  alone converges the ankle effector onto its target almost exactly at
+  every sampled frame, and the append-inheritance fix alone moves ~1989
+  left-leg-D-bone-weighted vertices by an average of 2.3-4.3 units across
+  sampled frames while leaving unrelated geometry (8441 head vertices) at
+  EXACTLY 0.0 delta - proof each fix is both real/large and correctly
+  scoped, not a side effect elsewhere. Fully unit-tested
+  (`tests/Animation/IkSolverTests.cpp`,
+  `tests/Animation/AppendBoneSolverTests.cpp`), full test suite (388
+  tests, 1 pre-existing machine-gated smoke test skipped) passes. See
+  `README.md`'s own "Status" entry for the full rundown.
 - **~~PMX material/texture import~~ - DONE, see the "minimal asset pipeline"
   bullet above** (`MaterialData.h`, `MaterialTexture.h`,
   `VertexLayout::PositionNormalUv`, `Shaders/TexturedMesh.vert/.frag`).
