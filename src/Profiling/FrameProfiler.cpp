@@ -93,8 +93,7 @@ void FrameProfiler::RecordCpuScope(const char* name, double milliseconds) noexce
     // Else: silently dropped - see this method's own header comment.
 }
 
-void FrameProfiler::SetGpuPassSample(GpuPass pass, GpuSampleStatus status, double milliseconds,
-    std::uint32_t drawCallCount, std::uint32_t triangleCount) noexcept
+void FrameProfiler::SetGpuPassTiming(GpuPass pass, GpuSampleStatus status, double milliseconds) noexcept
 {
     if (!m_captureEnabled || !m_frameInProgress) {
         return;
@@ -106,8 +105,24 @@ void FrameProfiler::SetGpuPassSample(GpuPass pass, GpuSampleStatus status, doubl
     }
 
     GpuPassSample& sample = m_current.gpuPasses[index];
-    sample.status = status;
+    sample.timingStatus = status;
     sample.milliseconds = milliseconds;
+}
+
+void FrameProfiler::SetGpuPassDrawStats(
+    GpuPass pass, GpuSampleStatus status, std::uint32_t drawCallCount, std::uint32_t triangleCount) noexcept
+{
+    if (!m_captureEnabled || !m_frameInProgress) {
+        return;
+    }
+
+    const std::size_t index = static_cast<std::size_t>(pass);
+    if (index >= kGpuPassCount) {
+        return;
+    }
+
+    GpuPassSample& sample = m_current.gpuPasses[index];
+    sample.countStatus = status;
     sample.drawCallCount = drawCallCount;
     sample.triangleCount = triangleCount;
 }

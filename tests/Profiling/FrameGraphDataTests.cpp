@@ -69,7 +69,8 @@ TEST_F(FrameGraphDataTest, SingleFrameRoundTripsExactly)
     EXPECT_DOUBLE_EQ(points[0].cpuMilliseconds, 12.5);
 
     for (const GpuPassSample& sample : points[0].gpuPasses) {
-        EXPECT_EQ(sample.status, GpuSampleStatus::Absent);
+        EXPECT_EQ(sample.timingStatus, GpuSampleStatus::Absent);
+        EXPECT_EQ(sample.countStatus, GpuSampleStatus::Absent);
     }
 }
 
@@ -96,8 +97,9 @@ TEST_F(FrameGraphDataTest, AllThreeGpuPassesAndTriStatesRoundTripToExactlyTheRig
 {
     FrameProfiler& profiler = FrameProfiler::Instance();
     profiler.BeginFrame();
-    profiler.SetGpuPassSample(GpuPass::GameView, GpuSampleStatus::Present, 3.5, 12, 400);
-    profiler.SetGpuPassSample(GpuPass::SceneView, GpuSampleStatus::Unsupported);
+    profiler.SetGpuPassTiming(GpuPass::GameView, GpuSampleStatus::Present, 3.5);
+    profiler.SetGpuPassDrawStats(GpuPass::GameView, GpuSampleStatus::Present, 12, 400);
+    profiler.SetGpuPassTiming(GpuPass::SceneView, GpuSampleStatus::Unsupported);
     // GpuPass::Present (the pass identifier) is deliberately left untouched,
     // i.e. still its default GpuSampleStatus::Absent (the status value) -
     // this is a small, deliberate proof that this codebase's two
@@ -111,16 +113,18 @@ TEST_F(FrameGraphDataTest, AllThreeGpuPassesAndTriStatesRoundTripToExactlyTheRig
     const FrameGraphPoint& point = points[0];
 
     const GpuPassSample& gameView = point.gpuPasses[static_cast<std::size_t>(GpuPass::GameView)];
-    EXPECT_EQ(gameView.status, GpuSampleStatus::Present);
+    EXPECT_EQ(gameView.timingStatus, GpuSampleStatus::Present);
     EXPECT_DOUBLE_EQ(gameView.milliseconds, 3.5);
+    EXPECT_EQ(gameView.countStatus, GpuSampleStatus::Present);
     EXPECT_EQ(gameView.drawCallCount, 12u);
     EXPECT_EQ(gameView.triangleCount, 400u);
 
     const GpuPassSample& sceneView = point.gpuPasses[static_cast<std::size_t>(GpuPass::SceneView)];
-    EXPECT_EQ(sceneView.status, GpuSampleStatus::Unsupported);
+    EXPECT_EQ(sceneView.timingStatus, GpuSampleStatus::Unsupported);
 
     const GpuPassSample& presentPass = point.gpuPasses[static_cast<std::size_t>(GpuPass::Present)];
-    EXPECT_EQ(presentPass.status, GpuSampleStatus::Absent);
+    EXPECT_EQ(presentPass.timingStatus, GpuSampleStatus::Absent);
+    EXPECT_EQ(presentPass.countStatus, GpuSampleStatus::Absent);
 }
 
 // --- Case 5: ring buffer wraparound is transparently handled --------------
@@ -176,18 +180,18 @@ TEST_F(FrameGraphDataTest, ComputeGpuMillisecondsRangeIgnoresAbsentFramesForThat
     profiler.EndFrame();
 
     profiler.BeginFrame(); // Frame 1: GameView present.
-    profiler.SetGpuPassSample(GpuPass::GameView, GpuSampleStatus::Present, 2.0, 1, 10);
+    profiler.SetGpuPassTiming(GpuPass::GameView, GpuSampleStatus::Present, 2.0);
     profiler.EndFrame();
 
     profiler.BeginFrame(); // Frame 2: GameView absent again.
     profiler.EndFrame();
 
     profiler.BeginFrame(); // Frame 3: GameView present, the max.
-    profiler.SetGpuPassSample(GpuPass::GameView, GpuSampleStatus::Present, 9.0, 3, 30);
+    profiler.SetGpuPassTiming(GpuPass::GameView, GpuSampleStatus::Present, 9.0);
     profiler.EndFrame();
 
     profiler.BeginFrame(); // Frame 4: GameView present, the min.
-    profiler.SetGpuPassSample(GpuPass::GameView, GpuSampleStatus::Present, 0.5, 2, 5);
+    profiler.SetGpuPassTiming(GpuPass::GameView, GpuSampleStatus::Present, 0.5);
     profiler.EndFrame();
 
     const std::vector<FrameGraphPoint> points = BuildFrameGraphPoints(profiler);
@@ -212,7 +216,7 @@ TEST_F(FrameGraphDataTest, AllUnsupportedSeriesReportsNoData)
 {
     FrameProfiler& profiler = FrameProfiler::Instance();
     profiler.BeginFrame();
-    profiler.SetGpuPassSample(GpuPass::SceneView, GpuSampleStatus::Unsupported);
+    profiler.SetGpuPassTiming(GpuPass::SceneView, GpuSampleStatus::Unsupported);
     profiler.EndFrame();
 
     const std::vector<FrameGraphPoint> points = BuildFrameGraphPoints(profiler);
@@ -227,12 +231,12 @@ TEST_F(FrameGraphDataTest, AbsentSampleWithStaleNonZeroValueIsStillExcluded)
 {
     FrameProfiler& profiler = FrameProfiler::Instance();
     profiler.BeginFrame();
-    // SetGpuPassSample()'s own signature permits a non-default milliseconds/
-    // drawCallCount/triangleCount alongside GpuSampleStatus::Absent - fully
-    // constructible today, not a hypothetical. This positively rules out an
-    // implementation that accidentally branches on "is the value zero"
-    // instead of on the actual status tag.
-    profiler.SetGpuPassSample(GpuPass::GameView, GpuSampleStatus::Absent, 42.0, 5, 100);
+    // SetGpuPassTiming()'s own signature permits a non-default milliseconds
+    // alongside GpuSampleStatus::Absent - fully constructible today, not a
+    // hypothetical. This positively rules out an implementation that
+    // accidentally branches on "is the value zero" instead of on the
+    // actual status tag.
+    profiler.SetGpuPassTiming(GpuPass::GameView, GpuSampleStatus::Absent, 42.0);
     profiler.EndFrame();
 
     const std::vector<FrameGraphPoint> points = BuildFrameGraphPoints(profiler);
@@ -244,12 +248,36 @@ TEST_F(FrameGraphDataTest, UnsupportedSampleWithStaleNonZeroValueIsStillExcluded
 {
     FrameProfiler& profiler = FrameProfiler::Instance();
     profiler.BeginFrame();
-    profiler.SetGpuPassSample(GpuPass::GameView, GpuSampleStatus::Unsupported, 42.0, 5, 100);
+    profiler.SetGpuPassTiming(GpuPass::GameView, GpuSampleStatus::Unsupported, 42.0);
     profiler.EndFrame();
 
     const std::vector<FrameGraphPoint> points = BuildFrameGraphPoints(profiler);
     const FrameGraphRange range = ComputeGpuMillisecondsRange(points, GpuPass::GameView);
     EXPECT_FALSE(range.hasData);
+}
+
+// --- New (Phase 3): a pass whose ONLY data this session is a draw-stats
+//     call (never SetGpuPassTiming()) must report NO timing data - proves
+//     ComputeGpuMillisecondsRange() genuinely branches on timingStatus
+//     only, never accidentally treats a real countStatus as implying real
+//     timing (see PHASE3_DRAW_CALL_TRIANGLE_COUNT_STRATEGY_v2.md, Step 3.6).
+
+TEST_F(FrameGraphDataTest, DrawStatsOnlyPassReportsNoTimingData)
+{
+    FrameProfiler& profiler = FrameProfiler::Instance();
+    profiler.BeginFrame();
+    profiler.SetGpuPassDrawStats(GpuPass::GameView, GpuSampleStatus::Present, 7, 250);
+    profiler.EndFrame();
+
+    const std::vector<FrameGraphPoint> points = BuildFrameGraphPoints(profiler);
+    const FrameGraphRange range = ComputeGpuMillisecondsRange(points, GpuPass::GameView);
+    EXPECT_FALSE(range.hasData);
+
+    // The count data itself is still genuinely present in the raw point.
+    const GpuPassSample& gameView = points[0].gpuPasses[static_cast<std::size_t>(GpuPass::GameView)];
+    EXPECT_EQ(gameView.countStatus, GpuSampleStatus::Present);
+    EXPECT_EQ(gameView.drawCallCount, 7u);
+    EXPECT_EQ(gameView.triangleCount, 250u);
 }
 
 // --- Bounds-check requirement (Step 3.2/checklist): an out-of-range
@@ -259,7 +287,7 @@ TEST_F(FrameGraphDataTest, OutOfRangeGpuPassReportsNoDataInsteadOfReadingOutOfBo
 {
     FrameProfiler& profiler = FrameProfiler::Instance();
     profiler.BeginFrame();
-    profiler.SetGpuPassSample(GpuPass::GameView, GpuSampleStatus::Present, 5.0, 1, 10);
+    profiler.SetGpuPassTiming(GpuPass::GameView, GpuSampleStatus::Present, 5.0);
     profiler.EndFrame();
 
     const std::vector<FrameGraphPoint> points = BuildFrameGraphPoints(profiler);

@@ -63,11 +63,12 @@ FrameGraphRange ComputeGpuMillisecondsRange(std::span<const FrameGraphPoint> poi
 
     for (const FrameGraphPoint& point : points) {
         const GpuPassSample& sample = point.gpuPasses[index];
-        // Only ever branch on `status` - never on whether `milliseconds`
-        // happens to look like zero. An Absent/Unsupported sample is
-        // excluded regardless of whatever numeric value is sitting in its
-        // own milliseconds field (see this function's own header comment).
-        if (sample.status != GpuSampleStatus::Present) {
+        // Only ever branch on `timingStatus` - never on whether
+        // `milliseconds` happens to look like zero. An Absent/Unsupported
+        // sample is excluded regardless of whatever numeric value is
+        // sitting in its own milliseconds field (see this function's own
+        // header comment).
+        if (sample.timingStatus != GpuSampleStatus::Present) {
             continue;
         }
 

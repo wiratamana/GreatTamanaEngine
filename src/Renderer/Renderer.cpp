@@ -83,14 +83,14 @@ void Renderer::OnResize(int width, int height)
     m_presenter.OnResize(width, height);
 }
 
-void Renderer::Present(const std::function<void(VkCommandBuffer)>& recordExtra)
+std::optional<DrawStats> Renderer::Present(const std::function<void(VkCommandBuffer)>& recordExtra)
 {
-    m_presenter.Present(m_frameRecorder, recordExtra);
+    return m_presenter.Present(m_frameRecorder, recordExtra);
 }
 
-void Renderer::RenderOffscreen(RenderTexture& target, const std::function<void(VkCommandBuffer)>& recordExtra)
+DrawStats Renderer::RenderOffscreen(RenderTexture& target, const std::function<void(VkCommandBuffer)>& recordExtra)
 {
-    m_presenter.RenderOffscreen(m_frameRecorder, target, recordExtra);
+    return m_presenter.RenderOffscreen(m_frameRecorder, target, recordExtra);
 }
 
 VkFormat Renderer::ColorFormat() const noexcept

@@ -160,17 +160,19 @@ TEST_F(FrameProfilerTest, GpuPassAndMemorySamplesDefaultToAbsent)
 
     const FrameSample& frame = profiler.HistoryAt(0);
     for (const GpuPassSample& sample : frame.gpuPasses) {
-        EXPECT_EQ(sample.status, GpuSampleStatus::Absent);
+        EXPECT_EQ(sample.timingStatus, GpuSampleStatus::Absent);
+        EXPECT_EQ(sample.countStatus, GpuSampleStatus::Absent);
     }
     EXPECT_EQ(frame.memory.status, GpuSampleStatus::Absent);
 }
 
-TEST_F(FrameProfilerTest, SetGpuPassSampleAndMemorySnapshotAreRecorded)
+TEST_F(FrameProfilerTest, SetGpuPassTimingAndDrawStatsAndMemorySnapshotAreRecorded)
 {
     FrameProfiler& profiler = FrameProfiler::Instance();
     profiler.BeginFrame();
-    profiler.SetGpuPassSample(GpuPass::GameView, GpuSampleStatus::Present, 3.5, 10, 200);
-    profiler.SetGpuPassSample(GpuPass::SceneView, GpuSampleStatus::Unsupported);
+    profiler.SetGpuPassTiming(GpuPass::GameView, GpuSampleStatus::Present, 3.5);
+    profiler.SetGpuPassDrawStats(GpuPass::GameView, GpuSampleStatus::Present, 10, 200);
+    profiler.SetGpuPassTiming(GpuPass::SceneView, GpuSampleStatus::Unsupported);
 
     MemorySnapshot memory;
     memory.status = GpuSampleStatus::Present;
@@ -181,28 +183,95 @@ TEST_F(FrameProfilerTest, SetGpuPassSampleAndMemorySnapshotAreRecorded)
     const FrameSample& frame = profiler.HistoryAt(0);
 
     const GpuPassSample& gameView = frame.gpuPasses[static_cast<std::size_t>(GpuPass::GameView)];
-    EXPECT_EQ(gameView.status, GpuSampleStatus::Present);
+    EXPECT_EQ(gameView.timingStatus, GpuSampleStatus::Present);
     EXPECT_DOUBLE_EQ(gameView.milliseconds, 3.5);
+    EXPECT_EQ(gameView.countStatus, GpuSampleStatus::Present);
     EXPECT_EQ(gameView.drawCallCount, 10u);
     EXPECT_EQ(gameView.triangleCount, 200u);
 
     const GpuPassSample& sceneView = frame.gpuPasses[static_cast<std::size_t>(GpuPass::SceneView)];
-    EXPECT_EQ(sceneView.status, GpuSampleStatus::Unsupported);
+    EXPECT_EQ(sceneView.timingStatus, GpuSampleStatus::Unsupported);
+    // SetGpuPassTiming() on SceneView must never have touched its countStatus.
+    EXPECT_EQ(sceneView.countStatus, GpuSampleStatus::Absent);
 
     EXPECT_EQ(frame.memory.status, GpuSampleStatus::Present);
     EXPECT_EQ(frame.memory.totalBytes, 1024u);
 }
 
-TEST_F(FrameProfilerTest, GpuPassSampleOutsideFrameBracketIsNoOp)
+TEST_F(FrameProfilerTest, SetGpuPassTimingNeverTouchesCountStatusOrViceVersa)
+{
+    // Direct regression coverage for the timingStatus/countStatus split
+    // itself (see ProfilingTypes.h's own comment, and
+    // PHASE3_DRAW_CALL_TRIANGLE_COUNT_STRATEGY_v2.md, Step 2.4/3.6):
+    // calling one setter must never have any observable effect on the
+    // OTHER tri-state/its sibling fields.
+    FrameProfiler& profiler = FrameProfiler::Instance();
+    profiler.BeginFrame();
+    profiler.SetGpuPassTiming(GpuPass::GameView, GpuSampleStatus::Present, 7.0);
+    profiler.EndFrame();
+
+    const GpuPassSample& afterTimingOnly = profiler.HistoryAt(0).gpuPasses[static_cast<std::size_t>(GpuPass::GameView)];
+    EXPECT_EQ(afterTimingOnly.timingStatus, GpuSampleStatus::Present);
+    EXPECT_DOUBLE_EQ(afterTimingOnly.milliseconds, 7.0);
+    EXPECT_EQ(afterTimingOnly.countStatus, GpuSampleStatus::Absent);
+    EXPECT_EQ(afterTimingOnly.drawCallCount, 0u);
+    EXPECT_EQ(afterTimingOnly.triangleCount, 0u);
+
+    profiler.BeginFrame();
+    profiler.SetGpuPassDrawStats(GpuPass::SceneView, GpuSampleStatus::Present, 4, 60);
+    profiler.EndFrame();
+
+    const GpuPassSample& afterCountOnly = profiler.HistoryAt(1).gpuPasses[static_cast<std::size_t>(GpuPass::SceneView)];
+    EXPECT_EQ(afterCountOnly.countStatus, GpuSampleStatus::Present);
+    EXPECT_EQ(afterCountOnly.drawCallCount, 4u);
+    EXPECT_EQ(afterCountOnly.triangleCount, 60u);
+    EXPECT_EQ(afterCountOnly.timingStatus, GpuSampleStatus::Absent);
+    EXPECT_DOUBLE_EQ(afterCountOnly.milliseconds, 0.0);
+}
+
+// The exact regression test that would have caught this whole phase's own
+// most important defect had it existed before Phase 3 was implemented (see
+// PHASE3_DRAW_CALL_TRIANGLE_COUNT_STRATEGY_v2.md, Step 3.6): reporting a
+// real draw-call/triangle count for a pass must NEVER imply real GPU timing
+// data exists for that same pass.
+TEST_F(FrameProfilerTest, DrawStatsAloneDoNotImplyRealTimingData)
 {
     FrameProfiler& profiler = FrameProfiler::Instance();
-    profiler.SetGpuPassSample(GpuPass::Present, GpuSampleStatus::Present, 1.0); // No BeginFrame() yet.
+    profiler.BeginFrame();
+    profiler.SetGpuPassDrawStats(GpuPass::GameView, GpuSampleStatus::Present, 12, 400);
+    profiler.EndFrame();
+
+    const FrameSample& frame = profiler.HistoryAt(0);
+    const GpuPassSample& gameView = frame.gpuPasses[static_cast<std::size_t>(GpuPass::GameView)];
+
+    EXPECT_EQ(gameView.countStatus, GpuSampleStatus::Present);
+    EXPECT_EQ(gameView.drawCallCount, 12u);
+    EXPECT_EQ(gameView.triangleCount, 400u);
+    EXPECT_EQ(gameView.timingStatus, GpuSampleStatus::Absent);
+}
+
+TEST_F(FrameProfilerTest, SetGpuPassTimingOutsideFrameBracketIsNoOp)
+{
+    FrameProfiler& profiler = FrameProfiler::Instance();
+    profiler.SetGpuPassTiming(GpuPass::Present, GpuSampleStatus::Present, 1.0); // No BeginFrame() yet.
 
     profiler.BeginFrame();
     profiler.EndFrame();
 
     const GpuPassSample& sample = profiler.HistoryAt(0).gpuPasses[static_cast<std::size_t>(GpuPass::Present)];
-    EXPECT_EQ(sample.status, GpuSampleStatus::Absent);
+    EXPECT_EQ(sample.timingStatus, GpuSampleStatus::Absent);
+}
+
+TEST_F(FrameProfilerTest, SetGpuPassDrawStatsOutsideFrameBracketIsNoOp)
+{
+    FrameProfiler& profiler = FrameProfiler::Instance();
+    profiler.SetGpuPassDrawStats(GpuPass::Present, GpuSampleStatus::Present, 1, 10); // No BeginFrame() yet.
+
+    profiler.BeginFrame();
+    profiler.EndFrame();
+
+    const GpuPassSample& sample = profiler.HistoryAt(0).gpuPasses[static_cast<std::size_t>(GpuPass::Present)];
+    EXPECT_EQ(sample.countStatus, GpuSampleStatus::Absent);
 }
 
 TEST_F(FrameProfilerTest, LastCompletedFrameMatchesMostRecentHistoryEntry)

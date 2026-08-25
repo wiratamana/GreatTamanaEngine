@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace gte {
@@ -87,10 +88,18 @@ public:
 
     // See Renderer::Present(). frameRecorder supplies the clear color and
     // queued Submit() draws recorded into this frame - see FrameRecorder.h.
-    void Present(FrameRecorder& frameRecorder, const std::function<void(VkCommandBuffer)>& recordExtra);
+    // Returns std::nullopt on a call that recorded NOTHING this time (a
+    // minimized window, a still-pending resize, or a just-recreated
+    // swapchain) - std::nullopt is the correct, honest signal that the
+    // "Present" GpuPass genuinely did not run this frame, distinct from
+    // "ran and recorded zero queued draws" (a real DrawStats{0, 0}). See
+    // PHASE3_DRAW_CALL_TRIANGLE_COUNT_STRATEGY_v2.md, Step 3.3.
+    std::optional<DrawStats> Present(FrameRecorder& frameRecorder, const std::function<void(VkCommandBuffer)>& recordExtra);
 
-    // See Renderer::RenderOffscreen().
-    void RenderOffscreen(FrameRecorder& frameRecorder, RenderTexture& target,
+    // See Renderer::RenderOffscreen(). Unlike Present() above, this
+    // function has no early-return path today - it always has a real
+    // DrawStats to return, never std::nullopt.
+    DrawStats RenderOffscreen(FrameRecorder& frameRecorder, RenderTexture& target,
         const std::function<void(VkCommandBuffer)>& recordExtra);
 
 private:

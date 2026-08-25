@@ -74,15 +74,26 @@ public:
     // distinct scope names.
     void RecordCpuScope(const char* name, double milliseconds) noexcept;
 
-    // Records one named GPU pass's measurement for the current in-progress
-    // frame. Not wired to anything real yet as of Phase 0/1 - see
-    // ProfilingTypes.h's own comment on GpuSampleStatus - but the storage/
-    // API already exists so a future Phase 4 (GPU timestamp queries)/
-    // Phase 3 (draw-call and triangle counts) has somewhere correct to
-    // write into. `status` must be GpuSampleStatus::Present for
-    // milliseconds/drawCallCount/triangleCount to be meaningful.
-    void SetGpuPassSample(GpuPass pass, GpuSampleStatus status, double milliseconds = 0.0,
-        std::uint32_t drawCallCount = 0, std::uint32_t triangleCount = 0) noexcept;
+    // Records one named GPU pass's TIMING measurement for the current
+    // in-progress frame - governs GpuPassSample::timingStatus/milliseconds
+    // ONLY (see ProfilingTypes.h's own comment on the timingStatus/
+    // countStatus split). Not wired to anything real yet - a future Phase 4
+    // (GPU timestamp queries) is what actually calls this every frame with a
+    // real measurement. `status` must be GpuSampleStatus::Present for
+    // `milliseconds` to be meaningful.
+    void SetGpuPassTiming(GpuPass pass, GpuSampleStatus status, double milliseconds = 0.0) noexcept;
+
+    // Records one named GPU pass's DRAW-CALL/TRIANGLE-COUNT measurement for
+    // the current in-progress frame - governs GpuPassSample::countStatus/
+    // drawCallCount/triangleCount ONLY, entirely independent of
+    // SetGpuPassTiming() above (see ProfilingTypes.h's own comment on the
+    // timingStatus/countStatus split - this is exactly the split that lets
+    // Phase 3 report real counts without falsely implying Phase 4's GPU
+    // timing was also measured this frame). `status` must be
+    // GpuSampleStatus::Present for drawCallCount/triangleCount to be
+    // meaningful.
+    void SetGpuPassDrawStats(GpuPass pass, GpuSampleStatus status, std::uint32_t drawCallCount = 0,
+        std::uint32_t triangleCount = 0) noexcept;
 
     // Records this frame's GPU memory snapshot. Not wired to anything real
     // yet as of Phase 0/1 - a future Phase 5 (GPU memory usage over time)

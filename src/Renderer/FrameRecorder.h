@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../Math/Mat4.h"
+#include "DrawStats.h"
 #include "Mesh.h"
 #include "Pipeline.h"
 #include "RenderTarget.h"
@@ -107,7 +108,18 @@ public:
     // (e.g. Present()'s editor-chrome-only pass, after RenderOffscreen()
     // already drew the queue into the Game view texture) never redraws it -
     // see BeginFrame()/Submit() above.
-    void RecordFrame(VkCommandBuffer cmd, const RenderTarget& target, VkFormat expectedFormat,
+    //
+    // Returns this call's own DrawStats (see DrawStats.h) - one
+    // AccumulateDrawStats() call per queued item, made INLINE inside the
+    // very loop that already issues vkCmdDraw/vkCmdDrawIndexed for it
+    // (never a separate pass over m_drawQueue) - see DrawStats.h's own
+    // header comment for exactly why this fused design is a correctness
+    // requirement, not a style choice (PHASE3_DRAW_CALL_TRIANGLE_COUNT_STRATEGY_v2.md,
+    // Step 3.1/3.2). The caller (FramePresenter::Present()/RenderOffscreen())
+    // threads this back up to Application::Run(), the one place that knows
+    // which named GpuPass (see Profiling/ProfilingTypes.h) this recording
+    // corresponds to.
+    DrawStats RecordFrame(VkCommandBuffer cmd, const RenderTarget& target, VkFormat expectedFormat,
         VkFormat expectedDepthFormat, VkImageLayout finalLayout, const std::function<void(VkCommandBuffer)>& recordExtra);
 
 private:

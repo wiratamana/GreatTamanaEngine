@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -92,7 +93,15 @@ public:
     // seam a future overlay pass (the Editor's own ImGui chrome, a debug
     // UI, ...) hooks its draw commands into, without Renderer ever needing
     // to know what ImGui - or anything else - is.
-    void Present(const std::function<void(VkCommandBuffer)>& recordExtra = {});
+    //
+    // Returns std::nullopt on a call that recorded NOTHING this time (a
+    // minimized window, a still-pending resize, or a just-recreated
+    // swapchain) - see FramePresenter::Present()'s own comment. This is the
+    // one place Application::Run() reads a real DrawStats (see
+    // Renderer/DrawStats.h) back out to report to the Profiler for the
+    // "Present" GpuPass (Profiling/ProfilingTypes.h) - see
+    // PHASE3_DRAW_CALL_TRIANGLE_COUNT_STRATEGY_v2.md.
+    std::optional<DrawStats> Present(const std::function<void(VkCommandBuffer)>& recordExtra = {});
 
     // Renders into an off-screen RenderTexture instead of the swapchain:
     // clears it to the last Clear() color, runs recordExtra (if set)
@@ -105,7 +114,10 @@ public:
     // simplest correct thing while this is only used a couple of times a
     // frame for Editor panels; revisit (e.g. pipeline against its own
     // frames-in-flight) if it ever shows up as a bottleneck.
-    void RenderOffscreen(RenderTexture& target, const std::function<void(VkCommandBuffer)>& recordExtra = {});
+    //
+    // Unlike Present() above, this has no early-return path today - always
+    // returns a real DrawStats, never std::nullopt.
+    DrawStats RenderOffscreen(RenderTexture& target, const std::function<void(VkCommandBuffer)>& recordExtra = {});
 
     // The color format this Renderer's swapchain actually negotiated at
     // runtime (see VulkanSwapchain.cpp's ChooseSurfaceFormat) - the single

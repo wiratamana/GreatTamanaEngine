@@ -189,7 +189,13 @@ int Application::Run()
             const VkExtent2D extent = gameTarget->Extent();
             m_game.Render(m_renderer, AspectRatioOf(static_cast<int>(extent.width), static_cast<int>(extent.height)));
             GTE_PROFILE_SCOPE("Renderer::RenderOffscreen(GameView)");
-            m_renderer.RenderOffscreen(*gameTarget);
+            const DrawStats gameViewStats = m_renderer.RenderOffscreen(*gameTarget);
+            // Not #if GTE_ENABLE_PROFILER-gated - see AGENTS.md's "Profiling"
+            // section and this same file's own BeginFrame()/EndFrame() calls
+            // above, which aren't gated either; only GTE_PROFILE_SCOPE(...)'s
+            // own macro body is compile-time-gated.
+            Profiling::FrameProfiler::Instance().SetGpuPassDrawStats(Profiling::GpuPass::GameView,
+                Profiling::GpuSampleStatus::Present, gameViewStats.drawCallCount, gameViewStats.triangleCount);
         }
         if (sceneTarget != nullptr) {
             const VkExtent2D extent = sceneTarget->Extent();
@@ -203,7 +209,9 @@ int Application::Run()
             const Mat4 sceneViewProjection = m_editorLayer->SceneViewProjection(aspect);
             m_game.Render(m_renderer, aspect, &sceneViewProjection);
             GTE_PROFILE_SCOPE("Renderer::RenderOffscreen(SceneView)");
-            m_renderer.RenderOffscreen(*sceneTarget);
+            const DrawStats sceneViewStats = m_renderer.RenderOffscreen(*sceneTarget);
+            Profiling::FrameProfiler::Instance().SetGpuPassDrawStats(Profiling::GpuPass::SceneView,
+                Profiling::GpuSampleStatus::Present, sceneViewStats.drawCallCount, sceneViewStats.triangleCount);
         }
         if (gameTarget == nullptr && sceneTarget == nullptr) {
             // No Editor at all (release build - always takes this path), or
@@ -243,7 +251,17 @@ int Application::Run()
         // swapchain moments ago.
         {
             GTE_PROFILE_SCOPE("Renderer::Present");
-            m_renderer.Present([this](VkCommandBuffer cmd) { m_editorLayer->Render(cmd); });
+            const std::optional<DrawStats> presentStats =
+                m_renderer.Present([this](VkCommandBuffer cmd) { m_editorLayer->Render(cmd); });
+            if (presentStats.has_value()) {
+                Profiling::FrameProfiler::Instance().SetGpuPassDrawStats(Profiling::GpuPass::Present,
+                    Profiling::GpuSampleStatus::Present, presentStats->drawCallCount, presentStats->triangleCount);
+            }
+            // else: Present() recorded nothing this frame (minimized window,
+            // pending resize, or a just-recreated swapchain - see
+            // FramePresenter::Present()'s own comment) - GpuPass::Present's
+            // countStatus correctly stays at its default
+            // GpuSampleStatus::Absent, with no extra code needed.
         }
 
         // Update/present any panel the user has dragged outside the main OS

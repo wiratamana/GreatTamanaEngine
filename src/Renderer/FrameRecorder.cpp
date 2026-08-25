@@ -37,7 +37,7 @@ void FrameRecorder::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat
     m_drawQueue.push_back(item);
 }
 
-void FrameRecorder::RecordFrame(VkCommandBuffer cmd, const RenderTarget& target, VkFormat expectedFormat,
+DrawStats FrameRecorder::RecordFrame(VkCommandBuffer cmd, const RenderTarget& target, VkFormat expectedFormat,
     VkFormat expectedDepthFormat, VkImageLayout finalLayout, const std::function<void(VkCommandBuffer)>& recordExtra)
 {
     // Fail fast (debug builds only) if this target's format doesn't match
@@ -160,6 +160,15 @@ void FrameRecorder::RecordFrame(VkCommandBuffer cmd, const RenderTarget& target,
 
     vkCmdBeginRendering(cmd, &renderingInfo);
 
+    // Accumulated once per queued item, INLINE inside the exact loop below
+    // that already issues vkCmdDraw/vkCmdDrawIndexed for it - never from a
+    // separate pass over m_drawQueue. See DrawStats.h's own header comment
+    // for why this fused design is a correctness requirement (Phase 3 -
+    // PHASE3_DRAW_CALL_TRIANGLE_COUNT_STRATEGY_v2.md, Step 3.1/3.2), not a
+    // style choice. Stays {0, 0} (never populated) on a frame where
+    // m_drawQueue is empty - see this function's own return statement below.
+    DrawStats drawStats;
+
     // Engine (Game) geometry queued via Submit() this frame - recorded
     // first, before any overlay, so an Editor's ImGui chrome always draws
     // on top of it. Cleared right after being recorded - see this
@@ -218,6 +227,13 @@ void FrameRecorder::RecordFrame(VkCommandBuffer cmd, const RenderTarget& target,
             } else {
                 vkCmdDraw(cmd, item.vertexCount, 1, 0, 0);
             }
+
+            // Accumulated on the exact same path that just issued the real
+            // vkCmdDraw/vkCmdDrawIndexed above - never before it, never
+            // unconditionally at the top of the loop body - so this count
+            // can never overstate what the GPU actually received. See
+            // DrawStats.h's own header comment (AccumulateDrawStats()).
+            AccumulateDrawStats(drawStats, item.indexBuffer != VK_NULL_HANDLE, item.vertexCount, item.indexCount);
         }
 
         m_drawQueue.clear();
@@ -264,6 +280,8 @@ void FrameRecorder::RecordFrame(VkCommandBuffer cmd, const RenderTarget& target,
     // declaration comment in FrameRecorder.h) - no final transition needed;
     // the next RecordFrame() call against it starts over from
     // VK_IMAGE_LAYOUT_UNDEFINED via loadOp = CLEAR again either way.
+
+    return drawStats;
 }
 
 } // namespace gte

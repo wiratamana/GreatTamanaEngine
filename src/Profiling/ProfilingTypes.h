@@ -75,13 +75,27 @@ enum class GpuPass : std::uint8_t {
 inline constexpr std::size_t kGpuPassCount = 3;
 
 // One named GPU pass's measurement for the current frame - see GpuPass/
-// GpuSampleStatus above. `milliseconds`/`drawCallCount`/`triangleCount`
-// are only meaningful when `status == GpuSampleStatus::Present`.
+// GpuSampleStatus above. Deliberately TWO INDEPENDENT tri-states, not one
+// combined `status` (see PHASE3_DRAW_CALL_TRIANGLE_COUNT_STRATEGY_v2.md,
+// Step 2.4 for the full reasoning this split fixes): Phase 3 (draw-call/
+// triangle counts) produces REAL data for `drawCallCount`/`triangleCount`
+// well before Phase 4 (GPU timestamp queries) exists to produce real data
+// for `milliseconds` - a single shared `status` field would force Phase 3's
+// own call site to falsely claim GPU timing was also measured this frame.
 struct GpuPassSample {
-    GpuSampleStatus status = GpuSampleStatus::Absent;
-    double milliseconds = 0.0;
-    std::uint32_t drawCallCount = 0;
-    std::uint32_t triangleCount = 0;
+    // Governs `milliseconds` ONLY. Stays GpuSampleStatus::Absent until a
+    // future Phase 4 (GPU timestamp queries) actually measures a real value
+    // for this pass this frame - Phase 3 (draw-call/triangle counts) never
+    // touches this field.
+    GpuSampleStatus timingStatus = GpuSampleStatus::Absent;
+    double milliseconds = 0.0; // Only meaningful when timingStatus == Present.
+
+    // Governs drawCallCount/triangleCount ONLY - Phase 3's own concern,
+    // entirely independent of GPU timing. A pure CPU-side count of what was
+    // queued via Submit()/FrameRecorder::Submit() this frame.
+    GpuSampleStatus countStatus = GpuSampleStatus::Absent;
+    std::uint32_t drawCallCount = 0; // Only meaningful when countStatus == Present.
+    std::uint32_t triangleCount = 0; // Only meaningful when countStatus == Present.
 };
 
 // A plain, Vulkan-free copy of GpuMemoryTracker::Totals's shape

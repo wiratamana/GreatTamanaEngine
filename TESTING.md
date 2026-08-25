@@ -70,6 +70,37 @@ safe on any machine/CI runner, GPU or not:
 - `Renderer/ResourcePoolTests.cpp` - the generic `ResourcePool<T, HandleT>`
   slot-map's insert/remove/lookup and generation-guard semantics (backing
   `MeshHandle`/`PipelineHandle` - see `README.md`, "Entity-Component-System").
+- `Renderer/DrawStatsTests.cpp` - Phase 3's pure per-item draw-call/
+  triangle-count accumulator, `AccumulateDrawStats()`/`CountDrawStats()`
+  (`src/Renderer/DrawStats.h`) - empty/single/mixed/truncating-division/
+  degenerate-zero-vertex cases, plus a case proving the inline accumulator
+  (what `FrameRecorder::RecordFrame()` actually calls) and the batch
+  wrapper (what this test file mostly uses) agree exactly. No Vulkan/
+  Renderer/live GPU device involved at all.
+- `Profiling/FrameProfilerTests.cpp` - `FrameProfiler`'s BeginFrame()/
+  EndFrame()/RecordCpuScope()/SetGpuPassTiming()/SetGpuPassDrawStats()/
+  SetMemorySnapshot() ring-buffer and flat-aggregation bookkeeping
+  (`src/Profiling/FrameProfiler.h`), including the `timingStatus`/
+  `countStatus` split's own regression coverage (a draw-stats-only call
+  must never imply real GPU timing data, and vice versa) - fed entirely
+  with hand-called timings/values, no live clock/Vulkan/SDL involved.
+  Always built (this module has no `GTE_ENABLE_EDITOR` dependency at all -
+  see `AGENTS.md`, "Profiling").
+- `Profiling/ScopeTimerTests.cpp` - `ScopeTimer`/`GTE_PROFILE_SCOPE`'s
+  actual RAII behavior (records a real positive duration, nests correctly,
+  and skips entirely when capture is disabled) - `src/Profiling/ScopeTimer.h`.
+  Always built, same reason as above.
+- `Profiling/FrameGraphDataTests.cpp` - Phase 2's pure "FrameProfiler
+  history -> plottable points" reshape (`BuildFrameGraphPoints()`/
+  `ComputeCpuMillisecondsRange()`/`ComputeGpuMillisecondsRange()` -
+  `src/Profiling/FrameGraphData.h`) - exact frame-index ordering (including
+  ring-buffer wraparound), all three GPU passes/tri-states round-tripping
+  without cross-contamination, an Absent/Unsupported sample never being
+  mistaken for real data even when it carries a stale non-zero value, a
+  pass whose only data is a Phase 3 draw-stats call correctly reporting no
+  TIMING data, an out-of-range `GpuPass` reporting no data rather than
+  reading out of bounds, and an in-progress (not yet `EndFrame()`'d) frame
+  never being observed. Always built, same reason as the two entries above.
 - `Math/Vec2Tests.cpp` / `Math/Vec3Tests.cpp` - `Vec2`/`Vec3` arithmetic and
   geometric ops (dot/cross/length/normalize/lerp), using exact hand-computed
   values.

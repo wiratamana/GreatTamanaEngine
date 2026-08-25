@@ -96,15 +96,18 @@ FrameGraphRange ComputeCpuMillisecondsRange(std::span<const FrameGraphPoint> poi
 
 // Computes the min/max GPU-millisecond range for one named `pass` across
 // every point in `points`, including ONLY entries whose
-// gpuPasses[pass].status == GpuSampleStatus::Present in the scan - an
+// gpuPasses[pass].timingStatus == GpuSampleStatus::Present in the scan - an
 // Absent/Unsupported entry is excluded regardless of whatever numeric value
 // happens to be sitting in its own milliseconds field (see
 // PHASE2_FRAME_GRAPH_DATA_STRATEGY_v3.md's own "never convert absent GPU
 // data into 0 ms" rule). hasData is true only if at least one Present entry
-// was found.
+// was found. Never reads/branches on countStatus/drawCallCount/
+// triangleCount - see ProfilingTypes.h's own comment on the timingStatus/
+// countStatus split (PHASE3_DRAW_CALL_TRIANGLE_COUNT_STRATEGY_v2.md, Step
+// 2.4).
 //
 // Bounds-checks `pass` unconditionally (active in both Debug and Release,
-// never a debug-only assert), mirroring FrameProfiler::SetGpuPassSample()'s
+// never a debug-only assert), mirroring FrameProfiler::SetGpuPassTiming()'s
 // own already-shipped handling of exactly this same kind of invalid input
 // (see FrameProfiler.cpp) - an out-of-range `pass` simply reports
 // hasData == false, the same as "a valid pass with zero Present entries",

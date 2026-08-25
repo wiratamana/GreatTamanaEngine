@@ -257,11 +257,73 @@ whenever touching profiling instrumentation, or adding a new call site:
   to a bare numeric `0`.** (`ProfilingTypes.h`'s `GpuSampleStatus`,
   `GpuPassSample`, `MemorySnapshot`.) A hidden Editor panel's pass not
   running this frame must never look, on a future graph/table, like it ran
-  and cost nothing - see `PROFILER_STRATEGY_v2.md`, Step 2.3/3a. This
-  tri-state is currently unused by any real producer (Phase 0/1 only wire
-  up CPU scope timers) - a future Phase 3/4/5 addition must set a real
-  status through `FrameProfiler::SetGpuPassSample()`/`SetMemorySnapshot()`
-  rather than inventing a second "is this real" convention.
+  and cost nothing - see `PROFILER_STRATEGY_v2.md`, Step 2.3/3a. As of
+  Phase 3 (`PHASE3_DRAW_CALL_TRIANGLE_COUNT_STRATEGY_v2.md`), this is
+  real, wired-up behavior for draw-call/triangle counts specifically (see
+  the `DrawStats.h`/`timingStatus`/`countStatus` bullets below) - GPU
+  TIMING (Phase 4) and the memory snapshot (Phase 5) remain the only
+  producers still unwired, set only synthetically by tests via
+  `FrameProfiler::SetGpuPassTiming()`/`SetMemorySnapshot()`.
+- **`GpuPassSample` splits its tri-state into TWO INDEPENDENT fields,
+  `timingStatus` and `countStatus` - never reintroduce a single combined
+  `status`.** (`ProfilingTypes.h`.) `timingStatus`/`milliseconds` are
+  governed exclusively by `FrameProfiler::SetGpuPassTiming()` (Phase 4's
+  eventual GPU timestamp queries - unwired to anything real as of Phase 3);
+  `countStatus`/`drawCallCount`/`triangleCount` are governed exclusively by
+  `FrameProfiler::SetGpuPassDrawStats()` (Phase 3's own draw-call/triangle
+  counts - real as of this phase, see the `DrawStats.h` bullet below). This
+  split exists because Phase 3 (cheap, self-contained) was deliberately
+  implemented before Phase 4 (substantial/risky) - a single shared `status`
+  field would have forced Phase 3's own call site to falsely claim GPU
+  timing was also measured this frame the instant it reported a real count.
+  See `PHASE3_DRAW_CALL_TRIANGLE_COUNT_STRATEGY_v2.md`, Step 2.4, and its
+  own regression test,
+  `tests/Profiling/FrameProfilerTests.cpp`'s `DrawStatsAloneDoNotImplyRealTimingData`.
+  `FrameGraphData.cpp`'s `ComputeGpuMillisecondsRange()` branches on
+  `timingStatus` only, never `countStatus` - a pass whose only data this
+  session is a draw-stats call correctly reports `hasData == false`
+  for timing (see `tests/Profiling/FrameGraphDataTests.cpp`'s
+  `DrawStatsOnlyPassReportsNoTimingData`).
+- **`src/Renderer/DrawStats.h/.cpp`** (Phase 3 -
+  `PHASE3_DRAW_CALL_TRIANGLE_COUNT_STRATEGY_v2.md`) is the always-compiled,
+  Vulkan-free pure accumulator behind the draw-call/triangle counts above:
+  `AccumulateDrawStats()` turns one queued draw's shape
+  (`hasIndexBuffer`/`vertexCount`/`indexCount`) into an incremental
+  `{drawCallCount, triangleCount}` contribution, and is called INLINE from
+  inside `FrameRecorder::RecordFrame()`'s existing per-item loop - on the
+  exact same code path that already issues the real
+  `vkCmdDraw`/`vkCmdDrawIndexed` for that item, immediately after it -
+  never from a separate pass over `m_drawQueue`. This is a correctness
+  decision, not a style preference: a separate counting pass would be a
+  second, independent place that has to keep agreeing with whatever the
+  real recording loop actually does, including any future skip/validity
+  branch added there - fusing the two into one loop makes divergence
+  between "what was counted" and "what was actually drawn" structurally
+  impossible. `CountDrawStats()` (a batch wrapper over
+  `AccumulateDrawStats()`) exists purely so
+  `tests/Renderer/DrawStatsTests.cpp` can write table-driven tests without
+  a live `FrameRecorder` - production code always calls
+  `AccumulateDrawStats()` directly, never `CountDrawStats()`. Triangle
+  counting (`(indexed ? indexCount : vertexCount) / 3`) assumes every
+  `Pipeline` is `VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST` (true today - see
+  `Pipeline.cpp`) and every draw has `instanceCount == 1` (no instancing
+  exists anywhere in this engine yet) - both assumptions are documented
+  directly in `DrawStats.h` and must be revisited together if either ever
+  changes. Deliberately NOT gated behind `#if GTE_ENABLE_PROFILER` (unlike
+  `ScopeTimer`'s per-scope clock read) - `m_drawQueue` is already iterated
+  unconditionally every frame to issue the real draw calls regardless of
+  that switch, so this accumulation rides along on that same,
+  already-necessary iteration at effectively no extra measurable cost.
+  `FrameRecorder::RecordFrame()`/`FramePresenter::Present()`/
+  `RenderOffscreen()`/`Renderer::Present()`/`RenderOffscreen()` all thread
+  this `DrawStats` result back up to `Application::Run()`, the one place
+  that knows which named `GpuPass` a given recording corresponds to -
+  `FramePresenter::Present()`'s several early-return paths (minimized
+  window, pending resize, just-recreated swapchain) return
+  `std::optional<DrawStats>` as `std::nullopt` specifically so a frame
+  that recorded nothing is never confused with one that recorded and drew
+  zero queued items - `RenderOffscreen()` has no such early-return path
+  and always returns a real `DrawStats`.
 - **`src/Profiling/FrameGraphData.h/.cpp`** (Phase 2 -
   `PHASE2_FRAME_GRAPH_DATA_STRATEGY_v3.md`) is the one place
   `FrameProfiler`'s ring buffer gets reshaped into plottable points -

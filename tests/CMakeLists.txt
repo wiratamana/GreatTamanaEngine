@@ -76,6 +76,13 @@
 #                                            AGENTS.md, "Entity-Component-
 #                                            System"), backing MeshHandle/
 #                                            PipelineHandle.
+#   - Renderer/DrawStatsTests.cpp             - Phase 3's pure per-item
+#                                            draw-call/triangle-count
+#                                            accumulator (AccumulateDrawStats()/
+#                                            CountDrawStats() -
+#                                            src/Renderer/DrawStats.h) - no
+#                                            Vulkan/Renderer/live GPU
+#                                            involved at all.
 #   - Game/RenderSystemTests.cpp             - RenderSystem::CollectRenderables()
 #                                            (the pure ECS -> DrawCommand step)
 #                                            and ResolveActiveCameraViewProjection()
@@ -308,6 +315,7 @@ set(GTE_TEST_SOURCES
     Renderer/VertexTests.cpp
     Renderer/PrimitiveMeshGeneratorTests.cpp
     Renderer/ResourcePoolTests.cpp
+    Renderer/DrawStatsTests.cpp
     Math/Vec2Tests.cpp
     Math/Vec3Tests.cpp
     Math/Mat4Tests.cpp

@@ -214,16 +214,17 @@ void FramePresenter::RecreateSwapchain()
     m_resizeRequested = false;
 }
 
-void FramePresenter::Present(FrameRecorder& frameRecorder, const std::function<void(VkCommandBuffer)>& recordExtra)
+std::optional<DrawStats> FramePresenter::Present(
+    FrameRecorder& frameRecorder, const std::function<void(VkCommandBuffer)>& recordExtra)
 {
     if (m_pendingWidth <= 0 || m_pendingHeight <= 0) {
-        return; // Minimized - nothing to draw this frame.
+        return std::nullopt; // Minimized - nothing to draw this frame.
     }
 
     if (m_resizeRequested) {
         RecreateSwapchain();
         if (m_resizeRequested) {
-            return; // Still pending (stayed minimized) - try again next frame.
+            return std::nullopt; // Still pending (stayed minimized) - try again next frame.
         }
     }
 
@@ -237,7 +238,7 @@ void FramePresenter::Present(FrameRecorder& frameRecorder, const std::function<v
 
     if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR) {
         RecreateSwapchain();
-        return;
+        return std::nullopt;
     }
     if (acquireResult != VK_SUCCESS && acquireResult != VK_SUBOPTIMAL_KHR) {
         throw std::runtime_error("vkAcquireNextImageKHR failed (VkResult=" + std::to_string(acquireResult) + ")");
@@ -289,7 +290,7 @@ void FramePresenter::Present(FrameRecorder& frameRecorder, const std::function<v
     // target.depthFormat stays VK_FORMAT_UNDEFINED (RenderTarget's own
     // defaults) - FrameRecorder::RecordFrame() treats a VK_NULL_HANDLE
     // depthImage as "skip the depth attachment for this pass entirely".
-    frameRecorder.RecordFrame(
+    const DrawStats drawStats = frameRecorder.RecordFrame(
         cmd, target, ColorFormat(), m_depthFormat, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, recordExtra);
 
     if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
@@ -331,9 +332,11 @@ void FramePresenter::Present(FrameRecorder& frameRecorder, const std::function<v
     }
 
     m_currentFrame = (m_currentFrame + 1) % kFramesInFlight;
+
+    return drawStats;
 }
 
-void FramePresenter::RenderOffscreen(
+DrawStats FramePresenter::RenderOffscreen(
     FrameRecorder& frameRecorder, RenderTexture& target, const std::function<void(VkCommandBuffer)>& recordExtra)
 {
     const VkFence offscreenFence = m_frameSync.OffscreenFence();
@@ -348,8 +351,8 @@ void FramePresenter::RenderOffscreen(
         throw std::runtime_error("vkBeginCommandBuffer failed (offscreen)");
     }
 
-    frameRecorder.RecordFrame(m_offscreenCommandBuffer, target.Target(), ColorFormat(), m_depthFormat,
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, recordExtra);
+    const DrawStats drawStats = frameRecorder.RecordFrame(m_offscreenCommandBuffer, target.Target(), ColorFormat(),
+        m_depthFormat, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, recordExtra);
 
     if (vkEndCommandBuffer(m_offscreenCommandBuffer) != VK_SUCCESS) {
         throw std::runtime_error("vkEndCommandBuffer failed (offscreen)");
@@ -366,6 +369,8 @@ void FramePresenter::RenderOffscreen(
 
     // Synchronous for now - see the declaration comment in Renderer.h.
     vkWaitForFences(m_device, 1, &offscreenFence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
+
+    return drawStats;
 }
 
 } // namespace gte
