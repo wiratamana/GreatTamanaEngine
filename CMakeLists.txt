@@ -333,6 +333,8 @@ if(GTE_ENABLE_EDITOR)
             src/Editor/AssetPreviewTexture.cpp
             src/Editor/AssetPreviewMesh.h
             src/Editor/AssetPreviewMesh.cpp
+            src/Editor/BoneViewerWindow.h
+            src/Editor/BoneViewerWindow.cpp
         )
     endif()
 else()

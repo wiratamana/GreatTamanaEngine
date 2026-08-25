@@ -8,6 +8,7 @@ struct EditorContext;
 #if GTE_ENABLE_PROJECT_PANEL
 class AssetPreviewTexture;
 class AssetPreviewMesh;
+class BoneViewerWindow;
 #endif
 
 // Shows/edits whichever selection is currently "on top" - see
@@ -17,7 +18,15 @@ class AssetPreviewMesh;
 //     as Euler degrees and converted back to the stored Quat - see
 //     Math/Quat.h's FromEulerDegrees()/ToEulerDegrees()); MeshRenderer's
 //     handles are shown read-only (no asset-picker UI exists yet to let a
-//     user reassign them).
+//     user reassign them). An entity that carries a MeshAssetSource
+//     component (i.e. the root of a model spawned via
+//     Game::CreateMeshEntityFromGtaFile() - see ECS/Components/
+//     MeshAssetSource.h) additionally gets an "Open Bone Viewer" button
+//     (only when GTE_ENABLE_PROJECT_PANEL is ON - see `boneViewer` below)
+//     that opens `boneViewer` onto it - a Unity-"Avatar configuration"-style
+//     floating debug window showing the model's bind-pose mesh with every
+//     skeleton bone drawn as a gizmo dot + name, for debugging an imported
+//     model/animation bone mismatch (see BoneViewerWindow.h).
 //   - Asset (ctx.selection.SelectedAssetAbsolutePath(), from Project - only
 //     reachable when GTE_ENABLE_PROJECT_PANEL is ON) - plain file/folder metadata
 //     (name/extension/size/last-modified, via AssetInspectorData.h), PLUS
@@ -34,14 +43,18 @@ class AssetPreviewMesh;
 //     else (a folder, a non-image/non-mesh/non-animation file, or a file
 //     that fails to decode/parse).
 // Called once per frame by ImGuiEditorLayer::BuildUI(), after
-// BuildHierarchyPanel(). `renderer`/`assetPreview`/`assetPreviewMesh` only
-// exist in this signature when GTE_ENABLE_PROJECT_PANEL is ON - see
-// AGENTS.md, "Editor Module Structure", for why this `#if` guard is one of
-// the few GTE_ENABLE_PROJECT_PANEL touch points allowed outside
-// ImGuiEditorLayer.cpp/DockLayout.cpp.
+// BuildHierarchyPanel(). `renderer`/`assetPreview`/`assetPreviewMesh`/
+// `boneViewer` only exist in this signature when GTE_ENABLE_PROJECT_PANEL is
+// ON - see AGENTS.md, "Editor Module Structure", for why this `#if` guard is
+// one of the few GTE_ENABLE_PROJECT_PANEL touch points allowed outside
+// ImGuiEditorLayer.cpp/DockLayout.cpp. (BoneViewerWindow itself has nothing
+// to do with the Project panel feature-wise - it's only gated the same way
+// because it reuses AssetPreviewMesh's own MeshPreview.vert/.frag shader
+// pair, which is only ever compiled/staged under this same switch - see
+// CMakeLists.txt.)
 #if GTE_ENABLE_PROJECT_PANEL
-void BuildInspectorPanel(
-    Registry& registry, EditorContext& ctx, Renderer& renderer, AssetPreviewTexture& assetPreview, AssetPreviewMesh& assetPreviewMesh);
+void BuildInspectorPanel(Registry& registry, EditorContext& ctx, Renderer& renderer, AssetPreviewTexture& assetPreview,
+    AssetPreviewMesh& assetPreviewMesh, BoneViewerWindow& boneViewer);
 #else
 void BuildInspectorPanel(Registry& registry, EditorContext& ctx);
 #endif

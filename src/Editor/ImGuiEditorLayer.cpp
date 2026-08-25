@@ -11,6 +11,7 @@
 #if GTE_ENABLE_PROJECT_PANEL
 #include "AssetPreviewMesh.h"
 #include "AssetPreviewTexture.h"
+#include "BoneViewerWindow.h"
 #include "Panels/ProjectPanel.h"
 #endif
 #include "Panels/ScenePanel.h"
@@ -253,11 +254,12 @@ public:
 #if GTE_ENABLE_PROJECT_PANEL
         // Must release its own GPU texture/ImGui descriptor(s) BEFORE
         // ImGui_ImplVulkan_Shutdown() below - member destruction order
-        // alone would run AFTER Shutdown() (m_assetPreview/m_assetPreviewMesh
-        // are declared further down than m_context), which is too late (see
-        // AssetPreviewTexture::Reset()'s own comment).
+        // alone would run AFTER Shutdown() (m_assetPreview/m_assetPreviewMesh/
+        // m_boneViewer are declared further down than m_context), which is
+        // too late (see AssetPreviewTexture::Reset()'s own comment).
         m_assetPreview.Reset();
         m_assetPreviewMesh.Reset();
+        m_boneViewer.Reset();
 #endif
         ImGui_ImplVulkan_Shutdown();
         ImGui_ImplSDL3_Shutdown();
@@ -423,7 +425,7 @@ public:
 
         BuildHierarchyPanel(game, renderer, m_ctx);
 #if GTE_ENABLE_PROJECT_PANEL
-        BuildInspectorPanel(registry, m_ctx, renderer, m_assetPreview, m_assetPreviewMesh);
+        BuildInspectorPanel(registry, m_ctx, renderer, m_assetPreview, m_assetPreviewMesh, m_boneViewer);
 #else
         BuildInspectorPanel(registry, m_ctx);
 #endif
@@ -432,6 +434,12 @@ public:
         BuildMemoryPanel(m_ctx, renderer);
 #if GTE_ENABLE_PROJECT_PANEL
         m_projectPanel.Build(m_ctx);
+        // The Bone Viewer is its own floating window (opened on demand via
+        // Inspector's "Open Bone Viewer" button - see
+        // Panels/InspectorPanel.cpp) rather than part of the fixed dock
+        // layout above - Build() itself is a complete no-op whenever it
+        // isn't currently open (see BoneViewerWindow.h).
+        m_boneViewer.Build(registry, renderer);
 #endif
     }
 
@@ -561,6 +569,15 @@ private:
     // AssetPreviewMesh.h. Also explicitly Reset() in the destructor above,
     // same reasoning as m_assetPreview.
     AssetPreviewMesh m_assetPreviewMesh;
+
+    // The Editor's Unity-"Avatar configuration"-style Bone Viewer floating
+    // debug window (BoneViewerWindow.h) - opened on demand via Inspector's
+    // "Open Bone Viewer" button (Panels/InspectorPanel.cpp) for whichever
+    // entity is currently selected, and stays open (drawing whatever entity
+    // it was last opened onto) independent of the Hierarchy/Inspector
+    // selection changing afterwards. Also explicitly Reset() in the
+    // destructor above, same reasoning as m_assetPreview/m_assetPreviewMesh.
+    BoneViewerWindow m_boneViewer;
 #endif
 
     // Shared state read/written by DockLayout.cpp's

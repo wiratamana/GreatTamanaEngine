@@ -13,11 +13,13 @@
 #include "../AssetInspectorData.h"
 #include "../AssetPreviewMesh.h"
 #include "../AssetPreviewTexture.h"
+#include "../BoneViewerWindow.h"
 #include "../MemoryPanelData.h" // FormatBytes() - reused for the asset size field below.
 #include "../ProjectPanelData.h" // Utf8ToPath()
 #include "../../Assets/AssetTypes.h" // AssetType, AssetFlags, Guid
 #include "../../Assets/GtaFile.h" // ReadGtaHeader()/ReadGtaFile()
 #include "../../Assets/MotionFile.h" // DecodeMotionDataFromBytes()
+#include "../../ECS/Components/MeshAssetSource.h"
 #include "../../Renderer/Renderer.h"
 #endif
 
@@ -30,10 +32,13 @@
 #include <vector>
 
 namespace gte {
-
 namespace {
 
+#if GTE_ENABLE_PROJECT_PANEL
+void BuildEntityInspector(Registry& registry, EditorContext& ctx, BoneViewerWindow& boneViewer)
+#else
 void BuildEntityInspector(Registry& registry, EditorContext& ctx)
+#endif
 {
     const Entity entity = ctx.selection.SelectedEntity();
 
@@ -128,6 +133,27 @@ void BuildEntityInspector(Registry& registry, EditorContext& ctx)
             ImGui::Text("Frame: %.1f", animator->frame);
         }
     }
+
+#if GTE_ENABLE_PROJECT_PANEL
+    // Shown for the ROOT entity of any model spawned via
+    // Game::CreateMeshEntityFromGtaFile() (see ECS/Components/
+    // MeshAssetSource.h) - a button that opens (or re-targets) the
+    // Unity-"Avatar configuration"-style Bone Viewer floating window
+    // (BoneViewerWindow.h) onto this entity, good for debugging exactly why
+    // an imported model's bones/animation don't line up (mismatched names,
+    // an unexpected hierarchy, ...). Always shown for any MeshAssetSource
+    // entity regardless of whether its model actually turns out to have
+    // skeleton data - BoneViewerWindow itself reports "no bone/skeleton
+    // data" plainly if not, same "never a spurious failure message, just a
+    // plain fact" convention as everything else in this panel.
+    if (registry.TryGetComponent<MeshAssetSource>(entity) != nullptr) {
+        if (ImGui::CollapsingHeader("Model", ImGuiTreeNodeFlags_DefaultOpen)) {
+            if (ImGui::Button("Open Bone Viewer")) {
+                boneViewer.Open(entity);
+            }
+        }
+    }
+#endif
 }
 
 #if GTE_ENABLE_PROJECT_PANEL
@@ -667,7 +693,7 @@ void BuildAssetInspector(
 
 #if GTE_ENABLE_PROJECT_PANEL
 void BuildInspectorPanel(Registry& registry, EditorContext& ctx, Renderer& renderer, AssetPreviewTexture& assetPreview,
-    AssetPreviewMesh& assetPreviewMesh)
+    AssetPreviewMesh& assetPreviewMesh, BoneViewerWindow& boneViewer)
 #else
 void BuildInspectorPanel(Registry& registry, EditorContext& ctx)
 #endif
@@ -682,7 +708,11 @@ void BuildInspectorPanel(Registry& registry, EditorContext& ctx)
     }
 #endif
 
+#if GTE_ENABLE_PROJECT_PANEL
+    BuildEntityInspector(registry, ctx, boneViewer);
+#else
     BuildEntityInspector(registry, ctx);
+#endif
 
     ImGui::End();
 }
