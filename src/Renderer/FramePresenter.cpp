@@ -233,6 +233,16 @@ std::optional<DrawStats> FramePresenter::Present(
 
     const VkFence fence = m_frameSync.InFlightFence(m_currentFrame);
     vkWaitForFences(m_device, 1, &fence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
+    // Phase 4D (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) - safe to read
+    // back whatever was written into THIS frame-in-flight slot
+    // kFramesInFlight frames ago: the fence wait immediately above already
+    // proves that submission has fully completed - this is the exact,
+    // pre-existing synchronization point Phase 4D piggybacks on, never a
+    // new wait added just to fetch this sooner. A no-op (cached
+    // Absent/Unsupported, no Vulkan call) until this slot has genuinely
+    // been written at least once - see GpuTimingService::
+    // ReadPresentResultIfAvailable()'s own warm-up handling.
+    m_gpuTiming->ReadPresentResultIfAvailable(m_currentFrame);
 
     std::uint32_t imageIndex = 0;
     const VkResult acquireResult = vkAcquireNextImageKHR(
@@ -273,6 +283,18 @@ std::optional<DrawStats> FramePresenter::Present(
         throw std::runtime_error("vkBeginCommandBuffer failed");
     }
 
+    // Phase 4D (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) - reset (both
+    // slots for THIS frame-in-flight index) + a TOP_OF_PIPE timestamp
+    // write, recorded OUTSIDE any dynamic rendering instance (before
+    // frameRecorder.RecordFrame() below opens/closes its own
+    // vkCmdBeginRendering/vkCmdEndRendering pair - see AGENTS.md-equivalent
+    // reasoning in that document's Step 2.3). Safe to reset+write here
+    // specifically because the fence wait at the top of this function
+    // already proved the LAST use of this exact slot pair
+    // (kFramesInFlight frames ago) is complete. A no-op when unsupported/
+    // uncompiled-in/capture-disabled.
+    m_gpuTiming->RecordPresentPassStart(cmd, m_currentFrame);
+
     RenderTarget target;
     target.image = m_swapchain.Image(imageIndex);
     target.imageView = m_swapchain.ImageView(imageIndex);
@@ -295,6 +317,16 @@ std::optional<DrawStats> FramePresenter::Present(
     // depthImage as "skip the depth attachment for this pass entirely".
     const DrawStats drawStats = frameRecorder.RecordFrame(
         cmd, target, ColorFormat(), m_depthFormat, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, recordExtra);
+
+    // BOTTOM_OF_PIPE timestamp write, immediately followed by marking this
+    // frame-in-flight slot as having genuinely been written this call -
+    // see RecordPresentPassStart()'s own comment above for why this
+    // placement (bracketing the WHOLE recorded pass, including recordExtra
+    // - Dear ImGui's own chrome) is correct. MarkPresentSlotWritten() is a
+    // safe no-op under the exact same guard as the Record* calls, so it's
+    // fine to call unconditionally right here (see GpuTimingService.h).
+    m_gpuTiming->RecordPresentPassEnd(cmd, m_currentFrame);
+    m_gpuTiming->MarkPresentSlotWritten(m_currentFrame);
 
     if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
         throw std::runtime_error("vkEndCommandBuffer failed");

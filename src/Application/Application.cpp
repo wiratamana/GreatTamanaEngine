@@ -295,12 +295,20 @@ int Application::Run()
             if (presentStats.has_value()) {
                 Profiling::FrameProfiler::Instance().SetGpuPassDrawStats(Profiling::GpuPass::Present,
                     Profiling::GpuSampleStatus::Present, presentStats->drawCallCount, presentStats->triangleCount);
+                // Phase 4D (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) -
+                // real GPU timing for the swapchain Present pass, reported
+                // through the exact same guard that already proves this
+                // pass ran this frame (mirroring the Game/Scene blocks
+                // above).
+                const GpuTimingSample presentTiming = m_renderer.LastGpuTiming(GpuTimingSlot::SwapchainPresent);
+                Profiling::FrameProfiler::Instance().SetGpuPassTiming(Profiling::GpuPass::Present,
+                    ToProfilingGpuSampleStatus(presentTiming.status), presentTiming.milliseconds);
             }
             // else: Present() recorded nothing this frame (minimized window,
             // pending resize, or a just-recreated swapchain - see
             // FramePresenter::Present()'s own comment) - GpuPass::Present's
-            // countStatus correctly stays at its default
-            // GpuSampleStatus::Absent, with no extra code needed.
+            // countStatus AND timingStatus both correctly stay at their
+            // default GpuSampleStatus::Absent, with no extra code needed.
         }
 
         // Update/present any panel the user has dragged outside the main OS
