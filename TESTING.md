@@ -65,6 +65,14 @@ safe on any machine/CI runner, GPU or not:
   just-released/delta semantics, fed with hand-built `gte::Event` values.
 - `Application/EventTranslatorTests.cpp` - the `SDL_Event` -> `gte::Event`
   mapping, using hand-built `SDL_Event` values (no `SDL_Init()` needed).
+- `Application/MemorySnapshotBuilderTests.cpp` - `BuildMemorySnapshot()`'s
+  (`src/Application/MemorySnapshotBuilder.h`, Phase 5 -
+  `PHASE5_GPU_MEMORY_HISTORY_STRATEGY_v2.md`) field-for-field mapping from a
+  plain `GpuMemoryTracker::Totals` value to a `Profiling::MemorySnapshot`,
+  including an all-zero `Totals` still reporting
+  `GpuSampleStatus::Present` (never `Absent`) - needs nothing but a plain
+  `GpuMemoryTracker::Totals` value, no live `VkDevice`/`VmaAllocator`/
+  `Renderer` at all.
 - `Renderer/VertexTests.cpp` - `Vertex`'s Vulkan binding/attribute
   description metadata.
 - `Renderer/ResourcePoolTests.cpp` - the generic `ResourcePool<T, HandleT>`
@@ -85,7 +93,13 @@ safe on any machine/CI runner, GPU or not:
   must never imply real GPU timing data, and vice versa) - fed entirely
   with hand-called timings/values, no live clock/Vulkan/SDL involved.
   Always built (this module has no `GTE_ENABLE_EDITOR` dependency at all -
-  see `AGENTS.md`, "Profiling").
+  see `AGENTS.md`, "Profiling"). `SetMemorySnapshot()` specifically
+  (Phase 5) has its own thorough coverage: an all-fields-exact round-trip,
+  an outside-`BeginFrame()`/`EndFrame()`-bracket no-op, correctness across
+  multiple frames and ring-buffer wraparound, an `Absent` sample staying
+  distinct from a genuinely all-zero-but-`Present` one (never collapsing
+  "no data" into a lying zero), and a cross-category isolation check
+  proving it never touches CPU scopes/GPU timing/draw stats.
 - `Profiling/ScopeTimerTests.cpp` - `ScopeTimer`/`GTE_PROFILE_SCOPE`'s
   actual RAII behavior (records a real positive duration, nests correctly,
   and skips entirely when capture is disabled) - `src/Profiling/ScopeTimer.h`.

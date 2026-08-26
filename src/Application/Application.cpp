@@ -1,6 +1,7 @@
 #include "Application.h"
 
 #include "EventTranslator.h"
+#include "MemorySnapshotBuilder.h"
 
 #include "../Memory/SdlMemoryTracker.h"
 #include "../Profiling/FrameProfiler.h"
@@ -272,6 +273,22 @@ int Application::Run()
         // there is no ordering requirement against the main window's own
         // present - see IEditorLayer::RenderPlatformWindows().
         m_editorLayer->RenderPlatformWindows();
+
+        // Phase 5 (GPU memory usage over time) - see PHASE5_GPU_MEMORY_
+        // HISTORY_STRATEGY_v2.md: one real GPU memory snapshot per
+        // profiler frame, taken as late as possible in the frame (still
+        // inside this BeginFrame()/EndFrame() bracket) so it reflects
+        // every resource created/destroyed anywhere this frame, including
+        // by IEditorLayer::BuildUI()'s own Inspector/Project-panel asset
+        // loading above. Unconditional - not #if GTE_ENABLE_PROFILER/
+        // GTE_ENABLE_EDITOR-gated, matching this same function's own
+        // BeginFrame()/EndFrame()/SetGpuPassDrawStats() calls, none of
+        // which are gated either (only GTE_PROFILE_SCOPE(...)'s own macro
+        // body is compile-time-gated - see AGENTS.md, "Profiling").
+        // Renderer::GetMemoryTotals() is O(1) and always meaningful (no
+        // "didn't run this frame" concept, unlike a GpuPass's draw-call
+        // count), so this is always GpuSampleStatus::Present.
+        Profiling::FrameProfiler::Instance().SetMemorySnapshot(BuildMemorySnapshot(m_renderer.GetMemoryTotals()));
 
         Profiling::FrameProfiler::Instance().EndFrame();
     }

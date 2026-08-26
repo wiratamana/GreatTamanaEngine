@@ -274,6 +274,186 @@ TEST_F(FrameProfilerTest, SetGpuPassDrawStatsOutsideFrameBracketIsNoOp)
     EXPECT_EQ(sample.countStatus, GpuSampleStatus::Absent);
 }
 
+// --- Phase 5 (GPU memory usage over time) - see PHASE5_GPU_MEMORY_HISTORY_
+// STRATEGY_v2.md - tests below -----------------------------------------
+
+TEST_F(FrameProfilerTest, SetMemorySnapshotRecordsEveryFieldExactly)
+{
+    // Unlike SetGpuPassTimingAndDrawStatsAndMemorySnapshotAreRecorded
+    // above (which only checks status/totalBytes as part of a broader,
+    // multi-setter test), this is a dedicated, exhaustive check of every
+    // single MemorySnapshot field at the FrameProfiler storage level. Note
+    // this deliberately does NOT go through BuildMemorySnapshot() - that
+    // function has its own separate test,
+    // tests/Application/MemorySnapshotBuilderTests.cpp - this test is
+    // purely about FrameProfiler's own storage/retrieval correctness.
+    FrameProfiler& profiler = FrameProfiler::Instance();
+    profiler.BeginFrame();
+
+    MemorySnapshot memory;
+    memory.status = GpuSampleStatus::Present;
+    memory.totalBytes = 1000;
+    memory.bufferBytes = 200;
+    memory.textureBytes = 800;
+    memory.gpuOnlyBytes = 600;
+    memory.cpuOnlyBytes = 150;
+    memory.sharedBytes = 250;
+    memory.bufferCount = 3;
+    memory.textureCount = 5;
+    profiler.SetMemorySnapshot(memory);
+    profiler.EndFrame();
+
+    const MemorySnapshot& recorded = profiler.HistoryAt(0).memory;
+    EXPECT_EQ(recorded.status, GpuSampleStatus::Present);
+    EXPECT_EQ(recorded.totalBytes, 1000u);
+    EXPECT_EQ(recorded.bufferBytes, 200u);
+    EXPECT_EQ(recorded.textureBytes, 800u);
+    EXPECT_EQ(recorded.gpuOnlyBytes, 600u);
+    EXPECT_EQ(recorded.cpuOnlyBytes, 150u);
+    EXPECT_EQ(recorded.sharedBytes, 250u);
+    EXPECT_EQ(recorded.bufferCount, 3u);
+    EXPECT_EQ(recorded.textureCount, 5u);
+}
+
+TEST_F(FrameProfilerTest, SetMemorySnapshotOutsideFrameBracketIsNoOp)
+{
+    FrameProfiler& profiler = FrameProfiler::Instance();
+
+    MemorySnapshot stray;
+    stray.status = GpuSampleStatus::Present;
+    stray.totalBytes = 999;
+    profiler.SetMemorySnapshot(stray); // No BeginFrame() yet this test.
+
+    profiler.BeginFrame();
+    profiler.EndFrame();
+
+    const MemorySnapshot& recorded = profiler.HistoryAt(0).memory;
+    EXPECT_EQ(recorded.status, GpuSampleStatus::Absent);
+    EXPECT_EQ(recorded.totalBytes, 0u);
+}
+
+TEST_F(FrameProfilerTest, MemorySnapshotStaysCorrectAcrossMultipleFrames)
+{
+    FrameProfiler& profiler = FrameProfiler::Instance();
+
+    MemorySnapshot first;
+    first.status = GpuSampleStatus::Present;
+    first.totalBytes = 100;
+    first.bufferCount = 1;
+    profiler.BeginFrame();
+    profiler.SetMemorySnapshot(first);
+    profiler.EndFrame();
+
+    MemorySnapshot second;
+    second.status = GpuSampleStatus::Present;
+    second.totalBytes = 5000;
+    second.bufferCount = 9;
+    profiler.BeginFrame();
+    profiler.SetMemorySnapshot(second);
+    profiler.EndFrame();
+
+    ASSERT_EQ(profiler.HistoryCount(), 2u);
+    EXPECT_EQ(profiler.HistoryAt(0).memory.totalBytes, 100u);
+    EXPECT_EQ(profiler.HistoryAt(0).memory.bufferCount, 1u);
+    EXPECT_EQ(profiler.HistoryAt(1).memory.totalBytes, 5000u);
+    EXPECT_EQ(profiler.HistoryAt(1).memory.bufferCount, 9u);
+}
+
+TEST_F(FrameProfilerTest, MemorySnapshotSurvivesRingBufferWraparound)
+{
+    FrameProfiler& profiler = FrameProfiler::Instance();
+    const std::uint64_t totalFrames = static_cast<std::uint64_t>(kMaxFrameHistory) + 5;
+
+    for (std::uint64_t i = 0; i < totalFrames; ++i) {
+        profiler.BeginFrame();
+        MemorySnapshot snapshot;
+        snapshot.status = GpuSampleStatus::Present;
+        snapshot.totalBytes = i * 10;
+        profiler.SetMemorySnapshot(snapshot);
+        profiler.EndFrame();
+    }
+
+    ASSERT_EQ(profiler.HistoryCount(), kMaxFrameHistory);
+    const std::uint64_t oldestRetainedFrameIndex = totalFrames - kMaxFrameHistory;
+    EXPECT_EQ(profiler.HistoryAt(0).memory.totalBytes, oldestRetainedFrameIndex * 10);
+    EXPECT_EQ(profiler.HistoryAt(0).memory.status, GpuSampleStatus::Present);
+    EXPECT_EQ(profiler.HistoryAt(kMaxFrameHistory - 1).memory.totalBytes, (totalFrames - 1) * 10);
+    EXPECT_EQ(profiler.HistoryAt(kMaxFrameHistory - 1).memory.status, GpuSampleStatus::Present);
+}
+
+// The single most important test in this whole phase, directly proving
+// the "never use 0 bytes to mean 'no data'" rule - see
+// PHASE5_GPU_MEMORY_HISTORY_STRATEGY_v2.md, Step 2.4.
+TEST_F(FrameProfilerTest, AbsentMemorySnapshotIsDistinctFromRealZeroBytes)
+{
+    FrameProfiler& profiler = FrameProfiler::Instance();
+
+    // Frame 0: SetMemorySnapshot() is never called at all - this is what
+    // "no snapshot captured" looks like.
+    profiler.BeginFrame();
+    profiler.EndFrame();
+
+    // Frame 1: SetMemorySnapshot() IS called, reporting a GENUINELY EMPTY
+    // GPU memory total (status = Present, every byte/count field
+    // legitimately 0). This is a real, valid, meaningful measurement, not
+    // a missing one - see MemorySnapshotBuilderTests.cpp's own
+    // AllZeroTotalsStillReportsPresent for the production-code-level
+    // equivalent of this same case.
+    MemorySnapshot genuinelyEmpty;
+    genuinelyEmpty.status = GpuSampleStatus::Present;
+    profiler.BeginFrame();
+    profiler.SetMemorySnapshot(genuinelyEmpty);
+    profiler.EndFrame();
+
+    ASSERT_EQ(profiler.HistoryCount(), 2u);
+
+    const MemorySnapshot& absentFrame = profiler.HistoryAt(0).memory;
+    const MemorySnapshot& presentZeroFrame = profiler.HistoryAt(1).memory;
+
+    // Both frames report totalBytes == 0 numerically...
+    EXPECT_EQ(absentFrame.totalBytes, 0u);
+    EXPECT_EQ(presentZeroFrame.totalBytes, 0u);
+
+    // ...but their STATUS is what actually tells them apart - this is the
+    // entire point of the tri-state, and the entire point of this test.
+    EXPECT_EQ(absentFrame.status, GpuSampleStatus::Absent);
+    EXPECT_EQ(presentZeroFrame.status, GpuSampleStatus::Present);
+    EXPECT_NE(absentFrame.status, presentZeroFrame.status);
+}
+
+TEST_F(FrameProfilerTest, SetMemorySnapshotDoesNotAffectCpuScopesGpuTimingOrDrawStats)
+{
+    FrameProfiler& profiler = FrameProfiler::Instance();
+    profiler.BeginFrame();
+
+    profiler.RecordCpuScope("SomeSystem::Update", 4.0);
+    profiler.SetGpuPassTiming(GpuPass::GameView, GpuSampleStatus::Present, 2.5);
+    profiler.SetGpuPassDrawStats(GpuPass::GameView, GpuSampleStatus::Present, 7, 150);
+
+    MemorySnapshot memory;
+    memory.status = GpuSampleStatus::Present;
+    memory.totalBytes = 4096;
+    profiler.SetMemorySnapshot(memory);
+
+    profiler.EndFrame();
+
+    const FrameSample& frame = profiler.HistoryAt(0);
+
+    EXPECT_EQ(frame.memory.status, GpuSampleStatus::Present);
+    EXPECT_EQ(frame.memory.totalBytes, 4096u);
+
+    ASSERT_EQ(frame.cpuScopeCount, 1u);
+    EXPECT_EQ(std::string(frame.cpuScopes[0].name), "SomeSystem::Update");
+    EXPECT_DOUBLE_EQ(frame.cpuScopes[0].totalMilliseconds, 4.0);
+
+    const GpuPassSample& gameView = frame.gpuPasses[static_cast<std::size_t>(GpuPass::GameView)];
+    EXPECT_EQ(gameView.timingStatus, GpuSampleStatus::Present);
+    EXPECT_DOUBLE_EQ(gameView.milliseconds, 2.5);
+    EXPECT_EQ(gameView.countStatus, GpuSampleStatus::Present);
+    EXPECT_EQ(gameView.drawCallCount, 7u);
+    EXPECT_EQ(gameView.triangleCount, 150u);
+}
+
 TEST_F(FrameProfilerTest, LastCompletedFrameMatchesMostRecentHistoryEntry)
 {
     FrameProfiler& profiler = FrameProfiler::Instance();

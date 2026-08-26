@@ -260,10 +260,12 @@ whenever touching profiling instrumentation, or adding a new call site:
   and cost nothing - see `PROFILER_STRATEGY_v2.md`, Step 2.3/3a. As of
   Phase 3 (`PHASE3_DRAW_CALL_TRIANGLE_COUNT_STRATEGY_v2.md`), this is
   real, wired-up behavior for draw-call/triangle counts specifically (see
-  the `DrawStats.h`/`timingStatus`/`countStatus` bullets below) - GPU
-  TIMING (Phase 4) and the memory snapshot (Phase 5) remain the only
-  producers still unwired, set only synthetically by tests via
-  `FrameProfiler::SetGpuPassTiming()`/`SetMemorySnapshot()`.
+  the `DrawStats.h`/`timingStatus`/`countStatus` bullets below) - as of
+  Phase 5 (`PHASE5_GPU_MEMORY_HISTORY_STRATEGY_v2.md`), the memory
+  snapshot is ALSO real, wired-up production data (see the
+  `MemorySnapshotBuilder.h` bullet below) - GPU TIMING (Phase 4) remains
+  the only producer still unwired, set only synthetically by tests via
+  `FrameProfiler::SetGpuPassTiming()`.
 - **`GpuPassSample` splits its tri-state into TWO INDEPENDENT fields,
   `timingStatus` and `countStatus` - never reintroduce a single combined
   `status`.** (`ProfilingTypes.h`.) `timingStatus`/`milliseconds` are
@@ -339,6 +341,26 @@ whenever touching profiling instrumentation, or adding a new call site:
   "Profiler" panel, or any other future graph/export need) must call these
   functions rather than re-deriving the same history-walk/tri-state-scan
   logic a second time.
+- **`src/Application/MemorySnapshotBuilder.h`** (Phase 5 -
+  `PHASE5_GPU_MEMORY_HISTORY_STRATEGY_v2.md`) is the one, small,
+  Tier-1-tested place that reshapes `Renderer::GetMemoryTotals()`'s result
+  (`GpuMemoryTracker::Totals`, a Vulkan-tied type) into a
+  `Profiling::MemorySnapshot` (a plain, Vulkan-free type) - deliberately
+  its OWN header rather than an anonymous-namespace helper inlined into
+  `Application.cpp`, specifically so `BuildMemorySnapshot()` itself can be
+  called directly from `tests/Application/MemorySnapshotBuilderTests.cpp`
+  (a bug transposing two of its eight fields would otherwise be invisible
+  to every `FrameProfiler`-level test, which all hand-construct a
+  `MemorySnapshot` directly and never call this function). `Application::Run()`
+  is the ONE production call site: it calls this once per frame,
+  unconditionally (not `#if GTE_ENABLE_PROFILER`/`GTE_ENABLE_EDITOR`-gated,
+  matching this same function's own `BeginFrame()`/`EndFrame()`/
+  `SetGpuPassDrawStats()` calls), as late as possible in the frame (right
+  before `EndFrame()`) so it reflects every GPU resource created/destroyed
+  anywhere that frame, and always with `status == GpuSampleStatus::Present`
+  - unlike a `GpuPass`'s draw-call/triangle count, `Renderer::GetMemoryTotals()`
+  has no "didn't run this frame" concept at all; it is always a valid,
+  meaningful O(1) read for as long as a live `Renderer` exists.
 
 ## Render Target Format Matching
 
