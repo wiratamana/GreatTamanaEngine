@@ -90,10 +90,16 @@
 #                                            slot-indexing math
 #                                            (ConvertTimestampDeltaToMilliseconds()/
 #                                            PresentTimestampSlotBase() -
-#                                            src/Renderer/GpuTiming.h) - no
+#                                            src/Renderer/GpuTiming.h), PLUS
+#                                            Phase 4B's pure tri-state
+#                                            priority resolution
+#                                            (ResolveGpuTimingStatus()) - no
 #                                            Vulkan/Renderer/live GPU device
 #                                            involved at all (no VkQueryPool
-#                                            is created anywhere in Phase 4A).
+#                                            is created anywhere in Phase 4A;
+#                                            Phase 4B's own GpuTimingService/
+#                                            VulkanQueryPool are Tier 2, see
+#                                            the note below).
 #   - Game/RenderSystemTests.cpp             - RenderSystem::CollectRenderables()
 #                                            (the pure ECS -> DrawCommand step)
 #                                            and ResolveActiveCameraViewProjection()

@@ -2,6 +2,7 @@
 
 #include "DepthBuffer.h"
 #include "FrameRecorder.h"
+#include "GpuTimingService.h"
 #include "Memory/GpuMemoryTracker.h"
 #include "RenderTarget.h"
 #include "RenderTexture.h"
@@ -58,7 +59,7 @@ public:
     FramePresenter(VkPhysicalDevice physicalDevice, VkDevice device, VkSurfaceKHR surface,
         std::uint32_t graphicsQueueFamily, std::uint32_t presentQueueFamily, VkQueue graphicsQueue,
         VkQueue presentQueue, int width, int height, VmaAllocator allocator, VkFormat depthFormat,
-        std::shared_ptr<GpuMemoryTracker> memoryTracker);
+        std::shared_ptr<GpuMemoryTracker> memoryTracker, std::shared_ptr<GpuTimingService> gpuTiming);
     ~FramePresenter();
 
     FramePresenter(const FramePresenter&) = delete;
@@ -126,6 +127,14 @@ private:
     VmaAllocator m_allocator = VK_NULL_HANDLE;
     VkFormat m_depthFormat = VK_FORMAT_UNDEFINED;
     std::shared_ptr<GpuMemoryTracker> m_memoryTracker;
+
+    // Phase 4B (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) - the SAME
+    // GpuTimingService instance Renderer itself owns (see Renderer.h's
+    // m_gpuTiming) - not yet called from Present()/RenderOffscreen() below
+    // (that starts in Phase 4C/4D); stored here now so this whole class's
+    // ownership graph/move plumbing is reviewed/landed once, in this
+    // sub-phase, rather than split awkwardly across two.
+    std::shared_ptr<GpuTimingService> m_gpuTiming;
 
     VulkanSwapchain m_swapchain;
     // Per-frame/per-image semaphores/fences, and the dedicated offscreen

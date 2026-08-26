@@ -11,7 +11,7 @@ namespace gte {
 FramePresenter::FramePresenter(VkPhysicalDevice physicalDevice, VkDevice device, VkSurfaceKHR surface,
     std::uint32_t graphicsQueueFamily, std::uint32_t presentQueueFamily, VkQueue graphicsQueue,
     VkQueue presentQueue, int width, int height, VmaAllocator allocator, VkFormat depthFormat,
-    std::shared_ptr<GpuMemoryTracker> memoryTracker)
+    std::shared_ptr<GpuMemoryTracker> memoryTracker, std::shared_ptr<GpuTimingService> gpuTiming)
     : m_device(device)
     , m_graphicsQueue(graphicsQueue)
     , m_presentQueue(presentQueue)
@@ -19,6 +19,7 @@ FramePresenter::FramePresenter(VkPhysicalDevice physicalDevice, VkDevice device,
     , m_allocator(allocator)
     , m_depthFormat(depthFormat)
     , m_memoryTracker(std::move(memoryTracker))
+    , m_gpuTiming(std::move(gpuTiming))
     , m_swapchain(physicalDevice, device, surface, graphicsQueueFamily, presentQueueFamily, width, height)
     , m_frameSync(device, kFramesInFlight, m_swapchain.ImageCount())
 {
@@ -46,6 +47,7 @@ FramePresenter::FramePresenter(FramePresenter&& other) noexcept
     , m_allocator(std::exchange(other.m_allocator, VK_NULL_HANDLE))
     , m_depthFormat(other.m_depthFormat)
     , m_memoryTracker(std::move(other.m_memoryTracker))
+    , m_gpuTiming(std::move(other.m_gpuTiming))
     , m_swapchain(std::move(other.m_swapchain))
     , m_frameSync(std::move(other.m_frameSync))
     , m_depthBuffers(std::move(other.m_depthBuffers))
@@ -72,6 +74,7 @@ FramePresenter& FramePresenter::operator=(FramePresenter&& other) noexcept
         m_allocator = std::exchange(other.m_allocator, VK_NULL_HANDLE);
         m_depthFormat = other.m_depthFormat;
         m_memoryTracker = std::move(other.m_memoryTracker);
+        m_gpuTiming = std::move(other.m_gpuTiming);
         m_swapchain = std::move(other.m_swapchain);
         m_frameSync = std::move(other.m_frameSync);
         m_depthBuffers = std::move(other.m_depthBuffers);

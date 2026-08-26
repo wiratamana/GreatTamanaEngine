@@ -1,13 +1,17 @@
 // Unit tests for Phase 4A's pure GPU-timestamp capability interpretation +
-// tick-delta/slot-indexing math (src/Renderer/GpuTiming.h) - see
-// PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md, "Phase 4A". No Vulkan/
-// Renderer/live GPU device involved at all: no VkQueryPool is created
-// anywhere in Phase 4A, so VulkanDevice::TimestampCapability()'s actual
-// VALUE against a real device is Tier 2 (verified manually - see that
-// document's own "Testing (Phase 4A)" section) while
+// tick-delta/slot-indexing math, PLUS Phase 4B's pure tri-state priority
+// resolution (src/Renderer/GpuTiming.h) - see
+// PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md, "Phase 4A"/"Phase 4B". No
+// Vulkan/Renderer/live GPU device involved at all: no VkQueryPool is
+// created anywhere in Phase 4A, so VulkanDevice::TimestampCapability()'s
+// actual VALUE against a real device is Tier 2 (verified manually - see
+// that document's own "Testing (Phase 4A)" section) while
 // InterpretTimestampCapability() - the pure DECISION logic VulkanDevice's
 // constructor calls with real, device-queried arguments - is exercised
-// here directly with hand-fabricated inputs instead.
+// here directly with hand-fabricated inputs instead. Phase 4B's
+// GpuTimingService itself is Tier 2 (needs a real VkDevice/VkQueue), but
+// the tri-state PRIORITY decision it builds on (ResolveGpuTimingStatus())
+// is pulled out as pure logic the exact same way, and tested below too.
 
 #include "Renderer/GpuTiming.h"
 
@@ -139,6 +143,49 @@ TEST(GpuTimingTest, InterpretTimestampCapabilityStoresRawValuesEvenWhenUnsupport
     EXPECT_FALSE(capability.supported);
     EXPECT_FLOAT_EQ(capability.timestampPeriodNs, 3.5f);
     EXPECT_EQ(capability.validBits, 12u);
+}
+
+// --- ResolveGpuTimingStatus() -----------------------------------------------
+// Phase 4B (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) - the pure
+// tri-state priority decision GpuTimingService::ReadOffscreenResultNow()/
+// ReadPresentResultIfAvailable() both build on. All 8 combinations of its 3
+// boolean inputs are exercised directly here, with no VkDevice/VkQueryPool
+// involved at all.
+
+TEST(GpuTimingTest, ResolveGpuTimingStatusPresentWhenSupportedCapturingAndWritten)
+{
+    EXPECT_EQ(ResolveGpuTimingStatus(true, true, true), GpuTimingSample::Status::Present);
+}
+
+TEST(GpuTimingTest, ResolveGpuTimingStatusAbsentWhenCaptureDisabled)
+{
+    // Capture being off is a TEMPORARY condition - must resolve to Absent,
+    // never Unsupported, even though the device/build itself is capable.
+    EXPECT_EQ(ResolveGpuTimingStatus(true, false, true), GpuTimingSample::Status::Absent);
+}
+
+TEST(GpuTimingTest, ResolveGpuTimingStatusAbsentWhenNotYetWritten)
+{
+    // A Present-path slot that hasn't been warmed up yet (see
+    // GpuTimingService::MarkPresentSlotWritten()) - also a TEMPORARY
+    // condition, also Absent, never Unsupported.
+    EXPECT_EQ(ResolveGpuTimingStatus(true, true, false), GpuTimingSample::Status::Absent);
+}
+
+TEST(GpuTimingTest, ResolveGpuTimingStatusAbsentWhenBothCaptureDisabledAndNotWritten)
+{
+    EXPECT_EQ(ResolveGpuTimingStatus(true, false, false), GpuTimingSample::Status::Absent);
+}
+
+TEST(GpuTimingTest, ResolveGpuTimingStatusUnsupportedWinsRegardlessOfTheOtherTwoInputs)
+{
+    // Unsupported (a PERMANENT condition - this device/build can NEVER
+    // produce this measurement) always wins, no matter what
+    // captureEnabled/hasWrittenData say.
+    EXPECT_EQ(ResolveGpuTimingStatus(false, true, true), GpuTimingSample::Status::Unsupported);
+    EXPECT_EQ(ResolveGpuTimingStatus(false, true, false), GpuTimingSample::Status::Unsupported);
+    EXPECT_EQ(ResolveGpuTimingStatus(false, false, true), GpuTimingSample::Status::Unsupported);
+    EXPECT_EQ(ResolveGpuTimingStatus(false, false, false), GpuTimingSample::Status::Unsupported);
 }
 
 } // namespace

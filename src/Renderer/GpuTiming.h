@@ -82,6 +82,33 @@ struct GpuTimingSample {
     double milliseconds = 0.0;
 };
 
+// Phase 4B (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) - the pure
+// tri-state PRIORITY decision GpuTimingService::ReadOffscreenResultNow()/
+// ReadPresentResultIfAvailable() both build on, extracted specifically so
+// this DECISION can be unit-tested directly with all 8 combinations of its
+// 3 boolean inputs, without needing a real VkDevice/VkQueryPool (mirrors
+// InterpretTimestampCapability()'s own "extract the pure decision, keep the
+// live-device call site a thin wrapper around it" precedent above).
+//
+// Priority order, deliberately fixed: `Unsupported` (this device/build can
+// NEVER produce this measurement - a permanent condition) wins over
+// `Absent` (no data available RIGHT NOW - a temporary condition, e.g.
+// capture currently disabled, or a Present-path slot not yet warmed up)
+// wins over `Present` (a real, freshly-read measurement). `Unsupported`
+// must never be confused with a temporarily-disabled `Absent`, and vice
+// versa - see GpuTimingService::SetCaptureEnabled()'s own doc comment.
+inline GpuTimingSample::Status ResolveGpuTimingStatus(
+    bool supported, bool captureEnabled, bool hasWrittenData) noexcept
+{
+    if (!supported) {
+        return GpuTimingSample::Status::Unsupported;
+    }
+    if (!captureEnabled || !hasWrittenData) {
+        return GpuTimingSample::Status::Absent;
+    }
+    return GpuTimingSample::Status::Present;
+}
+
 // Converts a [startTicks, endTicks) raw GPU timestamp-counter delta into
 // milliseconds, given this device's timestampPeriodNs (nanoseconds per
 // tick) and validBits (the counter's actual bit width - a Vulkan timestamp

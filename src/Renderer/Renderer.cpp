@@ -25,12 +25,21 @@ Renderer::Renderer(Window& window)
     // m_memoryTracker uses its default member initializer (see Renderer.h) -
     // constructed here implicitly, before m_presenter/m_resources below,
     // both of which receive a copy of the SAME shared_ptr.
+    // m_gpuTiming (Phase 4B - PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md)
+    // has no default member initializer (see Renderer.h) - it needs
+    // m_device's already-resolved native handle/graphics queue+family/
+    // queried timestamp capability, so it's constructed explicitly here,
+    // right after m_device is ready, before m_presenter below (which
+    // receives a copy of the SAME shared_ptr, mirroring m_memoryTracker's
+    // own sharing pattern immediately above).
+    , m_gpuTiming(std::make_shared<GpuTimingService>(
+          m_device.Native(), m_device.GraphicsQueue(), m_device.GraphicsQueueFamily(), m_device.TimestampCapability()))
     // VK_API_VERSION_1_3 matches VulkanInstance::CreateInstance's
     // VkApplicationInfo::apiVersion (see also GetVulkanContextInfo() below).
     , m_allocator(m_instance.Native(), m_device.Physical(), m_device.Native(), VK_API_VERSION_1_3)
     , m_presenter(m_device.Physical(), m_device.Native(), m_surface.Native(), m_device.GraphicsQueueFamily(),
           m_device.PresentQueueFamily(), m_device.GraphicsQueue(), m_device.PresentQueue(), window.Width(),
-          window.Height(), m_allocator.Native(), m_depthFormat, m_memoryTracker)
+          window.Height(), m_allocator.Native(), m_depthFormat, m_memoryTracker, m_gpuTiming)
     , m_resources(m_device.Native(), m_allocator.Native(), m_device.GraphicsQueue(), m_device.GraphicsQueueFamily(),
           m_depthFormat, m_memoryTracker)
 {
@@ -65,6 +74,7 @@ Renderer& Renderer::operator=(Renderer&& other) noexcept
         m_device = std::move(other.m_device);
         m_depthFormat = other.m_depthFormat;
         m_memoryTracker = std::move(other.m_memoryTracker);
+        m_gpuTiming = std::move(other.m_gpuTiming);
         m_allocator = std::move(other.m_allocator);
         m_presenter = std::move(other.m_presenter);
         m_resources = std::move(other.m_resources);
@@ -217,6 +227,16 @@ const std::string& Renderer::GetMemoryDebugName(GpuResourceHandle handle) const
 std::vector<VmaBudget> Renderer::GetVmaHeapBudgets() const
 {
     return m_allocator.GetHeapBudgets();
+}
+
+GpuTimingSample Renderer::LastGpuTiming(GpuTimingSlot slot) const noexcept
+{
+    return m_gpuTiming->LastKnown(slot);
+}
+
+void Renderer::SetGpuTimingCaptureEnabled(bool enabled) noexcept
+{
+    m_gpuTiming->SetCaptureEnabled(enabled);
 }
 
 } // namespace gte

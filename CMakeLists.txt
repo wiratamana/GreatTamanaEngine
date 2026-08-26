@@ -264,6 +264,8 @@ add_library(gte_core STATIC
     src/Renderer/DrawStats.h
     src/Renderer/GpuTiming.cpp
     src/Renderer/GpuTiming.h
+    src/Renderer/GpuTimingService.cpp
+    src/Renderer/GpuTimingService.h
     src/Renderer/GpuResourceFactory.cpp
     src/Renderer/GpuResourceFactory.h
     src/Renderer/Buffer.cpp
@@ -302,6 +304,8 @@ add_library(gte_core STATIC
     src/Renderer/Vulkan/VulkanAllocator.h
     src/Renderer/Vulkan/VulkanFrameSync.cpp
     src/Renderer/Vulkan/VulkanFrameSync.h
+    src/Renderer/Vulkan/VulkanQueryPool.cpp
+    src/Renderer/Vulkan/VulkanQueryPool.h
     src/Editor/EditorLayer.h
     src/Game/Instantiation/EntityBlueprint.h
     src/Game/Instantiation/EntityInstantiator.cpp

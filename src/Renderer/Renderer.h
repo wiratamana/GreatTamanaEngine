@@ -5,6 +5,8 @@
 #include "FramePresenter.h"
 #include "FrameRecorder.h"
 #include "GpuResourceFactory.h"
+#include "GpuTiming.h"
+#include "GpuTimingService.h"
 #include "Memory/GpuMemoryTracker.h"
 #include "Mesh.h"
 #include "Pipeline.h"
@@ -328,6 +330,34 @@ public:
     // overhead - isn't tracked yet.
     std::vector<VmaBudget> GetVmaHeapBudgets() const;
 
+    // Phase 4B (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) - a cheap,
+    // side-effect-free read of whatever GpuTimingService most recently
+    // cached for `slot` (see Renderer/GpuTimingService.h). Safe to call any
+    // number of times, including zero times in a frame where the
+    // corresponding pass didn't run - but a caller must ONLY treat the
+    // result as "this frame's" data immediately after a call that it knows
+    // actually ran that pass THIS frame (mirroring how Application.cpp
+    // already only reads a DrawStats return value inside the guard that
+    // proves the corresponding pass ran - see AGENTS.md, "Profiling").
+    // Reports GpuTimingSample::Status::Unsupported (never a fabricated
+    // 0.00 ms) on a device/build that can never produce this measurement,
+    // and Status::Absent whenever nothing has been recorded yet for this
+    // slot this session (including throughout Phase 4B, since nothing
+    // calls GpuTimingService's Record*/Read* methods yet - that's Phase
+    // 4C/4D's job).
+    GpuTimingSample LastGpuTiming(GpuTimingSlot slot) const noexcept;
+
+    // Phase 4B - the runtime layer of GpuTimingService's two-layer on/off
+    // gate (see GpuTimingService::SetCaptureEnabled()'s own doc comment).
+    // Takes a plain bool (never a Profiling::-namespaced type) so Renderer
+    // stays completely free of any Profiling/ header, exactly like every
+    // other Renderer<->Profiling bridge in this engine (see AGENTS.md,
+    // "Profiling", and this phase's own design decision log). Not yet
+    // called from Application::Run() in production code - that starts in
+    // Phase 4C, alongside the first real per-frame recording code it's
+    // meant to gate.
+    void SetGpuTimingCaptureEnabled(bool enabled) noexcept;
+
     // Read-only snapshot of this Renderer's core Vulkan handles + swapchain
     // format/image count, for an external Vulkan-based rendering backend
     // (e.g. Dear ImGui's Vulkan backend, owned by the Editor module) to
@@ -375,6 +405,21 @@ private:
     // GpuMemoryTracker's own class comment for why this is owned via
     // shared_ptr in the first place.
     std::shared_ptr<GpuMemoryTracker> m_memoryTracker = std::make_shared<GpuMemoryTracker>();
+
+    // Phase 4B (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) - the ONE
+    // GpuTimingService shared by this Renderer's own LastGpuTiming()/
+    // SetGpuTimingCaptureEnabled() and m_presenter below (which will call
+    // its Record*/Read* methods starting in Phase 4C/4D) - the exact same
+    // "constructed here, shared via shared_ptr with every collaborator that
+    // needs it" pattern m_memoryTracker immediately above already
+    // establishes for GPU memory tracking, applied to a second cross-
+    // cutting concern. Unlike m_memoryTracker, this has no default member
+    // initializer - GpuTimingService's constructor needs real,
+    // already-resolved m_device state (its native handle, graphics queue/
+    // family, and queried timestamp capability), so it's constructed
+    // explicitly in Renderer's own constructor body/initializer list
+    // instead (see Renderer.cpp).
+    std::shared_ptr<GpuTimingService> m_gpuTiming;
 
     // Declared (and thus destroyed, per reverse-declaration-order RAII
     // teardown) right after m_device: relative order vs. m_presenter
