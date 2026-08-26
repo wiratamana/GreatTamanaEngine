@@ -140,6 +140,33 @@
 #                                            values are hand-built with fake,
 #                                            never-dereferenced Vulkan handle
 #                                            values.
+#   - Renderer/RenderGraph/RenderGraphCompilerTests.cpp - Render Graph Phase 3's
+#                                            pure "Smart Planner" compilation
+#                                            algorithm (see src/Renderer/
+#                                            RenderGraph/RenderGraphCompiler.h) -
+#                                            dependency-graph construction
+#                                            (RAW/WAW edges), backward-
+#                                            reachability culling from a
+#                                            required finalOutputs root set,
+#                                            deterministic Kahn's-algorithm
+#                                            topological sort (declaration-
+#                                            order tie-breaking), and
+#                                            per-resource lifetime bounds -
+#                                            linear chains, a dead/culled
+#                                            branch, a diamond dependency
+#                                            (with a sibling-order
+#                                            determinism check), multiple
+#                                            writers to the same resource,
+#                                            lifetime off-by-one bounds,
+#                                            cross-call determinism, a
+#                                            self-loop (read+write of the
+#                                            same resource), a fully
+#                                            disconnected pass, and a
+#                                            finalOutputs handle nothing
+#                                            ever writes. No Vulkan device
+#                                            involved at all - fixtures are
+#                                            built through a real
+#                                            RenderGraphBuilder.
 #   - Game/RenderSystemTests.cpp             - RenderSystem::CollectRenderables()
 #                                            (the pure ECS -> DrawCommand step)
 #                                            and ResolveActiveCameraViewProjection()
@@ -392,6 +419,7 @@ set(GTE_TEST_SOURCES
     Renderer/GpuTimingTests.cpp
     Renderer/RenderGraph/RenderGraphTypesTests.cpp
     Renderer/RenderGraph/RenderGraphBuilderTests.cpp
+    Renderer/RenderGraph/RenderGraphCompilerTests.cpp
     Math/Vec2Tests.cpp
     Math/Vec3Tests.cpp
     Math/Mat4Tests.cpp
