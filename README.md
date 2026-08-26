@@ -615,7 +615,7 @@ CMake adds:
 - **Profiler panel:** a Unity-Profiler-window-style **"Profiler"** panel
   (`src/Editor/Panels/ProfilerPanel.h/.cpp`, docked alongside "Memory" along
   the bottom - see `DockLayout.cpp`), reading exclusively from
-  `Profiling::FrameProfiler`'s already-collected data (Phases 0-3/5 - see
+  `Profiling::FrameProfiler`'s already-collected data (Phases 0-5/7 - see
   `PROFILER_STRATEGY_v2.md`/`PHASE7_EDITOR_PROFILER_PANEL_STRATEGY_v2.md`),
   no new engine-level tracking added. Shows, live: a scrolling CPU
   frame-time graph over the last ~240 frames (current ms + FPS, visible-
@@ -631,11 +631,20 @@ CMake adds:
   misleading "0" for any pass that didn't run this frame; current GPU
   memory totals plus a sparkline over the same window (`FrameGraphPoint`
   gained a `memory` field and `Profiling::FrameGraphData.h` gained
-  `ComputeMemoryBytesRange()` for exactly this, in this same phase); and an
-  honest, permanent-until-Phase-4 **"GPU Timing: N/A"** line for all three
-  named passes (never a fabricated `0.00 ms`). Two independent controls:
+  `ComputeMemoryBytesRange()` for exactly this, in the Phase 7 session);
+  and, as of Phase 4 (`PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md`,
+  sub-phases 4A-4D - see `PHASE4A_COMPLETION_REPORT.md` through
+  `PHASE4D_COMPLETION_REPORT.md`), a real **GPU Timing** line for all three
+  named passes, showing genuine driver-measured milliseconds via real
+  Vulkan timestamp queries (`src/Renderer/GpuTiming.h`/`GpuTimingService.h`,
+  `Vulkan/VulkanQueryPool.h`) whenever that pass ran this frame, an honest
+  "N/A" for a hidden/not-yet-warmed-up pass, and a permanent "Unsupported"
+  on a device/build that can never produce this measurement - never a
+  fabricated `0.00 ms` either way. Two independent controls:
   **Capture** (`Profiling::FrameProfiler::SetCaptureEnabled()` - the real
-  on/off switch for data collection itself) and **Pause** (a
+  on/off switch for data collection itself, which ALSO now genuinely gates
+  the Phase 4 GPU timestamp query work, not just this panel's own display -
+  see AGENTS.md, "Profiling") and **Pause** (a
   `ProfilerPanel`-local snapshot freeze that only affects what this ONE
   panel currently displays, leaving `FrameProfiler` collecting normally
   underneath - `ProfilerPanel` is a small stateful class, the second
@@ -1397,12 +1406,14 @@ pieces:
 
 - **A new Editor "Profiler" panel makes the whole profiler data model
   (Phases 0-3/5) finally visible, closing out `PROFILER_STRATEGY_v2.md`'s
-  original 8-phase plan except for Phase 4 (Vulkan GPU timestamp queries)
-  and Phase 6 (benchmark mode), both deliberately deferred.** See "Editor /
+  original 8-phase plan except for Phase 4 (Vulkan GPU timestamp queries -
+  since implemented, see the entry below) and Phase 6 (benchmark mode),
+  both deliberately deferred at the time.** See "Editor /
   Debug UI" above for the full "Profiler panel:" rundown - live CPU
   frame-time graph, sorted CPU-scope table, per-pass draw-call/triangle
   counts, GPU memory totals + sparkline, an honest GPU-timing "N/A"
-  placeholder, and two genuinely independent Capture/Pause controls. No new
+  placeholder (a permanent condition until Phase 4 landed - see below), and
+  two genuinely independent Capture/Pause controls. No new
   engine-level tracking was needed - the one small, already-anticipated
   data-model extension this phase required (`FrameGraphPoint` gaining a
   `memory` field, `Profiling::FrameGraphData.h` gaining
@@ -1414,8 +1425,53 @@ pieces:
   `-DGTE_ENABLE_PROFILER=OFF` (clean build, 500 tests passing, confirming
   the CPU Scopes table's "instrumentation compiled out" wording actually
   differs from its ordinary "nothing recorded yet" empty state). See
-  `PHASE7_EDITOR_PROFILER_PANEL_STRATEGY_v2.md` and
-  `PROFILER_IMPLEMENTATION_STATUS_v6.md` for the full session writeup.
+  `PHASE7_EDITOR_PROFILER_PANEL_STRATEGY_v2.md` for the full session
+  writeup.
+- **Phase 4 (Vulkan GPU timestamp queries) is now fully implemented,
+  across four independently-shippable sub-phases (4A-4D) - the Editor's
+  "Profiler" panel's "GPU Timing" section (see above) now shows real,
+  driver-measured milliseconds instead of a permanent "N/A".** See
+  `PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md` for the full design
+  reasoning and `PHASE4A_COMPLETION_REPORT.md`/
+  `PHASE4B_COMPLETION_REPORT.md`/`PHASE4C_COMPLETION_REPORT.md`/
+  `PHASE4D_COMPLETION_REPORT.md` for each sub-phase's own session writeup;
+  summarized here: **4A** added device timestamp-capability probing
+  (`VulkanDevice::TimestampCapability()`) plus Vulkan-header-free pure math
+  (`src/Renderer/GpuTiming.h` - tick-delta -> millisecond conversion,
+  wraparound-safe via `validBits` masking; query-slot indexing), with zero
+  `VkQueryPool` created yet. **4B** added the actual RAII query-pool
+  infrastructure - `Vulkan/VulkanQueryPool.h/.cpp` (a thin wrapper around
+  one fixed-size `VK_QUERY_TYPE_TIMESTAMP` pool) and
+  `GpuTimingService.h/.cpp` (owns that pool, every real
+  `vkCmdResetQueryPool`/`vkCmdWriteTimestamp2`/`vkGetQueryPoolResults` call
+  site, and a two-layer on/off gate - `GTE_ENABLE_PROFILER` at compile
+  time, `SetCaptureEnabled()` at runtime, mirroring `ScopeTimer`'s own
+  convention) - wired into `Renderer`'s ownership graph (shared via
+  `std::shared_ptr`, same pattern as `GpuMemoryTracker`) but not yet called
+  from anywhere. **4C** wired up the Game/Scene offscreen passes first
+  (`RenderOffscreen()`'s already-fully-synchronous fence made this the
+  easiest, safest half): `Renderer::RenderOffscreen()` gained a
+  `std::optional<GpuTimingSlot>` parameter (`Offscreen0`/`Offscreen1` for
+  Game/Scene, or `std::nullopt` for a call that has nothing to do with the
+  Profiler's three named passes, e.g. `AssetPreviewMesh`'s Inspector mesh
+  preview or `BoneViewerWindow`'s own viewport - closing a real
+  slot-collision bug a naive design would have introduced), and
+  `Application::Run()` started calling
+  `Renderer::SetGpuTimingCaptureEnabled()` once per frame from the
+  Editor's existing "Capture" checkbox. **4D** wired up the harder
+  swapchain Present path, reading back a PAST frame's query result at
+  exactly the point the existing two-frames-in-flight fence wait already
+  proves it's safe (a per-slot "has this ever been written" warm-up flag,
+  not a frame-count heuristic, correctly handles the first two frames of
+  a session/of any capture-disabled or resize/minimize gap). No new GPU
+  wait was added anywhere in any of the four sub-phases - every read
+  piggybacks on synchronization the engine already performed for an
+  unrelated, pre-existing reason. Verified at every sub-phase with a clean
+  build, the full test suite (521 tests as of 4D, 1 pre-existing
+  machine-gated smoke test skipped, no regressions across all four
+  sub-phases), and a runtime smoke test against a real Vulkan device with
+  validation layers enabled. See `AGENTS.md`'s "Profiling" section for the
+  architectural rules this module follows.
 
 ## Roadmap
 

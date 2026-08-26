@@ -263,23 +263,36 @@ whenever touching profiling instrumentation, or adding a new call site:
   the `DrawStats.h`/`timingStatus`/`countStatus` bullets below) - as of
   Phase 5 (`PHASE5_GPU_MEMORY_HISTORY_STRATEGY_v2.md`), the memory
   snapshot is ALSO real, wired-up production data (see the
-  `MemorySnapshotBuilder.h` bullet below) - GPU TIMING (Phase 4) remains
-  the only producer still unwired, set only synthetically by tests via
-  `FrameProfiler::SetGpuPassTiming()`.
+  `MemorySnapshotBuilder.h` bullet below) - and as of Phase 4
+  (`PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md`, sub-phases 4A-4D), GPU
+  TIMING itself is ALSO real, driver-measured production data now for all
+  three named passes (see the `GpuTiming.h`/`GpuTimingService` bullet
+  below) - every category `GpuPassSample`/`MemorySnapshot` can carry is now
+  wired to genuine production data, with no synthetic-tests-only producer
+  left.
 - **`GpuPassSample` splits its tri-state into TWO INDEPENDENT fields,
   `timingStatus` and `countStatus` - never reintroduce a single combined
   `status`.** (`ProfilingTypes.h`.) `timingStatus`/`milliseconds` are
   governed exclusively by `FrameProfiler::SetGpuPassTiming()` (Phase 4's
-  eventual GPU timestamp queries - unwired to anything real as of Phase 3);
-  `countStatus`/`drawCallCount`/`triangleCount` are governed exclusively by
-  `FrameProfiler::SetGpuPassDrawStats()` (Phase 3's own draw-call/triangle
-  counts - real as of this phase, see the `DrawStats.h` bullet below). This
-  split exists because Phase 3 (cheap, self-contained) was deliberately
-  implemented before Phase 4 (substantial/risky) - a single shared `status`
-  field would have forced Phase 3's own call site to falsely claim GPU
-  timing was also measured this frame the instant it reported a real count.
-  See `PHASE3_DRAW_CALL_TRIANGLE_COUNT_STRATEGY_v2.md`, Step 2.4, and its
-  own regression test,
+  real Vulkan GPU timestamp queries as of `PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md`'s
+  sub-phases 4A-4D - unwired to anything real only historically, as of
+  Phase 3); `countStatus`/`drawCallCount`/`triangleCount` are governed
+  exclusively by `FrameProfiler::SetGpuPassDrawStats()` (Phase 3's own
+  draw-call/triangle counts - real since that phase, see the `DrawStats.h`
+  bullet below). This split exists because Phase 3 (cheap, self-contained)
+  was deliberately implemented before Phase 4 (substantial/risky) - a
+  single shared `status` field would have forced Phase 3's own call site
+  to falsely claim GPU timing was also measured this frame the instant it
+  reported a real count. The split remains just as load-bearing now that
+  BOTH phases are real: `Application::Run()`'s Game/Scene/Present blocks
+  each call `SetGpuPassDrawStats()` and `SetGpuPassTiming()` as two
+  genuinely separate calls, so a future edit that skips one of them (e.g.
+  a new offscreen pass that draws but is deliberately not GPU-timed, same
+  as `AssetPreviewMesh`/`BoneViewerWindow`'s `std::nullopt` opt-out - see
+  the `GpuTiming.h`/`GpuTimingService` bullet below) still can't
+  accidentally imply the other. See
+  `PHASE3_DRAW_CALL_TRIANGLE_COUNT_STRATEGY_v2.md`, Step 2.4, and its own
+  regression test,
   `tests/Profiling/FrameProfilerTests.cpp`'s `DrawStatsAloneDoNotImplyRealTimingData`.
   `FrameGraphData.cpp`'s `ComputeGpuMillisecondsRange()` branches on
   `timingStatus` only, never `countStatus` - a pass whose only data this
@@ -374,6 +387,59 @@ whenever touching profiling instrumentation, or adding a new call site:
   `ComputeGpuMillisecondsRange()`'s own "branch on status, never on the
   value" rule exactly: only entries whose `memory.status ==
   GpuSampleStatus::Present` contribute to the min/max scan.
+- **`src/Renderer/GpuTiming.h/.cpp`, `src/Renderer/GpuTimingService.h/.cpp`,
+  `src/Renderer/Vulkan/VulkanQueryPool.h/.cpp`** (Phase 4 -
+  `PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md`, sub-phases 4A-4D - see
+  `PHASE4A_COMPLETION_REPORT.md`/`PHASE4B_COMPLETION_REPORT.md`/
+  `PHASE4C_COMPLETION_REPORT.md`/`PHASE4D_COMPLETION_REPORT.md`) are what
+  finally make `SetGpuPassTiming()` above a genuine production call
+  instead of a test-only one. `GpuTiming.h` is the always-compiled,
+  Vulkan-header-FREE pure-data/pure-math half (mirroring `DrawStats.h`'s
+  own precedent exactly) - `GpuTimestampCapability`/
+  `InterpretTimestampCapability()` (device capability probing, queried
+  once by `VulkanDevice::TimestampCapability()`), `GpuTimingSlot`
+  (`Offscreen0`/`Offscreen1`/`SwapchainPresent` - deliberately GENERIC
+  names, never `GameView`/`SceneView`, since `Renderer`/`FramePresenter`
+  must never know Editor-facing pass naming), `GpuTimingSample` (a
+  Renderer-local tri-state mirror of `Profiling::GpuSampleStatus`,
+  deliberately a SEPARATE type so `Renderer` stays completely free of any
+  `Profiling/` header), `ConvertTimestampDeltaToMilliseconds()` (tick-delta
+  -> millisecond conversion, wraparound-safe via `validBits` masking), and
+  `ResolveGpuTimingStatus()` (the pure tri-state PRIORITY decision -
+  `Unsupported` always wins over `Absent` wins over `Present`). `VulkanQueryPool`
+  (`Vulkan/`) is a thin RAII wrapper around one `VK_QUERY_TYPE_TIMESTAMP`
+  `VkQueryPool`, fixed 8-slot layout, never resized/recreated.
+  `GpuTimingService` owns that pool and every actual
+  `vkCmdResetQueryPool`/`vkCmdWriteTimestamp2`/`vkGetQueryPoolResults` call
+  site - `FramePresenter` only ever calls INTO it (`RecordOffscreenPassStart/
+  End`/`ReadOffscreenResultNow` for `RenderOffscreen()`,
+  `RecordPresentPassStart/End`/`ReadPresentResultIfAvailable`/
+  `MarkPresentSlotWritten` for `Present()`), never issuing a raw query call
+  itself, mirroring the same division of labor `FramePresenter` already has
+  with `VulkanSwapchain`/`VulkanFrameSync`. **Gated by BOTH a compile-time
+  switch (`GTE_ENABLE_PROFILER` - forces `GpuTimingService`'s effective
+  capability to `unsupported`, so a `GTE_ENABLE_PROFILER=OFF` build never
+  creates a `VkQueryPool` at all) AND a runtime switch
+  (`GpuTimingService::SetCaptureEnabled()`, driven every frame by
+  `Renderer::SetGpuTimingCaptureEnabled(Profiling::FrameProfiler::Instance().IsCaptureEnabled())`
+  in `Application::Run()` - the exact same two-layer on/off convention
+  this section already establishes for `ScopeTimer` above, now applied to
+  a genuinely non-free per-frame GPU/driver cost rather than a CPU clock
+  read.** `Renderer::RenderOffscreen()`'s `std::optional<GpuTimingSlot>`
+  parameter has NO default - every caller must explicitly say
+  `GpuTimingSlot::Offscreen0`/`Offscreen1` (Game/Scene, `Application.cpp`)
+  or `std::nullopt` (any call with nothing to do with the Profiler's three
+  named passes - `AssetPreviewMesh`'s Inspector mesh preview,
+  `BoneViewerWindow`'s own viewport) - `std::nullopt` is one of two equally
+  explicit choices, never an implicit fallback, specifically so a future
+  Editor debug-preview caller can never silently share a query slot with,
+  and corrupt, "Game View"/"Scene View" GPU timing. Every read (both the
+  offscreen path's post-fence-wait read and the Present path's
+  per-frame-in-flight-slot read) is positioned at a point synchronization
+  the engine ALREADY performs for an unrelated, pre-existing reason - no
+  new GPU wait was ever added anywhere purely to fetch a timing result
+  sooner; see `PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md`'s own Step 2.3
+  for the exact reasoning this must never be weakened against.
 
 ## Render Target Format Matching
 
