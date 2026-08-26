@@ -83,6 +83,17 @@
 #                                            src/Renderer/DrawStats.h) - no
 #                                            Vulkan/Renderer/live GPU
 #                                            involved at all.
+#   - Renderer/GpuTimingTests.cpp            - Phase 4A's pure GPU-timestamp
+#                                            capability interpretation
+#                                            (InterpretTimestampCapability())
+#                                            and tick-delta -> millisecond/
+#                                            slot-indexing math
+#                                            (ConvertTimestampDeltaToMilliseconds()/
+#                                            PresentTimestampSlotBase() -
+#                                            src/Renderer/GpuTiming.h) - no
+#                                            Vulkan/Renderer/live GPU device
+#                                            involved at all (no VkQueryPool
+#                                            is created anywhere in Phase 4A).
 #   - Game/RenderSystemTests.cpp             - RenderSystem::CollectRenderables()
 #                                            (the pure ECS -> DrawCommand step)
 #                                            and ResolveActiveCameraViewProjection()
@@ -332,6 +343,7 @@ set(GTE_TEST_SOURCES
     Renderer/PrimitiveMeshGeneratorTests.cpp
     Renderer/ResourcePoolTests.cpp
     Renderer/DrawStatsTests.cpp
+    Renderer/GpuTimingTests.cpp
     Math/Vec2Tests.cpp
     Math/Vec3Tests.cpp
     Math/Mat4Tests.cpp

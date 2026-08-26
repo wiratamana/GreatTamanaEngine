@@ -1,4 +1,4 @@
-﻿#include "VulkanDevice.h"
+#include "VulkanDevice.h"
 
 #include <cstring>
 #include <optional>
@@ -115,6 +115,7 @@ VulkanDevice::VulkanDevice(VkInstance instance, VkSurfaceKHR surface)
 {
     PickPhysicalDevice(instance, surface);
     CreateLogicalDevice();
+    QueryTimestampCapability();
 }
 
 VulkanDevice::~VulkanDevice()
@@ -129,6 +130,7 @@ VulkanDevice::VulkanDevice(VulkanDevice&& other) noexcept
     , m_presentQueue(std::exchange(other.m_presentQueue, VK_NULL_HANDLE))
     , m_graphicsFamily(other.m_graphicsFamily)
     , m_presentFamily(other.m_presentFamily)
+    , m_timestampCapability(other.m_timestampCapability)
 {
 }
 
@@ -142,6 +144,7 @@ VulkanDevice& VulkanDevice::operator=(VulkanDevice&& other) noexcept
         m_presentQueue = std::exchange(other.m_presentQueue, VK_NULL_HANDLE);
         m_graphicsFamily = other.m_graphicsFamily;
         m_presentFamily = other.m_presentFamily;
+        m_timestampCapability = other.m_timestampCapability;
     }
     return *this;
 }
@@ -247,6 +250,25 @@ VkFormat VulkanDevice::PickDepthFormat() const
     throw std::runtime_error(
         "VulkanDevice::PickDepthFormat: no supported depth/stencil attachment format found "
         "(none of D32_SFLOAT/D32_SFLOAT_S8_UINT/D24_UNORM_S8_UINT) - should be impossible per the Vulkan spec.");
+}
+
+void VulkanDevice::QueryTimestampCapability()
+{
+    VkPhysicalDeviceProperties properties{};
+    vkGetPhysicalDeviceProperties(m_physicalDevice, &properties);
+
+    std::uint32_t familyCount = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(m_physicalDevice, &familyCount, nullptr);
+    std::vector<VkQueueFamilyProperties> families(familyCount);
+    vkGetPhysicalDeviceQueueFamilyProperties(m_physicalDevice, &familyCount, families.data());
+
+    const std::uint32_t validBits =
+        (m_graphicsFamily < families.size()) ? families[m_graphicsFamily].timestampValidBits : 0;
+
+    m_timestampCapability = InterpretTimestampCapability(
+        properties.limits.timestampComputeAndGraphics == VK_TRUE,
+        properties.limits.timestampPeriod,
+        validBits);
 }
 
 void VulkanDevice::Destroy() noexcept

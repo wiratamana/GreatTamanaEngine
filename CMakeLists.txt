@@ -262,6 +262,8 @@ add_library(gte_core STATIC
     src/Renderer/FrameRecorder.h
     src/Renderer/DrawStats.cpp
     src/Renderer/DrawStats.h
+    src/Renderer/GpuTiming.cpp
+    src/Renderer/GpuTiming.h
     src/Renderer/GpuResourceFactory.cpp
     src/Renderer/GpuResourceFactory.h
     src/Renderer/Buffer.cpp

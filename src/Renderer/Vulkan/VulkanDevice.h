@@ -1,6 +1,8 @@
-﻿#pragma once
+#pragma once
 
 #include <volk.h>
+
+#include "../GpuTiming.h"
 
 #include <cstdint>
 
@@ -58,9 +60,34 @@ public:
     std::uint32_t GraphicsQueueFamily() const noexcept { return m_graphicsFamily; }
     std::uint32_t PresentQueueFamily() const noexcept { return m_presentFamily; }
 
+    // Whether (and how precisely) this physical device can do GPU
+    // timestamp queries - queried ONCE, in the constructor (see
+    // QueryTimestampCapability()), and never re-checked afterward (Vulkan
+    // device capabilities do not change at runtime). Phase 4A
+    // (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) - no VkQueryPool is
+    // created anywhere yet; this is purely a capability probe. See
+    // Renderer/GpuTiming.h for GpuTimestampCapability's own definition and
+    // InterpretTimestampCapability()'s pure decision logic.
+    const GpuTimestampCapability& TimestampCapability() const noexcept { return m_timestampCapability; }
+
 private:
     void PickPhysicalDevice(VkInstance instance, VkSurfaceKHR surface);
     void CreateLogicalDevice();
+    // Queries this physical device's raw timestamp-related limits
+    // (vkGetPhysicalDeviceProperties()'s
+    // limits.timestampComputeAndGraphics/limits.timestampPeriod,
+    // vkGetPhysicalDeviceQueueFamilyProperties()'s
+    // families[m_graphicsFamily].timestampValidBits) and interprets them
+    // via InterpretTimestampCapability() (Renderer/GpuTiming.h) - mirrors
+    // PickDepthFormat()'s own "ask the device once, expose via accessor"
+    // shape, except this one is eagerly computed and cached in the
+    // constructor rather than callable on demand, since every consumer
+    // needs the same fixed answer for this device's entire lifetime.
+    // Never throws - an unsupported result is a completely normal outcome
+    // (see the Vulkan spec: a timestampPeriod of 0 or timestampValidBits
+    // of 0 are BOTH valid "not supported" signals, never assumed
+    // otherwise).
+    void QueryTimestampCapability();
     void Destroy() noexcept;
 
     VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
@@ -70,6 +97,8 @@ private:
     VkQueue m_presentQueue = VK_NULL_HANDLE;
     std::uint32_t m_graphicsFamily = 0;
     std::uint32_t m_presentFamily = 0;
+
+    GpuTimestampCapability m_timestampCapability;
 };
 
 } // namespace gte
