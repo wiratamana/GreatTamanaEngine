@@ -100,6 +100,24 @@
 #                                            Phase 4B's own GpuTimingService/
 #                                            VulkanQueryPool are Tier 2, see
 #                                            the note below).
+#   - Renderer/RenderGraph/RenderGraphTypesTests.cpp - Render Graph Phase 1's
+#                                            pure vocabulary (handles/
+#                                            ResourceAccess/TextureDesc/
+#                                            BufferDesc/PassRecord - see
+#                                            src/Renderer/RenderGraph/
+#                                            RenderGraphTypes.h) - handle
+#                                            validity/equality, desc value
+#                                            equality (including a v2
+#                                            regression test proving no
+#                                            field is compared by identity),
+#                                            and IsWriteAccess()/ToString()
+#                                            covering every ResourceAccess
+#                                            enumerator. No Vulkan device/
+#                                            Renderer/Registry involved at
+#                                            all - only VkFormat/VkDeviceSize/
+#                                            VkBufferUsageFlags Vulkan-header
+#                                            TYPES are used, never a Vulkan
+#                                            call.
 #   - Game/RenderSystemTests.cpp             - RenderSystem::CollectRenderables()
 #                                            (the pure ECS -> DrawCommand step)
 #                                            and ResolveActiveCameraViewProjection()
@@ -350,6 +368,7 @@ set(GTE_TEST_SOURCES
     Renderer/ResourcePoolTests.cpp
     Renderer/DrawStatsTests.cpp
     Renderer/GpuTimingTests.cpp
+    Renderer/RenderGraph/RenderGraphTypesTests.cpp
     Math/Vec2Tests.cpp
     Math/Vec3Tests.cpp
     Math/Mat4Tests.cpp

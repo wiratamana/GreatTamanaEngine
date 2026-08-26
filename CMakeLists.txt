@@ -306,6 +306,8 @@ add_library(gte_core STATIC
     src/Renderer/Vulkan/VulkanFrameSync.h
     src/Renderer/Vulkan/VulkanQueryPool.cpp
     src/Renderer/Vulkan/VulkanQueryPool.h
+    src/Renderer/RenderGraph/RenderGraphTypes.h
+    src/Renderer/RenderGraph/RenderGraphTypes.cpp
     src/Editor/EditorLayer.h
     src/Game/Instantiation/EntityBlueprint.h
     src/Game/Instantiation/EntityInstantiator.cpp
