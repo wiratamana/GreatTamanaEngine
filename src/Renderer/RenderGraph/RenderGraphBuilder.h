@@ -116,8 +116,21 @@ public:
         }
 
         void ReadTexture(TextureHandle handle, ResourceAccess access = ResourceAccess::ShaderRead);
-        void WriteColorAttachment(TextureHandle handle);
-        void WriteDepthStencilAttachment(TextureHandle handle);
+
+        // `clearColor`/`clearDepth` are Phase 7 additions
+        // (RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md) -
+        // std::nullopt (the default) preserves Phase 6's original-only
+        // behavior (VK_ATTACHMENT_LOAD_OP_LOAD - existing contents kept);
+        // supplying a value switches that attachment's loadOp to
+        // VK_ATTACHMENT_LOAD_OP_CLEAR with this exact value, recorded onto
+        // this pass's own PassRecord::colorClearValue/depthClearValue (see
+        // RenderGraphTypes.h). A pass with more than one WriteColorAttachment()/
+        // WriteDepthStencilAttachment() call this frame simply has its LAST
+        // supplied clear value (if any) win - the Phases 1-8 MVP never
+        // declares more than one color/depth write per pass anyway (see
+        // RenderGraph.h's own single-color-attachment-per-pass scope note).
+        void WriteColorAttachment(TextureHandle handle, const std::optional<std::array<float, 4>>& clearColor = std::nullopt);
+        void WriteDepthStencilAttachment(TextureHandle handle, std::optional<float> clearDepth = std::nullopt);
 
         // Symmetric buffer counterparts, for a future compute pass (Phase
         // 9 backlog) - no real Phases 1-8 pass needs these yet, but

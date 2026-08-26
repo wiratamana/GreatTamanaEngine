@@ -211,24 +211,28 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         if (hasColorWrite) {
             const PhysicalTexture& colorTex = physicalTextures[colorHandle.index];
 
-            // loadOp = LOAD (never CLEAR): Phase 2's builder API has no
-            // per-pass clear-color concept today (unlike
-            // FrameRecorder::RecordFrame(), which always clears) - LOAD is
-            // the only choice that never silently discards another pass's
-            // (or a previous frame's, for an imported resource) contents a
-            // pass author didn't ask to lose. storeOp = STORE (always) for
-            // the same reason: this graph has no way to know yet whether a
-            // later pass/import consumer needs this attachment's contents,
-            // so nothing is ever discarded speculatively. A future
-            // PassBuilder addition (a per-write clear-color parameter) is
-            // the natural place to revisit this - see
-            // RENDERGRAPH_PHASE6_COMPLETION_REPORT.md.
+            // Phase 7 (RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md)
+            // - loadOp is CLEAR whenever this pass declared a color clear
+            // value (PassRecord::colorClearValue, set via
+            // PassBuilder::WriteColorAttachment()'s own optional parameter -
+            // see RenderGraphBuilder.h), LOAD otherwise (Phase 6's original,
+            // only behavior - never silently discards another pass's, or a
+            // previous frame's, contents a pass author didn't ask to lose).
+            // storeOp = STORE (always): this graph has no way to know yet
+            // whether a later pass/import consumer needs this attachment's
+            // contents, so nothing is ever discarded speculatively.
             VkRenderingAttachmentInfo colorAttachment{};
             colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
             colorAttachment.imageView = colorTex.target.imageView;
             colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-            colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
             colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            if (pass.colorClearValue.has_value()) {
+                colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+                const std::array<float, 4>& c = *pass.colorClearValue;
+                colorAttachment.clearValue.color = { { c[0], c[1], c[2], c[3] } };
+            } else {
+                colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+            }
 
             VkRenderingAttachmentInfo depthAttachment{};
             bool hasDepthAttachment = false;
@@ -239,8 +243,13 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
                 depthAttachment.imageLayout = depthTex.target.depthHasStencil
                     ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
                     : VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
-                depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
                 depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+                if (pass.depthClearValue.has_value()) {
+                    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+                    depthAttachment.clearValue.depthStencil = { *pass.depthClearValue, 0 };
+                } else {
+                    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+                }
                 hasDepthAttachment = true;
             }
 

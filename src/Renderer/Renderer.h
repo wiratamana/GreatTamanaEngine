@@ -10,6 +10,7 @@
 #include "Memory/GpuMemoryTracker.h"
 #include "Mesh.h"
 #include "Pipeline.h"
+#include "RenderGraph/RenderGraphTypes.h"
 #include "RenderTexture.h"
 #include "Texture2D.h"
 #include "Vulkan/VulkanAllocator.h"
@@ -23,6 +24,11 @@
 #include <optional>
 #include <string>
 #include <vector>
+
+namespace gte::rg {
+class RenderGraph;
+class RenderGraphBuilder;
+} // namespace gte::rg
 
 namespace gte {
 
@@ -138,6 +144,71 @@ public:
     // log for why).
     DrawStats RenderOffscreen(RenderTexture& target, std::optional<GpuTimingSlot> timingSlot,
         const std::function<void(VkCommandBuffer)>& recordExtra = {});
+
+    // --- Phase 7 (RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md)
+    // - Render Graph integration ---------------------------------------
+    //
+    // Begins recording FramePresenter's dedicated offscreen command buffer
+    // (the same one RenderOffscreen() above uses) - waits on its fence,
+    // resets it, and calls vkBeginCommandBuffer(). The caller (Application::Run())
+    // is expected to declare/execute one or more RenderGraph passes against
+    // the returned VkCommandBuffer (see RenderPasses.h's AddGameViewPass()/
+    // AddSceneViewPass()), then call EndOffscreenRenderGraphRecording() to
+    // end/submit/block until the GPU finishes - mirroring RenderOffscreen()'s
+    // own synchronous behavior, just generalized to cover MULTIPLE render-
+    // graph passes recorded into ONE submission instead of one call per
+    // RenderTexture. Never call Renderer::RenderOffscreen() (the legacy,
+    // FrameRecorder-based path - still used by src/Editor/AssetPreviewMesh.cpp/
+    // BoneViewerWindow.cpp's own independent previews) between this call and
+    // EndOffscreenRenderGraphRecording() - both share the SAME underlying
+    // command buffer/fence.
+    VkCommandBuffer BeginOffscreenRenderGraphRecording();
+
+    // Ends/submits the command buffer BeginOffscreenRenderGraphRecording()
+    // began, and blocks until the GPU finishes (synchronous, matching
+    // RenderOffscreen()'s own documented behavior above).
+    void EndOffscreenRenderGraphRecording();
+
+    // Executes the pipelined swapchain-present regime via `graph` - handles
+    // acquire/resize/skip exactly like the legacy Present() above did, but
+    // records via the render graph instead of FrameRecorder. Returns
+    // std::nullopt under the exact same circumstances Present() did
+    // (minimized window, still-pending resize, just-recreated swapchain) -
+    // never touches `graph` at all in that case. `needsSwapchainDepth`
+    // mirrors FrameRecorder::HasQueuedDraws()'s old lazy depth-buffer
+    // provisioning decision - true when this frame's Present pass will draw
+    // real, depth-tested engine geometry directly into the swapchain image
+    // (the release-build/"both Game and Scene panels hidden" case - see
+    // RenderPasses.h's AddPresentPass()), false otherwise (the common
+    // Editor case, where nothing but ImGui's own never-depth-tested chrome
+    // is drawn here). `build` receives the swapchain's own freshly-imported
+    // TextureHandle (see RenderGraphBuilder::ImportTexture()) and returns
+    // the finalOutputs root set - mirroring RenderGraph::Execute()'s own
+    // `build` parameter. On success, returns the "Present" pass's own
+    // DrawStats (see RenderGraph::LastKnownStatsFor() - "Present" must
+    // match RenderPasses.h's AddPresentPass() pass name literal exactly).
+    std::optional<DrawStats> PresentViaRenderGraph(rg::RenderGraph& graph, bool needsSwapchainDepth,
+        const std::function<std::vector<rg::TextureHandle>(rg::RenderGraphBuilder&, rg::TextureHandle)>& build);
+
+    // While a render-graph pass is being recorded (see RenderPasses.h),
+    // Submit() below issues its Vulkan draw command DIRECTLY against `cmd`
+    // (via FrameRecorder::IssueDrawCommand()) instead of queuing into the
+    // legacy FrameRecorder draw list - this is the one surgical change that
+    // lets Game/RenderSystem keep calling Renderer::Submit() completely
+    // unaware anything changed underneath them (see
+    // RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md, Step 3.1).
+    // `recordDrawStats` is called once per Submit() call while active,
+    // mirroring PassContext::recordDraw's own shape exactly (see
+    // RenderGraph.h) - so a pass's own DrawStats tally stays fused to the
+    // exact call site that issues the real draw, per this engine's existing
+    // AccumulateDrawStats() correctness rule (see AGENTS.md, "Profiling").
+    // Must be paired with EndGraphPassRecording() before this same Renderer
+    // is used for anything else - RenderPasses.h's AddGameViewPass()/
+    // AddSceneViewPass()/AddPresentPass() already do this correctly, for
+    // the exact duration of their own `execute` callback.
+    void BeginGraphPassRecording(
+        VkCommandBuffer cmd, std::function<void(bool, std::uint32_t, std::uint32_t)> recordDrawStats);
+    void EndGraphPassRecording() noexcept;
 
     // The color format this Renderer's swapchain actually negotiated at
     // runtime (see VulkanSwapchain.cpp's ChooseSurfaceFormat) - the single
@@ -458,6 +529,15 @@ private:
     // This frame's clear color + queued Submit() draw list - see
     // FrameRecorder.h.
     FrameRecorder m_frameRecorder;
+
+    // Phase 7 (RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md) -
+    // set/cleared by BeginGraphPassRecording()/EndGraphPassRecording() for
+    // the exact duration of one RenderGraph pass's `execute` callback (see
+    // RenderPasses.h). VK_NULL_HANDLE (the default) means "not currently
+    // inside a render-graph pass" - Submit() below falls back to the legacy
+    // m_frameRecorder queue in that case.
+    VkCommandBuffer m_currentGraphPassCmd = VK_NULL_HANDLE;
+    std::function<void(bool, std::uint32_t, std::uint32_t)> m_currentGraphPassRecordDrawStats;
 };
 
 } // namespace gte

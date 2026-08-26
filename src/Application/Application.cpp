@@ -2,13 +2,17 @@
 
 #include "EventTranslator.h"
 #include "MemorySnapshotBuilder.h"
+#include "RenderPasses.h"
 
 #include "../Memory/SdlMemoryTracker.h"
 #include "../Profiling/FrameProfiler.h"
 #include "../Profiling/ScopeTimer.h"
+#include "../Renderer/RenderGraph/RenderGraphBuilder.h"
 
 #include <SDL3/SDL.h>
 
+#include <cassert>
+#include <cstdio>
 #include <stdexcept>
 
 namespace gte {
@@ -75,6 +79,7 @@ Application::Application(const std::string& title, int width, int height)
     : m_sdlContext()
     , m_window(title, width, height)
     , m_renderer(m_window)
+    , m_renderGraph(m_renderer)
     , m_editorLayer(CreateEditorLayer(m_window, m_renderer))
     , m_game()
     , m_windowWidth(width)
@@ -202,65 +207,105 @@ int Application::Run()
         // Unity-style Editor-vs-final-build rendering, and it lives here in
         // Application (the composition root), not in Game.
         //
-        // Game::Render() (clear + queue this frame's draws, see Game.h) is
-        // called once per VISIBLE target, immediately followed by the
-        // RenderOffscreen() call that consumes/clears that queue into it -
-        // see FrameRecorder.h for why a target must consume the queue
-        // before the next Render() call re-queues it for a different
-        // target/aspect ratio. If "Scene" and "Game" are tabbed together,
-        // only one of these two runs (at zero extra GPU cost for the
-        // hidden one); split apart, both run, each into its own
-        // RenderTexture/aspect ratio.
+        // Render Graph migration (Phase 7 -
+        // RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md): Game
+        // view / Scene view / Present are recorded via TWO
+        // RenderGraph::Execute() calls per frame - one for the SYNCHRONOUS
+        // offscreen regime (Game+Scene together, sharing FramePresenter's
+        // own dedicated offscreen command buffer/fence), one for the
+        // PIPELINED swapchain regime (Present alone) - see RenderPasses.h
+        // and this class's own m_renderGraph member. A dependency-cycle
+        // exception from RenderGraphCompiler::Compile() is structurally
+        // unreachable through any graph this engine declares today (see
+        // RENDERGRAPH_PHASE3_COMPLETION_REPORT.md) but is still caught
+        // here, loudly, per RENDERGRAPH_PHASE6_COMPLETION_REPORT.md's own
+        // Step 3.5 guidance - never silently swallowed.
         RenderTexture* gameTarget = m_editorLayer->GameViewTarget();
         RenderTexture* sceneTarget = m_editorLayer->SceneViewTarget();
 
+        // Call 1 of 2: the SYNCHRONOUS offscreen regime - Game view + Scene
+        // view together. Runs unconditionally whenever either target is
+        // non-null, completely independent of whatever the swapchain is
+        // doing this frame (a minimized OS window does not affect this
+        // call at all).
+        if (gameTarget != nullptr || sceneTarget != nullptr) {
+            try {
+                GTE_PROFILE_SCOPE("RenderGraph::Execute(Offscreen)");
+                const VkCommandBuffer offscreenCmd = m_renderer.BeginOffscreenRenderGraphRecording();
+                m_renderGraph.Execute(offscreenCmd, rg::ExecuteTimingMode::SynchronousImmediateReadback,
+                    [&](rg::RenderGraphBuilder& b) {
+                        std::vector<rg::TextureHandle> outputs;
+                        if (gameTarget != nullptr) {
+                            const VkExtent2D extent = gameTarget->Extent();
+                            const float aspect =
+                                AspectRatioOf(static_cast<int>(extent.width), static_cast<int>(extent.height));
+                            const rg::TextureHandle h =
+                                b.ImportTexture("GameView", gameTarget->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
+                            AddGameViewPass(b, m_game, m_renderer, h, aspect);
+                            outputs.push_back(h);
+                        }
+                        if (sceneTarget != nullptr) {
+                            const VkExtent2D extent = sceneTarget->Extent();
+                            const float aspect =
+                                AspectRatioOf(static_cast<int>(extent.width), static_cast<int>(extent.height));
+                            // Unlike the Game view above, the Scene view
+                            // renders through the Editor's OWN independently-
+                            // orbitable camera (see src/Editor/EditorCamera.h)
+                            // rather than whatever ECS entity currently has
+                            // the active Camera component - see
+                            // IEditorLayer::SceneViewProjection()/
+                            // Game::Render()'s viewProjectionOverride
+                            // parameter.
+                            const Mat4 sceneViewProjection = m_editorLayer->SceneViewProjection(aspect);
+                            const rg::TextureHandle h =
+                                b.ImportTexture("SceneView", sceneTarget->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
+                            AddSceneViewPass(b, m_game, m_renderer, h, aspect, sceneViewProjection);
+                            outputs.push_back(h);
+                        }
+                        return outputs;
+                    });
+
+                // Manual finalize: transitions whichever of Game/Scene were
+                // actually rendered this call from ColorAttachmentWrite to a
+                // real ShaderRead layout, for Dear ImGui's own (render-
+                // graph-external) descriptor set to sample during the
+                // Present regime call below - see RenderPasses.h's own doc
+                // comment on FinalizeRenderTextureForExternalSampling().
+                if (gameTarget != nullptr) {
+                    FinalizeRenderTextureForExternalSampling(offscreenCmd, *gameTarget);
+                }
+                if (sceneTarget != nullptr) {
+                    FinalizeRenderTextureForExternalSampling(offscreenCmd, *sceneTarget);
+                }
+
+                m_renderer.EndOffscreenRenderGraphRecording();
+            } catch (const std::exception& e) {
+                std::fprintf(stderr, "RenderGraph offscreen Execute() failed: %s\n", e.what());
+                assert(false && "RenderGraph offscreen Execute() threw - see stderr");
+            }
+        }
+
+        // Not #if GTE_ENABLE_PROFILER-gated - see AGENTS.md's "Profiling"
+        // section and this same function's own BeginFrame()/EndFrame()
+        // calls, which aren't gated either; only GTE_PROFILE_SCOPE(...)'s
+        // own macro body is compile-time-gated. "GameView"/"SceneView" must
+        // match RenderPasses.cpp's own AddGameViewPass()/AddSceneViewPass()
+        // pass name literals exactly.
         if (gameTarget != nullptr) {
-            const VkExtent2D extent = gameTarget->Extent();
-            m_game.Render(m_renderer, AspectRatioOf(static_cast<int>(extent.width), static_cast<int>(extent.height)));
-            GTE_PROFILE_SCOPE("Renderer::RenderOffscreen(GameView)");
-            const DrawStats gameViewStats = m_renderer.RenderOffscreen(*gameTarget, GpuTimingSlot::Offscreen0);
-            // Not #if GTE_ENABLE_PROFILER-gated - see AGENTS.md's "Profiling"
-            // section and this same file's own BeginFrame()/EndFrame() calls
-            // above, which aren't gated either; only GTE_PROFILE_SCOPE(...)'s
-            // own macro body is compile-time-gated.
+            const rg::PassGpuStats gameViewStats = m_renderGraph.LastKnownStatsFor("GameView");
             Profiling::FrameProfiler::Instance().SetGpuPassDrawStats(Profiling::GpuPass::GameView,
-                Profiling::GpuSampleStatus::Present, gameViewStats.drawCallCount, gameViewStats.triangleCount);
-            // Phase 4C (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) - real
-            // GPU timing, reported through the same guard that already
-            // proves this pass ran this frame (see this block's own comment
-            // above for why re-reading a stale value would never happen).
-            const GpuTimingSample gameViewTiming = m_renderer.LastGpuTiming(GpuTimingSlot::Offscreen0);
+                Profiling::GpuSampleStatus::Present, gameViewStats.drawStats.drawCallCount,
+                gameViewStats.drawStats.triangleCount);
             Profiling::FrameProfiler::Instance().SetGpuPassTiming(Profiling::GpuPass::GameView,
-                ToProfilingGpuSampleStatus(gameViewTiming.status), gameViewTiming.milliseconds);
+                ToProfilingGpuSampleStatus(gameViewStats.timing.status), gameViewStats.timing.milliseconds);
         }
         if (sceneTarget != nullptr) {
-            const VkExtent2D extent = sceneTarget->Extent();
-            const float aspect = AspectRatioOf(static_cast<int>(extent.width), static_cast<int>(extent.height));
-            // Unlike the Game view above, the Scene view renders through
-            // the Editor's OWN independently-orbitable camera (see
-            // src/Editor/EditorCamera.h) rather than whatever ECS entity
-            // currently has the active Camera component - see
-            // IEditorLayer::SceneViewProjection()/Game::Render()'s
-            // viewProjectionOverride parameter.
-            const Mat4 sceneViewProjection = m_editorLayer->SceneViewProjection(aspect);
-            m_game.Render(m_renderer, aspect, &sceneViewProjection);
-            GTE_PROFILE_SCOPE("Renderer::RenderOffscreen(SceneView)");
-            const DrawStats sceneViewStats = m_renderer.RenderOffscreen(*sceneTarget, GpuTimingSlot::Offscreen1);
+            const rg::PassGpuStats sceneViewStats = m_renderGraph.LastKnownStatsFor("SceneView");
             Profiling::FrameProfiler::Instance().SetGpuPassDrawStats(Profiling::GpuPass::SceneView,
-                Profiling::GpuSampleStatus::Present, sceneViewStats.drawCallCount, sceneViewStats.triangleCount);
-            const GpuTimingSample sceneViewTiming = m_renderer.LastGpuTiming(GpuTimingSlot::Offscreen1);
+                Profiling::GpuSampleStatus::Present, sceneViewStats.drawStats.drawCallCount,
+                sceneViewStats.drawStats.triangleCount);
             Profiling::FrameProfiler::Instance().SetGpuPassTiming(Profiling::GpuPass::SceneView,
-                ToProfilingGpuSampleStatus(sceneViewTiming.status), sceneViewTiming.milliseconds);
-        }
-        if (gameTarget == nullptr && sceneTarget == nullptr) {
-            // No Editor at all (release build - always takes this path), or
-            // an Editor build where both "Game" and "Scene" happen to be
-            // hidden simultaneously (a rare edge case - see
-            // EditorContext::gameViewVisible/sceneViewVisible) - render
-            // straight to the swapchain instead, at the OS window's own
-            // aspect ratio, exactly like a release build always did before
-            // "Scene" got its own RenderTexture.
-            m_game.Render(m_renderer, AspectRatioOf(m_windowWidth, m_windowHeight));
+                ToProfilingGpuSampleStatus(sceneViewStats.timing.status), sceneViewStats.timing.milliseconds);
         }
 
         // Build every editor panel (Hierarchy/Inspector/Scene/Game/Memory/menu
@@ -282,33 +327,47 @@ int Application::Run()
             running = false;
         }
 
-        // Present the swapchain. In an Editor build this draws the editor's
-        // own ImGui chrome (which itself displays the Game/Scene views
-        // above) via the recordExtra hook; in a release build recordExtra is
-        // effectively a no-op (NullEditorLayer::Render does nothing) and
-        // this just presents whatever Game rendered straight into the
-        // swapchain moments ago.
+        // Call 2 of 2: the PIPELINED swapchain-present regime - Present
+        // alone. In an Editor build this draws the editor's own ImGui
+        // chrome (which itself displays the Game/Scene views above) via the
+        // recordImGui hook; in a release build (or the rare Editor edge
+        // case where both "Game"/"Scene" are simultaneously hidden) it ALSO
+        // renders Game directly into the swapchain first - see
+        // RenderPasses.h's AddPresentPass().
         {
-            GTE_PROFILE_SCOPE("Renderer::Present");
-            const std::optional<DrawStats> presentStats =
-                m_renderer.Present([this](VkCommandBuffer cmd) { m_editorLayer->Render(cmd); });
+            GTE_PROFILE_SCOPE("Renderer::PresentViaRenderGraph");
+            const bool needsDirectGameRender = (gameTarget == nullptr && sceneTarget == nullptr);
+            const std::optional<float> directGameRenderAspect = needsDirectGameRender
+                ? std::optional<float>(AspectRatioOf(m_windowWidth, m_windowHeight))
+                : std::nullopt;
+
+            std::optional<DrawStats> presentStats;
+            try {
+                presentStats = m_renderer.PresentViaRenderGraph(m_renderGraph, needsDirectGameRender,
+                    [&](rg::RenderGraphBuilder& b, rg::TextureHandle swapchainImage) {
+                        AddPresentPass(b, m_game, m_renderer, swapchainImage, directGameRenderAspect,
+                            [this](VkCommandBuffer cmd) { m_editorLayer->Render(cmd); });
+                        return std::vector<rg::TextureHandle>{ swapchainImage };
+                    });
+            } catch (const std::exception& e) {
+                std::fprintf(stderr, "RenderGraph Present Execute() failed: %s\n", e.what());
+                assert(false && "RenderGraph Present Execute() threw - see stderr");
+            }
+
             if (presentStats.has_value()) {
                 Profiling::FrameProfiler::Instance().SetGpuPassDrawStats(Profiling::GpuPass::Present,
                     Profiling::GpuSampleStatus::Present, presentStats->drawCallCount, presentStats->triangleCount);
-                // Phase 4D (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) -
-                // real GPU timing for the swapchain Present pass, reported
-                // through the exact same guard that already proves this
-                // pass ran this frame (mirroring the Game/Scene blocks
-                // above).
-                const GpuTimingSample presentTiming = m_renderer.LastGpuTiming(GpuTimingSlot::SwapchainPresent);
+                // "Present" must match RenderPasses.cpp's own
+                // AddPresentPass() pass name literal exactly.
+                const GpuTimingSample presentTiming = m_renderGraph.LastKnownStatsFor("Present").timing;
                 Profiling::FrameProfiler::Instance().SetGpuPassTiming(Profiling::GpuPass::Present,
                     ToProfilingGpuSampleStatus(presentTiming.status), presentTiming.milliseconds);
             }
-            // else: Present() recorded nothing this frame (minimized window,
-            // pending resize, or a just-recreated swapchain - see
-            // FramePresenter::Present()'s own comment) - GpuPass::Present's
-            // countStatus AND timingStatus both correctly stay at their
-            // default GpuSampleStatus::Absent, with no extra code needed.
+            // else: PresentViaRenderGraph() recorded nothing this frame
+            // (minimized window, pending resize, or a just-recreated
+            // swapchain) - GpuPass::Present's countStatus AND timingStatus
+            // both correctly stay at their default GpuSampleStatus::Absent,
+            // with no extra code needed.
         }
 
         // Update/present any panel the user has dragged outside the main OS

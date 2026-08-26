@@ -230,6 +230,77 @@ TEST(RenderGraphBuilderTest, PassBuilderWriteDepthStencilAttachmentAppendsDepthS
     EXPECT_EQ(input.passes[0].writes[0].access, ResourceAccess::DepthStencilAttachmentReadWrite);
 }
 
+// Phase 7 (RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md) - the
+// default (no clear value supplied) leaves PassRecord::colorClearValue at
+// std::nullopt, matching Phase 6's original, only behavior
+// (VK_ATTACHMENT_LOAD_OP_LOAD).
+TEST(RenderGraphBuilderTest, WriteColorAttachmentWithNoClearColorLeavesColorClearValueEmpty)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle handle = builder.CreateTexture("Output", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+
+    builder.AddPass(
+        "WritePass",
+        [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(handle); },
+        NoOpExecute);
+
+    const CompiledGraphInput input = builder.Finish();
+    EXPECT_FALSE(input.passes[0].colorClearValue.has_value());
+}
+
+// Supplying a clear color records it verbatim onto the pass's own
+// PassRecord::colorClearValue - what RenderGraph::Execute() reads to decide
+// VK_ATTACHMENT_LOAD_OP_CLEAR vs. LOAD (see RenderGraph.cpp).
+TEST(RenderGraphBuilderTest, WriteColorAttachmentWithClearColorRecordsItOnThePass)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle handle = builder.CreateTexture("Output", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+    const std::array<float, 4> clearColor{ 0.1f, 0.2f, 0.3f, 1.0f };
+
+    builder.AddPass(
+        "WritePass",
+        [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(handle, clearColor); },
+        NoOpExecute);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_TRUE(input.passes[0].colorClearValue.has_value());
+    EXPECT_EQ(*input.passes[0].colorClearValue, clearColor);
+}
+
+// Same idea, depth side: no clear value supplied leaves depthClearValue at
+// std::nullopt.
+TEST(RenderGraphBuilderTest, WriteDepthStencilAttachmentWithNoClearDepthLeavesDepthClearValueEmpty)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle handle = builder.CreateTexture("Depth", TextureDesc{ 64, 64, VK_FORMAT_D32_SFLOAT, true });
+
+    builder.AddPass(
+        "DepthPass",
+        [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteDepthStencilAttachment(handle); },
+        NoOpExecute);
+
+    const CompiledGraphInput input = builder.Finish();
+    EXPECT_FALSE(input.passes[0].depthClearValue.has_value());
+}
+
+// Supplying a clear depth records it verbatim onto the pass's own
+// PassRecord::depthClearValue.
+TEST(RenderGraphBuilderTest, WriteDepthStencilAttachmentWithClearDepthRecordsItOnThePass)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle handle = builder.CreateTexture("Depth", TextureDesc{ 64, 64, VK_FORMAT_D32_SFLOAT, true });
+
+    builder.AddPass(
+        "DepthPass",
+        [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteDepthStencilAttachment(handle, 1.0f); },
+        NoOpExecute);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_TRUE(input.passes[0].depthClearValue.has_value());
+    EXPECT_FLOAT_EQ(*input.passes[0].depthClearValue, 1.0f);
+}
+
+
 TEST(RenderGraphBuilderTest, PassBuilderReadBufferAppendsWithGivenAccess)
 {
     RenderGraphBuilder builder;

@@ -1,5 +1,9 @@
 #include "FramePresenter.h"
 
+#include "RenderGraph/RenderGraph.h"
+#include "RenderGraph/RenderGraphBarrierPlanner.h"
+#include "RenderGraph/RenderGraphBuilder.h"
+
 #include <cstddef>
 #include <limits>
 #include <stdexcept>
@@ -438,6 +442,190 @@ DrawStats FramePresenter::RenderOffscreen(FrameRecorder& frameRecorder, RenderTe
     }
 
     return drawStats;
+}
+
+VkCommandBuffer FramePresenter::BeginOffscreenRecording()
+{
+    const VkFence offscreenFence = m_frameSync.OffscreenFence();
+    vkWaitForFences(m_device, 1, &offscreenFence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
+    vkResetFences(m_device, 1, &offscreenFence);
+
+    vkResetCommandBuffer(m_offscreenCommandBuffer, 0);
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    if (vkBeginCommandBuffer(m_offscreenCommandBuffer, &beginInfo) != VK_SUCCESS) {
+        throw std::runtime_error("vkBeginCommandBuffer failed (offscreen render graph)");
+    }
+
+    // Phase 7 (RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md) -
+    // GPU timestamp queries (GpuTimingService) are NOT wired into the
+    // render-graph-driven offscreen/present paths yet, matching Phase 6's
+    // own explicitly-documented scope decision (see
+    // RENDERGRAPH_PHASE6_COMPLETION_REPORT.md's "A deliberate scope
+    // decision") - RenderGraph's own PassGpuStats::timing is honestly
+    // Status::Absent for every pass today (see RenderGraph.h's own "GPU
+    // TIMING NOTE"). Generalizing GpuTimingService's fixed-3-slot pool into
+    // a real, per-pass-name query pool remains a follow-up, not done in
+    // this session - see RENDERGRAPH_PHASE7_COMPLETION_REPORT.md.
+    return m_offscreenCommandBuffer;
+}
+
+void FramePresenter::EndOffscreenRecording()
+{
+    if (vkEndCommandBuffer(m_offscreenCommandBuffer) != VK_SUCCESS) {
+        throw std::runtime_error("vkEndCommandBuffer failed (offscreen render graph)");
+    }
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &m_offscreenCommandBuffer;
+
+    const VkFence offscreenFence = m_frameSync.OffscreenFence();
+    if (vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, offscreenFence) != VK_SUCCESS) {
+        throw std::runtime_error("vkQueueSubmit failed (offscreen render graph)");
+    }
+
+    // Synchronous for now - matches RenderOffscreen()'s own documented
+    // behavior (see the declaration comment in Renderer.h).
+    vkWaitForFences(m_device, 1, &offscreenFence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
+}
+
+bool FramePresenter::PresentViaRenderGraph(rg::RenderGraph& graph, bool needsSwapchainDepth,
+    const std::function<std::vector<rg::TextureHandle>(rg::RenderGraphBuilder&, rg::TextureHandle)>& build)
+{
+    if (m_pendingWidth <= 0 || m_pendingHeight <= 0) {
+        return false; // Minimized - nothing to draw this frame.
+    }
+
+    if (m_resizeRequested) {
+        RecreateSwapchain();
+        if (m_resizeRequested) {
+            return false; // Still pending (stayed minimized) - try again next frame.
+        }
+    }
+
+    const VkFence fence = m_frameSync.InFlightFence(m_currentFrame);
+    vkWaitForFences(m_device, 1, &fence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
+
+    std::uint32_t imageIndex = 0;
+    const VkResult acquireResult = vkAcquireNextImageKHR(
+        m_device, m_swapchain.Native(), std::numeric_limits<std::uint64_t>::max(),
+        m_frameSync.ImageAvailableSemaphore(m_currentFrame), VK_NULL_HANDLE, &imageIndex);
+
+    if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR) {
+        RecreateSwapchain();
+        return false;
+    }
+    if (acquireResult != VK_SUCCESS && acquireResult != VK_SUBOPTIMAL_KHR) {
+        throw std::runtime_error("vkAcquireNextImageKHR failed (VkResult=" + std::to_string(acquireResult) + ")");
+    }
+
+    vkResetFences(m_device, 1, &fence);
+
+    if (needsSwapchainDepth) {
+        EnsureDepthBuffersForSwapchain();
+    }
+
+    const VkCommandBuffer cmd = m_commandBuffers[m_currentFrame];
+    vkResetCommandBuffer(cmd, 0);
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    if (vkBeginCommandBuffer(cmd, &beginInfo) != VK_SUCCESS) {
+        throw std::runtime_error("vkBeginCommandBuffer failed (render graph present)");
+    }
+
+    RenderTarget target;
+    target.image = m_swapchain.Image(imageIndex);
+    target.imageView = m_swapchain.ImageView(imageIndex);
+    target.extent = m_swapchain.Extent();
+    target.format = m_swapchain.ImageFormat();
+    if (needsSwapchainDepth) {
+        // Depth buffer paired with THIS swapchain image - see the class
+        // comment for why indexing by imageIndex (not m_currentFrame) is
+        // what makes this safe with no extra synchronization.
+        const DepthBuffer& depthBuffer = m_depthBuffers[imageIndex];
+        target.depthImage = depthBuffer.Image();
+        target.depthImageView = depthBuffer.View();
+        target.depthFormat = depthBuffer.Format();
+        target.depthHasStencil = depthBuffer.HasStencilComponent();
+    }
+
+    // The render graph's own Compile() step can, in principle, throw
+    // std::runtime_error on a genuine dependency cycle (structurally
+    // unreachable through any graph this engine declares today - see
+    // RENDERGRAPH_PHASE3_COMPLETION_REPORT.md) - deliberately NOT caught
+    // here; the caller (Application::Run()) is responsible for that, per
+    // RENDERGRAPH_PHASE6_COMPLETION_REPORT.md's own Step 3.5 guidance.
+    graph.Execute(cmd, rg::ExecuteTimingMode::PipelinedDeferredReadback,
+        [&](rg::RenderGraphBuilder& builder) -> std::vector<rg::TextureHandle> {
+            const rg::TextureHandle swapchainHandle =
+                builder.ImportTexture("Swapchain", target, VK_IMAGE_LAYOUT_UNDEFINED);
+            return build(builder, swapchainHandle);
+        });
+
+    // Manual finalize: the render graph itself never learns that THIS
+    // particular imported resource is about to be handed to
+    // vkQueuePresentKHR (no pass ever declares a "PresentSrc" usage - see
+    // RENDERGRAPH_PHASE5_COMPLETION_REPORT.md's own "design decision worth
+    // flagging" note) - so the swapchain image's final transition from
+    // ColorAttachmentWrite to VK_IMAGE_LAYOUT_PRESENT_SRC_KHR is done here,
+    // by hand, using the exact same pure Phase 5 helpers
+    // (RequiredStateFor()/EmitImageBarrier()) the graph itself uses
+    // internally - safe here because graph.Execute() above has already
+    // closed its own vkCmdBeginRendering/vkCmdEndRendering bracket.
+    {
+        const rg::ResourceState previous = rg::RequiredStateFor(rg::ResourceAccess::ColorAttachmentWrite, false);
+        const rg::ResourceState next{
+            VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, VK_ACCESS_2_NONE
+        };
+        const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+        rg::EmitImageBarrier(cmd, target.image, range, previous, next);
+    }
+
+    if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
+        throw std::runtime_error("vkEndCommandBuffer failed (render graph present)");
+    }
+
+    const VkSemaphore waitSemaphore = m_frameSync.ImageAvailableSemaphore(m_currentFrame);
+    const VkSemaphore signalSemaphore = m_frameSync.RenderFinishedSemaphore(imageIndex);
+    const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.waitSemaphoreCount = 1;
+    submitInfo.pWaitSemaphores = &waitSemaphore;
+    submitInfo.pWaitDstStageMask = &waitStage;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &cmd;
+    submitInfo.signalSemaphoreCount = 1;
+    submitInfo.pSignalSemaphores = &signalSemaphore;
+
+    if (vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, fence) != VK_SUCCESS) {
+        throw std::runtime_error("vkQueueSubmit failed (render graph present)");
+    }
+
+    VkPresentInfoKHR presentInfo{};
+    presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    presentInfo.waitSemaphoreCount = 1;
+    presentInfo.pWaitSemaphores = &signalSemaphore;
+    const VkSwapchainKHR swapchain = m_swapchain.Native();
+    presentInfo.swapchainCount = 1;
+    presentInfo.pSwapchains = &swapchain;
+    presentInfo.pImageIndices = &imageIndex;
+
+    const VkResult presentResult = vkQueuePresentKHR(m_presentQueue, &presentInfo);
+    if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR) {
+        m_resizeRequested = true;
+    } else if (presentResult != VK_SUCCESS) {
+        throw std::runtime_error("vkQueuePresentKHR failed (VkResult=" + std::to_string(presentResult) + ")");
+    }
+
+    m_currentFrame = (m_currentFrame + 1) % kFramesInFlight;
+
+    return true;
 }
 
 } // namespace gte

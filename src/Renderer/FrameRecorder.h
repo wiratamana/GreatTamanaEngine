@@ -58,6 +58,26 @@ public:
     void Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix = Mat4::Identity(),
         const Mat4& viewProjMatrix = Mat4::Identity(), VkDescriptorSet materialDescriptorSet = VK_NULL_HANDLE);
 
+    // Phase 7 (RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md) -
+    // issues ONE draw call's worth of real Vulkan commands directly against
+    // `cmd`: bind pipeline, push constants (model then viewProj - see
+    // Submit()'s own comment above for the exact layout), optionally bind a
+    // material descriptor set, bind vertex/index buffers, then
+    // vkCmdDraw()/vkCmdDrawIndexed() depending on whether `indexBuffer` is
+    // VK_NULL_HANDLE. This is the exact per-item body RecordFrame()'s own
+    // draw loop already used inline - pulled out into this public static
+    // method so Renderer::Submit() can call it DIRECTLY when recording
+    // inside a RenderGraph pass (see Renderer::BeginGraphPassRecording())
+    // instead of only ever being reachable via this class's own queued
+    // m_drawQueue/RecordFrame(). Never touches m_drawQueue or DrawStats
+    // itself - purely a thin, stateless Vulkan-call wrapper, mirroring
+    // RenderGraphBarrierPlanner's own EmitImageBarrier()/EmitBufferBarrier()
+    // "thin Vulkan-call half" precedent.
+    static void IssueDrawCommand(VkCommandBuffer cmd, VkPipeline pipeline, VkPipelineLayout layout,
+        VkBuffer vertexBuffer, std::uint32_t vertexCount, VkBuffer indexBuffer, std::uint32_t indexCount,
+        const Mat4& model, const Mat4& viewProj, VkDescriptorSet materialDescriptorSet);
+
+
     // True if at least one Submit() call is currently queued (i.e. not yet
     // consumed by a RecordFrame() call this frame). FramePresenter::Present()
     // uses this to decide whether the CURRENT swapchain Present() pass will

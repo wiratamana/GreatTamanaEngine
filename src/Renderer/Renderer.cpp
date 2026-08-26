@@ -1,6 +1,7 @@
 #include "Renderer.h"
 
 #include "../Window/Window.h"
+#include "RenderGraph/RenderGraph.h"
 
 #include <memory>
 #include <utility>
@@ -104,6 +105,41 @@ DrawStats Renderer::RenderOffscreen(
     return m_presenter.RenderOffscreen(m_frameRecorder, target, timingSlot, recordExtra);
 }
 
+VkCommandBuffer Renderer::BeginOffscreenRenderGraphRecording()
+{
+    return m_presenter.BeginOffscreenRecording();
+}
+
+void Renderer::EndOffscreenRenderGraphRecording()
+{
+    m_presenter.EndOffscreenRecording();
+}
+
+std::optional<DrawStats> Renderer::PresentViaRenderGraph(rg::RenderGraph& graph, bool needsSwapchainDepth,
+    const std::function<std::vector<rg::TextureHandle>(rg::RenderGraphBuilder&, rg::TextureHandle)>& build)
+{
+    const bool ran = m_presenter.PresentViaRenderGraph(graph, needsSwapchainDepth, build);
+    if (!ran) {
+        return std::nullopt;
+    }
+    // "Present" must match RenderPasses.cpp's AddPresentPass() pass name
+    // literal exactly - see this method's own doc comment in Renderer.h.
+    return graph.LastKnownStatsFor("Present").drawStats;
+}
+
+void Renderer::BeginGraphPassRecording(
+    VkCommandBuffer cmd, std::function<void(bool, std::uint32_t, std::uint32_t)> recordDrawStats)
+{
+    m_currentGraphPassCmd = cmd;
+    m_currentGraphPassRecordDrawStats = std::move(recordDrawStats);
+}
+
+void Renderer::EndGraphPassRecording() noexcept
+{
+    m_currentGraphPassCmd = VK_NULL_HANDLE;
+    m_currentGraphPassRecordDrawStats = nullptr;
+}
+
 VkFormat Renderer::ColorFormat() const noexcept
 {
     return m_presenter.ColorFormat();
@@ -153,6 +189,26 @@ void Renderer::BeginFrame()
 void Renderer::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix, const Mat4& viewProjMatrix,
     VkDescriptorSet materialDescriptorSet)
 {
+    // Phase 7 (RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md) -
+    // while a render-graph pass is being recorded (BeginGraphPassRecording()
+    // was called and hasn't been cleared yet - see Renderer.h), issue this
+    // draw's real Vulkan commands DIRECTLY against that pass's own command
+    // buffer instead of queuing into the legacy m_frameRecorder draw list -
+    // this is the one surgical change that lets Game/RenderSystem keep
+    // calling Renderer::Submit() completely unaware anything changed
+    // underneath them.
+    if (m_currentGraphPassCmd != VK_NULL_HANDLE) {
+        const bool hasIndexBuffer = mesh.HasIndexBuffer();
+        const std::uint32_t indexCount = hasIndexBuffer ? mesh.IndexCount() : 0;
+        FrameRecorder::IssueDrawCommand(m_currentGraphPassCmd, pipeline.Native(), pipeline.Layout(),
+            mesh.VertexBuffer(), mesh.VertexCount(), hasIndexBuffer ? mesh.IndexBuffer() : VK_NULL_HANDLE, indexCount,
+            modelMatrix, viewProjMatrix, materialDescriptorSet);
+        if (m_currentGraphPassRecordDrawStats) {
+            m_currentGraphPassRecordDrawStats(hasIndexBuffer, mesh.VertexCount(), indexCount);
+        }
+        return;
+    }
+
     m_frameRecorder.Submit(pipeline, mesh, modelMatrix, viewProjMatrix, materialDescriptorSet);
 }
 

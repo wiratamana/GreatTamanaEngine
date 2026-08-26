@@ -37,8 +37,10 @@
 
 #include <volk.h>
 
+#include <array>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <vector>
 
 namespace gte::rg {
@@ -282,6 +284,22 @@ struct PassRecord {
     // (operator bool() == false); nothing calls it without checking that
     // first.
     std::function<void(PassContext&)> execute;
+
+    // Phase 7 (RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md)
+    // addition - optional clear values for this pass's color/depth
+    // attachment, set via RenderGraphBuilder::PassBuilder::
+    // WriteColorAttachment()/WriteDepthStencilAttachment()'s own optional
+    // parameters. std::nullopt (the default) means "preserve existing
+    // contents" (RenderGraph::Execute() uses VK_ATTACHMENT_LOAD_OP_LOAD for
+    // that attachment, Phase 6's original and only behavior) - when set,
+    // that attachment's loadOp becomes VK_ATTACHMENT_LOAD_OP_CLEAR with
+    // this exact value. This closes the gap RENDERGRAPH_PHASE6_COMPLETION_REPORT.md
+    // flagged explicitly: Phase 6's RenderGraph::Execute() had no way to
+    // ask for a clear at all, since Phase 2's builder API had no clear-color
+    // concept yet - Phase 7's three real passes (Game/Scene/Present) are
+    // what finally need one (see src/Application/RenderPasses.cpp).
+    std::optional<std::array<float, 4>> colorClearValue;
+    std::optional<float> depthClearValue;
 };
 
 } // namespace gte::rg

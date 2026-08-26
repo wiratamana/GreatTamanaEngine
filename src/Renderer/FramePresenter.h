@@ -4,6 +4,7 @@
 #include "FrameRecorder.h"
 #include "GpuTimingService.h"
 #include "Memory/GpuMemoryTracker.h"
+#include "RenderGraph/RenderGraphTypes.h"
 #include "RenderTarget.h"
 #include "RenderTexture.h"
 #include "Vulkan/VulkanAllocator.h"
@@ -16,6 +17,11 @@
 #include <memory>
 #include <optional>
 #include <vector>
+
+namespace gte::rg {
+class RenderGraph;
+class RenderGraphBuilder;
+} // namespace gte::rg
 
 namespace gte {
 
@@ -107,6 +113,29 @@ public:
     // own doc comment for why this matters).
     DrawStats RenderOffscreen(FrameRecorder& frameRecorder, RenderTexture& target,
         std::optional<GpuTimingSlot> timingSlot, const std::function<void(VkCommandBuffer)>& recordExtra);
+
+    // --- Phase 7 (RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md)
+    // - Render Graph integration ---------------------------------------
+    //
+    // Begins recording m_offscreenCommandBuffer - waits on its fence, resets
+    // it, calls vkBeginCommandBuffer() - and returns it for the caller
+    // (Renderer::BeginOffscreenRenderGraphRecording()) to record one or more
+    // RenderGraph passes against. Must be paired with EndOffscreenRecording()
+    // below.
+    VkCommandBuffer BeginOffscreenRecording();
+
+    // Ends/submits m_offscreenCommandBuffer and blocks until the GPU
+    // finishes - the offscreen path's own synchronous behavior, matching
+    // RenderOffscreen() above.
+    void EndOffscreenRecording();
+
+    // See Renderer::PresentViaRenderGraph(). Returns false (never touching
+    // `graph`) under the exact same circumstances Present() above returns
+    // std::nullopt (minimized window, still-pending resize, just-recreated
+    // swapchain) - true otherwise, after a full acquire -> record via
+    // `graph` -> submit -> present cycle.
+    bool PresentViaRenderGraph(rg::RenderGraph& graph, bool needsSwapchainDepth,
+        const std::function<std::vector<rg::TextureHandle>(rg::RenderGraphBuilder&, rg::TextureHandle)>& build);
 
 private:
     static constexpr std::uint32_t kFramesInFlight = 2;

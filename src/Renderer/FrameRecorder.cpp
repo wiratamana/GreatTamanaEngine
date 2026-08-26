@@ -6,6 +6,46 @@
 
 namespace gte {
 
+void FrameRecorder::IssueDrawCommand(VkCommandBuffer cmd, VkPipeline pipeline, VkPipelineLayout layout,
+    VkBuffer vertexBuffer, std::uint32_t vertexCount, VkBuffer indexBuffer, std::uint32_t indexCount,
+    const Mat4& model, const Mat4& viewProj, VkDescriptorSet materialDescriptorSet)
+{
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+
+    // Matches Shaders/Triangle.vert's `layout(push_constant) uniform
+    // PushConstants { mat4 model; mat4 viewProj; } pc;` exactly - model
+    // first (offset 0, 64 bytes), viewProj right after (offset 64, 64
+    // bytes), 128 bytes total - see Pipeline.cpp's VkPushConstantRange.
+    struct PushConstants {
+        float model[16];
+        float viewProj[16];
+    } pushConstants;
+    std::memcpy(pushConstants.model, model.Data(), sizeof(pushConstants.model));
+    std::memcpy(pushConstants.viewProj, viewProj.Data(), sizeof(pushConstants.viewProj));
+    vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushConstants), &pushConstants);
+
+    // Bind this draw's material texture (a per-submesh diffuse texture -
+    // see Renderer/MaterialTexture.h), when it has one - only a Pipeline
+    // built with VertexLayout::PositionNormalUv actually declares
+    // descriptor set 0, so this is skipped entirely for every other
+    // pipeline (materialDescriptorSet stays VK_NULL_HANDLE otherwise).
+    if (materialDescriptorSet != VK_NULL_HANDLE) {
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &materialDescriptorSet, 0, nullptr);
+    }
+
+    const VkDeviceSize offset = 0;
+    vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer, &offset);
+    if (indexBuffer != VK_NULL_HANDLE) {
+        // A real imported mesh (see Mesh's indexed constructor) -
+        // vkCmdDrawIndexed() shares its vertices across triangles instead
+        // of duplicating them per-triangle.
+        vkCmdBindIndexBuffer(cmd, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdDrawIndexed(cmd, indexCount, 1, 0, 0, 0);
+    } else {
+        vkCmdDraw(cmd, vertexCount, 1, 0, 0);
+    }
+}
+
 void FrameRecorder::Clear(std::uint8_t r, std::uint8_t g, std::uint8_t b, std::uint8_t a)
 {
     m_clearColor[0] = static_cast<float>(r) / 255.0f;
@@ -188,45 +228,8 @@ DrawStats FrameRecorder::RecordFrame(VkCommandBuffer cmd, const RenderTarget& ta
         vkCmdSetScissor(cmd, 0, 1, &scissor);
 
         for (const DrawItem& item : m_drawQueue) {
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, item.pipeline);
-
-            // Matches Shaders/Triangle.vert's `layout(push_constant) uniform
-            // PushConstants { mat4 model; mat4 viewProj; } pc;` exactly -
-            // model first (offset 0, 64 bytes), viewProj right after
-            // (offset 64, 64 bytes), 128 bytes total - the guaranteed
-            // minimum maxPushConstantsSize on every conformant Vulkan
-            // implementation (see Pipeline.cpp's VkPushConstantRange), so
-            // this never needs a per-GPU size check.
-            struct PushConstants {
-                float model[16];
-                float viewProj[16];
-            } pushConstants;
-            std::memcpy(pushConstants.model, item.model.Data(), sizeof(pushConstants.model));
-            std::memcpy(pushConstants.viewProj, item.viewProj.Data(), sizeof(pushConstants.viewProj));
-            vkCmdPushConstants(
-                cmd, item.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushConstants), &pushConstants);
-            // Bind this draw's material texture (a per-submesh diffuse
-            // texture - see Renderer/MaterialTexture.h), when it has one -
-            // only a Pipeline built with VertexLayout::PositionNormalUv
-            // actually declares descriptor set 0, so this is skipped
-            // entirely for every other pipeline (materialDescriptorSet
-            // stays VK_NULL_HANDLE - see Submit() above).
-            if (item.materialDescriptorSet != VK_NULL_HANDLE) {
-                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, item.layout, 0, 1,
-                    &item.materialDescriptorSet, 0, nullptr);
-            }
-
-            const VkDeviceSize offset = 0;
-            vkCmdBindVertexBuffers(cmd, 0, 1, &item.vertexBuffer, &offset);
-            if (item.indexBuffer != VK_NULL_HANDLE) {
-                // A real imported mesh (see Mesh's indexed constructor) -
-                // vkCmdDrawIndexed() shares its vertices across triangles
-                // instead of duplicating them per-triangle.
-                vkCmdBindIndexBuffer(cmd, item.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-                vkCmdDrawIndexed(cmd, item.indexCount, 1, 0, 0, 0);
-            } else {
-                vkCmdDraw(cmd, item.vertexCount, 1, 0, 0);
-            }
+            IssueDrawCommand(cmd, item.pipeline, item.layout, item.vertexBuffer, item.vertexCount, item.indexBuffer,
+                item.indexCount, item.model, item.viewProj, item.materialDescriptorSet);
 
             // Accumulated on the exact same path that just issued the real
             // vkCmdDraw/vkCmdDrawIndexed above - never before it, never

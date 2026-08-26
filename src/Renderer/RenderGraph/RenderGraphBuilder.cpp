@@ -9,14 +9,21 @@ void RenderGraphBuilder::PassBuilder::ReadTexture(TextureHandle handle, Resource
     m_pass.reads.push_back(ResourceUsage::ForTexture(handle, access));
 }
 
-void RenderGraphBuilder::PassBuilder::WriteColorAttachment(TextureHandle handle)
+void RenderGraphBuilder::PassBuilder::WriteColorAttachment(
+    TextureHandle handle, const std::optional<std::array<float, 4>>& clearColor)
 {
     m_pass.writes.push_back(ResourceUsage::ForTexture(handle, ResourceAccess::ColorAttachmentWrite));
+    if (clearColor.has_value()) {
+        m_pass.colorClearValue = clearColor;
+    }
 }
 
-void RenderGraphBuilder::PassBuilder::WriteDepthStencilAttachment(TextureHandle handle)
+void RenderGraphBuilder::PassBuilder::WriteDepthStencilAttachment(TextureHandle handle, std::optional<float> clearDepth)
 {
     m_pass.writes.push_back(ResourceUsage::ForTexture(handle, ResourceAccess::DepthStencilAttachmentReadWrite));
+    if (clearDepth.has_value()) {
+        m_pass.depthClearValue = clearDepth;
+    }
 }
 
 void RenderGraphBuilder::PassBuilder::ReadBuffer(BufferHandle handle, ResourceAccess access)

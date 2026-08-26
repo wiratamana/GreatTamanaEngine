@@ -249,6 +249,8 @@ add_library(gte_core STATIC
     src/Application/EventTranslator.cpp
     src/Application/EventTranslator.h
     src/Application/MemorySnapshotBuilder.h
+    src/Application/RenderPasses.h
+    src/Application/RenderPasses.cpp
     src/Event/Event.h
     src/Input/InputState.cpp
     src/Input/InputState.h

@@ -6,6 +6,7 @@
 #include "../Editor/EditorLayer.h"
 #include "../Game/Game.h"
 #include "../Renderer/Renderer.h"
+#include "../Renderer/RenderGraph/RenderGraph.h"
 #include "../Window/Window.h"
 
 namespace gte {
@@ -49,6 +50,13 @@ private:
     SdlContext m_sdlContext;
     Window m_window;
     Renderer m_renderer;
+    // Phase 7 (RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md) -
+    // the ONE shared RenderGraph instance Game view/Scene view/Present are
+    // all recorded through (two Execute() calls per frame - see Run() and
+    // RenderPasses.h). Declared right after m_renderer (constructed with a
+    // reference to it) so it's already fully constructed by the time
+    // m_editorLayer/m_game below might indirectly need it.
+    rg::RenderGraph m_renderGraph;
     // Declared after Renderer (and before Game) so it is destroyed before
     // Renderer's Vulkan device/instance go away, but its lifetime doesn't
     // need to relate to Game's at all.
