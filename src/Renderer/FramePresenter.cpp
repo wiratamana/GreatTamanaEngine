@@ -339,8 +339,8 @@ std::optional<DrawStats> FramePresenter::Present(
     return drawStats;
 }
 
-DrawStats FramePresenter::RenderOffscreen(
-    FrameRecorder& frameRecorder, RenderTexture& target, const std::function<void(VkCommandBuffer)>& recordExtra)
+DrawStats FramePresenter::RenderOffscreen(FrameRecorder& frameRecorder, RenderTexture& target,
+    std::optional<GpuTimingSlot> timingSlot, const std::function<void(VkCommandBuffer)>& recordExtra)
 {
     const VkFence offscreenFence = m_frameSync.OffscreenFence();
     vkWaitForFences(m_device, 1, &offscreenFence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
@@ -354,8 +354,31 @@ DrawStats FramePresenter::RenderOffscreen(
         throw std::runtime_error("vkBeginCommandBuffer failed (offscreen)");
     }
 
+    // Phase 4C (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) - reset (both
+    // slots) + a TOP_OF_PIPE timestamp write, recorded BEFORE
+    // frameRecorder.RecordFrame() below records its own
+    // vkCmdBeginRendering/vkCmdEndRendering pair - vkCmdResetQueryPool must
+    // never be recorded INSIDE a dynamic rendering instance (see that
+    // document's own Step 2.3), which this placement satisfies by
+    // construction. Safe to reset+write here specifically because the
+    // vkWaitForFences() above already proved the LAST use of this exact
+    // slot pair (last frame's call for this SAME logical pass) is complete.
+    // A no-op (no Vulkan call at all) when timingSlot is std::nullopt.
+    if (timingSlot.has_value()) {
+        m_gpuTiming->RecordOffscreenPassStart(m_offscreenCommandBuffer, *timingSlot);
+    }
+
     const DrawStats drawStats = frameRecorder.RecordFrame(m_offscreenCommandBuffer, target.Target(), ColorFormat(),
         m_depthFormat, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, recordExtra);
+
+    // BOTTOM_OF_PIPE timestamp write - see the RecordOffscreenPassStart()
+    // comment above for why this placement (bracketing the WHOLE recorded
+    // pass, including recordExtra) is correct, and never inside
+    // FrameRecorder::RecordFrame() itself (see AGENTS.md-equivalent
+    // reasoning in PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md, Step 2.3).
+    if (timingSlot.has_value()) {
+        m_gpuTiming->RecordOffscreenPassEnd(m_offscreenCommandBuffer, *timingSlot);
+    }
 
     if (vkEndCommandBuffer(m_offscreenCommandBuffer) != VK_SUCCESS) {
         throw std::runtime_error("vkEndCommandBuffer failed (offscreen)");
@@ -372,6 +395,15 @@ DrawStats FramePresenter::RenderOffscreen(
 
     // Synchronous for now - see the declaration comment in Renderer.h.
     vkWaitForFences(m_device, 1, &offscreenFence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
+
+    // Safe to read back now - the fence wait immediately above already
+    // guarantees this exact submission (including the timestamp writes
+    // above) has fully completed. A no-op (no Vulkan call, no cache update)
+    // when timingSlot is std::nullopt - see
+    // PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md, Phase 4C.
+    if (timingSlot.has_value()) {
+        m_gpuTiming->ReadOffscreenResultNow(*timingSlot);
+    }
 
     return drawStats;
 }

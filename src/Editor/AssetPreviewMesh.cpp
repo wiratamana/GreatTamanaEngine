@@ -444,7 +444,12 @@ std::optional<AssetPreviewMesh::Preview> AssetPreviewMesh::Render(
     const std::uint32_t indexCount = m_indexCount;
     const VkExtent2D extent = m_renderTexture->Extent();
 
-    renderer.RenderOffscreen(*m_renderTexture, [&](VkCommandBuffer cmd) {
+    // Phase 4C (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) - std::nullopt:
+    // this Inspector mesh preview is not one of the Profiler's three named
+    // passes, and must never silently share a query slot with (or overwrite
+    // the cached timing of) "Game View"/"Scene View" - see
+    // Renderer::RenderOffscreen()'s own doc comment.
+    renderer.RenderOffscreen(*m_renderTexture, std::nullopt, [&](VkCommandBuffer cmd) {
         VkViewport viewport{};
         viewport.width = static_cast<float>(extent.width);
         viewport.height = static_cast<float>(extent.height);

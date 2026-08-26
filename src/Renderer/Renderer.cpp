@@ -98,9 +98,10 @@ std::optional<DrawStats> Renderer::Present(const std::function<void(VkCommandBuf
     return m_presenter.Present(m_frameRecorder, recordExtra);
 }
 
-DrawStats Renderer::RenderOffscreen(RenderTexture& target, const std::function<void(VkCommandBuffer)>& recordExtra)
+DrawStats Renderer::RenderOffscreen(
+    RenderTexture& target, std::optional<GpuTimingSlot> timingSlot, const std::function<void(VkCommandBuffer)>& recordExtra)
 {
-    return m_presenter.RenderOffscreen(m_frameRecorder, target, recordExtra);
+    return m_presenter.RenderOffscreen(m_frameRecorder, target, timingSlot, recordExtra);
 }
 
 VkFormat Renderer::ColorFormat() const noexcept

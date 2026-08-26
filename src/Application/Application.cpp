@@ -25,6 +25,25 @@ float AspectRatioOf(int width, int height) noexcept
     return height > 0 ? static_cast<float>(width) / static_cast<float>(height) : 1.0f;
 }
 
+// Phase 4C (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) - the one, tiny
+// bridge from Renderer's own (Profiling-free) GpuTimingSample::Status into
+// Profiling::GpuSampleStatus - see Application::Run()'s Game/Scene/Present
+// blocks below. Trivial by design (a straightforward 1:1 switch), same
+// judgment already applied to AspectRatioOf() above - not worth its own
+// Tier-1 test file.
+Profiling::GpuSampleStatus ToProfilingGpuSampleStatus(GpuTimingSample::Status status) noexcept
+{
+    switch (status) {
+    case GpuTimingSample::Status::Present:
+        return Profiling::GpuSampleStatus::Present;
+    case GpuTimingSample::Status::Unsupported:
+        return Profiling::GpuSampleStatus::Unsupported;
+    case GpuTimingSample::Status::Absent:
+    default:
+        return Profiling::GpuSampleStatus::Absent;
+    }
+}
+
 } // namespace
 
 Application::SdlContext::SdlContext()
@@ -85,6 +104,15 @@ int Application::Run()
         // runtime capture-enabled flag is false - see
         // Profiling::FrameProfiler.
         Profiling::FrameProfiler::Instance().BeginFrame();
+
+        // Phase 4C (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) - the
+        // runtime layer of GpuTimingService's two-layer on/off gate (see
+        // AGENTS.md, "Profiling", and Renderer::SetGpuTimingCaptureEnabled()'s
+        // own doc comment): reuses the Editor's EXISTING "Capture" checkbox
+        // rather than adding a new, Profiler-panel-specific control. A
+        // plain bool crosses this boundary - Renderer stays completely free
+        // of any Profiling/ header either way.
+        m_renderer.SetGpuTimingCaptureEnabled(Profiling::FrameProfiler::Instance().IsCaptureEnabled());
 
         // Clear last frame's transient "just pressed/released" flags and
         // per-frame mouse/wheel deltas before this frame's events arrive.
@@ -190,13 +218,20 @@ int Application::Run()
             const VkExtent2D extent = gameTarget->Extent();
             m_game.Render(m_renderer, AspectRatioOf(static_cast<int>(extent.width), static_cast<int>(extent.height)));
             GTE_PROFILE_SCOPE("Renderer::RenderOffscreen(GameView)");
-            const DrawStats gameViewStats = m_renderer.RenderOffscreen(*gameTarget);
+            const DrawStats gameViewStats = m_renderer.RenderOffscreen(*gameTarget, GpuTimingSlot::Offscreen0);
             // Not #if GTE_ENABLE_PROFILER-gated - see AGENTS.md's "Profiling"
             // section and this same file's own BeginFrame()/EndFrame() calls
             // above, which aren't gated either; only GTE_PROFILE_SCOPE(...)'s
             // own macro body is compile-time-gated.
             Profiling::FrameProfiler::Instance().SetGpuPassDrawStats(Profiling::GpuPass::GameView,
                 Profiling::GpuSampleStatus::Present, gameViewStats.drawCallCount, gameViewStats.triangleCount);
+            // Phase 4C (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) - real
+            // GPU timing, reported through the same guard that already
+            // proves this pass ran this frame (see this block's own comment
+            // above for why re-reading a stale value would never happen).
+            const GpuTimingSample gameViewTiming = m_renderer.LastGpuTiming(GpuTimingSlot::Offscreen0);
+            Profiling::FrameProfiler::Instance().SetGpuPassTiming(Profiling::GpuPass::GameView,
+                ToProfilingGpuSampleStatus(gameViewTiming.status), gameViewTiming.milliseconds);
         }
         if (sceneTarget != nullptr) {
             const VkExtent2D extent = sceneTarget->Extent();
@@ -210,9 +245,12 @@ int Application::Run()
             const Mat4 sceneViewProjection = m_editorLayer->SceneViewProjection(aspect);
             m_game.Render(m_renderer, aspect, &sceneViewProjection);
             GTE_PROFILE_SCOPE("Renderer::RenderOffscreen(SceneView)");
-            const DrawStats sceneViewStats = m_renderer.RenderOffscreen(*sceneTarget);
+            const DrawStats sceneViewStats = m_renderer.RenderOffscreen(*sceneTarget, GpuTimingSlot::Offscreen1);
             Profiling::FrameProfiler::Instance().SetGpuPassDrawStats(Profiling::GpuPass::SceneView,
                 Profiling::GpuSampleStatus::Present, sceneViewStats.drawCallCount, sceneViewStats.triangleCount);
+            const GpuTimingSample sceneViewTiming = m_renderer.LastGpuTiming(GpuTimingSlot::Offscreen1);
+            Profiling::FrameProfiler::Instance().SetGpuPassTiming(Profiling::GpuPass::SceneView,
+                ToProfilingGpuSampleStatus(sceneViewTiming.status), sceneViewTiming.milliseconds);
         }
         if (gameTarget == nullptr && sceneTarget == nullptr) {
             // No Editor at all (release build - always takes this path), or

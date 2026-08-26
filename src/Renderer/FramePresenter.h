@@ -99,9 +99,14 @@ public:
 
     // See Renderer::RenderOffscreen(). Unlike Present() above, this
     // function has no early-return path today - it always has a real
-    // DrawStats to return, never std::nullopt.
+    // DrawStats to return, never std::nullopt. `timingSlot` is threaded
+    // straight through to GpuTimingService's Record*/Read* calls (Phase 4C,
+    // PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) bracketing the call to
+    // frameRecorder.RecordFrame() below - std::nullopt means "don't touch a
+    // query slot for this call at all" (see Renderer::RenderOffscreen()'s
+    // own doc comment for why this matters).
     DrawStats RenderOffscreen(FrameRecorder& frameRecorder, RenderTexture& target,
-        const std::function<void(VkCommandBuffer)>& recordExtra);
+        std::optional<GpuTimingSlot> timingSlot, const std::function<void(VkCommandBuffer)>& recordExtra);
 
 private:
     static constexpr std::uint32_t kFramesInFlight = 2;

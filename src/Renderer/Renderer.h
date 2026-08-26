@@ -119,7 +119,25 @@ public:
     //
     // Unlike Present() above, this has no early-return path today - always
     // returns a real DrawStats, never std::nullopt.
-    DrawStats RenderOffscreen(RenderTexture& target, const std::function<void(VkCommandBuffer)>& recordExtra = {});
+    //
+    // Phase 4C (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) - `timingSlot`
+    // tells FramePresenter which of GpuTimingSlot::Offscreen0/Offscreen1
+    // this call's GPU timing belongs to (Application::Run()'s "Game"/
+    // "Scene" blocks), or std::nullopt to explicitly opt OUT of GPU-timing
+    // this call entirely (e.g. src/Editor/AssetPreviewMesh.cpp's Inspector
+    // mesh preview, or BoneViewerWindow's own viewport - neither is one of
+    // the Profiler's three named passes, and must never silently share a
+    // query slot with, or overwrite the cached timing of, "Game View"/
+    // "Scene View"). Deliberately NO DEFAULT VALUE - every caller must state
+    // its intent explicitly; see this document's own "Overall API surface"/
+    // design decision log for why std::nullopt is one of two equally
+    // explicit choices here, never an implicit fallback. Once this call
+    // returns, the resolved GpuTimingSample (if any) is available via
+    // Renderer::LastGpuTiming(*timingSlot) - never bundled into this
+    // function's own return value (see this document's own design decision
+    // log for why).
+    DrawStats RenderOffscreen(RenderTexture& target, std::optional<GpuTimingSlot> timingSlot,
+        const std::function<void(VkCommandBuffer)>& recordExtra = {});
 
     // The color format this Renderer's swapchain actually negotiated at
     // runtime (see VulkanSwapchain.cpp's ChooseSurfaceFormat) - the single
