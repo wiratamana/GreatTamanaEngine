@@ -167,6 +167,36 @@
 #                                            involved at all - fixtures are
 #                                            built through a real
 #                                            RenderGraphBuilder.
+#   - Renderer/RenderGraph/RenderGraphBarrierPlannerTests.cpp - Render Graph
+#                                            Phase 5's pure barrier-synthesis
+#                                            decision logic (see src/Renderer/
+#                                            RenderGraph/RenderGraphBarrierPlanner.h) -
+#                                            RequiredStateFor() covering every
+#                                            ResourceAccess enumerator (with a
+#                                            direct regression check against
+#                                            FrameRecorder.cpp's own hardcoded
+#                                            depth-attachment barrier fields),
+#                                            RequiresBarrier()'s identical-
+#                                            states-need-no-barrier
+#                                            optimization, a hand-simulated
+#                                            three-pass ping-pong sequence
+#                                            proving the exact expected
+#                                            barrier COUNT (2, not 3 or 1),
+#                                            BuildImageMemoryBarrier2()/
+#                                            BuildBufferMemoryBarrier2()'s
+#                                            plain field population, and -
+#                                            the single most important test
+#                                            in this phase - a field-for-
+#                                            field regression match against
+#                                            FrameRecorder.cpp's own existing
+#                                            Present()/RenderOffscreen()
+#                                            barrier shapes. EmitImageBarrier()/
+#                                            EmitBufferBarrier() (the thin
+#                                            Vulkan-call half - a real
+#                                            vkCmdPipelineBarrier2 call) are
+#                                            deliberately Tier 2 and not
+#                                            exercised here. No live VkDevice/
+#                                            VkCommandBuffer involved at all.
 #   - Game/RenderSystemTests.cpp             - RenderSystem::CollectRenderables()
 #                                            (the pure ECS -> DrawCommand step)
 #                                            and ResolveActiveCameraViewProjection()
@@ -432,6 +462,7 @@ set(GTE_TEST_SOURCES
     Renderer/RenderGraph/RenderGraphTypesTests.cpp
     Renderer/RenderGraph/RenderGraphBuilderTests.cpp
     Renderer/RenderGraph/RenderGraphCompilerTests.cpp
+    Renderer/RenderGraph/RenderGraphBarrierPlannerTests.cpp
     Math/Vec2Tests.cpp
     Math/Vec3Tests.cpp
     Math/Mat4Tests.cpp
