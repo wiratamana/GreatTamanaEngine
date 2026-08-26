@@ -221,6 +221,32 @@
 #                                            Vulkan device involved at all -
 #                                            this class has no VkQueryPool of
 #                                            its own.
+#   - Renderer/RenderGraph/RenderGraphSnapshotTests.cpp - Render Graph Phase
+#                                            8's pure "flatten a compiled
+#                                            graph into something
+#                                            displayable" reshape (see
+#                                            src/Renderer/RenderGraph/
+#                                            RenderGraphSnapshot.h) -
+#                                            surviving passes appear in real
+#                                            execution order with resolved
+#                                            read/write resource names and
+#                                            per-pass stats sourced from a
+#                                            hand-fabricated statsLookup
+#                                            (never a real RenderGraph),
+#                                            culled passes are appended after
+#                                            them with a default (never-
+#                                            queried) stats value, imported
+#                                            vs. transient texture resources
+#                                            and buffer resources (never
+#                                            reported as imported - no
+#                                            ImportBuffer() concept exists)
+#                                            report the correct kind/
+#                                            lifetime, and an empty
+#                                            statsLookup never crashes. No
+#                                            Vulkan device involved at all -
+#                                            RenderGraph.h/.cpp themselves
+#                                            remain Tier 2, see the note
+#                                            below.
 #   - Game/RenderSystemTests.cpp             - RenderSystem::CollectRenderables()
 #                                            (the pure ECS -> DrawCommand step)
 #                                            and ResolveActiveCameraViewProjection()
@@ -502,6 +528,7 @@ set(GTE_TEST_SOURCES
     Renderer/RenderGraph/RenderGraphCompilerTests.cpp
     Renderer/RenderGraph/RenderGraphBarrierPlannerTests.cpp
     Renderer/RenderGraph/RenderGraphNameSlotTableTests.cpp
+    Renderer/RenderGraph/RenderGraphSnapshotTests.cpp
     Math/Vec2Tests.cpp
     Math/Vec3Tests.cpp
     Math/Mat4Tests.cpp

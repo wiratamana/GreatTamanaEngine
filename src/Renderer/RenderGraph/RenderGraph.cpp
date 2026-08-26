@@ -296,6 +296,21 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         // Absent GpuTimingSample - see this class's own "GPU TIMING NOTE".
         RecordStatsFor(pass.name, PassGpuStats{ passDrawStats, GpuTimingSample{} });
     }
+
+    // Phase 8 (RENDERGRAPH_PHASE8_EDITOR_DEBUG_TOOLING_STRATEGY_v1.md) - built
+    // AFTER the whole pass loop above has run, so `statsLookup` (backed by
+    // LastKnownStatsFor(), already updated by RecordStatsFor() inside that
+    // loop) sees this call's own freshly-recorded stats for every surviving
+    // pass - see BuildRenderGraphSnapshot()'s own doc comment
+    // (RenderGraphSnapshot.h) for why a culled pass's stats are left at their
+    // default instead.
+    RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(
+        compiled, input, [this](const char* name) { return LastKnownStatsFor(name); });
+    if (timingMode == ExecuteTimingMode::SynchronousImmediateReadback) {
+        m_synchronousSnapshot = std::move(snapshot);
+    } else {
+        m_pipelinedSnapshot = std::move(snapshot);
+    }
 }
 
 void RenderGraph::RecordStatsFor(const char* name, const PassGpuStats& stats)
@@ -322,6 +337,11 @@ PassGpuStats RenderGraph::LastKnownStatsFor(const char* passName) const
         }
     }
     return PassGpuStats{};
+}
+
+const RenderGraphSnapshot& RenderGraph::LastSnapshot(ExecuteTimingMode mode) const noexcept
+{
+    return (mode == ExecuteTimingMode::SynchronousImmediateReadback) ? m_synchronousSnapshot : m_pipelinedSnapshot;
 }
 
 } // namespace gte::rg

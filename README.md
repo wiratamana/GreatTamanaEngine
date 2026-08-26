@@ -653,6 +653,38 @@ CMake adds:
   disabled, tooltipped "Export CSV" button is a deliberate stub pointing at
   Phase 6 (benchmark mode), which will own the real, shared CSV exporter -
   see `TODO.md`.
+- **Render Graph panel:** a Unity-Profiler-window-style **"Render Graph"**
+  panel (`src/Editor/Panels/RenderGraphPanel.h/.cpp`, docked alongside
+  "Memory"/"Profiler" along the bottom — see `DockLayout.cpp`), added as
+  Phase 8 of the Render Graph campaign (see "Rendering" above and
+  `RENDERGRAPH_CAMPAIGN_COMPLETION_REPORT.md`) once the engine's real
+  Game/Scene/Present passes were fully migrated onto
+  `gte::rg::RenderGraph` (Phase 7). Shows, for each of the engine's two real
+  per-frame `RenderGraph::Execute()` regimes ("Offscreen Regime (Game View +
+  Scene View)" and "Pipelined Regime (Present)") independently: an ordered
+  table of every SURVIVING pass (name, draw-call/triangle counts, GPU time -
+  "N/A" today, since real GPU timestamp wiring for the graph is still a
+  follow-up - and its declared reads/writes as resource-name chips), a
+  de-emphasized CULLED-passes section (still visible, never hidden, with a
+  hover tooltip explaining why a pass had no path to that call's final
+  output), and a RESOURCES table showing every declared texture/buffer's
+  imported-vs-transient kind and its computed lifetime as a
+  "`<first-use pass>` -> `<last-use pass>`" string. Backed by a new pure,
+  Tier-1-tested reshape,
+  `src/Renderer/RenderGraph/RenderGraphSnapshot.h/.cpp`'s
+  `BuildRenderGraphSnapshot()` (deliberately living alongside the rest of
+  the Render Graph campaign under `src/Renderer/RenderGraph/`, not under
+  `src/Editor/`, since it operates purely on `RenderGraph`'s own compiled-
+  graph data) - the panel itself
+  (`Panels/RenderGraphPanel.cpp`) is a thin ImGui-table wrapper around it,
+  with only a **Pause** control (no "Capture" - building a snapshot costs
+  nothing beyond copying already-computed small strings/vectors once per
+  `Execute()` call, so there's no meaningful capture toggle to offer) that
+  freezes only this ONE panel's own display, the same
+  `ProfilerPanel`/`BoneViewerWindow`-style small-stateful-class exception
+  (see AGENTS.md, "Editor Module Structure"). A disabled, tooltipped
+  "Export DOT" button is a deliberate stub pointing at Phase 9, mirroring
+  "Profiler"'s own "Export CSV" stub.
 - **Project panel:** a Unity/Windows-Explorer-style **two-pane "Project"**
   panel (`src/Editor/Panels/ProjectPanel.h/.cpp`, docked alongside "Memory"
   along the bottom — see `DockLayout.cpp`), gated by its own
@@ -1472,6 +1504,38 @@ pieces:
   sub-phases), and a runtime smoke test against a real Vulkan device with
   validation layers enabled. See `AGENTS.md`'s "Profiling" section for the
   architectural rules this module follows.
+- **The Render Graph campaign (Phases 1-8) is complete - the engine's real
+  Game View/Scene View/Present passes are now declared, compiled, barrier-
+  synthesized, and executed entirely through a genuine, declarative Render
+  Graph (`gte::rg::RenderGraph`, `src/Renderer/RenderGraph/`), replacing the
+  old hand-wired, three-hardcoded-pass `FrameRecorder` pipeline this section
+  used to describe.** See `RENDERGRAPH_PHASE0_MASTER_STRATEGY_v2.md` for the
+  original nine-phase plan and `RENDERGRAPH_CAMPAIGN_COMPLETION_REPORT.md`
+  for the full campaign-level summary (tying together all eight individual
+  `RENDERGRAPH_PHASEn_COMPLETION_REPORT.md` writeups). In short: Phases 1-2
+  built the graph's pure vocabulary and a declarative
+  `AddPass()`/`CreateTexture()`/`ImportTexture()` builder API; Phase 3 is a
+  pure dependency-resolving/culling/topological-sorting compiler; Phase 4
+  pools/reuses real GPU resources across frames; Phase 5 synthesizes every
+  barrier automatically (regression-matched field-for-field against the old
+  hand-written ones); Phase 6 ties all of that into a real executor,
+  `RenderGraph::Execute()`, called TWICE per frame (once for the
+  synchronous offscreen Game+Scene regime, once for the pipelined swapchain
+  Present regime); Phase 7 is the actual production cut-over -
+  `Application::Run()` now drives every real frame through it, with zero
+  observable behavior change by design; and Phase 8 (see "Editor / Debug
+  UI" above, "Render Graph panel") makes the whole thing observable via a
+  new Editor panel. `Game::Render()`/`RenderSystem::Draw()`/
+  `Renderer::Submit()` all kept their exact pre-campaign public signatures
+  throughout - this was, and remains, a purely internal `Renderer`-layer
+  architecture upgrade. Two genuine, explicitly-tracked follow-ups remain
+  open (see the campaign completion report's own "What is genuinely proven
+  vs. what remains open" section): real GPU timestamp-query timing for the
+  graph's own passes (every pass's GPU-timing sample is honestly `Absent`
+  today, never fabricated), and a real, shipped cross-pass texture READ to
+  prove out the graph's own most novel capability end-to-end (the
+  already-planned Scene-view outline-highlight post-process, see
+  `TODO.md`, is the natural candidate).
 
 ## Roadmap
 

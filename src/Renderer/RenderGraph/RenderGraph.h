@@ -52,6 +52,7 @@
 #include "RenderGraphCompiler.h"
 #include "RenderGraphNameSlotTable.h"
 #include "RenderGraphResourcePool.h"
+#include "RenderGraphSnapshot.h"
 #include "RenderGraphTypes.h"
 #include "../DrawStats.h"
 #include "../GpuTiming.h"
@@ -125,15 +126,15 @@ enum class ExecuteTimingMode : std::uint8_t {
     PipelinedDeferredReadback,
 };
 
-// One pass's last-known stats, as of whichever Execute() call most recently
-// ran it. `timing` is a genuine gte::GpuTimingSample (Renderer-local tri-
-// state, see GpuTiming.h) - DELIBERATELY always Status::Absent as of this
-// phase (see this header's own "GPU timing" note below); `drawStats` is
-// real, fused-per-draw-call data (see PassContext::recordDraw above).
-struct PassGpuStats {
-    DrawStats drawStats;
-    GpuTimingSample timing;
-};
+// PassGpuStats itself now lives in RenderGraphSnapshot.h (Phase 8 -
+// RENDERGRAPH_PHASE8_EDITOR_DEBUG_TOOLING_STRATEGY_v1.md), so the Editor's
+// "Render Graph" panel snapshot-building code (BuildRenderGraphSnapshot())
+// and this class's own LastKnownStatsFor()/RecordStatsFor() below share
+// exactly one definition rather than two. `timing` is a genuine
+// gte::GpuTimingSample (Renderer-local tri-state, see GpuTiming.h) -
+// DELIBERATELY always Status::Absent as of Phase 6/7 (see this header's own
+// "GPU timing" note below); `drawStats` is real, fused-per-draw-call data
+// (see PassContext::recordDraw above).
 
 // See this header's own top comment for Execute()'s two-calls-per-frame
 // contract, and RENDERGRAPH_PHASE6_EXECUTION_ENGINE_STRATEGY_v2.md for the
@@ -206,6 +207,21 @@ public:
     // - never garbage, never a stale value from an unrelated name.
     PassGpuStats LastKnownStatsFor(const char* passName) const;
 
+    // Phase 8 (RENDERGRAPH_PHASE8_EDITOR_DEBUG_TOOLING_STRATEGY_v1.md) - the
+    // full displayable snapshot (RenderGraphSnapshot.h) of the most recent
+    // Execute() call for the given regime: which passes ran (in real
+    // execution order) vs. were culled (and why they were never reachable),
+    // each surviving pass's declared reads/writes and current
+    // LastKnownStatsFor()-sourced stats, and every declared resource's
+    // computed lifetime. Updated at the end of every ExecuteCompiledGraph()
+    // call for ITS OWN `timingMode` only - the OTHER regime's snapshot is
+    // left untouched (mirrors how the two regimes' RenderGraphNameSlotTable
+    // instances are already kept fully independent - see this class's own
+    // "GPU TIMING NOTE"). Returns a default-constructed (empty)
+    // RenderGraphSnapshot before this RenderGraph has ever executed that
+    // regime at all - never garbage.
+    const RenderGraphSnapshot& LastSnapshot(ExecuteTimingMode mode) const noexcept;
+
 private:
     struct PhysicalTexture {
         bool resolved = false;
@@ -260,6 +276,12 @@ private:
     // matching this engine's "no hashing on the hot path" convention (see
     // AGENTS.md) given this engine declares single-digit pass counts today.
     std::vector<NamedStats> m_lastKnownStats;
+
+    // Phase 8 - one persistent RenderGraphSnapshot per ExecuteTimingMode
+    // regime, overwritten in full at the end of every ExecuteCompiledGraph()
+    // call for that regime - see LastSnapshot() above.
+    RenderGraphSnapshot m_synchronousSnapshot;
+    RenderGraphSnapshot m_pipelinedSnapshot;
 };
 
 } // namespace gte::rg

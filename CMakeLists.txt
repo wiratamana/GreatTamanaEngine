@@ -321,6 +321,8 @@ add_library(gte_core STATIC
     src/Renderer/RenderGraph/RenderGraphNameSlotTable.h
     src/Renderer/RenderGraph/RenderGraph.h
     src/Renderer/RenderGraph/RenderGraph.cpp
+    src/Renderer/RenderGraph/RenderGraphSnapshot.h
+    src/Renderer/RenderGraph/RenderGraphSnapshot.cpp
     src/Game/Instantiation/EntityInstantiator.cpp
     src/Game/Instantiation/EntityInstantiator.h
     src/Game/Instantiation/MeshVertexPacking.cpp
@@ -392,6 +394,8 @@ if(GTE_ENABLE_EDITOR)
         src/Editor/Panels/MemoryPanel.cpp
         src/Editor/Panels/ProfilerPanel.h
         src/Editor/Panels/ProfilerPanel.cpp
+        src/Editor/Panels/RenderGraphPanel.h
+        src/Editor/Panels/RenderGraphPanel.cpp
         src/Editor/ImGuiEditorLayer.cpp
     )
     target_link_libraries(gte_core PRIVATE imgui imguizmo)

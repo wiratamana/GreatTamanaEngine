@@ -17,6 +17,10 @@ class Window;
 class Renderer;
 class Game;
 
+namespace rg {
+class RenderGraph;
+} // namespace rg
+
 // Abstraction boundary between engine-core (Application/Renderer/Game) and
 // the optional Editor/Debug UI. Dear ImGui-backed in real builds, but
 // nothing outside src/Editor/ (specifically: nothing outside whichever
@@ -141,7 +145,15 @@ public:
     // has finished rendering into GameViewTarget()/SceneViewTarget()
     // (whichever came back non-null), so the "Game"/"Scene" panels have
     // fresh contents to display this frame.
-    virtual void BuildUI(Game& game, Renderer& renderer) = 0;
+    // `renderGraph` (Phase 8 -
+    // RENDERGRAPH_PHASE8_EDITOR_DEBUG_TOOLING_STRATEGY_v1.md) is the SAME
+    // gte::rg::RenderGraph Application drives every frame (two Execute()
+    // calls - see Application::Run()) - the "Render Graph" panel
+    // (Panels/RenderGraphPanel.h) reads its LastSnapshot() to show which
+    // passes ran/were culled last time each regime executed. Never mutated
+    // by the Editor - purely observed, same spirit as `game`/`renderer`
+    // above.
+    virtual void BuildUI(Game& game, Renderer& renderer, const rg::RenderGraph& renderGraph) = 0;
 
     // Records this frame's UI draw data into cmd. Called from inside
     // Renderer::Present()'s recordExtra hook - i.e. while the swapchain

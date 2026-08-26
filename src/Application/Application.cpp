@@ -318,7 +318,7 @@ int Application::Run()
         // GetMemoryResources()).
         {
             GTE_PROFILE_SCOPE("IEditorLayer::BuildUI");
-            m_editorLayer->BuildUI(m_game, m_renderer);
+            m_editorLayer->BuildUI(m_game, m_renderer, m_renderGraph);
         }
 
         // File > Exit (or any other future programmatic "close" UI action)

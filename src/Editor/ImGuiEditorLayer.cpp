@@ -9,6 +9,7 @@
 #include "Panels/InspectorPanel.h"
 #include "Panels/MemoryPanel.h"
 #include "Panels/ProfilerPanel.h"
+#include "Panels/RenderGraphPanel.h"
 #if GTE_ENABLE_PROJECT_PANEL
 #include "AssetPreviewMesh.h"
 #include "AssetPreviewTexture.h"
@@ -403,7 +404,7 @@ public:
         return m_sceneCamera.ViewProjection(aspectWidthOverHeight);
     }
 
-    void BuildUI(Game& game, Renderer& renderer) override
+    void BuildUI(Game& game, Renderer& renderer, const rg::RenderGraph& renderGraph) override
     {
         ImGui::SetCurrentContext(m_context);
 
@@ -434,6 +435,7 @@ public:
         BuildGamePanel(m_ctx);
         BuildMemoryPanel(m_ctx, renderer);
         m_profilerPanel.Build(m_ctx);
+        m_renderGraphPanel.Build(m_ctx, renderGraph);
 #if GTE_ENABLE_PROJECT_PANEL
         m_projectPanel.Build(m_ctx);
         // The Bone Viewer is its own floating window (opened on demand via
@@ -553,6 +555,14 @@ private:
     // Profiling::FrameProfiler, which is always compiled regardless of that
     // switch (see AGENTS.md, "Profiling").
     ProfilerPanel m_profilerPanel;
+
+    // The Editor's "Render Graph" panel (Phase 8 -
+    // RENDERGRAPH_PHASE8_EDITOR_DEBUG_TOOLING_STRATEGY_v1.md - see
+    // Panels/RenderGraphPanel.h) - docked alongside "Memory"/"Profiler"
+    // (DockLayout.cpp). Also not gated behind GTE_ENABLE_PROJECT_PANEL - it
+    // only depends on the gte::rg::RenderGraph Application already owns and
+    // drives every frame, passed into BuildUI() above.
+    RenderGraphPanel m_renderGraphPanel;
 
 #if GTE_ENABLE_PROJECT_PANEL
     // The Editor's Unity-style "Project" panel (see Panels/ProjectPanel.h) -
