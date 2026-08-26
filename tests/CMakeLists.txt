@@ -391,6 +391,18 @@
 # runner that has one. Left as a documented follow-up rather than
 # implemented here, since it needs its own fixture/CMake wiring
 # (GTE_BUILD_GPU_TESTS or similar) rather than being bolted onto Tier 1.
+#
+# Render Graph Phase 4 (RENDERGRAPH_PHASE4_PHYSICAL_REALIZATION_STRATEGY_v2.md
+# - src/Renderer/RenderGraph/RenderGraphResourcePool.h/.cpp) joins this same
+# Tier 2 bucket for the same reason: AcquireTexture()/AcquireBuffer() call
+# straight into Renderer::CreateRenderTexture()/CreateBuffer(), which need a
+# real VkDevice+VmaAllocator to construct anything at all. Its own matching
+# logic (a linear scan for `desc == entry.desc && !claimedThisFrame`) is
+# simple enough to review by inspection; the accepted verification bar is
+# manual (a debug build, checked against the Editor's "Memory" panel once
+# Phase 7 wires this into production, to confirm the GPU resource count
+# stays stable frame-to-frame at steady state) - see that phase's own
+# strategy document, Step 5.
 set(GTE_TEST_SOURCES
     Memory/GpuResourceHandleTests.cpp
     Assets/AssetTypesTests.cpp

@@ -312,7 +312,8 @@ add_library(gte_core STATIC
     src/Renderer/RenderGraph/RenderGraphBuilder.cpp
     src/Renderer/RenderGraph/RenderGraphCompiler.h
     src/Renderer/RenderGraph/RenderGraphCompiler.cpp
-    src/Editor/EditorLayer.h
+    src/Renderer/RenderGraph/RenderGraphResourcePool.h
+    src/Renderer/RenderGraph/RenderGraphResourcePool.cpp
     src/Game/Instantiation/EntityBlueprint.h
     src/Game/Instantiation/EntityInstantiator.cpp
     src/Game/Instantiation/EntityInstantiator.h
