@@ -359,6 +359,8 @@ if(GTE_ENABLE_EDITOR)
         src/Editor/ImGuiMemoryTracker.cpp
         src/Editor/MemoryPanelData.h
         src/Editor/MemoryPanelData.cpp
+        src/Editor/ProfilerPanelData.h
+        src/Editor/ProfilerPanelData.cpp
         src/Editor/Panels/HierarchyPanel.h
         src/Editor/Panels/HierarchyPanel.cpp
         src/Editor/Panels/InspectorPanel.h
@@ -369,6 +371,8 @@ if(GTE_ENABLE_EDITOR)
         src/Editor/Panels/GamePanel.cpp
         src/Editor/Panels/MemoryPanel.h
         src/Editor/Panels/MemoryPanel.cpp
+        src/Editor/Panels/ProfilerPanel.h
+        src/Editor/Panels/ProfilerPanel.cpp
         src/Editor/ImGuiEditorLayer.cpp
     )
     target_link_libraries(gte_core PRIVATE imgui imguizmo)

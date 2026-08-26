@@ -16,6 +16,7 @@ std::vector<FrameGraphPoint> BuildFrameGraphPoints(const FrameProfiler& profiler
         point.frameIndex = frame.frameIndex;
         point.cpuMilliseconds = frame.cpuFrameMilliseconds;
         point.gpuPasses = frame.gpuPasses;
+        point.memory = frame.memory;
         points.push_back(point);
     }
 
@@ -85,6 +86,39 @@ FrameGraphRange ComputeGpuMillisecondsRange(std::span<const FrameGraphPoint> poi
     range.hasData = found;
     range.minMilliseconds = minMilliseconds;
     range.maxMilliseconds = maxMilliseconds;
+    return range;
+}
+
+MemoryBytesRange ComputeMemoryBytesRange(std::span<const FrameGraphPoint> points)
+{
+    MemoryBytesRange range;
+
+    bool found = false;
+    std::uint64_t minBytes = 0;
+    std::uint64_t maxBytes = 0;
+
+    for (const FrameGraphPoint& point : points) {
+        // Only ever branch on `status` - never on whether `totalBytes`
+        // happens to look like zero (see this function's own header
+        // comment, mirroring ComputeGpuMillisecondsRange()'s identical
+        // rule).
+        if (point.memory.status != GpuSampleStatus::Present) {
+            continue;
+        }
+
+        if (!found) {
+            minBytes = point.memory.totalBytes;
+            maxBytes = point.memory.totalBytes;
+            found = true;
+        } else {
+            minBytes = std::min(minBytes, point.memory.totalBytes);
+            maxBytes = std::max(maxBytes, point.memory.totalBytes);
+        }
+    }
+
+    range.hasData = found;
+    range.minBytes = minBytes;
+    range.maxBytes = maxBytes;
     return range;
 }
 

@@ -29,6 +29,7 @@ constexpr const char* kAllPanelNames[] = {
     "Scene",
     "Game",
     "Memory",
+    "Profiler",
 #if GTE_ENABLE_PROJECT_PANEL
     "Project",
 #endif
@@ -84,6 +85,10 @@ void BuildDefaultDockLayout(ImGuiID dockspaceId, ImVec2 size)
     ImGui::DockBuilderDockWindow("Scene", center);
     ImGui::DockBuilderDockWindow("Game", center);
     ImGui::DockBuilderDockWindow("Memory", bottom);
+    // "Profiler" (Phase 7 - Panels/ProfilerPanel.h) is docked unconditionally
+    // alongside "Memory", exactly like "Memory" itself - it has no
+    // GTE_ENABLE_PROJECT_PANEL dependency at all.
+    ImGui::DockBuilderDockWindow("Profiler", bottom);
 #if GTE_ENABLE_PROJECT_PANEL
     // Tabbed alongside "Memory" - Unity's own default layout also puts
     // "Project" (and "Console") along the bottom.

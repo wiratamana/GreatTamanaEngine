@@ -361,6 +361,19 @@ whenever touching profiling instrumentation, or adding a new call site:
   - unlike a `GpuPass`'s draw-call/triangle count, `Renderer::GetMemoryTotals()`
   has no "didn't run this frame" concept at all; it is always a valid,
   meaningful O(1) read for as long as a live `Renderer` exists.
+- **`FrameGraphPoint` (Phase 2, above) gained a `memory` field, and
+  `FrameGraphData.h/.cpp` gained `ComputeMemoryBytesRange()`, as part of
+  Phase 7** (`PHASE7_EDITOR_PROFILER_PANEL_STRATEGY_v2.md`) - the Editor
+  "Profiler" panel's GPU-memory-over-time sparkline (see "Editor Module
+  Structure" below) is what first needed this, but it lives in this
+  always-compiled, Editor-independent module (not `src/Editor/
+  ProfilerPanelData.h`) for the exact same reason `FrameGraphPoint`/
+  `ComputeCpuMillisecondsRange()`/`ComputeGpuMillisecondsRange()` already do
+  - so a future Phase 6 benchmark-mode CSV exporter consumes the SAME
+  reshape, never a second copy. `ComputeMemoryBytesRange()` mirrors
+  `ComputeGpuMillisecondsRange()`'s own "branch on status, never on the
+  value" rule exactly: only entries whose `memory.status ==
+  GpuSampleStatus::Present` contribute to the min/max scan.
 
 ## Render Target Format Matching
 
@@ -674,7 +687,7 @@ directly as `ImGuiEditorLayer.cpp` itself:
   that layout must stay strictly one-shot, never re-checked every frame,
   or the user could never drag a panel loose from the default arrangement.
 - **`Panels/HierarchyPanel.*`, `InspectorPanel.*`, `ScenePanel.*`,
-  `GamePanel.*`** are each a single free function (`BuildXPanel(...)`)
+  `GamePanel.*`, `MemoryPanel.*`** are each a single free function (`BuildXPanel(...)`)
   taking `EditorContext&` (plus `Registry&` where a panel needs the ECS
   world) - not classes, and NOT implementations of any common
   `IEditorPanel` interface. There is deliberately no polymorphic
@@ -688,7 +701,14 @@ directly as `ImGuiEditorLayer.cpp` itself:
   frames** (e.g. a Console's scrollback buffer) may become a small class
   instead of a free function - it still gets called explicitly by name from
   `ImGuiEditorLayer::BuildUI()`, exactly like the stateless ones, with no
-  interface needed for it either.
+  interface needed for it either. Two real precedents already exist:
+  `BoneViewerWindow` (`BoneViewerWindow.h` - a floating debug window with
+  its own GPU buffers/camera/selection state) and `ProfilerPanel`
+  (`Panels/ProfilerPanel.h` - Phase 7,
+  `PHASE7_EDITOR_PROFILER_PANEL_STRATEGY_v2.md`, holding its Pause control's
+  frozen snapshot plus reusable `ImGui::PlotLines()` scratch buffers). Both
+  are still called explicitly by name (`m_boneViewer.Build(...)`/
+  `m_profilerPanel.Build(...)`), never through a shared interface.
 - **Vulkan types (e.g. `EditorContext::gameViewDescriptor`,
   `VkExtent2D`) are fine to use directly anywhere in this folder** - this is
   not an architectural leak. `Renderer`'s own public API

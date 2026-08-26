@@ -612,6 +612,38 @@ CMake adds:
   Memory Tracking") for the full rationale, including why calling
   `SDL_malloc()`/`ImGui::MemAlloc()` directly in a test needs neither
   `SDL_Init()` nor a live `ImGuiContext`.
+- **Profiler panel:** a Unity-Profiler-window-style **"Profiler"** panel
+  (`src/Editor/Panels/ProfilerPanel.h/.cpp`, docked alongside "Memory" along
+  the bottom - see `DockLayout.cpp`), reading exclusively from
+  `Profiling::FrameProfiler`'s already-collected data (Phases 0-3/5 - see
+  `PROFILER_STRATEGY_v2.md`/`PHASE7_EDITOR_PROFILER_PANEL_STRATEGY_v2.md`),
+  no new engine-level tracking added. Shows, live: a scrolling CPU
+  frame-time graph over the last ~240 frames (current ms + FPS, visible-
+  range min/max, via `Profiling::FrameGraphData.h`'s `BuildFrameGraphPoints()`/
+  `ComputeCpuMillisecondsRange()`); a CPU-scope breakdown table, sorted
+  biggest-total-first (`src/Editor/ProfilerPanelData.h`'s
+  `BuildSortedCpuScopeRows()`), whose empty state honestly distinguishes
+  "no scopes recorded yet this frame" from "CPU scope instrumentation is
+  compiled out entirely" (`-DGTE_ENABLE_PROFILER=OFF` - see AGENTS.md,
+  "Profiling") rather than looking identically blank either way; draw-call/
+  triangle counts for all three named `GpuPass`es (Game View primary, Scene
+  View/Present as de-emphasized context), reading "N/A" rather than a
+  misleading "0" for any pass that didn't run this frame; current GPU
+  memory totals plus a sparkline over the same window (`FrameGraphPoint`
+  gained a `memory` field and `Profiling::FrameGraphData.h` gained
+  `ComputeMemoryBytesRange()` for exactly this, in this same phase); and an
+  honest, permanent-until-Phase-4 **"GPU Timing: N/A"** line for all three
+  named passes (never a fabricated `0.00 ms`). Two independent controls:
+  **Capture** (`Profiling::FrameProfiler::SetCaptureEnabled()` - the real
+  on/off switch for data collection itself) and **Pause** (a
+  `ProfilerPanel`-local snapshot freeze that only affects what this ONE
+  panel currently displays, leaving `FrameProfiler` collecting normally
+  underneath - `ProfilerPanel` is a small stateful class, the second
+  real-world instance of that pre-approved exception alongside
+  `BoneViewerWindow` - see AGENTS.md, "Editor Module Structure"). A
+  disabled, tooltipped "Export CSV" button is a deliberate stub pointing at
+  Phase 6 (benchmark mode), which will own the real, shared CSV exporter -
+  see `TODO.md`.
 - **Project panel:** a Unity/Windows-Explorer-style **two-pane "Project"**
   panel (`src/Editor/Panels/ProjectPanel.h/.cpp`, docked alongside "Memory"
   along the bottom — see `DockLayout.cpp`), gated by its own
@@ -1362,6 +1394,28 @@ pieces:
   architectural rule naming `MeshInstantiationSystem`/`AnimationSystem`
   alongside `RenderSystem`. Full test suite (434 tests, 1 pre-existing
   machine-gated smoke test skipped) passes.
+
+- **A new Editor "Profiler" panel makes the whole profiler data model
+  (Phases 0-3/5) finally visible, closing out `PROFILER_STRATEGY_v2.md`'s
+  original 8-phase plan except for Phase 4 (Vulkan GPU timestamp queries)
+  and Phase 6 (benchmark mode), both deliberately deferred.** See "Editor /
+  Debug UI" above for the full "Profiler panel:" rundown - live CPU
+  frame-time graph, sorted CPU-scope table, per-pass draw-call/triangle
+  counts, GPU memory totals + sparkline, an honest GPU-timing "N/A"
+  placeholder, and two genuinely independent Capture/Pause controls. No new
+  engine-level tracking was needed - the one small, already-anticipated
+  data-model extension this phase required (`FrameGraphPoint` gaining a
+  `memory` field, `Profiling::FrameGraphData.h` gaining
+  `ComputeMemoryBytesRange()`) was named as a predicted future addition
+  back in the Phase 5 session's own status notes. Verified with a full
+  clean build + `ctest` run in three configurations - default (502 tests,
+  501 passing + 1 pre-existing machine-gated skip),
+  `-DGTE_ENABLE_EDITOR=OFF` (clean build, zero ImGui linked), and
+  `-DGTE_ENABLE_PROFILER=OFF` (clean build, 500 tests passing, confirming
+  the CPU Scopes table's "instrumentation compiled out" wording actually
+  differs from its ordinary "nothing recorded yet" empty state). See
+  `PHASE7_EDITOR_PROFILER_PANEL_STRATEGY_v2.md` and
+  `PROFILER_IMPLEMENTATION_STATUS_v6.md` for the full session writeup.
 
 ## Roadmap
 

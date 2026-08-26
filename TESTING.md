@@ -115,6 +115,11 @@ safe on any machine/CI runner, GPU or not:
   TIMING data, an out-of-range `GpuPass` reporting no data rather than
   reading out of bounds, and an in-progress (not yet `EndFrame()`'d) frame
   never being observed. Always built, same reason as the two entries above.
+  Also covers (Phase 7) `FrameGraphPoint::memory`/`ComputeMemoryBytesRange()`:
+  a verbatim, field-for-field copy of `FrameSample::memory`, min/max byte
+  range correctly ignoring `Absent` entries (including one carrying a
+  stale non-zero `totalBytes`), an all-`Absent` series reporting no data,
+  and an empty `points` span reporting no data.
 - `Math/Vec2Tests.cpp` / `Math/Vec3Tests.cpp` - `Vec2`/`Vec3` arithmetic and
   geometric ops (dot/cross/length/normalize/lerp), using exact hand-computed
   values.
@@ -272,6 +277,24 @@ safe on any machine/CI runner, GPU or not:
   see AGENTS.md, "CPU Dependency Memory Tracking"). Only built when
   `GTE_ENABLE_EDITOR` is `ON`, same reason as `Editor/EditorCameraTests.cpp`
   above.
+- `Editor/ProfilerPanelDataTests.cpp` - the Editor "Profiler" panel's pure
+  data-shaping/formatting logic (`BuildSortedCpuScopeRows()`/
+  `FormatDuration()`/`FormatFrameTimeSummary()`/`FormatCount()`/
+  `ResolveGpuPassCounts()`/`ToString(GpuPass)`/`FormatGpuTimingLine()`/
+  `CpuScopeTableEmptyMessage()`, `src/Editor/ProfilerPanelData.h`) - sorting/
+  formatting/tri-state-collapsing only, no ImGui/Renderer/live GPU device
+  involved. Only built when `GTE_ENABLE_EDITOR` is `ON`, same reason as
+  `Editor/EditorCameraTests.cpp` above. Covers: biggest-total-first sorting
+  that respects `cpuScopeCount` rather than the fixed array's own capacity,
+  duration/FPS/thousands-grouped-count formatting (including the
+  non-positive-frame-time "N/A" guard), the draw-call/triangle tri-state
+  correctly collapsing `Absent` (even with a stale non-zero value) to
+  `available == false` and bounds-checking an out-of-range `GpuPass`, the
+  GPU-timing placeholder never fabricating a `0.00 ms` for `Absent`/
+  `Unsupported`, and `CpuScopeTableEmptyMessageMatchesCompileTimeFlag` - a
+  regression test proving `CpuScopeTableEmptyMessage()`'s text and
+  `kCpuScopeInstrumentationCompiledIn`'s compile-time value never disagree
+  with each other within a single build.
 
 Testing `Buffer`/`RenderTexture`/`Pipeline`/`GpuResourceFactory` properly
 needs a real `VkDevice`+`VmaAllocator` (and, as `VulkanDevice` is written

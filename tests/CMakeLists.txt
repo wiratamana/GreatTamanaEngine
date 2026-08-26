@@ -119,6 +119,21 @@
 #                                            GTE_ENABLE_EDITOR is ON, same
 #                                            reason as EditorCameraTests.cpp
 #                                            above.
+#   - Editor/ProfilerPanelDataTests.cpp     - the Editor "Profiler" panel's
+#                                            pure data-shaping/formatting
+#                                            logic (BuildSortedCpuScopeRows()/
+#                                            FormatDuration()/
+#                                            FormatFrameTimeSummary()/
+#                                            FormatCount()/
+#                                            ResolveGpuPassCounts()/
+#                                            FormatGpuTimingLine()/
+#                                            CpuScopeTableEmptyMessage() - see
+#                                            src/Editor/ProfilerPanelData.h) -
+#                                            no ImGui/Renderer/live GPU
+#                                            involved. Only built when
+#                                            GTE_ENABLE_EDITOR is ON, same
+#                                            reason as EditorCameraTests.cpp
+#                                            above.
 #   - Editor/ProjectPanelDataTests.cpp        - the Editor "Project" panel's
 #                                            pure data-shaping/filesystem
 #                                            logic (ScanProjectDirectory()/
@@ -359,6 +374,7 @@ if(GTE_ENABLE_EDITOR)
         Editor/SelectionTests.cpp
         Editor/ImGuiMemoryTrackerTests.cpp
         Editor/MemoryPanelDataTests.cpp
+        Editor/ProfilerPanelDataTests.cpp
     )
 
     # ProjectPanelData.h/.cpp (see src/Editor/ProjectPanelData.h) is only

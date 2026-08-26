@@ -312,5 +312,129 @@ TEST_F(FrameGraphDataTest, BuildFrameGraphPointsNeverObservesAnInProgressFrame)
     EXPECT_EQ(points.size(), 2u);
 }
 
+// --- Phase 7 (PHASE7_EDITOR_PROFILER_PANEL_STRATEGY_v2.md, Step 3.1):
+//     FrameGraphPoint::memory + ComputeMemoryBytesRange() --------------------
+
+// --- Case 11: FrameSample::memory is copied verbatim, field-for-field ----
+
+TEST_F(FrameGraphDataTest, BuildFrameGraphPointsCopiesMemorySnapshotVerbatim)
+{
+    FrameProfiler& profiler = FrameProfiler::Instance();
+
+    MemorySnapshot snapshot;
+    snapshot.status = GpuSampleStatus::Present;
+    snapshot.totalBytes = 1000;
+    snapshot.bufferBytes = 200;
+    snapshot.textureBytes = 800;
+    snapshot.gpuOnlyBytes = 600;
+    snapshot.cpuOnlyBytes = 300;
+    snapshot.sharedBytes = 100;
+    snapshot.bufferCount = 3;
+    snapshot.textureCount = 5;
+
+    profiler.BeginFrame();
+    profiler.SetMemorySnapshot(snapshot);
+    profiler.EndFrame();
+
+    const std::vector<FrameGraphPoint> points = BuildFrameGraphPoints(profiler);
+    ASSERT_EQ(points.size(), 1u);
+
+    const MemorySnapshot& copied = points[0].memory;
+    EXPECT_EQ(copied.status, GpuSampleStatus::Present);
+    EXPECT_EQ(copied.totalBytes, 1000u);
+    EXPECT_EQ(copied.bufferBytes, 200u);
+    EXPECT_EQ(copied.textureBytes, 800u);
+    EXPECT_EQ(copied.gpuOnlyBytes, 600u);
+    EXPECT_EQ(copied.cpuOnlyBytes, 300u);
+    EXPECT_EQ(copied.sharedBytes, 100u);
+    EXPECT_EQ(copied.bufferCount, 3u);
+    EXPECT_EQ(copied.textureCount, 5u);
+}
+
+// --- Case 12: ComputeMemoryBytesRange() ignores Absent entries, min/max
+//     land in the middle of the sequence rather than at either boundary ----
+
+TEST_F(FrameGraphDataTest, ComputeMemoryBytesRangeIgnoresAbsentEntries)
+{
+    FrameProfiler& profiler = FrameProfiler::Instance();
+
+    profiler.BeginFrame(); // Frame 0: absent (default).
+    profiler.EndFrame();
+
+    MemorySnapshot present1;
+    present1.status = GpuSampleStatus::Present;
+    present1.totalBytes = 500;
+    profiler.BeginFrame(); // Frame 1: present.
+    profiler.SetMemorySnapshot(present1);
+    profiler.EndFrame();
+
+    profiler.BeginFrame(); // Frame 2: absent again.
+    profiler.EndFrame();
+
+    MemorySnapshot present2;
+    present2.status = GpuSampleStatus::Present;
+    present2.totalBytes = 9000; // The known max.
+    profiler.BeginFrame(); // Frame 3: present, the max.
+    profiler.SetMemorySnapshot(present2);
+    profiler.EndFrame();
+
+    MemorySnapshot present3;
+    present3.status = GpuSampleStatus::Present;
+    present3.totalBytes = 50; // The known min.
+    profiler.BeginFrame(); // Frame 4: present, the min.
+    profiler.SetMemorySnapshot(present3);
+    profiler.EndFrame();
+
+    const std::vector<FrameGraphPoint> points = BuildFrameGraphPoints(profiler);
+    ASSERT_EQ(points.size(), 5u);
+
+    const MemoryBytesRange range = ComputeMemoryBytesRange(points);
+    ASSERT_TRUE(range.hasData);
+    EXPECT_EQ(range.minBytes, 50u);
+    EXPECT_EQ(range.maxBytes, 9000u);
+}
+
+// --- Case 13: an all-Absent series reports no data ------------------------
+
+TEST_F(FrameGraphDataTest, ComputeMemoryBytesRangeOnAllAbsentReportsNoData)
+{
+    FrameProfiler& profiler = FrameProfiler::Instance();
+    profiler.BeginFrame(); // Default MemorySnapshot - status stays Absent.
+    profiler.EndFrame();
+
+    const std::vector<FrameGraphPoint> points = BuildFrameGraphPoints(profiler);
+    const MemoryBytesRange range = ComputeMemoryBytesRange(points);
+    EXPECT_FALSE(range.hasData);
+}
+
+// --- Case 14: an empty points span reports no data ------------------------
+
+TEST_F(FrameGraphDataTest, ComputeMemoryBytesRangeOnEmptyPointsReportsNoData)
+{
+    const std::vector<FrameGraphPoint> points;
+    const MemoryBytesRange range = ComputeMemoryBytesRange(points);
+    EXPECT_FALSE(range.hasData);
+}
+
+// --- Case 15: an Absent sample carrying a non-zero, "stale-looking" value
+//     is STILL correctly excluded - rules out branching on totalBytes == 0
+//     instead of on the actual status tag -----------------------------------
+
+TEST_F(FrameGraphDataTest, AbsentMemorySampleWithStaleNonZeroValueIsStillExcluded)
+{
+    FrameProfiler& profiler = FrameProfiler::Instance();
+
+    MemorySnapshot stale;
+    stale.status = GpuSampleStatus::Absent;
+    stale.totalBytes = 123456; // Non-zero despite being Absent.
+    profiler.BeginFrame();
+    profiler.SetMemorySnapshot(stale);
+    profiler.EndFrame();
+
+    const std::vector<FrameGraphPoint> points = BuildFrameGraphPoints(profiler);
+    const MemoryBytesRange range = ComputeMemoryBytesRange(points);
+    EXPECT_FALSE(range.hasData);
+}
+
 } // namespace
 } // namespace gte::Profiling

@@ -8,6 +8,7 @@
 #include "Panels/HierarchyPanel.h"
 #include "Panels/InspectorPanel.h"
 #include "Panels/MemoryPanel.h"
+#include "Panels/ProfilerPanel.h"
 #if GTE_ENABLE_PROJECT_PANEL
 #include "AssetPreviewMesh.h"
 #include "AssetPreviewTexture.h"
@@ -432,6 +433,7 @@ public:
         BuildScenePanel(game, renderer, m_ctx, m_sceneCamera);
         BuildGamePanel(m_ctx);
         BuildMemoryPanel(m_ctx, renderer);
+        m_profilerPanel.Build(m_ctx);
 #if GTE_ENABLE_PROJECT_PANEL
         m_projectPanel.Build(m_ctx);
         // The Bone Viewer is its own floating window (opened on demand via
@@ -544,6 +546,13 @@ private:
     // the top of every NewFrame()) - see RenderPlatformWindows() for why
     // this guard exists.
     bool m_frameRendered = false;
+
+    // The Editor's "Profiler" panel (see Panels/ProfilerPanel.h) - docked
+    // alongside "Memory" (DockLayout.cpp). Unlike every other panel here,
+    // it's NOT gated behind GTE_ENABLE_PROJECT_PANEL - it depends only on
+    // Profiling::FrameProfiler, which is always compiled regardless of that
+    // switch (see AGENTS.md, "Profiling").
+    ProfilerPanel m_profilerPanel;
 
 #if GTE_ENABLE_PROJECT_PANEL
     // The Editor's Unity-style "Project" panel (see Panels/ProjectPanel.h) -

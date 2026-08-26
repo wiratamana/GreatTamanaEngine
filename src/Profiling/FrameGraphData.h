@@ -49,6 +49,16 @@ struct FrameGraphPoint {
     // ProfilingTypes.h's GpuPass/GpuPassSample/GpuSampleStatus), never
     // reshaped into a new, Phase-2-specific tri-state representation.
     std::array<GpuPassSample, kGpuPassCount> gpuPasses{};
+
+    // Copied verbatim from FrameSample::memory (Phase 5 -
+    // PHASE5_GPU_MEMORY_HISTORY_STRATEGY_v2.md) - the exact same tri-state
+    // MemorySnapshot type FrameSample itself already uses, never reshaped
+    // into a new, Phase-7-specific representation. Added in Phase 7 (see
+    // PHASE7_EDITOR_PROFILER_PANEL_STRATEGY_v2.md, Step 3.1) specifically so
+    // the Editor "Profiler" panel's GPU-memory-over-time sparkline (and any
+    // future Phase 6 CSV exporter) can read memory history through this same
+    // one reshape, rather than re-deriving it a second time.
+    MemorySnapshot memory{};
 };
 
 // The Y-axis auto-scale helper's result, for a single series (CPU, or one
@@ -114,5 +124,32 @@ FrameGraphRange ComputeCpuMillisecondsRange(std::span<const FrameGraphPoint> poi
 // rather than inventing a separate error channel for a path that should
 // never be reachable from real code.
 FrameGraphRange ComputeGpuMillisecondsRange(std::span<const FrameGraphPoint> points, GpuPass pass);
+
+// The Y-axis auto-scale helper's result for GPU memory (Phase 7 -
+// PHASE7_EDITOR_PROFILER_PANEL_STRATEGY_v2.md, Step 3.1) - a plain
+// std::uint64_t-based sibling of FrameGraphRange (which is double-based,
+// suited to millisecond values), since a byte count has no meaningful
+// fractional part and this avoids a lossy uint64<->double round-trip for
+// large byte counts.
+struct MemoryBytesRange {
+    // False if zero points had a Present memory sample (e.g. an empty
+    // `points` span, or a history recorded entirely before Phase 5 wired up
+    // real MemorySnapshot data) - a caller must check this FIRST, same rule
+    // as FrameGraphRange::hasData above.
+    bool hasData = false;
+
+    // Only meaningful when hasData is true.
+    std::uint64_t minBytes = 0;
+    std::uint64_t maxBytes = 0;
+};
+
+// Computes the min/max TOTAL GPU memory (MemorySnapshot::totalBytes) byte
+// range across every point in `points`, including ONLY entries whose
+// memory.status == GpuSampleStatus::Present in the scan - mirrors
+// ComputeGpuMillisecondsRange()'s own "branch on status, never on the value"
+// rule exactly: an Absent memory sample is excluded regardless of whatever
+// numeric totalBytes value happens to be sitting alongside it (e.g. a
+// stale/default-constructed FrameSample::memory).
+MemoryBytesRange ComputeMemoryBytesRange(std::span<const FrameGraphPoint> points);
 
 } // namespace gte::Profiling
