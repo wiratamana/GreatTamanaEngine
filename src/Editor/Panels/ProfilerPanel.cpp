@@ -1,4 +1,4 @@
-﻿#include "ProfilerPanel.h"
+#include "ProfilerPanel.h"
 
 #include "../EditorContext.h"
 #include "../MemoryPanelData.h"
@@ -235,23 +235,26 @@ void BuildGpuMemorySection(std::span<const Profiling::FrameGraphPoint> windowed,
         static_cast<float>(range.minBytes), static_cast<float>(range.maxBytes), ImVec2(0.0f, 60.0f));
 }
 
-// --- Section 6: GPU timing placeholder (Phase 4 is not implemented) --------
+// --- Section 6: GPU timing -------------------------------------------------
 
 void BuildGpuTimingSection(const Profiling::FrameSample& latestFrame)
 {
     ImGui::SeparatorText("GPU Timing");
 
     // All three named passes, unconditionally - never just GameView (see
-    // PHASE7_EDITOR_PROFILER_PANEL_STRATEGY_v2.md, Changelog #3). Each will
-    // automatically start showing a real value the moment Phase 4 lands,
-    // per pass, independently, with zero code change here - see
-    // FormatGpuTimingLine()'s own comment.
+    // PHASE7_EDITOR_PROFILER_PANEL_STRATEGY_v2.md, Changelog #3). Real,
+    // driver-measured GPU milliseconds since Phase 4
+    // (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md, 4A-4D all landed) -
+    // FormatGpuTimingLine() honestly reports "N/A" for a pass that simply
+    // didn't run this frame (a hidden Editor panel, a minimized window, a
+    // not-yet-warmed-up Present slot, or Capture currently disabled) or for
+    // a device/build that can never produce this measurement at all -
+    // never a fabricated "0.00 ms" either way.
     for (const Profiling::GpuPass pass :
         { Profiling::GpuPass::GameView, Profiling::GpuPass::SceneView, Profiling::GpuPass::Present }) {
         const Profiling::GpuPassSample& sample = latestFrame.gpuPasses[static_cast<std::size_t>(pass)];
         ImGui::Text("%s: %s", ToString(pass), FormatGpuTimingLine(sample).c_str());
     }
-    ImGui::TextDisabled("Vulkan timestamp queries are not available yet.");
 }
 
 // --- Section 7: export stub -------------------------------------------------

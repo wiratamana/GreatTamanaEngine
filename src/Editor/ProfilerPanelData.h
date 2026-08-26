@@ -72,12 +72,14 @@ GpuPassCountDisplay ResolveGpuPassCounts(const Profiling::FrameSample& frame, Pr
 const char* ToString(Profiling::GpuPass pass);
 
 // Formats one GPU pass's TIMING line (see ProfilingTypes.h's
-// GpuPassSample::timingStatus/milliseconds) - honestly reports "N/A" for
-// Absent/Unsupported (Phase 4, Vulkan GPU timestamp queries, is not
-// implemented yet - see PROFILER_STRATEGY_v2.md) rather than ever
-// fabricating "0.00 ms". Takes the whole GpuPassSample (not a resolved
-// bool+value pair, unlike ResolveGpuPassCounts() above) so a future real
-// Present value flows through unchanged with zero call-site changes needed.
+// GpuPassSample::timingStatus/milliseconds) - real, driver-measured GPU
+// milliseconds since Phase 4 (Vulkan GPU timestamp queries -
+// PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md, 4A-4D all landed), honestly
+// reporting "N/A" for Absent (pass didn't run this frame, or Capture is
+// off) or Unsupported (this device/build can never produce this
+// measurement) rather than ever fabricating "0.00 ms". Takes the whole
+// GpuPassSample (not a resolved bool+value pair, unlike
+// ResolveGpuPassCounts() above).
 std::string FormatGpuTimingLine(const Profiling::GpuPassSample& pass);
 
 // Whether GTE_PROFILE_SCOPE actually records anything anywhere in this

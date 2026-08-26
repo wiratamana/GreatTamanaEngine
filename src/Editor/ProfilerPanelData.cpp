@@ -101,9 +101,9 @@ std::string FormatGpuTimingLine(const Profiling::GpuPassSample& pass)
         return FormatDuration(pass.milliseconds);
     }
     // Absent AND Unsupported both honestly report "N/A" - never a fabricated
-    // "0.00 ms" (see ProfilingTypes.h's own tri-state rule). Phase 4 (Vulkan
-    // GPU timestamp queries) is what will eventually make this branch
-    // actually produce a real value for some pass.
+    // "0.00 ms" (see ProfilingTypes.h's own tri-state rule). Absent means
+    // this pass simply didn't run this frame (or Capture is off); Unsupported
+    // means this device/build can never produce this measurement at all.
     return "N/A";
 }
 
