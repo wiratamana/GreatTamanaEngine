@@ -316,7 +316,9 @@ add_library(gte_core STATIC
     src/Renderer/RenderGraph/RenderGraphResourcePool.cpp
     src/Renderer/RenderGraph/RenderGraphBarrierPlanner.h
     src/Renderer/RenderGraph/RenderGraphBarrierPlanner.cpp
-    src/Game/Instantiation/EntityBlueprint.h
+    src/Renderer/RenderGraph/RenderGraphNameSlotTable.h
+    src/Renderer/RenderGraph/RenderGraph.h
+    src/Renderer/RenderGraph/RenderGraph.cpp
     src/Game/Instantiation/EntityInstantiator.cpp
     src/Game/Instantiation/EntityInstantiator.h
     src/Game/Instantiation/MeshVertexPacking.cpp

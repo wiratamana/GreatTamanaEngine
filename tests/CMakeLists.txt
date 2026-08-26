@@ -197,6 +197,30 @@
 #                                            deliberately Tier 2 and not
 #                                            exercised here. No live VkDevice/
 #                                            VkCommandBuffer involved at all.
+#   - Renderer/RenderGraph/RenderGraphNameSlotTableTests.cpp - Render Graph
+#                                            Phase 6's pure name -> slot
+#                                            assignment/reuse/overflow-
+#                                            degradation logic (see
+#                                            src/Renderer/RenderGraph/
+#                                            RenderGraphNameSlotTable.h) -
+#                                            first-call assignment, distinct
+#                                            names get increasing slots,
+#                                            reuse by identical pointer AND
+#                                            by equal-content-different-
+#                                            pointer (strcmp fallback), a
+#                                            null name returning the
+#                                            sentinel, budget overflow
+#                                            degrading gracefully for a
+#                                            brand-new name while an
+#                                            already-assigned name keeps
+#                                            resolving correctly, and two
+#                                            independent tables (simulating
+#                                            RenderGraph's own two
+#                                            ExecuteTimingMode regimes) never
+#                                            colliding on the same name. No
+#                                            Vulkan device involved at all -
+#                                            this class has no VkQueryPool of
+#                                            its own.
 #   - Game/RenderSystemTests.cpp             - RenderSystem::CollectRenderables()
 #                                            (the pure ECS -> DrawCommand step)
 #                                            and ResolveActiveCameraViewProjection()
@@ -433,6 +457,20 @@
 # Phase 7 wires this into production, to confirm the GPU resource count
 # stays stable frame-to-frame at steady state) - see that phase's own
 # strategy document, Step 5.
+#
+# Render Graph Phase 6 (RENDERGRAPH_PHASE6_EXECUTION_ENGINE_STRATEGY_v2.md -
+# src/Renderer/RenderGraph/RenderGraph.h/.cpp) joins this same Tier 2 bucket
+# for the same reason: RenderGraph::Execute() resolves textures/buffers
+# through RenderGraphResourcePool (above) and records real
+# vkCmdBeginRendering/vkCmdPipelineBarrier2/vkCmdSetViewport/vkCmdSetScissor/
+# vkCmdEndRendering calls against a live VkCommandBuffer - none of which can
+# run without a real VkDevice. The accepted verification bar (per that
+# phase's own strategy document, Step 3.4/5) is manual: a throwaway,
+# multi-pass test scene run against a real device with validation layers
+# enabled, exercised in BOTH ExecuteTimingMode regimes, once a real
+# Application-level call site exists to drive it (Phase 7). Only this
+# file's own pure, name-keyed slot-assignment helper
+# (RenderGraphNameSlotTable, see above) is pulled out as Tier-1-testable.
 set(GTE_TEST_SOURCES
     Memory/GpuResourceHandleTests.cpp
     Assets/AssetTypesTests.cpp
@@ -463,6 +501,7 @@ set(GTE_TEST_SOURCES
     Renderer/RenderGraph/RenderGraphBuilderTests.cpp
     Renderer/RenderGraph/RenderGraphCompilerTests.cpp
     Renderer/RenderGraph/RenderGraphBarrierPlannerTests.cpp
+    Renderer/RenderGraph/RenderGraphNameSlotTableTests.cpp
     Math/Vec2Tests.cpp
     Math/Vec3Tests.cpp
     Math/Mat4Tests.cpp
