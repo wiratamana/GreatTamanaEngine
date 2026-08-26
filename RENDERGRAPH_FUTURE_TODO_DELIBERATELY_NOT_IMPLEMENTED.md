@@ -58,17 +58,23 @@ From `RENDERGRAPH_CAMPAIGN_COMPLETION_REPORT.md`'s own "What is genuinely
 proven vs. what remains open" and the Phase 6/7/8 completion reports' own
 "Handoff notes":
 
-1. **Real GPU timing is still not wired up for render-graph passes.**
-   `RenderGraph::LastKnownStatsFor()`'s `timing` field is `Absent` for
-   every single pass, forever, as of Phase 8. `RenderGraphNameSlotTable`
-   (the pure name→slot assignment logic) is fully built and exercised on
-   every `Execute()` call, but nothing yet replaces `GpuTimingService`'s
-   fixed 3-slot `VkQueryPool` with a real, generalized one keyed by that
-   table. This was named the **single highest-priority follow-up** by
-   three separate completion reports in a row (Phase 6, 7, 8) and is still
-   untouched. Directly relevant to GPU-driven rendering: a compute culling
-   pass's own GPU cost is exactly the kind of number you need to actually
-   validate the "GPU-driven" part is a win, not a regression.
+1. **~~Real GPU timing is still not wired up for render-graph passes.~~ -
+   CLOSED, see `B1_REAL_GPU_TIMING_STRATEGY_v1.md` /
+   `B1_REAL_GPU_TIMING_COMPLETION_REPORT.md`.** `RenderGraph::LastKnownStatsFor()`'s
+   `timing` field is now real, driver-measured data for every surviving
+   pass - a brand-new, dedicated, name-keyed `RenderGraphTimestampPool`
+   (`src/Renderer/RenderGraph/RenderGraphTimestampPool.h`) now backs it,
+   built directly on `RenderGraphNameSlotTable`'s already-proven name->slot
+   assignment logic, rather than extending `GpuTimingService`'s fixed
+   3-slot design in place - a full-repository grep (performed as part of
+   this change, see the completion report's own evidence) confirmed
+   `GpuTimingSlot::Offscreen0/Offscreen1/SwapchainPresent` have ZERO
+   remaining real (non-`nullopt`) production callers as of Phase 7's
+   migration, so `GpuTimingService`/`VulkanQueryPool`/`GpuTimingSlot`
+   themselves were left completely untouched (still serving
+   `AssetPreviewMesh`/`BoneViewerWindow`'s own independent previews). Both
+   the "Render Graph" and "Profiler" Editor panels now show identical,
+   real GPU-time numbers for `GameView`/`SceneView`/`Present` every frame.
 2. **The campaign's own single most novel capability — a genuine
    cross-pass texture READ, synthesized into a real barrier — has never
    been exercised by a real, shipped pass.** None of Game view/Scene

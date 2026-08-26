@@ -76,6 +76,22 @@ public:
         return static_cast<std::int32_t>(m_names.size() - 1);
     }
 
+    // B.1 (B1_REAL_GPU_TIMING_STRATEGY_v1.md) - the exact inverse of
+    // AssignOrGetSlot() above: returns the name previously assigned to
+    // `slot` (via AssignOrGetSlot()), or nullptr if `slot` is out of range
+    // (including kNoNameSlot, which is always negative) or was never
+    // assigned. Needed by RenderGraph's own GPU-timing readback code to
+    // turn "slot 3 in this regime's pool just resolved" back into "that
+    // was the 'SceneView' pass" without RenderGraph having to keep its own,
+    // second, parallel name<->slot table.
+    const char* NameAtSlot(std::int32_t slot) const noexcept
+    {
+        if (slot < 0 || static_cast<std::size_t>(slot) >= m_names.size()) {
+            return nullptr;
+        }
+        return m_names[static_cast<std::size_t>(slot)];
+    }
+
     std::uint32_t SlotBudget() const noexcept { return m_slotBudget; }
     std::uint32_t AssignedCount() const noexcept { return static_cast<std::uint32_t>(m_names.size()); }
 

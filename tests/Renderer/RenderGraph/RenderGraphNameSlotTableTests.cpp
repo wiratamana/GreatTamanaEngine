@@ -108,5 +108,37 @@ TEST(RenderGraphNameSlotTableTests, TwoIndependentTablesNeverCollideOnTheSameNam
     EXPECT_EQ(pipelinedRegime.AssignedCount(), 2u);
 }
 
+// B.1 (B1_REAL_GPU_TIMING_STRATEGY_v1.md) - NameAtSlot() is the exact
+// inverse of AssignOrGetSlot(), needed by RenderGraph's own GPU-timing
+// readback code to turn a resolved query-pool slot index back into the
+// pass name it belongs to.
+TEST(RenderGraphNameSlotTableTests, NameAtSlotReturnsTheNameAssignedToThatSlot)
+{
+    RenderGraphNameSlotTable table(4);
+    EXPECT_EQ(table.AssignOrGetSlot("GameView"), 0);
+    EXPECT_EQ(table.AssignOrGetSlot("SceneView"), 1);
+
+    EXPECT_STREQ(table.NameAtSlot(0), "GameView");
+    EXPECT_STREQ(table.NameAtSlot(1), "SceneView");
+}
+
+TEST(RenderGraphNameSlotTableTests, NameAtSlotReturnsNullForAnUnassignedSlot)
+{
+    RenderGraphNameSlotTable table(4);
+    EXPECT_EQ(table.AssignOrGetSlot("GameView"), 0);
+    // Slot 1 was never assigned - out of range of the currently assigned
+    // prefix even though it's within the table's own budget.
+    EXPECT_EQ(table.NameAtSlot(1), nullptr);
+}
+
+TEST(RenderGraphNameSlotTableTests, NameAtSlotReturnsNullForNegativeOrOutOfRangeSlots)
+{
+    RenderGraphNameSlotTable table(4);
+    EXPECT_EQ(table.AssignOrGetSlot("GameView"), 0);
+    EXPECT_EQ(table.NameAtSlot(kNoNameSlot), nullptr);
+    EXPECT_EQ(table.NameAtSlot(-5), nullptr);
+    EXPECT_EQ(table.NameAtSlot(999), nullptr);
+}
+
 } // namespace
 } // namespace gte::rg

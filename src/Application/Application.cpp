@@ -118,6 +118,12 @@ int Application::Run()
         // plain bool crosses this boundary - Renderer stays completely free
         // of any Profiling/ header either way.
         m_renderer.SetGpuTimingCaptureEnabled(Profiling::FrameProfiler::Instance().IsCaptureEnabled());
+        // B.1 (B1_REAL_GPU_TIMING_STRATEGY_v1.md) - the same runtime toggle,
+        // now ALSO applied to the render graph's own, independent
+        // RenderGraphTimestampPool (m_renderGraph never shares
+        // GpuTimingService's pool with Renderer - see RenderGraph.h's own
+        // "GPU TIMING NOTE").
+        m_renderGraph.SetGpuTimingCaptureEnabled(Profiling::FrameProfiler::Instance().IsCaptureEnabled());
 
         // Clear last frame's transient "just pressed/released" flags and
         // per-frame mouse/wheel deltas before this frame's events arrive.
@@ -279,6 +285,15 @@ int Application::Run()
                 }
 
                 m_renderer.EndOffscreenRenderGraphRecording();
+
+                // B.1 (B1_REAL_GPU_TIMING_STRATEGY_v1.md) - must run
+                // immediately after EndOffscreenRenderGraphRecording()
+                // returns (i.e. after that call's own fence wait has
+                // already completed) - reads back every real GPU
+                // timestamp written during the SynchronousImmediateReadback
+                // Execute() call just above, for whichever of "GameView"/
+                // "SceneView" actually ran this frame.
+                m_renderGraph.FinalizeSynchronousGpuTiming();
             } catch (const std::exception& e) {
                 std::fprintf(stderr, "RenderGraph offscreen Execute() failed: %s\n", e.what());
                 assert(false && "RenderGraph offscreen Execute() threw - see stderr");

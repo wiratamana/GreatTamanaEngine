@@ -319,6 +319,8 @@ add_library(gte_core STATIC
     src/Renderer/RenderGraph/RenderGraphBarrierPlanner.h
     src/Renderer/RenderGraph/RenderGraphBarrierPlanner.cpp
     src/Renderer/RenderGraph/RenderGraphNameSlotTable.h
+    src/Renderer/RenderGraph/RenderGraphTimestampPool.h
+    src/Renderer/RenderGraph/RenderGraphTimestampPool.cpp
     src/Renderer/RenderGraph/RenderGraph.h
     src/Renderer/RenderGraph/RenderGraph.cpp
     src/Renderer/RenderGraph/RenderGraphSnapshot.h

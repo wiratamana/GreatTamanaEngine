@@ -52,6 +52,7 @@
 #include "RenderGraphCompiler.h"
 #include "RenderGraphNameSlotTable.h"
 #include "RenderGraphResourcePool.h"
+#include "RenderGraphTimestampPool.h"
 #include "RenderGraphSnapshot.h"
 #include "RenderGraphTypes.h"
 #include "../DrawStats.h"
@@ -129,41 +130,47 @@ enum class ExecuteTimingMode : std::uint8_t {
 // PassGpuStats itself now lives in RenderGraphSnapshot.h (Phase 8 -
 // RENDERGRAPH_PHASE8_EDITOR_DEBUG_TOOLING_STRATEGY_v1.md), so the Editor's
 // "Render Graph" panel snapshot-building code (BuildRenderGraphSnapshot())
-// and this class's own LastKnownStatsFor()/RecordStatsFor() below share
-// exactly one definition rather than two. `timing` is a genuine
-// gte::GpuTimingSample (Renderer-local tri-state, see GpuTiming.h) -
-// DELIBERATELY always Status::Absent as of Phase 6/7 (see this header's own
-// "GPU timing" note below); `drawStats` is real, fused-per-draw-call data
-// (see PassContext::recordDraw above).
+// and this class's own LastKnownStatsFor()/UpdateDrawStatsFor()/
+// UpdateTimingFor() below share exactly one definition rather than two.
+// `timing` is a genuine gte::GpuTimingSample (Renderer-local tri-state, see
+// GpuTiming.h) - was UNCONDITIONALLY Status::Absent through Phase 6/7/8;
+// as of B.1 (B1_REAL_GPU_TIMING_STRATEGY_v1.md, see this header's own "GPU
+// TIMING NOTE" below) it is now real, driver-measured data for every
+// surviving pass whenever this class's own GpuTimestampCapability reports
+// support and capture is enabled. `drawStats` is real, fused-per-draw-call
+// data (see PassContext::recordDraw above) and always has been.
 
 // See this header's own top comment for Execute()'s two-calls-per-frame
 // contract, and RENDERGRAPH_PHASE6_EXECUTION_ENGINE_STRATEGY_v2.md for the
 // full design this class implements.
 //
-// GPU TIMING NOTE (a deliberate, documented scope decision for THIS
-// implementation - see RENDERGRAPH_PHASE6_COMPLETION_REPORT.md for the full
-// reasoning): the strategy document's own Step 3.2 asks for
-// GpuTimingService's fixed 3-slot VkQueryPool to be REPLACED by a
-// generalized, name-keyed pool. Actually replacing GpuTimingService's
-// production-shipping pool/API in THIS phase - before Phase 7 has migrated
-// a single real call site onto RenderGraph - would be a materially risky,
-// unforced change to already-shipped, Tier-2 (manually-verified) code with
-// no real consumer yet, directly against this campaign's own "nothing
-// outside src/Renderer/RenderGraph/ calls into this yet" discipline. This
-// class instead owns two RenderGraphNameSlotTable instances (one per
-// ExecuteTimingMode regime - see m_synchronousTimingSlots/
-// m_pipelinedTimingSlots below), which already implement and prove out the
-// PURE name -> slot assignment/reuse/overflow-degradation logic Step 3.2
-// asks for (see RenderGraphNameSlotTable.h and its own Tier-1 tests) and
-// are exercised on every single Execute() call - but no VkQueryPool/
-// vkCmdWriteTimestamp2 call is issued anywhere in this class yet, so every
-// PassGpuStats::timing this phase ever produces is Status::Absent, never a
-// fabricated non-zero value (matching this engine's own "never default a
-// GPU measurement that doesn't have a real value this frame to a bare
-// numeric 0" rule - see AGENTS.md, "Profiling"). Wiring these slot tables
-// to a real, generalized VkQueryPool (replacing GpuTimingService's fixed
-// enum, exactly as Step 3.2 describes) is Phase 7's job, at the point a
-// real, in-production set of pass names actually exists to time.
+// GPU TIMING NOTE - UPDATED by B.1 (B1_REAL_GPU_TIMING_STRATEGY_v1.md),
+// which closes the gap this note used to describe. Phase 6/7 deliberately
+// left every PassGpuStats::timing as Status::Absent forever (see the
+// history preserved in RENDERGRAPH_PHASE6_COMPLETION_REPORT.md) - actually
+// wiring up real timestamp queries was named the single highest-priority
+// follow-up by three completion reports in a row (Phase 6, 7, 8) and is
+// what B.1 implements: this class now owns a RenderGraphTimestampPool
+// (RenderGraphTimestampPool.h) - a brand-new, dedicated, name-keyed
+// VkQueryPool pair (one per ExecuteTimingMode regime, mirroring
+// m_synchronousTimingSlots/m_pipelinedTimingSlots below exactly) - rather
+// than reusing/extending GpuTimingService's already-shipped fixed 3-slot
+// design, which a full-repository grep confirmed has zero remaining real
+// (non-nullopt) production callers as of Phase 7's migration (see
+// B1_REAL_GPU_TIMING_STRATEGY_v1.md, Step 3.1/3.3, and its own completion
+// report for the exact grep evidence). Every surviving pass's real,
+// driver-measured GPU time is now written into m_lastKnownStats via
+// UpdateTimingFor() below - a synchronous-regime pass's timing is finalized
+// by FinalizeSynchronousGpuTiming() (called once by Application::Run(),
+// right after Renderer::EndOffscreenRenderGraphRecording() returns); a
+// pipelined-regime pass's timing is read back at the very top of its own
+// NEXT ExecuteCompiledGraph() call, kGpuTimingFramesInFlight frames later,
+// exactly at the point FramePresenter::PresentViaRenderGraph()'s own
+// pre-existing per-frame-in-flight fence wait already proves it's safe -
+// never a new GPU wait added anywhere purely to fetch a timing result
+// sooner. Gated by the exact same two-layer on/off convention as
+// GpuTimingService (GTE_ENABLE_PROFILER at compile time,
+// SetGpuTimingCaptureEnabled() at runtime - see AGENTS.md, "Profiling").
 class RenderGraph {
 public:
     explicit RenderGraph(Renderer& renderer);
@@ -222,6 +229,30 @@ public:
     // regime at all - never garbage.
     const RenderGraphSnapshot& LastSnapshot(ExecuteTimingMode mode) const noexcept;
 
+    // B.1 (B1_REAL_GPU_TIMING_STRATEGY_v1.md) - must be called EXACTLY
+    // once, by Application::Run(), immediately after
+    // Renderer::EndOffscreenRenderGraphRecording() returns (i.e. after that
+    // call's own fence wait has already completed) - reads back every
+    // timestamp pair written during the immediately-preceding
+    // SynchronousImmediateReadback Execute() call, converts each to
+    // milliseconds, and merges the result into m_lastKnownStats via
+    // UpdateTimingFor() - never touching that same entry's drawStats,
+    // which was already written synchronously during Execute() itself (see
+    // this class's own "GPU TIMING NOTE"). A safe no-op on a frame where
+    // the offscreen regime didn't run at all this frame (both Game/Scene
+    // panels hidden) - the caller simply never calls it in that case,
+    // mirroring how Application::Run() already only calls
+    // EndOffscreenRenderGraphRecording() inside that same guard.
+    void FinalizeSynchronousGpuTiming();
+
+    // B.1 - the runtime layer of this class's own GPU-timing on/off gate,
+    // driven once per frame by Application::Run() alongside its existing
+    // Renderer::SetGpuTimingCaptureEnabled() call - takes a plain bool
+    // (never a Profiling::-namespaced type), matching every other
+    // Renderer<->Profiling bridge's own convention (see AGENTS.md,
+    // "Profiling").
+    void SetGpuTimingCaptureEnabled(bool enabled) noexcept { m_timestampPool.SetCaptureEnabled(enabled); }
+
 private:
     struct PhysicalTexture {
         bool resolved = false;
@@ -256,7 +287,27 @@ private:
     void ApplyUsageBarrierIfNeeded(VkCommandBuffer cmd, const ResourceUsage& usage, const CompiledGraphInput& input,
         std::vector<PhysicalTexture>& physicalTextures, std::vector<PhysicalBuffer>& physicalBuffers);
 
-    void RecordStatsFor(const char* name, const PassGpuStats& stats);
+    // B.1 (B1_REAL_GPU_TIMING_STRATEGY_v1.md) - replaces the old, single
+    // combined RecordStatsFor(): drawStats and timing are now written by
+    // TWO INDEPENDENT call sites (the per-pass loop below, and either
+    // FinalizeSynchronousGpuTiming() or this class's own pipelined-regime
+    // readback preamble) - mirroring Profiling::GpuPassSample's own
+    // "timingStatus/countStatus split, never a single combined status"
+    // rule exactly (see AGENTS.md, "Profiling"). UpdateDrawStatsFor() only
+    // ever touches an entry's drawStats; UpdateTimingFor() only ever
+    // touches its timing - neither may clobber the other's already-correct
+    // data with a stale default.
+    void UpdateDrawStatsFor(const char* name, const DrawStats& drawStats);
+    void UpdateTimingFor(const char* name, const GpuTimingSample& timing);
+
+    // Converts one RenderGraphTimestampPool::RawTicks pair into a real
+    // GpuTimingSample, using this class's own m_timestampPool for both its
+    // capability/capture-enabled state (via ResolveGpuTimingStatus()) and
+    // its GpuTimestampCapability (via ConvertTimestampDeltaToMilliseconds())
+    // - only ever called once the caller already knows `hasWrittenData` is
+    // true for the raw ticks being converted (i.e. a real reset+write pair
+    // was actually issued for this slot beforehand).
+    GpuTimingSample ResolveAndConvertTiming(const RenderGraphTimestampPool::RawTicks& raw) const;
 
     // Two generously-sized, independently-fixed slot budgets - see this
     // class's own "GPU TIMING NOTE" above. Never resized at runtime; a
@@ -269,8 +320,36 @@ private:
     static constexpr std::uint32_t kPipelinedTimingSlotBudget = 8;
 
     RenderGraphResourcePool m_resourcePool;
+
+    // B.1 (B1_REAL_GPU_TIMING_STRATEGY_v1.md) - constructed from
+    // Renderer::GetVulkanContextInfo()'s own device/graphicsQueue/
+    // graphicsQueueFamily/timestampCapability fields (see RenderGraph.cpp) -
+    // declared right after m_resourcePool so it's already available by the
+    // time ExecuteCompiledGraph() below needs it.
+    RenderGraphTimestampPool m_timestampPool;
     RenderGraphNameSlotTable m_synchronousTimingSlots{ kSynchronousTimingSlotBudget };
     RenderGraphNameSlotTable m_pipelinedTimingSlots{ kPipelinedTimingSlotBudget };
+
+    // B.1 - pipelined-regime bookkeeping: incremented once per real
+    // PipelinedDeferredReadback Execute() call (never on a frame where
+    // FramePresenter::PresentViaRenderGraph() skipped calling Execute() at
+    // all - minimized window, pending resize, just-recreated swapchain),
+    // so this always advances in lockstep with FramePresenter's own
+    // m_currentFrame cadence (both only ever advance on a genuine "this
+    // frame actually presented" event) - see B1_REAL_GPU_TIMING_STRATEGY_v1.md,
+    // Step 3.7.
+    std::uint32_t m_pipelinedFrameCounter = 0;
+
+    // Per-(slot, frame-in-flight-buffer) "has this exact slice ever been
+    // written" flags - correctly handles the first kGpuTimingFramesInFlight
+    // pipelined frames of a session (or any capture-disabled/hidden-pass
+    // gap) without a fragile frame-count heuristic, generalizing Phase 4D's
+    // own single warm-up flag (GpuTimingService) to
+    // kPipelinedTimingSlotBudget * kGpuTimingFramesInFlight independent
+    // ones. A plain fixed 2D array - no heap allocation, matching this
+    // engine's "nothing in the per-frame hot path may allocate" convention
+    // (see AGENTS.md, "Profiling").
+    bool m_pipelinedHasWritten[kPipelinedTimingSlotBudget][kGpuTimingFramesInFlight]{};
 
     // Per-pass-name last-known stats - a plain vector (never a hash map),
     // matching this engine's "no hashing on the hot path" convention (see

@@ -464,6 +464,15 @@ public:
         VkFormat colorFormat = VK_FORMAT_UNDEFINED;
         std::uint32_t imageCount = 0;
         std::uint32_t minImageCount = 0;
+        // B.1 (B1_REAL_GPU_TIMING_STRATEGY_v1.md) - this device's real GPU
+        // timestamp-query capability (VulkanDevice::TimestampCapability(),
+        // queried once at device-creation time - see VulkanDevice.h). Lets
+        // gte::rg::RenderGraph build its own RenderGraphTimestampPool
+        // (src/Renderer/RenderGraph/RenderGraphTimestampPool.h) against the
+        // same, single source of truth GpuTimingService already uses,
+        // without RenderGraph ever needing direct access to VulkanDevice
+        // itself.
+        GpuTimestampCapability timestampCapability;
     };
     VulkanContextInfo GetVulkanContextInfo() const;
 

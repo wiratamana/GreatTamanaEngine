@@ -1,11 +1,31 @@
 #include "RenderGraph.h"
 
+#include "../Renderer.h"
+
 #include <cstring>
 
 namespace gte::rg {
 
+namespace {
+
+// B.1 (B1_REAL_GPU_TIMING_STRATEGY_v1.md) - the one place this class's
+// constructor needs a Renderer::VulkanContextInfo, computed once and
+// forwarded into every RenderGraphTimestampPool constructor argument that
+// needs it, rather than calling Renderer::GetVulkanContextInfo() several
+// times inline in the member-initializer list (harmless either way - it's
+// a cheap, side-effect-free struct copy - but this reads more clearly).
+Renderer::VulkanContextInfo QueryVulkanContextInfo(Renderer& renderer)
+{
+    return renderer.GetVulkanContextInfo();
+}
+
+} // namespace
+
 RenderGraph::RenderGraph(Renderer& renderer)
     : m_resourcePool(renderer)
+    , m_timestampPool(QueryVulkanContextInfo(renderer).device, QueryVulkanContextInfo(renderer).graphicsQueue,
+          QueryVulkanContextInfo(renderer).graphicsQueueFamily, QueryVulkanContextInfo(renderer).timestampCapability,
+          kSynchronousTimingSlotBudget, kPipelinedTimingSlotBudget, kGpuTimingFramesInFlight)
 {
 }
 
@@ -124,13 +144,43 @@ void RenderGraph::ApplyUsageBarrierIfNeeded(VkCommandBuffer cmd, const ResourceU
 void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode timingMode, CompiledGraphInput input,
     const std::vector<TextureHandle>& finalOutputs)
 {
+    const bool isPipelined = (timingMode == ExecuteTimingMode::PipelinedDeferredReadback);
+
     // See this class's own header comment: the SynchronousImmediateReadback
     // call is, BY CONVENTION, the first of this frame's two Execute() calls
     // - it alone resets every pooled entry's "claimed this frame" flag, so
     // a resource claimed here stays correctly marked through the SECOND
     // (PipelinedDeferredReadback) call too.
-    if (timingMode == ExecuteTimingMode::SynchronousImmediateReadback) {
+    if (!isPipelined) {
         m_resourcePool.BeginFrame();
+    }
+
+    // B.1 (B1_REAL_GPU_TIMING_STRATEGY_v1.md), Step 3.7 - pipelined-regime
+    // GPU timing readback PREAMBLE: reads back whatever was written into
+    // THIS bufferIndex kGpuTimingFramesInFlight frames ago. Provably safe
+    // to do here, with no extra synchronization of its own, because
+    // FramePresenter::PresentViaRenderGraph() already waited on this exact
+    // frame-in-flight slot's fence BEFORE ever calling Execute() at all -
+    // see RenderGraphTimestampPool::WriteBegin()'s own doc comment for the
+    // full reasoning. `m_pipelinedFrameCounter` only ever advances once per
+    // REAL Execute() call in this mode (incremented at the very bottom of
+    // this function, in the `isPipelined` branch only), so it always stays
+    // in lockstep with FramePresenter's own m_currentFrame cadence.
+    std::uint32_t pipelinedBufferIndex = 0;
+    if (isPipelined) {
+        pipelinedBufferIndex = m_pipelinedFrameCounter % kGpuTimingFramesInFlight;
+        for (std::uint32_t s = 0; s < m_pipelinedTimingSlots.AssignedCount(); ++s) {
+            if (!m_pipelinedHasWritten[s][pipelinedBufferIndex]) {
+                continue; // This exact slice has never been written yet - first kGpuTimingFramesInFlight frames, or capture was off.
+            }
+            const char* name = m_pipelinedTimingSlots.NameAtSlot(static_cast<std::int32_t>(s));
+            if (name == nullptr) {
+                continue;
+            }
+            const RenderGraphTimestampPool::RawTicks raw =
+                m_timestampPool.ReadBack(/*pipelined=*/true, pipelinedBufferIndex, static_cast<std::int32_t>(s));
+            UpdateTimingFor(name, ResolveAndConvertTiming(raw));
+        }
     }
 
     // Deliberately NOT wrapped in try/catch here - see this class's own
@@ -142,9 +192,7 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
     std::vector<PhysicalTexture> physicalTextures(input.textureDescs.size());
     std::vector<PhysicalBuffer> physicalBuffers(input.bufferDescs.size());
 
-    RenderGraphNameSlotTable& timingSlots = (timingMode == ExecuteTimingMode::SynchronousImmediateReadback)
-        ? m_synchronousTimingSlots
-        : m_pipelinedTimingSlots;
+    RenderGraphNameSlotTable& timingSlots = isPipelined ? m_pipelinedTimingSlots : m_synchronousTimingSlots;
 
     for (const PassHandle& passHandle : compiled.executionOrder) {
         PassRecord& pass = input.passes[passHandle.index];
@@ -161,11 +209,18 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
             ApplyUsageBarrierIfNeeded(cmd, usage, input, physicalTextures, physicalBuffers);
         }
 
-        // Reserved for Phase 7's real per-pass timestamp query wiring (see
-        // this class's own "GPU TIMING NOTE") - exercising the name-slot
-        // assignment/reuse logic on every real Execute() call from day one,
-        // even though nothing consumes the resulting slot index yet.
-        (void)timingSlots.AssignOrGetSlot(pass.name);
+        const std::int32_t timingSlot = timingSlots.AssignOrGetSlot(pass.name);
+
+        // B.1 - the BEGIN timestamp is written AFTER this pass's own
+        // barriers have already been recorded above, so any GPU stall
+        // caused by waiting on THIS pass's own dependency transitions is
+        // attributed to THIS pass, never misleadingly folded into whatever
+        // pass happens to run immediately before it. A safe no-op (no
+        // Vulkan call at all) whenever timingSlot == kNoNameSlot (this
+        // regime's fixed slot budget is already fully assigned to other
+        // pass names) or GPU timing is unsupported/capture-disabled - see
+        // RenderGraphTimestampPool::WriteBegin()'s own doc comment.
+        m_timestampPool.WriteBegin(cmd, isPipelined, pipelinedBufferIndex, timingSlot);
 
         // MVP scope (RENDERGRAPH_PHASE5_BARRIER_SYNTHESIS_STRATEGY_v2.md,
         // carried into this phase): a SINGLE color attachment plus an
@@ -293,37 +348,107 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
             vkCmdEndRendering(cmd);
         }
 
-        // Absent GpuTimingSample - see this class's own "GPU TIMING NOTE".
-        RecordStatsFor(pass.name, PassGpuStats{ passDrawStats, GpuTimingSample{} });
+        // B.1 - the END timestamp, bracketing this pass's whole recorded
+        // body (both the dynamic-rendering bracket, if any, AND
+        // pass.execute() itself) - same guard as WriteBegin() above. For
+        // the pipelined regime, immediately mark this exact
+        // (slot, bufferIndex) slice as "genuinely written this call" so a
+        // FUTURE call (kGpuTimingFramesInFlight frames from now) knows it's
+        // safe to read back - mirrors GpuTimingService::
+        // RecordPresentPassEnd()/MarkPresentSlotWritten()'s own pairing.
+        m_timestampPool.WriteEnd(cmd, isPipelined, pipelinedBufferIndex, timingSlot);
+        if (isPipelined && timingSlot != kNoNameSlot) {
+            m_pipelinedHasWritten[static_cast<std::size_t>(timingSlot)][pipelinedBufferIndex] = true;
+        }
+
+        // B.1 - drawStats only; timing is populated separately (see
+        // FinalizeSynchronousGpuTiming()/the pipelined preamble above) -
+        // never let one clobber the other's already-correct data with a
+        // stale default (see UpdateDrawStatsFor()'s own doc comment).
+        UpdateDrawStatsFor(pass.name, passDrawStats);
+    }
+
+    if (isPipelined) {
+        ++m_pipelinedFrameCounter;
     }
 
     // Phase 8 (RENDERGRAPH_PHASE8_EDITOR_DEBUG_TOOLING_STRATEGY_v1.md) - built
     // AFTER the whole pass loop above has run, so `statsLookup` (backed by
-    // LastKnownStatsFor(), already updated by RecordStatsFor() inside that
-    // loop) sees this call's own freshly-recorded stats for every surviving
-    // pass - see BuildRenderGraphSnapshot()'s own doc comment
-    // (RenderGraphSnapshot.h) for why a culled pass's stats are left at their
-    // default instead.
+    // LastKnownStatsFor(), already updated by UpdateDrawStatsFor()/
+    // UpdateTimingFor() above/inside that loop) sees this call's own
+    // freshly-recorded stats for every surviving pass - see
+    // BuildRenderGraphSnapshot()'s own doc comment (RenderGraphSnapshot.h)
+    // for why a culled pass's stats are left at their default instead. Note
+    // that for the SYNCHRONOUS regime, this snapshot's `timing` still
+    // reflects whatever was known BEFORE this call's own
+    // FinalizeSynchronousGpuTiming() runs (that happens after this
+    // function returns, from Application::Run()) - i.e. one frame stale,
+    // same one-frame-of-lag every other Editor Game/Scene-view-sized field
+    // already tolerates (see ImGuiEditorLayer.cpp's own class comment).
     RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(
         compiled, input, [this](const char* name) { return LastKnownStatsFor(name); });
-    if (timingMode == ExecuteTimingMode::SynchronousImmediateReadback) {
+    if (!isPipelined) {
         m_synchronousSnapshot = std::move(snapshot);
     } else {
         m_pipelinedSnapshot = std::move(snapshot);
     }
 }
 
-void RenderGraph::RecordStatsFor(const char* name, const PassGpuStats& stats)
+void RenderGraph::FinalizeSynchronousGpuTiming()
+{
+    for (std::uint32_t s = 0; s < m_synchronousTimingSlots.AssignedCount(); ++s) {
+        const char* name = m_synchronousTimingSlots.NameAtSlot(static_cast<std::int32_t>(s));
+        if (name == nullptr) {
+            continue;
+        }
+        const RenderGraphTimestampPool::RawTicks raw =
+            m_timestampPool.ReadBack(/*pipelined=*/false, /*bufferIndex=*/0, static_cast<std::int32_t>(s));
+        UpdateTimingFor(name, ResolveAndConvertTiming(raw));
+    }
+}
+
+GpuTimingSample RenderGraph::ResolveAndConvertTiming(const RenderGraphTimestampPool::RawTicks& raw) const
+{
+    const GpuTimingSample::Status status =
+        ResolveGpuTimingStatus(m_timestampPool.IsSupported(), m_timestampPool.IsCaptureEnabled(), /*hasWrittenData=*/true);
+    if (status != GpuTimingSample::Status::Present) {
+        return GpuTimingSample{ status, 0.0 };
+    }
+    const GpuTimestampCapability& capability = m_timestampPool.Capability();
+    const double milliseconds =
+        ConvertTimestampDeltaToMilliseconds(raw.begin, raw.end, capability.timestampPeriodNs, capability.validBits);
+    return GpuTimingSample{ GpuTimingSample::Status::Present, milliseconds };
+}
+
+void RenderGraph::UpdateDrawStatsFor(const char* name, const DrawStats& drawStats)
 {
     if (name == nullptr) {
         return;
     }
     for (NamedStats& entry : m_lastKnownStats) {
         if (entry.name == name || std::strcmp(entry.name, name) == 0) {
-            entry.stats = stats;
+            entry.stats.drawStats = drawStats;
             return;
         }
     }
+    PassGpuStats stats;
+    stats.drawStats = drawStats;
+    m_lastKnownStats.push_back(NamedStats{ name, stats });
+}
+
+void RenderGraph::UpdateTimingFor(const char* name, const GpuTimingSample& timing)
+{
+    if (name == nullptr) {
+        return;
+    }
+    for (NamedStats& entry : m_lastKnownStats) {
+        if (entry.name == name || std::strcmp(entry.name, name) == 0) {
+            entry.stats.timing = timing;
+            return;
+        }
+    }
+    PassGpuStats stats;
+    stats.timing = timing;
     m_lastKnownStats.push_back(NamedStats{ name, stats });
 }
 

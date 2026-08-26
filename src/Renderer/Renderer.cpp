@@ -261,6 +261,9 @@ Renderer::VulkanContextInfo Renderer::GetVulkanContextInfo() const
     info.colorFormat = ColorFormat(); // single source of truth - see ColorFormat()'s comment in Renderer.h
     info.imageCount = m_presenter.ImageCount();
     info.minImageCount = m_presenter.FramesInFlight(); // matches what FramePresenter actually keeps in flight
+    // B.1 (B1_REAL_GPU_TIMING_STRATEGY_v1.md) - the single source of truth
+    // gte::rg::RenderGraph's own RenderGraphTimestampPool is built from.
+    info.timestampCapability = m_device.TimestampCapability();
     return info;
 }
 
