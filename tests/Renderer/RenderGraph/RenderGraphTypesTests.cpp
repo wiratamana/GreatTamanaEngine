@@ -238,7 +238,11 @@ TEST(RenderGraphResourceAccessTest, ToStringProducesDistinctNamesForDistinctEnum
 //
 // Not compared for equality (see RenderGraphTypes.h's own comment on
 // PassRecord::name) - just confirms the shape holds the fields later
-// phases need and defaults sanely.
+// phases need and defaults sanely. ResourceUsage's ForTexture()/ForBuffer()
+// tagged-union shape (grown in Phase 2, see RenderGraphTypes.h's own
+// comment on ResourceUsage and RENDERGRAPH_PHASE2_BUILDER_API_STRATEGY_v2.md)
+// is covered here rather than in RenderGraphBuilderTests.cpp since
+// ResourceUsage itself still lives in, and is owned by, this Phase 1 file.
 
 TEST(RenderGraphPassRecordTest, DefaultConstructedPassRecordIsEmptyAndNotCulled)
 {
@@ -247,19 +251,38 @@ TEST(RenderGraphPassRecordTest, DefaultConstructedPassRecordIsEmptyAndNotCulled)
     EXPECT_TRUE(record.reads.empty());
     EXPECT_TRUE(record.writes.empty());
     EXPECT_FALSE(record.isCulled);
+    EXPECT_FALSE(static_cast<bool>(record.execute));
+}
+
+TEST(RenderGraphResourceUsageTest, ForTextureSetsKindAndTextureFields)
+{
+    const ResourceUsage usage = ResourceUsage::ForTexture(TextureHandle{ 5, 2 }, ResourceAccess::ShaderRead);
+    EXPECT_EQ(usage.kind, ResourceKind::Texture);
+    EXPECT_EQ(usage.texture, (TextureHandle{ 5, 2 }));
+    EXPECT_EQ(usage.access, ResourceAccess::ShaderRead);
+}
+
+TEST(RenderGraphResourceUsageTest, ForBufferSetsKindAndBufferFields)
+{
+    const ResourceUsage usage = ResourceUsage::ForBuffer(BufferHandle{ 3, 1 }, ResourceAccess::TransferDst);
+    EXPECT_EQ(usage.kind, ResourceKind::Buffer);
+    EXPECT_EQ(usage.buffer, (BufferHandle{ 3, 1 }));
+    EXPECT_EQ(usage.access, ResourceAccess::TransferDst);
 }
 
 TEST(RenderGraphPassRecordTest, ReadsAndWritesCanBeAppendedIndependently)
 {
     PassRecord record;
     record.name = "TestPass";
-    record.reads.push_back(ResourceUsage{ TextureHandle{ 1, 1 }, ResourceAccess::ShaderRead });
-    record.writes.push_back(ResourceUsage{ TextureHandle{ 2, 1 }, ResourceAccess::ColorAttachmentWrite });
+    record.reads.push_back(ResourceUsage::ForTexture(TextureHandle{ 1, 1 }, ResourceAccess::ShaderRead));
+    record.writes.push_back(ResourceUsage::ForTexture(TextureHandle{ 2, 1 }, ResourceAccess::ColorAttachmentWrite));
 
     ASSERT_EQ(record.reads.size(), 1u);
     ASSERT_EQ(record.writes.size(), 1u);
+    EXPECT_EQ(record.reads[0].kind, ResourceKind::Texture);
     EXPECT_EQ(record.reads[0].texture, (TextureHandle{ 1, 1 }));
     EXPECT_EQ(record.reads[0].access, ResourceAccess::ShaderRead);
+    EXPECT_EQ(record.writes[0].kind, ResourceKind::Texture);
     EXPECT_EQ(record.writes[0].texture, (TextureHandle{ 2, 1 }));
     EXPECT_EQ(record.writes[0].access, ResourceAccess::ColorAttachmentWrite);
 }

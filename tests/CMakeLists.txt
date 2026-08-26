@@ -118,6 +118,28 @@
 #                                            VkBufferUsageFlags Vulkan-header
 #                                            TYPES are used, never a Vulkan
 #                                            call.
+#   - Renderer/RenderGraph/RenderGraphBuilderTests.cpp - Render Graph Phase 2's
+#                                            declarative builder API (see
+#                                            src/Renderer/RenderGraph/
+#                                            RenderGraphBuilder.h) -
+#                                            CreateTexture()/CreateBuffer()
+#                                            handle-vs-physical-identity
+#                                            (including a v2 regression test
+#                                            proving two different names
+#                                            with an identical desc still
+#                                            compare equal), AddPass()'s
+#                                            setup-runs-now/execute-never-
+#                                            runs-yet timing, every
+#                                            PassBuilder read/write method,
+#                                            ImportTexture()'s IsImported
+#                                            tagging + required currentLayout
+#                                            threading, and the null/empty
+#                                            name assertion guard (debug
+#                                            builds only). No Vulkan device
+#                                            involved at all - RenderTarget
+#                                            values are hand-built with fake,
+#                                            never-dereferenced Vulkan handle
+#                                            values.
 #   - Game/RenderSystemTests.cpp             - RenderSystem::CollectRenderables()
 #                                            (the pure ECS -> DrawCommand step)
 #                                            and ResolveActiveCameraViewProjection()
@@ -369,6 +391,7 @@ set(GTE_TEST_SOURCES
     Renderer/DrawStatsTests.cpp
     Renderer/GpuTimingTests.cpp
     Renderer/RenderGraph/RenderGraphTypesTests.cpp
+    Renderer/RenderGraph/RenderGraphBuilderTests.cpp
     Math/Vec2Tests.cpp
     Math/Vec3Tests.cpp
     Math/Mat4Tests.cpp

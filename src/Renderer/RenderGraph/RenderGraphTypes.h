@@ -38,6 +38,7 @@
 #include <volk.h>
 
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 namespace gte::rg {
@@ -195,15 +196,64 @@ struct BufferDesc {
 // declaration at a time) and Phase 3's compiler reads (to compute
 // dependency order, culling, and resource lifetimes).
 
-struct ResourceUsage {
-    // Phase 1 keeps this deliberately simple (a single TextureHandle) -
-    // Phase 2 is where this grows into the actual tagged-union shape
-    // (texture OR buffer) real pass declarations need; see
-    // RENDERGRAPH_PHASE2_BUILDER_API_STRATEGY_v2.md. Nothing in Phases 1-8
-    // reads/writes this field yet.
-    TextureHandle texture;
-    ResourceAccess access = ResourceAccess::ShaderRead;
+// Which of ResourceUsage's two handle fields is actually meaningful for a
+// given value - see ResourceUsage below.
+enum class ResourceKind : std::uint8_t {
+    Texture,
+    Buffer,
 };
+
+// A single declared read/write on either a texture OR a buffer resource.
+// Phase 1 shipped this as a texture-only shape and explicitly flagged (see
+// its own completion report's "Handoff notes") that Phase 2 - this phase -
+// is where it grows into this real tagged-union shape once an actual
+// builder API exists to justify it (RenderGraphBuilder::PassBuilder's
+// ReadBuffer()/WriteBuffer(), see RENDERGRAPH_PHASE2_BUILDER_API_STRATEGY_v2.md,
+// Step 3.1's "...ReadBuffer/WriteBuffer, symmetric, for a future compute
+// pass").
+//
+// `kind` says which of `texture`/`buffer` is meaningful - the other field
+// is simply left at its own default and never read. Deliberately a plain
+// "both fields present, one tag" struct rather than a std::variant,
+// matching this codebase's general preference for plain, explicit structs
+// (e.g. TextureDesc/BufferDesc are two separate structs, not one variant)
+// over template-heavy machinery it doesn't otherwise use. The two static
+// factory functions below are what every real call site
+// (RenderGraphBuilder::PassBuilder, see Phase 2) actually constructs one
+// through - nothing outside this file/its own tests should need to spell
+// out all four fields by hand.
+struct ResourceUsage {
+    ResourceKind kind = ResourceKind::Texture;
+    TextureHandle texture;
+    BufferHandle buffer;
+    ResourceAccess access = ResourceAccess::ShaderRead;
+
+    static ResourceUsage ForTexture(TextureHandle handle, ResourceAccess access) noexcept
+    {
+        ResourceUsage usage;
+        usage.kind = ResourceKind::Texture;
+        usage.texture = handle;
+        usage.access = access;
+        return usage;
+    }
+
+    static ResourceUsage ForBuffer(BufferHandle handle, ResourceAccess access) noexcept
+    {
+        ResourceUsage usage;
+        usage.kind = ResourceKind::Buffer;
+        usage.buffer = handle;
+        usage.access = access;
+        return usage;
+    }
+};
+
+// Forward-declared only - fully specified in Phase 6
+// (RENDERGRAPH_PHASE6_EXECUTION_ENGINE_STRATEGY_v2.md), once Phase 4's
+// physical-resource-realization result exists to give it a real shape.
+// PassRecord::execute below only needs to know it exists as an opaque type
+// its std::function closes over - see
+// RENDERGRAPH_PHASE2_BUILDER_API_STRATEGY_v2.md, Step 3.1.
+struct PassContext;
 
 struct PassRecord {
     // Must be a string literal / static-storage-duration const char* -
@@ -223,6 +273,15 @@ struct PassRecord {
     // never read, directly or transitively, is culled), read by Phase 6's
     // executor (a culled pass's Execute callback is never invoked).
     bool isCulled = false;
+
+    // Captured by RenderGraphBuilder::AddPass() (Phase 2) - stored, never
+    // invoked by AddPass()/Finish() themselves. Invoked exactly once by
+    // Phase 6's RenderGraph::Execute(), for every pass that survives Phase
+    // 3's culling (isCulled == false) - never for a culled one. A
+    // default-constructed PassRecord carries an empty std::function
+    // (operator bool() == false); nothing calls it without checking that
+    // first.
+    std::function<void(PassContext&)> execute;
 };
 
 } // namespace gte::rg
