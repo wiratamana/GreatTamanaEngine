@@ -25,6 +25,86 @@ own V2 Revision Note 4 has been waiting on since Phase 7.
 
 ---
 
+## Step 0: Status Update — the compute-shader campaign has since landed (texture-side)
+
+**Read this before Phase A.** Since this document was written,
+`COMPUTE_SHADER_MASTER_STRATEGY_v2.md`'s own seven-phase campaign
+(`COMPUTE_PHASE1_COMPLETION_REPORT.md` through
+`COMPUTE_PHASE7_COMPLETION_REPORT.md`) has shipped its **texture-side**
+half in full — general-purpose compute-shader plumbing plus a real,
+shipped compute box-blur validation workload. That campaign was
+deliberately generalized (see its own master document's "Why this
+document exists, and how it relates to
+`GPU_DRIVEN_RENDERING_COMPUTE_INDIRECT_STRATEGY_v1.md`" section) to serve
+BOTH itself and this document's own Phase A/B needs, specifically so
+nobody has to build `ComputePipeline`/descriptor infrastructure/
+`ResourceAccess` extensions twice. Concretely, this means:
+
+- **Phase A below (compute pipeline + descriptor infrastructure) is
+  ALREADY SHIPPED — do not rebuild it.** `ComputePipeline`
+  (`src/Renderer/ComputePipeline.h/.cpp`), the shared SPIR-V loader
+  (`Vulkan/ShaderModule.h/.cpp`), `DescriptorSetLayoutBuilder`
+  (`Vulkan/DescriptorSetLayoutBuilder.h/.cpp`), `ComputeDescriptorSet`
+  (`ComputeDescriptorSet.h/.cpp`), `GpuResourceFactory::
+  AllocateComputeDescriptorSet()`/`CreateComputePipeline()`, and
+  `Renderer::Dispatch()` + its pure `ComputeGroupCount()`/
+  `ComputeGroupCount3D()` dispatch math (`ComputeDispatch.h`) are all real,
+  shipped, tested code today — see `COMPUTE_PHASE2_COMPLETION_REPORT.md`,
+  `COMPUTE_PHASE3_COMPLETION_REPORT.md`, and
+  `COMPUTE_PHASE4_COMPLETION_REPORT.md`.
+- **Phase B below (`ResourceAccess` extension) is ALREADY SHIPPED — do not
+  re-add these enum values.** `ComputeShaderRead`, `ComputeShaderWrite`,
+  AND `IndirectCommandRead` (this document's own third, buffer-specific
+  value) were all added to `RenderGraphTypes.h`'s `ResourceAccess` enum,
+  with full `IsWriteAccess()`/`ToString()`/`RequiredStateFor()` handling
+  for both the buffer and texture case — see
+  `COMPUTE_PHASE5_COMPLETION_REPORT.md`. `IndirectCommandRead` in
+  particular has NO real consumer anywhere in this repository yet; it is
+  sitting there, fully implemented and unit-tested in isolation, waiting
+  specifically for THIS document's own Phase D/G work to be its first real
+  user.
+- **`RenderGraphBuilder`/`RenderGraph` integration
+  (`AddComputePass()`/`PassBuilder::WriteTexture()`/`ReadBuffer()`/
+  `WriteBuffer()`/`PassContext::resolveBuffer()`/`resolveTexture()`) is
+  ALSO ALREADY SHIPPED** — see `COMPUTE_PHASE6_COMPLETION_REPORT.md`.
+  `ReadBuffer()`/`WriteBuffer()` in particular — described in this
+  document's own "Step 2: The Situation" below as "already exist but have
+  never been exercised by a real pass" — are STILL true in that no real
+  pass has exercised them, but the surrounding integration work (barrier
+  application, `resolveBuffer()`) is now fully proven correct via the
+  texture-side equivalent (`WriteTexture()`/`resolveTexture()`), exercised
+  end-to-end by Phase 6's own throwaway validation pass and Phase 7's real,
+  shipped blur workload.
+- **`GpuResourceFactory::CreateStructuredBuffer()` already accepts the
+  `extraUsage` parameter this document's own Phase C needs** (for
+  `VK_BUFFER_USAGE_INDIRECT_COMMAND_BIT`) — added from day one specifically
+  so this document's own indirect-draw-buffer workload never needs a
+  second, near-duplicate structured-buffer factory method. See
+  `COMPUTE_PHASE1_COMPLETION_REPORT.md`.
+- **Real GPU timing for arbitrary `RenderGraph` passes (this document's own
+  Phase E) is ALSO already shipped**, closed by a separate, dedicated
+  effort — see `B1_REAL_GPU_TIMING_COMPLETION_REPORT.md`. A future compute
+  culling pass and indirect-draw graphics pass will both automatically get
+  real, driver-measured GPU milliseconds with zero additional plumbing.
+
+**What remains squarely THIS document's own job, untouched by the compute-
+shader campaign:** the real `Shaders/FrustumCull.comp` culling shader
+itself (Phase D), the indirect-draw-buffer binary layout and
+`Renderer::SubmitIndirect()`/`vkCmdDrawIndexedIndirect(Count)` support
+(Phase C), per-instance bounding-sphere/culling-input data sourced from the
+ECS (none exists there today), an "unknown/indirect" `DrawStats`
+representation, the real culling→indirect-draw pass graph and its
+buffer-reachability design (see
+`COMPUTE_SHADER_FEATURES_DELIBERATELY_NOT_IMPLEMENTED.md`'s own Section D
+for the full "what's already reusable vs. what's still open" breakdown),
+end-to-end validation (Phase G), and Editor tooling for a culled-instance
+readout (Phase H). **Whoever picks this document up should skip straight
+to Phase C** (below) — Phase A/B's own plans are kept in the sections
+below purely as historical context for how the shared infrastructure was
+originally scoped, not as a to-do list.
+
+---
+
 ## Step 1: The Goal
 
 Teach the engine to run compute shaders at all, teach it to draw via
@@ -140,6 +220,15 @@ engine) that benefits from being landable/reviewable in isolation.
 
 ### Phase A — Compute pipeline infrastructure (no RenderGraph integration yet)
 
+> **✅ ALREADY SHIPPED — see "Step 0: Status Update" above.** This phase's
+> plan is preserved below purely as historical context for how
+> `ComputePipeline`/descriptor infrastructure was originally scoped; it was
+> actually built (in a generalized form serving both this document and the
+> compute-shader campaign) by `COMPUTE_PHASE2_COMPLETION_REPORT.md`/
+> `COMPUTE_PHASE3_COMPLETION_REPORT.md`/`COMPUTE_PHASE4_COMPLETION_REPORT.md`.
+> Do not rebuild it — reuse `ComputePipeline`, `DescriptorSetLayoutBuilder`,
+> `ComputeDescriptorSet`, and `Renderer::Dispatch()` directly.
+
 **Goal:** Get a `VkComputePipeline` compiling, binding, and dispatching at
 all, completely independent of the render graph — mirrors how the original
 campaign's Phase 1 built pure vocabulary with zero live-device dependency
@@ -191,6 +280,14 @@ deliberately trivial and thrown away.
 
 ### Phase B — `ResourceAccess`/barrier extension for compute + indirect consumption
 
+> **✅ ALREADY SHIPPED — see "Step 0: Status Update" above.** All three
+> enumerators this phase describes (`ComputeShaderRead`/`ComputeShaderWrite`/
+> `IndirectCommandRead`), plus their full `IsWriteAccess()`/`ToString()`/
+> `RequiredStateFor()` handling and regression tests, were actually added by
+> `COMPUTE_PHASE5_COMPLETION_REPORT.md`. `IndirectCommandRead` still has no
+> real consumer anywhere — that's exactly what Phase D/G below supplies.
+> Do not re-add these enum values.
+
 **Goal:** Extend Phase 1's `ResourceAccess` enum and Phase 5's barrier
 planner with exactly the values this milestone needs — no more.
 
@@ -228,6 +325,13 @@ stays that way for depth specifically). No storage-IMAGE-specific access
 kind yet — this milestone's culling shader only touches buffers.
 
 ### Phase C — Indirect draw buffer format + `Renderer` support for issuing indirect draws
+
+> **⏸ STILL FULLY OPEN — this is where real work resumes.** Nothing below
+> has been built. Note one shipped piece this phase can lean on directly:
+> `GpuResourceFactory::CreateStructuredBuffer()` already accepts an
+> `extraUsage` parameter (see "Step 0" above) for exactly the
+> `VK_BUFFER_USAGE_INDIRECT_COMMAND_BIT` flag this phase's indirect-command
+> buffer needs — use it rather than adding a second buffer factory method.
 
 **Goal:** Define the indirect-command buffer's exact binary layout, and
 teach the engine to actually ISSUE `vkCmdDrawIndexedIndirect(Count)` from
@@ -282,6 +386,16 @@ hand-written CPU data).
   see `AGENTS.md`'s "Profiling" `AccumulateDrawStats()` rule) so a pass's
   `execute` callback still reports its stats at the exact call site that
   issues the real Vulkan command, never from a separate pass.
+  **Re-check this against the compute-shader campaign's own Phase 4/6
+  finding before building it** (see "Step 0" above and
+  `COMPUTE_PHASE4_COMPLETION_REPORT.md`'s "no `PassContext::recordDispatch`"
+  decision): the real, shipped `Renderer::Submit()`/`BeginGraphPassRecording()`
+  pattern already fuses a stats-producing call into a pass's own recorded
+  stats automatically, with no new `PassContext` callback needed — a
+  `Renderer::SubmitIndirect()` implemented the same way (called from inside
+  an already-open `BeginGraphPassRecording()`/`EndGraphPassRecording()`
+  bracket) very likely needs no new `recordIndirectDraw` hook either. Only
+  add one if implementation genuinely proves otherwise.
 
 **What We Will NOT Do:** No `vkCmdDrawIndirect` (non-indexed) support —
 every mesh in this engine that matters for this milestone already has an
@@ -302,15 +416,11 @@ a real `RenderGraphBuilder::AddPass()`-style compute pass.
 - `RenderGraphBuilder::PassBuilder` gains no new METHOD (`ReadBuffer()`/
   `WriteBuffer()` already exist and already take a `ResourceAccess`) —
   this phase is pure shader/orchestration work, not builder-API surface
-  area. A new convenience, `AddComputePass(name, setup, execute)`, MAY be
-  added as a thin alias of `AddPass()` purely for readability at call
-  sites (a compute pass never declares a color/depth write) — evaluate
-  during implementation whether this earns its own name or whether
-  `AddPass()` alone reads clearly enough; if added, it must be a pure
-  naming convenience with zero behavioral difference, so `RenderGraph::Execute()`
-  needs no new branch to support it (a pass's behavior is already fully
-  determined by what it declares in `writes`, per Phase 6's existing "no
-  color write → no rendering bracket" logic).
+  area. **`AddComputePass(name, setup, execute)` is ALREADY SHIPPED** as a
+  thin, purely-cosmetic alias of `AddPass()` — see "Step 0" above and
+  `COMPUTE_PHASE6_COMPLETION_REPORT.md` — use it directly, do not rebuild
+  it; it has zero behavioral difference from `AddPass()`, exactly as this
+  bullet's own original reasoning anticipated.
 - `Shaders/FrustumCull.comp` — one thread per instance: reads this
   instance's world-space bounding sphere (already-transformed on the CPU
   once per frame into the input SSBO, OR transformed in-shader from a
@@ -480,18 +590,35 @@ proves it's safe" pattern exactly, never a new blocking GPU wait).
 
 ## Step 5: Their Role
 
-- Land Phases A→F in order — do not skip to Phase D "because it's the
+- **Phases A/B and Phase E are already done — start at Phase C.** See "Step
+  0: Status Update" at the top of this document for the full breakdown of
+  what the compute-shader campaign (`COMPUTE_SHADER_MASTER_STRATEGY_v2.md`)
+  already shipped and what genuinely remains. Do not re-verify Phase A's
+  "single highest-risk, first-of-its-kind Vulkan surface area" concern from
+  scratch — that risk was already retired by `COMPUTE_PHASE2_COMPLETION_REPORT.md`
+  through `COMPUTE_PHASE4_COMPLETION_REPORT.md`, including real, validated
+  manual dispatch/descriptor/readback testing.
+
+- ~~Land Phases A→F in order — do not skip to Phase D "because it's the
   interesting part." Phase A alone (a working compute dispatch with
   nothing else attached) is the single highest-risk, first-of-its-kind
   Vulkan surface area in this whole campaign; get it manually verified with
-  validation layers clean before building anything on top of it.
+  validation layers clean before building anything on top of it.~~
+  **Superseded by the bullet above** — Phase A is done; still land Phases
+  C→F in order, though, for the same "don't skip to the interesting part"
+  reasoning applied to what's actually left.
 - Treat Phase B's "no `default:` case forces every switch to be revisited"
-  guardrail as a feature, not friction — if the compiler doesn't force you
-  to touch `RequiredStateFor()`/`IsWriteAccess()`/`ToString()`, you added
-  the new `ResourceAccess` value incorrectly.
-- Phase E (GPU timing) is not optional busywork bolted on afterward — it
+  guardrail as a feature, not friction — even though Phase B is already
+  shipped, the SAME discipline still applies the moment a future value
+  (e.g. a storage-image-specific compute access kind) is ever added on top
+  of it.
+- ~~Phase E (GPU timing) is not optional busywork bolted on afterward — it
   is what makes Phase G's validation claim ("this is actually faster")
-  honest rather than assumed. Do not skip it to ship sooner.
+  honest rather than assumed. Do not skip it to ship sooner.~~ **Already
+  done** — see `B1_REAL_GPU_TIMING_COMPLETION_REPORT.md`; every
+  `RenderGraph` pass, including a future compute culling pass and its
+  indirect-draw consumer, already gets real, driver-measured GPU
+  milliseconds automatically.
 - Once Phase G's validation lands, write a campaign-level
   `GPUDRIVEN_CAMPAIGN_COMPLETION_REPORT.md`, mirroring
   `RENDERGRAPH_CAMPAIGN_COMPLETION_REPORT.md`'s own shape — including an
