@@ -65,6 +65,23 @@ public:
     // here, rather than blocking Schedule() or dropping the job.
     void Schedule(JobFunction fn, void* payload, JobHandle& handle);
 
+    // Phase 3 (Job Dependencies / Continuations), internal use only by
+    // JobContinuation.cpp's ScheduleAfter()/DispatchAfter(): runs
+    // `fn(payload)` against `handle` exactly like Schedule() above, EXCEPT it
+    // does NOT increment `handle`'s pending counter itself - the caller
+    // already accounted for this one unit of work via
+    // JobHandle::AddPendingUnit() at the moment it was first accepted as a
+    // deferred continuation (see that method's own comment for why). Still
+    // decrements `handle`'s pending counter exactly once, the same as
+    // Schedule(), once this job actually finishes running - so the two
+    // always balance out to exactly one net unit of work, regardless of how
+    // long the deferral window was. Production/test code scheduling
+    // ordinary, non-continuation work should always call Schedule()/
+    // Dispatch() directly instead - this method exists solely so
+    // JobContinuation.cpp never has to duplicate JobSystem's own queueing/
+    // full-queue-fallback/watcher-firing logic a second time.
+    void ScheduleAlreadyPending(JobFunction fn, void* payload, JobHandle& handle);
+
     // Blocks the CALLING thread until every job ever scheduled against
     // `handle` has finished running. An already-complete handle (nothing
     // was ever scheduled against it, or every job already finished by the

@@ -444,18 +444,20 @@ whenever touching profiling instrumentation, or adding a new call site:
 ## Job System
 
 `src/Jobs/` (`JobTypes.h`, `JobQueue.h/.cpp`, `JobSystem.h/.cpp`,
-`JobDispatch.h/.cpp`) is the engine's general-purpose worker-thread pool -
-see `task_manager/job_system/JOBSYSTEM_PHASE0_MASTER_STRATEGY_v2.md` for the
-full multi-phase campaign this is Phases 1-2 of,
+`JobDispatch.h/.cpp`, `JobContinuation.h/.cpp`) is the engine's general-purpose
+worker-thread pool - see `task_manager/job_system/JOBSYSTEM_PHASE0_MASTER_STRATEGY_v2.md`
+for the full multi-phase campaign this is Phases 1-3 of,
 `task_manager/job_system/JOB_SYSTEM_PHASE1_COMPLETION_REPORT.md` for Phase
-1's own detailed writeup, and
-`task_manager/job_system/JOB_SYSTEM_PHASE2_COMPLETION_REPORT.md` for Phase
-2's. As of Phase 2, this module provides the minimal `JobHandle`/
-`Schedule()`/`WaitForJobs()`/`WorkerCount()` primitive (Phase 1) plus the
-batch/parallel-for API, `Dispatch()`/`ComputeBatchRanges()` (Phase 2) -
-**nothing else in the engine calls into either yet** (no real subsystem has
-been migrated onto it - that is Phase 6's job). Follow these rules whenever
-touching this module or building a later phase on top of it:
+1's own detailed writeup, `task_manager/job_system/JOB_SYSTEM_PHASE2_COMPLETION_REPORT.md`
+for Phase 2's, and `task_manager/job_system/JOB_SYSTEM_PHASE3_COMPLETION_REPORT.md`
+for Phase 3's. As of Phase 3, this module provides the minimal `JobHandle`/
+`Schedule()`/`WaitForJobs()`/`WorkerCount()` primitive (Phase 1), the
+batch/parallel-for API, `Dispatch()`/`ComputeBatchRanges()` (Phase 2), and
+job dependencies/continuations, `ScheduleAfter()`/`DispatchAfter()` (Phase 3 -
+see this section's own dedicated Phase 3 bullets further below) -
+**nothing else in the engine calls into any of this yet** (no real subsystem
+has been migrated onto it - that is Phase 6's job). Follow these rules
+whenever touching this module or building a later phase on top of it:
 
 - **`gte::Jobs::JobSystem::Instance()` is a Meyers singleton that starts
   lazily, on its FIRST call from anywhere in the process** - the exact same
@@ -595,6 +597,101 @@ touching this module or building a later phase on top of it:
   most important property this function guarantees; a future consumer
   (e.g. Phase 6's CPU vertex skinning) would silently corrupt or skip data
   if any of them were ever violated.
+- **Phase 3 (Job Dependencies / Continuations - `src/Jobs/JobContinuation.h/.cpp`,
+  see `task_manager/job_system/JOBSYSTEM_PHASE3_JOB_DEPENDENCIES_CONTINUATIONS.md`)
+  adds `ScheduleAfter()`/`DispatchAfter()` - the ability to say "run this
+  job/batch dispatch only once these OTHER handles have completed" -
+  without the main thread ever having to call `WaitForJobs()` in between
+  and manually stitch stages together.** Built ENTIRELY on top of Phases
+  1-2's existing `JobSystem::Schedule()`/`WaitForJobs()`/`JobHandle`/
+  `Dispatch()` - no second scheduler, no second queue, no parallel
+  bookkeeping duplicated. If EVERY handle in `dependencies` is already
+  complete at call time (the common case - a dependency that finished
+  earlier in the same frame), this degrades to an ordinary `Schedule()`
+  call with zero continuation bookkeeping at all - explicit dependencies
+  only, there is no automatic data-flow dependency inference anywhere in
+  this module.
+- **A deferred continuation's `handle` becomes "incomplete" the INSTANT
+  `ScheduleAfter()`/`DispatchAfter()` returns - not lazily, once the first
+  dependency clears - via `JobHandle::AddPendingUnit()` (a manual pending-
+  counter increment, paired 1:1 with `JobSystem::ScheduleAlreadyPending()`'s
+  own decrement once the deferred work actually finishes running).** This
+  is what makes it safe for a caller to call `WaitForJobs(handle)`
+  immediately after `ScheduleAfter()` returns and correctly block until the
+  real work has run, no matter how long its dependencies take to clear - a
+  naive "decrement then later increment again via a normal `Schedule()`
+  call" approach would risk a transient false-complete gap a concurrent
+  `WaitForJobs()` caller could observe. `ScheduleAlreadyPending()` is
+  deliberately a SEPARATE method from `Schedule()` (never increments
+  `pending` itself) purely for this reason - production/test code
+  scheduling ordinary, non-continuation work must always call `Schedule()`/
+  `Dispatch()` directly instead.
+- **A dependency handle's watcher list (`detail::JobHandleState::
+  watcherFns`/`watcherContexts`, `JobTypes.h`) is a small, FIXED-CAPACITY
+  array (`detail::kMaxWatchersPerHandle`, 8 by default) - never a growable
+  container.** `JobHandle::AddCompletionWatcher()` registers a callback to
+  run once that ONE handle's `pending` reaches zero (or calls it
+  immediately, synchronously, if already zero) - guarded by the same
+  mutex-bracketing discipline Phase 1's own lost-wakeup-race fix already
+  established for `m_completionMutex` (see above), applied here to a
+  SEPARATE, per-handle `watcherMutex` instead: the pending-zero check and
+  the watcher-list mutation happen under the same lock `FireWatchers()`
+  takes to read/clear the list, so a registration can never be "too late"
+  to see a completion that raced it. Firing every registered watcher
+  (`JobHandleState::FireWatchers()`, called by whichever thread performs
+  the decrement of `pending` down to zero - see `JobSystem::WorkerLoop()`/
+  `Schedule()`/`ScheduleAlreadyPending()`'s own full-queue-fallback paths)
+  is deliberately done AFTER releasing that lock, since a fired watcher
+  may itself call back into `JobSystem::Schedule()`/`ScheduleAlreadyPending()`.
+- **Once a single handle already has `kMaxWatchersPerHandle` OTHER
+  continuations registered against it, any further dependent falls back to
+  a dedicated, DETACHED `std::thread` that busy-polls
+  (`JobContinuation.cpp`'s `WatchDependencyWithFallback()`/
+  `RunPollingFallbackJob()`) - never silently dropped, and, just as
+  importantly, NEVER routed through `JobSystem::Schedule()`.** This is a
+  real, confirmed-in-practice correctness fix, not a style preference: with
+  `GTE_ENABLE_JOB_SYSTEM=OFF`, `Schedule()` runs its job IMMEDIATELY,
+  SYNCHRONOUSLY, on whichever thread calls it (see Phase 1's own OFF-mode
+  contract) - if the overflow fallback's poll job were scheduled that way
+  and the dependency it's polling can only ever be completed by something
+  running concurrently on ANOTHER thread (the only way it could still be
+  genuinely pending after 8 other watchers are already ahead of it), that
+  `Schedule()` call would spin forever on the calling thread instead of
+  yielding it back - a genuine deadlock, reproduced directly by this
+  phase's own `JobContinuationTests.OverflowingWatcherCapacityStillRunsEveryContinuation`
+  test before the fix. A raw, dedicated thread sidesteps this entirely,
+  regardless of `GTE_ENABLE_JOB_SYSTEM`.
+- **`JobSystem::WaitForJobs()`'s `GTE_ENABLE_JOB_SYSTEM=OFF` branch is a
+  real spin-wait (`while (!handle.IsComplete()) { std::this_thread::yield(); }`),
+  NOT the historical `(void)handle;` no-op Phases 1-2 could get away with.**
+  Before Phase 3, every `Schedule()`/`Dispatch()` call in the OFF
+  configuration ran its job(s) synchronously to completion before
+  returning, so a handle was always already complete by the time any
+  caller could reach `WaitForJobs()` - nothing was ever left "in flight"
+  for a caller on a different thread to wait for. `JobHandle::AddPendingUnit()`
+  breaks that assumption: a handle can be marked incomplete well BEFORE the
+  work that will eventually complete it is actually scheduled, and that
+  work may run to completion on a genuinely different thread (e.g. one
+  concurrently calling `Schedule()`/`ScheduleAlreadyPending()` for the
+  handle's own dependency). Reproduced directly by this phase's own
+  `JobContinuationTests.HandleStaysIncompleteUntilPendingDependencyClears`/
+  `FanInWaitsForEveryDependencyBeforeRunning` tests hanging/failing under
+  `GTE_ENABLE_JOB_SYSTEM=OFF` before this fix - fixed, and re-verified
+  clean (including a 15-iteration `--gtest_repeat` stress run) under a
+  full, separate MinGW/GCC `GTE_ENABLE_JOB_SYSTEM=OFF` configure+build+test
+  run, alongside the default `GTE_ENABLE_JOB_SYSTEM=ON` configuration.
+- **A test that needs to hold a dependency handle "genuinely pending" for a
+  controlled duration must NEVER call `Schedule()` with a blocking/spin-
+  waiting job directly from the test's own (main) thread - only from a
+  dedicated `std::thread` it spawns for exactly that purpose** (see
+  `tests/Jobs/JobContinuationTests.cpp`'s own `StartHeldDependency()`/
+  `WaitUntilPending()` helpers and their header comment). Doing it directly
+  from the main thread deadlocks immediately under
+  `GTE_ENABLE_JOB_SYSTEM=OFF`, for the exact same reason described above -
+  `Schedule()` would block that same thread forever waiting for a release
+  flag only that thread could ever set. This is now the established
+  pattern for any FUTURE `src/Jobs/` test that needs a genuinely
+  long-pending dependency, in either build configuration.
 
 ## Render Target Format Matching
 

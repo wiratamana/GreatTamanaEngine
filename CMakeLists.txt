@@ -388,6 +388,8 @@ add_library(gte_core STATIC
     src/Jobs/JobSystem.cpp
     src/Jobs/JobDispatch.h
     src/Jobs/JobDispatch.cpp
+    src/Jobs/JobContinuation.h
+    src/Jobs/JobContinuation.cpp
 )
 
 # Exactly one of these two branches gets compiled in, depending on

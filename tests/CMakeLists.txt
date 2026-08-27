@@ -548,6 +548,45 @@
 #                                            ON or OFF, same reason as
 #                                            JobSystemTests.cpp above.
 #
+#   Jobs/JobContinuationTests.cpp            - Job System Phase 3's job
+#                                            dependencies/continuations
+#                                            (ScheduleAfter()/DispatchAfter() -
+#                                            src/Jobs/JobContinuation.h),
+#                                            using a real JobSystem::Instance():
+#                                            an already-complete dependency
+#                                            degrades to an ordinary
+#                                            Schedule() call with strict
+#                                            ordering still verified (many
+#                                            repeated iterations, since
+#                                            concurrent ordering bugs can pass
+#                                            by luck on a single run), a
+#                                            genuinely pending dependency
+#                                            defers real execution until it
+#                                            clears (with WaitForJobs()
+#                                            called BEFORE the dependency
+#                                            clears, proving the handle is
+#                                            correctly incomplete from the
+#                                            instant ScheduleAfter() returns,
+#                                            not lazily), fan-in (one
+#                                            continuation waiting on several
+#                                            dependencies) and fan-out
+#                                            (several continuations waiting
+#                                            on the same dependency) both
+#                                            resolve correctly, a
+#                                            kMaxWatchersPerHandle-exceeding
+#                                            number of dependents on one slow
+#                                            handle all still eventually run
+#                                            via the documented polling
+#                                            fallback, and DispatchAfter()
+#                                            defers a real batched Dispatch()
+#                                            the same way, with every item
+#                                            written exactly once only after
+#                                            its own dependencies clear.
+#                                            Always built, passes identically
+#                                            whether GTE_ENABLE_JOB_SYSTEM is
+#                                            ON or OFF, same reason as
+#                                            JobDispatchTests.cpp above.
+#
 #
 # Note that the test BINARY still dynamically depends on SDL3.dll at process
 # load time regardless of the above (gte_core's Window.cpp references SDL
@@ -619,6 +658,7 @@ set(GTE_TEST_SOURCES
     Jobs/JobSystemTests.cpp
     Jobs/JobDispatchMathTests.cpp
     Jobs/JobDispatchTests.cpp
+    Jobs/JobContinuationTests.cpp
     Input/InputStateTests.cpp
     Application/EventTranslatorTests.cpp
     Application/MemorySnapshotBuilderTests.cpp

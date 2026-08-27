@@ -1,5 +1,13 @@
 #include "JobSystem.h"
 
+// <thread> is already pulled in transitively via JobSystem.h when
+// GTE_ENABLE_JOB_SYSTEM is ON; the OFF branch below also needs
+// std::this_thread::yield() (WaitForJobs()'s spin-wait - see that method's
+// own comment for why a real wait is needed there even in this
+// configuration), so include it directly and unconditionally here rather
+// than relying on the ON-only transitive include.
+#include <thread>
+
 namespace gte::Jobs {
 
 namespace {
@@ -88,8 +96,29 @@ void JobSystem::WorkerLoop()
             // 256-jobs-per-handle load before this fix; a --gtest_repeat
             // stress run showed zero hangs across 100+ iterations after
             // it.)
-            std::lock_guard<std::mutex> lock(m_completionMutex);
-            entry.state->pending.fetch_sub(1, std::memory_order_acq_rel);
+            //
+            // `previousPending` (the value BEFORE this decrement) tells us
+            // whether THIS decrement was the one that brought the handle
+            // down to zero (previousPending == 1) - if so, this thread is
+            // the one responsible for firing this handle's Phase 3
+            // continuation watchers (see JobHandleState::FireWatchers()).
+            // Exactly one thread ever observes previousPending == 1 for a
+            // given handle's completion, since fetch_sub() is atomic.
+            std::uint32_t previousPending;
+            {
+                std::lock_guard<std::mutex> lock(m_completionMutex);
+                previousPending = entry.state->pending.fetch_sub(1, std::memory_order_acq_rel);
+            }
+
+            if (previousPending == 1) {
+                // Deliberately fired AFTER releasing m_completionMutex above:
+                // FireWatchers() takes its own, separate watcherMutex, and a
+                // fired watcher (JobContinuation.cpp's OnDependencyCleared())
+                // may itself call back into JobSystem::Schedule()/
+                // ScheduleAlreadyPending() - never hold m_completionMutex
+                // while running arbitrary callback code.
+                entry.state->FireWatchers();
+            }
         }
 
         // Wake every WaitForJobs() caller currently blocked, regardless of
@@ -119,13 +148,42 @@ void JobSystem::Schedule(JobFunction fn, void* payload, JobHandle& handle)
     // comment) - run the job immediately, right here, on the calling
     // thread, rather than blocking Schedule() or dropping the job.
     fn(payload);
+    std::uint32_t previousPending;
     {
         // Same lock-bracketed-decrement requirement as WorkerLoop() above -
         // see that method's own comment for the full "why" (the exact same
         // lost-wakeup race is possible here too, however unlikely this
         // fallback path is to actually be hit in practice).
         std::lock_guard<std::mutex> lock(m_completionMutex);
-        handle.m_state->pending.fetch_sub(1, std::memory_order_acq_rel);
+        previousPending = handle.m_state->pending.fetch_sub(1, std::memory_order_acq_rel);
+    }
+    if (previousPending == 1) {
+        handle.m_state->FireWatchers(); // See WorkerLoop()'s own comment on why this runs unlocked.
+    }
+    m_completionCondition.notify_all();
+}
+
+void JobSystem::ScheduleAlreadyPending(JobFunction fn, void* payload, JobHandle& handle)
+{
+    // Unlike Schedule() above, deliberately does NOT increment
+    // handle.m_state->pending here - the caller (JobContinuation.cpp's
+    // ScheduleAfter()/DispatchAfter()) already accounted for this one unit
+    // of work via JobHandle::AddPendingUnit() at the moment it was first
+    // accepted as a deferred continuation - see that method's own comment.
+    detail::JobEntry entry{ fn, payload, handle.m_state };
+    if (m_queue.TryPush(std::move(entry))) {
+        return;
+    }
+
+    // Same graceful full-queue fallback as Schedule() above.
+    fn(payload);
+    std::uint32_t previousPending;
+    {
+        std::lock_guard<std::mutex> lock(m_completionMutex);
+        previousPending = handle.m_state->pending.fetch_sub(1, std::memory_order_acq_rel);
+    }
+    if (previousPending == 1) {
+        handle.m_state->FireWatchers();
     }
     m_completionCondition.notify_all();
 }
@@ -157,15 +215,50 @@ void JobSystem::Schedule(JobFunction fn, void* payload, JobHandle& handle)
     // contract.
     handle.m_state->pending.fetch_add(1, std::memory_order_acq_rel);
     fn(payload);
-    handle.m_state->pending.fetch_sub(1, std::memory_order_acq_rel);
+    const std::uint32_t previousPending = handle.m_state->pending.fetch_sub(1, std::memory_order_acq_rel);
+    if (previousPending == 1) {
+        handle.m_state->FireWatchers();
+    }
+}
+
+void JobSystem::ScheduleAlreadyPending(JobFunction fn, void* payload, JobHandle& handle)
+{
+    // Same "no increment here, the caller already accounted for it" contract
+    // as the GTE_ENABLE_JOB_SYSTEM=ON branch above - see
+    // JobHandle::AddPendingUnit()'s own comment.
+    fn(payload);
+    const std::uint32_t previousPending = handle.m_state->pending.fetch_sub(1, std::memory_order_acq_rel);
+    if (previousPending == 1) {
+        handle.m_state->FireWatchers();
+    }
 }
 
 void JobSystem::WaitForJobs(JobHandle& handle)
 {
-    // Schedule() above always finishes the job before returning in this
-    // configuration, so `handle` is already complete by the time any
-    // caller could reach here - nothing to wait for.
-    (void)handle;
+    // Historically (Phases 1-2) this could simply assume `handle` was
+    // already complete by the time any caller reached here, since every
+    // Schedule()/Dispatch() call in this configuration runs its job(s)
+    // synchronously, to completion, before returning - so nothing was ever
+    // left "in flight" for a caller on a different thread to wait for.
+    //
+    // That assumption no longer holds once Phase 3's ScheduleAfter()/
+    // DispatchAfter() (JobContinuation.h) exist: JobHandle::AddPendingUnit()
+    // can mark a handle incomplete well BEFORE the work that will eventually
+    // complete it is actually scheduled - it only runs once that handle's
+    // own dependencies clear, which may happen on a completely different
+    // thread (e.g. another thread that is itself concurrently calling
+    // Schedule()/ScheduleAlreadyPending() for the dependency). A caller
+    // blocked in WaitForJobs() on such a handle genuinely has something to
+    // wait for, even in this no-worker-pool configuration.
+    //
+    // There is no shared condition_variable to block on here (unlike the
+    // GTE_ENABLE_JOB_SYSTEM=ON branch above) - spin-wait instead, yielding
+    // the CPU between checks rather than busy-looping at full speed. This
+    // is still zero-heap-allocation and correct regardless of which thread
+    // (if any) actually completes `handle`.
+    while (!handle.IsComplete()) {
+        std::this_thread::yield();
+    }
 }
 
 std::size_t JobSystem::WorkerCount() const noexcept
