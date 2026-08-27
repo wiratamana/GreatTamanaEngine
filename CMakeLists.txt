@@ -308,6 +308,8 @@ add_library(gte_core STATIC
     src/Renderer/Vulkan/VulkanFrameSync.h
     src/Renderer/Vulkan/VulkanQueryPool.cpp
     src/Renderer/Vulkan/VulkanQueryPool.h
+    src/Renderer/Vulkan/FormatCapabilities.cpp
+    src/Renderer/Vulkan/FormatCapabilities.h
     src/Renderer/RenderGraph/RenderGraphTypes.h
     src/Renderer/RenderGraph/RenderGraphTypes.cpp
     src/Renderer/RenderGraph/RenderGraphBuilder.h

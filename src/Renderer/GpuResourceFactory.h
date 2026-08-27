@@ -33,7 +33,7 @@ namespace gte {
 // in-flight presentation/offscreen work.
 class GpuResourceFactory {
 public:
-    GpuResourceFactory(VkDevice device, VmaAllocator allocator, VkQueue graphicsQueue,
+    GpuResourceFactory(VkPhysicalDevice physicalDevice, VkDevice device, VmaAllocator allocator, VkQueue graphicsQueue,
         std::uint32_t graphicsQueueFamily, VkFormat depthFormat, std::shared_ptr<GpuMemoryTracker> memoryTracker);
     ~GpuResourceFactory();
 
@@ -48,9 +48,18 @@ public:
     // resolved by Renderer itself, since only Renderer (via FramePresenter)
     // knows ColorFormat(). depthDebugName optionally names the companion
     // DepthBuffer separately from the color image's debugName - see
-    // RenderTexture's constructor comment.
-    RenderTexture CreateRenderTexture(
-        int width, int height, VkFormat format, const char* debugName, const char* depthDebugName = nullptr) const;
+    // RenderTexture's constructor comment. `allowStorageImageAccess`
+    // (default false) opts the returned RenderTexture's color image into
+    // VK_IMAGE_USAGE_STORAGE_BIT (an `RWTexture` - see
+    // COMPUTE_PHASE1_RESOURCE_VOCABULARY_STRATEGY_v2.md) - when true, this
+    // method first confirms `format` actually supports
+    // VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT via
+    // Vulkan/FormatCapabilities.h's SupportsStorageImageUsage() and throws
+    // std::runtime_error loudly if it doesn't, rather than silently
+    // creating a RenderTexture a compute shader can't actually bind as a
+    // storage image.
+    RenderTexture CreateRenderTexture(int width, int height, VkFormat format, const char* debugName,
+        const char* depthDebugName = nullptr, bool allowStorageImageAccess = false) const;
 
     // See Renderer::CreateBuffer().
     Buffer CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, BufferMemoryUsage memoryUsage,
@@ -59,6 +68,32 @@ public:
     // See Renderer::CreateDeviceLocalBuffer().
     Buffer CreateDeviceLocalBuffer(
         const void* data, VkDeviceSize size, VkBufferUsageFlags usage, const char* debugName = nullptr) const;
+
+    // See Renderer::CreateStructuredBuffer(). A thin, self-documenting
+    // wrapper over CreateBuffer() above, for the `RWStructuredBuffer`/
+    // `StructuredBuffer` compute-shader resource kinds (see
+    // COMPUTE_PHASE1_RESOURCE_VOCABULARY_STRATEGY_v2.md) - both map onto
+    // the SAME underlying Vulkan buffer/descriptor type
+    // (VK_DESCRIPTOR_TYPE_STORAGE_BUFFER); the read-only-vs-read-write
+    // distinction is enforced entirely at the GLSL (`readonly buffer` vs.
+    // plain `buffer`) and render-graph (ComputeShaderRead vs.
+    // ComputeShaderWrite - see Phase 5) levels, never by a different
+    // Vulkan object here. `elementStride`/`elementCount` are plain
+    // bookkeeping (size = elementStride * elementCount) - this does NOT
+    // introduce a typed/templated buffer wrapper; the returned Buffer is
+    // exactly as untyped as ever. Always ORs in
+    // VK_BUFFER_USAGE_STORAGE_BUFFER_BIT (plus VK_BUFFER_USAGE_TRANSFER_DST_BIT
+    // when `memoryUsage == BufferMemoryUsage::GpuOnly`, mirroring
+    // CreateDeviceLocalBuffer()'s own convention, so a GPU-only structured
+    // buffer can still be initialized once via a caller-driven staging
+    // upload). `extraUsage` (default 0) lets a caller OR in additional
+    // usage flags this buffer also needs (e.g.
+    // VK_BUFFER_USAGE_INDIRECT_COMMAND_BIT for an indirect-draw buffer
+    // that's ALSO written as a plain RWStructuredBuffer by a culling
+    // compute shader - see the companion GPU-driven-rendering document)
+    // without needing a second, near-duplicate factory method.
+    Buffer CreateStructuredBuffer(VkDeviceSize elementStride, std::uint32_t elementCount,
+        BufferMemoryUsage memoryUsage, VkBufferUsageFlags extraUsage = 0, const char* debugName = nullptr) const;
 
     // See Renderer::ImmediateSubmit().
     void ImmediateSubmit(const std::function<void(VkCommandBuffer)>& recordFn) const;
@@ -104,8 +139,16 @@ public:
     // width*height*4 tightly-packed bytes (e.g. straight out of
     // stbi_load(..., desired_channels=4)) - uploaded via a temporary
     // staging Buffer + ImmediateSubmit(), the same pattern
-    // CreateDeviceLocalBuffer() above already uses.
-    Texture2D CreateTexture2D(const void* pixelsRgba8, int width, int height, const char* debugName = nullptr) const;
+    // CreateDeviceLocalBuffer() above already uses. `allowStorageImageAccess`
+    // (default false) opts the returned Texture2D's image into
+    // VK_IMAGE_USAGE_STORAGE_BIT (an `RWTexture`) - when true, this method
+    // first confirms Texture2D's own fixed VK_FORMAT_R8G8B8A8_UNORM format
+    // actually supports VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT via
+    // Vulkan/FormatCapabilities.h's SupportsStorageImageUsage() and throws
+    // std::runtime_error loudly if it doesn't - same discipline as
+    // CreateRenderTexture() above.
+    Texture2D CreateTexture2D(const void* pixelsRgba8, int width, int height, const char* debugName = nullptr,
+        bool allowStorageImageAccess = false) const;
 
     // The ONE descriptor-set-layout (a single combined-image-sampler,
     // fragment stage, set = 0 binding = 0) every VertexLayout::
@@ -149,6 +192,15 @@ private:
     VkDevice m_device = VK_NULL_HANDLE;
     VmaAllocator m_allocator = VK_NULL_HANDLE;
     VkQueue m_graphicsQueue = VK_NULL_HANDLE;
+
+    // Needed purely for the storage-image capability check
+    // (Vulkan/FormatCapabilities.h's SupportsStorageImageUsage()) that
+    // CreateRenderTexture()/CreateTexture2D() perform when
+    // `allowStorageImageAccess` is requested - see
+    // COMPUTE_PHASE1_RESOURCE_VOCABULARY_STRATEGY_v2.md. Not owned; must
+    // outlive this factory, same non-ownership convention as m_device/
+    // m_allocator/m_graphicsQueue above.
+    VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
 
     // The single depth format every RenderTexture/Pipeline this factory
     // creates is built against - always exactly Renderer::DepthFormat()

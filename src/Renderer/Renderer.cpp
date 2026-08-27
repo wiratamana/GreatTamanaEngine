@@ -41,8 +41,8 @@ Renderer::Renderer(Window& window)
     , m_presenter(m_device.Physical(), m_device.Native(), m_surface.Native(), m_device.GraphicsQueueFamily(),
           m_device.PresentQueueFamily(), m_device.GraphicsQueue(), m_device.PresentQueue(), window.Width(),
           window.Height(), m_allocator.Native(), m_depthFormat, m_memoryTracker, m_gpuTiming)
-    , m_resources(m_device.Native(), m_allocator.Native(), m_device.GraphicsQueue(), m_device.GraphicsQueueFamily(),
-          m_depthFormat, m_memoryTracker)
+    , m_resources(m_device.Physical(), m_device.Native(), m_allocator.Native(), m_device.GraphicsQueue(),
+          m_device.GraphicsQueueFamily(), m_depthFormat, m_memoryTracker)
 {
 }
 
@@ -145,8 +145,8 @@ VkFormat Renderer::DepthFormat() const noexcept
     return m_depthFormat;
 }
 
-RenderTexture Renderer::CreateRenderTexture(
-    int width, int height, VkFormat format, const char* debugName, const char* depthDebugName) const
+RenderTexture Renderer::CreateRenderTexture(int width, int height, VkFormat format, const char* debugName,
+    const char* depthDebugName, bool allowStorageImageAccess) const
 {
     // VK_FORMAT_UNDEFINED (the default - see Renderer.h) means "match
     // ColorFormat() exactly", not "let Vulkan pick" - resolved here (the one
@@ -156,7 +156,8 @@ RenderTexture Renderer::CreateRenderTexture(
     // (see VulkanSwapchain.cpp's ChooseSurfaceFormat), even if that differs
     // across GPUs/drivers. See AGENTS.md ("Render Target Format Matching").
     const VkFormat resolvedFormat = (format == VK_FORMAT_UNDEFINED) ? ColorFormat() : format;
-    return m_resources.CreateRenderTexture(width, height, resolvedFormat, debugName, depthDebugName);
+    return m_resources.CreateRenderTexture(
+        width, height, resolvedFormat, debugName, depthDebugName, allowStorageImageAccess);
 }
 
 Buffer Renderer::CreateBuffer(
@@ -164,6 +165,13 @@ Buffer Renderer::CreateBuffer(
 {
     return m_resources.CreateBuffer(size, usage, memoryUsage, debugName);
 }
+
+Buffer Renderer::CreateStructuredBuffer(VkDeviceSize elementStride, std::uint32_t elementCount,
+    BufferMemoryUsage memoryUsage, VkBufferUsageFlags extraUsage, const char* debugName) const
+{
+    return m_resources.CreateStructuredBuffer(elementStride, elementCount, memoryUsage, extraUsage, debugName);
+}
+
 
 Buffer Renderer::CreateDeviceLocalBuffer(
     const void* data, VkDeviceSize size, VkBufferUsageFlags usage, const char* debugName) const
@@ -233,9 +241,10 @@ Mesh Renderer::CreateSkinnedMesh(const void* vertexData, VkDeviceSize vertexData
         vertexData, vertexDataSize, vertexCount, indexData, indexDataSize, indexCount, debugName);
 }
 
-Texture2D Renderer::CreateTexture2D(const void* pixelsRgba8, int width, int height, const char* debugName) const
+Texture2D Renderer::CreateTexture2D(
+    const void* pixelsRgba8, int width, int height, const char* debugName, bool allowStorageImageAccess) const
 {
-    return m_resources.CreateTexture2D(pixelsRgba8, width, height, debugName);
+    return m_resources.CreateTexture2D(pixelsRgba8, width, height, debugName, allowStorageImageAccess);
 }
 
 MaterialTexture Renderer::CreateMaterialTexture2D(

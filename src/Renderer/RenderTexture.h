@@ -49,18 +49,32 @@ public:
     // AGENTS.md ("Render Target Format Matching").
     //
     // debugName/depthDebugName are optional and Editor-only (see
-    // GpuMemoryTracker) - plain, cheap `const char*` rather than a
-    // std::string. Must have static storage duration (e.g. a string
     // literal) if provided: this RenderTexture stores each pointer itself
     // (not a copy) so Resize() can re-attach the same names to the fresh
     // handles it creates. debugName names the color image; depthDebugName
     // separately names its companion DepthBuffer (e.g. "GameView" /
     // "GameViewDepth") - left null (the default) if the depth side isn't
     // worth naming individually.
+    //
+    // allowStorageImageAccess (default false - every existing call site is
+    // unaffected) opts this RenderTexture's color image into
+    // VK_IMAGE_USAGE_STORAGE_BIT, the Vulkan mechanism behind an
+    // `RWTexture` (see COMPUTE_PHASE1_RESOURCE_VOCABULARY_STRATEGY_v2.md) -
+    // e.g. a compute shader `imageStore`s directly into it. The CALLER
+    // (GpuResourceFactory::CreateRenderTexture(), never this constructor
+    // itself - see FormatCapabilities.h) is responsible for first
+    // confirming `format` actually supports
+    // VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT via SupportsStorageImageUsage()
+    // and throwing loudly if not; this constructor unconditionally trusts
+    // that check already happened and just sets the usage flag. The flag
+    // is remembered as a member (not just a constructor-local bool) so a
+    // later Resize() (Destroy() + Create()) re-applies the exact same
+    // usage flags at the new size, without needing to re-validate the
+    // format's capability (format never changes across a Resize()).
     RenderTexture(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDevice device, int width,
         int height, VkFormat format = VK_FORMAT_B8G8R8A8_UNORM,
         VkFormat depthFormat = VK_FORMAT_D32_SFLOAT, const char* debugName = nullptr,
-        const char* depthDebugName = nullptr);
+        const char* depthDebugName = nullptr, bool allowStorageImageAccess = false);
     ~RenderTexture();
 
     RenderTexture(const RenderTexture&) = delete;
@@ -100,6 +114,13 @@ public:
     // nothing outside this class currently needs it individually.
     GpuResourceHandle Handle() const noexcept { return m_handle; }
 
+    // Whether this RenderTexture's color image was created with
+    // VK_IMAGE_USAGE_STORAGE_BIT (i.e. an `RWTexture`, see
+    // COMPUTE_PHASE1_RESOURCE_VOCABULARY_STRATEGY_v2.md) - a future
+    // descriptor-set builder (Phase 3) needs this to know whether this
+    // texture is even eligible to be bound as a storage image.
+    bool AllowsStorageImageAccess() const noexcept { return m_allowStorageImageAccess; }
+
 private:
     void Create(int width, int height);
     void Destroy() noexcept;
@@ -113,6 +134,7 @@ private:
     VkDevice m_device = VK_NULL_HANDLE;
     VkFormat m_format = VK_FORMAT_B8G8R8A8_UNORM;
     VkFormat m_depthFormat = VK_FORMAT_D32_SFLOAT;
+    bool m_allowStorageImageAccess = false;
 
     VkImage m_image = VK_NULL_HANDLE;
     VmaAllocation m_allocation = VK_NULL_HANDLE;

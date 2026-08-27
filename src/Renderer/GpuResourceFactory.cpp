@@ -1,5 +1,7 @@
 #include "GpuResourceFactory.h"
 
+#include "Vulkan/FormatCapabilities.h"
+
 #include <cstddef>
 #include <limits>
 #include <stdexcept>
@@ -7,11 +9,13 @@
 
 namespace gte {
 
-GpuResourceFactory::GpuResourceFactory(VkDevice device, VmaAllocator allocator, VkQueue graphicsQueue,
-    std::uint32_t graphicsQueueFamily, VkFormat depthFormat, std::shared_ptr<GpuMemoryTracker> memoryTracker)
+GpuResourceFactory::GpuResourceFactory(VkPhysicalDevice physicalDevice, VkDevice device, VmaAllocator allocator,
+    VkQueue graphicsQueue, std::uint32_t graphicsQueueFamily, VkFormat depthFormat,
+    std::shared_ptr<GpuMemoryTracker> memoryTracker)
     : m_device(device)
     , m_allocator(allocator)
     , m_graphicsQueue(graphicsQueue)
+    , m_physicalDevice(physicalDevice)
     , m_depthFormat(depthFormat)
     , m_memoryTracker(std::move(memoryTracker))
 {
@@ -74,6 +78,7 @@ GpuResourceFactory::GpuResourceFactory(GpuResourceFactory&& other) noexcept
     : m_device(std::exchange(other.m_device, VK_NULL_HANDLE))
     , m_allocator(std::exchange(other.m_allocator, VK_NULL_HANDLE))
     , m_graphicsQueue(std::exchange(other.m_graphicsQueue, VK_NULL_HANDLE))
+    , m_physicalDevice(std::exchange(other.m_physicalDevice, VK_NULL_HANDLE))
     , m_depthFormat(other.m_depthFormat)
     , m_memoryTracker(std::move(other.m_memoryTracker))
     , m_commandPool(std::exchange(other.m_commandPool, VK_NULL_HANDLE))
@@ -90,6 +95,7 @@ GpuResourceFactory& GpuResourceFactory::operator=(GpuResourceFactory&& other) no
         m_device = std::exchange(other.m_device, VK_NULL_HANDLE);
         m_allocator = std::exchange(other.m_allocator, VK_NULL_HANDLE);
         m_graphicsQueue = std::exchange(other.m_graphicsQueue, VK_NULL_HANDLE);
+        m_physicalDevice = std::exchange(other.m_physicalDevice, VK_NULL_HANDLE);
         m_depthFormat = other.m_depthFormat;
         m_memoryTracker = std::move(other.m_memoryTracker);
         m_commandPool = std::exchange(other.m_commandPool, VK_NULL_HANDLE);
@@ -115,17 +121,36 @@ void GpuResourceFactory::Destroy() noexcept
     }
 }
 
-RenderTexture GpuResourceFactory::CreateRenderTexture(
-    int width, int height, VkFormat format, const char* debugName, const char* depthDebugName) const
+RenderTexture GpuResourceFactory::CreateRenderTexture(int width, int height, VkFormat format, const char* debugName,
+    const char* depthDebugName, bool allowStorageImageAccess) const
 {
-    return RenderTexture(
-        m_allocator, m_memoryTracker, m_device, width, height, format, m_depthFormat, debugName, depthDebugName);
+    if (allowStorageImageAccess && !SupportsStorageImageUsage(m_physicalDevice, format)) {
+        throw std::runtime_error(
+            "GpuResourceFactory::CreateRenderTexture: requested allowStorageImageAccess = true, but this "
+            "physical device does not support VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT for the requested format.");
+    }
+    return RenderTexture(m_allocator, m_memoryTracker, m_device, width, height, format, m_depthFormat, debugName,
+        depthDebugName, allowStorageImageAccess);
 }
 
 Buffer GpuResourceFactory::CreateBuffer(
     VkDeviceSize size, VkBufferUsageFlags usage, BufferMemoryUsage memoryUsage, const char* debugName) const
 {
     return Buffer(m_allocator, m_memoryTracker, size, usage, memoryUsage, debugName);
+}
+
+Buffer GpuResourceFactory::CreateStructuredBuffer(VkDeviceSize elementStride, std::uint32_t elementCount,
+    BufferMemoryUsage memoryUsage, VkBufferUsageFlags extraUsage, const char* debugName) const
+{
+    const VkDeviceSize size = elementStride * static_cast<VkDeviceSize>(elementCount);
+    VkBufferUsageFlags usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | extraUsage;
+    if (memoryUsage == BufferMemoryUsage::GpuOnly) {
+        // Mirrors CreateDeviceLocalBuffer()'s own convention - so a
+        // GpuOnly structured buffer can still be initialized once via a
+        // caller-driven staging upload (ImmediateSubmit() + vkCmdCopyBuffer).
+        usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    }
+    return CreateBuffer(size, usage, memoryUsage, debugName);
 }
 
 Buffer GpuResourceFactory::CreateDeviceLocalBuffer(
@@ -251,9 +276,14 @@ Mesh GpuResourceFactory::CreateSkinnedMesh(const void* vertexData, VkDeviceSize 
 }
 
 Texture2D GpuResourceFactory::CreateTexture2D(
-    const void* pixelsRgba8, int width, int height, const char* debugName) const
+    const void* pixelsRgba8, int width, int height, const char* debugName, bool allowStorageImageAccess) const
 {
-    Texture2D texture(m_allocator, m_memoryTracker, m_device, width, height, debugName);
+    if (allowStorageImageAccess && !SupportsStorageImageUsage(m_physicalDevice, VK_FORMAT_R8G8B8A8_UNORM)) {
+        throw std::runtime_error(
+            "GpuResourceFactory::CreateTexture2D: requested allowStorageImageAccess = true, but this physical "
+            "device does not support VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT for VK_FORMAT_R8G8B8A8_UNORM.");
+    }
+    Texture2D texture(m_allocator, m_memoryTracker, m_device, width, height, debugName, allowStorageImageAccess);
 
     const auto safeWidth = static_cast<VkDeviceSize>(texture.Width());
     const auto safeHeight = static_cast<VkDeviceSize>(texture.Height());

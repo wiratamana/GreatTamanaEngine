@@ -40,8 +40,19 @@ class Texture2D {
 public:
     // debugName is optional and Editor-only (see GpuMemoryTracker) - same
     // convention as Buffer/RenderTexture's own debugName parameter.
+    //
+    // allowStorageImageAccess (default false - every existing call site is
+    // unaffected) opts this Texture2D's image into
+    // VK_IMAGE_USAGE_STORAGE_BIT, the Vulkan mechanism behind an
+    // `RWTexture` (see COMPUTE_PHASE1_RESOURCE_VOCABULARY_STRATEGY_v2.md).
+    // The CALLER (GpuResourceFactory::CreateTexture2D(), never this
+    // constructor itself - see Vulkan/FormatCapabilities.h) is responsible
+    // for confirming VK_FORMAT_R8G8B8A8_UNORM (this class's own fixed
+    // format) actually supports VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT via
+    // SupportsStorageImageUsage() and throwing loudly if not - this
+    // constructor unconditionally trusts that check already happened.
     Texture2D(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDevice device, int width,
-        int height, const char* debugName = nullptr);
+        int height, const char* debugName = nullptr, bool allowStorageImageAccess = false);
     ~Texture2D();
 
     Texture2D(const Texture2D&) = delete;
@@ -65,6 +76,11 @@ public:
     // once moved-from.
     GpuResourceHandle Handle() const noexcept { return m_handle; }
 
+    // Whether this Texture2D was created with VK_IMAGE_USAGE_STORAGE_BIT
+    // (i.e. an `RWTexture`) - see RenderTexture::AllowsStorageImageAccess()'s
+    // own comment for why a future descriptor-set builder needs this.
+    bool AllowsStorageImageAccess() const noexcept { return m_allowStorageImageAccess; }
+
 private:
     void Destroy() noexcept;
 
@@ -79,6 +95,7 @@ private:
     VkSampler m_sampler = VK_NULL_HANDLE;
     int m_width = 0;
     int m_height = 0;
+    bool m_allowStorageImageAccess = false;
 };
 
 } // namespace gte

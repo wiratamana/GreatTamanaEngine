@@ -7,7 +7,8 @@
 namespace gte {
 
 RenderTexture::RenderTexture(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDevice device,
-    int width, int height, VkFormat format, VkFormat depthFormat, const char* debugName, const char* depthDebugName)
+    int width, int height, VkFormat format, VkFormat depthFormat, const char* debugName, const char* depthDebugName,
+    bool allowStorageImageAccess)
     : m_allocator(allocator)
     , m_tracker(std::move(tracker))
     , m_debugName(debugName)
@@ -15,6 +16,7 @@ RenderTexture::RenderTexture(VmaAllocator allocator, std::shared_ptr<GpuMemoryTr
     , m_device(device)
     , m_format(format)
     , m_depthFormat(depthFormat)
+    , m_allowStorageImageAccess(allowStorageImageAccess)
 {
     Create(width, height);
 }
@@ -33,6 +35,7 @@ RenderTexture::RenderTexture(RenderTexture&& other) noexcept
     , m_device(std::exchange(other.m_device, VK_NULL_HANDLE))
     , m_format(other.m_format)
     , m_depthFormat(other.m_depthFormat)
+    , m_allowStorageImageAccess(other.m_allowStorageImageAccess)
     , m_image(std::exchange(other.m_image, VK_NULL_HANDLE))
     , m_allocation(std::exchange(other.m_allocation, VK_NULL_HANDLE))
     , m_imageView(std::exchange(other.m_imageView, VK_NULL_HANDLE))
@@ -54,6 +57,7 @@ RenderTexture& RenderTexture::operator=(RenderTexture&& other) noexcept
         m_device = std::exchange(other.m_device, VK_NULL_HANDLE);
         m_format = other.m_format;
         m_depthFormat = other.m_depthFormat;
+        m_allowStorageImageAccess = other.m_allowStorageImageAccess;
         m_image = std::exchange(other.m_image, VK_NULL_HANDLE);
         m_allocation = std::exchange(other.m_allocation, VK_NULL_HANDLE);
         m_imageView = std::exchange(other.m_imageView, VK_NULL_HANDLE);
@@ -104,8 +108,18 @@ void RenderTexture::Create(int width, int height)
     imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
     // COLOR_ATTACHMENT so Renderer::RenderOffscreen() can draw into it,
     // SAMPLED so it can be displayed later (e.g. an Editor panel wrapping
-    // it in an ImGui descriptor set).
+    // it in an ImGui descriptor set). STORAGE_BIT is ADDITIONALLY OR'd in
+    // when this RenderTexture was created with allowStorageImageAccess =
+    // true (an `RWTexture` - see
+    // COMPUTE_PHASE1_RESOURCE_VOCABULARY_STRATEGY_v2.md) - the caller
+    // (GpuResourceFactory::CreateRenderTexture()) is responsible for having
+    // already confirmed `m_format` supports
+    // VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT via SupportsStorageImageUsage()
+    // before ever reaching here.
     imageInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    if (m_allowStorageImageAccess) {
+        imageInfo.usage |= VK_IMAGE_USAGE_STORAGE_BIT;
+    }
     imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 

@@ -8,7 +8,7 @@ namespace gte {
 
 Texture2D::Texture2D(
     VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDevice device, int width, int height,
-    const char* debugName)
+    const char* debugName, bool allowStorageImageAccess)
     : m_allocator(allocator)
     , m_tracker(std::move(tracker))
     , m_device(device)
@@ -18,6 +18,7 @@ Texture2D::Texture2D(
     // header that still passed stb_image's own sanity checks).
     , m_width(width > 0 ? width : 1)
     , m_height(height > 0 ? height : 1)
+    , m_allowStorageImageAccess(allowStorageImageAccess)
 {
     constexpr VkFormat kFormat = VK_FORMAT_R8G8B8A8_UNORM;
 
@@ -34,8 +35,17 @@ Texture2D::Texture2D(
     // pixel data into it; SAMPLED so it can be displayed afterwards (e.g.
     // wrapped in an ImGui descriptor set - see AssetPreviewTexture.h). No
     // COLOR_ATTACHMENT bit - unlike RenderTexture, this is never rendered
-    // into, only written once via a buffer-to-image copy.
+    // into, only written once via a buffer-to-image copy. STORAGE_BIT is
+    // ADDITIONALLY OR'd in when allowStorageImageAccess is true (an
+    // `RWTexture` - see COMPUTE_PHASE1_RESOURCE_VOCABULARY_STRATEGY_v2.md) -
+    // the caller (GpuResourceFactory::CreateTexture2D()) is responsible for
+    // having already confirmed kFormat supports
+    // VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT via SupportsStorageImageUsage()
+    // before ever reaching here.
     imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    if (m_allowStorageImageAccess) {
+        imageInfo.usage |= VK_IMAGE_USAGE_STORAGE_BIT;
+    }
     imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
@@ -116,6 +126,7 @@ Texture2D::Texture2D(Texture2D&& other) noexcept
     , m_sampler(std::exchange(other.m_sampler, VK_NULL_HANDLE))
     , m_width(std::exchange(other.m_width, 0))
     , m_height(std::exchange(other.m_height, 0))
+    , m_allowStorageImageAccess(std::exchange(other.m_allowStorageImageAccess, false))
 {
 }
 
@@ -133,6 +144,7 @@ Texture2D& Texture2D::operator=(Texture2D&& other) noexcept
         m_sampler = std::exchange(other.m_sampler, VK_NULL_HANDLE);
         m_width = std::exchange(other.m_width, 0);
         m_height = std::exchange(other.m_height, 0);
+        m_allowStorageImageAccess = std::exchange(other.m_allowStorageImageAccess, false);
     }
     return *this;
 }

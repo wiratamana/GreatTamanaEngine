@@ -232,8 +232,22 @@ public:
     // depthDebugName likewise optionally names the companion DepthBuffer
     // separately (e.g. "GameView" / "GameViewDepth") - left null if the
     // depth side isn't worth naming individually.
+    //
+    // `allowStorageImageAccess` (default false - every existing call site
+    // is unaffected) opts the returned RenderTexture's color image into
+    // VK_IMAGE_USAGE_STORAGE_BIT - an `RWTexture` (see
+    // COMPUTE_PHASE1_RESOURCE_VOCABULARY_STRATEGY_v2.md) a compute shader
+    // can `imageStore` directly into. When true, this throws
+    // std::runtime_error if `format` doesn't actually support
+    // VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT on this physical device (see
+    // Vulkan/FormatCapabilities.h's SupportsStorageImageUsage()) - never a
+    // silent fallback. Per that same document's own scope note, every
+    // storage-capable RenderTexture in this campaign is externally-owned/
+    // persistent (imported into a render graph via ImportTexture()) -
+    // never requested as a transient, render-graph-pooled resource.
     RenderTexture CreateRenderTexture(int width, int height, VkFormat format = VK_FORMAT_UNDEFINED,
-        const char* debugName = nullptr, const char* depthDebugName = nullptr) const;
+        const char* debugName = nullptr, const char* depthDebugName = nullptr,
+        bool allowStorageImageAccess = false) const;
 
     // Factory for GPU buffers (vertex/index/uniform/staging), so callers
     // never need direct access to the VmaAllocator this Renderer owns
@@ -255,6 +269,28 @@ public:
     // Buffer is unnamed, since it's gone before this call even returns.
     Buffer CreateDeviceLocalBuffer(
         const void* data, VkDeviceSize size, VkBufferUsageFlags usage, const char* debugName = nullptr) const;
+
+    // Convenience factory for the `RWStructuredBuffer`/`StructuredBuffer`
+    // compute-shader resource kinds (see
+    // COMPUTE_PHASE1_RESOURCE_VOCABULARY_STRATEGY_v2.md) - a thin wrapper
+    // over CreateBuffer() above that always ORs in
+    // VK_BUFFER_USAGE_STORAGE_BUFFER_BIT (plus VK_BUFFER_USAGE_TRANSFER_DST_BIT
+    // when `memoryUsage == BufferMemoryUsage::GpuOnly`, mirroring
+    // CreateDeviceLocalBuffer()'s own convention). `elementStride`/
+    // `elementCount` are plain bookkeeping (size = elementStride *
+    // elementCount) - the returned Buffer stays exactly as untyped as
+    // ever, no `Buffer<T>` wrapper introduced. `extraUsage` (default 0)
+    // lets a caller OR in additional usage flags this same buffer also
+    // needs (e.g. VK_BUFFER_USAGE_INDIRECT_COMMAND_BIT for an indirect-draw
+    // buffer a culling compute shader ALSO writes as a plain
+    // RWStructuredBuffer). The RWStructuredBuffer-vs-StructuredBuffer
+    // (read-write vs. read-only) distinction is enforced entirely at the
+    // GLSL (`readonly buffer` vs. plain `buffer`) and render-graph
+    // (ComputeShaderRead vs. ComputeShaderWrite) levels, never by a
+    // different Vulkan object here.
+    Buffer CreateStructuredBuffer(VkDeviceSize elementStride, std::uint32_t elementCount,
+        BufferMemoryUsage memoryUsage, VkBufferUsageFlags extraUsage = 0, const char* debugName = nullptr) const;
+
 
     // Records a one-time-submit command buffer (recordFn), submits it to
     // the graphics queue, and blocks until it finishes. The primitive
@@ -359,7 +395,15 @@ public:
     // width*height*4 tightly-packed bytes (e.g. straight out of
     // stbi_load(..., desired_channels=4)). debugName is optional/
     // Editor-only - see Buffer's constructor comment. See Texture2D.h.
-    Texture2D CreateTexture2D(const void* pixelsRgba8, int width, int height, const char* debugName = nullptr) const;
+    // `allowStorageImageAccess` (default false) opts the returned
+    // Texture2D's image into VK_IMAGE_USAGE_STORAGE_BIT (an `RWTexture` -
+    // see COMPUTE_PHASE1_RESOURCE_VOCABULARY_STRATEGY_v2.md), throwing
+    // std::runtime_error if this device doesn't actually support
+    // VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT for Texture2D's own fixed
+    // VK_FORMAT_R8G8B8A8_UNORM format - same discipline as
+    // CreateRenderTexture() above.
+    Texture2D CreateTexture2D(const void* pixelsRgba8, int width, int height, const char* debugName = nullptr,
+        bool allowStorageImageAccess = false) const;
 
     // Like CreateTexture2D() above, but for a texture meant to be SAMPLED
     // by one of this engine's own Pipelines (a PMX material's diffuse
