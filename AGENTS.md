@@ -441,6 +441,100 @@ whenever touching profiling instrumentation, or adding a new call site:
   sooner; see `PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md`'s own Step 2.3
   for the exact reasoning this must never be weakened against.
 
+## Job System
+
+`src/Jobs/` (`JobTypes.h`, `JobQueue.h/.cpp`, `JobSystem.h/.cpp`) is the
+engine's general-purpose worker-thread pool - see
+`task_manager/job_system/JOBSYSTEM_PHASE0_MASTER_STRATEGY_v2.md` for the
+full multi-phase campaign this is Phase 1 of, and
+`task_manager/job_system/JOB_SYSTEM_PHASE1_COMPLETION_REPORT.md` for this
+phase's own detailed writeup. As of Phase 1, this module provides only the
+minimal `JobHandle`/`Schedule()`/`WaitForJobs()`/`WorkerCount()` primitive -
+**nothing else in the engine calls into it yet** (no real subsystem has been
+migrated onto it - that is Phase 6's job). Follow these rules whenever
+touching this module or building a later phase on top of it:
+
+- **`gte::Jobs::JobSystem::Instance()` is a Meyers singleton that starts
+  lazily, on its FIRST call from anywhere in the process** - the exact same
+  pattern `Profiling::FrameProfiler::Instance()` already uses (see
+  "Profiling" above). This means the worker pool - real OS `std::thread`s -
+  does not exist at all, and none are ever created, until the first genuine
+  `Schedule()` call happens to run somewhere in the engine. Since nothing
+  calls `Schedule()` in production yet (only this module's own tests do),
+  a plain build/run of the engine today never spins up a single worker
+  thread - don't be surprised if a profiling capture shows zero job/worker
+  activity before Phase 6 lands; that's expected, not a bug.
+- **`JobSystem` (and `JobQueue`) always compile, unconditionally, regardless
+  of `GTE_ENABLE_JOB_SYSTEM`** - the same "the class stays available/
+  testable even when its production behavior is gated off" precedent
+  `SdlMemoryTracker`/`FrameProfiler` already established. Only the
+  *internal* behavior differs per that switch: `GTE_ENABLE_JOB_SYSTEM=ON`
+  (the default) runs `Schedule()`'d work on a real worker-thread pool sized
+  from `std::thread::hardware_concurrency()` (falling back to 1 if that
+  returns 0); `=OFF` runs `Schedule()`'d work IMMEDIATELY, synchronously, on
+  the calling thread, with no `std::thread` ever created - the public API's
+  observable contract (a `JobHandle` eventually becomes complete;
+  `WaitForJobs()` returns once it is) is identical either way. This is the
+  exact same two-branch, ODR-safe "gate at the .cpp level, never at the
+  call site" convention `GTE_ENABLE_EDITOR`'s `ImGuiEditorLayer.cpp`/
+  `NullEditorLayer.cpp` split already established.
+- **`JobHandle` is backed by a `std::shared_ptr<detail::JobHandleState>` -
+  exactly ONE heap allocation at `JobHandle` construction, never one per
+  job scheduled against it.** A single `JobHandle` is meant to be reused
+  across MANY `Schedule()` calls (Phase 2's whole batch-`Dispatch()` design
+  shares one `JobHandle` across every batch of a single call) -
+  `JobSystem::Schedule()` itself never allocates on the heap in its
+  steady-state path (`JobQueue` is a fixed-capacity ring buffer, sized once
+  at construction - see `JobQueue.h`'s own comment on why this is a fixed
+  size rather than a growable container, mirroring
+  `kMaxCpuScopesPerFrame`/`kMaxFrameHistory`'s precedent in
+  `src/Profiling/`). A full queue is handled by `Schedule()` falling back
+  to running the job immediately, inline, on the calling thread - never by
+  blocking, growing the buffer, or dropping the job silently.
+- **A worker's pending-count decrement MUST be bracketed by the SAME mutex
+  `WaitForJobs()` holds while checking its own predicate
+  (`JobSystem::m_completionMutex`) - never just an atomic write on its
+  own.** This is a real, confirmed-in-practice classic
+  `condition_variable` lost-wakeup race, not a theoretical concern: a
+  waiter can check `IsComplete()` (see it as still false, while still
+  holding the mutex) and, before it finishes registering itself as a
+  waiter on `m_completionCondition`, a worker's decrement-then-
+  `notify_all()` sequence can run to completion on another thread and find
+  no one registered yet to wake - the waiter then blocks forever waiting
+  for a notification that already happened moments earlier. This was
+  reproduced intermittently (roughly 1 run in 4) under a stress test
+  scheduling 256 jobs against one shared handle, before the fix (holding
+  `m_completionMutex` around the `fetch_sub`, in both `JobSystem::
+  WorkerLoop()` and `Schedule()`'s own full-queue fallback path) closed it
+  - a 100-iteration `--gtest_repeat` stress run showed zero hangs
+  afterward. Any FUTURE piece of code that mutates state a
+  `condition_variable` wait's predicate depends on must follow this same
+  "bracket the mutation with the SAME mutex the waiter holds while
+  checking" rule - see `cppreference`'s own
+  `condition_variable::notify_all()` documentation ("even though the
+  shared variable is atomic, it must be modified while owning the mutex to
+  correctly publish the modification to the waiting thread").
+- **Never gate a new `src/Jobs/` test file behind `GTE_ENABLE_EDITOR`/
+  `GTE_ENABLE_JOB_SYSTEM` in `tests/CMakeLists.txt`.** `JobQueue`/
+  `JobSystem` both always compile (see above), so
+  `tests/Jobs/JobQueueTests.cpp`/`JobSystemTests.cpp` are added to
+  `GTE_TEST_SOURCES` unconditionally, the same "always built" bucket as
+  `Profiling/FrameProfilerTests.cpp`/`ScopeTimerTests.cpp` - and both pass
+  identically whether `GTE_ENABLE_JOB_SYSTEM` is `ON` or `OFF` (verified:
+  the full suite passes in both configurations, and separately under a
+  completely different toolchain - MinGW/GCC vs. this project's usual
+  MSVC/Ninja build - as an extra cross-check for this module specifically,
+  since it's the engine's first genuinely multi-threaded code).
+- **A concurrency bug in this module can pass by luck on a single test
+  run.** Any new test that exercises real cross-thread interaction (not
+  just `JobQueue`'s own single-threaded ring-buffer logic) should be
+  stress-repeated (e.g. `--gtest_repeat=50` or more) at least once before
+  being trusted, mirroring the discipline
+  `JOBSYSTEM_PHASE3_JOB_DEPENDENCIES_CONTINUATIONS.md` already calls for
+  future phases - a single green run is not sufficient evidence for
+  genuinely concurrent code, as this phase's own lost-wakeup bug
+  demonstrated directly.
+
 ## Render Target Format Matching
 
 Vulkan pipelines are built against an exact color format

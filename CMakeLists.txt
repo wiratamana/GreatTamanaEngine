@@ -68,6 +68,21 @@ option(GTE_BUILD_TESTS "Build the GreatTamanaEngineTests unit test suite (Google
 # runtime without a second build - see PROFILER_STRATEGY_v2.md, Phase 0b.
 option(GTE_ENABLE_PROFILER "Compile in CPU scope-timer profiling instrumentation" ON)
 
+# Master switch for the always-compiled Job System module (src/Jobs/) - a
+# small, fixed-size pool of persistent OS worker threads plus a
+# Schedule()/JobHandle/WaitForJobs() API (see
+# task_manager/job_system/JOBSYSTEM_PHASE0_MASTER_STRATEGY_v2.md and
+# AGENTS.md, "Job System"). As of Phase 1, nothing in the engine actually
+# calls Jobs::JobSystem::Schedule() yet - this switch only controls whether
+# JobSystem's Schedule()/WaitForJobs() run work on a REAL worker-thread pool
+# (ON, the default) or immediately, synchronously, inline on the calling
+# thread with no std::thread ever created at all (OFF) - the public API
+# shape/observable contract (a JobHandle eventually becomes complete;
+# WaitForJobs() returns once it is) is identical either way, same
+# "class always compiles, only its internal behavior is gated" precedent
+# GTE_ENABLE_PROFILER already establishes for ScopeTimer above.
+option(GTE_ENABLE_JOB_SYSTEM "Compile in the Job System's real worker-thread pool" ON)
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(FetchSDL3)
 include(FetchVulkan)
@@ -366,6 +381,11 @@ add_library(gte_core STATIC
     src/Profiling/ScopeTimer.h
     src/Profiling/FrameGraphData.h
     src/Profiling/FrameGraphData.cpp
+    src/Jobs/JobTypes.h
+    src/Jobs/JobQueue.h
+    src/Jobs/JobQueue.cpp
+    src/Jobs/JobSystem.h
+    src/Jobs/JobSystem.cpp
 )
 
 # Exactly one of these two branches gets compiled in, depending on
@@ -472,6 +492,14 @@ target_compile_definitions(gte_core PUBLIC GTE_ENABLE_PROJECT_PANEL=$<BOOL:${GTE
 # exact same macro value gte_core itself was built with.
 target_compile_definitions(gte_core PUBLIC GTE_ENABLE_PROFILER=$<BOOL:${GTE_ENABLE_PROFILER}>)
 
+# Same idea again - exposes GTE_ENABLE_JOB_SYSTEM to C++ code as an actual
+# 1/0 preprocessor macro, needed by src/Jobs/JobSystem.h/.cpp's own
+# `#if GTE_ENABLE_JOB_SYSTEM` guards (see AGENTS.md, "Job System"). PUBLIC
+# for the same reason as the two definitions above: GreatTamanaEngineTests
+# (tests/Jobs/*.cpp) must see the exact same macro value gte_core itself was
+# built with.
+target_compile_definitions(gte_core PUBLIC GTE_ENABLE_JOB_SYSTEM=$<BOOL:${GTE_ENABLE_JOB_SYSTEM}>)
+
 # PUBLIC (not PRIVATE) for the same reason as the compile definition above:
 # any consumer of gte_core (GreatTamanaEngine's main.cpp, and every test in
 # GreatTamanaEngineTests) #includes engine headers that transitively need
@@ -480,6 +508,19 @@ target_compile_definitions(gte_core PUBLIC GTE_ENABLE_PROFILER=$<BOOL:${GTE_ENAB
 # automatically instead of every consumer having to repeat them.
 target_include_directories(gte_core PUBLIC "${CMAKE_SOURCE_DIR}/src")
 target_link_libraries(gte_core PUBLIC SDL3::SDL3 volk vma stb_image KTX::ktx)
+
+# src/Jobs/JobSystem.cpp/.h use std::thread/std::mutex/std::condition_variable
+# unconditionally (the class itself always compiles - see JobSystem.h's own
+# comment - only its INTERNAL behavior is gated by GTE_ENABLE_JOB_SYSTEM).
+# On some toolchains (notably MinGW/GCC) linking a real threading
+# implementation needs an explicit Threads::Threads - find_package(Threads)
+# is the portable, CMake-blessed way to find whatever that toolchain needs
+# (a plain compiler flag on MSVC, -lpthread-equivalent elsewhere) rather
+# than hardcoding a library name. PUBLIC for the same reason as everything
+# else linked into gte_core PUBLIC above: GreatTamanaEngineTests also
+# includes/links against this code path directly (tests/Jobs/*.cpp).
+find_package(Threads REQUIRED)
+target_link_libraries(gte_core PUBLIC Threads::Threads)
 
 # PRIVATE (not PUBLIC) deliberately: saba_pmx/glm are an implementation
 # detail confined entirely to src/Assets/PmxLoader.cpp/VmdLoader.cpp (see

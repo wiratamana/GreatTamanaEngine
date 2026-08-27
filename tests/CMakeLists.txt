@@ -463,6 +463,48 @@
 #                                            EndFrame()'d) frame never being
 #                                            observed. Always built, same
 #                                            reason as the two entries above.
+#   Jobs/JobQueueTests.cpp                  - Job System Phase 1's fixed-
+#                                            capacity ring buffer
+#                                            (gte::Jobs::detail::JobQueue -
+#                                            src/Jobs/JobQueue.h): FIFO
+#                                            push/pop order, the full-queue
+#                                            TryPush() failure case, reuse
+#                                            of a slot after it drains, and
+#                                            Shutdown()'s "drain what's
+#                                            already queued, THEN report
+#                                            empty" behavior. No real
+#                                            threads/JobSystem singleton
+#                                            involved - always built,
+#                                            regardless of
+#                                            GTE_ENABLE_JOB_SYSTEM (this
+#                                            class always compiles - see
+#                                            JobQueue.h's own comment).
+#   Jobs/JobSystemTests.cpp                 - Job System Phase 1's real
+#                                            worker-thread pool
+#                                            (gte::Jobs::JobSystem - src/
+#                                            Jobs/JobSystem.h):
+#                                            WorkerCount() is always >= 1,
+#                                            a default-constructed
+#                                            JobHandle is already complete,
+#                                            Schedule()+WaitForJobs()
+#                                            actually runs the job, many
+#                                            jobs scheduled against ONE
+#                                            shared handle all complete
+#                                            with no missed/corrupted
+#                                            writes (stress-repeated - see
+#                                            AGENTS.md, "Job System"), a
+#                                            copied JobHandle observes the
+#                                            same completion state as the
+#                                            original, and two independent
+#                                            handles don't interfere with
+#                                            each other. Always built,
+#                                            passes identically whether
+#                                            GTE_ENABLE_JOB_SYSTEM is ON
+#                                            (real worker threads) or OFF
+#                                            (Schedule() runs inline,
+#                                            synchronously) - see
+#                                            JobSystem.h's own comment.
+#
 #
 # Note that the test BINARY still dynamically depends on SDL3.dll at process
 # load time regardless of the above (gte_core's Window.cpp references SDL
@@ -530,6 +572,8 @@ set(GTE_TEST_SOURCES
     Profiling/FrameProfilerTests.cpp
     Profiling/ScopeTimerTests.cpp
     Profiling/FrameGraphDataTests.cpp
+    Jobs/JobQueueTests.cpp
+    Jobs/JobSystemTests.cpp
     Input/InputStateTests.cpp
     Application/EventTranslatorTests.cpp
     Application/MemorySnapshotBuilderTests.cpp
