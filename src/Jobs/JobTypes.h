@@ -82,19 +82,37 @@ struct JobHandleState {
     // triggers FireWatchers()} acquires watcherMutex first is always
     // observed correctly by the other, so a watcher can never be registered
     // "too late" to see a completion that raced it.
+    //
+    // HOTFIX 1: the immediate-fire ("already complete") branch must NEVER
+    // invoke `fn` while still holding watcherMutex - mirrors FireWatchers()'s
+    // own "decide under the lock, fire after releasing it" pattern below.
+    // Calling `fn` here under the lock previously violated that same
+    // no-reentrancy contract: if the fired continuation's own job body ever
+    // touched this same handle again (e.g. registered another watcher
+    // against it, or - in the worst case - the full-queue fallback ran the
+    // deferred job body inline, still nested inside this call), it would try
+    // to re-lock this same non-recursive watcherMutex on the same thread and
+    // deadlock. Determining "already complete" under the lock and firing
+    // only after releasing it closes that hole exactly the way
+    // FireWatchers() already does.
     bool AddWatcher(WatcherFunction fn, void* context)
     {
-        std::lock_guard<std::mutex> lock(watcherMutex);
-        if (pending.load(std::memory_order_acquire) == 0) {
-            fn(context);
-            return true;
+        bool alreadyComplete = false;
+        {
+            std::lock_guard<std::mutex> lock(watcherMutex);
+            if (pending.load(std::memory_order_acquire) == 0) {
+                alreadyComplete = true;
+            } else if (watcherCount >= kMaxWatchersPerHandle) {
+                return false;
+            } else {
+                watcherFns[watcherCount] = fn;
+                watcherContexts[watcherCount] = context;
+                ++watcherCount;
+            }
         }
-        if (watcherCount >= kMaxWatchersPerHandle) {
-            return false;
+        if (alreadyComplete) {
+            fn(context); // Invoked OUTSIDE watcherMutex - see this method's own comment above.
         }
-        watcherFns[watcherCount] = fn;
-        watcherContexts[watcherCount] = context;
-        ++watcherCount;
         return true;
     }
 

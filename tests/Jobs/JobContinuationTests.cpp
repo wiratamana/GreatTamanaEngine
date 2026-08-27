@@ -122,6 +122,68 @@ TEST(JobContinuationTests, AlreadyCompleteDependencyFallsThroughToOrdinarySchedu
     EXPECT_TRUE(continuationRan.load(std::memory_order_acquire));
 }
 
+struct ReentrantWatcherContext {
+    JobHandle* handle;
+    std::atomic<bool>* innerWatcherRan;
+};
+
+void InnerWatcherFn(void* payload)
+{
+    static_cast<std::atomic<bool>*>(payload)->store(true, std::memory_order_release);
+}
+
+void OuterWatcherFn(void* payload)
+{
+    ReentrantWatcherContext* context = static_cast<ReentrantWatcherContext*>(payload);
+    // Reentrant call into the SAME handle, from INSIDE the first watcher's
+    // own callback - this is exactly the HOTFIX 1 scenario (see
+    // JOBSYSTEM_HOTFIX_CODE_REVIEW_FINDINGS.md, item 1): before the fix,
+    // JobHandleState::AddWatcher() invoked this outer callback WHILE STILL
+    // HOLDING watcherMutex, so this inner AddCompletionWatcher() call would
+    // try to re-lock that same non-recursive mutex on the same thread and
+    // hang forever.
+    context->handle->AddCompletionWatcher(&InnerWatcherFn, context->innerWatcherRan);
+}
+
+// HOTFIX 1 regression test - see JOBSYSTEM_HOTFIX_CODE_REVIEW_FINDINGS.md,
+// item 1: AddCompletionWatcher()'s "already complete" immediate-fire branch
+// must never invoke the watcher callback while still holding the handle's
+// internal watcherMutex. Proven here by actually reentering the SAME
+// already-complete handle from inside a fired watcher, on a dedicated
+// thread with a bounded wait rather than an unconditional join() - a
+// regression back to the old locked-fire behavior would hang this thread
+// forever (a non-recursive mutex re-locked by the same thread), which this
+// test must fail loudly on instead of hanging the whole suite.
+TEST(JobContinuationTests, ReentrantWatcherRegistrationOnAlreadyCompleteHandleDoesNotDeadlock)
+{
+    std::atomic<bool> dependencyRan{ false };
+    JobHandle handle;
+    JobSystem::Instance().Schedule(&SetFlagJob, &dependencyRan, handle);
+    JobSystem::Instance().WaitForJobs(handle);
+    ASSERT_TRUE(handle.IsComplete());
+
+    std::atomic<bool> innerWatcherRan{ false };
+    ReentrantWatcherContext context{ &handle, &innerWatcherRan };
+
+    std::atomic<bool> outerCallReturned{ false };
+    std::thread worker([&]() {
+        handle.AddCompletionWatcher(&OuterWatcherFn, &context);
+        outerCallReturned.store(true, std::memory_order_release);
+    });
+
+    for (int i = 0; i < 500 && !outerCallReturned.load(std::memory_order_acquire); ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+
+    if (!outerCallReturned.load(std::memory_order_acquire)) {
+        worker.detach();
+        FAIL() << "AddCompletionWatcher() self-deadlocked on reentrant registration (HOTFIX 1 regression)";
+    }
+    worker.join();
+
+    EXPECT_TRUE(innerWatcherRan.load(std::memory_order_acquire));
+}
+
 TEST(JobContinuationTests, EmptyDependencyListIsAnOrdinarySchedule)
 {
     std::atomic<bool> continuationRan{ false };
