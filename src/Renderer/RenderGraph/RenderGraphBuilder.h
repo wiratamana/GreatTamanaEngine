@@ -132,6 +132,27 @@ public:
         void WriteColorAttachment(TextureHandle handle, const std::optional<std::array<float, 4>>& clearColor = std::nullopt);
         void WriteDepthStencilAttachment(TextureHandle handle, std::optional<float> clearDepth = std::nullopt);
 
+        // Phase 6 of the compute-shader campaign
+        // (COMPUTE_PHASE6_RENDERGRAPH_INTEGRATION_STRATEGY_v2.md) - a
+        // general, NON-ATTACHMENT texture write, distinct from
+        // WriteColorAttachment()/WriteDepthStencilAttachment() above (both
+        // of which ALSO implicitly mark this pass as needing a real
+        // vkCmdBeginRendering bracket - see RenderGraph::Execute()'s own
+        // hasColorWrite/hasDepthWrite scan, which correctly excludes this
+        // access kind via IsColorAttachmentWriteAccess()/TargetsDepthState(),
+        // RenderGraphBarrierPlanner.h). This is how a compute pass declares
+        // it writes an `RWTexture` (see
+        // COMPUTE_PHASE1_RESOURCE_VOCABULARY_STRATEGY_v2.md) -
+        // `access` defaults to ResourceAccess::ComputeShaderWrite, the only
+        // access kind this is meant for today. A true read-modify-write
+        // `RWTexture` (a compute shader that both `imageLoad`s and
+        // `imageStore`s the same image) declares BOTH
+        // `pass.ReadTexture(handle, ResourceAccess::ComputeShaderRead)` AND
+        // `pass.WriteTexture(handle)` on the SAME handle - mirroring how
+        // ReadBuffer()/WriteBuffer() below are already two separate calls a
+        // caller combines for buffers.
+        void WriteTexture(TextureHandle handle, ResourceAccess access = ResourceAccess::ComputeShaderWrite);
+
         // Symmetric buffer counterparts, for a future compute pass (Phase
         // 9 backlog) - no real Phases 1-8 pass needs these yet, but
         // CreateBuffer()/BufferHandle already exist from Phase 1, so these
@@ -213,6 +234,22 @@ public:
         setup(passBuilder);
 
         pass.execute = std::function<void(PassContext&)>(std::forward<ExecuteFn>(execute));
+    }
+
+    // Phase 6 of the compute-shader campaign
+    // (COMPUTE_PHASE6_RENDERGRAPH_INTEGRATION_STRATEGY_v2.md) - a thin,
+    // PURELY COSMETIC alias of AddPass() above, with zero behavioral
+    // difference: a pass's behavior is entirely determined by what it
+    // declares in `reads`/`writes` (via `setup`), never by which entry
+    // point created it. Exists only so a compute-only pass's own call site
+    // reads as "this is a compute pass" at a glance (mirroring the
+    // GPU_DRIVEN_RENDERING_COMPUTE_INDIRECT_STRATEGY_v1.md companion
+    // document's own Phase D naming) - prefer plain AddPass() if this
+    // alias doesn't clearly earn its keep at a given call site.
+    template <typename SetupFn, typename ExecuteFn>
+    void AddComputePass(const char* name, SetupFn&& setup, ExecuteFn&& execute)
+    {
+        AddPass(name, std::forward<SetupFn>(setup), std::forward<ExecuteFn>(execute));
     }
 
     // Consumes this builder, handing its whole in-progress description

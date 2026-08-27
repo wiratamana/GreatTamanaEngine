@@ -108,6 +108,28 @@ struct PassContext {
     // which has no sampler field).
     std::function<ResolvedTexture(TextureHandle)> resolveReadTexture;
 
+    // Phase 6 (COMPUTE_PHASE6_RENDERGRAPH_INTEGRATION_STRATEGY_v2.md) -
+    // a plain alias of resolveReadTexture() above with a name that no
+    // longer implies "reads only": resolves ANY texture handle this pass
+    // declared, whether via ReadTexture() OR PassBuilder::WriteTexture()
+    // (a compute shader's RWTexture output) - a write-only handle is
+    // resolved just as early as a read one (RenderGraph::Execute() resolves
+    // every declared read AND write before a pass's own `execute` callback
+    // runs), so this is safe to call for either direction. Intended for a
+    // compute pass's `execute` callback to use when rewriting its own
+    // ComputeDescriptorSet (see Renderer/ComputeDescriptorSet.h) against
+    // the CURRENT physical resource behind a declared handle, right before
+    // calling Renderer::Dispatch().
+    std::function<ResolvedTexture(TextureHandle)> resolveTexture;
+
+    // The buffer sibling of resolveTexture() above - resolves a declared
+    // BufferHandle (via ReadBuffer()/WriteBuffer()) into its CURRENT
+    // physical VkBuffer, for the exact same "rewrite my own
+    // ComputeDescriptorSet before dispatching" use case. Returns
+    // VK_NULL_HANDLE for a handle that never resolved to a physical buffer
+    // this call.
+    std::function<VkBuffer(BufferHandle)> resolveBuffer;
+
     // Called by a pass's `execute` callback immediately alongside issuing a
     // real vkCmdDraw/vkCmdDrawIndexed, so this pass's own DrawStats tally
     // stays fused to the exact call site that actually issued the draw -

@@ -243,10 +243,17 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
             if (usage.kind != ResourceKind::Texture) {
                 continue;
             }
-            if (usage.access == ResourceAccess::ColorAttachmentWrite) {
+            // IsColorAttachmentWriteAccess()/TargetsDepthState() (Phase 5/6
+            // of the compute-shader campaign - RenderGraphBarrierPlanner.h)
+            // are the Tier-1-testable, extracted decisions behind this
+            // scan - a pure ComputeShaderWrite usage (declared via
+            // PassBuilder::WriteTexture()) correctly triggers NEITHER
+            // branch, so a pure compute pass never gets a
+            // vkCmdBeginRendering bracket at all.
+            if (IsColorAttachmentWriteAccess(usage.access)) {
                 colorHandle = usage.texture;
                 hasColorWrite = true;
-            } else if (usage.access == ResourceAccess::DepthStencilAttachmentReadWrite) {
+            } else if (TargetsDepthState(usage.access)) {
                 depthHandle = usage.texture;
                 hasDepthWrite = true;
             }
@@ -254,12 +261,35 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
 
         PassContext ctx;
         ctx.cmd = cmd;
+        // Resolves ANY texture handle already resolved this call - whether
+        // declared via ReadTexture() OR a compute pass's WriteTexture()
+        // (Phase 6 of the compute-shader campaign) - EnsureTextureResolved()
+        // above runs for every declared read AND write, so a write-only
+        // handle is just as resolvable here as a read one by the time a
+        // pass's own `execute` callback runs. `resolveReadTexture` is kept
+        // as the original name (nothing outside this file used it in
+        // production before Phase 6 - see PassContext's own doc comment in
+        // RenderGraph.h); `resolveTexture` is a plain alias with a name
+        // that no longer implies "reads only", for a compute pass rewriting
+        // its own descriptor set against a texture it WRITES.
         ctx.resolveReadTexture = [&physicalTextures](TextureHandle handle) -> PassContext::ResolvedTexture {
             if (handle.index < physicalTextures.size() && physicalTextures[handle.index].resolved) {
                 const PhysicalTexture& tex = physicalTextures[handle.index];
                 return PassContext::ResolvedTexture{ tex.target.imageView, tex.sampler };
             }
             return PassContext::ResolvedTexture{};
+        };
+        ctx.resolveTexture = ctx.resolveReadTexture;
+
+        // Phase 6 (COMPUTE_PHASE6_RENDERGRAPH_INTEGRATION_STRATEGY_v2.md) -
+        // the buffer sibling of resolveTexture() above, so a compute pass
+        // can rewrite its own ComputeDescriptorSet against a declared
+        // BufferHandle's CURRENT physical VkBuffer before dispatching.
+        ctx.resolveBuffer = [&physicalBuffers](BufferHandle handle) -> VkBuffer {
+            if (handle.index < physicalBuffers.size() && physicalBuffers[handle.index].resolved) {
+                return physicalBuffers[handle.index].buffer;
+            }
+            return VK_NULL_HANDLE;
         };
 
         DrawStats passDrawStats;

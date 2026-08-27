@@ -113,6 +113,22 @@ ResourceState RequiredStateFor(ResourceAccess access, bool isDepthResource) noex
 // only ever consult this for a ResourceKind::Texture usage.
 bool TargetsDepthState(ResourceAccess access) noexcept;
 
+// Pure decision: does `access`, when declared as a texture WRITE, mark a
+// pass as needing a real vkCmdBeginRendering COLOR ATTACHMENT bracket in
+// RenderGraph::Execute()? True only for ColorAttachmentWrite - every other
+// ResourceAccess value (including the compute-shader storage-image kinds,
+// ComputeShaderRead/ComputeShaderWrite) must NOT trigger one. Extracted
+// here, alongside TargetsDepthState() above, for the exact same reason:
+// this decision used to live inline inside RenderGraph.cpp's
+// ExecuteCompiledGraph() (`usage.access == ResourceAccess::ColorAttachmentWrite`),
+// which needs a live VkDevice to exercise at all. Phase 6 of the
+// compute-shader campaign (COMPUTE_PHASE6_RENDERGRAPH_INTEGRATION_STRATEGY_v2.md)
+// explicitly calls for this exclusion to be VERIFIED, not merely assumed,
+// once a pass can declare a pure compute write via
+// RenderGraphBuilder::PassBuilder::WriteTexture() - see
+// tests/Renderer/RenderGraph/RenderGraphBarrierPlannerTests.cpp.
+bool IsColorAttachmentWriteAccess(ResourceAccess access) noexcept;
+
 // Pure decision: is a barrier even NEEDED to transition a resource from
 // `previous` to `next`? A resource read by two consecutive ShaderRead
 // passes with an IDENTICAL layout/stage/access needs no barrier at all

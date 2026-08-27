@@ -101,6 +101,17 @@ bool TargetsDepthState(ResourceAccess access) noexcept
     return access == ResourceAccess::DepthStencilAttachmentReadWrite;
 }
 
+bool IsColorAttachmentWriteAccess(ResourceAccess access) noexcept
+{
+    // ColorAttachmentWrite is the ONE ResourceAccess value that marks a
+    // pass as needing a real vkCmdBeginRendering COLOR attachment bracket
+    // in RenderGraph::Execute() - everything else (including the Phase 5
+    // compute-shader additions, ComputeShaderRead/ComputeShaderWrite, used
+    // by Phase 6 of the compute-shader campaign's WriteTexture()) must
+    // never trigger one. See this function's own doc comment.
+    return access == ResourceAccess::ColorAttachmentWrite;
+}
+
 bool RequiresBarrier(const ResourceState& previous, const ResourceState& next) noexcept
 {
     return !(previous == next);

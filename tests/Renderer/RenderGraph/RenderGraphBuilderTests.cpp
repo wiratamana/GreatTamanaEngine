@@ -300,6 +300,90 @@ TEST(RenderGraphBuilderTest, WriteDepthStencilAttachmentWithClearDepthRecordsItO
     EXPECT_FLOAT_EQ(*input.passes[0].depthClearValue, 1.0f);
 }
 
+// --- WriteTexture() (Phase 6 of the compute-shader campaign) ---------------
+
+TEST(RenderGraphBuilderTest, PassBuilderWriteTextureDefaultsToComputeShaderWrite)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle handle = builder.CreateTexture("Output", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+
+    builder.AddPass(
+        "ComputeWritePass",
+        [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteTexture(handle); },
+        NoOpExecute);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes[0].writes.size(), 1u);
+    EXPECT_EQ(input.passes[0].writes[0].kind, ResourceKind::Texture);
+    EXPECT_EQ(input.passes[0].writes[0].texture, handle);
+    EXPECT_EQ(input.passes[0].writes[0].access, ResourceAccess::ComputeShaderWrite);
+}
+
+TEST(RenderGraphBuilderTest, PassBuilderWriteTextureAppendsWithGivenAccess)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle handle = builder.CreateTexture("Output", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+
+    builder.AddPass(
+        "ComputeWritePass",
+        [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteTexture(handle, ResourceAccess::TransferDst); },
+        NoOpExecute);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes[0].writes.size(), 1u);
+    EXPECT_EQ(input.passes[0].writes[0].access, ResourceAccess::TransferDst);
+}
+
+// A read-modify-write RWTexture declares BOTH a ReadTexture(ComputeShaderRead)
+// AND a WriteTexture(ComputeShaderWrite) usage on the SAME handle - mirroring
+// ReadBuffer()/WriteBuffer()'s own existing two-calls-combined convention.
+TEST(RenderGraphBuilderTest, PassBuilderCanDeclareBothReadAndWriteOfSameTextureForReadModifyWrite)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle handle = builder.CreateTexture("Scratch", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+
+    builder.AddPass(
+        "ReadModifyWritePass",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.ReadTexture(handle, ResourceAccess::ComputeShaderRead);
+            pass.WriteTexture(handle, ResourceAccess::ComputeShaderWrite);
+        },
+        NoOpExecute);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes[0].reads.size(), 1u);
+    ASSERT_EQ(input.passes[0].writes.size(), 1u);
+    EXPECT_EQ(input.passes[0].reads[0].texture, handle);
+    EXPECT_EQ(input.passes[0].reads[0].access, ResourceAccess::ComputeShaderRead);
+    EXPECT_EQ(input.passes[0].writes[0].texture, handle);
+    EXPECT_EQ(input.passes[0].writes[0].access, ResourceAccess::ComputeShaderWrite);
+}
+
+// --- AddComputePass() - a thin, purely cosmetic alias of AddPass() ---------
+
+TEST(RenderGraphBuilderTest, AddComputePassBehavesIdenticallyToAddPass)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle handle = builder.CreateTexture("Output", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+    int setupCallCount = 0;
+
+    builder.AddComputePass(
+        "ComputePass",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            ++setupCallCount;
+            pass.WriteTexture(handle);
+        },
+        NoOpExecute);
+
+    EXPECT_EQ(setupCallCount, 1);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes.size(), 1u);
+    EXPECT_STREQ(input.passes[0].name, "ComputePass");
+    ASSERT_EQ(input.passes[0].writes.size(), 1u);
+    EXPECT_EQ(input.passes[0].writes[0].access, ResourceAccess::ComputeShaderWrite);
+}
+
 
 TEST(RenderGraphBuilderTest, PassBuilderReadBufferAppendsWithGivenAccess)
 {

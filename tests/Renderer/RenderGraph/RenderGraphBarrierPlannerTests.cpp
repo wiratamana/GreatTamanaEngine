@@ -155,6 +155,27 @@ TEST(RenderGraphBarrierPlannerTest, TargetsDepthStateIsTrueOnlyForDepthStencilAt
     EXPECT_FALSE(TargetsDepthState(ResourceAccess::IndirectCommandRead));
 }
 
+// --- IsColorAttachmentWriteAccess() - one case per enumerator --------------
+//
+// Phase 6 of the compute-shader campaign
+// (COMPUTE_PHASE6_RENDERGRAPH_INTEGRATION_STRATEGY_v2.md) - confirms,
+// directly, that a pure compute-shader texture write
+// (PassBuilder::WriteTexture(handle, ComputeShaderWrite)) is correctly
+// EXCLUDED from RenderGraph::Execute()'s hasColorWrite scan, so a
+// compute-only pass never gets a vkCmdBeginRendering bracket at all.
+
+TEST(RenderGraphBarrierPlannerTest, IsColorAttachmentWriteAccessIsTrueOnlyForColorAttachmentWrite)
+{
+    EXPECT_TRUE(IsColorAttachmentWriteAccess(ResourceAccess::ColorAttachmentWrite));
+    EXPECT_FALSE(IsColorAttachmentWriteAccess(ResourceAccess::DepthStencilAttachmentReadWrite));
+    EXPECT_FALSE(IsColorAttachmentWriteAccess(ResourceAccess::ShaderRead));
+    EXPECT_FALSE(IsColorAttachmentWriteAccess(ResourceAccess::TransferSrc));
+    EXPECT_FALSE(IsColorAttachmentWriteAccess(ResourceAccess::TransferDst));
+    EXPECT_FALSE(IsColorAttachmentWriteAccess(ResourceAccess::ComputeShaderRead));
+    EXPECT_FALSE(IsColorAttachmentWriteAccess(ResourceAccess::ComputeShaderWrite));
+    EXPECT_FALSE(IsColorAttachmentWriteAccess(ResourceAccess::IndirectCommandRead));
+}
+
 // --- Texture-side hand-simulated sequence: ComputeShaderWrite (an ---------
 // --- RWTexture) -> ShaderRead (the same texture, sampled normally by a ----
 // --- later graphics pass) --------------------------------------------------
