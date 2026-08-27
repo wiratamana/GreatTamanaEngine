@@ -2,10 +2,10 @@
 
 #include "MeshVertex.h"
 #include "Vertex.h"
+#include "Vulkan/ShaderModule.h"
 
 #include <array>
 #include <cstdint>
-#include <fstream>
 #include <iterator>
 #include <stdexcept>
 #include <utility>
@@ -14,35 +14,6 @@
 namespace gte {
 
 namespace {
-
-std::vector<char> ReadFile(const std::string& path)
-{
-    std::ifstream file(path, std::ios::ate | std::ios::binary);
-    if (!file.is_open()) {
-        throw std::runtime_error(
-            "Pipeline: failed to open shader file '" + path + "' - was it compiled? See cmake/CompileShaders.cmake.");
-    }
-
-    const std::size_t size = static_cast<std::size_t>(file.tellg());
-    std::vector<char> buffer(size);
-    file.seekg(0);
-    file.read(buffer.data(), static_cast<std::streamsize>(size));
-    return buffer;
-}
-
-VkShaderModule CreateShaderModule(VkDevice device, const std::vector<char>& spirv)
-{
-    VkShaderModuleCreateInfo createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    createInfo.codeSize = spirv.size();
-    createInfo.pCode = reinterpret_cast<const std::uint32_t*>(spirv.data());
-
-    VkShaderModule module = VK_NULL_HANDLE;
-    if (vkCreateShaderModule(device, &createInfo, nullptr, &module) != VK_SUCCESS) {
-        throw std::runtime_error("Pipeline: vkCreateShaderModule failed.");
-    }
-    return module;
-}
 
 // True for a combined depth+stencil format - see VulkanDevice::
 // PickDepthFormat() (which always prefers a depth-only format when the
@@ -60,17 +31,17 @@ Pipeline::Pipeline(VkDevice device, VkFormat colorFormat, VkFormat depthFormat, 
     const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout, VkDescriptorSetLayout materialSetLayout)
     : m_device(device)
 {
-    const std::vector<char> vertSpirv = ReadFile(vertexShaderSpirvPath);
-    const std::vector<char> fragSpirv = ReadFile(fragmentShaderSpirvPath);
-
     // Shader modules are only needed transiently, to build the VkPipeline
     // below - both are destroyed before this constructor returns (success
     // or failure), regardless of what vkCreateGraphicsPipelines does with
-    // them.
-    VkShaderModule vertModule = CreateShaderModule(device, vertSpirv);
+    // them. LoadShaderModule() (Vulkan/ShaderModule.h) is the one shared
+    // "read SPIR-V bytes off disk -> vkCreateShaderModule" primitive both
+    // this graphics pipeline and ComputePipeline (see ComputePipeline.h)
+    // build their own pipelines from.
+    VkShaderModule vertModule = LoadShaderModule(device, vertexShaderSpirvPath);
     VkShaderModule fragModule = VK_NULL_HANDLE;
     try {
-        fragModule = CreateShaderModule(device, fragSpirv);
+        fragModule = LoadShaderModule(device, fragmentShaderSpirvPath);
     } catch (...) {
         vkDestroyShaderModule(device, vertModule, nullptr);
         throw;

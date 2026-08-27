@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Buffer.h"
+#include "ComputePipeline.h"
 #include "MaterialTexture.h"
 #include "Memory/GpuMemoryTracker.h"
 #include "Mesh.h"
@@ -12,6 +13,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -108,6 +110,18 @@ public:
     Pipeline CreatePipeline(VkFormat colorFormat, const std::string& vertexShaderSpirvPath,
         const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor,
         bool useMaterialTexture = false) const;
+
+    // See Renderer::CreateComputePipeline() (Phase 2 -
+    // COMPUTE_PHASE2_PIPELINE_INFRASTRUCTURE_STRATEGY_v1.md). Builds a
+    // ComputePipeline from a single compiled .comp SPIR-V binary -
+    // `descriptorSetLayouts`/`pushConstantRange` are forwarded verbatim to
+    // ComputePipeline's own constructor (see ComputePipeline.h for the full
+    // reasoning behind both). Unlike CreatePipeline() above, this needs no
+    // color/depth format at all - a compute pipeline has no
+    // VkPipelineRenderingCreateInfo/render target of its own.
+    ComputePipeline CreateComputePipeline(const std::string& shaderSpirvPath,
+        const std::vector<VkDescriptorSetLayout>& descriptorSetLayouts = {},
+        std::optional<VkPushConstantRange> pushConstantRange = std::nullopt) const;
 
     // See Renderer::CreateMesh() (non-indexed overload).
     Mesh CreateMesh(const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount,

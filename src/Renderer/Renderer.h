@@ -354,6 +354,23 @@ public:
     Pipeline CreatePipeline(const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath,
         VertexLayout vertexLayout = VertexLayout::PositionColor, bool useMaterialTexture = false) const;
 
+    // Factory for compute pipelines (Phase 2 -
+    // COMPUTE_PHASE2_PIPELINE_INFRASTRUCTURE_STRATEGY_v1.md) - so callers
+    // never need direct access to the VkDevice this Renderer owns
+    // internally, mirroring CreatePipeline() above but for
+    // VK_PIPELINE_BIND_POINT_COMPUTE. `shaderSpirvPath` points at a
+    // compiled .comp SPIR-V binary (see cmake/CompileShaders.cmake).
+    // `descriptorSetLayouts`/`pushConstantRange` are forwarded straight to
+    // ComputePipeline's own constructor - see ComputePipeline.h for the
+    // full reasoning behind both (in particular why this takes a plural
+    // list of set layouts, unlike CreatePipeline()'s single optional
+    // `materialSetLayout`, and why the push-constant layout is a plain,
+    // per-shader-documented convention rather than this engine's fixed
+    // 128-byte graphics one).
+    ComputePipeline CreateComputePipeline(const std::string& shaderSpirvPath,
+        const std::vector<VkDescriptorSetLayout>& descriptorSetLayouts = {},
+        std::optional<VkPushConstantRange> pushConstantRange = std::nullopt) const;
+
     // Factory for meshes: a vertex buffer + vertex count, NO index buffer -
     // see Mesh.h's non-indexed constructor. So callers never need direct
     // access to the VmaAllocator this Renderer owns internally. vertexData/

@@ -222,6 +222,13 @@ Pipeline Renderer::CreatePipeline(const std::string& vertexShaderSpirvPath,
         ColorFormat(), vertexShaderSpirvPath, fragmentShaderSpirvPath, vertexLayout, useMaterialTexture);
 }
 
+ComputePipeline Renderer::CreateComputePipeline(const std::string& shaderSpirvPath,
+    const std::vector<VkDescriptorSetLayout>& descriptorSetLayouts,
+    std::optional<VkPushConstantRange> pushConstantRange) const
+{
+    return m_resources.CreateComputePipeline(shaderSpirvPath, descriptorSetLayouts, pushConstantRange);
+}
+
 Mesh Renderer::CreateMesh(
     const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount, const char* debugName) const
 {

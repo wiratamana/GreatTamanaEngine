@@ -237,6 +237,13 @@ Pipeline GpuResourceFactory::CreatePipeline(VkFormat colorFormat, const std::str
         materialSetLayout);
 }
 
+ComputePipeline GpuResourceFactory::CreateComputePipeline(const std::string& shaderSpirvPath,
+    const std::vector<VkDescriptorSetLayout>& descriptorSetLayouts,
+    std::optional<VkPushConstantRange> pushConstantRange) const
+{
+    return ComputePipeline(m_device, shaderSpirvPath, descriptorSetLayouts, pushConstantRange);
+}
+
 Mesh GpuResourceFactory::CreateMesh(
     const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount, const char* debugName) const
 {
