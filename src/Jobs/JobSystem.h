@@ -6,12 +6,14 @@
 #include "JobQueue.h"
 
 #include <condition_variable>
+#endif
+
+#include <atomic>
+#include <cstddef>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <vector>
-#endif
-
-#include <cstddef>
 
 namespace gte::Jobs {
 
@@ -95,9 +97,59 @@ public:
     // WorkerCount() batches) can always safely divide work by, never zero.
     std::size_t WorkerCount() const noexcept;
 
+    // HOTFIX 2 (see task_manager/job_system/JOBSYSTEM_HOTFIX_CODE_REVIEW_FINDINGS.md,
+    // item 2, and JOB_SYSTEM_HOTFIX2_COMPLETION_REPORT.md): registers a
+    // background thread that is NOT part of the worker pool above - today,
+    // exclusively the Phase 3 polling-fallback thread
+    // (JobContinuation.cpp's WatchDependencyWithFallback(), spawned once a
+    // single dependency handle already has detail::kMaxWatchersPerHandle
+    // other continuations registered against it) - so JobSystem's own
+    // destructor can JOIN it before this singleton finishes destructing,
+    // rather than leaving it fully detached with zero lifecycle tie to
+    // JobSystem at all (previously a real static-destruction-order hazard:
+    // a still-spinning detached thread could call JobSystem::Instance()
+    // during/after the Meyers singleton's own static destruction).
+    //
+    // `thread` is moved into an internal registry; `completionFlag` MUST be
+    // set to `true` (via `std::memory_order_release`) by `thread`'s own
+    // function, right before it returns - this is what lets a later call to
+    // RegisterBackgroundThread() opportunistically join/discard already-
+    // finished entries first, so this registry does not grow completely
+    // unbounded across a long-running process even though nothing else ever
+    // proactively prunes it. Safe to call from any thread, at any time.
+    //
+    // If this is called AFTER JobSystem's own destructor has already begun
+    // tearing down (IsShuttingDown() already true) - a narrow, expected-rare
+    // window, since JoinAllBackgroundThreads() may already have collected
+    // the registry by then - `thread` is joined synchronously, right here,
+    // instead of being stored, so it is never silently dropped from an
+    // already-collected registry.
+    void RegisterBackgroundThread(std::thread thread, std::shared_ptr<std::atomic<bool>> completionFlag);
+
+    // True once JobSystem's destructor has begun tearing down this
+    // instance. A background thread registered via RegisterBackgroundThread()
+    // above (e.g. the Phase 3 polling fallback) MUST check this on every
+    // iteration of its own poll loop and bail out immediately - WITHOUT
+    // calling back into JobSystem::Instance() again for anything else - the
+    // moment it observes this as true, so JobSystem's destructor can
+    // actually finish joining it (see JoinAllBackgroundThreads()) instead of
+    // either hanging forever (if the thread ignored this and its own
+    // dependency never clears) or risking a static-destruction-order hazard
+    // (if the thread kept calling back into JobSystem::Instance() with no
+    // bound at all).
+    bool IsShuttingDown() const noexcept;
+
 private:
     JobSystem();
     ~JobSystem();
+
+    // Common to both the GTE_ENABLE_JOB_SYSTEM=ON and =OFF configurations -
+    // background fallback threads (see RegisterBackgroundThread() above) can
+    // be spawned by JobContinuation.cpp regardless of that switch (the
+    // overflow condition that spawns one has nothing to do with whether a
+    // real worker-thread pool exists), so this must always be defined, and
+    // both destructor bodies below must always call it.
+    void JoinAllBackgroundThreads();
 
 #if GTE_ENABLE_JOB_SYSTEM
     void WorkerLoop();
@@ -117,6 +169,20 @@ private:
     detail::JobQueue m_queue;
     std::vector<std::thread> m_workers;
 #endif
+
+    // HOTFIX 2: background-thread registry (see RegisterBackgroundThread()/
+    // IsShuttingDown()/JoinAllBackgroundThreads() above) - deliberately
+    // defined unconditionally, not inside the #if block above, since a
+    // background fallback thread can exist regardless of
+    // GTE_ENABLE_JOB_SYSTEM.
+    struct BackgroundThreadEntry {
+        std::thread thread;
+        std::shared_ptr<std::atomic<bool>> completionFlag;
+    };
+
+    std::atomic<bool> m_shuttingDown{ false };
+    std::mutex m_backgroundThreadsMutex;
+    std::vector<BackgroundThreadEntry> m_backgroundThreads;
 };
 
 } // namespace gte::Jobs

@@ -32,6 +32,77 @@ JobSystem& JobSystem::Instance()
     return instance;
 }
 
+// --- HOTFIX 2: background-thread registry (see JobSystem.h's own comments
+// on RegisterBackgroundThread()/IsShuttingDown()/JoinAllBackgroundThreads())
+// -----------------------------------------------------------------------
+// Deliberately common to BOTH the GTE_ENABLE_JOB_SYSTEM=ON and =OFF
+// configurations (defined here, outside either #if branch below) - a
+// background fallback thread (JobContinuation.cpp's
+// WatchDependencyWithFallback()) can be spawned regardless of that switch,
+// since the overflow condition that triggers it (a dependency handle
+// already having detail::kMaxWatchersPerHandle OTHER continuations
+// registered against it) has nothing to do with whether a real worker-
+// thread pool exists.
+
+void JobSystem::RegisterBackgroundThread(std::thread thread, std::shared_ptr<std::atomic<bool>> completionFlag)
+{
+    if (m_shuttingDown.load(std::memory_order_acquire)) {
+        // Too late to register normally - JoinAllBackgroundThreads() may
+        // already have collected (and be joining) the registry by the time
+        // this call happens. Join synchronously, right here, so `thread` is
+        // never silently dropped from an already-collected registry -
+        // see this method's own header comment.
+        if (thread.joinable()) {
+            thread.join();
+        }
+        if (completionFlag) {
+            completionFlag->store(true, std::memory_order_release);
+        }
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(m_backgroundThreadsMutex);
+
+    // Opportunistically join/discard any previously-registered thread that
+    // has already finished (its own completionFlag set to true right before
+    // it returned) before appending the new one - keeps this registry from
+    // growing completely unbounded across a long-running process, without
+    // requiring anything to proactively prune it the instant a thread
+    // finishes.
+    for (std::size_t i = 0; i < m_backgroundThreads.size();) {
+        BackgroundThreadEntry& entry = m_backgroundThreads[i];
+        if (entry.completionFlag && entry.completionFlag->load(std::memory_order_acquire)) {
+            if (entry.thread.joinable()) {
+                entry.thread.join();
+            }
+            m_backgroundThreads.erase(m_backgroundThreads.begin() + static_cast<std::ptrdiff_t>(i));
+        } else {
+            ++i;
+        }
+    }
+
+    m_backgroundThreads.push_back(BackgroundThreadEntry{ std::move(thread), std::move(completionFlag) });
+}
+
+bool JobSystem::IsShuttingDown() const noexcept
+{
+    return m_shuttingDown.load(std::memory_order_acquire);
+}
+
+void JobSystem::JoinAllBackgroundThreads()
+{
+    std::vector<BackgroundThreadEntry> backgroundThreads;
+    {
+        std::lock_guard<std::mutex> lock(m_backgroundThreadsMutex);
+        backgroundThreads = std::move(m_backgroundThreads);
+    }
+    for (BackgroundThreadEntry& entry : backgroundThreads) {
+        if (entry.thread.joinable()) {
+            entry.thread.join();
+        }
+    }
+}
+
 #if GTE_ENABLE_JOB_SYSTEM
 
 JobSystem::JobSystem()
@@ -52,6 +123,13 @@ JobSystem::JobSystem()
 
 JobSystem::~JobSystem()
 {
+    // HOTFIX 2: mark shutdown BEFORE tearing down anything else, so any
+    // background fallback thread (see RegisterBackgroundThread()) that
+    // wakes up mid-teardown observes it (via IsShuttingDown()) and bails
+    // out immediately, without calling back into JobSystem::Instance()
+    // again - see JobContinuation.cpp's RunPollingFallbackJob().
+    m_shuttingDown.store(true, std::memory_order_release);
+
     // Ask every worker to exit its WaitAndPop() loop, then join all of
     // them - RAII-clean shutdown, no explicit "please remember to call
     // Shutdown()" step required anywhere else in the engine (this runs
@@ -63,6 +141,15 @@ JobSystem::~JobSystem()
             worker.join();
         }
     }
+
+    // HOTFIX 2: join every still-registered background fallback thread
+    // too - previously these were fully detached, with zero lifecycle tie
+    // to JobSystem at all, which meant a still-spinning one could call
+    // JobSystem::Instance() during/after this singleton's own static
+    // destruction (a real crash/UB hazard). By the time this call returns,
+    // every background thread ever registered against this instance is
+    // guaranteed to have already exited.
+    JoinAllBackgroundThreads();
 }
 
 void JobSystem::WorkerLoop()
@@ -146,7 +233,10 @@ void JobSystem::Schedule(JobFunction fn, void* payload, JobHandle& handle)
 
     // Documented, graceful full-queue fallback (see JobQueue.h's own
     // comment) - run the job immediately, right here, on the calling
-    // thread, rather than blocking Schedule() or dropping the job.
+    // thread, rather than blocking Schedule() or dropping the job. This is
+    // also the path a late Schedule()/ScheduleAlreadyPending() call takes
+    // once JobQueue::TryPush() starts rejecting pushes after Shutdown()
+    // (HOTFIX 2) - see JobQueue.cpp's own comment.
     fn(payload);
     std::uint32_t previousPending;
     {
@@ -202,7 +292,17 @@ std::size_t JobSystem::WorkerCount() const noexcept
 #else // !GTE_ENABLE_JOB_SYSTEM
 
 JobSystem::JobSystem() = default;
-JobSystem::~JobSystem() = default;
+
+JobSystem::~JobSystem()
+{
+    // See the GTE_ENABLE_JOB_SYSTEM=ON destructor above for the full
+    // rationale - a background fallback thread can exist in THIS
+    // configuration too (JobContinuation.cpp's overflow fallback has
+    // nothing to do with GTE_ENABLE_JOB_SYSTEM), so the exact same HOTFIX 2
+    // shutdown-then-join sequence is required here as well.
+    m_shuttingDown.store(true, std::memory_order_release);
+    JoinAllBackgroundThreads();
+}
 
 void JobSystem::Schedule(JobFunction fn, void* payload, JobHandle& handle)
 {

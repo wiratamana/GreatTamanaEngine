@@ -12,6 +12,15 @@ JobQueue::JobQueue(std::size_t capacity)
 bool JobQueue::TryPush(JobEntry entry)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_shuttingDown) {
+        // HOTFIX 2 (see JobQueue.h's own TryPush() comment): reject any
+        // push once Shutdown() has been called, rather than silently
+        // accepting it into a queue whose workers may already be exiting/
+        // exited their WaitAndPop() loop - the caller's own graceful
+        // fallback (JobSystem::Schedule()'s inline-run path) handles this
+        // exactly like a full queue.
+        return false;
+    }
     if (m_count == m_slots.size()) {
         return false; // Full - caller (JobSystem::Schedule()) handles the fallback.
     }

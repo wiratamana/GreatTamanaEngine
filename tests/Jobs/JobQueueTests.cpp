@@ -110,5 +110,23 @@ TEST(JobQueueTests, ShutdownStillDrainsAlreadyQueuedEntriesFirst)
     EXPECT_FALSE(queue.WaitAndPop(outAfter));
 }
 
+// HOTFIX 2 regression test - see
+// task_manager/job_system/JOBSYSTEM_HOTFIX_CODE_REVIEW_FINDINGS.md, item 2:
+// TryPush() previously never checked m_shuttingDown at all, so a push
+// arriving after Shutdown() had already been called could still succeed
+// even though the queue's own workers may have already exited their
+// WaitAndPop() loop and been joined - silently stranding that job forever.
+// TryPush() must now reject a push once Shutdown() has been called, even
+// when the queue still has free capacity (never merely a "full queue"
+// check).
+TEST(JobQueueTests, TryPushFailsAfterShutdownEvenWhenNotFull)
+{
+    JobQueue queue(4); // Plenty of free capacity - proves this is NOT a full-queue rejection.
+    queue.Shutdown();
+
+    int a = 0;
+    EXPECT_FALSE(queue.TryPush(JobEntry{ &NoOpJobFunction, &a, nullptr }));
+}
+
 } // namespace
 } // namespace gte::Jobs::detail

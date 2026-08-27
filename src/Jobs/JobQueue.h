@@ -49,10 +49,17 @@ public:
     JobQueue& operator=(JobQueue&&) = delete;
 
     // Attempts to enqueue `entry`. Returns false without modifying the
-    // queue at all if it is currently at full capacity - the caller is
-    // responsible for a graceful fallback in that case (see this class's
-    // own comment above); TryPush() itself never blocks, grows, or drops
-    // silently.
+    // queue at all if it is currently at full capacity, OR if Shutdown()
+    // has already been called (HOTFIX 2 - see
+    // task_manager/job_system/JOBSYSTEM_HOTFIX_CODE_REVIEW_FINDINGS.md,
+    // item 2: previously a push could succeed after Shutdown() was called,
+    // silently stranding a job that no worker would ever pop, since workers
+    // may have already exited their WaitAndPop() loop and been joined by
+    // the time such a late push arrived) - the caller is responsible for a
+    // graceful fallback in either case (see this class's own comment
+    // above, and JobSystem::Schedule()'s full-queue fallback, which this
+    // now also doubles as the "queue is shutting down" fallback for);
+    // TryPush() itself never blocks, grows, or drops silently.
     bool TryPush(JobEntry entry);
 
     // Blocks the calling (worker) thread until either a job is available
@@ -64,7 +71,10 @@ public:
     // Wakes every thread currently blocked in WaitAndPop() so each can
     // observe the shutdown request and return false. Called exactly once,
     // from JobSystem's destructor, before joining every worker thread.
-    // Idempotent - safe to call more than once.
+    // Idempotent - safe to call more than once. Once called, every FUTURE
+    // TryPush() call also starts returning false (see TryPush()'s own
+    // comment) - an entry already queued before this call is still handed
+    // out normally by WaitAndPop() first, per that method's own contract.
     void Shutdown();
 
 private:

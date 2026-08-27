@@ -3,6 +3,7 @@
 #include "JobSystem.h"
 
 #include <atomic>
+#include <memory>
 #include <thread>
 #include <vector>
 
@@ -66,21 +67,60 @@ void OnDependencyCleared(void* rawContinuation)
 // still be genuinely pending after AddCompletionWatcher() already found
 // kMaxWatchersPerHandle other still-pending watchers ahead of it), a
 // synchronous Schedule() call here would spin forever on the calling
-// thread instead of yielding it back. A dedicated, detached thread makes
-// this fallback's own "costs a background thread" contract true
-// unconditionally, regardless of GTE_ENABLE_JOB_SYSTEM.
+// thread instead of yielding it back. A dedicated thread makes this
+// fallback's own "costs a background thread" contract true unconditionally,
+// regardless of GTE_ENABLE_JOB_SYSTEM.
+//
+// HOTFIX 2 (see task_manager/job_system/JOBSYSTEM_HOTFIX_CODE_REVIEW_FINDINGS.md,
+// item 2, and JOB_SYSTEM_HOTFIX2_COMPLETION_REPORT.md): this thread is no
+// longer detached with zero lifecycle tie to JobSystem at all - it is
+// registered with JobSystem::Instance().RegisterBackgroundThread() (see
+// WatchDependencyWithFallback() below) so JobSystem's own destructor can
+// join it before the process's static-destruction phase, and it now checks
+// JobSystem::Instance().IsShuttingDown() on every loop iteration, bailing
+// out immediately (WITHOUT calling OnDependencyCleared()/JobSystem::Instance()
+// again afterward) the moment that becomes true - closing the previous
+// static-destruction-order hazard (a still-spinning detached thread calling
+// JobSystem::Instance() during/after the Meyers singleton's own static
+// destruction) without introducing a NEW hazard of its own (the destructor's
+// join() hanging forever on a dependency that never clears, e.g. an
+// abandoned dependency - see item 6 of the same findings document for that
+// general, still-open limitation).
 struct PollingFallbackContext {
     JobHandle dependency; // copy - independent of the caller's own dependency pointer's lifetime.
     PendingContinuation* continuation;
+    std::shared_ptr<std::atomic<bool>> completionFlag; // set true right before this thread's function returns.
 };
 
 void RunPollingFallbackJob(void* rawContext)
 {
     PollingFallbackContext* context = static_cast<PollingFallbackContext*>(rawContext);
-    while (!context->dependency.IsComplete()) {
+
+    bool dependencyCleared = false;
+    for (;;) {
+        if (JobSystem::Instance().IsShuttingDown()) {
+            // HOTFIX 2: bail out immediately - never call
+            // OnDependencyCleared()/JobSystem::Instance() again past this
+            // point. The PendingContinuation this abandons (if the
+            // dependency genuinely never cleared) is intentionally leaked
+            // here - the process is exiting; see item 6 of
+            // JOBSYSTEM_HOTFIX_CODE_REVIEW_FINDINGS.md for the general
+            // "no cancellation path for abandoned continuations"
+            // limitation this shares.
+            break;
+        }
+        if (context->dependency.IsComplete()) {
+            dependencyCleared = true;
+            break;
+        }
         std::this_thread::yield();
     }
-    OnDependencyCleared(context->continuation);
+
+    if (dependencyCleared) {
+        OnDependencyCleared(context->continuation);
+    }
+
+    context->completionFlag->store(true, std::memory_order_release);
     delete context;
 }
 
@@ -94,14 +134,16 @@ void WatchDependencyWithFallback(JobHandle& dependency, PendingContinuation* con
         return; // Registered directly (or already complete and fired immediately) - the common case.
     }
 
-    // Overflow - fall back to a dedicated, detached polling thread (see this
+    // Overflow - fall back to a dedicated polling thread (see this
     // function's own header comment above for why this must be a raw
-    // std::thread, never JobSystem::Schedule()). Detached: nothing ever
-    // waits on the polling thread itself, only on `continuation->handle`,
-    // which OnDependencyCleared()/ScheduleAlreadyPending() resolve
-    // independently once every real dependency has cleared.
-    auto* pollContext = new PollingFallbackContext{ dependency, continuation };
-    std::thread(&RunPollingFallbackJob, pollContext).detach();
+    // std::thread, never JobSystem::Schedule()). HOTFIX 2: no longer
+    // detached - registered with JobSystem so its destructor can join it
+    // (see RunPollingFallbackJob()'s own comment, and JobSystem.h's
+    // RegisterBackgroundThread()/IsShuttingDown()).
+    auto completionFlag = std::make_shared<std::atomic<bool>>(false);
+    auto* pollContext = new PollingFallbackContext{ dependency, continuation, completionFlag };
+    std::thread pollingThread(&RunPollingFallbackJob, pollContext);
+    JobSystem::Instance().RegisterBackgroundThread(std::move(pollingThread), std::move(completionFlag));
 }
 
 } // namespace

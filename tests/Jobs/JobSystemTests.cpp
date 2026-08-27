@@ -10,13 +10,25 @@
 // configuration) is reused by every other test in this binary. Nothing
 // here depends on a pristine/first-use baseline, since every test only
 // ever asserts on the OUTCOME of its own Schedule()/WaitForJobs() calls,
-// never on some assumed-empty starting state.
+// never on some assumed-empty starting state. This also means the real
+// singleton is NEVER actually destructed during a normal test run (it has
+// process lifetime) - so HOTFIX 2's join-on-destruction behavior itself
+// (see JOB_SYSTEM_HOTFIX2_COMPLETION_REPORT.md) is exercised here only
+// insofar as RegisterBackgroundThread()/IsShuttingDown() behave correctly
+// DURING normal (non-shutdown) operation; the destructor's own join
+// sequence was verified manually (a real process exit while a polling
+// fallback thread was still registered) rather than via an automated test,
+// since nothing can force this particular Meyers singleton to destruct
+// early without tearing down the whole test binary.
 #include "Jobs/JobSystem.h"
 
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
+#include <memory>
+#include <thread>
 #include <vector>
 
 namespace gte::Jobs {
@@ -135,6 +147,88 @@ TEST(JobSystemTests, TwoIndependentHandlesEachOnlyWaitForTheirOwnJobs)
     JobSystem::Instance().WaitForJobs(handleB);
     EXPECT_TRUE(handleB.IsComplete());
     EXPECT_TRUE(ranB.load(std::memory_order_acquire));
+}
+
+// HOTFIX 2 regression coverage - see
+// task_manager/job_system/JOBSYSTEM_HOTFIX_CODE_REVIEW_FINDINGS.md, item 2,
+// and JOB_SYSTEM_HOTFIX2_COMPLETION_REPORT.md.
+
+TEST(JobSystemTests, IsShuttingDownIsFalseDuringNormalOperation)
+{
+    // The real singleton is alive and well for the entire test binary's
+    // run (see this file's own header comment) - IsShuttingDown() must
+    // never report true outside of JobSystem's own destructor.
+    EXPECT_FALSE(JobSystem::Instance().IsShuttingDown());
+}
+
+TEST(JobSystemTests, RegisterBackgroundThreadLetsARealThreadRunToCompletion)
+{
+    // Proves RegisterBackgroundThread() genuinely hands off a live,
+    // running std::thread rather than blocking the caller or the thread
+    // itself - a background fallback thread (JobContinuation.cpp's
+    // WatchDependencyWithFallback()) must keep running normally after
+    // being registered.
+    auto completionFlag = std::make_shared<std::atomic<bool>>(false);
+    std::atomic<bool> threadBodyRan{ false };
+
+    std::thread backgroundThread([&threadBodyRan, completionFlag]() {
+        threadBodyRan.store(true, std::memory_order_release);
+        completionFlag->store(true, std::memory_order_release);
+    });
+    JobSystem::Instance().RegisterBackgroundThread(std::move(backgroundThread), completionFlag);
+
+    // Bounded poll (never an unconditional/indefinite block) for the
+    // thread to actually finish and flip its completion flag.
+    bool completed = false;
+    for (int i = 0; i < 500 && !completed; ++i) {
+        completed = completionFlag->load(std::memory_order_acquire);
+        if (!completed) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+
+    EXPECT_TRUE(completed) << "RegisterBackgroundThread()'s thread never completed";
+    EXPECT_TRUE(threadBodyRan.load(std::memory_order_acquire));
+}
+
+TEST(JobSystemTests, RegisterBackgroundThreadPrunesAlreadyFinishedEntriesOnNextCall)
+{
+    // Registers a quick-finishing thread and waits for it to signal
+    // completion via its own flag, then registers a SECOND thread - that
+    // second RegisterBackgroundThread() call's own opportunistic pruning
+    // pass (see its header comment) should join/discard the first,
+    // already-finished entry before appending the new one, rather than
+    // letting the registry grow completely unbounded. Nothing here can
+    // directly observe the registry's internal size, so this test's real
+    // assertion is simply that back-to-back registration/pruning never
+    // hangs or crashes, and that both threads are still given the chance
+    // to run to completion correctly.
+    auto firstFlag = std::make_shared<std::atomic<bool>>(false);
+    std::thread first([firstFlag]() { firstFlag->store(true, std::memory_order_release); });
+    JobSystem::Instance().RegisterBackgroundThread(std::move(first), firstFlag);
+
+    for (int i = 0; i < 500 && !firstFlag->load(std::memory_order_acquire); ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    ASSERT_TRUE(firstFlag->load(std::memory_order_acquire));
+
+    // A brief grace period so the first thread's own OS-level function has
+    // actually returned (its flag is set right before that, not after) by
+    // the time the second registration call below attempts to join it.
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+
+    auto secondFlag = std::make_shared<std::atomic<bool>>(false);
+    std::thread second([secondFlag]() { secondFlag->store(true, std::memory_order_release); });
+    JobSystem::Instance().RegisterBackgroundThread(std::move(second), secondFlag);
+
+    bool secondCompleted = false;
+    for (int i = 0; i < 500 && !secondCompleted; ++i) {
+        secondCompleted = secondFlag->load(std::memory_order_acquire);
+        if (!secondCompleted) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+    EXPECT_TRUE(secondCompleted) << "RegisterBackgroundThread()'s second thread never completed";
 }
 
 } // namespace

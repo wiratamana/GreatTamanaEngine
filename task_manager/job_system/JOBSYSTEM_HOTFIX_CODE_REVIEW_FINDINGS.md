@@ -4,9 +4,11 @@ Status: **PARTIALLY FIXED.** Captured from an ad-hoc code review of
 JobContinuation.cpp/.h, JobDispatch.cpp/.h, JobQueue.cpp/.h, JobSystem.cpp/.h,
 and JobTypes.h (Phase 3 continuations + underlying Phase 1/2 machinery).
 Item 1 (below) was fixed under **HOTFIX 1** - see
-`JOB_SYSTEM_HOTFIX1_COMPLETION_REPORT.md` for the full writeup. Items 2-6
-and the "Minor nits" remain OPEN - this file exists purely so those findings
-aren't lost before someone circles back to fix them.
+`JOB_SYSTEM_HOTFIX1_COMPLETION_REPORT.md` for the full writeup. Item 2 was
+fixed under **HOTFIX 2** - see `JOB_SYSTEM_HOTFIX2_COMPLETION_REPORT.md` for
+the full writeup. Items 3-6 and the "Minor nits" remain OPEN - this file
+exists purely so those findings aren't lost before someone circles back to
+fix them.
 
 Each item lists: severity, where, what's wrong, why it matters, and a
 suggested fix direction. None of these are hypothetical typos - each is a
@@ -73,8 +75,9 @@ this would hang forever under the old locked-fire behavior). See
 
 ---
 
-## 2. [HIGH] Detached polling-fallback threads have no lifecycle tie to
-   `JobSystem`'s shutdown — possible crash/UB at process exit
+## 2. [HIGH] [FIXED — HOTFIX 2] Detached polling-fallback threads have no
+   lifecycle tie to `JobSystem`'s shutdown — possible crash/UB at process
+   exit
 
 **File:** `JobContinuation.cpp`, `WatchDependencyWithFallback()` /
 `RunPollingFallbackJob()`
@@ -107,6 +110,28 @@ fallback threads before it finishes destructing (e.g. a registry + join in
 `~JobSystem()`), or (b) make `TryPush()` reject pushes once
 `m_shuttingDown` is set, and have the fallback thread bail out gracefully
 (without touching `JobSystem::Instance()`) if it observes shutdown.
+
+**FIXED (HOTFIX 2):** Implemented BOTH suggested directions together, since
+each alone left a gap the other closes. (a) `JobSystem` now owns a small
+background-thread registry (`RegisterBackgroundThread()`/
+`JoinAllBackgroundThreads()`, `JobSystem.h`/`.cpp`) - the polling fallback
+thread (`JobContinuation.cpp`'s `WatchDependencyWithFallback()`) is
+registered instead of detached, and `~JobSystem()` (both the
+`GTE_ENABLE_JOB_SYSTEM=ON` and `=OFF` bodies) sets a new `m_shuttingDown`
+flag and joins every registered thread before finishing destruction - by the
+time `~JobSystem()` returns, no background thread can still be running, so
+none can ever touch `JobSystem::Instance()` during/after the singleton's own
+static destruction. A new `JobSystem::IsShuttingDown()` is what
+`RunPollingFallbackJob()`'s poll loop checks on every iteration, bailing out
+immediately (without calling `OnDependencyCleared()`/`JobSystem::Instance()`
+again) the instant shutdown begins - without this half, the destructor's own
+join would otherwise risk hanging forever on a dependency that never clears
+(e.g. an abandoned dependency - see item 6). (b) `JobQueue::TryPush()`
+(`JobQueue.cpp`) now also rejects any push once `Shutdown()` has been
+called, even when the queue still has free capacity - closing the "late
+push silently stranded after workers already joined" half of this finding
+directly. See `JOB_SYSTEM_HOTFIX2_COMPLETION_REPORT.md` for full
+verification details.
 
 ---
 
@@ -204,6 +229,18 @@ detect or cancel it.
 `ScheduleAfter()`/`DispatchAfter()`, or at minimum a debug-build counter/
 assertion for "continuations still pending after N seconds" to make stuck
 dependencies observable instead of silently leaking.
+
+**Partially mitigated by HOTFIX 2 (still OPEN):** the polling-fallback
+thread no longer leaks *undetected by `JobSystem`* - it is now registered
+(`RegisterBackgroundThread()`) and will be joined by `~JobSystem()`, and it
+bails out cleanly (via `IsShuttingDown()`) the instant process shutdown
+begins, rather than running forever into/past static destruction. This does
+NOT fix the underlying issue this item describes: an abandoned dependency's
+`PendingContinuation` is still never freed, and its polling thread still
+spins for the entire remaining life of the process (right up until shutdown
+begins) if the dependency genuinely never clears - there is still no
+timeout/cancellation mechanism. See
+`JOB_SYSTEM_HOTFIX2_COMPLETION_REPORT.md`'s own "What remains open" section.
 
 ---
 
