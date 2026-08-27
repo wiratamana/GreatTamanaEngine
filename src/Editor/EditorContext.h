@@ -159,6 +159,25 @@ struct EditorContext {
     // the valid range depends on the Inspector panel's current on-screen
     // height, which only BuildAssetInspector() (mid-ImGui-layout) knows.
     float inspectorPreviewHeight = 260.0f;
+
+    // Phase 7 (COMPUTE_PHASE7_VALIDATION_TESTING_TOOLING_STRATEGY_v2.md) -
+    // the "Scene" panel's own small, permanent "Show Compute Blur (debug)"
+    // checkbox (Panels/ScenePanel.cpp) - when true, "Scene" displays
+    // blurredSceneOutputDescriptor below instead of sceneViewDescriptor
+    // above. Read by ImGuiEditorLayer::AddBlurValidationPass()/
+    // FinalizeBlurValidationForSampling() to decide whether to even
+    // declare the compute blur validation pass at all this frame.
+    bool showBlurredSceneOutput = false;
+
+    // The ImGui-side descriptor for ComputeBlurValidation's own persistent
+    // `blurredOutput` RenderTexture (see ComputeBlurValidation.h) - lazily
+    // (re)created by ImGuiEditorLayer::BuildUI(), same "created on first
+    // use, recreated after a resize" convention as gameViewDescriptor/
+    // sceneViewDescriptor above. VK_NULL_HANDLE until the blur pass has
+    // run at least once (e.g. the very first frame, or while the toggle
+    // above has never been turned on) - Panels/ScenePanel.cpp falls back
+    // to sceneViewDescriptor whenever this is still null.
+    VkDescriptorSet blurredSceneOutputDescriptor = VK_NULL_HANDLE;
 };
 
 } // namespace gte

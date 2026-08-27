@@ -41,10 +41,26 @@ void BuildScenePanel(Game& game, Renderer& renderer, EditorContext& ctx, EditorC
             ctx.desiredSceneExtent.width = static_cast<std::uint32_t>(avail.x);
             ctx.desiredSceneExtent.height = static_cast<std::uint32_t>(avail.y);
 
+            // Phase 7 of the compute-shader campaign
+            // (COMPUTE_PHASE7_VALIDATION_TESTING_TOOLING_STRATEGY_v2.md) -
+            // a small, permanent, clearly-labeled debug toggle: when on
+            // (and a blurred output actually exists, i.e. the pass has run
+            // at least once), "Scene" displays the compute box-blur
+            // validation pass's own output instead of the normal Scene
+            // view - see IEditorLayer::AddBlurValidationPass()/
+            // ImGuiEditorLayer::BuildUI() for how ctx.blurredSceneOutputDescriptor
+            // gets (re)created.
+            ImGui::Checkbox("Show Compute Blur (debug)", &ctx.showBlurredSceneOutput);
+
+            const bool showingBlurredOutput =
+                ctx.showBlurredSceneOutput && ctx.blurredSceneOutputDescriptor != VK_NULL_HANDLE;
+            const VkDescriptorSet imageDescriptor =
+                showingBlurredOutput ? ctx.blurredSceneOutputDescriptor : ctx.sceneViewDescriptor;
+
             // Its own RenderTexture now (ctx.sceneViewDescriptor) - "Scene"
             // no longer displays the same image as "Game".
             ImGui::Image(
-                static_cast<ImTextureID>(reinterpret_cast<intptr_t>(ctx.sceneViewDescriptor)),
+                static_cast<ImTextureID>(reinterpret_cast<intptr_t>(imageDescriptor)),
                 avail);
 
 #if GTE_ENABLE_PROJECT_PANEL

@@ -2,8 +2,10 @@
 
 #include "../Math/Mat4.h"
 #include "../Renderer/RenderTexture.h"
+#include "../Renderer/RenderGraph/RenderGraphTypes.h"
 
 #include <memory>
+#include <optional>
 
 // Forward-declared so this header needs no SDL dependency at all (matches
 // the Vulkan-handle forward-declare trick already used in Window.h) - only
@@ -19,6 +21,7 @@ class Game;
 
 namespace rg {
 class RenderGraph;
+class RenderGraphBuilder;
 } // namespace rg
 
 // Abstraction boundary between engine-core (Application/Renderer/Game) and
@@ -121,6 +124,35 @@ public:
     // it (so Application never renders a Scene view at all in a release
     // build).
     virtual Mat4 SceneViewProjection(float aspectWidthOverHeight) const = 0;
+
+    // Phase 7 (COMPUTE_PHASE7_VALIDATION_TESTING_TOOLING_STRATEGY_v2.md) -
+    // declares (if this implementation's own "Show Compute Blur (debug)"
+    // toggle is on AND the "Scene" panel was visible last frame) a compute
+    // box-blur validation pass into `builder`: reads `sceneViewHandle`
+    // (this call's own already-imported, just-rendered Scene view
+    // texture) as a plain `Texture`, and writes this implementation's own
+    // persistent, storage-capable `blurredOutput` RenderTexture (an
+    // `RWTexture`, imported fresh every call) sized to `sceneExtent`.
+    // Returns the blurred output's TextureHandle - which the CALLER must
+    // add to this call's own finalOutputs root set, or the pass's write
+    // will be silently culled - or std::nullopt if the pass was not
+    // declared at all this frame (see ComputeBlurValidation.h for the
+    // real implementation this wraps; always std::nullopt for
+    // NullEditorLayer, which never declares a pass at all). `renderer` is
+    // the same Renderer Application already owns.
+    virtual std::optional<rg::TextureHandle> AddBlurValidationPass(
+        rg::RenderGraphBuilder& builder, Renderer& renderer, rg::TextureHandle sceneViewHandle, VkExtent2D sceneExtent) = 0;
+
+    // Transitions the blurred-output texture (if AddBlurValidationPass()
+    // above actually declared a pass this frame - a safe no-op otherwise)
+    // from its compute-write state to a real ShaderRead state, ready for
+    // this implementation's own ImGui::Image() display - mirrors
+    // RenderPasses.h's FinalizeRenderTextureForExternalSampling() for the
+    // Game/Scene views. Must be called against the SAME command buffer
+    // the offscreen RenderGraph::Execute() call just recorded into, AFTER
+    // that call returns and BEFORE that command buffer is ended/submitted
+    // - see Application::Run(). A no-op for NullEditorLayer.
+    virtual void FinalizeBlurValidationForSampling(VkCommandBuffer cmd) = 0;
 
     // Builds every editor panel for this frame - top menu bar (File > Exit,
     // ...), Hierarchy (left), Inspector (right), Scene/Game (tabbed,

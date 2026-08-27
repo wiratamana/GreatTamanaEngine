@@ -1,0 +1,85 @@
+#version 450
+
+// Phase 7 (COMPUTE_PHASE7_VALIDATION_TESTING_TOOLING_STRATEGY_v2.md) -
+// the compute-shader campaign's texture-side validation workload: a
+// deliberately simple NxN box blur, reading the Editor's "Scene" view
+// (already rendered by an earlier graphics pass in the SAME offscreen
+// RenderGraph::Execute() call) as a plain, read-only `Texture`, and
+// writing a brand-new `blurredSceneOutput` texture as an `RWTexture` -
+// see COMPUTE_PHASE1_RESOURCE_VOCABULARY_STRATEGY_v2.md for the
+// StructuredBuffer/RWStructuredBuffer/Texture/RWTexture vocabulary this
+// exercises the last (texture) half of.
+//
+// Binding convention (see Vulkan/DescriptorSetLayoutBuilder.h's own
+// documented rule - declaration order: read-only buffers, read-write
+// buffers, read-only textures, storage images last): binding 0 is the
+// read-only `Texture` input, binding 1 is the `RWTexture` output. Both
+// C++ (see src/Editor/ComputeBlurValidation.cpp) and this file must be
+// kept in agreement by hand - this campaign deliberately has no shader
+// reflection (see COMPUTE_SHADER_MASTER_STRATEGY_v2.md's own "What We
+// Will NOT Do").
+//
+// local_size_x/y = 16 - MUST match src/Editor/ComputeBlurValidation.cpp's
+// own kBoxBlurLocalSizeX/kBoxBlurLocalSizeY constants exactly (see
+// ComputeDispatch.h's own header comment on why this pairing is a
+// hand-maintained convention, not something the build system enforces).
+layout(local_size_x = 16, local_size_y = 16) in;
+
+// A plain, read-only `Texture` - a combined image sampler, sampled here
+// exactly like a fragment shader already samples a MaterialTexture today
+// (see COMPUTE_PHASE1_RESOURCE_VOCABULARY_STRATEGY_v2.md's own "Texture -
+// no changes needed" section).
+layout(binding = 0) uniform sampler2D sourceTexture;
+
+// The `RWTexture` output - VK_FORMAT_R8G8B8A8_UNORM on the C++ side (see
+// ComputeBlurValidation.cpp's own explicit format choice), so `rgba8`
+// here must always match it exactly (see
+// COMPUTE_PHASE1_RESOURCE_VOCABULARY_STRATEGY_v2.md's own GLSL-format-
+// qualifier-vs-VkFormat convention).
+layout(binding = 1, rgba8) uniform writeonly image2D destinationImage;
+
+// Plain, per-shader push-constant convention (see ComputePipeline.h's own
+// class comment on why this is NOT this engine's fixed 128-byte graphics
+// layout) - the blurred output's pixel dimensions, needed both to reject
+// an out-of-bounds invocation (the dispatch's own group-count ceiling
+// division can genuinely overshoot the real extent - see
+// ComputeDispatch.h) and to convert a pixel coordinate into a normalized
+// UV for sourceTexture.
+layout(push_constant) uniform PushConstants {
+    uint width;
+    uint height;
+} pc;
+
+// Deliberately a small, fixed kernel radius - a simple, unoptimized box
+// average, not a real post-process feature (no adjustable radius, no
+// separable two-pass optimization) - see this phase's own "What We Will
+// NOT Do": this shader exists to validate the compute-shader/RenderGraph
+// plumbing, not to ship a production blur.
+const int kBlurRadius = 3;
+
+void main()
+{
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (pixel.x >= int(pc.width) || pixel.y >= int(pc.height)) {
+        // The dispatch's own ceiling-division group count can legitimately
+        // cover more threads than there are real pixels (e.g. a
+        // non-exact-multiple width/height) - see ComputeDispatch.h's own
+        // header comment. Those extra invocations simply do nothing.
+        return;
+    }
+
+    vec2 texelSize = 1.0 / vec2(float(pc.width), float(pc.height));
+
+    vec4 sum = vec4(0.0);
+    int sampleCount = 0;
+    for (int dy = -kBlurRadius; dy <= kBlurRadius; ++dy) {
+        for (int dx = -kBlurRadius; dx <= kBlurRadius; ++dx) {
+            vec2 uv = (vec2(pixel) + vec2(0.5) + vec2(float(dx), float(dy))) * texelSize;
+            sum += texture(sourceTexture, uv);
+            sampleCount += 1;
+        }
+    }
+
+    vec4 blurred = sum / float(sampleCount);
+    imageStore(destinationImage, pixel, blurred);
+}

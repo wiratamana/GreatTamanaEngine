@@ -385,6 +385,8 @@ if(GTE_ENABLE_EDITOR)
         src/Editor/Selection.cpp
         src/Editor/EditorCamera.h
         src/Editor/EditorCamera.cpp
+        src/Editor/ComputeBlurValidation.h
+        src/Editor/ComputeBlurValidation.cpp
         src/Editor/TransformGizmo.h
         src/Editor/TransformGizmo.cpp
         src/Editor/DockLayout.h
@@ -535,6 +537,17 @@ gte_add_shader(GreatTamanaEngine src/Shaders/TexturedMesh.frag)
 if(GTE_ENABLE_PROJECT_PANEL)
     gte_add_shader(GreatTamanaEngine src/Shaders/MeshPreview.vert)
     gte_add_shader(GreatTamanaEngine src/Shaders/MeshPreview.frag)
+endif()
+
+# Phase 7 of the compute-shader campaign
+# (COMPUTE_PHASE7_VALIDATION_TESTING_TOOLING_STRATEGY_v2.md) - the compute
+# box-blur validation shader (src/Editor/ComputeBlurValidation.h/.cpp).
+# Only compiled/staged when GTE_ENABLE_EDITOR is ON, since
+# ComputeBlurValidation.cpp - the only thing that ever loads it - isn't
+# compiled into gte_core otherwise (see GTE_ENABLE_EDITOR's target_sources()
+# block above).
+if(GTE_ENABLE_EDITOR)
+    gte_add_shader(GreatTamanaEngine src/Shaders/BoxBlur.comp)
 endif()
 
 # Ensures SDL3.dll is copied next to the built .exe after every build.

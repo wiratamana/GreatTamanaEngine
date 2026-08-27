@@ -1,5 +1,6 @@
 #include "EditorLayer.h"
 
+#include "ComputeBlurValidation.h"
 #include "DockLayout.h"
 #include "EditorCamera.h"
 #include "EditorContext.h"
@@ -253,6 +254,7 @@ public:
 
         ReleaseGameViewDescriptor();
         ReleaseSceneViewDescriptor();
+        ReleaseBlurredSceneOutputDescriptor();
 #if GTE_ENABLE_PROJECT_PANEL
         // Must release its own GPU texture/ImGui descriptor(s) BEFORE
         // ImGui_ImplVulkan_Shutdown() below - member destruction order
@@ -404,6 +406,26 @@ public:
         return m_sceneCamera.ViewProjection(aspectWidthOverHeight);
     }
 
+    // Phase 7 (COMPUTE_PHASE7_VALIDATION_TESTING_TOOLING_STRATEGY_v2.md) -
+    // see IEditorLayer::AddBlurValidationPass()'s own doc comment. Gated
+    // on BOTH the "Show Compute Blur (debug)" toggle AND the Scene panel
+    // actually being visible last frame (m_ctx.sceneViewVisible) AND a
+    // non-degenerate extent - mirroring GameViewTarget()/SceneViewTarget()'s
+    // own "only resize/act when the extent is non-zero" guard.
+    std::optional<rg::TextureHandle> AddBlurValidationPass(rg::RenderGraphBuilder& builder, Renderer& renderer,
+        rg::TextureHandle sceneViewHandle, VkExtent2D sceneExtent) override
+    {
+        if (!m_ctx.showBlurredSceneOutput || !m_ctx.sceneViewVisible) {
+            return std::nullopt;
+        }
+        if (sceneExtent.width == 0 || sceneExtent.height == 0) {
+            return std::nullopt;
+        }
+        return m_blurValidation.AddPass(builder, renderer, sceneViewHandle, m_sceneView.Sampler(), sceneExtent);
+    }
+
+    void FinalizeBlurValidationForSampling(VkCommandBuffer cmd) override { m_blurValidation.FinalizeForSampling(cmd); }
+
     void BuildUI(Game& game, Renderer& renderer, const rg::RenderGraph& renderGraph) override
     {
         ImGui::SetCurrentContext(m_context);
@@ -423,6 +445,27 @@ public:
         if (m_ctx.sceneViewDescriptor == VK_NULL_HANDLE) {
             m_ctx.sceneViewDescriptor = ImGui_ImplVulkan_AddTexture(
                 m_sceneView.Sampler(), m_sceneView.View(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        }
+
+        // Phase 7 - the blurred output's own ImGui descriptor, recreated
+        // whenever ComputeBlurValidation's underlying VkImageView actually
+        // changed (a resize, or its very first creation) - tracked via
+        // m_lastKnownBlurredView rather than "created once, never again"
+        // like gameViewDescriptor/sceneViewDescriptor above, since
+        // ComputeBlurValidation::AddPass() may resize its own RenderTexture
+        // out from under this class at any time this frame's earlier
+        // Execute() call (see Application::Run()), unlike m_gameView/
+        // m_sceneView, which only ever resize via THIS class's own
+        // GameViewTarget()/SceneViewTarget() (hence the ReleaseXDescriptor()
+        // + "== VK_NULL_HANDLE" pattern above already being sufficient for
+        // them).
+        if (RenderTexture* blurredOutput = m_blurValidation.OutputTexture()) {
+            if (m_ctx.blurredSceneOutputDescriptor == VK_NULL_HANDLE || blurredOutput->View() != m_lastKnownBlurredView) {
+                ReleaseBlurredSceneOutputDescriptor();
+                m_ctx.blurredSceneOutputDescriptor = ImGui_ImplVulkan_AddTexture(
+                    blurredOutput->Sampler(), blurredOutput->View(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                m_lastKnownBlurredView = blurredOutput->View();
+            }
         }
 
         BuildHierarchyPanel(game, renderer, m_ctx);
@@ -533,10 +576,34 @@ private:
         }
     }
 
+    void ReleaseBlurredSceneOutputDescriptor()
+    {
+        if (m_ctx.blurredSceneOutputDescriptor != VK_NULL_HANDLE) {
+            ImGui_ImplVulkan_RemoveTexture(m_ctx.blurredSceneOutputDescriptor);
+            m_ctx.blurredSceneOutputDescriptor = VK_NULL_HANDLE;
+            m_lastKnownBlurredView = VK_NULL_HANDLE;
+        }
+    }
+
     VkDevice m_device = VK_NULL_HANDLE;
     ImGuiContext* m_context = nullptr;
     RenderTexture m_gameView;
     RenderTexture m_sceneView;
+
+    // Phase 7 (COMPUTE_PHASE7_VALIDATION_TESTING_TOOLING_STRATEGY_v2.md) -
+    // the compute-shader campaign's own texture-side validation workload
+    // (a compute box-blur post-process reading m_sceneView, writing its
+    // own persistent RWTexture output) - see ComputeBlurValidation.h.
+    // m_lastKnownBlurredView tracks whichever VkImageView
+    // m_ctx.blurredSceneOutputDescriptor was last created against, so
+    // BuildUI() above can tell a resize happened (a NEW VkImageView) and
+    // needs a fresh ImGui descriptor, even though the resize itself
+    // happens earlier in the frame (during the offscreen RenderGraph::
+    // Execute() call, inside AddBlurValidationPass() above), entirely
+    // outside this class's own GameViewTarget()/SceneViewTarget()-style
+    // "resize on demand" methods.
+    ComputeBlurValidation m_blurValidation;
+    VkImageView m_lastKnownBlurredView = VK_NULL_HANDLE;
 
     // The Scene view's own, independently-orbitable camera (see
     // EditorCamera.h) - updated once per frame by Panels/ScenePanel.cpp

@@ -267,6 +267,30 @@ int Application::Run()
                                 b.ImportTexture("SceneView", sceneTarget->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
                             AddSceneViewPass(b, m_game, m_renderer, h, aspect, sceneViewProjection);
                             outputs.push_back(h);
+
+                            // Phase 7 of the compute-shader campaign
+                            // (COMPUTE_PHASE7_VALIDATION_TESTING_TOOLING_STRATEGY_v2.md)
+                            // - the texture-side validation workload: a
+                            // compute box-blur pass reading THIS call's own
+                            // just-declared Scene view texture `h` and
+                            // writing the Editor's own persistent
+                            // blurredSceneOutput RWTexture, declared into
+                            // the SAME builder/Execute() call so the render
+                            // graph's own automatic barrier planner
+                            // synchronizes the cross-pass read entirely on
+                            // its own (see
+                            // ComputeBlurValidation.h). Declared (and this
+                            // handle added to `outputs`) only when the
+                            // Editor's own "Show Compute Blur (debug)"
+                            // toggle is on and "Scene" is visible - see
+                            // IEditorLayer::AddBlurValidationPass()'s own
+                            // doc comment; std::nullopt (always the case
+                            // for NullEditorLayer) means nothing was
+                            // declared at all this call.
+                            if (const std::optional<rg::TextureHandle> blurHandle =
+                                    m_editorLayer->AddBlurValidationPass(b, m_renderer, h, extent)) {
+                                outputs.push_back(*blurHandle);
+                            }
                         }
                         return outputs;
                     });
@@ -283,6 +307,13 @@ int Application::Run()
                 if (sceneTarget != nullptr) {
                     FinalizeRenderTextureForExternalSampling(offscreenCmd, *sceneTarget);
                 }
+                // Phase 7 of the compute-shader campaign - finalizes the
+                // blurred-output texture for external (ImGui) sampling too,
+                // a safe no-op whenever AddBlurValidationPass() above
+                // didn't actually declare a pass this call - see
+                // IEditorLayer::FinalizeBlurValidationForSampling()'s own
+                // doc comment.
+                m_editorLayer->FinalizeBlurValidationForSampling(offscreenCmd);
 
                 m_renderer.EndOffscreenRenderGraphRecording();
 

@@ -20,6 +20,12 @@ public:
     RenderTexture* GameViewTarget() override { return nullptr; }
     RenderTexture* SceneViewTarget() override { return nullptr; }
     Mat4 SceneViewProjection(float /*aspectWidthOverHeight*/) const override { return Mat4::Identity(); }
+    std::optional<rg::TextureHandle> AddBlurValidationPass(rg::RenderGraphBuilder& /*builder*/,
+        Renderer& /*renderer*/, rg::TextureHandle /*sceneViewHandle*/, VkExtent2D /*sceneExtent*/) override
+    {
+        return std::nullopt;
+    }
+    void FinalizeBlurValidationForSampling(VkCommandBuffer /*cmd*/) override { }
     void BuildUI(Game& /*game*/, Renderer& /*renderer*/, const rg::RenderGraph& /*renderGraph*/) override { }
     void Render(VkCommandBuffer /*cmd*/) override { }
     void RenderPlatformWindows() override { }
