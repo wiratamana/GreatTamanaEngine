@@ -67,6 +67,42 @@ GpuResourceFactory::GpuResourceFactory(VkPhysicalDevice physicalDevice, VkDevice
         vkDestroyCommandPool(m_device, m_commandPool, nullptr);
         throw std::runtime_error("GpuResourceFactory: vkCreateDescriptorPool failed");
     }
+
+    // Phase 3 (COMPUTE_PHASE3_DESCRIPTOR_BINDING_MODEL_STRATEGY_v1.md) - a
+    // SECOND, dedicated descriptor pool for compute-shaped descriptor
+    // types - never shared with m_materialDescriptorPool above (see
+    // m_computeDescriptorPool's own comment in GpuResourceFactory.h).
+    // Generously sized (a low hundreds, not thousands - compute shaders
+    // are far less numerous per-frame than material textures) for every
+    // distinct compute-bound resource this engine is realistically likely
+    // to need in one process lifetime; individual sets allocated from it
+    // are never freed (see AllocateComputeDescriptorSet()), only the whole
+    // pool at once, in Destroy().
+    constexpr std::uint32_t kMaxComputeStorageBuffers = 256;
+    constexpr std::uint32_t kMaxComputeStorageImages = 128;
+    constexpr std::uint32_t kMaxComputeCombinedImageSamplers = 128;
+    constexpr std::uint32_t kMaxComputeDescriptorSets = 256;
+
+    VkDescriptorPoolSize computePoolSizes[3]{};
+    computePoolSizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    computePoolSizes[0].descriptorCount = kMaxComputeStorageBuffers;
+    computePoolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    computePoolSizes[1].descriptorCount = kMaxComputeStorageImages;
+    computePoolSizes[2].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    computePoolSizes[2].descriptorCount = kMaxComputeCombinedImageSamplers;
+
+    VkDescriptorPoolCreateInfo computePoolInfo{};
+    computePoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    computePoolInfo.maxSets = kMaxComputeDescriptorSets;
+    computePoolInfo.poolSizeCount = 3;
+    computePoolInfo.pPoolSizes = computePoolSizes;
+
+    if (vkCreateDescriptorPool(m_device, &computePoolInfo, nullptr, &m_computeDescriptorPool) != VK_SUCCESS) {
+        vkDestroyDescriptorPool(m_device, m_materialDescriptorPool, nullptr);
+        vkDestroyDescriptorSetLayout(m_device, m_materialSetLayout, nullptr);
+        vkDestroyCommandPool(m_device, m_commandPool, nullptr);
+        throw std::runtime_error("GpuResourceFactory: vkCreateDescriptorPool (compute) failed");
+    }
 }
 
 GpuResourceFactory::~GpuResourceFactory()
@@ -84,6 +120,7 @@ GpuResourceFactory::GpuResourceFactory(GpuResourceFactory&& other) noexcept
     , m_commandPool(std::exchange(other.m_commandPool, VK_NULL_HANDLE))
     , m_materialSetLayout(std::exchange(other.m_materialSetLayout, VK_NULL_HANDLE))
     , m_materialDescriptorPool(std::exchange(other.m_materialDescriptorPool, VK_NULL_HANDLE))
+    , m_computeDescriptorPool(std::exchange(other.m_computeDescriptorPool, VK_NULL_HANDLE))
 {
 }
 
@@ -101,6 +138,7 @@ GpuResourceFactory& GpuResourceFactory::operator=(GpuResourceFactory&& other) no
         m_commandPool = std::exchange(other.m_commandPool, VK_NULL_HANDLE);
         m_materialSetLayout = std::exchange(other.m_materialSetLayout, VK_NULL_HANDLE);
         m_materialDescriptorPool = std::exchange(other.m_materialDescriptorPool, VK_NULL_HANDLE);
+        m_computeDescriptorPool = std::exchange(other.m_computeDescriptorPool, VK_NULL_HANDLE);
     }
     return *this;
 }
@@ -110,6 +148,10 @@ void GpuResourceFactory::Destroy() noexcept
     if (m_materialDescriptorPool != VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(m_device, m_materialDescriptorPool, nullptr);
         m_materialDescriptorPool = VK_NULL_HANDLE;
+    }
+    if (m_computeDescriptorPool != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(m_device, m_computeDescriptorPool, nullptr);
+        m_computeDescriptorPool = VK_NULL_HANDLE;
     }
     if (m_materialSetLayout != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(m_device, m_materialSetLayout, nullptr);
@@ -372,6 +414,23 @@ MaterialTexture GpuResourceFactory::CreateMaterialTexture2D(
     vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
 
     return MaterialTexture{ std::move(texture), descriptorSet };
+}
+
+VkDescriptorSet GpuResourceFactory::AllocateComputeDescriptorSet(VkDescriptorSetLayout layout) const
+{
+    VkDescriptorSetAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocInfo.descriptorPool = m_computeDescriptorPool;
+    allocInfo.descriptorSetCount = 1;
+    allocInfo.pSetLayouts = &layout;
+
+    VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
+    if (vkAllocateDescriptorSets(m_device, &allocInfo, &descriptorSet) != VK_SUCCESS) {
+        throw std::runtime_error(
+            "GpuResourceFactory::AllocateComputeDescriptorSet: vkAllocateDescriptorSets failed "
+            "(consider raising GpuResourceFactory.cpp's compute descriptor pool sizes).");
+    }
+    return descriptorSet;
 }
 
 GpuMemoryTracker::Totals GpuResourceFactory::GetMemoryTotals() const

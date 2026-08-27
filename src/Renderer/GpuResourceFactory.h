@@ -188,6 +188,18 @@ public:
     MaterialTexture CreateMaterialTexture2D(
         const void* pixelsRgba8, int width, int height, const char* debugName = nullptr) const;
 
+    // Phase 3 (COMPUTE_PHASE3_DESCRIPTOR_BINDING_MODEL_STRATEGY_v1.md) -
+    // allocates one VkDescriptorSet from this factory's own persistent
+    // m_computeDescriptorPool against `layout` (built via
+    // Vulkan/DescriptorSetLayoutBuilder.h). Wrap the result in a
+    // ComputeDescriptorSet (see Renderer/ComputeDescriptorSet.h) and call
+    // its own Rewrite() to actually point it at real buffer/image
+    // resources before first use. Like m_materialDescriptorPool's own
+    // sets (see MaterialTexture.h's own comment), a set allocated here is
+    // NEVER individually freed - only the whole m_computeDescriptorPool at
+    // once, when this factory itself is destroyed.
+    VkDescriptorSet AllocateComputeDescriptorSet(VkDescriptorSetLayout layout) const;
+
     // See Renderer::GetMemoryTotals()/GetMemoryResources().
     GpuMemoryTracker::Totals GetMemoryTotals() const;
     std::vector<GpuMemoryTracker::Entry> GetMemoryResources() const;
@@ -246,6 +258,19 @@ private:
     // are never individually freed (see MaterialTexture.h's own comment).
     VkDescriptorSetLayout m_materialSetLayout = VK_NULL_HANDLE;
     VkDescriptorPool m_materialDescriptorPool = VK_NULL_HANDLE;
+
+    // Phase 3 (COMPUTE_PHASE3_DESCRIPTOR_BINDING_MODEL_STRATEGY_v1.md) - a
+    // SECOND, dedicated descriptor pool for compute-shaped descriptor
+    // types (VK_DESCRIPTOR_TYPE_STORAGE_BUFFER/STORAGE_IMAGE, plus
+    // COMBINED_IMAGE_SAMPLER for a compute shader's own plain `Texture`
+    // reads - see AllocateComputeDescriptorSet() above). Deliberately
+    // NEVER shared with m_materialDescriptorPool above - different
+    // descriptor type requirements, and keeping them separate means a
+    // compute-heavy feature can never exhaust the material-texture pool's
+    // budget or vice versa. Created once in the constructor, destroyed in
+    // Destroy() - sets allocated from it are never individually freed,
+    // same convention as m_materialDescriptorPool.
+    VkDescriptorPool m_computeDescriptorPool = VK_NULL_HANDLE;
 };
 
 } // namespace gte

@@ -229,6 +229,11 @@ ComputePipeline Renderer::CreateComputePipeline(const std::string& shaderSpirvPa
     return m_resources.CreateComputePipeline(shaderSpirvPath, descriptorSetLayouts, pushConstantRange);
 }
 
+VkDescriptorSet Renderer::AllocateComputeDescriptorSet(VkDescriptorSetLayout layout) const
+{
+    return m_resources.AllocateComputeDescriptorSet(layout);
+}
+
 Mesh Renderer::CreateMesh(
     const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount, const char* debugName) const
 {

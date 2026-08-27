@@ -371,6 +371,20 @@ public:
         const std::vector<VkDescriptorSetLayout>& descriptorSetLayouts = {},
         std::optional<VkPushConstantRange> pushConstantRange = std::nullopt) const;
 
+    // Factory for a compute descriptor set (Phase 3 -
+    // COMPUTE_PHASE3_DESCRIPTOR_BINDING_MODEL_STRATEGY_v1.md) - so callers
+    // never need direct access to the VkDevice/descriptor pool this
+    // Renderer owns internally, mirroring CreateComputePipeline() above.
+    // `layout` should be built via a Vulkan/DescriptorSetLayoutBuilder.h
+    // instance constructed against GetVulkanContextInfo().device. Wrap the
+    // returned VkDescriptorSet in a ComputeDescriptorSet
+    // (Renderer/ComputeDescriptorSet.h) and call its own Rewrite() to
+    // actually point it at real buffer/image resources before first use -
+    // see GpuResourceFactory::AllocateComputeDescriptorSet() for the full
+    // reasoning (in particular why the returned set is never individually
+    // freed).
+    VkDescriptorSet AllocateComputeDescriptorSet(VkDescriptorSetLayout layout) const;
+
     // Factory for meshes: a vertex buffer + vertex count, NO index buffer -
     // see Mesh.h's non-indexed constructor. So callers never need direct
     // access to the VmaAllocator this Renderer owns internally. vertexData/

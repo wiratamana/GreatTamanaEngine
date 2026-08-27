@@ -284,6 +284,8 @@ add_library(gte_core STATIC
     src/Renderer/Pipeline.h
     src/Renderer/ComputePipeline.cpp
     src/Renderer/ComputePipeline.h
+    src/Renderer/ComputeDescriptorSet.cpp
+    src/Renderer/ComputeDescriptorSet.h
     src/Renderer/Vertex.h
     src/Renderer/MeshVertex.h
     src/Renderer/Primitives/PrimitiveMeshGenerator.cpp
@@ -314,6 +316,8 @@ add_library(gte_core STATIC
     src/Renderer/Vulkan/FormatCapabilities.h
     src/Renderer/Vulkan/ShaderModule.cpp
     src/Renderer/Vulkan/ShaderModule.h
+    src/Renderer/Vulkan/DescriptorSetLayoutBuilder.cpp
+    src/Renderer/Vulkan/DescriptorSetLayoutBuilder.h
     src/Renderer/RenderGraph/RenderGraphTypes.h
     src/Renderer/RenderGraph/RenderGraphTypes.cpp
     src/Renderer/RenderGraph/RenderGraphBuilder.h
