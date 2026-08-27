@@ -504,6 +504,49 @@
 #                                            (Schedule() runs inline,
 #                                            synchronously) - see
 #                                            JobSystem.h's own comment.
+#   Jobs/JobDispatchMathTests.cpp            - Job System Phase 2's pure,
+#                                            deterministic batch-splitting
+#                                            math (gte::Jobs::ComputeBatchRanges() -
+#                                            src/Jobs/JobDispatch.h): zero
+#                                            itemCount, itemCount smaller
+#                                            than/equal to minItemsPerBatch
+#                                            (collapses to one batch), evenly/
+#                                            non-evenly divisible splits (full
+#                                            coverage, no gaps/overlap, sizes
+#                                            never differing by more than 1),
+#                                            never more batches than
+#                                            workerCount, degenerate
+#                                            zero-workerCount/zero-
+#                                            minItemsPerBatch inputs, plus a
+#                                            fuzz-style sweep across many
+#                                            (itemCount, workerCount,
+#                                            minItemsPerBatch) triples. No
+#                                            JobSystem/real threads involved
+#                                            at all - always built, same
+#                                            reason as JobQueueTests.cpp
+#                                            above.
+#   Jobs/JobDispatchTests.cpp                - Job System Phase 2's real
+#                                            Dispatch()+WaitForJobs() batch
+#                                            execution (src/Jobs/JobDispatch.h),
+#                                            proving batch-splitting math and
+#                                            real parallel execution compose
+#                                            correctly: a zero-itemCount call
+#                                            is an immediate no-op, an evenly
+#                                            divisible workload and a
+#                                            deliberately prime-sized
+#                                            (non-evenly-divisible) workload
+#                                            both complete with every index
+#                                            written exactly once, a workload
+#                                            smaller than minItemsPerBatch
+#                                            exercises the "collapses to one
+#                                            batch" path for real, and a
+#                                            stress-repeated loop of
+#                                            independent dispatches all
+#                                            complete correctly. Always
+#                                            built, passes identically
+#                                            whether GTE_ENABLE_JOB_SYSTEM is
+#                                            ON or OFF, same reason as
+#                                            JobSystemTests.cpp above.
 #
 #
 # Note that the test BINARY still dynamically depends on SDL3.dll at process
@@ -574,6 +617,8 @@ set(GTE_TEST_SOURCES
     Profiling/FrameGraphDataTests.cpp
     Jobs/JobQueueTests.cpp
     Jobs/JobSystemTests.cpp
+    Jobs/JobDispatchMathTests.cpp
+    Jobs/JobDispatchTests.cpp
     Input/InputStateTests.cpp
     Application/EventTranslatorTests.cpp
     Application/MemorySnapshotBuilderTests.cpp

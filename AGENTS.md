@@ -443,15 +443,18 @@ whenever touching profiling instrumentation, or adding a new call site:
 
 ## Job System
 
-`src/Jobs/` (`JobTypes.h`, `JobQueue.h/.cpp`, `JobSystem.h/.cpp`) is the
-engine's general-purpose worker-thread pool - see
-`task_manager/job_system/JOBSYSTEM_PHASE0_MASTER_STRATEGY_v2.md` for the
-full multi-phase campaign this is Phase 1 of, and
-`task_manager/job_system/JOB_SYSTEM_PHASE1_COMPLETION_REPORT.md` for this
-phase's own detailed writeup. As of Phase 1, this module provides only the
-minimal `JobHandle`/`Schedule()`/`WaitForJobs()`/`WorkerCount()` primitive -
-**nothing else in the engine calls into it yet** (no real subsystem has been
-migrated onto it - that is Phase 6's job). Follow these rules whenever
+`src/Jobs/` (`JobTypes.h`, `JobQueue.h/.cpp`, `JobSystem.h/.cpp`,
+`JobDispatch.h/.cpp`) is the engine's general-purpose worker-thread pool -
+see `task_manager/job_system/JOBSYSTEM_PHASE0_MASTER_STRATEGY_v2.md` for the
+full multi-phase campaign this is Phases 1-2 of,
+`task_manager/job_system/JOB_SYSTEM_PHASE1_COMPLETION_REPORT.md` for Phase
+1's own detailed writeup, and
+`task_manager/job_system/JOB_SYSTEM_PHASE2_COMPLETION_REPORT.md` for Phase
+2's. As of Phase 2, this module provides the minimal `JobHandle`/
+`Schedule()`/`WaitForJobs()`/`WorkerCount()` primitive (Phase 1) plus the
+batch/parallel-for API, `Dispatch()`/`ComputeBatchRanges()` (Phase 2) -
+**nothing else in the engine calls into either yet** (no real subsystem has
+been migrated onto it - that is Phase 6's job). Follow these rules whenever
 touching this module or building a later phase on top of it:
 
 - **`gte::Jobs::JobSystem::Instance()` is a Meyers singleton that starts
@@ -534,6 +537,64 @@ touching this module or building a later phase on top of it:
   future phases - a single green run is not sufficient evidence for
   genuinely concurrent code, as this phase's own lost-wakeup bug
   demonstrated directly.
+- **Phase 2's `Dispatch(fn, itemCount, payload, handle, minItemsPerBatch)`
+  (`src/Jobs/JobDispatch.h/.cpp`) turns Phase 1's "one job per `Schedule()`
+  call" primitive into an ergonomic parallel-for/batch API, built ENTIRELY
+  on top of `Schedule()`/`WaitForJobs()`/`JobHandle` - no second scheduler,
+  no second queue, no parallel bookkeeping duplicated.** `Dispatch()` splits
+  `[0, itemCount)` into a bounded number of contiguous batches
+  (`ComputeBatchRanges()` - never more than `JobSystem::Instance().WorkerCount()`
+  batches, and never smaller than the caller's own `minItemsPerBatch` floor
+  unless `itemCount` itself is smaller, in which case it collapses to
+  exactly one batch) and calls `Schedule()` once per batch, every batch
+  sharing the SAME `payload` pointer (read-only) and the SAME `handle` (so
+  one `WaitForJobs(handle)` call waits for the whole dispatch, never one
+  per batch).
+- **BATCHES, not items, are the unit of scheduling - `Dispatch()` never
+  schedules one job per array element.** Every `Schedule()` call touches
+  the shared, mutex-guarded `JobQueue` plus an atomic increment on the
+  handle's counter - for genuinely tiny per-item work, scheduling one job
+  PER ITEM would spend more total time on scheduling overhead than on the
+  actual work (the classic "over-parallelized until it's slower than
+  serial" trap). `Dispatch()`'s own batch count is derived automatically
+  from `WorkerCount()`, never something a caller has to compute by hand -
+  `minItemsPerBatch` (default 1) is the one knob a caller with real
+  per-item-cost knowledge can use to floor the batch size (e.g. "never
+  split fewer than 8 vertices' worth of work into their own batch" for a
+  future vertex-skinning call site) - `Dispatch()` never second-guesses
+  that floor by splitting smaller anyway.
+- **A NECESSARY, DELIBERATE, DOCUMENTED exception to Phase 1's own "zero
+  heap allocation in the steady-state per-job path" guarantee: each batch
+  gets its own small, heap-allocated `DispatchJobContext`
+  (`JobDispatch.cpp`, anonymous namespace) - the function pointer + user
+  payload pointer + that batch's own `BatchRange` - freed by the batch job
+  itself (`RunBatchJobTrampoline()`) right before it returns.** This is
+  required because each batch needs its OWN distinct `[begin, end)` range,
+  and `Dispatch()` itself does not block (it returns immediately), so that
+  range has to live somewhere between `Dispatch()` returning and the batch
+  job actually running - a plain `Schedule()` call can hand the caller's
+  own long-lived `payload` straight through with zero allocation, but
+  `Dispatch()` cannot, since no single long-lived object naturally holds
+  N different ranges. The number of these allocations per `Dispatch()`
+  call is bounded by `ComputeBatchRanges()`'s own batch-count ceiling (at
+  most `WorkerCount()` - a handful, never one per array element) - a
+  small, BOUNDED, explicitly-reviewed trade for API ergonomics, not an
+  accidental violation of Phase 1's guarantee. If this were ever found to
+  matter in practice, the fix is a small fixed-size pool of reusable
+  `DispatchJobContext` slots (mirroring `JobQueue`'s own fixed-capacity
+  philosophy) - deliberately NOT built preemptively.
+- **`ComputeBatchRanges()` (the pure batch-splitting math) is
+  Tier-1-tested completely separately from `Dispatch()` itself
+  (`tests/Jobs/JobDispatchMathTests.cpp` vs. `JobDispatchTests.cpp`)** -
+  the same "test the pure math in isolation before wiring it into anything
+  stateful" discipline this codebase already applies elsewhere
+  (`DrawStats.h` before `FrameRecorder`, `GpuTiming.h` before
+  `GpuTimingService`). The three invariants every test in
+  `JobDispatchMathTests.cpp` checks - ranges are contiguous/gap-free, never
+  overlap, and their union is exactly `[0, itemCount)` - are the single
+  most important property this function guarantees; a future consumer
+  (e.g. Phase 6's CPU vertex skinning) would silently corrupt or skip data
+  if any of them were ever violated.
 
 ## Render Target Format Matching
 
