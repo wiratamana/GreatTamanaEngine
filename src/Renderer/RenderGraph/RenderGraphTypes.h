@@ -107,21 +107,50 @@ struct PassHandle {
 // nextAccess) pair into a concrete VkImageMemoryBarrier2/
 // VkBufferMemoryBarrier2.
 //
-// Deliberately scoped to exactly what Phases 1-8's graphics-only MVP
-// needs, and not one value larger - see RENDERGRAPH_PHASE0_MASTER_STRATEGY_v2.md's
-// "What We Will NOT Do". Phase 9's compute-pass backlog is where
-// ShaderReadWrite/ShaderWrite (storage image/buffer access, needed for a
-// future compute pass) would be added, not now - adding a new enumerator
-// here MUST be accompanied by updating every exhaustive switch that
-// consumes it (see IsWriteAccess()/ToString() below, both deliberately
-// written with NO `default:` case so a future addition fails to compile
-// here until every consumer is updated too).
+// Originally scoped to exactly what Phases 1-8's graphics-only MVP needed
+// - see RENDERGRAPH_PHASE0_MASTER_STRATEGY_v2.md's "What We Will NOT Do".
+// Extended by Phase 5 of the compute-shader campaign
+// (COMPUTE_PHASE5_SYNCHRONIZATION_STRATEGY_v2.md) with three new
+// enumerators - ComputeShaderRead/ComputeShaderWrite (a StructuredBuffer/
+// RWStructuredBuffer or RWTexture's compute-shader access - see
+// COMPUTE_PHASE1_RESOURCE_VOCABULARY_STRATEGY_v2.md) and
+// IndirectCommandRead (the companion GPU-driven-rendering document's own
+// indirect-draw-buffer read, VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT/
+// VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT - added here, alongside the other
+// two, as the single shared source of truth both documents are meant to
+// consume, per COMPUTE_PHASE5_SYNCHRONIZATION_STRATEGY_v2.md's own Step 2:
+// "whichever document's implementation lands FIRST is where the enum
+// values are actually added"). Adding a new enumerator here MUST be
+// accompanied by updating every exhaustive switch that consumes it (see
+// IsWriteAccess()/ToString() below, both deliberately written with NO
+// `default:` case so a future addition fails to compile here until every
+// consumer is updated too) - RenderGraphBarrierPlanner.cpp's
+// RequiredStateFor() follows the exact same rule.
 enum class ResourceAccess : std::uint8_t {
     ColorAttachmentWrite,
     DepthStencilAttachmentReadWrite,
     ShaderRead, // sampled in a fragment shader (e.g. a material texture / a previous pass's output)
     TransferSrc,
     TransferDst,
+    // A StructuredBuffer/RWStructuredBuffer or RWTexture read by a compute
+    // shader - VK_DESCRIPTOR_TYPE_STORAGE_BUFFER/STORAGE_IMAGE, never a
+    // write hazard source for a later read (see
+    // COMPUTE_PHASE1_RESOURCE_VOCABULARY_STRATEGY_v2.md's own
+    // RWStructuredBuffer-vs-StructuredBuffer split - both map to this one
+    // ResourceAccess value; the read-only/read-write distinction is
+    // enforced at the GLSL level - `readonly buffer` vs. plain `buffer` -
+    // never here).
+    ComputeShaderRead,
+    // The write-side counterpart of ComputeShaderRead above - a
+    // RWStructuredBuffer/RWTexture written by a compute shader.
+    ComputeShaderWrite,
+    // A buffer read as the source of vkCmdDrawIndexedIndirect/
+    // vkCmdDrawIndirect - the companion GPU-driven-rendering document's own
+    // indirect-draw-buffer read. Buffer-only in practice (an indirect
+    // command buffer has no texture equivalent) - never asserted against
+    // isDepthResource in RequiredStateFor(), since it is meaningful
+    // regardless of that flag.
+    IndirectCommandRead,
 };
 
 // True for any access kind that can WRITE the resource's contents (used by

@@ -116,8 +116,13 @@ void RenderGraph::ApplyUsageBarrierIfNeeded(VkCommandBuffer cmd, const ResourceU
         // texture that also has a color image" as a distinct usage (e.g. a
         // shadow map sampled by a later pass) - see
         // RENDERGRAPH_PHASE5_COMPLETION_REPORT.md's own MRT/attachment-count
-        // scope notes for the sibling limitation this mirrors.
-        const bool isDepthAccess = (usage.access == ResourceAccess::DepthStencilAttachmentReadWrite);
+        // scope notes for the sibling limitation this mirrors. Phase 5 of
+        // the compute-shader campaign (COMPUTE_PHASE5_SYNCHRONIZATION_STRATEGY_v2.md)
+        // confirmed this correctly leaves a storage-image compute access
+        // (ComputeShaderRead/ComputeShaderWrite) routed to the color half
+        // too - TargetsDepthState() is the extracted, Tier-1-tested
+        // decision behind this line (see RenderGraphBarrierPlanner.h).
+        const bool isDepthAccess = TargetsDepthState(usage.access);
         ResourceState& state = isDepthAccess ? tex.depthState : tex.colorState;
         const ResourceState next = RequiredStateFor(usage.access, isDepthAccess);
 

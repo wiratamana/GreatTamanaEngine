@@ -21,6 +21,12 @@ bool IsWriteAccess(ResourceAccess access) noexcept
         return false; // The SOURCE of a copy is only ever read.
     case ResourceAccess::TransferDst:
         return true; // The DESTINATION of a copy is written.
+    case ResourceAccess::ComputeShaderRead:
+        return false;
+    case ResourceAccess::ComputeShaderWrite:
+        return true;
+    case ResourceAccess::IndirectCommandRead:
+        return false; // The indirect-draw buffer is only ever READ by vkCmdDraw(Indexed)Indirect.
     }
     return false;
 }
@@ -39,6 +45,12 @@ const char* ToString(ResourceAccess access) noexcept
         return "TransferSrc";
     case ResourceAccess::TransferDst:
         return "TransferDst";
+    case ResourceAccess::ComputeShaderRead:
+        return "ComputeShaderRead";
+    case ResourceAccess::ComputeShaderWrite:
+        return "ComputeShaderWrite";
+    case ResourceAccess::IndirectCommandRead:
+        return "IndirectCommandRead";
     }
     return "Unknown";
 }

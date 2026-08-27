@@ -95,6 +95,24 @@ struct ResourceState {
 // below).
 ResourceState RequiredStateFor(ResourceAccess access, bool isDepthResource) noexcept;
 
+// Pure decision: does `access` target a texture's DEPTH state, or its COLOR
+// state? Every ResourceAccess value targets the COLOR half of a texture's
+// tracked state EXCEPT DepthStencilAttachmentReadWrite - this is the single
+// exception RenderGraph.cpp's ApplyUsageBarrierIfNeeded() branches on to
+// decide whether to update tex.depthState or tex.colorState. Extracted here
+// as its own standalone, Tier-1-testable function (rather than left as an
+// inline `usage.access == ResourceAccess::DepthStencilAttachmentReadWrite`
+// comparison inside RenderGraph.cpp, which needs a live VkDevice to test at
+// all) specifically so Phase 5 of the compute-shader campaign
+// (COMPUTE_PHASE5_SYNCHRONIZATION_STRATEGY_v2.md) could directly VERIFY,
+// rather than merely assert by inspection, that a storage-image compute
+// access (ComputeShaderRead/ComputeShaderWrite) is correctly routed to a
+// texture's color half, never its depth half - see
+// tests/Renderer/RenderGraph/RenderGraphBarrierPlannerTests.cpp. Meaningless
+// for a buffer usage (buffers have no depth/color split at all) - callers
+// only ever consult this for a ResourceKind::Texture usage.
+bool TargetsDepthState(ResourceAccess access) noexcept;
+
 // Pure decision: is a barrier even NEEDED to transition a resource from
 // `previous` to `next`? A resource read by two consecutive ShaderRead
 // passes with an IDENTICAL layout/stage/access needs no barrier at all

@@ -409,6 +409,54 @@ TEST(RenderGraphCompilerTest, FinalOutputHandleNeverProducedByAnythingDoesNotCra
     EXPECT_TRUE(input.passes[0].isCulled);
 }
 
+// --- Compute-shader campaign Phase 5's own buffer-reachability caveat -----
+// (COMPUTE_PHASE5_SYNCHRONIZATION_STRATEGY_v2.md, Step 6) -------------------
+//
+// RenderGraphCompiler::Compile()'s `finalOutputs` root set is TextureHandle-
+// only - there is no BufferHandle equivalent, and RenderGraphBuilder has no
+// ImportBuffer() counterpart to ImportTexture() at all. A compute pass whose
+// ONLY declared write is a buffer can therefore be silently culled unless
+// some OTHER, ALSO-kept pass reads that buffer and itself has a path (direct
+// or transitive) to a real texture write in `finalOutputs` - exactly the
+// buffer-side sibling of every existing texture-culling test above. Three
+// passes: PassA writes buffer B (no texture write of its own) - PassB reads
+// B and writes texture T, a real finalOutputs root - PassC ALSO writes
+// buffer B but has no reader and no path to finalOutputs at all.
+TEST(RenderGraphCompilerTest, BufferOnlyWriteSurvivesCullingOnlyWhenAReaderReachesATextureFinalOutput)
+{
+    RenderGraphBuilder builder;
+    const BufferHandle bufferB = builder.CreateBuffer("B", BufferDesc{ 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
+    const TextureHandle textureT = builder.CreateTexture("T", MakeTextureDesc());
+
+    builder.AddPass(
+        "PassA",
+        [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteBuffer(bufferB, ResourceAccess::ComputeShaderWrite); },
+        NoOpExecute); // index 0 - buffer-only write, no texture output of its own.
+    builder.AddPass(
+        "PassB",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.ReadBuffer(bufferB, ResourceAccess::ComputeShaderRead);
+            pass.WriteColorAttachment(textureT);
+        },
+        NoOpExecute); // index 1 - reads B, and its own texture write IS a finalOutputs root.
+    builder.AddPass(
+        "PassC",
+        [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteBuffer(bufferB, ResourceAccess::ComputeShaderWrite); },
+        NoOpExecute); // index 2 - ALSO writes B, but nothing ever reads it - dead code.
+
+    CompiledGraphInput input = builder.Finish();
+    const TextureHandle finalOutputs[] = { textureT };
+    const CompiledGraph compiled = Compile(input, finalOutputs);
+
+    // PassA/PassB both survive (PassA's buffer write is kept alive
+    // transitively through PassB's own real texture output), in that
+    // execution order; PassC is correctly culled.
+    EXPECT_TRUE(ExecutionOrderEquals(compiled.executionOrder, { 0, 1 }));
+    EXPECT_FALSE(input.passes[0].isCulled);
+    EXPECT_FALSE(input.passes[1].isCulled);
+    EXPECT_TRUE(input.passes[2].isCulled);
+}
+
 // --- Cycle detection --------------------------------------------------------
 //
 // RENDERGRAPH_PHASE3_COMPILATION_STRATEGY_v1.md's own Step 3.4 asks for a

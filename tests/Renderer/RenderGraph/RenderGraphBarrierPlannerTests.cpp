@@ -91,6 +91,113 @@ TEST(RenderGraphBarrierPlannerTest, RequiredStateForTransferDst)
     EXPECT_EQ(state.accessMask, VK_ACCESS_2_TRANSFER_WRITE_BIT);
 }
 
+// --- RequiredStateFor() - Phase 5 of the compute-shader campaign's new -----
+// --- enumerators (COMPUTE_PHASE5_SYNCHRONIZATION_STRATEGY_v2.md) -----------
+
+TEST(RenderGraphBarrierPlannerTest, RequiredStateForComputeShaderRead)
+{
+    const ResourceState state = RequiredStateFor(ResourceAccess::ComputeShaderRead, false);
+
+    EXPECT_EQ(state.layout, VK_IMAGE_LAYOUT_GENERAL);
+    EXPECT_EQ(state.stageMask, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+    EXPECT_EQ(state.accessMask, VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
+}
+
+TEST(RenderGraphBarrierPlannerTest, RequiredStateForComputeShaderWrite)
+{
+    const ResourceState state = RequiredStateFor(ResourceAccess::ComputeShaderWrite, false);
+
+    EXPECT_EQ(state.layout, VK_IMAGE_LAYOUT_GENERAL);
+    EXPECT_EQ(state.stageMask, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+    EXPECT_EQ(state.accessMask, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+}
+
+TEST(RenderGraphBarrierPlannerTest, RequiredStateForIndirectCommandRead)
+{
+    const ResourceState state = RequiredStateFor(ResourceAccess::IndirectCommandRead, false);
+
+    EXPECT_EQ(state.stageMask, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
+    EXPECT_EQ(state.accessMask, VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT);
+}
+
+// ComputeShaderRead/ComputeShaderWrite must produce the exact SAME
+// ResourceState value regardless of the resource kind it's applied against
+// (a buffer's `layout` field is simply unused - see BuildBufferMemoryBarrier2()
+// and RequiredStateFor()'s own comment on this) - mirroring TransferSrc/
+// TransferDst's own existing dual applicability.
+TEST(RenderGraphBarrierPlannerTest, ComputeShaderReadAndWriteAreSymmetricApartFromAccessDirection)
+{
+    const ResourceState readState = RequiredStateFor(ResourceAccess::ComputeShaderRead, false);
+    const ResourceState writeState = RequiredStateFor(ResourceAccess::ComputeShaderWrite, false);
+
+    EXPECT_EQ(readState.layout, writeState.layout);
+    EXPECT_EQ(readState.stageMask, writeState.stageMask);
+    EXPECT_NE(readState.accessMask, writeState.accessMask);
+}
+
+// --- TargetsDepthState() - one case per enumerator -------------------------
+//
+// Confirms, directly (not merely by inspection), that a storage-image
+// compute access is routed to a texture's COLOR half, never its depth half -
+// see COMPUTE_PHASE5_SYNCHRONIZATION_STRATEGY_v2.md's own Step 3
+// ("write a targeted unit test proving it rather than trusting it by
+// inspection alone").
+
+TEST(RenderGraphBarrierPlannerTest, TargetsDepthStateIsTrueOnlyForDepthStencilAttachmentReadWrite)
+{
+    EXPECT_FALSE(TargetsDepthState(ResourceAccess::ColorAttachmentWrite));
+    EXPECT_TRUE(TargetsDepthState(ResourceAccess::DepthStencilAttachmentReadWrite));
+    EXPECT_FALSE(TargetsDepthState(ResourceAccess::ShaderRead));
+    EXPECT_FALSE(TargetsDepthState(ResourceAccess::TransferSrc));
+    EXPECT_FALSE(TargetsDepthState(ResourceAccess::TransferDst));
+    EXPECT_FALSE(TargetsDepthState(ResourceAccess::ComputeShaderRead));
+    EXPECT_FALSE(TargetsDepthState(ResourceAccess::ComputeShaderWrite));
+    EXPECT_FALSE(TargetsDepthState(ResourceAccess::IndirectCommandRead));
+}
+
+// --- Texture-side hand-simulated sequence: ComputeShaderWrite (an ---------
+// --- RWTexture) -> ShaderRead (the same texture, sampled normally by a ----
+// --- later graphics pass) --------------------------------------------------
+//
+// The texture-side sibling of the companion GPU-driven-rendering document's
+// own buffer-side ComputeShaderWrite -> IndirectCommandRead regression test
+// (see COMPUTE_PHASE5_SYNCHRONIZATION_STRATEGY_v2.md, Step 3) - together the
+// two prove the ResourceAccess extension generalizes correctly across both
+// resource kinds. Confirms exactly one barrier is emitted with
+// VK_IMAGE_LAYOUT_GENERAL -> VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL and the
+// matching stage/access masks.
+TEST(RenderGraphBarrierPlannerTest, ComputeShaderWriteFollowedByShaderReadEmitsExactlyOneCorrectBarrier)
+{
+    const ResourceState afterComputeWrite = RequiredStateFor(ResourceAccess::ComputeShaderWrite, false);
+    const ResourceState afterShaderRead = RequiredStateFor(ResourceAccess::ShaderRead, false);
+
+    ASSERT_TRUE(RequiresBarrier(afterComputeWrite, afterShaderRead));
+
+    const VkImageMemoryBarrier2 barrier =
+        BuildImageMemoryBarrier2(VK_NULL_HANDLE, VkImageSubresourceRange{}, afterComputeWrite, afterShaderRead);
+
+    EXPECT_EQ(barrier.oldLayout, VK_IMAGE_LAYOUT_GENERAL);
+    EXPECT_EQ(barrier.newLayout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    EXPECT_EQ(barrier.srcStageMask, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+    EXPECT_EQ(barrier.srcAccessMask, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+    EXPECT_EQ(barrier.dstStageMask, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
+    EXPECT_EQ(barrier.dstAccessMask, VK_ACCESS_2_SHADER_READ_BIT);
+}
+
+// Two consecutive ComputeShaderWrite usages against the SAME resource (e.g.
+// two dispatches within the same declared pass, or two passes that both
+// write the same RWTexture back-to-back with no intervening read) need NO
+// barrier at all between them - identical layout/stage/access, same
+// "already-known-safe redundant transition is skipped" optimization
+// RequiresBarrier() already provides for ShaderRead/ShaderRead above.
+TEST(RenderGraphBarrierPlannerTest, RequiresBarrierIsFalseForTwoConsecutiveComputeShaderWrites)
+{
+    const ResourceState a = RequiredStateFor(ResourceAccess::ComputeShaderWrite, false);
+    const ResourceState b = RequiredStateFor(ResourceAccess::ComputeShaderWrite, false);
+
+    EXPECT_FALSE(RequiresBarrier(a, b));
+}
+
 // --- RequiresBarrier() -----------------------------------------------------
 
 TEST(RenderGraphBarrierPlannerTest, RequiresBarrierIsFalseForTwoIdenticalStates)

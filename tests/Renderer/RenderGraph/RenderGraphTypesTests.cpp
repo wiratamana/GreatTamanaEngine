@@ -206,6 +206,24 @@ TEST(RenderGraphResourceAccessTest, TransferDstIsAWrite)
     EXPECT_TRUE(IsWriteAccess(ResourceAccess::TransferDst));
 }
 
+// Phase 5 of the compute-shader campaign
+// (COMPUTE_PHASE5_SYNCHRONIZATION_STRATEGY_v2.md) - the three new
+// enumerators.
+TEST(RenderGraphResourceAccessTest, ComputeShaderReadIsNotAWrite)
+{
+    EXPECT_FALSE(IsWriteAccess(ResourceAccess::ComputeShaderRead));
+}
+
+TEST(RenderGraphResourceAccessTest, ComputeShaderWriteIsAWrite)
+{
+    EXPECT_TRUE(IsWriteAccess(ResourceAccess::ComputeShaderWrite));
+}
+
+TEST(RenderGraphResourceAccessTest, IndirectCommandReadIsNotAWrite)
+{
+    EXPECT_FALSE(IsWriteAccess(ResourceAccess::IndirectCommandRead));
+}
+
 // --- ToString() - one assertion per enumerator, non-empty, non-null ------
 
 TEST(RenderGraphResourceAccessTest, ToStringCoversEveryEnumeratorNonNullNonEmpty)
@@ -216,6 +234,9 @@ TEST(RenderGraphResourceAccessTest, ToStringCoversEveryEnumeratorNonNullNonEmpty
         ResourceAccess::ShaderRead,
         ResourceAccess::TransferSrc,
         ResourceAccess::TransferDst,
+        ResourceAccess::ComputeShaderRead,
+        ResourceAccess::ComputeShaderWrite,
+        ResourceAccess::IndirectCommandRead,
     };
 
     for (const ResourceAccess value : values) {
@@ -232,6 +253,9 @@ TEST(RenderGraphResourceAccessTest, ToStringProducesDistinctNamesForDistinctEnum
     EXPECT_STREQ(ToString(ResourceAccess::ShaderRead), "ShaderRead");
     EXPECT_STREQ(ToString(ResourceAccess::TransferSrc), "TransferSrc");
     EXPECT_STREQ(ToString(ResourceAccess::TransferDst), "TransferDst");
+    EXPECT_STREQ(ToString(ResourceAccess::ComputeShaderRead), "ComputeShaderRead");
+    EXPECT_STREQ(ToString(ResourceAccess::ComputeShaderWrite), "ComputeShaderWrite");
+    EXPECT_STREQ(ToString(ResourceAccess::IndirectCommandRead), "IndirectCommandRead");
 }
 
 // --- PassRecord / ResourceUsage - basic plain-data sanity -----------------
