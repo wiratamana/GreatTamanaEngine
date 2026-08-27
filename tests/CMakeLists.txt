@@ -100,6 +100,21 @@
 #                                            Phase 4B's own GpuTimingService/
 #                                            VulkanQueryPool are Tier 2, see
 #                                            the note below).
+#   - Renderer/ComputeDispatchTests.cpp      - the compute-shader campaign's
+#                                            Phase 4 pure dispatch math
+#                                            (ComputeGroupCount()/
+#                                            ComputeGroupCount3D() -
+#                                            src/Renderer/ComputeDispatch.h) -
+#                                            exact multiples, the
+#                                            non-exact-multiple ceiling-
+#                                            division regression case (100
+#                                            items at group size 64 must
+#                                            yield group count 2, never the
+#                                            truncating-division 1), zero
+#                                            items, and the 3D per-axis
+#                                            overload - no Vulkan/Renderer/
+#                                            live GPU device involved at
+#                                            all.
 #   - Renderer/RenderGraph/RenderGraphTypesTests.cpp - Render Graph Phase 1's
 #                                            pure vocabulary (handles/
 #                                            ResourceAccess/TextureDesc/
@@ -523,6 +538,7 @@ set(GTE_TEST_SOURCES
     Renderer/ResourcePoolTests.cpp
     Renderer/DrawStatsTests.cpp
     Renderer/GpuTimingTests.cpp
+    Renderer/ComputeDispatchTests.cpp
     Renderer/RenderGraph/RenderGraphTypesTests.cpp
     Renderer/RenderGraph/RenderGraphBuilderTests.cpp
     Renderer/RenderGraph/RenderGraphCompilerTests.cpp

@@ -3,6 +3,7 @@
 #include "../Window/Window.h"
 #include "RenderGraph/RenderGraph.h"
 
+#include <cassert>
 #include <memory>
 #include <utility>
 
@@ -232,6 +233,33 @@ ComputePipeline Renderer::CreateComputePipeline(const std::string& shaderSpirvPa
 VkDescriptorSet Renderer::AllocateComputeDescriptorSet(VkDescriptorSetLayout layout) const
 {
     return m_resources.AllocateComputeDescriptorSet(layout);
+}
+
+void Renderer::Dispatch(const ComputePipeline& pipeline, VkDescriptorSet descriptorSet, const void* pushConstants,
+    std::uint32_t pushConstantBytes, std::uint32_t groupCountX, std::uint32_t groupCountY, std::uint32_t groupCountZ)
+{
+    // Phase 4 (COMPUTE_PHASE4_DISPATCH_EXECUTION_STRATEGY_v2.md) - see this
+    // method's own doc comment in Renderer.h for the full reasoning: unlike
+    // Submit(), there is deliberately no legacy/queued fallback - a
+    // dispatch outside an active render-graph pass recording has nothing
+    // sensible to do at all.
+    assert(m_currentGraphPassCmd != VK_NULL_HANDLE
+        && "Renderer::Dispatch() called outside of a render-graph pass recording - see "
+           "BeginGraphPassRecording()/EndGraphPassRecording()");
+    if (m_currentGraphPassCmd == VK_NULL_HANDLE) {
+        return;
+    }
+
+    vkCmdBindPipeline(m_currentGraphPassCmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Native());
+    if (descriptorSet != VK_NULL_HANDLE) {
+        vkCmdBindDescriptorSets(
+            m_currentGraphPassCmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Layout(), 0, 1, &descriptorSet, 0, nullptr);
+    }
+    if (pushConstantBytes > 0 && pushConstants != nullptr) {
+        vkCmdPushConstants(
+            m_currentGraphPassCmd, pipeline.Layout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, pushConstantBytes, pushConstants);
+    }
+    vkCmdDispatch(m_currentGraphPassCmd, groupCountX, groupCountY, groupCountZ);
 }
 
 Mesh Renderer::CreateMesh(

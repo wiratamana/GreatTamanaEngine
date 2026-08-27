@@ -286,6 +286,7 @@ add_library(gte_core STATIC
     src/Renderer/ComputePipeline.h
     src/Renderer/ComputeDescriptorSet.cpp
     src/Renderer/ComputeDescriptorSet.h
+    src/Renderer/ComputeDispatch.h
     src/Renderer/Vertex.h
     src/Renderer/MeshVertex.h
     src/Renderer/Primitives/PrimitiveMeshGenerator.cpp

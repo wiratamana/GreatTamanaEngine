@@ -2,6 +2,7 @@
 
 #include "../Math/Mat4.h"
 #include "Buffer.h"
+#include "ComputeDispatch.h"
 #include "FramePresenter.h"
 #include "FrameRecorder.h"
 #include "GpuResourceFactory.h"
@@ -384,6 +385,43 @@ public:
     // reasoning (in particular why the returned set is never individually
     // freed).
     VkDescriptorSet AllocateComputeDescriptorSet(VkDescriptorSetLayout layout) const;
+
+    // Phase 4 (COMPUTE_PHASE4_DISPATCH_EXECUTION_STRATEGY_v2.md) - the
+    // compute sibling of Submit() above: issues a real vkCmdDispatch
+    // against whichever render-graph pass is currently being recorded (see
+    // BeginGraphPassRecording()/EndGraphPassRecording()). Binds `pipeline`
+    // (VK_PIPELINE_BIND_POINT_COMPUTE), optionally binds `descriptorSet` as
+    // descriptor set 0 (skipped when VK_NULL_HANDLE), optionally pushes
+    // `pushConstantBytes` bytes from `pushConstants` at offset 0 with
+    // VK_SHADER_STAGE_COMPUTE_BIT (skipped when `pushConstantBytes == 0`),
+    // then dispatches `groupCountX`*`groupCountY`*`groupCountZ` work
+    // groups - `groupCountY`/`groupCountZ` default to 1 for a flat 1D
+    // dispatch. Compute a correct `groupCountX`/`Y`/`Z` via
+    // ComputeDispatch.h's ComputeGroupCount()/ComputeGroupCount3D(), never
+    // plain integer division (see that header's own comment for why).
+    //
+    // Unlike Submit() above, there is deliberately NO legacy/queued
+    // fallback path - compute dispatch is introduced ONLY as a render-
+    // graph-pass operation from day one (no pre-existing non-graph compute
+    // call site to preserve backward compatibility with). Calling this
+    // OUTSIDE of a BeginGraphPassRecording()/EndGraphPassRecording()
+    // bracket has nothing sensible to do at all: asserts in debug builds,
+    // and is a safe no-op in release (see COMPUTE_PHASE4_DISPATCH_EXECUTION_STRATEGY_v2.md's
+    // own Step 6, point 3).
+    //
+    // No PassContext::recordDispatch callback is involved (see that same
+    // document's Step 6, point 1) - a compute pass's own `execute`
+    // callback calls this directly, the same way a graphics pass's
+    // `execute` callback already calls Renderer::Submit() directly today.
+    // Also deliberately does NOT touch PassGpuStats::drawStats (see Step
+    // 6, point 2) - there is no meaningful compute equivalent of a
+    // triangle count yet; a pure-compute pass's GPU TIME is still recorded
+    // automatically by RenderGraph::ExecuteCompiledGraph()'s own
+    // unconditional per-pass timestamp bracket, with zero changes needed
+    // here.
+    void Dispatch(const ComputePipeline& pipeline, VkDescriptorSet descriptorSet, const void* pushConstants,
+        std::uint32_t pushConstantBytes, std::uint32_t groupCountX, std::uint32_t groupCountY = 1,
+        std::uint32_t groupCountZ = 1);
 
     // Factory for meshes: a vertex buffer + vertex count, NO index buffer -
     // see Mesh.h's non-indexed constructor. So callers never need direct
