@@ -94,11 +94,6 @@ void Renderer::OnResize(int width, int height)
     m_presenter.OnResize(width, height);
 }
 
-std::optional<DrawStats> Renderer::Present(const std::function<void(VkCommandBuffer)>& recordExtra)
-{
-    return m_presenter.Present(m_frameRecorder, recordExtra);
-}
-
 DrawStats Renderer::RenderOffscreen(
     RenderTexture& target, std::optional<GpuTimingSlot> timingSlot, const std::function<void(VkCommandBuffer)>& recordExtra)
 {

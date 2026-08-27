@@ -34,8 +34,8 @@ FramePresenter::FramePresenter(VkPhysicalDevice physicalDevice, VkDevice device,
     // m_depthBuffers is deliberately NOT created here - see its own comment
     // in FramePresenter.h for why the swapchain's own depth buffers are
     // allocated lazily (EnsureDepthBuffersForSwapchain(), called from
-    // Present() only once a frame is actually found to need one) rather
-    // than unconditionally up front.
+    // PresentViaRenderGraph()/RenderOffscreen(), only once a frame is
+    // actually found to need one) rather than unconditionally up front.
 }
 
 FramePresenter::~FramePresenter()
@@ -176,8 +176,9 @@ void FramePresenter::EnsureDepthBuffersForSwapchain()
 {
     // No-op once they already exist - see m_depthBuffers' own comment in
     // FramePresenter.h for why they're deliberately not created eagerly in
-    // the constructor. Called from Present() only on a frame that's
-    // actually found to need one (FrameRecorder::HasQueuedDraws()).
+    // the constructor. Called from PresentViaRenderGraph() only on a frame
+    // that's actually found to need one (its own `needsSwapchainDepth`
+    // parameter).
     if (m_depthBuffers.empty()) {
         CreateDepthBuffers();
     }
@@ -219,160 +220,6 @@ void FramePresenter::RecreateSwapchain()
     }
 
     m_resizeRequested = false;
-}
-
-std::optional<DrawStats> FramePresenter::Present(
-    FrameRecorder& frameRecorder, const std::function<void(VkCommandBuffer)>& recordExtra)
-{
-    if (m_pendingWidth <= 0 || m_pendingHeight <= 0) {
-        return std::nullopt; // Minimized - nothing to draw this frame.
-    }
-
-    if (m_resizeRequested) {
-        RecreateSwapchain();
-        if (m_resizeRequested) {
-            return std::nullopt; // Still pending (stayed minimized) - try again next frame.
-        }
-    }
-
-    const VkFence fence = m_frameSync.InFlightFence(m_currentFrame);
-    vkWaitForFences(m_device, 1, &fence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
-    // Phase 4D (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) - safe to read
-    // back whatever was written into THIS frame-in-flight slot
-    // kFramesInFlight frames ago: the fence wait immediately above already
-    // proves that submission has fully completed - this is the exact,
-    // pre-existing synchronization point Phase 4D piggybacks on, never a
-    // new wait added just to fetch this sooner. A no-op (cached
-    // Absent/Unsupported, no Vulkan call) until this slot has genuinely
-    // been written at least once - see GpuTimingService::
-    // ReadPresentResultIfAvailable()'s own warm-up handling.
-    m_gpuTiming->ReadPresentResultIfAvailable(m_currentFrame);
-
-    std::uint32_t imageIndex = 0;
-    const VkResult acquireResult = vkAcquireNextImageKHR(
-        m_device, m_swapchain.Native(), std::numeric_limits<std::uint64_t>::max(),
-        m_frameSync.ImageAvailableSemaphore(m_currentFrame), VK_NULL_HANDLE, &imageIndex);
-
-    if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR) {
-        RecreateSwapchain();
-        return std::nullopt;
-    }
-    if (acquireResult != VK_SUCCESS && acquireResult != VK_SUBOPTIMAL_KHR) {
-        throw std::runtime_error("vkAcquireNextImageKHR failed (VkResult=" + std::to_string(acquireResult) + ")");
-    }
-
-    vkResetFences(m_device, 1, &fence);
-
-    // Whether THIS frame's swapchain pass will actually draw real, depth-
-    // tested engine geometry directly into the swapchain image, rather than
-    // just Dear ImGui's own (never depth-tested) chrome - see
-    // FrameRecorder::HasQueuedDraws()'s own comment for the two cases where
-    // this is true (a release build with no Editor at all, or the rare
-    // Editor edge case where both "Game" and "Scene" panels are
-    // simultaneously hidden) versus the common Editor case where it's
-    // false. Decided BEFORE beginning command buffer recording below, since
-    // EnsureDepthBuffersForSwapchain() is a plain host-side Vulkan resource
-    // creation call, not itself part of what gets recorded.
-    const bool needsDepth = frameRecorder.HasQueuedDraws();
-    if (needsDepth) {
-        EnsureDepthBuffersForSwapchain();
-    }
-
-    const VkCommandBuffer cmd = m_commandBuffers[m_currentFrame];
-    vkResetCommandBuffer(cmd, 0);
-
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    if (vkBeginCommandBuffer(cmd, &beginInfo) != VK_SUCCESS) {
-        throw std::runtime_error("vkBeginCommandBuffer failed");
-    }
-
-    // Phase 4D (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) - reset (both
-    // slots for THIS frame-in-flight index) + a TOP_OF_PIPE timestamp
-    // write, recorded OUTSIDE any dynamic rendering instance (before
-    // frameRecorder.RecordFrame() below opens/closes its own
-    // vkCmdBeginRendering/vkCmdEndRendering pair - see AGENTS.md-equivalent
-    // reasoning in that document's Step 2.3). Safe to reset+write here
-    // specifically because the fence wait at the top of this function
-    // already proved the LAST use of this exact slot pair
-    // (kFramesInFlight frames ago) is complete. A no-op when unsupported/
-    // uncompiled-in/capture-disabled.
-    m_gpuTiming->RecordPresentPassStart(cmd, m_currentFrame);
-
-    RenderTarget target;
-    target.image = m_swapchain.Image(imageIndex);
-    target.imageView = m_swapchain.ImageView(imageIndex);
-    target.extent = m_swapchain.Extent();
-    target.format = m_swapchain.ImageFormat();
-    if (needsDepth) {
-        // Depth buffer paired with THIS swapchain image - see the class
-        // comment in FramePresenter.h for why indexing by imageIndex (not
-        // m_currentFrame) is what makes this safe with no extra
-        // synchronization.
-        const DepthBuffer& depthBuffer = m_depthBuffers[imageIndex];
-        target.depthImage = depthBuffer.Image();
-        target.depthImageView = depthBuffer.View();
-        target.depthFormat = depthBuffer.Format();
-        target.depthHasStencil = depthBuffer.HasStencilComponent();
-    }
-    // else: target.depthImage/depthImageView stay VK_NULL_HANDLE and
-    // target.depthFormat stays VK_FORMAT_UNDEFINED (RenderTarget's own
-    // defaults) - FrameRecorder::RecordFrame() treats a VK_NULL_HANDLE
-    // depthImage as "skip the depth attachment for this pass entirely".
-    const DrawStats drawStats = frameRecorder.RecordFrame(
-        cmd, target, ColorFormat(), m_depthFormat, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, recordExtra);
-
-    // BOTTOM_OF_PIPE timestamp write, immediately followed by marking this
-    // frame-in-flight slot as having genuinely been written this call -
-    // see RecordPresentPassStart()'s own comment above for why this
-    // placement (bracketing the WHOLE recorded pass, including recordExtra
-    // - Dear ImGui's own chrome) is correct. MarkPresentSlotWritten() is a
-    // safe no-op under the exact same guard as the Record* calls, so it's
-    // fine to call unconditionally right here (see GpuTimingService.h).
-    m_gpuTiming->RecordPresentPassEnd(cmd, m_currentFrame);
-    m_gpuTiming->MarkPresentSlotWritten(m_currentFrame);
-
-    if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
-        throw std::runtime_error("vkEndCommandBuffer failed");
-    }
-
-    const VkSemaphore waitSemaphore = m_frameSync.ImageAvailableSemaphore(m_currentFrame);
-    const VkSemaphore signalSemaphore = m_frameSync.RenderFinishedSemaphore(imageIndex);
-    const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.waitSemaphoreCount = 1;
-    submitInfo.pWaitSemaphores = &waitSemaphore;
-    submitInfo.pWaitDstStageMask = &waitStage;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &cmd;
-    submitInfo.signalSemaphoreCount = 1;
-    submitInfo.pSignalSemaphores = &signalSemaphore;
-
-    if (vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, fence) != VK_SUCCESS) {
-        throw std::runtime_error("vkQueueSubmit failed");
-    }
-
-    VkPresentInfoKHR presentInfo{};
-    presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-    presentInfo.waitSemaphoreCount = 1;
-    presentInfo.pWaitSemaphores = &signalSemaphore;
-    const VkSwapchainKHR swapchain = m_swapchain.Native();
-    presentInfo.swapchainCount = 1;
-    presentInfo.pSwapchains = &swapchain;
-    presentInfo.pImageIndices = &imageIndex;
-
-    const VkResult presentResult = vkQueuePresentKHR(m_presentQueue, &presentInfo);
-    if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR) {
-        m_resizeRequested = true;
-    } else if (presentResult != VK_SUCCESS) {
-        throw std::runtime_error("vkQueuePresentKHR failed (VkResult=" + std::to_string(presentResult) + ")");
-    }
-
-    m_currentFrame = (m_currentFrame + 1) % kFramesInFlight;
-
-    return drawStats;
 }
 
 DrawStats FramePresenter::RenderOffscreen(FrameRecorder& frameRecorder, RenderTexture& target,

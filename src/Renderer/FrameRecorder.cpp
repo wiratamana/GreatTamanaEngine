@@ -86,7 +86,8 @@ DrawStats FrameRecorder::RecordFrame(VkCommandBuffer cmd, const RenderTarget& ta
     // Target Format Matching"). A target that's deliberately a different
     // format needs its own dedicated pipeline variant recorded through
     // recordExtra; this catches a mismatch right here, at the one recording
-    // path shared by Present()/RenderOffscreen(), instead of a confusing
+    // path shared by every RecordFrame() caller
+    // (FramePresenter::RenderOffscreen()), instead of a confusing
     // validation-layer warning (or silent misrendering on a driver that
     // happens to tolerate it). Compiled out entirely in release (NDEBUG) -
     // zero cost.
@@ -95,10 +96,8 @@ DrawStats FrameRecorder::RecordFrame(VkCommandBuffer cmd, const RenderTarget& ta
         "any pipeline recorded via recordExtra here must have been built for THIS target's exact format.");
     // Only enforced when this target actually carries a depth image -
     // target.depthImage == VK_NULL_HANDLE deliberately means "skip the depth
-    // attachment for this pass entirely" (see below) - e.g.
-    // FramePresenter::Present() lazily skips allocating/binding the
-    // swapchain's own depth buffers on a frame where nothing but Dear
-    // ImGui's own (never depth-tested) chrome is being drawn into it.
+    // attachment for this pass entirely" (see below) - for a target with
+    // nothing depth-tested to draw into it.
     assert((target.depthImage == VK_NULL_HANDLE || target.depthFormat == expectedDepthFormat) &&
         "FrameRecorder::RecordFrame: target depth format does not match Renderer::DepthFormat().");
 
@@ -193,9 +192,8 @@ DrawStats FrameRecorder::RecordFrame(VkCommandBuffer cmd, const RenderTarget& ta
     // pipeline that itself requires a real depth attachment (e.g. this
     // engine's own Pipeline, built with depthAttachmentFormat =
     // Renderer::DepthFormat()) is never actually bound/drawn with in that
-    // case anyway, since m_drawQueue is guaranteed empty whenever the caller
-    // chose not to supply a depth image - see
-    // FrameRecorder::HasQueuedDraws()'s own comment.
+    // case, since a target with no depth image has nothing depth-tested to
+    // draw into it in the first place.
     renderingInfo.pDepthAttachment = hasDepth ? &depthAttachment : nullptr;
 
     vkCmdBeginRendering(cmd, &renderingInfo);
@@ -267,8 +265,10 @@ DrawStats FrameRecorder::RecordFrame(VkCommandBuffer cmd, const RenderTarget& ta
         toFinal.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
         toFinal.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
     } else {
-        // Swapchain path (Present): nothing further touches the image on
-        // our side before the presentation engine takes it.
+        // Any other finalLayout (e.g. VK_IMAGE_LAYOUT_PRESENT_SRC_KHR):
+        // nothing further touches the image on our side before whatever
+        // consumes it next (the presentation engine, for a swapchain
+        // image) does.
         toFinal.dstStageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
         toFinal.dstAccessMask = VK_ACCESS_2_NONE;
     }

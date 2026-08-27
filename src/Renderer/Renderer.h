@@ -41,22 +41,26 @@ class Window;
 // destructor:
 //   - FramePresenter (FramePresenter.h): owns the swapchain and every
 //     per-frame/per-image synchronization object, and implements
-//     Present()/RenderOffscreen()'s actual Vulkan recording/submission.
+//     RenderOffscreen()/PresentViaRenderGraph()'s actual Vulkan recording/
+//     submission.
 //   - GpuResourceFactory (GpuResourceFactory.h): the Buffer/RenderTexture/
 //     Pipeline/Mesh factories, GPU memory tracking, and ImmediateSubmit().
 //   - FrameRecorder (FrameRecorder.h): this frame's clear color plus the
 //     queued Submit() draw list, and the dynamic-rendering command
-//     sequence shared by Present()/RenderOffscreen() to record it.
+//     sequence RenderOffscreen() records with (see also
+//     Submit()/IssueDrawCommand() for the render-graph-driven Present path).
 // Renderer itself is now just a thin façade: every public method below
 // simply forwards to whichever collaborator actually implements it, so
 // Game/main code is completely unaffected by this split - every signature
 // is identical to before.
 //
-// Public API is intentionally still just Clear()/Present(), matching the
-// original SDL_Renderer-backed version, so Game/main code did not need to
-// change for this swap. Clear() only records the desired clear color;
-// the actual clear happens as part of Present() (Vulkan has no equivalent
-// of an immediate "clear now" call outside of a recorded command buffer).
+// Public API is Clear()/RenderOffscreen()/PresentViaRenderGraph() - the
+// swapchain path is driven entirely through a real gte::rg::RenderGraph
+// (see PresentViaRenderGraph()/BeginGraphPassRecording() below and
+// RENDERGRAPH_CAMPAIGN_COMPLETION_REPORT.md) rather than a standalone
+// Present() method; Clear() only records the desired clear color, actually
+// applied the next time RenderOffscreen() (or a render-graph pass) clears
+// its target.
 //
 // Also owns (via FramePresenter/GpuResourceFactory) the machinery to render
 // into an off-screen RenderTexture instead of the swapchain
@@ -64,10 +68,11 @@ class Window;
 // Unity-style Editor "Game"/"Scene" panels: a camera renders into a
 // RenderTexture, which the Editor then displays inside an ImGui::Image()
 // panel, while a final/release build (no Editor compiled in) instead
-// renders the same scene straight into the swapchain via Present(),
-// fullscreen, with no Editor/ImGui involved at all. Callers (Game, a future
-// Editor module, ...) never touch raw Vulkan handles for this -
-// RenderTarget/RenderTexture are the abstraction boundary.
+// renders the same scene straight into the swapchain via
+// PresentViaRenderGraph(), fullscreen, with no Editor/ImGui involved at
+// all. Callers (Game, a future Editor module, ...) never touch raw Vulkan
+// handles for this - RenderTarget/RenderTexture are the abstraction
+// boundary.
 class Renderer {
 public:
     explicit Renderer(Window& window);
@@ -87,33 +92,16 @@ public:
     Renderer& operator=(Renderer&& other) noexcept;
 
     // Sets the color the render target will be cleared to on the next
-    // Present() or RenderOffscreen() call (0-255 per channel).
+    // RenderOffscreen() call (0-255 per channel).
     void Clear(std::uint8_t r = 0, std::uint8_t g = 0, std::uint8_t b = 0, std::uint8_t a = 255);
-
-    // Acquires the next swapchain image, records+submits a command buffer
-    // that clears it to the last Clear() color, and presents it. Handles
-    // swapchain recreation transparently (resize, or out-of-date/suboptimal
-    // results from the driver).
-    //
-    // recordExtra, if set, is invoked with the recording command buffer
-    // between the clear and the final present-layout transition (i.e.
-    // between what used to be vkCmdBeginRendering/vkCmdEndRendering) - the
-    // seam a future overlay pass (the Editor's own ImGui chrome, a debug
-    // UI, ...) hooks its draw commands into, without Renderer ever needing
-    // to know what ImGui - or anything else - is.
-    //
-    // Returns std::nullopt on a call that recorded NOTHING this time (a
-    // minimized window, a still-pending resize, or a just-recreated
-    // swapchain) - see FramePresenter::Present()'s own comment. This is the
-    // one place Application::Run() reads a real DrawStats (see
-    // Renderer/DrawStats.h) back out to report to the Profiler for the
-    // "Present" GpuPass (Profiling/ProfilingTypes.h) - see
-    // PHASE3_DRAW_CALL_TRIANGLE_COUNT_STRATEGY_v2.md.
-    std::optional<DrawStats> Present(const std::function<void(VkCommandBuffer)>& recordExtra = {});
 
     // Renders into an off-screen RenderTexture instead of the swapchain:
     // clears it to the last Clear() color, runs recordExtra (if set)
-    // exactly like Present() does, and leaves the texture in
+    // between the clear and the final shader-read-layout transition (i.e.
+    // between what used to be vkCmdBeginRendering/vkCmdEndRendering) - the
+    // seam a future overlay pass (the Editor's own ImGui chrome, a debug
+    // UI, ...) hooks its draw commands into, without Renderer ever needing
+    // to know what ImGui - or anything else - is. Leaves the texture in
     // VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, ready to sample (e.g. wrap
     // in an ImGui descriptor set and display via ImGui::Image() - the
     // Unity-style Editor "Game"/"Scene" panel use case).
@@ -123,8 +111,7 @@ public:
     // frame for Editor panels; revisit (e.g. pipeline against its own
     // frames-in-flight) if it ever shows up as a bottleneck.
     //
-    // Unlike Present() above, this has no early-return path today - always
-    // returns a real DrawStats, never std::nullopt.
+    // Always returns a real DrawStats, never std::nullopt.
     //
     // Phase 4C (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) - `timingSlot`
     // tells FramePresenter which of GpuTimingSlot::Offscreen0/Offscreen1
@@ -170,13 +157,13 @@ public:
     void EndOffscreenRenderGraphRecording();
 
     // Executes the pipelined swapchain-present regime via `graph` - handles
-    // acquire/resize/skip exactly like the legacy Present() above did, but
-    // records via the render graph instead of FrameRecorder. Returns
-    // std::nullopt under the exact same circumstances Present() did
-    // (minimized window, still-pending resize, just-recreated swapchain) -
-    // never touches `graph` at all in that case. `needsSwapchainDepth`
-    // mirrors FrameRecorder::HasQueuedDraws()'s old lazy depth-buffer
-    // provisioning decision - true when this frame's Present pass will draw
+    // acquire/resize/skip (minimized window, still-pending resize, just-
+    // recreated swapchain) via the render graph instead of FrameRecorder.
+    // Returns std::nullopt under those same circumstances - never touches
+    // `graph` at all in that case. `needsSwapchainDepth`
+    // mirrors the same lazy swapchain-depth-buffer provisioning decision
+    // FramePresenter used to make from FrameRecorder's old queued-draws
+    // state - true when this frame's Present pass will draw
     // real, depth-tested engine geometry directly into the swapchain image
     // (the release-build/"both Game and Scene panels hidden" case - see
     // RenderPasses.h's AddPresentPass()), false otherwise (the common
@@ -273,8 +260,8 @@ public:
     // the graphics queue, and blocks until it finishes. The primitive
     // behind CreateDeviceLocalBuffer() above, but also useful directly for
     // future one-off GPU work (image layout transitions, mipmap
-    // generation, ...) that doesn't belong inside Present()/
-    // RenderOffscreen()'s per-frame recording.
+    // generation, ...) that doesn't belong inside RenderOffscreen()'s/a
+    // render-graph pass's per-frame recording.
     void ImmediateSubmit(const std::function<void(VkCommandBuffer)>& recordFn) const;
 
     // Call once per frame, before Game::Update()/Render() - clears any draw
@@ -477,8 +464,9 @@ public:
     VulkanContextInfo GetVulkanContextInfo() const;
 
     // Call when the window has been resized (e.g. from a WindowResized
-    // event) - marks the swapchain dirty so the next Present() rebuilds it
-    // at the new size instead of presenting into a stale-sized swapchain.
+    // event) - marks the swapchain dirty so the next PresentViaRenderGraph()
+    // rebuilds it at the new size instead of presenting into a
+    // stale-sized swapchain.
     void OnResize(int width, int height);
 
 private:
@@ -527,8 +515,9 @@ private:
     // (declared after it below), which uses it.
     VulkanAllocator m_allocator;
 
-    // Swapchain + per-frame sync objects + the actual Present()/
-    // RenderOffscreen() Vulkan recording/submission - see FramePresenter.h.
+    // Swapchain + per-frame sync objects + the actual
+    // RenderOffscreen()/PresentViaRenderGraph() Vulkan recording/submission -
+    // see FramePresenter.h.
     FramePresenter m_presenter;
 
     // Buffer/RenderTexture/Pipeline/Mesh factories + GPU memory tracking +

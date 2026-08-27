@@ -28,8 +28,8 @@ RenderTarget MakeFakeSwapchainTarget()
     target.imageView = reinterpret_cast<VkImageView>(static_cast<std::uintptr_t>(0x2222));
     target.extent = VkExtent2D{ 1920, 1080 };
     target.format = VK_FORMAT_B8G8R8A8_UNORM;
-    // No depth counterpart - mirrors a Present-only target with
-    // HasQueuedDraws() == false, see FrameRecorder.h.
+    // No depth counterpart - mirrors a swapchain-only target with nothing
+    // depth-tested drawn into it (e.g. Editor chrome only).
     return target;
 }
 

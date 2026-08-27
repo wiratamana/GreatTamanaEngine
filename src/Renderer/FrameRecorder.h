@@ -18,13 +18,15 @@ namespace gte {
 // Everything Game (or a future Editor) hands Renderer every frame BEFORE any
 // actual Vulkan recording happens: the color to clear to (Clear()) and the
 // list of Pipeline+Mesh draw calls queued for this frame (Submit()) - plus
-// the one shared routine (RecordFrame()) that turns that CPU-side state into
-// the actual dynamic-rendering command sequence (barrier -> clear -> queued
-// draws -> caller-supplied overlay -> barrier). RecordFrame() is used
-// identically by both Renderer::Present() (target = the swapchain image) and
-// Renderer::RenderOffscreen() (target = a RenderTexture) - see
-// FramePresenter.h, which owns the actual command-buffer/queue plumbing
-// around each of those calls.
+// RecordFrame(), the shared routine used by
+// Renderer::RenderOffscreen() (target = a RenderTexture) that turns that
+// CPU-side state into the actual dynamic-rendering command sequence
+// (barrier -> clear -> queued draws -> caller-supplied overlay -> barrier),
+// and IssueDrawCommand(), the thin per-item Vulkan-call primitive that
+// RecordFrame() itself uses internally AND Renderer::Submit() calls
+// directly while a real gte::rg::RenderGraph pass is being recorded (see
+// Renderer::BeginGraphPassRecording()) - see FramePresenter.h, which owns
+// the actual command-buffer/queue plumbing around RenderOffscreen().
 //
 // Deliberately holds no Vulkan device/queue/command-pool state of its own -
 // just CPU-side data plus recording logic against a caller-supplied
@@ -77,33 +79,17 @@ public:
         VkBuffer vertexBuffer, std::uint32_t vertexCount, VkBuffer indexBuffer, std::uint32_t indexCount,
         const Mat4& model, const Mat4& viewProj, VkDescriptorSet materialDescriptorSet);
 
-
-    // True if at least one Submit() call is currently queued (i.e. not yet
-    // consumed by a RecordFrame() call this frame). FramePresenter::Present()
-    // uses this to decide whether the CURRENT swapchain Present() pass will
-    // actually draw real, depth-tested engine geometry directly into the
-    // swapchain image - true in a release build (no Editor at all - Game
-    // always queues straight into the swapchain's own draw list there), or
-    // the rare Editor edge case where both "Game" and "Scene" panels are
-    // simultaneously hidden - versus false in the common Editor case, where
-    // Game's geometry is queued and consumed entirely by the two
-    // RenderOffscreen() calls into "Game"/"Scene" BEFORE Present() ever runs,
-    // leaving Present() with nothing but Dear ImGui's own (never depth-
-    // tested) chrome to draw. This is what lets the swapchain's own per-image
-    // DepthBuffers (see FramePresenter.h) be allocated lazily instead of
-    // unconditionally, saving real GPU memory in the common Editor case
-    // where they'd otherwise sit around bound/cleared every frame without
-    // ever being depth-tested against.
-    bool HasQueuedDraws() const noexcept { return !m_drawQueue.empty(); }
-
     // Records the undefined->color-attachment (and, when target carries a
     // real depth image, undefined->depth-attachment) barriers, the dynamic-
     // rendering clear + every queued Submit() draw + recordExtra, and the
-    // final transition to `finalLayout` - shared by
-    // FramePresenter::Present() (target = the current swapchain image,
-    // finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) and
+    // final transition to `finalLayout` - used by
     // FramePresenter::RenderOffscreen() (target = a RenderTexture,
-    // finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL).
+    // finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL). The
+    // swapchain's own Present pass no longer goes through this class at
+    // all - it's recorded directly via a real gte::rg::RenderGraph (see
+    // Application/RenderPasses.cpp's AddPresentPass() and
+    // FrameRecorder::IssueDrawCommand() above, which the render graph's own
+    // Submit() path calls directly instead).
     //
     // expectedFormat is asserted (debug builds only) against target.format;
     // expectedDepthFormat likewise against target.depthFormat, but ONLY
@@ -113,11 +99,11 @@ public:
     //
     // target.depthImage == VK_NULL_HANDLE means "skip the depth attachment
     // for this pass entirely" (no barrier, no depth clear,
-    // VkRenderingInfo::pDepthAttachment left NULL) - used by
-    // FramePresenter::Present() on a frame where HasQueuedDraws() above is
-    // false (see its own comment), since a pipeline that itself requires a
-    // real depth attachment is never actually bound in that case anyway.
-    // Whenever a real depth image IS supplied, it's always cleared
+    // VkRenderingInfo::pDepthAttachment left NULL) - used whenever a target
+    // has nothing depth-tested to draw into it (e.g. an offscreen preview
+    // with no depth buffer of its own), since a pipeline that itself
+    // requires a real depth attachment is never actually bound in that case
+    // anyway. Whenever a real depth image IS supplied, it's always cleared
     // (loadOp = CLEAR, clearValue = 1.0 - the far plane) and its contents
     // discarded afterwards (storeOp = DONT_CARE) - nothing ever samples a
     // depth buffer built this way, it exists purely for this one draw
@@ -125,9 +111,7 @@ public:
     //
     // Clears the queued draw list right after recording it (NOT at the top
     // of this call) so a second RecordFrame() call later in the SAME frame
-    // (e.g. Present()'s editor-chrome-only pass, after RenderOffscreen()
-    // already drew the queue into the Game view texture) never redraws it -
-    // see BeginFrame()/Submit() above.
+    // never redraws it - see BeginFrame()/Submit() above.
     //
     // Returns this call's own DrawStats (see DrawStats.h) - one
     // AccumulateDrawStats() call per queued item, made INLINE inside the
@@ -135,9 +119,9 @@ public:
     // (never a separate pass over m_drawQueue) - see DrawStats.h's own
     // header comment for exactly why this fused design is a correctness
     // requirement, not a style choice (PHASE3_DRAW_CALL_TRIANGLE_COUNT_STRATEGY_v2.md,
-    // Step 3.1/3.2). The caller (FramePresenter::Present()/RenderOffscreen())
-    // threads this back up to Application::Run(), the one place that knows
-    // which named GpuPass (see Profiling/ProfilingTypes.h) this recording
+    // Step 3.1/3.2). The caller (FramePresenter::RenderOffscreen()) threads
+    // this back up to Application::Run(), the one place that knows which
+    // named GpuPass (see Profiling/ProfilingTypes.h) this recording
     // corresponds to.
     DrawStats RecordFrame(VkCommandBuffer cmd, const RenderTarget& target, VkFormat expectedFormat,
         VkFormat expectedDepthFormat, VkImageLayout finalLayout, const std::function<void(VkCommandBuffer)>& recordExtra);
@@ -172,8 +156,7 @@ private:
 
     // This frame's queued Submit() calls. Cleared at the top of every frame
     // (BeginFrame()) AND immediately after being recorded (RecordFrame()),
-    // so a frame is never drawn twice (e.g. RenderOffscreen() then
-    // Present() in the same Editor-build frame) and never silently
+    // so a frame is never drawn twice and never silently
     // accumulates across frames where nothing consumes it.
     std::vector<DrawItem> m_drawQueue;
 };
