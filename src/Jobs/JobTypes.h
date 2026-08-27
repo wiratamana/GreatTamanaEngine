@@ -42,7 +42,7 @@ constexpr std::size_t kMaxWatchersPerHandle = 8;
 // decrements it exactly once right after that job's JobFunction returns.
 //
 // Phase 3 adds a small, fixed-capacity list of "watcher" callbacks
-// (AddWatcher()/FireWatchers() below) - this is what lets ScheduleAfter()/
+// (AddWatcher()/CompleteOneAndTakeWatchers() below) - this is what lets ScheduleAfter()/
 // DispatchAfter() (JobContinuation.h) be notified the INSTANT a dependency
 // handle completes, rather than having to poll it.
 struct JobHandleState {
@@ -52,7 +52,7 @@ struct JobHandleState {
     // is expected to be rare - only a genuine multi-stage dependency chain
     // (Phase 3) ever populates this list at all, and only while a dependency
     // handle is still in flight. Deliberately never held while actually
-    // INVOKING a watcher callback (see FireWatchers()) - a watcher body is
+    // INVOKING a watcher callback (see CompleteOneAndTakeWatchers()) - a watcher body is
     // free to call back into this same handle (e.g. register another watcher)
     // without risking a self-deadlock.
     std::mutex watcherMutex;
@@ -72,29 +72,35 @@ struct JobHandleState {
     // itself never blocks, grows its own storage, or silently drops a
     // registration it accepts.
     //
-    // Correctness note: the pending-zero check and the watcher-list
-    // mutation both happen while holding watcherMutex, and FireWatchers()
-    // (below) also takes that same mutex before reading/clearing the list -
-    // this is what closes the exact class of lost-wakeup race
-    // JobSystem::WorkerLoop()'s own m_completionMutex-bracketed decrement
-    // already guards against for WaitForJobs() (see AGENTS.md, "Job
-    // System"): whichever of {a registration, the decrement-to-zero that
-    // triggers FireWatchers()} acquires watcherMutex first is always
-    // observed correctly by the other, so a watcher can never be registered
-    // "too late" to see a completion that raced it.
+    // Correctness note: the pending-zero check (AddWatcher()) and the
+    // pending-decrement-to-zero-plus-watcher-capture
+    // (CompleteOneAndTakeWatchers(), below) both happen while holding this
+    // SAME watcherMutex - this is what closes the exact class of
+    // lost-wakeup race JobSystem::WorkerLoop()'s own
+    // m_completionMutex-bracketed decrement already guards against for
+    // WaitForJobs() (see AGENTS.md, "Job System"), AND (HOTFIX 8 - see
+    // task_manager/job_system/JOBSYSTEM_HOTFIX_CODE_REVIEW_FINDINGS.md,
+    // item 8) a SEPARATE race where a brand-new registration could be
+    // mistakenly swept into an OLDER completion's fired-watcher batch:
+    // whichever of {a registration, the decrement-to-zero that captures the
+    // watcher list} acquires watcherMutex first is always fully observed by
+    // the other, so a watcher registered for a NEW completion cycle can
+    // never be included in an OLD cycle's fired batch, and a watcher can
+    // never be registered "too late" to see a completion that raced it.
     //
     // HOTFIX 1: the immediate-fire ("already complete") branch must NEVER
-    // invoke `fn` while still holding watcherMutex - mirrors FireWatchers()'s
-    // own "decide under the lock, fire after releasing it" pattern below.
-    // Calling `fn` here under the lock previously violated that same
-    // no-reentrancy contract: if the fired continuation's own job body ever
-    // touched this same handle again (e.g. registered another watcher
-    // against it, or - in the worst case - the full-queue fallback ran the
-    // deferred job body inline, still nested inside this call), it would try
-    // to re-lock this same non-recursive watcherMutex on the same thread and
-    // deadlock. Determining "already complete" under the lock and firing
-    // only after releasing it closes that hole exactly the way
-    // FireWatchers() already does.
+    // invoke `fn` while still holding watcherMutex - mirrors
+    // CompleteOneAndTakeWatchers()'s own "decide under the lock, fire after
+    // releasing it" pattern below. Calling `fn` here under the lock
+    // previously violated that same no-reentrancy contract: if the fired
+    // continuation's own job body ever touched this same handle again
+    // (e.g. registered another watcher against it, or - in the worst case -
+    // the full-queue fallback ran the deferred job body inline, still
+    // nested inside this call), it would try to re-lock this same
+    // non-recursive watcherMutex on the same thread and deadlock.
+    // Determining "already complete" under the lock and firing only after
+    // releasing it closes that hole exactly the way
+    // CompleteOneAndTakeWatchers() already does.
     bool AddWatcher(WatcherFunction fn, void* context)
     {
         bool alreadyComplete = false;
@@ -116,27 +122,52 @@ struct JobHandleState {
         return true;
     }
 
-    // Called by whichever thread performs the decrement of `pending` down to
-    // zero (see JobSystem::WorkerLoop()/Schedule()/ScheduleAlreadyPending()'s
-    // own full-queue fallback paths) - fires every currently-registered
-    // watcher exactly once, then clears the list, so a LATER reuse of this
-    // same handle (see JobHandle's own "meant to be reused across many
-    // Schedule() calls" precedent) starts from a clean slate.
-    void FireWatchers()
+    // HOTFIX 8 (see task_manager/job_system/JOBSYSTEM_HOTFIX_CODE_REVIEW_FINDINGS.md,
+    // item 8, JOB_SYSTEM_HOTFIX8_COMPLETION_REPORT.md): merges the
+    // pending-count decrement-to-zero check with the watcher-list
+    // extraction into ONE operation, both guarded by the SAME watcherMutex
+    // AddWatcher() already takes - replaces the old, separately-locked
+    // FireWatchers(), which left a window open between "pending publicly
+    // reached zero" and "the watcher list was actually captured/cleared":
+    // a brand-new Schedule() call against the same handle (bumping pending
+    // back up) racing into that window could see its own freshly-registered
+    // watcher swept into the OLD completion's fired batch instead of
+    // waiting for its OWN completion - firing a continuation far too
+    // early. Folding the decrement into the same critical section as the
+    // capture closes that race: AddWatcher() and this method are now fully
+    // serialized against each other by watcherMutex, so whichever one runs
+    // first is completely finished (list captured-and-cleared, or a new
+    // watcher safely stored) before the other can observe any state at
+    // all.
+    //
+    // Called by whichever thread performs the decrement of `pending`
+    // (see JobSystem::WorkerLoop()/Schedule()/ScheduleAlreadyPending()'s
+    // own full-queue-fallback paths, in every GTE_ENABLE_JOB_SYSTEM
+    // configuration). Always decrements `pending` exactly once, mirroring
+    // the old FireWatchers() call sites' own unconditional fetch_sub().
+    // Returns true - and populates outFns/outContexts/outCount with
+    // whatever was registered - only if THIS decrement was the one that
+    // brought `pending` down to zero (the exact same "exactly one thread
+    // ever observes this" guarantee fetch_sub()'s atomicity always
+    // provided). The caller MUST invoke the returned watchers only AFTER
+    // releasing whatever OUTER lock (e.g. JobSystem::m_completionMutex) it
+    // held around this call - a fired watcher may itself call back into
+    // JobSystem::Schedule()/ScheduleAlreadyPending(), so it must never run
+    // while any lock relevant to job scheduling/completion is still held.
+    bool CompleteOneAndTakeWatchers(std::array<WatcherFunction, kMaxWatchersPerHandle>& outFns,
+        std::array<void*, kMaxWatchersPerHandle>& outContexts, std::size_t& outCount)
     {
-        std::array<WatcherFunction, kMaxWatchersPerHandle> fnsToFire{};
-        std::array<void*, kMaxWatchersPerHandle> contextsToFire{};
-        std::size_t count = 0;
-        {
-            std::lock_guard<std::mutex> lock(watcherMutex);
-            count = watcherCount;
-            fnsToFire = watcherFns;
-            contextsToFire = watcherContexts;
-            watcherCount = 0;
+        std::lock_guard<std::mutex> lock(watcherMutex);
+        const std::uint32_t previous = pending.fetch_sub(1, std::memory_order_acq_rel);
+        if (previous != 1) {
+            outCount = 0;
+            return false;
         }
-        for (std::size_t i = 0; i < count; ++i) {
-            fnsToFire[i](contextsToFire[i]);
-        }
+        outCount = watcherCount;
+        outFns = watcherFns;
+        outContexts = watcherContexts;
+        watcherCount = 0;
+        return true;
     }
 };
 
@@ -184,6 +215,21 @@ public:
     {
         return m_state->AddWatcher(fn, context);
     }
+
+    // HOTFIX 9 (see task_manager/job_system/JOBSYSTEM_HOTFIX_CODE_REVIEW_FINDINGS.md,
+    // item 9, JOB_SYSTEM_HOTFIX9_COMPLETION_REPORT.md): true if `other`
+    // shares the SAME underlying JobHandleState as this handle - i.e.
+    // `other` either IS this handle, or is a COPY of it (a JobHandle copy
+    // shares the same std::shared_ptr<detail::JobHandleState>, see this
+    // class's own header comment above). Comparing two shared_ptrs with
+    // `==` compares stored-pointer IDENTITY directly, never a deep/value
+    // compare - exactly what's needed here - and needs no locking, since
+    // m_state is only ever set once, at construction. Used by
+    // JobContinuation.cpp's ScheduleAfter() to detect - and refuse to
+    // honor - a dependency that is (or shares state with) its own output
+    // handle, which would otherwise deadlock that handle against itself
+    // forever (see that call site's own comment for the full reasoning).
+    bool SharesStateWith(const JobHandle& other) const noexcept { return m_state == other.m_state; }
 
     // Phase 3, internal use only by JobContinuation.cpp's ScheduleAfter()/
     // DispatchAfter(): manually accounts for one unit of DEFERRED work this

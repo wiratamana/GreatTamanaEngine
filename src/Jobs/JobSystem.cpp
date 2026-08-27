@@ -159,52 +159,72 @@ void JobSystem::WorkerLoop()
         entry.fn(entry.payload);
 
         if (entry.state) {
-            // The pending-count decrement MUST be bracketed by the SAME
-            // mutex WaitForJobs() holds while it checks its own predicate
-            // (m_completionMutex) - even though `pending` is itself atomic,
-            // an atomic write alone does NOT prevent a classic
-            // condition_variable lost-wakeup race: a waiter could check
-            // IsComplete() (see it as still false, while still holding
-            // m_completionMutex), and then, before it actually finishes
-            // registering itself as a waiter on m_completionCondition,
-            // this decrement-then-notify_all() sequence could run to
-            // completion on another thread and find no one registered yet
-            // to wake - the waiter would then block forever waiting for a
-            // notification that already happened moments earlier. Holding
-            // m_completionMutex around the decrement forces it to
-            // serialize against WaitForJobs()'s own lock-held predicate
-            // check/wait-registration, closing that window - see
-            // cppreference's own condition_variable::notify_all() docs:
-            // "even though the shared variable is atomic, it must be
-            // modified... while owning the mutex to correctly publish the
-            // modification to the waiting thread." (Verified: this exact
-            // race reproduced intermittently - roughly 1 in 4 runs - under
+            // The pending-count decrement (and, as of HOTFIX 8, the
+            // watcher-list capture that goes with it) MUST be bracketed by
+            // the SAME mutex WaitForJobs() holds while it checks its own
+            // predicate (m_completionMutex) - even though `pending` is
+            // itself atomic, an atomic write alone does NOT prevent a
+            // classic condition_variable lost-wakeup race: a waiter could
+            // check IsComplete() (see it as still false, while still
+            // holding m_completionMutex), and then, before it actually
+            // finishes registering itself as a waiter on
+            // m_completionCondition, this decrement-then-notify_all()
+            // sequence could run to completion on another thread and find
+            // no one registered yet to wake - the waiter would then block
+            // forever waiting for a notification that already happened
+            // moments earlier. Holding m_completionMutex around the
+            // decrement forces it to serialize against WaitForJobs()'s own
+            // lock-held predicate check/wait-registration, closing that
+            // window - see cppreference's own condition_variable::
+            // notify_all() docs: "even though the shared variable is
+            // atomic, it must be modified... while owning the mutex to
+            // correctly publish the modification to the waiting thread."
+            // (Verified: this exact race reproduced intermittently -
+            // roughly 1 in 4 runs - under
             // JobSystemTests.ManyJobsAgainstOneSharedHandleAllCompleteWithoutCorruption's
             // 256-jobs-per-handle load before this fix; a --gtest_repeat
             // stress run showed zero hangs across 100+ iterations after
             // it.)
             //
-            // `previousPending` (the value BEFORE this decrement) tells us
+            // HOTFIX 8 (see task_manager/job_system/JOBSYSTEM_HOTFIX_CODE_REVIEW_FINDINGS.md,
+            // item 8, JOB_SYSTEM_HOTFIX8_COMPLETION_REPORT.md): the
+            // decrement and the watcher-list capture now happen as ONE
+            // operation, JobHandleState::CompleteOneAndTakeWatchers() -
+            // previously the decrement happened here (under
+            // m_completionMutex), and the watcher list was only captured/
+            // cleared LATER, inside a separate FireWatchers() call guarded
+            // by a DIFFERENT mutex (watcherMutex) - leaving a window
+            // between "pending publicly reached zero" and "the watcher
+            // list actually captured" that a concurrent Schedule() call
+            // against the SAME handle (bumping pending back up for a
+            // brand-new job) could race into, sweeping a brand-new
+            // registration into THIS, OLDER completion's fired batch
+            // instead of waiting for its own. Folding both into
+            // CompleteOneAndTakeWatchers() (itself internally guarded by
+            // watcherMutex) closes that race - see that method's own
+            // comment for the full reasoning. `completedToZero` tells us
             // whether THIS decrement was the one that brought the handle
-            // down to zero (previousPending == 1) - if so, this thread is
-            // the one responsible for firing this handle's Phase 3
-            // continuation watchers (see JobHandleState::FireWatchers()).
-            // Exactly one thread ever observes previousPending == 1 for a
-            // given handle's completion, since fetch_sub() is atomic.
-            std::uint32_t previousPending;
+            // down to zero - exactly one thread ever observes this true
+            // for a given handle's completion.
+            std::array<detail::WatcherFunction, detail::kMaxWatchersPerHandle> firedFns{};
+            std::array<void*, detail::kMaxWatchersPerHandle> firedContexts{};
+            std::size_t firedCount = 0;
+            bool completedToZero;
             {
                 std::lock_guard<std::mutex> lock(m_completionMutex);
-                previousPending = entry.state->pending.fetch_sub(1, std::memory_order_acq_rel);
+                completedToZero = entry.state->CompleteOneAndTakeWatchers(firedFns, firedContexts, firedCount);
             }
 
-            if (previousPending == 1) {
-                // Deliberately fired AFTER releasing m_completionMutex above:
-                // FireWatchers() takes its own, separate watcherMutex, and a
-                // fired watcher (JobContinuation.cpp's OnDependencyCleared())
-                // may itself call back into JobSystem::Schedule()/
-                // ScheduleAlreadyPending() - never hold m_completionMutex
-                // while running arbitrary callback code.
-                entry.state->FireWatchers();
+            if (completedToZero) {
+                // Deliberately fired AFTER releasing m_completionMutex
+                // above: a fired watcher (JobContinuation.cpp's
+                // OnDependencyCleared()) may itself call back into
+                // JobSystem::Schedule()/ScheduleAlreadyPending() - never
+                // hold m_completionMutex while running arbitrary callback
+                // code.
+                for (std::size_t i = 0; i < firedCount; ++i) {
+                    firedFns[i](firedContexts[i]);
+                }
             }
         }
 
@@ -238,17 +258,27 @@ void JobSystem::Schedule(JobFunction fn, void* payload, JobHandle& handle)
     // once JobQueue::TryPush() starts rejecting pushes after Shutdown()
     // (HOTFIX 2) - see JobQueue.cpp's own comment.
     fn(payload);
-    std::uint32_t previousPending;
+    // HOTFIX 8 (see task_manager/job_system/JOBSYSTEM_HOTFIX_CODE_REVIEW_FINDINGS.md,
+    // item 8, JOB_SYSTEM_HOTFIX8_COMPLETION_REPORT.md): decrement+watcher-
+    // capture folded into one JobHandleState-guarded operation,
+    // CompleteOneAndTakeWatchers() - same lock-bracketed requirement as
+    // WorkerLoop() above - see that method's own comment for the full "why"
+    // (the exact same lost-wakeup race, AND the same watcher-batch race
+    // item 8 describes, are both possible here too, however unlikely this
+    // fallback path is to actually be hit in practice).
+    std::array<detail::WatcherFunction, detail::kMaxWatchersPerHandle> firedFns{};
+    std::array<void*, detail::kMaxWatchersPerHandle> firedContexts{};
+    std::size_t firedCount = 0;
+    bool completedToZero;
     {
-        // Same lock-bracketed-decrement requirement as WorkerLoop() above -
-        // see that method's own comment for the full "why" (the exact same
-        // lost-wakeup race is possible here too, however unlikely this
-        // fallback path is to actually be hit in practice).
         std::lock_guard<std::mutex> lock(m_completionMutex);
-        previousPending = handle.m_state->pending.fetch_sub(1, std::memory_order_acq_rel);
+        completedToZero = handle.m_state->CompleteOneAndTakeWatchers(firedFns, firedContexts, firedCount);
     }
-    if (previousPending == 1) {
-        handle.m_state->FireWatchers(); // See WorkerLoop()'s own comment on why this runs unlocked.
+    if (completedToZero) {
+        // See WorkerLoop()'s own comment on why this runs unlocked.
+        for (std::size_t i = 0; i < firedCount; ++i) {
+            firedFns[i](firedContexts[i]);
+        }
     }
     m_completionCondition.notify_all();
 }
@@ -267,13 +297,23 @@ void JobSystem::ScheduleAlreadyPending(JobFunction fn, void* payload, JobHandle&
 
     // Same graceful full-queue fallback as Schedule() above.
     fn(payload);
-    std::uint32_t previousPending;
+    // HOTFIX 8: decrement+watcher-capture folded into one
+    // JobHandleState-guarded operation - see WorkerLoop()'s own comment for
+    // the full rationale (the same lost-wakeup AND watcher-batch races are
+    // both possible here too, however unlikely this fallback path is to
+    // actually be hit in practice).
+    std::array<detail::WatcherFunction, detail::kMaxWatchersPerHandle> firedFns{};
+    std::array<void*, detail::kMaxWatchersPerHandle> firedContexts{};
+    std::size_t firedCount = 0;
+    bool completedToZero;
     {
         std::lock_guard<std::mutex> lock(m_completionMutex);
-        previousPending = handle.m_state->pending.fetch_sub(1, std::memory_order_acq_rel);
+        completedToZero = handle.m_state->CompleteOneAndTakeWatchers(firedFns, firedContexts, firedCount);
     }
-    if (previousPending == 1) {
-        handle.m_state->FireWatchers();
+    if (completedToZero) {
+        for (std::size_t i = 0; i < firedCount; ++i) {
+            firedFns[i](firedContexts[i]);
+        }
     }
     m_completionCondition.notify_all();
 }
@@ -315,9 +355,20 @@ void JobSystem::Schedule(JobFunction fn, void* payload, JobHandle& handle)
     // contract.
     handle.m_state->pending.fetch_add(1, std::memory_order_acq_rel);
     fn(payload);
-    const std::uint32_t previousPending = handle.m_state->pending.fetch_sub(1, std::memory_order_acq_rel);
-    if (previousPending == 1) {
-        handle.m_state->FireWatchers();
+    // HOTFIX 8: decrement+watcher-capture folded into one
+    // JobHandleState-guarded operation - no m_completionMutex exists in
+    // this configuration (see this class's own header comment), but
+    // CompleteOneAndTakeWatchers() is still safe to call without an outer
+    // lock here since JobHandleState's own internal watcherMutex fully
+    // guards the decrement+capture against a concurrent AddWatcher() call -
+    // see that method's own comment for the full rationale.
+    std::array<detail::WatcherFunction, detail::kMaxWatchersPerHandle> firedFns{};
+    std::array<void*, detail::kMaxWatchersPerHandle> firedContexts{};
+    std::size_t firedCount = 0;
+    if (handle.m_state->CompleteOneAndTakeWatchers(firedFns, firedContexts, firedCount)) {
+        for (std::size_t i = 0; i < firedCount; ++i) {
+            firedFns[i](firedContexts[i]);
+        }
     }
 }
 
@@ -327,9 +378,16 @@ void JobSystem::ScheduleAlreadyPending(JobFunction fn, void* payload, JobHandle&
     // as the GTE_ENABLE_JOB_SYSTEM=ON branch above - see
     // JobHandle::AddPendingUnit()'s own comment.
     fn(payload);
-    const std::uint32_t previousPending = handle.m_state->pending.fetch_sub(1, std::memory_order_acq_rel);
-    if (previousPending == 1) {
-        handle.m_state->FireWatchers();
+    // HOTFIX 8: decrement+watcher-capture folded into one
+    // JobHandleState-guarded operation - see CompleteOneAndTakeWatchers()'s
+    // own comment, and JobSystem::WorkerLoop()'s, for the full rationale.
+    std::array<detail::WatcherFunction, detail::kMaxWatchersPerHandle> firedFns{};
+    std::array<void*, detail::kMaxWatchersPerHandle> firedContexts{};
+    std::size_t firedCount = 0;
+    if (handle.m_state->CompleteOneAndTakeWatchers(firedFns, firedContexts, firedCount)) {
+        for (std::size_t i = 0; i < firedCount; ++i) {
+            firedFns[i](firedContexts[i]);
+        }
     }
 }
 

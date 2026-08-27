@@ -3,6 +3,8 @@
 #include "JobSystem.h"
 
 #include <atomic>
+#include <cassert>
+#include <cstdio>
 #include <memory>
 #include <thread>
 #include <vector>
@@ -177,7 +179,40 @@ void ScheduleAfter(JobFunction fn, void* payload, std::span<JobHandle* const> de
     std::vector<JobHandle*> pendingDependencies;
     pendingDependencies.reserve(dependencies.size());
     for (JobHandle* dependency : dependencies) {
-        if (dependency != nullptr && !dependency->IsComplete()) {
+        if (dependency == nullptr) {
+            continue;
+        }
+        if (dependency->SharesStateWith(handle)) {
+            // HOTFIX 9 (see task_manager/job_system/JOBSYSTEM_HOTFIX_CODE_REVIEW_FINDINGS.md,
+            // item 9, JOB_SYSTEM_HOTFIX9_COMPLETION_REPORT.md): a dependency
+            // that IS (or shares underlying state with, e.g. a copy of)
+            // `handle` itself must NEVER be honored as a real dependency -
+            // doing so would deadlock `handle` against itself forever: its
+            // own pending count would never be able to reach zero, since
+            // the one job that would bring it to zero (this continuation's
+            // own `fn`) can only ever run once `handle` ALREADY reached
+            // zero. Checked unconditionally, regardless of whether
+            // `dependency` currently looks complete - a self-dependency
+            // that happens to be complete AT THIS EXACT INSTANT is still a
+            // latent bug: a concurrent Schedule() call against the same
+            // shared state, landing between this check and
+            // handle.AddPendingUnit() below, would still be perfectly
+            // capable of re-triggering the exact same deadlock. Skipping it
+            // here (never registering a watcher for it) is what lets `fn`
+            // still eventually run once every OTHER, legitimate dependency
+            // clears, rather than either deadlocking OR silently dropping
+            // the whole continuation. Loud in every build (not just debug)
+            // since this is a caller bug that otherwise manifests as a
+            // silent, hard-to-trace permanent hang far from this call site.
+            std::fprintf(stderr,
+                "gte::Jobs::ScheduleAfter()/DispatchAfter(): a dependency must "
+                "never be (or share underlying state with) its own output "
+                "handle - ignoring this dependency to avoid a permanent "
+                "deadlock.\n");
+            assert(false && "ScheduleAfter()/DispatchAfter(): self-dependency on output handle");
+            continue;
+        }
+        if (!dependency->IsComplete()) {
             pendingDependencies.push_back(dependency);
         }
     }
