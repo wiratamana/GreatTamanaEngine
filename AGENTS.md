@@ -446,18 +446,23 @@ whenever touching profiling instrumentation, or adding a new call site:
 `src/Jobs/` (`JobTypes.h`, `JobQueue.h/.cpp`, `JobSystem.h/.cpp`,
 `JobDispatch.h/.cpp`, `JobContinuation.h/.cpp`) is the engine's general-purpose
 worker-thread pool - see `task_manager/job_system/JOBSYSTEM_PHASE0_MASTER_STRATEGY_v2.md`
-for the full multi-phase campaign this is Phases 1-3 of,
+for the full multi-phase campaign this is Phases 1-4 of,
 `task_manager/job_system/JOB_SYSTEM_PHASE1_COMPLETION_REPORT.md` for Phase
 1's own detailed writeup, `task_manager/job_system/JOB_SYSTEM_PHASE2_COMPLETION_REPORT.md`
-for Phase 2's, and `task_manager/job_system/JOB_SYSTEM_PHASE3_COMPLETION_REPORT.md`
-for Phase 3's. As of Phase 3, this module provides the minimal `JobHandle`/
-`Schedule()`/`WaitForJobs()`/`WorkerCount()` primitive (Phase 1), the
-batch/parallel-for API, `Dispatch()`/`ComputeBatchRanges()` (Phase 2), and
-job dependencies/continuations, `ScheduleAfter()`/`DispatchAfter()` (Phase 3 -
-see this section's own dedicated Phase 3 bullets further below) -
-**nothing else in the engine calls into any of this yet** (no real subsystem
-has been migrated onto it - that is Phase 6's job). Follow these rules
-whenever touching this module or building a later phase on top of it:
+for Phase 2's, `task_manager/job_system/JOB_SYSTEM_PHASE3_COMPLETION_REPORT.md`
+for Phase 3's, and `task_manager/job_system/JOB_SYSTEM_PHASE4_COMPLETION_REPORT.md`
+for Phase 4's (the Thread-Safety Audit). As of Phase 4, this module provides
+the minimal `JobHandle`/`Schedule()`/`WaitForJobs()`/`WorkerCount()` primitive
+(Phase 1), the batch/parallel-for API, `Dispatch()`/`ComputeBatchRanges()`
+(Phase 2), job dependencies/continuations, `ScheduleAfter()`/`DispatchAfter()`
+(Phase 3 - see this section's own dedicated Phase 3 bullets further below),
+and a written, reviewable thread-safety classification (NEVER/READ-SAFE/
+JOB-SAFE) of every existing shared/global/singleton piece of engine state a
+future job body could reach into (Phase 4 - see this section's own dedicated
+"Phase 4 - Thread-Safety Audit" bullets further below) - **nothing else in
+the engine calls `Schedule()`/`Dispatch()`/`ScheduleAfter()`/`DispatchAfter()`
+yet** (no real subsystem has been migrated onto it - that is Phase 6's job).
+Follow these rules whenever touching this module or building a later phase on top of it:
 
 - **`gte::Jobs::JobSystem::Instance()` is a Meyers singleton that starts
   lazily, on its FIRST call from anywhere in the process** - the exact same
@@ -692,6 +697,54 @@ whenever touching this module or building a later phase on top of it:
   flag only that thread could ever set. This is now the established
   pattern for any FUTURE `src/Jobs/` test that needs a genuinely
   long-pending dependency, in either build configuration.
+
+- **Phase 4 (Thread-Safety Audit + Integration Point Whitelist - see
+  `task_manager/job_system/JOBSYSTEM_PHASE4_THREAD_SAFETY_AUDIT_INTEGRATION_POINTS_v2.md`
+  and `task_manager/job_system/JOB_SYSTEM_PHASE4_COMPLETION_REPORT.md`) is a
+  deliberately documentation/verification-heavy phase, not a new API
+  surface: it produces a definitive, written answer to "if a job body,
+  running on a worker thread, tries to touch THIS engine subsystem, is that
+  safe" for every existing shared/global/singleton piece of engine state,
+  so Phase 6's real production migration (CPU vertex skinning) has a
+  reviewed whitelist to build against instead of each future call site
+  re-deriving its own answer by inspection.** The classification table
+  below uses the same three buckets the strategy document defines:
+  **NEVER** (a job body must never touch this at all, not even read-only,
+  without dedicated new synchronization this campaign has not added);
+  **READ-SAFE** (safe for a job body to READ, but only for as long as
+  nothing - including the main thread itself - concurrently MUTATES the
+  same data for the duration of the `Dispatch()`/`WaitForJobs()` bracket
+  the job body runs inside); and **JOB-SAFE** (genuinely safe to call
+  concurrently, from any number of threads at once, no external
+  synchronization needed at all - either because it is pure logic with no
+  shared mutable state, or because it was specifically built with its own
+  internal synchronization for exactly this purpose, e.g. `JobSystem`
+  itself).
+
+  | Subsystem | Classification | Why |
+  |---|---|---|
+  | `gte::Jobs::JobSystem`/`detail::JobQueue`/`detail::JobHandleState` (`src/Jobs/`) | **JOB-SAFE** | The entire point of Phases 1-3 - `Schedule()`/`Dispatch()`/`ScheduleAfter()`/the queue's mutex+condition_variable/the handle's atomic pending-counter and mutex-guarded watcher list are all specifically built, and stress-tested (see this section's own lost-wakeup-race bullets above), to be called concurrently from many threads at once. A job body scheduling MORE work via `JobSystem::Instance().Schedule()`/`Dispatch()` from inside another job is safe by this same design (not exercised by a real call site yet, but nothing about the implementation assumes single-threaded access). |
+  | `SDL_GetPerformanceCounter()`/`SDL_GetPerformanceFrequency()` (`<SDL3/SDL_timer.h>`, used by `src/Profiling/ScopeTimer.h`) | **JOB-SAFE** | This phase's own required verification item (see the strategy document's Step 3.2) - confirmed by a new, dedicated multi-threaded test, `tests/Jobs/JobSystemSdlClockThreadSafetyTests.cpp`: several threads released at the same instant via a shared start barrier all observe the exact same, non-zero `SDL_GetPerformanceFrequency()`, and each thread's own sequence of `SDL_GetPerformanceCounter()` reads stays strictly non-decreasing under concurrent load from every other thread. Consistent with SDL3's own documented contract - both are stateless queries against a platform-level monotonic counter/its fixed frequency, with no shared engine-owned mutable state involved in servicing the call. This is what lets Phase 5's planned `JobScopeTimer` safely call both functions from an arbitrary worker thread while the main thread's own `ScopeTimer` scopes call the identical functions concurrently. |
+  | `Profiling::FrameProfiler` (`src/Profiling/FrameProfiler.h/.cpp`) | **NEVER** (until Phase 5) | `RecordCpuScope()`'s linear scan + non-atomic `++m_current.cpuScopeCount`, and `BeginFrame()`/`EndFrame()`'s ring-buffer bookkeeping, are completely unsynchronized by design (`AGENTS.md`'s own "Profiling" section already documents this engine as single-threaded throughout) - a job body must never call `GTE_PROFILE_SCOPE`/touch `FrameProfiler::Instance()` directly. Phase 5 is specifically scoped to add a SEPARATE, genuinely thread-safe write path (`RecordWorkerJobSample()`, an atomic fetch-and-increment reservation into its own dedicated array) rather than attempt to retrofit locking onto the existing single-threaded path - until that phase lands, this stays a hard NEVER. |
+  | `GpuMemoryTracker`, `Renderer`/`Vulkan/*` (`VulkanInstance`/`VulkanDevice`/`VulkanSwapchain`/`VulkanAllocator`/`Buffer`/`RenderTexture`/`Pipeline`/`FramePresenter`/`FrameRecorder`/`GpuResourceFactory`), `GpuTimingService`/`VulkanQueryPool` | **NEVER** | `GpuMemoryTracker`'s own class comment already says "Not thread-safe" outright, and nothing under `Renderer`/`Vulkan/` was ever built with any synchronization in mind - every `VkCommandBuffer`/`VkQueue`/`VmaAllocator` call in this engine assumes single-threaded, main-thread-only access. A job body must never touch a live GPU resource, submit Vulkan work, or read/write `GpuMemoryTracker`'s tables directly - any future GPU-adjacent job (e.g. CPU vertex skinning writing into a `Mesh`'s host-visible buffer, Phase 6's actual target) resolves the destination pointer/buffer on the MAIN thread first and hands job bodies only a plain, disjoint output span to write into, never a `Mesh*`/`Renderer&`/Vulkan handle itself. |
+  | `src/Renderer/RenderGraph/*` (`RenderGraph`, `RenderGraphBuilder`, `RenderGraphCompiler`, `RenderGraphResourcePool`, `RenderGraphBarrierPlanner`, `RenderGraphTimestampPool`) | **NEVER** | Every one of these either directly issues Vulkan calls, touches `GpuMemoryTracker`-tracked resources, or mutates shared, unsynchronized compiler/pool state (`RenderGraphResourcePool`'s frame-to-frame texture reuse bookkeeping) - the same GPU-resource-adjacent reasoning as the row above. No job in this campaign's current or planned scope has any reason to touch any of it, and none ever should without a fresh, dedicated audit of its own. |
+  | `src/Editor/*` (the ImGui context, `EditorContext`, every `Panels/*Panel`) | **NEVER** | Dear ImGui's own context (`ImGuiContext`) is explicitly documented upstream as unsafe for concurrent access from multiple threads, and every Editor panel in this engine already only ever runs on the main thread inside `IEditorLayer::BuildUI()`/`Render()`. No job body has any legitimate reason to touch ImGui state directly - a future Editor "Jobs" panel (Phase 7) reads job/profiler DATA that a job body already finished writing (via `FrameProfiler`'s own thread-safe write path, Phase 5), never ImGui state from a worker thread. |
+  | `Registry`/`EntityManager`/`ComponentStorage<T>` (`src/ECS/`) | **mutation: NEVER; read: READ-SAFE** | `EntityManager::Create()`/`Destroy()` and `ComponentStorage<T>::Add()`/`Remove()` mutate unsynchronized vectors/free-lists/generation counters with zero locking - a job body must never call any mutating `Registry`/ECS method. Reading a component's plain data fields (e.g. a `Transform`'s `position`) from a job body is READ-SAFE, but only under the same rule Phase 6's own design already assumes: the main thread must not mutate that SAME `Registry` for the entire duration of the `Dispatch()`/`WaitForJobs()` bracket a job body reading it runs inside - in practice, the safest and simplest pattern (and the one Phase 6 actually uses) is to never hand a `Registry&`/component reference into a job body at all, extracting whatever plain values are needed into a copy/span on the main thread first. |
+  | `AssetDatabase` (`src/Assets/AssetDatabase.h/.cpp`) | **NEVER** (not yet proven safe for reads either) | Backed by a plain `std::vector`/two `std::unordered_map`s with zero internal synchronization - `RefreshFromDirectory()`/`ImportAsset()` are main-thread-only calls today, and nothing in this campaign's current or planned scope needs a job body to read from it. Unlike `Registry` above, this is classified NEVER outright rather than "read-safe with a caveat," since no real call site has ever needed to reason through the caveat for this specific class - a future job that genuinely needs read access must have that specific call site re-audited and documented here first, not merely assume the same reasoning transfers automatically. |
+  | `ResourcePool<T, HandleT>` (`src/Renderer/ResourcePool.h`, the `MeshHandle`/`PipelineHandle` pools owned by `RenderSystem`) | **NEVER** | Zero internal locking, and resolving a handle returns a live `Mesh*`/`Pipeline*` - a GPU-adjacent pointer that compounds directly with the `Renderer`/`Vulkan` NEVER row above. A job body must never call `RenderSystem::TryGetMesh()`/`TryGetPipeline()` (or any future equivalent) itself; the resolved pointer/buffer must always be resolved on the main thread and handed to job bodies only as a plain, disjoint output span, mirroring Phase 6's own boundary design exactly. |
+  | `src/Game/Instantiation/*` GPU catalogs (`PrimitiveGpuCatalog`, `MaterialTextureGpuCache`, `MeshAssetGpuCatalog`) | **NEVER** | GPU-resource-creating/caching code, unsynchronized, main-thread-only by construction today (called only from `MeshInstantiationSystem`, itself called only from `Game`'s own main-thread methods). A job body must never touch these directly - this is exactly what Phase 6's boundary design (a job body only ever sees plain CPU-side spans, never a `Mesh`/GPU handle) is built to guarantee structurally, not just by convention. |
+  | Pure `src/Animation/*` modules (`BoneChainResolver`, `BonePoseMath`, `SkeletonPose`, `IkSolver`, `AppendBoneSolver`, `MotionSampler`, `AnimationPoseEvaluator`, `VertexSkinning`) | **JOB-SAFE** | Every one of these is pure logic operating only on its own parameters - no static/global/singleton mutable state anywhere in this module (see `AGENTS.md`'s own "Skeletal Animation Pose Resolution" section) - safe to call concurrently from any number of threads at once, PROVIDED each individual call's own inputs/outputs (e.g. one model's own `skinnedPositions`/`skinnedNormals` output vectors) are never shared/aliased across two concurrent calls. This is exactly the pure-function foundation Phase 6's planned `SkinVertices()` migration depends on. |
+  | `src/Math/*` (`Vec2`/`Vec3`/`Vec4`/`Mat4`/`Quat`) | **JOB-SAFE** | Plain value types - every operation is a pure function of its own operands, no shared/static state of any kind. |
+  | `MeshData`/`SkeletonData`/`MotionData`/`MaterialData` (`src/Assets/*Data.h`), READ-ONLY | **READ-SAFE** | Plain data structs with no internal synchronization, but populated exactly once (at import/cache-load time, main-thread-only) and never mutated again for the lifetime of the cache entry that owns them (see `SkeletalRigCache`/`AnimationClipCache`'s own "load once, cache, never mutate again" design) - concurrent read-only access from multiple job bodies is safe as long as nothing concurrently mutates the SAME instance, which nothing in this engine's current design ever does after initial load. |
+  | `SkeletalRigCache`/`AnimationClipCache`/`ResolvedAnimationBindingCache` (`src/Game/Animation/*`) - the CACHE CONTAINERS themselves (`GetOrLoad()`/`Register()`/`TryGet()`) | **NEVER** for concurrent mutation; a resolved lookup's VALUE is **READ-SAFE** under a REQUIRED ordering rule | The containers are plain `std::unordered_map`s with zero locking - must only ever be called from the main thread, exactly as today. Once a lookup returns a pointer/reference to an already-cached value, reading that value from a job body is safe under the same rule as `MeshData` above, but with one REQUIRED addition specific to these three caches: the main thread must not call `GetOrLoad()`/`Register()` again on the SAME cache while a job holding an earlier lookup's pointer is still running, since an `unordered_map` insertion can invalidate previously-returned references - this is why Phase 6's planned design resolves every cache lookup up front, before any `Dispatch()` call, and never touches the cache again until `WaitForJobs()` returns. This is a REQUIRED correctness rule, not a performance convenience, and must never be relaxed by a future edit that "just wants one more lookup mid-flight." |
+  | Cross-entity/cross-instance shared GPU mesh buffers (the documented `README.md` limitation: two entities spawned from the same `*.gta` file share one underlying `Mesh`, including its CPU-side cached bind-pose vertex arrays and output skinning buffers) | **NEVER concurrently - sequential-only, main-thread-orchestrated** | Not a "touch this subsystem" rule like the rows above, but a cross-cutting HAZARD this table must call out explicitly: today this sharing is safe only because `AnimationSystem::Update()` (`src/Game/Animation/AnimationSystem.cpp`) processes every live `SkeletalAnimator` strictly one at a time, on one thread - at any given instant, at most one animator is ever touching that shared memory. The moment more than one animator's own `Dispatch()`/`WaitForJobs()` sequence is allowed to be in flight AT THE SAME TIME, two worker threads could write the same shared buffer concurrently - a genuine data race, not merely today's harmless "last write wins" visual bug. See `JOBSYSTEM_PHASE6_FIRST_PRODUCTION_CONSUMER_ANIMATION_SKINNING_v2.md`, Step 3.6, for the permanent mitigating rule (each model's own `Dispatch()`+`WaitForJobs()` pair must complete in full before the next model's begins) this campaign commits to - this row exists so that rule is discoverable from this table directly, not only from Phase 6's own document. |
+
+  This table is not exhaustive of every symbol in the engine, but every row
+  above was chosen because a future job body (starting with Phase 6's real
+  CPU vertex skinning migration) would plausibly be tempted to reach for it
+  - a future phase that needs to classify something not listed here should
+  add a new row rather than assume an unlisted subsystem is safe by
+  omission.
 
 ## Render Target Format Matching
 

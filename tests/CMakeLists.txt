@@ -587,6 +587,34 @@
 #                                            ON or OFF, same reason as
 #                                            JobDispatchTests.cpp above.
 #
+#   Jobs/JobSystemSdlClockThreadSafetyTests.cpp - Job System Phase 4's own
+#                                            required verification item
+#                                            (JOBSYSTEM_PHASE4_THREAD_SAFETY_AUDIT_INTEGRATION_POINTS_v2.md,
+#                                            Step 3.2): confirms
+#                                            SDL_GetPerformanceCounter()/
+#                                            SDL_GetPerformanceFrequency()
+#                                            (the one clock
+#                                            src/Profiling/ScopeTimer.h is
+#                                            built on) are safe to call
+#                                            CONCURRENTLY, from several
+#                                            threads released at the same
+#                                            instant via a shared start
+#                                            barrier - every thread observes
+#                                            the exact same, non-zero
+#                                            frequency, and every thread's
+#                                            own sequence of counter reads
+#                                            stays non-decreasing under
+#                                            concurrent load. No SDL_Init()/
+#                                            video subsystem needed (same
+#                                            "SDL functions that don't need
+#                                            SDL_Init()" pattern as
+#                                            Memory/SdlMemoryTrackerTests.cpp).
+#                                            Always built - has no dependency
+#                                            on GTE_ENABLE_JOB_SYSTEM/
+#                                            GTE_ENABLE_PROFILER at all, it
+#                                            calls SDL3's own timer API
+#                                            directly.
+#
 #
 # Note that the test BINARY still dynamically depends on SDL3.dll at process
 # load time regardless of the above (gte_core's Window.cpp references SDL
@@ -659,6 +687,7 @@ set(GTE_TEST_SOURCES
     Jobs/JobDispatchMathTests.cpp
     Jobs/JobDispatchTests.cpp
     Jobs/JobContinuationTests.cpp
+    Jobs/JobSystemSdlClockThreadSafetyTests.cpp
     Input/InputStateTests.cpp
     Application/EventTranslatorTests.cpp
     Application/MemorySnapshotBuilderTests.cpp
