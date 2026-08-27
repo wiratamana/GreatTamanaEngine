@@ -446,20 +446,26 @@ whenever touching profiling instrumentation, or adding a new call site:
 `src/Jobs/` (`JobTypes.h`, `JobQueue.h/.cpp`, `JobSystem.h/.cpp`,
 `JobDispatch.h/.cpp`, `JobContinuation.h/.cpp`) is the engine's general-purpose
 worker-thread pool - see `task_manager/job_system/JOBSYSTEM_PHASE0_MASTER_STRATEGY_v2.md`
-for the full multi-phase campaign this is Phases 1-4 of,
+for the full multi-phase campaign this is Phases 1-5 of,
 `task_manager/job_system/JOB_SYSTEM_PHASE1_COMPLETION_REPORT.md` for Phase
 1's own detailed writeup, `task_manager/job_system/JOB_SYSTEM_PHASE2_COMPLETION_REPORT.md`
 for Phase 2's, `task_manager/job_system/JOB_SYSTEM_PHASE3_COMPLETION_REPORT.md`
-for Phase 3's, and `task_manager/job_system/JOB_SYSTEM_PHASE4_COMPLETION_REPORT.md`
-for Phase 4's (the Thread-Safety Audit). As of Phase 4, this module provides
-the minimal `JobHandle`/`Schedule()`/`WaitForJobs()`/`WorkerCount()` primitive
-(Phase 1), the batch/parallel-for API, `Dispatch()`/`ComputeBatchRanges()`
-(Phase 2), job dependencies/continuations, `ScheduleAfter()`/`DispatchAfter()`
-(Phase 3 - see this section's own dedicated Phase 3 bullets further below),
-and a written, reviewable thread-safety classification (NEVER/READ-SAFE/
-JOB-SAFE) of every existing shared/global/singleton piece of engine state a
-future job body could reach into (Phase 4 - see this section's own dedicated
-"Phase 4 - Thread-Safety Audit" bullets further below) - **nothing else in
+for Phase 3's, `task_manager/job_system/JOB_SYSTEM_PHASE4_COMPLETION_REPORT.md`
+for Phase 4's (the Thread-Safety Audit), and
+`task_manager/job_system/JOB_SYSTEM_PHASE5_COMPLETION_REPORT.md` for Phase
+5's (Profiler Integration - Worker Timeline). As of Phase 5, this module
+provides the minimal `JobHandle`/`Schedule()`/`WaitForJobs()`/`WorkerCount()`
+primitive (Phase 1), the batch/parallel-for API, `Dispatch()`/
+`ComputeBatchRanges()` (Phase 2), job dependencies/continuations,
+`ScheduleAfter()`/`DispatchAfter()` (Phase 3 - see this section's own
+dedicated Phase 3 bullets further below), a written, reviewable
+thread-safety classification (NEVER/READ-SAFE/JOB-SAFE) of every existing
+shared/global/singleton piece of engine state a future job body could reach
+into (Phase 4 - see this section's own dedicated "Phase 4 - Thread-Safety
+Audit" bullets further below), and a genuinely thread-safe way for a job
+body to record its own CPU scope into `Profiling::FrameProfiler`,
+`GTE_PROFILE_JOB_SCOPE`/`Profiling::JobScopeTimer` (Phase 5 - see this
+section's own dedicated Phase 5 bullets further below) - **nothing else in
 the engine calls `Schedule()`/`Dispatch()`/`ScheduleAfter()`/`DispatchAfter()`
 yet** (no real subsystem has been migrated onto it - that is Phase 6's job).
 Follow these rules whenever touching this module or building a later phase on top of it:
@@ -725,7 +731,7 @@ Follow these rules whenever touching this module or building a later phase on to
   |---|---|---|
   | `gte::Jobs::JobSystem`/`detail::JobQueue`/`detail::JobHandleState` (`src/Jobs/`) | **JOB-SAFE** | The entire point of Phases 1-3 - `Schedule()`/`Dispatch()`/`ScheduleAfter()`/the queue's mutex+condition_variable/the handle's atomic pending-counter and mutex-guarded watcher list are all specifically built, and stress-tested (see this section's own lost-wakeup-race bullets above), to be called concurrently from many threads at once. A job body scheduling MORE work via `JobSystem::Instance().Schedule()`/`Dispatch()` from inside another job is safe by this same design (not exercised by a real call site yet, but nothing about the implementation assumes single-threaded access). |
   | `SDL_GetPerformanceCounter()`/`SDL_GetPerformanceFrequency()` (`<SDL3/SDL_timer.h>`, used by `src/Profiling/ScopeTimer.h`) | **JOB-SAFE** | This phase's own required verification item (see the strategy document's Step 3.2) - confirmed by a new, dedicated multi-threaded test, `tests/Jobs/JobSystemSdlClockThreadSafetyTests.cpp`: several threads released at the same instant via a shared start barrier all observe the exact same, non-zero `SDL_GetPerformanceFrequency()`, and each thread's own sequence of `SDL_GetPerformanceCounter()` reads stays strictly non-decreasing under concurrent load from every other thread. Consistent with SDL3's own documented contract - both are stateless queries against a platform-level monotonic counter/its fixed frequency, with no shared engine-owned mutable state involved in servicing the call. This is what lets Phase 5's planned `JobScopeTimer` safely call both functions from an arbitrary worker thread while the main thread's own `ScopeTimer` scopes call the identical functions concurrently. |
-  | `Profiling::FrameProfiler` (`src/Profiling/FrameProfiler.h/.cpp`) | **NEVER** (until Phase 5) | `RecordCpuScope()`'s linear scan + non-atomic `++m_current.cpuScopeCount`, and `BeginFrame()`/`EndFrame()`'s ring-buffer bookkeeping, are completely unsynchronized by design (`AGENTS.md`'s own "Profiling" section already documents this engine as single-threaded throughout) - a job body must never call `GTE_PROFILE_SCOPE`/touch `FrameProfiler::Instance()` directly. Phase 5 is specifically scoped to add a SEPARATE, genuinely thread-safe write path (`RecordWorkerJobSample()`, an atomic fetch-and-increment reservation into its own dedicated array) rather than attempt to retrofit locking onto the existing single-threaded path - until that phase lands, this stays a hard NEVER. |
+  | `Profiling::FrameProfiler` (`src/Profiling/FrameProfiler.h/.cpp`) | **NEVER, except `RecordWorkerJobSample()` specifically - JOB-SAFE** | `RecordCpuScope()`'s linear scan + non-atomic `++m_current.cpuScopeCount`, and `BeginFrame()`/`EndFrame()`'s ring-buffer bookkeeping, remain completely unsynchronized by design - a job body must still never call `GTE_PROFILE_SCOPE`/touch any OTHER `FrameProfiler::Instance()` method directly. As of Phase 5, `RecordWorkerJobSample()` is a genuinely separate, thread-safe write path (an atomic fetch-and-increment reservation into its own dedicated array, `m_captureEnabled` itself now `std::atomic<bool>`) - see this section's own dedicated Phase 5 bullets below for the full design - so `GTE_PROFILE_JOB_SCOPE` (`src/Profiling/JobScopeTimer.h`), which routes through it, is the one sanctioned way for a job body to record its own CPU scope. |
   | `GpuMemoryTracker`, `Renderer`/`Vulkan/*` (`VulkanInstance`/`VulkanDevice`/`VulkanSwapchain`/`VulkanAllocator`/`Buffer`/`RenderTexture`/`Pipeline`/`FramePresenter`/`FrameRecorder`/`GpuResourceFactory`), `GpuTimingService`/`VulkanQueryPool` | **NEVER** | `GpuMemoryTracker`'s own class comment already says "Not thread-safe" outright, and nothing under `Renderer`/`Vulkan/` was ever built with any synchronization in mind - every `VkCommandBuffer`/`VkQueue`/`VmaAllocator` call in this engine assumes single-threaded, main-thread-only access. A job body must never touch a live GPU resource, submit Vulkan work, or read/write `GpuMemoryTracker`'s tables directly - any future GPU-adjacent job (e.g. CPU vertex skinning writing into a `Mesh`'s host-visible buffer, Phase 6's actual target) resolves the destination pointer/buffer on the MAIN thread first and hands job bodies only a plain, disjoint output span to write into, never a `Mesh*`/`Renderer&`/Vulkan handle itself. |
   | `src/Renderer/RenderGraph/*` (`RenderGraph`, `RenderGraphBuilder`, `RenderGraphCompiler`, `RenderGraphResourcePool`, `RenderGraphBarrierPlanner`, `RenderGraphTimestampPool`) | **NEVER** | Every one of these either directly issues Vulkan calls, touches `GpuMemoryTracker`-tracked resources, or mutates shared, unsynchronized compiler/pool state (`RenderGraphResourcePool`'s frame-to-frame texture reuse bookkeeping) - the same GPU-resource-adjacent reasoning as the row above. No job in this campaign's current or planned scope has any reason to touch any of it, and none ever should without a fresh, dedicated audit of its own. |
   | `src/Editor/*` (the ImGui context, `EditorContext`, every `Panels/*Panel`) | **NEVER** | Dear ImGui's own context (`ImGuiContext`) is explicitly documented upstream as unsafe for concurrent access from multiple threads, and every Editor panel in this engine already only ever runs on the main thread inside `IEditorLayer::BuildUI()`/`Render()`. No job body has any legitimate reason to touch ImGui state directly - a future Editor "Jobs" panel (Phase 7) reads job/profiler DATA that a job body already finished writing (via `FrameProfiler`'s own thread-safe write path, Phase 5), never ImGui state from a worker thread. |
@@ -745,6 +751,109 @@ Follow these rules whenever touching this module or building a later phase on to
   - a future phase that needs to classify something not listed here should
   add a new row rather than assume an unlisted subsystem is safe by
   omission.
+
+- **Phase 5 (Profiler Integration - Worker Timeline - see
+  `task_manager/job_system/JOBSYSTEM_PHASE5_PROFILER_INTEGRATION_WORKER_TIMELINE_v2.md`
+  and `task_manager/job_system/JOB_SYSTEM_PHASE5_COMPLETION_REPORT.md`)
+  extends `src/Profiling/` so a worker thread's own scopes show up as real,
+  attributed data, closing the Phase 4 table's own `Profiling::FrameProfiler`
+  row ("NEVER (until Phase 5)") for exactly one new, narrow, genuinely
+  thread-safe write path - every OTHER `FrameProfiler` method remains
+  main-thread-only, unchanged.** `ProfilingTypes.h` gained `WorkerJobSample`
+  (`workerIndex`/`name`/`milliseconds`/`startTicks`) and
+  `kMaxWorkerJobSamplesPerFrame` (1024 - deliberately far larger than
+  `kMaxCpuScopesPerFrame`, since this is a raw per-CALL log, never
+  summed/deduplicated by name like `cpuScopes`), plus `FrameSample` gained
+  `frameStartTicks` (the raw `SDL_GetPerformanceCounter()` reading
+  `BeginFrame()` took to start that frame) and a
+  `workerJobs`/`workerJobCount` array - all still plain, fixed-size, POD
+  fields, so `FrameSample` itself remains trivially copyable into
+  `FrameProfiler`'s existing ring buffer with zero design change there.
+- **`FrameProfiler::RecordWorkerJobSample(workerIndex, name, milliseconds,
+  startTicks)` is the ONE method on `FrameProfiler` safe to call
+  CONCURRENTLY, from any number of Job System worker threads at once** -
+  every other method (`BeginFrame()`/`EndFrame()`/`RecordCpuScope()`/
+  `SetGpuPassTiming()`/`SetGpuPassDrawStats()`/`SetMemorySnapshot()`)
+  remains main-thread-only, exactly as the Phase 4 table already documents.
+  Implemented as a single atomic fetch-and-increment reservation
+  (`m_currentWorkerJobCount`, a `std::atomic<std::size_t>` kept SEPARATE
+  from `FrameSample::workerJobCount` itself, precisely because
+  `std::atomic` is neither copyable nor assignable and could therefore
+  never live INSIDE `FrameSample` without breaking its "plain, copyable
+  POD" contract) - each caller gets its own, never-repeated index, so
+  concurrent writes always land on DISJOINT array elements; no lock, no
+  allocation, ever. `BeginFrame()` resets this counter to 0; `EndFrame()`
+  snapshots it (clamped to `kMaxWorkerJobSamplesPerFrame`, mirroring
+  `RecordCpuScope()`'s own overflow-drop behavior) into
+  `m_current.workerJobCount` right before `m_current` is copied into
+  history.
+- **`FrameProfiler::m_captureEnabled` is now `std::atomic<bool>`, not a
+  plain `bool` like every other member - this is a real, deliberate
+  correctness fix, not a style change.** `RecordWorkerJobSample()` is the
+  one place this flag is genuinely read from a worker thread, possibly at
+  the EXACT same instant `SetCaptureEnabled()` is called from the main
+  thread (e.g. a user toggling the Editor's "Capture" checkbox while jobs
+  are in flight) - a plain `bool` read/written across threads with no
+  synchronization is undefined behavior, not just "probably fine". Every
+  other read of this flag (`BeginFrame()`/`EndFrame()`/`RecordCpuScope()`/
+  etc.) remains main-thread-only and unaffected by this change.
+  `m_frameInProgress`, by contrast, DELIBERATELY stays a plain `bool` -
+  reading it from a worker thread is safe without atomics ONLY because of
+  the Job System's own caller obligation that every `Dispatch()`/
+  `WaitForJobs()` bracket completes in full before the frame it belongs to
+  ends, which establishes a real happens-before edge from
+  `BeginFrame()`/`EndFrame()`'s own writes through to a job body's read,
+  via the Job System's internal mutex/condition-variable synchronization -
+  do not "fix" this one the same way; it would just be redundant.
+- **`gte::Jobs::JobSystem::WorkerIndexForCurrentThread()` (returns
+  `std::optional<std::size_t>`) is what `Profiling::JobScopeTimer`
+  (`src/Profiling/JobScopeTimer.h`) uses to attribute a recorded scope to
+  the worker that ran it - a genuinely NEW public method on `JobSystem`,
+  backed by a `thread_local std::optional<std::size_t>` set exactly once,
+  at the very top of `WorkerLoop()`, for the real worker thread running
+  it.** Returns `std::nullopt` for any thread that is NOT one of this
+  pool's own real worker threads (the main thread, a Phase 3
+  polling-fallback thread, ...) WHEN `GTE_ENABLE_JOB_SYSTEM` is `ON` - this
+  is what actually enforces the "never call `GTE_PROFILE_JOB_SCOPE` from
+  the main thread" rule below (a violation silently records nothing rather
+  than crashing or fabricating a worker index). When
+  `GTE_ENABLE_JOB_SYSTEM` is `OFF`, this instead ALWAYS returns `0` (never
+  `std::nullopt`) - mirroring `WorkerCount()`'s own "always >= 1, never 0"
+  contract, since there is no real worker-thread pool in that
+  configuration to distinguish "the main thread" from "a job body running
+  inline" in the first place (they are, by construction, the exact same
+  thread) - this is a deliberate design choice so an `OFF` build still
+  produces meaningful (if trivially single-row) worker-timeline data
+  instead of permanently blank data, at the honest cost of this specific
+  misuse-detection rule only being genuinely enforced when
+  `GTE_ENABLE_JOB_SYSTEM` is `ON`.
+- **`GTE_PROFILE_JOB_SCOPE("Name")` (`src/Profiling/JobScopeTimer.h`) is the
+  per-job-body counterpart of `GTE_PROFILE_SCOPE` - the ONLY correct way to
+  profile code running INSIDE a job body.** Mirrors `ScopeTimer`'s own
+  two-layer on/off convention exactly (compiles to a true empty no-op when
+  `GTE_ENABLE_PROFILER` is `OFF`; skips the clock read at runtime when
+  `FrameProfiler::IsCaptureEnabled()` is `false`), plus the one additional
+  runtime check described above (`WorkerIndexForCurrentThread()` must
+  return a value). NEVER call `GTE_PROFILE_SCOPE` from inside a job body
+  (it is completely unsynchronized - see the Phase 4 table's own
+  `FrameProfiler` row), and NEVER call `GTE_PROFILE_JOB_SCOPE` from the
+  main thread (see the previous bullet for exactly what happens if you do,
+  and why that enforcement is `GTE_ENABLE_JOB_SYSTEM`-dependent).
+- **`Profiling::BuildWorkerTimelinePoints()`/`ComputeDistinctWorkerCount()`
+  (`src/Profiling/WorkerTimelineData.h/.cpp`) is the pure, always-compiled,
+  ImGui-free "one frame's raw `WorkerJobSample` log -> a per-worker
+  timeline" reshape - mirrors `FrameGraphData.h`'s own "always-compiled
+  reshape" precedent exactly, so a future Phase 7 "Jobs" panel (and any
+  future benchmark-mode consumer) reads through this ONE function rather
+  than re-deriving the same reshape logic independently.** Each returned
+  `WorkerTimelinePoint::startMilliseconds` is computed relative to
+  `FrameSample::frameStartTicks` (never a raw absolute tick count a future
+  caller would otherwise have to re-derive the frame's own start from) via
+  `SDL_GetPerformanceFrequency()` - the same clock/units this whole module
+  standardizes on. Never re-sorts `FrameSample::workerJobs` - preserves
+  recording order exactly, and only ever reads the first
+  `workerJobCount` entries, never anything beyond it (stale/leftover array
+  slots past that count are never touched).
 
 ## Render Target Format Matching
 

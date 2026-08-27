@@ -117,6 +117,51 @@ struct MemorySnapshot {
     std::uint64_t textureCount = 0;
 };
 
+// Phase 5 (Profiler Integration - Worker Timeline - see
+// task_manager/job_system/JOBSYSTEM_PHASE5_PROFILER_INTEGRATION_WORKER_TIMELINE_v2.md):
+// one job body's own recorded CPU scope, attributed to whichever Job System
+// worker thread actually ran it - the per-worker-timeline analog of
+// CpuScopeSample above. Deliberately a SEPARATE, additive list from
+// cpuScopes (never merged into it): cpuScopes is a flat, name-keyed
+// AGGREGATE with no per-call timing/ordering information (repeated calls to
+// the same name are summed together) - exactly wrong for a worker TIMELINE,
+// which needs to know WHEN, on WHICH worker, each individual scope ran, so
+// it can be drawn as its own positioned, colored segment on that worker's
+// own row (see Profiling::BuildWorkerTimelinePoints(), WorkerTimelineData.h).
+struct WorkerJobSample {
+    std::size_t workerIndex = 0;
+
+    // Same string-literal/static-storage-duration convention as
+    // CpuScopeSample::name above - never owned/copied. See JobScopeTimer.h.
+    const char* name = nullptr;
+
+    double milliseconds = 0.0;
+
+    // The raw SDL_GetPerformanceCounter() reading (the SAME clock/units this
+    // whole module standardizes on - see AGENTS.md, "Profiling") this scope
+    // STARTED at - an ABSOLUTE tick count with no fixed epoch across
+    // frames/machines, needed ONLY so a future reshape
+    // (BuildWorkerTimelinePoints(), WorkerTimelineData.h) can compute this
+    // sample's own frame-relative start offset from FrameSample::
+    // frameStartTicks below; milliseconds alone (a DURATION) says nothing
+    // about WHEN within the frame a scope ran.
+    std::uint64_t startTicks = 0;
+};
+
+// Fixed capacity for the per-frame worker-job-sample log (see
+// FrameProfiler::RecordWorkerJobSample()) - deliberately far larger than
+// kMaxCpuScopesPerFrame above, since this is a raw per-CALL log (every
+// GTE_PROFILE_JOB_SCOPE construction/destruction pair gets its OWN entry,
+// never summed/deduplicated by name the way cpuScopes is) - a single
+// Dispatch() call can already produce dozens of batch jobs, across every
+// worker, in one frame. Still a small, fixed, generously-sized capacity
+// (never a growable container) - the same convention this module already
+// established for kMaxCpuScopesPerFrame/kMaxFrameHistory. A frame that
+// genuinely produces more than this many worker job samples simply drops
+// the overflow rather than allocating - see
+// FrameProfiler::RecordWorkerJobSample()'s own comment.
+inline constexpr std::size_t kMaxWorkerJobSamplesPerFrame = 1024;
+
 // One whole frame's worth of profiling data - exactly what FrameProfiler's
 // ring buffer stores one of, per frame. Every field is plain/POD and
 // fixed-size (std::array, never a growable container) - see
@@ -126,12 +171,32 @@ struct FrameSample {
     std::uint64_t frameIndex = 0;
     double cpuFrameMilliseconds = 0.0;
 
+    // The raw SDL_GetPerformanceCounter() reading BeginFrame() took to start
+    // THIS frame - an ABSOLUTE tick count with no fixed epoch across
+    // frames/machines; needed ONLY so a future reshape (see
+    // Profiling::BuildWorkerTimelinePoints(), WorkerTimelineData.h) has a
+    // stable "time zero" to compute each recorded WorkerJobSample's own
+    // frame-relative start offset from (Phase 5) - never meant to be read
+    // directly by ordinary calling code.
+    std::uint64_t frameStartTicks = 0;
+
     std::array<CpuScopeSample, kMaxCpuScopesPerFrame> cpuScopes{};
     std::size_t cpuScopeCount = 0;
 
     std::array<GpuPassSample, kGpuPassCount> gpuPasses{};
 
     MemorySnapshot memory{};
+
+    // Phase 5 (Profiler Integration - Worker Timeline): every job-body scope
+    // recorded via GTE_PROFILE_JOB_SCOPE this frame, attributed to whichever
+    // worker thread ran it - a raw, per-CALL log (never summed/deduplicated
+    // by name like cpuScopes above), since a worker TIMELINE needs to know
+    // WHEN and on WHICH worker each individual scope ran, not just an
+    // aggregate total. Populated via FrameProfiler::RecordWorkerJobSample(),
+    // the ONE thread-safe write path this module exposes - every other
+    // field on this struct remains written exclusively from the main thread.
+    std::array<WorkerJobSample, kMaxWorkerJobSamplesPerFrame> workerJobs{};
+    std::size_t workerJobCount = 0;
 };
 
 } // namespace gte::Profiling

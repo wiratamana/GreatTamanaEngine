@@ -2,6 +2,7 @@
 
 #include <SDL3/SDL_timer.h>
 
+#include <algorithm>
 #include <cstring>
 
 namespace gte::Profiling {
@@ -43,6 +44,12 @@ void FrameProfiler::BeginFrame() noexcept
     m_frameStartTicks = SDL_GetPerformanceCounter();
     m_current = FrameSample{};
     m_current.frameIndex = m_frameIndex;
+    m_current.frameStartTicks = m_frameStartTicks;
+
+    // Phase 5 (Profiler Integration - Worker Timeline): reset the atomic
+    // reservation counter for the new frame - see this member's own comment
+    // in FrameProfiler.h.
+    m_currentWorkerJobCount.store(0, std::memory_order_relaxed);
 }
 
 void FrameProfiler::EndFrame() noexcept
@@ -53,6 +60,16 @@ void FrameProfiler::EndFrame() noexcept
     }
 
     m_current.cpuFrameMilliseconds = ElapsedMilliseconds(m_frameStartTicks);
+
+    // Phase 5: snapshot the atomic reservation counter into the plain,
+    // copyable workerJobCount field - clamped to the fixed array's own
+    // capacity, since RecordWorkerJobSample()'s fetch_add can legitimately
+    // keep incrementing past kMaxWorkerJobSamplesPerFrame (every caller
+    // still gets a well-defined reserved index to check against the
+    // capacity, even once it's been exceeded - see that method's own
+    // comment).
+    m_current.workerJobCount = std::min<std::size_t>(
+        m_currentWorkerJobCount.load(std::memory_order_acquire), kMaxWorkerJobSamplesPerFrame);
 
     m_history[m_historyHead] = m_current;
     m_historyHead = (m_historyHead + 1) % kMaxFrameHistory;
@@ -135,6 +152,30 @@ void FrameProfiler::SetMemorySnapshot(const MemorySnapshot& snapshot) noexcept
     m_current.memory = snapshot;
 }
 
+void FrameProfiler::RecordWorkerJobSample(
+    std::size_t workerIndex, const char* name, double milliseconds, std::uint64_t startTicks) noexcept
+{
+    if (!m_captureEnabled || !m_frameInProgress || name == nullptr) {
+        return;
+    }
+
+    // A single atomic fetch-and-increment reservation - see this method's
+    // own header comment (FrameProfiler.h) for why this is the ONE method
+    // on this class safe to call concurrently from many worker threads at
+    // once: each caller gets its own, distinct, never-repeated index, so
+    // concurrent writes below always land on DISJOINT array elements.
+    const std::size_t index = m_currentWorkerJobCount.fetch_add(1, std::memory_order_acq_rel);
+    if (index >= kMaxWorkerJobSamplesPerFrame) {
+        return; // Overflow - silently dropped, mirroring RecordCpuScope()'s own overflow behavior.
+    }
+
+    WorkerJobSample& sample = m_current.workerJobs[index];
+    sample.workerIndex = workerIndex;
+    sample.name = name;
+    sample.milliseconds = milliseconds;
+    sample.startTicks = startTicks;
+}
+
 const FrameSample& FrameProfiler::HistoryAt(std::size_t indexFromOldest) const noexcept
 {
     const std::size_t oldestPhysicalIndex = (m_historyHead + kMaxFrameHistory - m_historyCount) % kMaxFrameHistory;
@@ -160,6 +201,7 @@ void FrameProfiler::ResetForTesting() noexcept
     m_history = {};
     m_historyHead = 0;
     m_historyCount = 0;
+    m_currentWorkerJobCount.store(0, std::memory_order_relaxed); // Phase 5.
 }
 
 void FrameProfiler::OverrideLastFrameCpuMillisecondsForTesting(double milliseconds) noexcept

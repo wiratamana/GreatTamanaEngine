@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <thread>
 #include <vector>
 
@@ -97,6 +98,43 @@ public:
     // WorkerCount() batches) can always safely divide work by, never zero.
     std::size_t WorkerCount() const noexcept;
 
+    // Phase 5 (Profiler Integration - Worker Timeline - see
+    // task_manager/job_system/JOBSYSTEM_PHASE5_PROFILER_INTEGRATION_WORKER_TIMELINE_v2.md):
+    // returns the 0-based index of the worker thread currently executing,
+    // IF AND ONLY IF the CALLING thread genuinely is one of this pool's own
+    // worker threads - std::nullopt otherwise (the main thread, or a Phase 3
+    // polling-fallback background thread). A real index is set exactly
+    // once, at the very top of WorkerLoop() below (thread_local, never
+    // reassigned afterward for the life of that thread).
+    //
+    // When GTE_ENABLE_JOB_SYSTEM is OFF, this ALWAYS returns `0` (never
+    // std::nullopt) - mirroring WorkerCount()'s own "always >= 1, never 0"
+    // contract above: there is no real worker-thread pool in that
+    // configuration (Schedule() simply runs every job inline, on whichever
+    // thread calls it), but there IS still exactly one conceptual "worker"
+    // (WorkerCount() == 1), so a job body running via Schedule() in this
+    // configuration is treated as running "as" that one worker, for the
+    // duration of the call - this is what keeps Profiling::JobScopeTimer
+    // still producing meaningful (if trivially single-row) worker-timeline
+    // data in an OFF build, rather than permanently blank. Note this DOES
+    // mean a caller in this configuration that (incorrectly, per AGENTS.md's
+    // "never call GTE_PROFILE_JOB_SCOPE from the main thread" rule) uses
+    // GTE_PROFILE_JOB_SCOPE directly from the main thread is indistinguishable
+    // from a genuine job body - an unavoidable ambiguity of a configuration
+    // where "the calling thread" and "the (only) worker" are, by design, the
+    // exact same thread; this rule remains real and enforced whenever
+    // GTE_ENABLE_JOB_SYSTEM is ON, where a real, distinguishable worker
+    // thread actually exists.
+    //
+    // Used exclusively by Profiling::JobScopeTimer
+    // (src/Profiling/JobScopeTimer.h) to attribute a recorded scope to the
+    // worker that ran it - a std::nullopt return is what makes JobScopeTimer
+    // skip recording entirely rather than attribute a scope to a fabricated
+    // worker index, so a caller violating the "never from the main thread"
+    // rule (in a GTE_ENABLE_JOB_SYSTEM=ON build) doesn't crash - it just
+    // quietly produces no worker-timeline data for that one scope.
+    std::optional<std::size_t> WorkerIndexForCurrentThread() const noexcept;
+
     // HOTFIX 2 (see task_manager/job_system/JOBSYSTEM_HOTFIX_CODE_REVIEW_FINDINGS.md,
     // item 2, and JOB_SYSTEM_HOTFIX2_COMPLETION_REPORT.md): registers a
     // background thread that is NOT part of the worker pool above - today,
@@ -152,7 +190,11 @@ private:
     void JoinAllBackgroundThreads();
 
 #if GTE_ENABLE_JOB_SYSTEM
-    void WorkerLoop();
+    // Phase 5: takes this worker's own 0-based index, set into a
+    // thread_local (JobSystem.cpp) at the very top of this function, for
+    // WorkerIndexForCurrentThread() to read back later from this same
+    // thread.
+    void WorkerLoop(std::size_t workerIndex);
 
     // A single, process-wide "a job just finished" signal, shared by every
     // WaitForJobs() caller regardless of which handle they're each actually

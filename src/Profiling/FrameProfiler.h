@@ -3,6 +3,7 @@
 #include "ProfilingTypes.h"
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
@@ -44,9 +45,17 @@ public:
     // The runtime half of the two-layer on/off switch (see
     // PROFILER_STRATEGY_v2.md, Phase 0b) - defaults to true. While false,
     // BeginFrame()/EndFrame()/RecordCpuScope()/SetGpuPassSample()/
-    // SetMemorySnapshot() all become true no-ops (no clock read, no ring
-    // buffer write at all) - this is what a future "Profiler" panel's
-    // pause toggle and a future benchmark-mode CLI flag both drive.
+    // SetMemorySnapshot()/RecordWorkerJobSample() all become true no-ops (no
+    // clock read, no ring buffer write at all) - this is what a future
+    // "Profiler" panel's pause toggle and a future benchmark-mode CLI flag
+    // both drive. Backed by std::atomic<bool> (Phase 5 - Profiler
+    // Integration/Worker Timeline), NOT a plain bool like every other
+    // member below: RecordWorkerJobSample() (see that method's own comment)
+    // is the one place this flag is genuinely read from a Job System worker
+    // thread, possibly at the exact same instant SetCaptureEnabled() is
+    // called from the main thread (e.g. a user toggling the Editor's
+    // "Capture" checkbox while jobs are in flight) - every other read of
+    // this flag remains main-thread-only, same as before.
     void SetCaptureEnabled(bool enabled) noexcept { m_captureEnabled = enabled; }
     bool IsCaptureEnabled() const noexcept { return m_captureEnabled; }
 
@@ -101,6 +110,38 @@ public:
     // Renderer::GetMemoryTotals() reshaped into a MemorySnapshot.
     void SetMemorySnapshot(const MemorySnapshot& snapshot) noexcept;
 
+    // Phase 5 (Profiler Integration - Worker Timeline): the ONE thread-safe
+    // write path into this module's data model - safe to call CONCURRENTLY,
+    // from any number of Job System worker threads at once, unlike EVERY
+    // other method on this class (RecordCpuScope()/BeginFrame()/EndFrame()/
+    // SetGpuPassTiming()/SetGpuPassDrawStats()/SetMemorySnapshot() remain
+    // main-thread-only - see AGENTS.md's Job System Phase 4 thread-safety
+    // table: "Profiling::FrameProfiler ... NEVER (until Phase 5)"). Called
+    // from Profiling::JobScopeTimer's destructor (src/Profiling/
+    // JobScopeTimer.h) - not meant to be called directly by ordinary job
+    // code (use GTE_PROFILE_JOB_SCOPE(name) instead). `name` MUST be a
+    // string literal/static-storage-duration pointer, same convention as
+    // RecordCpuScope(). A no-op while capture is disabled or outside a
+    // BeginFrame()/EndFrame() bracket - reads IsCaptureEnabled() (now backed
+    // by std::atomic<bool>, see below, since - unlike every other read in
+    // this class - it can genuinely be read from a worker thread at the
+    // same moment SetCaptureEnabled() is called from the main thread, e.g.
+    // an Editor "Capture" checkbox toggled while jobs are in flight) and
+    // m_frameInProgress (still a plain bool - safe to read from a worker
+    // thread ONLY because of the Job System's own caller obligation that
+    // every Dispatch()/WaitForJobs() bracket completes in full before the
+    // frame it belongs to ends, which is what establishes a real
+    // happens-before edge from BeginFrame()/EndFrame()'s own writes through
+    // to a job body's read, via the Job System's internal mutex/condition-
+    // variable synchronization - see AGENTS.md, "Job System"). Reserves its
+    // own slot in the current frame's fixed-capacity worker-job log via a
+    // single atomic fetch-and-increment - never a lock, never an allocation
+    // - and silently drops the sample (rather than allocating or blocking)
+    // once kMaxWorkerJobSamplesPerFrame is reached, mirroring
+    // RecordCpuScope()'s own overflow behavior.
+    void RecordWorkerJobSample(
+        std::size_t workerIndex, const char* name, double milliseconds, std::uint64_t startTicks) noexcept;
+
     // How many frames EndFrame() has fully completed so far (i.e. the
     // frame index BeginFrame() will assign to the NEXT frame it starts).
     std::uint64_t CompletedFrameCount() const noexcept { return m_frameIndex; }
@@ -153,12 +194,23 @@ public:
 private:
     FrameProfiler() = default;
 
-    bool m_captureEnabled = true;
+    std::atomic<bool> m_captureEnabled{ true };
     bool m_frameInProgress = false;
     std::uint64_t m_frameIndex = 0;
     std::uint64_t m_frameStartTicks = 0;
 
     FrameSample m_current{};
+
+    // Phase 5 (Profiler Integration - Worker Timeline): the thread-safe
+    // reservation counter behind RecordWorkerJobSample() - deliberately
+    // separate from m_current.workerJobCount itself (which stays a plain,
+    // copyable std::size_t, since FrameSample as a whole must remain a
+    // plain, copyable POD to be pushed into m_history below - std::atomic is
+    // neither copyable nor assignable, so it can never live INSIDE
+    // FrameSample). Reset to 0 by BeginFrame(); snapshotted (clamped to
+    // kMaxWorkerJobSamplesPerFrame) into m_current.workerJobCount by
+    // EndFrame(), right before m_current is copied into history.
+    std::atomic<std::size_t> m_currentWorkerJobCount{ 0 };
 
     std::array<FrameSample, kMaxFrameHistory> m_history{};
     std::size_t m_historyHead = 0; // Next slot EndFrame() will write to.

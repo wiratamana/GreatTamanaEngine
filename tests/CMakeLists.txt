@@ -463,6 +463,49 @@
 #                                            EndFrame()'d) frame never being
 #                                            observed. Always built, same
 #                                            reason as the two entries above.
+#   Profiling/JobScopeTimerTests.cpp        - Job System Phase 5's
+#                                            GTE_PROFILE_JOB_SCOPE/JobScopeTimer
+#                                            (src/Profiling/JobScopeTimer.h)
+#                                            recording a real positive
+#                                            duration into
+#                                            FrameProfiler::RecordWorkerJobSample()'s
+#                                            new, dedicated thread-safe log
+#                                            when called from a REAL
+#                                            gte::Jobs::Dispatch() batch job
+#                                            body (several batches across
+#                                            more than one worker, proving
+#                                            concurrent writes never
+#                                            corrupt each other's reserved
+#                                            slot), silently recording
+#                                            nothing when called from the
+#                                            test's own (non-worker) thread
+#                                            directly, and the
+#                                            kMaxWorkerJobSamplesPerFrame
+#                                            overflow path degrading
+#                                            gracefully rather than
+#                                            crashing/corrupting memory.
+#                                            Always built, same reason as
+#                                            ScopeTimerTests.cpp above.
+#   Profiling/WorkerTimelineDataTests.cpp   - Job System Phase 5's pure
+#                                            "one frame's raw
+#                                            WorkerJobSample log -> a
+#                                            per-worker timeline" reshape
+#                                            (BuildWorkerTimelinePoints()/
+#                                            ComputeDistinctWorkerCount() -
+#                                            src/Profiling/WorkerTimelineData.h) -
+#                                            an empty frame produces an
+#                                            empty result, every sample's
+#                                            own startMilliseconds is
+#                                            computed correctly relative to
+#                                            the frame's own start, distinct
+#                                            worker counting ignores
+#                                            repeats, and ordering is
+#                                            preserved exactly as recorded.
+#                                            No live clock/JobSystem
+#                                            involved - fed entirely with a
+#                                            hand-built FrameSample. Always
+#                                            built, same reason as
+#                                            FrameGraphDataTests.cpp above.
 #   Jobs/JobQueueTests.cpp                  - Job System Phase 1's fixed-
 #                                            capacity ring buffer
 #                                            (gte::Jobs::detail::JobQueue -
@@ -682,6 +725,8 @@ set(GTE_TEST_SOURCES
     Profiling/FrameProfilerTests.cpp
     Profiling/ScopeTimerTests.cpp
     Profiling/FrameGraphDataTests.cpp
+    Profiling/JobScopeTimerTests.cpp
+    Profiling/WorkerTimelineDataTests.cpp
     Jobs/JobQueueTests.cpp
     Jobs/JobSystemTests.cpp
     Jobs/JobDispatchMathTests.cpp

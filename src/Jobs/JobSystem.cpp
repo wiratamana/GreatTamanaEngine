@@ -18,6 +18,16 @@ namespace {
 // more in-flight jobs than this should raise this constant deliberately,
 // not silently rely on the graceful full-queue fallback as its normal path.
 constexpr std::size_t kDefaultQueueCapacity = 4096;
+
+// Phase 5 (Profiler Integration - Worker Timeline): per-thread, defaults to
+// std::nullopt for every thread except one of JobSystem's own real worker
+// threads (GTE_ENABLE_JOB_SYSTEM=ON only), which sets this to its own
+// 0-based index exactly once, right at the top of its own WorkerLoop()
+// invocation (see below) - never reassigned again for the rest of that
+// thread's life. Deliberately thread_local rather than a member of
+// JobSystem itself, since "which worker (if any) is THIS thread" is a
+// property of the calling thread, not of the JobSystem instance.
+thread_local std::optional<std::size_t> t_currentWorkerIndex;
 } // namespace
 
 JobSystem& JobSystem::Instance()
@@ -117,7 +127,7 @@ JobSystem::JobSystem()
 
     m_workers.reserve(workerCount);
     for (std::size_t i = 0; i < workerCount; ++i) {
-        m_workers.emplace_back([this]() { WorkerLoop(); });
+        m_workers.emplace_back([this, i]() { WorkerLoop(i); });
     }
 }
 
@@ -152,8 +162,13 @@ JobSystem::~JobSystem()
     JoinAllBackgroundThreads();
 }
 
-void JobSystem::WorkerLoop()
+void JobSystem::WorkerLoop(std::size_t workerIndex)
 {
+    // Phase 5: publish this worker's own index for
+    // WorkerIndexForCurrentThread() to read back later, from this same
+    // thread, for the rest of this thread's life.
+    t_currentWorkerIndex = workerIndex;
+
     detail::JobEntry entry;
     while (m_queue.WaitAndPop(entry)) {
         entry.fn(entry.payload);
@@ -329,6 +344,16 @@ std::size_t JobSystem::WorkerCount() const noexcept
     return m_workers.size();
 }
 
+std::optional<std::size_t> JobSystem::WorkerIndexForCurrentThread() const noexcept
+{
+    // t_currentWorkerIndex (JobSystem.cpp's own anonymous namespace) is only
+    // ever set by WorkerLoop(), and only for the thread actually running it
+    // - defaults to std::nullopt for every other thread (main thread, a
+    // Phase 3 polling-fallback thread, ...), exactly this method's own
+    // documented contract (see JobSystem.h).
+    return t_currentWorkerIndex;
+}
+
 #else // !GTE_ENABLE_JOB_SYSTEM
 
 JobSystem::JobSystem() = default;
@@ -424,6 +449,17 @@ std::size_t JobSystem::WorkerCount() const noexcept
     // A well-defined, non-zero value - see this method's own header
     // comment - so a future caller can always safely divide work by it.
     return 1;
+}
+
+std::optional<std::size_t> JobSystem::WorkerIndexForCurrentThread() const noexcept
+{
+    // No real worker-thread pool exists in this configuration at all, but
+    // ALWAYS returns 0 (never std::nullopt) - see this method's own header
+    // comment (JobSystem.h) for the full reasoning: mirrors WorkerCount()'s
+    // own "always >= 1, never 0" contract, treating whichever thread is
+    // currently running a job body (via Schedule()'s inline execution) as
+    // that one conceptual worker.
+    return std::optional<std::size_t>(0);
 }
 
 #endif // GTE_ENABLE_JOB_SYSTEM
