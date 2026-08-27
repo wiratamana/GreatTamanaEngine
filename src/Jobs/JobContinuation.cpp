@@ -16,11 +16,25 @@ namespace {
 // allocation in the steady-state per-job path" rule) per-ScheduleAfter()-call
 // bookkeeping: how many of the caller's dependencies are still outstanding,
 // and what to actually run once every one of them clears. Freed by whichever
-// watcher callback observes the LAST dependency clearing
-// (OnDependencyCleared(), below) - exactly one call ever does, since
-// unmetDependencyCount is only ever decremented, never re-incremented, and
-// atomically guards against more than one caller observing the transition to
-// zero.
+// call observes the transition to zero (OnDependencyCleared(), below) -
+// exactly one call ever does, since unmetDependencyCount is only ever
+// decremented, never re-incremented, and atomically guards against more than
+// one caller observing that transition.
+//
+// HOTFIX 3 (see task_manager/job_system/JOBSYSTEM_HOTFIX_CODE_REVIEW_FINDINGS.md,
+// item 7, and JOB_SYSTEM_HOTFIX3_COMPLETION_REPORT.md): unmetDependencyCount
+// is initialized to `pendingDependencies.size() + 1`, NOT just
+// `pendingDependencies.size()` - the "+1" is a synthetic "ScheduleAfter()'s
+// own registration loop is still in progress" unit, owned solely by the
+// thread running that loop, released via one extra OnDependencyCleared()
+// call only once every real dependency has actually been registered (see
+// ScheduleAfter() below). This is what stops unmetDependencyCount from EVER
+// being able to reach zero - and `continuation` from being deleted - while
+// the registration loop is still iterating over `pendingDependencies`, no
+// matter how many of those dependencies clear out from under it
+// concurrently (a real use-after-free otherwise: a dependency clearing
+// mid-loop could delete `continuation` while a LATER iteration of that same
+// loop still holds and dereferences the same pointer).
 struct PendingContinuation {
     JobFunction fn;
     void* payload;
@@ -28,10 +42,15 @@ struct PendingContinuation {
     std::atomic<std::uint32_t> unmetDependencyCount;
 };
 
-// Fired once per dependency, by whichever mechanism actually observed that
-// dependency clear (a direct JobHandleState watcher, or the polling fallback
-// below) - decrements the shared unmetDependencyCount, and once the LAST
-// dependency clears, actually schedules the real, deferred work via
+// Called once per real dependency clearing (by whichever mechanism actually
+// observed it - a direct JobHandleState watcher, or the polling fallback
+// below), AND exactly once more by ScheduleAfter() itself, right after its
+// own registration loop finishes, to release the registration-in-progress
+// sentinel unit described above - so this is no longer strictly "once per
+// dependency" (HOTFIX 3). Decrements the shared unmetDependencyCount, and
+// once the count actually reaches zero - which can only happen once every
+// real dependency has cleared AND ScheduleAfter() has released its own
+// sentinel, in either order - actually schedules the real, deferred work via
 // JobSystem::ScheduleAlreadyPending() (never plain Schedule() - see
 // PendingContinuation's own `handle` field comment and
 // JobHandle::AddPendingUnit()'s doc for why).
@@ -39,7 +58,8 @@ void OnDependencyCleared(void* rawContinuation)
 {
     PendingContinuation* continuation = static_cast<PendingContinuation*>(rawContinuation);
     if (continuation->unmetDependencyCount.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-        // We were the last dependency to clear.
+        // We were the last unit (real dependency OR the registration
+        // sentinel) to clear.
         JobSystem::Instance().ScheduleAlreadyPending(continuation->fn, continuation->payload, continuation->handle);
         delete continuation;
     }
@@ -174,13 +194,33 @@ void ScheduleAfter(JobFunction fn, void* payload, std::span<JobHandle* const> de
     // concurrent WaitForJobs() caller could otherwise observe).
     handle.AddPendingUnit();
 
+    // HOTFIX 3: +1 sentinel unit - represents "this registration loop is
+    // still in progress", NOT a real dependency. This is what stops
+    // unmetDependencyCount from EVER being able to reach zero (and
+    // `continuation` from being deleted) while the loop below is still
+    // running, no matter how many of pendingDependencies clear out from
+    // under it concurrently - the count can only actually reach zero once
+    // (a) every real dependency has cleared AND (b) this function has
+    // released its own registration-in-progress unit below; those two
+    // things may happen in either order.
     PendingContinuation* continuation = new PendingContinuation{
-        fn, payload, handle, std::atomic<std::uint32_t>(static_cast<std::uint32_t>(pendingDependencies.size()))
+        fn, payload, handle,
+        std::atomic<std::uint32_t>(static_cast<std::uint32_t>(pendingDependencies.size() + 1))
     };
 
     for (JobHandle* dependency : pendingDependencies) {
         WatchDependencyWithFallback(*dependency, continuation);
     }
+
+    // Release the registration-in-progress sentinel now that every
+    // dependency in pendingDependencies has been safely registered against
+    // `continuation` - if every one of them ALSO already cleared (possibly
+    // before this very line runs), this is the call that observes the
+    // transition to zero and actually fires the deferred job; otherwise it
+    // just brings the count down to the true "real dependencies still
+    // outstanding" number, and whichever later OnDependencyCleared() call
+    // brings that down to zero does the firing, as before this hotfix.
+    OnDependencyCleared(continuation);
 }
 
 namespace {

@@ -6,7 +6,9 @@ and JobTypes.h (Phase 3 continuations + underlying Phase 1/2 machinery).
 Item 1 (below) was fixed under **HOTFIX 1** - see
 `JOB_SYSTEM_HOTFIX1_COMPLETION_REPORT.md` for the full writeup. Item 2 was
 fixed under **HOTFIX 2** - see `JOB_SYSTEM_HOTFIX2_COMPLETION_REPORT.md` for
-the full writeup. Items 3-6 and the "Minor nits" remain OPEN - this file
+the full writeup. Item 7 - a CRITICAL use-after-free in `ScheduleAfter()` -
+was fixed under **HOTFIX 3** - see `JOB_SYSTEM_HOTFIX3_COMPLETION_REPORT.md`
+for the full writeup. Items 3-6 and the "Minor nits" remain OPEN - this file
 exists purely so those findings aren't lost before someone circles back to
 fix them.
 
@@ -244,6 +246,139 @@ timeout/cancellation mechanism. See
 
 ---
 
+## 7. [CRITICAL] [FIXED — HOTFIX 3] Use-after-free race
+   in `ScheduleAfter()`'s dependency-registration loop
+
+**File:** `JobContinuation.cpp`, `ScheduleAfter()` / `PendingContinuation` /
+`OnDependencyCleared()`
+
+```cpp
+PendingContinuation* continuation = new PendingContinuation{
+    fn, payload, handle, std::atomic<std::uint32_t>(static_cast<std::uint32_t>(pendingDependencies.size()))
+};
+
+for (JobHandle* dependency : pendingDependencies) {
+    WatchDependencyWithFallback(*dependency, continuation);
+}
+```
+
+`unmetDependencyCount` is initialized to EXACTLY `pendingDependencies.size()`
+- the real number of dependencies this continuation is waiting on - then the
+loop above registers a watcher against each one, ONE AT A TIME.
+`WatchDependencyWithFallback()`/`AddWatcher()` may invoke
+`OnDependencyCleared()` **synchronously, from inside this same loop**, either
+because a dependency is already complete by the time it is actually
+registered (a real race window - the earlier `!dependency->IsComplete()`
+filter is only a snapshot, taken before this loop starts) or because a
+background job on another thread completes a still-pending dependency while
+this loop is running.
+
+`OnDependencyCleared()` decrements `unmetDependencyCount` and, the moment it
+observes the transition to zero, immediately `delete`s `continuation`:
+
+```cpp
+void OnDependencyCleared(void* rawContinuation)
+{
+    PendingContinuation* continuation = static_cast<PendingContinuation*>(rawContinuation);
+    if (continuation->unmetDependencyCount.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+        JobSystem::Instance().ScheduleAlreadyPending(continuation->fn, continuation->payload, continuation->handle);
+        delete continuation;
+    }
+}
+```
+
+**Why it matters:** if two (or more) of `pendingDependencies` clear before
+the registration loop has finished iterating over all of them - entirely
+plausible any time `pendingDependencies.size() >= 2` and dependencies are
+themselves being completed concurrently by other worker threads, or simply
+finish between the pre-loop `IsComplete()` snapshot and their own
+registration - `unmetDependencyCount` can reach zero, and `continuation` can
+be `delete`d, **while the loop is still running**. Every subsequent
+iteration of the loop then calls
+`WatchDependencyWithFallback(*dependency, continuation)` with an
+already-freed pointer: a textbook use-after-free, reachable from the public
+API (`ScheduleAfter()`/`DispatchAfter()`) any time a caller passes 2 or more
+dependency handles, with no need for any unusual timing beyond ordinary
+concurrent job completion. This is a crash/memory-corruption bug, not a
+theoretical one.
+
+**Proposed fix (reviewed below - considered correct and sufficient):**
+initialize `unmetDependencyCount` to `pendingDependencies.size() + 1` - one
+extra, synthetic "registration in progress" unit that only the calling
+thread itself ever owns - run the registration loop exactly as today, then
+release that synthetic unit, via one extra `OnDependencyCleared(continuation)`
+call, only once every real dependency has actually been registered:
+
+```cpp
+// +1 sentinel: represents "ScheduleAfter()'s own registration loop is still
+// in progress", NOT a real dependency. This is what stops
+// unmetDependencyCount from EVER being able to reach zero (and `continuation`
+// from being deleted) while the loop below is still running, no matter how
+// many of pendingDependencies clear out from under it concurrently - the
+// count can only actually reach zero once (a) every real dependency has
+// cleared AND (b) this function has released its own registration-in-progress
+// unit below; those two things may happen in either order.
+PendingContinuation* continuation = new PendingContinuation{
+    fn, payload, handle,
+    std::atomic<std::uint32_t>(static_cast<std::uint32_t>(pendingDependencies.size() + 1))
+};
+
+for (JobHandle* dependency : pendingDependencies) {
+    WatchDependencyWithFallback(*dependency, continuation);
+}
+
+// Release the registration-in-progress sentinel now that every dependency in
+// pendingDependencies has been safely registered against `continuation` - if
+// every one of them ALSO already cleared (possibly before this very line
+// runs), this is the call that observes the transition to zero and actually
+// fires the deferred job; otherwise it just brings the count down to the
+// true "real dependencies still outstanding" number, and whichever later
+// OnDependencyCleared() call brings that down to zero does the firing, as
+// today.
+OnDependencyCleared(continuation);
+```
+
+This is the standard "N+1 latch" pattern for exactly this class of bug (the
+same shape of problem `JobHandle::AddPendingUnit()` already exists to solve
+for a different counter, `JobHandleState::pending` - see that method's own
+comment) and closes the race completely: `unmetDependencyCount` can never
+drop to zero before this function's own registration loop has finished,
+because the sentinel unit this function itself holds is not released until
+after that loop returns.
+
+**Review notes / refinements beyond the original proposal:**
+- The struct comment on `PendingContinuation::unmetDependencyCount` ("only
+  ever decremented... atomically guards against more than one caller
+  observing the transition to zero") remains true after this fix, but should
+  gain a note that its initial value is `pendingDependencies.size() + 1`, not
+  `pendingDependencies.size()`, and why (the sentinel).
+- `OnDependencyCleared()`'s own header comment ("Fired once per dependency...")
+  should be updated to note it is also called exactly one extra time per
+  `ScheduleAfter()` call, for the registration-sentinel release - it is no
+  longer strictly "once per dependency".
+- Recommend a regression test mirroring HOTFIX 1/2's own verification style
+  (see `tests/Jobs/JobContinuationTests.cpp`): schedule `ScheduleAfter()`
+  with several (3+) dependency handles, complete them concurrently from
+  other threads DURING the registration window (e.g. a small artificial
+  delay/interleaving hook, or a stress/`--gtest_repeat` loop under ASan/
+  TSan), and confirm no crash/UB - this is exactly the kind of race that can
+  pass silently for a long time without such a test.
+- The same theoretical truncation caveat already listed under "Minor nits"
+  below applies one integer wider here (`pendingDependencies.size() + 1`
+  overflowing `uint32_t` requires `size() == UINT32_MAX`) - still purely
+  theoretical at current scale, not worth a special-case fix, just noting it
+  is unchanged in severity by this proposal.
+
+**Status:** FIXED (HOTFIX 3). The proposed fix above was applied to
+`JobContinuation.cpp` exactly as reviewed (the "N+1 latch" sentinel unit,
+released via one extra `OnDependencyCleared(continuation)` call right after
+the registration loop finishes), plus every "Review notes / refinements"
+item above (both doc-comment updates, and the recommended concurrent-
+completion-during-registration regression test). See
+`JOB_SYSTEM_HOTFIX3_COMPLETION_REPORT.md` for the full writeup.
+
+---
+
 ## Minor nits (not urgent)
 
 - `ScheduleAfter()`: `static_cast<std::uint32_t>(pendingDependencies.size())`
@@ -257,3 +392,13 @@ timeout/cancellation mechanism. See
 
 _Generated from an AI code-review pass on 2026-08-27. No code was changed as
 part of this pass — this file is tracking/backlog only._
+
+_Item 7 added, and its proposed fix reviewed/refined, during a follow-up pass
+on 2026-08-27 (same day). No code was changed as part of THAT follow-up pass
+either - `JobContinuation.cpp` still contained the bug at that point._
+
+_HOTFIX 3 (2026-08-27, same day): item 7's reviewed fix was applied to
+`JobContinuation.cpp` as-is, plus a new regression test
+(`tests/Jobs/JobContinuationTests.cpp`'s
+`ScheduleAfterSurvivesConcurrentDependencyCompletionDuringRegistration`). See
+`JOB_SYSTEM_HOTFIX3_COMPLETION_REPORT.md` for the full writeup._

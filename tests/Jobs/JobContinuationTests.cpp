@@ -462,5 +462,61 @@ TEST(JobContinuationTests, DispatchAfterZeroItemCountIsAnImmediateNoOp)
     EXPECT_FALSE(everRan.load(std::memory_order_acquire));
 }
 
+// HOTFIX 3 regression test - see JOBSYSTEM_HOTFIX_CODE_REVIEW_FINDINGS.md,
+// item 7: a use-after-free in ScheduleAfter()'s own dependency-registration
+// loop, reachable any time 2+ dependencies are passed and at least one of
+// them clears WHILE that loop is still iterating over the REST (plausible
+// any time dependencies are real jobs racing to completion concurrently on
+// worker threads, exactly as set up below). Before the fix,
+// `unmetDependencyCount` was initialized to exactly `pendingDependencies.size()`
+// (no "registration still in progress" sentinel), so two or more
+// dependencies clearing before the loop finished registering every one of
+// them could bring the count to zero - and `continuation` `delete`d - while
+// a LATER loop iteration still held and dereferenced that same pointer.
+// This test's real assertion is simply "this doesn't crash/hang", repeated
+// many times (concurrent scheduling races are exactly the class of bug that
+// can pass by luck on a single run - see AGENTS.md, "Job System") to
+// maximize the chance of actually landing inside the registration window a
+// dependency's own completion races against.
+TEST(JobContinuationTests, ScheduleAfterSurvivesConcurrentDependencyCompletionDuringRegistration)
+{
+    constexpr int kIterations = 300;
+    constexpr int kDependencyCount = 4;
+    for (int iteration = 0; iteration < kIterations; ++iteration) {
+        std::vector<JobHandle> dependencies(kDependencyCount);
+        std::vector<std::atomic<bool>> dependencyRan(kDependencyCount);
+        for (int i = 0; i < kDependencyCount; ++i) {
+            dependencyRan[i].store(false, std::memory_order_relaxed);
+            // Real jobs, scheduled just before ScheduleAfter() below - on a
+            // real worker-thread pool (GTE_ENABLE_JOB_SYSTEM=ON) these race
+            // to completion concurrently with ScheduleAfter()'s own
+            // registration loop; even when it's OFF, Schedule() itself has
+            // already run each job to completion by the time this loop
+            // returns, so every dependency here is already complete before
+            // ScheduleAfter() is even called - both configurations are
+            // valuable, exercising different halves of this fix.
+            JobSystem::Instance().Schedule(&SetFlagJob, &dependencyRan[i], dependencies[i]);
+        }
+
+        std::atomic<bool> continuationRan{ false };
+        JobHandle handle;
+        std::vector<JobHandle*> dependencyPtrs;
+        dependencyPtrs.reserve(kDependencyCount);
+        for (int i = 0; i < kDependencyCount; ++i) {
+            dependencyPtrs.push_back(&dependencies[i]);
+        }
+
+        ScheduleAfter(&SetFlagJob, &continuationRan, dependencyPtrs, handle);
+
+        JobSystem::Instance().WaitForJobs(handle);
+        EXPECT_TRUE(handle.IsComplete()) << "iteration=" << iteration;
+        EXPECT_TRUE(continuationRan.load(std::memory_order_acquire)) << "iteration=" << iteration;
+        for (int i = 0; i < kDependencyCount; ++i) {
+            EXPECT_TRUE(dependencyRan[i].load(std::memory_order_acquire))
+                << "iteration=" << iteration << " dep=" << i;
+        }
+    }
+}
+
 } // namespace
 } // namespace gte::Jobs
