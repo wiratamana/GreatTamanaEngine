@@ -422,6 +422,8 @@ if(GTE_ENABLE_EDITOR)
         src/Editor/EditorCamera.cpp
         src/Editor/ComputeBlurValidation.h
         src/Editor/ComputeBlurValidation.cpp
+        src/Editor/GpuSkinningValidation.h
+        src/Editor/GpuSkinningValidation.cpp
         src/Editor/TransformGizmo.h
         src/Editor/TransformGizmo.cpp
         src/Editor/DockLayout.h
