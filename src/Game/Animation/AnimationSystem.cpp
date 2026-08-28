@@ -14,6 +14,7 @@
 #include "../Instantiation/MeshVertexPacking.h"
 #include "../RenderSystem.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 
@@ -27,11 +28,13 @@ constexpr float kVmdFramesPerSecond = 30.0f;
 // Job System Phase 6 (First Production Consumer - Animation / Vertex
 // Skinning - see AGENTS.md, "Job System", and
 // task_manager/job_system/JOB_SYSTEM_PHASE6_COMPLETION_REPORT.md): below
-// this vertex count, CPU vertex skinning runs inline, serially, on the
-// calling (main) thread - scheduling a gte::Jobs::Dispatch() for a
-// genuinely tiny model would spend more time on the Job System's own
-// per-Dispatch() scheduling overhead than the actual skinning work itself
-// (see JOBSYSTEM_PHASE6_FIRST_PRODUCTION_CONSUMER_ANIMATION_SKINNING_v2.md,
+// this vertex count, CPU vertex skinning (and, as of the multithreaded
+// CPU-skinning optimization below, vertex PACKING too) runs inline,
+// serially, on the calling (main) thread - scheduling a
+// gte::Jobs::Dispatch() for a genuinely tiny model would spend more time
+// on the Job System's own per-Dispatch() scheduling overhead than the
+// actual work itself (see
+// JOBSYSTEM_PHASE6_FIRST_PRODUCTION_CONSUMER_ANIMATION_SKINNING_v2.md,
 // Step 2, point 1 in the wider campaign's own Phase 2 rationale).
 constexpr std::size_t kMinVerticesToParallelize = 512;
 
@@ -76,6 +79,48 @@ void RunSkinningBatch(std::uint32_t beginIndex, std::uint32_t endIndex, void* pa
     SkinningBatchContext* context = static_cast<SkinningBatchContext*>(payload);
     SkinVertexRange(beginIndex, endIndex, *context->bindPositions, *context->bindNormals, *context->skinWeights,
         *context->skinningMatrices, *context->outPositions, *context->outNormals);
+}
+
+// Multithreaded CPU-skinning optimization, Stage 2 (parallelize the
+// PACKING step too - see
+// task_manager/optimizing_multi_thread_cpu_skinning/
+// MULTITHREAD_CPU_SKINNING_OPTIMIZATION_STRATEGY_v1.md): mirrors
+// SkinningBatchContext/RunSkinningBatch above exactly, but for
+// MeshVertexPacking.h's PackMeshVertexRange()/PackMeshVertexUvRange()
+// instead of SkinVertexRange(). Packing is just as embarrassingly parallel
+// per-vertex as the skin blend it now runs alongside (via its own,
+// separate Dispatch()+WaitForJobs() bracket - see RunPendingGroups() below)
+// - previously this pack step ran single-threaded, on the main thread,
+// once per MATERIAL PART (i.e. up to partCount times for the same data);
+// Stage 1 (the shared vertex buffer - see MeshAssetGpuCatalog.cpp) already
+// collapses that down to once per DISTINCT underlying GPU vertex buffer,
+// and this Stage 2 addition further moves that one remaining pass onto the
+// worker pool.
+struct PackUntexturedBatchContext {
+    const std::vector<Vec3>* positions;
+    const std::vector<Vec3>* normals;
+    std::vector<MeshVertex>* out;
+};
+
+void RunPackUntexturedBatch(std::uint32_t beginIndex, std::uint32_t endIndex, void* payload)
+{
+    GTE_PROFILE_JOB_SCOPE("PackMeshVertices");
+    PackUntexturedBatchContext* context = static_cast<PackUntexturedBatchContext*>(payload);
+    PackMeshVertexRange(beginIndex, endIndex, *context->positions, *context->normals, *context->out);
+}
+
+struct PackTexturedBatchContext {
+    const std::vector<Vec3>* positions;
+    const std::vector<Vec3>* normals;
+    const std::vector<Vec2>* uvs;
+    std::vector<MeshVertexUv>* out;
+};
+
+void RunPackTexturedBatch(std::uint32_t beginIndex, std::uint32_t endIndex, void* payload)
+{
+    GTE_PROFILE_JOB_SCOPE("PackMeshVertexUvs");
+    PackTexturedBatchContext* context = static_cast<PackTexturedBatchContext*>(payload);
+    PackMeshVertexUvRange(beginIndex, endIndex, *context->positions, *context->normals, *context->uvs, *context->out);
 }
 
 } // namespace
@@ -181,16 +226,26 @@ void AnimationSystem::Update(Registry& registry, double deltaSeconds)
         const std::vector<Mat4> skinningMatrices =
             EvaluateAnimatedSkinningPose(skinData->skeleton, binding, animator.frame);
 
+        // Stage 3 (reuse scratch buffers across frames, per model - see
+        // MULTITHREAD_CPU_SKINNING_OPTIMIZATION_STRATEGY_v1.md): owned by
+        // this AnimationSystem instance, keyed by mesh path, instead of a
+        // fresh std::vector allocated on every Update() call for every
+        // animator. resize() is a no-op once a buffer's capacity already
+        // covers `vertexCount`, which holds true for every frame after the
+        // first (a model's own vertex count never changes after load).
+        const std::size_t vertexCount = skinData->bindPositions.size();
+        AnimatorScratchBuffers& scratch = m_scratchBuffers[animator.meshGtaPath];
+        std::vector<Vec3>& skinnedPositions = scratch.skinnedPositions;
+        std::vector<Vec3>& skinnedNormals = scratch.skinnedNormals;
+        skinnedPositions.resize(vertexCount);
+        skinnedNormals.resize(vertexCount);
+
         // Job System Phase 6: CPU vertex skinning itself - dispatched across
         // the worker pool for a model with enough vertices to be worth it,
         // otherwise run inline. Either way, `skinnedPositions`/
         // `skinnedNormals` hold the exact same values SkinVertices() alone
         // would have produced (see tests/Animation/VertexSkinningParityTests.cpp) -
         // this is purely a "where/how" change, never a "what" change.
-        const std::size_t vertexCount = skinData->bindPositions.size();
-        std::vector<Vec3> skinnedPositions(vertexCount);
-        std::vector<Vec3> skinnedNormals(vertexCount);
-
         if (vertexCount < kMinVerticesToParallelize) {
             SkinVertexRange(0, static_cast<std::uint32_t>(vertexCount), skinData->bindPositions,
                 skinData->bindNormals, skinData->skinWeights, skinningMatrices, skinnedPositions, skinnedNormals);
@@ -201,10 +256,10 @@ void AnimationSystem::Update(Registry& registry, double deltaSeconds)
             Jobs::Dispatch(&RunSkinningBatch, static_cast<std::uint32_t>(vertexCount), &context, skinningHandle,
                 kMinVerticesPerBatch);
             // Exactly ONE wait, for THIS ONE model's entire skinning
-            // dispatch, before this loop iteration's GPU upload below runs -
-            // see this function's own header comment on why the NEXT
-            // animator's own Dispatch() must never begin before this
-            // WaitForJobs() call returns.
+            // dispatch, before this loop iteration's packing/GPU-upload
+            // work below runs - see this function's own header comment on
+            // why the NEXT animator's own Dispatch() must never begin
+            // before this WaitForJobs() call returns.
             Jobs::JobSystem::Instance().WaitForJobs(skinningHandle);
         }
 
@@ -213,29 +268,81 @@ void AnimationSystem::Update(Registry& registry, double deltaSeconds)
             continue;
         }
 
-        // Re-upload EVERY one of this model's mesh parts - each part's own
-        // GPU vertex buffer holds a full copy of the whole model's vertex
-        // data, so all of them need the same freshly-skinned positions/
-        // normals, just reformatted per part's own vertex layout via the
-        // SHARED MeshVertexPacking helpers (the exact same functions
-        // MeshAssetGpuCatalog used at initial load time) instead of the two
-        // duplicated inline loops this used to be. This GPU upload step
-        // stays main-thread-only, unconditionally - see AGENTS.md's Job
-        // System Phase 4 audit table's `Renderer`/`Mesh` row (NEVER for a
-        // job body to touch).
+        // Multithreaded CPU-skinning optimization, Stage 1 (see
+        // MULTITHREAD_CPU_SKINNING_OPTIMIZATION_STRATEGY_v1.md): several of
+        // this model's own MeshAssetParts may now point at the exact SAME
+        // underlying GPU vertex buffer (e.g. every textured-material
+        // submesh, built via Renderer::CreateMeshFromSharedVertexBuffer() -
+        // see MeshAssetGpuCatalog.cpp) - previously every part re-packed
+        // and re-uploaded a FULL copy of the whole model's vertex data,
+        // unconditionally, turning this loop's true cost into
+        // O(vertexCount x partCount). Group parts by their Mesh's own
+        // VertexBufferIdentity() first, so each DISTINCT underlying buffer
+        // is packed/uploaded exactly ONCE per frame, no matter how many
+        // parts reference it.
+        struct PendingGroup {
+            const void* identity;
+            Mesh* representativeMesh;
+            bool textured;
+        };
+        std::vector<PendingGroup> groups;
+        groups.reserve(parts->size());
+
         for (const MeshAssetPart& part : *parts) {
             Mesh* gpuMesh = m_renderSystem.TryGetMesh(part.mesh);
             if (gpuMesh == nullptr) {
                 continue;
             }
 
-            if (part.texture.IsValid()) {
-                const std::vector<MeshVertexUv> vertices =
-                    PackMeshVertexUvs(skinnedPositions, skinnedNormals, skinData->uvs);
-                gpuMesh->UpdateVertexData(vertices.data(), vertices.size() * sizeof(MeshVertexUv));
+            const void* identity = gpuMesh->VertexBufferIdentity();
+            const bool alreadyQueued = std::any_of(groups.begin(), groups.end(),
+                [identity](const PendingGroup& group) { return group.identity == identity; });
+            if (!alreadyQueued) {
+                groups.push_back(PendingGroup{ identity, gpuMesh, part.texture.IsValid() });
+            }
+        }
+
+        // For each distinct vertex buffer: pack (Stage 2 - parallelized via
+        // the worker pool exactly like the skin blend above, for a model
+        // large enough for it to be worth it) directly from this frame's
+        // freshly-skinned positions/normals into a reused scratch vector
+        // (Stage 3), then upload it ONCE (Stage 1) - this GPU upload step
+        // stays main-thread-only, unconditionally, exactly matching
+        // AGENTS.md's Job System Phase 4 audit table's `Renderer`/`Mesh`
+        // row (NEVER for a job body to touch).
+        for (const PendingGroup& group : groups) {
+            if (group.textured) {
+                std::vector<MeshVertexUv>& packed = scratch.packedTextured;
+                packed.resize(vertexCount);
+
+                if (vertexCount < kMinVerticesToParallelize) {
+                    PackMeshVertexUvRange(
+                        0, static_cast<std::uint32_t>(vertexCount), skinnedPositions, skinnedNormals, skinData->uvs, packed);
+                } else {
+                    PackTexturedBatchContext context{ &skinnedPositions, &skinnedNormals, &skinData->uvs, &packed };
+                    Jobs::JobHandle packHandle;
+                    Jobs::Dispatch(&RunPackTexturedBatch, static_cast<std::uint32_t>(vertexCount), &context,
+                        packHandle, kMinVerticesPerBatch);
+                    Jobs::JobSystem::Instance().WaitForJobs(packHandle);
+                }
+
+                group.representativeMesh->UpdateVertexData(packed.data(), packed.size() * sizeof(MeshVertexUv));
             } else {
-                const std::vector<MeshVertex> vertices = PackMeshVertices(skinnedPositions, skinnedNormals);
-                gpuMesh->UpdateVertexData(vertices.data(), vertices.size() * sizeof(MeshVertex));
+                std::vector<MeshVertex>& packed = scratch.packedUntextured;
+                packed.resize(vertexCount);
+
+                if (vertexCount < kMinVerticesToParallelize) {
+                    PackMeshVertexRange(
+                        0, static_cast<std::uint32_t>(vertexCount), skinnedPositions, skinnedNormals, packed);
+                } else {
+                    PackUntexturedBatchContext context{ &skinnedPositions, &skinnedNormals, &packed };
+                    Jobs::JobHandle packHandle;
+                    Jobs::Dispatch(&RunPackUntexturedBatch, static_cast<std::uint32_t>(vertexCount), &context,
+                        packHandle, kMinVerticesPerBatch);
+                    Jobs::JobSystem::Instance().WaitForJobs(packHandle);
+                }
+
+                group.representativeMesh->UpdateVertexData(packed.data(), packed.size() * sizeof(MeshVertex));
             }
         }
     }

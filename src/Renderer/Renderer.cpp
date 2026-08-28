@@ -281,6 +281,26 @@ Mesh Renderer::CreateSkinnedMesh(const void* vertexData, VkDeviceSize vertexData
         vertexData, vertexDataSize, vertexCount, indexData, indexDataSize, indexCount, debugName);
 }
 
+std::shared_ptr<Buffer> Renderer::CreateSharedMeshVertexBuffer(
+    const void* vertexData, VkDeviceSize vertexDataSize, const char* debugName) const
+{
+    return m_resources.CreateSharedMeshVertexBuffer(vertexData, vertexDataSize, debugName);
+}
+
+std::shared_ptr<Buffer> Renderer::CreateSharedSkinnedMeshVertexBuffer(
+    const void* vertexData, VkDeviceSize vertexDataSize, const char* debugName) const
+{
+    return m_resources.CreateSharedSkinnedMeshVertexBuffer(vertexData, vertexDataSize, debugName);
+}
+
+Mesh Renderer::CreateMeshFromSharedVertexBuffer(std::shared_ptr<Buffer> sharedVertexBuffer,
+    std::uint32_t vertexCount, const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount,
+    const char* debugName) const
+{
+    return m_resources.CreateMeshFromSharedVertexBuffer(
+        std::move(sharedVertexBuffer), vertexCount, indexData, indexDataSize, indexCount, debugName);
+}
+
 Texture2D Renderer::CreateTexture2D(
     const void* pixelsRgba8, int width, int height, const char* debugName, bool allowStorageImageAccess) const
 {

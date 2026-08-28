@@ -2,11 +2,15 @@
 
 #include "../../ECS/Entity.h"
 #include "../../ECS/Registry.h"
+#include "../../Math/Vec3.h"
+#include "../../Renderer/MeshVertex.h"
 #include "AnimationClipCache.h"
 #include "ResolvedAnimationBindingCache.h"
 #include "SkeletalRigCache.h"
 
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace gte {
 
@@ -57,9 +61,14 @@ public:
     // resolved binding via the three owned caches, calls the existing,
     // unchanged Animation/AnimationPoseEvaluator.h
     // (EvaluateAnimatedSkinningPose()) and Animation/VertexSkinning.h
-    // (SkinVertices()), packs the result via the SHARED MeshVertexPacking
+    // (SkinVertexRange()), packs the result via the SHARED MeshVertexPacking
     // helpers (instead of duplicated inline loops), and re-uploads every
-    // affected mesh part's GPU buffer.
+    // affected mesh part's GPU buffer - see this class's own .cpp file for
+    // the multithreaded CPU-skinning optimization applied here (Stage 1's
+    // shared-vertex-buffer de-duplication, Stage 2's parallelized packing,
+    // and Stage 3's per-model scratch-buffer reuse - see
+    // task_manager/optimizing_multi_thread_cpu_skinning/
+    // MULTITHREAD_CPU_SKINNING_OPTIMIZATION_STRATEGY_v1.md).
     void Update(Registry& registry, double deltaSeconds);
 
 private:
@@ -69,6 +78,24 @@ private:
     SkeletalRigCache m_rigCache;
     AnimationClipCache m_clipCache;
     ResolvedAnimationBindingCache m_bindingCache;
+
+    // Stage 3 (stop re-allocating scratch buffers every frame - see
+    // MULTITHREAD_CPU_SKINNING_OPTIMIZATION_STRATEGY_v1.md): one model's
+    // own skinned-position/normal output arrays plus its packed-vertex
+    // scratch arrays, OWNED here (per distinct mesh *.gta path) instead of
+    // being freshly heap-allocated on every single Update() call, for
+    // every animator, every frame. A std::vector's own resize() is a no-op
+    // (no reallocation) once its capacity already covers the requested
+    // size, so after the first frame these buffers never allocate again
+    // for as long as a given model's own vertex count stays constant
+    // (which it always does after initial load).
+    struct AnimatorScratchBuffers {
+        std::vector<Vec3> skinnedPositions;
+        std::vector<Vec3> skinnedNormals;
+        std::vector<MeshVertex> packedUntextured;
+        std::vector<MeshVertexUv> packedTextured;
+    };
+    std::unordered_map<std::string, AnimatorScratchBuffers> m_scratchBuffers;
 };
 
 } // namespace gte

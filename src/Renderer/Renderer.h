@@ -456,6 +456,27 @@ public:
         const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount,
         const char* debugName = nullptr) const;
 
+    // Multithreaded CPU-skinning optimization, Stage 1 (see
+    // task_manager/optimizing_multi_thread_cpu_skinning/
+    // MULTITHREAD_CPU_SKINNING_OPTIMIZATION_STRATEGY_v1.md) - see
+    // GpuResourceFactory::CreateSharedMeshVertexBuffer()/
+    // CreateSharedSkinnedMeshVertexBuffer()/CreateMeshFromSharedVertexBuffer()
+    // for the full reasoning: lets several material "parts" of the same
+    // imported model share ONE underlying GPU vertex buffer instead of each
+    // getting its own full, independently-uploaded copy of identical vertex
+    // data - only each part's own index buffer/range stays genuinely
+    // distinct. See Mesh.h's shared-vertex-buffer constructor and
+    // VertexBufferIdentity().
+    std::shared_ptr<Buffer> CreateSharedMeshVertexBuffer(
+        const void* vertexData, VkDeviceSize vertexDataSize, const char* debugName = nullptr) const;
+
+    std::shared_ptr<Buffer> CreateSharedSkinnedMeshVertexBuffer(
+        const void* vertexData, VkDeviceSize vertexDataSize, const char* debugName = nullptr) const;
+
+    Mesh CreateMeshFromSharedVertexBuffer(std::shared_ptr<Buffer> sharedVertexBuffer, std::uint32_t vertexCount,
+        const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount,
+        const char* debugName = nullptr) const;
+
     // Factory for a static, immutable, CPU-authored texture (e.g. a decoded
     // PNG/JPEG asset - see src/Editor/AssetPreviewTexture.h, the first
     // consumer of this) built once from already-decoded RGBA8 pixel data,

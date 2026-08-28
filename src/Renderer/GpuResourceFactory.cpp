@@ -324,6 +324,32 @@ Mesh GpuResourceFactory::CreateSkinnedMesh(const void* vertexData, VkDeviceSize 
     return Mesh(std::move(vertexBuffer), vertexCount, std::move(indexBuffer), indexCount);
 }
 
+std::shared_ptr<Buffer> GpuResourceFactory::CreateSharedMeshVertexBuffer(
+    const void* vertexData, VkDeviceSize vertexDataSize, const char* debugName) const
+{
+    Buffer vertexBuffer =
+        CreateDeviceLocalBuffer(vertexData, vertexDataSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, debugName);
+    return std::make_shared<Buffer>(std::move(vertexBuffer));
+}
+
+std::shared_ptr<Buffer> GpuResourceFactory::CreateSharedSkinnedMeshVertexBuffer(
+    const void* vertexData, VkDeviceSize vertexDataSize, const char* debugName) const
+{
+    Buffer vertexBuffer = CreateBuffer(vertexDataSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, BufferMemoryUsage::CpuToGpu,
+        debugName);
+    vertexBuffer.Upload(vertexData, static_cast<std::size_t>(vertexDataSize));
+    return std::make_shared<Buffer>(std::move(vertexBuffer));
+}
+
+Mesh GpuResourceFactory::CreateMeshFromSharedVertexBuffer(std::shared_ptr<Buffer> sharedVertexBuffer,
+    std::uint32_t vertexCount, const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount,
+    const char* debugName) const
+{
+    Buffer indexBuffer =
+        CreateDeviceLocalBuffer(indexData, indexDataSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, debugName);
+    return Mesh(std::move(sharedVertexBuffer), vertexCount, std::move(indexBuffer), indexCount);
+}
+
 Texture2D GpuResourceFactory::CreateTexture2D(
     const void* pixelsRgba8, int width, int height, const char* debugName, bool allowStorageImageAccess) const
 {

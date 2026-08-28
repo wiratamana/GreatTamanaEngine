@@ -148,6 +148,38 @@ public:
         const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount,
         const char* debugName = nullptr) const;
 
+    // Multithreaded CPU-skinning optimization, Stage 1 (see
+    // task_manager/optimizing_multi_thread_cpu_skinning/
+    // MULTITHREAD_CPU_SKINNING_OPTIMIZATION_STRATEGY_v1.md): builds ONE
+    // device-local vertex buffer, shared (via std::shared_ptr) across
+    // however many Mesh "parts" a caller subsequently builds from it via
+    // CreateMeshFromSharedVertexBuffer() below - each part still gets its
+    // own, genuinely distinct index buffer/range, but the (often far
+    // larger) vertex data is uploaded/stored exactly once, not once per
+    // part. Otherwise identical to CreateDeviceLocalBuffer() + wrapping.
+    std::shared_ptr<Buffer> CreateSharedMeshVertexBuffer(
+        const void* vertexData, VkDeviceSize vertexDataSize, const char* debugName = nullptr) const;
+
+    // Like CreateSharedMeshVertexBuffer() above, but host-visible/
+    // persistently-mapped (BufferMemoryUsage::CpuToGpu) instead of
+    // device-local - for a rigged (skinned) model's shared vertex buffer,
+    // re-writable every frame via Mesh::UpdateVertexData() (see
+    // GpuResourceFactory::CreateSkinnedMesh()'s own reasoning for the
+    // non-shared equivalent).
+    std::shared_ptr<Buffer> CreateSharedSkinnedMeshVertexBuffer(
+        const void* vertexData, VkDeviceSize vertexDataSize, const char* debugName = nullptr) const;
+
+    // Builds a Mesh that points at an ALREADY-CONSTRUCTED shared vertex
+    // buffer (from either factory above) plus its OWN, freshly-uploaded
+    // index buffer/range - see Mesh.h's shared-vertex-buffer constructor.
+    // `vertexCount` must match whatever the shared buffer was originally
+    // sized for (the caller's own responsibility - this factory has no way
+    // to independently verify it against a raw VkDeviceSize).
+    Mesh CreateMeshFromSharedVertexBuffer(std::shared_ptr<Buffer> sharedVertexBuffer, std::uint32_t vertexCount,
+        const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount,
+        const char* debugName = nullptr) const;
+
+
 
     // See Renderer::CreateTexture2D(). `pixelsRgba8` must be
     // width*height*4 tightly-packed bytes (e.g. straight out of

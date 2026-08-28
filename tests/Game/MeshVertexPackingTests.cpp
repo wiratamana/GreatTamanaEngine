@@ -1,6 +1,10 @@
 // Unit tests for MeshVertexPacking.h's PackMeshVertices()/PackMeshVertexUvs() -
 // the two pure functions that replaced four hand-copied packing loops in
-// Game.cpp (see GameInstantiationRefactorProposal.txt, Step 2.6/3.1).
+// Game.cpp (see GameInstantiationRefactorProposal.txt, Step 2.6/3.1) - plus
+// PackMeshVertexRange()/PackMeshVertexUvRange(), the batched/parallelizable
+// variants added for the multithreaded CPU-skinning optimization (see
+// task_manager/optimizing_multi_thread_cpu_skinning/
+// MULTITHREAD_CPU_SKINNING_OPTIMIZATION_STRATEGY_v1.md).
 
 #include "Game/Instantiation/MeshVertexPacking.h"
 
@@ -94,6 +98,61 @@ TEST(MeshVertexPackingTest, PackMeshVertexUvsFallsBackToUpWhenNormalsMissing)
 
     ASSERT_EQ(packed.size(), 1u);
     EXPECT_FLOAT_EQ(packed[0].normal[1], 1.0f);
+}
+
+TEST(MeshVertexPackingTest, PackMeshVertexRangeMatchesFullPackForASubrange)
+{
+    const std::vector<Vec3> positions = { Vec3{ 1.0f, 0.0f, 0.0f }, Vec3{ 2.0f, 0.0f, 0.0f },
+        Vec3{ 3.0f, 0.0f, 0.0f }, Vec3{ 4.0f, 0.0f, 0.0f } };
+    const std::vector<Vec3> normals = { Vec3::Up(), Vec3::Up(), Vec3::Up(), Vec3::Up() };
+
+    const std::vector<MeshVertex> expected = PackMeshVertices(positions, normals);
+
+    std::vector<MeshVertex> actual(positions.size());
+    // Two disjoint batches, exactly like AnimationSystem::Update() would
+    // dispatch via gte::Jobs::Dispatch() - see MeshVertexPacking.h's own
+    // header comment.
+    PackMeshVertexRange(0, 2, positions, normals, actual);
+    PackMeshVertexRange(2, 4, positions, normals, actual);
+
+    ASSERT_EQ(actual.size(), expected.size());
+    for (std::size_t i = 0; i < expected.size(); ++i) {
+        EXPECT_FLOAT_EQ(actual[i].position[0], expected[i].position[0]);
+        EXPECT_FLOAT_EQ(actual[i].normal[1], expected[i].normal[1]);
+    }
+}
+
+TEST(MeshVertexPackingTest, PackMeshVertexRangeNeverWritesPastClampedBounds)
+{
+    const std::vector<Vec3> positions = { Vec3::Zero(), Vec3::Zero() };
+    const std::vector<Vec3> normals = { Vec3::Up(), Vec3::Up() };
+
+    std::vector<MeshVertex> out(2);
+    // endIndex deliberately beyond positions.size()/out.size() - must clamp,
+    // never read/write out of bounds.
+    PackMeshVertexRange(0, 100, positions, normals, out);
+
+    EXPECT_FLOAT_EQ(out[1].normal[1], 1.0f);
+}
+
+TEST(MeshVertexPackingTest, PackMeshVertexUvRangeMatchesFullPackForASubrange)
+{
+    const std::vector<Vec3> positions = { Vec3{ 1.0f, 0.0f, 0.0f }, Vec3{ 2.0f, 0.0f, 0.0f },
+        Vec3{ 3.0f, 0.0f, 0.0f } };
+    const std::vector<Vec3> normals = { Vec3::Up(), Vec3::Up(), Vec3::Up() };
+    const std::vector<Vec2> uvs = { Vec2{ 0.1f, 0.1f }, Vec2{ 0.2f, 0.2f }, Vec2{ 0.3f, 0.3f } };
+
+    const std::vector<MeshVertexUv> expected = PackMeshVertexUvs(positions, normals, uvs);
+
+    std::vector<MeshVertexUv> actual(positions.size());
+    PackMeshVertexUvRange(0, 1, positions, normals, uvs, actual);
+    PackMeshVertexUvRange(1, 3, positions, normals, uvs, actual);
+
+    ASSERT_EQ(actual.size(), expected.size());
+    for (std::size_t i = 0; i < expected.size(); ++i) {
+        EXPECT_FLOAT_EQ(actual[i].uv[0], expected[i].uv[0]);
+        EXPECT_FLOAT_EQ(actual[i].uv[1], expected[i].uv[1]);
+    }
 }
 
 } // namespace

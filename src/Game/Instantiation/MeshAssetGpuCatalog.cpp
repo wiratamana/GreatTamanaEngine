@@ -152,25 +152,35 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
     }
 
     // --- Textured submeshes (position+normal+UV) - one shared vertex
-    // buffer built once here (via the SHARED PackMeshVertexUvs() helper),
-    // re-uploaded per submesh Mesh.
+    // buffer built once here (via the SHARED PackMeshVertexUvs() helper) AND
+    // uploaded to the GPU exactly ONCE (see Renderer::CreateSharedMeshVertexBuffer()/
+    // CreateSharedSkinnedMeshVertexBuffer()) - every textured submesh Mesh
+    // below points at that SAME underlying vertex buffer, differing only in
+    // its own index buffer/range. This is Stage 1 of
+    // task_manager/optimizing_multi_thread_cpu_skinning/
+    // MULTITHREAD_CPU_SKINNING_OPTIMIZATION_STRATEGY_v1.md: a model with N
+    // textured materials used to get N full, independent copies of this
+    // same vertex data (both at load time AND, far more expensively, on
+    // every single animated frame afterwards) - now it gets exactly one.
     if (!texturedSlices.empty()) {
         const std::vector<MeshVertexUv> texturedVertices = PackMeshVertexUvs(mesh->positions, mesh->normals, mesh->uvs);
+        const VkDeviceSize texturedVertexDataSize = texturedVertices.size() * sizeof(MeshVertexUv);
+        const std::uint32_t texturedVertexCount = static_cast<std::uint32_t>(texturedVertices.size());
+
+        const std::shared_ptr<Buffer> sharedTexturedVertexBuffer = skinned
+            ? renderer.CreateSharedSkinnedMeshVertexBuffer(
+                  texturedVertices.data(), texturedVertexDataSize, "ImportedTexturedMeshShared")
+            : renderer.CreateSharedMeshVertexBuffer(
+                  texturedVertices.data(), texturedVertexDataSize, "ImportedTexturedMeshShared");
 
         for (const TexturedSlice& slice : texturedSlices) {
             const std::vector<std::uint32_t> sliceIndices(
                 mesh->indices.begin() + static_cast<std::ptrdiff_t>(slice.start),
                 mesh->indices.begin() + static_cast<std::ptrdiff_t>(slice.start + slice.count));
 
-            Mesh gpuMesh = skinned
-                ? renderer.CreateSkinnedMesh(texturedVertices.data(), texturedVertices.size() * sizeof(MeshVertexUv),
-                      static_cast<std::uint32_t>(texturedVertices.size()), sliceIndices.data(),
-                      sliceIndices.size() * sizeof(std::uint32_t), static_cast<std::uint32_t>(sliceIndices.size()),
-                      "ImportedTexturedMesh")
-                : renderer.CreateMesh(texturedVertices.data(), texturedVertices.size() * sizeof(MeshVertexUv),
-                      static_cast<std::uint32_t>(texturedVertices.size()), sliceIndices.data(),
-                      sliceIndices.size() * sizeof(std::uint32_t), static_cast<std::uint32_t>(sliceIndices.size()),
-                      "ImportedTexturedMesh");
+            Mesh gpuMesh = renderer.CreateMeshFromSharedVertexBuffer(sharedTexturedVertexBuffer, texturedVertexCount,
+                sliceIndices.data(), sliceIndices.size() * sizeof(std::uint32_t),
+                static_cast<std::uint32_t>(sliceIndices.size()), "ImportedTexturedMesh");
             const MeshHandle handle = renderSystem.RegisterMesh(std::move(gpuMesh));
             parts.push_back(MeshAssetPart{ handle, slice.texture, slice.name });
         }
