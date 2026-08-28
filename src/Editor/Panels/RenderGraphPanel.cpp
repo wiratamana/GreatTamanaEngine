@@ -107,8 +107,23 @@ void BuildPassTable(const char* tableId, const rg::RenderGraphSnapshot& snapshot
         return;
     }
 
+    // ImGuiTableFlags_NoSavedSettings is REQUIRED here, not cosmetic - see the
+    // matching comment on BuildResourceTable()'s own tableFlags below for the
+    // full "why": without it, a column's width/weight can get corrupted (an
+    // observed real case: the two stretch columns below, "Reads"/"Writes",
+    // persisted into imgui.ini with Weight=nan after this table was first
+    // laid out at a degenerate zero/near-zero available width - e.g. the
+    // very first frame this panel's dock tab existed but wasn't yet the
+    // visible/selected one) and, once written to disk, silently keeps
+    // reloading that same NaN weight on every future launch - collapsing
+    // both columns down to an unreadable "..", and reportedly crashing the
+    // app outright the moment a user tries to drag (expand) one of them
+    // back out, since ImGui's stretch-weight redistribution math has no
+    // NaN-recovery path. NoSavedSettings makes this table always start each
+    // session from the sane, freshly-computed proportional widths declared
+    // below, so a corrupted weight can never survive to be reloaded.
     constexpr ImGuiTableFlags tableFlags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable
-        | ImGuiTableFlags_SizingStretchProp;
+        | ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings;
     if (ImGui::BeginTable(tableId, 6, tableFlags)) {
         ImGui::TableSetupColumn("Pass", ImGuiTableColumnFlags_WidthFixed, 110.0f);
         ImGui::TableSetupColumn("Draws", ImGuiTableColumnFlags_WidthFixed, 55.0f);
@@ -147,8 +162,14 @@ void BuildResourceTable(const char* tableId, const rg::RenderGraphSnapshot& snap
         return;
     }
 
+    // ImGuiTableFlags_NoSavedSettings is REQUIRED here, not cosmetic - see
+    // BuildPassTable()'s own tableFlags comment above for the full "why":
+    // this table's own "Lifetime" stretch column hit the exact same
+    // persisted-NaN-weight corruption (confirmed directly in a real
+    // imgui.ini: "[Table][0xF8B6D9C2,3] ... Column 2 Weight=nan") - fixed the
+    // same way, for the same reason.
     constexpr ImGuiTableFlags tableFlags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable
-        | ImGuiTableFlags_SizingStretchProp;
+        | ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings;
     if (ImGui::BeginTable(tableId, 3, tableFlags)) {
         ImGui::TableSetupColumn("Resource", ImGuiTableColumnFlags_WidthFixed, 130.0f);
         ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthFixed, 80.0f);
