@@ -4,6 +4,7 @@
 #include "../Math/Mat4.h"
 #include "../Math/Vec3.h"
 
+#include <cstdint>
 #include <vector>
 
 namespace gte {
@@ -34,9 +35,42 @@ namespace gte {
 // visually reasonable approximation, not a bug.
 //
 // Pure CPU-side math, no GPU/Renderer dependency - Tier-1-testable (see
-// tests/Animation/VertexSkinningTests.cpp).
+// tests/Animation/VertexSkinningTests.cpp). Implemented purely in terms of
+// SkinVertexRange() below (0, bindPositions.size()) - there is exactly one
+// copy of the actual per-vertex blending logic.
 void SkinVertices(const std::vector<Vec3>& bindPositions, const std::vector<Vec3>& bindNormals,
     const std::vector<VertexSkinWeights>& skinWeights, const std::vector<Mat4>& skinningMatrices,
     std::vector<Vec3>& outPositions, std::vector<Vec3>& outNormals);
+
+// Job System Phase 6 (First Production Consumer - Animation / Vertex
+// Skinning - see AGENTS.md, "Job System", and
+// task_manager/job_system/JOB_SYSTEM_PHASE6_COMPLETION_REPORT.md): the same
+// per-vertex blending SkinVertices() performs above, restricted to a single
+// half-open [beginIndex, endIndex) subrange of vertices - this is what lets
+// AnimationSystem::Update() (src/Game/Animation/AnimationSystem.cpp) split
+// one model's own vertex array into several DISJOINT batches and skin them
+// in parallel via gte::Jobs::Dispatch(), each batch writing into its own
+// non-overlapping slice of the SAME `outPositions`/`outNormals` vectors.
+//
+// Unlike SkinVertices() above, this function NEVER resizes `outPositions`/
+// `outNormals` - the caller must size them to `bindPositions.size()` (or
+// larger) BEFORE dispatching any batches, since two batches writing into
+// two different [begin, end) slices of the same vectors must never race a
+// third, hidden reallocation triggered by one of them calling resize().
+// `endIndex` is clamped internally to `bindPositions.size()` as a defensive
+// safety net - never reads/writes out of bounds even if a caller passes a
+// bad range.
+//
+// Pure CPU-side math, no GPU/Renderer/Jobs dependency of its own (nothing
+// under src/Jobs/ is included here - only AnimationSystem.cpp, the actual
+// job-body trampoline's owner, knows about the Job System) - Tier-1-
+// testable exactly like SkinVertices() itself (see
+// tests/Animation/VertexSkinningParityTests.cpp, which proves this
+// function - called serially across the WHOLE range, or in several
+// concurrent batches via a real gte::Jobs::Dispatch() call - always
+// produces results identical to SkinVertices()).
+void SkinVertexRange(std::uint32_t beginIndex, std::uint32_t endIndex, const std::vector<Vec3>& bindPositions,
+    const std::vector<Vec3>& bindNormals, const std::vector<VertexSkinWeights>& skinWeights,
+    const std::vector<Mat4>& skinningMatrices, std::vector<Vec3>& outPositions, std::vector<Vec3>& outNormals);
 
 } // namespace gte

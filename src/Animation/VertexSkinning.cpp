@@ -1,22 +1,26 @@
 #include "VertexSkinning.h"
 
+#include <algorithm>
 #include <cstdint>
 
 namespace gte {
 
-void SkinVertices(const std::vector<Vec3>& bindPositions, const std::vector<Vec3>& bindNormals,
-    const std::vector<VertexSkinWeights>& skinWeights, const std::vector<Mat4>& skinningMatrices,
-    std::vector<Vec3>& outPositions, std::vector<Vec3>& outNormals)
+void SkinVertexRange(std::uint32_t beginIndex, std::uint32_t endIndex, const std::vector<Vec3>& bindPositions,
+    const std::vector<Vec3>& bindNormals, const std::vector<VertexSkinWeights>& skinWeights,
+    const std::vector<Mat4>& skinningMatrices, std::vector<Vec3>& outPositions, std::vector<Vec3>& outNormals)
 {
     const std::size_t vertexCount = bindPositions.size();
-    outPositions.resize(vertexCount);
-    outNormals.resize(vertexCount);
-
     const bool hasNormals = bindNormals.size() == vertexCount;
     const bool hasWeights = skinWeights.size() == vertexCount;
     const std::size_t boneCount = skinningMatrices.size();
 
-    for (std::size_t i = 0; i < vertexCount; ++i) {
+    // Defensive clamp - never read/write past bindPositions'/outPositions'
+    // own bounds even if a caller (e.g. a mis-computed batch range) passes
+    // an endIndex beyond the real vertex count.
+    const std::size_t clampedEnd = std::min(static_cast<std::size_t>(endIndex), vertexCount);
+    const std::size_t clampedOutEnd = std::min(clampedEnd, std::min(outPositions.size(), outNormals.size()));
+
+    for (std::size_t i = beginIndex; i < clampedOutEnd; ++i) {
         const Vec3& bindPosition = bindPositions[i];
         const Vec3 bindNormal = hasNormals ? bindNormals[i] : Vec3::Up();
 
@@ -61,6 +65,18 @@ void SkinVertices(const std::vector<Vec3>& bindPositions, const std::vector<Vec3
             outNormals[i] = bindNormal;
         }
     }
+}
+
+void SkinVertices(const std::vector<Vec3>& bindPositions, const std::vector<Vec3>& bindNormals,
+    const std::vector<VertexSkinWeights>& skinWeights, const std::vector<Mat4>& skinningMatrices,
+    std::vector<Vec3>& outPositions, std::vector<Vec3>& outNormals)
+{
+    const std::size_t vertexCount = bindPositions.size();
+    outPositions.resize(vertexCount);
+    outNormals.resize(vertexCount);
+
+    SkinVertexRange(0, static_cast<std::uint32_t>(vertexCount), bindPositions, bindNormals, skinWeights,
+        skinningMatrices, outPositions, outNormals);
 }
 
 } // namespace gte

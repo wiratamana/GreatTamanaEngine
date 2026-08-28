@@ -772,6 +772,7 @@ set(GTE_TEST_SOURCES
     Animation/MotionSamplerTests.cpp
     Animation/AnimationPoseEvaluatorTests.cpp
     Animation/VertexSkinningTests.cpp
+    Animation/VertexSkinningParityTests.cpp
 )
 
 # Editor/EditorCamera.h/.cpp (see src/Editor/EditorCamera.h) is only

@@ -446,28 +446,35 @@ whenever touching profiling instrumentation, or adding a new call site:
 `src/Jobs/` (`JobTypes.h`, `JobQueue.h/.cpp`, `JobSystem.h/.cpp`,
 `JobDispatch.h/.cpp`, `JobContinuation.h/.cpp`) is the engine's general-purpose
 worker-thread pool - see `task_manager/job_system/JOBSYSTEM_PHASE0_MASTER_STRATEGY_v2.md`
-for the full multi-phase campaign this is Phases 1-5 of,
+for the full multi-phase campaign this is Phases 1-6 of,
 `task_manager/job_system/JOB_SYSTEM_PHASE1_COMPLETION_REPORT.md` for Phase
 1's own detailed writeup, `task_manager/job_system/JOB_SYSTEM_PHASE2_COMPLETION_REPORT.md`
 for Phase 2's, `task_manager/job_system/JOB_SYSTEM_PHASE3_COMPLETION_REPORT.md`
 for Phase 3's, `task_manager/job_system/JOB_SYSTEM_PHASE4_COMPLETION_REPORT.md`
-for Phase 4's (the Thread-Safety Audit), and
+for Phase 4's (the Thread-Safety Audit),
 `task_manager/job_system/JOB_SYSTEM_PHASE5_COMPLETION_REPORT.md` for Phase
-5's (Profiler Integration - Worker Timeline). As of Phase 5, this module
-provides the minimal `JobHandle`/`Schedule()`/`WaitForJobs()`/`WorkerCount()`
-primitive (Phase 1), the batch/parallel-for API, `Dispatch()`/
+5's (Profiler Integration - Worker Timeline), and
+`task_manager/job_system/JOB_SYSTEM_PHASE6_COMPLETION_REPORT.md` for Phase
+6's (First Production Consumer - Animation / Vertex Skinning). As of Phase
+6, this module provides the minimal `JobHandle`/`Schedule()`/`WaitForJobs()`/
+`WorkerCount()` primitive (Phase 1), the batch/parallel-for API, `Dispatch()`/
 `ComputeBatchRanges()` (Phase 2), job dependencies/continuations,
 `ScheduleAfter()`/`DispatchAfter()` (Phase 3 - see this section's own
 dedicated Phase 3 bullets further below), a written, reviewable
 thread-safety classification (NEVER/READ-SAFE/JOB-SAFE) of every existing
 shared/global/singleton piece of engine state a future job body could reach
 into (Phase 4 - see this section's own dedicated "Phase 4 - Thread-Safety
-Audit" bullets further below), and a genuinely thread-safe way for a job
+Audit" bullets further below), a genuinely thread-safe way for a job
 body to record its own CPU scope into `Profiling::FrameProfiler`,
 `GTE_PROFILE_JOB_SCOPE`/`Profiling::JobScopeTimer` (Phase 5 - see this
-section's own dedicated Phase 5 bullets further below) - **nothing else in
+section's own dedicated Phase 5 bullets further below), and its first real
+production consumer - `AnimationSystem::Update()`
+(`src/Game/Animation/AnimationSystem.cpp`) now dispatches CPU vertex
+skinning (`Animation/VertexSkinning.h`'s `SkinVertexRange()`) across the
+worker pool for a sufficiently large rigged model (Phase 6 - see this
+section's own dedicated Phase 6 bullets further below). Nothing else in
 the engine calls `Schedule()`/`Dispatch()`/`ScheduleAfter()`/`DispatchAfter()`
-yet** (no real subsystem has been migrated onto it - that is Phase 6's job).
+yet - `AnimationSystem::Update()` is still the only real, non-test call site.
 Follow these rules whenever touching this module or building a later phase on top of it:
 
 - **`gte::Jobs::JobSystem::Instance()` is a Meyers singleton that starts
@@ -854,6 +861,76 @@ Follow these rules whenever touching this module or building a later phase on to
   recording order exactly, and only ever reads the first
   `workerJobCount` entries, never anything beyond it (stale/leftover array
   slots past that count are never touched).
+- **Phase 6 (First Production Consumer - Animation / Vertex Skinning - see
+  `task_manager/job_system/JOBSYSTEM_PHASE6_FIRST_PRODUCTION_CONSUMER_ANIMATION_SKINNING_v2.md`
+  and `task_manager/job_system/JOB_SYSTEM_PHASE6_COMPLETION_REPORT.md`) is
+  the campaign's own production cut-over: `AnimationSystem::Update()`
+  (`src/Game/Animation/AnimationSystem.cpp`) is now the first, and only,
+  real (non-test) call site anywhere in the engine that calls
+  `gte::Jobs::Dispatch()`/`WaitForJobs()`.** For each currently-playing
+  `SkeletalAnimator`, CPU vertex skinning (previously always a single,
+  serial `Animation/VertexSkinning.h::SkinVertices()` call covering the
+  WHOLE model) now branches on vertex count: below
+  `kMinVerticesToParallelize` (512) it still runs inline, serially, via a
+  direct `SkinVertexRange(0, vertexCount, ...)` call (scheduling a
+  `Dispatch()` for a genuinely tiny model would cost more in scheduling
+  overhead than it saves); at or above that threshold, it is split into
+  batches (floored at `kMinVerticesPerBatch`, 256, so `Dispatch()` never
+  splits smaller than that) and skinned via a real
+  `Jobs::Dispatch(&RunSkinningBatch, ...)` + exactly one
+  `JobSystem::Instance().WaitForJobs(skinningHandle)` call before that
+  model's parts are re-uploaded to the GPU.
+- **`Animation/VertexSkinning.h`'s `SkinVertexRange(beginIndex, endIndex,
+  ...)` is the new, pure, always-compiled function both the serial and
+  parallel skinning paths above are built on - `SkinVertices()` itself is
+  now implemented purely in terms of `SkinVertexRange(0,
+  bindPositions.size(), ...)`, so there is exactly ONE copy of the actual
+  per-vertex blending logic, never two independently-maintained copies.**
+  Unlike `SkinVertices()`, `SkinVertexRange()` NEVER resizes its
+  `outPositions`/`outNormals` vectors - the caller must size them to the
+  full vertex count BEFORE dispatching any batches, since two concurrent
+  batches writing into two different `[begin, end)` slices of the same
+  vectors must never race a third, hidden reallocation triggered by one of
+  them calling `resize()`. `endIndex` is defensively clamped internally
+  against the real vertex/output-vector sizes - never reads/writes out of
+  bounds even if a caller ever passed a bad range. This refactor is
+  behavior-preserving only: every pre-existing
+  `tests/Animation/VertexSkinningTests.cpp` test passes unchanged against
+  it, and a new `tests/Animation/VertexSkinningParityTests.cpp` (Tier 1,
+  real `JobSystem::Instance()`, no live Renderer/GPU involved - see below)
+  proves a large, synthetic model skinned via several CONCURRENT
+  `Dispatch()` batches produces results IDENTICAL, vertex-for-vertex, to
+  the original serial `SkinVertices()` call.
+- **`AnimationSystem::Update()`'s per-batch job-body trampoline
+  (`RunSkinningBatch()`, an anonymous-namespace function local to
+  `AnimationSystem.cpp`) wraps its call to `SkinVertexRange()` in
+  `GTE_PROFILE_JOB_SCOPE("SkinVertices")`** - the one sanctioned way (per
+  this section's own Phase 5 bullets above) to profile code running inside
+  a job body. The GPU upload step that follows (`Mesh::UpdateVertexData()`
+  via `RenderSystem::TryGetMesh()`) is completely unchanged and stays
+  main-thread-only, unconditionally - exactly matching the Phase 4
+  thread-safety audit table's own `Renderer`/`Mesh` NEVER row; a job body
+  never sees a `Mesh*`/GPU handle of any kind, only the plain
+  `SkinningBatchContext` (five plain pointers into read-only input data
+  plus this call's own output vectors).
+- **`AnimationSystem::Update()`'s OUTER loop over every live
+  `SkeletalAnimator` MUST remain strictly sequential - one animator at a
+  time - and this is now enforced by an explicit, prominent code comment
+  directly at that loop's own call site, not merely documented here or in
+  the strategy document.** Two entities spawned from the SAME `*.gta` file
+  share one underlying GPU `Mesh` (see `README.md`'s own documented
+  limitation, cross-referenced by this section's own Phase 4 table row
+  above) - today this sharing is safe ONLY because this loop processes one
+  animator's entire per-model sequence (skinning dispatch + wait + every
+  part's GPU upload) to full completion before the next animator's own
+  sequence begins. Restructuring this loop to fire off every animator's
+  own `Dispatch()` up front and wait on all of them together - a
+  natural-looking next optimization once this phase exists - would let two
+  different worker threads write the SAME shared GPU buffer at the SAME
+  time: a genuine, unsynchronized data race, strictly worse than today's
+  harmless "last write wins" visual bug. This rule may only be lifted once
+  every spawned model instance owns its own private GPU mesh buffers - a
+  separate, unstarted piece of engine work (see `README.md`/`TODO.md`).
 
 ## Render Target Format Matching
 
