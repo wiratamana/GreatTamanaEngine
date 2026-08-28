@@ -7,6 +7,7 @@
 namespace gte {
 
 struct EditorContext;
+class Game;
 
 // Job System Phase 7 (Editor "Jobs" Panel -
 // task_manager/job_system/JOBSYSTEM_PHASE7_EDITOR_JOBS_PANEL.md): a Unity-
@@ -32,9 +33,19 @@ struct EditorContext;
 // Panels/ProfilerPanel.cpp's own Capture checkbox) rather than introducing a
 // second, independently-stateful toggle over the exact same underlying data
 // source (see JOBSYSTEM_PHASE7_EDITOR_JOBS_PANEL.md, Step 3.4, point 5).
+//
+// GPU Vertex Skinning campaign, Phase 7 (Editor Toggle & Profiling UX -
+// task_manager/gpu_skinning/GPU_SKINNING_PHASE7_EDITOR_PROFILING_UX_STRATEGY_v1.md):
+// also hosts the engine-wide CPU (Job System) / GPU (Compute) vertex
+// skinning mode toggle (Step 3.1 - this panel was chosen over "Render
+// Graph" specifically because a user watching THIS panel's own worker
+// timeline is exactly who benefits from seeing, right next to it, the
+// control that makes "SkinVertices" entries appear/disappear from it), which
+// is why Build() now also takes a Game& - the ONE new dependency this class
+// has beyond Profiling::FrameProfiler::Instance()/Jobs::JobSystem::Instance().
 class JobsPanel {
 public:
-    void Build(EditorContext& ctx);
+    void Build(EditorContext& ctx, Game& game);
 
 private:
     // See ProfilerPanel::m_paused's own doc comment for the full Pause

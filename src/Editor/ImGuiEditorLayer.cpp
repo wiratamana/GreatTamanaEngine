@@ -481,12 +481,14 @@ public:
         m_profilerPanel.Build(m_ctx);
         m_renderGraphPanel.Build(m_ctx, renderGraph);
         // Job System Phase 7 (Editor "Jobs" Panel) - reads Job System Phase
-        // 5's Profiling::BuildWorkerTimelinePoints() reshape internally; no
-        // new parameters needed here (mirrors m_profilerPanel.Build() above -
-        // both only ever touch m_ctx plus their own already-global data
-        // sources, gte::Profiling::FrameProfiler::Instance()/
-        // gte::Jobs::JobSystem::Instance()).
-        m_jobsPanel.Build(m_ctx);
+        // 5's Profiling::BuildWorkerTimelinePoints() reshape internally; also
+        // hosts the GPU Vertex Skinning campaign's own Phase 7 CPU/GPU
+        // skinning-mode toggle (see
+        // task_manager/gpu_skinning/GPU_SKINNING_PHASE7_EDITOR_PROFILING_UX_STRATEGY_v1.md),
+        // which is why `game` is now passed through here too (mirrors
+        // BuildHierarchyPanel()/BuildScenePanel() above, which already take
+        // `game` for their own reasons).
+        m_jobsPanel.Build(m_ctx, game);
 #if GTE_ENABLE_PROJECT_PANEL
         m_projectPanel.Build(m_ctx);
         // The Bone Viewer is its own floating window (opened on demand via

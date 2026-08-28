@@ -164,6 +164,65 @@ that haven't been started yet at all.
   for any other work; the current development machine doesn't even support
   headless mode.
 
+## GPU Vertex Skinning
+
+- **Full clean build + `ctest` regression run, plus a real, measured
+  CPU-vs-GPU performance comparison.** The eight-phase GPU Vertex Skinning
+  campaign (`task_manager/gpu_skinning/`, see `README.md`'s own "Status"
+  entry and `AGENTS.md`'s new "GPU Vertex Skinning" section) was verified
+  phase-by-phase with fast compile checks only, per this campaign's own
+  working agreement - a full clean build (`build_joboff`) and the complete
+  `ctest` suite have not been run since every phase landed, and the actual
+  deliverable Phase 7's own strategy document calls "the actual deliverable
+  the entire eight-phase campaign exists to produce" (a real, written
+  side-by-side CPU-worker-timeline-vs-GPU-pass-timing comparison, ideally
+  including weak-hardware-class hardware) has not yet been produced.
+- **Run `GpuSkinningValidation`'s numeric parity check against a real
+  rigged model.** `src/Editor/GpuSkinningValidation.h/.cpp` (Phase 6) is
+  built and compiles cleanly, but this session's development machine did
+  not have a real MMD model fixture on disk to run it against - the actual
+  "max/mean per-vertex delta" evidence this campaign's correctness proof
+  depends on has not been produced yet (see
+  `GPU_SKINNING_PHASE6_COMPLETION_REPORT.md`'s own "what remains an open
+  action item").
+- **Live-device validation-layer confirmation of the write-after-write
+  mitigation.** Phase 3's read-before-write dependency-edge fix (a
+  "phantom" `ComputeShaderRead` declared before the real
+  `ComputeShaderWrite`, closing a real hazard two `SkeletalAnimator`s
+  sharing one Mesh's GPU output buffer could hit) is proven correct at the
+  render-graph-compiler level (Tier 1 tests), but has not yet been
+  confirmed against a real Vulkan device with validation layers enabled,
+  with two real, simultaneously-animated instances of the same rigged
+  model on screen in GPU mode (see
+  `GPU_SKINNING_PHASE3_COMPLETION_REPORT.md`'s own "What was deliberately
+  NOT done").
+- **GPU-side pose evaluation (IK solving, append/grant inheritance,
+  forward kinematics) is deliberately out of scope.** The GPU kernel
+  consumes an already-fully-resolved `boneMatrices[]` array computed
+  entirely on the CPU (`Animation::EvaluateAnimatedSkinningPose()`) - moving
+  any of that evaluation onto the GPU was explicitly refused throughout
+  this campaign (see each phase's own "What We Will NOT Do") and remains a
+  substantial, unstarted follow-up if ever pursued.
+- **No per-model skinning-mode override.** `AnimationSystem::SkinningMode`
+  is a single, engine-wide switch - every currently-playing model is
+  skinned the same way. A future per-`SkeletalAnimator` override (e.g. to
+  force a specific model to stay on CPU mode regardless of the global
+  switch) was explicitly deferred.
+- **The doubled GPU memory footprint per GPU-skinned model is unaddressed.**
+  A model registered for GPU skinning keeps BOTH its original CPU-mode
+  `Mesh` and its GPU-mode counterpart alive simultaneously for its whole
+  lifetime (see `AGENTS.md`'s "GPU Vertex Skinning" section) - halving this
+  (e.g. lazily building the GPU-mode Mesh only the first time GPU mode is
+  actually selected, or freeing whichever Mesh isn't currently in use) was
+  explicitly deferred as a future optimization, not attempted here.
+- **No compute-kernel performance optimization was attempted.** Phase 2's
+  kernels are correctness-first, unoptimized (no subgroup ops, no
+  shared-memory bone-matrix caching, no bandwidth-reducing skin-weight/bone
+  compression) - see that phase's own "What We Will NOT Do". Any future
+  optimization should be motivated by the real, measured comparison data
+  the first bullet above still needs to produce, not by premature
+  guessing.
+
 ## Engine Roadmap (not yet started)
 
 Broader, longer-horizon ideas for moving the engine past "tech demo with a

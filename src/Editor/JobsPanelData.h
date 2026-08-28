@@ -96,4 +96,30 @@ inline constexpr bool kJobTimingInstrumentationCompiledIn =
 // dedicated "message text matches the compile-time flag" regression test.
 const char* JobsTimelineEmptyMessage();
 
+// GPU Vertex Skinning campaign, Phase 7 (Editor Toggle & Profiling UX -
+// task_manager/gpu_skinning/GPU_SKINNING_PHASE7_EDITOR_PROFILING_UX_STRATEGY_v1.md,
+// Step 3.1). The "Jobs" panel's own CPU/GPU skinning-mode toggle displays
+// and reasons about the mode purely as a `bool isGpuMode` here - deliberately
+// NOT gte::AnimationSystem::SkinningMode itself, so this pure, ImGui-free
+// header (like every other *PanelData.h in this module) never needs to
+// depend on Game/AnimationSystem at all; Panels/JobsPanel.cpp (which already
+// depends on Game for the toggle's actual read/write) is the one place that
+// translates between the two.
+
+// Plain display text for the toggle's own current value - "CPU (Job
+// System)" or "GPU (Compute)".
+const char* SkinningModeDisplayName(bool isGpuMode);
+
+// The one-line "look over there instead" note this phase's own strategy
+// document calls for (Step 3.1/3.3): flipping this toggle makes an entire
+// category of already-existing profiling data appear/disappear elsewhere in
+// the Editor (this SAME panel's own worker timeline below, for CPU mode; the
+// "Render Graph" panel's "SkinModel:..." pass(es), for GPU mode) - neither
+// panel needs (or gets) a new "N/A"/fabricated-value state for this (see
+// AGENTS.md, "Profiling": the absence of a row/segment already IS the
+// honest signal), but a user watching one panel who flips this toggle and
+// sees data vanish from it deserves to be told where to look instead,
+// rather than left to wonder if something broke.
+const char* SkinningModeCrossReferenceHint(bool isGpuMode);
+
 } // namespace gte

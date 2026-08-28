@@ -1537,6 +1537,40 @@ pieces:
   already-planned Scene-view outline-highlight post-process, see
   `TODO.md`, is the natural candidate).
 
+- **GPU Vertex Skinning is now a second, switchable implementation of vertex
+  skinning, alongside the existing CPU/Job-System path** - an eight-phase
+  campaign (`task_manager/gpu_skinning/`,
+  `GPU_SKINNING_PHASE0_MASTER_STRATEGY_v2.md`) added a compute-shader mirror
+  of `Animation/VertexSkinning.cpp`'s CPU blend (`Shaders/
+  SkinVerticesPositionNormal(Uv).comp`, `src/Renderer/GpuSkinning/`),
+  per-model GPU buffer/descriptor-set/Mesh management
+  (`GpuSkinningRigCache`), full render-graph synchronization (a new
+  `ResourceAccess::VertexBufferRead`/`RenderGraphBuilder::ImportBuffer()`,
+  closing a real write-after-write hazard two same-model instances could
+  otherwise hit), and a genuine runtime switch
+  (`AnimationSystem::SkinningMode`/`Game::SetSkinningMode()`) that swaps a
+  model's `MeshRenderer` onto its GPU-skinned Mesh counterpart with no
+  further per-frame CPU packing/upload cost beyond one bone-matrix buffer
+  write. The Editor's "Jobs" panel now hosts the actual CPU/GPU toggle
+  (`Panels/JobsPanel.cpp`'s "Skinning Mode" control) right next to the
+  worker timeline it makes "SkinVertices" entries appear/disappear from,
+  with a tooltip pointing at the "Render Graph" panel's own
+  "SkinModel:..." pass timing for the other mode - neither panel needed a
+  new "N/A"/fabricated-value state, since the absence of a row/segment
+  already is the honest signal (see `AGENTS.md`, "Profiling"). A dedicated
+  Editor-only validation tool (`src/Editor/GpuSkinningValidation.h/.cpp`,
+  mirroring `ComputeBlurValidation`'s own proven pattern) numerically
+  compares the GPU kernel's output against the CPU oracle per-vertex, since
+  this repository has no live-`VkDevice`-requiring automated test
+  infrastructure yet (see `TESTING.md`/`TODO.md`'s own "Tier 2" bucket).
+  See `AGENTS.md`'s new "GPU Vertex Skinning" section for the load-bearing
+  rules this feature depends on (the CPU path stays the permanent oracle;
+  a "phantom" `VertexBufferRead` declaration that looks like dead code but
+  isn't; `ComputeDescriptorSet::Rewrite()` called once per model, not every
+  frame; a GPU-skinned model deliberately owns two separate `Mesh` objects
+  at once). Full build/regression testing and a real, measured CPU-vs-GPU
+  performance comparison are still outstanding - see `TODO.md`.
+
 ## Roadmap
 
 See **[TODO.md](TODO.md)** for known limitations, deliberately deferred

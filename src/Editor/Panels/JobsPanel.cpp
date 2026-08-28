@@ -2,6 +2,8 @@
 
 #include "../EditorContext.h"
 #include "../JobsPanelData.h"
+#include "../../Game/Animation/AnimationSystem.h"
+#include "../../Game/Game.h"
 #include "../../Jobs/JobSystem.h"
 #include "../../Profiling/FrameProfiler.h"
 
@@ -20,6 +22,38 @@ namespace {
 // ProfilerPanel.cpp's own kGraphWindowFrames gets.
 constexpr float kRowHeight = 24.0f;
 constexpr float kRowSpacing = 4.0f;
+
+// --- Section 0: GPU Vertex Skinning mode toggle -----------------------------
+// GPU Vertex Skinning campaign, Phase 7 (Editor Toggle & Profiling UX -
+// task_manager/gpu_skinning/GPU_SKINNING_PHASE7_EDITOR_PROFILING_UX_STRATEGY_v1.md,
+// Step 3.1/3.2). A single, obvious control flipping the engine-wide
+// AnimationSystem::SkinningMode between CpuJobSystem and GpuCompute, wired
+// straight into Game::SetSkinningMode()/GetSkinningMode() - no intermediate
+// indirection layer, mirroring how ProfilerPanel's own Capture/Pause
+// controls call straight into FrameProfiler/Renderer methods.
+void BuildSkinningModeControl(Game& game)
+{
+    ImGui::SeparatorText("GPU Vertex Skinning");
+
+    const bool isGpuMode = game.GetSkinningMode() == AnimationSystem::SkinningMode::GpuCompute;
+    int modeIndex = isGpuMode ? 1 : 0;
+    const char* labels[] = { SkinningModeDisplayName(false), SkinningModeDisplayName(true) };
+    if (ImGui::Combo("Skinning Mode", &modeIndex, labels, 2)) {
+        game.SetSkinningMode(
+            modeIndex == 1 ? AnimationSystem::SkinningMode::GpuCompute : AnimationSystem::SkinningMode::CpuJobSystem);
+    }
+
+    ImGui::SameLine();
+    ImGui::TextDisabled("(?)");
+    if (ImGui::IsItemHovered()) {
+        // A fair CPU-vs-GPU comparison needs the same model/frame/vertex
+        // count in both modes - see this phase's own strategy document,
+        // Step 3.4. This is a documentation-level responsibility (a
+        // tooltip), not something enforced in code - see that step for why.
+        ImGui::SetTooltip("%s\n\nFor a fair comparison, compare the same model/animation/frame in both modes.",
+            SkinningModeCrossReferenceHint(isGpuMode));
+    }
+}
 
 // --- Section 1: Pause control -----------------------------------------------
 
@@ -144,12 +178,15 @@ void BuildTimeline(const std::vector<Profiling::WorkerTimelinePoint>& points, co
 
 } // namespace
 
-void JobsPanel::Build(EditorContext& /*ctx*/)
+void JobsPanel::Build(EditorContext& /*ctx*/, Game& game)
 {
     ImGui::Begin("Jobs");
 
     Profiling::FrameProfiler& profiler = Profiling::FrameProfiler::Instance();
     const std::size_t workerCount = Jobs::JobSystem::Instance().WorkerCount();
+
+    BuildSkinningModeControl(game);
+    ImGui::Separator();
 
     BuildPauseControl(profiler, m_paused, m_frozenPoints, m_frozenLatestFrame);
 

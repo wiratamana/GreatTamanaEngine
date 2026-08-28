@@ -117,4 +117,25 @@ const char* JobsTimelineEmptyMessage()
     return "No job samples recorded yet this frame.";
 }
 
+// GPU Vertex Skinning campaign, Phase 7 - see JobsPanelData.h's own doc
+// comments for both functions below for the full rationale.
+
+const char* SkinningModeDisplayName(bool isGpuMode)
+{
+    return isGpuMode ? "GPU (Compute)" : "CPU (Job System)";
+}
+
+const char* SkinningModeCrossReferenceHint(bool isGpuMode)
+{
+    if (isGpuMode) {
+        return "GPU mode: vertex skinning now runs as a compute pass instead - this panel's own "
+               "worker timeline below will show no \"SkinVertices\" entries for a GPU-skinned "
+               "model any more. See the \"Render Graph\" panel's own \"SkinModel:...\" pass(es) "
+               "for its GPU timing instead.";
+    }
+    return "CPU mode: vertex skinning runs across the worker pool below (look for \"SkinVertices\" "
+           "entries in the timeline). Switch to GPU to see that work move to a \"SkinModel:...\" "
+           "compute pass in the \"Render Graph\" panel instead.";
+}
+
 } // namespace gte

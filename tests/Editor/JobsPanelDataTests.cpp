@@ -162,5 +162,33 @@ TEST(JobsPanelDataTest, JobsTimelineEmptyMessageMatchesCompileTimeFlag)
     }
 }
 
+// GPU Vertex Skinning campaign, Phase 7 (Editor Toggle & Profiling UX) - the
+// "Jobs" panel's own CPU/GPU skinning-mode toggle's pure display text.
+
+TEST(JobsPanelDataTest, SkinningModeDisplayNameReflectsMode)
+{
+    EXPECT_STREQ(SkinningModeDisplayName(false), "CPU (Job System)");
+    EXPECT_STREQ(SkinningModeDisplayName(true), "GPU (Compute)");
+}
+
+TEST(JobsPanelDataTest, SkinningModeCrossReferenceHintDiffersByMode)
+{
+    const std::string cpuHint = SkinningModeCrossReferenceHint(false);
+    const std::string gpuHint = SkinningModeCrossReferenceHint(true);
+
+    // Distinct text for each mode - never the same message regardless of
+    // which mode is currently selected.
+    EXPECT_NE(cpuHint, gpuHint);
+
+    // Each points the user at the OTHER panel that shows the corresponding
+    // data for the mode NOT currently selected (see this phase's own
+    // strategy document, Step 3.3) - CPU mode's hint should mention where
+    // GPU timing would show up, and vice versa.
+    EXPECT_NE(cpuHint.find("Render Graph"), std::string::npos);
+    EXPECT_NE(gpuHint.find("Render Graph"), std::string::npos);
+    EXPECT_NE(cpuHint.find("SkinVertices"), std::string::npos);
+    EXPECT_NE(gpuHint.find("SkinVertices"), std::string::npos);
+}
+
 } // namespace
 } // namespace gte
