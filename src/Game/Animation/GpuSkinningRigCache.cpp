@@ -25,6 +25,18 @@ MeshHandle GpuSkinningRigCache::GpuModelEntry::TryGetGpuMeshHandle(MeshHandle cp
     return kInvalidMeshHandle;
 }
 
+MeshHandle GpuSkinningRigCache::GpuModelEntry::TryGetCpuMeshHandle(MeshHandle gpuMeshHandle) const
+{
+    for (const OutputGroup& group : outputGroups) {
+        for (const OutputGroup::PartMeshBinding& binding : group.partMeshBindings) {
+            if (binding.gpuMeshHandle == gpuMeshHandle) {
+                return binding.cpuMeshHandle;
+            }
+        }
+    }
+    return kInvalidMeshHandle;
+}
+
 void GpuSkinningRigCache::Register(Renderer& renderer, RenderSystem& renderSystem, GpuSkinningPipelines& pipelines,
     const std::string& absoluteGtaPath, const SkinnedMeshData& data, const std::vector<MeshAssetPart>& parts)
 {
@@ -55,8 +67,8 @@ void GpuSkinningRigCache::Register(Renderer& renderer, RenderSystem& renderSyste
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, "GpuSkinningWeights");
 
     // The one genuinely per-frame-rewritten input - sized here, uploaded by
-    // a future Phase 5 every frame this model is animated in GPU mode. See
-    // this phase's own strategy document, Step 3.3.
+    // AnimationSystem::Update() every frame this model is animated in GPU
+    // mode. See this phase's own strategy document, Step 3.3.
     Buffer boneMatricesBuffer = renderer.CreateStructuredBuffer(sizeof(Mat4),
         static_cast<std::uint32_t>(data.skeleton.bones.size()), BufferMemoryUsage::CpuToGpu, 0,
         "GpuSkinningBoneMatrices");
@@ -79,10 +91,17 @@ void GpuSkinningRigCache::Register(Renderer& renderer, RenderSystem& renderSyste
 
     entry.outputGroups.reserve(groups.size());
 
+    std::size_t groupIndex = 0;
     for (const MeshAssetPartGroup& group : groups) {
         OutputGroup outputGroup;
         outputGroup.isTextured = group.textured;
         outputGroup.vertexCount = vertexCount;
+        // Phase 5 - a stable, persistent name for this group's compute pass/
+        // imported buffer, living as long as this OutputGroup does (see
+        // OutputGroup::debugName's own doc comment above for why this must
+        // never be a per-frame temporary).
+        outputGroup.debugName = absoluteGtaPath + "#SkinGroup" + std::to_string(groupIndex);
+        ++groupIndex;
 
         const VkDeviceSize outputSize = group.textured
             ? static_cast<VkDeviceSize>(vertexCount) * sizeof(GpuSkinnedVertexPositionNormalUv)

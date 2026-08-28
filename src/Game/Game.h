@@ -163,6 +163,28 @@ public:
     // gracefully, never throw" convention as CreateMeshEntityFromGtaFile().
     bool PlayAnimationOnEntity(Entity targetEntity, const std::string& absoluteAnimationGtaPath);
 
+    // GPU Vertex Skinning campaign, Phase 5 (Runtime CPU/GPU Switch - see
+    // task_manager/gpu_skinning/GPU_SKINNING_PHASE5_RUNTIME_CPU_GPU_SWITCH_STRATEGY_v2.md).
+    // One-line forwards into AnimationSystem, mirroring every other public
+    // method on this class - see AnimationSystem::SkinningMode/
+    // SetSkinningMode()/GetSkinningMode()'s own doc comments
+    // (Animation/AnimationSystem.h) for the full behavior.
+    void SetSkinningMode(AnimationSystem::SkinningMode mode) noexcept { m_animationSystem.SetSkinningMode(mode); }
+    AnimationSystem::SkinningMode GetSkinningMode() const noexcept { return m_animationSystem.GetSkinningMode(); }
+
+    // Called once per frame by src/Application/RenderPasses.cpp's
+    // AddGpuSkinningPasses(), AFTER Game::Update() has already run this
+    // frame - see AnimationSystem::CollectModelsNeedingGpuSkinningThisFrame().
+    std::vector<AnimationSystem::GpuSkinningDispatchRequest> CollectGpuSkinningDispatchRequests() const
+    {
+        return m_animationSystem.CollectModelsNeedingGpuSkinningThisFrame();
+    }
+
+    // The shared compute-pipeline pair AddGpuSkinningPasses() dispatches
+    // against - see AnimationSystem::GetGpuSkinningPipelines()'s own doc
+    // comment.
+    GpuSkinningPipelines& GetGpuSkinningPipelines() noexcept { return m_animationSystem.GetGpuSkinningPipelines(); }
+
 private:
     // Lazily builds the demo scene - three entities sharing one triangle
     // Mesh/Pipeline, spaced left/center/right purely via Transform, plus one

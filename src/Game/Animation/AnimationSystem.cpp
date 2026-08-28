@@ -3,7 +3,9 @@
 #include "../../Animation/AnimationPoseEvaluator.h"
 #include "../../Animation/VertexSkinning.h"
 #include "../../ECS/Components/MeshAssetSource.h"
+#include "../../ECS/Components/MeshRenderer.h"
 #include "../../ECS/Components/SkeletalAnimator.h"
+#include "../../ECS/TransformHierarchy.h"
 #include "../../Jobs/JobDispatch.h"
 #include "../../Jobs/JobSystem.h"
 #include "../../Profiling/JobScopeTimer.h"
@@ -124,6 +126,40 @@ void RunPackTexturedBatch(std::uint32_t beginIndex, std::uint32_t endIndex, void
     PackMeshVertexUvRange(beginIndex, endIndex, *context->positions, *context->normals, *context->uvs, *context->out);
 }
 
+// Phase 5 (GPU_SKINNING_PHASE5_RUNTIME_CPU_GPU_SWITCH_STRATEGY_v2.md) -
+// keeps every MeshRenderer under `animatorEntity` (its direct children -
+// a model's own submesh "parts" are always direct children of its root,
+// see EntityInstantiator.cpp/MeshAssetGpuCatalog.cpp) pointed at whichever
+// Mesh (CPU-skinned or GPU-skinned) matches `mode`. Idempotent and safe to
+// call every frame regardless of whether `mode` actually changed since the
+// last call - a MeshRenderer already pointing at the "right" handle for
+// `mode` is simply left untouched (neither TryGetGpuMeshHandle() nor
+// TryGetCpuMeshHandle() ever matches its OWN handle back to itself, so at
+// most one of the two branches below ever does anything on a given frame).
+void ApplyMeshHandleForSkinningMode(Registry& registry, Entity animatorEntity,
+    const GpuSkinningRigCache::GpuModelEntry& gpuEntry, AnimationSystem::SkinningMode mode)
+{
+    const std::vector<Entity> children = GetChildren(registry, animatorEntity);
+    for (const Entity child : children) {
+        MeshRenderer* meshRenderer = registry.TryGetComponent<MeshRenderer>(child);
+        if (meshRenderer == nullptr) {
+            continue;
+        }
+
+        if (mode == AnimationSystem::SkinningMode::GpuCompute) {
+            const MeshHandle gpuHandle = gpuEntry.TryGetGpuMeshHandle(meshRenderer->mesh);
+            if (gpuHandle.IsValid()) {
+                meshRenderer->mesh = gpuHandle;
+            }
+        } else {
+            const MeshHandle cpuHandle = gpuEntry.TryGetCpuMeshHandle(meshRenderer->mesh);
+            if (cpuHandle.IsValid()) {
+                meshRenderer->mesh = cpuHandle;
+            }
+        }
+    }
+}
+
 } // namespace
 
 bool AnimationSystem::Play(Registry& registry, Entity targetEntity, const std::string& absoluteAnimationGtaPath)
@@ -160,6 +196,12 @@ void AnimationSystem::Update(Registry& registry, double deltaSeconds)
 {
     GTE_PROFILE_SCOPE("AnimationSystem::Update");
 
+    // Phase 5 - snapshotted ONCE, at the very top, so one model's entire
+    // per-frame processing below is never torn between two different modes
+    // mid-iteration - see this phase's own strategy document, Step 3.4.
+    const SkinningMode mode = m_mode;
+    m_gpuModelsNeedingDispatchThisFrame.clear();
+
     ComponentStorage<SkeletalAnimator>& animators = registry.Storage<SkeletalAnimator>();
 
     // Job System Phase 6 (First Production Consumer - see
@@ -184,9 +226,11 @@ void AnimationSystem::Update(Registry& registry, double deltaSeconds)
     // shared buffer, not merely today's harmless "last write wins" visual
     // bug. This rule may only be lifted once every spawned model instance
     // owns its own private GPU mesh buffers - a separate, unstarted piece
-    // of engine work (see README.md/TODO.md).
+    // of engine work (see README.md/TODO.md). GPU mode (below) is no
+    // exception to this rule either - see GPU_SKINNING_PHASE5_RUNTIME_CPU_GPU_SWITCH_STRATEGY_v2.md.
     for (std::size_t i = 0; i < animators.Size(); ++i) {
         SkeletalAnimator& animator = animators.ComponentAt(i);
+        const Entity animatorEntity = animators.EntityAt(i);
         if (!animator.playing || animator.animationGtaPath.empty()) {
             continue;
         }
@@ -223,9 +267,44 @@ void AnimationSystem::Update(Registry& registry, double deltaSeconds)
         // Sample -> IK-solve -> append/grant-inherit -> forward-kinematics,
         // in that exact, correctness-critical fixed order - see
         // Animation/AnimationPoseEvaluator.h's own file comment. This pure
-        // math module is NOT touched by this refactor at all.
+        // math module is NOT touched by this refactor at all, regardless
+        // of skinning mode - GPU mode still evaluates the pose entirely on
+        // the CPU (see GPU_SKINNING_PHASE0_MASTER_STRATEGY_v2.md's own
+        // "What We Will NOT Do": no GPU-side pose evaluation).
         const std::vector<Mat4> skinningMatrices =
             EvaluateAnimatedSkinningPose(skinData->skeleton, binding, animator.frame);
+
+        // Phase 5 - keep this model's own MeshRenderers pointed at whichever
+        // Mesh (CPU or GPU) matches the CURRENT mode, regardless of which
+        // branch below actually runs this frame - this is what makes a
+        // mid-session mode switch take effect on the very next frame.
+        const GpuSkinningRigCache::GpuModelEntry* gpuEntry = m_gpuRigCache.TryGet(animator.meshGtaPath);
+        if (gpuEntry != nullptr) {
+            ApplyMeshHandleForSkinningMode(registry, animatorEntity, *gpuEntry, mode);
+        }
+
+        if (mode == SkinningMode::GpuCompute) {
+            // Phase 5's ENTIRE per-frame CPU cost for this model: one
+            // Buffer::Upload() call, main-thread-only, no Jobs::Dispatch()
+            // involved at all - see this phase's own strategy document,
+            // Step 3.2/"What We Will NOT Do". The real vkCmdDispatch is
+            // recorded later, from src/Application/RenderPasses.cpp's
+            // AddGpuSkinningPasses(), once CollectModelsNeedingGpuSkinningThisFrame()
+            // is called after this whole Update() has returned.
+            if (gpuEntry == nullptr) {
+                continue; // Never registered for GPU skinning (see Phase 4) - nothing to dispatch.
+            }
+            gpuEntry->boneMatricesBuffer.Upload(skinningMatrices.data(), skinningMatrices.size() * sizeof(Mat4));
+
+            if (std::find(m_gpuModelsNeedingDispatchThisFrame.begin(), m_gpuModelsNeedingDispatchThisFrame.end(),
+                    animator.meshGtaPath)
+                == m_gpuModelsNeedingDispatchThisFrame.end()) {
+                m_gpuModelsNeedingDispatchThisFrame.push_back(animator.meshGtaPath);
+            }
+            continue;
+        }
+
+        // --- CpuJobSystem mode: existing CPU skinning path, UNCHANGED. ---
 
         // Stage 3 (reuse scratch buffers across frames, per model - see
         // MULTITHREAD_CPU_SKINNING_OPTIMIZATION_STRATEGY_v1.md): owned by
@@ -330,6 +409,35 @@ void AnimationSystem::Update(Registry& registry, double deltaSeconds)
             }
         }
     }
+}
+
+std::vector<AnimationSystem::GpuSkinningDispatchRequest> AnimationSystem::CollectModelsNeedingGpuSkinningThisFrame() const
+{
+    std::vector<GpuSkinningDispatchRequest> requests;
+
+    for (const std::string& absoluteGtaPath : m_gpuModelsNeedingDispatchThisFrame) {
+        const GpuSkinningRigCache::GpuModelEntry* entry = m_gpuRigCache.TryGet(absoluteGtaPath);
+        if (entry == nullptr) {
+            continue; // Shouldn't normally happen (it was registered when the upload above succeeded), but degrade gracefully.
+        }
+
+        for (const GpuSkinningRigCache::OutputGroup& group : entry->outputGroups) {
+            if (!group.outputVertexBuffer) {
+                continue;
+            }
+
+            GpuSkinningDispatchRequest request;
+            request.name = group.debugName.c_str();
+            request.outputBuffer = group.outputVertexBuffer->Native();
+            request.outputBufferSize = group.outputVertexBuffer->Size();
+            request.descriptorSet = group.descriptorSet.Native();
+            request.vertexCount = group.vertexCount;
+            request.textured = group.isTextured;
+            requests.push_back(request);
+        }
+    }
+
+    return requests;
 }
 
 } // namespace gte

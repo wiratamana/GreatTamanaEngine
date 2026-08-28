@@ -26,6 +26,12 @@
 // keeps working completely unmodified - the render graph integration
 // happens entirely BELOW Renderer::Submit(), never inside
 // Game/RenderSystem/ECS.
+//
+// GPU Vertex Skinning campaign, Phase 5
+// (GPU_SKINNING_PHASE5_RUNTIME_CPU_GPU_SWITCH_STRATEGY_v2.md, Step 3.3)
+// added AddGpuSkinningPasses() below, plus an optional
+// `gpuSkinningOutputBuffers` parameter on AddGameViewPass()/
+// AddSceneViewPass()/AddPresentPass() - see each one's own doc comment.
 
 #include "../Math/Mat4.h"
 #include "../Renderer/RenderGraph/RenderGraphTypes.h"
@@ -34,6 +40,7 @@
 
 #include <functional>
 #include <optional>
+#include <vector>
 
 namespace gte {
 
@@ -51,17 +58,31 @@ class RenderGraphBuilder;
 // color exactly), and its `execute` calls Game::Render() with the ECS's own
 // active Camera (RenderSystem::ResolveActiveCameraViewProjection() -
 // unchanged).
-void AddGameViewPass(
-    rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer, rg::TextureHandle gameViewTarget, float aspectWidthOverHeight);
+//
+// `gpuSkinningOutputBuffers` (GPU Vertex Skinning campaign, Phase 5 - see
+// GPU_SKINNING_PHASE5_RUNTIME_CPU_GPU_SWITCH_STRATEGY_v2.md) is the set of
+// buffer handles AddGpuSkinningPasses() (below) declared as
+// ComputeShaderWrite this same Execute() call - each is additionally
+// declared here as a phantom ResourceAccess::VertexBufferRead (see
+// GPU_SKINNING_PHASE3_RENDERGRAPH_SYNCHRONIZATION_STRATEGY_v2.md), forcing
+// the render graph's compiler/barrier planner to correctly order this draw
+// pass AFTER whichever compute pass(es) wrote them. Empty (the default) in
+// CPU skinning mode, or whenever no GPU-skinned model is currently
+// animating - declaring a phantom read for a buffer this pass doesn't
+// actually end up drawing this frame is a harmless, conservative
+// over-synchronization, never a correctness problem.
+void AddGameViewPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer, rg::TextureHandle gameViewTarget,
+    float aspectWidthOverHeight, const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers = {});
 
 // The Scene-view equivalent of AddGameViewPass() above - `execute` calls
 // Game::Render() with `sceneViewProjection` as its viewProjectionOverride
 // (the Editor's own independently-orbitable EditorCamera - see
 // IEditorLayer::SceneViewProjection()), bypassing ECS camera resolution for
 // this view only, exactly as Application::Run() already did before this
-// migration.
+// migration. `gpuSkinningOutputBuffers` - see AddGameViewPass() above.
 void AddSceneViewPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer, rg::TextureHandle sceneViewTarget,
-    float aspectWidthOverHeight, const Mat4& sceneViewProjection);
+    float aspectWidthOverHeight, const Mat4& sceneViewProjection,
+    const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers = {});
 
 // Declares the "Present" pass: writes swapchainImage's color attachment
 // (always cleared, matching FrameRecorder::RecordFrame()'s own old
@@ -75,9 +96,13 @@ void AddSceneViewPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& ren
 // see RENDERGRAPH_PHASE7_COMPLETION_REPORT.md for the full reasoning).
 // `recordImGui`, if set, is invoked last, still inside the same dynamic-
 // rendering bracket - mirroring IEditorLayer::Render()'s existing
-// recordExtra contract exactly.
+// recordExtra contract exactly. `gpuSkinningOutputBuffers` - see
+// AddGameViewPass() above; only meaningful (and only ever declared) when
+// `directGameRenderAspect` also has a value, since that's the only case
+// where this pass itself draws a GPU-skinned mesh directly.
 void AddPresentPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer, rg::TextureHandle swapchainImage,
-    std::optional<float> directGameRenderAspect, const std::function<void(VkCommandBuffer)>& recordImGui);
+    std::optional<float> directGameRenderAspect, const std::function<void(VkCommandBuffer)>& recordImGui,
+    const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers = {});
 
 // Transitions `texture`'s COLOR image from the ColorAttachmentWrite state a
 // GameView/SceneView pass (above) leaves it in, to a real ShaderRead state -
@@ -92,5 +117,32 @@ void AddPresentPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& rende
 // closed) and BEFORE that command buffer is ended/submitted - see
 // Application::Run().
 void FinalizeRenderTextureForExternalSampling(VkCommandBuffer cmd, RenderTexture& texture);
+
+// GPU Vertex Skinning campaign, Phase 5, Step 3.3 ("Who actually issues the
+// vkCmdDispatch?") - declares one AddComputePass() per distinct model +
+// output group AnimationSystem determined needs GPU skinning this frame
+// (see Game::CollectGpuSkinningDispatchRequests()/
+// AnimationSystem::CollectModelsNeedingGpuSkinningThisFrame()): imports
+// that group's persistent output buffer (RenderGraphBuilder::ImportBuffer())
+// and dispatches its skinning compute kernel (Renderer::Dispatch(), inside
+// a BeginGraphPassRecording()/EndGraphPassRecording() bracket, exactly
+// mirroring src/Editor/ComputeBlurValidation.cpp's own proven pattern).
+//
+// Returns the imported BufferHandle for every pass declared, in the same
+// order - the caller (Application::Run()) threads this straight into
+// AddGameViewPass()/AddSceneViewPass()/AddPresentPass()'s own
+// `gpuSkinningOutputBuffers` parameter, so those passes' declared
+// ResourceAccess::VertexBufferRead correctly orders them after this call's
+// own writes. A no-op (returns an empty vector, declares nothing) whenever
+// no model currently needs GPU skinning this frame - e.g. CPU mode is
+// active, or no rigged model is currently playing an animation at all.
+//
+// Must be called from INSIDE the same RenderGraph::Execute() `build`
+// lambda that will go on to declare the GameView/SceneView/Present pass(es)
+// consuming these buffers this frame - a compute pass declared into a
+// DIFFERENT Execute() call could never be ordered against them by the
+// compiler at all (each Execute() call compiles/executes its own,
+// completely independent graph).
+std::vector<rg::BufferHandle> AddGpuSkinningPasses(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer);
 
 } // namespace gte

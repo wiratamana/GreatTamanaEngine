@@ -9,6 +9,9 @@
 #include "ResolvedAnimationBindingCache.h"
 #include "SkeletalRigCache.h"
 
+#include <volk.h>
+
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -41,6 +44,26 @@ public:
     {
     }
 
+    // GPU Vertex Skinning campaign, Phase 5 (Runtime CPU/GPU Switch - see
+    // task_manager/gpu_skinning/GPU_SKINNING_PHASE5_RUNTIME_CPU_GPU_SWITCH_STRATEGY_v2.md).
+    // CpuJobSystem (the default) is today's exact, unmodified behavior -
+    // Job-System-dispatched CPU vertex skinning (see Update() below).
+    // GpuCompute instead uploads this frame's bone matrices into each
+    // playing model's GpuSkinningRigCache::GpuModelEntry::boneMatricesBuffer
+    // and swaps every affected MeshRenderer onto its GPU-skinned Mesh
+    // counterpart - the actual compute dispatch is issued later, by
+    // whoever calls CollectModelsNeedingGpuSkinningThisFrame() (see
+    // src/Application/RenderPasses.cpp's AddGpuSkinningPasses()), since
+    // only the render-graph-integrated caller knows where in the frame a
+    // real vkCmdDispatch may be recorded.
+    enum class SkinningMode : std::uint8_t {
+        CpuJobSystem,
+        GpuCompute,
+    };
+
+    void SetSkinningMode(SkinningMode mode) noexcept { m_mode = mode; }
+    SkinningMode GetSkinningMode() const noexcept { return m_mode; }
+
     // The explicit hand-off entry point that replaces the old hidden
     // "EnsureMeshAsset() writes m_meshSkinningCache, UpdateSkeletalAnimators()
     // reads it" coupling (see GameInstantiationRefactorProposal.txt, Step
@@ -72,6 +95,12 @@ public:
         m_gpuRigCache.Register(renderer, m_renderSystem, m_gpuSkinningPipelines, absoluteGtaPath, data, parts);
     }
 
+    // Phase 5 - direct access to the shared compute-pipeline pair, needed
+    // by AddGpuSkinningPasses() (src/Application/RenderPasses.cpp) to
+    // actually bind/dispatch whichever of the two (untextured vs. textured)
+    // kernels a given CollectModelsNeedingGpuSkinningThisFrame() request
+    // needs.
+    GpuSkinningPipelines& GetGpuSkinningPipelines() noexcept { return m_gpuSkinningPipelines; }
 
     // Mirrors Game::PlayAnimationOnEntity() exactly - same validation rules
     // (entity alive, has MeshAssetSource, its mesh has non-empty skinning
@@ -83,16 +112,55 @@ public:
     // SkeletalAnimator, advances frame/loop, looks up skin data + clip +
     // resolved binding via the three owned caches, calls the existing,
     // unchanged Animation/AnimationPoseEvaluator.h
-    // (EvaluateAnimatedSkinningPose()) and Animation/VertexSkinning.h
-    // (SkinVertexRange()), packs the result via the SHARED MeshVertexPacking
-    // helpers (instead of duplicated inline loops), and re-uploads every
-    // affected mesh part's GPU buffer - see this class's own .cpp file for
-    // the multithreaded CPU-skinning optimization applied here (Stage 1's
-    // shared-vertex-buffer de-duplication, Stage 2's parallelized packing,
-    // and Stage 3's per-model scratch-buffer reuse - see
-    // task_manager/optimizing_multi_thread_cpu_skinning/
-    // MULTITHREAD_CPU_SKINNING_OPTIMIZATION_STRATEGY_v1.md).
+    // (EvaluateAnimatedSkinningPose()), and then branches on GetSkinningMode():
+    // CpuJobSystem runs Animation/VertexSkinning.h (SkinVertexRange()) -
+    // dispatched across the worker pool for a big-enough model, unchanged
+    // from before Phase 5 existed - and re-uploads every affected mesh
+    // part's GPU vertex buffer via Mesh::UpdateVertexData(); GpuCompute
+    // instead uploads this frame's bone matrices straight into the model's
+    // GpuSkinningRigCache::GpuModelEntry::boneMatricesBuffer (its entire
+    // per-frame CPU cost) and records the model as needing a compute
+    // dispatch this frame (see CollectModelsNeedingGpuSkinningThisFrame()
+    // below). Either way, every affected MeshRenderer is kept in sync with
+    // the CURRENT mode (swapped onto its GPU-skinned or CPU-mode Mesh
+    // counterpart, per GpuSkinningRigCache::GpuModelEntry::
+    // TryGetGpuMeshHandle()/TryGetCpuMeshHandle()) every frame, so a
+    // mid-session mode switch takes effect the very next frame with no
+    // further caller action needed.
     void Update(Registry& registry, double deltaSeconds);
+
+    // GPU Vertex Skinning campaign, Phase 5, Step 3.3 ("Who actually issues
+    // the vkCmdDispatch?") - called from src/Application/RenderPasses.cpp's
+    // AddGpuSkinningPasses(), AFTER this frame's Update() has already run
+    // (and therefore already uploaded fresh bone matrices for every
+    // GPU-mode-animated model) and BEFORE the offscreen render graph's
+    // `build` lambda finishes declaring passes. Returns exactly one
+    // GpuSkinningDispatchRequest per distinct model+OutputGroup that
+    // genuinely needs a fresh compute dispatch this frame - deduplicated by
+    // model path (see Update()'s own m_gpuModelsNeedingDispatchThisFrame),
+    // so a caller never has to apply Phase 3's own read-before-write WAW
+    // mitigation itself: this list never asks for the SAME output buffer to
+    // be written twice in one frame. Empty whenever GetSkinningMode() ==
+    // CpuJobSystem, or no rigged model happens to be animating at all this
+    // frame.
+    struct GpuSkinningDispatchRequest {
+        // A stable, persistent (never a per-frame temporary) name - see
+        // GpuSkinningRigCache::OutputGroup::debugName's own doc comment for
+        // why this MUST NOT be a freshly-built std::string each frame.
+        // Suitable to pass directly as RenderGraphBuilder::AddPass()/
+        // ImportBuffer()'s own `name` parameter.
+        const char* name = nullptr;
+
+        VkBuffer outputBuffer = VK_NULL_HANDLE;
+        VkDeviceSize outputBufferSize = 0;
+        VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
+        std::uint32_t vertexCount = 0;
+        // Selects which of GetGpuSkinningPipelines()'s two pipelines
+        // (PositionNormal vs. PositionNormalUv) this request's descriptor
+        // set was built against.
+        bool textured = false;
+    };
+    std::vector<GpuSkinningDispatchRequest> CollectModelsNeedingGpuSkinningThisFrame() const;
 
 private:
     RenderSystem& m_renderSystem;
@@ -107,14 +175,30 @@ private:
     // registered model (its two compute pipelines are built once, lazily,
     // on the very first RegisterGpuSkinnedMesh() call - see
     // GpuSkinningPipelines::EnsureInitialized()); m_gpuRigCache owns every
-    // GPU buffer/descriptor-set/Mesh this campaign's later phases (5+) will
-    // need to actually dispatch a skinning compute pass and switch a
-    // MeshRenderer onto its GPU-skinned Mesh. Neither is consulted by
-    // Update() yet - that runtime CPU/GPU switch is explicitly Phase 5's
-    // job (GPU_SKINNING_PHASE5_RUNTIME_CPU_GPU_SWITCH_STRATEGY_v2.md), not
-    // this one.
+    // GPU buffer/descriptor-set/Mesh Phase 5's runtime CPU/GPU switch
+    // actually dispatches a skinning compute pass against and switches a
+    // MeshRenderer onto.
     GpuSkinningPipelines m_gpuSkinningPipelines;
     GpuSkinningRigCache m_gpuRigCache;
+
+    // Phase 5 - the runtime switch itself. Snapshotted ONCE at the top of
+    // every Update() call (see this phase's own strategy document, Step
+    // 3.4, rule 1) so one model's entire per-frame processing is never torn
+    // between two different modes mid-iteration even if a UI toggle flips
+    // it concurrently (this engine is single-threaded, but this discipline
+    // costs nothing and removes any doubt).
+    SkinningMode m_mode = SkinningMode::CpuJobSystem;
+
+    // Phase 5 - the distinct mesh *.gta paths that needed a fresh GPU
+    // skinning compute dispatch THIS frame (GpuCompute mode only),
+    // rebuilt from scratch at the top of every Update() call. Read back by
+    // CollectModelsNeedingGpuSkinningThisFrame() above - kept as a member
+    // (rather than returned directly from Update()) since Update() and
+    // CollectModelsNeedingGpuSkinningThisFrame() are necessarily two
+    // separate calls from two different call sites (Game::Update() vs.
+    // src/Application/RenderPasses.cpp), per this phase's own strategy
+    // document, Step 3.3.
+    std::vector<std::string> m_gpuModelsNeedingDispatchThisFrame;
 
     // Stage 3 (stop re-allocating scratch buffers every frame - see
     // MULTITHREAD_CPU_SKINNING_OPTIMIZATION_STRATEGY_v1.md): one model's

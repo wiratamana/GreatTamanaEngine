@@ -241,13 +241,25 @@ int Application::Run()
                 m_renderGraph.Execute(offscreenCmd, rg::ExecuteTimingMode::SynchronousImmediateReadback,
                     [&](rg::RenderGraphBuilder& b) {
                         std::vector<rg::TextureHandle> outputs;
+
+                        // GPU Vertex Skinning campaign, Phase 5
+                        // (GPU_SKINNING_PHASE5_RUNTIME_CPU_GPU_SWITCH_STRATEGY_v2.md,
+                        // Step 3.3) - declared FIRST, before either view pass
+                        // below, so their own ResourceAccess::VertexBufferRead
+                        // declarations (see RenderPasses.h) have a real
+                        // BufferHandle to reference. A no-op (empty vector,
+                        // nothing declared) in CPU skinning mode or whenever
+                        // no rigged model is currently animating.
+                        const std::vector<rg::BufferHandle> gpuSkinningBuffers =
+                            AddGpuSkinningPasses(b, m_game, m_renderer);
+
                         if (gameTarget != nullptr) {
                             const VkExtent2D extent = gameTarget->Extent();
                             const float aspect =
                                 AspectRatioOf(static_cast<int>(extent.width), static_cast<int>(extent.height));
                             const rg::TextureHandle h =
                                 b.ImportTexture("GameView", gameTarget->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
-                            AddGameViewPass(b, m_game, m_renderer, h, aspect);
+                            AddGameViewPass(b, m_game, m_renderer, h, aspect, gpuSkinningBuffers);
                             outputs.push_back(h);
                         }
                         if (sceneTarget != nullptr) {
@@ -265,7 +277,7 @@ int Application::Run()
                             const Mat4 sceneViewProjection = m_editorLayer->SceneViewProjection(aspect);
                             const rg::TextureHandle h =
                                 b.ImportTexture("SceneView", sceneTarget->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
-                            AddSceneViewPass(b, m_game, m_renderer, h, aspect, sceneViewProjection);
+                            AddSceneViewPass(b, m_game, m_renderer, h, aspect, sceneViewProjection, gpuSkinningBuffers);
                             outputs.push_back(h);
 
                             // Phase 7 of the compute-shader campaign
@@ -391,8 +403,20 @@ int Application::Run()
             try {
                 presentStats = m_renderer.PresentViaRenderGraph(m_renderGraph, needsDirectGameRender,
                     [&](rg::RenderGraphBuilder& b, rg::TextureHandle swapchainImage) {
+                        // GPU Vertex Skinning campaign, Phase 5 - only
+                        // meaningful when this pass is ALSO the one drawing
+                        // Game directly (needsDirectGameRender); see this
+                        // block's own directGameRenderAspect above. The
+                        // offscreen regime already dispatched GPU skinning
+                        // this frame whenever it ran at all (see the
+                        // offscreen build lambda above) - the two are
+                        // mutually exclusive per frame, so this never
+                        // double-dispatches the same model's compute pass.
+                        const std::vector<rg::BufferHandle> gpuSkinningBuffers = needsDirectGameRender
+                            ? AddGpuSkinningPasses(b, m_game, m_renderer)
+                            : std::vector<rg::BufferHandle>{};
                         AddPresentPass(b, m_game, m_renderer, swapchainImage, directGameRenderAspect,
-                            [this](VkCommandBuffer cmd) { m_editorLayer->Render(cmd); });
+                            [this](VkCommandBuffer cmd) { m_editorLayer->Render(cmd); }, gpuSkinningBuffers);
                         return std::vector<rg::TextureHandle>{ swapchainImage };
                     });
             } catch (const std::exception& e) {

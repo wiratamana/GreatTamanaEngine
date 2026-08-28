@@ -40,19 +40,19 @@ struct MeshAssetPart;
 // (Game::CreateMeshEntityFromGtaFile(), via
 // AnimationSystem::RegisterGpuSkinnedMesh()) - unconditionally, regardless
 // of which skinning mode (CPU/GPU) is currently active, so a future runtime
-// CPU/GPU switch (Phase 5 - not part of this phase) never needs a lazy
-// "oh, I need to register this now" fallback path. A model registered here
-// pays real, one-time GPU memory/setup cost the moment it's spawned - see
-// this phase's own strategy document, Step 4, for why this is a deliberate
-// trade against lazy/deferred registration.
+// CPU/GPU switch (Phase 5 - see AnimationSystem::SkinningMode) never needs a
+// lazy "oh, I need to register this now" fallback path. A model registered
+// here pays real, one-time GPU memory/setup cost the moment it's spawned -
+// see this phase's own strategy document, Step 4, for why this is a
+// deliberate trade against lazy/deferred registration.
 //
-// GPU-only, compute-write-only output buffers/descriptor sets/Mesh objects
-// built here are NOT wired into any runtime CPU/GPU switch yet - that is
-// explicitly Phase 5's job (GPU_SKINNING_PHASE5_RUNTIME_CPU_GPU_SWITCH_STRATEGY_v2.md).
-// This phase's own deliverable stops at "the per-model GPU resources exist,
-// are correctly laid out/bound, and are ready for Phase 5 to actually
-// dispatch a compute pass against and swap a MeshRenderer's MeshHandle
-// onto" - see TryGet()/GpuModelEntry below.
+// Phase 5 (GPU_SKINNING_PHASE5_RUNTIME_CPU_GPU_SWITCH_STRATEGY_v2.md) is
+// what actually DISPATCHES a compute pass against these resources (see
+// AnimationSystem::CollectModelsNeedingGpuSkinningThisFrame()) and swaps a
+// MeshRenderer's MeshHandle onto GpuModelEntry::TryGetGpuMeshHandle()'s
+// result (and back, via TryGetCpuMeshHandle(), when switching back to CPU
+// mode) - this class itself still owns nothing about WHEN any of that
+// happens, only the resources themselves.
 class GpuSkinningRigCache {
 public:
     // One shared GPU skinning-output buffer/descriptor-set/Mesh set for a
@@ -100,11 +100,28 @@ public:
         // buffer/range differs per part).
         std::uint32_t vertexCount = 0;
 
+        // Phase 5 (GPU_SKINNING_PHASE5_RUNTIME_CPU_GPU_SWITCH_STRATEGY_v2.md)
+        // - a stable, PERSISTENT (lives as long as this OutputGroup does,
+        // never a per-frame temporary) name for this group's own compute
+        // pass/imported-buffer, e.g. "<absoluteGtaPath>#SkinGroup0". Set
+        // exactly once, in Register() below. RenderGraphBuilder::AddPass()/
+        // ImportBuffer()'s own `name` parameter REQUIRES a string literal or
+        // otherwise static-storage-duration const char* (see
+        // RenderGraphBuilder.h) - a fresh std::string built every frame
+        // would dangle the instant that temporary is destroyed, so this
+        // field's whole reason to exist is to give
+        // AnimationSystem::CollectModelsNeedingGpuSkinningThisFrame() a
+        // pointer (via .c_str()) that stays valid for as long as this
+        // OutputGroup (and therefore this GpuModelEntry) does - i.e. for the
+        // rest of the process's lifetime, per this cache's own "load once,
+        // never evict" convention.
+        std::string debugName;
+
         // Maps each CPU-mode MeshAssetPart's own MeshHandle (the ORIGINAL,
         // CPU-skinned/static Mesh - see MeshAssetGpuCatalog.cpp) to its
         // GPU-skinned counterpart, built here from THIS group's own shared
         // outputVertexBuffer plus that same part's own index data (see
-        // MeshAssetPart::indices) - a future Phase 5 runtime switch swaps a
+        // MeshAssetPart::indices) - Phase 5's runtime switch swaps a
         // MeshRenderer's MeshHandle between the two, per this mapping, with
         // no further GPU work needed at switch time.
         struct PartMeshBinding {
@@ -128,21 +145,39 @@ public:
 
         // The ONE genuinely per-frame-rewritten input - see this phase's
         // own strategy document, Step 3.3. Sized once, here, to this
-        // model's own bone count; a future Phase 5 uploads fresh skinning
-        // matrices into it every frame this model is animated in GPU mode.
-        // Left at whatever undefined contents CreateStructuredBuffer()
-        // leaves it in until Phase 5's first real upload - never read by
-        // anything until then.
-        Buffer boneMatricesBuffer;
+        // model's own bone count; Phase 5 uploads fresh skinning matrices
+        // into it every frame this model is animated in GPU mode (see
+        // AnimationSystem::Update()). Left at whatever undefined contents
+        // CreateStructuredBuffer() leaves it in until that first real
+        // upload - never read by anything until then.
+        // Deliberately `mutable`: TryGet() (below) returns a const
+        // GpuModelEntry* (this cache's own resources are otherwise never
+        // mutated after Register()), but this ONE buffer is the documented
+        // exception - AnimationSystem::Update() calls Upload() on it, every
+        // frame, for a model currently animated in GPU mode. Marking just
+        // this one field mutable (rather than dropping const off TryGet()'s
+        // whole return type) keeps every OTHER field's real immutability
+        // guarantee visible/enforced by the type system.
+        mutable Buffer boneMatricesBuffer;
 
         std::vector<OutputGroup> outputGroups;
 
-        // Best-effort lookup used by a future Phase 5: returns the
+        // Best-effort lookup used by Phase 5's runtime switch: returns the
         // GPU-skinned counterpart of `cpuMeshHandle` if this model has one
         // registered, or kInvalidMeshHandle otherwise (e.g. a stale/
         // never-registered handle, or a model with no output groups at
         // all).
         MeshHandle TryGetGpuMeshHandle(MeshHandle cpuMeshHandle) const;
+
+        // The reverse of TryGetGpuMeshHandle() above - resolves an already
+        // GPU-skinned MeshHandle back to its ORIGINAL CPU-mode counterpart,
+        // used by Phase 5's runtime switch when switching a model back OUT
+        // of GPU mode (see this phase's own strategy document, Step 3.4:
+        // "switching modes mid-session is safe by construction... switching
+        // OUT of GPU mode needs no cleanup since the two Mesh objects are
+        // fully independent"). Returns kInvalidMeshHandle for a handle that
+        // isn't one of this model's own GPU-skinned meshes.
+        MeshHandle TryGetCpuMeshHandle(MeshHandle gpuMeshHandle) const;
     };
 
     // Mirrors SkeletalRigCache::Register() - called once, from the SAME
