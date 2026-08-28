@@ -57,6 +57,20 @@ namespace gte {
 //   |         |                           | GpuSkinnedVertexPositionNormal/|
 //   |         |                           | Uv below)                      |
 //
+// PHASE 2 ADDENDUM (see GPU_SKINNING_PHASE2_COMPUTE_KERNEL_STRATEGY_v1.md):
+// the PositionNormalUv compute-kernel variant (SkinVerticesPositionNormalUv.comp)
+// needed one MORE read-only input this table didn't originally have a slot
+// for - the bind-pose UV buffer (GpuUv, packed via PackUvs() below) - since
+// Phase 1's fixed 4-binding table has no UV entry at all. This is an
+// ADDITIVE extension, not a redefinition of bindings 0-3 above: a new
+// binding 4 (readonly buffer, plain vec2[] matching GpuUv exactly), used
+// ONLY by the PositionNormalUv variant's own descriptor-set layout - the
+// untextured PositionNormal variant's layout is unaffected and still has
+// exactly the 4 bindings above. See SkinVerticesPositionNormalUv.comp's own
+// header comment for the full reasoning.
+//   | 4       | Bind-pose UV buffer (Uv   | readonly buffer (std430) -     |
+//   |         | variant only)             | UV-VARIANT-ONLY ADDITION        |
+//
 // Lifetime convention (see Phase 1's own Step 3.3/3.4): the bind-pose vertex
 // buffer, skin-weight buffer, and skinned output buffer are all uploaded
 // ONCE, at model-load time, and never change again for that model's whole

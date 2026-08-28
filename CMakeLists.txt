@@ -306,6 +306,8 @@ add_library(gte_core STATIC
     src/Renderer/MeshVertex.h
     src/Renderer/GpuSkinning/GpuSkinningTypes.h
     src/Renderer/GpuSkinning/GpuSkinningTypes.cpp
+    src/Renderer/GpuSkinning/GpuSkinningPipelines.h
+    src/Renderer/GpuSkinning/GpuSkinningPipelines.cpp
     src/Renderer/Primitives/PrimitiveMeshGenerator.cpp
     src/Renderer/Primitives/PrimitiveMeshGenerator.h
     src/Renderer/Memory/GpuResourceHandle.h
@@ -579,6 +581,17 @@ gte_add_shader(GreatTamanaEngine src/Shaders/Mesh.frag)
 # Mesh.vert/.frag above.
 gte_add_shader(GreatTamanaEngine src/Shaders/TexturedMesh.vert)
 gte_add_shader(GreatTamanaEngine src/Shaders/TexturedMesh.frag)
+
+# GPU Vertex Skinning, Phase 2 (compute kernels) -
+# task_manager/gpu_skinning/GPU_SKINNING_PHASE2_COMPUTE_KERNEL_STRATEGY_v1.md.
+# Unconditional (NOT gated behind GTE_ENABLE_EDITOR/GTE_ENABLE_PROJECT_PANEL,
+# unlike BoxBlur.comp below) - src/Renderer/GpuSkinning/GpuSkinningPipelines.cpp,
+# the only thing that ever loads these, is compiled into gte_core
+# unconditionally (see gte_core's own target_sources() list above) since GPU
+# skinning is a genuine gameplay/runtime feature, not a debug/Editor-only
+# tool - it must work in a non-Editor, release build too.
+gte_add_shader(GreatTamanaEngine src/Shaders/SkinVerticesPositionNormal.comp)
+gte_add_shader(GreatTamanaEngine src/Shaders/SkinVerticesPositionNormalUv.comp)
 
 # The Inspector's Mesh Asset 3D preview viewer (src/Editor/AssetPreviewMesh.h)
 # needs its own small shader pair, compiled/staged the exact same way as
