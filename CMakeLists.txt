@@ -367,9 +367,13 @@ add_library(gte_core STATIC
     src/Game/Instantiation/MaterialTextureGpuCache.h
     src/Game/Instantiation/MeshAssetGpuCatalog.cpp
     src/Game/Instantiation/MeshAssetGpuCatalog.h
+    src/Game/Instantiation/MeshAssetPartGrouping.cpp
+    src/Game/Instantiation/MeshAssetPartGrouping.h
     src/Game/Instantiation/MeshInstantiationSystem.cpp
     src/Game/Instantiation/MeshInstantiationSystem.h
     src/Game/Animation/SkeletalRigCache.h
+    src/Game/Animation/GpuSkinningRigCache.cpp
+    src/Game/Animation/GpuSkinningRigCache.h
     src/Game/Animation/AnimationClipCache.cpp
     src/Game/Animation/AnimationClipCache.h
     src/Game/Animation/ResolvedAnimationBindingCache.h

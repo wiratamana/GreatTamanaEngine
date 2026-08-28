@@ -42,6 +42,18 @@ Entity Game::CreateMeshEntityFromGtaFile(Renderer& renderer, const std::string& 
         // doc comment, Game.h).
         if (const SkinnedMeshData* skin = m_meshInstantiationSystem.TryGetSkinnedMeshData(absoluteGtaPath)) {
             m_animationSystem.RegisterSkinnedMesh(absoluteGtaPath, *skin);
+
+            // GPU Vertex Skinning campaign, Phase 4 (Per-Model Resource
+            // Management - see
+            // task_manager/gpu_skinning/GPU_SKINNING_PHASE4_PER_MODEL_RESOURCE_MANAGEMENT_STRATEGY_v1.md).
+            // Registered unconditionally, alongside RegisterSkinnedMesh()
+            // above, regardless of which skinning mode is currently active -
+            // see AnimationSystem::RegisterGpuSkinnedMesh()'s own doc
+            // comment for why this must never become a lazy/on-first-use
+            // registration.
+            if (const std::vector<MeshAssetPart>* parts = m_meshInstantiationSystem.TryGetMeshAssetParts(absoluteGtaPath)) {
+                m_animationSystem.RegisterGpuSkinnedMesh(renderer, absoluteGtaPath, *skin, *parts);
+            }
         }
     }
     return root;

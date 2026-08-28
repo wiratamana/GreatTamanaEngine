@@ -4,6 +4,7 @@
 #include "MaterialTextureGpuCache.h"
 #include "../Animation/SkeletalRigCache.h"
 
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -30,6 +31,20 @@ struct MeshAssetPart {
     // may merge more than one material together, or a material whose own
     // name PMX left blank).
     std::string name;
+    // This part's own triangle-index list (the exact CPU-side data
+    // `mesh`'s own index buffer was uploaded from) - kept around
+    // (GPU Vertex Skinning campaign, Phase 4: see
+    // task_manager/gpu_skinning/GPU_SKINNING_PHASE4_PER_MODEL_RESOURCE_MANAGEMENT_STRATEGY_v1.md)
+    // so a GPU-skinned counterpart Mesh can be built later (sharing a GPU
+    // skinning output buffer, but needing its OWN, private index buffer -
+    // see Mesh.h's own "the index buffer is always this ONE Mesh's own
+    // private buffer, never shared" rule) without ever needing a
+    // device-to-host GPU readback of `mesh`'s own index buffer. Empty for
+    // any MeshAssetPart built before this field existed, or a boneless/
+    // riggless model that will never need a GPU-skinned counterpart at
+    // all - GpuSkinningRigCache::Register() simply skips a part whose
+    // `indices` is empty.
+    std::vector<std::uint32_t> indices;
 };
 
 // Replaces Game::EnsureMeshAsset()/EnsureMeshPipeline()/

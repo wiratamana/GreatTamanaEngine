@@ -292,6 +292,15 @@ public:
     Buffer CreateStructuredBuffer(VkDeviceSize elementStride, std::uint32_t elementCount,
         BufferMemoryUsage memoryUsage, VkBufferUsageFlags extraUsage = 0, const char* debugName = nullptr) const;
 
+    // GPU Vertex Skinning campaign, Phase 4 (Per-Model Resource Management -
+    // see task_manager/gpu_skinning/GPU_SKINNING_PHASE4_PER_MODEL_RESOURCE_MANAGEMENT_STRATEGY_v1.md).
+    // See GpuResourceFactory::CreateGpuSkinningTargetBuffer() for the full
+    // reasoning - a device-local buffer usable BOTH as a compute shader's
+    // storage-buffer output AND as a real vertex-input-assembler vertex
+    // buffer, for a GPU-skinned model's per-shared-vertex-buffer-group
+    // output.
+    Buffer CreateGpuSkinningTargetBuffer(VkDeviceSize size, const char* debugName = nullptr) const;
+
 
     // Records a one-time-submit command buffer (recordFn), submits it to
     // the graphics queue, and blocks until it finishes. The primitive

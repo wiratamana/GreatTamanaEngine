@@ -148,7 +148,17 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
                   untexturedIndices.size() * sizeof(std::uint32_t),
                   static_cast<std::uint32_t>(untexturedIndices.size()), "ImportedMesh");
         const MeshHandle handle = renderSystem.RegisterMesh(std::move(gpuMesh));
-        parts.push_back(MeshAssetPart{ handle, kInvalidTextureHandle, std::string() });
+        // `indices` is only worth keeping around for a SKINNED model - see
+        // MeshAssetPart::indices' own doc comment (MeshAssetGpuCatalog.h) -
+        // a non-skinned model will never need a GPU-skinned counterpart
+        // Mesh, so there is no reason to keep a second, redundant CPU-side
+        // copy of its index data alive for the rest of this cache entry's
+        // lifetime.
+        MeshAssetPart part{ handle, kInvalidTextureHandle, std::string() };
+        if (skinned) {
+            part.indices = untexturedIndices;
+        }
+        parts.push_back(std::move(part));
     }
 
     // --- Textured submeshes (position+normal+UV) - one shared vertex
@@ -182,7 +192,11 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
                 sliceIndices.data(), sliceIndices.size() * sizeof(std::uint32_t),
                 static_cast<std::uint32_t>(sliceIndices.size()), "ImportedTexturedMesh");
             const MeshHandle handle = renderSystem.RegisterMesh(std::move(gpuMesh));
-            parts.push_back(MeshAssetPart{ handle, slice.texture, slice.name });
+            MeshAssetPart part{ handle, slice.texture, slice.name };
+            if (skinned) {
+                part.indices = sliceIndices;
+            }
+            parts.push_back(std::move(part));
         }
     }
 

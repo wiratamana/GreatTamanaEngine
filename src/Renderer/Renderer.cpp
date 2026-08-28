@@ -173,6 +173,12 @@ Buffer Renderer::CreateStructuredBuffer(VkDeviceSize elementStride, std::uint32_
     return m_resources.CreateStructuredBuffer(elementStride, elementCount, memoryUsage, extraUsage, debugName);
 }
 
+Buffer Renderer::CreateGpuSkinningTargetBuffer(VkDeviceSize size, const char* debugName) const
+{
+    return m_resources.CreateGpuSkinningTargetBuffer(size, debugName);
+}
+
+
 
 Buffer Renderer::CreateDeviceLocalBuffer(
     const void* data, VkDeviceSize size, VkBufferUsageFlags usage, const char* debugName) const

@@ -5,6 +5,7 @@
 #include "../../Math/Vec3.h"
 #include "../../Renderer/MeshVertex.h"
 #include "AnimationClipCache.h"
+#include "GpuSkinningRigCache.h"
 #include "ResolvedAnimationBindingCache.h"
 #include "SkeletalRigCache.h"
 
@@ -14,8 +15,10 @@
 
 namespace gte {
 
+class Renderer;
 class RenderSystem;
 class MeshInstantiationSystem;
+struct MeshAssetPart;
 
 // The main animation orchestrator - promotes animation to a first-class,
 // dedicated system (see GameInstantiationRefactorProposal.txt, Step 3.5),
@@ -50,6 +53,26 @@ public:
         m_rigCache.Register(absoluteGtaPath, data);
     }
 
+    // GPU Vertex Skinning campaign, Phase 4 (Per-Model Resource Management -
+    // see task_manager/gpu_skinning/GPU_SKINNING_PHASE4_PER_MODEL_RESOURCE_MANAGEMENT_STRATEGY_v1.md).
+    // The GPU-side sibling of RegisterSkinnedMesh() above - called from the
+    // SAME Game::CreateMeshEntityFromGtaFile() hand-off site, ALONGSIDE
+    // (never instead of) RegisterSkinnedMesh(), unconditionally for a
+    // rigged model - see GpuSkinningRigCache::Register()'s own doc comment
+    // for why this must never become a lazy/on-first-use registration.
+    // `parts` is the same MeshAssetPart list MeshInstantiationSystem::
+    // TryGetMeshAssetParts() already exposes. A no-op for a boneless/
+    // riggless model, or one whose parts don't resolve to any live Mesh -
+    // see GpuSkinningRigCache::Register()'s own "degrade gracefully"
+    // convention.
+    void RegisterGpuSkinnedMesh(Renderer& renderer, const std::string& absoluteGtaPath, const SkinnedMeshData& data,
+        const std::vector<MeshAssetPart>& parts)
+    {
+        m_gpuSkinningPipelines.EnsureInitialized(renderer);
+        m_gpuRigCache.Register(renderer, m_renderSystem, m_gpuSkinningPipelines, absoluteGtaPath, data, parts);
+    }
+
+
     // Mirrors Game::PlayAnimationOnEntity() exactly - same validation rules
     // (entity alive, has MeshAssetSource, its mesh has non-empty skinning
     // data in SkeletalRigCache, the animation clip resolves) and same
@@ -78,6 +101,20 @@ private:
     SkeletalRigCache m_rigCache;
     AnimationClipCache m_clipCache;
     ResolvedAnimationBindingCache m_bindingCache;
+
+    // GPU Vertex Skinning campaign, Phase 4 - the GPU-side siblings of
+    // m_rigCache above. m_gpuSkinningPipelines is shared across every
+    // registered model (its two compute pipelines are built once, lazily,
+    // on the very first RegisterGpuSkinnedMesh() call - see
+    // GpuSkinningPipelines::EnsureInitialized()); m_gpuRigCache owns every
+    // GPU buffer/descriptor-set/Mesh this campaign's later phases (5+) will
+    // need to actually dispatch a skinning compute pass and switch a
+    // MeshRenderer onto its GPU-skinned Mesh. Neither is consulted by
+    // Update() yet - that runtime CPU/GPU switch is explicitly Phase 5's
+    // job (GPU_SKINNING_PHASE5_RUNTIME_CPU_GPU_SWITCH_STRATEGY_v2.md), not
+    // this one.
+    GpuSkinningPipelines m_gpuSkinningPipelines;
+    GpuSkinningRigCache m_gpuRigCache;
 
     // Stage 3 (stop re-allocating scratch buffers every frame - see
     // MULTITHREAD_CPU_SKINNING_OPTIMIZATION_STRATEGY_v1.md): one model's

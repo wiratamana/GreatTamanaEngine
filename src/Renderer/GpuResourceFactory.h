@@ -97,6 +97,22 @@ public:
     Buffer CreateStructuredBuffer(VkDeviceSize elementStride, std::uint32_t elementCount,
         BufferMemoryUsage memoryUsage, VkBufferUsageFlags extraUsage = 0, const char* debugName = nullptr) const;
 
+    // GPU Vertex Skinning campaign, Phase 4 (Per-Model Resource Management -
+    // see task_manager/gpu_skinning/GPU_SKINNING_PHASE4_PER_MODEL_RESOURCE_MANAGEMENT_STRATEGY_v1.md,
+    // Step 3.1). Creates a device-local (BufferMemoryUsage::GpuOnly) buffer
+    // usable BOTH as a compute shader's storage-buffer output AND as a real
+    // vertex-input-assembler vertex buffer (VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+    // | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT combined on the same VkBuffer -
+    // always legal on any conformant Vulkan implementation, unlike a storage
+    // IMAGE's format-dependent VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT check, see
+    // that strategy document's own Step 3.4 for the full reasoning). Never
+    // stages/uploads any initial data - this buffer starts life with
+    // UNDEFINED contents and is only ever meaningfully populated by the
+    // first compute dispatch that targets it (a GPU skinning kernel's own
+    // output), which must always happen before the first draw that reads
+    // it.
+    Buffer CreateGpuSkinningTargetBuffer(VkDeviceSize size, const char* debugName = nullptr) const;
+
     // See Renderer::ImmediateSubmit().
     void ImmediateSubmit(const std::function<void(VkCommandBuffer)>& recordFn) const;
 

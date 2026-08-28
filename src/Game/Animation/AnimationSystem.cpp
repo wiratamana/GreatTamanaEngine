@@ -11,6 +11,7 @@
 #include "../../Renderer/Mesh.h"
 #include "../../Renderer/MeshVertex.h"
 #include "../Instantiation/MeshInstantiationSystem.h"
+#include "../Instantiation/MeshAssetPartGrouping.h"
 #include "../Instantiation/MeshVertexPacking.h"
 #include "../RenderSystem.h"
 
@@ -277,30 +278,13 @@ void AnimationSystem::Update(Registry& registry, double deltaSeconds)
         // and re-uploaded a FULL copy of the whole model's vertex data,
         // unconditionally, turning this loop's true cost into
         // O(vertexCount x partCount). Group parts by their Mesh's own
-        // VertexBufferIdentity() first, so each DISTINCT underlying buffer
-        // is packed/uploaded exactly ONCE per frame, no matter how many
-        // parts reference it.
-        struct PendingGroup {
-            const void* identity;
-            Mesh* representativeMesh;
-            bool textured;
-        };
-        std::vector<PendingGroup> groups;
-        groups.reserve(parts->size());
-
-        for (const MeshAssetPart& part : *parts) {
-            Mesh* gpuMesh = m_renderSystem.TryGetMesh(part.mesh);
-            if (gpuMesh == nullptr) {
-                continue;
-            }
-
-            const void* identity = gpuMesh->VertexBufferIdentity();
-            const bool alreadyQueued = std::any_of(groups.begin(), groups.end(),
-                [identity](const PendingGroup& group) { return group.identity == identity; });
-            if (!alreadyQueued) {
-                groups.push_back(PendingGroup{ identity, gpuMesh, part.texture.IsValid() });
-            }
-        }
+        // VertexBufferIdentity() first (via the SHARED
+        // GroupMeshAssetPartsBySharedVertexBuffer() helper - GPU Vertex
+        // Skinning campaign, Phase 4, also used by GpuSkinningRigCache - see
+        // MeshAssetPartGrouping.h), so each DISTINCT underlying buffer is
+        // packed/uploaded exactly ONCE per frame, no matter how many parts
+        // reference it.
+        const std::vector<MeshAssetPartGroup> groups = GroupMeshAssetPartsBySharedVertexBuffer(m_renderSystem, *parts);
 
         // For each distinct vertex buffer: pack (Stage 2 - parallelized via
         // the worker pool exactly like the skin blend above, for a model
@@ -310,7 +294,7 @@ void AnimationSystem::Update(Registry& registry, double deltaSeconds)
         // stays main-thread-only, unconditionally, exactly matching
         // AGENTS.md's Job System Phase 4 audit table's `Renderer`/`Mesh`
         // row (NEVER for a job body to touch).
-        for (const PendingGroup& group : groups) {
+        for (const MeshAssetPartGroup& group : groups) {
             if (group.textured) {
                 std::vector<MeshVertexUv>& packed = scratch.packedTextured;
                 packed.resize(vertexCount);

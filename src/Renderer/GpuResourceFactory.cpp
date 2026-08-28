@@ -143,6 +143,12 @@ GpuResourceFactory& GpuResourceFactory::operator=(GpuResourceFactory&& other) no
     return *this;
 }
 
+Buffer GpuResourceFactory::CreateGpuSkinningTargetBuffer(VkDeviceSize size, const char* debugName) const
+{
+    return CreateBuffer(size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        BufferMemoryUsage::GpuOnly, debugName);
+}
+
 void GpuResourceFactory::Destroy() noexcept
 {
     if (m_materialDescriptorPool != VK_NULL_HANDLE) {
