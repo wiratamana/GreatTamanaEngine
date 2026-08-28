@@ -304,6 +304,8 @@ add_library(gte_core STATIC
     src/Renderer/ComputeDispatch.h
     src/Renderer/Vertex.h
     src/Renderer/MeshVertex.h
+    src/Renderer/GpuSkinning/GpuSkinningTypes.h
+    src/Renderer/GpuSkinning/GpuSkinningTypes.cpp
     src/Renderer/Primitives/PrimitiveMeshGenerator.cpp
     src/Renderer/Primitives/PrimitiveMeshGenerator.h
     src/Renderer/Memory/GpuResourceHandle.h

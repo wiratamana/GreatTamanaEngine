@@ -114,7 +114,32 @@
 #                                            items, and the 3D per-axis
 #                                            overload - no Vulkan/Renderer/
 #                                            live GPU device involved at
-#                                            all.
+#   all.
+#   - Renderer/GpuSkinning/GpuSkinningTypesTests.cpp - GPU Vertex Skinning
+#                                            campaign, Phase 1 (Data & Buffer
+#                                            Layout Foundations - see
+#                                            task_manager/gpu_skinning/
+#                                            GPU_SKINNING_PHASE1_DATA_BUFFER_FOUNDATIONS_STRATEGY_v1.md) -
+#                                            PackBindPoseVertices()/PackUvs()/
+#                                            PackSkinWeights() (src/Renderer/
+#                                            GpuSkinning/GpuSkinningTypes.h)
+#                                            pure CPU-side repacking into
+#                                            GPU-buffer-ready layouts: exact
+#                                            padded position/normal values,
+#                                            the mismatched-normals-count
+#                                            Vec3::Up() fallback (mirroring
+#                                            Animation/VertexSkinning.cpp's
+#                                            own SkinVertexRange()), UV
+#                                            pass-through, unused skin-weight
+#                                            slots translating to bone 0/
+#                                            weight 0.0 (never a raw
+#                                            bit-reinterpreted -1 index), and
+#                                            every struct's documented byte
+#                                            size. No Vulkan/Renderer/live GPU
+#                                            device involved at all - this
+#                                            file is deliberately
+#                                            Vulkan-header-free, same
+#                                            precedent as GpuTiming.h.
 #   - Renderer/RenderGraph/RenderGraphTypesTests.cpp - Render Graph Phase 1's
 #                                            pure vocabulary (handles/
 #                                            ResourceAccess/TextureDesc/
@@ -756,6 +781,7 @@ set(GTE_TEST_SOURCES
     Renderer/DrawStatsTests.cpp
     Renderer/GpuTimingTests.cpp
     Renderer/ComputeDispatchTests.cpp
+    Renderer/GpuSkinning/GpuSkinningTypesTests.cpp
     Renderer/RenderGraph/RenderGraphTypesTests.cpp
     Renderer/RenderGraph/RenderGraphBuilderTests.cpp
     Renderer/RenderGraph/RenderGraphCompilerTests.cpp
