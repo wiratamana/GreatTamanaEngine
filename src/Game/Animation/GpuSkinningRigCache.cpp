@@ -9,9 +9,37 @@
 #include "SkeletalRigCache.h"
 
 #include <algorithm>
+#include <filesystem>
 #include <utility>
 
 namespace gte {
+
+namespace {
+
+// Display-only helper for OutputGroup::debugName below - the Editor's
+// "Render Graph" panel (Panels/RenderGraphPanel.cpp) shows this pass/
+// imported-buffer name verbatim, so it must stay a short, human-readable
+// label ("Furina.gta#SkinGroup0"), never the full absolute on-disk path
+// ("C:\Users\...\build\Project\Furina.gta#SkinGroup0") the caller actually
+// hands Register() (see AnimationSystem::RegisterGpuSkinnedMesh()'s own
+// `absoluteGtaPath` parameter, which is - and must stay - the full path,
+// since it also doubles as this cache's own m_models lookup key).
+//
+// Same std::u8string round-trip MeshAssetGpuCatalog.cpp's own
+// Utf8PathFromGamePath()/PathToUtf8() use - std::filesystem::path must be
+// built from an explicit std::u8string, never straight from a plain
+// std::string, or a non-ASCII (e.g. Japanese) path/filename gets
+// reinterpreted through the OS's native/legacy codepage instead of UTF-8 on
+// Windows and comes out corrupted.
+std::string FileNameOnly(const std::string& absoluteUtf8Path)
+{
+    const std::filesystem::path path(
+        std::u8string(reinterpret_cast<const char8_t*>(absoluteUtf8Path.data()), absoluteUtf8Path.size()));
+    const std::u8string filenameU8 = path.filename().u8string();
+    return std::string(reinterpret_cast<const char*>(filenameU8.data()), filenameU8.size());
+}
+
+} // namespace
 
 MeshHandle GpuSkinningRigCache::GpuModelEntry::TryGetGpuMeshHandle(MeshHandle cpuMeshHandle) const
 {
@@ -91,6 +119,11 @@ void GpuSkinningRigCache::Register(Renderer& renderer, RenderSystem& renderSyste
 
     entry.outputGroups.reserve(groups.size());
 
+    // Computed once, outside the loop below - see FileNameOnly()'s own doc
+    // comment for why this (never absoluteGtaPath itself) is what feeds
+    // OutputGroup::debugName.
+    const std::string displayFileName = FileNameOnly(absoluteGtaPath);
+
     std::size_t groupIndex = 0;
     for (const MeshAssetPartGroup& group : groups) {
         OutputGroup outputGroup;
@@ -100,7 +133,7 @@ void GpuSkinningRigCache::Register(Renderer& renderer, RenderSystem& renderSyste
         // imported buffer, living as long as this OutputGroup does (see
         // OutputGroup::debugName's own doc comment above for why this must
         // never be a per-frame temporary).
-        outputGroup.debugName = absoluteGtaPath + "#SkinGroup" + std::to_string(groupIndex);
+        outputGroup.debugName = displayFileName + "#SkinGroup" + std::to_string(groupIndex);
         ++groupIndex;
 
         const VkDeviceSize outputSize = group.textured

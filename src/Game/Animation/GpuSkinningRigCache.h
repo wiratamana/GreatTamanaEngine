@@ -103,7 +103,15 @@ public:
         // Phase 5 (GPU_SKINNING_PHASE5_RUNTIME_CPU_GPU_SWITCH_STRATEGY_v2.md)
         // - a stable, PERSISTENT (lives as long as this OutputGroup does,
         // never a per-frame temporary) name for this group's own compute
-        // pass/imported-buffer, e.g. "<absoluteGtaPath>#SkinGroup0". Set
+        // pass/imported-buffer, e.g. "Furina.gta#SkinGroup0" - the FILE NAME
+        // only (see GpuSkinningRigCache.cpp's own FileNameOnly() helper),
+        // deliberately never the full absolute path Register()'s own
+        // `absoluteGtaPath` parameter carries - the Editor's "Render Graph"
+        // panel (Panels/RenderGraphPanel.cpp) shows this string verbatim as
+        // both a pass name and a resource name, and a full OS path there is
+        // both unreadable (it silently pushes every OTHER column off-screen
+        // - see RenderGraphPanel's own "Reads"/"Writes"/"Lifetime" columns)
+        // and a needless leak of the local machine's folder layout. Set
         // exactly once, in Register() below. RenderGraphBuilder::AddPass()/
         // ImportBuffer()'s own `name` parameter REQUIRES a string literal or
         // otherwise static-storage-duration const char* (see
