@@ -8,6 +8,7 @@
 #include "Panels/GamePanel.h"
 #include "Panels/HierarchyPanel.h"
 #include "Panels/InspectorPanel.h"
+#include "Panels/JobsPanel.h"
 #include "Panels/MemoryPanel.h"
 #include "Panels/ProfilerPanel.h"
 #include "Panels/RenderGraphPanel.h"
@@ -479,6 +480,13 @@ public:
         BuildMemoryPanel(m_ctx, renderer);
         m_profilerPanel.Build(m_ctx);
         m_renderGraphPanel.Build(m_ctx, renderGraph);
+        // Job System Phase 7 (Editor "Jobs" Panel) - reads Job System Phase
+        // 5's Profiling::BuildWorkerTimelinePoints() reshape internally; no
+        // new parameters needed here (mirrors m_profilerPanel.Build() above -
+        // both only ever touch m_ctx plus their own already-global data
+        // sources, gte::Profiling::FrameProfiler::Instance()/
+        // gte::Jobs::JobSystem::Instance()).
+        m_jobsPanel.Build(m_ctx);
 #if GTE_ENABLE_PROJECT_PANEL
         m_projectPanel.Build(m_ctx);
         // The Bone Viewer is its own floating window (opened on demand via
@@ -630,6 +638,14 @@ private:
     // only depends on the gte::rg::RenderGraph Application already owns and
     // drives every frame, passed into BuildUI() above.
     RenderGraphPanel m_renderGraphPanel;
+
+    // Job System Phase 7 (Editor "Jobs" Panel -
+    // task_manager/job_system/JOBSYSTEM_PHASE7_EDITOR_JOBS_PANEL.md - see
+    // Panels/JobsPanel.h) - docked alongside "Memory"/"Profiler"/"Render
+    // Graph" (DockLayout.cpp). Also not gated behind GTE_ENABLE_PROJECT_PANEL -
+    // it only depends on gte::Profiling::FrameProfiler/gte::Jobs::JobSystem,
+    // both of which are always compiled regardless of that switch.
+    JobsPanel m_jobsPanel;
 
 #if GTE_ENABLE_PROJECT_PANEL
     // The Editor's Unity-style "Project" panel (see Panels/ProjectPanel.h) -

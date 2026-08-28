@@ -424,6 +424,8 @@ if(GTE_ENABLE_EDITOR)
         src/Editor/MemoryPanelData.cpp
         src/Editor/ProfilerPanelData.h
         src/Editor/ProfilerPanelData.cpp
+        src/Editor/JobsPanelData.h
+        src/Editor/JobsPanelData.cpp
         src/Editor/Panels/HierarchyPanel.h
         src/Editor/Panels/HierarchyPanel.cpp
         src/Editor/Panels/InspectorPanel.h
@@ -438,6 +440,8 @@ if(GTE_ENABLE_EDITOR)
         src/Editor/Panels/ProfilerPanel.cpp
         src/Editor/Panels/RenderGraphPanel.h
         src/Editor/Panels/RenderGraphPanel.cpp
+        src/Editor/Panels/JobsPanel.h
+        src/Editor/Panels/JobsPanel.cpp
         src/Editor/ImGuiEditorLayer.cpp
     )
     target_link_libraries(gte_core PRIVATE imgui imguizmo)

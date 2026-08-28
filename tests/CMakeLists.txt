@@ -313,6 +313,20 @@
 #                                            GTE_ENABLE_EDITOR is ON, same
 #                                            reason as EditorCameraTests.cpp
 #                                            above.
+#   - Editor/JobsPanelDataTests.cpp          - the Editor "Jobs" panel's
+#                                            pure data-shaping logic
+#                                            (ColorForJobName()/
+#                                            ComputeWorkerUtilizationSummary()/
+#                                            FormatWorkerUtilizationSummary()/
+#                                            PointsForWorker()/
+#                                            JobsTimelineEmptyMessage() - see
+#                                            src/Editor/JobsPanelData.h) -
+#                                            no ImGui/Renderer/live GPU/real
+#                                            JobSystem/FrameProfiler
+#                                            singleton involved. Only built
+#                                            when GTE_ENABLE_EDITOR is ON,
+#                                            same reason as
+#                                            EditorCameraTests.cpp above.
 #   - Editor/ProjectPanelDataTests.cpp        - the Editor "Project" panel's
 #                                            pure data-shaping/filesystem
 #                                            logic (ScanProjectDirectory()/
@@ -792,6 +806,7 @@ if(GTE_ENABLE_EDITOR)
         Editor/ImGuiMemoryTrackerTests.cpp
         Editor/MemoryPanelDataTests.cpp
         Editor/ProfilerPanelDataTests.cpp
+        Editor/JobsPanelDataTests.cpp
     )
 
     # ProjectPanelData.h/.cpp (see src/Editor/ProjectPanelData.h) is only

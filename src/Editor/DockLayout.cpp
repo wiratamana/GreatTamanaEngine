@@ -31,6 +31,7 @@ constexpr const char* kAllPanelNames[] = {
     "Memory",
     "Profiler",
     "Render Graph",
+    "Jobs",
 #if GTE_ENABLE_PROJECT_PANEL
     "Project",
 #endif
@@ -94,6 +95,10 @@ void BuildDefaultDockLayout(ImGuiID dockspaceId, ImVec2 size)
     // unconditionally alongside Memory/Profiler" treatment; it has no
     // GTE_ENABLE_PROJECT_PANEL dependency either.
     ImGui::DockBuilderDockWindow("Render Graph", bottom);
+    // "Jobs" (Job System Phase 7 - Panels/JobsPanel.h) - same "docked
+    // unconditionally alongside Memory/Profiler/Render Graph" treatment; it
+    // has no GTE_ENABLE_PROJECT_PANEL dependency either.
+    ImGui::DockBuilderDockWindow("Jobs", bottom);
 #if GTE_ENABLE_PROJECT_PANEL
     // Tabbed alongside "Memory" - Unity's own default layout also puts
     // "Project" (and "Console") along the bottom.
