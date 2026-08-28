@@ -97,9 +97,12 @@ RenderGraphSnapshot BuildRenderGraphSnapshot(const CompiledGraph& compiled, cons
     for (std::size_t i = 0; i < input.bufferDescs.size(); ++i) {
         RenderGraphResourceSnapshot resource;
         resource.name = (i < input.bufferNames.size() && input.bufferNames[i] != nullptr) ? input.bufferNames[i] : "";
-        // No ImportBuffer() concept exists (see RenderGraphBuilder.h) - a
-        // buffer resource is never imported.
-        resource.isImported = false;
+        // GPU Vertex Skinning campaign, Phase 3
+        // (GPU_SKINNING_PHASE3_RENDERGRAPH_SYNCHRONIZATION_STRATEGY_v2.md) -
+        // a buffer resource CAN now be imported (RenderGraphBuilder::
+        // ImportBuffer()) - mirrors the texture branch immediately above,
+        // which was already correct.
+        resource.isImported = (i < input.bufferImportInfo.size()) && input.bufferImportInfo[i].isImported;
         if (i < compiled.bufferLifetimes.size()) {
             resource.firstUsePassIndex = compiled.bufferLifetimes[i].firstUsePassIndex;
             resource.lastUsePassIndex = compiled.bufferLifetimes[i].lastUsePassIndex;

@@ -457,6 +457,60 @@ TEST(RenderGraphCompilerTest, BufferOnlyWriteSurvivesCullingOnlyWhenAReaderReach
     EXPECT_TRUE(input.passes[2].isCulled);
 }
 
+// --- GPU Vertex Skinning campaign, Phase 3's own WAW-hazard mitigation -----
+// (GPU_SKINNING_PHASE3_RENDERGRAPH_SYNCHRONIZATION_STRATEGY_v2.md, Step 3.6) -
+//
+// Two "SkinModel" compute passes sharing ONE imported output buffer (the
+// two-SkeletalAnimators-sharing-one-Mesh scenario this campaign's own
+// documented limitation describes), followed by a graphics pass that reads
+// that same buffer as a vertex buffer. The SECOND skinning pass applies the
+// Step 3.6 mitigation (a phantom ComputeShaderRead declared immediately
+// before its real ComputeShaderWrite) - this test proves the COMPILER
+// (independent of the barrier planner's own field-level tests in
+// RenderGraphBarrierPlannerTests.cpp) still produces the correct, fully
+// serialized execution order: first writer, then second writer/reader,
+// then the draw - and that none of the three passes are ever culled, since
+// all three have a real path to the final color output.
+TEST(RenderGraphCompilerTest, GpuSkinningReadBeforeWriteMitigationPreservesOrderForSharedOutputBuffer)
+{
+    RenderGraphBuilder builder;
+    const BufferHandle output = builder.ImportBuffer("SkinOutput", VK_NULL_HANDLE, 1024);
+    const TextureHandle color = builder.CreateTexture("Color", MakeTextureDesc());
+
+    builder.AddComputePass(
+        "SkinModel:InstanceA",
+        [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteBuffer(output, ResourceAccess::ComputeShaderWrite); },
+        NoOpExecute); // index 0 - first animator's own skinning dispatch.
+    builder.AddComputePass(
+        "SkinModel:InstanceB",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            // The Step 3.6 mitigation - a phantom read declared BEFORE the
+            // real write, forcing a dependency edge/barrier against
+            // whichever pass most recently wrote this same handle, even
+            // though this pass's own compute shader never actually reads
+            // the buffer's prior contents.
+            pass.ReadBuffer(output, ResourceAccess::ComputeShaderRead);
+            pass.WriteBuffer(output, ResourceAccess::ComputeShaderWrite);
+        },
+        NoOpExecute); // index 1 - second animator sharing the same Mesh.
+    builder.AddPass(
+        "DrawModel",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.ReadBuffer(output, ResourceAccess::VertexBufferRead);
+            pass.WriteColorAttachment(color);
+        },
+        NoOpExecute); // index 2 - the graphics pass drawing from the result.
+
+    CompiledGraphInput input = builder.Finish();
+    const TextureHandle finalOutputs[] = { color };
+    const CompiledGraph compiled = Compile(input, finalOutputs);
+
+    EXPECT_TRUE(ExecutionOrderEquals(compiled.executionOrder, { 0, 1, 2 }));
+    EXPECT_FALSE(input.passes[0].isCulled);
+    EXPECT_FALSE(input.passes[1].isCulled);
+    EXPECT_FALSE(input.passes[2].isCulled);
+}
+
 // --- Cycle detection --------------------------------------------------------
 //
 // RENDERGRAPH_PHASE3_COMPILATION_STRATEGY_v1.md's own Step 3.4 asks for a

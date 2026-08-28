@@ -93,12 +93,33 @@ void RenderGraph::EnsureBufferResolved(
         return;
     }
 
-    // Phase 2 has no ImportBuffer() counterpart to ImportTexture() - every
-    // declared BufferHandle is necessarily transient/pooled.
-    Buffer& buffer = m_resourcePool.AcquireBuffer(input.bufferDescs[index], input.bufferNames[index]);
-    buf.buffer = buffer.Native();
-    buf.size = buffer.Size();
-    buf.state = ResourceState{};
+    // GPU Vertex Skinning campaign, Phase 3
+    // (GPU_SKINNING_PHASE3_RENDERGRAPH_SYNCHRONIZATION_STRATEGY_v2.md) -
+    // closes the gap this comment used to describe: RenderGraphBuilder now
+    // has a real ImportBuffer() counterpart to ImportTexture() (see
+    // RenderGraphBuilder.h) - a declared BufferHandle may be either
+    // transient/pooled (the original, only behavior) OR an already-live,
+    // externally-owned buffer (e.g. a future per-model GPU skinning output
+    // buffer).
+    const BufferImportInfo& importInfo = input.bufferImportInfo[index];
+    if (importInfo.isImported) {
+        // Already a real, externally-owned resource - never allocated/
+        // freed by this graph, mirroring EnsureTextureResolved()'s own
+        // import branch above. Always seeded at a fresh, "never touched
+        // before" ResourceState{} - a buffer has no image-layout concept
+        // requiring a true cross-frame carry the way an imported TEXTURE's
+        // currentLayout does; this engine's existing whole-frame fence/
+        // semaphore synchronization is what makes this safe (see
+        // RenderGraphBuilder::ImportBuffer()'s own comment).
+        buf.buffer = importInfo.externalBuffer;
+        buf.size = importInfo.size;
+        buf.state = ResourceState{};
+    } else {
+        Buffer& buffer = m_resourcePool.AcquireBuffer(input.bufferDescs[index], input.bufferNames[index]);
+        buf.buffer = buffer.Native();
+        buf.size = buffer.Size();
+        buf.state = ResourceState{};
+    }
     buf.resolved = true;
 }
 

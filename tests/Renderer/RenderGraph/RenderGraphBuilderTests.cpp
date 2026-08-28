@@ -518,6 +518,83 @@ TEST(RenderGraphBuilderTest, ImportedAndTransientTexturesShareOneContiguousHandl
     EXPECT_EQ(input.textureImportInfo.size(), 3u);
 }
 
+// --- ImportBuffer() (GPU Vertex Skinning campaign, Phase 3 - -----------------
+// --- GPU_SKINNING_PHASE3_RENDERGRAPH_SYNCHRONIZATION_STRATEGY_v2.md) ---------
+
+TEST(RenderGraphBuilderTest, ImportBufferProducesHandleUsableLikeCreateBufferHandle)
+{
+    RenderGraphBuilder builder;
+    const VkBuffer fakeBuffer = reinterpret_cast<VkBuffer>(static_cast<std::uintptr_t>(0x7777));
+    const BufferHandle imported = builder.ImportBuffer("SkinOutput", fakeBuffer, 1024);
+
+    ASSERT_TRUE(imported.IsValid());
+
+    // Usable in ReadBuffer()/WriteBuffer() exactly like a CreateBuffer()-
+    // minted handle - the pass author cannot tell the difference from the
+    // handle alone.
+    builder.AddPass(
+        "SkinPass",
+        [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteBuffer(imported, ResourceAccess::ComputeShaderWrite); },
+        NoOpExecute);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes[0].writes.size(), 1u);
+    EXPECT_EQ(input.passes[0].writes[0].buffer, imported);
+}
+
+TEST(RenderGraphBuilderTest, ImportBufferIsTaggedAsImportedInCompiledGraphInput)
+{
+    RenderGraphBuilder builder;
+    const VkBuffer fakeBuffer = reinterpret_cast<VkBuffer>(static_cast<std::uintptr_t>(0x8888));
+    const BufferHandle imported = builder.ImportBuffer("SkinOutput", fakeBuffer, 512);
+    const BufferHandle transient = builder.CreateBuffer("Scratch", BufferDesc{ 256, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.bufferImportInfo.size(), 2u);
+    EXPECT_TRUE(input.bufferImportInfo[imported.index].isImported);
+    EXPECT_FALSE(input.bufferImportInfo[transient.index].isImported);
+}
+
+TEST(RenderGraphBuilderTest, ImportBufferStoresExternalBufferAndSizeVerbatim)
+{
+    RenderGraphBuilder builder;
+    const VkBuffer fakeBuffer = reinterpret_cast<VkBuffer>(static_cast<std::uintptr_t>(0x9999));
+    const BufferHandle imported = builder.ImportBuffer("SkinOutput", fakeBuffer, 2048);
+
+    const CompiledGraphInput input = builder.Finish();
+    const BufferImportInfo& info = input.bufferImportInfo[imported.index];
+    EXPECT_EQ(info.externalBuffer, fakeBuffer);
+    EXPECT_EQ(info.size, 2048u);
+}
+
+TEST(RenderGraphBuilderTest, ImportBufferMirrorsSizeIntoBufferDesc)
+{
+    RenderGraphBuilder builder;
+    const VkBuffer fakeBuffer = reinterpret_cast<VkBuffer>(static_cast<std::uintptr_t>(0xAAAA));
+    const BufferHandle imported = builder.ImportBuffer("SkinOutput", fakeBuffer, 4096);
+
+    const CompiledGraphInput input = builder.Finish();
+    EXPECT_EQ(input.bufferDescs[imported.index].size, 4096u);
+}
+
+TEST(RenderGraphBuilderTest, ImportedAndTransientBuffersShareOneContiguousHandleSpace)
+{
+    RenderGraphBuilder builder;
+    const BufferHandle transientA = builder.CreateBuffer("A", BufferDesc{ 128, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
+    const BufferHandle imported = builder.ImportBuffer(
+        "SkinOutput", reinterpret_cast<VkBuffer>(static_cast<std::uintptr_t>(0xBBBB)), 512);
+    const BufferHandle transientB = builder.CreateBuffer("B", BufferDesc{ 64, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT });
+
+    EXPECT_FALSE(transientA == imported);
+    EXPECT_FALSE(imported == transientB);
+    EXPECT_FALSE(transientA == transientB);
+
+    const CompiledGraphInput input = builder.Finish();
+    EXPECT_EQ(input.bufferDescs.size(), 3u);
+    EXPECT_EQ(input.bufferNames.size(), 3u);
+    EXPECT_EQ(input.bufferImportInfo.size(), 3u);
+}
+
 // --- Name validation guard -------------------------------------------------
 //
 // A pass/resource name that is nullptr or empty is rejected via an
@@ -559,6 +636,15 @@ TEST(RenderGraphBuilderDeathTest, ImportTextureRejectsNullName)
         { builder.ImportTexture(nullptr, target, VK_IMAGE_LAYOUT_UNDEFINED); },
         "");
 }
+
+TEST(RenderGraphBuilderDeathTest, ImportBufferRejectsNullName)
+{
+    RenderGraphBuilder builder;
+    EXPECT_DEATH(
+        { builder.ImportBuffer(nullptr, VK_NULL_HANDLE, 1024); },
+        "");
+}
+
 
 TEST(RenderGraphBuilderDeathTest, AddPassRejectsNullName)
 {

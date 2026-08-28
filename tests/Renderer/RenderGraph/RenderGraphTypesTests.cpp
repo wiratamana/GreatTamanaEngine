@@ -224,6 +224,14 @@ TEST(RenderGraphResourceAccessTest, IndirectCommandReadIsNotAWrite)
     EXPECT_FALSE(IsWriteAccess(ResourceAccess::IndirectCommandRead));
 }
 
+// GPU Vertex Skinning campaign, Phase 3
+// (GPU_SKINNING_PHASE3_RENDERGRAPH_SYNCHRONIZATION_STRATEGY_v2.md) - the
+// fourth new enumerator.
+TEST(RenderGraphResourceAccessTest, VertexBufferReadIsNotAWrite)
+{
+    EXPECT_FALSE(IsWriteAccess(ResourceAccess::VertexBufferRead));
+}
+
 // --- ToString() - one assertion per enumerator, non-empty, non-null ------
 
 TEST(RenderGraphResourceAccessTest, ToStringCoversEveryEnumeratorNonNullNonEmpty)
@@ -237,6 +245,7 @@ TEST(RenderGraphResourceAccessTest, ToStringCoversEveryEnumeratorNonNullNonEmpty
         ResourceAccess::ComputeShaderRead,
         ResourceAccess::ComputeShaderWrite,
         ResourceAccess::IndirectCommandRead,
+        ResourceAccess::VertexBufferRead,
     };
 
     for (const ResourceAccess value : values) {
@@ -256,6 +265,7 @@ TEST(RenderGraphResourceAccessTest, ToStringProducesDistinctNamesForDistinctEnum
     EXPECT_STREQ(ToString(ResourceAccess::ComputeShaderRead), "ComputeShaderRead");
     EXPECT_STREQ(ToString(ResourceAccess::ComputeShaderWrite), "ComputeShaderWrite");
     EXPECT_STREQ(ToString(ResourceAccess::IndirectCommandRead), "IndirectCommandRead");
+    EXPECT_STREQ(ToString(ResourceAccess::VertexBufferRead), "VertexBufferRead");
 }
 
 // --- PassRecord / ResourceUsage - basic plain-data sanity -----------------

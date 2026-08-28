@@ -60,6 +60,28 @@ struct TextureImportInfo {
     VkImageLayout currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 };
 
+// Buffer sibling of TextureImportInfo above - see
+// RenderGraphBuilder::ImportBuffer() below and
+// GPU_SKINNING_PHASE3_RENDERGRAPH_SYNCHRONIZATION_STRATEGY_v2.md, Step 3.2,
+// for the motivating use case (a future GPU-vertex-skinning per-model
+// output buffer - created ONCE, at model-registration time, and
+// re-imported into a freshly-built graph every frame, exactly like the
+// Editor's persistent Game/Scene RenderTexture is re-imported as a texture
+// every frame today - see TextureImportInfo above). Parallel to
+// CompiledGraphInput::bufferDescs/bufferNames (same index), so a
+// non-imported (transient) buffer's entry here is simply
+// `BufferImportInfo{}` (isImported == false) and is never read by
+// RenderGraphResourcePool.
+struct BufferImportInfo {
+    bool isImported = false;
+    // Only meaningful when isImported == true - the already-live buffer
+    // this handle refers to. RenderGraphResourcePool must never try to
+    // allocate or free this - see RenderGraph::EnsureBufferResolved()'s own
+    // import branch.
+    VkBuffer externalBuffer = VK_NULL_HANDLE;
+    VkDeviceSize size = 0;
+};
+
 // The "raw material" handed off to Phase 3's compiler
 // (RenderGraphCompiler::Compile(CompiledGraphInput&&)) - NOT yet
 // "compiled" in any real sense (no ordering/culling has happened yet)
@@ -82,6 +104,7 @@ struct CompiledGraphInput {
 
     std::vector<BufferDesc> bufferDescs;
     std::vector<const char*> bufferNames;
+    std::vector<BufferImportInfo> bufferImportInfo;
 };
 
 // Owns the whole in-progress description of one frame. A fresh
@@ -198,6 +221,28 @@ public:
     // at here.
     TextureHandle ImportTexture(const char* name, const RenderTarget& externalTarget, VkImageLayout currentLayout);
 
+    // Buffer sibling of ImportTexture() above - GPU Vertex Skinning
+    // campaign, Phase 3
+    // (GPU_SKINNING_PHASE3_RENDERGRAPH_SYNCHRONIZATION_STRATEGY_v2.md, Step
+    // 3.2). Wraps an ALREADY-LIVE, externally-owned VkBuffer (e.g. a
+    // per-model GPU skinning output buffer, created once at model
+    // registration time and re-imported into a fresh graph every frame) as
+    // a graph resource - the resulting handle is usable in
+    // ReadBuffer()/WriteBuffer() exactly like a CreateBuffer()-minted one.
+    //
+    // Unlike ImportTexture(), there is no "currentLayout" (or equivalent
+    // "current ResourceState") parameter here at all - a buffer has no
+    // image-layout concept, and RenderGraph::EnsureBufferResolved() always
+    // seeds an imported buffer's tracked ResourceState fresh (the same
+    // "never touched before" default a transient/pooled buffer already
+    // starts every Execute() call at), relying on this engine's existing
+    // whole-frame fence/semaphore synchronization to make that safe -
+    // mirrors EnsureTextureResolved()'s own stage/access-mask seeding for
+    // an imported TEXTURE, which likewise never carries a true stage/
+    // access value across frames, only its layout (see that function's own
+    // comment in RenderGraph.cpp).
+    BufferHandle ImportBuffer(const char* name, VkBuffer externalBuffer, VkDeviceSize size);
+
     // `name` must be a string literal (mirrors GTE_PROFILE_SCOPE's own
     // static-storage-duration requirement - see AGENTS.md, "Profiling").
     // `setup` runs IMMEDIATELY, synchronously, exactly once, right here in
@@ -268,6 +313,7 @@ private:
 
     std::vector<BufferDesc> m_bufferDescs;
     std::vector<const char*> m_bufferNames;
+    std::vector<BufferImportInfo> m_bufferImportInfo;
 };
 
 } // namespace gte::rg

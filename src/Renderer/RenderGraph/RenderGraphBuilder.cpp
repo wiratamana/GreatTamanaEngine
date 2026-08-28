@@ -63,6 +63,7 @@ BufferHandle RenderGraphBuilder::CreateBuffer(const char* name, const BufferDesc
     const std::uint32_t index = static_cast<std::uint32_t>(m_bufferDescs.size());
     m_bufferDescs.push_back(desc);
     m_bufferNames.push_back(name);
+    m_bufferImportInfo.push_back(BufferImportInfo{});
     return BufferHandle{ index, 1 };
 }
 
@@ -95,6 +96,37 @@ TextureHandle RenderGraphBuilder::ImportTexture(const char* name, const RenderTa
     return TextureHandle{ index, 1 };
 }
 
+BufferHandle RenderGraphBuilder::ImportBuffer(const char* name, VkBuffer externalBuffer, VkDeviceSize size)
+{
+    assert(name != nullptr && name[0] != '\0' &&
+        "RenderGraphBuilder::ImportBuffer requires a non-empty, static-storage-duration name");
+
+    const std::uint32_t index = static_cast<std::uint32_t>(m_bufferDescs.size());
+
+    // Mirror the external buffer's own real size into a BufferDesc purely
+    // for informational/debug-display purposes (Phase 8's snapshot) -
+    // RenderGraphResourcePool never pool-matches against an imported
+    // resource's desc, since an imported resource is never allocated/freed
+    // by the graph in the first place (see ImportTexture()'s own identical
+    // comment above). `usage` has no equivalent to mirror (a live VkBuffer
+    // does not expose its own creation-time usage flags back) - left at 0,
+    // which is harmless since an imported entry's desc is never read for
+    // pool-matching purposes.
+    BufferDesc desc;
+    desc.size = size;
+    desc.usage = 0;
+    m_bufferDescs.push_back(desc);
+    m_bufferNames.push_back(name);
+
+    BufferImportInfo importInfo;
+    importInfo.isImported = true;
+    importInfo.externalBuffer = externalBuffer;
+    importInfo.size = size;
+    m_bufferImportInfo.push_back(importInfo);
+
+    return BufferHandle{ index, 1 };
+}
+
 CompiledGraphInput RenderGraphBuilder::Finish()
 {
     CompiledGraphInput input;
@@ -104,6 +136,7 @@ CompiledGraphInput RenderGraphBuilder::Finish()
     input.textureImportInfo = std::move(m_textureImportInfo);
     input.bufferDescs = std::move(m_bufferDescs);
     input.bufferNames = std::move(m_bufferNames);
+    input.bufferImportInfo = std::move(m_bufferImportInfo);
     return input;
 }
 

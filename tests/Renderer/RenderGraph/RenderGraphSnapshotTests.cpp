@@ -212,7 +212,15 @@ TEST(RenderGraphSnapshotTest, ImportedAndTransientTextureResourcesReportCorrectK
     EXPECT_EQ(scratchResource.lastUsePassIndex, 1);
 }
 
-TEST(RenderGraphSnapshotTest, BufferResourceIsNeverReportedAsImported)
+// A transient buffer (created via CreateBuffer(), never ImportBuffer()) is
+// never reported as imported - renamed from this test's original name,
+// "BufferResourceIsNeverReportedAsImported", once the GPU Vertex Skinning
+// campaign's Phase 3
+// (GPU_SKINNING_PHASE3_RENDERGRAPH_SYNCHRONIZATION_STRATEGY_v2.md) added a
+// real RenderGraphBuilder::ImportBuffer() - see
+// ImportedBufferResourceIsReportedAsImported below for the now-possible
+// opposite case.
+TEST(RenderGraphSnapshotTest, TransientBufferResourceIsNotReportedAsImported)
 {
     RenderGraphBuilder builder;
     const BufferHandle scratchBuffer = builder.CreateBuffer("ScratchBuffer", BufferDesc{ 256, 0 });
@@ -241,6 +249,40 @@ TEST(RenderGraphSnapshotTest, BufferResourceIsNeverReportedAsImported)
     const RenderGraphResourceSnapshot& bufferResource = snapshot.resources[bufferResourceIndex];
     EXPECT_EQ(bufferResource.name, "ScratchBuffer");
     EXPECT_FALSE(bufferResource.isImported);
+}
+
+// A buffer resource created via ImportBuffer() IS reported as imported -
+// mirrors ImportedAndTransientTextureResourcesReportCorrectKindAndLifetime
+// above, now that a buffer counterpart of ImportTexture() exists.
+TEST(RenderGraphSnapshotTest, ImportedBufferResourceIsReportedAsImported)
+{
+    RenderGraphBuilder builder;
+    const BufferHandle importedBuffer = builder.ImportBuffer("SkinOutput", VK_NULL_HANDLE, 1024);
+    const TextureHandle output = builder.CreateTexture("Output", MakeTextureDesc());
+
+    builder.AddPass(
+        "SkinPass", [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteBuffer(importedBuffer, ResourceAccess::ComputeShaderWrite); },
+        NoOpExecute);
+    builder.AddPass(
+        "DrawPass",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.ReadBuffer(importedBuffer, ResourceAccess::VertexBufferRead);
+            pass.WriteColorAttachment(output);
+        },
+        NoOpExecute);
+
+    CompiledGraphInput input = builder.Finish();
+    const TextureHandle finalOutputs[] = { output };
+    const CompiledGraph compiled = Compile(input, finalOutputs);
+
+    const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, {});
+
+    ASSERT_EQ(snapshot.resources.size(), 2u);
+    const std::size_t bufferResourceIndex = 1u + importedBuffer.index;
+    ASSERT_LT(bufferResourceIndex, snapshot.resources.size());
+    const RenderGraphResourceSnapshot& bufferResource = snapshot.resources[bufferResourceIndex];
+    EXPECT_EQ(bufferResource.name, "SkinOutput");
+    EXPECT_TRUE(bufferResource.isImported);
 }
 
 // --- A default-constructed (empty) statsLookup never crashes ------------------

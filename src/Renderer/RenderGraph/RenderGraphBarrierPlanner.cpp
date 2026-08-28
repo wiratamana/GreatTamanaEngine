@@ -88,6 +88,23 @@ ResourceState RequiredStateFor(ResourceAccess access, bool isDepthResource) noex
             VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
             VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT,
         };
+    case ResourceAccess::VertexBufferRead:
+        // GPU Vertex Skinning campaign, Phase 3
+        // (GPU_SKINNING_PHASE3_RENDERGRAPH_SYNCHRONIZATION_STRATEGY_v2.md) -
+        // buffer-only in practice, same as IndirectCommandRead immediately
+        // above (`layout` left at its default, never read for a buffer
+        // barrier). The fixed-function vertex-input assembler stage reads
+        // a bound vertex buffer at VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT
+        // with VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT - this is what a
+        // GPU-skinned model's graphics pass declares to synchronize
+        // against the skinning compute pass's own ComputeShaderWrite of
+        // the exact same buffer (see RenderGraphTypes.h's own doc comment
+        // on this enumerator for the full "phantom read" reasoning).
+        return ResourceState{
+            VK_IMAGE_LAYOUT_UNDEFINED,
+            VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT,
+            VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT,
+        };
     }
     return ResourceState{};
 }

@@ -120,6 +120,18 @@ TEST(RenderGraphBarrierPlannerTest, RequiredStateForIndirectCommandRead)
     EXPECT_EQ(state.accessMask, VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT);
 }
 
+// --- RequiredStateFor() - GPU Vertex Skinning campaign's own Phase 3 -------
+// --- new enumerator (GPU_SKINNING_PHASE3_RENDERGRAPH_SYNCHRONIZATION_STRATEGY_v2.md) ---
+
+TEST(RenderGraphBarrierPlannerTest, RequiredStateForVertexBufferRead)
+{
+    const ResourceState state = RequiredStateFor(ResourceAccess::VertexBufferRead, false);
+
+    EXPECT_EQ(state.stageMask, VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT);
+    EXPECT_EQ(state.accessMask, VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT);
+}
+
+
 // ComputeShaderRead/ComputeShaderWrite must produce the exact SAME
 // ResourceState value regardless of the resource kind it's applied against
 // (a buffer's `layout` field is simply unused - see BuildBufferMemoryBarrier2()
@@ -153,6 +165,7 @@ TEST(RenderGraphBarrierPlannerTest, TargetsDepthStateIsTrueOnlyForDepthStencilAt
     EXPECT_FALSE(TargetsDepthState(ResourceAccess::ComputeShaderRead));
     EXPECT_FALSE(TargetsDepthState(ResourceAccess::ComputeShaderWrite));
     EXPECT_FALSE(TargetsDepthState(ResourceAccess::IndirectCommandRead));
+    EXPECT_FALSE(TargetsDepthState(ResourceAccess::VertexBufferRead));
 }
 
 // --- IsColorAttachmentWriteAccess() - one case per enumerator --------------
@@ -174,6 +187,7 @@ TEST(RenderGraphBarrierPlannerTest, IsColorAttachmentWriteAccessIsTrueOnlyForCol
     EXPECT_FALSE(IsColorAttachmentWriteAccess(ResourceAccess::ComputeShaderRead));
     EXPECT_FALSE(IsColorAttachmentWriteAccess(ResourceAccess::ComputeShaderWrite));
     EXPECT_FALSE(IsColorAttachmentWriteAccess(ResourceAccess::IndirectCommandRead));
+    EXPECT_FALSE(IsColorAttachmentWriteAccess(ResourceAccess::VertexBufferRead));
 }
 
 // --- Texture-side hand-simulated sequence: ComputeShaderWrite (an ---------
@@ -217,6 +231,71 @@ TEST(RenderGraphBarrierPlannerTest, RequiresBarrierIsFalseForTwoConsecutiveCompu
     const ResourceState b = RequiredStateFor(ResourceAccess::ComputeShaderWrite, false);
 
     EXPECT_FALSE(RequiresBarrier(a, b));
+}
+
+// --- GPU Vertex Skinning campaign, Phase 3's own WAW-hazard mitigation -----
+// (GPU_SKINNING_PHASE3_RENDERGRAPH_SYNCHRONIZATION_STRATEGY_v2.md, Step 3.6) -
+//
+// The test immediately above is the CONFIRMED hazard that Step 3.6's own
+// "Step 1" verification asked for: two passes writing the SAME buffer with
+// the SAME ResourceAccess (e.g. two SkeletalAnimators sharing one GPU
+// skinning output buffer, both dispatching ComputeShaderWrite) get NO
+// barrier between them at all, since RequiresBarrier() is a pure state-diff
+// with no notion of "a different pass already wrote this". This is a real,
+// unsynchronized GPU write-after-write hazard - strictly worse than the CPU
+// path's own well-defined "last write wins" behavior for the same shared-
+// Mesh scenario.
+//
+// The mitigation (Step 3.6's "Step 2"): the SECOND (and any subsequent)
+// writer declares a "phantom" ComputeShaderRead of its own output buffer
+// immediately BEFORE its real ComputeShaderWrite - even though its own
+// compute shader body never actually reads the buffer's prior contents.
+// Since ComputeShaderRead and ComputeShaderWrite are DIFFERENT
+// ResourceAccess values (different access masks), RequiredStateFor()
+// necessarily produces two DIFFERENT ResourceState values for them - which
+// means RequiresBarrier() is GUARANTEED to return true for the transition
+// INTO the phantom read (from whatever the previous writer left behind),
+// and AGAIN for the transition from that phantom read to the real write -
+// closing the hazard unconditionally, regardless of how RequiresBarrier()
+// itself happens to be implemented. This is proven directly below, not
+// merely asserted by inspection.
+TEST(RenderGraphBarrierPlannerTest, ReadBeforeWriteMitigationForcesBarriersWhereConsecutiveWritesAloneWouldNotHaveOne)
+{
+    // Pass A (the first SkeletalAnimator) writes the shared output buffer.
+    const ResourceState afterPassAWrite = RequiredStateFor(ResourceAccess::ComputeShaderWrite, false);
+
+    // Pass B (the second SkeletalAnimator sharing the same Mesh) declares
+    // its own mitigation: a phantom read BEFORE its real write.
+    const ResourceState passBPhantomRead = RequiredStateFor(ResourceAccess::ComputeShaderRead, false);
+    const ResourceState passBRealWrite = RequiredStateFor(ResourceAccess::ComputeShaderWrite, false);
+
+    // Without the mitigation, transitioning straight from Pass A's write to
+    // Pass B's write would need NO barrier at all (see the test immediately
+    // above) - the mitigation's whole point is that inserting the phantom
+    // read in between makes BOTH of these transitions require one.
+    EXPECT_TRUE(RequiresBarrier(afterPassAWrite, passBPhantomRead));
+    EXPECT_TRUE(RequiresBarrier(passBPhantomRead, passBRealWrite));
+}
+
+// The graphics pass that then DRAWS from the GPU-skinned output buffer
+// declares ResourceAccess::VertexBufferRead against the very same handle -
+// this must also unconditionally require a barrier against whichever
+// compute pass most recently wrote it (ComputeShaderWrite), since the two
+// access kinds have distinct stage/access masks (VERTEX_INPUT/
+// VERTEX_ATTRIBUTE_READ vs. COMPUTE_SHADER/SHADER_STORAGE_WRITE).
+TEST(RenderGraphBarrierPlannerTest, ComputeShaderWriteFollowedByVertexBufferReadRequiresABarrier)
+{
+    const ResourceState afterComputeWrite = RequiredStateFor(ResourceAccess::ComputeShaderWrite, false);
+    const ResourceState vertexBufferRead = RequiredStateFor(ResourceAccess::VertexBufferRead, false);
+
+    EXPECT_TRUE(RequiresBarrier(afterComputeWrite, vertexBufferRead));
+
+    const VkBufferMemoryBarrier2 barrier =
+        BuildBufferMemoryBarrier2(VK_NULL_HANDLE, 0, 1024, afterComputeWrite, vertexBufferRead);
+    EXPECT_EQ(barrier.srcStageMask, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+    EXPECT_EQ(barrier.srcAccessMask, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+    EXPECT_EQ(barrier.dstStageMask, VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT);
+    EXPECT_EQ(barrier.dstAccessMask, VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT);
 }
 
 // --- RequiresBarrier() -----------------------------------------------------

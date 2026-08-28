@@ -120,7 +120,11 @@ struct PassHandle {
 // two, as the single shared source of truth both documents are meant to
 // consume, per COMPUTE_PHASE5_SYNCHRONIZATION_STRATEGY_v2.md's own Step 2:
 // "whichever document's implementation lands FIRST is where the enum
-// values are actually added"). Adding a new enumerator here MUST be
+// values are actually added"). A fourth enumerator, VertexBufferRead, was
+// added by the GPU Vertex Skinning campaign's own Phase 3
+// (GPU_SKINNING_PHASE3_RENDERGRAPH_SYNCHRONIZATION_STRATEGY_v2.md) - see
+// its own doc comment below for the full reasoning. Adding a new
+// enumerator here MUST be
 // accompanied by updating every exhaustive switch that consumes it (see
 // IsWriteAccess()/ToString() below, both deliberately written with NO
 // `default:` case so a future addition fails to compile here until every
@@ -151,6 +155,33 @@ enum class ResourceAccess : std::uint8_t {
     // isDepthResource in RequiredStateFor(), since it is meaningful
     // regardless of that flag.
     IndirectCommandRead,
+    // GPU Vertex Skinning campaign, Phase 3
+    // (GPU_SKINNING_PHASE3_RENDERGRAPH_SYNCHRONIZATION_STRATEGY_v2.md) - a
+    // vertex buffer read by the FIXED-FUNCTION vertex-input assembler (a
+    // real vkCmdBindVertexBuffers-bound buffer), as distinct from
+    // ShaderRead (a texture/buffer sampled/loaded from inside a shader
+    // stage) and ComputeShaderRead (a StructuredBuffer read by a compute
+    // shader). Buffer-only in practice, same as IndirectCommandRead above.
+    // The graphics pass that draws a GPU-skinned model declares
+    // ReadBuffer(outputHandle, ResourceAccess::VertexBufferRead) against
+    // the SAME BufferHandle a skinning compute pass just wrote via
+    // ComputeShaderWrite, so the barrier planner knows to transition that
+    // buffer from "just finished being computed" to "about to be read by
+    // the vertex-input stage" before that draw call - this "phantom read"
+    // declaration exists PURELY to express this dependency edge/barrier;
+    // the graphics pipeline itself reads the buffer through its own
+    // VkVertexInputAttributeDescription binding (set up once, outside the
+    // render graph, by whatever built that pass's Pipeline/Mesh), never
+    // through anything this ResourceAccess value's ResourceState would
+    // otherwise gate - no descriptor set is ever built for a
+    // VertexBufferRead usage. See
+    // GPU_SKINNING_PHASE3_RENDERGRAPH_SYNCHRONIZATION_STRATEGY_v2.md, Step
+    // 3.3, for the full reasoning: this declaration must never be "cleaned
+    // up" as apparently-dead/no-op code by a future reader unfamiliar with
+    // why it's here - removing it would silently reopen a real GPU
+    // read-after-write hazard between the skinning compute pass and the
+    // graphics pass that draws from its output.
+    VertexBufferRead,
 };
 
 // True for any access kind that can WRITE the resource's contents (used by
