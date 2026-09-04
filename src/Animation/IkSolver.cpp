@@ -1,7 +1,6 @@
 #include "IkSolver.h"
 
-#include "BoneChainResolver.h"
-#include "BonePoseMath.h"
+#include "BoneWorldMatrixQuery.h"
 #include "../Math/Mat4.h"
 #include "../Math/Quat.h"
 
@@ -25,29 +24,6 @@ constexpr float kFallbackMaxAnglePerStep = 0.0698131701f; // 4 degrees, in radia
 
 constexpr float kMinDirectionLengthSq = 1e-10f;
 constexpr float kMinAngleRadians = 1e-5f;
-
-// A single bone's CURRENT world matrix, re-derived fresh from `pose` every
-// call by walking only that bone's own ancestor chain
-// (BoneChainResolver.h's ResolveSingleBoneChain()) - deliberately NOT
-// memoized across calls, unlike SkeletonPose.cpp's whole-skeleton pass:
-// `pose` is mutated by THIS solver's own CCD loop between successive
-// queries (rotating an earlier link bone changes every later query's answer
-// for the effector/next link), so caching a bone's world matrix across
-// calls would return a stale answer - see SolveIkChains()'s own call site
-// comments below for exactly when a fresh query is needed. Shares the exact
-// same bind-relative local-transform formula SkeletonPose.cpp uses
-// (BonePoseMath.h's ComputeBoneLocalMatrix()), so the two can never
-// silently drift out of sync with each other.
-Mat4 ComputeBoneWorldMatrix(
-    const SkeletonData& skeleton, const std::vector<BoneLocalOffset>& pose, std::int32_t boneIndex)
-{
-    return ResolveSingleBoneChain<Mat4>(skeleton, boneIndex, Mat4::Identity(),
-        [&](std::size_t index) -> std::int32_t { return skeleton.bones[index].parentBoneIndex; },
-        [&](std::size_t index, const Mat4& parentWorld) -> Mat4 {
-            const BoneLocalOffset offset = index < pose.size() ? pose[index] : BoneLocalOffset{};
-            return parentWorld * ComputeBoneLocalMatrix(skeleton, index, offset);
-        });
-}
 
 // Clamps `rotation` (a TOTAL rotation from bind pose - see
 // BoneLocalOffset.h) component-wise, in Euler XYZ degrees, against a link's

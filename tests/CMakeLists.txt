@@ -768,6 +768,68 @@
 #                                            spatial-hash term is actually
 #                                            wired in, not a dead parameter).
 #                                            No ECS/GPU/Renderer involved.
+#   Animation/BoneWorldMatrixQueryTests.cpp - verlet-integration-1 campaign
+#                                            (PHASE2_BONE_CHAIN_PHYSICS_BRIDGE.md),
+#                                            the shared bone-world-matrix
+#                                            query (ComputeBoneWorldMatrix() -
+#                                            src/Animation/BoneWorldMatrixQuery.h)
+#                                            promoted out of IkSolver.cpp's
+#                                            own anonymous namespace: bind-pose
+#                                            world matrices match each bone's
+#                                            own bind position, a root
+#                                            translation offset propagates to
+#                                            every descendant, results agree
+#                                            EXACTLY with
+#                                            ComputeSkinningMatrices() (Skeleton
+#                                            Pose.h) for the same resolved
+#                                            pose (proving the extraction
+#                                            changed nothing behaviorally),
+#                                            and an out-of-range bone index
+#                                            returns Identity(). No ECS/GPU/
+#                                            Renderer involved.
+#   Physics/DynamicChainSolverTests.cpp     - Phase 2's chain-level
+#                                            orchestration (StepDynamicChain() -
+#                                            src/Physics/DynamicChainSolver.h):
+#                                            full stiffness (1.0) stays glued
+#                                            EXACTLY to the animated target
+#                                            every frame regardless of where
+#                                            the chain started, zero stiffness
+#                                            sags under gravity but never
+#                                            stretches past
+#                                            sum(restLengths)*1.01, repeated
+#                                            steps converge (finite, bounded,
+#                                            settling implied velocity) rather
+#                                            than diverging/oscillating
+#                                            forever, and a dedicated
+#                                            regression proves stiffness/
+#                                            constraintIterations stay fully
+#                                            DECOUPLED (changing
+#                                            constraintIterations alone never
+#                                            changes the FRACTION of remaining
+#                                            distance the goal constraint
+#                                            covers - PHASE0 Revision Notes
+#                                            finding #3). No ECS/GPU/Renderer/
+#                                            SkeletonData involved.
+#   Physics/BoneChainPhysicsResolverTests.cpp - Phase 2's position -> rotation
+#                                            bridge
+#                                            (ApplyDynamicChainPhysicsToPose() -
+#                                            src/Physics/
+#                                            BoneChainPhysicsResolver.h): a
+#                                            genuine round-trip test - moving a
+#                                            joint's simulated target sideways
+#                                            by its own bind length produces a
+#                                            rotation that, fed back through
+#                                            ComputeBoneWorldMatrix(), actually
+#                                            lands the bone at the requested
+#                                            position (translation left
+#                                            unchanged); a target already
+#                                            aligned with the bone's current
+#                                            direction leaves its rotation
+#                                            untouched; a 3-joint chain applies
+#                                            root-to-tip in dependency order;
+#                                            and an out-of-range joint bone
+#                                            index is skipped gracefully. No
+#                                            ECS/GPU/Renderer involved.
 #
 #
 # Note that the test BINARY still dynamically depends on SDL3.dll at process
@@ -880,6 +942,7 @@ set(GTE_TEST_SOURCES
     Animation/BonePoseMathTests.cpp
     Animation/SkeletonPoseTests.cpp
     Animation/IkSolverTests.cpp
+    Animation/BoneWorldMatrixQueryTests.cpp
     Animation/AppendBoneSolverTests.cpp
     Animation/MotionSamplerTests.cpp
     Animation/AnimationPoseEvaluatorTests.cpp
@@ -888,6 +951,8 @@ set(GTE_TEST_SOURCES
     Physics/VerletIntegrationTests.cpp
     Physics/ChainConstraintsTests.cpp
     Physics/WindFieldTests.cpp
+    Physics/DynamicChainSolverTests.cpp
+    Physics/BoneChainPhysicsResolverTests.cpp
 )
 
 # Editor/EditorCamera.h/.cpp (see src/Editor/EditorCamera.h) is only

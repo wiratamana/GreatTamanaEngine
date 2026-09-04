@@ -218,6 +218,8 @@ add_library(gte_core STATIC
     src/Animation/SkeletonPose.cpp
     src/Animation/IkSolver.h
     src/Animation/IkSolver.cpp
+    src/Animation/BoneWorldMatrixQuery.h
+    src/Animation/BoneWorldMatrixQuery.cpp
     src/Animation/AppendBoneSolver.h
     src/Animation/AppendBoneSolver.cpp
     src/Animation/MotionSampler.h
@@ -233,6 +235,12 @@ add_library(gte_core STATIC
     src/Physics/ChainConstraints.cpp
     src/Physics/WindField.h
     src/Physics/WindField.cpp
+    src/Physics/DynamicChainDefinition.h
+    src/Physics/DynamicChainRuntimeState.h
+    src/Physics/DynamicChainSolver.h
+    src/Physics/DynamicChainSolver.cpp
+    src/Physics/BoneChainPhysicsResolver.h
+    src/Physics/BoneChainPhysicsResolver.cpp
     src/Assets/AssetTypes.h
     src/Assets/AssetTypes.cpp
     src/Assets/GtaFile.h
