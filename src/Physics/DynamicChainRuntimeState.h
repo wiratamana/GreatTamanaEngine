@@ -27,6 +27,17 @@ struct DynamicChainRuntimeState {
     // ComputeWindAcceleration() (Phase 1) so wind phase is continuous
     // across frames rather than resetting.
     float simulationTimeSeconds = 0.0f;
+
+    // PHASE5 (task_manager/verlet-integration-1/
+    // PHASE5_COLLISION_STABILITY_AND_PERFORMANCE_HARDENING.md, 3.3) - the
+    // root world position StepDynamicChain() was last called with, used to
+    // detect an implausible root teleport between two consecutive calls.
+    // Set to this call's OWN rootWorldPosition before every
+    // StepDynamicChain() call returns, unconditionally - whether this call
+    // re-seeded because of a teleport, a genuine lazy-init, or ran the
+    // ordinary integrate+constrain path - so the guard never permanently
+    // trips after firing once.
+    Vec3 lastRootWorldPosition = Vec3::Zero();
 };
 
 } // namespace gte

@@ -808,8 +808,24 @@
 #                                            changes the FRACTION of remaining
 #                                            distance the goal constraint
 #                                            covers - PHASE0 Revision Notes
-#                                            finding #3). No ECS/GPU/Renderer/
-#                                            SkeletonData involved.
+#                                            finding #3). Phase 5 extends this
+#                                            file with: a head collider keeps
+#                                            every joint off its surface every
+#                                            step despite gravity pulling the
+#                                            chain into it; collision is a
+#                                            documented no-op whenever
+#                                            hasHeadCollider is false even if a
+#                                            non-null collider is passed in; an
+#                                            implausible root teleport
+#                                            re-seeds the chain onto its NEW
+#                                            animated target instead of
+#                                            whipping across the gap, and does
+#                                            NOT re-trigger on the very next
+#                                            (stationary-root) call; and a
+#                                            manually NaN-poisoned particle
+#                                            position comes out finite and
+#                                            sane after one call. No ECS/GPU/
+#                                            Renderer/SkeletonData involved.
 #   Physics/BoneChainPhysicsResolverTests.cpp - Phase 2's position -> rotation
 #                                            bridge
 #                                            (ApplyDynamicChainPhysicsToPose() -
@@ -882,6 +898,24 @@
 #                                            normally; and an empty skeleton
 #                                            detects nothing. No ECS/GPU/
 #                                            Renderer involved.
+#   Physics/SphereColliderTests.cpp         - Phase 5's bare-bone single-
+#                                            sphere collision projection
+#                                            (SolveSphereCollision() -
+#                                            src/Physics/SphereCollider.h): a
+#                                            particle fully outside the sphere
+#                                            is untouched (position AND
+#                                            previousPosition), a particle
+#                                            inside is projected EXACTLY onto
+#                                            the surface along the correct
+#                                            center->particle direction (both
+#                                            at the world origin and off-
+#                                            center), a pinned particle is
+#                                            never moved even when sitting
+#                                            dead center, the degenerate
+#                                            at-center case produces a finite
+#                                            result rather than NaN, and a
+#                                            non-positive radius is a no-op.
+#                                            No ECS/GPU/Renderer involved.
 #   Game/Animation/AnimationSystemEvaluatePosesTests.cpp - Phase 3's split of
 #                                            AnimationSystem::Update() into
 #                                            EvaluatePoses()/SkinAndUpload()
@@ -977,6 +1011,38 @@
 #                                            DynamicJointSettings, visible to
 #                                            a subsequent TryGet() call. No
 #                                            ECS/GPU/Renderer involved.
+#   Game/Physics/PhysicsSystemParallelTests.cpp - Phase 5's
+#                                            gte::Jobs::Dispatch() parallel
+#                                            path for PhysicsSystem::Update()
+#                                            (src/Game/Physics/
+#                                            PhysicsSystem.cpp, 3.4): a
+#                                            hand-built "few chains" model
+#                                            (below kMinDynamicJointsToParallelize,
+#                                            forcing the SERIAL path) and a
+#                                            geometrically/parametrically
+#                                            IDENTICAL "many chains" model
+#                                            (above that threshold, forcing
+#                                            the PARALLEL Dispatch() path),
+#                                            registered directly via
+#                                            DynamicChainRigCache (no
+#                                            DetectDynamicChains()/PMX/
+#                                            AnimationSystem/SkeletalAnimator
+#                                            involved at all), stepped through
+#                                            the SAME PhysicsSystem instance
+#                                            for the same number of frames,
+#                                            produce results that agree with
+#                                            each other to within a tight
+#                                            epsilon for EVERY chain,
+#                                            regardless of which path
+#                                            actually ran; a second test
+#                                            confirms every chain WITHIN one
+#                                            large parallel dispatch (several
+#                                            worker batches) stays internally
+#                                            consistent with every other
+#                                            symmetric, independent chain. No
+#                                            GPU/Renderer/live Vulkan device
+#                                            involved - a plain Registry is
+#                                            enough.
 #
 #
 # Note that the test BINARY still dynamically depends on SDL3.dll at process
@@ -1088,6 +1154,7 @@ set(GTE_TEST_SOURCES
     Game/Animation/AnimationSystemEvaluatePosesTests.cpp
     Game/Physics/PhysicsSystemTests.cpp
     Game/Physics/DynamicChainRigCacheTests.cpp
+    Game/Physics/PhysicsSystemParallelTests.cpp
     Animation/BoneChainResolverTests.cpp
     Animation/BonePoseMathTests.cpp
     Animation/SkeletonPoseTests.cpp
@@ -1105,6 +1172,7 @@ set(GTE_TEST_SOURCES
     Physics/BoneChainPhysicsResolverTests.cpp
     Physics/FixedTimestepAccumulatorTests.cpp
     Physics/DynamicChainDetectionTests.cpp
+    Physics/SphereColliderTests.cpp
 )
 
 # Editor/EditorCamera.h/.cpp (see src/Editor/EditorCamera.h) is only

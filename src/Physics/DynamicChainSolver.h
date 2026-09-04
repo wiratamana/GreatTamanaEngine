@@ -1,6 +1,7 @@
 #pragma once
 #include "DynamicChainDefinition.h"
 #include "DynamicChainRuntimeState.h"
+#include "SphereCollider.h"
 #include "WindField.h"
 #include "../Math/Vec3.h"
 
@@ -16,16 +17,31 @@ namespace gte {
 // Animation/BoneWorldMatrixQuery.h's ComputeBoneWorldMatrix() BEFORE calling
 // this function. `gravity` is the GLOBAL world gravity vector; `wind` is the
 // GLOBAL wind description (see PHASE4) - both scaled locally by
-// definition.gravityScale/windScale.
+// definition.gravityScale/windScale. `collider` (PHASE5, 3.2) is an OPTIONAL,
+// already-resolved WORLD-space collision sphere - nullptr disables collision
+// for this call entirely; when non-null, the caller (Game/Physics/
+// PhysicsSystem.cpp) is responsible for having derived its `center` fresh
+// this frame (via Animation/BoneWorldMatrixQuery.h's ComputeBoneWorldMatrix()
+// against definition.headColliderBoneIndex) - this keeps this header's own
+// signature free of a SkeletonData/pose dependency, exactly like
+// rootWorldPosition/animatedJointWorldPositions above.
 //
 // Per-call steps:
-//   1. Lazy init (state.initialized == false, or the chain's own joint
-//      count changed since the last call): resize state.particles to
-//      definition.jointBoneIndices.size(), set every particle's position AND
-//      previousPosition to its corresponding animatedJointWorldPositions[i]
-//      (zero implied velocity, so frame 1 never "snaps"/free-falls from the
-//      origin), inverseMass = 1.0f / max(jointSettings[i].mass, small
-//      epsilon), pinned = false. Set state.initialized = true.
+//   1. Lazy init / root-teleport guard: re-seeds every particle to its
+//      corresponding animatedJointWorldPositions[i] (position AND
+//      previousPosition, zero implied velocity, inverseMass = 1.0f /
+//      max(jointSettings[i].mass, small epsilon), pinned = false) whenever
+//      EITHER (a) this is genuinely the first call for this instance (or the
+//      chain's own joint count changed since the last call), OR (b) PHASE5's
+//      own numerical-safety guard: `rootWorldPosition` has moved farther than
+//      definition.maxPlausibleRootDelta since state.lastRootWorldPosition (a
+//      teleporting character, an Editor gizmo drag, ...) - integrating across
+//      such a spurious, implausibly large displacement would otherwise whip
+//      the chain at effectively infinite velocity on the very next step.
+//      state.lastRootWorldPosition is set to THIS call's own
+//      rootWorldPosition unconditionally, exactly once, regardless of which
+//      branch ran - forgetting this would turn the guard into a permanent,
+//      one-shot trip.
 //   2. Integrate: for each particle i, acceleration = gravity *
 //      definition.gravityScale + ComputeWindAcceleration(wind,
 //      particle.position, state.simulationTimeSeconds) * definition.windScale;
@@ -45,7 +61,19 @@ namespace gte {
 //      lengths for this step, is what keeps `stiffness` (a per-joint "how
 //      much to keep the animated shape" knob) and `constraintIterations` (a
 //      chain-level rod-rigidity/performance knob) fully independent.
-//   5. state.simulationTimeSeconds += fixedDeltaTime.
+//   5. Collision (PHASE5, 3.2) - exactly ONCE per call, AFTER the goal
+//      constraint (collision must have the final say, matching PBD
+//      convention: structural, then soft/goal, then hard collision): if
+//      `definition.hasHeadCollider` and `collider` is non-null,
+//      SolveSphereCollision() every joint particle against it.
+//   6. NaN/Inf guard (PHASE5, 3.3): after every position update above, any
+//      particle whose position fails std::isfinite() on any component is
+//      reset (that ONE particle only, never the whole chain) to its
+//      corresponding animatedJointWorldPositions[i] with zero implied
+//      velocity - and, in a debug/development build only, fires an assert so
+//      a real underlying bug is caught loudly rather than silently,
+//      permanently corrupting that one joint for the rest of the session.
+//   7. state.simulationTimeSeconds += fixedDeltaTime.
 //
 // Degrades gracefully (does nothing) if any of the three index-aligned
 // arrays (jointBoneIndices/jointSettings/restLengths,
@@ -53,6 +81,6 @@ namespace gte {
 // definition must never read or write out of bounds.
 void StepDynamicChain(const DynamicChainDefinition& definition, const Vec3& rootWorldPosition,
     const std::vector<Vec3>& animatedJointWorldPositions, DynamicChainRuntimeState& state, float fixedDeltaTime,
-    const Vec3& gravity, const WindSettings& wind);
+    const Vec3& gravity, const WindSettings& wind, const SphereCollider* collider = nullptr);
 
 } // namespace gte

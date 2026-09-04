@@ -1,5 +1,6 @@
 #include "DynamicChainDetection.h"
 
+#include "../Math/MathTypes.h" // kEpsilon
 #include "../Math/Vec3.h"
 
 namespace gte {
@@ -121,11 +122,33 @@ std::vector<DynamicChainDefinition> DetectDynamicChains(
         chain.restLengths.resize(jointIndices.size());
 
         Vec3 previousBindPosition = skeleton.bones[static_cast<std::size_t>(parentIndex)].position;
+        float sumRestLengths = 0.0f;
         for (std::size_t j = 0; j < jointIndices.size(); ++j) {
             const Vec3 jointBindPosition = skeleton.bones[static_cast<std::size_t>(jointIndices[j])].position;
             chain.restLengths[j] = Length(jointBindPosition - previousBindPosition);
+            sumRestLengths += chain.restLengths[j];
             previousBindPosition = jointBindPosition;
         }
+
+        // PHASE5 (task_manager/verlet-integration-1/
+        // PHASE5_COLLISION_STABILITY_AND_PERFORMANCE_HARDENING.md, Step 5,
+        // item 2) - a generous root-teleport threshold derived from this
+        // chain's own actual combined rest length (several times its total
+        // extent), rather than DynamicChainDefinition's own hand-built-test
+        // default. Left at that default (never zero/negative) for the
+        // degenerate case of a chain with zero combined rest length.
+        if (sumRestLengths > kEpsilon) {
+            chain.maxPlausibleRootDelta = sumRestLengths * 5.0f;
+        }
+
+        // PHASE5, Step 5 item 2 - pre-fill a reasonable head-collider
+        // starting point (the chain's own root bone, with a small heuristic
+        // radius derived from its average joint spacing) but leave it
+        // DISABLED (hasHeadCollider = false) until a human opts in via the
+        // Editor Inspector's "Dynamic Chain Physics" section.
+        chain.hasHeadCollider = false;
+        chain.headColliderBoneIndex = chain.rootBoneIndex;
+        chain.headColliderRadius = jointIndices.empty() ? 0.0f : (sumRestLengths / static_cast<float>(jointIndices.size())) * 0.5f;
 
         if (physics != nullptr) {
             for (std::size_t j = 0; j < jointIndices.size(); ++j) {

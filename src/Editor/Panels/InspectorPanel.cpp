@@ -180,6 +180,20 @@ void BuildEntityInspector(Registry& registry, EditorContext& ctx, PhysicsSystem&
                             ImGui::DragFloat("Weight (Mass)", &settings.mass, 0.01f, 0.01f, 100.0f);
                             ImGui::PopID();
                         }
+
+                        // PHASE5 (task_manager/verlet-integration-1/
+                        // PHASE5_COLLISION_STABILITY_AND_PERFORMANCE_HARDENING.md,
+                        // Step 5 item 2) - simple head/body collision. Disabled
+                        // by default even though DynamicChainDetection.h
+                        // pre-fills a reasonable starting bone/radius - a
+                        // human opts in here.
+                        ImGui::Separator();
+                        ImGui::Checkbox("Head Collider", &chain.hasHeadCollider);
+                        if (chain.hasHeadCollider) {
+                            ImGui::DragInt("Collider Bone Index", &chain.headColliderBoneIndex, 1.0f, 0,
+                                static_cast<int>(model->skeleton.bones.size()) - 1);
+                            ImGui::DragFloat("Collider Radius", &chain.headColliderRadius, 0.01f, 0.0f, 10.0f);
+                        }
                         ImGui::TreePop();
                     }
                     ImGui::PopID();

@@ -231,5 +231,174 @@ TEST(DynamicChainSolverTests, StiffnessAndConstraintIterationsAreFullyDecoupled)
         }
     }
 }
+// (e) PHASE5, 3.2 - collision: a chain whose head collider sits directly in
+// the chain's own falling path pushes every joint back out to the sphere's
+// surface every step, so no joint ever ends up INSIDE the collider despite
+// gravity pulling it there.
+TEST(DynamicChainSolverTests, HeadColliderKeepsJointsOffItsSurfaceWhenChainFallsIntoIt)
+{
+    DynamicChainDefinition definition = BuildThreeJointChainDefinition(/*stiffness=*/0.0f, /*damping=*/0.05f);
+    definition.hasHeadCollider = true;
+
+    DynamicChainRuntimeState state;
+    const Vec3 root(0.0f, 0.0f, 0.0f);
+    const std::vector<Vec3> targets = { Vec3(1.0f, 0.0f, 0.0f), Vec3(2.0f, 0.0f, 0.0f), Vec3(3.0f, 0.0f, 0.0f) };
+    const Vec3 gravity(0.0f, -9.8f, 0.0f);
+    const WindSettings noWind{};
+
+    // A generous sphere centered right where the chain is expected to sag
+    // to under gravity, so at least one joint would otherwise end up
+    // strictly inside it.
+    const SphereCollider collider{ Vec3(2.0f, -0.5f, 0.0f), 1.0f };
+
+    for (int step = 0; step < 120; ++step) {
+        StepDynamicChain(definition, root, targets, state, 1.0f / 60.0f, gravity, noWind, &collider);
+
+        for (const VerletParticle& particle : state.particles) {
+            const float distanceFromColliderCenter = Length(particle.position - collider.center);
+            EXPECT_GE(distanceFromColliderCenter, collider.radius - 1e-3f)
+                << "A joint ended up inside the head collider despite collision being enabled.";
+        }
+    }
+}
+
+// (f) PHASE5, 3.2 - collision is a documented no-op unless
+// definition.hasHeadCollider is true, even if a non-null collider is passed
+// in (mirrors the caller-side contract: PhysicsSystem.cpp only ever passes a
+// non-null pointer when hasHeadCollider is already true, but the solver
+// itself must not silently apply collision otherwise).
+TEST(DynamicChainSolverTests, ColliderIsIgnoredWhenHasHeadColliderIsFalse)
+{
+    DynamicChainDefinition definition = BuildThreeJointChainDefinition(/*stiffness=*/0.0f, /*damping=*/0.05f);
+    ASSERT_FALSE(definition.hasHeadCollider);
+
+    DynamicChainRuntimeState state;
+    const Vec3 root(0.0f, 0.0f, 0.0f);
+    const std::vector<Vec3> targets = { Vec3(1.0f, 0.0f, 0.0f), Vec3(2.0f, 0.0f, 0.0f), Vec3(3.0f, 0.0f, 0.0f) };
+    const WindSettings noWind{};
+
+    // A collider that would otherwise immediately swallow every joint.
+    const SphereCollider collider{ Vec3(2.0f, 0.0f, 0.0f), 100.0f };
+
+    StepDynamicChain(definition, root, targets, state, 1.0f / 60.0f, Vec3::Zero(), noWind, &collider);
+
+    for (std::size_t i = 0; i < targets.size(); ++i) {
+        EXPECT_TRUE(ApproximatelyEqual(state.particles[i].position, targets[i], 1e-3f))
+            << "Collision must not apply at all when hasHeadCollider is false, regardless of the collider pointer passed in.";
+    }
+}
+
+// (g) PHASE5, 3.3 - root-teleport guard: the root position jumping by an
+// implausible amount between two calls must NOT whip the chain - it must
+// instead re-seed onto the (new) animated target, exactly like a lazy init.
+TEST(DynamicChainSolverTests, ImplausibleRootTeleportReseedsInsteadOfWhipping)
+{
+    DynamicChainDefinition definition = BuildThreeJointChainDefinition(/*stiffness=*/0.0f, /*damping=*/0.1f);
+    definition.maxPlausibleRootDelta = 5.0f;
+
+    DynamicChainRuntimeState state;
+    const WindSettings noWind{};
+    const float dt = 1.0f / 60.0f;
+
+    // First call - ordinary lazy init at the origin.
+    const Vec3 rootA(0.0f, 0.0f, 0.0f);
+    const std::vector<Vec3> targetsA = { Vec3(1.0f, 0.0f, 0.0f), Vec3(2.0f, 0.0f, 0.0f), Vec3(3.0f, 0.0f, 0.0f) };
+    StepDynamicChain(definition, rootA, targetsA, state, dt, Vec3::Zero(), noWind);
+    for (std::size_t i = 0; i < targetsA.size(); ++i) {
+        EXPECT_TRUE(ApproximatelyEqual(state.particles[i].position, targetsA[i], 1e-4f));
+    }
+
+    // Second call - the root (and its whole animated target set) teleports
+    // FAR away (well beyond maxPlausibleRootDelta) in a single frame, as if
+    // the character itself was just repositioned by a script/gizmo drag.
+    const Vec3 rootB(1000.0f, 1000.0f, 1000.0f);
+    const std::vector<Vec3> targetsB
+        = { rootB + Vec3(1.0f, 0.0f, 0.0f), rootB + Vec3(2.0f, 0.0f, 0.0f), rootB + Vec3(3.0f, 0.0f, 0.0f) };
+    StepDynamicChain(definition, rootB, targetsB, state, dt, Vec3::Zero(), noWind);
+
+    for (std::size_t i = 0; i < targetsB.size(); ++i) {
+        EXPECT_TRUE(ApproximatelyEqual(state.particles[i].position, targetsB[i], 1e-2f))
+            << "A teleporting root must re-seed the chain onto its NEW animated target, never whip across the gap.";
+    }
+
+    // Third call, immediately after - root held STATIONARY at its new
+    // position. The guard must NOT re-trigger again (it already consumed
+    // the teleport on the previous call).
+    StepDynamicChain(definition, rootB, targetsB, state, dt, Vec3::Zero(), noWind);
+    for (std::size_t i = 0; i < targetsB.size(); ++i) {
+        const float distanceFromRoot = Length(state.particles[i].position - rootB);
+        EXPECT_LE(distanceFromRoot, 3.0f * 1.01f)
+            << "The guard re-triggering on a stationary root would still look plausible here, but a broken guard "
+               "would instead show a huge, obviously-wrong distance if it kept resetting to stale state.";
+    }
+}
+
+// (h) PHASE5, 3.3 - NaN/Inf guard. The RESET-to-finite-target logic runs
+// UNCONDITIONALLY (regardless of NDEBUG); the diagnostic assert() that
+// accompanies it, however, follows this codebase's own established
+// convention (see RenderGraphBuilderTests.cpp's "Name validation guard"
+// section) - a release build (NDEBUG defined) compiles assert() down to a
+// true no-op, so ONLY in that configuration can this call be observed
+// returning normally with a finite, sane position; in every OTHER
+// configuration (assert() live), the guard's own assert(false) is expected
+// to abort the process the instant it detects the poisoned NaN - verified
+// here as a death test, mirroring this codebase's own precedent exactly.
+#ifdef NDEBUG
+
+TEST(DynamicChainSolverTests, NanPositionIsResetToFiniteSanePosition)
+{
+    DynamicChainDefinition definition = BuildThreeJointChainDefinition(/*stiffness=*/0.3f, /*damping=*/0.1f);
+
+    DynamicChainRuntimeState state;
+    state.initialized = true;
+    state.particles.resize(3);
+    const float nan = std::nanf("");
+    state.particles[0].position = Vec3(nan, nan, nan);
+    state.particles[0].previousPosition = Vec3(nan, nan, nan);
+    state.particles[1].position = Vec3(-3.0f, 2.0f, 1.0f);
+    state.particles[1].previousPosition = Vec3(-3.0f, 2.0f, 1.0f);
+    state.particles[2].position = Vec3(0.0f, -8.0f, 4.0f);
+    state.particles[2].previousPosition = Vec3(0.0f, -8.0f, 4.0f);
+
+    const Vec3 root(0.0f, 0.0f, 0.0f);
+    const std::vector<Vec3> targets = { Vec3(1.0f, 0.0f, 0.0f), Vec3(2.0f, 0.0f, 0.0f), Vec3(3.0f, 0.0f, 0.0f) };
+    const WindSettings noWind{};
+
+    StepDynamicChain(definition, root, targets, state, 1.0f / 60.0f, Vec3::Zero(), noWind);
+
+    for (const VerletParticle& particle : state.particles) {
+        ASSERT_TRUE(std::isfinite(particle.position.x));
+        ASSERT_TRUE(std::isfinite(particle.position.y));
+        ASSERT_TRUE(std::isfinite(particle.position.z));
+    }
+}
+
+#else
+
+TEST(DynamicChainSolverDeathTest, NanPositionTripsTheDiagnosticAssert)
+{
+    DynamicChainDefinition definition = BuildThreeJointChainDefinition(/*stiffness=*/0.3f, /*damping=*/0.1f);
+
+    DynamicChainRuntimeState state;
+    state.initialized = true;
+    state.particles.resize(3);
+    const float nan = std::nanf("");
+    state.particles[0].position = Vec3(nan, nan, nan);
+    state.particles[0].previousPosition = Vec3(nan, nan, nan);
+    state.particles[1].position = Vec3(-3.0f, 2.0f, 1.0f);
+    state.particles[1].previousPosition = Vec3(-3.0f, 2.0f, 1.0f);
+    state.particles[2].position = Vec3(0.0f, -8.0f, 4.0f);
+    state.particles[2].previousPosition = Vec3(0.0f, -8.0f, 4.0f);
+
+    const Vec3 root(0.0f, 0.0f, 0.0f);
+    const std::vector<Vec3> targets = { Vec3(1.0f, 0.0f, 0.0f), Vec3(2.0f, 0.0f, 0.0f), Vec3(3.0f, 0.0f, 0.0f) };
+    const WindSettings noWind{};
+
+    EXPECT_DEATH(
+        { StepDynamicChain(definition, root, targets, state, 1.0f / 60.0f, Vec3::Zero(), noWind); },
+        "");
+}
+
+#endif
 
 } // namespace gte

@@ -34,6 +34,30 @@ struct DynamicChainDefinition {
     float gravityScale = 1.0f;             // LOCAL multiplier applied to the GLOBAL gravity vector (see PHASE4).
     float windScale = 1.0f;                // LOCAL multiplier applied to the GLOBAL WindSettings (see PHASE4).
     std::uint8_t constraintIterations = 4; // structural relaxation passes per fixed step - see ChainConstraints.h.
+
+    // PHASE5 (task_manager/verlet-integration-1/
+    // PHASE5_COLLISION_STABILITY_AND_PERFORMANCE_HARDENING.md, 3.2) - simple
+    // head/body collision. LOCAL, per-chain authoring: which collider bone a
+    // chain checks against (typically the head bone) is a per-model
+    // decision. `headColliderBoneIndex` is the bone this chain's collision
+    // sphere should track every step (see Physics/SphereCollider.h);
+    // `headColliderRadius` is a world-space radius authored once (never
+    // derived automatically from mesh geometry). Left DISABLED
+    // (`hasHeadCollider = false`) by default even when
+    // DynamicChainDetection.h pre-fills a reasonable starting
+    // bone/radius - a human must opt in via the Editor Inspector.
+    bool hasHeadCollider = false;
+    std::int32_t headColliderBoneIndex = -1;
+    float headColliderRadius = 0.0f;
+
+    // PHASE5, 3.3 - numerical safety: if the chain's own root bone moves
+    // farther than this in a single StepDynamicChain() call (a teleporting
+    // character, an Editor gizmo drag, ...), every particle is re-seeded
+    // onto the animated pose instead of being integrated across a spurious,
+    // implausibly large displacement. A generous default sufficient for
+    // hand-built definitions/tests; DynamicChainDetection.h overrides this
+    // per-chain based on the chain's own actual combined rest length.
+    float maxPlausibleRootDelta = 10.0f;
 };
 
 } // namespace gte

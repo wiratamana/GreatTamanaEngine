@@ -5,6 +5,8 @@
 #include "../Math/MathTypes.h"
 
 #include <algorithm>
+#include <cassert>
+#include <cmath>
 #include <cstddef>
 
 namespace gte {
@@ -30,11 +32,16 @@ void SeedParticlesFromAnimatedPose(
     }
 }
 
+bool IsFinite(const Vec3& v) noexcept
+{
+    return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+}
+
 } // namespace
 
 void StepDynamicChain(const DynamicChainDefinition& definition, const Vec3& rootWorldPosition,
     const std::vector<Vec3>& animatedJointWorldPositions, DynamicChainRuntimeState& state, float fixedDeltaTime,
-    const Vec3& gravity, const WindSettings& wind)
+    const Vec3& gravity, const WindSettings& wind, const SphereCollider* collider)
 {
     const std::size_t jointCount = definition.jointBoneIndices.size();
     if (definition.jointSettings.size() != jointCount || definition.restLengths.size() != jointCount
@@ -47,11 +54,24 @@ void StepDynamicChain(const DynamicChainDefinition& definition, const Vec3& root
 
     // 1. Lazy init - also re-seeds if the chain's own joint count ever
     // changes after the first call (shouldn't normally happen for a fixed,
-    // authoring-time chain, but never read/write out of bounds either way).
-    if (!state.initialized || state.particles.size() != jointCount) {
+    // authoring-time chain, but never read/write out of bounds either way) -
+    // OR (PHASE5, 3.3) the root bone has moved an implausible distance since
+    // the last call, e.g. a teleporting character/Editor gizmo drag.
+    bool needsSeed = !state.initialized || state.particles.size() != jointCount;
+    if (!needsSeed) {
+        const float rootDelta = Length(rootWorldPosition - state.lastRootWorldPosition);
+        if (rootDelta > definition.maxPlausibleRootDelta) {
+            needsSeed = true;
+        }
+    }
+    if (needsSeed) {
         SeedParticlesFromAnimatedPose(definition, animatedJointWorldPositions, state, jointCount);
         state.initialized = true;
     }
+    // Set UNCONDITIONALLY, exactly once per call, regardless of which branch
+    // above ran - forgetting this turns the teleport guard into a permanent,
+    // one-shot trip (see this file's own header comment, step 1).
+    state.lastRootWorldPosition = rootWorldPosition;
 
     // 2. Integrate every joint particle under gravity + wind.
     for (std::size_t i = 0; i < jointCount; ++i) {
@@ -86,7 +106,28 @@ void StepDynamicChain(const DynamicChainDefinition& definition, const Vec3& root
         SolveGoalConstraint(state.particles[i], animatedJointWorldPositions[i], definition.jointSettings[i].stiffness);
     }
 
-    // 5. Advance the simulation clock.
+    // 5. Collision (PHASE5, 3.2) - exactly ONCE per call, AFTER the goal
+    // constraint, so collision has the final say (structural, then soft/
+    // goal, then hard collision).
+    if (definition.hasHeadCollider && collider != nullptr) {
+        for (std::size_t i = 0; i < jointCount; ++i) {
+            SolveSphereCollision(state.particles[i], *collider);
+        }
+    }
+
+    // 6. NaN/Inf guard (PHASE5, 3.3) - reset only the AFFECTED particle, not
+    // the whole chain, so one bad joint never permanently corrupts its
+    // siblings.
+    for (std::size_t i = 0; i < jointCount; ++i) {
+        VerletParticle& particle = state.particles[i];
+        if (!IsFinite(particle.position)) {
+            assert(false && "DynamicChainSolver: a particle's position became non-finite (NaN/Inf) - resetting to its animated target.");
+            particle.position = animatedJointWorldPositions[i];
+            particle.previousPosition = animatedJointWorldPositions[i];
+        }
+    }
+
+    // 7. Advance the simulation clock.
     state.simulationTimeSeconds += fixedDeltaTime;
 }
 

@@ -53,7 +53,16 @@ public:
     // ApplyDynamicChainPhysicsToPose(). An entity with no
     // ResolvedAnimationPose yet this frame (AnimationSystem skipped a
     // non-playing animator) is simply skipped - degrade gracefully, never
-    // assume the component exists.
+    // assume the component exists. PHASE5 (task_manager/verlet-integration-1/
+    // PHASE5_COLLISION_STABILITY_AND_PERFORMANCE_HARDENING.md): also resolves
+    // each chain's OPTIONAL head-collision sphere (DynamicChainDefinition::
+    // hasHeadCollider) fresh every step, and - once an entity's own chains
+    // carry enough TOTAL joints to be worth it - dispatches its INDEPENDENT
+    // chains across the Job System's worker pool (see PhysicsSystem.cpp's own
+    // anonymous-namespace kMinDynamicJointsToParallelize) instead of stepping
+    // them strictly serially; this outer PER-ENTITY loop itself always stays
+    // strictly sequential (see PhysicsSystem.cpp's own header comment on
+    // Update() for why).
     void Update(Registry& registry, double deltaSeconds);
 
     const GlobalPhysicsSettings& GetGlobalPhysicsSettings() const noexcept { return m_globalSettings; }
