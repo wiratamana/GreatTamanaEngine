@@ -852,6 +852,36 @@
 #                                            returns zero steps rather than
 #                                            dividing by zero/looping forever.
 #                                            No ECS/GPU/Renderer involved.
+#   Physics/DynamicChainDetectionTests.cpp  - Phase 4's chain auto-detection
+#                                            algorithm (DetectDynamicChains() -
+#                                            src/Physics/
+#                                            DynamicChainDetection.h): a
+#                                            simple 3-joint linear run is
+#                                            detected with the correct
+#                                            rootBoneIndex/joint order/
+#                                            bind-pose restLengths; a
+#                                            BRANCHING run (one bone with two
+#                                            deformAfterPhysics children)
+#                                            detects two separate chains,
+#                                            each anchored at the branch bone
+#                                            and starting at its own child; a
+#                                            run shorter than
+#                                            minimumChainLength detects
+#                                            nothing; a matching Dynamic
+#                                            RigidBody overrides only its own
+#                                            joint's mass/damping while
+#                                            siblings keep the defaults; a
+#                                            degenerate skeleton whose OWN
+#                                            root bone is itself flagged
+#                                            deformAfterPhysics produces ZERO
+#                                            chains from that run (never
+#                                            rootBoneIndex == -1) while an
+#                                            unrelated, properly-anchored
+#                                            chain elsewhere in the same
+#                                            skeleton is still detected
+#                                            normally; and an empty skeleton
+#                                            detects nothing. No ECS/GPU/
+#                                            Renderer involved.
 #   Game/Animation/AnimationSystemEvaluatePosesTests.cpp - Phase 3's split of
 #                                            AnimationSystem::Update() into
 #                                            EvaluatePoses()/SkinAndUpload()
@@ -888,16 +918,14 @@
 #                                            Renderer-independent
 #                                            PhysicsSystem
 #                                            (src/Game/Physics/
-#                                            PhysicsSystem.h/.cpp): since this
-#                                            phase's own DynamicChainRigCache
-#                                            is a deliberate, provable stub
-#                                            (real chain detection is Phase
-#                                            4's job), every test here
-#                                            confirms Update() is a genuine,
-#                                            safe NO-OP today - an entity with
-#                                            a DynamicChainRig AND a
-#                                            ResolvedAnimationPose has its
-#                                            pose left byte-for-byte
+#                                            PhysicsSystem.h/.cpp): Phase 3's
+#                                            own tests confirmed Update() was
+#                                            a genuine, safe NO-OP while
+#                                            DynamicChainRigCache was still a
+#                                            deliberate, provable stub - an
+#                                            entity with a DynamicChainRig
+#                                            AND a ResolvedAnimationPose has
+#                                            its pose left byte-for-byte
 #                                            unchanged, an entity with a
 #                                            DynamicChainRig but no
 #                                            ResolvedAnimationPose yet is
@@ -909,9 +937,46 @@
 #                                            DISABLED DynamicChainRig
 #                                            (enabled == false) is skipped
 #                                            entirely even though it (and its
-#                                            ResolvedAnimationPose) exist. No
+#                                            ResolvedAnimationPose) exist.
+#                                            Phase 4 adds a REAL, non-stub,
+#                                            end-to-end test: registers a
+#                                            synthetic rigged model (a hand-
+#                                            built SkeletonData with a
+#                                            2-joint deformAfterPhysics run)
+#                                            through RegisterDynamicChains()/
+#                                            AttachDynamicChainRigIfNeeded(),
+#                                            drives a pure-FK
+#                                            ResolvedAnimationPose directly
+#                                            (no AnimationSystem involved at
+#                                            all - further proof the two
+#                                            systems are genuinely decoupled),
+#                                            runs several Update() calls with
+#                                            non-zero deltaSeconds and
+#                                            non-zero gravity, and asserts
+#                                            the resulting pose actually
+#                                            DIFFERS from the pure-FK values
+#                                            that were written in - the
+#                                            end-to-end proof this whole
+#                                            campaign exists to deliver. No
 #                                            ECS/GPU/Renderer involved beyond
 #                                            a plain Registry.
+#   Game/Physics/DynamicChainRigCacheTests.cpp - Phase 4's PhysicsSystem-owned
+#                                            cache of detected chains
+#                                            (src/Game/Physics/
+#                                            DynamicChainRigCache.h): a
+#                                            trivial Register()/TryGet()
+#                                            round-trip confirms both
+#                                            `skeleton` and `chains` survive
+#                                            intact; an unknown path returns
+#                                            nullptr from both TryGet() and
+#                                            TryGetMutable(); and
+#                                            TryGetMutable() lets a caller
+#                                            (the Editor Inspector's "Dynamic
+#                                            Chain Physics" section) live-edit
+#                                            a cached chain's
+#                                            DynamicJointSettings, visible to
+#                                            a subsequent TryGet() call. No
+#                                            ECS/GPU/Renderer involved.
 #
 #
 # Note that the test BINARY still dynamically depends on SDL3.dll at process
@@ -1022,6 +1087,7 @@ set(GTE_TEST_SOURCES
     Game/ResolvedAnimationBindingCacheTests.cpp
     Game/Animation/AnimationSystemEvaluatePosesTests.cpp
     Game/Physics/PhysicsSystemTests.cpp
+    Game/Physics/DynamicChainRigCacheTests.cpp
     Animation/BoneChainResolverTests.cpp
     Animation/BonePoseMathTests.cpp
     Animation/SkeletonPoseTests.cpp
@@ -1038,6 +1104,7 @@ set(GTE_TEST_SOURCES
     Physics/DynamicChainSolverTests.cpp
     Physics/BoneChainPhysicsResolverTests.cpp
     Physics/FixedTimestepAccumulatorTests.cpp
+    Physics/DynamicChainDetectionTests.cpp
 )
 
 # Editor/EditorCamera.h/.cpp (see src/Editor/EditorCamera.h) is only

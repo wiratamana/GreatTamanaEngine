@@ -4,6 +4,7 @@
 #include "../../ECS/Components/DynamicChainRig.h"
 #include "../../ECS/Components/ResolvedAnimationPose.h"
 #include "../../Physics/BoneChainPhysicsResolver.h"
+#include "../../Physics/DynamicChainDetection.h"
 #include "../../Physics/DynamicChainSolver.h"
 #include "../../Physics/FixedTimestepAccumulator.h"
 #include "../../Profiling/ScopeTimer.h"
@@ -13,25 +14,33 @@ namespace gte {
 
 void PhysicsSystem::RegisterDynamicChains(const std::string& absoluteGtaPath, const SkinnedMeshData& data)
 {
-    // PHASE3 STUB - real chain detection (Physics/DynamicChainDetection.h)
-    // is PHASE4's job (see
-    // task_manager/verlet-integration-1/PHASE4_PARAMETER_AUTHORING_AND_DATA_DRIVEN_CONFIG.md).
-    // Deliberately never registers anything yet, so m_rigCache.TryGet()
-    // keeps returning nullptr for every model and Update() below stays a
-    // PROVABLE no-op this phase - see DynamicChainRigCache.h's own file
-    // comment.
-    (void)absoluteGtaPath;
-    (void)data;
+    // PHASE4 (task_manager/verlet-integration-1/
+    // PHASE4_PARAMETER_AUTHORING_AND_DATA_DRIVEN_CONFIG.md) - real chain
+    // auto-detection, derived purely from already-imported PMX data
+    // (Bone::deformAfterPhysics / RigidBody::motionType) - no new asset
+    // format, no authoring UI required to get a first working result. An
+    // Editor override of DynamicChainDetectionDefaults may land later; pure
+    // defaults are used for every model today.
+    const DynamicChainDetectionDefaults defaults{};
+    std::vector<DynamicChainDefinition> chains
+        = DetectDynamicChains(data.skeleton, data.physics.has_value() ? &*data.physics : nullptr, defaults);
+
+    DynamicChainRigCache::ModelEntry entry;
+    entry.chains = std::move(chains);
+    entry.skeleton = data.skeleton; // A private COPY - see DynamicChainRigCache.h's own file comment.
+    m_rigCache.Register(absoluteGtaPath, std::move(entry));
 }
 
 void PhysicsSystem::AttachDynamicChainRigIfNeeded(Registry& registry, Entity rootEntity, const std::string& absoluteGtaPath)
 {
-    // PHASE3 STUB - mirrors RegisterDynamicChains() above: since that
-    // function never registers a non-empty chain list yet, this is
-    // unconditionally a no-op for every model until PHASE4 lands.
-    (void)registry;
-    (void)rootEntity;
-    (void)absoluteGtaPath;
+    const DynamicChainRigCache::ModelEntry* model = m_rigCache.TryGet(absoluteGtaPath);
+    if (model == nullptr || model->chains.empty()) {
+        return; // Nothing detected for this model - no DynamicChainRig needed.
+    }
+
+    DynamicChainRig& rig = registry.AddComponent<DynamicChainRig>(rootEntity);
+    rig.meshGtaPath = absoluteGtaPath;
+    rig.chainStates.resize(model->chains.size()); // one default-constructed DynamicChainRuntimeState per detected chain.
 }
 
 void PhysicsSystem::Update(Registry& registry, double deltaSeconds)

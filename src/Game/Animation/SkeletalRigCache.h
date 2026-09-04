@@ -1,10 +1,12 @@
 #pragma once
 
 #include "../../Assets/MeshData.h"
+#include "../../Assets/PhysicsData.h"
 #include "../../Assets/SkeletonData.h"
 #include "../../Math/Vec2.h"
 #include "../../Math/Vec3.h"
 
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -20,13 +22,20 @@ namespace gte {
 // source mesh has none) purely so the same skinned output can be
 // reformatted into either MeshVertex (untextured parts) or MeshVertexUv
 // (textured parts) with no extra branching at update time - see
-// MeshVertexPacking.h.
+// MeshVertexPacking.h. `physics` (PHASE4,
+// task_manager/verlet-integration-1/PHASE4_PARAMETER_AUTHORING_AND_DATA_DRIVEN_CONFIG.md)
+// is the model's own imported PMX RigidBody/Joint data - std::nullopt for a
+// model imported before this engine extracted physics data, or a
+// physics-data-less .pmx - PhysicsSystem::RegisterDynamicChains() treats a
+// nullopt exactly like an empty PhysicsData (pure defaults, no per-bone
+// RigidBody seeding), never a failure.
 struct SkinnedMeshData {
     std::vector<Vec3> bindPositions;
     std::vector<Vec3> bindNormals;
     std::vector<Vec2> uvs;
     std::vector<VertexSkinWeights> skinWeights;
     SkeletonData skeleton;
+    std::optional<PhysicsData> physics;
 };
 
 // Replaces the old Game::m_meshSkinningCache, but re-homed as an explicit,

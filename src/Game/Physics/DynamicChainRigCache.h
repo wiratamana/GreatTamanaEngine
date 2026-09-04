@@ -44,6 +44,19 @@ public:
         return found != m_cache.end() ? &found->second : nullptr;
     }
 
+    // Mutable counterpart of TryGet() above - the ONE sanctioned way to
+    // live-edit a cached chain's DynamicJointSettings (damping/stiffness/
+    // mass) from the Editor's Inspector "Dynamic Chain Physics" section
+    // (Panels/InspectorPanel.cpp, PHASE4 3.5) - edits apply to every entity
+    // spawned from that same model path (per-INSTANCE overrides are
+    // explicitly out of scope for this phase - see PHASE4's own "What We
+    // Will NOT Do").
+    ModelEntry* TryGetMutable(const std::string& absoluteGtaPath)
+    {
+        const auto found = m_cache.find(absoluteGtaPath);
+        return found != m_cache.end() ? &found->second : nullptr;
+    }
+
 private:
     std::unordered_map<std::string, ModelEntry> m_cache;
 };

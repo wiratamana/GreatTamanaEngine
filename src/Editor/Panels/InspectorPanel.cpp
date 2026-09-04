@@ -2,12 +2,15 @@
 
 #include "../EditorContext.h"
 #include "../../ECS/Components/Camera.h"
+#include "../../ECS/Components/DynamicChainRig.h"
 #include "../../ECS/Components/MeshRenderer.h"
 #include "../../ECS/Components/Name.h"
 #include "../../ECS/Components/SkeletalAnimator.h"
 #include "../../ECS/Components/Transform.h"
 #include "../../ECS/Registry.h"
 #include "../../ECS/TransformHierarchy.h"
+#include "../../Game/Physics/PhysicsSystem.h"
+#include "../../Physics/DynamicChainDefinition.h"
 
 #if GTE_ENABLE_PROJECT_PANEL
 #include "../AssetInspectorData.h"
@@ -35,9 +38,9 @@ namespace gte {
 namespace {
 
 #if GTE_ENABLE_PROJECT_PANEL
-void BuildEntityInspector(Registry& registry, EditorContext& ctx, BoneViewerWindow& boneViewer)
+void BuildEntityInspector(Registry& registry, EditorContext& ctx, BoneViewerWindow& boneViewer, PhysicsSystem& physicsSystem)
 #else
-void BuildEntityInspector(Registry& registry, EditorContext& ctx)
+void BuildEntityInspector(Registry& registry, EditorContext& ctx, PhysicsSystem& physicsSystem)
 #endif
 {
     const Entity entity = ctx.selection.SelectedEntity();
@@ -133,6 +136,68 @@ void BuildEntityInspector(Registry& registry, EditorContext& ctx)
             ImGui::Text("Frame: %.1f", animator->frame);
         }
     }
+
+    // Shown for any entity carrying a DynamicChainRig component (PHASE4,
+    // task_manager/verlet-integration-1/PHASE4_PARAMETER_AUTHORING_AND_DATA_DRIVEN_CONFIG.md,
+    // 3.5) - i.e. a model root PhysicsSystem::AttachDynamicChainRigIfNeeded()
+    // decided has at least one auto-detected dynamic bone chain (see
+    // Physics/DynamicChainDetection.h). Per-joint damping/stiffness/mass
+    // sliders write directly into the DynamicChainDefinition
+    // PhysicsSystem's own DynamicChainRigCache holds for this model PATH
+    // (shared by every entity spawned from the same *.gta - no per-instance
+    // override in this phase, see that document's own "What We Will NOT
+    // Do"). The GlobalPhysicsSettings readout at the bottom is read-only
+    // this phase (see the same "What We Will NOT Do" section) - it exists
+    // purely to make the global/local split visible/legible to a user.
+    if (DynamicChainRig* rig = registry.TryGetComponent<DynamicChainRig>(entity)) {
+        if (ImGui::CollapsingHeader("Dynamic Chain Physics", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::Checkbox("Enabled", &rig->enabled);
+
+            DynamicChainRigCache::ModelEntry* model
+                = physicsSystem.GetDynamicChainRigCache().TryGetMutable(rig->meshGtaPath);
+            if (model == nullptr || model->chains.empty()) {
+                ImGui::TextDisabled("No detected dynamic bone chains for this model.");
+            } else {
+                std::size_t totalJoints = 0;
+                for (const DynamicChainDefinition& chain : model->chains) {
+                    totalJoints += chain.jointBoneIndices.size();
+                }
+                ImGui::Text("%zu chain(s), %zu joint(s) total", model->chains.size(), totalJoints);
+
+                for (std::size_t chainIndex = 0; chainIndex < model->chains.size(); ++chainIndex) {
+                    DynamicChainDefinition& chain = model->chains[chainIndex];
+                    ImGui::PushID(static_cast<int>(chainIndex));
+                    char chainLabel[64];
+                    std::snprintf(chainLabel, sizeof(chainLabel), "Chain %zu (%zu joints)", chainIndex,
+                        chain.jointBoneIndices.size());
+                    if (ImGui::TreeNode(chainLabel)) {
+                        for (std::size_t jointIndex = 0; jointIndex < chain.jointSettings.size(); ++jointIndex) {
+                            DynamicJointSettings& settings = chain.jointSettings[jointIndex];
+                            ImGui::PushID(static_cast<int>(jointIndex));
+                            ImGui::Text("Joint %zu", jointIndex);
+                            ImGui::DragFloat("Damping", &settings.damping, 0.005f, 0.0f, 1.0f);
+                            ImGui::DragFloat("Stiffness", &settings.stiffness, 0.005f, 0.0f, 1.0f);
+                            ImGui::DragFloat("Weight (Mass)", &settings.mass, 0.01f, 0.01f, 100.0f);
+                            ImGui::PopID();
+                        }
+                        ImGui::TreePop();
+                    }
+                    ImGui::PopID();
+                }
+            }
+
+            ImGui::Separator();
+            ImGui::TextDisabled("Global Physics Settings (world-level, read-only):");
+            GlobalPhysicsSettings& globalSettings = physicsSystem.GetGlobalPhysicsSettings();
+            ImGui::BeginDisabled();
+            ImGui::DragFloat3("Gravity", &globalSettings.gravity.x);
+            ImGui::DragFloat3("Wind Direction", &globalSettings.wind.direction.x);
+            ImGui::DragFloat("Wind Base Strength", &globalSettings.wind.baseStrength);
+            ImGui::DragFloat("Wind Gust Strength", &globalSettings.wind.gustStrength);
+            ImGui::EndDisabled();
+        }
+    }
+
 
 #if GTE_ENABLE_PROJECT_PANEL
     // Shown for the ROOT entity of any model spawned via
@@ -693,9 +758,9 @@ void BuildAssetInspector(
 
 #if GTE_ENABLE_PROJECT_PANEL
 void BuildInspectorPanel(Registry& registry, EditorContext& ctx, Renderer& renderer, AssetPreviewTexture& assetPreview,
-    AssetPreviewMesh& assetPreviewMesh, BoneViewerWindow& boneViewer)
+    AssetPreviewMesh& assetPreviewMesh, BoneViewerWindow& boneViewer, PhysicsSystem& physicsSystem)
 #else
-void BuildInspectorPanel(Registry& registry, EditorContext& ctx)
+void BuildInspectorPanel(Registry& registry, EditorContext& ctx, PhysicsSystem& physicsSystem)
 #endif
 {
     ImGui::Begin("Inspector");
@@ -709,9 +774,9 @@ void BuildInspectorPanel(Registry& registry, EditorContext& ctx)
 #endif
 
 #if GTE_ENABLE_PROJECT_PANEL
-    BuildEntityInspector(registry, ctx, boneViewer);
+    BuildEntityInspector(registry, ctx, boneViewer, physicsSystem);
 #else
-    BuildEntityInspector(registry, ctx);
+    BuildEntityInspector(registry, ctx, physicsSystem);
 #endif
 
     ImGui::End();

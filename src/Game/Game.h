@@ -74,6 +74,15 @@ public:
     // place; Game itself never calls this on its own registry.
     Registry& GetRegistry() noexcept { return m_registry; }
 
+    // Editor-facing accessor (PHASE4,
+    // task_manager/verlet-integration-1/PHASE4_PARAMETER_AUTHORING_AND_DATA_DRIVEN_CONFIG.md,
+    // 3.5) - mirrors GetRegistry()'s own "Editor observes/edits through a
+    // public accessor" convention, this time for the Inspector's "Dynamic
+    // Chain Physics" section (Panels/InspectorPanel.cpp) to read detected
+    // chain/joint counts, live-edit per-joint DynamicJointSettings, and show
+    // the current (read-only) GlobalPhysicsSettings.
+    PhysicsSystem& GetPhysicsSystem() noexcept { return m_physicsSystem; }
+
     // Spawns a new entity built from one of the engine's built-in primitive
     // shapes (PrimitiveType - see Renderer/Primitives/
     // PrimitiveMeshGenerator.h): a Transform at the origin (identity

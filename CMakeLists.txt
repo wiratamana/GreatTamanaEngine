@@ -246,6 +246,8 @@ add_library(gte_core STATIC
     src/Physics/GlobalPhysicsSettings.h
     src/Physics/FixedTimestepAccumulator.h
     src/Physics/FixedTimestepAccumulator.cpp
+    src/Physics/DynamicChainDetection.h
+    src/Physics/DynamicChainDetection.cpp
     src/Assets/AssetTypes.h
     src/Assets/AssetTypes.cpp
     src/Assets/GtaFile.h

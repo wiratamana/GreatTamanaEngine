@@ -4,6 +4,7 @@ namespace gte {
 
 class Registry;
 class Renderer;
+class PhysicsSystem;
 struct EditorContext;
 #if GTE_ENABLE_PROJECT_PANEL
 class AssetPreviewTexture;
@@ -51,12 +52,16 @@ class BoneViewerWindow;
 // to do with the Project panel feature-wise - it's only gated the same way
 // because it reuses AssetPreviewMesh's own MeshPreview.vert/.frag shader
 // pair, which is only ever compiled/staged under this same switch - see
-// CMakeLists.txt.)
+// CMakeLists.txt.) `physicsSystem` (PHASE4,
+// task_manager/verlet-integration-1/PHASE4_PARAMETER_AUTHORING_AND_DATA_DRIVEN_CONFIG.md,
+// 3.5) exists in EVERY signature (not gated behind GTE_ENABLE_PROJECT_PANEL)
+// - it backs the "Dynamic Chain Physics" section shown for any entity
+// carrying a DynamicChainRig component.
 #if GTE_ENABLE_PROJECT_PANEL
 void BuildInspectorPanel(Registry& registry, EditorContext& ctx, Renderer& renderer, AssetPreviewTexture& assetPreview,
-    AssetPreviewMesh& assetPreviewMesh, BoneViewerWindow& boneViewer);
+    AssetPreviewMesh& assetPreviewMesh, BoneViewerWindow& boneViewer, PhysicsSystem& physicsSystem);
 #else
-void BuildInspectorPanel(Registry& registry, EditorContext& ctx);
+void BuildInspectorPanel(Registry& registry, EditorContext& ctx, PhysicsSystem& physicsSystem);
 #endif
 
 } // namespace gte

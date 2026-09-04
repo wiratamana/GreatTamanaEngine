@@ -471,9 +471,9 @@ public:
 
         BuildHierarchyPanel(game, renderer, m_ctx);
 #if GTE_ENABLE_PROJECT_PANEL
-        BuildInspectorPanel(registry, m_ctx, renderer, m_assetPreview, m_assetPreviewMesh, m_boneViewer);
+        BuildInspectorPanel(registry, m_ctx, renderer, m_assetPreview, m_assetPreviewMesh, m_boneViewer, game.GetPhysicsSystem());
 #else
-        BuildInspectorPanel(registry, m_ctx);
+        BuildInspectorPanel(registry, m_ctx, game.GetPhysicsSystem());
 #endif
         BuildScenePanel(game, renderer, m_ctx, m_sceneCamera);
         BuildGamePanel(m_ctx);

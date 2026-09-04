@@ -32,19 +32,14 @@ public:
     // Mirrors AnimationSystem::RegisterSkinnedMesh()'s own shape and calling
     // convention (called from the SAME Game::CreateMeshEntityFromGtaFile()
     // hand-off site, ALONGSIDE - never through - AnimationSystem::
-    // RegisterSkinnedMesh(), see PHASE4). Detects dynamic bone chains
+    // RegisterSkinnedMesh()). Detects dynamic bone chains
     // (Physics/DynamicChainDetection.h, PHASE4) and caches them (plus a copy
-    // of `data.skeleton`) keyed by `absoluteGtaPath`. PHASE3: a real,
-    // callable, but provably inert stub - see DynamicChainRigCache.h's own
-    // file comment - registers zero chains for every model until PHASE4
-    // implements real detection.
+    // of `data.skeleton`) keyed by `absoluteGtaPath`.
     void RegisterDynamicChains(const std::string& absoluteGtaPath, const SkinnedMeshData& data);
 
     // If this model has at least one detected chain, attaches a
     // DynamicChainRig component (sized to match) to `rootEntity` - called
-    // right after RegisterDynamicChains() at the same Game.cpp call site
-    // (see PHASE4). PHASE3: a no-op today, since RegisterDynamicChains()
-    // never registers a non-empty chain list yet.
+    // right after RegisterDynamicChains() at the same Game.cpp call site.
     void AttachDynamicChainRigIfNeeded(Registry& registry, Entity rootEntity, const std::string& absoluteGtaPath);
 
     // For every entity carrying an ENABLED DynamicChainRig AND a
@@ -63,6 +58,16 @@ public:
 
     const GlobalPhysicsSettings& GetGlobalPhysicsSettings() const noexcept { return m_globalSettings; }
     GlobalPhysicsSettings& GetGlobalPhysicsSettings() noexcept { return m_globalSettings; }
+
+    // Editor-facing accessor (PHASE4, 3.5 - Inspector "Dynamic Chain
+    // Physics" section) - lets InspectorPanel look up a model's detected
+    // chains (for the read-only chain/joint count summary) and live-edit
+    // their DynamicJointSettings (damping/stiffness/mass sliders) via
+    // DynamicChainRigCache::TryGetMutable(). Never used by PhysicsSystem's
+    // own Update()/RegisterDynamicChains()/AttachDynamicChainRigIfNeeded()
+    // methods above, which already hold m_rigCache directly.
+    DynamicChainRigCache& GetDynamicChainRigCache() noexcept { return m_rigCache; }
+    const DynamicChainRigCache& GetDynamicChainRigCache() const noexcept { return m_rigCache; }
 
 private:
     DynamicChainRigCache m_rigCache;
