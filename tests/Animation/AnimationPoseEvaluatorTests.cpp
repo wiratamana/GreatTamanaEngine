@@ -152,3 +152,25 @@ TEST(AnimationPoseEvaluatorTests, NoIkOrAppendBonesStillProducesPlainForwardKine
     const Vec3 animatedPos = evaluated[0].TransformPoint(root.position);
     EXPECT_TRUE(ApproximatelyEqual(animatedPos, root.position + kf.translation, 0.001f));
 }
+
+TEST(AnimationPoseEvaluatorTests, SkinningPoseNeverDivergesFromPreLikelyPhysicsPoseComposition)
+{
+    // Phase 3 (task_manager/verlet-integration-1/
+    // PHASE3_PIPELINE_INTEGRATION_AND_FIXED_TIMESTEP.md) regression test:
+    // EvaluateAnimatedSkinningPose() is now implemented purely in terms of
+    // EvaluateAnimatedPoseBeforePhysics() + ComputeSkinningMatrices() - this
+    // asserts the two can never silently diverge later (e.g. a future edit
+    // that duplicates the sample/IK/append sequence instead of reusing the
+    // new function).
+    const SkeletonData skeleton = BuildLegWithAppendBone();
+    const ResolvedAnimationBinding binding = BuildFootIkOnlyBinding(skeleton);
+
+    const std::vector<Mat4> direct = EvaluateAnimatedSkinningPose(skeleton, binding, 0.0f);
+    const std::vector<Mat4> composed =
+        ComputeSkinningMatrices(skeleton, EvaluateAnimatedPoseBeforePhysics(skeleton, binding, 0.0f));
+
+    ASSERT_EQ(direct.size(), composed.size());
+    for (std::size_t i = 0; i < direct.size(); ++i) {
+        EXPECT_TRUE(ApproximatelyEqual(direct[i], composed[i])) << "Mismatch at bone index " << i;
+    }
+}

@@ -108,26 +108,58 @@ public:
     // "false/no component change, never throws" failure contract.
     bool Play(Registry& registry, Entity targetEntity, const std::string& absoluteAnimationGtaPath);
 
-    // Mirrors Game::UpdateSkeletalAnimators() exactly - iterates every live
-    // SkeletalAnimator, advances frame/loop, looks up skin data + clip +
-    // resolved binding via the three owned caches, calls the existing,
-    // unchanged Animation/AnimationPoseEvaluator.h
-    // (EvaluateAnimatedSkinningPose()), and then branches on GetSkinningMode():
-    // CpuJobSystem runs Animation/VertexSkinning.h (SkinVertexRange()) -
-    // dispatched across the worker pool for a big-enough model, unchanged
-    // from before Phase 5 existed - and re-uploads every affected mesh
-    // part's GPU vertex buffer via Mesh::UpdateVertexData(); GpuCompute
-    // instead uploads this frame's bone matrices straight into the model's
-    // GpuSkinningRigCache::GpuModelEntry::boneMatricesBuffer (its entire
-    // per-frame CPU cost) and records the model as needing a compute
-    // dispatch this frame (see CollectModelsNeedingGpuSkinningThisFrame()
-    // below). Either way, every affected MeshRenderer is kept in sync with
-    // the CURRENT mode (swapped onto its GPU-skinned or CPU-mode Mesh
-    // counterpart, per GpuSkinningRigCache::GpuModelEntry::
-    // TryGetGpuMeshHandle()/TryGetCpuMeshHandle()) every frame, so a
-    // mid-session mode switch takes effect the very next frame with no
-    // further caller action needed.
-    void Update(Registry& registry, double deltaSeconds);
+    // Phase 3 (task_manager/verlet-integration-1/
+    // PHASE3_PIPELINE_INTEGRATION_AND_FIXED_TIMESTEP.md, v3/v4). REPLACES the
+    // previous single Update(Registry&, double) method - split in two so a
+    // brand-new, fully independent PhysicsSystem::Update() (src/Game/Physics/)
+    // can run sandwiched BETWEEN them, communicating ONLY through the new
+    // ResolvedAnimationPose ECS component (ECS/Components/
+    // ResolvedAnimationPose.h) - see Game::Update() (src/Game/Game.cpp) for
+    // the fixed three-stage call order this creates:
+    //
+    //   AnimationSystem::EvaluatePoses()  -> PhysicsSystem::Update()  ->  AnimationSystem::SkinAndUpload()
+    //
+    // Advances every playing SkeletalAnimator's frame, evaluates its pose
+    // (sample -> IK -> append -> FK-ready BoneLocalOffset array, via
+    // Animation/AnimationPoseEvaluator.h's EvaluateAnimatedPoseBeforePhysics())
+    // and writes the result into that entity's ResolvedAnimationPose
+    // component (adding the component the first time an entity is seen).
+    // Touches NO Renderer/Mesh/GPU state whatsoever, and #include's nothing
+    // under src/Physics/ or src/Game/Physics/ - this method (and this whole
+    // class) has ZERO knowledge that a physics system exists anywhere in
+    // this engine. Safe to call before PhysicsSystem::Update() every frame.
+    void EvaluatePoses(Registry& registry, double deltaSeconds);
+
+    // Phase 3 - the second half of the old Update(). Reads whatever
+    // ResolvedAnimationPose::pose currently holds for every playing
+    // SkeletalAnimator (physics-adjusted by PhysicsSystem or not - this
+    // method does not, and must not, branch on which) and performs the exact
+    // same CPU/GPU vertex skinning + GPU upload work the old, single Update()
+    // used to do inline, byte-for-byte unchanged (mode branch, scratch-buffer
+    // reuse, MeshAssetPart grouping/packing, GpuSkinningRigCache upload). An
+    // entity with no ResolvedAnimationPose yet (e.g. EvaluatePoses() skipped
+    // it this frame because it wasn't playing) is simply skipped here too -
+    // the identical "not playing -> continue" guard EvaluatePoses() itself
+    // applies. Mirrors Game::UpdateSkeletalAnimators()'s original behavior
+    // exactly (see EvaluatePoses()'s own doc comment for the full original
+    // description this split preserves): CpuJobSystem runs Animation/
+    // VertexSkinning.h (SkinVertexRange()) - dispatched across the worker
+    // pool for a big-enough model - and re-uploads every affected mesh part's
+    // GPU vertex buffer via Mesh::UpdateVertexData(); GpuCompute instead
+    // uploads this frame's bone matrices straight into the model's
+    // GpuSkinningRigCache::GpuModelEntry::boneMatricesBuffer and records the
+    // model as needing a compute dispatch this frame (see
+    // CollectModelsNeedingGpuSkinningThisFrame() below). Either way, every
+    // affected MeshRenderer is kept in sync with the CURRENT mode every
+    // frame, so a mid-session mode switch takes effect the very next frame
+    // with no further caller action needed.
+    //
+    // *** THIS METHOD'S OUTER LOOP MUST REMAIN STRICTLY SEQUENTIAL - see the
+    // .cpp's own prominent loop comment for why (shared GPU mesh buffers
+    // across two instances of the same model). EvaluatePoses() above is NOT
+    // bound by this same constraint (it touches no Renderer/Mesh state at
+    // all). ***
+    void SkinAndUpload(Registry& registry);
 
     // GPU Vertex Skinning campaign, Phase 5, Step 3.3 ("Who actually issues
     // the vkCmdDispatch?") - called from src/Application/RenderPasses.cpp's

@@ -1203,7 +1203,16 @@ lifetime code:
   back skeletal animation, built on `SkeletalRigCache`/`AnimationClipCache`/
   `ResolvedAnimationBindingCache`) are `Game`'s own legitimate dual
   dependency decomposed into two named, focused sub-systems it owns, not a
-  new architectural violation. `Renderer` itself must never gain a
+  new architectural violation. `PhysicsSystem` (`src/Game/Physics/PhysicsSystem.h/.cpp`
+  - the verlet-integration-1 campaign's dynamic-bone-chain physics
+  orchestrator, see `task_manager/verlet-integration-1/PHASE3_PIPELINE_INTEGRATION_AND_FIXED_TIMESTEP.md`)
+  is a FOURTH `Game`-layer orchestrator system, but is deliberately NOT part
+  of this dual-dependency list - it depends on the ECS `Registry` (to
+  read/write `DynamicChainRig`/`ResolvedAnimationPose`) but never on
+  `Renderer`/`Mesh`/`Pipeline`, by design, so it stays independently
+  testable and independently schedulable from `AnimationSystem`'s own
+  GPU-touching half (`SkinAndUpload()`) - see that phase document's own v3
+  Revision Notice for the full rationale. `Renderer` itself must never gain a
   dependency on ECS in either direction - `Renderer::Submit()` takes plain
   `Mat4`s, never an `Entity`/`Registry`.
   `RenderSystem::CollectRenderables(Registry&)` is the pure ECS -> plain-data

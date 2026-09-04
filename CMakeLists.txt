@@ -211,6 +211,8 @@ add_library(gte_core STATIC
     src/ECS/Components/Name.h
     src/ECS/Components/MeshAssetSource.h
     src/ECS/Components/SkeletalAnimator.h
+    src/ECS/Components/ResolvedAnimationPose.h
+    src/ECS/Components/DynamicChainRig.h
     src/Animation/BoneLocalOffset.h
     src/Animation/BoneChainResolver.h
     src/Animation/BonePoseMath.h
@@ -241,6 +243,9 @@ add_library(gte_core STATIC
     src/Physics/DynamicChainSolver.cpp
     src/Physics/BoneChainPhysicsResolver.h
     src/Physics/BoneChainPhysicsResolver.cpp
+    src/Physics/GlobalPhysicsSettings.h
+    src/Physics/FixedTimestepAccumulator.h
+    src/Physics/FixedTimestepAccumulator.cpp
     src/Assets/AssetTypes.h
     src/Assets/AssetTypes.cpp
     src/Assets/GtaFile.h
@@ -394,6 +399,9 @@ add_library(gte_core STATIC
     src/Game/Animation/ResolvedAnimationBindingCache.h
     src/Game/Animation/AnimationSystem.cpp
     src/Game/Animation/AnimationSystem.h
+    src/Game/Physics/DynamicChainRigCache.h
+    src/Game/Physics/PhysicsSystem.cpp
+    src/Game/Physics/PhysicsSystem.h
     src/Game/Game.cpp
     src/Game/Game.h
     src/Game/RenderSystem.cpp

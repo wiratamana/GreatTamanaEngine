@@ -23,7 +23,18 @@ void Game::Update(double deltaSeconds, const InputState& /*input*/)
     // Game/simulation logic goes here. Poll `input` for continuous state,
     // e.g. `if (input.IsKeyDown(KeyCode::W)) { ... }` for held-key movement.
 
-    m_animationSystem.Update(m_registry, deltaSeconds);
+    // Phase 3 (task_manager/verlet-integration-1/
+    // PHASE3_PIPELINE_INTEGRATION_AND_FIXED_TIMESTEP.md, v3/v4) - three
+    // genuinely independent stages, communicating ONLY through the
+    // ResolvedAnimationPose ECS component (see that component's own doc
+    // comment): AnimationSystem samples/IK-solves/append-inherits and
+    // writes a fresh pose; PhysicsSystem optionally overwrites individual
+    // physics-driven bones in that SAME pose; AnimationSystem then skins and
+    // uploads whatever the pose currently holds, regardless of which of the
+    // two touched it last.
+    m_animationSystem.EvaluatePoses(m_registry, deltaSeconds);
+    m_physicsSystem.Update(m_registry, deltaSeconds);
+    m_animationSystem.SkinAndUpload(m_registry);
 }
 
 Entity Game::CreatePrimitiveEntity(Renderer& renderer, PrimitiveType type)
@@ -42,6 +53,15 @@ Entity Game::CreateMeshEntityFromGtaFile(Renderer& renderer, const std::string& 
         // doc comment, Game.h).
         if (const SkinnedMeshData* skin = m_meshInstantiationSystem.TryGetSkinnedMeshData(absoluteGtaPath)) {
             m_animationSystem.RegisterSkinnedMesh(absoluteGtaPath, *skin);
+
+            // Phase 3/4 (task_manager/verlet-integration-1/) - the physics-side
+            // sibling of RegisterSkinnedMesh() above, called from the SAME
+            // hand-off site, ALONGSIDE (never through) AnimationSystem's own
+            // registration. PHASE3: both calls are provable no-ops (see
+            // PhysicsSystem.cpp) - PHASE4 is what makes real chain detection
+            // populate them.
+            m_physicsSystem.RegisterDynamicChains(absoluteGtaPath, *skin);
+            m_physicsSystem.AttachDynamicChainRigIfNeeded(m_registry, root, absoluteGtaPath);
 
             // GPU Vertex Skinning campaign, Phase 4 (Per-Model Resource
             // Management - see

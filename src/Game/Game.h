@@ -5,6 +5,7 @@
 #include "Animation/AnimationSystem.h"
 #include "ECS/Registry.h"
 #include "Instantiation/MeshInstantiationSystem.h"
+#include "Physics/PhysicsSystem.h"
 #include "Renderer/Primitives/PrimitiveMeshGenerator.h"
 #include "RenderSystem.h"
 
@@ -205,6 +206,15 @@ private:
     // after it so it's already constructed by the time these run.
     MeshInstantiationSystem m_meshInstantiationSystem{ m_renderSystem };
     AnimationSystem m_animationSystem{ m_renderSystem, m_meshInstantiationSystem };
+
+    // Phase 3 (task_manager/verlet-integration-1/
+    // PHASE3_PIPELINE_INTEGRATION_AND_FIXED_TIMESTEP.md, v3/v4) - a fourth,
+    // fully independent Game-layer orchestrator, sandwiched between
+    // m_animationSystem's EvaluatePoses()/SkinAndUpload() halves every frame
+    // (see Update(), Game.cpp). Takes no constructor dependencies (unlike
+    // AnimationSystem above) - it never touches Renderer/Mesh/RenderSystem/
+    // MeshInstantiationSystem at all, only the ECS Registry.
+    PhysicsSystem m_physicsSystem;
 
     // Kept only for the (already-flagged-as-temporary) demo scene builder
     // above, plus its own shared Pipeline/Mesh - see EnsureDemoSceneBuilt().

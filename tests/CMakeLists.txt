@@ -830,6 +830,88 @@
 #                                            and an out-of-range joint bone
 #                                            index is skipped gracefully. No
 #                                            ECS/GPU/Renderer involved.
+#   Physics/FixedTimestepAccumulatorTests.cpp - Phase 3's fixed-timestep
+#                                            accumulator
+#                                            (ComputeFixedStepCount() -
+#                                            src/Physics/
+#                                            FixedTimestepAccumulator.h,
+#                                            Culprit D): a normal ~60fps delta
+#                                            yields exactly one step and zero
+#                                            leftover; a delta of exactly two
+#                                            fixed timesteps yields exactly
+#                                            two steps and zero leftover; a
+#                                            huge (5 second) delta is clamped
+#                                            to maxStepsPerFrame and leaves
+#                                            leftover time bounded to at most
+#                                            one fixed timestep (the
+#                                            spiral-of-death guard); a delta
+#                                            smaller than one fixed timestep
+#                                            yields zero steps and simply
+#                                            accumulates across calls; and a
+#                                            non-positive fixed timestep
+#                                            returns zero steps rather than
+#                                            dividing by zero/looping forever.
+#                                            No ECS/GPU/Renderer involved.
+#   Game/Animation/AnimationSystemEvaluatePosesTests.cpp - Phase 3's split of
+#                                            AnimationSystem::Update() into
+#                                            EvaluatePoses()/SkinAndUpload()
+#                                            (src/Game/Animation/
+#                                            AnimationSystem.h/.cpp): a hand-
+#                                            built Registry + minimal
+#                                            SkinnedMeshData + a real temp
+#                                            *.gta AssetType::Animation file
+#                                            (same convention as
+#                                            Game/AnimationClipCacheTests.cpp)
+#                                            confirms EvaluatePoses() writes a
+#                                            ResolvedAnimationPose component
+#                                            matching an independently
+#                                            computed sample -> IK -> append
+#                                            pose EXACTLY, and that skinning
+#                                            matrices computed FROM that
+#                                            component are byte-identical to
+#                                            what the OLD, single-call
+#                                            EvaluateAnimatedSkinningPose()
+#                                            would have produced - proving the
+#                                            split is a genuine behavioral
+#                                            no-op; plus two degrade-
+#                                            gracefully cases (SkinAndUpload()
+#                                            never crashes with no GPU mesh
+#                                            parts registered, and correctly
+#                                            skips an entity EvaluatePoses()
+#                                            never produced a pose for this
+#                                            frame). No live Renderer/GPU
+#                                            device involved (RenderSystem/
+#                                            MeshInstantiationSystem are both
+#                                            default-constructible with no GPU
+#                                            dependency).
+#   Game/Physics/PhysicsSystemTests.cpp     - Phase 3's brand-new, ECS/
+#                                            Renderer-independent
+#                                            PhysicsSystem
+#                                            (src/Game/Physics/
+#                                            PhysicsSystem.h/.cpp): since this
+#                                            phase's own DynamicChainRigCache
+#                                            is a deliberate, provable stub
+#                                            (real chain detection is Phase
+#                                            4's job), every test here
+#                                            confirms Update() is a genuine,
+#                                            safe NO-OP today - an entity with
+#                                            a DynamicChainRig AND a
+#                                            ResolvedAnimationPose has its
+#                                            pose left byte-for-byte
+#                                            unchanged, an entity with a
+#                                            DynamicChainRig but no
+#                                            ResolvedAnimationPose yet is
+#                                            skipped gracefully (no
+#                                            component is ever added), an
+#                                            entity with neither component
+#                                            and an entirely empty Registry
+#                                            are both safe no-ops, and a
+#                                            DISABLED DynamicChainRig
+#                                            (enabled == false) is skipped
+#                                            entirely even though it (and its
+#                                            ResolvedAnimationPose) exist. No
+#                                            ECS/GPU/Renderer involved beyond
+#                                            a plain Registry.
 #
 #
 # Note that the test BINARY still dynamically depends on SDL3.dll at process
@@ -938,6 +1020,8 @@ set(GTE_TEST_SOURCES
     Game/SkeletalRigCacheTests.cpp
     Game/AnimationClipCacheTests.cpp
     Game/ResolvedAnimationBindingCacheTests.cpp
+    Game/Animation/AnimationSystemEvaluatePosesTests.cpp
+    Game/Physics/PhysicsSystemTests.cpp
     Animation/BoneChainResolverTests.cpp
     Animation/BonePoseMathTests.cpp
     Animation/SkeletonPoseTests.cpp
@@ -953,6 +1037,7 @@ set(GTE_TEST_SOURCES
     Physics/WindFieldTests.cpp
     Physics/DynamicChainSolverTests.cpp
     Physics/BoneChainPhysicsResolverTests.cpp
+    Physics/FixedTimestepAccumulatorTests.cpp
 )
 
 # Editor/EditorCamera.h/.cpp (see src/Editor/EditorCamera.h) is only

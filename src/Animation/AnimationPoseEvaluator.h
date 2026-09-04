@@ -57,4 +57,22 @@ namespace gte {
 std::vector<Mat4> EvaluateAnimatedSkinningPose(
     const SkeletonData& skeleton, const ResolvedAnimationBinding& binding, float frame);
 
+// NEW - Phase 3 (task_manager/verlet-integration-1/
+// PHASE3_PIPELINE_INTEGRATION_AND_FIXED_TIMESTEP.md). Runs the exact same
+// first three stages as EvaluateAnimatedSkinningPose() above (sample -> IK ->
+// append), but STOPS one step short of the final ComputeSkinningMatrices()
+// call and hands the caller back the intermediate, pre-physics `pose`
+// (already resolved) instead of finished skinning matrices - giving a caller
+// exactly the hook point a fixed 4-stage pipeline was missing. The caller
+// (AnimationSystem::EvaluatePoses()) writes this return value straight into
+// the calling entity's ResolvedAnimationPose::pose
+// (ECS/Components/ResolvedAnimationPose.h) and does nothing else with it -
+// physics-stepping (PhysicsSystem::Update(), src/Game/Physics/) and skinning
+// (AnimationSystem::SkinAndUpload()) both happen in later, separate,
+// independent stages. EvaluateAnimatedSkinningPose() itself is now
+// implemented purely in terms of this function (see the .cpp), so the two
+// can never silently diverge.
+std::vector<BoneLocalOffset> EvaluateAnimatedPoseBeforePhysics(
+    const SkeletonData& skeleton, const ResolvedAnimationBinding& binding, float frame);
+
 } // namespace gte
