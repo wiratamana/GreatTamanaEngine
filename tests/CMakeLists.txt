@@ -697,6 +697,78 @@
 #                                            calls SDL3's own timer API
 #                                            directly.
 #
+#   Physics/VerletIntegrationTests.cpp      - Verlet-integration campaign
+#                                            (task_manager/verlet-integration-1/
+#                                            PHASE1_CORE_VERLET_PHYSICS_FOUNDATION.md),
+#                                            Phase 1's Position-Verlet
+#                                            integrator (IntegrateParticle() -
+#                                            src/Physics/VerletIntegration.h):
+#                                            a particle at rest under zero
+#                                            acceleration/zero damping stays
+#                                            exactly at rest, an implied
+#                                            velocity continues in a straight
+#                                            line under zero acceleration/zero
+#                                            damping (Newton's first law - the
+#                                            core Verlet correctness check),
+#                                            damping of 1.0 fully kills implied
+#                                            velocity after one step, a pinned
+#                                            particle never moves regardless of
+#                                            acceleration/damping and its
+#                                            previousPosition tracks position
+#                                            every call, and gravity-only
+#                                            free-fall over many fixed steps
+#                                            matches the closed-form
+#                                            0.5*g*t^2 within a small
+#                                            tolerance. No ECS/GPU/Renderer
+#                                            involved at all - src/Physics/ is
+#                                            a brand-new, always-compiled,
+#                                            engine-data-free module.
+#   Physics/ChainConstraintsTests.cpp       - Phase 1's two independent
+#                                            constraint kinds
+#                                            (SolveDistanceConstraint()/
+#                                            SolveGoalConstraint() - src/
+#                                            Physics/ChainConstraints.h): two
+#                                            particles stretched beyond
+#                                            restLength are pulled back
+#                                            together by exactly the
+#                                            mass-weighted amount the formula
+#                                            predicts, two particles already
+#                                            at restLength are left untouched,
+#                                            a particle with one side pinned
+#                                            receives 100% of the correction
+#                                            while the pinned side receives
+#                                            none, both particles having
+#                                            inverseMass == 0 WITHOUT either
+#                                            being flagged pinned are left
+#                                            completely untouched (proves the
+#                                            guard checks invMassSum directly
+#                                            and never divides by zero -
+#                                            PHASE0 Revision Notes finding #1),
+#                                            and SolveGoalConstraint with
+#                                            stiffness01 == 0/1/0.5 leaves the
+#                                            particle untouched/snaps it
+#                                            exactly onto the target/lands
+#                                            exactly halfway respectively. No
+#                                            ECS/GPU/Renderer involved.
+#   Physics/WindFieldTests.cpp              - Phase 1's procedural,
+#                                            deterministic global wind field
+#                                            (ComputeWindAcceleration() - src/
+#                                            Physics/WindField.h): the same
+#                                            (settings, worldPosition,
+#                                            timeSeconds) triple always
+#                                            produces the bit-identical output
+#                                            vector (determinism check, no
+#                                            RNG/global state of any kind),
+#                                            baseStrength alone with zero gust
+#                                            produces a constant vector
+#                                            regardless of timeSeconds, and two
+#                                            different worldPositions with gust
+#                                            enabled produce measurably
+#                                            different results (proves the
+#                                            spatial-hash term is actually
+#                                            wired in, not a dead parameter).
+#                                            No ECS/GPU/Renderer involved.
+#
 #
 # Note that the test BINARY still dynamically depends on SDL3.dll at process
 # load time regardless of the above (gte_core's Window.cpp references SDL
@@ -813,6 +885,9 @@ set(GTE_TEST_SOURCES
     Animation/AnimationPoseEvaluatorTests.cpp
     Animation/VertexSkinningTests.cpp
     Animation/VertexSkinningParityTests.cpp
+    Physics/VerletIntegrationTests.cpp
+    Physics/ChainConstraintsTests.cpp
+    Physics/WindFieldTests.cpp
 )
 
 # Editor/EditorCamera.h/.cpp (see src/Editor/EditorCamera.h) is only

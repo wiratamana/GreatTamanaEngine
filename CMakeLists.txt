@@ -226,6 +226,13 @@ add_library(gte_core STATIC
     src/Animation/AnimationPoseEvaluator.cpp
     src/Animation/VertexSkinning.h
     src/Animation/VertexSkinning.cpp
+    src/Physics/VerletParticle.h
+    src/Physics/VerletIntegration.h
+    src/Physics/VerletIntegration.cpp
+    src/Physics/ChainConstraints.h
+    src/Physics/ChainConstraints.cpp
+    src/Physics/WindField.h
+    src/Physics/WindField.cpp
     src/Assets/AssetTypes.h
     src/Assets/AssetTypes.cpp
     src/Assets/GtaFile.h
