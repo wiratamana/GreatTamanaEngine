@@ -155,6 +155,7 @@ void BoneViewerWindow::Reset()
     m_joints.clear();
     m_boneChildren.clear();
     m_rootBoneIndices.clear();
+    m_rigidBodyAdjacency.clear();
     m_cachedPath.clear();
     m_cachedWriteTime = std::filesystem::file_time_type{};
     m_cachedIsValid = false;
@@ -398,8 +399,8 @@ bool BoneViewerWindow::EnsureDataLoaded(
 
         m_rigidBodies.reserve(rig->physics.rigidBodies.size());
         for (const RigidBody& body : rig->physics.rigidBodies) {
-            m_rigidBodies.push_back(
-                RigidBodyEntry{ body.name, body.translate, body.rotateRadians, body.shape, body.shapeSize, body.boneIndex });
+            m_rigidBodies.push_back(RigidBodyEntry{ body.name, body.translate, body.rotateRadians, body.shape,
+                body.shapeSize, body.boneIndex, body.group });
         }
 
         m_joints.reserve(rig->physics.joints.size());
@@ -408,6 +409,7 @@ bool BoneViewerWindow::EnsureDataLoaded(
         }
     }
     RebuildBoneHierarchyIndex(); // Still only walks m_bones - RigidBody/Joint have no tree to build.
+    RebuildRigidBodyAdjacencyIndex(); // Derives the rigid-body-centric graph "Select All (Branch)" walks.
 
     std::vector<PreviewVertex> vertices(mesh->positions.size());
     const bool hasNormals = mesh->normals.size() == mesh->positions.size();
@@ -514,6 +516,16 @@ void BoneViewerWindow::RebuildBoneHierarchyIndex()
             m_rootBoneIndices.push_back(static_cast<std::int32_t>(i));
         }
     }
+}
+
+void BoneViewerWindow::RebuildRigidBodyAdjacencyIndex()
+{
+    std::vector<RigidBodyJointEdge> edges;
+    edges.reserve(m_joints.size());
+    for (const JointEntry& joint : m_joints) {
+        edges.push_back(RigidBodyJointEdge{ joint.rigidBodyAIndex, joint.rigidBodyBIndex });
+    }
+    m_rigidBodyAdjacency = BuildRigidBodyAdjacency(edges, m_rigidBodies.size());
 }
 
 bool BoneViewerWindow::BoneMatchesFilterRecursive(std::int32_t boneIndex, const std::string& lowerFilter, int depth) const

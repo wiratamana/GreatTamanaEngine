@@ -1,8 +1,8 @@
 #pragma once
 
 #include "Selection.h" // ModelPartKind
+#include "RigidBodyGroupSelection.h" // RigidBodyJointEdge, BuildRigidBodyAdjacency()
 #include "../Assets/PhysicsData.h" // RigidBodyShape
-#include "../ECS/Entity.h"
 #include "../Math/Vec3.h"
 
 #include <volk.h>
@@ -142,6 +142,14 @@ private:
         RigidBodyShape shape = RigidBodyShape::Sphere;
         Vec3 shapeSize;
         std::int32_t boneIndex = -1; // Index into m_bones this body is attached to (-1 if unattached) - drawn as a connecting line.
+        // PMX collision group (0-15, PhysicsData.h's own RigidBody::group) -
+        // added by task_manager/verlet-integration-4/
+        // PHASE2_RIGID_BODY_GROUP_FIELD_AND_ADJACENCY_ALGORITHMS.md purely so
+        // the Bone Viewer's "Select All (Group)" toolbar button
+        // (PHASE3_BONE_VIEWER_SELECT_ALL_BUTTONS_AND_MULTISELECT_INPUT.md)
+        // has something to compare against - never drawn/used for anything
+        // else in this window.
+        std::uint8_t group = 0;
     };
 
     // One joint, flattened for overlay drawing.
@@ -216,6 +224,16 @@ private:
     std::vector<std::vector<std::int32_t>> m_boneChildren;
     std::vector<std::int32_t> m_rootBoneIndices;
 
+    // Per-rigid-body adjacency derived from every JointEntry's own
+    // rigidBodyAIndex/rigidBodyBIndex above (m_rigidBodyAdjacency[i] lists
+    // every OTHER rigid body directly joined to body i) - the graph the
+    // Bone Viewer's "Select All (Branch)" toolbar button
+    // (PHASE3_BONE_VIEWER_SELECT_ALL_BUTTONS_AND_MULTISELECT_INPUT.md) walks
+    // via RigidBodyGroupSelection.h's SelectRigidBodyBranch(). Rebuilt once
+    // per (re)load, right alongside m_rigidBodies/m_joints themselves - see
+    // RebuildRigidBodyAdjacencyIndex().
+    std::vector<std::vector<std::int32_t>> m_rigidBodyAdjacency;
+
     // Bounding sphere of the currently-uploaded mesh (model-local space) -
     // used by FrameCameraToBounds() to auto-frame the orbit camera whenever
     // a new model is loaded.
@@ -278,6 +296,13 @@ private:
     // parentIndex fields - called once right after m_bones itself is
     // (re)populated in EnsureDataLoaded().
     void RebuildBoneHierarchyIndex();
+
+    // Rebuilds m_rigidBodyAdjacency from m_joints' own rigidBodyAIndex/
+    // rigidBodyBIndex fields - called once right after m_joints itself is
+    // (re)populated in EnsureDataLoaded(), mirroring
+    // RebuildBoneHierarchyIndex()'s own "derive an index right after the
+    // source data it's built from" convention.
+    void RebuildRigidBodyAdjacencyIndex();
 
     // True if `boneIndex` itself, or ANY of its descendants (recursively),
     // has a name containing `lowerFilter` as a case-insensitive substring -

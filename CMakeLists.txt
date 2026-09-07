@@ -504,6 +504,8 @@ if(GTE_ENABLE_EDITOR)
             src/Editor/ModelRigCache.cpp
             src/Editor/RigidBodyWireframe.h
             src/Editor/RigidBodyWireframe.cpp
+            src/Editor/RigidBodyGroupSelection.h
+            src/Editor/RigidBodyGroupSelection.cpp
             src/Editor/BoneViewerWindow.h
             src/Editor/BoneViewerWindow.cpp
         )
