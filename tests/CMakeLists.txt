@@ -842,6 +842,42 @@
 #                                            position comes out finite and
 #                                            sane after one call. No ECS/GPU/
 #                                            Renderer/SkeletonData involved.
+#   Physics/DynamicChainSolverIdleSettlingTests.cpp - task_manager/
+#                                            verlet-integration-7 Phase 5
+#                                            (PHASE5_IDLE_PHYSICS_TUNING_AND_SETTLING_REGRESSION.md,
+#                                            Culprit E) - proves the RE-TUNED
+#                                            default DynamicJointSettings
+#                                            (damping = 0.4f, stiffness = 0.02f
+#                                            - src/Physics/
+#                                            DynamicChainDefinition.h) plus the
+#                                            unchanged default
+#                                            GlobalPhysicsSettings (src/Physics/
+#                                            GlobalPhysicsSettings.h) produce a
+#                                            believable, STABLE idle result for
+#                                            a chain that is NEVER animated: a
+#                                            perfectly still (bind-pose target
+#                                            held perfectly constant, no root
+#                                            motion) 5-joint chain sags visibly
+#                                            (> 1% of its own total rest length)
+#                                            under gravity rather than looking
+#                                            "dead"/rigid, genuinely settles
+#                                            into a steady shape well within
+#                                            half of a 10-simulated-second
+#                                            budget (600 steps @ 1/60s) rather
+#                                            than oscillating/jittering
+#                                            forever, and never diverges/
+#                                            explodes (> 1.5x total rest
+#                                            length)/NaNs - plus a second test
+#                                            proving the same tuned defaults
+#                                            generalize to a different joint
+#                                            count with non-uniform, sub-unit
+#                                            rest lengths, so the tuning isn't
+#                                            accidentally overfit to one
+#                                            specific chain shape. No ECS/GPU/
+#                                            Renderer/SkeletonData involved -
+#                                            calls StepDynamicChain() directly,
+#                                            same convention as
+#                                            DynamicChainSolverTests.cpp above.
 #   Physics/BoneChainPhysicsResolverTests.cpp - Phase 2's position -> rotation
 #                                            bridge
 #                                            (ApplyDynamicChainPhysicsToPose() -
@@ -1307,6 +1343,7 @@ set(GTE_TEST_SOURCES
     Physics/ChainConstraintsTests.cpp
     Physics/WindFieldTests.cpp
     Physics/DynamicChainSolverTests.cpp
+    Physics/DynamicChainSolverIdleSettlingTests.cpp
     Physics/BoneChainPhysicsResolverTests.cpp
     Physics/FixedTimestepAccumulatorTests.cpp
     Physics/DynamicChainDetectionTests.cpp

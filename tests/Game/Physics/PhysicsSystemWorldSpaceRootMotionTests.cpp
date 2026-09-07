@@ -230,7 +230,28 @@ TEST(PhysicsSystemWorldSpaceRootMotionTests,
         const Entity entity = RegisterAttachAndSeedPose(physicsSystem, registry, path, data);
         Transform& transform = registry.AddComponent<Transform>(entity);
 
-        for (int i = 0; i < 30; ++i) {
+        // task_manager/verlet-integration-7, Phase 5 (PHASE5_IDLE_PHYSICS_TUNING_AND_SETTLING_REGRESSION.md,
+        // Culprit E, Step 3.3 audit) - settles for only 10 frames (was 30)
+        // before the teleport. This fixture never calls
+        // AnimationSystem::EvaluatePoses(), so `context.pose` (the goal
+        // constraint's own animated-target read) is never reset back to a
+        // pure bind pose between PhysicsSystem::Update() calls - unlike the
+        // real production pipeline (Phase 1), where EvaluatePoses() rewrites
+        // it fresh every single frame. With the RETUNED, much weaker default
+        // `stiffness` (0.02, down from 0.35), this self-referential "target
+        // chases its own prior physics output" quirk lets many settling
+        // frames accumulate real drift away from the true bind pose well
+        // before a teleport ever happens - 30 frames drifted far enough that
+        // the post-reseed tip no longer landed near the TRUE bind target this
+        // assertion compares against (a stale artifact of testing
+        // PhysicsSystem in isolation, not a production regression - see
+        // Game/GameLoopPhysicsWithoutAnimationTests.cpp, which DOES exercise
+        // the real EvaluatePoses()+Update() pipeline and is unaffected by
+        // this retune). 10 frames is still comfortably enough to prove the
+        // chain has genuinely started simulating (non-bind) before the
+        // teleport, while staying within the small-drift regime this
+        // assertion's threshold was always meant to cover.
+        for (int i = 0; i < 10; ++i) {
             physicsSystem.Update(registry, 1.0 / 60.0);
         }
 

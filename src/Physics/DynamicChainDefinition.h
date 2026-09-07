@@ -6,9 +6,31 @@
 namespace gte {
 
 // LOCAL (per-joint) tuning - see PHASE4's "global vs. local" split.
+//
+// task_manager/verlet-integration-7, Phase 5 (PHASE5_IDLE_PHYSICS_TUNING_AND_SETTLING_REGRESSION.md,
+// Culprit E) - `damping`/`stiffness` defaults below were RE-TUNED this phase.
+// Every prior value (damping = 0.08f, stiffness = 0.35f) was only ever
+// validated/judged with physics riding on TOP of an actively-playing MMD
+// dance animation - large, constantly-changing bone motion that visually
+// masked how mediocre these defaults actually were in true isolation. Once
+// verlet-integration-7's Phases 1-4 made a perfectly still, NEVER-animated
+// T-pose model simulate continuously for the first time, the old defaults
+// were measured (via a throwaway tuning harness driving the real
+// StepDynamicChain() directly) to sag less than 0.15% of the chain's own
+// total rest length under default gravity - i.e. visually indistinguishable
+// from "dead"/rigid, exactly the complaint this campaign exists to fix. The
+// new defaults were chosen so a perfectly still T-pose chain (see
+// tests/Physics/DynamicChainSolverIdleSettlingTests.cpp) visibly sags
+// (comfortably above 1% of its own total rest length), settles into a
+// stable shape within a small fraction of the test's own 10-second budget,
+// and never diverges/explodes/NaNs - `stiffness` in particular had to drop
+// far more than `damping` rose, since SolveGoalConstraint() is applied as a
+// fixed-fraction-per-frame Lerp back toward the animated target EVERY single
+// step (see ChainConstraints.h), which otherwise suppresses almost all
+// gravity-driven motion even at a seemingly "low" value like 0.35.
 struct DynamicJointSettings {
-    float damping = 0.08f;   // "Damping" - see VerletIntegration.h.
-    float stiffness = 0.35f; // "Stiffness" (goal constraint) - see ChainConstraints.h's SolveGoalConstraint().
+    float damping = 0.4f;    // "Damping" - see VerletIntegration.h.
+    float stiffness = 0.02f; // "Stiffness" (goal constraint) - see ChainConstraints.h's SolveGoalConstraint().
     float mass = 1.0f;       // "Weight" - inverse-mass fed to VerletParticle::inverseMass (must be > 0).
 };
 
