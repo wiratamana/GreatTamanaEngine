@@ -76,6 +76,14 @@ struct DynamicChainBatchContext {
     // `pose` via ApplyDynamicChainPhysicsToPose(), which only ever operates
     // in bone-local space.
     Mat4 entityWorldMatrixInverse;
+
+    // task_manager/verlet-integration-7, Phase 4 (v2) - true while this
+    // entity's own DynamicChainRig::frozen is set. Consulted only by
+    // StepDynamicChainRange() below to skip the integration loop while
+    // still unconditionally reapplying state.particles into `pose` -
+    // see that function's own comment for why this must remain a separate
+    // guard rather than relying solely on `stepCount == 0`.
+    bool frozen;
 };
 
 // Steps every chain in `[beginIndex, endIndex)` of `context` to full
@@ -125,16 +133,34 @@ void StepDynamicChainRange(std::uint32_t beginIndex, std::uint32_t endIndex, Dyn
             hasCollider = true;
         }
 
-        for (int step = 0; step < context.stepCount; ++step) {
-            StepDynamicChain(chain, rootWorldPos, animatedJointWorldPositions, state, context.fixedTimestepSeconds,
-                context.gravity, context.wind, hasCollider ? &collider : nullptr);
+        // task_manager/verlet-integration-7, Phase 4 (v2) - take zero NEW
+        // integration steps whenever context.frozen is true, regardless of
+        // whatever context.stepCount happens to hold (PhysicsSystem::Update()
+        // itself already forces stepCount to 0 while frozen - see this
+        // file's own Update() comment - but this explicit guard means a
+        // future change to that invariant can never silently make a frozen
+        // rig integrate again without also revisiting this guard).
+        if (!context.frozen) {
+            for (int step = 0; step < context.stepCount; ++step) {
+                StepDynamicChain(chain, rootWorldPos, animatedJointWorldPositions, state, context.fixedTimestepSeconds,
+                    context.gravity, context.wind, hasCollider ? &collider : nullptr);
+            }
+        }
 
-            // task_manager/verlet-integration-7, Phase 3 - convert each
-            // simulated WORLD-space particle position back into bone-local/
-            // model space before handing it to ApplyDynamicChainPhysicsToPose(),
-            // which is completely untouched by this phase and only ever
-            // operates in bone-local space, exactly like every other bone in
-            // `pose`.
+        // task_manager/verlet-integration-7, Phase 4 (v2, Culprit F fix) -
+        // ALWAYS re-apply whatever `state.particles` currently holds into
+        // `pose`, EVERY call, regardless of whether any new integration step
+        // ran just above - this is what stops EvaluatePoses()'s own
+        // unconditional every-frame pose overwrite (Phase 1's bind pose, or
+        // a fresh FK sample) from ever being visible, even for one single
+        // rendered frame, once a chain has simulated at least once.
+        // `state.initialized` guards the ONLY case with nothing meaningful
+        // to reapply yet: a chain that has never once called
+        // StepDynamicChain() (e.g. spawned already-frozen, before its very
+        // first step) - in that case `pose` is correctly left exactly as
+        // EvaluatePoses() wrote it (its own bind/FK value), which is the
+        // right "nothing to show yet" behavior.
+        if (state.initialized) {
             std::vector<Vec3> simulatedPositions;
             simulatedPositions.reserve(state.particles.size());
             for (const VerletParticle& particle : state.particles) {
@@ -245,10 +271,32 @@ void PhysicsSystem::Update(Registry& registry, double deltaSeconds)
             continue; // Not (yet) registered, or stale - degrade gracefully.
         }
 
-        const int stepCount = ComputeFixedStepCount(rig.accumulatedSeconds, static_cast<float>(deltaSeconds),
-            m_globalSettings.fixedTimestepSeconds, m_globalSettings.maxStepsPerFrame);
-        if (stepCount <= 0) {
-            continue;
+        // task_manager/verlet-integration-7, Phase 4 (v2) - `stepCount`
+        // legitimately stays 0 in TWO distinct situations: this rig is
+        // explicitly `frozen` (Culprit D), or it is simply not yet time for
+        // a new fixed step this frame (the ordinary, expected accumulator-
+        // pattern outcome on most frames at any render rate above ~60 Hz).
+        // NEITHER case may `continue` out of this loop - doing so would
+        // leave whatever physics-blind pose EvaluatePoses() just wrote this
+        // frame (Phase 1's bind pose, or a fresh FK sample) completely
+        // unconverted, visibly "popping" every chain-controlled bone back to
+        // its un-simulated value for this one render frame (Culprit F - see
+        // PHASE0_MASTER_STRATEGY.md's Revision Notes, Finding #2). Every rig
+        // that reaches this point (enabled, has a resolved pose, has a
+        // registered model) ALWAYS falls through into
+        // StepDynamicChainRange()/the dispatch path below, every single
+        // frame - that function itself decides internally whether to take
+        // any NEW integration steps, but ALWAYS reapplies whatever
+        // state.particles already holds once the chain has been initialized
+        // at least once. Only genuinely unrecoverable conditions (disabled,
+        // no pose yet, model not registered/stale) may still `continue`
+        // above this point - never a merely-zero stepCount.
+        int stepCount = 0;
+        if (rig.frozen) {
+            rig.accumulatedSeconds = 0.0f; // Never bank time while frozen - un-freezing later must not trigger a multi-step catch-up burst.
+        } else {
+            stepCount = ComputeFixedStepCount(rig.accumulatedSeconds, static_cast<float>(deltaSeconds),
+                m_globalSettings.fixedTimestepSeconds, m_globalSettings.maxStepsPerFrame);
         }
 
         // task_manager/verlet-integration-7, Phase 3 (v2) - the owning
@@ -293,7 +341,7 @@ void PhysicsSystem::Update(Registry& registry, double deltaSeconds)
 
         DynamicChainBatchContext context{ &model->skeleton, &model->chains, &rig.chainStates, &resolvedPose->pose,
             stepCount, m_globalSettings.fixedTimestepSeconds, m_globalSettings.gravity, m_globalSettings.wind,
-            entityWorldMatrix, entityWorldMatrixInverse };
+            entityWorldMatrix, entityWorldMatrixInverse, rig.frozen };
 
         // PHASE5, 3.4 - parallelize INDEPENDENT chains WITHIN this one
         // entity's own physics step, across the Job System's worker pool,

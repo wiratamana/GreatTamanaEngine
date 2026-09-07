@@ -43,6 +43,32 @@ struct DynamicChainRig {
     float accumulatedSeconds = 0.0f;
 
     bool enabled = true; // lets PHASE4's Inspector toggle disable physics per-instance without removing the component.
+
+    // task_manager/verlet-integration-7, Phase 4 - pauses simulation
+    // stepping (no further gravity/wind integration or structural
+    // relaxation) while PRESERVING the chain's own last-simulated shape -
+    // distinct from `enabled = false`, which instead reverts every affected
+    // bone to whatever the bind/animated FK pose already says. While frozen,
+    // PhysicsSystem::Update() still re-applies each chain's last-known
+    // simulated WORLD-space (scale-free - see Phase 3, v2) particle
+    // positions through the CURRENT frame's entity world matrix - so a
+    // frozen chain's shape keeps correctly riding along, rigidly, with any
+    // further motion/rotation of the model itself, instead of staying
+    // pinned to the exact spot in the world it was frozen at. Ignored
+    // entirely when `enabled == false` (disable always wins).
+    //
+    // NOTE (v2): this same "keep re-applying the last-known simulated shape
+    // every frame regardless of new integration" behavior is ALSO now
+    // unconditionally applied when this flag is `false` but the
+    // fixed-timestep accumulator simply hasn't crossed a whole step yet
+    // this frame (Culprit F, PHASE0_MASTER_STRATEGY.md's Revision Notes) -
+    // `frozen` and "ordinary sub-threshold frame" are two different REASONS
+    // stepping is skipped this call, but both must reach the exact same
+    // "still reapply, just don't integrate" code path in
+    // StepDynamicChainRange() below. `frozen` is never required merely to
+    // avoid Culprit F - it exists purely for the user-facing "pause and
+    // hold" feature.
+    bool frozen = false;
 };
 
 } // namespace gte

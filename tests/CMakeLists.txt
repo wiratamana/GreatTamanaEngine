@@ -1141,6 +1141,42 @@
 #                                            all (scale-invariance). No
 #                                            ECS/GPU/Renderer involved beyond
 #                                            a plain Registry.
+#   Game/Physics/PhysicsSystemFreezeAndCulpritFTests.cpp - Phase 4 (v2) of the
+#                                            verlet-integration-7 campaign
+#                                            (src/Game/Physics/
+#                                            PhysicsSystem.cpp, src/ECS/
+#                                            Components/DynamicChainRig.h):
+#                                            proves the new
+#                                            DynamicChainRig::frozen opt-out
+#                                            stops further integration while
+#                                            keeping the chain's last
+#                                            simulated shape, that a frozen
+#                                            chain still rides along rigidly
+#                                            with further entity Transform
+#                                            motion, that un-freezing never
+#                                            triggers a multi-step catch-up
+#                                            burst (accumulatedSeconds pinned
+#                                            at 0 while frozen), and that
+#                                            `enabled = false`'s pre-existing
+#                                            behavior is completely
+#                                            unaffected. Also proves the
+#                                            Culprit F fix: an ordinary,
+#                                            non-frozen chain (both a
+#                                            never-animated T-pose entity and
+#                                            a genuinely-playing animated
+#                                            entity) never visibly "pops"
+#                                            back to raw bind/FK pose on a
+#                                            render frame where the
+#                                            fixed-timestep accumulator
+#                                            legitimately produces
+#                                            stepCount == 0 (e.g. simulating a
+#                                            240 Hz display). No GPU/Renderer/
+#                                            ImGui involved beyond a plain
+#                                            Registry (one test also touches a
+#                                            real temp directory to feed a
+#                                            real *.gta AssetType::Animation
+#                                            file through AnimationSystem::
+#                                            Play()).
 #
 #
 # Note that the test BINARY still dynamically depends on SDL3.dll at process
@@ -1256,6 +1292,7 @@ set(GTE_TEST_SOURCES
     Game/Physics/DynamicChainRigCacheTests.cpp
     Game/Physics/PhysicsSystemParallelTests.cpp
     Game/Physics/PhysicsSystemWorldSpaceRootMotionTests.cpp
+    Game/Physics/PhysicsSystemFreezeAndCulpritFTests.cpp
     Animation/BoneChainResolverTests.cpp
     Animation/BonePoseMathTests.cpp
     Animation/SkeletonPoseTests.cpp

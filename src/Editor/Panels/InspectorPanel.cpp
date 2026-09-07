@@ -584,6 +584,11 @@ void BuildEntityInspector(Registry& registry, EditorContext& ctx, PhysicsSystem&
     if (DynamicChainRig* rig = registry.TryGetComponent<DynamicChainRig>(entity)) {
         if (ImGui::CollapsingHeader("Dynamic Chain Physics", ImGuiTreeNodeFlags_DefaultOpen)) {
             ImGui::Checkbox("Enabled", &rig->enabled);
+            ImGui::SameLine();
+            ImGui::Checkbox("Freeze", &rig->frozen);
+            ImGui::TextDisabled(
+                "Enabled: physics runs every frame. Freeze: keep the current jiggled shape, stop simulating "
+                "further, still rides along rigidly with the model.");
 
             DynamicChainRigCache::ModelEntry* model
                 = physicsSystem.GetDynamicChainRigCache().TryGetMutable(rig->meshGtaPath);
