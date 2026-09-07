@@ -368,6 +368,22 @@
 #                                            AND GTE_ENABLE_PROJECT_PANEL are
 #                                            both ON, same reason as
 #                                            EditorCameraTests.cpp above.
+#   - Editor/ModelRigCacheTests.cpp           - ModelRigCache::GetOrLoad()'s
+#                                            mtime-gated load/reload/cache
+#                                            behavior for a model's whole
+#                                            RigFileData (bones/rigid bodies/
+#                                            joints - see
+#                                            src/Editor/ModelRigCache.h) -
+#                                            no ImGui/Renderer/live GPU/SDL
+#                                            video involved, though it DOES
+#                                            touch a real temp directory (and
+#                                            real *.gta files written via
+#                                            WriteGtaFile()) the test itself
+#                                            creates/tears down. Only built
+#                                            when GTE_ENABLE_EDITOR AND
+#                                            GTE_ENABLE_PROJECT_PANEL are both
+#                                            ON, same reason as
+#                                            EditorCameraTests.cpp above.
 #   - Assets/AssetTypesTests.cpp           - Guid value semantics/generation/
 #                                            string round-trip, AssetFlags bit
 #                                            ops, and AssetTypeFromExtension()
@@ -1207,6 +1223,7 @@ if(GTE_ENABLE_EDITOR)
         list(APPEND GTE_TEST_SOURCES
             Editor/ProjectPanelDataTests.cpp
             Editor/AssetInspectorDataTests.cpp
+            Editor/ModelRigCacheTests.cpp
         )
     endif()
 endif()
