@@ -46,6 +46,15 @@ enum class ModelPartKind {
     Bone,
     RigidBody,
     Joint,
+    Verlet, // task_manager/verlet-integration-5 - a physics-simulated
+            // ("jiggle") bone chain joint, drawn/selected in the Bone
+            // Viewer's "Verlet" mode - see BoneViewerWindow.h. partIndex
+            // for this kind is the joint's own SKELETON BONE INDEX (the
+            // same index space Bone mode already uses), NOT a freshly
+            // flattened per-chain joint counter - see
+            // Physics/DynamicChainDefinition.h's
+            // FindDynamicChainJointByBoneIndex() for how a caller turns
+            // this back into "which chain, which position in it."
 };
 
 // The single gate-keeper for every Hierarchy-entity / Project-asset /

@@ -914,6 +914,29 @@
 #                                            normally; and an empty skeleton
 #                                            detects nothing. No ECS/GPU/
 #                                            Renderer involved.
+#   Physics/DynamicChainDefinitionTests.cpp - task_manager/verlet-integration-5,
+#                                            Phase 1's shared chain lookup
+#                                            (FindDynamicChainJointByBoneIndex() -
+#                                            src/Physics/
+#                                            DynamicChainDefinition.h): a
+#                                            bone index that is one of a
+#                                            chain's own jointBoneIndices
+#                                            resolves to the correct
+#                                            (chainIndex, jointIndexInChain)
+#                                            pair for both a first and a
+#                                            second chain; a bone index that
+#                                            is not a joint of ANY chain
+#                                            (including a chain's own
+#                                            rootBoneIndex, which is never
+#                                            itself a joint) returns
+#                                            invalid; a negative bone index
+#                                            returns invalid immediately; an
+#                                            empty chains list returns
+#                                            invalid for any input; and the
+#                                            result is never partially valid
+#                                            (both fields set or both -1,
+#                                            never a mix). No ECS/GPU/
+#                                            Renderer involved.
 #   Physics/SphereColliderTests.cpp         - Phase 5's bare-bone single-
 #                                            sphere collision projection
 #                                            (SolveSphereCollision() -
@@ -1188,6 +1211,7 @@ set(GTE_TEST_SOURCES
     Physics/BoneChainPhysicsResolverTests.cpp
     Physics/FixedTimestepAccumulatorTests.cpp
     Physics/DynamicChainDetectionTests.cpp
+    Physics/DynamicChainDefinitionTests.cpp
     Physics/SphereColliderTests.cpp
 )
 
