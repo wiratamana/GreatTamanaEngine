@@ -24,6 +24,7 @@ DynamicChainRigCache::ModelEntry BuildSampleEntry()
     chain.rootBoneIndex = 0;
     chain.jointBoneIndices = { 1 };
     chain.jointSettings = { DynamicJointSettings{} };
+    chain.parentJointIndex = DynamicChainDefinition::MakeLinearParentIndices(1);
     chain.restLengths = { 1.0f };
     entry.chains.push_back(chain);
 

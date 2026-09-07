@@ -1,4 +1,5 @@
 #pragma once
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -11,24 +12,84 @@ struct DynamicJointSettings {
     float mass = 1.0f;       // "Weight" - inverse-mass fed to VerletParticle::inverseMass (must be > 0).
 };
 
-// One dynamic bone chain (a linear run of physics-simulated bones on one
-// model - any number of independent chains may coexist on the same
-// skeleton, sharing no state with each other) - `rootBoneIndex` is NOT
-// simulated (it is the pinned anchor, always taken directly from the
-// animated FK pose every step); `jointBoneIndices` is the ordered list of
-// bones that ARE simulated, root-to-tip, each one's parent in the chain
-// being the previous entry (or rootBoneIndex for the first).
+// task_manager/verlet-integration-6, Phase 1/3 - a single non-hierarchy
+// stabilizing constraint between two joints that are BOTH already members
+// of this same chain's jointBoneIndices, but are NOT a parentJointIndex
+// tree edge (see DynamicChainDefinition::parentJointIndex's own doc comment
+// below). Indices are POSITIONS within jointBoneIndices
+// (0..jointBoneIndices.size()-1), never raw skeleton bone indices - mirrors
+// jointBoneIndices' own "index into itself" convention used by
+// parentJointIndex. Purely a Verlet SolveDistanceConstraint() pair
+// (ChainConstraints.h) - never drives bone rotation (see
+// BoneChainPhysicsResolver.h's own "IMPORTANT DESIGN NOTE" for exactly why
+// only a REAL skeleton parent/child pair can ever do that). This is how an
+// MMD skirt's authored horizontal "ring brace" Joints (connecting two
+// SIBLING bones, or two bones unrelated in the skeleton) still meaningfully
+// stabilize the simulation even though they can never move a bone by
+// themselves.
+struct ExtraStructuralConstraint {
+    std::int32_t jointIndexA = -1; // position within jointBoneIndices.
+    std::int32_t jointIndexB = -1; // position within jointBoneIndices.
+    float restLength = 0.0f;       // bind-pose distance between the two bones.
+};
+
+// One dynamic bone chain (a TREE of physics-simulated bones on one model -
+// any number of independent chains may coexist on the same skeleton,
+// sharing no state with each other) - `rootBoneIndex` is NOT simulated (it
+// is the pinned anchor, always taken directly from the animated FK pose
+// every step); `jointBoneIndices` is the ordered list of bones that ARE
+// simulated. task_manager/verlet-integration-6, Phase 1 - a chain used to be
+// an implicit flat linked list (jointBoneIndices[i]'s parent was ALWAYS
+// jointBoneIndices[i-1]); it is now an EXPLICIT tree via parentJointIndex
+// below, so a single chain can represent genuine branching (an MMD skirt's
+// spider-web hub with 4+ children) instead of being forced into one object
+// per branch - see PHASE0_MASTER_STRATEGY.md (verlet-integration-6) for the
+// full rationale.
 struct DynamicChainDefinition {
     std::int32_t rootBoneIndex = -1;
     std::vector<std::int32_t> jointBoneIndices;
     std::vector<DynamicJointSettings> jointSettings; // index-aligned 1:1 with jointBoneIndices.
 
+    // task_manager/verlet-integration-6, Phase 1 - EXPLICIT tree-parent per
+    // joint, index-aligned 1:1 with jointBoneIndices. parentJointIndex[i] is
+    // a POSITION within jointBoneIndices (never a raw bone index) of joint
+    // i's own parent joint; -1 means "my parent is rootBoneIndex directly."
+    // INVARIANT (relied on by BoneChainPhysicsResolver.cpp/DynamicChainSolver.cpp,
+    // and re-verified by both files' own tests): parentJointIndex[i], if not
+    // -1, MUST be < i (every joint's parent already has an earlier position
+    // in this same array) - this guarantees a single top-to-bottom pass over
+    // jointBoneIndices always processes a parent strictly before any of its
+    // children, exactly like the OLD implicit "i-1" order already guaranteed
+    // by construction. A chain builder (Phase 3) that violates this ordering
+    // produces a definition that will silently fail to pose/simulate
+    // correctly for the affected joint and every one of its descendants -
+    // this is the single most important invariant in this whole campaign.
+    // ALSO INVARIANT: skeleton.bones[jointBoneIndices[i]].parentBoneIndex
+    // must equal (parentJointIndex[i] < 0 ? rootBoneIndex :
+    // jointBoneIndices[parentJointIndex[i]]) - i.e. parentJointIndex must
+    // always describe a REAL skeleton parent/child pair, never an arbitrary
+    // graph edge (see this file's own header comment above
+    // ExtraStructuralConstraint, and PHASE0's Culprit A). Chain builders
+    // (Phase 3) are the ONLY code that may construct this array; hand-built
+    // test fixtures must respect it too.
+    //
+    // A pre-Phase1 "flat list" chain is just the special case
+    // parentJointIndex[i] == static_cast<std::int32_t>(i) - 1 for every i -
+    // use DynamicChainDefinition::MakeLinearParentIndices() below to build
+    // exactly that shape without repeating this logic at every call site.
+    std::vector<std::int32_t> parentJointIndex;
+
+    // task_manager/verlet-integration-6, Phase 1/3 - see
+    // ExtraStructuralConstraint's own doc comment above. May be empty (the
+    // overwhelmingly common case for a plain single-strand hair/tail chain
+    // with no cross-bracing Joints at all).
+    std::vector<ExtraStructuralConstraint> extraConstraints;
+
     // Bind-pose segment lengths, index-aligned with jointBoneIndices:
-    // restLengths[0] is the distance from rootBoneIndex to jointBoneIndices[0]
-    // in the BIND pose; restLengths[i] (i>0) is the distance from
-    // jointBoneIndices[i-1] to jointBoneIndices[i]. Precomputed once (see
-    // PHASE4's chain-building step) directly from SkeletonData::Bone::position
-    // - never recomputed per frame.
+    // restLengths[i] is the bind-pose distance between jointBoneIndices[i]
+    // and ITS OWN parentJointIndex-resolved parent (rootBoneIndex if -1) -
+    // see parentJointIndex's own doc comment above for exactly which bone
+    // that is. Precomputed once, never recomputed per frame.
     std::vector<float> restLengths;
 
     float gravityScale = 1.0f;             // LOCAL multiplier applied to the GLOBAL gravity vector (see PHASE4).
@@ -58,6 +119,14 @@ struct DynamicChainDefinition {
     // hand-built definitions/tests; DynamicChainDetection.h overrides this
     // per-chain based on the chain's own actual combined rest length.
     float maxPlausibleRootDelta = 10.0f;
+
+    // task_manager/verlet-integration-6, Phase 1 - convenience helper for
+    // both hand-built test fixtures AND any future single-strand-only
+    // caller: returns { -1, 0, 1, ..., jointCount - 2 }, the exact "flat
+    // list" shape every chain implicitly had before this phase. Pass the
+    // RESULT to a freshly-built DynamicChainDefinition's own
+    // parentJointIndex field directly.
+    static std::vector<std::int32_t> MakeLinearParentIndices(std::size_t jointCount);
 };
 
 // task_manager/verlet-integration-5, Phase 1 - the result of

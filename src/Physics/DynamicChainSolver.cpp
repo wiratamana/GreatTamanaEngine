@@ -45,7 +45,7 @@ void StepDynamicChain(const DynamicChainDefinition& definition, const Vec3& root
 {
     const std::size_t jointCount = definition.jointBoneIndices.size();
     if (definition.jointSettings.size() != jointCount || definition.restLengths.size() != jointCount
-        || animatedJointWorldPositions.size() != jointCount) {
+        || definition.parentJointIndex.size() != jointCount || animatedJointWorldPositions.size() != jointCount) {
         return; // Malformed/stale definition - never read/write out of bounds.
     }
     if (jointCount == 0) {
@@ -81,9 +81,19 @@ void StepDynamicChain(const DynamicChainDefinition& definition, const Vec3& root
         IntegrateParticle(particle, fixedDeltaTime, acceleration, definition.jointSettings[i].damping);
     }
 
-    // 3. Constrain-structural: repeated `constraintIterations` times, root
-    // -> tip. The root anchor is a local, stack-allocated particle each
-    // iteration - it is never itself simulated/stored in `state`.
+    // 3. Constrain-structural: repeated `constraintIterations` times. Every
+    // iteration walks jointBoneIndices in ascending order (root -> tip),
+    // resolving each joint's TREE parent via definition.parentJointIndex[i]
+    // (task_manager/verlet-integration-6, Phase 1) - the root anchor is a
+    // local, stack-allocated particle each iteration, never itself
+    // simulated/stored in `state`. Tree edges are solved BEFORE
+    // extraConstraints every iteration (parent-before-child, guaranteed by
+    // parentJointIndex's own invariant - see DynamicChainDefinition.h),
+    // mirroring standard PBD practice of resolving the "primary" structure
+    // before "secondary" bracing constraints within the same relaxation
+    // pass; extraConstraints are fully order-independent among themselves
+    // (each is a simple, symmetric pairwise correction with no ordering
+    // dependency on any other extra constraint).
     const int iterations = static_cast<int>(definition.constraintIterations);
     for (int iter = 0; iter < iterations; ++iter) {
         VerletParticle anchor;
@@ -92,9 +102,23 @@ void StepDynamicChain(const DynamicChainDefinition& definition, const Vec3& root
         anchor.inverseMass = 0.0f;
         anchor.pinned = true;
 
-        SolveDistanceConstraint(anchor, state.particles[0], definition.restLengths[0]);
-        for (std::size_t i = 1; i < jointCount; ++i) {
-            SolveDistanceConstraint(state.particles[i - 1], state.particles[i], definition.restLengths[i]);
+        for (std::size_t i = 0; i < jointCount; ++i) {
+            const std::int32_t parentJoint = definition.parentJointIndex[i];
+            if (parentJoint < 0) {
+                SolveDistanceConstraint(anchor, state.particles[i], definition.restLengths[i]);
+            } else {
+                SolveDistanceConstraint(state.particles[static_cast<std::size_t>(parentJoint)], state.particles[i],
+                    definition.restLengths[i]);
+            }
+        }
+        for (const ExtraStructuralConstraint& extra : definition.extraConstraints) {
+            if (extra.jointIndexA < 0 || extra.jointIndexB < 0
+                || static_cast<std::size_t>(extra.jointIndexA) >= jointCount
+                || static_cast<std::size_t>(extra.jointIndexB) >= jointCount) {
+                continue; // Malformed/stale - never read/write out of bounds.
+            }
+            SolveDistanceConstraint(state.particles[static_cast<std::size_t>(extra.jointIndexA)],
+                state.particles[static_cast<std::size_t>(extra.jointIndexB)], extra.restLength);
         }
     }
 

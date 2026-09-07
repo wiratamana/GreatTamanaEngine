@@ -21,6 +21,7 @@ DynamicChainDefinition BuildThreeJointChainDefinition(float stiffness, float dam
     DynamicChainDefinition definition;
     definition.rootBoneIndex = -1; // unused by StepDynamicChain itself - only jointBoneIndices' SIZE matters here.
     definition.jointBoneIndices = { 0, 1, 2 };
+    definition.parentJointIndex = DynamicChainDefinition::MakeLinearParentIndices(3);
     definition.jointSettings = {
         DynamicJointSettings{ damping, stiffness, 1.0f },
         DynamicJointSettings{ damping, stiffness, 1.0f },
@@ -168,6 +169,7 @@ TEST(DynamicChainSolverTests, StiffnessAndConstraintIterationsAreFullyDecoupled)
         DynamicChainDefinition definition;
         definition.rootBoneIndex = -1;
         definition.jointBoneIndices = { 0 };
+        definition.parentJointIndex = DynamicChainDefinition::MakeLinearParentIndices(1);
         definition.jointSettings = { DynamicJointSettings{ 0.0f, stiffness, 1.0f } };
         definition.restLengths = { restLength };
         definition.gravityScale = 1.0f;
@@ -400,5 +402,44 @@ TEST(DynamicChainSolverDeathTest, NanPositionTripsTheDiagnosticAssert)
 }
 
 #endif
+
+// (i) task_manager/verlet-integration-6, Phase 1 - a 3-joint linear chain
+// plus one ExtraStructuralConstraint{0, 2, restLength} (bracing joint 0
+// directly to joint 2, skipping joint 1) - seed particles far enough apart
+// that the extra constraint has real work to do, step long enough to
+// converge, and confirm the final distance between joint 0 and joint 2
+// lands within tolerance of the extra constraint's own restLength (proof
+// the new extra-constraint loop actually executes and converges).
+TEST(DynamicChainSolverTests, ExtraStructuralConstraintPullsTwoNonAdjacentParticlesTogether)
+{
+    DynamicChainDefinition definition = BuildThreeJointChainDefinition(/*stiffness=*/0.0f, /*damping=*/0.2f);
+    definition.extraConstraints = { ExtraStructuralConstraint{ 0, 2, /*restLength=*/1.5f } };
+
+    DynamicChainRuntimeState state;
+    state.initialized = true;
+    state.particles.resize(3);
+    // Seed particles far apart from each other - well past the extra
+    // constraint's own restLength - so it has real work to do.
+    state.particles[0].position = Vec3(-5.0f, 0.0f, 0.0f);
+    state.particles[0].previousPosition = state.particles[0].position;
+    state.particles[1].position = Vec3(0.0f, 0.0f, 0.0f);
+    state.particles[1].previousPosition = state.particles[1].position;
+    state.particles[2].position = Vec3(5.0f, 0.0f, 0.0f);
+    state.particles[2].previousPosition = state.particles[2].position;
+
+    const Vec3 root(0.0f, 0.0f, 0.0f);
+    // Animated targets far apart too, so the goal constraint (stiffness=0,
+    // a documented no-op) never masks the extra constraint's own effect.
+    const std::vector<Vec3> targets = { Vec3(-5.0f, 0.0f, 0.0f), Vec3(0.0f, 0.0f, 0.0f), Vec3(5.0f, 0.0f, 0.0f) };
+    const WindSettings noWind{};
+
+    for (int step = 0; step < 600; ++step) {
+        StepDynamicChain(definition, root, targets, state, 1.0f / 60.0f, Vec3::Zero(), noWind);
+    }
+
+    const float finalDistance = Length(state.particles[2].position - state.particles[0].position);
+    EXPECT_NEAR(finalDistance, 1.5f, 0.2f)
+        << "ExtraStructuralConstraint between joint 0 and joint 2 did not converge to its own restLength.";
+}
 
 } // namespace gte

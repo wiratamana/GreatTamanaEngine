@@ -28,8 +28,8 @@ namespace gte {
 // A bone's rotation only ever swings its DESCENDANTS. Therefore, to make
 // joint `i` (definition.jointBoneIndices[i]) actually LAND at
 // `simulatedJointWorldPositions[i]`, this function must rewrite its
-// PARENT's rotation (definition.rootBoneIndex for i==0, otherwise
-// definition.jointBoneIndices[i-1]) - never `pose[jointBoneIndices[i]]`
+// PARENT's rotation (resolved via definition.parentJointIndex[i] - see
+// step 1 below) - never `pose[jointBoneIndices[i]]`
 // itself. This mirrors exactly how Animation/IkSolver.h's CCD solver
 // already works (it rotates a LINK bone to swing a DESCENDANT effector
 // toward a target - never the effector's own entry), just applied here to a
@@ -42,10 +42,15 @@ namespace gte {
 // iteration's write is an ANCESTOR of this iteration's child bone, exactly
 // like IkSolver's own CCD chain - never process joints out of order or in
 // parallel against the SAME chain):
-//   1. parentBoneIndex = definition.rootBoneIndex for i==0, otherwise
-//      definition.jointBoneIndices[i-1] - THIS is the bone whose rotation
-//      gets rewritten this iteration. Skipped entirely (nothing to rotate)
-//      if out of range (e.g. a chain with no real root bone at all).
+//   1. parentBoneIndex is resolved via definition.parentJointIndex[i]
+//      (task_manager/verlet-integration-6, Phase 1 - an explicit TREE-parent
+//      position within jointBoneIndices, -1 meaning "my parent is
+//      rootBoneIndex directly"): definition.rootBoneIndex when
+//      parentJointIndex[i] < 0, otherwise
+//      definition.jointBoneIndices[parentJointIndex[i]] - THIS is the bone
+//      whose rotation gets rewritten this iteration. Skipped entirely
+//      (nothing to rotate) if out of range (e.g. a chain with no real root
+//      bone at all).
 //   2. parentWorld = ComputeBoneWorldMatrix(skeleton, pose, parentBoneIndex);
 //      parentWorldPos = parentWorld.TransformPoint(Vec3::Zero()).
 //   3. currentChildWorld = ComputeBoneWorldMatrix(skeleton, pose, jointBoneIndices[i]).

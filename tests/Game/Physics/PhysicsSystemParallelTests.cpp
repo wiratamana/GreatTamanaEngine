@@ -66,6 +66,7 @@ SymmetricModel BuildSymmetricModel(std::size_t chainCount)
         chain.rootBoneIndex = armRootIndex;
         chain.jointBoneIndices = { jointIndex };
         chain.jointSettings = { DynamicJointSettings{ /*damping=*/0.1f, /*stiffness=*/0.2f, /*mass=*/1.0f } };
+        chain.parentJointIndex = DynamicChainDefinition::MakeLinearParentIndices(1);
         chain.restLengths = { 1.0f };
         chain.gravityScale = 1.0f;
         chain.windScale = 1.0f;

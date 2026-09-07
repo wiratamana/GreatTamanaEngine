@@ -28,7 +28,7 @@ void ApplyDynamicChainPhysicsToPose(const SkeletonData& skeleton, const DynamicC
     const std::vector<Vec3>& simulatedJointWorldPositions, std::vector<BoneLocalOffset>& pose)
 {
     const std::size_t jointCount = definition.jointBoneIndices.size();
-    if (simulatedJointWorldPositions.size() != jointCount) {
+    if (simulatedJointWorldPositions.size() != jointCount || definition.parentJointIndex.size() != jointCount) {
         return; // Malformed/stale input - never read/write out of bounds.
     }
 
@@ -49,8 +49,15 @@ void ApplyDynamicChainPhysicsToPose(const SkeletonData& skeleton, const DynamicC
         // this file's own header comment ("IMPORTANT DESIGN NOTE") for why
         // this must be the PARENT, never `boneIndex` itself: a bone's own
         // rotation can never move its own world position, only its
-        // descendants'.
-        const std::int32_t parentBoneIndex = (i == 0) ? definition.rootBoneIndex : definition.jointBoneIndices[i - 1];
+        // descendants'. task_manager/verlet-integration-6, Phase 1 - resolved
+        // via the explicit TREE-parent (definition.parentJointIndex[i]),
+        // never assumed to be jointBoneIndices[i - 1] - the size check above
+        // already guarantees definition.parentJointIndex.size() == jointCount,
+        // so `i` is always a valid index into it here.
+        const std::int32_t parentJoint = definition.parentJointIndex[i];
+        const std::int32_t parentBoneIndex = (parentJoint < 0)
+            ? definition.rootBoneIndex
+            : definition.jointBoneIndices[static_cast<std::size_t>(parentJoint)];
         if (parentBoneIndex < 0 || static_cast<std::size_t>(parentBoneIndex) >= skeleton.bones.size()) {
             continue; // No real bone to rotate for this segment (e.g. a world-anchored chain with no root bone).
         }

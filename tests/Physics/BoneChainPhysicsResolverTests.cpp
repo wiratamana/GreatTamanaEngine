@@ -51,6 +51,7 @@ DynamicChainDefinition BuildSingleJointDefinition()
     definition.rootBoneIndex = 0;
     definition.jointBoneIndices = { 1 };
     definition.jointSettings = { DynamicJointSettings{} };
+    definition.parentJointIndex = DynamicChainDefinition::MakeLinearParentIndices(1);
     definition.restLengths = { 1.0f };
     return definition;
 }
@@ -128,6 +129,7 @@ TEST(BoneChainPhysicsResolverTests, ThreeJointChainAppliesRootToTipInDependencyO
     definition.rootBoneIndex = 0;
     definition.jointBoneIndices = { 1, 2 };
     definition.jointSettings = { DynamicJointSettings{}, DynamicJointSettings{} };
+    definition.parentJointIndex = DynamicChainDefinition::MakeLinearParentIndices(2);
     definition.restLengths = { 1.0f, 1.0f };
 
     std::vector<BoneLocalOffset> pose(skeleton.bones.size());
@@ -162,6 +164,7 @@ TEST(BoneChainPhysicsResolverTests, OutOfRangeJointBoneIndexIsSkippedGracefully)
     definition.rootBoneIndex = 0;
     definition.jointBoneIndices = { 99 }; // out of range
     definition.jointSettings = { DynamicJointSettings{} };
+    definition.parentJointIndex = DynamicChainDefinition::MakeLinearParentIndices(1);
     definition.restLengths = { 1.0f };
 
     std::vector<BoneLocalOffset> pose(skeleton.bones.size());
@@ -180,6 +183,7 @@ TEST(BoneChainPhysicsResolverTests, OutOfRangeRootBoneIndexIsSkippedGracefully)
     definition.rootBoneIndex = -1; // No real root bone (e.g. a world-anchored chain).
     definition.jointBoneIndices = { 1 };
     definition.jointSettings = { DynamicJointSettings{} };
+    definition.parentJointIndex = DynamicChainDefinition::MakeLinearParentIndices(1);
     definition.restLengths = { 1.0f };
 
     std::vector<BoneLocalOffset> pose(skeleton.bones.size());
@@ -188,6 +192,84 @@ TEST(BoneChainPhysicsResolverTests, OutOfRangeRootBoneIndexIsSkippedGracefully)
     ApplyDynamicChainPhysicsToPose(skeleton, definition, simulatedPositions, pose); // Must not crash.
 
     EXPECT_TRUE(RepresentSameRotation(pose[0].rotation, Quat::Identity()));
+    EXPECT_TRUE(RepresentSameRotation(pose[1].rotation, Quat::Identity()));
+}
+
+// task_manager/verlet-integration-6, Phase 1 - a "hub" scenario: two joints
+// sharing the SAME real skeleton parent bone (a 3-bone skeleton: root=0,
+// jointA=1 child of 0, jointB=2 ALSO child of 0), both resolved via
+// parentJointIndex = -1 (their parent is rootBoneIndex directly, matching
+// the skeleton). Proves ApplyDynamicChainPhysicsToPose() does not crash/
+// misbehave when TWO different joints in the same call both resolve to the
+// SAME parentBoneIndex - this is exactly the "hub" scenario Phase 3 will
+// construct for a spider-web skirt. KNOWN, ACCEPTED limitation (documented
+// here, and in Phase 3's own "Known Limitation" callout): each iteration
+// independently overwrites pose[parentBoneIndex].rotation from scratch
+// based on its own joint's target, so processing jointB after jointA in the
+// SAME call overwrites jointA's own corrective rotation - the shared
+// parent's final rotation ends up reflecting only the LAST-processed
+// child's own target.
+TEST(BoneChainPhysicsResolverTests, BranchingTreeRotatesTheSharedParentTowardBothChildrenIndependently)
+{
+    SkeletonData skeleton;
+    Bone root;
+    root.position = Vec3(0.0f, 0.0f, 0.0f);
+    root.parentBoneIndex = -1;
+    skeleton.bones.push_back(root); // 0
+
+    Bone jointA;
+    jointA.position = Vec3(0.0f, 1.0f, 0.0f);
+    jointA.parentBoneIndex = 0;
+    skeleton.bones.push_back(jointA); // 1
+
+    Bone jointB;
+    jointB.position = Vec3(0.0f, 1.0f, 0.0f); // Also a direct child of root.
+    jointB.parentBoneIndex = 0;
+    skeleton.bones.push_back(jointB); // 2
+
+    DynamicChainDefinition definition;
+    definition.rootBoneIndex = 0;
+    definition.jointBoneIndices = { 1, 2 };
+    definition.jointSettings = { DynamicJointSettings{}, DynamicJointSettings{} };
+    definition.parentJointIndex = { -1, -1 }; // Both joints' parent is rootBoneIndex directly.
+    definition.restLengths = { 1.0f, 1.0f };
+
+    std::vector<BoneLocalOffset> pose(skeleton.bones.size());
+    const std::vector<Vec3> simulatedPositions = {
+        Vec3(1.0f, 0.0f, 0.0f), // jointA's target
+        Vec3(0.0f, -1.0f, 0.0f), // jointB's DIFFERENT target.
+    };
+
+    // Must not crash/misbehave - the exact behavior asserted below documents
+    // the known, accepted "last child wins" limitation rather than any
+    // particular averaged/blended result.
+    ApplyDynamicChainPhysicsToPose(skeleton, definition, simulatedPositions, pose);
+
+    // jointB was processed last, so the shared root's final rotation must
+    // land IT (not jointA) at its own requested target.
+    const Vec3 jointBWorld = ComputeBoneWorldMatrix(skeleton, pose, 2).TransformPoint(Vec3::Zero());
+    EXPECT_TRUE(ApproximatelyEqual(jointBWorld, simulatedPositions[1], 1e-4f));
+}
+
+// task_manager/verlet-integration-6, Phase 1 - regression test proving the
+// corrected top-of-function guard (BoneChainPhysicsResolver.cpp) actually
+// prevents an out-of-bounds parentJointIndex read for stale/malformed data,
+// rather than the rejected per-iteration `continue` guard an earlier draft
+// of this campaign's own strategy document would have produced instead (see
+// PHASE0_MASTER_STRATEGY.md's own Revision Notes (v2), finding #7).
+TEST(BoneChainPhysicsResolverTests, MismatchedParentJointIndexSizeIsIgnoredGracefully)
+{
+    SkeletonData skeleton = BuildTwoBoneSkeleton();
+    DynamicChainDefinition definition = BuildSingleJointDefinition();
+    definition.parentJointIndex.clear(); // Simulate stale/malformed data.
+
+    std::vector<BoneLocalOffset> pose(skeleton.bones.size());
+    const std::vector<Vec3> simulatedPositions = { Vec3(1.0f, 0.0f, 0.0f) };
+
+    ApplyDynamicChainPhysicsToPose(skeleton, definition, simulatedPositions, pose); // Must not crash.
+
+    EXPECT_TRUE(RepresentSameRotation(pose[0].rotation, Quat::Identity()))
+        << "A mismatched parentJointIndex size must leave the pose completely untouched.";
     EXPECT_TRUE(RepresentSameRotation(pose[1].rotation, Quat::Identity()));
 }
 

@@ -17,10 +17,12 @@ std::vector<DynamicChainDefinition> MakeTwoChains()
     DynamicChainDefinition chain0;
     chain0.rootBoneIndex = 1;
     chain0.jointBoneIndices = { 2, 3, 4 };
+    chain0.parentJointIndex = DynamicChainDefinition::MakeLinearParentIndices(chain0.jointBoneIndices.size());
 
     DynamicChainDefinition chain1;
     chain1.rootBoneIndex = 6;
     chain1.jointBoneIndices = { 7, 8 };
+    chain1.parentJointIndex = DynamicChainDefinition::MakeLinearParentIndices(chain1.jointBoneIndices.size());
 
     return { chain0, chain1 };
 }
@@ -96,6 +98,25 @@ TEST(DynamicChainDefinitionTests, LocationIsNeverPartiallyValid)
     EXPECT_FALSE(notFound.IsValid());
     EXPECT_EQ(notFound.chainIndex, -1);
     EXPECT_EQ(notFound.jointIndexInChain, -1);
+}
+
+// task_manager/verlet-integration-6, Phase 1 - MakeLinearParentIndices()
+// must reproduce the exact "flat list" shape every chain implicitly had
+// before this campaign: index 0 has no chain-internal parent (-1), and
+// every later index i's parent is i - 1.
+TEST(DynamicChainDefinitionTests, MakeLinearParentIndicesProducesExpectedShapeForVariousJointCounts)
+{
+    EXPECT_TRUE(DynamicChainDefinition::MakeLinearParentIndices(0).empty());
+
+    const std::vector<std::int32_t> single = DynamicChainDefinition::MakeLinearParentIndices(1);
+    ASSERT_EQ(single.size(), 1u);
+    EXPECT_EQ(single[0], -1);
+
+    const std::vector<std::int32_t> three = DynamicChainDefinition::MakeLinearParentIndices(3);
+    ASSERT_EQ(three.size(), 3u);
+    EXPECT_EQ(three[0], -1);
+    EXPECT_EQ(three[1], 0);
+    EXPECT_EQ(three[2], 1);
 }
 
 } // namespace gte

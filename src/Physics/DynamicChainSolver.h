@@ -48,11 +48,19 @@ namespace gte {
 //      call IntegrateParticle(particle, fixedDeltaTime, acceleration,
 //      jointSettings[i].damping).
 //   3. Constrain-structural: repeat definition.constraintIterations times:
-//      SolveDistanceConstraint against a temporary anchor particle pinned at
-//      rootWorldPosition (inverseMass 0, pinned = true) for the first joint
-//      (restLengths[0]), then between consecutive joint particles for every
-//      later one (restLengths[i]). ONLY the structural/distance constraint
-//      is repeated here.
+//      for each joint i in ascending order, resolve its TREE parent via
+//      definition.parentJointIndex[i] (task_manager/verlet-integration-6,
+//      Phase 1 - an explicit tree-parent position within jointBoneIndices,
+//      -1 meaning "my parent is the root anchor directly") and
+//      SolveDistanceConstraint() against that parent particle (or a
+//      temporary anchor particle pinned at rootWorldPosition when the
+//      parent is the root itself), using restLengths[i]. AFTER every tree
+//      edge, every one of definition.extraConstraints (non-hierarchy
+//      "web brace" joints - see DynamicChainDefinition.h's own
+//      ExtraStructuralConstraint doc comment) is ALSO relaxed the same
+//      iteration, via a plain SolveDistanceConstraint() between its own two
+//      referenced joint particles. ONLY the structural/distance constraints
+//      are repeated here.
 //   4. Constrain-goal (this step MUST run exactly ONCE per call, OUTSIDE/
 //      AFTER the constraintIterations loop above, never inside it): for
 //      every joint i, SolveGoalConstraint(particles[i],
@@ -75,8 +83,8 @@ namespace gte {
 //      permanently corrupting that one joint for the rest of the session.
 //   7. state.simulationTimeSeconds += fixedDeltaTime.
 //
-// Degrades gracefully (does nothing) if any of the three index-aligned
-// arrays (jointBoneIndices/jointSettings/restLengths,
+// Degrades gracefully (does nothing) if any of the four index-aligned
+// arrays (jointBoneIndices/jointSettings/restLengths/parentJointIndex,
 // animatedJointWorldPositions) disagree in size - a malformed/stale
 // definition must never read or write out of bounds.
 void StepDynamicChain(const DynamicChainDefinition& definition, const Vec3& rootWorldPosition,

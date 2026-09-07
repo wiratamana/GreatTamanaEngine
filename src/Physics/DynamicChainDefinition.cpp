@@ -2,6 +2,15 @@
 
 namespace gte {
 
+std::vector<std::int32_t> DynamicChainDefinition::MakeLinearParentIndices(std::size_t jointCount)
+{
+    std::vector<std::int32_t> parentJointIndex(jointCount);
+    for (std::size_t i = 0; i < jointCount; ++i) {
+        parentJointIndex[i] = (i == 0) ? -1 : static_cast<std::int32_t>(i) - 1;
+    }
+    return parentJointIndex;
+}
+
 DynamicChainJointLocation FindDynamicChainJointByBoneIndex(
     const std::vector<DynamicChainDefinition>& chains, std::int32_t boneIndex)
 {
