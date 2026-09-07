@@ -1226,6 +1226,7 @@ if(GTE_ENABLE_EDITOR)
             Editor/ModelRigCacheTests.cpp
             Editor/RigidBodyWireframeTests.cpp
             Editor/RigidBodySelectionAlgorithmsTests.cpp
+            Editor/FlatListRangeSelectionTests.cpp
         )
     endif()
 endif()

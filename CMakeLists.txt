@@ -506,6 +506,8 @@ if(GTE_ENABLE_EDITOR)
             src/Editor/RigidBodyWireframe.cpp
             src/Editor/RigidBodyGroupSelection.h
             src/Editor/RigidBodyGroupSelection.cpp
+            src/Editor/FlatListRangeSelection.h
+            src/Editor/FlatListRangeSelection.cpp
             src/Editor/BoneViewerWindow.h
             src/Editor/BoneViewerWindow.cpp
         )

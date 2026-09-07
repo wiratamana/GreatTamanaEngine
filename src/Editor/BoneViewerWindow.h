@@ -2,6 +2,7 @@
 
 #include "Selection.h" // ModelPartKind
 #include "RigidBodyGroupSelection.h" // RigidBodyJointEdge, BuildRigidBodyAdjacency()
+#include "FlatListRangeSelection.h" // BuildInclusiveIndexRange()
 #include "../Assets/PhysicsData.h" // RigidBodyShape
 #include "../Math/Vec3.h"
 
@@ -233,6 +234,23 @@ private:
     // per (re)load, right alongside m_rigidBodies/m_joints themselves - see
     // RebuildRigidBodyAdjacencyIndex().
     std::vector<std::vector<std::int32_t>> m_rigidBodyAdjacency;
+
+    // The last FLAT-list part index (Rigid Body/Joint mode only - see
+    // m_viewMode) that was the target of a PLAIN or Ctrl-click - Shift-
+    // click's own "anchor" for a genuine Windows-Explorer-style contiguous
+    // range select (see FlatListRangeSelection.h's BuildInclusiveIndexRange(),
+    // and task_manager/verlet-integration-4/
+    // PHASE3_BONE_VIEWER_SELECT_ALL_BUTTONS_AND_MULTISELECT_INPUT.md's own
+    // v2 revision). Reset to -1 (no anchor) whenever the index space it
+    // refers to stops meaning the same thing: a genuine data reload
+    // (EnsureDataLoaded()'s "reload starting" block, right alongside
+    // ctx.selection.ClearModelPartIfEntity() - see Step 3.8 below) and any
+    // m_viewMode change (the View combo callback - Step 3.8 below) -
+    // RigidBody/Joint each have their own independent index space, and Bone
+    // mode has no flat-list range-select concept at all (see
+    // RenderBoneTreeNode()'s own doc comment, Step 3.3, for why the tree
+    // stays toggle-only for both Ctrl AND Shift).
+    std::int32_t m_flatSelectionAnchorIndex = -1;
 
     // Bounding sphere of the currently-uploaded mesh (model-local space) -
     // used by FrameCameraToBounds() to auto-frame the orbit camera whenever

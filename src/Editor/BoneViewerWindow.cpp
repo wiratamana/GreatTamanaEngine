@@ -156,6 +156,7 @@ void BoneViewerWindow::Reset()
     m_boneChildren.clear();
     m_rootBoneIndices.clear();
     m_rigidBodyAdjacency.clear();
+    m_flatSelectionAnchorIndex = -1;
     m_cachedPath.clear();
     m_cachedWriteTime = std::filesystem::file_time_type{};
     m_cachedIsValid = false;
@@ -364,6 +365,7 @@ bool BoneViewerWindow::EnsureDataLoaded(
     // OTHER entity (e.g. the user picked a different entity in Hierarchy
     // since) is correctly left untouched.
     ctx.selection.ClearModelPartIfEntity(m_targetEntity);
+    m_flatSelectionAnchorIndex = -1; // Different data, possibly a different rigid-body/joint count/order - see this field's own doc comment.
 
     m_cachedPath = absoluteGtaPath;
     m_cachedIsValid = false;
@@ -578,7 +580,29 @@ void BoneViewerWindow::RenderBoneTreeNode(std::int32_t boneIndex, const std::str
     const bool opened = ImGui::TreeNodeEx(label.c_str(), flags);
 
     if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
-        ctx.selection.SelectModelPart(m_targetEntity, ModelPartKind::Bone, boneIndex);
+        // Ctrl/Shift-click both TOGGLE (add/remove) this one bone in/out of
+        // the current selection - Selection's own multi-object support
+        // (task_manager/verlet-integration-4/
+        // PHASE1_SELECTION_MULTI_MODEL_PART_SUPPORT.md's
+        // ToggleModelPartInSelection()). Deliberately NOT a genuine Windows-
+        // Explorer-style Shift range-select here (unlike Rigid Body/Joint's
+        // flat rows/viewport dot, below) - a bone's raw array index has no
+        // meaningful linear "range" to a user looking at an indented
+        // hierarchy tree, only its position within whichever branch happens
+        // to be expanded right now; correctly supporting a range select here
+        // would first require flattening the CURRENTLY VISIBLE/expanded tree
+        // rows into a linear order, a meaningfully bigger and differently-
+        // shaped piece of work the story never asked for - see
+        // task_manager/verlet-integration-4/PHASE0_MASTER_STRATEGY.md's
+        // "What We Will NOT Do" (v2). A plain click (neither modifier held)
+        // keeps today's exact "replace with just this one" behavior via
+        // SelectModelPart().
+        const ImGuiIO& io = ImGui::GetIO();
+        if (io.KeyCtrl || io.KeyShift) {
+            ctx.selection.ToggleModelPartInSelection(m_targetEntity, ModelPartKind::Bone, boneIndex);
+        } else {
+            ctx.selection.SelectModelPart(m_targetEntity, ModelPartKind::Bone, boneIndex);
+        }
         // Double-clicking a row re-centers the orbit camera on that bone
         // (keeping the current distance/angle) - a quick way to jump to a
         // bone buried deep in a large skeleton without hunting for its dot
@@ -610,7 +634,30 @@ void BoneViewerWindow::RenderFlatPartRow(ModelPartKind kind, std::int32_t index,
 
     ImGui::PushID(index);
     if (ImGui::Selectable(label.c_str(), isSelected)) {
-        ctx.selection.SelectModelPart(m_targetEntity, kind, index);
+        // v2 (task_manager/verlet-integration-4/PHASE0_MASTER_STRATEGY.md's
+        // Revision Notes, finding #2): Ctrl-click TOGGLES exactly this one
+        // row in/out of the current selection (Selection's own
+        // ToggleModelPartInSelection()); Shift-click instead performs a
+        // genuine Windows-Explorer/Unity-style contiguous RANGE select from
+        // m_flatSelectionAnchorIndex (the last plain- or Ctrl-clicked row -
+        // see that field's own doc comment, BoneViewerWindow.h) through
+        // THIS row, REPLACING the whole selection with exactly that range
+        // (never a union with whatever was selected before - a real
+        // Explorer Shift-click does the same). A plain click (neither
+        // modifier held) keeps today's exact "replace with just this one"
+        // behavior via SelectModelPart(), and also moves the range anchor to
+        // this row, same as a real Ctrl-click does.
+        const ImGuiIO& io = ImGui::GetIO();
+        if (io.KeyShift) {
+            const std::vector<std::int32_t> range = BuildInclusiveIndexRange(m_flatSelectionAnchorIndex, index);
+            ctx.selection.SelectModelParts(m_targetEntity, kind, std::vector<int>(range.begin(), range.end()));
+        } else if (io.KeyCtrl) {
+            ctx.selection.ToggleModelPartInSelection(m_targetEntity, kind, index);
+            m_flatSelectionAnchorIndex = index;
+        } else {
+            ctx.selection.SelectModelPart(m_targetEntity, kind, index);
+            m_flatSelectionAnchorIndex = index;
+        }
         if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
             m_camTarget = position;
         }
@@ -711,6 +758,7 @@ void BoneViewerWindow::Build(Registry& registry, Renderer& renderer, EditorConte
     int viewModeIndex = static_cast<int>(m_viewMode);
     if (ImGui::Combo("View", &viewModeIndex, kViewModeLabels, static_cast<int>(std::size(kViewModeLabels)))) {
         m_viewMode = static_cast<ModelPartKind>(viewModeIndex);
+        m_flatSelectionAnchorIndex = -1; // Different index space (Rigid Body vs. Joint vs. Bone) - see this field's own doc comment.
     }
     ImGui::PopItemWidth();
     ImGui::SameLine();
@@ -732,6 +780,105 @@ void BoneViewerWindow::Build(Registry& registry, Renderer& renderer, EditorConte
         ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "This model has no joint physics data.");
     }
     ImGui::Separator();
+
+    // "Select All (Group)"/"Select All (Branch)" - only meaningful in Rigid
+    // Body mode (RigidBodyEntry::group and joint-adjacency are both
+    // rigid-body-only concepts - see task_manager/verlet-integration-4/
+    // PHASE0_MASTER_STRATEGY.md, Step 4). Seeded from whichever ONE rigid
+    // body is currently the Model-Part selection on THIS window's own
+    // m_targetEntity - both buttons are disabled (not merely a no-op) when
+    // there is no such single seed to act from, matching this codebase's
+    // existing "grey out an action with nothing valid to act on" convention
+    // (see Panels/ProjectPanel.cpp's own "Delete Selected" menu item gated
+    // on HasAssetSelection()).
+    if (m_viewMode == ModelPartKind::RigidBody && !m_rigidBodies.empty()) {
+        // v2 fix (task_manager/verlet-integration-4/PHASE0_MASTER_STRATEGY.md's
+        // Revision Notes, finding #1): hasSeed now ALSO requires
+        // SelectedModelPartIndices().size() == 1. v1's check below the
+        // "&&"s stopped at "the lowest selected index is in range," which
+        // stays true even when SEVERAL rigid bodies are already selected
+        // (e.g. right after clicking one of these very buttons once
+        // already, or after a Shift-range-select) - reseeding from
+        // SelectedModelPartIndex() (always just the LOWEST of however many
+        // are selected - see Selection.h) in that state is ambiguous and
+        // contradicts this button's own "seeded from whichever ONE rigid
+        // body is currently selected" contract (Step 1, goal #1) and the
+        // story's own singular "pick everything with same group [as THE
+        // selected one]" phrasing.
+        const bool hasSeed = ctx.selection.Kind() == InspectorSelectionKind::ModelPart
+            && ctx.selection.SelectedModelPartEntity() == m_targetEntity
+            && ctx.selection.SelectedModelPartKind() == ModelPartKind::RigidBody
+            && ctx.selection.SelectedModelPartIndices().size() == 1
+            && ctx.selection.SelectedModelPartIndex() >= 0
+            && static_cast<std::size_t>(ctx.selection.SelectedModelPartIndex()) < m_rigidBodies.size();
+
+        const std::int32_t seed = hasSeed ? static_cast<std::int32_t>(ctx.selection.SelectedModelPartIndex()) : -1;
+        // Only meaningful when hasSeed is true (seed >= 0 and in range) -
+        // guarded accordingly at every read site below.
+        const bool seedIsBranch = hasSeed && m_rigidBodyAdjacency[static_cast<std::size_t>(seed)].size() >= 3;
+
+        ImGui::BeginDisabled(!hasSeed);
+        if (ImGui::Button("Select All (Group)")) {
+            std::vector<std::uint8_t> groups;
+            groups.reserve(m_rigidBodies.size());
+            for (const RigidBodyEntry& body : m_rigidBodies) {
+                groups.push_back(body.group);
+            }
+            const std::vector<std::int32_t> matches = SelectRigidBodiesByGroup(groups, seed);
+            ctx.selection.SelectModelParts(
+                m_targetEntity, ModelPartKind::RigidBody, std::vector<int>(matches.begin(), matches.end()));
+        }
+        // v2 QoL addition (task_manager/verlet-integration-4/
+        // PHASE0_MASTER_STRATEGY.md's Revision Notes, finding #3): preview
+        // the real match count on hover, computed via the exact same Phase 2
+        // function the click handler itself calls above - never a
+        // second, independently-maintained estimate.
+        if (hasSeed && ImGui::IsItemHovered()) {
+            std::vector<std::uint8_t> groups;
+            groups.reserve(m_rigidBodies.size());
+            for (const RigidBodyEntry& body : m_rigidBodies) {
+                groups.push_back(body.group);
+            }
+            const std::size_t count = SelectRigidBodiesByGroup(groups, seed).size();
+            const RigidBodyEntry& seedBody = m_rigidBodies[static_cast<std::size_t>(seed)];
+            ImGui::SetTooltip("Selects %zu rigid bod%s sharing collision group %u with \"%s\".", count,
+                count == 1 ? "y" : "ies", static_cast<unsigned>(seedBody.group), seedBody.name.c_str());
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Select All (Branch)")) {
+            const std::vector<std::int32_t> matches = SelectRigidBodyBranch(m_rigidBodyAdjacency, seed);
+            ctx.selection.SelectModelParts(
+                m_targetEntity, ModelPartKind::RigidBody, std::vector<int>(matches.begin(), matches.end()));
+        }
+        if (hasSeed && ImGui::IsItemHovered()) {
+            const RigidBodyEntry& seedBody = m_rigidBodies[static_cast<std::size_t>(seed)];
+            if (seedIsBranch) {
+                // The seed itself is a junction (degree >= 3) - the click
+                // handler above will correctly select just `{ seed }` (see
+                // Phase 2's own SelectRigidBodyBranchFromABranchNodeItself...
+                // test) - tell the user WHY up front instead of letting them
+                // discover "nothing visibly changed" by clicking blind.
+                ImGui::SetTooltip(
+                    "\"%s\" is itself a branch/junction (connected to %zu other rigid bodies) -\n"
+                    "there is no single unambiguous chain to select; only itself will be selected.",
+                    seedBody.name.c_str(), m_rigidBodyAdjacency[static_cast<std::size_t>(seed)].size());
+            } else {
+                const std::size_t count = SelectRigidBodyBranch(m_rigidBodyAdjacency, seed).size();
+                ImGui::SetTooltip("Selects %zu rigid bod%s in \"%s\"'s own uninterrupted joint chain.", count,
+                    count == 1 ? "y" : "ies", seedBody.name.c_str());
+            }
+        }
+        ImGui::EndDisabled();
+        if (!hasSeed) {
+            ImGui::SameLine();
+            if (ctx.selection.SelectedModelPartIndices().size() > 1) {
+                ImGui::TextDisabled("(select exactly one rigid body first - %zu are currently selected)",
+                    ctx.selection.SelectedModelPartIndices().size());
+            } else {
+                ImGui::TextDisabled("(select a rigid body first)");
+            }
+        }
+    }
 
     const std::string lowerFilter = ToLower(std::string(m_searchBuffer));
 
@@ -907,12 +1054,42 @@ void BoneViewerWindow::Build(Registry& registry, Renderer& renderer, EditorConte
         // what NEXT frame renders - see this window's own class comment for
         // why this one-frame lag mirrors Panels/ScenePanel.cpp's
         // EditorCamera handling) ---------------------------------------------
+        // `io` moved up here (from further below) since the click handling
+        // just below now needs KeyCtrl/KeyShift too - every other pre-
+        // existing use of `io` further down in this function keeps working
+        // unchanged, it is the exact same local, just declared a few lines
+        // earlier now.
+        const ImGuiIO& io = ImGui::GetIO();
         if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
             if (hoveredPartIndex >= 0) {
                 // Clicked directly on a part's gizmo dot - select it
                 // (mirrors clicking its row in the tree/list pane) instead
-                // of starting an orbit-camera drag.
-                ctx.selection.SelectModelPart(m_targetEntity, m_viewMode, hoveredPartIndex);
+                // of starting an orbit-camera drag. Range-select (Shift)
+                // only makes sense for a flat, linearly-ordered list (Rigid
+                // Body/Joint mode) - Bone mode keeps the same toggle-only
+                // behavior as its own tree rows (RenderBoneTreeNode()) for
+                // both Ctrl AND Shift, since a bone's raw array index
+                // carries no meaningful "range" to a user (see that
+                // function's own updated doc comment above, and
+                // task_manager/verlet-integration-4/
+                // PHASE0_MASTER_STRATEGY.md's Revision Notes, finding #2).
+                const bool supportsRangeSelect = m_viewMode != ModelPartKind::Bone;
+                if (supportsRangeSelect && io.KeyShift) {
+                    const std::vector<std::int32_t> range = BuildInclusiveIndexRange(
+                        m_flatSelectionAnchorIndex, static_cast<std::int32_t>(hoveredPartIndex));
+                    ctx.selection.SelectModelParts(
+                        m_targetEntity, m_viewMode, std::vector<int>(range.begin(), range.end()));
+                } else if (io.KeyCtrl || io.KeyShift) {
+                    ctx.selection.ToggleModelPartInSelection(m_targetEntity, m_viewMode, hoveredPartIndex);
+                    if (supportsRangeSelect) {
+                        m_flatSelectionAnchorIndex = hoveredPartIndex;
+                    }
+                } else {
+                    ctx.selection.SelectModelPart(m_targetEntity, m_viewMode, hoveredPartIndex);
+                    if (supportsRangeSelect) {
+                        m_flatSelectionAnchorIndex = hoveredPartIndex;
+                    }
+                }
             } else {
                 m_rotating = true;
             }
@@ -927,7 +1104,6 @@ void BoneViewerWindow::Build(Registry& registry, Renderer& renderer, EditorConte
             m_panning = false;
         }
 
-        const ImGuiIO& io = ImGui::GetIO();
         if (m_rotating) {
             m_camYawDeg += io.MouseDelta.x * 0.3f;
             m_camPitchDeg = Clamp(m_camPitchDeg + io.MouseDelta.y * 0.3f, -85.0f, 85.0f);
@@ -1039,13 +1215,22 @@ void BoneViewerWindow::Build(Registry& registry, Renderer& renderer, EditorConte
                 // (PHASE2_BONE_VIEWER_SELECT_TO_REVEAL_WIREFRAME_INTEGRATION.md):
                 // an UNSELECTED rigid body shows ONLY its plain dot (drawn
                 // above, shared with Bone/Joint mode) - exactly a "single
-                // selectable point", per the story's own requirement. Only
-                // the CURRENTLY SELECTED rigid body additionally reveals its
-                // real, per-shape wireframe (a wire sphere/box/capsule built
-                // from its actual shape/size/rotation - see
-                // RigidBodyWireframe.h), never a generic screen-space circle
-                // - and never for more than one body at once, since
-                // Selection is single-selection end-to-end.
+                // selectable point", per that campaign's own requirement.
+                // Every CURRENTLY SELECTED rigid body additionally reveals
+                // its real, per-shape wireframe (a wire sphere/box/capsule
+                // built from its actual shape/size/rotation - see
+                // RigidBodyWireframe.h), never a generic screen-space
+                // circle. As of task_manager/verlet-integration-4
+                // (PHASE1_SELECTION_MULTI_MODEL_PART_SUPPORT.md/
+                // PHASE3_BONE_VIEWER_SELECT_ALL_BUTTONS_AND_MULTISELECT_INPUT.md),
+                // Selection can hold MANY rigid bodies at once (Ctrl-click,
+                // Shift-range-select, or the "Select All (Group)"/"Select
+                // All (Branch)" toolbar buttons) - `isSelected` here is a
+                // per-part membership check, so this loop naturally draws a
+                // wireframe for EVERY currently-selected rigid body, not
+                // just one; no code in this loop needed to change for that
+                // to be correct - only IsModelPartSelected()'s own
+                // semantics did (see Selection.h).
                 if (m_viewMode == ModelPartKind::RigidBody && isSelected) {
                     const RigidBodyEntry& body = m_rigidBodies[i];
                     const std::vector<WireframeSegment> wireframe =
