@@ -81,12 +81,17 @@ const char* JointTypeLabel(JointType type)
 // task_manager/verlet-integration-2/PHASE1_SELECTION_MODEL_PART_FOUNDATION.md)
 // - the sub-part-of-a-model equivalent of BuildEntityInspector()/
 // BuildAssetInspector() below. Every field is read-only (plain ImGui::Text()
-// or ImGui::BeginDisabled()) - there is no physics simulation anywhere in
-// the engine that consumes RigidBody/Joint data yet (see
-// Assets/PhysicsData.h's own file comment), so there is nothing for an edit
-// here to actually drive - same scope limit as this file's existing
-// "Mesh Renderer"/"Global Physics Settings" read-only sections.
-void BuildModelPartInspector(Registry& registry, EditorContext& ctx, ModelRigCache& rigCache)
+// or ImGui::BeginDisabled()) for the Bone/RigidBody/Joint cases - there is no
+// physics simulation anywhere in the engine that consumes RigidBody/Joint
+// data yet (see Assets/PhysicsData.h's own file comment), so there is
+// nothing for an edit here to actually drive - same scope limit as this
+// file's existing "Mesh Renderer"/"Global Physics Settings" read-only
+// sections. The Verlet case (task_manager/verlet-integration-5,
+// PHASE3_INSPECTOR_VERLET_JOINT_SECTION.md) is the one exception - a real,
+// already-running simulation (PhysicsSystem::Update()) DOES consume
+// DynamicJointSettings, so that branch genuinely live-edits
+// PhysicsSystem's own DynamicChainRigCache.
+void BuildModelPartInspector(Registry& registry, EditorContext& ctx, ModelRigCache& rigCache, PhysicsSystem& physicsSystem)
 {
     const Entity owner = ctx.selection.SelectedModelPartEntity();
     if (!registry.IsAlive(owner)) {
@@ -336,6 +341,87 @@ void BuildModelPartInspector(Registry& registry, EditorContext& ctx, ModelRigCac
                 ImGui::DragFloat3("Spring Rotate Factor", &springRotateFactor.x);
             }
             ImGui::EndDisabled();
+        }
+        break;
+    }
+    case ModelPartKind::Verlet: {
+        ImGui::TextColored(ImVec4(0.55f, 0.75f, 1.0f, 1.0f), "Verlet Joint");
+
+        // `index` (this function's own existing local, set earlier from
+        // ctx.selection.SelectedModelPartIndex()) is a SKELETON BONE INDEX for
+        // this ModelPartKind - see task_manager/verlet-integration-5/
+        // PHASE1_CHAIN_LOOKUP_AND_SELECTION_FOUNDATION.md's own "bone index,
+        // not a flattened counter" decision - NOT a direct index into any
+        // chains/jointBoneIndices array itself.
+        if (index < 0 || static_cast<std::size_t>(index) >= rig->skeleton.bones.size()) {
+            ImGui::TextDisabled("Bone index %d is out of range (the model may have changed).", index);
+            break;
+        }
+        const Bone& bone = rig->skeleton.bones[static_cast<std::size_t>(index)];
+        ImGui::Text("Bone: %s (index %d)", bone.name.empty() ? "(unnamed)" : bone.name.c_str(), index);
+
+        DynamicChainRigCache::ModelEntry* model = physicsSystem.GetDynamicChainRigCache().TryGetMutable(source->gtaPath);
+        if (model == nullptr) {
+            ImGui::TextDisabled("No dynamic-chain physics data registered for this model.");
+            break;
+        }
+        const DynamicChainJointLocation location = FindDynamicChainJointByBoneIndex(model->chains, index);
+        if (!location.IsValid()) {
+            ImGui::TextDisabled(
+                "This bone is not a physics-simulated joint in any detected chain (it may be a chain's own root/anchor bone, or unrelated).");
+            break;
+        }
+
+        DynamicChainDefinition& chain = model->chains[static_cast<std::size_t>(location.chainIndex)];
+        const std::size_t jointIndex = static_cast<std::size_t>(location.jointIndexInChain);
+        ImGui::Text("Chain: %d (%zu joints)", location.chainIndex, chain.jointBoneIndices.size());
+        ImGui::Text("Position In Chain: %d of %zu", location.jointIndexInChain + 1, chain.jointBoneIndices.size());
+
+        const char* rootName = (chain.rootBoneIndex >= 0 && static_cast<std::size_t>(chain.rootBoneIndex) < rig->skeleton.bones.size())
+            ? rig->skeleton.bones[static_cast<std::size_t>(chain.rootBoneIndex)].name.c_str()
+            : "(none)";
+        ImGui::Text("Chain Root (Pinned Anchor): %s (index %d)", rootName, chain.rootBoneIndex);
+
+        if (jointIndex < chain.restLengths.size()) {
+            ImGui::BeginDisabled();
+            float restLength = chain.restLengths[jointIndex];
+            ImGui::DragFloat("Rest Length (to previous joint)", &restLength);
+            ImGui::EndDisabled();
+        }
+
+        ImGui::Separator();
+        ImGui::TextColored(ImVec4(0.55f, 0.75f, 1.0f, 1.0f), "Simulation Parameters (live - edits apply next physics step)");
+        // v2 robustness fix (see PHASE0_MASTER_STRATEGY.md's "Revision Notes
+        // (v2)", finding #3): jointSettings is documented as always
+        // index-aligned 1:1 with jointBoneIndices (DynamicChainDefinition.h's
+        // own doc comment), so this bounds check can never actually fail in
+        // practice - but the neighboring restLengths read two lines above this
+        // one already defensively checks its own bounds before indexing, and
+        // this whole file's every other single-part case (Bone/RigidBody/Joint,
+        // just above this one) treats "should never happen per an invariant
+        // elsewhere" as still worth guarding rather than an unchecked index -
+        // keep this branch consistent with that same convention instead of the
+        // one array access in this whole switch that silently assumed otherwise.
+        if (jointIndex >= chain.jointSettings.size()) {
+            ImGui::TextDisabled(
+                "Joint settings index %zu is out of range for this chain (%zu entries) - the chain data may be malformed.",
+                jointIndex, chain.jointSettings.size());
+            break;
+        }
+        DynamicJointSettings& settings = chain.jointSettings[jointIndex];
+        ImGui::DragFloat("Damping", &settings.damping, 0.005f, 0.0f, 1.0f);
+        ImGui::DragFloat("Stiffness", &settings.stiffness, 0.005f, 0.0f, 1.0f);
+        ImGui::DragFloat("Weight (Mass)", &settings.mass, 0.01f, 0.01f, 100.0f);
+
+        ImGui::Separator();
+        ImGui::TextColored(ImVec4(0.55f, 0.75f, 1.0f, 1.0f), "Chain-Wide Settings");
+        ImGui::DragFloat("Gravity Scale", &chain.gravityScale, 0.01f, 0.0f, 10.0f);
+        ImGui::DragFloat("Wind Scale", &chain.windScale, 0.01f, 0.0f, 10.0f);
+        ImGui::Checkbox("Head Collider", &chain.hasHeadCollider);
+        if (chain.hasHeadCollider) {
+            ImGui::DragInt("Collider Bone Index", &chain.headColliderBoneIndex, 1.0f, 0,
+                static_cast<int>(rig->skeleton.bones.size()) - 1);
+            ImGui::DragFloat("Collider Radius", &chain.headColliderRadius, 0.01f, 0.0f, 10.0f);
         }
         break;
     }
@@ -1092,7 +1178,7 @@ void BuildInspectorPanel(Registry& registry, EditorContext& ctx, PhysicsSystem& 
         return;
     }
     if (ctx.selection.Kind() == InspectorSelectionKind::ModelPart) {
-        BuildModelPartInspector(registry, ctx, rigCache);
+        BuildModelPartInspector(registry, ctx, rigCache, physicsSystem);
         ImGui::End();
         return;
     }
