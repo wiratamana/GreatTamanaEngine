@@ -1107,6 +1107,40 @@
 #                                            GPU/Renderer/live Vulkan device
 #                                            involved - a plain Registry is
 #                                            enough.
+#   Game/Physics/PhysicsSystemWorldSpaceRootMotionTests.cpp - Phase 3 of the
+#                                            verlet-integration-7 campaign
+#                                            (src/Game/Physics/
+#                                            PhysicsSystem.cpp): proves
+#                                            PhysicsSystem::Update() now
+#                                            composes the owning ECS entity's
+#                                            REAL, resolved world position/
+#                                            rotation (scale excluded) with
+#                                            the bone-local pose before
+#                                            simulating - a Transform
+#                                            translation produces genuine
+#                                            inertial lag in the tip joint
+#                                            (strictly less than the full
+#                                            rigid delta, but still nonzero);
+#                                            a sequence of small continuous
+#                                            drag deltas never trips the
+#                                            teleport-guard re-seed while one
+#                                            huge single-frame jump still
+#                                            does (and re-seeds cleanly, no
+#                                            NaN/Inf); an entity with no
+#                                            Transform, or an explicit
+#                                            identity one, produces
+#                                            byte-identical results (the
+#                                            backward-compatibility proof);
+#                                            an entity parented under a
+#                                            moving ancestor reacts to the
+#                                            ancestor's own motion through
+#                                            the full resolved parent chain;
+#                                            and Transform::scale never
+#                                            affects the simulated pose or
+#                                            the teleport-guard threshold at
+#                                            all (scale-invariance). No
+#                                            ECS/GPU/Renderer involved beyond
+#                                            a plain Registry.
 #
 #
 # Note that the test BINARY still dynamically depends on SDL3.dll at process
@@ -1221,6 +1255,7 @@ set(GTE_TEST_SOURCES
     Game/Physics/PhysicsSystemTests.cpp
     Game/Physics/DynamicChainRigCacheTests.cpp
     Game/Physics/PhysicsSystemParallelTests.cpp
+    Game/Physics/PhysicsSystemWorldSpaceRootMotionTests.cpp
     Animation/BoneChainResolverTests.cpp
     Animation/BonePoseMathTests.cpp
     Animation/SkeletonPoseTests.cpp

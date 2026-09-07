@@ -36,7 +36,12 @@ struct DynamicChainRuntimeState {
     // StepDynamicChain() call returns, unconditionally - whether this call
     // re-seeded because of a teleport, a genuine lazy-init, or ran the
     // ordinary integrate+constrain path - so the guard never permanently
-    // trips after firing once.
+    // trips after firing once. task_manager/verlet-integration-7, Phase 3 -
+    // as of this phase, this is a genuine WORLD-space (rotation +
+    // translation only, scale excluded) position, composed by
+    // PhysicsSystem::Update() from the owning ECS entity's own resolved
+    // Transform - before this phase it was only ever bone-local
+    // "model space".
     Vec3 lastRootWorldPosition = Vec3::Zero();
 };
 

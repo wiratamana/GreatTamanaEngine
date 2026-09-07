@@ -9,6 +9,15 @@ namespace gte {
 // folding in the previous step's timestep. This is what makes Verlet
 // integration unconditionally stable for a constrained chain without ever
 // needing to store/clamp a separate velocity vector.
+//
+// task_manager/verlet-integration-7, Phase 3 - `position`/`previousPosition`
+// are genuine WORLD-space (rotation + translation only, scale excluded -
+// see PHASE0_MASTER_STRATEGY.md's Revision Notes (v2), Finding #1) quantities
+// as of this phase: PhysicsSystem::Update() composes the owning ECS entity's
+// own resolved Transform with the bone-local pose before feeding a position
+// here, and converts a simulated position back into bone-local space before
+// writing it into ResolvedAnimationPose::pose. Before this phase, these were
+// only ever bone-local "model space" values.
 struct VerletParticle {
     Vec3 position = Vec3::Zero();
     Vec3 previousPosition = Vec3::Zero();

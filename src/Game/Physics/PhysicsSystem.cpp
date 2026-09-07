@@ -3,6 +3,8 @@
 #include "../../Animation/BoneWorldMatrixQuery.h"
 #include "../../ECS/Components/DynamicChainRig.h"
 #include "../../ECS/Components/ResolvedAnimationPose.h"
+#include "../../ECS/Components/Transform.h"
+#include "../../ECS/TransformHierarchy.h"
 #include "../../Jobs/JobDispatch.h"
 #include "../../Jobs/JobSystem.h"
 #include "../../Physics/BoneChainPhysicsResolver.h"
@@ -59,6 +61,21 @@ struct DynamicChainBatchContext {
     float fixedTimestepSeconds;
     Vec3 gravity;
     WindSettings wind;
+
+    // task_manager/verlet-integration-7, Phase 3 (v2) - the owning entity's
+    // REAL, fully-resolved world POSITION and ROTATION ONLY (scale
+    // deliberately excluded - see PHASE0_MASTER_STRATEGY.md's Revision Notes
+    // (v2), Finding #1, and PhysicsSystem::Update()'s own header comment
+    // where this is resolved). Read-only, resolved ONCE per entity per
+    // frame, on the main thread, BEFORE any per-chain parallel dispatch -
+    // shared by const reference by every chain in this one entity's own
+    // batch, exactly like `skeleton`/`pose` already are.
+    Mat4 entityWorldMatrix;
+    // Inverse of the above - converts a simulated WORLD-space particle
+    // position back into bone-local/model space before it's written into
+    // `pose` via ApplyDynamicChainPhysicsToPose(), which only ever operates
+    // in bone-local space.
+    Mat4 entityWorldMatrixInverse;
 };
 
 // Steps every chain in `[beginIndex, endIndex)` of `context` to full
@@ -77,15 +94,22 @@ void StepDynamicChainRange(std::uint32_t beginIndex, std::uint32_t endIndex, Dyn
         // whatever earlier chains in THIS SAME batch/frame already wrote)
         // left it, BEFORE any substep below mutates `pose` in place - see
         // PHASE0's Revision Notes finding #4. Never re-read inside the
-        // substep loop.
-        const Mat4 rootWorld = ComputeBoneWorldMatrix(*context.skeleton, *context.pose, chain.rootBoneIndex);
+        // substep loop. task_manager/verlet-integration-7, Phase 3 - each
+        // bone-local matrix is now composed with `context.entityWorldMatrix`
+        // BEFORE extracting a position, so the Verlet solver genuinely
+        // integrates in true (scale-free) world space instead of blind
+        // bone-local "model space" - this is what makes dragging/rotating
+        // the owning entity's Transform produce real inertial lag.
+        const Mat4 rootWorld
+            = context.entityWorldMatrix * ComputeBoneWorldMatrix(*context.skeleton, *context.pose, chain.rootBoneIndex);
         const Vec3 rootWorldPos = rootWorld.TransformPoint(Vec3::Zero());
 
         std::vector<Vec3> animatedJointWorldPositions;
         animatedJointWorldPositions.reserve(chain.jointBoneIndices.size());
         for (std::int32_t boneIndex : chain.jointBoneIndices) {
-            animatedJointWorldPositions.push_back(
-                ComputeBoneWorldMatrix(*context.skeleton, *context.pose, boneIndex).TransformPoint(Vec3::Zero()));
+            const Mat4 jointWorld
+                = context.entityWorldMatrix * ComputeBoneWorldMatrix(*context.skeleton, *context.pose, boneIndex);
+            animatedJointWorldPositions.push_back(jointWorld.TransformPoint(Vec3::Zero()));
         }
 
         // PHASE5, 3.2 - resolve this chain's own collision sphere (if any),
@@ -94,9 +118,10 @@ void StepDynamicChainRange(std::uint32_t beginIndex, std::uint32_t endIndex, Dyn
         SphereCollider collider;
         bool hasCollider = false;
         if (chain.hasHeadCollider) {
-            collider.center = ComputeBoneWorldMatrix(*context.skeleton, *context.pose, chain.headColliderBoneIndex)
-                                   .TransformPoint(Vec3::Zero());
-            collider.radius = chain.headColliderRadius;
+            const Mat4 colliderWorld = context.entityWorldMatrix
+                * ComputeBoneWorldMatrix(*context.skeleton, *context.pose, chain.headColliderBoneIndex);
+            collider.center = colliderWorld.TransformPoint(Vec3::Zero());
+            collider.radius = chain.headColliderRadius; // Unaffected by scale, same as before this phase.
             hasCollider = true;
         }
 
@@ -104,10 +129,16 @@ void StepDynamicChainRange(std::uint32_t beginIndex, std::uint32_t endIndex, Dyn
             StepDynamicChain(chain, rootWorldPos, animatedJointWorldPositions, state, context.fixedTimestepSeconds,
                 context.gravity, context.wind, hasCollider ? &collider : nullptr);
 
+            // task_manager/verlet-integration-7, Phase 3 - convert each
+            // simulated WORLD-space particle position back into bone-local/
+            // model space before handing it to ApplyDynamicChainPhysicsToPose(),
+            // which is completely untouched by this phase and only ever
+            // operates in bone-local space, exactly like every other bone in
+            // `pose`.
             std::vector<Vec3> simulatedPositions;
             simulatedPositions.reserve(state.particles.size());
             for (const VerletParticle& particle : state.particles) {
-                simulatedPositions.push_back(particle.position);
+                simulatedPositions.push_back(context.entityWorldMatrixInverse.TransformPoint(particle.position));
             }
             ApplyDynamicChainPhysicsToPose(*context.skeleton, chain, simulatedPositions, *context.pose);
         }
@@ -220,8 +251,49 @@ void PhysicsSystem::Update(Registry& registry, double deltaSeconds)
             continue;
         }
 
+        // task_manager/verlet-integration-7, Phase 3 (v2) - the owning
+        // entity's REAL, fully-resolved world POSITION and ROTATION (walking
+        // its whole ECS parent chain via ECS/TransformHierarchy.h - the SAME
+        // underlying data RenderSystem::CollectRenderables() uses to place
+        // the rendered mesh), deliberately EXCLUDING scale - see
+        // PHASE0_MASTER_STRATEGY.md's Revision Notes (v2), Finding #1, for
+        // the full rationale: every chain's own restLengths/
+        // headColliderRadius/maxPlausibleRootDelta is precomputed once in
+        // UNSCALED bind-pose units and shared by every entity spawned from
+        // the same model path, so baking a per-instance Transform::scale
+        // into the matrix the solver simulates in would desync the solver's
+        // own authored rest data from the world distances it actually sees.
+        // `scale` is still applied, correctly, entirely downstream and
+        // untouched by this phase - see RenderSystem::CollectRenderables()'s
+        // own unmodified full-TRS model matrix.
+        //
+        // Resolved ONCE per entity, per frame, here on the main thread
+        // (never inside the per-chain parallel Dispatch() below) - every
+        // chain this entity owns reads the SAME already-resolved matrix by
+        // const reference, so this is exactly as safe under the existing
+        // parallel-dispatch path as `pose`/`skeleton` already are.
+        const Transform entityWorldTransform = ComputeWorldTransform(registry, entity);
+        const Mat4 entityWorldMatrix = Mat4::TRS(entityWorldTransform.position, entityWorldTransform.rotation, Vec3::One());
+
+        // A pure rotation+translation matrix (unit scale, and Mat4::FromQuat()
+        // of a normalized quaternion is always orthonormal) is ALGEBRAICALLY
+        // NEVER singular - TryInverse() here is expected to ALWAYS succeed
+        // for every normal input. It is kept (rather than the asserting
+        // Inverse()) purely as cheap, unconditional, debug-only-asserting
+        // insurance against a theoretically-malformed (e.g. non-normalized)
+        // input quaternion reaching this far - a case this codebase has no
+        // evidence can actually happen today, so the Identity() fallback
+        // below is genuinely last-resort/should-never-trigger territory.
+        Mat4 entityWorldMatrixInverse;
+        if (!entityWorldMatrix.TryInverse(entityWorldMatrixInverse)) {
+            assert(false && "PhysicsSystem: entity world (rotation+translation) matrix was singular - "
+                             "should be algebraically impossible; check for a non-normalized Transform::rotation.");
+            entityWorldMatrixInverse = Mat4::Identity();
+        }
+
         DynamicChainBatchContext context{ &model->skeleton, &model->chains, &rig.chainStates, &resolvedPose->pose,
-            stepCount, m_globalSettings.fixedTimestepSeconds, m_globalSettings.gravity, m_globalSettings.wind };
+            stepCount, m_globalSettings.fixedTimestepSeconds, m_globalSettings.gravity, m_globalSettings.wind,
+            entityWorldMatrix, entityWorldMatrixInverse };
 
         // PHASE5, 3.4 - parallelize INDEPENDENT chains WITHIN this one
         // entity's own physics step, across the Job System's worker pool,
