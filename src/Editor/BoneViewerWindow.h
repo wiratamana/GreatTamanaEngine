@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Selection.h" // ModelPartKind
+#include "../Assets/PhysicsData.h" // RigidBodyShape
 #include "../ECS/Entity.h"
 #include "../Math/Vec3.h"
 
@@ -17,6 +19,8 @@ class Registry;
 class Renderer;
 class Buffer;
 class RenderTexture;
+class ModelRigCache;
+struct EditorContext;
 
 // A Unity-"Avatar configuration"-style debug window: opened on demand (via
 // a button in the Inspector - see Panels/InspectorPanel.cpp's
@@ -35,22 +39,33 @@ class RenderTexture;
 // PlayAnimationOnEntity() doc comment for the full "matched purely by name"
 // story this window is meant to help debug).
 //
+// As of task_manager/verlet-integration-2 (PHASE3_BONE_VIEWER_VIEW_MODE_DROPDOWN_AND_GIZMO.md),
+// this window can also show Rigid Bodies/Joints (m_viewMode, a "Bones /
+// Rigid Bodies / Joints" toolbar dropdown) instead of only Bones - loaded
+// via the shared ModelRigCache (see ModelRigCache.h) rather than decoding
+// RigFileData itself, and every selection interaction (tree row click,
+// direct viewport gizmo click) routes through the Editor's single
+// gate-keeper, Selection (see Selection.h's SelectModelPart()/
+// IsModelPartSelected()), instead of this class's own (now-removed) private
+// m_selectedBoneIndex.
+//
 // Deliberately reads STRAIGHT FROM THE SOURCE *.gta FILE on disk (via
-// GtaFile.h/MeshFile.h/RigFile.h), the exact same "asset importer" reading
-// path AssetPreviewMesh.h already uses for the Inspector's own Project-panel
-// mesh preview - NOT from Game's private, path-keyed skinning caches
-// (Game.h's m_meshSkinningCache) - so this window has zero dependency on
-// Game's internal caching/animation-runtime state at all, only on
-// MeshAssetSource's own recorded gtaPath (ECS/Components/MeshAssetSource.h)
-// for whichever entity it's currently showing. This ALWAYS shows the
-// model's original BIND POSE (identity model matrix, bones at their
-// authored SkeletonData::position - see Assets/SkeletonData.h's own doc
-// comment for why that's already in the same model-local space as
-// MeshData::positions, needing no extra transform) - it deliberately does
-// NOT reflect whatever pose a live SkeletalAnimator might currently be
-// posing the SAME entity's GPU mesh into (see ECS/Components/
-// SkeletalAnimator.h) - a live posed-skeleton overlay is a natural, but
-// separate, follow-up once this static bind-pose view proves useful.
+// GtaFile.h/MeshFile.h/RigFile.h, through ModelRigCache for the metadata
+// half), the exact same "asset importer" reading path AssetPreviewMesh.h
+// already uses for the Inspector's own Project-panel mesh preview - NOT from
+// Game's private, path-keyed skinning caches (Game.h's m_meshSkinningCache)
+// - so this window has zero dependency on Game's internal caching/
+// animation-runtime state at all, only on MeshAssetSource's own recorded
+// gtaPath (ECS/Components/MeshAssetSource.h) for whichever entity it's
+// currently showing. This ALWAYS shows the model's original BIND POSE
+// (identity model matrix, bones at their authored SkeletonData::position -
+// see Assets/SkeletonData.h's own doc comment for why that's already in the
+// same model-local space as MeshData::positions, needing no extra
+// transform) - it deliberately does NOT reflect whatever pose a live
+// SkeletalAnimator might currently be posing the SAME entity's GPU mesh into
+// (see ECS/Components/SkeletalAnimator.h) - a live posed-skeleton overlay is
+// a natural, but separate, follow-up once this static bind-pose view proves
+// useful.
 //
 // Builds its own small VkPipeline/VkPipelineLayout directly (reusing the
 // exact same MeshPreview.vert/.frag shader pair + PreviewVertex layout
@@ -90,7 +105,11 @@ public:
     // Builds the floating window - a complete no-op if not currently open
     // (see Open() above / the window's own close button). Called once per
     // frame from ImGuiEditorLayer::BuildUI(), after BuildInspectorPanel().
-    void Build(Registry& registry, Renderer& renderer);
+    // `ctx` is the shared EditorContext (read/written for Selection - see
+    // Selection.h) and `rigCache` is the shared ModelRigCache (Culprit A/E,
+    // PHASE0_MASTER_STRATEGY.md) both owned by ImGuiEditorLayer, passed by
+    // reference exactly like `registry`/`renderer` already are.
+    void Build(Registry& registry, Renderer& renderer, EditorContext& ctx, ModelRigCache& rigCache);
 
     // Releases every currently-held GPU resource (vertex/index buffers,
     // RenderTexture, ImGui descriptor, pipeline) - waiting for the GPU to be
@@ -110,8 +129,31 @@ private:
         std::int32_t parentIndex = -1;
     };
 
+    // One rigid body, flattened for overlay drawing - mirrors BoneEntry's
+    // own "only what this window's overlay actually needs" philosophy.
+    // Position/rotation are already in the SAME model-local space as
+    // MeshData::positions/Bone::position (see PhysicsData.h's own
+    // RigidBody::translate doc comment) - no extra transform needed to
+    // compare against a bone's own position.
+    struct RigidBodyEntry {
+        std::string name;
+        Vec3 translate;
+        Vec3 rotateRadians; // Euler, PMX convention (see PhysicsData.h) - used only for an approximate visual orientation hint.
+        RigidBodyShape shape = RigidBodyShape::Sphere;
+        Vec3 shapeSize;
+        std::int32_t boneIndex = -1; // Index into m_bones this body is attached to (-1 if unattached) - drawn as a connecting line.
+    };
+
+    // One joint, flattened for overlay drawing.
+    struct JointEntry {
+        std::string name;
+        Vec3 translate;
+        std::int32_t rigidBodyAIndex = -1; // Index into m_rigidBodies (-1 if out of range/unset).
+        std::int32_t rigidBodyBIndex = -1;
+    };
+
     void EnsurePipeline(Renderer& renderer);
-    bool EnsureDataLoaded(Renderer& renderer, const std::string& absoluteGtaPath);
+    bool EnsureDataLoaded(Renderer& renderer, const std::string& absoluteGtaPath, EditorContext& ctx, ModelRigCache& rigCache);
     void EnsureRenderTexture(Renderer& renderer, int width, int height);
 
     // Recomputes the orbit camera's target/distance from the currently-
@@ -150,10 +192,23 @@ private:
     // "no bone/skeleton data" message in that case).
     std::vector<BoneEntry> m_bones;
 
+    // The currently-loaded model's rigid bodies/joints, flattened for
+    // overlay drawing the same way m_bones is - both loaded (alongside
+    // m_bones) via the shared ModelRigCache in EnsureDataLoaded(). Empty for
+    // a model with no physics data at all (most non-jiggle-bone models).
+    std::vector<RigidBodyEntry> m_rigidBodies;
+    std::vector<JointEntry> m_joints;
+
+    // Which of the three categories the toolbar dropdown currently shows -
+    // persisted across frames (like m_showAllNames), NOT reset on reload (a
+    // user reloading/reopening onto a different model most likely wants to
+    // keep looking at the same category they were just looking at).
+    ModelPartKind m_viewMode = ModelPartKind::Bone;
+
     // Child-index adjacency derived from every BoneEntry::parentIndex above
     // (m_boneChildren[i] lists every bone whose parentIndex == i) plus the
     // list of ROOT bones (parentIndex invalid/out of range) - the two things
-    // BuildBoneTreePane()/RenderBoneTreeNode() need to walk the skeleton as a
+    // BuildPartListPane()/RenderBoneTreeNode() need to walk the skeleton as a
     // real indented tree "start from root", mirroring "Hierarchy"'s own
     // GetChildren()-based tree (see Panels/HierarchyPanel.cpp). Rebuilt once
     // per (re)load, right alongside m_bones itself - see
@@ -197,30 +252,20 @@ private:
 
     // Bone-name search filter (Unity's own "All" search field in its
     // Avatar configuration screen - see the attached reference screenshot)
-    // - a bone whose name contains this (case-insensitively) as a
-    // substring is drawn highlighted/always-labeled; every other bone is
-    // still drawn as a plain gizmo dot, labeled only on hover. Also filters
-    // the bone TREE pane (see BuildBoneTreePane()) - a bone with no
-    // matching name AND no matching descendant is hidden from the tree
-    // entirely while a filter is active, same "search prunes the tree"
-    // convention Unity's own Hierarchy search box uses.
+    // - a part whose name contains this (case-insensitively) as a substring
+    // is drawn highlighted/always-labeled; every other part is still drawn
+    // as a plain gizmo dot, labeled only on hover. Also filters the tree/
+    // list pane (see BuildPartListPane()) - a bone with no matching name AND
+    // no matching descendant is hidden from the tree entirely while a
+    // filter is active, same "search prunes the tree" convention Unity's own
+    // Hierarchy search box uses; a rigid body/joint row is simply hidden if
+    // its own name doesn't match (no descendant concept for those two).
     char m_searchBuffer[128] = {};
 
-    // When true, every bone's name is drawn permanently instead of only on
+    // When true, every part's name is drawn permanently instead of only on
     // hover/search-match - handy for a small enough skeleton, toggled via
-    // the window's own toolbar checkbox.
+    // the window's own toolbar checkbox. Applies to all three view modes.
     bool m_showAllNames = false;
-
-    // Index into m_bones of whichever bone is currently selected in the
-    // tree pane (or clicked directly on its gizmo dot in the viewport) - -1
-    // for "none selected". Drawn as a distinctly-colored, larger gizmo dot
-    // in the viewport (see Build()'s overlay-drawing section) and a
-    // highlighted row in the tree - the two views of the same selection,
-    // exactly like "Hierarchy" and "Scene" share one Selection in the main
-    // Editor (see Selection.h) - reset to -1 whenever a different model is
-    // (re)loaded, since a bone index from one skeleton means nothing in
-    // another.
-    int m_selectedBoneIndex = -1;
 
     // Persisted (across frames) pixel width of the tree pane, adjusted live
     // by dragging the splitter between it and the 3D viewport - same
@@ -249,14 +294,26 @@ private:
     // indented ImGui tree node, wiring up row selection (single-click) and
     // camera re-centering (double-click) - the tree-pane equivalent of
     // Panels/HierarchyPanel.cpp's RenderEntityNode(). Same recursion-depth
-    // guard as BoneMatchesFilterRecursive() above.
-    void RenderBoneTreeNode(std::int32_t boneIndex, const std::string& lowerFilter, int depth);
+    // guard as BoneMatchesFilterRecursive() above. Selection highlight/
+    // click now routes through ctx.selection.IsModelPartSelected()/
+    // SelectModelPart() (ModelPartKind::Bone) instead of a private index.
+    void RenderBoneTreeNode(std::int32_t boneIndex, const std::string& lowerFilter, int depth, EditorContext& ctx);
+
+    // Renders one non-tree (Rigid Body/Joint) row - a single, non-indented,
+    // non-expandable Selectable, reusing the same search-filter/selection/
+    // double-click-recenter shape RenderBoneTreeNode()'s own leaf case
+    // already has, just without the tree-node machinery (Rigid Body/Joint
+    // have no bind-pose parent/child tree to walk - see
+    // PHASE0_MASTER_STRATEGY.md, Culprit B).
+    void RenderFlatPartRow(ModelPartKind kind, std::int32_t index, const std::string& name, const Vec3& position,
+        const std::string& lowerFilter, EditorContext& ctx);
 
     // Renders every root bone (see m_rootBoneIndices) as the top level of a
-    // real indented hierarchy tree, "starting from root" - the left-hand
-    // pane of this window, alongside the 3D viewport on the right (see
-    // Build()).
-    void BuildBoneTreePane(const std::string& lowerFilter);
+    // real indented hierarchy tree, "starting from root" (Bone mode), or a
+    // flat list of Selectable rows (Rigid Body/Joint mode, via
+    // RenderFlatPartRow()) - branches on m_viewMode. The left-hand pane of
+    // this window, alongside the 3D viewport on the right (see Build()).
+    void BuildPartListPane(const std::string& lowerFilter, EditorContext& ctx);
 };
 
 } // namespace gte

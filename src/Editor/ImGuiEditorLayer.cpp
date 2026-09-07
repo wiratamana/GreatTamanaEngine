@@ -16,6 +16,7 @@
 #include "AssetPreviewMesh.h"
 #include "AssetPreviewTexture.h"
 #include "BoneViewerWindow.h"
+#include "ModelRigCache.h"
 #include "Panels/ProjectPanel.h"
 #endif
 #include "Panels/ScenePanel.h"
@@ -496,7 +497,7 @@ public:
         // Panels/InspectorPanel.cpp) rather than part of the fixed dock
         // layout above - Build() itself is a complete no-op whenever it
         // isn't currently open (see BoneViewerWindow.h).
-        m_boneViewer.Build(registry, renderer);
+        m_boneViewer.Build(registry, renderer, m_ctx, m_modelRigCache);
 #endif
     }
 
@@ -682,6 +683,15 @@ private:
     // selection changing afterwards. Also explicitly Reset() in the
     // destructor above, same reasoning as m_assetPreview/m_assetPreviewMesh.
     BoneViewerWindow m_boneViewer;
+
+    // Shared by BoneViewerWindow (above) and (as of
+    // task_manager/verlet-integration-2/PHASE4_INSPECTOR_MODEL_PART_SECTION.md)
+    // InspectorPanel's own "Model Part" section - one mtime-cached
+    // RigFileData per currently-relevant model path, see ModelRigCache.h.
+    // Owned here (rather than inside BoneViewerWindow itself) so both
+    // consumers read the exact same cached data instead of two independent,
+    // silently-divergible reloads of the same file.
+    ModelRigCache m_modelRigCache;
 #endif
 
     // Shared state read/written by DockLayout.cpp's

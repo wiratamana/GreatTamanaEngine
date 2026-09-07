@@ -1,10 +1,12 @@
 #include "BoneViewerWindow.h"
 
+#include "EditorContext.h"
+#include "ModelRigCache.h"
 #include "ProjectPanelData.h" // Utf8ToPath()
 #include "../Assets/AssetTypes.h" // AssetType
 #include "../Assets/GtaFile.h" // ReadGtaFile()
 #include "../Assets/MeshFile.h" // DecodeMeshDataFromBytes()
-#include "../Assets/RigFile.h" // DecodeRigDataFromBytes()
+#include "../Assets/RigFile.h" // RigFileData
 #include "../ECS/Components/MeshAssetSource.h"
 #include "../ECS/Registry.h"
 #include "../Math/Mat4.h"
@@ -103,6 +105,16 @@ std::string ToLower(const std::string& s)
     return result;
 }
 
+// One part's worth of "what the viewport overlay needs to project/label/hit-
+// test this frame" - the shared shape all three view modes reduce to, so
+// the hover/hit-test math and the name-label/search-color drawing loop are
+// each written ONCE (see BoneViewerWindow.cpp's Build(), "overlay" section)
+// rather than tripled per mode.
+struct OverlayPart {
+    Vec3 position;
+    std::string name;
+};
+
 } // namespace
 
 BoneViewerWindow::~BoneViewerWindow()
@@ -138,9 +150,10 @@ void BoneViewerWindow::Reset()
     m_texWidth = 0;
     m_texHeight = 0;
     m_bones.clear();
+    m_rigidBodies.clear();
+    m_joints.clear();
     m_boneChildren.clear();
     m_rootBoneIndices.clear();
-    m_selectedBoneIndex = -1;
     m_cachedPath.clear();
     m_cachedWriteTime = std::filesystem::file_time_type{};
     m_cachedIsValid = false;
@@ -316,7 +329,8 @@ void BoneViewerWindow::EnsurePipeline(Renderer& renderer)
     vkDestroyShaderModule(device, vertModule, nullptr);
 }
 
-bool BoneViewerWindow::EnsureDataLoaded(Renderer& renderer, const std::string& absoluteGtaPath)
+bool BoneViewerWindow::EnsureDataLoaded(
+    Renderer& renderer, const std::string& absoluteGtaPath, EditorContext& ctx, ModelRigCache& rigCache)
 {
     std::error_code timeEc;
     const std::filesystem::file_time_type writeTime = std::filesystem::last_write_time(Utf8ToPath(absoluteGtaPath), timeEc);
@@ -333,9 +347,21 @@ bool BoneViewerWindow::EnsureDataLoaded(Renderer& renderer, const std::string& a
     m_vertexCount = 0;
     m_indexCount = 0;
     m_bones.clear();
-    m_boneChildren.clear();
-    m_rootBoneIndices.clear();
-    m_selectedBoneIndex = -1; // A bone index from whatever was loaded before means nothing for a new asset.
+    m_rigidBodies.clear();
+    m_joints.clear();
+
+    // A genuine reload is starting (we did not take the mtime short-circuit
+    // return above) - whatever Model-Part index Selection may still be
+    // holding for THIS window's own m_targetEntity means nothing against the
+    // data about to be (re)loaded (mirrors the private m_selectedBoneIndex =
+    // -1 reset this same code used to do before Phase 1 moved selection out
+    // of this class into the shared Selection object - see
+    // task_manager/verlet-integration-2/PHASE0_MASTER_STRATEGY.md's
+    // "Revision Notes (v2)", finding #1). Only clears it if it currently
+    // belongs to m_targetEntity - a Model-Part selection belonging to some
+    // OTHER entity (e.g. the user picked a different entity in Hierarchy
+    // since) is correctly left untouched.
+    ctx.selection.ClearModelPartIfEntity(m_targetEntity);
 
     m_cachedPath = absoluteGtaPath;
     m_cachedIsValid = false;
@@ -353,19 +379,34 @@ bool BoneViewerWindow::EnsureDataLoaded(Renderer& renderer, const std::string& a
         return true;
     }
 
-    // Skeleton/bone data lives in the *.gta's METADATA section (see
-    // RigFile.h) - a boneless/riggless mesh (or one imported before rig
-    // extraction existed) simply has an empty metadata blob, in which case
-    // m_bones is correctly left empty rather than treated as a failure.
-    if (!gta->metadata.empty()) {
-        if (const std::optional<RigFileData> rig = DecodeRigDataFromBytes(gta->metadata); rig.has_value()) {
-            m_bones.reserve(rig->skeleton.bones.size());
-            for (const Bone& bone : rig->skeleton.bones) {
-                m_bones.push_back(BoneEntry{ bone.name, bone.position, bone.parentBoneIndex });
-            }
+    // Skeleton/rigid-body/joint data lives in the *.gta's METADATA section
+    // (see RigFile.h) - loaded through the shared ModelRigCache (Phase 2)
+    // rather than this class decoding RigFileData itself (see
+    // PHASE0_MASTER_STRATEGY.md, Culprit A/E). A boneless/riggless mesh (or
+    // one imported before rig extraction existed) simply resolves to a
+    // valid, empty RigFileData (ModelRigCache::GetOrLoad()'s own documented
+    // contract), in which case m_bones/m_rigidBodies/m_joints are correctly
+    // left empty rather than treated as a failure. `nullptr` instead means
+    // "not a loadable Mesh asset at all", which cannot happen here since the
+    // AssetType::Mesh check above already passed.
+    if (const RigFileData* rig = rigCache.GetOrLoad(absoluteGtaPath)) {
+        m_bones.reserve(rig->skeleton.bones.size());
+        for (const Bone& bone : rig->skeleton.bones) {
+            m_bones.push_back(BoneEntry{ bone.name, bone.position, bone.parentBoneIndex });
+        }
+
+        m_rigidBodies.reserve(rig->physics.rigidBodies.size());
+        for (const RigidBody& body : rig->physics.rigidBodies) {
+            m_rigidBodies.push_back(
+                RigidBodyEntry{ body.name, body.translate, body.rotateRadians, body.shape, body.shapeSize, body.boneIndex });
+        }
+
+        m_joints.reserve(rig->physics.joints.size());
+        for (const Joint& joint : rig->physics.joints) {
+            m_joints.push_back(JointEntry{ joint.name, joint.translate, joint.rigidBodyAIndex, joint.rigidBodyBIndex });
         }
     }
-    RebuildBoneHierarchyIndex();
+    RebuildBoneHierarchyIndex(); // Still only walks m_bones - RigidBody/Joint have no tree to build.
 
     std::vector<PreviewVertex> vertices(mesh->positions.size());
     const bool hasNormals = mesh->normals.size() == mesh->positions.size();
@@ -491,7 +532,7 @@ bool BoneViewerWindow::BoneMatchesFilterRecursive(std::int32_t boneIndex, const 
     return false;
 }
 
-void BoneViewerWindow::RenderBoneTreeNode(std::int32_t boneIndex, const std::string& lowerFilter, int depth)
+void BoneViewerWindow::RenderBoneTreeNode(std::int32_t boneIndex, const std::string& lowerFilter, int depth, EditorContext& ctx)
 {
     if (boneIndex < 0 || static_cast<std::size_t>(boneIndex) >= m_bones.size()
         || depth > static_cast<int>(m_bones.size())) {
@@ -514,7 +555,7 @@ void BoneViewerWindow::RenderBoneTreeNode(std::int32_t boneIndex, const std::str
     if (children.empty()) {
         flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
     }
-    if (m_selectedBoneIndex == boneIndex) {
+    if (ctx.selection.IsModelPartSelected(m_targetEntity, ModelPartKind::Bone, boneIndex)) {
         flags |= ImGuiTreeNodeFlags_Selected;
     }
 
@@ -524,7 +565,7 @@ void BoneViewerWindow::RenderBoneTreeNode(std::int32_t boneIndex, const std::str
     const bool opened = ImGui::TreeNodeEx(label.c_str(), flags);
 
     if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
-        m_selectedBoneIndex = boneIndex;
+        ctx.selection.SelectModelPart(m_targetEntity, ModelPartKind::Bone, boneIndex);
         // Double-clicking a row re-centers the orbit camera on that bone
         // (keeping the current distance/angle) - a quick way to jump to a
         // bone buried deep in a large skeleton without hunting for its dot
@@ -536,7 +577,7 @@ void BoneViewerWindow::RenderBoneTreeNode(std::int32_t boneIndex, const std::str
 
     if (opened && !children.empty()) {
         for (const std::int32_t child : children) {
-            RenderBoneTreeNode(child, lowerFilter, depth + 1);
+            RenderBoneTreeNode(child, lowerFilter, depth + 1, ctx);
         }
         ImGui::TreePop();
     }
@@ -544,19 +585,63 @@ void BoneViewerWindow::RenderBoneTreeNode(std::int32_t boneIndex, const std::str
     ImGui::PopID();
 }
 
-void BoneViewerWindow::BuildBoneTreePane(const std::string& lowerFilter)
+void BoneViewerWindow::RenderFlatPartRow(ModelPartKind kind, std::int32_t index, const std::string& name,
+    const Vec3& position, const std::string& lowerFilter, EditorContext& ctx)
 {
-    if (m_bones.empty()) {
-        ImGui::TextDisabled("(no bones)");
-        return;
+    if (!lowerFilter.empty() && ToLower(name).find(lowerFilter) == std::string::npos) {
+        return; // Same "search prunes the list" convention as the bone tree.
     }
-    for (const std::int32_t root : m_rootBoneIndices) {
-        RenderBoneTreeNode(root, lowerFilter, 0);
+
+    const bool isSelected = ctx.selection.IsModelPartSelected(m_targetEntity, kind, index);
+    const std::string label = name.empty() ? ("Part " + std::to_string(index)) : name;
+
+    ImGui::PushID(index);
+    if (ImGui::Selectable(label.c_str(), isSelected)) {
+        ctx.selection.SelectModelPart(m_targetEntity, kind, index);
+        if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+            m_camTarget = position;
+        }
+    }
+    ImGui::PopID();
+}
+
+void BoneViewerWindow::BuildPartListPane(const std::string& lowerFilter, EditorContext& ctx)
+{
+    switch (m_viewMode) {
+    case ModelPartKind::Bone:
+        if (m_bones.empty()) {
+            ImGui::TextDisabled("(no bones)");
+            return;
+        }
+        for (const std::int32_t root : m_rootBoneIndices) {
+            RenderBoneTreeNode(root, lowerFilter, 0, ctx);
+        }
+        return;
+    case ModelPartKind::RigidBody:
+        if (m_rigidBodies.empty()) {
+            ImGui::TextDisabled("(no rigid bodies)");
+            return;
+        }
+        for (std::size_t i = 0; i < m_rigidBodies.size(); ++i) {
+            RenderFlatPartRow(ModelPartKind::RigidBody, static_cast<std::int32_t>(i), m_rigidBodies[i].name,
+                m_rigidBodies[i].translate, lowerFilter, ctx);
+        }
+        return;
+    case ModelPartKind::Joint:
+        if (m_joints.empty()) {
+            ImGui::TextDisabled("(no joints)");
+            return;
+        }
+        for (std::size_t i = 0; i < m_joints.size(); ++i) {
+            const JointEntry& joint = m_joints[i];
+            const std::string label = joint.name.empty() ? ("Joint " + std::to_string(i)) : joint.name;
+            RenderFlatPartRow(ModelPartKind::Joint, static_cast<std::int32_t>(i), label, joint.translate, lowerFilter, ctx);
+        }
+        return;
     }
 }
 
-
-void BoneViewerWindow::Build(Registry& registry, Renderer& renderer)
+void BoneViewerWindow::Build(Registry& registry, Renderer& renderer, EditorContext& ctx, ModelRigCache& rigCache)
 {
     if (!m_open) {
         return;
@@ -583,7 +668,7 @@ void BoneViewerWindow::Build(Registry& registry, Renderer& renderer)
         return;
     }
 
-    if (!EnsureDataLoaded(renderer, source->gtaPath) || !m_cachedIsValid) {
+    if (!EnsureDataLoaded(renderer, source->gtaPath, ctx, rigCache) || !m_cachedIsValid) {
         ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.2f, 1.0f), "Failed to load mesh/skeleton data for:");
         ImGui::TextWrapped("%s", source->gtaPath.c_str());
         ImGui::End();
@@ -599,7 +684,7 @@ void BoneViewerWindow::Build(Registry& registry, Renderer& renderer)
 
     // --- Toolbar -----------------------------------------------------------
     ImGui::PushItemWidth(240.0f);
-    ImGui::InputTextWithHint("##BoneViewerSearch", "Search bones by name...", m_searchBuffer, sizeof(m_searchBuffer));
+    ImGui::InputTextWithHint("##BoneViewerSearch", "Search by name...", m_searchBuffer, sizeof(m_searchBuffer));
     ImGui::PopItemWidth();
     ImGui::SameLine();
     if (ImGui::Button("Reset View")) {
@@ -608,22 +693,42 @@ void BoneViewerWindow::Build(Registry& registry, Renderer& renderer)
     ImGui::SameLine();
     ImGui::Checkbox("Show All Names", &m_showAllNames);
     ImGui::SameLine();
-    ImGui::TextDisabled(
-        "%zu bones - %u verts / %u tris", m_bones.size(), m_vertexCount, m_indexCount / 3);
-    if (m_bones.empty()) {
+    ImGui::PushItemWidth(140.0f);
+    static const char* kViewModeLabels[] = { "Bones", "Rigid Bodies", "Joints" };
+    int viewModeIndex = static_cast<int>(m_viewMode);
+    if (ImGui::Combo("View", &viewModeIndex, kViewModeLabels, static_cast<int>(std::size(kViewModeLabels)))) {
+        m_viewMode = static_cast<ModelPartKind>(viewModeIndex);
+    }
+    ImGui::PopItemWidth();
+    ImGui::SameLine();
+
+    const std::size_t partCount = m_viewMode == ModelPartKind::Bone ? m_bones.size()
+        : m_viewMode == ModelPartKind::RigidBody                    ? m_rigidBodies.size()
+                                                                      : m_joints.size();
+    const char* partNoun = m_viewMode == ModelPartKind::Bone ? "bones"
+        : m_viewMode == ModelPartKind::RigidBody              ? "rigid bodies"
+                                                                : "joints";
+    ImGui::TextDisabled("%zu %s - %u verts / %u tris", partCount, partNoun, m_vertexCount, m_indexCount / 3);
+
+    if (m_viewMode == ModelPartKind::Bone && m_bones.empty()) {
         ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f),
             "This model has no bone/skeleton data (a boneless mesh, or one imported before rig extraction existed).");
+    } else if (m_viewMode == ModelPartKind::RigidBody && m_rigidBodies.empty()) {
+        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "This model has no rigid-body physics data.");
+    } else if (m_viewMode == ModelPartKind::Joint && m_joints.empty()) {
+        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "This model has no joint physics data.");
     }
     ImGui::Separator();
 
     const std::string lowerFilter = ToLower(std::string(m_searchBuffer));
 
-    // --- Left pane: bone hierarchy tree, "starting from root" ---------------
-    // Unity/Omniverse-Inspector-style: a real indented tree, walked from
-    // m_rootBoneIndices down through m_boneChildren (see
+    // --- Left pane: part list (bone tree, or a flat rigid-body/joint list) --
+    // Unity/Omniverse-Inspector-style: a real indented tree for Bones,
+    // walked from m_rootBoneIndices down through m_boneChildren (see
     // RebuildBoneHierarchyIndex()) - the same "GetChildren()-based recursive
     // tree" shape as "Hierarchy"'s own entity tree (Panels/HierarchyPanel.cpp),
-    // just for bones instead of entities.
+    // just for bones instead of entities; a flat Selectable list for Rigid
+    // Bodies/Joints, which have no bind-pose parent/child tree at all.
     constexpr float kSplitterThickness = 6.0f;
     constexpr float kMinTreeWidth = 150.0f;
     constexpr float kMinViewportWidth = 200.0f;
@@ -632,7 +737,7 @@ void BoneViewerWindow::Build(Registry& registry, Renderer& renderer)
     m_treeWidth = Clamp(m_treeWidth, kMinTreeWidth, maxTreeWidth);
 
     ImGui::BeginChild("BoneViewerTree", ImVec2(m_treeWidth, 0.0f), true);
-    BuildBoneTreePane(lowerFilter);
+    BuildPartListPane(lowerFilter, ctx);
     ImGui::EndChild();
 
     // The draggable splitter itself - same thin scrollbar-grip-styled button
@@ -722,28 +827,56 @@ void BoneViewerWindow::Build(Registry& registry, Renderer& renderer)
         const ImVec2 imageMax(imageMin.x + avail.x, imageMin.y + avail.y);
         const bool hovered = ImGui::IsItemHovered();
 
-        // Project every bone to screen space up front - shared by hit-
+        // Build this frame's "parts to project/label/hit-test" list for
+        // whichever mode is active - the ONE place per mode that decides
+        // what OverlayPart::position/name means, so the hover/hit-test math
+        // AND the name-label/search-color drawing loop below are each
+        // written once and reused for all three modes (see
+        // PHASE0_MASTER_STRATEGY.md's "Revision Notes (v2)", finding #2).
+        std::vector<OverlayPart> overlayParts;
+        if (m_viewMode == ModelPartKind::Bone) {
+            overlayParts.reserve(m_bones.size());
+            for (const BoneEntry& bone : m_bones) {
+                overlayParts.push_back(OverlayPart{ bone.position, bone.name });
+            }
+        } else if (m_viewMode == ModelPartKind::RigidBody) {
+            overlayParts.reserve(m_rigidBodies.size());
+            for (std::size_t i = 0; i < m_rigidBodies.size(); ++i) {
+                const RigidBodyEntry& body = m_rigidBodies[i];
+                overlayParts.push_back(
+                    OverlayPart{ body.translate, body.name.empty() ? ("Part " + std::to_string(i)) : body.name });
+            }
+        } else {
+            overlayParts.reserve(m_joints.size());
+            for (std::size_t i = 0; i < m_joints.size(); ++i) {
+                const JointEntry& joint = m_joints[i];
+                overlayParts.push_back(
+                    OverlayPart{ joint.translate, joint.name.empty() ? ("Joint " + std::to_string(i)) : joint.name });
+            }
+        }
+
+        // Project every part to screen space up front - shared by hit-
         // testing (hover/click below) AND the overlay drawing pass
         // (further below), computed with THIS frame's viewProj so
         // everything stays pixel-aligned with what was just rendered.
-        std::vector<ImVec2> screenPositions(m_bones.size());
-        std::vector<char> onScreen(m_bones.size(), 0);
-        for (std::size_t i = 0; i < m_bones.size(); ++i) {
+        std::vector<ImVec2> screenPositions(overlayParts.size());
+        std::vector<char> onScreen(overlayParts.size(), 0);
+        for (std::size_t i = 0; i < overlayParts.size(); ++i) {
             ImVec2 screen;
-            if (ProjectToScreen(m_bones[i].position, viewProj, imageMin, imageMax, screen)) {
+            if (ProjectToScreen(overlayParts[i].position, viewProj, imageMin, imageMax, screen)) {
                 screenPositions[i] = screen;
                 onScreen[i] = 1;
             }
         }
 
-        // Nearest on-screen bone dot to the mouse cursor (within a small
+        // Nearest on-screen part dot to the mouse cursor (within a small
         // pixel radius) - what both the hover-name-reveal and a direct
         // viewport click (below) hit-test against.
-        int hoveredBoneIndex = -1;
+        int hoveredPartIndex = -1;
         if (hovered) {
             const ImVec2 mousePos = ImGui::GetMousePos();
             float hoveredDistSq = 144.0f; // 12px radius.
-            for (std::size_t i = 0; i < m_bones.size(); ++i) {
+            for (std::size_t i = 0; i < overlayParts.size(); ++i) {
                 if (!onScreen[i]) {
                     continue;
                 }
@@ -752,21 +885,21 @@ void BoneViewerWindow::Build(Registry& registry, Renderer& renderer)
                 const float distSq = dx * dx + dy * dy;
                 if (distSq < hoveredDistSq) {
                     hoveredDistSq = distSq;
-                    hoveredBoneIndex = static_cast<int>(i);
+                    hoveredPartIndex = static_cast<int>(i);
                 }
             }
         }
 
-        // --- Orbit camera input / direct-click bone selection (applied to
+        // --- Orbit camera input / direct-click part selection (applied to
         // what NEXT frame renders - see this window's own class comment for
         // why this one-frame lag mirrors Panels/ScenePanel.cpp's
         // EditorCamera handling) ---------------------------------------------
         if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-            if (hoveredBoneIndex >= 0) {
-                // Clicked directly on a bone's gizmo dot - select it
-                // (mirrors clicking its row in the tree pane) instead of
-                // starting an orbit-camera drag.
-                m_selectedBoneIndex = hoveredBoneIndex;
+            if (hoveredPartIndex >= 0) {
+                // Clicked directly on a part's gizmo dot - select it
+                // (mirrors clicking its row in the tree/list pane) instead
+                // of starting an orbit-camera drag.
+                ctx.selection.SelectModelPart(m_targetEntity, m_viewMode, hoveredPartIndex);
             } else {
                 m_rotating = true;
             }
@@ -800,39 +933,81 @@ void BoneViewerWindow::Build(Registry& registry, Renderer& renderer)
             m_camDistance = std::max(m_boundsRadius * 0.05f, m_camDistance - io.MouseWheel * (m_camDistance * 0.15f));
         }
 
-        // --- Bone gizmo overlay ------------------------------------------------
-        if (!m_bones.empty()) {
+        // --- Part gizmo overlay --------------------------------------------
+        if (!overlayParts.empty()) {
             ImDrawList* drawList = ImGui::GetWindowDrawList();
             drawList->PushClipRect(imageMin, imageMax, true);
 
-            // Lines to parent first, so every dot/label below always paints
-            // over them.
-            for (std::size_t i = 0; i < m_bones.size(); ++i) {
-                const std::int32_t parent = m_bones[i].parentIndex;
-                if (parent < 0 || static_cast<std::size_t>(parent) >= m_bones.size()) {
-                    continue;
+            if (m_viewMode == ModelPartKind::Bone) {
+                // Lines to parent first, so every dot/label below always
+                // paints over them. UNCHANGED from before this phase.
+                for (std::size_t i = 0; i < m_bones.size(); ++i) {
+                    const std::int32_t parent = m_bones[i].parentIndex;
+                    if (parent < 0 || static_cast<std::size_t>(parent) >= m_bones.size()) {
+                        continue;
+                    }
+                    if (!onScreen[i] || !onScreen[static_cast<std::size_t>(parent)]) {
+                        continue;
+                    }
+                    drawList->AddLine(screenPositions[static_cast<std::size_t>(parent)], screenPositions[i],
+                        IM_COL32(70, 200, 100, 200), 2.0f);
                 }
-                if (!onScreen[i] || !onScreen[static_cast<std::size_t>(parent)]) {
-                    continue;
+            } else if (m_viewMode == ModelPartKind::RigidBody) {
+                // "Which bone drives this" hint - a dimmer connecting line
+                // from each rigid body to its attached bone (if any),
+                // symmetrical with a bone's own parent-line above.
+                for (std::size_t i = 0; i < m_rigidBodies.size(); ++i) {
+                    const std::int32_t boneIndex = m_rigidBodies[i].boneIndex;
+                    if (boneIndex < 0 || static_cast<std::size_t>(boneIndex) >= m_bones.size() || !onScreen[i]) {
+                        continue;
+                    }
+                    ImVec2 boneScreen;
+                    if (ProjectToScreen(m_bones[static_cast<std::size_t>(boneIndex)].position, viewProj, imageMin, imageMax,
+                            boneScreen)) {
+                        drawList->AddLine(screenPositions[i], boneScreen, IM_COL32(80, 180, 255, 110), 1.5f);
+                    }
                 }
-                drawList->AddLine(screenPositions[static_cast<std::size_t>(parent)], screenPositions[i],
-                    IM_COL32(70, 200, 100, 200), 2.0f);
+            } else {
+                // Joint mode - draw both connector lines (joint -> bodyA,
+                // joint -> bodyB) whenever the referenced rigid body index
+                // is in range.
+                for (std::size_t i = 0; i < m_joints.size(); ++i) {
+                    if (!onScreen[i]) {
+                        continue;
+                    }
+                    const JointEntry& joint = m_joints[i];
+                    for (const std::int32_t bodyIndex : { joint.rigidBodyAIndex, joint.rigidBodyBIndex }) {
+                        if (bodyIndex < 0 || static_cast<std::size_t>(bodyIndex) >= m_rigidBodies.size()) {
+                            continue;
+                        }
+                        ImVec2 bodyScreen;
+                        if (ProjectToScreen(m_rigidBodies[static_cast<std::size_t>(bodyIndex)].translate, viewProj, imageMin,
+                                imageMax, bodyScreen)) {
+                            drawList->AddLine(screenPositions[i], bodyScreen, IM_COL32(200, 120, 255, 140), 1.5f);
+                        }
+                    }
+                }
             }
 
-            for (std::size_t i = 0; i < m_bones.size(); ++i) {
+            for (std::size_t i = 0; i < overlayParts.size(); ++i) {
                 if (!onScreen[i]) {
                     continue;
                 }
                 const bool matchesFilter =
-                    !lowerFilter.empty() && ToLower(m_bones[i].name).find(lowerFilter) != std::string::npos;
-                const bool isHovered = hovered && (static_cast<int>(i) == hoveredBoneIndex);
-                const bool isSelected = (static_cast<int>(i) == m_selectedBoneIndex);
+                    !lowerFilter.empty() && ToLower(overlayParts[i].name).find(lowerFilter) != std::string::npos;
+                const bool isHovered = hovered && (static_cast<int>(i) == hoveredPartIndex);
+                const bool isSelected =
+                    ctx.selection.IsModelPartSelected(m_targetEntity, m_viewMode, static_cast<std::int32_t>(i));
 
-                // Selected beats hovered beats search-match beats the
-                // plain default - the same layered-priority convention
-                // "Hierarchy"'s own selection highlight uses relative to
-                // hover, just with one more tier (search match) here.
-                ImU32 dotColor = IM_COL32(90, 230, 130, 255);
+                // Base dot color is distinct PER MODE (green bones, cyan
+                // rigid bodies, violet joints) - selected beats hovered
+                // beats search-match beats the mode's own plain default,
+                // the same layered-priority convention "Hierarchy"'s own
+                // selection highlight uses relative to hover, just with one
+                // more tier (search match) here.
+                ImU32 dotColor = m_viewMode == ModelPartKind::Bone ? IM_COL32(90, 230, 130, 255)
+                    : m_viewMode == ModelPartKind::RigidBody        ? IM_COL32(80, 180, 255, 255)
+                                                                     : IM_COL32(200, 120, 255, 255);
                 if (matchesFilter) {
                     dotColor = IM_COL32(255, 215, 60, 255);
                 }
@@ -847,12 +1022,40 @@ void BoneViewerWindow::Build(Registry& registry, Renderer& renderer)
                     drawList->AddCircle(screenPositions[i], 9.0f, IM_COL32(255, 140, 0, 255), 0, 2.0f);
                 }
 
+                // Rigid Body mode also draws an approximate "size" hint - an
+                // unfilled circle whose pixel radius is the on-screen
+                // distance to a second point offset along the view-right
+                // axis by the shape's characteristic size - a deliberate,
+                // documented screen-space approximation (see
+                // PHASE0_MASTER_STRATEGY.md, "What We Will NOT Do"), never a
+                // true oriented 3D wireframe.
+                if (m_viewMode == ModelPartKind::RigidBody) {
+                    const RigidBodyEntry& body = m_rigidBodies[i];
+                    const float characteristicSize = body.shape == RigidBodyShape::Box ? Length(body.shapeSize) : body.shapeSize.x;
+                    if (characteristicSize > kEpsilon) {
+                        Vec3 viewRight = Normalize(Cross(Vec3::Up(), Normalize(m_camTarget - eye)));
+                        if (LengthSquared(viewRight) < kEpsilon) {
+                            viewRight = Vec3::Right();
+                        }
+                        ImVec2 sizeScreen;
+                        if (ProjectToScreen(body.translate + viewRight * characteristicSize, viewProj, imageMin, imageMax,
+                                sizeScreen)) {
+                            const float dx = sizeScreen.x - screenPositions[i].x;
+                            const float dy = sizeScreen.y - screenPositions[i].y;
+                            const float pixelRadius = std::sqrt(dx * dx + dy * dy);
+                            if (pixelRadius > 1.0f) {
+                                drawList->AddCircle(screenPositions[i], pixelRadius, dotColor, 0, 1.5f);
+                            }
+                        }
+                    }
+                }
+
                 if (m_showAllNames || matchesFilter || isHovered || isSelected) {
                     const ImVec2 textPos(screenPositions[i].x + 7.0f, screenPositions[i].y - 7.0f);
-                    const ImVec2 textSize = ImGui::CalcTextSize(m_bones[i].name.c_str());
+                    const ImVec2 textSize = ImGui::CalcTextSize(overlayParts[i].name.c_str());
                     drawList->AddRectFilled(ImVec2(textPos.x - 2.0f, textPos.y - 1.0f),
                         ImVec2(textPos.x + textSize.x + 2.0f, textPos.y + textSize.y + 1.0f), IM_COL32(0, 0, 0, 160));
-                    drawList->AddText(textPos, IM_COL32(255, 255, 255, 255), m_bones[i].name.c_str());
+                    drawList->AddText(textPos, IM_COL32(255, 255, 255, 255), overlayParts[i].name.c_str());
                 }
             }
 
