@@ -1211,6 +1211,7 @@ set(GTE_TEST_SOURCES
     Physics/BoneChainPhysicsResolverTests.cpp
     Physics/FixedTimestepAccumulatorTests.cpp
     Physics/DynamicChainDetectionTests.cpp
+    Physics/RigidBodyJointGraphTests.cpp
     Physics/DynamicChainDefinitionTests.cpp
     Physics/SphereColliderTests.cpp
 )

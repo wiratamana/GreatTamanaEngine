@@ -249,6 +249,8 @@ add_library(gte_core STATIC
     src/Physics/FixedTimestepAccumulator.cpp
     src/Physics/DynamicChainDetection.h
     src/Physics/DynamicChainDetection.cpp
+    src/Physics/RigidBodyJointGraph.h
+    src/Physics/RigidBodyJointGraph.cpp
     src/Physics/SphereCollider.h
     src/Physics/SphereCollider.cpp
     src/Assets/AssetTypes.h
