@@ -1191,6 +1191,7 @@ set(GTE_TEST_SOURCES
     Game/AnimationClipCacheTests.cpp
     Game/ResolvedAnimationBindingCacheTests.cpp
     Game/Animation/AnimationSystemEvaluatePosesTests.cpp
+    Game/GameLoopPhysicsWithoutAnimationTests.cpp
     Game/Physics/PhysicsSystemTests.cpp
     Game/Physics/DynamicChainRigCacheTests.cpp
     Game/Physics/PhysicsSystemParallelTests.cpp

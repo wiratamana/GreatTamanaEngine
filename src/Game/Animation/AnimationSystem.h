@@ -128,6 +128,23 @@ public:
     // under src/Physics/ or src/Game/Physics/ - this method (and this whole
     // class) has ZERO knowledge that a physics system exists anywhere in
     // this engine. Safe to call before PhysicsSystem::Update() every frame.
+    //
+    // Phase 1 (task_manager/verlet-integration-7/
+    // PHASE1_BASELINE_RESOLVED_POSE_FOR_NONANIMATED_PHYSICS_RIGS.md) added a
+    // SECOND pass, run immediately after the SkeletalAnimator loop above:
+    // every entity with an ENABLED DynamicChainRig component (ECS/Components/
+    // DynamicChainRig.h) that did NOT already get a fresh, genuinely-ANIMATED
+    // pose from the first pass this same call is given a baseline bind/T-pose
+    // ResolvedAnimationPose (an all-default BoneLocalOffset per bone) instead
+    // - always a full, fresh overwrite, never merged with a stale previous
+    // value. This is the ONLY thing that unblocks PhysicsSystem::Update() for
+    // a model that has never had Play() called on it at all (a pure T-pose
+    // model) - deliberately narrow in scope, per the user's own "narrow"
+    // answer (PHASE0_MASTER_STRATEGY.md, Step 1): a plain skinned model with
+    // no DynamicChainRig at all pays zero extra cost from this second pass.
+    // A DynamicChainRig entity whose animator IS actively playing this frame
+    // is completely unaffected - its freshly-sampled animated pose from the
+    // first pass is never clobbered by this baseline pass.
     void EvaluatePoses(Registry& registry, double deltaSeconds);
 
     // Phase 3 - the second half of the old Update(). Reads whatever

@@ -15,6 +15,7 @@
 #include "Assets/AssetTypes.h"
 #include "Assets/GtaFile.h"
 #include "Assets/MotionFile.h"
+#include "ECS/Components/DynamicChainRig.h"
 #include "ECS/Components/MeshAssetSource.h"
 #include "ECS/Components/ResolvedAnimationPose.h"
 #include "ECS/Components/SkeletalAnimator.h"
@@ -218,6 +219,177 @@ TEST_F(AnimationSystemEvaluatePosesTest, SkinAndUploadSkipsAnEntityWithNoResolve
     EXPECT_FALSE(registry.HasComponent<ResolvedAnimationPose>(entity));
 
     EXPECT_NO_FATAL_FAILURE(animationSystem.SkinAndUpload(registry));
+}
+
+// --- Phase 1 (task_manager/verlet-integration-7/
+// PHASE1_BASELINE_RESOLVED_POSE_FOR_NONANIMATED_PHYSICS_RIGS.md) - baseline
+// ResolvedAnimationPose for a DynamicChainRig entity with no (or no
+// currently-playing) SkeletalAnimator. ---
+
+TEST_F(AnimationSystemEvaluatePosesTest, EvaluatePosesWritesBindPoseForADynamicChainRigOnlyEntityWithNoSkeletalAnimatorAtAll)
+{
+    RenderSystem renderSystem;
+    MeshInstantiationSystem meshInstantiationSystem(renderSystem);
+    AnimationSystem animationSystem(renderSystem, meshInstantiationSystem);
+
+    const SkeletonData skeleton = BuildTwoBoneSkeleton();
+    SkinnedMeshData skinData;
+    skinData.skeleton = skeleton;
+
+    const std::string meshPath = "TPoseOnly.gta";
+    animationSystem.RegisterSkinnedMesh(meshPath, skinData);
+
+    Registry registry;
+    const Entity entity = registry.CreateEntity();
+    registry.AddComponent<DynamicChainRig>(entity, DynamicChainRig{ meshPath, {}, 0.0f, true });
+
+    animationSystem.EvaluatePoses(registry, 0.016);
+
+    ASSERT_TRUE(registry.HasComponent<ResolvedAnimationPose>(entity));
+    const ResolvedAnimationPose* resolvedPose = registry.TryGetComponent<ResolvedAnimationPose>(entity);
+    ASSERT_NE(resolvedPose, nullptr);
+    ASSERT_EQ(resolvedPose->pose.size(), skeleton.bones.size());
+    for (std::size_t i = 0; i < resolvedPose->pose.size(); ++i) {
+        EXPECT_TRUE(ApproximatelyEqual(resolvedPose->pose[i].translation, Vec3::Zero())) << "Mismatch at bone index " << i;
+        EXPECT_TRUE(RepresentSameRotation(resolvedPose->pose[i].rotation, Quat::Identity())) << "Mismatch at bone index " << i;
+    }
+}
+
+TEST_F(AnimationSystemEvaluatePosesTest,
+    EvaluatePosesDoesNotClobberAFreshlyAnimatedPoseOnAnEntityThatHasBothAPlayingSkeletalAnimatorAndADynamicChainRig)
+{
+    RenderSystem renderSystem;
+    MeshInstantiationSystem meshInstantiationSystem(renderSystem);
+    AnimationSystem animationSystem(renderSystem, meshInstantiationSystem);
+
+    const SkeletonData skeleton = BuildTwoBoneSkeleton();
+    const MotionData motion = BuildRootTranslationMotion();
+
+    SkinnedMeshData skinData;
+    skinData.skeleton = skeleton;
+
+    const std::string meshPath = "AnimatedWithRig.gta";
+    animationSystem.RegisterSkinnedMesh(meshPath, skinData);
+
+    const std::filesystem::path animationPath = m_root / "motion.gta";
+    const std::vector<std::uint8_t> payload = EncodeMotionDataToBytes(motion);
+    ASSERT_TRUE(WriteGtaFile(animationPath, AssetType::Animation, Guid::Generate(), AssetFlags::None, {}, payload));
+
+    Registry registry;
+    const Entity entity = registry.CreateEntity();
+    registry.AddComponent<MeshAssetSource>(entity, MeshAssetSource{ meshPath });
+    ASSERT_TRUE(animationSystem.Play(registry, entity, animationPath.string()));
+    registry.AddComponent<DynamicChainRig>(entity, DynamicChainRig{ meshPath, {}, 0.0f, true });
+
+    animationSystem.EvaluatePoses(registry, 0.0);
+
+    const ResolvedAnimationPose* resolvedPose = registry.TryGetComponent<ResolvedAnimationPose>(entity);
+    ASSERT_NE(resolvedPose, nullptr);
+
+    const ResolvedAnimationBinding expectedBinding = ResolveBoneTracksToSkeleton(skeleton, motion);
+    const std::vector<BoneLocalOffset> expectedPose = EvaluateAnimatedPoseBeforePhysics(skeleton, expectedBinding, 0.0f);
+
+    ASSERT_EQ(resolvedPose->pose.size(), expectedPose.size());
+    for (std::size_t i = 0; i < expectedPose.size(); ++i) {
+        EXPECT_TRUE(ApproximatelyEqual(resolvedPose->pose[i].translation, expectedPose[i].translation))
+            << "Mismatch at bone index " << i;
+        EXPECT_TRUE(ApproximatelyEqual(resolvedPose->pose[i].rotation, expectedPose[i].rotation))
+            << "Mismatch at bone index " << i;
+    }
+}
+
+TEST_F(AnimationSystemEvaluatePosesTest,
+    EvaluatePosesFallsBackToBindPoseForADynamicChainRigEntityWhoseSkeletalAnimatorExistsButIsNotPlaying)
+{
+    RenderSystem renderSystem;
+    MeshInstantiationSystem meshInstantiationSystem(renderSystem);
+    AnimationSystem animationSystem(renderSystem, meshInstantiationSystem);
+
+    const SkeletonData skeleton = BuildTwoBoneSkeleton();
+    const MotionData motion = BuildRootTranslationMotion();
+
+    SkinnedMeshData skinData;
+    skinData.skeleton = skeleton;
+
+    const std::string meshPath = "StoppedAnimatorWithRig.gta";
+    animationSystem.RegisterSkinnedMesh(meshPath, skinData);
+
+    const std::filesystem::path animationPath = m_root / "motion.gta";
+    const std::vector<std::uint8_t> payload = EncodeMotionDataToBytes(motion);
+    ASSERT_TRUE(WriteGtaFile(animationPath, AssetType::Animation, Guid::Generate(), AssetFlags::None, {}, payload));
+
+    Registry registry;
+    const Entity entity = registry.CreateEntity();
+    registry.AddComponent<MeshAssetSource>(entity, MeshAssetSource{ meshPath });
+    ASSERT_TRUE(animationSystem.Play(registry, entity, animationPath.string()));
+    registry.AddComponent<DynamicChainRig>(entity, DynamicChainRig{ meshPath, {}, 0.0f, true });
+
+    // First call: animator is playing a real clip - proves the fixture
+    // actually animates (a non-identity pose).
+    animationSystem.EvaluatePoses(registry, 0.0);
+    const ResolvedAnimationPose* animatedPose = registry.TryGetComponent<ResolvedAnimationPose>(entity);
+    ASSERT_NE(animatedPose, nullptr);
+    bool anyNonIdentity = false;
+    for (const BoneLocalOffset& offset : animatedPose->pose) {
+        if (!ApproximatelyEqual(offset.translation, Vec3::Zero())) {
+            anyNonIdentity = true;
+            break;
+        }
+    }
+    ASSERT_TRUE(anyNonIdentity) << "Fixture did not actually animate - test premise invalid.";
+
+    // Second call: animator has stopped playing - the entity must fall back
+    // to a clean bind-pose baseline, not get stuck holding stale animated
+    // data.
+    SkeletalAnimator* animator = registry.TryGetComponent<SkeletalAnimator>(entity);
+    ASSERT_NE(animator, nullptr);
+    animator->playing = false;
+
+    animationSystem.EvaluatePoses(registry, 0.0);
+    const ResolvedAnimationPose* fallbackPose = registry.TryGetComponent<ResolvedAnimationPose>(entity);
+    ASSERT_NE(fallbackPose, nullptr);
+    ASSERT_EQ(fallbackPose->pose.size(), skeleton.bones.size());
+    for (std::size_t i = 0; i < fallbackPose->pose.size(); ++i) {
+        EXPECT_TRUE(ApproximatelyEqual(fallbackPose->pose[i].translation, Vec3::Zero())) << "Mismatch at bone index " << i;
+        EXPECT_TRUE(RepresentSameRotation(fallbackPose->pose[i].rotation, Quat::Identity())) << "Mismatch at bone index " << i;
+    }
+}
+
+TEST_F(AnimationSystemEvaluatePosesTest, EvaluatePosesSkipsADisabledDynamicChainRigEntirely)
+{
+    RenderSystem renderSystem;
+    MeshInstantiationSystem meshInstantiationSystem(renderSystem);
+    AnimationSystem animationSystem(renderSystem, meshInstantiationSystem);
+
+    const SkeletonData skeleton = BuildTwoBoneSkeleton();
+    SkinnedMeshData skinData;
+    skinData.skeleton = skeleton;
+
+    const std::string meshPath = "DisabledRig.gta";
+    animationSystem.RegisterSkinnedMesh(meshPath, skinData);
+
+    Registry registry;
+    const Entity entity = registry.CreateEntity();
+    registry.AddComponent<DynamicChainRig>(entity, DynamicChainRig{ meshPath, {}, 0.0f, false });
+
+    animationSystem.EvaluatePoses(registry, 0.016);
+
+    EXPECT_FALSE(registry.HasComponent<ResolvedAnimationPose>(entity));
+}
+
+TEST_F(AnimationSystemEvaluatePosesTest, EvaluatePosesDegradesGracefullyForADynamicChainRigWhoseModelWasNeverRegistered)
+{
+    RenderSystem renderSystem;
+    MeshInstantiationSystem meshInstantiationSystem(renderSystem);
+    AnimationSystem animationSystem(renderSystem, meshInstantiationSystem);
+
+    Registry registry;
+    const Entity entity = registry.CreateEntity();
+    registry.AddComponent<DynamicChainRig>(entity, DynamicChainRig{ "NeverRegistered.gta", {}, 0.0f, true });
+
+    EXPECT_NO_FATAL_FAILURE(animationSystem.EvaluatePoses(registry, 0.016));
+
+    EXPECT_FALSE(registry.HasComponent<ResolvedAnimationPose>(entity));
 }
 
 } // namespace

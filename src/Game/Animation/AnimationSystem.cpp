@@ -3,6 +3,7 @@
 #include "../../Animation/AnimationPoseEvaluator.h"
 #include "../../Animation/SkeletonPose.h"
 #include "../../Animation/VertexSkinning.h"
+#include "../../ECS/Components/DynamicChainRig.h"
 #include "../../ECS/Components/MeshAssetSource.h"
 #include "../../ECS/Components/MeshRenderer.h"
 #include "../../ECS/Components/ResolvedAnimationPose.h"
@@ -22,6 +23,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <unordered_set>
 
 namespace gte {
 
@@ -200,6 +202,11 @@ void AnimationSystem::EvaluatePoses(Registry& registry, double deltaSeconds)
 
     ComponentStorage<SkeletalAnimator>& animators = registry.Storage<SkeletalAnimator>();
 
+    // Phase 1 (verlet-integration-7) - tracks which entities got a fresh,
+    // genuinely-ANIMATED pose from the loop below this frame, so the second
+    // loop (DynamicChainRig baseline pass, below) never clobbers it.
+    std::unordered_set<Entity> animatedThisFrame;
+
     // No GPU/Renderer/Mesh state touched anywhere in this loop - safe to
     // reason about (and, per Phase 3's own "What We Will NOT Do", safe to
     // parallelize in a future phase) independently of SkinAndUpload()'s own
@@ -258,6 +265,47 @@ void AnimationSystem::EvaluatePoses(Registry& registry, double deltaSeconds)
             resolvedPose = &registry.AddComponent<ResolvedAnimationPose>(animatorEntity);
         }
         resolvedPose->pose = std::move(pose);
+        animatedThisFrame.insert(animatorEntity);
+    }
+
+    // Phase 1 (verlet-integration-7 - PHASE1_BASELINE_RESOLVED_POSE_FOR_NONANIMATED_PHYSICS_RIGS.md):
+    // second pass, narrow scope - only entities with an ENABLED
+    // DynamicChainRig (per the user's own explicit "narrow" answer, see
+    // PHASE0_MASTER_STRATEGY.md, Step 1) that did NOT already get a fresh,
+    // genuinely-ANIMATED pose from the loop above this same call. This is
+    // the ONLY thing that unblocks PhysicsSystem::Update() for a model that
+    // has never had Game::PlayAnimationOnEntity() called on it at all - a
+    // pure T-pose model - since PhysicsSystem::Update() itself unconditionally
+    // skips any entity with no ResolvedAnimationPose component yet. The
+    // baseline is always the model's own bind/T-pose (an all-default
+    // BoneLocalOffset per bone - see Animation/SkeletonPose.h's own
+    // documented convention), always a full fresh overwrite (never merged
+    // with a previous frame's leftover value) - this runs BEFORE
+    // PhysicsSystem::Update() every frame (see Game::Update()'s fixed call
+    // order), so this is always exactly the "before physics touches it"
+    // snapshot, whether the entity is animated or not. Touches no
+    // Renderer/Mesh/GPU state, same as the loop above.
+    ComponentStorage<DynamicChainRig>& rigs = registry.Storage<DynamicChainRig>();
+    for (std::size_t i = 0; i < rigs.Size(); ++i) {
+        DynamicChainRig& rig = rigs.ComponentAt(i);
+        if (!rig.enabled) {
+            continue; // Mirrors PhysicsSystem::Update()'s own "disabled -> skip entirely" convention - no wasted work.
+        }
+        const Entity entity = rigs.EntityAt(i);
+        if (animatedThisFrame.count(entity) > 0) {
+            continue; // Already given a fresh, genuinely-ANIMATED pose above this same call - never clobber it.
+        }
+
+        const SkinnedMeshData* skinData = m_rigCache.TryGet(rig.meshGtaPath);
+        if (skinData == nullptr) {
+            continue; // Not (yet) registered - degrade gracefully, same convention as the loop above.
+        }
+
+        ResolvedAnimationPose* resolvedPose = registry.TryGetComponent<ResolvedAnimationPose>(entity);
+        if (resolvedPose == nullptr) {
+            resolvedPose = &registry.AddComponent<ResolvedAnimationPose>(entity);
+        }
+        resolvedPose->pose.assign(skinData->skeleton.bones.size(), BoneLocalOffset{});
     }
 }
 
