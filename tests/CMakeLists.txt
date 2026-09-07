@@ -1224,6 +1224,7 @@ if(GTE_ENABLE_EDITOR)
             Editor/ProjectPanelDataTests.cpp
             Editor/AssetInspectorDataTests.cpp
             Editor/ModelRigCacheTests.cpp
+            Editor/RigidBodyWireframeTests.cpp
         )
     endif()
 endif()
