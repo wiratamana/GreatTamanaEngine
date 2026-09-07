@@ -142,7 +142,10 @@ void BuildModelPartInspector(Registry& registry, EditorContext& ctx, ModelRigCac
     const std::vector<int>& selectedIndices = ctx.selection.SelectedModelPartIndices();
     if (selectedIndices.size() > 1) {
         const ModelPartKind kind = ctx.selection.SelectedModelPartKind();
-        const char* kindNoun = kind == ModelPartKind::Bone ? "Bones" : kind == ModelPartKind::RigidBody ? "Rigid Bodies" : "Joints";
+        const char* kindNoun = kind == ModelPartKind::Bone ? "Bones"
+            : kind == ModelPartKind::RigidBody ? "Rigid Bodies"
+            : kind == ModelPartKind::Joint      ? "Joints"
+                                                : "Verlet Joints";
         ImGui::TextColored(ImVec4(0.55f, 0.75f, 1.0f, 1.0f), "%zu %s Selected", selectedIndices.size(), kindNoun);
         ImGui::Separator();
 
@@ -165,6 +168,12 @@ void BuildModelPartInspector(Registry& registry, EditorContext& ctx, ModelRigCac
             case ModelPartKind::Joint:
                 if (selectedIndex >= 0 && static_cast<std::size_t>(selectedIndex) < rig->physics.joints.size()) {
                     const std::string& name = rig->physics.joints[static_cast<std::size_t>(selectedIndex)].name;
+                    label = name.empty() ? "(unnamed)" : name;
+                }
+                break;
+            case ModelPartKind::Verlet:
+                if (selectedIndex >= 0 && static_cast<std::size_t>(selectedIndex) < rig->skeleton.bones.size()) {
+                    const std::string& name = rig->skeleton.bones[static_cast<std::size_t>(selectedIndex)].name;
                     label = name.empty() ? "(unnamed)" : name;
                 }
                 break;

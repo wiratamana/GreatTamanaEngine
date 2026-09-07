@@ -981,6 +981,47 @@ void BoneViewerWindow::Build(
         }
     }
 
+    // "Select All (Chain)" - the Verlet-mode equivalent of Rigid Body mode's
+    // own "Select All (Group)"/"Select All (Branch)" buttons above (task_manager/
+    // verlet-integration-5/PHASE4_MULTISELECT_AND_REGRESSION_CLOSURE.md).
+    // Seeded from whichever ONE Verlet joint is currently the Model-Part
+    // selection on THIS window's own m_targetEntity - selects every joint of
+    // that same joint's own chain via Selection::SelectModelParts(), the exact
+    // same multi-select primitive the Rigid Body buttons above already use.
+    if (m_viewMode == ModelPartKind::Verlet) {
+        const bool hasSeed = ctx.selection.Kind() == InspectorSelectionKind::ModelPart
+            && ctx.selection.SelectedModelPartEntity() == m_targetEntity
+            && ctx.selection.SelectedModelPartKind() == ModelPartKind::Verlet
+            && ctx.selection.SelectedModelPartIndices().size() == 1;
+
+        // Only meaningful when hasSeed is true - guarded accordingly below,
+        // exactly like Rigid Body mode's own seed/location pattern.
+        const DynamicChainJointLocation seedLocation = (hasSeed && verletModel != nullptr)
+            ? FindDynamicChainJointByBoneIndex(verletModel->chains, ctx.selection.SelectedModelPartIndex())
+            : DynamicChainJointLocation{};
+
+        ImGui::BeginDisabled(!hasSeed || !seedLocation.IsValid());
+        if (ImGui::Button("Select All (Chain)")) {
+            const DynamicChainDefinition& chain = verletModel->chains[static_cast<std::size_t>(seedLocation.chainIndex)];
+            std::vector<int> indices(chain.jointBoneIndices.begin(), chain.jointBoneIndices.end());
+            ctx.selection.SelectModelParts(m_targetEntity, ModelPartKind::Verlet, std::move(indices));
+        }
+        if (hasSeed && seedLocation.IsValid() && ImGui::IsItemHovered()) {
+            const DynamicChainDefinition& chain = verletModel->chains[static_cast<std::size_t>(seedLocation.chainIndex)];
+            ImGui::SetTooltip("Selects all %zu joints of Chain %d.", chain.jointBoneIndices.size(), seedLocation.chainIndex);
+        }
+        ImGui::EndDisabled();
+        if (!hasSeed || !seedLocation.IsValid()) {
+            ImGui::SameLine();
+            if (ctx.selection.SelectedModelPartIndices().size() > 1) {
+                ImGui::TextDisabled("(select exactly one Verlet joint first - %zu are currently selected)",
+                    ctx.selection.SelectedModelPartIndices().size());
+            } else {
+                ImGui::TextDisabled("(select a Verlet joint first)");
+            }
+        }
+    }
+
     const std::string lowerFilter = ToLower(std::string(m_searchBuffer));
 
     // --- Left pane: part list (bone tree, or a flat rigid-body/joint list) --
