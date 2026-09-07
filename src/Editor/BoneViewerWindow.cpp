@@ -10,6 +10,7 @@
 #include "../Assets/RigFile.h" // RigFileData
 #include "../ECS/Components/MeshAssetSource.h"
 #include "../ECS/Registry.h"
+#include "../Game/Physics/PhysicsSystem.h" // PhysicsSystem::GetDynamicChainRigCache() - task_manager/verlet-integration-5, Phase 2
 #include "../Math/Mat4.h"
 #include "../Math/Vec4.h"
 #include "../Renderer/Buffer.h"
@@ -107,13 +108,21 @@ std::string ToLower(const std::string& s)
 }
 
 // One part's worth of "what the viewport overlay needs to project/label/hit-
-// test this frame" - the shared shape all three view modes reduce to, so
+// test this frame" - the shared shape all four view modes reduce to, so
 // the hover/hit-test math and the name-label/search-color drawing loop are
 // each written ONCE (see BoneViewerWindow.cpp's Build(), "overlay" section)
-// rather than tripled per mode.
+// rather than quadrupled per mode.
 struct OverlayPart {
     Vec3 position;
     std::string name;
+    // task_manager/verlet-integration-5, PHASE0_MASTER_STRATEGY.md, Culprit C
+    // - the REAL ModelPartKind partIndex this overlay slot represents. For
+    // Bone/RigidBody/Joint this is always identical to this part's own
+    // position in overlayParts (i == partIndex) - kept explicit rather than
+    // implicit so Verlet mode (where partIndex is a bone index, NOT the
+    // overlay slot position - see PHASE1's own "bone index" decision) can
+    // share every downstream hover/click/highlight code path unmodified.
+    std::int32_t partIndex = -1;
 };
 
 } // namespace
@@ -648,10 +657,20 @@ void BoneViewerWindow::RenderFlatPartRow(ModelPartKind kind, std::int32_t index,
         // behavior via SelectModelPart(), and also moves the range anchor to
         // this row, same as a real Ctrl-click does.
         const ImGuiIO& io = ImGui::GetIO();
-        if (io.KeyShift) {
+        // task_manager/verlet-integration-5, PHASE0_MASTER_STRATEGY.md,
+        // Culprit D - Verlet mode's partIndex is a skeleton BONE index, not a
+        // dense 0..N-1 flat-list position, so a raw inclusive integer range
+        // between two bone indices would silently include bones that are not
+        // even Verlet joints at all. Shift-click on a Verlet row therefore
+        // falls back to the exact same toggle-only behavior Bone mode's own
+        // tree already uses for the identical underlying reason - only Rigid
+        // Body/Joint (both genuinely dense, 0..count-1 index spaces) get a
+        // real contiguous range select.
+        const bool supportsRangeSelect = kind != ModelPartKind::Verlet;
+        if (supportsRangeSelect && io.KeyShift) {
             const std::vector<std::int32_t> range = BuildInclusiveIndexRange(m_flatSelectionAnchorIndex, index);
             ctx.selection.SelectModelParts(m_targetEntity, kind, std::vector<int>(range.begin(), range.end()));
-        } else if (io.KeyCtrl) {
+        } else if (io.KeyCtrl || io.KeyShift) {
             ctx.selection.ToggleModelPartInSelection(m_targetEntity, kind, index);
             m_flatSelectionAnchorIndex = index;
         } else {
@@ -665,7 +684,51 @@ void BoneViewerWindow::RenderFlatPartRow(ModelPartKind kind, std::int32_t index,
     ImGui::PopID();
 }
 
-void BoneViewerWindow::BuildPartListPane(const std::string& lowerFilter, EditorContext& ctx)
+void BoneViewerWindow::RenderVerletChainNode(std::int32_t chainIndex, const DynamicChainDefinition& chain,
+    const std::string& lowerFilter, EditorContext& ctx)
+{
+    // "Search prunes the tree" - hide the WHOLE chain header if a non-empty
+    // filter matches none of its joints' own names (mirrors
+    // BoneMatchesFilterRecursive()'s own reasoning, just non-recursive since
+    // a chain's joints have no further descendants of their own).
+    bool anyMatch = lowerFilter.empty();
+    for (std::size_t j = 0; j < chain.jointBoneIndices.size() && !anyMatch; ++j) {
+        const std::int32_t boneIndex = chain.jointBoneIndices[j];
+        if (boneIndex >= 0 && static_cast<std::size_t>(boneIndex) < m_bones.size()
+            && ToLower(m_bones[static_cast<std::size_t>(boneIndex)].name).find(lowerFilter) != std::string::npos) {
+            anyMatch = true;
+        }
+    }
+    if (!anyMatch) {
+        return;
+    }
+
+    const char* rootName = (chain.rootBoneIndex >= 0 && static_cast<std::size_t>(chain.rootBoneIndex) < m_bones.size())
+        ? m_bones[static_cast<std::size_t>(chain.rootBoneIndex)].name.c_str()
+        : "(none)";
+    char header[160];
+    std::snprintf(header, sizeof(header), "Chain %d - Root: %s (%zu joints)", chainIndex, rootName,
+        chain.jointBoneIndices.size());
+
+    ImGui::PushID(chainIndex);
+    if (ImGui::TreeNodeEx(header, ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth)) {
+        for (const std::int32_t boneIndex : chain.jointBoneIndices) {
+            if (boneIndex < 0 || static_cast<std::size_t>(boneIndex) >= m_bones.size()) {
+                continue; // Defensive - should never happen for a well-formed DynamicChainDefinition.
+            }
+            const BoneEntry& bone = m_bones[static_cast<std::size_t>(boneIndex)];
+            RenderFlatPartRow(ModelPartKind::Verlet, boneIndex, bone.name, bone.position, lowerFilter, ctx);
+        }
+        if (chain.hasHeadCollider) {
+            ImGui::TextDisabled("Head Collider: r=%.3f", chain.headColliderRadius);
+        }
+        ImGui::TreePop();
+    }
+    ImGui::PopID();
+}
+
+void BoneViewerWindow::BuildPartListPane(
+    const std::string& lowerFilter, EditorContext& ctx, const DynamicChainRigCache::ModelEntry* verletModel)
 {
     switch (m_viewMode) {
     case ModelPartKind::Bone:
@@ -698,10 +761,20 @@ void BoneViewerWindow::BuildPartListPane(const std::string& lowerFilter, EditorC
             RenderFlatPartRow(ModelPartKind::Joint, static_cast<std::int32_t>(i), label, joint.translate, lowerFilter, ctx);
         }
         return;
+    case ModelPartKind::Verlet:
+        if (verletModel == nullptr || verletModel->chains.empty()) {
+            ImGui::TextDisabled("(no dynamic bone chains)");
+            return;
+        }
+        for (std::size_t i = 0; i < verletModel->chains.size(); ++i) {
+            RenderVerletChainNode(static_cast<std::int32_t>(i), verletModel->chains[i], lowerFilter, ctx);
+        }
+        return;
     }
 }
 
-void BoneViewerWindow::Build(Registry& registry, Renderer& renderer, EditorContext& ctx, ModelRigCache& rigCache)
+void BoneViewerWindow::Build(
+    Registry& registry, Renderer& renderer, EditorContext& ctx, ModelRigCache& rigCache, PhysicsSystem& physicsSystem)
 {
     if (!m_open) {
         return;
@@ -735,6 +808,14 @@ void BoneViewerWindow::Build(Registry& registry, Renderer& renderer, EditorConte
         return;
     }
 
+    // task_manager/verlet-integration-5, PHASE0_MASTER_STRATEGY.md, Culprit E
+    // - fetched once per Build() call, PhysicsSystem's own DynamicChainRigCache
+    // is already an in-memory map, so this is a cheap, always-safe-to-repeat
+    // lookup; doing it once here and threading the pointer down avoids
+    // redundant identical hash lookups per frame. May be nullptr (no entry
+    // registered yet for this path) - handled gracefully everywhere below.
+    const DynamicChainRigCache::ModelEntry* verletModel = physicsSystem.GetDynamicChainRigCache().TryGet(source->gtaPath);
+
     if (m_needsFraming) {
         FrameCameraToBounds();
         m_needsFraming = false;
@@ -754,7 +835,7 @@ void BoneViewerWindow::Build(Registry& registry, Renderer& renderer, EditorConte
     ImGui::Checkbox("Show All Names", &m_showAllNames);
     ImGui::SameLine();
     ImGui::PushItemWidth(140.0f);
-    static const char* kViewModeLabels[] = { "Bones", "Rigid Bodies", "Joints" };
+    static const char* kViewModeLabels[] = { "Bones", "Rigid Bodies", "Joints", "Verlet" };
     int viewModeIndex = static_cast<int>(m_viewMode);
     if (ImGui::Combo("View", &viewModeIndex, kViewModeLabels, static_cast<int>(std::size(kViewModeLabels)))) {
         m_viewMode = static_cast<ModelPartKind>(viewModeIndex);
@@ -763,13 +844,30 @@ void BoneViewerWindow::Build(Registry& registry, Renderer& renderer, EditorConte
     ImGui::PopItemWidth();
     ImGui::SameLine();
 
+    // task_manager/verlet-integration-5 - Verlet mode's "count" is naturally
+    // "how many chains/joints", not a single flat count - computed once here,
+    // reading the SAME verletModel fetched once per Build() call above.
+    std::size_t verletJointCount = 0;
+    std::size_t verletChainCount = verletModel != nullptr ? verletModel->chains.size() : 0;
+    if (verletModel != nullptr) {
+        for (const DynamicChainDefinition& chain : verletModel->chains) {
+            verletJointCount += chain.jointBoneIndices.size();
+        }
+    }
+
     const std::size_t partCount = m_viewMode == ModelPartKind::Bone ? m_bones.size()
-        : m_viewMode == ModelPartKind::RigidBody                    ? m_rigidBodies.size()
-                                                                      : m_joints.size();
+        : m_viewMode == ModelPartKind::RigidBody ? m_rigidBodies.size()
+        : m_viewMode == ModelPartKind::Joint      ? m_joints.size()
+                                                  : verletJointCount;
     const char* partNoun = m_viewMode == ModelPartKind::Bone ? "bones"
-        : m_viewMode == ModelPartKind::RigidBody              ? "rigid bodies"
-                                                                : "joints";
+        : m_viewMode == ModelPartKind::RigidBody ? "rigid bodies"
+        : m_viewMode == ModelPartKind::Joint      ? "joints"
+                                                  : "verlet joints";
     ImGui::TextDisabled("%zu %s - %u verts / %u tris", partCount, partNoun, m_vertexCount, m_indexCount / 3);
+    if (m_viewMode == ModelPartKind::Verlet) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("(%zu chain%s)", verletChainCount, verletChainCount == 1 ? "" : "s");
+    }
 
     if (m_viewMode == ModelPartKind::Bone && m_bones.empty()) {
         ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f),
@@ -778,6 +876,9 @@ void BoneViewerWindow::Build(Registry& registry, Renderer& renderer, EditorConte
         ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "This model has no rigid-body physics data.");
     } else if (m_viewMode == ModelPartKind::Joint && m_joints.empty()) {
         ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "This model has no joint physics data.");
+    } else if (m_viewMode == ModelPartKind::Verlet && verletJointCount == 0) {
+        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f),
+            "This model has no detected dynamic (Verlet) bone-chain physics data.");
     }
     ImGui::Separator();
 
@@ -897,7 +998,7 @@ void BoneViewerWindow::Build(Registry& registry, Renderer& renderer, EditorConte
     m_treeWidth = Clamp(m_treeWidth, kMinTreeWidth, maxTreeWidth);
 
     ImGui::BeginChild("BoneViewerTree", ImVec2(m_treeWidth, 0.0f), true);
-    BuildPartListPane(lowerFilter, ctx);
+    BuildPartListPane(lowerFilter, ctx, verletModel);
     ImGui::EndChild();
 
     // The draggable splitter itself - same thin scrollbar-grip-styled button
@@ -989,29 +1090,42 @@ void BoneViewerWindow::Build(Registry& registry, Renderer& renderer, EditorConte
 
         // Build this frame's "parts to project/label/hit-test" list for
         // whichever mode is active - the ONE place per mode that decides
-        // what OverlayPart::position/name means, so the hover/hit-test math
-        // AND the name-label/search-color drawing loop below are each
-        // written once and reused for all three modes (see
-        // PHASE0_MASTER_STRATEGY.md's "Revision Notes (v2)", finding #2).
+        // what OverlayPart::position/name/partIndex means, so the hover/hit-
+        // test math AND the name-label/search-color drawing loop below are
+        // each written once and reused for all four modes (see
+        // PHASE0_MASTER_STRATEGY.md's "Revision Notes (v2)", finding #2, and
+        // task_manager/verlet-integration-5's own Culprit C).
         std::vector<OverlayPart> overlayParts;
         if (m_viewMode == ModelPartKind::Bone) {
             overlayParts.reserve(m_bones.size());
             for (const BoneEntry& bone : m_bones) {
-                overlayParts.push_back(OverlayPart{ bone.position, bone.name });
+                overlayParts.push_back(OverlayPart{ bone.position, bone.name, static_cast<std::int32_t>(overlayParts.size()) });
             }
         } else if (m_viewMode == ModelPartKind::RigidBody) {
             overlayParts.reserve(m_rigidBodies.size());
             for (std::size_t i = 0; i < m_rigidBodies.size(); ++i) {
                 const RigidBodyEntry& body = m_rigidBodies[i];
-                overlayParts.push_back(
-                    OverlayPart{ body.translate, body.name.empty() ? ("Part " + std::to_string(i)) : body.name });
+                overlayParts.push_back(OverlayPart{ body.translate,
+                    body.name.empty() ? ("Part " + std::to_string(i)) : body.name, static_cast<std::int32_t>(i) });
             }
-        } else {
+        } else if (m_viewMode == ModelPartKind::Joint) {
             overlayParts.reserve(m_joints.size());
             for (std::size_t i = 0; i < m_joints.size(); ++i) {
                 const JointEntry& joint = m_joints[i];
-                overlayParts.push_back(
-                    OverlayPart{ joint.translate, joint.name.empty() ? ("Joint " + std::to_string(i)) : joint.name });
+                overlayParts.push_back(OverlayPart{ joint.translate,
+                    joint.name.empty() ? ("Joint " + std::to_string(i)) : joint.name, static_cast<std::int32_t>(i) });
+            }
+        } else { // ModelPartKind::Verlet
+            if (verletModel != nullptr) {
+                for (const DynamicChainDefinition& chain : verletModel->chains) {
+                    for (const std::int32_t boneIndex : chain.jointBoneIndices) {
+                        if (boneIndex < 0 || static_cast<std::size_t>(boneIndex) >= m_bones.size()) {
+                            continue;
+                        }
+                        const BoneEntry& bone = m_bones[static_cast<std::size_t>(boneIndex)];
+                        overlayParts.push_back(OverlayPart{ bone.position, bone.name, boneIndex });
+                    }
+                }
             }
         }
 
@@ -1073,21 +1187,28 @@ void BoneViewerWindow::Build(Registry& registry, Renderer& renderer, EditorConte
                 // function's own updated doc comment above, and
                 // task_manager/verlet-integration-4/
                 // PHASE0_MASTER_STRATEGY.md's Revision Notes, finding #2).
-                const bool supportsRangeSelect = m_viewMode != ModelPartKind::Bone;
+                // Verlet mode ALSO does not support range-select - its
+                // partIndex is a bone index, not a dense flat-list position
+                // (task_manager/verlet-integration-5, Culprit D).
+                const bool supportsRangeSelect = m_viewMode != ModelPartKind::Bone && m_viewMode != ModelPartKind::Verlet;
+                // The REAL partIndex this overlay slot represents (task_manager/
+                // verlet-integration-5, Culprit C) - identical to hoveredPartIndex
+                // for Bone/RigidBody/Joint, but the joint's own bone index for
+                // Verlet mode.
+                const std::int32_t realPartIndex = overlayParts[static_cast<std::size_t>(hoveredPartIndex)].partIndex;
                 if (supportsRangeSelect && io.KeyShift) {
-                    const std::vector<std::int32_t> range = BuildInclusiveIndexRange(
-                        m_flatSelectionAnchorIndex, static_cast<std::int32_t>(hoveredPartIndex));
+                    const std::vector<std::int32_t> range = BuildInclusiveIndexRange(m_flatSelectionAnchorIndex, realPartIndex);
                     ctx.selection.SelectModelParts(
                         m_targetEntity, m_viewMode, std::vector<int>(range.begin(), range.end()));
                 } else if (io.KeyCtrl || io.KeyShift) {
-                    ctx.selection.ToggleModelPartInSelection(m_targetEntity, m_viewMode, hoveredPartIndex);
+                    ctx.selection.ToggleModelPartInSelection(m_targetEntity, m_viewMode, realPartIndex);
                     if (supportsRangeSelect) {
-                        m_flatSelectionAnchorIndex = hoveredPartIndex;
+                        m_flatSelectionAnchorIndex = realPartIndex;
                     }
                 } else {
-                    ctx.selection.SelectModelPart(m_targetEntity, m_viewMode, hoveredPartIndex);
+                    ctx.selection.SelectModelPart(m_targetEntity, m_viewMode, realPartIndex);
                     if (supportsRangeSelect) {
-                        m_flatSelectionAnchorIndex = hoveredPartIndex;
+                        m_flatSelectionAnchorIndex = realPartIndex;
                     }
                 }
             } else {
@@ -1156,7 +1277,7 @@ void BoneViewerWindow::Build(Registry& registry, Renderer& renderer, EditorConte
                         drawList->AddLine(screenPositions[i], boneScreen, IM_COL32(80, 180, 255, 110), 1.5f);
                     }
                 }
-            } else {
+            } else if (m_viewMode == ModelPartKind::Joint) {
                 // Joint mode - draw both connector lines (joint -> bodyA,
                 // joint -> bodyB) whenever the referenced rigid body index
                 // is in range.
@@ -1176,6 +1297,76 @@ void BoneViewerWindow::Build(Registry& registry, Renderer& renderer, EditorConte
                         }
                     }
                 }
+            } else if (m_viewMode == ModelPartKind::Verlet) {
+                // task_manager/verlet-integration-5 - chain connector lines,
+                // root/anchor markers, and the optional head-collider
+                // wireframe, sourced straight from verletModel (the SAME
+                // PhysicsSystem-owned data the Inspector's "Dynamic Chain
+                // Physics" section already reads/edits).
+                if (verletModel != nullptr) {
+                    for (const DynamicChainDefinition& chain : verletModel->chains) {
+                        // Root/anchor marker - drawn even though it is NOT
+                        // part of overlayParts/selectable
+                        // (DynamicChainDefinition::rootBoneIndex is never
+                        // itself simulated) - a small, visually distinct,
+                        // non-interactive square so a user can see exactly
+                        // where a chain "hangs from."
+                        Vec3 prevPos;
+                        bool havePrev = false;
+                        if (chain.rootBoneIndex >= 0 && static_cast<std::size_t>(chain.rootBoneIndex) < m_bones.size()) {
+                            prevPos = m_bones[static_cast<std::size_t>(chain.rootBoneIndex)].position;
+                            havePrev = true;
+                            ImVec2 rootScreen;
+                            if (ProjectToScreen(prevPos, viewProj, imageMin, imageMax, rootScreen)) {
+                                constexpr float kHalf = 4.0f;
+                                drawList->AddRectFilled(ImVec2(rootScreen.x - kHalf, rootScreen.y - kHalf),
+                                    ImVec2(rootScreen.x + kHalf, rootScreen.y + kHalf), IM_COL32(200, 200, 200, 255));
+                            }
+                        }
+                        // Chain connector lines, root -> joint[0] -> joint[1]
+                        // -> ..., reprojected directly from m_bones
+                        // (independent of overlayParts/screenPositions -
+                        // mirrors how RigidBody mode's own "attached bone"
+                        // connector line already reprojects
+                        // m_bones[boneIndex].position directly).
+                        for (const std::int32_t boneIndex : chain.jointBoneIndices) {
+                            if (boneIndex < 0 || static_cast<std::size_t>(boneIndex) >= m_bones.size()) {
+                                continue;
+                            }
+                            const Vec3 jointPos = m_bones[static_cast<std::size_t>(boneIndex)].position;
+                            if (havePrev) {
+                                ImVec2 prevScreen, jointScreen;
+                                if (ProjectToScreen(prevPos, viewProj, imageMin, imageMax, prevScreen)
+                                    && ProjectToScreen(jointPos, viewProj, imageMin, imageMax, jointScreen)) {
+                                    drawList->AddLine(prevScreen, jointScreen, IM_COL32(255, 90, 170, 160), 2.0f);
+                                }
+                            }
+                            prevPos = jointPos;
+                            havePrev = true;
+                        }
+                        // Optional head-collider wireframe (Sphere shape -
+                        // reusing RigidBodyWireframe.h's own existing
+                        // per-shape geometry builder exactly like Rigid Body
+                        // mode's selected-shape wireframe does) - drawn
+                        // unconditionally whenever configured, NOT
+                        // selection-gated (it is a debug aid for the whole
+                        // chain, not itself a selectable part).
+                        if (chain.hasHeadCollider && chain.headColliderBoneIndex >= 0
+                            && static_cast<std::size_t>(chain.headColliderBoneIndex) < m_bones.size()
+                            && chain.headColliderRadius > 0.0f) {
+                            const Vec3 colliderCenter = m_bones[static_cast<std::size_t>(chain.headColliderBoneIndex)].position;
+                            const std::vector<WireframeSegment> wireframe = BuildRigidBodyWireframe(
+                                RigidBodyShape::Sphere, Vec3(chain.headColliderRadius, 0.0f, 0.0f), colliderCenter, Vec3::Zero());
+                            for (const WireframeSegment& segment : wireframe) {
+                                ImVec2 screenA, screenB;
+                                if (ProjectToScreen(segment.a, viewProj, imageMin, imageMax, screenA)
+                                    && ProjectToScreen(segment.b, viewProj, imageMin, imageMax, screenB)) {
+                                    drawList->AddLine(screenA, screenB, IM_COL32(255, 90, 170, 90), 1.25f);
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             for (std::size_t i = 0; i < overlayParts.size(); ++i) {
@@ -1186,17 +1377,18 @@ void BoneViewerWindow::Build(Registry& registry, Renderer& renderer, EditorConte
                     !lowerFilter.empty() && ToLower(overlayParts[i].name).find(lowerFilter) != std::string::npos;
                 const bool isHovered = hovered && (static_cast<int>(i) == hoveredPartIndex);
                 const bool isSelected =
-                    ctx.selection.IsModelPartSelected(m_targetEntity, m_viewMode, static_cast<std::int32_t>(i));
+                    ctx.selection.IsModelPartSelected(m_targetEntity, m_viewMode, overlayParts[i].partIndex);
 
                 // Base dot color is distinct PER MODE (green bones, cyan
-                // rigid bodies, violet joints) - selected beats hovered
-                // beats search-match beats the mode's own plain default,
-                // the same layered-priority convention "Hierarchy"'s own
-                // selection highlight uses relative to hover, just with one
-                // more tier (search match) here.
+                // rigid bodies, violet joints, hot pink verlet joints) -
+                // selected beats hovered beats search-match beats the mode's
+                // own plain default, the same layered-priority convention
+                // "Hierarchy"'s own selection highlight uses relative to
+                // hover, just with one more tier (search match) here.
                 ImU32 dotColor = m_viewMode == ModelPartKind::Bone ? IM_COL32(90, 230, 130, 255)
-                    : m_viewMode == ModelPartKind::RigidBody        ? IM_COL32(80, 180, 255, 255)
-                                                                     : IM_COL32(200, 120, 255, 255);
+                    : m_viewMode == ModelPartKind::RigidBody ? IM_COL32(80, 180, 255, 255)
+                    : m_viewMode == ModelPartKind::Joint      ? IM_COL32(200, 120, 255, 255)
+                                                              : IM_COL32(255, 90, 170, 255); // Verlet
                 if (matchesFilter) {
                     dotColor = IM_COL32(255, 215, 60, 255);
                 }

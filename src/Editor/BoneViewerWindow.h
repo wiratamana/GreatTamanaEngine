@@ -5,6 +5,8 @@
 #include "FlatListRangeSelection.h" // BuildInclusiveIndexRange()
 #include "../Assets/PhysicsData.h" // RigidBodyShape
 #include "../Math/Vec3.h"
+#include "../Physics/DynamicChainDefinition.h" // DynamicChainDefinition - task_manager/verlet-integration-5, Phase 2
+#include "../Game/Physics/DynamicChainRigCache.h" // DynamicChainRigCache::ModelEntry - used by BuildPartListPane()'s signature below
 
 #include <volk.h>
 
@@ -21,8 +23,8 @@ class Renderer;
 class Buffer;
 class RenderTexture;
 class ModelRigCache;
+class PhysicsSystem; // task_manager/verlet-integration-5, Phase 2 - PhysicsSystem::GetDynamicChainRigCache()
 struct EditorContext;
-
 // A Unity-"Avatar configuration"-style debug window: opened on demand (via
 // a button in the Inspector - see Panels/InspectorPanel.cpp's
 // BuildEntityInspector()) as its own floating ImGui window ("on the fly",
@@ -110,7 +112,13 @@ public:
     // Selection.h) and `rigCache` is the shared ModelRigCache (Culprit A/E,
     // PHASE0_MASTER_STRATEGY.md) both owned by ImGuiEditorLayer, passed by
     // reference exactly like `registry`/`renderer` already are.
-    void Build(Registry& registry, Renderer& renderer, EditorContext& ctx, ModelRigCache& rigCache);
+    // `physicsSystem` (task_manager/verlet-integration-5, PHASE0_MASTER_STRATEGY.md,
+    // Culprit E) is "Verlet" mode's own source of truth - looked up FRESH
+    // every Build() call (PhysicsSystem::GetDynamicChainRigCache().TryGet())
+    // rather than cached into a new member field, since DynamicChainRigCache
+    // is already an in-memory, already-populated, O(1)-lookup map with no
+    // on-disk mtime concept to gate a reload against in the first place.
+    void Build(Registry& registry, Renderer& renderer, EditorContext& ctx, ModelRigCache& rigCache, PhysicsSystem& physicsSystem);
 
     // Releases every currently-held GPU resource (vertex/index buffers,
     // RenderTexture, ImGui descriptor, pipeline) - waiting for the GPU to be
@@ -351,12 +359,30 @@ private:
     void RenderFlatPartRow(ModelPartKind kind, std::int32_t index, const std::string& name, const Vec3& position,
         const std::string& lowerFilter, EditorContext& ctx);
 
+    // Renders one detected dynamic bone chain (task_manager/verlet-integration-5,
+    // PHASE2_BONE_VIEWER_VERLET_MODE_TREE_AND_GIZMO.md) as a non-selectable,
+    // always-expanded ImGui tree header (e.g. "Chain 0 - Root: waist (3 joints)"),
+    // with each of its joints rendered underneath via the EXISTING
+    // RenderFlatPartRow() (ModelPartKind::Verlet, partIndex = that joint's own
+    // bone index - see PHASE1_CHAIN_LOOKUP_AND_SELECTION_FOUNDATION.md's own
+    // "bone index, not a flattened counter" decision). Hidden entirely (no
+    // header drawn at all) if a non-empty `lowerFilter` matches NONE of this
+    // chain's own joint names - the "search prunes the tree" convention every
+    // other mode's own pane already follows (see BoneMatchesFilterRecursive()'s
+    // doc comment).
+    void RenderVerletChainNode(std::int32_t chainIndex, const DynamicChainDefinition& chain,
+        const std::string& lowerFilter, EditorContext& ctx);
+
     // Renders every root bone (see m_rootBoneIndices) as the top level of a
     // real indented hierarchy tree, "starting from root" (Bone mode), or a
     // flat list of Selectable rows (Rigid Body/Joint mode, via
     // RenderFlatPartRow()) - branches on m_viewMode. The left-hand pane of
     // this window, alongside the 3D viewport on the right (see Build()).
-    void BuildPartListPane(const std::string& lowerFilter, EditorContext& ctx);
+    // `verletModel` (Verlet mode only, may be nullptr - see Build()'s own
+    // fetch-once-per-frame comment) is threaded down explicitly rather than
+    // as a member field/a PhysicsSystem& parameter - see
+    // PHASE2_BONE_VIEWER_VERLET_MODE_TREE_AND_GIZMO.md, section 3.4.
+    void BuildPartListPane(const std::string& lowerFilter, EditorContext& ctx, const DynamicChainRigCache::ModelEntry* verletModel);
 };
 
 } // namespace gte

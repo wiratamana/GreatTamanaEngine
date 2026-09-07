@@ -497,7 +497,7 @@ public:
         // Panels/InspectorPanel.cpp) rather than part of the fixed dock
         // layout above - Build() itself is a complete no-op whenever it
         // isn't currently open (see BoneViewerWindow.h).
-        m_boneViewer.Build(registry, renderer, m_ctx, m_modelRigCache);
+        m_boneViewer.Build(registry, renderer, m_ctx, m_modelRigCache, game.GetPhysicsSystem());
 #endif
     }
 
