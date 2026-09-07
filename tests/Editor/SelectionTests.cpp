@@ -29,6 +29,16 @@ TEST(SelectionTest, DefaultsToNoneWithNoEntityOrAssetSelected)
     EXPECT_FALSE(selection.HasAssetSelection());
 }
 
+TEST(SelectionTest, DefaultsToNoneWithNoModelPartSelectedEither)
+{
+    const Selection selection;
+
+    EXPECT_EQ(selection.SelectedModelPartEntity(), kInvalidEntity);
+    EXPECT_EQ(selection.SelectedModelPartKind(), ModelPartKind::Bone);
+    EXPECT_EQ(selection.SelectedModelPartIndex(), -1);
+    EXPECT_FALSE(selection.IsModelPartSelected(kInvalidEntity, ModelPartKind::Bone, -1));
+}
+
 TEST(SelectionTest, SelectEntityMakesItTheCurrentEntitySelectionAndInspectorSource)
 {
     Selection selection;
@@ -45,7 +55,6 @@ TEST(SelectionTest, SelectEntityLeavesAssetFieldsIntactButUnhighlightsThemImmedi
 {
     Selection selection;
     selection.SelectAsset("C:/Project/rock.png", "rock.png", /*isDirectory=*/false);
-
     selection.SelectEntity(Entity{ 7, 1 });
 
     // Kind() flips to Entity (Inspector now shows the entity), and the
@@ -193,6 +202,134 @@ TEST(SelectionTest, ClearResetsEverythingToDefaults)
     EXPECT_TRUE(selection.SelectedAssetAbsolutePath().empty());
     EXPECT_TRUE(selection.SelectedAssetRelativePath().empty());
     EXPECT_FALSE(selection.SelectedAssetIsDirectory());
+}
+
+TEST(SelectionTest, ClearResetsModelPartFieldsToo)
+{
+    Selection selection;
+    selection.SelectModelPart(Entity{ 4, 1 }, ModelPartKind::RigidBody, 7);
+
+    selection.Clear();
+
+    EXPECT_EQ(selection.Kind(), InspectorSelectionKind::None);
+    EXPECT_EQ(selection.SelectedModelPartEntity(), kInvalidEntity);
+    EXPECT_EQ(selection.SelectedModelPartKind(), ModelPartKind::Bone);
+    EXPECT_EQ(selection.SelectedModelPartIndex(), -1);
+}
+
+TEST(SelectionTest, SelectModelPartMakesItTheCurrentModelPartSelectionAndInspectorSource)
+{
+    Selection selection;
+
+    selection.SelectModelPart(Entity{ 4, 1 }, ModelPartKind::RigidBody, 7);
+
+    EXPECT_EQ(selection.Kind(), InspectorSelectionKind::ModelPart);
+    EXPECT_EQ(selection.SelectedModelPartEntity(), (Entity{ 4, 1 }));
+    EXPECT_EQ(selection.SelectedModelPartKind(), ModelPartKind::RigidBody);
+    EXPECT_EQ(selection.SelectedModelPartIndex(), 7);
+    EXPECT_TRUE(selection.IsModelPartSelected(Entity{ 4, 1 }, ModelPartKind::RigidBody, 7));
+}
+
+TEST(SelectionTest, IsModelPartSelectedRequiresAllThreeFieldsToMatchExactly)
+{
+    Selection selection;
+    selection.SelectModelPart(Entity{ 4, 1 }, ModelPartKind::RigidBody, 7);
+
+    // Different entity, same kind/index.
+    EXPECT_FALSE(selection.IsModelPartSelected(Entity{ 5, 1 }, ModelPartKind::RigidBody, 7));
+    // Different ModelPartKind, same entity/index.
+    EXPECT_FALSE(selection.IsModelPartSelected(Entity{ 4, 1 }, ModelPartKind::Bone, 7));
+    // Different index, same entity/kind.
+    EXPECT_FALSE(selection.IsModelPartSelected(Entity{ 4, 1 }, ModelPartKind::RigidBody, 8));
+}
+
+TEST(SelectionTest, SelectModelPartLeavesEntityAndAssetFieldsIntactButUnhighlightsThemImmediately)
+{
+    Selection selection;
+    const Entity entity{ 2, 1 };
+    selection.SelectEntity(entity);
+    selection.SelectAsset("C:/Project/rock.png", "rock.png", /*isDirectory=*/false);
+
+    selection.SelectModelPart(Entity{ 4, 1 }, ModelPartKind::RigidBody, 7);
+
+    EXPECT_EQ(selection.Kind(), InspectorSelectionKind::ModelPart);
+    EXPECT_EQ(selection.SelectedEntity(), entity);
+    EXPECT_EQ(selection.SelectedAssetRelativePath(), "rock.png");
+    EXPECT_FALSE(selection.IsEntitySelected(entity));
+    EXPECT_FALSE(selection.IsAssetSelected("rock.png"));
+}
+
+TEST(SelectionTest, SelectEntityAfterModelPartUnhighlightsItImmediately)
+{
+    Selection selection;
+    selection.SelectModelPart(Entity{ 4, 1 }, ModelPartKind::RigidBody, 7);
+
+    selection.SelectEntity(Entity{ 9, 1 });
+
+    // The stale Model-Part selection is still "remembered" (accessors still
+    // return it, never auto-cleared - matches SelectEntity()/SelectAsset()'s
+    // own existing "leave it, just gate visibility" convention), but
+    // IsModelPartSelected() is gated on Kind() == ModelPart - no longer
+    // highlighted once an entity is on top.
+    EXPECT_EQ(selection.SelectedModelPartEntity(), (Entity{ 4, 1 }));
+    EXPECT_EQ(selection.SelectedModelPartKind(), ModelPartKind::RigidBody);
+    EXPECT_EQ(selection.SelectedModelPartIndex(), 7);
+    EXPECT_FALSE(selection.IsModelPartSelected(Entity{ 4, 1 }, ModelPartKind::RigidBody, 7));
+}
+
+TEST(SelectionTest, SelectAssetAfterModelPartUnhighlightsItImmediately)
+{
+    Selection selection;
+    selection.SelectModelPart(Entity{ 4, 1 }, ModelPartKind::RigidBody, 7);
+
+    selection.SelectAsset("C:/Project/rock.png", "rock.png", /*isDirectory=*/false);
+
+    EXPECT_EQ(selection.SelectedModelPartEntity(), (Entity{ 4, 1 }));
+    EXPECT_EQ(selection.SelectedModelPartKind(), ModelPartKind::RigidBody);
+    EXPECT_EQ(selection.SelectedModelPartIndex(), 7);
+    EXPECT_FALSE(selection.IsModelPartSelected(Entity{ 4, 1 }, ModelPartKind::RigidBody, 7));
+}
+
+TEST(SelectionTest, ClearModelPartIfEntityIsNoOpWhenEntityDoesNotMatch)
+{
+    Selection selection;
+    selection.SelectModelPart(Entity{ 4, 1 }, ModelPartKind::RigidBody, 7);
+
+    selection.ClearModelPartIfEntity(Entity{ 9, 1 });
+
+    EXPECT_EQ(selection.Kind(), InspectorSelectionKind::ModelPart);
+    EXPECT_EQ(selection.SelectedModelPartEntity(), (Entity{ 4, 1 }));
+    EXPECT_EQ(selection.SelectedModelPartKind(), ModelPartKind::RigidBody);
+    EXPECT_EQ(selection.SelectedModelPartIndex(), 7);
+}
+
+TEST(SelectionTest, ClearModelPartIfEntityClearsFieldsAndRevertsKindToNoneWhenModelPartIsOnTop)
+{
+    Selection selection;
+    selection.SelectModelPart(Entity{ 4, 1 }, ModelPartKind::RigidBody, 7);
+
+    selection.ClearModelPartIfEntity(Entity{ 4, 1 });
+
+    EXPECT_EQ(selection.Kind(), InspectorSelectionKind::None);
+    EXPECT_EQ(selection.SelectedModelPartEntity(), kInvalidEntity);
+    EXPECT_EQ(selection.SelectedModelPartKind(), ModelPartKind::Bone);
+    EXPECT_EQ(selection.SelectedModelPartIndex(), -1);
+}
+
+TEST(SelectionTest, ClearModelPartIfEntityClearsFieldsButKeepsEntityKindWhenEntityIsOnTop)
+{
+    Selection selection;
+    selection.SelectModelPart(Entity{ 4, 1 }, ModelPartKind::RigidBody, 7);
+    selection.SelectEntity(Entity{ 2, 1 }); // Inspector now shows the entity, not the model part.
+
+    selection.ClearModelPartIfEntity(Entity{ 4, 1 });
+
+    EXPECT_EQ(selection.Kind(), InspectorSelectionKind::Entity);
+    EXPECT_EQ(selection.SelectedEntity(), (Entity{ 2, 1 }));
+    EXPECT_EQ(selection.SelectedModelPartEntity(), kInvalidEntity);
+    EXPECT_EQ(selection.SelectedModelPartKind(), ModelPartKind::Bone);
+    EXPECT_EQ(selection.SelectedModelPartIndex(), -1);
+    EXPECT_FALSE(selection.IsModelPartSelected(Entity{ 4, 1 }, ModelPartKind::RigidBody, 7));
 }
 
 } // namespace

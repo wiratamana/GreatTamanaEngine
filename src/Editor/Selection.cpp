@@ -31,6 +31,29 @@ void Selection::ClearAssetIfPath(const std::string& relativePath)
     }
 }
 
+void Selection::SelectModelPart(Entity owningEntity, ModelPartKind partKind, int partIndex)
+{
+    m_modelPartEntity = owningEntity;
+    m_modelPartKind = partKind;
+    m_modelPartIndex = partIndex;
+    m_kind = InspectorSelectionKind::ModelPart;
+}
+
+void Selection::ClearModelPartIfEntity(Entity owningEntity)
+{
+    if (m_modelPartEntity != owningEntity) {
+        return;
+    }
+
+    m_modelPartEntity = kInvalidEntity;
+    m_modelPartKind = ModelPartKind::Bone;
+    m_modelPartIndex = -1;
+
+    if (m_kind == InspectorSelectionKind::ModelPart) {
+        m_kind = InspectorSelectionKind::None;
+    }
+}
+
 void Selection::Clear()
 {
     m_kind = InspectorSelectionKind::None;
@@ -38,6 +61,9 @@ void Selection::Clear()
     m_assetAbsolutePath.clear();
     m_assetRelativePath.clear();
     m_assetIsDirectory = false;
+    m_modelPartEntity = kInvalidEntity;
+    m_modelPartKind = ModelPartKind::Bone;
+    m_modelPartIndex = -1;
 }
 
 bool Selection::IsEntitySelected(Entity entity) const
@@ -53,6 +79,12 @@ bool Selection::IsAssetSelected(const std::string& relativePath) const
 bool Selection::HasAssetSelection() const
 {
     return m_kind == InspectorSelectionKind::Asset && !m_assetRelativePath.empty();
+}
+
+bool Selection::IsModelPartSelected(Entity owningEntity, ModelPartKind partKind, int partIndex) const
+{
+    return m_kind == InspectorSelectionKind::ModelPart && m_modelPartEntity == owningEntity
+        && m_modelPartKind == partKind && m_modelPartIndex == partIndex;
 }
 
 } // namespace gte
