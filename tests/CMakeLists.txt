@@ -987,6 +987,31 @@
 #                                            MeshInstantiationSystem are both
 #                                            default-constructible with no GPU
 #                                            dependency).
+#   Game/Animation/AnimationSystemSkinAndUploadPhysicsOnlyTests.cpp -
+#                                            verlet-integration-7 Phase 2
+#                                            (PHASE2_SKIN_AND_UPLOAD_VISIBILITY_FOR_PHYSICS_ONLY_ENTITIES.md):
+#                                            proves SkinAndUpload()'s new
+#                                            Source 2 (every enabled
+#                                            DynamicChainRig entity) actually
+#                                            reaches the shared
+#                                            SkinAndUploadOneEntity() body -
+#                                            a physics-only, never-animated
+#                                            entity is processed without
+#                                            crashing; an entity carrying
+#                                            BOTH a playing SkeletalAnimator
+#                                            AND an enabled DynamicChainRig
+#                                            is processed safely exactly
+#                                            once (never double-uploaded);
+#                                            a disabled rig is skipped
+#                                            entirely even with a
+#                                            ResolvedAnimationPose already
+#                                            present; and a rig with no
+#                                            ResolvedAnimationPose yet
+#                                            degrades gracefully. GPU-compute
+#                                            skinning mode itself is not
+#                                            exercised (needs a live
+#                                            Renderer - Tier 2, see
+#                                            TESTING.md).
 #   Game/Physics/PhysicsSystemTests.cpp     - Phase 3's brand-new, ECS/
 #                                            Renderer-independent
 #                                            PhysicsSystem
@@ -1191,6 +1216,7 @@ set(GTE_TEST_SOURCES
     Game/AnimationClipCacheTests.cpp
     Game/ResolvedAnimationBindingCacheTests.cpp
     Game/Animation/AnimationSystemEvaluatePosesTests.cpp
+    Game/Animation/AnimationSystemSkinAndUploadPhysicsOnlyTests.cpp
     Game/GameLoopPhysicsWithoutAnimationTests.cpp
     Game/Physics/PhysicsSystemTests.cpp
     Game/Physics/DynamicChainRigCacheTests.cpp

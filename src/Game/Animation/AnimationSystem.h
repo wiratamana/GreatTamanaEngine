@@ -148,22 +148,37 @@ public:
     void EvaluatePoses(Registry& registry, double deltaSeconds);
 
     // Phase 3 - the second half of the old Update(). Reads whatever
-    // ResolvedAnimationPose::pose currently holds for every playing
-    // SkeletalAnimator (physics-adjusted by PhysicsSystem or not - this
-    // method does not, and must not, branch on which) and performs the exact
-    // same CPU/GPU vertex skinning + GPU upload work the old, single Update()
-    // used to do inline, byte-for-byte unchanged (mode branch, scratch-buffer
-    // reuse, MeshAssetPart grouping/packing, GpuSkinningRigCache upload). An
-    // entity with no ResolvedAnimationPose yet (e.g. EvaluatePoses() skipped
-    // it this frame because it wasn't playing) is simply skipped here too -
-    // the identical "not playing -> continue" guard EvaluatePoses() itself
-    // applies. Mirrors Game::UpdateSkeletalAnimators()'s original behavior
-    // exactly (see EvaluatePoses()'s own doc comment for the full original
+    // ResolvedAnimationPose::pose currently holds (physics-adjusted by
+    // PhysicsSystem or not - this method does not, and must not, branch on
+    // which) and performs the exact same CPU/GPU vertex skinning + GPU
+    // upload work the old, single Update() used to do inline, byte-for-byte
+    // unchanged (mode branch, scratch-buffer reuse, MeshAssetPart
+    // grouping/packing, GpuSkinningRigCache upload) - now factored into the
+    // shared SkinAndUploadOneEntity() private helper below (Phase 2,
+    // task_manager/verlet-integration-7/
+    // PHASE2_SKIN_AND_UPLOAD_VISIBILITY_FOR_PHYSICS_ONLY_ENTITIES.md).
+    //
+    // Iterates TWO entity sources this frame, de-duplicated against each
+    // other so an entity carrying BOTH components is skinned/uploaded
+    // exactly ONCE, never twice (a double-upload would double-write the
+    // same shared GPU vertex buffer):
+    //   Source 1 - every actively-playing SkeletalAnimator (the original,
+    //              unmodified behavior).
+    //   Source 2 - every ENABLED DynamicChainRig entity Phase 1's
+    //              EvaluatePoses() guaranteed a fresh ResolvedAnimationPose
+    //              for this same frame (a physics-only, never-animated
+    //              T-pose model), not already covered by Source 1.
+    // An entity with no ResolvedAnimationPose yet (e.g. EvaluatePoses()
+    // skipped it this frame, or the model isn't registered) is simply
+    // skipped, from either source - the identical "not (yet) available ->
+    // continue" guard EvaluatePoses() itself applies. Mirrors
+    // Game::UpdateSkeletalAnimators()'s original behavior exactly for
+    // Source 1 (see EvaluatePoses()'s own doc comment for the full original
     // description this split preserves): CpuJobSystem runs Animation/
     // VertexSkinning.h (SkinVertexRange()) - dispatched across the worker
-    // pool for a big-enough model - and re-uploads every affected mesh part's
-    // GPU vertex buffer via Mesh::UpdateVertexData(); GpuCompute instead
-    // uploads this frame's bone matrices straight into the model's
+    // pool for a big-enough model - and re-uploads every affected mesh
+    // part's GPU vertex buffer via Mesh::UpdateVertexData(); GpuCompute
+    // instead uploads this frame's bone matrices straight into the model's
     // GpuSkinningRigCache::GpuModelEntry::boneMatricesBuffer and records the
     // model as needing a compute dispatch this frame (see
     // CollectModelsNeedingGpuSkinningThisFrame() below). Either way, every
@@ -171,11 +186,12 @@ public:
     // frame, so a mid-session mode switch takes effect the very next frame
     // with no further caller action needed.
     //
-    // *** THIS METHOD'S OUTER LOOP MUST REMAIN STRICTLY SEQUENTIAL - see the
-    // .cpp's own prominent loop comment for why (shared GPU mesh buffers
-    // across two instances of the same model). EvaluatePoses() above is NOT
-    // bound by this same constraint (it touches no Renderer/Mesh state at
-    // all). ***
+    // *** THIS METHOD'S OUTER PROCESSING MUST REMAIN STRICTLY SEQUENTIAL,
+    // ONE MODEL AT A TIME, REGARDLESS OF WHICH SOURCE DISCOVERED IT - see
+    // the .cpp's own prominent loop comment for why (shared GPU mesh
+    // buffers across two instances of the same model). EvaluatePoses()
+    // above is NOT bound by this same constraint (it touches no
+    // Renderer/Mesh state at all). ***
     void SkinAndUpload(Registry& registry);
 
     // GPU Vertex Skinning campaign, Phase 5, Step 3.3 ("Who actually issues
@@ -212,6 +228,21 @@ public:
     std::vector<GpuSkinningDispatchRequest> CollectModelsNeedingGpuSkinningThisFrame() const;
 
 private:
+    // Phase 2 (task_manager/verlet-integration-7/
+    // PHASE2_SKIN_AND_UPLOAD_VISIBILITY_FOR_PHYSICS_ONLY_ENTITIES.md) - the
+    // ENTIRE per-entity skin/pack/upload body SkinAndUpload() used to run
+    // inline for its own SkeletalAnimator loop, extracted verbatim (zero
+    // logic change) so it can be called for an entity discovered via EITHER
+    // a playing SkeletalAnimator OR an enabled DynamicChainRig, without
+    // maintaining two copies of the real skin/pack/upload logic. `entity`
+    // is whichever entity owns the ResolvedAnimationPose to read from;
+    // `meshGtaPath` is that entity's own resolved model path
+    // (SkeletalAnimator::meshGtaPath OR DynamicChainRig::meshGtaPath - both
+    // are the same string convention); `mode` is the SAME snapshotted
+    // SkinningMode SkinAndUpload() itself captured at the top of its own
+    // call.
+    void SkinAndUploadOneEntity(Registry& registry, Entity entity, const std::string& meshGtaPath, SkinningMode mode);
+
     RenderSystem& m_renderSystem;
     MeshInstantiationSystem& m_meshInstantiationSystem;
 
