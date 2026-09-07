@@ -386,6 +386,37 @@ void BuildModelPartInspector(Registry& registry, EditorContext& ctx, ModelRigCac
         ImGui::Text("Chain: %d (%zu joints)", location.chainIndex, chain.jointBoneIndices.size());
         ImGui::Text("Position In Chain: %d of %zu", location.jointIndexInChain + 1, chain.jointBoneIndices.size());
 
+        // task_manager/verlet-integration-6, Phase 5, 3.4 - show this joint's
+        // own resolved TREE parent (root bone name if parentJointIndex[jointIndex]
+        // < 0, otherwise the sibling joint bone's own name), mirroring
+        // BoneViewerWindow.cpp's own tree-pane/gizmo resolution logic exactly.
+        const std::int32_t parentJoint = (jointIndex < chain.parentJointIndex.size()) ? chain.parentJointIndex[jointIndex] : -1;
+        std::string parentName = "(none)";
+        if (parentJoint < 0) {
+            if (chain.rootBoneIndex >= 0 && static_cast<std::size_t>(chain.rootBoneIndex) < rig->skeleton.bones.size()) {
+                parentName = rig->skeleton.bones[static_cast<std::size_t>(chain.rootBoneIndex)].name;
+            }
+        } else if (static_cast<std::size_t>(parentJoint) < chain.jointBoneIndices.size()) {
+            const std::int32_t parentBoneIndex = chain.jointBoneIndices[static_cast<std::size_t>(parentJoint)];
+            if (parentBoneIndex >= 0 && static_cast<std::size_t>(parentBoneIndex) < rig->skeleton.bones.size()) {
+                parentName = rig->skeleton.bones[static_cast<std::size_t>(parentBoneIndex)].name;
+            }
+        }
+        ImGui::Text("Tree Parent: %s", parentName.empty() ? "(unnamed)" : parentName.c_str());
+
+        // Extra ("web brace") structural constraints referencing this exact
+        // joint - so a user inspecting one particle also learns it
+        // participates in the skirt's web bracing, not just its own tree edge.
+        std::size_t extraBraceCount = 0;
+        for (const ExtraStructuralConstraint& extra : chain.extraConstraints) {
+            if (extra.jointIndexA == static_cast<std::int32_t>(jointIndex)
+                || extra.jointIndexB == static_cast<std::int32_t>(jointIndex)) {
+                ++extraBraceCount;
+            }
+        }
+        if (extraBraceCount > 0) {
+            ImGui::TextDisabled("Extra brace constraints: %zu", extraBraceCount);
+        }
         const char* rootName = (chain.rootBoneIndex >= 0 && static_cast<std::size_t>(chain.rootBoneIndex) < rig->skeleton.bones.size())
             ? rig->skeleton.bones[static_cast<std::size_t>(chain.rootBoneIndex)].name.c_str()
             : "(none)";
@@ -564,6 +595,18 @@ void BuildEntityInspector(Registry& registry, EditorContext& ctx, PhysicsSystem&
                     totalJoints += chain.jointBoneIndices.size();
                 }
                 ImGui::Text("%zu chain(s), %zu joint(s) total", model->chains.size(), totalJoints);
+                // task_manager/verlet-integration-6, Phase 5, 3.5 (v2) - a
+                // single, cheap pointer toward the Bone Viewer's Verlet tree
+                // pane for a user who only ever opens the Inspector, rather
+                // than duplicating the full per-entry listing in two panels.
+                if (!model->diagnostics.crossChainJointsDropped.empty()
+                    || !model->diagnostics.duplicateBoneRigidBodyAssignmentsDropped.empty()) {
+                    ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f),
+                        "%zu cross-chain joint(s) and %zu duplicate rigid-body assignment(s) were dropped during "
+                        "detection - see the Bone Viewer's Verlet tree pane for details.",
+                        model->diagnostics.crossChainJointsDropped.size(),
+                        model->diagnostics.duplicateBoneRigidBodyAssignmentsDropped.size());
+                }
 
                 for (std::size_t chainIndex = 0; chainIndex < model->chains.size(); ++chainIndex) {
                     DynamicChainDefinition& chain = model->chains[chainIndex];
