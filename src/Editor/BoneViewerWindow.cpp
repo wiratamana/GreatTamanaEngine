@@ -3,6 +3,7 @@
 #include "EditorContext.h"
 #include "ModelRigCache.h"
 #include "ProjectPanelData.h" // Utf8ToPath()
+#include "RigidBodyWireframe.h"
 #include "../Assets/AssetTypes.h" // AssetType
 #include "../Assets/GtaFile.h" // ReadGtaFile()
 #include "../Assets/MeshFile.h" // DecodeMeshDataFromBytes()
@@ -1022,30 +1023,26 @@ void BoneViewerWindow::Build(Registry& registry, Renderer& renderer, EditorConte
                     drawList->AddCircle(screenPositions[i], 9.0f, IM_COL32(255, 140, 0, 255), 0, 2.0f);
                 }
 
-                // Rigid Body mode also draws an approximate "size" hint - an
-                // unfilled circle whose pixel radius is the on-screen
-                // distance to a second point offset along the view-right
-                // axis by the shape's characteristic size - a deliberate,
-                // documented screen-space approximation (see
-                // PHASE0_MASTER_STRATEGY.md, "What We Will NOT Do"), never a
-                // true oriented 3D wireframe.
-                if (m_viewMode == ModelPartKind::RigidBody) {
+                // As of task_manager/verlet-integration-3
+                // (PHASE2_BONE_VIEWER_SELECT_TO_REVEAL_WIREFRAME_INTEGRATION.md):
+                // an UNSELECTED rigid body shows ONLY its plain dot (drawn
+                // above, shared with Bone/Joint mode) - exactly a "single
+                // selectable point", per the story's own requirement. Only
+                // the CURRENTLY SELECTED rigid body additionally reveals its
+                // real, per-shape wireframe (a wire sphere/box/capsule built
+                // from its actual shape/size/rotation - see
+                // RigidBodyWireframe.h), never a generic screen-space circle
+                // - and never for more than one body at once, since
+                // Selection is single-selection end-to-end.
+                if (m_viewMode == ModelPartKind::RigidBody && isSelected) {
                     const RigidBodyEntry& body = m_rigidBodies[i];
-                    const float characteristicSize = body.shape == RigidBodyShape::Box ? Length(body.shapeSize) : body.shapeSize.x;
-                    if (characteristicSize > kEpsilon) {
-                        Vec3 viewRight = Normalize(Cross(Vec3::Up(), Normalize(m_camTarget - eye)));
-                        if (LengthSquared(viewRight) < kEpsilon) {
-                            viewRight = Vec3::Right();
-                        }
-                        ImVec2 sizeScreen;
-                        if (ProjectToScreen(body.translate + viewRight * characteristicSize, viewProj, imageMin, imageMax,
-                                sizeScreen)) {
-                            const float dx = sizeScreen.x - screenPositions[i].x;
-                            const float dy = sizeScreen.y - screenPositions[i].y;
-                            const float pixelRadius = std::sqrt(dx * dx + dy * dy);
-                            if (pixelRadius > 1.0f) {
-                                drawList->AddCircle(screenPositions[i], pixelRadius, dotColor, 0, 1.5f);
-                            }
+                    const std::vector<WireframeSegment> wireframe =
+                        BuildRigidBodyWireframe(body.shape, body.shapeSize, body.translate, body.rotateRadians);
+                    for (const WireframeSegment& segment : wireframe) {
+                        ImVec2 screenA, screenB;
+                        if (ProjectToScreen(segment.a, viewProj, imageMin, imageMax, screenA)
+                            && ProjectToScreen(segment.b, viewProj, imageMin, imageMax, screenB)) {
+                            drawList->AddLine(screenA, screenB, dotColor, 1.5f);
                         }
                     }
                 }
