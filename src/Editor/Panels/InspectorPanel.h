@@ -10,6 +10,7 @@ struct EditorContext;
 class AssetPreviewTexture;
 class AssetPreviewMesh;
 class BoneViewerWindow;
+class ModelRigCache;
 #endif
 
 // Shows/edits whichever selection is currently "on top" - see
@@ -43,9 +44,19 @@ class BoneViewerWindow;
 //     src/Assets/VmdLoader.h); falls back to metadata-only for anything
 //     else (a folder, a non-image/non-mesh/non-animation file, or a file
 //     that fails to decode/parse).
+//   - ModelPart (ctx.selection.SelectedModelPartEntity()/Kind()/Index(),
+//     from BoneViewerWindow's own Bones/Rigid Bodies/Joints selection -
+//     only reachable when GTE_ENABLE_PROJECT_PANEL is ON) - full, read-only
+//     details for whichever bone/rigid body/joint is currently selected
+//     inside the Bone Viewer (name/index/parent/position/flags/IK chain for
+//     a Bone; shape/size/transform/mass/damping/collision filter for a
+//     RigidBody; connected bodies/transform/limits/spring factors for a
+//     Joint), read via the shared `rigCache` (ModelRigCache.h) - see
+//     task_manager/verlet-integration-2/PHASE4_INSPECTOR_MODEL_PART_SECTION.md.
 // Called once per frame by ImGuiEditorLayer::BuildUI(), after
 // BuildHierarchyPanel(). `renderer`/`assetPreview`/`assetPreviewMesh`/
-// `boneViewer` only exist in this signature when GTE_ENABLE_PROJECT_PANEL is
+// `boneViewer`/`rigCache` only exist in this signature when
+// GTE_ENABLE_PROJECT_PANEL is
 // ON - see AGENTS.md, "Editor Module Structure", for why this `#if` guard is
 // one of the few GTE_ENABLE_PROJECT_PANEL touch points allowed outside
 // ImGuiEditorLayer.cpp/DockLayout.cpp. (BoneViewerWindow itself has nothing
@@ -59,7 +70,7 @@ class BoneViewerWindow;
 // carrying a DynamicChainRig component.
 #if GTE_ENABLE_PROJECT_PANEL
 void BuildInspectorPanel(Registry& registry, EditorContext& ctx, Renderer& renderer, AssetPreviewTexture& assetPreview,
-    AssetPreviewMesh& assetPreviewMesh, BoneViewerWindow& boneViewer, PhysicsSystem& physicsSystem);
+    AssetPreviewMesh& assetPreviewMesh, BoneViewerWindow& boneViewer, PhysicsSystem& physicsSystem, ModelRigCache& rigCache);
 #else
 void BuildInspectorPanel(Registry& registry, EditorContext& ctx, PhysicsSystem& physicsSystem);
 #endif

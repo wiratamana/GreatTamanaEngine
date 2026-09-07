@@ -18,10 +18,12 @@
 #include "../AssetPreviewTexture.h"
 #include "../BoneViewerWindow.h"
 #include "../MemoryPanelData.h" // FormatBytes() - reused for the asset size field below.
+#include "../ModelRigCache.h" // ModelRigCache::GetOrLoad() - shared bones/rigid-bodies/joints cache, Model Part section.
 #include "../ProjectPanelData.h" // Utf8ToPath()
 #include "../../Assets/AssetTypes.h" // AssetType, AssetFlags, Guid
 #include "../../Assets/GtaFile.h" // ReadGtaHeader()/ReadGtaFile()
 #include "../../Assets/MotionFile.h" // DecodeMotionDataFromBytes()
+#include "../../Assets/PhysicsData.h" // RigidBody, Joint, RigidBodyShape, RigidBodyMotionType, JointType
 #include "../../ECS/Components/MeshAssetSource.h"
 #include "../../Renderer/Renderer.h"
 #endif
@@ -36,6 +38,262 @@
 
 namespace gte {
 namespace {
+
+#if GTE_ENABLE_PROJECT_PANEL
+
+// Human-readable label helpers - same "always produce something
+// displayable" convention as AssetTypeLabel()/AssetFlagsLabel() further
+// down this file.
+const char* RigidBodyShapeLabel(RigidBodyShape shape)
+{
+    switch (shape) {
+    case RigidBodyShape::Sphere: return "Sphere";
+    case RigidBodyShape::Box: return "Box";
+    case RigidBodyShape::Capsule: return "Capsule";
+    default: return "Unknown";
+    }
+}
+
+const char* RigidBodyMotionTypeLabel(RigidBodyMotionType type)
+{
+    switch (type) {
+    case RigidBodyMotionType::Static: return "Static (follows bone)";
+    case RigidBodyMotionType::Dynamic: return "Dynamic (physics-driven)";
+    case RigidBodyMotionType::DynamicAndBoneMerge: return "Dynamic + Bone Merge";
+    default: return "Unknown";
+    }
+}
+
+const char* JointTypeLabel(JointType type)
+{
+    switch (type) {
+    case JointType::SpringDof6: return "Spring 6-DOF";
+    case JointType::Dof6: return "6-DOF";
+    case JointType::P2P: return "Point-to-Point";
+    case JointType::ConeTwist: return "Cone Twist";
+    case JointType::Slider: return "Slider";
+    case JointType::Hinge: return "Hinge";
+    default: return "Unknown";
+    }
+}
+
+// Shown whenever ctx.selection.Kind() == ModelPart (see
+// task_manager/verlet-integration-2/PHASE1_SELECTION_MODEL_PART_FOUNDATION.md)
+// - the sub-part-of-a-model equivalent of BuildEntityInspector()/
+// BuildAssetInspector() below. Every field is read-only (plain ImGui::Text()
+// or ImGui::BeginDisabled()) - there is no physics simulation anywhere in
+// the engine that consumes RigidBody/Joint data yet (see
+// Assets/PhysicsData.h's own file comment), so there is nothing for an edit
+// here to actually drive - same scope limit as this file's existing
+// "Mesh Renderer"/"Global Physics Settings" read-only sections.
+void BuildModelPartInspector(Registry& registry, EditorContext& ctx, ModelRigCache& rigCache)
+{
+    const Entity owner = ctx.selection.SelectedModelPartEntity();
+    if (!registry.IsAlive(owner)) {
+        ImGui::TextDisabled("The selected model part's owning entity no longer exists.");
+        return;
+    }
+
+    // Lets the user get back to the Entity Inspector view (and its "Open
+    // Bone Viewer" button, only reachable from that view - see
+    // InspectorPanel.h's own class comment) without leaving the Bone Viewer
+    // and re-picking the same entity in Hierarchy - see
+    // PHASE0_MASTER_STRATEGY.md's "Revision Notes (v2)", finding #4. Calling
+    // SelectEntity() flips ctx.selection.Kind() to Entity immediately, so
+    // NEXT frame's BuildInspectorPanel() call takes the BuildEntityInspector()
+    // branch instead of this one - this frame still finishes rendering the
+    // Model Part section below unchanged (harmless - Kind() only matters at
+    // the top of BuildInspectorPanel(), already past by the time this runs).
+    if (ImGui::Button("Select Owning Entity")) {
+        ctx.selection.SelectEntity(owner);
+    }
+    ImGui::Separator();
+
+    const MeshAssetSource* source = registry.TryGetComponent<MeshAssetSource>(owner);
+    if (source == nullptr || source->gtaPath.empty()) {
+        ImGui::TextDisabled("The selected model part's owning entity has no associated mesh asset.");
+        return;
+    }
+
+    const RigFileData* rig = rigCache.GetOrLoad(source->gtaPath);
+    if (rig == nullptr) {
+        ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.2f, 1.0f), "Failed to load rig data for:");
+        ImGui::TextWrapped("%s", source->gtaPath.c_str());
+        return;
+    }
+
+    const int index = ctx.selection.SelectedModelPartIndex();
+
+    switch (ctx.selection.SelectedModelPartKind()) {
+    case ModelPartKind::Bone: {
+        ImGui::TextColored(ImVec4(0.55f, 0.75f, 1.0f, 1.0f), "Bone");
+        if (index < 0 || static_cast<std::size_t>(index) >= rig->skeleton.bones.size()) {
+            ImGui::TextDisabled("Bone index %d is out of range (the model may have changed).", index);
+            break;
+        }
+        const Bone& bone = rig->skeleton.bones[static_cast<std::size_t>(index)];
+        ImGui::Text("Name: %s", bone.name.empty() ? "(unnamed)" : bone.name.c_str());
+        if (!bone.englishName.empty()) {
+            ImGui::Text("English Name: %s", bone.englishName.c_str());
+        }
+        ImGui::Text("Index: %d", index);
+        ImGui::Text("Parent Bone Index: %d", bone.parentBoneIndex);
+        {
+            Vec3 position = bone.position;
+            ImGui::BeginDisabled();
+            ImGui::DragFloat3("Position", &position.x);
+            ImGui::EndDisabled();
+        }
+        ImGui::Text("Deform Depth: %d", bone.deformDepth);
+        {
+            bool rotatable = bone.rotatable;
+            bool translatable = bone.translatable;
+            bool isIk = bone.isIk;
+            bool deformAfterPhysics = bone.deformAfterPhysics;
+            bool visible = bone.visible;
+            bool controllable = bone.controllable;
+            ImGui::BeginDisabled();
+            ImGui::Checkbox("Rotatable", &rotatable);
+            ImGui::SameLine();
+            ImGui::Checkbox("Translatable", &translatable);
+            ImGui::Checkbox("IK", &isIk);
+            ImGui::SameLine();
+            ImGui::Checkbox("Deform After Physics", &deformAfterPhysics);
+            ImGui::Checkbox("Visible", &visible);
+            ImGui::SameLine();
+            ImGui::Checkbox("Controllable", &controllable);
+            ImGui::EndDisabled();
+        }
+
+        // IK chain - only meaningful when isIk is true (see
+        // Assets/SkeletonData.h's own Bone::isIk doc comment). Squarely
+        // in-scope for this window: BoneViewerWindow.h's own class comment
+        // names diagnosing an IK/animation bone mismatch as this whole
+        // window's reason to exist.
+        if (bone.isIk) {
+            ImGui::Separator();
+            ImGui::TextColored(ImVec4(0.55f, 0.75f, 1.0f, 1.0f), "IK Chain");
+            if (bone.ikTargetBoneIndex >= 0
+                && static_cast<std::size_t>(bone.ikTargetBoneIndex) < rig->skeleton.bones.size()) {
+                const Bone& target = rig->skeleton.bones[static_cast<std::size_t>(bone.ikTargetBoneIndex)];
+                ImGui::Text("Target Bone: %s (index %d)", target.name.c_str(), bone.ikTargetBoneIndex);
+            } else {
+                ImGui::TextDisabled("Target Bone: (none)");
+            }
+            ImGui::Text("Iteration Count: %d", bone.ikIterationCount);
+            {
+                float angleLimit = bone.ikAngleLimitRadians;
+                ImGui::BeginDisabled();
+                ImGui::DragFloat("Angle Limit (radians)", &angleLimit);
+                ImGui::EndDisabled();
+            }
+            ImGui::Text("Links (%zu):", bone.ikLinks.size());
+            for (std::size_t linkIndex = 0; linkIndex < bone.ikLinks.size(); ++linkIndex) {
+                const Bone::IkLink& link = bone.ikLinks[linkIndex];
+                std::string linkLabel = "(invalid)";
+                if (link.boneIndex >= 0 && static_cast<std::size_t>(link.boneIndex) < rig->skeleton.bones.size()) {
+                    linkLabel = rig->skeleton.bones[static_cast<std::size_t>(link.boneIndex)].name;
+                }
+                ImGui::BulletText("[%zu] %s (index %d)%s", linkIndex, linkLabel.c_str(), link.boneIndex,
+                    link.hasAngleLimit ? " - angle limited" : "");
+            }
+        }
+        break;
+    }
+    case ModelPartKind::RigidBody: {
+        ImGui::TextColored(ImVec4(0.55f, 0.75f, 1.0f, 1.0f), "Rigid Body");
+        if (index < 0 || static_cast<std::size_t>(index) >= rig->physics.rigidBodies.size()) {
+            ImGui::TextDisabled("Rigid body index %d is out of range (the model may have changed).", index);
+            break;
+        }
+        const RigidBody& body = rig->physics.rigidBodies[static_cast<std::size_t>(index)];
+        ImGui::Text("Name: %s", body.name.empty() ? "(unnamed)" : body.name.c_str());
+        ImGui::Text("Index: %d", index);
+        if (body.boneIndex >= 0 && static_cast<std::size_t>(body.boneIndex) < rig->skeleton.bones.size()) {
+            ImGui::Text("Attached Bone: %s (index %d)",
+                rig->skeleton.bones[static_cast<std::size_t>(body.boneIndex)].name.c_str(), body.boneIndex);
+        } else {
+            ImGui::TextDisabled("Attached Bone: (none)");
+        }
+        ImGui::Text("Shape: %s", RigidBodyShapeLabel(body.shape));
+        ImGui::Text("Motion Type: %s", RigidBodyMotionTypeLabel(body.motionType));
+        // Collision filtering fields - matches Bullet's own group/mask
+        // convention exactly (PhysicsData.h's own RigidBody::group/
+        // collisionGroupMask doc comment) - shown as plain unsigned/hex
+        // text, not editable widgets, since neither is a float/bool
+        // DragFloat*/Checkbox can represent directly.
+        ImGui::Text("Collision Group: %u", static_cast<unsigned>(body.group));
+        ImGui::Text("Collision Mask: 0x%04X", static_cast<unsigned>(body.collisionGroupMask));
+        {
+            Vec3 shapeSize = body.shapeSize;
+            Vec3 translate = body.translate;
+            Vec3 rotateRadians = body.rotateRadians;
+            float mass = body.mass;
+            float linearDamping = body.linearDamping;
+            float angularDamping = body.angularDamping;
+            float restitution = body.restitution;
+            float friction = body.friction;
+            ImGui::BeginDisabled();
+            ImGui::DragFloat3("Shape Size", &shapeSize.x);
+            ImGui::DragFloat3("Translate", &translate.x);
+            ImGui::DragFloat3("Rotate (radians)", &rotateRadians.x);
+            ImGui::DragFloat("Mass", &mass);
+            ImGui::DragFloat("Linear Damping", &linearDamping);
+            ImGui::DragFloat("Angular Damping", &angularDamping);
+            ImGui::DragFloat("Restitution", &restitution);
+            ImGui::DragFloat("Friction", &friction);
+            ImGui::EndDisabled();
+        }
+        break;
+    }
+    case ModelPartKind::Joint: {
+        ImGui::TextColored(ImVec4(0.55f, 0.75f, 1.0f, 1.0f), "Joint");
+        if (index < 0 || static_cast<std::size_t>(index) >= rig->physics.joints.size()) {
+            ImGui::TextDisabled("Joint index %d is out of range (the model may have changed).", index);
+            break;
+        }
+        const Joint& joint = rig->physics.joints[static_cast<std::size_t>(index)];
+        ImGui::Text("Name: %s", joint.name.empty() ? "(unnamed)" : joint.name.c_str());
+        ImGui::Text("Index: %d", index);
+        ImGui::Text("Type: %s", JointTypeLabel(joint.type));
+
+        auto rigidBodyLabel = [&](std::int32_t rigidBodyIndex) -> std::string {
+            if (rigidBodyIndex < 0 || static_cast<std::size_t>(rigidBodyIndex) >= rig->physics.rigidBodies.size()) {
+                return "(none)";
+            }
+            const RigidBody& rb = rig->physics.rigidBodies[static_cast<std::size_t>(rigidBodyIndex)];
+            return (rb.name.empty() ? std::string("(unnamed)") : rb.name) + " (index " + std::to_string(rigidBodyIndex) + ")";
+        };
+        ImGui::Text("Rigid Body A: %s", rigidBodyLabel(joint.rigidBodyAIndex).c_str());
+        ImGui::Text("Rigid Body B: %s", rigidBodyLabel(joint.rigidBodyBIndex).c_str());
+
+        {
+            Vec3 translate = joint.translate;
+            Vec3 rotateRadians = joint.rotateRadians;
+            Vec3 translateLowerLimit = joint.translateLowerLimit;
+            Vec3 translateUpperLimit = joint.translateUpperLimit;
+            Vec3 rotateLowerLimit = joint.rotateLowerLimit;
+            Vec3 rotateUpperLimit = joint.rotateUpperLimit;
+            Vec3 springTranslateFactor = joint.springTranslateFactor;
+            Vec3 springRotateFactor = joint.springRotateFactor;
+            ImGui::BeginDisabled();
+            ImGui::DragFloat3("Translate", &translate.x);
+            ImGui::DragFloat3("Rotate (radians)", &rotateRadians.x);
+            ImGui::DragFloat3("Translate Lower Limit", &translateLowerLimit.x);
+            ImGui::DragFloat3("Translate Upper Limit", &translateUpperLimit.x);
+            ImGui::DragFloat3("Rotate Lower Limit", &rotateLowerLimit.x);
+            ImGui::DragFloat3("Rotate Upper Limit", &rotateUpperLimit.x);
+            if (joint.type == JointType::SpringDof6) {
+                ImGui::DragFloat3("Spring Translate Factor", &springTranslateFactor.x);
+                ImGui::DragFloat3("Spring Rotate Factor", &springRotateFactor.x);
+            }
+            ImGui::EndDisabled();
+        }
+        break;
+    }
+    }
+}
+#endif
 
 #if GTE_ENABLE_PROJECT_PANEL
 void BuildEntityInspector(Registry& registry, EditorContext& ctx, BoneViewerWindow& boneViewer, PhysicsSystem& physicsSystem)
@@ -772,7 +1030,7 @@ void BuildAssetInspector(
 
 #if GTE_ENABLE_PROJECT_PANEL
 void BuildInspectorPanel(Registry& registry, EditorContext& ctx, Renderer& renderer, AssetPreviewTexture& assetPreview,
-    AssetPreviewMesh& assetPreviewMesh, BoneViewerWindow& boneViewer, PhysicsSystem& physicsSystem)
+    AssetPreviewMesh& assetPreviewMesh, BoneViewerWindow& boneViewer, PhysicsSystem& physicsSystem, ModelRigCache& rigCache)
 #else
 void BuildInspectorPanel(Registry& registry, EditorContext& ctx, PhysicsSystem& physicsSystem)
 #endif
@@ -782,6 +1040,11 @@ void BuildInspectorPanel(Registry& registry, EditorContext& ctx, PhysicsSystem& 
 #if GTE_ENABLE_PROJECT_PANEL
     if (ctx.selection.Kind() == InspectorSelectionKind::Asset && !ctx.selection.SelectedAssetAbsolutePath().empty()) {
         BuildAssetInspector(ctx, renderer, assetPreview, assetPreviewMesh);
+        ImGui::End();
+        return;
+    }
+    if (ctx.selection.Kind() == InspectorSelectionKind::ModelPart) {
+        BuildModelPartInspector(registry, ctx, rigCache);
         ImGui::End();
         return;
     }
