@@ -1,6 +1,7 @@
 #pragma once
 #include "../../Assets/SkeletonData.h"
 #include "../../Physics/DynamicChainDefinition.h"
+#include "../../Physics/DynamicChainDetection.h"
 
 #include <string>
 #include <unordered_map>
@@ -16,21 +17,25 @@ namespace gte {
 // own v3 Revision Notice for why this deliberate small duplication of a
 // SkeletonData copy - once in AnimationSystem::m_rigCache, once here - is an
 // accepted trade for genuine system independence).
-//
-// PHASE3 STUB: real chain detection (Physics/DynamicChainDetection.h) is
-// PHASE4's job (see
-// task_manager/verlet-integration-1/PHASE4_PARAMETER_AUTHORING_AND_DATA_DRIVEN_CONFIG.md).
-// Register() is a real, callable method (so PhysicsSystem::RegisterDynamicChains()
-// has a genuine call site to forward into today) but is intentionally never
-// invoked with a non-empty ModelEntry::chains list yet - TryGet() therefore
-// always returns nullptr for every model in THIS phase, which is what makes
-// PhysicsSystem::Update() a PROVABLE no-op today: nothing has a populated
-// DynamicChainRig to act on yet.
+// PHASE3 note: real chain detection now lives in
+// Physics/DynamicChainDetection.h (task_manager/verlet-integration-1's own
+// PHASE4, later fully rewritten to traverse the real RigidBody/Joint graph by
+// task_manager/verlet-integration-6 - see that campaign's
+// PHASE0_MASTER_STRATEGY.md). Register()/TryGet()/TryGetMutable() themselves
+// are unchanged by that rewrite - only ModelEntry's own shape gained a new
+// `diagnostics` field (below) to carry DetectDynamicChains()'s diagnostic
+// output alongside its chains.
 class DynamicChainRigCache {
 public:
     struct ModelEntry {
         std::vector<DynamicChainDefinition> chains;
         SkeletonData skeleton;
+        // task_manager/verlet-integration-6, Phase 3/4 - carried straight from
+        // DetectDynamicChains()'s own DynamicChainDetectionResult::diagnostics,
+        // unmodified - PHASE5's Editor visualization reads
+        // diagnostics.orphanedDynamicBoneIndices to render a non-simulated rigid
+        // body distinctly (see this campaign's PHASE0_MASTER_STRATEGY.md).
+        DynamicChainDetectionDiagnostics diagnostics;
     };
 
     void Register(const std::string& absoluteGtaPath, ModelEntry entry)

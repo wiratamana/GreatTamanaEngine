@@ -108,9 +108,9 @@ TEST(PhysicsSystemTests, RegisteredDynamicChainVisiblyDivergesFromPureFkPoseUnde
     PhysicsSystem physicsSystem;
     Registry registry;
 
-    // Synthetic 4-bone rig: root(0, not flagged) -> chainRoot(1, not
-    // flagged, the chain's anchor) -> joint1(2, flagged) -> joint2(3,
-    // flagged) - a 2-joint deformAfterPhysics run, well above
+    // Synthetic 4-bone rig: root(0, no rigid body) -> chainRoot(1, a STATIC
+    // rigid body - this chain's anchor) -> joint1(2, a Dynamic rigid body) ->
+    // joint2(3, a Dynamic rigid body) - a 2-joint chain, well above
     // DynamicChainDetectionDefaults::minimumChainLength (2). Deliberately
     // extends along +X (perpendicular to gravity, which points along -Y) -
     // a chain colinear WITH gravity would only ever compress/stretch along
@@ -118,6 +118,13 @@ TEST(PhysicsSystemTests, RegisteredDynamicChainVisiblyDivergesFromPureFkPoseUnde
     // constraint, producing zero net rotation - see
     // BoneChainPhysicsResolverTests.cpp's own "already aligned" case), never
     // genuinely swing sideways the way this test needs to observe.
+    //
+    // task_manager/verlet-integration-6 (PHASE0_MASTER_STRATEGY.md) replaced
+    // the old Bone::deformAfterPhysics-only detection algorithm with one that
+    // traverses the model's own RigidBody/Joint graph - this fixture now
+    // carries real PhysicsData (a Static anchor rigid body plus two Dynamic
+    // rigid bodies, jointed together and to the anchor) instead of relying on
+    // Bone::deformAfterPhysics alone, which the new algorithm never reads.
     SkinnedMeshData data;
     Bone root;
     root.position = Vec3(0.0f, 0.0f, 0.0f);
@@ -132,14 +139,41 @@ TEST(PhysicsSystemTests, RegisteredDynamicChainVisiblyDivergesFromPureFkPoseUnde
     Bone joint1;
     joint1.position = Vec3(2.0f, 0.0f, 0.0f);
     joint1.parentBoneIndex = 1;
-    joint1.deformAfterPhysics = true;
     data.skeleton.bones.push_back(joint1); // 2
 
     Bone joint2;
     joint2.position = Vec3(3.0f, 0.0f, 0.0f);
     joint2.parentBoneIndex = 2;
-    joint2.deformAfterPhysics = true;
     data.skeleton.bones.push_back(joint2); // 3
+
+    PhysicsData physics;
+
+    RigidBody anchorBody;
+    anchorBody.boneIndex = 1;
+    anchorBody.motionType = RigidBodyMotionType::Static;
+    physics.rigidBodies.push_back(anchorBody); // 0
+
+    RigidBody joint1Body;
+    joint1Body.boneIndex = 2;
+    joint1Body.motionType = RigidBodyMotionType::Dynamic;
+    physics.rigidBodies.push_back(joint1Body); // 1
+
+    RigidBody joint2Body;
+    joint2Body.boneIndex = 3;
+    joint2Body.motionType = RigidBodyMotionType::Dynamic;
+    physics.rigidBodies.push_back(joint2Body); // 2
+
+    Joint anchorToJoint1;
+    anchorToJoint1.rigidBodyAIndex = 0;
+    anchorToJoint1.rigidBodyBIndex = 1;
+    physics.joints.push_back(anchorToJoint1);
+
+    Joint joint1ToJoint2;
+    joint1ToJoint2.rigidBodyAIndex = 1;
+    joint1ToJoint2.rigidBodyBIndex = 2;
+    physics.joints.push_back(joint1ToJoint2);
+
+    data.physics = std::move(physics);
 
     const std::string path = "SyntheticDynamicChainModel.gta";
     physicsSystem.RegisterDynamicChains(path, data);

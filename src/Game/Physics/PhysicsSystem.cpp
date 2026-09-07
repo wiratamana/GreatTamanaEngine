@@ -14,7 +14,9 @@
 #include "../../Profiling/ScopeTimer.h"
 #include "../Animation/SkeletalRigCache.h"
 
+#include <cassert>
 #include <cstdint>
+#include <unordered_set>
 
 namespace gte {
 
@@ -129,20 +131,44 @@ void RunDynamicChainBatchJob(std::uint32_t beginIndex, std::uint32_t endIndex, v
 
 void PhysicsSystem::RegisterDynamicChains(const std::string& absoluteGtaPath, const SkinnedMeshData& data)
 {
-    // PHASE4 (task_manager/verlet-integration-1/
-    // PHASE4_PARAMETER_AUTHORING_AND_DATA_DRIVEN_CONFIG.md) - real chain
-    // auto-detection, derived purely from already-imported PMX data
-    // (Bone::deformAfterPhysics / RigidBody::motionType) - no new asset
-    // format, no authoring UI required to get a first working result. An
-    // Editor override of DynamicChainDetectionDefaults may land later; pure
-    // defaults are used for every model today.
+    // task_manager/verlet-integration-6 (PHASE0_MASTER_STRATEGY.md) - real
+    // chain auto-detection by traversing the model's own RigidBody/Joint
+    // graph (RigidBodyMotionType::Static bodies anchor a chain, Dynamic/
+    // DynamicAndBoneMerge bodies reachable from one become its simulated
+    // joints), combined with the skeleton's own real bone ancestry to build
+    // each chain's tree - REPLACES the previous Bone::deformAfterPhysics-only
+    // algorithm entirely. No new asset format, no authoring UI required to
+    // get a first working result. An Editor override of
+    // DynamicChainDetectionDefaults may land later; pure defaults are used
+    // for every model today.
     const DynamicChainDetectionDefaults defaults{};
-    std::vector<DynamicChainDefinition> chains
+    DynamicChainDetectionResult detection
         = DetectDynamicChains(data.skeleton, data.physics.has_value() ? &*data.physics : nullptr, defaults);
 
+#ifndef NDEBUG
+    // task_manager/verlet-integration-6, Phase 4 - defensive re-verification
+    // of the disjoint-jointBoneIndices invariant PhysicsSystem::Update()'s
+    // own parallel dispatch path relies on (see this file's own comment
+    // above DynamicChainBatchContext) - Phase 3's construction is SUPPOSED
+    // to guarantee this by construction (every participating bone is
+    // assigned to exactly one chain), but this is cheap, debug-only
+    // insurance against a future regression silently corrupting a shared
+    // pose buffer under the parallel path instead of failing loudly here.
+    {
+        std::unordered_set<std::int32_t> seenBoneIndices;
+        for (const DynamicChainDefinition& chain : detection.chains) {
+            for (std::int32_t boneIndex : chain.jointBoneIndices) {
+                assert(seenBoneIndices.insert(boneIndex).second
+                    && "DetectDynamicChains() produced two chains sharing a bone index - parallel dispatch is unsafe.");
+            }
+        }
+    }
+#endif
+
     DynamicChainRigCache::ModelEntry entry;
-    entry.chains = std::move(chains);
+    entry.chains = std::move(detection.chains);
     entry.skeleton = data.skeleton; // A private COPY - see DynamicChainRigCache.h's own file comment.
+    entry.diagnostics = std::move(detection.diagnostics);
     m_rigCache.Register(absoluteGtaPath, std::move(entry));
 }
 

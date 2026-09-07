@@ -8,6 +8,10 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
+#include <utility>
+#include <vector>
+
 namespace gte {
 namespace {
 
@@ -73,6 +77,26 @@ TEST(DynamicChainRigCacheTests, TryGetMutableOnUnknownPathReturnsNullptr)
 {
     DynamicChainRigCache cache;
     EXPECT_EQ(cache.TryGetMutable("Unknown.gta"), nullptr);
+}
+
+// task_manager/verlet-integration-6, Phase 4 (v2 recommendation) - confirms
+// ModelEntry::diagnostics (added by this campaign's Phase 3/4) round-trips
+// through Register()/TryGet() just like chains/skeleton already do, before
+// Phase 5's Editor visualization starts reading it for the first time.
+TEST(DynamicChainRigCacheTests, RegisteredDiagnosticsRoundTripThroughTryGet)
+{
+    DynamicChainRigCache cache;
+    DynamicChainRigCache::ModelEntry entry = BuildSampleEntry();
+    entry.diagnostics.orphanedDynamicBoneIndices = { 5, 7 };
+    entry.diagnostics.crossChainJointsDropped = { 2 };
+    entry.diagnostics.duplicateBoneRigidBodyAssignmentsDropped = { 9 };
+    cache.Register("Model.gta", std::move(entry));
+
+    const DynamicChainRigCache::ModelEntry* found = cache.TryGet("Model.gta");
+    ASSERT_NE(found, nullptr);
+    EXPECT_EQ(found->diagnostics.orphanedDynamicBoneIndices, (std::vector<std::int32_t>{ 5, 7 }));
+    EXPECT_EQ(found->diagnostics.crossChainJointsDropped, (std::vector<std::int32_t>{ 2 }));
+    EXPECT_EQ(found->diagnostics.duplicateBoneRigidBodyAssignmentsDropped, (std::vector<std::int32_t>{ 9 }));
 }
 
 } // namespace gte
