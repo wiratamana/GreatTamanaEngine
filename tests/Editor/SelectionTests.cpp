@@ -332,5 +332,152 @@ TEST(SelectionTest, ClearModelPartIfEntityClearsFieldsButKeepsEntityKindWhenEnti
     EXPECT_FALSE(selection.IsModelPartSelected(Entity{ 4, 1 }, ModelPartKind::RigidBody, 7));
 }
 
+TEST(SelectionTest, SelectModelPartsReplacesEntireSelectionWithGivenSet)
+{
+    Selection selection;
+    selection.SelectModelPart(Entity{ 4, 1 }, ModelPartKind::RigidBody, 2);
+
+    selection.SelectModelParts(Entity{ 4, 1 }, ModelPartKind::RigidBody, { 5, 1, 3 });
+
+    EXPECT_EQ(selection.Kind(), InspectorSelectionKind::ModelPart);
+    // Stored ascending-sorted regardless of insertion order.
+    EXPECT_EQ(selection.SelectedModelPartIndices(), (std::vector<int>{ 1, 3, 5 }));
+    EXPECT_EQ(selection.SelectedModelPartIndex(), 1); // Lowest element.
+    EXPECT_TRUE(selection.IsModelPartSelected(Entity{ 4, 1 }, ModelPartKind::RigidBody, 1));
+    EXPECT_TRUE(selection.IsModelPartSelected(Entity{ 4, 1 }, ModelPartKind::RigidBody, 3));
+    EXPECT_TRUE(selection.IsModelPartSelected(Entity{ 4, 1 }, ModelPartKind::RigidBody, 5));
+    EXPECT_FALSE(selection.IsModelPartSelected(Entity{ 4, 1 }, ModelPartKind::RigidBody, 2)); // Replaced, not merged.
+}
+
+TEST(SelectionTest, SelectModelPartsDeduplicatesInput)
+{
+    Selection selection;
+
+    selection.SelectModelParts(Entity{ 1, 1 }, ModelPartKind::RigidBody, { 3, 3, 1, 1, 2 });
+
+    EXPECT_EQ(selection.SelectedModelPartIndices(), (std::vector<int>{ 1, 2, 3 }));
+}
+
+TEST(SelectionTest, SelectModelPartsWithEmptySetClearsTheSelectionEntirely)
+{
+    Selection selection;
+    selection.SelectModelPart(Entity{ 4, 1 }, ModelPartKind::RigidBody, 7);
+
+    selection.SelectModelParts(Entity{ 4, 1 }, ModelPartKind::RigidBody, {});
+
+    EXPECT_EQ(selection.Kind(), InspectorSelectionKind::None);
+    EXPECT_EQ(selection.SelectedModelPartEntity(), kInvalidEntity);
+    EXPECT_EQ(selection.SelectedModelPartKind(), ModelPartKind::Bone);
+    EXPECT_TRUE(selection.SelectedModelPartIndices().empty());
+    EXPECT_EQ(selection.SelectedModelPartIndex(), -1);
+}
+
+TEST(SelectionTest, ToggleModelPartInSelectionAddsANewIndexToAnExistingCompatibleSelection)
+{
+    Selection selection;
+    selection.SelectModelPart(Entity{ 4, 1 }, ModelPartKind::RigidBody, 2);
+
+    selection.ToggleModelPartInSelection(Entity{ 4, 1 }, ModelPartKind::RigidBody, 5);
+
+    EXPECT_EQ(selection.SelectedModelPartIndices(), (std::vector<int>{ 2, 5 }));
+    EXPECT_TRUE(selection.IsModelPartSelected(Entity{ 4, 1 }, ModelPartKind::RigidBody, 2));
+    EXPECT_TRUE(selection.IsModelPartSelected(Entity{ 4, 1 }, ModelPartKind::RigidBody, 5));
+}
+
+TEST(SelectionTest, ToggleModelPartInSelectionRemovesAnAlreadySelectedIndex)
+{
+    Selection selection;
+    selection.SelectModelParts(Entity{ 4, 1 }, ModelPartKind::RigidBody, { 2, 5 });
+
+    selection.ToggleModelPartInSelection(Entity{ 4, 1 }, ModelPartKind::RigidBody, 2);
+
+    EXPECT_EQ(selection.SelectedModelPartIndices(), (std::vector<int>{ 5 }));
+    EXPECT_FALSE(selection.IsModelPartSelected(Entity{ 4, 1 }, ModelPartKind::RigidBody, 2));
+    EXPECT_TRUE(selection.IsModelPartSelected(Entity{ 4, 1 }, ModelPartKind::RigidBody, 5));
+}
+
+TEST(SelectionTest, ToggleModelPartInSelectionRemovingTheLastIndexClearsTheSelectionEntirely)
+{
+    Selection selection;
+    selection.SelectModelPart(Entity{ 4, 1 }, ModelPartKind::RigidBody, 2);
+
+    selection.ToggleModelPartInSelection(Entity{ 4, 1 }, ModelPartKind::RigidBody, 2);
+
+    EXPECT_EQ(selection.Kind(), InspectorSelectionKind::None);
+    EXPECT_TRUE(selection.SelectedModelPartIndices().empty());
+}
+
+TEST(SelectionTest, ToggleModelPartInSelectionStartsAFreshSelectionWhenTheCurrentOneIsIncompatible)
+{
+    Selection selection;
+    selection.SelectModelPart(Entity{ 4, 1 }, ModelPartKind::RigidBody, 2);
+
+    // Different owningEntity - not an extension of the existing selection.
+    selection.ToggleModelPartInSelection(Entity{ 9, 1 }, ModelPartKind::RigidBody, 5);
+    EXPECT_EQ(selection.SelectedModelPartEntity(), (Entity{ 9, 1 }));
+    EXPECT_EQ(selection.SelectedModelPartIndices(), (std::vector<int>{ 5 }));
+
+    // Different partKind on the SAME entity - also not an extension.
+    selection.SelectModelPart(Entity{ 4, 1 }, ModelPartKind::RigidBody, 2);
+    selection.ToggleModelPartInSelection(Entity{ 4, 1 }, ModelPartKind::Bone, 0);
+    EXPECT_EQ(selection.SelectedModelPartKind(), ModelPartKind::Bone);
+    EXPECT_EQ(selection.SelectedModelPartIndices(), (std::vector<int>{ 0 }));
+}
+
+// v2 addition (task_manager/verlet-integration-4/PHASE0_MASTER_STRATEGY.md's
+// Revision Notes, finding #4) - the existing test directly above only ever
+// starts from a PRE-EXISTING but INCOMPATIBLE ModelPart selection (a
+// different owningEntity/partKind). Neither "nothing selected at all"
+// (Kind() == None) nor "an Entity/Asset selection is currently on top" was
+// ever independently exercised, even though both take the exact same
+// `m_kind != InspectorSelectionKind::ModelPart` branch in the real
+// implementation.
+TEST(SelectionTest, ToggleModelPartInSelectionStartsAFreshSelectionWhenNothingOrAnUnrelatedKindWasSelected)
+{
+    Selection freshSelection;
+    ASSERT_EQ(freshSelection.Kind(), InspectorSelectionKind::None);
+
+    freshSelection.ToggleModelPartInSelection(Entity{ 3, 1 }, ModelPartKind::RigidBody, 4);
+
+    EXPECT_EQ(freshSelection.Kind(), InspectorSelectionKind::ModelPart);
+    EXPECT_EQ(freshSelection.SelectedModelPartIndices(), (std::vector<int>{ 4 }));
+
+    Selection entitySelection;
+    entitySelection.SelectEntity(Entity{ 7, 1 });
+    ASSERT_EQ(entitySelection.Kind(), InspectorSelectionKind::Entity);
+
+    entitySelection.ToggleModelPartInSelection(Entity{ 3, 1 }, ModelPartKind::RigidBody, 4);
+
+    EXPECT_EQ(entitySelection.Kind(), InspectorSelectionKind::ModelPart);
+    EXPECT_EQ(entitySelection.SelectedModelPartIndices(), (std::vector<int>{ 4 }));
+    // The pre-existing Entity selection field is left untouched (same
+    // "leave the other fields, just gate visibility on Kind()" contract
+    // every other Selection mutator already has).
+    EXPECT_EQ(entitySelection.SelectedEntity(), (Entity{ 7, 1 }));
+}
+
+TEST(SelectionTest, ClearModelPartIfEntityClearsAMultiElementSelectionEntirely)
+{
+    Selection selection;
+    selection.SelectModelParts(Entity{ 4, 1 }, ModelPartKind::RigidBody, { 1, 2, 3 });
+
+    selection.ClearModelPartIfEntity(Entity{ 4, 1 });
+
+    EXPECT_EQ(selection.Kind(), InspectorSelectionKind::None);
+    EXPECT_TRUE(selection.SelectedModelPartIndices().empty());
+}
+
+TEST(SelectionTest, ClearResetsAMultiElementModelPartSelectionToo)
+{
+    Selection selection;
+    selection.SelectModelParts(Entity{ 4, 1 }, ModelPartKind::RigidBody, { 1, 2, 3 });
+
+    selection.Clear();
+
+    EXPECT_EQ(selection.Kind(), InspectorSelectionKind::None);
+    EXPECT_TRUE(selection.SelectedModelPartIndices().empty());
+    EXPECT_EQ(selection.SelectedModelPartIndex(), -1);
+}
+
 } // namespace
 } // namespace gte

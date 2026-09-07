@@ -2,7 +2,9 @@
 
 #include "../ECS/Entity.h"
 
+#include <algorithm>
 #include <string>
+#include <vector>
 
 namespace gte {
 
@@ -71,7 +73,12 @@ enum class ModelPartKind {
 // already, from Entity/Asset to also cover ModelPart (see
 // task_manager/verlet-integration-2/PHASE1_SELECTION_MODEL_PART_FOUNDATION.md)
 // - any future selectable "thing" should extend it the same way rather than
-// adding a new ad hoc field elsewhere.
+// adding a new ad hoc field elsewhere. Extended a second time in
+// task_manager/verlet-integration-4/PHASE1_SELECTION_MULTI_MODEL_PART_SUPPORT.md
+// to let the ModelPart selection hold MANY indices at once (a
+// std::vector<int> instead of one int) - SelectModelPart()/
+// SelectedModelPartIndex() stayed as single-element convenience wrappers so
+// every pre-existing single-selection call site kept compiling unchanged.
 class Selection {
 public:
     // Makes `entity` the Hierarchy selection and the current Inspector
@@ -112,24 +119,56 @@ public:
     void ClearAssetIfPath(const std::string& relativePath);
 
     // Makes "part `partIndex` of kind `partKind`, belonging to `owningEntity`'s
-    // own model" the current Model-Part selection and the current Inspector
-    // source (Kind() becomes ModelPart) - the Hierarchy/entity selection field
-    // AND the Project/asset selection fields are left untouched (SelectedEntity()/
-    // SelectedAssetAbsolutePath() etc. still return whatever was last picked in
-    // Hierarchy/Project), but since Kind() is now ModelPart,
-    // IsEntitySelected()/IsAssetSelected() below immediately report nothing
-    // selected - exactly the same "leave the other fields untouched, just gate
-    // visibility on Kind()" contract SelectEntity()/SelectAsset() already have
-    // with each other. `owningEntity` is the model's ROOT entity (the one
-    // carrying MeshAssetSource - see ECS/Components/MeshAssetSource.h) - NOT
-    // necessarily the same as whatever SelectedEntity() currently returns.
-    // `partIndex` is an index into whichever array `partKind` names
-    // (SkeletonData::bones / PhysicsData::rigidBodies / PhysicsData::joints -
-    // see Assets/PhysicsData.h/SkeletonData.h) - meaningless on its own without
-    // also knowing `owningEntity`'s own model and `partKind`, which is exactly
-    // why all three are stored together rather than as three independently-
-    // settable fields.
+    // own model" the ENTIRE current Model-Part selection (replacing whatever
+    // was selected before, exactly like clicking a single row/dot always
+    // has) and the current Inspector source (Kind() becomes ModelPart) - a
+    // thin single-element convenience wrapper over SelectModelParts() below
+    // (`SelectModelParts(owningEntity, partKind, { partIndex })`), kept so
+    // every pre-existing single-click call site
+    // (BoneViewerWindow.cpp's RenderBoneTreeNode()/RenderFlatPartRow()/direct
+    // viewport-dot click) keeps compiling and behaving exactly as before.
+    // See SelectModelParts() below for the multi-object version (task_manager/
+    // verlet-integration-4/PHASE1_SELECTION_MULTI_MODEL_PART_SUPPORT.md).
     void SelectModelPart(Entity owningEntity, ModelPartKind partKind, int partIndex);
+
+    // Replaces the ENTIRE current Model-Part selection with the exact set of
+    // `indices` (de-duplicated and ascending-sorted internally - callers may
+    // pass them in any order, with duplicates) and makes it the current
+    // Inspector source (Kind() becomes ModelPart) - the multi-object
+    // equivalent of SelectModelPart() above. Used by BoneViewerWindow's
+    // "Select All (Group)"/"Select All (Branch)" toolbar buttons AND its own
+    // genuine Shift-click contiguous range select (see task_manager/
+    // verlet-integration-4/PHASE3_BONE_VIEWER_SELECT_ALL_BUTTONS_AND_MULTISELECT_INPUT.md)
+    // to make MANY rigid bodies the current selection at once. An EMPTY
+    // `indices` is treated as a genuine CLEAR of the Model-Part selection -
+    // exactly like ClearModelPartIfEntity() (Kind() reverts to None if
+    // ModelPart was currently on top) - "select all matching" that matched
+    // nothing must never leave a stale "ModelPart selected, holding zero
+    // parts" limbo state that IsModelPartSelected() would then have to
+    // special-case separately.
+    void SelectModelParts(Entity owningEntity, ModelPartKind partKind, std::vector<int> indices);
+
+    // Adds `index` to the CURRENT Model-Part selection set if it is not
+    // already present, or REMOVES it if it is - Ctrl-click's own "extend the
+    // existing selection by exactly one item" semantics (Windows Explorer/
+    // Unity style), as opposed to SelectModelPart()/SelectModelParts() above,
+    // both of which always REPLACE the whole set. Also used by the Bone
+    // tree's own Shift-click (BoneViewerWindow.cpp's RenderBoneTreeNode()) -
+    // deliberately identical to its own Ctrl-click there, since a bone's raw
+    // array index has no meaningful linear "range" the way a flat Rigid
+    // Body/Joint row does (a genuine Shift-click range select for those two
+    // is built on top of SelectModelParts() above instead - see PHASE3's own
+    // FlatListRangeSelection.h). If the CURRENT selection does not already
+    // belong to this exact `owningEntity`/`partKind` pair (Kind() is not
+    // ModelPart yet, or it's a ModelPart selection for a DIFFERENT
+    // entity/kind), this call first behaves exactly like
+    // `SelectModelPart(owningEntity, partKind, index)` - a fresh Ctrl-click
+    // on an unrelated part/entity/kind always starts a brand new
+    // single-element selection rather than silently mixing incompatible
+    // selections together. If, after toggling, the resulting set is empty
+    // (the user Ctrl-clicked the last remaining selected item), this reverts
+    // Kind() to None exactly like SelectModelParts({}) would.
+    void ToggleModelPartInSelection(Entity owningEntity, ModelPartKind partKind, int index);
 
     // Clears the Model-Part selection fields ONLY if they currently refer to
     // `owningEntity` exactly (regardless of whatever partKind/partIndex they
@@ -164,7 +203,32 @@ public:
 
     Entity SelectedModelPartEntity() const { return m_modelPartEntity; }
     ModelPartKind SelectedModelPartKind() const { return m_modelPartKind; }
-    int SelectedModelPartIndex() const { return m_modelPartIndex; }
+
+    // The lowest-numbered currently-selected Model-Part index, or -1 if
+    // none is selected - a thin single-element convenience accessor over
+    // SelectedModelPartIndices() below, kept so every pre-existing
+    // single-selection reader (InspectorPanel.cpp's single-part property
+    // sheet, before task_manager/verlet-integration-4/
+    // PHASE4_INSPECTOR_MULTI_SELECTION_SUMMARY.md's own update) keeps
+    // compiling and, for the single-selection case, returns byte-for-byte
+    // the same value as before this phase (a one-element set's only
+    // element IS its lowest element). NOTE: this is deliberately NOT "is
+    // there exactly one selected" - a caller that needs to distinguish
+    // "exactly one selected" from "several selected, this is merely the
+    // lowest of them" (e.g. BoneViewerWindow.cpp's "Select All (...)"
+    // button seed check - see PHASE3's own hasSeed fix, task_manager/
+    // verlet-integration-4/PHASE0_MASTER_STRATEGY.md's Revision Notes,
+    // finding #1) MUST also check SelectedModelPartIndices().size() == 1,
+    // never rely on this accessor alone for that purpose.
+    int SelectedModelPartIndex() const { return m_modelPartIndices.empty() ? -1 : m_modelPartIndices.front(); }
+
+    // Every currently-selected Model-Part index, ascending-sorted, for
+    // whichever (owningEntity, partKind) SelectedModelPartEntity()/
+    // SelectedModelPartKind() currently report - empty if nothing is
+    // selected. This is the SOURCE OF TRUTH for "how many/which" parts are
+    // currently selected - SelectedModelPartIndex() above is only ever sugar
+    // over this list's first (lowest) element.
+    const std::vector<int>& SelectedModelPartIndices() const { return m_modelPartIndices; }
 
     // True if `entity` is exactly the current Hierarchy selection AND
     // Kind() is Entity - this is the ONLY thing HierarchyPanel's row
@@ -215,7 +279,7 @@ private:
 
     Entity m_modelPartEntity = kInvalidEntity;
     ModelPartKind m_modelPartKind = ModelPartKind::Bone;
-    int m_modelPartIndex = -1;
+    std::vector<int> m_modelPartIndices;
 };
 
 } // namespace gte
