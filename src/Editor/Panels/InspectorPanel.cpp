@@ -122,6 +122,54 @@ void BuildModelPartInspector(Registry& registry, EditorContext& ctx, ModelRigCac
         return;
     }
 
+    // Multi-selection summary - as of task_manager/verlet-integration-4
+    // (PHASE1_SELECTION_MULTI_MODEL_PART_SUPPORT.md/
+    // PHASE3_BONE_VIEWER_SELECT_ALL_BUTTONS_AND_MULTISELECT_INPUT.md),
+    // Selection can hold MANY Model-Part indices at once (the Bone Viewer's
+    // "Select All (Group)"/"Select All (Branch)" toolbar buttons, or
+    // Ctrl/Shift-click). A single part's full read-only property sheet
+    // below only ever makes sense for exactly ONE selected part - showing
+    // it for just the FIRST of many, with no indication anything else is
+    // also selected, would be a silent, misleading regression. Whenever
+    // more than one index is selected, show a compact "N <Kind>s Selected"
+    // summary + name list instead, and return early - the single-part
+    // switch below is never reached in that case.
+    const std::vector<int>& selectedIndices = ctx.selection.SelectedModelPartIndices();
+    if (selectedIndices.size() > 1) {
+        const ModelPartKind kind = ctx.selection.SelectedModelPartKind();
+        const char* kindNoun = kind == ModelPartKind::Bone ? "Bones" : kind == ModelPartKind::RigidBody ? "Rigid Bodies" : "Joints";
+        ImGui::TextColored(ImVec4(0.55f, 0.75f, 1.0f, 1.0f), "%zu %s Selected", selectedIndices.size(), kindNoun);
+        ImGui::Separator();
+
+        ImGui::BeginChild("InspectorMultiSelectionList", ImVec2(0.0f, 200.0f), true);
+        for (const int selectedIndex : selectedIndices) {
+            std::string label = "(out of range)";
+            switch (kind) {
+            case ModelPartKind::Bone:
+                if (selectedIndex >= 0 && static_cast<std::size_t>(selectedIndex) < rig->skeleton.bones.size()) {
+                    const std::string& name = rig->skeleton.bones[static_cast<std::size_t>(selectedIndex)].name;
+                    label = name.empty() ? "(unnamed)" : name;
+                }
+                break;
+            case ModelPartKind::RigidBody:
+                if (selectedIndex >= 0 && static_cast<std::size_t>(selectedIndex) < rig->physics.rigidBodies.size()) {
+                    const std::string& name = rig->physics.rigidBodies[static_cast<std::size_t>(selectedIndex)].name;
+                    label = name.empty() ? "(unnamed)" : name;
+                }
+                break;
+            case ModelPartKind::Joint:
+                if (selectedIndex >= 0 && static_cast<std::size_t>(selectedIndex) < rig->physics.joints.size()) {
+                    const std::string& name = rig->physics.joints[static_cast<std::size_t>(selectedIndex)].name;
+                    label = name.empty() ? "(unnamed)" : name;
+                }
+                break;
+            }
+            ImGui::BulletText("[%d] %s", selectedIndex, label.c_str());
+        }
+        ImGui::EndChild();
+        return;
+    }
+
     const int index = ctx.selection.SelectedModelPartIndex();
 
     switch (ctx.selection.SelectedModelPartKind()) {
