@@ -411,7 +411,7 @@ bool BoneViewerWindow::EnsureDataLoaded(
         m_rigidBodies.reserve(rig->physics.rigidBodies.size());
         for (const RigidBody& body : rig->physics.rigidBodies) {
             m_rigidBodies.push_back(RigidBodyEntry{ body.name, body.translate, body.rotateRadians, body.shape,
-                body.shapeSize, body.boneIndex, body.group, body.motionType });
+                body.shapeSize, body.boneIndex, body.group, body.motionType, body.collisionGroupMask });
         }
 
         m_joints.reserve(rig->physics.joints.size());
@@ -740,7 +740,8 @@ void BoneViewerWindow::RenderVerletChainNode(std::int32_t chainIndex, const Dyna
         // model, not per chain - see BuildOverlayGeometry()'s own Verlet
         // branch / Step 3.4 below).
         if (chain.collisionEnabled) {
-            ImGui::TextDisabled("Collision: enabled (collides against this model's auto-detected colliders)");
+            ImGui::TextDisabled("Collision: enabled (collides against this model's auto-detected colliders, "
+                "subject to PMX collision-group/layer rules)");
         }
         ImGui::TreePop();
     }
@@ -1498,6 +1499,41 @@ void BoneViewerWindow::Build(
                             }
                         }
                     }
+                    // task_manager/verlet-integration-10, PHASE4 - collect
+                    // the union of every collider reachable by AT LEAST ONE
+                    // collision-enabled chain in this model, so an
+                    // unreachable collider (excluded by every chain's own
+                    // PMX group/mask) can be drawn more dimly than a
+                    // genuinely-active one, instead of looking identical.
+                    // Matched to its own RigidBodyEntry by (boneIndex, shape,
+                    // shapeSize) as a combined key rather than boneIndex
+                    // alone (v2 - see PHASE4's own "v2 change summary,"
+                    // finding #6) - ModelColliderDefinition does not retain
+                    // which original PMX rigid-body index it came from, and
+                    // a model COULD validly have more than one Static rigid
+                    // body on the same bone; the combined key resolves that
+                    // ambiguity in every realistic case, for a purely
+                    // cosmetic Editor overlay. `group` is masked (`& 0x0Fu`)
+                    // before use as a shift amount - see PHASE1's own
+                    // GroupBit() doc comment for why this is a safety
+                    // requirement, not a style choice.
+                    std::vector<bool> colliderIsReachableByAnyChain(verletModel->colliders.size(), false);
+                    for (const DynamicChainDefinition& c : verletModel->chains) {
+                        if (!c.collisionEnabled) {
+                            continue;
+                        }
+                        for (std::size_t ci = 0; ci < verletModel->colliders.size(); ++ci) {
+                            const ModelColliderDefinition& colliderDef = verletModel->colliders[ci];
+                            for (const DynamicJointSettings& joint : c.jointSettings) {
+                                const std::uint16_t jointBit = static_cast<std::uint16_t>(1u << (joint.group & 0x0Fu));
+                                const std::uint16_t colliderBit = static_cast<std::uint16_t>(1u << (colliderDef.group & 0x0Fu));
+                                if ((jointBit & colliderDef.collisionMask) != 0 && (colliderBit & joint.collisionMask) != 0) {
+                                    colliderIsReachableByAnyChain[ci] = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
                     // task_manager/verlet-integration-9, PHASE5 (v2) -
                     // replaces the old PER-CHAIN single-sphere
                     // "head collider" wireframe with a single, PER-MODEL
@@ -1521,13 +1557,38 @@ void BoneViewerWindow::Build(
                         if (body.motionType != RigidBodyMotionType::Static) {
                             continue;
                         }
+                        // task_manager/verlet-integration-10, PHASE4 - look up
+                        // this body's own matching ModelColliderDefinition by
+                        // the combined (boneIndex, shape, shapeSize) key (see
+                        // this block's own header comment above for why NOT
+                        // boneIndex alone) and dim it when PHASE1's group/mask
+                        // filter means NO collision-enabled chain in this
+                        // model could ever actually reach it. A body with no
+                        // match at all (should not normally happen for one
+                        // that already passed the motionType == Static filter
+                        // above, but never assumed blindly) is drawn at the
+                        // ORIGINAL, un-dimmed alpha - "no PHASE1 data
+                        // available" must never look like "PHASE1 confirmed
+                        // unreachable."
+                        bool matchedReachable = true;
+                        bool foundMatch = false;
+                        for (std::size_t ci = 0; ci < verletModel->colliders.size() && !foundMatch; ++ci) {
+                            const ModelColliderDefinition& colliderDef = verletModel->colliders[ci];
+                            if (colliderDef.boneIndex == body.boneIndex && colliderDef.shape == body.shape
+                                && colliderDef.shapeSize.x == body.shapeSize.x && colliderDef.shapeSize.y == body.shapeSize.y
+                                && colliderDef.shapeSize.z == body.shapeSize.z) {
+                                foundMatch = true;
+                                matchedReachable = colliderIsReachableByAnyChain[ci];
+                            }
+                        }
+                        const ImU32 wireColor = (foundMatch && !matchedReachable) ? IM_COL32(255, 90, 170, 30) : IM_COL32(255, 90, 170, 90);
                         const std::vector<WireframeSegment> wireframe =
                             BuildRigidBodyWireframe(body.shape, body.shapeSize, body.translate, body.rotateRadians);
                         for (const WireframeSegment& segment : wireframe) {
                             ImVec2 screenA, screenB;
                             if (ProjectToScreen(segment.a, viewProj, imageMin, imageMax, screenA)
                                 && ProjectToScreen(segment.b, viewProj, imageMin, imageMax, screenB)) {
-                                drawList->AddLine(screenA, screenB, IM_COL32(255, 90, 170, 90), 1.25f);
+                                drawList->AddLine(screenA, screenB, wireColor, 1.25f);
                             }
                         }
                     }

@@ -77,6 +77,41 @@ const char* JointTypeLabel(JointType type)
     }
 }
 
+// task_manager/verlet-integration-10, PHASE4 - counts how many of
+// `colliders` this SPECIFIC chain's joints could ever actually reach under
+// PMX collision-group/mask rules (mirrors DynamicChainSolver.cpp's own
+// GroupsMayCollide()/GroupBit() truth table exactly, but is deliberately NOT
+// a call into either of those functions - they are `static`/anonymous-
+// namespace, not exported; this is a small, independent, Editor-only
+// re-derivation purely for an informational readout, never itself part of
+// the simulation). A chain with multiple joints having DIFFERENT group/mask
+// values (uncommon but not forbidden - PHASE1 seeds this per-joint, not
+// per-chain) counts a collider as "reachable" if ANY of the chain's own
+// joints could hit it. `group` is masked to its documented 4-bit range
+// (`& 0x0Fu`) before use as a shift amount - see PHASE1's own GroupBit()
+// doc comment for why this is required for safety, not merely style (a raw,
+// unvalidated .pmx file byte, confirmed never range-checked anywhere in this
+// engine's load pipeline).
+std::size_t CountCollidersReachableByChain(const DynamicChainDefinition& chain, const std::vector<ModelColliderDefinition>& colliders)
+{
+    std::size_t reachable = 0;
+    for (const ModelColliderDefinition& collider : colliders) {
+        bool anyJointReaches = false;
+        for (const DynamicJointSettings& joint : chain.jointSettings) {
+            const std::uint16_t jointBit = static_cast<std::uint16_t>(1u << (joint.group & 0x0Fu));
+            const std::uint16_t colliderBit = static_cast<std::uint16_t>(1u << (collider.group & 0x0Fu));
+            if ((jointBit & collider.collisionMask) != 0 && (colliderBit & joint.collisionMask) != 0) {
+                anyJointReaches = true;
+                break;
+            }
+        }
+        if (anyJointReaches) {
+            ++reachable;
+        }
+    }
+    return reachable;
+}
+
 // Shown whenever ctx.selection.Kind() == ModelPart (see
 // task_manager/verlet-integration-2/PHASE1_SELECTION_MODEL_PART_FOUNDATION.md)
 // - the sub-part-of-a-model equivalent of BuildEntityInspector()/
@@ -453,6 +488,16 @@ void BuildModelPartInspector(Registry& registry, EditorContext& ctx, ModelRigCac
         ImGui::DragFloat("Stiffness", &settings.stiffness, 0.005f, 0.0f, 1.0f);
         ImGui::DragFloat("Weight (Mass)", &settings.mass, 0.01f, 0.01f, 100.0f);
 
+        // task_manager/verlet-integration-10, PHASE4 - read-only, derived
+        // from this joint's own PMX Dynamic/DynamicAndBoneMerge rigid body
+        // shape/size (PHASE2's DeriveJointCollisionRadius()) - mirrors this
+        // same function's own `restLength` readout above (BeginDisabled()/
+        // EndDisabled()) since a user's edit here could never be authored
+        // back into the source model either.
+        ImGui::BeginDisabled();
+        ImGui::DragFloat("Collision Radius (from PMX rigid body shape)", &settings.collisionRadius);
+        ImGui::EndDisabled();
+
         ImGui::Separator();
         ImGui::TextColored(ImVec4(0.55f, 0.75f, 1.0f, 1.0f), "Chain-Wide Settings");
         ImGui::DragFloat("Gravity Scale", &chain.gravityScale, 0.01f, 0.0f, 10.0f);
@@ -462,15 +507,26 @@ void BuildModelPartInspector(Registry& registry, EditorContext& ctx, ModelRigCac
         // Collision now automatically targets EVERY Static rigid body
         // (Sphere/Box/Capsule) the model's own PMX data describes (see
         // Physics/ModelColliderDetection.h) - there is nothing left to
-        // hand-author beyond this one opt-in checkbox.
+        // hand-author beyond this one opt-in checkbox. task_manager/
+        // verlet-integration-10, PHASE1/4 - "every" is no longer accurate:
+        // PMX collision-group/layer rules (RigidBody::group/
+        // collisionGroupMask) can exclude some of a model's own detected
+        // colliders from THIS specific chain - the readout below now
+        // reports the real reachable count instead.
         ImGui::Checkbox("Enable Collision", &chain.collisionEnabled);
         if (chain.collisionEnabled) {
+            const std::size_t reachable = CountCollidersReachableByChain(chain, model->colliders);
             ImGui::TextDisabled(
-                "Collides against every auto-detected Static rigid body for this model (%zu total).",
-                model->colliders.size());
+                "Collides against %zu of %zu auto-detected Static rigid-body collider(s) for this model "
+                "(the rest are excluded by this chain's own PMX collision-group/layer rules).",
+                reachable, model->colliders.size());
             if (model->colliders.empty()) {
                 ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f),
                     "This model has no detected Static rigid-body colliders - enabling this has no effect.");
+            } else if (reachable == 0) {
+                ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f),
+                    "None of this model's detected colliders are reachable by this chain's own PMX collision "
+                    "group/mask - enabling this currently has no visible effect for this chain specifically.");
             }
         }
         break;
@@ -637,6 +693,14 @@ void BuildEntityInspector(Registry& registry, EditorContext& ctx, PhysicsSystem&
                             ImGui::DragFloat("Damping", &settings.damping, 0.005f, 0.0f, 1.0f);
                             ImGui::DragFloat("Stiffness", &settings.stiffness, 0.005f, 0.0f, 1.0f);
                             ImGui::DragFloat("Weight (Mass)", &settings.mass, 0.01f, 0.01f, 100.0f);
+                            // task_manager/verlet-integration-10, PHASE4 -
+                            // read-only, derived from this joint's own PMX
+                            // rigid body shape/size (see the single-part
+                            // Inspector's own identical readout above for
+                            // the full rationale).
+                            ImGui::BeginDisabled();
+                            ImGui::DragFloat("Collision Radius (from PMX rigid body shape)", &settings.collisionRadius);
+                            ImGui::EndDisabled();
                             ImGui::PopID();
                         }
 
@@ -644,16 +708,26 @@ void BuildEntityInspector(Registry& registry, EditorContext& ctx, PhysicsSystem&
                         // replaces the old "Head Collider" single-sphere
                         // bone-index/radius pair entirely - see
                         // Physics/DynamicChainDefinition.h's own
-                        // `collisionEnabled` doc comment.
+                        // `collisionEnabled` doc comment. task_manager/
+                        // verlet-integration-10, PHASE1/4 - "every" is no
+                        // longer accurate: PMX collision-group/layer rules
+                        // can exclude some colliders from this specific
+                        // chain - see the reachable-count readout below.
                         ImGui::Separator();
                         ImGui::Checkbox("Enable Collision", &chain.collisionEnabled);
                         if (chain.collisionEnabled) {
+                            const std::size_t reachable = CountCollidersReachableByChain(chain, model->colliders);
                             ImGui::TextDisabled(
-                                "Collides against every auto-detected Static rigid body for this model (%zu total).",
-                                model->colliders.size());
+                                "Collides against %zu of %zu auto-detected Static rigid-body collider(s) for this model "
+                                "(the rest are excluded by this chain's own PMX collision-group/layer rules).",
+                                reachable, model->colliders.size());
                             if (model->colliders.empty()) {
                                 ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f),
                                     "This model has no detected Static rigid-body colliders - enabling this has no effect.");
+                            } else if (reachable == 0) {
+                                ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f),
+                                    "None of this model's detected colliders are reachable by this chain's own PMX collision "
+                                    "group/mask - enabling this currently has no visible effect for this chain specifically.");
                             }
                         }
                         ImGui::TreePop();

@@ -167,6 +167,27 @@ private:
         // own eligibility rule so the Bone Viewer's preview never shows a
         // shape that will not actually collide with anything at runtime.
         RigidBodyMotionType motionType = RigidBodyMotionType::Static;
+        // task_manager/verlet-integration-10, PHASE4 (v2 - appended AFTER
+        // motionType, the struct's own true last field BEFORE this campaign,
+        // never inserted between `group` and `motionType` - the ONE real
+        // construction call site in BoneViewerWindow.cpp populates this
+        // struct via plain 8-argument POSITIONAL aggregate-init today; any
+        // field inserted in the MIDDLE of this struct would either silently
+        // absorb the wrong value or, in this specific case, fail to compile
+        // outright, since `motionType` - an enum class with no implicit
+        // integer conversion - would be forced into whatever new field took
+        // its old position. See PHASE0_MASTER_STRATEGY.md's Step 2 point 12
+        // for the general rule this struct is a concrete, previously-broken
+        // example of.) - this body's own PMX collision-group MASK
+        // (Assets/PhysicsData.h's own RigidBody::collisionGroupMask), added
+        // purely so the Verlet overlay (BuildOverlayGeometry()'s own Verlet
+        // branch) can visually distinguish a Static collider the
+        // CURRENTLY-EXPANDED chain's own joints could never actually reach
+        // (PHASE1's group/mask filter) from one it genuinely collides
+        // against - never used for selection logic (unlike `group` above,
+        // which the unrelated "Select All (Group)" toolbar button already
+        // uses).
+        std::uint16_t collisionGroupMask = 0xFFFF;
     };
 
     // One joint, flattened for overlay drawing.
