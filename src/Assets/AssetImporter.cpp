@@ -177,6 +177,31 @@ AssetImportResult ImportAssetFile(
             std::filesystem::path gtaPath = preferredDestinationPath;
             gtaPath.replace_extension(".gta");
 
+            // task_manager/verlet-integration-11, PHASE1 (3.9) - a re-import
+            // of an ALREADY-imported model must not silently discard a
+            // user's previously-saved joint physics tuning (Editor "Save
+            // Joint Physics to Asset", PHASE4) just because the freshly-
+            // reparsed .pmx itself obviously carries none of that engine-
+            // only, non-PMX data (see JointPhysicsOverride's own doc
+            // comment, Assets/PhysicsData.h - "never populated by
+            // PmxLoader.h"). Mirrors exactly how the ImportAsset() call
+            // below already preserves an EXISTING destination file's own
+            // Guid across a re-import (see AssetDatabase.cpp's own comment
+            // on that) - read BEFORE this function's own WriteGtaFile() call
+            // (via database.ImportAsset() below) overwrites the file, using
+            // the SAME gtaPath a moment later. Empty (never touched) for a
+            // brand-new import - nothing exists yet to preserve, which is
+            // the correct, intentional "no saved overrides yet" starting
+            // state for any freshly-imported model.
+            std::vector<JointPhysicsOverride> preservedJointPhysicsOverrides;
+            if (const std::optional<GtaFileData> existingGta = ReadGtaFile(gtaPath);
+                existingGta.has_value() && existingGta->header.Type() == AssetType::Mesh) {
+                if (const std::optional<RigFileData> existingRig = DecodeRigDataFromBytes(existingGta->metadata);
+                    existingRig.has_value()) {
+                    preservedJointPhysicsOverrides = existingRig->jointPhysicsOverrides;
+                }
+            }
+
             // Imports every material's referenced texture as its own
             // *.gta AssetType::Texture asset (see
             // ImportPmxMaterialTextures()'s own doc comment above) and
@@ -195,6 +220,7 @@ AssetImportResult ImportAssetFile(
             rig.morphs = loaded.morphs;
             rig.physics = loaded.physics;
             rig.materials = loaded.materials;
+            rig.jointPhysicsOverrides = std::move(preservedJointPhysicsOverrides); // task_manager/verlet-integration-11, PHASE1 (3.9).
             const std::vector<std::uint8_t> metadata = EncodeRigDataToBytes(rig);
 
             const std::optional<Guid> guid = database.ImportAsset(gtaPath, AssetType::Mesh, metadata, payload);

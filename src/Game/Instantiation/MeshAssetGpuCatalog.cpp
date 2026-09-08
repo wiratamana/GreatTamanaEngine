@@ -218,6 +218,7 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
         skinData.skinWeights = rig->skinWeights;
         skinData.skeleton = rig->skeleton;
         skinData.physics = rig->physics; // PHASE4 - see SkinnedMeshData's own doc comment (SkeletalRigCache.h).
+        skinData.jointPhysicsOverrides = rig->jointPhysicsOverrides; // task_manager/verlet-integration-11, PHASE1.
         m_skinnedMeshCache.insert_or_assign(absoluteGtaPath, std::move(skinData));
     }
 

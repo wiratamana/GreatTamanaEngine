@@ -369,6 +369,64 @@ TEST_F(AssetImporterTest, ConvertedMeshAssetsMetadataDecodesBackToItsRigData)
     EXPECT_TRUE(rig->physics.rigidBodies.empty());
 }
 
+// task_manager/verlet-integration-11, PHASE1 (3.9) - a re-import of an
+// already-tuned model's source .pmx must not silently discard a previously-
+// saved joint physics override list (see PHASE0_MASTER_STRATEGY.md, Step 2.6).
+TEST_F(AssetImporterTest, ReimportingAPmxPreservesAnAlreadySavedJointPhysicsOverridesList)
+{
+    const std::filesystem::path source = m_root / "model.pmx";
+    WriteBinaryFile(source, BuildMinimalTrianglePmx());
+    const std::filesystem::path destination = m_root / "model.pmx"; // Same path both imports below target.
+
+    // --- First import: establishes the *.gta with NO saved overrides yet. ---
+    const AssetImportResult firstResult = ImportAssetFile(m_db, source, destination);
+    ASSERT_TRUE(firstResult.success) << firstResult.message;
+
+    // --- Simulate a user having saved joint physics via the Editor (PHASE4)
+    // sometime after the first import, by directly mutating the *.gta's own
+    // RigFileData the same way SaveJointPhysicsOverridesToGtaFile() would. ---
+    {
+        const std::optional<GtaFileData> gta = ReadGtaFile(firstResult.finalPath);
+        ASSERT_TRUE(gta.has_value());
+        std::optional<RigFileData> rig = DecodeRigDataFromBytes(gta->metadata);
+        ASSERT_TRUE(rig.has_value());
+        rig->jointPhysicsOverrides.push_back(JointPhysicsOverride{ 0, 0.77f, 0.06f, 4.5f });
+        const std::vector<std::uint8_t> newMetadata = EncodeRigDataToBytes(*rig);
+        ASSERT_TRUE(WriteGtaFile(firstResult.finalPath, gta->header.Type(), gta->header.Id(), gta->header.Flags(),
+            newMetadata, gta->payload, gta->header.version));
+    }
+
+    // --- Re-import the SAME source .pmx onto the SAME destination path -
+    // this must NOT wipe out the override just written above. ---
+    const AssetImportResult secondResult = ImportAssetFile(m_db, source, destination);
+    ASSERT_TRUE(secondResult.success) << secondResult.message;
+    EXPECT_EQ(secondResult.finalPath, firstResult.finalPath);
+
+    const std::optional<GtaFileData> gtaAfter = ReadGtaFile(secondResult.finalPath);
+    ASSERT_TRUE(gtaAfter.has_value());
+    const std::optional<RigFileData> rigAfter = DecodeRigDataFromBytes(gtaAfter->metadata);
+    ASSERT_TRUE(rigAfter.has_value());
+    ASSERT_EQ(rigAfter->jointPhysicsOverrides.size(), 1u);
+    EXPECT_EQ(rigAfter->jointPhysicsOverrides[0].boneIndex, 0);
+    EXPECT_FLOAT_EQ(rigAfter->jointPhysicsOverrides[0].damping, 0.77f);
+    EXPECT_FLOAT_EQ(rigAfter->jointPhysicsOverrides[0].mass, 4.5f);
+}
+
+TEST_F(AssetImporterTest, FirstTimeImportOfAPmxHasNoJointPhysicsOverridesToPreserve)
+{
+    const std::filesystem::path source = m_root / "model.pmx";
+    WriteBinaryFile(source, BuildMinimalTrianglePmx());
+
+    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "model.pmx");
+    ASSERT_TRUE(result.success) << result.message;
+
+    const std::optional<GtaFileData> gta = ReadGtaFile(result.finalPath);
+    ASSERT_TRUE(gta.has_value());
+    const std::optional<RigFileData> rig = DecodeRigDataFromBytes(gta->metadata);
+    ASSERT_TRUE(rig.has_value());
+    EXPECT_TRUE(rig->jointPhysicsOverrides.empty()); // Nothing to preserve on a brand-new import - not a regression.
+}
+
 
 TEST_F(AssetImporterTest, ConvertedMeshAssetIsImmediatelyTrackedByTheDatabase)
 {

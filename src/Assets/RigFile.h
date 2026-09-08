@@ -28,6 +28,16 @@ struct RigFileData {
     MorphData morphs;
     PhysicsData physics;
     MaterialData materials;
+
+    // task_manager/verlet-integration-11, PHASE1 - user-saved per-joint
+    // damping/stiffness/mass overrides (see JointPhysicsOverride's own doc
+    // comment, PhysicsData.h). ALWAYS encoded as a trailing, OPTIONAL section
+    // (see EncodeRigDataToBytes()/DecodeRigDataFromBytes()'s own updated doc
+    // comment below for the exact backward/forward-compatibility mechanism) -
+    // empty for a model that has never been saved with any joint edits
+    // (every model imported before this phase, and every model a user has
+    // simply never clicked "Save Joint Physics to Asset" for).
+    std::vector<JointPhysicsOverride> jointPhysicsOverrides;
 };
 
 // (De)serializes a RigFileData - per-vertex bone skinning weights, the bone
@@ -82,6 +92,15 @@ struct RigFileData {
 //   uint32_t : materials count, followed by that many variable-size
 //              material records (two strings, fixed color/texture-index/
 //              toon fields, then the material's own indexCount)
+//   uint32_t : joint physics override count (task_manager/verlet-integration-11,
+//              PHASE1) - followed by that many fixed-size records (1 int32
+//              bone index + 3 floats: damping, stiffness, mass). OPTIONAL -
+//              a blob with no bytes left after materials decodes with this
+//              list empty rather than failing; this is what lets a *.gta
+//              written by any version of the engine PRIOR to this phase keep
+//              decoding correctly forever, with no magic bump required (see
+//              DecodeRigDataFromBytes()'s own comment for the exact
+//              mechanism this relies on).
 //
 // Encodes/decodes never fail on a well-formed (even if entirely empty)
 // RigFileData; Decode only fails (returns std::nullopt) on a genuinely

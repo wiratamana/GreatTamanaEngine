@@ -119,6 +119,21 @@ RigFileData BuildSampleRigData()
     material.indexCount = 6;
     rig.materials.materials.push_back(material);
 
+    // --- Joint physics overrides (task_manager/verlet-integration-11, PHASE1) ---
+    JointPhysicsOverride override0;
+    override0.boneIndex = 1;
+    override0.damping = 0.55f;
+    override0.stiffness = 0.03f;
+    override0.mass = 2.5f;
+    rig.jointPhysicsOverrides.push_back(override0);
+
+    JointPhysicsOverride override1;
+    override1.boneIndex = 4;
+    override1.damping = 0.12f;
+    override1.stiffness = 0.09f;
+    override1.mass = 0.75f;
+    rig.jointPhysicsOverrides.push_back(override1);
+
     return rig;
 }
 
@@ -200,6 +215,17 @@ TEST(RigFileTest, EncodeThenDecodeRoundTripsSkinWeightsBonesMorphsAndPhysics)
     EXPECT_EQ(decoded->materials.materials[0].name, "Body");
     EXPECT_EQ(decoded->materials.materials[0].textureIndex, 0);
     EXPECT_EQ(decoded->materials.materials[0].indexCount, 6u);
+
+    // --- Joint physics overrides (task_manager/verlet-integration-11, PHASE1) ---
+    ASSERT_EQ(decoded->jointPhysicsOverrides.size(), 2u);
+    EXPECT_EQ(decoded->jointPhysicsOverrides[0].boneIndex, 1);
+    EXPECT_FLOAT_EQ(decoded->jointPhysicsOverrides[0].damping, 0.55f);
+    EXPECT_FLOAT_EQ(decoded->jointPhysicsOverrides[0].stiffness, 0.03f);
+    EXPECT_FLOAT_EQ(decoded->jointPhysicsOverrides[0].mass, 2.5f);
+    EXPECT_EQ(decoded->jointPhysicsOverrides[1].boneIndex, 4);
+    EXPECT_FLOAT_EQ(decoded->jointPhysicsOverrides[1].damping, 0.12f);
+    EXPECT_FLOAT_EQ(decoded->jointPhysicsOverrides[1].stiffness, 0.09f);
+    EXPECT_FLOAT_EQ(decoded->jointPhysicsOverrides[1].mass, 0.75f);
 }
 
 TEST(RigFileTest, EncodesAllEmptyRigDataAsAHeaderOnlyBlobThatDecodesBackToEmpty)
@@ -216,6 +242,7 @@ TEST(RigFileTest, EncodesAllEmptyRigDataAsAHeaderOnlyBlobThatDecodesBackToEmpty)
     EXPECT_TRUE(decoded->physics.joints.empty());
     EXPECT_TRUE(decoded->materials.textures.empty());
     EXPECT_TRUE(decoded->materials.materials.empty());
+    EXPECT_TRUE(decoded->jointPhysicsOverrides.empty());
 }
 
 TEST(RigFileTest, DecodeFailsOnEmptyBytes)
@@ -254,6 +281,43 @@ TEST(RigFileTest, DecodeFailsWhenTruncatedRightAfterTheMagic)
     // large, otherwise-complete blob's tail instead).
     std::vector<std::uint8_t> encoded = EncodeRigDataToBytes(BuildSampleRigData());
     encoded.resize(sizeof(kRigFileMagic) + 2);
+    EXPECT_FALSE(DecodeRigDataFromBytes(encoded).has_value());
+}
+
+// task_manager/verlet-integration-11, PHASE1 - backward compatibility: a
+// blob with NO trailing joint-override section at all (as any *.gta written
+// by code that predates this phase would be) must still decode successfully,
+// with jointPhysicsOverrides left empty rather than the decode failing.
+TEST(RigFileTest, DecodeSucceedsOnABlobWithNoTrailingJointOverrideSection)
+{
+    RigFileData rig = BuildSampleRigData();
+    rig.jointPhysicsOverrides.clear();
+    std::vector<std::uint8_t> encoded = EncodeRigDataToBytes(rig);
+    // Chop off exactly the trailing "count == 0" u32 this phase's own
+    // encoder just wrote, simulating a blob produced by code that predates
+    // this phase entirely (never wrote ANY trailing bytes).
+    ASSERT_GE(encoded.size(), 4u);
+    encoded.resize(encoded.size() - 4);
+
+    const std::optional<RigFileData> decoded = DecodeRigDataFromBytes(encoded);
+    ASSERT_TRUE(decoded.has_value());
+    EXPECT_TRUE(decoded->jointPhysicsOverrides.empty());
+    // Also spot-check that everything ELSE still decoded correctly - proves
+    // the cursor-guard didn't accidentally swallow/misread any earlier
+    // section.
+    EXPECT_EQ(decoded->materials.materials.size(), rig.materials.materials.size());
+}
+
+// task_manager/verlet-integration-11, PHASE1 - distinguishes "no trailing
+// section at all" (above, a normal/expected old-file case) from "a trailing
+// section IS present but is itself truncated/corrupt" (a genuine failure).
+TEST(RigFileTest, DecodeFailsWhenJointOverrideSectionIsPresentButTruncated)
+{
+    RigFileData rig = BuildSampleRigData();
+    rig.jointPhysicsOverrides.push_back(JointPhysicsOverride{ 0, 0.1f, 0.2f, 0.3f });
+    std::vector<std::uint8_t> encoded = EncodeRigDataToBytes(rig);
+    encoded.resize(encoded.size() - 2); // Mid-way through the last float.
+
     EXPECT_FALSE(DecodeRigDataFromBytes(encoded).has_value());
 }
 

@@ -636,6 +636,34 @@ bool ReadMaterialData(BinaryReader& r, MaterialData* out)
 
     return r.Ok();
 }
+
+void WriteJointPhysicsOverrides(BinaryWriter& w, const std::vector<JointPhysicsOverride>& overrides)
+{
+    w.U32(static_cast<std::uint32_t>(overrides.size()));
+    for (const auto& o : overrides) {
+        w.I32(o.boneIndex);
+        w.F32(o.damping);
+        w.F32(o.stiffness);
+        w.F32(o.mass);
+    }
+}
+
+bool ReadJointPhysicsOverrides(BinaryReader& r, std::vector<JointPhysicsOverride>* out)
+{
+    const std::uint32_t count = r.U32();
+    out->clear();
+    out->reserve(count);
+    for (std::uint32_t i = 0; i < count && r.Ok(); ++i) {
+        JointPhysicsOverride o;
+        o.boneIndex = r.I32();
+        o.damping = r.F32();
+        o.stiffness = r.F32();
+        o.mass = r.F32();
+        out->push_back(o);
+    }
+    return r.Ok();
+}
+
 } // namespace
 
 std::vector<std::uint8_t> EncodeRigDataToBytes(const RigFileData& rig)
@@ -649,6 +677,7 @@ std::vector<std::uint8_t> EncodeRigDataToBytes(const RigFileData& rig)
     WriteMorphs(w, rig.morphs.morphs);
     WritePhysics(w, rig.physics);
     WriteMaterialData(w, rig.materials);
+    WriteJointPhysicsOverrides(w, rig.jointPhysicsOverrides); // task_manager/verlet-integration-11, PHASE1 - always written (possibly count == 0).
 
     return bytes;
 }
@@ -679,6 +708,29 @@ std::optional<RigFileData> DecodeRigDataFromBytes(const std::vector<std::uint8_t
     }
     if (!ReadMaterialData(r, &rig.materials)) {
         return std::nullopt;
+    }
+
+    // task_manager/verlet-integration-11, PHASE1 - OPTIONAL trailing section:
+    // only attempt this read if there is genuinely at least one more byte
+    // left. A blob encoded by code that predates this phase ends exactly
+    // here (r.Cursor() == bytes.size()) - leaving rig.jointPhysicsOverrides
+    // at its default-constructed empty state is the CORRECT, intentional
+    // "no saved overrides for this model" outcome, not a decode failure. Do
+    // NOT make this an unconditional call like every read above it - an
+    // unconditional ReadJointPhysicsOverrides() call against an old, already-
+    // fully-consumed buffer would read U32() past the end, and while
+    // BinaryReader's sticky-failure design makes that SAFE (it would just
+    // return an empty vector with Ok() staying whatever it already was), it
+    // would also incorrectly report a truncation-style failure via r.Ok()
+    // becoming false the instant EnsureAvailable(4) fails with zero bytes
+    // left - which would make DecodeRigDataFromBytes() return std::nullopt
+    // for every single pre-existing *.gta file in the project. The cursor
+    // check below is what makes this genuinely backward-compatible instead
+    // of merely "backward-compatible unless you forget this exact guard."
+    if (r.Cursor() < bytes.size()) {
+        if (!ReadJointPhysicsOverrides(r, &rig.jointPhysicsOverrides)) {
+            return std::nullopt; // A trailing section IS present but is itself truncated/corrupt - a real failure.
+        }
     }
 
     return rig;

@@ -123,4 +123,27 @@ struct PhysicsData {
     std::vector<Joint> joints;
 };
 
+// task_manager/verlet-integration-11, PHASE1 - a single joint's SAVED, USER-
+// EDITED tuning (damping/stiffness/mass), keyed by SKELETON BONE INDEX rather
+// than by chain/joint-in-chain position - the latter is recomputed fresh by
+// DetectDynamicChains() on every load and is NOT a stable identity across
+// engine versions/algorithm changes, while a bone index is stable for the
+// lifetime of the imported skeleton (see PHASE0_MASTER_STRATEGY.md, Step 2.4).
+// This is DELIBERATELY separate from RigidBody/Joint above: those are RAW,
+// read-only, imported-from-PMX data; this is engine-owned, user-authored
+// tuning data with no PMX equivalent at all - never populated by PmxLoader.h,
+// only ever by a human editing DynamicJointSettings sliders in the Editor and
+// clicking "Save Joint Physics to Asset" (see
+// Game/Physics/DynamicChainPhysicsPersistence.h, PHASE4), EXCEPT for one
+// deliberate carry-forward: AssetImporter.cpp's own re-import path (PHASE1,
+// 3.9) copies an ALREADY-SAVED list forward across a re-import of the SAME
+// destination path, exactly mirroring how AssetDatabase::ImportAsset()
+// already preserves an existing file's own Guid across a re-import.
+struct JointPhysicsOverride {
+    std::int32_t boneIndex = -1; // SkeletonData::bones index - matches DynamicChainDefinition::jointBoneIndices entries.
+    float damping = 0.4f;        // Mirrors DynamicJointSettings::damping's own default (DynamicChainDefinition.h).
+    float stiffness = 0.02f;     // Mirrors DynamicJointSettings::stiffness's own default.
+    float mass = 1.0f;           // Mirrors DynamicJointSettings::mass's own default.
+};
+
 } // namespace gte

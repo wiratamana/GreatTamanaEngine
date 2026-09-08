@@ -36,6 +36,17 @@ struct SkinnedMeshData {
     std::vector<VertexSkinWeights> skinWeights;
     SkeletonData skeleton;
     std::optional<PhysicsData> physics;
+
+    // task_manager/verlet-integration-11, PHASE1 - this model's SAVED
+    // per-joint damping/stiffness/mass overrides (JointPhysicsOverride,
+    // Assets/PhysicsData.h), copied verbatim from the *.gta's own
+    // RigFileData::jointPhysicsOverrides (see MeshAssetGpuCatalog.cpp's
+    // EnsureMeshAsset()). Empty for a model that has never been saved with
+    // any joint edits - PhysicsSystem::RegisterDynamicChains() (PHASE2)
+    // treats an empty list as a pure no-op, applying nothing on top of
+    // DetectDynamicChains()'s own defaults, exactly like `physics` being
+    // std::nullopt already does for RigidBody-seeded defaults above.
+    std::vector<JointPhysicsOverride> jointPhysicsOverrides;
 };
 
 // Replaces the old Game::m_meshSkinningCache, but re-homed as an explicit,
