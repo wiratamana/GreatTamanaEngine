@@ -12,6 +12,7 @@
 #include "../../Physics/DynamicChainSolver.h"
 #include "../../Physics/FixedTimestepAccumulator.h"
 #include "../../Physics/Collider.h"
+#include "../../Physics/ModelColliderDetection.h"
 #include "../../Profiling/JobScopeTimer.h"
 #include "../../Profiling/ScopeTimer.h"
 #include "../Animation/SkeletalRigCache.h"
@@ -195,6 +196,14 @@ void PhysicsSystem::RegisterDynamicChains(const std::string& absoluteGtaPath, co
     DynamicChainDetectionResult detection
         = DetectDynamicChains(data.skeleton, data.physics.has_value() ? &*data.physics : nullptr, defaults);
 
+    // task_manager/verlet-integration-9, PHASE3 - independent of chain
+    // detection above (see DetectModelColliders()'s own doc comment for
+    // why): every Static rigid body of any shape becomes a collision
+    // obstacle candidate for every chain belonging to this same model, once
+    // opted in per-chain (DynamicChainDefinition::collisionEnabled, PHASE2).
+    std::vector<ModelColliderDefinition> colliders
+        = DetectModelColliders(data.skeleton, data.physics.has_value() ? &*data.physics : nullptr);
+
 #ifndef NDEBUG
     // task_manager/verlet-integration-6, Phase 4 - defensive re-verification
     // of the disjoint-jointBoneIndices invariant PhysicsSystem::Update()'s
@@ -219,6 +228,7 @@ void PhysicsSystem::RegisterDynamicChains(const std::string& absoluteGtaPath, co
     entry.chains = std::move(detection.chains);
     entry.skeleton = data.skeleton; // A private COPY - see DynamicChainRigCache.h's own file comment.
     entry.diagnostics = std::move(detection.diagnostics);
+    entry.colliders = std::move(colliders);
     m_rigCache.Register(absoluteGtaPath, std::move(entry));
 }
 

@@ -2,6 +2,7 @@
 #include "../../Assets/SkeletonData.h"
 #include "../../Physics/DynamicChainDefinition.h"
 #include "../../Physics/DynamicChainDetection.h"
+#include "../../Physics/ModelColliderDefinition.h"
 
 #include <string>
 #include <unordered_map>
@@ -36,6 +37,14 @@ public:
         // diagnostics.orphanedDynamicBoneIndices to render a non-simulated rigid
         // body distinctly (see this campaign's PHASE0_MASTER_STRATEGY.md).
         DynamicChainDetectionDiagnostics diagnostics;
+        // task_manager/verlet-integration-9, PHASE3 - every Static rigid-body
+        // collider detected for this model (DetectModelColliders(),
+        // Physics/ModelColliderDetection.h), in LOCAL/bind-pose-relative form -
+        // shared read-only by every chain belonging to this model whose own
+        // DynamicChainDefinition::collisionEnabled is true (see
+        // Game/Physics/PhysicsSystem.cpp, PHASE4, which resolves this list to
+        // WORLD space fresh every frame before stepping any chain).
+        std::vector<ModelColliderDefinition> colliders;
     };
 
     void Register(const std::string& absoluteGtaPath, ModelEntry entry)

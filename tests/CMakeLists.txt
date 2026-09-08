@@ -1411,6 +1411,7 @@ set(GTE_TEST_SOURCES
     Physics/BoxColliderTests.cpp
     Physics/CapsuleColliderTests.cpp
     Physics/ColliderTests.cpp
+    Physics/ModelColliderDetectionTests.cpp
 )
 
 # Editor/EditorCamera.h/.cpp (see src/Editor/EditorCamera.h) is only

@@ -240,6 +240,8 @@ add_library(gte_core STATIC
     src/Physics/DynamicChainDefinition.h
     src/Physics/DynamicChainDefinition.cpp
     src/Physics/ModelColliderDefinition.h
+    src/Physics/ModelColliderDetection.h
+    src/Physics/ModelColliderDetection.cpp
     src/Physics/DynamicChainRuntimeState.h
     src/Physics/DynamicChainSolver.h
     src/Physics/DynamicChainSolver.cpp
