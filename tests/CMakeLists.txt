@@ -1016,6 +1016,33 @@
 #                                            dispatch-repacking check, not a
 #                                            re-test of the underlying math.
 #                                            No ECS/GPU/Renderer involved.
+#   Physics/ModelColliderDetectionTests.cpp - verlet-integration-9 PHASE3's
+#                                            model-wide collider auto-
+#                                            detection (DetectModelColliders() -
+#                                            src/Physics/
+#                                            ModelColliderDetection.h): every
+#                                            RigidBodyMotionType::Static rigid
+#                                            body of a non-degenerate shape
+#                                            (Sphere/Box/Capsule) becomes a
+#                                            ModelColliderDefinition with a
+#                                            correctly precomputed bind-pose-
+#                                            relative offset (position AND
+#                                            rotation) from its own tracked
+#                                            bone, round-tripped against a
+#                                            hand-derived expected offset; a
+#                                            Dynamic/DynamicAndBoneMerge body
+#                                            is never included; an unattached
+#                                            (boneIndex == -1) or out-of-range
+#                                            boneIndex body is skipped; a
+#                                            degenerate shape (non-positive
+#                                            radius/all-non-positive box half-
+#                                            extents) is skipped; the result is
+#                                            sorted by ascending boneIndex,
+#                                            ties broken by original rigid-body
+#                                            index; and a null PhysicsData
+#                                            pointer returns an empty list
+#                                            rather than crashing. No ECS/GPU/
+#                                            Renderer involved.
 #   Game/Animation/AnimationSystemEvaluatePosesTests.cpp - Phase 3's split of
 #                                            AnimationSystem::Update() into
 #                                            EvaluatePoses()/SkinAndUpload()
@@ -1271,6 +1298,64 @@
 #                                            Transform is dragged. No
 #                                            GPU/Renderer/ImGui involved
 #                                            beyond a plain Registry.
+#   Game/Physics/PhysicsSystemModelColliderResolutionTests.cpp -
+#                                            task_manager/verlet-integration-9
+#                                            PHASE4 (Game/Physics/
+#                                            PhysicsSystem.cpp): proves every
+#                                            one of a model's auto-detected
+#                                            Static-rigid-body colliders
+#                                            (Physics/ModelColliderDefinition.h,
+#                                            PHASE3) is genuinely re-resolved
+#                                            to its CURRENT world-space
+#                                            center/rotation every frame -
+#                                            never a stale/cached value -
+#                                            correctly composing the tracked
+#                                            bone's own current animated pose,
+#                                            the collider's own FIXED
+#                                            bind-pose-relative local offset
+#                                            from that bone, and the owning
+#                                            ECS entity's own resolved world
+#                                            Transform. Every other simulation
+#                                            force (gravity/goal
+#                                            stiffness/structural relaxation)
+#                                            is deliberately neutralized so
+#                                            only the collision-resolution
+#                                            step itself can ever move a
+#                                            joint, isolating this resolution
+#                                            math from the solver's own
+#                                            dynamics (covered separately by
+#                                            DynamicChainSolverTests.cpp). No
+#                                            GPU/Renderer/ImGui involved
+#                                            beyond a plain Registry.
+#   Game/Physics/PhysicsSystemMultiShapeColliderTests.cpp -
+#                                            task_manager/verlet-integration-9
+#                                            PHASE6, the campaign's own final,
+#                                            real, FULL-PIPELINE regression
+#                                            test: a single dynamic chain
+#                                            hanging from a Static PMX anchor
+#                                            genuinely collides against a
+#                                            Sphere, a Box, AND a Capsule
+#                                            collider SIMULTANEOUSLY - all
+#                                            three auto-detected from real
+#                                            RigidBodyMotionType::Static PMX
+#                                            rigid bodies and resolved to
+#                                            world space every frame - driven
+#                                            end to end through the REAL
+#                                            RegisterDynamicChains() ->
+#                                            AttachDynamicChainRigIfNeeded()
+#                                            -> Update() pipeline (never a
+#                                            hand-passed Collider list),
+#                                            exactly the scenario the user
+#                                            originally reported as broken.
+#                                            A second test proves this is a
+#                                            genuine regression guard, not
+#                                            trivially true: the identical
+#                                            fixture, stepped identically but
+#                                            with collision left disabled,
+#                                            independently confirmed to
+#                                            actually penetrate at least one
+#                                            collider. No GPU/Renderer/ImGui
+#                                            involved beyond a plain Registry.
 #
 # Note that the test BINARY still dynamically depends on SDL3.dll at process
 # load time regardless of the above (gte_core's Window.cpp references SDL
@@ -1388,6 +1473,7 @@ set(GTE_TEST_SOURCES
     Game/Physics/PhysicsSystemModelColliderResolutionTests.cpp
     Game/Physics/PhysicsSystemFreezeAndCulpritFTests.cpp
     Game/Physics/PhysicsSystemAnchorRigidityRegressionTests.cpp
+    Game/Physics/PhysicsSystemMultiShapeColliderTests.cpp
     Animation/BoneChainResolverTests.cpp
     Animation/BonePoseMathTests.cpp
     Animation/SkeletonPoseTests.cpp
