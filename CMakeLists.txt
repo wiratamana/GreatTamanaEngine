@@ -268,6 +268,8 @@ add_library(gte_core STATIC
     src/Scene/SceneDocument.h
     src/Scene/SceneTextFormat.h
     src/Scene/SceneTextFormat.cpp
+    src/Scene/SceneBuilder.h
+    src/Scene/SceneBuilder.cpp
     src/Assets/AssetTypes.h
     src/Assets/AssetTypes.cpp
     src/Assets/GtaFile.h

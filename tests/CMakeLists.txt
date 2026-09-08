@@ -509,6 +509,32 @@
 #                                            at all - this module is always
 #                                            compiled, mirroring src/Physics/
 #                                            and src/Jobs/'s own bootstrap.
+#   Scene/SceneBuilderTests.cpp              - BuildSceneDocumentFromRegistry()
+#                                            (Registry + AssetDatabase ->
+#                                            SceneDocument) and
+#                                            ClearSerializableSceneObjects()
+#                                            (src/Scene/SceneBuilder.h) -
+#                                            a Primitive-tagged root, an
+#                                            Asset-tagged root that resolves
+#                                            via a real temp-directory
+#                                            AssetDatabase (including a
+#                                            differently-spelled-but-
+#                                            equivalent path proving the
+#                                            path-normalization invariant
+#                                            holds), an untracked-asset-path
+#                                            root being skipped, an
+#                                            untagged root (e.g. Camera)
+#                                            being skipped, a child entity
+#                                            never being independently
+#                                            visited, multiple mixed roots
+#                                            resolving together, and
+#                                            ClearSerializableSceneObjects()
+#                                            destroying only what this
+#                                            feature owns (roots +
+#                                            descendants) while leaving
+#                                            everything else alive. Real
+#                                            temp directory, no GPU/SDL/
+#                                            ImGui involved.
 #   Profiling/FrameProfilerTests.cpp        - FrameProfiler's BeginFrame()/
 #                                            EndFrame()/RecordCpuScope()/
 #                                            SetGpuPassSample()/
@@ -1543,6 +1569,7 @@ set(GTE_TEST_SOURCES
     Assets/MotionFileTests.cpp
     Assets/RigFileTests.cpp
     Scene/SceneTextFormatTests.cpp
+    Scene/SceneBuilderTests.cpp
     Memory/GpuMemoryTrackerTests.cpp
     Memory/SdlMemoryTrackerTests.cpp
     Profiling/FrameProfilerTests.cpp
