@@ -418,6 +418,8 @@ add_library(gte_core STATIC
     src/Game/Animation/AnimationSystem.cpp
     src/Game/Animation/AnimationSystem.h
     src/Game/Physics/DynamicChainRigCache.h
+    src/Game/Physics/DynamicChainPhysicsPersistence.cpp
+    src/Game/Physics/DynamicChainPhysicsPersistence.h
     src/Game/Physics/PhysicsSystem.cpp
     src/Game/Physics/PhysicsSystem.h
     src/Game/Game.cpp

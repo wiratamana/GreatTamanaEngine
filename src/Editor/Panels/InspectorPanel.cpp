@@ -11,6 +11,7 @@
 #include "../../ECS/TransformHierarchy.h"
 #include "../../Game/Physics/PhysicsSystem.h"
 #include "../../Game/Instantiation/MeshInstantiationSystem.h"
+#include "../../Game/Physics/DynamicChainPhysicsPersistence.h"
 #include "../../Physics/DynamicChainDefinition.h"
 
 #if GTE_ENABLE_PROJECT_PANEL
@@ -537,9 +538,11 @@ void BuildModelPartInspector(Registry& registry, EditorContext& ctx, ModelRigCac
 #endif
 
 #if GTE_ENABLE_PROJECT_PANEL
-void BuildEntityInspector(Registry& registry, EditorContext& ctx, BoneViewerWindow& boneViewer, PhysicsSystem& physicsSystem)
+void BuildEntityInspector(Registry& registry, EditorContext& ctx, BoneViewerWindow& boneViewer, PhysicsSystem& physicsSystem,
+    MeshInstantiationSystem& meshInstantiationSystem)
 #else
-void BuildEntityInspector(Registry& registry, EditorContext& ctx, PhysicsSystem& physicsSystem)
+void BuildEntityInspector(Registry& registry, EditorContext& ctx, PhysicsSystem& physicsSystem,
+    MeshInstantiationSystem& meshInstantiationSystem)
 #endif
 {
     const Entity entity = ctx.selection.SelectedEntity();
@@ -656,6 +659,47 @@ void BuildEntityInspector(Registry& registry, EditorContext& ctx, PhysicsSystem&
             ImGui::TextDisabled(
                 "Enabled: physics runs every frame. Freeze: keep the current jiggled shape, stop simulating "
                 "further, still rides along rigidly with the model.");
+
+            // task_manager/verlet-integration-11, PHASE4 - persists the
+            // CURRENT live DynamicJointSettings of every joint of every
+            // chain belonging to this model path back into its own *.gta
+            // file's metadata (RigFileData::jointPhysicsOverrides, PHASE1),
+            // so PhysicsSystem::RegisterDynamicChains() (PHASE2) re-applies
+            // them the next time this model path is instantiated - this
+            // session (via the RefreshCachedJointPhysicsOverridesFromDisk()
+            // call below, PHASE3) or any future one. The two static locals
+            // are scoped as narrowly as possible (see this phase's own
+            // strategy doc, Step 3.3, for why a plain function-local static
+            // was chosen over promoting this file to a class).
+            static bool s_lastJointPhysicsSaveSucceeded = false;
+            static std::string s_lastJointPhysicsSaveError;
+
+            if (ImGui::Button("Save Joint Physics to Asset")) {
+                std::string errorMessage;
+                const DynamicChainRigCache::ModelEntry* currentModel
+                    = physicsSystem.GetDynamicChainRigCache().TryGet(rig->meshGtaPath);
+                if (currentModel == nullptr) {
+                    s_lastJointPhysicsSaveError = "No detected dynamic bone chains to save for this model.";
+                    s_lastJointPhysicsSaveSucceeded = false;
+                } else {
+                    s_lastJointPhysicsSaveSucceeded
+                        = SaveJointPhysicsOverridesToGtaFile(rig->meshGtaPath, currentModel->chains, &errorMessage);
+                    s_lastJointPhysicsSaveError = errorMessage;
+                    if (s_lastJointPhysicsSaveSucceeded) {
+                        meshInstantiationSystem.RefreshCachedJointPhysicsOverridesFromDisk(rig->meshGtaPath);
+                    }
+                }
+            }
+            if (!s_lastJointPhysicsSaveError.empty() || s_lastJointPhysicsSaveSucceeded) {
+                if (s_lastJointPhysicsSaveSucceeded) {
+                    ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1.0f), "Saved joint physics to asset.");
+                } else {
+                    ImGui::TextColored(ImVec4(0.95f, 0.4f, 0.4f, 1.0f), "Save failed: %s", s_lastJointPhysicsSaveError.c_str());
+                }
+            }
+            ImGui::TextDisabled(
+                "Writes the CURRENT damping/stiffness/mass of every joint below into this model's *.gta file, so it "
+                "is restored automatically the next time this model is instantiated (this session or a future one).");
 
             DynamicChainRigCache::ModelEntry* model
                 = physicsSystem.GetDynamicChainRigCache().TryGetMutable(rig->meshGtaPath);
@@ -1332,9 +1376,9 @@ void BuildInspectorPanel(Registry& registry, EditorContext& ctx, PhysicsSystem& 
 #endif
 
 #if GTE_ENABLE_PROJECT_PANEL
-    BuildEntityInspector(registry, ctx, boneViewer, physicsSystem);
+    BuildEntityInspector(registry, ctx, boneViewer, physicsSystem, meshInstantiationSystem);
 #else
-    BuildEntityInspector(registry, ctx, physicsSystem);
+    BuildEntityInspector(registry, ctx, physicsSystem, meshInstantiationSystem);
 #endif
 
     ImGui::End();
