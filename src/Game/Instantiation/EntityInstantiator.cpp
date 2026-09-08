@@ -3,6 +3,7 @@
 #include "../../ECS/Components/MeshAssetSource.h"
 #include "../../ECS/Components/MeshRenderer.h"
 #include "../../ECS/Components/Name.h"
+#include "../../ECS/Components/PrimitiveSource.h"
 #include "../../ECS/Components/Transform.h"
 #include "../../ECS/TransformHierarchy.h"
 
@@ -27,6 +28,10 @@ Entity Instantiate(Registry& registry, const EntityBlueprint& blueprint, Entity 
 
     if (!blueprint.meshAssetSourcePath.empty()) {
         registry.AddComponent<MeshAssetSource>(entity, MeshAssetSource{ blueprint.meshAssetSourcePath });
+    }
+
+    if (blueprint.primitiveSourceType.has_value()) {
+        registry.AddComponent<PrimitiveSource>(entity, PrimitiveSource{ *blueprint.primitiveSourceType });
     }
 
     if (parent != kInvalidEntity) {

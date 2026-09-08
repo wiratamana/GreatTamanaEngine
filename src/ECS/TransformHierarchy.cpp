@@ -264,4 +264,22 @@ bool SetParent(Registry& registry, Entity child, Entity newParent, bool worldPos
     return true;
 }
 
+void DestroyEntityAndDescendants(Registry& registry, Entity entity)
+{
+    if (!registry.IsAlive(entity)) {
+        return;
+    }
+
+    // Snapshot BEFORE recursing/destroying - GetChildren() reads live
+    // Transform::parent data that Registry::DestroyEntity() below is about
+    // to invalidate, so every child must be captured into this local
+    // vector up front, not re-queried mid-loop.
+    const std::vector<Entity> children = GetChildren(registry, entity);
+    for (const Entity child : children) {
+        DestroyEntityAndDescendants(registry, child);
+    }
+
+    registry.DestroyEntity(entity);
+}
+
 } // namespace gte

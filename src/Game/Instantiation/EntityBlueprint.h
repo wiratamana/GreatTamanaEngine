@@ -3,8 +3,10 @@
 #include "../../ECS/Components/Transform.h"
 #include "../../Renderer/MeshHandle.h"
 #include "../../Renderer/PipelineHandle.h"
+#include "../../Renderer/Primitives/PrimitiveMeshGenerator.h"
 #include "../../Renderer/TextureHandle.h"
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -53,6 +55,16 @@ struct EntityBlueprintNode {
     // asset it came from so a later PlayAnimationOnEntity()-equivalent call
     // can look its cached rig data back up.
     std::string meshAssetSourcePath;
+
+    // Non-nullopt only on a node that should carry a PrimitiveSource
+    // component (see ECS/Components/PrimitiveSource.h) - the single node a
+    // primitive spawn request resolves to (PrimitiveGpuCatalog::Resolve()),
+    // recording exactly which PrimitiveType it was generated from. Mutually
+    // exclusive with meshAssetSourcePath above in practice (a node is either
+    // a primitive OR an asset-spawned entity, never both), though nothing
+    // here enforces that - EntityInstantiator::Instantiate() simply adds
+    // whichever component(s) have a non-default value.
+    std::optional<PrimitiveType> primitiveSourceType;
 
     std::vector<EntityBlueprintNode> children;
 };

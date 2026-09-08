@@ -210,6 +210,7 @@ add_library(gte_core STATIC
     src/ECS/Components/Camera.h
     src/ECS/Components/Name.h
     src/ECS/Components/MeshAssetSource.h
+    src/ECS/Components/PrimitiveSource.h
     src/ECS/Components/SkeletalAnimator.h
     src/ECS/Components/ResolvedAnimationPose.h
     src/ECS/Components/DynamicChainRig.h

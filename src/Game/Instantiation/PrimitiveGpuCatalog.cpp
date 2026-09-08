@@ -36,6 +36,7 @@ EntityBlueprint PrimitiveGpuCatalog::Resolve(RenderSystem& renderSystem, Rendere
     EntityBlueprint blueprint;
     blueprint.pipeline = EnsureDefaultPipeline(renderSystem, renderer);
     blueprint.mesh = EnsurePrimitiveMesh(renderSystem, renderer, type);
+    blueprint.primitiveSourceType = type;
     return blueprint;
 }
 

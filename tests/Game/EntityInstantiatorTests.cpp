@@ -9,6 +9,7 @@
 #include "ECS/Components/MeshAssetSource.h"
 #include "ECS/Components/MeshRenderer.h"
 #include "ECS/Components/Name.h"
+#include "ECS/Components/PrimitiveSource.h"
 #include "ECS/Components/Transform.h"
 #include "ECS/TransformHierarchy.h"
 
@@ -87,6 +88,30 @@ TEST(EntityInstantiatorTest, NonEmptySourcePathAddsMeshAssetSourceComponent)
 
     ASSERT_TRUE(registry.HasComponent<MeshAssetSource>(entity));
     EXPECT_EQ(registry.GetComponent<MeshAssetSource>(entity).gtaPath, "C:/Project/Furina.gta");
+}
+
+TEST(EntityInstantiatorTest, PrimitiveSourceTypeSetAddsPrimitiveSourceComponent)
+{
+    Registry registry;
+
+    EntityBlueprint blueprint;
+    blueprint.primitiveSourceType = PrimitiveType::Sphere;
+
+    const Entity entity = Instantiate(registry, blueprint);
+
+    ASSERT_TRUE(registry.HasComponent<PrimitiveSource>(entity));
+    EXPECT_EQ(registry.GetComponent<PrimitiveSource>(entity).type, PrimitiveType::Sphere);
+}
+
+TEST(EntityInstantiatorTest, PrimitiveSourceTypeUnsetAddsNoPrimitiveSourceComponent)
+{
+    Registry registry;
+
+    EntityBlueprint blueprint; // primitiveSourceType left at std::nullopt.
+
+    const Entity entity = Instantiate(registry, blueprint);
+
+    EXPECT_FALSE(registry.HasComponent<PrimitiveSource>(entity));
 }
 
 TEST(EntityInstantiatorTest, LocalTransformOverrideIsAppliedVerbatim)

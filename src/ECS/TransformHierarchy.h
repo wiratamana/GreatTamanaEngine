@@ -117,4 +117,21 @@ bool SetSiblingIndex(Registry& registry, Entity entity, std::uint32_t desiredInd
 // Transform component.
 void MoveToLastSibling(Registry& registry, Entity entity);
 
+// Destroys `entity` AND every descendant of it (recursively, via
+// GetChildren() above), post-order (children destroyed before their own
+// parent) so a destroyed entity's own children are never left querying a
+// GetChildren() call against an already-dead parent mid-walk. Safe to call
+// on an already-dead/invalid entity (a no-op, matching
+// Registry::DestroyEntity()'s own safety guarantee). Each individual
+// destroy goes through Registry::DestroyEntity() (removing the entity from
+// every component pool it ever touched - see Registry.h), so no component
+// type this entity or its descendants carry needs to be known here.
+//
+// Needed by task_manager/scene-serialization-1's
+// Scene/SceneBuilder.h::ClearSerializableSceneObjects() (replacing a scene's
+// content before a Load) - also independently useful for a future
+// per-entity Hierarchy "Delete" command (see TODO.md, "Per-entity Hierarchy
+// context menu").
+void DestroyEntityAndDescendants(Registry& registry, Entity entity);
+
 } // namespace gte

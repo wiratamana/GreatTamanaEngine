@@ -345,5 +345,87 @@ TEST(TransformHierarchyTest, MoveToLastSiblingAppendsAfterCurrentMaxSiblingIndex
     EXPECT_EQ(children[1], a);
 }
 
+TEST(TransformHierarchyTest, DestroyEntityAndDescendantsDestroysWholeChain)
+{
+    Registry registry;
+    const Entity parent = registry.CreateEntity();
+    registry.AddComponent<Transform>(parent);
+    const Entity child = registry.CreateEntity();
+    registry.AddComponent<Transform>(child);
+    const Entity grandchild = registry.CreateEntity();
+    registry.AddComponent<Transform>(grandchild);
+
+    ASSERT_TRUE(SetParent(registry, child, parent));
+    ASSERT_TRUE(SetParent(registry, grandchild, child));
+
+    DestroyEntityAndDescendants(registry, parent);
+
+    EXPECT_FALSE(registry.IsAlive(parent));
+    EXPECT_FALSE(registry.IsAlive(child));
+    EXPECT_FALSE(registry.IsAlive(grandchild));
+}
+
+TEST(TransformHierarchyTest, DestroyEntityAndDescendantsLeafOnlyRemovesItselfNotSiblings)
+{
+    Registry registry;
+    const Entity parent = registry.CreateEntity();
+    registry.AddComponent<Transform>(parent);
+    const Entity leaf = registry.CreateEntity();
+    registry.AddComponent<Transform>(leaf);
+    const Entity sibling = registry.CreateEntity();
+    registry.AddComponent<Transform>(sibling);
+
+    ASSERT_TRUE(SetParent(registry, leaf, parent));
+    ASSERT_TRUE(SetParent(registry, sibling, parent));
+
+    DestroyEntityAndDescendants(registry, leaf);
+
+    EXPECT_FALSE(registry.IsAlive(leaf));
+    EXPECT_TRUE(registry.IsAlive(sibling));
+    EXPECT_TRUE(registry.IsAlive(parent));
+}
+
+TEST(TransformHierarchyTest, DestroyEntityAndDescendantsOnAlreadyDeadEntityIsSafeNoOp)
+{
+    Registry registry;
+    const Entity entity = registry.CreateEntity();
+    registry.AddComponent<Transform>(entity);
+    registry.DestroyEntity(entity);
+
+    DestroyEntityAndDescendants(registry, entity); // Already dead.
+    DestroyEntityAndDescendants(registry, kInvalidEntity); // Default/invalid.
+    DestroyEntityAndDescendants(registry, Entity{}); // Default-constructed.
+
+    // No crash, and nothing else in the registry is affected.
+    EXPECT_FALSE(registry.IsAlive(entity));
+}
+
+TEST(TransformHierarchyTest, DestroyEntityAndDescendantsRemovesEveryDescendantInWiderTree)
+{
+    Registry registry;
+    const Entity parent = registry.CreateEntity();
+    registry.AddComponent<Transform>(parent);
+    const Entity childA = registry.CreateEntity();
+    registry.AddComponent<Transform>(childA);
+    const Entity childB = registry.CreateEntity();
+    registry.AddComponent<Transform>(childB);
+    const Entity grandchildOfA = registry.CreateEntity();
+    registry.AddComponent<Transform>(grandchildOfA);
+    const Entity unrelated = registry.CreateEntity();
+    registry.AddComponent<Transform>(unrelated);
+
+    ASSERT_TRUE(SetParent(registry, childA, parent));
+    ASSERT_TRUE(SetParent(registry, childB, parent));
+    ASSERT_TRUE(SetParent(registry, grandchildOfA, childA));
+
+    DestroyEntityAndDescendants(registry, parent);
+
+    EXPECT_FALSE(registry.IsAlive(parent));
+    EXPECT_FALSE(registry.IsAlive(childA));
+    EXPECT_FALSE(registry.IsAlive(childB));
+    EXPECT_FALSE(registry.IsAlive(grandchildOfA));
+    EXPECT_TRUE(registry.IsAlive(unrelated));
+}
+
 } // namespace
 } // namespace gte
