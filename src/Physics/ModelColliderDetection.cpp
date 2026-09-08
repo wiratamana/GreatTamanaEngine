@@ -84,6 +84,8 @@ std::vector<ModelColliderDefinition> DetectModelColliders(const SkeletonData& sk
         def.boneIndex = body.boneIndex;
         def.shape = body.shape;
         def.shapeSize = body.shapeSize;
+        def.group = body.group;
+        def.collisionMask = body.collisionGroupMask;
         def.localOffsetPosition = localOffsetMat.TransformPoint(Vec3::Zero());
         def.localOffsetRotation = Quat::FromMat4(localOffsetMat);
         result.push_back(def);

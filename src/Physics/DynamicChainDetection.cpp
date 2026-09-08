@@ -448,6 +448,8 @@ DynamicChainDetectionResult DetectDynamicChains(
                 const RigidBody& body = physics->rigidBodies[static_cast<std::size_t>(rbIt->second)];
                 chain.jointSettings[j].mass = body.mass;
                 chain.jointSettings[j].damping = body.linearDamping;
+                chain.jointSettings[j].group = body.group;
+                chain.jointSettings[j].collisionMask = body.collisionGroupMask;
             }
         }
 

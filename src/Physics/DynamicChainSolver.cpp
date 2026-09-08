@@ -8,6 +8,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 
 namespace gte {
 
@@ -17,6 +18,40 @@ namespace {
 // producing an infinite/negative inverseMass - mirrors ChainConstraints.cpp's
 // own "degrade gracefully instead of NaN/Inf" convention.
 constexpr float kMinMass = 1e-4f;
+
+// task_manager/verlet-integration-10, PHASE1 (v2) - a single "which layer am
+// I on" bit, SAFELY derived from a raw group value that this engine never
+// range-validates anywhere in its own load pipeline (PmxLoader.cpp's own
+// ConvertRigidBody(): `out.group = body.m_group;`, a straight byte copy off
+// an untrusted .pmx file, with no range check - see
+// PHASE0_MASTER_STRATEGY.md's Step 2 point 13). PMX authoring tools always
+// emit 0-15, but this engine cannot assume the FILE itself is well-formed.
+// Masking to the documented 4-bit range BEFORE shifting is what guarantees
+// `1u << group` can never become undefined behavior (shifting by an amount
+// >= the promoted-to unsigned int's own bit width, 32, is UB in C++ - a real
+// risk for an unmasked `group` up to 255) - matching this codebase's own
+// "degrade gracefully, never crash" convention (see BoxCollider.cpp's own
+// degenerate half-extent handling, SphereCollider.cpp's own degenerate-
+// center fallback, IsDegenerateColliderShape()'s own sibling precedent in
+// Physics/ModelColliderDetection.cpp).
+constexpr std::uint16_t GroupBit(std::uint8_t group) noexcept
+{
+    return static_cast<std::uint16_t>(1u << (group & 0x0Fu));
+}
+
+// task_manager/verlet-integration-10, PHASE1 - Bullet's own broad-phase
+// collision-filter convention (confirmed against
+// third_party/saba/src/Saba/Model/MMD/MMDPhysics.cpp's own
+// `m_world->addRigidBody(rb, 1 << mmdRB->GetGroup(), mmdRB->GetGroupMask())`
+// call, lines 149-154, and its own `GetGroup()`/`GetGroupMask()` accessors,
+// lines 632-637) - a SYMMETRIC AND-test: A and B may collide only if A's own
+// group bit is set in B's mask, AND B's own group bit is set in A's mask.
+bool GroupsMayCollide(std::uint8_t groupA, std::uint16_t maskA, std::uint8_t groupB, std::uint16_t maskB) noexcept
+{
+    const std::uint16_t bitA = GroupBit(groupA);
+    const std::uint16_t bitB = GroupBit(groupB);
+    return (bitA & maskB) != 0 && (bitB & maskA) != 0;
+}
 
 void SeedParticlesFromAnimatedPose(
     const DynamicChainDefinition& definition, const std::vector<Vec3>& animatedJointWorldPositions,
@@ -139,10 +174,20 @@ void StepDynamicChain(const DynamicChainDefinition& definition, const Vec3& root
     // projection), so a particle penetrating more than one collider
     // simultaneously still ends up outside ALL of them by the end of this
     // loop (each subsequent call only ever pushes it further from whichever
-    // surface it is CURRENTLY penetrating).
+    // surface it is CURRENTLY penetrating). task_manager/verlet-integration-10,
+    // PHASE1 - before actually solving, a Bullet-style symmetric group/mask
+    // AND-test (GroupsMayCollide(), above) filters out any joint/collider
+    // pair that isn't mutually "visible" to each other via PMX's own
+    // collision-group/layer rule ("use pmx defined rigid body layer rule
+    // with collision map").
     if (definition.collisionEnabled) {
         for (std::size_t i = 0; i < jointCount; ++i) {
+            const std::uint8_t jointGroup = definition.jointSettings[i].group;
+            const std::uint16_t jointMask = definition.jointSettings[i].collisionMask;
             for (const Collider& collider : colliders) {
+                if (!GroupsMayCollide(jointGroup, jointMask, collider.group, collider.collisionMask)) {
+                    continue; // task_manager/verlet-integration-10, PHASE1 - PMX collision-group/layer rule.
+                }
                 SolveCollision(state.particles[i], collider);
             }
         }

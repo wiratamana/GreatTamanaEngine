@@ -41,6 +41,31 @@ struct Collider {
     Vec3 center = Vec3::Zero();
     Quat rotation = Quat::Identity();
     Vec3 size = Vec3::Zero();
+
+    // task_manager/verlet-integration-10, PHASE1 - this collider's own PMX
+    // collision-group membership/mask (Assets/PhysicsData.h's own
+    // RigidBody::group/collisionGroupMask, copied verbatim by
+    // Physics/ModelColliderDetection.h's DetectModelColliders() and
+    // Game/Physics/PhysicsSystem.cpp's own per-frame resolution - see
+    // DynamicJointSettings::group/collisionMask below for the joint-side
+    // half of this same filter). `group` is a single 0-15 value (this
+    // collider's own layer); `collisionMask` is which layers this collider
+    // is willing to be hit BY. DEFAULT VALUES ARE DELIBERATE: `group = 0`,
+    // `collisionMask = 0xFFFF` (every bit set) - this is "belongs to layer 0,
+    // collides with every layer", which is EXACTLY the old (pre-PHASE1)
+    // behavior for any Collider that never had real PMX group/mask data
+    // copied into it (every existing hand-built test fixture in
+    // tests/Physics/{Collider,DynamicChainSolver}Tests.cpp constructs a
+    // Collider via plain positional aggregate-init that never mentions these
+    // two new trailing fields) - see this campaign's own
+    // PHASE0_MASTER_STRATEGY.md, Step 2 point 12, for why this is not a
+    // coincidence. NOTE: `group` is never range-validated anywhere in this
+    // engine (see PHASE0's Step 2 point 13) - any code that turns this value
+    // into a shift amount (`1u << group`) MUST mask it first
+    // (`group & 0x0Fu`); see DynamicChainSolver.cpp's own GroupBit() helper
+    // below for the one shared, safe implementation.
+    std::uint8_t group = 0;
+    std::uint16_t collisionMask = 0xFFFF;
 };
 
 // Dispatches to SolveSphereCollision()/SolveBoxCollision()/
@@ -48,7 +73,12 @@ struct Collider {
 // based on `collider.shape` - each underlying function ALREADY checks
 // `particle.pinned` and its own shape-specific degenerate-size case
 // internally, so this dispatcher adds no extra logic of its own beyond the
-// plain field-repacking needed to call the right one.
+// plain field-repacking needed to call the right one. task_manager/
+// verlet-integration-10, PHASE1 - group/mask filtering (Collider::group/
+// collisionMask vs. a joint's own DynamicJointSettings::group/collisionMask)
+// is the CALLER's responsibility (DynamicChainSolver.cpp's own
+// GroupsMayCollide() check, run BEFORE this function is ever called) - this
+// dispatcher itself never reads/writes group/collisionMask at all.
 void SolveCollision(VerletParticle& particle, const Collider& collider) noexcept;
 
 } // namespace gte

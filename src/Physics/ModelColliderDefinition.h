@@ -49,6 +49,19 @@ struct ModelColliderDefinition {
     // recomputed per frame.
     Vec3 localOffsetPosition = Vec3::Zero();
     Quat localOffsetRotation = Quat::Identity();
+
+    // task_manager/verlet-integration-10, PHASE1 - copied verbatim from the
+    // Static RigidBody this collider was detected from
+    // (Assets/PhysicsData.h::RigidBody::group/collisionGroupMask) - see
+    // Physics/Collider.h's own `group`/`collisionMask` doc comment for the
+    // full filtering contract these are resolved into every frame, and its
+    // own note on why `group` must always be masked (`& 0x0Fu`) before use
+    // as a shift amount. Unlike Collider's own trailing fields, these are a
+    // VERBATIM copy of whatever the source PMX RigidBody actually declared,
+    // never defaulted to "collides with everything" here - see
+    // Physics/ModelColliderDetection.cpp's own DetectModelColliders().
+    std::uint8_t group = 0;
+    std::uint16_t collisionMask = 0xFFFF;
 };
 
 } // namespace gte

@@ -1036,13 +1036,46 @@
 #                                            boneIndex body is skipped; a
 #                                            degenerate shape (non-positive
 #                                            radius/all-non-positive box half-
-#                                            extents) is skipped; the result is
 #                                            sorted by ascending boneIndex,
 #                                            ties broken by original rigid-body
 #                                            index; and a null PhysicsData
 #                                            pointer returns an empty list
 #                                            rather than crashing. No ECS/GPU/
 #                                            Renderer involved.
+#   Physics/ModelColliderDetectionGroupMaskTests.cpp - task_manager/
+#                                            verlet-integration-10 PHASE1:
+#                                            DetectModelColliders() now copies
+#                                            a Static RigidBody's own
+#                                            group/collisionGroupMask
+#                                            VERBATIM into the detected
+#                                            ModelColliderDefinition's
+#                                            group/collisionMask fields -
+#                                            including a literal zero mask
+#                                            (proving this is a verbatim
+#                                            copy, never silently replaced by
+#                                            Collider's own "default to
+#                                            0xFFFF" convenience). No ECS/GPU/
+#                                            Renderer involved.
+#   Physics/DynamicChainSolverCollisionGroupFilterTests.cpp - task_manager/
+#                                            verlet-integration-10 PHASE1: the
+#                                            Bullet-style symmetric group/mask
+#                                            AND-test added to
+#                                            StepDynamicChain()'s own
+#                                            collision loop - same-group
+#                                            joint/collider pairs collide,
+#                                            disjoint-mask pairs do not (even
+#                                            with collisionEnabled == true),
+#                                            the filter is genuinely
+#                                            symmetric (both sides must
+#                                            allow each other), the pre-
+#                                            PHASE1 all-default behavior is
+#                                            reproduced exactly, and an
+#                                            out-of-documented-range group
+#                                            byte is masked safely (never
+#                                            undefined behavior) and produces
+#                                            the same result as its
+#                                            in-range low-4-bit equivalent.
+#                                            No ECS/GPU/Renderer involved.
 #   Game/Animation/AnimationSystemEvaluatePosesTests.cpp - Phase 3's split of
 #                                            AnimationSystem::Update() into
 #                                            EvaluatePoses()/SkinAndUpload()
@@ -1499,6 +1532,8 @@ set(GTE_TEST_SOURCES
     Physics/CapsuleColliderTests.cpp
     Physics/ColliderTests.cpp
     Physics/ModelColliderDetectionTests.cpp
+    Physics/ModelColliderDetectionGroupMaskTests.cpp
+    Physics/DynamicChainSolverCollisionGroupFilterTests.cpp
 )
 
 # Editor/EditorCamera.h/.cpp (see src/Editor/EditorCamera.h) is only

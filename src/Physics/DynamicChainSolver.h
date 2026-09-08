@@ -81,7 +81,16 @@ namespace gte {
 //      (Physics/Collider.h). An empty `colliders` list, or
 //      `collisionEnabled == false`, is a complete, documented no-op -
 //      exactly like the old `hasHeadCollider == false` contract it
-//      replaces.
+//      replaces. task_manager/verlet-integration-10, PHASE1 - BEFORE
+//      SolveCollision() is actually called, a Bullet-style symmetric
+//      group/mask AND-test (this joint's own DynamicJointSettings::group/
+//      collisionMask vs. the collider's own Collider::group/collisionMask,
+//      via a shift-safe GroupBit() helper that masks `group` to its
+//      documented 4-bit range before ever using it as a shift amount) must
+//      also pass, matching PMX's own authored collision-group/layer rule -
+//      a joint/collider pair that isn't mutually "visible" to each other is
+//      skipped entirely for that pair, same as if the collider weren't in
+//      the list at all.
 //   6. NaN/Inf guard (PHASE5, 3.3): after every position update above, any
 //      particle whose position fails std::isfinite() on any component is
 //      reset (that ONE particle only, never the whole chain) to its

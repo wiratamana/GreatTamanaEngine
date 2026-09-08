@@ -396,6 +396,8 @@ void PhysicsSystem::Update(Registry& registry, double deltaSeconds)
                 collider.center = boneWorld.TransformPoint(colliderDef.localOffsetPosition);
                 collider.rotation = Quat::FromMat4(boneWorld) * colliderDef.localOffsetRotation;
                 collider.size = colliderDef.shapeSize;
+                collider.group = colliderDef.group;
+                collider.collisionMask = colliderDef.collisionMask;
                 resolvedColliders.push_back(collider);
             }
         }

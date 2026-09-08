@@ -32,6 +32,24 @@ struct DynamicJointSettings {
     float damping = 0.4f;    // "Damping" - see VerletIntegration.h.
     float stiffness = 0.02f; // "Stiffness" (goal constraint) - see ChainConstraints.h's SolveGoalConstraint().
     float mass = 1.0f;       // "Weight" - inverse-mass fed to VerletParticle::inverseMass (must be > 0).
+
+    // task_manager/verlet-integration-10, PHASE1 - this JOINT's own PMX
+    // collision-group membership/mask, copied from whichever Dynamic/
+    // DynamicAndBoneMerge RigidBody this joint's own bone matched during
+    // detection (DynamicChainDetection.cpp, Step G) - the joint-side half of
+    // the same Bullet-style group/mask filter Physics/Collider.h's own
+    // `group`/`collisionMask` fields implement for the STATIC collider side.
+    // Same "collides with everything by default" rationale as Collider's own
+    // fields - every hand-built DynamicJointSettings{...} in the existing
+    // test suite (e.g. DynamicChainSolverTests.cpp's
+    // `DynamicJointSettings{ damping, stiffness, 1.0f }`) leaves these two
+    // trailing fields at these exact defaults, reproducing pre-PHASE1
+    // behavior byte-for-byte. `group` is NEVER range-validated anywhere in
+    // this engine (a raw, unchecked byte from the source .pmx file - see
+    // PHASE0_MASTER_STRATEGY.md's Step 2 point 13) - always mask it
+    // (`group & 0x0Fu`) before using it as a shift amount.
+    std::uint8_t group = 0;
+    std::uint16_t collisionMask = 0xFFFF;
 };
 
 // task_manager/verlet-integration-6, Phase 1/3 - a single non-hierarchy
