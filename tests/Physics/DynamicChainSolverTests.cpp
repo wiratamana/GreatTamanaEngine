@@ -277,7 +277,9 @@ TEST(DynamicChainSolverTests, EnabledCollisionKeepsJointsOffEveryColliderSurface
 TEST(DynamicChainSolverTests, CollidersAreIgnoredWhenCollisionEnabledIsFalse)
 {
     DynamicChainDefinition definition = BuildThreeJointChainDefinition(/*stiffness=*/0.0f, /*damping=*/0.05f);
-    ASSERT_FALSE(definition.collisionEnabled);
+    definition.collisionEnabled = false; // Explicit - this test intentionally exercises the disabled case,
+                                          // independent of whatever DynamicChainDefinition's own default is
+                                          // (task_manager/verlet-integration-10, PHASE3 flipped that default to true).
 
     DynamicChainRuntimeState state;
     const Vec3 root(0.0f, 0.0f, 0.0f);

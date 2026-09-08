@@ -171,16 +171,22 @@ struct DynamicChainDefinition {
     // to that model. `collisionEnabled` is the one remaining per-chain
     // knob: when true, EVERY joint particle of THIS chain is tested against
     // EVERY collider in that shared model-wide list (see
-    // DynamicChainSolver.h's own StepDynamicChain() step 5) - when false
-    // (the default, matching the old hasHeadCollider's own opt-in-only
-    // default), collision is a complete no-op for this chain regardless of
-    // how many colliders the model has. A human still opts in via the
-    // Editor Inspector (see Editor/Panels/InspectorPanel.cpp, PHASE5) -
-    // there is simply nothing left to hand-author beyond that one checkbox,
-    // since shape/size/position/orientation now all come directly from the
-    // model's own real PMX rigid-body data instead of a hand-picked bone
-    // index + guessed radius.
-    bool collisionEnabled = false;
+    // DynamicChainSolver.h's own StepDynamicChain() step 5) - when false,
+    // collision is a complete no-op for this chain regardless of how many
+    // colliders the model has. task_manager/verlet-integration-10, PHASE3 -
+    // defaults to true as of this phase (was false from this field's
+    // introduction in verlet-integration-9 through the rest of that
+    // campaign) - a freshly-detected chain now collides against its model's
+    // own auto-detected PMX colliders immediately, with no manual Editor
+    // opt-in required, per that campaign's own explicit user request ("by
+    // default, turn collision to ON"). A human may still explicitly disable
+    // collision per chain via the Editor Inspector's existing "Enable
+    // Collision" checkbox (Editor/Panels/InspectorPanel.cpp) - this default
+    // only changes what a BRAND NEW, never-before-tuned chain starts at. See
+    // Game/Physics/PhysicsSystem.cpp's own `anyChainWantsCollision` guard
+    // doc comment for the accepted per-frame performance consequence of this
+    // default flip (task_manager/verlet-integration-10, PHASE3, Step 4.1).
+    bool collisionEnabled = true;
 
     // PHASE5, 3.3 - numerical safety: if the chain's own root bone moves
     // farther than this in a single StepDynamicChain() call (a teleporting

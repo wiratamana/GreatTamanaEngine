@@ -380,9 +380,18 @@ void PhysicsSystem::Update(Registry& registry, double deltaSeconds)
         // skeleton/pose's own existing "resolved once on the main thread,
         // shared by every chain" pattern) - only bothered with at all when at
         // least one of this entity's chains actually opted in
-        // (collisionEnabled), and the model has at least one collider, so an
-        // entity with collision disabled everywhere (today's default for every
-        // chain) pays zero extra ComputeBoneWorldMatrix() calls per frame.
+        // (collisionEnabled), and the model has at least one collider.
+        // task_manager/verlet-integration-10, PHASE3 - `collisionEnabled` now
+        // DEFAULTS to true for a freshly-detected chain (was false through the
+        // rest of verlet-integration-9), so this guard now fires (i.e. this
+        // resolution work now actually runs) for the overwhelming majority of
+        // models with at least one detected chain and at least one detected
+        // Static collider, an intentional and accepted per-frame cost of
+        // "collision on by default" - see DynamicChainDefinition.h's own
+        // `collisionEnabled` doc comment and PHASE3's own Step 4.1 for the
+        // full accepted-trade-off discussion. An entity with collision
+        // explicitly disabled on every one of its chains still pays zero
+        // extra ComputeBoneWorldMatrix() calls per frame, exactly as before.
         std::vector<Collider> resolvedColliders;
         const bool anyChainWantsCollision = std::any_of(model->chains.begin(), model->chains.end(),
             [](const DynamicChainDefinition& c) { return c.collisionEnabled; });
