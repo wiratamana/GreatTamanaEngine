@@ -218,5 +218,93 @@ TEST(PhysicsSystemTests, RegisteredDynamicChainVisiblyDivergesFromPureFkPoseUnde
            "a physics-driven bone must visibly move where a static FK bone would not.";
 }
 
+// task_manager/verlet-integration-11, PHASE2_RUNTIME_APPLICATION_ON_INSTANTIATION.md -
+// proves the WIRING (not just the pure ApplyJointPhysicsOverrides() function
+// itself, see tests/Physics/JointPhysicsOverrideApplicationTests.cpp) works
+// end-to-end: RegisterDynamicChains(), given a SkinnedMeshData whose
+// jointPhysicsOverrides names a real detected joint's bone index, produces a
+// DynamicChainRigCache::ModelEntry whose matching joint's DynamicJointSettings
+// reflect the SAVED values, not DetectDynamicChains()'s own auto-computed
+// defaults. Reuses the exact same synthetic 4-bone/2-joint rig fixture as
+// RegisteredDynamicChainVisiblyDivergesFromPureFkPoseUnderGravity above.
+TEST(PhysicsSystemTests, RegisterDynamicChainsAppliesSavedJointOverridesOnTopOfDetectionDefaults)
+{
+    SkinnedMeshData data;
+    Bone root;
+    root.position = Vec3(0.0f, 0.0f, 0.0f);
+    root.parentBoneIndex = -1;
+    data.skeleton.bones.push_back(root); // 0
+
+    Bone chainRoot;
+    chainRoot.position = Vec3(1.0f, 0.0f, 0.0f);
+    chainRoot.parentBoneIndex = 0;
+    data.skeleton.bones.push_back(chainRoot); // 1
+
+    Bone joint1;
+    joint1.position = Vec3(2.0f, 0.0f, 0.0f);
+    joint1.parentBoneIndex = 1;
+    data.skeleton.bones.push_back(joint1); // 2
+
+    Bone joint2;
+    joint2.position = Vec3(3.0f, 0.0f, 0.0f);
+    joint2.parentBoneIndex = 2;
+    data.skeleton.bones.push_back(joint2); // 3
+
+    PhysicsData physics;
+
+    RigidBody anchorBody;
+    anchorBody.boneIndex = 1;
+    anchorBody.motionType = RigidBodyMotionType::Static;
+    physics.rigidBodies.push_back(anchorBody); // 0
+
+    RigidBody joint1Body;
+    joint1Body.boneIndex = 2;
+    joint1Body.motionType = RigidBodyMotionType::Dynamic;
+    physics.rigidBodies.push_back(joint1Body); // 1
+
+    RigidBody joint2Body;
+    joint2Body.boneIndex = 3;
+    joint2Body.motionType = RigidBodyMotionType::Dynamic;
+    physics.rigidBodies.push_back(joint2Body); // 2
+
+    Joint anchorToJoint1;
+    anchorToJoint1.rigidBodyAIndex = 0;
+    anchorToJoint1.rigidBodyBIndex = 1;
+    physics.joints.push_back(anchorToJoint1);
+
+    Joint joint1ToJoint2;
+    joint1ToJoint2.rigidBodyAIndex = 1;
+    joint1ToJoint2.rigidBodyBIndex = 2;
+    physics.joints.push_back(joint1ToJoint2);
+
+    data.physics = std::move(physics);
+
+    // The saved override - joint bone index 3 (the second/last joint of the
+    // one detected chain) - custom values that would never occur from pure
+    // defaults/RigidBody seeding alone.
+    const std::int32_t someJointBoneIndex = 3;
+    data.jointPhysicsOverrides.push_back(JointPhysicsOverride{ someJointBoneIndex, 0.77f, 0.06f, 4.5f });
+
+    PhysicsSystem physicsSystem;
+    physicsSystem.RegisterDynamicChains("test.gta", data);
+
+    const DynamicChainRigCache::ModelEntry* model = physicsSystem.GetDynamicChainRigCache().TryGet("test.gta");
+    ASSERT_NE(model, nullptr);
+    ASSERT_FALSE(model->chains.empty());
+
+    bool found = false;
+    for (const DynamicChainDefinition& chain : model->chains) {
+        for (std::size_t i = 0; i < chain.jointBoneIndices.size(); ++i) {
+            if (chain.jointBoneIndices[i] == someJointBoneIndex) {
+                EXPECT_FLOAT_EQ(chain.jointSettings[i].damping, 0.77f);
+                EXPECT_FLOAT_EQ(chain.jointSettings[i].stiffness, 0.06f);
+                EXPECT_FLOAT_EQ(chain.jointSettings[i].mass, 4.5f);
+                found = true;
+            }
+        }
+    }
+    EXPECT_TRUE(found) << "Expected the detected chain to contain the overridden joint bone index.";
+}
+
 } // namespace
 } // namespace gte

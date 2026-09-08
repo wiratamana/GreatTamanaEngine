@@ -1595,6 +1595,7 @@ set(GTE_TEST_SOURCES
     Physics/ModelColliderDetectionGroupMaskTests.cpp
     Physics/DynamicChainSolverCollisionGroupFilterTests.cpp
     Physics/DynamicChainDetectionJointRadiusTests.cpp
+    Physics/JointPhysicsOverrideApplicationTests.cpp
 )
 
 # Editor/EditorCamera.h/.cpp (see src/Editor/EditorCamera.h) is only

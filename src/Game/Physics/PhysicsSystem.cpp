@@ -13,6 +13,7 @@
 #include "../../Physics/FixedTimestepAccumulator.h"
 #include "../../Physics/Collider.h"
 #include "../../Physics/ModelColliderDetection.h"
+#include "../../Physics/JointPhysicsOverrideApplication.h"
 #include "../../Profiling/JobScopeTimer.h"
 #include "../../Profiling/ScopeTimer.h"
 #include "../Animation/SkeletalRigCache.h"
@@ -226,6 +227,16 @@ void PhysicsSystem::RegisterDynamicChains(const std::string& absoluteGtaPath, co
     const DynamicChainDetectionDefaults defaults{};
     DynamicChainDetectionResult detection
         = DetectDynamicChains(data.skeleton, data.physics.has_value() ? &*data.physics : nullptr, defaults);
+
+    // task_manager/verlet-integration-11, PHASE2 - apply any previously-
+    // SAVED, user-edited joint tuning (Editor "Save Joint Physics to Asset",
+    // PHASE4) ON TOP of the pure/PMX-seeded defaults DetectDynamicChains()
+    // just computed - MUST run strictly after detection (so it has real
+    // chains/jointBoneIndices to match against) and strictly before this
+    // result is cached (so every consumer of DynamicChainRigCache, including
+    // the very first entity spawned from this path this session, sees the
+    // saved values, never the pre-override defaults for even one frame).
+    ApplyJointPhysicsOverrides(detection.chains, data.jointPhysicsOverrides);
 
     // task_manager/verlet-integration-9, PHASE3 - independent of chain
     // detection above (see DetectModelColliders()'s own doc comment for
