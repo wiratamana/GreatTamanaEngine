@@ -265,6 +265,9 @@ add_library(gte_core STATIC
     src/Physics/Collider.cpp
     src/Physics/JointPhysicsOverrideApplication.h
     src/Physics/JointPhysicsOverrideApplication.cpp
+    src/Scene/SceneDocument.h
+    src/Scene/SceneTextFormat.h
+    src/Scene/SceneTextFormat.cpp
     src/Assets/AssetTypes.h
     src/Assets/AssetTypes.cpp
     src/Assets/GtaFile.h

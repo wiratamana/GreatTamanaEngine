@@ -477,6 +477,38 @@
 #                                            plus malformed/truncated/empty
 #                                            input rejection - no GPU device
 #                                            involved (src/Assets/RigFile.h).
+#   Scene/SceneTextFormatTests.cpp          - SerializeSceneDocument()/
+#                                            DeserializeSceneDocument()
+#                                            round-tripping the new *.gtscene
+#                                            hand-rolled text format (src/
+#                                            Scene/SceneDocument.h,
+#                                            src/Scene/SceneTextFormat.h) -
+#                                            empty/single-Primitive/single-
+#                                            Asset/mixed documents round-trip
+#                                            exactly, malformed input
+#                                            (missing/mismatched magic,
+#                                            unclosed OBJECT, stray END,
+#                                            unrecognized kind/primitiveType,
+#                                            wrong CSV field counts,
+#                                            non-numeric floats, a
+#                                            syntactically malformed
+#                                            assetGuid=) is rejected, the v2
+#                                            kind=Asset cross-field
+#                                            validation (missing assetGuid=
+#                                            or one parsing to
+#                                            Guid::Invalid() both fail) is
+#                                            enforced while kind=Primitive
+#                                            tolerates a stray assetGuid=
+#                                            line, an unrecognized key is
+#                                            silently ignored (forward
+#                                            compatibility), and an absent
+#                                            optional field (e.g. no name=
+#                                            line) simply keeps its default
+#                                            rather than failing. No ECS/
+#                                            Renderer/filesystem I/O involved
+#                                            at all - this module is always
+#                                            compiled, mirroring src/Physics/
+#                                            and src/Jobs/'s own bootstrap.
 #   Profiling/FrameProfilerTests.cpp        - FrameProfiler's BeginFrame()/
 #                                            EndFrame()/RecordCpuScope()/
 #                                            SetGpuPassSample()/
@@ -1510,6 +1542,7 @@ set(GTE_TEST_SOURCES
     Assets/MeshFileTests.cpp
     Assets/MotionFileTests.cpp
     Assets/RigFileTests.cpp
+    Scene/SceneTextFormatTests.cpp
     Memory/GpuMemoryTrackerTests.cpp
     Memory/SdlMemoryTrackerTests.cpp
     Profiling/FrameProfilerTests.cpp
