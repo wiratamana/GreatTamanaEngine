@@ -205,17 +205,16 @@ public:
     GpuSkinningPipelines& GetGpuSkinningPipelines() noexcept { return m_animationSystem.GetGpuSkinningPipelines(); }
 
 private:
-    // Lazily builds the demo scene - three entities sharing one triangle
-    // Mesh/Pipeline, spaced left/center/right purely via Transform, plus one
-    // Camera entity positioned back along -Z looking at them - on the first
-    // Render() call (needs a Renderer to build GPU resources through).
-    // Proves the ECS -> RenderSystem -> Renderer pipeline end to end:
-    // multiple entities, one shared mesh/pipeline, independently positioned
-    // via push-constant model matrices, all viewed through a real
-    // view-projection matrix rather than vertices authored directly in clip
-    // space. Will be replaced by a real scene/asset-loading system once
-    // there's more than a hardcoded demo scene (see TODO.md).
-    void EnsureDemoSceneBuilt(Renderer& renderer);
+    // The engine's one auto-created entity: a Camera sitting back along -Z
+    // so a brand-new (or freshly-loaded - see task_manager/
+    // scene-serialization-1/) scene always has something to actually look
+    // through in "Scene"/"Game" - see this method's own doc comment in
+    // Game.cpp for the full rationale. Used to also build 3 hardcoded demo
+    // triangles proving the ECS -> RenderSystem -> Renderer pipeline end to
+    // end; that scaffolding is gone now that real scene content (primitives,
+    // imported meshes, and a real save/load loop) exists instead (see
+    // TODO.md's "Scene serialization" entry).
+    void EnsureDefaultCameraExists();
 
     Registry m_registry;
     RenderSystem m_renderSystem;
@@ -234,10 +233,8 @@ private:
     // MeshInstantiationSystem at all, only the ECS Registry.
     PhysicsSystem m_physicsSystem;
 
-    // Kept only for the (already-flagged-as-temporary) demo scene builder
-    // above, plus its own shared Pipeline/Mesh - see EnsureDemoSceneBuilt().
-    bool m_demoSceneBuilt = false;
-    PipelineHandle m_demoPipeline;
+    // Kept only for EnsureDefaultCameraExists()'s own one-time guard above.
+    bool m_defaultCameraEnsured = false;
 };
 
 } // namespace gte

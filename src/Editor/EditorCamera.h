@@ -37,8 +37,8 @@ namespace gte {
 class EditorCamera {
 public:
     // Starts positioned back along -Z looking toward the origin with an
-    // identity rotation, deliberately matching Game's own demo-scene Camera
-    // entity (see Game::EnsureDemoSceneBuilt()) - purely so the very first
+    // identity rotation, deliberately matching Game's own default Camera
+    // entity (see Game::EnsureDefaultCameraExists()) - purely so the very
     // time a user opens "Scene" it already shows something, not a blank
     // RenderTexture; there is no other link between the two cameras.
     EditorCamera() noexcept : m_transform{ Vec3{ 0.0f, 0.0f, -5.0f }, Quat::Identity(), Vec3::One() } { }
