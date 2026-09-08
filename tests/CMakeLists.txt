@@ -991,6 +991,31 @@
 #                                            result rather than NaN, and a
 #                                            non-positive radius is a no-op.
 #                                            No ECS/GPU/Renderer involved.
+#   Physics/BoxColliderTests.cpp,             - verlet-integration-9 PHASE1's
+#   Physics/CapsuleColliderTests.cpp,           new Box/Capsule collision
+#   Physics/ColliderTests.cpp                   primitives (SolveBoxCollision()/
+#                                            SolveCapsuleCollision() -
+#                                            src/Physics/BoxCollider.h/
+#                                            CapsuleCollider.h - plus the
+#                                            unified, shape-tagged
+#                                            SolveCollision() dispatcher in
+#                                            src/Physics/Collider.h): an
+#                                            outside particle is untouched, a
+#                                            penetrating particle is pushed to
+#                                            the nearest face/surface (Box:
+#                                            smallest-escape-distance axis;
+#                                            Capsule: nearest point on its own
+#                                            central segment, clamped to the
+#                                            end caps), rotation is actually
+#                                            applied (not ignored), a pinned
+#                                            particle is never moved, and every
+#                                            documented degenerate/no-op case
+#                                            (non-positive half-extent/radius/
+#                                            height) produces a finite result.
+#                                            ColliderTests.cpp itself is a thin
+#                                            dispatch-repacking check, not a
+#                                            re-test of the underlying math.
+#                                            No ECS/GPU/Renderer involved.
 #   Game/Animation/AnimationSystemEvaluatePosesTests.cpp - Phase 3's split of
 #                                            AnimationSystem::Update() into
 #                                            EvaluatePoses()/SkinAndUpload()
@@ -1383,6 +1408,9 @@ set(GTE_TEST_SOURCES
     Physics/RigidBodyJointGraphTests.cpp
     Physics/DynamicChainDefinitionTests.cpp
     Physics/SphereColliderTests.cpp
+    Physics/BoxColliderTests.cpp
+    Physics/CapsuleColliderTests.cpp
+    Physics/ColliderTests.cpp
 )
 
 # Editor/EditorCamera.h/.cpp (see src/Editor/EditorCamera.h) is only

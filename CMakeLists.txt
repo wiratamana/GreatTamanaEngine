@@ -253,6 +253,12 @@ add_library(gte_core STATIC
     src/Physics/RigidBodyJointGraph.cpp
     src/Physics/SphereCollider.h
     src/Physics/SphereCollider.cpp
+    src/Physics/BoxCollider.h
+    src/Physics/BoxCollider.cpp
+    src/Physics/CapsuleCollider.h
+    src/Physics/CapsuleCollider.cpp
+    src/Physics/Collider.h
+    src/Physics/Collider.cpp
     src/Assets/AssetTypes.h
     src/Assets/AssetTypes.cpp
     src/Assets/GtaFile.h
