@@ -57,16 +57,27 @@ struct ExtraStructuralConstraint {
 
 // One dynamic bone chain (a TREE of physics-simulated bones on one model -
 // any number of independent chains may coexist on the same skeleton,
-// sharing no state with each other) - `rootBoneIndex` is NOT simulated (it
-// is the pinned anchor, always taken directly from the animated FK pose
-// every step); `jointBoneIndices` is the ordered list of bones that ARE
-// simulated. task_manager/verlet-integration-6, Phase 1 - a chain used to be
-// an implicit flat linked list (jointBoneIndices[i]'s parent was ALWAYS
-// jointBoneIndices[i-1]); it is now an EXPLICIT tree via parentJointIndex
-// below, so a single chain can represent genuine branching (an MMD skirt's
-// spider-web hub with 4+ children) instead of being forced into one object
-// per branch - see PHASE0_MASTER_STRATEGY.md (verlet-integration-6) for the
-// full rationale.
+// sharing no state with each other) - `rootBoneIndex` is NEVER written by
+// physics - not its rotation, not its translation, for any joint, ever (see
+// Physics/BoneChainPhysicsResolver.cpp's ApplyDynamicChainPhysicsToPose(),
+// task_manager/verlet-integration-8, Phase 1). It is the pinned anchor,
+// always taken directly from the animated FK pose every step. This matters
+// because `rootBoneIndex` is frequently a REAL, SHARED, load-bearing
+// skeleton bone (e.g. an MMD model's own 下半身/"lower body," which is also
+// the ordinary FK ancestor of the character's legs) - NOT a dedicated,
+// physics-only "hair root" bone. Before verlet-integration-8, this
+// guarantee was violated for any joint whose tree-parent was the anchor
+// directly (see that campaign's own investigation,
+// task_manager/verlet-integration-7/INVESTIGATION_FULL_BODY_DISTORTION_ON_TRANSFORM_DRAG.md,
+// for the full reported symptom and root cause) - this comment now
+// describes the CORRECTED, enforced behavior. `jointBoneIndices` is the
+// ordered list of bones that ARE simulated. task_manager/verlet-integration-6,
+// Phase 1 - a chain used to be an implicit flat linked list
+// (jointBoneIndices[i]'s parent was ALWAYS jointBoneIndices[i-1]); it is now
+// an EXPLICIT tree via parentJointIndex below, so a single chain can
+// represent genuine branching (an MMD skirt's spider-web hub with 4+
+// children) instead of being forced into one object per branch - see
+// PHASE0_MASTER_STRATEGY.md (verlet-integration-6) for the full rationale.
 struct DynamicChainDefinition {
     std::int32_t rootBoneIndex = -1;
     std::vector<std::int32_t> jointBoneIndices;

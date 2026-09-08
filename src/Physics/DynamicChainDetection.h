@@ -106,17 +106,36 @@ struct DynamicChainDetectionResult {
 // is an intentional, accepted consequence of fully replacing the old
 // bone-flag-only algorithm (see PHASE0_MASTER_STRATEGY.md, Step 1).
 //
-// Known Limitation: when two or more joints in the same chain share the
-// exact same parentJointIndex-resolved parent bone (a genuine "hub", e.g. a
-// spider-web skirt's own strand roots), BoneChainPhysicsResolver.cpp's
-// ApplyDynamicChainPhysicsToPose() processes joints strictly in ascending
-// order and, for a shared parent, each subsequent child's own corrective
-// rotation OVERWRITES the previous child's - only the LAST child processed
-// at a given hub each frame "wins" the parent bone's final FK rotation
-// (every joint still gets a physically-simulated Verlet position - this only
-// affects how faithfully the FK pose reproduces it for extra siblings
-// sharing one rotating parent). Accepted, documented, not fixed by this
-// campaign (see PHASE0_MASTER_STRATEGY.md's own "What We Will NOT Do").
+// Known Limitation (NARROWED by task_manager/verlet-integration-8, Phase 1
+// - read carefully, this note used to describe a strictly broader problem):
+// when two or more joints in the SAME chain share the exact same
+// parentJointIndex-resolved parent bone (a genuine "hub"), and that shared
+// parent is itself ANOTHER CHAIN JOINT (parentJointIndex of the shared
+// parent's own entry is >= 0, i.e. an ordinary accessory bone, never the
+// chain's own rootBoneIndex) - BoneChainPhysicsResolver.cpp's
+// ApplyDynamicChainPhysicsToPose() still processes joints strictly in
+// ascending order and, for that shared NON-ANCHOR parent, each subsequent
+// child's own corrective rotation still OVERWRITES the previous child's -
+// only the LAST child processed at that interior hub each frame "wins" that
+// one accessory bone's own final FK rotation. This remaining case never
+// touches a real, shared, load-bearing body bone (it is confined entirely
+// to the chain's own accessory bones), so it cannot cause the "whole body
+// looks ragdoll-simulated" symptom - it is a narrower, purely cosmetic,
+// still-accepted, still-not-fixed limitation (e.g. a spider-web skirt's own
+// internal strand-root sharing).
+//
+// The BROADER case this note used to describe - two or more joints sharing
+// the chain's own ANCHOR bone (rootBoneIndex) as their direct tree-parent,
+// exactly the shape of the model in
+// task_manager/verlet-integration-7/INVESTIGATION_FULL_BODY_DISTORTION_ON_TRANSFORM_DRAG.md
+// (dozens of accessory strands hanging directly off a real, shared body
+// bone like 下半身) - is FIXED as of task_manager/verlet-integration-8,
+// Phase 1: each such joint now corrects its OWN local translation instead of
+// rotating the shared anchor, so every one of them lands at its own
+// independent target in the same call, and the anchor (and every real body
+// bone descending from it) is never perturbed at all. See
+// Physics/BoneChainPhysicsResolver.h's own header comment for the full
+// derivation.
 DynamicChainDetectionResult DetectDynamicChains(
     const SkeletonData& skeleton, const PhysicsData* physics, const DynamicChainDetectionDefaults& defaults);
 
