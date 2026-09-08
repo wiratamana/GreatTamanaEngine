@@ -239,6 +239,7 @@ add_library(gte_core STATIC
     src/Physics/WindField.cpp
     src/Physics/DynamicChainDefinition.h
     src/Physics/DynamicChainDefinition.cpp
+    src/Physics/ModelColliderDefinition.h
     src/Physics/DynamicChainRuntimeState.h
     src/Physics/DynamicChainSolver.h
     src/Physics/DynamicChainSolver.cpp

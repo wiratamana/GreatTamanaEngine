@@ -41,7 +41,7 @@ bool IsFinite(const Vec3& v) noexcept
 
 void StepDynamicChain(const DynamicChainDefinition& definition, const Vec3& rootWorldPosition,
     const std::vector<Vec3>& animatedJointWorldPositions, DynamicChainRuntimeState& state, float fixedDeltaTime,
-    const Vec3& gravity, const WindSettings& wind, const SphereCollider* collider)
+    const Vec3& gravity, const WindSettings& wind, const std::vector<Collider>& colliders)
 {
     const std::size_t jointCount = definition.jointBoneIndices.size();
     if (definition.jointSettings.size() != jointCount || definition.restLengths.size() != jointCount
@@ -130,12 +130,21 @@ void StepDynamicChain(const DynamicChainDefinition& definition, const Vec3& root
         SolveGoalConstraint(state.particles[i], animatedJointWorldPositions[i], definition.jointSettings[i].stiffness);
     }
 
-    // 5. Collision (PHASE5, 3.2) - exactly ONCE per call, AFTER the goal
-    // constraint, so collision has the final say (structural, then soft/
-    // goal, then hard collision).
-    if (definition.hasHeadCollider && collider != nullptr) {
+    // 5. Collision (task_manager/verlet-integration-9, PHASE2) - exactly
+    // ONCE per call, AFTER the goal constraint, so collision has the final
+    // say (structural, then soft/goal, then hard collision). Every joint
+    // particle is tested against EVERY collider in the shared,
+    // already-resolved list - order among colliders never matters (each
+    // SolveCollision() call is an independent, idempotent-if-already-outside
+    // projection), so a particle penetrating more than one collider
+    // simultaneously still ends up outside ALL of them by the end of this
+    // loop (each subsequent call only ever pushes it further from whichever
+    // surface it is CURRENTLY penetrating).
+    if (definition.collisionEnabled) {
         for (std::size_t i = 0; i < jointCount; ++i) {
-            SolveSphereCollision(state.particles[i], *collider);
+            for (const Collider& collider : colliders) {
+                SolveCollision(state.particles[i], collider);
+            }
         }
     }
 

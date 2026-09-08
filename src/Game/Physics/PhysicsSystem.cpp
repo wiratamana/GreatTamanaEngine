@@ -11,7 +11,7 @@
 #include "../../Physics/DynamicChainDetection.h"
 #include "../../Physics/DynamicChainSolver.h"
 #include "../../Physics/FixedTimestepAccumulator.h"
-#include "../../Physics/SphereCollider.h"
+#include "../../Physics/Collider.h"
 #include "../../Profiling/JobScopeTimer.h"
 #include "../../Profiling/ScopeTimer.h"
 #include "../Animation/SkeletalRigCache.h"
@@ -120,18 +120,11 @@ void StepDynamicChainRange(std::uint32_t beginIndex, std::uint32_t endIndex, Dyn
             animatedJointWorldPositions.push_back(jointWorld.TransformPoint(Vec3::Zero()));
         }
 
-        // PHASE5, 3.2 - resolve this chain's own collision sphere (if any),
-        // once, from the SAME pure-FK snapshot as the root/joint targets
-        // above - never recomputed per substep.
-        SphereCollider collider;
-        bool hasCollider = false;
-        if (chain.hasHeadCollider) {
-            const Mat4 colliderWorld = context.entityWorldMatrix
-                * ComputeBoneWorldMatrix(*context.skeleton, *context.pose, chain.headColliderBoneIndex);
-            collider.center = colliderWorld.TransformPoint(Vec3::Zero());
-            collider.radius = chain.headColliderRadius; // Unaffected by scale, same as before this phase.
-            hasCollider = true;
-        }
+        // task_manager/verlet-integration-9 - placeholder until PHASE4 wires
+        // real per-frame world-space collider resolution here; an empty
+        // list keeps every chain's own StepDynamicChain() call behaviorally
+        // identical to "collision fully disabled" in the meantime.
+        const std::vector<Collider> colliders;
 
         // task_manager/verlet-integration-7, Phase 4 (v2) - take zero NEW
         // integration steps whenever context.frozen is true, regardless of
@@ -143,7 +136,7 @@ void StepDynamicChainRange(std::uint32_t beginIndex, std::uint32_t endIndex, Dyn
         if (!context.frozen) {
             for (int step = 0; step < context.stepCount; ++step) {
                 StepDynamicChain(chain, rootWorldPos, animatedJointWorldPositions, state, context.fixedTimestepSeconds,
-                    context.gravity, context.wind, hasCollider ? &collider : nullptr);
+                    context.gravity, context.wind, colliders);
             }
         }
 

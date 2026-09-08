@@ -733,8 +733,13 @@ void BoneViewerWindow::RenderVerletChainNode(std::int32_t chainIndex, const Dyna
             }
             RenderFlatPartRow(ModelPartKind::Verlet, boneIndex, label, bone.position, lowerFilter, ctx);
         }
-        if (chain.hasHeadCollider) {
-            ImGui::TextDisabled("Head Collider: r=%.3f", chain.headColliderRadius);
+        // task_manager/verlet-integration-9 - minimal transitional compile
+        // fix: the old head-collider bone/radius readout no longer has a
+        // backing field (see Physics/DynamicChainDefinition.h's own
+        // collisionEnabled replacement). PHASE5 will replace this with a
+        // proper collider-count readout.
+        if (chain.collisionEnabled) {
+            ImGui::TextDisabled("Collision: enabled (against model's shared collider list)");
         }
         ImGui::TreePop();
     }
@@ -1491,27 +1496,18 @@ void BoneViewerWindow::Build(
                                 drawList->AddLine(screenA, screenB, IM_COL32(120, 200, 255, 110), 1.0f);
                             }
                         }
-                        // Optional head-collider wireframe (Sphere shape -
-                        // reusing RigidBodyWireframe.h's own existing
-                        // per-shape geometry builder exactly like Rigid Body
-                        // mode's selected-shape wireframe does) - drawn
-                        // unconditionally whenever configured, NOT
-                        // selection-gated (it is a debug aid for the whole
-                        // chain, not itself a selectable part).
-                        if (chain.hasHeadCollider && chain.headColliderBoneIndex >= 0
-                            && static_cast<std::size_t>(chain.headColliderBoneIndex) < m_bones.size()
-                            && chain.headColliderRadius > 0.0f) {
-                            const Vec3 colliderCenter = m_bones[static_cast<std::size_t>(chain.headColliderBoneIndex)].position;
-                            const std::vector<WireframeSegment> wireframe = BuildRigidBodyWireframe(
-                                RigidBodyShape::Sphere, Vec3(chain.headColliderRadius, 0.0f, 0.0f), colliderCenter, Vec3::Zero());
-                            for (const WireframeSegment& segment : wireframe) {
-                                ImVec2 screenA, screenB;
-                                if (ProjectToScreen(segment.a, viewProj, imageMin, imageMax, screenA)
-                                    && ProjectToScreen(segment.b, viewProj, imageMin, imageMax, screenB)) {
-                                    drawList->AddLine(screenA, screenB, IM_COL32(255, 90, 170, 90), 1.25f);
-                                }
-                            }
-                        }
+                        // task_manager/verlet-integration-9 - the old
+                        // per-chain head-collider wireframe (Sphere shape
+                        // only) was removed here: its backing fields
+                        // (DynamicChainDefinition::hasHeadCollider/
+                        // headColliderBoneIndex/headColliderRadius) no
+                        // longer exist, replaced by a single
+                        // `collisionEnabled` flag plus a shared, model-wide,
+                        // mixed-shape collider list (see
+                        // Physics/ModelColliderDefinition.h, PHASE3/PHASE4).
+                        // A real overlay of that shared list is left to
+                        // PHASE5's own Editor UI update - this is a minimal,
+                        // transitional compile fix only.
                     }
                     // task_manager/verlet-integration-6, Phase 5, 3.2 - orphaned
                     // (non-simulated) rigid-body bones, per the user's own

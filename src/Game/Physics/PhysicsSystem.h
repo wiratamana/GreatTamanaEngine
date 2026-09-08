@@ -55,8 +55,11 @@ public:
     // non-playing animator) is simply skipped - degrade gracefully, never
     // assume the component exists. PHASE5 (task_manager/verlet-integration-1/
     // PHASE5_COLLISION_STABILITY_AND_PERFORMANCE_HARDENING.md): also resolves
-    // each chain's OPTIONAL head-collision sphere (DynamicChainDefinition::
-    // hasHeadCollider) fresh every step, and - once an entity's own chains
+    // this entity's shared, model-wide collider list
+    // (task_manager/verlet-integration-9 - see Physics/
+    // ModelColliderDefinition.h/PhysicsSystem.cpp's own PHASE4 resolution
+    // code) fresh every step for whichever chains opted in via
+    // DynamicChainDefinition::collisionEnabled, and
     // carry enough TOTAL joints to be worth it - dispatches its INDEPENDENT
     // chains across the Job System's worker pool (see PhysicsSystem.cpp's own
     // anonymous-namespace kMinDynamicJointsToParallelize) instead of stepping

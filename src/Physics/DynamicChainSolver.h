@@ -1,7 +1,7 @@
 #pragma once
+#include "Collider.h"
 #include "DynamicChainDefinition.h"
 #include "DynamicChainRuntimeState.h"
-#include "SphereCollider.h"
 #include "WindField.h"
 #include "../Math/Vec3.h"
 
@@ -17,14 +17,15 @@ namespace gte {
 // Animation/BoneWorldMatrixQuery.h's ComputeBoneWorldMatrix() BEFORE calling
 // this function. `gravity` is the GLOBAL world gravity vector; `wind` is the
 // GLOBAL wind description (see PHASE4) - both scaled locally by
-// definition.gravityScale/windScale. `collider` (PHASE5, 3.2) is an OPTIONAL,
-// already-resolved WORLD-space collision sphere - nullptr disables collision
-// for this call entirely; when non-null, the caller (Game/Physics/
-// PhysicsSystem.cpp) is responsible for having derived its `center` fresh
-// this frame (via Animation/BoneWorldMatrixQuery.h's ComputeBoneWorldMatrix()
-// against definition.headColliderBoneIndex) - this keeps this header's own
-// signature free of a SkeletonData/pose dependency, exactly like
-// rootWorldPosition/animatedJointWorldPositions above.
+// definition.gravityScale/windScale.
+// `colliders` (task_manager/verlet-integration-9, PHASE2) is an
+// already-resolved, WORLD-space, mixed-shape list, shared across every
+// chain belonging to the same model/entity this frame - empty by default;
+// the caller (Game/Physics/PhysicsSystem.cpp) is responsible for having
+// derived every entry's `center`/`rotation` fresh this frame (via
+// Animation/BoneWorldMatrixQuery.h's ComputeBoneWorldMatrix()) - this keeps
+// this header's own signature free of a SkeletonData/pose dependency,
+// exactly like rootWorldPosition/animatedJointWorldPositions above.
 //
 // Per-call steps:
 //   1. Lazy init / root-teleport guard: re-seeds every particle to its
@@ -69,11 +70,18 @@ namespace gte {
 //      lengths for this step, is what keeps `stiffness` (a per-joint "how
 //      much to keep the animated shape" knob) and `constraintIterations` (a
 //      chain-level rod-rigidity/performance knob) fully independent.
-//   5. Collision (PHASE5, 3.2) - exactly ONCE per call, AFTER the goal
-//      constraint (collision must have the final say, matching PBD
-//      convention: structural, then soft/goal, then hard collision): if
-//      `definition.hasHeadCollider` and `collider` is non-null,
-//      SolveSphereCollision() every joint particle against it.
+//   5. Collision (task_manager/verlet-integration-9, PHASE2) - exactly ONCE
+//      per call, AFTER the goal constraint (collision must have the final
+//      say, matching PBD convention: structural, then soft/goal, then hard
+//      collision): if `definition.collisionEnabled`, every joint particle is
+//      tested, in order, against EVERY entry of `colliders` (an
+//      already-resolved, WORLD-space, mixed-shape list shared across every
+//      chain belonging to the same model/entity this frame - see
+//      Game/Physics/PhysicsSystem.cpp, PHASE4) via SolveCollision()
+//      (Physics/Collider.h). An empty `colliders` list, or
+//      `collisionEnabled == false`, is a complete, documented no-op -
+//      exactly like the old `hasHeadCollider == false` contract it
+//      replaces.
 //   6. NaN/Inf guard (PHASE5, 3.3): after every position update above, any
 //      particle whose position fails std::isfinite() on any component is
 //      reset (that ONE particle only, never the whole chain) to its
@@ -89,6 +97,6 @@ namespace gte {
 // definition must never read or write out of bounds.
 void StepDynamicChain(const DynamicChainDefinition& definition, const Vec3& rootWorldPosition,
     const std::vector<Vec3>& animatedJointWorldPositions, DynamicChainRuntimeState& state, float fixedDeltaTime,
-    const Vec3& gravity, const WindSettings& wind, const SphereCollider* collider = nullptr);
+    const Vec3& gravity, const WindSettings& wind, const std::vector<Collider>& colliders = {});
 
 } // namespace gte

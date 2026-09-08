@@ -129,20 +129,26 @@ struct DynamicChainDefinition {
     float windScale = 1.0f;                // LOCAL multiplier applied to the GLOBAL WindSettings (see PHASE4).
     std::uint8_t constraintIterations = 4; // structural relaxation passes per fixed step - see ChainConstraints.h.
 
-    // PHASE5 (task_manager/verlet-integration-1/
-    // PHASE5_COLLISION_STABILITY_AND_PERFORMANCE_HARDENING.md, 3.2) - simple
-    // head/body collision. LOCAL, per-chain authoring: which collider bone a
-    // chain checks against (typically the head bone) is a per-model
-    // decision. `headColliderBoneIndex` is the bone this chain's collision
-    // sphere should track every step (see Physics/SphereCollider.h);
-    // `headColliderRadius` is a world-space radius authored once (never
-    // derived automatically from mesh geometry). Left DISABLED
-    // (`hasHeadCollider = false`) by default even when
-    // DynamicChainDetection.h pre-fills a reasonable starting
-    // bone/radius - a human must opt in via the Editor Inspector.
-    bool hasHeadCollider = false;
-    std::int32_t headColliderBoneIndex = -1;
-    float headColliderRadius = 0.0f;
+    // task_manager/verlet-integration-9 (PHASE2_DATA_MODEL_GENERALIZED_COLLIDER_LIST.md)
+    // - REPLACES the old single-sphere `hasHeadCollider`/
+    // `headColliderBoneIndex`/`headColliderRadius` trio entirely. Collision
+    // is no longer authored per-chain at all: the actual collider SHAPES
+    // (mixed Sphere/Box/Capsule) are auto-detected once per MODEL from every
+    // RigidBodyMotionType::Static PMX rigid body (see Physics/
+    // ModelColliderDetection.h, PHASE3) and shared by every chain belonging
+    // to that model. `collisionEnabled` is the one remaining per-chain
+    // knob: when true, EVERY joint particle of THIS chain is tested against
+    // EVERY collider in that shared model-wide list (see
+    // DynamicChainSolver.h's own StepDynamicChain() step 5) - when false
+    // (the default, matching the old hasHeadCollider's own opt-in-only
+    // default), collision is a complete no-op for this chain regardless of
+    // how many colliders the model has. A human still opts in via the
+    // Editor Inspector (see Editor/Panels/InspectorPanel.cpp, PHASE5) -
+    // there is simply nothing left to hand-author beyond that one checkbox,
+    // since shape/size/position/orientation now all come directly from the
+    // model's own real PMX rigid-body data instead of a hand-picked bone
+    // index + guessed radius.
+    bool collisionEnabled = false;
 
     // PHASE5, 3.3 - numerical safety: if the chain's own root bone moves
     // farther than this in a single StepDynamicChain() call (a teleporting

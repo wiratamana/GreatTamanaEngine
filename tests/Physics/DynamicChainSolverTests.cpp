@@ -8,9 +8,10 @@
 #include "Physics/DynamicChainSolver.h"
 
 #include "Physics/ChainConstraints.h"
+#include "Physics/Collider.h"
 
 #include <gtest/gtest.h>
-
+#include <algorithm>
 #include <cmath>
 
 namespace gte {
@@ -233,14 +234,16 @@ TEST(DynamicChainSolverTests, StiffnessAndConstraintIterationsAreFullyDecoupled)
         }
     }
 }
-// (e) PHASE5, 3.2 - collision: a chain whose head collider sits directly in
-// the chain's own falling path pushes every joint back out to the sphere's
-// surface every step, so no joint ever ends up INSIDE the collider despite
-// gravity pulling it there.
-TEST(DynamicChainSolverTests, HeadColliderKeepsJointsOffItsSurfaceWhenChainFallsIntoIt)
+// (e) task_manager/verlet-integration-9, PHASE2 - collision: a chain whose
+// collider sits directly in the chain's own falling path pushes every joint
+// back out to the sphere's surface every step, so no joint ever ends up
+// INSIDE the collider despite gravity pulling it there - deliberately built
+// as a Collider (not a raw SphereCollider) to prove the new mixed-shape
+// list API is exercised.
+TEST(DynamicChainSolverTests, EnabledCollisionKeepsJointsOffEveryColliderSurfaceWhenChainFallsIntoIt)
 {
     DynamicChainDefinition definition = BuildThreeJointChainDefinition(/*stiffness=*/0.0f, /*damping=*/0.05f);
-    definition.hasHeadCollider = true;
+    definition.collisionEnabled = true;
 
     DynamicChainRuntimeState state;
     const Vec3 root(0.0f, 0.0f, 0.0f);
@@ -251,28 +254,30 @@ TEST(DynamicChainSolverTests, HeadColliderKeepsJointsOffItsSurfaceWhenChainFalls
     // A generous sphere centered right where the chain is expected to sag
     // to under gravity, so at least one joint would otherwise end up
     // strictly inside it.
-    const SphereCollider collider{ Vec3(2.0f, -0.5f, 0.0f), 1.0f };
+    const std::vector<Collider> colliders = { Collider{ ColliderShape::Sphere, Vec3(2.0f, -0.5f, 0.0f),
+        Quat::Identity(), Vec3(1.0f, 0.0f, 0.0f) } };
 
     for (int step = 0; step < 120; ++step) {
-        StepDynamicChain(definition, root, targets, state, 1.0f / 60.0f, gravity, noWind, &collider);
+        StepDynamicChain(definition, root, targets, state, 1.0f / 60.0f, gravity, noWind, colliders);
 
         for (const VerletParticle& particle : state.particles) {
-            const float distanceFromColliderCenter = Length(particle.position - collider.center);
-            EXPECT_GE(distanceFromColliderCenter, collider.radius - 1e-3f)
-                << "A joint ended up inside the head collider despite collision being enabled.";
+            const float distanceFromColliderCenter = Length(particle.position - colliders[0].center);
+            EXPECT_GE(distanceFromColliderCenter, colliders[0].size.x - 1e-3f)
+                << "A joint ended up inside the collider despite collision being enabled.";
         }
     }
 }
 
-// (f) PHASE5, 3.2 - collision is a documented no-op unless
-// definition.hasHeadCollider is true, even if a non-null collider is passed
-// in (mirrors the caller-side contract: PhysicsSystem.cpp only ever passes a
-// non-null pointer when hasHeadCollider is already true, but the solver
-// itself must not silently apply collision otherwise).
-TEST(DynamicChainSolverTests, ColliderIsIgnoredWhenHasHeadColliderIsFalse)
+// (f) task_manager/verlet-integration-9, PHASE2 - collision is a documented
+// no-op unless definition.collisionEnabled is true, even if a non-empty
+// colliders list is passed in (mirrors the caller-side contract:
+// PhysicsSystem.cpp only ever passes a non-empty list when at least one
+// chain opted in, but the solver itself must not silently apply collision
+// otherwise).
+TEST(DynamicChainSolverTests, CollidersAreIgnoredWhenCollisionEnabledIsFalse)
 {
     DynamicChainDefinition definition = BuildThreeJointChainDefinition(/*stiffness=*/0.0f, /*damping=*/0.05f);
-    ASSERT_FALSE(definition.hasHeadCollider);
+    ASSERT_FALSE(definition.collisionEnabled);
 
     DynamicChainRuntimeState state;
     const Vec3 root(0.0f, 0.0f, 0.0f);
@@ -280,14 +285,64 @@ TEST(DynamicChainSolverTests, ColliderIsIgnoredWhenHasHeadColliderIsFalse)
     const WindSettings noWind{};
 
     // A collider that would otherwise immediately swallow every joint.
-    const SphereCollider collider{ Vec3(2.0f, 0.0f, 0.0f), 100.0f };
+    const std::vector<Collider> colliders
+        = { Collider{ ColliderShape::Sphere, Vec3(2.0f, 0.0f, 0.0f), Quat::Identity(), Vec3(100.0f, 0.0f, 0.0f) } };
 
-    StepDynamicChain(definition, root, targets, state, 1.0f / 60.0f, Vec3::Zero(), noWind, &collider);
+    StepDynamicChain(definition, root, targets, state, 1.0f / 60.0f, Vec3::Zero(), noWind, colliders);
 
     for (std::size_t i = 0; i < targets.size(); ++i) {
         EXPECT_TRUE(ApproximatelyEqual(state.particles[i].position, targets[i], 1e-3f))
-            << "Collision must not apply at all when hasHeadCollider is false, regardless of the collider pointer passed in.";
+            << "Collision must not apply at all when collisionEnabled is false, regardless of what colliders are passed in.";
     }
+}
+
+// (f2) task_manager/verlet-integration-9, PHASE2 - proves the inner
+// `for (const Collider& collider : colliders)` loop genuinely visits EVERY
+// entry of a mixed-shape list for every particle, not just colliders[0]:
+// one Sphere, one Box, and one Capsule, each positioned so it is the ONLY
+// thing blocking a DIFFERENT one of the three joints.
+TEST(DynamicChainSolverTests, MultipleCollidersOfDifferentShapesAreAllRespectedSimultaneously)
+{
+    DynamicChainDefinition definition = BuildThreeJointChainDefinition(/*stiffness=*/0.0f, /*damping=*/0.05f);
+    definition.collisionEnabled = true;
+
+    DynamicChainRuntimeState state;
+    const Vec3 root(0.0f, 0.0f, 0.0f);
+    const std::vector<Vec3> targets = { Vec3(1.0f, 0.0f, 0.0f), Vec3(2.0f, 0.0f, 0.0f), Vec3(3.0f, 0.0f, 0.0f) };
+    const Vec3 gravity(0.0f, -9.8f, 0.0f);
+    const WindSettings noWind{};
+
+    // Sphere blocks joint 0's own sag position; Box blocks joint 1's; Capsule
+    // blocks joint 2's - each is the ONLY collider anywhere near its own
+    // target joint, so if the solver only ever tested colliders[0] the other
+    // two joints would end up penetrating undetected.
+    const std::vector<Collider> colliders = {
+        Collider{ ColliderShape::Sphere, Vec3(1.0f, -0.5f, 0.0f), Quat::Identity(), Vec3(0.6f, 0.0f, 0.0f) },
+        Collider{ ColliderShape::Box, Vec3(2.0f, -0.5f, 0.0f), Quat::Identity(), Vec3(0.6f, 0.6f, 0.6f) },
+        Collider{ ColliderShape::Capsule, Vec3(3.0f, -0.5f, 0.0f), Quat::Identity(), Vec3(0.6f, 1.0f, 0.0f) },
+    };
+
+    for (int step = 0; step < 120; ++step) {
+        StepDynamicChain(definition, root, targets, state, 1.0f / 60.0f, gravity, noWind, colliders);
+    }
+
+    // Sphere (joint 0) - simple distance-from-center check.
+    EXPECT_GE(Length(state.particles[0].position - colliders[0].center), colliders[0].size.x - 1e-3f)
+        << "Joint 0 ended up inside its own Sphere collider.";
+
+    // Box (joint 1) - must sit outside the AABB (no rotation applied here).
+    const Vec3 localToBox = state.particles[1].position - colliders[1].center;
+    const bool outsideBox = std::abs(localToBox.x) >= colliders[1].size.x - 1e-3f
+        || std::abs(localToBox.y) >= colliders[1].size.y - 1e-3f || std::abs(localToBox.z) >= colliders[1].size.z - 1e-3f;
+    EXPECT_TRUE(outsideBox) << "Joint 1 ended up inside its own Box collider.";
+
+    // Capsule (joint 2) - closest point on the vertical (local +Y) segment,
+    // clamped to the half-height, since the capsule is unrotated here.
+    const float halfHeight = colliders[2].size.y * 0.5f;
+    const float clampedY = std::max(-halfHeight, std::min(halfHeight, state.particles[2].position.y - colliders[2].center.y));
+    const Vec3 closestOnSegment = colliders[2].center + Vec3(0.0f, clampedY, 0.0f);
+    EXPECT_GE(Length(state.particles[2].position - closestOnSegment), colliders[2].size.x - 1e-3f)
+        << "Joint 2 ended up inside its own Capsule collider.";
 }
 
 // (g) PHASE5, 3.3 - root-teleport guard: the root position jumping by an

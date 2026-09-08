@@ -457,12 +457,13 @@ void BuildModelPartInspector(Registry& registry, EditorContext& ctx, ModelRigCac
         ImGui::TextColored(ImVec4(0.55f, 0.75f, 1.0f, 1.0f), "Chain-Wide Settings");
         ImGui::DragFloat("Gravity Scale", &chain.gravityScale, 0.01f, 0.0f, 10.0f);
         ImGui::DragFloat("Wind Scale", &chain.windScale, 0.01f, 0.0f, 10.0f);
-        ImGui::Checkbox("Head Collider", &chain.hasHeadCollider);
-        if (chain.hasHeadCollider) {
-            ImGui::DragInt("Collider Bone Index", &chain.headColliderBoneIndex, 1.0f, 0,
-                static_cast<int>(rig->skeleton.bones.size()) - 1);
-            ImGui::DragFloat("Collider Radius", &chain.headColliderRadius, 0.01f, 0.0f, 10.0f);
-        }
+        // task_manager/verlet-integration-9 - minimal transitional compile
+        // fix: the old "Head Collider" bone/radius controls no longer have a
+        // backing field (see Physics/DynamicChainDefinition.h's own
+        // collisionEnabled replacement). PHASE5 will replace this with a
+        // proper collider-count readout; for now this is just the one
+        // remaining opt-in checkbox.
+        ImGui::Checkbox("Collision Enabled", &chain.collisionEnabled);
         break;
     }
     }
@@ -630,19 +631,13 @@ void BuildEntityInspector(Registry& registry, EditorContext& ctx, PhysicsSystem&
                             ImGui::PopID();
                         }
 
-                        // PHASE5 (task_manager/verlet-integration-1/
-                        // PHASE5_COLLISION_STABILITY_AND_PERFORMANCE_HARDENING.md,
-                        // Step 5 item 2) - simple head/body collision. Disabled
-                        // by default even though DynamicChainDetection.h
-                        // pre-fills a reasonable starting bone/radius - a
-                        // human opts in here.
+                        // task_manager/verlet-integration-9 - minimal
+                        // transitional compile fix (see this file's own
+                        // earlier occurrence above for the full rationale) -
+                        // PHASE5 will replace this with a proper
+                        // collider-count readout.
                         ImGui::Separator();
-                        ImGui::Checkbox("Head Collider", &chain.hasHeadCollider);
-                        if (chain.hasHeadCollider) {
-                            ImGui::DragInt("Collider Bone Index", &chain.headColliderBoneIndex, 1.0f, 0,
-                                static_cast<int>(model->skeleton.bones.size()) - 1);
-                            ImGui::DragFloat("Collider Radius", &chain.headColliderRadius, 0.01f, 0.0f, 10.0f);
-                        }
+                        ImGui::Checkbox("Collision Enabled", &chain.collisionEnabled);
                         ImGui::TreePop();
                     }
                     ImGui::PopID();

@@ -418,8 +418,10 @@ DynamicChainDetectionResult DetectDynamicChains(
     }
 
     // Step G - discard chains shorter than defaults.minimumChainLength, then
-    // seed jointSettings/maxPlausibleRootDelta/head-collider defaults - a
-    // discarded chain's own bones are NOT retroactively moved into
+    // seed jointSettings/maxPlausibleRootDelta defaults - collision detection
+    // is now handled entirely separately by DetectModelColliders()
+    // (task_manager/verlet-integration-9, PHASE3), not by this function at
+    // all. A discarded chain's own bones are NOT retroactively moved into
     // orphanedBoneIndices ("too short" and "unreachable" remain distinct).
     std::vector<DynamicChainDefinition> finalChains;
     for (DynamicChainDefinition& chain : preliminaryChains) {
@@ -439,12 +441,6 @@ DynamicChainDetectionResult DetectDynamicChains(
         if (sumRestLengths > kEpsilon) {
             chain.maxPlausibleRootDelta = sumRestLengths * 5.0f;
         }
-
-        chain.hasHeadCollider = false;
-        chain.headColliderBoneIndex = chain.rootBoneIndex;
-        chain.headColliderRadius = chain.jointBoneIndices.empty()
-            ? 0.0f
-            : (sumRestLengths / static_cast<float>(chain.jointBoneIndices.size())) * 0.5f;
 
         for (std::size_t j = 0; j < chain.jointBoneIndices.size(); ++j) {
             const auto rbIt = boneIndexToRigidBodyIndex.find(chain.jointBoneIndices[j]);
