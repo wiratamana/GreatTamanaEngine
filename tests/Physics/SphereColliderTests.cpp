@@ -98,5 +98,44 @@ TEST(SphereColliderTests, NonPositiveRadiusIsANoOp)
     EXPECT_TRUE(ApproximatelyEqual(particle.position, Vec3(0.1f, 0.0f, 0.0f)));
 }
 
+// task_manager/verlet-integration-10, PHASE2 - a joint particle's own
+// PMX-rigid-body-shape-derived collision radius (VerletParticle::
+// collisionRadius) inflates the effective push-out surface.
+TEST(SphereColliderTests, ParticleWithNonZeroCollisionRadiusIsPushedFartherThanAZeroRadiusParticle)
+{
+    const SphereCollider collider{ Vec3::Zero(), 2.0f };
+
+    VerletParticle zeroRadiusParticle;
+    zeroRadiusParticle.position = Vec3(0.5f, 0.0f, 0.0f); // inside the sphere.
+    SolveSphereCollision(zeroRadiusParticle, collider);
+
+    VerletParticle inflatedParticle;
+    inflatedParticle.position = Vec3(0.5f, 0.0f, 0.0f);
+    inflatedParticle.collisionRadius = 0.3f;
+    SolveSphereCollision(inflatedParticle, collider);
+
+    const float zeroRadiusDistance = Length(zeroRadiusParticle.position - collider.center);
+    const float inflatedDistance = Length(inflatedParticle.position - collider.center);
+    EXPECT_GT(inflatedDistance, zeroRadiusDistance);
+    EXPECT_NEAR(zeroRadiusDistance, collider.radius, 1e-4f);
+    EXPECT_NEAR(inflatedDistance, collider.radius + 0.3f, 1e-4f);
+}
+
+TEST(SphereColliderTests, ZeroCollisionRadiusReproducesExactPreExistingBehavior)
+{
+    const SphereCollider collider{ Vec3(1.0f, 2.0f, 3.0f), 1.5f };
+
+    VerletParticle explicitZero;
+    explicitZero.position = collider.center + Vec3(0.1f, 0.0f, 0.0f);
+    explicitZero.collisionRadius = 0.0f;
+    SolveSphereCollision(explicitZero, collider);
+
+    VerletParticle neverSet;
+    neverSet.position = collider.center + Vec3(0.1f, 0.0f, 0.0f);
+    SolveSphereCollision(neverSet, collider);
+
+    EXPECT_TRUE(ApproximatelyEqual(explicitZero.position, neverSet.position));
+}
+
 } // namespace
 } // namespace gte

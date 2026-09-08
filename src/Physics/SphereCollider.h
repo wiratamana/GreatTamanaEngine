@@ -29,7 +29,12 @@ struct SphereCollider {
 // SolveGoalConstraint, so the position correction here contributes to
 // (rather than erases) the particle's own implied velocity next step,
 // giving the chain a visible "slide off the surface" response instead of
-// simply freezing at the boundary.
+// simply freezing at the boundary. task_manager/verlet-integration-10,
+// PHASE2 - the effective test/push-out radius is `collider.radius PLUS
+// particle.collisionRadius` (this particle's own PMX-rigid-body-derived
+// physical extent, 0.0f by default - see VerletParticle::collisionRadius's
+// own doc comment) - a particle that never had a radius seeded reproduces
+// the exact pre-PHASE2 behavior, term for term.
 void SolveSphereCollision(VerletParticle& particle, const SphereCollider& collider) noexcept;
 
 } // namespace gte

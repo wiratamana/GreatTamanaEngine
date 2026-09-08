@@ -91,6 +91,47 @@ BoneRole RoleOf(const std::unordered_map<std::int32_t, std::int32_t>& boneIndexT
     return motionType == RigidBodyMotionType::Static ? BoneRole::Anchor : BoneRole::Member;
 }
 
+// task_manager/verlet-integration-10, PHASE2 - approximates a PMX rigid
+// body's own shape as a single effective collision radius, for use as a
+// simulated joint particle's own physical "thickness" (VerletParticle::
+// collisionRadius, via DynamicJointSettings::collisionRadius). This is
+// DELIBERATELY an approximation (a Box or an off-axis Capsule cannot be
+// exactly reduced to one scalar radius) chosen to be SAFE (never larger
+// than the body's own true minimum half-thickness, so this can never push a
+// joint further away from a collider than its real PMX geometry would
+// justify):
+//   Sphere  -> shapeSize.x directly (already an exact radius).
+//   Capsule -> shapeSize.x directly (the capsule's own radius - its height
+//              is a SEGMENT length along the bone chain's own direction,
+//              already fully accounted for by the chain's own restLengths;
+//              re-using it here as an additional radius would double-count
+//              the joint's own reach along its own chain axis).
+//   Box     -> the SMALLEST of the three half-extents (shapeSize.x/y/z) -
+//              the inscribed-sphere radius, i.e. the largest sphere that
+//              still fits entirely inside the box on its own thinnest axis -
+//              conservative/safe by construction (never larger than the
+//              box's own true minimum half-thickness on any axis).
+// A non-positive result (a degenerate/zero-sized authored shape) is clamped
+// to exactly 0.0f - "no meaningful physical extent," matching
+// IsDegenerateColliderShape()'s own sibling convention in
+// Physics/ModelColliderDetection.cpp.
+float DeriveJointCollisionRadius(RigidBodyShape shape, const Vec3& shapeSize) noexcept
+{
+    float radius = 0.0f;
+    switch (shape) {
+    case RigidBodyShape::Sphere:
+        radius = shapeSize.x;
+        break;
+    case RigidBodyShape::Capsule:
+        radius = shapeSize.x;
+        break;
+    case RigidBodyShape::Box:
+        radius = std::min({ shapeSize.x, shapeSize.y, shapeSize.z });
+        break;
+    }
+    return std::max(0.0f, radius);
+}
+
 // One anchor-rooted group of resolved members, still using REAL bone indices
 // (converted into jointBoneIndices positions only once the final traversal
 // order is known - Step E).
@@ -450,6 +491,7 @@ DynamicChainDetectionResult DetectDynamicChains(
                 chain.jointSettings[j].damping = body.linearDamping;
                 chain.jointSettings[j].group = body.group;
                 chain.jointSettings[j].collisionMask = body.collisionGroupMask;
+                chain.jointSettings[j].collisionRadius = DeriveJointCollisionRadius(body.shape, body.shapeSize);
             }
         }
 

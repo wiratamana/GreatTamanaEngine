@@ -1076,6 +1076,27 @@
 #                                            the same result as its
 #                                            in-range low-4-bit equivalent.
 #                                            No ECS/GPU/Renderer involved.
+#   Physics/DynamicChainDetectionJointRadiusTests.cpp - task_manager/
+#                                            verlet-integration-10 PHASE2:
+#                                            DetectDynamicChains()'s Step G
+#                                            now also derives each joint's
+#                                            own DynamicJointSettings::
+#                                            collisionRadius from its
+#                                            matched Dynamic RigidBody's
+#                                            shape/shapeSize
+#                                            (DeriveJointCollisionRadius()) -
+#                                            Sphere/Capsule use their own
+#                                            authored radius directly (a
+#                                            Capsule's height never
+#                                            contributes), Box uses its
+#                                            smallest half-extent (a safe
+#                                            inscribed-sphere
+#                                            approximation), a degenerate
+#                                            negative/zero shape clamps to
+#                                            exactly 0.0f, and each joint of
+#                                            a multi-joint chain derives its
+#                                            own radius independently. No
+#                                            ECS/GPU/Renderer involved.
 #   Game/Animation/AnimationSystemEvaluatePosesTests.cpp - Phase 3's split of
 #                                            AnimationSystem::Update() into
 #                                            EvaluatePoses()/SkinAndUpload()
@@ -1534,6 +1555,7 @@ set(GTE_TEST_SOURCES
     Physics/ModelColliderDetectionTests.cpp
     Physics/ModelColliderDetectionGroupMaskTests.cpp
     Physics/DynamicChainSolverCollisionGroupFilterTests.cpp
+    Physics/DynamicChainDetectionJointRadiusTests.cpp
 )
 
 # Editor/EditorCamera.h/.cpp (see src/Editor/EditorCamera.h) is only

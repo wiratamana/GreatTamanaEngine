@@ -40,7 +40,12 @@ struct BoxCollider {
 // satisfied on that axis for any real coordinate, so the box is
 // automatically, correctly treated as a no-op collider on that (or any)
 // degenerate axis - no separate early-return branch is needed for this,
-// it falls out of the inequality itself.
+// it falls out of the inequality itself. task_manager/verlet-integration-10,
+// PHASE2 - every halfExtents.x/y/z used above is really an EFFECTIVE
+// half-extent, inflated by max(0, particle.collisionRadius) on every axis
+// (see BoxCollider.cpp for the full conservative-approximation rationale)
+// - a particle that never had a radius seeded reproduces the exact
+// pre-PHASE2 behavior, term for term.
 void SolveBoxCollision(VerletParticle& particle, const BoxCollider& collider) noexcept;
 
 } // namespace gte

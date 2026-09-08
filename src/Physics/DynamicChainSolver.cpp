@@ -63,6 +63,10 @@ void SeedParticlesFromAnimatedPose(
         particle.position = animatedJointWorldPositions[i];
         particle.previousPosition = animatedJointWorldPositions[i];
         particle.inverseMass = 1.0f / std::max(definition.jointSettings[i].mass, kMinMass);
+        // task_manager/verlet-integration-10, PHASE2 - this joint's own
+        // PMX-rigid-body-derived collision radius (see DynamicJointSettings::
+        // collisionRadius's own doc comment).
+        particle.collisionRadius = definition.jointSettings[i].collisionRadius;
         particle.pinned = false;
     }
 }

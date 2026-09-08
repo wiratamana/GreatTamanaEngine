@@ -40,6 +40,26 @@ struct VerletParticle {
     // constraint functions stay pure/self-contained - they never need a
     // side-channel "is this the anchor" flag.
     bool pinned = false;
+    // task_manager/verlet-integration-10, PHASE2 - this particle's own
+    // physical collision extent, derived from its own PMX Dynamic/
+    // DynamicAndBoneMerge RigidBody's real shape/shapeSize (see
+    // Physics/DynamicChainDefinition.h's own DynamicJointSettings::
+    // collisionRadius doc comment for exactly how this is derived per
+    // shape) - seeded once per (re)seed by
+    // DynamicChainSolver.cpp's SeedParticlesFromAnimatedPose(), exactly
+    // like inverseMass already is. DEFAULT IS 0.0f - a zero-radius
+    // mathematical point, i.e. EXACTLY today's pre-PHASE2 behavior - so
+    // every existing hand-built VerletParticle in every existing test
+    // (SphereColliderTests.cpp/BoxColliderTests.cpp/CapsuleColliderTests.cpp/
+    // DynamicChainSolverTests.cpp, none of which ever mention this field)
+    // continues to produce byte-identical results. Every
+    // Solve*Collision() function inflates its own effective surface
+    // distance by this value (see SphereCollider.cpp/BoxCollider.cpp) -
+    // CapsuleCollider.cpp needs NO change at all, since
+    // SolveCapsuleCollision() already delegates to SolveSphereCollision()
+    // with the SAME `particle` reference, inheriting the inflation for
+    // free.
+    float collisionRadius = 0.0f;
 };
 
 // Implicit velocity this step, in world units per second - NOT stored, always

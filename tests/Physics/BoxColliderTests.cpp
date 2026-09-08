@@ -118,5 +118,24 @@ TEST(BoxColliderTests, DegenerateBoxWithOneOrMoreNonPositiveHalfExtentIsANoOp)
     }
 }
 
+// task_manager/verlet-integration-10, PHASE2 - a joint particle's own
+// PMX-rigid-body-shape-derived collision radius (VerletParticle::
+// collisionRadius) inflates the box's effective half-extents on every axis.
+TEST(BoxColliderTests, ParticleWithNonZeroCollisionRadiusIsPushedToAnInflatedFace)
+{
+    VerletParticle particle;
+    const BoxCollider collider{ Vec3::Zero(), Quat::Identity(), Vec3(2.0f, 1.0f, 3.0f) };
+    particle.position = Vec3(0.1f, 0.8f, 0.1f); // Same fixture as ParticlePenetratingAlongShortestAxisIsPushedToThatFace.
+    particle.collisionRadius = 0.25f;
+
+    SolveBoxCollision(particle, collider);
+
+    EXPECT_NEAR(std::fabs(particle.position.y), collider.halfExtents.y + particle.collisionRadius, 1e-4f)
+        << "Should have been pushed out to the INFLATED Y face (halfExtents.y + collisionRadius).";
+    EXPECT_TRUE(particle.position.y > 0.0f) << "Sign should match the original local Y sign.";
+    EXPECT_NEAR(particle.position.x, 0.1f, 1e-4f) << "X should be unchanged.";
+    EXPECT_NEAR(particle.position.z, 0.1f, 1e-4f) << "Z should be unchanged.";
+}
+
 } // namespace
 } // namespace gte

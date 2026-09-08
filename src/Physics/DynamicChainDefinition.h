@@ -50,6 +50,20 @@ struct DynamicJointSettings {
     // (`group & 0x0Fu`) before using it as a shift amount.
     std::uint8_t group = 0;
     std::uint16_t collisionMask = 0xFFFF;
+
+    // task_manager/verlet-integration-10, PHASE2 - this joint's own
+    // effective collision radius, derived once by
+    // DynamicChainDetection.cpp (Step G) from whichever Dynamic/
+    // DynamicAndBoneMerge RigidBody this joint's own bone matched during
+    // detection - see that file's own DeriveJointCollisionRadius() doc
+    // comment for the exact per-shape derivation rule. Copied into
+    // VerletParticle::collisionRadius once per (re)seed by
+    // DynamicChainSolver.cpp's SeedParticlesFromAnimatedPose(), mirroring
+    // exactly how `mass` is already copied into VerletParticle::inverseMass
+    // at that same point. DEFAULT 0.0f - a hand-built chain (every existing
+    // test fixture) that never sets this reproduces the exact pre-PHASE2
+    // zero-radius-point behavior.
+    float collisionRadius = 0.0f;
 };
 
 // task_manager/verlet-integration-6, Phase 1/3 - a single non-hierarchy

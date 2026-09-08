@@ -2,6 +2,7 @@
 
 #include "../Math/MathTypes.h" // kEpsilon
 
+#include <algorithm> // std::max
 #include <cmath>
 
 namespace gte {
@@ -19,22 +20,38 @@ void SolveBoxCollision(VerletParticle& particle, const BoxCollider& collider) no
     const Vec3 worldOffset = particle.position - collider.center;
     const Vec3 local = collider.rotation.Inverse().RotateVector(worldOffset);
 
+    // task_manager/verlet-integration-10, PHASE2 - the EFFECTIVE half-extent
+    // on every axis is the box's own authored half-extent PLUS this
+    // particle's own physical radius (see SphereCollider.cpp's own
+    // identical rationale) - an approximation (a true "rounded box"
+    // Minkowski-sum surface is not flat-faced near an edge/corner, unlike
+    // this per-axis-inflated approximation), but a deliberately SAFE one:
+    // it never UNDER-estimates the true rounded-box surface anywhere,
+    // meaning a particle is guaranteed to be pushed AT LEAST as far away
+    // as its own true physical radius requires, never less - the same
+    // "conservative, never wrong in the unsafe direction" trade-off this
+    // codebase already accepts for Box collision's own "push out along the
+    // single smallest-escape axis" simplification versus a true SAT-based
+    // OBB response.
+    const float radius = std::max(0.0f, particle.collisionRadius);
+    const Vec3 effectiveHalfExtents = collider.halfExtents + Vec3(radius, radius, radius);
+
     // Penetration test: STRICTLY inside every axis range. See BoxCollider.h's
     // own doc comment for why a degenerate (<=0) half-extent on any axis
     // makes this always false - no separate early-return needed.
-    const bool insideX = std::fabs(local.x) < collider.halfExtents.x;
-    const bool insideY = std::fabs(local.y) < collider.halfExtents.y;
-    const bool insideZ = std::fabs(local.z) < collider.halfExtents.z;
+    const bool insideX = std::fabs(local.x) < effectiveHalfExtents.x;
+    const bool insideY = std::fabs(local.y) < effectiveHalfExtents.y;
+    const bool insideZ = std::fabs(local.z) < effectiveHalfExtents.z;
     if (!(insideX && insideY && insideZ)) {
         return; // Not penetrating (or a degenerate box).
     }
 
-    // Escape distance (>= 0, since we just proved |local[axis]| < halfExtents[axis])
+    // Escape distance (>= 0, since we just proved |local[axis]| < effectiveHalfExtents[axis])
     // per axis - the axis with the SMALLEST escape distance is the box's
     // nearest face, the standard shallow-OBB-push-out choice.
-    const float escapeX = collider.halfExtents.x - std::fabs(local.x);
-    const float escapeY = collider.halfExtents.y - std::fabs(local.y);
-    const float escapeZ = collider.halfExtents.z - std::fabs(local.z);
+    const float escapeX = effectiveHalfExtents.x - std::fabs(local.x);
+    const float escapeY = effectiveHalfExtents.y - std::fabs(local.y);
+    const float escapeZ = effectiveHalfExtents.z - std::fabs(local.z);
 
     int axis = 0;
     float smallestEscape = escapeX;
@@ -48,7 +65,7 @@ void SolveBoxCollision(VerletParticle& particle, const BoxCollider& collider) no
     // axis" convention for its degenerate at-center case).
     Vec3 pushedLocal = local;
     const float sign = pushedLocal[axis] >= 0.0f ? 1.0f : -1.0f;
-    pushedLocal[axis] = sign * collider.halfExtents[axis];
+    pushedLocal[axis] = sign * effectiveHalfExtents[axis];
 
     particle.position = collider.center + collider.rotation.RotateVector(pushedLocal);
 }

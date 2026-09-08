@@ -31,7 +31,10 @@ namespace gte {
 //   1. Lazy init / root-teleport guard: re-seeds every particle to its
 //      corresponding animatedJointWorldPositions[i] (position AND
 //      previousPosition, zero implied velocity, inverseMass = 1.0f /
-//      max(jointSettings[i].mass, small epsilon), pinned = false) whenever
+//      max(jointSettings[i].mass, small epsilon), collisionRadius =
+//      jointSettings[i].collisionRadius (task_manager/verlet-integration-10,
+//      PHASE2 - this joint's own PMX-rigid-body-shape-derived physical
+//      collision extent, 0.0f by default), pinned = false) whenever
 //      EITHER (a) this is genuinely the first call for this instance (or the
 //      chain's own joint count changed since the last call), OR (b) PHASE5's
 //      own numerical-safety guard: `rootWorldPosition` has moved farther than
@@ -90,7 +93,13 @@ namespace gte {
 //      also pass, matching PMX's own authored collision-group/layer rule -
 //      a joint/collider pair that isn't mutually "visible" to each other is
 //      skipped entirely for that pair, same as if the collider weren't in
-//      the list at all.
+//      the list at all. task_manager/verlet-integration-10, PHASE2 - when a
+//      pair IS mutually visible, SolveCollision() itself now also inflates
+//      the effective test/push-out surface by this joint particle's own
+//      `collisionRadius` (its own PMX rigid-body-shape-derived physical
+//      extent, seeded in step 1 above - see SphereCollider.cpp/
+//      BoxCollider.cpp for the exact per-shape math; Capsule inherits this
+//      for free via its own existing delegation to SolveSphereCollision()).
 //   6. NaN/Inf guard (PHASE5, 3.3): after every position update above, any
 //      particle whose position fails std::isfinite() on any component is
 //      reset (that ONE particle only, never the whole chain) to its

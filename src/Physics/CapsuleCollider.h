@@ -35,7 +35,10 @@ struct CapsuleCollider {
 // non-positive `height` degrades to a pure sphere at `center` (both segment
 // endpoints coincide) rather than being treated as invalid - matches
 // RigidBodyWireframe.h's own "a non-positive shapeSize.y is a 'pure sphere'
-// capsule" documented convention exactly.
+// capsule" documented convention exactly. task_manager/verlet-integration-10,
+// PHASE2 - this function inherits `particle.collisionRadius` inflation for
+// free through its own existing delegation to SolveSphereCollision()
+// immediately below - no code in this file needed to change for that.
 void SolveCapsuleCollision(VerletParticle& particle, const CapsuleCollider& collider) noexcept;
 
 } // namespace gte
