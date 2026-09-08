@@ -230,17 +230,28 @@ great editor" toward something that can hold a real scene/game - none of
 these have any code written yet; listed here in roughly the order they'd
 unblock the most follow-on work:
 
-- **Scene serialization (save/load a scene to/from a file, e.g. JSON).**
-  Right now the Editor lets you live-edit entities via the gizmo/Inspector,
-  and can now also spawn new ones from scratch via "Hierarchy" -> "Create 3D
-  Object" (`Game::CreatePrimitiveEntity()`, see `README.md`) - but there is
-  still no way to persist or reload the result; `Game.cpp`'s own demo
-  entities remain hardcoded in C++. Likely the single highest-leverage next
-  engine-level feature: a pure `Registry` <-> text-format read/write, fitting
-  this engine's existing Tier-1-testability doctrine, that turns every other
-  item below into something you can actually author instead of hardcode.
-  "Create 3D Object" is exactly the tool needed to build a non-trivial test
-  scene to exercise save/modify/load against once this lands.
+- **~~Scene serialization (save/load a scene to/from a file)~~ - DONE, first
+  slice.** `Game.cpp`'s old hardcoded demo entities are gone (see
+  `README.md`, "Status"), replaced by a real Save/Load loop: a new,
+  always-compiled `src/Scene/` module (`SceneDocument.h`,
+  `SceneTextFormat.h/.cpp`, `SceneBuilder.h/.cpp` - fully Tier-1-tested, no
+  ECS/Renderer/filesystem dependency) implements a small, hand-rolled,
+  line-oriented TEXT format (`*.gtscene` - deliberately not JSON, no JSON
+  library is vendored) round-tripping the two kinds of top-level object the
+  Editor can create: a built-in primitive (`Game::CreatePrimitiveEntity()`,
+  by its `PrimitiveType` - a new `PrimitiveSource` component) and an
+  imported-asset instance (`Game::CreateMeshEntityFromGtaFile()`, by its
+  stable `AssetDatabase` `Guid`, never a raw path). `File > Save Scene`
+  (Ctrl+S) / `File > Open Scene` (Ctrl+O) (`src/Editor/SceneIO.h/.cpp`,
+  `DockLayout.cpp`) read/write one hardcoded path,
+  `<Project folder>/TestScene.gtscene` - no file picker/"Save As" yet. Only
+  each object's ROOT entity's Transform/Name round-trips (a multi-part
+  asset's own child "submesh part" entities are always freshly re-derived
+  from the asset on Load, never individually serialized); Camera/physics/
+  animation-runtime state, undo/redo, and multi-scene are all explicitly
+  NOT yet done. See
+  `task_manager/scene-serialization-1/PHASE0_MASTER_STRATEGY.md` for the
+  full six-phase writeup.
 - **A minimal asset pipeline: real mesh loading + a real, shader-bindable
   texture from a *.gta.** The IMPORT half of both texture AND mesh handling
   now exists - dropping a PNG/JPG into "Project" decodes+re-encodes it as

@@ -3,6 +3,7 @@
 #include "Selection.h"
 #include "TransformGizmo.h"
 
+#include <chrono>
 #include <string>
 
 #include <volk.h>
@@ -136,6 +137,17 @@ struct EditorContext {
     // Set by File > Exit (see DockLayout.cpp's BuildDockspaceAndMenuBar());
     // read once per frame by ImGuiEditorLayer::WantsExit().
     bool exitRequested = false;
+
+    // Short-lived, colored status feedback for File > Save Scene/Open Scene
+    // (DockLayout.cpp's BuildDockspaceAndMenuBar(), Ctrl+S/Ctrl+O too) -
+    // mirrors ProjectPanel's own private SetStatus()/m_statusMessage
+    // pattern (Panels/ProjectPanel.cpp), just surfaced through EditorContext
+    // instead, since DockLayout.cpp's BuildDockspaceAndMenuBar() is a free
+    // function with no persistent members of its own to keep this in.
+    // Empty means "nothing to show right now".
+    std::string sceneIoStatusMessage;
+    bool sceneIoStatusIsError = false;
+    std::chrono::steady_clock::time_point sceneIoStatusSetTime;
 
     // Latches true the first time every one of Hierarchy/Inspector/Scene/
     // Game is confirmed to have a real dock (see DockLayout.cpp's

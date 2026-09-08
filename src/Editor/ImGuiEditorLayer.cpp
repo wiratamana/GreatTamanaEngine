@@ -434,7 +434,7 @@ public:
 
         Registry& registry = game.GetRegistry();
 
-        BuildDockspaceAndMenuBar(m_ctx);
+        BuildDockspaceAndMenuBar(m_ctx, game, renderer);
 
         // Lazily (re)create the ImGui-side descriptors for the Game/Scene
         // view textures - needed on first use, and again after

@@ -1571,6 +1571,35 @@ pieces:
   at once). Full build/regression testing and a real, measured CPU-vs-GPU
   performance comparison are still outstanding - see `TODO.md`.
 
+- **The hardcoded demo triangle scene is gone, replaced by a real (if
+  deliberately minimal) scene Save/Load loop.** `Game::EnsureDemoSceneBuilt()`'s
+  3 hardcoded triangle entities and their private `Pipeline`/`Mesh` (see
+  earlier "Status" entries above, and the "Entity-Component-System"
+  section's own now-historical description of them) are gone -
+  `Game::EnsureDefaultCameraExists()` now creates only the one default
+  `Camera` entity every fresh/just-loaded scene still needs. In their
+  place, a new, always-compiled `src/Scene/` module (`SceneDocument.h`,
+  `SceneTextFormat.h/.cpp`, `SceneBuilder.h/.cpp` - fully Tier-1-tested,
+  zero ECS/Renderer/filesystem dependency) implements a small, hand-rolled,
+  line-oriented TEXT file format (`*.gtscene` - deliberately not JSON, no
+  JSON library is vendored in this engine) that can serialize/restore the
+  two kinds of top-level scene object the Editor can currently create: a
+  built-in primitive (`Game::CreatePrimitiveEntity()`, by which
+  `PrimitiveType` it is - a new `PrimitiveSource` component) and an
+  imported-asset instance (`Game::CreateMeshEntityFromGtaFile()`, by its
+  stable `AssetDatabase` `Guid` - never a raw machine-local path, the same
+  principle `MaterialTextureRef::guid` already established). A new
+  `File > Save Scene` (Ctrl+S) / `File > Open Scene` (Ctrl+O) menu pair
+  (`src/Editor/SceneIO.h/.cpp`, `DockLayout.cpp`) reads/writes one
+  hardcoded path, `<Project folder>/TestScene.gtscene` - no file picker,
+  no "Save As", no undo/redo yet; only each object's ROOT entity's
+  Transform/Name round-trips (a multi-part asset's own child "submesh
+  part" entities are always freshly re-derived from the asset itself on
+  Load, never individually serialized), and Camera/physics/animation-
+  runtime state is intentionally not persisted at all. See
+  `task_manager/scene-serialization-1/PHASE0_MASTER_STRATEGY.md` for the
+  full six-phase writeup.
+
 ## Roadmap
 
 See **[TODO.md](TODO.md)** for known limitations, deliberately deferred

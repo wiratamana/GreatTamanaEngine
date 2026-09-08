@@ -1,6 +1,9 @@
 #include "DockLayout.h"
 
 #include "EditorContext.h"
+#include "SceneIO.h"
+
+#include "../Game/Game.h"
 
 // imgui_internal.h is needed (only here, among the Editor's panel/layout
 // files) for the DockBuilder* API used to lay out the default Unity-style
@@ -9,6 +12,9 @@
 // alternative in Dear ImGui today.
 #include <imgui.h>
 #include <imgui_internal.h>
+
+#include <chrono>
+#include <string>
 
 namespace gte {
 
@@ -109,7 +115,7 @@ void BuildDefaultDockLayout(ImGuiID dockspaceId, ImVec2 size)
 }
 } // namespace
 
-void BuildDockspaceAndMenuBar(EditorContext& ctx)
+void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer)
 {
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
@@ -127,8 +133,28 @@ void BuildDockspaceAndMenuBar(EditorContext& ctx)
     ImGui::Begin("EditorDockSpaceHost", nullptr, hostFlags);
     ImGui::PopStyleVar(3);
 
+    // Runs SaveScene()/LoadScene() and stamps ctx.sceneIo* status feedback -
+    // shared by both the File menu items below and the Ctrl+S/Ctrl+O global
+    // shortcut check further down, so the bookkeeping (message/error flag/
+    // timestamp) is never duplicated four times.
+    auto reportStatus = [&ctx](bool ok, const std::string& okMessage, const std::string& failMessage) {
+        ctx.sceneIoStatusMessage = ok ? okMessage : failMessage;
+        ctx.sceneIoStatusIsError = !ok;
+        ctx.sceneIoStatusSetTime = std::chrono::steady_clock::now();
+    };
+
     if (ImGui::BeginMenuBar()) {
         if (ImGui::BeginMenu("File")) {
+            if (ImGui::MenuItem("Save Scene", "Ctrl+S")) {
+                const bool saved = SaveScene(game);
+                reportStatus(saved, "Saved scene to " + DefaultScenePath().string(), "Failed to save scene.");
+            }
+            if (ImGui::MenuItem("Open Scene", "Ctrl+O")) {
+                const bool loaded = LoadScene(game, renderer);
+                reportStatus(loaded, "Loaded scene from " + DefaultScenePath().string(),
+                    "Failed to load scene (missing or malformed file).");
+            }
+            ImGui::Separator();
             // Simple example of a menu item that exits the application
             // programmatically: sets ctx.exitRequested, which
             // ImGuiEditorLayer::WantsExit() checks once per frame, rather
@@ -140,6 +166,26 @@ void BuildDockspaceAndMenuBar(EditorContext& ctx)
             ImGui::EndMenu();
         }
         ImGui::EndMenuBar();
+    }
+
+    {
+        ImGuiIO& io = ImGui::GetIO();
+        // WantTextInput guards against a user typing a literal 's'/'o' into
+        // an unrelated ImGui text field (e.g. renaming something, once that
+        // exists) from being misread as this shortcut - the same defensive
+        // pattern IEditorLayer::WantsCaptureKeyboard() already establishes
+        // for gameplay input (see AGENTS.md, "Editor Module Structure").
+        if (!io.WantTextInput && io.KeyCtrl) {
+            if (ImGui::IsKeyPressed(ImGuiKey_S, /*repeat=*/false)) {
+                const bool saved = SaveScene(game);
+                reportStatus(saved, "Saved scene to " + DefaultScenePath().string(), "Failed to save scene.");
+            }
+            if (ImGui::IsKeyPressed(ImGuiKey_O, /*repeat=*/false)) {
+                const bool loaded = LoadScene(game, renderer);
+                reportStatus(loaded, "Loaded scene from " + DefaultScenePath().string(),
+                    "Failed to load scene (missing or malformed file).");
+            }
+        }
     }
 
     const ImGuiID dockspaceId = ImGui::GetID("EditorDockSpace");
@@ -193,6 +239,22 @@ void BuildDockspaceAndMenuBar(EditorContext& ctx)
         // else: not enough information yet (some panel hasn't had its
         // first Begin() this session) - leave ctx.dockLayoutEnsured false
         // and re-evaluate next frame.
+    }
+
+    // Short-lived colored status line for the last Save/Open Scene action
+    // (see ctx.sceneIoStatusMessage's own doc comment in EditorContext.h) -
+    // mirrors ProjectPanel::Build()'s own identical status-message pattern
+    // (Panels/ProjectPanel.cpp), just rendered here since this is where the
+    // action itself is triggered from.
+    if (!ctx.sceneIoStatusMessage.empty()) {
+        constexpr std::chrono::milliseconds kSceneIoStatusLifetime{ 4000 };
+        if (std::chrono::steady_clock::now() - ctx.sceneIoStatusSetTime < kSceneIoStatusLifetime) {
+            const ImVec4 color
+                = ctx.sceneIoStatusIsError ? ImVec4(1.0f, 0.4f, 0.4f, 1.0f) : ImVec4(0.6f, 0.85f, 0.6f, 1.0f);
+            ImGui::TextColored(color, "%s", ctx.sceneIoStatusMessage.c_str());
+        } else {
+            ctx.sceneIoStatusMessage.clear();
+        }
     }
 
     ImGui::End();
