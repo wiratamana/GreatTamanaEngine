@@ -18,7 +18,8 @@ namespace {
 // 3.5 instruction ("reuse the same literal tolerance constants ... by
 // either sharing them via a small shared constants header or simply
 // redeclaring the same numeric literals locally with a comment
-// cross-referencing IkSolver.cpp").
+// cross-referencing IkSolver.cpp"). Used only by the parentJoint >= 0
+// (rotate-parent) branch below.
 constexpr float kMinDirectionLengthSq = 1e-10f;
 constexpr float kMinAngleRadians = 1e-5f;
 
@@ -45,41 +46,68 @@ void ApplyDynamicChainPhysicsToPose(const SkeletonData& skeleton, const DynamicC
             continue; // Malformed chain data - skip rather than crash.
         }
 
-        // 1. The bone whose rotation this iteration actually rewrites - see
-        // this file's own header comment ("IMPORTANT DESIGN NOTE") for why
-        // this must be the PARENT, never `boneIndex` itself: a bone's own
-        // rotation can never move its own world position, only its
-        // descendants'. task_manager/verlet-integration-6, Phase 1 - resolved
-        // via the explicit TREE-parent (definition.parentJointIndex[i]),
-        // never assumed to be jointBoneIndices[i - 1] - the size check above
-        // already guarantees definition.parentJointIndex.size() == jointCount,
-        // so `i` is always a valid index into it here.
         const std::int32_t parentJoint = definition.parentJointIndex[i];
-        const std::int32_t parentBoneIndex = (parentJoint < 0)
-            ? definition.rootBoneIndex
-            : definition.jointBoneIndices[static_cast<std::size_t>(parentJoint)];
-        if (parentBoneIndex < 0 || static_cast<std::size_t>(parentBoneIndex) >= skeleton.bones.size()) {
-            continue; // No real bone to rotate for this segment (e.g. a world-anchored chain with no root bone).
+
+        if (parentJoint < 0) {
+            // This joint's tree-parent is the chain's own ANCHOR bone
+            // (definition.rootBoneIndex) directly - the Bone Viewer's "(root
+            // child)" case. The anchor is frequently a REAL, SHARED, load-
+            // bearing skeleton bone (e.g. MMD's own 下半身), which may be the
+            // tree-parent of many dozens of unrelated accessory joints AND the
+            // real FK ancestor of non-participating body bones (legs). Per
+            // DynamicChainDefinition.h's own documented contract, the anchor's
+            // pose entry must NEVER be written by physics - so instead of
+            // rotating it (which would move every other child sharing it, and
+            // every real body bone descending from it), this branch corrects
+            // ONLY this joint's OWN local TRANSLATION, which moves nothing
+            // except this one bone's own origin within the anchor's (always
+            // untouched) frame. See this file's own header comment for the
+            // full derivation. task_manager/verlet-integration-8, Phase 1.
+            const std::int32_t rootBoneIndex = definition.rootBoneIndex;
+            if (rootBoneIndex < 0 || static_cast<std::size_t>(rootBoneIndex) >= skeleton.bones.size()) {
+                continue; // No real anchor bone (e.g. a world-anchored chain) - nothing to translate relative to.
+            }
+
+            const Mat4 anchorWorld = ComputeBoneWorldMatrix(skeleton, pose, rootBoneIndex);
+            Mat4 anchorWorldInverse;
+            if (!anchorWorld.TryInverse(anchorWorldInverse)) {
+                continue; // Algebraically should never happen (anchorWorld is a unit-scale TRS) - defensive only.
+            }
+
+            const Vec3 desiredLocalPoint = anchorWorldInverse.TransformPoint(simulatedJointWorldPositions[i]);
+            const Vec3 localBindOffset = skeleton.bones[static_cast<std::size_t>(boneIndex)].position
+                - skeleton.bones[static_cast<std::size_t>(rootBoneIndex)].position;
+            pose[static_cast<std::size_t>(boneIndex)].translation = desiredLocalPoint - localBindOffset;
+            // pose[boneIndex].rotation is intentionally left untouched here - if
+            // this SAME bone is itself some LATER joint's own tree-parent, the
+            // `parentJoint >= 0` branch below (a later iteration, per this
+            // array's own root-to-tip ordering invariant) will still correctly
+            // rewrite its rotation to aim that descendant - translation and
+            // rotation are independent BoneLocalOffset channels
+            // (Animation/BonePoseMath.h's ComputeBoneLocalMatrix()), so writing
+            // both across two different iterations composes correctly.
+            continue;
         }
 
-        // 2. Parent's current world matrix/position.
+        // UNCHANGED below this point: parentJoint >= 0, i.e. this joint's
+        // tree-parent is ANOTHER chain joint (never the anchor) - rotate that
+        // joint's own bone to aim this joint's descendant at its target, exactly
+        // as before. See this file's own header comment for why this must be
+        // the PARENT's rotation, never boneIndex's own.
+        const std::int32_t parentBoneIndex = definition.jointBoneIndices[static_cast<std::size_t>(parentJoint)];
+        if (parentBoneIndex < 0 || static_cast<std::size_t>(parentBoneIndex) >= skeleton.bones.size()) {
+            continue;
+        }
+
         const Mat4 parentWorld = ComputeBoneWorldMatrix(skeleton, pose, parentBoneIndex);
         const Vec3 parentWorldPos = parentWorld.TransformPoint(Vec3::Zero());
 
-        // 3. The child bone's CURRENT world position, before this
-        // iteration's own correction (already reflecting every EARLIER
-        // iteration's rewritten ancestor rotation this same call).
         const Mat4 currentChildWorld = ComputeBoneWorldMatrix(skeleton, pose, boneIndex);
         const Vec3 currentChildPos = currentChildWorld.TransformPoint(Vec3::Zero());
         const Vec3 rawCurrentDelta = currentChildPos - parentWorldPos;
 
-        // 4. Wherever the simulated particle actually landed, relative to
-        // the same (already-resolved) parent.
         const Vec3 rawTargetDelta = simulatedJointWorldPositions[i] - parentWorldPos;
 
-        // 5. Degenerate-direction guard (near-zero length) - leave this
-        // segment's parent rotation untouched rather than normalizing
-        // garbage.
         if (LengthSquared(rawCurrentDelta) < kMinDirectionLengthSq || LengthSquared(rawTargetDelta) < kMinDirectionLengthSq) {
             continue;
         }
@@ -90,28 +118,18 @@ void ApplyDynamicChainPhysicsToPose(const SkeletonData& skeleton, const DynamicC
         const float dot = Clamp(Dot(currentDir, targetDir), -1.0f, 1.0f);
         const float angle = std::acos(dot);
         if (angle < kMinAngleRadians) {
-            continue; // Already (approximately) aimed at the simulated position - nothing to correct.
+            continue;
         }
 
         Vec3 axis = Cross(currentDir, targetDir);
         if (LengthSquared(axis) < kMinDirectionLengthSq) {
-            continue; // Parallel/antiparallel - no well-defined rotation axis.
+            continue;
         }
         axis = Normalize(axis);
 
-        // 6-7. World-space corrective rotation, applied on top of the
-        // PARENT bone's existing world rotation (a single corrective step
-        // per bone per frame - see this file's own header comment for why
-        // this deliberately does NOT mirror IkSolver's local-space CCD
-        // accumulation style).
         const Quat delta = Quat::FromAxisAngle(axis, angle);
         const Quat newParentWorldRotation = delta * Quat::FromMat4(parentWorld);
 
-        // 8. Convert back to the parent bone's LOCAL offset rotation by
-        // removing ITS OWN parent's (the "grandparent" relative to
-        // boneIndex) world rotation. Translation is left unchanged - PMX
-        // bones never need a translation channel for a purely-rotated FK
-        // bend (see SkeletonPose.h's own bind-pose convention).
         const std::int32_t grandparentBoneIndex = skeleton.bones[static_cast<std::size_t>(parentBoneIndex)].parentBoneIndex;
         const Mat4 grandparentWorld = ComputeBoneWorldMatrix(skeleton, pose, grandparentBoneIndex);
         const Quat grandparentWorldRotationInverse = Quat::FromMat4(grandparentWorld).Inverse();
