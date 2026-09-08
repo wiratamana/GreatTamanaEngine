@@ -1385,6 +1385,7 @@ set(GTE_TEST_SOURCES
     Game/Physics/DynamicChainRigCacheTests.cpp
     Game/Physics/PhysicsSystemParallelTests.cpp
     Game/Physics/PhysicsSystemWorldSpaceRootMotionTests.cpp
+    Game/Physics/PhysicsSystemModelColliderResolutionTests.cpp
     Game/Physics/PhysicsSystemFreezeAndCulpritFTests.cpp
     Game/Physics/PhysicsSystemAnchorRigidityRegressionTests.cpp
     Animation/BoneChainResolverTests.cpp

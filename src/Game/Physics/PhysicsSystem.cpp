@@ -17,6 +17,7 @@
 #include "../../Profiling/ScopeTimer.h"
 #include "../Animation/SkeletalRigCache.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <unordered_set>
@@ -34,6 +35,21 @@ namespace {
 // the actual work itself, mirroring AnimationSystem.cpp's own
 // kMinVerticesToParallelize precedent exactly (see AGENTS.md, "Job System").
 constexpr std::size_t kMinDynamicJointsToParallelize = 24;
+
+// task_manager/verlet-integration-9, PHASE4 - Assets::RigidBodyShape and
+// Physics::ColliderShape intentionally share the same three enumerators in
+// the same order (both written by this same campaign) - this explicit
+// mapping is preferred over a raw static_cast so a future reordering/
+// extension of either enum can never silently miscompute here.
+ColliderShape ToColliderShape(RigidBodyShape shape) noexcept
+{
+    switch (shape) {
+    case RigidBodyShape::Sphere: return ColliderShape::Sphere;
+    case RigidBodyShape::Box: return ColliderShape::Box;
+    case RigidBodyShape::Capsule: return ColliderShape::Capsule;
+    }
+    return ColliderShape::Sphere;
+}
 
 // The per-batch job context handed through gte::Jobs::Dispatch()'s opaque
 // payload pointer. One "item" here is one WHOLE CHAIN (not one joint/vertex,
@@ -85,6 +101,19 @@ struct DynamicChainBatchContext {
     // see that function's own comment for why this must remain a separate
     // guard rather than relying solely on `stepCount == 0`.
     bool frozen;
+
+    // task_manager/verlet-integration-9, PHASE4 - every collider this
+    // entity's model has, already resolved to WORLD space THIS frame (see
+    // PhysicsSystem::Update()'s own construction of this list, right
+    // before this context is built) - shared, read-only, by every chain in
+    // this entity's own batch, exactly like `skeleton`/`pose` already are.
+    // Empty whenever no chain in this entity wants collision at all (see
+    // the `anyChainWantsCollision` guard where this is built) - passing an
+    // empty list is behaviorally identical to every chain treating
+    // collision as disabled, matching StepDynamicChain()'s own documented
+    // "empty colliders list is a no-op" contract regardless of
+    // collisionEnabled.
+    const std::vector<Collider>* resolvedColliders;
 };
 
 // Steps every chain in `[beginIndex, endIndex)` of `context` to full
@@ -121,11 +150,13 @@ void StepDynamicChainRange(std::uint32_t beginIndex, std::uint32_t endIndex, Dyn
             animatedJointWorldPositions.push_back(jointWorld.TransformPoint(Vec3::Zero()));
         }
 
-        // task_manager/verlet-integration-9 - placeholder until PHASE4 wires
-        // real per-frame world-space collider resolution here; an empty
-        // list keeps every chain's own StepDynamicChain() call behaviorally
-        // identical to "collision fully disabled" in the meantime.
-        const std::vector<Collider> colliders;
+        // task_manager/verlet-integration-9, PHASE4 - the shared, already
+        // WORLD-space-resolved collider list for this entire entity (resolved
+        // ONCE per entity per frame by PhysicsSystem::Update(), never here) -
+        // passed uniformly to every chain regardless of that chain's own
+        // collisionEnabled; StepDynamicChain()'s own internal
+        // `if (definition.collisionEnabled)` guard decides per-chain whether
+        // it is actually used.
 
         // task_manager/verlet-integration-7, Phase 4 (v2) - take zero NEW
         // integration steps whenever context.frozen is true, regardless of
@@ -137,7 +168,7 @@ void StepDynamicChainRange(std::uint32_t beginIndex, std::uint32_t endIndex, Dyn
         if (!context.frozen) {
             for (int step = 0; step < context.stepCount; ++step) {
                 StepDynamicChain(chain, rootWorldPos, animatedJointWorldPositions, state, context.fixedTimestepSeconds,
-                    context.gravity, context.wind, colliders);
+                    context.gravity, context.wind, *context.resolvedColliders);
             }
         }
 
@@ -342,9 +373,36 @@ void PhysicsSystem::Update(Registry& registry, double deltaSeconds)
             entityWorldMatrixInverse = Mat4::Identity();
         }
 
+        // task_manager/verlet-integration-9, PHASE4 - resolve every one of this
+        // model's Static-rigid-body colliders (PHASE3) to its CURRENT
+        // world-space center/rotation, ONCE per entity per frame, shared
+        // read-only by every chain this entity owns (mirrors entityWorldMatrix/
+        // skeleton/pose's own existing "resolved once on the main thread,
+        // shared by every chain" pattern) - only bothered with at all when at
+        // least one of this entity's chains actually opted in
+        // (collisionEnabled), and the model has at least one collider, so an
+        // entity with collision disabled everywhere (today's default for every
+        // chain) pays zero extra ComputeBoneWorldMatrix() calls per frame.
+        std::vector<Collider> resolvedColliders;
+        const bool anyChainWantsCollision = std::any_of(model->chains.begin(), model->chains.end(),
+            [](const DynamicChainDefinition& c) { return c.collisionEnabled; });
+        if (anyChainWantsCollision && !model->colliders.empty()) {
+            resolvedColliders.reserve(model->colliders.size());
+            for (const ModelColliderDefinition& colliderDef : model->colliders) {
+                const Mat4 boneWorld
+                    = entityWorldMatrix * ComputeBoneWorldMatrix(model->skeleton, resolvedPose->pose, colliderDef.boneIndex);
+                Collider collider;
+                collider.shape = ToColliderShape(colliderDef.shape);
+                collider.center = boneWorld.TransformPoint(colliderDef.localOffsetPosition);
+                collider.rotation = Quat::FromMat4(boneWorld) * colliderDef.localOffsetRotation;
+                collider.size = colliderDef.shapeSize;
+                resolvedColliders.push_back(collider);
+            }
+        }
+
         DynamicChainBatchContext context{ &model->skeleton, &model->chains, &rig.chainStates, &resolvedPose->pose,
             stepCount, m_globalSettings.fixedTimestepSeconds, m_globalSettings.gravity, m_globalSettings.wind,
-            entityWorldMatrix, entityWorldMatrixInverse, rig.frozen };
+            entityWorldMatrix, entityWorldMatrixInverse, rig.frozen, &resolvedColliders };
 
         // PHASE5, 3.4 - parallelize INDEPENDENT chains WITHIN this one
         // entity's own physics step, across the Job System's worker pool,
