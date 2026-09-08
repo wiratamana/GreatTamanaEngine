@@ -1,12 +1,11 @@
 #include "ProjectPanel.h"
 
 #include "../EditorContext.h"
+#include "../ProjectRootPath.h"
 #include "../../Assets/AssetImporter.h"
 #include "../MemoryPanelData.h" // FormatBytes() - reused for the file-size tooltip below.
 
 #include <imgui.h>
-
-#include <SDL3/SDL.h>
 
 #include <algorithm>
 #include <cctype>
@@ -35,16 +34,13 @@ bool HasSubfolders(const ProjectEntry& entry)
 
 ProjectPanel::ProjectPanel()
 {
-    // SDL_GetBasePath() returns the directory containing the running
-    // executable (with a trailing separator), UTF-8 encoded, owned by SDL
-    // (never freed by us) - "Project" lives right next to the .exe, per
-    // this feature's spec. Falls back to the current working directory if
-    // SDL can't determine it for some reason, rather than leaving
-    // m_rootPath empty (which would otherwise resolve to the process's
-    // current directory anyway via the "Project" relative path below, but
-    // this makes the fallback explicit rather than incidental).
-    const char* basePath = SDL_GetBasePath();
-    m_rootPath = Utf8ToPath(basePath != nullptr ? basePath : "./") / "Project";
+    // See ProjectRootPath.h for why this now resolves through a shared
+    // helper (also used by Editor/SceneIO.h's Save/Load, which must work
+    // even when GTE_ENABLE_PROJECT_PANEL is OFF) rather than its own
+    // private computation - this keeps exactly ONE place in the codebase
+    // that decides where "Project" lives, instead of two independent
+    // copies that could silently drift apart.
+    m_rootPath = ResolveProjectRootDirectory();
 }
 
 void ProjectPanel::EnsureRootAndMaybeRescan()

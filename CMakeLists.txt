@@ -465,6 +465,10 @@ add_library(gte_core STATIC
 if(GTE_ENABLE_EDITOR)
     target_sources(gte_core PRIVATE
         src/Editor/EditorContext.h
+        src/Editor/ProjectRootPath.h
+        src/Editor/ProjectRootPath.cpp
+        src/Editor/SceneIO.h
+        src/Editor/SceneIO.cpp
         src/Editor/Selection.h
         src/Editor/Selection.cpp
         src/Editor/EditorCamera.h
