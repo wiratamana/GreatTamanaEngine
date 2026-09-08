@@ -140,23 +140,6 @@ Vec3 ReconstructTipWorldPosition(Registry& registry, Entity entity, const Skelet
 
 constexpr std::int32_t kChainRootBoneIndex = 1;
 
-// The tip's WORLD position, expressed RELATIVE TO the chain's own root
-// bone's WORLD position (rather than relative to the world origin) - this
-// is the actual "shape" quantity task_manager/verlet-integration-7's
-// PHASE4 doc means by "the chain's reconstructed world position (root-
-// relative offset) is preserved" while frozen: the root bone itself always
-// moves perfectly rigidly with the entity's own Transform (its own pose
-// entry only ever has its ROTATION corrected by physics, never its
-// translation - see BoneChainPhysicsResolver.cpp), so this offset isolates
-// the chain's own SAG/SHAPE from the entity's rigid motion.
-Vec3 ReconstructRootRelativeTipOffset(
-    Registry& registry, Entity entity, const SkeletonData& skeleton, const std::vector<BoneLocalOffset>& pose)
-{
-    const Vec3 tipWorld = ReconstructTipWorldPosition(registry, entity, skeleton, pose, kTipBoneIndex);
-    const Vec3 rootWorld = ReconstructTipWorldPosition(registry, entity, skeleton, pose, kChainRootBoneIndex);
-    return tipWorld - rootWorld;
-}
-
 TEST(PhysicsSystemFreezeAndCulpritFTests, FrozenDynamicChainRigStopsIntegratingButKeepsItsLastSimulatedShape)
 {
     PhysicsSystem physicsSystem;
@@ -227,6 +210,41 @@ TEST(PhysicsSystemFreezeAndCulpritFTests, FrozenDynamicChainRigStopsIntegratingB
     (void)siblingTipLater;
 }
 
+// task_manager/verlet-integration-8, Phase 1/3 - REWRITTEN. Before Phase 1,
+// a direct anchor-child joint's corrective ROTATION was written onto the
+// chain's own ANCHOR bone (definition.rootBoneIndex) - an approximate,
+// fixed-bind-length, direction-only correction. Because that correction was
+// only ever "pointed" at wherever the (possibly stale, while frozen) target
+// happened to be RELATIVE TO the anchor's own CURRENT world position, a
+// small entity Transform drag while frozen only nudged the resulting
+// direction slightly, so the chain's overall SHAPE (root-relative tip
+// offset) barely changed - hence this test's original ~"changes by less
+// than half the drag delta" assertion below.
+//
+// After Phase 1, a direct anchor-child's correction is instead an EXACT
+// local TRANSLATION that lands the joint bone at PRECISELY its simulated
+// target (see BoneChainPhysicsResolver.cpp's ApplyDynamicChainPhysicsToPose()
+// and its own header comment for the full derivation) - the anchor's own
+// pose entry is never written at all. Combined with how PhysicsSystem.cpp
+// feeds this function ITS OWN entity-transform-INVERSE-transformed particle
+// position as the "simulated target" (see StepDynamicChainRange()'s own
+// `context.entityWorldMatrixInverse.TransformPoint(particle.position)`
+// call), composing the corrected pose back with the (possibly-just-dragged)
+// entity transform algebraically CANCELS the transform out completely for a
+// direct anchor-child bone: its real WORLD position ends up EXACTLY equal to
+// its last real, frozen, absolute-world particle position, regardless of
+// what the entity's Transform is doing - a mathematically exact invariant,
+// not an approximation. This is a genuine, deliberate, PROVABLE behavior
+// change from Phase 1, not a regression: "frozen" now means the chain's own
+// simulated joints stay pinned at their last real world position (rather
+// than approximately riding along with the model), while the anchor bone
+// itself (never touched by physics, per DynamicChainDefinition.h's own
+// contract) still moves perfectly rigidly with the entity's Transform - the
+// two halves of "the chain" now visibly diverge while both frozen AND
+// dragged at the same time, which is an accepted, out-of-scope-for-this-
+// campaign consequence of correctly fixing the anchor's own rigidity (see
+// PHASE0_MASTER_STRATEGY.md, "What We Will NOT Do" - the Verlet solver/
+// freeze semantics themselves are untouched by this campaign).
 TEST(PhysicsSystemFreezeAndCulpritFTests, FrozenDynamicChainRigStillRidesAlongRigidlyWithEntityTransformMotion)
 {
     PhysicsSystem physicsSystem;
@@ -247,17 +265,14 @@ TEST(PhysicsSystemFreezeAndCulpritFTests, FrozenDynamicChainRigStillRidesAlongRi
     // RETUNED, much weaker default `stiffness` (0.02, down from 0.35), this
     // self-referential "target chases its own prior physics output" quirk
     // lets many settling frames accumulate real drift toward a near-full
-    // gravity hang rather than the small, comfortable sag this test's own
-    // "less than half the drag delta" assertion below was calibrated
-    // against - 60 frames drifted far enough that the chain's shape became
-    // dominated by gravity rather than by its own bind-pose direction (a
-    // stale artifact of testing PhysicsSystem in isolation, not a
+    // gravity hang - 60 frames drifted far enough that the chain's shape
+    // became dominated by gravity rather than by its own bind-pose direction
+    // (a stale artifact of testing PhysicsSystem in isolation, not a
     // production regression - see Game/GameLoopPhysicsWithoutAnimationTests.cpp,
     // which DOES exercise the real EvaluatePoses()+Update() pipeline and is
     // unaffected by this retune). 10 frames is still comfortably enough to
     // prove the chain has genuinely started simulating (non-bind) before
-    // freezing, while staying within the small-sag regime this assertion
-    // was always meant to cover.
+    // freezing.
     for (int i = 0; i < 10; ++i) {
         physicsSystem.Update(registry, 1.0 / 60.0);
     }
@@ -266,58 +281,52 @@ TEST(PhysicsSystemFreezeAndCulpritFTests, FrozenDynamicChainRigStillRidesAlongRi
     ASSERT_NE(rig, nullptr);
     rig->frozen = true;
 
-    // Capture the chain's SHAPE right after freezing (the tip's world
-    // position expressed relative to the chain's own root bone, which
-    // always moves perfectly rigidly with the entity - see
-    // ReconstructRootRelativeTipOffset()'s own comment), plus the root's
-    // own absolute world position, before any further Transform motion.
-    Vec3 rootRelativeOffsetBeforeDrag;
+    // Capture the tip's and the root's own absolute WORLD positions right
+    // after freezing, before any further Transform motion.
+    Vec3 tipWorldPosBeforeDrag;
     Vec3 rootWorldPosBeforeDrag;
     {
         const ResolvedAnimationPose* pose = registry.TryGetComponent<ResolvedAnimationPose>(entity);
         ASSERT_NE(pose, nullptr);
-        rootRelativeOffsetBeforeDrag = ReconstructRootRelativeTipOffset(registry, entity, data.skeleton, pose->pose);
+        tipWorldPosBeforeDrag = ReconstructTipWorldPosition(registry, entity, data.skeleton, pose->pose, kTipBoneIndex);
         rootWorldPosBeforeDrag
             = ReconstructTipWorldPosition(registry, entity, data.skeleton, pose->pose, kChainRootBoneIndex);
     }
 
     // A small, plausible per-frame drag delta, scaled to this synthetic
     // chain's own bind length (unit-length segments) rather than to the
-    // teleport-guard's own (much larger) maxPlausibleRootDelta threshold -
-    // ApplyDynamicChainPhysicsToPose() only ever corrects a bone's
-    // ROTATION at a FIXED bind length (see BoneChainPhysicsResolver.cpp),
-    // so a drag delta many times larger than the chain's own segment length
-    // would swing the corrected direction almost entirely toward the drag
-    // itself rather than preserving the chain's own shape - not a bug, just
-    // the expected behavior of a direction-only correction at a fixed rod
-    // length, and not representative of an ordinary small mouse-drag step.
+    // teleport-guard's own (much larger) maxPlausibleRootDelta threshold.
     const Vec3 dragDelta(0.1f, 0.0f, 0.0f);
     transform.position += dragDelta;
     physicsSystem.Update(registry, 1.0 / 60.0);
 
     const ResolvedAnimationPose* poseAfterDrag = registry.TryGetComponent<ResolvedAnimationPose>(entity);
     ASSERT_NE(poseAfterDrag, nullptr);
-    const Vec3 rootRelativeOffsetAfterDrag
-        = ReconstructRootRelativeTipOffset(registry, entity, data.skeleton, poseAfterDrag->pose);
+    const Vec3 tipWorldPosAfterDrag
+        = ReconstructTipWorldPosition(registry, entity, data.skeleton, poseAfterDrag->pose, kTipBoneIndex);
     const Vec3 rootWorldPosAfterDrag
         = ReconstructTipWorldPosition(registry, entity, data.skeleton, poseAfterDrag->pose, kChainRootBoneIndex);
 
-    // 1. The chain's own root bone ALWAYS moves perfectly rigidly with the
-    // entity's Transform, frozen or not (its own pose entry only ever has
-    // its rotation corrected by physics, never its translation) - this is
-    // what actually makes the whole chain "ride along" at all.
+    // 1. The chain's own root (anchor) bone ALWAYS moves perfectly rigidly
+    // with the entity's Transform, frozen or not - PhysicsSystem::Update()
+    // never writes to its pose entry at all, neither rotation nor
+    // translation (see BoneChainPhysicsResolver.cpp's
+    // ApplyDynamicChainPhysicsToPose(), task_manager/verlet-integration-8,
+    // Phase 1).
     EXPECT_TRUE(ApproximatelyEqual(rootWorldPosAfterDrag - rootWorldPosBeforeDrag, dragDelta, 1e-3f))
         << "The chain's own root bone did not move rigidly with the entity's Transform drag.";
 
-    // 2. The chain's SHAPE (root-relative tip offset) must stay
-    // approximately the same across the freeze+drag - it must NOT collapse
-    // toward zero (which would mean the tip snapped back to sit exactly on
-    // top of the moved root) nor swing toward pointing at the drag
-    // direction (which would mean the tip stayed pinned at its old,
-    // pre-drag absolute world spot while the root moved out from under it).
-    EXPECT_LT(Length(rootRelativeOffsetAfterDrag - rootRelativeOffsetBeforeDrag), 0.5f * Length(dragDelta))
-        << "A frozen chain's shape (root-relative tip offset) changed by more than half the drag delta - it is "
-           "not correctly riding along rigidly with the model.";
+    // 2. task_manager/verlet-integration-8, Phase 1/3 - the chain's TIP, by
+    // contrast, stays PINNED at its last real, simulated, absolute WORLD
+    // position while frozen, regardless of the drag - a mathematically exact
+    // consequence of Phase 1's exact translation-based anchor-child
+    // correction canceling the entity transform, proven above this test.
+    // This REPLACES the pre-Phase-1 "root-relative offset changes by less
+    // than half the drag delta" assertion, which relied on the OLD
+    // approximate, direction-only correction's own incidental behavior.
+    EXPECT_LT(Length(tipWorldPosAfterDrag - tipWorldPosBeforeDrag), 1e-3f)
+        << "A frozen chain's tip must stay pinned at its last simulated world position across a Transform drag - "
+           "see this test's own comment for the exact reason this is now provably true.";
 }
 
 TEST(PhysicsSystemFreezeAndCulpritFTests, UnfreezingResetsAccumulatedSecondsSoNoCatchUpBurstOccurs)

@@ -1213,7 +1213,39 @@
 #                                            real *.gta AssetType::Animation
 #                                            file through AnimationSystem::
 #                                            Play()).
-#
+#   Game/Physics/PhysicsSystemAnchorRigidityRegressionTests.cpp -
+#                                            task_manager/verlet-integration-8
+#                                            campaign (src/Physics/
+#                                            BoneChainPhysicsResolver.cpp,
+#                                            Phase 1): the full end-to-end
+#                                            regression test for "whole body
+#                                            looks ragdoll-simulated" (see
+#                                            task_manager/verlet-integration-7/
+#                                            INVESTIGATION_FULL_BODY_DISTORTION_ON_TRANSFORM_DRAG.md) -
+#                                            a synthetic rig whose chain
+#                                            anchor is ALSO a real,
+#                                            non-participating FK body bone
+#                                            (a stand-in for MMD's own
+#                                            下半身/legs) with FIVE
+#                                            independent Dynamic accessory
+#                                            joints hubbed directly off that
+#                                            same anchor (a stand-in for the
+#                                            reported model's ~23-25
+#                                            "(root child)" hair/skirt
+#                                            strands), driven through the
+#                                            REAL PhysicsSystem::Update()
+#                                            for 300 continuous frames and
+#                                            across a live
+#                                            Transform.position drag -
+#                                            proves the "leg" bone's own
+#                                            local pose (both rotation AND
+#                                            translation) never moves at
+#                                            all, regardless of how many
+#                                            accessories hub off its parent
+#                                            anchor or how the entity's
+#                                            Transform is dragged. No
+#                                            GPU/Renderer/ImGui involved
+#                                            beyond a plain Registry.
 #
 # Note that the test BINARY still dynamically depends on SDL3.dll at process
 # load time regardless of the above (gte_core's Window.cpp references SDL
@@ -1329,6 +1361,7 @@ set(GTE_TEST_SOURCES
     Game/Physics/PhysicsSystemParallelTests.cpp
     Game/Physics/PhysicsSystemWorldSpaceRootMotionTests.cpp
     Game/Physics/PhysicsSystemFreezeAndCulpritFTests.cpp
+    Game/Physics/PhysicsSystemAnchorRigidityRegressionTests.cpp
     Animation/BoneChainResolverTests.cpp
     Animation/BonePoseMathTests.cpp
     Animation/SkeletonPoseTests.cpp
