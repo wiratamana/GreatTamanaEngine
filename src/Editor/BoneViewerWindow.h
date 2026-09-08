@@ -159,6 +159,14 @@ private:
         // has something to compare against - never drawn/used for anything
         // else in this window.
         std::uint8_t group = 0;
+        // task_manager/verlet-integration-9, PHASE5 - lets the Verlet
+        // overlay (BuildOverlayGeometry()'s own Verlet branch) filter down
+        // to exactly the bodies DetectModelColliders() (Physics/
+        // ModelColliderDetection.h) would treat as a real collision
+        // obstacle (RigidBodyMotionType::Static) - mirrors that function's
+        // own eligibility rule so the Bone Viewer's preview never shows a
+        // shape that will not actually collide with anything at runtime.
+        RigidBodyMotionType motionType = RigidBodyMotionType::Static;
     };
 
     // One joint, flattened for overlay drawing.

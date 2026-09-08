@@ -411,7 +411,7 @@ bool BoneViewerWindow::EnsureDataLoaded(
         m_rigidBodies.reserve(rig->physics.rigidBodies.size());
         for (const RigidBody& body : rig->physics.rigidBodies) {
             m_rigidBodies.push_back(RigidBodyEntry{ body.name, body.translate, body.rotateRadians, body.shape,
-                body.shapeSize, body.boneIndex, body.group });
+                body.shapeSize, body.boneIndex, body.group, body.motionType });
         }
 
         m_joints.reserve(rig->physics.joints.size());
@@ -733,13 +733,14 @@ void BoneViewerWindow::RenderVerletChainNode(std::int32_t chainIndex, const Dyna
             }
             RenderFlatPartRow(ModelPartKind::Verlet, boneIndex, label, bone.position, lowerFilter, ctx);
         }
-        // task_manager/verlet-integration-9 - minimal transitional compile
-        // fix: the old head-collider bone/radius readout no longer has a
-        // backing field (see Physics/DynamicChainDefinition.h's own
-        // collisionEnabled replacement). PHASE5 will replace this with a
-        // proper collider-count readout.
+        // task_manager/verlet-integration-9, PHASE5 - replaces the old
+        // per-chain single-sphere "Head Collider" readout - collision is
+        // now a plain per-chain opt-in against the whole model's
+        // auto-detected Static rigid-body list (drawn once for the whole
+        // model, not per chain - see BuildOverlayGeometry()'s own Verlet
+        // branch / Step 3.4 below).
         if (chain.collisionEnabled) {
-            ImGui::TextDisabled("Collision: enabled (against model's shared collider list)");
+            ImGui::TextDisabled("Collision: enabled (collides against this model's auto-detected colliders)");
         }
         ImGui::TreePop();
     }
@@ -1496,18 +1497,39 @@ void BoneViewerWindow::Build(
                                 drawList->AddLine(screenA, screenB, IM_COL32(120, 200, 255, 110), 1.0f);
                             }
                         }
-                        // task_manager/verlet-integration-9 - the old
-                        // per-chain head-collider wireframe (Sphere shape
-                        // only) was removed here: its backing fields
-                        // (DynamicChainDefinition::hasHeadCollider/
-                        // headColliderBoneIndex/headColliderRadius) no
-                        // longer exist, replaced by a single
-                        // `collisionEnabled` flag plus a shared, model-wide,
-                        // mixed-shape collider list (see
-                        // Physics/ModelColliderDefinition.h, PHASE3/PHASE4).
-                        // A real overlay of that shared list is left to
-                        // PHASE5's own Editor UI update - this is a minimal,
-                        // transitional compile fix only.
+                    }
+                    // task_manager/verlet-integration-9, PHASE5 (v2) -
+                    // replaces the old PER-CHAIN single-sphere
+                    // "head collider" wireframe with a single, PER-MODEL
+                    // pass over every genuinely auto-detected Static
+                    // rigid-body collider (Physics/ModelColliderDetection.h's
+                    // own eligibility rule, mirrored here via `motionType`)
+                    // - drawn exactly ONCE per model regardless of how many
+                    // chains have collisionEnabled, since the collider list
+                    // itself is shared/model-wide, not owned by any one
+                    // chain (see PHASE0_MASTER_STRATEGY.md's "one shared
+                    // model-wide collider list" rationale). Reuses the SAME
+                    // BuildRigidBodyWireframe() call this window's own
+                    // "Rigid Body" view mode already makes (see this
+                    // function's own m_viewMode == ModelPartKind::RigidBody
+                    // branch) - translate/rotateRadians are already an
+                    // absolute model-space bind-pose transform
+                    // (PhysicsData.h), so no bone-world-matrix tracking is
+                    // needed for this static preview, exactly like that
+                    // existing branch.
+                    for (const RigidBodyEntry& body : m_rigidBodies) {
+                        if (body.motionType != RigidBodyMotionType::Static) {
+                            continue;
+                        }
+                        const std::vector<WireframeSegment> wireframe =
+                            BuildRigidBodyWireframe(body.shape, body.shapeSize, body.translate, body.rotateRadians);
+                        for (const WireframeSegment& segment : wireframe) {
+                            ImVec2 screenA, screenB;
+                            if (ProjectToScreen(segment.a, viewProj, imageMin, imageMax, screenA)
+                                && ProjectToScreen(segment.b, viewProj, imageMin, imageMax, screenB)) {
+                                drawList->AddLine(screenA, screenB, IM_COL32(255, 90, 170, 90), 1.25f);
+                            }
+                        }
                     }
                     // task_manager/verlet-integration-6, Phase 5, 3.2 - orphaned
                     // (non-simulated) rigid-body bones, per the user's own

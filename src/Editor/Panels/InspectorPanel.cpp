@@ -457,13 +457,22 @@ void BuildModelPartInspector(Registry& registry, EditorContext& ctx, ModelRigCac
         ImGui::TextColored(ImVec4(0.55f, 0.75f, 1.0f, 1.0f), "Chain-Wide Settings");
         ImGui::DragFloat("Gravity Scale", &chain.gravityScale, 0.01f, 0.0f, 10.0f);
         ImGui::DragFloat("Wind Scale", &chain.windScale, 0.01f, 0.0f, 10.0f);
-        // task_manager/verlet-integration-9 - minimal transitional compile
-        // fix: the old "Head Collider" bone/radius controls no longer have a
-        // backing field (see Physics/DynamicChainDefinition.h's own
-        // collisionEnabled replacement). PHASE5 will replace this with a
-        // proper collider-count readout; for now this is just the one
-        // remaining opt-in checkbox.
-        ImGui::Checkbox("Collision Enabled", &chain.collisionEnabled);
+        // task_manager/verlet-integration-9, PHASE5 - replaces the old
+        // "Head Collider" single-sphere bone-index/radius pair entirely.
+        // Collision now automatically targets EVERY Static rigid body
+        // (Sphere/Box/Capsule) the model's own PMX data describes (see
+        // Physics/ModelColliderDetection.h) - there is nothing left to
+        // hand-author beyond this one opt-in checkbox.
+        ImGui::Checkbox("Enable Collision", &chain.collisionEnabled);
+        if (chain.collisionEnabled) {
+            ImGui::TextDisabled(
+                "Collides against every auto-detected Static rigid body for this model (%zu total).",
+                model->colliders.size());
+            if (model->colliders.empty()) {
+                ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f),
+                    "This model has no detected Static rigid-body colliders - enabling this has no effect.");
+            }
+        }
         break;
     }
     }
@@ -631,13 +640,22 @@ void BuildEntityInspector(Registry& registry, EditorContext& ctx, PhysicsSystem&
                             ImGui::PopID();
                         }
 
-                        // task_manager/verlet-integration-9 - minimal
-                        // transitional compile fix (see this file's own
-                        // earlier occurrence above for the full rationale) -
-                        // PHASE5 will replace this with a proper
-                        // collider-count readout.
+                        // task_manager/verlet-integration-9, PHASE5 -
+                        // replaces the old "Head Collider" single-sphere
+                        // bone-index/radius pair entirely - see
+                        // Physics/DynamicChainDefinition.h's own
+                        // `collisionEnabled` doc comment.
                         ImGui::Separator();
-                        ImGui::Checkbox("Collision Enabled", &chain.collisionEnabled);
+                        ImGui::Checkbox("Enable Collision", &chain.collisionEnabled);
+                        if (chain.collisionEnabled) {
+                            ImGui::TextDisabled(
+                                "Collides against every auto-detected Static rigid body for this model (%zu total).",
+                                model->colliders.size());
+                            if (model->colliders.empty()) {
+                                ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f),
+                                    "This model has no detected Static rigid-body colliders - enabling this has no effect.");
+                            }
+                        }
                         ImGui::TreePop();
                     }
                     ImGui::PopID();
