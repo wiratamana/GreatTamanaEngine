@@ -92,6 +92,27 @@ TEST(DynamicChainSolverCollisionGroupFilterTests, JointAndColliderInSameGroupDoC
 // pairing (collider's mask has bit 3 clear), must NOT collide - a genuine
 // regression guard proving the GROUP filter itself, not merely the ordinary
 // collisionEnabled == false no-op (collisionEnabled is explicitly true here).
+//
+// task_manager/verlet-integration-10, PHASE5 - this test's own original
+// geometry (a settling gravity pendulum) was found to be unreliable: the
+// joint's own natural resting position ends up OUTSIDE the collider's own
+// radius regardless of whether the group filter actually blocked anything,
+// making this test pass/fail for the wrong reason (a pure geometry-selection
+// mistake, confirmed and left flagged by this campaign's own PHASE2/PHASE3/
+// PHASE4 completion reports for this phase to fix). Rebuilt using the same
+// "deep initial penetration, zero gravity, zero stiffness" deterministic
+// technique tests/Game/Physics/PhysicsSystemMultiShapeColliderTests.cpp's own
+// fixture already established: the joint particle SEEDS exactly at the
+// collider's own center (SeedParticlesFromAnimatedPose() seeds
+// particle.position = animatedJointWorldPositions[i] on the very first
+// call), with a rest length exactly matching the root-to-target distance (so
+// the structural constraint is already satisfied and never moves it) and
+// zero gravity/goal-constraint pull (so NOTHING besides collision can ever
+// move the particle away from the collider's own center) - if the group
+// filter genuinely blocks this pair, the particle must stay exactly at the
+// collider's center (distance 0); if it doesn't, it gets pushed out to the
+// surface (distance == radius) exactly like the sibling
+// JointAndColliderInSameGroupDoCollide test above already proves.
 TEST(DynamicChainSolverCollisionGroupFilterTests, JointAndColliderInDifferentGroupsWithNoOverlapDoNotCollide)
 {
     DynamicChainDefinition definition = BuildOneJointChainDefinition(/*group=*/3, /*mask=*/0xFFFF);
@@ -99,15 +120,16 @@ TEST(DynamicChainSolverCollisionGroupFilterTests, JointAndColliderInDifferentGro
 
     DynamicChainRuntimeState state;
     const Vec3 root(0.0f, 0.0f, 0.0f);
-    const std::vector<Vec3> targets = { Vec3(1.0f, 0.0f, 0.0f) };
-    const Vec3 gravity(0.0f, -9.8f, 0.0f);
+    const Vec3 jointTarget(1.0f, 0.0f, 0.0f); // == restLengths[0] (1.0) away from root - the distance constraint is already satisfied.
+    const std::vector<Vec3> targets = { jointTarget };
+    const Vec3 gravity(0.0f, 0.0f, 0.0f); // zero - see this test's own header comment above for why determinism requires this.
     const WindSettings noWind{};
 
     Collider collider;
     collider.shape = ColliderShape::Sphere;
-    collider.center = Vec3(1.0f, -0.5f, 0.0f);
+    collider.center = jointTarget; // deep, deliberate initial penetration - the particle seeds exactly at the collider's own center.
     collider.rotation = Quat::Identity();
-    collider.size = Vec3(1.0f, 0.0f, 0.0f);
+    collider.size = Vec3(0.5f, 0.0f, 0.0f);
     collider.group = 5;
     collider.collisionMask = 0x0000; // Bit 3 (the joint's own group) is clear - filter must block this pair.
     const std::vector<Collider> colliders = { collider };
@@ -118,7 +140,8 @@ TEST(DynamicChainSolverCollisionGroupFilterTests, JointAndColliderInDifferentGro
 
     const float distanceFromColliderCenter = Length(state.particles[0].position - collider.center);
     EXPECT_LT(distanceFromColliderCenter, collider.size.x - 1e-3f)
-        << "The group filter must have blocked this pair, so the joint should have penetrated the sphere freely.";
+        << "The group filter must have blocked this pair, so the joint should have stayed exactly at the collider's "
+           "own center, deep inside it, with nothing else in this fixture able to move it away.";
 }
 
 // Proves the AND is genuinely SYMMETRIC (both sides must allow each other),

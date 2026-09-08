@@ -124,11 +124,31 @@ SkinnedMeshData BuildFixture(const Vec3& jointBonePosition, const Vec3& collider
     RigidBody jointBody;
     jointBody.boneIndex = kJointBoneIndex;
     jointBody.motionType = RigidBodyMotionType::Dynamic;
+    // task_manager/verlet-integration-10, PHASE1/PHASE5 - RigidBody::
+    // collisionGroupMask's own default member-initializer is 0 ("collides
+    // with nothing"), NOT the "collides with everything" convenience
+    // Collider/DynamicJointSettings default to for a hand-built fixture that
+    // never populates these fields at all (see Physics/Collider.h's own
+    // doc comment) - RigidBody faithfully preserves whatever a REAL PMX file
+    // said, verbatim, even a literal 0 (see
+    // tests/Physics/ModelColliderDetectionGroupMaskTests.cpp's own
+    // "DefaultZeroGroupAndDefaultZeroMaskAreStillCopiedVerbatimNotSilentlyReplaced"
+    // test for why that is correct and deliberate). This file's own hand-built
+    // joint bodies pre-date that campaign and never populated this field,
+    // implicitly relying on collision filtering not existing yet - now that
+    // DynamicChainDetection.cpp's Step G copies this value verbatim into
+    // DynamicJointSettings::collisionMask, an unset 0 here would silently
+    // block ALL collision for this joint, breaking this file's own
+    // pre-existing "collision resolution actually happens" assertions. Set
+    // explicitly to reproduce the old (pre-PHASE1), "collides with
+    // everything" behavior this file's own tests have always depended on.
+    jointBody.collisionGroupMask = 0xFFFF;
     physics.rigidBodies.push_back(jointBody); // 1
 
     RigidBody secondJointBody;
     secondJointBody.boneIndex = kSecondJointBoneIndex;
     secondJointBody.motionType = RigidBodyMotionType::Dynamic;
+    secondJointBody.collisionGroupMask = 0xFFFF; // see jointBody's own comment above - same reproduced-old-behavior reasoning.
     physics.rigidBodies.push_back(secondJointBody); // 2
 
     Joint anchorToJoint;
@@ -148,6 +168,7 @@ SkinnedMeshData BuildFixture(const Vec3& jointBonePosition, const Vec3& collider
     colliderBody.shapeSize = shapeSize;
     colliderBody.translate = bodyTranslate;
     colliderBody.rotateRadians = bodyRotateRadians;
+    colliderBody.collisionGroupMask = 0xFFFF; // see jointBody's own comment above - the STATIC side of the same filter.
     physics.rigidBodies.push_back(colliderBody); // 3 - not referenced by any Joint.
 
     data.physics = std::move(physics);

@@ -61,6 +61,27 @@ namespace {
 // an established convention in this codebase - see e.g. RotationFromPmxEuler()
 // being independently redeclared in several different .cpp files, each
 // cross-referencing the others).
+// task_manager/verlet-integration-10, PHASE1/PHASE5 - RigidBody::
+// collisionGroupMask's own default member-initializer is 0 ("collides with
+// nothing"), NOT the "collides with everything" convenience Collider/
+// DynamicJointSettings default to for a hand-built fixture that never
+// populates these fields at all (see Physics/Collider.h's own doc comment) -
+// RigidBody faithfully preserves whatever a REAL PMX file said, verbatim,
+// even a literal 0 (see tests/Physics/ModelColliderDetectionGroupMaskTests.cpp's
+// own "DefaultZeroGroupAndDefaultZeroMaskAreStillCopiedVerbatimNotSilentlyReplaced"
+// test for why that is correct and deliberate). This file predates that
+// campaign and never populated this field on any of its own hand-built
+// bodies, implicitly relying on collision-group filtering not existing yet -
+// now that DynamicChainDetection.cpp's Step G (joints) and
+// ModelColliderDetection.cpp (Static colliders) both copy this value
+// verbatim, an unset 0 here would silently block ALL collision in every test
+// in this file, breaking its own pre-existing "collision resolution actually
+// happens" assertions. MakeRigidBody() itself sets it to 0xFFFF
+// unconditionally below (rather than at each individual call site) precisely
+// because EVERY rigid body this file ever builds - joint or collider alike -
+// needs "collides with everything" to reproduce this file's own pre-PHASE1
+// behavior; no test in this file exercises PHASE1's group/mask filtering
+// itself (see DynamicChainSolverCollisionGroupFilterTests.cpp for that).
 RigidBody MakeRigidBody(std::int32_t boneIndex, RigidBodyMotionType motionType, RigidBodyShape shape,
     const Vec3& shapeSize, const Vec3& translate = Vec3::Zero(), const Vec3& rotateRadians = Vec3::Zero())
 {
@@ -71,6 +92,7 @@ RigidBody MakeRigidBody(std::int32_t boneIndex, RigidBodyMotionType motionType, 
     body.shapeSize = shapeSize;
     body.translate = translate;
     body.rotateRadians = rotateRadians;
+    body.collisionGroupMask = 0xFFFF;
     return body;
 }
 

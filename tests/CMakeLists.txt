@@ -1410,6 +1410,44 @@
 #                                            actually penetrate at least one
 #                                            collider. No GPU/Renderer/ImGui
 #                                            involved beyond a plain Registry.
+#   Game/Physics/PhysicsSystemCollisionGroupAndRadiusEndToEndTests.cpp -
+#                                            task_manager/verlet-integration-10
+#                                            PHASE5, the campaign's own final,
+#                                            real, FULL-PIPELINE regression
+#                                            test proving PHASE1 (PMX
+#                                            collision-group/layer filtering),
+#                                            PHASE2 (a joint's own PMX
+#                                            rigid-body shape as its collision
+#                                            radius), and PHASE3 (collision
+#                                            enabled ON by default) all work
+#                                            correctly TOGETHER, driven end to
+#                                            end through the REAL
+#                                            RegisterDynamicChains() ->
+#                                            AttachDynamicChainRigIfNeeded()
+#                                            -> Update() pipeline: a 2-joint
+#                                            chain where one joint's own PMX
+#                                            collision-group/mask rule
+#                                            genuinely blocks it from one
+#                                            Static collider (confirmed to
+#                                            still genuinely penetrate it)
+#                                            while its sibling joint (an
+#                                            unrestricted mask) and both
+#                                            joints' own ordinary interaction
+#                                            with a second, unrestricted
+#                                            collider are resolved normally,
+#                                            with PHASE2's own radius
+#                                            inflation explicitly measured. A
+#                                            second test proves an
+#                                            out-of-documented-range PMX
+#                                            `group` byte produces an outcome
+#                                            IDENTICAL to the same fixture
+#                                            authored with the legitimate,
+#                                            in-range value sharing its low 4
+#                                            bits, through the FULL pipeline
+#                                            (not just PHASE1's own isolated
+#                                            solver-level unit test). No
+#                                            GPU/Renderer/ImGui involved
+#                                            beyond a plain Registry.
 #
 # Note that the test BINARY still dynamically depends on SDL3.dll at process
 # load time regardless of the above (gte_core's Window.cpp references SDL
@@ -1528,6 +1566,7 @@ set(GTE_TEST_SOURCES
     Game/Physics/PhysicsSystemFreezeAndCulpritFTests.cpp
     Game/Physics/PhysicsSystemAnchorRigidityRegressionTests.cpp
     Game/Physics/PhysicsSystemMultiShapeColliderTests.cpp
+    Game/Physics/PhysicsSystemCollisionGroupAndRadiusEndToEndTests.cpp
     Animation/BoneChainResolverTests.cpp
     Animation/BonePoseMathTests.cpp
     Animation/SkeletonPoseTests.cpp
