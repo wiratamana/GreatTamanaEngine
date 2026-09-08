@@ -1561,6 +1561,7 @@ set(GTE_TEST_SOURCES
     Game/GameLoopPhysicsWithoutAnimationTests.cpp
     Game/Physics/PhysicsSystemTests.cpp
     Game/Physics/DynamicChainPhysicsPersistenceTests.cpp
+    Game/Physics/PhysicsSystemJointOverrideEndToEndTests.cpp
     Game/Physics/DynamicChainRigCacheTests.cpp
     Game/Physics/PhysicsSystemParallelTests.cpp
     Game/Physics/PhysicsSystemWorldSpaceRootMotionTests.cpp
