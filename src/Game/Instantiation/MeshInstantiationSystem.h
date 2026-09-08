@@ -56,6 +56,16 @@ public:
         return m_meshAssetCatalog.TryGetSkinnedMeshData(absoluteGtaPath);
     }
 
+    // task_manager/verlet-integration-11, PHASE3 - forwards straight to
+    // MeshAssetGpuCatalog::RefreshCachedJointPhysicsOverridesFromDisk() (see its
+    // own doc comment for the full contract) - NOT const, since it mutates the
+    // underlying cache, unlike TryGetMeshAssetParts()/TryGetSkinnedMeshData()
+    // above.
+    bool RefreshCachedJointPhysicsOverridesFromDisk(const std::string& absoluteGtaPath)
+    {
+        return m_meshAssetCatalog.RefreshCachedJointPhysicsOverridesFromDisk(absoluteGtaPath);
+    }
+
 private:
     RenderSystem& m_renderSystem;
     PrimitiveGpuCatalog m_primitiveCatalog;

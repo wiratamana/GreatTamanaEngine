@@ -90,6 +90,29 @@ public:
     const std::vector<MeshAssetPart>* TryGetParts(const std::string& absoluteGtaPath) const;
     const SkinnedMeshData* TryGetSkinnedMeshData(const std::string& absoluteGtaPath) const;
 
+    // task_manager/verlet-integration-11, PHASE3 - re-reads ONLY the *.gta's
+    // metadata's trailing jointPhysicsOverrides section (see Assets/RigFile.h,
+    // PHASE1) for `absoluteGtaPath` and updates the ALREADY-CACHED
+    // SkinnedMeshData for that exact path in place - never the mesh payload,
+    // skeleton, skin weights, morphs, materials, or any GPU resource. Called by
+    // Editor/Panels/InspectorPanel.cpp (via MeshInstantiationSystem's own
+    // forwarding accessor, PHASE3) immediately after
+    // SaveJointPhysicsOverridesToGtaFile() (PHASE4) succeeds, so a model
+    // respawned LATER IN THE SAME SESSION (not just after a full engine
+    // restart) also picks up the just-saved values - see
+    // PHASE0_MASTER_STRATEGY.md, Step 2.5, for why EnsureMeshAsset()'s own
+    // "once per distinct path, then cached forever" contract otherwise leaves
+    // an already-loaded path's cached SkinnedMeshData permanently stale.
+    //
+    // Returns false (and touches nothing) if `absoluteGtaPath` has never been
+    // cached by this MeshAssetGpuCatalog instance (nothing to keep in sync yet -
+    // that path's own eventual FIRST EnsureMeshAsset() call will read the
+    // freshly-saved file correctly on its own regardless), or if the file can't
+    // be read/decoded as a valid Mesh *.gta with decodable rig metadata (the
+    // existing cached entry is left untouched rather than being corrupted or
+    // cleared - a failed refresh is a silent no-op, never destructive).
+    bool RefreshCachedJointPhysicsOverridesFromDisk(const std::string& absoluteGtaPath);
+
 private:
     PipelineHandle EnsureMeshPipeline(RenderSystem& renderSystem, Renderer& renderer);
     PipelineHandle EnsureTexturedMeshPipeline(RenderSystem& renderSystem, Renderer& renderer);

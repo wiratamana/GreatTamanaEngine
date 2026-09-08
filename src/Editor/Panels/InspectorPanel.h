@@ -5,6 +5,7 @@ namespace gte {
 class Registry;
 class Renderer;
 class PhysicsSystem;
+class MeshInstantiationSystem;
 struct EditorContext;
 #if GTE_ENABLE_PROJECT_PANEL
 class AssetPreviewTexture;
@@ -67,12 +68,19 @@ class ModelRigCache;
 // task_manager/verlet-integration-1/PHASE4_PARAMETER_AUTHORING_AND_DATA_DRIVEN_CONFIG.md,
 // 3.5) exists in EVERY signature (not gated behind GTE_ENABLE_PROJECT_PANEL)
 // - it backs the "Dynamic Chain Physics" section shown for any entity
-// carrying a DynamicChainRig component.
+// carrying a DynamicChainRig component. `meshInstantiationSystem`
+// (task_manager/verlet-integration-11, PHASE3) also exists in EVERY
+// signature for the same reason - it lets the "Save Joint Physics to Asset"
+// button (PHASE4) refresh this session's already-cached SkinnedMeshData via
+// MeshInstantiationSystem::RefreshCachedJointPhysicsOverridesFromDisk() right
+// after a successful save.
 #if GTE_ENABLE_PROJECT_PANEL
 void BuildInspectorPanel(Registry& registry, EditorContext& ctx, Renderer& renderer, AssetPreviewTexture& assetPreview,
-    AssetPreviewMesh& assetPreviewMesh, BoneViewerWindow& boneViewer, PhysicsSystem& physicsSystem, ModelRigCache& rigCache);
+    AssetPreviewMesh& assetPreviewMesh, BoneViewerWindow& boneViewer, PhysicsSystem& physicsSystem,
+    MeshInstantiationSystem& meshInstantiationSystem, ModelRigCache& rigCache);
 #else
-void BuildInspectorPanel(Registry& registry, EditorContext& ctx, PhysicsSystem& physicsSystem);
+void BuildInspectorPanel(Registry& registry, EditorContext& ctx, PhysicsSystem& physicsSystem,
+    MeshInstantiationSystem& meshInstantiationSystem);
 #endif
 
 } // namespace gte

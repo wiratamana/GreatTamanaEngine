@@ -10,6 +10,7 @@
 #include "../../ECS/Registry.h"
 #include "../../ECS/TransformHierarchy.h"
 #include "../../Game/Physics/PhysicsSystem.h"
+#include "../../Game/Instantiation/MeshInstantiationSystem.h"
 #include "../../Physics/DynamicChainDefinition.h"
 
 #if GTE_ENABLE_PROJECT_PANEL
@@ -1308,9 +1309,11 @@ void BuildAssetInspector(
 
 #if GTE_ENABLE_PROJECT_PANEL
 void BuildInspectorPanel(Registry& registry, EditorContext& ctx, Renderer& renderer, AssetPreviewTexture& assetPreview,
-    AssetPreviewMesh& assetPreviewMesh, BoneViewerWindow& boneViewer, PhysicsSystem& physicsSystem, ModelRigCache& rigCache)
+    AssetPreviewMesh& assetPreviewMesh, BoneViewerWindow& boneViewer, PhysicsSystem& physicsSystem,
+    MeshInstantiationSystem& meshInstantiationSystem, ModelRigCache& rigCache)
 #else
-void BuildInspectorPanel(Registry& registry, EditorContext& ctx, PhysicsSystem& physicsSystem)
+void BuildInspectorPanel(Registry& registry, EditorContext& ctx, PhysicsSystem& physicsSystem,
+    MeshInstantiationSystem& meshInstantiationSystem)
 #endif
 {
     ImGui::Begin("Inspector");

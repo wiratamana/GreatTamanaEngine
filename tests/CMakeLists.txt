@@ -1550,6 +1550,7 @@ set(GTE_TEST_SOURCES
     ECS/TransformHierarchyTests.cpp
     Game/RenderSystemTests.cpp
     Game/EntityInstantiatorTests.cpp
+    Game/Instantiation/MeshAssetGpuCatalogJointOverrideRefreshTests.cpp
     Game/MeshVertexPackingTests.cpp
     Game/MeshMaterialPartitionerTests.cpp
     Game/SkeletalRigCacheTests.cpp

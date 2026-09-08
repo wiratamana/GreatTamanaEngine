@@ -83,6 +83,15 @@ public:
     // the current (read-only) GlobalPhysicsSettings.
     PhysicsSystem& GetPhysicsSystem() noexcept { return m_physicsSystem; }
 
+    // Editor-facing accessor (task_manager/verlet-integration-11, PHASE3) -
+    // mirrors GetPhysicsSystem()'s own "Editor observes/acts through a public
+    // accessor" convention, this time so the Inspector's "Save Joint Physics to
+    // Asset" button (PHASE4) can keep THIS SESSION'S already-cached
+    // SkinnedMeshData in sync with whatever it just wrote to disk - see
+    // MeshInstantiationSystem::RefreshCachedJointPhysicsOverridesFromDisk()'s own
+    // doc comment for the full contract this forwards to.
+    MeshInstantiationSystem& GetMeshInstantiationSystem() noexcept { return m_meshInstantiationSystem; }
+
     // Spawns a new entity built from one of the engine's built-in primitive
     // shapes (PrimitiveType - see Renderer/Primitives/
     // PrimitiveMeshGenerator.h): a Transform at the origin (identity

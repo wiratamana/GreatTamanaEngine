@@ -269,4 +269,24 @@ const SkinnedMeshData* MeshAssetGpuCatalog::TryGetSkinnedMeshData(const std::str
     return found != m_skinnedMeshCache.end() ? &found->second : nullptr;
 }
 
+bool MeshAssetGpuCatalog::RefreshCachedJointPhysicsOverridesFromDisk(const std::string& absoluteGtaPath)
+{
+    const auto found = m_skinnedMeshCache.find(absoluteGtaPath);
+    if (found == m_skinnedMeshCache.end()) {
+        return false; // Never cached this session - nothing to refresh (see this method's own header comment).
+    }
+
+    const std::optional<GtaFileData> gta = ReadGtaFile(Utf8PathFromGamePath(absoluteGtaPath));
+    if (!gta.has_value() || gta->header.Type() != AssetType::Mesh) {
+        return false; // Leave the existing cached entry exactly as it was - never clear/corrupt it on a failed refresh.
+    }
+    const std::optional<RigFileData> rig = DecodeRigDataFromBytes(gta->metadata);
+    if (!rig.has_value()) {
+        return false;
+    }
+
+    found->second.jointPhysicsOverrides = rig->jointPhysicsOverrides;
+    return true;
+}
+
 } // namespace gte
