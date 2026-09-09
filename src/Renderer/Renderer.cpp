@@ -2,8 +2,10 @@
 
 #include "../Window/Window.h"
 #include "RenderGraph/RenderGraph.h"
+#include "RenderGraph/RenderGraphBarrierPlanner.h"
 
 #include <cassert>
+#include <cstring>
 #include <memory>
 #include <utility>
 
@@ -159,6 +161,56 @@ RenderTexture Renderer::CreateRenderTexture(int width, int height, VkFormat form
     const VkFormat resolvedFormat = (format == VK_FORMAT_UNDEFINED) ? ColorFormat() : format;
     return m_resources.CreateRenderTexture(
         width, height, resolvedFormat, debugName, depthDebugName, allowStorageImageAccess);
+}
+
+Renderer::CapturedRawPixels Renderer::CaptureRenderTexturePixels(RenderTexture& texture) const
+{
+    const VkExtent2D extent = texture.Extent();
+    const VkDeviceSize size = VkDeviceSize(extent.width) * extent.height * 4;
+
+    // Throwaway, on-demand readback buffer - deliberately NOT kept alive
+    // past this function (see Renderer.h's own doc comment on this method).
+    Buffer readback = CreateBuffer(size, VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemoryUsage::GpuToCpu, "CaptureReadback");
+
+    const VkImageSubresourceRange colorRange{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+    const rg::ResourceState shaderReadState = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
+    const rg::ResourceState transferSrcState = rg::RequiredStateFor(rg::ResourceAccess::TransferSrc, false);
+
+    ImmediateSubmit([&](VkCommandBuffer cmd) {
+        // texture -> TRANSFER_SRC_OPTIMAL (from the SHADER_READ_ONLY_OPTIMAL
+        // state RenderOffscreen()/the render-graph offscreen regime always
+        // leaves it in).
+        rg::EmitImageBarrier(cmd, texture.Image(), colorRange, shaderReadState, transferSrcState);
+
+        VkBufferImageCopy region{};
+        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        region.imageSubresource.layerCount = 1;
+        region.imageExtent = { extent.width, extent.height, 1 };
+        vkCmdCopyImageToBuffer(cmd, texture.Image(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback.Native(), 1, &region);
+
+        // Host-read visibility: a fence wait alone (ImmediateSubmit()'s own
+        // wait, below) guarantees the GPU write finished EXECUTING, but the
+        // Vulkan spec still requires an explicit memory dependency whose
+        // destination stage/access includes HOST_BIT/HOST_READ_BIT before a
+        // device write is guaranteed VISIBLE to a later host read - this
+        // engine had no prior GpuToCpu-buffer consumer to copy this step
+        // from, so it's spelled out explicitly here rather than assumed.
+        const rg::ResourceState transferWriteState{ VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT };
+        const rg::ResourceState hostReadState{ VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT };
+        rg::EmitBufferBarrier(cmd, readback.Native(), 0, size, transferWriteState, hostReadState);
+
+        // texture back to SHADER_READ_ONLY_OPTIMAL - a later ImGui sample of
+        // the same texture this same frame must be unaffected.
+        rg::EmitImageBarrier(cmd, texture.Image(), colorRange, transferSrcState, shaderReadState);
+    });
+
+    CapturedRawPixels result;
+    result.pixels.resize(static_cast<std::size_t>(size));
+    std::memcpy(result.pixels.data(), readback.MappedData(), static_cast<std::size_t>(size));
+    result.width = static_cast<int>(extent.width);
+    result.height = static_cast<int>(extent.height);
+    result.format = texture.Format();
+    return result;
 }
 
 Buffer Renderer::CreateBuffer(

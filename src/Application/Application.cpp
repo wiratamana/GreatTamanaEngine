@@ -4,6 +4,8 @@
 #include "MemorySnapshotBuilder.h"
 #include "RenderPasses.h"
 
+#include "../Encoding/PixelConversion.h"
+#include "../Encoding/PngEncoder.h"
 #include "../Memory/SdlMemoryTracker.h"
 #include "../Profiling/FrameProfiler.h"
 #include "../Profiling/ScopeTimer.h"
@@ -48,6 +50,21 @@ Profiling::GpuSampleStatus ToProfilingGpuSampleStatus(GpuTimingSample::Status st
     }
 }
 
+// network-impl-2 campaign, Phase 3
+// (PHASE3_GAME_VIEW_CAPTURE_AND_GET_GAME_VIEW_ENDPOINT.md) - true for the
+// two BGRA channel-order formats VulkanSwapchain.cpp's ChooseSurfaceFormat()
+// is actually known to negotiate (it prefers VK_FORMAT_B8G8R8A8_UNORM but
+// falls back to formats.front(), i.e. whatever the platform/driver reports
+// first, if that exact combination isn't available). An unrecognized
+// BGRA-like variant this two-value check doesn't catch would silently
+// produce a channel-swapped (red/blue reversed) PNG with no error at all -
+// an accepted, narrow risk (see PHASE3's own Non-Goals) - if a future
+// "screenshot has wrong colors" report ever shows up, start here.
+bool IsBgraFormat(VkFormat format) noexcept
+{
+    return format == VK_FORMAT_B8G8R8A8_UNORM || format == VK_FORMAT_B8G8R8A8_SRGB;
+}
+
 } // namespace
 
 Application::SdlContext::SdlContext()
@@ -82,6 +99,12 @@ Application::Application(const std::string& title, int width, int height)
     , m_renderGraph(m_renderer)
     , m_editorLayer(CreateEditorLayer(m_window, m_renderer))
     , m_game()
+    // network-impl-2 campaign, Phase 3 - hands FrameCaptureBridge's address
+    // into NetworkServer's constructor (a defaulted pointer parameter - see
+    // NetworkServer.h) so its /get_game_view route handler can reach it.
+    // Safe: m_captureBridge is declared (and thus constructed) before
+    // m_networkServer, per Application.h's own member ordering.
+    , m_networkServer(&m_captureBridge)
     , m_windowWidth(width)
     , m_windowHeight(height)
 {
@@ -241,6 +264,21 @@ int Application::Run()
         RenderTexture* gameTarget = m_editorLayer->GameViewTarget();
         RenderTexture* sceneTarget = m_editorLayer->SceneViewTarget();
 
+        // network-impl-2 campaign, Phase 3
+        // (PHASE3_GAME_VIEW_CAPTURE_AND_GET_GAME_VIEW_ENDPOINT.md) - the
+        // FAST-FAIL branch, placed HERE (unconditionally, every frame,
+        // BEFORE the `if (gameTarget != nullptr || sceneTarget != nullptr)`
+        // block below) rather than inside that block - a release build (or
+        // an Editor build with both "Game"/"Scene" hidden) never enters that
+        // block at all, so a fast-fail placed inside it would never run in
+        // precisely the scenario it exists to handle, silently degrading
+        // every such /get_game_view request to the bridge's full 3-second
+        // timeout (HTTP 504) instead of an immediate HTTP 409. See that
+        // phase document's own "IMPORTANT - a placement gotcha" note.
+        if (gameTarget == nullptr && m_captureBridge.IsCaptureRequested(FrameCaptureKind::GameView)) {
+            m_captureBridge.FailPendingRequest(FrameCaptureKind::GameView, FrameCaptureFailureReason::TargetNotAvailable);
+        }
+
         // Call 1 of 2: the SYNCHRONOUS offscreen regime - Game view + Scene
         // view together. Runs unconditionally whenever either target is
         // non-null, completely independent of whatever the swapchain is
@@ -340,6 +378,27 @@ int Application::Run()
                 m_editorLayer->FinalizeBlurValidationForSampling(offscreenCmd);
 
                 m_renderer.EndOffscreenRenderGraphRecording();
+
+                // network-impl-2 campaign, Phase 3
+                // (PHASE3_GAME_VIEW_CAPTURE_AND_GET_GAME_VIEW_ENDPOINT.md) -
+                // the SUCCESS-path capture. Guarded by `gameTarget !=
+                // nullptr`, which only evaluates true on a frame where this
+                // whole enclosing `if` block already ran (see this method's
+                // own gameTarget/sceneTarget computation above) - so
+                // EndOffscreenRenderGraphRecording() above is guaranteed to
+                // have already run this frame too. CaptureRenderTexturePixels()
+                // uses its OWN separate ImmediateSubmit() call (a fresh
+                // command buffer/fence) - never `offscreenCmd`, which is
+                // already ended/submitted by the call just above.
+                if (gameTarget != nullptr && m_captureBridge.IsCaptureRequested(FrameCaptureKind::GameView)) {
+                    Renderer::CapturedRawPixels raw = m_renderer.CaptureRenderTexturePixels(*gameTarget);
+                    if (IsBgraFormat(raw.format)) {
+                        Encoding::ConvertBgraToRgbaInPlace(raw.pixels.data(), raw.width, raw.height);
+                    }
+                    std::vector<std::uint8_t> png = Encoding::EncodeRgba8ToPng(raw.pixels.data(), raw.width, raw.height);
+                    m_captureBridge.FulfillPendingRequest(FrameCaptureKind::GameView,
+                        CapturedPngImage{ std::move(png), raw.width, raw.height });
+                }
 
                 // B.1 (B1_REAL_GPU_TIMING_STRATEGY_v1.md) - must run
                 // immediately after EndOffscreenRenderGraphRecording()

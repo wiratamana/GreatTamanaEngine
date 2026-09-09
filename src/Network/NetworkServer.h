@@ -14,6 +14,12 @@
 // still works.
 namespace httplib { class Server; }
 
+// Forward-declared rather than #including "../Application/FrameCaptureBridge.h"
+// here, for the same cheap-header reason as httplib::Server above -
+// network-impl-2 campaign, Phase 3
+// (PHASE3_GAME_VIEW_CAPTURE_AND_GET_GAME_VIEW_ENDPOINT.md).
+namespace gte { class FrameCaptureBridge; }
+
 namespace gte::Network {
 
 // Owns a real, embedded HTTP server (cpp-httplib) bound to loopback
@@ -35,7 +41,17 @@ namespace gte::Network {
 // in this engine (see AGENTS.md, "Coding Guidelines").
 class NetworkServer {
 public:
-    NetworkServer();
+    // `captureBridge` (network-impl-2 campaign, Phase 3 -
+    // PHASE3_GAME_VIEW_CAPTURE_AND_GET_GAME_VIEW_ENDPOINT.md) is a
+    // DEFAULTED, non-owning pointer - kept default (nullptr) by every
+    // existing tests/Network/NetworkServerTests.cpp call site (seven
+    // no-argument `NetworkServer server;` constructions), so this remains a
+    // fully backward-compatible signature change. Non-null in production
+    // (Application owns the real FrameCaptureBridge and passes its address -
+    // see Application.cpp) - `nullptr` means "no engine-state-touching
+    // routes are wired up" (a route needing it responds 503 rather than
+    // crashing - see NetworkServer.cpp's own RegisterRoutes()).
+    explicit NetworkServer(FrameCaptureBridge* captureBridge = nullptr);
     ~NetworkServer();
 
     NetworkServer(const NetworkServer&) = delete;
@@ -100,6 +116,10 @@ private:
     std::thread m_thread;
     std::atomic<bool> m_running{ false };
     std::atomic<int> m_boundPort{ 0 };
+
+    // Non-owning - see this class's own constructor doc comment above.
+    // Application owns the real instance and must outlive this NetworkServer.
+    FrameCaptureBridge* m_captureBridge = nullptr;
 };
 
 } // namespace gte::Network

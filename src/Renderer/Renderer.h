@@ -250,6 +250,39 @@ public:
         const char* debugName = nullptr, const char* depthDebugName = nullptr,
         bool allowStorageImageAccess = false) const;
 
+    // network-impl-2 campaign, Phase 3
+    // (PHASE3_GAME_VIEW_CAPTURE_AND_GET_GAME_VIEW_ENDPOINT.md) - synchronous,
+    // on-demand pixel readback from a RenderTexture, the primitive behind
+    // GET /get_game_view. `pixels` is tightly packed width*height*4 bytes in
+    // whatever `format` actually reports - the caller (Application::Run())
+    // decides whether a BGRA->RGBA swizzle is needed (see
+    // Encoding::ConvertBgraToRgbaInPlace()) based on that real format, never
+    // an assumption.
+    struct CapturedRawPixels {
+        std::vector<std::uint8_t> pixels;
+        int width = 0;
+        int height = 0;
+        VkFormat format = VK_FORMAT_UNDEFINED;
+    };
+
+    // Synchronously reads back `texture`'s CURRENT color pixels - the caller
+    // is responsible for only calling this once it independently knows
+    // `texture`'s contents are final for this frame (e.g. right after
+    // Renderer::EndOffscreenRenderGraphRecording() returns for it - see
+    // Application::Run()). Uses a throwaway, on-demand host-visible readback
+    // Buffer + Renderer::ImmediateSubmit() - a genuinely EXTRA GPU
+    // submission/wait beyond the frame's own normal recording, acceptable
+    // ONLY because this is invoked at most once per network request, never
+    // unconditionally every frame.
+    //
+    // `texture` must currently be in VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    // (the state Renderer::RenderOffscreen()/the render-graph offscreen
+    // regime always leaves a RenderTexture in) - this call transitions it to
+    // TRANSFER_SRC_OPTIMAL, copies it, and transitions it back to
+    // SHADER_READ_ONLY_OPTIMAL before returning, so a later ImGui sample of
+    // the SAME texture this same frame is unaffected.
+    CapturedRawPixels CaptureRenderTexturePixels(RenderTexture& texture) const;
+
     // Factory for GPU buffers (vertex/index/uniform/staging), so callers
     // never need direct access to the VmaAllocator this Renderer owns
     // internally. See BufferMemoryUsage (Buffer.h) for how memoryUsage

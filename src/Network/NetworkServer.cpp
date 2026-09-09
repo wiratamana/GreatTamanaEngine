@@ -2,6 +2,9 @@
 
 #include "NetworkRoutes.h"
 
+#include "../Application/FrameCaptureBridge.h"
+#include "../Encoding/Base64.h"
+
 #include <httplib.h>
 
 #include <cstdio>
@@ -13,7 +16,8 @@
 // bool bind_to_port(host, port, socket_flags = 0); int bind_to_any_port(host,
 // socket_flags = 0); bool listen_after_bind(); bool is_running() const; void
 // stop() noexcept; - every signature matches what this file assumes exactly,
-// no adjustment needed.
+// no adjustment needed. get_param_value()/get_header_value() (Request) are
+// likewise confirmed present (network-impl-2 campaign, Phase 3).
 
 namespace gte::Network {
 
@@ -30,10 +34,44 @@ constexpr const char* kBindHost = "127.0.0.1";
 // is added here as one more server.Get(...)/Post(...) line, forwarding to
 // its own NetworkRoutes.h function - never composing response text inline
 // in this lambda.
-void RegisterRoutes(httplib::Server& server)
+void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge)
 {
     server.Get("/http_hello_world", [](const httplib::Request&, httplib::Response& res) {
         res.set_content(HandleHelloWorld(), "text/plain; charset=utf-8");
+    });
+
+    // network-impl-2 campaign, Phase 3
+    // (PHASE3_GAME_VIEW_CAPTURE_AND_GET_GAME_VIEW_ENDPOINT.md) - the first
+    // engine-state-touching endpoint. See AGENTS.md, "Networking", for why
+    // this route handler is allowed to touch FrameCaptureBridge and nothing
+    // else engine-side.
+    server.Get("/get_game_view", [captureBridge](const httplib::Request& req, httplib::Response& res) {
+        if (captureBridge == nullptr) {
+            res.status = 503;
+            res.set_content("capture bridge not available", "text/plain; charset=utf-8");
+            return;
+        }
+        const FrameCaptureBridge::RequestResult result = captureBridge->RequestCaptureAndWait(FrameCaptureKind::GameView);
+        if (result.alreadyPending) {
+            res.status = 503;
+            res.set_content("capture already in progress", "text/plain; charset=utf-8");
+            return;
+        }
+        if (result.failure.has_value()) {
+            res.status = (*result.failure == FrameCaptureFailureReason::TimedOut) ? 504 : 409;
+            res.set_content("capture failed", "text/plain; charset=utf-8");
+            return;
+        }
+        const CapturedPngImage& image = *result.image;
+        const CaptureResponseFormat format =
+            ResolveCaptureResponseFormat(req.get_param_value("format"), req.get_header_value("Accept"));
+        if (format == CaptureResponseFormat::RawPng) {
+            res.set_content(
+                reinterpret_cast<const char*>(image.pngBytes.data()), image.pngBytes.size(), "image/png");
+        } else {
+            const std::string base64 = Encoding::EncodeBase64(image.pngBytes);
+            res.set_content(BuildCaptureJsonBody(image.width, image.height, base64), "application/json");
+        }
     });
 }
 
@@ -43,14 +81,16 @@ struct NetworkServer::Impl {
     httplib::Server server;
 };
 
-NetworkServer::NetworkServer() : m_impl(std::make_unique<Impl>())
+NetworkServer::NetworkServer(FrameCaptureBridge* captureBridge)
+    : m_impl(std::make_unique<Impl>())
+    , m_captureBridge(captureBridge)
 {
     // Registered exactly ONCE per NetworkServer instance, here in the
     // constructor - never inside Start() - so a Start()/Stop()/Start()
     // restart cycle (or a Start() that overlaps a failed bind retry) can
     // NEVER re-register the same route handler onto the same
     // httplib::Server a second time.
-    RegisterRoutes(m_impl->server);
+    RegisterRoutes(m_impl->server, m_captureBridge);
 }
 
 NetworkServer::~NetworkServer()

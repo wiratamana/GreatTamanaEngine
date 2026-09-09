@@ -9,6 +9,7 @@
 #include "../Renderer/Renderer.h"
 #include "../Renderer/RenderGraph/RenderGraph.h"
 #include "../Window/Window.h"
+#include "FrameCaptureBridge.h"
 
 namespace gte {
 
@@ -63,6 +64,14 @@ private:
     // need to relate to Game's at all.
     std::unique_ptr<IEditorLayer> m_editorLayer;
     Game m_game;
+
+    // network-impl-2 campaign (task_manager/network-impl-2/) - the ONE
+    // sanctioned cross-thread bridge a Network route handler is allowed to
+    // touch (see AGENTS.md, "Networking", and FrameCaptureBridge.h's own
+    // header comment). Declared BEFORE m_networkServer (constructed first,
+    // destroyed last relative to it) so its address can be handed into
+    // m_networkServer's own constructor below.
+    FrameCaptureBridge m_captureBridge;
 
     // Networking campaign (task_manager/network-impl-1/) - an embedded,
     // loopback-only HTTP server (see AGENTS.md, "Networking"). Declared
