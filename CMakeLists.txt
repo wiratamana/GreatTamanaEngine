@@ -103,6 +103,7 @@ include(FetchVMA)
 include(FetchSTB)
 include(FetchSTBImageWrite)
 include(FetchHttplib)
+include(FetchJson)
 include(FetchKTX)
 include(CompileShaders)
 
@@ -154,6 +155,16 @@ fetch_stb_image_write()
 #   any engine source file.
 # Also defines the `httplib` INTERFACE target, linked into gte_core below.
 fetch_httplib()
+
+# Downloads (if not already present) and stages nlohmann/json for Windows:
+#   third_party/json/nlohmann/json.hpp - single-header, header-only JSON
+#   parsing/serialization library, used by src/Network/NetworkRoutes.cpp to
+#   parse POST /instantiate_primitive and POST /delete_entity request bodies
+#   and build their JSON responses (see
+#   task_manager/network-impl-3/PHASE1_JSON_DEPENDENCY_AND_REQUEST_PARSING.md).
+# Also defines the `nlohmann_json` INTERFACE target, linked into gte_core
+# below.
+fetch_json()
 
 # Builds KTX-Software from source in-tree (headers + a STATIC `ktx` library,
 # with Basis Universal/astc-encoder support baked in - no ktx.dll needed at
@@ -650,7 +661,7 @@ target_compile_definitions(gte_core PUBLIC GTE_ENABLE_NETWORK=$<BOOL:${GTE_ENABL
 # included here purely as a debugging/tooling dependency (see
 # cmake/FetchHttplib.cmake) - nothing in gte_core uses it yet.
 target_include_directories(gte_core PUBLIC "${CMAKE_SOURCE_DIR}/src")
-target_link_libraries(gte_core PUBLIC SDL3::SDL3 volk vma stb_image stb_image_write KTX::ktx httplib)
+target_link_libraries(gte_core PUBLIC SDL3::SDL3 volk vma stb_image stb_image_write KTX::ktx httplib nlohmann_json)
 
 # src/Jobs/JobSystem.cpp/.h use std::thread/std::mutex/std::condition_variable
 # unconditionally (the class itself always compiles - see JobSystem.h's own
