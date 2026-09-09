@@ -61,7 +61,12 @@ public:
     // defaulted, non-owning pointer, appended AFTER `captureBridge` so every
     // existing call site (including this constructor's own single-argument
     // production use) keeps compiling unchanged. Non-null in production
-    // (Application owns the real EngineCommandBridge and passes its address).
+    // (Application owns the real EngineCommandBridge and passes its address) -
+    // `nullptr` means "POST /instantiate_primitive and POST /delete_entity
+    // (network-impl-3 campaign, Phase 5 -
+    // PHASE5_NETWORK_POST_ROUTES_AND_COMMAND_DISPATCH.md) both respond 503
+    // rather than crashing" - the exact same "nullptr degrades gracefully to
+    // a 503, never a crash" contract `captureBridge` already documents above.
     explicit NetworkServer(FrameCaptureBridge* captureBridge = nullptr, EngineCommandBridge* commandBridge = nullptr);
     ~NetworkServer();
 

@@ -5,6 +5,7 @@
 #include "../Application/EngineCommandBridge.h"
 #include "../Application/FrameCaptureBridge.h"
 #include "../Encoding/Base64.h"
+#include "../Math/Vec3.h"
 
 #include <httplib.h>
 
@@ -78,13 +79,6 @@ void RegisterCaptureRoute(httplib::Server& server, const char* path, FrameCaptur
 // in this lambda.
 void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, EngineCommandBridge* commandBridge)
 {
-    // network-impl-3 campaign, Phase 4
-    // (PHASE4_ENGINE_COMMAND_BRIDGE_AND_MAIN_LOOP_INTEGRATION.md) - this
-    // phase only needs to make sure `commandBridge` correctly ARRIVES here;
-    // Phase 5 (PHASE5_NETWORK_POST_ROUTES_AND_COMMAND_DISPATCH.md) is what
-    // actually registers POST routes that use it.
-    (void)commandBridge;
-
     server.Get("/http_hello_world", [](const httplib::Request&, httplib::Response& res) {
         res.set_content(HandleHelloWorld(), "text/plain; charset=utf-8");
     });
@@ -98,6 +92,102 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
     // FrameCaptureBridge and nothing else engine-side.
     RegisterCaptureRoute(server, "/get_game_view", FrameCaptureKind::GameView, captureBridge);
     RegisterCaptureRoute(server, "/get_swapchain", FrameCaptureKind::Swapchain, captureBridge);
+
+    // network-impl-3 campaign, Phase 5
+    // (PHASE5_NETWORK_POST_ROUTES_AND_COMMAND_DISPATCH.md) - the engine's
+    // first POST routes, and its first routes that MUTATE the ECS world.
+    // Each handler is still a PURE function of its own request data plus
+    // EngineCommandBridge::SubmitAndWait() (see AGENTS.md, "Networking") -
+    // it never touches Registry/Renderer/Game/AssetDatabase directly. The
+    // two routes are deliberately NOT collapsed into one shared helper (see
+    // this phase document's own Step 2 - different request parser,
+    // different response builder, different failure-status mapping for a
+    // not-found case).
+    server.Post("/instantiate_primitive", [commandBridge](const httplib::Request& req, httplib::Response& res) {
+        const ParsedInstantiatePrimitiveRequest parsed = ParseInstantiatePrimitiveRequest(req.body);
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        if (commandBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("engine command bridge not available"), "application/json");
+            return;
+        }
+
+        EngineCommandRequest request;
+        request.kind = EngineCommandKind::InstantiatePrimitive;
+        request.instantiatePrimitive.shape = parsed.shape;
+        request.instantiatePrimitive.requestedName = parsed.name;
+        request.instantiatePrimitive.worldPosition = Vec3{ parsed.worldX, parsed.worldY, parsed.worldZ };
+        request.instantiatePrimitive.hasParent = parsed.hasParent;
+        request.instantiatePrimitive.parentName = parsed.parentName;
+
+        const EngineCommandBridge::SubmitResult submit = commandBridge->SubmitAndWait(request);
+        if (submit.alreadyPending) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("another engine command is already in progress"), "application/json");
+            return;
+        }
+        if (submit.timedOut) {
+            res.status = 504;
+            res.set_content(BuildGenericErrorResponseJson("engine command timed out"), "application/json");
+            return;
+        }
+
+        const InstantiatePrimitiveOutcome& outcome = submit.result->instantiatePrimitive;
+        res.status = outcome.success ? 200 : 400;
+        res.set_content(BuildInstantiatePrimitiveResponseJson(outcome.success, outcome.errorMessage,
+            outcome.entityIndex, outcome.entityGeneration, outcome.resolvedName,
+            outcome.parentRequestedButNotFound, outcome.requestedParentName), "application/json");
+    });
+
+    server.Post("/delete_entity", [commandBridge](const httplib::Request& req, httplib::Response& res) {
+        const ParsedDeleteEntityRequest parsed = ParseDeleteEntityRequest(req.body);
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        if (commandBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("engine command bridge not available"), "application/json");
+            return;
+        }
+
+        EngineCommandRequest request;
+        request.kind = EngineCommandKind::DeleteEntity;
+        request.deleteEntity.name = parsed.name;
+
+        const EngineCommandBridge::SubmitResult submit = commandBridge->SubmitAndWait(request);
+        if (submit.alreadyPending) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("another engine command is already in progress"), "application/json");
+            return;
+        }
+        if (submit.timedOut) {
+            res.status = 504;
+            res.set_content(BuildGenericErrorResponseJson("engine command timed out"), "application/json");
+            return;
+        }
+
+        const DeleteEntityOutcome& outcome = submit.result->deleteEntity;
+        // 404 (not 400) specifically for "no such entity" - a not-found
+        // lookup is a distinct, well-known HTTP status from a generic bad
+        // request, and is what lets a caller (an LLM/script) tell "you
+        // typo'd the JSON shape" (400) apart from "that name doesn't exist
+        // right now" (404) without parsing the error string. An EMPTY name
+        // (the other DeleteEntityByName() failure case) is unreachable here
+        // in practice, since ParseDeleteEntityRequest() above already
+        // rejects an empty "name" field as a 400 -
+        // Game::DeleteEntityByName()'s own empty-name guard is defense in
+        // depth for its OTHER (non-network) callers, not something this
+        // route can actually trigger.
+        res.status = outcome.success ? 200 : 404;
+        res.set_content(BuildDeleteEntityResponseJson(outcome.success, outcome.errorMessage,
+            outcome.deletedEntityIndex, outcome.deletedEntityGeneration), "application/json");
+    });
 }
 
 } // namespace

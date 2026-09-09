@@ -1677,6 +1677,7 @@ set(GTE_TEST_SOURCES
     Network/NetworkRoutesTests.cpp
     Network/NetworkServerTests.cpp
     Network/CaptureEndpointsEndToEndTests.cpp
+    Network/EngineCommandEndpointsEndToEndTests.cpp
     Input/InputStateTests.cpp
     Application/EventTranslatorTests.cpp
     Application/MemorySnapshotBuilderTests.cpp
