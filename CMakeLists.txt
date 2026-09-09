@@ -522,6 +522,8 @@ if(GTE_ENABLE_EDITOR)
         src/Editor/EditorCamera.cpp
         src/Editor/SceneGridMath.h
         src/Editor/SceneGridMath.cpp
+        src/Editor/SceneGridRenderer.h
+        src/Editor/SceneGridRenderer.cpp
         src/Editor/ComputeBlurValidation.h
         src/Editor/ComputeBlurValidation.cpp
         src/Editor/GpuSkinningValidation.h
