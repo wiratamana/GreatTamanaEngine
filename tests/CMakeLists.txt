@@ -1603,6 +1603,9 @@
 # (RenderGraphNameSlotTable, see above) is pulled out as Tier-1-testable.
 set(GTE_TEST_SOURCES
     Memory/GpuResourceHandleTests.cpp
+    Encoding/Base64Tests.cpp
+    Encoding/PixelConversionTests.cpp
+    Encoding/PngEncoderTests.cpp
     Assets/AssetTypesTests.cpp
     Assets/GtaFileTests.cpp
     Assets/AssetDatabaseTests.cpp

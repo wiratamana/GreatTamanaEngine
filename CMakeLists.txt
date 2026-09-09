@@ -101,6 +101,7 @@ include(FetchSDL3)
 include(FetchVulkan)
 include(FetchVMA)
 include(FetchSTB)
+include(FetchSTBImageWrite)
 include(FetchHttplib)
 include(FetchKTX)
 include(CompileShaders)
@@ -135,6 +136,16 @@ fetch_vma()
 #   textures imported via the Editor's Project panel).
 # Also defines the `stb_image` INTERFACE target, linked into gte_core below.
 fetch_stb()
+
+# Downloads (if not already present) and stages stb_image_write.h for
+# Windows:
+#   third_party/stb/stb_image_write.h - single-header image *encoding*
+#   library (PNG/BMP/TGA/JPG/HDR), the write-side counterpart of stb_image.h
+#   above - used by src/Encoding/PngEncoder.h/.cpp to turn a raw RGBA8 pixel
+#   buffer (e.g. a captured Game view/swapchain frame) into an in-memory PNG.
+# Also defines the `stb_image_write` INTERFACE target, linked into gte_core
+# below.
+fetch_stb_image_write()
 
 # Downloads (if not already present) and stages cpp-httplib for Windows:
 #   third_party/httplib/httplib.h - single-header HTTP/HTTPS server+client
@@ -476,6 +487,12 @@ add_library(gte_core STATIC
     src/Network/NetworkRoutes.cpp
     src/Network/NetworkServer.h
     src/Network/NetworkServer.cpp
+    src/Encoding/Base64.h
+    src/Encoding/Base64.cpp
+    src/Encoding/PixelConversion.h
+    src/Encoding/PixelConversion.cpp
+    src/Encoding/PngEncoder.h
+    src/Encoding/PngEncoder.cpp
 )
 
 # Exactly one of these two branches gets compiled in, depending on
@@ -625,7 +642,7 @@ target_compile_definitions(gte_core PUBLIC GTE_ENABLE_NETWORK=$<BOOL:${GTE_ENABL
 # included here purely as a debugging/tooling dependency (see
 # cmake/FetchHttplib.cmake) - nothing in gte_core uses it yet.
 target_include_directories(gte_core PUBLIC "${CMAKE_SOURCE_DIR}/src")
-target_link_libraries(gte_core PUBLIC SDL3::SDL3 volk vma stb_image KTX::ktx httplib)
+target_link_libraries(gte_core PUBLIC SDL3::SDL3 volk vma stb_image stb_image_write KTX::ktx httplib)
 
 # src/Jobs/JobSystem.cpp/.h use std::thread/std::mutex/std::condition_variable
 # unconditionally (the class itself always compiles - see JobSystem.h's own
