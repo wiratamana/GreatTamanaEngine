@@ -1769,6 +1769,7 @@ set(GTE_TEST_SOURCES
 if(GTE_ENABLE_EDITOR)
     list(APPEND GTE_TEST_SOURCES
         Editor/EditorCameraTests.cpp
+        Editor/SceneGridMathTests.cpp
         Editor/SelectionTests.cpp
         Editor/ImGuiMemoryTrackerTests.cpp
         Editor/MemoryPanelDataTests.cpp

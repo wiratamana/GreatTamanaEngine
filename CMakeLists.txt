@@ -520,6 +520,8 @@ if(GTE_ENABLE_EDITOR)
         src/Editor/Selection.cpp
         src/Editor/EditorCamera.h
         src/Editor/EditorCamera.cpp
+        src/Editor/SceneGridMath.h
+        src/Editor/SceneGridMath.cpp
         src/Editor/ComputeBlurValidation.h
         src/Editor/ComputeBlurValidation.cpp
         src/Editor/GpuSkinningValidation.h
