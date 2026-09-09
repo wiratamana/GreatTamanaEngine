@@ -10,6 +10,7 @@
 #include "../Memory/SdlMemoryTracker.h"
 #include "../Profiling/FrameProfiler.h"
 #include "../Profiling/ScopeTimer.h"
+#include "../Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
 
 #include <SDL3/SDL.h>
@@ -395,9 +396,20 @@ int Application::Run()
                 // comment on FinalizeRenderTextureForExternalSampling().
                 if (gameTarget != nullptr) {
                     FinalizeRenderTextureForExternalSampling(offscreenCmd, *gameTarget);
+                    // network-impl-4 campaign, Phase 3 - keeps the debug-texture registry's
+                    // OWN idea of "GameView"'s current color state correct across this
+                    // graph-external manual transition - see PHASE0_MASTER_STRATEGY.md's
+                    // Locked Design Decision 7. Must use the EXACT same ResourceState
+                    // FinalizeRenderTextureForExternalSampling() itself just transitioned
+                    // to (ShaderRead) - re-derive via the same rg::RequiredStateFor() call,
+                    // never hand-guessed.
+                    m_renderGraph.NotifyDebugTextureStateOverride(
+                        "GameView", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
                 }
                 if (sceneTarget != nullptr) {
                     FinalizeRenderTextureForExternalSampling(offscreenCmd, *sceneTarget);
+                    m_renderGraph.NotifyDebugTextureStateOverride(
+                        "SceneView", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
                 }
                 // Phase 7 of the compute-shader campaign - finalizes the
                 // blurred-output texture for external (ImGui) sampling too,
@@ -406,6 +418,22 @@ int Application::Run()
                 // IEditorLayer::FinalizeBlurValidationForSampling()'s own
                 // doc comment.
                 m_editorLayer->FinalizeBlurValidationForSampling(offscreenCmd);
+                // network-impl-4 campaign, Phase 3 - the "BlurredSceneOutput" correction
+                // (Locked Design Decision 7's third of four call sites). Unlike GameView/
+                // SceneView above, Application.cpp has NO visibility into whether
+                // ComputeBlurValidation::FinalizeForSampling() actually did anything this
+                // call (that is tracked purely internally, via its own private
+                // m_writtenThisFrame flag - see ComputeBlurValidation.h's own doc comment
+                // on why) - so this call is made UNCONDITIONALLY, every frame, rather than
+                // guarded by an `if`. This is safe: RenderGraphDebugTextureRegistry::
+                // ApplyColorStateOverride() (Phase 1) is a documented no-op when
+                // "BlurredSceneOutput" isn't a currently-known name (the debug-blur toggle
+                // has never been turned on this session), and idempotent (harmless) when
+                // it's already correctly ShaderRead from an earlier frame's correction -
+                // there is no code path where calling this "too often" produces a wrong
+                // result.
+                m_renderGraph.NotifyDebugTextureStateOverride(
+                    "BlurredSceneOutput", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
 
                 m_renderer.EndOffscreenRenderGraphRecording();
 

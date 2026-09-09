@@ -479,6 +479,15 @@ bool FramePresenter::PresentViaRenderGraph(rg::RenderGraph& graph, bool needsSwa
         };
         const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
         rg::EmitImageBarrier(cmd, target.image, range, previous, next);
+
+        // network-impl-4 campaign, Phase 3 - Locked Design Decision 7's fourth
+        // (of four) call site. Called unconditionally, every real Present -
+        // this manual PRESENT_SRC_KHR transition ALWAYS runs here (unlike
+        // ComputeBlurValidation's own conditional finalize above), so there is
+        // no "did this actually run this frame" ambiguity to handle. Must use
+        // the EXACT same `next` value just computed above - never re-derived
+        // separately, so the two can never silently drift apart.
+        graph.NotifyDebugTextureStateOverride("Swapchain", next);
     }
 
     if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {

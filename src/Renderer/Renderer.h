@@ -11,6 +11,7 @@
 #include "Memory/GpuMemoryTracker.h"
 #include "Mesh.h"
 #include "Pipeline.h"
+#include "RenderGraph/RenderGraphBarrierPlanner.h" // gte::rg::ResourceState - needed by CaptureImagePixels() below (network-impl-4, Phase 3).
 #include "RenderGraph/RenderGraphTypes.h"
 #include "RenderTexture.h"
 #include "Texture2D.h"
@@ -281,7 +282,49 @@ public:
     // TRANSFER_SRC_OPTIMAL, copies it, and transitions it back to
     // SHADER_READ_ONLY_OPTIMAL before returning, so a later ImGui sample of
     // the SAME texture this same frame is unaffected.
+    //
+    // network-impl-4 campaign, Phase 3 - now implemented purely in terms of
+    // CaptureImagePixels() below (aspect=COLOR, previousState=ShaderRead) -
+    // zero signature/behavior change for this method or its existing caller.
     CapturedRawPixels CaptureRenderTexturePixels(RenderTexture& texture) const;
+
+    // network-impl-4 campaign, Phase 3
+    // (task_manager/network-impl-4/PHASE3_GENERIC_IMAGE_READBACK_AND_DEPTH_VISUALIZATION.md) -
+    // the generalized, PUBLIC primitive behind BOTH CaptureRenderTexturePixels()
+    // above (which now just calls this with aspect=COLOR and a ShaderRead
+    // previous state) and GET /get_texture's own named-texture capture path
+    // (Phase 4, Application::Run()), which calls this directly with whatever
+    // RenderGraphDebugTextureRegistry (src/Renderer/RenderGraph/
+    // RenderGraphDebugTextureRegistry.h) reports for an arbitrary registered
+    // name's color OR depth half. Public (not private) specifically because
+    // Phase 4's caller lives in a different class (Application) than Renderer
+    // itself.
+    //
+    // `previousState` MUST be the image's actual, real current ResourceState -
+    // guessing wrong is a silent correctness bug (see network-impl-2's
+    // PHASE3_GAME_VIEW_CAPTURE_AND_GET_GAME_VIEW_ENDPOINT.md's own analogous
+    // warning for RenderGraphBuilder::ImportTexture()'s `currentLayout`
+    // parameter). Restores the image to the SAME `previousState` afterward,
+    // unconditionally - see this phase's own Step 2 analysis for why this is
+    // cheap, always-safe insurance even in cases where nothing currently
+    // depends on the restored value being exactly right.
+    //
+    // bytesPerPixel must be exactly 4 for every real caller today (RGBA8/BGRA8
+    // color, or any of this engine's three possible depth formats copied via
+    // their DEPTH aspect alone - see PHASE3's own Step 2) - asserted, not
+    // silently handled for any other value.
+    CapturedRawPixels CaptureImagePixels(VkImage image, VkImageAspectFlags aspect, VkFormat format, VkExtent2D extent,
+        const rg::ResourceState& previousState, int bytesPerPixel = 4) const;
+
+    // A full, blocking vkDeviceWaitIdle() - see PHASE0_MASTER_STRATEGY.md's
+    // Locked Design Decision 1. NEVER call this from any per-frame/
+    // performance-sensitive path - it is reserved for the rare, explicit,
+    // human/LLM-triggered GET /get_texture request path (Phase 4) only. Every
+    // OTHER capture endpoint in this engine (/get_swapchain, /get_game_view)
+    // deliberately adds ZERO GPU stall and must stay that way - this method
+    // must never be called from anywhere those two endpoints' own code paths
+    // reach.
+    void WaitForGpuIdle() const;
 
     // network-impl-2 campaign, Phase 4
     // (PHASE4_SWAPCHAIN_PIPELINED_CAPTURE_SERVICE.md) - the pipelined

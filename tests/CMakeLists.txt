@@ -1647,6 +1647,7 @@ set(GTE_TEST_SOURCES
     Memory/GpuResourceHandleTests.cpp
     Encoding/Base64Tests.cpp
     Encoding/PixelConversionTests.cpp
+    Encoding/DepthVisualizationTests.cpp
     Encoding/PngEncoderTests.cpp
     Assets/AssetTypesTests.cpp
     Assets/GtaFileTests.cpp

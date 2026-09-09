@@ -517,6 +517,8 @@ add_library(gte_core STATIC
     src/Encoding/PixelConversion.cpp
     src/Encoding/PngEncoder.h
     src/Encoding/PngEncoder.cpp
+    src/Encoding/DepthVisualization.h
+    src/Encoding/DepthVisualization.cpp
 )
 
 # Exactly one of these two branches gets compiled in, depending on

@@ -163,45 +163,40 @@ RenderTexture Renderer::CreateRenderTexture(int width, int height, VkFormat form
         width, height, resolvedFormat, debugName, depthDebugName, allowStorageImageAccess);
 }
 
-Renderer::CapturedRawPixels Renderer::CaptureRenderTexturePixels(RenderTexture& texture) const
+Renderer::CapturedRawPixels Renderer::CaptureImagePixels(VkImage image, VkImageAspectFlags aspect, VkFormat format,
+    VkExtent2D extent, const rg::ResourceState& previousState, int bytesPerPixel) const
 {
-    const VkExtent2D extent = texture.Extent();
-    const VkDeviceSize size = VkDeviceSize(extent.width) * extent.height * 4;
+    assert(bytesPerPixel == 4
+        && "CaptureImagePixels: every real caller today copies exactly 4 bytes/pixel (RGBA8/BGRA8 color, or any of "
+           "this engine's 3 possible depth formats via their DEPTH aspect alone) - re-derive this function's own "
+           "size math before changing it for a genuinely different pixel size.");
 
-    // Throwaway, on-demand readback buffer - deliberately NOT kept alive
-    // past this function (see Renderer.h's own doc comment on this method).
+    const VkDeviceSize size = VkDeviceSize(extent.width) * extent.height * static_cast<VkDeviceSize>(bytesPerPixel);
     Buffer readback = CreateBuffer(size, VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemoryUsage::GpuToCpu, "CaptureReadback");
 
-    const VkImageSubresourceRange colorRange{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-    const rg::ResourceState shaderReadState = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
+    const VkImageSubresourceRange range{ aspect, 0, 1, 0, 1 };
     const rg::ResourceState transferSrcState = rg::RequiredStateFor(rg::ResourceAccess::TransferSrc, false);
 
     ImmediateSubmit([&](VkCommandBuffer cmd) {
-        // texture -> TRANSFER_SRC_OPTIMAL (from the SHADER_READ_ONLY_OPTIMAL
-        // state RenderOffscreen()/the render-graph offscreen regime always
-        // leaves it in).
-        rg::EmitImageBarrier(cmd, texture.Image(), colorRange, shaderReadState, transferSrcState);
+        rg::EmitImageBarrier(cmd, image, range, previousState, transferSrcState);
 
         VkBufferImageCopy region{};
-        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        region.imageSubresource.aspectMask = aspect;
         region.imageSubresource.layerCount = 1;
         region.imageExtent = { extent.width, extent.height, 1 };
-        vkCmdCopyImageToBuffer(cmd, texture.Image(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback.Native(), 1, &region);
+        vkCmdCopyImageToBuffer(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback.Native(), 1, &region);
 
         // Host-read visibility: a fence wait alone (ImmediateSubmit()'s own
         // wait, below) guarantees the GPU write finished EXECUTING, but the
         // Vulkan spec still requires an explicit memory dependency whose
         // destination stage/access includes HOST_BIT/HOST_READ_BIT before a
-        // device write is guaranteed VISIBLE to a later host read - this
-        // engine had no prior GpuToCpu-buffer consumer to copy this step
-        // from, so it's spelled out explicitly here rather than assumed.
+        // device write is guaranteed VISIBLE to a later host read - mirrors
+        // CaptureRenderTexturePixels()'s original own reasoning for this step.
         const rg::ResourceState transferWriteState{ VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT };
         const rg::ResourceState hostReadState{ VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT };
         rg::EmitBufferBarrier(cmd, readback.Native(), 0, size, transferWriteState, hostReadState);
 
-        // texture back to SHADER_READ_ONLY_OPTIMAL - a later ImGui sample of
-        // the same texture this same frame must be unaffected.
-        rg::EmitImageBarrier(cmd, texture.Image(), colorRange, transferSrcState, shaderReadState);
+        rg::EmitImageBarrier(cmd, image, range, transferSrcState, previousState);
     });
 
     CapturedRawPixels result;
@@ -209,8 +204,20 @@ Renderer::CapturedRawPixels Renderer::CaptureRenderTexturePixels(RenderTexture& 
     std::memcpy(result.pixels.data(), readback.MappedData(), static_cast<std::size_t>(size));
     result.width = static_cast<int>(extent.width);
     result.height = static_cast<int>(extent.height);
-    result.format = texture.Format();
+    result.format = format;
     return result;
+}
+
+Renderer::CapturedRawPixels Renderer::CaptureRenderTexturePixels(RenderTexture& texture) const
+{
+    const rg::ResourceState shaderReadState = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
+    return CaptureImagePixels(
+        texture.Image(), VK_IMAGE_ASPECT_COLOR_BIT, texture.Format(), texture.Extent(), shaderReadState);
+}
+
+void Renderer::WaitForGpuIdle() const
+{
+    vkDeviceWaitIdle(m_device.Native());
 }
 
 void Renderer::RequestSwapchainCapture()
