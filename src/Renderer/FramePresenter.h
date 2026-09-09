@@ -7,6 +7,7 @@
 #include "RenderGraph/RenderGraphTypes.h"
 #include "RenderTarget.h"
 #include "RenderTexture.h"
+#include "SwapchainCaptureService.h"
 #include "Vulkan/VulkanAllocator.h"
 #include "Vulkan/VulkanFrameSync.h"
 #include "Vulkan/VulkanSwapchain.h"
@@ -123,6 +124,27 @@ public:
     bool PresentViaRenderGraph(rg::RenderGraph& graph, bool needsSwapchainDepth,
         const std::function<std::vector<rg::TextureHandle>(rg::RenderGraphBuilder&, rg::TextureHandle)>& build);
 
+    // network-impl-2 campaign, Phase 4
+    // (PHASE4_SWAPCHAIN_PIPELINED_CAPTURE_SERVICE.md) - requests a one-shot
+    // capture of the real swapchain image, fulfilled TWO real frames later
+    // (kFramesInFlight == 2) with zero added GPU stall - see
+    // SwapchainCaptureService's own class comment. A safe no-op if a
+    // capture is already pending.
+    void RequestSwapchainCapture();
+
+    // Returns (and clears) whatever capture PresentViaRenderGraph() itself
+    // completed during its OWN most recent call - std::nullopt if none
+    // completed that call. Deliberately NOT a thin forward to
+    // SwapchainCaptureService::TryTakeCompletedCapture() directly (that
+    // needs a specific frameInFlightIndex tied to a specific moment inside
+    // PresentViaRenderGraph()'s own execution, not "whatever m_currentFrame
+    // happens to be when some caller outside this class asks") - this is
+    // what lets a caller (Renderer::TakeLastCompletedSwapchainCapture())
+    // retrieve a same-frame result via a simple, argument-free call right
+    // after PresentViaRenderGraph() returns, with no frame-in-flight
+    // bookkeeping of its own.
+    std::optional<CapturedSwapchainPixels> TakeLastCompletedSwapchainCapture();
+
 private:
     static constexpr std::uint32_t kFramesInFlight = 2;
 
@@ -200,6 +222,19 @@ private:
     bool m_resizeRequested = false;
     int m_pendingWidth = 0;
     int m_pendingHeight = 0;
+
+    // network-impl-2 campaign, Phase 4
+    // (PHASE4_SWAPCHAIN_PIPELINED_CAPTURE_SERVICE.md) - see
+    // RequestSwapchainCapture()/TakeLastCompletedSwapchainCapture() above.
+    // A plain value member (SwapchainCaptureService has no forward-declare
+    // requirement of its own - see FramePresenter.cpp's own constructor).
+    SwapchainCaptureService m_swapchainCapture;
+
+    // Populated ONLY from inside PresentViaRenderGraph() itself, right
+    // after its own per-slot vkWaitForFences() call - see
+    // TakeLastCompletedSwapchainCapture()'s own doc comment above for why
+    // this indirection exists.
+    std::optional<CapturedSwapchainPixels> m_lastCompletedCapture;
 };
 
 } // namespace gte

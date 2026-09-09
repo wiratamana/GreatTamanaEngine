@@ -213,6 +213,16 @@ Renderer::CapturedRawPixels Renderer::CaptureRenderTexturePixels(RenderTexture& 
     return result;
 }
 
+void Renderer::RequestSwapchainCapture()
+{
+    m_presenter.RequestSwapchainCapture();
+}
+
+std::optional<CapturedSwapchainPixels> Renderer::TakeLastCompletedSwapchainCapture()
+{
+    return m_presenter.TakeLastCompletedSwapchainCapture();
+}
+
 Buffer Renderer::CreateBuffer(
     VkDeviceSize size, VkBufferUsageFlags usage, BufferMemoryUsage memoryUsage, const char* debugName) const
 {

@@ -283,6 +283,29 @@ public:
     // the SAME texture this same frame is unaffected.
     CapturedRawPixels CaptureRenderTexturePixels(RenderTexture& texture) const;
 
+    // network-impl-2 campaign, Phase 4
+    // (PHASE4_SWAPCHAIN_PIPELINED_CAPTURE_SERVICE.md) - the pipelined
+    // counterpart of CaptureRenderTexturePixels() above, for the REAL
+    // swapchain image going through PresentViaRenderGraph()'s pipelined,
+    // multi-frame-in-flight Present regime. Unlike
+    // CaptureRenderTexturePixels() (synchronous, adds a real extra GPU
+    // submission/wait), this adds ZERO extra GPU work: RequestSwapchainCapture()
+    // merely marks a capture as wanted, and the actual readback copy/read
+    // happens automatically, piggy-backing on synchronization
+    // PresentViaRenderGraph() already performs every frame for an unrelated,
+    // pre-existing reason - see SwapchainCaptureService's own class comment
+    // (FramePresenter.h/SwapchainCaptureService.h). A capture requested this
+    // way is NOT fulfilled by the SAME PresentViaRenderGraph() call it was
+    // requested from - it completes kFramesInFlight (2) real frames later.
+    void RequestSwapchainCapture();
+
+    // Returns (and clears) whatever swapchain capture completed during THIS
+    // Renderer's own most recent PresentViaRenderGraph() call -
+    // std::nullopt if none completed that call. Call this right after
+    // PresentViaRenderGraph() returns (see Application::Run()) - never
+    // before, since it reflects only that one call's own result.
+    std::optional<CapturedSwapchainPixels> TakeLastCompletedSwapchainCapture();
+
     // Factory for GPU buffers (vertex/index/uniform/staging), so callers
     // never need direct access to the VmaAllocator this Renderer owns
     // internally. See BufferMemoryUsage (Buffer.h) for how memoryUsage

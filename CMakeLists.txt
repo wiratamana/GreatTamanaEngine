@@ -362,6 +362,8 @@ add_library(gte_core STATIC
     src/Renderer/GpuTiming.h
     src/Renderer/GpuTimingService.cpp
     src/Renderer/GpuTimingService.h
+    src/Renderer/SwapchainCaptureService.cpp
+    src/Renderer/SwapchainCaptureService.h
     src/Renderer/GpuResourceFactory.cpp
     src/Renderer/GpuResourceFactory.h
     src/Renderer/Buffer.cpp

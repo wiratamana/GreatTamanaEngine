@@ -26,6 +26,7 @@ FramePresenter::FramePresenter(VkPhysicalDevice physicalDevice, VkDevice device,
     , m_gpuTiming(std::move(gpuTiming))
     , m_swapchain(physicalDevice, device, surface, graphicsQueueFamily, presentQueueFamily, width, height)
     , m_frameSync(device, kFramesInFlight, m_swapchain.ImageCount())
+    , m_swapchainCapture(allocator, m_memoryTracker, kFramesInFlight)
 {
     m_pendingWidth = width;
     m_pendingHeight = height;
@@ -62,6 +63,8 @@ FramePresenter::FramePresenter(FramePresenter&& other) noexcept
     , m_resizeRequested(other.m_resizeRequested)
     , m_pendingWidth(other.m_pendingWidth)
     , m_pendingHeight(other.m_pendingHeight)
+    , m_swapchainCapture(std::move(other.m_swapchainCapture))
+    , m_lastCompletedCapture(std::move(other.m_lastCompletedCapture))
 {
     other.m_commandBuffers.fill(VK_NULL_HANDLE);
 }
@@ -90,6 +93,8 @@ FramePresenter& FramePresenter::operator=(FramePresenter&& other) noexcept
         m_resizeRequested = other.m_resizeRequested;
         m_pendingWidth = other.m_pendingWidth;
         m_pendingHeight = other.m_pendingHeight;
+        m_swapchainCapture = std::move(other.m_swapchainCapture);
+        m_lastCompletedCapture = std::move(other.m_lastCompletedCapture);
     }
     return *this;
 }
@@ -207,6 +212,15 @@ void FramePresenter::RecreateSwapchain()
     // Per-swapchain-image semaphores must be rebuilt alongside the
     // swapchain, since the image count can change (or just to be safe).
     m_frameSync.RecreateRenderFinishedSemaphores(m_swapchain.ImageCount());
+
+    // network-impl-2 campaign, Phase 4
+    // (PHASE4_SWAPCHAIN_PIPELINED_CAPTURE_SERVICE.md) - a real resize means
+    // every readback buffer is the wrong size now, and any currently-pending
+    // capture's source image no longer exists at that size/identity - see
+    // SwapchainCaptureService::NotifySwapchainRecreated()'s own doc comment.
+    // Placed right after the early minimized-window return above, so this
+    // never fires for a resize that never actually happened.
+    m_swapchainCapture.NotifySwapchainRecreated();
 
     // Same reasoning for the per-swapchain-image depth buffers - a
     // genuinely new size (and possibly image count) means genuinely new
@@ -356,6 +370,20 @@ bool FramePresenter::PresentViaRenderGraph(rg::RenderGraph& graph, bool needsSwa
     const VkFence fence = m_frameSync.InFlightFence(m_currentFrame);
     vkWaitForFences(m_device, 1, &fence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
 
+    // network-impl-2 campaign, Phase 4
+    // (PHASE4_SWAPCHAIN_PIPELINED_CAPTURE_SERVICE.md) - the fence wait above
+    // just proved whatever GPU work was submitted the LAST time
+    // m_currentFrame had this same value (kFramesInFlight frames ago,
+    // including any readback copy RecordCaptureIfRequested() recorded into
+    // that slot's buffer back then) is now fully complete - this is the
+    // exact, zero-extra-wait point to safely read a previous capture's
+    // results. Read BEFORE any RecreateSwapchain() call further down this
+    // function could ever invalidate this same slot out from under it - see
+    // the phase document's own Step 3.3 for why this ordering is safe
+    // either way (a resize either already ran, clearing every slot before
+    // this line, or hasn't happened yet).
+    m_lastCompletedCapture = m_swapchainCapture.TryTakeCompletedCapture(m_currentFrame);
+
     std::uint32_t imageIndex = 0;
     const VkResult acquireResult = vkAcquireNextImageKHR(
         m_device, m_swapchain.Native(), std::numeric_limits<std::uint64_t>::max(),
@@ -413,6 +441,18 @@ bool FramePresenter::PresentViaRenderGraph(rg::RenderGraph& graph, bool needsSwa
             return build(builder, swapchainHandle);
         });
 
+    // network-impl-2 campaign, Phase 4
+    // (PHASE4_SWAPCHAIN_PIPELINED_CAPTURE_SERVICE.md) - right after
+    // graph.Execute() returns and BEFORE the existing manual finalize block
+    // below (see this file's own "Manual finalize" comment right after this
+    // block for why this is the established, precedented seam a swapchain
+    // pixel-readback copy hooks into) - if a capture was requested, this
+    // records the readback copy + both required barriers, and the existing
+    // finalize block's own "previous" state must become TransferSrcOptimal
+    // instead of ColorAttachmentWrite for THIS call only (see below).
+    const bool capturedThisFrame =
+        m_swapchainCapture.RecordCaptureIfRequested(cmd, target.image, target.extent, target.format, m_currentFrame);
+
     // Manual finalize: the render graph itself never learns that THIS
     // particular imported resource is about to be handed to
     // vkQueuePresentKHR (no pass ever declares a "PresentSrc" usage - see
@@ -424,7 +464,16 @@ bool FramePresenter::PresentViaRenderGraph(rg::RenderGraph& graph, bool needsSwa
     // internally - safe here because graph.Execute() above has already
     // closed its own vkCmdBeginRendering/vkCmdEndRendering bracket.
     {
-        const rg::ResourceState previous = rg::RequiredStateFor(rg::ResourceAccess::ColorAttachmentWrite, false);
+        // network-impl-2 Phase 4: if RecordCaptureIfRequested() above just
+        // recorded a readback copy, it already transitioned the image to
+        // TransferSrcOptimal (and left it there - see that method's own doc
+        // comment) - this call's own "previous" state must reflect that
+        // instead of the usual ColorAttachmentWrite the "Present" pass
+        // itself left it in.
+        const rg::ResourceState previous = capturedThisFrame
+            ? rg::ResourceState{ VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                  VK_ACCESS_2_TRANSFER_READ_BIT }
+            : rg::RequiredStateFor(rg::ResourceAccess::ColorAttachmentWrite, false);
         const rg::ResourceState next{
             VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, VK_ACCESS_2_NONE
         };
@@ -473,6 +522,16 @@ bool FramePresenter::PresentViaRenderGraph(rg::RenderGraph& graph, bool needsSwa
     m_currentFrame = (m_currentFrame + 1) % kFramesInFlight;
 
     return true;
+}
+
+void FramePresenter::RequestSwapchainCapture()
+{
+    m_swapchainCapture.RequestCapture();
+}
+
+std::optional<CapturedSwapchainPixels> FramePresenter::TakeLastCompletedSwapchainCapture()
+{
+    return std::exchange(m_lastCompletedCapture, std::nullopt);
 }
 
 } // namespace gte
