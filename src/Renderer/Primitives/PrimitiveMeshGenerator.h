@@ -2,6 +2,7 @@
 
 #include "Renderer/Vertex.h"
 
+#include <string>
 #include <vector>
 
 namespace gte {
@@ -29,6 +30,17 @@ enum class PrimitiveType {
 // Renderer::CreateMesh(). Pure, dependency-free, safe to call from anywhere
 // including Tier 1 tests - see tests/Renderer/PrimitiveMeshGeneratorTests.cpp.
 const char* ToString(PrimitiveType type) noexcept;
+
+// The inverse of ToString() above - parses a shape name (case-INSENSITIVE:
+// "Cube", "cube", "CUBE" all match) into its PrimitiveType. Recognizes
+// exactly the 5 names ToString() itself can ever produce, lower-cased for the
+// comparison ("cube", "sphere", "capsule", "cone", "plane") - never a fuzzy/
+// partial match. Returns false (and leaves `outType` completely untouched -
+// never partially/incorrectly written) for anything else, including an empty
+// string. Used by the network instantiate_primitive endpoint
+// (network-impl-3 campaign, see Game::InstantiatePrimitive()) to turn a
+// JSON "shape" string field into a real PrimitiveType.
+bool TryParsePrimitiveTypeName(const std::string& name, PrimitiveType& outType) noexcept;
 
 // Pure CPU-side geometry generation for the engine's built-in primitive
 // shapes - genuinely Tier-1-testable (see AGENTS.md, "Testability &

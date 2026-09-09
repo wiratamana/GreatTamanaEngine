@@ -1703,6 +1703,7 @@ set(GTE_TEST_SOURCES
     ECS/RegistryTests.cpp
     ECS/CameraTests.cpp
     ECS/TransformHierarchyTests.cpp
+    ECS/EntityQueryTests.cpp
     Game/RenderSystemTests.cpp
     Game/EntityInstantiatorTests.cpp
     Game/Instantiation/MeshAssetGpuCatalogJointOverrideRefreshTests.cpp

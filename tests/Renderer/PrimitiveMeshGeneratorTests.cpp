@@ -191,5 +191,53 @@ TEST(PrimitiveMeshGeneratorTest, Capsule_EveryVertexIsExactlyRadiusAwayFromItsNe
     }
 }
 
+TEST(PrimitiveMeshGeneratorTest, TryParsePrimitiveTypeName_ParsesAllFiveNamesInMultipleCasings)
+{
+    PrimitiveType outType;
+
+    EXPECT_TRUE(TryParsePrimitiveTypeName("cube", outType));
+    EXPECT_EQ(outType, PrimitiveType::Cube);
+    EXPECT_TRUE(TryParsePrimitiveTypeName("CUBE", outType));
+    EXPECT_EQ(outType, PrimitiveType::Cube);
+    EXPECT_TRUE(TryParsePrimitiveTypeName("Cube", outType));
+    EXPECT_EQ(outType, PrimitiveType::Cube);
+
+    EXPECT_TRUE(TryParsePrimitiveTypeName("sphere", outType));
+    EXPECT_EQ(outType, PrimitiveType::Sphere);
+    EXPECT_TRUE(TryParsePrimitiveTypeName("SPHERE", outType));
+    EXPECT_EQ(outType, PrimitiveType::Sphere);
+
+    EXPECT_TRUE(TryParsePrimitiveTypeName("capsule", outType));
+    EXPECT_EQ(outType, PrimitiveType::Capsule);
+    EXPECT_TRUE(TryParsePrimitiveTypeName("Capsule", outType));
+    EXPECT_EQ(outType, PrimitiveType::Capsule);
+
+    EXPECT_TRUE(TryParsePrimitiveTypeName("cone", outType));
+    EXPECT_EQ(outType, PrimitiveType::Cone);
+    EXPECT_TRUE(TryParsePrimitiveTypeName("CONE", outType));
+    EXPECT_EQ(outType, PrimitiveType::Cone);
+
+    EXPECT_TRUE(TryParsePrimitiveTypeName("plane", outType));
+    EXPECT_EQ(outType, PrimitiveType::Plane);
+    EXPECT_TRUE(TryParsePrimitiveTypeName("Plane", outType));
+    EXPECT_EQ(outType, PrimitiveType::Plane);
+}
+
+TEST(PrimitiveMeshGeneratorTest, TryParsePrimitiveTypeName_ReturnsFalseAndLeavesOutTypeUntouchedForUnrecognizedName)
+{
+    PrimitiveType outType = PrimitiveType::Sphere; // sentinel, must survive untouched.
+
+    EXPECT_FALSE(TryParsePrimitiveTypeName("not_a_shape", outType));
+    EXPECT_EQ(outType, PrimitiveType::Sphere);
+}
+
+TEST(PrimitiveMeshGeneratorTest, TryParsePrimitiveTypeName_ReturnsFalseForEmptyString)
+{
+    PrimitiveType outType = PrimitiveType::Cone; // sentinel, must survive untouched.
+
+    EXPECT_FALSE(TryParsePrimitiveTypeName("", outType));
+    EXPECT_EQ(outType, PrimitiveType::Cone);
+}
+
 } // namespace
 } // namespace gte

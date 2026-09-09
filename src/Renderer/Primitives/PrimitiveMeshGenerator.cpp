@@ -3,6 +3,7 @@
 #include "Math/MathTypes.h"
 #include "Math/Vec3.h"
 
+#include <cctype>
 #include <cmath>
 #include <cstddef>
 
@@ -127,6 +128,38 @@ const char* ToString(PrimitiveType type) noexcept
         case PrimitiveType::Plane: return "Plane";
     }
     return "Unknown";
+}
+
+bool TryParsePrimitiveTypeName(const std::string& name, PrimitiveType& outType) noexcept
+{
+    std::string lower;
+    lower.reserve(name.size());
+    for (char c : name) {
+        lower.push_back(static_cast<char>(
+            std::tolower(static_cast<unsigned char>(c))));
+    }
+
+    if (lower == "cube") {
+        outType = PrimitiveType::Cube;
+        return true;
+    }
+    if (lower == "sphere") {
+        outType = PrimitiveType::Sphere;
+        return true;
+    }
+    if (lower == "capsule") {
+        outType = PrimitiveType::Capsule;
+        return true;
+    }
+    if (lower == "cone") {
+        outType = PrimitiveType::Cone;
+        return true;
+    }
+    if (lower == "plane") {
+        outType = PrimitiveType::Plane;
+        return true;
+    }
+    return false;
 }
 
 std::vector<Vertex> PrimitiveMeshGenerator::Generate(PrimitiveType type)
