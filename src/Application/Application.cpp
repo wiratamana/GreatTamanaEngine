@@ -327,7 +327,18 @@ int Application::Run()
                             const Mat4 sceneViewProjection = m_editorLayer->SceneViewProjection(aspect);
                             const rg::TextureHandle h =
                                 b.ImportTexture("SceneView", sceneTarget->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
-                            AddSceneViewPass(b, m_game, m_renderer, h, aspect, sceneViewProjection, gpuSkinningBuffers);
+                            // The Editor's infinite ground grid (see
+                            // task_manager/editor-enchancements-1/PHASE0_MASTER_STRATEGY.md) - a
+                            // plain std::function keeps RenderPasses.cpp itself completely
+                            // Editor-agnostic (see AGENTS.md, Clean Architecture); only this call
+                            // site (which already legitimately holds m_editorLayer) knows the real
+                            // callback reaches into IEditorLayer::RenderSceneGrid().
+                            const std::function<void(VkCommandBuffer, const Mat4&)> recordSceneGrid =
+                                [this](VkCommandBuffer cmd, const Mat4& viewProj) {
+                                    m_editorLayer->RenderSceneGrid(m_renderer, cmd, viewProj);
+                                };
+                            AddSceneViewPass(
+                                b, m_game, m_renderer, h, aspect, sceneViewProjection, gpuSkinningBuffers, recordSceneGrid);
                             outputs.push_back(h);
 
                             // Phase 7 of the compute-shader campaign

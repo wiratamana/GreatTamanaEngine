@@ -12,6 +12,7 @@
 #include "Panels/MemoryPanel.h"
 #include "Panels/ProfilerPanel.h"
 #include "Panels/RenderGraphPanel.h"
+#include "SceneGridRenderer.h"
 #if GTE_ENABLE_PROJECT_PANEL
 #include "AssetPreviewMesh.h"
 #include "AssetPreviewTexture.h"
@@ -428,6 +429,18 @@ public:
 
     void FinalizeBlurValidationForSampling(VkCommandBuffer cmd) override { m_blurValidation.FinalizeForSampling(cmd); }
 
+    // See IEditorLayer::RenderSceneGrid()'s own doc comment. Always called by
+    // Application::Run() whenever "Scene" was rendered at all this frame (see
+    // AddSceneViewPass()'s own new recordSceneOverlay parameter,
+    // PHASE4_RENDERGRAPH_INTEGRATION.md) - no additional visibility guard is
+    // needed here, since Application::Run() already only calls
+    // AddSceneViewPass() (and therefore only ever triggers this callback) when
+    // sceneTarget != nullptr, i.e. exactly when "Scene" is actually visible.
+    void RenderSceneGrid(Renderer& renderer, VkCommandBuffer cmd, const Mat4& sceneViewProjection) override
+    {
+        m_sceneGrid.Draw(renderer, cmd, sceneViewProjection);
+    }
+
     void BuildUI(Game& game, Renderer& renderer, const rg::RenderGraph& renderGraph) override
     {
         ImGui::SetCurrentContext(m_context);
@@ -622,6 +635,14 @@ private:
     // (called from BuildUI() above) from that panel's own mouse input, and
     // read back by SceneViewProjection() above.
     EditorCamera m_sceneCamera;
+
+    // The Editor's "Scene" panel infinite ground grid (see
+    // task_manager/editor-enchancements-1/PHASE0_MASTER_STRATEGY.md) - drawn
+    // every frame the "Scene" panel itself is visible/rendered, with no
+    // separate on/off toggle (a deliberate, confirmed design decision - see
+    // PHASE0_MASTER_STRATEGY.md's own "Locked Design Decisions"), exactly
+    // mirroring how Unity's own Scene grid has no such toggle either.
+    SceneGridRenderer m_sceneGrid;
 
     // True once Render(cmd) has actually run THIS frame (reset to false at
     // the top of every NewFrame()) - see RenderPlatformWindows() for why

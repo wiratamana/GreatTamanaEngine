@@ -26,6 +26,7 @@ public:
         return std::nullopt;
     }
     void FinalizeBlurValidationForSampling(VkCommandBuffer /*cmd*/) override { }
+    void RenderSceneGrid(Renderer& /*renderer*/, VkCommandBuffer /*cmd*/, const Mat4& /*sceneViewProjection*/) override { }
     void BuildUI(Game& /*game*/, Renderer& /*renderer*/, const rg::RenderGraph& /*renderGraph*/) override { }
     void Render(VkCommandBuffer /*cmd*/) override { }
     void RenderPlatformWindows() override { }

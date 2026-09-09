@@ -66,7 +66,8 @@ void AddGameViewPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& rend
 
 void AddSceneViewPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer, rg::TextureHandle sceneViewTarget,
     float aspectWidthOverHeight, const Mat4& sceneViewProjection,
-    const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers)
+    const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers,
+    const std::function<void(VkCommandBuffer, const Mat4&)>& recordSceneOverlay)
 {
     builder.AddPass(
         "SceneView",
@@ -75,10 +76,13 @@ void AddSceneViewPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& ren
             pass.WriteDepthStencilAttachment(sceneViewTarget, kGameClearDepth);
             DeclareGpuSkinningReads(pass, gpuSkinningOutputBuffers);
         },
-        [&game, &renderer, aspectWidthOverHeight, sceneViewProjection](rg::PassContext& ctx) {
+        [&game, &renderer, aspectWidthOverHeight, sceneViewProjection, recordSceneOverlay](rg::PassContext& ctx) {
             renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
             game.Render(renderer, aspectWidthOverHeight, &sceneViewProjection);
             renderer.EndGraphPassRecording();
+            if (recordSceneOverlay) {
+                recordSceneOverlay(ctx.cmd, sceneViewProjection);
+            }
         });
 }
 

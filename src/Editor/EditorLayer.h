@@ -154,6 +154,23 @@ public:
     // - see Application::Run(). A no-op for NullEditorLayer.
     virtual void FinalizeBlurValidationForSampling(VkCommandBuffer cmd) = 0;
 
+    // Records the Editor's "Scene" panel infinite ground grid (see
+    // task_manager/editor-enchancements-1/PHASE0_MASTER_STRATEGY.md) directly
+    // against `cmd` - called by Application::Run() from INSIDE
+    // AddSceneViewPass()'s own execute callback (RenderPasses.cpp), i.e.
+    // still inside that pass's open vkCmdBeginRendering/vkCmdEndRendering
+    // bracket, immediately AFTER Game::Render() has already recorded the real
+    // scene geometry for this frame - this exact ordering is what makes the
+    // grid correctly depth-tested/occluded by scene objects already in front
+    // of it (see SceneGridRenderer::Draw()'s own doc comment).
+    // `sceneViewProjection` is the exact same combined view-projection matrix
+    // Game::Render() was just called with for this same pass (see
+    // IEditorLayer::SceneViewProjection()). Always a safe no-op for
+    // NullEditorLayer (a release build has no "Scene" panel, and this is
+    // simply never meaningfully reachable there either way, since
+    // SceneViewTarget() already always returns nullptr for it).
+    virtual void RenderSceneGrid(Renderer& renderer, VkCommandBuffer cmd, const Mat4& sceneViewProjection) = 0;
+
     // Builds every editor panel for this frame - top menu bar (File > Exit,
     // ...), Hierarchy (left), Inspector (right), Scene/Game (tabbed,
     // center), and Memory (bottom, a Unity-Memory-Profiler-style GPU memory

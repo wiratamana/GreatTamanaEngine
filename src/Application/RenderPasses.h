@@ -80,9 +80,19 @@ void AddGameViewPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& rend
 // IEditorLayer::SceneViewProjection()), bypassing ECS camera resolution for
 // this view only, exactly as Application::Run() already did before this
 // migration. `gpuSkinningOutputBuffers` - see AddGameViewPass() above.
+// `recordSceneOverlay`, if set, is invoked once, immediately after
+// Game::Render()'s own draws for this pass finish (still inside this pass's
+// open dynamic-rendering bracket) - passed this pass's own `cmd` and
+// `sceneViewProjection` again, so a caller (Application::Run(), via
+// IEditorLayer::RenderSceneGrid()) can layer a Scene-view-only visual
+// overlay (the Editor's infinite ground grid -
+// task_manager/editor-enchancements-1/PHASE0_MASTER_STRATEGY.md) on top of
+// the real scene geometry, correctly depth-tested against it. Empty (the
+// default) draws nothing extra - the exact pre-existing behavior.
 void AddSceneViewPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer, rg::TextureHandle sceneViewTarget,
     float aspectWidthOverHeight, const Mat4& sceneViewProjection,
-    const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers = {});
+    const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers = {},
+    const std::function<void(VkCommandBuffer, const Mat4&)>& recordSceneOverlay = {});
 
 // Declares the "Present" pass: writes swapchainImage's color attachment
 // (always cleared, matching FrameRecorder::RecordFrame()'s own old
