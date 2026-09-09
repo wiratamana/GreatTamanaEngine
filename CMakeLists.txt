@@ -732,6 +732,19 @@ if(GTE_ENABLE_PROJECT_PANEL)
     gte_add_shader(GreatTamanaEngine src/Shaders/MeshPreview.frag)
 endif()
 
+# The Editor's "Scene" panel infinite ground grid (Unity-style procedural
+# shader grid - see task_manager/editor-enchancements-1/PHASE0_MASTER_STRATEGY.md).
+# Only compiled/staged when GTE_ENABLE_EDITOR is ON, since
+# src/Editor/SceneGridRenderer.cpp (PHASE3) - the only thing that ever
+# loads these - isn't compiled into gte_core otherwise (unlike
+# MeshPreview.vert/frag above, this does NOT additionally need
+# GTE_ENABLE_PROJECT_PANEL - SceneGridRenderer has no dependency on the
+# Project panel at all).
+if(GTE_ENABLE_EDITOR)
+    gte_add_shader(GreatTamanaEngine src/Shaders/SceneGrid.vert)
+    gte_add_shader(GreatTamanaEngine src/Shaders/SceneGrid.frag)
+endif()
+
 # Phase 7 of the compute-shader campaign
 # (COMPUTE_PHASE7_VALIDATION_TESTING_TOOLING_STRATEGY_v2.md) - the compute
 # box-blur validation shader (src/Editor/ComputeBlurValidation.h/.cpp).
