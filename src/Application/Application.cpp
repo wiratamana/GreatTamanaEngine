@@ -456,6 +456,22 @@ int Application::Run()
             running = false;
         }
 
+        // network-impl-2 campaign, Phase 5
+        // (PHASE5_GET_SWAPCHAIN_ENDPOINT_AND_FORMAT_NEGOTIATION_REUSE.md) -
+        // must run BEFORE PresentViaRenderGraph() below so
+        // SwapchainCaptureService::RecordCaptureIfRequested() (Phase 4) sees
+        // m_captureRequested == true in time this frame. Unconditional, at
+        // Run()'s own top-level body (never nested inside an
+        // if (gameTarget != nullptr || sceneTarget != nullptr) block, unlike
+        // the Game-view fast-fail check above) - runs every single frame, in
+        // every build configuration, regardless of whether a Game/Scene view
+        // exists this frame. Cheap, side-effect-free read per
+        // IsCaptureRequested()'s own doc comment; RequestSwapchainCapture()
+        // itself is idempotent/safe to call repeatedly while a request is
+        // already pending.
+        if (m_captureBridge.IsCaptureRequested(FrameCaptureKind::Swapchain)) {
+            m_renderer.RequestSwapchainCapture();
+        }
         // Call 2 of 2: the PIPELINED swapchain-present regime - Present
         // alone. In an Editor build this draws the editor's own ImGui
         // chrome (which itself displays the Game/Scene views above) via the
@@ -493,6 +509,25 @@ int Application::Run()
             } catch (const std::exception& e) {
                 std::fprintf(stderr, "RenderGraph Present Execute() failed: %s\n", e.what());
                 assert(false && "RenderGraph Present Execute() threw - see stderr");
+            }
+
+            // network-impl-2 campaign, Phase 5
+            // (PHASE5_GET_SWAPCHAIN_ENDPOINT_AND_FORMAT_NEGOTIATION_REUSE.md) -
+            // checked unconditionally right after PresentViaRenderGraph()
+            // returns, whether or not it actually recorded/returned a value
+            // this frame (a capture requested several frames ago may
+            // complete on a frame whose own new Present pass was itself
+            // skipped for an unrelated reason) - TakeLastCompletedSwapchainCapture()
+            // is a cheap std::exchange() either way. Mirrors Phase 3's own
+            // Game-view success-path capture shape exactly (BGRA->RGBA
+            // conversion, then PNG encode, then FulfillPendingRequest()).
+            if (std::optional<CapturedSwapchainPixels> raw = m_renderer.TakeLastCompletedSwapchainCapture()) {
+                if (IsBgraFormat(raw->format)) {
+                    Encoding::ConvertBgraToRgbaInPlace(raw->pixels.data(), raw->width, raw->height);
+                }
+                std::vector<std::uint8_t> png = Encoding::EncodeRgba8ToPng(raw->pixels.data(), raw->width, raw->height);
+                m_captureBridge.FulfillPendingRequest(FrameCaptureKind::Swapchain,
+                    CapturedPngImage{ std::move(png), raw->width, raw->height });
             }
 
             if (presentStats.has_value()) {

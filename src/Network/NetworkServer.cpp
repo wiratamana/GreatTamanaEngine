@@ -28,30 +28,25 @@ namespace {
 // this literal appears - Start()'s signature has no host parameter to
 // smuggle a different value in through.
 constexpr const char* kBindHost = "127.0.0.1";
-
-// The one, hand-written route table for this campaign - see
-// PHASE0_MASTER_STRATEGY.md's locked "Endpoint contract". A future endpoint
-// is added here as one more server.Get(...)/Post(...) line, forwarding to
-// its own NetworkRoutes.h function - never composing response text inline
-// in this lambda.
-void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge)
+// network-impl-2 campaign, Phase 5
+// (PHASE5_GET_SWAPCHAIN_ENDPOINT_AND_FORMAT_NEGOTIATION_REUSE.md) - the one
+// shared route-registration helper behind BOTH /get_game_view (Phase 3) and
+// /get_swapchain (this phase), extracted once a SECOND, byte-for-byte-
+// identical-apart-from-`path`/`kind` call site genuinely existed (see
+// PHASE5's own Step 3.2 - the same "extract only once a real second caller
+// needs it" convention this codebase already applies elsewhere, e.g.
+// AGENTS.md's BonePoseMath.h precedent). Reuses
+// ResolveCaptureResponseFormat()/BuildCaptureJsonBody() (NetworkRoutes.h,
+// Phase 3) completely unchanged.
+void RegisterCaptureRoute(httplib::Server& server, const char* path, FrameCaptureKind kind, FrameCaptureBridge* captureBridge)
 {
-    server.Get("/http_hello_world", [](const httplib::Request&, httplib::Response& res) {
-        res.set_content(HandleHelloWorld(), "text/plain; charset=utf-8");
-    });
-
-    // network-impl-2 campaign, Phase 3
-    // (PHASE3_GAME_VIEW_CAPTURE_AND_GET_GAME_VIEW_ENDPOINT.md) - the first
-    // engine-state-touching endpoint. See AGENTS.md, "Networking", for why
-    // this route handler is allowed to touch FrameCaptureBridge and nothing
-    // else engine-side.
-    server.Get("/get_game_view", [captureBridge](const httplib::Request& req, httplib::Response& res) {
+    server.Get(path, [captureBridge, kind](const httplib::Request& req, httplib::Response& res) {
         if (captureBridge == nullptr) {
             res.status = 503;
             res.set_content("capture bridge not available", "text/plain; charset=utf-8");
             return;
         }
-        const FrameCaptureBridge::RequestResult result = captureBridge->RequestCaptureAndWait(FrameCaptureKind::GameView);
+        const FrameCaptureBridge::RequestResult result = captureBridge->RequestCaptureAndWait(kind);
         if (result.alreadyPending) {
             res.status = 503;
             res.set_content("capture already in progress", "text/plain; charset=utf-8");
@@ -73,6 +68,28 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge)
             res.set_content(BuildCaptureJsonBody(image.width, image.height, base64), "application/json");
         }
     });
+}
+
+// The one, hand-written route table for this campaign - see
+// PHASE0_MASTER_STRATEGY.md's locked "Endpoint contract". A future endpoint
+// is added here as one more server.Get(...)/Post(...) line, forwarding to
+// its own NetworkRoutes.h function - never composing response text inline
+// in this lambda.
+void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge)
+{
+    server.Get("/http_hello_world", [](const httplib::Request&, httplib::Response& res) {
+        res.set_content(HandleHelloWorld(), "text/plain; charset=utf-8");
+    });
+
+    // network-impl-2 campaign, Phase 3
+    // (PHASE3_GAME_VIEW_CAPTURE_AND_GET_GAME_VIEW_ENDPOINT.md) /
+    // Phase 5 (PHASE5_GET_SWAPCHAIN_ENDPOINT_AND_FORMAT_NEGOTIATION_REUSE.md)
+    // - the two engine-state-touching endpoints, both wired through this one
+    // shared helper (identical apart from the path/FrameCaptureKind). See
+    // AGENTS.md, "Networking", for why a route handler is allowed to touch
+    // FrameCaptureBridge and nothing else engine-side.
+    RegisterCaptureRoute(server, "/get_game_view", FrameCaptureKind::GameView, captureBridge);
+    RegisterCaptureRoute(server, "/get_swapchain", FrameCaptureKind::Swapchain, captureBridge);
 }
 
 } // namespace
