@@ -83,6 +83,19 @@ option(GTE_ENABLE_PROFILER "Compile in CPU scope-timer profiling instrumentation
 # GTE_ENABLE_PROFILER already establishes for ScopeTimer above.
 option(GTE_ENABLE_JOB_SYSTEM "Compile in the Job System's real worker-thread pool" ON)
 
+# Master switch for the always-compiled Network module (src/Network/) - an
+# embedded, loopback-only HTTP server (gte::Network::NetworkServer, built on
+# the already-fetched cpp-httplib - see cmake/FetchHttplib.cmake) that lets an
+# external tool/script send the engine a plain HTTP request without ever
+# blocking Application::Run()'s own frame loop (see
+# task_manager/network-impl-1/PHASE0_MASTER_STRATEGY.md). Same "class always
+# compiles, only the production call site is gated" precedent as
+# GTE_ENABLE_JOB_SYSTEM above: turning this OFF means Application never calls
+# NetworkServer::Start() (so a release build never opens a socket at all, at
+# zero cost), while src/Network/'s own classes/tests still compile and pass
+# either way.
+option(GTE_ENABLE_NETWORK "Compile in and auto-start the embedded, loopback-only HTTP server" ON)
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(FetchSDL3)
 include(FetchVulkan)
@@ -459,6 +472,8 @@ add_library(gte_core STATIC
     src/Jobs/JobDispatch.cpp
     src/Jobs/JobContinuation.h
     src/Jobs/JobContinuation.cpp
+    src/Network/NetworkRoutes.h
+    src/Network/NetworkRoutes.cpp
 )
 
 # Exactly one of these two branches gets compiled in, depending on
@@ -590,6 +605,14 @@ target_compile_definitions(gte_core PUBLIC GTE_ENABLE_PROFILER=$<BOOL:${GTE_ENAB
 # (tests/Jobs/*.cpp) must see the exact same macro value gte_core itself was
 # built with.
 target_compile_definitions(gte_core PUBLIC GTE_ENABLE_JOB_SYSTEM=$<BOOL:${GTE_ENABLE_JOB_SYSTEM}>)
+
+# Same idea again - exposes GTE_ENABLE_NETWORK to C++ code as an actual 1/0
+# preprocessor macro, needed by Application.cpp's own
+# `#if GTE_ENABLE_NETWORK` guard around NetworkServer::Start() (see
+# AGENTS.md, "Networking"). PUBLIC for the same reason as the three
+# definitions above: GreatTamanaEngineTests must see the exact same macro
+# value gte_core itself was built with.
+target_compile_definitions(gte_core PUBLIC GTE_ENABLE_NETWORK=$<BOOL:${GTE_ENABLE_NETWORK}>)
 
 # PUBLIC (not PRIVATE) for the same reason as the compile definition above:
 # any consumer of gte_core (GreatTamanaEngine's main.cpp, and every test in
