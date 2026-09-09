@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <mutex>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace gte {
@@ -28,6 +29,19 @@ namespace gte {
 enum class FrameCaptureKind {
     Swapchain, // GET /get_swapchain - the literal, currently-presented OS window image.
     GameView,  // GET /get_game_view - the Game's own off-screen 3D-scene RenderTexture.
+    // network-impl-4 campaign, Phase 4 - GET /get_texture. Unlike the two
+    // above, a request of THIS kind carries a dynamic payload (which
+    // texture, which channel) - see RequestedTextureName()/
+    // RequestedTextureChannel() below.
+    NamedTexture,
+};
+
+// network-impl-4 campaign, Phase 4 - which half of a named texture a
+// GET /get_texture request wants. Color is the default (see
+// PHASE0_MASTER_STRATEGY.md's Locked Design Decision 5).
+enum class DebugTextureChannel {
+    Color,
+    Depth,
 };
 
 // A successfully captured, already-PNG-encoded still frame.
@@ -35,6 +49,15 @@ struct CapturedPngImage {
     std::vector<std::uint8_t> pngBytes;
     int width = 0;
     int height = 0;
+    // network-impl-4 campaign, Phase 4 - PHASE0_MASTER_STRATEGY.md's Locked
+    // Design Decision 4. Meaningful ONLY for FrameCaptureKind::NamedTexture
+    // (left at its default, 0, for Swapchain/GameView, which have no
+    // equivalent "how many frames old" concept and whose own route handler
+    // never reads this field at all - see Phase 5). Computed by
+    // Application::Run() at the exact moment it services the request, as
+    // `RenderGraph::CurrentDebugTextureFrameCounter() -
+    // snapshot.lastUpdatedFrameCounter` (see Application.cpp).
+    std::uint64_t framesSinceUpdate = 0;
 };
 
 // Why a capture request did NOT produce an image - surfaced to the network
@@ -83,7 +106,11 @@ public:
         std::optional<FrameCaptureFailureReason> failure;
         bool alreadyPending = false;
     };
-    RequestResult RequestCaptureAndWait(FrameCaptureKind kind, int timeoutMilliseconds = 3000);
+    // `textureName`/`channel` are meaningful ONLY when
+    // `kind == FrameCaptureKind::NamedTexture` - ignored for the other two
+    // kinds, exactly like an unused parameter.
+    RequestResult RequestCaptureAndWait(FrameCaptureKind kind, int timeoutMilliseconds = 3000,
+        const std::string& textureName = "", DebugTextureChannel channel = DebugTextureChannel::Color);
 
     // --- Called from the MAIN thread (Application::Run()) only ----------
 
@@ -91,6 +118,26 @@ public:
     // thread should actually go perform this capture this frame). A cheap,
     // side-effect-free read - never blocks.
     bool IsCaptureRequested(FrameCaptureKind kind) const;
+
+    // Valid ONLY when IsCaptureRequested(FrameCaptureKind::NamedTexture) is
+    // currently true - the exact (textureName, channel) the currently-pending
+    // request asked for. Returns a default-constructed
+    // {"", DebugTextureChannel::Color} if nothing is currently pending for
+    // this kind - never garbage.
+    //
+    // NOTE: this is intentionally TWO separate accessors (plus
+    // IsCaptureRequested() as a third, prior call) rather than one combined
+    // atomic read. A concurrent request-of-a-different-name racing in between
+    // these calls is possible in principle but harmless in practice: whichever
+    // request is actually pending by the time this phase's own Application.cpp
+    // block reaches FulfillPendingRequest()/FailPendingRequest() is always the
+    // SAME request whose name/channel were just read here - a completion
+    // always targets "whatever this slot's current request is", never a
+    // stale one, since RequestCaptureAndWait() only marks a request complete
+    // for the specific slot state a caller is actually waiting on. No
+    // redesign is needed here purely to remove this theoretical interleaving.
+    std::string RequestedTextureName() const;
+    DebugTextureChannel RequestedTextureChannel() const;
 
     // Delivers a successfully captured+encoded image to whichever network
     // thread is waiting on `kind` (a safe no-op, doing nothing, if nothing
@@ -123,6 +170,13 @@ private:
 
     Slot m_swapchainSlot;
     Slot m_gameViewSlot;
+    Slot m_namedTextureSlot;
+    // Guarded by m_namedTextureSlot.mutex - see .cpp for the exact locking
+    // discipline (set once, by RequestCaptureAndWait(), right before it marks
+    // `requested = true`; read by RequestedTextureName()/
+    // RequestedTextureChannel() under the same lock).
+    std::string m_requestedTextureName;
+    DebugTextureChannel m_requestedTextureChannel = DebugTextureChannel::Color;
 };
 
 } // namespace gte

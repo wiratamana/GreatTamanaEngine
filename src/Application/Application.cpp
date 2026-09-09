@@ -5,6 +5,7 @@
 #include "MemorySnapshotBuilder.h"
 #include "RenderPasses.h"
 
+#include "../Encoding/DepthVisualization.h"
 #include "../Encoding/PixelConversion.h"
 #include "../Encoding/PngEncoder.h"
 #include "../Memory/SdlMemoryTracker.h"
@@ -12,6 +13,7 @@
 #include "../Profiling/ScopeTimer.h"
 #include "../Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
+#include "../Renderer/RenderGraph/RenderGraphDebugTextureRegistry.h"
 
 #include <SDL3/SDL.h>
 
@@ -613,6 +615,81 @@ int Application::Run()
         // present - see IEditorLayer::RenderPlatformWindows().
         m_editorLayer->RenderPlatformWindows();
 
+        // network-impl-4 campaign, Phase 4
+        // (task_manager/network-impl-4/PHASE4_FRAMECAPTUREBRIDGE_NAMED_TEXTURE_SUPPORT.md) -
+        // GET /get_texture's own capture path. Placed here (unconditionally, once
+        // per Run() iteration, AFTER every render-graph Execute() call this frame)
+        // so RenderGraph::DebugTextureSnapshotFor() sees the freshest possible
+        // registry state, and so WaitForGpuIdle() below waits out every submission
+        // this frame - both regimes - before the readback below runs. Cheap,
+        // side-effect-free when nothing is pending (IsCaptureRequested() is a
+        // plain bool read).
+        if (m_captureBridge.IsCaptureRequested(FrameCaptureKind::NamedTexture)) {
+            const std::string requestedName = m_captureBridge.RequestedTextureName();
+            const DebugTextureChannel requestedChannel = m_captureBridge.RequestedTextureChannel();
+
+            if (const std::optional<rg::DebugTextureSnapshot> snapshot = m_renderGraph.DebugTextureSnapshotFor(requestedName)) {
+                const bool wantsDepth = (requestedChannel == DebugTextureChannel::Depth);
+                if (wantsDepth && !snapshot->hasDepth) {
+                    // Positively known, permanent-for-this-registration failure -
+                    // fail fast (409) rather than waiting out the full timeout,
+                    // exactly mirroring the Game-view "no panel visible"
+                    // fast-fail's own reasoning.
+                    m_captureBridge.FailPendingRequest(FrameCaptureKind::NamedTexture, FrameCaptureFailureReason::TargetNotAvailable);
+                } else {
+                    // PHASE0_MASTER_STRATEGY.md's Locked Design Decision 4 -
+                    // computed BEFORE WaitForGpuIdle()/the readback below, from the
+                    // snapshot as it was at the moment this request was actually
+                    // serviced (never re-queried afterward - a capture that takes a
+                    // few extra milliseconds to read back must not report itself
+                    // as "0 frames old" merely because the CURRENT counter moved on
+                    // in the meantime; it genuinely reflects THIS snapshot's own
+                    // last-write frame, compared against "now").
+                    const std::uint64_t framesSinceUpdate =
+                        m_renderGraph.CurrentDebugTextureFrameCounter() - snapshot->lastUpdatedFrameCounter;
+
+                    m_renderer.WaitForGpuIdle();
+
+                    const VkImage image = wantsDepth ? snapshot->target.depthImage : snapshot->target.image;
+                    const VkImageAspectFlags aspect = wantsDepth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+                    const VkFormat format = wantsDepth ? snapshot->target.depthFormat : snapshot->target.format;
+                    const rg::ResourceState state = wantsDepth ? snapshot->depthState : snapshot->colorState;
+
+                    Renderer::CapturedRawPixels raw =
+                        m_renderer.CaptureImagePixels(image, aspect, format, snapshot->target.extent, state);
+
+                    bool ok = true;
+                    if (wantsDepth) {
+                        // Safe to write in-place into the SAME buffer it reads from
+                        // (see PHASE4's own detailed correctness note): every pixel's
+                        // 4 input bytes are fully read into a local temporary BEFORE
+                        // any of that pixel's own 4 output bytes are written, and
+                        // input/output share the exact same per-pixel byte offset
+                        // (no shift) - never a different pixel's range.
+                        ok = Encoding::ConvertDepthToGrayscaleRgba8(raw.pixels.data(), raw.format, raw.width, raw.height, raw.pixels.data());
+                    } else if (IsBgraFormat(raw.format)) {
+                        Encoding::ConvertBgraToRgbaInPlace(raw.pixels.data(), raw.width, raw.height);
+                    }
+
+                    if (!ok) {
+                        // Depth format this device negotiated isn't one
+                        // ConvertDepthToGrayscaleRgba8() recognizes - see
+                        // PHASE3's own accepted, documented, narrow risk.
+                        m_captureBridge.FailPendingRequest(FrameCaptureKind::NamedTexture, FrameCaptureFailureReason::TargetNotAvailable);
+                    } else {
+                        std::vector<std::uint8_t> png = Encoding::EncodeRgba8ToPng(raw.pixels.data(), raw.width, raw.height);
+                        m_captureBridge.FulfillPendingRequest(FrameCaptureKind::NamedTexture,
+                            CapturedPngImage{ std::move(png), raw.width, raw.height, framesSinceUpdate });
+                    }
+                }
+            }
+            // else: this name has never been registered yet this session - leave
+            // the request pending; either it starts rendering within the bridge's
+            // existing fixed timeout (a later Run() iteration's own check above
+            // then succeeds), or the caller eventually gets HTTP 504 - exactly the
+            // same accepted "main thread hasn't produced this yet" bucket
+            // network-impl-2's own PHASE0_MASTER_STRATEGY.md already documents.
+        }
         // Phase 5 (GPU memory usage over time) - see PHASE5_GPU_MEMORY_
         // HISTORY_STRATEGY_v2.md: one real GPU memory snapshot per
         // profiler frame, taken as late as possible in the frame (still
