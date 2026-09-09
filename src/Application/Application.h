@@ -5,6 +5,7 @@
 
 #include "../Editor/EditorLayer.h"
 #include "../Game/Game.h"
+#include "../Network/NetworkServer.h"
 #include "../Renderer/Renderer.h"
 #include "../Renderer/RenderGraph/RenderGraph.h"
 #include "../Window/Window.h"
@@ -62,6 +63,17 @@ private:
     // need to relate to Game's at all.
     std::unique_ptr<IEditorLayer> m_editorLayer;
     Game m_game;
+
+    // Networking campaign (task_manager/network-impl-1/) - an embedded,
+    // loopback-only HTTP server (see AGENTS.md, "Networking"). Declared
+    // LAST (after Game) so it is DESTROYED FIRST, before Game/the Editor/
+    // Renderer/Window/SDL start tearing down - a defensive ordering choice,
+    // not a strictly necessary one today (no route handler touches any
+    // engine state at all yet - see NetworkRoutes.h), but it's what a
+    // FUTURE endpoint that DOES need to bridge into engine state would
+    // already want: the background thread is guaranteed fully stopped
+    // before anything it might eventually reference starts being torn down.
+    Network::NetworkServer m_networkServer;
 
     // Current OS window size, kept up to date by the same WindowResized
     // event Renderer::OnResize()/m_editorLayer->OnWindowResized() react to

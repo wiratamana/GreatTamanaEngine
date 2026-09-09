@@ -85,6 +85,18 @@ Application::Application(const std::string& title, int width, int height)
     , m_windowWidth(width)
     , m_windowHeight(height)
 {
+#if GTE_ENABLE_NETWORK
+    // Loopback-only (127.0.0.1 is baked into NetworkServer itself - Start()
+    // deliberately has no host parameter, see Phase 2), port 8080 - see
+    // AGENTS.md, "Networking", and
+    // task_manager/network-impl-1/PHASE0_MASTER_STRATEGY.md's locked
+    // design decisions for why this is hardcoded rather than configurable
+    // yet, and why this is safe to auto-start unconditionally. A bind
+    // failure (e.g. another instance of the engine already running and
+    // holding port 8080) is logged by NetworkServer itself and is
+    // NON-FATAL - the rest of Application still starts normally either way.
+    m_networkServer.Start(8080);
+#endif
 }
 
 Application::~Application() = default;

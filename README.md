@@ -1599,6 +1599,21 @@ pieces:
   runtime state is intentionally not persisted at all. See
   `task_manager/scene-serialization-1/PHASE0_MASTER_STRATEGY.md` for the
   full six-phase writeup.
+- **The engine now has its first real networking feature: an embedded,
+  loopback-only HTTP server.** `src/Network/` (`NetworkServer.h/.cpp`,
+  built on the already-vendored cpp-httplib - see `cmake/FetchHttplib.cmake`)
+  is auto-started by `Application`'s constructor (gated by a new
+  `GTE_ENABLE_NETWORK` CMake option, default ON) on a dedicated background
+  thread, so it never blocks the main frame loop. Binds to `127.0.0.1` only
+  - `NetworkServer::Start(int port)` has no `host` parameter at all, so this
+  is enforced by the type itself, never reachable from another machine. One
+  endpoint exists today: `GET http://127.0.0.1:8080/http_hello_world`
+  returns `hello world`. See `AGENTS.md`'s new "Networking" section for the
+  thread-safety rule every future endpoint must follow (a route handler
+  must be a pure function of its own request data - it must never touch
+  ECS/Renderer/Game/AssetDatabase directly), and
+  `task_manager/network-impl-1/PHASE0_MASTER_STRATEGY.md` for the full
+  campaign writeup.
 
 ## Roadmap
 

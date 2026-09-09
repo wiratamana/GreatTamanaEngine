@@ -934,6 +934,77 @@ Follow these rules whenever touching this module or building a later phase on to
   every spawned model instance owns its own private GPU mesh buffers - a
   separate, unstarted piece of engine work (see `README.md`/`TODO.md`).
 
+## Networking
+
+`src/Network/` (`NetworkRoutes.h/.cpp`, `NetworkServer.h/.cpp`) is the
+engine's first real network I/O - a single embedded, loopback-only HTTP
+server (`gte::Network::NetworkServer`, built on the already-vendored
+cpp-httplib - see `cmake/FetchHttplib.cmake`), auto-started by
+`Application`'s constructor (gated by the `GTE_ENABLE_NETWORK` CMake
+option, default ON - see `task_manager/network-impl-1/PHASE0_MASTER_STRATEGY.md`
+for the full campaign writeup). Follow these rules whenever touching this
+module or adding a new endpoint:
+
+- **The server only ever binds to `127.0.0.1` (loopback) - never a
+  LAN-visible interface.** This is enforced by `NetworkServer::Start(int
+  port)`'s own signature - there is no `host` parameter anywhere in its
+  public API for a caller to override upward, so the constraint holds by
+  construction, not by convention (see PHASE0's own "Locked Design
+  Decisions"). A future requirement to expose this remotely needs a fresh,
+  explicit design/security review first, not a one-line signature change.
+- **Every registered route handler runs on NetworkServer's own dedicated
+  background `std::thread` (via `httplib::Server::listen_after_bind()`),
+  NEVER the main thread - and, symmetrically, nothing outside
+  `NetworkServer.cpp` may call into `httplib::Server` directly.** This is
+  a NEW background thread, structurally similar to (but independent from)
+  the Job System's own worker-thread pool (see "Job System" above) - the
+  exact same category of problem applies: this thread runs completely
+  unsynchronized with the main thread's own frame loop, so it must never
+  read OR write any engine-owned mutable state without a dedicated,
+  reviewed thread-safe bridge.
+- **A route handler must be a PURE function of its own request data only -
+  it must NEVER touch `Registry`/`Renderer`/`Game`/`AssetDatabase`/
+  `IEditorLayer`/ImGui/any other engine subsystem, directly or indirectly,
+  full stop.** Every single row of the Job System's own Phase 4
+  thread-safety classification table (see "Job System" above) that says
+  **NEVER** for a job body applies at least as strongly here - none of
+  those subsystems were built with ANY concurrent access in mind, and this
+  network thread has no more special standing than an arbitrary job body
+  would. `NetworkRoutes.h`'s own convention (every handler is a small, pure
+  function with no engine-side parameter at all, e.g. `HandleHelloWorld()`)
+  is what makes this rule trivially satisfiable today - a future endpoint
+  that genuinely needs engine data (e.g. "how many entities are in the
+  scene") needs a dedicated, reviewed, thread-safe bridge built first (e.g.
+  a fixed-size, mutex-guarded command/snapshot queue the main thread drains
+  once per frame, mirroring `Jobs::detail::JobQueue`'s own fixed-capacity,
+  mutex-guarded shape) - never a raw pointer/reference into live engine
+  state handed to a handler lambda.
+- **Every one of `NetworkServer`'s own failure modes (a bind failure, e.g.
+  the port already being in use) is NON-FATAL - log to stderr and continue,
+  never throw/crash/abort engine startup.** This is a debugging/tooling
+  aid layered on top of the engine, not a required subsystem the engine
+  cannot run without (the same spirit `cmake/FetchHttplib.cmake`'s own
+  header comment already states) - a developer running two instances of
+  the engine at once, or a port already held by something else, must never
+  be the reason the engine window itself fails to open. This exact path
+  (a bind collision leaving `IsRunning() == false`) has an automated
+  regression test - see Phase 4's `NetworkServerTests.cpp`.
+- **`NetworkServer::Start()`/`Stop()` are NOT thread-safe against each
+  other or against themselves (no internal mutex) - by design, since
+  `Application` is their only caller, and it only ever calls both from the
+  main thread.** A future caller from a different thread (e.g. a future
+  Editor "Network" panel's Start/Stop button, if that panel itself isn't
+  already guaranteed to run on the main thread the way every other Editor
+  panel does - see "Editor Module Structure") must not assume this is safe
+  without adding real synchronization first.
+- **`GTE_ENABLE_NETWORK` follows the exact same "class always compiles,
+  only the production call site is gated" precedent as
+  `GTE_ENABLE_JOB_SYSTEM`/`GTE_ENABLE_PROFILER` (see those sections above).**
+  `NetworkServer`/`NetworkRoutes` compile and their tests pass identically
+  whether the switch is ON or OFF - turning it OFF only skips
+  `Application`'s own `m_networkServer.Start(...)` call, so a build with it
+  OFF never opens a socket at all, at zero runtime cost.
+
 ## Render Target Format Matching
 
 Vulkan pipelines are built against an exact color format
