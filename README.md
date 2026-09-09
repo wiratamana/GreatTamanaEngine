@@ -1614,6 +1614,41 @@ pieces:
   ECS/Renderer/Game/AssetDatabase directly), and
   `task_manager/network-impl-1/PHASE0_MASTER_STRATEGY.md` for the full
   campaign writeup.
+- **The engine's embedded HTTP server now has its first engine-state-
+  touching endpoints: `GET /get_swapchain` and `GET /get_game_view`, both
+  returning a live PNG screenshot.** (`network-impl-2` campaign.)
+  `GET http://127.0.0.1:8080/get_swapchain` returns the literal, currently-
+  presented OS-window swapchain image (in an Editor build, this is a
+  screenshot of the whole Editor UI - dock panels, menu bar, chrome and all);
+  `GET http://127.0.0.1:8080/get_game_view` returns just the Game's own
+  off-screen 3D-scene `RenderTexture` ("Game view"), available only when a
+  Game view actually exists and is currently visible this session (a `409`
+  otherwise). Both accept an optional `?format=` query parameter (`png` -
+  the default, raw bytes with `Content-Type: image/png` - or
+  `base64`/`json`, a `{"width":...,"height":...,"format":"png",
+  "data_base64":"..."}` JSON envelope), or honor an
+  `Accept: application/json` request header when `?format=` is omitted. The
+  engine's own window keeps rendering/updating at full frame rate,
+  completely undisturbed by the request - a route handler never touches
+  Vulkan/`Renderer`/`Game` directly; it only ever calls into
+  `FrameCaptureBridge` (`src/Application/FrameCaptureBridge.h/.cpp`), the
+  one reviewed, thread-safe bridge between the network's own background
+  thread and the main thread's per-frame loop (returns HTTP `503` if a
+  request of the same kind is already pending, `504` on a timeout, `409` if
+  the main thread positively determines the target isn't available this
+  frame). The swapchain capture is genuinely pipelined - a per-frame-in-
+  flight readback buffer pair read back one "round" later
+  (`SwapchainCaptureService`, `src/Renderer/SwapchainCaptureService.h/.cpp`,
+  mirroring `GpuTimingService`'s own Present-timing pattern) - with **zero
+  added GPU stall**, never a simplified wait-idle shortcut. A new
+  `src/Encoding/` module (`Base64.h`/`PixelConversion.h`/`PngEncoder.h`,
+  always-compiled, Vulkan-free, Tier-1-tested) provides the base64/BGRA→RGBA/
+  PNG-encode primitives both routes share, built on a newly-vendored
+  `stb_image_write.h` (the encode-side counterpart of the already-vendored
+  `stb_image.h` decoder). No new CMake toggle was added - this feature is
+  gated entirely by the existing `GTE_ENABLE_NETWORK` switch. See
+  `task_manager/network-impl-2/PHASE0_MASTER_STRATEGY.md` for the full
+  six-phase campaign writeup.
 
 ## Roadmap
 

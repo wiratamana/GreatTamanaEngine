@@ -1,5 +1,7 @@
 #include "Network/NetworkServer.h"
 
+#include "NetworkTestHelpers.h"
+
 #include <httplib.h>
 
 #include <gtest/gtest.h>
@@ -9,25 +11,14 @@
 
 namespace {
 
-// Polls IsRunning() briefly rather than assuming Start() has already fully
-// spun up its background thread by the time this line runs - Start() itself
-// binds synchronously (so BoundPort() is already correct the instant
-// Start() returns - see NetworkServer.cpp's own comment), but the
-// background thread's own httplib::Server::listen_after_bind() call still
-// needs a moment to actually reach its accept() loop before a client
-// connection is guaranteed to succeed. A tight, short poll loop (never a
-// fixed sleep) keeps this test fast on a healthy machine while still being
-// robust under CI scheduling jitter.
-void WaitUntilAcceptingConnections(gte::Network::NetworkServer& server, httplib::Client& client)
-{
-    for (int attempt = 0; attempt < 50; ++attempt) {
-        if (auto res = client.Get("/http_hello_world"); res && res->status == 200) {
-            return;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
-    }
-    FAIL() << "NetworkServer never started accepting connections on port " << server.BoundPort();
-}
+// network-impl-2 campaign, Phase 6
+// (PHASE6_AUTOMATED_TESTS_DOCS_AND_REGRESSION_SAFETY.md, Step 3.1) - this
+// file's own WaitUntilAcceptingConnections() was extracted into
+// tests/Network/NetworkTestHelpers.h so
+// tests/Network/CaptureEndpointsEndToEndTests.cpp can reuse it verbatim;
+// pulled back in here via a using-declaration so every call site below
+// keeps working completely unchanged.
+using gte::Network::TestHelpers::WaitUntilAcceptingConnections;
 
 // RAII wrapper around a raw TCP listening socket bound EXCLUSIVELY to
 // 127.0.0.1:port (Windows' SO_EXCLUSIVEADDRUSE), used solely by

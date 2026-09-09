@@ -993,6 +993,32 @@ module or adding a new endpoint:
   unrelated purpose - build its own small, similarly-reviewed, similarly-
   narrow bridge instead, following this one's shape (see
   `task_manager/network-impl-2/PHASE2_CROSS_THREAD_FRAME_CAPTURE_BRIDGE.md`).
+- **`GET /get_swapchain`/`GET /get_game_view`** (`network-impl-2` campaign,
+  `task_manager/network-impl-2/PHASE0_MASTER_STRATEGY.md`) are this engine's
+  first engine-state-touching endpoints, built entirely on top of
+  `FrameCaptureBridge` (above) - `src/Encoding/` (`Base64.h`/
+  `PixelConversion.h`/`PngEncoder.h`, Tier 1, always-compiled, Vulkan-free)
+  provides the base64/BGRA→RGBA/PNG-encode primitives both routes share;
+  `Renderer::CaptureRenderTexturePixels()` (a synchronous readback,
+  piggybacking on the already-synchronous offscreen Game-view regime) and
+  `SwapchainCaptureService` (`src/Renderer/SwapchainCaptureService.h/.cpp`, a
+  pipelined, frame-in-flight-aware swapchain readback mirroring
+  `GpuTimingService`'s own Present-timing pattern, with zero added GPU
+  stall) are the two capture mechanisms feeding it. Both routes accept an
+  optional `?format=` query parameter (`png` - the default, raw bytes,
+  `Content-Type: image/png` - or `base64`/`json`, a
+  `{"width":...,"height":...,"format":"png","data_base64":"..."}` JSON
+  envelope) or an `Accept: application/json` header when `?format=` is
+  omitted - `Network::ResolveCaptureResponseFormat()`/
+  `BuildCaptureJsonBody()` (`src/Network/NetworkRoutes.h`) are the one,
+  shared, Tier-1-tested implementation of this precedence, reused verbatim
+  by both routes' shared `RegisterCaptureRoute()` helper
+  (`NetworkServer.cpp`) - never reimplemented per-route. A future THIRD
+  capture kind (e.g. a Scene-view endpoint) should reuse
+  `Renderer::CaptureRenderTexturePixels()` directly (it already works for
+  ANY `RenderTexture`, not just the Game view) and extend
+  `FrameCaptureKind`/`RegisterCaptureRoute()` rather than duplicating any of
+  this.
 - **Every one of `NetworkServer`'s own failure modes (a bind failure, e.g.
   the port already being in use) is NON-FATAL - log to stderr and continue,
   never throw/crash/abort engine startup.** This is a debugging/tooling

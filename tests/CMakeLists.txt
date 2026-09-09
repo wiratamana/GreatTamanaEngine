@@ -816,6 +816,48 @@
 #                                            AGENTS.md, "Networking"), so both
 #                                            files pass identically whether
 #                                            the switch is ON or OFF.
+#   Network/CaptureEndpointsEndToEndTests.cpp - network-impl-2 campaign,
+#                                            Phase 6
+#                                            (task_manager/network-impl-2/
+#                                            PHASE6_AUTOMATED_TESTS_DOCS_AND_REGRESSION_SAFETY.md)
+#                                            - the campaign's own strongest
+#                                            regression proof: a real
+#                                            gte::FrameCaptureBridge + a real
+#                                            gte::Network::NetworkServer,
+#                                            wired together exactly like
+#                                            gte::Application does in
+#                                            production, hit over a real
+#                                            loopback socket via
+#                                            httplib::Client for BOTH
+#                                            /get_game_view and
+#                                            /get_swapchain - default raw-PNG
+#                                            response (PNG magic bytes
+#                                            checked), ?format=base64's JSON
+#                                            envelope decoding back to the
+#                                            exact same bytes as the raw
+#                                            response, a second concurrent
+#                                            request of the same kind
+#                                            returning 503 promptly, and the
+#                                            bridge's own TimedOut result
+#                                            (the same one the HTTP route
+#                                            forwards verbatim as a 504) -
+#                                            all driven by a FAKE, GPU-free
+#                                            capture producer
+#                                            (FakeMainThreadStandIn, local to
+#                                            this file) standing in for
+#                                            Application::Run()'s real
+#                                            per-frame capture-servicing
+#                                            logic, so no live Renderer/
+#                                            Vulkan device is needed. Shares
+#                                            NetworkServerTests.cpp's own
+#                                            WaitUntilAcceptingConnections()
+#                                            poll helper via
+#                                            Network/NetworkTestHelpers.h.
+#                                            Tier 2's GPU-touching half of
+#                                            this campaign (Phases 3-5) stays
+#                                            an accepted, documented gap - see
+#                                            AGENTS.md, "Testability &
+#                                            Regression Safety".
 #
 #   Physics/VerletIntegrationTests.cpp      - Verlet-integration campaign
 #                                            (task_manager/verlet-integration-1/
@@ -1634,6 +1676,7 @@ set(GTE_TEST_SOURCES
     Jobs/JobSystemSdlClockThreadSafetyTests.cpp
     Network/NetworkRoutesTests.cpp
     Network/NetworkServerTests.cpp
+    Network/CaptureEndpointsEndToEndTests.cpp
     Input/InputStateTests.cpp
     Application/EventTranslatorTests.cpp
     Application/MemorySnapshotBuilderTests.cpp
