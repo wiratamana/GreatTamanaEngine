@@ -474,6 +474,8 @@ add_library(gte_core STATIC
     src/Jobs/JobContinuation.cpp
     src/Network/NetworkRoutes.h
     src/Network/NetworkRoutes.cpp
+    src/Network/NetworkServer.h
+    src/Network/NetworkServer.cpp
 )
 
 # Exactly one of these two branches gets compiled in, depending on
