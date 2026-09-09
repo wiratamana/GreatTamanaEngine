@@ -1650,6 +1650,54 @@ pieces:
   `task_manager/network-impl-2/PHASE0_MASTER_STRATEGY.md` for the full
   six-phase campaign writeup.
 
+- **The Editor's "Scene" panel now has a Unity-style procedural infinite
+  ground grid** (`editor-enchancements-1` campaign,
+  `task_manager/editor-enchancements-1/PHASE0_MASTER_STRATEGY.md`) - a
+  ray-plane-intersection effect computed entirely in a fragment shader
+  (`Shaders/SceneGrid.vert/.frag`), with **zero** mesh/texture/`*.gta` asset
+  of its own: the vertex stage synthesizes a full-screen triangle purely from
+  `gl_VertexIndex`, and the fragment stage casts each pixel's camera ray
+  against the world's `Y = 0` plane. Shows two anti-aliased LOD levels
+  (1-world-unit "minor" / 10-world-unit "major" lines, Unity's own default
+  spacing, `fwidth()`-based coverage with the minor grid fading out as cells
+  shrink toward sub-pixel size), Unity-style colored X/Z axis highlight lines
+  through the world origin (red/blue), and a smooth distance fade so the
+  horizon never shows a messy converging line-field. Correctly depth-TESTED
+  (never depth-WRITTEN) against real scene geometry already drawn that frame -
+  an opaque primitive sitting on the grid genuinely occludes the grid lines
+  underneath it - by drawing as one more `vkCmdDraw` call
+  (`src/Editor/SceneGridRenderer.h/.cpp`, a dedicated `VkPipeline` bypassing
+  `Renderer::CreatePipeline()`/`Submit()` entirely, the same proven shape
+  `AssetPreviewMesh`/`ComputeBlurValidation` already established) issued
+  INSIDE the already-open `"SceneView"` RenderGraph pass's own
+  `vkCmdBeginRendering` bracket, immediately after `Game::Render()`'s own
+  draws finish - deliberately never a second, separate RenderGraph pass (see
+  the campaign's own `PHASE0_MASTER_STRATEGY.md` for the write-after-write
+  hazard a naive second-pass design would have introduced, given
+  `RenderGraphBarrierPlanner`'s own barrier-elision rule for two
+  same-resource attachment writes). Renders **only** in "Scene" - never
+  "Game", and structurally absent at zero cost from a
+  `-DGTE_ENABLE_EDITOR=OFF` release build, since `NullEditorLayer`'s
+  `RenderSceneGrid()` override is a no-op and the shader itself is never even
+  compiled in that configuration (its `gte_add_shader()` CMake registration
+  lives inside the same `if(GTE_ENABLE_EDITOR)` block as everything else
+  under `src/Editor/`). No visibility toggle (matches Unity, which has none
+  either), never selectable/pickable, and never touches `Registry`/ECS in any
+  way - it is pure Editor-side GPU output, by construction. The exact same
+  ray-plane/grid-line/axis-line math also has a pure, Tier-1-tested CPU
+  mirror, `src/Editor/SceneGridMath.h/.cpp`
+  (`ComputeGridPlaneHit()`/`ComputeGridLineCoverage()`/
+  `ComputeAxisLineCoverage()`, `tests/Editor/SceneGridMathTests.cpp`) - the
+  "CPU math is the spec, GLSL mirrors it" discipline this engine already
+  applies to GPU vertex skinning, verified in the campaign's own final phase
+  against real spawned geometry (two cubes at the world origin and at
+  `(5, 0, 0)`, confirming the axis lines/grid cells line up pixel-for-pixel
+  with real scene content) and against grazing/straight-down/straight-up
+  camera angles. See
+  `task_manager/editor-enchancements-1/PHASE5_COMPLETION_REPORT.md` for the
+  campaign's final polish/verification session and its full five-phase
+  writeup.
+
 ## Roadmap
 
 See **[TODO.md](TODO.md)** for known limitations, deliberately deferred
