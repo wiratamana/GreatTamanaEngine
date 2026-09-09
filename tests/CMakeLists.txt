@@ -771,6 +771,52 @@
 #                                            calls SDL3's own timer API
 #                                            directly.
 #
+#   Network/NetworkRoutesTests.cpp          - network-impl-1 campaign
+#                                            (task_manager/network-impl-1/
+#                                            PHASE4_AUTOMATED_TESTS_AND_REGRESSION_SAFETY.md),
+#                                            Tier 1: HandleHelloWorld()
+#                                            (src/Network/NetworkRoutes.h)
+#                                            returns the exact contracted
+#                                            "hello world" response body, no
+#                                            httplib/socket/thread involved at
+#                                            all.
+#   Network/NetworkServerTests.cpp          - Phase 4's real, end-to-end
+#                                            coverage of NetworkServer (src/
+#                                            Network/NetworkServer.h): a real
+#                                            ephemeral-port bind + background
+#                                            std::thread + httplib::Client
+#                                            request proves GET
+#                                            /http_hello_world actually
+#                                            answers "hello world" over a
+#                                            real loopback socket, an unknown
+#                                            route falls through to a plain
+#                                            404, Stop() is safe even without
+#                                            a prior Start(), and two
+#                                            correctness-critical cases:
+#                                            DestructorStopsTheServerWithoutHanging
+#                                            (the automated proof of Phase 2's
+#                                            "no detached thread, no hang"
+#                                            RAII requirement) and
+#                                            BindFailureIsNonFatalAndLeavesServerNotRunning
+#                                            (the automated proof of the
+#                                            documented "a bind failure is
+#                                            logged and non-fatal" contract -
+#                                            AGENTS.md, "Networking"). Not
+#                                            strict Tier 1 (real OS
+#                                            socket/thread involved) but needs
+#                                            no GPU/live Vulkan device/SDL
+#                                            video subsystem, so it lives here
+#                                            alongside Jobs/JobSystemTests.cpp
+#                                            rather than a Tier-2 GPU-gated
+#                                            bucket. Always built - NetworkServer/
+#                                            NetworkRoutes always compile
+#                                            regardless of GTE_ENABLE_NETWORK
+#                                            (only Application's own
+#                                            production call site is gated -
+#                                            AGENTS.md, "Networking"), so both
+#                                            files pass identically whether
+#                                            the switch is ON or OFF.
+#
 #   Physics/VerletIntegrationTests.cpp      - Verlet-integration campaign
 #                                            (task_manager/verlet-integration-1/
 #                                            PHASE1_CORE_VERLET_PHYSICS_FOUNDATION.md),
@@ -1583,6 +1629,8 @@ set(GTE_TEST_SOURCES
     Jobs/JobDispatchTests.cpp
     Jobs/JobContinuationTests.cpp
     Jobs/JobSystemSdlClockThreadSafetyTests.cpp
+    Network/NetworkRoutesTests.cpp
+    Network/NetworkServerTests.cpp
     Input/InputStateTests.cpp
     Application/EventTranslatorTests.cpp
     Application/MemorySnapshotBuilderTests.cpp

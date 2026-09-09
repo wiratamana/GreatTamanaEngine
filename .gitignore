@@ -1,6 +1,7 @@
 # CMake build trees
 /build/
 /build_test/
+/build_network_off/
 /out/
 
 # Local-machine-only build tool shim (e.g. a fetched ninja.exe for dev boxes
