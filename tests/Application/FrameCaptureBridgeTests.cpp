@@ -207,6 +207,153 @@ TEST(FrameCaptureBridgeTest, IsCaptureRequestedReflectsPendingState)
     EXPECT_FALSE(bridge.IsCaptureRequested(FrameCaptureKind::GameView));
 }
 
+// --- network-impl-4 campaign, Phase 4/6
+// (task_manager/network-impl-4/PHASE4_FRAMECAPTUREBRIDGE_NAMED_TEXTURE_SUPPORT.md,
+// PHASE6_TESTS_DOCS_AND_REGRESSION_SAFETY.md) - FrameCaptureKind::NamedTexture
+// coverage explicitly deferred from Phase 4 to this phase.
+
+// A NamedTexture request must carry its (textureName, channel) payload
+// through to RequestedTextureName()/RequestedTextureChannel() while pending,
+// and a subsequent fulfillment must round-trip framesSinceUpdate correctly -
+// mirroring the existing Swapchain/GameView fulfillment shapes above.
+TEST(FrameCaptureBridgeTest, NamedTextureRequestFulfillRoundTripCarriesNameChannelAndFramesSinceUpdate)
+{
+    FrameCaptureBridge bridge;
+
+    std::thread fulfiller([&bridge] {
+        for (int i = 0; i < 200 && !bridge.IsCaptureRequested(FrameCaptureKind::NamedTexture); ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        EXPECT_EQ(bridge.RequestedTextureName(), "SceneView");
+        EXPECT_EQ(bridge.RequestedTextureChannel(), DebugTextureChannel::Depth);
+
+        CapturedPngImage image = MakeImage(30, 64, 48);
+        image.framesSinceUpdate = 7;
+        bridge.FulfillPendingRequest(FrameCaptureKind::NamedTexture, image);
+    });
+
+    const FrameCaptureBridge::RequestResult result = bridge.RequestCaptureAndWait(
+        FrameCaptureKind::NamedTexture, 5000, "SceneView", DebugTextureChannel::Depth);
+    fulfiller.join();
+
+    EXPECT_FALSE(result.alreadyPending);
+    ASSERT_TRUE(result.image.has_value());
+    EXPECT_FALSE(result.failure.has_value());
+    EXPECT_EQ(result.image->width, 64);
+    EXPECT_EQ(result.image->height, 48);
+    EXPECT_EQ(result.image->framesSinceUpdate, 7u);
+}
+
+// FailPendingRequest() must also work correctly for FrameCaptureKind::NamedTexture,
+// mirroring the existing Swapchain/GameView FailedRequestReturnsTargetNotAvailableQuickly test.
+TEST(FrameCaptureBridgeTest, NamedTextureRequestFailReturnsTargetNotAvailableQuickly)
+{
+    FrameCaptureBridge bridge;
+
+    std::thread failer([&bridge] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        bridge.FailPendingRequest(FrameCaptureKind::NamedTexture, FrameCaptureFailureReason::TargetNotAvailable);
+    });
+
+    const FrameCaptureBridge::RequestResult result = bridge.RequestCaptureAndWait(
+        FrameCaptureKind::NamedTexture, 5000, "ThisNameNeverExists", DebugTextureChannel::Color);
+    failer.join();
+
+    EXPECT_FALSE(result.alreadyPending);
+    EXPECT_FALSE(result.image.has_value());
+    ASSERT_TRUE(result.failure.has_value());
+    EXPECT_EQ(*result.failure, FrameCaptureFailureReason::TargetNotAvailable);
+}
+
+// A second, concurrent NamedTexture request for a DIFFERENT name must return
+// alreadyPending == true IMMEDIATELY (never block) and must NEVER overwrite
+// the first request's own recorded name/channel - the regression test for
+// FrameCaptureBridge.h's own RequestedTextureName()/RequestedTextureChannel()
+// "set once, before marking requested" ordering guarantee.
+TEST(FrameCaptureBridgeTest, SecondConcurrentNamedTextureRequestForDifferentNameReturnsAlreadyPendingAndDoesNotOverwriteFirstName)
+{
+    FrameCaptureBridge bridge;
+
+    std::thread firstRequester([&bridge] {
+        // Nobody ever fulfills or fails this one - it simply times out on its
+        // own after this test's own assertions are done reading it.
+        bridge.RequestCaptureAndWait(FrameCaptureKind::NamedTexture, 1500, "GameView", DebugTextureChannel::Color);
+    });
+
+    for (int i = 0; i < 200 && !bridge.IsCaptureRequested(FrameCaptureKind::NamedTexture); ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    ASSERT_TRUE(bridge.IsCaptureRequested(FrameCaptureKind::NamedTexture));
+
+    const auto start = std::chrono::steady_clock::now();
+    const FrameCaptureBridge::RequestResult second = bridge.RequestCaptureAndWait(
+        FrameCaptureKind::NamedTexture, 5000, "SceneView", DebugTextureChannel::Depth);
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+
+    EXPECT_TRUE(second.alreadyPending);
+    EXPECT_FALSE(second.image.has_value());
+    EXPECT_FALSE(second.failure.has_value());
+    EXPECT_LT(elapsed, std::chrono::milliseconds(500));
+
+    // The first request's own name/channel must still be exactly what it
+    // asked for - the second, rejected request must never have clobbered it.
+    EXPECT_EQ(bridge.RequestedTextureName(), "GameView");
+    EXPECT_EQ(bridge.RequestedTextureChannel(), DebugTextureChannel::Color);
+
+    firstRequester.join();
+}
+
+// SlotFor()'s three-way switch (Swapchain/GameView/NamedTexture) must return
+// three MUTUALLY DISTINCT slots - the regression test for the ternary->switch
+// rewrite: requesting all three kinds concurrently and confirming none
+// observes another's requested/result state.
+TEST(FrameCaptureBridgeTest, AllThreeCaptureKindSlotsAreMutuallyDistinct)
+{
+    FrameCaptureBridge bridge;
+
+    std::thread swapchainRequester([&bridge] {
+        bridge.RequestCaptureAndWait(FrameCaptureKind::Swapchain, 3000);
+    });
+    std::thread gameViewRequester([&bridge] {
+        bridge.RequestCaptureAndWait(FrameCaptureKind::GameView, 3000);
+    });
+    std::thread namedTextureRequester([&bridge] {
+        bridge.RequestCaptureAndWait(FrameCaptureKind::NamedTexture, 3000, "GameView", DebugTextureChannel::Color);
+    });
+
+    for (int i = 0; i < 200; ++i) {
+        if (bridge.IsCaptureRequested(FrameCaptureKind::Swapchain) &&
+            bridge.IsCaptureRequested(FrameCaptureKind::GameView) &&
+            bridge.IsCaptureRequested(FrameCaptureKind::NamedTexture)) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    ASSERT_TRUE(bridge.IsCaptureRequested(FrameCaptureKind::Swapchain));
+    ASSERT_TRUE(bridge.IsCaptureRequested(FrameCaptureKind::GameView));
+    ASSERT_TRUE(bridge.IsCaptureRequested(FrameCaptureKind::NamedTexture));
+
+    // Fulfilling ONLY NamedTexture must leave the other two slots untouched.
+    bridge.FulfillPendingRequest(FrameCaptureKind::NamedTexture, MakeImage(1, 1, 1));
+    namedTextureRequester.join();
+
+    EXPECT_TRUE(bridge.IsCaptureRequested(FrameCaptureKind::Swapchain));
+    EXPECT_TRUE(bridge.IsCaptureRequested(FrameCaptureKind::GameView));
+    EXPECT_FALSE(bridge.IsCaptureRequested(FrameCaptureKind::NamedTexture));
+
+    // Fulfilling Swapchain next must leave GameView (still pending) untouched.
+    bridge.FulfillPendingRequest(FrameCaptureKind::Swapchain, MakeImage(2, 2, 2));
+    swapchainRequester.join();
+
+    EXPECT_FALSE(bridge.IsCaptureRequested(FrameCaptureKind::Swapchain));
+    EXPECT_TRUE(bridge.IsCaptureRequested(FrameCaptureKind::GameView));
+
+    bridge.FulfillPendingRequest(FrameCaptureKind::GameView, MakeImage(3, 3, 3));
+    gameViewRequester.join();
+
+    EXPECT_FALSE(bridge.IsCaptureRequested(FrameCaptureKind::GameView));
+}
+
 // --- network-impl-4 campaign, Phase 5
 // (task_manager/network-impl-4/PHASE5_HTTP_ENDPOINTS_GET_TEXTURE_AND_LIST_TEXTURES.md) -
 // GET /list_textures support: PublishTextureList()/GetPublishedTextureList().

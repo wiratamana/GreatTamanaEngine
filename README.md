@@ -1676,6 +1676,25 @@ pieces:
   See `task_manager/network-impl-3/PHASE0_MASTER_STRATEGY.md` for the full
   six-phase campaign writeup.
 
+- **Any render-graph texture can now be captured as a PNG by name over
+  HTTP** (`network-impl-4` campaign,
+  `task_manager/network-impl-4/PHASE0_MASTER_STRATEGY.md`) -
+  `GET /get_texture?texture_name=<name>` captures whatever render-graph
+  texture was registered under that exact name (every texture any pass
+  declares via `RenderGraphBuilder::CreateTexture()`/`ImportTexture()`
+  becomes capturable automatically, with zero opt-in), including a
+  texture's own depth buffer (`&channel=depth`) - useful for debugging
+  off-screen intermediate passes (e.g. future atmosphere-scattering LUTs)
+  that never otherwise appear on screen. `GET /list_textures` lists every
+  texture name registered so far this session, alongside its
+  regime/format/extent/depth-availability and how many frames old its last
+  update is (`frames_since_update`). See `AGENTS.md`'s "Networking" section
+  ("Named Texture Capture") for the one narrow, deliberate exception this
+  endpoint makes to this engine's usual "zero added GPU stall" networking
+  rule, and
+  `task_manager/network-impl-4/NETWORK_IMPL_4_CAMPAIGN_COMPLETION_REPORT.md`
+  for the full six-phase campaign writeup.
+
 - **The Editor's "Scene" panel now has a Unity-style procedural infinite
   ground grid** (`editor-enchancements-1` campaign,
   `task_manager/editor-enchancements-1/PHASE0_MASTER_STRATEGY.md`) - a

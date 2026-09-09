@@ -1106,6 +1106,114 @@ module or adding a new endpoint:
   `nlohmann::json` anywhere else in the engine without the same
   "genuinely parsing untrusted input" justification.
 
+### Named Texture Capture (`GET /get_texture`)
+
+`network-impl-4` campaign (`task_manager/network-impl-4/PHASE0_MASTER_STRATEGY.md`)
+adds a THIRD, generic way to pull a still image out of the engine over HTTP -
+rather than one dedicated endpoint per known render target (as
+`/get_swapchain`/`/get_game_view` are), `GET /get_texture` can capture ANY
+render-graph texture, by name, that the engine has ever declared this
+session, plus a companion `GET /list_textures` that enumerates what's
+currently capturable. Follow these rules whenever touching this feature or
+registering a new named texture:
+
+- **`gte::rg::RenderGraphDebugTextureRegistry`
+  (`src/Renderer/RenderGraph/RenderGraphDebugTextureRegistry.h/.cpp`) is the
+  mechanism, and registration is fully AUTOMATIC.** Every texture any pass
+  declares via `RenderGraphBuilder::CreateTexture()`/`ImportTexture()`
+  becomes capturable by that exact name with ZERO opt-in required from that
+  pass's own author - `RenderGraph::ExecuteCompiledGraph()` (both
+  `ExecuteTimingMode` regimes) upserts a `DebugTextureSnapshot` for every
+  declared texture at the end of its own per-frame execution. **Buffers
+  (`CreateBuffer()`/`ImportBuffer()`) are NEVER visible this way, by
+  design** - this registry only ever tracks textures; a buffer has a
+  completely separate `BufferHandle`/`bufferNames` vocabulary this registry
+  never touches at all.
+- **Never confuse a render-graph PASS's name with the TEXTURE name actually
+  registered for capture.** This campaign's own strategy documents record a
+  real, corrected mistake where an earlier revision conflated the `"Present"`
+  pass name with the texture name actually capturable for it, which is the
+  literal string `"Swapchain"` (registered via
+  `ImportTexture("Swapchain", ...)` inside that pass, not derived from the
+  pass's own name in any way). A future contributor adding a new named
+  texture must always check the literal string passed to
+  `CreateTexture()`/`ImportTexture()` for that texture, never the name of the
+  `AddPass()` call it happens to sit near.
+- **`Renderer::WaitForGpuIdle()` (a full `vkDeviceWaitIdle()`) is a
+  deliberate, NARROW, bounded exception to `network-impl-2`'s own "zero added
+  GPU stall" swapchain-capture design principle - `GET /get_texture`, and
+  ONLY that endpoint, calls it once per request, before reading pixels back.**
+  This is acceptable here specifically because this endpoint is rare and
+  human/LLM-triggered debugging traffic, never part of any per-frame path -
+  unlike `/get_swapchain`'s pipelined, zero-stall
+  `SwapchainCaptureService`/`GpuTimingService`-style design. **No other
+  endpoint, and no per-frame engine code anywhere else, may ever call
+  `Renderer::WaitForGpuIdle()`** - this is a warning for future contributors,
+  not just a historical note; if a future endpoint needs to read back a
+  texture without stalling, it must build its own pipelined capture path
+  (mirroring `SwapchainCaptureService`) rather than reaching for this method.
+- **`RenderGraph::NotifyDebugTextureStateOverride()` exists because a
+  graph-external manual Vulkan barrier is otherwise invisible to the render
+  graph's own internal resource-state tracking** - a pass that hands a
+  texture off for external sampling/presentation via a manual
+  `EmitImageBarrier()` call (outside the graph's own compiled barrier plan)
+  must call this method right afterward so the registry's own
+  `colorState`/`depthState` for that texture stays accurate for the NEXT
+  frame's barrier synthesis and for a correct `/get_texture` capture. There
+  are FOUR existing call sites today - name all four when reasoning about
+  this, an earlier revision of this campaign's own strategy undercounted it
+  as two before its own audit caught it: `Application::Run()`'s two
+  `FinalizeRenderTextureForExternalSampling()` calls (`"GameView"`/
+  `"SceneView"`), `FramePresenter.cpp`'s own `"Swapchain"` `PRESENT_SRC_KHR`
+  finalize inside `PresentViaRenderGraph()`, and
+  `ComputeBlurValidation::FinalizeForSampling()`'s `"BlurredSceneOutput"`
+  finalize (called unconditionally from `Application.cpp`, regardless of
+  whether that call actually wrote anything this frame). A future pass
+  author adding a SIMILAR graph-external manual transition for some other
+  named texture must add the matching correction call too, or that texture's
+  registry entry silently goes stale.
+- **The `frames_since_update` counter (Locked Design Decision 4) only
+  advances once per real `SynchronousImmediateReadback` `Execute()` call** -
+  a texture registered ONLY by the PIPELINED regime (today: `"Swapchain"`)
+  has its own freshness signal driven by how often the OFFSCREEN regime
+  happens to run elsewhere, not by how often it itself updates. In a session
+  where both Editor panels ("Game"/"Scene") are hidden - or any
+  `-DGTE_ENABLE_EDITOR=OFF` build - this reads as a constant, maximally-fresh
+  value regardless of real elapsed frames. This is intentional, not a bug to
+  "fix" with a second, dedicated counter.
+- **`gte::PublishedTextureListEntry` (`src/Application/FrameCaptureBridge.h`)
+  and `gte::Network::TextureListEntryView` (`src/Network/NetworkRoutes.h`)
+  are two small, nearly-identical, DELIBERATELY SEPARATE structs behind
+  `GET /list_textures` - never collapse them into one shared type crossing
+  the `Application`/`Network` layer boundary.** `Application::Run()` resolves
+  each `rg::DebugTextureSnapshot` into a `PublishedTextureListEntry` (already-
+  resolved plain scalars only - `name`/`regime`/`format` as `std::string`,
+  `width`/`height` as `std::uint32_t`, `hasDepth`/`framesSinceUpdate` -
+  keeping `FrameCaptureBridge.h` itself Vulkan/Renderer/RenderGraph-free) and
+  calls `FrameCaptureBridge::PublishTextureList()`; `NetworkServer.cpp` (the
+  one place that legitimately depends on BOTH `FrameCaptureBridge.h` and
+  `NetworkRoutes.h`) is the ONLY place that copies a `PublishedTextureListEntry`
+  into a fresh `TextureListEntryView`, one field at a time, right before
+  calling `BuildListTexturesResponseJson()`. This is the exact same "don't
+  take a foreign layer's struct" rule this section already establishes for
+  `EngineCommandBridge`, applied here to a second, independent case.
+- **The two new endpoints' exact contract:**
+  `GET /get_texture?texture_name=<name>[&channel=color|depth][&format=png|base64|json]`
+  captures the named texture (`channel=depth` requires that texture to have
+  been registered `hasDepth == true`) and returns a PNG (default) or a
+  `{"width":...,"height":...,"format":"png","data_base64":"...",
+  "frames_since_update":...}` JSON envelope (`?format=base64`/`json`, or an
+  `Accept: application/json` header) - `400` for a missing `texture_name` or
+  an invalid/wrong-case `channel` value (exact-lowercase `"color"`/`"depth"`
+  only), `409` if the requested channel doesn't exist for that texture,
+  `503` if a different `/get_texture`/`/get_swapchain`/`/get_game_view`
+  request is already pending, `504` if the main thread never resolves the
+  named texture within the fixed timeout (e.g. an unknown name, or a
+  not-currently-rendering view like a hidden "Scene" panel). `GET
+  /list_textures` returns a JSON array of every texture currently known to
+  the registry, each entry carrying `name`/`regime`/`format`/`width`/
+  `height`/`has_depth`/`frames_since_update`.
+
 ## Render Target Format Matching
 
 Vulkan pipelines are built against an exact color format
