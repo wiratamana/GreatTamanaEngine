@@ -480,6 +480,7 @@ add_library(gte_core STATIC
     src/Game/Physics/PhysicsSystem.h
     src/Game/Game.cpp
     src/Game/Game.h
+    src/Game/EngineCommandResults.h
     src/Game/RenderSystem.cpp
     src/Game/RenderSystem.h
     src/Profiling/ProfilingTypes.h

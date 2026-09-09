@@ -4,6 +4,7 @@
 #include "../Input/InputState.h"
 #include "Animation/AnimationSystem.h"
 #include "ECS/Registry.h"
+#include "EngineCommandResults.h"
 #include "Instantiation/MeshInstantiationSystem.h"
 #include "Physics/PhysicsSystem.h"
 #include "Renderer/Primitives/PrimitiveMeshGenerator.h"
@@ -203,6 +204,51 @@ public:
     // against - see AnimationSystem::GetGpuSkinningPipelines()'s own doc
     // comment.
     GpuSkinningPipelines& GetGpuSkinningPipelines() noexcept { return m_animationSystem.GetGpuSkinningPipelines(); }
+
+    // Spawns a primitive shape by NAME (network-impl-3 campaign) - the same
+    // underlying spawn as CreatePrimitiveEntity() above (shares its GPU mesh/
+    // pipeline cache, PrimitiveGpuCatalog - a second "cube" spawned this way
+    // costs no new GPU upload), plus three additive steps: (1) `shapeName` is
+    // parsed case-insensitively via PrimitiveMeshGenerator::TryParsePrimitiveTypeName() -
+    // an unrecognized shape name fails the whole call (no entity created) with
+    // `errorMessage` explaining which names ARE valid; (2) `requestedName`
+    // (falling back to the shape's own ToString() when empty - e.g. an
+    // unqualified "Cube" for a plain cube spawn with no name given) is passed
+    // through EntityQuery.h's MakeUniqueEntityName() and the RESULT is what
+    // actually gets added as this entity's Name component - Unity's own
+    // "GameObject", "GameObject (1)", ... auto-de-duplication behavior (see
+    // AGENTS.md/network-impl-3's PHASE0's own Locked Design Decision #3);
+    // (3) the entity's Transform::position is set to `worldPosition` (valid
+    // since a freshly spawned, still-unparented entity's local position IS
+    // its world position - see ECS/Components/Transform.h), and if
+    // `hasParent` is true and `parentName` resolves (via EntityQuery.h's
+    // FindEntityByName()) to a live entity, ECS/TransformHierarchy.h's
+    // SetParent(..., worldPositionStays = true) attaches it there, preserving
+    // the exact world position just set. If `hasParent` is true but
+    // `parentName` does NOT resolve to a live entity, the entity is still
+    // created, left UNPARENTED (world space) -
+    // InstantiatePrimitiveOutcome::parentRequestedButNotFound is set to true
+    // and `requestedParentName` echoes `parentName` back, but this is never
+    // treated as a failure of the overall call (see network-impl-3's Locked
+    // Design Decision #2).
+    //
+    // Never throws. Returns an outcome with success == false (and creates NO
+    // entity at all) only for an unrecognized `shapeName`.
+    InstantiatePrimitiveOutcome InstantiatePrimitive(Renderer& renderer, const std::string& shapeName,
+        const std::string& requestedName, const Vec3& worldPosition, bool hasParent, const std::string& parentName);
+
+    // Destroys the live entity (and every descendant of it - see
+    // ECS/TransformHierarchy.h::DestroyEntityAndDescendants()) whose Name
+    // component value exactly equals `name` (network-impl-3 campaign).
+    // Returns success == false (destroying NOTHING) if `name` is empty or no
+    // live entity currently has that exact name. If more than one live
+    // entity happens to share the same name (possible only through some
+    // OTHER naming path than InstantiatePrimitive() above, which always
+    // auto-dedupes - see network-impl-3's Locked Design Decision #3), the
+    // FIRST match found by EntityQuery.h::FindEntityByName()'s own
+    // dense-iteration-order rule is the one destroyed - documented as
+    // best-effort, matching FindEntityByName()'s own doc comment.
+    DeleteEntityOutcome DeleteEntityByName(const std::string& name);
 
 private:
     // The engine's one auto-created entity: a Camera sitting back along -Z

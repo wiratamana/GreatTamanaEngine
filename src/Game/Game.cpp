@@ -3,7 +3,10 @@
 #include "../Renderer/Renderer.h"
 #include "ECS/Components/Camera.h"
 #include "ECS/Components/MeshRenderer.h"
+#include "ECS/Components/Name.h"
 #include "ECS/Components/Transform.h"
+#include "ECS/EntityQuery.h"
+#include "ECS/TransformHierarchy.h"
 #include "Profiling/ScopeTimer.h"
 
 namespace gte {
@@ -81,6 +84,75 @@ Entity Game::CreateMeshEntityFromGtaFile(Renderer& renderer, const std::string& 
 bool Game::PlayAnimationOnEntity(Entity targetEntity, const std::string& absoluteAnimationGtaPath)
 {
     return m_animationSystem.Play(m_registry, targetEntity, absoluteAnimationGtaPath);
+}
+
+InstantiatePrimitiveOutcome Game::InstantiatePrimitive(Renderer& renderer, const std::string& shapeName,
+    const std::string& requestedName, const Vec3& worldPosition, bool hasParent, const std::string& parentName)
+{
+    InstantiatePrimitiveOutcome outcome;
+
+    PrimitiveType type{};
+    if (!TryParsePrimitiveTypeName(shapeName, type)) {
+        outcome.success = false;
+        outcome.errorMessage = "unrecognized shape '" + shapeName
+            + "' - expected one of: cube, sphere, capsule, cone, plane";
+        return outcome;
+    }
+
+    const std::string baseName = requestedName.empty() ? std::string(ToString(type)) : requestedName;
+    const std::string uniqueName = MakeUniqueEntityName(m_registry, baseName);
+
+    const Entity entity = CreatePrimitiveEntity(renderer, type);
+    // Defensive - CreatePrimitiveEntity() is not currently documented to ever
+    // return kInvalidEntity, but this is cheap insurance against a future
+    // change there (e.g. a GPU resource creation failure surfaced as
+    // kInvalidEntity instead of an exception) silently producing a "success"
+    // outcome with a bogus entity handle.
+    if (entity == kInvalidEntity) {
+        outcome.success = false;
+        outcome.errorMessage = "failed to create primitive entity";
+        return outcome;
+    }
+
+    Transform& transform = m_registry.GetComponent<Transform>(entity);
+    transform.position = worldPosition;
+
+    m_registry.AddComponent<Name>(entity, Name{ uniqueName });
+
+    outcome.success = true;
+    outcome.entityIndex = entity.index;
+    outcome.entityGeneration = entity.generation;
+    outcome.resolvedName = uniqueName;
+
+    if (hasParent) {
+        const Entity parentEntity = FindEntityByName(m_registry, parentName);
+        if (parentEntity == kInvalidEntity) {
+            outcome.parentRequestedButNotFound = true;
+            outcome.requestedParentName = parentName;
+        } else {
+            SetParent(m_registry, entity, parentEntity, /*worldPositionStays=*/true);
+        }
+    }
+
+    return outcome;
+}
+
+DeleteEntityOutcome Game::DeleteEntityByName(const std::string& name)
+{
+    DeleteEntityOutcome outcome;
+    const Entity entity = FindEntityByName(m_registry, name);
+    if (entity == kInvalidEntity) {
+        outcome.success = false;
+        outcome.errorMessage = name.empty()
+            ? "name must not be empty"
+            : ("no live entity found with name '" + name + "'");
+        return outcome;
+    }
+    outcome.deletedEntityIndex = entity.index;
+    outcome.deletedEntityGeneration = entity.generation;
+    DestroyEntityAndDescendants(m_registry, entity);
+    outcome.success = true;
+    return outcome;
 }
 
 void Game::EnsureDefaultCameraExists()
