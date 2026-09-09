@@ -88,6 +88,7 @@ include(FetchSDL3)
 include(FetchVulkan)
 include(FetchVMA)
 include(FetchSTB)
+include(FetchHttplib)
 include(FetchKTX)
 include(CompileShaders)
 
@@ -121,6 +122,14 @@ fetch_vma()
 #   textures imported via the Editor's Project panel).
 # Also defines the `stb_image` INTERFACE target, linked into gte_core below.
 fetch_stb()
+
+# Downloads (if not already present) and stages cpp-httplib for Windows:
+#   third_party/httplib/httplib.h - single-header HTTP/HTTPS server+client
+#   library, brought in purely as a debugging/tooling aid (e.g. a lightweight
+#   in-process HTTP endpoint for inspecting engine state) - not yet used by
+#   any engine source file.
+# Also defines the `httplib` INTERFACE target, linked into gte_core below.
+fetch_httplib()
 
 # Builds KTX-Software from source in-tree (headers + a STATIC `ktx` library,
 # with Basis Universal/astc-encoder support baked in - no ktx.dll needed at
@@ -585,11 +594,13 @@ target_compile_definitions(gte_core PUBLIC GTE_ENABLE_JOB_SYSTEM=$<BOOL:${GTE_EN
 # PUBLIC (not PRIVATE) for the same reason as the compile definition above:
 # any consumer of gte_core (GreatTamanaEngine's main.cpp, and every test in
 # GreatTamanaEngineTests) #includes engine headers that transitively need
-# SDL3/volk/vma/stb_image/KTX's include directories and, ultimately, their
-# libraries at final-link time - PUBLIC is what propagates both
-# automatically instead of every consumer having to repeat them.
+# SDL3/volk/vma/stb_image/KTX/httplib's include directories and, ultimately,
+# their libraries at final-link time - PUBLIC is what propagates both
+# automatically instead of every consumer having to repeat them. httplib is
+# included here purely as a debugging/tooling dependency (see
+# cmake/FetchHttplib.cmake) - nothing in gte_core uses it yet.
 target_include_directories(gte_core PUBLIC "${CMAKE_SOURCE_DIR}/src")
-target_link_libraries(gte_core PUBLIC SDL3::SDL3 volk vma stb_image KTX::ktx)
+target_link_libraries(gte_core PUBLIC SDL3::SDL3 volk vma stb_image KTX::ktx httplib)
 
 # src/Jobs/JobSystem.cpp/.h use std::thread/std::mutex/std::condition_variable
 # unconditionally (the class itself always compiles - see JobSystem.h's own

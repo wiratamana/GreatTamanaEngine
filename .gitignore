@@ -52,6 +52,10 @@
 # CMakeLists.txt / cmake/FetchGTest.cmake / tests/CMakeLists.txt)
 /third_party/googletest/
 
+# cpp-httplib artifacts fetched by cmake/FetchHttplib.cmake (regenerated
+# automatically on configure — see CMakeLists.txt / cmake/FetchHttplib.cmake)
+/third_party/httplib/
+
 # Compiled shader binaries (SPIR-V) built from src/Shaders/*.vert/*.frag by
 # cmake/CompileShaders.cmake (glslc) - regenerated automatically on every
 # build into "<exe dir>/shaders/", never committed. Only the GLSL source is
