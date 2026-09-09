@@ -136,4 +136,16 @@ void FrameCaptureBridge::FailPendingRequest(FrameCaptureKind kind, FrameCaptureF
     slot.conditionVariable.notify_one();
 }
 
+void FrameCaptureBridge::PublishTextureList(std::vector<PublishedTextureListEntry> entries)
+{
+    std::lock_guard<std::mutex> lock(m_textureListMutex);
+    m_publishedTextureList = std::move(entries);
+}
+
+std::vector<PublishedTextureListEntry> FrameCaptureBridge::GetPublishedTextureList() const
+{
+    std::lock_guard<std::mutex> lock(m_textureListMutex);
+    return m_publishedTextureList;
+}
+
 } // namespace gte

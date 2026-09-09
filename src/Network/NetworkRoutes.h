@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace gte::Network {
 
@@ -154,5 +155,90 @@ std::string BuildDeleteEntityResponseJson(bool success, const std::string& error
 // (malformed JSON, bridge unavailable/busy, timeout - see Phase 5):
 // {"success":false,"error":"<errorMessage>"}
 std::string BuildGenericErrorResponseJson(const std::string& errorMessage);
+
+// --- network-impl-4 campaign, Phase 5
+// (task_manager/network-impl-4/PHASE5_HTTP_ENDPOINTS_GET_TEXTURE_AND_LIST_TEXTURES.md) -
+// GET /get_texture and GET /list_textures. Every function below stays PURE,
+// same discipline as everything above.
+
+// Parsed, validated GET /get_texture query parameters. `valid == false`
+// means `errorMessage` explains exactly why (a 400 response - see
+// NetworkServer.cpp's own route lambda) - every other field is meaningless
+// in that case.
+struct ParsedGetTextureQuery {
+    bool valid = false;
+    std::string errorMessage;
+    std::string textureName;
+    // Mirrors FrameCaptureBridge's own DebugTextureChannel (Phase 4) -
+    // NetworkRoutes.h deliberately does NOT #include FrameCaptureBridge.h
+    // (this file's own existing convention - see its header comment:
+    // "completely Game/ECS-independent" - FrameCaptureBridge lives under
+    // src/Application/, one layer further from pure than this file wants to
+    // depend on), so this is its OWN small, parallel bool instead of
+    // reusing that enum directly - NetworkServer.cpp's route lambda is
+    // what converts `wantsDepth` into the real
+    // FrameCaptureBridge::DebugTextureChannel value at the one call site
+    // that already depends on both headers anyway.
+    bool wantsDepth = false;
+};
+
+// Validation rules: "texture_name" must be present and non-empty -
+// otherwise "missing or empty required query parameter: texture_name".
+// "channel" is OPTIONAL; absent or exactly "color" -> wantsDepth = false;
+// exactly "depth" -> wantsDepth = true; any OTHER non-empty value ->
+// "invalid channel - must be \"color\" or \"depth\"" (a validation
+// FAILURE, unlike ResolveCaptureResponseFormat()'s own "unrecognized value
+// falls back to a default" convention - a typo'd channel name is much more
+// likely to be a caller MISTAKE worth surfacing loudly than a forward-
+// compatible "ignore it" case, since guessing wrong here would otherwise
+// silently return the WRONG channel's image with no error at all).
+// NOTE: matching is EXACT-CASE ("color"/"depth" only, never "Color"/"DEPTH")
+// - mirrors ResolveCaptureResponseFormat()'s own exact-lowercase-only
+// matching in this same file; this is a deliberate, consistent choice
+// across every query-parameter parser in this file, not an oversight - do
+// not add case-insensitive matching here without doing the same everywhere
+// else in this file first.
+ParsedGetTextureQuery ParseGetTextureQuery(const std::string& textureNameParam, const std::string& channelParam);
+
+// Builds GET /get_texture's own JSON/base64 response body (used only when
+// CaptureResponseFormat::JsonBase64 is resolved - see
+// ResolveCaptureResponseFormat(), reused unchanged from Phase 3 of
+// network-impl-2):
+// {"width":<int>,"height":<int>,"format":"png","data_base64":"<...>","frames_since_update":<uint>}
+// NOTE: this response's OWN "format" field is always the literal string
+// "png" - the PNG *encoding*, exactly like BuildCaptureJsonBody()'s
+// existing field of the same name. Do NOT confuse this with
+// TextureListEntryView::format below, which is the SOURCE texture's
+// VkFormat (e.g. "B8G8R8A8_UNORM") - the two are unrelated concepts that
+// simply happen to share a JSON key name in two different response shapes.
+// Built via nlohmann::json (see this file's own Step 2 note) - NOT
+// BuildCaptureJsonBody() (which stays exactly as /get_game_view/
+// /get_swapchain need it, untouched by this campaign).
+std::string BuildTextureCaptureJsonBody(
+    int width, int height, const std::string& base64Png, std::uint64_t framesSinceUpdate);
+
+// One entry of GET /list_textures's own JSON array - see
+// BuildListTexturesResponseJson() below. A plain, scalars-only struct THIS
+// file owns (see this file's own Step 2 note on why a struct crossing a
+// layer boundary is never accepted directly here) - NetworkServer.cpp is
+// the one place that copies gte::PublishedTextureListEntry
+// (src/Application/FrameCaptureBridge.h, Phase 5's own addition there - see
+// Step 3.3 below) into this struct, one field at a time.
+struct TextureListEntryView {
+    std::string name;
+    std::string regime; // "synchronous" or "pipelined" - already resolved to a string upstream (Application::Run(), Step 3.4) - this file never sees rg::ExecuteTimingMode.
+    std::string format;  // e.g. "B8G8R8A8_UNORM" - the texture's COLOR VkFormat, already resolved to a string upstream - see this file's own note on BuildTextureCaptureJsonBody() above for why this is a DIFFERENT "format" concept than that function's own field of the same name.
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+    bool hasDepth = false;
+    std::uint64_t framesSinceUpdate = 0;
+};
+
+// Builds the full GET /list_textures response body:
+// {"textures":[{"name":"GameView","regime":"synchronous","format":"B8G8R8A8_UNORM","width":1280,"height":720,"has_depth":true,"frames_since_update":0}, ...]}
+// An empty `entries` produces {"textures":[]}, never an error - a session
+// where nothing has rendered a single named texture yet (e.g. queried
+// immediately at startup, before the first frame) is a valid, normal state.
+std::string BuildListTexturesResponseJson(const std::vector<TextureListEntryView>& entries);
 
 } // namespace gte::Network

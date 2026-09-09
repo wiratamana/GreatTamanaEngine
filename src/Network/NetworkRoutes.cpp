@@ -201,4 +201,60 @@ std::string BuildGenericErrorResponseJson(const std::string& errorMessage)
     return body.dump();
 }
 
+// --- network-impl-4 campaign, Phase 5
+// (task_manager/network-impl-4/PHASE5_HTTP_ENDPOINTS_GET_TEXTURE_AND_LIST_TEXTURES.md)
+
+ParsedGetTextureQuery ParseGetTextureQuery(const std::string& textureNameParam, const std::string& channelParam)
+{
+    ParsedGetTextureQuery result;
+    if (textureNameParam.empty()) {
+        result.errorMessage = "missing or empty required query parameter: texture_name";
+        return result;
+    }
+    result.textureName = textureNameParam;
+
+    if (channelParam.empty() || channelParam == "color") {
+        result.wantsDepth = false;
+    } else if (channelParam == "depth") {
+        result.wantsDepth = true;
+    } else {
+        result.errorMessage = "invalid channel - must be \"color\" or \"depth\"";
+        return result;
+    }
+
+    result.valid = true;
+    return result;
+}
+
+std::string BuildTextureCaptureJsonBody(
+    int width, int height, const std::string& base64Png, std::uint64_t framesSinceUpdate)
+{
+    nlohmann::json body;
+    body["width"] = width;
+    body["height"] = height;
+    body["format"] = "png";
+    body["data_base64"] = base64Png;
+    body["frames_since_update"] = framesSinceUpdate;
+    return body.dump();
+}
+
+std::string BuildListTexturesResponseJson(const std::vector<TextureListEntryView>& entries)
+{
+    nlohmann::json arr = nlohmann::json::array();
+    for (const TextureListEntryView& entry : entries) {
+        nlohmann::json item;
+        item["name"] = entry.name;
+        item["regime"] = entry.regime;
+        item["format"] = entry.format;
+        item["width"] = entry.width;
+        item["height"] = entry.height;
+        item["has_depth"] = entry.hasDepth;
+        item["frames_since_update"] = entry.framesSinceUpdate;
+        arr.push_back(std::move(item));
+    }
+    nlohmann::json body;
+    body["textures"] = std::move(arr);
+    return body.dump();
+}
+
 } // namespace gte::Network

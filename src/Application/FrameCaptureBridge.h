@@ -60,6 +60,43 @@ struct CapturedPngImage {
     std::uint64_t framesSinceUpdate = 0;
 };
 
+// network-impl-4 campaign, Phase 5
+// (task_manager/network-impl-4/PHASE5_HTTP_ENDPOINTS_GET_TEXTURE_AND_LIST_TEXTURES.md) -
+// one fully pre-shaped row of GET /list_textures' response, published once
+// per real engine frame by Application::Run() (see PublishTextureList()
+// below). Deliberately a SEPARATE, nearly-identical type from
+// gte::Network::TextureListEntryView (src/Network/NetworkRoutes.h), not a
+// shared one - this keeps BOTH of this engine's "a struct must never cross
+// this exact layer boundary" rules intact at once:
+//   - THIS class must stay Vulkan/Renderer/RenderGraph-free (see this
+//     file's own header comment, above) - so every field here is an
+//     ALREADY-RESOLVED plain scalar, never an
+//     rg::DebugTextureSnapshot/rg::ExecuteTimingMode. Application::Run()
+//     (which DOES know about RenderGraph) resolves `regime`/`format` to
+//     plain strings and `framesSinceUpdate` to a plain integer BEFORE ever
+//     calling PublishTextureList() below - see Step 3.4.
+//   - NetworkRoutes.h's own response-builder functions must never take a
+//     struct OWNED BY A DIFFERENT LAYER as a parameter (see
+//     BuildInstantiatePrimitiveResponseJson()'s own doc comment) - so this
+//     struct never crosses into NetworkRoutes.h either. NetworkServer.cpp
+//     (which already depends on BOTH this header and NetworkRoutes.h) is
+//     the ONE place that copies this struct's fields into a fresh
+//     gte::Network::TextureListEntryView, one field at a time, right before
+//     calling BuildListTexturesResponseJson() - see Step 3.6.
+// A few bytes of per-request copying for a single-digit-to-low-double-
+// digit-sized list is negligible - see PHASE0_MASTER_STRATEGY.md's own
+// Locked Design Decision 8 for this engine's general tolerance for this
+// class of cost.
+struct PublishedTextureListEntry {
+    std::string name;
+    std::string regime; // "synchronous" or "pipelined" - see Application.cpp's own ToDebugTextureRegimeString() helper (Step 3.4).
+    std::string format;  // e.g. "B8G8R8A8_UNORM" - the texture's COLOR VkFormat, already stringified - see Application.cpp's own DebugTextureColorFormatName() helper (Step 3.4). Never the depth format; see hasDepth below for whether one even exists.
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+    bool hasDepth = false;
+    std::uint64_t framesSinceUpdate = 0;
+};
+
 // Why a capture request did NOT produce an image - surfaced to the network
 // route as a specific HTTP status (see Phase 3/5's own route handlers).
 enum class FrameCaptureFailureReason {
@@ -155,6 +192,27 @@ public:
     // no visible Game view).
     void FailPendingRequest(FrameCaptureKind kind, FrameCaptureFailureReason reason);
 
+    // --- GET /list_textures support (network-impl-4 campaign, Phase 5) ------
+    // Unlike RequestCaptureAndWait() above, there is nothing to "wait for" here
+    // - the list is whatever it is right now. Guarded by its own small,
+    // dedicated mutex (m_textureListMutex) - deliberately NO condition
+    // variable, since nothing ever blocks on this.
+
+    // --- Called from the MAIN thread (Application::Run()) only --------------
+    // Publishes a fresh, COMPLETE snapshot of every currently-known texture -
+    // OVERWRITES whatever was published before wholesale (never merges/
+    // appends), so an empty vector correctly clears a previously non-empty
+    // list rather than leaving stale entries behind. Called once per real
+    // engine frame - see Application.cpp's own wiring, Step 3.4.
+    void PublishTextureList(std::vector<PublishedTextureListEntry> entries);
+
+    // --- Called from the NETWORK thread (a route handler) only --------------
+    // A cheap, thread-safe COPY of whatever was last published - never blocks.
+    // Returns an empty vector if PublishTextureList() has never been called yet
+    // this session (e.g. queried before the very first Run() iteration
+    // completes) - a valid, normal state, never an error.
+    std::vector<PublishedTextureListEntry> GetPublishedTextureList() const;
+
 private:
     struct Slot {
         mutable std::mutex mutex;
@@ -177,6 +235,11 @@ private:
     // RequestedTextureChannel() under the same lock).
     std::string m_requestedTextureName;
     DebugTextureChannel m_requestedTextureChannel = DebugTextureChannel::Color;
+
+    // network-impl-4 campaign, Phase 5 - GET /list_textures support. Guarded
+    // by its own dedicated mutex, independent of every Slot above.
+    mutable std::mutex m_textureListMutex;
+    std::vector<PublishedTextureListEntry> m_publishedTextureList;
 };
 
 } // namespace gte

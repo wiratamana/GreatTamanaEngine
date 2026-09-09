@@ -69,6 +69,41 @@ bool IsBgraFormat(VkFormat format) noexcept
     return format == VK_FORMAT_B8G8R8A8_UNORM || format == VK_FORMAT_B8G8R8A8_SRGB;
 }
 
+// network-impl-4 campaign, Phase 5 - GET /list_textures' own small,
+// human-readable resolution helpers. Both are deliberately narrow (only the
+// enumerators/formats this engine's render graph can actually produce
+// today), mirroring IsBgraFormat()'s own "accepted narrow risk, documented"
+// precedent immediately above - an unrecognized regime can never actually
+// occur (ExecuteTimingMode has exactly two enumerators, both handled), and
+// an unrecognized VkFormat falls back to a safe, clearly-labeled numeric
+// string rather than a crash or a silently-wrong label, mirroring
+// src/Editor/MemoryPanelData.cpp's own ToString(VkFormat) fallback
+// convention (not reused directly - that function lives under
+// GTE_ENABLE_EDITOR-gated src/Editor/, and this call site must work in
+// every build configuration, editor or not).
+const char* ToDebugTextureRegimeString(rg::ExecuteTimingMode mode)
+{
+    switch (mode) {
+    case rg::ExecuteTimingMode::SynchronousImmediateReadback: return "synchronous";
+    case rg::ExecuteTimingMode::PipelinedDeferredReadback: return "pipelined";
+    }
+    return "unknown"; // Unreachable - every real enumerator handled above.
+}
+
+std::string DebugTextureColorFormatName(VkFormat format)
+{
+    switch (format) {
+    case VK_FORMAT_B8G8R8A8_UNORM: return "B8G8R8A8_UNORM";
+    case VK_FORMAT_B8G8R8A8_SRGB: return "B8G8R8A8_SRGB";
+    case VK_FORMAT_R8G8B8A8_UNORM: return "R8G8B8A8_UNORM";
+    case VK_FORMAT_R8G8B8A8_SRGB: return "R8G8B8A8_SRGB";
+    default: break;
+    }
+    char buffer[32];
+    std::snprintf(buffer, sizeof(buffer), "VkFormat(%d)", static_cast<int>(format));
+    return std::string(buffer);
+}
+
 } // namespace
 
 Application::SdlContext::SdlContext()
@@ -690,6 +725,40 @@ int Application::Run()
             // same accepted "main thread hasn't produced this yet" bucket
             // network-impl-2's own PHASE0_MASTER_STRATEGY.md already documents.
         }
+
+        // network-impl-4 campaign, Phase 5
+        // (task_manager/network-impl-4/PHASE5_HTTP_ENDPOINTS_GET_TEXTURE_AND_LIST_TEXTURES.md) -
+        // GET /list_textures' only data source. Resolved to plain
+        // PublishedTextureListEntry values HERE, never inside FrameCaptureBridge
+        // itself - see that struct's own doc comment (FrameCaptureBridge.h) for
+        // why. Cheap - see PHASE0_MASTER_STRATEGY.md's own Locked Design Decision
+        // 8: O(declared textures), the same order of magnitude as
+        // Renderer::GetMemoryResources()'s own existing "safe to call every frame"
+        // per-frame snapshot copy.
+        {
+            const std::vector<rg::DebugTextureSnapshot> snapshots = m_renderGraph.ListDebugTextures();
+            const std::uint64_t currentFrameCounter = m_renderGraph.CurrentDebugTextureFrameCounter();
+
+            std::vector<PublishedTextureListEntry> published;
+            published.reserve(snapshots.size());
+            for (const rg::DebugTextureSnapshot& snap : snapshots) {
+                PublishedTextureListEntry entry;
+                entry.name = snap.name;
+                entry.regime = ToDebugTextureRegimeString(snap.regime);
+                entry.format = DebugTextureColorFormatName(snap.target.format);
+                entry.width = snap.target.extent.width;
+                entry.height = snap.target.extent.height;
+                entry.hasDepth = snap.hasDepth;
+                // Same subtraction PHASE0_MASTER_STRATEGY.md's own Locked Design
+                // Decision 4 defines for /get_texture's single-entry case (Phase 4),
+                // just computed here for EVERY known texture at once, once per
+                // frame, rather than once per request.
+                entry.framesSinceUpdate = currentFrameCounter - snap.lastUpdatedFrameCounter;
+                published.push_back(std::move(entry));
+            }
+            m_captureBridge.PublishTextureList(std::move(published));
+        }
+
         // Phase 5 (GPU memory usage over time) - see PHASE5_GPU_MEMORY_
         // HISTORY_STRATEGY_v2.md: one real GPU memory snapshot per
         // profiler frame, taken as late as possible in the frame (still

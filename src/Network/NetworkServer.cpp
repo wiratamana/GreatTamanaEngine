@@ -72,6 +72,105 @@ void RegisterCaptureRoute(httplib::Server& server, const char* path, FrameCaptur
     });
 }
 
+// network-impl-4 campaign, Phase 5
+// (task_manager/network-impl-4/PHASE5_HTTP_ENDPOINTS_GET_TEXTURE_AND_LIST_TEXTURES.md) -
+// GET /get_texture. Deliberately NOT shoehorned into RegisterCaptureRoute()
+// above - see this phase document's own Step 2 for why the two have
+// diverged enough (extra required query param, extra failure mode, richer
+// JSON response) that a shared helper would need more parameters/branches
+// than it saves.
+void RegisterGetTextureRoute(httplib::Server& server, FrameCaptureBridge* captureBridge)
+{
+    server.Get("/get_texture", [captureBridge](const httplib::Request& req, httplib::Response& res) {
+        const ParsedGetTextureQuery parsed =
+            ParseGetTextureQuery(req.get_param_value("texture_name"), req.get_param_value("channel"));
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        if (captureBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("capture bridge not available"), "application/json");
+            return;
+        }
+
+        const DebugTextureChannel channel = parsed.wantsDepth ? DebugTextureChannel::Depth : DebugTextureChannel::Color;
+        const FrameCaptureBridge::RequestResult result =
+            captureBridge->RequestCaptureAndWait(FrameCaptureKind::NamedTexture, 3000, parsed.textureName, channel);
+
+        if (result.alreadyPending) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson(
+                "a /get_texture (or another named-texture) capture is already in progress"), "application/json");
+            return;
+        }
+        if (result.failure.has_value()) {
+            // TimedOut -> this exact texture_name never registered (or
+            // never rendered again) within the timeout -> 504.
+            // TargetNotAvailable -> a positively-known "no depth buffer on
+            // this texture" (Phase 4's own fast-fail) or an unrecognized
+            // depth format (Phase 3's own accepted narrow risk) -> 409. Each
+            // gets its OWN, distinct, actionable message - never one shared
+            // ambiguous sentence for both.
+            if (*result.failure == FrameCaptureFailureReason::TimedOut) {
+                res.status = 504;
+                res.set_content(BuildGenericErrorResponseJson(
+                    "texture_name '" + parsed.textureName + "' was never registered (or never rendered again) "
+                    "within the timeout - see GET /list_textures for the currently known names"),
+                    "application/json");
+            } else {
+                res.status = 409;
+                res.set_content(BuildGenericErrorResponseJson(
+                    "requested channel is not available for texture_name '" + parsed.textureName +
+                    "' - it either has no depth buffer, or its depth format could not be visualized"),
+                    "application/json");
+            }
+            return;
+        }
+
+        const CapturedPngImage& image = *result.image;
+        const CaptureResponseFormat format =
+            ResolveCaptureResponseFormat(req.get_param_value("format"), req.get_header_value("Accept"));
+        if (format == CaptureResponseFormat::RawPng) {
+            res.set_content(reinterpret_cast<const char*>(image.pngBytes.data()), image.pngBytes.size(), "image/png");
+        } else {
+            const std::string base64 = Encoding::EncodeBase64(image.pngBytes);
+            res.set_content(BuildTextureCaptureJsonBody(image.width, image.height, base64, image.framesSinceUpdate),
+                "application/json");
+        }
+    });
+}
+
+// network-impl-4 campaign, Phase 5 - GET /list_textures, the discoverability
+// companion to /get_texture. Needs NO RenderGraph/rg::-namespaced type or
+// header at all - Application.cpp (Phase 5, Step 3.4) already resolved
+// everything down to plain PublishedTextureListEntry scalars.
+void RegisterListTexturesRoute(httplib::Server& server, FrameCaptureBridge* captureBridge)
+{
+    server.Get("/list_textures", [captureBridge](const httplib::Request&, httplib::Response& res) {
+        if (captureBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("capture bridge not available"), "application/json");
+            return;
+        }
+
+        const std::vector<PublishedTextureListEntry> published = captureBridge->GetPublishedTextureList();
+        std::vector<TextureListEntryView> views;
+        views.reserve(published.size());
+        for (const PublishedTextureListEntry& entry : published) {
+            // Trivial 1:1 field copy - the ONE place this campaign
+            // deliberately keeps two nearly-identical structs (see
+            // PublishedTextureListEntry's own doc comment, FrameCaptureBridge.h,
+            // Step 3.3, for why they are not the same type).
+            views.push_back(TextureListEntryView{
+                entry.name, entry.regime, entry.format, entry.width, entry.height, entry.hasDepth,
+                entry.framesSinceUpdate });
+        }
+        res.set_content(BuildListTexturesResponseJson(views), "application/json");
+    });
+}
+
 // The one, hand-written route table for this campaign - see
 // PHASE0_MASTER_STRATEGY.md's locked "Endpoint contract". A future endpoint
 // is added here as one more server.Get(...)/Post(...) line, forwarding to
@@ -92,6 +191,13 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
     // FrameCaptureBridge and nothing else engine-side.
     RegisterCaptureRoute(server, "/get_game_view", FrameCaptureKind::GameView, captureBridge);
     RegisterCaptureRoute(server, "/get_swapchain", FrameCaptureKind::Swapchain, captureBridge);
+
+    // network-impl-4 campaign, Phase 5
+    // (task_manager/network-impl-4/PHASE5_HTTP_ENDPOINTS_GET_TEXTURE_AND_LIST_TEXTURES.md) -
+    // GET /get_texture (any named render-graph texture, by name) and its
+    // discoverability companion, GET /list_textures.
+    RegisterGetTextureRoute(server, captureBridge);
+    RegisterListTexturesRoute(server, captureBridge);
 
     // network-impl-3 campaign, Phase 5
     // (PHASE5_NETWORK_POST_ROUTES_AND_COMMAND_DISPATCH.md) - the engine's

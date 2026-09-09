@@ -333,4 +333,124 @@ TEST(BuildResponseJsonTests, GenericErrorResponseEscapesQuotesAndBackslashes)
     EXPECT_EQ(parsed["error"].get<std::string>(), messageWithSpecialChars);
 }
 
+// --- network-impl-4 campaign, Phase 5
+// (task_manager/network-impl-4/PHASE5_HTTP_ENDPOINTS_GET_TEXTURE_AND_LIST_TEXTURES.md) -
+// GET /get_texture + GET /list_textures.
+
+using gte::Network::BuildListTexturesResponseJson;
+using gte::Network::BuildTextureCaptureJsonBody;
+using gte::Network::ParseGetTextureQuery;
+using gte::Network::ParsedGetTextureQuery;
+using gte::Network::TextureListEntryView;
+
+TEST(ParseGetTextureQueryTests, MissingTextureNameFails)
+{
+    const ParsedGetTextureQuery result = ParseGetTextureQuery("", "");
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.errorMessage, "missing or empty required query parameter: texture_name");
+}
+
+TEST(ParseGetTextureQueryTests, EmptyTextureNameFails)
+{
+    const ParsedGetTextureQuery result = ParseGetTextureQuery("", "color");
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.errorMessage, "missing or empty required query parameter: texture_name");
+}
+
+TEST(ParseGetTextureQueryTests, ChannelAbsentDefaultsToColor)
+{
+    const ParsedGetTextureQuery result = ParseGetTextureQuery("GameView", "");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_EQ(result.textureName, "GameView");
+    EXPECT_FALSE(result.wantsDepth);
+}
+
+TEST(ParseGetTextureQueryTests, ChannelColorMeansWantsDepthFalse)
+{
+    const ParsedGetTextureQuery result = ParseGetTextureQuery("GameView", "color");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_FALSE(result.wantsDepth);
+}
+
+TEST(ParseGetTextureQueryTests, ChannelDepthMeansWantsDepthTrue)
+{
+    const ParsedGetTextureQuery result = ParseGetTextureQuery("GameView", "depth");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_TRUE(result.wantsDepth);
+}
+
+struct ParseGetTextureQueryInvalidChannelCase {
+    std::string channel;
+};
+
+class ParseGetTextureQueryInvalidChannelTest
+    : public ::testing::TestWithParam<ParseGetTextureQueryInvalidChannelCase> {};
+
+TEST_P(ParseGetTextureQueryInvalidChannelTest, RejectsNonLowercaseOrUnknownChannelValues)
+{
+    const ParsedGetTextureQuery result = ParseGetTextureQuery("GameView", GetParam().channel);
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.errorMessage, "invalid channel - must be \"color\" or \"depth\"");
+}
+
+INSTANTIATE_TEST_SUITE_P(NetworkRoutesTests, ParseGetTextureQueryInvalidChannelTest,
+    ::testing::Values(
+        ParseGetTextureQueryInvalidChannelCase{ "Depth" },
+        ParseGetTextureQueryInvalidChannelCase{ "COLOR" },
+        ParseGetTextureQueryInvalidChannelCase{ "bogus" }));
+
+TEST(BuildTextureCaptureJsonBodyTests, PopulatedCallProducesExpectedFields)
+{
+    const std::string body = BuildTextureCaptureJsonBody(64, 32, "QUJD", 7);
+    const nlohmann::json parsed = nlohmann::json::parse(body);
+    EXPECT_EQ(parsed["width"], 64);
+    EXPECT_EQ(parsed["height"], 32);
+    EXPECT_EQ(parsed["format"], "png");
+    EXPECT_EQ(parsed["data_base64"], "QUJD");
+    EXPECT_EQ(parsed["frames_since_update"], 7);
+}
+
+TEST(BuildListTexturesResponseJsonTests, EmptyListProducesLiteralEmptyShape)
+{
+    const std::string body = BuildListTexturesResponseJson({});
+    EXPECT_EQ(body, R"({"textures":[]})");
+}
+
+TEST(BuildListTexturesResponseJsonTests, MultipleEntriesRoundTripEveryField)
+{
+    const std::vector<TextureListEntryView> entries = {
+        TextureListEntryView{ "GameView", "synchronous", "B8G8R8A8_UNORM", 1280, 720, true, 0 },
+        TextureListEntryView{ "Swapchain", "pipelined", "B8G8R8A8_SRGB", 1920, 1080, false, 3 },
+    };
+    const std::string body = BuildListTexturesResponseJson(entries);
+    const nlohmann::json parsed = nlohmann::json::parse(body);
+    ASSERT_EQ(parsed["textures"].size(), 2u);
+
+    EXPECT_EQ(parsed["textures"][0]["name"], "GameView");
+    EXPECT_EQ(parsed["textures"][0]["regime"], "synchronous");
+    EXPECT_EQ(parsed["textures"][0]["format"], "B8G8R8A8_UNORM");
+    EXPECT_EQ(parsed["textures"][0]["width"], 1280);
+    EXPECT_EQ(parsed["textures"][0]["height"], 720);
+    EXPECT_EQ(parsed["textures"][0]["has_depth"], true);
+    EXPECT_EQ(parsed["textures"][0]["frames_since_update"], 0);
+
+    EXPECT_EQ(parsed["textures"][1]["name"], "Swapchain");
+    EXPECT_EQ(parsed["textures"][1]["regime"], "pipelined");
+    EXPECT_EQ(parsed["textures"][1]["format"], "B8G8R8A8_SRGB");
+    EXPECT_EQ(parsed["textures"][1]["width"], 1920);
+    EXPECT_EQ(parsed["textures"][1]["height"], 1080);
+    EXPECT_EQ(parsed["textures"][1]["has_depth"], false);
+    EXPECT_EQ(parsed["textures"][1]["frames_since_update"], 3);
+}
+
+TEST(BuildListTexturesResponseJsonTests, NameWithQuoteRoundTripsThroughJson)
+{
+    const std::vector<TextureListEntryView> entries = {
+        TextureListEntryView{ R"(My"Texture)", "synchronous", "B8G8R8A8_UNORM", 4, 4, false, 0 },
+    };
+    const std::string body = BuildListTexturesResponseJson(entries);
+    const nlohmann::json parsed = nlohmann::json::parse(body);
+    EXPECT_EQ(parsed["textures"][0]["name"].get<std::string>(), R"(My"Texture)");
+}
+
 } // namespace

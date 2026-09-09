@@ -207,5 +207,83 @@ TEST(FrameCaptureBridgeTest, IsCaptureRequestedReflectsPendingState)
     EXPECT_FALSE(bridge.IsCaptureRequested(FrameCaptureKind::GameView));
 }
 
+// --- network-impl-4 campaign, Phase 5
+// (task_manager/network-impl-4/PHASE5_HTTP_ENDPOINTS_GET_TEXTURE_AND_LIST_TEXTURES.md) -
+// GET /list_textures support: PublishTextureList()/GetPublishedTextureList().
+
+TEST(FrameCaptureBridgeTest, GetPublishedTextureListIsEmptyBeforeAnyPublish)
+{
+    FrameCaptureBridge bridge;
+    EXPECT_TRUE(bridge.GetPublishedTextureList().empty());
+}
+
+TEST(FrameCaptureBridgeTest, PublishedTextureListRoundTripsAcrossThreads)
+{
+    FrameCaptureBridge bridge;
+
+    std::vector<PublishedTextureListEntry> entries;
+    {
+        PublishedTextureListEntry entry;
+        entry.name = "GameView";
+        entry.regime = "synchronous";
+        entry.format = "B8G8R8A8_UNORM";
+        entry.width = 1280;
+        entry.height = 720;
+        entry.hasDepth = true;
+        entry.framesSinceUpdate = 0;
+        entries.push_back(entry);
+    }
+    {
+        PublishedTextureListEntry entry;
+        entry.name = "Swapchain";
+        entry.regime = "pipelined";
+        entry.format = "B8G8R8A8_SRGB";
+        entry.width = 1920;
+        entry.height = 1080;
+        entry.hasDepth = false;
+        entry.framesSinceUpdate = 5;
+        entries.push_back(entry);
+    }
+
+    std::thread publisher([&bridge, entries] {
+        bridge.PublishTextureList(entries);
+    });
+    publisher.join();
+
+    const std::vector<PublishedTextureListEntry> readBack = bridge.GetPublishedTextureList();
+    ASSERT_EQ(readBack.size(), 2u);
+    EXPECT_EQ(readBack[0].name, "GameView");
+    EXPECT_EQ(readBack[0].regime, "synchronous");
+    EXPECT_EQ(readBack[0].format, "B8G8R8A8_UNORM");
+    EXPECT_EQ(readBack[0].width, 1280u);
+    EXPECT_EQ(readBack[0].height, 720u);
+    EXPECT_TRUE(readBack[0].hasDepth);
+    EXPECT_EQ(readBack[0].framesSinceUpdate, 0u);
+
+    EXPECT_EQ(readBack[1].name, "Swapchain");
+    EXPECT_EQ(readBack[1].regime, "pipelined");
+    EXPECT_EQ(readBack[1].format, "B8G8R8A8_SRGB");
+    EXPECT_EQ(readBack[1].width, 1920u);
+    EXPECT_EQ(readBack[1].height, 1080u);
+    EXPECT_FALSE(readBack[1].hasDepth);
+    EXPECT_EQ(readBack[1].framesSinceUpdate, 5u);
+}
+
+// PublishTextureList()'s own "overwrites wholesale, never merges" contract -
+// publishing an EMPTY list after a non-empty one must correctly clear it,
+// never leave "sticky" old entries behind.
+TEST(FrameCaptureBridgeTest, PublishingEmptyListClearsPreviousEntries)
+{
+    FrameCaptureBridge bridge;
+
+    PublishedTextureListEntry entry;
+    entry.name = "GameView";
+    bridge.PublishTextureList({ entry });
+    ASSERT_EQ(bridge.GetPublishedTextureList().size(), 1u);
+
+    bridge.PublishTextureList({});
+    EXPECT_TRUE(bridge.GetPublishedTextureList().empty());
+}
+
 } // namespace
 } // namespace gte
