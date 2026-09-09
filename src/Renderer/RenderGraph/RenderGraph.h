@@ -50,6 +50,7 @@
 #include "RenderGraphBarrierPlanner.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphCompiler.h"
+#include "RenderGraphDebugTextureRegistry.h"
 #include "RenderGraphNameSlotTable.h"
 #include "RenderGraphResourcePool.h"
 #include "RenderGraphTimestampPool.h"
@@ -62,6 +63,8 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
+#include <string>
 #include <vector>
 
 namespace gte {
@@ -251,6 +254,55 @@ public:
     // regime at all - never garbage.
     const RenderGraphSnapshot& LastSnapshot(ExecuteTimingMode mode) const noexcept;
 
+    // network-impl-4 campaign, Phase 2
+    // (task_manager/network-impl-4/PHASE2_RENDERGRAPH_INTEGRATION_AND_AUTO_REGISTRATION.md) -
+    // the query surface behind GET /get_texture and GET /list_textures (see
+    // src/Application/FrameCaptureBridge.h and src/Network/NetworkRoutes.h,
+    // Phases 4/5). `name` is compared as a plain std::string - see
+    // RenderGraphDebugTextureRegistry::FindByName()'s own doc comment for why
+    // this is safe against an arbitrary, HTTP-supplied string. Returns
+    // std::nullopt if this RenderGraph has never resolved a texture under this
+    // exact name this session.
+    //
+    // NOTE (bare names, no "rg::" prefix): this class is already declared
+    // inside namespace gte::rg, so DebugTextureSnapshot/ResourceState below
+    // refer to gte::rg::DebugTextureSnapshot/gte::rg::ResourceState directly -
+    // matching this header's own pre-existing style (see LastSnapshot() above).
+    std::optional<DebugTextureSnapshot> DebugTextureSnapshotFor(const std::string& name) const;
+
+    // Every texture name/snapshot ever registered this session - the primitive
+    // behind GET /list_textures.
+    std::vector<DebugTextureSnapshot> ListDebugTextures() const;
+
+    // PHASE0_MASTER_STRATEGY.md's Locked Design Decision 7 - called ONLY from
+    // the small number of call sites that perform a graph-EXTERNAL manual
+    // image-layout transition on an already-registered named texture right
+    // after this RenderGraph's own ExecuteCompiledGraph() call returns (today:
+    // Application::Run()'s two FinalizeRenderTextureForExternalSampling() call
+    // sites for "GameView"/"SceneView", FramePresenter.cpp's own "Swapchain"
+    // finalize, and ComputeBlurValidation::FinalizeForSampling()'s
+    // "BlurredSceneOutput" finalize - see Phase 3, which corrected an earlier
+    // revision's "only two call sites" undercount). A safe no-op if `name`
+    // is not yet a known entry (see RenderGraphDebugTextureRegistry::
+    // ApplyColorStateOverride()'s own doc comment).
+    void NotifyDebugTextureStateOverride(const std::string& name, const ResourceState& newColorState);
+
+    // The registry's own current monotonic "engine frame" counter value (see
+    // RenderGraph.h's own m_debugTextureFrameCounter member doc comment) - a
+    // caller (Phase 4/5) computes a snapshot's own "frames_since_update" as
+    // `CurrentDebugTextureFrameCounter() - snapshot.lastUpdatedFrameCounter`
+    // at the exact moment it services a request, never cached/stale.
+    //
+    // IMPORTANT (see PHASE2's own Step 3.3a): this counter only ever
+    // advances during a SynchronousImmediateReadback call. A texture that is
+    // ONLY ever registered by the PipelinedDeferredReadback regime (today:
+    // "Swapchain") therefore has its own "frames_since_update" freshness signal
+    // driven entirely by how often the OFFSCREEN (Game/Scene) regime executes
+    // elsewhere - NOT by how often that texture itself actually updates. This
+    // is intentional (see PHASE0_MASTER_STRATEGY.md's own Locked Design
+    // Decision 4 caveat), not a bug to fix by adding a second counter.
+    std::uint64_t CurrentDebugTextureFrameCounter() const noexcept;
+
     // B.1 (B1_REAL_GPU_TIMING_STRATEGY_v1.md) - must be called EXACTLY
     // once, by Application::Run(), immediately after
     // Renderer::EndOffscreenRenderGraphRecording() returns (i.e. after that
@@ -383,6 +435,27 @@ private:
     // call for that regime - see LastSnapshot() above.
     RenderGraphSnapshot m_synchronousSnapshot;
     RenderGraphSnapshot m_pipelinedSnapshot;
+
+    // network-impl-4 campaign, Phase 1/2 - the passive, name-keyed debug
+    // texture registry (RenderGraphDebugTextureRegistry.h) plus the one
+    // shared, monotonically increasing "engine frame" counter it is stamped
+    // with - see this class's own DebugTextureSnapshotFor()/
+    // ListDebugTextures()/NotifyDebugTextureStateOverride()/
+    // CurrentDebugTextureFrameCounter() methods above, and
+    // ExecuteCompiledGraph()'s own registration loop (RenderGraph.cpp) for
+    // how this is kept passively up to date every call, in BOTH
+    // ExecuteTimingMode regimes.
+    RenderGraphDebugTextureRegistry m_debugTextures;
+
+    // Increments once per REAL engine frame - i.e. once per
+    // SynchronousImmediateReadback call (see ExecuteCompiledGraph()'s own
+    // `if (!isPipelined)` block, alongside m_resourcePool.BeginFrame()) -
+    // NEVER once per ExecuteCompiledGraph() call in general, since that
+    // would double-count relative to a real engine frame given both
+    // regimes share this same counter. See CurrentDebugTextureFrameCounter()'s
+    // own doc comment above for the accepted "Swapchain" freshness caveat
+    // this sharing implies.
+    std::uint64_t m_debugTextureFrameCounter = 0;
 };
 
 } // namespace gte::rg

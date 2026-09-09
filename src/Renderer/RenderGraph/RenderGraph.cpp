@@ -179,6 +179,7 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
     // (PipelinedDeferredReadback) call too.
     if (!isPipelined) {
         m_resourcePool.BeginFrame();
+        ++m_debugTextureFrameCounter; // network-impl-4, Phase 2 - see RenderGraph.h's own doc comment on this member.
     }
 
     // B.1 (B1_REAL_GPU_TIMING_STRATEGY_v1.md), Step 3.7 - pipelined-regime
@@ -428,6 +429,33 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         ++m_pipelinedFrameCounter;
     }
 
+    // network-impl-4 campaign, Phase 2 - passive registration: every texture
+    // this call actually resolved becomes (or stays) queryable by name via
+    // DebugTextureSnapshotFor()/ListDebugTextures(), regardless of which
+    // ExecuteTimingMode this call was. An unresolved index this call is
+    // skipped, deliberately leaving any PREVIOUS entry for that name
+    // untouched - see PHASE2's own Step 2 analysis for why.
+    for (std::size_t i = 0; i < physicalTextures.size(); ++i) {
+        const PhysicalTexture& tex = physicalTextures[i];
+        if (!tex.resolved) {
+            continue;
+        }
+        const char* name = input.textureNames[i];
+        if (name == nullptr || name[0] == '\0') {
+            continue; // Defensive - every real call site always supplies a real name (RenderGraphBuilder::CreateTexture()/ImportTexture() both assert a non-null/non-empty name), but never trust that blindly here (an assert compiles out entirely in a release/NDEBUG build).
+        }
+
+        DebugTextureSnapshot snapshot;
+        snapshot.name = name;
+        snapshot.regime = timingMode; // ExecuteCompiledGraph()'s own parameter - confirmed live, exact spelling.
+        snapshot.target = tex.target;
+        snapshot.hasDepth = tex.hasDepth;
+        snapshot.colorState = tex.colorState;
+        snapshot.depthState = tex.depthState;
+        snapshot.lastUpdatedFrameCounter = m_debugTextureFrameCounter;
+        m_debugTextures.Upsert(snapshot);
+    }
+
     // Phase 8 (RENDERGRAPH_PHASE8_EDITOR_DEBUG_TOOLING_STRATEGY_v1.md) - built
     // AFTER the whole pass loop above has run, so `statsLookup` (backed by
     // LastKnownStatsFor(), already updated by UpdateDrawStatsFor()/
@@ -523,6 +551,28 @@ PassGpuStats RenderGraph::LastKnownStatsFor(const char* passName) const
 const RenderGraphSnapshot& RenderGraph::LastSnapshot(ExecuteTimingMode mode) const noexcept
 {
     return (mode == ExecuteTimingMode::SynchronousImmediateReadback) ? m_synchronousSnapshot : m_pipelinedSnapshot;
+}
+
+// network-impl-4 campaign, Phase 2 - thin forwarders onto m_debugTextures
+// (see RenderGraph.h's own doc comments on each of these).
+std::optional<DebugTextureSnapshot> RenderGraph::DebugTextureSnapshotFor(const std::string& name) const
+{
+    return m_debugTextures.FindByName(name);
+}
+
+std::vector<DebugTextureSnapshot> RenderGraph::ListDebugTextures() const
+{
+    return m_debugTextures.ListAll();
+}
+
+void RenderGraph::NotifyDebugTextureStateOverride(const std::string& name, const ResourceState& newColorState)
+{
+    m_debugTextures.ApplyColorStateOverride(name, newColorState);
+}
+
+std::uint64_t RenderGraph::CurrentDebugTextureFrameCounter() const noexcept
+{
+    return m_debugTextureFrameCounter;
 }
 
 } // namespace gte::rg
