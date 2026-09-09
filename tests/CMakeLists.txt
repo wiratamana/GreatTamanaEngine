@@ -1637,6 +1637,7 @@ set(GTE_TEST_SOURCES
     Input/InputStateTests.cpp
     Application/EventTranslatorTests.cpp
     Application/MemorySnapshotBuilderTests.cpp
+    Application/FrameCaptureBridgeTests.cpp
     Renderer/VertexTests.cpp
     Renderer/PrimitiveMeshGeneratorTests.cpp
     Renderer/ResourcePoolTests.cpp

@@ -979,6 +979,20 @@ module or adding a new endpoint:
   once per frame, mirroring `Jobs::detail::JobQueue`'s own fixed-capacity,
   mutex-guarded shape) - never a raw pointer/reference into live engine
   state handed to a handler lambda.
+- **`FrameCaptureBridge` (`src/Application/FrameCaptureBridge.h/.cpp`,
+  `network-impl-2` campaign) is the ONE sanctioned exception to the rule
+  above.** A route handler may call `FrameCaptureBridge::
+  RequestCaptureAndWait()` and nothing else engine-side - it never reaches
+  into `Renderer`/`Registry`/`Game`/`AssetDatabase` directly, even
+  indirectly through this bridge; the bridge itself only ever moves
+  already-produced, plain `CapturedPngImage` byte buffers, never a live
+  pointer/reference. `Application::Run()` is the ONLY thing that ever calls
+  `IsCaptureRequested()`/`FulfillPendingRequest()`/`FailPendingRequest()`,
+  once per frame, from the main thread. A future endpoint needing DIFFERENT
+  engine data must NOT extend this class's `FrameCaptureKind` enum for an
+  unrelated purpose - build its own small, similarly-reviewed, similarly-
+  narrow bridge instead, following this one's shape (see
+  `task_manager/network-impl-2/PHASE2_CROSS_THREAD_FRAME_CAPTURE_BRIDGE.md`).
 - **Every one of `NetworkServer`'s own failure modes (a bind failure, e.g.
   the port already being in use) is NON-FATAL - log to stderr and continue,
   never throw/crash/abort engine startup.** This is a debugging/tooling
