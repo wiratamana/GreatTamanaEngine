@@ -1,6 +1,7 @@
 #include "Application.h"
 
 #include "EventTranslator.h"
+#include "EngineCommandDispatch.h"
 #include "MemorySnapshotBuilder.h"
 #include "RenderPasses.h"
 
@@ -104,7 +105,11 @@ Application::Application(const std::string& title, int width, int height)
     // NetworkServer.h) so its /get_game_view route handler can reach it.
     // Safe: m_captureBridge is declared (and thus constructed) before
     // m_networkServer, per Application.h's own member ordering.
-    , m_networkServer(&m_captureBridge)
+    // network-impl-3 campaign, Phase 4 - ALSO hands EngineCommandBridge's
+    // address into NetworkServer's constructor (a second, appended
+    // defaulted pointer parameter), for the exact same reason -
+    // m_commandBridge is likewise declared before m_networkServer.
+    , m_networkServer(&m_captureBridge, &m_commandBridge)
     , m_windowWidth(width)
     , m_windowHeight(height)
 {
@@ -219,6 +224,20 @@ int Application::Run()
                     m_game.OnEvent(*event);
                 }
             }
+        }
+
+        // network-impl-3 campaign (task_manager/network-impl-3/) - drains at
+        // most ONE pending network-issued engine command
+        // (instantiate_primitive/delete_entity) per frame, as EARLY as
+        // possible - right after input polling, BEFORE Game::Update()/
+        // Physics/Animation run this frame - so a freshly spawned/deleted
+        // entity is fully consistent for the REST of this exact frame (see
+        // PHASE4_ENGINE_COMMAND_BRIDGE_AND_MAIN_LOOP_INTEGRATION.md, and
+        // PHASE0_MASTER_STRATEGY.md's own Locked Design Decision #6).
+        if (const std::optional<EngineCommandRequest> request = m_commandBridge.TryPeekPendingCommandRequest()) {
+            GTE_PROFILE_SCOPE("Application::ExecuteEngineCommand");
+            const EngineCommandResult result = ExecuteEngineCommand(m_game, m_renderer, *request);
+            m_commandBridge.FulfillCommand(result);
         }
 
         const Uint64 nowTicksNs = SDL_GetTicksNS();

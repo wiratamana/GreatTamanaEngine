@@ -20,6 +20,11 @@ namespace httplib { class Server; }
 // (PHASE3_GAME_VIEW_CAPTURE_AND_GET_GAME_VIEW_ENDPOINT.md).
 namespace gte { class FrameCaptureBridge; }
 
+// Forward-declared for the same cheap-header reason as FrameCaptureBridge
+// above - network-impl-3 campaign, Phase 4
+// (PHASE4_ENGINE_COMMAND_BRIDGE_AND_MAIN_LOOP_INTEGRATION.md).
+namespace gte { class EngineCommandBridge; }
+
 namespace gte::Network {
 
 // Owns a real, embedded HTTP server (cpp-httplib) bound to loopback
@@ -51,7 +56,13 @@ public:
     // see Application.cpp) - `nullptr` means "no engine-state-touching
     // routes are wired up" (a route needing it responds 503 rather than
     // crashing - see NetworkServer.cpp's own RegisterRoutes()).
-    explicit NetworkServer(FrameCaptureBridge* captureBridge = nullptr);
+    // `commandBridge` (network-impl-3 campaign, Phase 4 -
+    // PHASE4_ENGINE_COMMAND_BRIDGE_AND_MAIN_LOOP_INTEGRATION.md) is a SECOND
+    // defaulted, non-owning pointer, appended AFTER `captureBridge` so every
+    // existing call site (including this constructor's own single-argument
+    // production use) keeps compiling unchanged. Non-null in production
+    // (Application owns the real EngineCommandBridge and passes its address).
+    explicit NetworkServer(FrameCaptureBridge* captureBridge = nullptr, EngineCommandBridge* commandBridge = nullptr);
     ~NetworkServer();
 
     NetworkServer(const NetworkServer&) = delete;
@@ -120,6 +131,9 @@ private:
     // Non-owning - see this class's own constructor doc comment above.
     // Application owns the real instance and must outlive this NetworkServer.
     FrameCaptureBridge* m_captureBridge = nullptr;
+    // Non-owning - same lifetime contract as m_captureBridge above
+    // (network-impl-3 campaign, Phase 4).
+    EngineCommandBridge* m_commandBridge = nullptr;
 };
 
 } // namespace gte::Network

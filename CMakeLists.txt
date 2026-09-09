@@ -356,6 +356,10 @@ add_library(gte_core STATIC
     src/Application/MemorySnapshotBuilder.h
     src/Application/FrameCaptureBridge.h
     src/Application/FrameCaptureBridge.cpp
+    src/Application/EngineCommandBridge.h
+    src/Application/EngineCommandBridge.cpp
+    src/Application/EngineCommandDispatch.h
+    src/Application/EngineCommandDispatch.cpp
     src/Application/RenderPasses.h
     src/Application/RenderPasses.cpp
     src/Event/Event.h

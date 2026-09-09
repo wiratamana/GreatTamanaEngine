@@ -2,6 +2,7 @@
 
 #include "NetworkRoutes.h"
 
+#include "../Application/EngineCommandBridge.h"
 #include "../Application/FrameCaptureBridge.h"
 #include "../Encoding/Base64.h"
 
@@ -75,8 +76,15 @@ void RegisterCaptureRoute(httplib::Server& server, const char* path, FrameCaptur
 // is added here as one more server.Get(...)/Post(...) line, forwarding to
 // its own NetworkRoutes.h function - never composing response text inline
 // in this lambda.
-void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge)
+void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, EngineCommandBridge* commandBridge)
 {
+    // network-impl-3 campaign, Phase 4
+    // (PHASE4_ENGINE_COMMAND_BRIDGE_AND_MAIN_LOOP_INTEGRATION.md) - this
+    // phase only needs to make sure `commandBridge` correctly ARRIVES here;
+    // Phase 5 (PHASE5_NETWORK_POST_ROUTES_AND_COMMAND_DISPATCH.md) is what
+    // actually registers POST routes that use it.
+    (void)commandBridge;
+
     server.Get("/http_hello_world", [](const httplib::Request&, httplib::Response& res) {
         res.set_content(HandleHelloWorld(), "text/plain; charset=utf-8");
     });
@@ -98,16 +106,17 @@ struct NetworkServer::Impl {
     httplib::Server server;
 };
 
-NetworkServer::NetworkServer(FrameCaptureBridge* captureBridge)
+NetworkServer::NetworkServer(FrameCaptureBridge* captureBridge, EngineCommandBridge* commandBridge)
     : m_impl(std::make_unique<Impl>())
     , m_captureBridge(captureBridge)
+    , m_commandBridge(commandBridge)
 {
     // Registered exactly ONCE per NetworkServer instance, here in the
     // constructor - never inside Start() - so a Start()/Stop()/Start()
     // restart cycle (or a Start() that overlaps a failed bind retry) can
     // NEVER re-register the same route handler onto the same
     // httplib::Server a second time.
-    RegisterRoutes(m_impl->server, m_captureBridge);
+    RegisterRoutes(m_impl->server, m_captureBridge, m_commandBridge);
 }
 
 NetworkServer::~NetworkServer()

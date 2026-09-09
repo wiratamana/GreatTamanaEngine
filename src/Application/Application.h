@@ -9,6 +9,7 @@
 #include "../Renderer/Renderer.h"
 #include "../Renderer/RenderGraph/RenderGraph.h"
 #include "../Window/Window.h"
+#include "EngineCommandBridge.h"
 #include "FrameCaptureBridge.h"
 
 namespace gte {
@@ -72,6 +73,16 @@ private:
     // destroyed last relative to it) so its address can be handed into
     // m_networkServer's own constructor below.
     FrameCaptureBridge m_captureBridge;
+
+    // network-impl-3 campaign (task_manager/network-impl-3/) - the SECOND
+    // sanctioned cross-thread bridge a Network route handler is allowed to
+    // touch, this one for ECS-MUTATING commands (instantiate_primitive/
+    // delete_entity - see AGENTS.md, "Networking", and
+    // EngineCommandBridge.h's own header comment). Declared right after
+    // m_captureBridge, for the exact same reason: BEFORE m_networkServer
+    // (constructed first, destroyed last relative to it) so its address can
+    // be handed into m_networkServer's own constructor below.
+    EngineCommandBridge m_commandBridge;
 
     // Networking campaign (task_manager/network-impl-1/) - an embedded,
     // loopback-only HTTP server (see AGENTS.md, "Networking"). Declared
