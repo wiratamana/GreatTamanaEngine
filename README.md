@@ -1650,6 +1650,32 @@ pieces:
   `task_manager/network-impl-2/PHASE0_MASTER_STRATEGY.md` for the full
   six-phase campaign writeup.
 
+- **The engine's embedded HTTP server now has its first POST endpoints that
+  MUTATE the ECS world, not just read pixels back.** (`network-impl-3`
+  campaign, `task_manager/network-impl-3/PHASE0_MASTER_STRATEGY.md`.)
+  `POST http://127.0.0.1:8080/instantiate_primitive` spawns one of the
+  engine's 5 built-in primitive shapes (`cube`/`sphere`/`capsule`/`cone`/
+  `plane`, case-insensitive) as a new, uniquely-named entity - Unity's own
+  `GameObject.CreatePrimitive()` plus `transform.position =`/
+  `transform.SetParent()`, reachable over HTTP - given a JSON body of
+  `shape`/`name`/`world_position`/an optional `parent` (looked up by name; an
+  unresolvable parent is a non-fatal warning, never a failure - the entity is
+  still created, just left unparented). A repeated `name` auto-de-duplicates
+  Unity-style (`"Cube"`, `"Cube (1)"`, ...). `POST
+  http://127.0.0.1:8080/delete_entity` destroys a live entity (and every
+  descendant of it) looked up by name. Both are built on a brand-new
+  cross-thread bridge, `EngineCommandBridge`
+  (`src/Application/EngineCommandBridge.h/.cpp` - contrast with
+  `network-impl-2`'s read-only `FrameCaptureBridge`: this one carries a real
+  request payload and a real success/failure mutation outcome, drained by
+  `Application::Run()` once per frame, EARLY - right after SDL input polling,
+  before `Game::Update()` - so a network-spawned/deleted entity is fully
+  consistent for the rest of that same frame), and on the engine's first
+  vendored JSON library (`nlohmann/json`, `cmake/FetchJson.cmake`) for real
+  request-body parsing/response-building instead of hand-formatted strings.
+  See `task_manager/network-impl-3/PHASE0_MASTER_STRATEGY.md` for the full
+  six-phase campaign writeup.
+
 - **The Editor's "Scene" panel now has a Unity-style procedural infinite
   ground grid** (`editor-enchancements-1` campaign,
   `task_manager/editor-enchancements-1/PHASE0_MASTER_STRATEGY.md`) - a

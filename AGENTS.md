@@ -1044,6 +1044,67 @@ module or adding a new endpoint:
   whether the switch is ON or OFF - turning it OFF only skips
   `Application`'s own `m_networkServer.Start(...)` call, so a build with it
   OFF never opens a socket at all, at zero runtime cost.
+- **POST support now exists (`network-impl-3` campaign - see
+  `task_manager/network-impl-3/PHASE0_MASTER_STRATEGY.md`), and the existing
+  "pure function of its own request data" rule extends to it unchanged.** A
+  POST route handler parses its own request BODY (via `NetworkRoutes.h`'s
+  `ParseInstantiatePrimitiveRequest()`/`ParseDeleteEntityRequest()`) but still
+  never touches `Registry`/`Renderer`/`Game` directly - it only ever calls
+  `EngineCommandBridge::SubmitAndWait()`, this campaign's own sanctioned
+  bridge, exactly mirroring `FrameCaptureBridge`'s existing "the ONE
+  sanctioned exception" precedent bullet above, just for a SECOND, independent
+  bridge.
+- **`EngineCommandBridge` (`src/Application/EngineCommandBridge.h/.cpp`) is
+  the cross-thread bridge for ECS-MUTATING network requests** - contrast
+  directly with `FrameCaptureBridge`'s read-only/produce-bytes shape: a
+  SINGLE GLOBAL slot (not one per kind - a locked, deliberate design choice,
+  see `network-impl-3`'s own `PHASE0_MASTER_STRATEGY.md`), carrying a real
+  caller-supplied request payload (`EngineCommandRequest`, tagged by
+  `EngineCommandKind`) and a real success/failure outcome
+  (`EngineCommandResult`). `Application::Run()` drains at most ONE pending
+  command per frame, via `TryPeekPendingCommandRequest()`/`FulfillCommand()`,
+  EARLY - right after SDL input-event polling, BEFORE `Game::Update()` runs -
+  a deliberate ordering choice (unlike `FrameCaptureBridge`'s own checks,
+  which run later, interleaved with rendering) so a network-spawned/deleted
+  entity is fully consistent for the rest of that exact frame (simulated,
+  animated, and rendered as if it had always been there).
+- **`POST /instantiate_primitive`** spawns one of the engine's 5 built-in
+  primitive shapes (`cube`/`sphere`/`capsule`/`cone`/`plane`, case-insensitive)
+  as a new `Transform`+`MeshRenderer`+`Name` entity - `Game::InstantiatePrimitive()`
+  (`src/Game/Game.h/.cpp`) - given a JSON body of `shape`/`name`/
+  `world_position`/an optional `parent` (looked up BY NAME). The entity's
+  display name is auto-de-duplicated Unity-style (`"Cube"`, `"Cube (1)"`,
+  `"Cube (2)"`, ... - `ECS/EntityQuery.h`'s `MakeUniqueEntityName()`) and
+  returned as `resolvedName`; an unresolvable `parent` name is a non-fatal
+  warning (`parent_requested_but_not_found: true`), never a failure - the
+  entity is still created, just left unparented. Responds `200` on success
+  (even with that warning) or `400` for an unrecognized shape name/malformed
+  JSON. **`POST /delete_entity`** destroys a live entity (and every
+  descendant of it, via the existing `ECS/TransformHierarchy.h`'s
+  `DestroyEntityAndDescendants()`) looked up BY NAME - `Game::DeleteEntityByName()` -
+  responding `200` on success, `404` if no live entity currently has that
+  name, or `400` for malformed JSON. Both routes respond `503` if a different
+  engine command is already pending (the bridge's single global slot) or
+  `504` if the main thread doesn't drain the request within the bridge's
+  timeout. See `task_manager/network-impl-3/PHASE0_MASTER_STRATEGY.md` for
+  the full six-phase campaign writeup.
+- **A future THIRD engine command** (e.g. `set_transform`/`play_animation`/
+  `list_entities`) should extend `EngineCommandKind` plus
+  `EngineCommandRequest`/`EngineCommandResult`'s tagged-struct shape
+  (`src/Application/EngineCommandBridge.h`) rather than inventing a new
+  bridge - this generalization is exactly what this campaign was designed to
+  enable.
+- **JSON parsing now exists via a vendored `nlohmann/json`** (single-header
+  `json.hpp`, fetched via `cmake/FetchJson.cmake` mirroring
+  `cmake/FetchHttplib.cmake`'s own pattern) - a deliberate, narrow exception to
+  the "no JSON library, hand-rolled formats only" precedent
+  `Scene/SceneTextFormat.h`/`NetworkRoutes.h`'s own pre-existing
+  `BuildCaptureJsonBody()` established, made specifically because this
+  campaign needs to PARSE untrusted/possibly-malformed input (an incoming
+  POST body), not just emit a few already-known-safe fields. A future
+  contributor should not read this as blanket permission to reach for
+  `nlohmann::json` anywhere else in the engine without the same
+  "genuinely parsing untrusted input" justification.
 
 ## Render Target Format Matching
 

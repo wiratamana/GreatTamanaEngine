@@ -1707,6 +1707,7 @@ set(GTE_TEST_SOURCES
     ECS/TransformHierarchyTests.cpp
     ECS/EntityQueryTests.cpp
     Game/RenderSystemTests.cpp
+    Game/GameEntityCommandsTests.cpp
     Game/EntityInstantiatorTests.cpp
     Game/Instantiation/MeshAssetGpuCatalogJointOverrideRefreshTests.cpp
     Game/MeshVertexPackingTests.cpp
