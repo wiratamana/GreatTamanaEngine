@@ -922,13 +922,53 @@ int Application::Run()
                             CapturedPngImage{ std::move(png), raw.width, raw.height, framesSinceUpdate });
                     }
                 }
+            } else if (const std::optional<rg::DebugVolumeTextureSnapshot> volumeSnapshot =
+                           m_renderGraph.DebugVolumeTextureSnapshotFor(requestedName)) {
+                // network-impl-6 campaign, Phase 4
+                // (task_manager/network-impl-6/PHASE4_NAMED_TEXTURE_ENDPOINT_VOLUME_BRANCH_WIRING.md)
+                // - a name that isn't a registered 2D texture but IS a
+                // registered volume texture now renders a fresh raymarch
+                // thumbnail on demand instead of copying already-rendered
+                // pixels (a volume texture has no "existing rendered 2D
+                // contents" to copy - see PHASE0_MASTER_STRATEGY.md's Step 2).
+                if (requestedChannel == DebugTextureChannel::Depth) {
+                    // A volume texture has no depth-companion concept at all
+                    // (see VolumeTarget.h) - the same positively-known,
+                    // permanent-failure fast-fail (409) the 2D branch above
+                    // uses for wantsDepth && !snapshot->hasDepth (see
+                    // PHASE0_MASTER_STRATEGY.md's Locked Design Decision 6).
+                    m_captureBridge.FailPendingRequest(FrameCaptureKind::NamedTexture, FrameCaptureFailureReason::TargetNotAvailable);
+                } else {
+                    // Computed BEFORE WaitForGpuIdle()/the render below, from
+                    // the snapshot as it was at the moment this request was
+                    // actually serviced - exactly mirroring the 2D branch's
+                    // own identical reasoning above (Phase 2 deliberately did
+                    // not add a second, volume-specific frame counter).
+                    const std::uint64_t framesSinceUpdate =
+                        m_renderGraph.CurrentDebugTextureFrameCounter() - volumeSnapshot->lastUpdatedFrameCounter;
+
+                    m_renderer.WaitForGpuIdle();
+
+                    const VolumeTexturePreviewRenderer::CapturedRawPixels raw =
+                        m_volumeTexturePreviewRenderer.RenderPreview(m_renderer, volumeSnapshot->target, volumeSnapshot->state);
+
+                    // raw.pixels is already tightly-packed RGBA8 (see Phase 3's
+                    // own RenderPreview() doc comment) - no BGRA swizzle, no
+                    // HDR conversion, no depth-to-grayscale conversion needed
+                    // at all, unlike the 2D branch's several format-dependent
+                    // branches above.
+                    std::vector<std::uint8_t> png = Encoding::EncodeRgba8ToPng(raw.pixels.data(), raw.width, raw.height);
+                    m_captureBridge.FulfillPendingRequest(FrameCaptureKind::NamedTexture,
+                        CapturedPngImage{ std::move(png), raw.width, raw.height, framesSinceUpdate });
+                }
             }
-            // else: this name has never been registered yet this session - leave
-            // the request pending; either it starts rendering within the bridge's
-            // existing fixed timeout (a later Run() iteration's own check above
-            // then succeeds), or the caller eventually gets HTTP 504 - exactly the
-            // same accepted "main thread hasn't produced this yet" bucket
-            // network-impl-2's own PHASE0_MASTER_STRATEGY.md already documents.
+            // else: this name has never been registered as EITHER kind yet this
+            // session - leave the request pending; either it starts rendering
+            // within the bridge's existing fixed timeout (a later Run()
+            // iteration's own check above then succeeds), or the caller
+            // eventually gets HTTP 504 - exactly the same accepted "main thread
+            // hasn't produced this yet" bucket network-impl-2's own
+            // PHASE0_MASTER_STRATEGY.md already documents.
         }
 
         // network-impl-4 campaign, Phase 5

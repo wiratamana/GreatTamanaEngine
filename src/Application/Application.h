@@ -9,6 +9,7 @@
 #include "../Renderer/Atmosphere/AtmosphereLutRenderer.h"
 #include "../Renderer/Renderer.h"
 #include "../Renderer/RenderGraph/RenderGraph.h"
+#include "../Renderer/VolumeTexturePreviewRenderer.h"
 #include "../Window/Window.h"
 #include "EngineCommandBridge.h"
 #include "FrameCaptureBridge.h"
@@ -75,6 +76,17 @@ private:
     // PERMANENT home as of Phase 7 (ATMOSPHERE_PHASE7_SKY_BACKGROUND_AND_COMPOSITE_PASSES_v1.md)
     // - see that phase's own completion report.
     AtmosphereLutRenderer m_atmosphereLutRenderer;
+
+    // network-impl-6 campaign, Phase 4
+    // (task_manager/network-impl-6/PHASE4_NAMED_TEXTURE_ENDPOINT_VOLUME_BRANCH_WIRING.md)
+    // - the GET /get_texture volume-texture raymarch preview renderer (see
+    // VolumeTexturePreviewRenderer.h). A genuinely lazy/on-demand class
+    // (EnsureInitialized() does nothing until the first real RenderPreview()
+    // call), so adding it unconditionally as a plain member here costs
+    // nothing at startup - exactly like m_atmosphereLutRenderer above costs
+    // nothing until its own first real pass runs. Declared right after it
+    // for the same "constructed once, reused every request" ownership shape.
+    VolumeTexturePreviewRenderer m_volumeTexturePreviewRenderer;
 
     // Atmosphere Scattering + Aerial Perspective campaign, Phase 8
     // (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md)
