@@ -1253,6 +1253,54 @@ registering a new named texture:
   /list_textures` returns a JSON array of every texture currently known to
   the registry, each entry carrying `name`/`regime`/`format`/`width`/
   `height`/`has_depth`/`frames_since_update`.
+- **`GET /get_texture` also resolves a name registered as a VOLUME texture**
+  (`network-impl-6` campaign,
+  `task_manager/network-impl-6/PHASE0_MASTER_STRATEGY.md`) - same query
+  parameters, same `?format=png|base64|json` negotiation, same
+  `Accept: application/json` honoring as the 2D case documented above.
+  `channel=depth` against a volume name is always `409` - a
+  `VolumeTarget`/`VolumeTexture` has no depth-companion concept at all (see
+  `VolumeTarget.h`'s own doc comment), so this is the SAME existing
+  depth-`409` failure mode applied to a case that is always true for every
+  volume, not a new one. Unlike an ordinary 2D capture (a pixel COPY of
+  whatever the render graph already rendered this frame), a volume capture
+  is rendered FRESH, on demand, at request time: a single, fixed-camera,
+  front-to-back alpha-composite raymarch (Unity's Texture3D "Volume" preview
+  mode equivalent) into a persistent 256x256 RGBA8 thumbnail - no camera/
+  yaw/pitch/distance query parameters, and no other preview mode
+  (Slice/Maximum-Intensity-Projection), by deliberate design; this is a
+  debugging/LLM-agent capability, not an Editor inspector feature. The
+  mechanism is fully generic over ANY current or future `VolumeTextureHandle`
+  a render-graph pass declares and keeps alive via
+  `RenderGraphBuilder::KeepVolumeTextureOutput()` - not hardcoded to the
+  Atmosphere feature's own two aerial-perspective volumes specifically,
+  mirroring `RenderGraphDebugTextureRegistry`'s own "zero opt-in required"
+  property exactly (see "Atmosphere Scattering" below for where the new
+  volume-texture registry itself, `RenderGraphDebugVolumeTextureRegistry`, is
+  documented).
+- **`GET /list_textures` entries now carry a
+  `"kind":"texture2d"|"texture3d"` field, plus a `"depth"` field** (a
+  volume's Z/texel-count extent - always `0` on a 2D entry) - every other
+  pre-existing 2D-entry field is unchanged. This is how an LLM/AI agent
+  caller discovers which `texture_name`s are volumes worth requesting,
+  without any prior knowledge of the engine's internal naming convention.
+- **`gte::VolumeTexturePreviewRenderer`/`VolumeTexturePreviewMath.h`**
+  (`src/Renderer/VolumeTexturePreviewRenderer.h/.cpp`,
+  `src/Renderer/VolumeTexturePreviewMath.h/.cpp`) is the self-contained,
+  on-demand, no-RenderGraph-dependency renderer behind the raymarch above -
+  the same established shape `ComputeBlurValidation`/
+  `AtmosphereTransmittanceLutValidation`/`GpuSkinningValidation` already use
+  (a small class built directly on `Renderer::ImmediateSubmit()`/
+  `Renderer::CaptureImagePixels()`, with its own owned `VkSampler`/
+  descriptor-set/compute pipeline, never routed through the render graph
+  itself). `VolumeTexturePreviewMath.h`'s `ComputeVolumeCameraSetup()`/
+  `IntersectRayBox()` is the permanent CPU ORACLE for the fixed camera/
+  ray-box math `VolumeTexturePreview.comp` mirrors in GLSL - the exact same
+  "if the GLSL and the CPU oracle ever disagree, the CPU oracle is right by
+  definition and the shader is what needs fixing" discipline `AtmosphereMath.h`
+  already establishes (see "Atmosphere Scattering" below). See
+  `task_manager/network-impl-6/PHASE0_MASTER_STRATEGY.md` for the full
+  six-phase campaign writeup.
 
 ## Render Target Format Matching
 
@@ -1478,16 +1526,28 @@ whenever touching this feature:
   exactly like `ComputeBlurValidation`'s own persistent output — do not build
   `CreateVolumeTexture()` speculatively; only a genuine future need (more
   than one distinct volume texture with varying sizes across frames)
-  justifies it. `RenderGraphDebugTextureRegistry` (`GET /get_texture`/
-  `GET /list_textures`, `network-impl-4` campaign) deliberately still has NO
-  3D concept at all — a volume texture is never directly capturable that
-  way; Phase 9's own small, permanent "debug slice" mirror
+  justifies it. `RenderGraphDebugVolumeTextureRegistry`
+  (`src/Renderer/RenderGraph/RenderGraphDebugVolumeTextureRegistry.h/.cpp`,
+  `network-impl-6` campaign) is the volume-texture sibling of
+  `RenderGraphDebugTextureRegistry` (`GET /get_texture`/`GET /list_textures`,
+  `network-impl-4` campaign) — auto-populated by
+  `RenderGraph::ExecuteCompiledGraph()` exactly like the 2D registry, with
+  zero opt-in required from whichever pass declared the volume texture (see
+  "Networking" above, "Named Texture Capture", for the endpoint's own full
+  contract). `GET /get_texture` now transparently resolves EITHER kind by
+  name — a volume capture is rendered FRESH, on demand, via a single,
+  fixed-camera raymarch (`VolumeTexturePreviewRenderer`), never a raw pixel
+  copy, since a 3D voxel grid has no direct 2D pixel representation to copy
+  the way an ordinary 2D render target does. Phase 9's own small, permanent
+  "debug slice" mirror
   (`AtmosphereLutRenderer::AddAerialPerspectiveVolumeDebugSlicePass()`,
   copying one Z-slice into a real, registered 2D texture,
-  `"AtmosphereAerialPerspectiveVolumeDebugSlice"`) is the correct, narrow way
-  to get debug visibility for a volume texture — do NOT retrofit
-  `RenderGraphDebugTextureRegistry` itself to understand 3D resources
-  generically; that remains a deliberate, out-of-scope non-goal.
+  `"AtmosphereAerialPerspectiveVolumeDebugSlice"`) still exists and remains a
+  perfectly valid, narrower way to get a literal-slice view of a volume
+  texture — the two approaches are complementary, not redundant; this is no
+  longer a "deliberate, out-of-scope non-goal" (see
+  `task_manager/network-impl-6/PHASE0_MASTER_STRATEGY.md` for the full
+  six-phase campaign that lifted this restriction).
 - **`AtmosphereParametersGpu`/`AtmosphereFrameUniforms`
   (`src/Renderer/Atmosphere/AtmosphereTypes.h`) are ALWAYS bound as read-only
   STORAGE buffers (`layout(std430, ...) readonly buffer`), NEVER a true

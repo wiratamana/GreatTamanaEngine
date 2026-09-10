@@ -1852,6 +1852,48 @@ pieces:
   feature). See `AGENTS.md`'s new "Atmosphere Scattering" section for every
   load-bearing rule future contributors must follow, and each phase's own
   `ATMOSPHERE_PHASEn_COMPLETION_REPORT.md` for the full nine-phase writeup.
+- **The embedded HTTP server's `GET /get_texture`/`GET /list_textures` now
+  understand live, GPU-resident 3D (volume) textures, not just 2D ones**
+  (`network-impl-6` campaign,
+  `task_manager/network-impl-6/PHASE0_MASTER_STRATEGY.md`) - the same class
+  of capability Unity's Editor gives you when it draws a raymarched
+  "smoke cloud"-style preview thumbnail for a `Texture3D` asset in the
+  Inspector, except here the client is an LLM/AI agent talking to
+  `GET /get_texture` over loopback HTTP, not a human looking at an Editor
+  panel. A new, pure, Tier-1-tested data model,
+  `gte::rg::RenderGraphDebugVolumeTextureRegistry`
+  (`src/Renderer/RenderGraph/RenderGraphDebugVolumeTextureRegistry.h/.cpp`),
+  mirrors the existing 2D `RenderGraphDebugTextureRegistry`
+  (`network-impl-4` campaign) and is auto-populated by
+  `gte::rg::RenderGraph::ExecuteCompiledGraph()` every frame, with zero
+  opt-in from whichever pass declared the volume texture (today: the
+  Atmosphere feature's own two aerial-perspective froxel volumes - see the
+  Atmosphere Scattering entry immediately above - this campaign's own first
+  real, verified consumer, but the mechanism works generically for any future
+  `VolumeTextureHandle`). A requested `texture_name` that resolves to a
+  volume now renders a fresh, on-demand, single-fixed-camera, front-to-back
+  alpha-composite raymarch (`gte::VolumeTexturePreviewRenderer`, driven by a
+  new compute shader, `Shaders/VolumeTexturePreview.comp`, and its own pure
+  CPU camera/ray-box math oracle, `VolumeTexturePreviewMath.h` - the same
+  "CPU oracle is right by definition" discipline the Atmosphere Scattering
+  campaign's own `AtmosphereMath.h` already established) into a persistent
+  256x256 RGBA8 thumbnail, then rejoins the exact same PNG-encode/
+  `?format=`/`Accept:` negotiation path every existing 2D capture already
+  uses - no new endpoint, no new query parameter, no new cross-thread bridge
+  type. `GET /list_textures` entries now also carry a
+  `"kind":"texture2d"|"texture3d"` field plus a `"depth"` field (a volume's
+  Z/texel-count extent), so an LLM/AI agent caller can discover which
+  `texture_name`s are volumes worth requesting with no prior knowledge of
+  the engine's internal naming convention. Verified end-to-end against a
+  live running engine (`GET /get_texture?texture_name=AtmosphereAerialPerspectiveVolume_GameView`
+  returning a real, visually plausible non-cubic-box PNG thumbnail;
+  `channel=depth` against a volume
+  name correctly returning `409`; every pre-existing 2D-texture capture
+  request behaving byte-for-byte unchanged) and a full clean build plus full
+  `ctest` regression pass. See `AGENTS.md`'s "Named Texture Capture"/
+  "Atmosphere Scattering" sections for every load-bearing rule this feature
+  depends on, and each phase's own `PHASEn_COMPLETION_REPORT.md` for the
+  full six-phase campaign writeup.
 
 ## Roadmap
 
