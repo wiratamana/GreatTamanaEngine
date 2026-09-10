@@ -1743,6 +1743,94 @@ pieces:
   campaign's final polish/verification session and its full five-phase
   writeup.
 
+- **The engine now has a physically-based, real-time Atmosphere Scattering +
+  Aerial Perspective system** (`atmosphere-scattering-1` campaign, nine
+  phases - `task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE0_MASTER_STRATEGY_v1.md`,
+  `ATMOSPHERE_CAMPAIGN_COMPLETION_REPORT.md`) - the same class of technique
+  as Sébastien Hillaire's *"A Scalable and Production Ready Sky and
+  Atmosphere Rendering Technique"*, hand-ported (never vendored) from a
+  cloned reference implementation, [hoffstadt/pl-sky](https://github.com/hoffstadt/pl-sky).
+  A physically-plausible sky renders behind all scene geometry in both the
+  Editor's "Game" and "Scene" views, and distant opaque geometry now
+  progressively washes out/tints toward the sky's own color with distance
+  (aerial perspective) - a real, visible change from the engine's previous
+  "no atmosphere at all" look. **The permanent CPU oracle**:
+  `src/Renderer/Atmosphere/AtmosphereMath.h/.cpp` (density profiles, optical
+  depth, transmittance, phase functions - fully Tier-1-tested,
+  `tests/Renderer/Atmosphere/AtmosphereMathTests.cpp`) is the from-scratch,
+  hand-verified ground truth every GLSL shader in this campaign is checked
+  against, never the other way around - see `AGENTS.md`'s new "Atmosphere
+  Scattering" section for the full rule. **Four chained compute passes**
+  build the technique's LUT (look-up texture) chain every frame: the
+  Transmittance LUT (`Shaders/AtmosphereTransmittanceLut.comp`, 256x256, the
+  only one of the four whose GPU output is now NUMERICALLY validated against
+  the CPU oracle - see below), the Multi-Scattering LUT
+  (`AtmosphereMultiScatteringLut.comp`, 64x64), the per-view Sky-View LUT
+  (`AtmosphereSkyViewLut.comp`, 200x100, one per Game/Scene View), and the
+  Aerial Perspective froxel volume (`AtmosphereAerialPerspectiveVolume.comp`,
+  128x128x32) - the last of which required teaching the engine's Render
+  Graph (`gte::rg::RenderGraph`) a genuine THIRD resource kind,
+  `VolumeTexture`/`VolumeTextureHandle` (`src/Renderer/VolumeTexture.h`,
+  `RenderGraphBuilder::ImportVolumeTexture()`/`KeepVolumeTextureOutput()`),
+  alongside its existing 2D-texture/buffer vocabulary. Two new full-screen
+  passes composite the result onto real content: a Sky Background pass
+  (`AtmosphereSkyBackgroundRenderer.h/.cpp`, `Shaders/AtmosphereSkyBackground.vert/.frag`)
+  draws the sky wherever nothing else was drawn (a depth-EQUAL-against-the-
+  clear-value trick, never depth-written), and an Aerial Perspective
+  Composite pass (`Shaders/AtmosphereAerialPerspectiveComposite.comp`) blends
+  the froxel volume's transmittance/in-scattering onto the already-rendered
+  scene color+depth - both wired into the real, permanent per-frame Game
+  View/Scene View pass sequence (`src/Application/AtmospherePassSequence.h/.cpp`),
+  never a parallel/throwaway code path. **Scene control**: a new
+  `DirectionalLight` ECS component (`src/ECS/Components/DirectionalLight.h`)
+  sits on a `Transform`-bearing "Sun" entity, selectable/rotatable in
+  "Hierarchy"/"Inspector" exactly like any other entity (Hierarchy gained a
+  "Create Directional Light" entry) - `src/Renderer/Atmosphere/
+  DirectionalLightResolver.h`'s `ResolveActiveDirectionalLight()` picks the
+  first active one (falling back to a fixed placeholder sun when none
+  exists, so a scene with no Sun entity still renders a plausible sky), the
+  same "first active wins" convention `Camera` already established. A new
+  Editor **"Atmosphere" panel** (`src/Editor/Panels/AtmospherePanel.h/.cpp`,
+  docked alongside "Memory"/"Profiler"/"Render Graph") exposes a short,
+  deliberately curated `AtmosphereSettings` struct (ground albedo tint,
+  aerial perspective strength, sky exposure - never every physical constant)
+  plus, as of this campaign's final phase, an aerial-perspective-volume
+  debug-slice slider and a live LUT-validation button (see below).
+  **Phase 9 (validation/tooling/docs) closed out the campaign**: a new
+  Editor-only tool, `src/Editor/AtmosphereTransmittanceLutValidation.h/.cpp`
+  (mirroring `GpuSkinningValidation`'s own proven shape - self-contained,
+  built on `Renderer::CaptureImagePixels()`, no RenderGraph dependency),
+  reads back the REAL, currently-computed `"AtmosphereTransmittanceLut"`
+  texture, decodes each texel's UV back into `(height, zenithAngle)` (a new
+  `AtmosphereMath::TransmittanceLutUvToHeightZenith()` C++ port of the
+  shader's own parameterization), and numerically compares every texel
+  against the CPU oracle - surfaced as a "Validate Transmittance LUT" button
+  in the "Atmosphere" panel. **The very first real run found every texel
+  agreeing with the CPU oracle well within the documented 0.01 tolerance
+  (UNORM8 quantization alone accounts for ~0.004 of that) - no shader bug was
+  found, so nothing needed fixing.** The aerial-perspective volume also
+  gained permanent debug visibility Phase 2 had deliberately deferred: a
+  tiny new compute pass, `AtmosphereLutRenderer::AddAerialPerspectiveVolumeDebugSlicePass()`
+  (`Shaders/AtmosphereAerialPerspectiveVolumeDebugSlice.comp`), mirrors one
+  Z-slice of the Game View's own froxel volume into a real, registered 2D
+  texture, `"AtmosphereAerialPerspectiveVolumeDebugSlice"` - automatically
+  `GET /get_texture`/`GET /list_textures`-capturable with zero further
+  networking changes, exactly like every other named texture this engine
+  already exposes (`network-impl-4` campaign). Verified with a full clean
+  build (`gte_core`/`GreatTamanaEngineTests`/`GreatTamanaEngine`, all three
+  targets) and a full `ctest` regression pass (1205 tests, 1 pre-existing
+  machine-gated smoke test skipped, zero regressions), plus a live runtime
+  smoke pass confirming all four LUTs, the new debug-slice texture, the
+  composited Game/Scene views, and `GET /list_textures` all report sane,
+  live-updating data. Explicitly deferred (see `TODO.md`'s new "Atmosphere
+  Scattering" section): scene serialization of `DirectionalLight`/
+  `AtmosphereSettings`, volumetric clouds/god-rays, a general lighting
+  system, day-night animation, and per-render-graph-pass GPU timing in
+  general (a pre-existing, campaign-external gap, not unique to this
+  feature). See `AGENTS.md`'s new "Atmosphere Scattering" section for every
+  load-bearing rule future contributors must follow, and each phase's own
+  `ATMOSPHERE_PHASEn_COMPLETION_REPORT.md` for the full nine-phase writeup.
+
 ## Roadmap
 
 See **[TODO.md](TODO.md)** for known limitations, deliberately deferred

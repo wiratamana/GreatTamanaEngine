@@ -128,4 +128,12 @@ float CornetteShanksMiePhaseFunction(float g, float cosTheta) noexcept
     return numerator / denominator;
 }
 
+void TransmittanceLutUvToHeightZenith(
+    const AtmosphereParametersGpu& params, float lutGridU, float lutGridV, float& outHeightKm, float& outUpDot) noexcept
+{
+    const float clampedU = std::clamp(lutGridU, 0.0f, 1.0f);
+    outHeightKm = clampedU * params.atmosphereThicknessKm; // mix(0, thickness, u)
+    outUpDot = std::max(lutGridV * 2.0f - 1.0f, -0.999f);
+}
+
 } // namespace gte

@@ -20,6 +20,7 @@ namespace gte {
 class Window;
 class Renderer;
 class Game;
+class AtmosphereLutRenderer;
 
 namespace rg {
 class RenderGraph;
@@ -248,9 +249,15 @@ public:
     // directly by reference, the same way "Inspector" reads/writes a
     // selected entity's Camera component - Application's own per-frame
     // atmosphere pass-building code (AtmospherePassSequence.h/.cpp) reads
-    // whatever this panel most recently wrote.
-    virtual void BuildUI(
-        Game& game, Renderer& renderer, const rg::RenderGraph& renderGraph, AtmosphereSettings& atmosphereSettings) = 0;
+    // whatever this panel most recently wrote. `atmosphereLutRenderer`
+    // (Phase 9 - ATMOSPHERE_PHASE9_VALIDATION_DEBUG_TOOLING_AND_DOCS_v1.md)
+    // is the SAME AtmosphereLutRenderer Application owns
+    // (Application::m_atmosphereLutRenderer) - the "Atmosphere" panel's new
+    // "Validate Transmittance LUT" button
+    // (src/Editor/AtmosphereTransmittanceLutValidation.h) reads back its
+    // real, currently-computed output texture through this reference.
+    virtual void BuildUI(Game& game, Renderer& renderer, const rg::RenderGraph& renderGraph,
+        AtmosphereSettings& atmosphereSettings, AtmosphereLutRenderer& atmosphereLutRenderer) = 0;
 
     // Records this frame's UI draw data into cmd. Called from inside
     // Renderer::Present()'s recordExtra hook - i.e. while the swapchain

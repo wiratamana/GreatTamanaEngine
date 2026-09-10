@@ -1,0 +1,55 @@
+#version 450
+
+// Atmosphere Scattering + Aerial Perspective campaign, Phase 9
+// (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE9_VALIDATION_DEBUG_TOOLING_AND_DOCS_v1.md,
+// Step 3.2) - the volume-texture debug-visibility gap Phase 2 deliberately
+// deferred (RenderGraphDebugTextureRegistry has no 3D concept - see
+// AGENTS.md's "Named Texture Capture"). Copies ONE Z slice of the aerial-
+// perspective froxel volume (Phase 6) into a REAL, registered 2D texture,
+// so it becomes automatically GET /get_texture/GET /list_textures-
+// capturable with zero further networking changes - see
+// src/Renderer/Atmosphere/AtmosphereLutRenderer.h's
+// AddAerialPerspectiveVolumeDebugSlicePass().
+//
+// BINDING CONVENTION: binding 0 is the source volume's own trilinear
+// sampler3D (read-only combined image sampler - the SAME VolumeTexture
+// AddAerialPerspectiveVolumePass() itself writes, sampled here rather than
+// storage-image-fetched, since we only need ONE bilinear-filtered slice,
+// not a raw texel), binding 1 is the output image2D (rgba16f, matching the
+// volume's own HDR format exactly - never clipped to [0, 1]).
+//
+// local_size_x/y = 16 - matches this campaign's other 2D-output compute
+// passes (e.g. Shaders/AtmosphereMultiScatteringLut.comp) - MUST match
+// src/Renderer/Atmosphere/AtmosphereLutRenderer.cpp's own
+// kAerialPerspectiveVolumeDebugSliceLocalSizeX/Y constants exactly.
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(binding = 0) uniform sampler3D sourceVolume;
+layout(binding = 1, rgba16f) uniform writeonly image2D destinationSlice;
+
+// MUST match AtmosphereLutRenderer.cpp's own
+// AerialPerspectiveVolumeDebugSlicePushConstants (2 uints = 8 bytes).
+layout(push_constant) uniform PushConstants {
+    uint sliceIndex;
+    uint sliceCount;
+} pc;
+
+void main()
+{
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 destSize = imageSize(destinationSlice);
+    if (texel.x >= destSize.x || texel.y >= destSize.y) {
+        // The dispatch's own ceiling-division group count can legitimately
+        // cover more threads than there are real texels - see
+        // ComputeDispatch.h's own header comment. Those extra invocations
+        // simply do nothing.
+        return;
+    }
+
+    vec2 uv = (vec2(texel) + vec2(0.5)) / vec2(destSize);
+    float sliceCountF = max(float(pc.sliceCount), 1.0);
+    float w = (float(pc.sliceIndex) + 0.5) / sliceCountF;
+
+    vec4 value = texture(sourceVolume, vec3(uv, w));
+    imageStore(destinationSlice, texel, value);
+}

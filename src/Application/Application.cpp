@@ -22,6 +22,7 @@
 #include <SDL3/SDL.h>
 
 #include <cassert>
+#include <cstdint>
 #include <cstdio>
 #include <stdexcept>
 
@@ -421,6 +422,26 @@ int Application::Run()
                             // for the real Phase 2 gap this fixes.
                             b.KeepVolumeTextureOutput(gameAtmosphere.aerialPerspectiveVolumeHandle);
 
+                            // Phase 9 (ATMOSPHERE_PHASE9_VALIDATION_DEBUG_TOOLING_AND_DOCS_v1.md,
+                            // Step 3.2) - the volume-texture debug-visibility
+                            // gap Phase 2 deliberately deferred: mirrors ONE
+                            // Z slice of the Game View's own aerial-
+                            // perspective volume into a real, registered 2D
+                            // texture, automatically GET /get_texture/
+                            // GET /list_textures-capturable with zero
+                            // further networking changes. Game View only
+                            // (per that method's own doc comment) - a
+                            // plain rg::TextureHandle output, so it goes
+                            // into the ordinary `outputs` root set, unlike
+                            // the VolumeTextureHandle above.
+                            const rg::TextureHandle aerialPerspectiveDebugSlice =
+                                m_atmosphereLutRenderer.AddAerialPerspectiveVolumeDebugSlicePass(b, m_renderer,
+                                    gameAtmosphere.aerialPerspectiveVolumeHandle,
+                                    "AtmosphereAerialPerspectiveVolume_GameView",
+                                    static_cast<std::uint32_t>(m_atmosphereSettings.aerialPerspectiveDebugSliceIndex),
+                                    "AtmosphereAerialPerspectiveVolumeDebugSlice");
+                            outputs.push_back(aerialPerspectiveDebugSlice);
+
                             // 3.2 - the Sky Background pass, issued INSIDE
                             // AddGameViewPass()'s own already-open
                             // vkCmdBeginRendering bracket, right after
@@ -696,7 +717,7 @@ int Application::Run()
         // GetMemoryResources()).
         {
             GTE_PROFILE_SCOPE("IEditorLayer::BuildUI");
-            m_editorLayer->BuildUI(m_game, m_renderer, m_renderGraph, m_atmosphereSettings);
+            m_editorLayer->BuildUI(m_game, m_renderer, m_renderGraph, m_atmosphereSettings, m_atmosphereLutRenderer);
         }
 
         // File > Exit (or any other future programmatic "close" UI action)

@@ -254,6 +254,52 @@ TEST(AtmosphereMathTest, CornetteShanksMiePhaseFunctionIsStronglyForwardScatteri
     EXPECT_GT(CornetteShanksMiePhaseFunction(g, 1.0f), CornetteShanksMiePhaseFunction(g, -1.0f));
 }
 
+// --- TransmittanceLutUvToHeightZenith() (Phase 9 - C++ port of
+// AtmosphereCommon.glsl's own identically-named GLSL function) -----------
+
+TEST(AtmosphereMathTest, TransmittanceLutUvToHeightZenithMapsUZeroAndOneToHeightExtremes)
+{
+    const AtmosphereParametersGpu params = MakeDefaultEarthAtmosphereParameters();
+    float heightKm = -1.0f;
+    float upDot = -1.0f;
+
+    TransmittanceLutUvToHeightZenith(params, 0.0f, 0.5f, heightKm, upDot);
+    EXPECT_NEAR(heightKm, 0.0f, 1e-6f);
+
+    TransmittanceLutUvToHeightZenith(params, 1.0f, 0.5f, heightKm, upDot);
+    EXPECT_NEAR(heightKm, params.atmosphereThicknessKm, 1e-4f);
+}
+
+TEST(AtmosphereMathTest, TransmittanceLutUvToHeightZenithMapsVHalfToZeroUpDot)
+{
+    const AtmosphereParametersGpu params = MakeDefaultEarthAtmosphereParameters();
+    float heightKm = 0.0f;
+    float upDot = -1.0f;
+    TransmittanceLutUvToHeightZenith(params, 0.5f, 0.5f, heightKm, upDot);
+    EXPECT_NEAR(upDot, 0.0f, 1e-6f);
+}
+
+TEST(AtmosphereMathTest, TransmittanceLutUvToHeightZenithClampsUpDotAwayFromExactlyMinusOne)
+{
+    const AtmosphereParametersGpu params = MakeDefaultEarthAtmosphereParameters();
+    float heightKm = 0.0f;
+    float upDot = 0.0f;
+    // v = 0 would naively decode to upDot = -1.0 exactly (a degenerate
+    // straight-down direction) - mirrors AtmosphereCommon.glsl's own
+    // `max(lutGridUv.y * 2.0 - 1.0, -0.999)` clamp exactly.
+    TransmittanceLutUvToHeightZenith(params, 0.5f, 0.0f, heightKm, upDot);
+    EXPECT_NEAR(upDot, -0.999f, 1e-6f);
+}
+
+TEST(AtmosphereMathTest, TransmittanceLutUvToHeightZenithMapsVOneToUpDotOne)
+{
+    const AtmosphereParametersGpu params = MakeDefaultEarthAtmosphereParameters();
+    float heightKm = 0.0f;
+    float upDot = 0.0f;
+    TransmittanceLutUvToHeightZenith(params, 0.5f, 1.0f, heightKm, upDot);
+    EXPECT_NEAR(upDot, 1.0f, 1e-6f);
+}
+
 // --- AtmosphereParameters.h -------------------------------------------------
 
 TEST(AtmosphereParametersTest, DefaultEarthParametersMatchTheCitedReferenceValues)

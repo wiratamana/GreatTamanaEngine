@@ -124,4 +124,24 @@ float RayleighPhaseFunction(float cosTheta) noexcept;
 // Transcribed from sky.inc's `pl_phase_cornette_shanks()`.
 float CornetteShanksMiePhaseFunction(float g, float cosTheta) noexcept;
 
+// Phase 9 (ATMOSPHERE_PHASE9_VALIDATION_DEBUG_TOOLING_AND_DOCS_v1.md, Step
+// 3.1) - the C++ port of AtmosphereCommon.glsl's own identically-named GLSL
+// function (Phase 3), added specifically so
+// src/Editor/AtmosphereTransmittanceLutValidation.cpp can decode a captured
+// Transmittance LUT texel's own (u, v) grid position back into the exact
+// same (heightKm, upDot) pair AtmosphereTransmittanceLut.comp itself used
+// to generate that texel, then feed it back into
+// ComputeTransmittanceToTopOfAtmosphere() above for a genuine numeric
+// parity check. This is a one-off, documented EXCEPTION to this file's
+// usual "CPU first, GLSL mirrors it" discipline - the GLSL version was
+// authored first, in Phase 3, since this UV parameterization did not exist
+// at all until that phase invented it (Phase 1 only required the density/
+// transmittance formulas above, not this) - so this C++ port is instead
+// checked BY HAND against the real GLSL source
+// (src/Shaders/AtmosphereCommon.glsl) for byte-for-byte formula
+// equivalence, confirmed identical: `heightKm = mix(0, thickness,
+// clamp(u, 0, 1))` and `upDot = max(v * 2 - 1, -0.999)`.
+void TransmittanceLutUvToHeightZenith(
+    const AtmosphereParametersGpu& params, float lutGridU, float lutGridV, float& outHeightKm, float& outUpDot) noexcept;
+
 } // namespace gte

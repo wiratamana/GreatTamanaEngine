@@ -569,6 +569,8 @@ if(GTE_ENABLE_EDITOR)
         src/Editor/ComputeBlurValidation.cpp
         src/Editor/GpuSkinningValidation.h
         src/Editor/GpuSkinningValidation.cpp
+        src/Editor/AtmosphereTransmittanceLutValidation.h
+        src/Editor/AtmosphereTransmittanceLutValidation.cpp
         src/Editor/TransformGizmo.h
         src/Editor/TransformGizmo.cpp
         src/Editor/DockLayout.h
@@ -859,6 +861,16 @@ gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereSkyBackground.frag
     EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl)
 gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereAerialPerspectiveComposite.comp
     EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl)
+
+# Atmosphere Scattering + Aerial Perspective campaign, Phase 9
+# (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE9_VALIDATION_DEBUG_TOOLING_AND_DOCS_v1.md,
+# Step 3.2) - the volume-texture debug-visibility gap Phase 2 deliberately
+# deferred. Same unconditional (NOT GTE_ENABLE_EDITOR-gated) treatment as
+# every other atmosphere shader above - this pass is wired into the SAME
+# always-running Game View pass sequence as the rest of this campaign's
+# shaders. Does NOT #include AtmosphereCommon.glsl, so no EXTRA_DEPENDS.
+gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereAerialPerspectiveVolumeDebugSlice.comp)
+
 
 
 # Ensures SDL3.dll is copied next to the built .exe after every build.

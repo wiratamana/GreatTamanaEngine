@@ -223,6 +223,62 @@ that haven't been started yet at all.
   the first bullet above still needs to produce, not by premature
   guessing.
 
+## Atmosphere Scattering
+
+Everything below was explicitly named as deferred by
+`task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE0_MASTER_STRATEGY_v1.md`'s
+own "What We Will NOT Do" (Step 4) and re-confirmed still open by Phase 9's
+own completion report/`ATMOSPHERE_CAMPAIGN_COMPLETION_REPORT.md` - see
+`README.md`'s own "Status" entry and `AGENTS.md`'s new "Atmosphere
+Scattering" section for the full feature writeup.
+
+- **Scene (de)serialization for `DirectionalLight`/`AtmosphereSettings`.**
+  `Scene/SceneTextFormat.h`'s existing format only round-trips
+  `PrimitiveSource`/`MeshAssetSource`-tagged root entities - a `DirectionalLight`
+  "Sun" entity created via the Editor's "Hierarchy" (or a tuned
+  `AtmosphereSettings` value from the "Atmosphere" panel) does not survive a
+  Save/Load cycle today, exactly like a `Camera` entity doesn't either. Would
+  need a new `SceneObjectKind` (see `AGENTS.md`'s "Scene Serialization"
+  section for the exact pattern a new kind must follow) plus a way to
+  serialize `AtmosphereSettings` itself (currently owned by `Application`,
+  not any ECS entity/component at all).
+- **Volumetric clouds, god-rays/light-shafts.** This campaign's own Locked
+  Design Decisions/Step 4 explicitly scoped these out from the start - no
+  code for either exists anywhere in the engine.
+- **A general-purpose lighting system.** `DirectionalLight`
+  (`src/ECS/Components/DirectionalLight.h`) exists ONLY to drive the
+  atmosphere's own sun direction/illuminance - it is deliberately NOT wired
+  into `Mesh.frag`/`TexturedMesh.frag`/`MeshPreview.frag`'s existing
+  fixed-direction lambert term, and no point/spot light of any kind exists.
+  A future "real lighting" system could reuse this same component as its own
+  directional-light primitive, but does not exist yet.
+- **Day-night animation / a time-of-day cycle.** The sun's direction is
+  whatever the `DirectionalLight` entity's `Transform` currently is - nothing
+  auto-rotates it over time. A future gameplay system could drive this by
+  rotating that `Transform` every frame, entirely outside this campaign's own
+  scope.
+- **Per-render-graph-pass GPU timing, in general.** Not unique to atmosphere
+  scattering - a pre-existing, campaign-external gap already called out by
+  `RENDERGRAPH_CAMPAIGN_COMPLETION_REPORT.md`'s own "Still open" list.
+  Every atmosphere pass already shows up correctly (name/reads/writes/
+  ordering/culling) in the Editor's "Render Graph" panel; only its GPU-time
+  column reads "N/A", the same as every other render-graph pass today.
+  Closing this needs `GpuTimingService`'s fixed, hand-maintained 3-slot
+  `VkQueryPool` generalized to an arbitrary-name-keyed slot assignment (see
+  `RenderGraphNameSlotTable.h`'s own already-exercised pattern) - a
+  meaningfully large, engine-wide follow-up, not something to bolt onto this
+  campaign's own passes individually (e.g. do NOT add new `GpuTimingSlot`
+  enumerators one atmosphere pass at a time).
+- **The release-build/both-Editor-panels-hidden direct-to-swapchain path does
+  not get the atmosphere effect.** `AddPresentPass()`'s own
+  `directGameRenderAspect` branch (used only when both "Game" and "Scene" are
+  simultaneously hidden, or in a genuinely headless `-DGTE_ENABLE_EDITOR=OFF`
+  release build) does not go through `AddGameViewPass()`/
+  `AddAtmosphereCompositePass()` at all - flagged as an open question across
+  Phases 7-9's own completion reports, never resolved. A future session should
+  explicitly decide whether this is acceptable long-term scope or whether that
+  direct-render branch needs its own Sky Background + Composite treatment.
+
 ## Engine Roadmap (not yet started)
 
 Broader, longer-horizon ideas for moving the engine past "tech demo with a

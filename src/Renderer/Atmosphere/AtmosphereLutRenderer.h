@@ -94,6 +94,7 @@
 
 #include <volk.h>
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -310,6 +311,50 @@ public:
     // AddAerialPerspectiveCompositePass() at all this session.
     void FinalizeAerialPerspectiveCompositeForSampling(VkCommandBuffer cmd, const char* outputTextureName);
 
+    // Phase 9 (ATMOSPHERE_PHASE9_VALIDATION_DEBUG_TOOLING_AND_DOCS_v1.md,
+    // Step 3.1) - exposes the persistent Texture2D behind
+    // AddTransmittanceLutPass()'s own output, so
+    // src/Editor/AtmosphereTransmittanceLutValidation.cpp can read back its
+    // REAL, currently-computed pixels (via Renderer::CaptureImagePixels())
+    // without this class needing any dependency on that validation tool.
+    // Returns nullptr if AddTransmittanceLutPass() has never run yet this
+    // session.
+    Texture2D* TransmittanceLutOutput() noexcept
+    {
+        return m_transmittanceLutOutput.has_value() ? &(*m_transmittanceLutOutput) : nullptr;
+    }
+
+    // Phase 9, Step 3.2 - the volume-texture debug-visibility gap Phase 2
+    // deliberately deferred (RenderGraphDebugTextureRegistry has no 3D
+    // concept - see AGENTS.md's "Named Texture Capture"). Declares a tiny
+    // compute pass copying ONE Z slice of `aerialPerspectiveVolumeHandle`
+    // (this SAME frame's own AddAerialPerspectiveVolumePass() result,
+    // looked up again by `aerialPerspectiveVolumeName` for its own
+    // trilinear sampler/dimensions - an imported VolumeTextureHandle's
+    // resolved sampler is always VK_NULL_HANDLE, mirrors
+    // AddAerialPerspectiveCompositePass()'s own identical
+    // `aerialVolumeSampler` lookup) into a REAL, registered 2D
+    // RenderTexture (rgba16f, matching the volume's own HDR format exactly
+    // - never clipped to [0, 1]) under the literal name
+    // `outputTextureName` - so it becomes automatically
+    // GET /get_texture/GET /list_textures-capturable with zero further
+    // networking changes (GET /get_texture's own existing isHdrColor check
+    // already handles VK_FORMAT_R16G16B16A16_SFLOAT, unchanged by this
+    // phase). `debugSliceIndex` is clamped to [0, volume depth - 1]
+    // internally - never out of bounds even if the Editor's own slider
+    // briefly disagrees with the volume's real depth.
+    //
+    // MUST be called AFTER AddAerialPerspectiveVolumePass() for
+    // `aerialPerspectiveVolumeName` in the SAME frame. Unlike
+    // AddAerialPerspectiveVolumePass() itself, this pass's own OWN output
+    // is a plain 2D TextureHandle, so the CALLER just adds it to this
+    // call's own ordinary `outputs` root set (finalOutputs) - never
+    // `KeepVolumeTextureOutput()`, which only applies to a VolumeTexture
+    // WRITE, not a Texture WRITE that merely READS a volume texture.
+    rg::TextureHandle AddAerialPerspectiveVolumeDebugSlicePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
+        rg::VolumeTextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,
+        std::uint32_t debugSliceIndex, const char* outputTextureName);
+
 private:
     // Per-VIEW state for the Sky-View LUT (Phase 5) - one instance per
     // distinct `outputTextureName` ever passed to AddSkyViewLutPass(),
@@ -346,6 +391,19 @@ private:
         std::optional<RenderTexture> output;
     };
 
+    // Phase 9 - Aerial Perspective Volume Debug Slice. One instance per
+    // distinct `outputTextureName` ever passed to
+    // AddAerialPerspectiveVolumeDebugSlicePass() (today just
+    // "AtmosphereAerialPerspectiveVolumeDebugSlice" - the Game View's own
+    // volume only, see that method's own doc comment) - mirrors
+    // AerialPerspectiveCompositeViewState's own shape exactly (no per-view
+    // uniforms buffer of its own; this pass's own per-call parameters are
+    // pushed as compute push constants instead).
+    struct AerialPerspectiveVolumeDebugSliceViewState {
+        ComputeDescriptorSet descriptorSet;
+        std::optional<RenderTexture> output;
+    };
+
     void EnsureTransmittanceLutInitialized(Renderer& renderer, const AtmosphereParametersGpu& params);
     void EnsureMultiScatteringLutInitialized(Renderer& renderer);
     void EnsureSkyViewLutInitialized(Renderer& renderer);
@@ -356,6 +414,9 @@ private:
     void EnsureAerialPerspectiveCompositeInitialized(Renderer& renderer);
     AerialPerspectiveCompositeViewState& EnsureAerialPerspectiveCompositeViewInitialized(
         Renderer& renderer, const char* outputTextureName, VkExtent2D extent);
+    void EnsureAerialPerspectiveVolumeDebugSliceInitialized(Renderer& renderer);
+    AerialPerspectiveVolumeDebugSliceViewState& EnsureAerialPerspectiveVolumeDebugSliceViewInitialized(
+        Renderer& renderer, const char* outputTextureName, int width, int height);
 
 
     VkDevice m_device = VK_NULL_HANDLE;
@@ -403,6 +464,19 @@ private:
     VkDescriptorSetLayout m_aerialPerspectiveCompositeDescriptorSetLayout = VK_NULL_HANDLE;
     std::optional<ComputePipeline> m_aerialPerspectiveCompositePipeline;
     std::unordered_map<std::string, AerialPerspectiveCompositeViewState> m_aerialPerspectiveCompositeViewStates;
+
+    // Phase 9 - Aerial Perspective Volume Debug Slice. Deliberately NO
+    // AtmosphereParametersGpu/frame-uniforms buffer at all, same reasoning
+    // as Aerial Perspective Composite above (this pass's own per-call
+    // parameters are pushed as compute push constants instead). Pipeline/
+    // descriptor-set-LAYOUT are shared across every view;
+    // m_aerialPerspectiveVolumeDebugSliceViewStates holds the genuinely
+    // per-view state (see AerialPerspectiveVolumeDebugSliceViewState's own
+    // doc comment above).
+    VkDescriptorSetLayout m_aerialPerspectiveVolumeDebugSliceDescriptorSetLayout = VK_NULL_HANDLE;
+    std::optional<ComputePipeline> m_aerialPerspectiveVolumeDebugSlicePipeline;
+    std::unordered_map<std::string, AerialPerspectiveVolumeDebugSliceViewState>
+        m_aerialPerspectiveVolumeDebugSliceViewStates;
 
     // Phase 7 - the Sky Background pass's own dedicated graphics-pipeline
     // owner (see AtmosphereSkyBackgroundRenderer.h) - a genuinely different

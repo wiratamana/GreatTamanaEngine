@@ -8,6 +8,7 @@
 #include "../RenderGraph/RenderGraph.h"
 #include "../Vulkan/DescriptorSetLayoutBuilder.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <utility>
@@ -95,6 +96,21 @@ struct AerialPerspectiveCompositePushConstants {
     float aerialPerspectiveStrengthAndPad[4]; // x = aerialPerspectiveStrength, yzw = reserved padding.
 };
 
+// Phase 9 (ATMOSPHERE_PHASE9_VALIDATION_DEBUG_TOOLING_AND_DOCS_v1.md, Step
+// 3.2) - MUST match
+// Shaders/AtmosphereAerialPerspectiveVolumeDebugSlice.comp's own
+// `layout(local_size_x = 16, local_size_y = 16) in;` exactly.
+constexpr std::uint32_t kAerialPerspectiveVolumeDebugSliceLocalSizeX = 16;
+constexpr std::uint32_t kAerialPerspectiveVolumeDebugSliceLocalSizeY = 16;
+
+// Push constants for the Aerial Perspective Volume Debug Slice compute
+// pass - MUST match Shaders/AtmosphereAerialPerspectiveVolumeDebugSlice.comp's
+// own `layout(push_constant)` block exactly (2 uints = 8 bytes).
+struct AerialPerspectiveVolumeDebugSlicePushConstants {
+    std::uint32_t sliceIndex = 0;
+    std::uint32_t sliceCount = 1;
+};
+
 } // namespace
 
 AtmosphereLutRenderer::~AtmosphereLutRenderer()
@@ -125,6 +141,9 @@ AtmosphereLutRenderer::~AtmosphereLutRenderer()
     }
     if (m_aerialPerspectiveCompositeDescriptorSetLayout != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(m_device, m_aerialPerspectiveCompositeDescriptorSetLayout, nullptr);
+    }
+    if (m_aerialPerspectiveVolumeDebugSliceDescriptorSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(m_device, m_aerialPerspectiveVolumeDebugSliceDescriptorSetLayout, nullptr);
     }
 }
 
@@ -802,6 +821,132 @@ void AtmosphereLutRenderer::FinalizeAerialPerspectiveCompositeForSampling(VkComm
     const rg::ResourceState next = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
     const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
     rg::EmitImageBarrier(cmd, it->second.output->Image(), range, previous, next);
+}
+
+void AtmosphereLutRenderer::EnsureAerialPerspectiveVolumeDebugSliceInitialized(Renderer& renderer)
+{
+    if (m_aerialPerspectiveVolumeDebugSlicePipeline.has_value()) {
+        return;
+    }
+
+    const Renderer::VulkanContextInfo context = renderer.GetVulkanContextInfo();
+    m_device = context.device;
+
+    // Binding convention (matches
+    // Shaders/AtmosphereAerialPerspectiveVolumeDebugSlice.comp exactly):
+    // binding 0 = the source volume's own trilinear sampler3D (read-only
+    // combined image sampler), binding 1 = the output image2D.
+    DescriptorSetLayoutBuilder layoutBuilder(m_device);
+    m_aerialPerspectiveVolumeDebugSliceDescriptorSetLayout =
+        layoutBuilder.AddCombinedImageSampler(/*binding=*/0).AddStorageImage(/*binding=*/1).Build();
+
+    VkPushConstantRange pushConstantRange{};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = sizeof(AerialPerspectiveVolumeDebugSlicePushConstants);
+
+    m_aerialPerspectiveVolumeDebugSlicePipeline.emplace(
+        renderer.CreateComputePipeline("shaders/AtmosphereAerialPerspectiveVolumeDebugSlice.comp.spv",
+            std::vector<VkDescriptorSetLayout>{ m_aerialPerspectiveVolumeDebugSliceDescriptorSetLayout },
+            pushConstantRange));
+}
+
+AtmosphereLutRenderer::AerialPerspectiveVolumeDebugSliceViewState&
+AtmosphereLutRenderer::EnsureAerialPerspectiveVolumeDebugSliceViewInitialized(
+    Renderer& renderer, const char* outputTextureName, int width, int height)
+{
+    const auto existing = m_aerialPerspectiveVolumeDebugSliceViewStates.find(outputTextureName);
+    if (existing != m_aerialPerspectiveVolumeDebugSliceViewStates.end()) {
+        return existing->second;
+    }
+
+    AerialPerspectiveVolumeDebugSliceViewState state;
+    state.descriptorSet = ComputeDescriptorSet(
+        renderer.AllocateComputeDescriptorSet(m_aerialPerspectiveVolumeDebugSliceDescriptorSetLayout));
+
+    // rgba16f - matches the aerial-perspective volume's own HDR format
+    // exactly, so a captured slice preserves the volume's real
+    // in-scattering/transmittance magnitudes (never clipped to [0, 1] like
+    // an 8-bit Texture2D would). GET /get_texture's own existing
+    // isHdrColor check (Application.cpp) already handles this format,
+    // unchanged by this phase.
+    state.output.emplace(renderer.CreateRenderTexture(width, height, VK_FORMAT_R16G16B16A16_SFLOAT, outputTextureName,
+        /*depthDebugName=*/nullptr, /*allowStorageImageAccess=*/true));
+
+    const auto insertedPair =
+        m_aerialPerspectiveVolumeDebugSliceViewStates.emplace(outputTextureName, std::move(state));
+    return insertedPair.first->second;
+}
+
+rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveVolumeDebugSlicePass(rg::RenderGraphBuilder& builder,
+    Renderer& renderer, rg::VolumeTextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,
+    std::uint32_t debugSliceIndex, const char* outputTextureName)
+{
+    EnsureAerialPerspectiveVolumeDebugSliceInitialized(renderer);
+
+    // The SAME AerialPerspectiveVolumeViewState AddAerialPerspectiveVolumePass()
+    // itself created for `aerialPerspectiveVolumeName` THIS session - looked
+    // up again purely for its own Width()/Height()/Depth()/View()/Sampler()
+    // (an imported VolumeTextureHandle's resolved sampler is always
+    // VK_NULL_HANDLE - mirrors AddAerialPerspectiveCompositePass()'s own
+    // identical `aerialVolumeSampler` lookup for the exact same reason).
+    const auto volumeIt = m_aerialPerspectiveVolumeViewStates.find(aerialPerspectiveVolumeName);
+    if (volumeIt == m_aerialPerspectiveVolumeViewStates.end() || !volumeIt->second.output.has_value()) {
+        // Programmer error (mirrors DrawSkyBackground()'s own degrade-
+        // gracefully contract) - AddAerialPerspectiveVolumePass() for this
+        // exact name MUST have already run earlier THIS SAME frame.
+        return rg::TextureHandle{};
+    }
+    const VolumeTexture& sourceVolume = *volumeIt->second.output;
+    const int volumeWidth = sourceVolume.Width();
+    const int volumeHeight = sourceVolume.Height();
+    const std::uint32_t sliceCount = static_cast<std::uint32_t>(sourceVolume.Depth());
+    const std::uint32_t clampedSliceIndex = sliceCount > 0 ? std::min(debugSliceIndex, sliceCount - 1) : 0;
+    const VkImageView sourceVolumeView = sourceVolume.View();
+    const VkSampler sourceVolumeSampler = sourceVolume.Sampler();
+
+    AerialPerspectiveVolumeDebugSliceViewState& viewState =
+        EnsureAerialPerspectiveVolumeDebugSliceViewInitialized(renderer, outputTextureName, volumeWidth, volumeHeight);
+
+    const rg::TextureHandle outputHandle =
+        builder.ImportTexture(outputTextureName, viewState.output->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
+
+    AerialPerspectiveVolumeDebugSlicePushConstants pushConstants{};
+    pushConstants.sliceIndex = clampedSliceIndex;
+    pushConstants.sliceCount = sliceCount;
+
+    builder.AddComputePass(
+        "AtmosphereAerialPerspectiveVolumeDebugSlicePass",
+        [aerialPerspectiveVolumeHandle, outputHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
+            // Real dependency declaration - order this pass strictly after
+            // AddAerialPerspectiveVolumePass()'s own write this same frame.
+            pass.ReadVolumeTexture(aerialPerspectiveVolumeHandle, rg::ResourceAccess::ShaderRead);
+            pass.WriteTexture(outputHandle, rg::ResourceAccess::ComputeShaderWrite);
+        },
+        [this, &renderer, &viewState, sourceVolumeView, sourceVolumeSampler, outputHandle, pushConstants, volumeWidth,
+            volumeHeight](rg::PassContext& ctx) {
+            const rg::PassContext::ResolvedTexture dest = ctx.resolveTexture(outputHandle);
+
+            viewState.descriptorSet.Rewrite(m_device,
+                std::vector<ComputeDescriptorWrite>{
+                    ComputeDescriptorWrite::CombinedImageSampler(0, sourceVolumeView, sourceVolumeSampler),
+                    ComputeDescriptorWrite::StorageImage(1, dest.view),
+                });
+
+            AerialPerspectiveVolumeDebugSlicePushConstants localPushConstants = pushConstants;
+
+            const Extent3D groupCounts = ComputeGroupCount3D(
+                Extent3D{ static_cast<std::uint32_t>(volumeWidth), static_cast<std::uint32_t>(volumeHeight), 1 },
+                Extent3D{ kAerialPerspectiveVolumeDebugSliceLocalSizeX, kAerialPerspectiveVolumeDebugSliceLocalSizeY, 1 });
+
+            renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
+            renderer.Dispatch(*m_aerialPerspectiveVolumeDebugSlicePipeline, viewState.descriptorSet.Native(),
+                &localPushConstants, sizeof(localPushConstants), groupCounts.width, groupCounts.height,
+                groupCounts.depth);
+            renderer.EndGraphPassRecording();
+        });
+
+    return outputHandle;
 }
 
 

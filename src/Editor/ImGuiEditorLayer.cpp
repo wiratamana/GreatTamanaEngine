@@ -1,5 +1,6 @@
 #include "EditorLayer.h"
 
+#include "AtmosphereTransmittanceLutValidation.h"
 #include "ComputeBlurValidation.h"
 #include "DockLayout.h"
 #include "EditorCamera.h"
@@ -108,6 +109,7 @@
 #include <SDL3/SDL.h>
 
 #include <cstdint>
+#include <optional>
 #include <stdexcept>
 
 namespace gte {
@@ -456,7 +458,7 @@ public:
     }
 
     void BuildUI(Game& game, Renderer& renderer, const rg::RenderGraph& renderGraph,
-        AtmosphereSettings& atmosphereSettings) override
+        AtmosphereSettings& atmosphereSettings, AtmosphereLutRenderer& atmosphereLutRenderer) override
     {
         ImGui::SetCurrentContext(m_context);
 
@@ -544,7 +546,8 @@ public:
         // class exception - this panel has no cross-frame state of its
         // own), docked alongside "Memory"/"Profiler"/"Render Graph"/
         // "Project" (see DockLayout.cpp).
-        BuildAtmospherePanel(m_ctx, atmosphereSettings);
+        BuildAtmospherePanel(
+            m_ctx, atmosphereSettings, renderer, atmosphereLutRenderer, m_lastAtmosphereTransmittanceLutValidation);
         // Job System Phase 7 (Editor "Jobs" Panel) - reads Job System Phase
         // 5's Profiling::BuildWorkerTimelinePoints() reshape internally; also
         // hosts the GPU Vertex Skinning campaign's own Phase 7 CPU/GPU
@@ -789,6 +792,16 @@ private:
     // BuildUI() above - see EditorContext.h for what each field means and
     // exactly who reads/writes it.
     EditorContext m_ctx;
+
+    // Atmosphere Scattering + Aerial Perspective campaign, Phase 9
+    // (ATMOSPHERE_PHASE9_VALIDATION_DEBUG_TOOLING_AND_DOCS_v1.md, Step 3.1)
+    // - the "Atmosphere" panel's own "last result" readout for its
+    // "Validate Transmittance LUT" button (Panels/AtmospherePanel.cpp) -
+    // owned HERE (not inside that stateless free-function panel itself),
+    // mirroring how this class already owns every other panel's genuinely
+    // cross-frame state (m_gameView/m_sceneView/m_blurValidation/...).
+    // std::nullopt until the button is clicked at least once this session.
+    std::optional<AtmosphereTransmittanceLutValidationResult> m_lastAtmosphereTransmittanceLutValidation;
 };
 
 } // namespace
