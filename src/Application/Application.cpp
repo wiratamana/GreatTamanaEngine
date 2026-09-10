@@ -6,6 +6,7 @@
 #include "RenderPasses.h"
 
 #include "../Encoding/DepthVisualization.h"
+#include "../Encoding/HdrColorVisualization.h"
 #include "../Encoding/PixelConversion.h"
 #include "../Encoding/PngEncoder.h"
 #include "../Memory/SdlMemoryTracker.h"
@@ -363,26 +364,36 @@ int Application::Run()
 
                         // Atmosphere Scattering + Aerial Perspective campaign,
                         // Phase 3 (task_manager/atmosphere-scattering-1/
-                        // ATMOSPHERE_PHASE3_TRANSMITTANCE_LUT_v1.md) -
+                        // ATMOSPHERE_PHASE3_TRANSMITTANCE_LUT_v1.md) +
+                        // Phase 4 (ATMOSPHERE_PHASE4_MULTISCATTERING_LUT_v1.md) -
                         // TEMPORARY validation call site: declares the
-                        // Transmittance LUT compute pass into this SAME
-                        // offscreen Execute() call so it actually runs (and
-                        // is visible via GET /get_texture?texture_name=
-                        // AtmosphereTransmittanceLut) every frame, completely
-                        // independent of whether Game/Scene are visible this
-                        // frame. Fixed default Earth parameters only - no
-                        // Editor parameter editing yet (Phase 8), no
-                        // dirty-flag optimization yet (Phase 3's own "What
-                        // We Will NOT Do").
+                        // Transmittance LUT AND Multi-Scattering LUT compute
+                        // passes into this SAME offscreen Execute() call so
+                        // they actually run (and are visible via GET
+                        // /get_texture?texture_name=AtmosphereTransmittanceLut
+                        // / AtmosphereMultiScatteringLut) every frame,
+                        // completely independent of whether Game/Scene are
+                        // visible this frame. Fixed default Earth parameters
+                        // only - no Editor parameter editing yet (Phase 8),
+                        // no dirty-flag optimization yet (Phase 3/4's own
+                        // "What We Will NOT Do"). Multi-Scattering MUST be
+                        // declared strictly AFTER Transmittance (it both
+                        // needs the returned TextureHandle as its own
+                        // argument, and reads it as a real render-graph
+                        // dependency - see AddMultiScatteringLutPass()'s own
+                        // ReadTexture() declaration).
                         // TODO(ATMOSPHERE_PHASE7): relocate into the real
                         // atmosphere pass sequence once the sky
                         // background/aerial-perspective composite passes
                         // exist - do NOT delete this call site in the
-                        // meantime (Phases 4/5/6 build directly on this pass
+                        // meantime (Phases 5/6 build directly on these passes
                         // running every frame).
                         const AtmosphereParametersGpu atmosphereParameters = MakeDefaultEarthAtmosphereParameters();
-                        outputs.push_back(
-                            m_atmosphereLutRenderer.AddTransmittanceLutPass(b, m_renderer, atmosphereParameters));
+                        const rg::TextureHandle transmittanceLutHandle =
+                            m_atmosphereLutRenderer.AddTransmittanceLutPass(b, m_renderer, atmosphereParameters);
+                        outputs.push_back(transmittanceLutHandle);
+                        outputs.push_back(m_atmosphereLutRenderer.AddMultiScatteringLutPass(
+                            b, m_renderer, atmosphereParameters, transmittanceLutHandle));
 
                         if (gameTarget != nullptr) {
                             const VkExtent2D extent = gameTarget->Extent();
@@ -715,8 +726,31 @@ int Application::Run()
                     const VkFormat format = wantsDepth ? snapshot->target.depthFormat : snapshot->target.format;
                     const rg::ResourceState state = wantsDepth ? snapshot->depthState : snapshot->colorState;
 
+                    // Atmosphere Scattering + Aerial Perspective campaign,
+                    // Phase 4 (ATMOSPHERE_PHASE4_MULTISCATTERING_LUT_v1.md) -
+                    // the FIRST capturable color texture that is genuinely
+                    // NOT 4 bytes/pixel (VK_FORMAT_R16G16B16A16_SFLOAT is 8 -
+                    // see AtmosphereLutRenderer's own Multi-Scattering LUT
+                    // output). Every other capturable texture (color OR
+                    // depth) is still exactly 4 bytes/pixel, unchanged - see
+                    // Renderer::CaptureImagePixels()'s own doc comment.
+                    const bool isHdrColor = !wantsDepth && format == VK_FORMAT_R16G16B16A16_SFLOAT;
+                    const int bytesPerPixel = isHdrColor ? 8 : 4;
+
                     Renderer::CapturedRawPixels raw =
-                        m_renderer.CaptureImagePixels(image, aspect, format, snapshot->target.extent, state);
+                        m_renderer.CaptureImagePixels(image, aspect, format, snapshot->target.extent, state, bytesPerPixel);
+
+                    // A separate, always-4-bytes/pixel buffer PNG encoding
+                    // actually reads from - identical to raw.pixels for
+                    // every "traditional" 4-bytes/pixel capture (no copy
+                    // needed - encodePixels just points straight at it), but
+                    // a genuinely different, freshly-allocated buffer for the
+                    // HDR case above (raw.pixels itself stays 8-bytes/pixel
+                    // native data - ConvertHdrRgba16fToRgba8() below is an
+                    // OUT conversion, not in-place, mirroring
+                    // ConvertDepthToGrayscaleRgba8()'s own out-buffer shape).
+                    std::vector<std::uint8_t> hdrConvertedPixels;
+                    const std::uint8_t* encodePixels = raw.pixels.data();
 
                     bool ok = true;
                     if (wantsDepth) {
@@ -727,17 +761,24 @@ int Application::Run()
                         // input/output share the exact same per-pixel byte offset
                         // (no shift) - never a different pixel's range.
                         ok = Encoding::ConvertDepthToGrayscaleRgba8(raw.pixels.data(), raw.format, raw.width, raw.height, raw.pixels.data());
+                    } else if (isHdrColor) {
+                        hdrConvertedPixels.resize(static_cast<std::size_t>(raw.width) * static_cast<std::size_t>(raw.height) * 4);
+                        ok = Encoding::ConvertHdrRgba16fToRgba8(
+                            raw.pixels.data(), raw.format, raw.width, raw.height, hdrConvertedPixels.data());
+                        encodePixels = hdrConvertedPixels.data();
                     } else if (IsBgraFormat(raw.format)) {
                         Encoding::ConvertBgraToRgbaInPlace(raw.pixels.data(), raw.width, raw.height);
                     }
 
                     if (!ok) {
                         // Depth format this device negotiated isn't one
-                        // ConvertDepthToGrayscaleRgba8() recognizes - see
-                        // PHASE3's own accepted, documented, narrow risk.
+                        // ConvertDepthToGrayscaleRgba8() recognizes, or the color
+                        // format isn't one ConvertHdrRgba16fToRgba8() recognizes -
+                        // see PHASE3/this phase's own accepted, documented, narrow
+                        // risk.
                         m_captureBridge.FailPendingRequest(FrameCaptureKind::NamedTexture, FrameCaptureFailureReason::TargetNotAvailable);
                     } else {
-                        std::vector<std::uint8_t> png = Encoding::EncodeRgba8ToPng(raw.pixels.data(), raw.width, raw.height);
+                        std::vector<std::uint8_t> png = Encoding::EncodeRgba8ToPng(encodePixels, raw.width, raw.height);
                         m_captureBridge.FulfillPendingRequest(FrameCaptureKind::NamedTexture,
                             CapturedPngImage{ std::move(png), raw.width, raw.height, framesSinceUpdate });
                     }

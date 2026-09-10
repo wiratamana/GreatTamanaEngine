@@ -269,5 +269,80 @@ void TransmittanceLutUvToHeightZenith(AtmosphereParametersGpu params, vec2 lutGr
     heightKm = mix(0.0, params.atmosphereThicknessKm, clamp(lutGridUv.x, 0.0, 1.0));
     upDot = max(lutGridUv.y * 2.0 - 1.0, -0.999);
 }
+// ----------------------------------------------------------------------
+// Scattering-only coefficient (Rayleigh scattering + Mie scattering, no
+// absorption/ozone) - the companion split of
+// ComputeExtinctionCoefficientAtHeight() above that AtmosphereMath.h's own
+// doc comment predicted a later phase would need "once a later phase
+// actually needs it" - Phase 4's Multi-Scattering LUT is that later phase.
+// Transcribed from _reference/pl-sky/shaders/sky.inc's
+// pl_calculate_coefficients(), its .tScatterRayleigh + .tScatterMie sum.
+// ----------------------------------------------------------------------
+
+vec3 ComputeScatteringCoefficientAtHeight(AtmosphereParametersGpu params, float heightKm)
+{
+    float rayleighDensity = RayleighDensityAtHeight(params, heightKm);
+    float mieDensity = MieDensityAtHeight(params, heightKm);
+    return params.rayleighScattering * rayleighDensity + params.mieScattering * mieDensity;
+}
+
+// ----------------------------------------------------------------------
+// Analytic single-segment inscattering integral - the Multi-Scattering
+// LUT's own per-ray-march-step accumulation formula, transcribed from
+// _reference/pl-sky/shaders/sky.inc's pl_integrate_inscattering() (itself
+// citing "Physically Based and Unified Volumetric Rendering in
+// Frostbite", page 29): the closed-form integral of a constant
+// scattering/extinction pair over one step of length `stepLengthKm`,
+// avoiding a second, nested numerical sub-integration per step.
+// ----------------------------------------------------------------------
+
+vec3 IntegrateInscattering(vec3 scatteringCoefficient, vec3 extinctionCoefficient, float stepLengthKm)
+{
+    return (scatteringCoefficient - scatteringCoefficient * exp(-extinctionCoefficient * stepLengthKm))
+        / max(extinctionCoefficient, vec3(1e-5));
+}
+
+// ----------------------------------------------------------------------
+// Multi-Scattering LUT (Phase 4) - shared spherical direction-sampling
+// pattern, transcribed EXACTLY from
+// _reference/pl-sky/shaders/sky_multiscatter_lut.comp's own nested 8x8
+// loop (iSampleCountSqrt = 8): a fixed, deterministic grid of directions
+// with theta in [0, PI] sweeping the FULL sphere (not just a hemisphere)
+// and phi in [0, 2*PI]. Kept EXACTLY as the reference's own (non-standard)
+// axis assignment - the Y component uses sin(theta), not cos(theta) - per
+// this campaign's own "transcribe the exact sample count and pattern
+// pl-sky uses, per the reference notes, rather than inventing a different
+// one" rule (see this phase's own strategy document, Step 3); this LUT has
+// no CPU oracle to validate a "corrected" version against, so faithful
+// transcription is the safer choice. `sinTheta` is handed back to the
+// caller too - the same per-sample solid-angle weight the reference's own
+// accumulation multiplies every contribution by, before dividing the
+// running total by sampleCountSqrt^2 once at the end.
+// ----------------------------------------------------------------------
+
+vec3 MultiScatteringSampleDirection(int sampleIndexTheta, int sampleIndexPhi, int sampleCountSqrt, out float sinTheta)
+{
+    float sampleCountSqrtRcp = 1.0 / float(sampleCountSqrt);
+    float theta = kAtmospherePi * float(sampleIndexTheta) * sampleCountSqrtRcp;
+    float phi = 2.0 * kAtmospherePi * (float(sampleIndexPhi) + 0.5) * sampleCountSqrtRcp;
+
+    sinTheta = sin(theta);
+    return vec3(sinTheta * cos(phi), sinTheta, sinTheta * sin(phi));
+}
+
+// Multi-Scattering LUT UV <-> (height, zenith) parameterization -
+// transcribed from _reference/pl-sky/shaders/sky_multiscatter_lut.comp's
+// own texel decode (see ATMOSPHERE_REFERENCE_NOTES.md, Section 3): the
+// SAME linear height/upDot formula as TransmittanceLutUvToHeightZenith()
+// above, but note the deliberate OFF-BY-ONE-TEXEL difference in how the
+// CALLER (AtmosphereMultiScatteringLut.comp) computes `lutGridUv` itself -
+// `texel / resolution` here, NOT `texel / (resolution - 1)` like the
+// Transmittance LUT - confirmed present in the real cloned source, not a
+// transcription typo.
+void MultiScatteringLutUvToHeightZenith(AtmosphereParametersGpu params, vec2 lutGridUv, out float heightKm, out float upDot)
+{
+    heightKm = mix(0.0, params.atmosphereThicknessKm, clamp(lutGridUv.x, 0.0, 1.0));
+    upDot = max(lutGridUv.y * 2.0 - 1.0, -0.999);
+}
 
 #endif // ATMOSPHERE_COMMON_GLSL

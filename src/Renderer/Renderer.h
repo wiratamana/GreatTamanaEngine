@@ -310,10 +310,16 @@ public:
     // cheap, always-safe insurance even in cases where nothing currently
     // depends on the restored value being exactly right.
     //
-    // bytesPerPixel must be exactly 4 for every real caller today (RGBA8/BGRA8
-    // color, or any of this engine's three possible depth formats copied via
-    // their DEPTH aspect alone - see PHASE3's own Step 2) - asserted, not
-    // silently handled for any other value.
+    // bytesPerPixel must be exactly 4 for every "traditional" caller
+    // (RGBA8/BGRA8 color, or any of this engine's three possible depth
+    // formats copied via their DEPTH aspect alone - see PHASE3's own Step 2)
+    // - OR exactly 8, for the ONE genuinely different case the atmosphere-
+    // scattering-1 campaign's Phase 4 introduced: capturing an HDR
+    // VK_FORMAT_R16G16B16A16_SFLOAT color texture (see
+    // src/Encoding/HdrColorVisualization.h, and Application::Run()'s own
+    // GET /get_texture handler for how the caller decides which value to
+    // pass, based on the real format being captured). Any OTHER value is
+    // asserted, not silently handled.
     CapturedRawPixels CaptureImagePixels(VkImage image, VkImageAspectFlags aspect, VkFormat format, VkExtent2D extent,
         const rg::ResourceState& previousState, int bytesPerPixel = 4) const;
 

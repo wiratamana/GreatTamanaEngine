@@ -1,0 +1,212 @@
+#version 450
+
+// Atmosphere Scattering + Aerial Perspective campaign, Phase 4
+// (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE4_MULTISCATTERING_LUT_v1.md)
+// - the Multi-Scattering LUT: approximates the contribution of light that
+// scatters MORE THAN ONCE before reaching the eye - single-scattering alone
+// (the Transmittance LUT's own domain) noticeably under-brightens a real
+// sky, especially near the horizon and on the dark side of objects.
+//
+// For each texel (u, v): decode a (height, sunZenithAngle) pair via
+// AtmosphereCommon.glsl's MultiScatteringLutUvToHeightZenith(), then
+// numerically estimate 2nd-order scattering by ray-marching a fixed
+// 8x8 = 64 direction sample set over the FULL sphere (see
+// MultiScatteringSampleDirection()), sampling the Transmittance LUT
+// (Phase 3's own output) for each step's sun transmittance instead of
+// re-integrating optical depth from scratch, and finally solving the
+// geometric-series closed form `L_total = L_2nd / (1 - f_ms)` to
+// approximate the infinite sum of every higher-order bounce from just the
+// 2nd-order estimate. Faithfully transcribed from
+// _reference/pl-sky/shaders/sky_multiscatter_lut.comp - see
+// task_manager/atmosphere-scattering-1/ATMOSPHERE_REFERENCE_NOTES.md,
+// Section 5, for the exact sample counts this must match (8x8 = 64 outer
+// sphere-sampling directions, 20 inner ray-march samples per direction).
+//
+// DEVIATION FROM THE REFERENCE (documented, not a design change): the
+// ground-hit/atmosphere-exit ray/sphere test below is built from this
+// campaign's own already-shared AtmosphereCommon.glsl helpers
+// (RayIntersectsSphereNearest()/DistanceToAtmosphereOuterBoundary(), both
+// added in Phase 3) rather than re-transcribing pl-sky's own single
+// combined `pl_ray_intersection_planet()` a THIRD time - functionally
+// equivalent (same nearest-ground-hit-or-atmosphere-exit result), and
+// keeps this campaign's sphere-intersection math in exactly one place per
+// concern instead of three independently-maintained copies (see AGENTS.md's
+// "Skeletal Animation Pose Resolution" section for why this codebase
+// refuses that pattern elsewhere too).
+//
+// BINDING CONVENTION (DescriptorSetLayoutBuilder.h's own documented
+// ordering: buffer bindings, then read-only textures, then storage images
+// last; see also this campaign's own "Revision Notes"): binding 0 =
+// AtmosphereParametersGpu, a read-only STORAGE buffer (`readonly buffer`,
+// NEVER `uniform` - this engine has no VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+// descriptor support anywhere today), REUSING the exact same buffer Phase
+// 3's AddTransmittanceLutPass() already created/uploaded this frame (no
+// second, duplicate buffer for the same data); binding 1 = sampler2D
+// transmittanceLut (read-only, Phase 3's own output); binding 2 = the
+// output image2D. Both C++
+// (src/Renderer/Atmosphere/AtmosphereLutRenderer.cpp) and this file must be
+// kept in agreement by hand - this campaign deliberately has no shader
+// reflection.
+//
+// local_size_x/y = 16 - MUST match
+// src/Renderer/Atmosphere/AtmosphereLutRenderer.cpp's own
+// kMultiScatteringLutLocalSizeX/Y constants exactly (mirrors
+// AtmosphereTransmittanceLut.comp's own established 16x16 convention).
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#include "AtmosphereCommon.glsl"
+
+layout(std430, binding = 0) readonly buffer AtmosphereParametersBlock {
+    AtmosphereParametersGpu atmosphereParameters;
+};
+
+layout(binding = 1) uniform sampler2D transmittanceLut;
+
+// The output LUT is an HDR RenderTexture (VK_FORMAT_R16G16B16A16_SFLOAT on
+// the C++ side, see AtmosphereLutRenderer.cpp) - a multi-scattering
+// "response" value can legitimately exceed 1.0, unlike the Transmittance
+// LUT's bounded [0, 1] output, so `rgba16f` (not `rgba8`) here must always
+// match it exactly.
+layout(binding = 2, rgba16f) uniform writeonly image2D multiScatteringLutImage;
+
+// SAME fixed sample counts as
+// _reference/pl-sky/shaders/sky_multiscatter_lut.comp's own
+// iSampleCountSqrt/PL_INNER_SAMPLE_COUNT (see ATMOSPHERE_REFERENCE_NOTES.md,
+// Section 5) - fixed, hardcoded constants documented here, never a
+// runtime-tunable Editor knob (see this phase's own "What We Will NOT Do").
+const int kMultiScatteringSampleCountSqrt = 8;
+const int kMultiScatteringInnerSampleCount = 20;
+
+void main()
+{
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 lutSize = imageSize(multiScatteringLutImage);
+    if (texel.x >= lutSize.x || texel.y >= lutSize.y) {
+        // The dispatch's own ceiling-division group count can legitimately
+        // cover more threads than there are real texels - see
+        // ComputeDispatch.h's own header comment. Those extra invocations
+        // simply do nothing.
+        return;
+    }
+
+    // NOTE the deliberate off-by-one-texel difference from the
+    // Transmittance LUT's own grid (texel / resolution here, NOT
+    // texel / (resolution - 1)) - present in the real cloned source, see
+    // AtmosphereCommon.glsl's own MultiScatteringLutUvToHeightZenith()
+    // comment.
+    float x = float(texel.x) / float(lutSize.x);
+    float y = float(texel.y) / float(lutSize.y);
+
+    float heightKm;
+    float upDot;
+    MultiScatteringLutUvToHeightZenith(atmosphereParameters, vec2(x, y), heightKm, upDot);
+
+    float planetRadiusKm = atmosphereParameters.planetRadiusKm;
+    float atmosphereRadiusKm = AtmosphereRadiusKm(atmosphereParameters);
+    vec3 positionKm = vec3(0.0, heightKm + planetRadiusKm, 0.0);
+
+    // Direction TOWARD the sun - mirrors the reference's own
+    // `vec3(0, fUpDot, sqrt(1 - fUpDot*fUpDot))`.
+    vec3 sunDirection = vec3(0.0, upDot, sqrt(max(1.0 - upDot * upDot, 0.0)));
+
+    vec3 secondOrderScattering = vec3(0.0); // L_2nd in the reference
+    vec3 multipleScatteringFraction = vec3(0.0); // f_ms in the reference
+
+    const float isotropicPhase = 1.0 / (4.0 * kAtmospherePi);
+
+    for (int sampleTheta = 0; sampleTheta < kMultiScatteringSampleCountSqrt; ++sampleTheta) {
+        for (int samplePhi = 0; samplePhi < kMultiScatteringSampleCountSqrt; ++samplePhi) {
+            float sinTheta;
+            vec3 sampleDirection =
+                MultiScatteringSampleDirection(sampleTheta, samplePhi, kMultiScatteringSampleCountSqrt, sinTheta);
+
+            // Ray-march this one sample direction out to wherever it exits
+            // the atmosphere, or to the ground if it hits the planet
+            // first - see this file's own top-of-file "DEVIATION FROM THE
+            // REFERENCE" note for why this reuses AtmosphereCommon.glsl's
+            // existing two single-sphere helpers instead of the
+            // reference's own combined pl_ray_intersection_planet().
+            float groundHitDistanceKm = RayIntersectsSphereNearest(positionKm, sampleDirection, planetRadiusKm);
+            bool hitsGround = groundHitDistanceKm >= 0.0;
+            float atmosphereExitDistanceKm =
+                DistanceToAtmosphereOuterBoundary(positionKm, sampleDirection, atmosphereRadiusKm);
+            float rayDistanceKm = hitsGround ? groundHitDistanceKm : max(atmosphereExitDistanceKm, 0.0);
+
+            float stepLengthKm = rayDistanceKm / float(kMultiScatteringInnerSampleCount);
+            vec3 step = sampleDirection * stepLengthKm;
+
+            // Ground-bounce contribution - if this sample direction hits
+            // the planet surface first, some of the sun's light reflects
+            // back diffusely (Lambertian) off it, attenuated by that
+            // point's own transmittance to the sun. Mirrors the
+            // reference's own `tEarthAlbedo / PI * incomingLight *
+            // fEarthNoL` term exactly (albedo from
+            // AtmosphereParametersGpu::groundAlbedo, not the reference's
+            // own hardcoded vec3(0.3) - see AtmosphereTypes.h's own doc
+            // comment on why that field exists).
+            vec3 groundHitPositionKm = positionKm + sampleDirection * rayDistanceKm;
+            vec3 groundNormal = normalize(groundHitPositionKm);
+            float groundNoL = clamp(dot(groundNormal, sunDirection), 0.0, 1.0);
+            vec2 groundLutUv = HeightZenithToTransmittanceLutUv(atmosphereParameters, 0.0, dot(groundNormal, sunDirection));
+            vec3 groundTransmittance = texture(transmittanceLut, groundLutUv).rgb;
+            vec3 groundContribution =
+                atmosphereParameters.groundAlbedo / kAtmospherePi * groundTransmittance * groundNoL;
+            vec3 directRadiance = hitsGround ? groundContribution : vec3(0.0);
+
+            vec3 currentPositionKm = positionKm;
+            vec3 transmittanceToHere = vec3(1.0);
+            vec3 inscatteredRadiance = vec3(0.0);
+            vec3 scatteredFraction = vec3(0.0);
+
+            for (int i = 0; i < kMultiScatteringInnerSampleCount; ++i) {
+                currentPositionKm += step;
+
+                float currentHeightKm = max(length(currentPositionKm) - planetRadiusKm, 0.0);
+                vec3 upAtSample = normalize(currentPositionKm);
+
+                vec3 scatteringCoefficient = ComputeScatteringCoefficientAtHeight(atmosphereParameters, currentHeightKm);
+                vec3 extinctionCoefficient = ComputeExtinctionCoefficientAtHeight(atmosphereParameters, currentHeightKm);
+
+                // Transmittance from this ray-march sample point toward
+                // the sun - sampled from Phase 3's own Transmittance LUT
+                // rather than re-integrated from scratch (exactly why
+                // Phase 3 had to exist first - see this phase's own
+                // strategy document, Step 2).
+                vec2 sunLutUv =
+                    HeightZenithToTransmittanceLutUv(atmosphereParameters, currentHeightKm, dot(upAtSample, sunDirection));
+                vec3 sunTransmittance = texture(transmittanceLut, sunLutUv).rgb;
+
+                vec3 segmentIntegral = IntegrateInscattering(scatteringCoefficient, extinctionCoefficient, stepLengthKm);
+                scatteredFraction += segmentIntegral * transmittanceToHere;
+
+                // Reuses the same segment integral for the actual
+                // in-scattered radiance too (it is linear in that factor -
+                // mirrors the reference's own comment on this exact
+                // reuse), scaled by the isotropic phase function and this
+                // step's own sun transmittance.
+                vec3 segmentInscattered = segmentIntegral * sunTransmittance * isotropicPhase;
+                inscatteredRadiance += segmentInscattered * transmittanceToHere;
+
+                transmittanceToHere *= exp(-extinctionCoefficient * stepLengthKm);
+            }
+
+            // Weighted by sinTheta - compensates for the non-uniform solid
+            // angle a naive theta/phi grid produces (denser sampling near
+            // the poles) - mirrors the reference's own identical
+            // `* fSinTheta` weighting on both accumulators.
+            multipleScatteringFraction += scatteredFraction * sinTheta;
+            secondOrderScattering += (directRadiance * transmittanceToHere + inscatteredRadiance) * sinTheta;
+        }
+    }
+
+    float sampleWeight = 1.0 / float(kMultiScatteringSampleCountSqrt * kMultiScatteringSampleCountSqrt);
+    multipleScatteringFraction *= sampleWeight;
+    secondOrderScattering *= sampleWeight;
+
+    // Geometric-series closed form: L_total = L_2nd / (1 - f_ms) -
+    // approximates the infinite sum of every higher-order (3rd, 4th, ...)
+    // scattering bounce from just the 2nd-order estimate above.
+    vec3 multiScatteringResponse = secondOrderScattering / max(vec3(1.0) - multipleScatteringFraction, vec3(1e-5));
+
+    imageStore(multiScatteringLutImage, texel, vec4(multiScatteringResponse, 0.0));
+}

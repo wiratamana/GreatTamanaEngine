@@ -529,6 +529,8 @@ add_library(gte_core STATIC
     src/Encoding/PngEncoder.cpp
     src/Encoding/DepthVisualization.h
     src/Encoding/DepthVisualization.cpp
+    src/Encoding/HdrColorVisualization.h
+    src/Encoding/HdrColorVisualization.cpp
 )
 
 # Exactly one of these two branches gets compiled in, depending on
@@ -804,6 +806,15 @@ endif()
 # this shader #includes, so an edit to it correctly triggers glslc to
 # recompile this (and every future atmosphere shader that also lists it).
 gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereTransmittanceLut.comp
+    EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl)
+
+# Atmosphere Scattering + Aerial Perspective campaign, Phase 4
+# (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE4_MULTISCATTERING_LUT_v1.md)
+# - the Multi-Scattering LUT compute shader. Same unconditional (NOT
+# GTE_ENABLE_EDITOR-gated) treatment as the Transmittance LUT shader above,
+# for the exact same reason (Locked Design Decision 4 - always-compiled core
+# rendering feature).
+gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereMultiScatteringLut.comp
     EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl)
 
 # Ensures SDL3.dll is copied next to the built .exe after every build.

@@ -27,11 +27,24 @@
 // value is always in [0, 1] per channel, but this choice does NOT
 // automatically transfer to Phase 4/5's own HDR-valued LUTs (see this
 // class's own .cpp for the full reasoning).
+//
+// Phase 4 (task_manager/atmosphere-scattering-1/
+// ATMOSPHERE_PHASE4_MULTISCATTERING_LUT_v1.md) adds the SECOND LUT pass,
+// AddMultiScatteringLutPass() - same overall shape (lazily-initialized
+// pipeline/descriptor-set/output texture), REUSING the SAME
+// m_atmosphereParametersBuffer AddTransmittanceLutPass() above already
+// creates/uploads (no second, duplicate buffer for the same data), but
+// its own output texture is a RenderTexture with an explicit HDR float
+// format (VK_FORMAT_R16G16B16A16_SFLOAT) rather than a Texture2D - a
+// multi-scattering "response" value can legitimately exceed 1.0, unlike
+// the Transmittance LUT's bounded [0, 1] output (see this class's own
+// .cpp for the full reasoning, and this campaign's own "Revision Notes").
 
 #include "AtmosphereTypes.h"
 #include "../Buffer.h"
 #include "../ComputeDescriptorSet.h"
 #include "../ComputePipeline.h"
+#include "../RenderTexture.h"
 #include "../Texture2D.h"
 #include "../RenderGraph/RenderGraphBuilder.h"
 #include "../RenderGraph/RenderGraphTypes.h"
@@ -77,8 +90,27 @@ public:
     rg::TextureHandle AddTransmittanceLutPass(
         rg::RenderGraphBuilder& builder, Renderer& renderer, const AtmosphereParametersGpu& params);
 
+    // Phase 4 (ATMOSPHERE_PHASE4_MULTISCATTERING_LUT_v1.md) - declares this
+    // frame's Multi-Scattering LUT compute pass into `builder`: reads
+    // `transmittanceLutHandle` (this call's own AddTransmittanceLutPass()
+    // result, from THIS SAME builder call - the render graph therefore
+    // orders this pass strictly after it, see RenderGraphCompiler) and
+    // writes this object's own persistent, 64x64 HDR output RenderTexture
+    // (imported fresh every call, registered under the literal name
+    // "AtmosphereMultiScatteringLut"). MUST be called AFTER
+    // AddTransmittanceLutPass() in the SAME frame (it needs that call's own
+    // return value as an argument, and its own lazy init reuses the
+    // AtmosphereParametersGpu buffer that call already created/uploaded).
+    //
+    // Same "no dirty-flag optimization" contract as AddTransmittanceLutPass()
+    // above, and the same "caller must add the returned handle to this
+    // call's own outputs root set or the pass is silently culled" contract.
+    rg::TextureHandle AddMultiScatteringLutPass(rg::RenderGraphBuilder& builder, Renderer& renderer,
+        const AtmosphereParametersGpu& params, rg::TextureHandle transmittanceLutHandle);
+
 private:
     void EnsureTransmittanceLutInitialized(Renderer& renderer, const AtmosphereParametersGpu& params);
+    void EnsureMultiScatteringLutInitialized(Renderer& renderer);
 
     VkDevice m_device = VK_NULL_HANDLE;
 
@@ -87,6 +119,14 @@ private:
     ComputeDescriptorSet m_transmittanceLutDescriptorSet;
     std::optional<Buffer> m_atmosphereParametersBuffer;
     std::optional<Texture2D> m_transmittanceLutOutput;
+
+    // Phase 4 - Multi-Scattering LUT. Deliberately NO second
+    // m_atmosphereParametersBuffer here - reuses m_atmosphereParametersBuffer
+    // above (see this class's own .cpp).
+    VkDescriptorSetLayout m_multiScatteringLutDescriptorSetLayout = VK_NULL_HANDLE;
+    std::optional<ComputePipeline> m_multiScatteringLutPipeline;
+    ComputeDescriptorSet m_multiScatteringLutDescriptorSet;
+    std::optional<RenderTexture> m_multiScatteringLutOutput;
 };
 
 } // namespace gte

@@ -166,10 +166,11 @@ RenderTexture Renderer::CreateRenderTexture(int width, int height, VkFormat form
 Renderer::CapturedRawPixels Renderer::CaptureImagePixels(VkImage image, VkImageAspectFlags aspect, VkFormat format,
     VkExtent2D extent, const rg::ResourceState& previousState, int bytesPerPixel) const
 {
-    assert(bytesPerPixel == 4
+    assert((bytesPerPixel == 4 || bytesPerPixel == 8)
         && "CaptureImagePixels: every real caller today copies exactly 4 bytes/pixel (RGBA8/BGRA8 color, or any of "
-           "this engine's 3 possible depth formats via their DEPTH aspect alone) - re-derive this function's own "
-           "size math before changing it for a genuinely different pixel size.");
+           "this engine's 3 possible depth formats via their DEPTH aspect alone) OR exactly 8 bytes/pixel (the "
+           "atmosphere-scattering-1 campaign's Phase 4 HDR VK_FORMAT_R16G16B16A16_SFLOAT color capture case) - "
+           "re-derive this function's own size math before changing it for a genuinely different pixel size.");
 
     const VkDeviceSize size = VkDeviceSize(extent.width) * extent.height * static_cast<VkDeviceSize>(bytesPerPixel);
     Buffer readback = CreateBuffer(size, VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemoryUsage::GpuToCpu, "CaptureReadback");
