@@ -60,6 +60,24 @@
 // PIPELINE/descriptor-set-LAYOUT are shared across every view (same
 // shader, same binding layout) - only the per-view descriptor SET/frame-
 // uniforms buffer/output texture are ever duplicated.
+//
+// Phase 6 (task_manager/atmosphere-scattering-1/
+// ATMOSPHERE_PHASE6_AERIAL_PERSPECTIVE_FROXEL_VOLUME_v1.md) adds the
+// FOURTH LUT pass, AddAerialPerspectiveVolumePass() - the campaign's first
+// pass writing a genuine 3D VolumeTexture (Phase 2's own
+// RenderGraphBuilder::ImportVolumeTexture()/WriteVolumeTexture()) rather
+// than a 2D texture. Same per-view state shape as the Sky-View LUT above
+// (a std::unordered_map keyed by `outputVolumeName`, mirroring
+// m_skyViewLutViewStates exactly - see ATMOSPHERE_PHASE5_COMPLETION_REPORT.md's
+// own "Their Role" note recommending this same pattern), and the SAME
+// "reuse m_atmosphereParametersBuffer, don't duplicate it" rule as every
+// LUT pass above. Unlike the Sky-View LUT, this pass's own per-view output
+// is a persistent VolumeTexture (created ONCE via
+// Renderer::CreateVolumeTexture(), per Phase 2's own completion report
+// "Their Role" answer (c) - never a graph-pooled/transient resource) that
+// is re-imported into the render graph fresh every frame via
+// ImportVolumeTexture(), exactly the pattern that phase's own disposable
+// validation code proved out end-to-end.
 
 #include "AtmosphereTypes.h"
 #include "../../ECS/Registry.h"
@@ -69,6 +87,7 @@
 #include "../ComputePipeline.h"
 #include "../RenderTexture.h"
 #include "../Texture2D.h"
+#include "../VolumeTexture.h"
 #include "../RenderGraph/RenderGraphBuilder.h"
 #include "../RenderGraph/RenderGraphTypes.h"
 
@@ -159,6 +178,43 @@ public:
         rg::TextureHandle transmittanceLutHandle, rg::TextureHandle multiScatteringLutHandle,
         const char* outputTextureName);
 
+    // Phase 6 (ATMOSPHERE_PHASE6_AERIAL_PERSPECTIVE_FROXEL_VOLUME_v1.md) -
+    // declares this frame's Aerial Perspective froxel-volume compute pass
+    // into `builder` for ONE view: reads
+    // `transmittanceLutHandle`/`multiScatteringLutHandle` (same as
+    // AddSkyViewLutPass() above) and writes a persistent, 128x128x32 HDR
+    // (rgba16f) output VolumeTexture registered under the literal name
+    // `outputVolumeName` - the parameter that lets this ONE method serve
+    // both the Game View and Scene View call sites with two distinct
+    // registered volume names, mirroring AddSkyViewLutPass()'s own
+    // `outputTextureName` parameter exactly. `outputVolumeName` MUST be a
+    // string-literal/static-storage-duration pointer - it is handed
+    // straight through to RenderGraphBuilder::ImportVolumeTexture(), which
+    // asserts exactly that. `frameUniforms` (including its Phase-6-new
+    // `invViewProjection` field - see AtmosphereTypes.h) is uploaded into a
+    // PER-VIEW buffer (keyed by `outputVolumeName`, see
+    // m_aerialPerspectiveVolumeViewStates below) every call, so two views
+    // computed in the same frame never clobber each other's camera height/
+    // sun direction/view-projection mid-frame.
+    //
+    // MUST be called AFTER both AddTransmittanceLutPass()/
+    // AddMultiScatteringLutPass() in the SAME frame (needs their own
+    // TextureHandle return values as arguments). Same "no dirty-flag
+    // optimization" contract as every LUT pass above - BUT a different
+    // "keep this alive" contract than the texture-returning methods above:
+    // a VolumeTextureHandle can NEVER be a `finalOutputs` root (see
+    // RenderGraphCompiler::Compile()'s own doc comment - this was, in fact,
+    // a genuine Phase 2 infrastructure gap this phase found and fixed, see
+    // this class's own .cpp/ATMOSPHERE_PHASE6_COMPLETION_REPORT.md) - the
+    // CALLER must instead call
+    // `builder.KeepVolumeTextureOutput(returnedHandle)` explicitly, or this
+    // pass's write will be silently culled the next time
+    // RenderGraphCompiler::Compile() runs.
+    rg::VolumeTextureHandle AddAerialPerspectiveVolumePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
+        const AtmosphereParametersGpu& params, const AtmosphereFrameUniforms& frameUniforms,
+        rg::TextureHandle transmittanceLutHandle, rg::TextureHandle multiScatteringLutHandle,
+        const char* outputVolumeName);
+
 private:
     // Per-VIEW state for the Sky-View LUT (Phase 5) - one instance per
     // distinct `outputTextureName` ever passed to AddSkyViewLutPass(),
@@ -173,10 +229,24 @@ private:
         std::optional<RenderTexture> output;
     };
 
+    // Phase 6 - Aerial Perspective Volume. One instance per distinct
+    // `outputVolumeName` ever passed to AddAerialPerspectiveVolumePass(),
+    // stored in m_aerialPerspectiveVolumeViewStates below - mirrors
+    // SkyViewLutViewState's own shape exactly, just with a VolumeTexture
+    // output instead of a RenderTexture.
+    struct AerialPerspectiveVolumeViewState {
+        ComputeDescriptorSet descriptorSet;
+        std::optional<Buffer> frameUniformsBuffer;
+        std::optional<VolumeTexture> output;
+    };
+
     void EnsureTransmittanceLutInitialized(Renderer& renderer, const AtmosphereParametersGpu& params);
     void EnsureMultiScatteringLutInitialized(Renderer& renderer);
     void EnsureSkyViewLutInitialized(Renderer& renderer);
     SkyViewLutViewState& EnsureSkyViewLutViewInitialized(Renderer& renderer, const char* outputTextureName);
+    void EnsureAerialPerspectiveVolumeInitialized(Renderer& renderer);
+    AerialPerspectiveVolumeViewState& EnsureAerialPerspectiveVolumeViewInitialized(
+        Renderer& renderer, const char* outputVolumeName);
 
     VkDevice m_device = VK_NULL_HANDLE;
 
@@ -202,6 +272,15 @@ private:
     VkDescriptorSetLayout m_skyViewLutDescriptorSetLayout = VK_NULL_HANDLE;
     std::optional<ComputePipeline> m_skyViewLutPipeline;
     std::unordered_map<std::string, SkyViewLutViewState> m_skyViewLutViewStates;
+
+    // Phase 6 - Aerial Perspective Volume. Deliberately NO second
+    // m_atmosphereParametersBuffer here either - reuses the SAME buffer as
+    // above. Pipeline/descriptor-set-LAYOUT are shared across every view;
+    // m_aerialPerspectiveVolumeViewStates holds the genuinely per-view
+    // state (see AerialPerspectiveVolumeViewState's own doc comment above).
+    VkDescriptorSetLayout m_aerialPerspectiveVolumeDescriptorSetLayout = VK_NULL_HANDLE;
+    std::optional<ComputePipeline> m_aerialPerspectiveVolumePipeline;
+    std::unordered_map<std::string, AerialPerspectiveVolumeViewState> m_aerialPerspectiveVolumeViewStates;
 };
 
 // Phase 5 (ATMOSPHERE_PHASE5_SKYVIEW_LUT_v1.md, Step 3) - resolves this

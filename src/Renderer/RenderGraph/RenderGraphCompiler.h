@@ -83,10 +83,16 @@ struct CompiledGraph {
 // Compiles `input` against the REQUIRED root set `finalOutputs` - the
 // texture handles the caller actually needs to exist by the end of this
 // frame (e.g. the swapchain image the Present pass writes, and nothing
-// else). A pass with no path (direct or transitive, through declared
-// reads/writes) to any `finalOutputs` entry is dead code and is culled
-// entirely: excluded from `executionOrder`, and none of its declared
-// reads/writes extend any resource's lifetime.
+// else). ALSO reads `input.finalVolumeTextureOutputs` (Atmosphere
+// Scattering campaign, Phase 6 -
+// ATMOSPHERE_PHASE6_AERIAL_PERSPECTIVE_FROXEL_VOLUME_v1.md - see
+// RenderGraphBuilder::KeepVolumeTextureOutput()) as a SECOND, independent
+// root set for VolumeTextureHandle writes - a `BufferHandle` still has no
+// equivalent root set and can never be a root. A pass with no path (direct
+// or transitive, through declared reads/writes) to any `finalOutputs`/
+// `finalVolumeTextureOutputs` entry is dead code and is culled entirely:
+// excluded from `executionOrder`, and none of its declared reads/writes
+// extend any resource's lifetime.
 //
 // `input` is taken by NON-CONST reference (not `const&`, despite this
 // phase's own strategy document sketching a `const&` signature) because

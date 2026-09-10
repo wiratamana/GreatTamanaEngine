@@ -826,6 +826,15 @@ gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereMultiScatteringLut.comp
 gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereSkyViewLut.comp
     EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl)
 
+# Atmosphere Scattering + Aerial Perspective campaign, Phase 6
+# (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE6_AERIAL_PERSPECTIVE_FROXEL_VOLUME_v1.md)
+# - the Aerial Perspective froxel-volume compute shader. Same unconditional
+# (NOT GTE_ENABLE_EDITOR-gated) treatment as the Transmittance/Multi-
+# Scattering/Sky-View LUT shaders above, for the exact same reason (Locked
+# Design Decision 4 - always-compiled core rendering feature).
+gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereAerialPerspectiveVolume.comp
+    EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl)
+
 # Ensures SDL3.dll is copied next to the built .exe after every build.
 sdl3_copy_runtime_dll(GreatTamanaEngine)
 

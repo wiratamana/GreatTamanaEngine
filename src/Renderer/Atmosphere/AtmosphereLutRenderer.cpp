@@ -58,6 +58,22 @@ constexpr std::uint32_t kSkyViewLutLocalSizeY = 8;
 constexpr int kSkyViewLutWidth = 200;
 constexpr int kSkyViewLutHeight = 100;
 
+// MUST match Shaders/AtmosphereAerialPerspectiveVolume.comp's own
+// `layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;`
+// exactly - one invocation per froxel COLUMN (the Z loop happens INSIDE
+// each invocation, never a third dispatch axis).
+constexpr std::uint32_t kAerialPerspectiveVolumeLocalSizeX = 8;
+constexpr std::uint32_t kAerialPerspectiveVolumeLocalSizeY = 8;
+constexpr std::uint32_t kAerialPerspectiveVolumeLocalSizeZ = 1;
+
+// Aerial Perspective volume resolution - see
+// task_manager/atmosphere-scattering-1/ATMOSPHERE_REFERENCE_NOTES.md,
+// Section 2 ("128 x 128 x 32", cited from the cloned reference's own
+// tAerialLutResolution, src/app.c line 206).
+constexpr int kAerialPerspectiveVolumeWidth = 128;
+constexpr int kAerialPerspectiveVolumeHeight = 128;
+constexpr int kAerialPerspectiveVolumeDepth = 32;
+
 } // namespace
 
 AtmosphereLutRenderer::~AtmosphereLutRenderer()
@@ -82,6 +98,9 @@ AtmosphereLutRenderer::~AtmosphereLutRenderer()
     }
     if (m_skyViewLutDescriptorSetLayout != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(m_device, m_skyViewLutDescriptorSetLayout, nullptr);
+    }
+    if (m_aerialPerspectiveVolumeDescriptorSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(m_device, m_aerialPerspectiveVolumeDescriptorSetLayout, nullptr);
     }
 }
 
@@ -433,6 +452,146 @@ rg::TextureHandle AtmosphereLutRenderer::AddSkyViewLutPass(rg::RenderGraphBuilde
             renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
             renderer.Dispatch(*m_skyViewLutPipeline, viewState.descriptorSet.Native(), nullptr, 0, groupCounts.width,
                 groupCounts.height, groupCounts.depth);
+            renderer.EndGraphPassRecording();
+        });
+
+    return outputHandle;
+}
+
+void AtmosphereLutRenderer::EnsureAerialPerspectiveVolumeInitialized(Renderer& renderer)
+{
+    if (m_aerialPerspectiveVolumePipeline.has_value()) {
+        return;
+    }
+
+    // By the time this is ever called, EnsureTransmittanceLutInitialized()
+    // has ALREADY run (AddTransmittanceLutPass() is always called first, in
+    // the SAME frame, at this campaign's own temporary validation call
+    // site - see Application.cpp) - m_device/m_atmosphereParametersBuffer/
+    // m_transmittanceLutOutput/m_multiScatteringLutOutput are therefore
+    // already valid here. This method does NOT create a second
+    // AtmosphereParametersGpu buffer.
+    const Renderer::VulkanContextInfo context = renderer.GetVulkanContextInfo();
+    m_device = context.device;
+
+    // Binding convention (matches
+    // Shaders/AtmosphereAerialPerspectiveVolume.comp exactly): binding 0 =
+    // AtmosphereParametersGpu (the SAME buffer AddTransmittanceLutPass()
+    // already created/uploads - reused, not duplicated), binding 1 =
+    // AtmosphereFrameUniforms (a SECOND read-only storage buffer, per-VIEW
+    // - see m_aerialPerspectiveVolumeViewStates), binding 2 = the read-only
+    // transmittanceLut combined image sampler, binding 3 = the read-only
+    // multiScatteringLut combined image sampler, binding 4 = the output
+    // image3D.
+    DescriptorSetLayoutBuilder layoutBuilder(m_device);
+    m_aerialPerspectiveVolumeDescriptorSetLayout = layoutBuilder.AddStorageBuffer(/*binding=*/0)
+                                                        .AddStorageBuffer(/*binding=*/1)
+                                                        .AddCombinedImageSampler(/*binding=*/2)
+                                                        .AddCombinedImageSampler(/*binding=*/3)
+                                                        .AddStorageImage(/*binding=*/4)
+                                                        .Build();
+
+    m_aerialPerspectiveVolumePipeline.emplace(
+        renderer.CreateComputePipeline("shaders/AtmosphereAerialPerspectiveVolume.comp.spv",
+            std::vector<VkDescriptorSetLayout>{ m_aerialPerspectiveVolumeDescriptorSetLayout }));
+}
+
+AtmosphereLutRenderer::AerialPerspectiveVolumeViewState& AtmosphereLutRenderer::EnsureAerialPerspectiveVolumeViewInitialized(
+    Renderer& renderer, const char* outputVolumeName)
+{
+    const auto existing = m_aerialPerspectiveVolumeViewStates.find(outputVolumeName);
+    if (existing != m_aerialPerspectiveVolumeViewStates.end()) {
+        return existing->second;
+    }
+
+    AerialPerspectiveVolumeViewState state;
+    state.descriptorSet =
+        ComputeDescriptorSet(renderer.AllocateComputeDescriptorSet(m_aerialPerspectiveVolumeDescriptorSetLayout));
+    state.frameUniformsBuffer.emplace(renderer.CreateBuffer(sizeof(AtmosphereFrameUniforms),
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemoryUsage::CpuToGpu, "AtmosphereFrameUniforms"));
+
+    // Persistent VolumeTexture output, created ONCE (per Phase 2's own
+    // completion report "Their Role" answer (c) - never a graph-pooled/
+    // transient resource) - `outputVolumeName` is reused directly as this
+    // VolumeTexture's own GpuMemoryTracker debug name (guaranteed
+    // static-storage-duration by AddAerialPerspectiveVolumePass()'s own
+    // contract), same convention as the Sky-View LUT's own output
+    // RenderTexture above. rgba16f - see this class's own .cpp file
+    // comment/AtmosphereAerialPerspectiveVolume.comp's own binding 4
+    // comment for why (in-scattered luminance routinely exceeds 1.0).
+    state.output.emplace(renderer.CreateVolumeTexture(kAerialPerspectiveVolumeWidth, kAerialPerspectiveVolumeHeight,
+        kAerialPerspectiveVolumeDepth, VK_FORMAT_R16G16B16A16_SFLOAT, outputVolumeName));
+
+    const auto insertedPair = m_aerialPerspectiveVolumeViewStates.emplace(outputVolumeName, std::move(state));
+    return insertedPair.first->second;
+}
+
+rg::VolumeTextureHandle AtmosphereLutRenderer::AddAerialPerspectiveVolumePass(rg::RenderGraphBuilder& builder,
+    Renderer& renderer, const AtmosphereParametersGpu& params, const AtmosphereFrameUniforms& frameUniforms,
+    rg::TextureHandle transmittanceLutHandle, rg::TextureHandle multiScatteringLutHandle, const char* outputVolumeName)
+{
+    (void)params; // Already uploaded into m_atmosphereParametersBuffer by AddTransmittanceLutPass() this same frame.
+
+    EnsureAerialPerspectiveVolumeInitialized(renderer);
+    AerialPerspectiveVolumeViewState& viewState = EnsureAerialPerspectiveVolumeViewInitialized(renderer, outputVolumeName);
+
+    // Step 4's own "no dirty-flag optimization" - this per-view buffer is
+    // unconditionally re-uploaded and the whole volume recomputed every
+    // single call, exactly like AddSkyViewLutPass()'s own contract.
+    viewState.frameUniformsBuffer->Upload(&frameUniforms, sizeof(AtmosphereFrameUniforms));
+
+    const rg::VolumeTextureHandle outputHandle =
+        builder.ImportVolumeTexture(outputVolumeName, viewState.output->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
+
+    builder.AddComputePass(
+        "AtmosphereAerialPerspectiveVolumePass",
+        [transmittanceLutHandle, multiScatteringLutHandle, outputHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
+            // Real dependency declarations - order this pass strictly
+            // after AddTransmittanceLutPass()/AddMultiScatteringLutPass()'s
+            // own writes this same frame, same ShaderRead convention as
+            // every other LUT-sampling pass above.
+            pass.ReadTexture(transmittanceLutHandle, rg::ResourceAccess::ShaderRead);
+            pass.ReadTexture(multiScatteringLutHandle, rg::ResourceAccess::ShaderRead);
+            pass.WriteVolumeTexture(outputHandle, rg::ResourceAccess::ComputeShaderWrite);
+        },
+        [this, &renderer, &viewState, outputHandle](rg::PassContext& ctx) {
+            const rg::PassContext::ResolvedVolumeTexture dest = ctx.resolveVolumeTexture(outputHandle);
+
+            // m_transmittanceLutOutput/m_multiScatteringLutOutput are the
+            // SAME Texture2D/RenderTexture AddTransmittanceLutPass()/
+            // AddMultiScatteringLutPass() themselves write through - see
+            // AddSkyViewLutPass()'s own identical reasoning for why their
+            // own View()/Sampler() are used directly here instead of
+            // resolved via PassContext::resolveTexture(). `&viewState`
+            // stays valid across any future insertion into
+            // m_aerialPerspectiveVolumeViewStates for the exact same
+            // std::unordered_map reference-stability reason documented at
+            // AddSkyViewLutPass()'s own capture site.
+            viewState.descriptorSet.Rewrite(m_device,
+                std::vector<ComputeDescriptorWrite>{
+                    ComputeDescriptorWrite::StorageBuffer(0, m_atmosphereParametersBuffer->Native()),
+                    ComputeDescriptorWrite::StorageBuffer(1, viewState.frameUniformsBuffer->Native()),
+                    ComputeDescriptorWrite::CombinedImageSampler(
+                        2, m_transmittanceLutOutput->View(), m_transmittanceLutOutput->Sampler()),
+                    ComputeDescriptorWrite::CombinedImageSampler(
+                        3, m_multiScatteringLutOutput->View(), m_multiScatteringLutOutput->Sampler()),
+                    ComputeDescriptorWrite::StorageImage(4, dest.view),
+                });
+
+            // One dispatch group covers exactly ONE froxel column each -
+            // never dispatched across Z at all (kAerialPerspectiveVolumeLocalSizeZ
+            // == 1, and the Z axis's own "total items" is 1, not the
+            // volume's real depth - each invocation loops every Z slice
+            // internally, see AtmosphereAerialPerspectiveVolume.comp).
+            const Extent3D groupCounts = ComputeGroupCount3D(
+                Extent3D{ static_cast<std::uint32_t>(kAerialPerspectiveVolumeWidth),
+                    static_cast<std::uint32_t>(kAerialPerspectiveVolumeHeight), 1 },
+                Extent3D{ kAerialPerspectiveVolumeLocalSizeX, kAerialPerspectiveVolumeLocalSizeY,
+                    kAerialPerspectiveVolumeLocalSizeZ });
+
+            renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
+            renderer.Dispatch(*m_aerialPerspectiveVolumePipeline, viewState.descriptorSet.Native(), nullptr, 0,
+                groupCounts.width, groupCounts.height, groupCounts.depth);
             renderer.EndGraphPassRecording();
         });
 

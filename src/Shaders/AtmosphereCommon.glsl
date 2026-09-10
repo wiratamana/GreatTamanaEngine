@@ -367,6 +367,14 @@ struct AtmosphereFrameUniforms {
 
     vec3 sunIlluminance;
     float _pad2;
+
+    // Phase 6 (ATMOSPHERE_PHASE6_AERIAL_PERSPECTIVE_FROXEL_VOLUME_v1.md) -
+    // this view's combined view-projection matrix, ALREADY INVERTED on the
+    // CPU side (see AtmosphereTypes.h's own doc comment on this field) -
+    // used by FroxelColumnToViewRayDirection() below. A plain GLSL `mat4`
+    // is already exactly 4 vec4 columns (64 bytes) with no extra padding,
+    // matching Mat4::Data()'s column-major layout exactly.
+    mat4 invViewProjection;
 };
 
 // ----------------------------------------------------------------------
@@ -526,6 +534,78 @@ vec2 ViewDirectionToSkyViewLutUv(vec3 direction, ivec2 lutSize, float viewHeight
     uv.x = fract(0.5 - phi / (2.0 * kAtmospherePi));
 
     return vec2(SkyViewLutUnitToSubUv(uv.x, float(lutSize.x)), SkyViewLutUnitToSubUv(uv.y, float(lutSize.y)));
+}
+
+// ----------------------------------------------------------------------
+// Aerial Perspective froxel volume (Phase 6,
+// ATMOSPHERE_PHASE6_AERIAL_PERSPECTIVE_FROXEL_VOLUME_v1.md) - Z-slice <->
+// view-depth mapping, transcribed from
+// _reference/pl-sky/shaders/sky_aerial_lut.comp's own pl_aerial_depth():
+// a QUADRATIC (depthExponent = 2.0 by default) distance distribution that
+// concentrates slices near the camera, where aerial perspective changes
+// fastest per unit depth. `slice`/`sliceCount` may be fractional (a slice
+// BOUNDARY, e.g. 0..volumeDepth inclusive), matching the reference's own
+// call convention (it calls this with both `slice` and `slice + 1` to get
+// one Z slice's near/far distance).
+// ----------------------------------------------------------------------
+
+// slice boundary -> view-space distance, in the SAME kilometers every
+// other AtmosphereMath.h/AtmosphereCommon.glsl quantity uses.
+float FroxelSliceToViewDepth(float slice, float sliceCount, float maxDistanceKm, float depthExponent)
+{
+    float u = clamp(slice / max(sliceCount, 1e-6), 0.0, 1.0);
+    return maxDistanceKm * pow(u, depthExponent);
+}
+
+// The inverse of FroxelSliceToViewDepth() above - view-space distance ->
+// (fractional) slice boundary. Not needed by this phase's own generation
+// pass (which only ever walks `slice` forward, an integer, and derives its
+// OWN distance via the forward function above), but declared now for a
+// LATER phase that needs to map a REAL on-screen pixel's own view-space
+// depth back into this volume's Z axis (Phase 7's aerial-perspective
+// composite pass) - mirrors this file's own "add the inverse too, for a
+// later phase" precedent (see HeightZenithToTransmittanceLutUv() above).
+float ViewDepthToFroxelSlice(float viewDepthKm, float sliceCount, float maxDistanceKm, float depthExponent)
+{
+    float u = clamp(viewDepthKm / max(maxDistanceKm, 1e-6), 0.0, 1.0);
+    return pow(u, 1.0 / max(depthExponent, 1e-6)) * sliceCount;
+}
+
+// Froxel COLUMN (x, y) -> world-space view-ray DIRECTION - the X/Y
+// counterpart of the Z-slice mapping above. Reconstructs the direction by
+// unprojecting two NDC points (the near and far plane, at this froxel
+// column's own center) through `invViewProjection` and taking the
+// normalized difference - a standard, handedness/projection-convention-
+// agnostic technique (works for ANY invertible view-projection matrix,
+// unlike _reference/pl-sky's own pl_get_aerial_view_direction(), which
+// instead reads specific diagonal entries of a SEPARATE inverse-projection
+// matrix and rotates by an inverse-view 3x3 - a shortcut that assumes a
+// particular symmetric-perspective matrix layout). `froxelXY` is a texel
+// index (0-based); `volumeXYSize` is the volume's own X/Y resolution
+// (`imageSize(destinationVolume).xy` at the call site).
+vec3 FroxelColumnToViewRayDirection(ivec2 froxelXY, ivec2 volumeXYSize, mat4 invViewProjection)
+{
+    vec2 uv = (vec2(froxelXY) + vec2(0.5)) / vec2(volumeXYSize);
+    vec2 ndc = uv * 2.0 - 1.0;
+
+    // Vulkan's ZERO-TO-ONE clip-space depth range (see
+    // Mat4::PerspectiveFovLH_ZO) - near plane at NDC z = 0, far plane at
+    // NDC z = 1.
+    vec4 nearClip = vec4(ndc, 0.0, 1.0);
+    vec4 farClip = vec4(ndc, 1.0, 1.0);
+
+    vec4 nearWorld4 = invViewProjection * nearClip;
+    vec4 farWorld4 = invViewProjection * farClip;
+
+    vec3 nearWorld = nearWorld4.xyz / nearWorld4.w;
+    vec3 farWorld = farWorld4.xyz / farWorld4.w;
+
+    // Only the DIRECTION matters here (never an absolute position) - world
+    // space and this file's own planet-centered atmosphere-space frame
+    // share the same orientation (just a different origin/scale), so this
+    // direction is directly usable as-is for the ray-march below, with no
+    // further transform needed.
+    return normalize(farWorld - nearWorld);
 }
 
 #endif // ATMOSPHERE_COMMON_GLSL

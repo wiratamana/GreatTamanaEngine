@@ -166,6 +166,11 @@ VolumeTextureHandle RenderGraphBuilder::ImportVolumeTexture(
     return VolumeTextureHandle{ index, 1 };
 }
 
+void RenderGraphBuilder::KeepVolumeTextureOutput(VolumeTextureHandle handle)
+{
+    m_finalVolumeTextureOutputs.push_back(handle);
+}
+
 CompiledGraphInput RenderGraphBuilder::Finish()
 {
     CompiledGraphInput input;
@@ -179,6 +184,7 @@ CompiledGraphInput RenderGraphBuilder::Finish()
     input.volumeTextureDescs = std::move(m_volumeTextureDescs);
     input.volumeTextureNames = std::move(m_volumeTextureNames);
     input.volumeTextureImportInfo = std::move(m_volumeTextureImportInfo);
+    input.finalVolumeTextureOutputs = std::move(m_finalVolumeTextureOutputs);
     return input;
 }
 

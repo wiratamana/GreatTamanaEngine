@@ -132,6 +132,24 @@ struct CompiledGraphInput {
     std::vector<VolumeTextureDesc> volumeTextureDescs;
     std::vector<const char*> volumeTextureNames;
     std::vector<VolumeTextureImportInfo> volumeTextureImportInfo;
+
+    // Atmosphere Scattering campaign, Phase 6
+    // (ATMOSPHERE_PHASE6_AERIAL_PERSPECTIVE_FROXEL_VOLUME_v1.md) - fixes a
+    // genuine Phase 2 infrastructure gap this phase found: RenderGraphCompiler::
+    // Compile()'s `finalOutputs` root set is TextureHandle-only, so a pass
+    // whose ONLY write is a VolumeTextureHandle (e.g. this campaign's own
+    // aerial-perspective froxel volume) could NEVER be kept alive - its
+    // write is structurally unreachable from any texture-only root, so it
+    // was always silently culled, no matter what it declared. Rather than
+    // changing every existing `RenderGraph::Execute()` `build` callback's
+    // return type (which is texture-only, `std::vector<TextureHandle>`, and
+    // used by every pre-existing call site), RenderGraphBuilder gained a
+    // SEPARATE, opt-in way to mark a VolumeTextureHandle as a required root
+    // - see RenderGraphBuilder::KeepVolumeTextureOutput() below.
+    // RenderGraphCompiler::Compile() reads THIS field directly off `input`
+    // (it already takes `CompiledGraphInput&`) rather than needing a new
+    // parameter of its own.
+    std::vector<VolumeTextureHandle> finalVolumeTextureOutputs;
 };
 
 
@@ -300,6 +318,23 @@ public:
     VolumeTextureHandle ImportVolumeTexture(
         const char* name, const VolumeTarget& externalVolumeTarget, VkImageLayout currentLayout);
 
+    // Atmosphere Scattering campaign, Phase 6
+    // (ATMOSPHERE_PHASE6_AERIAL_PERSPECTIVE_FROXEL_VOLUME_v1.md) - marks
+    // `handle` as a REQUIRED root the compiler must keep alive, the
+    // VolumeTextureHandle counterpart of `RenderGraph::Execute()`'s own
+    // `build` callback returning a `std::vector<TextureHandle>` -
+    // deliberately a SEPARATE call rather than changing that callback's
+    // return type (which is texture-only and shared by every existing call
+    // site) - see CompiledGraphInput::finalVolumeTextureOutputs above for
+    // the full reasoning behind this specific shape. A pass whose only
+    // write is a VolumeTextureHandle that is NEVER passed to this method
+    // (directly, or read by some other pass that is itself kept alive) is
+    // silently culled, exactly like an ordinary TextureHandle that never
+    // reaches `finalOutputs`. Safe to call more than once for the same
+    // handle (idempotent - RenderGraphCompiler::Compile()'s own root-
+    // marking scan only ever needs `handle` to appear at least once).
+    void KeepVolumeTextureOutput(VolumeTextureHandle handle);
+
     // `name` must be a string literal (mirrors GTE_PROFILE_SCOPE's own
     // static-storage-duration requirement - see AGENTS.md, "Profiling").
     // `setup` runs IMMEDIATELY, synchronously, exactly once, right here in
@@ -376,6 +411,10 @@ private:
     std::vector<VolumeTextureDesc> m_volumeTextureDescs;
     std::vector<const char*> m_volumeTextureNames;
     std::vector<VolumeTextureImportInfo> m_volumeTextureImportInfo;
+
+    // Atmosphere Scattering campaign, Phase 6 - see
+    // CompiledGraphInput::finalVolumeTextureOutputs above.
+    std::vector<VolumeTextureHandle> m_finalVolumeTextureOutputs;
 };
 
 } // namespace gte::rg

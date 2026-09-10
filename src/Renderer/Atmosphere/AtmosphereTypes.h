@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../../Math/Mat4.h"
 #include "../../Math/Vec3.h"
 
 #include <cstdint>
@@ -133,9 +134,7 @@ static_assert(sizeof(AtmosphereParametersGpu) == 96,
 // The PER-FRAME values every atmosphere-sampling pass from Phase 5 onward
 // needs, threaded in alongside AtmosphereParametersGpu above (which changes
 // only when the atmosphere's own physical constants change, i.e. almost
-// never). Phase 6 is expected to add a couple more fields here (ray-march
-// sample-count knobs for the aerial perspective volume) - deliberately NOT
-// added speculatively now, per this phase's own "What We Will NOT Do" scope.
+// never).
 struct AtmosphereFrameUniforms {
     // Group 1 (16 bytes): the camera's position in ATMOSPHERE-SPACE
     // kilometers (see AtmosphereParameters.h's
@@ -155,10 +154,34 @@ struct AtmosphereFrameUniforms {
     // reserved padding float.
     Vec3 sunIlluminance = Vec3::One();
     float _pad2 = 0.0f;
+
+    // Groups 4-7 (64 bytes, Phase 6 -
+    // ATMOSPHERE_PHASE6_AERIAL_PERSPECTIVE_FROXEL_VOLUME_v1.md): this VIEW's
+    // combined view-projection matrix, ALREADY INVERTED on the CPU side
+    // (never inverted in the shader - a 4x4 inverse is comparatively
+    // expensive and this value is only ever computed once per view per
+    // frame here, vs. once per froxel COLUMN if done in
+    // AtmosphereAerialPerspectiveVolume.comp instead). Needed to reconstruct
+    // a world-space view-ray DIRECTION for a given froxel column
+    // (AtmosphereCommon.glsl's FroxelColumnToViewRayDirection() unprojects
+    // two NDC points - near/far plane - through this matrix and takes their
+    // difference, which is handedness/projection-convention-agnostic,
+    // unlike pl-sky's own inverse-projection-diagonal shortcut - see this
+    // phase's own completion report for the full reasoning). `mat4` is
+    // ALREADY exactly 4 vec4 columns (64 bytes, 16-byte-aligned per column)
+    // in both this engine's own Mat4 layout (column-major, see Math/Mat4.h)
+    // AND GLSL's std140/std430 mat4 layout - no padding needed, matching
+    // Mat4::Data()'s existing "uploads with zero transpose" contract.
+    // Defaults to Identity() (never Mat4()'s own all-zero default - see
+    // Mat4.h) so a caller that forgets to set this (e.g. the Sky-View LUT's
+    // own call site, which does not need this field at all) still uploads
+    // an invertible, harmless placeholder rather than a singular all-zero
+    // matrix.
+    Mat4 invViewProjection = Mat4::Identity();
 };
-static_assert(sizeof(AtmosphereFrameUniforms) == 48,
+static_assert(sizeof(AtmosphereFrameUniforms) == 112,
     "AtmosphereFrameUniforms must be exactly three 16-byte std140/std430-"
-    "compatible groups (3 * 16 = 48 bytes) - see each group's own doc "
-    "comment above.");
+    "compatible groups (3 * 16 = 48 bytes) plus one 64-byte mat4 group "
+    "(48 + 64 = 112 bytes) - see each group's own doc comment above.");
 
 } // namespace gte

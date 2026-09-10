@@ -17,6 +17,22 @@ bool ContainsTextureHandle(std::span<const TextureHandle> handles, const Texture
     return false;
 }
 
+// Atmosphere Scattering campaign, Phase 6
+// (ATMOSPHERE_PHASE6_AERIAL_PERSPECTIVE_FROXEL_VOLUME_v1.md) - the
+// VolumeTextureHandle sibling of ContainsTextureHandle() above, used by the
+// root-marking scan below to fix a genuine Phase 2 gap (see
+// CompiledGraphInput::finalVolumeTextureOutputs's own doc comment,
+// RenderGraphBuilder.h).
+bool ContainsVolumeTextureHandle(std::span<const VolumeTextureHandle> handles, const VolumeTextureHandle& handle)
+{
+    for (const VolumeTextureHandle& candidate : handles) {
+        if (candidate == handle) {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 // Implementation note on cycle detection (Step 3.2.3's Kahn's-algorithm
@@ -148,30 +164,53 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
 
     // --- Step 2: backward reachability from finalOutputs (Step 3.2.2) ---
     //
-    // Every pass that writes a `finalOutputs` texture is a root; walking
-    // backwards along edgeExists from every root marks every pass that
-    // (directly or transitively) contributes to a final output as
+    // Every pass that writes a `finalOutputs` texture (or a
+    // `finalVolumeTextureOutputs` volume texture - see below) is a root;
+    // walking backwards along edgeExists from every root marks every pass
+    // that (directly or transitively) contributes to a final output as
     // "kept". Everything never reached is dead code - PassRecord::isCulled
     // gets written `true` for exactly those passes, and none of their
     // declared reads/writes are allowed to extend any resource's lifetime
     // (Step 4 below only ever scans `executionOrder`, which excludes
     // them entirely).
     //
-    // NOTE (Atmosphere Scattering campaign, Phase 2 precheck): this scan is
-    // ALREADY correctly three-way-safe as written - `usage.kind ==
-    // ResourceKind::Texture` is the only branch that can ever mark a pass
-    // "kept" here, so neither a Buffer NOR a VolumeTexture usage can ever
-    // be treated as a finalOutputs root (matching the existing,
-    // deliberate rule that a BufferHandle can't be one either - see
-    // RenderGraphCompiler.h's own Compile() doc comment). No code change
-    // was needed at this specific site.
+    // UPDATED (Atmosphere Scattering campaign, Phase 6 -
+    // ATMOSPHERE_PHASE6_AERIAL_PERSPECTIVE_FROXEL_VOLUME_v1.md): this scan
+    // used to be "ALREADY correctly three-way-safe as written" per Phase
+    // 2's own precheck - true as far as it went (a Buffer usage could
+    // never accidentally be treated as a root), but that same
+    // "usage.kind == ResourceKind::Texture is the only branch that marks a
+    // pass kept" property was ALSO a genuine correctness GAP, not just a
+    // safety guarantee: it meant a VolumeTextureHandle could NEVER be a
+    // root either, so a pass whose only write was a VolumeTextureHandle
+    // (e.g. this campaign's own Phase 6 aerial-perspective froxel volume)
+    // was ALWAYS silently culled, no matter what it declared - discovered
+    // directly by this phase's own real workload (see
+    // ATMOSPHERE_PHASE6_COMPLETION_REPORT.md). Fixed here by ALSO checking
+    // `input.finalVolumeTextureOutputs` (populated via
+    // RenderGraphBuilder::KeepVolumeTextureOutput() - see
+    // RenderGraphBuilder.h) for a VolumeTexture write - a BufferHandle
+    // still can never be a root (matching the existing, deliberate rule
+    // that it never could be one either).
     std::vector<bool> kept(static_cast<std::size_t>(passCount), false);
     std::vector<std::int32_t> stack;
 
     for (std::int32_t i = 0; i < passCount; ++i) {
         const PassRecord& pass = input.passes[static_cast<std::size_t>(i)];
         for (const ResourceUsage& usage : pass.writes) {
-            if (usage.kind == ResourceKind::Texture && ContainsTextureHandle(finalOutputs, usage.texture)) {
+            bool isRoot = false;
+            switch (usage.kind) {
+            case ResourceKind::Texture:
+                isRoot = ContainsTextureHandle(finalOutputs, usage.texture);
+                break;
+            case ResourceKind::Buffer:
+                isRoot = false;
+                break;
+            case ResourceKind::VolumeTexture:
+                isRoot = ContainsVolumeTextureHandle(input.finalVolumeTextureOutputs, usage.volumeTexture);
+                break;
+            }
+            if (isRoot) {
                 if (!kept[static_cast<std::size_t>(i)]) {
                     kept[static_cast<std::size_t>(i)] = true;
                     stack.push_back(i);

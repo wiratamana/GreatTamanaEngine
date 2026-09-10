@@ -399,37 +399,46 @@ int Application::Run()
                         // Phase 3 (task_manager/atmosphere-scattering-1/
                         // ATMOSPHERE_PHASE3_TRANSMITTANCE_LUT_v1.md) +
                         // Phase 4 (ATMOSPHERE_PHASE4_MULTISCATTERING_LUT_v1.md) +
-                        // Phase 5 (ATMOSPHERE_PHASE5_SKYVIEW_LUT_v1.md) -
-                        // TEMPORARY validation call site: declares the
-                        // Transmittance LUT, Multi-Scattering LUT, AND
-                        // (Game-View-only, per Phase 5's own "What We Will
-                        // NOT Do") Sky-View LUT compute passes into this SAME
+                        // Phase 5 (ATMOSPHERE_PHASE5_SKYVIEW_LUT_v1.md) +
+                        // Phase 6 (ATMOSPHERE_PHASE6_AERIAL_PERSPECTIVE_FROXEL_VOLUME_v1.md)
+                        // - TEMPORARY validation call site: declares the
+                        // Transmittance LUT, Multi-Scattering LUT, Sky-View
+                        // LUT, AND (Game-View-only, per Phase 5/6's own
+                        // "What We Will NOT Do") the Aerial Perspective
+                        // froxel volume compute passes into this SAME
                         // offscreen Execute() call so they actually run (and
-                        // are visible via GET
+                        // the 2D LUTs are visible via GET
                         // /get_texture?texture_name=AtmosphereTransmittanceLut
                         // / AtmosphereMultiScatteringLut /
-                        // AtmosphereSkyViewLut_GameView) every frame,
-                        // completely independent of whether Game/Scene are
-                        // visible this frame. Fixed default Earth parameters
-                        // only - no Editor parameter editing yet (Phase 8),
-                        // no dirty-flag optimization yet (Phase 3/4/5's own
-                        // "What We Will NOT Do"). Multi-Scattering MUST be
-                        // declared strictly AFTER Transmittance, and Sky-View
-                        // strictly AFTER both (each needs the previous
-                        // pass(es)' own returned TextureHandle(s) as its own
-                        // argument, and reads them as real render-graph
-                        // dependencies - see AddMultiScatteringLutPass()'s/
-                        // AddSkyViewLutPass()'s own ReadTexture()
+                        // AtmosphereSkyViewLut_GameView every frame - the
+                        // Phase 6 volume itself has no `/get_texture`
+                        // equivalent, per Phase 2's own explicit scope note;
+                        // see this phase's own completion report for how it
+                        // was instead verified), completely independent of
+                        // whether Game/Scene are visible this frame. Fixed
+                        // default Earth parameters only - no Editor
+                        // parameter editing yet (Phase 8), no dirty-flag
+                        // optimization yet (Phase 3/4/5/6's own "What We
+                        // Will NOT Do"). Multi-Scattering MUST be declared
+                        // strictly AFTER Transmittance, Sky-View strictly
+                        // AFTER both, and the Aerial Perspective volume
+                        // strictly AFTER Transmittance/Multi-Scattering too
+                        // (each needs the previous pass(es)' own returned
+                        // TextureHandle(s) as its own argument, and reads
+                        // them as real render-graph dependencies - see
+                        // AddMultiScatteringLutPass()'s/AddSkyViewLutPass()'s/
+                        // AddAerialPerspectiveVolumePass()'s own ReadTexture()
                         // declarations).
                         // TODO(ATMOSPHERE_PHASE7): relocate into the real
                         // atmosphere pass sequence once the sky
                         // background/aerial-perspective composite passes
                         // exist - do NOT delete this call site in the
-                        // meantime (Phase 6 builds directly on these passes
-                        // running every frame; Phase 5 also deliberately
-                        // leaves Scene View's own Sky-View LUT unwired here,
-                        // per its own "What We Will NOT Do" - Phase 7 is
-                        // what wires that up for real).
+                        // meantime (Phase 7 builds directly on these passes
+                        // running every frame; Phase 5/6 also deliberately
+                        // leave Scene View's own Sky-View LUT/Aerial
+                        // Perspective volume unwired here, per their own
+                        // "What We Will NOT Do" - Phase 7 is what wires that
+                        // up for real).
                         const AtmosphereParametersGpu atmosphereParameters = MakeDefaultEarthAtmosphereParameters();
                         const rg::TextureHandle transmittanceLutHandle =
                             m_atmosphereLutRenderer.AddTransmittanceLutPass(b, m_renderer, atmosphereParameters);
@@ -449,6 +458,45 @@ int Application::Run()
                         outputs.push_back(m_atmosphereLutRenderer.AddSkyViewLutPass(b, m_renderer, atmosphereParameters,
                             gameViewFrameUniforms, transmittanceLutHandle, multiScatteringLutHandle,
                             "AtmosphereSkyViewLut_GameView"));
+
+                        // Atmosphere Scattering + Aerial Perspective
+                        // campaign, Phase 6
+                        // (ATMOSPHERE_PHASE6_AERIAL_PERSPECTIVE_FROXEL_VOLUME_v1.md)
+                        // - Game View only, per this phase's own "Extend
+                        // the running temporary validation call site"
+                        // instruction (Scene View wiring stays Phase 7's
+                        // job, same as the Sky-View LUT above). Reuses
+                        // `gameViewFrameUniforms` (same eye position/
+                        // hardcoded sun) but ALSO needs the Game View's
+                        // own current view-projection matrix, inverted on
+                        // the CPU, to reconstruct per-froxel-column ray
+                        // directions (AtmosphereFrameUniforms::
+                        // invViewProjection, new this phase) - falls back
+                        // to a fixed 16:9 aspect when the Game View panel
+                        // isn't currently visible this frame (gameTarget ==
+                        // nullptr), mirroring how this whole block already
+                        // runs completely independent of Game/Scene
+                        // visibility.
+                        constexpr float kAerialPerspectiveFallbackAspect = 16.0f / 9.0f;
+                        const float gameViewAerialAspect = (gameTarget != nullptr)
+                            ? AspectRatioOf(static_cast<int>(gameTarget->Extent().width),
+                                  static_cast<int>(gameTarget->Extent().height))
+                            : kAerialPerspectiveFallbackAspect;
+                        const Mat4 gameViewViewProjection =
+                            RenderSystem::ResolveActiveCameraViewProjection(m_game.GetRegistry(), gameViewAerialAspect);
+                        AtmosphereFrameUniforms gameViewAerialFrameUniforms = gameViewFrameUniforms;
+                        gameViewAerialFrameUniforms.invViewProjection = gameViewViewProjection.Inverse();
+                        const rg::VolumeTextureHandle aerialPerspectiveVolumeHandle =
+                            m_atmosphereLutRenderer.AddAerialPerspectiveVolumePass(b, m_renderer, atmosphereParameters,
+                                gameViewAerialFrameUniforms, transmittanceLutHandle, multiScatteringLutHandle,
+                                "AtmosphereAerialPerspectiveVolume_GameView");
+                        // A VolumeTextureHandle can never go into `outputs`
+                        // (TextureHandle-only) - see
+                        // RenderGraphBuilder::KeepVolumeTextureOutput()'s
+                        // own doc comment for why this is a SEPARATE call,
+                        // and ATMOSPHERE_PHASE6_COMPLETION_REPORT.md for
+                        // the real Phase 2 gap this fixes.
+                        b.KeepVolumeTextureOutput(aerialPerspectiveVolumeHandle);
 
                         if (gameTarget != nullptr) {
                             const VkExtent2D extent = gameTarget->Extent();

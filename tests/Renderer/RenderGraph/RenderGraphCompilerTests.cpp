@@ -457,6 +457,77 @@ TEST(RenderGraphCompilerTest, BufferOnlyWriteSurvivesCullingOnlyWhenAReaderReach
     EXPECT_TRUE(input.passes[2].isCulled);
 }
 
+// --- Atmosphere Scattering campaign, Phase 6's own VolumeTextureHandle
+// root-set fix (ATMOSPHERE_PHASE6_AERIAL_PERSPECTIVE_FROXEL_VOLUME_v1.md) -
+//
+// Before this phase, `finalOutputs` was the ONLY root set Compile() ever
+// consulted, and it is TextureHandle-only - a pass whose ONLY declared
+// write was a VolumeTextureHandle had structurally NO way to survive
+// culling, no matter what it wrote (this was a genuine Phase 2
+// infrastructure gap, discovered by Phase 6's own real workload - see
+// ATMOSPHERE_PHASE6_COMPLETION_REPORT.md). RenderGraphBuilder::
+// KeepVolumeTextureOutput() is the fix: a SECOND, independent root set
+// (CompiledGraphInput::finalVolumeTextureOutputs) Compile() now also
+// checks. VolumeA is explicitly kept via KeepVolumeTextureOutput() and
+// must survive; VolumeB is written but never kept/read by anything and
+// must still be culled, proving this fix is correctly OPT-IN, not a
+// blanket "every volume texture write always survives" regression.
+TEST(RenderGraphCompilerTest, VolumeTextureOnlyWriteSurvivesCullingOnlyWhenExplicitlyKeptAsOutput)
+{
+    RenderGraphBuilder builder;
+    const VolumeTarget dummyVolumeTarget{};
+    const VolumeTextureHandle volumeA =
+        builder.ImportVolumeTexture("VolA", dummyVolumeTarget, VK_IMAGE_LAYOUT_UNDEFINED);
+    const VolumeTextureHandle volumeB =
+        builder.ImportVolumeTexture("VolB", dummyVolumeTarget, VK_IMAGE_LAYOUT_UNDEFINED);
+
+    builder.AddComputePass(
+        "WritesKeptVolume",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.WriteVolumeTexture(volumeA, ResourceAccess::ComputeShaderWrite);
+        },
+        NoOpExecute); // index 0 - its only write is explicitly kept as a root below.
+    builder.AddComputePass(
+        "WritesUnkeptVolume",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.WriteVolumeTexture(volumeB, ResourceAccess::ComputeShaderWrite);
+        },
+        NoOpExecute); // index 1 - writes a DIFFERENT volume texture, never kept/read - dead code.
+
+    builder.KeepVolumeTextureOutput(volumeA);
+
+    CompiledGraphInput input = builder.Finish();
+    const CompiledGraph compiled = Compile(input, {});
+
+    EXPECT_TRUE(ExecutionOrderEquals(compiled.executionOrder, { 0 }));
+    EXPECT_FALSE(input.passes[0].isCulled);
+    EXPECT_TRUE(input.passes[1].isCulled);
+}
+
+TEST(RenderGraphCompilerTest, VolumeTextureWriteNeverKeptIsCulledEvenWithNoTextureFinalOutputsAtAll)
+{
+    RenderGraphBuilder builder;
+    const VolumeTarget dummyVolumeTarget{};
+    const VolumeTextureHandle volume = builder.ImportVolumeTexture("Vol", dummyVolumeTarget, VK_IMAGE_LAYOUT_UNDEFINED);
+
+    builder.AddComputePass(
+        "WritesVolume",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.WriteVolumeTexture(volume, ResourceAccess::ComputeShaderWrite);
+        },
+        NoOpExecute);
+
+    // Deliberately never call KeepVolumeTextureOutput() - this is the exact
+    // pre-fix behavior (and remains correct post-fix): a volume texture
+    // write nobody ever marks as a root is dead code, same as any other
+    // never-read/never-kept resource.
+    CompiledGraphInput input = builder.Finish();
+    const CompiledGraph compiled = Compile(input, {});
+
+    EXPECT_TRUE(compiled.executionOrder.empty());
+    EXPECT_TRUE(input.passes[0].isCulled);
+}
+
 // --- GPU Vertex Skinning campaign, Phase 3's own WAW-hazard mitigation -----
 // (GPU_SKINNING_PHASE3_RENDERGRAPH_SYNCHRONIZATION_STRATEGY_v2.md, Step 3.6) -
 //
