@@ -406,6 +406,11 @@ add_library(gte_core STATIC
     src/Renderer/GpuSkinning/GpuSkinningTypes.cpp
     src/Renderer/GpuSkinning/GpuSkinningPipelines.h
     src/Renderer/GpuSkinning/GpuSkinningPipelines.cpp
+    src/Renderer/Atmosphere/AtmosphereTypes.h
+    src/Renderer/Atmosphere/AtmosphereParameters.h
+    src/Renderer/Atmosphere/AtmosphereParameters.cpp
+    src/Renderer/Atmosphere/AtmosphereMath.h
+    src/Renderer/Atmosphere/AtmosphereMath.cpp
     src/Renderer/Primitives/PrimitiveMeshGenerator.cpp
     src/Renderer/Primitives/PrimitiveMeshGenerator.h
     src/Renderer/Memory/GpuResourceHandle.h
@@ -779,6 +784,17 @@ endif()
 if(GTE_ENABLE_EDITOR)
     gte_add_shader(GreatTamanaEngine src/Shaders/BoxBlur.comp)
 endif()
+
+# Atmosphere Scattering + Aerial Perspective campaign (Phase 1 -
+# task_manager/atmosphere-scattering-1/
+# ATMOSPHERE_PHASE1_REFERENCE_ANALYSIS_AND_PHYSICAL_MODEL_FOUNDATIONS_v1.md).
+# No .comp/.frag shader source exists yet in this campaign (that starts
+# Phase 3) - src/Shaders/AtmosphereCommon.glsl is a placeholder shared-math
+# include target only, not compiled on its own (glslc only ever compiles a
+# real .vert/.frag/.comp entry point; a plain .glsl include file is never
+# passed to gte_add_shader() directly - it is added to a future shader's own
+# EXTRA_DEPENDS instead, see cmake/CompileShaders.cmake).
+
 
 # Ensures SDL3.dll is copied next to the built .exe after every build.
 sdl3_copy_runtime_dll(GreatTamanaEngine)

@@ -140,6 +140,37 @@
 #                                            file is deliberately
 #                                            Vulkan-header-free, same
 #                                            precedent as GpuTiming.h.
+#   - Renderer/Atmosphere/AtmosphereMathTests.cpp - Atmosphere Scattering +
+#                                            Aerial Perspective campaign,
+#                                            Phase 1 (task_manager/
+#                                            atmosphere-scattering-1/
+#                                            ATMOSPHERE_PHASE1_REFERENCE_ANALYSIS_AND_PHYSICAL_MODEL_FOUNDATIONS_v1.md)
+#                                            - the permanent CPU oracle
+#                                            (src/Renderer/Atmosphere/
+#                                            AtmosphereMath.h/.cpp,
+#                                            AtmosphereParameters.h/.cpp):
+#                                            density-profile monotonicity/
+#                                            sea-level normalization
+#                                            (Rayleigh/Mie), the ozone tent
+#                                            profile's peak/symmetry/zero
+#                                            edges, transmittance always
+#                                            within [0,1] per channel and
+#                                            correctly smaller at sea level
+#                                            than at high altitude for the
+#                                            same direction, both phase
+#                                            functions integrating to ~1.0
+#                                            over the full sphere (numeric
+#                                            integration) plus hand-computed
+#                                            spot values, the default Earth
+#                                            parameters matching the cited
+#                                            reference values verbatim, and
+#                                            the world-unit<->kilometer
+#                                            conversion helper. No Vulkan/
+#                                            Renderer/live GPU device
+#                                            involved at all - deliberately
+#                                            Vulkan-header-free, same
+#                                            precedent as GpuTiming.h/
+#                                            GpuSkinningTypes.h above.
 #   - Renderer/RenderGraph/RenderGraphTypesTests.cpp - Render Graph Phase 1's
 #                                            pure vocabulary (handles/
 #                                            ResourceAccess/TextureDesc/
@@ -1691,6 +1722,7 @@ set(GTE_TEST_SOURCES
     Renderer/GpuTimingTests.cpp
     Renderer/ComputeDispatchTests.cpp
     Renderer/GpuSkinning/GpuSkinningTypesTests.cpp
+    Renderer/Atmosphere/AtmosphereMathTests.cpp
     Renderer/RenderGraph/RenderGraphTypesTests.cpp
     Renderer/RenderGraph/RenderGraphBuilderTests.cpp
     Renderer/RenderGraph/RenderGraphCompilerTests.cpp

@@ -4,6 +4,11 @@
 /build_network_off/
 /out/
 
+# Local reference-only clones for research (see task_manager/atmosphere-scattering-1/
+# ATMOSPHERE_PHASE0_MASTER_STRATEGY_v1.md, Locked Design Decision 3) - a study
+# aid only, never added to CMake/compiled/linked, never committed.
+/_reference/
+
 # Local-machine-only build tool shim (e.g. a fetched ninja.exe for dev boxes
 # missing a build tool) - not part of the project, never committed.
 /build_tools/
