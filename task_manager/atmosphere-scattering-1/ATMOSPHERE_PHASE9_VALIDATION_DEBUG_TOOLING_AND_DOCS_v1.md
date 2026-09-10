@@ -3,6 +3,16 @@
 ### Child document 9 of 9 (final phase) — see `ATMOSPHERE_PHASE0_MASTER_STRATEGY_v1.md` for the full campaign map.
 ### Depends on: every prior phase (1-8) fully landed. This is the ONLY phase allowed to run a full build + full `ctest` regression pass and update `README.md`/`AGENTS.md`/`TODO.md`, per Phase 0's own workflow rule.
 
+> **Revision Notes (double-check pass, 2026-09-10):** confirmed
+> `src/Editor/GpuSkinningValidation.h/.cpp` really is the exact
+> Editor-only/self-contained-`ImmediateSubmit()`/no-`RenderGraph`-dependency
+> shape 3.1 asks to mirror — a good, accurate precedent to copy. No other
+> changes needed; this phase's own readback approach (`vkCmdCopyImageToBuffer`
+> against `AtmosphereTransmittanceLut`, a plain image copy) is unaffected by
+> the binding-type/depth-sampling corrections made to Phases 3/7 — those are
+> prerequisites this phase can simply assume are already landed and working
+> by the time it starts, per the normal one-phase-at-a-time campaign order.
+
 ## Step 1: The Goal
 
 Close out the campaign: prove the Transmittance LUT's GPU output is

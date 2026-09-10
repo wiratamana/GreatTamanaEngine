@@ -3,6 +3,15 @@
 ### Child document 6 of 9 — see `ATMOSPHERE_PHASE0_MASTER_STRATEGY_v1.md` for the full campaign map.
 ### Depends on: Phase 2 (`VolumeTexture` + RenderGraph 3rd resource kind), Phase 3 (`"AtmosphereTransmittanceLut"`), Phase 4 (`"AtmosphereMultiScatteringLut"`), Phase 5 (`AtmosphereFrameUniforms` resolution helper).
 
+> **Revision Notes (double-check pass, 2026-09-10):** one correction carried
+> forward from Phase 3's own corrected document: `AtmosphereParametersGpu`/
+> `AtmosphereFrameUniforms` bind as read-only STORAGE buffers, never true
+> `uniform` blocks (the engine has no `VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER`
+> support anywhere today) — reflected inline below. This phase's own
+> `VolumeTexture`/`rgba16f` format choice is unaffected (already an explicit
+> float format, per Phase 2). Everything else in this document was
+> confirmed accurate against the real source.
+
 This is the pass that actually produces **aerial perspective** — everything
 before this phase only produced sky-background data. This is also the second
 highest-risk phase in the campaign (after Phase 2), since it is the first
@@ -83,8 +92,12 @@ screen-space column and its actual depth-mapped Z slice, and blends:
   view-projection matrix to reconstruct ray directions per column — extend
   `AtmosphereFrameUniforms`, per Phase 1's own forward-looking note that it
   would likely grow, with an `invViewProjection` `mat4` field, or pass it as
-  a separate small per-view uniform buffer/push-constant if that fits the
-  existing convention better — either is fine, document the choice),
+  a separate small per-view read-only storage buffer/push-constant if that
+  fits the existing convention better — either is fine, document the
+  choice; either way, both `AtmosphereParametersGpu` and
+  `AtmosphereFrameUniforms` bind as read-only STORAGE buffers here, never
+  true `uniform` blocks — see `ATMOSPHERE_PHASE3_TRANSMITTANCE_LUT_v1.md`'s
+  corrected Step 2),
   `sampler2D transmittanceLut`, `sampler2D multiScatteringLut`, `image3D
   destinationVolume` (format matches Phase 2's `VolumeTexture`, e.g.
   `rgba16f`). Each invocation loops `z` from 0 to `depth-1`, converting `z`

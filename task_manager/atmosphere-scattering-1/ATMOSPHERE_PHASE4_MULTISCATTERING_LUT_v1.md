@@ -3,6 +3,18 @@
 ### Child document 4 of 9 — see `ATMOSPHERE_PHASE0_MASTER_STRATEGY_v1.md` for the full campaign map.
 ### Depends on: Phase 3's `AtmosphereLutRenderer` + `"AtmosphereTransmittanceLut"` texture existing and being visually correct.
 
+> **Revision Notes (double-check pass, 2026-09-10):** two corrections carried
+> forward from Phase 3's own corrected document (see its Revision Notes):
+> `AtmosphereParametersGpu` is bound as a read-only STORAGE buffer (`readonly
+> buffer` in GLSL), never a true `uniform` block — the engine has no
+> `VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER` descriptor support anywhere today; and
+> this LUT's own output texture must use `RenderTexture` with an explicit
+> HDR float format (e.g. `VK_FORMAT_R16G16B16A16_SFLOAT`), never `Texture2D`
+> (hard-locked to `VK_FORMAT_R8G8B8A8_UNORM`), since a multi-scattering
+> response value can exceed `1.0`. Both are now reflected inline below
+> (search "STORAGE buffer"/"RenderTexture"). Everything else in this
+> document was confirmed accurate against the real source.
+
 ## Step 1: The Goal
 
 Add the second permanent atmosphere compute pass: the **Multi-Scattering
@@ -57,10 +69,12 @@ single-scattering integration.
   LUT's — usually near-linear, per most public references, but confirm
   against the actual cloned source).
 - `src/Shaders/AtmosphereMultiScatteringLut.comp` — binding 0:
-  `AtmosphereParametersGpu` uniform buffer, binding 1: `sampler2D
+  `AtmosphereParametersGpu` (a read-only STORAGE buffer, `readonly buffer`
+  in GLSL — see `ATMOSPHERE_PHASE3_TRANSMITTANCE_LUT_v1.md`'s corrected
+  Step 2 for why this is NOT a true `uniform` block), binding 1: `sampler2D
   transmittanceLut` (read-only), binding 2: `image2D destinationImage`
   (write-only) — following `DescriptorSetLayoutBuilder`'s documented
-  ordering convention exactly (uniform/buffer bindings, then read-only
+  ordering convention exactly (buffer bindings, then read-only
   textures, then storage images last). For each texel: decode
   `(height, sunZenithAngle)`, ray-march the fixed sample-direction set,
   sampling `transmittanceLut` for each step's transmittance instead of
@@ -70,9 +84,20 @@ single-scattering integration.
   `TextureHandle AddMultiScatteringLutPass(RenderGraphBuilder&, Renderer&,
   const AtmosphereParametersGpu&, TextureHandle transmittanceLutHandle)` —
   same lazily-initialized-pipeline/descriptor-set/output-texture shape as
-  Phase 3's method, reusing the SAME `AtmosphereParametersGpu` uniform
-  buffer Phase 3 already created (do not create a second, duplicate uniform
-  buffer for the same data — thread the existing one through).
+  Phase 3's method, reusing the SAME `AtmosphereParametersGpu` storage
+  buffer Phase 3 already created (do not create a second, duplicate buffer
+  for the same data — thread the existing one through). **This LUT's own
+  output texture must NOT reuse Phase 3's `Texture2D`-with-fixed-UNORM-
+  format choice** (see `ATMOSPHERE_PHASE3_TRANSMITTANCE_LUT_v1.md`'s own
+  corrected Step 3 for why `Texture2D` is hard-locked to
+  `VK_FORMAT_R8G8B8A8_UNORM`): a multi-scattering "response" value can
+  legitimately exceed `1.0` (this is an HDR quantity, unlike the bounded
+  `[0, 1]` Transmittance LUT), so use `RenderTexture` with an explicit
+  floating-point format instead (e.g. `VK_FORMAT_R16G16B16A16_SFLOAT`,
+  matching Phase 2's own `VolumeTexture` format choice), accepting its
+  always-created, here-unused companion `DepthBuffer` as a harmless cost —
+  decide and record this choice explicitly in this phase's completion
+  report.
 - Register the output under the literal name
   `"AtmosphereMultiScatteringLut"`.
 - Extend this phase's own temporary validation call site (from Phase 3,

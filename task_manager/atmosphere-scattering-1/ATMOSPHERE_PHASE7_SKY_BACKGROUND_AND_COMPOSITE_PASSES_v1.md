@@ -3,6 +3,22 @@
 ### Child document 7 of 9 — see `ATMOSPHERE_PHASE0_MASTER_STRATEGY_v1.md` for the full campaign map.
 ### Depends on: Phases 2-6 all landed and individually proven (via their own throwaway/temporary validation call sites).
 
+> **Revision Notes (double-check pass, 2026-09-10):** two hedged "confirm
+> this" spots in the original document are now resolved with concrete,
+> source-confirmed answers (search "CONFIRMED"): (1) this engine's real
+> depth convention is clear-to-`1.0` + `VK_COMPARE_OP_LESS` everywhere, so
+> the Sky Background pass should draw at a fixed depth of `1.0` with
+> `VK_COMPARE_OP_EQUAL`; and (2) `DepthBuffer` (`src/Renderer/DepthBuffer.h`)
+> genuinely CANNOT be sampled today — no `VK_IMAGE_USAGE_SAMPLED_BIT`, no
+> `VkSampler` at all — so the Aerial Perspective Composite pass's
+> `sampler2D sourceDepth` binding needs a small, concrete, additive engine
+> change first (a new `allowSampledAccess` constructor flag, mirroring
+> `Texture2D`/`RenderTexture`'s own `allowStorageImageAccess` convention).
+> Everything else in this document (the `RenderPasses.h`/`.cpp` precedent,
+> `NotifyDebugTextureStateOverride()`'s four existing call sites, the
+> blur-toggle descriptor-swap pattern) was confirmed accurate against the
+> real source.
+
 **This is the phase that makes the feature actually VISIBLE and PERMANENT.**
 Every prior phase (3-6) proved its own pass in isolation via a temporary,
 clearly-marked `// TODO(ATMOSPHERE_PHASE7): relocate...` call site. This
@@ -70,12 +86,15 @@ consume everything.
   (unlike the blur toggle, this is not optional/debug-only — once this phase
   lands, the composited output IS the real Game/Scene View output, always).
 - The Sky Background pass needs to know which pixels have "no geometry" —
-  this is a depth-buffer test (`depth == far` / `depth == 1.0` in this
-  engine's depth convention — confirm the exact convention from
-  `DepthBuffer.h`/`Pipeline.cpp`'s depth-compare setup) rather than any
-  stencil/tag mechanism; a full-screen fragment shader (not a compute pass)
-  with `gl_FragDepth`/an explicit depth-equality test in the fragment shader,
-  drawn with `VK_COMPARE_OP_GREATER_OR_EQUAL`/`EQUAL` against the existing
+  this is a depth-buffer test rather than any stencil/tag mechanism.
+  **CONFIRMED (double-check pass):** this engine clears depth to `1.0` (the
+  far plane) every frame (`FrameRecorder.cpp`'s
+  `depthAttachment.clearValue.depthStencil = { 1.0f, 0 }`) and every real
+  pipeline depth-tests with `VK_COMPARE_OP_LESS` (confirmed directly from
+  `SceneGridRenderer.h`'s own comment and `README.md`'s "Rendering"
+  section) — so "no geometry was drawn here" means "depth is still exactly
+  `1.0`". A full-screen fragment shader (not a compute pass) drawing at a
+  fixed depth of `1.0` with `VK_COMPARE_OP_EQUAL` against the existing
   depth buffer (so it is trivially rejected by the depth test everywhere
   real geometry already exists, at full hardware speed, needing no manual
   per-pixel branch) is the natural, idiomatic Vulkan way to implement this —
@@ -83,7 +102,8 @@ consume everything.
   depth-TESTED (never depth-WRITTEN) against real scene geometry (see
   `AGENTS.md`'s own "Scene" grid entry) — reuse that exact depth-test
   discipline rather than inventing a compute-shader-based "is this pixel
-  empty" branch.
+  empty" branch. See this document's own 3.2 below for the exact
+  `gl_Position.z`/compare-op mechanics.
 
 ## Step 3: The Plan
 
@@ -123,9 +143,24 @@ consume everything.
   (bound as `sampler2D`) using this pixel's own view-ray direction (derived
   from the pixel's NDC coordinate + the view's inverse view-projection
   matrix, pushed via push-constant/uniform), writes it as this pixel's color.
-  Depth-tested (`VK_COMPARE_OP_GREATER_OR_EQUAL`/whatever this engine's exact
-  convention resolves to for "only the empty far-plane pixels pass"), NEVER
-  depth-WRITTEN (mirrors `SceneGridRenderer`'s own rule exactly).
+  **CONFIRMED (double-check pass), replacing the earlier "confirm the exact
+  convention" hedge with a concrete answer:** this engine's depth
+  convention (confirmed directly from `FrameRecorder.cpp`'s
+  `depthAttachment.clearValue.depthStencil = { 1.0f, 0 }` and
+  `SceneGridRenderer.h`'s own comment, "`VK_COMPARE_OP_LESS`, matching every
+  other pipeline in this engine") is: depth is cleared to `1.0` (the far
+  plane) every frame, and every real pipeline depth-tests with
+  `VK_COMPARE_OP_LESS`. Draw this pass's full-screen triangle at a fixed
+  NDC depth of exactly `1.0` (e.g. `gl_Position.z = gl_Position.w;` in the
+  vertex shader, or an equivalent fixed `gl_FragDepth = 1.0;` in the
+  fragment shader) with the pipeline's own depth-compare op set to
+  `VK_COMPARE_OP_EQUAL` (simplest, exact-match semantics — nothing can ever
+  be written at a depth greater than `1.0`, so `GREATER_OR_EQUAL` and
+  `EQUAL` are equivalent here; prefer `EQUAL` for clarity) — this passes
+  ONLY at a pixel whose depth is still exactly the clear value (nothing
+  real was ever drawn there), and is trivially rejected everywhere real
+  geometry already exists. NEVER depth-WRITTEN (mirrors `SceneGridRenderer`'s
+  own rule exactly).
 - A small dedicated class, `src/Editor/AtmosphereSkyBackgroundRenderer.h/.cpp`
   (or, if `AtmosphereLutRenderer` already comfortably owns graphics
   pipelines too by this point, a method on it instead — decide based on
@@ -146,11 +181,24 @@ consume everything.
 
 - `src/Shaders/AtmosphereAerialPerspectiveComposite.comp` — bindings:
   `sampler2D sourceColor` (the view's original color, post-Sky-Background-pass),
-  `sampler2D sourceDepth` (the view's depth buffer, sampled — confirm the
-  engine's depth attachment can be bound as a sampled input at this point in
-  the frame; if not, this may need a small depth-buffer-to-sampled-copy step,
-  or reading depth via a resolve/blit — check `DepthBuffer.h`'s real
-  capabilities before assuming direct sampling works), `sampler3D
+  `sampler2D sourceDepth` (the view's depth buffer, sampled). **CONFIRMED
+  (double-check pass) this needs a real engine change first:**
+  `src/Renderer/DepthBuffer.h/.cpp` creates its `VkImage` with ONLY
+  `VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT` (no `VK_IMAGE_USAGE_SAMPLED_BIT`
+  at all) and never creates a `VkSampler` — its own class comment says so
+  outright ("never sampled — no `VkSampler`"). Direct sampling will NOT work
+  as-is. The recommended, lowest-risk fix (mirroring `Texture2D`/
+  `RenderTexture`'s own existing `allowStorageImageAccess` opt-in flag
+  convention exactly): add an `allowSampledAccess` constructor parameter to
+  `DepthBuffer` (default `false`, every existing call site unaffected) that
+  additionally ORs in `VK_IMAGE_USAGE_SAMPLED_BIT` and creates a real
+  `VkSampler` (nearest filtering — depth values should never be
+  linearly blended across texels), applied to whichever `DepthBuffer` backs
+  the Game/Scene View's own `RenderTexture` companion depth. Read it via
+  `ResourceAccess::ShaderRead` with `isDepthResource=true`
+  (`RenderGraphBarrierPlanner::RequiredStateFor()` already treats this
+  identically to a color `ShaderRead` — confirmed, zero barrier-planner
+  changes needed). `sampler3D
   aerialPerspectiveVolume`, `image2D destinationImage` (the new, separate
   `"GameViewComposited"`/`"SceneViewComposited"` output texture, per Step 2).
   For each pixel: reconstruct view-space depth from `sourceDepth`, map it to

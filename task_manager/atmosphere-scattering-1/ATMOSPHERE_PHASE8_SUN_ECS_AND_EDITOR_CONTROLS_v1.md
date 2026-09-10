@@ -3,6 +3,17 @@
 ### Child document 8 of 9 — see `ATMOSPHERE_PHASE0_MASTER_STRATEGY_v1.md` for the full campaign map.
 ### Depends on: Phase 7 fully landed (the real, permanent per-frame atmosphere sequence exists and is visible) — this phase replaces its hardcoded sun-direction placeholder and adds the first Editor-facing tuning surface.
 
+> **Revision Notes (double-check pass, 2026-09-10):** every concrete claim in
+> this document was cross-checked against the real source and confirmed
+> accurate — `Camera` (`src/ECS/Components/Camera.h`) really is the plain-
+> data-plus-two-pure-helpers shape described, `RenderSystem::
+> ResolveActiveCameraViewProjection(Registry&, float)` really is the exact
+> "first active, `ComponentStorage` order, fall back to identity" pattern to
+> mirror, and `Panels/HierarchyPanel.cpp`'s "Create 3D Object" really is a
+> top-level `ImGui::BeginMenu()` entry inside the right-click context menu
+> (confirming a parallel "Create Directional Light" entry fits naturally).
+> No corrections needed; left unchanged.
+
 ## Step 1: The Goal
 
 Make the sun direction a real, first-class, ECS-authored thing (Locked

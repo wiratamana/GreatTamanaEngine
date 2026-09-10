@@ -3,6 +3,19 @@
 ### Child document 5 of 9 — see `ATMOSPHERE_PHASE0_MASTER_STRATEGY_v1.md` for the full campaign map.
 ### Depends on: Phase 3 (`"AtmosphereTransmittanceLut"`) and Phase 4 (`"AtmosphereMultiScatteringLut"`) both existing and correct.
 
+> **Revision Notes (double-check pass, 2026-09-10):** same two corrections
+> as Phase 4 (see its own Revision Notes), applied here: both
+> `AtmosphereParametersGpu` and this phase's new `AtmosphereFrameUniforms`
+> bind as read-only STORAGE buffers, never true `uniform` blocks (no
+> `VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER` support exists in the engine today);
+> and this LUT's own output texture must use `RenderTexture` with an
+> explicit HDR float format, never `Texture2D` (hard-locked to 8-bit UNORM)
+> — the sky's own near-sun radiance routinely exceeds `1.0`. Both are
+> reflected inline below. Everything else in this document was confirmed
+> accurate against the real source (`RenderSystem::
+> ResolveActiveCameraViewProjection()`'s real signature, the Game-View-vs-
+> Scene-View dual-camera setup).
+
 ## Step 1: The Goal
 
 Add the third atmosphere compute pass, and the FIRST one that is genuinely
@@ -55,8 +68,9 @@ which Phase 6 also needs.
   texels near the horizon, and a linear/near-linear azimuth remap; transcribe
   exactly).
 - `src/Shaders/AtmosphereSkyViewLut.comp` — bindings: `AtmosphereParametersGpu`
-  uniform buffer, `AtmosphereFrameUniforms` uniform buffer (NEW — a second,
-  small, host-writable uniform buffer, written fresh every frame, unlike the
+  (read-only storage buffer, per `ATMOSPHERE_PHASE3_TRANSMITTANCE_LUT_v1.md`'s
+  corrected Step 2 — NOT a true `uniform` block), `AtmosphereFrameUniforms`
+  (a SECOND read-only storage buffer, written fresh every frame, unlike the
   session-stable `AtmosphereParametersGpu` one), `sampler2D transmittanceLut`,
   `sampler2D multiScatteringLut`, `image2D destinationImage`. For each texel:
   decode `(azimuth, elevation)` relative to the sun, ray-march from the
@@ -72,11 +86,18 @@ which Phase 6 also needs.
   SAME method serve both the Game View and Scene View call sites with two
   distinct registered texture names (per Step 2's own per-view decision),
   without duplicating the method itself. Internally this needs its OWN
-  `AtmosphereFrameUniforms` uniform buffer instance PER VIEW if two are
+  `AtmosphereFrameUniforms` storage-buffer instance PER VIEW if two are
   computed per frame — do not let the Scene View's camera height overwrite
   the Game View's mid-frame; `AtmosphereLutRenderer` should own two small
   buffer+descriptor-set instances (or a tiny fixed-size array indexed by
-  view) rather than one shared mutable one.
+  view) rather than one shared mutable one. **This LUT's own output texture
+  must use `RenderTexture` with an explicit HDR float format (e.g.
+  `VK_FORMAT_R16G16B16A16_SFLOAT`), never `Texture2D`** (hard-locked to
+  `VK_FORMAT_R8G8B8A8_UNORM` — see `ATMOSPHERE_PHASE3_TRANSMITTANCE_LUT_v1.md`'s
+  corrected Step 3): the sky's own radiance near the sun disc is routinely
+  well above `1.0`, and clamping it to 8-bit UNORM here would visibly clip/
+  band the one LUT the Sky Background pass (Phase 7) samples directly for
+  on-screen color.
 - A small, explicit helper (in `AtmosphereLutRenderer.cpp` or a sibling free
   function) resolves `AtmosphereFrameUniforms` for a given view: given a
   `Registry&` (for the eventual real `DirectionalLight`/`Camera` lookup) and

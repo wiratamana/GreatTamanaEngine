@@ -2,6 +2,29 @@
 
 ### Child document 1 of 9 — see `ATMOSPHERE_PHASE0_MASTER_STRATEGY_v1.md` for the full campaign map.
 
+> **Revision Notes (double-check pass, 2026-09-10):** every concrete claim
+> in this document was cross-checked against the real source and confirmed
+> accurate — `cmake/CompileShaders.cmake`'s `gte_add_shader(TARGET SOURCE)`
+> really does list only `SOURCE` in its `DEPENDS` (no include-file tracking
+> yet, confirming 3.2's plan is necessary), `src/Renderer/GpuSkinning/`
+> really does split into `GpuSkinningTypes.h/.cpp` (pure data) +
+> `GpuSkinningPipelines.h/.cpp` (live-`VkDevice` orchestration) exactly as
+> cited, and `tests/CMakeLists.txt`'s `GTE_TEST_SOURCES` really is a flat
+> list of relative paths, so a new `Renderer/Atmosphere/AtmosphereMathTests.cpp`
+> entry mirrors existing entries directly. One clarification worth flagging
+> here since it affects this phase's own 3.3: `ATMOSPHERE_PHASE3_TRANSMITTANCE_LUT_v1.md`
+> (as corrected by this same double-check pass) found that the engine has
+> **no real uniform-buffer (`VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER`) descriptor
+> support anywhere today** — `AtmosphereParametersGpu`/`AtmosphereFrameUniforms`
+> will actually be bound as read-only STORAGE buffers (GLSL `readonly
+> buffer`, std430), not true `uniform` blocks, unless Phase 3 deliberately
+> adds new UBO plumbing first. Since neither struct contains an array, this
+> does not change this phase's own std140-oriented padding guidance below in
+> practice (std140 and std430 produce identical padding for a flat,
+> array-free struct) — read "std140-layout-compatible" as "std140-and-
+> std430-layout-compatible" given this resolution. See Phase 3's own Step 2
+> for the full reasoning.
+
 ## Step 1: The Goal
 
 Turn "we want atmosphere scattering" into a concrete, written, engine-specific

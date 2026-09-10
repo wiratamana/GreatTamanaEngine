@@ -4,6 +4,22 @@
 ### Depends on: Phase 1 (`AtmosphereTypes.h`/`AtmosphereParameters.h`/`AtmosphereMath.h`, verified shared-`#include` support) and Phase 2 (not directly — this phase only needs 2D textures, but must not regress anything Phase 2 changed in `RenderGraphTypes.h`).
 ### Read `ATMOSPHERE_REFERENCE_NOTES.md` (written in Phase 1) for this LUT's exact resolution/formula before starting.
 
+> **Revision Notes (double-check pass, 2026-09-10):** two concrete engine
+> gaps this document's original text glossed over were found and corrected
+> in place below (search for "CORRECTED"): (1) the engine has **no real
+> uniform-buffer (`VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER`) descriptor support
+> anywhere today** — `AtmosphereParametersGpu` must be bound as a read-only
+> STORAGE buffer instead (GLSL `readonly buffer`, mirroring the GPU Vertex
+> Skinning campaign's own bone-matrix-buffer precedent), not a true
+> `uniform` block, unless new UBO plumbing is deliberately added first; and
+> (2) `Texture2D` is hard-locked to `VK_FORMAT_R8G8B8A8_UNORM` with no
+> `format` parameter at all, which is fine for THIS LUT (values always in
+> `[0, 1]`) but will NOT work for Phase 4/5's own LUTs, which need an HDR
+> float format instead. Everything else in this document was confirmed
+> accurate against the real source (`ComputeBlurValidation`/`BoxBlur.comp`'s
+> shape, `DescriptorSetLayoutBuilder`'s binding-order convention,
+> `Renderer::CreateBuffer()`'s signature).
+
 ## Step 1: The Goal
 
 Ship the FIRST real, permanent atmosphere compute pass: the **Transmittance
@@ -43,10 +59,34 @@ this one — it is the foundation, and the one this campaign's CPU oracle
   when parameters are dirty — the simplest option is explicitly preferred
   here per Step 4 below).
 - `DescriptorSetLayoutBuilder`'s documented binding-order convention
-  (read-only buffers, read-write buffers, read-only textures, storage images
-  last — see `BoxBlur.comp`'s own header comment) applies here too: binding 0
-  should be the `AtmosphereParametersGpu` uniform buffer, binding 1 the
-  `image2D` output.
+  (read-only buffers, read-write buffers, read-only textures, storage
+  images last — see `BoxBlur.comp`'s own header comment) applies here too:
+  binding 0 is `AtmosphereParametersGpu`, binding 1 the `image2D` output.
+  **CORRECTED (double-check pass): bind `AtmosphereParametersGpu` as a
+  read-only STORAGE buffer, not a true `uniform` buffer.** A direct search
+  of `src/` confirms `VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER` appears NOWHERE in
+  this codebase today — `Vulkan/DescriptorSetLayoutBuilder.h` only has
+  `AddStorageBuffer()`/`AddStorageImage()`/`AddCombinedImageSampler()` (no
+  `AddUniformBuffer()`), and `ComputeDescriptorWrite` only has
+  `StorageBuffer()`/`StorageImage()`/`CombinedImageSampler()` factories (no
+  `UniformBuffer()`). Create the buffer via `Renderer::CreateBuffer(...,
+  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemoryUsage::CpuToGpu, ...)`,
+  bind it via `AddStorageBuffer(/*binding=*/0)`/
+  `ComputeDescriptorWrite::StorageBuffer(0, buffer.Native())`, and declare
+  it in GLSL as `layout(std430, binding = 0) readonly buffer
+  AtmosphereParametersBlock { ... } atmosphereParameters;` (a plain,
+  tightly-scoped `readonly buffer`, NOT `uniform`) — this exactly mirrors
+  the GPU Vertex Skinning campaign's own bone-matrix-buffer precedent
+  (`GpuSkinningTypes.h`) and needs ZERO new engine plumbing. (An
+  alternative — adding genuine `AddUniformBuffer()`/
+  `ComputeDescriptorWrite::UniformBuffer()` support using
+  `VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER` — is also valid but is real, new,
+  additive engineering this phase's plan did not originally budget for;
+  the storage-buffer route above is the recommended default unless a
+  specific reason favors adding real UBO support instead.) This same
+  resolution applies to every later phase's own `AtmosphereFrameUniforms`
+  buffer (Phase 5 onward) — do not re-litigate it per phase, just cite
+  this section.
 
 ## Step 3: The Plan
 
@@ -75,11 +115,20 @@ this one — it is the foundation, and the one this campaign's CPU oracle
 - `src/Renderer/Atmosphere/AtmosphereLutRenderer.h/.cpp` — a new class,
   modeled on `ComputeBlurValidation`'s shape, owning: the Transmittance LUT's
   `ComputePipeline`/`ComputeDescriptorSetLayout`/`ComputeDescriptorSet`, a
-  persistent output `RenderTexture` (or plain storage-capable `Texture2D` if
-  a companion depth buffer is not needed — it is not, for a 2D LUT; prefer
-  `Texture2D` with `allowStorageImageAccess=true` over `RenderTexture` here,
-  since this is not a "camera view" target and doesn't need `RenderTexture`'s
-  resize-with-panel behavior at all), and one method,
+  persistent output texture (`Texture2D` with `allowStorageImageAccess=true`
+  — **CORRECTED (double-check pass):** `Texture2D` (`src/Renderer/
+  Texture2D.h`) is hard-locked to `VK_FORMAT_R8G8B8A8_UNORM` — it takes NO
+  `format` parameter at all, unlike `RenderTexture` (which does, at the
+  cost of an always-created, here-unused companion `DepthBuffer`). This is
+  fine for THIS LUT specifically, since a transmittance value is always in
+  `[0, 1]` per channel by definition
+  (`AtmosphereMath::ComputeTransmittanceToTopOfAtmosphere()`'s own
+  contract) — do NOT assume this choice transfers to Phase 4/5's own LUTs
+  (multi-scattering/sky-radiance values can exceed `1.0`, needing a real
+  HDR format `Texture2D` cannot provide); each of those phases must decide
+  explicitly, in their own completion report, whether to use `RenderTexture`
+  with an explicit float format instead, or extend `Texture2D` with a new
+  `format` parameter first), and one method,
   `TextureHandle AddTransmittanceLutPass(RenderGraphBuilder&, Renderer&,
   const AtmosphereParametersGpu&)`. This class is the SINGLE home for every
   atmosphere LUT pass added in Phases 3-6 — do not create four independent,
@@ -91,11 +140,13 @@ this one — it is the foundation, and the one this campaign's CPU oracle
   Phase 0's cross-cutting rule) — this is what makes it immediately visible
   via `GET /get_texture?texture_name=AtmosphereTransmittanceLut` with zero
   extra plumbing.
-- Add the new uniform buffer for `AtmosphereParametersGpu` via
-  `Renderer::CreateBuffer()`(`BufferMemoryUsage::CpuToGpu`, matching how any
-  other small, host-writable uniform buffer in this engine is already
-  created) — written once (or once per change) from the CPU side, never
-  per-texel.
+- Add the new read-only storage buffer for `AtmosphereParametersGpu` via
+  `Renderer::CreateBuffer(sizeof(AtmosphereParametersGpu),
+  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemoryUsage::CpuToGpu, ...)` (see
+  the corrected Step 2 binding-type guidance above — NOT a true
+  `VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT` uniform buffer, since no descriptor
+  plumbing for that exists yet) — written once (or once per change) from the
+  CPU side via `Buffer::Upload()`, never per-texel.
 - Disposable proof, mirroring Phase 2's own discipline: a temporary call site
   (clearly commented `// TEMPORARY - ATMOSPHERE_PHASE3 VALIDATION`) that adds
   this pass into one of the two real `RenderGraph::Execute()` regimes (the
