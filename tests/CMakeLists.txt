@@ -1759,6 +1759,7 @@ set(GTE_TEST_SOURCES
     Renderer/RenderGraph/RenderGraphNameSlotTableTests.cpp
     Renderer/RenderGraph/RenderGraphSnapshotTests.cpp
     Renderer/RenderGraph/RenderGraphDebugTextureRegistryTests.cpp
+    Renderer/RenderGraph/RenderGraphDebugVolumeTextureRegistryTests.cpp
     Math/Vec2Tests.cpp
     Math/Vec3Tests.cpp
     Math/Mat4Tests.cpp
