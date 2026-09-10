@@ -57,6 +57,40 @@ nlohmann::json ParseJsonNoThrow(const std::string& jsonBody)
     return nlohmann::json::parse(jsonBody, /*callback*/ nullptr, /*allow_exceptions*/ false);
 }
 
+// network-impl-5 campaign
+// (PHASE1_NETWORK_ROUTES_REQUEST_PARSING_AND_RESPONSE_BUILDING.md) - shared
+// helper behind ParseSetEntityTrsRequest()'s "translation"/
+// "rotation_euler_degrees"/"scale" fields AND
+// ParseInstantiateLightRequest()'s own "rotation_euler_degrees" field - all
+// four follow the EXACT same all-or-nothing x/y/z rule (see
+// NetworkRoutes.h's own doc comments): absent entirely, or explicitly JSON
+// null, leaves outHasValue false with no error; present-and-non-null must be
+// a JSON object with all three of "x"/"y"/"z" present as JSON numbers, or
+// this fails with "<fieldName> must be an object with numeric x, y, and z
+// fields". Returns false (and sets outErrorMessage) only on that failure -
+// callers should immediately `return result;` when this returns false.
+bool TryParseAllOrNothingXyz(const nlohmann::json& parent, const std::string& fieldName, bool& outHasValue,
+    float& outX, float& outY, float& outZ, std::string& outErrorMessage)
+{
+    outHasValue = false;
+    if (!parent.contains(fieldName) || parent[fieldName].is_null()) {
+        return true;
+    }
+
+    const nlohmann::json& value = parent[fieldName];
+    if (!value.is_object() || !value.contains("x") || !value.contains("y") || !value.contains("z") ||
+        !value["x"].is_number() || !value["y"].is_number() || !value["z"].is_number()) {
+        outErrorMessage = fieldName + " must be an object with numeric x, y, and z fields";
+        return false;
+    }
+
+    outX = value["x"].get<float>();
+    outY = value["y"].get<float>();
+    outZ = value["z"].get<float>();
+    outHasValue = true;
+    return true;
+}
+
 } // namespace
 
 ParsedInstantiatePrimitiveRequest ParseInstantiatePrimitiveRequest(const std::string& jsonBody)
@@ -162,6 +196,197 @@ ParsedDeleteEntityRequest ParseDeleteEntityRequest(const std::string& jsonBody)
     return result;
 }
 
+// --- network-impl-5 campaign
+// (PHASE1_NETWORK_ROUTES_REQUEST_PARSING_AND_RESPONSE_BUILDING.md) - see
+// NetworkRoutes.h's own doc comments above each declaration for the exact,
+// locked validation rules implemented below.
+
+ParsedSetEntityTrsRequest ParseSetEntityTrsRequest(const std::string& jsonBody)
+{
+    ParsedSetEntityTrsRequest result;
+
+    const nlohmann::json parsed = ParseJsonNoThrow(jsonBody);
+    if (parsed.is_discarded()) {
+        result.errorMessage = "malformed JSON body";
+        return result;
+    }
+    if (!parsed.is_object()) {
+        result.errorMessage = "request body must be a JSON object";
+        return result;
+    }
+
+    // 2. "name"
+    if (!parsed.contains("name") || !parsed["name"].is_string() ||
+        parsed["name"].get<std::string>().empty()) {
+        result.errorMessage = "missing or invalid required field: name";
+        return result;
+    }
+    result.name = parsed["name"].get<std::string>();
+
+    // 3. "translation" (optional, all-or-nothing)
+    if (!TryParseAllOrNothingXyz(parsed, "translation", result.hasTranslation, result.translationX,
+            result.translationY, result.translationZ, result.errorMessage)) {
+        return result;
+    }
+
+    // 4. "rotation_euler_degrees" (optional, all-or-nothing)
+    if (!TryParseAllOrNothingXyz(parsed, "rotation_euler_degrees", result.hasRotationEulerDegrees,
+            result.rotationPitchXDegrees, result.rotationYawYDegrees, result.rotationRollZDegrees,
+            result.errorMessage)) {
+        return result;
+    }
+
+    // 5. "scale" (optional, all-or-nothing)
+    if (!TryParseAllOrNothingXyz(
+            parsed, "scale", result.hasScale, result.scaleX, result.scaleY, result.scaleZ, result.errorMessage)) {
+        return result;
+    }
+
+    result.valid = true;
+    return result;
+}
+
+ParsedInstantiateLightRequest ParseInstantiateLightRequest(const std::string& jsonBody)
+{
+    ParsedInstantiateLightRequest result;
+
+    const nlohmann::json parsed = ParseJsonNoThrow(jsonBody);
+    if (parsed.is_discarded()) {
+        result.errorMessage = "malformed JSON body";
+        return result;
+    }
+    if (!parsed.is_object()) {
+        result.errorMessage = "request body must be a JSON object";
+        return result;
+    }
+
+    // 2. "light_type" (optional)
+    if (parsed.contains("light_type")) {
+        if (!parsed["light_type"].is_string()) {
+            result.errorMessage = "light_type must be a string";
+            return result;
+        }
+        result.lightType = parsed["light_type"].get<std::string>();
+    }
+
+    // 3. "name" (required)
+    if (!parsed.contains("name") || !parsed["name"].is_string() ||
+        parsed["name"].get<std::string>().empty()) {
+        result.errorMessage = "missing or invalid required field: name";
+        return result;
+    }
+    result.name = parsed["name"].get<std::string>();
+
+    // 4. "world_position" (optional, per-axis-optional-defaults-to-0)
+    if (parsed.contains("world_position")) {
+        const nlohmann::json& worldPosition = parsed["world_position"];
+        if (!worldPosition.is_object()) {
+            result.errorMessage = "world_position must be an object";
+            return result;
+        }
+        if (worldPosition.contains("x")) {
+            if (!worldPosition["x"].is_number()) {
+                result.errorMessage = "world_position.x must be a number";
+                return result;
+            }
+            result.worldX = worldPosition["x"].get<float>();
+        }
+        if (worldPosition.contains("y")) {
+            if (!worldPosition["y"].is_number()) {
+                result.errorMessage = "world_position.y must be a number";
+                return result;
+            }
+            result.worldY = worldPosition["y"].get<float>();
+        }
+        if (worldPosition.contains("z")) {
+            if (!worldPosition["z"].is_number()) {
+                result.errorMessage = "world_position.z must be a number";
+                return result;
+            }
+            result.worldZ = worldPosition["z"].get<float>();
+        }
+    }
+
+    // 5. "rotation_euler_degrees" (optional, all-or-nothing)
+    if (!TryParseAllOrNothingXyz(parsed, "rotation_euler_degrees", result.hasRotationEulerDegrees,
+            result.rotationPitchXDegrees, result.rotationYawYDegrees, result.rotationRollZDegrees,
+            result.errorMessage)) {
+        return result;
+    }
+
+    // 6. "color" (optional; present-and-non-null must be an object; each of
+    // r/g/b is itself optional-but-numeric-if-present)
+    if (parsed.contains("color") && !parsed["color"].is_null()) {
+        const nlohmann::json& color = parsed["color"];
+        if (!color.is_object()) {
+            result.errorMessage = "color must be an object";
+            return result;
+        }
+        if (color.contains("r")) {
+            if (!color["r"].is_number()) {
+                result.errorMessage = "color.r must be a number";
+                return result;
+            }
+            result.colorR = color["r"].get<float>();
+        }
+        if (color.contains("g")) {
+            if (!color["g"].is_number()) {
+                result.errorMessage = "color.g must be a number";
+                return result;
+            }
+            result.colorG = color["g"].get<float>();
+        }
+        if (color.contains("b")) {
+            if (!color["b"].is_number()) {
+                result.errorMessage = "color.b must be a number";
+                return result;
+            }
+            result.colorB = color["b"].get<float>();
+        }
+    }
+
+    // 7. "illuminance_lux" (optional, must be >= 0 if present)
+    if (parsed.contains("illuminance_lux")) {
+        if (!parsed["illuminance_lux"].is_number()) {
+            result.errorMessage = "illuminance_lux must be a non-negative number";
+            return result;
+        }
+        const float illuminance = parsed["illuminance_lux"].get<float>();
+        if (illuminance < 0.0f) {
+            result.errorMessage = "illuminance_lux must be a non-negative number";
+            return result;
+        }
+        result.illuminanceLux = illuminance;
+    }
+
+    // 8. "active" (optional bool)
+    if (parsed.contains("active")) {
+        if (!parsed["active"].is_boolean()) {
+            result.errorMessage = "active must be a boolean";
+            return result;
+        }
+        result.active = parsed["active"].get<bool>();
+    }
+
+    // 9. "parent" (optional) - identical rule to
+    // ParseInstantiatePrimitiveRequest()'s own "parent" field.
+    if (parsed.contains("parent") && !parsed["parent"].is_null()) {
+        const nlohmann::json& parent = parsed["parent"];
+        if (!parent.is_string()) {
+            result.errorMessage = "parent must be a string or null";
+            return result;
+        }
+        const std::string parentName = parent.get<std::string>();
+        if (!parentName.empty()) {
+            result.hasParent = true;
+            result.parentName = parentName;
+        }
+    }
+
+    result.valid = true;
+    return result;
+}
+
 std::string BuildInstantiatePrimitiveResponseJson(bool success, const std::string& errorMessage,
     std::uint32_t entityIndex, std::uint32_t entityGeneration, const std::string& resolvedName,
     bool parentRequestedButNotFound, const std::string& requestedParentName)
@@ -198,6 +423,41 @@ std::string BuildGenericErrorResponseJson(const std::string& errorMessage)
     nlohmann::json body;
     body["success"] = false;
     body["error"] = errorMessage;
+    return body.dump();
+}
+
+std::string BuildSetEntityTrsResponseJson(bool success, const std::string& errorMessage,
+    std::uint32_t entityIndex, std::uint32_t entityGeneration, bool translationChanged, bool rotationChanged,
+    bool scaleChanged, const TransformSnapshotView& resultingTransform)
+{
+    if (!success) {
+        return BuildGenericErrorResponseJson(errorMessage);
+    }
+
+    nlohmann::json body;
+    body["success"] = true;
+    body["entity"] = nlohmann::json::object({ { "index", entityIndex }, { "generation", entityGeneration } });
+    body["changed"] = nlohmann::json::object({
+        { "translation", translationChanged },
+        { "rotation", rotationChanged },
+        { "scale", scaleChanged },
+    });
+    body["transform"] = nlohmann::json::object({
+        { "position",
+            nlohmann::json::object({ { "x", resultingTransform.positionX }, { "y", resultingTransform.positionY },
+                { "z", resultingTransform.positionZ } }) },
+        { "rotation_euler_degrees",
+            nlohmann::json::object({ { "x", resultingTransform.rotationEulerXDegrees },
+                { "y", resultingTransform.rotationEulerYDegrees },
+                { "z", resultingTransform.rotationEulerZDegrees } }) },
+        { "rotation_quaternion",
+            nlohmann::json::object({ { "x", resultingTransform.rotationQuatX },
+                { "y", resultingTransform.rotationQuatY }, { "z", resultingTransform.rotationQuatZ },
+                { "w", resultingTransform.rotationQuatW } }) },
+        { "scale",
+            nlohmann::json::object({ { "x", resultingTransform.scaleX }, { "y", resultingTransform.scaleY },
+                { "z", resultingTransform.scaleZ } }) },
+    });
     return body.dump();
 }
 
