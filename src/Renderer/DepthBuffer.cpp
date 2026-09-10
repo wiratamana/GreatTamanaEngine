@@ -1,4 +1,4 @@
-﻿#include "DepthBuffer.h"
+#include "DepthBuffer.h"
 
 #include <stdexcept>
 #include <utility>
@@ -6,12 +6,13 @@
 namespace gte {
 
 DepthBuffer::DepthBuffer(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDevice device,
-    int width, int height, VkFormat format, const char* debugName)
+    int width, int height, VkFormat format, const char* debugName, bool allowSampledAccess)
     : m_allocator(allocator)
     , m_tracker(std::move(tracker))
     , m_debugName(debugName)
     , m_device(device)
     , m_format(format)
+    , m_allowSampledAccess(allowSampledAccess)
 {
     Create(width, height);
 }
@@ -28,9 +29,11 @@ DepthBuffer::DepthBuffer(DepthBuffer&& other) noexcept
     , m_debugName(std::exchange(other.m_debugName, nullptr))
     , m_device(std::exchange(other.m_device, VK_NULL_HANDLE))
     , m_format(other.m_format)
+    , m_allowSampledAccess(other.m_allowSampledAccess)
     , m_image(std::exchange(other.m_image, VK_NULL_HANDLE))
     , m_allocation(std::exchange(other.m_allocation, VK_NULL_HANDLE))
     , m_imageView(std::exchange(other.m_imageView, VK_NULL_HANDLE))
+    , m_sampler(std::exchange(other.m_sampler, VK_NULL_HANDLE))
     , m_extent(other.m_extent)
 {
 }
@@ -45,9 +48,11 @@ DepthBuffer& DepthBuffer::operator=(DepthBuffer&& other) noexcept
         m_debugName = std::exchange(other.m_debugName, nullptr);
         m_device = std::exchange(other.m_device, VK_NULL_HANDLE);
         m_format = other.m_format;
+        m_allowSampledAccess = other.m_allowSampledAccess;
         m_image = std::exchange(other.m_image, VK_NULL_HANDLE);
         m_allocation = std::exchange(other.m_allocation, VK_NULL_HANDLE);
         m_imageView = std::exchange(other.m_imageView, VK_NULL_HANDLE);
+        m_sampler = std::exchange(other.m_sampler, VK_NULL_HANDLE);
         m_extent = other.m_extent;
     }
     return *this;
@@ -83,6 +88,12 @@ void DepthBuffer::Create(int width, int height)
     imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
     imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
     imageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    // Atmosphere Scattering campaign, Phase 7 - see this class's own header
+    // comment. Additive only: every existing call site (allowSampledAccess
+    // left at its default false) is completely unaffected.
+    if (m_allowSampledAccess) {
+        imageInfo.usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
+    }
     imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
@@ -125,10 +136,33 @@ void DepthBuffer::Create(int width, int height)
     if (vkCreateImageView(m_device, &viewInfo, nullptr, &m_imageView) != VK_SUCCESS) {
         throw std::runtime_error("DepthBuffer: vkCreateImageView failed.");
     }
+
+    if (m_allowSampledAccess) {
+        // NEAREST filtering - a depth value must never be linearly blended
+        // across texels (see this class's own header comment).
+        VkSamplerCreateInfo samplerInfo{};
+        samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        samplerInfo.magFilter = VK_FILTER_NEAREST;
+        samplerInfo.minFilter = VK_FILTER_NEAREST;
+        samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        samplerInfo.minLod = 0.0f;
+        samplerInfo.maxLod = 1.0f;
+
+        if (vkCreateSampler(m_device, &samplerInfo, nullptr, &m_sampler) != VK_SUCCESS) {
+            throw std::runtime_error("DepthBuffer: vkCreateSampler failed.");
+        }
+    }
 }
 
 void DepthBuffer::Destroy() noexcept
 {
+    if (m_sampler != VK_NULL_HANDLE) {
+        vkDestroySampler(m_device, m_sampler, nullptr);
+        m_sampler = VK_NULL_HANDLE;
+    }
     if (m_imageView != VK_NULL_HANDLE) {
         vkDestroyImageView(m_device, m_imageView, nullptr);
         m_imageView = VK_NULL_HANDLE;

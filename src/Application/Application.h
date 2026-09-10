@@ -64,16 +64,16 @@ private:
 
     // Atmosphere Scattering + Aerial Perspective campaign, Phase 3
     // (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE3_TRANSMITTANCE_LUT_v1.md)
-    // - owns the Transmittance LUT's ComputePipeline/descriptor set/output
-    // texture across frames (see AtmosphereLutRenderer.h). Declared right
-    // after m_renderGraph/before m_editorLayer for the same reason
+    // - owns every atmosphere LUT/pass's ComputePipeline/descriptor set/
+    // output texture across frames (see AtmosphereLutRenderer.h). Declared
+    // right after m_renderGraph/before m_editorLayer for the same reason
     // m_renderGraph itself is: Run()'s offscreen-regime build lambda (see
-    // RenderPasses.h/Application.cpp) calls into it every frame, so it must
-    // already be alive by the time that lambda can possibly run, and must
-    // outlive it (destroyed only once the Vulkan device it was built
-    // against is done being used). TODO(ATMOSPHERE_PHASE7): relocate this
-    // ownership/call site into the real, permanent atmosphere pass sequence
-    // once that phase lands - see this phase's own completion report.
+    // src/Application/AtmospherePassSequence.h/Application.cpp) calls into
+    // it every frame, so it must already be alive by the time that lambda
+    // can possibly run, and must outlive it (destroyed only once the
+    // Vulkan device it was built against is done being used). This is its
+    // PERMANENT home as of Phase 7 (ATMOSPHERE_PHASE7_SKY_BACKGROUND_AND_COMPOSITE_PASSES_v1.md)
+    // - see that phase's own completion report.
     AtmosphereLutRenderer m_atmosphereLutRenderer;
 
     // Declared after Renderer (and before Game) so it is destroyed before

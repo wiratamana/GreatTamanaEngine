@@ -8,7 +8,7 @@ namespace gte {
 
 RenderTexture::RenderTexture(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDevice device,
     int width, int height, VkFormat format, VkFormat depthFormat, const char* debugName, const char* depthDebugName,
-    bool allowStorageImageAccess)
+    bool allowStorageImageAccess, bool allowDepthSampledAccess)
     : m_allocator(allocator)
     , m_tracker(std::move(tracker))
     , m_debugName(debugName)
@@ -17,6 +17,7 @@ RenderTexture::RenderTexture(VmaAllocator allocator, std::shared_ptr<GpuMemoryTr
     , m_format(format)
     , m_depthFormat(depthFormat)
     , m_allowStorageImageAccess(allowStorageImageAccess)
+    , m_allowDepthSampledAccess(allowDepthSampledAccess)
 {
     Create(width, height);
 }
@@ -36,6 +37,7 @@ RenderTexture::RenderTexture(RenderTexture&& other) noexcept
     , m_format(other.m_format)
     , m_depthFormat(other.m_depthFormat)
     , m_allowStorageImageAccess(other.m_allowStorageImageAccess)
+    , m_allowDepthSampledAccess(other.m_allowDepthSampledAccess)
     , m_image(std::exchange(other.m_image, VK_NULL_HANDLE))
     , m_allocation(std::exchange(other.m_allocation, VK_NULL_HANDLE))
     , m_imageView(std::exchange(other.m_imageView, VK_NULL_HANDLE))
@@ -58,6 +60,7 @@ RenderTexture& RenderTexture::operator=(RenderTexture&& other) noexcept
         m_format = other.m_format;
         m_depthFormat = other.m_depthFormat;
         m_allowStorageImageAccess = other.m_allowStorageImageAccess;
+        m_allowDepthSampledAccess = other.m_allowDepthSampledAccess;
         m_image = std::exchange(other.m_image, VK_NULL_HANDLE);
         m_allocation = std::exchange(other.m_allocation, VK_NULL_HANDLE);
         m_imageView = std::exchange(other.m_imageView, VK_NULL_HANDLE);
@@ -188,7 +191,7 @@ void RenderTexture::Create(int width, int height)
     // constructor comment for the naming convention (e.g. "GameView" /
     // "GameViewDepth").
     m_depthBuffer = std::make_unique<DepthBuffer>(
-        m_allocator, m_tracker, m_device, width, height, m_depthFormat, m_depthDebugName);
+        m_allocator, m_tracker, m_device, width, height, m_depthFormat, m_depthDebugName, m_allowDepthSampledAccess);
 }
 
 void RenderTexture::Destroy() noexcept

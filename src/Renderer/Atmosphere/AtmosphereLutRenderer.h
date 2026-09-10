@@ -79,6 +79,7 @@
 // ImportVolumeTexture(), exactly the pattern that phase's own disposable
 // validation code proved out end-to-end.
 
+#include "AtmosphereSkyBackgroundRenderer.h"
 #include "AtmosphereTypes.h"
 #include "../../ECS/Registry.h"
 #include "../../Math/Vec3.h"
@@ -215,6 +216,92 @@ public:
         rg::TextureHandle transmittanceLutHandle, rg::TextureHandle multiScatteringLutHandle,
         const char* outputVolumeName);
 
+    // Phase 7 (task_manager/atmosphere-scattering-1/
+    // ATMOSPHERE_PHASE7_SKY_BACKGROUND_AND_COMPOSITE_PASSES_v1.md) - draws
+    // this VIEW's sky background directly against `cmd`, INSIDE the
+    // caller's own already-open vkCmdBeginRendering bracket (mirrors
+    // src/Editor/SceneGridRenderer's own integration pattern - see
+    // AtmosphereSkyBackgroundRenderer.h for the full reasoning). Looks up
+    // the ALREADY-COMPUTED Sky-View LUT output for `skyViewLutName` (this
+    // SAME frame's own AddSkyViewLutPass() call for that exact name MUST
+    // have already run - a programmer error, not a runtime-recoverable
+    // one, if it hasn't) and forwards straight into
+    // AtmosphereSkyBackgroundRenderer::Draw() - this class stays the
+    // single home for every atmosphere GPU pass, including this one, per
+    // its own class comment.
+    void DrawSkyBackground(Renderer& renderer, VkCommandBuffer cmd, const Mat4& viewProjection,
+        const AtmosphereParametersGpu& params, const AtmosphereFrameUniforms& frameUniforms,
+        const char* skyViewLutName);
+
+    // Phase 7 - declares this frame's Aerial Perspective Composite compute
+    // pass into `builder` for ONE view: reads `sourceColorHandle` (the
+    // view's own already-imported Game/Scene View TextureHandle, POST-Sky-
+    // Background-pass) for BOTH its color half (ShaderRead) and, via the
+    // new `isDepthResource=true` overload of PassBuilder::ReadTexture()
+    // (RenderGraphBuilder.h), its DEPTH half (requires that RenderTexture's
+    // own companion DepthBuffer to have been created with
+    // allowSampledAccess=true - see DepthBuffer.h/RenderTexture.h) -
+    // `sourceColorSampler`/`sourceDepthView`/`sourceDepthSampler` are the
+    // CALLER-resolved plain Vulkan objects behind that same handle (an
+    // IMPORTED texture's resolved sampler/depth view are never available
+    // via PassContext::resolveTexture() - mirrors
+    // ComputeBlurValidation::AddPass()'s own identical `sceneViewSampler`
+    // parameter/reasoning). Also reads `aerialPerspectiveVolumeHandle`
+    // (Phase 6's own output, looked up again by `aerialPerspectiveVolumeName`
+    // for its own trilinear sampler - see m_aerialPerspectiveVolumeViewStates)
+    // and writes a NEW, separate, persistent output RenderTexture registered
+    // under the literal name `outputTextureName`
+    // ("GameViewComposited"/"SceneViewComposited") - explicit
+    // VK_FORMAT_R8G8B8A8_UNORM (never the swapchain's own negotiated
+    // format), mirroring ComputeBlurValidation's own identical reasoning
+    // for why (this texture is never bound to the same Pipeline as the
+    // swapchain/Game/Scene views - only ever sampled via ImGui::Image()/
+    // `/get_game_view` - so there is no reason to inherit the swapchain's
+    // own uncertain storage-image-format support).
+    //
+    // `invViewProjection`/`cameraWorldPosition` are this view's own current
+    // values, pushed as compute push constants (never a per-view uniform
+    // buffer - this pass's own per-view parameters are small enough that a
+    // buffer would be pure overhead, matching BoxBlur.comp's own simple
+    // push-constant convention).
+    //
+    // Returns the composited output's TextureHandle - the CALLER must add
+    // it to this call's own outputs root set, or this pass's write will be
+    // silently culled the next time RenderGraphCompiler::Compile() runs
+    // (same contract as every AddXxxLutPass() above).
+    rg::TextureHandle AddAerialPerspectiveCompositePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
+        rg::TextureHandle sourceColorHandle, VkSampler sourceColorSampler, VkImageView sourceDepthView,
+        VkSampler sourceDepthSampler, rg::VolumeTextureHandle aerialPerspectiveVolumeHandle,
+        const char* aerialPerspectiveVolumeName, const Mat4& invViewProjection, Vec3 cameraWorldPosition,
+        VkExtent2D extent, const char* outputTextureName);
+
+    // Returns a pointer to `outputTextureName`'s own persistent composited
+    // output RenderTexture (the SAME one AddAerialPerspectiveCompositePass()
+    // above imports every call), or nullptr if that name has never been
+    // passed to it yet this session - used by Application::Run() both to
+    // hand the Editor a stable RenderTexture* to display in "Game"/"Scene"
+    // (see IEditorLayer::SetGameViewCompositedTexture()/
+    // SetSceneViewCompositedTexture()) and as the new source for
+    // `GET /get_game_view` capture (network-impl-2 campaign).
+    RenderTexture* CompositedOutput(const char* outputTextureName) noexcept;
+
+    // Transitions `outputTextureName`'s own composited output texture from
+    // the ComputeShaderWrite state AddAerialPerspectiveCompositePass() above
+    // leaves it in (VK_IMAGE_LAYOUT_GENERAL) to a real ShaderRead state,
+    // ready for Dear ImGui/`GET /get_game_view`/`GET /get_texture` to sample
+    // it directly - mirrors RenderPasses.h's own
+    // FinalizeRenderTextureForExternalSampling() for the Game/Scene views
+    // themselves, applied here against ComputeShaderWrite as the "previous"
+    // access instead of ColorAttachmentWrite (matches
+    // ComputeBlurValidation::FinalizeForSampling()'s own identical
+    // reasoning for its own compute-written output). Must be called against
+    // the SAME command buffer the offscreen RenderGraph::Execute() call just
+    // recorded into, AFTER that call returns and BEFORE that command buffer
+    // is ended/submitted - see Application::Run(). A safe no-op if
+    // `outputTextureName` has never been passed to
+    // AddAerialPerspectiveCompositePass() at all this session.
+    void FinalizeAerialPerspectiveCompositeForSampling(VkCommandBuffer cmd, const char* outputTextureName);
+
 private:
     // Per-VIEW state for the Sky-View LUT (Phase 5) - one instance per
     // distinct `outputTextureName` ever passed to AddSkyViewLutPass(),
@@ -240,6 +327,17 @@ private:
         std::optional<VolumeTexture> output;
     };
 
+    // Phase 7 - Aerial Perspective Composite. One instance per distinct
+    // `outputTextureName` ever passed to AddAerialPerspectiveCompositePass()
+    // ("GameViewComposited"/"SceneViewComposited") - mirrors
+    // SkyViewLutViewState's own shape, minus the per-view uniforms buffer
+    // (this pass's own per-view parameters are pushed as push constants
+    // instead - see AddAerialPerspectiveCompositePass()'s own doc comment).
+    struct AerialPerspectiveCompositeViewState {
+        ComputeDescriptorSet descriptorSet;
+        std::optional<RenderTexture> output;
+    };
+
     void EnsureTransmittanceLutInitialized(Renderer& renderer, const AtmosphereParametersGpu& params);
     void EnsureMultiScatteringLutInitialized(Renderer& renderer);
     void EnsureSkyViewLutInitialized(Renderer& renderer);
@@ -247,6 +345,10 @@ private:
     void EnsureAerialPerspectiveVolumeInitialized(Renderer& renderer);
     AerialPerspectiveVolumeViewState& EnsureAerialPerspectiveVolumeViewInitialized(
         Renderer& renderer, const char* outputVolumeName);
+    void EnsureAerialPerspectiveCompositeInitialized(Renderer& renderer);
+    AerialPerspectiveCompositeViewState& EnsureAerialPerspectiveCompositeViewInitialized(
+        Renderer& renderer, const char* outputTextureName, VkExtent2D extent);
+
 
     VkDevice m_device = VK_NULL_HANDLE;
 
@@ -281,6 +383,27 @@ private:
     VkDescriptorSetLayout m_aerialPerspectiveVolumeDescriptorSetLayout = VK_NULL_HANDLE;
     std::optional<ComputePipeline> m_aerialPerspectiveVolumePipeline;
     std::unordered_map<std::string, AerialPerspectiveVolumeViewState> m_aerialPerspectiveVolumeViewStates;
+
+    // Phase 7 - Aerial Perspective Composite. Deliberately NO
+    // AtmosphereParametersGpu/frame-uniforms buffer at all - this pass's
+    // own per-view parameters are pushed as compute push constants instead
+    // (see AddAerialPerspectiveCompositePass()'s own doc comment). Pipeline/
+    // descriptor-set-LAYOUT are shared across every view;
+    // m_aerialPerspectiveCompositeViewStates holds the genuinely per-view
+    // state (see AerialPerspectiveCompositeViewState's own doc comment
+    // above).
+    VkDescriptorSetLayout m_aerialPerspectiveCompositeDescriptorSetLayout = VK_NULL_HANDLE;
+    std::optional<ComputePipeline> m_aerialPerspectiveCompositePipeline;
+    std::unordered_map<std::string, AerialPerspectiveCompositeViewState> m_aerialPerspectiveCompositeViewStates;
+
+    // Phase 7 - the Sky Background pass's own dedicated graphics-pipeline
+    // owner (see AtmosphereSkyBackgroundRenderer.h) - a genuinely different
+    // kind of object than every compute pipeline above, owned here (rather
+    // than a sibling class of its own) since AtmosphereLutRenderer remains
+    // this campaign's single home for atmosphere GPU pass orchestration
+    // (see this class's own header comment) - only the low-level
+    // VkPipeline-building logic itself lives in a separate file.
+    AtmosphereSkyBackgroundRenderer m_skyBackgroundRenderer;
 };
 
 // Phase 5 (ATMOSPHERE_PHASE5_SKYVIEW_LUT_v1.md, Step 3) - resolves this

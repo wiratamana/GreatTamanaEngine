@@ -116,10 +116,10 @@ namespace {
 class ImGuiEditorLayer final : public IEditorLayer {
 public:
     ImGuiEditorLayer(Window& window, Renderer& renderer)
-        : m_gameView(renderer.CreateRenderTexture(
-              window.Width(), window.Height(), VK_FORMAT_UNDEFINED, "GameView", "GameViewDepth"))
-        , m_sceneView(renderer.CreateRenderTexture(
-              window.Width(), window.Height(), VK_FORMAT_UNDEFINED, "SceneView", "SceneViewDepth"))
+        : m_gameView(renderer.CreateRenderTexture(window.Width(), window.Height(), VK_FORMAT_UNDEFINED, "GameView",
+              "GameViewDepth", /*allowStorageImageAccess=*/false, /*allowDepthSampledAccess=*/true))
+        , m_sceneView(renderer.CreateRenderTexture(window.Width(), window.Height(), VK_FORMAT_UNDEFINED, "SceneView",
+              "SceneViewDepth", /*allowStorageImageAccess=*/false, /*allowDepthSampledAccess=*/true))
     {
         // See EditorContext::desiredExtent/desiredSceneExtent for why both
         // are initialized to the OS window's startup size here.
@@ -409,6 +409,19 @@ public:
         return m_sceneCamera.ViewProjection(aspectWidthOverHeight);
     }
 
+    // See IEditorLayer::SceneViewCameraWorldPosition()'s own doc comment.
+    Vec3 SceneViewCameraWorldPosition() const override { return m_sceneCamera.GetTransform().position; }
+
+
+    // See IEditorLayer::SetGameViewCompositedTexture()'s own doc comment -
+    // simply remembers the pointer; the actual (re)creation of
+    // m_ctx.gameViewDescriptor from it happens in BuildUI() below, the one
+    // place ImGui descriptor (re)creation already happens for every other
+    // texture this class displays.
+    void SetGameViewCompositedTexture(RenderTexture* texture) override { m_gameViewComposited = texture; }
+    void SetSceneViewCompositedTexture(RenderTexture* texture) override { m_sceneViewComposited = texture; }
+
+
     // Phase 7 (COMPUTE_PHASE7_VALIDATION_TESTING_TOOLING_STRATEGY_v2.md) -
     // see IEditorLayer::AddBlurValidationPass()'s own doc comment. Gated
     // on BOTH the "Show Compute Blur (debug)" toggle AND the Scene panel
@@ -453,13 +466,40 @@ public:
         // view textures - needed on first use, and again after
         // GameViewTarget()/SceneViewTarget() invalidated the previous one
         // (a resize). Each panel owns its own descriptor/texture.
-        if (m_ctx.gameViewDescriptor == VK_NULL_HANDLE) {
-            m_ctx.gameViewDescriptor = ImGui_ImplVulkan_AddTexture(
-                m_gameView.Sampler(), m_gameView.View(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        //
+        // Atmosphere Scattering + Aerial Perspective campaign, Phase 7 -
+        // PERMANENTLY prefers m_gameViewComposited/m_sceneViewComposited
+        // (the atmosphere-composited output - see
+        // IEditorLayer::SetGameViewCompositedTexture()'s own doc comment)
+        // over m_gameView/m_sceneView whenever a composited texture is
+        // available this frame, falling back to the original pre-composite
+        // texture only on a frame where the composite pass hasn't produced
+        // one yet (e.g. the very first frame). Since the composited
+        // texture's own underlying VkImageView can change (a resize) at any
+        // time during THIS frame's earlier offscreen Execute() call -
+        // outside this class's own GameViewTarget()/SceneViewTarget()-style
+        // "resize on demand" methods, exactly like ComputeBlurValidation's
+        // own output below - both descriptors are now tracked the SAME
+        // "recreate whenever the underlying view actually changed" way the
+        // blurred output already was, rather than "created once, never
+        // again".
+        {
+            RenderTexture* gameSource = (m_gameViewComposited != nullptr) ? m_gameViewComposited : &m_gameView;
+            if (m_ctx.gameViewDescriptor == VK_NULL_HANDLE || gameSource->View() != m_lastKnownGameView) {
+                ReleaseGameViewDescriptor();
+                m_ctx.gameViewDescriptor = ImGui_ImplVulkan_AddTexture(
+                    gameSource->Sampler(), gameSource->View(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                m_lastKnownGameView = gameSource->View();
+            }
         }
-        if (m_ctx.sceneViewDescriptor == VK_NULL_HANDLE) {
-            m_ctx.sceneViewDescriptor = ImGui_ImplVulkan_AddTexture(
-                m_sceneView.Sampler(), m_sceneView.View(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        {
+            RenderTexture* sceneSource = (m_sceneViewComposited != nullptr) ? m_sceneViewComposited : &m_sceneView;
+            if (m_ctx.sceneViewDescriptor == VK_NULL_HANDLE || sceneSource->View() != m_lastKnownSceneView) {
+                ReleaseSceneViewDescriptor();
+                m_ctx.sceneViewDescriptor = ImGui_ImplVulkan_AddTexture(
+                    sceneSource->Sampler(), sceneSource->View(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                m_lastKnownSceneView = sceneSource->View();
+            }
         }
 
         // Phase 7 - the blurred output's own ImGui descriptor, recreated
@@ -590,6 +630,7 @@ private:
         if (m_ctx.gameViewDescriptor != VK_NULL_HANDLE) {
             ImGui_ImplVulkan_RemoveTexture(m_ctx.gameViewDescriptor);
             m_ctx.gameViewDescriptor = VK_NULL_HANDLE;
+            m_lastKnownGameView = VK_NULL_HANDLE;
         }
     }
 
@@ -598,6 +639,7 @@ private:
         if (m_ctx.sceneViewDescriptor != VK_NULL_HANDLE) {
             ImGui_ImplVulkan_RemoveTexture(m_ctx.sceneViewDescriptor);
             m_ctx.sceneViewDescriptor = VK_NULL_HANDLE;
+            m_lastKnownSceneView = VK_NULL_HANDLE;
         }
     }
 
@@ -614,6 +656,22 @@ private:
     ImGuiContext* m_context = nullptr;
     RenderTexture m_gameView;
     RenderTexture m_sceneView;
+
+    // Atmosphere Scattering + Aerial Perspective campaign, Phase 7 - see
+    // IEditorLayer::SetGameViewCompositedTexture()/
+    // SetSceneViewCompositedTexture()'s own doc comments. Non-owning -
+    // Application (via AtmosphereLutRenderer) owns the real
+    // RenderTexture(s) these point at. m_lastKnownGameView/
+    // m_lastKnownSceneView track whichever VkImageView
+    // m_ctx.gameViewDescriptor/sceneViewDescriptor were last created
+    // against (mirrors m_lastKnownBlurredView's own identical role below),
+    // so BuildUI() can tell whenever the displayed source's own underlying
+    // view changed (composited texture created for the first time, OR
+    // resized) and needs a fresh ImGui descriptor.
+    RenderTexture* m_gameViewComposited = nullptr;
+    RenderTexture* m_sceneViewComposited = nullptr;
+    VkImageView m_lastKnownGameView = VK_NULL_HANDLE;
+    VkImageView m_lastKnownSceneView = VK_NULL_HANDLE;
 
     // Phase 7 (COMPUTE_PHASE7_VALIDATION_TESTING_TOOLING_STRATEGY_v2.md) -
     // the compute-shader campaign's own texture-side validation workload

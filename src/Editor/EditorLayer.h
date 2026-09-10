@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../Math/Mat4.h"
+#include "../Math/Vec3.h"
 #include "../Renderer/RenderTexture.h"
 #include "../Renderer/RenderGraph/RenderGraphTypes.h"
 
@@ -124,6 +125,43 @@ public:
     // it (so Application never renders a Scene view at all in a release
     // build).
     virtual Mat4 SceneViewProjection(float aspectWidthOverHeight) const = 0;
+
+    // Atmosphere Scattering + Aerial Perspective campaign, Phase 7 - the
+    // Scene view's own EditorCamera world-space eye position (its
+    // Transform's position - see EditorCamera::GetTransform()), needed to
+    // resolve the Scene View's own AtmosphereFrameUniforms (camera height
+    // above the virtual planet's ground) the same way
+    // RenderSystem::ResolveActiveCameraViewProjection()'s ECS Camera
+    // equivalent already is for the Game View. Always Vec3::Zero() for
+    // NullEditorLayer (never actually consulted there in practice, for the
+    // same reason SceneViewProjection() above never is either).
+    virtual Vec3 SceneViewCameraWorldPosition() const = 0;
+
+
+    // Atmosphere Scattering + Aerial Perspective campaign, Phase 7
+    // (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE7_SKY_BACKGROUND_AND_COMPOSITE_PASSES_v1.md)
+    // - hands this implementation a stable RenderTexture* to display in the
+    // "Game" panel INSTEAD of GameViewTarget()'s own m_gameView, now that
+    // the atmosphere-composited output (a NEW, separate texture -
+    // "GameViewComposited" - written by a post-process pass AFTER
+    // Game::Render() finishes) is PERMANENTLY what gets displayed - never
+    // optional/debug-only, unlike the existing "Show Compute Blur (debug)"
+    // toggle. Called once per frame, AFTER Application::Run() has finished
+    // recording this frame's atmosphere composite pass (and finalized it
+    // for external sampling) - `texture` is nullptr on any frame the Game
+    // view wasn't actually rendered at all (mirrors GameViewTarget()'s own
+    // nullptr contract). A real implementation is expected to fall back to
+    // its own original m_gameView whenever this is nullptr (e.g. the very
+    // first frame, before anything has run yet) rather than showing nothing.
+    // A no-op for NullEditorLayer (a release build has no "Game" panel to
+    // update).
+    virtual void SetGameViewCompositedTexture(RenderTexture* texture) = 0;
+
+    // The Scene-view equivalent of SetGameViewCompositedTexture() above, for
+    // "SceneViewComposited" / the "Scene" panel - see that method's own doc
+    // comment for the full reasoning.
+    virtual void SetSceneViewCompositedTexture(RenderTexture* texture) = 0;
+
 
     // Phase 7 (COMPUTE_PHASE7_VALIDATION_TESTING_TOOLING_STRATEGY_v2.md) -
     // declares (if this implementation's own "Show Compute Blur (debug)"

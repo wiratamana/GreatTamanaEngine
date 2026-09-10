@@ -71,8 +71,20 @@ class RenderGraphBuilder;
 // animating - declaring a phantom read for a buffer this pass doesn't
 // actually end up drawing this frame is a harmless, conservative
 // over-synchronization, never a correctness problem.
+//
+// `recordSkyBackground` (Atmosphere Scattering + Aerial Perspective
+// campaign, Phase 7 - task_manager/atmosphere-scattering-1/
+// ATMOSPHERE_PHASE7_SKY_BACKGROUND_AND_COMPOSITE_PASSES_v1.md), if set, is
+// invoked once, immediately after Game::Render()'s own draws for this pass
+// finish (still inside this pass's open dynamic-rendering bracket) -
+// passed this pass's own `cmd` - so a caller (Application::Run(), via
+// AtmosphereLutRenderer::DrawSkyBackground()) can draw the atmosphere sky
+// background wherever the depth buffer still shows the frame's own clear
+// value. Empty (the default) draws nothing extra - the exact pre-Phase-7
+// behavior.
 void AddGameViewPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer, rg::TextureHandle gameViewTarget,
-    float aspectWidthOverHeight, const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers = {});
+    float aspectWidthOverHeight, const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers = {},
+    const std::function<void(VkCommandBuffer)>& recordSkyBackground = {});
 
 // The Scene-view equivalent of AddGameViewPass() above - `execute` calls
 // Game::Render() with `sceneViewProjection` as its viewProjectionOverride
@@ -80,19 +92,24 @@ void AddGameViewPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& rend
 // IEditorLayer::SceneViewProjection()), bypassing ECS camera resolution for
 // this view only, exactly as Application::Run() already did before this
 // migration. `gpuSkinningOutputBuffers` - see AddGameViewPass() above.
-// `recordSceneOverlay`, if set, is invoked once, immediately after
-// Game::Render()'s own draws for this pass finish (still inside this pass's
-// open dynamic-rendering bracket) - passed this pass's own `cmd` and
-// `sceneViewProjection` again, so a caller (Application::Run(), via
-// IEditorLayer::RenderSceneGrid()) can layer a Scene-view-only visual
-// overlay (the Editor's infinite ground grid -
-// task_manager/editor-enchancements-1/PHASE0_MASTER_STRATEGY.md) on top of
-// the real scene geometry, correctly depth-tested against it. Empty (the
+// `recordSkyBackground` - see AddGameViewPass() above; invoked BEFORE
+// `recordSceneOverlay` below (the atmosphere sky background must be drawn
+// before the Editor's own ground-grid overlay, so the grid's own alpha
+// blend correctly composites over the sky wherever it intersects the
+// ground plane - see this phase's own completion report for the full
+// ordering reasoning). `recordSceneOverlay`, if set, is invoked once,
+// immediately after that (still inside this pass's open dynamic-rendering
+// bracket) - passed this pass's own `cmd` and `sceneViewProjection` again,
+// so a caller (Application::Run(), via IEditorLayer::RenderSceneGrid()) can
+// layer a Scene-view-only visual overlay (the Editor's infinite ground grid
+// - task_manager/editor-enchancements-1/PHASE0_MASTER_STRATEGY.md) on top
+// of the real scene geometry, correctly depth-tested against it. Empty (the
 // default) draws nothing extra - the exact pre-existing behavior.
 void AddSceneViewPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer, rg::TextureHandle sceneViewTarget,
     float aspectWidthOverHeight, const Mat4& sceneViewProjection,
     const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers = {},
-    const std::function<void(VkCommandBuffer, const Mat4&)>& recordSceneOverlay = {});
+    const std::function<void(VkCommandBuffer, const Mat4&)>& recordSceneOverlay = {},
+    const std::function<void(VkCommandBuffer)>& recordSkyBackground = {});
 
 // Declares the "Present" pass: writes swapchainImage's color attachment
 // (always cleared, matching FrameRecorder::RecordFrame()'s own old

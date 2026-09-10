@@ -172,18 +172,27 @@ void RenderGraph::ApplyUsageBarrierIfNeeded(VkCommandBuffer cmd, const ResourceU
         PhysicalTexture& tex = physicalTextures[usage.texture.index];
 
         // Every ResourceAccess kind except DepthStencilAttachmentReadWrite
-        // targets the COLOR image of this handle - MVP limitation: there is
-        // no way today to declare "I want to ShaderRead the DEPTH half of a
-        // texture that also has a color image" as a distinct usage (e.g. a
-        // shadow map sampled by a later pass) - see
-        // RENDERGRAPH_PHASE5_COMPLETION_REPORT.md's own MRT/attachment-count
-        // scope notes for the sibling limitation this mirrors. Phase 5 of
-        // the compute-shader campaign (COMPUTE_PHASE5_SYNCHRONIZATION_STRATEGY_v2.md)
-        // confirmed this correctly leaves a storage-image compute access
-        // (ComputeShaderRead/ComputeShaderWrite) routed to the color half
-        // too - TargetsDepthState() is the extracted, Tier-1-tested
-        // decision behind this line (see RenderGraphBarrierPlanner.h).
-        const bool isDepthAccess = TargetsDepthState(usage.access);
+        // targets the COLOR image of this handle by default - Atmosphere
+        // Scattering + Aerial Perspective campaign, Phase 7
+        // (ATMOSPHERE_PHASE7_SKY_BACKGROUND_AND_COMPOSITE_PASSES_v1.md)
+        // closes the MVP limitation this comment used to describe outright
+        // ("there is no way today to declare... a distinct usage") by ALSO
+        // consulting the usage's own explicit `isDepthResource` flag
+        // (RenderGraphTypes.h's ResourceUsage/PassBuilder::ReadTexture()) -
+        // this is what lets the Aerial Perspective Composite pass declare a
+        // ShaderRead against the DEPTH half of the Game/Scene View's own
+        // already-imported TextureHandle (which also carries a color
+        // image), without needing a second, separately-imported handle for
+        // the same physical depth image. TargetsDepthState() itself
+        // (RenderGraphBarrierPlanner.h) is UNCHANGED by this addition - it
+        // still only ever returns true for DepthStencilAttachmentReadWrite,
+        // exactly as Phase 5 of the compute-shader campaign
+        // (COMPUTE_PHASE5_SYNCHRONIZATION_STRATEGY_v2.md) confirmed for a
+        // storage-image compute access (ComputeShaderRead/
+        // ComputeShaderWrite), which is still correctly routed to the color
+        // half either way (a compute access can never set isDepthResource
+        // true today - no call site does).
+        const bool isDepthAccess = TargetsDepthState(usage.access) || usage.isDepthResource;
         ResourceState& state = isDepthAccess ? tex.depthState : tex.colorState;
         const ResourceState next = RequiredStateFor(usage.access, isDepthAccess);
 

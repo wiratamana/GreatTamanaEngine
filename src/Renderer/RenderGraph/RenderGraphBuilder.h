@@ -184,7 +184,8 @@ public:
         {
         }
 
-        void ReadTexture(TextureHandle handle, ResourceAccess access = ResourceAccess::ShaderRead);
+        void ReadTexture(TextureHandle handle, ResourceAccess access = ResourceAccess::ShaderRead,
+            bool isDepthResource = false);
 
         // `clearColor`/`clearDepth` are Phase 7 additions
         // (RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md) -

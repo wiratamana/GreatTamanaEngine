@@ -4,9 +4,9 @@ namespace gte::rg {
 
 // --- RenderGraphBuilder::PassBuilder ---------------------------------------
 
-void RenderGraphBuilder::PassBuilder::ReadTexture(TextureHandle handle, ResourceAccess access)
+void RenderGraphBuilder::PassBuilder::ReadTexture(TextureHandle handle, ResourceAccess access, bool isDepthResource)
 {
-    m_pass.reads.push_back(ResourceUsage::ForTexture(handle, access));
+    m_pass.reads.push_back(ResourceUsage::ForTexture(handle, access, isDepthResource));
 }
 
 void RenderGraphBuilder::PassBuilder::WriteColorAttachment(

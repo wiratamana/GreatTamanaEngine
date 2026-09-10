@@ -71,10 +71,23 @@ public:
     // later Resize() (Destroy() + Create()) re-applies the exact same
     // usage flags at the new size, without needing to re-validate the
     // format's capability (format never changes across a Resize()).
+    //
+    // allowDepthSampledAccess (default false - every existing call site is
+    // unaffected) is the DEPTH-side counterpart of allowStorageImageAccess
+    // above - Atmosphere Scattering + Aerial Perspective campaign, Phase 7
+    // (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE7_SKY_BACKGROUND_AND_COMPOSITE_PASSES_v1.md).
+    // Forwarded straight through to this RenderTexture's own companion
+    // DepthBuffer's `allowSampledAccess` constructor parameter (see
+    // DepthBuffer.h) - opts the depth image into VK_IMAGE_USAGE_SAMPLED_BIT
+    // plus a real (nearest-filter) VkSampler, so the Aerial Perspective
+    // Composite pass can bind it as `sampler2D sourceDepth`. Applied to the
+    // Game/Scene View's own RenderTexture (see ImGuiEditorLayer.cpp) - no
+    // other call site needs this.
     RenderTexture(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDevice device, int width,
         int height, VkFormat format = VK_FORMAT_B8G8R8A8_UNORM,
         VkFormat depthFormat = VK_FORMAT_D32_SFLOAT, const char* debugName = nullptr,
-        const char* depthDebugName = nullptr, bool allowStorageImageAccess = false);
+        const char* depthDebugName = nullptr, bool allowStorageImageAccess = false,
+        bool allowDepthSampledAccess = false);
     ~RenderTexture();
 
     RenderTexture(const RenderTexture&) = delete;
@@ -121,6 +134,14 @@ public:
     // texture is even eligible to be bound as a storage image.
     bool AllowsStorageImageAccess() const noexcept { return m_allowStorageImageAccess; }
 
+    // Sampler suitable for reading this texture's DEPTH image in a shader
+    // as `sampler2D`, once whichever pass wrote it has finished -
+    // VK_NULL_HANDLE unless this RenderTexture was constructed with
+    // allowDepthSampledAccess = true (see this class's own constructor
+    // comment). NEAREST filtering (see DepthBuffer::Sampler()'s own doc
+    // comment).
+    VkSampler DepthSampler() const noexcept { return m_depthBuffer ? m_depthBuffer->Sampler() : VK_NULL_HANDLE; }
+
 private:
     void Create(int width, int height);
     void Destroy() noexcept;
@@ -135,6 +156,7 @@ private:
     VkFormat m_format = VK_FORMAT_B8G8R8A8_UNORM;
     VkFormat m_depthFormat = VK_FORMAT_D32_SFLOAT;
     bool m_allowStorageImageAccess = false;
+    bool m_allowDepthSampledAccess = false;
 
     VkImage m_image = VK_NULL_HANDLE;
     VmaAllocation m_allocation = VK_NULL_HANDLE;

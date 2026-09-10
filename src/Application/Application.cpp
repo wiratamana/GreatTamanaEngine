@@ -1,5 +1,6 @@
 #include "Application.h"
 
+#include "AtmospherePassSequence.h"
 #include "EventTranslator.h"
 #include "EngineCommandDispatch.h"
 #include "MemorySnapshotBuilder.h"
@@ -38,37 +39,6 @@ float AspectRatioOf(int width, int height) noexcept
     return height > 0 ? static_cast<float>(width) / static_cast<float>(height) : 1.0f;
 }
 
-// Atmosphere Scattering + Aerial Perspective campaign, Phase 5
-// (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE5_SKYVIEW_LUT_v1.md)
-// - resolves the Game View's own eye world-space position: the first
-// active ECS Camera entity's world position (mirrors
-// RenderSystem::ResolveActiveCameraViewProjection()'s own "first active
-// Camera, in ComponentStorage<Camera> order" resolution exactly, but
-// returns just the position rather than a combined view-projection
-// matrix), falling back to Vec3::Zero() when the Registry has no active
-// Camera at all (matches that function's own "no active Camera ->
-// Identity()" fallback in spirit). Feeds the free function
-// gte::ResolveAtmosphereFrameUniforms() below - a small,
-// local helper rather than a new RenderSystem method, since this is
-// temporary validation-call-site wiring (see this phase's own strategy
-// document's Step 3) that Phase 7 will relocate/reconsider anyway.
-Vec3 ResolveActiveCameraWorldPosition(Registry& registry) noexcept
-{
-    ComponentStorage<Camera>& cameras = registry.Storage<Camera>();
-    for (std::size_t i = 0; i < cameras.Size(); ++i) {
-        const Camera& camera = cameras.ComponentAt(i);
-        if (!camera.active) {
-            continue;
-        }
-
-        const Entity entity = cameras.EntityAt(i);
-        if (registry.TryGetComponent<Transform>(entity) != nullptr) {
-            return ComputeWorldTransform(registry, entity).position;
-        }
-        return Vec3::Zero();
-    }
-    return Vec3::Zero();
-}
 
 // Phase 4C (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) - the one, tiny
 // bridge from Renderer's own (Profiling-free) GpuTimingSample::Status into
@@ -396,116 +366,83 @@ int Application::Run()
                             AddGpuSkinningPasses(b, m_game, m_renderer);
 
                         // Atmosphere Scattering + Aerial Perspective campaign,
-                        // Phase 3 (task_manager/atmosphere-scattering-1/
-                        // ATMOSPHERE_PHASE3_TRANSMITTANCE_LUT_v1.md) +
-                        // Phase 4 (ATMOSPHERE_PHASE4_MULTISCATTERING_LUT_v1.md) +
-                        // Phase 5 (ATMOSPHERE_PHASE5_SKYVIEW_LUT_v1.md) +
-                        // Phase 6 (ATMOSPHERE_PHASE6_AERIAL_PERSPECTIVE_FROXEL_VOLUME_v1.md)
-                        // - TEMPORARY validation call site: declares the
-                        // Transmittance LUT, Multi-Scattering LUT, Sky-View
-                        // LUT, AND (Game-View-only, per Phase 5/6's own
-                        // "What We Will NOT Do") the Aerial Perspective
-                        // froxel volume compute passes into this SAME
-                        // offscreen Execute() call so they actually run (and
-                        // the 2D LUTs are visible via GET
-                        // /get_texture?texture_name=AtmosphereTransmittanceLut
-                        // / AtmosphereMultiScatteringLut /
-                        // AtmosphereSkyViewLut_GameView every frame - the
-                        // Phase 6 volume itself has no `/get_texture`
-                        // equivalent, per Phase 2's own explicit scope note;
-                        // see this phase's own completion report for how it
-                        // was instead verified), completely independent of
-                        // whether Game/Scene are visible this frame. Fixed
-                        // default Earth parameters only - no Editor
+                        // Phase 7 (task_manager/atmosphere-scattering-1/
+                        // ATMOSPHERE_PHASE7_SKY_BACKGROUND_AND_COMPOSITE_PASSES_v1.md)
+                        // - the REAL, PERMANENT per-frame atmosphere pass
+                        // sequence (relocated out of Phases 3-6's own
+                        // temporary `// TODO(ATMOSPHERE_PHASE7)` validation
+                        // call site - see AtmospherePassSequence.h/.cpp).
+                        // Shared LUTs (Transmittance/Multi-Scattering) are
+                        // declared ONCE per frame here (view-independent);
+                        // the Sky-View LUT/Aerial Perspective volume are
+                        // resolved PER VIEW, inside each view's own `if`
+                        // block below, now covering BOTH Game View AND
+                        // Scene View (Phases 5/6 deliberately left Scene
+                        // View unwired - this is what finally wires it up).
+                        // Fixed default Earth parameters only - no Editor
                         // parameter editing yet (Phase 8), no dirty-flag
-                        // optimization yet (Phase 3/4/5/6's own "What We
-                        // Will NOT Do"). Multi-Scattering MUST be declared
-                        // strictly AFTER Transmittance, Sky-View strictly
-                        // AFTER both, and the Aerial Perspective volume
-                        // strictly AFTER Transmittance/Multi-Scattering too
-                        // (each needs the previous pass(es)' own returned
-                        // TextureHandle(s) as its own argument, and reads
-                        // them as real render-graph dependencies - see
-                        // AddMultiScatteringLutPass()'s/AddSkyViewLutPass()'s/
-                        // AddAerialPerspectiveVolumePass()'s own ReadTexture()
-                        // declarations).
-                        // TODO(ATMOSPHERE_PHASE7): relocate into the real
-                        // atmosphere pass sequence once the sky
-                        // background/aerial-perspective composite passes
-                        // exist - do NOT delete this call site in the
-                        // meantime (Phase 7 builds directly on these passes
-                        // running every frame; Phase 5/6 also deliberately
-                        // leave Scene View's own Sky-View LUT/Aerial
-                        // Perspective volume unwired here, per their own
-                        // "What We Will NOT Do" - Phase 7 is what wires that
-                        // up for real).
+                        // optimization (unchanged from Phase 3/4/5/6's own
+                        // "What We Will NOT Do").
                         const AtmosphereParametersGpu atmosphereParameters = MakeDefaultEarthAtmosphereParameters();
-                        const rg::TextureHandle transmittanceLutHandle =
-                            m_atmosphereLutRenderer.AddTransmittanceLutPass(b, m_renderer, atmosphereParameters);
-                        outputs.push_back(transmittanceLutHandle);
-                        const rg::TextureHandle multiScatteringLutHandle = m_atmosphereLutRenderer.AddMultiScatteringLutPass(
-                            b, m_renderer, atmosphereParameters, transmittanceLutHandle);
-                        outputs.push_back(multiScatteringLutHandle);
-
-                        // Game View only (Scene View wiring is explicitly
-                        // deferred to Phase 7 - see this phase's own "What
-                        // We Will NOT Do"): resolve this frame's
-                        // AtmosphereFrameUniforms from the active ECS
-                        // Camera's own current world position.
-                        const Vec3 gameViewEyeWorldPosition = ResolveActiveCameraWorldPosition(m_game.GetRegistry());
-                        const AtmosphereFrameUniforms gameViewFrameUniforms =
-                            ResolveAtmosphereFrameUniforms(m_game.GetRegistry(), gameViewEyeWorldPosition);
-                        outputs.push_back(m_atmosphereLutRenderer.AddSkyViewLutPass(b, m_renderer, atmosphereParameters,
-                            gameViewFrameUniforms, transmittanceLutHandle, multiScatteringLutHandle,
-                            "AtmosphereSkyViewLut_GameView"));
-
-                        // Atmosphere Scattering + Aerial Perspective
-                        // campaign, Phase 6
-                        // (ATMOSPHERE_PHASE6_AERIAL_PERSPECTIVE_FROXEL_VOLUME_v1.md)
-                        // - Game View only, per this phase's own "Extend
-                        // the running temporary validation call site"
-                        // instruction (Scene View wiring stays Phase 7's
-                        // job, same as the Sky-View LUT above). Reuses
-                        // `gameViewFrameUniforms` (same eye position/
-                        // hardcoded sun) but ALSO needs the Game View's
-                        // own current view-projection matrix, inverted on
-                        // the CPU, to reconstruct per-froxel-column ray
-                        // directions (AtmosphereFrameUniforms::
-                        // invViewProjection, new this phase) - falls back
-                        // to a fixed 16:9 aspect when the Game View panel
-                        // isn't currently visible this frame (gameTarget ==
-                        // nullptr), mirroring how this whole block already
-                        // runs completely independent of Game/Scene
-                        // visibility.
-                        constexpr float kAerialPerspectiveFallbackAspect = 16.0f / 9.0f;
-                        const float gameViewAerialAspect = (gameTarget != nullptr)
-                            ? AspectRatioOf(static_cast<int>(gameTarget->Extent().width),
-                                  static_cast<int>(gameTarget->Extent().height))
-                            : kAerialPerspectiveFallbackAspect;
-                        const Mat4 gameViewViewProjection =
-                            RenderSystem::ResolveActiveCameraViewProjection(m_game.GetRegistry(), gameViewAerialAspect);
-                        AtmosphereFrameUniforms gameViewAerialFrameUniforms = gameViewFrameUniforms;
-                        gameViewAerialFrameUniforms.invViewProjection = gameViewViewProjection.Inverse();
-                        const rg::VolumeTextureHandle aerialPerspectiveVolumeHandle =
-                            m_atmosphereLutRenderer.AddAerialPerspectiveVolumePass(b, m_renderer, atmosphereParameters,
-                                gameViewAerialFrameUniforms, transmittanceLutHandle, multiScatteringLutHandle,
-                                "AtmosphereAerialPerspectiveVolume_GameView");
-                        // A VolumeTextureHandle can never go into `outputs`
-                        // (TextureHandle-only) - see
-                        // RenderGraphBuilder::KeepVolumeTextureOutput()'s
-                        // own doc comment for why this is a SEPARATE call,
-                        // and ATMOSPHERE_PHASE6_COMPLETION_REPORT.md for
-                        // the real Phase 2 gap this fixes.
-                        b.KeepVolumeTextureOutput(aerialPerspectiveVolumeHandle);
+                        const AtmosphereSharedLutHandles atmosphereSharedLuts =
+                            AddAtmosphereSharedLutPasses(b, m_renderer, m_atmosphereLutRenderer, atmosphereParameters);
+                        outputs.push_back(atmosphereSharedLuts.transmittanceLutHandle);
+                        outputs.push_back(atmosphereSharedLuts.multiScatteringLutHandle);
 
                         if (gameTarget != nullptr) {
                             const VkExtent2D extent = gameTarget->Extent();
                             const float aspect =
                                 AspectRatioOf(static_cast<int>(extent.width), static_cast<int>(extent.height));
+
+                            // Game View's own eye world position (active ECS
+                            // Camera) and view-projection matrix (Phase 5's
+                            // own helper, now permanently wired here).
+                            const Vec3 gameEyeWorldPosition = ResolveActiveCameraWorldPosition(m_game.GetRegistry());
+                            const Mat4 gameViewProjection =
+                                RenderSystem::ResolveActiveCameraViewProjection(m_game.GetRegistry(), aspect);
+
+                            const AtmosphereViewLutHandles gameAtmosphere = AddAtmosphereViewLutPasses(b, m_renderer,
+                                m_atmosphereLutRenderer, m_game.GetRegistry(), atmosphereParameters,
+                                atmosphereSharedLuts, gameEyeWorldPosition, gameViewProjection,
+                                "AtmosphereSkyViewLut_GameView", "AtmosphereAerialPerspectiveVolume_GameView");
+                            outputs.push_back(gameAtmosphere.skyViewLutHandle);
+                            // A VolumeTextureHandle can never go into
+                            // `outputs` (TextureHandle-only) - see
+                            // RenderGraphBuilder::KeepVolumeTextureOutput()'s
+                            // own doc comment for why this is a SEPARATE
+                            // call, and ATMOSPHERE_PHASE6_COMPLETION_REPORT.md
+                            // for the real Phase 2 gap this fixes.
+                            b.KeepVolumeTextureOutput(gameAtmosphere.aerialPerspectiveVolumeHandle);
+
+                            // 3.2 - the Sky Background pass, issued INSIDE
+                            // AddGameViewPass()'s own already-open
+                            // vkCmdBeginRendering bracket, right after
+                            // Game::Render()'s own real scene geometry draws
+                            // (see RenderPasses.h's own updated doc comment).
+                            const std::function<void(VkCommandBuffer)> recordGameSkyBackground =
+                                MakeRecordSkyBackgroundCallback(m_atmosphereLutRenderer, m_renderer, gameViewProjection,
+                                    atmosphereParameters, gameAtmosphere.frameUniforms, "AtmosphereSkyViewLut_GameView");
+
                             const rg::TextureHandle h =
                                 b.ImportTexture("GameView", gameTarget->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
-                            AddGameViewPass(b, m_game, m_renderer, h, aspect, gpuSkinningBuffers);
+                            AddGameViewPass(b, m_game, m_renderer, h, aspect, gpuSkinningBuffers, recordGameSkyBackground);
                             outputs.push_back(h);
+
+                            // 3.3 - the Aerial Perspective Composite pass -
+                            // declared AFTER the GameView pass above (same
+                            // builder/Execute() call), reading its own
+                            // just-written color+depth (via the new
+                            // isDepthResource=true ReadTexture() overload -
+                            // see RenderGraphTypes.h) and writing a NEW,
+                            // separate "GameViewComposited" output texture -
+                            // this is what the Editor's "Game" panel and
+                            // `GET /get_game_view` display/capture from now
+                            // on (see the finalize block below).
+                            const rg::TextureHandle gameComposited = AddAtmosphereCompositePass(b, m_renderer,
+                                m_atmosphereLutRenderer, *gameTarget, h, gameAtmosphere.aerialPerspectiveVolumeHandle,
+                                "AtmosphereAerialPerspectiveVolume_GameView", gameAtmosphere.frameUniforms,
+                                gameEyeWorldPosition, extent, "GameViewComposited");
+                            outputs.push_back(gameComposited);
                         }
                         if (sceneTarget != nullptr) {
                             const VkExtent2D extent = sceneTarget->Extent();
@@ -518,8 +455,23 @@ int Application::Run()
                             // the active Camera component - see
                             // IEditorLayer::SceneViewProjection()/
                             // Game::Render()'s viewProjectionOverride
-                            // parameter.
+                            // parameter. IEditorLayer::SceneViewCameraWorldPosition()
+                            // (new this phase) is this view's own eye
+                            // world-space position equivalent.
                             const Mat4 sceneViewProjection = m_editorLayer->SceneViewProjection(aspect);
+                            const Vec3 sceneEyeWorldPosition = m_editorLayer->SceneViewCameraWorldPosition();
+
+                            const AtmosphereViewLutHandles sceneAtmosphere = AddAtmosphereViewLutPasses(b, m_renderer,
+                                m_atmosphereLutRenderer, m_game.GetRegistry(), atmosphereParameters,
+                                atmosphereSharedLuts, sceneEyeWorldPosition, sceneViewProjection,
+                                "AtmosphereSkyViewLut_SceneView", "AtmosphereAerialPerspectiveVolume_SceneView");
+                            outputs.push_back(sceneAtmosphere.skyViewLutHandle);
+                            b.KeepVolumeTextureOutput(sceneAtmosphere.aerialPerspectiveVolumeHandle);
+
+                            const std::function<void(VkCommandBuffer)> recordSceneSkyBackground =
+                                MakeRecordSkyBackgroundCallback(m_atmosphereLutRenderer, m_renderer, sceneViewProjection,
+                                    atmosphereParameters, sceneAtmosphere.frameUniforms, "AtmosphereSkyViewLut_SceneView");
+
                             const rg::TextureHandle h =
                                 b.ImportTexture("SceneView", sceneTarget->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
                             // The Editor's infinite ground grid (see
@@ -532,21 +484,32 @@ int Application::Run()
                                 [this](VkCommandBuffer cmd, const Mat4& viewProj) {
                                     m_editorLayer->RenderSceneGrid(m_renderer, cmd, viewProj);
                                 };
-                            AddSceneViewPass(
-                                b, m_game, m_renderer, h, aspect, sceneViewProjection, gpuSkinningBuffers, recordSceneGrid);
+                            // Sky background BEFORE the grid overlay - see
+                            // RenderPasses.h's own AddSceneViewPass() doc
+                            // comment for the full ordering reasoning.
+                            AddSceneViewPass(b, m_game, m_renderer, h, aspect, sceneViewProjection, gpuSkinningBuffers,
+                                recordSceneGrid, recordSceneSkyBackground);
                             outputs.push_back(h);
+
+                            const rg::TextureHandle sceneComposited = AddAtmosphereCompositePass(b, m_renderer,
+                                m_atmosphereLutRenderer, *sceneTarget, h, sceneAtmosphere.aerialPerspectiveVolumeHandle,
+                                "AtmosphereAerialPerspectiveVolume_SceneView", sceneAtmosphere.frameUniforms,
+                                sceneEyeWorldPosition, extent, "SceneViewComposited");
+                            outputs.push_back(sceneComposited);
 
                             // Phase 7 of the compute-shader campaign
                             // (COMPUTE_PHASE7_VALIDATION_TESTING_TOOLING_STRATEGY_v2.md)
                             // - the texture-side validation workload: a
                             // compute box-blur pass reading THIS call's own
-                            // just-declared Scene view texture `h` and
-                            // writing the Editor's own persistent
-                            // blurredSceneOutput RWTexture, declared into
-                            // the SAME builder/Execute() call so the render
-                            // graph's own automatic barrier planner
-                            // synchronizes the cross-pass read entirely on
-                            // its own (see
+                            // just-declared Scene view texture `h` (the
+                            // PRE-atmosphere-composite color, unchanged by
+                            // this phase - this debug tool has no reason to
+                            // move onto the composited output) and writing
+                            // the Editor's own persistent blurredSceneOutput
+                            // RWTexture, declared into the SAME builder/
+                            // Execute() call so the render graph's own
+                            // automatic barrier planner synchronizes the
+                            // cross-pass read entirely on its own (see
                             // ComputeBlurValidation.h). Declared (and this
                             // handle added to `outputs`) only when the
                             // Editor's own "Show Compute Blur (debug)"
@@ -581,11 +544,36 @@ int Application::Run()
                     // never hand-guessed.
                     m_renderGraph.NotifyDebugTextureStateOverride(
                         "GameView", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
+
+                    // Atmosphere Scattering + Aerial Perspective campaign,
+                    // Phase 7 - the FIFTH NotifyDebugTextureStateOverride()
+                    // call site (see AGENTS.md's "Named Texture Capture"
+                    // section - not yet updated there, per this campaign's
+                    // own workflow rule that only Phase 9 touches
+                    // AGENTS.md/README.md/TODO.md): finalizes
+                    // "GameViewComposited" for external (ImGui/
+                    // `/get_game_view`/`/get_texture`) sampling, then hands
+                    // the Editor a stable pointer to it so "Game" displays
+                    // the atmosphere-composited output PERMANENTLY from now
+                    // on (see IEditorLayer::SetGameViewCompositedTexture()).
+                    m_atmosphereLutRenderer.FinalizeAerialPerspectiveCompositeForSampling(
+                        offscreenCmd, "GameViewComposited");
+                    m_renderGraph.NotifyDebugTextureStateOverride(
+                        "GameViewComposited", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
+                    m_editorLayer->SetGameViewCompositedTexture(m_atmosphereLutRenderer.CompositedOutput("GameViewComposited"));
                 }
                 if (sceneTarget != nullptr) {
                     FinalizeRenderTextureForExternalSampling(offscreenCmd, *sceneTarget);
                     m_renderGraph.NotifyDebugTextureStateOverride(
                         "SceneView", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
+
+                    // Same "SceneViewComposited" treatment as "GameViewComposited"
+                    // above, for the Scene view.
+                    m_atmosphereLutRenderer.FinalizeAerialPerspectiveCompositeForSampling(
+                        offscreenCmd, "SceneViewComposited");
+                    m_renderGraph.NotifyDebugTextureStateOverride(
+                        "SceneViewComposited", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
+                    m_editorLayer->SetSceneViewCompositedTexture(m_atmosphereLutRenderer.CompositedOutput("SceneViewComposited"));
                 }
                 // Phase 7 of the compute-shader campaign - finalizes the
                 // blurred-output texture for external (ImGui) sampling too,
@@ -624,8 +612,24 @@ int Application::Run()
                 // uses its OWN separate ImmediateSubmit() call (a fresh
                 // command buffer/fence) - never `offscreenCmd`, which is
                 // already ended/submitted by the call just above.
+                //
+                // Atmosphere Scattering + Aerial Perspective campaign,
+                // Phase 7 - captures "GameViewComposited" (the atmosphere-
+                // composited output) instead of the original, pre-composite
+                // `*gameTarget`, now that it's PERMANENTLY what the Game
+                // View actually displays - see this phase's own completion
+                // report's explicit flag that every subsequent capture
+                // includes the atmosphere effect. Falls back to `gameTarget`
+                // itself only in the (should-be-unreachable, since the
+                // composite pass above always runs whenever gameTarget !=
+                // nullptr) case the composited texture somehow doesn't
+                // exist yet, so a capture request is never silently dropped.
                 if (gameTarget != nullptr && m_captureBridge.IsCaptureRequested(FrameCaptureKind::GameView)) {
-                    Renderer::CapturedRawPixels raw = m_renderer.CaptureRenderTexturePixels(*gameTarget);
+                    RenderTexture* captureSource = m_atmosphereLutRenderer.CompositedOutput("GameViewComposited");
+                    if (captureSource == nullptr) {
+                        captureSource = gameTarget;
+                    }
+                    Renderer::CapturedRawPixels raw = m_renderer.CaptureRenderTexturePixels(*captureSource);
                     if (IsBgraFormat(raw.format)) {
                         Encoding::ConvertBgraToRgbaInPlace(raw.pixels.data(), raw.width, raw.height);
                     }

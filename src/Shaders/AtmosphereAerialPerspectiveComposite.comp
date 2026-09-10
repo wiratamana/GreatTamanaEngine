@@ -1,0 +1,96 @@
+#version 450
+
+// Atmosphere Scattering + Aerial Perspective campaign, Phase 7
+// (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE7_SKY_BACKGROUND_AND_COMPOSITE_PASSES_v1.md)
+// - the Aerial Perspective Composite pass: for every pixel, samples the
+// Phase 6 aerial-perspective froxel volume at that pixel's screen column
+// plus a depth-mapped Z slice, and blends
+// `finalColor = sceneColor * transmittance + inScattering` onto whatever
+// the Sky Background pass (3.2, same frame, same view, drawn earlier into
+// this SAME source color texture) already wrote there.
+//
+// BINDING CONVENTION: binding 0 = sampler2D sourceColor (this view's
+// original color, POST-Sky-Background-pass); binding 1 = sampler2D
+// sourceDepth (this view's own DepthBuffer, sampled - requires
+// DepthBuffer::allowSampledAccess, see src/Renderer/DepthBuffer.h); binding
+// 2 = sampler3D aerialPerspectiveVolume (Phase 6's own output, trilinearly
+// filtered - see VolumeTexture.h); binding 3 = the new, separate
+// destinationImage (rgba8, write-only - "GameViewComposited"/
+// "SceneViewComposited", never the SAME texture as sourceColor, mirroring
+// this codebase's own "a compute pass never reads and writes the exact
+// SAME storage image in the same dispatch" convention - see
+// ComputeBlurValidation.h).
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#include "AtmosphereCommon.glsl"
+
+layout(push_constant) uniform PushConstants {
+    mat4 invViewProjection;
+    // .xyz = camera world position (engine world units, NOT km); .w =
+    // worldUnitsPerKm (AtmosphereParameters.h's kWorldUnitsPerKilometer,
+    // 1000.0 by convention) - packed as one vec4 (rather than a separate
+    // vec3 + float) to avoid any ambiguity in this push-constant block's
+    // own std430-like packing rules; matches the C++ side's plain
+    // 4-contiguous-floats layout exactly either way.
+    vec4 cameraWorldPositionAndScale;
+} pc;
+
+layout(binding = 0) uniform sampler2D sourceColor;
+layout(binding = 1) uniform sampler2D sourceDepth;
+layout(binding = 2) uniform sampler3D aerialPerspectiveVolume;
+layout(binding = 3, rgba8) uniform writeonly image2D destinationImage;
+
+// MUST match src/Renderer/Atmosphere/AtmosphereLutRenderer.cpp's own
+// kAerialMaxDistanceKm/kAerialDepthExponent constants (also mirrored in
+// AtmosphereAerialPerspectiveVolume.comp) - these describe the SAME froxel
+// volume this pass reads, so the Z-slice mapping used here to LOOK UP a
+// froxel must be the exact inverse of the mapping used to GENERATE it.
+const float kAerialMaxDistanceKm = 10.0;
+const float kAerialDepthExponent = 2.0;
+
+void main()
+{
+    ivec2 outputSize = imageSize(destinationImage);
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    if (texel.x >= outputSize.x || texel.y >= outputSize.y) {
+        // The dispatch's own ceiling-division group count can legitimately
+        // cover more threads than there are real pixels - see
+        // ComputeDispatch.h's own header comment.
+        return;
+    }
+
+    vec2 uv = (vec2(texel) + vec2(0.5)) / vec2(outputSize);
+    vec2 ndc = uv * 2.0 - 1.0;
+
+    float rawDepth = texture(sourceDepth, uv).r;
+
+    float viewDistanceKm;
+    if (rawDepth >= 0.999999) {
+        // Nothing was drawn at this pixel (still at the clear value, 1.0) -
+        // per this phase's own Step 1, the sky itself is understood as
+        // being "infinitely far": always sample the volume's FARTHEST Z
+        // slice, rather than reconstructing a (potentially unstable, or
+        // simply much-closer-than-10km) far-clip-plane world position.
+        viewDistanceKm = kAerialMaxDistanceKm;
+    } else {
+        vec4 clipPos = vec4(ndc, rawDepth, 1.0);
+        vec4 worldPos4 = pc.invViewProjection * clipPos;
+        vec3 worldPos = worldPos4.xyz / worldPos4.w;
+        float worldDistance = length(worldPos - pc.cameraWorldPositionAndScale.xyz);
+        viewDistanceKm = worldDistance / max(pc.cameraWorldPositionAndScale.w, 1e-6);
+    }
+
+    ivec3 volumeSize = textureSize(aerialPerspectiveVolume, 0);
+    float slice =
+        ViewDepthToFroxelSlice(viewDistanceKm, float(volumeSize.z), kAerialMaxDistanceKm, kAerialDepthExponent);
+    float sliceUv = clamp(slice / float(volumeSize.z), 0.0, 1.0);
+
+    vec4 aerial = texture(aerialPerspectiveVolume, vec3(uv, sliceUv));
+    vec3 inScattering = aerial.rgb;
+    float transmittance = aerial.a;
+
+    vec3 sceneColor = texture(sourceColor, uv).rgb;
+    vec3 finalColor = sceneColor * transmittance + inScattering;
+
+    imageStore(destinationImage, texel, vec4(finalColor, 1.0));
+}

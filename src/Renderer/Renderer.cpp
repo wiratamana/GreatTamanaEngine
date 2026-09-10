@@ -149,7 +149,7 @@ VkFormat Renderer::DepthFormat() const noexcept
 }
 
 RenderTexture Renderer::CreateRenderTexture(int width, int height, VkFormat format, const char* debugName,
-    const char* depthDebugName, bool allowStorageImageAccess) const
+    const char* depthDebugName, bool allowStorageImageAccess, bool allowDepthSampledAccess) const
 {
     // VK_FORMAT_UNDEFINED (the default - see Renderer.h) means "match
     // ColorFormat() exactly", not "let Vulkan pick" - resolved here (the one
@@ -160,7 +160,7 @@ RenderTexture Renderer::CreateRenderTexture(int width, int height, VkFormat form
     // across GPUs/drivers. See AGENTS.md ("Render Target Format Matching").
     const VkFormat resolvedFormat = (format == VK_FORMAT_UNDEFINED) ? ColorFormat() : format;
     return m_resources.CreateRenderTexture(
-        width, height, resolvedFormat, debugName, depthDebugName, allowStorageImageAccess);
+        width, height, resolvedFormat, debugName, depthDebugName, allowStorageImageAccess, allowDepthSampledAccess);
 }
 
 Renderer::CapturedRawPixels Renderer::CaptureImagePixels(VkImage image, VkImageAspectFlags aspect, VkFormat format,

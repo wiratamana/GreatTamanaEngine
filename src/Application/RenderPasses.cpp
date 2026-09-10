@@ -48,7 +48,8 @@ void DeclareGpuSkinningReads(
 } // namespace
 
 void AddGameViewPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer, rg::TextureHandle gameViewTarget,
-    float aspectWidthOverHeight, const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers)
+    float aspectWidthOverHeight, const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers,
+    const std::function<void(VkCommandBuffer)>& recordSkyBackground)
 {
     builder.AddPass(
         "GameView",
@@ -57,17 +58,21 @@ void AddGameViewPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& rend
             pass.WriteDepthStencilAttachment(gameViewTarget, kGameClearDepth);
             DeclareGpuSkinningReads(pass, gpuSkinningOutputBuffers);
         },
-        [&game, &renderer, aspectWidthOverHeight](rg::PassContext& ctx) {
+        [&game, &renderer, aspectWidthOverHeight, recordSkyBackground](rg::PassContext& ctx) {
             renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
             game.Render(renderer, aspectWidthOverHeight);
             renderer.EndGraphPassRecording();
+            if (recordSkyBackground) {
+                recordSkyBackground(ctx.cmd);
+            }
         });
 }
 
 void AddSceneViewPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer, rg::TextureHandle sceneViewTarget,
     float aspectWidthOverHeight, const Mat4& sceneViewProjection,
     const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers,
-    const std::function<void(VkCommandBuffer, const Mat4&)>& recordSceneOverlay)
+    const std::function<void(VkCommandBuffer, const Mat4&)>& recordSceneOverlay,
+    const std::function<void(VkCommandBuffer)>& recordSkyBackground)
 {
     builder.AddPass(
         "SceneView",
@@ -76,10 +81,17 @@ void AddSceneViewPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& ren
             pass.WriteDepthStencilAttachment(sceneViewTarget, kGameClearDepth);
             DeclareGpuSkinningReads(pass, gpuSkinningOutputBuffers);
         },
-        [&game, &renderer, aspectWidthOverHeight, sceneViewProjection, recordSceneOverlay](rg::PassContext& ctx) {
+        [&game, &renderer, aspectWidthOverHeight, sceneViewProjection, recordSceneOverlay,
+            recordSkyBackground](rg::PassContext& ctx) {
             renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
             game.Render(renderer, aspectWidthOverHeight, &sceneViewProjection);
             renderer.EndGraphPassRecording();
+            // Sky background BEFORE the grid overlay - see this file's own
+            // header comment (AddSceneViewPass()'s doc comment) for the
+            // full ordering reasoning.
+            if (recordSkyBackground) {
+                recordSkyBackground(ctx.cmd);
+            }
             if (recordSceneOverlay) {
                 recordSceneOverlay(ctx.cmd, sceneViewProjection);
             }

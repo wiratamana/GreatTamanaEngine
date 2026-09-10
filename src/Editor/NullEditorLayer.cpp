@@ -20,6 +20,9 @@ public:
     RenderTexture* GameViewTarget() override { return nullptr; }
     RenderTexture* SceneViewTarget() override { return nullptr; }
     Mat4 SceneViewProjection(float /*aspectWidthOverHeight*/) const override { return Mat4::Identity(); }
+    Vec3 SceneViewCameraWorldPosition() const override { return Vec3::Zero(); }
+    void SetGameViewCompositedTexture(RenderTexture* /*texture*/) override { }
+    void SetSceneViewCompositedTexture(RenderTexture* /*texture*/) override { }
     std::optional<rg::TextureHandle> AddBlurValidationPass(rg::RenderGraphBuilder& /*builder*/,
         Renderer& /*renderer*/, rg::TextureHandle /*sceneViewHandle*/, VkExtent2D /*sceneExtent*/) override
     {

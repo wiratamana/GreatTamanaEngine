@@ -248,9 +248,18 @@ public:
     // storage-capable RenderTexture in this campaign is externally-owned/
     // persistent (imported into a render graph via ImportTexture()) -
     // never requested as a transient, render-graph-pooled resource.
+    //
+    // `allowDepthSampledAccess` (default false) - Atmosphere Scattering +
+    // Aerial Perspective campaign, Phase 7
+    // (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE7_SKY_BACKGROUND_AND_COMPOSITE_PASSES_v1.md)
+    // - forwards straight through to RenderTexture's own identically-named
+    // constructor parameter, opting this RenderTexture's companion
+    // DepthBuffer into VK_IMAGE_USAGE_SAMPLED_BIT plus a real (nearest-
+    // filter) VkSampler, so a later pass can bind it as `sampler2D`. See
+    // DepthBuffer.h/RenderTexture.h for the full reasoning.
     RenderTexture CreateRenderTexture(int width, int height, VkFormat format = VK_FORMAT_UNDEFINED,
         const char* debugName = nullptr, const char* depthDebugName = nullptr,
-        bool allowStorageImageAccess = false) const;
+        bool allowStorageImageAccess = false, bool allowDepthSampledAccess = false) const;
 
     // network-impl-2 campaign, Phase 3
     // (PHASE3_GAME_VIEW_CAPTURE_AND_GET_GAME_VIEW_ENDPOINT.md) - synchronous,

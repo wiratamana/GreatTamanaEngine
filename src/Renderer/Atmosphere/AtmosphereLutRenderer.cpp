@@ -8,6 +8,7 @@
 #include "../Vulkan/DescriptorSetLayoutBuilder.h"
 
 #include <cstdint>
+#include <cstring>
 #include <utility>
 #include <vector>
 
@@ -74,6 +75,19 @@ constexpr int kAerialPerspectiveVolumeWidth = 128;
 constexpr int kAerialPerspectiveVolumeHeight = 128;
 constexpr int kAerialPerspectiveVolumeDepth = 32;
 
+// Phase 7 - MUST match Shaders/AtmosphereAerialPerspectiveComposite.comp's
+// own `layout(local_size_x = 16, local_size_y = 16) in;` exactly.
+constexpr std::uint32_t kAerialPerspectiveCompositeLocalSizeX = 16;
+constexpr std::uint32_t kAerialPerspectiveCompositeLocalSizeY = 16;
+
+// Push constants for the Aerial Perspective Composite compute pass - MUST
+// match Shaders/AtmosphereAerialPerspectiveComposite.comp's own
+// `layout(push_constant)` block exactly (mat4 + vec4 = 80 bytes).
+struct AerialPerspectiveCompositePushConstants {
+    float invViewProjection[16];
+    float cameraWorldPositionAndScale[4]; // xyz = camera world position, w = worldUnitsPerKm.
+};
+
 } // namespace
 
 AtmosphereLutRenderer::~AtmosphereLutRenderer()
@@ -101,6 +115,9 @@ AtmosphereLutRenderer::~AtmosphereLutRenderer()
     }
     if (m_aerialPerspectiveVolumeDescriptorSetLayout != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(m_device, m_aerialPerspectiveVolumeDescriptorSetLayout, nullptr);
+    }
+    if (m_aerialPerspectiveCompositeDescriptorSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(m_device, m_aerialPerspectiveCompositeDescriptorSetLayout, nullptr);
     }
 }
 
@@ -596,6 +613,209 @@ rg::VolumeTextureHandle AtmosphereLutRenderer::AddAerialPerspectiveVolumePass(rg
         });
 
     return outputHandle;
+}
+
+void AtmosphereLutRenderer::EnsureAerialPerspectiveCompositeInitialized(Renderer& renderer)
+{
+    if (m_aerialPerspectiveCompositePipeline.has_value()) {
+        return;
+    }
+
+    const Renderer::VulkanContextInfo context = renderer.GetVulkanContextInfo();
+    m_device = context.device;
+
+    // Binding convention (matches
+    // Shaders/AtmosphereAerialPerspectiveComposite.comp exactly): binding 0
+    // = sourceColor, binding 1 = sourceDepth, binding 2 =
+    // aerialPerspectiveVolume (all read-only combined image samplers),
+    // binding 3 = the output image2D.
+    DescriptorSetLayoutBuilder layoutBuilder(m_device);
+    m_aerialPerspectiveCompositeDescriptorSetLayout = layoutBuilder.AddCombinedImageSampler(/*binding=*/0)
+                                                            .AddCombinedImageSampler(/*binding=*/1)
+                                                            .AddCombinedImageSampler(/*binding=*/2)
+                                                            .AddStorageImage(/*binding=*/3)
+                                                            .Build();
+
+    // Compute-stage push constants - never a per-view uniform/storage
+    // buffer here (see this class's own header comment) - matches
+    // BoxBlur.comp's own simple push-constant convention.
+    VkPushConstantRange pushConstantRange{};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = sizeof(AerialPerspectiveCompositePushConstants);
+
+    m_aerialPerspectiveCompositePipeline.emplace(
+        renderer.CreateComputePipeline("shaders/AtmosphereAerialPerspectiveComposite.comp.spv",
+            std::vector<VkDescriptorSetLayout>{ m_aerialPerspectiveCompositeDescriptorSetLayout }, pushConstantRange));
+}
+
+AtmosphereLutRenderer::AerialPerspectiveCompositeViewState&
+AtmosphereLutRenderer::EnsureAerialPerspectiveCompositeViewInitialized(
+    Renderer& renderer, const char* outputTextureName, VkExtent2D extent)
+{
+    const auto existing = m_aerialPerspectiveCompositeViewStates.find(outputTextureName);
+    if (existing != m_aerialPerspectiveCompositeViewStates.end()) {
+        return existing->second;
+    }
+
+    AerialPerspectiveCompositeViewState state;
+    state.descriptorSet =
+        ComputeDescriptorSet(renderer.AllocateComputeDescriptorSet(m_aerialPerspectiveCompositeDescriptorSetLayout));
+
+    // Explicit VK_FORMAT_R8G8B8A8_UNORM (never the swapchain's own
+    // negotiated format) - see AddAerialPerspectiveCompositePass()'s own
+    // doc comment for the full reasoning (mirrors ComputeBlurValidation's
+    // own identical "BlurredSceneOutput" choice). `outputTextureName` is
+    // reused directly as this RenderTexture's own GpuMemoryTracker debug
+    // name, same convention as the Sky-View LUT's own output.
+    const int width = extent.width > 0 ? static_cast<int>(extent.width) : 1;
+    const int height = extent.height > 0 ? static_cast<int>(extent.height) : 1;
+    state.output.emplace(renderer.CreateRenderTexture(width, height, VK_FORMAT_R8G8B8A8_UNORM, outputTextureName,
+        /*depthDebugName=*/nullptr, /*allowStorageImageAccess=*/true));
+
+    const auto insertedPair = m_aerialPerspectiveCompositeViewStates.emplace(outputTextureName, std::move(state));
+    return insertedPair.first->second;
+}
+
+rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveCompositePass(rg::RenderGraphBuilder& builder,
+    Renderer& renderer, rg::TextureHandle sourceColorHandle, VkSampler sourceColorSampler,
+    VkImageView sourceDepthView, VkSampler sourceDepthSampler, rg::VolumeTextureHandle aerialPerspectiveVolumeHandle,
+    const char* aerialPerspectiveVolumeName, const Mat4& invViewProjection, Vec3 cameraWorldPosition,
+    VkExtent2D extent, const char* outputTextureName)
+{
+    EnsureAerialPerspectiveCompositeInitialized(renderer);
+    AerialPerspectiveCompositeViewState& viewState =
+        EnsureAerialPerspectiveCompositeViewInitialized(renderer, outputTextureName, extent);
+
+    const VkExtent2D currentExtent = viewState.output->Extent();
+    if (currentExtent.width != extent.width || currentExtent.height != extent.height) {
+        // Resizes are rare/user-driven (dragging the Game/Scene panel's
+        // border) - a full device stall here is the simplest correct
+        // thing, mirroring ComputeBlurValidation::AddPass()'s own
+        // identical discipline.
+        vkDeviceWaitIdle(m_device);
+        viewState.output->Resize(static_cast<int>(extent.width), static_cast<int>(extent.height));
+    }
+
+    const rg::TextureHandle outputHandle =
+        builder.ImportTexture(outputTextureName, viewState.output->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
+
+    // The Phase 6 Aerial Perspective Volume's own trilinear sampler - looked
+    // up by name (the SAME name this frame's own AddAerialPerspectiveVolumePass()
+    // call registered it under) rather than resolved via
+    // PassContext::resolveVolumeTexture() (which never carries a sampler -
+    // see RenderGraph.h's own ResolvedVolumeTexture{view} shape).
+    const auto aerialVolumeIt = m_aerialPerspectiveVolumeViewStates.find(aerialPerspectiveVolumeName);
+    const VkSampler aerialVolumeSampler =
+        (aerialVolumeIt != m_aerialPerspectiveVolumeViewStates.end() && aerialVolumeIt->second.output.has_value())
+        ? aerialVolumeIt->second.output->Sampler()
+        : VK_NULL_HANDLE;
+
+    AerialPerspectiveCompositePushConstants pushConstants{};
+    std::memcpy(pushConstants.invViewProjection, invViewProjection.Data(), sizeof(pushConstants.invViewProjection));
+    pushConstants.cameraWorldPositionAndScale[0] = cameraWorldPosition.x;
+    pushConstants.cameraWorldPositionAndScale[1] = cameraWorldPosition.y;
+    pushConstants.cameraWorldPositionAndScale[2] = cameraWorldPosition.z;
+    pushConstants.cameraWorldPositionAndScale[3] = kWorldUnitsPerKilometer;
+
+    builder.AddComputePass(
+        "AtmosphereAerialPerspectiveCompositePass",
+        [sourceColorHandle, aerialPerspectiveVolumeHandle, outputHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
+            // Real dependency declarations - order this pass strictly after
+            // whichever GameView/SceneView graphics pass wrote
+            // sourceColorHandle's color+depth this same frame. The SECOND
+            // ReadTexture() call (isDepthResource=true) is what actually
+            // closes this phase's own engine gap - see
+            // RenderGraphTypes.h's ResourceUsage::isDepthResource doc
+            // comment.
+            pass.ReadTexture(sourceColorHandle, rg::ResourceAccess::ShaderRead);
+            pass.ReadTexture(sourceColorHandle, rg::ResourceAccess::ShaderRead, /*isDepthResource=*/true);
+            pass.ReadVolumeTexture(aerialPerspectiveVolumeHandle, rg::ResourceAccess::ShaderRead);
+            pass.WriteTexture(outputHandle, rg::ResourceAccess::ComputeShaderWrite);
+        },
+        [this, &renderer, &viewState, sourceColorHandle, sourceColorSampler, sourceDepthView, sourceDepthSampler,
+            aerialPerspectiveVolumeHandle, aerialVolumeSampler, outputHandle, pushConstants,
+            extent](rg::PassContext& ctx) {
+            const rg::PassContext::ResolvedTexture sourceColor = ctx.resolveTexture(sourceColorHandle);
+            const rg::PassContext::ResolvedTexture dest = ctx.resolveTexture(outputHandle);
+            const rg::PassContext::ResolvedVolumeTexture volume =
+                ctx.resolveVolumeTexture(aerialPerspectiveVolumeHandle);
+
+            // sourceColor.view is the CURRENT physical view behind
+            // sourceColorHandle (resolved fresh every call - correct for an
+            // imported texture too); sourceDepthView/sourceDepthSampler are
+            // caller-supplied directly (see this method's own doc comment
+            // for why - mirrors ComputeBlurValidation::AddPass()'s own
+            // identical `sceneViewSampler` reasoning, applied here to a
+            // SECOND (depth) plain Vulkan object the render graph has no
+            // resolution path for at all).
+            viewState.descriptorSet.Rewrite(m_device,
+                std::vector<ComputeDescriptorWrite>{
+                    ComputeDescriptorWrite::CombinedImageSampler(0, sourceColor.view, sourceColorSampler),
+                    ComputeDescriptorWrite::CombinedImageSampler(1, sourceDepthView, sourceDepthSampler),
+                    ComputeDescriptorWrite::CombinedImageSampler(2, volume.view, aerialVolumeSampler),
+                    ComputeDescriptorWrite::StorageImage(3, dest.view),
+                });
+
+            AerialPerspectiveCompositePushConstants localPushConstants = pushConstants;
+
+            const Extent3D groupCounts = ComputeGroupCount3D(Extent3D{ extent.width, extent.height, 1 },
+                Extent3D{ kAerialPerspectiveCompositeLocalSizeX, kAerialPerspectiveCompositeLocalSizeY, 1 });
+
+            renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
+            renderer.Dispatch(*m_aerialPerspectiveCompositePipeline, viewState.descriptorSet.Native(),
+                &localPushConstants, sizeof(localPushConstants), groupCounts.width, groupCounts.height,
+                groupCounts.depth);
+            renderer.EndGraphPassRecording();
+        });
+    return outputHandle;
+}
+
+RenderTexture* AtmosphereLutRenderer::CompositedOutput(const char* outputTextureName) noexcept
+{
+    const auto it = m_aerialPerspectiveCompositeViewStates.find(outputTextureName);
+    if (it == m_aerialPerspectiveCompositeViewStates.end() || !it->second.output.has_value()) {
+        return nullptr;
+    }
+    return &it->second.output.value();
+}
+
+void AtmosphereLutRenderer::FinalizeAerialPerspectiveCompositeForSampling(VkCommandBuffer cmd, const char* outputTextureName)
+{
+    const auto it = m_aerialPerspectiveCompositeViewStates.find(outputTextureName);
+    if (it == m_aerialPerspectiveCompositeViewStates.end() || !it->second.output.has_value()) {
+        return;
+    }
+
+    const rg::ResourceState previous = rg::RequiredStateFor(rg::ResourceAccess::ComputeShaderWrite, false);
+    const rg::ResourceState next = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
+    const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+    rg::EmitImageBarrier(cmd, it->second.output->Image(), range, previous, next);
+}
+
+
+void AtmosphereLutRenderer::DrawSkyBackground(Renderer& renderer, VkCommandBuffer cmd, const Mat4& viewProjection,
+    const AtmosphereParametersGpu& params, const AtmosphereFrameUniforms& frameUniforms, const char* skyViewLutName)
+{
+    const auto it = m_skyViewLutViewStates.find(skyViewLutName);
+    if (it == m_skyViewLutViewStates.end() || !it->second.output.has_value()) {
+        // Programmer error, per this method's own doc comment
+        // (AtmosphereLutRenderer.h) - AddSkyViewLutPass() for this exact
+        // name MUST have already run earlier THIS SAME frame. Degrades to
+        // "draw nothing" (an invisible sky) rather than crashing, so a
+        // future call-order mistake stays a visible bug, not a hard fault.
+        return;
+    }
+
+    // AtmosphereFrameUniforms::cameraPositionAtmosphere.y IS ALREADY the
+    // "view height from the planet's CENTER" quantity (planetRadiusKm +
+    // heightAboveGroundKm) - the exact same value
+    // AtmosphereSkyViewLut.comp's own generation pass reads directly, and
+    // exactly what AtmosphereSkyBackground.frag's own
+    // ViewDirectionToSkyViewLutUv() call expects - see
+    // ResolveAtmosphereFrameUniforms()'s own doc comment below.
+    m_skyBackgroundRenderer.Draw(renderer, cmd, viewProjection, it->second.output->View(),
+        it->second.output->Sampler(), frameUniforms.cameraPositionAtmosphere.y, params.planetRadiusKm);
 }
 
 AtmosphereFrameUniforms ResolveAtmosphereFrameUniforms(Registry& registry, Vec3 eyeWorldPosition)

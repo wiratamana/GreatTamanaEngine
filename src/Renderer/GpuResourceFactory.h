@@ -60,9 +60,16 @@ public:
     // Vulkan/FormatCapabilities.h's SupportsStorageImageUsage() and throws
     // std::runtime_error loudly if it doesn't, rather than silently
     // creating a RenderTexture a compute shader can't actually bind as a
-    // storage image.
+    // storage image. `allowDepthSampledAccess` (default false) - Atmosphere
+    // Scattering campaign, Phase 7 - forwards straight through to
+    // RenderTexture's own identically-named constructor parameter (see
+    // RenderTexture.h); no format-capability check needed here (unlike
+    // allowStorageImageAccess above), since a depth format's own
+    // VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT support is effectively universal
+    // on every conformant Vulkan implementation.
     RenderTexture CreateRenderTexture(int width, int height, VkFormat format, const char* debugName,
-        const char* depthDebugName = nullptr, bool allowStorageImageAccess = false) const;
+        const char* depthDebugName = nullptr, bool allowStorageImageAccess = false,
+        bool allowDepthSampledAccess = false) const;
 
     // See Renderer::CreateBuffer().
     Buffer CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, BufferMemoryUsage memoryUsage,

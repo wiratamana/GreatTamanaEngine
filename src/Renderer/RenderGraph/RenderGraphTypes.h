@@ -333,13 +333,30 @@ struct ResourceUsage {
     BufferHandle buffer;
     VolumeTextureHandle volumeTexture;
     ResourceAccess access = ResourceAccess::ShaderRead;
+    // Atmosphere Scattering + Aerial Perspective campaign, Phase 7
+    // (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE7_SKY_BACKGROUND_AND_COMPOSITE_PASSES_v1.md)
+    // - only meaningful when kind == ResourceKind::Texture. Lets a caller
+    // declare a ShaderRead (or any other non-DepthStencilAttachmentReadWrite
+    // access) against the DEPTH half of an already-imported texture handle
+    // that ALSO carries a color image (e.g. the Game/Scene View's own
+    // RenderTexture, imported once as a single TextureHandle covering both)
+    // - closing the MVP limitation RenderGraph.cpp's own
+    // ApplyUsageBarrierIfNeeded() used to document ("there is no way today
+    // to declare... a distinct usage"). Combined with TargetsDepthState()
+    // (RenderGraphBarrierPlanner.h, itself UNCHANGED by this addition) at
+    // the one call site that actually applies a barrier - see
+    // RenderGraph.cpp's ApplyUsageBarrierIfNeeded(). Defaults to false so
+    // every existing ResourceUsage/ForTexture() call site (which always
+    // meant "the color half") is completely unaffected.
+    bool isDepthResource = false;
 
-    static ResourceUsage ForTexture(TextureHandle handle, ResourceAccess access) noexcept
+    static ResourceUsage ForTexture(TextureHandle handle, ResourceAccess access, bool isDepthResource = false) noexcept
     {
         ResourceUsage usage;
         usage.kind = ResourceKind::Texture;
         usage.texture = handle;
         usage.access = access;
+        usage.isDepthResource = isDepthResource;
         return usage;
     }
 

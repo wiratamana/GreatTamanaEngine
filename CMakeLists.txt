@@ -362,6 +362,8 @@ add_library(gte_core STATIC
     src/Application/EngineCommandDispatch.cpp
     src/Application/RenderPasses.h
     src/Application/RenderPasses.cpp
+    src/Application/AtmospherePassSequence.h
+    src/Application/AtmospherePassSequence.cpp
     src/Event/Event.h
     src/Input/InputState.cpp
     src/Input/InputState.h
@@ -416,6 +418,8 @@ add_library(gte_core STATIC
     src/Renderer/Atmosphere/AtmosphereMath.cpp
     src/Renderer/Atmosphere/AtmosphereLutRenderer.h
     src/Renderer/Atmosphere/AtmosphereLutRenderer.cpp
+    src/Renderer/Atmosphere/AtmosphereSkyBackgroundRenderer.h
+    src/Renderer/Atmosphere/AtmosphereSkyBackgroundRenderer.cpp
     src/Renderer/Primitives/PrimitiveMeshGenerator.cpp
     src/Renderer/Primitives/PrimitiveMeshGenerator.h
     src/Renderer/Memory/GpuResourceHandle.h
@@ -834,6 +838,23 @@ gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereSkyViewLut.comp
 # Design Decision 4 - always-compiled core rendering feature).
 gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereAerialPerspectiveVolume.comp
     EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl)
+
+# Atmosphere Scattering + Aerial Perspective campaign, Phase 7
+# (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE7_SKY_BACKGROUND_AND_COMPOSITE_PASSES_v1.md)
+# - the Sky Background pass (a graphics vert/frag pair, drawn via
+# AtmosphereSkyBackgroundRenderer.h/.cpp) and the Aerial Perspective
+# Composite pass (a compute shader). Same unconditional (NOT
+# GTE_ENABLE_EDITOR-gated) treatment as every other atmosphere shader above,
+# for the exact same reason (Locked Design Decision 4 - always-compiled core
+# rendering feature) - this pass runs in BOTH the Game View (which still
+# renders even in a -DGTE_ENABLE_EDITOR=OFF release build) and the
+# Editor-only Scene View.
+gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereSkyBackground.vert)
+gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereSkyBackground.frag
+    EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl)
+gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereAerialPerspectiveComposite.comp
+    EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl)
+
 
 # Ensures SDL3.dll is copied next to the built .exe after every build.
 sdl3_copy_runtime_dll(GreatTamanaEngine)
