@@ -345,4 +345,187 @@ void MultiScatteringLutUvToHeightZenith(AtmosphereParametersGpu params, vec2 lut
     upDot = max(lutGridUv.y * 2.0 - 1.0, -0.999);
 }
 
+// ----------------------------------------------------------------------
+// AtmosphereFrameUniforms (Phase 5, ATMOSPHERE_PHASE5_SKYVIEW_LUT_v1.md) -
+// mirrors src/Renderer/Atmosphere/AtmosphereTypes.h's AtmosphereFrameUniforms
+// EXACTLY (same field names/order/16-byte-group layout convention as
+// AtmosphereParametersGpu above) - the campaign's first genuinely PER-FRAME
+// GPU buffer (camera height + sun direction change every frame, unlike the
+// session-stable AtmosphereParametersGpu above, which only changes when the
+// atmosphere's own physical constants change). Bound as ANOTHER read-only
+// STORAGE buffer, never a true uniform block - same "Revision Notes" rule
+// as AtmosphereParametersGpu (no VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER support
+// exists in the engine today).
+// ----------------------------------------------------------------------
+
+struct AtmosphereFrameUniforms {
+    vec3 cameraPositionAtmosphere;
+    float _pad0;
+
+    vec3 sunDirection;
+    float _pad1;
+
+    vec3 sunIlluminance;
+    float _pad2;
+};
+
+// ----------------------------------------------------------------------
+// Planet self-shadow visibility test - whether the sun is visible (1.0) or
+// blocked by the planet's own bulk (0.0) from a given point, biased a tiny
+// distance off the surface along its own local "up" to avoid a degenerate
+// self-intersection exactly at height == 0. Transcribed from
+// _reference/pl-sky/shaders/sky.inc's pl_planet_visibility() - shared here
+// (rather than inlined once into the Sky-View LUT below) since Phase 6's
+// aerial-perspective volume is expected to need the exact same self-shadow
+// test along its own ray-march.
+// ----------------------------------------------------------------------
+
+float PlanetVisibility(vec3 positionKm, vec3 directionToSun, float planetRadiusKm)
+{
+    float radialLengthKm = length(positionKm);
+    vec3 upAtPosition = positionKm / max(radialLengthKm, 1e-20);
+
+    float surfaceEpsilonKm = max(planetRadiusKm * 1e-7, 1e-6);
+    vec3 biasedPositionKm = positionKm + upAtPosition * surfaceEpsilonKm;
+
+    float groundHitDistanceKm = RayIntersectsSphereNearest(biasedPositionKm, directionToSun, planetRadiusKm);
+    return (groundHitDistanceKm >= 0.0) ? 0.0 : 1.0;
+}
+
+// ----------------------------------------------------------------------
+// Half-texel-inset LUT UV clamp - keeps a bilinear sample strictly inside a
+// LUT's own valid texel-center range, never letting it filter against (and
+// blend in) whatever lies just past the texture's hard edge. Transcribed
+// from _reference/pl-sky/shaders/sky.inc's pl_clamp_lut_uv().
+// ----------------------------------------------------------------------
+
+vec2 ClampLutUvHalfTexelInset(vec2 uv, ivec2 lutSize)
+{
+    vec2 halfTexel = 0.5 / vec2(lutSize);
+    return clamp(uv, halfTexel, vec2(1.0) - halfTexel);
+}
+
+// ----------------------------------------------------------------------
+// Sky-View LUT (Phase 5) - UV <-> view-direction parameterization,
+// transcribed from _reference/pl-sky/shaders/sky.inc's
+// skyLutSubUvToUnit()/skyLutUnitToSubUv()/fromSkyLut()/pl_to_sky_lut() (see
+// ATMOSPHERE_REFERENCE_NOTES.md, Section 3): a non-linear, HORIZON-BIASED
+// elevation remap (extra texel density is spent near the geometric
+// horizon, where the sky's own appearance changes fastest as you look
+// toward/past it) plus a plain linear full-360-degree azimuth remap.
+// "up" is +Y here, matching this file's own planet-centered positionKm
+// convention (Length(positionKm) == planetRadiusKm + heightAboveGroundKm -
+// see this file's own top-of-file COORDINATE CONVENTION comment): the
+// reference's own prose comments claim the local up is "negative Y", but
+// its ACTUAL code (acos(direction.y) treated directly as the zenith angle)
+// behaves exactly as if +Y were up - this transcription follows the real
+// code, not the comment (Phase 0's own "the real source always wins"
+// rule).
+// ----------------------------------------------------------------------
+
+// Converts a texel-center UV into a unit UV whose first/last texel centers
+// represent exactly 0/1 - mirrors skyLutSubUvToUnit() exactly.
+float SkyViewLutSubUvToUnit(float subUv, float resolution)
+{
+    if (resolution <= 1.0) {
+        return 0.0;
+    }
+    return clamp((subUv * resolution - 0.5) / (resolution - 1.0), 0.0, 1.0);
+}
+
+// The inverse of SkyViewLutSubUvToUnit() above - mirrors skyLutUnitToSubUv().
+float SkyViewLutUnitToSubUv(float unitUv, float resolution)
+{
+    if (resolution <= 1.0) {
+        return 0.5;
+    }
+    return (clamp(unitUv, 0.0, 1.0) * (resolution - 1.0) + 0.5) / resolution;
+}
+
+// Decodes a Sky-View LUT texel-center UV into a normalized VIEW DIRECTION -
+// this LUT's own GENERATION-time parameterization (what
+// AtmosphereSkyViewLut.comp itself calls per-texel). Mirrors fromSkyLut()
+// exactly: a horizon-biased non-linear elevation remap (quadratic from
+// zenith to horizon, sqrt from horizon to nadir) plus a linear 360-degree
+// azimuth remap. `viewHeightKm` is the eye's distance from the planet
+// CENTER (planetRadiusKm + heightAboveGroundKm, never just the height
+// alone).
+vec3 SkyViewLutUvToViewDirection(vec2 subUv, ivec2 lutSize, float viewHeightKm, float planetRadiusKm)
+{
+    vec2 uv = vec2(SkyViewLutSubUvToUnit(subUv.x, float(lutSize.x)), SkyViewLutSubUvToUnit(subUv.y, float(lutSize.y)));
+
+    viewHeightKm = max(viewHeightKm, planetRadiusKm);
+
+    float horizonDistanceKm = sqrt(max(viewHeightKm * viewHeightKm - planetRadiusKm * planetRadiusKm, 0.0));
+    float cosBeta = clamp(horizonDistanceKm / max(viewHeightKm, 1e-6), 0.0, 1.0);
+    float beta = acos(cosBeta);
+
+    // Angle measured from local up to the geometric horizon - ground
+    // level: PI/2; above ground: greater than PI/2.
+    float zenithToHorizonAngle = kAtmospherePi - beta;
+
+    float viewZenithAngle;
+    if (uv.y < 0.5) {
+        // Upper, non-ground-intersecting half: uv.y = 0 -> zenith, uv.y =
+        // 0.5 -> geometric horizon.
+        float coord = uv.y * 2.0;
+        coord = 1.0 - coord;
+        coord *= coord;
+        coord = 1.0 - coord;
+        viewZenithAngle = zenithToHorizonAngle * coord;
+    } else {
+        // Lower, ground-intersecting half: uv.y = 0.5 -> geometric
+        // horizon, uv.y = 1.0 -> nadir.
+        float coord = uv.y * 2.0 - 1.0;
+        coord *= coord;
+        viewZenithAngle = zenithToHorizonAngle + beta * coord;
+    }
+
+    // Full 360-degree azimuth mapping.
+    float phi = (0.5 - uv.x) * 2.0 * kAtmospherePi;
+
+    float sinZenith = sin(viewZenithAngle);
+    float cosZenith = cos(viewZenithAngle);
+
+    return vec3(sinZenith * cos(phi), cosZenith, sinZenith * sin(phi));
+}
+
+// The inverse of SkyViewLutUvToViewDirection() above - encodes a normalized
+// view DIRECTION into this LUT's own texel-center UV. Not needed by this
+// LUT's own generation pass (above), but declared now (mirrors
+// HeightZenithToTransmittanceLutUv()'s own "needed by a LATER phase that
+// SAMPLES this LUT" precedent) for Phase 7's Sky Background pass, which
+// will sample this LUT given a per-pixel camera ray direction. Mirrors
+// pl_to_sky_lut() exactly.
+vec2 ViewDirectionToSkyViewLutUv(vec3 direction, ivec2 lutSize, float viewHeightKm, float planetRadiusKm)
+{
+    direction = normalize(direction);
+    viewHeightKm = max(viewHeightKm, planetRadiusKm);
+
+    float horizonDistanceKm = sqrt(max(viewHeightKm * viewHeightKm - planetRadiusKm * planetRadiusKm, 0.0));
+    float cosBeta = clamp(horizonDistanceKm / max(viewHeightKm, 1e-6), 0.0, 1.0);
+    float beta = acos(cosBeta);
+    float zenithToHorizonAngle = kAtmospherePi - beta;
+
+    float viewZenithAngle = acos(clamp(direction.y, -1.0, 1.0));
+
+    vec2 uv;
+    if (viewZenithAngle <= zenithToHorizonAngle) {
+        float coord = viewZenithAngle / max(zenithToHorizonAngle, 1e-6);
+        coord = 1.0 - coord;
+        coord = sqrt(max(coord, 0.0));
+        coord = 1.0 - coord;
+        uv.y = coord * 0.5;
+    } else {
+        float coord = (viewZenithAngle - zenithToHorizonAngle) / max(beta, 1e-6);
+        coord = sqrt(clamp(coord, 0.0, 1.0));
+        uv.y = 0.5 + coord * 0.5;
+    }
+
+    float phi = atan(direction.z, direction.x);
+    uv.x = fract(0.5 - phi / (2.0 * kAtmospherePi));
+
+    return vec2(SkyViewLutUnitToSubUv(uv.x, float(lutSize.x)), SkyViewLutUnitToSubUv(uv.y, float(lutSize.y)));
+}
+
 #endif // ATMOSPHERE_COMMON_GLSL

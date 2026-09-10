@@ -817,6 +817,15 @@ gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereTransmittanceLut.comp
 gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereMultiScatteringLut.comp
     EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl)
 
+# Atmosphere Scattering + Aerial Perspective campaign, Phase 5
+# (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE5_SKYVIEW_LUT_v1.md)
+# - the Sky-View LUT compute shader. Same unconditional (NOT
+# GTE_ENABLE_EDITOR-gated) treatment as the Transmittance/Multi-Scattering
+# LUT shaders above, for the exact same reason (Locked Design Decision 4 -
+# always-compiled core rendering feature).
+gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereSkyViewLut.comp
+    EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl)
+
 # Ensures SDL3.dll is copied next to the built .exe after every build.
 sdl3_copy_runtime_dll(GreatTamanaEngine)
 

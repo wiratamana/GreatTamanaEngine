@@ -16,6 +16,7 @@
 #include "../Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../Renderer/RenderGraph/RenderGraphDebugTextureRegistry.h"
+#include "ECS/TransformHierarchy.h"
 
 #include <SDL3/SDL.h>
 
@@ -35,6 +36,38 @@ namespace {
 float AspectRatioOf(int width, int height) noexcept
 {
     return height > 0 ? static_cast<float>(width) / static_cast<float>(height) : 1.0f;
+}
+
+// Atmosphere Scattering + Aerial Perspective campaign, Phase 5
+// (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE5_SKYVIEW_LUT_v1.md)
+// - resolves the Game View's own eye world-space position: the first
+// active ECS Camera entity's world position (mirrors
+// RenderSystem::ResolveActiveCameraViewProjection()'s own "first active
+// Camera, in ComponentStorage<Camera> order" resolution exactly, but
+// returns just the position rather than a combined view-projection
+// matrix), falling back to Vec3::Zero() when the Registry has no active
+// Camera at all (matches that function's own "no active Camera ->
+// Identity()" fallback in spirit). Feeds the free function
+// gte::ResolveAtmosphereFrameUniforms() below - a small,
+// local helper rather than a new RenderSystem method, since this is
+// temporary validation-call-site wiring (see this phase's own strategy
+// document's Step 3) that Phase 7 will relocate/reconsider anyway.
+Vec3 ResolveActiveCameraWorldPosition(Registry& registry) noexcept
+{
+    ComponentStorage<Camera>& cameras = registry.Storage<Camera>();
+    for (std::size_t i = 0; i < cameras.Size(); ++i) {
+        const Camera& camera = cameras.ComponentAt(i);
+        if (!camera.active) {
+            continue;
+        }
+
+        const Entity entity = cameras.EntityAt(i);
+        if (registry.TryGetComponent<Transform>(entity) != nullptr) {
+            return ComputeWorldTransform(registry, entity).position;
+        }
+        return Vec3::Zero();
+    }
+    return Vec3::Zero();
 }
 
 // Phase 4C (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) - the one, tiny
@@ -365,35 +398,57 @@ int Application::Run()
                         // Atmosphere Scattering + Aerial Perspective campaign,
                         // Phase 3 (task_manager/atmosphere-scattering-1/
                         // ATMOSPHERE_PHASE3_TRANSMITTANCE_LUT_v1.md) +
-                        // Phase 4 (ATMOSPHERE_PHASE4_MULTISCATTERING_LUT_v1.md) -
+                        // Phase 4 (ATMOSPHERE_PHASE4_MULTISCATTERING_LUT_v1.md) +
+                        // Phase 5 (ATMOSPHERE_PHASE5_SKYVIEW_LUT_v1.md) -
                         // TEMPORARY validation call site: declares the
-                        // Transmittance LUT AND Multi-Scattering LUT compute
-                        // passes into this SAME offscreen Execute() call so
-                        // they actually run (and are visible via GET
+                        // Transmittance LUT, Multi-Scattering LUT, AND
+                        // (Game-View-only, per Phase 5's own "What We Will
+                        // NOT Do") Sky-View LUT compute passes into this SAME
+                        // offscreen Execute() call so they actually run (and
+                        // are visible via GET
                         // /get_texture?texture_name=AtmosphereTransmittanceLut
-                        // / AtmosphereMultiScatteringLut) every frame,
+                        // / AtmosphereMultiScatteringLut /
+                        // AtmosphereSkyViewLut_GameView) every frame,
                         // completely independent of whether Game/Scene are
                         // visible this frame. Fixed default Earth parameters
                         // only - no Editor parameter editing yet (Phase 8),
-                        // no dirty-flag optimization yet (Phase 3/4's own
+                        // no dirty-flag optimization yet (Phase 3/4/5's own
                         // "What We Will NOT Do"). Multi-Scattering MUST be
-                        // declared strictly AFTER Transmittance (it both
-                        // needs the returned TextureHandle as its own
-                        // argument, and reads it as a real render-graph
-                        // dependency - see AddMultiScatteringLutPass()'s own
-                        // ReadTexture() declaration).
+                        // declared strictly AFTER Transmittance, and Sky-View
+                        // strictly AFTER both (each needs the previous
+                        // pass(es)' own returned TextureHandle(s) as its own
+                        // argument, and reads them as real render-graph
+                        // dependencies - see AddMultiScatteringLutPass()'s/
+                        // AddSkyViewLutPass()'s own ReadTexture()
+                        // declarations).
                         // TODO(ATMOSPHERE_PHASE7): relocate into the real
                         // atmosphere pass sequence once the sky
                         // background/aerial-perspective composite passes
                         // exist - do NOT delete this call site in the
-                        // meantime (Phases 5/6 build directly on these passes
-                        // running every frame).
+                        // meantime (Phase 6 builds directly on these passes
+                        // running every frame; Phase 5 also deliberately
+                        // leaves Scene View's own Sky-View LUT unwired here,
+                        // per its own "What We Will NOT Do" - Phase 7 is
+                        // what wires that up for real).
                         const AtmosphereParametersGpu atmosphereParameters = MakeDefaultEarthAtmosphereParameters();
                         const rg::TextureHandle transmittanceLutHandle =
                             m_atmosphereLutRenderer.AddTransmittanceLutPass(b, m_renderer, atmosphereParameters);
                         outputs.push_back(transmittanceLutHandle);
-                        outputs.push_back(m_atmosphereLutRenderer.AddMultiScatteringLutPass(
-                            b, m_renderer, atmosphereParameters, transmittanceLutHandle));
+                        const rg::TextureHandle multiScatteringLutHandle = m_atmosphereLutRenderer.AddMultiScatteringLutPass(
+                            b, m_renderer, atmosphereParameters, transmittanceLutHandle);
+                        outputs.push_back(multiScatteringLutHandle);
+
+                        // Game View only (Scene View wiring is explicitly
+                        // deferred to Phase 7 - see this phase's own "What
+                        // We Will NOT Do"): resolve this frame's
+                        // AtmosphereFrameUniforms from the active ECS
+                        // Camera's own current world position.
+                        const Vec3 gameViewEyeWorldPosition = ResolveActiveCameraWorldPosition(m_game.GetRegistry());
+                        const AtmosphereFrameUniforms gameViewFrameUniforms =
+                            ResolveAtmosphereFrameUniforms(m_game.GetRegistry(), gameViewEyeWorldPosition);
+                        outputs.push_back(m_atmosphereLutRenderer.AddSkyViewLutPass(b, m_renderer, atmosphereParameters,
+                            gameViewFrameUniforms, transmittanceLutHandle, multiScatteringLutHandle,
+                            "AtmosphereSkyViewLut_GameView"));
 
                         if (gameTarget != nullptr) {
                             const VkExtent2D extent = gameTarget->Extent();
