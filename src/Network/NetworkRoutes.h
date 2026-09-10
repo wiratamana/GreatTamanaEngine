@@ -516,10 +516,24 @@ struct TextureListEntryView {
     std::uint32_t height = 0;
     bool hasDepth = false;
     std::uint64_t framesSinceUpdate = 0;
+
+    // network-impl-6 campaign, Phase 5 - "texture2d" or "texture3d". Mirrors
+    // gte::PublishedTextureListEntry::kind exactly (see that struct's own
+    // doc comment, FrameCaptureBridge.h) - NetworkServer.cpp copies it
+    // across verbatim, one more positional field in the same aggregate
+    // initializer as everything else here.
+    std::string kind = "texture2d";
+
+    // Meaningful ONLY when kind == "texture3d" (the volume's Z/depth texel
+    // count) - always 0 for a "texture2d" entry. Mirrors
+    // gte::PublishedTextureListEntry::depth exactly (see that struct's own
+    // doc comment for why this is unrelated to hasDepth above).
+    std::uint32_t depth = 0;
 };
 
 // Builds the full GET /list_textures response body:
-// {"textures":[{"name":"GameView","regime":"synchronous","format":"B8G8R8A8_UNORM","width":1280,"height":720,"has_depth":true,"frames_since_update":0}, ...]}
+// {"textures":[{"name":"GameView","regime":"synchronous","format":"B8G8R8A8_UNORM","width":1280,"height":720,"has_depth":true,"frames_since_update":0,"kind":"texture2d","depth":0},
+//              {"name":"AtmosphereAerialPerspectiveVolume_GameView","regime":"synchronous","format":"R16G16B16A16_SFLOAT","width":128,"height":128,"has_depth":false,"frames_since_update":0,"kind":"texture3d","depth":32}]}
 // An empty `entries` produces {"textures":[]}, never an error - a session
 // where nothing has rendered a single named texture yet (e.g. queried
 // immediately at startup, before the first frame) is a valid, normal state.

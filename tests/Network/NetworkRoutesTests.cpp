@@ -433,6 +433,11 @@ TEST(BuildListTexturesResponseJsonTests, MultipleEntriesRoundTripEveryField)
     EXPECT_EQ(parsed["textures"][0]["height"], 720);
     EXPECT_EQ(parsed["textures"][0]["has_depth"], true);
     EXPECT_EQ(parsed["textures"][0]["frames_since_update"], 0);
+    // network-impl-6 campaign, Phase 5 - a default-constructed
+    // TextureListEntryView (no kind/depth supplied at the call site above)
+    // must still emit its "texture2d"/0 defaults explicitly.
+    EXPECT_EQ(parsed["textures"][0]["kind"], "texture2d");
+    EXPECT_EQ(parsed["textures"][0]["depth"], 0);
 
     EXPECT_EQ(parsed["textures"][1]["name"], "Swapchain");
     EXPECT_EQ(parsed["textures"][1]["regime"], "pipelined");
@@ -441,6 +446,34 @@ TEST(BuildListTexturesResponseJsonTests, MultipleEntriesRoundTripEveryField)
     EXPECT_EQ(parsed["textures"][1]["height"], 1080);
     EXPECT_EQ(parsed["textures"][1]["has_depth"], false);
     EXPECT_EQ(parsed["textures"][1]["frames_since_update"], 3);
+    EXPECT_EQ(parsed["textures"][1]["kind"], "texture2d");
+    EXPECT_EQ(parsed["textures"][1]["depth"], 0);
+}
+
+TEST(BuildListTexturesResponseJsonTests, VolumeEntryReportsTexture3dKindAndDepth)
+{
+    // network-impl-6 campaign, Phase 5
+    // (task_manager/network-impl-6/PHASE5_LIST_TEXTURES_VOLUME_SURFACING.md) -
+    // a volume texture's entry always has has_depth == false (no
+    // depth-companion concept at all - see VolumeTarget.h) but a real,
+    // non-zero "depth" field (its own Z/texel-count dimension).
+    TextureListEntryView entry{ "AtmosphereAerialPerspectiveVolume_GameView", "synchronous",
+        "R16G16B16A16_SFLOAT", 128, 128, false, 0 };
+    entry.kind = "texture3d";
+    entry.depth = 32;
+    const std::vector<TextureListEntryView> entries = { entry };
+
+    const std::string body = BuildListTexturesResponseJson(entries);
+    const nlohmann::json parsed = nlohmann::json::parse(body);
+    ASSERT_EQ(parsed["textures"].size(), 1u);
+    EXPECT_EQ(parsed["textures"][0]["name"], "AtmosphereAerialPerspectiveVolume_GameView");
+    EXPECT_EQ(parsed["textures"][0]["regime"], "synchronous");
+    EXPECT_EQ(parsed["textures"][0]["format"], "R16G16B16A16_SFLOAT");
+    EXPECT_EQ(parsed["textures"][0]["width"], 128);
+    EXPECT_EQ(parsed["textures"][0]["height"], 128);
+    EXPECT_EQ(parsed["textures"][0]["has_depth"], false);
+    EXPECT_EQ(parsed["textures"][0]["kind"], "texture3d");
+    EXPECT_EQ(parsed["textures"][0]["depth"], 32);
 }
 
 TEST(BuildListTexturesResponseJsonTests, NameWithQuoteRoundTripsThroughJson)

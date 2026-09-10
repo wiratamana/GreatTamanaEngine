@@ -510,6 +510,8 @@ std::string BuildListTexturesResponseJson(const std::vector<TextureListEntryView
         item["height"] = entry.height;
         item["has_depth"] = entry.hasDepth;
         item["frames_since_update"] = entry.framesSinceUpdate;
+        item["kind"] = entry.kind;
+        item["depth"] = entry.depth;
         arr.push_back(std::move(item));
     }
     nlohmann::json body;

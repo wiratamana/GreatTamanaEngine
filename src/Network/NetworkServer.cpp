@@ -166,7 +166,7 @@ void RegisterListTexturesRoute(httplib::Server& server, FrameCaptureBridge* capt
             // Step 3.3, for why they are not the same type).
             views.push_back(TextureListEntryView{
                 entry.name, entry.regime, entry.format, entry.width, entry.height, entry.hasDepth,
-                entry.framesSinceUpdate });
+                entry.framesSinceUpdate, entry.kind, entry.depth });
         }
         res.set_content(BuildListTexturesResponseJson(views), "application/json");
     });

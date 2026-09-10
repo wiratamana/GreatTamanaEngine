@@ -999,8 +999,33 @@ int Application::Run()
                 // just computed here for EVERY known texture at once, once per
                 // frame, rather than once per request.
                 entry.framesSinceUpdate = currentFrameCounter - snap.lastUpdatedFrameCounter;
+                entry.kind = "texture2d"; // network-impl-6 campaign, Phase 5 - explicit at every call site, see PublishedTextureListEntry's own doc comment.
                 published.push_back(std::move(entry));
             }
+
+            // network-impl-6 campaign, Phase 5
+            // (task_manager/network-impl-6/PHASE5_LIST_TEXTURES_VOLUME_SURFACING.md) -
+            // every registered VOLUME texture also gets its own
+            // PublishedTextureListEntry, appended right after every 2D one, so
+            // GET /list_textures surfaces both kinds side by side in one flat
+            // array - this is what lets an LLM/AI caller discover a
+            // texture_name worth calling GET /get_texture with, without
+            // already knowing the Atmosphere feature's internal naming
+            // convention.
+            for (const rg::DebugVolumeTextureSnapshot& vol : m_renderGraph.ListDebugVolumeTextures()) {
+                PublishedTextureListEntry entry;
+                entry.name = vol.name;
+                entry.regime = ToDebugTextureRegimeString(vol.regime);
+                entry.format = DebugTextureColorFormatName(vol.target.format);
+                entry.width = vol.target.extent.width;
+                entry.height = vol.target.extent.height;
+                entry.hasDepth = false; // A volume texture has no depth-companion concept at all - see VolumeTarget.h.
+                entry.framesSinceUpdate = currentFrameCounter - vol.lastUpdatedFrameCounter;
+                entry.kind = "texture3d";
+                entry.depth = vol.target.extent.depth;
+                published.push_back(std::move(entry));
+            }
+
             m_captureBridge.PublishTextureList(std::move(published));
         }
 
