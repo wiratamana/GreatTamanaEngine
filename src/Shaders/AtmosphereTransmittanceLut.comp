@@ -1,0 +1,93 @@
+#version 450
+
+// Atmosphere Scattering + Aerial Perspective campaign, Phase 3
+// (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE3_TRANSMITTANCE_LUT_v1.md)
+// - the Transmittance LUT: for each texel (u, v), decode a (height, zenith
+// angle) pair via AtmosphereCommon.glsl's TransmittanceLutUvToHeightZenith(),
+// then store the RGB transmittance from that point, in that direction, to
+// the top of the atmosphere (or vec3(0) if the ray hits the ground first -
+// see the ground-occlusion check below, mirroring
+// _reference/pl-sky/shaders/sky_transmission_lut.comp's own
+// `tIntersection.bHitEarth ? vec3(0) : tTransmittance` branch).
+//
+// BINDING CONVENTION (see Vulkan/DescriptorSetLayoutBuilder.h's own
+// documented rule, and this campaign's own strategy document "Revision
+// Notes"): binding 0 is AtmosphereParametersGpu, bound as a read-only
+// STORAGE buffer (`readonly buffer`, NOT `uniform`) - this engine has NO
+// VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER descriptor support anywhere today (a
+// direct grep of src/ confirms it), mirroring the GPU Vertex Skinning
+// campaign's own bone-matrix-buffer precedent. Binding 1 is the output
+// image2D. Both C++ (src/Renderer/Atmosphere/AtmosphereLutRenderer.cpp) and
+// this file must be kept in agreement by hand - this campaign deliberately
+// has no shader reflection.
+//
+// local_size_x/y = 16 - MUST match
+// src/Renderer/Atmosphere/AtmosphereLutRenderer.cpp's own
+// kTransmittanceLutLocalSizeX/Y constants exactly (mirrors
+// Shaders/BoxBlur.comp's own established 16x16 convention - see
+// ComputeDispatch.h's own header comment on why this pairing is a
+// hand-maintained convention, not something the build system enforces).
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#include "AtmosphereCommon.glsl"
+
+layout(std430, binding = 0) readonly buffer AtmosphereParametersBlock {
+    AtmosphereParametersGpu atmosphereParameters;
+};
+
+// The output LUT - VK_FORMAT_R8G8B8A8_UNORM on the C++ side (Texture2D's
+// own fixed format, see AtmosphereLutRenderer.cpp), so `rgba8` here must
+// always match it exactly - fine for THIS LUT specifically since a
+// transmittance value is always in [0, 1] per channel by definition.
+layout(binding = 1, rgba8) uniform writeonly image2D transmittanceLutImage;
+
+// SAME fixed sample count as _reference/pl-sky/shaders/sky_transmission_lut.comp's
+// own PL_SAMPLE_COUNT (see ATMOSPHERE_REFERENCE_NOTES.md, Section 5) - kept
+// identical to the CPU oracle's own numerical method for Phase 9's parity
+// check.
+const int kTransmittanceLutSampleCount = 40;
+
+void main()
+{
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 lutSize = imageSize(transmittanceLutImage);
+    if (texel.x >= lutSize.x || texel.y >= lutSize.y) {
+        // The dispatch's own ceiling-division group count can legitimately
+        // cover more threads than there are real texels - see
+        // ComputeDispatch.h's own header comment. Those extra invocations
+        // simply do nothing.
+        return;
+    }
+
+    // Plain LINEAR height/angle grid - x = texel / (width - 1), y = texel /
+    // (height - 1) - matches the cloned reference's own Transmittance LUT
+    // parameterization exactly (see ATMOSPHERE_REFERENCE_NOTES.md, Section
+    // 3): NOT a texel-center convention.
+    float x = (lutSize.x > 1) ? float(texel.x) / float(lutSize.x - 1) : 0.0;
+    float y = (lutSize.y > 1) ? float(texel.y) / float(lutSize.y - 1) : 0.0;
+
+    float heightKm;
+    float upDot;
+    TransmittanceLutUvToHeightZenith(atmosphereParameters, vec2(x, y), heightKm, upDot);
+
+    // View direction constructed so dot(localUp, V) == upDot exactly,
+    // assuming spherical symmetry (localUp == vec3(0, 1, 0) here) - mirrors
+    // the reference's own `vec3(0, fUpDot, sqrt(1 - fUpDot*fUpDot))`.
+    vec3 viewDirection = vec3(0.0, upDot, sqrt(max(1.0 - upDot * upDot, 0.0)));
+
+    float planetRadiusKm = atmosphereParameters.planetRadiusKm;
+    vec3 positionKm = vec3(0.0, heightKm + planetRadiusKm, 0.0);
+
+    // Ground-occlusion check (LUT-specific - see AtmosphereMath.h's own doc
+    // comment on why ComputeOpticalDepthToTopOfAtmosphere() itself
+    // deliberately does not do this): a view direction that geometrically
+    // intersects the planet before reaching the top of the atmosphere
+    // carries zero transmittance.
+    float groundHitDistance = RayIntersectsSphereNearest(positionKm, viewDirection, planetRadiusKm);
+
+    vec3 transmittance = (groundHitDistance >= 0.0)
+        ? vec3(0.0)
+        : ComputeTransmittanceToTopOfAtmosphere(atmosphereParameters, positionKm, viewDirection, kTransmittanceLutSampleCount);
+
+    imageStore(transmittanceLutImage, texel, vec4(transmittance, 1.0));
+}

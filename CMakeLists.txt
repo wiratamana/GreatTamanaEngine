@@ -414,6 +414,8 @@ add_library(gte_core STATIC
     src/Renderer/Atmosphere/AtmosphereParameters.cpp
     src/Renderer/Atmosphere/AtmosphereMath.h
     src/Renderer/Atmosphere/AtmosphereMath.cpp
+    src/Renderer/Atmosphere/AtmosphereLutRenderer.h
+    src/Renderer/Atmosphere/AtmosphereLutRenderer.cpp
     src/Renderer/Primitives/PrimitiveMeshGenerator.cpp
     src/Renderer/Primitives/PrimitiveMeshGenerator.h
     src/Renderer/Memory/GpuResourceHandle.h
@@ -788,15 +790,21 @@ if(GTE_ENABLE_EDITOR)
     gte_add_shader(GreatTamanaEngine src/Shaders/BoxBlur.comp)
 endif()
 
-# Atmosphere Scattering + Aerial Perspective campaign (Phase 1 -
-# task_manager/atmosphere-scattering-1/
-# ATMOSPHERE_PHASE1_REFERENCE_ANALYSIS_AND_PHYSICAL_MODEL_FOUNDATIONS_v1.md).
-# No .comp/.frag shader source exists yet in this campaign (that starts
-# Phase 3) - src/Shaders/AtmosphereCommon.glsl is a placeholder shared-math
-# include target only, not compiled on its own (glslc only ever compiles a
-# real .vert/.frag/.comp entry point; a plain .glsl include file is never
-# passed to gte_add_shader() directly - it is added to a future shader's own
-# EXTRA_DEPENDS instead, see cmake/CompileShaders.cmake).
+# Atmosphere Scattering + Aerial Perspective campaign, Phase 3
+# (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE3_TRANSMITTANCE_LUT_v1.md)
+# - the Transmittance LUT compute shader (src/Renderer/Atmosphere/
+# AtmosphereLutRenderer.h/.cpp). Unconditional (NOT gated behind
+# GTE_ENABLE_EDITOR, unlike BoxBlur.comp above) - this campaign's own Locked
+# Design Decision 4 (ATMOSPHERE_PHASE0_MASTER_STRATEGY_v1.md) makes atmosphere
+# scattering an always-compiled core rendering feature, the same tier as the
+# Render Graph or GPU Vertex Skinning, with no on/off switch of its own -
+# AtmosphereLutRenderer.cpp (the only thing that ever loads this shader) is
+# compiled into gte_core unconditionally (see gte_core's own target_sources()
+# list above). EXTRA_DEPENDS lists the shared AtmosphereCommon.glsl include
+# this shader #includes, so an edit to it correctly triggers glslc to
+# recompile this (and every future atmosphere shader that also lists it).
+gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereTransmittanceLut.comp
+    EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl)
 
 # Ensures SDL3.dll is copied next to the built .exe after every build.
 sdl3_copy_runtime_dll(GreatTamanaEngine)

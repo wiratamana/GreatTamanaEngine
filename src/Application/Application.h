@@ -6,6 +6,7 @@
 #include "../Editor/EditorLayer.h"
 #include "../Game/Game.h"
 #include "../Network/NetworkServer.h"
+#include "../Renderer/Atmosphere/AtmosphereLutRenderer.h"
 #include "../Renderer/Renderer.h"
 #include "../Renderer/RenderGraph/RenderGraph.h"
 #include "../Window/Window.h"
@@ -60,6 +61,21 @@ private:
     // reference to it) so it's already fully constructed by the time
     // m_editorLayer/m_game below might indirectly need it.
     rg::RenderGraph m_renderGraph;
+
+    // Atmosphere Scattering + Aerial Perspective campaign, Phase 3
+    // (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE3_TRANSMITTANCE_LUT_v1.md)
+    // - owns the Transmittance LUT's ComputePipeline/descriptor set/output
+    // texture across frames (see AtmosphereLutRenderer.h). Declared right
+    // after m_renderGraph/before m_editorLayer for the same reason
+    // m_renderGraph itself is: Run()'s offscreen-regime build lambda (see
+    // RenderPasses.h/Application.cpp) calls into it every frame, so it must
+    // already be alive by the time that lambda can possibly run, and must
+    // outlive it (destroyed only once the Vulkan device it was built
+    // against is done being used). TODO(ATMOSPHERE_PHASE7): relocate this
+    // ownership/call site into the real, permanent atmosphere pass sequence
+    // once that phase lands - see this phase's own completion report.
+    AtmosphereLutRenderer m_atmosphereLutRenderer;
+
     // Declared after Renderer (and before Game) so it is destroyed before
     // Renderer's Vulkan device/instance go away, but its lifetime doesn't
     // need to relate to Game's at all.

@@ -11,6 +11,7 @@
 #include "../Memory/SdlMemoryTracker.h"
 #include "../Profiling/FrameProfiler.h"
 #include "../Profiling/ScopeTimer.h"
+#include "../Renderer/Atmosphere/AtmosphereParameters.h"
 #include "../Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../Renderer/RenderGraph/RenderGraphDebugTextureRegistry.h"
@@ -359,6 +360,29 @@ int Application::Run()
                         // no rigged model is currently animating.
                         const std::vector<rg::BufferHandle> gpuSkinningBuffers =
                             AddGpuSkinningPasses(b, m_game, m_renderer);
+
+                        // Atmosphere Scattering + Aerial Perspective campaign,
+                        // Phase 3 (task_manager/atmosphere-scattering-1/
+                        // ATMOSPHERE_PHASE3_TRANSMITTANCE_LUT_v1.md) -
+                        // TEMPORARY validation call site: declares the
+                        // Transmittance LUT compute pass into this SAME
+                        // offscreen Execute() call so it actually runs (and
+                        // is visible via GET /get_texture?texture_name=
+                        // AtmosphereTransmittanceLut) every frame, completely
+                        // independent of whether Game/Scene are visible this
+                        // frame. Fixed default Earth parameters only - no
+                        // Editor parameter editing yet (Phase 8), no
+                        // dirty-flag optimization yet (Phase 3's own "What
+                        // We Will NOT Do").
+                        // TODO(ATMOSPHERE_PHASE7): relocate into the real
+                        // atmosphere pass sequence once the sky
+                        // background/aerial-perspective composite passes
+                        // exist - do NOT delete this call site in the
+                        // meantime (Phases 4/5/6 build directly on this pass
+                        // running every frame).
+                        const AtmosphereParametersGpu atmosphereParameters = MakeDefaultEarthAtmosphereParameters();
+                        outputs.push_back(
+                            m_atmosphereLutRenderer.AddTransmittanceLutPass(b, m_renderer, atmosphereParameters));
 
                         if (gameTarget != nullptr) {
                             const VkExtent2D extent = gameTarget->Extent();
