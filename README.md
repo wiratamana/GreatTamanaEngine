@@ -1695,6 +1695,28 @@ pieces:
   `task_manager/network-impl-4/NETWORK_IMPL_4_CAMPAIGN_COMPLETION_REPORT.md`
   for the full six-phase campaign writeup.
 
+- **The embedded HTTP server can now change an existing entity's transform,
+  and spawn lights, over HTTP** (`network-impl-5` campaign,
+  `task_manager/network-impl-5/PHASE0_MASTER_STRATEGY.md`) - two more
+  `EngineCommandBridge`-backed POST endpoints, reusing the exact same
+  cross-thread bridge/JSON machinery `network-impl-3` already built (no new
+  vendored dependency, no new cross-thread mechanism). `POST
+  /set_entity_trs` updates translation/rotation/scale on an existing,
+  by-name entity, independently (any subset of the three), operating on its
+  LOCAL (parent-relative) transform; every call's response always echoes the
+  entity's full resulting transform (position, rotation as both Euler
+  degrees and a raw quaternion, scale) plus which fields this call actually
+  changed - including a call that changes nothing, which doubles as a
+  lightweight "read the current transform" query. `POST /instantiate_light`
+  spawns a new `DirectionalLight` entity (a `light_type` field future-proofs
+  this for a later point/spot light), mirroring `/instantiate_primitive`'s
+  own name/position/parent contract, plus color/illuminance/active fields
+  mapping directly onto `DirectionalLight`'s own component fields - a
+  network-spawned light with no explicit rotation gets the same
+  "late-afternoon" default rotation the Editor's own "Create Directional
+  Light" menu already uses. See `task_manager/network-impl-5/PHASE0_MASTER_STRATEGY.md`
+  for the full five-phase campaign writeup.
+
 - **The Editor's "Scene" panel now has a Unity-style procedural infinite
   ground grid** (`editor-enchancements-1` campaign,
   `task_manager/editor-enchancements-1/PHASE0_MASTER_STRATEGY.md`) - a

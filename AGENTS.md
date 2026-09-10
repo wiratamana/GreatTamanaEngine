@@ -1088,12 +1088,52 @@ module or adding a new endpoint:
   `504` if the main thread doesn't drain the request within the bridge's
   timeout. See `task_manager/network-impl-3/PHASE0_MASTER_STRATEGY.md` for
   the full six-phase campaign writeup.
-- **A future THIRD engine command** (e.g. `set_transform`/`play_animation`/
-  `list_entities`) should extend `EngineCommandKind` plus
-  `EngineCommandRequest`/`EngineCommandResult`'s tagged-struct shape
-  (`src/Application/EngineCommandBridge.h`) rather than inventing a new
-  bridge - this generalization is exactly what this campaign was designed to
-  enable.
+- **`POST /set_entity_trs` and `POST /instantiate_light`** (`network-impl-5`
+  campaign, `task_manager/network-impl-5/PHASE0_MASTER_STRATEGY.md`) are the
+  THIRD and FOURTH `EngineCommandKind` values, added in the same campaign -
+  this is the worked example the older revision of this bullet (below, now
+  folded into this one) used to describe only hypothetically. Same bridge,
+  same rule: a route handler stays a pure function of its own request data
+  plus `EngineCommandBridge::SubmitAndWait()`, nothing else engine-side.
+  **`POST /set_entity_trs`** updates an existing, by-name entity's LOCAL
+  (parent-relative) `Transform` - `Game::SetEntityTrs()` - given a JSON body
+  of `name` (required) plus three INDEPENDENTLY OPTIONAL, ALL-OR-NOTHING
+  groups (`translation`/`rotation_euler_degrees`/`scale`, each requiring all
+  of `x`/`y`/`z` together when present - rotation is Euler DEGREES only, no
+  quaternion input). The response ALWAYS echoes the entity's full resulting
+  local transform (position, rotation as both Euler degrees and a raw
+  quaternion, scale) plus a `"changed":{"translation":...,"rotation":...,
+  "scale":...}` object, regardless of which fields this call actually
+  changed - a request specifying none of the three groups is a valid,
+  harmless no-op that doubles as a de-facto "read the current transform"
+  query. Responds `200` on success (including the no-op case), `404` if no
+  live entity has that name, `409` if the entity exists but has no
+  `Transform` component, or `400` for malformed JSON/an incomplete
+  translation-rotation-scale group. **`POST /instantiate_light`** spawns a
+  new light entity (today: the engine's only implemented kind,
+  `DirectionalLight`) - `Game::InstantiateLight()` - mirroring
+  `/instantiate_primitive`'s own `name`/`world_position`/`parent` contract,
+  plus a `light_type` field (`""`/`"directional"` today, case-insensitive -
+  future-proofs the request shape for a later point/spot light without an
+  API-breaking change; any other value is a `400`), and `color`/
+  `illuminance_lux`/`active` fields mapping 1:1 onto `DirectionalLight`'s own
+  component fields. A network-spawned light with no explicit
+  `rotation_euler_degrees` gets the SAME "late-afternoon" default rotation
+  the Editor's own "Create Directional Light" menu already uses
+  (`Quat::FromEulerDegrees(45.0f, -30.0f, 0.0f)`) - NOT identity - shared via
+  one small private helper (`DefaultDirectionalLightRotation()`,
+  `Game.cpp`) both paths call, so they can never silently drift apart.
+  Responds `200` on success or `400` for malformed JSON/a missing `name`/an
+  unsupported `light_type`. **A genuine test-coverage improvement over
+  `network-impl-3`'s own accepted gap**: unlike `Game::InstantiatePrimitive()`
+  (GPU/`Renderer`-touching, "Tier 2, no automated coverage yet" per
+  "Testability & Regression Safety" below), `Game::SetEntityTrs()`/
+  `InstantiateLight()` are BOTH fully Tier-1-testable end to end (neither
+  touches a live `Renderer` at all) - every layer of both new commands
+  (`NetworkRoutes.h` parsing, `Game::` logic, the bridge, the HTTP route) has
+  real, direct, automated coverage, with no Tier-2 gap to accept this time.
+  See `task_manager/network-impl-5/PHASE0_MASTER_STRATEGY.md` for the full
+  five-phase campaign writeup.
 - **JSON parsing now exists via a vendored `nlohmann/json`** (single-header
   `json.hpp`, fetched via `cmake/FetchJson.cmake` mirroring
   `cmake/FetchHttplib.cmake`'s own pattern) - a deliberate, narrow exception to
