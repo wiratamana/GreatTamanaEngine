@@ -1,0 +1,125 @@
+// Unit tests for the network-impl-6 campaign's Phase 3 CPU oracle
+// (src/Renderer/VolumeTexturePreviewMath.h/.cpp) - see
+// task_manager/network-impl-6/PHASE3_VOLUME_RAYMARCH_PREVIEW_RENDERER.md,
+// Step 3.2. No Vulkan/Renderer/live GPU device involved at all - every
+// function under test is pure, taking/returning only plain ints/Vec3/float
+// values.
+
+#include "Renderer/VolumeTexturePreviewMath.h"
+
+#include <gtest/gtest.h>
+
+#include <cmath>
+
+namespace gte {
+namespace {
+
+constexpr float kEpsilon = 1e-4f;
+
+// --- ComputeVolumeCameraSetup() --------------------------------------------
+
+TEST(VolumeTexturePreviewMathTest, PerfectCubeProducesExactHalfExtents)
+{
+    const VolumeCameraSetup setup = ComputeVolumeCameraSetup(128, 128, 128);
+    EXPECT_NEAR(setup.boxHalfExtents.x, 0.5f, kEpsilon);
+    EXPECT_NEAR(setup.boxHalfExtents.y, 0.5f, kEpsilon);
+    EXPECT_NEAR(setup.boxHalfExtents.z, 0.5f, kEpsilon);
+}
+
+TEST(VolumeTexturePreviewMathTest, NonCubicVolumeScalesShorterAxesProportionally)
+{
+    // The real Atmosphere aerial-perspective volume shape - see
+    // PHASE0_MASTER_STRATEGY.md's Locked Design Decision 7. Longest axis
+    // (width/height, 128) maps to exactly 0.5; depth (32) is 32/128 = 0.25
+    // of that -> 0.125.
+    const VolumeCameraSetup setup = ComputeVolumeCameraSetup(128, 128, 32);
+    EXPECT_NEAR(setup.boxHalfExtents.x, 0.5f, kEpsilon);
+    EXPECT_NEAR(setup.boxHalfExtents.y, 0.5f, kEpsilon);
+    EXPECT_NEAR(setup.boxHalfExtents.z, 0.125f, kEpsilon);
+}
+
+TEST(VolumeTexturePreviewMathTest, CameraBasisIsOrthonormal)
+{
+    const VolumeCameraSetup setup = ComputeVolumeCameraSetup(128, 128, 32);
+
+    EXPECT_NEAR(Length(setup.forward), 1.0f, kEpsilon);
+    EXPECT_NEAR(Length(setup.right), 1.0f, kEpsilon);
+    EXPECT_NEAR(Length(setup.up), 1.0f, kEpsilon);
+
+    EXPECT_NEAR(Dot(setup.forward, setup.right), 0.0f, kEpsilon);
+    EXPECT_NEAR(Dot(setup.forward, setup.up), 0.0f, kEpsilon);
+    EXPECT_NEAR(Dot(setup.right, setup.up), 0.0f, kEpsilon);
+}
+
+TEST(VolumeTexturePreviewMathTest, EyeSitsStrictlyOutsideTheBoundingSphere)
+{
+    const VolumeCameraSetup setup = ComputeVolumeCameraSetup(128, 128, 32);
+    EXPECT_GT(Length(setup.eyePosition), Length(setup.boxHalfExtents));
+}
+
+TEST(VolumeTexturePreviewMathTest, EveryBoxCornerIsReachableFromTheEye)
+{
+    const VolumeCameraSetup setup = ComputeVolumeCameraSetup(128, 128, 32);
+    const Vec3& e = setup.boxHalfExtents;
+
+    for (int cx = -1; cx <= 1; cx += 2) {
+        for (int cy = -1; cy <= 1; cy += 2) {
+            for (int cz = -1; cz <= 1; cz += 2) {
+                const Vec3 corner(static_cast<float>(cx) * e.x, static_cast<float>(cy) * e.y,
+                    static_cast<float>(cz) * e.z);
+                const Vec3 rayDir = Normalize(corner - setup.eyePosition);
+
+                float tEnter = 0.0f;
+                float tExit = 0.0f;
+                const bool hit = IntersectRayBox(setup.eyePosition, rayDir, setup.boxHalfExtents, tEnter, tExit);
+                ASSERT_TRUE(hit) << "corner (" << cx << "," << cy << "," << cz << ")";
+                EXPECT_GE(tExit, tEnter) << "corner (" << cx << "," << cy << "," << cz << ")";
+                EXPECT_GE(tEnter, 0.0f) << "corner (" << cx << "," << cy << "," << cz << ")";
+            }
+        }
+    }
+}
+
+// --- IntersectRayBox() ------------------------------------------------------
+
+TEST(VolumeTexturePreviewMathTest, RayFromOutsidePointedAtCenterHitsWithPositiveTEnter)
+{
+    const Vec3 boxHalfExtents(0.5f, 0.5f, 0.5f);
+    const Vec3 rayOrigin(0.0f, 0.0f, -5.0f);
+    const Vec3 rayDir = Normalize(Vec3::Zero() - rayOrigin);
+
+    float tEnter = 0.0f;
+    float tExit = 0.0f;
+    ASSERT_TRUE(IntersectRayBox(rayOrigin, rayDir, boxHalfExtents, tEnter, tExit));
+    EXPECT_GT(tEnter, 0.0f);
+    EXPECT_GT(tExit, tEnter);
+}
+
+TEST(VolumeTexturePreviewMathTest, RayStartingInsideTheBoxHasNonPositiveTEnter)
+{
+    const Vec3 boxHalfExtents(0.5f, 0.5f, 0.5f);
+    const Vec3 rayOrigin(0.0f, 0.0f, 0.0f);
+    const Vec3 rayDir = Vec3::Forward();
+
+    float tEnter = 0.0f;
+    float tExit = 0.0f;
+    ASSERT_TRUE(IntersectRayBox(rayOrigin, rayDir, boxHalfExtents, tEnter, tExit));
+    EXPECT_LE(tEnter, 0.0f);
+    EXPECT_GE(tExit, 0.0f);
+    EXPECT_GE(tExit, tEnter);
+}
+
+TEST(VolumeTexturePreviewMathTest, RayThatMissesTheBoxEntirelyReturnsFalse)
+{
+    const Vec3 boxHalfExtents(0.5f, 0.5f, 0.5f);
+    // Parallel to the Z axis, offset well outside the box's X extent.
+    const Vec3 rayOrigin(10.0f, 0.0f, -5.0f);
+    const Vec3 rayDir = Vec3::Forward();
+
+    float tEnter = 0.0f;
+    float tExit = 0.0f;
+    EXPECT_FALSE(IntersectRayBox(rayOrigin, rayDir, boxHalfExtents, tEnter, tExit));
+}
+
+} // namespace
+} // namespace gte

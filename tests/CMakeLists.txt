@@ -1749,6 +1749,7 @@ set(GTE_TEST_SOURCES
     Renderer/DrawStatsTests.cpp
     Renderer/GpuTimingTests.cpp
     Renderer/ComputeDispatchTests.cpp
+    Renderer/VolumeTexturePreviewMathTests.cpp
     Renderer/GpuSkinning/GpuSkinningTypesTests.cpp
     Renderer/Atmosphere/AtmosphereMathTests.cpp
     Renderer/Atmosphere/DirectionalLightResolverTests.cpp
