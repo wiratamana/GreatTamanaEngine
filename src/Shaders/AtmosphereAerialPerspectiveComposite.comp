@@ -33,6 +33,13 @@ layout(push_constant) uniform PushConstants {
     // own std430-like packing rules; matches the C++ side's plain
     // 4-contiguous-floats layout exactly either way.
     vec4 cameraWorldPositionAndScale;
+    // Phase 8 (ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md) - .x =
+    // aerialPerspectiveStrength, an Editor "Atmosphere" panel-tunable
+    // overall multiplier for the effect (1.0 = unchanged physical result,
+    // 0.0 = fully disabled/pass-through) - see main()'s own use of it
+    // below. .yzw are reserved padding, matching this block's existing
+    // "one vec4 group per logical value" convention.
+    vec4 aerialPerspectiveStrengthAndPad;
 } pc;
 
 layout(binding = 0) uniform sampler2D sourceColor;
@@ -86,8 +93,15 @@ void main()
     float sliceUv = clamp(slice / float(volumeSize.z), 0.0, 1.0);
 
     vec4 aerial = texture(aerialPerspectiveVolume, vec3(uv, sliceUv));
-    vec3 inScattering = aerial.rgb;
-    float transmittance = aerial.a;
+    // Phase 8 (ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md) -
+    // aerialPerspectiveStrength (pc.aerialPerspectiveStrengthAndPad.x)
+    // scales the effect's overall contribution: 1.0 reproduces the
+    // original, unscaled physical blend exactly; 0.0 fully disables it
+    // (transmittance mixes back to 1.0 - a pure pass-through of sceneColor
+    // - and inScattering scales to 0.0), interpolating smoothly in between.
+    float strength = pc.aerialPerspectiveStrengthAndPad.x;
+    vec3 inScattering = aerial.rgb * strength;
+    float transmittance = mix(1.0, aerial.a, strength);
 
     vec3 sceneColor = texture(sourceColor, uv).rgb;
     vec3 finalColor = sceneColor * transmittance + inScattering;

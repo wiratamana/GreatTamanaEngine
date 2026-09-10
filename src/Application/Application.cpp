@@ -379,11 +379,18 @@ int Application::Run()
                         // block below, now covering BOTH Game View AND
                         // Scene View (Phases 5/6 deliberately left Scene
                         // View unwired - this is what finally wires it up).
-                        // Fixed default Earth parameters only - no Editor
-                        // parameter editing yet (Phase 8), no dirty-flag
-                        // optimization (unchanged from Phase 3/4/5/6's own
-                        // "What We Will NOT Do").
-                        const AtmosphereParametersGpu atmosphereParameters = MakeDefaultEarthAtmosphereParameters();
+                        // Phase 8 (ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md)
+                        // - m_atmosphereSettings::groundAlbedoTint is folded
+                        // into the default Earth parameters here, once per
+                        // frame, before the shared LUT passes read it (the
+                        // Multi-Scattering LUT's own ground-bounce term is
+                        // the only consumer of AtmosphereParametersGpu::
+                        // groundAlbedo - see AtmosphereParameters.h). No
+                        // dirty-flag optimization (unchanged from every
+                        // prior phase's own "What We Will NOT Do").
+                        AtmosphereParametersGpu atmosphereParameters = MakeDefaultEarthAtmosphereParameters();
+                        atmosphereParameters.groundAlbedo =
+                            atmosphereParameters.groundAlbedo * m_atmosphereSettings.groundAlbedoTint;
                         const AtmosphereSharedLutHandles atmosphereSharedLuts =
                             AddAtmosphereSharedLutPasses(b, m_renderer, m_atmosphereLutRenderer, atmosphereParameters);
                         outputs.push_back(atmosphereSharedLuts.transmittanceLutHandle);
@@ -421,7 +428,8 @@ int Application::Run()
                             // (see RenderPasses.h's own updated doc comment).
                             const std::function<void(VkCommandBuffer)> recordGameSkyBackground =
                                 MakeRecordSkyBackgroundCallback(m_atmosphereLutRenderer, m_renderer, gameViewProjection,
-                                    atmosphereParameters, gameAtmosphere.frameUniforms, "AtmosphereSkyViewLut_GameView");
+                                    atmosphereParameters, gameAtmosphere.frameUniforms, "AtmosphereSkyViewLut_GameView",
+                                    m_atmosphereSettings.skyExposure);
 
                             const rg::TextureHandle h =
                                 b.ImportTexture("GameView", gameTarget->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
@@ -441,7 +449,8 @@ int Application::Run()
                             const rg::TextureHandle gameComposited = AddAtmosphereCompositePass(b, m_renderer,
                                 m_atmosphereLutRenderer, *gameTarget, h, gameAtmosphere.aerialPerspectiveVolumeHandle,
                                 "AtmosphereAerialPerspectiveVolume_GameView", gameAtmosphere.frameUniforms,
-                                gameEyeWorldPosition, extent, "GameViewComposited");
+                                gameEyeWorldPosition, m_atmosphereSettings.aerialPerspectiveStrength, extent,
+                                "GameViewComposited");
                             outputs.push_back(gameComposited);
                         }
                         if (sceneTarget != nullptr) {
@@ -470,7 +479,8 @@ int Application::Run()
 
                             const std::function<void(VkCommandBuffer)> recordSceneSkyBackground =
                                 MakeRecordSkyBackgroundCallback(m_atmosphereLutRenderer, m_renderer, sceneViewProjection,
-                                    atmosphereParameters, sceneAtmosphere.frameUniforms, "AtmosphereSkyViewLut_SceneView");
+                                    atmosphereParameters, sceneAtmosphere.frameUniforms, "AtmosphereSkyViewLut_SceneView",
+                                    m_atmosphereSettings.skyExposure);
 
                             const rg::TextureHandle h =
                                 b.ImportTexture("SceneView", sceneTarget->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
@@ -494,7 +504,8 @@ int Application::Run()
                             const rg::TextureHandle sceneComposited = AddAtmosphereCompositePass(b, m_renderer,
                                 m_atmosphereLutRenderer, *sceneTarget, h, sceneAtmosphere.aerialPerspectiveVolumeHandle,
                                 "AtmosphereAerialPerspectiveVolume_SceneView", sceneAtmosphere.frameUniforms,
-                                sceneEyeWorldPosition, extent, "SceneViewComposited");
+                                sceneEyeWorldPosition, m_atmosphereSettings.aerialPerspectiveStrength, extent,
+                                "SceneViewComposited");
                             outputs.push_back(sceneComposited);
 
                             // Phase 7 of the compute-shader campaign
@@ -685,7 +696,7 @@ int Application::Run()
         // GetMemoryResources()).
         {
             GTE_PROFILE_SCOPE("IEditorLayer::BuildUI");
-            m_editorLayer->BuildUI(m_game, m_renderer, m_renderGraph);
+            m_editorLayer->BuildUI(m_game, m_renderer, m_renderGraph, m_atmosphereSettings);
         }
 
         // File > Exit (or any other future programmatic "close" UI action)

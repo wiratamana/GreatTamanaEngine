@@ -184,4 +184,41 @@ static_assert(sizeof(AtmosphereFrameUniforms) == 112,
     "compatible groups (3 * 16 = 48 bytes) plus one 64-byte mat4 group "
     "(48 + 64 = 112 bytes) - see each group's own doc comment above.");
 
+// Atmosphere Scattering + Aerial Perspective campaign, Phase 8
+// (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md)
+// - a SHORT, deliberately curated list of genuinely tunable, non-spatial
+// atmosphere knobs, edited live via the Editor's new "Atmosphere" panel
+// (src/Editor/Panels/AtmospherePanel.h/.cpp). Owned by Application
+// (Application::m_atmosphereSettings), NOT by EditorContext (which is
+// Editor-UI-state only - see AGENTS.md's "Editor Module Structure" section)
+// and NOT stored on any ECS entity/component - there is exactly one of
+// these per running session, mirroring this campaign's own Locked Design
+// Decision 3 ("exactly one global AtmosphereSettings per scene").
+//
+// Deliberately does NOT duplicate AtmosphereParametersGpu's own physical
+// constants (Rayleigh/Mie/ozone coefficients, planet/atmosphere sizing) -
+// those stay AtmosphereParameters.cpp's fixed defaults; nobody needs to
+// live-tune them, and Phase 8's own strategy document explicitly warns
+// against turning this into "every field of AtmosphereParametersGpu".
+struct AtmosphereSettings {
+    // Multiplies AtmosphereParametersGpu::groundAlbedo (component-wise) -
+    // lets a user tint how much light the ground bounce term (the
+    // Multi-Scattering LUT's own ground-reflection contribution) reflects
+    // back, without hand-editing the underlying physical constant.
+    Vec3 groundAlbedoTint = Vec3::One();
+
+    // Overall multiplier for the Aerial Perspective Composite pass's
+    // effect strength - 1.0 reproduces the unscaled physical result
+    // exactly, 0.0 fully disables it (a pure pass-through of the
+    // pre-composite scene color), see
+    // AtmosphereAerialPerspectiveComposite.comp's own doc comment for the
+    // exact blend formula this scales.
+    float aerialPerspectiveStrength = 1.0f;
+
+    // Exposure multiplier for the Sky Background pass's own fixed
+    // exponential tonemap (see AtmosphereSkyBackground.frag) - replaces
+    // what used to be a hardcoded `kSkyExposure = 12.0` constant.
+    float skyExposure = 12.0f;
+};
+
 } // namespace gte

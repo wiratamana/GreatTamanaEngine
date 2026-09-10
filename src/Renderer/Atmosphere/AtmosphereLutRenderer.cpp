@@ -1,6 +1,7 @@
 #include "AtmosphereLutRenderer.h"
 
 #include "AtmosphereParameters.h"
+#include "DirectionalLightResolver.h"
 #include "../ComputeDispatch.h"
 #include "../RenderTarget.h"
 #include "../Renderer.h"
@@ -82,10 +83,16 @@ constexpr std::uint32_t kAerialPerspectiveCompositeLocalSizeY = 16;
 
 // Push constants for the Aerial Perspective Composite compute pass - MUST
 // match Shaders/AtmosphereAerialPerspectiveComposite.comp's own
-// `layout(push_constant)` block exactly (mat4 + vec4 = 80 bytes).
+// `layout(push_constant)` block exactly (mat4 + vec4 + vec4 = 96 bytes).
+// Phase 8 (ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md) added
+// `aerialPerspectiveStrengthAndPad` - the Editor's "Atmosphere" panel-
+// tunable overall strength multiplier (`.x`), packed with 3 reserved
+// padding floats into its own vec4 group, matching this struct's existing
+// "one vec4 group per logical value" convention exactly.
 struct AerialPerspectiveCompositePushConstants {
     float invViewProjection[16];
     float cameraWorldPositionAndScale[4]; // xyz = camera world position, w = worldUnitsPerKm.
+    float aerialPerspectiveStrengthAndPad[4]; // x = aerialPerspectiveStrength, yzw = reserved padding.
 };
 
 } // namespace
@@ -681,7 +688,7 @@ rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveCompositePass(rg::R
     Renderer& renderer, rg::TextureHandle sourceColorHandle, VkSampler sourceColorSampler,
     VkImageView sourceDepthView, VkSampler sourceDepthSampler, rg::VolumeTextureHandle aerialPerspectiveVolumeHandle,
     const char* aerialPerspectiveVolumeName, const Mat4& invViewProjection, Vec3 cameraWorldPosition,
-    VkExtent2D extent, const char* outputTextureName)
+    float aerialPerspectiveStrength, VkExtent2D extent, const char* outputTextureName)
 {
     EnsureAerialPerspectiveCompositeInitialized(renderer);
     AerialPerspectiveCompositeViewState& viewState =
@@ -717,6 +724,10 @@ rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveCompositePass(rg::R
     pushConstants.cameraWorldPositionAndScale[1] = cameraWorldPosition.y;
     pushConstants.cameraWorldPositionAndScale[2] = cameraWorldPosition.z;
     pushConstants.cameraWorldPositionAndScale[3] = kWorldUnitsPerKilometer;
+    pushConstants.aerialPerspectiveStrengthAndPad[0] = aerialPerspectiveStrength;
+    pushConstants.aerialPerspectiveStrengthAndPad[1] = 0.0f;
+    pushConstants.aerialPerspectiveStrengthAndPad[2] = 0.0f;
+    pushConstants.aerialPerspectiveStrengthAndPad[3] = 0.0f;
 
     builder.AddComputePass(
         "AtmosphereAerialPerspectiveCompositePass",
@@ -795,7 +806,8 @@ void AtmosphereLutRenderer::FinalizeAerialPerspectiveCompositeForSampling(VkComm
 
 
 void AtmosphereLutRenderer::DrawSkyBackground(Renderer& renderer, VkCommandBuffer cmd, const Mat4& viewProjection,
-    const AtmosphereParametersGpu& params, const AtmosphereFrameUniforms& frameUniforms, const char* skyViewLutName)
+    const AtmosphereParametersGpu& params, const AtmosphereFrameUniforms& frameUniforms, const char* skyViewLutName,
+    float skyExposure)
 {
     const auto it = m_skyViewLutViewStates.find(skyViewLutName);
     if (it == m_skyViewLutViewStates.end() || !it->second.output.has_value()) {
@@ -815,18 +827,11 @@ void AtmosphereLutRenderer::DrawSkyBackground(Renderer& renderer, VkCommandBuffe
     // ViewDirectionToSkyViewLutUv() call expects - see
     // ResolveAtmosphereFrameUniforms()'s own doc comment below.
     m_skyBackgroundRenderer.Draw(renderer, cmd, viewProjection, it->second.output->View(),
-        it->second.output->Sampler(), frameUniforms.cameraPositionAtmosphere.y, params.planetRadiusKm);
+        it->second.output->Sampler(), frameUniforms.cameraPositionAtmosphere.y, params.planetRadiusKm, skyExposure);
 }
 
 AtmosphereFrameUniforms ResolveAtmosphereFrameUniforms(Registry& registry, Vec3 eyeWorldPosition)
 {
-    // TODO(ATMOSPHERE_PHASE8): replace with real DirectionalLight
-    // resolution - `registry` is accepted now purely so this function's
-    // own SIGNATURE never needs to change once that phase lands; it is not
-    // read at all yet (see this function's own declaration in
-    // AtmosphereLutRenderer.h for the full reasoning).
-    (void)registry;
-
     AtmosphereFrameUniforms uniforms;
 
     const AtmosphereParametersGpu earthParameters = MakeDefaultEarthAtmosphereParameters();
@@ -841,15 +846,16 @@ AtmosphereFrameUniforms ResolveAtmosphereFrameUniforms(Registry& registry, Vec3 
     // the ground, never full 3D world position.
     uniforms.cameraPositionAtmosphere = Vec3(0.0f, earthParameters.planetRadiusKm + heightAboveGroundKm, 0.0f);
 
-    // TODO(ATMOSPHERE_PHASE8): replace with real DirectionalLight
-    // resolution - hardcoded placeholder: a fixed 45-degree-elevation sun
-    // direction (azimuth 0), per this phase's own strategy document.
-    uniforms.sunDirection = Normalize(Vec3(0.70710678f, 0.70710678f, 0.0f));
-
-    // Sun color (1.0, 0.95, 0.85) * illuminance scale 3.0 - transcribed
-    // verbatim from the cloned reference (see
-    // ATMOSPHERE_REFERENCE_NOTES.md, Section 1).
-    uniforms.sunIlluminance = Vec3(1.0f, 0.95f, 0.85f) * 3.0f;
+    // Phase 8 (ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md) - the
+    // sun direction/color/illuminance now come from a real, first-class
+    // ECS DirectionalLight entity (see ECS/Components/DirectionalLight.h)
+    // via DirectionalLightResolver.h's ResolveActiveDirectionalLight(),
+    // which itself falls back to the exact same hardcoded placeholder
+    // Phase 5 originally used whenever the Registry has no active
+    // DirectionalLight at all - see that function's own doc comment.
+    const ResolvedDirectionalLight sun = ResolveActiveDirectionalLight(registry);
+    uniforms.sunDirection = sun.directionTowardSun;
+    uniforms.sunIlluminance = sun.sunIlluminance;
 
     return uniforms;
 }

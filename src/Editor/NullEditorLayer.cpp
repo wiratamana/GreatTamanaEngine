@@ -30,7 +30,10 @@ public:
     }
     void FinalizeBlurValidationForSampling(VkCommandBuffer /*cmd*/) override { }
     void RenderSceneGrid(Renderer& /*renderer*/, VkCommandBuffer /*cmd*/, const Mat4& /*sceneViewProjection*/) override { }
-    void BuildUI(Game& /*game*/, Renderer& /*renderer*/, const rg::RenderGraph& /*renderGraph*/) override { }
+    void BuildUI(Game& /*game*/, Renderer& /*renderer*/, const rg::RenderGraph& /*renderGraph*/,
+        AtmosphereSettings& /*atmosphereSettings*/) override
+    {
+    }
     void Render(VkCommandBuffer /*cmd*/) override { }
     void RenderPlatformWindows() override { }
     bool WantsExit() const override { return false; }

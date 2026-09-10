@@ -2,6 +2,7 @@
 
 #include "../Math/Mat4.h"
 #include "../Math/Vec3.h"
+#include "../Renderer/Atmosphere/AtmosphereTypes.h"
 #include "../Renderer/RenderTexture.h"
 #include "../Renderer/RenderGraph/RenderGraphTypes.h"
 
@@ -239,8 +240,17 @@ public:
     // (Panels/RenderGraphPanel.h) reads its LastSnapshot() to show which
     // passes ran/were culled last time each regime executed. Never mutated
     // by the Editor - purely observed, same spirit as `game`/`renderer`
-    // above.
-    virtual void BuildUI(Game& game, Renderer& renderer, const rg::RenderGraph& renderGraph) = 0;
+    // above. `atmosphereSettings` (Atmosphere Scattering + Aerial
+    // Perspective campaign, Phase 8 -
+    // ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md) is the SAME
+    // AtmosphereSettings Application owns (Application::m_atmosphereSettings) -
+    // the new "Atmosphere" panel (Panels/AtmospherePanel.h) reads/writes it
+    // directly by reference, the same way "Inspector" reads/writes a
+    // selected entity's Camera component - Application's own per-frame
+    // atmosphere pass-building code (AtmospherePassSequence.h/.cpp) reads
+    // whatever this panel most recently wrote.
+    virtual void BuildUI(
+        Game& game, Renderer& renderer, const rg::RenderGraph& renderGraph, AtmosphereSettings& atmosphereSettings) = 0;
 
     // Records this frame's UI draw data into cmd. Called from inside
     // Renderer::Present()'s recordExtra hook - i.e. while the swapchain

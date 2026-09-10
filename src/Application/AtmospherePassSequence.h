@@ -102,9 +102,12 @@ AtmosphereViewLutHandles AddAtmosphereViewLutPasses(rg::RenderGraphBuilder& buil
 // rest of this frame's recording regardless of what happens to the
 // arguments afterward. `skyViewLutName` must be the SAME name just passed
 // to AddAtmosphereViewLutPasses() above for this view, this same frame.
+// `skyExposure` (Phase 8 -
+// ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md) is the Editor's
+// "Atmosphere" panel-tunable value (AtmosphereSettings::skyExposure).
 std::function<void(VkCommandBuffer)> MakeRecordSkyBackgroundCallback(AtmosphereLutRenderer& atmosphereLutRenderer,
     Renderer& renderer, const Mat4& viewProjection, const AtmosphereParametersGpu& atmosphereParameters,
-    const AtmosphereFrameUniforms& frameUniforms, const char* skyViewLutName);
+    const AtmosphereFrameUniforms& frameUniforms, const char* skyViewLutName, float skyExposure);
 
 // Declares the Aerial Perspective Composite pass (Phase 7, Step 3.3) for
 // ONE view - MUST be called AFTER that view's own GameView/SceneView pass
@@ -119,12 +122,14 @@ std::function<void(VkCommandBuffer)> MakeRecordSkyBackgroundCallback(AtmosphereL
 // AtmosphereLutRenderer::AddAerialPerspectiveCompositePass()'s own doc
 // comment). `sourceColorHandle` is the SAME TextureHandle
 // AddGameViewPass()/AddSceneViewPass() was given for this view, this same
-// frame. The CALLER must add the returned TextureHandle to this call's own
-// outputs root set.
+// frame. `aerialPerspectiveStrength` (Phase 8) is the Editor's
+// "Atmosphere" panel-tunable overall multiplier for the effect. The
+// CALLER must add the returned TextureHandle to this call's own outputs
+// root set.
 rg::TextureHandle AddAtmosphereCompositePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
     AtmosphereLutRenderer& atmosphereLutRenderer, RenderTexture& viewRenderTexture, rg::TextureHandle sourceColorHandle,
     rg::VolumeTextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,
-    const AtmosphereFrameUniforms& frameUniforms, Vec3 eyeWorldPosition, VkExtent2D extent,
-    const char* outputTextureName);
+    const AtmosphereFrameUniforms& frameUniforms, Vec3 eyeWorldPosition, float aerialPerspectiveStrength,
+    VkExtent2D extent, const char* outputTextureName);
 
 } // namespace gte

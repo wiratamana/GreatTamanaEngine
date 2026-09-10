@@ -59,25 +59,25 @@ AtmosphereViewLutHandles AddAtmosphereViewLutPasses(rg::RenderGraphBuilder& buil
 
 std::function<void(VkCommandBuffer)> MakeRecordSkyBackgroundCallback(AtmosphereLutRenderer& atmosphereLutRenderer,
     Renderer& renderer, const Mat4& viewProjection, const AtmosphereParametersGpu& atmosphereParameters,
-    const AtmosphereFrameUniforms& frameUniforms, const char* skyViewLutName)
+    const AtmosphereFrameUniforms& frameUniforms, const char* skyViewLutName, float skyExposure)
 {
-    return [&atmosphereLutRenderer, &renderer, viewProjection, atmosphereParameters, frameUniforms,
-               skyViewLutName](VkCommandBuffer cmd) {
+    return [&atmosphereLutRenderer, &renderer, viewProjection, atmosphereParameters, frameUniforms, skyViewLutName,
+               skyExposure](VkCommandBuffer cmd) {
         atmosphereLutRenderer.DrawSkyBackground(renderer, cmd, viewProjection, atmosphereParameters, frameUniforms,
-            skyViewLutName);
+            skyViewLutName, skyExposure);
     };
 }
 
 rg::TextureHandle AddAtmosphereCompositePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
     AtmosphereLutRenderer& atmosphereLutRenderer, RenderTexture& viewRenderTexture, rg::TextureHandle sourceColorHandle,
     rg::VolumeTextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,
-    const AtmosphereFrameUniforms& frameUniforms, Vec3 eyeWorldPosition, VkExtent2D extent,
-    const char* outputTextureName)
+    const AtmosphereFrameUniforms& frameUniforms, Vec3 eyeWorldPosition, float aerialPerspectiveStrength,
+    VkExtent2D extent, const char* outputTextureName)
 {
     return atmosphereLutRenderer.AddAerialPerspectiveCompositePass(builder, renderer, sourceColorHandle,
         viewRenderTexture.Sampler(), viewRenderTexture.Target().depthImageView, viewRenderTexture.DepthSampler(),
         aerialPerspectiveVolumeHandle, aerialPerspectiveVolumeName, frameUniforms.invViewProjection, eyeWorldPosition,
-        extent, outputTextureName);
+        aerialPerspectiveStrength, extent, outputTextureName);
 }
 
 } // namespace gte

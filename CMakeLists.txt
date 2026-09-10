@@ -254,6 +254,7 @@ add_library(gte_core STATIC
     src/ECS/Components/Transform.h
     src/ECS/Components/MeshRenderer.h
     src/ECS/Components/Camera.h
+    src/ECS/Components/DirectionalLight.h
     src/ECS/Components/Name.h
     src/ECS/Components/MeshAssetSource.h
     src/ECS/Components/PrimitiveSource.h
@@ -416,6 +417,8 @@ add_library(gte_core STATIC
     src/Renderer/Atmosphere/AtmosphereParameters.cpp
     src/Renderer/Atmosphere/AtmosphereMath.h
     src/Renderer/Atmosphere/AtmosphereMath.cpp
+    src/Renderer/Atmosphere/DirectionalLightResolver.h
+    src/Renderer/Atmosphere/DirectionalLightResolver.cpp
     src/Renderer/Atmosphere/AtmosphereLutRenderer.h
     src/Renderer/Atmosphere/AtmosphereLutRenderer.cpp
     src/Renderer/Atmosphere/AtmosphereSkyBackgroundRenderer.h
@@ -594,6 +597,8 @@ if(GTE_ENABLE_EDITOR)
         src/Editor/Panels/RenderGraphPanel.cpp
         src/Editor/Panels/JobsPanel.h
         src/Editor/Panels/JobsPanel.cpp
+        src/Editor/Panels/AtmospherePanel.h
+        src/Editor/Panels/AtmospherePanel.cpp
         src/Editor/ImGuiEditorLayer.cpp
     )
     target_link_libraries(gte_core PRIVATE imgui imguizmo)

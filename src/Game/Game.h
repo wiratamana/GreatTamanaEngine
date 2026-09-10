@@ -3,6 +3,7 @@
 #include "../Event/Event.h"
 #include "../Input/InputState.h"
 #include "Animation/AnimationSystem.h"
+#include "ECS/Components/DirectionalLight.h"
 #include "ECS/Registry.h"
 #include "EngineCommandResults.h"
 #include "Instantiation/MeshInstantiationSystem.h"
@@ -108,6 +109,22 @@ public:
     // actual GPU-mesh-caching/entity-spawning behavior, unchanged from
     // before this refactor.
     Entity CreatePrimitiveEntity(Renderer& renderer, PrimitiveType type);
+
+    // Atmosphere Scattering + Aerial Perspective campaign, Phase 8
+    // (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md)
+    // - spawns a new "Sun" entity: a Transform (given a sensible default
+    // rotation looking somewhat downward, like a late-afternoon sun) plus a
+    // DirectionalLight component - this engine's equivalent of
+    // CreatePrimitiveEntity() above, just with no Renderer/GPU mesh
+    // involved at all (a light has nothing to rasterize). Needs no
+    // `Renderer&` parameter for exactly that reason. Given a Name of
+    // "Directional Light", auto-de-duplicated the same Unity-style way
+    // InstantiatePrimitive() already does for primitives (see
+    // ECS/EntityQuery.h's MakeUniqueEntityName()). The Editor's "Hierarchy"
+    // right-click "Create Directional Light" entry
+    // (src/Editor/Panels/HierarchyPanel.cpp) is the first caller of it.
+    Entity CreateDirectionalLightEntity();
+
 
     // Spawns a whole hierarchy of entities from an imported *.gta
     // AssetType::Mesh file (see src/Assets/MeshFile.h/PmxLoader.h - the

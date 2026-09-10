@@ -251,6 +251,15 @@ void BuildHierarchyPanel(Game& game, Renderer& renderer, EditorContext& ctx)
             }
             ImGui::EndMenu();
         }
+        // Atmosphere Scattering + Aerial Perspective campaign, Phase 8
+        // (ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md) - a plain
+        // top-level entry (not a submenu, since there's only ever this one
+        // light kind - see this campaign's own "no point/spot lights"
+        // refusal), mirroring "Create 3D Object"'s own "select what you
+        // just created" UX convention.
+        if (ImGui::MenuItem("Create Directional Light")) {
+            ctx.selection.SelectEntity(game.CreateDirectionalLightEntity());
+        }
         ImGui::EndPopup();
     }
 

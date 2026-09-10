@@ -72,13 +72,16 @@ public:
     // today. `eyeHeightKm`/`planetRadiusKm` are this view's own current
     // values (the exact same ones already fed into this frame's
     // AtmosphereFrameUniforms/AddSkyViewLutPass() call - see
-    // AtmosphereLutRenderer::DrawSkyBackground()).
+    // AtmosphereLutRenderer::DrawSkyBackground()). `skyExposure` (Phase 8 -
+    // ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md) is the Editor's
+    // "Atmosphere" panel-tunable replacement for what used to be a fixed
+    // `kSkyExposure` constant in AtmosphereSkyBackground.frag.
     //
     // A safe no-op (draws nothing) whenever `viewProjection` turns out to
     // be singular (Mat4::TryInverse() fails) - mirrors SceneGridRenderer's
     // own identical guard against a degenerate camera matrix.
     void Draw(Renderer& renderer, VkCommandBuffer cmd, const Mat4& viewProjection, VkImageView skyViewLutView,
-        VkSampler skyViewLutSampler, float eyeHeightKm, float planetRadiusKm);
+        VkSampler skyViewLutSampler, float eyeHeightKm, float planetRadiusKm, float skyExposure);
 
     // Releases the pipeline/pipeline layout/descriptor-set-layout (if
     // built) - waits for the GPU to be idle first, mirrors

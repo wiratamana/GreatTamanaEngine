@@ -76,6 +76,18 @@ private:
     // - see that phase's own completion report.
     AtmosphereLutRenderer m_atmosphereLutRenderer;
 
+    // Atmosphere Scattering + Aerial Perspective campaign, Phase 8
+    // (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md)
+    // - the small set of tunable, non-spatial atmosphere knobs edited live
+    // via the Editor's new "Atmosphere" panel (Panels/AtmospherePanel.h) -
+    // see AtmosphereTypes.h's own AtmosphereSettings doc comment for why
+    // this lives on Application (not EditorContext, not an ECS component).
+    // Threaded into the per-frame atmosphere pass-building code in Run()
+    // (ground-albedo tint into AtmosphereParametersGpu before the shared
+    // LUT passes, sky exposure into MakeRecordSkyBackgroundCallback(),
+    // aerial-perspective strength into AddAtmosphereCompositePass()).
+    AtmosphereSettings m_atmosphereSettings;
+
     // Declared after Renderer (and before Game) so it is destroyed before
     // Renderer's Vulkan device/instance go away, but its lifetime doesn't
     // need to relate to Game's at all.

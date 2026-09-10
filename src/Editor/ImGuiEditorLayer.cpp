@@ -5,6 +5,7 @@
 #include "EditorCamera.h"
 #include "EditorContext.h"
 #include "ImGuiMemoryTracker.h"
+#include "Panels/AtmospherePanel.h"
 #include "Panels/GamePanel.h"
 #include "Panels/HierarchyPanel.h"
 #include "Panels/InspectorPanel.h"
@@ -454,7 +455,8 @@ public:
         m_sceneGrid.Draw(renderer, cmd, sceneViewProjection);
     }
 
-    void BuildUI(Game& game, Renderer& renderer, const rg::RenderGraph& renderGraph) override
+    void BuildUI(Game& game, Renderer& renderer, const rg::RenderGraph& renderGraph,
+        AtmosphereSettings& atmosphereSettings) override
     {
         ImGui::SetCurrentContext(m_context);
 
@@ -535,6 +537,14 @@ public:
         BuildMemoryPanel(m_ctx, renderer);
         m_profilerPanel.Build(m_ctx);
         m_renderGraphPanel.Build(m_ctx, renderGraph);
+        // Atmosphere Scattering + Aerial Perspective campaign, Phase 8
+        // (ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md) - a small,
+        // stateless free-function panel (mirrors BuildMemoryPanel()'s own
+        // shape exactly, unlike ProfilerPanel/RenderGraphPanel's stateful-
+        // class exception - this panel has no cross-frame state of its
+        // own), docked alongside "Memory"/"Profiler"/"Render Graph"/
+        // "Project" (see DockLayout.cpp).
+        BuildAtmospherePanel(m_ctx, atmosphereSettings);
         // Job System Phase 7 (Editor "Jobs" Panel) - reads Job System Phase
         // 5's Profiling::BuildWorkerTimelinePoints() reshape internally; also
         // hosts the GPU Vertex Skinning campaign's own Phase 7 CPU/GPU

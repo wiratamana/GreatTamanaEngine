@@ -21,17 +21,18 @@
 // own header comment/ATMOSPHERE_PHASE5_COMPLETION_REPORT.md), while this
 // engine's Game/Scene View color attachments are plain, non-HDR
 // UNORM/SRGB formats (Renderer::ColorFormat()) with no separate HDR
-// exposure pass of their own. `kSkyExposure` is a deliberate, hardcoded
-// simplification (a real, user-tunable exposure control belongs to a
-// future AtmosphereSettings-driven Editor control, e.g. Phase 8/9 - see
-// this phase's own completion report) - not a physically-derived constant.
+// exposure pass of their own. `pc.skyExposure` (Phase 8 -
+// ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md) replaces what used
+// to be a hardcoded `kSkyExposure` constant - now a real, Editor
+// "Atmosphere" panel-tunable value (AtmosphereSettings::skyExposure),
+// still not a physically-derived constant.
 
 layout(push_constant) uniform PushConstants {
     mat4 invViewProjection;
     float eyeHeightKm;
     float planetRadiusKm;
+    float skyExposure;
     float _pad0;
-    float _pad1;
 } pc;
 
 layout(binding = 0) uniform sampler2D skyViewLut;
@@ -41,8 +42,6 @@ layout(binding = 0) uniform sampler2D skyViewLut;
 layout(location = 0) in vec2 inNdcXY;
 
 layout(location = 0) out vec4 outColor;
-
-const float kSkyExposure = 12.0;
 
 void main()
 {
@@ -60,7 +59,7 @@ void main()
     vec2 uv = ViewDirectionToSkyViewLutUv(viewDirection, lutSize, viewHeightKm, pc.planetRadiusKm);
 
     vec3 radiance = texture(skyViewLut, uv).rgb;
-    vec3 tonemapped = vec3(1.0) - exp(-max(radiance, vec3(0.0)) * kSkyExposure);
+    vec3 tonemapped = vec3(1.0) - exp(-max(radiance, vec3(0.0)) * pc.skyExposure);
 
     outColor = vec4(tonemapped, 1.0);
 }

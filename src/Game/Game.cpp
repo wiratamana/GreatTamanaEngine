@@ -44,6 +44,25 @@ Entity Game::CreatePrimitiveEntity(Renderer& renderer, PrimitiveType type)
     return m_meshInstantiationSystem.SpawnPrimitive(m_registry, renderer, type);
 }
 
+Entity Game::CreateDirectionalLightEntity()
+{
+    const Entity entity = m_registry.CreateEntity();
+
+    Transform& transform = m_registry.AddComponent<Transform>(entity);
+    // Late-afternoon-ish sun: pitched down toward the ground plus a bit of
+    // yaw so it isn't perfectly axis-aligned - purely a sensible visual
+    // default (see Quat::FromEulerDegrees()'s own "pitch around Right()"
+    // convention), not physically derived.
+    transform.rotation = Quat::FromEulerDegrees(45.0f, -30.0f, 0.0f);
+
+    m_registry.AddComponent<DirectionalLight>(entity);
+
+    const std::string uniqueName = MakeUniqueEntityName(m_registry, "Directional Light");
+    m_registry.AddComponent<Name>(entity, Name{ uniqueName });
+
+    return entity;
+}
+
 Entity Game::CreateMeshEntityFromGtaFile(Renderer& renderer, const std::string& absoluteGtaPath)
 {
     const Entity root = m_meshInstantiationSystem.SpawnMeshAsset(m_registry, renderer, absoluteGtaPath);

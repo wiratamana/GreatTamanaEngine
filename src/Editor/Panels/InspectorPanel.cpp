@@ -2,6 +2,7 @@
 
 #include "../EditorContext.h"
 #include "../../ECS/Components/Camera.h"
+#include "../../ECS/Components/DirectionalLight.h"
 #include "../../ECS/Components/DynamicChainRig.h"
 #include "../../ECS/Components/MeshRenderer.h"
 #include "../../ECS/Components/Name.h"
@@ -619,6 +620,20 @@ void BuildEntityInspector(Registry& registry, EditorContext& ctx, PhysicsSystem&
             ImGui::DragFloat("Field of View (Y)", &camera->fovYDegrees, 0.5f, 1.0f, 179.0f);
             ImGui::DragFloat("Near Z", &camera->nearZ, 0.01f, 0.001f, camera->farZ - 0.01f);
             ImGui::DragFloat("Far Z", &camera->farZ, 1.0f, camera->nearZ + 0.01f);
+        }
+    }
+
+    // Atmosphere Scattering + Aerial Perspective campaign, Phase 8
+    // (ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md) - mirrors the
+    // "Camera" section directly above exactly (same layout/style): a color
+    // picker, an illuminance field, and an active checkbox. Direction is
+    // deliberately NOT edited here - it's derived from this same entity's
+    // "Transform" section above (see DirectionalLight.h's own doc comment).
+    if (DirectionalLight* light = registry.TryGetComponent<DirectionalLight>(entity)) {
+        if (ImGui::CollapsingHeader("Directional Light", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::ColorEdit3("Color", &light->color.x);
+            ImGui::DragFloat("Illuminance (lux)", &light->illuminanceLux, 100.0f, 0.0f, 200000.0f);
+            ImGui::Checkbox("Active", &light->active);
         }
     }
 

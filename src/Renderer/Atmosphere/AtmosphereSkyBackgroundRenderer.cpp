@@ -49,13 +49,17 @@ bool DepthFormatHasStencil(VkFormat format)
 
 // Fragment-stage push constants - MUST match
 // Shaders/AtmosphereSkyBackground.frag's own `layout(push_constant)` block
-// exactly (mat4 + 2 floats + 2 padding floats = 80 bytes).
+// exactly (mat4 + 3 floats + 1 padding float = 80 bytes). Phase 8
+// (ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md) repurposed what
+// used to be `_pad0` into `skyExposure` - the Editor's "Atmosphere" panel-
+// tunable replacement for the shader's former hardcoded `kSkyExposure`
+// constant; the struct's total size/layout is unchanged.
 struct PushConstants {
     float invViewProjection[16];
     float eyeHeightKm;
     float planetRadiusKm;
+    float skyExposure;
     float _pad0;
-    float _pad1;
 };
 
 } // namespace
@@ -255,7 +259,8 @@ void AtmosphereSkyBackgroundRenderer::EnsurePipeline(Renderer& renderer)
 }
 
 void AtmosphereSkyBackgroundRenderer::Draw(Renderer& renderer, VkCommandBuffer cmd, const Mat4& viewProjection,
-    VkImageView skyViewLutView, VkSampler skyViewLutSampler, float eyeHeightKm, float planetRadiusKm)
+    VkImageView skyViewLutView, VkSampler skyViewLutSampler, float eyeHeightKm, float planetRadiusKm,
+    float skyExposure)
 {
     m_device = renderer.GetVulkanContextInfo().device;
 
@@ -277,6 +282,7 @@ void AtmosphereSkyBackgroundRenderer::Draw(Renderer& renderer, VkCommandBuffer c
     std::memcpy(pushConstants.invViewProjection, invViewProjection.Data(), sizeof(pushConstants.invViewProjection));
     pushConstants.eyeHeightKm = eyeHeightKm;
     pushConstants.planetRadiusKm = planetRadiusKm;
+    pushConstants.skyExposure = skyExposure;
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);
     vkCmdBindDescriptorSets(

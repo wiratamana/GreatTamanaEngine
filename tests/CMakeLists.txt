@@ -171,6 +171,34 @@
 #                                            Vulkan-header-free, same
 #                                            precedent as GpuTiming.h/
 #                                            GpuSkinningTypes.h above.
+#   - Renderer/Atmosphere/DirectionalLightResolverTests.cpp - Atmosphere
+#                                            Scattering + Aerial Perspective
+#                                            campaign, Phase 8 (task_manager/
+#                                            atmosphere-scattering-1/
+#                                            ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md)
+#                                            - ResolveActiveDirectionalLight()
+#                                            (src/Renderer/Atmosphere/
+#                                            DirectionalLightResolver.h/.cpp):
+#                                            an empty Registry (and one with
+#                                            only an INACTIVE DirectionalLight)
+#                                            falls back to the exact Phase 5
+#                                            placeholder direction/illuminance,
+#                                            a non-trivial 90-degree yaw
+#                                            rotation resolves the direction
+#                                            TOWARD the sun as the correct
+#                                            negation of the entity's own
+#                                            forward vector (the sign-error
+#                                            regression this phase's own
+#                                            strategy document explicitly
+#                                            asked for), color/illuminance-lux
+#                                            are combined into the expected
+#                                            shader-space scale, a parented
+#                                            light follows its parent's
+#                                            resolved world rotation, and a
+#                                            zero-lux light produces zero
+#                                            sunIlluminance. No Renderer/GPU/
+#                                            live Vulkan device involved at
+#                                            all - a plain Registry is enough.
 #   - Renderer/RenderGraph/RenderGraphTypesTests.cpp - Render Graph Phase 1's
 #                                            pure vocabulary (handles/
 #                                            ResourceAccess/TextureDesc/
@@ -1723,6 +1751,7 @@ set(GTE_TEST_SOURCES
     Renderer/ComputeDispatchTests.cpp
     Renderer/GpuSkinning/GpuSkinningTypesTests.cpp
     Renderer/Atmosphere/AtmosphereMathTests.cpp
+    Renderer/Atmosphere/DirectionalLightResolverTests.cpp
     Renderer/RenderGraph/RenderGraphTypesTests.cpp
     Renderer/RenderGraph/RenderGraphBuilderTests.cpp
     Renderer/RenderGraph/RenderGraphCompilerTests.cpp

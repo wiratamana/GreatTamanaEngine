@@ -228,10 +228,13 @@ public:
     // one, if it hasn't) and forwards straight into
     // AtmosphereSkyBackgroundRenderer::Draw() - this class stays the
     // single home for every atmosphere GPU pass, including this one, per
-    // its own class comment.
+    // its own class comment. `skyExposure` (Phase 8 -
+    // ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md) is the Editor's
+    // "Atmosphere" panel-tunable replacement for what used to be a fixed
+    // `kSkyExposure` constant in AtmosphereSkyBackground.frag.
     void DrawSkyBackground(Renderer& renderer, VkCommandBuffer cmd, const Mat4& viewProjection,
         const AtmosphereParametersGpu& params, const AtmosphereFrameUniforms& frameUniforms,
-        const char* skyViewLutName);
+        const char* skyViewLutName, float skyExposure);
 
     // Phase 7 - declares this frame's Aerial Perspective Composite compute
     // pass into `builder` for ONE view: reads `sourceColorHandle` (the
@@ -263,7 +266,12 @@ public:
     // values, pushed as compute push constants (never a per-view uniform
     // buffer - this pass's own per-view parameters are small enough that a
     // buffer would be pure overhead, matching BoxBlur.comp's own simple
-    // push-constant convention).
+    // push-constant convention). `aerialPerspectiveStrength` (Phase 8 -
+    // ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md) is the Editor's
+    // "Atmosphere" panel-tunable overall multiplier for the effect (1.0 =
+    // unchanged physical result, 0.0 = fully disabled/pass-through) - see
+    // AtmosphereAerialPerspectiveComposite.comp's own doc comment for the
+    // exact blend formula this scales.
     //
     // Returns the composited output's TextureHandle - the CALLER must add
     // it to this call's own outputs root set, or this pass's write will be
@@ -273,7 +281,7 @@ public:
         rg::TextureHandle sourceColorHandle, VkSampler sourceColorSampler, VkImageView sourceDepthView,
         VkSampler sourceDepthSampler, rg::VolumeTextureHandle aerialPerspectiveVolumeHandle,
         const char* aerialPerspectiveVolumeName, const Mat4& invViewProjection, Vec3 cameraWorldPosition,
-        VkExtent2D extent, const char* outputTextureName);
+        float aerialPerspectiveStrength, VkExtent2D extent, const char* outputTextureName);
 
     // Returns a pointer to `outputTextureName`'s own persistent composited
     // output RenderTexture (the SAME one AddAerialPerspectiveCompositePass()
@@ -409,17 +417,18 @@ private:
 // Phase 5 (ATMOSPHERE_PHASE5_SKYVIEW_LUT_v1.md, Step 3) - resolves this
 // frame's AtmosphereFrameUniforms for ONE view, given that view's own eye
 // world-space position (Game View: the active ECS Camera's resolved world
-// position - see Application.cpp's temporary validation call site; Scene
-// View, once Phase 7 wires it up: the Editor's own EditorCamera position).
-// `registry` is accepted now purely so a future phase (8) can look up a
-// real DirectionalLight entity from it - THIS phase's own sun-direction
-// branch is a hardcoded placeholder (see this function's own .cpp
-// definition, clearly marked `// TODO(ATMOSPHERE_PHASE8)`) and does not
-// read `registry` at all yet. Keep this function's SIGNATURE stable even
-// once Phase 8 replaces that one branch's body - every call site (this
-// phase's own Game View wiring, a future Phase 6 aerial-perspective
-// volume, a future Phase 7 Scene View wiring) depends on it never changing
-// shape.
+// position; Scene View: the Editor's own EditorCamera position - see
+// IEditorLayer::SceneViewCameraWorldPosition()). `registry` is used to
+// resolve the real, first-active ECS DirectionalLight entity (Phase 8 -
+// ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md) via
+// Renderer/Atmosphere/DirectionalLightResolver.h's
+// ResolveActiveDirectionalLight() - falling back to that same helper's own
+// hardcoded placeholder sun whenever the Registry has no active
+// DirectionalLight at all (a scene with no Sun entity still renders a
+// plausible-looking sky). Keep this function's SIGNATURE stable regardless
+// of future changes to how the sun is resolved - every call site
+// (AtmospherePassSequence.cpp's Game View/Scene View wiring, the Aerial
+// Perspective volume) depends on it never changing shape.
 AtmosphereFrameUniforms ResolveAtmosphereFrameUniforms(Registry& registry, Vec3 eyeWorldPosition);
 
 
