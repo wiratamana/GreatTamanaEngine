@@ -45,6 +45,9 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
     CompiledGraph result;
     result.textureLifetimes.assign(input.textureDescs.size(), ResourceLifetime{});
     result.bufferLifetimes.assign(input.bufferDescs.size(), ResourceLifetime{});
+    // Atmosphere Scattering campaign, Phase 2
+    // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md).
+    result.volumeTextureLifetimes.assign(input.volumeTextureDescs.size(), ResourceLifetime{});
 
     if (passCount == 0) {
         return result;
@@ -76,6 +79,14 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
 
     std::vector<std::int32_t> lastTextureWriter(input.textureDescs.size(), -1);
     std::vector<std::int32_t> lastBufferWriter(input.bufferDescs.size(), -1);
+    // Atmosphere Scattering campaign, Phase 2 - see this file's own
+    // pre-implementation precheck (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md,
+    // Step 2/3.2): every `usage.kind == ResourceKind::Texture ? ... : ...`
+    // two-way branch below was audited and converted to a real,
+    // exhaustive, `default:`-less three-way `switch (usage.kind)` BEFORE
+    // ResourceKind::VolumeTexture was ever added to the enum, so a future
+    // fourth resource kind gets this same compile-time safety net too.
+    std::vector<std::int32_t> lastVolumeTextureWriter(input.volumeTextureDescs.size(), -1);
 
     for (std::int32_t i = 0; i < passCount; ++i) {
         const PassRecord& pass = input.passes[static_cast<std::size_t>(i)];
@@ -87,14 +98,22 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
         // see Step 4's "no automatic resource-usage validation").
         for (const ResourceUsage& usage : pass.reads) {
             std::int32_t writer = -1;
-            if (usage.kind == ResourceKind::Texture) {
+            switch (usage.kind) {
+            case ResourceKind::Texture:
                 if (usage.texture.index < lastTextureWriter.size()) {
                     writer = lastTextureWriter[usage.texture.index];
                 }
-            } else {
+                break;
+            case ResourceKind::Buffer:
                 if (usage.buffer.index < lastBufferWriter.size()) {
                     writer = lastBufferWriter[usage.buffer.index];
                 }
+                break;
+            case ResourceKind::VolumeTexture:
+                if (usage.volumeTexture.index < lastVolumeTextureWriter.size()) {
+                    writer = lastVolumeTextureWriter[usage.volumeTexture.index];
+                }
+                break;
             }
             addEdge(writer, i);
         }
@@ -104,16 +123,25 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
         // writers to the same imported resource" case), then become the
         // new last writer for anything declared after this pass.
         for (const ResourceUsage& usage : pass.writes) {
-            if (usage.kind == ResourceKind::Texture) {
+            switch (usage.kind) {
+            case ResourceKind::Texture:
                 if (usage.texture.index < lastTextureWriter.size()) {
                     addEdge(lastTextureWriter[usage.texture.index], i);
                     lastTextureWriter[usage.texture.index] = i;
                 }
-            } else {
+                break;
+            case ResourceKind::Buffer:
                 if (usage.buffer.index < lastBufferWriter.size()) {
                     addEdge(lastBufferWriter[usage.buffer.index], i);
                     lastBufferWriter[usage.buffer.index] = i;
                 }
+                break;
+            case ResourceKind::VolumeTexture:
+                if (usage.volumeTexture.index < lastVolumeTextureWriter.size()) {
+                    addEdge(lastVolumeTextureWriter[usage.volumeTexture.index], i);
+                    lastVolumeTextureWriter[usage.volumeTexture.index] = i;
+                }
+                break;
             }
         }
     }
@@ -128,6 +156,15 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
     // declared reads/writes are allowed to extend any resource's lifetime
     // (Step 4 below only ever scans `executionOrder`, which excludes
     // them entirely).
+    //
+    // NOTE (Atmosphere Scattering campaign, Phase 2 precheck): this scan is
+    // ALREADY correctly three-way-safe as written - `usage.kind ==
+    // ResourceKind::Texture` is the only branch that can ever mark a pass
+    // "kept" here, so neither a Buffer NOR a VolumeTexture usage can ever
+    // be treated as a finalOutputs root (matching the existing,
+    // deliberate rule that a BufferHandle can't be one either - see
+    // RenderGraphCompiler.h's own Compile() doc comment). No code change
+    // was needed at this specific site.
     std::vector<bool> kept(static_cast<std::size_t>(passCount), false);
     std::vector<std::int32_t> stack;
 
@@ -242,13 +279,26 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
         const PassRecord& pass = input.passes[static_cast<std::size_t>(order[pos])];
 
         auto touch = [&](const ResourceUsage& usage) {
-            std::vector<ResourceLifetime>& lifetimes =
-                (usage.kind == ResourceKind::Texture) ? result.textureLifetimes : result.bufferLifetimes;
-            const std::uint32_t index = (usage.kind == ResourceKind::Texture) ? usage.texture.index : usage.buffer.index;
-            if (index >= lifetimes.size()) {
+            std::vector<ResourceLifetime>* lifetimes = nullptr;
+            std::uint32_t index = 0;
+            switch (usage.kind) {
+            case ResourceKind::Texture:
+                lifetimes = &result.textureLifetimes;
+                index = usage.texture.index;
+                break;
+            case ResourceKind::Buffer:
+                lifetimes = &result.bufferLifetimes;
+                index = usage.buffer.index;
+                break;
+            case ResourceKind::VolumeTexture:
+                lifetimes = &result.volumeTextureLifetimes;
+                index = usage.volumeTexture.index;
+                break;
+            }
+            if (lifetimes == nullptr || index >= lifetimes->size()) {
                 return;
             }
-            ResourceLifetime& lifetime = lifetimes[index];
+            ResourceLifetime& lifetime = (*lifetimes)[index];
             if (lifetime.firstUsePassIndex == -1) {
                 lifetime.firstUsePassIndex = static_cast<std::int32_t>(pos);
             }

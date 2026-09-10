@@ -133,6 +133,24 @@ struct PassContext {
     // this call.
     std::function<VkBuffer(BufferHandle)> resolveBuffer;
 
+    // Atmosphere Scattering campaign, Phase 2
+    // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md) - the
+    // volume-texture sibling of resolveTexture()/resolveBuffer() above.
+    // Deliberately mirrors their exact "hand back plain, already-resolved
+    // Vulkan data, never an owning object" shape - RenderGraph never owns
+    // a VolumeTexture (every VolumeTextureHandle today is imported, see
+    // RenderGraphBuilder::ImportVolumeTexture()), so this returns a plain
+    // ResolvedVolumeTexture{view}, never a "VolumeTexture&" (there is no
+    // such owning reference for RenderGraph to hand out - it only ever
+    // tracks the plain VolumeTarget an external owner supplied). A pass's
+    // `execute` callback uses this to rewrite its own ComputeDescriptorSet
+    // (VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL) against
+    // the CURRENT physical image view behind a declared handle.
+    struct ResolvedVolumeTexture {
+        VkImageView view = VK_NULL_HANDLE;
+    };
+    std::function<ResolvedVolumeTexture(VolumeTextureHandle)> resolveVolumeTexture;
+
     // Called by a pass's `execute` callback immediately alongside issuing a
     // real vkCmdDraw/vkCmdDrawIndexed, so this pass's own DrawStats tally
     // stays fused to the exact call site that actually issued the draw -
@@ -345,6 +363,22 @@ private:
         ResourceState state;
     };
 
+    // Atmosphere Scattering campaign, Phase 2
+    // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md) - the
+    // volume-texture sibling of PhysicalTexture/PhysicalBuffer above. Every
+    // VolumeTextureHandle today is imported (see RenderGraphBuilder::
+    // ImportVolumeTexture()) - there is deliberately no pooled/transient
+    // counterpart yet, so `isImported` is always true in practice (see
+    // this campaign's own Phase 2 completion report). No `hasDepth`/depth
+    // state at all - a volume texture has no depth-companion concept the
+    // way a 2D PhysicalTexture does.
+    struct PhysicalVolumeTexture {
+        bool resolved = false;
+        bool isImported = false;
+        VolumeTarget target;
+        ResourceState state;
+    };
+
     struct NamedStats {
         const char* name = nullptr;
         PassGpuStats stats;
@@ -357,9 +391,14 @@ private:
         std::uint32_t index, const CompiledGraphInput& input, std::vector<PhysicalTexture>& physicalTextures);
     void EnsureBufferResolved(
         std::uint32_t index, const CompiledGraphInput& input, std::vector<PhysicalBuffer>& physicalBuffers);
+    // Atmosphere Scattering campaign, Phase 2.
+    void EnsureVolumeTextureResolved(std::uint32_t index, const CompiledGraphInput& input,
+        std::vector<PhysicalVolumeTexture>& physicalVolumeTextures);
 
     void ApplyUsageBarrierIfNeeded(VkCommandBuffer cmd, const ResourceUsage& usage, const CompiledGraphInput& input,
-        std::vector<PhysicalTexture>& physicalTextures, std::vector<PhysicalBuffer>& physicalBuffers);
+        std::vector<PhysicalTexture>& physicalTextures, std::vector<PhysicalBuffer>& physicalBuffers,
+        std::vector<PhysicalVolumeTexture>& physicalVolumeTextures);
+
 
     // B.1 (B1_REAL_GPU_TIMING_STRATEGY_v1.md) - replaces the old, single
     // combined RecordStatsFor(): drawStats and timing are now written by

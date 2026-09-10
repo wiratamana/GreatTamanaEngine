@@ -422,6 +422,7 @@ int Application::Run()
                                 outputs.push_back(*blurHandle);
                             }
                         }
+
                         return outputs;
                     });
 

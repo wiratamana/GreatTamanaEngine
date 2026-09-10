@@ -29,6 +29,7 @@
 
 #include "RenderGraphTypes.h"
 #include "../RenderTarget.h"
+#include "../VolumeTarget.h"
 
 #include <volk.h>
 
@@ -82,6 +83,27 @@ struct BufferImportInfo {
     VkDeviceSize size = 0;
 };
 
+// VolumeTexture sibling of TextureImportInfo above - Atmosphere Scattering
+// campaign, Phase 2 (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md).
+// Parallel to CompiledGraphInput::volumeTextureDescs/volumeTextureNames
+// (same index). Every VolumeTextureHandle today is created exclusively via
+// RenderGraphBuilder::ImportVolumeTexture() below (isImported is therefore
+// always true in practice) - there is deliberately no
+// CreateVolumeTexture()-requested transient/pooled counterpart yet (see
+// this campaign's own Phase 2 completion report for why this was
+// deliberately deferred).
+struct VolumeTextureImportInfo {
+    bool isImported = false;
+    // Only meaningful when isImported == true - the already-live resource
+    // this handle refers to. RenderGraphResourcePool must never try to
+    // allocate or free this (it never even sees a volume texture at all -
+    // see this campaign's own Phase 2 analysis).
+    VolumeTarget externalTarget{};
+    // Only meaningful when isImported == true - see ImportVolumeTexture()'s
+    // own comment for why this has no default to silently fall back on.
+    VkImageLayout currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+};
+
 // The "raw material" handed off to Phase 3's compiler
 // (RenderGraphCompiler::Compile(CompiledGraphInput&&)) - NOT yet
 // "compiled" in any real sense (no ordering/culling has happened yet)
@@ -105,7 +127,13 @@ struct CompiledGraphInput {
     std::vector<BufferDesc> bufferDescs;
     std::vector<const char*> bufferNames;
     std::vector<BufferImportInfo> bufferImportInfo;
+
+    // Atmosphere Scattering campaign, Phase 2.
+    std::vector<VolumeTextureDesc> volumeTextureDescs;
+    std::vector<const char*> volumeTextureNames;
+    std::vector<VolumeTextureImportInfo> volumeTextureImportInfo;
 };
+
 
 // Owns the whole in-progress description of one frame. A fresh
 // RenderGraphBuilder is meant to be built up once per frame (CreateTexture/
@@ -185,6 +213,17 @@ public:
         void ReadBuffer(BufferHandle handle, ResourceAccess access = ResourceAccess::ShaderRead);
         void WriteBuffer(BufferHandle handle, ResourceAccess access = ResourceAccess::TransferDst);
 
+        // Atmosphere Scattering campaign, Phase 2
+        // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md) -
+        // volume-texture counterparts of ReadBuffer()/WriteBuffer() above,
+        // mirroring their exact shape. `access` defaults to
+        // ComputeShaderRead/ComputeShaderWrite respectively - the only
+        // access kinds a volume texture is meant for today (a compute pass
+        // writing/reading an `image3D`, or a later full-screen pass
+        // sampling it as `sampler3D` via ShaderRead).
+        void ReadVolumeTexture(VolumeTextureHandle handle, ResourceAccess access = ResourceAccess::ComputeShaderRead);
+        void WriteVolumeTexture(VolumeTextureHandle handle, ResourceAccess access = ResourceAccess::ComputeShaderWrite);
+
     private:
         PassRecord& m_pass;
     };
@@ -242,6 +281,24 @@ public:
     // access value across frames, only its layout (see that function's own
     // comment in RenderGraph.cpp).
     BufferHandle ImportBuffer(const char* name, VkBuffer externalBuffer, VkDeviceSize size);
+
+    // VolumeTexture sibling of ImportTexture() above - Atmosphere
+    // Scattering campaign, Phase 2
+    // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md). Takes a
+    // plain, non-owning VolumeTarget (see VolumeTarget.h) - mirroring
+    // ImportTexture()'s own `const RenderTarget&` convention exactly, NEVER
+    // the owning VolumeTexture object itself, so this header stays
+    // decoupled from VolumeTexture.h's own (heavier) dependency, exactly
+    // like ImportTexture()'s existing RenderTarget.h-only layering. The
+    // resulting handle is usable in ReadVolumeTexture()/WriteVolumeTexture()
+    // exactly like any other declared handle.
+    //
+    // `currentLayout` is REQUIRED, with no default - same reasoning as
+    // ImportTexture()'s own `currentLayout` parameter above: the caller
+    // must state exactly what VkImageLayout this image is ACTUALLY in
+    // right now.
+    VolumeTextureHandle ImportVolumeTexture(
+        const char* name, const VolumeTarget& externalVolumeTarget, VkImageLayout currentLayout);
 
     // `name` must be a string literal (mirrors GTE_PROFILE_SCOPE's own
     // static-storage-duration requirement - see AGENTS.md, "Profiling").
@@ -314,6 +371,11 @@ private:
     std::vector<BufferDesc> m_bufferDescs;
     std::vector<const char*> m_bufferNames;
     std::vector<BufferImportInfo> m_bufferImportInfo;
+
+    // Atmosphere Scattering campaign, Phase 2.
+    std::vector<VolumeTextureDesc> m_volumeTextureDescs;
+    std::vector<const char*> m_volumeTextureNames;
+    std::vector<VolumeTextureImportInfo> m_volumeTextureImportInfo;
 };
 
 } // namespace gte::rg

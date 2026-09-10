@@ -41,6 +41,17 @@ void RenderGraphBuilder::PassBuilder::WriteBuffer(BufferHandle handle, ResourceA
     m_pass.writes.push_back(ResourceUsage::ForBuffer(handle, access));
 }
 
+void RenderGraphBuilder::PassBuilder::ReadVolumeTexture(VolumeTextureHandle handle, ResourceAccess access)
+{
+    m_pass.reads.push_back(ResourceUsage::ForVolumeTexture(handle, access));
+}
+
+void RenderGraphBuilder::PassBuilder::WriteVolumeTexture(VolumeTextureHandle handle, ResourceAccess access)
+{
+    m_pass.writes.push_back(ResourceUsage::ForVolumeTexture(handle, access));
+}
+
+
 // --- RenderGraphBuilder ------------------------------------------------
 
 TextureHandle RenderGraphBuilder::CreateTexture(const char* name, const TextureDesc& desc)
@@ -127,6 +138,34 @@ BufferHandle RenderGraphBuilder::ImportBuffer(const char* name, VkBuffer externa
     return BufferHandle{ index, 1 };
 }
 
+VolumeTextureHandle RenderGraphBuilder::ImportVolumeTexture(
+    const char* name, const VolumeTarget& externalVolumeTarget, VkImageLayout currentLayout)
+{
+    assert(name != nullptr && name[0] != '\0' &&
+        "RenderGraphBuilder::ImportVolumeTexture requires a non-empty, static-storage-duration name");
+
+    const std::uint32_t index = static_cast<std::uint32_t>(m_volumeTextureDescs.size());
+
+    // Mirror the external target's own real shape into a VolumeTextureDesc
+    // purely for informational/debug-display purposes - mirrors
+    // ImportTexture()'s own identical comment above.
+    VolumeTextureDesc desc;
+    desc.width = externalVolumeTarget.extent.width;
+    desc.height = externalVolumeTarget.extent.height;
+    desc.depth = externalVolumeTarget.extent.depth;
+    desc.format = externalVolumeTarget.format;
+    m_volumeTextureDescs.push_back(desc);
+    m_volumeTextureNames.push_back(name);
+
+    VolumeTextureImportInfo importInfo;
+    importInfo.isImported = true;
+    importInfo.externalTarget = externalVolumeTarget;
+    importInfo.currentLayout = currentLayout;
+    m_volumeTextureImportInfo.push_back(importInfo);
+
+    return VolumeTextureHandle{ index, 1 };
+}
+
 CompiledGraphInput RenderGraphBuilder::Finish()
 {
     CompiledGraphInput input;
@@ -137,6 +176,9 @@ CompiledGraphInput RenderGraphBuilder::Finish()
     input.bufferDescs = std::move(m_bufferDescs);
     input.bufferNames = std::move(m_bufferNames);
     input.bufferImportInfo = std::move(m_bufferImportInfo);
+    input.volumeTextureDescs = std::move(m_volumeTextureDescs);
+    input.volumeTextureNames = std::move(m_volumeTextureNames);
+    input.volumeTextureImportInfo = std::move(m_volumeTextureImportInfo);
     return input;
 }
 

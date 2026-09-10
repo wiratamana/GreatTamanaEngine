@@ -87,6 +87,23 @@ struct BufferHandle {
     friend bool operator==(const BufferHandle&, const BufferHandle&) noexcept = default;
 };
 
+// Atmosphere Scattering campaign, Phase 2
+// (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md) - a genuine
+// THIRD resource kind, for a real 3D (VK_IMAGE_TYPE_3D) GPU image (see
+// src/Renderer/VolumeTexture.h) - same cheap POD index+generation shape as
+// TextureHandle/BufferHandle above, deliberately its own DISTINCT struct
+// (never a shared template) for the exact same reason those two are
+// already separate types - see this file's own header comment.
+struct VolumeTextureHandle {
+    std::uint32_t index = kInvalidIndex;
+    std::uint32_t generation = 0;
+
+    bool IsValid() const noexcept { return index != kInvalidIndex; }
+
+    friend bool operator==(const VolumeTextureHandle&, const VolumeTextureHandle&) noexcept = default;
+};
+
+
 struct PassHandle {
     std::uint32_t index = kInvalidIndex;
     std::uint32_t generation = 0;
@@ -252,42 +269,69 @@ struct BufferDesc {
     friend bool operator==(const BufferDesc&, const BufferDesc&) noexcept = default;
 };
 
+// Atmosphere Scattering campaign, Phase 2
+// (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md) - the
+// VolumeTextureHandle counterpart of TextureDesc/BufferDesc above, same
+// "purely a physical-shape descriptor, no debugName field" rule (see this
+// file's own "standing rule" comment above). `depth` is the one genuinely
+// new dimension neither TextureDesc nor BufferDesc has any equivalent of.
+struct VolumeTextureDesc {
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+    std::uint32_t depth = 0;
+    VkFormat format = VK_FORMAT_UNDEFINED;
+
+    friend bool operator==(const VolumeTextureDesc&, const VolumeTextureDesc&) noexcept = default;
+};
+
 // --- Pass metadata -----------------------------------------------------
 //
 // The pure record Phase 2's builder API fills in (one read/write
 // declaration at a time) and Phase 3's compiler reads (to compute
 // dependency order, culling, and resource lifetimes).
 
-// Which of ResourceUsage's two handle fields is actually meaningful for a
+// Which of ResourceUsage's three handle fields is actually meaningful for a
 // given value - see ResourceUsage below.
 enum class ResourceKind : std::uint8_t {
     Texture,
     Buffer,
+    // Atmosphere Scattering campaign, Phase 2
+    // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md) - a real
+    // 3D (VK_IMAGE_TYPE_3D) GPU image (see src/Renderer/VolumeTexture.h).
+    // IMPORTANT: every place that branches on ResourceKind (RenderGraphCompiler.cpp/
+    // RenderGraph.cpp) was audited and converted to a real three-way branch
+    // (an exhaustive switch with no `default:`, mirroring IsWriteAccess()'s
+    // own convention) BEFORE this enumerator was added - see this
+    // campaign's own Phase 2 completion report for the full write-up of
+    // why a plain two-way if/else here would have silently misrouted a
+    // volume-texture usage into the Buffer path, reaching a real,
+    // unchecked out-of-bounds vector access in
+    // RenderGraph::EnsureBufferResolved().
+    VolumeTexture,
 };
 
-// A single declared read/write on either a texture OR a buffer resource.
-// Phase 1 shipped this as a texture-only shape and explicitly flagged (see
-// its own completion report's "Handoff notes") that Phase 2 - this phase -
-// is where it grows into this real tagged-union shape once an actual
-// builder API exists to justify it (RenderGraphBuilder::PassBuilder's
-// ReadBuffer()/WriteBuffer(), see RENDERGRAPH_PHASE2_BUILDER_API_STRATEGY_v2.md,
-// Step 3.1's "...ReadBuffer/WriteBuffer, symmetric, for a future compute
-// pass").
+// A single declared read/write on a texture, a buffer, OR a volume
+// texture. Phase 1 shipped this as a texture-only shape; Phase 2 of the
+// Render Graph campaign grew it into a texture/buffer tagged-union shape
+// once RenderGraphBuilder::PassBuilder's ReadBuffer()/WriteBuffer() existed
+// to justify it; the Atmosphere Scattering campaign's own Phase 2
+// (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md) extends it
+// to a third kind, for the exact same reason.
 //
-// `kind` says which of `texture`/`buffer` is meaningful - the other field
-// is simply left at its own default and never read. Deliberately a plain
-// "both fields present, one tag" struct rather than a std::variant,
-// matching this codebase's general preference for plain, explicit structs
-// (e.g. TextureDesc/BufferDesc are two separate structs, not one variant)
-// over template-heavy machinery it doesn't otherwise use. The two static
-// factory functions below are what every real call site
-// (RenderGraphBuilder::PassBuilder, see Phase 2) actually constructs one
-// through - nothing outside this file/its own tests should need to spell
-// out all four fields by hand.
+// `kind` says which of `texture`/`buffer`/`volumeTexture` is meaningful -
+// every other field is simply left at its own default and never read.
+// Deliberately a plain "all fields present, one tag" struct rather than a
+// std::variant, matching this codebase's general preference for plain,
+// explicit structs over template-heavy machinery it doesn't otherwise use.
+// The three static factory functions below are what every real call site
+// (RenderGraphBuilder::PassBuilder) actually constructs one through -
+// nothing outside this file/its own tests should need to spell out every
+// field by hand.
 struct ResourceUsage {
     ResourceKind kind = ResourceKind::Texture;
     TextureHandle texture;
     BufferHandle buffer;
+    VolumeTextureHandle volumeTexture;
     ResourceAccess access = ResourceAccess::ShaderRead;
 
     static ResourceUsage ForTexture(TextureHandle handle, ResourceAccess access) noexcept
@@ -307,7 +351,19 @@ struct ResourceUsage {
         usage.access = access;
         return usage;
     }
+
+    // Atmosphere Scattering campaign, Phase 2
+    // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md).
+    static ResourceUsage ForVolumeTexture(VolumeTextureHandle handle, ResourceAccess access) noexcept
+    {
+        ResourceUsage usage;
+        usage.kind = ResourceKind::VolumeTexture;
+        usage.volumeTexture = handle;
+        usage.access = access;
+        return usage;
+    }
 };
+
 
 // Forward-declared only - fully specified in Phase 6
 // (RENDERGRAPH_PHASE6_EXECUTION_ENGINE_STRATEGY_v2.md), once Phase 4's

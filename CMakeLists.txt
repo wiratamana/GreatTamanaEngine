@@ -387,6 +387,9 @@ add_library(gte_core STATIC
     src/Renderer/Buffer.h
     src/Renderer/Texture2D.cpp
     src/Renderer/Texture2D.h
+    src/Renderer/VolumeTexture.cpp
+    src/Renderer/VolumeTexture.h
+    src/Renderer/VolumeTarget.h
     src/Renderer/TextureHandle.h
     src/Renderer/MaterialTexture.h
     src/Renderer/Mesh.h
@@ -794,7 +797,6 @@ endif()
 # real .vert/.frag/.comp entry point; a plain .glsl include file is never
 # passed to gte_add_shader() directly - it is added to a future shader's own
 # EXTRA_DEPENDS instead, see cmake/CompileShaders.cmake).
-
 
 # Ensures SDL3.dll is copied next to the built .exe after every build.
 sdl3_copy_runtime_dll(GreatTamanaEngine)

@@ -15,6 +15,7 @@
 #include "RenderGraph/RenderGraphTypes.h"
 #include "RenderTexture.h"
 #include "Texture2D.h"
+#include "VolumeTexture.h"
 #include "Vulkan/VulkanAllocator.h"
 #include "Vulkan/VulkanDevice.h"
 #include "Vulkan/VulkanInstance.h"
@@ -612,6 +613,26 @@ public:
     // Submit()'s own `materialDescriptorSet` parameter above).
     MaterialTexture CreateMaterialTexture2D(
         const void* pixelsRgba8, int width, int height, const char* debugName = nullptr) const;
+
+    // Atmosphere Scattering campaign, Phase 2
+    // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md) - factory
+    // for a real 3D (VK_IMAGE_TYPE_3D) GPU image (see VolumeTexture.h),
+    // mirroring CreateTexture2D() above but with an EXPLICIT `format`
+    // (unlike Texture2D's fixed VK_FORMAT_R8G8B8A8_UNORM - a volume texture
+    // typically needs a higher-precision floating-point format to store
+    // scattering values that can exceed [0, 1]) and ALWAYS storage+sampled
+    // capable (no `allowStorageImageAccess` opt-in - a VolumeTexture is
+    // always compute-written and later sampled). Throws std::runtime_error
+    // if this device doesn't actually support
+    // VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT for the requested `format` (see
+    // Vulkan/FormatCapabilities.h's SupportsStorageImageUsage()) - same
+    // discipline as CreateRenderTexture()/CreateTexture2D() above. Import
+    // the result into a gte::rg::RenderGraph via its own Target() accessor
+    // and RenderGraphBuilder::ImportVolumeTexture() - never the owning
+    // VolumeTexture object itself (see VolumeTarget.h).
+    VolumeTexture CreateVolumeTexture(
+        int width, int height, int depth, VkFormat format, const char* debugName = nullptr) const;
+
 
     // Aggregate live-memory totals across every Buffer/RenderTexture this
     // Renderer has ever created and not yet destroyed - see

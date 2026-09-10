@@ -414,6 +414,18 @@ Texture2D GpuResourceFactory::CreateTexture2D(
     return texture;
 }
 
+VolumeTexture GpuResourceFactory::CreateVolumeTexture(
+    int width, int height, int depth, VkFormat format, const char* debugName) const
+{
+    if (!SupportsStorageImageUsage(m_physicalDevice, format)) {
+        throw std::runtime_error(
+            "GpuResourceFactory::CreateVolumeTexture: this physical device does not support "
+            "VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT for the requested format.");
+    }
+    return VolumeTexture(m_allocator, m_memoryTracker, m_device, width, height, depth, format, debugName);
+}
+
+
 MaterialTexture GpuResourceFactory::CreateMaterialTexture2D(
     const void* pixelsRgba8, int width, int height, const char* debugName) const
 {

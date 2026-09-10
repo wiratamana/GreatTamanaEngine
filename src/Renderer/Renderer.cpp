@@ -388,6 +388,12 @@ MaterialTexture Renderer::CreateMaterialTexture2D(
     return m_resources.CreateMaterialTexture2D(pixelsRgba8, width, height, debugName);
 }
 
+VolumeTexture Renderer::CreateVolumeTexture(
+    int width, int height, int depth, VkFormat format, const char* debugName) const
+{
+    return m_resources.CreateVolumeTexture(width, height, depth, format, debugName);
+}
+
 Renderer::VulkanContextInfo Renderer::GetVulkanContextInfo() const
 {
     VulkanContextInfo info;

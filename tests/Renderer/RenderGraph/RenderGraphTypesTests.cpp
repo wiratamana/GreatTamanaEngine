@@ -89,6 +89,35 @@ TEST(RenderGraphHandleTest, PassHandleEqualityComparesBothFields)
     EXPECT_FALSE(a == differentGeneration);
 }
 
+// Atmosphere Scattering campaign, Phase 2
+// (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md) -
+// VolumeTextureHandle mirrors TextureHandle/BufferHandle/PassHandle's own
+// tests exactly.
+TEST(RenderGraphHandleTest, DefaultConstructedVolumeTextureHandleIsInvalid)
+{
+    const VolumeTextureHandle handle;
+    EXPECT_FALSE(handle.IsValid());
+}
+
+TEST(RenderGraphHandleTest, ExplicitlyConstructedVolumeTextureHandleIsValid)
+{
+    const VolumeTextureHandle handle{ 6, 1 };
+    EXPECT_TRUE(handle.IsValid());
+}
+
+TEST(RenderGraphHandleTest, VolumeTextureHandleEqualityComparesBothFields)
+{
+    const VolumeTextureHandle a{ 4, 3 };
+    const VolumeTextureHandle b{ 4, 3 };
+    const VolumeTextureHandle differentIndex{ 9, 3 };
+    const VolumeTextureHandle differentGeneration{ 4, 9 };
+
+    EXPECT_TRUE(a == b);
+    EXPECT_FALSE(a == differentIndex);
+    EXPECT_FALSE(a == differentGeneration);
+}
+
+
 // --- TextureDesc / BufferDesc value equality ------------------------------
 //
 // This is the exact behavior Phase 4's pool-matching logic will depend on
@@ -176,6 +205,46 @@ TEST(RenderGraphDescTest, BufferDescsDifferingInUsageCompareUnequal)
 {
     const BufferDesc a{ 1024, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT };
     const BufferDesc b{ 1024, VK_BUFFER_USAGE_INDEX_BUFFER_BIT };
+    EXPECT_FALSE(a == b);
+}
+
+// Atmosphere Scattering campaign, Phase 2
+// (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md) -
+// VolumeTextureDesc mirrors TextureDesc's own value-equality tests exactly,
+// plus its own new `depth` dimension.
+
+TEST(RenderGraphDescTest, IdenticalVolumeTextureDescsCompareEqual)
+{
+    const VolumeTextureDesc a{ 32, 32, 32, VK_FORMAT_R16G16B16A16_SFLOAT };
+    const VolumeTextureDesc b{ 32, 32, 32, VK_FORMAT_R16G16B16A16_SFLOAT };
+    EXPECT_TRUE(a == b);
+}
+
+TEST(RenderGraphDescTest, VolumeTextureDescsDifferingInWidthCompareUnequal)
+{
+    const VolumeTextureDesc a{ 32, 32, 32, VK_FORMAT_R16G16B16A16_SFLOAT };
+    const VolumeTextureDesc b{ 16, 32, 32, VK_FORMAT_R16G16B16A16_SFLOAT };
+    EXPECT_FALSE(a == b);
+}
+
+TEST(RenderGraphDescTest, VolumeTextureDescsDifferingInHeightCompareUnequal)
+{
+    const VolumeTextureDesc a{ 32, 32, 32, VK_FORMAT_R16G16B16A16_SFLOAT };
+    const VolumeTextureDesc b{ 32, 16, 32, VK_FORMAT_R16G16B16A16_SFLOAT };
+    EXPECT_FALSE(a == b);
+}
+
+TEST(RenderGraphDescTest, VolumeTextureDescsDifferingInDepthCompareUnequal)
+{
+    const VolumeTextureDesc a{ 32, 32, 32, VK_FORMAT_R16G16B16A16_SFLOAT };
+    const VolumeTextureDesc b{ 32, 32, 16, VK_FORMAT_R16G16B16A16_SFLOAT };
+    EXPECT_FALSE(a == b);
+}
+
+TEST(RenderGraphDescTest, VolumeTextureDescsDifferingInFormatCompareUnequal)
+{
+    const VolumeTextureDesc a{ 32, 32, 32, VK_FORMAT_R16G16B16A16_SFLOAT };
+    const VolumeTextureDesc b{ 32, 32, 32, VK_FORMAT_R8G8B8A8_UNORM };
     EXPECT_FALSE(a == b);
 }
 
@@ -303,6 +372,18 @@ TEST(RenderGraphResourceUsageTest, ForBufferSetsKindAndBufferFields)
     EXPECT_EQ(usage.buffer, (BufferHandle{ 3, 1 }));
     EXPECT_EQ(usage.access, ResourceAccess::TransferDst);
 }
+
+// Atmosphere Scattering campaign, Phase 2
+// (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md).
+TEST(RenderGraphResourceUsageTest, ForVolumeTextureSetsKindAndVolumeTextureFields)
+{
+    const ResourceUsage usage =
+        ResourceUsage::ForVolumeTexture(VolumeTextureHandle{ 8, 3 }, ResourceAccess::ComputeShaderWrite);
+    EXPECT_EQ(usage.kind, ResourceKind::VolumeTexture);
+    EXPECT_EQ(usage.volumeTexture, (VolumeTextureHandle{ 8, 3 }));
+    EXPECT_EQ(usage.access, ResourceAccess::ComputeShaderWrite);
+}
+
 
 TEST(RenderGraphPassRecordTest, ReadsAndWritesCanBeAppendedIndependently)
 {

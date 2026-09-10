@@ -69,11 +69,15 @@ struct CompiledGraph {
     // nothing else mints/recycles a PassHandle's generation today.
     std::vector<PassHandle> executionOrder;
 
-    // Parallel to CompiledGraphInput::textureDescs/bufferDescs (same
-    // index) - one ResourceLifetime per declared resource, regardless of
-    // whether it survived culling.
+    // Parallel to CompiledGraphInput::textureDescs/bufferDescs/
+    // volumeTextureDescs (same index) - one ResourceLifetime per declared
+    // resource, regardless of whether it survived culling.
     std::vector<ResourceLifetime> textureLifetimes;
     std::vector<ResourceLifetime> bufferLifetimes;
+
+    // Atmosphere Scattering campaign, Phase 2
+    // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md).
+    std::vector<ResourceLifetime> volumeTextureLifetimes;
 };
 
 // Compiles `input` against the REQUIRED root set `finalOutputs` - the

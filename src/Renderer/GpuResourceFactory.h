@@ -8,6 +8,7 @@
 #include "Pipeline.h"
 #include "RenderTexture.h"
 #include "Texture2D.h"
+#include "VolumeTexture.h"
 #include "Vulkan/VulkanAllocator.h"
 
 #include <cstdint>
@@ -211,6 +212,21 @@ public:
     // CreateRenderTexture() above.
     Texture2D CreateTexture2D(const void* pixelsRgba8, int width, int height, const char* debugName = nullptr,
         bool allowStorageImageAccess = false) const;
+
+    // Atmosphere Scattering campaign, Phase 2
+    // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md) - see
+    // Renderer::CreateVolumeTexture(). Unlike CreateTexture2D()/
+    // CreateRenderTexture() above, storage-image access is NOT optional -
+    // a VolumeTexture is always compute-written and later sampled, so this
+    // ALWAYS confirms `format` actually supports
+    // VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT via
+    // Vulkan/FormatCapabilities.h's SupportsStorageImageUsage() and throws
+    // std::runtime_error loudly if it doesn't - same "constructor trusts,
+    // factory checks" division of labor as every other storage-capable
+    // resource this factory creates.
+    VolumeTexture CreateVolumeTexture(
+        int width, int height, int depth, VkFormat format, const char* debugName = nullptr) const;
+
 
     // The ONE descriptor-set-layout (a single combined-image-sampler,
     // fragment stage, set = 0 binding = 0) every VertexLayout::

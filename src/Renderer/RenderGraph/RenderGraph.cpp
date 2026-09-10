@@ -123,11 +123,51 @@ void RenderGraph::EnsureBufferResolved(
     buf.resolved = true;
 }
 
+// Atmosphere Scattering campaign, Phase 2
+// (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md). Every
+// VolumeTextureHandle today is imported exclusively via
+// RenderGraphBuilder::ImportVolumeTexture() - there is deliberately no
+// CreateVolumeTexture() (pooled/transient) counterpart yet, so
+// `importInfo.isImported` is always true in practice; the `else` branch
+// below is defensive-only, mirroring a transient resource's own "never
+// touched before" seed for when that gap is eventually closed.
+void RenderGraph::EnsureVolumeTextureResolved(std::uint32_t index, const CompiledGraphInput& input,
+    std::vector<PhysicalVolumeTexture>& physicalVolumeTextures)
+{
+    PhysicalVolumeTexture& vol = physicalVolumeTextures[index];
+    if (vol.resolved) {
+        return;
+    }
+
+    const VolumeTextureImportInfo& importInfo = input.volumeTextureImportInfo[index];
+    if (importInfo.isImported) {
+        vol.isImported = true;
+        vol.target = importInfo.externalTarget;
+        vol.state = ResourceState{ importInfo.currentLayout, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE };
+    } else {
+        vol.isImported = false;
+        vol.target = VolumeTarget{};
+        vol.state = ResourceState{};
+    }
+    vol.resolved = true;
+}
+
 void RenderGraph::ApplyUsageBarrierIfNeeded(VkCommandBuffer cmd, const ResourceUsage& usage,
     const CompiledGraphInput& input, std::vector<PhysicalTexture>& physicalTextures,
-    std::vector<PhysicalBuffer>& physicalBuffers)
+    std::vector<PhysicalBuffer>& physicalBuffers, std::vector<PhysicalVolumeTexture>& physicalVolumeTextures)
 {
-    if (usage.kind == ResourceKind::Texture) {
+    // Atmosphere Scattering campaign, Phase 2 precheck
+    // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md, Step
+    // 2/3.2): this used to be a plain `if (usage.kind == ResourceKind::Texture)
+    // {...} else {...}` two-way branch that would have silently routed a
+    // VolumeTexture usage into the Buffer path - `EnsureBufferResolved()`
+    // has NO bounds check on its own `index` parameter, so that would have
+    // been a real, reachable out-of-bounds `physicalBuffers` access the
+    // instant a volume-texture usage was ever declared. Converted to a
+    // real, exhaustive, `default:`-less three-way `switch (usage.kind)`
+    // BEFORE ResourceKind::VolumeTexture was ever added to the enum.
+    switch (usage.kind) {
+    case ResourceKind::Texture: {
         EnsureTextureResolved(usage.texture.index, input, physicalTextures);
         PhysicalTexture& tex = physicalTextures[usage.texture.index];
 
@@ -156,7 +196,9 @@ void RenderGraph::ApplyUsageBarrierIfNeeded(VkCommandBuffer cmd, const ResourceU
             EmitImageBarrier(cmd, image, range, state, next);
         }
         state = next;
-    } else {
+        break;
+    }
+    case ResourceKind::Buffer: {
         EnsureBufferResolved(usage.buffer.index, input, physicalBuffers);
         PhysicalBuffer& buf = physicalBuffers[usage.buffer.index];
         const ResourceState next = RequiredStateFor(usage.access, false);
@@ -164,6 +206,26 @@ void RenderGraph::ApplyUsageBarrierIfNeeded(VkCommandBuffer cmd, const ResourceU
             EmitBufferBarrier(cmd, buf.buffer, 0, buf.size, buf.state, next);
         }
         buf.state = next;
+        break;
+    }
+    case ResourceKind::VolumeTexture: {
+        // Atmosphere Scattering campaign, Phase 2
+        // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md) - a
+        // volume texture has no depth-companion concept at all (unlike a
+        // 2D PhysicalTexture's colorState/depthState split), so this is a
+        // single ResourceState, always targeting the COLOR aspect of the
+        // image (VK_IMAGE_ASPECT_COLOR_BIT - the only aspect a color
+        // VK_FORMAT_R16G16B16A16_SFLOAT-style volume image ever has).
+        EnsureVolumeTextureResolved(usage.volumeTexture.index, input, physicalVolumeTextures);
+        PhysicalVolumeTexture& vol = physicalVolumeTextures[usage.volumeTexture.index];
+        const ResourceState next = RequiredStateFor(usage.access, false);
+        if (RequiresBarrier(vol.state, next)) {
+            const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+            EmitImageBarrier(cmd, vol.target.image, range, vol.state, next);
+        }
+        vol.state = next;
+        break;
+    }
     }
 }
 
@@ -218,6 +280,8 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
 
     std::vector<PhysicalTexture> physicalTextures(input.textureDescs.size());
     std::vector<PhysicalBuffer> physicalBuffers(input.bufferDescs.size());
+    // Atmosphere Scattering campaign, Phase 2.
+    std::vector<PhysicalVolumeTexture> physicalVolumeTextures(input.volumeTextureDescs.size());
 
     RenderGraphNameSlotTable& timingSlots = isPipelined ? m_pipelinedTimingSlots : m_synchronousTimingSlots;
 
@@ -230,10 +294,10 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         // mirrors how a pass conceptually consumes its inputs before
         // producing its outputs.
         for (const ResourceUsage& usage : pass.reads) {
-            ApplyUsageBarrierIfNeeded(cmd, usage, input, physicalTextures, physicalBuffers);
+            ApplyUsageBarrierIfNeeded(cmd, usage, input, physicalTextures, physicalBuffers, physicalVolumeTextures);
         }
         for (const ResourceUsage& usage : pass.writes) {
-            ApplyUsageBarrierIfNeeded(cmd, usage, input, physicalTextures, physicalBuffers);
+            ApplyUsageBarrierIfNeeded(cmd, usage, input, physicalTextures, physicalBuffers, physicalVolumeTextures);
         }
 
         const std::int32_t timingSlot = timingSlots.AssignOrGetSlot(pass.name);
@@ -313,6 +377,19 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
             }
             return VK_NULL_HANDLE;
         };
+
+        // Atmosphere Scattering campaign, Phase 2
+        // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md) -
+        // the volume-texture sibling of resolveTexture()/resolveBuffer()
+        // above, same "resolve whatever was already resolved above" shape.
+        ctx.resolveVolumeTexture =
+            [&physicalVolumeTextures](VolumeTextureHandle handle) -> PassContext::ResolvedVolumeTexture {
+            if (handle.index < physicalVolumeTextures.size() && physicalVolumeTextures[handle.index].resolved) {
+                return PassContext::ResolvedVolumeTexture{ physicalVolumeTextures[handle.index].target.imageView };
+            }
+            return PassContext::ResolvedVolumeTexture{};
+        };
+
 
         DrawStats passDrawStats;
         ctx.recordDraw = [&passDrawStats](bool hasIndexBuffer, std::uint32_t vertexCount, std::uint32_t indexCount) {
