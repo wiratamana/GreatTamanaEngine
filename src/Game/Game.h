@@ -267,6 +267,69 @@ public:
     // best-effort, matching FindEntityByName()'s own doc comment.
     DeleteEntityOutcome DeleteEntityByName(const std::string& name);
 
+    // network-impl-5 campaign
+    // (PHASE2_GAME_LEVEL_SET_ENTITY_TRS_AND_INSTANTIATE_LIGHT_APIS.md) -
+    // updates the LOCAL (parent-relative) Transform of an EXISTING live
+    // entity, looked up by Name (EntityQuery.h's FindEntityByName() - same
+    // lookup DeleteEntityByName() already uses). Operates ONLY on
+    // Transform::position/rotation/scale directly - NEVER a hierarchy-aware
+    // world-space conversion (ECS/TransformHierarchy.h's ComputeWorldMatrix()/
+    // ComputeWorldTransform() are never called here) - see
+    // PHASE0_MASTER_STRATEGY.md's Locked Design Decision #3. For an entity
+    // with no parent (every entity InstantiatePrimitive()/InstantiateLight()
+    // produce, unless explicitly parented) local IS world, so this already
+    // covers the common "move/rotate the thing I just spawned" case exactly.
+    //
+    // Each of params.hasTranslation/hasRotationEulerDegrees/hasScale is
+    // applied INDEPENDENTLY - a call with only hasScale == true leaves
+    // position/rotation completely untouched, and vice versa. A call with
+    // ALL THREE false is not an error - it changes nothing and simply
+    // returns the entity's current transform (see SetEntityTrsOutcome's own
+    // doc comment, EngineCommandResults.h, and PHASE0's Locked Design
+    // Decision #6).
+    //
+    // Never throws. Returns success == false (nothing changed) when:
+    // params.name is empty or does not resolve to any live entity at all
+    // (SetEntityTrsOutcome::entityNotFound == true in that specific case),
+    // OR the resolved entity exists but has no Transform component at all
+    // (entityNotFound stays false in THAT case - see that outcome field's
+    // own doc comment for why this distinction exists).
+    SetEntityTrsOutcome SetEntityTrs(const SetEntityTrsParams& params);
+
+    // network-impl-5 campaign - spawns a new light entity BY PARAMETERS, the
+    // light-specific sibling of InstantiatePrimitive() above, built on the
+    // same spawn machinery CreateDirectionalLightEntity() above already
+    // established (a Transform + a DirectionalLight component), plus the
+    // same additive naming/positioning/parenting steps InstantiatePrimitive()
+    // itself already established (MakeUniqueEntityName()/FindEntityByName()/
+    // SetParent(..., worldPositionStays = true)). Needs no `Renderer&`
+    // parameter, for the exact same reason CreateDirectionalLightEntity()
+    // itself doesn't - a light has nothing to rasterize. (This is also
+    // exactly why, unlike InstantiatePrimitive(), this method is fully
+    // Tier-1-testable - see PHASE0_MASTER_STRATEGY.md's own Step 2 note.)
+    //
+    // params.lightType (case-insensitive; empty also means "directional")
+    // only ever recognizes "directional" today - this engine's only
+    // implemented light component (ECS/Components/DirectionalLight.h). ANY
+    // other non-empty value fails the whole call (success == false, NO
+    // entity created) with errorMessage explaining only "directional" is
+    // supported - see PHASE0's Locked Design Decision #9 for why this field
+    // exists at all today.
+    //
+    // Unlike InstantiatePrimitive()'s "rotation is always identity"
+    // behavior, this method gives a light with NO explicit rotation
+    // (params.hasRotationEulerDegrees == false) the SAME "late-afternoon"
+    // default rotation CreateDirectionalLightEntity() itself uses
+    // (Quat::FromEulerDegrees(45, -30, 0)) - see PHASE0's Locked Design
+    // Decision #5 for the rationale, and Game.cpp's own shared
+    // DefaultDirectionalLightRotation() helper for how this stays a SINGLE
+    // literal shared with CreateDirectionalLightEntity(), never two
+    // independently-drifting copies.
+    //
+    // Never throws. Returns success == false (and creates NO entity at all)
+    // only for an unrecognized params.lightType.
+    InstantiateLightOutcome InstantiateLight(const InstantiateLightParams& params);
+
 private:
     // The engine's one auto-created entity: a Camera sitting back along -Z
     // so a brand-new (or freshly-loaded - see task_manager/

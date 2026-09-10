@@ -9,7 +9,30 @@
 #include "ECS/TransformHierarchy.h"
 #include "Profiling/ScopeTimer.h"
 
+#include <algorithm>
+#include <cctype>
+
 namespace gte {
+
+namespace {
+// network-impl-5 campaign
+// (PHASE2_GAME_LEVEL_SET_ENTITY_TRS_AND_INSTANTIATE_LIGHT_APIS.md) - shared
+// between Game::CreateDirectionalLightEntity() (the Editor's "Create
+// Directional Light" menu path) and Game::InstantiateLight() (this
+// campaign's own new path) so the two can never silently drift apart - see
+// PHASE0_MASTER_STRATEGY.md's Locked Design Decision #5. Late-afternoon-ish
+// sun: pitched down toward the ground plus a bit of yaw so it isn't
+// perfectly axis-aligned - purely a sensible visual default (see
+// Quat::FromEulerDegrees()'s own "pitch around Right()" convention), not
+// physically derived. This is the EXACT SAME literal
+// Game::CreateDirectionalLightEntity() already used before this refactor -
+// extracting it here must not change that method's own observable
+// behavior at all.
+Quat DefaultDirectionalLightRotation() noexcept
+{
+    return Quat::FromEulerDegrees(45.0f, -30.0f, 0.0f);
+}
+} // namespace
 
 void Game::OnEvent(const Event& /*event*/)
 {
@@ -49,11 +72,7 @@ Entity Game::CreateDirectionalLightEntity()
     const Entity entity = m_registry.CreateEntity();
 
     Transform& transform = m_registry.AddComponent<Transform>(entity);
-    // Late-afternoon-ish sun: pitched down toward the ground plus a bit of
-    // yaw so it isn't perfectly axis-aligned - purely a sensible visual
-    // default (see Quat::FromEulerDegrees()'s own "pitch around Right()"
-    // convention), not physically derived.
-    transform.rotation = Quat::FromEulerDegrees(45.0f, -30.0f, 0.0f);
+    transform.rotation = DefaultDirectionalLightRotation();
 
     m_registry.AddComponent<DirectionalLight>(entity);
 
@@ -171,6 +190,99 @@ DeleteEntityOutcome Game::DeleteEntityByName(const std::string& name)
     outcome.deletedEntityGeneration = entity.generation;
     DestroyEntityAndDescendants(m_registry, entity);
     outcome.success = true;
+    return outcome;
+}
+
+SetEntityTrsOutcome Game::SetEntityTrs(const SetEntityTrsParams& params)
+{
+    SetEntityTrsOutcome outcome;
+
+    const Entity entity = FindEntityByName(m_registry, params.name);
+    if (entity == kInvalidEntity) {
+        outcome.success = false;
+        outcome.entityNotFound = true;
+        outcome.errorMessage = params.name.empty()
+            ? "name must not be empty"
+            : ("no live entity found with name '" + params.name + "'");
+        return outcome;
+    }
+
+    Transform* transform = m_registry.TryGetComponent<Transform>(entity);
+    if (transform == nullptr) {
+        outcome.success = false;
+        outcome.errorMessage = "entity '" + params.name + "' has no Transform component";
+        return outcome;
+    }
+
+    if (params.hasTranslation) {
+        transform->position = params.translation;
+        outcome.translationChanged = true;
+    }
+    if (params.hasRotationEulerDegrees) {
+        transform->rotation = Quat::FromEulerDegrees(
+            params.rotationEulerDegrees.x, params.rotationEulerDegrees.y, params.rotationEulerDegrees.z);
+        outcome.rotationChanged = true;
+    }
+    if (params.hasScale) {
+        transform->scale = params.scale;
+        outcome.scaleChanged = true;
+    }
+
+    outcome.success = true;
+    outcome.entityIndex = entity.index;
+    outcome.entityGeneration = entity.generation;
+    outcome.resultingPosition = transform->position;
+    outcome.resultingRotation = transform->rotation;
+    outcome.resultingScale = transform->scale;
+    return outcome;
+}
+
+InstantiateLightOutcome Game::InstantiateLight(const InstantiateLightParams& params)
+{
+    InstantiateLightOutcome outcome;
+
+    std::string normalizedType = params.lightType;
+    std::transform(normalizedType.begin(), normalizedType.end(), normalizedType.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (!normalizedType.empty() && normalizedType != "directional") {
+        outcome.success = false;
+        outcome.errorMessage = "unsupported light_type '" + params.lightType
+            + "' - only 'directional' is currently supported";
+        return outcome;
+    }
+
+    const Entity entity = m_registry.CreateEntity();
+
+    Transform& transform = m_registry.AddComponent<Transform>(entity);
+    transform.position = params.worldPosition;
+    transform.rotation = params.hasRotationEulerDegrees
+        ? Quat::FromEulerDegrees(params.rotationEulerDegrees.x, params.rotationEulerDegrees.y, params.rotationEulerDegrees.z)
+        : DefaultDirectionalLightRotation();
+
+    DirectionalLight& light = m_registry.AddComponent<DirectionalLight>(entity);
+    light.color = params.color;
+    light.illuminanceLux = params.illuminanceLux;
+    light.active = params.active;
+
+    const std::string baseName = params.requestedName.empty() ? std::string("Directional Light") : params.requestedName;
+    const std::string uniqueName = MakeUniqueEntityName(m_registry, baseName);
+    m_registry.AddComponent<Name>(entity, Name{ uniqueName });
+
+    outcome.success = true;
+    outcome.entityIndex = entity.index;
+    outcome.entityGeneration = entity.generation;
+    outcome.resolvedName = uniqueName;
+
+    if (params.hasParent) {
+        const Entity parentEntity = FindEntityByName(m_registry, params.parentName);
+        if (parentEntity == kInvalidEntity) {
+            outcome.parentRequestedButNotFound = true;
+            outcome.requestedParentName = params.parentName;
+        } else {
+            SetParent(m_registry, entity, parentEntity, /*worldPositionStays=*/true);
+        }
+    }
+
     return outcome;
 }
 
