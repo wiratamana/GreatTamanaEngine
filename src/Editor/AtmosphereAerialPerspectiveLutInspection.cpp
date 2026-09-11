@@ -87,7 +87,42 @@ std::string ToDiagnosticString(const AtmosphereAerialPerspectiveLutInspectionRes
         result.maxInScatteringMagnitude, result.meanInScatteringMagnitude,
         result.likelyVisibleAtDefaultExposure ? "LIKELY VISIBLE at default exposure"
                                                : "LIKELY TOO FAINT at default exposure");
-    return std::string(buffer);
+    std::string diagnostic(buffer);
+
+    // atmosphere-scattering-3 campaign, Phase 1 - appended after the
+    // existing whole-volume text, one line per Near/Mid/Far band (see
+    // AerialPerspectiveBandSummary's own doc comment for why this exists).
+    for (const AerialPerspectiveBandSummary& band : result.bandSummaries) {
+        char bandBuffer[192];
+        std::snprintf(bandBuffer, sizeof(bandBuffer),
+            "\n  slices [%d,%d): mean transmittance=%.6f  mean in-scattering=%.6f", band.sliceBeginInclusive,
+            band.sliceEndExclusive, band.meanTransmittance, band.meanInScatteringMagnitude);
+        diagnostic += bandBuffer;
+    }
+
+    return diagnostic;
+}
+
+// atmosphere-scattering-3 campaign, Phase 1 - see this function's own
+// declaration (AtmosphereAerialPerspectiveLutInspection.h) for the full
+// design reasoning. Pure sum/texelCount reduction, mirroring
+// FinalizeAerialPerspectiveLutInspection()'s own mean-computation shape
+// exactly, scoped to a single band's own already-accumulated stats.
+AerialPerspectiveBandSummary FinalizeAerialPerspectiveBandSummary(
+    const AerialPerspectiveSliceStats& bandStats, int sliceBeginInclusive, int sliceEndExclusive)
+{
+    AerialPerspectiveBandSummary summary;
+    summary.sliceBeginInclusive = sliceBeginInclusive;
+    summary.sliceEndExclusive = sliceEndExclusive;
+
+    summary.meanTransmittance = bandStats.texelCount > 0
+        ? static_cast<float>(bandStats.sumTransmittance / static_cast<double>(bandStats.texelCount))
+        : 1.0f;
+    summary.meanInScatteringMagnitude = bandStats.texelCount > 0
+        ? static_cast<float>(bandStats.sumInScatteringMagnitude / static_cast<double>(bandStats.texelCount))
+        : 0.0f;
+
+    return summary;
 }
 
 AtmosphereAerialPerspectiveLutInspectionResult FinalizeAerialPerspectiveLutInspection(
@@ -140,6 +175,19 @@ AtmosphereAerialPerspectiveLutInspectionResult InspectAerialPerspectiveVolume(
     int width = 0;
     int height = 0;
 
+    // atmosphere-scattering-3 campaign, Phase 1 - three parallel accumulators
+    // (Near/Mid/Far, in that fixed order), fed from the exact same per-slice
+    // raw.pixels.data() as totalStats above - never a second, separate GPU
+    // capture pass. Each slice's own band boundaries are recorded the first/
+    // last time a slice routes to that band, so bandBegin[i]/bandEnd[i]
+    // exactly reflect the real, possibly-uneven split produced by
+    // `sliceIndex * 3 / depth` (see this function's own doc comment /
+    // PHASE1's own Step 3.2 for why this does not always produce a perfectly
+    // even three-way split).
+    std::array<AerialPerspectiveSliceStats, 3> bandAccumulators;
+    std::array<int, 3> bandSliceBegin = { -1, -1, -1 };
+    std::array<int, 3> bandSliceEnd = { -1, -1, -1 };
+
     for (std::uint32_t sliceIndex = 0; sliceIndex < static_cast<std::uint32_t>(depth); ++sliceIndex) {
         const Renderer::CapturedRawPixels raw = atmosphereLutRenderer.CaptureAerialPerspectiveVolumeSliceImmediate(
             renderer, aerialPerspectiveVolumeName, sliceIndex, kInspectionOutputTextureName);
@@ -155,9 +203,26 @@ AtmosphereAerialPerspectiveLutInspectionResult InspectAerialPerspectiveVolume(
         height = raw.height;
         const std::size_t texelCount = static_cast<std::size_t>(raw.width) * static_cast<std::size_t>(raw.height);
         totalStats = AccumulateAerialPerspectiveSliceStats(raw.pixels.data(), texelCount, totalStats);
+
+        const int bandIndex = std::min(2, static_cast<int>(sliceIndex) * 3 / depth);
+        bandAccumulators[bandIndex]
+            = AccumulateAerialPerspectiveSliceStats(raw.pixels.data(), texelCount, bandAccumulators[bandIndex]);
+        if (bandSliceBegin[bandIndex] < 0) {
+            bandSliceBegin[bandIndex] = static_cast<int>(sliceIndex);
+        }
+        bandSliceEnd[bandIndex] = static_cast<int>(sliceIndex) + 1;
     }
 
-    return FinalizeAerialPerspectiveLutInspection(totalStats, width, height, depth);
+    AtmosphereAerialPerspectiveLutInspectionResult result2
+        = FinalizeAerialPerspectiveLutInspection(totalStats, width, height, depth);
+    for (int i = 0; i < 3; ++i) {
+        const int sliceBeginInclusive = bandSliceBegin[i] < 0 ? 0 : bandSliceBegin[i];
+        const int sliceEndExclusive = bandSliceEnd[i] < 0 ? 0 : bandSliceEnd[i];
+        result2.bandSummaries[static_cast<std::size_t>(i)]
+            = FinalizeAerialPerspectiveBandSummary(bandAccumulators[static_cast<std::size_t>(i)], sliceBeginInclusive,
+                sliceEndExclusive);
+    }
+    return result2;
 }
 
 } // namespace gte

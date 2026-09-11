@@ -121,5 +121,40 @@ TEST(VolumeTexturePreviewMathTest, RayThatMissesTheBoxEntirelyReturnsFalse)
     EXPECT_FALSE(IntersectRayBox(rayOrigin, rayDir, boxHalfExtents, tEnter, tExit));
 }
 
+// --- atmosphere-scattering-3 campaign, Phase 1 -----------------------------
+// (task_manager/atmosphere-scattering-3/PHASE1_ROOT_CAUSE_INSTRUMENTATION_AND_REGRESSION_TESTS.md)
+// Codifies, as a permanent checked fact, the exact geometry defect
+// PHASE0_MASTER_STRATEGY.md's own investigation found:
+// ComputeVolumeCameraSetup() scales boxHalfExtents directly proportional to
+// raw texel counts, which is CORRECT for a genuine spatial volume but WRONG
+// for the Aerial Perspective froxel volume (128x128x32 - see
+// AtmosphereLutRenderer.cpp's kAerialPerspectiveVolumeWidth/Height/Depth),
+// whose Z axis is a camera-relative DISTANCE SLICE index, not a comparable
+// physical length to its X/Y screen-column/row indices. This test is NOT a
+// "fails before fix, passes after" regression test - ComputeVolumeCameraSetup()
+// itself is NEVER changed by this campaign (see PHASE0's own Locked Design
+// Decision 2); it is a CHARACTERIZATION test, permanently documenting the
+// generic function's own (still correct, for an ACTUAL spatial volume)
+// behavior, so a future reader can see exactly why Phase 2 needed a SECOND,
+// separate function instead of just tweaking constants inside this one.
+TEST(VolumeTexturePreviewMathTest, AerialPerspectiveVolumeDimensionsProduceSeverelyFlattenedDepthAxisUnderGenericFunction)
+{
+    const VolumeCameraSetup setup = ComputeVolumeCameraSetup(128, 128, 32);
+
+    // X/Y both hit the generic function's own maximum half-extent (0.5),
+    // since width == height == the max dimension here.
+    EXPECT_NEAR(setup.boxHalfExtents.x, 0.5f, 1e-5f);
+    EXPECT_NEAR(setup.boxHalfExtents.y, 0.5f, 1e-5f);
+    // Z (the depth/distance axis - the ONLY axis carrying this LUT's
+    // near/far story) is squashed to exactly 32/128 = 0.25 of that.
+    EXPECT_NEAR(setup.boxHalfExtents.z, 0.125f, 1e-5f);
+
+    // Written as an explicit ratio assertion too, so the "severely
+    // flattened" claim is a checked number, not just an eyeballed one.
+    const float depthToWidthRatio = setup.boxHalfExtents.z / setup.boxHalfExtents.x;
+    EXPECT_LT(depthToWidthRatio, 0.3f); // 0.25 in practice - comfortably confirms the flattening.
+}
+
+
 } // namespace
 } // namespace gte

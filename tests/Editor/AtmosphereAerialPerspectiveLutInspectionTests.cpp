@@ -204,5 +204,62 @@ TEST(AtmosphereAerialPerspectiveLutInspectionTest, DiagnosticStringReportsDimens
     EXPECT_NE(text.find("128x128x32"), std::string::npos);
 }
 
+// ---------------------------------------------------------------------
+// FinalizeAerialPerspectiveBandSummary (atmosphere-scattering-3 campaign,
+// Phase 1 - see task_manager/atmosphere-scattering-3/
+// PHASE1_ROOT_CAUSE_INSTRUMENTATION_AND_REGRESSION_TESTS.md, Step 3.3)
+// ---------------------------------------------------------------------
+
+TEST(AtmosphereAerialPerspectiveLutInspectionTest, BandSummaryReductionMatchesHandComputedMean)
+{
+    std::vector<std::uint8_t> bytes;
+    AppendTexel(bytes, 0.0f, 0.0f, 0.0f, 1.0f);
+    AppendTexel(bytes, 3.0f, 4.0f, 0.0f, 0.5f);
+
+    const AerialPerspectiveSliceStats stats = AccumulateAerialPerspectiveSliceStats(bytes.data(), 2);
+    const AerialPerspectiveBandSummary summary = FinalizeAerialPerspectiveBandSummary(stats, 5, 9);
+
+    EXPECT_EQ(summary.sliceBeginInclusive, 5);
+    EXPECT_EQ(summary.sliceEndExclusive, 9);
+    // Hand-computed: sum / texelCount == (1.0 + 0.5) / 2 == 0.75, and
+    // (0 + 5.0) / 2 == 2.5 (magnitude of texel 1 is length(3,4,0) == 5).
+    EXPECT_NEAR(summary.meanTransmittance, 0.75f, kEpsilon);
+    EXPECT_NEAR(summary.meanInScatteringMagnitude, 2.5f, kEpsilon);
+}
+
+TEST(AtmosphereAerialPerspectiveLutInspectionTest, NearBandStaysClearerThanFarBand)
+{
+    std::vector<std::uint8_t> nearBytes;
+    AppendTexel(nearBytes, 0.0f, 0.0f, 0.0f, 1.0f);
+    AppendTexel(nearBytes, 0.0f, 0.0f, 0.0f, 1.0f);
+
+    std::vector<std::uint8_t> farBytes;
+    AppendTexel(farBytes, 3.0f, 4.0f, 0.0f, 0.5f);
+    AppendTexel(farBytes, 3.0f, 4.0f, 0.0f, 0.5f);
+
+    const AerialPerspectiveSliceStats nearStats = AccumulateAerialPerspectiveSliceStats(nearBytes.data(), 2);
+    const AerialPerspectiveSliceStats farStats = AccumulateAerialPerspectiveSliceStats(farBytes.data(), 2);
+
+    const AerialPerspectiveBandSummary nearSummary = FinalizeAerialPerspectiveBandSummary(nearStats, 0, 11);
+    const AerialPerspectiveBandSummary farSummary = FinalizeAerialPerspectiveBandSummary(farStats, 22, 32);
+
+    // A real, checked proof that "near stays clearer than far" is something
+    // this tool can actually detect, not just something a diagnostic string
+    // prints and hopes is right.
+    EXPECT_GT(nearSummary.meanTransmittance, farSummary.meanTransmittance);
+    EXPECT_LT(nearSummary.meanInScatteringMagnitude, farSummary.meanInScatteringMagnitude);
+}
+
+TEST(AtmosphereAerialPerspectiveLutInspectionTest, EmptyBandReportsDefaultsRatherThanDividingByZero)
+{
+    const AerialPerspectiveSliceStats emptyStats; // Default-constructed - texelCount == 0.
+    const AerialPerspectiveBandSummary summary = FinalizeAerialPerspectiveBandSummary(emptyStats, 10, 10);
+
+    EXPECT_EQ(summary.sliceBeginInclusive, 10);
+    EXPECT_EQ(summary.sliceEndExclusive, 10);
+    EXPECT_NEAR(summary.meanTransmittance, 1.0f, kEpsilon);
+    EXPECT_NEAR(summary.meanInScatteringMagnitude, 0.0f, kEpsilon);
+}
+
 } // namespace
 } // namespace gte

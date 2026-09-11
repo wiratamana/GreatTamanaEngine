@@ -38,6 +38,7 @@
 // misinterpret every texel's bytes, quietly producing garbage statistics
 // with no crash to flag it.
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -77,6 +78,39 @@ struct AerialPerspectiveSliceStats {
 AerialPerspectiveSliceStats AccumulateAerialPerspectiveSliceStats(
     const std::uint8_t* rawRgba16fBytes, std::size_t texelCount, AerialPerspectiveSliceStats accumulateInto = {});
 
+// atmosphere-scattering-3 campaign, Phase 1 - a lightweight per-BAND
+// summary (Near/Mid/Far thirds of the volume's own Z/depth range), added
+// alongside the existing whole-volume AtmosphereAerialPerspectiveLutInspectionResult
+// specifically to answer a question the whole-volume min/max/mean cannot:
+// "is there a real, systematic DIFFERENCE between the near end and the far
+// end of this volume, or is it just noisy/uniform?" - the literal
+// definition of "does this LUT have a near/far gradient worth visualizing
+// at all", which is this whole campaign's own root-cause question (see
+// PHASE0_MASTER_STRATEGY.md, Step 2.2, point 3).
+struct AerialPerspectiveBandSummary {
+    int sliceBeginInclusive = 0;
+    int sliceEndExclusive = 0;
+    float meanTransmittance = 1.0f;
+    float meanInScatteringMagnitude = 0.0f;
+};
+
+// Reduces ONE band's own accumulated AerialPerspectiveSliceStats (e.g. one
+// entry of InspectAerialPerspectiveVolume()'s own bandAccumulators[3] - see
+// that function's own updated body) into a single AerialPerspectiveBandSummary.
+// Deliberately a NAMED, header-declared function - never a .cpp-local/
+// anonymous-namespace helper - specifically so this per-band reduction is
+// directly Tier-1-testable in isolation, mirroring
+// FinalizeAerialPerspectiveLutInspection()'s own existing testable shape
+// exactly (mean = sum / texelCount, reusing AerialPerspectiveSliceStats's own
+// existing sumTransmittance/sumInScatteringMagnitude/texelCount fields
+// directly - no floating-point re-derivation from raw pixels needed here,
+// same contract as FinalizeAerialPerspectiveLutInspection() itself). Always
+// succeeds - an empty/zero-texelCount band reports meanTransmittance=1.0f/
+// meanInScatteringMagnitude=0.0f (the struct's own defaults), never a
+// divide-by-zero.
+AerialPerspectiveBandSummary FinalizeAerialPerspectiveBandSummary(
+    const AerialPerspectiveSliceStats& bandStats, int sliceBeginInclusive, int sliceEndExclusive);
+
 // The result of InspectAerialPerspectiveVolume() below - a whole-volume
 // summary (every depth slice combined), suitable for printing straight into
 // the Editor's "Atmosphere" panel (Panels/AtmospherePanel.cpp), mirroring
@@ -112,6 +146,12 @@ struct AtmosphereAerialPerspectiveLutInspectionResult {
     // maxInScatteringMagnitude`) before calling it plausible, to allow
     // comfortable margin over pure quantization noise.
     bool likelyVisibleAtDefaultExposure = false;
+
+    // atmosphere-scattering-3 campaign, Phase 1 - Near/Mid/Far (in that fixed
+    // order) thirds of the volume's own Z/depth range - see
+    // AerialPerspectiveBandSummary's own doc comment above for why this
+    // exists alongside the whole-volume fields above.
+    std::array<AerialPerspectiveBandSummary, 3> bandSummaries;
 };
 
 std::string ToDiagnosticString(const AtmosphereAerialPerspectiveLutInspectionResult& result);
