@@ -63,7 +63,7 @@ struct PushConstants {
 // a visually legible mid-range rather than crushing to black. Re-tune this
 // constant (not kDensityScale, not any call site) if Phase 3's own final
 // chosen exaggeration default changes substantially later.
-static constexpr float kAerialPreviewExposure = 2000.0f;
+static constexpr float kAerialPreviewExposure = 3200.0f; // atmosphere-scattering-3 Phase 4: raised from 2000 -> 3200 so the far (hazy) end of the frustum reads as a brighter, more glowing blue - closer to the reference diagram's own bright, near-white far-end glow - without visibly blowing out/flattening the near-to-far gradient (checked against a live capture at each step, see PHASE4_COMPLETION_REPORT.md).
 
 } // namespace
 

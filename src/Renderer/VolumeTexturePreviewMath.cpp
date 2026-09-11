@@ -42,10 +42,10 @@ constexpr float kAerialPreviewDepthHalfExtent = 0.9f; // ~2.5x the XY half-exten
 // transition as a visible gradient across the rendered frame - the same
 // "camera positioned to one side, subject recedes toward the other side of
 // frame" composition the reference diagram itself uses.
-constexpr float kAerialPreviewAzimuthDegrees = 75.0f;
-constexpr float kAerialPreviewElevationDegrees = 18.0f;
+constexpr float kAerialPreviewAzimuthDegrees = 85.0f; // atmosphere-scattering-3 Phase 4: raised from 75 -> 85 (closer to a pure side-on view) so the camera's own "right" axis aligns closer with the frustum's world-Z tapering axis, making the near->far widening read as a left-to-right sweep across the frame (matching the reference diagram's own left-to-right composition) instead of a diagonal one.
+constexpr float kAerialPreviewElevationDegrees = 10.0f; // atmosphere-scattering-3 Phase 4: lowered from 18 -> 10 (still enough tilt to read as a 3D wedge, not a flat edge-on profile) to keep the widening sweep closer to the frame's horizontal middle rather than skewed toward one corner.
 constexpr float kAerialPreviewFovYDegrees = 40.0f;
-constexpr float kAerialPreviewDistanceMargin = 1.15f;
+constexpr float kAerialPreviewDistanceMargin = 1.25f; // atmosphere-scattering-3 Phase 4: settled at 1.25 (started 1.15 -> too tight per Phase 3's own measured ~92.8% FOV-boundary margin -> tried 1.45, which fixed the margin but made the shape look too small within the 256x256 frame -> 1.25 keeps a comfortable safety margin while still filling a legible portion of the frame).
 
 } // namespace
 
