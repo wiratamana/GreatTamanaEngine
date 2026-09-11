@@ -42,6 +42,52 @@
 namespace gte {
 namespace {
 
+// task_manager/verlet-integration-10, PHASE4 - counts how many of
+// `colliders` this SPECIFIC chain's joints could ever actually reach under
+// PMX collision-group/mask rules (mirrors DynamicChainSolver.cpp's own
+// GroupsMayCollide()/GroupBit() truth table exactly, but is deliberately NOT
+// a call into either of those functions - they are `static`/anonymous-
+// namespace, not exported; this is a small, independent, Editor-only
+// re-derivation purely for an informational readout, never itself part of
+// the simulation). A chain with multiple joints having DIFFERENT group/mask
+// values (uncommon but not forbidden - PHASE1 seeds this per-joint, not
+// per-chain) counts a collider as "reachable" if ANY of the chain's own
+// joints could hit it. `group` is masked to its documented 4-bit range
+// (`& 0x0Fu`) before use as a shift amount - see PHASE1's own GroupBit()
+// doc comment for why this is required for safety, not merely style (a raw,
+// unvalidated .pmx file byte, confirmed never range-checked anywhere in this
+// engine's load pipeline).
+//
+// Deliberately placed OUTSIDE the #if GTE_ENABLE_PROJECT_PANEL block below
+// (network-impl-7 campaign's own PHASE5 full-build verification pass found
+// a SECOND call site further down this file, in the always-compiled
+// per-joint physics editor, that reaches this function - it used to live
+// INSIDE that block, which broke a clean -DGTE_ENABLE_PROJECT_PANEL=OFF
+// build outright). This function has no dependency on anything
+// project-panel-gated (only DynamicChainDefinition/DynamicJointSettings/
+// ModelColliderDefinition, all already visible unconditionally via this
+// file's own top-of-file includes), so it belongs in the always-compiled
+// section, not the gated one.
+std::size_t CountCollidersReachableByChain(const DynamicChainDefinition& chain, const std::vector<ModelColliderDefinition>& colliders)
+{
+    std::size_t reachable = 0;
+    for (const ModelColliderDefinition& collider : colliders) {
+        bool anyJointReaches = false;
+        for (const DynamicJointSettings& joint : chain.jointSettings) {
+            const std::uint16_t jointBit = static_cast<std::uint16_t>(1u << (joint.group & 0x0Fu));
+            const std::uint16_t colliderBit = static_cast<std::uint16_t>(1u << (collider.group & 0x0Fu));
+            if ((jointBit & collider.collisionMask) != 0 && (colliderBit & joint.collisionMask) != 0) {
+                anyJointReaches = true;
+                break;
+            }
+        }
+        if (anyJointReaches) {
+            ++reachable;
+        }
+    }
+    return reachable;
+}
+
 #if GTE_ENABLE_PROJECT_PANEL
 
 // Human-readable label helpers - same "always produce something
@@ -78,41 +124,6 @@ const char* JointTypeLabel(JointType type)
     case JointType::Hinge: return "Hinge";
     default: return "Unknown";
     }
-}
-
-// task_manager/verlet-integration-10, PHASE4 - counts how many of
-// `colliders` this SPECIFIC chain's joints could ever actually reach under
-// PMX collision-group/mask rules (mirrors DynamicChainSolver.cpp's own
-// GroupsMayCollide()/GroupBit() truth table exactly, but is deliberately NOT
-// a call into either of those functions - they are `static`/anonymous-
-// namespace, not exported; this is a small, independent, Editor-only
-// re-derivation purely for an informational readout, never itself part of
-// the simulation). A chain with multiple joints having DIFFERENT group/mask
-// values (uncommon but not forbidden - PHASE1 seeds this per-joint, not
-// per-chain) counts a collider as "reachable" if ANY of the chain's own
-// joints could hit it. `group` is masked to its documented 4-bit range
-// (`& 0x0Fu`) before use as a shift amount - see PHASE1's own GroupBit()
-// doc comment for why this is required for safety, not merely style (a raw,
-// unvalidated .pmx file byte, confirmed never range-checked anywhere in this
-// engine's load pipeline).
-std::size_t CountCollidersReachableByChain(const DynamicChainDefinition& chain, const std::vector<ModelColliderDefinition>& colliders)
-{
-    std::size_t reachable = 0;
-    for (const ModelColliderDefinition& collider : colliders) {
-        bool anyJointReaches = false;
-        for (const DynamicJointSettings& joint : chain.jointSettings) {
-            const std::uint16_t jointBit = static_cast<std::uint16_t>(1u << (joint.group & 0x0Fu));
-            const std::uint16_t colliderBit = static_cast<std::uint16_t>(1u << (collider.group & 0x0Fu));
-            if ((jointBit & collider.collisionMask) != 0 && (colliderBit & joint.collisionMask) != 0) {
-                anyJointReaches = true;
-                break;
-            }
-        }
-        if (anyJointReaches) {
-            ++reachable;
-        }
-    }
-    return reachable;
 }
 
 // Shown whenever ctx.selection.Kind() == ModelPart (see

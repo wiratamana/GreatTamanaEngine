@@ -2,6 +2,8 @@
 /build/
 /build_test/
 /build_network_off/
+/build-editor-off/
+/build-project-panel-off/
 /out/
 
 # Local reference-only clones for research (see task_manager/atmosphere-scattering-1/
