@@ -228,4 +228,40 @@ TEST(NetworkServerTests, BindFailureIsNonFatalAndLeavesServerNotRunning)
     healthy.Stop();
 }
 
+// network-impl-7 campaign
+// (PHASE4_HTTP_ENDPOINTS_ACTIVATE_TAB_AND_LIST_TABS.md, Section 3.4) - proves
+// the "unknown name (404) is checked BEFORE the nullptr-bridge (503) check"
+// ordering rule is really implemented, not just documented in a comment.
+TEST(NetworkServerTests, ActivateTabWithNullBridgeRespondsServiceUnavailableForAKnownName)
+{
+    gte::Network::NetworkServer server; // uiCommandBridge defaults to nullptr.
+    server.Start(0);
+    ASSERT_TRUE(server.IsRunning());
+
+    httplib::Client client("127.0.0.1", server.BoundPort());
+    WaitUntilAcceptingConnections(server, client);
+
+    const httplib::Result res = client.Get("/activate_tab?name=Profiler");
+    ASSERT_TRUE(res != nullptr);
+    EXPECT_EQ(res->status, 503);
+
+    server.Stop();
+}
+
+TEST(NetworkServerTests, ActivateTabWithNullBridgeStillRespondsNotFoundForAnUnknownName)
+{
+    gte::Network::NetworkServer server; // uiCommandBridge defaults to nullptr.
+    server.Start(0);
+    ASSERT_TRUE(server.IsRunning());
+
+    httplib::Client client("127.0.0.1", server.BoundPort());
+    WaitUntilAcceptingConnections(server, client);
+
+    const httplib::Result res = client.Get("/activate_tab?name=NotARealTab");
+    ASSERT_TRUE(res != nullptr);
+    EXPECT_EQ(res->status, 404);
+
+    server.Stop();
+}
+
 } // namespace

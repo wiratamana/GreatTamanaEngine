@@ -744,4 +744,83 @@ TEST(BuildSetEntityTrsResponseJsonTests, FailureShapeMatchesGenericErrorAndHasNo
     EXPECT_FALSE(parsed.contains("changed"));
 }
 
+// --- network-impl-7 campaign
+// (PHASE4_HTTP_ENDPOINTS_ACTIVATE_TAB_AND_LIST_TABS.md) -
+// GET /activate_tab + GET /list_tabs request parsing/response building.
+
+using gte::Network::BuildActivateTabResponseJson;
+using gte::Network::BuildListTabsResponseJson;
+using gte::Network::BuildUnknownTabNameResponseJson;
+using gte::Network::ParseActivateTabQuery;
+using gte::Network::ParsedActivateTabQuery;
+
+TEST(ParseActivateTabQueryTests, RejectsEmptyName)
+{
+    const ParsedActivateTabQuery result = ParseActivateTabQuery("");
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.errorMessage, "missing or empty required query parameter: name");
+}
+
+TEST(ParseActivateTabQueryTests, AcceptsKnownName)
+{
+    const ParsedActivateTabQuery result = ParseActivateTabQuery("Profiler");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_FALSE(result.notFound);
+    EXPECT_EQ(result.tabName, "Profiler");
+}
+
+TEST(ParseActivateTabQueryTests, FlagsUnknownNameAsNotFoundNotInvalid)
+{
+    const ParsedActivateTabQuery result = ParseActivateTabQuery("NotARealTab");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_TRUE(result.notFound);
+    EXPECT_EQ(result.tabName, "NotARealTab");
+}
+
+TEST(ParseActivateTabQueryTests, IsCaseSensitive)
+{
+    const ParsedActivateTabQuery lower = ParseActivateTabQuery("profiler");
+    EXPECT_TRUE(lower.notFound);
+    const ParsedActivateTabQuery upper = ParseActivateTabQuery("PROFILER");
+    EXPECT_TRUE(upper.notFound);
+}
+
+TEST(BuildActivateTabResponseJsonTests, SuccessShape)
+{
+    const std::string body = BuildActivateTabResponseJson(true, true, "Profiler");
+    const nlohmann::json parsed = nlohmann::json::parse(body);
+    EXPECT_EQ(parsed["success"], true);
+    EXPECT_EQ(parsed["activated_tab"], "Profiler");
+    EXPECT_FALSE(parsed.contains("error"));
+}
+
+TEST(BuildActivateTabResponseJsonTests, FailureShape)
+{
+    const std::string body = BuildActivateTabResponseJson(false, false, "Profiler");
+    const nlohmann::json parsed = nlohmann::json::parse(body);
+    EXPECT_EQ(parsed["success"], false);
+    EXPECT_EQ(parsed["error"],
+        "panel 'Profiler' has no live window yet this session - try again after the Editor has rendered at least one frame");
+    EXPECT_FALSE(parsed.contains("activated_tab"));
+}
+
+TEST(BuildUnknownTabNameResponseJsonTests, Shape)
+{
+    const std::string body = BuildUnknownTabNameResponseJson("NotARealTab");
+    const nlohmann::json parsed = nlohmann::json::parse(body);
+    EXPECT_EQ(parsed["success"], false);
+    EXPECT_EQ(parsed["error"], "unknown tab name 'NotARealTab' - see GET /list_tabs for the currently known names");
+}
+
+TEST(BuildListTabsResponseJsonTests, ContainsEveryKnownPanelName)
+{
+    const std::string body = BuildListTabsResponseJson();
+    const nlohmann::json parsed = nlohmann::json::parse(body);
+    ASSERT_TRUE(parsed.contains("tabs"));
+    ASSERT_EQ(parsed["tabs"].size(), gte::kKnownEditorPanelNameCount);
+    for (std::size_t i = 0; i < gte::kKnownEditorPanelNameCount; ++i) {
+        EXPECT_EQ(parsed["tabs"][i], gte::kKnownEditorPanelNames[i]);
+    }
+}
+
 } // namespace

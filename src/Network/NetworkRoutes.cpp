@@ -519,4 +519,54 @@ std::string BuildListTexturesResponseJson(const std::vector<TextureListEntryView
     return body.dump();
 }
 
+// --- network-impl-7 campaign - GET /activate_tab and GET /list_tabs. See
+// NetworkRoutes.h's own doc comments above each declaration for the exact,
+// locked validation/response rules implemented below.
+
+ParsedActivateTabQuery ParseActivateTabQuery(const std::string& nameParam)
+{
+    ParsedActivateTabQuery result;
+    if (nameParam.empty()) {
+        result.valid = false;
+        result.errorMessage = "missing or empty required query parameter: name";
+        return result;
+    }
+    result.valid = true;
+    result.tabName = nameParam;
+    result.notFound = !IsKnownEditorPanelName(nameParam);
+    return result;
+}
+
+std::string BuildActivateTabResponseJson(bool success, bool tabExists, const std::string& tabName)
+{
+    (void)tabExists; // See NetworkRoutes.h's own doc comment - `success` alone already selects the right branch below.
+    nlohmann::json body;
+    body["success"] = success;
+    if (success) {
+        body["activated_tab"] = tabName;
+    } else {
+        body["error"] = "panel '" + tabName +
+            "' has no live window yet this session - try again after the Editor has rendered at least one frame";
+    }
+    return body.dump();
+}
+
+std::string BuildUnknownTabNameResponseJson(const std::string& tabName)
+{
+    nlohmann::json body;
+    body["success"] = false;
+    body["error"] = "unknown tab name '" + tabName + "' - see GET /list_tabs for the currently known names";
+    return body.dump();
+}
+
+std::string BuildListTabsResponseJson()
+{
+    nlohmann::json body;
+    body["tabs"] = nlohmann::json::array();
+    for (const char* name : kKnownEditorPanelNames) {
+        body["tabs"].push_back(name);
+    }
+    return body.dump();
+}
+
 } // namespace gte::Network

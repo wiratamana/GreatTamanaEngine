@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include "../Editor/EditorPanelCatalog.h"
+
 namespace gte::Network {
 
 // Pure, httplib-independent route handler logic - Tier 1 testable (see
@@ -538,5 +540,68 @@ struct TextureListEntryView {
 // where nothing has rendered a single named texture yet (e.g. queried
 // immediately at startup, before the first frame) is a valid, normal state.
 std::string BuildListTexturesResponseJson(const std::vector<TextureListEntryView>& entries);
+
+// --- network-impl-7 campaign - GET /activate_tab and GET /list_tabs.
+// Every function below stays PURE - no httplib/socket/thread/Registry/Game/
+// Renderer/ImGui dependency of any kind, exactly like everything above -
+// EditorPanelCatalog.h (included above) is a plain, compile-time-fixed data
+// header with the same "safe to depend on from anywhere" property as
+// <cstdint>/<string>, not an Editor/ImGui dependency in the sense this
+// file's own header comment warns against.
+
+// Parsed, validated GET /activate_tab query parameters. `valid == false`
+// means `errorMessage` explains exactly why (a 400 response); `notFound ==
+// true` (only meaningful when `valid == true`) means the name did not
+// match anything in EditorPanelCatalog.h's known panel list (a 404
+// response, NOT a 400 - the request itself was well-formed, the NAME it
+// asked about just isn't one this engine knows about - see
+// PHASE0_MASTER_STRATEGY.md's own locked endpoint contract for the exact
+// status-code mapping this distinction feeds into).
+struct ParsedActivateTabQuery {
+    bool valid = false;
+    std::string errorMessage;
+    bool notFound = false;
+    std::string tabName;
+};
+
+// Validation rules (checked in this order):
+//   1. `nameParam` must be non-empty - otherwise "missing or empty required
+//      query parameter: name" (valid = false).
+//   2. `nameParam` must exactly (case-sensitive) match one entry of
+//      gte::kKnownEditorPanelNames (EditorPanelCatalog.h's
+//      IsKnownEditorPanelName()) - otherwise valid = true, notFound = true,
+//      tabName = nameParam (the caller/route handler is expected to build a
+//      404 response quoting this name - see BuildActivateTabResponseJson()
+//      below).
+//   3. Otherwise valid = true, notFound = false, tabName = nameParam.
+ParsedActivateTabQuery ParseActivateTabQuery(const std::string& nameParam);
+
+// Builds GET /activate_tab's response body for every outcome EXCEPT the
+// 400 (malformed request) and 503 (bridge unavailable) cases, which reuse
+// BuildGenericErrorResponseJson() directly at the route-handler call site,
+// same split convention BuildSetEntityTrsResponseJson()'s own doc comment
+// already documents for its own endpoint.
+//   - success == true  -> {"success":true,"activated_tab":"<tabName>"}
+//   - success == false && tabExists == false (a KNOWN panel name, but no
+//     live window with that name existed this session yet) ->
+//     {"success":false,"error":"panel '<tabName>' has no live window yet
+//     this session - try again after the Editor has rendered at least one
+//     frame"} (409 - see the route handler, NetworkServer.cpp)
+std::string BuildActivateTabResponseJson(bool success, bool tabExists, const std::string& tabName);
+
+// Builds the 404 response body for a `name` that is well-formed but not a
+// known panel (ParsedActivateTabQuery::notFound == true):
+// {"success":false,"error":"unknown tab name '<tabName>' - see GET
+// /list_tabs for the currently known names"}
+std::string BuildUnknownTabNameResponseJson(const std::string& tabName);
+
+// Builds GET /list_tabs's entire response body - needs no request/query
+// input at all, since the panel catalog is fixed at compile time (see
+// EditorPanelCatalog.h): {"tabs":["Hierarchy","Inspector","Scene","Game",
+// "Memory","Profiler","Render Graph","Jobs","Atmosphere"]} (plus "Project"
+// appended at the end when GTE_ENABLE_PROJECT_PANEL is ON - reads directly
+// from gte::kKnownEditorPanelNames, so this list can never drift out of
+// sync with what GET /activate_tab itself accepts).
+std::string BuildListTabsResponseJson();
 
 } // namespace gte::Network

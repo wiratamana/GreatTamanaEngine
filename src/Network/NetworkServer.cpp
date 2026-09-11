@@ -202,6 +202,66 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
     RegisterGetTextureRoute(server, captureBridge);
     RegisterListTexturesRoute(server, captureBridge);
 
+    // network-impl-7 campaign
+    // (PHASE4_HTTP_ENDPOINTS_ACTIVATE_TAB_AND_LIST_TABS.md) - GET /list_tabs.
+    // Needs NO bridge at all - the panel catalog is fixed at compile time
+    // (see EditorPanelCatalog.h) - this is the SIMPLEST route in this whole
+    // file: a pure function of build configuration, zero runtime/thread/
+    // bridge dependency.
+    server.Get("/list_tabs", [](const httplib::Request&, httplib::Response& res) {
+        res.set_content(BuildListTabsResponseJson(), "application/json");
+    });
+
+    // network-impl-7 campaign
+    // (PHASE4_HTTP_ENDPOINTS_ACTIVATE_TAB_AND_LIST_TABS.md) -
+    // GET /activate_tab?name=<PanelName>. See PHASE0_MASTER_STRATEGY.md's
+    // own locked endpoint contract for the exact status-code mapping
+    // implemented below.
+    server.Get("/activate_tab", [uiCommandBridge](const httplib::Request& req, httplib::Response& res) {
+        const ParsedActivateTabQuery parsed = ParseActivateTabQuery(req.get_param_value("name"));
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        // IMPORTANT ordering detail: an unknown tab NAME (404) is checked
+        // BEFORE the uiCommandBridge == nullptr (503) check - see this
+        // phase document's own Section 3.3 "IMPORTANT ordering detail" note
+        // - a request for an unrecognized name fails for the same reason
+        // regardless of whether the bridge exists at all, so it must always
+        // be a 404, never a 503.
+        if (parsed.notFound) {
+            res.status = 404;
+            res.set_content(BuildUnknownTabNameResponseJson(parsed.tabName), "application/json");
+            return;
+        }
+        if (uiCommandBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("editor UI command bridge not available"), "application/json");
+            return;
+        }
+
+        EditorUiCommandRequest request;
+        request.kind = EditorUiCommandKind::ActivateTab;
+        request.activateTab.tabName = parsed.tabName;
+
+        const EditorUiCommandBridge::SubmitResult submit = uiCommandBridge->SubmitAndWait(request);
+        if (submit.alreadyPending) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("another editor UI command is already in progress"), "application/json");
+            return;
+        }
+        if (submit.timedOut) {
+            res.status = 504;
+            res.set_content(BuildGenericErrorResponseJson("editor UI command timed out"), "application/json");
+            return;
+        }
+
+        const ActivateTabOutcome& outcome = submit.result->activateTab;
+        res.status = outcome.success ? 200 : 409;
+        res.set_content(BuildActivateTabResponseJson(outcome.success, outcome.tabExists, parsed.tabName), "application/json");
+    });
+
     // network-impl-3 campaign, Phase 5
     // (PHASE5_NETWORK_POST_ROUTES_AND_COMMAND_DISPATCH.md) - the engine's
     // first POST routes, and its first routes that MUTATE the ECS world.
