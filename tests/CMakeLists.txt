@@ -171,6 +171,29 @@
 #                                            Vulkan-header-free, same
 #                                            precedent as GpuTiming.h/
 #                                            GpuSkinningTypes.h above.
+#   - Renderer/Atmosphere/AtmosphereAerialPerspectiveCompositeMathTests.cpp -
+#                                            atmosphere-scattering-4 campaign,
+#                                            Phase 1 (task_manager/
+#                                            atmosphere-scattering-4/
+#                                            PHASE1_COMPOSITE_DECISION_CPU_ORACLE_AND_TESTS.md)
+#                                            - the permanent CPU oracle for
+#                                            the Aerial Perspective Composite
+#                                            pass's own no-geometry-pixel
+#                                            bypass branch + blend arithmetic
+#                                            (src/Renderer/Atmosphere/
+#                                            AtmosphereAerialPerspectiveCompositeMath.h/.cpp):
+#                                            the exact >= 0.999999 clear-depth
+#                                            boundary, the literal bug-
+#                                            regression test that extreme
+#                                            aerial inputs are ignored once
+#                                            bypassed, and zero/full/partial
+#                                            strength blend math against
+#                                            hand-computed values. No Vulkan/
+#                                            Renderer/live GPU device involved
+#                                            at all - deliberately
+#                                            Vulkan-header-free, same
+#                                            precedent as AtmosphereMath.h
+#                                            above.
 #   - Renderer/Atmosphere/DirectionalLightResolverTests.cpp - Atmosphere
 #                                            Scattering + Aerial Perspective
 #                                            campaign, Phase 8 (task_manager/
@@ -1752,6 +1775,7 @@ set(GTE_TEST_SOURCES
     Renderer/VolumeTexturePreviewMathTests.cpp
     Renderer/GpuSkinning/GpuSkinningTypesTests.cpp
     Renderer/Atmosphere/AtmosphereMathTests.cpp
+    Renderer/Atmosphere/AtmosphereAerialPerspectiveCompositeMathTests.cpp
     Renderer/Atmosphere/DirectionalLightResolverTests.cpp
     Renderer/RenderGraph/RenderGraphTypesTests.cpp
     Renderer/RenderGraph/RenderGraphBuilderTests.cpp

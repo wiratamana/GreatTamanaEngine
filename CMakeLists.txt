@@ -421,6 +421,8 @@ add_library(gte_core STATIC
     src/Renderer/Atmosphere/AtmosphereParameters.cpp
     src/Renderer/Atmosphere/AtmosphereMath.h
     src/Renderer/Atmosphere/AtmosphereMath.cpp
+    src/Renderer/Atmosphere/AtmosphereAerialPerspectiveCompositeMath.h
+    src/Renderer/Atmosphere/AtmosphereAerialPerspectiveCompositeMath.cpp
     src/Renderer/Atmosphere/DirectionalLightResolver.h
     src/Renderer/Atmosphere/DirectionalLightResolver.cpp
     src/Renderer/Atmosphere/AtmosphereLutRenderer.h
