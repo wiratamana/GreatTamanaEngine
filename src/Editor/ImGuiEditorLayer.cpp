@@ -1,5 +1,6 @@
 #include "EditorLayer.h"
 #include "AtmosphereAerialPerspectiveLutInspection.h"
+#include "AtmosphereAerialPerspectiveSkyPurityValidation.h"
 #include "AtmosphereTransmittanceLutValidation.h"
 #include "ComputeBlurValidation.h"
 #include "DockLayout.h"
@@ -547,7 +548,8 @@ public:
         // own), docked alongside "Memory"/"Profiler"/"Render Graph"/
         // "Project" (see DockLayout.cpp).
         BuildAtmospherePanel(m_ctx, atmosphereSettings, renderer, atmosphereLutRenderer,
-            m_lastAtmosphereTransmittanceLutValidation, m_lastAerialPerspectiveLutInspection);
+            m_lastAtmosphereTransmittanceLutValidation, m_lastAerialPerspectiveLutInspection, renderGraph,
+            m_lastAerialPerspectiveSkyPurityResult);
         // Job System Phase 7 (Editor "Jobs" Panel) - reads Job System Phase
         // 5's Profiling::BuildWorkerTimelinePoints() reshape internally; also
         // hosts the GPU Vertex Skinning campaign's own Phase 7 CPU/GPU
@@ -809,6 +811,13 @@ private:
     // Aerial Perspective LUT" button, mirroring
     // m_lastAtmosphereTransmittanceLutValidation above exactly.
     std::optional<AtmosphereAerialPerspectiveLutInspectionResult> m_lastAerialPerspectiveLutInspection;
+
+    // atmosphere-scattering-4 campaign, Phase 3
+    // (task_manager/atmosphere-scattering-4/PHASE3_REGRESSION_DIAGNOSTIC_TOOLING.md)
+    // - the "Atmosphere" panel's own "last result" readout for its "Validate
+    // Aerial Perspective Sky Purity" button, mirroring
+    // m_lastAtmosphereTransmittanceLutValidation above exactly.
+    std::optional<AtmosphereAerialPerspectiveSkyPurityResult> m_lastAerialPerspectiveSkyPurityResult;
 };
 
 } // namespace

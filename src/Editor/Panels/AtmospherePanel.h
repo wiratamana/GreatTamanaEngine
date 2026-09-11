@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../AtmosphereAerialPerspectiveLutInspection.h"
+#include "../AtmosphereAerialPerspectiveSkyPurityValidation.h"
 #include "../AtmosphereTransmittanceLutValidation.h"
 
 #include <optional>
@@ -11,6 +12,10 @@ struct EditorContext;
 struct AtmosphereSettings;
 class Renderer;
 class AtmosphereLutRenderer;
+
+namespace rg {
+class RenderGraph;
+} // namespace rg
 
 // Atmosphere Scattering + Aerial Perspective campaign, Phase 8
 // (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md)
@@ -49,9 +54,20 @@ class AtmosphereLutRenderer;
 // `lastAerialInspectionResult` (an "Inspect Aerial Perspective LUT" button +
 // printed min/max/mean transmittance/in-scattering readout, calling
 // AtmosphereAerialPerspectiveLutInspection.h's InspectAerialPerspectiveVolume()).
+//
+// atmosphere-scattering-4 campaign, Phase 3
+// (task_manager/atmosphere-scattering-4/PHASE3_REGRESSION_DIAGNOSTIC_TOOLING.md)
+// adds a FOURTH such piece, same convention - `renderGraph` (the same
+// `const rg::RenderGraph&` ImGuiEditorLayer::BuildUI() already has in scope,
+// passed straight through) and `lastSkyPurityResult` (a "Validate Aerial
+// Perspective Sky Purity" button + PASS/FAIL/ERROR readout, calling
+// AtmosphereAerialPerspectiveSkyPurityValidation.h's
+// ValidateAerialPerspectiveSkyPurity()).
 void BuildAtmospherePanel(EditorContext& ctx, AtmosphereSettings& settings, Renderer& renderer,
     AtmosphereLutRenderer& atmosphereLutRenderer,
     std::optional<AtmosphereTransmittanceLutValidationResult>& lastValidationResult,
-    std::optional<AtmosphereAerialPerspectiveLutInspectionResult>& lastAerialInspectionResult);
+    std::optional<AtmosphereAerialPerspectiveLutInspectionResult>& lastAerialInspectionResult,
+    const rg::RenderGraph& renderGraph,
+    std::optional<AtmosphereAerialPerspectiveSkyPurityResult>& lastSkyPurityResult);
 
 } // namespace gte

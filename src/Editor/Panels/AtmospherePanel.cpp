@@ -11,7 +11,9 @@ namespace gte {
 void BuildAtmospherePanel(EditorContext& /*ctx*/, AtmosphereSettings& settings, Renderer& renderer,
     AtmosphereLutRenderer& atmosphereLutRenderer,
     std::optional<AtmosphereTransmittanceLutValidationResult>& lastValidationResult,
-    std::optional<AtmosphereAerialPerspectiveLutInspectionResult>& lastAerialInspectionResult)
+    std::optional<AtmosphereAerialPerspectiveLutInspectionResult>& lastAerialInspectionResult,
+    const rg::RenderGraph& renderGraph,
+    std::optional<AtmosphereAerialPerspectiveSkyPurityResult>& lastSkyPurityResult)
 {
     ImGui::Begin("Atmosphere");
 
@@ -88,6 +90,20 @@ void BuildAtmospherePanel(EditorContext& /*ctx*/, AtmosphereSettings& settings, 
             ok ? (r.likelyVisibleAtDefaultExposure ? ImVec4(0.3f, 1.0f, 0.3f, 1.0f) : ImVec4(1.0f, 0.8f, 0.3f, 1.0f))
                : ImVec4(1.0f, 0.4f, 0.3f, 1.0f),
             "%s", !ok ? "ERROR" : (r.likelyVisibleAtDefaultExposure ? "LIKELY VISIBLE" : "LIKELY TOO FAINT"));
+        ImGui::TextWrapped("%s", ToDiagnosticString(r).c_str());
+    }
+
+    // atmosphere-scattering-4 campaign, Phase 3 - the permanent, automated
+    // regression guard for AERIAL_PERSPECTIVE_NO_GEOMETRY_BUG_REPORT_20260911.md.
+    ImGui::Separator();
+    if (ImGui::Button("Validate Aerial Perspective Sky Purity")) {
+        lastSkyPurityResult = ValidateAerialPerspectiveSkyPurity(renderer, renderGraph, "GameView", "GameViewComposited");
+    }
+    if (lastSkyPurityResult.has_value()) {
+        const AtmosphereAerialPerspectiveSkyPurityResult& r = *lastSkyPurityResult;
+        const bool passed = r.Passed();
+        ImGui::TextColored(passed ? ImVec4(0.3f, 1.0f, 0.3f, 1.0f) : ImVec4(1.0f, 0.4f, 0.3f, 1.0f), "%s",
+            !r.succeeded ? "ERROR" : (passed ? "PASS" : "FAIL"));
         ImGui::TextWrapped("%s", ToDiagnosticString(r).c_str());
     }
 
