@@ -25,6 +25,10 @@ namespace gte { class FrameCaptureBridge; }
 // (PHASE4_ENGINE_COMMAND_BRIDGE_AND_MAIN_LOOP_INTEGRATION.md).
 namespace gte { class EngineCommandBridge; }
 
+// Forward-declared for the same cheap-header reason as FrameCaptureBridge/
+// EngineCommandBridge above - network-impl-7 campaign.
+namespace gte { class EditorUiCommandBridge; }
+
 namespace gte::Network {
 
 // Owns a real, embedded HTTP server (cpp-httplib) bound to loopback
@@ -67,7 +71,16 @@ public:
     // PHASE5_NETWORK_POST_ROUTES_AND_COMMAND_DISPATCH.md) both respond 503
     // rather than crashing" - the exact same "nullptr degrades gracefully to
     // a 503, never a crash" contract `captureBridge` already documents above.
-    explicit NetworkServer(FrameCaptureBridge* captureBridge = nullptr, EngineCommandBridge* commandBridge = nullptr);
+    // `uiCommandBridge` (network-impl-7 campaign) is a THIRD defaulted,
+    // non-owning pointer, appended AFTER `commandBridge` so every existing
+    // call site keeps compiling unchanged. Non-null in production
+    // (Application owns the real EditorUiCommandBridge and passes its
+    // address) - `nullptr` means "GET /activate_tab responds 503 rather
+    // than crashing" - the exact same "nullptr degrades gracefully" contract
+    // `captureBridge`/`commandBridge` already document above.
+    explicit NetworkServer(FrameCaptureBridge* captureBridge = nullptr,
+        EngineCommandBridge* commandBridge = nullptr,
+        EditorUiCommandBridge* uiCommandBridge = nullptr);
     ~NetworkServer();
 
     NetworkServer(const NetworkServer&) = delete;
@@ -139,6 +152,9 @@ private:
     // Non-owning - same lifetime contract as m_captureBridge above
     // (network-impl-3 campaign, Phase 4).
     EngineCommandBridge* m_commandBridge = nullptr;
+    // Non-owning - same lifetime contract as m_captureBridge above
+    // (network-impl-7 campaign).
+    EditorUiCommandBridge* m_uiCommandBridge = nullptr;
 };
 
 } // namespace gte::Network

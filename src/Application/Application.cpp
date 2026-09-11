@@ -153,7 +153,11 @@ Application::Application(const std::string& title, int width, int height)
     // address into NetworkServer's constructor (a second, appended
     // defaulted pointer parameter), for the exact same reason -
     // m_commandBridge is likewise declared before m_networkServer.
-    , m_networkServer(&m_captureBridge, &m_commandBridge)
+    // network-impl-7 campaign, Phase 3 - ALSO hands EditorUiCommandBridge's
+    // address into NetworkServer's constructor (a third, appended defaulted
+    // pointer parameter), for the exact same reason - m_uiCommandBridge is
+    // likewise declared before m_networkServer.
+    , m_networkServer(&m_captureBridge, &m_commandBridge, &m_uiCommandBridge)
     , m_windowWidth(width)
     , m_windowHeight(height)
 {
@@ -289,6 +293,33 @@ int Application::Run()
         lastTicksNs = nowTicksNs;
 
         m_editorLayer->NewFrame();
+
+        // network-impl-7 campaign - drains at most ONE pending
+        // GET /activate_tab request per frame, IMMEDIATELY after
+        // NewFrame() and BEFORE BuildUI() - this is the one window in the
+        // frame where Dear ImGui's window/dock state is valid to touch
+        // (NewFrame() already ran) AND where a change here is still
+        // visible in THIS SAME frame's own tab rendering (BuildUI() has
+        // not run yet - see PHASE3_APPLICATION_WIRING_AND_FRAME_LOOP_INTEGRATION.md's
+        // own "why this exact frame position" reasoning for the full
+        // justification). Mirrors EngineCommandBridge's own "drain as
+        // early as possible" precedent above, just relative to a different
+        // pair of per-frame calls.
+        if (const std::optional<EditorUiCommandRequest> uiRequest = m_uiCommandBridge.TryPeekPendingCommandRequest()) {
+            GTE_PROFILE_SCOPE("Application::ExecuteEditorUiCommand");
+            EditorUiCommandResult uiResult;
+            uiResult.kind = uiRequest->kind;
+            // Only one EditorUiCommandKind exists today (ActivateTab) - a
+            // future addition to this bridge (see EditorUiCommandBridge.h's
+            // own doc comment on why it's an enum, not a single hardcoded
+            // shape) would branch on uiRequest->kind here, the exact same
+            // shape ExecuteEngineCommand() (EngineCommandDispatch.cpp)
+            // already uses for ITS bridge's own multiple kinds.
+            const TabActivationResult activation = m_editorLayer->ActivateTab(uiRequest->activateTab.tabName);
+            uiResult.activateTab.tabExists = activation.tabExists;
+            uiResult.activateTab.success = activation.tabExists;
+            m_uiCommandBridge.FulfillCommand(uiResult);
+        }
 
         // Clears last frame's queued Submit() draw items before Game gets a
         // chance to queue this frame's - see Renderer::BeginFrame().

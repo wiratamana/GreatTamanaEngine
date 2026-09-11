@@ -12,6 +12,7 @@
 #include "../Renderer/VolumeTexturePreviewRenderer.h"
 #include "../Window/Window.h"
 #include "EngineCommandBridge.h"
+#include "EditorUiCommandBridge.h"
 #include "FrameCaptureBridge.h"
 
 namespace gte {
@@ -123,6 +124,15 @@ private:
     // (constructed first, destroyed last relative to it) so its address can
     // be handed into m_networkServer's own constructor below.
     EngineCommandBridge m_commandBridge;
+
+    // network-impl-7 campaign - the THIRD sanctioned cross-thread bridge a
+    // Network route handler is allowed to touch, this one for EDITOR-UI
+    // commands (activate_tab - see AGENTS.md, "Networking", and
+    // EditorUiCommandBridge.h's own header comment). Declared right after
+    // m_commandBridge, for the exact same reason: BEFORE m_networkServer
+    // (constructed first, destroyed last relative to it) so its address
+    // can be handed into m_networkServer's own constructor below.
+    EditorUiCommandBridge m_uiCommandBridge;
 
     // Networking campaign (task_manager/network-impl-1/) - an embedded,
     // loopback-only HTTP server (see AGENTS.md, "Networking"). Declared
