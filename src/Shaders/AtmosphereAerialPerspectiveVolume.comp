@@ -88,6 +88,20 @@ void main()
     float depthExponent = frameUniforms.aerialPerspectiveDepthExponent;
     int samplesPerSlice = clamp(int(frameUniforms.aerialPerspectiveSamplesPerSliceAsFloat + 0.5), 1, 8);
 
+    // atmosphere-scattering-2 campaign, Phase 3 - a purely ARTISTIC "turn up
+    // the fog density" multiplier, applied strictly LOCALLY inside this
+    // shader's own per-sample scattering/extinction computation below (see
+    // the "scatteringExaggeration" uses further down in this file) - the
+    // shared AtmosphereMath.h/AtmosphereCommon.glsl oracle functions this
+    // shader calls (ComputeExtinctionCoefficientAtHeight()/
+    // RayleighDensityAtHeight()/MieDensityAtHeight()) are NEVER modified, so
+    // the Sky-View LUT/Transmittance LUT/Multi-Scattering LUT passes, which
+    // also call those same shared functions, stay completely
+    // physically-accurate and unaffected by this per-view knob. Clamped to
+    // never go negative (a negative exaggeration would flip scattering/
+    // extinction signs, which is meaningless).
+    float scatteringExaggeration = max(frameUniforms.aerialPerspectiveScatteringExaggeration, 0.0);
+
     float planetRadiusKm = atmosphereParameters.planetRadiusKm;
 
     // Same tiny surface-scale offset as AtmosphereSkyViewLut.comp's own
@@ -151,10 +165,23 @@ void main()
             vec3 multipleScatteredLuminance =
                 texture(multiScatteringLut, ClampLutUvHalfTexelInset(lutUv, multiScatteringLutSize)).rgb;
 
-            vec3 extinctionCoefficient = ComputeExtinctionCoefficientAtHeight(atmosphereParameters, currentHeightKm);
+            // Phase 3 - scatteringExaggeration multiplies BOTH the local
+            // extinction coefficient AND the local scattering coefficients by
+            // the SAME factor ("increase the fog's own physical density"),
+            // which keeps the single-scattering albedo (scattering /
+            // extinction) unchanged - the haze's own COLOR/character stays
+            // physically plausible even as its MAGNITUDE is exaggerated.
+            // ComputeExtinctionCoefficientAtHeight()/RayleighDensityAtHeight()/
+            // MieDensityAtHeight() themselves are called completely
+            // unmodified - the multiplier is applied to their RESULT, here,
+            // strictly locally to this shader.
+            vec3 extinctionCoefficient =
+                ComputeExtinctionCoefficientAtHeight(atmosphereParameters, currentHeightKm) * scatteringExaggeration;
             vec3 scatterRayleigh =
-                atmosphereParameters.rayleighScattering * RayleighDensityAtHeight(atmosphereParameters, currentHeightKm);
-            vec3 scatterMie = atmosphereParameters.mieScattering * MieDensityAtHeight(atmosphereParameters, currentHeightKm);
+                atmosphereParameters.rayleighScattering * RayleighDensityAtHeight(atmosphereParameters, currentHeightKm)
+                * scatteringExaggeration;
+            vec3 scatterMie = atmosphereParameters.mieScattering * MieDensityAtHeight(atmosphereParameters, currentHeightKm)
+                * scatteringExaggeration;
             vec3 totalScattering = scatterRayleigh + scatterMie;
 
             float planetVisibility = PlanetVisibility(currentPositionKm, directionToSun, planetRadiusKm);

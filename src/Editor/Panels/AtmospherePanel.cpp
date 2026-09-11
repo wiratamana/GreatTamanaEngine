@@ -20,21 +20,21 @@ void BuildAtmospherePanel(EditorContext& /*ctx*/, AtmosphereSettings& settings, 
     ImGui::ColorEdit3("Ground Albedo Tint", &settings.groundAlbedoTint.x);
     ImGui::DragFloat("Aerial Perspective Strength", &settings.aerialPerspectiveStrength, 0.01f, 0.0f, 2.0f);
 
-    // atmosphere-scattering-2 campaign, Phase 1 - single source of truth for
+    // atmosphere-scattering-2 campaign, Phase 1/3 - single source of truth for
     // the aerial-perspective froxel volume's own ray-march tunables (see
     // AtmosphereTypes.h's own AtmosphereFrameUniforms/AtmosphereSettings doc
-    // comments). Defaults (10.0/2.0/8/1.0) are IDENTICAL to the pre-Phase-1
-    // hardcoded shader constants - a pure plumbing refactor, zero visual
-    // change, until Phase 3 changes these DEFAULTS (never this UI).
+    // comments). Phase 3 shipped new, deliberately non-1.0/non-10km DEFAULTS
+    // for these (0.5km/2.0/8/30.0 as of this session - see AtmosphereTypes.h's
+    // own AtmosphereSettings comment and PHASE3_COMPLETION_REPORT.md for the
+    // empirical evidence behind the exaggeration value specifically) - this
+    // UI itself is unchanged from Phase 1 beyond widening the Exaggeration
+    // slider's range below and removing the "does nothing yet" caveat now
+    // that Phase 3 actually wires it into AtmosphereAerialPerspectiveVolume.comp.
     ImGui::DragFloat("Aerial Max Distance (km)", &settings.aerialPerspectiveMaxDistanceKm, 0.01f, 0.01f, 50.0f);
     ImGui::DragFloat("Aerial Depth Exponent", &settings.aerialPerspectiveDepthExponent, 0.05f, 1.0f, 4.0f);
     ImGui::SliderInt("Aerial Samples Per Slice", &settings.aerialPerspectiveSamplesPerSlice, 1, 8);
     ImGui::DragFloat(
         "Aerial Scattering Exaggeration", &settings.aerialPerspectiveScatteringExaggeration, 0.1f, 0.1f, 50.0f);
-    ImGui::TextDisabled(
-        "Max Distance/Depth Exponent/Samples Per Slice are now live (previously hardcoded shader constants). "
-        "Scattering Exaggeration is plumbed through but NOT YET consumed by any shader math - it will start "
-        "affecting the render once atmosphere-scattering-2 campaign Phase 3 lands.");
     ImGui::DragFloat("Sky Exposure", &settings.skyExposure, 0.1f, 0.0f, 50.0f);
 
     ImGui::Separator();

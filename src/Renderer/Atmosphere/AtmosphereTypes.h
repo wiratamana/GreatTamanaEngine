@@ -187,10 +187,25 @@ struct AtmosphereFrameUniforms {
     // AtmosphereParametersGpu (session-stable physical constants), since a
     // future per-view override is plausible even though today both Game/Scene
     // views always receive the SAME AtmosphereSettings-sourced values.
+    //
+    // Phase 3 (atmosphere-scattering-2) DELIBERATELY leaves these four
+    // struct-level DEFAULT member initializers at the OLD, physically-
+    // conservative pre-Phase-3 numbers (10km/2.0/8/1.0) rather than mirroring
+    // AtmosphereSettings's own new Phase 3 defaults below. These defaults are
+    // only ever actually observed by a caller that constructs an
+    // AtmosphereFrameUniforms{} directly WITHOUT going through
+    // AtmosphereSettings - no such production call site exists today,
+    // AddAtmosphereViewLutPasses() always overwrites all four fields from the
+    // live AtmosphereSettings first (see AtmospherePassSequence.cpp) - so this
+    // is a documented "safety net" choice, not a behavior-affecting one: if a
+    // future caller ever DOES construct this struct directly, it silently
+    // falls back to the original, unexaggerated, real-Earth-scale physical
+    // result rather than inheriting the new, deliberately exaggerated
+    // Editor-facing defaults.
     float aerialPerspectiveMaxDistanceKm = 10.0f;
     float aerialPerspectiveDepthExponent = 2.0f;
     float aerialPerspectiveSamplesPerSliceAsFloat = 8.0f; // Stored as float (GLSL storage-buffer int alignment is fiddly); shader rounds+clamps to [1, 8].
-    float aerialPerspectiveScatteringExaggeration = 1.0f; // Unused until Phase 3 - see that phase's own file.
+    float aerialPerspectiveScatteringExaggeration = 1.0f; // Now consumed by AtmosphereAerialPerspectiveVolume.comp as of Phase 3 - see that file's own doc comment.
 };
 static_assert(sizeof(AtmosphereFrameUniforms) == 128,
     "AtmosphereFrameUniforms must be exactly three 16-byte std140/std430-"
@@ -249,14 +264,42 @@ struct AtmosphereSettings {
 
     // atmosphere-scattering-2 campaign, Phase 1/3 - Aerial Perspective froxel
     // volume ray-march tunables, mirrored into every view's own
-    // AtmosphereFrameUniforms (Application.cpp) each frame. Defaults here are
-    // Phase 1's OWN "zero behavior change" values (identical to the pre-Phase-1
-    // hardcoded shader constants) - Phase 3 changes these DEFAULTS, not this
-    // phase.
-    float aerialPerspectiveMaxDistanceKm = 10.0f;
+    // AtmosphereFrameUniforms (Application.cpp) each frame.
+    //
+    // Phase 3 (PHASE3_AERIAL_PERSPECTIVE_VISIBILITY_REBALANCE.md) ships NEW
+    // shipped DEFAULTS here - this is the actual visibility fix for "I can't
+    // see the blueish fog on far distance objects":
+    //   - aerialPerspectiveMaxDistanceKm: was 10.0f (Phase 1's own "zero
+    //     behavior change" value, identical to the pre-Phase-1 hardcoded
+    //     shader constant) - now 0.5f (500m), matched to typical engine
+    //     test-scene content scale (tens to a few hundred meters), per
+    //     AERIAL_PERSPECTIVE_INVESTIGATION_FINDINGS.md's own recommended
+    //     0.05-0.5km range.
+    //   - aerialPerspectiveDepthExponent: unchanged (2.0f) - the quadratic
+    //     near-camera slice density is still correct at this new, smaller
+    //     scale (re-confirmed dimensionless per Step 3.5 of the phase file).
+    //   - aerialPerspectiveSamplesPerSlice: unchanged (8).
+    //   - aerialPerspectiveScatteringExaggeration: was 1.0f (a documented
+    //     no-op placeholder, unused until this phase) - now 30.0f, re-tuned
+    //     EMPIRICALLY against a live scaled-primitive test scene (10m/100m/
+    //     400m from camera, using the network-impl-5 POST /set_entity_trs
+    //     command to scale each test cube proportionally to its distance so
+    //     all three keep a similar on-screen size) via
+    //     GET /get_texture?texture_name=SceneViewComposited (GET
+    //     /get_game_view itself 409'd - "Game" was the inactive dock tab
+    //     this session, see PHASE3_COMPLETION_REPORT.md for the full
+    //     reasoning) - see that same report for the exact before/after
+    //     screenshots and why 30.0f (not the phase file's own documented
+    //     6.0f STARTING point) was the value actually shipped: 6.0f and even
+    //     20.0f were visually indistinguishable from each other in this
+    //     engine's real-Earth-scale coefficients at these distances, while
+    //     30.0f produces a clearly visible darkening/tinting of far-distance
+    //     geometry relative to near, without drastically altering the sky's
+    //     own overall tone the way 50.0f did.
+    float aerialPerspectiveMaxDistanceKm = 0.5f;
     float aerialPerspectiveDepthExponent = 2.0f;
     int aerialPerspectiveSamplesPerSlice = 8;
-    float aerialPerspectiveScatteringExaggeration = 1.0f;
+    float aerialPerspectiveScatteringExaggeration = 30.0f;
 };
 
 } // namespace gte
