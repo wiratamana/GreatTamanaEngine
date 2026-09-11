@@ -1,6 +1,7 @@
 #include "DockLayout.h"
 
 #include "EditorContext.h"
+#include "EditorPanelCatalog.h"
 #include "SceneIO.h"
 
 #include "../Game/Game.h"
@@ -20,30 +21,6 @@ namespace gte {
 
 namespace {
 
-// Every panel name the one-shot default-layout logic below cares about -
-// factored out so DefaultDockLayoutIsNeeded() and the one-shot check inside
-// BuildDockspaceAndMenuBar() can never silently drift apart from each other
-// (or from BuildDefaultDockLayout()'s own DockBuilderDockWindow() calls) as
-// panels are added/removed. "Project" (Panels/ProjectPanel.h) is only
-// listed when GTE_ENABLE_PROJECT_PANEL is ON - a build with the Project
-// panel switched off never expects a "Project" window to exist at all, so
-// it must not be part of what this one-shot logic waits for/rebuilds
-// around.
-constexpr const char* kAllPanelNames[] = {
-    "Hierarchy",
-    "Inspector",
-    "Scene",
-    "Game",
-    "Memory",
-    "Profiler",
-    "Render Graph",
-    "Jobs",
-    "Atmosphere",
-#if GTE_ENABLE_PROJECT_PANEL
-    "Project",
-#endif
-};
-
 // True if the dockspace node itself doesn't exist yet, OR if any of our
 // four panels currently exists as a window but has never actually been
 // docked (DockId == 0) - see BuildDockspaceAndMenuBar()'s comment for why
@@ -53,7 +30,7 @@ bool DefaultDockLayoutIsNeeded(ImGuiID dockspaceId)
     if (ImGui::DockBuilderGetNode(dockspaceId) == nullptr) {
         return true;
     }
-    for (const char* panelName : kAllPanelNames) {
+    for (const char* panelName : kKnownEditorPanelNames) {
         const ImGuiWindow* window = ImGui::FindWindowByName(panelName);
         if (window != nullptr && window->DockId == 0) {
             return true;
@@ -219,7 +196,7 @@ void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer
     // undocked floating windows).
     if (!ctx.dockLayoutEnsured) {
         bool allPanelsAccountedFor = true;
-        for (const char* panelName : kAllPanelNames) {
+        for (const char* panelName : kKnownEditorPanelNames) {
             // A panel that has never called Begin() yet this session (e.g.
             // this is the very first frame ever, before this same
             // BuildUI() call reaches BuildHierarchyPanel()/etc.) doesn't
@@ -264,6 +241,27 @@ void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer
     }
 
     ImGui::End();
+}
+
+// network-impl-7 campaign - see DockLayout.h's own doc comment for the full
+// contract. The "read with FindWindowByName() first, then call
+// SetWindowFocus() by name a second time" shape here is NOT reusing
+// DefaultDockLayoutIsNeeded()'s own loop above (that loop only ever calls
+// FindWindowByName() to check window->DockId == 0, never SetWindowFocus()) -
+// the double lookup is required because SetWindowFocus()'s own public-API
+// signature only takes a name, never a resolved ImGuiWindow*, so there is no
+// way to avoid a second name-based lookup internally without reaching for a
+// different, more internal API than this codebase already uses elsewhere
+// (ImGui::FocusWindow(ImGuiWindow*, ImGuiFocusRequestFlags = 0), also
+// declared in imgui_internal.h) - not worth it for no measurable benefit.
+bool FindAndFocusEditorWindow(const char* panelName)
+{
+    const ImGuiWindow* window = ImGui::FindWindowByName(panelName);
+    if (window == nullptr) {
+        return false;
+    }
+    ImGui::SetWindowFocus(panelName);
+    return true;
 }
 
 } // namespace gte

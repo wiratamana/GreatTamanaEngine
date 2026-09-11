@@ -8,6 +8,7 @@
 
 #include <memory>
 #include <optional>
+#include <string>
 
 // Forward-declared so this header needs no SDL dependency at all (matches
 // the Vulkan-handle forward-declare trick already used in Window.h) - only
@@ -59,6 +60,18 @@ class RenderGraphBuilder;
 //     behaves exactly as if no Editor/ImGui ever existed. Compiled instead
 //     when GTE_ENABLE_EDITOR is OFF, with zero ImGui code or linkage
 //     anywhere in the binary.
+// Result of ActivateTab() below - deliberately a SEPARATE, tiny,
+// dependency-free type from Application/EditorUiCommandBridge.h's own
+// ActivateTabOutcome (network-impl-7 campaign) - EditorLayer.h must never
+// depend on anything under src/Application/ (Application depends on
+// Editor, never the reverse - see this file's own class comment). Only
+// Application::Run() (Phase 3) ever converts one of these into the OTHER
+// type, one field at a time, at the one call site that legitimately
+// depends on both.
+struct TabActivationResult {
+    bool tabExists = false;
+};
+
 class IEditorLayer {
 public:
     virtual ~IEditorLayer() = default;
@@ -304,6 +317,24 @@ public:
     // future ImGui text field currently has keyboard focus). Backed by
     // ImGuiIO::WantCaptureKeyboard. Always false for NullEditorLayer.
     virtual bool WantsCaptureKeyboard() const = 0;
+
+    // network-impl-7 campaign - brings the named Editor panel/tab to the
+    // front (Dear ImGui's own SetWindowFocus(), which for a DOCKED window
+    // selects it as its dock node's active tab - exactly like a user
+    // clicking the tab). `panelName` is expected to already be validated
+    // against EditorPanelCatalog.h's known panel list by the CALLER
+    // (Application::Run(), fed from EditorUiCommandBridge - see Phase 3) -
+    // this method itself does no such validation; it just tries to find and
+    // focus whatever exact name it's given. Returns tabExists == false, and
+    // does nothing else, if no live ImGui window with that exact name
+    // exists THIS FRAME (e.g. called before this panel's own first Begin()
+    // call ever ran this session). Must only ever be called between
+    // NewFrame() and BuildUI() in the SAME frame (see Application::Run(),
+    // Phase 3) - calling it before NewFrame() or after Render() is
+    // undefined with respect to which frame's tab-selection state it
+    // affects. Always returns tabExists == false for NullEditorLayer (a
+    // release build has no Editor UI/tabs to activate at all).
+    virtual TabActivationResult ActivateTab(const std::string& panelName) = 0;
 };
 
 // Constructs the real ImGui-backed editor layer, or the inert Null one,

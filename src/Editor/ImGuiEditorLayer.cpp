@@ -639,6 +639,24 @@ public:
         return ImGui::GetIO().WantCaptureKeyboard;
     }
 
+    // network-impl-7 campaign - see IEditorLayer::ActivateTab()'s own doc
+    // comment (EditorLayer.h) for the full contract. Must set the current
+    // ImGui context first, same as every other method in this class that
+    // touches ImGui state outside a BuildUI()/Render() call that already
+    // did so earlier this same frame (see WantsCaptureMouse() immediately
+    // above for the identical pattern) - ActivateTab() is called from
+    // Application::Run() at a point where NewFrame() already ran this
+    // frame (see Phase 3), but nothing guarantees this is the LAST thing to
+    // touch the context before it, so setting it explicitly here is cheap
+    // insurance, not redundant.
+    TabActivationResult ActivateTab(const std::string& panelName) override
+    {
+        ImGui::SetCurrentContext(m_context);
+        TabActivationResult result;
+        result.tabExists = FindAndFocusEditorWindow(panelName.c_str());
+        return result;
+    }
+
 private:
     void ReleaseGameViewDescriptor()
     {

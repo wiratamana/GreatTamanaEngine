@@ -39,6 +39,7 @@ public:
     bool WantsExit() const override { return false; }
     bool WantsCaptureMouse() const override { return false; }
     bool WantsCaptureKeyboard() const override { return false; }
+    TabActivationResult ActivateTab(const std::string& /*panelName*/) override { return TabActivationResult{}; }
 };
 
 } // namespace
