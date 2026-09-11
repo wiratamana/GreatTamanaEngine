@@ -12,6 +12,18 @@
 // against, mirroring AtmosphereMath.h's own "CPU oracle is right by
 // definition" rule - see AGENTS.md, "Atmosphere Scattering").
 //
+// atmosphere-scattering-2 campaign, Phase 4
+// (task_manager/atmosphere-scattering-2/PHASE4_ATMOSPHERE_AWARE_VOLUME_DEBUG_PREVIEW.md)
+// - `pc.interpretationMode` selects between this shader's original, generic
+// "alpha = density, rgb = color" interpretation (mode 0, UNCHANGED default
+// behavior for every non-atmosphere volume) and a second, atmosphere-aware
+// interpretation (mode 1, auto-selected server-side by
+// Application.cpp based on the requested texture_name) specifically for the
+// Aerial Perspective volume: its `alpha` is TRANSMITTANCE (how much light
+// SURVIVES - the opposite polarity of a density) and its `rgb` is raw HDR
+// in-scattered luminance (tiny; needs exposure + tonemap to be legible at
+// all) - see main()'s own branch below for the exact math.
+//
 // BINDING CONVENTION (matches
 // src/Renderer/VolumeTexturePreviewRenderer.cpp exactly - see
 // Vulkan/DescriptorSetLayoutBuilder.h's own documented "read-only Texture
@@ -30,7 +42,9 @@ layout(binding = 1, rgba8) uniform writeonly image2D outputImage;
 
 // MUST match VolumeTexturePreviewRenderer.cpp's own PushConstants struct -
 // every vec3 starts at a 16-byte-aligned offset, std140-style (see that
-// file's own doc comment).
+// file's own doc comment). `interpretationMode`/`aerialPreviewExposure` were
+// appended at the tail by atmosphere-scattering-2's Phase 4 - every field
+// above them keeps its exact pre-Phase-4 offset.
 layout(push_constant) uniform PushConstants {
     vec3 eyePosition;
     float tanHalfFovY;
@@ -42,6 +56,8 @@ layout(push_constant) uniform PushConstants {
     float _padding0;
     vec3 boxHalfExtents;
     float _padding1;
+    int interpretationMode;
+    float aerialPreviewExposure;
 } pc;
 
 // Dark gray, so white/bright smoke-like content stays readable - the
@@ -110,8 +126,23 @@ void main()
         vec3 uvw = (localPos / pc.boxHalfExtents) * 0.5 + 0.5; // -> [0, 1]^3 texture space.
 
         vec4 s = texture(volumeTex, uvw);
-        float density = s.a;
-        vec3 color = s.rgb;
+        float density;
+        vec3 color;
+        if (pc.interpretationMode == 1) {
+            // Atmosphere Aerial Perspective volume (atmosphere-scattering-2
+            // campaign, Phase 4): s.a is TRANSMITTANCE (how much light
+            // survives - opposite polarity of a density), s.rgb is raw HDR
+            // in-scattered luminance (tiny; needs exposure + tonemap to be
+            // legible at all). See this campaign's
+            // PHASE4_ATMOSPHERE_AWARE_VOLUME_DEBUG_PREVIEW.md.
+            density = 1.0 - s.a; // "haze amount" - 0 where fully transparent/no haze, ->1 where opaque/heavy haze.
+            vec3 exposed = s.rgb * pc.aerialPreviewExposure;
+            color = exposed / (exposed + vec3(1.0)); // Simple fixed Reinhard tonemap - keeps arbitrarily bright HDR input in [0,1) without hard clipping.
+        } else {
+            // Generic interpretation - network-impl-6's own original, UNCHANGED behavior.
+            density = s.a;
+            color = s.rgb;
+        }
         float alpha = 1.0 - exp(-density * pc.densityScale * stepLength);
 
         accum.rgb += (1.0 - accum.a) * color * alpha;

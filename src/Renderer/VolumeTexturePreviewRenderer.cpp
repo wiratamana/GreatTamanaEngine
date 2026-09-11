@@ -28,7 +28,28 @@ struct PushConstants {
     float _padding0 = 0.0f;
     Vec3 boxHalfExtents;
     float _padding1 = 0.0f;
+    // atmosphere-scattering-2 campaign, Phase 4
+    // (task_manager/atmosphere-scattering-2/PHASE4_ATMOSPHERE_AWARE_VOLUME_DEBUG_PREVIEW.md)
+    // - appended at the tail so every existing field above keeps its exact
+    // pre-Phase-4 offset. This `int` immediately followed by a `float` packs
+    // into 8 bytes with no gap needed - the preceding field (`_padding1`)
+    // ends the struct's existing groups exactly 16-byte aligned (5 groups of
+    // 16 bytes = offset 80), so this new 8-byte tail needs no extra padding
+    // of its own either.
+    std::int32_t interpretationMode = 0; // VolumeTexturePreviewInterpretation, as int.
+    float aerialPreviewExposure = 0.0f; // Only meaningful when interpretationMode == 1; 0 when mode == 0 (unused).
 };
+
+// atmosphere-scattering-2 campaign, Phase 4 - fixed exposure multiplier
+// applied ONLY when interpretationMode == AtmosphereAerialPerspective,
+// BEFORE the shader's own Reinhard tonemap - chosen empirically so this
+// campaign's own typical in-scattering magnitudes (see
+// AERIAL_PERSPECTIVE_INVESTIGATION_FINDINGS.md's own cited numbers, ~1e-5 to
+// ~1e-3 pre-Phase-3, larger after Phase 3's exaggeration multiplier) land in
+// a visually legible mid-range rather than crushing to black. Re-tune this
+// constant (not kDensityScale, not any call site) if Phase 3's own final
+// chosen exaggeration default changes substantially later.
+static constexpr float kAerialPreviewExposure = 2000.0f;
 
 } // namespace
 
@@ -107,7 +128,8 @@ void VolumeTexturePreviewRenderer::EnsureInitialized(Renderer& renderer)
 }
 
 VolumeTexturePreviewRenderer::CapturedRawPixels VolumeTexturePreviewRenderer::RenderPreview(
-    Renderer& renderer, const VolumeTarget& volume, const rg::ResourceState& previousState)
+    Renderer& renderer, const VolumeTarget& volume, const rg::ResourceState& previousState,
+    VolumeTexturePreviewInterpretation interpretation)
 {
     EnsureInitialized(renderer);
 
@@ -134,6 +156,13 @@ VolumeTexturePreviewRenderer::CapturedRawPixels VolumeTexturePreviewRenderer::Re
     pushConstants.stepCount = kStepCount;
     pushConstants.up = setup.up;
     pushConstants.boxHalfExtents = setup.boxHalfExtents;
+    // atmosphere-scattering-2 campaign, Phase 4 - the exposure value is only
+    // meaningful when interpretationMode == AtmosphereAerialPerspective;
+    // left at 0 (its PushConstants default) for the generic interpretation,
+    // exactly mirroring this struct's own doc comment above.
+    pushConstants.interpretationMode = static_cast<std::int32_t>(interpretation);
+    pushConstants.aerialPreviewExposure =
+        (interpretation == VolumeTexturePreviewInterpretation::AtmosphereAerialPerspective) ? kAerialPreviewExposure : 0.0f;
 
     // A COMBINED IMAGE SAMPLER read from a COMPUTE shader has no existing
     // ResourceAccess enumerator to reuse via RequiredStateFor() -

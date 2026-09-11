@@ -951,8 +951,22 @@ int Application::Run()
 
                     m_renderer.WaitForGpuIdle();
 
-                    const VolumeTexturePreviewRenderer::CapturedRawPixels raw =
-                        m_volumeTexturePreviewRenderer.RenderPreview(m_renderer, volumeSnapshot->target, volumeSnapshot->state);
+                    // atmosphere-scattering-2 campaign, Phase 4
+                    // (task_manager/atmosphere-scattering-2/PHASE4_ATMOSPHERE_AWARE_VOLUME_DEBUG_PREVIEW.md)
+                    // - auto-detect the Aerial Perspective volume by name so its
+                    // preview uses the atmosphere-aware transmittance/in-scattering
+                    // interpretation instead of the generic density/color one -
+                    // zero new HTTP endpoint/query parameter (see that phase's own
+                    // Locked Design Decision 6). Every other volume texture name
+                    // still resolves to GenericDensityInAlpha, byte-for-byte the
+                    // same behavior network-impl-6 already shipped.
+                    const bool isAerialPerspectiveVolume = requestedName.rfind("AtmosphereAerialPerspectiveVolume", 0) == 0;
+                    const VolumeTexturePreviewInterpretation interpretation = isAerialPerspectiveVolume
+                        ? VolumeTexturePreviewInterpretation::AtmosphereAerialPerspective
+                        : VolumeTexturePreviewInterpretation::GenericDensityInAlpha;
+
+                    const VolumeTexturePreviewRenderer::CapturedRawPixels raw = m_volumeTexturePreviewRenderer.RenderPreview(
+                        m_renderer, volumeSnapshot->target, volumeSnapshot->state, interpretation);
 
                     // raw.pixels is already tightly-packed RGBA8 (see Phase 3's
                     // own RenderPreview() doc comment) - no BGRA swizzle, no

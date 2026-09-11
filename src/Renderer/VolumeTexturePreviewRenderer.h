@@ -15,6 +15,17 @@ namespace gte {
 
 class Renderer;
 
+// atmosphere-scattering-2 campaign, Phase 4
+// (task_manager/atmosphere-scattering-2/PHASE4_ATMOSPHERE_AWARE_VOLUME_DEBUG_PREVIEW.md)
+// - which raw-texel -> density/color interpretation VolumeTexturePreview.comp
+// uses. Auto-selected by RenderPreview()'s own caller (Application.cpp) based
+// on the requested texture_name string - never exposed as a new HTTP query
+// parameter (see PHASE0_MASTER_STRATEGY.md's own Locked Design Decision 6).
+enum class VolumeTexturePreviewInterpretation : std::int32_t {
+    GenericDensityInAlpha = 0, // network-impl-6's original, still-default interpretation - UNCHANGED.
+    AtmosphereAerialPerspective = 1, // atmosphere-scattering-2 Phase 4 - see VolumeTexturePreview.comp's own doc comment.
+};
+
 // network-impl-6 campaign, Phase 3. A small, self-contained, ON-DEMAND
 // (never per-frame) GPU compute renderer that raymarches an arbitrary live
 // VolumeTexture into a fixed-size 2D RGBA8 thumbnail - the "Volume mode"
@@ -64,7 +75,13 @@ public:
     // mirroring CaptureImagePixels()'s existing "restore afterward"
     // discipline (a later graph-recorded frame touching the SAME volume
     // texture must see it in the state it expects).
-    CapturedRawPixels RenderPreview(Renderer& renderer, const VolumeTarget& volume, const rg::ResourceState& previousState);
+    // `interpretation` selects the raw-texel -> density/color derivation
+    // VolumeTexturePreview.comp uses (see the enum's own doc comment above) -
+    // this codebase's own convention favors explicit call sites over relying
+    // on the default, so pass it explicitly at every real call site even
+    // though a default is provided here for convenience/safety.
+    CapturedRawPixels RenderPreview(Renderer& renderer, const VolumeTarget& volume, const rg::ResourceState& previousState,
+        VolumeTexturePreviewInterpretation interpretation = VolumeTexturePreviewInterpretation::GenericDensityInAlpha);
 
 private:
     void EnsureInitialized(Renderer& renderer);
