@@ -18,6 +18,9 @@ class Renderer;
 // atmosphere-scattering-2 campaign, Phase 4
 // (task_manager/atmosphere-scattering-2/PHASE4_ATMOSPHERE_AWARE_VOLUME_DEBUG_PREVIEW.md)
 // - which raw-texel -> density/color interpretation VolumeTexturePreview.comp
+// uses, AND (as of atmosphere-scattering-3 campaign, Phase 2 -
+// task_manager/atmosphere-scattering-3/PHASE2_ATMOSPHERE_AWARE_PREVIEW_CAMERA_FRAMING.md)
+// which camera/proxy-box FRAMING VolumeTexturePreviewRenderer::RenderPreview()
 // uses. Auto-selected by RenderPreview()'s own caller (Application.cpp) based
 // on the requested texture_name string - never exposed as a new HTTP query
 // parameter (see PHASE0_MASTER_STRATEGY.md's own Locked Design Decision 6).
@@ -76,7 +79,9 @@ public:
     // discipline (a later graph-recorded frame touching the SAME volume
     // texture must see it in the state it expects).
     // `interpretation` selects the raw-texel -> density/color derivation
-    // VolumeTexturePreview.comp uses (see the enum's own doc comment above) -
+    // VolumeTexturePreview.comp uses, AND (as of atmosphere-scattering-3
+    // campaign, Phase 2) which camera/proxy-box FRAMING this method itself
+    // uses internally (see the enum's own doc comment above) -
     // this codebase's own convention favors explicit call sites over relying
     // on the default, so pass it explicitly at every real call site even
     // though a default is provided here for convenience/safety.

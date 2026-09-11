@@ -19,6 +19,33 @@ constexpr float kFovYDegrees = 45.0f;
 // edge.
 constexpr float kDistanceMargin = 1.2f;
 
+// atmosphere-scattering-3 campaign, Phase 2 - fixed box half-extents for the Aerial
+// Perspective preview: X/Y stay modest (narrower than the generic
+// function's own 0.5, deliberately, to leave headroom below), while Z (the
+// depth/distance axis) is given a much LARGER, fixed half-extent so it
+// reads as the visually dominant axis - matching how the reference concept
+// diagram (task_manager/atmosphere-scattering-3/
+// aerial-persepective-lut-3d-texture.png) draws it: a shape that visibly
+// RECEDES away from the camera, not a flat slab. These two constants (and
+// the camera angle ones below) are explicitly re-tuned empirically in
+// PHASE4_VISUAL_TUNING_AGAINST_REFERENCE_IMAGE.md - treat the values below
+// as a reasonable, principled STARTING point, not a final, load-bearing
+// choice.
+constexpr float kAerialPreviewXYHalfExtent = 0.35f;
+constexpr float kAerialPreviewDepthHalfExtent = 0.9f; // ~2.5x the XY half-extent.
+
+// A near-SIDE-ON viewing angle - UNLIKE ComputeVolumeCameraSetup()'s own
+// true-isometric 45/35.26 degree angle, this is chosen so the camera looks
+// mostly ACROSS the elongated depth axis (rather than staring down its own
+// barrel), which is what actually reveals a near-to-far color/opacity
+// transition as a visible gradient across the rendered frame - the same
+// "camera positioned to one side, subject recedes toward the other side of
+// frame" composition the reference diagram itself uses.
+constexpr float kAerialPreviewAzimuthDegrees = 75.0f;
+constexpr float kAerialPreviewElevationDegrees = 18.0f;
+constexpr float kAerialPreviewFovYDegrees = 40.0f;
+constexpr float kAerialPreviewDistanceMargin = 1.15f;
+
 } // namespace
 
 VolumeCameraSetup ComputeVolumeCameraSetup(int width, int height, int depth)
@@ -59,6 +86,35 @@ VolumeCameraSetup ComputeVolumeCameraSetup(int width, int height, int depth)
     setup.right = Normalize(Cross(worldUp, setup.forward));
     setup.up = Cross(setup.forward, setup.right);
 
+    return setup;
+}
+
+VolumeCameraSetup ComputeAtmosphereAerialPerspectivePreviewCameraSetup(int width, int height, int depth)
+{
+    (void)width;
+    (void)height;
+    (void)depth; // Deliberately unused - see this function's own header comment in VolumeTexturePreviewMath.h.
+
+    VolumeCameraSetup setup;
+    setup.boxHalfExtents = Vec3(kAerialPreviewXYHalfExtent, kAerialPreviewXYHalfExtent, kAerialPreviewDepthHalfExtent);
+
+    const float fovYRadians = DegToRad(kAerialPreviewFovYDegrees);
+    setup.tanHalfFovY = std::tan(fovYRadians * 0.5f);
+
+    const float boundingRadius = Length(setup.boxHalfExtents);
+    const float distance = (boundingRadius / std::sin(fovYRadians * 0.5f)) * kAerialPreviewDistanceMargin;
+
+    const float azimuthRadians = DegToRad(kAerialPreviewAzimuthDegrees);
+    const float elevationRadians = DegToRad(kAerialPreviewElevationDegrees);
+    const float cosElevation = std::cos(elevationRadians);
+    const Vec3 directionFromCenter = Vec3(cosElevation * std::sin(azimuthRadians), std::sin(elevationRadians),
+        cosElevation * std::cos(azimuthRadians));
+
+    setup.eyePosition = directionFromCenter * distance;
+    setup.forward = Normalize(Vec3::Zero() - setup.eyePosition);
+    const Vec3 worldUp = Vec3::Up();
+    setup.right = Normalize(Cross(worldUp, setup.forward));
+    setup.up = Cross(setup.forward, setup.right);
     return setup;
 }
 

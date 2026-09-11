@@ -155,6 +155,42 @@ TEST(VolumeTexturePreviewMathTest, AerialPerspectiveVolumeDimensionsProduceSever
     EXPECT_LT(depthToWidthRatio, 0.3f); // 0.25 in practice - comfortably confirms the flattening.
 }
 
+// --- atmosphere-scattering-3 campaign, Phase 2 -----------------------------
+// (task_manager/atmosphere-scattering-3/PHASE2_ATMOSPHERE_AWARE_PREVIEW_CAMERA_FRAMING.md)
+// ComputeAtmosphereAerialPerspectivePreviewCameraSetup() - the SECOND,
+// dedicated camera + proxy-box setup used ONLY for the Aerial Perspective
+// froxel volume's own HTTP preview. Deliberately the OPPOSITE of the generic
+// function's own behavior for these same dimensions (see Phase 1's own
+// characterization test above) - depth must now be the visually DOMINANT
+// axis, not the smallest.
+
+TEST(VolumeTexturePreviewMathTest, AtmosphereAerialPerspectivePreviewProducesADepthDominantBox)
+{
+    const VolumeCameraSetup setup = ComputeAtmosphereAerialPerspectivePreviewCameraSetup(128, 128, 32);
+    // The OPPOSITE of the generic function's own behavior for these same
+    // dimensions (see PHASE1's characterization test) - depth must now be
+    // the LARGEST axis, not the smallest.
+    EXPECT_GT(setup.boxHalfExtents.z, setup.boxHalfExtents.x);
+    EXPECT_GT(setup.boxHalfExtents.z, setup.boxHalfExtents.y);
+}
+
+TEST(VolumeTexturePreviewMathTest, AtmosphereAerialPerspectivePreviewCameraBasisIsOrthonormal)
+{
+    const VolumeCameraSetup setup = ComputeAtmosphereAerialPerspectivePreviewCameraSetup(128, 128, 32);
+    EXPECT_NEAR(Length(setup.forward), 1.0f, 1e-4f);
+    EXPECT_NEAR(Length(setup.right), 1.0f, 1e-4f);
+    EXPECT_NEAR(Length(setup.up), 1.0f, 1e-4f);
+    EXPECT_NEAR(Dot(setup.forward, setup.right), 0.0f, 1e-4f);
+    EXPECT_NEAR(Dot(setup.forward, setup.up), 0.0f, 1e-4f);
+    EXPECT_NEAR(Dot(setup.right, setup.up), 0.0f, 1e-4f);
+}
+
+TEST(VolumeTexturePreviewMathTest, AtmosphereAerialPerspectivePreviewEyeSitsOutsideTheBoundingSphere)
+{
+    const VolumeCameraSetup setup = ComputeAtmosphereAerialPerspectivePreviewCameraSetup(128, 128, 32);
+    const float boundingRadius = Length(setup.boxHalfExtents);
+    EXPECT_GT(Length(setup.eyePosition), boundingRadius);
+}
 
 } // namespace
 } // namespace gte

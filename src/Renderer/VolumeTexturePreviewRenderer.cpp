@@ -133,8 +133,11 @@ VolumeTexturePreviewRenderer::CapturedRawPixels VolumeTexturePreviewRenderer::Re
 {
     EnsureInitialized(renderer);
 
-    const VolumeCameraSetup setup = ComputeVolumeCameraSetup(
-        static_cast<int>(volume.extent.width), static_cast<int>(volume.extent.height), static_cast<int>(volume.extent.depth));
+    const VolumeCameraSetup setup = (interpretation == VolumeTexturePreviewInterpretation::AtmosphereAerialPerspective)
+        ? ComputeAtmosphereAerialPerspectivePreviewCameraSetup(static_cast<int>(volume.extent.width),
+              static_cast<int>(volume.extent.height), static_cast<int>(volume.extent.depth))
+        : ComputeVolumeCameraSetup(static_cast<int>(volume.extent.width), static_cast<int>(volume.extent.height),
+              static_cast<int>(volume.extent.depth));
 
     // Every call serves a DIFFERENT volume image (unlike a per-model cache
     // elsewhere in this engine that only rewrites once) - binding 0 must be

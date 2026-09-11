@@ -47,6 +47,35 @@ struct VolumeCameraSetup {
 // on `width`/`height`/`depth`.
 VolumeCameraSetup ComputeVolumeCameraSetup(int width, int height, int depth);
 
+// atmosphere-scattering-3 campaign, Phase 2
+// (task_manager/atmosphere-scattering-3/PHASE2_ATMOSPHERE_AWARE_PREVIEW_CAMERA_FRAMING.md)
+// - a SECOND, dedicated camera + proxy-box setup, used ONLY for the Aerial
+// Perspective froxel volume's own HTTP preview (auto-selected by
+// VolumeTexturePreviewRenderer::RenderPreview() based on its own
+// `interpretation` parameter - mirrors VolumeTexturePreviewInterpretation's
+// existing selection convention exactly, see VolumeTexturePreviewRenderer.h).
+//
+// UNLIKE ComputeVolumeCameraSetup() above, this deliberately does NOT scale
+// boxHalfExtents proportionally to the volume's raw texel counts - for a
+// camera-frustum-shaped froxel LUT, width/height (screen-space column/row
+// index) and depth (camera-relative distance SLICE index) are fundamentally
+// different UNITS that merely happen to be stored inside the same 3D
+// texture; treating all three as comparable physical lengths (which is the
+// textbook-CORRECT thing ComputeVolumeCameraSetup() does for an actual
+// spatial volume, e.g. a smoke/cloud Texture3D) squashes the ONE axis that
+// carries this LUT's entire near/far story into an imperceptible sliver -
+// see PHASE1_ROOT_CAUSE_INSTRUMENTATION_AND_REGRESSION_TESTS.md's own
+// characterization test (VolumeTexturePreviewMathTests.cpp,
+// AerialPerspectiveVolumeDimensionsProduceSeverelyFlattenedDepthAxisUnderGenericFunction)
+// for the exact measured numbers this function exists to avoid repeating.
+//
+// `width`/`height`/`depth` are accepted (matching ComputeVolumeCameraSetup()'s
+// own signature, so both functions are trivially interchangeable at the call
+// site) but deliberately UNUSED for the box shape itself - kept as
+// parameters purely so a future maintainer isn't surprised the two
+// functions don't share a signature; do not remove them.
+VolumeCameraSetup ComputeAtmosphereAerialPerspectivePreviewCameraSetup(int width, int height, int depth);
+
 // Ray-box intersection against a box centered at the origin with the given
 // half-extents (Vec3, one entry per axis) - a straight C++ port of the
 // how-to reference material's own RayBox() HLSL function (see
