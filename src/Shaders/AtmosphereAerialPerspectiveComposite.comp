@@ -9,6 +9,17 @@
 // the Sky Background pass (3.2, same frame, same view, drawn earlier into
 // this SAME source color texture) already wrote there.
 //
+// atmosphere-scattering-2 campaign, Phase 2
+// (task_manager/atmosphere-scattering-2/PHASE2_AERIAL_COMPOSITE_PRECISION_FIXES.md)
+// - fixes two precision gaps vs. pl-sky_aerial_perspective.md §5: point 7 (a
+// half-texel Z-bias when converting this pixel's own view distance into a
+// volume Z lookup coordinate, since slice i stores the CUMULATIVE value at
+// that slice's FAR boundary while a 3D texture sample lands on texel
+// CENTERS) and point 9 (a first-slice fade-in blend, so geometry falling
+// inside the coarse, nearest froxel slice doesn't show a visible seam/pop
+// - see main()'s own boundaryU/halfTexelZ/sampledAerial/firstSliceBlend
+// locals below for both fixes).
+//
 // BINDING CONVENTION: binding 0 = sampler2D sourceColor (this view's
 // original color, POST-Sky-Background-pass); binding 1 = sampler2D
 // sourceDepth (this view's own DepthBuffer, sampled - requires
@@ -97,11 +108,36 @@ void main()
     }
 
     ivec3 volumeSize = textureSize(aerialPerspectiveVolume, 0);
+    float sliceCount = float(volumeSize.z);
     float slice =
-        ViewDepthToFroxelSlice(viewDistanceKm, float(volumeSize.z), maxDistanceKm, depthExponent);
-    float sliceUv = clamp(slice / float(volumeSize.z), 0.0, 1.0);
+        ViewDepthToFroxelSlice(viewDistanceKm, sliceCount, maxDistanceKm, depthExponent);
+    float boundaryU = clamp(slice / sliceCount, 0.0, 1.0);
 
-    vec4 aerial = texture(aerialPerspectiveVolume, vec3(uv, sliceUv));
+    // Half-texel Z-bias (pl-sky_aerial_perspective.md §5, point 7): slice i
+    // stores the CUMULATIVE value at that slice's FAR boundary, but a 3D
+    // texture sample lands on texel CENTERS - bias boundaryU back by half a
+    // texel so the sample lands on the texel whose stored value actually
+    // corresponds to this distance, then re-clamp into the valid
+    // texel-center range (mirrors ClampLutUvHalfTexelInset()'s existing 2D
+    // pattern in AtmosphereCommon.glsl, applied here to a single Z axis
+    // instead of a vec2).
+    float halfTexelZ = 0.5 / sliceCount;
+    float sliceUv = clamp(boundaryU - halfTexelZ, halfTexelZ, 1.0 - halfTexelZ);
+
+    vec4 sampledAerial = texture(aerialPerspectiveVolume, vec3(uv, sliceUv));
+
+    // First-slice fade-in (pl-sky_aerial_perspective.md §5, point 9):
+    // geometry that falls inside the COARSE first froxel slice would
+    // otherwise show a visible seam/pop, since that slice's own internal
+    // precision is the poorest in the whole volume (see
+    // AtmosphereAerialPerspectiveVolume.comp's own quadratic depth-slice
+    // distribution - slice 0 covers the smallest, most quickly-changing
+    // distance range). Blends from "no scattering added, full transmittance"
+    // (a pure pass-through of sceneColor) up to the real sampled value as
+    // boundaryU sweeps across slice 0's own span (0 .. 1/sliceCount).
+    float firstSliceBlend = clamp(boundaryU * sliceCount, 0.0, 1.0);
+    vec4 aerial = mix(vec4(0.0, 0.0, 0.0, 1.0), sampledAerial, firstSliceBlend);
+
     // Phase 8 (ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md) -
     // aerialPerspectiveStrength (pc.aerialPerspectiveStrengthAndPad.x)
     // scales the effect's overall contribution: 1.0 reproduces the
