@@ -37,8 +37,13 @@ layout(push_constant) uniform PushConstants {
     // aerialPerspectiveStrength, an Editor "Atmosphere" panel-tunable
     // overall multiplier for the effect (1.0 = unchanged physical result,
     // 0.0 = fully disabled/pass-through) - see main()'s own use of it
-    // below. .yzw are reserved padding, matching this block's existing
-    // "one vec4 group per logical value" convention.
+    // below. As of atmosphere-scattering-2 campaign Phase 1, .y/.z are no
+    // longer reserved padding - .y = aerialPerspectiveMaxDistanceKm, .z =
+    // aerialPerspectiveDepthExponent (both mirrored from AtmosphereSettings,
+    // the SAME values AtmosphereAerialPerspectiveVolume.comp's own
+    // frameUniforms fields use to GENERATE this volume - this pass's own
+    // Z-slice lookup must stay the exact inverse of that generation
+    // mapping). .w remains reserved padding.
     vec4 aerialPerspectiveStrengthAndPad;
 } pc;
 
@@ -47,13 +52,14 @@ layout(binding = 1) uniform sampler2D sourceDepth;
 layout(binding = 2) uniform sampler3D aerialPerspectiveVolume;
 layout(binding = 3, rgba8) uniform writeonly image2D destinationImage;
 
-// MUST match src/Renderer/Atmosphere/AtmosphereLutRenderer.cpp's own
-// kAerialMaxDistanceKm/kAerialDepthExponent constants (also mirrored in
-// AtmosphereAerialPerspectiveVolume.comp) - these describe the SAME froxel
-// volume this pass reads, so the Z-slice mapping used here to LOOK UP a
-// froxel must be the exact inverse of the mapping used to GENERATE it.
-const float kAerialMaxDistanceKm = 10.0;
-const float kAerialDepthExponent = 2.0;
+// maxDistanceKm/depthExponent are now read from the push-constant block
+// above (pc.aerialPerspectiveStrengthAndPad.y/.z), no longer local `const`
+// literals - as of atmosphere-scattering-2 campaign Phase 1, they are
+// mirrored, per-frame, from AtmosphereSettings (see AtmosphereLutRenderer.cpp's
+// AddAerialPerspectiveCompositePass()) rather than hardcoded here - these
+// still describe the SAME froxel volume this pass reads, so the Z-slice
+// mapping used here to LOOK UP a froxel must be the exact inverse of the
+// mapping used to GENERATE it.
 
 void main()
 {
@@ -65,6 +71,9 @@ void main()
         // ComputeDispatch.h's own header comment.
         return;
     }
+
+    float maxDistanceKm = pc.aerialPerspectiveStrengthAndPad.y;
+    float depthExponent = pc.aerialPerspectiveStrengthAndPad.z;
 
     vec2 uv = (vec2(texel) + vec2(0.5)) / vec2(outputSize);
     vec2 ndc = uv * 2.0 - 1.0;
@@ -78,7 +87,7 @@ void main()
         // being "infinitely far": always sample the volume's FARTHEST Z
         // slice, rather than reconstructing a (potentially unstable, or
         // simply much-closer-than-10km) far-clip-plane world position.
-        viewDistanceKm = kAerialMaxDistanceKm;
+        viewDistanceKm = maxDistanceKm;
     } else {
         vec4 clipPos = vec4(ndc, rawDepth, 1.0);
         vec4 worldPos4 = pc.invViewProjection * clipPos;
@@ -89,7 +98,7 @@ void main()
 
     ivec3 volumeSize = textureSize(aerialPerspectiveVolume, 0);
     float slice =
-        ViewDepthToFroxelSlice(viewDistanceKm, float(volumeSize.z), kAerialMaxDistanceKm, kAerialDepthExponent);
+        ViewDepthToFroxelSlice(viewDistanceKm, float(volumeSize.z), maxDistanceKm, depthExponent);
     float sliceUv = clamp(slice / float(volumeSize.z), 0.0, 1.0);
 
     vec4 aerial = texture(aerialPerspectiveVolume, vec3(uv, sliceUv));

@@ -375,6 +375,17 @@ struct AtmosphereFrameUniforms {
     // is already exactly 4 vec4 columns (64 bytes) with no extra padding,
     // matching Mat4::Data()'s column-major layout exactly.
     mat4 invViewProjection;
+
+    // Group 8 (16 bytes, atmosphere-scattering-2 campaign Phase 1) - mirrors
+    // src/Renderer/Atmosphere/AtmosphereTypes.h's AtmosphereFrameUniforms
+    // EXACTLY (same field names/order) - the Aerial Perspective froxel
+    // volume's own tunable ray-march parameters, sourced from
+    // AtmosphereSettings (Editor "Atmosphere" panel) instead of hardcoded
+    // shader constants.
+    float aerialPerspectiveMaxDistanceKm;
+    float aerialPerspectiveDepthExponent;
+    float aerialPerspectiveSamplesPerSliceAsFloat;
+    float aerialPerspectiveScatteringExaggeration;
 };
 
 // ----------------------------------------------------------------------

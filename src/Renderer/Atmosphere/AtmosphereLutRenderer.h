@@ -272,7 +272,13 @@ public:
     // "Atmosphere" panel-tunable overall multiplier for the effect (1.0 =
     // unchanged physical result, 0.0 = fully disabled/pass-through) - see
     // AtmosphereAerialPerspectiveComposite.comp's own doc comment for the
-    // exact blend formula this scales.
+    // exact blend formula this scales. `maxDistanceKm`/`depthExponent`
+    // (atmosphere-scattering-2 campaign Phase 1) are this composite pass's
+    // OWN copy of the SAME two values AddAerialPerspectiveVolumePass()'s own
+    // frameUniforms fields use to GENERATE the volume this pass reads - this
+    // pass's Z-slice lookup must stay the exact inverse of that generation
+    // mapping, so both values are sourced from the SAME AtmosphereSettings
+    // fields as the volume-generation pass (see AtmospherePassSequence.cpp).
     //
     // Returns the composited output's TextureHandle - the CALLER must add
     // it to this call's own outputs root set, or this pass's write will be
@@ -282,7 +288,8 @@ public:
         rg::TextureHandle sourceColorHandle, VkSampler sourceColorSampler, VkImageView sourceDepthView,
         VkSampler sourceDepthSampler, rg::VolumeTextureHandle aerialPerspectiveVolumeHandle,
         const char* aerialPerspectiveVolumeName, const Mat4& invViewProjection, Vec3 cameraWorldPosition,
-        float aerialPerspectiveStrength, VkExtent2D extent, const char* outputTextureName);
+        float aerialPerspectiveStrength, float maxDistanceKm, float depthExponent, VkExtent2D extent,
+        const char* outputTextureName);
 
     // Returns a pointer to `outputTextureName`'s own persistent composited
     // output RenderTexture (the SAME one AddAerialPerspectiveCompositePass()

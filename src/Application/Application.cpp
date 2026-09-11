@@ -411,7 +411,7 @@ int Application::Run()
 
                             const AtmosphereViewLutHandles gameAtmosphere = AddAtmosphereViewLutPasses(b, m_renderer,
                                 m_atmosphereLutRenderer, m_game.GetRegistry(), atmosphereParameters,
-                                atmosphereSharedLuts, gameEyeWorldPosition, gameViewProjection,
+                                m_atmosphereSettings, atmosphereSharedLuts, gameEyeWorldPosition, gameViewProjection,
                                 "AtmosphereSkyViewLut_GameView", "AtmosphereAerialPerspectiveVolume_GameView");
                             outputs.push_back(gameAtmosphere.skyViewLutHandle);
                             // A VolumeTextureHandle can never go into
@@ -470,8 +470,9 @@ int Application::Run()
                             const rg::TextureHandle gameComposited = AddAtmosphereCompositePass(b, m_renderer,
                                 m_atmosphereLutRenderer, *gameTarget, h, gameAtmosphere.aerialPerspectiveVolumeHandle,
                                 "AtmosphereAerialPerspectiveVolume_GameView", gameAtmosphere.frameUniforms,
-                                gameEyeWorldPosition, m_atmosphereSettings.aerialPerspectiveStrength, extent,
-                                "GameViewComposited");
+                                gameEyeWorldPosition, m_atmosphereSettings.aerialPerspectiveStrength,
+                                m_atmosphereSettings.aerialPerspectiveMaxDistanceKm,
+                                m_atmosphereSettings.aerialPerspectiveDepthExponent, extent, "GameViewComposited");
                             outputs.push_back(gameComposited);
                         }
                         if (sceneTarget != nullptr) {
@@ -493,7 +494,7 @@ int Application::Run()
 
                             const AtmosphereViewLutHandles sceneAtmosphere = AddAtmosphereViewLutPasses(b, m_renderer,
                                 m_atmosphereLutRenderer, m_game.GetRegistry(), atmosphereParameters,
-                                atmosphereSharedLuts, sceneEyeWorldPosition, sceneViewProjection,
+                                m_atmosphereSettings, atmosphereSharedLuts, sceneEyeWorldPosition, sceneViewProjection,
                                 "AtmosphereSkyViewLut_SceneView", "AtmosphereAerialPerspectiveVolume_SceneView");
                             outputs.push_back(sceneAtmosphere.skyViewLutHandle);
                             b.KeepVolumeTextureOutput(sceneAtmosphere.aerialPerspectiveVolumeHandle);
@@ -525,8 +526,9 @@ int Application::Run()
                             const rg::TextureHandle sceneComposited = AddAtmosphereCompositePass(b, m_renderer,
                                 m_atmosphereLutRenderer, *sceneTarget, h, sceneAtmosphere.aerialPerspectiveVolumeHandle,
                                 "AtmosphereAerialPerspectiveVolume_SceneView", sceneAtmosphere.frameUniforms,
-                                sceneEyeWorldPosition, m_atmosphereSettings.aerialPerspectiveStrength, extent,
-                                "SceneViewComposited");
+                                sceneEyeWorldPosition, m_atmosphereSettings.aerialPerspectiveStrength,
+                                m_atmosphereSettings.aerialPerspectiveMaxDistanceKm,
+                                m_atmosphereSettings.aerialPerspectiveDepthExponent, extent, "SceneViewComposited");
                             outputs.push_back(sceneComposited);
 
                             // Phase 7 of the compute-shader campaign

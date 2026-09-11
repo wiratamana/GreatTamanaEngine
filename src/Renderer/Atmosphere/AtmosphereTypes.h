@@ -178,11 +178,26 @@ struct AtmosphereFrameUniforms {
     // an invertible, harmless placeholder rather than a singular all-zero
     // matrix.
     Mat4 invViewProjection = Mat4::Identity();
+
+    // Group 8 (16 bytes, atmosphere-scattering-2 campaign Phase 1) - the
+    // Aerial Perspective froxel volume's own tunable ray-march parameters,
+    // now sourced from AtmosphereSettings (Editor "Atmosphere" panel) instead
+    // of hardcoded shader constants - see AtmosphereAerialPerspectiveVolume.comp.
+    // Deliberately stored here (per-VIEW frame uniforms), not in
+    // AtmosphereParametersGpu (session-stable physical constants), since a
+    // future per-view override is plausible even though today both Game/Scene
+    // views always receive the SAME AtmosphereSettings-sourced values.
+    float aerialPerspectiveMaxDistanceKm = 10.0f;
+    float aerialPerspectiveDepthExponent = 2.0f;
+    float aerialPerspectiveSamplesPerSliceAsFloat = 8.0f; // Stored as float (GLSL storage-buffer int alignment is fiddly); shader rounds+clamps to [1, 8].
+    float aerialPerspectiveScatteringExaggeration = 1.0f; // Unused until Phase 3 - see that phase's own file.
 };
-static_assert(sizeof(AtmosphereFrameUniforms) == 112,
+static_assert(sizeof(AtmosphereFrameUniforms) == 128,
     "AtmosphereFrameUniforms must be exactly three 16-byte std140/std430-"
     "compatible groups (3 * 16 = 48 bytes) plus one 64-byte mat4 group "
-    "(48 + 64 = 112 bytes) - see each group's own doc comment above.");
+    "(48 + 64 = 112 bytes) plus one new 16-byte group (atmosphere-scattering-2 "
+    "Phase 1 aerial perspective tunables) - 48 + 64 + 16 = 128 bytes total - "
+    "see each group's own doc comment above.");
 
 // Atmosphere Scattering + Aerial Perspective campaign, Phase 8
 // (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md)
@@ -231,6 +246,17 @@ struct AtmosphereSettings {
     // never out of bounds even if this value briefly disagrees with the
     // volume's real depth.
     int aerialPerspectiveDebugSliceIndex = 16;
+
+    // atmosphere-scattering-2 campaign, Phase 1/3 - Aerial Perspective froxel
+    // volume ray-march tunables, mirrored into every view's own
+    // AtmosphereFrameUniforms (Application.cpp) each frame. Defaults here are
+    // Phase 1's OWN "zero behavior change" values (identical to the pre-Phase-1
+    // hardcoded shader constants) - Phase 3 changes these DEFAULTS, not this
+    // phase.
+    float aerialPerspectiveMaxDistanceKm = 10.0f;
+    float aerialPerspectiveDepthExponent = 2.0f;
+    int aerialPerspectiveSamplesPerSlice = 8;
+    float aerialPerspectiveScatteringExaggeration = 1.0f;
 };
 
 } // namespace gte

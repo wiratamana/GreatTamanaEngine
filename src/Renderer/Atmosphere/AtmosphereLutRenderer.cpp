@@ -89,11 +89,17 @@ constexpr std::uint32_t kAerialPerspectiveCompositeLocalSizeY = 16;
 // `aerialPerspectiveStrengthAndPad` - the Editor's "Atmosphere" panel-
 // tunable overall strength multiplier (`.x`), packed with 3 reserved
 // padding floats into its own vec4 group, matching this struct's existing
-// "one vec4 group per logical value" convention exactly.
+// "one vec4 group per logical value" convention exactly. atmosphere-
+// scattering-2 campaign Phase 1 repurposed `.y`/`.z` (no longer reserved
+// padding) into this composite pass's own copy of
+// aerialPerspectiveMaxDistanceKm/aerialPerspectiveDepthExponent - the SAME
+// two values AddAerialPerspectiveVolumePass()'s own frameUniforms fields use
+// to GENERATE the volume this pass reads (see AtmosphereAerialPerspectiveComposite.comp's
+// own doc comment) - `.w` remains reserved padding.
 struct AerialPerspectiveCompositePushConstants {
     float invViewProjection[16];
     float cameraWorldPositionAndScale[4]; // xyz = camera world position, w = worldUnitsPerKm.
-    float aerialPerspectiveStrengthAndPad[4]; // x = aerialPerspectiveStrength, yzw = reserved padding.
+    float aerialPerspectiveStrengthAndPad[4]; // x = aerialPerspectiveStrength, y = aerialPerspectiveMaxDistanceKm, z = aerialPerspectiveDepthExponent, w = reserved padding.
 };
 
 // Phase 9 (ATMOSPHERE_PHASE9_VALIDATION_DEBUG_TOOLING_AND_DOCS_v1.md, Step
@@ -707,7 +713,8 @@ rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveCompositePass(rg::R
     Renderer& renderer, rg::TextureHandle sourceColorHandle, VkSampler sourceColorSampler,
     VkImageView sourceDepthView, VkSampler sourceDepthSampler, rg::VolumeTextureHandle aerialPerspectiveVolumeHandle,
     const char* aerialPerspectiveVolumeName, const Mat4& invViewProjection, Vec3 cameraWorldPosition,
-    float aerialPerspectiveStrength, VkExtent2D extent, const char* outputTextureName)
+    float aerialPerspectiveStrength, float maxDistanceKm, float depthExponent, VkExtent2D extent,
+    const char* outputTextureName)
 {
     EnsureAerialPerspectiveCompositeInitialized(renderer);
     AerialPerspectiveCompositeViewState& viewState =
@@ -744,8 +751,8 @@ rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveCompositePass(rg::R
     pushConstants.cameraWorldPositionAndScale[2] = cameraWorldPosition.z;
     pushConstants.cameraWorldPositionAndScale[3] = kWorldUnitsPerKilometer;
     pushConstants.aerialPerspectiveStrengthAndPad[0] = aerialPerspectiveStrength;
-    pushConstants.aerialPerspectiveStrengthAndPad[1] = 0.0f;
-    pushConstants.aerialPerspectiveStrengthAndPad[2] = 0.0f;
+    pushConstants.aerialPerspectiveStrengthAndPad[1] = maxDistanceKm;
+    pushConstants.aerialPerspectiveStrengthAndPad[2] = depthExponent;
     pushConstants.aerialPerspectiveStrengthAndPad[3] = 0.0f;
 
     builder.AddComputePass(

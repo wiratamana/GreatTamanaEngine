@@ -78,7 +78,15 @@ AtmosphereSharedLutHandles AddAtmosphereSharedLutPasses(rg::RenderGraphBuilder& 
 // frameUniforms.invViewProjection for the Aerial Perspective volume's own
 // froxel-ray reconstruction, and reused again later (unchanged) by
 // MakeRecordSkyBackgroundCallback()/AddAtmosphereCompositePass() for this
-// exact same view.
+// exact same view. `atmosphereSettings` (atmosphere-scattering-2 campaign
+// Phase 1) supplies the 4 Aerial Perspective froxel-volume ray-march
+// tunables (max distance/depth exponent/samples-per-slice/scattering
+// exaggeration) set onto `result.frameUniforms` from INSIDE this function,
+// right after ResolveAtmosphereFrameUniforms() returns and BEFORE
+// AddSkyViewLutPass()/AddAerialPerspectiveVolumePass() are called (so both
+// of those two calls' own GPU-side reads of frameUniforms already see the
+// live Editor-tunable values) - the Sky-View LUT pass itself ignores these
+// 4 fields entirely; only the Aerial Perspective Volume pass consumes them.
 //
 // The CALLER must add the returned Sky-View LUT TextureHandle to this
 // call's own outputs root set, AND call
@@ -92,9 +100,9 @@ struct AtmosphereViewLutHandles {
 };
 AtmosphereViewLutHandles AddAtmosphereViewLutPasses(rg::RenderGraphBuilder& builder, Renderer& renderer,
     AtmosphereLutRenderer& atmosphereLutRenderer, Registry& registry,
-    const AtmosphereParametersGpu& atmosphereParameters, const AtmosphereSharedLutHandles& sharedLuts,
-    Vec3 eyeWorldPosition, const Mat4& viewProjection, const char* skyViewLutName,
-    const char* aerialPerspectiveVolumeName);
+    const AtmosphereParametersGpu& atmosphereParameters, const AtmosphereSettings& atmosphereSettings,
+    const AtmosphereSharedLutHandles& sharedLuts, Vec3 eyeWorldPosition, const Mat4& viewProjection,
+    const char* skyViewLutName, const char* aerialPerspectiveVolumeName);
 
 // Builds a ready-to-pass-into-AddGameViewPass()/AddSceneViewPass()'s own
 // `recordSkyBackground` parameter (RenderPasses.h) - captures everything
@@ -123,13 +131,17 @@ std::function<void(VkCommandBuffer)> MakeRecordSkyBackgroundCallback(AtmosphereL
 // comment). `sourceColorHandle` is the SAME TextureHandle
 // AddGameViewPass()/AddSceneViewPass() was given for this view, this same
 // frame. `aerialPerspectiveStrength` (Phase 8) is the Editor's
-// "Atmosphere" panel-tunable overall multiplier for the effect. The
+// "Atmosphere" panel-tunable overall multiplier for the effect.
+// `maxDistanceKm`/`depthExponent` (atmosphere-scattering-2 campaign Phase 1)
+// are forwarded straight through, unchanged, to
+// AtmosphereLutRenderer::AddAerialPerspectiveCompositePass()'s own new
+// parameters of the same name - see that function's own doc comment. The
 // CALLER must add the returned TextureHandle to this call's own outputs
 // root set.
 rg::TextureHandle AddAtmosphereCompositePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
     AtmosphereLutRenderer& atmosphereLutRenderer, RenderTexture& viewRenderTexture, rg::TextureHandle sourceColorHandle,
     rg::VolumeTextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,
     const AtmosphereFrameUniforms& frameUniforms, Vec3 eyeWorldPosition, float aerialPerspectiveStrength,
-    VkExtent2D extent, const char* outputTextureName);
+    float maxDistanceKm, float depthExponent, VkExtent2D extent, const char* outputTextureName);
 
 } // namespace gte

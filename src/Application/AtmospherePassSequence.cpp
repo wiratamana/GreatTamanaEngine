@@ -39,13 +39,19 @@ AtmosphereSharedLutHandles AddAtmosphereSharedLutPasses(rg::RenderGraphBuilder& 
 
 AtmosphereViewLutHandles AddAtmosphereViewLutPasses(rg::RenderGraphBuilder& builder, Renderer& renderer,
     AtmosphereLutRenderer& atmosphereLutRenderer, Registry& registry,
-    const AtmosphereParametersGpu& atmosphereParameters, const AtmosphereSharedLutHandles& sharedLuts,
-    Vec3 eyeWorldPosition, const Mat4& viewProjection, const char* skyViewLutName,
-    const char* aerialPerspectiveVolumeName)
+    const AtmosphereParametersGpu& atmosphereParameters, const AtmosphereSettings& atmosphereSettings,
+    const AtmosphereSharedLutHandles& sharedLuts, Vec3 eyeWorldPosition, const Mat4& viewProjection,
+    const char* skyViewLutName, const char* aerialPerspectiveVolumeName)
 {
     AtmosphereViewLutHandles result;
     result.frameUniforms = ResolveAtmosphereFrameUniforms(registry, eyeWorldPosition);
     result.frameUniforms.invViewProjection = viewProjection.Inverse();
+    result.frameUniforms.aerialPerspectiveMaxDistanceKm = atmosphereSettings.aerialPerspectiveMaxDistanceKm;
+    result.frameUniforms.aerialPerspectiveDepthExponent = atmosphereSettings.aerialPerspectiveDepthExponent;
+    result.frameUniforms.aerialPerspectiveSamplesPerSliceAsFloat =
+        static_cast<float>(atmosphereSettings.aerialPerspectiveSamplesPerSlice);
+    result.frameUniforms.aerialPerspectiveScatteringExaggeration =
+        atmosphereSettings.aerialPerspectiveScatteringExaggeration;
 
     result.skyViewLutHandle = atmosphereLutRenderer.AddSkyViewLutPass(builder, renderer, atmosphereParameters,
         result.frameUniforms, sharedLuts.transmittanceLutHandle, sharedLuts.multiScatteringLutHandle, skyViewLutName);
@@ -72,12 +78,12 @@ rg::TextureHandle AddAtmosphereCompositePass(rg::RenderGraphBuilder& builder, Re
     AtmosphereLutRenderer& atmosphereLutRenderer, RenderTexture& viewRenderTexture, rg::TextureHandle sourceColorHandle,
     rg::VolumeTextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,
     const AtmosphereFrameUniforms& frameUniforms, Vec3 eyeWorldPosition, float aerialPerspectiveStrength,
-    VkExtent2D extent, const char* outputTextureName)
+    float maxDistanceKm, float depthExponent, VkExtent2D extent, const char* outputTextureName)
 {
     return atmosphereLutRenderer.AddAerialPerspectiveCompositePass(builder, renderer, sourceColorHandle,
         viewRenderTexture.Sampler(), viewRenderTexture.Target().depthImageView, viewRenderTexture.DepthSampler(),
         aerialPerspectiveVolumeHandle, aerialPerspectiveVolumeName, frameUniforms.invViewProjection, eyeWorldPosition,
-        aerialPerspectiveStrength, extent, outputTextureName);
+        aerialPerspectiveStrength, maxDistanceKm, depthExponent, extent, outputTextureName);
 }
 
 } // namespace gte

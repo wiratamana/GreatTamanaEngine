@@ -60,17 +60,17 @@ layout(binding = 4, rgba16f) uniform writeonly image3D destinationVolume;
 
 // SAME fixed constants as _reference/pl-sky/src/app.c's own defaults (see
 // task_manager/atmosphere-scattering-1/ATMOSPHERE_REFERENCE_NOTES.md,
-// Sections 2/5) - fixed, hardcoded, never a runtime-tunable Editor knob
-// (this phase's own "What We Will NOT Do"). The volume's actual
-// width/height/depth are read from imageSize(destinationVolume) below
-// rather than hardcoded here too (matches AtmosphereSkyViewLut.comp's own
-// "read imageSize(), don't hardcode resolution in the shader" convention),
-// but MUST match
+// Sections 2/5). As of atmosphere-scattering-2 campaign Phase 1, these are
+// now LIVE Editor-tunable values (Editor "Atmosphere" panel ->
+// AtmosphereSettings -> AtmosphereFrameUniforms, see frameUniforms.
+// aerialPerspectiveMaxDistanceKm/aerialPerspectiveDepthExponent/
+// aerialPerspectiveSamplesPerSliceAsFloat below), no longer fixed hardcoded
+// shader constants. The volume's actual width/height/depth are read from
+// imageSize(destinationVolume) below rather than hardcoded here too (matches
+// AtmosphereSkyViewLut.comp's own "read imageSize(), don't hardcode
+// resolution in the shader" convention), but MUST match
 // src/Renderer/Atmosphere/AtmosphereLutRenderer.cpp's own
 // kAerialPerspectiveVolumeWidth/Height/Depth constants (128x128x32).
-const float kAerialMaxDistanceKm = 10.0;
-const float kAerialDepthExponent = 2.0;
-const int kAerialSamplesPerSlice = 8;
 
 void main()
 {
@@ -83,6 +83,10 @@ void main()
         // simply do nothing.
         return;
     }
+
+    float maxDistanceKm = frameUniforms.aerialPerspectiveMaxDistanceKm;
+    float depthExponent = frameUniforms.aerialPerspectiveDepthExponent;
+    int samplesPerSlice = clamp(int(frameUniforms.aerialPerspectiveSamplesPerSliceAsFloat + 0.5), 1, 8);
 
     float planetRadiusKm = atmosphereParameters.planetRadiusKm;
 
@@ -113,15 +117,15 @@ void main()
 
     for (int slice = 0; slice < volumeSize.z; ++slice) {
         float distance0Km =
-            FroxelSliceToViewDepth(float(slice), float(volumeSize.z), kAerialMaxDistanceKm, kAerialDepthExponent);
+            FroxelSliceToViewDepth(float(slice), float(volumeSize.z), maxDistanceKm, depthExponent);
         float distance1Km =
-            FroxelSliceToViewDepth(float(slice + 1), float(volumeSize.z), kAerialMaxDistanceKm, kAerialDepthExponent);
+            FroxelSliceToViewDepth(float(slice + 1), float(volumeSize.z), maxDistanceKm, depthExponent);
         float sliceLengthKm = max(distance1Km - distance0Km, 0.0);
 
-        for (int sampleIndex = 0; sampleIndex < kAerialSamplesPerSlice; ++sampleIndex) {
-            float sampleU = (float(sampleIndex) + 0.5) / float(kAerialSamplesPerSlice);
+        for (int sampleIndex = 0; sampleIndex < samplesPerSlice; ++sampleIndex) {
+            float sampleU = (float(sampleIndex) + 0.5) / float(samplesPerSlice);
             float sampleDistanceKm = mix(distance0Km, distance1Km, sampleU);
-            float segmentLengthKm = sliceLengthKm / float(kAerialSamplesPerSlice);
+            float segmentLengthKm = sliceLengthKm / float(samplesPerSlice);
 
             vec3 currentPositionKm = rayOrigin + viewDirection * sampleDistanceKm;
             float radialLengthKm = length(currentPositionKm);
