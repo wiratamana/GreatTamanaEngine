@@ -577,6 +577,8 @@ if(GTE_ENABLE_EDITOR)
         src/Editor/GpuSkinningValidation.cpp
         src/Editor/AtmosphereTransmittanceLutValidation.h
         src/Editor/AtmosphereTransmittanceLutValidation.cpp
+        src/Editor/AtmosphereAerialPerspectiveLutInspection.h
+        src/Editor/AtmosphereAerialPerspectiveLutInspection.cpp
         src/Editor/TransformGizmo.h
         src/Editor/TransformGizmo.cpp
         src/Editor/DockLayout.h

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../AtmosphereAerialPerspectiveLutInspection.h"
 #include "../AtmosphereTransmittanceLutValidation.h"
 
 #include <optional>
@@ -40,8 +41,17 @@ class AtmosphereLutRenderer;
 //     ValidateAtmosphereTransmittanceLut());
 //   - a "Aerial Perspective Debug Slice" slider
 //     (AtmosphereSettings::aerialPerspectiveDebugSliceIndex).
+//
+// atmosphere-scattering-2 campaign, Phase 5
+// (task_manager/atmosphere-scattering-2/PHASE5_AERIAL_LUT_NUMERIC_VALIDATION_TOOL.md)
+// adds a THIRD such piece, following the exact same "caller owns the
+// cross-frame result, this panel stays stateless" convention -
+// `lastAerialInspectionResult` (an "Inspect Aerial Perspective LUT" button +
+// printed min/max/mean transmittance/in-scattering readout, calling
+// AtmosphereAerialPerspectiveLutInspection.h's InspectAerialPerspectiveVolume()).
 void BuildAtmospherePanel(EditorContext& ctx, AtmosphereSettings& settings, Renderer& renderer,
     AtmosphereLutRenderer& atmosphereLutRenderer,
-    std::optional<AtmosphereTransmittanceLutValidationResult>& lastValidationResult);
+    std::optional<AtmosphereTransmittanceLutValidationResult>& lastValidationResult,
+    std::optional<AtmosphereAerialPerspectiveLutInspectionResult>& lastAerialInspectionResult);
 
 } // namespace gte

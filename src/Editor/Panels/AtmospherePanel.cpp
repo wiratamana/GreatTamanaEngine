@@ -10,7 +10,8 @@ namespace gte {
 
 void BuildAtmospherePanel(EditorContext& /*ctx*/, AtmosphereSettings& settings, Renderer& renderer,
     AtmosphereLutRenderer& atmosphereLutRenderer,
-    std::optional<AtmosphereTransmittanceLutValidationResult>& lastValidationResult)
+    std::optional<AtmosphereTransmittanceLutValidationResult>& lastValidationResult,
+    std::optional<AtmosphereAerialPerspectiveLutInspectionResult>& lastAerialInspectionResult)
 {
     ImGui::Begin("Atmosphere");
 
@@ -65,6 +66,28 @@ void BuildAtmospherePanel(EditorContext& /*ctx*/, AtmosphereSettings& settings, 
         const bool passed = r.succeeded && r.texelsExceedingEpsilon == 0;
         ImGui::TextColored(passed ? ImVec4(0.3f, 1.0f, 0.3f, 1.0f) : ImVec4(1.0f, 0.4f, 0.3f, 1.0f), "%s",
             !r.succeeded ? "ERROR" : (passed ? "PASS" : "CHECK"));
+        ImGui::TextWrapped("%s", ToDiagnosticString(r).c_str());
+    }
+
+    // atmosphere-scattering-2 campaign, Phase 5
+    // (task_manager/atmosphere-scattering-2/PHASE5_AERIAL_LUT_NUMERIC_VALIDATION_TOOL.md)
+    // - the numeric, non-visual, objective aerial-perspective inspection
+    // tool's own button + readout, mirroring "Validate Transmittance LUT"
+    // above exactly. NOT a GPU-vs-CPU-oracle parity check like that one - a
+    // plain descriptive-statistics readback (min/max/mean transmittance and
+    // in-scattering magnitude across the whole volume).
+    ImGui::Separator();
+    if (ImGui::Button("Inspect Aerial Perspective LUT")) {
+        lastAerialInspectionResult = InspectAerialPerspectiveVolume(
+            renderer, atmosphereLutRenderer, "AtmosphereAerialPerspectiveVolume_GameView");
+    }
+    if (lastAerialInspectionResult.has_value()) {
+        const AtmosphereAerialPerspectiveLutInspectionResult& r = *lastAerialInspectionResult;
+        const bool ok = r.succeeded;
+        ImGui::TextColored(
+            ok ? (r.likelyVisibleAtDefaultExposure ? ImVec4(0.3f, 1.0f, 0.3f, 1.0f) : ImVec4(1.0f, 0.8f, 0.3f, 1.0f))
+               : ImVec4(1.0f, 0.4f, 0.3f, 1.0f),
+            "%s", !ok ? "ERROR" : (r.likelyVisibleAtDefaultExposure ? "LIKELY VISIBLE" : "LIKELY TOO FAINT"));
         ImGui::TextWrapped("%s", ToDiagnosticString(r).c_str());
     }
 

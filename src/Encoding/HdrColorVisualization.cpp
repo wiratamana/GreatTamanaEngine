@@ -5,15 +5,20 @@
 
 namespace gte::Encoding {
 
-namespace {
-
+// atmosphere-scattering-2 campaign, Phase 5
+// (task_manager/atmosphere-scattering-2/PHASE5_AERIAL_LUT_NUMERIC_VALIDATION_TOOL.md)
+// - moved out of this file's own anonymous namespace (was a private
+// `HalfToFloat()` helper) and renamed to `DecodeHalfFloat()`, now declared
+// publicly in HdrColorVisualization.h - a PURE visibility change, this
+// function's own body/behavior is completely unchanged.
+//
 // Plain IEEE 754 binary16 -> binary32 conversion (handles zero, subnormals,
 // normals, infinities, and NaN) - no hardware F16C instruction dependency,
 // since this is a rare, human/LLM-triggered debug-capture path, never a
 // per-frame hot path (see AGENTS.md's own "Named Texture Capture" section
 // on GET /get_texture's already-accepted vkDeviceWaitIdle() cost - this
 // function's own cost is negligible in comparison).
-float HalfToFloat(std::uint16_t half) noexcept
+float DecodeHalfFloat(std::uint16_t half) noexcept
 {
     const std::uint32_t sign = static_cast<std::uint32_t>(half & 0x8000u) << 16;
     std::uint32_t exponent = (half & 0x7C00u) >> 10;
@@ -43,6 +48,8 @@ float HalfToFloat(std::uint16_t half) noexcept
     std::memcpy(&result, &bits, sizeof(result));
     return result;
 }
+
+namespace {
 
 // A multi-scattering "response" value is typically small in absolute terms
 // (a fraction of the Transmittance LUT's own [0, 1] scale - scattering
@@ -96,9 +103,9 @@ bool ConvertHdrRgba16fToRgba8(
         std::memcpy(channels, rawRgba16f + i * 8, 8);
 
         std::uint8_t rgba[4];
-        rgba[0] = TonemapToByte(HalfToFloat(channels[0]));
-        rgba[1] = TonemapToByte(HalfToFloat(channels[1]));
-        rgba[2] = TonemapToByte(HalfToFloat(channels[2]));
+        rgba[0] = TonemapToByte(DecodeHalfFloat(channels[0]));
+        rgba[1] = TonemapToByte(DecodeHalfFloat(channels[1]));
+        rgba[2] = TonemapToByte(DecodeHalfFloat(channels[2]));
         rgba[3] = 255; // Alpha carries no meaningful data for this LUT (imageStore()'s own alpha is always 0.0) - always fully opaque for display.
 
         std::memcpy(outRgba8 + i * 4, rgba, 4);

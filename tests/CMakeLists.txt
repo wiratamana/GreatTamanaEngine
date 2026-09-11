@@ -1844,6 +1844,7 @@ if(GTE_ENABLE_EDITOR)
         Editor/MemoryPanelDataTests.cpp
         Editor/ProfilerPanelDataTests.cpp
         Editor/JobsPanelDataTests.cpp
+        Editor/AtmosphereAerialPerspectiveLutInspectionTests.cpp
     )
 
     # ProjectPanelData.h/.cpp (see src/Editor/ProjectPanelData.h) is only

@@ -51,4 +51,24 @@ namespace gte::Encoding {
 bool ConvertHdrRgba16fToRgba8(
     const std::uint8_t* rawRgba16f, VkFormat colorFormat, int width, int height, std::uint8_t* outRgba8);
 
+// atmosphere-scattering-2 campaign, Phase 5
+// (task_manager/atmosphere-scattering-2/PHASE5_AERIAL_LUT_NUMERIC_VALIDATION_TOOL.md)
+// - a PURE visibility change only: this is the exact same IEEE-754 binary16
+// -> binary32 conversion ConvertHdrRgba16fToRgba8() above already used
+// internally (previously a private HalfToFloat() helper in this .cpp's own
+// anonymous namespace), now exposed publicly so a second consumer
+// (src/Editor/AtmosphereAerialPerspectiveLutInspection.cpp, which reads back
+// raw VK_FORMAT_R16G16B16A16_SFLOAT bytes and must decode each half-float
+// channel itself before computing any min/max/mean statistic) never needs a
+// second, independently-maintained copy of this bit-twiddling logic - see
+// AGENTS.md's "one implementation, no duplication" discipline.
+// ConvertHdrRgba16fToRgba8()'s own behavior/tests are completely unchanged by
+// this move - it now simply calls this newly-public function instead of a
+// private one.
+//
+// Handles zero, subnormals, normals, infinities, and NaN - no hardware F16C
+// instruction dependency, since every real caller of this function is a
+// rare, human/LLM-triggered debug-capture path, never a per-frame hot path.
+float DecodeHalfFloat(std::uint16_t half) noexcept;
+
 } // namespace gte::Encoding

@@ -86,6 +86,7 @@
 #include "../Buffer.h"
 #include "../ComputeDescriptorSet.h"
 #include "../ComputePipeline.h"
+#include "../Renderer.h" // gte::Renderer::CapturedRawPixels - needed by CaptureAerialPerspectiveVolumeSliceImmediate() below (atmosphere-scattering-2, Phase 5). No circular include: Renderer.h never includes anything under Atmosphere/.
 #include "../RenderTexture.h"
 #include "../Texture2D.h"
 #include "../VolumeTexture.h"
@@ -100,8 +101,6 @@
 #include <unordered_map>
 
 namespace gte {
-
-class Renderer;
 
 class AtmosphereLutRenderer {
 public:
@@ -331,6 +330,20 @@ public:
         return m_transmittanceLutOutput.has_value() ? &(*m_transmittanceLutOutput) : nullptr;
     }
 
+    // atmosphere-scattering-2 campaign, Phase 5
+    // (task_manager/atmosphere-scattering-2/PHASE5_AERIAL_LUT_NUMERIC_VALIDATION_TOOL.md)
+    // - the real Z-slice count for `aerialPerspectiveVolumeName`, so
+    // src/Editor/AtmosphereAerialPerspectiveLutInspection.cpp's
+    // InspectAerialPerspectiveVolume() can loop over every one of the
+    // volume's real depth slices without hardcoding this campaign's own
+    // fixed 128x128x32 resolution constant (which lives only as a private
+    // implementation detail of this class's own .cpp). Returns 0 if
+    // `aerialPerspectiveVolumeName` has never been generated this session
+    // (mirrors this class's other graceful-failure contracts - a caller
+    // should treat 0 as "nothing to inspect yet", never divide/index by it
+    // unconditionally).
+    int AerialPerspectiveVolumeDepth(const char* aerialPerspectiveVolumeName) const noexcept;
+
     // Phase 9, Step 3.2 - the volume-texture debug-visibility gap Phase 2
     // deliberately deferred (RenderGraphDebugTextureRegistry has no 3D
     // concept - see AGENTS.md's "Named Texture Capture"). Declares a tiny
@@ -361,6 +374,52 @@ public:
     rg::TextureHandle AddAerialPerspectiveVolumeDebugSlicePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
         rg::VolumeTextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,
         std::uint32_t debugSliceIndex, const char* outputTextureName);
+
+    // atmosphere-scattering-2 campaign, Phase 5
+    // (task_manager/atmosphere-scattering-2/PHASE5_AERIAL_LUT_NUMERIC_VALIDATION_TOOL.md,
+    // Step 3.3a) - the ad-hoc, IMMEDIATE-dispatch counterpart of
+    // AddAerialPerspectiveVolumeDebugSlicePass() above, for the "copy this
+    // one Z slice and read it back RIGHT NOW, outside any per-frame
+    // RenderGraph pass" case src/Editor/AtmosphereAerialPerspectiveLutInspection.cpp's
+    // own InspectAerialPerspectiveVolume() needs (looping over every one of
+    // the volume's Z slices from an Editor button click). Reuses the SAME
+    // lazily-initialized pipeline/descriptor-set-layout
+    // (EnsureAerialPerspectiveVolumeDebugSliceInitialized()) and per-name
+    // output RenderTexture (EnsureAerialPerspectiveVolumeDebugSliceViewInitialized())
+    // AddAerialPerspectiveVolumeDebugSlicePass() itself already builds - only
+    // the RECORDING differs: a renderer.ImmediateSubmit() callback issuing
+    // raw vkCmdBindPipeline/vkCmdBindDescriptorSets/vkCmdPushConstants/
+    // vkCmdDispatch calls directly, mirroring
+    // VolumeTexturePreviewRenderer::RenderPreview()'s own already-shipped
+    // "immediate, non-per-frame dispatch" pattern EXACTLY - NEVER
+    // renderer.Dispatch() (gated to render-graph-pass recording only) and
+    // NEVER a throwaway rg::RenderGraph + RenderGraph::Execute() call (see
+    // this phase's own strategy document, "Which approach, and why", for the
+    // verified reasoning both of those would be unsafe/infeasible here).
+    //
+    // `outputTextureName` MUST be a DIFFERENT literal than
+    // "AtmosphereAerialPerspectiveVolumeDebugSlice" (e.g.
+    // "AtmosphereAerialPerspectiveVolumeInspectionSlice") - it gets its own,
+    // separate entry in m_aerialPerspectiveVolumeDebugSliceViewStates, so
+    // this method's own 32-slice sweep never clobbers the separately-live,
+    // per-frame, Editor-slider-driven, GET /get_texture-capturable debug-
+    // slice texture a user/AI agent may currently be relying on.
+    //
+    // Returns the RAW captured bytes (Renderer::CapturedRawPixels::pixels) -
+    // exactly width*height*8 bytes, tightly packed row-major, 4 IEEE-754
+    // HALF floats (2 bytes/channel) per texel, matching
+    // VK_FORMAT_R16G16B16A16_SFLOAT's own real memory layout - this is NOT 4
+    // full 32-bit floats/texel. The caller
+    // (AtmosphereAerialPerspectiveLutInspection.cpp's
+    // InspectAerialPerspectiveVolume()) must decode each channel via
+    // Encoding::DecodeHalfFloat() - never reinterpret_cast this buffer as
+    // `const float*` directly. Returns an empty, default-constructed
+    // CapturedRawPixels (width == 0, pixels empty) if
+    // `aerialPerspectiveVolumeName` has never been generated this session
+    // (mirrors AddAerialPerspectiveVolumeDebugSlicePass()'s own graceful-
+    // failure contract - a programmer/caller-ordering error, never a crash).
+    Renderer::CapturedRawPixels CaptureAerialPerspectiveVolumeSliceImmediate(Renderer& renderer,
+        const char* aerialPerspectiveVolumeName, std::uint32_t sliceIndex, const char* outputTextureName);
 
 private:
     // Per-VIEW state for the Sky-View LUT (Phase 5) - one instance per

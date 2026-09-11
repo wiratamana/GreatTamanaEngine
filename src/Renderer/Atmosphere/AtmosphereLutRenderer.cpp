@@ -830,6 +830,18 @@ void AtmosphereLutRenderer::FinalizeAerialPerspectiveCompositeForSampling(VkComm
     rg::EmitImageBarrier(cmd, it->second.output->Image(), range, previous, next);
 }
 
+// atmosphere-scattering-2 campaign, Phase 5 - see this method's own
+// AtmosphereLutRenderer.h doc comment.
+int AtmosphereLutRenderer::AerialPerspectiveVolumeDepth(const char* aerialPerspectiveVolumeName) const noexcept
+{
+    const auto it = m_aerialPerspectiveVolumeViewStates.find(aerialPerspectiveVolumeName);
+    if (it == m_aerialPerspectiveVolumeViewStates.end() || !it->second.output.has_value()) {
+        return 0;
+    }
+    return it->second.output->Depth();
+}
+
+
 void AtmosphereLutRenderer::EnsureAerialPerspectiveVolumeDebugSliceInitialized(Renderer& renderer)
 {
     if (m_aerialPerspectiveVolumeDebugSlicePipeline.has_value()) {
@@ -954,6 +966,122 @@ rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveVolumeDebugSlicePas
         });
 
     return outputHandle;
+}
+
+// atmosphere-scattering-2 campaign, Phase 5
+// (task_manager/atmosphere-scattering-2/PHASE5_AERIAL_LUT_NUMERIC_VALIDATION_TOOL.md,
+// Step 3.3a) - see this method's own AtmosphereLutRenderer.h doc comment for
+// the full "which approach, and why" reasoning (mirrors
+// VolumeTexturePreviewRenderer::RenderPreview()'s already-shipped "immediate,
+// non-per-frame dispatch" pattern exactly).
+Renderer::CapturedRawPixels AtmosphereLutRenderer::CaptureAerialPerspectiveVolumeSliceImmediate(
+    Renderer& renderer, const char* aerialPerspectiveVolumeName, std::uint32_t sliceIndex, const char* outputTextureName)
+{
+    const auto volumeIt = m_aerialPerspectiveVolumeViewStates.find(aerialPerspectiveVolumeName);
+    if (volumeIt == m_aerialPerspectiveVolumeViewStates.end() || !volumeIt->second.output.has_value()) {
+        // Programmer/caller-ordering error (mirrors
+        // AddAerialPerspectiveVolumeDebugSlicePass()'s own graceful-failure
+        // contract) - AddAerialPerspectiveVolumePass() for this exact name
+        // must have already run at least once this session. Returns an
+        // empty, default-constructed CapturedRawPixels rather than crashing.
+        return Renderer::CapturedRawPixels{};
+    }
+
+    EnsureAerialPerspectiveVolumeDebugSliceInitialized(renderer);
+
+    const VolumeTexture& sourceVolume = *volumeIt->second.output;
+    const int volumeWidth = sourceVolume.Width();
+    const int volumeHeight = sourceVolume.Height();
+    const std::uint32_t sliceCount = static_cast<std::uint32_t>(sourceVolume.Depth());
+    const std::uint32_t clampedSliceIndex = sliceCount > 0 ? std::min(sliceIndex, sliceCount - 1) : 0;
+    const VkImage sourceVolumeImage = sourceVolume.Image();
+    const VkImageView sourceVolumeView = sourceVolume.View();
+    const VkSampler sourceVolumeSampler = sourceVolume.Sampler();
+
+    AerialPerspectiveVolumeDebugSliceViewState& viewState =
+        EnsureAerialPerspectiveVolumeDebugSliceViewInitialized(renderer, outputTextureName, volumeWidth, volumeHeight);
+
+    viewState.descriptorSet.Rewrite(m_device,
+        std::vector<ComputeDescriptorWrite>{
+            ComputeDescriptorWrite::CombinedImageSampler(0, sourceVolumeView, sourceVolumeSampler),
+            ComputeDescriptorWrite::StorageImage(1, viewState.output->View()),
+        });
+
+    AerialPerspectiveVolumeDebugSlicePushConstants pushConstants{};
+    pushConstants.sliceIndex = clampedSliceIndex;
+    pushConstants.sliceCount = sliceCount;
+
+    // The state AddAerialPerspectiveCompositePass()'s own
+    // ReadVolumeTexture(..., ShaderRead) call leaves the source volume in by
+    // the end of this session's most recently completed real frame - mirrors
+    // ValidateAtmosphereTransmittanceLut()'s own identical "assume the state
+    // the last real, already-GPU-completed frame left it in" reasoning
+    // (AtmosphereTransmittanceLutValidation.cpp).
+    const rg::ResourceState sourceVolumePreviousState = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
+    // A combined-image-sampler read from a COMPUTE shader (this dispatch) has
+    // no existing ResourceAccess enumerator to reuse via RequiredStateFor() -
+    // that function's own ShaderRead case always resolves to
+    // VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, never compute - so this state
+    // is built by hand, mirroring VolumeTexturePreviewRenderer::RenderPreview()'s
+    // own identical `volumeSampledState`.
+    const rg::ResourceState sourceVolumeSampledState{
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+    };
+
+    const VkImage outputImage = viewState.output->Image();
+    // This dedicated inspection-only output RenderTexture's own REAL current
+    // layout doesn't matter here, regardless of whether this is the very
+    // first call for `outputTextureName` this session (freshly created,
+    // genuinely VK_IMAGE_LAYOUT_UNDEFINED) or a later one (left in
+    // VK_IMAGE_LAYOUT_GENERAL by a previous call to this same method): this
+    // dispatch's own imageStore() unconditionally overwrites every one of
+    // its texels, so transitioning FROM VK_IMAGE_LAYOUT_UNDEFINED (Vulkan's
+    // own explicit "discard whatever was there, don't care" contract - valid
+    // regardless of the image's real current layout) is always correct, and
+    // there is no concurrent-access hazard to synchronize against either,
+    // since Renderer::ImmediateSubmit() fully blocks until its own fence
+    // signals (see Renderer.h) - every previous call already completed in
+    // full before this one even starts recording.
+    const rg::ResourceState outputDiscardState{};
+    const rg::ResourceState outputWriteState = rg::RequiredStateFor(rg::ResourceAccess::ComputeShaderWrite, false);
+
+    const VkPipeline pipelineHandle = m_aerialPerspectiveVolumeDebugSlicePipeline->Native();
+    const VkPipelineLayout pipelineLayout = m_aerialPerspectiveVolumeDebugSlicePipeline->Layout();
+    const VkDescriptorSet rawDescriptorSet = viewState.descriptorSet.Native();
+
+    renderer.ImmediateSubmit([&](VkCommandBuffer cmd) {
+        const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+
+        // Never renderer.Dispatch() here - that method is gated to
+        // render-graph-pass recording only (asserts/no-ops otherwise, see
+        // Renderer::Dispatch()'s own doc comment) - every Vulkan call below
+        // is issued directly, mirroring
+        // VolumeTexturePreviewRenderer::RenderPreview() exactly.
+        rg::EmitImageBarrier(cmd, sourceVolumeImage, range, sourceVolumePreviousState, sourceVolumeSampledState);
+        rg::EmitImageBarrier(cmd, outputImage, range, outputDiscardState, outputWriteState);
+
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineHandle);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, &rawDescriptorSet, 0, nullptr);
+        vkCmdPushConstants(cmd, pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pushConstants), &pushConstants);
+
+        const Extent3D groupCounts = ComputeGroupCount3D(
+            Extent3D{ static_cast<std::uint32_t>(volumeWidth), static_cast<std::uint32_t>(volumeHeight), 1 },
+            Extent3D{ kAerialPerspectiveVolumeDebugSliceLocalSizeX, kAerialPerspectiveVolumeDebugSliceLocalSizeY, 1 });
+        vkCmdDispatch(cmd, groupCounts.width, groupCounts.height, groupCounts.depth);
+
+        // Restore the source volume image to its real previous state - the
+        // NEXT real frame's own RenderGraph::Execute() call must find it
+        // exactly where it left it, mirroring
+        // VolumeTexturePreviewRenderer::RenderPreview()'s own identical
+        // "restore the volume image to its real previous state" comment.
+        rg::EmitImageBarrier(cmd, sourceVolumeImage, range, sourceVolumeSampledState, sourceVolumePreviousState);
+    });
+
+    const VkExtent2D extent{ static_cast<std::uint32_t>(volumeWidth), static_cast<std::uint32_t>(volumeHeight) };
+    return renderer.CaptureImagePixels(outputImage, VK_IMAGE_ASPECT_COLOR_BIT, VK_FORMAT_R16G16B16A16_SFLOAT, extent,
+        outputWriteState, /*bytesPerPixel=*/8);
 }
 
 
