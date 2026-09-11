@@ -1712,6 +1712,37 @@ whenever touching this feature:
   created via the Editor, and any tuned `AtmosphereSettings` value, exist only
   for the current running session, same as a `Camera` entity today (see
   `TODO.md`'s new "Atmosphere Scattering" section for the tracked follow-up).
+- **The Aerial Perspective Composite pass (`Shaders/AtmosphereAerialPerspectiveComposite.comp`)
+  is a PURE PASS-THROUGH for any pixel with no opaque geometry drawn into it
+  this frame (`rawDepth >= 0.999999`, the frame's own clear-depth value) -
+  see `task_manager/atmosphere-scattering-4/PHASE0_MASTER_STRATEGY.md`.**
+  Before this campaign, the composite shader ran its full blend
+  UNCONDITIONALLY, double-fogging a sky pixel the Sky Background pass had
+  ALREADY finished, correctly, earlier in the same frame - confirmed and
+  fixed by the `atmosphere-scattering-4` campaign (see
+  `task_manager/atmosphere-scattering-4/AERIAL_PERSPECTIVE_NO_GEOMETRY_BUG_REPORT_20260911.md`
+  for the original root-cause investigation). The bypass DECISION (not the
+  volume's own trilinear sample/Z-slice math, which has no CPU equivalent -
+  see that campaign's own Locked Design Decision 5) is codified as a small,
+  dedicated, Tier-1-tested CPU oracle,
+  `src/Renderer/Atmosphere/AtmosphereAerialPerspectiveCompositeMath.h/.cpp`'s
+  `ShouldBypassAerialPerspectiveComposite()`/
+  `ComputeAerialPerspectiveCompositeColor()` - deliberately its OWN new file,
+  never added to `AtmosphereMath.h` (see that campaign's own Locked Design
+  Decision 2 for why not). A permanent, automated regression guard,
+  `src/Editor/AtmosphereAerialPerspectiveSkyPurityValidation.h/.cpp`'s
+  `ValidateAerialPerspectiveSkyPurity()` (a "Validate Aerial Perspective Sky
+  Purity" button in the Editor's "Atmosphere" panel, mirroring
+  `AtmosphereTransmittanceLutValidation`'s own proven shape), numerically
+  confirms every sky pixel's post-composite color still exactly matches its
+  pre-composite color, every session, on demand - a future edit that
+  reintroduces double-compositing onto background pixels will show up here as
+  a non-zero `mismatchingSkyPixelCount` rather than only being caught by a
+  human eyeballing a screenshot. `AtmosphereSettings`'s own aerial-perspective
+  tunables (`aerialPerspectiveMaxDistanceKm`/`aerialPerspectiveScatteringExaggeration`/
+  etc.) were NOT changed by this campaign - they remain exactly as
+  `atmosphere-scattering-2` shipped them, since they are correctly, and
+  separately, tuned for real opaque geometry.
 
 ## Entity-Component-System (ECS)
 

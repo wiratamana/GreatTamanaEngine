@@ -284,6 +284,15 @@ Scattering" section for the full feature writeup.
   Phases 7-9's own completion reports, never resolved. A future session should
   explicitly decide whether this is acceptable long-term scope or whether that
   direct-render branch needs its own Sky Background + Composite treatment.
+- **`ValidateAerialPerspectiveSkyPurity()` only checks the "Game" view's pair
+  of textures (`"GameView"`/`"GameViewComposited"`) today.** (Added by the
+  `atmosphere-scattering-4` campaign — see `AGENTS.md`'s "Atmosphere
+  Scattering" section.) Extending it to also validate the "Scene" view's own
+  `"SceneView"`/`"SceneViewComposited"` pair (an independent, second call from
+  the same Editor button, or a second button) would close the one remaining
+  gap in this diagnostic's own coverage — not attempted in that campaign
+  since the "Game" view alone was already enough to prove the fix and confirm
+  the regression guard works end to end.
 
 ## Engine Roadmap (not yet started)
 

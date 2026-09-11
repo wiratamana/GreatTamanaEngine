@@ -1941,6 +1941,29 @@ pieces:
   gradient - verified with a full clean build and full `ctest` regression
   pass. See `task_manager/atmosphere-scattering-3/CAMPAIGN_COMPLETION_REPORT.md`
   for the full five-phase writeup.
+- **A follow-up campaign, `atmosphere-scattering-4`, fixed a confirmed bug
+  where Aerial Perspective was double-applied to empty sky pixels** (no
+  opaque geometry drawn into them that frame) — the Aerial Perspective
+  Composite pass used to run its full haze blend unconditionally, re-fogging
+  a sky pixel the Sky Background pass had already finished, correctly,
+  earlier in the same frame (confirmed by toggling `aerialPerspectiveStrength`
+  visibly changing the sky itself, which should never happen). The fix is a
+  small early pass-through branch in
+  `Shaders/AtmosphereAerialPerspectiveComposite.comp`, mirroring a new,
+  dedicated, Tier-1-tested CPU oracle
+  (`src/Renderer/Atmosphere/AtmosphereAerialPerspectiveCompositeMath.h/.cpp`)
+  built and tested BEFORE the shader was touched — real opaque geometry
+  (a mesh, the reference grid) still fogs progressively with distance exactly
+  as before, completely unaffected. A new permanent Editor diagnostic, the
+  "Validate Aerial Perspective Sky Purity" button in the "Atmosphere" panel
+  (`src/Editor/AtmosphereAerialPerspectiveSkyPurityValidation.h/.cpp`),
+  numerically re-confirms every sky pixel's post-composite color exactly
+  matches its pre-composite color, on demand — catching a future regression
+  of this exact bug class without relying on a human eyeballing a screenshot.
+  Verified with a full clean build, a full `ctest` regression pass, and a
+  live runtime smoke test. See
+  `task_manager/atmosphere-scattering-4/CAMPAIGN_COMPLETION_REPORT.md` for
+  the full four-phase writeup.
 
 ## Roadmap
 
