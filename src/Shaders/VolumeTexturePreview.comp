@@ -58,6 +58,7 @@ layout(push_constant) uniform PushConstants {
     float _padding1;
     int interpretationMode;
     float aerialPreviewExposure;
+    int shapeMode; // 0 = box (IntersectRayBox), 1 = frustum (IntersectRayFrustum) - atmosphere-scattering-3, Phase 3.
 } pc;
 
 // Dark gray, so white/bright smoke-like content stays readable - the
@@ -92,6 +93,112 @@ bool IntersectRayBox(vec3 rayOrigin, vec3 rayDirection, vec3 boxHalfExtents, out
     return tExit >= max(tEnter, 0.0);
 }
 
+// atmosphere-scattering-3 campaign, Phase 3
+// (task_manager/atmosphere-scattering-3/PHASE3_FRUSTUM_SHAPED_RAYMARCH_PROXY.md)
+// - a direct GLSL transcription of VolumeTexturePreviewMath.cpp's own
+// FrustumProxy/IntersectRayFrustum()/MapFrustumLocalPositionToUvw() (the CPU
+// oracle) - used ONLY for the Aerial Perspective preview (pc.shapeMode == 1).
+// The frustum's own parameters are packed into a plain vec3, REUSING
+// pc.boxHalfExtents (see PushConstants' own doc comment on the C++ side for
+// why): x = farHalfWidth, y = farHalfHeight, z = halfDepth - NOTE this is a
+// DIFFERENT order than FrustumProxy's own C++ struct field declaration order
+// (halfDepth, farHalfWidth, farHalfHeight) - there is no named struct on this
+// side to catch a mix-up by construction, so this ordering must be kept in
+// sync BY HAND with VolumeTexturePreviewRenderer.cpp's own packing.
+
+// Stands in for +/-infinity without relying on a literal-zero GLSL division
+// (unlike IntersectRayBox() above, which legitimately needs 1.0/rayDirection
+// to produce a real IEEE-754 infinity for its own slab method) - comfortably
+// larger than any ray-parameter t value this feature's small, fixed-size
+// proxy shapes could ever produce.
+const float kFloatMax = 3.402823466e+38;
+
+struct HalfSpacePlane {
+    vec3 normal;
+    float constant; // Half-space is "inside" where dot(normal, pos) + constant <= 0.
+};
+
+// Mirrors VolumeTexturePreviewMath.cpp's own ClipRayAgainstHalfSpace() (an
+// anonymous-namespace helper on the CPU side) exactly - clips the running
+// [tEnter, tExit] range against ONE half-space.
+bool ClipRayAgainstHalfSpace(vec3 rayOrigin, vec3 rayDirection, HalfSpacePlane plane, inout float tEnter, inout float tExit)
+{
+    float denom = dot(plane.normal, rayDirection);
+    float originValue = dot(plane.normal, rayOrigin) + plane.constant;
+    const float kEpsilon = 1e-8;
+
+    if (abs(denom) < kEpsilon) {
+        return originValue <= 0.0;
+    }
+
+    float t = -originValue / denom;
+    if (denom > 0.0) {
+        tExit = min(tExit, t);
+    } else {
+        tEnter = max(tEnter, t);
+    }
+    return tEnter <= tExit;
+}
+
+bool IntersectRayFrustum(vec3 rayOrigin, vec3 rayDirection, vec3 frustumParams, out float tEnter, out float tExit)
+{
+    float farHalfWidth = frustumParams.x;
+    float farHalfHeight = frustumParams.y;
+    float halfDepth = frustumParams.z;
+
+    tEnter = -kFloatMax;
+    tExit = kFloatMax;
+
+    // Near/far caps - axis-aligned in Z only.
+    if (!ClipRayAgainstHalfSpace(rayOrigin, rayDirection, HalfSpacePlane(vec3(0.0, 0.0, -1.0), -halfDepth), tEnter, tExit)) {
+        return false;
+    }
+    if (!ClipRayAgainstHalfSpace(rayOrigin, rayDirection, HalfSpacePlane(vec3(0.0, 0.0, 1.0), -halfDepth), tEnter, tExit)) {
+        return false;
+    }
+
+    // Four tapering side walls - see MapFrustumLocalPositionToUvw() below /
+    // the CPU oracle's own comment for the kx/ky taper-rate derivation.
+    float kx = farHalfWidth / (2.0 * halfDepth);
+    float ky = farHalfHeight / (2.0 * halfDepth);
+
+    if (!ClipRayAgainstHalfSpace(rayOrigin, rayDirection, HalfSpacePlane(vec3(1.0, 0.0, -kx), -kx * halfDepth), tEnter, tExit)) {
+        return false;
+    }
+    if (!ClipRayAgainstHalfSpace(rayOrigin, rayDirection, HalfSpacePlane(vec3(-1.0, 0.0, -kx), -kx * halfDepth), tEnter, tExit)) {
+        return false;
+    }
+    if (!ClipRayAgainstHalfSpace(rayOrigin, rayDirection, HalfSpacePlane(vec3(0.0, 1.0, -ky), -ky * halfDepth), tEnter, tExit)) {
+        return false;
+    }
+    if (!ClipRayAgainstHalfSpace(rayOrigin, rayDirection, HalfSpacePlane(vec3(0.0, -1.0, -ky), -ky * halfDepth), tEnter, tExit)) {
+        return false;
+    }
+
+    return tExit >= max(tEnter, 0.0);
+}
+
+// Mirrors VolumeTexturePreviewMath.cpp's own MapFrustumLocalPositionToUvw()
+// exactly - maps a point already known to be inside (or on the boundary of)
+// the frustum to normalized [0,1]^3 texture space.
+vec3 MapFrustumLocalPositionToUvw(vec3 localPos, vec3 frustumParams)
+{
+    float farHalfWidth = frustumParams.x;
+    float farHalfHeight = frustumParams.y;
+    float halfDepth = frustumParams.z;
+
+    float w = (localPos.z + halfDepth) / (2.0 * halfDepth);
+    float kx = farHalfWidth / (2.0 * halfDepth);
+    float ky = farHalfHeight / (2.0 * halfDepth);
+    const float kMinCrossSection = 1e-5;
+    float halfWidthAtZ = max(kx * (localPos.z + halfDepth), kMinCrossSection);
+    float halfHeightAtZ = max(ky * (localPos.z + halfDepth), kMinCrossSection);
+
+    float u = (localPos.x / halfWidthAtZ) * 0.5 + 0.5;
+    float v = (localPos.y / halfHeightAtZ) * 0.5 + 0.5;
+    return vec3(u, v, w);
+}
+
 void main()
 {
     ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
@@ -110,7 +217,13 @@ void main()
 
     float tEnter;
     float tExit;
-    if (!IntersectRayBox(pc.eyePosition, rayDir, pc.boxHalfExtents, tEnter, tExit)) {
+    bool hit;
+    if (pc.shapeMode == 1) {
+        hit = IntersectRayFrustum(pc.eyePosition, rayDir, pc.boxHalfExtents, tEnter, tExit);
+    } else {
+        hit = IntersectRayBox(pc.eyePosition, rayDir, pc.boxHalfExtents, tEnter, tExit);
+    }
+    if (!hit) {
         imageStore(outputImage, pixel, vec4(kBackgroundColor, 1.0));
         return;
     }
@@ -122,8 +235,13 @@ void main()
 
     vec4 accum = vec4(0.0);
     for (int i = 0; i < pc.stepCount; ++i) {
-        vec3 localPos = pc.eyePosition + rayDir * t; // Box-local space, box spans [-boxHalfExtents, +boxHalfExtents].
-        vec3 uvw = (localPos / pc.boxHalfExtents) * 0.5 + 0.5; // -> [0, 1]^3 texture space.
+        vec3 localPos = pc.eyePosition + rayDir * t; // Local space, box spans [-boxHalfExtents, +boxHalfExtents] (or frustum-local space when pc.shapeMode == 1).
+        vec3 uvw;
+        if (pc.shapeMode == 1) {
+            uvw = MapFrustumLocalPositionToUvw(localPos, pc.boxHalfExtents);
+        } else {
+            uvw = (localPos / pc.boxHalfExtents) * 0.5 + 0.5; // -> [0, 1]^3 texture space.
+        }
 
         vec4 s = texture(volumeTex, uvw);
         float density;

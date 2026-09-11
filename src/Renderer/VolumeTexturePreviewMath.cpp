@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace gte {
 
@@ -149,6 +150,116 @@ bool IntersectRayBox(
     outTEnter = tEnter;
     outTExit = tExit;
     return true;
+}
+// atmosphere-scattering-3 campaign, Phase 3
+// (task_manager/atmosphere-scattering-3/PHASE3_FRUSTUM_SHAPED_RAYMARCH_PROXY.md)
+
+namespace {
+
+struct HalfSpacePlane {
+    Vec3 normal;
+    float constant = 0.0f; // Half-space is "inside" where Dot(normal, pos) + constant <= 0.
+};
+
+// Clips the running [tEnter, tExit] range against ONE half-space - returns
+// false the instant the range becomes empty (tEnter > tExit), exactly like
+// IntersectRayBox()'s own final range check, just applied incrementally
+// per-plane instead of once at the end (necessary here since, unlike the
+// axis-aligned box case, there is no single component-wise min/max
+// shortcut across all six planes at once).
+bool ClipRayAgainstHalfSpace(
+    const Vec3& rayOrigin, const Vec3& rayDirection, const HalfSpacePlane& plane, float& tEnter, float& tExit)
+{
+    const float denom = Dot(plane.normal, rayDirection);
+    const float originValue = Dot(plane.normal, rayOrigin) + plane.constant;
+    constexpr float kEpsilon = 1e-8f;
+
+    if (std::fabs(denom) < kEpsilon) {
+        // Ray direction is parallel to this plane - either the ray origin
+        // is already on the "inside" side of it for its entire length, or
+        // it never is.
+        return originValue <= 0.0f;
+    }
+
+    const float t = -originValue / denom;
+    if (denom > 0.0f) {
+        // Moving along +rayDirection moves FROM inside TOWARD outside -
+        // this plane bounds the EXIT side.
+        tExit = std::min(tExit, t);
+    } else {
+        tEnter = std::max(tEnter, t);
+    }
+    return tEnter <= tExit;
+}
+
+} // namespace
+
+bool IntersectRayFrustum(
+    const Vec3& rayOrigin, const Vec3& rayDirection, const FrustumProxy& frustum, float& outTEnter, float& outTExit)
+{
+    float tEnter = -std::numeric_limits<float>::infinity();
+    float tExit = std::numeric_limits<float>::infinity();
+
+    // Near/far caps - axis-aligned in Z only.
+    if (!ClipRayAgainstHalfSpace(rayOrigin, rayDirection, { Vec3(0.0f, 0.0f, -1.0f), -frustum.halfDepth }, tEnter, tExit)) {
+        return false;
+    }
+    if (!ClipRayAgainstHalfSpace(rayOrigin, rayDirection, { Vec3(0.0f, 0.0f, 1.0f), -frustum.halfDepth }, tEnter, tExit)) {
+        return false;
+    }
+
+    // Four tapering side walls: half-width(z) = kx * (z + halfDepth),
+    // half-height(z) = ky * (z + halfDepth) - zero at z=-halfDepth (the
+    // apex), farHalfWidth/farHalfHeight at z=+halfDepth (the far cap).
+    const float kx = frustum.farHalfWidth / (2.0f * frustum.halfDepth);
+    const float ky = frustum.farHalfHeight / (2.0f * frustum.halfDepth);
+
+    // x <= kx*(z+halfDepth)  ->  x - kx*z - kx*halfDepth <= 0
+    if (!ClipRayAgainstHalfSpace(rayOrigin, rayDirection, { Vec3(1.0f, 0.0f, -kx), -kx * frustum.halfDepth }, tEnter, tExit)) {
+        return false;
+    }
+    // x >= -kx*(z+halfDepth)  ->  -x - kx*z - kx*halfDepth <= 0
+    if (!ClipRayAgainstHalfSpace(rayOrigin, rayDirection, { Vec3(-1.0f, 0.0f, -kx), -kx * frustum.halfDepth }, tEnter, tExit)) {
+        return false;
+    }
+    if (!ClipRayAgainstHalfSpace(rayOrigin, rayDirection, { Vec3(0.0f, 1.0f, -ky), -ky * frustum.halfDepth }, tEnter, tExit)) {
+        return false;
+    }
+    if (!ClipRayAgainstHalfSpace(rayOrigin, rayDirection, { Vec3(0.0f, -1.0f, -ky), -ky * frustum.halfDepth }, tEnter, tExit)) {
+        return false;
+    }
+
+    if (tExit < std::max(tEnter, 0.0f)) {
+        return false;
+    }
+    outTEnter = tEnter;
+    outTExit = tExit;
+    return true;
+}
+
+Vec3 MapFrustumLocalPositionToUvw(const Vec3& localPos, const FrustumProxy& frustum)
+{
+    const float w = (localPos.z + frustum.halfDepth) / (2.0f * frustum.halfDepth); // [0,1] along depth.
+    const float kx = frustum.farHalfWidth / (2.0f * frustum.halfDepth);
+    const float ky = frustum.farHalfHeight / (2.0f * frustum.halfDepth);
+    // Cross-section half-size AT this z - floored to a small epsilon so a
+    // point exactly at (or numerically near) the apex never divides by ~0.
+    constexpr float kMinCrossSection = 1e-5f;
+    const float halfWidthAtZ = std::max(kx * (localPos.z + frustum.halfDepth), kMinCrossSection);
+    const float halfHeightAtZ = std::max(ky * (localPos.z + frustum.halfDepth), kMinCrossSection);
+
+    const float u = (localPos.x / halfWidthAtZ) * 0.5f + 0.5f;
+    const float v = (localPos.y / halfHeightAtZ) * 0.5f + 0.5f;
+    return Vec3(u, v, w);
+}
+
+FrustumProxy ComputeAtmosphereAerialPerspectivePreviewFrustum()
+{
+    FrustumProxy frustum;
+    frustum.halfDepth = kAerialPreviewDepthHalfExtent;
+    frustum.farHalfWidth = kAerialPreviewXYHalfExtent * 2.0f; // The far (wide) end deliberately exceeds the old box's own flat half-extent, so the WIDENING itself is visually obvious, not subtle.
+    frustum.farHalfHeight = kAerialPreviewXYHalfExtent * 2.0f;
+    return frustum;
 }
 
 } // namespace gte

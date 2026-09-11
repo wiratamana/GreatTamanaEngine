@@ -10,6 +10,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <cstddef>
 
 namespace gte {
 namespace {
@@ -190,6 +191,149 @@ TEST(VolumeTexturePreviewMathTest, AtmosphereAerialPerspectivePreviewEyeSitsOuts
     const VolumeCameraSetup setup = ComputeAtmosphereAerialPerspectivePreviewCameraSetup(128, 128, 32);
     const float boundingRadius = Length(setup.boxHalfExtents);
     EXPECT_GT(Length(setup.eyePosition), boundingRadius);
+}
+
+// --- atmosphere-scattering-3 campaign, Phase 3 -----------------------------
+// (task_manager/atmosphere-scattering-3/PHASE3_FRUSTUM_SHAPED_RAYMARCH_PROXY.md)
+// IntersectRayFrustum()/MapFrustumLocalPositionToUvw() - the new frustum-
+// shaped raymarch proxy used ONLY for the Aerial Perspective preview.
+
+TEST(VolumeTexturePreviewMathTest, IntersectRayFrustumAlongCentralAxisSpansFullDepth)
+{
+    FrustumProxy frustum;
+    frustum.halfDepth = 2.0f;
+    frustum.farHalfWidth = 1.0f;
+    frustum.farHalfHeight = 1.0f;
+
+    const Vec3 rayOrigin(0.0f, 0.0f, -10.0f);
+    const Vec3 rayDirection(0.0f, 0.0f, 1.0f);
+
+    float tEnter = 0.0f;
+    float tExit = 0.0f;
+    ASSERT_TRUE(IntersectRayFrustum(rayOrigin, rayDirection, frustum, tEnter, tExit));
+
+    // tEnter/tExit are RAY-PARAMETER offsets from rayOrigin, not raw z
+    // coordinates - see this phase's own strategy document for the exact
+    // wording correction this test reflects.
+    EXPECT_NEAR(rayOrigin.z + tEnter, -frustum.halfDepth, kEpsilon);
+    EXPECT_NEAR(rayOrigin.z + tExit, frustum.halfDepth, kEpsilon);
+    EXPECT_NEAR(tExit - tEnter, 2.0f * frustum.halfDepth, kEpsilon);
+}
+
+TEST(VolumeTexturePreviewMathTest, IntersectRayFrustumSideWallEntryAndExitMatchHandComputedT)
+{
+    FrustumProxy frustum;
+    frustum.halfDepth = 1.0f;
+    frustum.farHalfWidth = 2.0f;
+    frustum.farHalfHeight = 2.0f;
+
+    const Vec3 rayOrigin(3.0f, 0.0f, 0.0f);
+    const Vec3 rayDirection(-1.0f, 0.0f, 0.0f);
+
+    float tEnter = 0.0f;
+    float tExit = 0.0f;
+    ASSERT_TRUE(IntersectRayFrustum(rayOrigin, rayDirection, frustum, tEnter, tExit));
+
+    EXPECT_NEAR(tEnter, 2.0f, kEpsilon);
+    EXPECT_NEAR(tExit, 4.0f, kEpsilon);
+
+    const Vec3 entryPoint = rayOrigin + rayDirection * tEnter;
+    const Vec3 exitPoint = rayOrigin + rayDirection * tExit;
+    EXPECT_NEAR(entryPoint.x, 1.0f, kEpsilon);
+    EXPECT_NEAR(entryPoint.y, 0.0f, kEpsilon);
+    EXPECT_NEAR(entryPoint.z, 0.0f, kEpsilon);
+    EXPECT_NEAR(exitPoint.x, -1.0f, kEpsilon);
+    EXPECT_NEAR(exitPoint.y, 0.0f, kEpsilon);
+    EXPECT_NEAR(exitPoint.z, 0.0f, kEpsilon);
+}
+
+TEST(VolumeTexturePreviewMathTest, IntersectRayFrustumMissingRayReturnsFalse)
+{
+    FrustumProxy frustum;
+    frustum.halfDepth = 2.0f;
+    frustum.farHalfWidth = 1.0f;
+    frustum.farHalfHeight = 1.0f;
+
+    // Offset in X by MORE than farHalfWidth (the frustum's single widest
+    // point at any z), parallel to Z - guaranteed to miss regardless of
+    // where along Z it passes.
+    const Vec3 rayOrigin(2.0f, 0.0f, -10.0f);
+    const Vec3 rayDirection(0.0f, 0.0f, 1.0f);
+
+    float tEnter = 0.0f;
+    float tExit = 0.0f;
+    EXPECT_FALSE(IntersectRayFrustum(rayOrigin, rayDirection, frustum, tEnter, tExit));
+}
+
+TEST(VolumeTexturePreviewMathTest, IntersectRayFrustumRayFromInsideHasNonPositiveTEnter)
+{
+    FrustumProxy frustum;
+    frustum.halfDepth = 0.5f;
+    frustum.farHalfWidth = 0.5f;
+    frustum.farHalfHeight = 0.5f;
+
+    const Vec3 rayOrigin(0.0f, 0.0f, 0.0f);
+    const Vec3 rayDirection = Vec3::Forward();
+
+    float tEnter = 0.0f;
+    float tExit = 0.0f;
+    ASSERT_TRUE(IntersectRayFrustum(rayOrigin, rayDirection, frustum, tEnter, tExit));
+    EXPECT_LE(tEnter, 0.0f);
+    EXPECT_GE(tExit, 0.0f);
+    EXPECT_GE(tExit, tEnter);
+}
+
+TEST(VolumeTexturePreviewMathTest, MapFrustumLocalPositionToUvwApexMapsToCenterUAndV)
+{
+    FrustumProxy frustum;
+    frustum.halfDepth = 1.0f;
+    frustum.farHalfWidth = 2.0f;
+    frustum.farHalfHeight = 2.0f;
+
+    // The cross-section at z == -halfDepth is exactly zero, so x == 0 /
+    // y == 0 is the ONLY genuinely-inside-the-frustum point at that z -
+    // this test must only assert this exact apex point, never a nonzero
+    // x/y at the same z (see this phase's own strategy document for why).
+    const Vec3 localPos(0.0f, 0.0f, -frustum.halfDepth);
+    const Vec3 uvw = MapFrustumLocalPositionToUvw(localPos, frustum);
+    EXPECT_NEAR(uvw.x, 0.5f, kEpsilon);
+    EXPECT_NEAR(uvw.y, 0.5f, kEpsilon);
+}
+
+TEST(VolumeTexturePreviewMathTest, MapFrustumLocalPositionToUvwFarCapCornersMapToUnitSquareCorners)
+{
+    FrustumProxy frustum;
+    frustum.halfDepth = 1.0f;
+    frustum.farHalfWidth = 2.0f;
+    frustum.farHalfHeight = 2.0f;
+
+    for (int sx = -1; sx <= 1; sx += 2) {
+        for (int sy = -1; sy <= 1; sy += 2) {
+            const Vec3 localPos(static_cast<float>(sx) * frustum.farHalfWidth,
+                static_cast<float>(sy) * frustum.farHalfHeight, frustum.halfDepth);
+            const Vec3 uvw = MapFrustumLocalPositionToUvw(localPos, frustum);
+            const float expectedU = (sx > 0) ? 1.0f : 0.0f;
+            const float expectedV = (sy > 0) ? 1.0f : 0.0f;
+            EXPECT_NEAR(uvw.x, expectedU, kEpsilon) << "sx=" << sx << " sy=" << sy;
+            EXPECT_NEAR(uvw.y, expectedV, kEpsilon) << "sx=" << sx << " sy=" << sy;
+        }
+    }
+}
+
+TEST(VolumeTexturePreviewMathTest, MapFrustumLocalPositionToUvwWMatchesDepthFraction)
+{
+    FrustumProxy frustum;
+    frustum.halfDepth = 2.0f;
+    frustum.farHalfWidth = 1.0f;
+    frustum.farHalfHeight = 1.0f;
+
+    const float zValues[] = { -2.0f, -1.0f, 0.0f, 1.0f, 2.0f };
+    const float expectedW[] = { 0.0f, 0.25f, 0.5f, 0.75f, 1.0f };
+    for (std::size_t i = 0; i < 5; ++i) {
+        const Vec3 localPos(0.0f, 0.0f, zValues[i]);
+        const Vec3 uvw = MapFrustumLocalPositionToUvw(localPos, frustum);
+        EXPECT_NEAR(uvw.z, expectedW[i], kEpsilon) << "z=" << zValues[i];
+    }
 }
 
 } // namespace

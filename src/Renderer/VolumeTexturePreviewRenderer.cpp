@@ -26,6 +26,13 @@ struct PushConstants {
     std::int32_t stepCount = 0;
     Vec3 up;
     float _padding0 = 0.0f;
+    // Box's own local-space half-extents when shapeMode == 0 (the default/
+    // generic path, UNCHANGED). atmosphere-scattering-3 campaign, Phase 3
+    // (task_manager/atmosphere-scattering-3/PHASE3_FRUSTUM_SHAPED_RAYMARCH_PROXY.md)
+    // REUSES this same field to carry (farHalfWidth, farHalfHeight, halfDepth)
+    // - NOTE the different field order than FrustumProxy's own C++ struct
+    // declaration (halfDepth, farHalfWidth, farHalfHeight) - when
+    // shapeMode == 1. No new Vec3 field was added purely for this.
     Vec3 boxHalfExtents;
     float _padding1 = 0.0f;
     // atmosphere-scattering-2 campaign, Phase 4
@@ -38,6 +45,13 @@ struct PushConstants {
     // of its own either.
     std::int32_t interpretationMode = 0; // VolumeTexturePreviewInterpretation, as int.
     float aerialPreviewExposure = 0.0f; // Only meaningful when interpretationMode == 1; 0 when mode == 0 (unused).
+    // atmosphere-scattering-3 campaign, Phase 3
+    // (task_manager/atmosphere-scattering-3/PHASE3_FRUSTUM_SHAPED_RAYMARCH_PROXY.md)
+    // - appended at the true tail, after aerialPreviewExposure, so every
+    // existing field keeps its exact pre-Phase-3 offset. 0 = axis-aligned
+    // box (IntersectRayBox, existing/default), 1 = tapering frustum
+    // (IntersectRayFrustum).
+    std::int32_t shapeMode = 0;
 };
 
 // atmosphere-scattering-2 campaign, Phase 4 - fixed exposure multiplier
@@ -166,6 +180,25 @@ VolumeTexturePreviewRenderer::CapturedRawPixels VolumeTexturePreviewRenderer::Re
     pushConstants.interpretationMode = static_cast<std::int32_t>(interpretation);
     pushConstants.aerialPreviewExposure =
         (interpretation == VolumeTexturePreviewInterpretation::AtmosphereAerialPerspective) ? kAerialPreviewExposure : 0.0f;
+
+    // atmosphere-scattering-3 campaign, Phase 3
+    // (task_manager/atmosphere-scattering-3/PHASE3_FRUSTUM_SHAPED_RAYMARCH_PROXY.md)
+    // - the Aerial Perspective preview swaps the raymarch proxy SHAPE from an
+    // axis-aligned box to a tapering frustum, overwriting boxHalfExtents
+    // (already assigned above from `setup`) to instead carry
+    // (farHalfWidth, farHalfHeight, halfDepth) - see PushConstants::
+    // boxHalfExtents's own doc comment for the exact field-order caveat.
+    // The camera's own eyePosition/forward/right/up/tanHalfFovY from
+    // ComputeAtmosphereAerialPerspectivePreviewCameraSetup() above are left
+    // unchanged; only this shape-related field is overridden here. Every
+    // OTHER (generic) interpretation leaves shapeMode at its PushConstants
+    // default (0) and boxHalfExtents exactly as ComputeVolumeCameraSetup()
+    // produced it - zero regression to that path.
+    if (interpretation == VolumeTexturePreviewInterpretation::AtmosphereAerialPerspective) {
+        pushConstants.shapeMode = 1;
+        const FrustumProxy frustum = ComputeAtmosphereAerialPerspectivePreviewFrustum();
+        pushConstants.boxHalfExtents = Vec3(frustum.farHalfWidth, frustum.farHalfHeight, frustum.halfDepth);
+    }
 
     // A COMBINED IMAGE SAMPLER read from a COMPUTE shader has no existing
     // ResourceAccess enumerator to reuse via RequiredStateFor() -

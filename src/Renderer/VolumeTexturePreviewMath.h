@@ -86,4 +86,51 @@ VolumeCameraSetup ComputeAtmosphereAerialPerspectivePreviewCameraSetup(int width
 bool IntersectRayBox(const Vec3& rayOrigin, const Vec3& rayDirection, const Vec3& boxHalfExtents, float& outTEnter,
     float& outTExit);
 
+// atmosphere-scattering-3 campaign, Phase 3
+// (task_manager/atmosphere-scattering-3/PHASE3_FRUSTUM_SHAPED_RAYMARCH_PROXY.md)
+// - a raymarch proxy shaped like a real camera view frustum: local +Z spans
+// [-halfDepth, +halfDepth], and the cross-section half-width/half-height
+// grows LINEARLY from (0, 0) at z=-halfDepth (the near "apex" end) to
+// (farHalfWidth, farHalfHeight) at z=+halfDepth (the far, wide end). Because
+// the taper is LINEAR, every side wall is a flat PLANE (never a curved
+// surface) - this is what keeps IntersectRayFrustum() below a
+// straightforward generalization of IntersectRayBox()'s own slab method,
+// rather than needing genuinely curved-surface intersection math.
+struct FrustumProxy {
+    float halfDepth = 0.0f;
+    float farHalfWidth = 0.0f;
+    float farHalfHeight = 0.0f;
+};
+
+// A direct C++ implementation of clipping a ray against FrustumProxy's six
+// bounding half-spaces (2 for the near/far Z caps, 4 for the four linearly-
+// tapering side walls) via the standard Cyrus-Beck-style "compute one
+// [tEnter, tExit] t-range per half-space, intersect them all" technique -
+// the same overall shape as IntersectRayBox()'s own min/max slab reduction,
+// generalized from axis-aligned planes to arbitrary ones. Returns false
+// (tEnter/tExit untouched) if the ray never enters the frustum, or only
+// enters it entirely behind the ray's own origin - same contract as
+// IntersectRayBox().
+bool IntersectRayFrustum(const Vec3& rayOrigin, const Vec3& rayDirection, const FrustumProxy& frustum, float& outTEnter,
+    float& outTExit);
+
+// Maps a point already known to be INSIDE (or on the boundary of) a
+// FrustumProxy - in the frustum's own local space, i.e. the same space
+// IntersectRayFrustum() above operates in - to normalized [0,1]^3 texture
+// space, mirroring IntersectRayBox()'s callers' own
+// `(localPos / boxHalfExtents) * 0.5 + 0.5` formula, generalized for a
+// shape whose X/Y cross-section size depends on Z. `localPos.z == -halfDepth`
+// (the apex) maps to `uvw.x == uvw.y == 0.5` (dividing by a
+// cross-section size of exactly 0 is avoided via a small epsilon floor -
+// see the .cpp implementation).
+Vec3 MapFrustumLocalPositionToUvw(const Vec3& localPos, const FrustumProxy& frustum);
+
+// atmosphere-scattering-3, Phase 3 - derives the Aerial Perspective preview's
+// own FrustumProxy directly from the SAME two constants
+// (kAerialPreviewXYHalfExtent/kAerialPreviewDepthHalfExtent)
+// ComputeAtmosphereAerialPerspectivePreviewCameraSetup() already uses for its
+// (superseded, for this shape) boxHalfExtents - single source of truth for
+// both. Non-static so VolumeTexturePreviewRenderer.cpp can call it.
+FrustumProxy ComputeAtmosphereAerialPerspectivePreviewFrustum();
+
 } // namespace gte
