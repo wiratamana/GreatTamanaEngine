@@ -1766,6 +1766,8 @@ set(GTE_TEST_SOURCES
     Application/MemorySnapshotBuilderTests.cpp
     Application/FrameCaptureBridgeTests.cpp
     Application/EngineCommandBridgeTests.cpp
+    Application/EditorUiCommandBridgeTests.cpp
+    Editor/EditorPanelCatalogTests.cpp
     Renderer/VertexTests.cpp
     Renderer/PrimitiveMeshGeneratorTests.cpp
     Renderer/ResourcePoolTests.cpp
