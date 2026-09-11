@@ -1,0 +1,128 @@
+#version 450
+
+// network-impl-6 campaign, Phase 3
+// (task_manager/network-impl-6/PHASE3_VOLUME_RAYMARCH_PREVIEW_RENDERER.md) -
+// the "Volume mode" raymarch preview Unity's own Texture3D inspector uses,
+// built for an LLM/AI agent fetching it over HTTP (GET /get_texture) rather
+// than a human-facing Editor panel - see PHASE0_MASTER_STRATEGY.md for the
+// full campaign writeup. One invocation per output pixel; front-to-back
+// alpha-composited raymarch through a fixed-camera, origin-centered proxy
+// box (see src/Renderer/VolumeTexturePreviewMath.h - the CPU oracle this
+// shader's own IntersectRayBox() below must always be checked BY HAND
+// against, mirroring AtmosphereMath.h's own "CPU oracle is right by
+// definition" rule - see AGENTS.md, "Atmosphere Scattering").
+//
+// BINDING CONVENTION (matches
+// src/Renderer/VolumeTexturePreviewRenderer.cpp exactly - see
+// Vulkan/DescriptorSetLayoutBuilder.h's own documented "read-only Texture
+// first, RWTexture output last" ordering): binding 0 = the live volume
+// texture (read-only combined image sampler), binding 1 = the persistent
+// 256x256 RGBA8 output image.
+//
+// local_size_x/y = 16 - matches this codebase's other 2D-output compute
+// passes (e.g. src/Shaders/AtmosphereAerialPerspectiveVolumeDebugSlice.comp)
+// - MUST match VolumeTexturePreviewRenderer.h's own kLocalSizeX/kLocalSizeY
+// constants exactly.
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(binding = 0) uniform sampler3D volumeTex;
+layout(binding = 1, rgba8) uniform writeonly image2D outputImage;
+
+// MUST match VolumeTexturePreviewRenderer.cpp's own PushConstants struct -
+// every vec3 starts at a 16-byte-aligned offset, std140-style (see that
+// file's own doc comment).
+layout(push_constant) uniform PushConstants {
+    vec3 eyePosition;
+    float tanHalfFovY;
+    vec3 forward;
+    float densityScale;
+    vec3 right;
+    int stepCount;
+    vec3 up;
+    float _padding0;
+    vec3 boxHalfExtents;
+    float _padding1;
+} pc;
+
+// Dark gray, so white/bright smoke-like content stays readable - the
+// how-to reference material's own recommendation
+// (task_manager/network-impl-6/how-to-instruction.txt).
+const vec3 kBackgroundColor = vec3(0.2, 0.2, 0.2);
+
+// A direct GLSL transcription of VolumeTexturePreviewMath.cpp's own
+// IntersectRayBox() (the CPU oracle) - box centered at the origin,
+// boxMin = -boxHalfExtents, boxMax = +boxHalfExtents. Deliberately NOT
+// epsilon-guarded against a zero ray-direction component (relies on
+// IEEE-754 1.0/0.0 == +inf behaving correctly in the min/max slab logic
+// below, exactly like the CPU oracle) - if this GLSL ever disagrees with
+// the CPU oracle, THIS is what needs fixing, never the reverse (see
+// AGENTS.md, "Atmosphere Scattering", for the identical precedent this
+// rule is modeled on).
+bool IntersectRayBox(vec3 rayOrigin, vec3 rayDirection, vec3 boxHalfExtents, out float tEnter, out float tExit)
+{
+    vec3 boxMin = -boxHalfExtents;
+    vec3 boxMax = boxHalfExtents;
+
+    vec3 invDir = 1.0 / rayDirection;
+    vec3 t0 = (boxMin - rayOrigin) * invDir;
+    vec3 t1 = (boxMax - rayOrigin) * invDir;
+
+    vec3 tMin = min(t0, t1);
+    vec3 tMax = max(t0, t1);
+
+    tEnter = max(max(tMin.x, tMin.y), tMin.z);
+    tExit = min(min(tMax.x, tMax.y), tMax.z);
+
+    return tExit >= max(tEnter, 0.0);
+}
+
+void main()
+{
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 outSize = imageSize(outputImage);
+    if (pixel.x >= outSize.x || pixel.y >= outSize.y) {
+        return;
+    }
+
+    vec2 ndc = (vec2(pixel) + 0.5) / vec2(outSize) * 2.0 - 1.0; // [-1, 1], y NOT flipped since this is a compute image write, not a rasterized clip-space position.
+    float aspect = float(outSize.x) / float(outSize.y);
+
+    vec3 rayDir = normalize(
+        pc.forward
+        + pc.right * (ndc.x * pc.tanHalfFovY * aspect)
+        + pc.up * (-ndc.y * pc.tanHalfFovY)); // -ndc.y so pixel row 0 (top) maps to +up, matching normal image-row-0-is-top convention.
+
+    float tEnter;
+    float tExit;
+    if (!IntersectRayBox(pc.eyePosition, rayDir, pc.boxHalfExtents, tEnter, tExit)) {
+        imageStore(outputImage, pixel, vec4(kBackgroundColor, 1.0));
+        return;
+    }
+    tEnter = max(tEnter, 0.0);
+
+    float rayLength = tExit - tEnter;
+    float stepLength = rayLength / float(pc.stepCount);
+    float t = tEnter + 0.5 * stepLength;
+
+    vec4 accum = vec4(0.0);
+    for (int i = 0; i < pc.stepCount; ++i) {
+        vec3 localPos = pc.eyePosition + rayDir * t; // Box-local space, box spans [-boxHalfExtents, +boxHalfExtents].
+        vec3 uvw = (localPos / pc.boxHalfExtents) * 0.5 + 0.5; // -> [0, 1]^3 texture space.
+
+        vec4 s = texture(volumeTex, uvw);
+        float density = s.a;
+        vec3 color = s.rgb;
+        float alpha = 1.0 - exp(-density * pc.densityScale * stepLength);
+
+        accum.rgb += (1.0 - accum.a) * color * alpha;
+        accum.a += (1.0 - accum.a) * alpha;
+
+        if (accum.a > 0.995) {
+            break;
+        }
+        t += stepLength;
+    }
+
+    vec3 finalColor = accum.rgb + (1.0 - accum.a) * kBackgroundColor;
+    imageStore(outputImage, pixel, vec4(finalColor, 1.0));
+}

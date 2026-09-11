@@ -5,6 +5,7 @@
 #include "../Application/EngineCommandBridge.h"
 #include "../Application/FrameCaptureBridge.h"
 #include "../Encoding/Base64.h"
+#include "../Math/Quat.h"
 #include "../Math/Vec3.h"
 
 #include <httplib.h>
@@ -165,7 +166,7 @@ void RegisterListTexturesRoute(httplib::Server& server, FrameCaptureBridge* capt
             // Step 3.3, for why they are not the same type).
             views.push_back(TextureListEntryView{
                 entry.name, entry.regime, entry.format, entry.width, entry.height, entry.hasDepth,
-                entry.framesSinceUpdate });
+                entry.framesSinceUpdate, entry.kind, entry.depth });
         }
         res.set_content(BuildListTexturesResponseJson(views), "application/json");
     });
@@ -293,6 +294,133 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         res.status = outcome.success ? 200 : 404;
         res.set_content(BuildDeleteEntityResponseJson(outcome.success, outcome.errorMessage,
             outcome.deletedEntityIndex, outcome.deletedEntityGeneration), "application/json");
+    });
+
+    // network-impl-5 campaign
+    // (PHASE4_NETWORK_POST_ROUTES_WIRING.md) - two more POST routes, wired
+    // the exact same five-step way as /instantiate_primitive//delete_entity
+    // above: parse (Phase 1) -> bridge unavailable check -> build an
+    // EngineCommandRequest (converting Phase 1's plain floats into real
+    // Vec3/Quat values HERE, the one place that boundary is crossed) ->
+    // SubmitAndWait() -> map alreadyPending/timedOut/outcome to a status
+    // code + Phase 1's response builder.
+    server.Post("/set_entity_trs", [commandBridge](const httplib::Request& req, httplib::Response& res) {
+        const ParsedSetEntityTrsRequest parsed = ParseSetEntityTrsRequest(req.body);
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        if (commandBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("engine command bridge not available"), "application/json");
+            return;
+        }
+
+        EngineCommandRequest request;
+        request.kind = EngineCommandKind::SetEntityTrs;
+        request.setEntityTrs.name = parsed.name;
+        request.setEntityTrs.hasTranslation = parsed.hasTranslation;
+        request.setEntityTrs.translation = Vec3{ parsed.translationX, parsed.translationY, parsed.translationZ };
+        request.setEntityTrs.hasRotationEulerDegrees = parsed.hasRotationEulerDegrees;
+        request.setEntityTrs.rotationEulerDegrees =
+            Vec3{ parsed.rotationPitchXDegrees, parsed.rotationYawYDegrees, parsed.rotationRollZDegrees };
+        request.setEntityTrs.hasScale = parsed.hasScale;
+        request.setEntityTrs.scale = Vec3{ parsed.scaleX, parsed.scaleY, parsed.scaleZ };
+
+        const EngineCommandBridge::SubmitResult submit = commandBridge->SubmitAndWait(request);
+        if (submit.alreadyPending) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("another engine command is already in progress"), "application/json");
+            return;
+        }
+        if (submit.timedOut) {
+            res.status = 504;
+            res.set_content(BuildGenericErrorResponseJson("engine command timed out"), "application/json");
+            return;
+        }
+
+        const SetEntityTrsOutcome& outcome = submit.result->setEntityTrs;
+        if (!outcome.success) {
+            // See PHASE0/PHASE2's own note: TWO distinct failure reasons get
+            // TWO distinct status codes - a not-found NAME is 404 (mirrors
+            // /delete_entity's own convention), while a found-but-Transform-less
+            // entity is 409 (the entity positively exists, this operation just
+            // cannot apply to it).
+            res.status = outcome.entityNotFound ? 404 : 409;
+            res.set_content(BuildGenericErrorResponseJson(outcome.errorMessage), "application/json");
+            return;
+        }
+
+        const Vec3 resultEulerDegrees = outcome.resultingRotation.ToEulerDegrees();
+        TransformSnapshotView snapshot;
+        snapshot.positionX = outcome.resultingPosition.x;
+        snapshot.positionY = outcome.resultingPosition.y;
+        snapshot.positionZ = outcome.resultingPosition.z;
+        snapshot.rotationEulerXDegrees = resultEulerDegrees.x;
+        snapshot.rotationEulerYDegrees = resultEulerDegrees.y;
+        snapshot.rotationEulerZDegrees = resultEulerDegrees.z;
+        snapshot.rotationQuatX = outcome.resultingRotation.x;
+        snapshot.rotationQuatY = outcome.resultingRotation.y;
+        snapshot.rotationQuatZ = outcome.resultingRotation.z;
+        snapshot.rotationQuatW = outcome.resultingRotation.w;
+        snapshot.scaleX = outcome.resultingScale.x;
+        snapshot.scaleY = outcome.resultingScale.y;
+        snapshot.scaleZ = outcome.resultingScale.z;
+
+        res.status = 200;
+        res.set_content(BuildSetEntityTrsResponseJson(true, "", outcome.entityIndex, outcome.entityGeneration,
+            outcome.translationChanged, outcome.rotationChanged, outcome.scaleChanged, snapshot), "application/json");
+    });
+
+    server.Post("/instantiate_light", [commandBridge](const httplib::Request& req, httplib::Response& res) {
+        const ParsedInstantiateLightRequest parsed = ParseInstantiateLightRequest(req.body);
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        if (commandBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("engine command bridge not available"), "application/json");
+            return;
+        }
+
+        EngineCommandRequest request;
+        request.kind = EngineCommandKind::InstantiateLight;
+        request.instantiateLight.lightType = parsed.lightType;
+        request.instantiateLight.requestedName = parsed.name;
+        request.instantiateLight.worldPosition = Vec3{ parsed.worldX, parsed.worldY, parsed.worldZ };
+        request.instantiateLight.hasRotationEulerDegrees = parsed.hasRotationEulerDegrees;
+        request.instantiateLight.rotationEulerDegrees =
+            Vec3{ parsed.rotationPitchXDegrees, parsed.rotationYawYDegrees, parsed.rotationRollZDegrees };
+        request.instantiateLight.color = Vec3{ parsed.colorR, parsed.colorG, parsed.colorB };
+        request.instantiateLight.illuminanceLux = parsed.illuminanceLux;
+        request.instantiateLight.active = parsed.active;
+        request.instantiateLight.hasParent = parsed.hasParent;
+        request.instantiateLight.parentName = parsed.parentName;
+
+        const EngineCommandBridge::SubmitResult submit = commandBridge->SubmitAndWait(request);
+        if (submit.alreadyPending) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("another engine command is already in progress"), "application/json");
+            return;
+        }
+        if (submit.timedOut) {
+            res.status = 504;
+            res.set_content(BuildGenericErrorResponseJson("engine command timed out"), "application/json");
+            return;
+        }
+
+        const InstantiateLightOutcome& outcome = submit.result->instantiateLight;
+        res.status = outcome.success ? 200 : 400;
+        // network-impl-5 campaign - deliberately reuses
+        // BuildInstantiatePrimitiveResponseJson() verbatim (see NetworkRoutes.h,
+        // Phase 1, Step 3.4) - InstantiateLightOutcome's own fields line up
+        // 1:1 with what that builder already expects.
+        res.set_content(BuildInstantiatePrimitiveResponseJson(outcome.success, outcome.errorMessage,
+            outcome.entityIndex, outcome.entityGeneration, outcome.resolvedName,
+            outcome.parentRequestedButNotFound, outcome.requestedParentName), "application/json");
     });
 }
 

@@ -38,6 +38,13 @@ namespace gte {
 enum class EngineCommandKind {
     InstantiatePrimitive,
     DeleteEntity,
+    // network-impl-5 campaign
+    // (PHASE3_ENGINE_COMMAND_BRIDGE_AND_DISPATCH_EXTENSION.md) - two more
+    // engine commands, sharing this SAME single-global-slot bridge (see
+    // PHASE0_MASTER_STRATEGY.md's Locked Design Decision #8 - unchanged
+    // from network-impl-3's own original Locked Design Decision #5).
+    SetEntityTrs,
+    InstantiateLight,
 };
 
 // Plain request payload for one InstantiatePrimitive command - copied
@@ -56,15 +63,22 @@ struct DeleteEntityCommand {
 };
 
 // One pending engine command, tagged by `kind` - EXACTLY one of
-// `instantiatePrimitive`/`deleteEntity` is meaningful, selected by `kind`
-// (deliberately a plain tagged struct, not std::variant, matching this
-// codebase's existing FrameCaptureKind + CapturedPngImage precedent - a
-// single-purpose enum tag plus plain sibling fields, no visitor machinery
-// needed for just two kinds).
+// `instantiatePrimitive`/`deleteEntity`/`setEntityTrs`/`instantiateLight` is
+// meaningful, selected by `kind` (deliberately a plain tagged struct, not
+// std::variant, matching this codebase's existing FrameCaptureKind +
+// CapturedPngImage precedent - a single-purpose enum tag plus plain sibling
+// fields, no visitor machinery needed).
 struct EngineCommandRequest {
     EngineCommandKind kind = EngineCommandKind::InstantiatePrimitive;
     InstantiatePrimitiveCommand instantiatePrimitive;
     DeleteEntityCommand deleteEntity;
+    // network-impl-5 campaign - reuses Game's OWN request-parameter structs
+    // directly (src/Game/EngineCommandResults.h, Phase 2) rather than
+    // re-declaring an identical shape as a THIRD/FOURTH "Command" struct
+    // here - see this phase document's own Step 2 note on why this
+    // diverges, deliberately, from the two OLDER fields immediately above.
+    SetEntityTrsParams setEntityTrs;
+    InstantiateLightParams instantiateLight;
 };
 
 // The completed result of one EngineCommandRequest - `kind` mirrors the
@@ -74,6 +88,9 @@ struct EngineCommandResult {
     EngineCommandKind kind = EngineCommandKind::InstantiatePrimitive;
     InstantiatePrimitiveOutcome instantiatePrimitive;
     DeleteEntityOutcome deleteEntity;
+    // network-impl-5 campaign
+    SetEntityTrsOutcome setEntityTrs;
+    InstantiateLightOutcome instantiateLight;
 };
 
 class EngineCommandBridge {

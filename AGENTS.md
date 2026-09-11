@@ -1088,12 +1088,52 @@ module or adding a new endpoint:
   `504` if the main thread doesn't drain the request within the bridge's
   timeout. See `task_manager/network-impl-3/PHASE0_MASTER_STRATEGY.md` for
   the full six-phase campaign writeup.
-- **A future THIRD engine command** (e.g. `set_transform`/`play_animation`/
-  `list_entities`) should extend `EngineCommandKind` plus
-  `EngineCommandRequest`/`EngineCommandResult`'s tagged-struct shape
-  (`src/Application/EngineCommandBridge.h`) rather than inventing a new
-  bridge - this generalization is exactly what this campaign was designed to
-  enable.
+- **`POST /set_entity_trs` and `POST /instantiate_light`** (`network-impl-5`
+  campaign, `task_manager/network-impl-5/PHASE0_MASTER_STRATEGY.md`) are the
+  THIRD and FOURTH `EngineCommandKind` values, added in the same campaign -
+  this is the worked example the older revision of this bullet (below, now
+  folded into this one) used to describe only hypothetically. Same bridge,
+  same rule: a route handler stays a pure function of its own request data
+  plus `EngineCommandBridge::SubmitAndWait()`, nothing else engine-side.
+  **`POST /set_entity_trs`** updates an existing, by-name entity's LOCAL
+  (parent-relative) `Transform` - `Game::SetEntityTrs()` - given a JSON body
+  of `name` (required) plus three INDEPENDENTLY OPTIONAL, ALL-OR-NOTHING
+  groups (`translation`/`rotation_euler_degrees`/`scale`, each requiring all
+  of `x`/`y`/`z` together when present - rotation is Euler DEGREES only, no
+  quaternion input). The response ALWAYS echoes the entity's full resulting
+  local transform (position, rotation as both Euler degrees and a raw
+  quaternion, scale) plus a `"changed":{"translation":...,"rotation":...,
+  "scale":...}` object, regardless of which fields this call actually
+  changed - a request specifying none of the three groups is a valid,
+  harmless no-op that doubles as a de-facto "read the current transform"
+  query. Responds `200` on success (including the no-op case), `404` if no
+  live entity has that name, `409` if the entity exists but has no
+  `Transform` component, or `400` for malformed JSON/an incomplete
+  translation-rotation-scale group. **`POST /instantiate_light`** spawns a
+  new light entity (today: the engine's only implemented kind,
+  `DirectionalLight`) - `Game::InstantiateLight()` - mirroring
+  `/instantiate_primitive`'s own `name`/`world_position`/`parent` contract,
+  plus a `light_type` field (`""`/`"directional"` today, case-insensitive -
+  future-proofs the request shape for a later point/spot light without an
+  API-breaking change; any other value is a `400`), and `color`/
+  `illuminance_lux`/`active` fields mapping 1:1 onto `DirectionalLight`'s own
+  component fields. A network-spawned light with no explicit
+  `rotation_euler_degrees` gets the SAME "late-afternoon" default rotation
+  the Editor's own "Create Directional Light" menu already uses
+  (`Quat::FromEulerDegrees(45.0f, -30.0f, 0.0f)`) - NOT identity - shared via
+  one small private helper (`DefaultDirectionalLightRotation()`,
+  `Game.cpp`) both paths call, so they can never silently drift apart.
+  Responds `200` on success or `400` for malformed JSON/a missing `name`/an
+  unsupported `light_type`. **A genuine test-coverage improvement over
+  `network-impl-3`'s own accepted gap**: unlike `Game::InstantiatePrimitive()`
+  (GPU/`Renderer`-touching, "Tier 2, no automated coverage yet" per
+  "Testability & Regression Safety" below), `Game::SetEntityTrs()`/
+  `InstantiateLight()` are BOTH fully Tier-1-testable end to end (neither
+  touches a live `Renderer` at all) - every layer of both new commands
+  (`NetworkRoutes.h` parsing, `Game::` logic, the bridge, the HTTP route) has
+  real, direct, automated coverage, with no Tier-2 gap to accept this time.
+  See `task_manager/network-impl-5/PHASE0_MASTER_STRATEGY.md` for the full
+  five-phase campaign writeup.
 - **JSON parsing now exists via a vendored `nlohmann/json`** (single-header
   `json.hpp`, fetched via `cmake/FetchJson.cmake` mirroring
   `cmake/FetchHttplib.cmake`'s own pattern) - a deliberate, narrow exception to
@@ -1213,6 +1253,54 @@ registering a new named texture:
   /list_textures` returns a JSON array of every texture currently known to
   the registry, each entry carrying `name`/`regime`/`format`/`width`/
   `height`/`has_depth`/`frames_since_update`.
+- **`GET /get_texture` also resolves a name registered as a VOLUME texture**
+  (`network-impl-6` campaign,
+  `task_manager/network-impl-6/PHASE0_MASTER_STRATEGY.md`) - same query
+  parameters, same `?format=png|base64|json` negotiation, same
+  `Accept: application/json` honoring as the 2D case documented above.
+  `channel=depth` against a volume name is always `409` - a
+  `VolumeTarget`/`VolumeTexture` has no depth-companion concept at all (see
+  `VolumeTarget.h`'s own doc comment), so this is the SAME existing
+  depth-`409` failure mode applied to a case that is always true for every
+  volume, not a new one. Unlike an ordinary 2D capture (a pixel COPY of
+  whatever the render graph already rendered this frame), a volume capture
+  is rendered FRESH, on demand, at request time: a single, fixed-camera,
+  front-to-back alpha-composite raymarch (Unity's Texture3D "Volume" preview
+  mode equivalent) into a persistent 256x256 RGBA8 thumbnail - no camera/
+  yaw/pitch/distance query parameters, and no other preview mode
+  (Slice/Maximum-Intensity-Projection), by deliberate design; this is a
+  debugging/LLM-agent capability, not an Editor inspector feature. The
+  mechanism is fully generic over ANY current or future `VolumeTextureHandle`
+  a render-graph pass declares and keeps alive via
+  `RenderGraphBuilder::KeepVolumeTextureOutput()` - not hardcoded to the
+  Atmosphere feature's own two aerial-perspective volumes specifically,
+  mirroring `RenderGraphDebugTextureRegistry`'s own "zero opt-in required"
+  property exactly (see "Atmosphere Scattering" below for where the new
+  volume-texture registry itself, `RenderGraphDebugVolumeTextureRegistry`, is
+  documented).
+- **`GET /list_textures` entries now carry a
+  `"kind":"texture2d"|"texture3d"` field, plus a `"depth"` field** (a
+  volume's Z/texel-count extent - always `0` on a 2D entry) - every other
+  pre-existing 2D-entry field is unchanged. This is how an LLM/AI agent
+  caller discovers which `texture_name`s are volumes worth requesting,
+  without any prior knowledge of the engine's internal naming convention.
+- **`gte::VolumeTexturePreviewRenderer`/`VolumeTexturePreviewMath.h`**
+  (`src/Renderer/VolumeTexturePreviewRenderer.h/.cpp`,
+  `src/Renderer/VolumeTexturePreviewMath.h/.cpp`) is the self-contained,
+  on-demand, no-RenderGraph-dependency renderer behind the raymarch above -
+  the same established shape `ComputeBlurValidation`/
+  `AtmosphereTransmittanceLutValidation`/`GpuSkinningValidation` already use
+  (a small class built directly on `Renderer::ImmediateSubmit()`/
+  `Renderer::CaptureImagePixels()`, with its own owned `VkSampler`/
+  descriptor-set/compute pipeline, never routed through the render graph
+  itself). `VolumeTexturePreviewMath.h`'s `ComputeVolumeCameraSetup()`/
+  `IntersectRayBox()` is the permanent CPU ORACLE for the fixed camera/
+  ray-box math `VolumeTexturePreview.comp` mirrors in GLSL - the exact same
+  "if the GLSL and the CPU oracle ever disagree, the CPU oracle is right by
+  definition and the shader is what needs fixing" discipline `AtmosphereMath.h`
+  already establishes (see "Atmosphere Scattering" below). See
+  `task_manager/network-impl-6/PHASE0_MASTER_STRATEGY.md` for the full
+  six-phase campaign writeup.
 
 ## Render Target Format Matching
 
@@ -1438,16 +1526,28 @@ whenever touching this feature:
   exactly like `ComputeBlurValidation`'s own persistent output — do not build
   `CreateVolumeTexture()` speculatively; only a genuine future need (more
   than one distinct volume texture with varying sizes across frames)
-  justifies it. `RenderGraphDebugTextureRegistry` (`GET /get_texture`/
-  `GET /list_textures`, `network-impl-4` campaign) deliberately still has NO
-  3D concept at all — a volume texture is never directly capturable that
-  way; Phase 9's own small, permanent "debug slice" mirror
+  justifies it. `RenderGraphDebugVolumeTextureRegistry`
+  (`src/Renderer/RenderGraph/RenderGraphDebugVolumeTextureRegistry.h/.cpp`,
+  `network-impl-6` campaign) is the volume-texture sibling of
+  `RenderGraphDebugTextureRegistry` (`GET /get_texture`/`GET /list_textures`,
+  `network-impl-4` campaign) — auto-populated by
+  `RenderGraph::ExecuteCompiledGraph()` exactly like the 2D registry, with
+  zero opt-in required from whichever pass declared the volume texture (see
+  "Networking" above, "Named Texture Capture", for the endpoint's own full
+  contract). `GET /get_texture` now transparently resolves EITHER kind by
+  name — a volume capture is rendered FRESH, on demand, via a single,
+  fixed-camera raymarch (`VolumeTexturePreviewRenderer`), never a raw pixel
+  copy, since a 3D voxel grid has no direct 2D pixel representation to copy
+  the way an ordinary 2D render target does. Phase 9's own small, permanent
+  "debug slice" mirror
   (`AtmosphereLutRenderer::AddAerialPerspectiveVolumeDebugSlicePass()`,
   copying one Z-slice into a real, registered 2D texture,
-  `"AtmosphereAerialPerspectiveVolumeDebugSlice"`) is the correct, narrow way
-  to get debug visibility for a volume texture — do NOT retrofit
-  `RenderGraphDebugTextureRegistry` itself to understand 3D resources
-  generically; that remains a deliberate, out-of-scope non-goal.
+  `"AtmosphereAerialPerspectiveVolumeDebugSlice"`) still exists and remains a
+  perfectly valid, narrower way to get a literal-slice view of a volume
+  texture — the two approaches are complementary, not redundant; this is no
+  longer a "deliberate, out-of-scope non-goal" (see
+  `task_manager/network-impl-6/PHASE0_MASTER_STRATEGY.md` for the full
+  six-phase campaign that lifted this restriction).
 - **`AtmosphereParametersGpu`/`AtmosphereFrameUniforms`
   (`src/Renderer/Atmosphere/AtmosphereTypes.h`) are ALWAYS bound as read-only
   STORAGE buffers (`layout(std430, ...) readonly buffer`), NEVER a true

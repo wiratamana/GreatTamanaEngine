@@ -1695,6 +1695,28 @@ pieces:
   `task_manager/network-impl-4/NETWORK_IMPL_4_CAMPAIGN_COMPLETION_REPORT.md`
   for the full six-phase campaign writeup.
 
+- **The embedded HTTP server can now change an existing entity's transform,
+  and spawn lights, over HTTP** (`network-impl-5` campaign,
+  `task_manager/network-impl-5/PHASE0_MASTER_STRATEGY.md`) - two more
+  `EngineCommandBridge`-backed POST endpoints, reusing the exact same
+  cross-thread bridge/JSON machinery `network-impl-3` already built (no new
+  vendored dependency, no new cross-thread mechanism). `POST
+  /set_entity_trs` updates translation/rotation/scale on an existing,
+  by-name entity, independently (any subset of the three), operating on its
+  LOCAL (parent-relative) transform; every call's response always echoes the
+  entity's full resulting transform (position, rotation as both Euler
+  degrees and a raw quaternion, scale) plus which fields this call actually
+  changed - including a call that changes nothing, which doubles as a
+  lightweight "read the current transform" query. `POST /instantiate_light`
+  spawns a new `DirectionalLight` entity (a `light_type` field future-proofs
+  this for a later point/spot light), mirroring `/instantiate_primitive`'s
+  own name/position/parent contract, plus color/illuminance/active fields
+  mapping directly onto `DirectionalLight`'s own component fields - a
+  network-spawned light with no explicit rotation gets the same
+  "late-afternoon" default rotation the Editor's own "Create Directional
+  Light" menu already uses. See `task_manager/network-impl-5/PHASE0_MASTER_STRATEGY.md`
+  for the full five-phase campaign writeup.
+
 - **The Editor's "Scene" panel now has a Unity-style procedural infinite
   ground grid** (`editor-enchancements-1` campaign,
   `task_manager/editor-enchancements-1/PHASE0_MASTER_STRATEGY.md`) - a
@@ -1830,6 +1852,48 @@ pieces:
   feature). See `AGENTS.md`'s new "Atmosphere Scattering" section for every
   load-bearing rule future contributors must follow, and each phase's own
   `ATMOSPHERE_PHASEn_COMPLETION_REPORT.md` for the full nine-phase writeup.
+- **The embedded HTTP server's `GET /get_texture`/`GET /list_textures` now
+  understand live, GPU-resident 3D (volume) textures, not just 2D ones**
+  (`network-impl-6` campaign,
+  `task_manager/network-impl-6/PHASE0_MASTER_STRATEGY.md`) - the same class
+  of capability Unity's Editor gives you when it draws a raymarched
+  "smoke cloud"-style preview thumbnail for a `Texture3D` asset in the
+  Inspector, except here the client is an LLM/AI agent talking to
+  `GET /get_texture` over loopback HTTP, not a human looking at an Editor
+  panel. A new, pure, Tier-1-tested data model,
+  `gte::rg::RenderGraphDebugVolumeTextureRegistry`
+  (`src/Renderer/RenderGraph/RenderGraphDebugVolumeTextureRegistry.h/.cpp`),
+  mirrors the existing 2D `RenderGraphDebugTextureRegistry`
+  (`network-impl-4` campaign) and is auto-populated by
+  `gte::rg::RenderGraph::ExecuteCompiledGraph()` every frame, with zero
+  opt-in from whichever pass declared the volume texture (today: the
+  Atmosphere feature's own two aerial-perspective froxel volumes - see the
+  Atmosphere Scattering entry immediately above - this campaign's own first
+  real, verified consumer, but the mechanism works generically for any future
+  `VolumeTextureHandle`). A requested `texture_name` that resolves to a
+  volume now renders a fresh, on-demand, single-fixed-camera, front-to-back
+  alpha-composite raymarch (`gte::VolumeTexturePreviewRenderer`, driven by a
+  new compute shader, `Shaders/VolumeTexturePreview.comp`, and its own pure
+  CPU camera/ray-box math oracle, `VolumeTexturePreviewMath.h` - the same
+  "CPU oracle is right by definition" discipline the Atmosphere Scattering
+  campaign's own `AtmosphereMath.h` already established) into a persistent
+  256x256 RGBA8 thumbnail, then rejoins the exact same PNG-encode/
+  `?format=`/`Accept:` negotiation path every existing 2D capture already
+  uses - no new endpoint, no new query parameter, no new cross-thread bridge
+  type. `GET /list_textures` entries now also carry a
+  `"kind":"texture2d"|"texture3d"` field plus a `"depth"` field (a volume's
+  Z/texel-count extent), so an LLM/AI agent caller can discover which
+  `texture_name`s are volumes worth requesting with no prior knowledge of
+  the engine's internal naming convention. Verified end-to-end against a
+  live running engine (`GET /get_texture?texture_name=AtmosphereAerialPerspectiveVolume_GameView`
+  returning a real, visually plausible non-cubic-box PNG thumbnail;
+  `channel=depth` against a volume
+  name correctly returning `409`; every pre-existing 2D-texture capture
+  request behaving byte-for-byte unchanged) and a full clean build plus full
+  `ctest` regression pass. See `AGENTS.md`'s "Named Texture Capture"/
+  "Atmosphere Scattering" sections for every load-bearing rule this feature
+  depends on, and each phase's own `PHASEn_COMPLETION_REPORT.md` for the
+  full six-phase campaign writeup.
 
 ## Roadmap
 

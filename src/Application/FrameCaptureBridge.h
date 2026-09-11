@@ -95,6 +95,21 @@ struct PublishedTextureListEntry {
     std::uint32_t height = 0;
     bool hasDepth = false;
     std::uint64_t framesSinceUpdate = 0;
+
+    // network-impl-6 campaign, Phase 5. "texture2d" (the only kind that
+    // existed before this campaign) or "texture3d". Every OLD call site
+    // building a 2D entry is updated to set this explicitly to "texture2d"
+    // (never left to an implicit/defaulted value, so it's obvious at each
+    // call site which kind is being built) - see Application.cpp.
+    std::string kind = "texture2d";
+
+    // Meaningful ONLY when kind == "texture3d" (the volume's Z/depth texel
+    // count) - always 0 for a "texture2d" entry. NOT to be confused with
+    // hasDepth above (a 2D texture's OWN depth-BUFFER availability) - a
+    // volume entry always has hasDepth == false (see VolumeTarget.h: a
+    // volume texture has no depth-companion concept at all), that field
+    // is untouched/reused as-is for this new kind, just always false.
+    std::uint32_t depth = 0;
 };
 
 // Why a capture request did NOT produce an image - surfaced to the network

@@ -433,6 +433,11 @@ TEST(BuildListTexturesResponseJsonTests, MultipleEntriesRoundTripEveryField)
     EXPECT_EQ(parsed["textures"][0]["height"], 720);
     EXPECT_EQ(parsed["textures"][0]["has_depth"], true);
     EXPECT_EQ(parsed["textures"][0]["frames_since_update"], 0);
+    // network-impl-6 campaign, Phase 5 - a default-constructed
+    // TextureListEntryView (no kind/depth supplied at the call site above)
+    // must still emit its "texture2d"/0 defaults explicitly.
+    EXPECT_EQ(parsed["textures"][0]["kind"], "texture2d");
+    EXPECT_EQ(parsed["textures"][0]["depth"], 0);
 
     EXPECT_EQ(parsed["textures"][1]["name"], "Swapchain");
     EXPECT_EQ(parsed["textures"][1]["regime"], "pipelined");
@@ -441,6 +446,34 @@ TEST(BuildListTexturesResponseJsonTests, MultipleEntriesRoundTripEveryField)
     EXPECT_EQ(parsed["textures"][1]["height"], 1080);
     EXPECT_EQ(parsed["textures"][1]["has_depth"], false);
     EXPECT_EQ(parsed["textures"][1]["frames_since_update"], 3);
+    EXPECT_EQ(parsed["textures"][1]["kind"], "texture2d");
+    EXPECT_EQ(parsed["textures"][1]["depth"], 0);
+}
+
+TEST(BuildListTexturesResponseJsonTests, VolumeEntryReportsTexture3dKindAndDepth)
+{
+    // network-impl-6 campaign, Phase 5
+    // (task_manager/network-impl-6/PHASE5_LIST_TEXTURES_VOLUME_SURFACING.md) -
+    // a volume texture's entry always has has_depth == false (no
+    // depth-companion concept at all - see VolumeTarget.h) but a real,
+    // non-zero "depth" field (its own Z/texel-count dimension).
+    TextureListEntryView entry{ "AtmosphereAerialPerspectiveVolume_GameView", "synchronous",
+        "R16G16B16A16_SFLOAT", 128, 128, false, 0 };
+    entry.kind = "texture3d";
+    entry.depth = 32;
+    const std::vector<TextureListEntryView> entries = { entry };
+
+    const std::string body = BuildListTexturesResponseJson(entries);
+    const nlohmann::json parsed = nlohmann::json::parse(body);
+    ASSERT_EQ(parsed["textures"].size(), 1u);
+    EXPECT_EQ(parsed["textures"][0]["name"], "AtmosphereAerialPerspectiveVolume_GameView");
+    EXPECT_EQ(parsed["textures"][0]["regime"], "synchronous");
+    EXPECT_EQ(parsed["textures"][0]["format"], "R16G16B16A16_SFLOAT");
+    EXPECT_EQ(parsed["textures"][0]["width"], 128);
+    EXPECT_EQ(parsed["textures"][0]["height"], 128);
+    EXPECT_EQ(parsed["textures"][0]["has_depth"], false);
+    EXPECT_EQ(parsed["textures"][0]["kind"], "texture3d");
+    EXPECT_EQ(parsed["textures"][0]["depth"], 32);
 }
 
 TEST(BuildListTexturesResponseJsonTests, NameWithQuoteRoundTripsThroughJson)
@@ -451,6 +484,264 @@ TEST(BuildListTexturesResponseJsonTests, NameWithQuoteRoundTripsThroughJson)
     const std::string body = BuildListTexturesResponseJson(entries);
     const nlohmann::json parsed = nlohmann::json::parse(body);
     EXPECT_EQ(parsed["textures"][0]["name"].get<std::string>(), R"(My"Texture)");
+}
+
+// --- network-impl-5 campaign
+// (PHASE1_NETWORK_ROUTES_REQUEST_PARSING_AND_RESPONSE_BUILDING.md) -
+// POST /set_entity_trs + POST /instantiate_light request parsing/response
+// building.
+
+using gte::Network::BuildSetEntityTrsResponseJson;
+using gte::Network::ParseInstantiateLightRequest;
+using gte::Network::ParseSetEntityTrsRequest;
+using gte::Network::ParsedInstantiateLightRequest;
+using gte::Network::ParsedSetEntityTrsRequest;
+using gte::Network::TransformSnapshotView;
+
+TEST(ParseSetEntityTrsRequestTests, FullyValidPayloadParsesAllThreeGroups)
+{
+    const ParsedSetEntityTrsRequest result = ParseSetEntityTrsRequest(
+        R"({"name":"MyLight","translation":{"x":1.0,"y":2.0,"z":3.0},)"
+        R"("rotation_euler_degrees":{"x":30.0,"y":90.0,"z":0.0},)"
+        R"("scale":{"x":2.0,"y":2.0,"z":2.0}})");
+
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_EQ(result.name, "MyLight");
+    ASSERT_TRUE(result.hasTranslation);
+    EXPECT_FLOAT_EQ(result.translationX, 1.0f);
+    EXPECT_FLOAT_EQ(result.translationY, 2.0f);
+    EXPECT_FLOAT_EQ(result.translationZ, 3.0f);
+    ASSERT_TRUE(result.hasRotationEulerDegrees);
+    EXPECT_FLOAT_EQ(result.rotationPitchXDegrees, 30.0f);
+    EXPECT_FLOAT_EQ(result.rotationYawYDegrees, 90.0f);
+    EXPECT_FLOAT_EQ(result.rotationRollZDegrees, 0.0f);
+    ASSERT_TRUE(result.hasScale);
+    EXPECT_FLOAT_EQ(result.scaleX, 2.0f);
+    EXPECT_FLOAT_EQ(result.scaleY, 2.0f);
+    EXPECT_FLOAT_EQ(result.scaleZ, 2.0f);
+}
+
+TEST(ParseSetEntityTrsRequestTests, NoneOfTheThreeGroupsPresentIsStillValid)
+{
+    const ParsedSetEntityTrsRequest result = ParseSetEntityTrsRequest(R"({"name":"MyLight"})");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_FALSE(result.hasTranslation);
+    EXPECT_FALSE(result.hasRotationEulerDegrees);
+    EXPECT_FALSE(result.hasScale);
+}
+
+TEST(ParseSetEntityTrsRequestTests, AllThreeGroupsExplicitlyNullIsStillValid)
+{
+    const ParsedSetEntityTrsRequest result = ParseSetEntityTrsRequest(
+        R"({"name":"MyLight","translation":null,"rotation_euler_degrees":null,"scale":null})");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_FALSE(result.hasTranslation);
+    EXPECT_FALSE(result.hasRotationEulerDegrees);
+    EXPECT_FALSE(result.hasScale);
+}
+
+TEST(ParseSetEntityTrsRequestTests, TranslationMissingOneAxisFails)
+{
+    const ParsedSetEntityTrsRequest result =
+        ParseSetEntityTrsRequest(R"({"name":"MyLight","translation":{"x":1.0,"y":2.0}})");
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.errorMessage, "translation must be an object with numeric x, y, and z fields");
+}
+
+TEST(ParseSetEntityTrsRequestTests, TranslationNotAnObjectFailsWithSameMessageAsMissingAxis)
+{
+    const ParsedSetEntityTrsRequest result =
+        ParseSetEntityTrsRequest(R"({"name":"MyLight","translation":"nope"})");
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.errorMessage, "translation must be an object with numeric x, y, and z fields");
+}
+
+TEST(ParseSetEntityTrsRequestTests, RotationEulerDegreesMissingOneAxisFails)
+{
+    const ParsedSetEntityTrsRequest result = ParseSetEntityTrsRequest(
+        R"({"name":"MyLight","rotation_euler_degrees":{"x":1.0,"z":2.0}})");
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.errorMessage, "rotation_euler_degrees must be an object with numeric x, y, and z fields");
+}
+
+TEST(ParseSetEntityTrsRequestTests, ScaleMissingOneAxisFails)
+{
+    const ParsedSetEntityTrsRequest result =
+        ParseSetEntityTrsRequest(R"({"name":"MyLight","scale":{"y":2.0,"z":2.0}})");
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.errorMessage, "scale must be an object with numeric x, y, and z fields");
+}
+
+TEST(ParseSetEntityTrsRequestTests, MissingNameFails)
+{
+    const ParsedSetEntityTrsRequest result = ParseSetEntityTrsRequest(R"({})");
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.errorMessage, "missing or invalid required field: name");
+}
+
+TEST(ParseSetEntityTrsRequestTests, MalformedJsonFailsWithExactMessage)
+{
+    const ParsedSetEntityTrsRequest result = ParseSetEntityTrsRequest("{not valid json");
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.errorMessage, "malformed JSON body");
+}
+
+TEST(ParseSetEntityTrsRequestTests, ExtraUnrecognizedFieldIsIgnored)
+{
+    const ParsedSetEntityTrsRequest result =
+        ParseSetEntityTrsRequest(R"({"name":"MyLight","some_future_field":123})");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_EQ(result.name, "MyLight");
+}
+
+TEST(ParseSetEntityTrsRequestTests, RotationQuaternionFieldIsSilentlyIgnored)
+{
+    const ParsedSetEntityTrsRequest result = ParseSetEntityTrsRequest(
+        R"({"name":"MyLight","rotation_quaternion":{"x":0,"y":0,"z":0,"w":1}})");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_FALSE(result.hasRotationEulerDegrees);
+}
+
+TEST(ParseInstantiateLightRequestTests, FullyValidPayloadParsesEveryField)
+{
+    const ParsedInstantiateLightRequest result = ParseInstantiateLightRequest(
+        R"({"light_type":"directional","name":"Sun","world_position":{"x":1.0,"y":2.0,"z":3.0},)"
+        R"("rotation_euler_degrees":{"x":45.0,"y":-30.0,"z":0.0},)"
+        R"("color":{"r":0.5,"g":0.6,"b":0.7},"illuminance_lux":50000.0,"active":false,"parent":"Root"})");
+
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_EQ(result.lightType, "directional");
+    EXPECT_EQ(result.name, "Sun");
+    EXPECT_FLOAT_EQ(result.worldX, 1.0f);
+    EXPECT_FLOAT_EQ(result.worldY, 2.0f);
+    EXPECT_FLOAT_EQ(result.worldZ, 3.0f);
+    ASSERT_TRUE(result.hasRotationEulerDegrees);
+    EXPECT_FLOAT_EQ(result.rotationPitchXDegrees, 45.0f);
+    EXPECT_FLOAT_EQ(result.rotationYawYDegrees, -30.0f);
+    EXPECT_FLOAT_EQ(result.rotationRollZDegrees, 0.0f);
+    EXPECT_FLOAT_EQ(result.colorR, 0.5f);
+    EXPECT_FLOAT_EQ(result.colorG, 0.6f);
+    EXPECT_FLOAT_EQ(result.colorB, 0.7f);
+    EXPECT_FLOAT_EQ(result.illuminanceLux, 50000.0f);
+    EXPECT_FALSE(result.active);
+    EXPECT_TRUE(result.hasParent);
+    EXPECT_EQ(result.parentName, "Root");
+}
+
+TEST(ParseInstantiateLightRequestTests, MinimalPayloadUsesDocumentedDefaults)
+{
+    const ParsedInstantiateLightRequest result = ParseInstantiateLightRequest(R"({"name":"Sun"})");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_EQ(result.lightType, "");
+    EXPECT_FALSE(result.hasRotationEulerDegrees);
+    EXPECT_FLOAT_EQ(result.colorR, 1.0f);
+    EXPECT_FLOAT_EQ(result.colorG, 1.0f);
+    EXPECT_FLOAT_EQ(result.colorB, 1.0f);
+    EXPECT_FLOAT_EQ(result.illuminanceLux, 100000.0f);
+    EXPECT_TRUE(result.active);
+    EXPECT_FALSE(result.hasParent);
+}
+
+TEST(ParseInstantiateLightRequestTests, MissingNameFails)
+{
+    const ParsedInstantiateLightRequest result = ParseInstantiateLightRequest(R"({})");
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.errorMessage, "missing or invalid required field: name");
+}
+
+TEST(ParseInstantiateLightRequestTests, UnrecognizedLightTypeValueIsNotRejectedHere)
+{
+    const ParsedInstantiateLightRequest result =
+        ParseInstantiateLightRequest(R"({"light_type":"point","name":"Sun"})");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_EQ(result.lightType, "point");
+}
+
+TEST(ParseInstantiateLightRequestTests, NegativeIlluminanceLuxFails)
+{
+    const ParsedInstantiateLightRequest result =
+        ParseInstantiateLightRequest(R"({"name":"Sun","illuminance_lux":-1.0})");
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.errorMessage, "illuminance_lux must be a non-negative number");
+}
+
+TEST(ParseInstantiateLightRequestTests, ActiveNotABooleanFails)
+{
+    const ParsedInstantiateLightRequest result = ParseInstantiateLightRequest(R"({"name":"Sun","active":"yes"})");
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.errorMessage, "active must be a boolean");
+}
+
+TEST(ParseInstantiateLightRequestTests, ColorNotAnObjectFails)
+{
+    const ParsedInstantiateLightRequest result = ParseInstantiateLightRequest(R"({"name":"Sun","color":"red"})");
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.errorMessage, "color must be an object");
+}
+
+TEST(ParseInstantiateLightRequestTests, ColorComponentNotANumberFailsWithComponentSpecificMessage)
+{
+    const ParsedInstantiateLightRequest result =
+        ParseInstantiateLightRequest(R"({"name":"Sun","color":{"r":"nope"}})");
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.errorMessage, "color.r must be a number");
+}
+
+TEST(ParseInstantiateLightRequestTests, MalformedJsonFailsWithExactMessage)
+{
+    const ParsedInstantiateLightRequest result = ParseInstantiateLightRequest("{not valid json");
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.errorMessage, "malformed JSON body");
+}
+
+TEST(BuildSetEntityTrsResponseJsonTests, SuccessShapeRoundTripsWithMixedChangedFlags)
+{
+    TransformSnapshotView transform;
+    transform.positionX = 1.0f;
+    transform.positionY = 2.0f;
+    transform.positionZ = 3.0f;
+    transform.rotationEulerXDegrees = 30.0f;
+    transform.rotationEulerYDegrees = 90.0f;
+    transform.rotationEulerZDegrees = 0.0f;
+    transform.rotationQuatX = 0.1f;
+    transform.rotationQuatY = 0.2f;
+    transform.rotationQuatZ = 0.3f;
+    transform.rotationQuatW = 0.9f;
+    transform.scaleX = 1.0f;
+    transform.scaleY = 1.0f;
+    transform.scaleZ = 1.0f;
+
+    const std::string body = BuildSetEntityTrsResponseJson(
+        /*success=*/true, /*errorMessage=*/"", /*entityIndex=*/5, /*entityGeneration=*/1,
+        /*translationChanged=*/true, /*rotationChanged=*/false, /*scaleChanged=*/true, transform);
+
+    const nlohmann::json parsed = nlohmann::json::parse(body);
+    EXPECT_EQ(parsed["success"], true);
+    EXPECT_EQ(parsed["entity"]["index"], 5);
+    EXPECT_EQ(parsed["entity"]["generation"], 1);
+    EXPECT_EQ(parsed["changed"]["translation"], true);
+    EXPECT_EQ(parsed["changed"]["rotation"], false);
+    EXPECT_EQ(parsed["changed"]["scale"], true);
+    EXPECT_FLOAT_EQ(parsed["transform"]["position"]["x"].get<float>(), 1.0f);
+    EXPECT_FLOAT_EQ(parsed["transform"]["position"]["y"].get<float>(), 2.0f);
+    EXPECT_FLOAT_EQ(parsed["transform"]["position"]["z"].get<float>(), 3.0f);
+    EXPECT_FLOAT_EQ(parsed["transform"]["rotation_euler_degrees"]["x"].get<float>(), 30.0f);
+    EXPECT_FLOAT_EQ(parsed["transform"]["rotation_euler_degrees"]["y"].get<float>(), 90.0f);
+    EXPECT_FLOAT_EQ(parsed["transform"]["rotation_quaternion"]["w"].get<float>(), 0.9f);
+    EXPECT_FLOAT_EQ(parsed["transform"]["scale"]["x"].get<float>(), 1.0f);
+}
+
+TEST(BuildSetEntityTrsResponseJsonTests, FailureShapeMatchesGenericErrorAndHasNoStrayKeys)
+{
+    const TransformSnapshotView transform;
+    const std::string body = BuildSetEntityTrsResponseJson(
+        /*success=*/false, /*errorMessage=*/"entity not found", 0, 0, false, false, false, transform);
+
+    EXPECT_EQ(body, BuildGenericErrorResponseJson("entity not found"));
+    const nlohmann::json parsed = nlohmann::json::parse(body);
+    EXPECT_FALSE(parsed.contains("entity"));
+    EXPECT_FALSE(parsed.contains("transform"));
+    EXPECT_FALSE(parsed.contains("changed"));
 }
 
 } // namespace

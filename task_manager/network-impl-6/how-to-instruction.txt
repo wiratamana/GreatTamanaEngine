@@ -1,0 +1,187 @@
+Yes — Unity’s **Volume** preview is basically a volume raymarch through a box. Unity’s public editor source has a `Texture3DPreview` implementation with separate materials for **Volume**, **Slice**, and **SDF** previews. The Volume mode is documented as a translucent cube with adjustable **Quality** (sample count) and **Alpha**. ([github.com](https://github.com/Unity-Technologies/UnityCsReference/blob/master/Editor/Mono/Inspector/Texture3DPreview.cs))
+
+For your engine, your plan is correct up to the ray-box intersection part:
+
+1. Render a cube proxy, or a fullscreen quad.
+2. For each pixel, construct a ray in the volume’s local space.
+3. Intersect it with the `[0,1]^3` texture box.
+4. March from `tEnter` to `tExit`.
+5. Sample the `Texture3D`.
+6. **Composite samples front-to-back.**
+
+The important correction is:
+
+> Do **not** normally sum values and divide by the number of steps.
+
+That produces an **average-density projection**. It can be useful as an optional debug display, but it does not look like smoke with opacity. It also makes a thick dense cloud look too similar to a thin dense cloud.
+
+Use front-to-back alpha compositing instead:
+
+```hlsl
+float4 accum = 0; // RGB is premultiplied here
+
+for (int i = 0; i < stepCount; i++)
+{
+    float3 uvw = rayOrigin + rayDir * t;
+
+    float4 s = SAMPLE_TEXTURE3D(_VolumeTex, sampler_VolumeTex, uvw);
+
+    float density = s.a;       // Or use s.r for a one-channel density texture.
+    float3 color = s.rgb;
+
+    // Convert density to opacity for this physical step length.
+    float alpha = 1.0 - exp(-density * densityScale * stepLength);
+
+    // Front-to-back premultiplied-alpha composition.
+    accum.rgb += (1.0 - accum.a) * color * alpha;
+    accum.a   += (1.0 - accum.a) * alpha;
+
+    if (accum.a > 0.995)
+        break;
+
+    t += stepLength;
+}
+```
+
+This is the core equation:
+
+```hlsl
+accum.rgb += (1 - accum.a) * sampleColor * sampleAlpha;
+accum.a   += (1 - accum.a) * sampleAlpha;
+```
+
+Using:
+
+```hlsl
+sampleAlpha = 1 - exp(-density * extinction * ds);
+```
+
+is valuable because the result stays much more stable when you change the number of raymarch steps. `ds` is the distance between samples.
+
+## Ray-box intersection
+
+For a volume in normalized texture coordinates, use box bounds `(0,0,0)` through `(1,1,1)`:
+
+```hlsl
+bool RayBox(
+    float3 ro, float3 rd,
+    float3 boxMin, float3 boxMax,
+    out float tEnter, out float tExit)
+{
+    float3 invDir = 1.0 / rd;
+
+    float3 t0 = (boxMin - ro) * invDir;
+    float3 t1 = (boxMax - ro) * invDir;
+
+    float3 tMin = min(t0, t1);
+    float3 tMax = max(t0, t1);
+
+    tEnter = max(max(tMin.x, tMin.y), tMin.z);
+    tExit  = min(min(tMax.x, tMax.y), tMax.z);
+
+    return tExit >= max(tEnter, 0.0);
+}
+```
+
+Then:
+
+```hlsl
+float t0, t1;
+if (!RayBox(rayOrigin, rayDir, 0.0, 1.0, t0, t1))
+    discard;
+
+t0 = max(t0, 0.0);
+
+float rayLength = t1 - t0;
+int stepCount = 96; // Fine for a small editor thumbnail.
+float stepLength = rayLength / stepCount;
+
+float t = t0 + 0.5 * stepLength; // Center each sample in its interval.
+```
+
+## What Unity likely does
+
+Unity’s exact Volume shader is not fully exposed in the C# reference repository, but its public editor code clearly has a dedicated `Texture3DPreview` path and a Volume preview material. The official controls also strongly indicate raymarching: **Quality** controls the number of samples, and **Alpha** controls preview opacity. ([github.com](https://github.com/Unity-Technologies/UnityCsReference/blob/master/Editor/Mono/Inspector/Texture3DPreview.cs))
+
+Unity also exposes this concept through `Handles.DrawTexture3DVolume`, whose parameters include opacity, quality modifier, filtering, and an optional color ramp. ([docs.unity3d.com](https://docs.unity3d.com/2020.1/Documentation/ScriptReference/Handles.DrawTexture3DVolume.html))
+
+For your screenshot, the preview is probably doing something close to:
+
+- raymarch a cube;
+- use trilinear filtering;
+- treat alpha or luminance as density;
+- composite front-to-back;
+- stop early when nearly opaque;
+- optionally use a grayscale-to-color gradient/ramp;
+- use an orbit camera around the cube.
+
+## Good preview modes to support
+
+Unity has three preview categories: **Volume**, **Slice**, and **SDF**. ([docs.unity3d.com](https://docs.unity3d.com/6000.3/Documentation/Manual/class-Texture3D-preview.html)) Your engine should probably offer similar modes:
+
+### 1. Volume / smoke mode
+
+Use the alpha compositing method above. Best default for your smoke texture.
+
+### 2. Slice mode
+
+Show one XY, XZ, or YZ plane directly. This is extremely useful to inspect the raw voxels and detect import errors.
+
+```hlsl
+float4 sample = tex3D(volumeTex, float3(uv, selectedZ));
+```
+
+### 3. Maximum intensity projection
+
+For density/debug volumes, this often gives a very readable thumbnail:
+
+```hlsl
+float maximum = 0.0;
+
+for (...)
+{
+    float density = SampleDensity(uvw);
+    maximum = max(maximum, density);
+}
+
+return float4(maximum.xxx, 1.0);
+```
+
+Unlike averaging, it keeps thin bright structures visible. It is not physically volumetric, but it is excellent for asset browsing.
+
+### 4. Average projection
+
+Your proposed method:
+
+```hlsl
+sum += density;
+return sum / stepCount;
+```
+
+This is valid as a diagnostic mode, but I would not use it as the main smoke preview. It is more like an X-ray / density-average visualization.
+
+## Practical settings for asset thumbnails
+
+For a small Project Browser-like thumbnail:
+
+- **48–96 steps**: usually enough.
+- **Trilinear filtering**: important for smooth smoke.
+- **Early termination** when accumulated alpha is high.
+- **Jitter the first step** slightly to reduce banding:
+  ```hlsl
+  t += blueNoise(pixelCoord) * stepLength;
+  ```
+- Use a dark gray background, so white smoke is readable.
+- Use a fixed orbit camera and fixed lightless/unlit volume shader for consistent thumbnails.
+- Cache the rendered thumbnail. Do not raymarch every asset every frame.
+
+For a `128 × 128 × 64` texture like the image, I would start with:
+
+```text
+stepCount    = 64
+densityScale = tune per asset, perhaps 2–12
+filter       = trilinear
+preview mode = front-to-back alpha compositing
+```
+
+One final detail: if the volume dimensions represent different real-world voxel sizes, account for its physical aspect ratio. A `128×128×64` texture does not necessarily mean a cube-shaped physical volume. Either scale the proxy box to its world extents, or compensate in the ray direction / step-length calculation. If it is only generic texture data with no world-size metadata, displaying it in a unit cube is reasonable.

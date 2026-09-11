@@ -924,13 +924,53 @@ int Application::Run()
                             CapturedPngImage{ std::move(png), raw.width, raw.height, framesSinceUpdate });
                     }
                 }
+            } else if (const std::optional<rg::DebugVolumeTextureSnapshot> volumeSnapshot =
+                           m_renderGraph.DebugVolumeTextureSnapshotFor(requestedName)) {
+                // network-impl-6 campaign, Phase 4
+                // (task_manager/network-impl-6/PHASE4_NAMED_TEXTURE_ENDPOINT_VOLUME_BRANCH_WIRING.md)
+                // - a name that isn't a registered 2D texture but IS a
+                // registered volume texture now renders a fresh raymarch
+                // thumbnail on demand instead of copying already-rendered
+                // pixels (a volume texture has no "existing rendered 2D
+                // contents" to copy - see PHASE0_MASTER_STRATEGY.md's Step 2).
+                if (requestedChannel == DebugTextureChannel::Depth) {
+                    // A volume texture has no depth-companion concept at all
+                    // (see VolumeTarget.h) - the same positively-known,
+                    // permanent-failure fast-fail (409) the 2D branch above
+                    // uses for wantsDepth && !snapshot->hasDepth (see
+                    // PHASE0_MASTER_STRATEGY.md's Locked Design Decision 6).
+                    m_captureBridge.FailPendingRequest(FrameCaptureKind::NamedTexture, FrameCaptureFailureReason::TargetNotAvailable);
+                } else {
+                    // Computed BEFORE WaitForGpuIdle()/the render below, from
+                    // the snapshot as it was at the moment this request was
+                    // actually serviced - exactly mirroring the 2D branch's
+                    // own identical reasoning above (Phase 2 deliberately did
+                    // not add a second, volume-specific frame counter).
+                    const std::uint64_t framesSinceUpdate =
+                        m_renderGraph.CurrentDebugTextureFrameCounter() - volumeSnapshot->lastUpdatedFrameCounter;
+
+                    m_renderer.WaitForGpuIdle();
+
+                    const VolumeTexturePreviewRenderer::CapturedRawPixels raw =
+                        m_volumeTexturePreviewRenderer.RenderPreview(m_renderer, volumeSnapshot->target, volumeSnapshot->state);
+
+                    // raw.pixels is already tightly-packed RGBA8 (see Phase 3's
+                    // own RenderPreview() doc comment) - no BGRA swizzle, no
+                    // HDR conversion, no depth-to-grayscale conversion needed
+                    // at all, unlike the 2D branch's several format-dependent
+                    // branches above.
+                    std::vector<std::uint8_t> png = Encoding::EncodeRgba8ToPng(raw.pixels.data(), raw.width, raw.height);
+                    m_captureBridge.FulfillPendingRequest(FrameCaptureKind::NamedTexture,
+                        CapturedPngImage{ std::move(png), raw.width, raw.height, framesSinceUpdate });
+                }
             }
-            // else: this name has never been registered yet this session - leave
-            // the request pending; either it starts rendering within the bridge's
-            // existing fixed timeout (a later Run() iteration's own check above
-            // then succeeds), or the caller eventually gets HTTP 504 - exactly the
-            // same accepted "main thread hasn't produced this yet" bucket
-            // network-impl-2's own PHASE0_MASTER_STRATEGY.md already documents.
+            // else: this name has never been registered as EITHER kind yet this
+            // session - leave the request pending; either it starts rendering
+            // within the bridge's existing fixed timeout (a later Run()
+            // iteration's own check above then succeeds), or the caller
+            // eventually gets HTTP 504 - exactly the same accepted "main thread
+            // hasn't produced this yet" bucket network-impl-2's own
+            // PHASE0_MASTER_STRATEGY.md already documents.
         }
 
         // network-impl-4 campaign, Phase 5
@@ -961,8 +1001,33 @@ int Application::Run()
                 // just computed here for EVERY known texture at once, once per
                 // frame, rather than once per request.
                 entry.framesSinceUpdate = currentFrameCounter - snap.lastUpdatedFrameCounter;
+                entry.kind = "texture2d"; // network-impl-6 campaign, Phase 5 - explicit at every call site, see PublishedTextureListEntry's own doc comment.
                 published.push_back(std::move(entry));
             }
+
+            // network-impl-6 campaign, Phase 5
+            // (task_manager/network-impl-6/PHASE5_LIST_TEXTURES_VOLUME_SURFACING.md) -
+            // every registered VOLUME texture also gets its own
+            // PublishedTextureListEntry, appended right after every 2D one, so
+            // GET /list_textures surfaces both kinds side by side in one flat
+            // array - this is what lets an LLM/AI caller discover a
+            // texture_name worth calling GET /get_texture with, without
+            // already knowing the Atmosphere feature's internal naming
+            // convention.
+            for (const rg::DebugVolumeTextureSnapshot& vol : m_renderGraph.ListDebugVolumeTextures()) {
+                PublishedTextureListEntry entry;
+                entry.name = vol.name;
+                entry.regime = ToDebugTextureRegimeString(vol.regime);
+                entry.format = DebugTextureColorFormatName(vol.target.format);
+                entry.width = vol.target.extent.width;
+                entry.height = vol.target.extent.height;
+                entry.hasDepth = false; // A volume texture has no depth-companion concept at all - see VolumeTarget.h.
+                entry.framesSinceUpdate = currentFrameCounter - vol.lastUpdatedFrameCounter;
+                entry.kind = "texture3d";
+                entry.depth = vol.target.extent.depth;
+                published.push_back(std::move(entry));
+            }
+
             m_captureBridge.PublishTextureList(std::move(published));
         }
 

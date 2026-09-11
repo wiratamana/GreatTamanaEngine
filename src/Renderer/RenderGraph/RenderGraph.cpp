@@ -542,6 +542,36 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         m_debugTextures.Upsert(snapshot);
     }
 
+    // network-impl-6 campaign, Phase 2
+    // (task_manager/network-impl-6/PHASE2_RENDERGRAPH_VOLUME_AUTO_REGISTRATION.md) -
+    // the volume-texture counterpart of the loop just above, sharing the
+    // exact same m_debugTextureFrameCounter stamp (see RenderGraph.h's own
+    // CurrentDebugTextureFrameCounter() doc comment for why there is
+    // deliberately no separate volume-only counter). input.volumeTextureNames
+    // and physicalVolumeTextures are both sized from
+    // input.volumeTextureDescs.size() (see RenderGraphBuilder::
+    // ImportVolumeTexture(), which always pushes onto both in lockstep), so
+    // indexing them together by `i` is safe by construction, exactly like
+    // the 2D pair above.
+    for (std::size_t i = 0; i < physicalVolumeTextures.size(); ++i) {
+        const PhysicalVolumeTexture& vol = physicalVolumeTextures[i];
+        if (!vol.resolved) {
+            continue;
+        }
+        const char* name = input.volumeTextureNames[i];
+        if (name == nullptr || name[0] == '\0') {
+            continue; // Defensive - RenderGraphBuilder::ImportVolumeTexture() already asserts a non-null/non-empty name, but an assert compiles out entirely in a release/NDEBUG build.
+        }
+
+        DebugVolumeTextureSnapshot snapshot;
+        snapshot.name = name;
+        snapshot.regime = timingMode;
+        snapshot.target = vol.target;
+        snapshot.state = vol.state;
+        snapshot.lastUpdatedFrameCounter = m_debugTextureFrameCounter;
+        m_debugVolumeTextures.Upsert(snapshot);
+    }
+
     // Phase 8 (RENDERGRAPH_PHASE8_EDITOR_DEBUG_TOOLING_STRATEGY_v1.md) - built
     // AFTER the whole pass loop above has run, so `statsLookup` (backed by
     // LastKnownStatsFor(), already updated by UpdateDrawStatsFor()/
@@ -649,6 +679,19 @@ std::optional<DebugTextureSnapshot> RenderGraph::DebugTextureSnapshotFor(const s
 std::vector<DebugTextureSnapshot> RenderGraph::ListDebugTextures() const
 {
     return m_debugTextures.ListAll();
+}
+
+// network-impl-6 campaign, Phase 2 - thin forwarders onto
+// m_debugVolumeTextures (see RenderGraph.h's own doc comments on each of
+// these).
+std::optional<DebugVolumeTextureSnapshot> RenderGraph::DebugVolumeTextureSnapshotFor(const std::string& name) const
+{
+    return m_debugVolumeTextures.FindByName(name);
+}
+
+std::vector<DebugVolumeTextureSnapshot> RenderGraph::ListDebugVolumeTextures() const
+{
+    return m_debugVolumeTextures.ListAll();
 }
 
 void RenderGraph::NotifyDebugTextureStateOverride(const std::string& name, const ResourceState& newColorState)

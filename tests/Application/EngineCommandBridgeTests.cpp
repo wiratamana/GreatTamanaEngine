@@ -180,5 +180,98 @@ TEST(EngineCommandBridgeTest, LateFulfillmentAfterTimeoutIsInertAndDoesNotCorrup
     EXPECT_EQ(fresh.result->instantiatePrimitive.resolvedName, "Fresh");
 }
 
+// network-impl-5 campaign (PHASE3_ENGINE_COMMAND_BRIDGE_AND_DISPATCH_EXTENSION.md)
+// - a round-trip test per NEW EngineCommandKind, mirroring
+// FulfilledRequestReturnsExactResultQuickly's own exact shape above. These
+// exercise ONLY the bridge's existing generic mutex/condition-variable
+// mechanics - proving directly that adding two more EngineCommandKind values
+// needed zero changes to EngineCommandBridge.cpp itself (PHASE0's own Step 2
+// claim).
+TEST(EngineCommandBridgeTest, FulfilledSetEntityTrsRequestReturnsExactResultQuickly)
+{
+    EngineCommandBridge bridge;
+
+    EngineCommandRequest request;
+    request.kind = EngineCommandKind::SetEntityTrs;
+    request.setEntityTrs.name = "MyLight";
+    request.setEntityTrs.hasTranslation = true;
+    request.setEntityTrs.translation = Vec3{ 0.0f, 5.0f, -2.0f };
+
+    std::thread fulfiller([&bridge] {
+        while (!bridge.IsCommandPending()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        const std::optional<EngineCommandRequest> peeked = bridge.TryPeekPendingCommandRequest();
+        ASSERT_TRUE(peeked.has_value());
+        EXPECT_EQ(peeked->kind, EngineCommandKind::SetEntityTrs);
+        EXPECT_EQ(peeked->setEntityTrs.name, "MyLight");
+        EXPECT_TRUE(peeked->setEntityTrs.hasTranslation);
+
+        EngineCommandResult result;
+        result.kind = EngineCommandKind::SetEntityTrs;
+        result.setEntityTrs.success = true;
+        result.setEntityTrs.translationChanged = true;
+        result.setEntityTrs.resultingPosition = Vec3{ 0.0f, 5.0f, -2.0f };
+        bridge.FulfillCommand(result);
+    });
+
+    const auto start = std::chrono::steady_clock::now();
+    const EngineCommandBridge::SubmitResult result = bridge.SubmitAndWait(request, 5000);
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+
+    fulfiller.join();
+
+    EXPECT_FALSE(result.alreadyPending);
+    EXPECT_FALSE(result.timedOut);
+    ASSERT_TRUE(result.result.has_value());
+    EXPECT_EQ(result.result->kind, EngineCommandKind::SetEntityTrs);
+    EXPECT_TRUE(result.result->setEntityTrs.success);
+    EXPECT_TRUE(result.result->setEntityTrs.translationChanged);
+    EXPECT_FALSE(result.result->setEntityTrs.rotationChanged);
+    EXPECT_EQ(result.result->setEntityTrs.resultingPosition.y, 5.0f);
+    EXPECT_LT(elapsed, std::chrono::milliseconds(4000));
+}
+
+TEST(EngineCommandBridgeTest, FulfilledInstantiateLightRequestReturnsExactResultQuickly)
+{
+    EngineCommandBridge bridge;
+
+    EngineCommandRequest request;
+    request.kind = EngineCommandKind::InstantiateLight;
+    request.instantiateLight.lightType = "directional";
+    request.instantiateLight.requestedName = "Sun";
+    request.instantiateLight.worldPosition = Vec3{ 0.0f, 10.0f, 0.0f };
+
+    std::thread fulfiller([&bridge] {
+        while (!bridge.IsCommandPending()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        const std::optional<EngineCommandRequest> peeked = bridge.TryPeekPendingCommandRequest();
+        ASSERT_TRUE(peeked.has_value());
+        EXPECT_EQ(peeked->kind, EngineCommandKind::InstantiateLight);
+        EXPECT_EQ(peeked->instantiateLight.requestedName, "Sun");
+
+        EngineCommandResult result;
+        result.kind = EngineCommandKind::InstantiateLight;
+        result.instantiateLight.success = true;
+        result.instantiateLight.resolvedName = "Sun";
+        bridge.FulfillCommand(result);
+    });
+
+    const auto start = std::chrono::steady_clock::now();
+    const EngineCommandBridge::SubmitResult result = bridge.SubmitAndWait(request, 5000);
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+
+    fulfiller.join();
+
+    EXPECT_FALSE(result.alreadyPending);
+    EXPECT_FALSE(result.timedOut);
+    ASSERT_TRUE(result.result.has_value());
+    EXPECT_EQ(result.result->kind, EngineCommandKind::InstantiateLight);
+    EXPECT_TRUE(result.result->instantiateLight.success);
+    EXPECT_EQ(result.result->instantiateLight.resolvedName, "Sun");
+    EXPECT_LT(elapsed, std::chrono::milliseconds(4000));
+}
+
 } // namespace
 } // namespace gte

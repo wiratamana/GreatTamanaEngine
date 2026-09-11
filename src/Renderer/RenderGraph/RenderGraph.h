@@ -51,6 +51,7 @@
 #include "RenderGraphBuilder.h"
 #include "RenderGraphCompiler.h"
 #include "RenderGraphDebugTextureRegistry.h"
+#include "RenderGraphDebugVolumeTextureRegistry.h"
 #include "RenderGraphNameSlotTable.h"
 #include "RenderGraphResourcePool.h"
 #include "RenderGraphTimestampPool.h"
@@ -292,6 +293,20 @@ public:
     // behind GET /list_textures.
     std::vector<DebugTextureSnapshot> ListDebugTextures() const;
 
+    // network-impl-6 campaign, Phase 2
+    // (task_manager/network-impl-6/PHASE2_RENDERGRAPH_VOLUME_AUTO_REGISTRATION.md) -
+    // the volume-texture counterpart of DebugTextureSnapshotFor()/
+    // ListDebugTextures() above, backed by m_debugVolumeTextures instead of
+    // m_debugTextures. `name` is compared as a plain std::string - see
+    // RenderGraphDebugVolumeTextureRegistry::FindByName()'s own doc comment.
+    // Returns std::nullopt if this RenderGraph has never resolved a volume
+    // texture under this exact name this session.
+    std::optional<DebugVolumeTextureSnapshot> DebugVolumeTextureSnapshotFor(const std::string& name) const;
+
+    // Every volume texture name/snapshot ever registered this session - the
+    // volume-texture counterpart of ListDebugTextures() above.
+    std::vector<DebugVolumeTextureSnapshot> ListDebugVolumeTextures() const;
+
     // PHASE0_MASTER_STRATEGY.md's Locked Design Decision 7 - called ONLY from
     // the small number of call sites that perform a graph-EXTERNAL manual
     // image-layout transition on an already-registered named texture right
@@ -310,6 +325,13 @@ public:
     // caller (Phase 4/5) computes a snapshot's own "frames_since_update" as
     // `CurrentDebugTextureFrameCounter() - snapshot.lastUpdatedFrameCounter`
     // at the exact moment it services a request, never cached/stale.
+    //
+    // network-impl-6 campaign, Phase 2 - this SAME counter also stamps every
+    // DebugVolumeTextureSnapshot's own lastUpdatedFrameCounter (there is
+    // deliberately no separate "current debug VOLUME texture frame counter"
+    // method - see PHASE2_RENDERGRAPH_VOLUME_AUTO_REGISTRATION.md's own Step
+    // 3.1) - a caller computing a volume snapshot's own "frames_since_update"
+    // must call this exact same method too.
     //
     // IMPORTANT (see PHASE2's own Step 3.3a): this counter only ever
     // advances during a SynchronousImmediateReadback call. A texture that is
@@ -485,6 +507,15 @@ private:
     // how this is kept passively up to date every call, in BOTH
     // ExecuteTimingMode regimes.
     RenderGraphDebugTextureRegistry m_debugTextures;
+
+    // network-impl-6 campaign, Phase 2
+    // (task_manager/network-impl-6/PHASE2_RENDERGRAPH_VOLUME_AUTO_REGISTRATION.md) -
+    // the volume-texture counterpart of m_debugTextures above, kept up to
+    // date by ExecuteCompiledGraph()'s own second registration loop
+    // (RenderGraph.cpp), stamped with this SAME m_debugTextureFrameCounter -
+    // see CurrentDebugTextureFrameCounter()'s own doc comment above for why
+    // there is deliberately no separate volume-only counter.
+    RenderGraphDebugVolumeTextureRegistry m_debugVolumeTextures;
 
     // Increments once per REAL engine frame - i.e. once per
     // SynchronousImmediateReadback call (see ExecuteCompiledGraph()'s own

@@ -393,6 +393,10 @@ add_library(gte_core STATIC
     src/Renderer/VolumeTexture.cpp
     src/Renderer/VolumeTexture.h
     src/Renderer/VolumeTarget.h
+    src/Renderer/VolumeTexturePreviewMath.cpp
+    src/Renderer/VolumeTexturePreviewMath.h
+    src/Renderer/VolumeTexturePreviewRenderer.cpp
+    src/Renderer/VolumeTexturePreviewRenderer.h
     src/Renderer/TextureHandle.h
     src/Renderer/MaterialTexture.h
     src/Renderer/Mesh.h
@@ -472,6 +476,8 @@ add_library(gte_core STATIC
     src/Renderer/RenderGraph/RenderGraphSnapshot.cpp
     src/Renderer/RenderGraph/RenderGraphDebugTextureRegistry.h
     src/Renderer/RenderGraph/RenderGraphDebugTextureRegistry.cpp
+    src/Renderer/RenderGraph/RenderGraphDebugVolumeTextureRegistry.h
+    src/Renderer/RenderGraph/RenderGraphDebugVolumeTextureRegistry.cpp
     src/Game/Instantiation/EntityInstantiator.cpp
     src/Game/Instantiation/EntityInstantiator.h
     src/Game/Instantiation/MeshVertexPacking.cpp
@@ -870,6 +876,17 @@ gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereAerialPerspectiveComposit
 # always-running Game View pass sequence as the rest of this campaign's
 # shaders. Does NOT #include AtmosphereCommon.glsl, so no EXTRA_DEPENDS.
 gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereAerialPerspectiveVolumeDebugSlice.comp)
+
+# network-impl-6 campaign, Phase 3
+# (task_manager/network-impl-6/PHASE3_VOLUME_RAYMARCH_PREVIEW_RENDERER.md) -
+# the raymarch preview thumbnail compute pass behind GET /get_texture's
+# volume-texture branch (Phase 4). Same unconditional (NOT
+# GTE_ENABLE_EDITOR-gated) treatment as every other core Renderer-tier
+# shader above (Locked Design Decision 4) - this feature follows GET
+# /get_texture's own gating exactly (GTE_ENABLE_NETWORK only, at the HTTP
+# route level, not here). Does NOT #include AtmosphereCommon.glsl, so no
+# EXTRA_DEPENDS.
+gte_add_shader(GreatTamanaEngine src/Shaders/VolumeTexturePreview.comp)
 
 
 

@@ -1,130 +1,132 @@
-#pragma once
+# PHASE1 — `NetworkRoutes.h/.cpp`: Request Parsing + Response Building
 
-#include <cstdint>
-#include <string>
-#include <vector>
+**v2 — revised after a focused double-check pass against the ACTUAL current
+`src/Network/NetworkRoutes.h`/`.cpp` source (and `tests/Network/
+NetworkRoutesTests.cpp`) found a few claims in the original draft that didn't
+quite match the real code, plus a couple of genuinely ambiguous spots that
+two different implementers could reasonably fill in two different,
+incompatible ways. See the "v2 revision notes" callouts inline below for
+exactly what changed and why — nothing in PHASE0's Locked Design Decisions was
+touched or relitigated.**
 
-namespace gte::Network {
+Parent: `PHASE0_MASTER_STRATEGY.md`. Depends on: nothing (pure JSON/string
+logic, exactly like every existing function in this file). Does **not**
+depend on Phase 2/3/4 — this phase's own new functions can be written,
+compiled, and Tier-1-tested in total isolation, before a single line of
+`Game.h`/`EngineCommandBridge.h` is touched.
 
-// Pure, httplib-independent route handler logic - Tier 1 testable (see
-// tests/Network/NetworkRoutesTests.cpp), no live httplib::Server/socket/
-// thread involved at all. NetworkServer.cpp (Phase 2) is only ever a thin
-// wiring layer that calls these functions and forwards their result into
-// httplib::Response::set_content() - it must never compose response text
-// itself. Every future endpoint's own response-computation logic must be
-// added here the same way, as its own small function, so it stays testable
-// the same way.
-//
-// Returns the exact response body for GET /http_hello_world - see
-// PHASE0_MASTER_STRATEGY.md's locked "Endpoint contract" for the exact
-// expected bytes (no trailing newline).
-std::string HandleHelloWorld();
+## Step 1 — The Goal
 
-// network-impl-2 campaign, Phase 3
-// (PHASE3_GAME_VIEW_CAPTURE_AND_GET_GAME_VIEW_ENDPOINT.md) - the response-
-// format-negotiation logic shared by BOTH /get_game_view and (Phase 5)
-// /get_swapchain.
-enum class CaptureResponseFormat { RawPng, JsonBase64 };
+Add four new pure functions (two parsers, two response builders) to the
+EXISTING `src/Network/NetworkRoutes.h/.cpp` — no new file, mirroring
+`ParseInstantiatePrimitiveRequest()`/`ParseDeleteEntityRequest()`/
+`BuildInstantiatePrimitiveResponseJson()`/`BuildDeleteEntityResponseJson()`'s
+own exact shape and validation-order convention:
 
-// Resolves which shape a capture endpoint's response should take, given the
-// request's own `?format=` query parameter value (empty string if absent)
-// and `Accept` header value (empty string if absent) - see
-// PHASE0_MASTER_STRATEGY.md's Locked Design Decision #3 for the exact,
-// locked precedence rules this implements:
-//   - queryFormat == "png"            -> RawPng
-//   - queryFormat == "base64"/"json"  -> JsonBase64
-//   - queryFormat is anything else non-empty -> RawPng (an unrecognized
-//     value is NOT an error - falls back to the default, same spirit as
-//     this engine's other "unknown-value falls back to a safe default"
-//     precedents, e.g. GpuTimingSample's own tri-state resolution)
-//   - queryFormat is empty AND acceptHeader contains "application/json"
-//     (a simple substring check - real Accept headers can have multiple,
-//     weighted values; this engine only ever needs the simple case) -> JsonBase64
-//   - otherwise (queryFormat empty, Accept doesn't ask for JSON) -> RawPng
-CaptureResponseFormat ResolveCaptureResponseFormat(const std::string& queryFormat, const std::string& acceptHeader);
+1. `ParseSetEntityTrsRequest(const std::string& jsonBody)` →
+   `ParsedSetEntityTrsRequest`.
+2. `ParseInstantiateLightRequest(const std::string& jsonBody)` →
+   `ParsedInstantiateLightRequest`.
+3. `BuildSetEntityTrsResponseJson(...)` → `std::string`.
+4. `instantiate_light`'s SUCCESS response reuses the EXISTING
+   `BuildInstantiatePrimitiveResponseJson()` verbatim — see Step 3.4 below
+   for why no new builder function is needed for it at all.
 
-// Builds the JSON body for the JsonBase64 response shape - a small, fixed,
-// hand-formatted JSON object (see PHASE0_MASTER_STRATEGY.md's own
-// "no JSON library" decision):
-// {"width":<int>,"height":<int>,"format":"png","data_base64":"<...>"}
-// `base64Png` must already be valid base64 text (see Encoding::EncodeBase64)
-// - this function does no escaping of it (base64's own alphabet contains no
-// character that needs JSON-string escaping).
-std::string BuildCaptureJsonBody(int width, int height, const std::string& base64Png);
+## Step 2 — The Situation
 
-// --- network-impl-3 campaign
-// (PHASE1_JSON_DEPENDENCY_AND_REQUEST_PARSING.md) - real JSON request
-// parsing/response building for the new POST /instantiate_primitive and
-// POST /delete_entity endpoints (Phase 5). Implemented via nlohmann::json
-// (see cmake/FetchJson.cmake) - the FIRST place in this engine that parses
-// genuinely untrusted, possibly-malformed JSON text rather than only ever
-// emitting a few known-safe fields (BuildCaptureJsonBody() above hand-
-// formats safely only because it carries just integers/base64 text - that
-// trick does not generalize to arbitrary caller-supplied entity/parent
-// names, which can contain characters that need real JSON-string escaping).
-// Every function below stays PURE - no httplib/socket/thread/Registry/Game/
-// Renderer dependency of any kind, exactly like everything above.
+- This file is deliberately **Math/Vec3/Quat-free** — every existing parsed
+  field is a plain `float`/`bool`/`std::string` (e.g.
+  `ParsedInstantiatePrimitiveRequest::worldX/Y/Z`, not a `Vec3`).
+  `NetworkServer.cpp` is the one place that later converts these into real
+  `Vec3`/`Quat` values (Phase 4 does this for both new routes). This
+  campaign's new parsers/builders MUST preserve that same boundary — do not
+  `#include "../Math/Vec3.h"` or `"../Math/Quat.h"` in this file.
+- `nlohmann::json` is already vendored and already `#include`d at the top of
+  `NetworkRoutes.cpp` (`network-impl-3` campaign) — no new dependency work
+  of any kind in this phase.
+- `ParseInstantiatePrimitiveRequest()`'s own doc comment (already in
+  `NetworkRoutes.h`) is the exact validation-order convention to mirror:
+  checked in a fixed order, the FIRST failure found is what `errorMessage`
+  reports; unrecognized extra JSON fields are silently ignored
+  (forward-compatible).
+- **[v2 correction — verified against the real `.cpp` AND
+  `tests/Network/NetworkRoutesTests.cpp`]** The malformed-JSON error message
+  text is the LITERAL, exact string `"malformed JSON body"` — nothing is
+  ever appended to it. `NetworkRoutes.h`'s own existing header comment for
+  `ParseInstantiatePrimitiveRequest()` currently (mis-)describes this as
+  `"malformed JSON body: <parser's own message>"`, but the real
+  `ParseJsonNoThrow()`/`ParseInstantiatePrimitiveRequest()` implementation in
+  `NetworkRoutes.cpp` never appends anything (`result.errorMessage =
+  "malformed JSON body";`, full stop), and
+  `tests/Network/NetworkRoutesTests.cpp`'s `MalformedJsonTextFails`/
+  `ParseDeleteEntityRequestTests.MalformedJsonFails` both assert the exact
+  string `"malformed JSON body"` with nothing appended. **This phase's two
+  new parsers must use the literal string `"malformed JSON body"` for this
+  case, NOT append any parser-provided detail** — copying the pre-existing
+  header comment's slightly-too-specific wording (as the original v1 draft of
+  this phase document did) would introduce a real, visible inconsistency
+  between the new endpoints' error text and every existing endpoint's. (Fixing
+  the pre-existing header comment itself is a one-line, unrelated
+  documentation nit outside this campaign's scope — feel free to fix it in
+  passing if convenient, but it is not required by this phase.)
+- Per `PHASE0_MASTER_STRATEGY.md`'s Locked Design Decisions #1/#2/#4/#9,
+  this phase's two new parsers have a meaningfully different validation
+  shape than `ParseInstantiatePrimitiveRequest()`'s own "each numeric field
+  independently optional, defaulting to 0" rule:
+  - `set_entity_trs`'s three optional groups (`translation`/
+    `rotation_euler_degrees`/`scale`) are each **all-or-nothing** — if the
+    JSON key is present at all, `x`/`y`/`z` must ALL be present and be JSON
+    numbers, or the whole request is invalid. This is a genuinely different
+    rule from `world_position`'s own "each axis independently optional,
+    defaults to 0" rule in the EXISTING function — do not accidentally copy
+    that per-axis-optional behavior here.
+  - `instantiate_light`'s `world_position`/`color` fields, by contrast, DO
+    use the existing per-component-optional-with-a-default convention
+    (creation-time defaults, not a mutation — see Locked Design Decision
+    rationale in PHASE0), while its `rotation_euler_degrees` field uses the
+    SAME all-or-nothing rule as `set_entity_trs`'s own (for internal
+    consistency between the two new endpoints' rotation fields).
+- `Vec3::One()`/`DirectionalLight`'s own default field values
+  (`ECS/Components/DirectionalLight.h`) are `color = (1,1,1)`,
+  `illuminanceLux = 100000.0f`, `active = true` — this phase's own default
+  values for `ParsedInstantiateLightRequest`'s color/illuminance/active
+  fields should match these exactly, so "field omitted entirely" and
+  "field explicitly set to the component's own default" produce identical
+  behavior. **[v2 — verified directly against the real
+  `src/ECS/Components/DirectionalLight.h`: confirmed exact match, no
+  correction needed here.]**
+- **[v2 addition — resolves a genuine ambiguity the v1 draft left open]**
+  What does an EXPLICIT JSON `null` mean for `translation`/
+  `rotation_euler_degrees`/`scale` (the three new all-or-nothing groups,
+  in EITHER endpoint)? E.g. `{"name":"X","translation":null}`. The v1 draft
+  never said, which is a real gap two implementers could fill two different,
+  incompatible ways (some readers would assume `null` behaves like "absent,"
+  by analogy with the existing `"parent"` field's own
+  `contains("parent") && !is_null()` handling; others would let the ordinary
+  `is_object()` check reject it as invalid, since `null` is not an object).
+  **Locked for this phase: an explicit JSON `null` for `translation`/
+  `rotation_euler_degrees`/`scale` is treated EXACTLY the same as the key
+  being absent entirely** (the corresponding `hasX` flag stays `false`, no
+  validation error) — this mirrors the existing `"parent"` field's own
+  null-means-absent convention and is the least surprising choice for a
+  caller who serializes "no value" as JSON `null` (a common pattern in many
+  JSON-producing client libraries/languages). This rule applies ONLY to the
+  three all-or-nothing groups (new in this phase) — it does **not** change
+  `world_position`'s or `color`'s existing/mirrored per-component-optional
+  behavior (an explicit `"world_position": null` continues to fail with
+  `"world_position must be an object"`, exactly matching
+  `ParseInstantiatePrimitiveRequest()`'s own pre-existing, unchanged
+  behavior for that field — do not "fix" that consistency gap as part of
+  this phase; it's out of scope and not part of Locked Design Decisions).
 
-// Parsed, VALIDATED result of a POST /instantiate_primitive request body.
-// `valid == false` means `errorMessage` explains exactly why - every OTHER
-// field is meaningless in that case. See ParseInstantiatePrimitiveRequest()'s
-// own doc comment below for the exact validation rules.
-struct ParsedInstantiatePrimitiveRequest {
-    bool valid = false;
-    std::string errorMessage;
-    std::string shape;
-    std::string name;
-    float worldX = 0.0f;
-    float worldY = 0.0f;
-    float worldZ = 0.0f;
-    bool hasParent = false;
-    std::string parentName; // meaningful only when hasParent is true
-};
+## Step 3 — The Plan
 
-// Parses `jsonBody` (the raw POST body) for POST /instantiate_primitive.
-// Validation rules (checked in this order - the FIRST failure found is what
-// `errorMessage` reports):
-//   1. `jsonBody` must parse as valid JSON at all, and the top-level value
-//      must be a JSON OBJECT (not an array/string/number/etc) - otherwise
-//      "malformed JSON body: <parser's own message>" / "request body must be
-//      a JSON object".
-//   2. "shape" must be present, a JSON STRING, and non-empty after parsing -
-//      otherwise "missing or invalid required field: shape". This function
-//      does NOT itself validate the shape NAME is a recognized PrimitiveType
-//      (cube/sphere/capsule/cone/plane) - that is
-//      PrimitiveMeshGenerator::TryParsePrimitiveTypeName()'s job (Phase 2),
-//      called later by Game::InstantiatePrimitive() (Phase 3). This function
-//      only validates the JSON SHAPE of the request, never its semantic
-//      meaning - keeps this function's own test suite independent of
-//      PrimitiveType ever gaining/losing a value.
-//   3. "name" must be present, a JSON STRING, and non-empty - otherwise
-//      "missing or invalid required field: name".
-//   4. "world_position" is OPTIONAL. If absent entirely, worldX/Y/Z all
-//      default to 0.0f. If present, it must be a JSON OBJECT; each of its
-//      "x"/"y"/"z" members is itself OPTIONAL (missing -> 0.0f for that axis)
-//      but if present must be a JSON NUMBER (otherwise "world_position.x/y/z
-//      must be a number").
-//   5. "parent" is OPTIONAL. Absent entirely, JSON null, OR an empty string
-//      all mean "no parent requested" (hasParent = false, parentName left
-//      empty). Any other JSON STRING means hasParent = true, parentName = that
-//      string. Any other JSON type (number/bool/object/array) for "parent" is
-//      a validation failure: "parent must be a string or null".
-// Unrecognized extra JSON fields are silently ignored (forward-compatible -
-// a future client sending an extra field never breaks an older engine build).
-ParsedInstantiatePrimitiveRequest ParseInstantiatePrimitiveRequest(const std::string& jsonBody);
+### 3.1 — New struct + parser: `ParsedSetEntityTrsRequest`/`ParseSetEntityTrsRequest()`
 
-// Parsed, VALIDATED result of a POST /delete_entity request body:
-// `{"name": "..."}`. Same "valid == false means errorMessage explains why"
-// contract as above. Validation: jsonBody must parse as a JSON object;
-// "name" must be present, a JSON string, and non-empty - otherwise "missing
-// or invalid required field: name".
-struct ParsedDeleteEntityRequest {
-    bool valid = false;
-    std::string errorMessage;
-    std::string name;
-};
-ParsedDeleteEntityRequest ParseDeleteEntityRequest(const std::string& jsonBody);
+Add to `NetworkRoutes.h`, immediately after the existing
+`ParsedDeleteEntityRequest`/`ParseDeleteEntityRequest()` declarations:
 
+```cpp
 // --- network-impl-5 campaign
 // (PHASE1_NETWORK_ROUTES_REQUEST_PARSING_AND_RESPONSE_BUILDING.md) - real
 // JSON request parsing/response building for the new POST /set_entity_trs
@@ -206,7 +208,11 @@ struct ParsedSetEntityTrsRequest {
 // (a harmless no-op, doubling as a de-facto "read the current transform"
 // query once Phase 2/4 exist).
 ParsedSetEntityTrsRequest ParseSetEntityTrsRequest(const std::string& jsonBody);
+```
 
+### 3.2 — New struct + parser: `ParsedInstantiateLightRequest`/`ParseInstantiateLightRequest()`
+
+```cpp
 // Parsed, VALIDATED result of a POST /instantiate_light request body.
 // `valid == false` means `errorMessage` explains exactly why - every OTHER
 // field is meaningless in that case.
@@ -311,7 +317,11 @@ struct ParsedInstantiateLightRequest {
 //      (point 4 of that function's own doc comment, including its exact
 //      "world_position must be an object"/"world_position.x/y/z must be a
 //      number" message text and its existing null-is-not-treated-specially
-//      behavior).
+//      behavior) - reuse that exact parsing helper/logic if this file
+//      already factored it out as a private helper; otherwise write the
+//      equivalent logic here (and consider factoring a shared private
+//      helper at that point - see this file's own Step 2 note on
+//      premature-abstraction discipline before doing so speculatively).
 //   5. "rotation_euler_degrees" is OPTIONAL, all-or-nothing x/y/z rule
 //      (including null-means-absent) - identical shape/message convention
 //      to ParseSetEntityTrsRequest()'s own field of the same name.
@@ -338,44 +348,20 @@ struct ParsedInstantiateLightRequest {
 // Unrecognized extra JSON fields are silently ignored, same
 // forward-compatible convention as everywhere else in this file.
 ParsedInstantiateLightRequest ParseInstantiateLightRequest(const std::string& jsonBody);
+```
 
-// Response-JSON builders for the two new endpoints (Phase 5's actual route
-// handlers call these). Deliberately take only PLAIN SCALAR parameters -
-// never a Game-layer/EngineCommandBridge struct type - so this file keeps its
-// existing "pure, httplib-independent, and now also completely Game/ECS-
-// independent" contract from its own file header comment. Built via
-// nlohmann::json (correct string escaping) rather than hand-formatted like
-// BuildCaptureJsonBody() above, because an entity/parent NAME - unlike a
-// base64 image or a plain integer - can legitimately contain characters that
-// need real JSON-string escaping (a quote, a backslash, ...).
-//
-// Success shape:
-//   {"success":true,"entity":{"index":<uint>,"generation":<uint>},
-//    "name":"<resolvedName>",
-//    "parent_requested_but_not_found":<bool>,
-//    "requested_parent_name":"<...>"}   (only meaningful/non-empty when the
-//                                        previous field is true)
-// Failure shape (BuildGenericErrorResponseJson below): {"success":false,"error":"<message>"}
-//
-// network-impl-5 campaign: POST /instantiate_light's route handler (Phase 4)
-// calls this SAME function for its own success/failure response - the two
-// endpoints' response shapes (spawn a named, possibly-parented entity,
-// report the same five pieces of information) are intentionally identical,
-// so no second, dedicated "BuildInstantiateLightResponseJson()" was written.
-std::string BuildInstantiatePrimitiveResponseJson(bool success, const std::string& errorMessage,
-    std::uint32_t entityIndex, std::uint32_t entityGeneration, const std::string& resolvedName,
-    bool parentRequestedButNotFound, const std::string& requestedParentName);
+### 3.3 — Response builder: `TransformSnapshotView` + `BuildSetEntityTrsResponseJson()`
 
-// Success shape: {"success":true,"entity":{"index":<uint>,"generation":<uint>}}
-// Failure shape: identical to BuildGenericErrorResponseJson() below.
-std::string BuildDeleteEntityResponseJson(bool success, const std::string& errorMessage,
-    std::uint32_t deletedEntityIndex, std::uint32_t deletedEntityGeneration);
+`set_entity_trs`'s response needs to echo back up to 13 plain floats (a
+position, an Euler-degrees rotation, a raw quaternion, AND a scale) plus 3
+"changed" bools and an entity handle. A flat 15+ parameter function would be
+its own readability hazard - group the 13 transform floats into ONE small,
+plain, Math-free struct this file owns (mirroring `TextureListEntryView`'s
+own already-established precedent later in this same file - its own doc
+comment, "a plain, scalars-only struct THIS file owns", is the exact
+philosophy to copy here too):
 
-// Shared failure-shape builder used by BOTH new endpoints AND any future one
-// (malformed JSON, bridge unavailable/busy, timeout - see Phase 5):
-// {"success":false,"error":"<errorMessage>"}
-std::string BuildGenericErrorResponseJson(const std::string& errorMessage);
-
+```cpp
 // A plain, Math/Vec3/Quat-free snapshot of one entity's resulting local
 // transform, for BuildSetEntityTrsResponseJson()'s own response body below.
 // NetworkServer.cpp (Phase 4) is the one place that copies a real
@@ -439,104 +425,79 @@ std::string BuildSetEntityTrsResponseJson(bool success, const std::string& error
     std::uint32_t entityIndex, std::uint32_t entityGeneration,
     bool translationChanged, bool rotationChanged, bool scaleChanged,
     const TransformSnapshotView& resultingTransform);
+```
 
-// --- network-impl-4 campaign, Phase 5
-// (task_manager/network-impl-4/PHASE5_HTTP_ENDPOINTS_GET_TEXTURE_AND_LIST_TEXTURES.md) -
-// GET /get_texture and GET /list_textures. Every function below stays PURE,
-// same discipline as everything above.
+Only emit the `"transform"`/`"changed"` JSON keys when `success == true` —
+confirmed directly against `BuildDeleteEntityResponseJson()`'s real
+implementation in `NetworkRoutes.cpp` (not just inferred from its header
+comment): on failure it returns `BuildGenericErrorResponseJson(errorMessage)`
+immediately, before touching `entity`/anything else, so the failure body
+never contains a stray `"entity"`/`"transform"`/`"changed"` key at all. Follow
+that exact same shape here.
 
-// Parsed, validated GET /get_texture query parameters. `valid == false`
-// means `errorMessage` explains exactly why (a 400 response - see
-// NetworkServer.cpp's own route lambda) - every other field is meaningless
-// in that case.
-struct ParsedGetTextureQuery {
-    bool valid = false;
-    std::string errorMessage;
-    std::string textureName;
-    // Mirrors FrameCaptureBridge's own DebugTextureChannel (Phase 4) -
-    // NetworkRoutes.h deliberately does NOT #include FrameCaptureBridge.h
-    // (this file's own existing convention - see its header comment:
-    // "completely Game/ECS-independent" - FrameCaptureBridge lives under
-    // src/Application/, one layer further from pure than this file wants to
-    // depend on), so this is its OWN small, parallel bool instead of
-    // reusing that enum directly - NetworkServer.cpp's route lambda is
-    // what converts `wantsDepth` into the real
-    // FrameCaptureBridge::DebugTextureChannel value at the one call site
-    // that already depends on both headers anyway.
-    bool wantsDepth = false;
-};
+### 3.4 — `instantiate_light`'s success response: reuse `BuildInstantiatePrimitiveResponseJson()` verbatim
 
-// Validation rules: "texture_name" must be present and non-empty -
-// otherwise "missing or empty required query parameter: texture_name".
-// "channel" is OPTIONAL; absent or exactly "color" -> wantsDepth = false;
-// exactly "depth" -> wantsDepth = true; any OTHER non-empty value ->
-// "invalid channel - must be \"color\" or \"depth\"" (a validation
-// FAILURE, unlike ResolveCaptureResponseFormat()'s own "unrecognized value
-// falls back to a default" convention - a typo'd channel name is much more
-// likely to be a caller MISTAKE worth surfacing loudly than a forward-
-// compatible "ignore it" case, since guessing wrong here would otherwise
-// silently return the WRONG channel's image with no error at all).
-// NOTE: matching is EXACT-CASE ("color"/"depth" only, never "Color"/"DEPTH")
-// - mirrors ResolveCaptureResponseFormat()'s own exact-lowercase-only
-// matching in this same file; this is a deliberate, consistent choice
-// across every query-parameter parser in this file, not an oversight - do
-// not add case-insensitive matching here without doing the same everywhere
-// else in this file first.
-ParsedGetTextureQuery ParseGetTextureQuery(const std::string& textureNameParam, const std::string& channelParam);
+**No new builder function for `instantiate_light` is needed at all.** Its
+success/failure JSON shape (`{"success":...,"entity":{...},"name":...,
+"parent_requested_but_not_found":...,"requested_parent_name":...}`) is
+BYTE-FOR-BYTE identical to `instantiate_primitive`'s own — both spawn a
+named, possibly-parented entity and report exactly those same five pieces
+of information. Add a short comment immediately above
+`BuildInstantiatePrimitiveResponseJson()`'s existing declaration in
+`NetworkRoutes.h` noting this reuse explicitly (e.g. "network-impl-5
+campaign: POST /instantiate_light's route handler (Phase 4) calls this
+SAME function for its own success/failure response - the two endpoints'
+response shapes are intentionally identical, so no second builder was
+written"), so a future reader isn't confused about why `instantiate_light`
+has no `BuildInstantiateLightResponseJson()` of its own anywhere in this
+file. Do NOT rename `BuildInstantiatePrimitiveResponseJson()` to something
+more generic as part of this campaign - an unrelated rename is scope creep;
+leave the existing name exactly as-is and just add the explanatory comment.
 
-// Builds GET /get_texture's own JSON/base64 response body (used only when
-// CaptureResponseFormat::JsonBase64 is resolved - see
-// ResolveCaptureResponseFormat(), reused unchanged from Phase 3 of
-// network-impl-2):
-// {"width":<int>,"height":<int>,"format":"png","data_base64":"<...>","frames_since_update":<uint>}
-// NOTE: this response's OWN "format" field is always the literal string
-// "png" - the PNG *encoding*, exactly like BuildCaptureJsonBody()'s
-// existing field of the same name. Do NOT confuse this with
-// TextureListEntryView::format below, which is the SOURCE texture's
-// VkFormat (e.g. "B8G8R8A8_UNORM") - the two are unrelated concepts that
-// simply happen to share a JSON key name in two different response shapes.
-// Built via nlohmann::json (see this file's own Step 2 note) - NOT
-// BuildCaptureJsonBody() (which stays exactly as /get_game_view/
-// /get_swapchain need it, untouched by this campaign).
-std::string BuildTextureCaptureJsonBody(
-    int width, int height, const std::string& base64Png, std::uint64_t framesSinceUpdate);
+## Verification for this phase
 
-// One entry of GET /list_textures's own JSON array - see
-// BuildListTexturesResponseJson() below. A plain, scalars-only struct THIS
-// file owns (see this file's own Step 2 note on why a struct crossing a
-// layer boundary is never accepted directly here) - NetworkServer.cpp is
-// the one place that copies gte::PublishedTextureListEntry
-// (src/Application/FrameCaptureBridge.h, Phase 5's own addition there - see
-// Step 3.3 below) into this struct, one field at a time.
-struct TextureListEntryView {
-    std::string name;
-    std::string regime; // "synchronous" or "pipelined" - already resolved to a string upstream (Application::Run(), Step 3.4) - this file never sees rg::ExecuteTimingMode.
-    std::string format;  // e.g. "B8G8R8A8_UNORM" - the texture's COLOR VkFormat, already resolved to a string upstream - see this file's own note on BuildTextureCaptureJsonBody() above for why this is a DIFFERENT "format" concept than that function's own field of the same name.
-    std::uint32_t width = 0;
-    std::uint32_t height = 0;
-    bool hasDepth = false;
-    std::uint64_t framesSinceUpdate = 0;
-
-    // network-impl-6 campaign, Phase 5 - "texture2d" or "texture3d". Mirrors
-    // gte::PublishedTextureListEntry::kind exactly (see that struct's own
-    // doc comment, FrameCaptureBridge.h) - NetworkServer.cpp copies it
-    // across verbatim, one more positional field in the same aggregate
-    // initializer as everything else here.
-    std::string kind = "texture2d";
-
-    // Meaningful ONLY when kind == "texture3d" (the volume's Z/depth texel
-    // count) - always 0 for a "texture2d" entry. Mirrors
-    // gte::PublishedTextureListEntry::depth exactly (see that struct's own
-    // doc comment for why this is unrelated to hasDepth above).
-    std::uint32_t depth = 0;
-};
-
-// Builds the full GET /list_textures response body:
-// {"textures":[{"name":"GameView","regime":"synchronous","format":"B8G8R8A8_UNORM","width":1280,"height":720,"has_depth":true,"frames_since_update":0,"kind":"texture2d","depth":0},
-//              {"name":"AtmosphereAerialPerspectiveVolume_GameView","regime":"synchronous","format":"R16G16B16A16_SFLOAT","width":128,"height":128,"has_depth":false,"frames_since_update":0,"kind":"texture3d","depth":32}]}
-// An empty `entries` produces {"textures":[]}, never an error - a session
-// where nothing has rendered a single named texture yet (e.g. queried
-// immediately at startup, before the first frame) is a valid, normal state.
-std::string BuildListTexturesResponseJson(const std::vector<TextureListEntryView>& entries);
-
-} // namespace gte::Network
+- Fast compile check.
+- New test cases in `tests/Network/NetworkRoutesTests.cpp` (existing file -
+  extend it, do not create a new one) covering, at minimum:
+  - For `ParseSetEntityTrsRequest()`: a fully valid request with all three
+    groups present; a valid request with NONE of the three groups present
+    (still `valid == true`, per Locked Design Decision #6); a valid request
+    where all three groups are explicitly JSON `null` (still `valid ==
+    true`, same as absent — **[v2 addition]**, exercises this phase's own
+    new null-means-absent rule); a request with a `translation` object
+    missing one axis (`valid == false`); a request where `translation` is
+    present but not even a JSON object, e.g. a string or number (`valid ==
+    false`, same error message as the missing-axis case — **[v2 addition]**,
+    since the doc comment states one message covers both causes); a
+    malformed-JSON body asserting the EXACT string `"malformed JSON body"`
+    (**[v2 addition]** — this is what would have caught the v1 draft's own
+    message-text mistake before it ever reached production code); a missing
+    `name`; an unrecognized extra top-level field is silently ignored
+    (**[v2 addition]**, mirrors `ParseInstantiatePrimitiveRequestTests.
+    ExtraUnrecognizedFieldIsIgnored`); a `rotation_quaternion` field is
+    silently ignored rather than rejected or consulted (**[v2 addition]** —
+    directly exercises this function's own documented "no such field exists"
+    behavior from Locked Design Decision #1).
+  - For `ParseInstantiateLightRequest()`: a fully valid request; a missing
+    `name` (`valid == false`); an unrecognized `light_type` value is **NOT**
+    rejected here (this function only validates JSON shape, not the
+    semantic light-type value - assert `valid == true` for e.g. `light_type:
+    "point"`, since that specific rejection is Phase 2's job, not this
+    function's - a test asserting the OPPOSITE would be actively wrong per
+    this function's own documented contract); a negative `illuminance_lux`
+    (`valid == false`); an `active` field that isn't a boolean (`valid ==
+    false`); a `color` field that is present but not a JSON object, e.g. a
+    string (`valid == false`, message `"color must be an object"` — **[v2
+    addition]**, closes a gap the v1 draft's own doc comment left this exact
+    message text unspecified for); a `color` object with a non-numeric `r`
+    asserting the exact message `"color.r must be a number"` (**[v2
+    addition]**, confirms the three-distinct-messages reading of the doc
+    comment rather than one combined "r/g/b" string).
+  - Also cover `BuildSetEntityTrsResponseJson()`'s own output with a
+    round-trip `nlohmann::json::parse()` assertion on a couple of
+    representative cases (success with all three `changed` flags mixed
+    true/false; failure — confirming the failure body has no stray
+    `"entity"`/`"transform"`/`"changed"` key, mirroring
+    `BuildDeleteEntityResponseJson()`'s own real, verified failure shape).
+- Write `PHASE1_COMPLETION_REPORT.md` in this same folder, `git add`/`git
+  commit`.
