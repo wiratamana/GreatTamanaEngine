@@ -1928,6 +1928,19 @@ pieces:
   "Atmosphere Scattering" sections for every load-bearing rule this feature
   depends on, and each phase's own `PHASEn_COMPLETION_REPORT.md` for the
   full six-phase campaign writeup.
+- **The Aerial Perspective volume's own HTTP preview thumbnail (above) had its
+  camera framing corrected in a follow-up campaign, `atmosphere-scattering-3`**
+  (`task_manager/atmosphere-scattering-3/`) - the generic volume-preview
+  camera/proxy-box math is correct for an ordinary spatial volume, but it
+  flattened this particular LUT's one meaningful (near/far) axis into an
+  unreadably thin sliver, since its three axes aren't comparable units; a
+  dedicated camera, and then a literal tapering frustum-shaped raymarch proxy
+  (auto-selected purely by texture name, same convention as the
+  color-interpretation fix above, with zero new HTTP parameter), now make the
+  preview actually widen away from the camera with a legible near/far haze
+  gradient - verified with a full clean build and full `ctest` regression
+  pass. See `task_manager/atmosphere-scattering-3/CAMPAIGN_COMPLETION_REPORT.md`
+  for the full five-phase writeup.
 
 ## Roadmap
 

@@ -1311,7 +1311,13 @@ registering a new named texture:
   definition and the shader is what needs fixing" discipline `AtmosphereMath.h`
   already establishes (see "Atmosphere Scattering" below). See
   `task_manager/network-impl-6/PHASE0_MASTER_STRATEGY.md` for the full
-  six-phase campaign writeup.
+  six-phase campaign writeup. The `atmosphere-scattering-3` campaign
+  (`task_manager/atmosphere-scattering-3/PHASE0_MASTER_STRATEGY.md`) later
+  added a SECOND, dedicated camera/proxy-shape framing specifically for the
+  Aerial Perspective volume (auto-selected the same way as its own
+  color-interpretation mode, see "Atmosphere Scattering" below) — every OTHER
+  volume texture still resolves through this bullet's own original
+  `ComputeVolumeCameraSetup()`/`IntersectRayBox()` path, unmodified.
 
 ## Render Target Format Matching
 
@@ -1635,7 +1641,50 @@ whenever touching this feature:
   reading confirmed minimum transmittance dropped to ~0.71 (from ~0.9956
   pre-campaign) and maximum in-scattering magnitude grew to ~0.0039 (from
   ~4.6e-5 pre-campaign), both comfortably crossing the "likely visible"
-  threshold.
+  threshold. The `atmosphere-scattering-3` campaign's own Phase 1
+  (`task_manager/atmosphere-scattering-3/PHASE1_ROOT_CAUSE_INSTRUMENTATION_AND_REGRESSION_TESTS.md`)
+  extended this same tool to also report Near/Mid/Far per-band
+  (`AerialPerspectiveBandSummary`) transmittance/in-scattering means, not just
+  the whole-volume min/max/mean — this is what let that campaign confirm, as a
+  permanent checked fact, that the LUT's own near/far gradient is real data,
+  not merely a preview-rendering illusion.
+- **The Aerial Perspective volume's HTTP/LLM-agent preview also had a SECOND,
+  complementary bug beyond the color-interpretation fix above, found and fixed
+  by the `atmosphere-scattering-3` campaign**
+  (`task_manager/atmosphere-scattering-3/PHASE0_MASTER_STRATEGY.md`) — the
+  generic volume-preview renderer's `ComputeVolumeCameraSetup()` sizes its
+  raymarch proxy box directly proportional to the volume's own raw texel
+  counts (correct for a genuine spatial volume, where every axis measures the
+  same kind of physical length) and views it from a single, fixed, generic
+  isometric camera angle, but the Aerial Perspective volume's three axes are
+  NOT comparable units at all (X/Y are screen-space froxel column/row indices,
+  Z is a camera-relative distance SLICE index) — feeding its real `128x128x32`
+  dimensions into that formula squashed the one axis carrying its entire
+  near/far story to 1/4 the size of the other two, producing a thin, nearly
+  flat, unreadable preview even after the color-interpretation fix above. A
+  SECOND, dedicated camera + proxy-shape setup function,
+  `ComputeAtmosphereAerialPerspectivePreviewCameraSetup()` (Phase 2), plus a
+  literal, tapering `FrustumProxy`/`IntersectRayFrustum()`/
+  `MapFrustumLocalPositionToUvw()`/
+  `ComputeAtmosphereAerialPerspectivePreviewFrustum()` (Phase 3, a MANDATORY
+  deliverable) and `VolumeTexturePreview.comp`'s new `shapeMode` push-constant
+  branch (all in `VolumeTexturePreviewMath.h/.cpp`/
+  `VolumeTexturePreviewRenderer.h/.cpp`), auto-selected by the exact SAME
+  `texture_name`-prefix check `Application.cpp` already uses for the
+  color-interpretation mode above — zero new HTTP parameter, zero
+  `Application.cpp` changes — now makes the preview genuinely WIDEN away from
+  the camera with a legible near/far haze gradient, matching the reference
+  paper diagram's own receding, hazier-with-distance fan-of-quads concept.
+  Every OTHER (non-Aerial-Perspective) volume texture is completely
+  unaffected — it still resolves through the ORIGINAL, byte-for-byte-unchanged
+  `ComputeVolumeCameraSetup()`/`IntersectRayBox()` path, confirmed both by code
+  inspection and by re-confirming a live, non-volume 2D capture
+  (`GET /get_swapchain`) behaves identically throughout. Phase 4 of this same
+  campaign then iteratively tuned the new camera/frustum's own
+  distance-margin/angle/exposure constants against the reference image, never
+  touching `kDensityScale`/`kStepCount` (shared with the generic path). See
+  `task_manager/atmosphere-scattering-3/CAMPAIGN_COMPLETION_REPORT.md` for the
+  full five-phase writeup.
 - **This feature is ALWAYS compiled in — there is no `GTE_ENABLE_ATMOSPHERE`
   CMake switch, and there must never be one.** It is a core rendering
   feature, the same tier as the Render Graph or GPU Vertex Skinning (neither
