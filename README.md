@@ -1852,6 +1852,40 @@ pieces:
   feature). See `AGENTS.md`'s new "Atmosphere Scattering" section for every
   load-bearing rule future contributors must follow, and each phase's own
   `ATMOSPHERE_PHASEn_COMPLETION_REPORT.md` for the full nine-phase writeup.
+- **The Aerial Perspective haze is now actually VISIBLE at this engine's real
+  scene scale, its own tuning knobs are live Editor sliders instead of
+  hardcoded shader constants, and its froxel volume has a genuinely useful
+  live visual + numeric debugging path** (`atmosphere-scattering-2` campaign,
+  six phases - `task_manager/atmosphere-scattering-2/PHASE0_MASTER_STRATEGY.md`,
+  `AERIAL_PERSPECTIVE_CAMPAIGN_COMPLETION_REPORT.md`). The original
+  `atmosphere-scattering-1` pipeline was confirmed logically correct
+  end-to-end, but its fixed 10km froxel far-plane and real-Earth-scale
+  scattering coefficients made the effect ~2-3 orders of magnitude too faint
+  to see at the few-meters-to-few-hundred-meters distances this engine's real
+  content actually lives at - a genuine SCALE MISMATCH, not a bug (see
+  `AERIAL_PERSPECTIVE_INVESTIGATION_FINDINGS.md`, kept as permanent historical
+  record). `aerialPerspectiveMaxDistanceKm`/`aerialPerspectiveDepthExponent`/
+  `aerialPerspectiveSamplesPerSlice`/`aerialPerspectiveScatteringExaggeration`
+  are now real `AtmosphereSettings` fields with live sliders in the "Atmosphere"
+  panel (Phase 1), the max distance default shrank from 10km to **0.5km** and a
+  new scattering-exaggeration multiplier shipped at **30.0x** (Phase 3) -
+  applied strictly LOCALLY inside the aerial volume's own shader, never
+  touching the shared `AtmosphereMath.h`/`AtmosphereCommon.glsl` oracle the
+  Sky-View/Transmittance/Multi-Scattering LUTs also rely on - plus two smaller,
+  independently-confirmed composite-pass precision fixes (half-texel Z-bias,
+  first-slice fade-in blend, Phase 2). The existing `GET /get_texture`
+  volume-preview raymarch (`network-impl-6`) gained a second, atmosphere-aware
+  interpretation mode auto-selected by volume name (Phase 4), turning what used
+  to render as a flat, uninformative dark box into a legible spatial gradient,
+  and a new numeric CPU-readback inspection tool
+  (`src/Editor/AtmosphereAerialPerspectiveLutInspection.h/.cpp`, an "Inspect
+  Aerial Perspective LUT" button in the "Atmosphere" panel, Phase 5) reports
+  live min/max/mean transmittance/in-scattering plus a "likely visible"
+  heuristic. Verified with a full clean build, a full `ctest` regression pass,
+  and a live runtime smoke test confirming the blueish haze is now clearly,
+  smoothly visible on far-distance test geometry relative to near geometry -
+  see `AERIAL_PERSPECTIVE_CAMPAIGN_COMPLETION_REPORT.md` for the full
+  six-phase writeup and final verification snapshot.
 - **The embedded HTTP server's `GET /get_texture`/`GET /list_textures` now
   understand live, GPU-resident 3D (volume) textures, not just 2D ones**
   (`network-impl-6` campaign,

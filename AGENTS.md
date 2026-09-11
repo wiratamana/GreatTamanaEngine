@@ -1277,7 +1277,18 @@ registering a new named texture:
   mirroring `RenderGraphDebugTextureRegistry`'s own "zero opt-in required"
   property exactly (see "Atmosphere Scattering" below for where the new
   volume-texture registry itself, `RenderGraphDebugVolumeTextureRegistry`, is
-  documented).
+  documented). **As of the `atmosphere-scattering-2` campaign's Phase 4**
+  (`task_manager/atmosphere-scattering-2/`), this volume-preview raymarch also
+  has a SECOND, atmosphere-aware interpretation mode, auto-selected purely by
+  volume name — zero new query parameter, zero new endpoint: for a volume
+  whose name starts with the literal prefix `"AtmosphereAerialPerspectiveVolume"`,
+  `alpha` is reinterpreted as "haze amount" (`1 - transmittance`, since this
+  LUT's `alpha` is transmittance, the opposite polarity of a generic density)
+  and `rgb` is exposure-adjusted (`2000x`) and Reinhard-tonemapped before
+  compositing, rather than the generic `alpha = density, rgb = raw color`
+  reading. Every other (present or future) volume texture keeps the original,
+  unchanged generic interpretation documented above — see "Atmosphere
+  Scattering" below for the full writeup.
 - **`GET /list_textures` entries now carry a
   `"kind":"texture2d"|"texture3d"` field, plus a `"depth"` field** (a
   volume's Z/texel-count extent - always `0` on a 2D entry) - every other
@@ -1583,6 +1594,48 @@ whenever touching this feature:
   a new mesh-shading feature that "also needs aerial perspective" should
   extend the composite pass (which already reads the scene's final color+
   depth), never add per-material atmosphere sampling to a forward shader.
+- **The Aerial Perspective froxel volume's own max-distance/depth-exponent/
+  samples-per-slice/scattering-exaggeration are real, Editor-tunable
+  `AtmosphereSettings` fields, NOT hardcoded per-shader `const` literals** —
+  `aerialPerspectiveMaxDistanceKm`/`aerialPerspectiveDepthExponent`/
+  `aerialPerspectiveSamplesPerSlice`/`aerialPerspectiveScatteringExaggeration`
+  (`AtmosphereTypes.h`), threaded through `AtmosphereFrameUniforms` (consumed
+  by `AtmosphereAerialPerspectiveVolume.comp`) and the composite pass's own
+  push constants (`AtmosphereAerialPerspectiveComposite.comp`), added by the
+  `atmosphere-scattering-2` campaign's Phase 1
+  (`task_manager/atmosphere-scattering-2/`) — previously three of these four
+  were separate, disconnected hardcoded literals duplicated across THREE
+  files with no single source of truth and no way to tune them without
+  hand-editing GLSL and recompiling shaders. All four are live sliders in the
+  Editor's "Atmosphere" panel (`Panels/AtmospherePanel.cpp`), mirroring
+  `aerialPerspectiveStrength`'s own pre-existing pattern exactly — same
+  "no persistence/serialization" limitation as every other `AtmosphereSettings`
+  field (see this section's own "No scene (de)serialization" bullet below).
+  **The shipped defaults changed from `pl-sky`'s own original 10km max
+  distance / 1.0x exaggeration to `0.5` km max distance and `30.0`x
+  scattering exaggeration** (Phase 3) — the original 10km/real-Earth-scale
+  defaults left the effect ~2-3 orders of magnitude too faint to see at the
+  few-meters-to-few-hundred-meters distances this engine's real test content
+  actually lives at (a genuine SCALE MISMATCH, not a logic bug — see
+  `task_manager/atmosphere-scattering-2/AERIAL_PERSPECTIVE_INVESTIGATION_FINDINGS.md`,
+  kept as permanent historical record). The `aerialPerspectiveScatteringExaggeration`
+  multiplier is applied strictly LOCALLY inside
+  `AtmosphereAerialPerspectiveVolume.comp`'s own per-sample
+  extinction/scattering coefficients — `AtmosphereMath.h`/`AtmosphereCommon.glsl`'s
+  shared oracle functions (`ComputeExtinctionCoefficientAtHeight()`/
+  `RayleighDensityAtHeight()`/etc., also used unmodified by the Sky-View/
+  Transmittance/Multi-Scattering LUTs) are never touched by this multiplier,
+  keeping the sky's own physically-accurate rendering completely unaffected.
+  A dedicated numeric CPU-readback inspection tool,
+  `src/Editor/AtmosphereAerialPerspectiveLutInspection.h/.cpp` (Phase 5,
+  mirroring `AtmosphereTransmittanceLutValidation`'s own proven shape),
+  reports live min/max/mean transmittance and in-scattering magnitude plus a
+  `likelyVisibleAtDefaultExposure` heuristic via an "Inspect Aerial
+  Perspective LUT" button in the "Atmosphere" panel — a live post-Phase-3/4
+  reading confirmed minimum transmittance dropped to ~0.71 (from ~0.9956
+  pre-campaign) and maximum in-scattering magnitude grew to ~0.0039 (from
+  ~4.6e-5 pre-campaign), both comfortably crossing the "likely visible"
+  threshold.
 - **This feature is ALWAYS compiled in — there is no `GTE_ENABLE_ATMOSPHERE`
   CMake switch, and there must never be one.** It is a core rendering
   feature, the same tier as the Render Graph or GPU Vertex Skinning (neither

@@ -232,6 +232,12 @@ own completion report/`ATMOSPHERE_CAMPAIGN_COMPLETION_REPORT.md` - see
 `README.md`'s own "Status" entry and `AGENTS.md`'s new "Atmosphere
 Scattering" section for the full feature writeup.
 
+- **Aerial-perspective's own max-distance/depth-exponent/samples-per-slice/
+  scattering-exaggeration are now `AtmosphereSettings` fields (Editor-tunable,
+  NOT scene-serialized — same limitation as every other `AtmosphereSettings`
+  field, see the "Scene (de)serialization" bullet immediately below) — see
+  `task_manager/atmosphere-scattering-2/` for the campaign that added them.**
+
 - **Scene (de)serialization for `DirectionalLight`/`AtmosphereSettings`.**
   `Scene/SceneTextFormat.h`'s existing format only round-trips
   `PrimitiveSource`/`MeshAssetSource`-tagged root entities - a `DirectionalLight`
