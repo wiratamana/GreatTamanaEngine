@@ -1965,6 +1965,28 @@ pieces:
   `task_manager/atmosphere-scattering-4/CAMPAIGN_COMPLETION_REPORT.md` for
   the full four-phase writeup.
 
+- **The embedded HTTP server can now bring a specific Editor panel/tab to
+  the front on command, and list every known panel name** (`network-impl-7`
+  campaign, `task_manager/network-impl-7/PHASE0_MASTER_STRATEGY.md`) -
+  `GET /activate_tab?name=<PanelName>` makes that named tab
+  (`"Hierarchy"`/`"Inspector"`/`"Scene"`/`"Game"`/`"Memory"`/`"Profiler"`/
+  `"Render Graph"`/`"Jobs"`/`"Atmosphere"`/`"Project"`) the active/focused tab
+  this same frame, exactly as if a human had clicked it, and
+  `GET /list_tabs` reports every currently-known panel name so a caller
+  never has to guess or hardcode the engine's internal naming convention.
+  Built on a brand-new, dedicated cross-thread bridge,
+  `EditorUiCommandBridge` (`src/Application/EditorUiCommandBridge.h/.cpp`),
+  mirroring `FrameCaptureBridge`/`EngineCommandBridge`'s own narrow,
+  single-purpose bridge precedent, and a shared
+  `src/Editor/EditorPanelCatalog.h` panel-name catalog that `DockLayout.cpp`'s
+  own default layout now reads from too, so the set of valid tab names can
+  never drift out of sync between the two. Verified end-to-end with a real
+  running engine (`GET /activate_tab?name=Profiler` followed by
+  `GET /get_swapchain` visually confirming the "Profiler" tab genuinely came
+  to the front) and a full `ctest` regression pass. See
+  `task_manager/network-impl-7/CAMPAIGN_COMPLETION_REPORT.md` for the full
+  five-phase campaign writeup.
+
 ## Roadmap
 
 See **[TODO.md](TODO.md)** for known limitations, deliberately deferred

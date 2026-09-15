@@ -1146,6 +1146,43 @@ module or adding a new endpoint:
   `nlohmann::json` anywhere else in the engine without the same
   "genuinely parsing untrusted input" justification.
 
+- **`GET /activate_tab`/`GET /list_tabs`** (`network-impl-7` campaign,
+  `task_manager/network-impl-7/PHASE0_MASTER_STRATEGY.md`) let an external
+  HTTP/LLM-agent caller bring a specific named Editor panel/tab to the
+  front, exactly as if a human had clicked it - built on a brand-new,
+  dedicated cross-thread bridge, `EditorUiCommandBridge`
+  (`src/Application/EditorUiCommandBridge.h/.cpp`), a THIRD, separate bridge
+  alongside `FrameCaptureBridge`/`EngineCommandBridge` for the exact reason
+  the `FrameCaptureBridge` bullet above already states: a future endpoint
+  needing DIFFERENT engine data must build its own new, narrow bridge rather
+  than repurpose an existing one for an unrelated kind of request - this one
+  is the first to touch EDITOR UI focus state rather than pixels or ECS
+  data. `GET /activate_tab?name=<PanelName>` returns `200`
+  (`{"success":true,"activated_tab":"<PanelName>"}`) when the named tab was
+  found and focused THIS frame, `400` for a missing/empty `name`, `404` when
+  `name` isn't one of the engine's known panel names
+  (`src/Editor/EditorPanelCatalog.h`'s `kKnownEditorPanelNames`/
+  `IsKnownEditorPanelName()` - the SAME shared source of truth
+  `DockLayout.cpp`'s own default dock-layout logic already reads from), `409`
+  when `name` IS known but has no live window yet this session (either a
+  narrow just-started-Editor race in a `GTE_ENABLE_EDITOR=ON` build, or
+  PERMANENTLY in a `GTE_ENABLE_EDITOR=OFF` build, since
+  `NullEditorLayer::ActivateTab()` always reports no live window - never a
+  `503` for this reason, since `Application` still owns a real, non-null
+  `EditorUiCommandBridge` unconditionally either way), `503` only when the
+  bridge pointer itself is null (reachable only in a test that constructs
+  `NetworkServer` directly), and `504` on a bridge timeout. `GET /list_tabs`
+  always returns `200` with every currently-known panel name and needs no
+  bridge round-trip at all, since the catalog is compile-time-fixed.
+  `Application::Run()` drains this bridge once per frame immediately after
+  `m_editorLayer->NewFrame()` and before `BuildUI()` - the one window where
+  Dear ImGui's window/dock state is valid to touch AND where the change is
+  still visible in THAT SAME frame's own tab rendering, mirroring
+  `EngineCommandBridge`'s own "drain as early as possible" precedent just
+  relative to a different pair of per-frame calls. See
+  `task_manager/network-impl-7/CAMPAIGN_COMPLETION_REPORT.md` for the full
+  five-phase campaign writeup.
+
 ### Named Texture Capture (`GET /get_texture`)
 
 `network-impl-4` campaign (`task_manager/network-impl-4/PHASE0_MASTER_STRATEGY.md`)
