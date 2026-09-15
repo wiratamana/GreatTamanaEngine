@@ -2,6 +2,7 @@
 
 #include "../Event/Event.h"
 #include "../Input/InputState.h"
+#include "../Core/EngineContext.h"
 #include "Animation/AnimationSystem.h"
 #include "ECS/Components/DirectionalLight.h"
 #include "ECS/Registry.h"
@@ -42,7 +43,15 @@ public:
     // be read from the InputState passed to Update() instead.
     void OnEvent(const Event& event);
 
-    void Update(double deltaSeconds, const InputState& input);
+    // frame-debugger-1 campaign (task_manager/frame-debugger-1/
+    // PHASE2_GAME_UPDATE_SIGNATURE_AND_FREEZE_GATING.md) - takes the shared,
+    // Application-owned EngineContext instead of a raw deltaSeconds, so this
+    // method (and everything it calls) has access to the full Time contract
+    // (DeltaTime()/IsFrozenThisFrame()/...) rather than just one already-
+    // resolved number. Called EVERY frame regardless of pause state (see
+    // PHASE0's own Locked Design Decision #2) - the freeze itself is decided
+    // INSIDE this method's own body, not by the caller skipping the call.
+    void Update(const EngineContext& engineContext, const InputState& input);
 
     // Sets the clear color and, via RenderSystem::Draw(), queues this
     // frame's draw calls for every entity that has a MeshRenderer.

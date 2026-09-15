@@ -3,6 +3,7 @@
 #include <memory>
 #include <string>
 
+#include "../Core/EngineContext.h"
 #include "../Editor/EditorLayer.h"
 #include "../Game/Game.h"
 #include "../Network/NetworkServer.h"
@@ -106,6 +107,14 @@ private:
     // need to relate to Game's at all.
     std::unique_ptr<IEditorLayer> m_editorLayer;
     Game m_game;
+
+    // frame-debugger-1 campaign (task_manager/frame-debugger-1/
+    // PHASE0_MASTER_STRATEGY.md) - the ONE EngineContext instance for the
+    // whole process, advanced exactly once per Run() loop iteration
+    // (m_engineContext.time.Advance(...)) and passed by const reference into
+    // Game::Update(). See EngineContext.h's own doc comment for why this
+    // stays deliberately minimal (just `time` for now).
+    EngineContext m_engineContext;
 
     // network-impl-2 campaign (task_manager/network-impl-2/) - the ONE
     // sanctioned cross-thread bridge a Network route handler is allowed to

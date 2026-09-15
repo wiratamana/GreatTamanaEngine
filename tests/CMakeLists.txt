@@ -1388,6 +1388,35 @@
 #                                            exercised (needs a live
 #                                            Renderer - Tier 2, see
 #                                            TESTING.md).
+#   Game/GameUpdateFreezeGatingTests.cpp     - frame-debugger-1 campaign,
+#                                            PHASE2
+#                                            (PHASE2_GAME_UPDATE_SIGNATURE_AND_FREEZE_GATING.md):
+#                                            the genuine, automated
+#                                            regression proof for Game::
+#                                            Update()'s new EngineContext-
+#                                            driven freeze gating - a
+#                                            synthetic 2-joint dynamic-chain
+#                                            rig (same fixture shape as
+#                                            PhysicsSystemTests.cpp's own
+#                                            RegisteredDynamicChainVisiblyDivergesFromPureFkPoseUnderGravity)
+#                                            attached to a real Game via
+#                                            GetPhysicsSystem()/GetRegistry():
+#                                            a frozen EngineContext leaves the
+#                                            pose byte-for-byte unchanged
+#                                            across many calls; an unfrozen
+#                                            one visibly diverges under
+#                                            gravity; a Step frame (paused +
+#                                            stepped) simulates exactly one
+#                                            tick and then refreezing holds
+#                                            the result steady; and
+#                                            CollectGpuSkinningDispatchRequests()
+#                                            stays empty across a frozen
+#                                            frame, confirming
+#                                            AnimationSystem::
+#                                            ClearGpuSkinningDispatchThisFrame()
+#                                            is genuinely called from the
+#                                            frozen branch. No live Renderer/
+#                                            GPU device involved.
 #   Game/Physics/PhysicsSystemTests.cpp     - Phase 3's brand-new, ECS/
 #                                            Renderer-independent
 #                                            PhysicsSystem
@@ -1807,6 +1836,7 @@ set(GTE_TEST_SOURCES
     ECS/EntityQueryTests.cpp
     Game/RenderSystemTests.cpp
     Game/GameEntityCommandsTests.cpp
+    Game/GameUpdateFreezeGatingTests.cpp
     Game/EntityInstantiatorTests.cpp
     Game/Instantiation/MeshAssetGpuCatalogJointOverrideRefreshTests.cpp
     Game/MeshVertexPackingTests.cpp

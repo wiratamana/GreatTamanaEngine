@@ -227,6 +227,20 @@ public:
     };
     std::vector<GpuSkinningDispatchRequest> CollectModelsNeedingGpuSkinningThisFrame() const;
 
+    // frame-debugger-1 campaign (task_manager/frame-debugger-1/
+    // PHASE2_GAME_UPDATE_SIGNATURE_AND_FREEZE_GATING.md) - called by
+    // Game::Update() INSTEAD OF SkinAndUpload() on a frame where simulation is
+    // frozen (paused, not stepping - see Time::IsFrozenThisFrame()). Clears
+    // m_gpuModelsNeedingDispatchThisFrame (normally rebuilt from scratch every
+    // SkinAndUpload() call) so CollectModelsNeedingGpuSkinningThisFrame() -
+    // read later THIS SAME FRAME by src/Application/RenderPasses.cpp's
+    // AddGpuSkinningPasses() - correctly reports "nothing needs a GPU skinning
+    // dispatch this frame" instead of silently re-reporting whatever the LAST
+    // frame that actually ran SkinAndUpload() happened to leave behind. A
+    // trivial, inline, always-safe no-op to call even in CpuJobSystem mode
+    // (where this vector is already always empty).
+    void ClearGpuSkinningDispatchThisFrame() noexcept { m_gpuModelsNeedingDispatchThisFrame.clear(); }
+
 private:
     // Phase 2 (task_manager/verlet-integration-7/
     // PHASE2_SKIN_AND_UPLOAD_VISIBILITY_FOR_PHYSICS_ONLY_ENTITIES.md) - the

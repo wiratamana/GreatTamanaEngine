@@ -40,6 +40,15 @@ float AspectRatioOf(int width, int height) noexcept
     return height > 0 ? static_cast<float>(width) / static_cast<float>(height) : 1.0f;
 }
 
+// frame-debugger-1 campaign (task_manager/frame-debugger-1/
+// PHASE0_MASTER_STRATEGY.md, Locked Design Decision #4) - the fixed,
+// deterministic amount of simulated time a single Step (PHASE3/PHASE4)
+// advances by, and also what a resume-from-pause frame is clamped to (see
+// Time::Advance()'s own doc comment, Locked Design Decision #11). A plain
+// 1/60s, never derived from real elapsed time.
+constexpr double kFixedStepSeconds = 1.0 / 60.0;
+
+
 
 // Phase 4C (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) - the one, tiny
 // bridge from Renderer's own (Profiling-free) GpuTimingSample::Status into
@@ -292,6 +301,14 @@ int Application::Run()
         const double deltaSeconds = static_cast<double>(nowTicksNs - lastTicksNs) / 1000000000.0;
         lastTicksNs = nowTicksNs;
 
+        // frame-debugger-1 campaign, PHASE2 - hardcoded "never paused" for now;
+        // PHASE4 replaces these two literals with the Editor's real toolbar
+        // state (see IEditorLayer::IsPlaybackPaused()/TryConsumeStepRequest(),
+        // added in PHASE3). Keeping this phase's own change limited to plumbing
+        // only (zero observable behavior change) is deliberate - see this
+        // phase's own doc comment.
+        m_engineContext.time.Advance(deltaSeconds, /*isPaused=*/false, /*isSteppedThisFrame=*/false, kFixedStepSeconds);
+
         m_editorLayer->NewFrame();
 
         // network-impl-7 campaign - drains at most ONE pending
@@ -331,7 +348,7 @@ int Application::Run()
         // aggregation model (see AGENTS.md, "Profiling") would otherwise
         // double-count identically-named nested scopes rather than
         // measuring the same call twice for no reason.
-        m_game.Update(deltaSeconds, inputState);
+        m_game.Update(m_engineContext, inputState);
 
         // Ask the Editor where Game's frame(s) should actually land this
         // frame: an off-screen RenderTexture per visible panel ("Game"

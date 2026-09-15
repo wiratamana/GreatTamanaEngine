@@ -41,25 +41,48 @@ void Game::OnEvent(const Event& /*event*/)
     // event.data is active - see Event.h.
 }
 
-void Game::Update(double deltaSeconds, const InputState& /*input*/)
+void Game::Update(const EngineContext& engineContext, const InputState& /*input*/)
 {
     GTE_PROFILE_SCOPE("Game::Update");
 
     // Game/simulation logic goes here. Poll `input` for continuous state,
     // e.g. `if (input.IsKeyDown(KeyCode::W)) { ... }` for held-key movement.
 
-    // Phase 3 (task_manager/verlet-integration-1/
-    // PHASE3_PIPELINE_INTEGRATION_AND_FIXED_TIMESTEP.md, v3/v4) - three
-    // genuinely independent stages, communicating ONLY through the
-    // ResolvedAnimationPose ECS component (see that component's own doc
-    // comment): AnimationSystem samples/IK-solves/append-inherits and
-    // writes a fresh pose; PhysicsSystem optionally overwrites individual
-    // physics-driven bones in that SAME pose; AnimationSystem then skins and
-    // uploads whatever the pose currently holds, regardless of which of the
-    // two touched it last.
-    m_animationSystem.EvaluatePoses(m_registry, deltaSeconds);
-    m_physicsSystem.Update(m_registry, deltaSeconds);
-    m_animationSystem.SkinAndUpload(m_registry);
+    const Time& time = engineContext.time;
+
+    // frame-debugger-1 campaign - "freeze everything" (task_manager/
+    // frame-debugger-1/PHASE0_MASTER_STRATEGY.md). IsFrozenThisFrame() is
+    // true only while paused and NOT honoring a Step request - false on
+    // every normal frame AND on a Step frame (which DOES need one real
+    // simulation tick - see Time.h). Skipping these three calls entirely
+    // (rather than feeding them time.DeltaTime() == 0.0) is a deliberate
+    // choice: it is cheaper (no wasted IK-solve/vertex-pack/skin-upload
+    // work for output that provably cannot have changed) AND does not
+    // depend on every one of these three systems' own degenerate-zero-
+    // delta handling staying correct forever - see PHASE0's Locked Design
+    // Decision #2.
+    if (!time.IsFrozenThisFrame()) {
+        // Phase 3 (task_manager/verlet-integration-1/
+        // PHASE3_PIPELINE_INTEGRATION_AND_FIXED_TIMESTEP.md, v3/v4) - three
+        // genuinely independent stages, communicating ONLY through the
+        // ResolvedAnimationPose ECS component (see that component's own doc
+        // comment): AnimationSystem samples/IK-solves/append-inherits and
+        // writes a fresh pose; PhysicsSystem optionally overwrites individual
+        // physics-driven bones in that SAME pose; AnimationSystem then skins and
+        // uploads whatever the pose currently holds, regardless of which of the
+        // two touched it last.
+        m_animationSystem.EvaluatePoses(m_registry, time.DeltaTime());
+        m_physicsSystem.Update(m_registry, time.DeltaTime());
+        m_animationSystem.SkinAndUpload(m_registry);
+    } else {
+        // Nothing simulated this frame - make sure no STALE GPU-skinning
+        // compute dispatch request lingers from the last frame that
+        // actually ran SkinAndUpload() above (which is what normally
+        // rebuilds this list every call) - see
+        // AnimationSystem::ClearGpuSkinningDispatchThisFrame()'s own doc
+        // comment for why this is needed.
+        m_animationSystem.ClearGpuSkinningDispatchThisFrame();
+    }
 }
 
 Entity Game::CreatePrimitiveEntity(Renderer& renderer, PrimitiveType type)
