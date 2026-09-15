@@ -32,10 +32,18 @@ engine doesn't already have.
   `BeginGraphPassRecording()`/`EndGraphPassRecording()` bracket it (which `AddGameViewPass()`
   always does), calls `FrameRecorder::IssueDrawCommand()` directly and invokes
   `m_currentGraphPassRecordDrawStats` (which is how `PassGpuStats::drawStats` gets fused per pass
-  today, per `AGENTS.md`'s "Profiling" section) — THIS is the single, already-existing, correct
-  call site to also feed a NEW capture context, for the exact same "fuse the accounting into the
-  real call site, never a second separate pass" correctness reason `DrawStats.h`'s own header
-  comment already documents for triangle counting.
+  today, per `AGENTS.md`'s "Profiling" section). CONFIRMED during this review: `Renderer::Submit()`
+  itself is NOT the right place to feed the new capture context, and its signature must NOT change
+  for this feature — it only ever receives a bare `VkDescriptorSet` for the bound material, never a
+  `MaterialTexture&`/its debug name, so it has no way to record a distinct texture identity even if
+  a capture pointer were threaded into it. The correct (and only feasible) recording call site is
+  one layer up, in `RenderSystem::Draw()` (see Step 3.1/3.2 below) — the exact point that already
+  resolves the real `Pipeline*`/`MaterialTexture*` from its own `ResourcePool`s, immediately
+  before/alongside the very same `mesh != nullptr && pipeline != nullptr` check that already decides
+  whether `renderer.Submit()` is even called at all for this draw — giving the identical "fuse the
+  accounting into the real call site, never a second separate pass" correctness guarantee
+  `DrawStats.h`'s own header comment documents for triangle counting, without requiring any change
+  to `Renderer::Submit()`'s own signature at all.
 - `Pipeline` (`src/Renderer/Pipeline.h/.cpp`) carries NO name/identity today — its constructor
   takes `vertexShaderSpirvPath`/`fragmentShaderSpirvPath`/`vertexLayout`/`materialSetLayout` and
   builds a real `VkPipeline`, but nothing about which shader files/vertex layout it was built with
@@ -56,7 +64,17 @@ engine doesn't already have.
   own existing `GpuMemoryTracker`-facing debug-name convention (`AGENTS.md`, "GPU Resource Memory
   Tracking") — if it does not yet, extend it the same way those two already work (an
   optional/nullable `const char* debugName` constructor parameter, retained as an owned
-  `std::string`), rather than inventing a second, parallel naming mechanism.
+  `std::string`), rather than inventing a second, parallel naming mechanism. CONFIRMED during this
+  review: a generic `GpuMemoryTracker`-based debug name technically already exists for
+  `MaterialTexture::texture` (a `Texture2D`) via `Texture2D::Handle()` +
+  `Renderer::GetMemoryDebugName()` (Editor-only) — but this does NOT yet satisfy Locked Design
+  Decision #6's "every DISTINCT real bound `MaterialTexture` debug name" requirement, because the
+  one real call site that builds every `MaterialTexture` today
+  (`src/Game/Instantiation/MaterialTextureGpuCache.cpp`) passes the same literal constant string
+  `"MaterialTexture"` for every single texture, regardless of which asset it actually is. Do not
+  assume this existing mechanism already works for this feature — either give `MaterialTexture` its
+  own genuinely per-instance name, or fix that one call site to pass something identifying (e.g.
+  derived from the texture's own `Guid`), whichever is cheaper.
 - **Zero-overhead-when-disarmed is a hard requirement, not a nice-to-have.** Every frame where the
   Frame Debugger window has never been opened (the overwhelming common case, including every
   release/non-Editor build) must pay ZERO extra cost — not an extra branch inside the innermost
@@ -71,13 +89,15 @@ engine doesn't already have.
 
 Home: `src/Editor/FrameDebuggerCapture.h`/`.cpp` (Editor-only, `GTE_ENABLE_EDITOR`-gated, exactly
 like every other `FrameDebuggerData.h`-adjacent file) — NOT `src/Renderer/`, even though it is fed
-FROM `Renderer`/`RenderSystem`. Reasoning: this is a debugging/inspection concern the Renderer
-itself must stay unaware of as a first-class feature (mirrors `AGENTS.md`'s "Clean Architecture"
-rule — `Renderer` never depends on `Editor`); the real mechanism is a small, plain, ImGui-free,
-pure-data "recorder" object that `Renderer`/`RenderSystem` accept a reference/pointer to (nullable,
-default `nullptr` — "not armed", exactly like `GpuTimingSlot`'s own `std::optional` "opt out"
-convention in `Renderer::RenderOffscreen()`) and record real facts into, WITHOUT `Renderer`/
-`RenderSystem` themselves needing to `#include` anything from `src/Editor/`. Concretely:
+FROM `RenderSystem`. Reasoning: this is a debugging/inspection concern `Renderer` itself must stay
+completely unaware of, as a first-class feature (mirrors `AGENTS.md`'s "Clean Architecture" rule —
+`Renderer` never depends on `Editor`) — CONFIRMED: `Renderer::Submit()`'s own signature does NOT
+need to change at all for this feature, and must not (see below for why); the real mechanism is a
+small, plain, ImGui-free, pure-data "recorder" object that ONLY `RenderSystem` accepts a
+reference/pointer to (nullable, default `nullptr` — "not armed", exactly like `GpuTimingSlot`'s own
+`std::optional` "opt out" convention in `Renderer::RenderOffscreen()`) and records real facts into,
+WITHOUT `RenderSystem` itself needing to `#include` anything from `src/Editor/` beyond this one new
+header. Concretely:
 
 - `RenderSystem::Draw(Registry&, Renderer&, float aspectWidthOverHeight, FrameDebuggerCaptureContext*
   capture = nullptr)` (and the explicit-view-projection overload) — a new, defaulted, LAST
@@ -92,26 +112,41 @@ convention in `Renderer::RenderOffscreen()`) and record real facts into, WITHOUT
   sets/vectors (distinct pipeline names, distinct texture names) plus remembering the LAST
   `viewProj` it saw (real and correct, since every draw within one Game-View pass this frame uses
   the SAME view-projection matrix by construction — confirm this invariant holds by reading
-  `RenderSystem::Draw()`'s own per-call-site `viewProj` argument before relying on it). `Reset()`
+  `RenderSystem::Draw()`'s own per-call-site `viewProj` argument before relying on it). NOTE for
+  PHASE2: `Mat4` (`src/Math/Mat4.h`) is COLUMN-major (`columns[c][r]`, `Data()` returns a
+  contiguous column-major float[16] matching GLSL directly) — this is retained here as a plain
+  `Mat4`, unconverted, so THIS phase has no transpose risk of its own, but PHASE2/PHASE6's own
+  conversion into `FrameDebuggerMatrixProperty::values` MUST transpose, since that struct's own
+  header comment (`src/Editor/FrameDebuggerData.h`) explicitly documents ROW-major storage
+  (`values[0..3]` is row 0) — a naive `std::copy(viewProj.Data(), ..., property.values.begin())`
+  would silently display a transposed matrix. `Reset()`
   clears it at the top of every armed frame (mirrors `FrameRecorder::BeginFrame()`'s own
   per-frame-clear convention).
 - **Arming**: a single, explicit bool the CALLER (Application/`Game::Render()`'s Game-View branch)
-  decides for itself once per frame — e.g. `Game::Render()` receives an optional
-  `FrameDebuggerCaptureContext*` (already threaded down from `Application::Run()`, which is the one
+  decides for itself once per frame — e.g. (eventual, PHASE3 end-state) `Game::Render()` receives an
+  optional `FrameDebuggerCaptureContext*` (threaded down from `Application::Run()`, which is the one
   place that actually knows whether the Frame Debugger is currently armed for THIS frame, per
-  PHASE3's capture-trigger logic) and passes it straight through to `RenderSystem::Draw()`. When
-  that pointer is `nullptr` (every ordinary frame), the ENTIRE new code path inside
-  `RenderSystem::Draw()`/`Renderer::Submit()` collapses to one already-taken "is this pointer
+  PHASE3's capture-trigger logic) and passes it straight through to `RenderSystem::Draw()`. THIS
+  PHASE (PHASE1) does NOT wire that plumbing yet — `Game::Render()`/`AddGameViewPass()`/
+  `Application::Run()` are left completely untouched, and every existing call to
+  `RenderSystem::Draw()` keeps compiling unchanged against the new parameter's default; only PHASE3
+  ever constructs/passes a real, non-null pointer. When
+  that pointer is `nullptr` (every frame until PHASE3 lands, and every ordinary frame after), the
+  ENTIRE new code path inside `RenderSystem::Draw()` collapses to one already-taken "is this pointer
   null" branch per draw call — no string formatting, no vector `push_back`, no extra work of any
-  kind happens.
+  kind happens. `Renderer::Submit()` itself has no new branch at all (see above).
 
 ### 3.2 `Pipeline`'s new cosmetic debug name
 
 Add an optional `const char* debugName = nullptr` constructor parameter to `Pipeline`
 (`src/Renderer/Pipeline.h/.cpp`), stored as an owned `std::string m_debugName` (empty string when
 not supplied), with a `const std::string& DebugName() const noexcept` accessor. Every REAL
-`Renderer::CreatePipeline()` call site in `src/Game/Game.cpp` (or wherever pipelines are actually
-constructed for the Game View — confirm exact call sites during implementation) supplies a real,
+`Renderer::CreatePipeline()` call site is confirmed to live in
+`src/Game/Instantiation/MeshAssetGpuCatalog.cpp` (`EnsureMeshPipeline()`/
+`EnsureTexturedMeshPipeline()`) and `src/Game/Instantiation/PrimitiveGpuCatalog.cpp`
+(`EnsureDefaultPipeline()`) — NOT `src/Game/Game.cpp`/`Game.h`, which construct no pipelines
+directly (only `PrimitiveGpuCatalog`/`MeshAssetGpuCatalog`, both under `src/Game/Instantiation/`,
+do) — each supplies a real,
 hand-authored, human-readable name describing exactly what it built, e.g. `"Mesh.vert/Mesh.frag
 (PositionNormal)"` or `"TexturedMesh.vert/TexturedMesh.frag (PositionNormalUv)"` — mirrors
 `RenderGraphTypes.h`'s own explicit rule that a cosmetic name is threaded as a SEPARATE parameter,
@@ -132,8 +167,12 @@ populating the relevant `FrameDebuggerEventDetails` string fields — `blendMode
 engine's REAL, hardcoded values, cross-checked against `Pipeline.cpp`'s actual
 `VkPipelineColorBlendAttachmentState`/`VkPipelineDepthStencilStateCreateInfo` construction at
 implementation time (do not guess — read the real values out of that file) — e.g. `blendMode =
-"Opaque (no blend)"`, `zTest = "LEqual"`, `zWrite = "On"`, `cull = "None"` (confirm cull mode from
-`Pipeline.cpp`'s `VkPipelineRasterizationStateCreateInfo`), `stencilRef`/`stencilComp`/etc. = `"n/a
+"Opaque (no blend)"`, `zTest = "Less"` (confirmed: `Pipeline.cpp` sets `depthCompareOp =
+VK_COMPARE_OP_LESS` — this is "Less", NOT "LEqual"/"LessEqual", which would be a different,
+currently-unused `VK_COMPARE_OP_LESS_OR_EQUAL` — do not guess the display string from the operator's
+name alone), `zWrite = "On"`, `cull = "None"` (confirmed: `Pipeline.cpp`'s
+`VkPipelineRasterizationStateCreateInfo` sets `cullMode = VK_CULL_MODE_NONE`), `stencilRef`/
+`stencilComp`/etc. = `"n/a
 (no stencil test)"`. This function takes NO parameters and needs no live `VkDevice` — it is purely
 "transcribe these already-known compile-time facts into display strings" — and must therefore be
 directly Tier-1-testable with a trivial "call it, assert the returned strings" test.
@@ -173,12 +212,26 @@ regression yet (that's PHASE8's job).
 
 New: `src/Editor/FrameDebuggerCapture.h`, `src/Editor/FrameDebuggerCapture.cpp`,
 `tests/Editor/FrameDebuggerCaptureTests.cpp`.
-Modified: `src/Renderer/Pipeline.h`/`.cpp` (debug name), `src/Renderer/Renderer.h`/`.cpp` (thread
-the capture pointer through `Submit()`'s already-armed-graph-pass path), `src/Game/RenderSystem.h`/
-`.cpp` (new defaulted parameter on `Draw()`), `src/Renderer/MaterialTexture.h`/`.cpp` (only if it
-genuinely lacks a debug name today), `CMakeLists.txt`/`tests/CMakeLists.txt` (new files), plus
-whichever `Game.cpp`/`Game.h` call sites actually construct Game-View pipelines (to supply real
-`debugName` arguments).
+Modified: `src/Renderer/Pipeline.h`/`.cpp` (debug name), `src/Renderer/Renderer.h`/`.cpp` (a new,
+plain `const char* debugName = nullptr` parameter on `CreatePipeline()`, forwarded straight through
+to `Pipeline`'s constructor — NOT any capture-context involvement; see Step 2/3.1's analysis above
+for why `Renderer::Submit()`'s own signature does not change at all for this feature),
+`src/Renderer/GpuResourceFactory.h`/`.cpp` (the same new `debugName` parameter threaded from
+`Renderer::CreatePipeline()` into `Pipeline`'s constructor — confirmed missing from this inventory
+originally; `Renderer::CreatePipeline()` only forwards to `GpuResourceFactory::CreatePipeline()`,
+so both must change together), `src/Game/RenderSystem.h`/`.cpp` (new defaulted
+`FrameDebuggerCaptureContext*` parameter on BOTH `Draw()` overloads, plus the actual
+`capture->RecordDraw(...)` call site itself, right where each `DrawCommand` is already resolved
+against `m_pipelines`/`m_textures` — see Step 3.1/3.2), `src/Renderer/MaterialTexture.h`/`.cpp`
+(only if it genuinely lacks a way to produce a DISTINCT per-instance debug name — see Step 2's
+MaterialTexture note above; confirmed the existing `GpuMemoryTracker` path alone is NOT enough,
+since every real call site passes the literal constant string `"MaterialTexture"` today),
+`CMakeLists.txt`/`tests/CMakeLists.txt` (new files), plus the ACTUAL real
+`Renderer::CreatePipeline()` call sites confirmed by reading the code —
+`src/Game/Instantiation/MeshAssetGpuCatalog.cpp` (`EnsureMeshPipeline()`/
+`EnsureTexturedMeshPipeline()`) and `src/Game/Instantiation/PrimitiveGpuCatalog.cpp`
+(`EnsureDefaultPipeline()`) — NOT `Game.cpp`/`Game.h`, which construct no pipelines directly — to
+supply real `debugName` arguments.
 
 Write `PHASE1_COMPLETION_REPORT.md` once done, following the exact template every prior
 `frame-debugger-1`/`frame-debugger-2` phase report already used.
