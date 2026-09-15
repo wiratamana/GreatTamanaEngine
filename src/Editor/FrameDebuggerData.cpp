@@ -109,4 +109,256 @@ std::string FormatMatrixProperty(const FrameDebuggerMatrixProperty& matrix)
     return result;
 }
 
+namespace {
+
+// PHASE2 - duplicated, real, hardcoded clear-color constant. Mirrors
+// src/Application/RenderPasses.cpp's own kGameClearColor VALUE exactly
+// (20/255, 20/255, 30/255, 1.0f - see that file's own top-of-file comment,
+// which already establishes "duplicate a hardcoded engine constant with a
+// comment documenting the value it must be kept in sync with" as an
+// accepted pattern in this codebase, rather than a workaround). NOT
+// re-exported/re-used directly from RenderPasses.cpp/.h here on purpose:
+// RenderPasses.cpp's own copy is an anonymous-namespace, internal-linkage
+// local, and src/Editor/ must never #include src/Application/ headers (see
+// AGENTS.md's "Clean Architecture" - Application is the composition root
+// that depends on Editor, never the reverse; exposing it via a NEW shared
+// header was considered and rejected as unnecessary churn for one constant
+// this campaign's own PHASE0 already established a "just duplicate it with
+// a comment" precedent for). If RenderPasses.cpp's own kGameClearColor ever
+// changes, update this constant to match.
+constexpr float kFrameDebuggerGameClearColor[4] = { 20.0f / 255.0f, 20.0f / 255.0f, 30.0f / 255.0f, 1.0f };
+
+// Finds the first pass in `passes` whose name exactly matches `name`, or
+// nullptr if none does - a plain linear scan, exactly as cheap/simple as
+// this once-per-captured-frame lookup needs to be.
+const rg::RenderGraphPassSnapshot* FindPassByName(
+    const std::vector<rg::RenderGraphPassSnapshot>& passes, const std::string& name)
+{
+    for (const rg::RenderGraphPassSnapshot& pass : passes) {
+        if (pass.name == name) {
+            return &pass;
+        }
+    }
+    return nullptr;
+}
+
+bool Contains(const std::vector<std::string>& names, const std::string& name)
+{
+    for (const std::string& candidate : names) {
+        if (candidate == name) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Builds one GPU-skinning compute-dispatch LEAF node for `pass` - see
+// BuildRealFrameDebuggerSnapshot()'s own header-comment tree-shape
+// description and PHASE0_MASTER_STRATEGY.md's Locked Design Decision #6.
+FrameDebuggerEventNode BuildGpuSkinningLeaf(const rg::RenderGraphPassSnapshot& pass, int eventIndex)
+{
+    FrameDebuggerEventNode leaf;
+    leaf.name = pass.name;
+    leaf.isDrawCall = true;
+    leaf.eventIndex = eventIndex;
+
+    FrameDebuggerEventDetails details;
+    details.eventIndex = eventIndex;
+    details.eventLabel = "Compute Dispatch";
+    details.shaderName = pass.name;
+    details.passName = "GPU Skinning";
+    details.blendMode = "n/a (compute pass)";
+    details.zClip = "n/a (compute pass)";
+    details.zTest = "n/a (compute pass)";
+    details.zWrite = "n/a (compute pass)";
+    details.cull = "n/a (compute pass)";
+    details.stencilRef = "n/a (compute pass)";
+    details.stencilComp = "n/a (compute pass)";
+    details.stencilPass = "n/a (compute pass)";
+    details.stencilFail = "n/a (compute pass)";
+    details.stencilZFail = "n/a (compute pass)";
+
+    // Renderer::Dispatch() never touches PassGpuStats::drawStats (see
+    // RenderPasses.cpp's AddGpuSkinningPasses() and DrawStats.h's own
+    // header comment) - a compute pass genuinely never issues a draw call,
+    // so reporting an all-zero "Draw Stats" row here would misleadingly
+    // imply one happened. The one real, DrawStats-adjacent number
+    // PassGpuStats DOES carry for a compute pass is its GPU timing sample -
+    // report that instead (0.0ms whenever GPU timing is Absent/Unsupported,
+    // exactly like every other GPU-timing consumer in this engine today -
+    // see AGENTS.md's "Profiling" section).
+    FrameDebuggerVectorProperty timing;
+    timing.name = "GPU Time (ms)";
+    timing.x = static_cast<float>(pass.stats.timing.milliseconds);
+    details.vectors.push_back(timing);
+
+    // textures/matrices deliberately left empty - real: a compute skinning
+    // pass never samples a material texture or uses a camera matrix (see
+    // PHASE2_FRAME_DEBUGGER_SNAPSHOT_BUILDER.md's own Step 3.1).
+
+    leaf.details = std::move(details);
+    return leaf;
+}
+
+// Builds the real "GameView" pass LEAF node - see
+// BuildRealFrameDebuggerSnapshot()'s own header-comment tree-shape
+// description and PHASE0_MASTER_STRATEGY.md's Locked Design Decision #6.
+FrameDebuggerEventNode BuildGameViewLeaf(
+    const rg::RenderGraphPassSnapshot& gameViewPass, const FrameDebuggerCaptureContext& capture, int eventIndex)
+{
+    FrameDebuggerEventNode leaf;
+    leaf.name = "GameView";
+    leaf.isDrawCall = true;
+    leaf.eventIndex = eventIndex;
+
+    FrameDebuggerEventDetails details;
+    details.eventIndex = eventIndex;
+    details.eventLabel = "Draw Mesh";
+    details.passName = "GameView";
+
+    // shaderName - every DISTINCT real Pipeline debug name recorded this
+    // frame, comma-joined (Locked Design Decision #6). Empty (never a
+    // fabricated placeholder name) if capture recorded no draws at all this
+    // frame - a genuinely empty Game View is a real, honest outcome.
+    {
+        std::string joined;
+        const std::vector<std::string>& names = capture.PipelineDebugNames();
+        for (std::size_t i = 0; i < names.size(); ++i) {
+            if (i > 0) {
+                joined += ", ";
+            }
+            joined += names[i];
+        }
+        details.shaderName = joined;
+    }
+
+    // textures - one row per DISTINCT real bound MaterialTexture debug name
+    // - there is no per-slot "_MainTex"-style naming in this engine yet, so
+    // `name` is a stable, generic label rather than an invented one (see
+    // this phase's own Step 3.1).
+    for (const std::string& textureName : capture.MaterialTextureDebugNames()) {
+        FrameDebuggerTextureProperty texture;
+        texture.name = "Material Texture";
+        texture.valueLabel = textureName;
+        details.textures.push_back(std::move(texture));
+    }
+
+    // vectors - the real clear color, plus the real aggregate DrawStats
+    // (draw-call count / triangle count) taken directly from
+    // graphSnapshot's own "GameView" pass entry, exactly as this phase's
+    // own Step 3.1 specifies (NOT re-derived from `capture.DrawCallCount()`
+    // - the graph snapshot's own stats are the authoritative source other
+    // panels, e.g. the "Render Graph" panel, already trust).
+    {
+        FrameDebuggerVectorProperty clearColor;
+        clearColor.name = "Clear Color";
+        clearColor.x = kFrameDebuggerGameClearColor[0];
+        clearColor.y = kFrameDebuggerGameClearColor[1];
+        clearColor.z = kFrameDebuggerGameClearColor[2];
+        clearColor.w = kFrameDebuggerGameClearColor[3];
+        details.vectors.push_back(clearColor);
+
+        FrameDebuggerVectorProperty drawStats;
+        drawStats.name = "Draw Stats (Calls, Tris)";
+        drawStats.x = static_cast<float>(gameViewPass.stats.drawStats.drawCallCount);
+        drawStats.y = static_cast<float>(gameViewPass.stats.drawStats.triangleCount);
+        details.vectors.push_back(drawStats);
+    }
+
+    // matrices - the real view-projection matrix this pass actually
+    // rendered with this frame. Mat4 is COLUMN-MAJOR storage
+    // (columns[c][r] via operator()(row, col) - see Math/Mat4.h's own class
+    // comment), but FrameDebuggerMatrixProperty::values is ROW-MAJOR
+    // (values[row*4 + col] is row `row`, column `col` - see
+    // FrameDebuggerData.h's own struct comment) - so this copies through
+    // Mat4::operator()(row, col) element-by-element (which already accounts
+    // for the column-major storage internally) rather than a raw memcpy of
+    // Mat4::Data() (which is column-major and would silently transpose the
+    // displayed matrix - see PHASE2_FRAME_DEBUGGER_SNAPSHOT_BUILDER.md's
+    // own explicit warning about exactly this bug class).
+    {
+        FrameDebuggerMatrixProperty viewProjection;
+        viewProjection.name = "ViewProjection";
+        const Mat4& matrix = capture.LastViewProjection();
+        for (int row = 0; row < 4; ++row) {
+            for (int col = 0; col < 4; ++col) {
+                viewProjection.values[static_cast<std::size_t>(row * 4 + col)] = matrix(row, col);
+            }
+        }
+        details.matrices.push_back(viewProjection);
+    }
+
+    // blend/Z/stencil rows - this engine's real, single, constant Pipeline
+    // configuration (Locked Design Decision #6).
+    {
+        const FrameDebuggerStandardPipelineState pipelineState = DescribeStandardPipelineState();
+        details.blendMode = pipelineState.blendMode;
+        details.zClip = pipelineState.zClip;
+        details.zTest = pipelineState.zTest;
+        details.zWrite = pipelineState.zWrite;
+        details.cull = pipelineState.cull;
+        details.stencilRef = pipelineState.stencilRef;
+        details.stencilComp = pipelineState.stencilComp;
+        details.stencilPass = pipelineState.stencilPass;
+        details.stencilFail = pipelineState.stencilFail;
+        details.stencilZFail = pipelineState.stencilZFail;
+    }
+
+    leaf.details = std::move(details);
+    return leaf;
+}
+
+} // namespace
+
+FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapshot& graphSnapshot,
+    const FrameDebuggerCaptureContext& capture, const std::vector<std::string>& gpuSkinningPassNamesThisFrame,
+    const FrameDebuggerRenderTargetInfo& gameViewRenderTargetInfo)
+{
+    const rg::RenderGraphPassSnapshot* gameViewPass = FindPassByName(graphSnapshot.passesInExecutionOrder, "GameView");
+    if (gameViewPass == nullptr) {
+        // Honest "no frame captured yet" empty result - see this function's
+        // own header-comment contract and PHASE0's Locked Design Decision #2.
+        return FrameDebuggerSnapshot{};
+    }
+
+    int nextEventIndex = 0;
+
+    FrameDebuggerEventNode root;
+    root.name = "Game View";
+    root.isDrawCall = false;
+
+    if (!gpuSkinningPassNamesThisFrame.empty()) {
+        FrameDebuggerEventNode gpuSkinningGroup;
+        gpuSkinningGroup.name = "GPU Skinning";
+        gpuSkinningGroup.isDrawCall = false;
+
+        // Preserve graphSnapshot's own real execution order - never the
+        // (unrelated) order `gpuSkinningPassNamesThisFrame` itself happens
+        // to list its names in.
+        for (const rg::RenderGraphPassSnapshot& pass : graphSnapshot.passesInExecutionOrder) {
+            if (Contains(gpuSkinningPassNamesThisFrame, pass.name)) {
+                gpuSkinningGroup.children.push_back(BuildGpuSkinningLeaf(pass, nextEventIndex++));
+            }
+        }
+
+        // Only add the group at all if at least one real pass in this
+        // frame's graphSnapshot actually matched by name - see this
+        // function's own Step 2 fallback reasoning in the phase document
+        // (a caller-supplied name with no matching real pass this frame
+        // must never produce an empty, misleading "GPU Skinning" group).
+        if (!gpuSkinningGroup.children.empty()) {
+            root.children.push_back(std::move(gpuSkinningGroup));
+        }
+    }
+
+    root.children.push_back(BuildGameViewLeaf(*gameViewPass, capture, nextEventIndex++));
+
+    FrameDebuggerSnapshot snapshot;
+    snapshot.rootNodes.push_back(std::move(root));
+    snapshot.totalEventCount = nextEventIndex;
+    snapshot.renderTarget = gameViewRenderTargetInfo;
+    snapshot.renderTarget.name = "GameView";
+    return snapshot;
+}
+
 } // namespace gte

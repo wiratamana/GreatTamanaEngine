@@ -5,6 +5,14 @@
 #include <string>
 #include <vector>
 
+// PHASE2 (task_manager/frame-debugger-3/PHASE2_FRAME_DEBUGGER_SNAPSHOT_BUILDER.md)
+// - BuildRealFrameDebuggerSnapshot() below reshapes these two ALREADY-REAL
+// types into a real FrameDebuggerSnapshot; both are safe to include here
+// since this whole file only ever compiles under GTE_ENABLE_EDITOR, exactly
+// like FrameDebuggerCapture.h itself.
+#include "FrameDebuggerCapture.h"
+#include "../Renderer/RenderGraph/RenderGraphSnapshot.h"
+
 // task_manager/frame-debugger-2 campaign (PHASE1) - the pure, ImGui-free
 // data model behind the Editor's "Frame Debugger" window (Panels/
 // FrameDebuggerPanel.h) - mirrors JobsPanelData.h/ProfilerPanelData.h's
@@ -190,5 +198,52 @@ std::string FormatVectorProperty(const FrameDebuggerVectorProperty& vector);
 // directly by that call site (ImGui text wrapping/alignment would look
 // wrong that way).
 std::string FormatMatrixProperty(const FrameDebuggerMatrixProperty& matrix);
+
+// PHASE2 (task_manager/frame-debugger-3/PHASE2_FRAME_DEBUGGER_SNAPSHOT_BUILDER.md)
+// - the real, non-placeholder builder. Pure reshape of ONE frame's already-
+// real data (`graphSnapshot` - see gte::rg::BuildRenderGraphSnapshot();
+// `capture` - see PHASE1's FrameDebuggerCaptureContext, already Reset()/
+// populated for the CURRENT frame by the caller; `gpuSkinningPassNamesThisFrame`
+// - the CURRENT frame's real AnimationSystem::GpuSkinningDispatchRequest::name
+// values, already resolved to plain strings by the caller so this function
+// itself never needs to #include AnimationSystem.h) into a real,
+// Game-View-only FrameDebuggerSnapshot - never a competing capture
+// mechanism. No live VkDevice/Renderer/RenderTexture involved - exactly
+// like BuildRenderGraphSnapshot() itself.
+//
+// Returns an EMPTY FrameDebuggerSnapshot{} (same honest "no frame captured
+// yet" shape BuildPlaceholderFrameDebuggerSnapshot() already models) if
+// `graphSnapshot` has no pass literally named "GameView" - e.g. queried
+// before the very first frame ever rendered.
+//
+// Tree shape produced otherwise: one root group node "Game View", with an
+// optional "GPU Skinning" child group (present only when
+// `gpuSkinningPassNamesThisFrame` is non-empty, containing one LEAF per
+// matching real pass, in `graphSnapshot`'s own execution order) followed by
+// exactly one final LEAF sibling for the real "GameView" pass itself - see
+// PHASE0_MASTER_STRATEGY.md's Locked Design Decisions #1/#6/#7 for the full
+// reasoning (pass-level granularity, pass-scoped aggregated "reflection",
+// Game-View-only scope).
+//
+// `gameViewRenderTargetInfo` is DELIBERATELY a plain, already-resolved
+// parameter rather than this function reaching into a live RenderTexture/
+// Renderer itself - the phase document's own Step 3.1 point 4 asks for real
+// width/height/format info, but this function must stay pure (no live
+// VkDevice/Renderer), exactly like the `gpuSkinningPassNamesThisFrame`
+// parameter immediately above resolves the same tension for GPU-skinning
+// pass names. Only `width`/`height`/`format` are actually used from it -
+// `name` is always overwritten to "GameView" for a non-empty result (left
+// completely untouched - the caller's argument is simply ignored - for the
+// empty-result "no GameView pass" case, matching
+// BuildPlaceholderFrameDebuggerSnapshot()'s own all-default convention).
+// Defaults to an all-default FrameDebuggerRenderTargetInfo{} so a caller
+// that does not yet have real live extent/format data on hand (e.g. every
+// Tier-1 test in tests/Editor/FrameDebuggerSnapshotBuilderTests.cpp) can
+// simply omit it.
+FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(
+    const rg::RenderGraphSnapshot& graphSnapshot,
+    const FrameDebuggerCaptureContext& capture,
+    const std::vector<std::string>& gpuSkinningPassNamesThisFrame,
+    const FrameDebuggerRenderTargetInfo& gameViewRenderTargetInfo = FrameDebuggerRenderTargetInfo{});
 
 } // namespace gte
