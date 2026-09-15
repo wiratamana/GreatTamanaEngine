@@ -334,51 +334,65 @@ scoped out from the start, not overlooked:
   clicks the button and watches it happen live" step is a documented manual-
   verification gap, not a defect.
 
-## Frame Debugger (scaffolding)
+## Frame Debugger
 
-### Deferred from the `frame-debugger-2` campaign
+The `frame-debugger-3` campaign
+(`task_manager/frame-debugger-3/PHASE0_MASTER_STRATEGY.md`, eight phases,
+`CAMPAIGN_COMPLETION_REPORT.md`) closed nearly every item the
+`frame-debugger-2` campaign had deferred (see `AGENTS.md`'s "Frame Debugger"
+section and `docs/conventions/frame-debugger.md` for the full, current
+convention). The following are now DONE, not deferred:
 
-See `AGENTS.md`'s "Frame Debugger (scaffolding)" section,
-`docs/conventions/frame-debugger.md`, and
-`task_manager/frame-debugger-2/PHASE0_MASTER_STRATEGY.md`'s own "Non-Goals"
-(Step 3.3) for the full campaign writeup - the following were explicitly
-scoped out from the start, not overlooked. This whole campaign was
-deliberately GUI-scaffolding-only:
+- ~~Any real frame/draw-call/render-pass capture logic whatsoever~~ - DONE.
+  `FrameDebuggerCaptureContext`/`RenderSystem::Draw()` instrumentation
+  (PHASE1) plus `BuildRealFrameDebuggerSnapshot()` (PHASE2) produce a real,
+  non-empty, Game-View-only snapshot from the real `RenderGraphSnapshot`.
+- ~~Any real shader/material property introspection~~ - DONE, at PASS-scoped
+  granularity (real distinct `Pipeline`/`MaterialTexture` debug names, real
+  clear color/draw stats/view-projection matrix, real constant blend/Z/
+  stencil state via `DescribeStandardPipelineState()`).
+- ~~A frame-history ring buffer / scrubbing through multiple past frames~~ -
+  DONE. `FrameDebuggerHistory` (PHASE3), an 8-slot ring buffer with its own
+  retained GPU preview texture per slot, plus a new Frame-History Prev/Next
+  mini-toolbar (PHASE4).
+- ~~Any Network/HTTP endpoint for the Frame Debugger~~ - DONE. A brand-new
+  `FrameDebuggerCommandBridge` plus eight `/frame_debugger/*` routes (PHASE7).
+- ~~Interactive click-driven Enable/tree-row-selection verification via the
+  embedded HTTP server~~ - DONE, closed for good. A genuine, fully-automated,
+  HTTP-driven, screenshot-verified end-to-end smoke test (PHASE8) finally
+  exercises open/enable/capture/select-event/step-history/set-channel/
+  set-levels with no mouse/keyboard involved - see
+  `task_manager/frame-debugger-3/PHASE8_COMPLETION_REPORT.md`.
+- Channels (All/R/G/B/A)/Levels controls actually affecting the preview image
+  - DONE, via a dedicated compositing shader (PHASE6), not part of the
+  original `frame-debugger-2` deferred list but called out here for
+  completeness.
 
-- **Any real frame/draw-call/render-pass capture logic whatsoever** (no
-  hooking into `gte::rg::RenderGraph`, `DrawStats`, `GpuTiming`, or any
-  shader-reflection data). `BuildPlaceholderFrameDebuggerSnapshot()`
-  (`src/Editor/FrameDebuggerData.h/.cpp`) always returns a completely empty
-  snapshot - a future campaign wires the real data source in behind the
-  exact seams this campaign built (see `docs/conventions/frame-debugger.md`'s
-  own "glue seams" section).
-- **Any real shader/material property introspection.** No real `_MainTex`/
-  `_Color`/`unity_MatrixVP`-equivalent values are ever read from a real
-  pipeline/descriptor set - `FrameDebuggerEventDetails`'s fields are fully
-  built and rendered (PHASE6), but never populated with real data.
-- **A frame-history ring buffer / scrubbing through multiple past frames.**
-  The stepper row's "N of M" always reads "0 of 0" - no multi-frame capture
-  history exists yet.
-- **Any Network/HTTP endpoint for the Frame Debugger** (mirrors
-  `frame-debugger-1`'s own identical non-goal for Pause/Step).
-- **Adding "Frame Debugger" to `EditorPanelCatalog.h`/the default dock
-  layout.** It is deliberately an on-demand floating window, exactly like
-  the precedent `BoneViewerWindow` already establishes (which also has no
-  catalog entry) - see `docs/conventions/frame-debugger.md`.
+### Still genuinely deferred (permanent design choices or real future work)
+
+- **Per-individual-draw-call event granularity.** A deliberate, PERMANENT
+  divergence from Unity's own reference screenshot (pass-level granularity
+  only) - not a temporary scaffolding gap; a future campaign could relax this,
+  but it is not a bug today.
+- **Scene View or Present-pass capture.** The Frame Debugger's own captured
+  event tree is permanently filtered to the Game View's own passes only - a
+  clean, well-isolated single-line filter change for some future campaign to
+  relax, not attempted here.
+- **A full, generic shader-reflection system** (real SPIR-V reflection data /
+  real descriptor-set binding tables) - `DescribeStandardPipelineState()` is a
+  small, hand-authored, constant-valued function matching this engine's
+  actual single Pipeline configuration today; a genuine future campaign would
+  be needed if/when this engine ever grows real per-material blend/Z/stencil
+  variation to reflect.
 - **A `RenderGraphPanel`/`ProfilerPanel`-style Pause/frozen-snapshot control
-  on this panel.** There is no live, frame-to-frame-changing data yet to
-  freeze a snapshot of - `BuildPlaceholderFrameDebuggerSnapshot()` is cheap
-  and pure enough to call fresh every single `Build()` call.
-- **Interactive click-driven Enable/tree-row-selection verification via the
-  embedded HTTP server** - mirrors `frame-debugger-1`'s own identical,
-  already-documented gap immediately above: no mouse-control tool exists in
-  this session's environment to actually click the ImGui checkbox/tree
-  rows over HTTP, and the Frame Debugger window is deliberately absent from
-  `GET /activate_tab`'s catalog (see above). The underlying widget-tree code
-  is a direct, reviewed application of already-working ImGui idioms used
-  identically elsewhere in this codebase - only the "a human/agent actually
-  clicks it and watches it happen live" step is a documented
-  manual-verification gap, not a defect.
+  on the Frame Debugger panel itself** - snapshot-on-demand (a real trigger,
+  not continuous rebuilding) already serves the same purpose this panel needs.
+- **Publishing the Frame Debugger's own retained preview texture into
+  `RenderGraphDebugTextureRegistry`** (so it could also be fetched via the
+  generic `GET /get_texture`/`GET /list_textures` routes) - explicitly
+  optional per `PHASE0_MASTER_STRATEGY.md`'s own Step 2, and not needed since
+  the dedicated `/frame_debugger/*` routes plus the panel's own `ImGui::Image()`
+  display are already a complete, sufficient automation surface.
 
 ## Engine Roadmap (not yet started)
 

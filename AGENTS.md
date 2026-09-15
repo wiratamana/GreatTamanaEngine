@@ -78,20 +78,32 @@ regardless of pause - only gameplay simulation freezes.
 
 Full convention: [docs/conventions/time-and-playback-pause.md](docs/conventions/time-and-playback-pause.md).
 
-## Frame Debugger (scaffolding)
+## Frame Debugger
 
-`src/Editor/FrameDebuggerData.h/.cpp` (pure data model) and
-`src/Editor/Panels/FrameDebuggerPanel.h/.cpp` (the on-demand floating
-"Frame Debugger" window, opened via Window > Frame Debugger) are the
-GUI-only scaffolding for a future Unity-Frame-Debugger-style tool - an
-"Enable" checkbox (which auto-engages the existing Pause/Resume
-toolbar), a disabled mode combo, a disabled frame stepper, a
-draggable-splitter event tree (always "No frame captured yet." this
-campaign), and an inspector pane (RenderTarget/Channels/Levels/preview
-chrome plus an always-"No event selected." event-details section). No
-real frame/draw-call capture exists yet - every value is a disabled
-control or placeholder message, by design, until a future campaign
-wires real data into the documented seams.
+`src/Editor/FrameDebuggerData.h/.cpp` (pure data model, real snapshot builder),
+`src/Editor/FrameDebuggerCapture.h/.cpp` (the per-frame capture context
+threaded through `Renderer::Submit()`/`RenderSystem::Draw()`, zero overhead
+when disarmed), `src/Editor/FrameDebuggerHistory.h/.cpp` (a real 8-slot
+multi-frame history ring buffer, each slot holding a real snapshot plus a
+retained GPU copy of that frame's Game View output), `src/Editor/
+FrameDebuggerPreviewProcessing.h/.cpp` (a real Channels/Levels
+preview-compositing CPU oracle + compute shader), and
+`src/Editor/Panels/FrameDebuggerPanel.h/.cpp` (the on-demand floating "Frame
+Debugger" window, opened via Window > Frame Debugger or `GET
+/frame_debugger/open`) together give the Editor a genuinely working,
+Unity-Frame-Debugger-style tool for the Game View render target: enabling it
+freezes and captures one real rendered frame's worth of real Render Graph
+passes (pass-level granularity, not per-draw-call - a deliberate, permanent
+design choice, not a gap), the event tree shows those real passes, selecting
+one shows real shader/blend/Z/stencil/texture/vector/matrix data plus a real
+preview image reconstructed as of that exact point in the frame, a
+Frame-History mini-toolbar steps backward/forward through past captured
+frames, and the Channels/Levels controls really affect the preview image via
+a dedicated compositing shader. The entire feature is drivable end-to-end
+over the embedded HTTP server (`GET /frame_debugger/open|enable|capture|
+select_event|step_history|set_channel|set_levels|state`), with the window
+forced onto the main ImGui viewport whenever opened this way so `GET
+/get_swapchain` always sees it.
 
 Full convention: [docs/conventions/frame-debugger.md](docs/conventions/frame-debugger.md).
 

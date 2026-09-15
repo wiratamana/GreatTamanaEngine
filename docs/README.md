@@ -59,11 +59,12 @@ than subsystem-specific):
   the dedicated, explicit `gte::Time`/`gte::EngineContext` per-frame
   time-keeping objects, and the Unity-style Pause/Resume/Step toolbar built
   on top of them.
-- **[Frame Debugger](conventions/frame-debugger.md)** — the GUI-only
-  scaffolding for a future Unity-Frame-Debugger-style window
-  (`FrameDebuggerData.h/.cpp`, `Panels/FrameDebuggerPanel.h/.cpp`), an
-  on-demand floating window not listed in `EditorPanelCatalog.h`, and the
-  exact seams a future real-capture campaign should replace.
+- **[Frame Debugger](conventions/frame-debugger.md)** — the real,
+  Unity-Frame-Debugger-style Game View capture tool (`FrameDebuggerData.h/.cpp`
+  /`FrameDebuggerCapture.h/.cpp`/`FrameDebuggerHistory.h/.cpp`/
+  `FrameDebuggerPreviewProcessing.h/.cpp`, `Panels/FrameDebuggerPanel.h/.cpp`),
+  its 8-slot frame-history ring buffer, real Channels/Levels preview
+  compositing, and its full `/frame_debugger/*` HTTP automation surface.
 - **[Job System](conventions/job-system.md)** — `src/Jobs/`'s general-purpose
   worker-thread pool, `Schedule()`/`Dispatch()`/dependencies/continuations,
   and the thread-safety classification of every shared subsystem.

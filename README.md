@@ -110,6 +110,36 @@ pieces. This section keeps only the most recent entries inline — see
 **[docs/CHANGELOG.md](docs/CHANGELOG.md)** for the complete, reverse-
 chronological project history from the very first triangle demo onward.
 
+- **The Editor's "Frame Debugger" window is now a genuinely working,
+  Unity-Frame-Debugger-style tool for the Game View, closing the whole
+  `frame-debugger-2` GUI-only scaffolding's "manual-verification limitation"
+  for good** (`frame-debugger-3` campaign, eight phases -
+  `task_manager/frame-debugger-3/PHASE0_MASTER_STRATEGY.md`) - checking
+  "Enable" now freezes and captures one real rendered frame's worth of real
+  Render Graph passes (pass-level granularity - one leaf per relevant real
+  pass, a deliberate, permanent divergence from Unity's own per-draw-call
+  detail, not a gap), the left-hand tree shows those real passes instead of
+  "No frame captured yet.", clicking one shows real shader/blend/Z/stencil/
+  texture/vector/matrix data (`FrameDebuggerCapture.h/.cpp`'s new,
+  zero-overhead-when-disarmed capture context threaded through
+  `Renderer::Submit()`/`RenderSystem::Draw()`) plus a real preview image
+  reconstructed as of that exact point in the frame, a new 8-slot Frame
+  History ring buffer (`FrameDebuggerHistory.h/.cpp`) lets you step backward/
+  forward through past captured frames each with its own retained GPU
+  texture copy, and the Channels (All/R/G/B/A)/Levels controls now actually
+  affect the preview image via a dedicated compositing shader
+  (`FrameDebuggerPreviewProcessing.h/.cpp`/`Shaders/FrameDebuggerPreview.comp`).
+  A brand-new `FrameDebuggerCommandBridge` plus eight `/frame_debugger/*` HTTP
+  routes (`open`/`enable`/`capture`/`select_event`/`step_history`/
+  `set_channel`/`set_levels`/`state`) make the entire feature drivable with no
+  mouse/keyboard at all, and a main-viewport-pinning fix guarantees the window
+  is visible to `GET /get_swapchain` whenever opened this way. Verified with a
+  full clean build (both `GTE_ENABLE_EDITOR=ON` and `=OFF`), a full `ctest`
+  regression pass, and - for the first time in this feature's history - a
+  genuine, fully-automated, HTTP-driven, screenshot-verified end-to-end smoke
+  test of the whole feature (open → enable/auto-capture → select event →
+  explicit capture → step history → set channel → set levels, each step
+  visually confirmed via `GET /get_swapchain`).
 - **The Editor now has a new "Frame Debugger" window, GUI-only scaffolding
   for a future Unity-Frame-Debugger-style tool** (`frame-debugger-2`
   campaign, seven phases -
