@@ -2,6 +2,12 @@
 
 A raw game engine built from scratch.
 
+## Documentation
+
+This README is intentionally thin. Full architecture detail, the complete
+project changelog, and contributor conventions all live under
+[`docs/`](docs/README.md) — start at **[docs/README.md](docs/README.md)**.
+
 ## Goal
 
 The plan is to develop a raw game engine from scratch, with the very foundation

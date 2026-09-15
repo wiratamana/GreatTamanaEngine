@@ -2,6 +2,12 @@
 
 Instructions for LLM/AI agents working on this codebase.
 
+## Documentation
+
+This file covers universal coding guidelines and testability rules, plus a
+short summary + link for every subsystem-specific convention. Full detail
+for each subsystem lives under [`docs/conventions/`](docs/README.md).
+
 ## Coding Guidelines
 
 - **Clean Architecture**: Write clean architecture code. Keep clear
