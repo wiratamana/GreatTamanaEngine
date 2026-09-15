@@ -78,6 +78,23 @@ regardless of pause - only gameplay simulation freezes.
 
 Full convention: [docs/conventions/time-and-playback-pause.md](docs/conventions/time-and-playback-pause.md).
 
+## Frame Debugger (scaffolding)
+
+`src/Editor/FrameDebuggerData.h/.cpp` (pure data model) and
+`src/Editor/Panels/FrameDebuggerPanel.h/.cpp` (the on-demand floating
+"Frame Debugger" window, opened via Window > Frame Debugger) are the
+GUI-only scaffolding for a future Unity-Frame-Debugger-style tool - an
+"Enable" checkbox (which auto-engages the existing Pause/Resume
+toolbar), a disabled mode combo, a disabled frame stepper, a
+draggable-splitter event tree (always "No frame captured yet." this
+campaign), and an inspector pane (RenderTarget/Channels/Levels/preview
+chrome plus an always-"No event selected." event-details section). No
+real frame/draw-call capture exists yet - every value is a disabled
+control or placeholder message, by design, until a future campaign
+wires real data into the documented seams.
+
+Full convention: [docs/conventions/frame-debugger.md](docs/conventions/frame-debugger.md).
+
 ## Job System
 
 `src/Jobs/` (`JobTypes.h`, `JobQueue.h/.cpp`, `JobSystem.h/.cpp`,

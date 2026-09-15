@@ -110,6 +110,24 @@ pieces. This section keeps only the most recent entries inline — see
 **[docs/CHANGELOG.md](docs/CHANGELOG.md)** for the complete, reverse-
 chronological project history from the very first triangle demo onward.
 
+- **The Editor now has a new "Frame Debugger" window, GUI-only scaffolding
+  for a future Unity-Frame-Debugger-style tool** (`frame-debugger-2`
+  campaign, seven phases -
+  `task_manager/frame-debugger-2/PHASE0_MASTER_STRATEGY.md`) - an on-demand
+  floating window opened via a brand-new "Window" top-level menu
+  (`src/Editor/Panels/FrameDebuggerPanel.h/.cpp`, backed by the pure
+  `src/Editor/FrameDebuggerData.h/.cpp` data model), showing a toolbar
+  ("Enable" checkbox, cosmetic disabled "Editor" combo), a disabled frame
+  stepper row, a draggable-splitter left-hand event tree, and a right-hand
+  inspector pane (RenderTarget/Channels/Levels/preview chrome plus a
+  Shader/Pass/Blend/Z-state/Stencil/Preview/ShaderProperties event-details
+  section). Checking "Enable" auto-engages the existing Pause/Resume toolbar
+  from the `frame-debugger-1` campaign. No real frame/draw-call capture
+  logic was wired in anywhere - every value shown is a disabled control or a
+  placeholder message ("No frame captured yet." / "No event selected."), by
+  design, until a future campaign wires real data into the documented seams.
+  Verified with a full clean build (both `GTE_ENABLE_EDITOR=ON` and `=OFF`),
+  a full `ctest` regression pass, and a live runtime smoke test.
 - **The Editor now has a genuine Unity-style Pause/Step control, backed by
   a brand-new, dedicated, explicit `Time` class** (`frame-debugger-1`
   campaign, five phases -

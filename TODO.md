@@ -334,6 +334,52 @@ scoped out from the start, not overlooked:
   clicks the button and watches it happen live" step is a documented manual-
   verification gap, not a defect.
 
+## Frame Debugger (scaffolding)
+
+### Deferred from the `frame-debugger-2` campaign
+
+See `AGENTS.md`'s "Frame Debugger (scaffolding)" section,
+`docs/conventions/frame-debugger.md`, and
+`task_manager/frame-debugger-2/PHASE0_MASTER_STRATEGY.md`'s own "Non-Goals"
+(Step 3.3) for the full campaign writeup - the following were explicitly
+scoped out from the start, not overlooked. This whole campaign was
+deliberately GUI-scaffolding-only:
+
+- **Any real frame/draw-call/render-pass capture logic whatsoever** (no
+  hooking into `gte::rg::RenderGraph`, `DrawStats`, `GpuTiming`, or any
+  shader-reflection data). `BuildPlaceholderFrameDebuggerSnapshot()`
+  (`src/Editor/FrameDebuggerData.h/.cpp`) always returns a completely empty
+  snapshot - a future campaign wires the real data source in behind the
+  exact seams this campaign built (see `docs/conventions/frame-debugger.md`'s
+  own "glue seams" section).
+- **Any real shader/material property introspection.** No real `_MainTex`/
+  `_Color`/`unity_MatrixVP`-equivalent values are ever read from a real
+  pipeline/descriptor set - `FrameDebuggerEventDetails`'s fields are fully
+  built and rendered (PHASE6), but never populated with real data.
+- **A frame-history ring buffer / scrubbing through multiple past frames.**
+  The stepper row's "N of M" always reads "0 of 0" - no multi-frame capture
+  history exists yet.
+- **Any Network/HTTP endpoint for the Frame Debugger** (mirrors
+  `frame-debugger-1`'s own identical non-goal for Pause/Step).
+- **Adding "Frame Debugger" to `EditorPanelCatalog.h`/the default dock
+  layout.** It is deliberately an on-demand floating window, exactly like
+  the precedent `BoneViewerWindow` already establishes (which also has no
+  catalog entry) - see `docs/conventions/frame-debugger.md`.
+- **A `RenderGraphPanel`/`ProfilerPanel`-style Pause/frozen-snapshot control
+  on this panel.** There is no live, frame-to-frame-changing data yet to
+  freeze a snapshot of - `BuildPlaceholderFrameDebuggerSnapshot()` is cheap
+  and pure enough to call fresh every single `Build()` call.
+- **Interactive click-driven Enable/tree-row-selection verification via the
+  embedded HTTP server** - mirrors `frame-debugger-1`'s own identical,
+  already-documented gap immediately above: no mouse-control tool exists in
+  this session's environment to actually click the ImGui checkbox/tree
+  rows over HTTP, and the Frame Debugger window is deliberately absent from
+  `GET /activate_tab`'s catalog (see above). The underlying widget-tree code
+  is a direct, reviewed application of already-working ImGui idioms used
+  identically elsewhere in this codebase - only the "a human/agent actually
+  clicks it and watches it happen live" step is a documented
+  manual-verification gap, not a defect.
+
 ## Engine Roadmap (not yet started)
 
 Broader, longer-horizon ideas for moving the engine past "tech demo with a

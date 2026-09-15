@@ -78,14 +78,18 @@ directly as `ImGuiEditorLayer.cpp` itself:
   frames** (e.g. a Console's scrollback buffer) may become a small class
   instead of a free function - it still gets called explicitly by name from
   `ImGuiEditorLayer::BuildUI()`, exactly like the stateless ones, with no
-  interface needed for it either. Two real precedents already exist:
+  interface needed for it either. Three real precedents already exist:
   `BoneViewerWindow` (`BoneViewerWindow.h` - a floating debug window with
-  its own GPU buffers/camera/selection state) and `ProfilerPanel`
+  its own GPU buffers/camera/selection state), `ProfilerPanel`
   (`Panels/ProfilerPanel.h` - Phase 7,
   `PHASE7_EDITOR_PROFILER_PANEL_STRATEGY_v2.md`, holding its Pause control's
-  frozen snapshot plus reusable `ImGui::PlotLines()` scratch buffers). Both
-  are still called explicitly by name (`m_boneViewer.Build(...)`/
-  `m_profilerPanel.Build(...)`), never through a shared interface.
+  frozen snapshot plus reusable `ImGui::PlotLines()` scratch buffers), and
+  `FrameDebuggerPanel` (`Panels/FrameDebuggerPanel.h` -
+  `task_manager/frame-debugger-2/PHASE0_MASTER_STRATEGY.md`, holding its
+  "Enable" toggle, selected-event index, and splitter width across frames).
+  All three are still called explicitly by name (`m_boneViewer.Build(...)`/
+  `m_profilerPanel.Build(...)`/`m_frameDebuggerPanel.Build(...)`), never
+  through a shared interface.
 - **Vulkan types (e.g. `EditorContext::gameViewDescriptor`,
   `VkExtent2D`) are fine to use directly anywhere in this folder** - this is
   not an architectural leak. `Renderer`'s own public API
