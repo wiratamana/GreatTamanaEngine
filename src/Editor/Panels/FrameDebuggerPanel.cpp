@@ -5,11 +5,20 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <cstddef>
 
 namespace gte {
 
 namespace {
 constexpr float kSplitterWidth = 6.0f;
+
+void BuildPropertyRow(const char* label, const std::string& value)
+{
+    ImGui::TextUnformatted(label);
+    ImGui::SameLine(150.0f);
+    ImGui::TextUnformatted(value.c_str());
+}
+
 } // namespace
 
 void FrameDebuggerPanel::BuildToolbarRow(EditorContext& ctx)
@@ -159,7 +168,93 @@ void FrameDebuggerPanel::BuildInspectorPane(const FrameDebuggerSnapshot& snapsho
 
     ImGui::Separator();
 
-    // PHASE6 appends BuildEventDetailsSection() right here.
+    const std::optional<FrameDebuggerEventDetails> details
+        = FindEventDetailsByIndex(snapshot, m_selectedEventIndex);
+    BuildEventDetailsSection(details);
+}
+
+void FrameDebuggerPanel::BuildEventDetailsSection(const std::optional<FrameDebuggerEventDetails>& details)
+{
+    if (!details.has_value()) {
+        // ALWAYS this branch in production this campaign - see this
+        // file's own top-of-file comment and PHASE0_MASTER_STRATEGY.md's
+        // Locked Design Decision #2. Not a bug; the correct final state.
+        ImGui::TextDisabled("No event selected.");
+        return;
+    }
+
+    // Unreachable in practice this campaign (details is always
+    // std::nullopt - see FindEventDetailsByIndex()'s own doc comment in
+    // FrameDebuggerData.h), but fully correct and ready for a future
+    // real-capture campaign to exercise for free the moment
+    // FrameDebuggerEventNode::details starts being populated for real.
+    const FrameDebuggerEventDetails& d = *details;
+
+    ImGui::Text("Event #%d: %s", d.eventIndex, d.eventLabel.c_str());
+    ImGui::Separator();
+
+    BuildPropertyRow("Shader", d.shaderName);
+    BuildPropertyRow("Pass", d.passName);
+    BuildPropertyRow("Blend", d.blendMode);
+    BuildPropertyRow("ZClip", d.zClip);
+    BuildPropertyRow("ZTest", d.zTest);
+    BuildPropertyRow("ZWrite", d.zWrite);
+    BuildPropertyRow("Cull", d.cull);
+    BuildPropertyRow("Stencil Ref", d.stencilRef);
+    BuildPropertyRow("Stencil Comp", d.stencilComp);
+    BuildPropertyRow("Stencil Pass", d.stencilPass);
+    BuildPropertyRow("Stencil Fail", d.stencilFail);
+    BuildPropertyRow("Stencil ZFail", d.stencilZFail);
+
+    ImGui::Spacing();
+
+    if (ImGui::BeginTabBar("FrameDebuggerEventTabs")) {
+        if (ImGui::BeginTabItem("Preview")) {
+            // A real per-draw-call preview render is out of scope for
+            // this campaign (see PHASE6's own Step 2) - a much larger,
+            // separately-sized future feature.
+            ImGui::TextDisabled("Not available yet.");
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("ShaderProperties")) {
+            if (!d.textures.empty()) {
+                ImGui::SeparatorText("Textures");
+                for (const FrameDebuggerTextureProperty& texture : d.textures) {
+                    BuildPropertyRow(texture.name.c_str(), texture.valueLabel);
+                }
+            }
+            if (!d.vectors.empty()) {
+                ImGui::SeparatorText("Vectors");
+                for (const FrameDebuggerVectorProperty& vector : d.vectors) {
+                    BuildPropertyRow(vector.name.c_str(), FormatVectorProperty(vector));
+                }
+            }
+            if (!d.matrices.empty()) {
+                ImGui::SeparatorText("Matrices");
+                for (const FrameDebuggerMatrixProperty& matrix : d.matrices) {
+                    ImGui::TextUnformatted(matrix.name.c_str());
+                    const std::string formatted = FormatMatrixProperty(matrix);
+                    // Split on '\n' and draw each row as its own
+                    // ImGui::Text() call - see FormatMatrixProperty()'s
+                    // own doc comment for why a single multi-line
+                    // ImGui::Text() call is avoided here.
+                    std::size_t start = 0;
+                    while (start <= formatted.size()) {
+                        const std::size_t newlinePos = formatted.find('\n', start);
+                        const std::string rowText = formatted.substr(
+                            start, newlinePos == std::string::npos ? std::string::npos : newlinePos - start);
+                        ImGui::Text("    %s", rowText.c_str());
+                        if (newlinePos == std::string::npos) {
+                            break;
+                        }
+                        start = newlinePos + 1;
+                    }
+                }
+            }
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
+    }
 }
 
 void FrameDebuggerPanel::Build(EditorContext& ctx)

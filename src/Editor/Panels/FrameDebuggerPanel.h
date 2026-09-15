@@ -44,6 +44,7 @@ private:
     void BuildEventTreePane(const FrameDebuggerSnapshot& snapshot);
     void RenderEventNode(const FrameDebuggerEventNode& node);
     void BuildInspectorPane(const FrameDebuggerSnapshot& snapshot);
+    void BuildEventDetailsSection(const std::optional<FrameDebuggerEventDetails>& details);
 
     // The panel's own "Enable" toggle (see FrameDebuggerData.h's own
     // top-of-file comment: this is a purely GUI concept this campaign -

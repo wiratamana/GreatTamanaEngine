@@ -14,6 +14,8 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
 namespace gte {
 namespace {
 
@@ -78,6 +80,38 @@ TEST(FrameDebuggerDataTest, FindEventDetailsByIndexTest)
 
     EXPECT_FALSE(FindEventDetailsByIndex(snapshot, 999).has_value());
     EXPECT_FALSE(FindEventDetailsByIndex(snapshot, -1).has_value());
+}
+
+TEST(FrameDebuggerDataTest, FormatVectorPropertyTest)
+{
+    FrameDebuggerVectorProperty color;
+    color.name = "_Color";
+    color.x = 1.0f;
+    color.y = 1.0f;
+    color.z = 1.0f;
+    color.w = 1.0f;
+    EXPECT_EQ(FormatVectorProperty(color), "(1, 1, 1, 1)");
+
+    FrameDebuggerVectorProperty other;
+    other.name = "_Other";
+    other.x = 0.5f;
+    other.y = 0.0f;
+    other.z = 0.0f;
+    other.w = 0.0f;
+    EXPECT_EQ(FormatVectorProperty(other), "(0.5, 0, 0, 0)");
+}
+
+TEST(FrameDebuggerDataTest, FormatMatrixPropertyTest)
+{
+    FrameDebuggerMatrixProperty matrix;
+    matrix.name = "unity_MatrixVP";
+    matrix.values = { 0.001f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0019f, 0.0f, 0.0f, 0.0f, 0.0f, 0.00023f, 0.5f, 0.0f, 0.0f,
+        0.0f, 1.0f };
+
+    const std::string formatted = FormatMatrixProperty(matrix);
+    EXPECT_EQ(formatted.substr(0, formatted.find('\n')), "0.001 0 0 0");
+    EXPECT_EQ(formatted.substr(formatted.rfind('\n') + 1), "0 0 0 1");
+    EXPECT_EQ(std::count(formatted.begin(), formatted.end(), '\n'), 3);
 }
 
 } // namespace

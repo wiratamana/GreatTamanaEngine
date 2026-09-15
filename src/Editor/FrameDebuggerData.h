@@ -72,6 +72,23 @@ struct FrameDebuggerEventDetails {
     std::vector<FrameDebuggerTextureProperty> textures;
     std::vector<FrameDebuggerVectorProperty> vectors;
     std::vector<FrameDebuggerMatrixProperty> matrices;
+
+    // Short, display-ready label for this event's own OPERATION KIND
+    // (e.g. "Draw Mesh", "Clear", "SetRenderTarget") - matches the
+    // reference screenshot's own "Event #2117: Draw Mesh" header
+    // convention. Deliberately its own copy rather than re-deriving it
+    // from the owning FrameDebuggerEventNode::name (which may carry
+    // extra detail, e.g. "Draw Mesh pf_fence_02") - this struct is
+    // self-contained on purpose (see FrameDebuggerData.h's own top-of-
+    // file "OWNED-string philosophy" note), and BuildEventDetailsSection()
+    // (PHASE6) needs no access back into the tree at all to render its
+    // own header. Always empty in practice this campaign (never
+    // populated, like every other field here) - appended at the END of
+    // this struct's field list, not inserted in the middle, mirroring
+    // BoneViewerWindow.h's own explicit "never insert a field in the
+    // middle of a struct some call site might positionally
+    // aggregate-initialize" precedent.
+    std::string eventLabel;
 };
 
 // One row of the left-hand event tree (see the reference screenshot's
@@ -152,5 +169,26 @@ int ClampSelectedEventIndex(int requested, int totalEventCount);
 // PHASE6) ever needs to change.
 std::optional<FrameDebuggerEventDetails> FindEventDetailsByIndex(
     const FrameDebuggerSnapshot& snapshot, int eventIndex);
+
+// Formats a vector property's value as "(x, y, z, w)" - matches the
+// reference screenshot's own "_Color  (1, 1, 1, 1)" display convention.
+// Trims trailing zeros the same way std::to_string would NOT do on its
+// own (e.g. "1" not "1.000000") by using a short, fixed "%g"-style
+// formatting internally - see FrameDebuggerData.cpp for the exact
+// formatting rule.
+std::string FormatVectorProperty(const FrameDebuggerVectorProperty& vector);
+
+// Formats a 4x4 matrix property as 4 space-joined rows of 4 numbers
+// each, newline-separated - e.g. row-major
+// "0.001 0 0 0\n0 0.0019 0 0\n0 0 0.00023 0.5\n0 0 0 1", matching the
+// reference screenshot's own "unity_MatrixVP" grid. Caller decides how
+// to lay the 4 lines out in ImGui (see BuildEventDetailsSection() below,
+// which draws each row as its own ImGui::Text() call rather than one
+// multi-line string, for cleaner monospace column alignment) - this
+// function itself only needs to produce the 4 ready-to-split-on-'\n'
+// lines of text; NEVER used as one giant multi-line ImGui::Text() call
+// directly by that call site (ImGui text wrapping/alignment would look
+// wrong that way).
+std::string FormatMatrixProperty(const FrameDebuggerMatrixProperty& matrix);
 
 } // namespace gte
