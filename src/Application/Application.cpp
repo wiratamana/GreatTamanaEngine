@@ -301,13 +301,25 @@ int Application::Run()
         const double deltaSeconds = static_cast<double>(nowTicksNs - lastTicksNs) / 1000000000.0;
         lastTicksNs = nowTicksNs;
 
-        // frame-debugger-1 campaign, PHASE2 - hardcoded "never paused" for now;
-        // PHASE4 replaces these two literals with the Editor's real toolbar
-        // state (see IEditorLayer::IsPlaybackPaused()/TryConsumeStepRequest(),
-        // added in PHASE3). Keeping this phase's own change limited to plumbing
-        // only (zero observable behavior change) is deliberate - see this
-        // phase's own doc comment.
-        m_engineContext.time.Advance(deltaSeconds, /*isPaused=*/false, /*isSteppedThisFrame=*/false, kFixedStepSeconds);
+        // frame-debugger-1 campaign, PHASE4 - read the Editor's own Pause/Step
+        // toolbar state (see PHASE3's IEditorLayer::IsPlaybackPaused()/
+        // TryConsumeStepRequest()) and drive EngineContext::Time with it for
+        // real. This reflects whatever the user last clicked as of the END of
+        // last frame's BuildUI() call - the same one-frame-of-lag every other
+        // Editor<->engine feedback loop in this file already accepts (see e.g.
+        // GameViewTarget()'s own doc comment). Always false/false for a release
+        // build (NullEditorLayer - see PHASE3), so Application behaves exactly
+        // like before this whole campaign whenever GTE_ENABLE_EDITOR is OFF.
+        const bool playbackPaused = m_editorLayer->IsPlaybackPaused();
+        // Deliberately called EVERY frame, unconditionally (never short-circuited
+        // by `playbackPaused &&`) so a stray/stale pending step request can never
+        // linger un-cleared even in an edge case the toolbar's own "Step is
+        // disabled while not paused" UI guard wasn't supposed to allow in the
+        // first place - see IEditorLayer::TryConsumeStepRequest()'s own doc
+        // comment.
+        const bool stepRequestedRaw = m_editorLayer->TryConsumeStepRequest();
+        const bool steppedThisFrame = playbackPaused && stepRequestedRaw;
+        m_engineContext.time.Advance(deltaSeconds, playbackPaused, steppedThisFrame, kFixedStepSeconds);
 
         m_editorLayer->NewFrame();
 

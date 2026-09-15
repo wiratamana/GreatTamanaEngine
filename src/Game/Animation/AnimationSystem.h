@@ -207,7 +207,13 @@ public:
     // mitigation itself: this list never asks for the SAME output buffer to
     // be written twice in one frame. Empty whenever GetSkinningMode() ==
     // CpuJobSystem, or no rigged model happens to be animating at all this
-    // frame.
+    // frame. Also empty on any frame frozen by the frame-debugger-1
+    // campaign's Pause/Step feature (task_manager/frame-debugger-1/) - see
+    // Game::Update()'s freeze branch, which calls
+    // ClearGpuSkinningDispatchThisFrame() (below) instead of SkinAndUpload()
+    // whenever EngineContext::Time::IsFrozenThisFrame() is true, so this
+    // list can legitimately drop to empty mid-session with the model still
+    // fully loaded/rigged - that is expected, not a bug.
     struct GpuSkinningDispatchRequest {
         // A stable, persistent (never a per-frame temporary) name - see
         // GpuSkinningRigCache::OutputGroup::debugName's own doc comment for
