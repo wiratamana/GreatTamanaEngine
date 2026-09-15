@@ -623,6 +623,8 @@ if(GTE_ENABLE_EDITOR)
         src/Editor/Panels/JobsPanel.cpp
         src/Editor/Panels/AtmospherePanel.h
         src/Editor/Panels/AtmospherePanel.cpp
+        src/Editor/Panels/FrameDebuggerPanel.h
+        src/Editor/Panels/FrameDebuggerPanel.cpp
         src/Editor/ImGuiEditorLayer.cpp
     )
     target_link_libraries(gte_core PRIVATE imgui imguizmo)

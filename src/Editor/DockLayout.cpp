@@ -148,6 +148,19 @@ void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer
             }
             ImGui::EndMenu();
         }
+        if (ImGui::BeginMenu("Window")) {
+            // task_manager/frame-debugger-2 campaign (PHASE2) - the
+            // Frame Debugger is an on-demand floating window (like
+            // BoneViewerWindow), not part of the default dock layout,
+            // so it needs its own explicit way to be (re)opened once
+            // closed - a checkable menu item bound directly to
+            // ctx.frameDebuggerWindowOpen (see EditorContext.h). The
+            // checkmark reflects the window's actual current open state
+            // even if it was closed via its own titlebar [x] rather than
+            // this menu.
+            ImGui::MenuItem("Frame Debugger", nullptr, &ctx.frameDebuggerWindowOpen);
+            ImGui::EndMenu();
+        }
         ImGui::EndMenuBar();
     }
 

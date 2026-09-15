@@ -208,6 +208,21 @@ struct EditorContext {
     // while NOT already paused is a no-op (the button is rendered disabled
     // while playbackPaused is false - see PlaybackControls.cpp).
     bool stepOneFrameRequested = false;
+
+    // task_manager/frame-debugger-2 campaign (PHASE2) - true whenever
+    // the Editor's on-demand "Frame Debugger" floating window
+    // (Panels/FrameDebuggerPanel.h) is currently open. Flipped directly
+    // by DockLayout.cpp's checkable "Window > Frame Debugger" menu item
+    // (ImGui::MenuItem's own 3-argument overload writes straight through
+    // a bool*), and passed as ImGui::Begin()'s own p_open parameter by
+    // FrameDebuggerPanel::Build() - so the window's titlebar [x] close
+    // button keeps this exact same bool in sync automatically, in both
+    // directions. False by default (closed on a fresh session) -
+    // mirrors BoneViewerWindow's own default-closed-until-opened
+    // behavior, just via a shared EditorContext bool instead of a
+    // private member (see FrameDebuggerPanel.h's own class comment for
+    // why).
+    bool frameDebuggerWindowOpen = false;
 };
 
 } // namespace gte

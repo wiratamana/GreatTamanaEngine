@@ -8,6 +8,7 @@
 #include "EditorContext.h"
 #include "ImGuiMemoryTracker.h"
 #include "Panels/AtmospherePanel.h"
+#include "Panels/FrameDebuggerPanel.h"
 #include "Panels/GamePanel.h"
 #include "Panels/HierarchyPanel.h"
 #include "Panels/InspectorPanel.h"
@@ -559,6 +560,14 @@ public:
         // BuildHierarchyPanel()/BuildScenePanel() above, which already take
         // `game` for their own reasons).
         m_jobsPanel.Build(m_ctx, game);
+        // task_manager/frame-debugger-2 campaign (PHASE2) - the Editor's
+        // on-demand "Frame Debugger" floating window (Panels/
+        // FrameDebuggerPanel.h). Build() itself is a complete no-op
+        // unless ctx.frameDebuggerWindowOpen is true (see
+        // FrameDebuggerPanel::Build()), so calling it unconditionally
+        // every frame here is cheap and matches every other panel's own
+        // call-site shape.
+        m_frameDebuggerPanel.Build(m_ctx);
 #if GTE_ENABLE_PROJECT_PANEL
         m_projectPanel.Build(m_ctx);
         // The Bone Viewer is its own floating window (opened on demand via
@@ -778,6 +787,16 @@ private:
     // it only depends on gte::Profiling::FrameProfiler/gte::Jobs::JobSystem,
     // both of which are always compiled regardless of that switch.
     JobsPanel m_jobsPanel;
+
+    // task_manager/frame-debugger-2 campaign (PHASE2) - the Editor's
+    // on-demand "Frame Debugger" floating window (Panels/
+    // FrameDebuggerPanel.h). Unlike m_jobsPanel/m_profilerPanel/
+    // m_renderGraphPanel above, this one is NOT docked alongside
+    // "Memory" - it is a closeable floating window, opened via the
+    // "Window" menu (DockLayout.cpp) - but it is still owned here and
+    // called explicitly by name from BuildUI() below, exactly like every
+    // other stateful panel.
+    FrameDebuggerPanel m_frameDebuggerPanel;
 
 #if GTE_ENABLE_PROJECT_PANEL
     // The Editor's Unity-style "Project" panel (see Panels/ProjectPanel.h) -
