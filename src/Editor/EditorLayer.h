@@ -84,6 +84,27 @@ struct TabActivationResult {
     bool tabExists = false;
 };
 
+// task_manager/frame-debugger-3 campaign, PHASE7
+// (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md) - the Frame
+// Debugger's own read-only state snapshot, mirroring TabActivationResult's
+// own "tiny, dependency-free, Editor-owned result type" precedent
+// immediately above - Application::Run() is the one place that copies this
+// into src/Application/FrameDebuggerCommandBridge.h's own, separate
+// FrameDebuggerStateOutcome, one field at a time (this header must never
+// depend on anything under src/Application/, same rule TabActivationResult
+// already follows).
+struct FrameDebuggerStateSnapshotView {
+    bool enabled = false;
+    bool windowOpen = false;
+    int historyCount = 0;
+    int historyCursor = 0;
+    int totalEventCount = 0;
+    int selectedEventIndex = -1;
+    std::string channel = "all";
+    float levelsBlack = 0.0f;
+    float levelsWhite = 1.0f;
+};
+
 class IEditorLayer {
 public:
     virtual ~IEditorLayer() = default;
@@ -401,6 +422,72 @@ public:
     // Game-View render this Step just drove has genuinely finished. A
     // no-op for NullEditorLayer.
     virtual void NotifyFrameDebuggerStepConsumed() = 0;
+
+    // task_manager/frame-debugger-3 campaign, PHASE7
+    // (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md) - the
+    // HTTP-automation surface for the Frame Debugger window
+    // (`/frame_debugger/*` routes - see NetworkRoutes.h/NetworkServer.cpp
+    // and the new src/Application/FrameDebuggerCommandBridge.h). Each
+    // method below mirrors exactly what its corresponding piece of
+    // hand-driven UI already does (see Panels/FrameDebuggerPanel.cpp's own
+    // matching method for the real implementation) - Application::Run()'s
+    // own FrameDebuggerCommandBridge pump (mirroring EditorUiCommandBridge's
+    // own pump, ActivateTab() above) is what maps one bridge request's
+    // `kind` to exactly ONE of these calls.
+
+    // Opens the Frame Debugger window (idempotent - a no-op if already
+    // open) and arranges for it to be PINNED to the main ImGui viewport for
+    // that one opening only (see Panels/FrameDebuggerPanel.h's own
+    // m_pinToMainViewportNextOpen bool) - this is what guarantees
+    // GET /get_swapchain can see it on the very first frame it opens.
+    // Never touched by, and never regresses, ordinary manual "Window >
+    // Frame Debugger" use (DockLayout.cpp's own checkable menu item flips
+    // ctx.frameDebuggerWindowOpen directly and has no reference to this
+    // method at all). A no-op for NullEditorLayer.
+    virtual void FrameDebuggerOpenWindow() = 0;
+
+    // Mirrors the "Enable" checkbox's own false->true/true->false edges
+    // exactly, including the false->true edge's "auto-engage Pause +
+    // trigger the very first real capture" side effect (see
+    // Panels/FrameDebuggerPanel.cpp's own BuildToolbarRow()/
+    // ApplyEnabledEdge()). A no-op for NullEditorLayer.
+    virtual void FrameDebuggerSetEnabled(bool enabled) = 0;
+
+    // Forces PHASE3's TriggerCapture() this frame - returns false (a safe
+    // no-op) if the Frame Debugger is not currently enabled (mirroring the
+    // "Capture" button's own BeginDisabled(!m_enabled) guard), true
+    // otherwise. Always false for NullEditorLayer.
+    virtual bool FrameDebuggerCaptureNow() = 0;
+
+    // Sets the currently-selected leaf event's global index (clamped via
+    // ClampSelectedEventIndex() against the currently-viewed captured
+    // frame's own totalEventCount, exactly like a tree-row click already
+    // does). A no-op for NullEditorLayer.
+    virtual void FrameDebuggerSelectEvent(int index) = 0;
+
+    // Steps the Frame-History cursor (+1 next / -1 prev / any other delta -
+    // see FrameDebuggerHistory::StepCursor()). A no-op for NullEditorLayer.
+    virtual void FrameDebuggerStepHistory(int delta) = 0;
+
+    // Sets the Channels row's active channel from "all"/"r"/"g"/"b"/"a"
+    // (case-sensitive, lowercase-only - mirrors NetworkRoutes.cpp's own
+    // existing exact-lowercase-matching convention for every other query
+    // parameter in that file). Returns false (a safe no-op) for any other
+    // string - defense in depth only, since NetworkRoutes.cpp's own query
+    // parser already rejects an invalid value with its own 400 response
+    // before this is ever called. Always false for NullEditorLayer.
+    virtual bool FrameDebuggerSetChannel(const std::string& channel) = 0;
+
+    // Sets the Levels black/white points directly (same defensive
+    // "white > black + 0.001f" clamp the DragFloatRange2 UI control itself
+    // already applies). A no-op for NullEditorLayer.
+    virtual void FrameDebuggerSetLevels(float black, float white) = 0;
+
+    // Read-only status snapshot for GET /frame_debugger/state - always
+    // meaningful (never throws/asserts), reflecting whatever the Frame
+    // Debugger's real state currently is. All-default for NullEditorLayer
+    // (enabled == false, windowOpen == false, channel == "all", ...).
+    virtual FrameDebuggerStateSnapshotView FrameDebuggerGetState() const = 0;
 };
 
 // Constructs the real ImGui-backed editor layer, or the inert Null one,

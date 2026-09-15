@@ -823,4 +823,199 @@ TEST(BuildListTabsResponseJsonTests, ContainsEveryKnownPanelName)
     }
 }
 
+// --- task_manager/frame-debugger-3 campaign, PHASE7
+// (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md) -
+// GET /frame_debugger/* request parsing/response building.
+
+using gte::Network::BuildFrameDebuggerCommandResponseJson;
+using gte::Network::BuildFrameDebuggerStateResponseJson;
+using gte::Network::FrameDebuggerStateResponseView;
+using gte::Network::ParseFrameDebuggerEnableQuery;
+using gte::Network::ParseFrameDebuggerSelectEventQuery;
+using gte::Network::ParseFrameDebuggerSetChannelQuery;
+using gte::Network::ParseFrameDebuggerSetLevelsQuery;
+using gte::Network::ParseFrameDebuggerStepHistoryQuery;
+using gte::Network::ParsedFrameDebuggerEnableQuery;
+using gte::Network::ParsedFrameDebuggerSelectEventQuery;
+using gte::Network::ParsedFrameDebuggerSetChannelQuery;
+using gte::Network::ParsedFrameDebuggerSetLevelsQuery;
+using gte::Network::ParsedFrameDebuggerStepHistoryQuery;
+
+TEST(ParseFrameDebuggerEnableQueryTests, AcceptsTrue)
+{
+    const ParsedFrameDebuggerEnableQuery result = ParseFrameDebuggerEnableQuery("true");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_TRUE(result.value);
+}
+
+TEST(ParseFrameDebuggerEnableQueryTests, AcceptsFalse)
+{
+    const ParsedFrameDebuggerEnableQuery result = ParseFrameDebuggerEnableQuery("false");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_FALSE(result.value);
+}
+
+TEST(ParseFrameDebuggerEnableQueryTests, RejectsMissingOrInvalidValue)
+{
+    const ParsedFrameDebuggerEnableQuery missing = ParseFrameDebuggerEnableQuery("");
+    EXPECT_FALSE(missing.valid);
+    EXPECT_EQ(missing.errorMessage, "missing or invalid required query parameter: value - must be \"true\" or \"false\"");
+
+    const ParsedFrameDebuggerEnableQuery wrongCase = ParseFrameDebuggerEnableQuery("True");
+    EXPECT_FALSE(wrongCase.valid);
+}
+
+TEST(ParseFrameDebuggerSelectEventQueryTests, AcceptsNonNegativeInteger)
+{
+    const ParsedFrameDebuggerSelectEventQuery result = ParseFrameDebuggerSelectEventQuery("5");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_EQ(result.index, 5);
+}
+
+TEST(ParseFrameDebuggerSelectEventQueryTests, AcceptsNegativeOneToDeselect)
+{
+    const ParsedFrameDebuggerSelectEventQuery result = ParseFrameDebuggerSelectEventQuery("-1");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_EQ(result.index, -1);
+}
+
+TEST(ParseFrameDebuggerSelectEventQueryTests, RejectsMissingOrNonIntegerIndex)
+{
+    const ParsedFrameDebuggerSelectEventQuery missing = ParseFrameDebuggerSelectEventQuery("");
+    EXPECT_FALSE(missing.valid);
+    EXPECT_EQ(missing.errorMessage, "missing or invalid required query parameter: index - must be an integer");
+
+    const ParsedFrameDebuggerSelectEventQuery notAnInt = ParseFrameDebuggerSelectEventQuery("2.5");
+    EXPECT_FALSE(notAnInt.valid);
+
+    const ParsedFrameDebuggerSelectEventQuery trailingGarbage = ParseFrameDebuggerSelectEventQuery("3abc");
+    EXPECT_FALSE(trailingGarbage.valid);
+}
+
+TEST(ParseFrameDebuggerStepHistoryQueryTests, AcceptsPrevAndNext)
+{
+    const ParsedFrameDebuggerStepHistoryQuery prev = ParseFrameDebuggerStepHistoryQuery("prev");
+    ASSERT_TRUE(prev.valid) << prev.errorMessage;
+    EXPECT_EQ(prev.delta, -1);
+
+    const ParsedFrameDebuggerStepHistoryQuery next = ParseFrameDebuggerStepHistoryQuery("next");
+    ASSERT_TRUE(next.valid) << next.errorMessage;
+    EXPECT_EQ(next.delta, 1);
+}
+
+TEST(ParseFrameDebuggerStepHistoryQueryTests, RejectsUnknownDirection)
+{
+    const ParsedFrameDebuggerStepHistoryQuery result = ParseFrameDebuggerStepHistoryQuery("sideways");
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.errorMessage, "missing or invalid required query parameter: direction - must be \"prev\" or \"next\"");
+}
+
+struct ParseFrameDebuggerSetChannelQueryValidCase {
+    std::string value;
+};
+
+class ParseFrameDebuggerSetChannelQueryValidTest
+    : public ::testing::TestWithParam<ParseFrameDebuggerSetChannelQueryValidCase> {};
+
+TEST_P(ParseFrameDebuggerSetChannelQueryValidTest, AcceptsEveryDocumentedChannel)
+{
+    const ParsedFrameDebuggerSetChannelQuery result = ParseFrameDebuggerSetChannelQuery(GetParam().value);
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_EQ(result.channel, GetParam().value);
+}
+
+INSTANTIATE_TEST_SUITE_P(NetworkRoutesTests, ParseFrameDebuggerSetChannelQueryValidTest,
+    ::testing::Values(ParseFrameDebuggerSetChannelQueryValidCase{ "all" },
+        ParseFrameDebuggerSetChannelQueryValidCase{ "r" }, ParseFrameDebuggerSetChannelQueryValidCase{ "g" },
+        ParseFrameDebuggerSetChannelQueryValidCase{ "b" }, ParseFrameDebuggerSetChannelQueryValidCase{ "a" }));
+
+TEST(ParseFrameDebuggerSetChannelQueryTests, RejectsUnknownOrWrongCaseValue)
+{
+    const ParsedFrameDebuggerSetChannelQuery upper = ParseFrameDebuggerSetChannelQuery("R");
+    EXPECT_FALSE(upper.valid);
+    EXPECT_EQ(upper.errorMessage, "invalid channel - must be \"all\", \"r\", \"g\", \"b\", or \"a\"");
+
+    // Deliberately never collides with /get_texture's own "color"/"depth"
+    // channel values - see this function's own doc comment.
+    const ParsedFrameDebuggerSetChannelQuery colorValue = ParseFrameDebuggerSetChannelQuery("color");
+    EXPECT_FALSE(colorValue.valid);
+}
+
+TEST(ParseFrameDebuggerSetLevelsQueryTests, AcceptsValidFloats)
+{
+    const ParsedFrameDebuggerSetLevelsQuery result = ParseFrameDebuggerSetLevelsQuery("0.1", "0.9");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_FLOAT_EQ(result.black, 0.1f);
+    EXPECT_FLOAT_EQ(result.white, 0.9f);
+}
+
+TEST(ParseFrameDebuggerSetLevelsQueryTests, RejectsMissingOrNonNumericBlack)
+{
+    const ParsedFrameDebuggerSetLevelsQuery missing = ParseFrameDebuggerSetLevelsQuery("", "1.0");
+    EXPECT_FALSE(missing.valid);
+    EXPECT_EQ(missing.errorMessage, "missing or invalid required query parameter: black - must be a number");
+
+    const ParsedFrameDebuggerSetLevelsQuery nonNumeric = ParseFrameDebuggerSetLevelsQuery("nope", "1.0");
+    EXPECT_FALSE(nonNumeric.valid);
+}
+
+TEST(ParseFrameDebuggerSetLevelsQueryTests, RejectsMissingOrNonNumericWhite)
+{
+    const ParsedFrameDebuggerSetLevelsQuery missing = ParseFrameDebuggerSetLevelsQuery("0.0", "");
+    EXPECT_FALSE(missing.valid);
+    EXPECT_EQ(missing.errorMessage, "missing or invalid required query parameter: white - must be a number");
+}
+
+TEST(BuildFrameDebuggerStateResponseJsonTests, ProducesExactExpectedShape)
+{
+    FrameDebuggerStateResponseView state;
+    state.enabled = true;
+    state.windowOpen = true;
+    state.historyCount = 3;
+    state.historyCursor = 2;
+    state.totalEventCount = 5;
+    state.selectedEventIndex = 4;
+    state.channel = "r";
+    state.levelsBlack = 0.1f;
+    state.levelsWhite = 0.9f;
+
+    const std::string body = BuildFrameDebuggerStateResponseJson(state);
+    const nlohmann::json parsed = nlohmann::json::parse(body);
+    EXPECT_EQ(parsed["enabled"], true);
+    EXPECT_EQ(parsed["windowOpen"], true);
+    EXPECT_EQ(parsed["historyCount"], 3);
+    EXPECT_EQ(parsed["historyCursor"], 2);
+    EXPECT_EQ(parsed["totalEventCount"], 5);
+    EXPECT_EQ(parsed["selectedEventIndex"], 4);
+    EXPECT_EQ(parsed["channel"], "r");
+    EXPECT_FLOAT_EQ(parsed["levelsBlack"].get<float>(), 0.1f);
+    EXPECT_FLOAT_EQ(parsed["levelsWhite"].get<float>(), 0.9f);
+    // Never wrapped in a "success" envelope - this is a pure status read.
+    EXPECT_FALSE(parsed.contains("success"));
+}
+
+TEST(BuildFrameDebuggerCommandResponseJsonTests, SuccessShapeHasNoErrorField)
+{
+    const FrameDebuggerStateResponseView state;
+    const std::string body = BuildFrameDebuggerCommandResponseJson(true, "", state);
+    const nlohmann::json parsed = nlohmann::json::parse(body);
+    EXPECT_EQ(parsed["success"], true);
+    EXPECT_FALSE(parsed.contains("error"));
+    ASSERT_TRUE(parsed.contains("state"));
+    EXPECT_EQ(parsed["state"]["channel"], "all");
+}
+
+TEST(BuildFrameDebuggerCommandResponseJsonTests, FailureShapeIncludesErrorAndState)
+{
+    FrameDebuggerStateResponseView state;
+    state.enabled = false;
+    const std::string body =
+        BuildFrameDebuggerCommandResponseJson(false, "frame debugger command could not be applied", state);
+    const nlohmann::json parsed = nlohmann::json::parse(body);
+    EXPECT_EQ(parsed["success"], false);
+    EXPECT_EQ(parsed["error"], "frame debugger command could not be applied");
+    ASSERT_TRUE(parsed.contains("state"));
+    EXPECT_EQ(parsed["state"]["enabled"], false);
+}
+
 } // namespace

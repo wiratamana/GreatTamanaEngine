@@ -166,7 +166,12 @@ Application::Application(const std::string& title, int width, int height)
     // address into NetworkServer's constructor (a third, appended defaulted
     // pointer parameter), for the exact same reason - m_uiCommandBridge is
     // likewise declared before m_networkServer.
-    , m_networkServer(&m_captureBridge, &m_commandBridge, &m_uiCommandBridge)
+    // task_manager/frame-debugger-3 campaign, PHASE7 - ALSO hands
+    // FrameDebuggerCommandBridge's address into NetworkServer's constructor
+    // (a fourth, appended defaulted pointer parameter), for the exact same
+    // reason - m_frameDebuggerCommandBridge is likewise declared before
+    // m_networkServer.
+    , m_networkServer(&m_captureBridge, &m_commandBridge, &m_uiCommandBridge, &m_frameDebuggerCommandBridge)
     , m_windowWidth(width)
     , m_windowHeight(height)
 {
@@ -361,6 +366,72 @@ int Application::Run()
             uiResult.activateTab.tabExists = activation.tabExists;
             uiResult.activateTab.success = activation.tabExists;
             m_uiCommandBridge.FulfillCommand(uiResult);
+        }
+
+        // task_manager/frame-debugger-3 campaign, PHASE7
+        // (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md, Step
+        // 3.3) - drains at most ONE pending Frame Debugger command per
+        // frame, at the SAME point in the loop EditorUiCommandBridge's own
+        // pump immediately above already runs (right after NewFrame() and
+        // BEFORE BuildUI()) - see FrameDebuggerCommandBridge.h's own header
+        // comment for why this is safe even for a command (CaptureNow)
+        // whose real effect only fully "lands" later the SAME frame, inside
+        // BuildUI()'s own FrameDebuggerPanel::Build() call: every
+        // IEditorLayer::FrameDebugger*() method below is a cheap, direct
+        // main-thread call (never itself blocking on anything), and
+        // FrameDebuggerGetState() is read back AFTER dispatching whichever
+        // command actually ran, so `fdResult.state` always reflects this
+        // exact call's own real effect before FulfillCommand() unblocks the
+        // waiting network thread.
+        if (const std::optional<FrameDebuggerCommandRequest> fdRequest =
+                m_frameDebuggerCommandBridge.TryPeekPendingCommandRequest()) {
+            GTE_PROFILE_SCOPE("Application::ExecuteFrameDebuggerCommand");
+            FrameDebuggerCommandResult fdResult;
+            fdResult.kind = fdRequest->kind;
+            switch (fdRequest->kind) {
+            case FrameDebuggerCommandKind::OpenWindow:
+                m_editorLayer->FrameDebuggerOpenWindow();
+                fdResult.success = true;
+                break;
+            case FrameDebuggerCommandKind::SetEnabled:
+                m_editorLayer->FrameDebuggerSetEnabled(fdRequest->setEnabled.enabled);
+                fdResult.success = true;
+                break;
+            case FrameDebuggerCommandKind::CaptureNow:
+                fdResult.success = m_editorLayer->FrameDebuggerCaptureNow();
+                break;
+            case FrameDebuggerCommandKind::SelectEvent:
+                m_editorLayer->FrameDebuggerSelectEvent(fdRequest->selectEvent.index);
+                fdResult.success = true;
+                break;
+            case FrameDebuggerCommandKind::StepFrameHistory:
+                m_editorLayer->FrameDebuggerStepHistory(fdRequest->stepFrameHistory.delta);
+                fdResult.success = true;
+                break;
+            case FrameDebuggerCommandKind::SetChannel:
+                fdResult.success = m_editorLayer->FrameDebuggerSetChannel(fdRequest->setChannel.channel);
+                break;
+            case FrameDebuggerCommandKind::SetLevels:
+                m_editorLayer->FrameDebuggerSetLevels(fdRequest->setLevels.black, fdRequest->setLevels.white);
+                fdResult.success = true;
+                break;
+            case FrameDebuggerCommandKind::GetState:
+                fdResult.success = true;
+                break;
+            }
+
+            const FrameDebuggerStateSnapshotView stateView = m_editorLayer->FrameDebuggerGetState();
+            fdResult.state.enabled = stateView.enabled;
+            fdResult.state.windowOpen = stateView.windowOpen;
+            fdResult.state.historyCount = stateView.historyCount;
+            fdResult.state.historyCursor = stateView.historyCursor;
+            fdResult.state.totalEventCount = stateView.totalEventCount;
+            fdResult.state.selectedEventIndex = stateView.selectedEventIndex;
+            fdResult.state.channel = stateView.channel;
+            fdResult.state.levelsBlack = stateView.levelsBlack;
+            fdResult.state.levelsWhite = stateView.levelsWhite;
+
+            m_frameDebuggerCommandBridge.FulfillCommand(fdResult);
         }
 
         // Clears last frame's queued Submit() draw items before Game gets a

@@ -15,6 +15,7 @@
 #include "EngineCommandBridge.h"
 #include "EditorUiCommandBridge.h"
 #include "FrameCaptureBridge.h"
+#include "FrameDebuggerCommandBridge.h"
 
 namespace gte {
 
@@ -142,6 +143,18 @@ private:
     // (constructed first, destroyed last relative to it) so its address
     // can be handed into m_networkServer's own constructor below.
     EditorUiCommandBridge m_uiCommandBridge;
+
+    // task_manager/frame-debugger-3 campaign, PHASE7
+    // (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md) - the
+    // FOURTH sanctioned cross-thread bridge a Network route handler is
+    // allowed to touch, this one for FRAME-DEBUGGER commands (open/enable/
+    // capture/select_event/step_history/set_channel/set_levels/state - see
+    // AGENTS.md, "Networking", and FrameDebuggerCommandBridge.h's own
+    // header comment). Declared right after m_uiCommandBridge, for the
+    // exact same reason: BEFORE m_networkServer (constructed first,
+    // destroyed last relative to it) so its address can be handed into
+    // m_networkServer's own constructor below.
+    FrameDebuggerCommandBridge m_frameDebuggerCommandBridge;
 
     // Networking campaign (task_manager/network-impl-1/) - an embedded,
     // loopback-only HTTP server (see AGENTS.md, "Networking"). Declared

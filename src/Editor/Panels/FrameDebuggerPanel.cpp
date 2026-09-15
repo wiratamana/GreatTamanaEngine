@@ -144,29 +144,26 @@ void FrameDebuggerPanel::TriggerCapture()
     m_selectedEventIndex = -1;
 }
 
-void FrameDebuggerPanel::BuildToolbarRow(EditorContext& ctx)
+// task_manager/frame-debugger-3 campaign, PHASE7
+// (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md) - the exact
+// same false->true-edge effect the "Enable" checkbox has always had
+// (frame-debugger-2's Locked Design Decision #3 + PHASE3's Step 3.2 call
+// site 1), now shared by BOTH BuildToolbarRow()'s own checkbox AND
+// SetEnabledFromCommand() (the new HTTP-automation entry point) - see this
+// method's own callers for why the false->true edge auto-engages Pause and
+// triggers the very first real capture, and why turning Enable back OFF
+// deliberately does NOT auto-resume (a user inspecting a paused frame
+// should not be silently un-paused just for closing/disabling this debug
+// window, whether that happened by hand or via GET /frame_debugger/enable).
+void FrameDebuggerPanel::ApplyEnabledEdge(EditorContext& ctx, bool newEnabled)
 {
     const bool wasEnabled = m_enabled;
-    ImGui::Checkbox("Enable", &m_enabled);
+    m_enabled = newEnabled;
     if (m_enabled && !wasEnabled) {
-        // task_manager/frame-debugger-2 campaign, Locked Design Decision
-        // #3 (PHASE0_MASTER_STRATEGY.md): turning Enable ON auto-engages
-        // the existing Pause/Resume playback toolbar (frame-debugger-1
-        // campaign) - the SAME ctx.playbackPaused field
-        // PlaybackControls.cpp's own "Pause" button writes. Turning
-        // Enable back OFF deliberately does NOT auto-resume - see this
-        // file's own BuildToolbarRow() comment for why (a user
-        // inspecting a paused frame should not be silently un-paused
-        // just for closing/disabling this debug window).
         ctx.playbackPaused = true;
 
-        // PHASE3 (task_manager/frame-debugger-3/
-        // PHASE3_FRAME_HISTORY_RING_BUFFER_AND_CAPTURE_TRIGGER.md, Step
-        // 3.2, call site 1) - the very first "Enable" click also performs
-        // the very first real capture, so the tree is never left showing
-        // nothing the moment Enable is checked. NOTE: this exact frame's
-        // own m_captureContext was armed based on m_enabled as of the END
-        // of LAST frame (still false) - see
+        // NOTE: this exact frame's own m_captureContext was armed based on
+        // m_enabled as of the END of LAST frame (still false) - see
         // PrepareCaptureContextForThisFrame(), called earlier THIS frame,
         // before Game::Render() ever ran - so this particular capture's
         // own shader/texture/matrix facts may be empty (a real, honest
@@ -177,6 +174,15 @@ void FrameDebuggerPanel::BuildToolbarRow(EditorContext& ctx)
         // loop in this codebase already accepts (see e.g.
         // IEditorLayer::IsPlaybackPaused()'s own doc comment).
         TriggerCapture();
+    }
+}
+
+void FrameDebuggerPanel::BuildToolbarRow(EditorContext& ctx)
+{
+    bool enabledValue = m_enabled;
+    ImGui::Checkbox("Enable", &enabledValue);
+    if (enabledValue != m_enabled) {
+        ApplyEnabledEdge(ctx, enabledValue);
     }
 
     ImGui::SameLine();
@@ -536,7 +542,37 @@ void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg:
     // "Window > Frame Debugger" menu item flips (DockLayout.cpp) -
     // clicking either one closes/reopens the same shared state, with no
     // extra code needed on either side.
-    ImGui::SetNextWindowSize(ImVec2(900.0f, 600.0f), ImGuiCond_FirstUseEver);
+    //
+    // task_manager/frame-debugger-3 campaign, PHASE7
+    // (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md, Step
+    // 3.4) - the main-viewport pin: whenever RequestOpenWindow() armed
+    // m_pinToMainViewportNextOpen (a PROGRAMMATIC open, e.g. via
+    // GET /frame_debugger/open), force this window onto the main ImGui
+    // viewport, at a fixed generous size anchored inside its own work
+    // area - copying DockLayout.cpp's own already-proven
+    // ImGui::SetNextWindowPos(viewport->WorkPos) precedent for the main
+    // dockspace host window, PLUS an explicit SetNextWindowViewport() call
+    // (the one piece that precedent doesn't need, since the dockspace host
+    // is already the main-viewport window by construction) - this is what
+    // prevents Dear ImGui from ever classifying THIS window as a separate
+    // platform window (see ImGuiEditorLayer.cpp's own
+    // ImGuiConfigFlags_ViewportsEnable comment), so GET /get_swapchain (which
+    // only ever reads back the MAIN window's own swapchain image) can see it
+    // on the very first frame it opens. A ONE-SHOT pin - cleared immediately
+    // after, so a human can still freely drag it away afterwards, exactly
+    // like ordinary manual "Window > Frame Debugger" use (which never sets
+    // this bool at all, and therefore never takes this branch).
+    if (m_pinToMainViewportNextOpen) {
+        const ImGuiViewport* mainViewport = ImGui::GetMainViewport();
+        const ImVec2 pinnedSize(
+            std::min(900.0f, mainViewport->WorkSize.x), std::min(600.0f, mainViewport->WorkSize.y));
+        ImGui::SetNextWindowViewport(mainViewport->ID);
+        ImGui::SetNextWindowPos(mainViewport->WorkPos, ImGuiCond_Always);
+        ImGui::SetNextWindowSize(pinnedSize, ImGuiCond_Always);
+        m_pinToMainViewportNextOpen = false;
+    } else {
+        ImGui::SetNextWindowSize(ImVec2(900.0f, 600.0f), ImGuiCond_FirstUseEver);
+    }
     if (!ImGui::Begin("Frame Debugger", &ctx.frameDebuggerWindowOpen)) {
         // Collapsed - still need End() (Dear ImGui's own Begin()/End()
         // pairing contract requires End() even when Begin() returns
@@ -635,6 +671,132 @@ void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg:
     }
 
     ImGui::End();
+}
+
+// task_manager/frame-debugger-3 campaign, PHASE7
+// (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md) - HTTP
+// automation entry points (see FrameDebuggerPanel.h's own doc comments for
+// each method's exact contract).
+
+void FrameDebuggerPanel::RequestOpenWindow(EditorContext& ctx)
+{
+    if (!ctx.frameDebuggerWindowOpen) {
+        ctx.frameDebuggerWindowOpen = true;
+        m_pinToMainViewportNextOpen = true;
+    }
+}
+
+void FrameDebuggerPanel::SetEnabledFromCommand(EditorContext& ctx, bool enabled)
+{
+    ApplyEnabledEdge(ctx, enabled);
+}
+
+bool FrameDebuggerPanel::CaptureNowFromCommand()
+{
+    if (!m_enabled) {
+        // Mirrors the "Capture" button's own BeginDisabled(!m_enabled)
+        // guard - a real capture without Enable first would only ever
+        // reflect stale/never-armed FrameDebuggerCaptureContext data (see
+        // PrepareCaptureContextForThisFrame()'s own doc comment), so this
+        // is a safe, honest no-op rather than a dishonest "successful"
+        // capture of nothing meaningful.
+        return false;
+    }
+    TriggerCapture();
+    return true;
+}
+
+void FrameDebuggerPanel::SelectEventFromCommand(int index)
+{
+    const FrameDebuggerHistoryEntry* currentEntry = m_history.CurrentEntry();
+    const int totalEventCount = (currentEntry != nullptr) ? currentEntry->snapshot.totalEventCount : 0;
+    m_selectedEventIndex = ClampSelectedEventIndex(index, totalEventCount);
+}
+
+void FrameDebuggerPanel::StepFrameHistoryFromCommand(int delta)
+{
+    // Build()'s own existing "did the viewed history entry itself change"
+    // detection (comparing m_lastKnownRawPreviewView) already resets
+    // m_selectedEventIndex on the very next Build() call this same frame -
+    // no separate handling needed here, exactly mirroring what a real
+    // Prev/Next button click already relies on (see
+    // BuildFrameHistoryToolbarRow()).
+    m_history.StepCursor(delta);
+}
+
+bool FrameDebuggerPanel::SetChannelFromCommand(const std::string& channel)
+{
+    if (channel == "all") {
+        m_channel = FrameDebuggerPreviewChannel::All;
+        return true;
+    }
+    if (channel == "r") {
+        m_channel = FrameDebuggerPreviewChannel::R;
+        return true;
+    }
+    if (channel == "g") {
+        m_channel = FrameDebuggerPreviewChannel::G;
+        return true;
+    }
+    if (channel == "b") {
+        m_channel = FrameDebuggerPreviewChannel::B;
+        return true;
+    }
+    if (channel == "a") {
+        m_channel = FrameDebuggerPreviewChannel::A;
+        return true;
+    }
+    return false;
+}
+
+void FrameDebuggerPanel::SetLevelsFromCommand(float black, float white)
+{
+    // Same clamp discipline as the Levels DragFloatRange2 UI control
+    // itself (ImGuiSliderFlags_AlwaysClamp keeps both handles inside
+    // [0, 1] and never lets them cross) - see BuildInspectorPane().
+    m_levelsBlack = std::clamp(black, 0.0f, 1.0f);
+    m_levelsWhite = std::clamp(white, 0.0f, 1.0f);
+    m_levelsWhite = std::max(m_levelsWhite, m_levelsBlack + 0.001f);
+}
+
+FrameDebuggerStateSnapshotView FrameDebuggerPanel::BuildStateSnapshotView(const EditorContext& ctx) const
+{
+    FrameDebuggerStateSnapshotView view;
+    view.enabled = m_enabled;
+    view.windowOpen = ctx.frameDebuggerWindowOpen;
+    view.historyCount = m_history.Count();
+    view.historyCursor = m_history.CursorIndex();
+
+    const FrameDebuggerHistoryEntry* currentEntry = m_history.CurrentEntry();
+    view.totalEventCount = (currentEntry != nullptr) ? currentEntry->snapshot.totalEventCount : 0;
+    view.selectedEventIndex = m_selectedEventIndex;
+
+    // Deliberately NO `default:` case - the same exhaustive-switch
+    // convention RenderGraphTypes.cpp's ToString(ResourceAccess)/
+    // IsWriteAccess() already establish (see PHASE6_COMPLETION_REPORT.md) -
+    // a future channel enumerator added without updating this function
+    // fails to compile.
+    switch (m_channel) {
+    case FrameDebuggerPreviewChannel::All:
+        view.channel = "all";
+        break;
+    case FrameDebuggerPreviewChannel::R:
+        view.channel = "r";
+        break;
+    case FrameDebuggerPreviewChannel::G:
+        view.channel = "g";
+        break;
+    case FrameDebuggerPreviewChannel::B:
+        view.channel = "b";
+        break;
+    case FrameDebuggerPreviewChannel::A:
+        view.channel = "a";
+        break;
+    }
+
+    view.levelsBlack = m_levelsBlack;
+    view.levelsWhite = m_levelsWhite;
+    return view;
 }
 
 } // namespace gte

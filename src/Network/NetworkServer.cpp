@@ -5,6 +5,7 @@
 #include "../Application/EditorUiCommandBridge.h"
 #include "../Application/EngineCommandBridge.h"
 #include "../Application/FrameCaptureBridge.h"
+#include "../Application/FrameDebuggerCommandBridge.h"
 #include "../Encoding/Base64.h"
 #include "../Math/Quat.h"
 #include "../Math/Vec3.h"
@@ -173,13 +174,63 @@ void RegisterListTexturesRoute(httplib::Server& server, FrameCaptureBridge* capt
     });
 }
 
+// task_manager/frame-debugger-3 campaign, PHASE7
+// (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md) - copies a
+// real FrameDebuggerStateOutcome (src/Application/FrameDebuggerCommandBridge.h)
+// into NetworkRoutes.h's own, completely independent
+// FrameDebuggerStateResponseView, one field at a time - the same "a struct
+// crossing a layer boundary is never accepted directly by NetworkRoutes.h"
+// convention TextureListEntryView's own doc comment already establishes.
+FrameDebuggerStateResponseView ToFrameDebuggerStateResponseView(const FrameDebuggerStateOutcome& outcome)
+{
+    FrameDebuggerStateResponseView view;
+    view.enabled = outcome.enabled;
+    view.windowOpen = outcome.windowOpen;
+    view.historyCount = outcome.historyCount;
+    view.historyCursor = outcome.historyCursor;
+    view.totalEventCount = outcome.totalEventCount;
+    view.selectedEventIndex = outcome.selectedEventIndex;
+    view.channel = outcome.channel;
+    view.levelsBlack = outcome.levelsBlack;
+    view.levelsWhite = outcome.levelsWhite;
+    return view;
+}
+
+// Shared tail for every /frame_debugger/* route EXCEPT /state (which needs
+// its own, slightly different 200-only-on-success-read shape - see that
+// route's own lambda below): maps alreadyPending/timedOut/outcome.success
+// to a status code + BuildFrameDebuggerCommandResponseJson(), exactly
+// mirroring /activate_tab's own alreadyPending/timedOut -> 503/504 mapping
+// immediately above.
+void RespondWithFrameDebuggerCommandResult(
+    httplib::Response& res, const FrameDebuggerCommandBridge::SubmitResult& submit)
+{
+    if (submit.alreadyPending) {
+        res.status = 503;
+        res.set_content(BuildGenericErrorResponseJson("another frame debugger command is already in progress"), "application/json");
+        return;
+    }
+    if (submit.timedOut) {
+        res.status = 504;
+        res.set_content(BuildGenericErrorResponseJson("frame debugger command timed out"), "application/json");
+        return;
+    }
+
+    const FrameDebuggerCommandResult& result = *submit.result;
+    const FrameDebuggerStateResponseView stateView = ToFrameDebuggerStateResponseView(result.state);
+    res.status = result.success ? 200 : 409;
+    res.set_content(BuildFrameDebuggerCommandResponseJson(result.success,
+        result.success ? "" : "frame debugger command could not be applied - see the reported state for why", stateView),
+        "application/json");
+}
+
 // The one, hand-written route table for this campaign - see
 // PHASE0_MASTER_STRATEGY.md's locked "Endpoint contract". A future endpoint
 // is added here as one more server.Get(...)/Post(...) line, forwarding to
 // its own NetworkRoutes.h function - never composing response text inline
 // in this lambda.
 void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, EngineCommandBridge* commandBridge,
-    EditorUiCommandBridge* uiCommandBridge)
+    EditorUiCommandBridge* uiCommandBridge, FrameDebuggerCommandBridge* frameDebuggerCommandBridge)
 {
     server.Get("/http_hello_world", [](const httplib::Request&, httplib::Response& res) {
         res.set_content(HandleHelloWorld(), "text/plain; charset=utf-8");
@@ -260,6 +311,165 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         const ActivateTabOutcome& outcome = submit.result->activateTab;
         res.status = outcome.success ? 200 : 409;
         res.set_content(BuildActivateTabResponseJson(outcome.success, outcome.tabExists, parsed.tabName), "application/json");
+    });
+
+    // task_manager/frame-debugger-3 campaign, PHASE7
+    // (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md) -
+    // GET /frame_debugger/open, /enable, /capture, /select_event,
+    // /step_history, /set_channel, /set_levels, /state. Every route below
+    // shares the SAME shape: parse (NetworkRoutes.h) -> bridge-unavailable
+    // (503) check -> build a FrameDebuggerCommandRequest ->
+    // FrameDebuggerCommandBridge::SubmitAndWait() ->
+    // RespondWithFrameDebuggerCommandResult() maps alreadyPending/timedOut/
+    // outcome to a status code + response body - mirroring every other
+    // bridge-backed route in this file exactly.
+    server.Get("/frame_debugger/open", [frameDebuggerCommandBridge](const httplib::Request&, httplib::Response& res) {
+        if (frameDebuggerCommandBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("frame debugger command bridge not available"), "application/json");
+            return;
+        }
+        FrameDebuggerCommandRequest request;
+        request.kind = FrameDebuggerCommandKind::OpenWindow;
+        const FrameDebuggerCommandBridge::SubmitResult submit = frameDebuggerCommandBridge->SubmitAndWait(request);
+        RespondWithFrameDebuggerCommandResult(res, submit);
+    });
+
+    server.Get("/frame_debugger/enable", [frameDebuggerCommandBridge](const httplib::Request& req, httplib::Response& res) {
+        const ParsedFrameDebuggerEnableQuery parsed = ParseFrameDebuggerEnableQuery(req.get_param_value("value"));
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        if (frameDebuggerCommandBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("frame debugger command bridge not available"), "application/json");
+            return;
+        }
+        FrameDebuggerCommandRequest request;
+        request.kind = FrameDebuggerCommandKind::SetEnabled;
+        request.setEnabled.enabled = parsed.value;
+        const FrameDebuggerCommandBridge::SubmitResult submit = frameDebuggerCommandBridge->SubmitAndWait(request);
+        RespondWithFrameDebuggerCommandResult(res, submit);
+    });
+
+    server.Get("/frame_debugger/capture", [frameDebuggerCommandBridge](const httplib::Request&, httplib::Response& res) {
+        if (frameDebuggerCommandBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("frame debugger command bridge not available"), "application/json");
+            return;
+        }
+        FrameDebuggerCommandRequest request;
+        request.kind = FrameDebuggerCommandKind::CaptureNow;
+        const FrameDebuggerCommandBridge::SubmitResult submit = frameDebuggerCommandBridge->SubmitAndWait(request);
+        RespondWithFrameDebuggerCommandResult(res, submit);
+    });
+
+    server.Get("/frame_debugger/select_event", [frameDebuggerCommandBridge](const httplib::Request& req, httplib::Response& res) {
+        const ParsedFrameDebuggerSelectEventQuery parsed = ParseFrameDebuggerSelectEventQuery(req.get_param_value("index"));
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        if (frameDebuggerCommandBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("frame debugger command bridge not available"), "application/json");
+            return;
+        }
+        FrameDebuggerCommandRequest request;
+        request.kind = FrameDebuggerCommandKind::SelectEvent;
+        request.selectEvent.index = parsed.index;
+        const FrameDebuggerCommandBridge::SubmitResult submit = frameDebuggerCommandBridge->SubmitAndWait(request);
+        RespondWithFrameDebuggerCommandResult(res, submit);
+    });
+
+    server.Get("/frame_debugger/step_history", [frameDebuggerCommandBridge](const httplib::Request& req, httplib::Response& res) {
+        const ParsedFrameDebuggerStepHistoryQuery parsed = ParseFrameDebuggerStepHistoryQuery(req.get_param_value("direction"));
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        if (frameDebuggerCommandBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("frame debugger command bridge not available"), "application/json");
+            return;
+        }
+        FrameDebuggerCommandRequest request;
+        request.kind = FrameDebuggerCommandKind::StepFrameHistory;
+        request.stepFrameHistory.delta = parsed.delta;
+        const FrameDebuggerCommandBridge::SubmitResult submit = frameDebuggerCommandBridge->SubmitAndWait(request);
+        RespondWithFrameDebuggerCommandResult(res, submit);
+    });
+
+    server.Get("/frame_debugger/set_channel", [frameDebuggerCommandBridge](const httplib::Request& req, httplib::Response& res) {
+        const ParsedFrameDebuggerSetChannelQuery parsed = ParseFrameDebuggerSetChannelQuery(req.get_param_value("value"));
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        if (frameDebuggerCommandBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("frame debugger command bridge not available"), "application/json");
+            return;
+        }
+        FrameDebuggerCommandRequest request;
+        request.kind = FrameDebuggerCommandKind::SetChannel;
+        request.setChannel.channel = parsed.channel;
+        const FrameDebuggerCommandBridge::SubmitResult submit = frameDebuggerCommandBridge->SubmitAndWait(request);
+        RespondWithFrameDebuggerCommandResult(res, submit);
+    });
+
+    server.Get("/frame_debugger/set_levels", [frameDebuggerCommandBridge](const httplib::Request& req, httplib::Response& res) {
+        const ParsedFrameDebuggerSetLevelsQuery parsed =
+            ParseFrameDebuggerSetLevelsQuery(req.get_param_value("black"), req.get_param_value("white"));
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        if (frameDebuggerCommandBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("frame debugger command bridge not available"), "application/json");
+            return;
+        }
+        FrameDebuggerCommandRequest request;
+        request.kind = FrameDebuggerCommandKind::SetLevels;
+        request.setLevels.black = parsed.black;
+        request.setLevels.white = parsed.white;
+        const FrameDebuggerCommandBridge::SubmitResult submit = frameDebuggerCommandBridge->SubmitAndWait(request);
+        RespondWithFrameDebuggerCommandResult(res, submit);
+    });
+
+    // GET /frame_debugger/state - a READ-ONLY status endpoint. Goes through
+    // the SAME bridge (a GetState command kind) rather than a lighter-weight
+    // direct read - see FrameDebuggerCommandBridge.h's own header comment
+    // for exactly why (the Frame Debugger's state is genuinely mutable,
+    // main-thread-owned data with no atomics of its own).
+    server.Get("/frame_debugger/state", [frameDebuggerCommandBridge](const httplib::Request&, httplib::Response& res) {
+        if (frameDebuggerCommandBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("frame debugger command bridge not available"), "application/json");
+            return;
+        }
+        FrameDebuggerCommandRequest request;
+        request.kind = FrameDebuggerCommandKind::GetState;
+        const FrameDebuggerCommandBridge::SubmitResult submit = frameDebuggerCommandBridge->SubmitAndWait(request);
+        if (submit.alreadyPending) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("another frame debugger command is already in progress"), "application/json");
+            return;
+        }
+        if (submit.timedOut) {
+            res.status = 504;
+            res.set_content(BuildGenericErrorResponseJson("frame debugger command timed out"), "application/json");
+            return;
+        }
+        res.status = 200;
+        res.set_content(BuildFrameDebuggerStateResponseJson(ToFrameDebuggerStateResponseView(submit.result->state)), "application/json");
     });
 
     // network-impl-3 campaign, Phase 5
@@ -493,18 +703,19 @@ struct NetworkServer::Impl {
 };
 
 NetworkServer::NetworkServer(FrameCaptureBridge* captureBridge, EngineCommandBridge* commandBridge,
-    EditorUiCommandBridge* uiCommandBridge)
+    EditorUiCommandBridge* uiCommandBridge, FrameDebuggerCommandBridge* frameDebuggerCommandBridge)
     : m_impl(std::make_unique<Impl>())
     , m_captureBridge(captureBridge)
     , m_commandBridge(commandBridge)
     , m_uiCommandBridge(uiCommandBridge)
+    , m_frameDebuggerCommandBridge(frameDebuggerCommandBridge)
 {
     // Registered exactly ONCE per NetworkServer instance, here in the
     // constructor - never inside Start() - so a Start()/Stop()/Start()
     // restart cycle (or a Start() that overlaps a failed bind retry) can
     // NEVER re-register the same route handler onto the same
     // httplib::Server a second time.
-    RegisterRoutes(m_impl->server, m_captureBridge, m_commandBridge, m_uiCommandBridge);
+    RegisterRoutes(m_impl->server, m_captureBridge, m_commandBridge, m_uiCommandBridge, m_frameDebuggerCommandBridge);
 }
 
 NetworkServer::~NetworkServer()

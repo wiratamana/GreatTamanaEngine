@@ -3,6 +3,7 @@
 #include "../FrameDebuggerData.h"
 #include "../FrameDebuggerHistory.h"
 #include "../FrameDebuggerPreviewProcessing.h"
+#include "../EditorLayer.h" // FrameDebuggerStateSnapshotView - PHASE7.
 
 #include <volk.h>
 
@@ -118,6 +119,47 @@ public:
     // even starts. Safe to call repeatedly / on an already-empty instance.
     void ReleasePreviewDescriptor();
 
+    // task_manager/frame-debugger-3 campaign, PHASE7
+    // (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md) - HTTP
+    // automation entry points, called from ImGuiEditorLayer's own
+    // FrameDebuggerOpenWindow()/FrameDebuggerSetEnabled()/etc. overrides
+    // (EditorLayer.h). Each one mirrors exactly what its corresponding
+    // piece of hand-driven UI already does - see each method's own body.
+
+    // Opens the window (a no-op if already open) and arms the one-shot
+    // main-viewport pin for the very next Build() call - see
+    // m_pinToMainViewportNextOpen's own doc comment below.
+    void RequestOpenWindow(EditorContext& ctx);
+
+    // Mirrors the "Enable" checkbox's own false->true/true->false edge
+    // detection exactly (see ApplyEnabledEdge()).
+    void SetEnabledFromCommand(EditorContext& ctx, bool enabled);
+
+    // Mirrors the "Capture" button's own BeginDisabled(!m_enabled) guard -
+    // returns false (a safe no-op) if not currently enabled, true (after
+    // performing a real TriggerCapture()) otherwise.
+    bool CaptureNowFromCommand();
+
+    // Mirrors a tree-row click - clamps via ClampSelectedEventIndex()
+    // against the currently-viewed captured frame's own totalEventCount.
+    void SelectEventFromCommand(int index);
+
+    // Mirrors a Frame-History Prev/Next button click.
+    void StepFrameHistoryFromCommand(int delta);
+
+    // Mirrors a Channels row button click. Returns false (a safe no-op,
+    // defense in depth only - see EditorLayer.h's own doc comment) if
+    // `channel` isn't exactly one of "all"/"r"/"g"/"b"/"a".
+    bool SetChannelFromCommand(const std::string& channel);
+
+    // Mirrors the Levels DragFloatRange2 control, including its own
+    // defensive white > black + 0.001f clamp.
+    void SetLevelsFromCommand(float black, float white);
+
+    // Builds the read-only state view GET /frame_debugger/state (and every
+    // other /frame_debugger/* response's own "state" field) reports.
+    FrameDebuggerStateSnapshotView BuildStateSnapshotView(const EditorContext& ctx) const;
+
 private:
     void BuildToolbarRow(EditorContext& ctx);
     void BuildFrameHistoryToolbarRow();
@@ -126,6 +168,14 @@ private:
     void RenderEventNode(const FrameDebuggerEventNode& node);
     void BuildInspectorPane(const FrameDebuggerSnapshot& snapshot, const FrameDebuggerHistoryEntry* currentEntry);
     void BuildEventDetailsSection(const std::optional<FrameDebuggerEventDetails>& details);
+
+    // PHASE7 - shared by BOTH the "Enable" checkbox's own edge-detection
+    // (BuildToolbarRow()) and SetEnabledFromCommand() above, so hand-driven
+    // UI and HTTP automation can never silently diverge in behavior. See
+    // BuildToolbarRow()'s own original comment (now here) for why the
+    // false->true edge auto-engages Pause and triggers the first capture,
+    // and why turning Enable back OFF deliberately does NOT auto-resume.
+    void ApplyEnabledEdge(EditorContext& ctx, bool newEnabled);
 
     // PHASE4 - (re)creates m_previewDescriptor whenever the currently-viewed
     // history entry's own retained preview texture's VkImageView differs
@@ -297,6 +347,28 @@ private:
     // NotifyStepConsumed() was called (read-and-cleared) - see that
     // method's own doc comment.
     bool m_stepCaptureRequested = false;
+
+    // task_manager/frame-debugger-3 campaign, PHASE7
+    // (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md, Step
+    // 3.4) - true for exactly the NEXT Build() call after RequestOpenWindow()
+    // ran and actually flipped ctx.frameDebuggerWindowOpen from false to
+    // true PROGRAMMATICALLY. That one Build() call forces
+    // ImGui::SetNextWindowViewport(main viewport)/SetNextWindowPos()/
+    // SetNextWindowSize() before ImGui::Begin(), so the window can never be
+    // classified as an independent OS-level platform window before
+    // GET /get_swapchain has had a chance to see it at least once (see
+    // SwapchainCaptureService.h - it only ever reads back the MAIN
+    // window's own swapchain image). Cleared back to false immediately
+    // after that one Build() call - a ONE-SHOT pin, never a permanent
+    // lock: a human is still completely free to drag the window away
+    // afterwards, exactly like every other floating window in this
+    // codebase (BoneViewerWindow, ...). Ordinary manual "Window > Frame
+    // Debugger" use (DockLayout.cpp's own checkable menu item) never
+    // touches this bool at all - it flips ctx.frameDebuggerWindowOpen
+    // directly, with no reference to this class to call RequestOpenWindow()
+    // on, so manual use keeps exactly the same drag-anywhere freedom it
+    // already had before this phase.
+    bool m_pinToMainViewportNextOpen = false;
 };
 
 } // namespace gte

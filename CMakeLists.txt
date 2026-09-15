@@ -364,6 +364,8 @@ add_library(gte_core STATIC
     src/Application/EngineCommandBridge.cpp
     src/Application/EditorUiCommandBridge.h
     src/Application/EditorUiCommandBridge.cpp
+    src/Application/FrameDebuggerCommandBridge.h
+    src/Application/FrameDebuggerCommandBridge.cpp
     src/Editor/EditorPanelCatalog.h
     src/Application/EngineCommandDispatch.h
     src/Application/EngineCommandDispatch.cpp

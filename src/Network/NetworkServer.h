@@ -29,6 +29,12 @@ namespace gte { class EngineCommandBridge; }
 // EngineCommandBridge above - network-impl-7 campaign.
 namespace gte { class EditorUiCommandBridge; }
 
+// Forward-declared for the same cheap-header reason as FrameCaptureBridge/
+// EngineCommandBridge/EditorUiCommandBridge above - task_manager/
+// frame-debugger-3 campaign, PHASE7
+// (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md).
+namespace gte { class FrameDebuggerCommandBridge; }
+
 namespace gte::Network {
 
 // Owns a real, embedded HTTP server (cpp-httplib) bound to loopback
@@ -77,10 +83,19 @@ public:
     // (Application owns the real EditorUiCommandBridge and passes its
     // address) - `nullptr` means "GET /activate_tab responds 503 rather
     // than crashing" - the exact same "nullptr degrades gracefully" contract
-    // `captureBridge`/`commandBridge` already document above.
+    // `frameDebuggerCommandBridge` (task_manager/frame-debugger-3 campaign,
+    // PHASE7) is a FOURTH defaulted, non-owning pointer, appended AFTER
+    // `uiCommandBridge` so every existing call site keeps compiling
+    // unchanged. Non-null in production (Application owns the real
+    // FrameDebuggerCommandBridge and passes its address) - `nullptr` means
+    // "every GET /frame_debugger/* route responds 503 rather than
+    // crashing" - the exact same "nullptr degrades gracefully" contract
+    // `captureBridge`/`commandBridge`/`uiCommandBridge` already document
+    // above.
     explicit NetworkServer(FrameCaptureBridge* captureBridge = nullptr,
         EngineCommandBridge* commandBridge = nullptr,
-        EditorUiCommandBridge* uiCommandBridge = nullptr);
+        EditorUiCommandBridge* uiCommandBridge = nullptr,
+        FrameDebuggerCommandBridge* frameDebuggerCommandBridge = nullptr);
     ~NetworkServer();
 
     NetworkServer(const NetworkServer&) = delete;
@@ -155,6 +170,9 @@ private:
     // Non-owning - same lifetime contract as m_captureBridge above
     // (network-impl-7 campaign).
     EditorUiCommandBridge* m_uiCommandBridge = nullptr;
+    // Non-owning - same lifetime contract as m_captureBridge above
+    // (task_manager/frame-debugger-3 campaign, PHASE7).
+    FrameDebuggerCommandBridge* m_frameDebuggerCommandBridge = nullptr;
 };
 
 } // namespace gte::Network

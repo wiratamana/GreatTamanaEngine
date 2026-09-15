@@ -569,4 +569,167 @@ std::string BuildListTabsResponseJson()
     return body.dump();
 }
 
+// --- task_manager/frame-debugger-3 campaign, PHASE7
+// (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md) - see
+// NetworkRoutes.h's own doc comments above each declaration for the exact,
+// locked validation/response rules implemented below.
+
+namespace {
+
+// Strict whole-integer parse: the ENTIRE string must be consumed (no
+// trailing garbage, e.g. "12abc" is rejected, not silently truncated to
+// 12) and must not be empty - mirrors this file's own existing
+// "caller mistake -> loud validation failure, never a silent best guess"
+// philosophy (see this file's header comment).
+bool TryParseWholeInt(const std::string& text, int& outValue)
+{
+    if (text.empty()) {
+        return false;
+    }
+    try {
+        std::size_t consumed = 0;
+        const int parsed = std::stoi(text, &consumed);
+        if (consumed != text.size()) {
+            return false;
+        }
+        outValue = parsed;
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+// Same strict, whole-string-consumed parse as TryParseWholeInt() above, for
+// a decimal float.
+bool TryParseWholeFloat(const std::string& text, float& outValue)
+{
+    if (text.empty()) {
+        return false;
+    }
+    try {
+        std::size_t consumed = 0;
+        const float parsed = std::stof(text, &consumed);
+        if (consumed != text.size()) {
+            return false;
+        }
+        outValue = parsed;
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+} // namespace
+
+ParsedFrameDebuggerEnableQuery ParseFrameDebuggerEnableQuery(const std::string& valueParam)
+{
+    ParsedFrameDebuggerEnableQuery result;
+    if (valueParam == "true") {
+        result.value = true;
+    } else if (valueParam == "false") {
+        result.value = false;
+    } else {
+        result.errorMessage = "missing or invalid required query parameter: value - must be \"true\" or \"false\"";
+        return result;
+    }
+    result.valid = true;
+    return result;
+}
+
+ParsedFrameDebuggerSelectEventQuery ParseFrameDebuggerSelectEventQuery(const std::string& indexParam)
+{
+    ParsedFrameDebuggerSelectEventQuery result;
+    int parsedIndex = -1;
+    if (!TryParseWholeInt(indexParam, parsedIndex)) {
+        result.errorMessage = "missing or invalid required query parameter: index - must be an integer";
+        return result;
+    }
+    result.index = parsedIndex;
+    result.valid = true;
+    return result;
+}
+
+ParsedFrameDebuggerStepHistoryQuery ParseFrameDebuggerStepHistoryQuery(const std::string& directionParam)
+{
+    ParsedFrameDebuggerStepHistoryQuery result;
+    if (directionParam == "prev") {
+        result.delta = -1;
+    } else if (directionParam == "next") {
+        result.delta = 1;
+    } else {
+        result.errorMessage = "missing or invalid required query parameter: direction - must be \"prev\" or \"next\"";
+        return result;
+    }
+    result.valid = true;
+    return result;
+}
+
+ParsedFrameDebuggerSetChannelQuery ParseFrameDebuggerSetChannelQuery(const std::string& valueParam)
+{
+    ParsedFrameDebuggerSetChannelQuery result;
+    if (valueParam != "all" && valueParam != "r" && valueParam != "g" && valueParam != "b" && valueParam != "a") {
+        result.errorMessage = "invalid channel - must be \"all\", \"r\", \"g\", \"b\", or \"a\"";
+        return result;
+    }
+    result.channel = valueParam;
+    result.valid = true;
+    return result;
+}
+
+ParsedFrameDebuggerSetLevelsQuery ParseFrameDebuggerSetLevelsQuery(
+    const std::string& blackParam, const std::string& whiteParam)
+{
+    ParsedFrameDebuggerSetLevelsQuery result;
+    float parsedBlack = 0.0f;
+    if (!TryParseWholeFloat(blackParam, parsedBlack)) {
+        result.errorMessage = "missing or invalid required query parameter: black - must be a number";
+        return result;
+    }
+    float parsedWhite = 1.0f;
+    if (!TryParseWholeFloat(whiteParam, parsedWhite)) {
+        result.errorMessage = "missing or invalid required query parameter: white - must be a number";
+        return result;
+    }
+    result.black = parsedBlack;
+    result.white = parsedWhite;
+    result.valid = true;
+    return result;
+}
+
+namespace {
+
+nlohmann::json FrameDebuggerStateToJson(const FrameDebuggerStateResponseView& state)
+{
+    nlohmann::json body;
+    body["enabled"] = state.enabled;
+    body["windowOpen"] = state.windowOpen;
+    body["historyCount"] = state.historyCount;
+    body["historyCursor"] = state.historyCursor;
+    body["totalEventCount"] = state.totalEventCount;
+    body["selectedEventIndex"] = state.selectedEventIndex;
+    body["channel"] = state.channel;
+    body["levelsBlack"] = state.levelsBlack;
+    body["levelsWhite"] = state.levelsWhite;
+    return body;
+}
+
+} // namespace
+
+std::string BuildFrameDebuggerStateResponseJson(const FrameDebuggerStateResponseView& state)
+{
+    return FrameDebuggerStateToJson(state).dump();
+}
+
+std::string BuildFrameDebuggerCommandResponseJson(
+    bool success, const std::string& errorMessage, const FrameDebuggerStateResponseView& state)
+{
+    nlohmann::json body;
+    body["success"] = success;
+    if (!success) {
+        body["error"] = errorMessage;
+    }
+    body["state"] = FrameDebuggerStateToJson(state);
+    return body.dump();
+}
+
 } // namespace gte::Network

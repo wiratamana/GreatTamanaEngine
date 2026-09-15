@@ -720,6 +720,29 @@ public:
 
     void NotifyFrameDebuggerStepConsumed() override { m_frameDebuggerPanel.NotifyStepConsumed(); }
 
+    // task_manager/frame-debugger-3 campaign, PHASE7
+    // (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md) - see
+    // EditorLayer.h's own doc comments for the full contract; every one of
+    // these simply forwards into m_frameDebuggerPanel's own matching
+    // *FromCommand()/RequestOpenWindow()/BuildStateSnapshotView() method.
+    void FrameDebuggerOpenWindow() override { m_frameDebuggerPanel.RequestOpenWindow(m_ctx); }
+    void FrameDebuggerSetEnabled(bool enabled) override { m_frameDebuggerPanel.SetEnabledFromCommand(m_ctx, enabled); }
+    bool FrameDebuggerCaptureNow() override { return m_frameDebuggerPanel.CaptureNowFromCommand(); }
+    void FrameDebuggerSelectEvent(int index) override { m_frameDebuggerPanel.SelectEventFromCommand(index); }
+    void FrameDebuggerStepHistory(int delta) override { m_frameDebuggerPanel.StepFrameHistoryFromCommand(delta); }
+    bool FrameDebuggerSetChannel(const std::string& channel) override
+    {
+        return m_frameDebuggerPanel.SetChannelFromCommand(channel);
+    }
+    void FrameDebuggerSetLevels(float black, float white) override
+    {
+        m_frameDebuggerPanel.SetLevelsFromCommand(black, white);
+    }
+    FrameDebuggerStateSnapshotView FrameDebuggerGetState() const override
+    {
+        return m_frameDebuggerPanel.BuildStateSnapshotView(m_ctx);
+    }
+
 private:
     void ReleaseGameViewDescriptor()
     {

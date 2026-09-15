@@ -44,6 +44,19 @@ public:
     TabActivationResult ActivateTab(const std::string& /*panelName*/) override { return TabActivationResult{}; }
     FrameDebuggerCaptureContext* PrepareFrameDebuggerCaptureContext() override { return nullptr; }
     void NotifyFrameDebuggerStepConsumed() override { }
+
+    // task_manager/frame-debugger-3 campaign, PHASE7 - see EditorLayer.h's
+    // own doc comments for the full contract; every one of these is a safe,
+    // inert no-op for a release build (no Frame Debugger UI/state exists to
+    // affect at all).
+    void FrameDebuggerOpenWindow() override { }
+    void FrameDebuggerSetEnabled(bool /*enabled*/) override { }
+    bool FrameDebuggerCaptureNow() override { return false; }
+    void FrameDebuggerSelectEvent(int /*index*/) override { }
+    void FrameDebuggerStepHistory(int /*delta*/) override { }
+    bool FrameDebuggerSetChannel(const std::string& /*channel*/) override { return false; }
+    void FrameDebuggerSetLevels(float /*black*/, float /*white*/) override { }
+    FrameDebuggerStateSnapshotView FrameDebuggerGetState() const override { return FrameDebuggerStateSnapshotView{}; }
 };
 
 } // namespace
