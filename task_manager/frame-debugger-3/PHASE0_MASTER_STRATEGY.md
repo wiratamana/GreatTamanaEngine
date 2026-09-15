@@ -241,6 +241,15 @@ Modified files (across the whole campaign):
 - `src/Renderer/Pipeline.h`/`.cpp` (PHASE1 — cosmetic debug-name parameter)
 - `src/Renderer/Renderer.h`/`.cpp` (PHASE1 — arms/reads the capture context around `Submit()`)
 - `src/Game/RenderSystem.h`/`.cpp` (PHASE1 — threads entity/material identity into the capture)
+- `src/Renderer/GpuResourceFactory.h`/`.cpp` (PHASE1 — the same new cosmetic `debugName` parameter on
+  `CreatePipeline()`, threaded from `Renderer::CreatePipeline()` into `Pipeline`'s constructor)
+- `src/Game/Game.h`/`.cpp` (PHASE3 — new defaulted `FrameDebuggerCaptureContext*` parameter on
+  `Render()`, forwarded to `RenderSystem::Draw()`'s float-aspect overload only — see PHASE1's Step
+  3.1b/PHASE3's Step 3.4b, added during this 2nd-iteration review)
+- `src/Application/RenderPasses.h`/`.cpp` (PHASE3 — new parameter on `AddGameViewPass()` threading
+  the armed capture-context pointer into its own `Game::Render()` call; `AddPresentPass()`'s own
+  direct-render fallback always passes `nullptr` — see PHASE3's Step 3.4b, added during this
+  2nd-iteration review)
 - `src/Editor/FrameDebuggerData.h`/`.cpp` (PHASE2 — new real builder function(s), no breaking
   change to any existing struct/field)
 - `src/Editor/Panels/FrameDebuggerPanel.h`/`.cpp` (PHASE3/4/5/6/7)

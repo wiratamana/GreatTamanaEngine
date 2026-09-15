@@ -136,6 +136,39 @@ header. Concretely:
   null" branch per draw call — no string formatting, no vector `push_back`, no extra work of any
   kind happens. `Renderer::Submit()` itself has no new branch at all (see above).
 
+### 3.1b Threading an Editor-only type through CORE, always-compiled files (read this before
+implementing PHASE3's own arming/threading step — it builds directly on this phase's new type)
+
+`src/Game/RenderSystem.h`/`.cpp` (this phase's own new `capture` parameter) and, per PHASE3,
+`src/Game/Game.h`/`.cpp` and `src/Application/RenderPasses.h`/`.cpp` are CORE files — always
+compiled regardless of `GTE_ENABLE_EDITOR` (see `AGENTS.md`'s "Editor Module Structure": only
+`src/Editor/` itself is excluded from a `GTE_ENABLE_EDITOR=OFF` build, at the CMake
+`target_sources()` level — there is no `#if GTE_ENABLE_EDITOR` guard inside any individual core
+file's own text). `FrameDebuggerCaptureContext` (this phase's own new type) lives under
+`src/Editor/` and is therefore ABSENT ENTIRELY — not merely inert — from a `GTE_ENABLE_EDITOR=OFF`
+build/link. Concretely, this means:
+- `RenderSystem.h` must NEVER `#include` `FrameDebuggerCapture.h` unconditionally — it only ever
+  needs a POINTER to the type, so an unconditional, bare forward declaration at namespace scope
+  (`class FrameDebuggerCaptureContext;`) is enough, and is always legal even when the type is never
+  defined at all in a given translation unit.
+- `RenderSystem.cpp` must wrap BOTH its real `#include "../Editor/FrameDebuggerCapture.h"` AND the
+  actual `capture->RecordDraw(...)` call site itself inside `#if GTE_ENABLE_EDITOR` / `#endif`. This
+  is not optional polish: if that call site were left unconditional, a `GTE_ENABLE_EDITOR=OFF`
+  build would still COMPILE `RenderSystem.cpp` (the forward declaration is enough for the compiler),
+  but would then FAIL TO LINK `gte_core`/`GreatTamanaEngine` with an undefined-reference error for
+  `FrameDebuggerCaptureContext::RecordDraw()`, since `FrameDebuggerCapture.cpp` (which defines it)
+  is never compiled into that configuration at all. The `capture` PARAMETER itself (a bare pointer,
+  always defaulted to `nullptr`) stays completely unconditional — only the code that DEREFERENCES it
+  needs the `#if` guard.
+- PHASE3 must apply this exact same forward-declare-in-the-header / guard-the-dereference-in-the-
+  `.cpp` pattern at every one of ITS OWN new call sites too (`Game.h`/`.cpp`'s new parameter on
+  `Render()`, `RenderPasses.h`/`.cpp`'s new parameter on `AddGameViewPass()`) — see that phase's own
+  Step 3.3/file-change inventory, which this review pass has updated to call this out explicitly.
+- Do not defer discovering a mistake here until PHASE8's full `GTE_ENABLE_EDITOR=OFF` clean build —
+  this phase's OWN compile check (Step 3.6 below) now also requires a scoped `GTE_ENABLE_EDITOR=OFF`
+  configure+build of `gte_core` alone, specifically because this is the one phase that introduces
+  the Editor-only type every later phase's own core-file changes must reference safely.
+
 ### 3.2 `Pipeline`'s new cosmetic debug name
 
 Add an optional `const char* debugName = nullptr` constructor parameter to `Pipeline`
@@ -206,7 +239,12 @@ busywork).
 
 Fast compile check only (per `AGENTS.md`'s Tier-1 discipline): build `gte_core` and
 `GreatTamanaEngineTests`, run `--gtest_filter=*FrameDebuggerCapture*`. No full build, no `ctest`
-regression yet (that's PHASE8's job).
+regression yet (that's PHASE8's job). ADDITIONALLY (per this phase's new Step 3.1b above): do a
+second, scoped configure+build of `gte_core` ALONE with `-DGTE_ENABLE_EDITOR=OFF` (a fresh/separate
+build directory, e.g. `build-editor-off`, is fine — no need to run its tests, just confirm it
+compiles AND LINKS cleanly) — this is the one cheap, local check that catches an unguarded
+`#include`/dereference of `FrameDebuggerCaptureContext` from `RenderSystem.cpp` immediately, rather
+than only at PHASE8's own full validation pass.
 
 ### 3.7 File-change inventory
 
@@ -220,8 +258,11 @@ for why `Renderer::Submit()`'s own signature does not change at all for this fea
 `Renderer::CreatePipeline()` into `Pipeline`'s constructor — confirmed missing from this inventory
 originally; `Renderer::CreatePipeline()` only forwards to `GpuResourceFactory::CreatePipeline()`,
 so both must change together), `src/Game/RenderSystem.h`/`.cpp` (new defaulted
-`FrameDebuggerCaptureContext*` parameter on BOTH `Draw()` overloads, plus the actual
-`capture->RecordDraw(...)` call site itself, right where each `DrawCommand` is already resolved
+`FrameDebuggerCaptureContext*` parameter on BOTH `Draw()` overloads — `RenderSystem.h` adds ONLY an
+unconditional forward declaration, `class FrameDebuggerCaptureContext;`, never a real `#include` of
+`FrameDebuggerCapture.h`; `RenderSystem.cpp` wraps its real `#include` PLUS the actual
+`capture->RecordDraw(...)` call site itself inside `#if GTE_ENABLE_EDITOR`/`#endif` — see this
+phase's own new Step 3.1b for exactly why), right where each `DrawCommand` is already resolved
 against `m_pipelines`/`m_textures` — see Step 3.1/3.2), `src/Renderer/MaterialTexture.h`/`.cpp`
 (only if it genuinely lacks a way to produce a DISTINCT per-instance debug name — see Step 2's
 MaterialTexture note above; confirmed the existing `GpuMemoryTracker` path alone is NOT enough,

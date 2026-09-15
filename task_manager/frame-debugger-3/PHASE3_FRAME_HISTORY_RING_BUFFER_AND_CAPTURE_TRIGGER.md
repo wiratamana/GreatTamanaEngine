@@ -136,6 +136,55 @@ needs — `FrameDebuggerPanel` may need a small public `bool WantsCaptureThisFra
 `FrameRecorder::BeginFrame()`'s own per-frame-clear convention — never accumulating stale data
 from a previous frame into a new one.
 
+### 3.4b Actually threading the armed pointer: `Game::Render()` and `AddGameViewPass()` DO change
+(a correction/addendum found during the 2nd-iteration review — PHASE1's own Step 3.1 only defers
+this wiring to PHASE3 "eventual end-state" text; this phase is where it must actually happen, and it
+was missing from an earlier draft of this file's own file-change inventory below)
+
+`Application::Run()` never calls `RenderSystem::Draw()` directly — the actual call site is one layer
+down, inside `RenderPasses.cpp`'s `AddGameViewPass()`'s own `execute` lambda (`game.Render(renderer,
+aspectWidthOverHeight)`), which itself calls `RenderSystem::Draw()` via `Game::Render()`. Threading
+PHASE3's real, non-null `FrameDebuggerCaptureContext*` from `Application::Run()` down to
+`RenderSystem::Draw()` therefore genuinely requires growing BOTH of these two signatures, not just
+`RenderSystem::Draw()`'s own (already done in PHASE1):
+- `Game::Render(Renderer&, float aspectWidthOverHeight, const Mat4* viewProjectionOverride = nullptr,
+  FrameDebuggerCaptureContext* frameDebuggerCapture = nullptr)` — a new, defaulted, LAST parameter,
+  forwarded straight through to the float-aspect `RenderSystem::Draw()` overload ONLY (the branch
+  taken when `viewProjectionOverride == nullptr`) — never into the `viewProjectionOverride`
+  branch, since that branch is what Scene View's own call site uses (out of scope, Locked Design
+  Decision #7).
+- `AddGameViewPass(...)` (`src/Application/RenderPasses.h`/`.cpp`) gains a new parameter (e.g.
+  `FrameDebuggerCaptureContext* capture`) that its `execute` lambda captures and forwards into its own
+  `game.Render(renderer, aspectWidthOverHeight, nullptr, capture)` call. `Application::Run()` passes
+  the real, armed-or-null pointer here (see Step 3.4 above for exactly when it is armed) at the SAME
+  call site that already builds `AddGameViewPass(...)`'s other arguments.
+- **`AddPresentPass(...)`'s OWN direct-render fallback branch (`directGameRenderAspect.has_value()`,
+  the "both Game and Scene panels hidden this frame" case — genuinely reachable even in an Editor
+  build, per `Application.cpp`'s own comment at its `PresentViaRenderGraph()` call site, not only in
+  a release/non-Editor build) must NEVER be handed a real, non-null capture pointer — always pass
+  `nullptr` explicitly at that one call site, never the same variable used for `AddGameViewPass()`.
+  This is the correct, honest behavior anyway (this fallback path renders in place of, never
+  alongside, the real `"GameView"` pass this same frame — the two are mutually exclusive per frame
+  by construction, since `AddGameViewPass()` is simply never declared at all in the frame where this
+  fallback runs), but it is also an easy mistake to make (naively forwarding one shared variable into
+  both call sites) — call this out explicitly in code review/self-review before considering this
+  phase done.
+- `RenderPasses.h`'s own existing header comment for `AddGameViewPass()` (and the file-level comment
+  above it) currently states `execute` calls `Game::Render()` "(UNCHANGED signature)" — that sentence
+  becomes stale the moment this phase adds a new parameter; update it in the same edit (a one-line
+  fix: reword to say the signature is unchanged FOR EVERY PARAMETER THIS FILE'S OWN PRE-EXISTING
+  DOCUMENTATION ALREADY DESCRIBED, plus one new, always-defaulted, campaign-specific parameter — do
+  not just delete the claim and say nothing).
+- Apply PHASE1's own Step 3.1b forward-declare + `#if GTE_ENABLE_EDITOR`-guarded-dereference pattern
+  at both of these two new call sites too — `Game.h`/`RenderPasses.h` are core, always-compiled files
+  exactly like `RenderSystem.h`, and `FrameDebuggerCaptureContext` is just as absent from a
+  `GTE_ENABLE_EDITOR=OFF` build here as it is there. Since neither `Game.cpp` nor `RenderPasses.cpp`
+  ever needs to DEREFERENCE the pointer themselves (they only ever forward it onward, as a bare
+  pointer, to whatever they call), most likely NEITHER of their own `.cpp` files needs an `#if`
+  guard at all — only the header forward declarations are required — but confirm this is really true
+  once the real code is in front of you, and add the guard anyway if either file turns out to touch
+  the pointee directly for any reason.
+
 ### 3.5 What this phase explicitly does NOT do
 
 - Does not change `FrameDebuggerPanel`'s own displayed content yet beyond the new Capture button
@@ -176,7 +225,12 @@ member `FrameDebuggerHistory m_history`), `src/Editor/EditorContext.h` (only if 
 genuinely needed there — prefer keeping ownership inside `FrameDebuggerPanel` itself per its own
 existing stateful-class precedent), `src/Application/Application.h`/`.cpp` (arm/reset the capture
 context each frame; observe the Step-consumed edge), `src/Editor/ImGuiEditorLayer.cpp`/`.h` (thread
-the new required references into `FrameDebuggerPanel::Build()`), `CMakeLists.txt`/
-`tests/CMakeLists.txt`.
+the new required references into `FrameDebuggerPanel::Build()`), `src/Game/Game.h`/`.cpp` (new
+defaulted `FrameDebuggerCaptureContext*` parameter on `Render()`, forwarded to `RenderSystem::Draw()`
+— see Step 3.4b above), `src/Application/RenderPasses.h`/`.cpp` (new parameter on `AddGameViewPass()`
+threading the armed pointer into its own `game.Render(...)` call; `AddPresentPass()`'s own direct-
+render fallback call site passes `nullptr` explicitly, never this same pointer — see Step 3.4b;
+also update `RenderPasses.h`'s own now-stale "Game::Render() (UNCHANGED signature)" comment),
+`CMakeLists.txt`/`tests/CMakeLists.txt`.
 
 Write `PHASE3_COMPLETION_REPORT.md` once done.

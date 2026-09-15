@@ -26,7 +26,19 @@ semantically-unrelated `channel=color|depth` query parameter.
   texture, applies channel-isolate + levels remap per pixel, and writes into a SEPARATE, small,
   dedicated scratch `RenderTexture` the panel actually displays (never mutates the retained
   historical copy in place — a user must be able to flip Channels/Levels back and forth without
-  losing the original captured pixels).
+  losing the original captured pixels). **CONFIRMED during this review: copy `VolumeTexturePreviewRenderer::
+  RenderPreview()`'s own EXACT dispatch mechanism, not `Renderer::Dispatch()`** — that
+  `VolumeTexturePreviewRenderer.cpp` call site issues its `vkCmdBindPipeline`/`vkCmdBindDescriptorSets`/
+  `vkCmdPushConstants`/`vkCmdDispatch` calls directly inside a `renderer.ImmediateSubmit(...)` lambda,
+  with an explicit code comment there explaining exactly why: `Renderer::Dispatch()` asserts (and,
+  in a release build, silently no-ops) unless it is called from INSIDE an active
+  `BeginGraphPassRecording()`/`EndGraphPassRecording()` bracket — i.e. from a real render-graph
+  pass's own `execute` callback, running during `RenderGraph::Execute()`. `FrameDebuggerPanel::Build()`
+  runs during ImGui UI construction, called directly from `ImGuiEditorLayer::BuildUI()` — it is NEVER
+  inside such a bracket, so a naive `renderer.Dispatch(...)` call from inside this phase's own
+  Channels/Levels wiring would either assert (debug) or silently do nothing at all (release),
+  producing a permanently-stale/blank scratch preview with no visible error. See Step 3.2 below,
+  updated to reflect the correct mechanism.
 - **Do not reuse `/get_texture?channel=color|depth`** — that parameter means "give me the color
   half or the depth half of a named texture," an entirely different axis from "isolate the R/G/B/A
   channel of an already-color image for VISUAL inspection." Any new query parameter this phase (or
@@ -76,12 +88,16 @@ it here too, at a much smaller scale):
   view-mode buttons, for the exact "highlighted when active" ImGui idiom to copy).
 - Levels slider: a real `ImGui::SliderFloat`/two-handle range control writing
   `m_levelsBlack`/`m_levelsWhite` (clamp `levelsBlack < levelsWhite` always).
-- On any change (or a history-cursor change from PHASE4), dispatch the compute shader once via
-  `renderer.Dispatch(...)` (the existing generic compute-dispatch primitive, `Renderer.h`) against
-  the currently-viewed history entry's retained texture, writing into one shared scratch
-  `RenderTexture` the panel itself owns (lazily created, sized to match the largest historical
-  entry seen so far, or simply re-created at the source's exact size each time it's needed —
-  implementer's call based on real measured cost).
+- On any change (or a history-cursor change from PHASE4), dispatch the compute shader once via a
+  `renderer.ImmediateSubmit([&](VkCommandBuffer cmd) { ... })` lambda that directly issues
+  `vkCmdBindPipeline`/`vkCmdBindDescriptorSets`/`vkCmdPushConstants`/`vkCmdDispatch` against `cmd`
+  itself — **NEVER `renderer.Dispatch(...)`**, which only works from inside an active render-graph
+  pass recording (see Step 2's own `VolumeTexturePreviewRenderer::RenderPreview()` precedent above
+  for the exact shape to copy field-for-field, including its own image-layout-barrier dance around
+  the dispatch) — against the currently-viewed history entry's retained texture, writing into one
+  shared scratch `RenderTexture` the panel itself owns (lazily created, sized to match the largest
+  historical entry seen so far, or simply re-created at the source's exact size each time it's
+  needed — implementer's call based on real measured cost).
 - The preview box (PHASE4) now displays THIS scratch texture instead of the raw retained one,
   whenever `m_channel != All` or the levels sliders are non-default; when both are at their
   neutral defaults (`All`, `levelsBlack = 0`, `levelsWhite = 1`), it is equally correct to just

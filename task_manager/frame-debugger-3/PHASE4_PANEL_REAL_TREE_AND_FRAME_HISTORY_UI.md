@@ -26,11 +26,19 @@ preview box instead of the "No Texture" placeholder.
   only needs to swap the preview box's content source (still a "No Texture" placeholder whenever
   `FrameDebuggerHistory::CurrentEntry()->preview` is `std::nullopt`, e.g. before the very first
   real capture ever happens).
-- **How does an existing panel display a live `RenderTexture` inside `ImGui::Image()`?** Read
-  `Panels/GamePanel.cpp`'s own existing implementation FIRST (it already solves exactly this
-  problem for the live Game View) and copy its exact descriptor-set-wrapping mechanism
-  (`ImGui_ImplVulkan_AddTexture` or whatever this codebase's own real call is) rather than
-  reinventing it — the only difference here is the source texture is PHASE3's retained HISTORICAL
+- **How does an existing panel display a live `RenderTexture` inside `ImGui::Image()`?** CONFIRMED
+  during this review: the mechanism is split across TWO files, not one — read BOTH before
+  implementing. `Panels/GamePanel.cpp` itself does NOT call `ImGui_ImplVulkan_AddTexture` at all; it
+  only consumes an ALREADY-WRAPPED `VkDescriptorSet` (`EditorContext::gameViewDescriptor`) via a
+  plain `ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(ctx.gameViewDescriptor)),
+  avail)` call. The actual wrapping — `ImGui_ImplVulkan_AddTexture(sampler, view,
+  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)`, plus the "only re-wrap when the underlying
+  `VkImageView` actually changed" caching logic — lives in `ImGuiEditorLayer.cpp`'s own `BuildUI()`
+  (search for where it assigns `m_ctx.gameViewDescriptor`), NOT in `GamePanel.cpp`. This phase's own
+  new preview-image descriptor should be created/cached the same way `ImGuiEditorLayer::BuildUI()`
+  already does for `gameViewDescriptor`/`sceneViewDescriptor` (re-wrap only when the retained
+  texture's own `VkImageView` changes — i.e., whenever the history cursor moves to a different
+  captured frame) — the only difference here is the source texture is PHASE3's retained HISTORICAL
   copy, not the live, currently-rendering Game View.
 - **Do not confuse the two different "stepper" concepts** (Locked Design Decision #4): the
   EXISTING frame-stepper row (`BuildFrameStepperRow()`, `FormatFrameStepperLabel()`) means
@@ -72,7 +80,8 @@ sufficient).
 
 Inside `BuildInspectorPane()`'s existing preview-box code: if `m_history.CurrentEntry()` is
 non-null AND its `preview` has a value, display it via `ImGui::Image()` (per Step 2's own
-`GamePanel.cpp` precedent) at whatever size the existing placeholder box already reserves; keep
+`GamePanel.cpp`/`ImGuiEditorLayer.cpp` descriptor-wrapping precedent above) at whatever size the
+existing placeholder box already reserves; keep
 the exact-existing "No Texture" bordered placeholder box for every other case (no entry yet, or a
 GPU-skinning leaf selected whose event legitimately has no texture — see PHASE2's Step 3.1). The
 resolution/format caption row (currently always `"0x0  Default"`) becomes real: read the real
@@ -103,7 +112,14 @@ automation-driven pass, but still confirm a clean, crash-free build/launch here.
 ### 3.6 File-change inventory
 
 Modified: `src/Editor/Panels/FrameDebuggerPanel.h`/`.cpp` (snapshot source swap, new Frame-History
-toolbar, real preview image display, real resolution/format caption), `src/Editor/FrameDebuggerData.h`/
+toolbar, real preview image display, real resolution/format caption — including its own
+`ImGui_ImplVulkan_AddTexture`-wrapped descriptor for the retained preview texture, re-wrapped only
+when the history cursor moves to a captured frame with a different underlying `VkImageView`, per
+this phase's own Step 2 finding above; `ImGuiEditorLayer.cpp`/`.h` only needs a change TOO if the
+implementer decides this new descriptor is better owned there alongside `gameViewDescriptor`/
+`sceneViewDescriptor` rather than inside `FrameDebuggerPanel` itself — either placement is
+acceptable, but pick one and document the choice, since `FrameDebuggerPanel` is a stateful class
+that already owns comparable per-frame state, per its own existing precedent), `src/Editor/FrameDebuggerData.h`/
 `.cpp` (new `FormatFrameHistoryLabel()` pure helper + its test), `tests/Editor/*` (new test case(s)
 for the new formatter).
 
