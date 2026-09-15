@@ -60,6 +60,24 @@ panel by `FrameGraphData.h`.
 
 Full convention: [docs/conventions/profiling.md](docs/conventions/profiling.md).
 
+## Time and Playback Pause
+
+`src/Core/Time.h/.cpp` (`gte::Time`) plus `src/Core/EngineContext.h`
+(`gte::EngineContext`) are the engine's dedicated, explicit (never
+singleton) per-frame time-keeping objects - `Application` owns the one
+`EngineContext` instance, advances its `Time` once per frame
+(`Time::Advance()`), and passes it by `const&` into `Game::Update()`,
+which uses `Time::IsFrozenThisFrame()` to skip Animation/Physics/GPU-
+skinning work entirely on a paused (non-stepping) frame - Unity-style
+Pause, driven by a small Pause/Resume/Step toolbar in the Editor
+(`src/Editor/PlaybackControls.h/.cpp`, `EditorContext::playbackPaused`/
+`stepOneFrameRequested`, `IEditorLayer::IsPlaybackPaused()`/
+`TryConsumeStepRequest()`). Rendering, the Editor UI, and the
+independently-orbitable Scene-view camera all keep running normally
+regardless of pause - only gameplay simulation freezes.
+
+Full convention: [docs/conventions/time-and-playback-pause.md](docs/conventions/time-and-playback-pause.md).
+
 ## Job System
 
 `src/Jobs/` (`JobTypes.h`, `JobQueue.h/.cpp`, `JobSystem.h/.cpp`,

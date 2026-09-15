@@ -294,6 +294,46 @@ Scattering" section for the full feature writeup.
   since the "Game" view alone was already enough to prove the fix and confirm
   the regression guard works end to end.
 
+## Time and Playback Pause
+
+### Deferred from the `frame-debugger-1` Pause/Time campaign
+
+See `AGENTS.md`'s "Time and Playback Pause" section and
+`task_manager/frame-debugger-1/PHASE0_MASTER_STRATEGY.md`'s own "Non-Goals"
+(Step 4) for the full campaign writeup - the following were explicitly
+scoped out from the start, not overlooked:
+
+- **A "Stop" button with full scene-state snapshot/revert (Unity's own
+  Edit-mode <-> Play-mode split).** This campaign only added Pause/Resume/
+  Step on top of the engine's existing, always-running loop - there is no
+  separate Edit-mode/Play-mode distinction anywhere, and no snapshot/revert
+  of any kind.
+- **A `Time.timeScale` slider (slow-motion/fast-forward).** Today's Pause is
+  binary (running or fully frozen) only - `gte::Time`'s own API is written so
+  a future `timeScale` field would be a small, additive change, not a
+  redesign, but it is not built now.
+- **HTTP/network endpoints to control Play/Pause/Step remotely**, mirroring
+  the existing `network-impl-*` campaigns' AI-agent-facing control surface -
+  Pause/Resume/Step are Editor-toolbar-only for now.
+- **A keyboard shortcut for Play/Pause (e.g. Unity's own Ctrl+P).** Toolbar
+  buttons only in this campaign.
+- **The actual frame-debugger feature (draw-call/render-pass stepping, a
+  Render Graph pass-by-pass inspector).** This campaign's own `Time`/
+  `EngineContext` groundwork exists specifically to support this future
+  work - a later campaign's job, not started here.
+- **Interactive click-driven Pause/Step/Resume verification via the
+  embedded HTTP server.** No mouse-control tool exists in this session's
+  environment to actually click the ImGui toolbar buttons over HTTP (the
+  only Editor-UI-control endpoint today, `GET /activate_tab`, added by
+  `network-impl-7`, only brings a named tab/panel to the front - it cannot
+  toggle `EditorContext::playbackPaused`, and per this campaign's own Locked
+  Design Decision #6, that is deliberate). The underlying freeze/step/resume
+  LOGIC is still fully proven by two dedicated automated test files
+  (`tests/Core/TimeTests.cpp`, `tests/Game/GameUpdateFreezeGatingTests.cpp`)
+  exercising `Game::Update()` directly - only the "a human/agent actually
+  clicks the button and watches it happen live" step is a documented manual-
+  verification gap, not a defect.
+
 ## Engine Roadmap (not yet started)
 
 Broader, longer-horizon ideas for moving the engine past "tech demo with a

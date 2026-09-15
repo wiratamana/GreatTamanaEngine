@@ -55,6 +55,10 @@ than subsystem-specific):
 - **[Profiling](conventions/profiling.md)** — `src/Profiling/`'s always-
   compiled CPU scope-timer instrumentation (`GTE_PROFILE_SCOPE`), draw-call/
   GPU-memory/GPU-timestamp data feeding the "Profiler" panel.
+- **[Time and Playback Pause](conventions/time-and-playback-pause.md)** —
+  the dedicated, explicit `gte::Time`/`gte::EngineContext` per-frame
+  time-keeping objects, and the Unity-style Pause/Resume/Step toolbar built
+  on top of them.
 - **[Job System](conventions/job-system.md)** — `src/Jobs/`'s general-purpose
   worker-thread pool, `Schedule()`/`Dispatch()`/dependencies/continuations,
   and the thread-safety classification of every shared subsystem.

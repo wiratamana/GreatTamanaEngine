@@ -110,6 +110,23 @@ pieces. This section keeps only the most recent entries inline — see
 **[docs/CHANGELOG.md](docs/CHANGELOG.md)** for the complete, reverse-
 chronological project history from the very first triangle demo onward.
 
+- **The Editor now has a genuine Unity-style Pause/Step control, backed by
+  a brand-new, dedicated, explicit `Time` class** (`frame-debugger-1`
+  campaign, five phases -
+  `task_manager/frame-debugger-1/PHASE0_MASTER_STRATEGY.md`) - a small
+  Pause/Resume + Step toolbar (`src/Editor/PlaybackControls.h/.cpp`) drives
+  a new `gte::Time`/`gte::EngineContext` (`src/Core/Time.h/.cpp`,
+  `src/Core/EngineContext.h`) that `Application` advances once per frame
+  and `Game::Update()` reads to skip Animation/Physics/GPU-skinning work
+  entirely on a frozen frame - rendering, the Editor UI, and the
+  independently-orbitable Scene-view camera all keep working normally
+  while paused, and "Step" advances by exactly one deterministic 1/60s
+  tick. Resuming from an arbitrarily long pause is clamped to a single
+  ordinary-sized simulation step rather than replaying the entire elapsed
+  real-world gap. Verified with a full clean build (both
+  `GTE_ENABLE_EDITOR=ON` and `=OFF`), a full `ctest` regression pass, and a
+  live runtime smoke test.
+
 - **The Aerial Perspective haze is now actually VISIBLE at this engine's real
   scene scale, its own tuning knobs are live Editor sliders instead of
   hardcoded shader constants, and its froxel volume has a genuinely useful
