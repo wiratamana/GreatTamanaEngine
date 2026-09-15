@@ -4,9 +4,10 @@ Parent: `PHASE0_MASTER_STRATEGY.md`
 Depends on: PHASE1-6 (the whole feature is functionally complete as of
 PHASE6 — this phase is closeout, not new UI).
 Touches: `AGENTS.md`, `README.md`, `TODO.md`, `docs/README.md`,
-`docs/conventions/editor-module-structure.md`; verifies (does not
-necessarily need to change) `CMakeLists.txt`/`tests/CMakeLists.txt`;
-writes `CAMPAIGN_COMPLETION_REPORT.md`.
+`docs/conventions/editor-module-structure.md` (new file:
+`docs/conventions/frame-debugger.md`); verifies (does not necessarily need
+to change) `CMakeLists.txt`/`tests/CMakeLists.txt`; writes
+`CAMPAIGN_COMPLETION_REPORT.md`.
 
 ## Step 1: The Goal
 
@@ -37,6 +38,19 @@ original reference screenshot, and write the campaign's own
   Frame Debugger window's existence, that it is GUI-only scaffolding, and
   linking to a new `docs/conventions/frame-debugger.md` file for full
   detail.
+- `docs/conventions/editor-module-structure.md`'s own "A future panel that
+  genuinely needs its own persistent state across frames" bullet
+  (confirmed present in that file today) currently names exactly two
+  concrete precedents — `BoneViewerWindow` and `ProfilerPanel` — even
+  though `Panels/RenderGraphPanel.h/.cpp` is a THIRD, already-shipped
+  stateful-class panel `PHASE0_MASTER_STRATEGY.md`'s own Step 2 also cites
+  (that omission pre-dates this campaign; it is not this phase's job to
+  fix it, see 3.4 below for the narrow, additive edit this phase actually
+  makes). `FrameDebuggerPanel` (this campaign) is a genuine FOURTH
+  precedent for that same exception and this file's own list must say so,
+  or `PHASE0_MASTER_STRATEGY.md`'s file-change inventory (which already
+  lists this file as modified by this phase) would be describing work
+  that never actually happened.
 - **Explicitly confirm and document**: `src/Editor/EditorPanelCatalog.h`'s
   `kKnownEditorPanelNames` array does **not** get a "Frame Debugger"
   entry, and `tests/Editor/EditorPanelCatalogTests.cpp` is **not**
@@ -136,19 +150,51 @@ wires real data into the documented seams.
 Full convention: [docs/conventions/frame-debugger.md](docs/conventions/frame-debugger.md).
 ```
 
-### 3.4 `docs/README.md` — index link
+### 3.4 `docs/conventions/editor-module-structure.md` — extend the stateful-panel precedent bullet
 
-Add the new `frame-debugger.md` entry to the conventions index, in the
-same alphabetized/grouped position that file's own existing list
-convention uses.
+This file's existing "A future panel that genuinely needs its own
+persistent state across frames" bullet (see Step 2 above) currently
+reads, in relevant part: "Two real precedents already exist:
+`BoneViewerWindow` (...) and `ProfilerPanel` (...). Both are still
+called explicitly by name (...), never through a shared interface."
+Edit it to add `FrameDebuggerPanel` as a third named example in that same
+sentence (rephrasing "Two real precedents" to "Three real precedents" and
+appending a short clause identifying it as this campaign's own addition,
+e.g. "...and `FrameDebuggerPanel` (`Panels/FrameDebuggerPanel.h` -
+`task_manager/frame-debugger-2/PHASE0_MASTER_STRATEGY.md`, holding its
+'Enable' toggle, selected-event index, and splitter width across frames).
+All three are still called explicitly by name (...), never through a
+shared interface."). Do **not** also try to fix that bullet's pre-existing
+omission of `RenderGraphPanel` (a third, already-shipped stateful panel
+from an earlier, unrelated campaign) — that gap predates this campaign
+and is out of scope here; touch only what is needed to make this
+campaign's own addition accurate. This edit is what makes
+`PHASE0_MASTER_STRATEGY.md`'s own file-change inventory (which already
+lists this file as modified by this phase) actually true — without it,
+this phase's own file-change inventory (3.9 below) would silently omit a
+file `PHASE0_MASTER_STRATEGY.md` says is in scope.
 
-### 3.5 `README.md` — status bullet
+### 3.5 `docs/README.md` — index link
+
+Add the new `frame-debugger.md` entry to the "Conventions" list. That
+list's actual ordering (confirmed against the file directly) is **not**
+alphabetical — every entry appears in the exact same order its matching
+section appears in `AGENTS.md` (e.g. "Time and Playback Pause" before
+"Job System" before "Networking", mirroring `AGENTS.md` exactly). Since
+3.3 above inserts the new `AGENTS.md` section immediately after "Time and
+Playback Pause" and before "Job System", insert this new
+`docs/README.md` bullet in that exact same relative position — immediately
+after the existing "Time and Playback Pause" bullet and before the "Job
+System" bullet — not at the alphabetically-sorted position "Frame
+Debugger" would otherwise occupy.
+
+### 3.6 `README.md` — status bullet
 
 Add one bullet under the project's own "Status"/feature-list section
 (mirror `frame-debugger-1`'s own added bullet's exact phrasing style)
 noting the new Frame Debugger window exists as GUI-only scaffolding.
 
-### 3.6 `TODO.md` — deferred items
+### 3.7 `TODO.md` — deferred items
 
 Add a new "Frame Debugger (scaffolding) - deferred to a future campaign"
 section listing every one of `PHASE0_MASTER_STRATEGY.md`'s Non-Goals
@@ -158,7 +204,7 @@ dock-layout entry, a Pause/frozen-snapshot control on this panel) as
 concrete, individually-actionable future work items - mirroring
 `frame-debugger-1`'s own `TODO.md` section's exact structure.
 
-### 3.7 Full validation
+### 3.8 Full validation
 
 1. `cmake --build build --clean-first` (GTE_ENABLE_EDITOR=ON) - expect
    zero errors.
@@ -175,14 +221,15 @@ concrete, individually-actionable future work items - mirroring
    above - `run_app_background`, `gte_send_request`, verify, then
    `stop_app_background`.
 
-### 3.8 File-change inventory (this phase only)
+### 3.9 File-change inventory (this phase only)
 
 New: `docs/conventions/frame-debugger.md`,
 `task_manager/frame-debugger-2/CAMPAIGN_COMPLETION_REPORT.md`.
 Modified (docs only, plus build-system confirmation touch-ups if
 anything was actually missing): `AGENTS.md`, `README.md`, `TODO.md`,
-`docs/README.md`, and (only if Step 3.1 found something genuinely
-missing) `CMakeLists.txt`/`tests/CMakeLists.txt`.
+`docs/README.md`, `docs/conventions/editor-module-structure.md`, and
+(only if Step 3.1 found something genuinely missing)
+`CMakeLists.txt`/`tests/CMakeLists.txt`.
 
 Write `PHASE7_COMPLETION_REPORT.md` AND
 `CAMPAIGN_COMPLETION_REPORT.md` (mirroring `frame-debugger-1`'s own two-
