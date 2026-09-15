@@ -13,6 +13,12 @@
 # GPU, or SDL window/video subsystem required to run - safe to execute on
 # every commit/PR, including a CI runner with no GPU at all:
 #
+#   - Core/TimeTests.cpp                   - gte::Time's Advance()/DeltaTime()/
+#                                            pause-freeze/step/resume-clamp
+#                                            bookkeeping (frame-debugger-1
+#                                            campaign, PHASE1) - hand-picked
+#                                            Advance() call sequences only,
+#                                            no ECS/GPU/SDL involved.
 #   - Memory/GpuResourceHandleTests.cpp   - GpuResourceHandle value semantics.
 #   - Memory/GpuMemoryTrackerTests.cpp    - GpuMemoryTracker's Track()/
 #                                            Untrack()/totals/snapshot
@@ -1726,6 +1732,7 @@
 # file's own pure, name-keyed slot-assignment helper
 # (RenderGraphNameSlotTable, see above) is pulled out as Tier-1-testable.
 set(GTE_TEST_SOURCES
+    Core/TimeTests.cpp
     Memory/GpuResourceHandleTests.cpp
     Encoding/Base64Tests.cpp
     Encoding/PixelConversionTests.cpp

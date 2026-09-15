@@ -234,6 +234,9 @@ endif()
 # apart (e.g. differing compile flags) the way a naively-duplicated file
 # list could.
 add_library(gte_core STATIC
+    src/Core/Time.h
+    src/Core/Time.cpp
+    src/Core/EngineContext.h
     src/Math/MathTypes.h
     src/Math/Vec2.h
     src/Math/Vec3.h
