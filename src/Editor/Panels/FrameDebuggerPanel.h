@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../FrameDebuggerData.h"
+
 namespace gte {
 
 struct EditorContext;
@@ -35,6 +37,18 @@ struct EditorContext;
 class FrameDebuggerPanel {
 public:
     void Build(EditorContext& ctx);
+
+private:
+    void BuildToolbarRow(EditorContext& ctx);
+    void BuildFrameStepperRow();
+
+    // The panel's own "Enable" toggle (see FrameDebuggerData.h's own
+    // top-of-file comment: this is a purely GUI concept this campaign -
+    // toggling it does not turn on any real capture logic yet, only
+    // this window's own placeholder/inert content vs. an explanatory
+    // "please enable" message). False by default - a freshly-opened
+    // window starts disabled, matching Unity's own Frame Debugger.
+    bool m_enabled = false;
 };
 
 } // namespace gte
