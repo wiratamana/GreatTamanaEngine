@@ -104,6 +104,64 @@ void FrameDebuggerPanel::BuildEventTreePane(const FrameDebuggerSnapshot& snapsho
     }
 }
 
+void FrameDebuggerPanel::BuildInspectorPane(const FrameDebuggerSnapshot& snapshot)
+{
+    // --- RenderTarget selector row (frame-level, not event-level) ---
+    ImGui::TextUnformatted("RenderTarget");
+    ImGui::SameLine(150.0f);
+    ImGui::TextUnformatted(snapshot.renderTarget.name.c_str());
+
+    static constexpr const char* kRenderTargetItems[] = { "RT 0" };
+    int rtIndex = 0;
+    ImGui::SetNextItemWidth(80.0f);
+    ImGui::BeginDisabled();
+    ImGui::Combo("##FrameDebuggerRenderTarget", &rtIndex, kRenderTargetItems, 1);
+    ImGui::EndDisabled();
+
+    ImGui::SameLine();
+    ImGui::TextUnformatted("Channels");
+    ImGui::SameLine();
+    // Cosmetic-only toggle row - no real channel-isolation concept
+    // exists this campaign (there is no real texture to isolate a
+    // channel of yet). Purely visual parity with the reference
+    // screenshot; clicking these currently has no effect beyond its own
+    // pressed-highlight look.
+    for (const char* channelLabel : { "All", "R", "G", "B", "A" }) {
+        ImGui::SameLine();
+        ImGui::SmallButton(channelLabel);
+    }
+
+    // --- Levels slider (frame-level) ---
+    ImGui::TextUnformatted("Levels");
+    ImGui::SameLine();
+    float levelsValue = 0.0f;
+    ImGui::SetNextItemWidth(-1.0f);
+    ImGui::BeginDisabled();
+    ImGui::SliderFloat("##FrameDebuggerLevels", &levelsValue, 0.0f, 1.0f, "");
+    ImGui::EndDisabled();
+
+    // --- Texture preview placeholder box ---
+    const std::string resolutionCaption = std::to_string(snapshot.renderTarget.width) + "x"
+        + std::to_string(snapshot.renderTarget.height) + "  " + snapshot.renderTarget.format;
+    ImGui::TextDisabled("%s", resolutionCaption.c_str());
+
+    const float previewHeight = std::max(120.0f, ImGui::GetContentRegionAvail().y * 0.5f);
+    ImGui::BeginChild("FrameDebuggerTexturePreview", ImVec2(0.0f, previewHeight), true);
+    {
+        const ImVec2 avail = ImGui::GetContentRegionAvail();
+        const char* placeholderText = "No Texture";
+        const ImVec2 textSize = ImGui::CalcTextSize(placeholderText);
+        ImGui::SetCursorPos(ImVec2(
+            std::max(0.0f, (avail.x - textSize.x) * 0.5f), std::max(0.0f, (avail.y - textSize.y) * 0.5f)));
+        ImGui::TextDisabled("%s", placeholderText);
+    }
+    ImGui::EndChild();
+
+    ImGui::Separator();
+
+    // PHASE6 appends BuildEventDetailsSection() right here.
+}
+
 void FrameDebuggerPanel::Build(EditorContext& ctx)
 {
     if (!ctx.frameDebuggerWindowOpen) {
@@ -154,8 +212,7 @@ void FrameDebuggerPanel::Build(EditorContext& ctx)
         ImGui::SameLine();
 
         ImGui::BeginChild("FrameDebuggerInspector", ImVec2(0.0f, paneAreaHeight), true);
-        // PHASE5/PHASE6 fill this in.
-        ImGui::TextDisabled("(inspector pane - added in a later phase of this campaign)");
+        BuildInspectorPane(snapshot);
         ImGui::EndChild();
     }
 
