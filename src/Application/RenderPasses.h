@@ -20,7 +20,12 @@
 // Application::Run() used to do by hand for that same block: `setup`
 // declares exactly one color-attachment write (plus, for Game/Scene, one
 // depth-attachment write) against the handle it's given; `execute` calls
-// Game::Render() (UNCHANGED signature) inside a
+// Game::Render() (unchanged for every parameter this comment already
+// described here - `renderer`, `aspectWidthOverHeight`,
+// `viewProjectionOverride` - task_manager/frame-debugger-3/PHASE3 added one
+// new, always-defaulted, campaign-specific trailing parameter,
+// `frameDebuggerCapture`, on AddGameViewPass() only - see that function's
+// own doc comment below) inside a
 // Renderer::BeginGraphPassRecording()/EndGraphPassRecording() bracket, so
 // every Renderer::Submit() call Game/RenderSystem already makes internally
 // keeps working completely unmodified - the render graph integration
@@ -47,6 +52,18 @@ namespace gte {
 class Game;
 class Renderer;
 class RenderTexture;
+
+// Editor-only type (src/Editor/FrameDebuggerCapture.h) - forward-declared
+// ONLY (never #included here), since RenderPasses.h is a CORE, always-
+// compiled file that must still compile (and, per RenderPasses.cpp, LINK)
+// cleanly with GTE_ENABLE_EDITOR=OFF, a build where this type does not
+// exist at all - see task_manager/frame-debugger-3/
+// PHASE3_FRAME_HISTORY_RING_BUFFER_AND_CAPTURE_TRIGGER.md's own Step 3.4b
+// (mirroring src/Game/RenderSystem.h's own identical PHASE1 precedent). A
+// bare forward declaration of a pointee is always legal even when the type
+// is never defined in this translation unit, since AddGameViewPass() below
+// only ever needs a POINTER to it.
+class FrameDebuggerCaptureContext;
 
 namespace rg {
 class RenderGraphBuilder;
@@ -80,11 +97,24 @@ class RenderGraphBuilder;
 // passed this pass's own `cmd` - so a caller (Application::Run(), via
 // AtmosphereLutRenderer::DrawSkyBackground()) can draw the atmosphere sky
 // background wherever the depth buffer still shows the frame's own clear
-// value. Empty (the default) draws nothing extra - the exact pre-Phase-7
 // behavior.
+//
+// `frameDebuggerCapture` (task_manager/frame-debugger-3 campaign, PHASE3 -
+// PHASE3_FRAME_HISTORY_RING_BUFFER_AND_CAPTURE_TRIGGER.md, Step 3.4b) -
+// forwarded straight through into this pass's own `game.Render(...)` call
+// as its new, LAST, defaulted parameter (see Game.h's own updated Render()
+// comment). `nullptr` (the default) whenever the Frame Debugger is not
+// currently armed for this frame - Application::Run() is the ONLY caller
+// that ever passes a real, non-null pointer here (see
+// IEditorLayer::PrepareFrameDebuggerCaptureContext()), and ONLY at this one
+// call site - AddSceneViewPass()/AddPresentPass() never receive one (Scene
+// View is out of scope - Locked Design Decision #7 - and AddPresentPass()'s
+// own direct-render fallback branch must NEVER be handed a real capture
+// pointer either way, see that function's own doc comment below).
 void AddGameViewPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer, rg::TextureHandle gameViewTarget,
     float aspectWidthOverHeight, const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers = {},
-    const std::function<void(VkCommandBuffer)>& recordSkyBackground = {});
+    const std::function<void(VkCommandBuffer)>& recordSkyBackground = {},
+    FrameDebuggerCaptureContext* frameDebuggerCapture = nullptr);
 
 // The Scene-view equivalent of AddGameViewPass() above - `execute` calls
 // Game::Render() with `sceneViewProjection` as its viewProjectionOverride
@@ -125,8 +155,23 @@ void AddSceneViewPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& ren
 // rendering bracket - mirroring IEditorLayer::Render()'s existing
 // recordExtra contract exactly. `gpuSkinningOutputBuffers` - see
 // AddGameViewPass() above; only meaningful (and only ever declared) when
-// `directGameRenderAspect` also has a value, since that's the only case
 // where this pass itself draws a GPU-skinned mesh directly.
+//
+// task_manager/frame-debugger-3 campaign, PHASE3
+// (PHASE3_FRAME_HISTORY_RING_BUFFER_AND_CAPTURE_TRIGGER.md, Step 3.4b) -
+// this pass's own direct-render fallback branch (`directGameRenderAspect`
+// having a value) calls `game.Render(renderer, *directGameRenderAspect)`
+// with NO explicit `frameDebuggerCapture` argument at all - relying on
+// Game::Render()'s own `nullptr` default rather than accidentally
+// forwarding AddGameViewPass()'s own armed pointer here. This is
+// deliberate and correct (this fallback path renders in place of, never
+// alongside, the real "GameView" pass this same frame - the two are
+// mutually exclusive per frame by construction, since AddGameViewPass() is
+// simply never declared at all in the frame where this fallback runs), and
+// is exactly why this function's own signature does NOT grow a
+// `frameDebuggerCapture` parameter at all - there being no such parameter
+// to accidentally misuse here is the safest possible guard against ever
+// wiring the same shared variable into both call sites by mistake.
 void AddPresentPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer, rg::TextureHandle swapchainImage,
     std::optional<float> directGameRenderAspect, const std::function<void(VkCommandBuffer)>& recordImGui,
     const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers = {});

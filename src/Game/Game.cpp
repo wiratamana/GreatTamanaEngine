@@ -334,7 +334,8 @@ void Game::EnsureDefaultCameraExists()
     m_registry.AddComponent<Camera>(cameraEntity);
 }
 
-void Game::Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* viewProjectionOverride)
+void Game::Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* viewProjectionOverride,
+    FrameDebuggerCaptureContext* frameDebuggerCapture)
 {
     renderer.Clear(20, 20, 30, 255);
 
@@ -343,7 +344,11 @@ void Game::Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* v
     if (viewProjectionOverride != nullptr) {
         m_renderSystem.Draw(m_registry, renderer, *viewProjectionOverride);
     } else {
-        m_renderSystem.Draw(m_registry, renderer, aspectWidthOverHeight);
+        // frameDebuggerCapture is never dereferenced here (or anywhere else
+        // in this file) - only forwarded onward, as a bare pointer, exactly
+        // like PHASE1's own Step 3.1b requires for a CORE, always-compiled
+        // file such as this one. See Game.h's own updated Render() comment.
+        m_renderSystem.Draw(m_registry, renderer, aspectWidthOverHeight, frameDebuggerCapture);
     }
 }
 

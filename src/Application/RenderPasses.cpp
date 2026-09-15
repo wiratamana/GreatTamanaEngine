@@ -49,7 +49,7 @@ void DeclareGpuSkinningReads(
 
 void AddGameViewPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer, rg::TextureHandle gameViewTarget,
     float aspectWidthOverHeight, const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers,
-    const std::function<void(VkCommandBuffer)>& recordSkyBackground)
+    const std::function<void(VkCommandBuffer)>& recordSkyBackground, FrameDebuggerCaptureContext* frameDebuggerCapture)
 {
     builder.AddPass(
         "GameView",
@@ -58,9 +58,15 @@ void AddGameViewPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& rend
             pass.WriteDepthStencilAttachment(gameViewTarget, kGameClearDepth);
             DeclareGpuSkinningReads(pass, gpuSkinningOutputBuffers);
         },
-        [&game, &renderer, aspectWidthOverHeight, recordSkyBackground](rg::PassContext& ctx) {
+        [&game, &renderer, aspectWidthOverHeight, recordSkyBackground, frameDebuggerCapture](rg::PassContext& ctx) {
             renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-            game.Render(renderer, aspectWidthOverHeight);
+            // frameDebuggerCapture is never dereferenced here - only
+            // forwarded onward, as a bare pointer, exactly like PHASE1's
+            // own Step 3.1b requires for a CORE, always-compiled file such
+            // as this one (see task_manager/frame-debugger-3/
+            // PHASE3_FRAME_HISTORY_RING_BUFFER_AND_CAPTURE_TRIGGER.md's own
+            // Step 3.4b).
+            game.Render(renderer, aspectWidthOverHeight, nullptr, frameDebuggerCapture);
             renderer.EndGraphPassRecording();
             if (recordSkyBackground) {
                 recordSkyBackground(ctx.cmd);
@@ -114,6 +120,12 @@ void AddPresentPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& rende
         [&game, &renderer, directGameRenderAspect, recordImGui](rg::PassContext& ctx) {
             if (directGameRenderAspect.has_value()) {
                 renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
+                // task_manager/frame-debugger-3 campaign, PHASE3, Step 3.4b
+                // - deliberately NO frameDebuggerCapture argument here at
+                // all (relies on Game::Render()'s own nullptr default) -
+                // see this file's own RenderPasses.h AddPresentPass() doc
+                // comment for why this fallback branch must NEVER receive
+                // a real capture pointer.
                 game.Render(renderer, *directGameRenderAspect);
                 renderer.EndGraphPassRecording();
             }

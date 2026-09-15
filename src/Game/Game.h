@@ -18,6 +18,18 @@ namespace gte {
 
 class Renderer;
 
+// Editor-only type (src/Editor/FrameDebuggerCapture.h) - forward-declared
+// ONLY (never #included here), since Game.h is a CORE, always-compiled file
+// that must still compile (and, per Game.cpp, LINK) cleanly with
+// GTE_ENABLE_EDITOR=OFF, a build where this type does not exist at all -
+// see task_manager/frame-debugger-3/
+// PHASE3_FRAME_HISTORY_RING_BUFFER_AND_CAPTURE_TRIGGER.md's own Step 3.4b
+// (mirroring src/Game/RenderSystem.h's own identical PHASE1 precedent). A
+// bare forward declaration of a pointee is always legal even when the type
+// is never defined in this translation unit, since Render() below only
+// ever needs a POINTER to it.
+class FrameDebuggerCaptureContext;
+
 // Sits on top of Window/Renderer and has no direct knowledge of SDL, or of
 // Vulkan beyond the Renderer abstraction. Game is a thin COMPOSITION ROOT:
 // it owns the ECS World (m_registry) plus three collaborating systems -
@@ -74,7 +86,20 @@ public:
     // ends up (the swapchain, fullscreen, or one of the Editor's off-screen
     // "Game view"/"Scene view" RenderTextures) is decided by Application
     // too. See Application::Run().
-    void Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* viewProjectionOverride = nullptr);
+    //
+    // task_manager/frame-debugger-3 campaign, PHASE3
+    // (PHASE3_FRAME_HISTORY_RING_BUFFER_AND_CAPTURE_TRIGGER.md, Step 3.4b) -
+    // `frameDebuggerCapture` (new, defaulted, LAST parameter) is forwarded
+    // straight through to the float-aspect RenderSystem::Draw() overload
+    // ONLY (the branch taken when viewProjectionOverride == nullptr) -
+    // never into the viewProjectionOverride branch, since THAT branch is
+    // what Scene View's own call site uses (out of scope for the whole
+    // Frame Debugger feature - see PHASE0_MASTER_STRATEGY.md's Locked
+    // Design Decision #7). nullptr (the default) on every existing call
+    // site until Application::Run() arms a real one for the Game-View-
+    // driving call only (see RenderPasses.h's AddGameViewPass()).
+    void Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* viewProjectionOverride = nullptr,
+        FrameDebuggerCaptureContext* frameDebuggerCapture = nullptr);
 
     // Read-only-in-spirit access to the ECS World for the Editor's
     // Hierarchy/Inspector panels (src/Editor/ImGuiEditorLayer.cpp) to

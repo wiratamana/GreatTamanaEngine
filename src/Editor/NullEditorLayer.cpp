@@ -42,6 +42,8 @@ public:
     bool IsPlaybackPaused() const override { return false; }
     bool TryConsumeStepRequest() override { return false; }
     TabActivationResult ActivateTab(const std::string& /*panelName*/) override { return TabActivationResult{}; }
+    FrameDebuggerCaptureContext* PrepareFrameDebuggerCaptureContext() override { return nullptr; }
+    void NotifyFrameDebuggerStepConsumed() override { }
 };
 
 } // namespace

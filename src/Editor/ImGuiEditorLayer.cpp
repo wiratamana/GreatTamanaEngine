@@ -567,7 +567,25 @@ public:
         // FrameDebuggerPanel::Build()), so calling it unconditionally
         // every frame here is cheap and matches every other panel's own
         // call-site shape.
-        m_frameDebuggerPanel.Build(m_ctx);
+        //
+        // task_manager/frame-debugger-3 campaign, PHASE3 - Build() now also
+        // needs `renderer`/`renderGraph`/m_gameView (this class's own real
+        // Game-View RenderTexture - see the class comment above) to service
+        // its own real capture TRIGGER (TriggerCapture(), called from
+        // BuildToolbarRow()), plus this frame's real GPU-skinning pass
+        // names (see PHASE2's BuildRealFrameDebuggerSnapshot()) - resolved
+        // right here, from `game`, mirroring RenderPasses.cpp's own
+        // AddGpuSkinningPasses() identical resolution (a second, harmless,
+        // idempotent call - CollectGpuSkinningDispatchRequests() is a
+        // plain, side-effect-free const query, see AnimationSystem.h).
+        {
+            std::vector<std::string> gpuSkinningPassNames;
+            for (const AnimationSystem::GpuSkinningDispatchRequest& request :
+                game.CollectGpuSkinningDispatchRequests()) {
+                gpuSkinningPassNames.push_back(request.name);
+            }
+            m_frameDebuggerPanel.Build(m_ctx, renderer, renderGraph, m_gameView, gpuSkinningPassNames);
+        }
 #if GTE_ENABLE_PROJECT_PANEL
         m_projectPanel.Build(m_ctx);
         // The Bone Viewer is its own floating window (opened on demand via
@@ -681,6 +699,19 @@ public:
         result.tabExists = FindAndFocusEditorWindow(panelName.c_str());
         return result;
     }
+
+    // task_manager/frame-debugger-3 campaign, PHASE3 - see
+    // IEditorLayer::PrepareFrameDebuggerCaptureContext()/
+    // NotifyFrameDebuggerStepConsumed()'s own doc comments (EditorLayer.h)
+    // for the full contract; both simply forward into m_frameDebuggerPanel,
+    // which owns the real FrameDebuggerCaptureContext/FrameDebuggerHistory
+    // state.
+    FrameDebuggerCaptureContext* PrepareFrameDebuggerCaptureContext() override
+    {
+        return m_frameDebuggerPanel.PrepareCaptureContextForThisFrame(m_ctx);
+    }
+
+    void NotifyFrameDebuggerStepConsumed() override { m_frameDebuggerPanel.NotifyStepConsumed(); }
 
 private:
     void ReleaseGameViewDescriptor()

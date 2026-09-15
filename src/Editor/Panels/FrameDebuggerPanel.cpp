@@ -1,6 +1,9 @@
 #include "FrameDebuggerPanel.h"
 
 #include "../EditorContext.h"
+#include "../MemoryPanelData.h" // gte::ToString(VkFormat) - reused for the real render-target format label (PHASE3).
+#include "../../Renderer/RenderGraph/RenderGraph.h"
+#include "../../Renderer/RenderTexture.h"
 
 #include <imgui.h>
 
@@ -21,6 +24,45 @@ void BuildPropertyRow(const char* label, const std::string& value)
 
 } // namespace
 
+FrameDebuggerCaptureContext* FrameDebuggerPanel::PrepareCaptureContextForThisFrame(EditorContext& ctx)
+{
+    if (!ctx.frameDebuggerWindowOpen || !m_enabled) {
+        return nullptr;
+    }
+    m_captureContext.Reset();
+    return &m_captureContext;
+}
+
+void FrameDebuggerPanel::NotifyStepConsumed() noexcept
+{
+    m_stepCaptureRequested = true;
+}
+
+void FrameDebuggerPanel::TriggerCapture()
+{
+    if (m_frameRenderer == nullptr || m_frameRenderGraph == nullptr || m_frameGameView == nullptr) {
+        // Defensive only - Build() below always sets these, unconditionally,
+        // before BuildToolbarRow() (the only caller of TriggerCapture())
+        // ever runs, so this should be unreachable in practice.
+        return;
+    }
+
+    const rg::RenderGraphSnapshot graphSnapshot =
+        m_frameRenderGraph->LastSnapshot(rg::ExecuteTimingMode::SynchronousImmediateReadback);
+
+    FrameDebuggerRenderTargetInfo renderTargetInfo;
+    const VkExtent2D extent = m_frameGameView->Extent();
+    renderTargetInfo.width = static_cast<int>(extent.width);
+    renderTargetInfo.height = static_cast<int>(extent.height);
+    renderTargetInfo.format = ToString(m_frameGameView->Format());
+
+    const FrameDebuggerSnapshot snapshot =
+        BuildRealFrameDebuggerSnapshot(graphSnapshot, m_captureContext, m_frameGpuSkinningPassNames, renderTargetInfo);
+
+    m_history.CaptureFrame(*m_frameRenderer, snapshot, *m_frameGameView);
+    m_selectedEventIndex = -1;
+}
+
 void FrameDebuggerPanel::BuildToolbarRow(EditorContext& ctx)
 {
     const bool wasEnabled = m_enabled;
@@ -36,7 +78,37 @@ void FrameDebuggerPanel::BuildToolbarRow(EditorContext& ctx)
         // inspecting a paused frame should not be silently un-paused
         // just for closing/disabling this debug window).
         ctx.playbackPaused = true;
+
+        // PHASE3 (task_manager/frame-debugger-3/
+        // PHASE3_FRAME_HISTORY_RING_BUFFER_AND_CAPTURE_TRIGGER.md, Step
+        // 3.2, call site 1) - the very first "Enable" click also performs
+        // the very first real capture, so the tree is never left showing
+        // nothing the moment Enable is checked. NOTE: this exact frame's
+        // own m_captureContext was armed based on m_enabled as of the END
+        // of LAST frame (still false) - see
+        // PrepareCaptureContextForThisFrame(), called earlier THIS frame,
+        // before Game::Render() ever ran - so this particular capture's
+        // own shader/texture/matrix facts may be empty (a real, honest
+        // "GameView" leaf with real draw-stats/blend-Z-stencil info, just
+        // no per-draw facts yet); real per-draw facts start flowing from
+        // the NEXT captured frame onward, once arming has caught up. This
+        // is the same one-frame lag every other Editor<->engine feedback
+        // loop in this codebase already accepts (see e.g.
+        // IEditorLayer::IsPlaybackPaused()'s own doc comment).
+        TriggerCapture();
     }
+
+    ImGui::SameLine();
+
+    // PHASE3's new explicit "Capture" button - re-captures on demand
+    // without stepping (e.g. after moving the Scene-view camera, or after
+    // an unrelated scene edit, while the simulation itself stays paused).
+    // Only enabled/clickable while m_enabled is true.
+    ImGui::BeginDisabled(!m_enabled);
+    if (ImGui::Button("Capture")) {
+        TriggerCapture();
+    }
+    ImGui::EndDisabled();
 
     ImGui::SameLine();
 
@@ -52,6 +124,23 @@ void FrameDebuggerPanel::BuildToolbarRow(EditorContext& ctx)
     ImGui::BeginDisabled();
     ImGui::Combo("##FrameDebuggerMode", &modeIndex, kModeItems, 1);
     ImGui::EndDisabled();
+
+    // PHASE3's Step-triggered capture (call site 2) - serviced HERE
+    // (rather than back where NotifyStepConsumed() itself was called,
+    // Application::Run(), early in the frame, well before Game::Render()
+    // even ran) because TriggerCapture() needs THIS frame's now-FINAL
+    // RenderGraphSnapshot/FrameDebuggerCaptureContext/Game View pixels,
+    // all of which only become available once BuildUI() (and therefore
+    // this very Build() call) runs, later in the SAME frame Step was
+    // consumed. Re-checks m_enabled here (its freshest value THIS frame,
+    // including any edit the Enable checkbox above just made) rather than
+    // trusting whatever it was back when NotifyStepConsumed() was called.
+    if (m_stepCaptureRequested) {
+        m_stepCaptureRequested = false;
+        if (m_enabled) {
+            TriggerCapture();
+        }
+    }
 }
 
 void FrameDebuggerPanel::BuildFrameStepperRow()
@@ -257,8 +346,21 @@ void FrameDebuggerPanel::BuildEventDetailsSection(const std::optional<FrameDebug
     }
 }
 
-void FrameDebuggerPanel::Build(EditorContext& ctx)
+void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg::RenderGraph& renderGraph,
+    RenderTexture& gameView, const std::vector<std::string>& gpuSkinningPassNamesThisFrame)
 {
+    // PHASE3 - cached for TriggerCapture()'s own use for the rest of THIS
+    // call (BuildToolbarRow(), below, is the only thing that reads these) -
+    // see this class's own header comment for why these are safe,
+    // non-owning raw pointers/reference here. Set unconditionally, even
+    // though the window itself may turn out to be closed below - cheap
+    // (a few pointer/reference copies), and keeps this the ONE place that
+    // ever touches these members.
+    m_frameRenderer = &renderer;
+    m_frameRenderGraph = &renderGraph;
+    m_frameGameView = &gameView;
+    m_frameGpuSkinningPassNames = gpuSkinningPassNamesThisFrame;
+
     if (!ctx.frameDebuggerWindowOpen) {
         return;
     }
@@ -285,6 +387,12 @@ void FrameDebuggerPanel::Build(EditorContext& ctx)
     if (!m_enabled) {
         ImGui::TextDisabled("Enable Frame Debugger above to inspect the current frame's render events.");
     } else {
+        // PHASE3 explicitly does NOT switch this over to m_history's real
+        // data yet (that is PHASE4's job - see this file's own header
+        // comment) - the displayed tree/inspector still read the exact
+        // same placeholder this campaign's earlier phases already used,
+        // even though a real capture genuinely happened above (in
+        // BuildToolbarRow()) and m_history now genuinely holds it.
         const FrameDebuggerSnapshot snapshot = BuildPlaceholderFrameDebuggerSnapshot();
 
         const float totalAvailWidth = ImGui::GetContentRegionAvail().x;

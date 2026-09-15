@@ -607,6 +607,8 @@ if(GTE_ENABLE_EDITOR)
         src/Editor/FrameDebuggerData.cpp
         src/Editor/FrameDebuggerCapture.h
         src/Editor/FrameDebuggerCapture.cpp
+        src/Editor/FrameDebuggerHistory.h
+        src/Editor/FrameDebuggerHistory.cpp
         src/Editor/Panels/HierarchyPanel.h
         src/Editor/Panels/HierarchyPanel.cpp
         src/Editor/Panels/InspectorPanel.h

@@ -23,6 +23,18 @@ class Renderer;
 class Game;
 class AtmosphereLutRenderer;
 
+// Editor-only type (src/Editor/FrameDebuggerCapture.h) - forward-declared
+// ONLY (never #included here), since EditorLayer.h is a CORE, always-
+// compiled file (see task_manager/frame-debugger-3/
+// PHASE1_RENDERER_CAPTURE_INSTRUMENTATION.md's own Step 3.1b, applied here
+// exactly like src/Game/RenderSystem.h already does) that must still
+// compile with GTE_ENABLE_EDITOR=OFF, a build where this type does not
+// exist at all. A bare forward declaration of a pointee is always legal
+// even when the type is never defined in this translation unit, since
+// PrepareFrameDebuggerCaptureContext() below only ever needs a POINTER to
+// it.
+class FrameDebuggerCaptureContext;
+
 namespace rg {
 class RenderGraph;
 class RenderGraphBuilder;
@@ -358,6 +370,37 @@ public:
     // affects. Always returns tabExists == false for NullEditorLayer (a
     // release build has no Editor UI/tabs to activate at all).
     virtual TabActivationResult ActivateTab(const std::string& panelName) = 0;
+
+    // task_manager/frame-debugger-3 campaign, PHASE3
+    // (PHASE3_FRAME_HISTORY_RING_BUFFER_AND_CAPTURE_TRIGGER.md, Step 3.4) -
+    // the ONE place that decides whether the Frame Debugger's real capture
+    // context is ARMED for THIS frame's Game-View render: returns a real,
+    // non-null pointer (already Reset() for this fresh frame) whenever the
+    // Frame Debugger window is currently open AND its own "Enable" toggle
+    // is on, or nullptr otherwise (the overwhelmingly common case - see
+    // PHASE1's own "zero-overhead-when-disarmed" requirement). Call ONCE
+    // per frame, BEFORE Game::Render()'s Game-View branch runs (see
+    // Application::Run(), which threads the result straight into
+    // RenderPasses.h's AddGameViewPass()) - this necessarily reflects
+    // whatever the user's "Enable"/open state was as of the END of the
+    // PREVIOUS frame's BuildUI() call, the exact same one-frame lag every
+    // other Editor<->engine feedback loop in this codebase already has
+    // (see e.g. IsPlaybackPaused()'s own doc comment). Always nullptr for
+    // NullEditorLayer (a release build has no Frame Debugger to arm).
+    virtual FrameDebuggerCaptureContext* PrepareFrameDebuggerCaptureContext() = 0;
+
+    // The Frame Debugger's own Step-triggered capture (PHASE3's Step 3.2,
+    // call site 2) - called by Application::Run() right where
+    // TryConsumeStepRequest() above is already checked, i.e. BEFORE
+    // Game::Render() even runs this frame, whenever that call returned
+    // true. Merely records "a Step happened this frame" - the REAL capture
+    // (which needs this frame's now-FINAL RenderGraphSnapshot/
+    // FrameDebuggerCaptureContext/Game View pixels) is actually performed
+    // later the SAME frame, from inside BuildUI() (see
+    // Panels/FrameDebuggerPanel.cpp's own TriggerCapture()), once the
+    // Game-View render this Step just drove has genuinely finished. A
+    // no-op for NullEditorLayer.
+    virtual void NotifyFrameDebuggerStepConsumed() = 0;
 };
 
 // Constructs the real ImGui-backed editor layer, or the inert Null one,

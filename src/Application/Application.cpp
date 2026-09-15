@@ -321,6 +321,19 @@ int Application::Run()
         const bool steppedThisFrame = playbackPaused && stepRequestedRaw;
         m_engineContext.time.Advance(deltaSeconds, playbackPaused, steppedThisFrame, kFixedStepSeconds);
 
+        // task_manager/frame-debugger-3 campaign, PHASE3
+        // (PHASE3_FRAME_HISTORY_RING_BUFFER_AND_CAPTURE_TRIGGER.md, Step
+        // 3.2, call site 2) - records "a Step happened this frame" for the
+        // Frame Debugger's own later use (its real capture, which needs
+        // this frame's now-FINAL RenderGraphSnapshot/Game View pixels, only
+        // actually runs later THIS SAME frame, from inside BuildUI() - see
+        // IEditorLayer::NotifyFrameDebuggerStepConsumed()'s own doc
+        // comment). Called right where TryConsumeStepRequest() above is
+        // already checked - a no-op for NullEditorLayer.
+        if (steppedThisFrame) {
+            m_editorLayer->NotifyFrameDebuggerStepConsumed();
+        }
+
         m_editorLayer->NewFrame();
 
         // network-impl-7 campaign - drains at most ONE pending
@@ -386,6 +399,21 @@ int Application::Run()
         // Step 3.5 guidance - never silently swallowed.
         RenderTexture* gameTarget = m_editorLayer->GameViewTarget();
         RenderTexture* sceneTarget = m_editorLayer->SceneViewTarget();
+
+        // task_manager/frame-debugger-3 campaign, PHASE3
+        // (PHASE3_FRAME_HISTORY_RING_BUFFER_AND_CAPTURE_TRIGGER.md, Step
+        // 3.4) - decides whether the Frame Debugger's real capture context
+        // is ARMED for THIS frame's Game-View render (nullptr the
+        // overwhelmingly common case - see PHASE1's own "zero-overhead-
+        // when-disarmed" requirement). Obtained here, BEFORE Game::Render()
+        // ever runs this frame, and threaded straight into AddGameViewPass()
+        // below - see IEditorLayer::PrepareFrameDebuggerCaptureContext()'s
+        // own doc comment. `frameDebuggerCapture` is a bare, forward-
+        // declared pointer type (see EditorLayer.h) - this whole file never
+        // dereferences it, so no #if GTE_ENABLE_EDITOR guard is needed here
+        // (see task_manager/frame-debugger-3/
+        // PHASE1_RENDERER_CAPTURE_INSTRUMENTATION.md's own Step 3.1b).
+        FrameDebuggerCaptureContext* frameDebuggerCapture = m_editorLayer->PrepareFrameDebuggerCaptureContext();
 
         // network-impl-2 campaign, Phase 3
         // (PHASE3_GAME_VIEW_CAPTURE_AND_GET_GAME_VIEW_ENDPOINT.md) - the
@@ -514,7 +542,8 @@ int Application::Run()
 
                             const rg::TextureHandle h =
                                 b.ImportTexture("GameView", gameTarget->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
-                            AddGameViewPass(b, m_game, m_renderer, h, aspect, gpuSkinningBuffers, recordGameSkyBackground);
+                            AddGameViewPass(b, m_game, m_renderer, h, aspect, gpuSkinningBuffers, recordGameSkyBackground,
+                                frameDebuggerCapture);
                             outputs.push_back(h);
 
                             // 3.3 - the Aerial Perspective Composite pass -
