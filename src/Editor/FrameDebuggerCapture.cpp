@@ -1,0 +1,65 @@
+#include "FrameDebuggerCapture.h"
+
+#include <algorithm>
+
+namespace gte {
+
+FrameDebuggerStandardPipelineState DescribeStandardPipelineState()
+{
+    // Every value below is transcribed directly from Pipeline.cpp's own
+    // real, hardcoded construction code (confirmed at implementation
+    // time - never guessed from an operator's name alone):
+    //   - colorBlendAttachment.blendEnable = VK_FALSE                      -> "Opaque (no blend)".
+    //   - rasterizer.depthClampEnable left at its zero-initialized default
+    //     (VK_FALSE) -> real geometry IS clipped against the near/far
+    //     planes -> ZClip "On".
+    //   - depthStencil.depthTestEnable = VK_TRUE, depthCompareOp =
+    //     VK_COMPARE_OP_LESS - this is "Less", NOT "LEqual"/"LessEqual"
+    //     (that would be the currently-unused VK_COMPARE_OP_LESS_OR_EQUAL).
+    //   - depthStencil.depthWriteEnable = VK_TRUE -> ZWrite "On".
+    //   - rasterizer.cullMode = VK_CULL_MODE_NONE -> Cull "None".
+    //   - depthStencil.stencilTestEnable = VK_FALSE, no stencil struct
+    //     populated anywhere -> every stencil field "n/a (no stencil test)".
+    FrameDebuggerStandardPipelineState state;
+    state.blendMode = "Opaque (no blend)";
+    state.zClip = "On";
+    state.zTest = "Less";
+    state.zWrite = "On";
+    state.cull = "None";
+    state.stencilRef = "n/a (no stencil test)";
+    state.stencilComp = "n/a (no stencil test)";
+    state.stencilPass = "n/a (no stencil test)";
+    state.stencilFail = "n/a (no stencil test)";
+    state.stencilZFail = "n/a (no stencil test)";
+    return state;
+}
+
+void FrameDebuggerCaptureContext::RecordDraw(
+    const std::string& pipelineDebugName, const std::string& materialTextureDebugName, const Mat4& viewProjection)
+{
+    ++m_drawCallCount;
+
+    if (!pipelineDebugName.empty()
+        && std::find(m_pipelineDebugNames.begin(), m_pipelineDebugNames.end(), pipelineDebugName)
+            == m_pipelineDebugNames.end()) {
+        m_pipelineDebugNames.push_back(pipelineDebugName);
+    }
+
+    if (!materialTextureDebugName.empty()
+        && std::find(m_materialTextureDebugNames.begin(), m_materialTextureDebugNames.end(), materialTextureDebugName)
+            == m_materialTextureDebugNames.end()) {
+        m_materialTextureDebugNames.push_back(materialTextureDebugName);
+    }
+
+    m_lastViewProjection = viewProjection;
+}
+
+void FrameDebuggerCaptureContext::Reset()
+{
+    m_pipelineDebugNames.clear();
+    m_materialTextureDebugNames.clear();
+    m_drawCallCount = 0;
+    m_lastViewProjection = Mat4::Identity();
+}
+
+} // namespace gte

@@ -131,9 +131,13 @@ public:
     // factory's own persistent MaterialDescriptorSetLayout() through to
     // Pipeline's constructor - meaningful (and expected to be true) only
     // when vertexLayout is VertexLayout::PositionNormalUv.
+    // `debugName` (optional, default nullptr) is a purely cosmetic,
+    // human-readable Pipeline identity label - forwarded straight through
+    // to Pipeline's own constructor (see Pipeline.h's own `debugName`
+    // comment) - task_manager/frame-debugger-3, PHASE1.
     Pipeline CreatePipeline(VkFormat colorFormat, const std::string& vertexShaderSpirvPath,
         const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor,
-        bool useMaterialTexture = false) const;
+        bool useMaterialTexture = false, const char* debugName = nullptr) const;
 
     // See Renderer::CreateComputePipeline() (Phase 2 -
     // COMPUTE_PHASE2_PIPELINE_INFRASTRUCTURE_STRATEGY_v1.md). Builds a

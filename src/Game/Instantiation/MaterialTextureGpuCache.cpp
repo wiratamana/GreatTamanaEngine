@@ -48,9 +48,18 @@ TextureHandle MaterialTextureGpuCache::Resolve(
         return kInvalidTextureHandle;
     }
 
+    // A genuinely per-instance debug name (derived from this texture
+    // asset's own Guid), NOT the old literal constant "MaterialTexture"
+    // every real MaterialTexture used to share - see task_manager/
+    // frame-debugger-3/PHASE1_RENDERER_CAPTURE_INSTRUMENTATION.md's Step 2:
+    // RenderSystem::Draw()'s FrameDebuggerCaptureContext needs every
+    // DISTINCT real bound MaterialTexture to actually report a DISTINCT
+    // name (via Renderer::GetMemoryDebugName()), which the old shared
+    // literal string could never do.
+    const std::string debugName = "MaterialTexture " + textureGuid.ToString();
     const TextureHandle handle = renderSystem.RegisterTexture(renderer.CreateMaterialTexture2D(
         decoded->rgba8Pixels.data(), static_cast<int>(decoded->width), static_cast<int>(decoded->height),
-        "MaterialTexture"));
+        debugName.c_str()));
     m_cache.emplace(textureGuid, handle);
     return handle;
 }

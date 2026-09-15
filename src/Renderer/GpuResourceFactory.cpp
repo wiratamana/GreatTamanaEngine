@@ -278,11 +278,12 @@ void GpuResourceFactory::ImmediateSubmit(const std::function<void(VkCommandBuffe
 }
 
 Pipeline GpuResourceFactory::CreatePipeline(VkFormat colorFormat, const std::string& vertexShaderSpirvPath,
-    const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout, bool useMaterialTexture) const
+    const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout, bool useMaterialTexture,
+    const char* debugName) const
 {
     const VkDescriptorSetLayout materialSetLayout = useMaterialTexture ? m_materialSetLayout : VK_NULL_HANDLE;
     return Pipeline(m_device, colorFormat, m_depthFormat, vertexShaderSpirvPath, fragmentShaderSpirvPath, vertexLayout,
-        materialSetLayout);
+        materialSetLayout, debugName);
 }
 
 ComputePipeline GpuResourceFactory::CreateComputePipeline(const std::string& shaderSpirvPath,

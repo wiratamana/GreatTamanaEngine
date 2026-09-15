@@ -19,6 +19,17 @@ namespace gte {
 
 class Renderer;
 
+// Editor-only type (src/Editor/FrameDebuggerCapture.h) - forward-declared
+// ONLY (never #included here), since RenderSystem.h is a CORE, always-
+// compiled file that must still compile (and, per RenderSystem.cpp, LINK)
+// cleanly with GTE_ENABLE_EDITOR=OFF, a build where this type does not
+// exist at all - see task_manager/frame-debugger-3/
+// PHASE1_RENDERER_CAPTURE_INSTRUMENTATION.md's own Step 3.1b. A bare
+// forward declaration of a pointee is always legal even when the type is
+// never defined in this translation unit, since Draw() below only ever
+// needs a POINTER to it.
+class FrameDebuggerCaptureContext;
+
 // One queued draw call's worth of PLAIN data, extracted from the ECS world -
 // a MeshHandle/PipelineHandle/TextureHandle triple (never a Mesh&/Pipeline*/
 // MaterialTexture* - see ECS/Components/MeshRenderer.h) plus the world
@@ -110,7 +121,18 @@ public:
     // kInvalidTextureHandle - the normal untextured case - or a stale
     // handle) simply draws with no material texture bound (VK_NULL_HANDLE -
     // see Renderer::Submit()'s own `materialDescriptorSet` parameter).
-    void Draw(Registry& registry, Renderer& renderer, float aspectWidthOverHeight);
+    //
+    // `capture` (optional, default nullptr - see FrameDebuggerCaptureContext
+    // above, task_manager/frame-debugger-3, PHASE1) is only ever a real,
+    // non-null, ARMED pointer for the Game-View-driving call site, and only
+    // from PHASE3 onward - every existing call site (including this whole
+    // campaign's own PHASE1) keeps compiling completely unchanged against
+    // this new parameter's default. When armed, records real per-draw facts
+    // (Pipeline debug name/MaterialTexture debug name/view-projection
+    // matrix) for every resolved draw this call issues - see
+    // FrameDebuggerCaptureContext::RecordDraw().
+    void Draw(Registry& registry, Renderer& renderer, float aspectWidthOverHeight,
+        FrameDebuggerCaptureContext* capture = nullptr);
 
     // Explicit-view-projection overload of Draw() above, for a caller that
     // already has its own view-projection matrix to render with instead of
@@ -121,8 +143,13 @@ public:
     // active Camera component (that's still what the float-aspect overload
     // above, used by the Game view, resolves via
     // ResolveActiveCameraViewProjection()). The float-aspect overload above
-    // is implemented purely in terms of this one.
-    void Draw(Registry& registry, Renderer& renderer, const Mat4& viewProjection);
+    // is implemented purely in terms of this one. `capture` - see the
+    // float-aspect overload above's own comment; Scene View's own call site
+    // (unaffected by this campaign - see PHASE0's Locked Design Decision
+    // #7) stays at its default nullptr forever, since Scene View is out of
+    // scope for the whole Frame Debugger feature.
+    void Draw(Registry& registry, Renderer& renderer, const Mat4& viewProjection,
+        FrameDebuggerCaptureContext* capture = nullptr);
 
 private:
     ResourcePool<Mesh, MeshHandle> m_meshes;

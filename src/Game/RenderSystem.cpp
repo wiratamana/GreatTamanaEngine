@@ -4,6 +4,20 @@
 #include "Profiling/ScopeTimer.h"
 #include "Renderer/Renderer.h"
 
+// FrameDebuggerCaptureContext (src/Editor/FrameDebuggerCapture.h) is an
+// Editor-only type - RenderSystem.h above only ever forward-declares it
+// (see that header's own comment). This real #include, AND every actual
+// dereference of a `capture` pointer below, must stay wrapped in
+// `#if GTE_ENABLE_EDITOR` - a GTE_ENABLE_EDITOR=OFF build compiles this
+// whole file fine either way (the forward declaration is enough), but
+// would FAIL TO LINK if an unconditional RecordDraw() call site referenced
+// a type/function that's never compiled into that configuration at all.
+// See task_manager/frame-debugger-3/
+// PHASE1_RENDERER_CAPTURE_INSTRUMENTATION.md's own Step 3.1b.
+#if GTE_ENABLE_EDITOR
+#include "../Editor/FrameDebuggerCapture.h"
+#endif
+
 namespace gte {
 
 std::vector<DrawCommand> RenderSystem::CollectRenderables(Registry& registry)
@@ -66,12 +80,14 @@ Mat4 RenderSystem::ResolveActiveCameraViewProjection(Registry& registry, float a
     return Mat4::Identity();
 }
 
-void RenderSystem::Draw(Registry& registry, Renderer& renderer, float aspectWidthOverHeight)
+void RenderSystem::Draw(
+    Registry& registry, Renderer& renderer, float aspectWidthOverHeight, FrameDebuggerCaptureContext* capture)
 {
-    Draw(registry, renderer, ResolveActiveCameraViewProjection(registry, aspectWidthOverHeight));
+    Draw(registry, renderer, ResolveActiveCameraViewProjection(registry, aspectWidthOverHeight), capture);
 }
 
-void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& viewProjection)
+void RenderSystem::Draw(
+    Registry& registry, Renderer& renderer, const Mat4& viewProjection, FrameDebuggerCaptureContext* capture)
 {
     GTE_PROFILE_SCOPE("RenderSystem::Draw");
 
@@ -82,6 +98,23 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& view
             const MaterialTexture* materialTexture = m_textures.TryGet(command.texture);
             const VkDescriptorSet descriptorSet =
                 materialTexture != nullptr ? materialTexture->descriptorSet : VK_NULL_HANDLE;
+
+#if GTE_ENABLE_EDITOR
+            // Zero-overhead-when-disarmed: this whole block collapses to
+            // one already-taken "is this pointer null" branch when
+            // `capture` is nullptr (the common case - every frame until
+            // PHASE3 wires a real arming trigger, and every ordinary frame
+            // afterward) - no string formatting, no vector work happens.
+            // See task_manager/frame-debugger-3/
+            // PHASE1_RENDERER_CAPTURE_INSTRUMENTATION.md's own Step 2.
+            if (capture != nullptr) {
+                const std::string materialTextureDebugName = materialTexture != nullptr
+                    ? renderer.GetMemoryDebugName(materialTexture->texture.Handle())
+                    : std::string();
+                capture->RecordDraw(pipeline->DebugName(), materialTextureDebugName, viewProjection);
+            }
+#endif
+
             renderer.Submit(*pipeline, *mesh, command.model, viewProjection, descriptorSet);
         }
     }

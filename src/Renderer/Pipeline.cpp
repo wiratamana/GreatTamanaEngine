@@ -28,8 +28,10 @@ bool DepthFormatHasStencil(VkFormat format)
 } // namespace
 
 Pipeline::Pipeline(VkDevice device, VkFormat colorFormat, VkFormat depthFormat, const std::string& vertexShaderSpirvPath,
-    const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout, VkDescriptorSetLayout materialSetLayout)
+    const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout, VkDescriptorSetLayout materialSetLayout,
+    const char* debugName)
     : m_device(device)
+    , m_debugName(debugName != nullptr ? debugName : std::string())
 {
     // Shader modules are only needed transiently, to build the VkPipeline
     // below - both are destroyed before this constructor returns (success
@@ -236,6 +238,7 @@ Pipeline::Pipeline(Pipeline&& other) noexcept
     : m_device(std::exchange(other.m_device, VK_NULL_HANDLE))
     , m_layout(std::exchange(other.m_layout, VK_NULL_HANDLE))
     , m_pipeline(std::exchange(other.m_pipeline, VK_NULL_HANDLE))
+    , m_debugName(std::move(other.m_debugName))
 {
 }
 
@@ -246,6 +249,7 @@ Pipeline& Pipeline::operator=(Pipeline&& other) noexcept
         m_device = std::exchange(other.m_device, VK_NULL_HANDLE);
         m_layout = std::exchange(other.m_layout, VK_NULL_HANDLE);
         m_pipeline = std::exchange(other.m_pipeline, VK_NULL_HANDLE);
+        m_debugName = std::move(other.m_debugName);
     }
     return *this;
 }

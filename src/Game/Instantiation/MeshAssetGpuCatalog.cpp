@@ -37,8 +37,8 @@ std::string PathToUtf8(const std::filesystem::path& path)
 PipelineHandle MeshAssetGpuCatalog::EnsureMeshPipeline(RenderSystem& renderSystem, Renderer& renderer)
 {
     if (!m_meshPipeline.IsValid()) {
-        m_meshPipeline = renderSystem.RegisterPipeline(
-            renderer.CreatePipeline("shaders/Mesh.vert.spv", "shaders/Mesh.frag.spv", VertexLayout::PositionNormal));
+        m_meshPipeline = renderSystem.RegisterPipeline(renderer.CreatePipeline("shaders/Mesh.vert.spv",
+            "shaders/Mesh.frag.spv", VertexLayout::PositionNormal, false, "Mesh.vert/Mesh.frag (PositionNormal)"));
     }
     return m_meshPipeline;
 }
@@ -46,8 +46,9 @@ PipelineHandle MeshAssetGpuCatalog::EnsureMeshPipeline(RenderSystem& renderSyste
 PipelineHandle MeshAssetGpuCatalog::EnsureTexturedMeshPipeline(RenderSystem& renderSystem, Renderer& renderer)
 {
     if (!m_texturedMeshPipeline.IsValid()) {
-        m_texturedMeshPipeline = renderSystem.RegisterPipeline(renderer.CreatePipeline("shaders/TexturedMesh.vert.spv",
-            "shaders/TexturedMesh.frag.spv", VertexLayout::PositionNormalUv, true));
+        m_texturedMeshPipeline = renderSystem.RegisterPipeline(
+            renderer.CreatePipeline("shaders/TexturedMesh.vert.spv", "shaders/TexturedMesh.frag.spv",
+                VertexLayout::PositionNormalUv, true, "TexturedMesh.vert/TexturedMesh.frag (PositionNormalUv)"));
     }
     return m_texturedMeshPipeline;
 }

@@ -14,8 +14,8 @@ PipelineHandle PrimitiveGpuCatalog::EnsureDefaultPipeline(RenderSystem& renderSy
         // Shader source lives at src/Shaders/Triangle.vert/.frag (version-
         // controlled); compiled to SPIR-V at build time by
         // cmake/CompileShaders.cmake into "<exe dir>/shaders/*.spv".
-        m_defaultPipeline = renderSystem.RegisterPipeline(
-            renderer.CreatePipeline("shaders/Triangle.vert.spv", "shaders/Triangle.frag.spv"));
+        m_defaultPipeline = renderSystem.RegisterPipeline(renderer.CreatePipeline("shaders/Triangle.vert.spv",
+            "shaders/Triangle.frag.spv", VertexLayout::PositionColor, false, "Triangle.vert/Triangle.frag (PositionColor)"));
     }
     return m_defaultPipeline;
 }

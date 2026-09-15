@@ -293,10 +293,11 @@ void Renderer::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& mo
 }
 
 Pipeline Renderer::CreatePipeline(const std::string& vertexShaderSpirvPath,
-    const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout, bool useMaterialTexture) const
+    const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout, bool useMaterialTexture,
+    const char* debugName) const
 {
     return m_resources.CreatePipeline(
-        ColorFormat(), vertexShaderSpirvPath, fragmentShaderSpirvPath, vertexLayout, useMaterialTexture);
+        ColorFormat(), vertexShaderSpirvPath, fragmentShaderSpirvPath, vertexLayout, useMaterialTexture, debugName);
 }
 
 ComputePipeline Renderer::CreateComputePipeline(const std::string& shaderSpirvPath,

@@ -476,8 +476,14 @@ public:
     // VertexLayout::PositionNormalUv (with `useMaterialTexture` = true) for
     // one meant to sample a per-submesh MaterialTexture - see
     // CreateMaterialTexture2D() below.
+    // `debugName` (optional, default nullptr) is a purely cosmetic,
+    // human-readable Pipeline identity label, forwarded straight through
+    // to Pipeline's own constructor - see Pipeline.h's own `debugName`
+    // comment and RenderSystem::Draw()'s FrameDebuggerCaptureContext
+    // consumer (task_manager/frame-debugger-3, PHASE1).
     Pipeline CreatePipeline(const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath,
-        VertexLayout vertexLayout = VertexLayout::PositionColor, bool useMaterialTexture = false) const;
+        VertexLayout vertexLayout = VertexLayout::PositionColor, bool useMaterialTexture = false,
+        const char* debugName = nullptr) const;
 
     // Factory for compute pipelines (Phase 2 -
     // COMPUTE_PHASE2_PIPELINE_INFRASTRUCTURE_STRATEGY_v1.md) - so callers

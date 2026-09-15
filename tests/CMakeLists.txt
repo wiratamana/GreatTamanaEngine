@@ -1909,6 +1909,7 @@ if(GTE_ENABLE_EDITOR)
         Editor/ProfilerPanelDataTests.cpp
         Editor/JobsPanelDataTests.cpp
         Editor/FrameDebuggerDataTests.cpp
+        Editor/FrameDebuggerCaptureTests.cpp
         Editor/AtmosphereAerialPerspectiveLutInspectionTests.cpp
     )
 

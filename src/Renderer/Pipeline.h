@@ -91,9 +91,19 @@ public:
     // layout. Left VK_NULL_HANDLE (the default) for every other vertex
     // layout, which then builds a VkPipelineLayout with no descriptor sets
     // at all, exactly as before this parameter existed.
+    // `debugName` (optional, default nullptr - stored as an empty string
+    // then) is a purely COSMETIC, human-readable label describing which
+    // real shader files/vertex layout this Pipeline was built with (e.g.
+    // "Mesh.vert/Mesh.frag (PositionNormal)") - never folded into any
+    // equality-compared/cache-key struct, mirroring RenderGraphTypes.h's
+    // own explicit "a resource's human-readable name is threaded as its
+    // OWN separate parameter" precedent (see task_manager/frame-debugger-3/
+    // PHASE1_RENDERER_CAPTURE_INSTRUMENTATION.md). Consumed by
+    // RenderSystem::Draw() when a FrameDebuggerCaptureContext is armed -
+    // see DebugName() below.
     Pipeline(VkDevice device, VkFormat colorFormat, VkFormat depthFormat, const std::string& vertexShaderSpirvPath,
         const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor,
-        VkDescriptorSetLayout materialSetLayout = VK_NULL_HANDLE);
+        VkDescriptorSetLayout materialSetLayout = VK_NULL_HANDLE, const char* debugName = nullptr);
     ~Pipeline();
 
     Pipeline(const Pipeline&) = delete;
@@ -105,12 +115,17 @@ public:
     VkPipeline Native() const noexcept { return m_pipeline; }
     VkPipelineLayout Layout() const noexcept { return m_layout; }
 
+    // See `debugName` above - empty string when this Pipeline was built
+    // with no debug name at all.
+    const std::string& DebugName() const noexcept { return m_debugName; }
+
 private:
     void Destroy() noexcept;
 
     VkDevice m_device = VK_NULL_HANDLE;
     VkPipelineLayout m_layout = VK_NULL_HANDLE;
     VkPipeline m_pipeline = VK_NULL_HANDLE;
+    std::string m_debugName;
 };
 
 } // namespace gte
