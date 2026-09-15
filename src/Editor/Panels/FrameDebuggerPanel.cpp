@@ -4,7 +4,13 @@
 
 #include <imgui.h>
 
+#include <algorithm>
+
 namespace gte {
+
+namespace {
+constexpr float kSplitterWidth = 6.0f;
+} // namespace
 
 void FrameDebuggerPanel::BuildToolbarRow(EditorContext& ctx)
 {
@@ -55,6 +61,49 @@ void FrameDebuggerPanel::BuildFrameStepperRow()
     ImGui::EndDisabled();
 }
 
+void FrameDebuggerPanel::RenderEventNode(const FrameDebuggerEventNode& node)
+{
+    if (!node.isDrawCall) {
+        // A group node (e.g. "Drawing", "Render.OpaqueGeometry") - an
+        // expandable tree header; default-open so a shallow real
+        // hierarchy is legible without extra clicking, mirroring the
+        // reference screenshot's own mostly-expanded look.
+        const bool open = ImGui::TreeNodeEx(node.name.c_str(), ImGuiTreeNodeFlags_DefaultOpen);
+        if (open) {
+            for (const FrameDebuggerEventNode& child : node.children) {
+                RenderEventNode(child);
+            }
+            ImGui::TreePop();
+        }
+        return;
+    }
+
+    // A leaf draw-call row - a single selectable line, highlighted when
+    // it matches m_selectedEventIndex; clicking it selects it (feeding
+    // PHASE6's BuildEventDetailsSection() via FindEventDetailsByIndex()).
+    const bool isSelected = (node.eventIndex == m_selectedEventIndex);
+    if (ImGui::Selectable(node.name.c_str(), isSelected)) {
+        m_selectedEventIndex = node.eventIndex;
+    }
+}
+
+void FrameDebuggerPanel::BuildEventTreePane(const FrameDebuggerSnapshot& snapshot)
+{
+    if (snapshot.rootNodes.empty()) {
+        // Always this branch this campaign - see PHASE0_MASTER_STRATEGY.md's
+        // Locked Design Decision #2: zero fake/mock rows, ever.
+        ImGui::TextDisabled("No frame captured yet.");
+        return;
+    }
+
+    // Unreachable in practice this campaign (rootNodes is always
+    // empty), but fully correct - ready for a future real-capture
+    // campaign to exercise for free.
+    for (const FrameDebuggerEventNode& root : snapshot.rootNodes) {
+        RenderEventNode(root);
+    }
+}
+
 void FrameDebuggerPanel::Build(EditorContext& ctx)
 {
     if (!ctx.frameDebuggerWindowOpen) {
@@ -83,12 +132,31 @@ void FrameDebuggerPanel::Build(EditorContext& ctx)
     if (!m_enabled) {
         ImGui::TextDisabled("Enable Frame Debugger above to inspect the current frame's render events.");
     } else {
-        // PHASE4/PHASE5/PHASE6 fill this branch in (event tree pane +
-        // splitter + inspector pane). Left as an explicit, clearly
-        // labeled placeholder for now rather than an empty branch, so a
-        // reader mid-campaign can tell this is intentionally
-        // unfinished, not accidentally empty.
-        ImGui::TextDisabled("(event tree + inspector - added in a later phase of this campaign)");
+        const FrameDebuggerSnapshot snapshot = BuildPlaceholderFrameDebuggerSnapshot();
+
+        const float totalAvailWidth = ImGui::GetContentRegionAvail().x;
+        const float paneAreaHeight = ImGui::GetContentRegionAvail().y;
+        const float maxLeftWidth = std::max(120.0f, totalAvailWidth - 200.0f - kSplitterWidth);
+        m_leftPaneWidth = std::clamp(m_leftPaneWidth, 120.0f, maxLeftWidth);
+
+        ImGui::BeginChild("FrameDebuggerEventTree", ImVec2(m_leftPaneWidth, paneAreaHeight), true);
+        BuildEventTreePane(snapshot);
+        ImGui::EndChild();
+
+        ImGui::SameLine();
+        ImGui::Button("##FrameDebuggerSplitter", ImVec2(kSplitterWidth, paneAreaHeight));
+        if (ImGui::IsItemActive()) {
+            m_leftPaneWidth += ImGui::GetIO().MouseDelta.x;
+        }
+        if (ImGui::IsItemHovered() || ImGui::IsItemActive()) {
+            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+        }
+        ImGui::SameLine();
+
+        ImGui::BeginChild("FrameDebuggerInspector", ImVec2(0.0f, paneAreaHeight), true);
+        // PHASE5/PHASE6 fill this in.
+        ImGui::TextDisabled("(inspector pane - added in a later phase of this campaign)");
+        ImGui::EndChild();
     }
 
     ImGui::End();

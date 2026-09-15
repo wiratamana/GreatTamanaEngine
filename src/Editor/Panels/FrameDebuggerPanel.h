@@ -41,6 +41,8 @@ public:
 private:
     void BuildToolbarRow(EditorContext& ctx);
     void BuildFrameStepperRow();
+    void BuildEventTreePane(const FrameDebuggerSnapshot& snapshot);
+    void RenderEventNode(const FrameDebuggerEventNode& node);
 
     // The panel's own "Enable" toggle (see FrameDebuggerData.h's own
     // top-of-file comment: this is a purely GUI concept this campaign -
@@ -49,6 +51,21 @@ private:
     // "please enable" message). False by default - a freshly-opened
     // window starts disabled, matching Unity's own Frame Debugger.
     bool m_enabled = false;
+
+    // Persisted (across frames) pixel width of the left-hand event tree
+    // pane, adjusted live by dragging the splitter - mirrors
+    // ProjectPanel::m_leftPaneWidth's own convention exactly (see
+    // Panels/ProjectPanel.cpp).
+    float m_leftPaneWidth = 320.0f;
+
+    // The currently-selected leaf event's global index (matches
+    // FrameDebuggerEventNode::eventIndex), or -1 if nothing is selected.
+    // Set by RenderEventNode()'s own click handling below; read by
+    // BuildEventDetailsSection() (PHASE6) via FindEventDetailsByIndex().
+    // Always -1 in practice this campaign (there is never a leaf node to
+    // click, since the placeholder snapshot's rootNodes is always
+    // empty), but written for real so PHASE6 needs no further plumbing.
+    int m_selectedEventIndex = -1;
 };
 
 } // namespace gte
