@@ -3,6 +3,8 @@
 #include "../FrameDebuggerData.h"
 #include "../FrameDebuggerHistory.h"
 
+#include <volk.h>
+
 #include <string>
 #include <vector>
 
@@ -49,8 +51,33 @@ class RenderGraph;
 // index, and splitter width across frames. Still called explicitly BY
 // NAME from ImGuiEditorLayer::BuildUI() - no IEditorPanel interface
 // introduced.
+// task_manager/frame-debugger-3 campaign, PHASE4
+// (PHASE4_PANEL_REAL_TREE_AND_FRAME_HISTORY_UI.md) - Build() now reads
+// PHASE3's m_history's currently-viewed entry instead of
+// BuildPlaceholderFrameDebuggerSnapshot() (falling back to that same
+// placeholder only when m_history has never captured anything yet - still a
+// real, honest, reachable "enabled, but not yet captured" state), a new
+// Frame-History mini-toolbar (BuildFrameHistoryToolbarRow()) lets the user
+// scrub across up to kCapacity past captured frames, and the RenderTarget
+// preview box displays the currently-viewed entry's own real retained
+// preview texture (m_previewDescriptor, an ImGui_ImplVulkan_AddTexture()-
+// wrapped VkDescriptorSet this class owns itself - see EnsurePreviewDescriptor()'s
+// own doc comment for why ownership lives HERE rather than in
+// ImGuiEditorLayer, mirroring BoneViewerWindow.h's own "owns its own GPU
+// texture/ImGui descriptor" precedent) instead of the "No Texture"
+// placeholder.
 class FrameDebuggerPanel {
 public:
+    FrameDebuggerPanel() = default;
+
+    // Releases m_previewDescriptor (see ReleasePreviewDescriptor()'s own doc
+    // comment for why this - not just relying on implicit member
+    // destruction - matters).
+    ~FrameDebuggerPanel();
+
+    FrameDebuggerPanel(const FrameDebuggerPanel&) = delete;
+    FrameDebuggerPanel& operator=(const FrameDebuggerPanel&) = delete;
+
     // `renderer`/`renderGraph`/`gameView` are the CURRENT frame's real,
     // already-rendered collaborators (ImGuiEditorLayer's own m_gameView,
     // the SAME Renderer/RenderGraph Application drives every frame) -
@@ -77,13 +104,66 @@ public:
     // BuildToolbarRow()).
     void NotifyStepConsumed() noexcept;
 
+    // PHASE4 - releases m_previewDescriptor (an ImGui_ImplVulkan_AddTexture()
+    // descriptor, see EnsurePreviewDescriptor()'s own doc comment), if one
+    // currently exists. MUST be called explicitly by ImGuiEditorLayer's own
+    // destructor BEFORE ImGui_ImplVulkan_Shutdown() runs (mirroring
+    // AssetPreviewMesh::Reset()/AssetPreviewTexture::Reset()/
+    // BoneViewerWindow::Reset()'s own identical requirement - see that
+    // destructor's own comment) - relying on THIS class's own destructor
+    // alone would run too late, since FrameDebuggerPanel is declared (and
+    // therefore destroyed, in reverse order) BEFORE ImGuiEditorLayer's own
+    // explicit destructor BODY (which calls ImGui_ImplVulkan_Shutdown())
+    // even starts. Safe to call repeatedly / on an already-empty instance.
+    void ReleasePreviewDescriptor();
+
 private:
     void BuildToolbarRow(EditorContext& ctx);
-    void BuildFrameStepperRow();
+    void BuildFrameHistoryToolbarRow();
+    void BuildFrameStepperRow(const FrameDebuggerSnapshot& snapshot);
     void BuildEventTreePane(const FrameDebuggerSnapshot& snapshot);
     void RenderEventNode(const FrameDebuggerEventNode& node);
-    void BuildInspectorPane(const FrameDebuggerSnapshot& snapshot);
+    void BuildInspectorPane(const FrameDebuggerSnapshot& snapshot, const FrameDebuggerHistoryEntry* currentEntry);
     void BuildEventDetailsSection(const std::optional<FrameDebuggerEventDetails>& details);
+
+    // PHASE4 - (re)creates m_previewDescriptor whenever the currently-viewed
+    // history entry's own retained preview texture's VkImageView differs
+    // from whatever m_previewDescriptor currently wraps (a history-cursor
+    // move, OR a brand-new capture landing on the same cursor position -
+    // either way, FrameDebuggerHistory::CaptureFrame() always creates a
+    // FRESH RenderTexture with a genuinely new VkImageView - see that
+    // method's own doc comment) - mirrors ImGuiEditorLayer::BuildUI()'s own
+    // "only re-wrap when the underlying VkImageView actually changed"
+    // gameViewDescriptor/sceneViewDescriptor caching logic exactly (see
+    // PHASE0_MASTER_STRATEGY.md's own Step 2 finding), just against
+    // PHASE3's retained HISTORICAL copy instead of the live, currently-
+    // rendering Game View. Releases (and leaves null) m_previewDescriptor
+    // whenever there is currently nothing to preview at all (no history
+    // entry yet, or - defensively - an entry whose own preview is
+    // std::nullopt), so BuildInspectorPane() can fall back to the "No
+    // Texture" placeholder with a single, simple `m_previewDescriptor ==
+    // VK_NULL_HANDLE` check.
+    //
+    // OWNERSHIP CHOICE (this phase's own documented Step 2 finding,
+    // PHASE4_PANEL_REAL_TREE_AND_FRAME_HISTORY_UI.md): the wrapping call
+    // itself, ImGui_ImplVulkan_AddTexture(), does NOT live in
+    // Panels/GamePanel.cpp (that file only ever consumes an ALREADY-WRAPPED
+    // VkDescriptorSet, EditorContext::gameViewDescriptor) - it lives in
+    // ImGuiEditorLayer.cpp's own BuildUI(). Rather than plumb a THIRD
+    // descriptor field onto the shared EditorContext (and a getter back out
+    // of FrameDebuggerHistory for ImGuiEditorLayer to read every frame, just
+    // to decide whether/what to re-wrap), this new preview descriptor is
+    // instead owned directly by FrameDebuggerPanel itself, exactly like
+    // BoneViewerWindow already owns its own m_descriptor/m_renderTexture
+    // pair (see BoneViewerWindow.h's own class comment: "Owns its GPU
+    // buffers/RenderTexture/ImGui descriptor/pipeline for as long as
+    // they're needed") - FrameDebuggerPanel is already a stateful class that
+    // owns comparable per-frame state (m_captureContext, m_history), so this
+    // is the smallest, most self-contained change: no new EditorContext
+    // field, no new ImGuiEditorLayer method, and the ImGui/Vulkan wrapping
+    // detail stays entirely local to the one class that actually displays
+    // it.
+    void EnsurePreviewDescriptor();
 
     // PHASE3's own Step 3.2 - performs ONE real capture: builds PHASE2's
     // real FrameDebuggerSnapshot from THIS frame's already-cached
@@ -129,6 +209,27 @@ private:
 
     // PHASE3 - the real multi-frame ring buffer (see FrameDebuggerHistory.h).
     FrameDebuggerHistory m_history;
+
+    // PHASE4 - this class's own ImGui-side descriptor for the currently-
+    // viewed history entry's retained preview texture (see
+    // EnsurePreviewDescriptor()'s own doc comment above). VK_NULL_HANDLE
+    // whenever there is nothing to preview right now.
+    VkDescriptorSet m_previewDescriptor = VK_NULL_HANDLE;
+
+    // Which VkImageView m_previewDescriptor currently wraps - compared
+    // against the currently-viewed history entry's own preview->View() every
+    // Build() call to decide whether EnsurePreviewDescriptor() needs to
+    // re-wrap (mirrors ImGuiEditorLayer's own m_lastKnownGameView/
+    // m_lastKnownSceneView convention exactly).
+    VkImageView m_lastKnownPreviewView = VK_NULL_HANDLE;
+
+    // The live VkDevice, refreshed unconditionally every Build() call from
+    // `renderer.GetVulkanContextInfo().device` (cheap - a few field reads) -
+    // used only by this class's own destructor (see ~FrameDebuggerPanel())
+    // to safely wait for the GPU to be idle before its final
+    // ImGui_ImplVulkan_RemoveTexture() call, mirroring BoneViewerWindow's own
+    // m_device precedent.
+    VkDevice m_device = VK_NULL_HANDLE;
 
     // This-frame-only cached context for TriggerCapture()'s own use - see
     // Build() above. Non-owning: every one of these points at a long-lived

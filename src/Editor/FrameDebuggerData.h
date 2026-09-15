@@ -164,6 +164,19 @@ std::string FormatFrameStepperLabel(int currentEventIndex, int totalEventCount);
 // reimplementing the same clamp.
 int ClampSelectedEventIndex(int requested, int totalEventCount);
 
+// PHASE4 (task_manager/frame-debugger-3/PHASE4_PANEL_REAL_TREE_AND_FRAME_HISTORY_UI.md)
+// - formats the NEW Frame-History mini-toolbar's label: "Frame 3 of 8" for a
+// 0-based cursorIndex == 2 into an 8-slot history (1-based display,
+// matching FormatFrameStepperLabel()'s own convention above) - this is a
+// COMPLETELY SEPARATE axis from FormatFrameStepperLabel() (Locked Design
+// Decision #4, PHASE0_MASTER_STRATEGY.md: "which CAPTURED FRAME (of up to
+// FrameDebuggerHistory::kCapacity) is being viewed", never to be conflated
+// with "which EVENT, within the currently-viewed captured frame, is
+// selected"). Returns "Frame 0 of 0" whenever count <= 0 (a fresh, never-
+// captured-into FrameDebuggerHistory) rather than a divide-by-zero-adjacent
+// "Frame 1 of 0".
+std::string FormatFrameHistoryLabel(int cursorIndex, int count);
+
 // Recursively searches `snapshot.rootNodes` (and every descendant) for a
 // leaf node (isDrawCall == true) whose eventIndex == eventIndex,
 // returning its `details` if found. Returns std::nullopt if

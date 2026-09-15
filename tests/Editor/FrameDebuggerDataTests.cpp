@@ -44,6 +44,19 @@ TEST(FrameDebuggerDataTest, ClampSelectedEventIndexTest)
     EXPECT_EQ(ClampSelectedEventIndex(4, 10), 4); // Identity for an already-valid index.
 }
 
+// task_manager/frame-debugger-3 campaign, PHASE4
+// (PHASE4_PANEL_REAL_TREE_AND_FRAME_HISTORY_UI.md) - the NEW Frame-History
+// mini-toolbar's own label formatter, a completely separate axis from
+// FormatFrameStepperLabelTest above (Locked Design Decision #4).
+TEST(FrameDebuggerDataTest, FormatFrameHistoryLabelTest)
+{
+    EXPECT_EQ(FormatFrameHistoryLabel(0, 0), "Frame 0 of 0");
+    EXPECT_EQ(FormatFrameHistoryLabel(-1, 0), "Frame 0 of 0");
+    EXPECT_EQ(FormatFrameHistoryLabel(0, 1), "Frame 1 of 1");
+    EXPECT_EQ(FormatFrameHistoryLabel(2, 8), "Frame 3 of 8");
+    EXPECT_EQ(FormatFrameHistoryLabel(7, 8), "Frame 8 of 8");
+}
+
 TEST(FrameDebuggerDataTest, FindEventDetailsByIndexTest)
 {
     // Hand-build a small, synthetic, non-empty FrameDebuggerSnapshot - the

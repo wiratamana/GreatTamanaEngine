@@ -3,8 +3,10 @@
 #include "../EditorContext.h"
 #include "../MemoryPanelData.h" // gte::ToString(VkFormat) - reused for the real render-target format label (PHASE3).
 #include "../../Renderer/RenderGraph/RenderGraph.h"
+#include "../../Renderer/Renderer.h"
 #include "../../Renderer/RenderTexture.h"
 
+#include <backends/imgui_impl_vulkan.h>
 #include <imgui.h>
 
 #include <algorithm>
@@ -23,6 +25,50 @@ void BuildPropertyRow(const char* label, const std::string& value)
 }
 
 } // namespace
+
+FrameDebuggerPanel::~FrameDebuggerPanel()
+{
+    // Same "wait for the GPU to actually be done with it first" reasoning as
+    // BoneViewerWindow::Reset() - m_previewDescriptor may still be
+    // referenced by an in-flight command buffer from a recent frame.
+    if (m_device != VK_NULL_HANDLE && m_previewDescriptor != VK_NULL_HANDLE) {
+        vkDeviceWaitIdle(m_device);
+    }
+    ReleasePreviewDescriptor();
+}
+
+void FrameDebuggerPanel::ReleasePreviewDescriptor()
+{
+    if (m_previewDescriptor != VK_NULL_HANDLE) {
+        ImGui_ImplVulkan_RemoveTexture(m_previewDescriptor);
+        m_previewDescriptor = VK_NULL_HANDLE;
+        m_lastKnownPreviewView = VK_NULL_HANDLE;
+    }
+}
+
+void FrameDebuggerPanel::EnsurePreviewDescriptor()
+{
+    const FrameDebuggerHistoryEntry* entry = m_history.CurrentEntry();
+    const bool hasPreview = (entry != nullptr) && entry->preview.has_value();
+
+    if (!hasPreview) {
+        // Nothing to preview right now (no capture has ever happened yet) -
+        // release any stale descriptor so BuildInspectorPane() falls back to
+        // the "No Texture" placeholder cleanly.
+        ReleasePreviewDescriptor();
+        return;
+    }
+
+    const VkImageView currentView = entry->preview->View();
+    if (m_previewDescriptor != VK_NULL_HANDLE && currentView == m_lastKnownPreviewView) {
+        return; // Already wrapping the right VkImageView - nothing to do.
+    }
+
+    ReleasePreviewDescriptor();
+    m_previewDescriptor = ImGui_ImplVulkan_AddTexture(
+        entry->preview->Sampler(), currentView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    m_lastKnownPreviewView = currentView;
+}
 
 FrameDebuggerCaptureContext* FrameDebuggerPanel::PrepareCaptureContextForThisFrame(EditorContext& ctx)
 {
@@ -143,18 +189,55 @@ void FrameDebuggerPanel::BuildToolbarRow(EditorContext& ctx)
     }
 }
 
-void FrameDebuggerPanel::BuildFrameStepperRow()
+void FrameDebuggerPanel::BuildFrameHistoryToolbarRow()
 {
-    // Always "0 of 0" this campaign - see FrameDebuggerData.h's
-    // FormatFrameStepperLabel() doc comment. Rendered as a disabled
-    // slider (visual parity with the reference screenshot's scrubber)
-    // plus the same text label a real implementation will show.
-    int stepperValue = 0;
+    // PHASE4's new Frame-History mini-toolbar - a COMPLETELY SEPARATE
+    // control from BuildFrameStepperRow() below (Locked Design Decision #4,
+    // PHASE0_MASTER_STRATEGY.md): this one scrubs across WHICH CAPTURED
+    // FRAME (of up to FrameDebuggerHistory::kCapacity) is being viewed, not
+    // which event within it is selected. Deliberately shown regardless of
+    // m_enabled - a user may have disabled further capturing but still want
+    // to scrub back through frames captured earlier this session.
+    const int count = m_history.Count();
+    const int cursor = m_history.CursorIndex();
+
+    ImGui::TextUnformatted("Frame History");
+    ImGui::SameLine();
+
+    ImGui::BeginDisabled(count == 0 || cursor <= 0);
+    if (ImGui::ArrowButton("##FrameDebuggerHistoryPrev", ImGuiDir_Left)) {
+        m_history.StepCursor(-1);
+    }
+    ImGui::EndDisabled();
+
+    ImGui::SameLine();
+    const std::string label = FormatFrameHistoryLabel(cursor, count);
+    ImGui::TextUnformatted(label.c_str());
+    ImGui::SameLine();
+
+    ImGui::BeginDisabled(count == 0 || cursor >= count - 1);
+    if (ImGui::ArrowButton("##FrameDebuggerHistoryNext", ImGuiDir_Right)) {
+        m_history.StepCursor(1);
+    }
+    ImGui::EndDisabled();
+}
+
+void FrameDebuggerPanel::BuildFrameStepperRow(const FrameDebuggerSnapshot& snapshot)
+{
+    // PHASE4 - now shows REAL numbers (this is the EXISTING "which event,
+    // within the currently-viewed captured frame, is selected" axis - see
+    // Locked Design Decision #4; do not conflate this with
+    // BuildFrameHistoryToolbarRow() above). The slider itself stays a purely
+    // cosmetic, disabled control (matching the reference screenshot's own
+    // scrubber look) - clicking a tree row (RenderEventNode() below) is
+    // still the only way to change m_selectedEventIndex this campaign.
+    int stepperValue = m_selectedEventIndex < 0 ? 0 : m_selectedEventIndex;
     ImGui::BeginDisabled();
     ImGui::SetNextItemWidth(200.0f);
-    ImGui::SliderInt("##FrameDebuggerStepper", &stepperValue, 0, 0, "");
+    ImGui::SliderInt(
+        "##FrameDebuggerStepper", &stepperValue, 0, std::max(0, snapshot.totalEventCount - 1), "");
     ImGui::SameLine();
-    const std::string label = FormatFrameStepperLabel(-1, 0);
+    const std::string label = FormatFrameStepperLabel(m_selectedEventIndex, snapshot.totalEventCount);
     ImGui::TextUnformatted(label.c_str());
     ImGui::EndDisabled();
 }
@@ -188,21 +271,21 @@ void FrameDebuggerPanel::RenderEventNode(const FrameDebuggerEventNode& node)
 void FrameDebuggerPanel::BuildEventTreePane(const FrameDebuggerSnapshot& snapshot)
 {
     if (snapshot.rootNodes.empty()) {
-        // Always this branch this campaign - see PHASE0_MASTER_STRATEGY.md's
+        // Real, reachable state whenever m_history has never captured
+        // anything yet (e.g. the window was just opened and "Enable"/
+        // "Capture" hasn't run this session) - see PHASE0_MASTER_STRATEGY.md's
         // Locked Design Decision #2: zero fake/mock rows, ever.
         ImGui::TextDisabled("No frame captured yet.");
         return;
     }
 
-    // Unreachable in practice this campaign (rootNodes is always
-    // empty), but fully correct - ready for a future real-capture
-    // campaign to exercise for free.
     for (const FrameDebuggerEventNode& root : snapshot.rootNodes) {
         RenderEventNode(root);
     }
 }
 
-void FrameDebuggerPanel::BuildInspectorPane(const FrameDebuggerSnapshot& snapshot)
+void FrameDebuggerPanel::BuildInspectorPane(
+    const FrameDebuggerSnapshot& snapshot, const FrameDebuggerHistoryEntry* currentEntry)
 {
     // --- RenderTarget selector row (frame-level, not event-level) ---
     ImGui::TextUnformatted("RenderTarget");
@@ -238,45 +321,64 @@ void FrameDebuggerPanel::BuildInspectorPane(const FrameDebuggerSnapshot& snapsho
     ImGui::SliderFloat("##FrameDebuggerLevels", &levelsValue, 0.0f, 1.0f, "");
     ImGui::EndDisabled();
 
-    // --- Texture preview placeholder box ---
+    // --- Texture preview box ---
     const std::string resolutionCaption = std::to_string(snapshot.renderTarget.width) + "x"
         + std::to_string(snapshot.renderTarget.height) + "  " + snapshot.renderTarget.format;
     ImGui::TextDisabled("%s", resolutionCaption.c_str());
 
+    const std::optional<FrameDebuggerEventDetails> details
+        = FindEventDetailsByIndex(snapshot, m_selectedEventIndex);
+
+    // PHASE4 - real preview display (Locked Design Decision #5,
+    // PHASE0_MASTER_STRATEGY.md): the retained preview texture is a
+    // per-CAPTURED-FRAME thing (one real image, taken right when the
+    // "GameView" pass finished), not a per-EVENT thing - so it is shown
+    // whenever the currently-viewed history entry actually has one,
+    // EXCEPT when the currently-SELECTED event is a GPU-skinning leaf
+    // (details->passName == "GPU Skinning" - see FrameDebuggerData.cpp's
+    // own BuildGpuSkinningLeaf()) - a compute dispatch genuinely has no
+    // color image of its own, and showing one anyway would be dishonest.
+    // Nothing selected (m_selectedEventIndex == -1) falls through to
+    // showing the texture too, matching the RenderTarget row's own
+    // "frame-level, not event-level" framing immediately above.
+    const bool selectedEventIsGpuSkinning = details.has_value() && details->passName == "GPU Skinning";
+    const bool showPreviewTexture =
+        (m_previewDescriptor != VK_NULL_HANDLE) && (currentEntry != nullptr) && !selectedEventIsGpuSkinning;
+
     const float previewHeight = std::max(120.0f, ImGui::GetContentRegionAvail().y * 0.5f);
     ImGui::BeginChild("FrameDebuggerTexturePreview", ImVec2(0.0f, previewHeight), true);
     {
-        const ImVec2 avail = ImGui::GetContentRegionAvail();
-        const char* placeholderText = "No Texture";
-        const ImVec2 textSize = ImGui::CalcTextSize(placeholderText);
-        ImGui::SetCursorPos(ImVec2(
-            std::max(0.0f, (avail.x - textSize.x) * 0.5f), std::max(0.0f, (avail.y - textSize.y) * 0.5f)));
-        ImGui::TextDisabled("%s", placeholderText);
+        if (showPreviewTexture) {
+            const ImVec2 avail = ImGui::GetContentRegionAvail();
+            if (avail.x >= 1.0f && avail.y >= 1.0f) {
+                ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(m_previewDescriptor)), avail);
+            }
+        } else {
+            const ImVec2 avail = ImGui::GetContentRegionAvail();
+            const char* placeholderText = "No Texture";
+            const ImVec2 textSize = ImGui::CalcTextSize(placeholderText);
+            ImGui::SetCursorPos(ImVec2(
+                std::max(0.0f, (avail.x - textSize.x) * 0.5f), std::max(0.0f, (avail.y - textSize.y) * 0.5f)));
+            ImGui::TextDisabled("%s", placeholderText);
+        }
     }
     ImGui::EndChild();
 
     ImGui::Separator();
 
-    const std::optional<FrameDebuggerEventDetails> details
-        = FindEventDetailsByIndex(snapshot, m_selectedEventIndex);
     BuildEventDetailsSection(details);
 }
 
 void FrameDebuggerPanel::BuildEventDetailsSection(const std::optional<FrameDebuggerEventDetails>& details)
 {
     if (!details.has_value()) {
-        // ALWAYS this branch in production this campaign - see this
-        // file's own top-of-file comment and PHASE0_MASTER_STRATEGY.md's
-        // Locked Design Decision #2. Not a bug; the correct final state.
+        // Real, reachable state whenever nothing is currently selected
+        // (e.g. right after a fresh capture, which always resets
+        // m_selectedEventIndex to -1 - see TriggerCapture()).
         ImGui::TextDisabled("No event selected.");
         return;
     }
 
-    // Unreachable in practice this campaign (details is always
-    // std::nullopt - see FindEventDetailsByIndex()'s own doc comment in
-    // FrameDebuggerData.h), but fully correct and ready for a future
-    // real-capture campaign to exercise for free the moment
-    // FrameDebuggerEventNode::details starts being populated for real.
     const FrameDebuggerEventDetails& d = *details;
 
     ImGui::Text("Event #%d: %s", d.eventIndex, d.eventLabel.c_str());
@@ -361,6 +463,11 @@ void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg:
     m_frameGameView = &gameView;
     m_frameGpuSkinningPassNames = gpuSkinningPassNamesThisFrame;
 
+    // PHASE4 - refreshed unconditionally every call, cheap, mirrors
+    // BoneViewerWindow's own m_device precedent - only ever actually read by
+    // this class's own destructor (see ~FrameDebuggerPanel()).
+    m_device = renderer.GetVulkanContextInfo().device;
+
     if (!ctx.frameDebuggerWindowOpen) {
         return;
     }
@@ -381,20 +488,62 @@ void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg:
 
     BuildToolbarRow(ctx);
     ImGui::Separator();
-    BuildFrameStepperRow();
+
+    // PHASE4 (task_manager/frame-debugger-3/
+    // PHASE4_PANEL_REAL_TREE_AND_FRAME_HISTORY_UI.md, Step 3.1) - swap the
+    // displayed snapshot's own source from BuildPlaceholderFrameDebuggerSnapshot()
+    // to m_history's currently-viewed entry, falling back to that exact
+    // same placeholder's own empty-tree behavior whenever no real capture
+    // has ever happened yet this session (m_history.CurrentEntry() ==
+    // nullptr) - a real, honest, reachable "enabled, but not yet captured"
+    // state (see BuildEventTreePane()'s own updated comment above).
+    const FrameDebuggerHistoryEntry* currentEntry = m_history.CurrentEntry();
+    const FrameDebuggerSnapshot snapshot =
+        (currentEntry != nullptr) ? currentEntry->snapshot : BuildPlaceholderFrameDebuggerSnapshot();
+
+    // PHASE4 - clears any stale event selection whenever the VIEWED history
+    // entry itself changes underneath us (a Frame-History Prev/Next
+    // navigation - see BuildFrameHistoryToolbarRow() below; a brand-new
+    // capture already resets m_selectedEventIndex directly, in
+    // TriggerCapture()). eventIndex values are only meaningful relative to
+    // the specific snapshot they were assigned in - carrying a selection
+    // over to a DIFFERENT captured frame's tree (which may have a
+    // completely different shape, e.g. no GPU-skinning leaves this time)
+    // could otherwise highlight/describe the wrong event by sheer index
+    // coincidence. Compared via the entry's own retained preview
+    // VkImageView (guaranteed fresh on every single real capture - see
+    // FrameDebuggerHistory::CaptureFrame()'s own doc comment), captured
+    // BEFORE EnsurePreviewDescriptor() below updates it.
+    {
+        const VkImageView previousPreviewView = m_lastKnownPreviewView;
+        const VkImageView newPreviewView =
+            (currentEntry != nullptr && currentEntry->preview.has_value()) ? currentEntry->preview->View()
+                                                                            : VK_NULL_HANDLE;
+        if (newPreviewView != previousPreviewView) {
+            m_selectedEventIndex = -1;
+        }
+    }
+
+    // PHASE4 - keeps m_previewDescriptor in sync with whichever history
+    // entry is currently being viewed (see EnsurePreviewDescriptor()'s own
+    // doc comment). Called unconditionally here (cheap - a no-op unless the
+    // underlying VkImageView actually changed), not gated on m_enabled,
+    // since the Frame-History toolbar below lets a user scrub through past
+    // captures even while further capturing is currently disabled.
+    EnsurePreviewDescriptor();
+
+    // PHASE4's new Frame-History mini-toolbar - see BuildFrameHistoryToolbarRow()'s
+    // own doc comment for why this is a SEPARATE control from the
+    // event-stepper row immediately below (Locked Design Decision #4).
+    BuildFrameHistoryToolbarRow();
+    ImGui::Separator();
+
+    BuildFrameStepperRow(snapshot);
     ImGui::Separator();
 
     if (!m_enabled) {
         ImGui::TextDisabled("Enable Frame Debugger above to inspect the current frame's render events.");
     } else {
-        // PHASE3 explicitly does NOT switch this over to m_history's real
-        // data yet (that is PHASE4's job - see this file's own header
-        // comment) - the displayed tree/inspector still read the exact
-        // same placeholder this campaign's earlier phases already used,
-        // even though a real capture genuinely happened above (in
-        // BuildToolbarRow()) and m_history now genuinely holds it.
-        const FrameDebuggerSnapshot snapshot = BuildPlaceholderFrameDebuggerSnapshot();
-
         const float totalAvailWidth = ImGui::GetContentRegionAvail().x;
         const float paneAreaHeight = ImGui::GetContentRegionAvail().y;
         const float maxLeftWidth = std::max(120.0f, totalAvailWidth - 200.0f - kSplitterWidth);
@@ -415,7 +564,7 @@ void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg:
         ImGui::SameLine();
 
         ImGui::BeginChild("FrameDebuggerInspector", ImVec2(0.0f, paneAreaHeight), true);
-        BuildInspectorPane(snapshot);
+        BuildInspectorPane(snapshot, currentEntry);
         ImGui::EndChild();
     }
 

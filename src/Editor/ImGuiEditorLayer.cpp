@@ -263,6 +263,13 @@ public:
         ReleaseGameViewDescriptor();
         ReleaseSceneViewDescriptor();
         ReleaseBlurredSceneOutputDescriptor();
+        // task_manager/frame-debugger-3 campaign, PHASE4 - same "release
+        // BEFORE ImGui_ImplVulkan_Shutdown()" requirement as
+        // Release*Descriptor() above (m_frameDebuggerPanel is declared,
+        // and therefore destroyed, later than m_context - see this class's
+        // own member-order comment below - so its OWN destructor alone
+        // would run too late otherwise).
+        m_frameDebuggerPanel.ReleasePreviewDescriptor();
 #if GTE_ENABLE_PROJECT_PANEL
         // Must release its own GPU texture/ImGui descriptor(s) BEFORE
         // ImGui_ImplVulkan_Shutdown() below - member destruction order
@@ -827,6 +834,15 @@ private:
     // "Window" menu (DockLayout.cpp) - but it is still owned here and
     // called explicitly by name from BuildUI() below, exactly like every
     // other stateful panel.
+    //
+    // task_manager/frame-debugger-3 campaign, PHASE4 - now also owns its own
+    // ImGui-side descriptor for its real retained preview texture (see
+    // FrameDebuggerPanel.h's own class comment) - this is why its
+    // ReleasePreviewDescriptor() must be called explicitly from THIS
+    // class's own destructor above, BEFORE ImGui_ImplVulkan_Shutdown(),
+    // since this member is declared (and destroyed, in reverse order) AFTER
+    // m_context, m_context's own real-Shutdown() teardown is called from an
+    // explicit destructor BODY that runs before any member destructor.
     FrameDebuggerPanel m_frameDebuggerPanel;
 
 #if GTE_ENABLE_PROJECT_PANEL

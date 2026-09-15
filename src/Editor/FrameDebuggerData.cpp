@@ -42,6 +42,20 @@ int ClampSelectedEventIndex(int requested, int totalEventCount)
     return requested;
 }
 
+std::string FormatFrameHistoryLabel(int cursorIndex, int count)
+{
+    if (count <= 0) {
+        return "Frame 0 of 0";
+    }
+    // 1-based display, matching FormatFrameStepperLabel()'s own convention -
+    // a negative cursorIndex (defensive only; FrameDebuggerHistory never
+    // actually produces one once count > 0 - see
+    // ClampFrameDebuggerHistoryCursor()) displays as "Frame 1", not "Frame
+    // 0", for the same "never below the first real display index" reason.
+    const int displayIndex = cursorIndex < 0 ? 1 : (cursorIndex + 1);
+    return "Frame " + std::to_string(displayIndex) + " of " + std::to_string(count);
+}
+
 namespace {
 
 std::optional<FrameDebuggerEventDetails> FindEventDetailsByIndexRecursive(
