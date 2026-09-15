@@ -1912,6 +1912,7 @@ if(GTE_ENABLE_EDITOR)
         Editor/FrameDebuggerCaptureTests.cpp
         Editor/FrameDebuggerHistoryTests.cpp
         Editor/FrameDebuggerSnapshotBuilderTests.cpp
+        Editor/FrameDebuggerPreviewProcessingTests.cpp
         Editor/AtmosphereAerialPerspectiveLutInspectionTests.cpp
     )
 

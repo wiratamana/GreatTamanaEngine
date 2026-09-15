@@ -2,6 +2,7 @@
 
 #include "../FrameDebuggerData.h"
 #include "../FrameDebuggerHistory.h"
+#include "../FrameDebuggerPreviewProcessing.h"
 
 #include <volk.h>
 
@@ -210,18 +211,66 @@ private:
     // PHASE3 - the real multi-frame ring buffer (see FrameDebuggerHistory.h).
     FrameDebuggerHistory m_history;
 
+    // PHASE6 (task_manager/frame-debugger-3/PHASE6_CHANNELS_AND_LEVELS_REAL_PREVIEW.md)
+    // - the real, persisted Channels/Levels state (Locked Design Decision
+    // #8, PHASE0_MASTER_STRATEGY.md). Defaults ("All", [0, 1]) are the
+    // neutral/no-op case - EnsurePreviewDescriptor() below displays the RAW
+    // retained history texture directly whenever both are still at these
+    // defaults, skipping the compute dispatch entirely (a valid, cheap
+    // optimization - see that phase's own Step 3.2).
+    FrameDebuggerPreviewChannel m_channel = FrameDebuggerPreviewChannel::All;
+    float m_levelsBlack = 0.0f;
+    float m_levelsWhite = 1.0f;
+
+    // PHASE6 - the dedicated, small, on-demand GPU compute dispatcher this
+    // panel owns (see FrameDebuggerPreviewProcessing.h's own class comment)
+    // - NEVER touches the retained history entry's own texture in place;
+    // always writes into its own separate, persistent scratch texture.
+    FrameDebuggerPreviewRenderer m_previewProcessor;
+
+    // PHASE6 - "is the currently-processed preview still up to date"
+    // bookkeeping, so EnsurePreviewDescriptor() only actually re-dispatches
+    // the compute shader when m_channel/m_levelsBlack/m_levelsWhite/the
+    // viewed history entry's own retained texture genuinely changed since
+    // the last dispatch - never every single ImGui frame (see PHASE6's own
+    // Step 2 "only recompute when dirty" discipline).
+    VkImageView m_lastProcessedSourceView = VK_NULL_HANDLE;
+    FrameDebuggerPreviewChannel m_lastProcessedChannel = FrameDebuggerPreviewChannel::All;
+    float m_lastProcessedLevelsBlack = 0.0f;
+    float m_lastProcessedLevelsWhite = 1.0f;
+
     // PHASE4 - this class's own ImGui-side descriptor for the currently-
-    // viewed history entry's retained preview texture (see
-    // EnsurePreviewDescriptor()'s own doc comment above). VK_NULL_HANDLE
-    // whenever there is nothing to preview right now.
+    // displayed preview image (PHASE6: either the currently-viewed history
+    // entry's RAW retained texture, or m_previewProcessor's own processed
+    // scratch texture - see EnsurePreviewDescriptor()'s own doc comment
+    // above for exactly which one, and when). VK_NULL_HANDLE whenever there
+    // is nothing to preview right now.
     VkDescriptorSet m_previewDescriptor = VK_NULL_HANDLE;
 
     // Which VkImageView m_previewDescriptor currently wraps - compared
-    // against the currently-viewed history entry's own preview->View() every
-    // Build() call to decide whether EnsurePreviewDescriptor() needs to
-    // re-wrap (mirrors ImGuiEditorLayer's own m_lastKnownGameView/
-    // m_lastKnownSceneView convention exactly).
+    // against EnsurePreviewDescriptor()'s own freshly-computed "desired"
+    // view every call to decide whether it needs to re-wrap (mirrors
+    // ImGuiEditorLayer's own m_lastKnownGameView/m_lastKnownSceneView
+    // convention exactly). PHASE6: this is now DELIBERATELY DIFFERENT from
+    // "which raw history entry is being viewed" (see
+    // m_lastKnownRawPreviewView below) - a non-neutral Channels/Levels
+    // state means this wraps m_previewProcessor's own scratch VkImageView
+    // instead of the raw retained one.
     VkImageView m_lastKnownPreviewView = VK_NULL_HANDLE;
+
+    // PHASE6 - a SEPARATE piece of bookkeeping from m_lastKnownPreviewView
+    // above, tracking ONLY the currently-viewed history entry's own RAW
+    // retained texture VkImageView (never the processed scratch one) -
+    // Build()'s own "did the viewed history entry itself change underneath
+    // us" detection (which resets m_selectedEventIndex to -1 on a
+    // Frame-History Prev/Next navigation) MUST compare against this, not
+    // m_lastKnownPreviewView - reusing m_lastKnownPreviewView for that check
+    // would incorrectly reset the selection on EVERY SINGLE frame whenever
+    // a non-neutral Channels/Levels state is active (since it then wraps
+    // the processed view, which never equals the raw entry's own view by
+    // construction). Refreshed unconditionally once per Build() call,
+    // before EnsurePreviewDescriptor() runs.
+    VkImageView m_lastKnownRawPreviewView = VK_NULL_HANDLE;
 
     // The live VkDevice, refreshed unconditionally every Build() call from
     // `renderer.GetVulkanContextInfo().device` (cheap - a few field reads) -

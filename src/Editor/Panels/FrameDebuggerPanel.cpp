@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <utility>
 
 namespace gte {
 
@@ -30,8 +31,15 @@ FrameDebuggerPanel::~FrameDebuggerPanel()
 {
     // Same "wait for the GPU to actually be done with it first" reasoning as
     // BoneViewerWindow::Reset() - m_previewDescriptor may still be
-    // referenced by an in-flight command buffer from a recent frame.
-    if (m_device != VK_NULL_HANDLE && m_previewDescriptor != VK_NULL_HANDLE) {
+    // referenced by an in-flight command buffer from a recent frame. PHASE6
+    // widened this to an unconditional wait (whenever a live VkDevice is
+    // even known) rather than gating on m_previewDescriptor alone -
+    // m_previewProcessor (PHASE6) may itself own live GPU resources
+    // (a ComputePipeline/descriptor set/scratch Texture2D) even in the rare
+    // case m_previewDescriptor happens to be null at shutdown time, and
+    // those must be just as safe to destroy as m_previewDescriptor's own
+    // wrapped texture.
+    if (m_device != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(m_device);
     }
     ReleasePreviewDescriptor();
@@ -59,15 +67,42 @@ void FrameDebuggerPanel::EnsurePreviewDescriptor()
         return;
     }
 
-    const VkImageView currentView = entry->preview->View();
-    if (m_previewDescriptor != VK_NULL_HANDLE && currentView == m_lastKnownPreviewView) {
+    // PHASE6 (task_manager/frame-debugger-3/PHASE6_CHANNELS_AND_LEVELS_REAL_PREVIEW.md,
+    // Step 3.2) - Channels/Levels at their neutral defaults is a valid,
+    // cheap optimization: display the RAW retained history texture
+    // directly, skipping the compute dispatch entirely. Anything else
+    // re-dispatches FrameDebuggerPreviewRenderer (only when actually dirty -
+    // see below) and displays ITS OWN separate scratch texture instead -
+    // the retained historical copy itself is never mutated in place
+    // (Locked Design Decision #8).
+    const bool isNeutral =
+        (m_channel == FrameDebuggerPreviewChannel::All) && (m_levelsBlack <= 0.0f) && (m_levelsWhite >= 1.0f);
+
+    VkImageView desiredView = entry->preview->View();
+    VkSampler desiredSampler = entry->preview->Sampler();
+
+    if (!isNeutral && m_frameRenderer != nullptr) {
+        const VkImageView sourceView = entry->preview->View();
+        const bool dirty = (m_lastProcessedSourceView != sourceView) || (m_lastProcessedChannel != m_channel)
+            || (m_lastProcessedLevelsBlack != m_levelsBlack) || (m_lastProcessedLevelsWhite != m_levelsWhite);
+        if (dirty) {
+            m_previewProcessor.RenderPreview(*m_frameRenderer, *entry->preview, m_channel, m_levelsBlack, m_levelsWhite);
+            m_lastProcessedSourceView = sourceView;
+            m_lastProcessedChannel = m_channel;
+            m_lastProcessedLevelsBlack = m_levelsBlack;
+            m_lastProcessedLevelsWhite = m_levelsWhite;
+        }
+        desiredView = m_previewProcessor.OutputView();
+        desiredSampler = m_previewProcessor.OutputSampler();
+    }
+
+    if (m_previewDescriptor != VK_NULL_HANDLE && desiredView == m_lastKnownPreviewView) {
         return; // Already wrapping the right VkImageView - nothing to do.
     }
 
     ReleasePreviewDescriptor();
-    m_previewDescriptor = ImGui_ImplVulkan_AddTexture(
-        entry->preview->Sampler(), currentView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    m_lastKnownPreviewView = currentView;
+    m_previewDescriptor = ImGui_ImplVulkan_AddTexture(desiredSampler, desiredView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    m_lastKnownPreviewView = desiredView;
 }
 
 FrameDebuggerCaptureContext* FrameDebuggerPanel::PrepareCaptureContextForThisFrame(EditorContext& ctx)
@@ -302,24 +337,48 @@ void FrameDebuggerPanel::BuildInspectorPane(
     ImGui::SameLine();
     ImGui::TextUnformatted("Channels");
     ImGui::SameLine();
-    // Cosmetic-only toggle row - no real channel-isolation concept
-    // exists this campaign (there is no real texture to isolate a
-    // channel of yet). Purely visual parity with the reference
-    // screenshot; clicking these currently has no effect beyond its own
-    // pressed-highlight look.
-    for (const char* channelLabel : { "All", "R", "G", "B", "A" }) {
+    // PHASE6 (task_manager/frame-debugger-3/PHASE6_CHANNELS_AND_LEVELS_REAL_PREVIEW.md,
+    // Locked Design Decision #8) - now genuinely real: clicking a button
+    // sets m_channel directly (read by EnsurePreviewDescriptor()), and is
+    // highlighted (reusing the existing ImGuiCol_ButtonActive theme color -
+    // never a hardcoded one, mirroring BoneViewerWindow.cpp/
+    // Panels/InspectorPanel.cpp's own splitter-button precedent) exactly
+    // when it is the currently active channel.
+    static constexpr std::pair<const char*, FrameDebuggerPreviewChannel> kChannelButtons[] = {
+        { "All", FrameDebuggerPreviewChannel::All },
+        { "R", FrameDebuggerPreviewChannel::R },
+        { "G", FrameDebuggerPreviewChannel::G },
+        { "B", FrameDebuggerPreviewChannel::B },
+        { "A", FrameDebuggerPreviewChannel::A },
+    };
+    for (const auto& [channelLabel, channelValue] : kChannelButtons) {
         ImGui::SameLine();
-        ImGui::SmallButton(channelLabel);
+        const bool isActive = (m_channel == channelValue);
+        if (isActive) {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+        }
+        if (ImGui::SmallButton(channelLabel)) {
+            m_channel = channelValue;
+        }
+        if (isActive) {
+            ImGui::PopStyleColor();
+        }
     }
 
     // --- Levels slider (frame-level) ---
     ImGui::TextUnformatted("Levels");
     ImGui::SameLine();
-    float levelsValue = 0.0f;
     ImGui::SetNextItemWidth(-1.0f);
-    ImGui::BeginDisabled();
-    ImGui::SliderFloat("##FrameDebuggerLevels", &levelsValue, 0.0f, 1.0f, "");
-    ImGui::EndDisabled();
+    // A real two-handle range control (PHASE6) - writes m_levelsBlack/
+    // m_levelsWhite directly (read by EnsurePreviewDescriptor()).
+    // ImGuiSliderFlags_AlwaysClamp keeps both handles inside [0, 1] and
+    // never lets them cross - the extra clamp immediately below is cheap,
+    // purely defensive insurance on top of that (ApplyFrameDebuggerPreviewTransform()'s
+    // own remap already tolerates a degenerate/inverted pair without ever
+    // dividing by zero regardless).
+    ImGui::DragFloatRange2("##FrameDebuggerLevels", &m_levelsBlack, &m_levelsWhite, 0.005f, 0.0f, 1.0f, "Black %.2f",
+        "White %.2f", ImGuiSliderFlags_AlwaysClamp);
+    m_levelsWhite = std::max(m_levelsWhite, m_levelsBlack + 0.001f);
 
     // --- Texture preview box ---
     const std::string resolutionCaption = std::to_string(snapshot.renderTarget.width) + "x"
@@ -510,18 +569,25 @@ void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg:
     // over to a DIFFERENT captured frame's tree (which may have a
     // completely different shape, e.g. no GPU-skinning leaves this time)
     // could otherwise highlight/describe the wrong event by sheer index
-    // coincidence. Compared via the entry's own retained preview
+    // coincidence. Compared via the entry's own RAW retained preview
     // VkImageView (guaranteed fresh on every single real capture - see
-    // FrameDebuggerHistory::CaptureFrame()'s own doc comment), captured
-    // BEFORE EnsurePreviewDescriptor() below updates it.
+    // FrameDebuggerHistory::CaptureFrame()'s own doc comment) tracked in
+    // m_lastKnownRawPreviewView - PHASE6 deliberately does NOT reuse
+    // m_lastKnownPreviewView for this check anymore, since that field can
+    // now instead hold m_previewProcessor's own processed scratch
+    // VkImageView (a non-neutral Channels/Levels state) - see
+    // m_lastKnownRawPreviewView's own doc comment (FrameDebuggerPanel.h) for
+    // why reusing m_lastKnownPreviewView here would have incorrectly reset
+    // the selection on every single frame in that case.
     {
-        const VkImageView previousPreviewView = m_lastKnownPreviewView;
-        const VkImageView newPreviewView =
+        const VkImageView previousRawPreviewView = m_lastKnownRawPreviewView;
+        const VkImageView newRawPreviewView =
             (currentEntry != nullptr && currentEntry->preview.has_value()) ? currentEntry->preview->View()
                                                                             : VK_NULL_HANDLE;
-        if (newPreviewView != previousPreviewView) {
+        if (newRawPreviewView != previousRawPreviewView) {
             m_selectedEventIndex = -1;
         }
+        m_lastKnownRawPreviewView = newRawPreviewView;
     }
 
     // PHASE4 - keeps m_previewDescriptor in sync with whichever history

@@ -609,6 +609,8 @@ if(GTE_ENABLE_EDITOR)
         src/Editor/FrameDebuggerCapture.cpp
         src/Editor/FrameDebuggerHistory.h
         src/Editor/FrameDebuggerHistory.cpp
+        src/Editor/FrameDebuggerPreviewProcessing.h
+        src/Editor/FrameDebuggerPreviewProcessing.cpp
         src/Editor/Panels/HierarchyPanel.h
         src/Editor/Panels/HierarchyPanel.cpp
         src/Editor/Panels/InspectorPanel.h
@@ -909,6 +911,18 @@ gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereAerialPerspectiveVolumeDe
 # route level, not here). Does NOT #include AtmosphereCommon.glsl, so no
 # EXTRA_DEPENDS.
 gte_add_shader(GreatTamanaEngine src/Shaders/VolumeTexturePreview.comp)
+
+# task_manager/frame-debugger-3 campaign, PHASE6
+# (PHASE6_CHANNELS_AND_LEVELS_REAL_PREVIEW.md) - the Frame Debugger's own
+# Channels/Levels preview-compositing compute shader
+# (src/Editor/FrameDebuggerPreviewProcessing.h/.cpp). Only compiled/staged
+# when GTE_ENABLE_EDITOR is ON, since FrameDebuggerPreviewProcessing.cpp -
+# the only thing that ever loads it - isn't compiled into gte_core otherwise
+# (same precedent as BoxBlur.comp/SceneGrid.vert/frag above). Does NOT
+# #include AtmosphereCommon.glsl, so no EXTRA_DEPENDS.
+if(GTE_ENABLE_EDITOR)
+    gte_add_shader(GreatTamanaEngine src/Shaders/FrameDebuggerPreview.comp)
+endif()
 
 
 
