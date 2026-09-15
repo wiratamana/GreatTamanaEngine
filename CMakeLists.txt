@@ -603,6 +603,8 @@ if(GTE_ENABLE_EDITOR)
         src/Editor/ProfilerPanelData.cpp
         src/Editor/JobsPanelData.h
         src/Editor/JobsPanelData.cpp
+        src/Editor/FrameDebuggerData.h
+        src/Editor/FrameDebuggerData.cpp
         src/Editor/Panels/HierarchyPanel.h
         src/Editor/Panels/HierarchyPanel.cpp
         src/Editor/Panels/InspectorPanel.h
