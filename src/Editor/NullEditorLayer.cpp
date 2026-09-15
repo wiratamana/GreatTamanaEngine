@@ -39,6 +39,8 @@ public:
     bool WantsExit() const override { return false; }
     bool WantsCaptureMouse() const override { return false; }
     bool WantsCaptureKeyboard() const override { return false; }
+    bool IsPlaybackPaused() const override { return false; }
+    bool TryConsumeStepRequest() override { return false; }
     TabActivationResult ActivateTab(const std::string& /*panelName*/) override { return TabActivationResult{}; }
 };
 

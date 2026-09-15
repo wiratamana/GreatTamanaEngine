@@ -639,6 +639,22 @@ public:
         return ImGui::GetIO().WantCaptureKeyboard;
     }
 
+    // frame-debugger-1 campaign (task_manager/frame-debugger-1/
+    // PHASE3_EDITOR_PAUSE_STEP_STATE_AND_TOOLBAR_UI.md) - see
+    // IEditorLayer::IsPlaybackPaused()/TryConsumeStepRequest() for the full
+    // contract. Backed directly by EditorContext's own two toggle fields
+    // (see PlaybackControls.cpp, the only place that writes them).
+    bool IsPlaybackPaused() const override { return m_ctx.playbackPaused; }
+
+    bool TryConsumeStepRequest() override
+    {
+        if (!m_ctx.stepOneFrameRequested) {
+            return false;
+        }
+        m_ctx.stepOneFrameRequested = false;
+        return true;
+    }
+
     // network-impl-7 campaign - see IEditorLayer::ActivateTab()'s own doc
     // comment (EditorLayer.h) for the full contract. Must set the current
     // ImGui context first, same as every other method in this class that

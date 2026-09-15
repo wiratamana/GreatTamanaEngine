@@ -318,6 +318,29 @@ public:
     // ImGuiIO::WantCaptureKeyboard. Always false for NullEditorLayer.
     virtual bool WantsCaptureKeyboard() const = 0;
 
+    // frame-debugger-1 campaign (task_manager/frame-debugger-1/
+    // PHASE3_EDITOR_PAUSE_STEP_STATE_AND_TOOLBAR_UI.md) - true whenever the
+    // user currently has gameplay simulation paused via the toolbar (see
+    // PlaybackControls.h). Read once per frame by Application::Run(), BEFORE
+    // NewFrame(), to decide this frame's EngineContext::Time::Advance() call
+    // (see PHASE4) - this necessarily reflects whatever the user last clicked
+    // as of the END of the PREVIOUS frame's BuildUI() call, exactly one frame
+    // of lag, the same acceptable lag every other Editor<->engine feedback
+    // loop in this codebase already has (see e.g. GameViewTarget()'s own doc
+    // comment on resize lag). Always false for NullEditorLayer (a release
+    // build has no toolbar to pause with at all).
+    virtual bool IsPlaybackPaused() const = 0;
+
+    // True, and CLEARS the pending request (read-and-clear, exactly once), if
+    // the user clicked "Step" since the last time this was called - false on
+    // every other call, including every call after the first one following a
+    // given click. Called unconditionally once per frame by
+    // Application::Run() (see PHASE4) so a stray/stale request set while NOT
+    // actually paused (should never happen - the button is rendered disabled
+    // then - but this is defensive) is still drained rather than left
+    // dangling forever. Always false for NullEditorLayer.
+    virtual bool TryConsumeStepRequest() = 0;
+
     // network-impl-7 campaign - brings the named Editor panel/tab to the
     // front (Dear ImGui's own SetWindowFocus(), which for a DOCKED window
     // selects it as its dock node's active tab - exactly like a user

@@ -190,6 +190,24 @@ struct EditorContext {
     // above has never been turned on) - Panels/ScenePanel.cpp falls back
     // to sceneViewDescriptor whenever this is still null.
     VkDescriptorSet blurredSceneOutputDescriptor = VK_NULL_HANDLE;
+
+    // frame-debugger-1 campaign (task_manager/frame-debugger-1/
+    // PHASE3_EDITOR_PAUSE_STEP_STATE_AND_TOOLBAR_UI.md) - true whenever the
+    // user has toggled gameplay simulation paused via the toolbar's
+    // Pause/Resume button (see PlaybackControls.h). False by default - a
+    // brand-new session behaves EXACTLY like before this campaign (nothing
+    // paused, Game::Update() simulates normally every frame) until the user
+    // explicitly pauses. Read once per frame by
+    // Application::Run()/IEditorLayer::IsPlaybackPaused() - see PHASE4.
+    bool playbackPaused = false;
+
+    // True for exactly the one frame after the user clicks "Step" while
+    // playbackPaused is already true - set by PlaybackControls.cpp's own
+    // button handler, consumed (read-and-cleared) by
+    // IEditorLayer::TryConsumeStepRequest() - see PHASE4. Clicking "Step"
+    // while NOT already paused is a no-op (the button is rendered disabled
+    // while playbackPaused is false - see PlaybackControls.cpp).
+    bool stepOneFrameRequested = false;
 };
 
 } // namespace gte

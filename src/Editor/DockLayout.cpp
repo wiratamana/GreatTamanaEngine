@@ -1,7 +1,7 @@
 #include "DockLayout.h"
-
 #include "EditorContext.h"
 #include "EditorPanelCatalog.h"
+#include "PlaybackControls.h"
 #include "SceneIO.h"
 
 #include "../Game/Game.h"
@@ -150,6 +150,12 @@ void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer
         }
         ImGui::EndMenuBar();
     }
+
+    // frame-debugger-1 campaign (task_manager/frame-debugger-1/
+    // PHASE3_EDITOR_PAUSE_STEP_STATE_AND_TOOLBAR_UI.md) - the Pause/Resume +
+    // Step playback toolbar, rendered as a fixed strip right under the menu
+    // bar, before the dockspace itself - see PlaybackControls.h.
+    BuildPlaybackToolbar(ctx);
 
     {
         ImGuiIO& io = ImGui::GetIO();

@@ -593,6 +593,8 @@ if(GTE_ENABLE_EDITOR)
         src/Editor/TransformGizmo.cpp
         src/Editor/DockLayout.h
         src/Editor/DockLayout.cpp
+        src/Editor/PlaybackControls.h
+        src/Editor/PlaybackControls.cpp
         src/Editor/ImGuiMemoryTracker.h
         src/Editor/ImGuiMemoryTracker.cpp
         src/Editor/MemoryPanelData.h
