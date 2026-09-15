@@ -138,3 +138,30 @@ not a gap in this campaign's own work, it is a locked, cross-campaign
 sequencing decision made explicitly to avoid running the full regression
 suite twice in the same overall effort. This campaign will be considered
 fully closed once that addendum is appended above.
+
+## Addendum — Sections 3.5/3.6 Discharge Confirmation (via doc-refactor-1)
+
+`doc-refactor-1`'s own Phase 5 (`task_manager/doc-refactor-1/PHASE5_FULL_
+REGRESSION_AND_CAMPAIGN_CLOSEOUT.md`) ran the full 3-configuration clean
+build + `ctest` regression pass this campaign's own Section 3.5 deferred,
+plus the manual live smoke test Section 3.6 deferred. Results: default
+configuration (`build/`) — 1326 tests, 100% passed (1 machine-gated
+`PmxLoaderRealModelSmokeTest` skip, zero failures); `-DGTE_ENABLE_EDITOR=OFF`
+(`build-editor-off/`) — 1140 tests, 100% passed after this same Phase 5
+fixed one genuine pre-existing test bug it surfaced (a dangling
+`const Transform&` held across a second `Registry::AddComponent<Transform>()`
+call in `GameEntityCommandsTests.cpp`'s
+`InstantiateLightDefaultCallMatchesCreateDirectionalLightEntityRotation` —
+unrelated to `GTE_ENABLE_EDITOR` itself, see that phase's own completion
+report for the full root-cause writeup); `-DGTE_ENABLE_PROJECT_PANEL=OFF`
+(`build-project-panel-off/`) — 1255 tests, 100% passed. The manual live
+smoke test passed in full across both the default and
+`-DGTE_ENABLE_PROJECT_PANEL=OFF` binaries: `GET /list_tabs` and
+`GET /activate_tab?name=Profiler`/`Memory`/`NotARealTab` behaved exactly as
+specified in the default configuration (each activation visually confirmed
+via `GET /get_swapchain`), and `-DGTE_ENABLE_PROJECT_PANEL=OFF` correctly
+omitted `"Project"` from `/list_tabs` and returned `404` (not `409`/`200`)
+for `GET /activate_tab?name=Project`. See
+`task_manager/doc-refactor-1/PHASE5_COMPLETION_REPORT.md` and
+`task_manager/doc-refactor-1/CAMPAIGN_COMPLETION_REPORT.md` for the full
+verification detail. This campaign (`network-impl-7`) is now fully closed.

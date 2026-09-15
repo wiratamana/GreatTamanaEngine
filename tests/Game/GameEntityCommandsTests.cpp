@@ -219,7 +219,16 @@ TEST(GameEntityCommandsTest, InstantiateLightDefaultCallMatchesCreateDirectional
     Registry& registry = game.GetRegistry();
 
     const Entity editorLight = game.CreateDirectionalLightEntity();
-    const Transform& editorTransform = registry.GetComponent<Transform>(editorLight);
+    // Copy the rotation by VALUE (not a reference into the Transform pool) -
+    // ComponentStorage<T>::Add() documents that any reference/pointer into
+    // its dense array is invalidated by a LATER Add() on the same pool, and
+    // game.InstantiateLight() below adds a second Transform component to
+    // this exact same registry, which can reallocate that pool's dense
+    // vector. A dangling `const Transform&` here was a genuine, confirmed
+    // regression this campaign's own Phase 5 cross-configuration ctest pass
+    // caught (see PHASE5_COMPLETION_REPORT.md) - the intermittent failure
+    // depended on capacity-growth timing, not on GTE_ENABLE_EDITOR itself.
+    const Quat editorRotation = registry.GetComponent<Transform>(editorLight).rotation;
 
     InstantiateLightParams params;
     params.requestedName = "NetworkLight";
@@ -231,7 +240,7 @@ TEST(GameEntityCommandsTest, InstantiateLightDefaultCallMatchesCreateDirectional
     const Entity spawned{ outcome.entityIndex, outcome.entityGeneration };
     const Transform& spawnedTransform = registry.GetComponent<Transform>(spawned);
 
-    EXPECT_TRUE(RepresentSameRotation(spawnedTransform.rotation, editorTransform.rotation));
+    EXPECT_TRUE(RepresentSameRotation(spawnedTransform.rotation, editorRotation));
 }
 
 TEST(GameEntityCommandsTest, InstantiateLightExplicitRotationOverridesDefault)
