@@ -209,4 +209,26 @@ struct InstantiateLightOutcome {
     std::string requestedParentName;
 };
 
+// task_manager/stl-parser-2 campaign, PHASE3 - outcome of one
+// Game::InstantiateMeshAssetFromGtaFile() call. Deliberately the SAME
+// SHAPE as InstantiatePrimitiveOutcome (success/errorMessage/entityIndex/
+// entityGeneration/resolvedName) minus the parenting fields - this method
+// never parents/positions/renames anything beyond what
+// CreateMeshEntityFromGtaFile() already does today (PHASE0's Locked
+// Design Decision #4 - "bare-bones wrapper", no world_position/name/parent
+// input of any kind).
+struct InstantiateMeshAssetOutcome {
+    bool success = false;
+    std::string errorMessage;
+
+    std::uint32_t entityIndex = 0;
+    std::uint32_t entityGeneration = 0;
+    // The spawned ROOT entity's actual Name component value (the source
+    // file's own stem, e.g. "terrain" for "terrain.gta") - empty if the
+    // root somehow has no Name component at all (should not happen in
+    // practice - MeshInstantiationSystem::SpawnMeshAsset() always assigns
+    // one - but defensively read back rather than assumed).
+    std::string resolvedName;
+};
+
 } // namespace gte

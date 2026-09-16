@@ -142,6 +142,27 @@ Entity Game::CreateMeshEntityFromGtaFile(Renderer& renderer, const std::string& 
     return root;
 }
 
+InstantiateMeshAssetOutcome Game::InstantiateMeshAssetFromGtaFile(Renderer& renderer, const std::string& absoluteGtaPath)
+{
+    InstantiateMeshAssetOutcome outcome;
+
+    const Entity root = CreateMeshEntityFromGtaFile(renderer, absoluteGtaPath);
+    if (root == kInvalidEntity) {
+        outcome.success = false;
+        outcome.errorMessage = "failed to load or spawn a Mesh asset from \"" + absoluteGtaPath
+            + "\" - the file may be missing, not a valid Mesh *.gta, or empty (zero vertices/triangles)";
+        return outcome;
+    }
+
+    outcome.success = true;
+    outcome.entityIndex = root.index;
+    outcome.entityGeneration = root.generation;
+    if (const Name* name = m_registry.TryGetComponent<Name>(root)) {
+        outcome.resolvedName = name->value;
+    }
+    return outcome;
+}
+
 bool Game::PlayAnimationOnEntity(Entity targetEntity, const std::string& absoluteAnimationGtaPath)
 {
     return m_animationSystem.Play(m_registry, targetEntity, absoluteAnimationGtaPath);

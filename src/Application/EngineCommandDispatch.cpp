@@ -33,6 +33,15 @@ EngineCommandResult ExecuteEngineCommand(Game& game, Renderer& renderer, const E
         result.instantiateLight = game.InstantiateLight(request.instantiateLight);
         break;
     }
+    // task_manager/stl-parser-2 campaign, PHASE3 - spawns an already-
+    // imported Mesh *.gta asset. Touches `renderer` (the freshly-spawned
+    // GPU mesh must be uploaded through it), unlike SetEntityTrs/
+    // InstantiateLight immediately above.
+    case EngineCommandKind::InstantiateMeshAsset: {
+        result.instantiateMeshAsset = game.InstantiateMeshAssetFromGtaFile(
+            renderer, request.instantiateMeshAsset.absoluteGtaPath);
+        break;
+    }
     }
     return result;
 }

@@ -204,6 +204,18 @@ public:
     // 2.4/3.5).
     Entity CreateMeshEntityFromGtaFile(Renderer& renderer, const std::string& absoluteGtaPath);
 
+    // task_manager/stl-parser-2 campaign, PHASE3 - a network-command-friendly,
+    // Outcome-returning wrapper around CreateMeshEntityFromGtaFile() above -
+    // see that method's own doc comment for the FULL spawn behavior this
+    // preserves EXACTLY, unchanged (world origin, unparented, named after the
+    // file - PHASE0_MASTER_STRATEGY.md's Locked Design Decision #4, "bare-bones
+    // wrapper"). The only thing this method ADDS is a rich success/failure
+    // report: `outcome.success == false` (with `errorMessage` explaining why,
+    // and NO entity created) exactly when CreateMeshEntityFromGtaFile() would
+    // have returned kInvalidEntity - missing file, wrong/corrupt *.gta, or a
+    // decodable-but-empty (zero vertices/triangles) mesh. Never throws.
+    InstantiateMeshAssetOutcome InstantiateMeshAssetFromGtaFile(Renderer& renderer, const std::string& absoluteGtaPath);
+
     // Assigns/replaces the SkeletalAnimator component on `targetEntity` (a
     // live entity spawned by CreateMeshEntityFromGtaFile() - i.e. one that
     // carries a MeshAssetSource component, see ECS/Components/

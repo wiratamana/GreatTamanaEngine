@@ -45,6 +45,13 @@ enum class EngineCommandKind {
     // from network-impl-3's own original Locked Design Decision #5).
     SetEntityTrs,
     InstantiateLight,
+    // task_manager/stl-parser-2 campaign, PHASE3 - spawns an already-
+    // imported Mesh *.gta asset (see Game::InstantiateMeshAssetFromGtaFile()) -
+    // reuses this SAME bridge (not a new one) because this is exactly the
+    // same shape of request InstantiatePrimitive/InstantiateLight already
+    // are: an ECS+Renderer-mutating spawn - see
+    // PHASE0_MASTER_STRATEGY.md's Locked Design Decision #9.
+    InstantiateMeshAsset,
 };
 
 // Plain request payload for one InstantiatePrimitive command - copied
@@ -60,6 +67,11 @@ struct InstantiatePrimitiveCommand {
 // Plain request payload for one DeleteEntity command.
 struct DeleteEntityCommand {
     std::string name;
+};
+
+// Plain request payload for one InstantiateMeshAsset command.
+struct InstantiateMeshAssetCommand {
+    std::string absoluteGtaPath;
 };
 
 // One pending engine command, tagged by `kind` - EXACTLY one of
@@ -79,6 +91,8 @@ struct EngineCommandRequest {
     // diverges, deliberately, from the two OLDER fields immediately above.
     SetEntityTrsParams setEntityTrs;
     InstantiateLightParams instantiateLight;
+    // task_manager/stl-parser-2 campaign, PHASE3
+    InstantiateMeshAssetCommand instantiateMeshAsset;
 };
 
 // The completed result of one EngineCommandRequest - `kind` mirrors the
@@ -91,6 +105,9 @@ struct EngineCommandResult {
     // network-impl-5 campaign
     SetEntityTrsOutcome setEntityTrs;
     InstantiateLightOutcome instantiateLight;
+    // task_manager/stl-parser-2 campaign, PHASE3 (needs
+    // "../Game/EngineCommandResults.h" already #included above, which it is).
+    InstantiateMeshAssetOutcome instantiateMeshAsset;
 };
 
 class EngineCommandBridge {
