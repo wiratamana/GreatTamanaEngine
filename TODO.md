@@ -368,6 +368,22 @@ convention). The following are now DONE, not deferred:
   original `frame-debugger-2` deferred list but called out here for
   completeness.
 
+A follow-up bug-fix campaign, `frame-debugger-4`
+(`task_manager/frame-debugger-4/PHASE0_MASTER_STRATEGY.md`, three phases,
+`CAMPAIGN_COMPLETION_REPORT.md`), confirmed this exact bug was never
+previously listed anywhere in this section - it was found by direct user
+report, not a previously-tracked gap - and fixed it:
+
+- ~~The Frame Debugger's retained preview never actually included the
+  atmosphere-scattering/aerial-perspective effect~~ - DONE, fixed.
+  `FrameDebuggerHistory` now retains BOTH the true pre-composite `"GameView"`
+  image and the true post-composite, final `"GameViewComposited"` image per
+  captured frame (PHASE1), and the real `"AtmosphereAerialPerspectiveCompositePass"`
+  render-graph pass that produces the composited image is now a real,
+  selectable tree leaf (PHASE2) - see `AGENTS.md`'s "Frame Debugger" section
+  and `docs/conventions/frame-debugger.md`'s "Known limitation, now fixed"
+  note for the full root-cause writeup.
+
 ### Still genuinely deferred (permanent design choices or real future work)
 
 - **Per-individual-draw-call event granularity.** A deliberate, PERMANENT
@@ -377,7 +393,12 @@ convention). The following are now DONE, not deferred:
 - **Scene View or Present-pass capture.** The Frame Debugger's own captured
   event tree is permanently filtered to the Game View's own passes only - a
   clean, well-isolated single-line filter change for some future campaign to
-  relax, not attempted here.
+  relax, not attempted here. Should a future Scene-View Frame Debugger ever
+  be built, it would need its own version of `frame-debugger-4`'s dual-stage
+  retained-capture/composite-aware preview-selection pattern (this campaign's
+  `ChooseFrameDebuggerPreviewSource()`/`"SceneViewComposited"` would be the
+  natural equivalents) - not attempted here, since no Scene-View capture of
+  any kind exists yet to extend.
 - **A full, generic shader-reflection system** (real SPIR-V reflection data /
   real descriptor-set binding tables) - `DescribeStandardPipelineState()` is a
   small, hand-authored, constant-valued function matching this engine's

@@ -140,6 +140,26 @@ chronological project history from the very first triangle demo onward.
   test of the whole feature (open → enable/auto-capture → select event →
   explicit capture → step history → set channel → set levels, each step
   visually confirmed via `GET /get_swapchain`).
+- **A follow-up bug-fix campaign, `frame-debugger-4`, fixed a confirmed bug
+  where the Frame Debugger above never actually showed the atmosphere-
+  scattering/aerial-perspective effect** (three phases -
+  `task_manager/frame-debugger-4/PHASE0_MASTER_STRATEGY.md`) - the retained
+  preview was always fed the pre-atmosphere-composite `"GameView"` texture,
+  never the real, final `"GameViewComposited"` output the "Game" panel/
+  `GET /get_game_view` already show, and the real
+  `"AtmosphereAerialPerspectiveCompositePass"` render-graph pass that produces
+  that composited image was entirely invisible in the event tree. Fixed by
+  having `FrameDebuggerHistory` retain BOTH images per captured frame (the
+  true pre-composite copy plus a new true post-composite copy), a new
+  composite-aware picking rule that shows the final, fog-inclusive image by
+  default (and the true pre-composite reconstruction only when the
+  `"GameView"` leaf itself is explicitly selected), and a new, real, selectable
+  `"AtmosphereAerialPerspectiveCompositePass"` tree leaf sibling to `"GameView"`
+  with real read/write texture names and GPU timing. Verified with a full
+  clean build (both `GTE_ENABLE_EDITOR` configs), a full `ctest` regression
+  pass, and a live, HTTP-driven, screenshot-verified smoke test directly
+  comparing the Frame Debugger's own preview against `GET /get_game_view`
+  before and after selecting each leaf.
 - **The Editor now has a new "Frame Debugger" window, GUI-only scaffolding
   for a future Unity-Frame-Debugger-style tool** (`frame-debugger-2`
   campaign, seven phases -

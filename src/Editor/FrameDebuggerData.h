@@ -262,4 +262,46 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(
     const std::vector<std::string>& gpuSkinningPassNamesThisFrame,
     const FrameDebuggerRenderTargetInfo& gameViewRenderTargetInfo = FrameDebuggerRenderTargetInfo{});
 
+// frame-debugger-4 campaign, PHASE3
+// (PHASE3_TESTS_DOCS_FULL_BUILD_AND_LIVE_VERIFICATION.md, Step 3.1) - the
+// one genuinely PURE piece of decision logic buried inside PHASE1's own
+// Panels/FrameDebuggerPanel.cpp EnsurePreviewDescriptor(): given whether a
+// history entry exists at all, whether its two retained textures
+// (`preview`/`compositedPreview`) are actually populated, and whether the
+// currently-selected tree event is literally the "GameView" leaf, decide
+// WHICH of the two retained textures (if either) should be displayed.
+// Extracted here - rather than left inline in that Tier-2, ImGui/Vulkan-
+// coupled function - specifically so this one rule (Locked Design
+// Decisions #5/#6, PHASE0_MASTER_STRATEGY.md) is directly Tier-1-testable
+// with no live VkDevice/ImGui context at all; see
+// tests/Editor/FrameDebuggerDataTests.cpp for the full set of covered input
+// combinations.
+enum class FrameDebuggerPreviewSourceChoice {
+    None, // Nothing to preview - no entry at all, or the "GameView" leaf is
+        // selected but its own `preview` is (defensively) unpopulated.
+    Preview, // The true pre-atmosphere-composite "GameView" copy.
+    CompositedPreview, // The true post-atmosphere-composite, final image.
+};
+
+// Pure decision function - no FrameDebuggerHistoryEntry/RenderTexture
+// dependency at all, deliberately taking already-resolved plain booleans
+// instead (mirrors this codebase's own established "extract a pure
+// function that takes already-resolved plain values" convention - see
+// AGENTS.md's "Testability & Regression Safety"). `hasEntry` is whether a
+// currently-viewed FrameDebuggerHistoryEntry exists at all (false for a
+// fresh, never-captured-into FrameDebuggerHistory); `hasPreview`/
+// `hasCompositedPreview` are whether that entry's own two optional retained
+// textures are actually populated; `isViewingGameViewLeaf` is whether the
+// currently-selected event's own FrameDebuggerEventDetails::passName is
+// literally "GameView" (false whenever nothing is selected, or any other
+// leaf - including PHASE2's new "Aerial Perspective Composite" one - is).
+//
+// Rule (Locked Design Decisions #5/#6): the literal "GameView" leaf always
+// shows the pre-composite `preview` (never `compositedPreview`, even if
+// that IS present); anything else (including nothing selected) prefers the
+// post-composite `compositedPreview`, falling back to `preview` only when
+// `compositedPreview` itself is absent for this particular captured frame.
+FrameDebuggerPreviewSourceChoice ChooseFrameDebuggerPreviewSource(
+    bool hasEntry, bool hasPreview, bool hasCompositedPreview, bool isViewingGameViewLeaf);
+
 } // namespace gte

@@ -127,5 +127,36 @@ TEST(FrameDebuggerDataTest, FormatMatrixPropertyTest)
     EXPECT_EQ(std::count(formatted.begin(), formatted.end(), '\n'), 3);
 }
 
+// frame-debugger-4 campaign, PHASE3
+// (PHASE3_TESTS_DOCS_FULL_BUILD_AND_LIVE_VERIFICATION.md, Step 3.1) - the
+// pure decision function extracted out of PHASE1's own Panels/
+// FrameDebuggerPanel.cpp EnsurePreviewDescriptor(), covering every
+// meaningful input combination the phase document itself calls out.
+TEST(FrameDebuggerDataTest, ChooseFrameDebuggerPreviewSourceTest)
+{
+    // No entry at all (fresh history) -> None.
+    EXPECT_EQ(ChooseFrameDebuggerPreviewSource(false, false, false, false), FrameDebuggerPreviewSourceChoice::None);
+
+    // Entry exists, nothing selected, compositedPreview present -> CompositedPreview.
+    EXPECT_EQ(ChooseFrameDebuggerPreviewSource(true, true, true, false),
+        FrameDebuggerPreviewSourceChoice::CompositedPreview);
+
+    // Entry exists, nothing selected, compositedPreview absent, preview present -> Preview.
+    EXPECT_EQ(ChooseFrameDebuggerPreviewSource(true, true, false, false), FrameDebuggerPreviewSourceChoice::Preview);
+
+    // Entry exists, "GameView" leaf selected, preview present -> Preview (even if
+    // compositedPreview is ALSO present - explicit leaf selection always wins).
+    EXPECT_EQ(ChooseFrameDebuggerPreviewSource(true, true, true, true), FrameDebuggerPreviewSourceChoice::Preview);
+
+    // Entry exists, "GameView" leaf selected, preview somehow absent (defensive-only,
+    // should not happen in practice) -> None.
+    EXPECT_EQ(ChooseFrameDebuggerPreviewSource(true, false, true, true), FrameDebuggerPreviewSourceChoice::None);
+
+    // Entry exists, some OTHER leaf selected (e.g. "Aerial Perspective Composite" or
+    // "GPU Skinning"), compositedPreview present -> CompositedPreview.
+    EXPECT_EQ(ChooseFrameDebuggerPreviewSource(true, true, true, false),
+        FrameDebuggerPreviewSourceChoice::CompositedPreview);
+}
+
 } // namespace
 } // namespace gte

@@ -479,4 +479,28 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
     return snapshot;
 }
 
+// frame-debugger-4 campaign, PHASE3 - see FrameDebuggerData.h's own doc
+// comment for the full contract. A plain, exhaustive if/else chain over
+// already-resolved booleans - deliberately no live FrameDebuggerHistoryEntry/
+// RenderTexture dependency at all.
+FrameDebuggerPreviewSourceChoice ChooseFrameDebuggerPreviewSource(
+    bool hasEntry, bool hasPreview, bool hasCompositedPreview, bool isViewingGameViewLeaf)
+{
+    if (!hasEntry) {
+        return FrameDebuggerPreviewSourceChoice::None;
+    }
+    if (isViewingGameViewLeaf) {
+        // Explicit leaf selection always wins - even if compositedPreview is
+        // ALSO present for this captured frame (Locked Design Decision #5).
+        return hasPreview ? FrameDebuggerPreviewSourceChoice::Preview : FrameDebuggerPreviewSourceChoice::None;
+    }
+    if (hasCompositedPreview) {
+        return FrameDebuggerPreviewSourceChoice::CompositedPreview;
+    }
+    if (hasPreview) {
+        return FrameDebuggerPreviewSourceChoice::Preview;
+    }
+    return FrameDebuggerPreviewSourceChoice::None;
+}
+
 } // namespace gte

@@ -70,27 +70,39 @@ void FrameDebuggerPanel::EnsurePreviewDescriptor()
     //     the "GPU Skinning" leaf (which itself is separately hidden behind
     //     "No Texture" by BuildInspectorPane()'s own existing
     //     selectedEventIsGpuSkinning check - this function does not need to
-    //     special-case that itself), or PHASE2's brand-new "Aerial
-    //     Perspective Composite" leaf once it exists - prefers the TRUE,
-    //     final, atmosphere-inclusive entry->compositedPreview, falling back
-    //     to entry->preview only when compositedPreview is std::nullopt for
-    //     this particular captured frame (e.g. captured before the very
-    //     first composite pass ever ran this session).
-    // This ONE rule is deliberately written generically enough that PHASE2's
-    // new tree leaf requires ZERO further change here - see
-    // PHASE2_AERIAL_PERSPECTIVE_COMPOSITE_EVENT_TREE_LEAF.md's own Step 2.
-    const RenderTexture* selectedSource = nullptr;
+    //     special-case that itself), or PHASE2's "Aerial Perspective
+    //     Composite" leaf - prefers the TRUE, final, atmosphere-inclusive
+    //     entry->compositedPreview, falling back to entry->preview only when
+    //     compositedPreview is std::nullopt for this particular captured
+    //     frame (e.g. captured before the very first composite pass ever ran
+    //     this session).
+    // PHASE3 (frame-debugger-4 campaign) - the actual decision itself is now
+    // delegated to ChooseFrameDebuggerPreviewSource() (FrameDebuggerData.h), a
+    // pure, Tier-1-tested function extracted specifically so this rule has
+    // real automated regression coverage with no live VkDevice/ImGui context
+    // involved (see tests/Editor/FrameDebuggerDataTests.cpp) - this function
+    // itself now only resolves the plain booleans that function needs, then
+    // maps its enum result back onto a real RenderTexture pointer.
+    bool isViewingGameViewLeaf = false;
     if (entry != nullptr) {
         const std::optional<FrameDebuggerEventDetails> details =
             FindEventDetailsByIndex(entry->snapshot, m_selectedEventIndex);
-        const bool viewingPreCompositeGameViewLeaf = details.has_value() && details->passName == "GameView";
-        if (viewingPreCompositeGameViewLeaf) {
-            selectedSource = entry->preview.has_value() ? &(*entry->preview) : nullptr;
-        } else if (entry->compositedPreview.has_value()) {
-            selectedSource = &(*entry->compositedPreview);
-        } else if (entry->preview.has_value()) {
-            selectedSource = &(*entry->preview);
-        }
+        isViewingGameViewLeaf = details.has_value() && details->passName == "GameView";
+    }
+    const FrameDebuggerPreviewSourceChoice choice = ChooseFrameDebuggerPreviewSource(entry != nullptr,
+        entry != nullptr && entry->preview.has_value(), entry != nullptr && entry->compositedPreview.has_value(),
+        isViewingGameViewLeaf);
+
+    const RenderTexture* selectedSource = nullptr;
+    switch (choice) {
+    case FrameDebuggerPreviewSourceChoice::Preview:
+        selectedSource = (entry != nullptr && entry->preview.has_value()) ? &(*entry->preview) : nullptr;
+        break;
+    case FrameDebuggerPreviewSourceChoice::CompositedPreview:
+        selectedSource = (entry != nullptr && entry->compositedPreview.has_value()) ? &(*entry->compositedPreview) : nullptr;
+        break;
+    case FrameDebuggerPreviewSourceChoice::None:
+        break;
     }
 
     if (selectedSource == nullptr) {

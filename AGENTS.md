@@ -96,10 +96,15 @@ freezes and captures one real rendered frame's worth of real Render Graph
 passes (pass-level granularity, not per-draw-call - a deliberate, permanent
 design choice, not a gap), the event tree shows those real passes, selecting
 one shows real shader/blend/Z/stencil/texture/vector/matrix data plus a real
-preview image reconstructed as of that exact point in the frame, a
-Frame-History mini-toolbar steps backward/forward through past captured
-frames, and the Channels/Levels controls really affect the preview image via
-a dedicated compositing shader. The entire feature is drivable end-to-end
+preview image reconstructed as of that exact point in the frame. Two of those
+reconstructed points are genuinely distinct: selecting the pass that actually
+draws the scene shows the frame before atmosphere scattering/aerial-perspective
+fog is applied, and a further, real "Aerial Perspective Composite" step shows
+the frame after it - the preview always defaults to the final, fog-inclusive
+image whenever nothing more specific is selected. A Frame-History mini-toolbar
+steps backward/forward through past captured frames, and the Channels/Levels
+controls really affect the preview image via a dedicated compositing shader.
+The entire feature is drivable end-to-end
 over the embedded HTTP server (`GET /frame_debugger/open|enable|capture|
 select_event|step_history|set_channel|set_levels|state`), with the window
 forced onto the main ImGui viewport whenever opened this way so `GET
