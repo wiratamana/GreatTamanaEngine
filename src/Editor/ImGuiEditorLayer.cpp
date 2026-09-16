@@ -579,32 +579,33 @@ public:
         // needs `renderer`/`renderGraph`/m_gameView (this class's own real
         // Game-View RenderTexture - see the class comment above) to service
         // its own real capture TRIGGER (TriggerCapture(), called from
-        // BuildToolbarRow()), plus this frame's real GPU-skinning pass
-        // names (see PHASE2's BuildRealFrameDebuggerSnapshot()) - resolved
-        // right here, from `game`, mirroring RenderPasses.cpp's own
-        // AddGpuSkinningPasses() identical resolution (a second, harmless,
-        // idempotent call - CollectGpuSkinningDispatchRequests() is a
-        // plain, side-effect-free const query, see AnimationSystem.h).
-        {
-            std::vector<std::string> gpuSkinningPassNames;
-            for (const AnimationSystem::GpuSkinningDispatchRequest& request :
-                game.CollectGpuSkinningDispatchRequests()) {
-                gpuSkinningPassNames.push_back(request.name);
-            }
-            // frame-debugger-4 campaign, PHASE1 - feeds the Frame Debugger BOTH
-            // the pre-composite "GameView" texture (m_gameView, always real) and
-            // the real post-atmosphere-composite final output
-            // (m_gameViewComposited, nullable until the composite pass has
-            // produced something at least once this session) - see
-            // FrameDebuggerHistory::CaptureFrame()'s own doc comment for exactly
-            // how these two flow into the ring buffer's own dual retained
-            // copies. Mirrors this SAME function's own earlier "Game" panel
-            // descriptor logic (the gameSource local a few dozen lines above)
-            // rather than introducing a second, differently-named local -
-            // m_gameViewComposited is a plain member, safe to read directly
-            // here too.
-            m_frameDebuggerPanel.Build(m_ctx, renderer, renderGraph, m_gameView, m_gameViewComposited, gpuSkinningPassNames);
-        }
+        // BuildToolbarRow()).
+        //
+        // frame-debugger-5 campaign, PHASE2
+        // (PHASE2_GENERIC_COMPUTE_DISPATCH_EVENT_TREE_DISCOVERY.md) - this
+        // call site no longer resolves/threads a `gpuSkinningPassNames`
+        // list through (REMOVED - see PHASE0_MASTER_STRATEGY.md's Locked
+        // Design Decision #2/#6): GPU Skinning passes, and every other real
+        // compute dispatch, are now discovered generically inside
+        // BuildRealFrameDebuggerSnapshot() itself, purely via PHASE1's new
+        // RenderGraphPassSnapshot::isComputePass flag - the old
+        // `game.CollectGpuSkinningDispatchRequests()` call this block used
+        // to make purely to resolve that name list is gone too (confirmed,
+        // via a full grep of this file, to have had no other purpose here).
+        //
+        // frame-debugger-4 campaign, PHASE1 - feeds the Frame Debugger BOTH
+        // the pre-composite "GameView" texture (m_gameView, always real) and
+        // the real post-atmosphere-composite final output
+        // (m_gameViewComposited, nullable until the composite pass has
+        // produced something at least once this session) - see
+        // FrameDebuggerHistory::CaptureFrame()'s own doc comment for exactly
+        // how these two flow into the ring buffer's own dual retained
+        // copies. Mirrors this SAME function's own earlier "Game" panel
+        // descriptor logic (the gameSource local a few dozen lines above)
+        // rather than introducing a second, differently-named local -
+        // m_gameViewComposited is a plain member, safe to read directly
+        // here too.
+        m_frameDebuggerPanel.Build(m_ctx, renderer, renderGraph, m_gameView, m_gameViewComposited);
 #if GTE_ENABLE_PROJECT_PANEL
         m_projectPanel.Build(m_ctx);
         // The Bone Viewer is its own floating window (opened on demand via

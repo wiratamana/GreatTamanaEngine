@@ -156,31 +156,75 @@ const rg::RenderGraphPassSnapshot* FindPassByName(
     return nullptr;
 }
 
-bool Contains(const std::vector<std::string>& names, const std::string& name)
+// frame-debugger-5 campaign, PHASE2
+// (PHASE2_GENERIC_COMPUTE_DISPATCH_EVENT_TREE_DISCOVERY.md, Step 3.2) -
+// small, exhaustive-switch row-label helpers for a compute-dispatch leaf's
+// read/write rows, keyed by PHASE1's new real rg::ResourceKind (never
+// guessed) - mirrors RenderGraphTypes.cpp's own IsWriteAccess()/ToString()
+// "deliberately NO `default:` case" convention exactly, so a future fourth
+// ResourceKind enumerator fails to compile here until updated.
+const char* ReadRowLabelForKind(rg::ResourceKind kind)
 {
-    for (const std::string& candidate : names) {
-        if (candidate == name) {
-            return true;
-        }
+    switch (kind) {
+    case rg::ResourceKind::Texture:
+        return "Read Texture";
+    case rg::ResourceKind::Buffer:
+        return "Read Buffer";
+    case rg::ResourceKind::VolumeTexture:
+        return "Read Volume Texture";
     }
-    return false;
+    return "Read Texture";
 }
 
-// Builds one GPU-skinning compute-dispatch LEAF node for `pass` - see
-// BuildRealFrameDebuggerSnapshot()'s own header-comment tree-shape
-// description and PHASE0_MASTER_STRATEGY.md's Locked Design Decision #6.
-FrameDebuggerEventNode BuildGpuSkinningLeaf(const rg::RenderGraphPassSnapshot& pass, int eventIndex)
+const char* WriteRowLabelForKind(rg::ResourceKind kind)
+{
+    switch (kind) {
+    case rg::ResourceKind::Texture:
+        return "Write Texture";
+    case rg::ResourceKind::Buffer:
+        return "Write Buffer";
+    case rg::ResourceKind::VolumeTexture:
+        return "Write Volume Texture";
+    }
+    return "Write Texture";
+}
+
+// frame-debugger-5 campaign, PHASE2 - the ONE generic leaf builder for ANY
+// real compute dispatch (RenderGraphPassSnapshot::isComputePass == true)
+// that survived this frame, whatever its name - GPU Skinning, every
+// atmosphere LUT pass, Aerial Perspective Composite, the Aerial
+// Perspective Volume Debug-Slice pass, Compute Blur Validation, and any
+// future compute pass this engine ever adds. Mirrors the OLD, now-DELETED
+// BuildGpuSkinningLeaf()/BuildAerialPerspectiveCompositeLeaf()'s own
+// "n/a (compute pass)" blend/Z/stencil convention exactly (a compute
+// dispatch never issues a draw call), but is the SINGLE, UNIFIED
+// replacement for both of those deleted, name-specific functions - see
+// PHASE0_MASTER_STRATEGY.md's Locked Design Decision #6.
+FrameDebuggerEventNode BuildComputeDispatchLeaf(const rg::RenderGraphPassSnapshot& pass, int eventIndex)
 {
     FrameDebuggerEventNode leaf;
-    leaf.name = pass.name;
+    leaf.name = pass.name; // The real, raw render-graph pass name - never fabricated/prettified.
     leaf.isDrawCall = true;
     leaf.eventIndex = eventIndex;
 
     FrameDebuggerEventDetails details;
     details.eventIndex = eventIndex;
     details.eventLabel = "Compute Dispatch";
+    // No separate "friendly label" - the real, raw pass name IS the
+    // passName too, for every compute leaf uniformly (this is what makes
+    // this function correct for a pass this file has never heard of
+    // before - see PHASE2_GENERIC_COMPUTE_DISPATCH_EVENT_TREE_DISCOVERY.md's
+    // own Step 3.4 for the OPTIONAL cosmetic-label idea this deliberately
+    // does NOT implement by default).
+    details.passName = pass.name;
+    // shaderName - honestly, this generic function has no way to know a
+    // real compute pass's exact .comp shader FILE name (that fact used to
+    // live only in the deleted, hand-written
+    // BuildAerialPerspectiveCompositeLeaf()'s own hardcoded string) - the
+    // real, raw pass NAME is used here instead, which is always true and
+    // never fabricated.
     details.shaderName = pass.name;
-    details.passName = "GPU Skinning";
+
     details.blendMode = "n/a (compute pass)";
     details.zClip = "n/a (compute pass)";
     details.zTest = "n/a (compute pass)";
@@ -192,23 +236,38 @@ FrameDebuggerEventNode BuildGpuSkinningLeaf(const rg::RenderGraphPassSnapshot& p
     details.stencilFail = "n/a (compute pass)";
     details.stencilZFail = "n/a (compute pass)";
 
-    // Renderer::Dispatch() never touches PassGpuStats::drawStats (see
-    // RenderPasses.cpp's AddGpuSkinningPasses() and DrawStats.h's own
-    // header comment) - a compute pass genuinely never issues a draw call,
-    // so reporting an all-zero "Draw Stats" row here would misleadingly
-    // imply one happened. The one real, DrawStats-adjacent number
-    // PassGpuStats DOES carry for a compute pass is its GPU timing sample -
-    // report that instead (0.0ms whenever GPU timing is Absent/Unsupported,
-    // exactly like every other GPU-timing consumer in this engine today -
-    // see AGENTS.md's "Profiling" section).
+    // textures - real read/write resource names, EACH LABELED BY ITS REAL
+    // KIND (PHASE1's new readKinds/writeKinds) so a buffer write (e.g. GPU
+    // Skinning's own output buffer) is never mislabeled as a texture.
+    for (std::size_t i = 0; i < pass.readNames.size(); ++i) {
+        FrameDebuggerTextureProperty texture;
+        texture.name = ReadRowLabelForKind(i < pass.readKinds.size() ? pass.readKinds[i] : rg::ResourceKind::Texture);
+        texture.valueLabel = pass.readNames[i];
+        details.textures.push_back(std::move(texture));
+    }
+    for (std::size_t i = 0; i < pass.writeNames.size(); ++i) {
+        FrameDebuggerTextureProperty texture;
+        texture.name
+            = WriteRowLabelForKind(i < pass.writeKinds.size() ? pass.writeKinds[i] : rg::ResourceKind::Texture);
+        texture.valueLabel = pass.writeNames[i];
+        details.textures.push_back(std::move(texture));
+    }
+
+    // vectors - real GPU timing (0.0ms whenever GPU timing is
+    // Absent/Unsupported, exactly like every other GPU-timing consumer in
+    // this engine today - see AGENTS.md's "Profiling" section). A compute
+    // dispatch never issues a draw call, so PassGpuStats::drawStats is
+    // deliberately never reported here (see RenderPasses.cpp's
+    // AddGpuSkinningPasses()/DrawStats.h's own header comment).
     FrameDebuggerVectorProperty timing;
     timing.name = "GPU Time (ms)";
     timing.x = static_cast<float>(pass.stats.timing.milliseconds);
     details.vectors.push_back(timing);
 
-    // textures/matrices deliberately left empty - real: a compute skinning
-    // pass never samples a material texture or uses a camera matrix (see
-    // PHASE2_FRAME_DEBUGGER_SNAPSHOT_BUILDER.md's own Step 3.1).
+    // matrices deliberately left empty - a compute dispatch never uses a
+    // rasterizer-consumed camera matrix (mirrors the deleted
+    // BuildGpuSkinningLeaf()/BuildAerialPerspectiveCompositeLeaf()'s own
+    // identical convention).
 
     leaf.details = std::move(details);
     return leaf;
@@ -322,99 +381,10 @@ FrameDebuggerEventNode BuildGameViewLeaf(
     return leaf;
 }
 
-// Builds the real "Aerial Perspective Composite" pass LEAF node - see
-// BuildRealFrameDebuggerSnapshot()'s own header-comment tree-shape
-// description. frame-debugger-4 campaign, PHASE2. Mirrors
-// BuildGpuSkinningLeaf()'s own "n/a (compute pass)" blend/Z/stencil
-// convention (a real compute dispatch, never a draw call), but - unlike
-// GPU Skinning, which never samples a material texture at all - this pass
-// DOES have real, meaningful texture reads/writes worth showing (it is the
-// whole reason this leaf exists: to make the atmosphere-compositing step
-// visible), sourced directly from `pass.readNames`/`pass.writeNames` -
-// never fabricated or re-derived from anywhere else.
-FrameDebuggerEventNode BuildAerialPerspectiveCompositeLeaf(const rg::RenderGraphPassSnapshot& pass, int eventIndex)
-{
-    FrameDebuggerEventNode leaf;
-    // Mirrors BuildGpuSkinningLeaf()'s own leaf.name = pass.name convention
-    // exactly - the real, raw render-graph pass name, never a prettified
-    // invented one (this campaign's own honesty rule - see AGENTS.md,
-    // "Testability & Regression Safety" and PHASE0_MASTER_STRATEGY.md's own
-    // "never fabricate" precedent throughout this whole feature).
-    leaf.name = pass.name; // "AtmosphereAerialPerspectiveCompositePass"
-    leaf.isDrawCall = true;
-    leaf.eventIndex = eventIndex;
-
-    FrameDebuggerEventDetails details;
-    details.eventIndex = eventIndex;
-    details.eventLabel = "Compute Composite";
-    // A friendlier grouping label, distinct from the raw pass name above -
-    // mirrors BuildGpuSkinningLeaf()'s own details.passName = "GPU Skinning"
-    // precedent (a real pass's own raw name vs. a short, human-readable
-    // category label are allowed to differ).
-    details.passName = "Aerial Perspective Composite";
-
-    // shaderName - a real, hardcoded fact (there is exactly ONE compute
-    // shader this pass ever dispatches - see AtmosphereLutRenderer::
-    // AddAerialPerspectiveCompositePass()'s own renderer.Dispatch() call,
-    // Shaders/AtmosphereAerialPerspectiveComposite.comp) - never fabricated,
-    // mirrors DescribeStandardPipelineState()'s own "duplicate a real
-    // hardcoded engine constant with a comment documenting what it must be
-    // kept in sync with" precedent (FrameDebuggerCapture.cpp/.h).
-    details.shaderName = "AtmosphereAerialPerspectiveComposite.comp";
-
-    details.blendMode = "n/a (compute pass)";
-    details.zClip = "n/a (compute pass)";
-    details.zTest = "n/a (compute pass)";
-    details.zWrite = "n/a (compute pass)";
-    details.cull = "n/a (compute pass)";
-    details.stencilRef = "n/a (compute pass)";
-    details.stencilComp = "n/a (compute pass)";
-    details.stencilPass = "n/a (compute pass)";
-    details.stencilFail = "n/a (compute pass)";
-    details.stencilZFail = "n/a (compute pass)";
-
-    // textures - real read/write resource names, straight from this exact
-    // pass's own already-resolved RenderGraphPassSnapshot fields - never
-    // aggregated from FrameDebuggerCaptureContext (this pass is not a
-    // per-draw-call thing at all, unlike the "GameView" leaf).
-    for (const std::string& readName : pass.readNames) {
-        FrameDebuggerTextureProperty texture;
-        texture.name = "Read Texture";
-        texture.valueLabel = readName;
-        details.textures.push_back(std::move(texture));
-    }
-    for (const std::string& writeName : pass.writeNames) {
-        FrameDebuggerTextureProperty texture;
-        texture.name = "Write Texture";
-        texture.valueLabel = writeName;
-        details.textures.push_back(std::move(texture));
-    }
-
-    // vectors - real GPU timing, exactly like BuildGpuSkinningLeaf()'s own
-    // identical convention (0.0ms whenever GPU timing is Absent/Unsupported
-    // - see that function's own comment for the full reasoning, unchanged
-    // here).
-    FrameDebuggerVectorProperty timing;
-    timing.name = "GPU Time (ms)";
-    timing.x = static_cast<float>(pass.stats.timing.milliseconds);
-    details.vectors.push_back(timing);
-
-    // matrices deliberately left empty - real: this pass's own real
-    // invViewProjection/cameraWorldPosition push constants are genuinely
-    // camera-derived, but PHASE0's own Non-Goals explicitly scope this leaf
-    // to pass-level read/write/timing facts only, mirroring GPU Skinning's
-    // own "no per-draw camera matrix" precedent for a compute pass (neither
-    // pass is drawing anything with a rasterizer-consumed matrix).
-
-    leaf.details = std::move(details);
-    return leaf;
-}
-
 } // namespace
 
 FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapshot& graphSnapshot,
-    const FrameDebuggerCaptureContext& capture, const std::vector<std::string>& gpuSkinningPassNamesThisFrame,
-    const FrameDebuggerRenderTargetInfo& gameViewRenderTargetInfo)
+    const FrameDebuggerCaptureContext& capture, const FrameDebuggerRenderTargetInfo& gameViewRenderTargetInfo)
 {
     const rg::RenderGraphPassSnapshot* gameViewPass = FindPassByName(graphSnapshot.passesInExecutionOrder, "GameView");
     if (gameViewPass == nullptr) {
@@ -429,46 +399,77 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
     root.name = "Game View";
     root.isDrawCall = false;
 
-    if (!gpuSkinningPassNamesThisFrame.empty()) {
-        FrameDebuggerEventNode gpuSkinningGroup;
-        gpuSkinningGroup.name = "GPU Skinning";
-        gpuSkinningGroup.isDrawCall = false;
+    // frame-debugger-5 campaign, PHASE2 - THE generic replacement for the
+    // former "GPU Skinning" group AND the former hardcoded
+    // "AtmosphereAerialPerspectiveCompositePass" special case (see
+    // PHASE0_MASTER_STRATEGY.md's Locked Design Decision #6). Every real,
+    // surviving compute pass this frame becomes one leaf here, in real
+    // execution order, whatever its name - "GameView" itself is
+    // structurally excluded (it is never isComputePass==true, since it's
+    // declared via plain AddPass()/WriteColorAttachment(), never
+    // AddComputePass()). SPLIT into a pre/post pair (Locked Design
+    // Decision #8, v2 review finding) so a pass that genuinely ran BEFORE
+    // "GameView" (e.g. GPU Skinning, every atmosphere LUT pass) is never
+    // shown as if it ran after it.
+    const int gameViewIndex = static_cast<int>(gameViewPass - graphSnapshot.passesInExecutionOrder.data());
 
-        // Preserve graphSnapshot's own real execution order - never the
-        // (unrelated) order `gpuSkinningPassNamesThisFrame` itself happens
-        // to list its names in.
-        for (const rg::RenderGraphPassSnapshot& pass : graphSnapshot.passesInExecutionOrder) {
-            if (Contains(gpuSkinningPassNamesThisFrame, pass.name)) {
-                gpuSkinningGroup.children.push_back(BuildGpuSkinningLeaf(pass, nextEventIndex++));
-            }
-        }
+    FrameDebuggerEventNode preGameViewGroup;
+    preGameViewGroup.name = "Compute Dispatches (Pre-GameView)";
+    preGameViewGroup.isDrawCall = false;
 
-        // Only add the group at all if at least one real pass in this
-        // frame's graphSnapshot actually matched by name - see this
-        // function's own Step 2 fallback reasoning in the phase document
-        // (a caller-supplied name with no matching real pass this frame
-        // must never produce an empty, misleading "GPU Skinning" group).
-        if (!gpuSkinningGroup.children.empty()) {
-            root.children.push_back(std::move(gpuSkinningGroup));
+    FrameDebuggerEventNode postGameViewGroup;
+    postGameViewGroup.name = "Compute Dispatches (Post-GameView)";
+    postGameViewGroup.isDrawCall = false;
+
+    // frame-debugger-5 campaign, PHASE2 - IMPORTANT ("nextEventIndex
+    // ordering" fix vs. the phase document's own inline code sample): the
+    // phase document's Step 3.3 literally showed ONE single loop over the
+    // WHOLE passesInExecutionOrder range that routes each surviving compute
+    // pass into whichever group it belongs to. Re-verified against this
+    // function's own explicitly-documented invariant (and the phase
+    // document's own immediately-following "IMPORTANT (nextEventIndex
+    // ordering caveat)" prose, which says the pre-GameView loop must assign
+    // its leaves' eventIndex values BEFORE "GameView" gets its own, and the
+    // post-GameView loop must assign its leaves' eventIndex values AFTER):
+    // a SINGLE loop over the whole array would assign eventIndex values to
+    // POST-GameView passes BEFORE "GameView" itself ever gets one (since the
+    // single loop finishes completely before BuildGameViewLeaf() is ever
+    // called) - silently breaking the documented "pre < GameView < post"
+    // monotonic ordering for any frame with a POST-GameView compute pass.
+    // Caught by this phase's own new
+    // EventIndexIsMonotonicAcrossPreGameViewGameViewAndPostGameView test
+    // (and 2 others) actually failing against the doc's literal sample.
+    // Fixed here by using TWO range-restricted loops instead - one over
+    // [0, gameViewIndex) BEFORE "GameView"'s own leaf is built, one over
+    // (gameViewIndex, size) AFTER - so eventIndex is genuinely monotonic
+    // increasing in true chronological order, exactly as documented.
+    for (int i = 0; i < gameViewIndex; ++i) {
+        const rg::RenderGraphPassSnapshot& pass = graphSnapshot.passesInExecutionOrder[static_cast<std::size_t>(i)];
+        if (!pass.isComputePass || pass.isCulled) {
+            continue;
         }
+        preGameViewGroup.children.push_back(BuildComputeDispatchLeaf(pass, nextEventIndex++));
     }
 
+    // Only add either group at all if something real actually survived
+    // this frame in THAT half - mirrors the deleted "GPU Skinning" group's
+    // own "only add if at least one real pass actually matched" discipline,
+    // applied independently to each half (it is entirely normal/expected
+    // for only one half to have children on a given captured frame).
+    if (!preGameViewGroup.children.empty()) {
+        root.children.push_back(std::move(preGameViewGroup));
+    }
     root.children.push_back(BuildGameViewLeaf(*gameViewPass, capture, nextEventIndex++));
 
-    // frame-debugger-4 campaign, PHASE2 - the real atmosphere-compositing
-    // step, sibling to "GameView" above, in real execution order (it always
-    // runs strictly AFTER "GameView" in the same frame - see
-    // AtmosphereLutRenderer::AddAerialPerspectiveCompositePass()'s own
-    // pass.ReadTexture(sourceColorHandle, ...) dependency declaration).
-    // Mirrors the "GPU Skinning" group's own "only add if a real matching pass
-    // was actually found this frame" discipline - a graphSnapshot from before
-    // this feature existed, or a hypothetical future build where atmosphere
-    // compositing genuinely did not run, must never produce a fake, empty, or
-    // misleading leaf.
-    const rg::RenderGraphPassSnapshot* aerialPerspectiveCompositePass =
-        FindPassByName(graphSnapshot.passesInExecutionOrder, "AtmosphereAerialPerspectiveCompositePass");
-    if (aerialPerspectiveCompositePass != nullptr) {
-        root.children.push_back(BuildAerialPerspectiveCompositeLeaf(*aerialPerspectiveCompositePass, nextEventIndex++));
+    for (int i = gameViewIndex + 1; i < static_cast<int>(graphSnapshot.passesInExecutionOrder.size()); ++i) {
+        const rg::RenderGraphPassSnapshot& pass = graphSnapshot.passesInExecutionOrder[static_cast<std::size_t>(i)];
+        if (!pass.isComputePass || pass.isCulled) {
+            continue;
+        }
+        postGameViewGroup.children.push_back(BuildComputeDispatchLeaf(pass, nextEventIndex++));
+    }
+    if (!postGameViewGroup.children.empty()) {
+        root.children.push_back(std::move(postGameViewGroup));
     }
 
     FrameDebuggerSnapshot snapshot;

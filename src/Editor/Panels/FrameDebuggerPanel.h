@@ -91,13 +91,18 @@ public:
     // `gameView`'s own "stashed for the rest of THIS call only" contract, just
     // nullable) - see TriggerCapture()'s own doc comment for how this flows into
     // FrameDebuggerHistory::CaptureFrame().
-    // `gpuSkinningPassNamesThisFrame` - the CURRENT frame's real
-    // AnimationSystem::GpuSkinningDispatchRequest::name values, already
-    // resolved to plain strings by the caller (ImGuiEditorLayer::BuildUI())
-    // - see PHASE2's BuildRealFrameDebuggerSnapshot() for why this function
-    // itself never needs to #include AnimationSystem.h.
+    //
+    // frame-debugger-5 campaign, PHASE2
+    // (PHASE2_GENERIC_COMPUTE_DISPATCH_EVENT_TREE_DISCOVERY.md) - this method
+    // no longer takes a `gpuSkinningPassNamesThisFrame` parameter (REMOVED -
+    // see PHASE0_MASTER_STRATEGY.md's Locked Design Decision #2/#6): GPU
+    // Skinning passes (and every other real compute dispatch) are now
+    // discovered generically by TriggerCapture()'s own call into
+    // BuildRealFrameDebuggerSnapshot(), purely via PHASE1's new
+    // RenderGraphPassSnapshot::isComputePass flag - no externally-supplied
+    // name list is threaded through this call anymore.
     void Build(EditorContext& ctx, Renderer& renderer, const rg::RenderGraph& renderGraph, RenderTexture& gameView,
-        RenderTexture* compositedGameView, const std::vector<std::string>& gpuSkinningPassNamesThisFrame);
+        RenderTexture* compositedGameView);
 
     // See IEditorLayer::PrepareFrameDebuggerCaptureContext()'s own doc
     // comment (EditorLayer.h) - the real implementation this forwards to.
@@ -351,7 +356,14 @@ private:
         // ImGuiEditorLayer::m_gameViewComposited's own "nullptr until the atmosphere
         // composite pass has produced something at least once this session" contract exactly
         // - see Build()'s own new parameter doc comment.
-    std::vector<std::string> m_frameGpuSkinningPassNames;
+    // frame-debugger-5 campaign, PHASE2 - m_frameGpuSkinningPassNames (the
+    // old, name-list-driven "which passes are GPU Skinning" cache) was
+    // REMOVED here (see PHASE0_MASTER_STRATEGY.md's Locked Design Decision
+    // #2/#6) - GPU Skinning passes, and every other real compute dispatch,
+    // are discovered generically now, purely via PHASE1's new
+    // RenderGraphPassSnapshot::isComputePass flag inside
+    // BuildRealFrameDebuggerSnapshot() itself, with no externally-supplied
+    // name list threaded through this class at all anymore.
 
     // True for exactly one BuildToolbarRow() call after
     // NotifyStepConsumed() was called (read-and-cleared) - see that

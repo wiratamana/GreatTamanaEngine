@@ -185,8 +185,7 @@ void FrameDebuggerPanel::TriggerCapture()
     renderTargetInfo.height = static_cast<int>(extent.height);
     renderTargetInfo.format = ToString(m_frameGameView->Format());
 
-    const FrameDebuggerSnapshot snapshot =
-        BuildRealFrameDebuggerSnapshot(graphSnapshot, m_captureContext, m_frameGpuSkinningPassNames, renderTargetInfo);
+    const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, m_captureContext, renderTargetInfo);
 
     m_history.CaptureFrame(*m_frameRenderer, snapshot, *m_frameGameView, m_frameGameViewComposited);
     m_selectedEventIndex = -1;
@@ -446,14 +445,27 @@ void FrameDebuggerPanel::BuildInspectorPane(
     // PHASE0_MASTER_STRATEGY.md): the retained preview texture is a
     // per-CAPTURED-FRAME thing (one real image, taken right when the
     // "GameView" pass finished), not a per-EVENT thing - so it is shown
-    // whenever the currently-viewed history entry actually has one,
-    // EXCEPT when the currently-SELECTED event is a GPU-skinning leaf
-    // (details->passName == "GPU Skinning" - see FrameDebuggerData.cpp's
-    // own BuildGpuSkinningLeaf()) - a compute dispatch genuinely has no
-    // color image of its own, and showing one anyway would be dishonest.
+    // whenever the currently-viewed history entry actually has one.
     // Nothing selected (m_selectedEventIndex == -1) falls through to
     // showing the texture too, matching the RenderTarget row's own
     // "frame-level, not event-level" framing immediately above.
+    //
+    // frame-debugger-5 campaign, PHASE2
+    // (PHASE2_GENERIC_COMPUTE_DISPATCH_EVENT_TREE_DISCOVERY.md) - the OLD
+    // "hide the whole-frame preview specifically for a GPU-skinning leaf"
+    // special case below (`details->passName == "GPU Skinning"`) can NEVER
+    // fire anymore: BuildComputeDispatchLeaf() (FrameDebuggerData.cpp) now
+    // sets `passName` to the pass's own real, raw name for EVERY compute
+    // leaf uniformly, never the literal string "GPU Skinning" - so
+    // `selectedEventIsGpuSkinning` below is permanently false today. This is
+    // NOT a bug: PHASE0_MASTER_STRATEGY.md's own Step 3.7 explicitly
+    // documents that, until PHASE3 lands a real per-compute-pass retained
+    // preview, selecting ANY compute-dispatch leaf (including what used to
+    // be the "GPU Skinning" one) is EXPECTED to fall back to showing the
+    // whole-frame image, exactly like every other still-unhandled leaf -
+    // this dead check is left in place deliberately rather than deleted,
+    // since PHASE3 is expected to replace it outright with a real
+    // per-pass-preview lookup rather than this boolean surviving as-is.
     const bool selectedEventIsGpuSkinning = details.has_value() && details->passName == "GPU Skinning";
     const bool showPreviewTexture =
         (m_previewDescriptor != VK_NULL_HANDLE) && (currentEntry != nullptr) && !selectedEventIsGpuSkinning;
@@ -562,8 +574,7 @@ void FrameDebuggerPanel::BuildEventDetailsSection(const std::optional<FrameDebug
 }
 
 void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg::RenderGraph& renderGraph,
-    RenderTexture& gameView, RenderTexture* compositedGameView,
-    const std::vector<std::string>& gpuSkinningPassNamesThisFrame)
+    RenderTexture& gameView, RenderTexture* compositedGameView)
 {
     // PHASE3 - cached for TriggerCapture()'s own use for the rest of THIS
     // call (BuildToolbarRow(), below, is the only thing that reads these) -
@@ -576,7 +587,6 @@ void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg:
     m_frameRenderGraph = &renderGraph;
     m_frameGameView = &gameView;
     m_frameGameViewComposited = compositedGameView; // PHASE1 (frame-debugger-4) - nullable, see header comment.
-    m_frameGpuSkinningPassNames = gpuSkinningPassNamesThisFrame;
 
     // PHASE4 - refreshed unconditionally every call, cheap, mirrors
     // BoneViewerWindow's own m_device precedent - only ever actually read by

@@ -216,10 +216,7 @@ std::string FormatMatrixProperty(const FrameDebuggerMatrixProperty& matrix);
 // - the real, non-placeholder builder. Pure reshape of ONE frame's already-
 // real data (`graphSnapshot` - see gte::rg::BuildRenderGraphSnapshot();
 // `capture` - see PHASE1's FrameDebuggerCaptureContext, already Reset()/
-// populated for the CURRENT frame by the caller; `gpuSkinningPassNamesThisFrame`
-// - the CURRENT frame's real AnimationSystem::GpuSkinningDispatchRequest::name
-// values, already resolved to plain strings by the caller so this function
-// itself never needs to #include AnimationSystem.h) into a real,
+// populated for the CURRENT frame by the caller) into a real,
 // Game-View-only FrameDebuggerSnapshot - never a competing capture
 // mechanism. No live VkDevice/Renderer/RenderTexture involved - exactly
 // like BuildRenderGraphSnapshot() itself.
@@ -229,28 +226,41 @@ std::string FormatMatrixProperty(const FrameDebuggerMatrixProperty& matrix);
 // `graphSnapshot` has no pass literally named "GameView" - e.g. queried
 // before the very first frame ever rendered.
 //
+// frame-debugger-5 campaign, PHASE2
+// (PHASE2_GENERIC_COMPUTE_DISPATCH_EVENT_TREE_DISCOVERY.md) - this function
+// no longer takes a caller-supplied `gpuSkinningPassNamesThisFrame` name
+// list (REMOVED - see PHASE0_MASTER_STRATEGY.md's Locked Design Decision
+// #2/#6). Every real compute dispatch this frame - GPU Skinning, every
+// atmosphere LUT/volume pass, the Aerial Perspective Composite pass,
+// Compute Blur Validation, and any future compute pass this engine ever
+// adds - is now discovered GENERICALLY, purely via PHASE1's new
+// `RenderGraphPassSnapshot::isComputePass` flag, never by a hand-maintained
+// name list or a hardcoded literal string match.
+//
 // Tree shape produced otherwise: one root group node "Game View", with an
-// optional "GPU Skinning" child group (present only when
-// `gpuSkinningPassNamesThisFrame` is non-empty, containing one LEAF per
-// matching real pass, in `graphSnapshot`'s own execution order) followed by
-// exactly one LEAF for the real "GameView" pass itself, followed by an
-// OPTIONAL final LEAF for the real "AtmosphereAerialPerspectiveCompositePass"
-// (present only when that exact pass name is found in `graphSnapshot` this
-// frame) - see PHASE0_MASTER_STRATEGY.md's Locked Design Decisions #1/#2/#6/#7
+// OPTIONAL "Compute Dispatches (Pre-GameView)" child group (present only
+// when at least one real, surviving `isComputePass == true` pass's own
+// index in `graphSnapshot.passesInExecutionOrder` is STRICTLY LESS THAN
+// the real "GameView" pass's own index - e.g. GPU Skinning, every
+// atmosphere LUT pass), followed by exactly one LEAF for the real
+// "GameView" pass itself, followed by an OPTIONAL "Compute Dispatches
+// (Post-GameView)" child group (same rule, but STRICTLY GREATER THAN
+// "GameView"'s own index - e.g. the Aerial Perspective Composite pass) -
+// see PHASE0_MASTER_STRATEGY.md's Locked Design Decisions #1/#2/#6/#7/#8
 // for the full reasoning (pass-level granularity, pass-scoped facts,
-// Game-View-only scope), and the `frame-debugger-4` campaign's own
-// PHASE0_MASTER_STRATEGY.md for why this specific trailing leaf exists.
+// Game-View-only scope, the split-group ordering rule). Each group is a
+// SIBLING of "GameView" in the tree, never nested inside the other, and is
+// only added at all when it has at least one real surviving child this
+// frame (never an empty, misleading group).
 //
 // `gameViewRenderTargetInfo` is DELIBERATELY a plain, already-resolved
 // parameter rather than this function reaching into a live RenderTexture/
 // Renderer itself - the phase document's own Step 3.1 point 4 asks for real
 // width/height/format info, but this function must stay pure (no live
-// VkDevice/Renderer), exactly like the `gpuSkinningPassNamesThisFrame`
-// parameter immediately above resolves the same tension for GPU-skinning
-// pass names. Only `width`/`height`/`format` are actually used from it -
-// `name` is always overwritten to "GameView" for a non-empty result (left
-// completely untouched - the caller's argument is simply ignored - for the
-// empty-result "no GameView pass" case, matching
+// VkDevice/Renderer). Only `width`/`height`/`format` are actually used from
+// it - `name` is always overwritten to "GameView" for a non-empty result
+// (left completely untouched - the caller's argument is simply ignored -
+// for the empty-result "no GameView pass" case, matching
 // BuildPlaceholderFrameDebuggerSnapshot()'s own all-default convention).
 // Defaults to an all-default FrameDebuggerRenderTargetInfo{} so a caller
 // that does not yet have real live extent/format data on hand (e.g. every
@@ -259,7 +269,6 @@ std::string FormatMatrixProperty(const FrameDebuggerMatrixProperty& matrix);
 FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(
     const rg::RenderGraphSnapshot& graphSnapshot,
     const FrameDebuggerCaptureContext& capture,
-    const std::vector<std::string>& gpuSkinningPassNamesThisFrame,
     const FrameDebuggerRenderTargetInfo& gameViewRenderTargetInfo = FrameDebuggerRenderTargetInfo{});
 
 // frame-debugger-4 campaign, PHASE3
