@@ -537,6 +537,25 @@
 #                                            MMD motion (GTEST_SKIP()s
 #                                            everywhere that motion isn't
 #                                            present).
+#   Assets/StlLoaderTests.cpp               - LoadStlModel()'s auto-detected
+#                                            binary/ASCII STL parsing into a
+#                                            MeshData (non-shared per-triangle
+#                                            vertices, degenerate/non-finite
+#                                            stored-normal recompute, 64-bit-
+#                                            safe binary triangle-count/file-
+#                                            size validation, malformed/
+#                                            truncated ASCII facet rejection),
+#                                            hand-built fixtures via a local
+#                                            StlByteWriter (same "construct
+#                                            the exact binary format by hand"
+#                                            approach as PmxLoaderTests.cpp) -
+#                                            no GPU device involved
+#                                            (src/Assets/StlLoader.h). Also
+#                                            includes one machine-gated smoke
+#                                            test against the real, non-
+#                                            vendored terrain.stl reference
+#                                            fixture (GTEST_SKIP()s everywhere
+#                                            that fixture isn't present).
 #   Assets/MeshFileTests.cpp               - EncodeMeshDataToBytes()/
 #                                            DecodeMeshDataFromBytes()
 #                                            round-tripping the *.gta
@@ -1775,6 +1794,7 @@ set(GTE_TEST_SOURCES
     Assets/AssetImporterTests.cpp
     Assets/PmxLoaderTests.cpp
     Assets/VmdLoaderTests.cpp
+    Assets/StlLoaderTests.cpp
     Assets/MeshFileTests.cpp
     Assets/MotionFileTests.cpp
     Assets/RigFileTests.cpp

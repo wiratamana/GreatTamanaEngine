@@ -337,6 +337,8 @@ add_library(gte_core STATIC
     src/Assets/PmxLoader.cpp
     src/Assets/VmdLoader.h
     src/Assets/VmdLoader.cpp
+    src/Assets/StlLoader.h
+    src/Assets/StlLoader.cpp
     src/Assets/MaterialData.h
     src/Assets/ImageFileDecoder.h
     src/Assets/ImageFileDecoder.cpp
