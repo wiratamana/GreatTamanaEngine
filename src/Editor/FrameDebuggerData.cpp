@@ -322,6 +322,94 @@ FrameDebuggerEventNode BuildGameViewLeaf(
     return leaf;
 }
 
+// Builds the real "Aerial Perspective Composite" pass LEAF node - see
+// BuildRealFrameDebuggerSnapshot()'s own header-comment tree-shape
+// description. frame-debugger-4 campaign, PHASE2. Mirrors
+// BuildGpuSkinningLeaf()'s own "n/a (compute pass)" blend/Z/stencil
+// convention (a real compute dispatch, never a draw call), but - unlike
+// GPU Skinning, which never samples a material texture at all - this pass
+// DOES have real, meaningful texture reads/writes worth showing (it is the
+// whole reason this leaf exists: to make the atmosphere-compositing step
+// visible), sourced directly from `pass.readNames`/`pass.writeNames` -
+// never fabricated or re-derived from anywhere else.
+FrameDebuggerEventNode BuildAerialPerspectiveCompositeLeaf(const rg::RenderGraphPassSnapshot& pass, int eventIndex)
+{
+    FrameDebuggerEventNode leaf;
+    // Mirrors BuildGpuSkinningLeaf()'s own leaf.name = pass.name convention
+    // exactly - the real, raw render-graph pass name, never a prettified
+    // invented one (this campaign's own honesty rule - see AGENTS.md,
+    // "Testability & Regression Safety" and PHASE0_MASTER_STRATEGY.md's own
+    // "never fabricate" precedent throughout this whole feature).
+    leaf.name = pass.name; // "AtmosphereAerialPerspectiveCompositePass"
+    leaf.isDrawCall = true;
+    leaf.eventIndex = eventIndex;
+
+    FrameDebuggerEventDetails details;
+    details.eventIndex = eventIndex;
+    details.eventLabel = "Compute Composite";
+    // A friendlier grouping label, distinct from the raw pass name above -
+    // mirrors BuildGpuSkinningLeaf()'s own details.passName = "GPU Skinning"
+    // precedent (a real pass's own raw name vs. a short, human-readable
+    // category label are allowed to differ).
+    details.passName = "Aerial Perspective Composite";
+
+    // shaderName - a real, hardcoded fact (there is exactly ONE compute
+    // shader this pass ever dispatches - see AtmosphereLutRenderer::
+    // AddAerialPerspectiveCompositePass()'s own renderer.Dispatch() call,
+    // Shaders/AtmosphereAerialPerspectiveComposite.comp) - never fabricated,
+    // mirrors DescribeStandardPipelineState()'s own "duplicate a real
+    // hardcoded engine constant with a comment documenting what it must be
+    // kept in sync with" precedent (FrameDebuggerCapture.cpp/.h).
+    details.shaderName = "AtmosphereAerialPerspectiveComposite.comp";
+
+    details.blendMode = "n/a (compute pass)";
+    details.zClip = "n/a (compute pass)";
+    details.zTest = "n/a (compute pass)";
+    details.zWrite = "n/a (compute pass)";
+    details.cull = "n/a (compute pass)";
+    details.stencilRef = "n/a (compute pass)";
+    details.stencilComp = "n/a (compute pass)";
+    details.stencilPass = "n/a (compute pass)";
+    details.stencilFail = "n/a (compute pass)";
+    details.stencilZFail = "n/a (compute pass)";
+
+    // textures - real read/write resource names, straight from this exact
+    // pass's own already-resolved RenderGraphPassSnapshot fields - never
+    // aggregated from FrameDebuggerCaptureContext (this pass is not a
+    // per-draw-call thing at all, unlike the "GameView" leaf).
+    for (const std::string& readName : pass.readNames) {
+        FrameDebuggerTextureProperty texture;
+        texture.name = "Read Texture";
+        texture.valueLabel = readName;
+        details.textures.push_back(std::move(texture));
+    }
+    for (const std::string& writeName : pass.writeNames) {
+        FrameDebuggerTextureProperty texture;
+        texture.name = "Write Texture";
+        texture.valueLabel = writeName;
+        details.textures.push_back(std::move(texture));
+    }
+
+    // vectors - real GPU timing, exactly like BuildGpuSkinningLeaf()'s own
+    // identical convention (0.0ms whenever GPU timing is Absent/Unsupported
+    // - see that function's own comment for the full reasoning, unchanged
+    // here).
+    FrameDebuggerVectorProperty timing;
+    timing.name = "GPU Time (ms)";
+    timing.x = static_cast<float>(pass.stats.timing.milliseconds);
+    details.vectors.push_back(timing);
+
+    // matrices deliberately left empty - real: this pass's own real
+    // invViewProjection/cameraWorldPosition push constants are genuinely
+    // camera-derived, but PHASE0's own Non-Goals explicitly scope this leaf
+    // to pass-level read/write/timing facts only, mirroring GPU Skinning's
+    // own "no per-draw camera matrix" precedent for a compute pass (neither
+    // pass is drawing anything with a rasterizer-consumed matrix).
+
+    leaf.details = std::move(details);
+    return leaf;
+}
+
 } // namespace
 
 FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapshot& graphSnapshot,
@@ -366,6 +454,22 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
     }
 
     root.children.push_back(BuildGameViewLeaf(*gameViewPass, capture, nextEventIndex++));
+
+    // frame-debugger-4 campaign, PHASE2 - the real atmosphere-compositing
+    // step, sibling to "GameView" above, in real execution order (it always
+    // runs strictly AFTER "GameView" in the same frame - see
+    // AtmosphereLutRenderer::AddAerialPerspectiveCompositePass()'s own
+    // pass.ReadTexture(sourceColorHandle, ...) dependency declaration).
+    // Mirrors the "GPU Skinning" group's own "only add if a real matching pass
+    // was actually found this frame" discipline - a graphSnapshot from before
+    // this feature existed, or a hypothetical future build where atmosphere
+    // compositing genuinely did not run, must never produce a fake, empty, or
+    // misleading leaf.
+    const rg::RenderGraphPassSnapshot* aerialPerspectiveCompositePass =
+        FindPassByName(graphSnapshot.passesInExecutionOrder, "AtmosphereAerialPerspectiveCompositePass");
+    if (aerialPerspectiveCompositePass != nullptr) {
+        root.children.push_back(BuildAerialPerspectiveCompositeLeaf(*aerialPerspectiveCompositePass, nextEventIndex++));
+    }
 
     FrameDebuggerSnapshot snapshot;
     snapshot.rootNodes.push_back(std::move(root));

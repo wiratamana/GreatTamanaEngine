@@ -221,5 +221,95 @@ TEST(FrameDebuggerSnapshotBuilderTest, RenderTargetInfoIsRealAndNamedGameView)
     EXPECT_EQ(snapshot.renderTarget.format, "Texture (RGBA8 UNORM)");
 }
 
+// frame-debugger-4 campaign, PHASE2 - the new "Aerial Perspective Composite"
+// leaf, sibling to "GameView", present only when a real pass literally named
+// "AtmosphereAerialPerspectiveCompositePass" is found in graphSnapshot.
+TEST(FrameDebuggerSnapshotBuilderTest, AerialPerspectiveCompositePassProducesThirdLeafAfterGameView)
+{
+    rg::RenderGraphSnapshot graphSnapshot;
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+
+    rg::RenderGraphPassSnapshot composite = MakePass("AtmosphereAerialPerspectiveCompositePass");
+    composite.readNames.push_back("GameView");
+    composite.writeNames.push_back("GameViewComposited");
+    composite.stats.timing.status = GpuTimingSample::Status::Present;
+    composite.stats.timing.milliseconds = 0.25;
+    graphSnapshot.passesInExecutionOrder.push_back(composite);
+
+    const FrameDebuggerCaptureContext capture;
+    const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture, {});
+
+    ASSERT_EQ(snapshot.rootNodes.size(), 1u);
+    const FrameDebuggerEventNode& root = snapshot.rootNodes[0];
+    ASSERT_EQ(root.children.size(), 2u); // "GameView" leaf + new "Aerial Perspective Composite" leaf.
+    EXPECT_EQ(snapshot.totalEventCount, 2);
+
+    const FrameDebuggerEventNode& leaf = root.children[1];
+    EXPECT_TRUE(leaf.isDrawCall);
+    EXPECT_EQ(leaf.name, "AtmosphereAerialPerspectiveCompositePass");
+    EXPECT_EQ(leaf.eventIndex, 1); // Highest in the tree, sequential after "GameView"'s own 0.
+    ASSERT_TRUE(leaf.details.has_value());
+    EXPECT_EQ(leaf.details->passName, "Aerial Perspective Composite");
+    EXPECT_EQ(leaf.details->eventLabel, "Compute Composite");
+    EXPECT_EQ(leaf.details->blendMode, "n/a (compute pass)");
+    ASSERT_EQ(leaf.details->textures.size(), 2u);
+    EXPECT_EQ(leaf.details->textures[0].name, "Read Texture");
+    EXPECT_EQ(leaf.details->textures[0].valueLabel, "GameView");
+    EXPECT_EQ(leaf.details->textures[1].name, "Write Texture");
+    EXPECT_EQ(leaf.details->textures[1].valueLabel, "GameViewComposited");
+    ASSERT_EQ(leaf.details->vectors.size(), 1u);
+    EXPECT_EQ(leaf.details->vectors[0].name, "GPU Time (ms)");
+    EXPECT_FLOAT_EQ(leaf.details->vectors[0].x, 0.25f);
+}
+
+TEST(FrameDebuggerSnapshotBuilderTest, NoAerialPerspectiveCompositePassAddsNoThirdLeaf)
+{
+    rg::RenderGraphSnapshot graphSnapshot;
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+
+    const FrameDebuggerCaptureContext capture;
+    const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture, {});
+
+    ASSERT_EQ(snapshot.rootNodes.size(), 1u);
+    EXPECT_EQ(snapshot.rootNodes[0].children.size(), 1u); // Only "GameView" - no third leaf appears.
+    EXPECT_EQ(snapshot.totalEventCount, 1);
+}
+
+TEST(FrameDebuggerSnapshotBuilderTest, AllThreeGroupsAppearTogetherInRealExecutionOrder)
+{
+    rg::RenderGraphSnapshot graphSnapshot;
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("SkinPass_A"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("AtmosphereAerialPerspectiveCompositePass"));
+
+    const FrameDebuggerCaptureContext capture;
+    const std::vector<std::string> gpuSkinningNames{ "SkinPass_A" };
+    const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture, gpuSkinningNames);
+
+    ASSERT_EQ(snapshot.rootNodes.size(), 1u);
+    const FrameDebuggerEventNode& root = snapshot.rootNodes[0];
+    ASSERT_EQ(root.children.size(), 3u);
+
+    const FrameDebuggerEventNode& gpuGroup = root.children[0];
+    EXPECT_FALSE(gpuGroup.isDrawCall);
+    EXPECT_EQ(gpuGroup.name, "GPU Skinning");
+
+    const FrameDebuggerEventNode& gameViewLeaf = root.children[1];
+    EXPECT_TRUE(gameViewLeaf.isDrawCall);
+    EXPECT_EQ(gameViewLeaf.name, "GameView");
+
+    const FrameDebuggerEventNode& compositeLeaf = root.children[2];
+    EXPECT_TRUE(compositeLeaf.isDrawCall);
+    EXPECT_EQ(compositeLeaf.name, "AtmosphereAerialPerspectiveCompositePass");
+
+    // eventIndex values strictly increasing left-to-right across the whole
+    // tree: 0 (SkinPass_A), 1 (GameView), 2 (AtmosphereAerialPerspectiveCompositePass).
+    ASSERT_EQ(gpuGroup.children.size(), 1u);
+    EXPECT_EQ(gpuGroup.children[0].eventIndex, 0);
+    EXPECT_EQ(gameViewLeaf.eventIndex, 1);
+    EXPECT_EQ(compositeLeaf.eventIndex, 2);
+    EXPECT_EQ(snapshot.totalEventCount, 3);
+}
+
 } // namespace
 } // namespace gte

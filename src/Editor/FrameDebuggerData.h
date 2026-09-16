@@ -233,10 +233,13 @@ std::string FormatMatrixProperty(const FrameDebuggerMatrixProperty& matrix);
 // optional "GPU Skinning" child group (present only when
 // `gpuSkinningPassNamesThisFrame` is non-empty, containing one LEAF per
 // matching real pass, in `graphSnapshot`'s own execution order) followed by
-// exactly one final LEAF sibling for the real "GameView" pass itself - see
-// PHASE0_MASTER_STRATEGY.md's Locked Design Decisions #1/#6/#7 for the full
-// reasoning (pass-level granularity, pass-scoped aggregated "reflection",
-// Game-View-only scope).
+// exactly one LEAF for the real "GameView" pass itself, followed by an
+// OPTIONAL final LEAF for the real "AtmosphereAerialPerspectiveCompositePass"
+// (present only when that exact pass name is found in `graphSnapshot` this
+// frame) - see PHASE0_MASTER_STRATEGY.md's Locked Design Decisions #1/#2/#6/#7
+// for the full reasoning (pass-level granularity, pass-scoped facts,
+// Game-View-only scope), and the `frame-debugger-4` campaign's own
+// PHASE0_MASTER_STRATEGY.md for why this specific trailing leaf exists.
 //
 // `gameViewRenderTargetInfo` is DELIBERATELY a plain, already-resolved
 // parameter rather than this function reaching into a live RenderTexture/
