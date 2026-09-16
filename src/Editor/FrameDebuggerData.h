@@ -306,6 +306,36 @@ struct FrameDebuggerComputePassTextureWrite {
 std::vector<FrameDebuggerComputePassTextureWrite> CollectComputePassTextureWrites(
     const rg::RenderGraphSnapshot& graphSnapshot);
 
+// frame-debugger-5 campaign, PHASE4
+// (PHASE4_VOLUME_TEXTURE_RAYMARCH_PREVIEW_REUSE.md, Step 3.1) - the
+// VolumeTexture-kind sibling of FrameDebuggerComputePassTextureWrite/
+// CollectComputePassTextureWrites() above. A SEPARATE, independent
+// collection pass rather than a filter option on the same result - a pass
+// could, in principle, have BOTH a Texture-kind write and a VolumeTexture-
+// kind write in a future engine (not true of any real pass today), so this
+// deliberately does not assume "exactly one visual write kind per pass".
+struct FrameDebuggerComputePassVolumeTextureWrite {
+    std::string passName;
+    std::string writeVolumeTextureName;
+};
+
+// Pure, CPU-side discovery (no live VkDevice/Renderer/RenderTexture/
+// VolumeTexturePreviewRenderer involved) - walks
+// `graphSnapshot.passesInExecutionOrder` directly, exactly like
+// CollectComputePassTextureWrites() above, and collects one
+// {pass.name, pass.writeNames[i]} pair for every real, SURVIVING
+// (`isCulled == false`) compute-dispatch (`isComputePass == true`) pass
+// whose FIRST `writeKinds[i] == rg::ResourceKind::VolumeTexture` write is
+// found. A pass with no `VolumeTexture`-kind write at all (e.g. a
+// `Texture`-kind write, or a `Buffer`-kind write) is simply excluded
+// entirely from this result - never a fake/empty entry for it.
+//
+// KNOWN, ACCEPTED LIMITATION (mirrors CollectComputePassTextureWrites()'s
+// own identical limitation): only the FIRST `VolumeTexture`-kind write per
+// pass is collected.
+std::vector<FrameDebuggerComputePassVolumeTextureWrite> CollectComputePassVolumeTextureWrites(
+    const rg::RenderGraphSnapshot& graphSnapshot);
+
 // frame-debugger-4 campaign, PHASE3
 // (PHASE3_TESTS_DOCS_FULL_BUILD_AND_LIVE_VERIFICATION.md, Step 3.1) - the
 // one genuinely PURE piece of decision logic buried inside PHASE1's own

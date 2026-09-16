@@ -506,6 +506,33 @@ std::vector<FrameDebuggerComputePassTextureWrite> CollectComputePassTextureWrite
     return result;
 }
 
+// frame-debugger-5 campaign, PHASE4
+// (PHASE4_VOLUME_TEXTURE_RAYMARCH_PREVIEW_REUSE.md, Step 3.1) - the
+// VolumeTexture-kind sibling of CollectComputePassTextureWrites() above - see
+// FrameDebuggerData.h's own doc comment for the full contract. Identical
+// traversal shape, just filtering on rg::ResourceKind::VolumeTexture instead
+// of rg::ResourceKind::Texture.
+std::vector<FrameDebuggerComputePassVolumeTextureWrite> CollectComputePassVolumeTextureWrites(
+    const rg::RenderGraphSnapshot& graphSnapshot)
+{
+    std::vector<FrameDebuggerComputePassVolumeTextureWrite> result;
+    for (const rg::RenderGraphPassSnapshot& pass : graphSnapshot.passesInExecutionOrder) {
+        if (!pass.isComputePass || pass.isCulled) {
+            continue;
+        }
+        for (std::size_t i = 0; i < pass.writeKinds.size() && i < pass.writeNames.size(); ++i) {
+            if (pass.writeKinds[i] == rg::ResourceKind::VolumeTexture) {
+                FrameDebuggerComputePassVolumeTextureWrite write;
+                write.passName = pass.name;
+                write.writeVolumeTextureName = pass.writeNames[i];
+                result.push_back(std::move(write));
+                break; // Known, accepted limitation - only the FIRST VolumeTexture-kind write per pass.
+            }
+        }
+    }
+    return result;
+}
+
 // frame-debugger-4 campaign, PHASE3 - see FrameDebuggerData.h's own doc
 // comment for the full contract. A plain, exhaustive if/else chain over
 // already-resolved booleans - deliberately no live FrameDebuggerHistoryEntry/

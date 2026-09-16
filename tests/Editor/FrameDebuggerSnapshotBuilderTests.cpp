@@ -595,5 +595,109 @@ TEST(FrameDebuggerSnapshotBuilderTest, CollectComputePassTextureWritesOnlyCollec
     EXPECT_EQ(writes[0].writeTextureName, "FirstTexture");
 }
 
+// frame-debugger-5 campaign, PHASE4
+// (PHASE4_VOLUME_TEXTURE_RAYMARCH_PREVIEW_REUSE.md, Step 3.3) - Tier-1 tests
+// for CollectComputePassVolumeTextureWrites() (FrameDebuggerData.h/.cpp), the
+// VolumeTexture-kind sibling of CollectComputePassTextureWrites() above.
+
+TEST(FrameDebuggerSnapshotBuilderTest, CollectComputePassVolumeTextureWritesFindsExactlyOneVolumeTextureKindWrite)
+{
+    rg::RenderGraphSnapshot graphSnapshot;
+    rg::RenderGraphPassSnapshot pass = MakeComputePass("AtmosphereAerialPerspectiveVolumePass");
+    pass.writeNames.push_back("AerialPerspectiveVolume");
+    pass.writeKinds.push_back(rg::ResourceKind::VolumeTexture);
+    graphSnapshot.passesInExecutionOrder.push_back(pass);
+
+    const std::vector<FrameDebuggerComputePassVolumeTextureWrite> writes =
+        CollectComputePassVolumeTextureWrites(graphSnapshot);
+    ASSERT_EQ(writes.size(), 1u);
+    EXPECT_EQ(writes[0].passName, "AtmosphereAerialPerspectiveVolumePass");
+    EXPECT_EQ(writes[0].writeVolumeTextureName, "AerialPerspectiveVolume");
+}
+
+TEST(FrameDebuggerSnapshotBuilderTest, CollectComputePassVolumeTextureWritesExcludesTextureAndBufferOnlyWrites)
+{
+    rg::RenderGraphSnapshot graphSnapshot;
+
+    rg::RenderGraphPassSnapshot textureOnly = MakeComputePass("AtmosphereTransmittanceLutPass");
+    textureOnly.writeNames.push_back("TransmittanceLut");
+    textureOnly.writeKinds.push_back(rg::ResourceKind::Texture);
+    graphSnapshot.passesInExecutionOrder.push_back(textureOnly);
+
+    rg::RenderGraphPassSnapshot bufferOnly = MakeComputePass("SkinPass_A");
+    bufferOnly.writeNames.push_back("SkinnedVertexBuffer");
+    bufferOnly.writeKinds.push_back(rg::ResourceKind::Buffer);
+    graphSnapshot.passesInExecutionOrder.push_back(bufferOnly);
+
+    const std::vector<FrameDebuggerComputePassVolumeTextureWrite> writes =
+        CollectComputePassVolumeTextureWrites(graphSnapshot);
+    EXPECT_TRUE(writes.empty());
+}
+
+TEST(FrameDebuggerSnapshotBuilderTest, CollectComputePassVolumeTextureWritesExcludesCulledComputePass)
+{
+    rg::RenderGraphSnapshot graphSnapshot;
+    rg::RenderGraphPassSnapshot culled = MakeComputePass("CulledVolumePass");
+    culled.isCulled = true;
+    culled.writeNames.push_back("SomeVolume");
+    culled.writeKinds.push_back(rg::ResourceKind::VolumeTexture);
+    graphSnapshot.passesInExecutionOrder.push_back(culled);
+
+    const std::vector<FrameDebuggerComputePassVolumeTextureWrite> writes =
+        CollectComputePassVolumeTextureWrites(graphSnapshot);
+    EXPECT_TRUE(writes.empty());
+}
+
+TEST(FrameDebuggerSnapshotBuilderTest, CollectComputePassVolumeTextureWritesExcludesNonComputePass)
+{
+    rg::RenderGraphSnapshot graphSnapshot;
+    rg::RenderGraphPassSnapshot gameView = MakePass("GameView"); // isComputePass defaults to false.
+    gameView.writeNames.push_back("GameView");
+    gameView.writeKinds.push_back(rg::ResourceKind::VolumeTexture); // Hypothetical/defensive only.
+    graphSnapshot.passesInExecutionOrder.push_back(gameView);
+
+    const std::vector<FrameDebuggerComputePassVolumeTextureWrite> writes =
+        CollectComputePassVolumeTextureWrites(graphSnapshot);
+    EXPECT_TRUE(writes.empty());
+}
+
+TEST(FrameDebuggerSnapshotBuilderTest, CollectComputePassVolumeTextureWritesOnlyCollectsFirstVolumeTextureKindWrite)
+{
+    rg::RenderGraphSnapshot graphSnapshot;
+    rg::RenderGraphPassSnapshot pass = MakeComputePass("MixedVolumeWritesPass");
+    pass.writeNames = { "FirstVolume", "SecondVolume" };
+    pass.writeKinds = { rg::ResourceKind::VolumeTexture, rg::ResourceKind::VolumeTexture };
+    graphSnapshot.passesInExecutionOrder.push_back(pass);
+
+    const std::vector<FrameDebuggerComputePassVolumeTextureWrite> writes =
+        CollectComputePassVolumeTextureWrites(graphSnapshot);
+    ASSERT_EQ(writes.size(), 1u);
+    EXPECT_EQ(writes[0].writeVolumeTextureName, "FirstVolume");
+}
+
+// Step 3.3's own explicit third case: a pass with BOTH a Texture-kind AND a
+// VolumeTexture-kind write appears in BOTH CollectComputePassTextureWrites()'s
+// AND CollectComputePassVolumeTextureWrites()'s own results - a hypothetical
+// case for any real pass in this engine today, but the two collection passes
+// deliberately do not assume "exactly one visual write kind per pass".
+TEST(FrameDebuggerSnapshotBuilderTest, PassWithBothTextureAndVolumeTextureWritesAppearsInBothCollections)
+{
+    rg::RenderGraphSnapshot graphSnapshot;
+    rg::RenderGraphPassSnapshot pass = MakeComputePass("HypotheticalDualWritePass");
+    pass.writeNames = { "SomeTexture", "SomeVolume" };
+    pass.writeKinds = { rg::ResourceKind::Texture, rg::ResourceKind::VolumeTexture };
+    graphSnapshot.passesInExecutionOrder.push_back(pass);
+
+    const std::vector<FrameDebuggerComputePassTextureWrite> textureWrites =
+        CollectComputePassTextureWrites(graphSnapshot);
+    const std::vector<FrameDebuggerComputePassVolumeTextureWrite> volumeWrites =
+        CollectComputePassVolumeTextureWrites(graphSnapshot);
+
+    ASSERT_EQ(textureWrites.size(), 1u);
+    EXPECT_EQ(textureWrites[0].writeTextureName, "SomeTexture");
+    ASSERT_EQ(volumeWrites.size(), 1u);
+    EXPECT_EQ(volumeWrites[0].writeVolumeTextureName, "SomeVolume");
+}
+
 } // namespace
 } // namespace gte

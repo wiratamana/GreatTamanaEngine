@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <vector>
 #include <volk.h>
 
@@ -31,6 +32,22 @@ enum class VolumeTexturePreviewInterpretation : std::int32_t {
     GenericDensityInAlpha = 0, // network-impl-6's original, still-default interpretation - UNCHANGED.
     AtmosphereAerialPerspective = 1, // atmosphere-scattering-2 Phase 4 - see VolumeTexturePreview.comp's own doc comment.
 };
+
+// frame-debugger-5 campaign, PHASE4
+// (task_manager/frame-debugger-5/PHASE4_VOLUME_TEXTURE_RAYMARCH_PREVIEW_REUSE.md)
+// - the SAME interpretation-selection rule Application.cpp's own GET /get_texture
+// volume-texture branch already used INLINE (auto-detect the Aerial Perspective
+// volume purely by its registered NAME prefix, "AtmosphereAerialPerspectiveVolume")
+// - extracted here into one small, shared, named, PURE function (no live
+// VkDevice/Renderer involved - see tests/Renderer/VolumeTexturePreviewRendererTests.cpp)
+// so a SECOND real call site (FrameDebuggerHistory::CaptureFrame(), same phase)
+// never needs to re-derive this rule independently by hand. Every OTHER volume
+// texture name still resolves to GenericDensityInAlpha - zero behavior change
+// for Application.cpp's own existing call site (byte-for-byte the same rule,
+// just no longer inlined there - see atmosphere-scattering-2 campaign, Phase 4's
+// own Locked Design Decision 6, still the reason this stays a pure NAME-based
+// heuristic rather than a new parameter/flag anywhere).
+VolumeTexturePreviewInterpretation SelectVolumeTexturePreviewInterpretation(const std::string& volumeTextureName);
 
 // network-impl-6 campaign, Phase 3. A small, self-contained, ON-DEMAND
 // (never per-frame) GPU compute renderer that raymarches an arbitrary live

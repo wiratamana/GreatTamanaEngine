@@ -1813,6 +1813,7 @@ set(GTE_TEST_SOURCES
     Renderer/GpuTimingTests.cpp
     Renderer/ComputeDispatchTests.cpp
     Renderer/VolumeTexturePreviewMathTests.cpp
+    Renderer/VolumeTexturePreviewRendererTests.cpp
     Renderer/GpuSkinning/GpuSkinningTypesTests.cpp
     Renderer/Atmosphere/AtmosphereMathTests.cpp
     Renderer/Atmosphere/AtmosphereAerialPerspectiveCompositeMathTests.cpp

@@ -67,6 +67,20 @@ static constexpr float kAerialPreviewExposure = 3200.0f; // atmosphere-scatterin
 
 } // namespace
 
+// frame-debugger-5 campaign, PHASE4
+// (task_manager/frame-debugger-5/PHASE4_VOLUME_TEXTURE_RAYMARCH_PREVIEW_REUSE.md)
+// - see this function's own header (VolumeTexturePreviewRenderer.h) doc
+// comment for the full contract. Byte-for-byte the same rule
+// Application.cpp's own GET /get_texture volume-texture branch used inline
+// before this phase - extracted here, unchanged, so a second call site
+// (FrameDebuggerHistory::CaptureFrame()) can reuse it verbatim.
+VolumeTexturePreviewInterpretation SelectVolumeTexturePreviewInterpretation(const std::string& volumeTextureName)
+{
+    const bool isAerialPerspectiveVolume = volumeTextureName.rfind("AtmosphereAerialPerspectiveVolume", 0) == 0;
+    return isAerialPerspectiveVolume ? VolumeTexturePreviewInterpretation::AtmosphereAerialPerspective
+                                      : VolumeTexturePreviewInterpretation::GenericDensityInAlpha;
+}
+
 VolumeTexturePreviewRenderer::~VolumeTexturePreviewRenderer()
 {
     // m_pipeline/m_outputTexture are RAII types and clean up themselves;

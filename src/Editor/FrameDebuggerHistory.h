@@ -2,6 +2,7 @@
 
 #include "FrameDebuggerData.h"
 #include "../Renderer/RenderTexture.h"
+#include "../Renderer/VolumeTexturePreviewRenderer.h" // frame-debugger-5, PHASE4 - m_volumePreviewRenderer below.
 
 #include <array>
 #include <optional>
@@ -78,19 +79,26 @@ struct FrameDebuggerHistoryEntry {
     std::optional<RenderTexture> compositedPreview;
 
     // NEW (frame-debugger-5 campaign, PHASE3
-    // PHASE3_GENERIC_PER_PASS_RETAINED_PREVIEW_CAPTURE.md) - one retained GPU
+    // PHASE3_GENERIC_PER_PASS_RETAINED_PREVIEW_CAPTURE.md; WIDENED, PHASE4
+    // PHASE4_VOLUME_TEXTURE_RAYMARCH_PREVIEW_REUSE.md) - one retained GPU
     // copy per real compute-dispatch pass THIS capture found with at least
     // one real 2D-texture write (see FrameDebuggerData.h's own
     // CollectComputePassTextureWrites(), and FrameDebuggerData.cpp's
-    // generic "Compute Dispatches" tree groups, PHASE2). Keyed by the pass's
-    // own real, raw name (matches FrameDebuggerEventNode::name /
+    // generic "Compute Dispatches" tree groups, PHASE2) OR (PHASE4) a real
+    // ray-marched thumbnail for a pass whose only visual write is a 3D
+    // volume texture (see FrameDebuggerData.h's own
+    // CollectComputePassVolumeTextureWrites()). Keyed by the pass's own
+    // real, raw name (matches FrameDebuggerEventNode::name /
     // FrameDebuggerEventDetails::passName for that leaf exactly) so
     // EnsurePreviewDescriptor() (Panels/FrameDebuggerPanel.cpp) can look up
     // "does the CURRENTLY SELECTED leaf have its own retained preview" by a
-    // simple linear name comparison. A pass with NO real 2D-texture write at
-    // all (a buffer-only write, e.g. GPU Skinning; or - until a future PHASE4
-    // - a volume-texture-only write, e.g. the Aerial Perspective Volume
-    // pass) simply has NO entry here at all - never a fake/empty one. This
+    // simple linear name comparison - from that picking logic's point of
+    // view, a volume-derived preview and a plain 2D-texture preview are
+    // indistinguishable, both are just "this pass's own retained preview
+    // texture" (PHASE4 needed ZERO changes to that logic). A pass with
+    // neither a real 2D-texture write NOR a real volume-texture write (e.g.
+    // a buffer-only write, GPU Skinning's own output buffer) simply has NO
+    // entry here at all - never a fake/empty one. This
     // field's OWN rule (a third, different rule from `preview`'s "once
     // written, always populated" and `compositedPreview`'s "may legitimately
     // go back to std::nullopt") is: entirely REBUILT from scratch on every
@@ -160,11 +168,18 @@ public:
     // on hand (`*m_frameRenderGraph`). Used to (a) re-fetch THIS SAME frame's
     // own already-built rg::RenderGraphSnapshot (renderGraph.LastSnapshot())
     // to discover every real compute-dispatch pass's own first Texture-kind
-    // write (see FrameDebuggerData.h's CollectComputePassTextureWrites()),
+    // write (see FrameDebuggerData.h's CollectComputePassTextureWrites())
+    // AND (frame-debugger-5, PHASE4) every real compute-dispatch pass's own
+    // first VolumeTexture-kind write (CollectComputePassVolumeTextureWrites()),
     // and (b) resolve each discovered write-texture name into its real,
     // current physical texture + tracked GPU state
-    // (renderGraph.DebugTextureSnapshotFor()) - see this method's own .cpp
-    // body for the full capture sequence.
+    // (renderGraph.DebugTextureSnapshotFor()/DebugVolumeTextureSnapshotFor())
+    // - see this method's own .cpp body for the full capture sequence. A
+    // volume-texture write additionally goes through this class's own
+    // m_volumePreviewRenderer (below) to produce a real ray-marched 2D
+    // thumbnail, reusing VolumeTexturePreviewRenderer::RenderPreview() -
+    // the EXACT SAME code GET /get_texture already uses to preview a volume
+    // texture over HTTP (PHASE4).
     void CaptureFrame(Renderer& renderer, const rg::RenderGraph& renderGraph, const FrameDebuggerSnapshot& snapshot,
         RenderTexture& gameViewSource, RenderTexture* compositedGameViewSource);
 
@@ -190,6 +205,20 @@ private:
     std::array<FrameDebuggerHistoryEntry, kCapacity> m_entries;
     FrameDebuggerHistoryWriteState m_writeState;
     int m_cursor = 0;
+
+    // frame-debugger-5 campaign, PHASE4
+    // (PHASE4_VOLUME_TEXTURE_RAYMARCH_PREVIEW_REUSE.md, Step 3.2 item 2) -
+    // owned directly, mirroring how Application.cpp already owns its own
+    // instance for GET /get_texture's identical volume-preview use case
+    // (VolumeTexturePreviewRenderer is explicitly designed to be cheap to
+    // own one-per-consumer - see its own class comment: "self-contained...
+    // this is invoked at most once per network request" - here, at most
+    // once per real capture trigger, per volume-writing pass). NOT
+    // copyable/movable (see VolumeTexturePreviewRenderer's own class
+    // comment) - this is fine, since FrameDebuggerHistory itself is never
+    // copied/moved anywhere either (a plain, in-place member of
+    // FrameDebuggerPanel - Panels/FrameDebuggerPanel.h).
+    VolumeTexturePreviewRenderer m_volumePreviewRenderer;
 };
 
 } // namespace gte

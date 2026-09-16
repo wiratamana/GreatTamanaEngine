@@ -1120,10 +1120,16 @@ int Application::Run()
                     // Locked Design Decision 6). Every other volume texture name
                     // still resolves to GenericDensityInAlpha, byte-for-byte the
                     // same behavior network-impl-6 already shipped.
-                    const bool isAerialPerspectiveVolume = requestedName.rfind("AtmosphereAerialPerspectiveVolume", 0) == 0;
-                    const VolumeTexturePreviewInterpretation interpretation = isAerialPerspectiveVolume
-                        ? VolumeTexturePreviewInterpretation::AtmosphereAerialPerspective
-                        : VolumeTexturePreviewInterpretation::GenericDensityInAlpha;
+                    //
+                    // frame-debugger-5 campaign, PHASE4
+                    // (task_manager/frame-debugger-5/PHASE4_VOLUME_TEXTURE_RAYMARCH_PREVIEW_REUSE.md)
+                    // - this rule is now a shared, named, pure function
+                    // (VolumeTexturePreviewRenderer.h's SelectVolumeTexturePreviewInterpretation())
+                    // rather than inlined here, since FrameDebuggerHistory::CaptureFrame()
+                    // now needs the exact same rule for a second real call site - byte-for-byte
+                    // unchanged behavior for this call site.
+                    const VolumeTexturePreviewInterpretation interpretation =
+                        SelectVolumeTexturePreviewInterpretation(requestedName);
 
                     const VolumeTexturePreviewRenderer::CapturedRawPixels raw = m_volumeTexturePreviewRenderer.RenderPreview(
                         m_renderer, volumeSnapshot->target, volumeSnapshot->state, interpretation);

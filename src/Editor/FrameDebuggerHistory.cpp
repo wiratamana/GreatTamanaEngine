@@ -249,6 +249,98 @@ void FrameDebuggerHistory::CaptureFrame(Renderer& renderer, const rg::RenderGrap
         }
     });
 
+    // NEW (frame-debugger-5 campaign, PHASE4
+    // PHASE4_VOLUME_TEXTURE_RAYMARCH_PREVIEW_REUSE.md) - Step A' (pure,
+    // CPU-side, mirrors Step A above): discover every real, surviving
+    // compute-dispatch pass's own FIRST VolumeTexture-kind write this same
+    // frame - a SEPARATE list from computeWrites above (a pass could, in
+    // principle, have both kinds of write in a future engine - not true of
+    // any pass today).
+    const std::vector<FrameDebuggerComputePassVolumeTextureWrite> computeVolumeWrites =
+        CollectComputePassVolumeTextureWrites(graphSnapshot);
+
+    for (const FrameDebuggerComputePassVolumeTextureWrite& volumeWrite : computeVolumeWrites) {
+        const std::optional<rg::DebugVolumeTextureSnapshot> volumeSnapshot =
+            renderGraph.DebugVolumeTextureSnapshotFor(volumeWrite.writeVolumeTextureName);
+        if (!volumeSnapshot.has_value()) {
+            // Defensive only (mirrors the 2D case above) - should not happen
+            // for a name just read straight out of this SAME frame's own
+            // graphSnapshot, but never crash / fabricate an entry if it does.
+            continue;
+        }
+
+        // The SAME interpretation-selection rule GET /get_texture's own
+        // volume branch already uses (Application.cpp) - extracted into one
+        // shared, named, pure function so both real call sites agree
+        // (VolumeTexturePreviewRenderer.h's SelectVolumeTexturePreviewInterpretation()).
+        const VolumeTexturePreviewInterpretation interpretation =
+            SelectVolumeTexturePreviewInterpretation(volumeWrite.writeVolumeTextureName);
+
+        // RenderPreview() is its OWN self-contained ImmediateSubmit() call
+        // (plus a second, internal one of its own for the CPU readback) -
+        // genuinely SEPARATE from the main copy-loop's single
+        // ImmediateSubmit() above. frame-debugger-4's own Locked Design
+        // Decision #8 ("one single ImmediateSubmit() call... never N
+        // separate submissions") is specifically about that main
+        // whole-frame + per-2D-pass copy loop - it does not apply to this
+        // deliberately self-contained utility class this phase merely calls
+        // into (see PHASE4_VOLUME_TEXTURE_RAYMARCH_PREVIEW_REUSE.md's own
+        // Step 3.2 item 3). This means one CaptureFrame() call, once
+        // volume-writing passes exist, now issues MORE THAN ONE separate GPU
+        // submission total - a deliberate, accepted, still genuinely
+        // ON-DEMAND cost (this whole method only runs on Enable-edge/Step/
+        // explicit-Capture-click, never per real frame).
+        const VolumeTexturePreviewRenderer::CapturedRawPixels raw = m_volumePreviewRenderer.RenderPreview(
+            renderer, volumeSnapshot->target, volumeSnapshot->state, interpretation);
+
+        char volumeDebugNameBuffer[96];
+        std::snprintf(volumeDebugNameBuffer, sizeof(volumeDebugNameBuffer),
+            "FrameDebuggerHistorySlot%dCompute%.48s", writeIndex, volumeWrite.passName.c_str());
+
+        // FrameDebuggerComputePassPreview::preview is a plain RenderTexture
+        // (PHASE3), never a Texture2D - RenderPreview() only returns
+        // CPU-side pixels (it was built for an HTTP JSON response, not a
+        // live GPU texture ready for ImGui::Image()), so this phase uploads
+        // them into a freshly created RenderTexture via a staging buffer,
+        // mirroring GpuResourceFactory::CreateTexture2D()'s own internal
+        // upload sequence exactly (UNDEFINED -> TRANSFER_DST ->
+        // SHADER_READ_ONLY_OPTIMAL) - see PHASE4's own Step 3.2 item 4 for
+        // why this (rather than widening FrameDebuggerComputePassPreview
+        // into a tagged union) is the resolved shape.
+        RenderTexture volumePreviewTexture =
+            renderer.CreateRenderTexture(raw.width, raw.height, VK_FORMAT_R8G8B8A8_UNORM, volumeDebugNameBuffer);
+
+        const VkDeviceSize uploadSize =
+            static_cast<VkDeviceSize>(raw.width) * static_cast<VkDeviceSize>(raw.height) * 4;
+        Buffer stagingBuffer =
+            renderer.CreateBuffer(uploadSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, BufferMemoryUsage::CpuToGpu);
+        stagingBuffer.Upload(raw.pixels.data(), static_cast<std::size_t>(uploadSize));
+
+        const VkImage volumePreviewImage = volumePreviewTexture.Image();
+        renderer.ImmediateSubmit([&](VkCommandBuffer cmd) {
+            rg::EmitImageBarrier(cmd, volumePreviewImage, range, freshImageState, transferDst);
+
+            VkBufferImageCopy copyRegion{};
+            copyRegion.bufferOffset = 0;
+            copyRegion.bufferRowLength = 0;
+            copyRegion.bufferImageHeight = 0;
+            copyRegion.imageSubresource = VkImageSubresourceLayers{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+            copyRegion.imageOffset = VkOffset3D{ 0, 0, 0 };
+            copyRegion.imageExtent =
+                VkExtent3D{ static_cast<std::uint32_t>(raw.width), static_cast<std::uint32_t>(raw.height), 1 };
+            vkCmdCopyBufferToImage(
+                cmd, stagingBuffer.Native(), volumePreviewImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+
+            // Leave the retained copy in ShaderRead, ready for
+            // ImGui::Image() display - matching every other retained
+            // preview texture in this method.
+            rg::EmitImageBarrier(cmd, volumePreviewImage, range, transferDst, shaderRead);
+        });
+
+        entry.computePassPreviews.push_back(
+            FrameDebuggerComputePassPreview{ volumeWrite.passName, std::move(volumePreviewTexture) });
+    }
+
     m_writeState = AdvanceFrameDebuggerHistoryWriteState(m_writeState, kCapacity);
     m_cursor = ClampFrameDebuggerHistoryCursor(m_writeState.count - 1, m_writeState.count);
 }
