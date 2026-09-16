@@ -58,20 +58,18 @@ void FrameDebuggerPanel::EnsurePreviewDescriptor()
 {
     const FrameDebuggerHistoryEntry* entry = m_history.CurrentEntry();
 
-    // PHASE1 (frame-debugger-4 campaign) - decide WHICH of the two retained
-    // textures this call should display, based on the currently-SELECTED
-    // tree event (Locked Design Decision #5/#6, PHASE0_MASTER_STRATEGY.md):
+    // PHASE1 (frame-debugger-4 campaign) - decide WHICH retained texture
+    // this call should display, based on the currently-SELECTED tree event
+    // (Locked Design Decision #5/#6, PHASE0_MASTER_STRATEGY.md):
     //   - the literal "GameView" leaf selected -> the TRUE pre-atmosphere-
     //     composite image (entry->preview), "as of the exact point this
     //     specific event finished" - preserves frame-debugger-3's own
     //     original Locked Design Decision #5 semantics for that one leaf.
     //   - anything else at all - including nothing selected (a fresh
-    //     capture, or a Frame-History navigation that reset the selection),
-    //     the "GPU Skinning" leaf (which itself is separately hidden behind
-    //     "No Texture" by BuildInspectorPane()'s own existing
-    //     selectedEventIsGpuSkinning check - this function does not need to
-    //     special-case that itself), or PHASE2's "Aerial Perspective
-    //     Composite" leaf - prefers the TRUE, final, atmosphere-inclusive
+    //     capture, or a Frame-History navigation that reset the selection) -
+    //     a selected compute-dispatch leaf with its OWN retained preview
+    //     (frame-debugger-5 campaign, PHASE3 - see below) wins next; failing
+    //     that, prefers the TRUE, final, atmosphere-inclusive
     //     entry->compositedPreview, falling back to entry->preview only when
     //     compositedPreview is std::nullopt for this particular captured
     //     frame (e.g. captured before the very first composite pass ever ran
@@ -84,14 +82,37 @@ void FrameDebuggerPanel::EnsurePreviewDescriptor()
     // itself now only resolves the plain booleans that function needs, then
     // maps its enum result back onto a real RenderTexture pointer.
     bool isViewingGameViewLeaf = false;
+    std::string selectedPassName;
+    bool hasSelectedPassName = false;
     if (entry != nullptr) {
         const std::optional<FrameDebuggerEventDetails> details =
             FindEventDetailsByIndex(entry->snapshot, m_selectedEventIndex);
         isViewingGameViewLeaf = details.has_value() && details->passName == "GameView";
+        hasSelectedPassName = details.has_value();
+        if (hasSelectedPassName) {
+            selectedPassName = details->passName;
+        }
     }
+
+    // frame-debugger-5 campaign, PHASE3
+    // (PHASE3_GENERIC_PER_PASS_RETAINED_PREVIEW_CAPTURE.md, Step 3.4) - does
+    // the CURRENTLY-SELECTED leaf (whatever it is) have its own entry in
+    // entry->computePassPreviews? A simple linear name match - this vector
+    // is at most a handful of entries per captured frame (one per real
+    // compute-dispatch pass), so no hash map is warranted.
+    const FrameDebuggerComputePassPreview* selectedComputePassPreview = nullptr;
+    if (entry != nullptr && hasSelectedPassName) {
+        for (const FrameDebuggerComputePassPreview& candidate : entry->computePassPreviews) {
+            if (candidate.passName == selectedPassName) {
+                selectedComputePassPreview = &candidate;
+                break;
+            }
+        }
+    }
+
     const FrameDebuggerPreviewSourceChoice choice = ChooseFrameDebuggerPreviewSource(entry != nullptr,
         entry != nullptr && entry->preview.has_value(), entry != nullptr && entry->compositedPreview.has_value(),
-        isViewingGameViewLeaf);
+        isViewingGameViewLeaf, selectedComputePassPreview != nullptr);
 
     const RenderTexture* selectedSource = nullptr;
     switch (choice) {
@@ -100,6 +121,9 @@ void FrameDebuggerPanel::EnsurePreviewDescriptor()
         break;
     case FrameDebuggerPreviewSourceChoice::CompositedPreview:
         selectedSource = (entry != nullptr && entry->compositedPreview.has_value()) ? &(*entry->compositedPreview) : nullptr;
+        break;
+    case FrameDebuggerPreviewSourceChoice::ComputePassPreview:
+        selectedSource = (selectedComputePassPreview != nullptr) ? &selectedComputePassPreview->preview : nullptr;
         break;
     case FrameDebuggerPreviewSourceChoice::None:
         break;
@@ -187,7 +211,7 @@ void FrameDebuggerPanel::TriggerCapture()
 
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, m_captureContext, renderTargetInfo);
 
-    m_history.CaptureFrame(*m_frameRenderer, snapshot, *m_frameGameView, m_frameGameViewComposited);
+    m_history.CaptureFrame(*m_frameRenderer, *m_frameRenderGraph, snapshot, *m_frameGameView, m_frameGameViewComposited);
     m_selectedEventIndex = -1;
 }
 

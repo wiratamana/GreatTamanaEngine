@@ -516,5 +516,84 @@ TEST(FrameDebuggerSnapshotBuilderTest, EventIndexIsMonotonicAcrossPreGameViewGam
     EXPECT_EQ(snapshot.totalEventCount, 5);
 }
 
+// frame-debugger-5 campaign, PHASE3
+// (PHASE3_GENERIC_PER_PASS_RETAINED_PREVIEW_CAPTURE.md, Step 3.6) - Tier-1
+// tests for CollectComputePassTextureWrites() (FrameDebuggerData.h/.cpp),
+// the pure, CPU-side discovery function FrameDebuggerHistory::CaptureFrame()
+// uses to find which compute passes' own write textures to retain a real GPU
+// copy of. Deliberately exercised directly against a hand-fabricated
+// rg::RenderGraphSnapshot - no FrameDebuggerSnapshot/Editor-tree involved at
+// all, per this function's own "reads graphSnapshot directly" design.
+
+TEST(FrameDebuggerSnapshotBuilderTest, CollectComputePassTextureWritesFindsExactlyOneTextureKindWrite)
+{
+    rg::RenderGraphSnapshot graphSnapshot;
+    rg::RenderGraphPassSnapshot pass = MakeComputePass("AtmosphereTransmittanceLutPass");
+    pass.writeNames.push_back("TransmittanceLut");
+    pass.writeKinds.push_back(rg::ResourceKind::Texture);
+    graphSnapshot.passesInExecutionOrder.push_back(pass);
+
+    const std::vector<FrameDebuggerComputePassTextureWrite> writes = CollectComputePassTextureWrites(graphSnapshot);
+    ASSERT_EQ(writes.size(), 1u);
+    EXPECT_EQ(writes[0].passName, "AtmosphereTransmittanceLutPass");
+    EXPECT_EQ(writes[0].writeTextureName, "TransmittanceLut");
+}
+
+TEST(FrameDebuggerSnapshotBuilderTest, CollectComputePassTextureWritesExcludesBufferAndVolumeTextureOnlyWrites)
+{
+    rg::RenderGraphSnapshot graphSnapshot;
+
+    rg::RenderGraphPassSnapshot bufferOnly = MakeComputePass("SkinPass_A");
+    bufferOnly.writeNames.push_back("SkinnedVertexBuffer");
+    bufferOnly.writeKinds.push_back(rg::ResourceKind::Buffer);
+    graphSnapshot.passesInExecutionOrder.push_back(bufferOnly);
+
+    rg::RenderGraphPassSnapshot volumeOnly = MakeComputePass("AtmosphereAerialPerspectiveVolumePass");
+    volumeOnly.writeNames.push_back("AerialPerspectiveVolume");
+    volumeOnly.writeKinds.push_back(rg::ResourceKind::VolumeTexture);
+    graphSnapshot.passesInExecutionOrder.push_back(volumeOnly);
+
+    const std::vector<FrameDebuggerComputePassTextureWrite> writes = CollectComputePassTextureWrites(graphSnapshot);
+    EXPECT_TRUE(writes.empty());
+}
+
+TEST(FrameDebuggerSnapshotBuilderTest, CollectComputePassTextureWritesExcludesCulledComputePass)
+{
+    rg::RenderGraphSnapshot graphSnapshot;
+    rg::RenderGraphPassSnapshot culled = MakeComputePass("CulledComputePass");
+    culled.isCulled = true;
+    culled.writeNames.push_back("SomeTexture");
+    culled.writeKinds.push_back(rg::ResourceKind::Texture);
+    graphSnapshot.passesInExecutionOrder.push_back(culled);
+
+    const std::vector<FrameDebuggerComputePassTextureWrite> writes = CollectComputePassTextureWrites(graphSnapshot);
+    EXPECT_TRUE(writes.empty());
+}
+
+TEST(FrameDebuggerSnapshotBuilderTest, CollectComputePassTextureWritesExcludesNonComputePass)
+{
+    rg::RenderGraphSnapshot graphSnapshot;
+    rg::RenderGraphPassSnapshot gameView = MakePass("GameView"); // isComputePass defaults to false.
+    gameView.writeNames.push_back("GameView");
+    gameView.writeKinds.push_back(rg::ResourceKind::Texture);
+    graphSnapshot.passesInExecutionOrder.push_back(gameView);
+
+    const std::vector<FrameDebuggerComputePassTextureWrite> writes = CollectComputePassTextureWrites(graphSnapshot);
+    EXPECT_TRUE(writes.empty());
+}
+
+TEST(FrameDebuggerSnapshotBuilderTest, CollectComputePassTextureWritesOnlyCollectsFirstTextureKindWrite)
+{
+    rg::RenderGraphSnapshot graphSnapshot;
+    rg::RenderGraphPassSnapshot pass = MakeComputePass("MixedWritesPass");
+    pass.writeNames = { "FirstTexture", "SecondTexture" };
+    pass.writeKinds = { rg::ResourceKind::Texture, rg::ResourceKind::Texture };
+    graphSnapshot.passesInExecutionOrder.push_back(pass);
+
+    const std::vector<FrameDebuggerComputePassTextureWrite> writes = CollectComputePassTextureWrites(graphSnapshot);
+    ASSERT_EQ(writes.size(), 1u);
+    EXPECT_EQ(writes[0].writeTextureName, "FirstTexture");
+}
+
 } // namespace
 } // namespace gte

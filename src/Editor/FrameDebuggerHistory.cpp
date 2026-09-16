@@ -1,6 +1,7 @@
 #include "FrameDebuggerHistory.h"
 
 #include "../Renderer/Renderer.h"
+#include "../Renderer/RenderGraph/RenderGraph.h"
 #include "../Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
 
 #include <algorithm>
@@ -38,9 +39,24 @@ int FrameDebuggerHistory::StorageIndexForLogicalIndex(int logicalIndex) const no
     return (base + logicalIndex) % kCapacity;
 }
 
-void FrameDebuggerHistory::CaptureFrame(
-    Renderer& renderer, const FrameDebuggerSnapshot& snapshot, RenderTexture& gameViewSource,
-    RenderTexture* compositedGameViewSource)
+namespace {
+
+// frame-debugger-5 campaign, PHASE3 - one discovered compute-pass write's
+// real, CURRENT physical source (image/extent) plus its own real, currently
+// TRACKED GPU state (colorState) - resolved once, up front (Step B, before
+// any Vulkan barrier call), then consumed inside the single ImmediateSubmit()
+// lambda below. Deliberately a small, local, capture-scoped struct - never
+// exposed outside this .cpp file.
+struct ComputePassCopySource {
+    VkImage image = VK_NULL_HANDLE;
+    VkExtent2D extent{};
+    rg::ResourceState colorState;
+};
+
+} // namespace
+
+void FrameDebuggerHistory::CaptureFrame(Renderer& renderer, const rg::RenderGraph& renderGraph,
+    const FrameDebuggerSnapshot& snapshot, RenderTexture& gameViewSource, RenderTexture* compositedGameViewSource)
 {
     const int writeIndex = m_writeState.nextWriteIndex;
     FrameDebuggerHistoryEntry& entry = m_entries[static_cast<std::size_t>(writeIndex)];
@@ -87,6 +103,61 @@ void FrameDebuggerHistory::CaptureFrame(
         entry.compositedPreview.reset();
     }
 
+    // NEW (frame-debugger-5 campaign, PHASE3
+    // PHASE3_GENERIC_PER_PASS_RETAINED_PREVIEW_CAPTURE.md, Step 3.3) -
+    // Step A (pure, CPU-side, before touching Vulkan at all): re-fetch THIS
+    // SAME frame's own already-built rg::RenderGraphSnapshot (the identical
+    // snapshot FrameDebuggerPanel::TriggerCapture() already built moments ago
+    // to construct `snapshot` above) and discover every real, surviving
+    // compute-dispatch pass's own FIRST Texture-kind write.
+    const rg::RenderGraphSnapshot graphSnapshot =
+        renderGraph.LastSnapshot(rg::ExecuteTimingMode::SynchronousImmediateReadback);
+    const std::vector<FrameDebuggerComputePassTextureWrite> computeWrites =
+        CollectComputePassTextureWrites(graphSnapshot);
+
+    // Step B: resolve each discovered write-texture name into its real,
+    // CURRENT physical texture + tracked GPU state via the already-existing
+    // RenderGraphDebugTextureRegistry (RenderGraph::DebugTextureSnapshotFor())
+    // - the SAME registry GET /get_texture/GET /list_textures already rely
+    // on. entry.computePassPreviews is entirely REBUILT from scratch every
+    // single real capture (see that field's own doc comment,
+    // FrameDebuggerHistory.h) - never merely appended to.
+    entry.computePassPreviews.clear();
+    std::vector<ComputePassCopySource> computeCopySources;
+    computeCopySources.reserve(computeWrites.size());
+
+    for (const FrameDebuggerComputePassTextureWrite& write : computeWrites) {
+        const std::optional<rg::DebugTextureSnapshot> textureSnapshot =
+            renderGraph.DebugTextureSnapshotFor(write.writeTextureName);
+        if (!textureSnapshot.has_value()) {
+            // Defensive only (see this method's own header-comment contract)
+            // - should not happen for a name just read straight out of this
+            // SAME frame's own graphSnapshot, but never crash / fabricate an
+            // entry if it somehow does.
+            continue;
+        }
+
+        char computeDebugNameBuffer[96];
+        std::snprintf(computeDebugNameBuffer, sizeof(computeDebugNameBuffer),
+            "FrameDebuggerHistorySlot%dCompute%.48s", writeIndex, write.passName.c_str());
+
+        // Aggregate-initialized directly (NOT default-constructed then
+        // assigned) - RenderTexture (FrameDebuggerComputePassPreview::preview)
+        // has no default constructor at all, so this member must be
+        // initialized directly from CreateRenderTexture()'s own return value
+        // via aggregate list-initialization (guaranteed copy elision, C++17)
+        // rather than default-construct-then-move-assign.
+        FrameDebuggerComputePassPreview computePreview{ write.passName,
+            renderer.CreateRenderTexture(static_cast<int>(textureSnapshot->target.extent.width),
+                static_cast<int>(textureSnapshot->target.extent.height), textureSnapshot->target.format,
+                computeDebugNameBuffer) };
+
+        computeCopySources.push_back(
+            ComputePassCopySource{ textureSnapshot->target.image, textureSnapshot->target.extent,
+                textureSnapshot->colorState });
+        entry.computePassPreviews.push_back(std::move(computePreview));
+    }
+
     const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
     const rg::ResourceState shaderRead = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
     const rg::ResourceState transferSrc = rg::RequiredStateFor(rg::ResourceAccess::TransferSrc, false);
@@ -100,10 +171,13 @@ void FrameDebuggerHistory::CaptureFrame(
     // A genuinely EXTRA, explicit, on-demand GPU submission - acceptable
     // ONLY because CaptureFrame() itself happens at most once per real
     // capture trigger (never every frame) - see this class's own header
-    // comment. Both the pre-composite and (when present) post-composite
-    // copies happen inside this SAME ImmediateSubmit() call (PHASE0's
-    // Locked Design Decision #8) - a single GPU submission + fence wait for
-    // the whole CaptureFrame() call, not two separate ones.
+    // comment. The pre-composite copy, the post-composite copy (when
+    // present), AND (frame-debugger-5, PHASE3) every discovered compute-pass
+    // copy all happen inside this SAME ImmediateSubmit() call
+    // (frame-debugger-4's own Locked Design Decision #8 - "one single
+    // ImmediateSubmit() call... never N separate submissions") - a single
+    // GPU submission + fence wait for the WHOLE CaptureFrame() call
+    // (2 + computeCopySources.size() total copies), never several.
     renderer.ImmediateSubmit([&](VkCommandBuffer cmd) {
         // Pre-composite copy - byte-for-byte the existing, already-correct
         // sequence, unchanged.
@@ -138,6 +212,40 @@ void FrameDebuggerHistory::CaptureFrame(
                 entry.compositedPreview->Image(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &compositedRegion);
             rg::EmitImageBarrier(cmd, compositedGameViewSource->Image(), range, transferSrc, shaderRead);
             rg::EmitImageBarrier(cmd, entry.compositedPreview->Image(), range, transferDst, shaderRead);
+        }
+
+        // NEW (frame-debugger-5 campaign, PHASE3) - one more transition-copy-
+        // transition-back sequence per discovered compute-pass write texture.
+        // CRITICAL: the SOURCE's "previous" state for the first barrier below
+        // is `source.colorState` - this pass's own REAL, CURRENTLY-TRACKED
+        // GPU state, read straight out of the registry (Step B above) -
+        // deliberately NEVER assuming ShaderRead the way the two hardcoded
+        // copies above do. An arbitrary compute pass's output may legitimately
+        // be left in a different tracked state (e.g. General/ShaderReadWrite
+        // for a storage image a later pass still needs to read/write) - and
+        // the source is restored back to that SAME real state afterward
+        // (never left in TransferSrc for a later graph-recorded frame to trip
+        // over), mirroring AtmosphereLutRenderer's own
+        // FinalizeAerialPerspectiveCompositeForSampling() "restore afterward"
+        // discipline. The retained DESTINATION copy itself is left in
+        // ShaderRead (matching the other two retained copies above), ready
+        // for ImGui::Image() display.
+        for (std::size_t i = 0; i < computeCopySources.size(); ++i) {
+            const ComputePassCopySource& source = computeCopySources[i];
+            const RenderTexture& destination = entry.computePassPreviews[i].preview;
+
+            rg::EmitImageBarrier(cmd, source.image, range, source.colorState, transferSrc);
+            rg::EmitImageBarrier(cmd, destination.Image(), range, freshImageState, transferDst);
+
+            VkImageCopy computeRegion{};
+            computeRegion.srcSubresource = VkImageSubresourceLayers{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+            computeRegion.dstSubresource = VkImageSubresourceLayers{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+            computeRegion.extent = VkExtent3D{ source.extent.width, source.extent.height, 1 };
+            vkCmdCopyImage(cmd, source.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, destination.Image(),
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &computeRegion);
+
+            rg::EmitImageBarrier(cmd, source.image, range, transferSrc, source.colorState);
+            rg::EmitImageBarrier(cmd, destination.Image(), range, transferDst, shaderRead);
         }
     });
 

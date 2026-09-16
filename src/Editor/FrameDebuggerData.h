@@ -271,25 +271,70 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(
     const FrameDebuggerCaptureContext& capture,
     const FrameDebuggerRenderTargetInfo& gameViewRenderTargetInfo = FrameDebuggerRenderTargetInfo{});
 
+// frame-debugger-5 campaign, PHASE3
+// (PHASE3_GENERIC_PER_PASS_RETAINED_PREVIEW_CAPTURE.md, Step 3.3 "Step A" -
+// v2/second-iteration review finding) - one real compute-dispatch pass's own
+// FIRST Texture-kind write this frame, ready for FrameDebuggerHistory::
+// CaptureFrame() (FrameDebuggerHistory.h/.cpp) to resolve into a real,
+// retained GPU copy via rg::RenderGraph::DebugTextureSnapshotFor().
+struct FrameDebuggerComputePassTextureWrite {
+    std::string passName;
+    std::string writeTextureName;
+};
+
+// Pure, CPU-side discovery (no live VkDevice/Renderer/RenderTexture
+// involved) - walks `graphSnapshot.passesInExecutionOrder` directly (NOT
+// the Editor's own already-built FrameDebuggerEventNode tree/display-string
+// row labels - see this function's own originating phase document for why
+// that alternative was explicitly rejected during this campaign's v2
+// review) and collects one {pass.name, pass.writeNames[i]} pair for every
+// real, SURVIVING (`isCulled == false`) compute-dispatch (`isComputePass ==
+// true`) pass whose FIRST `writeKinds[i] == rg::ResourceKind::Texture`
+// write is found. A pass with no `Texture`-kind write at all (a
+// `Buffer`-only write, e.g. GPU Skinning's own output buffer; or - until a
+// future campaign - a `VolumeTexture`-only write, e.g. the Aerial
+// Perspective Volume pass) is simply excluded entirely from the result -
+// never a fake/empty entry for it. `"GameView"` itself is never included
+// (it is never `isComputePass == true`, since it is declared via plain
+// `AddPass()`/`WriteColorAttachment()`, never `AddComputePass()`).
+//
+// KNOWN, ACCEPTED LIMITATION: only the FIRST `Texture`-kind write per pass
+// is collected - no real pass in this engine writes more than one 2D
+// texture today, but if a future pass ever did, only the first would get a
+// retained preview. This is a deliberate, documented simplification, not a
+// silent gap.
+std::vector<FrameDebuggerComputePassTextureWrite> CollectComputePassTextureWrites(
+    const rg::RenderGraphSnapshot& graphSnapshot);
+
 // frame-debugger-4 campaign, PHASE3
 // (PHASE3_TESTS_DOCS_FULL_BUILD_AND_LIVE_VERIFICATION.md, Step 3.1) - the
 // one genuinely PURE piece of decision logic buried inside PHASE1's own
 // Panels/FrameDebuggerPanel.cpp EnsurePreviewDescriptor(): given whether a
-// history entry exists at all, whether its two retained textures
-// (`preview`/`compositedPreview`) are actually populated, and whether the
+// history entry exists at all, whether its retained textures
+// (`preview`/`compositedPreview`/a selected compute-dispatch leaf's own
+// retained preview) are actually available, and whether the
 // currently-selected tree event is literally the "GameView" leaf, decide
-// WHICH of the two retained textures (if either) should be displayed.
+// WHICH retained texture (if any) should be displayed.
 // Extracted here - rather than left inline in that Tier-2, ImGui/Vulkan-
 // coupled function - specifically so this one rule (Locked Design
 // Decisions #5/#6, PHASE0_MASTER_STRATEGY.md) is directly Tier-1-testable
 // with no live VkDevice/ImGui context at all; see
 // tests/Editor/FrameDebuggerDataTests.cpp for the full set of covered input
 // combinations.
+//
+// frame-debugger-5 campaign, PHASE3
+// (PHASE3_GENERIC_PER_PASS_RETAINED_PREVIEW_CAPTURE.md, Step 3.4) - grows one
+// new case, `ComputePassPreview` - the currently-SELECTED leaf's own
+// retained compute-pass output texture (FrameDebuggerHistoryEntry::
+// computePassPreviews, FrameDebuggerHistory.h). Every OTHER existing input
+// combination's existing output is UNCHANGED by this addition.
 enum class FrameDebuggerPreviewSourceChoice {
     None, // Nothing to preview - no entry at all, or the "GameView" leaf is
         // selected but its own `preview` is (defensively) unpopulated.
     Preview, // The true pre-atmosphere-composite "GameView" copy.
     CompositedPreview, // The true post-atmosphere-composite, final image.
+    ComputePassPreview, // NEW (PHASE3) - the selected leaf's own retained
+        // compute-pass output texture.
 };
 
 // Pure decision function - no FrameDebuggerHistoryEntry/RenderTexture
@@ -303,14 +348,28 @@ enum class FrameDebuggerPreviewSourceChoice {
 // textures are actually populated; `isViewingGameViewLeaf` is whether the
 // currently-selected event's own FrameDebuggerEventDetails::passName is
 // literally "GameView" (false whenever nothing is selected, or any other
-// leaf - including PHASE2's new "Aerial Perspective Composite" one - is).
+// leaf - including a compute-dispatch leaf - is).
 //
-// Rule (Locked Design Decisions #5/#6): the literal "GameView" leaf always
-// shows the pre-composite `preview` (never `compositedPreview`, even if
-// that IS present); anything else (including nothing selected) prefers the
-// post-composite `compositedPreview`, falling back to `preview` only when
-// `compositedPreview` itself is absent for this particular captured frame.
-FrameDebuggerPreviewSourceChoice ChooseFrameDebuggerPreviewSource(
-    bool hasEntry, bool hasPreview, bool hasCompositedPreview, bool isViewingGameViewLeaf);
+// NEW (frame-debugger-5 campaign, PHASE3) `hasSelectedComputePassPreview` -
+// whether the CURRENTLY-SELECTED leaf (whatever it is) has its own entry in
+// the currently-viewed FrameDebuggerHistoryEntry::computePassPreviews (i.e.
+// an entry whose `passName` matches the selected leaf's own real
+// `FrameDebuggerEventDetails::passName`) - resolved by the CALLER
+// (Panels/FrameDebuggerPanel.cpp's EnsurePreviewDescriptor()), never by this
+// function itself (which stays free of any FrameDebuggerHistoryEntry/
+// RenderTexture dependency, per this function's own pre-existing
+// philosophy above).
+//
+// Rule (Locked Design Decisions #5/#6, PLUS PHASE3's new addition): the
+// literal "GameView" leaf always shows the pre-composite `preview` (never
+// `compositedPreview`/a compute-pass preview, even if either IS present -
+// UNCHANGED by PHASE3); otherwise, a selected leaf with its own retained
+// compute-pass preview WINS (NEW - PHASE3) over the post-composite
+// `compositedPreview`; failing that, anything else (including nothing
+// selected) prefers the post-composite `compositedPreview`, falling back to
+// `preview` only when `compositedPreview` itself is absent for this
+// particular captured frame (both UNCHANGED from before PHASE3).
+FrameDebuggerPreviewSourceChoice ChooseFrameDebuggerPreviewSource(bool hasEntry, bool hasPreview,
+    bool hasCompositedPreview, bool isViewingGameViewLeaf, bool hasSelectedComputePassPreview);
 
 } // namespace gte

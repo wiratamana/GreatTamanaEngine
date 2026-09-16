@@ -5,6 +5,8 @@
 
 #include <array>
 #include <optional>
+#include <string>
+#include <vector>
 
 // task_manager/frame-debugger-3 campaign, PHASE3
 // (PHASE3_FRAME_HISTORY_RING_BUFFER_AND_CAPTURE_TRIGGER.md) - a real,
@@ -17,6 +19,34 @@ namespace gte {
 
 class Renderer;
 
+// frame-debugger-5 campaign, PHASE3
+// (PHASE3_GENERIC_PER_PASS_RETAINED_PREVIEW_CAPTURE.md) - forward-declared
+// here (mirroring Panels/FrameDebuggerPanel.h's own identical forward
+// declaration) so CaptureFrame() below can take a `const rg::RenderGraph&`
+// parameter without this header needing to #include the real,
+// heavyweight RenderGraph.h - only FrameDebuggerHistory.cpp needs the real
+// definition (it calls renderGraph.LastSnapshot()/DebugTextureSnapshotFor()).
+namespace rg {
+class RenderGraph;
+} // namespace rg
+
+// frame-debugger-5 campaign, PHASE3
+// (PHASE3_GENERIC_PER_PASS_RETAINED_PREVIEW_CAPTURE.md) - one real,
+// retained GPU copy of ONE compute-dispatch pass's own real 2D-texture
+// write, as of one specific real capture. `preview` is ALWAYS populated for
+// an entry that exists in FrameDebuggerHistoryEntry::computePassPreviews at
+// all (never std::optional here - unlike `preview`/`compositedPreview`
+// above, a pass either gets a real entry with a real texture, or no entry
+// at all; there is no partially-populated state for this struct). `preview`
+// is intentionally NOT copyable (RenderTexture itself is move-only) - this
+// struct is therefore also move-only, which is exactly what
+// std::vector<FrameDebuggerComputePassPreview>::push_back(std::move(...))
+// needs.
+struct FrameDebuggerComputePassPreview {
+    std::string passName;
+    RenderTexture preview;
+};
+
 // One ring-buffer slot: a fully real, already-resolved FrameDebuggerSnapshot
 // (PHASE2's BuildRealFrameDebuggerSnapshot()) plus a retained GPU copy of
 // that historical frame's real Game View output image. `preview` is
@@ -25,7 +55,8 @@ class Renderer;
 // comment) - once written, it is ALWAYS populated (a fresh RenderTexture is
 // created for every single real capture, never left std::nullopt again).
 // `compositedPreview` (below) instead follows its own, different rule - see
-// its own field-level comment.
+// its own field-level comment. `computePassPreviews` (below) follows a
+// THIRD, different rule again - see its own field-level comment.
 struct FrameDebuggerHistoryEntry {
     FrameDebuggerSnapshot snapshot;
     std::optional<RenderTexture> preview; // pre-composite "GameView" copy - unchanged behavior/doc comment.
@@ -45,6 +76,29 @@ struct FrameDebuggerHistoryEntry {
     // call - this field's std::nullopt-ness is a property of the CAPTURE
     // that most recently wrote this slot, not a one-way ratchet.
     std::optional<RenderTexture> compositedPreview;
+
+    // NEW (frame-debugger-5 campaign, PHASE3
+    // PHASE3_GENERIC_PER_PASS_RETAINED_PREVIEW_CAPTURE.md) - one retained GPU
+    // copy per real compute-dispatch pass THIS capture found with at least
+    // one real 2D-texture write (see FrameDebuggerData.h's own
+    // CollectComputePassTextureWrites(), and FrameDebuggerData.cpp's
+    // generic "Compute Dispatches" tree groups, PHASE2). Keyed by the pass's
+    // own real, raw name (matches FrameDebuggerEventNode::name /
+    // FrameDebuggerEventDetails::passName for that leaf exactly) so
+    // EnsurePreviewDescriptor() (Panels/FrameDebuggerPanel.cpp) can look up
+    // "does the CURRENTLY SELECTED leaf have its own retained preview" by a
+    // simple linear name comparison. A pass with NO real 2D-texture write at
+    // all (a buffer-only write, e.g. GPU Skinning; or - until a future PHASE4
+    // - a volume-texture-only write, e.g. the Aerial Perspective Volume
+    // pass) simply has NO entry here at all - never a fake/empty one. This
+    // field's OWN rule (a third, different rule from `preview`'s "once
+    // written, always populated" and `compositedPreview`'s "may legitimately
+    // go back to std::nullopt") is: entirely REBUILT from scratch on every
+    // single real capture (`.clear()`'d, then re-populated) - its size/
+    // contents can legitimately differ from one capture to the next (e.g. a
+    // pass that ran last capture but was culled this one simply has no entry
+    // this time), never assumed stable across captures.
+    std::vector<FrameDebuggerComputePassPreview> computePassPreviews;
 };
 
 // Pure, plain-int bookkeeping for a fixed-capacity circular ring buffer -
@@ -100,8 +154,19 @@ public:
     // nullptr when no composited texture exists yet this session (see this
     // method's own doc comment on FrameDebuggerHistoryEntry::compositedPreview
     // above) - nullptr is a completely safe, ordinary input, never dereferenced.
-    void CaptureFrame(Renderer& renderer, const FrameDebuggerSnapshot& snapshot, RenderTexture& gameViewSource,
-        RenderTexture* compositedGameViewSource);
+    //
+    // NEW `renderGraph` parameter (frame-debugger-5 campaign, PHASE3) - the
+    // SAME live RenderGraph FrameDebuggerPanel::TriggerCapture() already has
+    // on hand (`*m_frameRenderGraph`). Used to (a) re-fetch THIS SAME frame's
+    // own already-built rg::RenderGraphSnapshot (renderGraph.LastSnapshot())
+    // to discover every real compute-dispatch pass's own first Texture-kind
+    // write (see FrameDebuggerData.h's CollectComputePassTextureWrites()),
+    // and (b) resolve each discovered write-texture name into its real,
+    // current physical texture + tracked GPU state
+    // (renderGraph.DebugTextureSnapshotFor()) - see this method's own .cpp
+    // body for the full capture sequence.
+    void CaptureFrame(Renderer& renderer, const rg::RenderGraph& renderGraph, const FrameDebuggerSnapshot& snapshot,
+        RenderTexture& gameViewSource, RenderTexture* compositedGameViewSource);
 
     // How many real captures exist right now (0..kCapacity).
     int Count() const noexcept { return m_writeState.count; }

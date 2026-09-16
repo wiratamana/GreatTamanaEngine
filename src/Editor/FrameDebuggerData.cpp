@@ -480,20 +480,56 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
     return snapshot;
 }
 
+// frame-debugger-5 campaign, PHASE3
+// (PHASE3_GENERIC_PER_PASS_RETAINED_PREVIEW_CAPTURE.md, Step 3.3 "Step A") -
+// see FrameDebuggerData.h's own doc comment for the full contract. Pure,
+// CPU-side discovery - reads graphSnapshot.passesInExecutionOrder directly,
+// never the Editor's own already-built event tree/display-string labels.
+std::vector<FrameDebuggerComputePassTextureWrite> CollectComputePassTextureWrites(
+    const rg::RenderGraphSnapshot& graphSnapshot)
+{
+    std::vector<FrameDebuggerComputePassTextureWrite> result;
+    for (const rg::RenderGraphPassSnapshot& pass : graphSnapshot.passesInExecutionOrder) {
+        if (!pass.isComputePass || pass.isCulled) {
+            continue;
+        }
+        for (std::size_t i = 0; i < pass.writeKinds.size() && i < pass.writeNames.size(); ++i) {
+            if (pass.writeKinds[i] == rg::ResourceKind::Texture) {
+                FrameDebuggerComputePassTextureWrite write;
+                write.passName = pass.name;
+                write.writeTextureName = pass.writeNames[i];
+                result.push_back(std::move(write));
+                break; // Known, accepted limitation - only the FIRST Texture-kind write per pass.
+            }
+        }
+    }
+    return result;
+}
+
 // frame-debugger-4 campaign, PHASE3 - see FrameDebuggerData.h's own doc
 // comment for the full contract. A plain, exhaustive if/else chain over
 // already-resolved booleans - deliberately no live FrameDebuggerHistoryEntry/
 // RenderTexture dependency at all.
-FrameDebuggerPreviewSourceChoice ChooseFrameDebuggerPreviewSource(
-    bool hasEntry, bool hasPreview, bool hasCompositedPreview, bool isViewingGameViewLeaf)
+//
+// frame-debugger-5 campaign, PHASE3 (Step 3.4) - widened with the new
+// `hasSelectedComputePassPreview` parameter/`ComputePassPreview` branch; every
+// other branch's ORDER and OUTCOME is unchanged.
+FrameDebuggerPreviewSourceChoice ChooseFrameDebuggerPreviewSource(bool hasEntry, bool hasPreview,
+    bool hasCompositedPreview, bool isViewingGameViewLeaf, bool hasSelectedComputePassPreview)
 {
     if (!hasEntry) {
         return FrameDebuggerPreviewSourceChoice::None;
     }
     if (isViewingGameViewLeaf) {
-        // Explicit leaf selection always wins - even if compositedPreview is
-        // ALSO present for this captured frame (Locked Design Decision #5).
+        // Explicit "GameView" leaf selection always wins - even if
+        // compositedPreview/a compute-pass preview is ALSO present for this
+        // captured frame (Locked Design Decision #5).
         return hasPreview ? FrameDebuggerPreviewSourceChoice::Preview : FrameDebuggerPreviewSourceChoice::None;
+    }
+    if (hasSelectedComputePassPreview) {
+        // NEW (PHASE3) - a selected compute-dispatch leaf's own retained
+        // output wins over the whole-frame compositedPreview/preview.
+        return FrameDebuggerPreviewSourceChoice::ComputePassPreview;
     }
     if (hasCompositedPreview) {
         return FrameDebuggerPreviewSourceChoice::CompositedPreview;
