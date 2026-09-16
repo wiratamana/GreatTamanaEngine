@@ -24,9 +24,27 @@ class Renderer;
 // has never written into at all (see that method's own "lazy allocation"
 // comment) - once written, it is ALWAYS populated (a fresh RenderTexture is
 // created for every single real capture, never left std::nullopt again).
+// `compositedPreview` (below) instead follows its own, different rule - see
+// its own field-level comment.
 struct FrameDebuggerHistoryEntry {
     FrameDebuggerSnapshot snapshot;
-    std::optional<RenderTexture> preview;
+    std::optional<RenderTexture> preview; // pre-composite "GameView" copy - unchanged behavior/doc comment.
+
+    // NEW (frame-debugger-4 campaign, PHASE1) - a retained GPU copy of this
+    // historical frame's real POST-atmosphere-composite "GameViewComposited"
+    // output - the TRUE final image the "Game" panel / GET /get_game_view
+    // actually show (see PHASE0_MASTER_STRATEGY.md's Step 2 root-cause
+    // investigation). std::nullopt whenever CaptureFrame() below was called
+    // with compositedGameViewSource == nullptr for THIS capture (e.g. a
+    // capture taken before the atmosphere composite pass had ever produced
+    // anything yet this session) - a real, honest "not available for this
+    // particular captured frame" state, never a bug and never silently
+    // substituted with something fake. Once populated for a given slot, a
+    // LATER capture into that same slot may legitimately go back to
+    // std::nullopt again if compositedGameViewSource is null on that later
+    // call - this field's std::nullopt-ness is a property of the CAPTURE
+    // that most recently wrote this slot, not a one-way ratchet.
+    std::optional<RenderTexture> compositedPreview;
 };
 
 // Pure, plain-int bookkeeping for a fixed-capacity circular ring buffer -
@@ -77,7 +95,13 @@ public:
     // AdvanceFrameDebuggerHistoryWriteState() above) and moves the viewing
     // cursor onto this brand-new, just-captured frame (the natural "I just
     // captured something, show me that" behavior).
-    void CaptureFrame(Renderer& renderer, const FrameDebuggerSnapshot& snapshot, RenderTexture& gameViewSource);
+    // `compositedGameViewSource` is the CURRENT frame's real, post-atmosphere-
+    // composite final output (ImGuiEditorLayer's own m_gameViewComposited), or
+    // nullptr when no composited texture exists yet this session (see this
+    // method's own doc comment on FrameDebuggerHistoryEntry::compositedPreview
+    // above) - nullptr is a completely safe, ordinary input, never dereferenced.
+    void CaptureFrame(Renderer& renderer, const FrameDebuggerSnapshot& snapshot, RenderTexture& gameViewSource,
+        RenderTexture* compositedGameViewSource);
 
     // How many real captures exist right now (0..kCapacity).
     int Count() const noexcept { return m_writeState.count; }

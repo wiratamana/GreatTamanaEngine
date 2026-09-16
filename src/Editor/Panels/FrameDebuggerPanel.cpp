@@ -57,12 +57,46 @@ void FrameDebuggerPanel::ReleasePreviewDescriptor()
 void FrameDebuggerPanel::EnsurePreviewDescriptor()
 {
     const FrameDebuggerHistoryEntry* entry = m_history.CurrentEntry();
-    const bool hasPreview = (entry != nullptr) && entry->preview.has_value();
 
-    if (!hasPreview) {
-        // Nothing to preview right now (no capture has ever happened yet) -
-        // release any stale descriptor so BuildInspectorPane() falls back to
-        // the "No Texture" placeholder cleanly.
+    // PHASE1 (frame-debugger-4 campaign) - decide WHICH of the two retained
+    // textures this call should display, based on the currently-SELECTED
+    // tree event (Locked Design Decision #5/#6, PHASE0_MASTER_STRATEGY.md):
+    //   - the literal "GameView" leaf selected -> the TRUE pre-atmosphere-
+    //     composite image (entry->preview), "as of the exact point this
+    //     specific event finished" - preserves frame-debugger-3's own
+    //     original Locked Design Decision #5 semantics for that one leaf.
+    //   - anything else at all - including nothing selected (a fresh
+    //     capture, or a Frame-History navigation that reset the selection),
+    //     the "GPU Skinning" leaf (which itself is separately hidden behind
+    //     "No Texture" by BuildInspectorPane()'s own existing
+    //     selectedEventIsGpuSkinning check - this function does not need to
+    //     special-case that itself), or PHASE2's brand-new "Aerial
+    //     Perspective Composite" leaf once it exists - prefers the TRUE,
+    //     final, atmosphere-inclusive entry->compositedPreview, falling back
+    //     to entry->preview only when compositedPreview is std::nullopt for
+    //     this particular captured frame (e.g. captured before the very
+    //     first composite pass ever ran this session).
+    // This ONE rule is deliberately written generically enough that PHASE2's
+    // new tree leaf requires ZERO further change here - see
+    // PHASE2_AERIAL_PERSPECTIVE_COMPOSITE_EVENT_TREE_LEAF.md's own Step 2.
+    const RenderTexture* selectedSource = nullptr;
+    if (entry != nullptr) {
+        const std::optional<FrameDebuggerEventDetails> details =
+            FindEventDetailsByIndex(entry->snapshot, m_selectedEventIndex);
+        const bool viewingPreCompositeGameViewLeaf = details.has_value() && details->passName == "GameView";
+        if (viewingPreCompositeGameViewLeaf) {
+            selectedSource = entry->preview.has_value() ? &(*entry->preview) : nullptr;
+        } else if (entry->compositedPreview.has_value()) {
+            selectedSource = &(*entry->compositedPreview);
+        } else if (entry->preview.has_value()) {
+            selectedSource = &(*entry->preview);
+        }
+    }
+
+    if (selectedSource == nullptr) {
+        // Nothing to preview right now - see this function's own original
+        // comment (no capture has ever happened yet, or - defensively -
+        // neither retained texture is populated for the viewed slot).
         ReleasePreviewDescriptor();
         return;
     }
@@ -74,19 +108,21 @@ void FrameDebuggerPanel::EnsurePreviewDescriptor()
     // re-dispatches FrameDebuggerPreviewRenderer (only when actually dirty -
     // see below) and displays ITS OWN separate scratch texture instead -
     // the retained historical copy itself is never mutated in place
-    // (Locked Design Decision #8).
+    // (Locked Design Decision #8). PHASE1 (frame-debugger-4) - every read
+    // below is now against `*selectedSource` (the just-decided pointer,
+    // above), not unconditionally against `entry->preview` anymore.
     const bool isNeutral =
         (m_channel == FrameDebuggerPreviewChannel::All) && (m_levelsBlack <= 0.0f) && (m_levelsWhite >= 1.0f);
 
-    VkImageView desiredView = entry->preview->View();
-    VkSampler desiredSampler = entry->preview->Sampler();
+    VkImageView desiredView = selectedSource->View();
+    VkSampler desiredSampler = selectedSource->Sampler();
 
     if (!isNeutral && m_frameRenderer != nullptr) {
-        const VkImageView sourceView = entry->preview->View();
+        const VkImageView sourceView = selectedSource->View();
         const bool dirty = (m_lastProcessedSourceView != sourceView) || (m_lastProcessedChannel != m_channel)
             || (m_lastProcessedLevelsBlack != m_levelsBlack) || (m_lastProcessedLevelsWhite != m_levelsWhite);
         if (dirty) {
-            m_previewProcessor.RenderPreview(*m_frameRenderer, *entry->preview, m_channel, m_levelsBlack, m_levelsWhite);
+            m_previewProcessor.RenderPreview(*m_frameRenderer, *selectedSource, m_channel, m_levelsBlack, m_levelsWhite);
             m_lastProcessedSourceView = sourceView;
             m_lastProcessedChannel = m_channel;
             m_lastProcessedLevelsBlack = m_levelsBlack;
@@ -140,7 +176,7 @@ void FrameDebuggerPanel::TriggerCapture()
     const FrameDebuggerSnapshot snapshot =
         BuildRealFrameDebuggerSnapshot(graphSnapshot, m_captureContext, m_frameGpuSkinningPassNames, renderTargetInfo);
 
-    m_history.CaptureFrame(*m_frameRenderer, snapshot, *m_frameGameView);
+    m_history.CaptureFrame(*m_frameRenderer, snapshot, *m_frameGameView, m_frameGameViewComposited);
     m_selectedEventIndex = -1;
 }
 
@@ -514,7 +550,8 @@ void FrameDebuggerPanel::BuildEventDetailsSection(const std::optional<FrameDebug
 }
 
 void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg::RenderGraph& renderGraph,
-    RenderTexture& gameView, const std::vector<std::string>& gpuSkinningPassNamesThisFrame)
+    RenderTexture& gameView, RenderTexture* compositedGameView,
+    const std::vector<std::string>& gpuSkinningPassNamesThisFrame)
 {
     // PHASE3 - cached for TriggerCapture()'s own use for the rest of THIS
     // call (BuildToolbarRow(), below, is the only thing that reads these) -
@@ -526,6 +563,7 @@ void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg:
     m_frameRenderer = &renderer;
     m_frameRenderGraph = &renderGraph;
     m_frameGameView = &gameView;
+    m_frameGameViewComposited = compositedGameView; // PHASE1 (frame-debugger-4) - nullable, see header comment.
     m_frameGpuSkinningPassNames = gpuSkinningPassNamesThisFrame;
 
     // PHASE4 - refreshed unconditionally every call, cheap, mirrors

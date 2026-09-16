@@ -39,7 +39,8 @@ int FrameDebuggerHistory::StorageIndexForLogicalIndex(int logicalIndex) const no
 }
 
 void FrameDebuggerHistory::CaptureFrame(
-    Renderer& renderer, const FrameDebuggerSnapshot& snapshot, RenderTexture& gameViewSource)
+    Renderer& renderer, const FrameDebuggerSnapshot& snapshot, RenderTexture& gameViewSource,
+    RenderTexture* compositedGameViewSource)
 {
     const int writeIndex = m_writeState.nextWriteIndex;
     FrameDebuggerHistoryEntry& entry = m_entries[static_cast<std::size_t>(writeIndex)];
@@ -65,6 +66,27 @@ void FrameDebuggerHistory::CaptureFrame(
     entry.preview.emplace(renderer.CreateRenderTexture(static_cast<int>(extent.width),
         static_cast<int>(extent.height), gameViewSource.Format(), debugNameBuffer));
 
+    // NEW (frame-debugger-4 campaign, PHASE1) - the second retained copy,
+    // only when a real composited source exists this capture. Uses the
+    // COMPOSITED source's own extent/format (which may legitimately differ
+    // in size from gameViewSource's own extent between two captures if a
+    // resize landed asymmetrically - in practice both always match the SAME
+    // Game View panel's current content-region size, but this function must
+    // not assume that). A distinct debug-name suffix ("Composited") keeps
+    // GPU-memory-debugger tooling (if any reads RenderTexture debug names)
+    // able to tell the two apart.
+    const bool hasCompositedSource = (compositedGameViewSource != nullptr);
+    char compositedDebugNameBuffer[48];
+    if (hasCompositedSource) {
+        std::snprintf(compositedDebugNameBuffer, sizeof(compositedDebugNameBuffer),
+            "FrameDebuggerHistorySlot%dComposited", writeIndex);
+        const VkExtent2D compositedExtent = compositedGameViewSource->Extent();
+        entry.compositedPreview.emplace(renderer.CreateRenderTexture(static_cast<int>(compositedExtent.width),
+            static_cast<int>(compositedExtent.height), compositedGameViewSource->Format(), compositedDebugNameBuffer));
+    } else {
+        entry.compositedPreview.reset();
+    }
+
     const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
     const rg::ResourceState shaderRead = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
     const rg::ResourceState transferSrc = rg::RequiredStateFor(rg::ResourceAccess::TransferSrc, false);
@@ -78,8 +100,13 @@ void FrameDebuggerHistory::CaptureFrame(
     // A genuinely EXTRA, explicit, on-demand GPU submission - acceptable
     // ONLY because CaptureFrame() itself happens at most once per real
     // capture trigger (never every frame) - see this class's own header
-    // comment.
+    // comment. Both the pre-composite and (when present) post-composite
+    // copies happen inside this SAME ImmediateSubmit() call (PHASE0's
+    // Locked Design Decision #8) - a single GPU submission + fence wait for
+    // the whole CaptureFrame() call, not two separate ones.
     renderer.ImmediateSubmit([&](VkCommandBuffer cmd) {
+        // Pre-composite copy - byte-for-byte the existing, already-correct
+        // sequence, unchanged.
         rg::EmitImageBarrier(cmd, gameViewSource.Image(), range, shaderRead, transferSrc);
         rg::EmitImageBarrier(cmd, entry.preview->Image(), range, freshImageState, transferDst);
 
@@ -96,6 +123,22 @@ void FrameDebuggerHistory::CaptureFrame(
         // for PHASE4's own ImGui::Image() display.
         rg::EmitImageBarrier(cmd, gameViewSource.Image(), range, transferSrc, shaderRead);
         rg::EmitImageBarrier(cmd, entry.preview->Image(), range, transferDst, shaderRead);
+
+        // NEW (frame-debugger-4 campaign, PHASE1) - post-composite copy,
+        // only when requested this capture.
+        if (hasCompositedSource) {
+            const VkExtent2D compositedExtent = compositedGameViewSource->Extent();
+            rg::EmitImageBarrier(cmd, compositedGameViewSource->Image(), range, shaderRead, transferSrc);
+            rg::EmitImageBarrier(cmd, entry.compositedPreview->Image(), range, freshImageState, transferDst);
+            VkImageCopy compositedRegion{};
+            compositedRegion.srcSubresource = VkImageSubresourceLayers{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+            compositedRegion.dstSubresource = VkImageSubresourceLayers{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+            compositedRegion.extent = VkExtent3D{ compositedExtent.width, compositedExtent.height, 1 };
+            vkCmdCopyImage(cmd, compositedGameViewSource->Image(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                entry.compositedPreview->Image(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &compositedRegion);
+            rg::EmitImageBarrier(cmd, compositedGameViewSource->Image(), range, transferSrc, shaderRead);
+            rg::EmitImageBarrier(cmd, entry.compositedPreview->Image(), range, transferDst, shaderRead);
+        }
     });
 
     m_writeState = AdvanceFrameDebuggerHistoryWriteState(m_writeState, kCapacity);

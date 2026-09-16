@@ -85,13 +85,19 @@ public:
     // the SAME Renderer/RenderGraph Application drives every frame) -
     // stashed for the rest of THIS call only (see TriggerCapture()'s own
     // doc comment), never retained across frames.
+    // `compositedGameView` - the CURRENT frame's real, post-atmosphere-composite
+    // final Game View output (ImGuiEditorLayer's own m_gameViewComposited), or
+    // nullptr on a frame where no composited texture exists yet (mirrors
+    // `gameView`'s own "stashed for the rest of THIS call only" contract, just
+    // nullable) - see TriggerCapture()'s own doc comment for how this flows into
+    // FrameDebuggerHistory::CaptureFrame().
     // `gpuSkinningPassNamesThisFrame` - the CURRENT frame's real
     // AnimationSystem::GpuSkinningDispatchRequest::name values, already
     // resolved to plain strings by the caller (ImGuiEditorLayer::BuildUI())
     // - see PHASE2's BuildRealFrameDebuggerSnapshot() for why this function
     // itself never needs to #include AnimationSystem.h.
     void Build(EditorContext& ctx, Renderer& renderer, const rg::RenderGraph& renderGraph, RenderTexture& gameView,
-        const std::vector<std::string>& gpuSkinningPassNamesThisFrame);
+        RenderTexture* compositedGameView, const std::vector<std::string>& gpuSkinningPassNamesThisFrame);
 
     // See IEditorLayer::PrepareFrameDebuggerCaptureContext()'s own doc
     // comment (EditorLayer.h) - the real implementation this forwards to.
@@ -341,6 +347,10 @@ private:
     Renderer* m_frameRenderer = nullptr;
     const rg::RenderGraph* m_frameRenderGraph = nullptr;
     RenderTexture* m_frameGameView = nullptr;
+    RenderTexture* m_frameGameViewComposited = nullptr; // NEW - PHASE1 (frame-debugger-4). Nullable: mirrors
+        // ImGuiEditorLayer::m_gameViewComposited's own "nullptr until the atmosphere
+        // composite pass has produced something at least once this session" contract exactly
+        // - see Build()'s own new parameter doc comment.
     std::vector<std::string> m_frameGpuSkinningPassNames;
 
     // True for exactly one BuildToolbarRow() call after

@@ -591,7 +591,19 @@ public:
                 game.CollectGpuSkinningDispatchRequests()) {
                 gpuSkinningPassNames.push_back(request.name);
             }
-            m_frameDebuggerPanel.Build(m_ctx, renderer, renderGraph, m_gameView, gpuSkinningPassNames);
+            // frame-debugger-4 campaign, PHASE1 - feeds the Frame Debugger BOTH
+            // the pre-composite "GameView" texture (m_gameView, always real) and
+            // the real post-atmosphere-composite final output
+            // (m_gameViewComposited, nullable until the composite pass has
+            // produced something at least once this session) - see
+            // FrameDebuggerHistory::CaptureFrame()'s own doc comment for exactly
+            // how these two flow into the ring buffer's own dual retained
+            // copies. Mirrors this SAME function's own earlier "Game" panel
+            // descriptor logic (the gameSource local a few dozen lines above)
+            // rather than introducing a second, differently-named local -
+            // m_gameViewComposited is a plain member, safe to read directly
+            // here too.
+            m_frameDebuggerPanel.Build(m_ctx, renderer, renderGraph, m_gameView, m_gameViewComposited, gpuSkinningPassNames);
         }
 #if GTE_ENABLE_PROJECT_PANEL
         m_projectPanel.Build(m_ctx);
