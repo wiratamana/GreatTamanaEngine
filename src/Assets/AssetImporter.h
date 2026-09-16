@@ -7,6 +7,22 @@
 
 namespace gte {
 
+// Which mesh-format loader actually produced a given
+// AssetImportResult::convertedToMeshAsset == true import - see
+// AssetImportResult::meshSourceFormat below. Explicit, never renumbered
+// once shipped, matching this codebase's existing enum-stability
+// convention (see AssetTypes.h's AssetType) - though, unlike AssetType,
+// this is NEVER itself serialized into a *.gta file; it only travels
+// through this one in-memory result struct for the duration of a single
+// ImportAssetFile() call, so a future re-ordering would be harmless in
+// practice. Kept explicit anyway for consistency with this codebase's
+// house style.
+enum class MeshSourceFormat {
+    Unknown = 0, // convertedToMeshAsset is false, or this AssetImportResult predates this field.
+    Pmx = 1,
+    Stl = 2,
+};
+
 // The outcome of one ImportAssetFile() call below - always fully populated
 // (never partially, and `message` is always set) whether the import
 // succeeded or failed, so a caller (e.g. the Editor's "Project" panel) can
@@ -27,6 +43,11 @@ struct AssetImportResult {
     // convertedToKtx2/convertedToMotionAsset - a given source file only
     // ever matches ONE of these gating predicates.
     bool convertedToMeshAsset = false;
+
+    // Only meaningful when convertedToMeshAsset is true - which mesh-format
+    // loader actually produced this import (see MeshSourceFormat above).
+    // MeshSourceFormat::Unknown otherwise.
+    MeshSourceFormat meshSourceFormat = MeshSourceFormat::Unknown;
 
     // True if `sourcePath` was gated into the .vmd -> MotionData -> *.gta
     // (AssetType::Animation) pipeline instead (see IsImportableAsMotionAsset()/
@@ -106,12 +127,14 @@ bool IsImportableAsKtx2Texture(const std::string& extensionLowercaseWithDot);
 
 // True if `extensionLowercaseWithDot` names a source 3D model format this
 // engine's import pipeline knows how to parse into a MeshData (see
-// MeshData.h) - today just MikuMikuDance's ".pmx" (via PmxLoader.h/saba's
-// PMXFile reader - see FetchSaba.cmake). A future OBJ/glTF importer would
-// extend this same predicate (and ImportAssetFile()'s matching branch
-// below) rather than inventing a separate gating function - this is the
-// mesh-import equivalent of IsImportableAsKtx2Texture() above, same
-// Tier-1-testable pure-predicate shape.
+// MeshData.h) - MikuMikuDance's ".pmx" (via PmxLoader.h/saba's PMXFile
+// reader - see FetchSaba.cmake) AND STereoLithography's ".stl" (both the
+// binary and ASCII variants, via StlLoader.h's LoadStlModel()). A future
+// OBJ/glTF importer would extend this same predicate (and
+// ImportAssetFile()'s matching branch below) rather than inventing a
+// separate gating function - this is the mesh-import equivalent of
+// IsImportableAsKtx2Texture() above, same Tier-1-testable pure-predicate
+// shape.
 bool IsImportableAsMeshAsset(const std::string& extensionLowercaseWithDot);
 
 // True if `extensionLowercaseWithDot` names a source motion/animation
@@ -128,17 +151,22 @@ bool IsImportableAsMotionAsset(const std::string& extensionLowercaseWithDot);
 //
 // The gating rules this function exists for, checked in order:
 //   1. If `sourcePath`'s extension is one IsImportableAsMeshAsset()
-//      recognizes, it's parsed into a MeshData (PmxLoader.h today),
-//      serialized via MeshFile.h's EncodeMeshDataToBytes(), and wrapped as a
-//      *.gta (AssetType::Mesh) at `preferredDestinationPath` with its
-//      extension replaced by ".gta", via `database.ImportAsset()`. The same
-//      PmxLoader.h call also extracts per-vertex skinning weights plus the
-//      model's bones/morphs/rigid-body-and-joint physics setup (see
-//      SkeletonData.h/MorphData.h/PhysicsData.h) - RigFile.h's
-//      EncodeRigDataToBytes() serializes ALL of that into the *.gta's
-//      METADATA section (see GtaFile.h), alongside the unchanged MeshFile.h
-//      payload in the same file. A boneless/riggless .pmx still imports
-//      successfully; its rig section simply encodes as all-empty.
+//      recognizes, it's parsed into a MeshData - via PmxLoader.h's
+//      LoadPmxModel() for ".pmx", or StlLoader.h's LoadStlModel() for
+//      ".stl" (both binary and ASCII) - serialized via MeshFile.h's
+//      EncodeMeshDataToBytes(), and wrapped as a *.gta (AssetType::Mesh) at
+//      `preferredDestinationPath` with its extension replaced by ".gta",
+//      via `database.ImportAsset()`. The same PmxLoader.h call also
+//      extracts per-vertex skinning weights plus the model's bones/morphs/
+//      rigid-body-and-joint physics setup (see SkeletonData.h/MorphData.h/
+//      PhysicsData.h) - RigFile.h's EncodeRigDataToBytes() serializes ALL
+//      of that into the *.gta's METADATA section (see GtaFile.h), alongside
+//      the unchanged MeshFile.h payload in the same file. A boneless/
+//      riggless .pmx still imports successfully; its rig section simply
+//      encodes as all-empty - an .stl import (which has no skeleton/morphs/
+//      physics/materials concept at all) always produces exactly this same
+//      well-formed, all-empty rig section. AssetImportResult::meshSourceFormat
+//      records which of the two loaders actually produced a given import.
 //   2. Otherwise, if it's one IsImportableAsMotionAsset() recognizes, it's
 //      parsed into a MotionData (VmdLoader.h), serialized via MotionFile.h's
 //      EncodeMotionDataToBytes(), and wrapped as a *.gta

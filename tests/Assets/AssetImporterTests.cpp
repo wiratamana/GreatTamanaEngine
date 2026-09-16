@@ -124,6 +124,30 @@ std::vector<std::uint8_t> BuildMinimalTrianglePmx()
     return bytes;
 }
 
+// Minimal one-triangle BINARY STL fixture (134 bytes: 80-byte header +
+// uint32 triangle count + one 50-byte triangle record) - reuses the
+// PmxU8()/PmxU32()/PmxF32() byte-writing helpers already defined above
+// rather than duplicating them again, matching this test suite's existing
+// convention (see BuildMinimalTrianglePmx() above). Mirrors the exact
+// binary layout StlLoaderTests.cpp's own StlByteWriter produces.
+std::vector<std::uint8_t> BuildMinimalOneTriangleBinaryStl()
+{
+    std::vector<std::uint8_t> bytes;
+    for (int i = 0; i < 80; ++i) {
+        PmxU8(bytes, 0); // 80-byte free-form header, unused.
+    }
+    PmxU32(bytes, 1); // triangle count
+
+    // One triangle record: normal + 3 vertices (each 3 floats), then a
+    // trailing 2-byte "attribute byte count" this engine always ignores.
+    PmxF32(bytes, 0.0f); PmxF32(bytes, 0.0f); PmxF32(bytes, 1.0f); // normal
+    PmxF32(bytes, 0.0f); PmxF32(bytes, 0.0f); PmxF32(bytes, 0.0f); // vertex 0
+    PmxF32(bytes, 1.0f); PmxF32(bytes, 0.0f); PmxF32(bytes, 0.0f); // vertex 1
+    PmxF32(bytes, 0.0f); PmxF32(bytes, 1.0f); PmxF32(bytes, 0.0f); // vertex 2
+    bytes.push_back(0); bytes.push_back(0); // attribute byte count
+    return bytes;
+}
+
 // Same hand-built minimal-.vmd-file approach as VmdLoaderTests.cpp's
 // BuildMinimalOneBoneKeyframeVmd() (see that file's own comment for the
 // exact binary layout being reproduced here) - duplicated rather than
@@ -210,6 +234,11 @@ TEST(IsImportableAsKtx2TextureTest, RejectsNonImageExtensions)
 TEST(IsImportableAsMeshAssetTest, RecognizesPmx)
 {
     EXPECT_TRUE(IsImportableAsMeshAsset(".pmx"));
+}
+
+TEST(IsImportableAsMeshAssetTest, RecognizesStl)
+{
+    EXPECT_TRUE(IsImportableAsMeshAsset(".stl"));
 }
 
 TEST(IsImportableAsMeshAssetTest, RejectsNonMeshExtensions)
@@ -349,6 +378,20 @@ TEST_F(AssetImporterTest, ConvertsAValidPmxToMeshWrappedGta)
     EXPECT_FALSE(std::filesystem::exists(m_root / "Imported" / "model.pmx", ec)); // No plain-copy byproduct left behind.
 }
 
+// PHASE2 (stl-parser-1) - direct proof AssetImportResult::meshSourceFormat
+// doesn't accidentally default/leak the wrong value for the pre-existing
+// PMX format now that STL shares the same FinalizeMeshAssetImport() helper.
+TEST_F(AssetImporterTest, PmxImportStillReportsMeshSourceFormatPmx)
+{
+    const std::filesystem::path source = m_root / "model.pmx";
+    WriteBinaryFile(source, BuildMinimalTrianglePmx());
+
+    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "Imported" / "model.pmx");
+
+    ASSERT_TRUE(result.success) << result.message;
+    EXPECT_EQ(result.meshSourceFormat, MeshSourceFormat::Pmx);
+}
+
 TEST_F(AssetImporterTest, ConvertedMeshAssetsMetadataDecodesBackToItsRigData)
 {
     const std::filesystem::path source = m_root / "model.pmx";
@@ -447,6 +490,89 @@ TEST_F(AssetImporterTest, CorruptPmxExtensionFallsBackToPlainCopy)
     WriteFile(source, "this is not a real PMX file");
 
     const std::filesystem::path destination = m_root / "Imported" / "fake.pmx";
+    const AssetImportResult result = ImportAssetFile(m_db, source, destination);
+
+    ASSERT_TRUE(result.success);
+    EXPECT_FALSE(result.convertedToMeshAsset);
+    EXPECT_EQ(result.finalPath, destination);
+
+    std::error_code ec;
+    EXPECT_TRUE(std::filesystem::exists(result.finalPath, ec));
+}
+
+// --- STL mesh import (stl-parser-1, PHASE2) ---------------------------------
+
+TEST_F(AssetImporterTest, ConvertsAValidStlToMeshWrappedGta)
+{
+    const std::filesystem::path source = m_root / "model.stl";
+    WriteBinaryFile(source, BuildMinimalOneTriangleBinaryStl());
+
+    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "Imported" / "model.stl");
+
+    ASSERT_TRUE(result.success) << result.message;
+    EXPECT_TRUE(result.convertedToMeshAsset);
+    EXPECT_FALSE(result.convertedToKtx2);
+    EXPECT_EQ(result.meshSourceFormat, MeshSourceFormat::Stl);
+    EXPECT_EQ(result.finalPath.extension(), ".gta");
+    EXPECT_TRUE(result.guid.IsValid());
+    EXPECT_EQ(result.meshVertexCount, 3u);
+    EXPECT_EQ(result.meshTriangleCount, 1u);
+    // An STL import carries no skeleton/morphs/physics/materials at all - a
+    // normal, successful, riggless/materialless import (see RigFile.h's own
+    // documented "all-empty is well-formed" convention).
+    EXPECT_EQ(result.skinnedVertexCount, 0u);
+    EXPECT_EQ(result.boneCount, 0u);
+    EXPECT_EQ(result.morphCount, 0u);
+    EXPECT_EQ(result.rigidBodyCount, 0u);
+    EXPECT_EQ(result.jointCount, 0u);
+    EXPECT_EQ(result.materialCount, 0u);
+    EXPECT_EQ(result.textureCount, 0u);
+
+    std::error_code ec;
+    EXPECT_TRUE(std::filesystem::exists(result.finalPath, ec));
+    EXPECT_FALSE(std::filesystem::exists(m_root / "Imported" / "model.stl", ec)); // No plain-copy byproduct left behind.
+}
+
+TEST_F(AssetImporterTest, ConvertedStlMeshAssetsMetadataDecodesBackToAnEmptyRig)
+{
+    const std::filesystem::path source = m_root / "model.stl";
+    WriteBinaryFile(source, BuildMinimalOneTriangleBinaryStl());
+
+    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "model.stl");
+    ASSERT_TRUE(result.success) << result.message;
+
+    const std::optional<GtaFileData> gta = ReadGtaFile(result.finalPath);
+    ASSERT_TRUE(gta.has_value());
+    EXPECT_EQ(gta->header.Type(), AssetType::Mesh);
+
+    const std::optional<RigFileData> rig = DecodeRigDataFromBytes(gta->metadata);
+    ASSERT_TRUE(rig.has_value());
+    EXPECT_TRUE(rig->skinWeights.empty());
+    EXPECT_TRUE(rig->skeleton.bones.empty());
+    EXPECT_TRUE(rig->morphs.morphs.empty());
+    EXPECT_TRUE(rig->physics.rigidBodies.empty());
+    EXPECT_TRUE(rig->materials.materials.empty());
+}
+
+TEST_F(AssetImporterTest, ConvertedStlMeshAssetIsImmediatelyTrackedByTheDatabase)
+{
+    const std::filesystem::path source = m_root / "model.stl";
+    WriteBinaryFile(source, BuildMinimalOneTriangleBinaryStl());
+
+    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "model.stl");
+    ASSERT_TRUE(result.success) << result.message;
+
+    const AssetRecord* record = m_db.FindByGuid(result.guid);
+    ASSERT_NE(record, nullptr);
+    EXPECT_EQ(record->type, AssetType::Mesh);
+}
+
+TEST_F(AssetImporterTest, CorruptStlExtensionFallsBackToPlainCopy)
+{
+    const std::filesystem::path source = m_root / "fake.stl"; // Named like an STL model, but not really one.
+    WriteFile(source, "this is not a real STL file");
+
+    const std::filesystem::path destination = m_root / "Imported" / "fake.stl";
     const AssetImportResult result = ImportAssetFile(m_db, source, destination);
 
     ASSERT_TRUE(result.success);
