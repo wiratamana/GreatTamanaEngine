@@ -381,8 +381,42 @@ report, not a previously-tracked gap - and fixed it:
   captured frame (PHASE1), and the real `"AtmosphereAerialPerspectiveCompositePass"`
   render-graph pass that produces the composited image is now a real,
   selectable tree leaf (PHASE2) - see `AGENTS.md`'s "Frame Debugger" section
-  and `docs/conventions/frame-debugger.md`'s "Known limitation, now fixed"
-  note for the full root-cause writeup.
+  and `docs/conventions/frame-debugger.md`'s "Known limitation, now fixed
+  (`frame-debugger-4` campaign)" note for the full root-cause writeup.
+
+A second follow-up bug-fix campaign, `frame-debugger-5`
+(`task_manager/frame-debugger-5/PHASE0_MASTER_STRATEGY.md`, five phases,
+`CAMPAIGN_COMPLETION_REPORT.md`), confirmed a SECOND, separately-reported bug
+(this one about compute-dispatch COVERAGE, not composite-awareness) and fixed
+it:
+
+- ~~The Frame Debugger only ever showed 3 of this engine's 8+ real
+  compute-shader dispatches (GPU Skinning via a caller-supplied name list, and
+  one single hardcoded `"AtmosphereAerialPerspectiveCompositePass"` special
+  case) - every Atmosphere Transmittance/Multi-Scattering/Sky-View LUT pass,
+  the Aerial Perspective Volume pass, the Aerial Perspective Volume
+  Debug-Slice pass, and Compute Blur Validation's own pass were completely
+  invisible in the tree, no matter whether they ran that frame~~ - DONE, fixed.
+  `RenderGraphBuilder::AddComputePass()` now stamps a real, structurally-
+  tracked `PassRecord::isComputePass`/`RenderGraphPassSnapshot::isComputePass`
+  flag (PHASE1) that survives into `RenderGraphPassSnapshot::readKinds`/
+  `writeKinds` too (Texture/Buffer/VolumeTexture, never guessed);
+  `FrameDebuggerData.cpp` now discovers EVERY real, surviving compute pass
+  generically via that flag and splits them into two new tree groups,
+  `"Compute Dispatches (Pre-GameView)"`/`"Compute Dispatches (Post-GameView)"`,
+  positioned strictly before/after the real `"GameView"` leaf by each pass's
+  own real execution-order index (PHASE2) - REPLACING, not merely
+  supplementing, the old name-list and hardcoded-string mechanisms (a
+  deliberate, user-approved breaking change to the previously-shipped tree
+  shape). Selecting any one of these leaves now shows THAT PASS'S OWN real
+  output image: `FrameDebuggerHistory::CaptureFrame()` eagerly retains a real
+  GPU copy of every surviving compute pass's own first `Texture`-kind write
+  (PHASE3), and a pass whose only visual write is a 3D volume texture (the
+  Aerial Perspective froxel volume) instead gets a real ray-marched 2D
+  thumbnail by reusing the already-shipped `VolumeTexturePreviewRenderer`
+  (PHASE4) - see `AGENTS.md`'s "Frame Debugger" section and
+  `docs/conventions/frame-debugger.md`'s "Known limitation, now fixed
+  (`frame-debugger-5` campaign)" note for the full root-cause writeup.
 
 ### Still genuinely deferred (permanent design choices or real future work)
 
@@ -414,6 +448,21 @@ report, not a previously-tracked gap - and fixed it:
   optional per `PHASE0_MASTER_STRATEGY.md`'s own Step 2, and not needed since
   the dedicated `/frame_debugger/*` routes plus the panel's own `ImGui::Image()`
   display are already a complete, sufficient automation surface.
+- **True per-pass "stop"/breakpoint execution control** (pausing the GPU
+  mid-frame at a specific compute-dispatch boundary for live step-through
+  inspection). Named and explicitly deferred by the `frame-debugger-5`
+  campaign's own `PHASE0_MASTER_STRATEGY.md` Non-Goals: that campaign
+  delivered "trackable" (every real compute dispatch is now a real,
+  inspectable tree leaf with its own real output preview - see above) and
+  "stoppable" only in the sense that the EXISTING Enable/Step/Capture
+  frame-level controls already let an engineer freeze a specific frame and
+  walk its compute passes one at a time in the tree. A genuine
+  mid-command-buffer GPU pause/breakpoint - stopping execution AT a specific
+  compute dispatch boundary rather than only ever inspecting a whole already-
+  finished frame - would need this engine's `Renderer::ImmediateSubmit()`/
+  render-graph model to support a partial, resumable command-buffer
+  submission, which does not exist today; a genuinely larger, separate future
+  campaign, not attempted by any Frame Debugger campaign so far.
 
 ## Engine Roadmap (not yet started)
 

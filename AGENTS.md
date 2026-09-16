@@ -96,19 +96,48 @@ freezes and captures one real rendered frame's worth of real Render Graph
 passes (pass-level granularity, not per-draw-call - a deliberate, permanent
 design choice, not a gap), the event tree shows those real passes, selecting
 one shows real shader/blend/Z/stencil/texture/vector/matrix data plus a real
-preview image reconstructed as of that exact point in the frame. Two of those
-reconstructed points are genuinely distinct: selecting the pass that actually
-draws the scene shows the frame before atmosphere scattering/aerial-perspective
-fog is applied, and a further, real "Aerial Perspective Composite" step shows
-the frame after it - the preview always defaults to the final, fog-inclusive
-image whenever nothing more specific is selected. A Frame-History mini-toolbar
-steps backward/forward through past captured frames, and the Channels/Levels
-controls really affect the preview image via a dedicated compositing shader.
-The entire feature is drivable end-to-end
+preview image reconstructed as of that exact point in the frame. **Every real
+compute-shader dispatch that ran this frame is now a first-class, automatically
+discovered citizen of this tree, never a hand-maintained special case**
+(`frame-debugger-5` campaign) - `RenderGraphBuilder::AddComputePass()` is the
+one real "choke point" that stamps a new, structurally-tracked
+`PassRecord::isComputePass`/`RenderGraphPassSnapshot::isComputePass` flag
+(`RenderGraphTypes.h`/`RenderGraphSnapshot.h`), read/write rows are labeled by
+a real per-entry `ResourceKind` (`readKinds`/`writeKinds` - Texture/Buffer/
+VolumeTexture, never guessed), and `FrameDebuggerData.cpp`'s
+`BuildRealFrameDebuggerSnapshot()` walks every surviving compute pass in the
+current frame's `RenderGraphSnapshot` generically, splitting them into two
+tree groups positioned around the real `"GameView"` leaf by each pass's own
+real execution-order index: `"Compute Dispatches (Pre-GameView)"` (e.g. GPU
+Skinning, every Atmosphere LUT pass, the Aerial Perspective Volume pass - all
+of which genuinely run BEFORE `"GameView"` samples them) and
+`"Compute Dispatches (Post-GameView)"` (e.g. the Aerial Perspective Composite
+pass) - never one single group unconditionally placed after `"GameView"`,
+which would misrepresent passes that really ran earlier. A future compute pass
+anywhere in this engine appears here automatically, with zero further
+Frame-Debugger-specific code ever required. Selecting any one of these leaves
+shows THAT PASS'S OWN real output image, not the whole Game View: `
+FrameDebuggerHistory::CaptureFrame()` eagerly retains one more real GPU copy
+per surviving compute pass's own first `Texture`-kind write (sourced from the
+already-existing `RenderGraphDebugTextureRegistry`), and a pass whose only
+visual write is a 3D volume texture (the Aerial Perspective froxel volume)
+instead gets a real ray-marched 2D thumbnail by reusing the already-shipped
+`VolumeTexturePreviewRenderer` (the same renderer `GET /get_texture` already
+uses for a volume) - a pass with neither (e.g. GPU Skinning's own buffer
+write) correctly falls back to the existing whole-frame preview, an honest
+"not available" state, never a wrong or fabricated image. Two whole-frame
+reconstructed points remain genuinely distinct too: selecting the `"GameView"`
+leaf itself shows the frame before atmosphere scattering/aerial-perspective fog
+is applied, and everything else defaults to the final, fog-inclusive image. A
+Frame-History mini-toolbar steps backward/forward through past captured
+frames, and the Channels/Levels controls really affect the preview image via a
+dedicated compositing shader. The entire feature is drivable end-to-end
 over the embedded HTTP server (`GET /frame_debugger/open|enable|capture|
 select_event|step_history|set_channel|set_levels|state`), with the window
 forced onto the main ImGui viewport whenever opened this way so `GET
-/get_swapchain` always sees it.
+/get_swapchain` always sees it. True per-pass "stop"/breakpoint execution
+control (pausing the GPU mid-frame at a specific compute dispatch boundary) is
+a still-deferred future item - see `TODO.md`'s "Frame Debugger" section.
 
 Full convention: [docs/conventions/frame-debugger.md](docs/conventions/frame-debugger.md).
 

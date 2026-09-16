@@ -3,6 +3,12 @@
 #include "../Renderer/Renderer.h"
 #include "../Renderer/RenderGraph/RenderGraph.h"
 #include "../Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
+// frame-debugger-5 campaign, PHASE5 (closing-phase live-smoke-test bug fix) -
+// Encoding::ConvertHdrRgba16fToRgba8(), the SAME debug exposure/tonemap
+// GET /get_texture already applies for this engine's one genuinely HDR 2D
+// texture format (VK_FORMAT_R16G16B16A16_SFLOAT) - see the new
+// HdrComputePassCopySource struct below for the full root-cause writeup.
+#include "../Encoding/HdrColorVisualization.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -48,6 +54,41 @@ namespace {
 // lambda below. Deliberately a small, local, capture-scoped struct - never
 // exposed outside this .cpp file.
 struct ComputePassCopySource {
+    VkImage image = VK_NULL_HANDLE;
+    VkExtent2D extent{};
+    rg::ResourceState colorState;
+};
+
+// frame-debugger-5 campaign, PHASE5 (closing-phase live-smoke-test bug fix) -
+// a discovered compute-pass write whose real, CURRENT physical texture
+// format is this engine's one genuinely HDR 2D-texture format
+// (VK_FORMAT_R16G16B16A16_SFLOAT - AtmosphereMultiScatteringLutPass/
+// AtmosphereSkyViewLutPass/AtmosphereAerialPerspectiveVolumeDebugSlicePass).
+// CONFIRMED LIVE during this phase's own required HTTP-driven smoke test: a
+// plain vkCmdCopyImage preserving the raw HDR bits (ComputePassCopySource's
+// own straight-copy path above) is technically correct - the bytes really
+// are copied - but VISUALLY INDISTINGUISHABLE FROM SOLID BLACK once
+// displayed by the Inspector's plain ImGui::Image(), because these LUTs'
+// real physical magnitudes are tiny fractions of 1.0 (see
+// src/Encoding/HdrColorVisualization.cpp's own "typically small in absolute
+// terms" doc comment) - exactly the same reason GET /get_texture ALREADY
+// applies a debug-only 400x exposure + Reinhard tonemap
+// (Encoding::ConvertHdrRgba16fToRgba8()) before ever PNG-encoding this same
+// format. Fixed here by reusing that EXACT SAME already-shipped, already-
+// tested function (never a second, independently-maintained copy of its
+// exposure math) via a CPU round-trip (Renderer::CaptureImagePixels() +
+// ConvertHdrRgba16fToRgba8() + upload as VK_FORMAT_R8G8B8A8_UNORM), mirroring
+// this same file's own volume-texture-preview upload sequence further below
+// - see CaptureFrame()'s own body for the exact sequence. Kept as a SEPARATE
+// struct/loop from ComputePassCopySource's straight-copy path (rather than a
+// branch inside that same loop) so every existing, already-verified LDR
+// (R8G8B8A8_UNORM/BGRA8_UNORM) compute-pass preview - Transmittance LUT, the
+// Aerial Perspective Composite pass's own "GameViewComposited" write, any
+// future non-HDR compute pass - keeps using the exact same zero-risk,
+// single-ImmediateSubmit() GPU-to-GPU copy it already used before this fix,
+// byte-for-byte unchanged.
+struct HdrComputePassCopySource {
+    std::string passName;
     VkImage image = VK_NULL_HANDLE;
     VkExtent2D extent{};
     rg::ResourceState colorState;
@@ -122,9 +163,17 @@ void FrameDebuggerHistory::CaptureFrame(Renderer& renderer, const rg::RenderGrap
     // on. entry.computePassPreviews is entirely REBUILT from scratch every
     // single real capture (see that field's own doc comment,
     // FrameDebuggerHistory.h) - never merely appended to.
-    entry.computePassPreviews.clear();
+entry.computePassPreviews.clear();
     std::vector<ComputePassCopySource> computeCopySources;
     computeCopySources.reserve(computeWrites.size());
+
+    // frame-debugger-5 campaign, PHASE5 (closing-phase live-smoke-test bug
+    // fix) - every discovered write whose real, CURRENT format is this
+    // engine's one genuinely HDR 2D-texture format is routed to a SEPARATE
+    // CPU-round-trip loop further below (see HdrComputePassCopySource's own
+    // doc comment above) instead of the straight-copy path every other
+    // (LDR) compute-pass write still uses, unchanged.
+    std::vector<HdrComputePassCopySource> hdrComputeCopySources;
 
     for (const FrameDebuggerComputePassTextureWrite& write : computeWrites) {
         const std::optional<rg::DebugTextureSnapshot> textureSnapshot =
@@ -134,6 +183,12 @@ void FrameDebuggerHistory::CaptureFrame(Renderer& renderer, const rg::RenderGrap
             // - should not happen for a name just read straight out of this
             // SAME frame's own graphSnapshot, but never crash / fabricate an
             // entry if it somehow does.
+            continue;
+        }
+
+        if (textureSnapshot->target.format == VK_FORMAT_R16G16B16A16_SFLOAT) {
+            hdrComputeCopySources.push_back(HdrComputePassCopySource{ write.passName,
+                textureSnapshot->target.image, textureSnapshot->target.extent, textureSnapshot->colorState });
             continue;
         }
 
@@ -249,6 +304,80 @@ void FrameDebuggerHistory::CaptureFrame(Renderer& renderer, const rg::RenderGrap
         }
     });
 
+    // frame-debugger-5 campaign, PHASE5 (closing-phase live-smoke-test bug
+    // fix) - one CPU round-trip per discovered HDR
+    // (VK_FORMAT_R16G16B16A16_SFLOAT) compute-pass 2D write, GENUINELY
+    // SEPARATE from the main copy loop's single ImmediateSubmit() above
+    // (mirrors the volume-texture ray-march loop's own identical "separate
+    // submission, still on-demand-only" reasoning immediately below - see
+    // HdrComputePassCopySource's own doc comment for the full root-cause
+    // writeup). Renderer::CaptureImagePixels() reads back the source's real,
+    // CURRENT tracked GPU state (never assuming ShaderRead), restoring it
+    // afterward - byte-for-byte the same discipline the straight-copy path
+    // above already applies. Encoding::ConvertHdrRgba16fToRgba8() is the
+    // EXACT SAME, already-tested function GET /get_texture already uses for
+    // this one format - never a second, independently-maintained copy of its
+    // exposure/tonemap math.
+    for (const HdrComputePassCopySource& hdrSource : hdrComputeCopySources) {
+        const Renderer::CapturedRawPixels raw = renderer.CaptureImagePixels(hdrSource.image,
+            VK_IMAGE_ASPECT_COLOR_BIT, VK_FORMAT_R16G16B16A16_SFLOAT, hdrSource.extent, hdrSource.colorState,
+            /*bytesPerPixel=*/8);
+
+        std::vector<std::uint8_t> convertedPixels(
+            static_cast<std::size_t>(raw.width) * static_cast<std::size_t>(raw.height) * 4);
+        if (!Encoding::ConvertHdrRgba16fToRgba8(
+                raw.pixels.data(), raw.format, raw.width, raw.height, convertedPixels.data())) {
+            // Defensive only - raw.format is always exactly
+            // VK_FORMAT_R16G16B16A16_SFLOAT here (the same value just
+            // checked before this write was ever added to
+            // hdrComputeCopySources above), so ConvertHdrRgba16fToRgba8()
+            // can never actually reject it in practice - never crash or
+            // fabricate a wrong-content entry if it somehow did.
+            continue;
+        }
+
+        char hdrDebugNameBuffer[96];
+        std::snprintf(hdrDebugNameBuffer, sizeof(hdrDebugNameBuffer), "FrameDebuggerHistorySlot%dCompute%.48s",
+            writeIndex, hdrSource.passName.c_str());
+
+        // Mirrors the volume-texture-preview upload sequence immediately
+        // below exactly (fresh VK_FORMAT_R8G8B8A8_UNORM RenderTexture +
+        // staging-buffer upload) - the SAME reason: this loop only has
+        // CPU-side pixels ready to upload, not a live GPU image to
+        // vkCmdCopyImage from directly.
+        RenderTexture hdrPreviewTexture =
+            renderer.CreateRenderTexture(raw.width, raw.height, VK_FORMAT_R8G8B8A8_UNORM, hdrDebugNameBuffer);
+
+        const VkDeviceSize uploadSize =
+            static_cast<VkDeviceSize>(raw.width) * static_cast<VkDeviceSize>(raw.height) * 4;
+        Buffer stagingBuffer =
+            renderer.CreateBuffer(uploadSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, BufferMemoryUsage::CpuToGpu);
+        stagingBuffer.Upload(convertedPixels.data(), static_cast<std::size_t>(uploadSize));
+
+        const VkImage hdrPreviewImage = hdrPreviewTexture.Image();
+        renderer.ImmediateSubmit([&](VkCommandBuffer cmd) {
+            rg::EmitImageBarrier(cmd, hdrPreviewImage, range, freshImageState, transferDst);
+
+            VkBufferImageCopy copyRegion{};
+            copyRegion.bufferOffset = 0;
+            copyRegion.bufferRowLength = 0;
+            copyRegion.bufferImageHeight = 0;
+            copyRegion.imageSubresource = VkImageSubresourceLayers{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+            copyRegion.imageOffset = VkOffset3D{ 0, 0, 0 };
+            copyRegion.imageExtent =
+                VkExtent3D{ static_cast<std::uint32_t>(raw.width), static_cast<std::uint32_t>(raw.height), 1 };
+            vkCmdCopyBufferToImage(
+                cmd, stagingBuffer.Native(), hdrPreviewImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+
+            // Leave the retained copy in ShaderRead, ready for
+            // ImGui::Image() display - matching every other retained
+            // preview texture in this method.
+            rg::EmitImageBarrier(cmd, hdrPreviewImage, range, transferDst, shaderRead);
+        });
+
+        entry.computePassPreviews.push_back(
+            FrameDebuggerComputePassPreview{ hdrSource.passName, std::move(hdrPreviewTexture) });
+    }
     // NEW (frame-debugger-5 campaign, PHASE4
     // PHASE4_VOLUME_TEXTURE_RAYMARCH_PREVIEW_REUSE.md) - Step A' (pure,
     // CPU-side, mirrors Step A above): discover every real, surviving

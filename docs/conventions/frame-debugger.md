@@ -15,26 +15,82 @@ preview-compositing pipeline, and full HTTP automation. A follow-up campaign,
 `frame-debugger-4` (`task_manager/frame-debugger-4/PHASE0_MASTER_STRATEGY.md`,
 three phases), then fixed a real, confirmed bug: the retained preview this
 window ever showed was always the PRE-atmosphere-composite image, and the real
-atmosphere-compositing pass was entirely invisible in the event tree — see
-"Known limitation, now fixed" below for the full story. **This is the CURRENT,
-real system** — follow these rules whenever touching this window, its data
-model, its capture instrumentation, or its cross-wiring with the Pause/Resume
-toolbar or the embedded HTTP server:
+atmosphere-compositing pass was entirely invisible in the event tree. A second
+follow-up campaign, `frame-debugger-5`
+(`task_manager/frame-debugger-5/PHASE0_MASTER_STRATEGY.md`, five phases), then
+fixed a second, separately-confirmed bug: only 3 of the 8+ real compute-shader
+dispatches this engine actually issues (GPU Skinning, and one single
+hardcoded `"AtmosphereAerialPerspectiveCompositePass"` special case) ever
+appeared anywhere in the event tree at all — every Atmosphere LUT pass
+(Transmittance/Multi-Scattering/Sky-View), the Aerial Perspective Volume pass,
+the Aerial Perspective Volume Debug-Slice pass, and Compute Blur Validation's
+own pass were completely invisible, regardless of whether they ran that frame
+— see "Known limitation, now fixed (`frame-debugger-5` campaign)" below for the
+full story. **This is the CURRENT, real system** — follow these rules whenever
+touching this window, its data model, its capture instrumentation, or its
+cross-wiring with the Pause/Resume toolbar or the embedded HTTP server:
 
 ## What is real today
 
 - **Capture is genuinely real, but PASS-LEVEL, never per-individual-draw-call
   — this is a PERMANENT, locked design fact about this feature, not an
   unfinished gap.** One leaf event = one real `gte::rg::RenderGraphPassSnapshot`
-  -backed pass relevant to the Game View: zero-or-more upstream GPU-skinning
-  compute passes feeding it that frame, the `"GameView"` pass itself, and an
-  optional trailing `"AtmosphereAerialPerspectiveCompositePass"` leaf (present
-  whenever that real pass ran this frame — see the "Aerial Perspective
-  Composite" bullet below, `frame-debugger-4` campaign) — never one leaf per
-  mesh/entity. This is a deliberate, permanent divergence from Unity's own
-  per-draw-call granularity (`PHASE0_MASTER_STRATEGY.md`'s Locked Design
-  Decision #1), chosen for implementation-cost reasons — do not mistake the
-  coarser-than-Unity granularity for something still to be finished.
+  -backed pass relevant to the Game View — never one leaf per mesh/entity.
+  This is a deliberate, permanent divergence from Unity's own per-draw-call
+  granularity (`frame-debugger-2`'s own `PHASE0_MASTER_STRATEGY.md`'s Locked
+  Design Decision #1), chosen for implementation-cost reasons — do not mistake
+  the coarser-than-Unity granularity for something still to be finished.
+- **Every real compute-shader dispatch that ran this frame is now a
+  first-class, AUTOMATICALLY DISCOVERED tree citizen — never a hand-maintained
+  per-pass-name special case** (`frame-debugger-5` campaign). The tree is:
+
+  ```
+  "GameView" (root)
+    |-- "Compute Dispatches (Pre-GameView)"   (only present if >=1 child)
+    |     |-- <every surviving compute pass whose own real execution-order
+    |     |     index in graphSnapshot.passesInExecutionOrder is BEFORE
+    |     |     "GameView"'s own index, in real execution order>
+    |-- "GameView" leaf                        (the one real graphics/draw pass)
+    |-- "Compute Dispatches (Post-GameView)"  (only present if >=1 child)
+          |-- <every surviving compute pass whose own real execution-order
+          |     index is AFTER "GameView"'s own index, in real execution order>
+  ```
+
+  Concretely, on a typical frame with a Sun light present: `"Compute Dispatches
+  (Pre-GameView)"` holds `AtmosphereTransmittanceLutPass`,
+  `AtmosphereMultiScatteringLutPass`, `AtmosphereSkyViewLutPass`,
+  `AtmosphereAerialPerspectiveVolumePass`, plus every GPU-skinning dispatch
+  request active that frame (`RenderPasses.cpp`'s `AddGpuSkinningPasses()`),
+  and `"Compute Dispatches (Post-GameView)"` holds
+  `AtmosphereAerialPerspectiveCompositePass` (and, if the Editor's "Show
+  Compute Blur (debug)" toggle is on, `"ComputeBlurValidation"`). Neither group
+  is ever added at all when it would have zero real children (mirrors every
+  other "never an empty, misleading group" rule elsewhere in this tree) — a
+  single unconditional group placed after `"GameView"` would misrepresent
+  which passes really ran before it (e.g. `"GameView"`'s own Sky-Background
+  sub-draw samples the Sky-View LUT, so that LUT pass must already have run).
+  Discovery is fully generic: `RenderGraphBuilder::AddComputePass()` is the one
+  real "choke point" every compute dispatch in this engine already funnels
+  through, and it now stamps a real, structurally-tracked
+  `PassRecord::isComputePass` flag (survives into
+  `RenderGraphPassSnapshot::isComputePass`, `RenderGraphTypes.h`/
+  `RenderGraphSnapshot.h`) — `FrameDebuggerData.cpp`'s
+  `BuildRealFrameDebuggerSnapshot()` walks every surviving (`isCulled == false`)
+  `isComputePass == true` pass in the current frame's real
+  `RenderGraphSnapshot` and builds one uniform `BuildComputeDispatchLeaf()` per
+  pass — a future compute pass added anywhere in this engine appears here
+  automatically, with **zero further Frame-Debugger-specific code ever
+  required for it to show up.** A compute-dispatch leaf's `passName`/
+  `shaderName`/tree-row text are all the pass's own RAW, real name (never a
+  fabricated friendly label like the old, now-removed `"GPU Skinning"`/
+  `"Aerial Perspective Composite"` special cases used to invent), and every
+  read/write row is labeled by its own real `ResourceKind`
+  (`"Read Texture"`/`"Read Buffer"`/`"Read Volume Texture"`/`"Write Texture"`/
+  `"Write Buffer"`/`"Write Volume Texture"`, from
+  `RenderGraphPassSnapshot::readKinds`/`writeKinds` — parallel vectors to the
+  existing `readNames`/`writeNames`, PHASE1 of `frame-debugger-5`) — never
+  mislabeled, never guessed by probing multiple registries. A culled compute
+  pass never appears in either group (it did not really run this frame).
 - **Capture is snapshot-ON-DEMAND, never continuous.** A "frame" is captured
   exactly once, on a real trigger (Enable's false→true edge, a Step while
   Enabled, or the explicit "Capture" button), and stays frozen/inspectable
@@ -45,14 +101,15 @@ toolbar or the embedded HTTP server:
   even though they exist in the same underlying `RenderGraphSnapshot` the
   "Render Graph" panel already displays in full. Relaxing this filter to cover
   Scene View/Present is a clean, well-isolated future extension point (a
-  single line in the snapshot builder's filter), not attempted by this
-  campaign.
+  single line in the snapshot builder's filter), not attempted by any
+  campaign so far.
 - **A REAL multi-frame history ring buffer exists**
   (`FrameDebuggerHistory`/`FrameDebuggerHistoryEntry`,
   `src/Editor/FrameDebuggerHistory.h/.cpp`), holding the last
   `kFrameDebuggerHistoryCapacity` (8) captured frames, each a full,
   independent, already-resolved `FrameDebuggerSnapshot` PLUS its own retained
-  GPU copy texture of that historical frame's real Game View output. A
+  GPU copy textures of that historical frame's real output (see "Preview
+  reconstruction" below for exactly how many, and of what, per slot). A
   "Frame History" Prev/Next mini-toolbar
   (`FrameDebuggerPanel::BuildFrameHistoryToolbarRow()`) scrubs across this ring
   buffer — a SEPARATE axis from the pre-existing "N of M" event-stepper row
@@ -75,44 +132,52 @@ toolbar or the embedded HTTP server:
   (`Pipeline.cpp`: no blend, `VK_COMPARE_OP_LESS` depth test, no stencil
   test anywhere), so there is nothing to fabricate per-mesh here; a genuine
   future per-material blend/Z/stencil VARIATION would need its own follow-up
-  campaign, not just a data-plumbing change.
-- **Preview reconstruction is real and dual-stage, but still a cheap "copy
-  right after the relevant real event finishes"** — not a full mid-pass
-  draw-call replay. `FrameDebuggerHistory` retains TWO real images per
-  captured frame (`frame-debugger-4` campaign — see "Known limitation, now
-  fixed" below): the true PRE-atmosphere-composite `"GameView"` output
-  (`FrameDebuggerHistoryEntry::preview`) and the true POST-atmosphere-
-  composite, final `"GameViewComposited"` output
-  (`FrameDebuggerHistoryEntry::compositedPreview`, `std::nullopt` only for a
-  capture taken before the atmosphere-composite pass had ever produced
-  anything yet this session). Selecting the literal `"GameView"` leaf shows
-  the pre-composite image (preserving this feature's original "as of the
-  exact point this event finished" semantics for that one leaf); selecting
-  ANYTHING else — including nothing selected, or the new
-  `"AtmosphereAerialPerspectiveCompositePass"` leaf — shows the post-composite,
-  final image, i.e. the SAME pixels the "Game" panel / `GET /get_game_view`
-  show. This one rule is centralized in a pure, Tier-1-tested function,
+  campaign, not just a data-plumbing change. Every compute-dispatch leaf's
+  blend/Z/stencil rows all read `"n/a (compute pass)"` (it never issues a draw
+  call), and its `vectors` include its own real GPU timing sample whenever one
+  is present.
+- **Preview reconstruction is real, but still a cheap "copy right after the
+  relevant real event finishes"** — not a full mid-pass draw-call replay.
+  `FrameDebuggerHistory` retains, per captured frame:
+  - `preview` — the true PRE-atmosphere-composite `"GameView"` output.
+  - `compositedPreview` — the true POST-atmosphere-composite, final
+    `"GameViewComposited"` output (`std::nullopt` only for a capture taken
+    before the atmosphere-composite pass had ever produced anything yet this
+    session — `frame-debugger-4` campaign).
+  - `computePassPreviews` — (`frame-debugger-5` campaign) one retained GPU
+    copy PER real, surviving compute-dispatch pass that had a real visual
+    write this capture, keyed by that pass's own raw name: a pass whose FIRST
+    `Texture`-kind write is found gets a direct GPU-to-GPU copy of that
+    texture (sourced from the already-existing
+    `RenderGraphDebugTextureRegistry`/`RenderGraph::DebugTextureSnapshotFor()`
+    — no new registry needed); a pass whose only visual write is a
+    `VolumeTexture` (today: the Aerial Perspective froxel volume) instead gets
+    a real ray-marched 2D thumbnail, produced by reusing the ALREADY-SHIPPED
+    `VolumeTexturePreviewRenderer::RenderPreview()` (`src/Renderer/
+    VolumeTexturePreviewRenderer.h/.cpp` — the EXACT SAME renderer
+    `GET /get_texture` already uses to preview a volume texture over HTTP,
+    including the SAME shared interpretation-selection rule,
+    `SelectVolumeTexturePreviewInterpretation()`) and uploading its raw RGBA8
+    pixels into a fresh `RenderTexture`. A pass with neither kind of visual
+    write (e.g. GPU Skinning's own `Buffer`-kind write) correctly gets **no**
+    entry at all — a real, honest "not available" state, never a
+    wrong/fabricated image. All of this is eager: every real capture trigger
+    (Enable-edge / Step / explicit Capture) re-populates every retained
+    texture, never a lazy "only copy the one the user happens to click" scheme
+    — every leaf's own preview is instantly available the moment it's clicked.
+
+  Selecting the literal `"GameView"` leaf shows the pre-composite `preview`
+  image (preserving this feature's original "as of the exact point this event
+  finished" semantics for that one leaf); selecting any compute-dispatch leaf
+  that has its own retained `computePassPreviews` entry shows THAT PASS'S OWN
+  real output image; selecting anything else — including nothing selected, or
+  a compute-dispatch leaf with no retained preview of its own (e.g. GPU
+  Skinning) — falls back to the post-composite, final `compositedPreview`
+  image, i.e. the SAME pixels the "Game" panel / `GET /get_game_view` show.
+  This rule is centralized in a pure, Tier-1-tested function,
   `ChooseFrameDebuggerPreviewSource()` (`src/Editor/FrameDebuggerData.h/.cpp`),
   which `Panels/FrameDebuggerPanel.cpp`'s `EnsurePreviewDescriptor()` calls
-  into rather than re-implementing the decision inline. Selecting a
-  GPU-skinning leaf still shows "No Texture" (real, honest — a compute pass
-  has no color image output) alongside real numeric/textual details for that
-  compute dispatch (its own real GPU timing sample).
-- **The `"Aerial Perspective Composite"` leaf is real** (`frame-debugger-4`
-  campaign) — a genuine, selectable tree leaf for the real
-  `"AtmosphereAerialPerspectiveCompositePass"` render-graph compute pass,
-  sibling to `"GameView"`. Its own TREE ROW TEXT is the real, raw pass name,
-  `"AtmosphereAerialPerspectiveCompositePass"` (mirroring the `"GPU Skinning"`
-  group's own children, which show each real dispatch's raw pass name too) —
-  `"Aerial Perspective Composite"` is only the shorter, friendlier label shown
-  in the Inspector's own "Pass" field (`FrameDebuggerEventDetails::passName`)
-  once the leaf is selected, never the tree row's own displayed text. Its
-  `textures` rows are real `"Read Texture"`/`"Write Texture"` entries sourced
-  directly from that pass's own `RenderGraphPassSnapshot::readNames`/
-  `writeNames` (`"GameView"` in, `"GameViewComposited"` out), its `vectors`
-  include the real GPU timing sample, and its blend/Z/stencil rows all read
-  `"n/a (compute pass)"`, mirroring `"GPU Skinning"`'s own convention for a
-  compute dispatch that never issues a draw call.
+  into rather than re-implementing the decision inline.
 - **Channels (All/R/G/B/A) and Levels are functionally real**, driven by a
   dedicated preview-compositing module
   (`src/Editor/FrameDebuggerPreviewProcessing.h/.cpp`, mirrored by
@@ -148,12 +213,59 @@ produces the composited image was never looked up or shown anywhere in the
 event tree, so there was no way to even discover that compositing happened.
 `task_manager/frame-debugger-4/PHASE0_MASTER_STRATEGY.md` (three phases) fixed
 both: `FrameDebuggerHistory` now retains both images per captured frame
-(PHASE1), and the compositing pass is now a real, selectable
-`"AtmosphereAerialPerspectiveCompositePass"` tree leaf (PHASE2) — see the
-"Preview reconstruction"/"Aerial Perspective Composite" bullets above for the
-fixed behavior, and `task_manager/frame-debugger-4/CAMPAIGN_COMPLETION_REPORT.md`
-for the full three-phase writeup plus the live, HTTP-driven, screenshot-
-verified proof the fix actually works.
+(PHASE1), and (at the time) the compositing pass became a real, hardcoded,
+selectable `"AtmosphereAerialPerspectiveCompositePass"` tree leaf (PHASE2) —
+this one-off special case was itself REPLACED by `frame-debugger-5`'s fully
+generic mechanism (see immediately below) — see
+`task_manager/frame-debugger-4/CAMPAIGN_COMPLETION_REPORT.md` for the full
+three-phase writeup plus the live, HTTP-driven, screenshot-verified proof the
+fix actually worked at the time.
+
+## Known limitation, now fixed (`frame-debugger-5` campaign)
+
+Even after `frame-debugger-4`'s fix above, the event tree only ever showed
+THREE of this engine's 8+ real compute-shader dispatches, each hardcoded by
+exact string name: `"GameView"` itself (a graphics pass, correctly always
+shown), whatever pass names appeared in a caller-supplied
+`gpuSkinningPassNamesThisFrame` list (sourced from a completely separate,
+parallel path, `Game::CollectGpuSkinningDispatchRequests()`, kept in sync with
+the render graph only by convention, never structurally guaranteed), and the
+one, single, literal `"AtmosphereAerialPerspectiveCompositePass"` string.
+**Every atmosphere LUT pass (Transmittance/Multi-Scattering/Sky-View), the
+Aerial Perspective Volume pass, the Aerial Perspective Volume Debug-Slice
+pass, and Compute Blur Validation's own pass were completely invisible in the
+tree, no matter whether they ran that frame or not** — the literal bug this
+campaign exists to fix ("I don't think it's catching all compute shader
+dispatch operations... it involves creating multiple LUT textures using
+compute shader"). Even the one compute pass that WAS shown
+(`"AtmosphereAerialPerspectiveCompositePass"`) only showed the correct preview
+image by pure coincidence — its own write target happened to be
+`"GameViewComposited"`, the exact same texture `compositedPreview` already
+retained for an unrelated reason; there was no generic mechanism at all for
+"show me THIS specific pass's own real output texture," so naively adding a
+leaf for, say, the Transmittance LUT pass would have shown the wrong image.
+
+`task_manager/frame-debugger-5/PHASE0_MASTER_STRATEGY.md` (five phases) fixed
+this at the root: `RenderGraphBuilder::AddComputePass()` — the one real choke
+point every compute dispatch in this engine already funnels through — now
+stamps a real `PassRecord::isComputePass`/`RenderGraphPassSnapshot::isComputePass`
+flag (PHASE1), `FrameDebuggerData.cpp` discovers every surviving compute pass
+generically via that flag and builds the split `"Compute Dispatches
+(Pre-GameView)"`/`"Compute Dispatches (Post-GameView)"` groups (PHASE2, see
+"What is real today" above), `FrameDebuggerHistory::CaptureFrame()` eagerly
+retains a real per-pass 2D-texture preview for every one of them (PHASE3), and
+the one remaining gap — a compute pass whose only visual write is a 3D volume
+texture — gets a real ray-marched thumbnail by reusing the already-shipped
+`VolumeTexturePreviewRenderer` (PHASE4). The OLD `gpuSkinningPassNamesThisFrame`
+name-list mechanism and the OLD hardcoded
+`FindPassByName(..., "AtmosphereAerialPerspectiveCompositePass")` special case
+are both REMOVED entirely, not merely supplemented — this was an explicit,
+user-approved BREAKING change to the previously-shipped tree shape (see
+`task_manager/frame-debugger-5/PHASE0_MASTER_STRATEGY.md`'s Locked Design
+Decision #6). See `task_manager/frame-debugger-5/CAMPAIGN_COMPLETION_REPORT.md`
+for the full five-phase writeup plus the live, HTTP-driven, screenshot-verified
+proof every atmosphere LUT compute pass now appears as its own selectable leaf
+with its own correct, distinct real output image.
 
 ## The data model and panel (structure, largely unchanged in shape from
 `frame-debugger-2`)
@@ -165,15 +277,22 @@ verified proof the fix actually works.
   `FrameDebuggerSnapshot`, plus `BuildRealFrameDebuggerSnapshot()` (the real
   builder, reshaping `gte::rg::RenderGraphSnapshot` +
   `FrameDebuggerCaptureContext` into a real, non-empty snapshot filtered to
-  Game-View-only passes — `BuildPlaceholderFrameDebuggerSnapshot()` still
-  exists and is still used as the honest empty-tree fallback when nothing has
-  been captured yet this session), `FormatFrameStepperLabel()`,
+  Game-View-only passes, with the generic compute-dispatch discovery/split
+  described above — `BuildPlaceholderFrameDebuggerSnapshot()` still exists and
+  is still used as the honest empty-tree fallback when nothing has been
+  captured yet this session), `FormatFrameStepperLabel()`,
   `FormatFrameHistoryLabel()`, `ClampSelectedEventIndex()`,
   `FindEventDetailsByIndex()`, `FormatVectorProperty()`,
-  `FormatMatrixProperty()`, and (`frame-debugger-4` campaign)
-  `ChooseFrameDebuggerPreviewSource()` (the pure "which of the two retained
-  images should the preview box show" decision — see "Preview reconstruction"
-  above). Mirrors `JobsPanelData.h`/`ProfilerPanelData.h`'s
+  `FormatMatrixProperty()`, `ChooseFrameDebuggerPreviewSource()` (the pure
+  "which retained image should the preview box show" decision — see "Preview
+  reconstruction" above, widened by `frame-debugger-5` to also consider a
+  selected compute-dispatch leaf's own retained preview), and
+  (`frame-debugger-5` campaign) `CollectComputePassTextureWrites()`/
+  `CollectComputePassVolumeTextureWrites()` (the two pure, CPU-side discovery
+  functions `FrameDebuggerHistory::CaptureFrame()` uses to find which compute
+  passes' own write textures/volume textures to retain a real copy of, reading
+  `rg::RenderGraphSnapshot` directly rather than the Editor's own display
+  strings). Mirrors `JobsPanelData.h`/`ProfilerPanelData.h`'s
   own "small, dedicated, directly-testable reshaping module" precedent (see
   [Testability & Regression Safety](../../AGENTS.md#testability--regression-safety)).
   Tier-1-tested by `tests/Editor/FrameDebuggerDataTests.cpp` and
@@ -188,12 +307,18 @@ verified proof the fix actually works.
   matrix used this frame. Also home to `DescribeStandardPipelineState()` (see
   above). Tier-1-tested by `tests/Editor/FrameDebuggerCaptureTests.cpp`.
 - **`src/Editor/FrameDebuggerHistory.h/.cpp`** — the real ring buffer, now
-  retaining TWO images per slot (`FrameDebuggerHistoryEntry::preview`/
-  `compositedPreview` — `frame-debugger-4` campaign, see "Preview
-  reconstruction" above). Tier-1-tested by
-  `tests/Editor/FrameDebuggerHistoryTests.cpp` (the pure write-state/
-  cursor-clamp arithmetic — `CaptureFrame()`'s own dual-copy `ImmediateSubmit()`
-  body stays Tier-2/untested directly, unchanged from before).
+  retaining THREE kinds of preview per slot: `FrameDebuggerHistoryEntry::preview`/
+  `compositedPreview` (`frame-debugger-4` campaign, see "Preview
+  reconstruction" above) plus `computePassPreviews` (`frame-debugger-5`
+  campaign — one entry per real compute-dispatch pass with a visual write this
+  capture, 2D-texture-copy OR volume-ray-march-thumbnail as appropriate).
+  Tier-1-tested by `tests/Editor/FrameDebuggerHistoryTests.cpp` (the pure
+  write-state/cursor-clamp arithmetic — `CaptureFrame()`'s own multi-copy
+  `ImmediateSubmit()` body, plus the volume-ray-march branch, stay
+  Tier-2/untested directly, since both need a live `VkDevice` — the PURE
+  discovery logic each one depends on, `CollectComputePassTextureWrites()`/
+  `CollectComputePassVolumeTextureWrites()`, is fully extracted and Tier-1-
+  tested instead, see above).
 - **`src/Editor/FrameDebuggerPreviewProcessing.h/.cpp`** — the real
   Channels/Levels compositing (see above). Tier-1-tested by
   `tests/Editor/FrameDebuggerPreviewProcessingTests.cpp`.
@@ -212,7 +337,9 @@ verified proof the fix actually works.
   `BoneViewerWindow`'s own "owns its own `ImGui_ImplVulkan_AddTexture()`
   descriptor" precedent), and its own `FrameDebuggerPreviewRenderer`
   instance. Called explicitly by name from `ImGuiEditorLayer::BuildUI()` — no
-  `IEditorPanel` interface.
+  `IEditorPanel` interface. As of `frame-debugger-5`, it no longer takes a
+  `gpuSkinningPassNamesThisFrame` parameter anywhere — GPU Skinning passes are
+  discovered exactly like every other compute pass now (see above).
 - **An ON-DEMAND FLOATING WINDOW, not part of the default dock layout, and
   NOT listed in `EditorPanelCatalog.h`.** Still deliberate (mirroring
   `BoneViewerWindow`'s own precedent) — `EditorPanelCatalog.h` exists purely
@@ -304,28 +431,51 @@ HTTP-driven open.
 
 ## Testing this feature
 
-Every layer above (`FrameDebuggerCaptureContext`, the real snapshot builder,
-the history ring buffer's pure write-state/cursor arithmetic, the preview
-compositing CPU oracle, the composite-aware preview-source picking rule
-(`ChooseFrameDebuggerPreviewSource()`), the command bridge, and every new HTTP
-query parser/response builder) has dedicated Tier-1 test coverage — see
-`tests/Editor/FrameDebugger*Tests.cpp`, `tests/Application/
-FrameDebuggerCommandBridgeTests.cpp`, and the `ParseFrameDebugger*`/
-`BuildFrameDebugger*` cases in `tests/Network/NetworkRoutesTests.cpp`. A full,
-genuine, HTTP-driven, screenshot-verified end-to-end smoke test (open →
-enable → auto-capture → select event → explicit capture → step history →
-set channel → set levels, each step visually confirmed via
-`GET /get_swapchain`) is part of this feature's own closing verification —
-see `task_manager/frame-debugger-3/PHASE8_COMPLETION_REPORT.md` and
+Every layer above (`FrameDebuggerCaptureContext`, the real snapshot builder
+and its generic compute-dispatch discovery, the history ring buffer's pure
+write-state/cursor arithmetic, the two per-pass write-collection functions,
+the preview compositing CPU oracle, the composite-and-compute-pass-aware
+preview-source picking rule (`ChooseFrameDebuggerPreviewSource()`), the
+command bridge, and every new HTTP query parser/response builder) has
+dedicated Tier-1 test coverage — see `tests/Editor/FrameDebugger*Tests.cpp`,
+`tests/Application/FrameDebuggerCommandBridgeTests.cpp`, and the
+`ParseFrameDebugger*`/`BuildFrameDebugger*` cases in
+`tests/Network/NetworkRoutesTests.cpp`. A full, genuine, HTTP-driven,
+screenshot-verified end-to-end smoke test (open → enable → auto-capture →
+select event → explicit capture → step history → set channel → set levels,
+each step visually confirmed via `GET /get_swapchain`) is part of this
+feature's own closing verification — see
+`task_manager/frame-debugger-3/PHASE8_COMPLETION_REPORT.md` and
 `CAMPAIGN_COMPLETION_REPORT.md` for the full evidence. This finally closes the
 manual-verification gap `frame-debugger-1`/`frame-debugger-2` both had to
 accept — there is no longer any manual-verification limitation for this
 feature. The `frame-debugger-4` campaign's own follow-up live smoke test (see
 `task_manager/frame-debugger-4/PHASE3_COMPLETION_REPORT.md`/
 `CAMPAIGN_COMPLETION_REPORT.md`) re-ran the same HTTP-automation-driven
-approach specifically to prove the atmosphere-compositing bug fix: the
-default preview now visibly matches `GET /get_game_view`'s own fog-inclusive
-image, explicitly selecting the `"GameView"` leaf shows a visibly less-foggy
-pre-composite reconstruction, and selecting the new
-`"AtmosphereAerialPerspectiveCompositePass"` leaf shows the post-composite
-image again alongside its own real read/write texture rows.
+approach specifically to prove the atmosphere-compositing bug fix, and the
+`frame-debugger-5` campaign's own closing phase
+(`task_manager/frame-debugger-5/PHASE5_COMPLETION_REPORT.md`/
+`CAMPAIGN_COMPLETION_REPORT.md`) ran it once more, specifically proving every
+atmosphere LUT compute pass now appears as its own selectable leaf under the
+split `"Compute Dispatches (Pre-GameView)"`/`"Compute Dispatches
+(Post-GameView)"` groups, each showing its own correct, distinct real output
+image — the Transmittance LUT/Multi-Scattering LUT/Sky-View LUT leaves each
+show their own distinct texture, the Aerial Perspective Volume leaf shows a
+real ray-marched thumbnail, and the Aerial Perspective Composite leaf still
+pixel-matches `GET /get_game_view`, exactly as `frame-debugger-4` already
+proved for that one leaf.
+
+## Still-deferred future work
+
+**True per-pass "stop"/breakpoint execution control** — pausing the GPU
+mid-frame at a specific compute dispatch boundary for live step-through
+inspection — remains explicitly out of scope for every campaign so far. Every
+real compute dispatch is now "trackable" (a real, inspectable tree leaf with
+its own real output preview), and "stoppable" today means the EXISTING
+Enable/Step/Capture frame-level controls (`frame-debugger-3`'s own PHASE3) let
+an engineer freeze a specific frame and walk its compute passes one at a time
+in the tree — a genuine mid-command-buffer GPU pause/breakpoint would need
+this engine's `Renderer::ImmediateSubmit()`/render-graph model to support a
+partial, resumable command-buffer submission, which it does not today. See
+`TODO.md`'s "Frame Debugger" section for this item tracked as a named, still-
+deferred future item.

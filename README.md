@@ -110,6 +110,38 @@ pieces. This section keeps only the most recent entries inline — see
 **[docs/CHANGELOG.md](docs/CHANGELOG.md)** for the complete, reverse-
 chronological project history from the very first triangle demo onward.
 
+- **A follow-up campaign, `frame-debugger-5`, fixed a confirmed bug where the
+  Frame Debugger below only ever showed 3 of this engine's 8+ real
+  compute-shader dispatches** (five phases -
+  `task_manager/frame-debugger-5/PHASE0_MASTER_STRATEGY.md`) - every Atmosphere
+  Transmittance/Multi-Scattering/Sky-View LUT pass, the Aerial Perspective
+  Volume pass, the Aerial Perspective Volume Debug-Slice pass, and Compute
+  Blur Validation's own pass were completely invisible in the event tree
+  regardless of whether they ran that frame, since discovery only ever checked
+  a hand-maintained GPU-Skinning name list plus one single hardcoded
+  `"AtmosphereAerialPerspectiveCompositePass"` string. Fixed at the root:
+  `RenderGraphBuilder::AddComputePass()` - the one real "choke point" every
+  compute dispatch in this engine already funnels through - now stamps a real,
+  structurally-tracked `PassRecord::isComputePass` flag (surviving into
+  `RenderGraphPassSnapshot::isComputePass`/new `readKinds`/`writeKinds`
+  per-entry resource-kind tags), so `FrameDebuggerData.cpp` can generically
+  discover EVERY real, surviving compute pass and split them into two new
+  tree groups positioned around the real `"GameView"` leaf by true execution
+  order - `"Compute Dispatches (Pre-GameView)"` (GPU Skinning, every
+  Atmosphere LUT pass, the Aerial Perspective Volume pass) and
+  `"Compute Dispatches (Post-GameView)"` (the Aerial Perspective Composite
+  pass) - REPLACING the old name-list/hardcoded-string special cases entirely,
+  a deliberate, user-approved breaking change to the previously-shipped tree
+  shape. Selecting any one of these leaves now shows THAT PASS'S OWN real
+  output image instead of always the whole Game View: `FrameDebuggerHistory`
+  eagerly retains a real GPU copy of every compute pass's own 2D-texture
+  write, and a pass whose only visual write is a 3D volume texture (the
+  Aerial Perspective froxel volume) gets a real ray-marched thumbnail by
+  reusing the already-shipped `VolumeTexturePreviewRenderer`. Verified with a
+  full clean build (both `GTE_ENABLE_EDITOR` configs), a full `ctest`
+  regression pass, and a live, HTTP-driven, screenshot-verified smoke test
+  confirming every atmosphere LUT compute pass now appears as its own
+  selectable leaf, each showing its own correct, distinct real output image.
 - **The Editor's "Frame Debugger" window is now a genuinely working,
   Unity-Frame-Debugger-style tool for the Game View, closing the whole
   `frame-debugger-2` GUI-only scaffolding's "manual-verification limitation"
