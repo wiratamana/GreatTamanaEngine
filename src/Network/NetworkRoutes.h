@@ -724,4 +724,86 @@ std::string BuildFrameDebuggerStateResponseJson(const FrameDebuggerStateResponse
 std::string BuildFrameDebuggerCommandResponseJson(
     bool success, const std::string& errorMessage, const FrameDebuggerStateResponseView& state);
 
+// --- task_manager/stl-parser-2 campaign, PHASE2 - POST /import_asset.
+// Every function below stays PURE - no httplib/socket/thread/Registry/Game/
+// Renderer/AssetDatabase/ProjectPanel dependency of any kind, exactly like
+// everything else in this file (see this file's own header comment).
+// NetworkServer.cpp (Phase 2's own Section 3.2) is the one place that
+// converts a parsed request into a real AssetImportCommandRequest and
+// calls AssetImportCommandBridge::SubmitAndWait().
+
+// Parsed, VALIDATED result of a POST /import_asset request body:
+// {"source_path": "...", "destination_folder": "..." (optional)}.
+// `valid == false` means `errorMessage` explains exactly why - every other
+// field is meaningless in that case.
+struct ParsedImportAssetRequest {
+    bool valid = false;
+    std::string errorMessage;
+    std::string sourcePath;
+    std::string destinationFolder; // "" when omitted - means "the Project root itself".
+};
+
+// Parses `jsonBody` (the raw POST body) for POST /import_asset. Validation
+// rules (checked in this order - the FIRST failure found is what
+// `errorMessage` reports):
+//   1. `jsonBody` must parse as valid JSON at all, and the top-level value
+//      must be a JSON OBJECT - otherwise "malformed JSON body" / "request
+//      body must be a JSON object" (same exact message convention as
+//      ParseSetEntityTrsRequest() above).
+//   2. "source_path" must be present, a JSON STRING, and non-empty -
+//      otherwise "missing or invalid required field: source_path". This
+//      function does NOT check the path actually exists on disk, is
+//      readable, or names a file rather than a directory - that is
+//      ProjectPanel::ImportExternalFile()'s own job (PHASE1), reported
+//      back through the bridge's own outcome/message, mapped to a 400 by
+//      NetworkServer.cpp's own route handler (Section 3.2) exactly like
+//      any other "well-formed request, semantic failure" case elsewhere in
+//      this file.
+//   3. "destination_folder" is OPTIONAL. Absent, JSON null, or an empty
+//      string all mean "" (the Project root itself). Any other JSON type
+//      (number/bool/object/array) is a validation FAILURE:
+//      "destination_folder must be a string". This function does NOT
+//      itself reject a path-traversal value (e.g. "../../outside") - that
+//      hardening lives in ProjectPanel::ImportExternalFile() (PHASE1),
+//      exactly mirroring point 2 above's own "semantic checks happen
+//      downstream" split.
+// Unrecognized extra JSON fields are silently ignored, same
+// forward-compatible convention as everywhere else in this file.
+ParsedImportAssetRequest ParseImportAssetRequest(const std::string& jsonBody);
+
+// A plain, AssetImportCommandBridge-independent view of one /import_asset
+// outcome, for BuildImportAssetResponseJson() below - NetworkServer.cpp is
+// the one place that copies a real ImportExternalFileOutcome
+// (src/Application/AssetImportCommandBridge.h) into this struct, one field
+// at a time, mirroring TextureListEntryView's/TransformSnapshotView's own
+// "a struct crossing a layer boundary is never accepted directly here"
+// precedent. NOTE: unlike those two examples, this one is DELIBERATELY THE
+// SAME SHAPE as ImportExternalFileOutcome (nothing is dropped/renamed) -
+// still kept as its own, separate type for the same "this file must never
+// depend on src/Application/" reason.
+struct ImportedAssetResponseView {
+    std::string message;
+    std::string finalRelativePath;
+    std::string finalAbsolutePath;
+    std::string guid;
+    bool convertedToMeshAsset = false;
+    std::string meshSourceFormat;
+    bool convertedToKtx2 = false;
+    bool convertedToMotionAsset = false;
+    std::uint64_t meshVertexCount = 0;
+    std::uint64_t meshTriangleCount = 0;
+};
+
+// Builds POST /import_asset's response body for its SUCCESS path only
+// (`view.success` does not exist on this struct on purpose - NetworkServer.cpp's
+// own route handler, Section 3.2, calls BuildGenericErrorResponseJson()
+// DIRECTLY for every failure case, exactly like BuildSetEntityTrsResponseJson()'s
+// own documented split convention):
+//   {"success":true,"message":"...",
+//    "final_relative_path":"...","final_absolute_path":"...","guid":"...",
+//    "converted_to_mesh_asset":bool,"mesh_source_format":"stl"|"pmx"|"",
+//    "converted_to_ktx2":bool,"converted_to_motion_asset":bool,
+//    "mesh_vertex_count":uint64,"mesh_triangle_count":uint64}
+std::string BuildImportAssetResponseJson(const ImportedAssetResponseView& view);
+
 } // namespace gte::Network

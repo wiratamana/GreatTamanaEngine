@@ -732,4 +732,61 @@ std::string BuildFrameDebuggerCommandResponseJson(
     return body.dump();
 }
 
+
+// --- task_manager/stl-parser-2 campaign, PHASE2 - POST /import_asset. See
+// NetworkRoutes.h's own doc comments above each declaration for the exact,
+// locked validation/response rules implemented below.
+
+ParsedImportAssetRequest ParseImportAssetRequest(const std::string& jsonBody)
+{
+    ParsedImportAssetRequest result;
+
+    const nlohmann::json parsed = ParseJsonNoThrow(jsonBody);
+    if (parsed.is_discarded()) {
+        result.errorMessage = "malformed JSON body";
+        return result;
+    }
+    if (!parsed.is_object()) {
+        result.errorMessage = "request body must be a JSON object";
+        return result;
+    }
+
+    // 2. "source_path"
+    if (!parsed.contains("source_path") || !parsed["source_path"].is_string() ||
+        parsed["source_path"].get<std::string>().empty()) {
+        result.errorMessage = "missing or invalid required field: source_path";
+        return result;
+    }
+    result.sourcePath = parsed["source_path"].get<std::string>();
+
+    // 3. "destination_folder" (optional - absent/null/empty string all mean "")
+    if (parsed.contains("destination_folder") && !parsed["destination_folder"].is_null()) {
+        if (!parsed["destination_folder"].is_string()) {
+            result.errorMessage = "destination_folder must be a string";
+            return result;
+        }
+        result.destinationFolder = parsed["destination_folder"].get<std::string>();
+    }
+
+    result.valid = true;
+    return result;
+}
+
+std::string BuildImportAssetResponseJson(const ImportedAssetResponseView& view)
+{
+    nlohmann::json body;
+    body["success"] = true;
+    body["message"] = view.message;
+    body["final_relative_path"] = view.finalRelativePath;
+    body["final_absolute_path"] = view.finalAbsolutePath;
+    body["guid"] = view.guid;
+    body["converted_to_mesh_asset"] = view.convertedToMeshAsset;
+    body["mesh_source_format"] = view.meshSourceFormat;
+    body["converted_to_ktx2"] = view.convertedToKtx2;
+    body["converted_to_motion_asset"] = view.convertedToMotionAsset;
+    body["mesh_vertex_count"] = view.meshVertexCount;
+    body["mesh_triangle_count"] = view.meshTriangleCount;
+    return body.dump();
+}
+
 } // namespace gte::Network

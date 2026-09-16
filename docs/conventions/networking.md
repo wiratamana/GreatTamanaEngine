@@ -251,6 +251,43 @@ module or adding a new endpoint:
   `task_manager/network-impl-7/CAMPAIGN_COMPLETION_REPORT.md` for the full
   five-phase campaign writeup.
 
+- **`POST /import_asset`** (`task_manager/stl-parser-2` campaign,
+  `task_manager/stl-parser-2/PHASE0_MASTER_STRATEGY.md`) imports a single file
+  that lives ANYWHERE on this machine's filesystem into the Editor's
+  "Project" folder, through the exact same `AssetImporter::ImportAssetFile()`
+  pipeline the Editor's "Project" panel drag-and-drop already uses (STL/PMX
+  -> Mesh `*.gta`, VMD -> Animation `*.gta`, a supported image -> KTX2
+  `*.gta`, anything else -> a plain file copy). Built on a brand-new,
+  FIFTH cross-thread bridge, `AssetImportCommandBridge`
+  (`src/Application/AssetImportCommandBridge.h/.cpp`) - the same "a future
+  endpoint needing DIFFERENT engine data must build its own new, narrow
+  bridge" rule the `FrameCaptureBridge` bullet above already states, this
+  time for a request that is Editor/Project/`AssetDatabase`-shaped rather
+  than pixels, ECS data, or Editor UI focus state. A JSON body of
+  `source_path` (required, an absolute path to the external file) and an
+  optional `destination_folder` (a path RELATIVE to the "Project" root,
+  created automatically if missing - omitted/empty means "the Project root
+  itself") is parsed by `NetworkRoutes.h`'s `ParseImportAssetRequest()`, then
+  handed to `AssetImportCommandBridge::SubmitAndWait()` - unlike every other
+  bridge, this one's default timeout is **120000ms (120 seconds)**, not
+  3000ms, since the actual import (parsing the file, writing the `*.gta`)
+  runs SYNCHRONOUSLY on the MAIN THREAD (a deliberate, documented trade-off -
+  a large import, e.g. a 52MB/1,045,458-triangle `.stl`, briefly stalls the
+  whole engine frame loop rather than ever letting a route handler touch
+  `AssetDatabase` from the network thread). Responds `200` with the
+  imported asset's `final_relative_path`/`final_absolute_path`/`guid`/mesh
+  conversion details on success, `400` for malformed JSON/a missing
+  `source_path`/a semantic import failure (bad source file, a
+  `destination_folder` that is absolute, drive/root-relative, or would
+  lexically escape the Project root via `".."` - hardened in
+  `ProjectPanel::ImportExternalFile()`), `503` if the bridge pointer itself
+  is null OR the Editor's "Project" panel isn't available in this build
+  (`GTE_ENABLE_EDITOR`/`GTE_ENABLE_PROJECT_PANEL` is OFF) OR another import
+  is already pending, or `504` on a bridge timeout. `Application::Run()`
+  drains this bridge once per frame, appended after every other bridge's own
+  drain block. See `task_manager/stl-parser-2/PHASE0_MASTER_STRATEGY.md` for
+  the full five-phase campaign writeup.
+
 ## Named Texture Capture (`GET /get_texture`)
 
 `network-impl-4` campaign (`task_manager/network-impl-4/PHASE0_MASTER_STRATEGY.md`)

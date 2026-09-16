@@ -2,6 +2,7 @@
 
 #include "NetworkRoutes.h"
 
+#include "../Application/AssetImportCommandBridge.h"
 #include "../Application/EditorUiCommandBridge.h"
 #include "../Application/EngineCommandBridge.h"
 #include "../Application/FrameCaptureBridge.h"
@@ -230,7 +231,8 @@ void RespondWithFrameDebuggerCommandResult(
 // its own NetworkRoutes.h function - never composing response text inline
 // in this lambda.
 void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, EngineCommandBridge* commandBridge,
-    EditorUiCommandBridge* uiCommandBridge, FrameDebuggerCommandBridge* frameDebuggerCommandBridge)
+    EditorUiCommandBridge* uiCommandBridge, FrameDebuggerCommandBridge* frameDebuggerCommandBridge,
+    AssetImportCommandBridge* assetImportCommandBridge)
 {
     server.Get("/http_hello_world", [](const httplib::Request&, httplib::Response& res) {
         res.set_content(HandleHelloWorld(), "text/plain; charset=utf-8");
@@ -694,6 +696,74 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
             outcome.entityIndex, outcome.entityGeneration, outcome.resolvedName,
             outcome.parentRequestedButNotFound, outcome.requestedParentName), "application/json");
     });
+
+    // task_manager/stl-parser-2 campaign, PHASE2 - POST /import_asset. See
+    // PHASE0_MASTER_STRATEGY.md's own locked endpoint contract for the exact
+    // status-code mapping implemented below, and AGENTS.md's "Networking" for
+    // why this handler still never touches AssetDatabase/ProjectPanel
+    // directly - only AssetImportCommandBridge::SubmitAndWait().
+    server.Post("/import_asset", [assetImportCommandBridge](const httplib::Request& req, httplib::Response& res) {
+        const ParsedImportAssetRequest parsed = ParseImportAssetRequest(req.body);
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        if (assetImportCommandBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("asset import command bridge not available"), "application/json");
+            return;
+        }
+
+        AssetImportCommandRequest request;
+        request.kind = AssetImportCommandKind::ImportExternalFile;
+        request.importExternalFile.sourceAbsolutePath = parsed.sourcePath;
+        request.importExternalFile.destinationRelativeFolder = parsed.destinationFolder;
+
+        // PHASE0's Locked Design Decision #6 - this bridge's own 120000ms
+        // default (see AssetImportCommandBridge.h) is used here EXPLICITLY
+        // (pass no second argument to SubmitAndWait()) - do not shorten it to
+        // match the other bridges' 3000ms default.
+        const AssetImportCommandBridge::SubmitResult submit = assetImportCommandBridge->SubmitAndWait(request);
+        if (submit.alreadyPending) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("another asset import is already in progress"), "application/json");
+            return;
+        }
+        if (submit.timedOut) {
+            res.status = 504;
+            res.set_content(BuildGenericErrorResponseJson("asset import timed out"), "application/json");
+            return;
+        }
+
+        const ImportExternalFileOutcome& outcome = submit.result->importExternalFile;
+        if (!outcome.projectAvailable) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson(
+                "the Editor's \"Project\" panel is not available in this build (GTE_ENABLE_EDITOR/"
+                "GTE_ENABLE_PROJECT_PANEL is OFF)"), "application/json");
+            return;
+        }
+
+        // NetworkRoutes.h's own "must never depend on src/Application/" rule
+        // means BuildImportAssetResponseJson() takes an ImportedAssetResponseView
+        // (this file's OWN type), never the Application-layer
+        // ImportExternalFileOutcome directly - copy field-by-field first.
+        ImportedAssetResponseView view;
+        view.message = outcome.message;
+        view.finalRelativePath = outcome.finalRelativePath;
+        view.finalAbsolutePath = outcome.finalAbsolutePath;
+        view.guid = outcome.guid;
+        view.convertedToMeshAsset = outcome.convertedToMeshAsset;
+        view.meshSourceFormat = outcome.meshSourceFormat;
+        view.convertedToKtx2 = outcome.convertedToKtx2;
+        view.convertedToMotionAsset = outcome.convertedToMotionAsset;
+        view.meshVertexCount = outcome.meshVertexCount;
+        view.meshTriangleCount = outcome.meshTriangleCount;
+        res.status = outcome.success ? 200 : 400;
+        res.set_content(outcome.success ? BuildImportAssetResponseJson(view) : BuildGenericErrorResponseJson(outcome.message),
+            "application/json");
+    });
 }
 
 } // namespace
@@ -717,11 +787,10 @@ NetworkServer::NetworkServer(FrameCaptureBridge* captureBridge, EngineCommandBri
     // restart cycle (or a Start() that overlaps a failed bind retry) can
     // NEVER re-register the same route handler onto the same
     // httplib::Server a second time.
-    RegisterRoutes(m_impl->server, m_captureBridge, m_commandBridge, m_uiCommandBridge, m_frameDebuggerCommandBridge);
-    // m_assetImportCommandBridge is deliberately NOT passed into
-    // RegisterRoutes() yet - PHASE2 is what extends RegisterRoutes()'s own
-    // signature (and its call site here) once a real /import_asset route
-    // handler actually needs to read it.
+    RegisterRoutes(m_impl->server, m_captureBridge, m_commandBridge, m_uiCommandBridge, m_frameDebuggerCommandBridge,
+        m_assetImportCommandBridge);
+    // task_manager/stl-parser-2 campaign, PHASE2 - m_assetImportCommandBridge
+    // is now actually consulted by RegisterRoutes() above (POST /import_asset).
 }
 
 NetworkServer::~NetworkServer()
