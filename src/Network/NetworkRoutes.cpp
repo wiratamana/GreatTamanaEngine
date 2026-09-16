@@ -789,4 +789,43 @@ std::string BuildImportAssetResponseJson(const ImportedAssetResponseView& view)
     return body.dump();
 }
 
+// --- task_manager/stl-parser-2 campaign, PHASE4 - POST /instantiate_asset.
+// See NetworkRoutes.h's own doc comments above each declaration for the
+// exact, locked validation/response rules implemented below.
+
+ParsedInstantiateAssetRequest ParseInstantiateAssetRequest(const std::string& jsonBody)
+{
+    ParsedInstantiateAssetRequest result;
+
+    const nlohmann::json parsed = ParseJsonNoThrow(jsonBody);
+    if (parsed.is_discarded()) {
+        result.errorMessage = "malformed JSON body";
+        return result;
+    }
+    if (!parsed.is_object()) {
+        result.errorMessage = "request body must be a JSON object";
+        return result;
+    }
+
+    if (!parsed.contains("gta_path") || !parsed["gta_path"].is_string() ||
+        parsed["gta_path"].get<std::string>().empty()) {
+        result.errorMessage = "missing or invalid required field: gta_path";
+        return result;
+    }
+    result.gtaPath = parsed["gta_path"].get<std::string>();
+
+    result.valid = true;
+    return result;
+}
+
+std::string BuildInstantiateAssetResponseJson(
+    std::uint32_t entityIndex, std::uint32_t entityGeneration, const std::string& resolvedName)
+{
+    nlohmann::json body;
+    body["success"] = true;
+    body["entity"] = nlohmann::json::object({ { "index", entityIndex }, { "generation", entityGeneration } });
+    body["name"] = resolvedName;
+    return body.dump();
+}
+
 } // namespace gte::Network

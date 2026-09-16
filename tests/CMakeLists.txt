@@ -1868,6 +1868,8 @@ set(GTE_TEST_SOURCES
     Network/ActivateTabEndpointEndToEndTests.cpp
     Network/NetworkRoutesImportAssetTests.cpp
     Network/ImportAssetEndpointEndToEndTests.cpp
+    Network/NetworkRoutesInstantiateAssetTests.cpp
+    Network/InstantiateAssetEndpointEndToEndTests.cpp
     Input/InputStateTests.cpp
     Application/EventTranslatorTests.cpp
     Application/MemorySnapshotBuilderTests.cpp

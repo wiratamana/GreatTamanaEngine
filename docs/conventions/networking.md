@@ -288,6 +288,38 @@ module or adding a new endpoint:
   drain block. See `task_manager/stl-parser-2/PHASE0_MASTER_STRATEGY.md` for
   the full five-phase campaign writeup.
 
+- **`POST /instantiate_asset`** (`task_manager/stl-parser-2` campaign,
+  `task_manager/stl-parser-2/PHASE0_MASTER_STRATEGY.md`) spawns an already-
+  imported Mesh `*.gta` asset into the live ECS Scene - the network-
+  triggerable equivalent of dragging a Mesh asset from "Project" onto
+  "Hierarchy". Unlike `POST /import_asset` above, this route reuses the
+  ALREADY-EXISTING `EngineCommandBridge` as a FIFTH `EngineCommandKind`
+  value, `InstantiateMeshAsset` (`Game::InstantiateMeshAssetFromGtaFile()`,
+  a bare-bones `Outcome`-returning wrapper around the already-existing,
+  unchanged `Game::CreateMeshEntityFromGtaFile()`) - this is exactly the same
+  shape of request `/instantiate_primitive`/`/instantiate_light` already are
+  (an ECS/Renderer-mutating spawn), so it correctly does NOT get its own new
+  bridge, and it works identically whether `GTE_ENABLE_EDITOR` is ON or OFF,
+  with no dependency on the Editor/"Project" panel at all. A JSON body of a
+  single required field, `gta_path` (used EXACTLY as given - an ABSOLUTE
+  path, e.g. exactly the `final_absolute_path` `/import_asset`'s own response
+  already hands back; a relative path resolves against the engine PROCESS's
+  own current working directory, NOT specially against the "Project" root),
+  is parsed by `NetworkRoutes.h`'s `ParseInstantiateAssetRequest()`, then
+  handed to `EngineCommandBridge::SubmitAndWait()` using that bridge's own
+  UNCHANGED 3000ms default timeout (spawning an already-decoded Mesh `*.gta`
+  is "just" a GPU upload + ECS entity creation, not a from-scratch parse like
+  `/import_asset`'s own 120-second allowance exists for). The spawned entity
+  sits at the world origin, completely unparented, named after the source
+  file's own stem - no position/name/parent input, unlike its
+  `/instantiate_primitive` sibling. Responds `200` with the spawned entity's
+  `index`/`generation`/`name` on success, `400` for malformed JSON/a missing
+  `gta_path`/the underlying spawn itself failing (bad path, wrong asset type,
+  an empty mesh), `503` if the bridge pointer is null or another engine
+  command is already pending, or `504` on a bridge timeout. See
+  `task_manager/stl-parser-2/PHASE0_MASTER_STRATEGY.md` for the full
+  five-phase campaign writeup.
+
 ## Named Texture Capture (`GET /get_texture`)
 
 `network-impl-4` campaign (`task_manager/network-impl-4/PHASE0_MASTER_STRATEGY.md`)

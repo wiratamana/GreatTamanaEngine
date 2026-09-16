@@ -806,4 +806,45 @@ struct ImportedAssetResponseView {
 //    "mesh_vertex_count":uint64,"mesh_triangle_count":uint64}
 std::string BuildImportAssetResponseJson(const ImportedAssetResponseView& view);
 
+// --- task_manager/stl-parser-2 campaign, PHASE4 - POST /instantiate_asset.
+// Every function below stays PURE, same discipline as everything else in
+// this file.
+
+// Parsed, VALIDATED result of a POST /instantiate_asset request body:
+// {"gta_path": "..."}. `valid == false` means `errorMessage` explains
+// exactly why - every other field is meaningless in that case.
+struct ParsedInstantiateAssetRequest {
+    bool valid = false;
+    std::string errorMessage;
+    std::string gtaPath;
+};
+
+// Parses `jsonBody` (the raw POST body) for POST /instantiate_asset.
+// Validation rules (checked in this order):
+//   1. Same "must parse as a JSON object" rule as every other parser in
+//      this file - "malformed JSON body" / "request body must be a JSON
+//      object".
+//   2. "gta_path" must be present, a JSON STRING, and non-empty -
+//      otherwise "missing or invalid required field: gta_path". This
+//      function does NOT check the path actually exists, is a valid Mesh
+//      *.gta, or is absolute - see PHASE0_MASTER_STRATEGY.md's Locked
+//      Design Decision #3's own clarifying note on why path resolution is
+//      deliberately the CALLER's responsibility (pass an absolute path -
+//      e.g. exactly what /import_asset's own response already returns as
+//      "final_absolute_path" - PHASE2). Game::InstantiateMeshAssetFromGtaFile()
+//      (PHASE3) is what actually reports a resolution/parse failure, via
+//      its own errorMessage, mapped to a 400 by this endpoint's route
+//      handler exactly like every other "well-formed request, semantic
+//      failure downstream" case in this file.
+// Unrecognized extra JSON fields are silently ignored.
+ParsedInstantiateAssetRequest ParseInstantiateAssetRequest(const std::string& jsonBody);
+
+// Builds POST /instantiate_asset's response body for its SUCCESS path only
+// (failures reuse BuildGenericErrorResponseJson() directly at the route
+// handler's own call site, exactly like BuildSetEntityTrsResponseJson()'s
+// own documented split):
+//   {"success":true,"entity":{"index":<uint>,"generation":<uint>},"name":"<resolvedName>"}
+std::string BuildInstantiateAssetResponseJson(
+    std::uint32_t entityIndex, std::uint32_t entityGeneration, const std::string& resolvedName);
+
 } // namespace gte::Network

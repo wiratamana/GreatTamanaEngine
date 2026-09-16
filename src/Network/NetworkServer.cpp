@@ -764,6 +764,53 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         res.set_content(outcome.success ? BuildImportAssetResponseJson(view) : BuildGenericErrorResponseJson(outcome.message),
             "application/json");
     });
+
+    // task_manager/stl-parser-2 campaign, PHASE4 - POST /instantiate_asset.
+    // Reuses the SAME EngineCommandBridge/commandBridge every other
+    // /instantiate_* route already uses - see
+    // PHASE0_MASTER_STRATEGY.md's Locked Design Decision #9 for why this is
+    // correct (an ECS/Renderer-mutating spawn, not an Editor/Project-panel
+    // concern - this route has NO dependency on assetImportCommandBridge at
+    // all, and works identically whether GTE_ENABLE_EDITOR is ON or OFF).
+    server.Post("/instantiate_asset", [commandBridge](const httplib::Request& req, httplib::Response& res) {
+        const ParsedInstantiateAssetRequest parsed = ParseInstantiateAssetRequest(req.body);
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        if (commandBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("engine command bridge not available"), "application/json");
+            return;
+        }
+
+        EngineCommandRequest request;
+        request.kind = EngineCommandKind::InstantiateMeshAsset;
+        request.instantiateMeshAsset.absoluteGtaPath = parsed.gtaPath;
+
+        const EngineCommandBridge::SubmitResult submit = commandBridge->SubmitAndWait(request);
+        if (submit.alreadyPending) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("another engine command is already in progress"), "application/json");
+            return;
+        }
+        if (submit.timedOut) {
+            res.status = 504;
+            res.set_content(BuildGenericErrorResponseJson("engine command timed out"), "application/json");
+            return;
+        }
+
+        const InstantiateMeshAssetOutcome& outcome = submit.result->instantiateMeshAsset;
+        if (!outcome.success) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(outcome.errorMessage), "application/json");
+            return;
+        }
+        res.status = 200;
+        res.set_content(BuildInstantiateAssetResponseJson(outcome.entityIndex, outcome.entityGeneration, outcome.resolvedName),
+            "application/json");
+    });
 }
 
 } // namespace
