@@ -305,5 +305,183 @@ TEST(RenderGraphSnapshotTest, EmptyStatsLookupLeavesEveryPassAtDefaultStats)
     EXPECT_EQ(snapshot.passesInExecutionOrder[0].stats.timing.status, GpuTimingSample::Status::Absent);
 }
 
+// --- frame-debugger-5 campaign, PHASE1 - isComputePass / readKinds / -------
+// --- writeKinds (PHASE1_RENDERGRAPH_COMPUTE_DISPATCH_CHOKEPOINT_INFRASTRUCTURE.md) ---
+
+// isComputePass is copied through correctly for a surviving graphics pass
+// (AddPass() -> false) vs. a surviving compute pass (AddComputePass() ->
+// true), each keeping its own real name/execution-order position.
+TEST(RenderGraphSnapshotTest, IsComputePassIsCopiedThroughForSurvivingGraphicsAndComputePasses)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle t0 = builder.CreateTexture("T0", MakeTextureDesc());
+    TextureHandle t1;
+
+    builder.AddPass(
+        "GraphicsPass", [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(t0); }, NoOpExecute);
+    builder.AddComputePass(
+        "ComputePass",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.ReadTexture(t0);
+            t1 = builder.CreateTexture("T1", MakeTextureDesc());
+            pass.WriteTexture(t1);
+        },
+        NoOpExecute);
+
+    CompiledGraphInput input = builder.Finish();
+    const TextureHandle finalOutputs[] = { t1 };
+    const CompiledGraph compiled = Compile(input, finalOutputs);
+
+    const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, {});
+    ASSERT_EQ(snapshot.passesInExecutionOrder.size(), 2u);
+
+    EXPECT_EQ(snapshot.passesInExecutionOrder[0].name, "GraphicsPass");
+    EXPECT_FALSE(snapshot.passesInExecutionOrder[0].isComputePass);
+
+    EXPECT_EQ(snapshot.passesInExecutionOrder[1].name, "ComputePass");
+    EXPECT_TRUE(snapshot.passesInExecutionOrder[1].isComputePass);
+}
+
+// A culled compute pass must still truthfully report isComputePass == true
+// (and correct readKinds/writeKinds) - only `stats` stays defaulted for a
+// culled pass, per this struct's own pre-existing convention.
+TEST(RenderGraphSnapshotTest, CulledComputePassStillReportsIsComputePassTrueAndCorrectWriteKind)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle output = builder.CreateTexture("Output", MakeTextureDesc());
+    const TextureHandle deadEnd = builder.CreateTexture("DeadEnd", MakeTextureDesc());
+
+    builder.AddPass(
+        "Survivor", [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(output); }, NoOpExecute);
+    builder.AddComputePass(
+        "CulledCompute", [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteTexture(deadEnd); }, NoOpExecute);
+
+    CompiledGraphInput input = builder.Finish();
+    const TextureHandle finalOutputs[] = { output };
+    const CompiledGraph compiled = Compile(input, finalOutputs);
+
+    const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, {});
+    ASSERT_EQ(snapshot.passesInExecutionOrder.size(), 2u);
+
+    const RenderGraphPassSnapshot& culled = snapshot.passesInExecutionOrder[1];
+    EXPECT_EQ(culled.name, "CulledCompute");
+    EXPECT_TRUE(culled.isCulled);
+    EXPECT_TRUE(culled.isComputePass);
+    ASSERT_EQ(culled.writeKinds.size(), 1u);
+    EXPECT_EQ(culled.writeKinds[0], ResourceKind::Texture);
+    // stats still default for a culled pass - unchanged pre-existing rule.
+    EXPECT_EQ(culled.stats.drawStats.drawCallCount, 0u);
+    EXPECT_EQ(culled.stats.timing.status, GpuTimingSample::Status::Absent);
+}
+
+// A single pass declaring a mix of texture/buffer/volume-texture reads AND
+// writes ends up with readKinds/writeKinds exactly parallel to
+// readNames/writeNames, each entry carrying the correct ResourceKind - and
+// (regression coverage for the pre-existing ResourceUsageName() gap fixed
+// by this same phase, see 3.4b) the volume-texture entries resolve to their
+// REAL name, never an empty string.
+TEST(RenderGraphSnapshotTest, ReadKindsAndWriteKindsMatchDeclaredResourceKindsIncludingVolumeTextureNames)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle textureHandle = builder.CreateTexture("Tex", MakeTextureDesc());
+    const BufferHandle bufferHandle = builder.CreateBuffer("Buf", BufferDesc{ 256, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
+    const VolumeTarget volumeTarget{};
+    const VolumeTextureHandle volumeHandle =
+        builder.ImportVolumeTexture("Vol", volumeTarget, VK_IMAGE_LAYOUT_UNDEFINED);
+
+    builder.AddComputePass(
+        "MixedPass",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.ReadTexture(textureHandle, ResourceAccess::ComputeShaderRead);
+            pass.ReadBuffer(bufferHandle, ResourceAccess::ComputeShaderRead);
+            pass.ReadVolumeTexture(volumeHandle, ResourceAccess::ComputeShaderRead);
+            pass.WriteTexture(textureHandle, ResourceAccess::ComputeShaderWrite);
+            pass.WriteBuffer(bufferHandle, ResourceAccess::ComputeShaderWrite);
+            pass.WriteVolumeTexture(volumeHandle, ResourceAccess::ComputeShaderWrite);
+        },
+        NoOpExecute);
+
+    builder.KeepVolumeTextureOutput(volumeHandle);
+    CompiledGraphInput input = builder.Finish();
+    const TextureHandle finalOutputs[] = { textureHandle };
+    const CompiledGraph compiled = Compile(input, finalOutputs);
+
+    const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, {});
+    ASSERT_EQ(snapshot.passesInExecutionOrder.size(), 1u);
+
+    const RenderGraphPassSnapshot& pass = snapshot.passesInExecutionOrder[0];
+    EXPECT_TRUE(pass.isComputePass);
+    EXPECT_FALSE(pass.isCulled);
+
+    ASSERT_EQ(pass.readNames.size(), 3u);
+    ASSERT_EQ(pass.readKinds.size(), 3u);
+    EXPECT_EQ(pass.readKinds[0], ResourceKind::Texture);
+    EXPECT_EQ(pass.readNames[0], "Tex");
+    EXPECT_EQ(pass.readKinds[1], ResourceKind::Buffer);
+    EXPECT_EQ(pass.readNames[1], "Buf");
+    EXPECT_EQ(pass.readKinds[2], ResourceKind::VolumeTexture);
+    EXPECT_EQ(pass.readNames[2], "Vol");
+
+    ASSERT_EQ(pass.writeNames.size(), 3u);
+    ASSERT_EQ(pass.writeKinds.size(), 3u);
+    EXPECT_EQ(pass.writeKinds[0], ResourceKind::Texture);
+    EXPECT_EQ(pass.writeNames[0], "Tex");
+    EXPECT_EQ(pass.writeKinds[1], ResourceKind::Buffer);
+    EXPECT_EQ(pass.writeNames[1], "Buf");
+    EXPECT_EQ(pass.writeKinds[2], ResourceKind::VolumeTexture);
+    EXPECT_EQ(pass.writeNames[2], "Vol");
+}
+
+// Dedicated, minimal regression test for 3.4b's own ResourceUsageName() fix,
+// asked for explicitly by the phase document alongside the broader mixed-
+// kind test above: a WriteVolumeTexture() (in one pass) and a
+// ReadVolumeTexture() (in a separate, later pass) each resolve to the
+// volume's real, non-empty name - never the pre-fix "" this exact case used
+// to silently produce.
+TEST(RenderGraphSnapshotTest, WriteVolumeTextureAndReadVolumeTextureProduceNonEmptyRealNames)
+{
+    RenderGraphBuilder builder;
+    const VolumeTarget volumeTarget{};
+    const VolumeTextureHandle volumeHandle =
+        builder.ImportVolumeTexture("AtmosphereAerialPerspectiveVolume", volumeTarget, VK_IMAGE_LAYOUT_UNDEFINED);
+    const TextureHandle output = builder.CreateTexture("Output", MakeTextureDesc());
+
+    builder.AddComputePass(
+        "WriteVolumePass",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.WriteVolumeTexture(volumeHandle, ResourceAccess::ComputeShaderWrite);
+        },
+        NoOpExecute);
+    builder.AddComputePass(
+        "ReadVolumePass",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.ReadVolumeTexture(volumeHandle, ResourceAccess::ComputeShaderRead);
+            pass.WriteTexture(output, ResourceAccess::ComputeShaderWrite);
+        },
+        NoOpExecute);
+
+    CompiledGraphInput input = builder.Finish();
+    const TextureHandle finalOutputs[] = { output };
+    const CompiledGraph compiled = Compile(input, finalOutputs);
+
+    const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, {});
+    ASSERT_EQ(snapshot.passesInExecutionOrder.size(), 2u);
+
+    const RenderGraphPassSnapshot& writePass = snapshot.passesInExecutionOrder[0];
+    EXPECT_EQ(writePass.name, "WriteVolumePass");
+    EXPECT_FALSE(writePass.isCulled);
+    ASSERT_EQ(writePass.writeNames.size(), 1u);
+    EXPECT_EQ(writePass.writeKinds[0], ResourceKind::VolumeTexture);
+    EXPECT_EQ(writePass.writeNames[0], "AtmosphereAerialPerspectiveVolume");
+    EXPECT_FALSE(writePass.writeNames[0].empty());
+
+    const RenderGraphPassSnapshot& readPass = snapshot.passesInExecutionOrder[1];
+    EXPECT_EQ(readPass.name, "ReadVolumePass");
+    ASSERT_EQ(readPass.readNames.size(), 1u);
+    EXPECT_EQ(readPass.readKinds[0], ResourceKind::VolumeTexture);
+    EXPECT_EQ(readPass.readNames[0], "AtmosphereAerialPerspectiveVolume");
+    EXPECT_FALSE(readPass.readNames[0].empty());
+}
+
 } // namespace
 } // namespace gte::rg

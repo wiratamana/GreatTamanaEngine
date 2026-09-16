@@ -354,6 +354,9 @@ TEST(RenderGraphPassRecordTest, DefaultConstructedPassRecordIsEmptyAndNotCulled)
     EXPECT_TRUE(record.reads.empty());
     EXPECT_TRUE(record.writes.empty());
     EXPECT_FALSE(record.isCulled);
+    // frame-debugger-5 campaign, PHASE1
+    // (PHASE1_RENDERGRAPH_COMPUTE_DISPATCH_CHOKEPOINT_INFRASTRUCTURE.md).
+    EXPECT_FALSE(record.isComputePass);
     EXPECT_FALSE(static_cast<bool>(record.execute));
 }
 

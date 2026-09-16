@@ -66,6 +66,27 @@ struct RenderGraphPassSnapshot {
     bool isCulled = false;
     std::vector<std::string> readNames;
     std::vector<std::string> writeNames;
+
+    // frame-debugger-5 campaign, PHASE1
+    // (PHASE1_RENDERGRAPH_COMPUTE_DISPATCH_CHOKEPOINT_INFRASTRUCTURE.md) -
+    // true for a real compute dispatch (see PassRecord::isComputePass's own
+    // doc comment, RenderGraphTypes.h) - copied straight through for BOTH a
+    // surviving AND a culled pass (a culled compute pass must still
+    // truthfully report this - only its `stats` below stays at its own
+    // default for a culled pass, per this struct's own pre-existing
+    // convention).
+    bool isComputePass = false;
+
+    // frame-debugger-5 campaign, PHASE1 - PARALLEL to readNames/writeNames
+    // above (same index, same length) - which ResourceKind (RenderGraphTypes.h)
+    // each entry actually is, so a consumer never has to guess/probe
+    // multiple registries to tell "this name is a real 2D texture" from
+    // "...a buffer" from "...a volume texture". A pass with, e.g., 2 reads
+    // and 1 write has readKinds.size() == 2 and writeKinds.size() == 1,
+    // always exactly matching readNames.size()/writeNames.size().
+    std::vector<ResourceKind> readKinds;
+    std::vector<ResourceKind> writeKinds;
+
     // Deliberately left at its default (an empty DrawStats, an Absent
     // GpuTimingSample) for a CULLED pass - see BuildRenderGraphSnapshot()'s
     // own doc comment below for why.

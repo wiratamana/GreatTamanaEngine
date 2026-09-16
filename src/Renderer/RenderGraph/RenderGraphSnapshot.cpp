@@ -5,27 +5,48 @@ namespace gte::rg {
 namespace {
 
 // Resolves one declared read/write's resource name, from whichever of
-// CompiledGraphInput::textureNames/bufferNames actually applies to its kind
-// - mirrors how RenderGraph.cpp itself resolves a ResourceUsage's target
-// (see ApplyUsageBarrierIfNeeded()), just for a NAME instead of a physical
-// resource. Never reads out of bounds (a stale/invalid index degrades to an
-// empty string rather than crashing) - defensive, since this function's
-// whole job is to build a DISPLAY artifact, never to assert correctness
-// that Phase 1-3's own code already guarantees elsewhere.
+// CompiledGraphInput::textureNames/bufferNames/volumeTextureNames actually
+// applies to its kind - mirrors how RenderGraph.cpp itself resolves a
+// ResourceUsage's target (see ApplyUsageBarrierIfNeeded()), just for a NAME
+// instead of a physical resource. Never reads out of bounds (a stale/invalid
+// index degrades to an empty string rather than crashing) - defensive, since
+// this function's whole job is to build a DISPLAY artifact, never to assert
+// correctness that Phase 1-3's own code already guarantees elsewhere.
+//
+// frame-debugger-5 campaign, PHASE1
+// (PHASE1_RENDERGRAPH_COMPUTE_DISPATCH_CHOKEPOINT_INFRASTRUCTURE.md) -
+// REQUIRED companion fix: this used to be a plain two-way
+// `if (kind == Texture) {...} else {assume Buffer}` shape - the exact hazard
+// RenderGraphCompiler.cpp/RenderGraph.cpp both explicitly document having
+// already audited and converted away from when ResourceKind::VolumeTexture
+// was first added (Atmosphere Scattering campaign, Phase 2) - this one file
+// was missed by that audit, silently resolving every VolumeTexture usage to
+// an empty string. Now a real, exhaustive, `default:`-less three-way
+// `switch (usage.kind)`, mirroring that same established convention, so a
+// future fourth ResourceKind fails to compile here too, until this function
+// is updated to match.
 std::string ResourceUsageName(const ResourceUsage& usage, const CompiledGraphInput& input)
 {
-    if (usage.kind == ResourceKind::Texture) {
-        if (usage.texture.index < input.textureNames.size()) {
-            const char* name = input.textureNames[usage.texture.index];
-            return name != nullptr ? name : "";
+    std::string name;
+    switch (usage.kind) {
+    case ResourceKind::Texture:
+        if (usage.texture.index < input.textureNames.size() && input.textureNames[usage.texture.index] != nullptr) {
+            name = input.textureNames[usage.texture.index];
         }
-        return "";
+        break;
+    case ResourceKind::Buffer:
+        if (usage.buffer.index < input.bufferNames.size() && input.bufferNames[usage.buffer.index] != nullptr) {
+            name = input.bufferNames[usage.buffer.index];
+        }
+        break;
+    case ResourceKind::VolumeTexture:
+        if (usage.volumeTexture.index < input.volumeTextureNames.size()
+            && input.volumeTextureNames[usage.volumeTexture.index] != nullptr) {
+            name = input.volumeTextureNames[usage.volumeTexture.index];
+        }
+        break;
     }
-    if (usage.buffer.index < input.bufferNames.size()) {
-        const char* name = input.bufferNames[usage.buffer.index];
-        return name != nullptr ? name : "";
-    }
-    return "";
+    return name;
 }
 
 RenderGraphPassSnapshot BuildPassSnapshot(const PassRecord& pass, const CompiledGraphInput& input, bool isCulled,
@@ -34,15 +55,20 @@ RenderGraphPassSnapshot BuildPassSnapshot(const PassRecord& pass, const Compiled
     RenderGraphPassSnapshot snapshot;
     snapshot.name = pass.name != nullptr ? pass.name : "";
     snapshot.isCulled = isCulled;
+    snapshot.isComputePass = pass.isComputePass; // frame-debugger-5, PHASE1
 
     snapshot.readNames.reserve(pass.reads.size());
+    snapshot.readKinds.reserve(pass.reads.size());          // frame-debugger-5, PHASE1
     for (const ResourceUsage& usage : pass.reads) {
         snapshot.readNames.push_back(ResourceUsageName(usage, input));
+        snapshot.readKinds.push_back(usage.kind);           // frame-debugger-5, PHASE1
     }
 
     snapshot.writeNames.reserve(pass.writes.size());
+    snapshot.writeKinds.reserve(pass.writes.size());        // frame-debugger-5, PHASE1
     for (const ResourceUsage& usage : pass.writes) {
         snapshot.writeNames.push_back(ResourceUsageName(usage, input));
+        snapshot.writeKinds.push_back(usage.kind);          // frame-debugger-5, PHASE1
     }
 
     // See this file's header comment - a culled pass's stats are

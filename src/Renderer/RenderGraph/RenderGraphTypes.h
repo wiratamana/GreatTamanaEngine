@@ -409,6 +409,21 @@ struct PassRecord {
     // executor (a culled pass's Execute callback is never invoked).
     bool isCulled = false;
 
+    // frame-debugger-5 campaign, PHASE1
+    // (PHASE1_RENDERGRAPH_COMPUTE_DISPATCH_CHOKEPOINT_INFRASTRUCTURE.md) -
+    // true for every pass declared via RenderGraphBuilder::AddComputePass()
+    // (see that method's own updated doc comment, RenderGraphBuilder.h);
+    // false (the default) for a pass declared via plain AddPass() - i.e.
+    // every real graphics/draw pass in this engine today (e.g. "GameView").
+    // This is PURELY DESCRIPTIVE metadata: nothing in RenderGraph.cpp/
+    // RenderGraphCompiler.cpp reads this field at all - it exists solely so
+    // a downstream CONSUMER (RenderGraphSnapshot.h's own
+    // RenderGraphPassSnapshot::isComputePass, read by the Editor's Frame
+    // Debugger - see FrameDebuggerData.cpp) can generically discover "which
+    // passes that ran this frame were compute dispatches" without needing
+    // to already know every compute pass's exact string name in advance.
+    bool isComputePass = false;
+
     // Captured by RenderGraphBuilder::AddPass() (Phase 2) - stored, never
     // invoked by AddPass()/Finish() themselves. Invoked exactly once by
     // Phase 6's RenderGraph::Execute(), for every pass that survives Phase

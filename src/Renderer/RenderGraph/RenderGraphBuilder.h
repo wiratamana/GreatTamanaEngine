@@ -374,20 +374,26 @@ public:
         pass.execute = std::function<void(PassContext&)>(std::forward<ExecuteFn>(execute));
     }
 
-    // Phase 6 of the compute-shader campaign
-    // (COMPUTE_PHASE6_RENDERGRAPH_INTEGRATION_STRATEGY_v2.md) - a thin,
-    // PURELY COSMETIC alias of AddPass() above, with zero behavioral
-    // difference: a pass's behavior is entirely determined by what it
-    // declares in `reads`/`writes` (via `setup`), never by which entry
-    // point created it. Exists only so a compute-only pass's own call site
-    // reads as "this is a compute pass" at a glance (mirroring the
-    // GPU_DRIVEN_RENDERING_COMPUTE_INDIRECT_STRATEGY_v1.md companion
-    // document's own Phase D naming) - prefer plain AddPass() if this
-    // alias doesn't clearly earn its keep at a given call site.
+    // frame-debugger-5 campaign, PHASE1
+    // (PHASE1_RENDERGRAPH_COMPUTE_DISPATCH_CHOKEPOINT_INFRASTRUCTURE.md) -
+    // UPDATES this method's own former "purely cosmetic" claim: this is now
+    // the ONE place in the whole engine that marks a pass as a real compute
+    // dispatch (PassRecord::isComputePass - see RenderGraphTypes.h). Still
+    // otherwise behaviorally identical to plain AddPass() - a pass's actual
+    // barrier/attachment/dispatch behavior is still entirely determined by
+    // what it declares in `reads`/`writes` via `setup`, never by which entry
+    // point created it; this method ONLY additionally stamps one bool. Every
+    // real compute pass in this engine already calls this method (not plain
+    // AddPass()) - see PHASE0_MASTER_STRATEGY.md's Step 2.2 for the full,
+    // confirmed list - so this one flag alone is enough to make every one of
+    // them automatically, generically discoverable by any future consumer
+    // (the Editor's Frame Debugger, frame-debugger-5 PHASE2, is the first
+    // one).
     template <typename SetupFn, typename ExecuteFn>
     void AddComputePass(const char* name, SetupFn&& setup, ExecuteFn&& execute)
     {
         AddPass(name, std::forward<SetupFn>(setup), std::forward<ExecuteFn>(execute));
+        m_passes.back().isComputePass = true;
     }
 
     // Consumes this builder, handing its whole in-progress description

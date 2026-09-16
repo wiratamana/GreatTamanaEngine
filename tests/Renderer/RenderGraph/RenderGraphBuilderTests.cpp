@@ -359,9 +359,16 @@ TEST(RenderGraphBuilderTest, PassBuilderCanDeclareBothReadAndWriteOfSameTextureF
     EXPECT_EQ(input.passes[0].writes[0].access, ResourceAccess::ComputeShaderWrite);
 }
 
-// --- AddComputePass() - a thin, purely cosmetic alias of AddPass() ---------
+// --- AddComputePass() - the compute-dispatch choke point (frame-debugger-5
+// campaign, PHASE1 - PHASE1_RENDERGRAPH_COMPUTE_DISPATCH_CHOKEPOINT_INFRASTRUCTURE.md)
+// --- still behaviorally identical to AddPass() aside from the one new
+// --- isComputePass stamp; renamed from this section's original name/test
+// --- ("a thin, purely cosmetic alias of AddPass()") once that claim
+// --- stopped being true - see AddComputePass()'s own updated doc comment,
+// --- RenderGraphBuilder.h. No existing assertion below changed - only the
+// --- name/header text and a couple of NEW assertions were added.
 
-TEST(RenderGraphBuilderTest, AddComputePassBehavesIdenticallyToAddPass)
+TEST(RenderGraphBuilderTest, AddComputePassStillRunsSetupAndCapturesExecuteLikeAddPass)
 {
     RenderGraphBuilder builder;
     const TextureHandle handle = builder.CreateTexture("Output", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
@@ -383,6 +390,81 @@ TEST(RenderGraphBuilderTest, AddComputePassBehavesIdenticallyToAddPass)
     ASSERT_EQ(input.passes[0].writes.size(), 1u);
     EXPECT_EQ(input.passes[0].writes[0].access, ResourceAccess::ComputeShaderWrite);
 }
+
+// frame-debugger-5 campaign, PHASE1 - the actual new behavior: a plain
+// AddPass() call's resulting PassRecord has isComputePass == false.
+TEST(RenderGraphBuilderTest, AddPassRecordsIsComputePassFalse)
+{
+    RenderGraphBuilder builder;
+    builder.AddPass(
+        "GraphicsPass",
+        [](RenderGraphBuilder::PassBuilder&) { },
+        NoOpExecute);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes.size(), 1u);
+    EXPECT_FALSE(input.passes[0].isComputePass);
+}
+
+// frame-debugger-5 campaign, PHASE1 - an AddComputePass() call's resulting
+// PassRecord has isComputePass == true - the literal "choke point" this
+// phase exists to build.
+TEST(RenderGraphBuilderTest, AddComputePassRecordsIsComputePassTrue)
+{
+    RenderGraphBuilder builder;
+    builder.AddComputePass(
+        "ComputeDispatchPass",
+        [](RenderGraphBuilder::PassBuilder&) { },
+        NoOpExecute);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes.size(), 1u);
+    EXPECT_TRUE(input.passes[0].isComputePass);
+}
+
+// frame-debugger-5 campaign, PHASE1 - a single compute pass declaring a
+// mix of ReadTexture/WriteTexture AND ReadBuffer/WriteBuffer AND
+// ReadVolumeTexture/WriteVolumeTexture still populates pass.reads/writes
+// with the correct ResourceUsage::kind for each - a pure sanity check of
+// pre-existing behavior, now also asserted alongside isComputePass.
+TEST(RenderGraphBuilderTest, AddComputePassWithMixedReadWriteKindsRecordsEachCorrectly)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle textureHandle =
+        builder.CreateTexture("Tex", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+    const BufferHandle bufferHandle = builder.CreateBuffer("Buf", BufferDesc{ 256, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
+    const VolumeTarget volumeTarget{};
+    const VolumeTextureHandle volumeHandle =
+        builder.ImportVolumeTexture("Volume", volumeTarget, VK_IMAGE_LAYOUT_UNDEFINED);
+
+    builder.AddComputePass(
+        "MixedPass",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.ReadTexture(textureHandle, ResourceAccess::ComputeShaderRead);
+            pass.ReadBuffer(bufferHandle, ResourceAccess::ComputeShaderRead);
+            pass.ReadVolumeTexture(volumeHandle, ResourceAccess::ComputeShaderRead);
+            pass.WriteTexture(textureHandle, ResourceAccess::ComputeShaderWrite);
+            pass.WriteBuffer(bufferHandle, ResourceAccess::ComputeShaderWrite);
+            pass.WriteVolumeTexture(volumeHandle, ResourceAccess::ComputeShaderWrite);
+        },
+        NoOpExecute);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes.size(), 1u);
+    const PassRecord& pass = input.passes[0];
+    EXPECT_TRUE(pass.isComputePass);
+
+    ASSERT_EQ(pass.reads.size(), 3u);
+    EXPECT_EQ(pass.reads[0].kind, ResourceKind::Texture);
+    EXPECT_EQ(pass.reads[1].kind, ResourceKind::Buffer);
+    EXPECT_EQ(pass.reads[2].kind, ResourceKind::VolumeTexture);
+
+    ASSERT_EQ(pass.writes.size(), 3u);
+    EXPECT_EQ(pass.writes[0].kind, ResourceKind::Texture);
+    EXPECT_EQ(pass.writes[1].kind, ResourceKind::Buffer);
+    EXPECT_EQ(pass.writes[2].kind, ResourceKind::VolumeTexture);
+}
+
 
 
 TEST(RenderGraphBuilderTest, PassBuilderReadBufferAppendsWithGivenAccess)
