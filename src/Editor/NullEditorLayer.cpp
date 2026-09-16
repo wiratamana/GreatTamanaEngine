@@ -42,6 +42,16 @@ public:
     bool IsPlaybackPaused() const override { return false; }
     bool TryConsumeStepRequest() override { return false; }
     TabActivationResult ActivateTab(const std::string& /*panelName*/) override { return TabActivationResult{}; }
+
+    // task_manager/stl-parser-2, PHASE1 - a release build has no "Project"
+    // panel at all, so this is always unavailable.
+    ProjectAssetImportResult ImportExternalAssetIntoProject(
+        const std::string& /*sourceAbsolutePath*/, const std::string& /*destinationRelativeFolder*/) override
+    {
+        ProjectAssetImportResult result;
+        result.projectAvailable = false;
+        return result;
+    }
     FrameDebuggerCaptureContext* PrepareFrameDebuggerCaptureContext() override { return nullptr; }
     void NotifyFrameDebuggerStepConsumed() override { }
 

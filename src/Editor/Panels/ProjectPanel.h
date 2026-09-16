@@ -2,6 +2,7 @@
 
 #include "../ProjectPanelData.h"
 #include "../../Assets/AssetDatabase.h"
+#include "../../Assets/AssetImporter.h"
 
 #include <chrono>
 #include <filesystem>
@@ -127,6 +128,20 @@ public:
     // exactly like every other failure mode this panel handles.
     void HandleExternalFileDrop(float screenX, float screenY, const std::string& sourcePathUtf8);
 
+    // task_manager/stl-parser-2, PHASE1 - the programmatic equivalent of
+    // HandleExternalFileDrop() above, driven by an explicit absolute source
+    // path + relative destination folder instead of a screen-coordinate OS
+    // drop event - see IEditorLayer::ImportExternalAssetIntoProject()'s own
+    // doc comment (EditorLayer.h) for the full contract this implements.
+    // `destinationRelativeFolder` is REJECTED (a failure AssetImportResult with
+    // success == false, no filesystem operation performed at all) if it is an
+    // absolute path, a Windows drive/root-relative path, or if its own
+    // std::filesystem::path::lexically_normal() form starts with a ".."
+    // component - see this method's own .cpp comment for the exact algorithm
+    // (PHASE0_MASTER_STRATEGY.md's Risk Register / Locked Design Decision #8).
+    AssetImportResult ImportExternalFile(
+        const std::filesystem::path& sourceAbsolutePath, const std::string& destinationRelativeFolder);
+
     // The engine-wide registry of every *.gta asset currently tracked under
     // "Project" (see AssetDatabase.h) - kept in sync with the real
     // filesystem on the same throttle as the folder tree itself (see
@@ -137,6 +152,14 @@ public:
     // needs to look up what's currently tracked without triggering its own
     // rescan.
     const AssetDatabase& GetAssetDatabase() const noexcept { return m_assetDatabase; }
+
+    // task_manager/stl-parser-2, PHASE1 - the Project root's own absolute
+    // path, needed by ImGuiEditorLayer::ImportExternalAssetIntoProject() to
+    // turn ImportExternalFile()'s own AssetImportResult::finalPath (always an
+    // ABSOLUTE path) into a path relative to "Project" for
+    // ProjectAssetImportResult::finalRelativePath - mirrors GetAssetDatabase()'s
+    // own "read-only accessor for a private member" shape immediately above.
+    const std::filesystem::path& GetRootPath() const noexcept { return m_rootPath; }
 
 private:
     void EnsureRootAndMaybeRescan();

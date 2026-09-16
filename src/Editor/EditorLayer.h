@@ -6,6 +6,7 @@
 #include "../Renderer/RenderTexture.h"
 #include "../Renderer/RenderGraph/RenderGraphTypes.h"
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -83,6 +84,30 @@ class RenderGraphBuilder;
 struct TabActivationResult {
     bool tabExists = false;
 };
+
+// task_manager/stl-parser-2, PHASE1 - result of ImportExternalAssetIntoProject()
+// below. Deliberately a SEPARATE, tiny, dependency-free type from
+// src/Application/AssetImportCommandBridge.h's own ImportExternalFileOutcome
+// (network-impl-7's own TabActivationResult/ActivateTabOutcome split
+// precedent, applied here) - EditorLayer.h must never depend on anything
+// under src/Application/. Application::Run() (Phase 3.7 below) is the one
+// place that converts one of these into the OTHER type, one field at a
+// time.
+struct ProjectAssetImportResult {
+    bool projectAvailable = true;
+    bool success = false;
+    std::string message;
+    std::string finalRelativePath;
+    std::string finalAbsolutePath;
+    std::string guid;
+    bool convertedToMeshAsset = false;
+    std::string meshSourceFormat;
+    bool convertedToKtx2 = false;
+    bool convertedToMotionAsset = false;
+    std::uint64_t meshVertexCount = 0;
+    std::uint64_t meshTriangleCount = 0;
+};
+
 
 // task_manager/frame-debugger-3 campaign, PHASE7
 // (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md) - the Frame
@@ -391,6 +416,23 @@ public:
     // affects. Always returns tabExists == false for NullEditorLayer (a
     // release build has no Editor UI/tabs to activate at all).
     virtual TabActivationResult ActivateTab(const std::string& panelName) = 0;
+
+    // task_manager/stl-parser-2, PHASE1 - imports a single external file
+    // (anywhere on disk, `sourceAbsolutePath`) into the Editor's "Project"
+    // folder, at `destinationRelativeFolder` (a path relative to the Project
+    // root - "" means the Project root itself; auto-created if missing) -
+    // the programmatic equivalent of dragging a file onto the "Project" panel
+    // (see Panels/ProjectPanel.h's own HandleExternalFileDrop()). Routes
+    // through the EXACT SAME AssetImporter::ImportAssetFile() pipeline and the
+    // SAME live AssetDatabase instance ProjectPanel already owns, so the
+    // Project panel's own tree/selection reflect this import on its very next
+    // rendered frame, with no separate rescan needed from the caller. Returns
+    // projectAvailable == false (every other field meaningless) when this
+    // build has no "Project" panel at all - always true for NullEditorLayer,
+    // and for the real ImGuiEditorLayer impl only when GTE_ENABLE_PROJECT_PANEL
+    // is OFF (a real Editor build with the Project panel compiled out).
+    virtual ProjectAssetImportResult ImportExternalAssetIntoProject(
+        const std::string& sourceAbsolutePath, const std::string& destinationRelativeFolder) = 0;
 
     // task_manager/frame-debugger-3 campaign, PHASE3
     // (PHASE3_FRAME_HISTORY_RING_BUFFER_AND_CAPTURE_TRIGGER.md, Step 3.4) -

@@ -171,7 +171,13 @@ Application::Application(const std::string& title, int width, int height)
     // (a fourth, appended defaulted pointer parameter), for the exact same
     // reason - m_frameDebuggerCommandBridge is likewise declared before
     // m_networkServer.
-    , m_networkServer(&m_captureBridge, &m_commandBridge, &m_uiCommandBridge, &m_frameDebuggerCommandBridge)
+    // task_manager/stl-parser-2 campaign, PHASE1 - ALSO hands
+    // AssetImportCommandBridge's address into NetworkServer's constructor
+    // (a fifth, appended defaulted pointer parameter), for the exact same
+    // reason - m_assetImportCommandBridge is likewise declared before
+    // m_networkServer.
+    , m_networkServer(&m_captureBridge, &m_commandBridge, &m_uiCommandBridge, &m_frameDebuggerCommandBridge,
+          &m_assetImportCommandBridge)
     , m_windowWidth(width)
     , m_windowHeight(height)
 {
@@ -433,6 +439,41 @@ int Application::Run()
 
             m_frameDebuggerCommandBridge.FulfillCommand(fdResult);
         }
+
+        // task_manager/stl-parser-2, PHASE1 - drains at most ONE pending
+        // /import_asset request per frame. Unlike EditorUiCommandBridge's own
+        // pump above, this one does not need ImGui's context to be valid at all -
+        // ImportExternalAssetIntoProject() only touches ProjectPanel's own
+        // AssetDatabase/filesystem state, never ImGui - but it is kept at this
+        // same point in the frame, appended after every other bridge's own drain
+        // block, for locality with them.
+        if (const std::optional<AssetImportCommandRequest> importRequest =
+                m_assetImportCommandBridge.TryPeekPendingCommandRequest()) {
+            GTE_PROFILE_SCOPE("Application::ExecuteAssetImportCommand");
+            AssetImportCommandResult importResult;
+            importResult.kind = importRequest->kind;
+            // Only one AssetImportCommandKind exists today (ImportExternalFile) -
+            // a future addition would branch on importRequest->kind here, the
+            // same shape ExecuteEngineCommand() already uses for its own bridge.
+            const ProjectAssetImportResult layerResult = m_editorLayer->ImportExternalAssetIntoProject(
+                importRequest->importExternalFile.sourceAbsolutePath,
+                importRequest->importExternalFile.destinationRelativeFolder);
+            ImportExternalFileOutcome& outcome = importResult.importExternalFile;
+            outcome.projectAvailable = layerResult.projectAvailable;
+            outcome.success = layerResult.success;
+            outcome.message = layerResult.message;
+            outcome.finalRelativePath = layerResult.finalRelativePath;
+            outcome.finalAbsolutePath = layerResult.finalAbsolutePath;
+            outcome.guid = layerResult.guid;
+            outcome.convertedToMeshAsset = layerResult.convertedToMeshAsset;
+            outcome.meshSourceFormat = layerResult.meshSourceFormat;
+            outcome.convertedToKtx2 = layerResult.convertedToKtx2;
+            outcome.convertedToMotionAsset = layerResult.convertedToMotionAsset;
+            outcome.meshVertexCount = layerResult.meshVertexCount;
+            outcome.meshTriangleCount = layerResult.meshTriangleCount;
+            m_assetImportCommandBridge.FulfillCommand(importResult);
+        }
+
 
         // Clears last frame's queued Submit() draw items before Game gets a
         // chance to queue this frame's - see Renderer::BeginFrame().

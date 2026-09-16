@@ -703,12 +703,14 @@ struct NetworkServer::Impl {
 };
 
 NetworkServer::NetworkServer(FrameCaptureBridge* captureBridge, EngineCommandBridge* commandBridge,
-    EditorUiCommandBridge* uiCommandBridge, FrameDebuggerCommandBridge* frameDebuggerCommandBridge)
+    EditorUiCommandBridge* uiCommandBridge, FrameDebuggerCommandBridge* frameDebuggerCommandBridge,
+    AssetImportCommandBridge* assetImportCommandBridge)
     : m_impl(std::make_unique<Impl>())
     , m_captureBridge(captureBridge)
     , m_commandBridge(commandBridge)
     , m_uiCommandBridge(uiCommandBridge)
     , m_frameDebuggerCommandBridge(frameDebuggerCommandBridge)
+    , m_assetImportCommandBridge(assetImportCommandBridge)
 {
     // Registered exactly ONCE per NetworkServer instance, here in the
     // constructor - never inside Start() - so a Start()/Stop()/Start()
@@ -716,6 +718,10 @@ NetworkServer::NetworkServer(FrameCaptureBridge* captureBridge, EngineCommandBri
     // NEVER re-register the same route handler onto the same
     // httplib::Server a second time.
     RegisterRoutes(m_impl->server, m_captureBridge, m_commandBridge, m_uiCommandBridge, m_frameDebuggerCommandBridge);
+    // m_assetImportCommandBridge is deliberately NOT passed into
+    // RegisterRoutes() yet - PHASE2 is what extends RegisterRoutes()'s own
+    // signature (and its call site here) once a real /import_asset route
+    // handler actually needs to read it.
 }
 
 NetworkServer::~NetworkServer()

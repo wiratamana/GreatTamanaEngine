@@ -1872,6 +1872,7 @@ set(GTE_TEST_SOURCES
     Application/FrameCaptureBridgeTests.cpp
     Application/EngineCommandBridgeTests.cpp
     Application/EditorUiCommandBridgeTests.cpp
+    Application/AssetImportCommandBridgeTests.cpp
     Application/FrameDebuggerCommandBridgeTests.cpp
     Editor/EditorPanelCatalogTests.cpp
     Renderer/VertexTests.cpp

@@ -35,6 +35,15 @@ namespace gte { class EditorUiCommandBridge; }
 // (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md).
 namespace gte { class FrameDebuggerCommandBridge; }
 
+// Forward-declared for the same cheap-header reason as FrameCaptureBridge/
+// EngineCommandBridge/EditorUiCommandBridge/FrameDebuggerCommandBridge
+// above - task_manager/stl-parser-2 campaign, PHASE1. Genuinely unused by
+// any route yet - PHASE2 is what actually registers `POST /import_asset`
+// against it - stored now purely so PHASE2 never needs to touch
+// Application.h/.cpp again (see PHASE0_MASTER_STRATEGY.md's own Locked
+// Design Decision #1 and this phase's own Definition of Done).
+namespace gte { class AssetImportCommandBridge; }
+
 namespace gte::Network {
 
 // Owns a real, embedded HTTP server (cpp-httplib) bound to loopback
@@ -89,13 +98,20 @@ public:
     // unchanged. Non-null in production (Application owns the real
     // FrameDebuggerCommandBridge and passes its address) - `nullptr` means
     // "every GET /frame_debugger/* route responds 503 rather than
-    // crashing" - the exact same "nullptr degrades gracefully" contract
+    // `crashing" - the exact same "nullptr degrades gracefully" contract
     // `captureBridge`/`commandBridge`/`uiCommandBridge` already document
-    // above.
+    // above. `assetImportCommandBridge` (task_manager/stl-parser-2 campaign,
+    // PHASE1) is a FIFTH defaulted, non-owning pointer, appended AFTER
+    // `frameDebuggerCommandBridge` so every existing call site keeps
+    // compiling unchanged. Non-null in production (Application owns the
+    // real AssetImportCommandBridge and passes its address) - genuinely
+    // UNUSED by any route yet (see this class's own private member comment
+    // below) until PHASE2 registers `POST /import_asset` against it.
     explicit NetworkServer(FrameCaptureBridge* captureBridge = nullptr,
         EngineCommandBridge* commandBridge = nullptr,
         EditorUiCommandBridge* uiCommandBridge = nullptr,
-        FrameDebuggerCommandBridge* frameDebuggerCommandBridge = nullptr);
+        FrameDebuggerCommandBridge* frameDebuggerCommandBridge = nullptr,
+        AssetImportCommandBridge* assetImportCommandBridge = nullptr);
     ~NetworkServer();
 
     NetworkServer(const NetworkServer&) = delete;
@@ -173,6 +189,11 @@ private:
     // Non-owning - same lifetime contract as m_captureBridge above
     // (task_manager/frame-debugger-3 campaign, PHASE7).
     FrameDebuggerCommandBridge* m_frameDebuggerCommandBridge = nullptr;
+    // Non-owning - same lifetime contract as m_captureBridge above
+    // (task_manager/stl-parser-2 campaign, PHASE1). Not yet passed into
+    // RegisterRoutes() below - PHASE2 is what actually wires a real route
+    // handler against it, when POST /import_asset is registered.
+    AssetImportCommandBridge* m_assetImportCommandBridge = nullptr;
 };
 
 } // namespace gte::Network

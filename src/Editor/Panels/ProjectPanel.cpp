@@ -515,4 +515,92 @@ void ProjectPanel::HandleExternalFileDrop(float screenX, float screenY, const st
     }
 }
 
+AssetImportResult ProjectPanel::ImportExternalFile(
+    const std::filesystem::path& sourceAbsolutePath, const std::string& destinationRelativeFolder)
+{
+    AssetImportResult result;
+
+    // Confirmed (read in full): EnsureRootAndMaybeRescan() is already
+    // idempotent and throttled (500ms, via m_lastScanTime/m_needsRescan) -
+    // calling it again here, on top of Build()'s own once-per-frame call,
+    // is always safe and never double-scans within the same throttle
+    // window.
+    EnsureRootAndMaybeRescan();
+    if (!m_rootExists) {
+        result.success = false;
+        result.message = "Cannot import - the \"Project\" folder is missing.";
+        return result;
+    }
+
+    std::error_code existsEc;
+    if (!std::filesystem::exists(sourceAbsolutePath, existsEc) || existsEc) {
+        result.success = false;
+        result.message = "The source file does not exist: \"" + PathToUtf8(sourceAbsolutePath) + "\".";
+        return result;
+    }
+    std::error_code isDirEc;
+    if (std::filesystem::is_directory(sourceAbsolutePath, isDirEc) && !isDirEc) {
+        result.success = false;
+        result.message = "The source path is a directory, not a file - only single-file imports are supported.";
+        return result;
+    }
+
+    // Path-traversal hardening - PHASE0_MASTER_STRATEGY.md's Risk Register /
+    // Locked Design Decision #8. An empty destinationRelativeFolder means
+    // "the Project root itself", exactly like m_currentFolderRelativePath's
+    // own "" convention elsewhere in this class.
+    std::filesystem::path relFolder = Utf8ToPath(destinationRelativeFolder);
+    // Rejects BOTH a fully-qualified absolute path (e.g. "C:\Windows") AND a
+    // Windows DRIVE-RELATIVE or ROOT-RELATIVE path (e.g. "C:Temp" -
+    // relative to whatever the current directory on the C: drive happens
+    // to be, or "\Escape" - relative to the current drive's own root).
+    // is_absolute() alone returns FALSE for both of those on Windows (it
+    // requires BOTH a root name AND a root directory together) -
+    // has_root_path() is true if EITHER one is present on its own, which is
+    // what actually matters here: "does this path carry any notion of a
+    // drive/root at all that could resolve outside the Project folder".
+    if (relFolder.is_absolute() || relFolder.has_root_path()) {
+        result.success = false;
+        result.message = "destination_folder must be a plain path relative to the Project root, not absolute "
+                          "or drive/root-relative.";
+        return result;
+    }
+    const std::filesystem::path normalizedRelFolder = relFolder.lexically_normal();
+    if (!normalizedRelFolder.empty() && normalizedRelFolder.begin()->wstring() == L"..") {
+        result.success = false;
+        result.message = "destination_folder must not escape the Project root (no \"..\" segments).";
+        return result;
+    }
+
+    const std::filesystem::path targetDir = (m_rootPath / normalizedRelFolder).lexically_normal();
+
+    std::error_code dirEc;
+    std::filesystem::create_directories(targetDir, dirEc); // best-effort; MakeUniqueDestinationPath()/ImportAssetFile() below are the real check.
+
+    // Same "*.gta"-collision-aware destination naming HandleExternalFileDrop()
+    // already uses (see that method's own comment on why this matters for
+    // an already-imported "name.gta" existing before "name.png"/"name.pmx"
+    // is re-dropped) - EXTENDED here to also cover IsImportableAsMotionAsset()
+    // (".vmd"), which HandleExternalFileDrop() itself does not currently
+    // check (a narrow, pre-existing, out-of-scope inconsistency in that
+    // already-merged stl-parser-1-era method - NOT something this phase
+    // fixes there - but there is no reason to knowingly copy it into this
+    // brand-new method too).
+    std::filesystem::path desiredName = sourceAbsolutePath.filename();
+    std::string extension = PathToUtf8(sourceAbsolutePath.extension());
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (IsImportableAsKtx2Texture(extension) || IsImportableAsMeshAsset(extension)
+        || IsImportableAsMotionAsset(extension)) {
+        desiredName.replace_extension(".gta");
+    }
+    const std::filesystem::path destination = MakeUniqueDestinationPath(targetDir, desiredName);
+
+    result = ImportAssetFile(m_assetDatabase, sourceAbsolutePath, destination);
+    if (result.success) {
+        m_needsRescan = true;
+    }
+    return result;
+}
+
 } // namespace gte

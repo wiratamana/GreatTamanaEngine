@@ -12,6 +12,7 @@
 #include "../Renderer/RenderGraph/RenderGraph.h"
 #include "../Renderer/VolumeTexturePreviewRenderer.h"
 #include "../Window/Window.h"
+#include "AssetImportCommandBridge.h"
 #include "EngineCommandBridge.h"
 #include "EditorUiCommandBridge.h"
 #include "FrameCaptureBridge.h"
@@ -155,6 +156,16 @@ private:
     // destroyed last relative to it) so its address can be handed into
     // m_networkServer's own constructor below.
     FrameDebuggerCommandBridge m_frameDebuggerCommandBridge;
+
+    // task_manager/stl-parser-2 campaign, PHASE1 - the FIFTH sanctioned
+    // cross-thread bridge a Network route handler is allowed to touch, this
+    // one for the future POST /import_asset route (PHASE2) - see AGENTS.md,
+    // "Networking", and AssetImportCommandBridge.h's own header comment.
+    // Declared right after m_frameDebuggerCommandBridge, for the exact same
+    // reason: BEFORE m_networkServer (constructed first, destroyed last
+    // relative to it) so its address can be handed into m_networkServer's
+    // own constructor below.
+    AssetImportCommandBridge m_assetImportCommandBridge;
 
     // Networking campaign (task_manager/network-impl-1/) - an embedded,
     // loopback-only HTTP server (see AGENTS.md, "Networking"). Declared

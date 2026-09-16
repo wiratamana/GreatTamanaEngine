@@ -111,8 +111,10 @@
 #include <SDL3/SDL.h>
 
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <stdexcept>
+#include <system_error>
 
 namespace gte {
 
@@ -719,6 +721,50 @@ public:
         result.tabExists = FindAndFocusEditorWindow(panelName.c_str());
         return result;
     }
+
+    // task_manager/stl-parser-2, PHASE1 - see
+    // IEditorLayer::ImportExternalAssetIntoProject()'s own doc comment
+    // (EditorLayer.h) for the full contract. #if-gated exactly like
+    // m_projectPanel's own declaration - GTE_ENABLE_PROJECT_PANEL is a
+    // SEPARATE switch from GTE_ENABLE_EDITOR (see CMakeLists.txt), so a real
+    // Editor build can still have this panel compiled out.
+    ProjectAssetImportResult ImportExternalAssetIntoProject(
+        const std::string& sourceAbsolutePath, const std::string& destinationRelativeFolder) override
+    {
+        ProjectAssetImportResult result;
+#if GTE_ENABLE_PROJECT_PANEL
+        const AssetImportResult imported = m_projectPanel.ImportExternalFile(
+            Utf8ToPath(sourceAbsolutePath), destinationRelativeFolder);
+        result.projectAvailable = true;
+        result.success = imported.success;
+        result.message = imported.message;
+
+        // std::filesystem::relative()'s error_code overload is used
+        // deliberately (never the throwing 2-argument overload) - this class
+        // has no surrounding try/catch, and this codebase's "never throws"
+        // degrade-gracefully convention (see AssetImportResult's own doc
+        // comment) means a relative-path computation failure here should fall
+        // back to something still useful, never propagate an exception.
+        std::error_code relEc;
+        const std::filesystem::path relativePath =
+            std::filesystem::relative(imported.finalPath, m_projectPanel.GetRootPath(), relEc);
+        result.finalRelativePath = (!relEc) ? PathToUtf8(relativePath) : PathToUtf8(imported.finalPath);
+        result.finalAbsolutePath = PathToUtf8(imported.finalPath);
+
+        result.guid = imported.guid.IsValid() ? imported.guid.ToString() : std::string();
+        result.convertedToMeshAsset = imported.convertedToMeshAsset;
+        result.meshSourceFormat = (imported.meshSourceFormat == MeshSourceFormat::Stl) ? "stl"
+            : (imported.meshSourceFormat == MeshSourceFormat::Pmx) ? "pmx" : std::string();
+        result.convertedToKtx2 = imported.convertedToKtx2;
+        result.convertedToMotionAsset = imported.convertedToMotionAsset;
+        result.meshVertexCount = imported.meshVertexCount;
+        result.meshTriangleCount = imported.meshTriangleCount;
+#else
+        result.projectAvailable = false;
+#endif
+        return result;
+    }
+
 
     // task_manager/frame-debugger-3 campaign, PHASE3 - see
     // IEditorLayer::PrepareFrameDebuggerCaptureContext()/
