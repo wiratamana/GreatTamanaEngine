@@ -290,4 +290,10 @@ bool MeshAssetGpuCatalog::RefreshCachedJointPhysicsOverridesFromDisk(const std::
     return true;
 }
 
+void MeshAssetGpuCatalog::InvalidateCachedMeshAsset(const std::string& absoluteGtaPath)
+{
+    m_meshAssetCache.erase(absoluteGtaPath);
+    m_skinnedMeshCache.erase(absoluteGtaPath);
+}
+
 } // namespace gte

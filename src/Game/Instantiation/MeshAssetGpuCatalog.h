@@ -113,6 +113,23 @@ public:
     // cleared - a failed refresh is a silent no-op, never destructive).
     bool RefreshCachedJointPhysicsOverridesFromDisk(const std::string& absoluteGtaPath);
 
+    // Drops any cached MeshAssetPart/SkinnedMeshData entry for `absoluteGtaPath`
+    // (a no-op if this path was never cached), so the NEXT Resolve()/
+    // EnsureMeshAsset() call for that same path re-reads and re-uploads it fresh
+    // from disk - used after an operation that changed the *.gta's own vertex
+    // DATA in place (e.g. RecomputeAndSaveMeshNormalsToGtaFile() -
+    // MeshNormalRecomputePersistence.h), unlike
+    // RefreshCachedJointPhysicsOverridesFromDisk() above (which patches a
+    // cached value IN PLACE because that data is read fresh at attach-time, not
+    // baked into a GPU buffer) - normals ARE baked directly into the uploaded
+    // MeshVertex GPU buffer at upload time, so the only safe fix here is a
+    // fresh re-upload, not an in-place patch. Deliberately does NOT retroactively
+    // touch any ALREADY-SPAWNED Scene entity's current GPU mesh (those keep
+    // showing whatever normals they had at spawn time until deleted and
+    // re-spawned) - see this method's own call site in Panels/InspectorPanel.cpp
+    // for the exact user-facing wording of this limitation.
+    void InvalidateCachedMeshAsset(const std::string& absoluteGtaPath);
+
 private:
     PipelineHandle EnsureMeshPipeline(RenderSystem& renderSystem, Renderer& renderer);
     PipelineHandle EnsureTexturedMeshPipeline(RenderSystem& renderSystem, Renderer& renderer);

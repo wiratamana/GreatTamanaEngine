@@ -584,6 +584,52 @@
 #                                            plus malformed/truncated/empty
 #                                            input rejection - no GPU device
 #                                            involved (src/Assets/RigFile.h).
+#   Assets/MeshNormalRecomputeTests.cpp     - task_manager/stl-parser-1 PHASE3's
+#                                            pure, format-agnostic
+#                                            RecomputeMeshNormalsFromGeometry()
+#                                            (src/Assets/MeshNormalRecompute.h)
+#                                            area-weighted per-vertex normal
+#                                            accumulation: a flat normal for a
+#                                            single non-shared triangle,
+#                                            matching flat normals across two
+#                                            non-shared coplanar triangles
+#                                            (the STL-shaped regression case),
+#                                            correct averaging across a true
+#                                            shared vertex touched by a 4-
+#                                            triangle fan in different planes
+#                                            (the PMX-shaped regression case -
+#                                            proves this is real area-weighted
+#                                            averaging, not "last triangle
+#                                            wins"), a degenerate zero-area
+#                                            triangle contributing nothing and
+#                                            never producing NaN, `normals`
+#                                            being resized to match
+#                                            `positions` when mismatched, and a
+#                                            trailing partial (non-multiple-of-3)
+#                                            index tolerated without crashing.
+#                                            No GPU/file I/O involved at all.
+#   Assets/MeshNormalRecomputePersistenceTests.cpp - task_manager/stl-parser-1
+#                                            PHASE3's real-temp-file round-trip
+#                                            persistence wrapper
+#                                            (RecomputeAndSaveMeshNormalsToGtaFile() -
+#                                            src/Assets/
+#                                            MeshNormalRecomputePersistence.h):
+#                                            a hand-built single-triangle Mesh
+#                                            *.gta with deliberately wrong
+#                                            normals gets its normals
+#                                            overwritten in place while its
+#                                            GUID/flags/version/metadata stay
+#                                            byte-for-byte unchanged; a missing
+#                                            file, a non-Mesh *.gta, and an
+#                                            undecodable mesh payload all fail
+#                                            gracefully (false + a non-empty
+#                                            error message) with the
+#                                            undecodable-payload case also
+#                                            confirmed to leave the ORIGINAL
+#                                            file on disk completely untouched.
+#                                            No GPU involved - real temp-file
+#                                            I/O only, same convention as
+#                                            AssetImporterTests.cpp.
 #   Scene/SceneTextFormatTests.cpp          - SerializeSceneDocument()/
 #                                            DeserializeSceneDocument()
 #                                            round-tripping the new *.gtscene
@@ -1798,6 +1844,8 @@ set(GTE_TEST_SOURCES
     Assets/MeshFileTests.cpp
     Assets/MotionFileTests.cpp
     Assets/RigFileTests.cpp
+    Assets/MeshNormalRecomputeTests.cpp
+    Assets/MeshNormalRecomputePersistenceTests.cpp
     Scene/SceneTextFormatTests.cpp
     Scene/SceneBuilderTests.cpp
     Memory/GpuMemoryTrackerTests.cpp

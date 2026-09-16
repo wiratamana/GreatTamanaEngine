@@ -339,6 +339,10 @@ add_library(gte_core STATIC
     src/Assets/VmdLoader.cpp
     src/Assets/StlLoader.h
     src/Assets/StlLoader.cpp
+    src/Assets/MeshNormalRecompute.h
+    src/Assets/MeshNormalRecompute.cpp
+    src/Assets/MeshNormalRecomputePersistence.h
+    src/Assets/MeshNormalRecomputePersistence.cpp
     src/Assets/MaterialData.h
     src/Assets/ImageFileDecoder.h
     src/Assets/ImageFileDecoder.cpp

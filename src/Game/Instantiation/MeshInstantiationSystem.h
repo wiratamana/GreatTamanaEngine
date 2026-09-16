@@ -66,6 +66,16 @@ public:
         return m_meshAssetCatalog.RefreshCachedJointPhysicsOverridesFromDisk(absoluteGtaPath);
     }
 
+    // task_manager/stl-parser-1, PHASE3 - forwards straight to
+    // MeshAssetGpuCatalog::InvalidateCachedMeshAsset() (see its own doc
+    // comment for the full contract) - NOT const, since it mutates the
+    // underlying cache, unlike TryGetMeshAssetParts()/TryGetSkinnedMeshData()
+    // above.
+    void InvalidateCachedMeshAsset(const std::string& absoluteGtaPath)
+    {
+        m_meshAssetCatalog.InvalidateCachedMeshAsset(absoluteGtaPath);
+    }
+
 private:
     RenderSystem& m_renderSystem;
     PrimitiveGpuCatalog m_primitiveCatalog;

@@ -26,6 +26,7 @@
 #include "../../Assets/AssetTypes.h" // AssetType, AssetFlags, Guid
 #include "../../Assets/GtaFile.h" // ReadGtaHeader()/ReadGtaFile()
 #include "../../Assets/MotionFile.h" // DecodeMotionDataFromBytes()
+#include "../../Assets/MeshNormalRecomputePersistence.h" // RecomputeAndSaveMeshNormalsToGtaFile()
 #include "../../Assets/PhysicsData.h" // RigidBody, Joint, RigidBodyShape, RigidBodyMotionType, JointType
 #include "../../ECS/Components/MeshAssetSource.h"
 #include "../../Renderer/Renderer.h"
@@ -969,6 +970,47 @@ void BuildGtaMeshMetadata(
     ImGui::Text("On-disk Size (.gta): %s", FormatBytes(fileSizeBytes).c_str());
 }
 
+// task_manager/stl-parser-1, PHASE3 - the "Recompute Normals from Geometry"
+// button + its own persistent status line + explanatory disabled text,
+// factored into ONE shared helper (rather than duplicated inline) because
+// BuildAssetInspector() below has TWO separate call sites that each render
+// mesh metadata for the same isGtaMesh && gtaHeader.has_value() condition -
+// one when the live mesh preview render succeeds, one in the fallback
+// branch reached when it fails (e.g. a zero-vertex/corrupt mesh) - and this
+// button must be reachable from BOTH, not just the first, since a mesh
+// whose live preview fails to render is arguably exactly the kind of asset
+// a user is most likely to want to fix via this very button. A single
+// static pair of "last attempt" locals shared by both call sites is
+// intentional and correct: only one of the two branches ever actually
+// executes for a given selection/frame, so there is never any ambiguity
+// about which one the button's own status line refers to.
+void BuildRecomputeNormalsFromGeometryButton(const std::string& absolutePath, MeshInstantiationSystem& meshInstantiationSystem)
+{
+    static bool s_lastNormalRecomputeSucceeded = false;
+    static std::string s_lastNormalRecomputeError;
+
+    if (ImGui::Button("Recompute Normals from Geometry")) {
+        std::string errorMessage;
+        s_lastNormalRecomputeSucceeded = RecomputeAndSaveMeshNormalsToGtaFile(absolutePath, &errorMessage);
+        s_lastNormalRecomputeError = errorMessage;
+        if (s_lastNormalRecomputeSucceeded) {
+            meshInstantiationSystem.InvalidateCachedMeshAsset(absolutePath);
+        }
+    }
+    if (!s_lastNormalRecomputeError.empty() || s_lastNormalRecomputeSucceeded) {
+        if (s_lastNormalRecomputeSucceeded) {
+            ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1.0f), "Recomputed normals and saved to asset.");
+        } else {
+            ImGui::TextColored(ImVec4(0.95f, 0.4f, 0.4f, 1.0f), "Recompute failed: %s", s_lastNormalRecomputeError.c_str());
+        }
+    }
+    ImGui::TextDisabled(
+        "Overwrites every stored normal with a fresh, area-weighted average computed directly from this "
+        "mesh's own vertex positions - useful when a source file's original normals are missing/incorrect "
+        "(common for some exported STL files). Only affects instances spawned AFTER this; any copies of this "
+        "model already placed in the current Scene keep their current normals until deleted and re-spawned.");
+}
+
 // The Animation-asset equivalent of BuildGtaTextureMetadata()/
 // BuildGtaMeshMetadata() above - shown when the selected *.gta wraps
 // AssetType::Animation (the result of importing a .vmd motion file - see
@@ -1217,8 +1259,8 @@ void BuildMeshViewer(const AssetMetadata& metadata, const AssetPreviewMesh::Prev
     ImGui::EndChild();
 }
 
-void BuildAssetInspector(
-    EditorContext& ctx, Renderer& renderer, AssetPreviewTexture& assetPreview, AssetPreviewMesh& assetPreviewMesh)
+void BuildAssetInspector(EditorContext& ctx, Renderer& renderer, AssetPreviewTexture& assetPreview,
+    AssetPreviewMesh& assetPreviewMesh, MeshInstantiationSystem& meshInstantiationSystem)
 {
     const std::string& absolutePath = ctx.selection.SelectedAssetAbsolutePath();
     const std::string& relativePath = ctx.selection.SelectedAssetRelativePath();
@@ -1319,6 +1361,7 @@ void BuildAssetInspector(
         } else if (isGtaMesh && gtaHeader.has_value()) {
             BuildGtaMeshMetadata(*gtaHeader, metadata.sizeBytes, meshPreview);
             ImGui::Separator();
+            BuildRecomputeNormalsFromGeometryButton(absolutePath, meshInstantiationSystem);
         }
         BuildPlainFileMetadata(metadata, absolutePath);
         ImGui::EndChild();
@@ -1367,6 +1410,7 @@ void BuildAssetInspector(
     } else if (isGtaMesh && gtaHeader.has_value()) {
         BuildGtaMeshMetadata(*gtaHeader, metadata.sizeBytes, std::nullopt);
         ImGui::Separator();
+        BuildRecomputeNormalsFromGeometryButton(absolutePath, meshInstantiationSystem);
     } else if (isGtaAnimation && gtaHeader.has_value()) {
         BuildGtaAnimationMetadata(*gtaHeader, metadata.sizeBytes, motionData);
         ImGui::Separator();
@@ -1390,7 +1434,7 @@ void BuildInspectorPanel(Registry& registry, EditorContext& ctx, PhysicsSystem& 
 
 #if GTE_ENABLE_PROJECT_PANEL
     if (ctx.selection.Kind() == InspectorSelectionKind::Asset && !ctx.selection.SelectedAssetAbsolutePath().empty()) {
-        BuildAssetInspector(ctx, renderer, assetPreview, assetPreviewMesh);
+        BuildAssetInspector(ctx, renderer, assetPreview, assetPreviewMesh, meshInstantiationSystem);
         ImGui::End();
         return;
     }
