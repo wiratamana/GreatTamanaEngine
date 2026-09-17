@@ -171,10 +171,20 @@ std::vector<rg::TextureHandle> AddFrameDebuggerReplayPasses(rg::RenderGraphBuild
 {
     std::vector<rg::TextureHandle> destHandles;
 #if GTE_ENABLE_EDITOR
-    if (objectCount == 0) {
+    // frame-debugger-8 campaign, PHASE2 - `includeSkyStep`/`totalStepCount`
+    // REPLACE the old `if (objectCount == 0) return;` early-out. A real
+    // scene with ZERO mesh entities (e.g. Camera + Directional Light only)
+    // still genuinely draws the sky every frame - it must still get
+    // exactly one real, selectable replay step, not zero (this is a real,
+    // confirmed, second fix this phase makes as a natural side effect of
+    // the redesign below - see PHASE0_MASTER_STRATEGY.md's own Definition
+    // of Done, "zero mesh entities" bullet).
+    const bool includeSkyStep = static_cast<bool>(recordSkyBackground);
+    const std::size_t totalStepCount = objectCount + (includeSkyStep ? 1 : 0);
+    if (totalStepCount == 0) {
         return destHandles;
     }
-    destHandles.reserve(objectCount);
+    destHandles.reserve(totalStepCount);
 
     // Same width/height/format as the real GameView target, read directly
     // off `gameTarget` (never hardcoded - see AGENTS.md's "Render Target
@@ -185,9 +195,9 @@ std::vector<rg::TextureHandle> AddFrameDebuggerReplayPasses(rg::RenderGraphBuild
     const VkFormat format = gameTarget.Format();
 
     std::vector<RenderTexture> destinations;
-    destinations.reserve(objectCount); // ESSENTIAL - every destHandle below imports a POINTER-STABLE
-                                        // Target() from this vector; it must never reallocate after this point.
-    for (std::size_t i = 0; i < objectCount; ++i) {
+    destinations.reserve(totalStepCount); // ESSENTIAL - every destHandle below imports a POINTER-STABLE
+                                           // Target() from this vector; it must never reallocate after this point.
+    for (std::size_t i = 0; i < totalStepCount; ++i) {
         // Step 3.3b - these debugName/depthDebugName stack buffers are a
         // COMPLETELY SEPARATE, unrelated concern from the pass NAME below
         // (ReplayStepPassName()) - safe ONLY because these RenderTextures
@@ -206,11 +216,27 @@ std::vector<rg::TextureHandle> AddFrameDebuggerReplayPasses(rg::RenderGraphBuild
             renderer.CreateRenderTexture(width, height, format, debugNameBuffer, depthDebugNameBuffer));
     }
 
-    for (std::size_t i = 0; i < objectCount; ++i) {
+    for (std::size_t i = 0; i < totalStepCount; ++i) {
         const char* passName = ReplayStepPassName(i); // Step 3.3b - NEVER a per-call temporary.
 
         const rg::TextureHandle destHandle =
             builder.ImportTexture(passName, destinations[i].Target(), VK_IMAGE_LAYOUT_UNDEFINED);
+
+        // frame-debugger-8 campaign, PHASE2 - THE fix. `isSkyStep` is true
+        // for EXACTLY ONE index: the extra, dedicated step this phase adds
+        // (only reachable when includeSkyStep is true, and only ever equal
+        // to `objectCount` - i.e. the very last index in [0, totalStepCount)).
+        // Every OTHER index (a real per-object step, i in [0, objectCount))
+        // NEVER draws sky, no matter what - this is the actual bug fix:
+        // the OLD code's own "if (i + 1 == objectCount && recordSkyBackground)"
+        // branch inside the per-object loop is GONE, not just moved.
+        const bool isSkyStep = includeSkyStep && (i == objectCount);
+        // Real per-object steps redraw objects [0..i] (maxDrawCount = i+1,
+        // UNCHANGED from before). The one dedicated sky step redraws EVERY
+        // real object (maxDrawCount = objectCount) and then, ADDITIONALLY,
+        // the sky - matching the real "GameView" pass's own true order
+        // (every entity, then sky, see AddGameViewPass()).
+        const std::size_t maxDrawCount = isSkyStep ? objectCount : (i + 1);
 
         builder.AddPass(passName, rg::ViewScope::GameView,
             [destHandle, gpuSkinningOutputBuffers](rg::RenderGraphBuilder::PassBuilder& pass) {
@@ -218,29 +244,24 @@ std::vector<rg::TextureHandle> AddFrameDebuggerReplayPasses(rg::RenderGraphBuild
                 pass.WriteDepthStencilAttachment(destHandle, kGameClearDepth);
                 DeclareGpuSkinningReads(pass, gpuSkinningOutputBuffers);
             },
-            [&game, &renderer, aspectWidthOverHeight, i, objectCount, recordSkyBackground](rg::PassContext& ctx) {
+            [&game, &renderer, aspectWidthOverHeight, maxDrawCount, isSkyStep, recordSkyBackground](
+                rg::PassContext& ctx) {
                 renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-                // CORRECTNESS-CRITICAL, easy to get wrong by copy-pasting
-                // AddGameViewPass()'s own call: `frameDebuggerCapture` here
-                // is ALWAYS nullptr, NEVER the real, armed capture context.
-                // FrameDebuggerCaptureContext::RecordDraw()/RecordEntityDraw()
-                // are NOT idempotent/deduplicated by draw identity - if a
-                // real capture pointer were passed into these N replay
-                // passes' own game.Render() calls, capture.DrawRecords()
-                // would balloon to O(N^2) duplicated entries, silently
-                // corrupting the exact data Phase 4's per-entity tree AND
-                // this phase's own Definition of Done both depend on.
-                game.Render(renderer, aspectWidthOverHeight, nullptr, /*frameDebuggerCapture=*/nullptr,
-                    /*maxDrawCount=*/ i + 1);
+                // frameDebuggerCapture is ALWAYS nullptr here, NEVER the
+                // real, armed capture context - see this function's own
+                // pre-existing correctness-critical comment (unchanged
+                // reasoning, still applies): RecordDraw()/RecordEntityDraw()
+                // are not idempotent/deduplicated by draw identity, so
+                // feeding a real capture pointer into these N+1 replay
+                // passes' own game.Render() calls would silently balloon
+                // capture.DrawRecords() into O(N^2) duplicated entries.
+                game.Render(renderer, aspectWidthOverHeight, nullptr, /*frameDebuggerCapture=*/nullptr, maxDrawCount);
                 renderer.EndGraphPassRecording();
-                // Only the VERY LAST replay pass also draws the sky
-                // background, exactly mirroring AddGameViewPass()'s own
-                // real ordering (sky is drawn AFTER every object, once,
-                // not per-object) - this makes replay step N-1's own image
-                // pixel-identical to the existing entry.preview snapshot,
-                // a good internal cross-check confirmed during this
-                // phase's own manual verification.
-                if (i + 1 == objectCount && recordSkyBackground) {
+                // Sky is drawn ON EXACTLY ONE dedicated step now - the
+                // frame-debugger-8 campaign's own fix for the "last
+                // object's own preview silently already included sky"
+                // bug (see PHASE0_MASTER_STRATEGY.md Step 2, point 5).
+                if (isSkyStep && recordSkyBackground) {
                     recordSkyBackground(ctx.cmd);
                 }
             });

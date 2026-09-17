@@ -221,6 +221,14 @@ public:
     // its destination later this SAME Execute() call - so a caller must
     // never read these textures back before this whole Execute() call has
     // returned.
+    // frame-debugger-8 campaign, PHASE2 - as of this campaign, N may be ONE
+    // GREATER than the real object count: AddFrameDebuggerReplayPasses()
+    // (src/Application/RenderPasses.cpp) now appends exactly one additional,
+    // dedicated "sky step" destination (index == the real object count)
+    // whenever a Sky Background draw callback exists this frame, holding
+    // "every real object AND the sky" rather than one more per-object state
+    // - see that function's own doc comment in RenderPasses.h for the full
+    // "entities first, sky last" ordering contract.
     //
     // IMPORTANT ordering requirement for TriggerCapture()/CaptureFrame()
     // (Phase 4's own job to act on) - this vector must be read/moved OUT

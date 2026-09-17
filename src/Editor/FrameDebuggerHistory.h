@@ -101,6 +101,12 @@ struct FrameDebuggerHistoryEntry {
     // Indexed by a selected event node's own
     // `FrameDebuggerEventDetails::stepPreviewIndex` (only meaningful when
     // `stepPreviewKind == PerObjectStep` - see FrameDebuggerData.h).
+    // frame-debugger-8 campaign, PHASE2 - as of this campaign, this vector
+    // may hold exactly ONE MORE entry than the real object count: the last
+    // entry is a dedicated "sky step" image (every real object AND the sky)
+    // whenever a Sky Background draw callback existed for this capture -
+    // see FrameDebuggerCapture.h's own SetReplayStepPreviews() doc comment
+    // for the full contract this vector is moved in from.
     std::vector<RenderTexture> perObjectStepPreviews;
 };
 
