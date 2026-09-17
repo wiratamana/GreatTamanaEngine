@@ -238,16 +238,20 @@ Scattering" section for the full feature writeup.
   field, see the "Scene (de)serialization" bullet immediately below) — see
   `task_manager/atmosphere-scattering-2/` for the campaign that added them.**
 
-- **Scene (de)serialization for `DirectionalLight`/`AtmosphereSettings`.**
-  `Scene/SceneTextFormat.h`'s existing format only round-trips
-  `PrimitiveSource`/`MeshAssetSource`-tagged root entities - a `DirectionalLight`
-  "Sun" entity created via the Editor's "Hierarchy" (or a tuned
-  `AtmosphereSettings` value from the "Atmosphere" panel) does not survive a
-  Save/Load cycle today, exactly like a `Camera` entity doesn't either. Would
-  need a new `SceneObjectKind` (see `AGENTS.md`'s "Scene Serialization"
-  section for the exact pattern a new kind must follow) plus a way to
-  serialize `AtmosphereSettings` itself (currently owned by `Application`,
-  not any ECS entity/component at all).
+- **~~Scene (de)serialization for `DirectionalLight`~~ - DONE, `AtmosphereSettings` itself still NOT covered.**
+  The `scene-serialization-2` campaign (`task_manager/scene-serialization-2/`,
+  see `AGENTS.md`'s "Scene Serialization" section) replaced the old root-only/
+  tagged-only system with a genuine field-reflection layer that walks EVERY
+  entity in the Registry - a `DirectionalLight` "Sun" entity created via the
+  Editor's "Hierarchy" now DOES survive a Save/Load cycle (`color`/
+  `illuminanceLux`/`active`, plus its Transform), exactly like a `Camera`
+  entity's `nearZ`/`farZ`/`fovYDegrees` now do too. Still NOT done: a tuned
+  `AtmosphereSettings` value from the "Atmosphere" panel does NOT survive a
+  Save/Load cycle - `AtmosphereSettings` is owned by `Application`, not any
+  ECS entity/component at all, so it falls outside even the new, widened
+  per-entity reflection system; serializing it would need its own, separate
+  mechanism (e.g. a small dedicated top-level JSON section in the `*.gtscene`
+  file, sibling to `"entities"`) that has not been designed yet.
 - **Volumetric clouds, god-rays/light-shafts.** This campaign's own Locked
   Design Decisions/Step 4 explicitly scoped these out from the start - no
   code for either exists anywhere in the engine.
@@ -472,27 +476,46 @@ these have any code written yet; listed here in roughly the order they'd
 unblock the most follow-on work:
 
 - **~~Scene serialization (save/load a scene to/from a file)~~ - DONE, first
-  slice.** `Game.cpp`'s old hardcoded demo entities are gone (see
-  `README.md`, "Status"), replaced by a real Save/Load loop: a new,
-  always-compiled `src/Scene/` module (`SceneDocument.h`,
-  `SceneTextFormat.h/.cpp`, `SceneBuilder.h/.cpp` - fully Tier-1-tested, no
-  ECS/Renderer/filesystem dependency) implements a small, hand-rolled,
-  line-oriented TEXT format (`*.gtscene` - deliberately not JSON, no JSON
-  library is vendored) round-tripping the two kinds of top-level object the
-  Editor can create: a built-in primitive (`Game::CreatePrimitiveEntity()`,
-  by its `PrimitiveType` - a new `PrimitiveSource` component) and an
-  imported-asset instance (`Game::CreateMeshEntityFromGtaFile()`, by its
-  stable `AssetDatabase` `Guid`, never a raw path). `File > Save Scene`
-  (Ctrl+S) / `File > Open Scene` (Ctrl+O) (`src/Editor/SceneIO.h/.cpp`,
-  `DockLayout.cpp`) read/write one hardcoded path,
-  `<Project folder>/TestScene.gtscene` - no file picker/"Save As" yet. Only
-  each object's ROOT entity's Transform/Name round-trips (a multi-part
-  asset's own child "submesh part" entities are always freshly re-derived
-  from the asset on Load, never individually serialized); Camera/physics/
-  animation-runtime state, undo/redo, and multi-scene are all explicitly
-  NOT yet done. See
-  `task_manager/scene-serialization-1/PHASE0_MASTER_STRATEGY.md` for the
-  full six-phase writeup.
+  slice, then made genuinely generic.** `Game.cpp`'s old hardcoded demo
+  entities are gone (see `README.md`, "Status"), replaced by a real Save/Load
+  loop. The original `scene-serialization-1` slice implemented a small,
+  hand-rolled, line-oriented TEXT format (`*.gtscene`) round-tripping only
+  two kinds of top-level object (a `PrimitiveSource` root, an imported-asset
+  `MeshAssetSource` root), ROOT-entity Transform/Name only, no Camera/Light/
+  plain-node support at all. **The `scene-serialization-2` campaign (six
+  phases, `task_manager/scene-serialization-2/PHASE0_MASTER_STRATEGY.md`)
+  replaced this wholesale**: a new, always-compiled `src/ECS/Reflection/`
+  field-reflection layer (`ComponentTypeRegistry`, `GTE_REFLECT_FIELD`/
+  `GTE_REFLECT_ENUM_FIELD`) lets a component register its own serializable
+  fields once, in one place (`BuiltinComponentReflection.cpp`); the on-disk
+  format is now JSON (`Scene/SceneJsonFormat.h/.cpp`, replacing the deleted
+  `SceneTextFormat.h/.cpp`); `Scene/SceneBuilder.cpp`'s
+  `BuildSceneDocumentFromRegistry()` now walks EVERY entity in the Registry
+  (full parent/child hierarchy, not just tagged roots) - a plain empty node,
+  a `Camera` (now including `nearZ`/`farZ`/`fovYDegrees`), or a
+  `DirectionalLight` "Sun" entity all round-trip now too; and
+  `Editor/SceneIO.cpp`'s `LoadScene()` reconciles a multi-part imported
+  mesh's own child "part" entities by name, so a hand-edited (including
+  unnamed) child Transform now survives a round trip too - superseding
+  `scene-serialization-1`'s old "only a root's Transform round-trips"
+  limitation entirely. Two new HTTP endpoints, `POST /save_scene`/
+  `POST /load_scene`, expose the whole system over the embedded HTTP server.
+  `File > Save Scene` (Ctrl+S) / `File > Open Scene` (Ctrl+O)
+  (`src/Editor/SceneIO.h/.cpp`, `DockLayout.cpp`) still read/write one
+  hardcoded path, `<Project folder>/TestScene.gtscene` - no file picker/
+  "Save As" yet. See `docs/conventions/scene-serialization.md` for the full,
+  current convention, and `task_manager/scene-serialization-2/`'s own six
+  `PHASEn_COMPLETION_REPORT.md` files for the full campaign writeup. Still
+  explicitly NOT done:
+  - **`SkeletalAnimator` is not yet reflectable/serializable** - restoring it
+    correctly needs re-running `Game::PlayAnimationOnEntity()`'s own
+    cache-registration side effects at Load time, not just a field copy - see
+    `task_manager/scene-serialization-2/PHASE2_BUILTIN_COMPONENT_REFLECTION_REGISTRATION.md`'s
+    Step 3.3 for the full reasoning.
+  - Physics/animation-RUNTIME state (`DynamicChainRig`/`ResolvedAnimationPose`)
+    is deliberately never serialized - see `docs/conventions/scene-serialization.md`'s
+    "What is deliberately never reflected" section.
+  - Undo/redo and multi-scene support are still not implemented at all.
 - **A minimal asset pipeline: real mesh loading + a real, shader-bindable
   texture from a *.gta.** The IMPORT half of both texture AND mesh handling
   now exists - dropping a PNG/JPG into "Project" decodes+re-encodes it as

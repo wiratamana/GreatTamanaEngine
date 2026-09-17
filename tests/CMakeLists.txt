@@ -727,6 +727,15 @@
 #                                            reconstructed root all come out
 #                                            exactly right. No ECS/Renderer/
 #                                            filesystem I/O involved at all.
+#                                            PHASE6 (task_manager/
+#                                            scene-serialization-2/PHASE6_TESTS_DOCS_CLEANUP_AND_FULL_REGRESSION.md,
+#                                            section 3.4) extended this same
+#                                            test with a THIRD, independent
+#                                            PrimitiveSource root sibling in
+#                                            the SAME document, proving an
+#                                            unrelated root resolves
+#                                            correctly side-by-side with the
+#                                            Camera+child hierarchy.
 #   Profiling/FrameProfilerTests.cpp        - FrameProfiler's BeginFrame()/
 #                                            EndFrame()/RecordCpuScope()/
 #                                            SetGpuPassSample()/

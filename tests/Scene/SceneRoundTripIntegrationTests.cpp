@@ -16,12 +16,25 @@
 // Scene/SceneBuilder.h + Scene/SceneJsonFormat.h + ECS/Reflection - a real,
 // automated stand-in for the phase's own required manual check, and a
 // permanent regression guard for the whole round trip composing correctly.
+//
+// task_manager/scene-serialization-2/PHASE6_TESTS_DOCS_CLEANUP_AND_FULL_REGRESSION.md,
+// section 3.4 - extended with a THIRD, independent root - a PrimitiveSource -
+// alongside the original Camera+child pair, so this test also proves a
+// second, unrelated root resolves correctly side-by-side with a parented
+// hierarchy in the SAME document, end to end through the real
+// BuildSceneDocumentFromRegistry() -> SerializeSceneDocument() ->
+// DeserializeSceneDocument() -> reconstruction pipeline (not just the
+// reflection primitives in isolation - Phase 1/2's own tests already cover
+// those; this test's job is to catch an integration mistake between
+// SceneBuilder.cpp and the registry that neither phase's own isolated tests
+// could).
 
 #include "Scene/SceneBuilder.h"
 #include "Scene/SceneJsonFormat.h"
 
 #include "ECS/Components/Camera.h"
 #include "ECS/Components/Name.h"
+#include "ECS/Components/PrimitiveSource.h"
 #include "ECS/Components/Transform.h"
 #include "ECS/Reflection/ComponentTypeRegistry.h"
 #include "ECS/TransformHierarchy.h"
@@ -34,7 +47,8 @@ namespace {
 TEST(SceneRoundTripIntegrationTest, CameraWithNonDefaultNearFarPlusChildTransformNameRoundTripsExactly)
 {
     // --- Build the original scene: a Camera root (non-default nearZ/farZ)
-    // with a plain Transform+Name child parented under it. ---
+    // with a plain Transform+Name child parented under it, PLUS a completely
+    // independent PrimitiveSource root sibling. ---
     Registry sourceRegistry;
 
     const Entity cameraEntity = sourceRegistry.CreateEntity();
@@ -52,10 +66,16 @@ TEST(SceneRoundTripIntegrationTest, CameraWithNonDefaultNearFarPlusChildTransfor
     childTransform.position = Vec3(1.0f, 2.0f, 3.0f);
     sourceRegistry.AddComponent<Name>(childEntity).value = "ChildNode";
 
+    const Entity primitiveEntity = sourceRegistry.CreateEntity();
+    Transform& primitiveTransform = sourceRegistry.AddComponent<Transform>(primitiveEntity);
+    primitiveTransform.position = Vec3(-4.0f, 0.5f, 8.0f);
+    sourceRegistry.AddComponent<PrimitiveSource>(primitiveEntity).type = PrimitiveType::Capsule;
+    sourceRegistry.AddComponent<Name>(primitiveEntity).value = "MyCapsule";
+
     // --- "Save": BuildSceneDocumentFromRegistry() + SerializeSceneDocument() ---
     AssetDatabase emptyAssetDatabase; // Never refreshed - no *.gta files needed for this check.
     const SceneDocument document = BuildSceneDocumentFromRegistry(sourceRegistry, emptyAssetDatabase);
-    ASSERT_EQ(document.entities.size(), 2u);
+    ASSERT_EQ(document.entities.size(), 3u);
 
     const std::string text = SerializeSceneDocument(document);
 
@@ -64,7 +84,7 @@ TEST(SceneRoundTripIntegrationTest, CameraWithNonDefaultNearFarPlusChildTransfor
     // Editor/SceneIO.cpp's LoadScene() uses against a live Registry. ---
     const std::optional<SceneDocument> parsedDocument = DeserializeSceneDocument(text);
     ASSERT_TRUE(parsedDocument.has_value());
-    ASSERT_EQ(parsedDocument->entities.size(), 2u);
+    ASSERT_EQ(parsedDocument->entities.size(), 3u);
 
     Registry destinationRegistry;
     std::vector<Entity> resultEntities(parsedDocument->entities.size(), kInvalidEntity);
@@ -108,22 +128,26 @@ TEST(SceneRoundTripIntegrationTest, CameraWithNonDefaultNearFarPlusChildTransfor
         SetSiblingIndex(destinationRegistry, resultEntities[i], parsedDocument->entities[i].siblingIndex);
     }
 
-    // --- Verify: find the reconstructed Camera root and its child by Name,
-    // rather than assuming array order (BuildSceneDocumentFromRegistry()
-    // never documented one). ---
+    // --- Verify: find the reconstructed Camera root, its child, and the
+    // independent PrimitiveSource root by Name, rather than assuming array
+    // order (BuildSceneDocumentFromRegistry() never documented one). ---
     Entity reconstructedCamera = kInvalidEntity;
     Entity reconstructedChild = kInvalidEntity;
+    Entity reconstructedPrimitive = kInvalidEntity;
     for (const Entity entity : resultEntities) {
         if (const Name* name = destinationRegistry.TryGetComponent<Name>(entity); name != nullptr) {
             if (name->value == "MainCamera") {
                 reconstructedCamera = entity;
             } else if (name->value == "ChildNode") {
                 reconstructedChild = entity;
+            } else if (name->value == "MyCapsule") {
+                reconstructedPrimitive = entity;
             }
         }
     }
     ASSERT_NE(reconstructedCamera, kInvalidEntity);
     ASSERT_NE(reconstructedChild, kInvalidEntity);
+    ASSERT_NE(reconstructedPrimitive, kInvalidEntity);
 
     // Camera's own non-default nearZ/farZ/fovYDegrees round-tripped exactly.
     ASSERT_TRUE(destinationRegistry.HasComponent<Camera>(reconstructedCamera));
@@ -153,6 +177,17 @@ TEST(SceneRoundTripIntegrationTest, CameraWithNonDefaultNearFarPlusChildTransfor
     const std::vector<Entity> cameraChildren = GetChildren(destinationRegistry, reconstructedCamera);
     ASSERT_EQ(cameraChildren.size(), 1u);
     EXPECT_EQ(cameraChildren[0], reconstructedChild);
+
+    // The independent PrimitiveSource root resolved correctly too, entirely
+    // unaffected by the unrelated Camera+child hierarchy in the same
+    // document - its own type/Transform round-tripped exactly, and it is a
+    // genuine root (no parent) in the reconstructed registry.
+    ASSERT_TRUE(destinationRegistry.HasComponent<PrimitiveSource>(reconstructedPrimitive));
+    EXPECT_EQ(destinationRegistry.GetComponent<PrimitiveSource>(reconstructedPrimitive).type, PrimitiveType::Capsule);
+    ASSERT_TRUE(destinationRegistry.HasComponent<Transform>(reconstructedPrimitive));
+    EXPECT_TRUE(ApproximatelyEqual(
+        destinationRegistry.GetComponent<Transform>(reconstructedPrimitive).position, Vec3(-4.0f, 0.5f, 8.0f)));
+    EXPECT_EQ(destinationRegistry.GetComponent<Transform>(reconstructedPrimitive).parent, kInvalidEntity);
 }
 
 } // namespace

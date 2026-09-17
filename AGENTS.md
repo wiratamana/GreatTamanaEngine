@@ -230,9 +230,18 @@ Full convention: [docs/conventions/ecs.md](docs/conventions/ecs.md).
 ## Scene Serialization
 
 The `scene-serialization-1` campaign gave the engine its first real Save/Load
-loop - an always-compiled `src/Scene/` module (`SceneDocument.h`/
-`SceneTextFormat.h/.cpp`/`SceneBuilder.h/.cpp`) plus `src/Editor/SceneIO.h/.cpp`,
-wired into `File > Save Scene`/`File > Open Scene`.
+loop (root-only, `PrimitiveSource`/`MeshAssetSource`-only, a hand-rolled TEXT
+format). The `scene-serialization-2` campaign (six phases) replaced that
+wholesale with a genuinely generic system: a new, always-compiled
+`src/ECS/Reflection/` field-reflection layer (`ComponentTypeRegistry`,
+`GTE_REFLECT_FIELD`/`GTE_REFLECT_ENUM_FIELD`, `BuiltinComponentReflection.cpp`)
+a future component registers its own fields into ONCE - `src/Scene/`
+(`SceneDocument.h`, `SceneJsonFormat.h/.cpp` - JSON, replacing the deleted
+`SceneTextFormat.h/.cpp`, `SceneBuilder.h/.cpp`) now walks EVERY entity in the
+Registry (full parent/child hierarchy), not just tagged roots; plus
+`src/Editor/SceneIO.h/.cpp`'s recipe-spawn-reconciliation `LoadScene()`, wired
+into `File > Save Scene`/`File > Open Scene`, and two new HTTP endpoints,
+`POST /save_scene`/`POST /load_scene` (see the "Networking" section below).
 
 Full convention: [docs/conventions/scene-serialization.md](docs/conventions/scene-serialization.md).
 
