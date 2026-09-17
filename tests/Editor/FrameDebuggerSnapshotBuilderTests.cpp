@@ -401,6 +401,99 @@ TEST(FrameDebuggerSnapshotBuilderTest, PreAndPostGameViewGroupsAppearTogetherAsS
     EXPECT_EQ(snapshot.totalEventCount, 3);
 }
 
+// frame-debugger-6 campaign, PHASE2
+// (PHASE2_FRAME_DEBUGGER_VIEWSCOPE_FILTERED_DISCOVERY.md, Step 4) - the
+// actual regression proof for the real-world bug this whole campaign started
+// from (PHASE0_MASTER_STRATEGY.md Section 0): TWO real compute passes, ONE
+// literal shared name ("AtmosphereSkyViewLutPass"), one genuinely GameView-
+// scoped and one genuinely SceneView-scoped - only the GameView one may ever
+// appear in this Game-View-scoped tree.
+TEST(FrameDebuggerSnapshotBuilderTest, SceneViewScopedPreGameViewPassIsExcludedEvenWhenNameCollidesWithGameViewOne)
+{
+    rg::RenderGraphSnapshot graphSnapshot;
+
+    rg::RenderGraphPassSnapshot gameViewScoped = MakeComputePass("AtmosphereSkyViewLutPass");
+    gameViewScoped.viewScope = rg::ViewScope::GameView;
+    graphSnapshot.passesInExecutionOrder.push_back(gameViewScoped);
+
+    rg::RenderGraphPassSnapshot sceneViewScoped = MakeComputePass("AtmosphereSkyViewLutPass");
+    sceneViewScoped.viewScope = rg::ViewScope::SceneView;
+    graphSnapshot.passesInExecutionOrder.push_back(sceneViewScoped);
+
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+
+    const FrameDebuggerCaptureContext capture;
+    const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
+
+    ASSERT_EQ(snapshot.rootNodes.size(), 1u);
+    const FrameDebuggerEventNode& root = snapshot.rootNodes[0];
+    ASSERT_EQ(root.children.size(), 2u); // "Compute Dispatches (Pre-GameView)" group + "GameView" leaf.
+
+    const FrameDebuggerEventNode& preGroup = root.children[0];
+    EXPECT_EQ(preGroup.name, "Compute Dispatches (Pre-GameView)");
+    ASSERT_EQ(preGroup.children.size(), 1u); // NOT two - the SceneView-scoped duplicate must be gone.
+    EXPECT_EQ(preGroup.children[0].name, "AtmosphereSkyViewLutPass");
+    EXPECT_EQ(snapshot.totalEventCount, 2);
+}
+
+// Symmetric coverage for the POST-GameView group - models the real
+// "AtmosphereAerialPerspectiveCompositePass" duplicate scenario from
+// PHASE0_MASTER_STRATEGY.md Section 0.
+TEST(FrameDebuggerSnapshotBuilderTest, SceneViewScopedPostGameViewPassIsExcludedEvenWhenNameCollidesWithGameViewOne)
+{
+    rg::RenderGraphSnapshot graphSnapshot;
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+
+    rg::RenderGraphPassSnapshot gameViewScoped = MakeComputePass("AtmosphereAerialPerspectiveCompositePass");
+    gameViewScoped.viewScope = rg::ViewScope::GameView;
+    graphSnapshot.passesInExecutionOrder.push_back(gameViewScoped);
+
+    rg::RenderGraphPassSnapshot sceneViewScoped = MakeComputePass("AtmosphereAerialPerspectiveCompositePass");
+    sceneViewScoped.viewScope = rg::ViewScope::SceneView;
+    graphSnapshot.passesInExecutionOrder.push_back(sceneViewScoped);
+
+    const FrameDebuggerCaptureContext capture;
+    const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
+
+    ASSERT_EQ(snapshot.rootNodes.size(), 1u);
+    const FrameDebuggerEventNode& root = snapshot.rootNodes[0];
+    ASSERT_EQ(root.children.size(), 2u); // "GameView" leaf + "Compute Dispatches (Post-GameView)" group.
+
+    const FrameDebuggerEventNode& postGroup = root.children[1];
+    EXPECT_EQ(postGroup.name, "Compute Dispatches (Post-GameView)");
+    ASSERT_EQ(postGroup.children.size(), 1u); // NOT two - the SceneView-scoped duplicate must be gone.
+    EXPECT_EQ(postGroup.children[0].name, "AtmosphereAerialPerspectiveCompositePass");
+    EXPECT_EQ(snapshot.totalEventCount, 2);
+}
+
+// Guards against an over-eager fix that accidentally also excludes
+// ViewScope::Shared passes (e.g. the real Transmittance/Multi-Scattering LUT
+// passes, genuinely computed once per frame, not once per view) - these must
+// still appear exactly as before this campaign.
+TEST(FrameDebuggerSnapshotBuilderTest, SharedViewScopedPassStillAppearsNormally)
+{
+    rg::RenderGraphSnapshot graphSnapshot;
+
+    rg::RenderGraphPassSnapshot shared = MakeComputePass("AtmosphereTransmittanceLutPass");
+    shared.viewScope = rg::ViewScope::Shared; // Explicit, though this is also the default.
+    graphSnapshot.passesInExecutionOrder.push_back(shared);
+
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+
+    const FrameDebuggerCaptureContext capture;
+    const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
+
+    ASSERT_EQ(snapshot.rootNodes.size(), 1u);
+    const FrameDebuggerEventNode& root = snapshot.rootNodes[0];
+    ASSERT_EQ(root.children.size(), 2u);
+    const FrameDebuggerEventNode& preGroup = root.children[0];
+    EXPECT_EQ(preGroup.name, "Compute Dispatches (Pre-GameView)");
+    ASSERT_EQ(preGroup.children.size(), 1u);
+    EXPECT_EQ(preGroup.children[0].name, "AtmosphereTransmittanceLutPass");
+    EXPECT_EQ(snapshot.totalEventCount, 2);
+}
+
+
 // NEW - PHASE2's own Step 3.6 item (c): a culled compute pass must never
 // appear in either group, on EITHER side of "GameView" - a culled pass did
 // not really run this frame, so showing it as if it did would be dishonest.

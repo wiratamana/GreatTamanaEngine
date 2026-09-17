@@ -253,6 +253,23 @@ std::string FormatMatrixProperty(const FrameDebuggerMatrixProperty& matrix);
 // only added at all when it has at least one real surviving child this
 // frame (never an empty, misleading group).
 //
+// frame-debugger-6 campaign, PHASE2
+// (PHASE2_FRAME_DEBUGGER_VIEWSCOPE_FILTERED_DISCOVERY.md) - BOTH groups
+// above also now REQUIRE `pass.viewScope != rg::ViewScope::SceneView` (a
+// real, PHASE1-stamped, structural field - never a pass-name/resource-suffix
+// string comparison) in addition to `isComputePass`/`!isCulled`/execution-
+// order position. This engine genuinely runs a SEPARATE per-view copy of
+// several Atmosphere compute passes (Sky-View LUT, Aerial Perspective
+// Volume, Aerial Perspective Composite) - one for the Game View, one for the
+// Editor's own Scene View - under the exact same literal pass NAME, so
+// without this extra check this tree used to show duplicate,
+// indistinguishable leaves for the SAME name, and even leaked a genuinely
+// Scene-View-only debug tool ("ComputeBlurValidation") into a tree that is
+// documented as Game-View ONLY. `ViewScope::Shared` (e.g. the
+// Transmittance/Multi-Scattering LUT passes, genuinely computed once per
+// frame, not once per view) and `ViewScope::GameView` both still pass
+// through unchanged.
+//
 // `gameViewRenderTargetInfo` is DELIBERATELY a plain, already-resolved
 // parameter rather than this function reaching into a live RenderTexture/
 // Renderer itself - the phase document's own Step 3.1 point 4 asks for real

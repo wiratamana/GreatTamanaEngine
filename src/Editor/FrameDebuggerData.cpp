@@ -411,6 +411,24 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
     // Decision #8, v2 review finding) so a pass that genuinely ran BEFORE
     // "GameView" (e.g. GPU Skinning, every atmosphere LUT pass) is never
     // shown as if it ran after it.
+    //
+    // frame-debugger-6 campaign, PHASE2
+    // (PHASE2_FRAME_DEBUGGER_VIEWSCOPE_FILTERED_DISCOVERY.md) - BOTH loops
+    // below also now exclude any surviving compute pass whose PHASE1-stamped
+    // `rg::ViewScope` is `SceneView` - this engine genuinely runs a SEPARATE
+    // copy of several Atmosphere compute passes for the Editor's own
+    // Scene-View camera (writing to "..._SceneView"-suffixed resources) in
+    // addition to the Game-View ones, but both copies used to share the exact
+    // same literal pass NAME (e.g. "AtmosphereSkyViewLutPass"), so this tree
+    // used to show duplicate, indistinguishable leaves and even leak a
+    // genuinely Scene-View-only debug tool ("ComputeBlurValidation") into a
+    // tree that this feature's own permanent rule says is Game-View ONLY
+    // (see this campaign's own PHASE0_MASTER_STRATEGY.md Section 0 and Locked
+    // Design Decision #2). `Shared` (e.g.
+    // the Transmittance/Multi-Scattering LUT passes, genuinely computed once
+    // per frame, not once per view) and `GameView` both still pass through
+    // unchanged - this is a structural, one-line boolean filter, never a
+    // pass-name/resource-suffix string comparison.
     const int gameViewIndex = static_cast<int>(gameViewPass - graphSnapshot.passesInExecutionOrder.data());
 
     FrameDebuggerEventNode preGameViewGroup;
@@ -445,7 +463,17 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
     // increasing in true chronological order, exactly as documented.
     for (int i = 0; i < gameViewIndex; ++i) {
         const rg::RenderGraphPassSnapshot& pass = graphSnapshot.passesInExecutionOrder[static_cast<std::size_t>(i)];
-        if (!pass.isComputePass || pass.isCulled) {
+        // frame-debugger-6 campaign, PHASE2
+        // (PHASE2_FRAME_DEBUGGER_VIEWSCOPE_FILTERED_DISCOVERY.md, Step 3.1) -
+        // a pass whose PHASE1-stamped rg::ViewScope is SceneView is NEVER
+        // genuinely part of the Game View's own render/compute chain, even if
+        // it happens to survive this frame and sit before "GameView"'s own
+        // index - e.g. a Scene-View-only copy of an Atmosphere LUT pass that
+        // shares its literal pass NAME with the real Game-View instance (the
+        // exact real-world collision that motivated this whole campaign - see
+        // PHASE0_MASTER_STRATEGY.md Section 0). `Shared` and `GameView` both
+        // still pass through unchanged.
+        if (!pass.isComputePass || pass.isCulled || pass.viewScope == rg::ViewScope::SceneView) {
             continue;
         }
         preGameViewGroup.children.push_back(BuildComputeDispatchLeaf(pass, nextEventIndex++));
@@ -463,7 +491,11 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
 
     for (int i = gameViewIndex + 1; i < static_cast<int>(graphSnapshot.passesInExecutionOrder.size()); ++i) {
         const rg::RenderGraphPassSnapshot& pass = graphSnapshot.passesInExecutionOrder[static_cast<std::size_t>(i)];
-        if (!pass.isComputePass || pass.isCulled) {
+        // frame-debugger-6 campaign, PHASE2 - identical rule, symmetrically
+        // applied to the post-GameView half (see the pre-GameView loop's own
+        // comment above for the full rationale) - e.g. the real
+        // "AtmosphereAerialPerspectiveCompositePass" duplicate scenario.
+        if (!pass.isComputePass || pass.isCulled || pass.viewScope == rg::ViewScope::SceneView) {
             continue;
         }
         postGameViewGroup.children.push_back(BuildComputeDispatchLeaf(pass, nextEventIndex++));
