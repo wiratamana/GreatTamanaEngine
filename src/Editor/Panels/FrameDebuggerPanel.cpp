@@ -220,11 +220,11 @@ void FrameDebuggerPanel::TriggerCapture()
 // (frame-debugger-2's Locked Design Decision #3 + PHASE3's Step 3.2 call
 // site 1), now shared by BOTH BuildToolbarRow()'s own checkbox AND
 // SetEnabledFromCommand() (the new HTTP-automation entry point) - see this
-// method's own callers for why the false->true edge auto-engages Pause and
-// triggers the very first real capture, and why turning Enable back OFF
-// deliberately does NOT auto-resume (a user inspecting a paused frame
-// should not be silently un-paused just for closing/disabling this debug
-// window, whether that happened by hand or via GET /frame_debugger/enable).
+// method's own callers for why the false->true edge auto-engages Pause, and
+// why turning Enable back OFF deliberately does NOT auto-resume (a user
+// inspecting a paused frame should not be silently un-paused just for
+// closing/disabling this debug window, whether that happened by hand or via
+// GET /frame_debugger/enable).
 //
 // task_manager/frame-debugger-7 campaign, PHASE1
 // (PHASE1_REMOVE_HISTORY_AND_SINGLE_CAPTURE_LIFECYCLE.md) - the true->false
@@ -234,6 +234,27 @@ void FrameDebuggerPanel::TriggerCapture()
 // Step 1) - only the captured DATA disappears; m_enabled itself is already
 // set to `newEnabled` immediately above, exactly wherever the caller wanted
 // it.
+//
+// task_manager/frame-debugger-7 campaign, PHASE2
+// (PHASE2_DEFERRED_CAPTURE_TRIGGER.md) - the false->true edge NO LONGER
+// captures synchronously. This used to be Bug 1's real root cause: THIS
+// exact frame's own m_captureContext was armed (PrepareCaptureContextForThisFrame())
+// based on m_enabled as of the END of LAST frame - still false at that
+// point - and that arming call happens BEFORE Game::Render() runs, so this
+// frame's RenderSystem::Draw() calls never recorded any per-object
+// FrameDebuggerDrawRecords at all; a capture built moments later from that
+// same frame's data was therefore real (render graph/pass list intact) but
+// had zero per-entity draw records, so the "GameView" node's children
+// (terrain/smoke cube/...) were silently missing. The fix: this edge no
+// longer calls TriggerCapture() itself at all - it only sets
+// m_pendingCaptureAfterEnable = true (see that member's own doc comment,
+// FrameDebuggerPanel.h). The actual TriggerCapture() call is deferred to the
+// START of the very NEXT Build() call (consumed at the top of
+// BuildToolbarRow(), before the "Enable" checkbox itself is drawn) - by that
+// point m_enabled has already been true for that entire next frame, before
+// ITS OWN Game::Render() ran, so PrepareCaptureContextForThisFrame() armed
+// correctly and this deferred TriggerCapture() call sees real, complete
+// per-object data.
 void FrameDebuggerPanel::ApplyEnabledEdge(EditorContext& ctx, bool newEnabled)
 {
     const bool wasEnabled = m_enabled;
@@ -241,18 +262,10 @@ void FrameDebuggerPanel::ApplyEnabledEdge(EditorContext& ctx, bool newEnabled)
     if (m_enabled && !wasEnabled) {
         ctx.playbackPaused = true;
 
-        // NOTE: this exact frame's own m_captureContext was armed based on
-        // m_enabled as of the END of LAST frame (still false) - see
-        // PrepareCaptureContextForThisFrame(), called earlier THIS frame,
-        // before Game::Render() ever ran - so this particular capture's
-        // own shader/texture/matrix facts may be empty (a real, honest
-        // "GameView" leaf with real draw-stats/blend-Z-stencil info, just
-        // no per-draw facts yet); real per-draw facts start flowing from
-        // the NEXT captured frame onward, once arming has caught up. This
-        // is the same one-frame lag every other Editor<->engine feedback
-        // loop in this codebase already accepts (see e.g.
-        // IEditorLayer::IsPlaybackPaused()'s own doc comment).
-        TriggerCapture();
+        // PHASE2 (frame-debugger-7 campaign) - defer the real capture to
+        // the next Build() call instead of calling TriggerCapture()
+        // synchronously here - see this method's own doc comment above.
+        m_pendingCaptureAfterEnable = true;
     } else if (!m_enabled && wasEnabled) {
         // NEW (frame-debugger-7 campaign, PHASE1) - "clear on Disable".
         m_currentCapture.Clear();
@@ -261,6 +274,23 @@ void FrameDebuggerPanel::ApplyEnabledEdge(EditorContext& ctx, bool newEnabled)
 
 void FrameDebuggerPanel::BuildToolbarRow(EditorContext& ctx)
 {
+    // task_manager/frame-debugger-7 campaign, PHASE2
+    // (PHASE2_DEFERRED_CAPTURE_TRIGGER.md, Step 3.3) - consume the deferred
+    // Enable-edge capture trigger FIRST, before anything else in this
+    // function (including drawing the "Enable" checkbox itself) runs. By
+    // the time THIS Build()/BuildToolbarRow() call is running, this exact
+    // frame's own Game::Render()/RenderSystem::Draw() calls have ALREADY
+    // executed (with the capture context correctly armed, since m_enabled
+    // has been true for this entire frame - see ApplyEnabledEdge()'s own
+    // doc comment) - so it is now safe and correct to call TriggerCapture()
+    // right here, which is exactly what makes the tree the user sees THIS
+    // frame already show real, complete per-object data instead of the
+    // stale/empty capture Bug 1 used to produce.
+    if (m_pendingCaptureAfterEnable) {
+        m_pendingCaptureAfterEnable = false;
+        TriggerCapture();
+    }
+
     bool enabledValue = m_enabled;
     ImGui::Checkbox("Enable", &enabledValue);
     if (enabledValue != m_enabled) {
@@ -390,7 +420,13 @@ void FrameDebuggerPanel::BuildEventTreePane(const FrameDebuggerSnapshot& snapsho
         // Real, reachable state whenever nothing has ever been captured yet
         // (e.g. the window was just opened and "Enable"/"Capture" hasn't run
         // this session) - see PHASE0_MASTER_STRATEGY.md's Locked Design
-        // Decision #2: zero fake/mock rows, ever.
+        // Decision #2: zero fake/mock rows, ever. task_manager/
+        // frame-debugger-7 campaign, PHASE2 (PHASE2_DEFERRED_CAPTURE_TRIGGER.md,
+        // Step 3.6) - this is also the exact fallback shown during the one
+        // real frame between the Enable checkbox's false->true edge and its
+        // deferred capture landing (m_pendingCaptureAfterEnable == true,
+        // m_currentCapture.CurrentEntry() still nullptr) - an honest "not
+        // captured YET" state, never a wrong/incomplete tree.
         ImGui::TextDisabled("No frame captured yet.");
         return;
     }

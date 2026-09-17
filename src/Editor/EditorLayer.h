@@ -493,10 +493,14 @@ public:
     virtual void FrameDebuggerOpenWindow() = 0;
 
     // Mirrors the "Enable" checkbox's own false->true/true->false edges
-    // exactly, including the false->true edge's "auto-engage Pause +
-    // trigger the very first real capture" side effect (see
-    // Panels/FrameDebuggerPanel.cpp's own BuildToolbarRow()/
-    // ApplyEnabledEdge()). A no-op for NullEditorLayer.
+    // exactly, including the false->true edge's "auto-engage Pause" side
+    // effect. task_manager/frame-debugger-7 campaign, PHASE2
+    // (PHASE2_DEFERRED_CAPTURE_TRIGGER.md) - the false->true edge no longer
+    // triggers a real capture synchronously here; it only arms a deferred
+    // one-shot flag consumed at the START of the very next Build() call
+    // (fixes Bug 1 - see Panels/FrameDebuggerPanel.cpp's own
+    // BuildToolbarRow()/ApplyEnabledEdge() doc comments for the full "why").
+    // A no-op for NullEditorLayer.
     virtual void FrameDebuggerSetEnabled(bool enabled) = 0;
 
     // Forces PHASE3's TriggerCapture() this frame - returns false (a safe

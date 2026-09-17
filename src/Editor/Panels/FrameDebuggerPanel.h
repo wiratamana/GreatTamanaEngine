@@ -185,8 +185,8 @@ private:
     // (BuildToolbarRow()) and SetEnabledFromCommand() above, so hand-driven
     // UI and HTTP automation can never silently diverge in behavior. See
     // BuildToolbarRow()'s own original comment (now here) for why the
-    // false->true edge auto-engages Pause and triggers the first capture,
-    // and why turning Enable back OFF deliberately does NOT auto-resume.
+    // false->true edge auto-engages Pause, and why turning Enable back OFF
+    // deliberately does NOT auto-resume.
     //
     // task_manager/frame-debugger-7 campaign, PHASE1 - the true->false edge
     // (Enable unticked) now ALSO calls m_currentCapture.Clear() (see this
@@ -194,6 +194,12 @@ private:
     // campaign's Locked Design Decision (PHASE0_MASTER_STRATEGY.md, Step 1).
     // The checkbox's own value itself is never forced back by this - only
     // the captured DATA disappears.
+    //
+    // task_manager/frame-debugger-7 campaign, PHASE2
+    // (PHASE2_DEFERRED_CAPTURE_TRIGGER.md) - the false->true edge no longer
+    // captures synchronously; it only sets m_pendingCaptureAfterEnable (see
+    // that member's own doc comment) - see the .cpp body's own doc comment
+    // for the full "why" (fixes Bug 1, the missing-objects first capture).
     void ApplyEnabledEdge(EditorContext& ctx, bool newEnabled);
 
     // PHASE4 - (re)creates m_previewDescriptor whenever the currently-
@@ -238,12 +244,19 @@ private:
     // (a freshly captured frame has nothing selected yet - matches
     // frame-debugger-2's own "freshly opened window starts with nothing
     // selected" convention). Called from exactly three places, all inside
-    // BuildToolbarRow(): the "Enable" checkbox's own false->true edge, the
-    // new explicit "Capture" button, and a pending Step-triggered capture
-    // (see NotifyStepConsumed() above) - see that method's own body for the
-    // one-frame-lag caveat the Enable-edge/Capture-button paths carry (this
-    // frame's own m_captureContext was armed based on m_enabled as of the
-    // END of last frame - see PrepareCaptureContextForThisFrame()). A safe
+    // BuildToolbarRow(): the deferred pending-capture-after-Enable
+    // consumption (see m_pendingCaptureAfterEnable's own doc comment -
+    // task_manager/frame-debugger-7 campaign, PHASE2,
+    // PHASE2_DEFERRED_CAPTURE_TRIGGER.md), the explicit "Capture" button,
+    // and a pending Step-triggered capture (see NotifyStepConsumed() above).
+    // As of PHASE2, EVERY call site is already guaranteed to run on a frame
+    // whose own m_captureContext was armed (via PrepareFrameDebuggerCapture
+    // Context(), called earlier this same frame, before Game::Render() ran)
+    // based on m_enabled/m_pendingCaptureAfterEnable as they stood at the
+    // START of this exact frame - so this method itself never needs to
+    // account for a stale/one-frame-lagged capture context anymore (that
+    // lag used to exist only for the Enable-edge path, and PHASE2 removed
+    // it by deferring the call instead of fixing this method). A safe
     // no-op if Build() was never called this session yet (defensive only -
     // unreachable in practice, since BuildToolbarRow() itself is only ever
     // called from inside Build()).
@@ -376,6 +389,21 @@ private:
     // NotifyStepConsumed() was called (read-and-cleared) - see that
     // method's own doc comment.
     bool m_stepCaptureRequested = false;
+
+    // task_manager/frame-debugger-7 campaign, PHASE2
+    // (PHASE2_DEFERRED_CAPTURE_TRIGGER.md) - true for exactly one Build()
+    // call after the Enable checkbox's false->true edge fires, consumed at
+    // the START of the NEXT Build() call (via BuildToolbarRow(), before the
+    // checkbox itself is drawn) whose own frame was actually rendered with
+    // the capture context armed - see ApplyEnabledEdge()'s own updated doc
+    // comment. Fixes Bug 1 (the very first captured frame after pressing
+    // "Enable" being missing objects) by deferring TriggerCapture() to that
+    // properly-armed frame instead of calling it synchronously on the click
+    // itself. NOTE: PHASE3 of this same campaign renames this bool to
+    // `m_pendingCaptureTrigger` and generalizes the mechanism to the Step/
+    // Capture-button triggers too - that is expected, not a gap this phase
+    // needs to anticipate.
+    bool m_pendingCaptureAfterEnable = false;
 
     // task_manager/frame-debugger-7 campaign, PHASE1
     // (PHASE1_REMOVE_HISTORY_AND_SINGLE_CAPTURE_LIFECYCLE.md) - tracks
