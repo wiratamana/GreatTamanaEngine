@@ -24,20 +24,31 @@ std::filesystem::path DefaultScenePath();
 // PLUS - as of task_manager/scene-serialization-2/PHASE4 - a resolved
 // asset_guid for every MeshAssetSource root whose gtaPath is currently a
 // tracked asset) and writes it, as JSON text (Scene/SceneJsonFormat.h's
-// SerializeSceneDocument()), to DefaultScenePath() - creating the Project
-// folder first if it doesn't exist yet (mirrors Assets/GtaFile.cpp's
+// SerializeSceneDocument()), to `scenePath` - creating its parent directory
+// first if it doesn't exist yet (mirrors Assets/GtaFile.cpp's
 // WriteGtaFile()'s own "creates any missing parent directories first"
 // convention). An AssetDatabase is scanned fresh, right here, against
 // ResolveProjectRootDirectory() - passed through to
 // BuildSceneDocumentFromRegistry() for its own asset_guid resolution step;
 // never persisted/cached across calls. Always OVERWRITES whatever was
-// previously at DefaultScenePath(), with no confirmation prompt (per this
+// previously at `scenePath`, with no confirmation prompt (per this
 // campaign's own "keep it simple" scope). Returns false (and leaves the
 // previous file, if any, untouched where avoidable) on any I/O failure -
 // never throws.
+//
+// task_manager/scene-serialization-2/PHASE5_NETWORK_SAVE_LOAD_SCENE_ENDPOINTS.md -
+// added as an explicit-path sibling to the original zero-argument
+// SaveScene(Game&) below, so POST /save_scene can target a caller-supplied
+// path. The AssetDatabase scan still always happens against
+// ResolveProjectRootDirectory() regardless of `scenePath` - only the actual
+// scene-file WRITE location is parameterized.
+bool SaveScene(Game& game, const std::filesystem::path& scenePath);
+
+// Unchanged behavior - still what Editor/DockLayout.cpp's Ctrl+S calls -
+// forwards to the explicit-path overload above with DefaultScenePath().
 bool SaveScene(Game& game);
 
-// Reads DefaultScenePath(), parses it (Scene/SceneJsonFormat.h's
+// Reads `scenePath`, parses it (Scene/SceneJsonFormat.h's
 // DeserializeSceneDocument()), and - only if that succeeds - replaces
 // `game`'s current scene content with a full, recipe-aware reconstruction
 // (task_manager/scene-serialization-2/
@@ -76,8 +87,17 @@ bool SaveScene(Game& game);
 // function returns rather than only on the next rendered frame.
 //
 // Returns false or DOES NOT modify `game`'s registry at all when
-// DefaultScenePath() doesn't exist or fails to parse (a malformed/missing
-// file never partially clears the current scene) - never throws.
+// `scenePath` doesn't exist or fails to parse (a malformed/missing file
+// never partially clears the current scene) - never throws.
+//
+// task_manager/scene-serialization-2/PHASE5_NETWORK_SAVE_LOAD_SCENE_ENDPOINTS.md -
+// added as an explicit-path sibling to the original zero-argument
+// LoadScene(Game&, Renderer&) below, so POST /load_scene can target a
+// caller-supplied path.
+bool LoadScene(Game& game, Renderer& renderer, const std::filesystem::path& scenePath);
+
+// Unchanged behavior - still what Editor/DockLayout.cpp's Ctrl+O calls -
+// forwards to the explicit-path overload above with DefaultScenePath().
 bool LoadScene(Game& game, Renderer& renderer);
 
 } // namespace gte

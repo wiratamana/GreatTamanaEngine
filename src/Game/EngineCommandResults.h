@@ -231,4 +231,28 @@ struct InstantiateMeshAssetOutcome {
     std::string resolvedName;
 };
 
+// task_manager/scene-serialization-2 campaign, PHASE5
+// (PHASE5_NETWORK_SAVE_LOAD_SCENE_ENDPOINTS.md) - outcomes of one
+// Editor/SceneIO.h SaveScene(Game&, path)/LoadScene(Game&, Renderer&, path)
+// call, wrapped for EngineCommandBridge/EngineCommandDispatch.cpp.
+// `editorAvailable == false` means this build was compiled with
+// GTE_ENABLE_EDITOR=OFF - SceneIO.h does not even exist in that
+// configuration, so `success` is always false and `errorMessage` explains
+// why, mirroring ImportExternalFileOutcome::projectAvailable's own
+// precedent (see NetworkRoutes.h/NetworkServer.cpp's existing
+// /import_asset route).
+struct SaveSceneOutcome {
+    bool success = false;
+    bool editorAvailable = true;
+    std::string errorMessage;
+    std::string resolvedPath; // the ABSOLUTE path actually written to, meaningful only when success == true.
+};
+
+struct LoadSceneOutcome {
+    bool success = false;
+    bool editorAvailable = true;
+    std::string errorMessage;
+    std::string resolvedPath; // the ABSOLUTE path actually read from, meaningful only when success == true.
+};
+
 } // namespace gte

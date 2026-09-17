@@ -1018,4 +1018,90 @@ TEST(BuildFrameDebuggerCommandResponseJsonTests, FailureShapeIncludesErrorAndSta
     EXPECT_EQ(parsed["state"]["enabled"], false);
 }
 
+// --- task_manager/scene-serialization-2 campaign, PHASE5
+// (PHASE5_NETWORK_SAVE_LOAD_SCENE_ENDPOINTS.md) -
+// POST /save_scene + POST /load_scene request parsing/response building.
+
+using gte::Network::BuildScenePathResponseJson;
+using gte::Network::ParseScenePathRequest;
+using gte::Network::ParsedScenePathRequest;
+
+TEST(ParseScenePathRequestTests, EmptyBodyIsValidWithEmptyPath)
+{
+    const ParsedScenePathRequest result = ParseScenePathRequest("");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_EQ(result.path, "");
+}
+
+TEST(ParseScenePathRequestTests, EmptyObjectIsValidWithEmptyPath)
+{
+    const ParsedScenePathRequest result = ParseScenePathRequest(R"({})");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_EQ(result.path, "");
+}
+
+TEST(ParseScenePathRequestTests, ExplicitPathStringIsParsed)
+{
+    const ParsedScenePathRequest result = ParseScenePathRequest(R"({"path":"C:\\some\\path.gtscene"})");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_EQ(result.path, "C:\\some\\path.gtscene");
+}
+
+TEST(ParseScenePathRequestTests, ExplicitEmptyStringPathIsValidAndTreatedAsDefault)
+{
+    const ParsedScenePathRequest result = ParseScenePathRequest(R"({"path":""})");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_EQ(result.path, "");
+}
+
+TEST(ParseScenePathRequestTests, NullPathIsValidAndTreatedAsDefault)
+{
+    const ParsedScenePathRequest result = ParseScenePathRequest(R"({"path":null})");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_EQ(result.path, "");
+}
+
+TEST(ParseScenePathRequestTests, NonStringPathIsRejected)
+{
+    const ParsedScenePathRequest result = ParseScenePathRequest(R"({"path":123})");
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.errorMessage, "path must be a string");
+}
+
+TEST(ParseScenePathRequestTests, MalformedJsonBodyIsTreatedAsNoPathNotAnError)
+{
+    // Deliberately DIFFERENT from every other ParseXxxRequest() in this
+    // file - see NetworkRoutes.h's own doc comment for
+    // ParsedScenePathRequest.
+    const ParsedScenePathRequest result = ParseScenePathRequest("{not valid json");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_EQ(result.path, "");
+}
+
+TEST(ParseScenePathRequestTests, NonObjectTopLevelIsTreatedAsNoPathNotAnError)
+{
+    const ParsedScenePathRequest arrayResult = ParseScenePathRequest("[]");
+    ASSERT_TRUE(arrayResult.valid) << arrayResult.errorMessage;
+    EXPECT_EQ(arrayResult.path, "");
+
+    const ParsedScenePathRequest numberResult = ParseScenePathRequest("42");
+    ASSERT_TRUE(numberResult.valid) << numberResult.errorMessage;
+    EXPECT_EQ(numberResult.path, "");
+}
+
+TEST(BuildScenePathResponseJsonTests, SuccessShape)
+{
+    const std::string body = BuildScenePathResponseJson(true, "", "C:\\Project\\TestScene.gtscene");
+    const nlohmann::json parsed = nlohmann::json::parse(body);
+    EXPECT_EQ(parsed["success"], true);
+    EXPECT_EQ(parsed["resolved_path"], "C:\\Project\\TestScene.gtscene");
+    EXPECT_FALSE(parsed.contains("error"));
+}
+
+TEST(BuildScenePathResponseJsonTests, FailureShapeMatchesGenericError)
+{
+    const std::string body = BuildScenePathResponseJson(false, "boom", "");
+    EXPECT_EQ(body, BuildGenericErrorResponseJson("boom"));
+}
+
 } // namespace

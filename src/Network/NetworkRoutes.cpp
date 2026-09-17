@@ -828,4 +828,53 @@ std::string BuildInstantiateAssetResponseJson(
     return body.dump();
 }
 
+// --- task_manager/scene-serialization-2 campaign, PHASE5
+// (PHASE5_NETWORK_SAVE_LOAD_SCENE_ENDPOINTS.md) - POST /save_scene and
+// POST /load_scene. See NetworkRoutes.h's own doc comment above
+// ParseScenePathRequest() for the exact, locked (and deliberately
+// DIFFERENT from every other parser in this file) validation rules
+// implemented below.
+
+ParsedScenePathRequest ParseScenePathRequest(const std::string& jsonBody)
+{
+    ParsedScenePathRequest result;
+
+    // DELIBERATE EXCEPTION to this file's usual "malformed/non-object JSON
+    // body is a validation failure" convention (see every other
+    // ParseXxxRequest() above) - see NetworkRoutes.h's own doc comment on
+    // ParsedScenePathRequest for why: both /save_scene and /load_scene have
+    // exactly ONE optional field, so "no body at all" (or a body that
+    // isn't even valid JSON) is treated identically to "path omitted"
+    // rather than rejected outright. Do NOT "fix" this to match the other
+    // parsers in this file.
+    const nlohmann::json parsed = ParseJsonNoThrow(jsonBody);
+    if (parsed.is_discarded() || !parsed.is_object()) {
+        result.valid = true;
+        return result;
+    }
+
+    if (parsed.contains("path") && !parsed["path"].is_null()) {
+        if (!parsed["path"].is_string()) {
+            result.errorMessage = "path must be a string";
+            return result;
+        }
+        result.path = parsed["path"].get<std::string>();
+    }
+
+    result.valid = true;
+    return result;
+}
+
+std::string BuildScenePathResponseJson(bool success, const std::string& errorMessage, const std::string& resolvedPath)
+{
+    if (!success) {
+        return BuildGenericErrorResponseJson(errorMessage);
+    }
+
+    nlohmann::json body;
+    body["success"] = true;
+    body["resolved_path"] = resolvedPath;
+    return body.dump();
+}
+
 } // namespace gte::Network

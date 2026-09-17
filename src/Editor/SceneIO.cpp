@@ -23,7 +23,7 @@ std::filesystem::path DefaultScenePath()
     return ResolveProjectRootDirectory() / "TestScene.gtscene";
 }
 
-bool SaveScene(Game& game)
+bool SaveScene(Game& game, const std::filesystem::path& scenePath)
 {
     const std::filesystem::path projectRoot = ResolveProjectRootDirectory();
 
@@ -32,8 +32,6 @@ bool SaveScene(Game& game)
 
     const SceneDocument document = BuildSceneDocumentFromRegistry(game.GetRegistry(), assetDatabase);
     const std::string text = SerializeSceneDocument(document);
-
-    const std::filesystem::path scenePath = projectRoot / "TestScene.gtscene";
 
     std::error_code ec;
     std::filesystem::create_directories(scenePath.parent_path(), ec);
@@ -50,10 +48,13 @@ bool SaveScene(Game& game)
     return file.good();
 }
 
-bool LoadScene(Game& game, Renderer& renderer)
+bool SaveScene(Game& game)
 {
-    const std::filesystem::path scenePath = DefaultScenePath();
+    return SaveScene(game, DefaultScenePath());
+}
 
+bool LoadScene(Game& game, Renderer& renderer, const std::filesystem::path& scenePath)
+{
     std::ifstream file(scenePath, std::ios::binary);
     if (!file) {
         return false;
@@ -383,6 +384,11 @@ bool LoadScene(Game& game, Renderer& renderer)
     game.EnsureDefaultCameraExists();
 
     return true;
+}
+
+bool LoadScene(Game& game, Renderer& renderer)
+{
+    return LoadScene(game, renderer, DefaultScenePath());
 }
 
 } // namespace gte

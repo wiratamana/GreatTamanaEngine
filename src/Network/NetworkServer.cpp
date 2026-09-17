@@ -811,6 +811,100 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         res.set_content(BuildInstantiateAssetResponseJson(outcome.entityIndex, outcome.entityGeneration, outcome.resolvedName),
             "application/json");
     });
+
+    // task_manager/scene-serialization-2 campaign, PHASE5
+    // (PHASE5_NETWORK_SAVE_LOAD_SCENE_ENDPOINTS.md) - POST /save_scene and
+    // POST /load_scene, a thin network bridge to Editor/SceneIO.h's
+    // SaveScene()/LoadScene(). Reuses the SAME EngineCommandBridge/
+    // commandBridge every other engine command already uses.
+    server.Post("/save_scene", [commandBridge](const httplib::Request& req, httplib::Response& res) {
+        const ParsedScenePathRequest parsed = ParseScenePathRequest(req.body);
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        if (commandBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("engine command bridge not available"), "application/json");
+            return;
+        }
+
+        EngineCommandRequest request;
+        request.kind = EngineCommandKind::SaveScene;
+        request.saveScene.path = parsed.path;
+
+        const EngineCommandBridge::SubmitResult submit = commandBridge->SubmitAndWait(request);
+        if (submit.alreadyPending) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("another engine command is already in progress"), "application/json");
+            return;
+        }
+        if (submit.timedOut) {
+            res.status = 504;
+            res.set_content(BuildGenericErrorResponseJson("engine command timed out"), "application/json");
+            return;
+        }
+
+        const SaveSceneOutcome& outcome = submit.result->saveScene;
+        if (!outcome.editorAvailable) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson(outcome.errorMessage), "application/json");
+            return;
+        }
+        // A failed save is a 500 (an environment/I-O problem, not a
+        // caller mistake) - see this route's own strategy doc note on why
+        // this differs from /load_scene's own 400 below.
+        res.status = outcome.success ? 200 : 500;
+        res.set_content(BuildScenePathResponseJson(outcome.success, outcome.errorMessage, outcome.resolvedPath), "application/json");
+    });
+
+    server.Post("/load_scene", [commandBridge](const httplib::Request& req, httplib::Response& res) {
+        // Mirrors /save_scene exactly, substituting EngineCommandKind::LoadScene,
+        // request.loadScene.path, and submit.result->loadScene. A failed load
+        // (missing/malformed file - see LoadScene()'s own doc comment) is a 400
+        // (a caller-actionable "that scene file wasn't found or was invalid"),
+        // NOT a 500 (which is reserved for save's own I/O-failure case, an
+        // environment problem rather than a bad request) - this ONE status-code
+        // difference between the two routes' otherwise-identical shape is
+        // implemented deliberately, not copy-pasted identically.
+        const ParsedScenePathRequest parsed = ParseScenePathRequest(req.body);
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        if (commandBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("engine command bridge not available"), "application/json");
+            return;
+        }
+
+        EngineCommandRequest request;
+        request.kind = EngineCommandKind::LoadScene;
+        request.loadScene.path = parsed.path;
+
+        const EngineCommandBridge::SubmitResult submit = commandBridge->SubmitAndWait(request);
+        if (submit.alreadyPending) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("another engine command is already in progress"), "application/json");
+            return;
+        }
+        if (submit.timedOut) {
+            res.status = 504;
+            res.set_content(BuildGenericErrorResponseJson("engine command timed out"), "application/json");
+            return;
+        }
+
+        const LoadSceneOutcome& outcome = submit.result->loadScene;
+        if (!outcome.editorAvailable) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson(outcome.errorMessage), "application/json");
+            return;
+        }
+        res.status = outcome.success ? 200 : 400;
+        res.set_content(BuildScenePathResponseJson(outcome.success, outcome.errorMessage, outcome.resolvedPath), "application/json");
+    });
 }
 
 } // namespace

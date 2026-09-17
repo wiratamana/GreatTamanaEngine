@@ -45,13 +45,14 @@ enum class EngineCommandKind {
     // from network-impl-3's own original Locked Design Decision #5).
     SetEntityTrs,
     InstantiateLight,
-    // task_manager/stl-parser-2 campaign, PHASE3 - spawns an already-
-    // imported Mesh *.gta asset (see Game::InstantiateMeshAssetFromGtaFile()) -
-    // reuses this SAME bridge (not a new one) because this is exactly the
-    // same shape of request InstantiatePrimitive/InstantiateLight already
-    // are: an ECS+Renderer-mutating spawn - see
-    // PHASE0_MASTER_STRATEGY.md's Locked Design Decision #9.
+    // task_manager/stl-parser-2 campaign, PHASE3
     InstantiateMeshAsset,
+    // task_manager/scene-serialization-2 campaign, PHASE5
+    // (PHASE5_NETWORK_SAVE_LOAD_SCENE_ENDPOINTS.md) - two more engine
+    // commands, sharing this SAME single-global-slot bridge (see
+    // PHASE0_MASTER_STRATEGY.md's Locked Design Decision #5 - unchanged).
+    SaveScene,
+    LoadScene,
 };
 
 // Plain request payload for one InstantiatePrimitive command - copied
@@ -74,6 +75,17 @@ struct InstantiateMeshAssetCommand {
     std::string absoluteGtaPath;
 };
 
+// task_manager/scene-serialization-2 campaign, PHASE5
+// (PHASE5_NETWORK_SAVE_LOAD_SCENE_ENDPOINTS.md) - plain request payloads
+// for one SaveScene/LoadScene command. "" means "use Editor::SceneIO.h's
+// own DefaultScenePath()".
+struct SaveSceneCommand {
+    std::string path;
+};
+struct LoadSceneCommand {
+    std::string path;
+};
+
 // One pending engine command, tagged by `kind` - EXACTLY one of
 // `instantiatePrimitive`/`deleteEntity`/`setEntityTrs`/`instantiateLight` is
 // meaningful, selected by `kind` (deliberately a plain tagged struct, not
@@ -93,6 +105,9 @@ struct EngineCommandRequest {
     InstantiateLightParams instantiateLight;
     // task_manager/stl-parser-2 campaign, PHASE3
     InstantiateMeshAssetCommand instantiateMeshAsset;
+    // task_manager/scene-serialization-2 campaign, PHASE5
+    SaveSceneCommand saveScene;
+    LoadSceneCommand loadScene;
 };
 
 // The completed result of one EngineCommandRequest - `kind` mirrors the
@@ -108,6 +123,9 @@ struct EngineCommandResult {
     // task_manager/stl-parser-2 campaign, PHASE3 (needs
     // "../Game/EngineCommandResults.h" already #included above, which it is).
     InstantiateMeshAssetOutcome instantiateMeshAsset;
+    // task_manager/scene-serialization-2 campaign, PHASE5
+    SaveSceneOutcome saveScene;
+    LoadSceneOutcome loadScene;
 };
 
 class EngineCommandBridge {

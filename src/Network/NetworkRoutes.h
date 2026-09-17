@@ -847,4 +847,35 @@ ParsedInstantiateAssetRequest ParseInstantiateAssetRequest(const std::string& js
 std::string BuildInstantiateAssetResponseJson(
     std::uint32_t entityIndex, std::uint32_t entityGeneration, const std::string& resolvedName);
 
+// --- task_manager/scene-serialization-2 campaign, PHASE5
+// (PHASE5_NETWORK_SAVE_LOAD_SCENE_ENDPOINTS.md) - POST /save_scene and
+// POST /load_scene. Every function below stays PURE, same discipline as
+// everything else in this file.
+
+// Parsed, VALIDATED result of a POST /save_scene or POST /load_scene
+// request body: {"path": "..."} (optional). `valid == false` means
+// `errorMessage` explains why. Validation: if "path" is present, it must
+// be a JSON STRING (may be empty - an explicitly empty string is treated
+// identically to the key being absent entirely: "use the default path").
+// Any OTHER JSON type for "path" (number/bool/object/array) is a
+// validation failure: "path must be a string". An entirely EMPTY request
+// body (not even valid JSON, e.g. a genuinely empty POST) is NOT an error
+// here - both endpoints treat a body that fails to parse as JSON at all
+// (or parses to something other than an object) the SAME as "path was
+// simply omitted" (path = ""), UNLIKE every other POST route in this file
+// - this is the ONE deliberate exception, because both endpoints'
+// single-optional-field-only shape makes "no body at all" a completely
+// reasonable, common, valid request (e.g. a caller just wants "save/load
+// the default scene"), not a malformed one.
+struct ParsedScenePathRequest {
+    bool valid = false;
+    std::string errorMessage;
+    std::string path; // "" means "use the default path".
+};
+ParsedScenePathRequest ParseScenePathRequest(const std::string& jsonBody);
+
+// Success shape: {"success":true,"resolved_path":"<resolvedPath>"}
+// Failure shape: identical to BuildGenericErrorResponseJson() below.
+std::string BuildScenePathResponseJson(bool success, const std::string& errorMessage, const std::string& resolvedPath);
+
 } // namespace gte::Network

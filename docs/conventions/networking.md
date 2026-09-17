@@ -204,15 +204,27 @@ module or adding a new endpoint:
   five-phase campaign writeup.
 - **JSON parsing now exists via a vendored `nlohmann/json`** (single-header
   `json.hpp`, fetched via `cmake/FetchJson.cmake` mirroring
-  `cmake/FetchHttplib.cmake`'s own pattern) - a deliberate, narrow exception to
-  the "no JSON library, hand-rolled formats only" precedent
-  `Scene/SceneTextFormat.h`/`NetworkRoutes.h`'s own pre-existing
-  `BuildCaptureJsonBody()` established, made specifically because this
-  campaign needs to PARSE untrusted/possibly-malformed input (an incoming
-  POST body), not just emit a few already-known-safe fields. A future
-  contributor should not read this as blanket permission to reach for
-  `nlohmann::json` anywhere else in the engine without the same
-  "genuinely parsing untrusted input" justification.
+  `cmake/FetchHttplib.cmake`'s own pattern) - originally a deliberate, narrow
+  exception to the "no JSON library, hand-rolled formats only" precedent
+  this file's own pre-existing `BuildCaptureJsonBody()` established, made
+  specifically because `network-impl-3` needed to PARSE untrusted/possibly-
+  malformed input (an incoming POST body), not just emit a few already-
+  known-safe fields. **As of the `task_manager/scene-serialization-2`
+  campaign, this scope has WIDENED**: `nlohmann::json` is now ALSO this
+  engine's real ON-DISK scene file format (`src/Scene/SceneJsonFormat.h/.cpp`,
+  superseding that campaign's own original hand-rolled TEXT grammar,
+  `Scene/SceneTextFormat.h`, deleted in that campaign's Phase 3) and the
+  underlying value type the new `src/ECS/Reflection/` generic
+  field-reflection layer serializes each component's fields into/out of
+  (`ComponentTypeRegistry.h`) - not merely a network-parsing exception
+  anymore. A future contributor should still not read this as blanket
+  permission to reach for `nlohmann::json` for some UNRELATED, brand-new
+  purpose without a similarly explicit, reviewed justification - but "an
+  on-disk serialization format that needs a naturally-nestable value type"
+  is now an established, valid reason alongside "genuinely parsing
+  untrusted network input". See
+  `task_manager/scene-serialization-2/PHASE0_MASTER_STRATEGY.md`'s Locked
+  Design Decision #1 for the full rationale.
 
 - **`GET /activate_tab`/`GET /list_tabs`** (`network-impl-7` campaign,
   `task_manager/network-impl-7/PHASE0_MASTER_STRATEGY.md`) let an external
@@ -319,6 +331,49 @@ module or adding a new endpoint:
   command is already pending, or `504` on a bridge timeout. See
   `task_manager/stl-parser-2/PHASE0_MASTER_STRATEGY.md` for the full
   five-phase campaign writeup.
+
+- **`POST /save_scene`/`POST /load_scene`** (`task_manager/scene-serialization-2`
+  campaign, `task_manager/scene-serialization-2/PHASE0_MASTER_STRATEGY.md`,
+  Phase 5) are a thin network bridge to the Editor's existing Save/Load
+  system, `Editor/SceneIO.h`'s `SaveScene()`/`LoadScene()` - the same shape
+  as every other `EngineCommandBridge`-backed route above, reusing that
+  ALREADY-EXISTING bridge as a SIXTH/SEVENTH `EngineCommandKind` value
+  (`SaveScene`/`LoadScene`) rather than a new one, since this is exactly the
+  same "an ECS-mutating (Load) or ECS-reading (Save) engine action" shape
+  every other command on this bridge already is. Both accept an OPTIONAL
+  JSON body with a single `path` field - omitted, `null`, or an empty
+  string all mean "use `Editor/SceneIO.h`'s own `DefaultScenePath()`" (the
+  SAME hardcoded path Ctrl+S/Ctrl+O use); a non-empty string is used EXACTLY
+  as given (absolute, or resolved against the engine process's own current
+  working directory if relative) - the SAME "caller's responsibility, no
+  sandboxing" convention `POST /instantiate_asset`'s own `gta_path` field
+  already established. Unlike every OTHER `ParseXxxRequest()` in this file,
+  `NetworkRoutes.h`'s `ParseScenePathRequest()` treats a genuinely EMPTY
+  request body, or a body that isn't even valid JSON, IDENTICALLY to "path
+  omitted" rather than as a 400 validation failure - a deliberate, one-time
+  exception, since both endpoints' single-optional-field-only shape makes
+  "no body at all" a completely reasonable, common request ("just save/load
+  the default scene"); an explicitly-present but non-string `path` (a
+  number/bool/object/array) is still a `400` ("path must be a string").
+  `Editor/SceneIO.h`'s `SaveScene(Game&, path)`/`LoadScene(Game&, Renderer&,
+  path)` explicit-path overloads (new siblings of the original zero-argument
+  overloads, which still forward to them with `DefaultScenePath()` and still
+  back Ctrl+S/Ctrl+O completely unchanged) do the actual work.
+  Responds `200` with `{"success":true,"resolved_path":"<absolute path
+  actually used>"}` on success; `503` if the bridge pointer is null, another
+  engine command is already pending, OR this build was compiled with
+  `GTE_ENABLE_EDITOR=OFF` (`Editor/SceneIO.h` does not even exist in that
+  configuration - the SAME `GTE_ENABLE_EDITOR`-off `503` precedent
+  `POST /import_asset` already established, mirrored here via a conditionally-
+  compiled `case` branch in the always-compiled `EngineCommandDispatch.cpp`);
+  `504` on a bridge timeout. On a genuine (non-Editor-availability) failure,
+  `POST /save_scene` responds `500` (an I/O-write failure - an environment
+  problem, not a caller mistake) while `POST /load_scene` responds `400` (a
+  missing/malformed scene file - a caller-actionable "that request was bad"
+  case) - the ONE deliberate status-code difference between these two
+  otherwise-identical routes. See
+  `task_manager/scene-serialization-2/PHASE0_MASTER_STRATEGY.md` for the
+  full six-phase campaign writeup.
 
 ## Named Texture Capture (`GET /get_texture`)
 
