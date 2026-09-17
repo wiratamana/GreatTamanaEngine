@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../Math/Mat4.h"
+#include "../Renderer/RenderTexture.h" // frame-debugger-7 campaign, PHASE3 - m_replayStepPreviews below.
 
 #include <cstdint>
 #include <string>
@@ -161,12 +162,54 @@ public:
     // see FrameDebuggerDrawRecord's own doc comment above.
     const std::vector<FrameDebuggerDrawRecord>& DrawRecords() const noexcept { return m_drawRecords; }
 
+    // task_manager/frame-debugger-7 campaign, PHASE3
+    // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step
+    // 3.4) - called ONCE by AddFrameDebuggerReplayPasses()
+    // (src/Application/RenderPasses.cpp), at Render-Graph-pass-declaration
+    // time (a live Renderer& already exists there), on an explicit
+    // capture-trigger frame only. Hands over N real, retained
+    // RenderTexture objects - one per real object drawn this frame's
+    // "GameView" pass, in the SAME order as DrawRecords() (see that
+    // function's own doc comment for the one documented case this
+    // ordering assumption could theoretically diverge in) - each one
+    // holding the real, accumulated Game View image exactly as it looked
+    // after objects [0..i] were redrawn from scratch. Move-only
+    // (RenderTexture itself is move-only), mirroring
+    // FrameDebuggerComputePassPreview's own vector-of-move-only-struct
+    // precedent (FrameDebuggerHistory.h). Filled with FRESH (garbage/
+    // uninitialized) content at the time this is called - each replay
+    // pass's own `execute` lambda only actually renders real pixels into
+    // its destination later this SAME Execute() call - so a caller must
+    // never read these textures back before this whole Execute() call has
+    // returned.
+    //
+    // IMPORTANT ordering requirement for TriggerCapture()/CaptureFrame()
+    // (Phase 4's own job to act on) - this vector must be read/moved OUT
+    // of this FrameDebuggerCaptureContext into permanent storage strictly
+    // BEFORE the next armed frame's Reset() call below wipes it, i.e.
+    // inside TriggerCapture() itself, which the Step 3.0 two-bool
+    // handshake already guarantees runs later this SAME frame.
+    void SetReplayStepPreviews(std::vector<RenderTexture>&& previews) noexcept
+    {
+        m_replayStepPreviews = std::move(previews);
+    }
+
+    // Empty on every frame that isn't itself a capture-trigger frame (see
+    // SetReplayStepPreviews()'s own doc comment above) - Reset() (below)
+    // clears this every armed frame, exactly like every other field on
+    // this class.
+    const std::vector<RenderTexture>& ReplayStepPreviews() const noexcept { return m_replayStepPreviews; }
+
 private:
     std::vector<std::string> m_pipelineDebugNames;
     std::vector<std::string> m_materialTextureDebugNames;
     int m_drawCallCount = 0;
     Mat4 m_lastViewProjection = Mat4::Identity();
     std::vector<FrameDebuggerDrawRecord> m_drawRecords;
+
+    // task_manager/frame-debugger-7 campaign, PHASE3 - see
+    // SetReplayStepPreviews()/ReplayStepPreviews() above.
+    std::vector<RenderTexture> m_replayStepPreviews;
 };
 
 } // namespace gte

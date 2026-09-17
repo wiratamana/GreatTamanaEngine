@@ -654,6 +654,49 @@ int Application::Run()
                                 frameDebuggerCapture);
                             outputs.push_back(h);
 
+                            // task_manager/frame-debugger-7 campaign, PHASE3
+                            // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md,
+                            // Step 3.5) - the EARLY half of this phase's
+                            // two-bool pending/serviced handshake (Step
+                            // 3.0): consumes m_pendingCaptureTrigger (if
+                            // set) and, only then, declares this frame's N
+                            // debug-only replay passes - BEFORE any of them
+                            // (or the real "GameView" pass above, which was
+                            // only just DECLARED, not yet executed) actually
+                            // run, since this whole `build` lambda only
+                            // describes the frame; RenderGraph::Execute()
+                            // records/runs every declared pass after this
+                            // lambda returns. `frameDebuggerCapture` is a
+                            // bare, forward-declared pointer (see
+                            // EditorLayer.h) - never dereferenced by this
+                            // file except via `*frameDebuggerCapture` here,
+                            // which only ever runs once this same `if` has
+                            // already confirmed it is non-null.
+                            if (frameDebuggerCapture != nullptr
+                                && m_editorLayer->ConsumePendingFrameDebuggerReplayRequest()) {
+                                const std::size_t objectCount = m_game.CountGameViewDrawCommandsThisFrame();
+                                // IMPORTANT, CORRECTNESS-CRITICAL (see
+                                // RenderPasses.h's own updated doc comment on
+                                // AddFrameDebuggerReplayPasses()) - every
+                                // returned destination TextureHandle MUST be
+                                // appended to `outputs`, or
+                                // RenderGraphCompiler::Compile()'s own
+                                // backward-reachability culling scan silently
+                                // culls every one of these N passes (their
+                                // writes are never otherwise read by anything
+                                // else in the graph) - confirmed by this
+                                // phase's own Step 4 manual visual spot-check,
+                                // which caught exactly this bug (garbage/
+                                // uninitialized VRAM content instead of a
+                                // real rendered image) before this fix.
+                                const std::vector<rg::TextureHandle> replayStepHandles = AddFrameDebuggerReplayPasses(
+                                    b, m_game, m_renderer, aspect, objectCount, gpuSkinningBuffers,
+                                    recordGameSkyBackground, *gameTarget, *frameDebuggerCapture);
+                                for (const rg::TextureHandle& replayHandle : replayStepHandles) {
+                                    outputs.push_back(replayHandle);
+                                }
+                            }
+
                             // 3.3 - the Aerial Perspective Composite pass -
                             // declared AFTER the GameView pass above (same
                             // builder/Execute() call), reading its own

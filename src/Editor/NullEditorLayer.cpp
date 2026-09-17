@@ -54,6 +54,7 @@ public:
     }
     FrameDebuggerCaptureContext* PrepareFrameDebuggerCaptureContext() override { return nullptr; }
     void NotifyFrameDebuggerStepConsumed() override { }
+    bool ConsumePendingFrameDebuggerReplayRequest() override { return false; }
 
     // task_manager/frame-debugger-3 campaign, PHASE7 - see EditorLayer.h's
     // own doc comments for the full contract; every one of these is a safe,

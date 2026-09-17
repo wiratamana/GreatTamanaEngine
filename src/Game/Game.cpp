@@ -369,20 +369,25 @@ void Game::EnsureDefaultCameraExists()
 }
 
 void Game::Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* viewProjectionOverride,
-    FrameDebuggerCaptureContext* frameDebuggerCapture)
+    FrameDebuggerCaptureContext* frameDebuggerCapture, std::optional<std::size_t> maxDrawCount)
 {
     renderer.Clear(20, 20, 30, 255);
 
     EnsureDefaultCameraExists();
 
     if (viewProjectionOverride != nullptr) {
+        // task_manager/frame-debugger-7 campaign, PHASE3 - maxDrawCount is
+        // NEVER forwarded into this branch (mirrors frameDebuggerCapture's
+        // own exact rule, above/Game.h's own doc comment) - this branch is
+        // Scene View's own call site, out of scope for the whole Frame
+        // Debugger feature.
         m_renderSystem.Draw(m_registry, renderer, *viewProjectionOverride);
     } else {
         // frameDebuggerCapture is never dereferenced here (or anywhere else
         // in this file) - only forwarded onward, as a bare pointer, exactly
         // like PHASE1's own Step 3.1b requires for a CORE, always-compiled
         // file such as this one. See Game.h's own updated Render() comment.
-        m_renderSystem.Draw(m_registry, renderer, aspectWidthOverHeight, frameDebuggerCapture);
+        m_renderSystem.Draw(m_registry, renderer, aspectWidthOverHeight, frameDebuggerCapture, maxDrawCount);
     }
 }
 

@@ -11,7 +11,28 @@
 #include "../Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
 
+// task_manager/frame-debugger-7 campaign, PHASE3
+// (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step 3.3)
+// - FrameDebuggerCaptureContext (src/Editor/FrameDebuggerCapture.h) is an
+// Editor-only type. This real #include, AND every actual dereference of a
+// `capture` REFERENCE below (AddFrameDebuggerReplayPasses()'s own body),
+// must stay wrapped in `#if GTE_ENABLE_EDITOR` - a GTE_ENABLE_EDITOR=OFF
+// build compiles this whole file fine either way (RenderPasses.h's own
+// forward declaration is enough for the function's SIGNATURE), but would
+// FAIL TO LINK if an unconditional call site referenced a type/function
+// that's never compiled into that configuration at all - mirrors
+// src/Game/RenderSystem.cpp's own identical PHASE1 precedent, applied here
+// to a CALLEE's body instead of a passthrough parameter (see
+// RenderPasses.h's own updated AddFrameDebuggerReplayPasses() doc comment).
+#if GTE_ENABLE_EDITOR
+#include "../Editor/FrameDebuggerCapture.h"
+#endif
+
 #include <cstdint>
+#include <cstdio>
+#include <deque>
+#include <string>
+#include <utility>
 
 namespace gte {
 
@@ -45,6 +66,42 @@ void DeclareGpuSkinningReads(
     }
 }
 
+// task_manager/frame-debugger-7 campaign, PHASE3
+// (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step
+// 3.3b) - permanent (whole-process-lifetime), ever-growing pool of
+// "FrameDebuggerReplayStepN" pass names. MUST NOT be a per-frame/per-
+// capture temporary: RenderGraphBuilder::AddPass()'s own `name` parameter,
+// and RenderGraphNameSlotTable's own persistent-across-Execute()-calls
+// name table, both require a name that is valid for the rest of this
+// process's lifetime, never just "this frame" - a stack buffer or a
+// function-local std::string/std::vector would produce a real, confirmed
+// dangling-pointer / use-after-free bug the very next time ANY capture
+// happens (the second, third, ... capture this session) - see this
+// campaign's own phase document for the full reasoning. std::deque (never
+// std::vector) so growing this pool NEVER moves an already-handed-out
+// std::string's own character storage - a std::vector<std::string>
+// growing/reallocating would invalidate every c_str() pointer already
+// stored inside a PREVIOUSLY-declared PassRecord::name, which is exactly
+// the same class of bug this whole mechanism exists to avoid.
+std::deque<std::string>& ReplayStepPassNamePool()
+{
+    static std::deque<std::string> pool;
+    return pool;
+}
+
+// Returns a STABLE, permanent const char* naming replay step `index` -
+// lazily grows the pool the first time `index` is ever requested, then
+// reuses the SAME std::string (and therefore the SAME pointer) for that
+// index forever afterwards, across every future capture this session.
+const char* ReplayStepPassName(std::size_t index)
+{
+    std::deque<std::string>& pool = ReplayStepPassNamePool();
+    while (pool.size() <= index) {
+        pool.push_back("FrameDebuggerReplayStep" + std::to_string(pool.size()));
+    }
+    return pool[index].c_str();
+}
+
 } // namespace
 
 void AddGameViewPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer, rg::TextureHandle gameViewTarget,
@@ -72,6 +129,112 @@ void AddGameViewPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& rend
                 recordSkyBackground(ctx.cmd);
             }
         });
+}
+
+// task_manager/frame-debugger-7 campaign, PHASE3
+// (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md) - see
+// this function's own doc comment in RenderPasses.h for the full contract.
+// The GTE_ENABLE_EDITOR guard below is why this function is declared here,
+// unconditionally, but only ever has a REAL body in an Editor build - see
+// this file's own top-of-file comment for the full "why".
+std::vector<rg::TextureHandle> AddFrameDebuggerReplayPasses(rg::RenderGraphBuilder& builder, Game& game,
+    Renderer& renderer, float aspectWidthOverHeight, std::size_t objectCount,
+    const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers,
+    const std::function<void(VkCommandBuffer)>& recordSkyBackground, RenderTexture& gameTarget,
+    FrameDebuggerCaptureContext& capture)
+{
+    std::vector<rg::TextureHandle> destHandles;
+#if GTE_ENABLE_EDITOR
+    if (objectCount == 0) {
+        return destHandles;
+    }
+    destHandles.reserve(objectCount);
+
+    // Same width/height/format as the real GameView target, read directly
+    // off `gameTarget` (never hardcoded - see AGENTS.md's "Render Target
+    // Format Matching") - `gameTarget` itself is NEVER written to here.
+    const VkExtent2D extent = gameTarget.Extent();
+    const int width = static_cast<int>(extent.width);
+    const int height = static_cast<int>(extent.height);
+    const VkFormat format = gameTarget.Format();
+
+    std::vector<RenderTexture> destinations;
+    destinations.reserve(objectCount); // ESSENTIAL - every destHandle below imports a POINTER-STABLE
+                                        // Target() from this vector; it must never reallocate after this point.
+    for (std::size_t i = 0; i < objectCount; ++i) {
+        // Step 3.3b - these debugName/depthDebugName stack buffers are a
+        // COMPLETELY SEPARATE, unrelated concern from the pass NAME below
+        // (ReplayStepPassName()) - safe ONLY because these RenderTextures
+        // are always freshly (re)created every capture, NEVER Resize()d in
+        // place (mirrors FrameDebuggerHistory.cpp's own identical
+        // reasoning for its own retained-preview textures).
+        char debugNameBuffer[48];
+        std::snprintf(debugNameBuffer, sizeof(debugNameBuffer), "FrameDebuggerReplayStep%zuColor", i);
+        char depthDebugNameBuffer[48];
+        std::snprintf(depthDebugNameBuffer, sizeof(depthDebugNameBuffer), "FrameDebuggerReplayStep%zuDepth", i);
+        // Depth is created automatically (Renderer::CreateRenderTexture()
+        // always builds it against Renderer::DepthFormat() internally) -
+        // see Step 3.3a: a RenderTexture already carries its own paired
+        // depth buffer, no second array needed.
+        destinations.push_back(
+            renderer.CreateRenderTexture(width, height, format, debugNameBuffer, depthDebugNameBuffer));
+    }
+
+    for (std::size_t i = 0; i < objectCount; ++i) {
+        const char* passName = ReplayStepPassName(i); // Step 3.3b - NEVER a per-call temporary.
+
+        const rg::TextureHandle destHandle =
+            builder.ImportTexture(passName, destinations[i].Target(), VK_IMAGE_LAYOUT_UNDEFINED);
+
+        builder.AddPass(passName, rg::ViewScope::GameView,
+            [destHandle, gpuSkinningOutputBuffers](rg::RenderGraphBuilder::PassBuilder& pass) {
+                pass.WriteColorAttachment(destHandle, kGameClearColor);
+                pass.WriteDepthStencilAttachment(destHandle, kGameClearDepth);
+                DeclareGpuSkinningReads(pass, gpuSkinningOutputBuffers);
+            },
+            [&game, &renderer, aspectWidthOverHeight, i, objectCount, recordSkyBackground](rg::PassContext& ctx) {
+                renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
+                // CORRECTNESS-CRITICAL, easy to get wrong by copy-pasting
+                // AddGameViewPass()'s own call: `frameDebuggerCapture` here
+                // is ALWAYS nullptr, NEVER the real, armed capture context.
+                // FrameDebuggerCaptureContext::RecordDraw()/RecordEntityDraw()
+                // are NOT idempotent/deduplicated by draw identity - if a
+                // real capture pointer were passed into these N replay
+                // passes' own game.Render() calls, capture.DrawRecords()
+                // would balloon to O(N^2) duplicated entries, silently
+                // corrupting the exact data Phase 4's per-entity tree AND
+                // this phase's own Definition of Done both depend on.
+                game.Render(renderer, aspectWidthOverHeight, nullptr, /*frameDebuggerCapture=*/nullptr,
+                    /*maxDrawCount=*/ i + 1);
+                renderer.EndGraphPassRecording();
+                // Only the VERY LAST replay pass also draws the sky
+                // background, exactly mirroring AddGameViewPass()'s own
+                // real ordering (sky is drawn AFTER every object, once,
+                // not per-object) - this makes replay step N-1's own image
+                // pixel-identical to the existing entry.preview snapshot,
+                // a good internal cross-check confirmed during this
+                // phase's own manual verification.
+                if (i + 1 == objectCount && recordSkyBackground) {
+                    recordSkyBackground(ctx.cmd);
+                }
+            });
+
+        destHandles.push_back(destHandle);
+    }
+
+    capture.SetReplayStepPreviews(std::move(destinations));
+#else
+    (void)builder;
+    (void)game;
+    (void)renderer;
+    (void)aspectWidthOverHeight;
+    (void)objectCount;
+    (void)gpuSkinningOutputBuffers;
+    (void)recordSkyBackground;
+    (void)gameTarget;
+    (void)capture;
+#endif
+    return destHandles;
 }
 
 void AddSceneViewPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer, rg::TextureHandle sceneViewTarget,

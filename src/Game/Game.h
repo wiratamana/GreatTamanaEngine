@@ -12,6 +12,8 @@
 #include "Renderer/Primitives/PrimitiveMeshGenerator.h"
 #include "RenderSystem.h"
 
+#include <cstddef>
+#include <optional>
 #include <string>
 
 namespace gte {
@@ -89,7 +91,7 @@ public:
     //
     // task_manager/frame-debugger-3 campaign, PHASE3
     // (PHASE3_FRAME_HISTORY_RING_BUFFER_AND_CAPTURE_TRIGGER.md, Step 3.4b) -
-    // `frameDebuggerCapture` (new, defaulted, LAST parameter) is forwarded
+    // `frameDebuggerCapture` (new, defaulted parameter) is forwarded
     // straight through to the float-aspect RenderSystem::Draw() overload
     // ONLY (the branch taken when viewProjectionOverride == nullptr) -
     // never into the viewProjectionOverride branch, since THAT branch is
@@ -98,8 +100,24 @@ public:
     // Design Decision #7). nullptr (the default) on every existing call
     // site until Application::Run() arms a real one for the Game-View-
     // driving call only (see RenderPasses.h's AddGameViewPass()).
+    //
+    // task_manager/frame-debugger-7 campaign, PHASE3
+    // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step
+    // 3.2) - `maxDrawCount` (new, defaulted, LAST parameter) is forwarded
+    // straight through to whichever internal RenderSystem::Draw() overload
+    // this call ends up using (the `Mat4&` overload when
+    // viewProjectionOverride != nullptr, the float-aspect overload
+    // otherwise), unchanged - see RenderSystem::Draw()'s own updated doc
+    // comment for the exact stop-early semantics. std::nullopt (the
+    // default) on every existing call site - a real value is only ever
+    // passed by this phase's own AddFrameDebuggerReplayPasses()
+    // (src/Application/RenderPasses.cpp), each one of its N replay passes
+    // requesting a different cutoff (`i + 1`) so pass `i` redraws exactly
+    // objects `[0..i]`.
     void Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* viewProjectionOverride = nullptr,
-        FrameDebuggerCaptureContext* frameDebuggerCapture = nullptr);
+        FrameDebuggerCaptureContext* frameDebuggerCapture = nullptr,
+        std::optional<std::size_t> maxDrawCount = std::nullopt);
+
 
     // Read-only-in-spirit access to the ECS World for the Editor's
     // Hierarchy/Inspector panels (src/Editor/ImGuiEditorLayer.cpp) to
@@ -267,6 +285,46 @@ public:
     // against - see AnimationSystem::GetGpuSkinningPipelines()'s own doc
     // comment.
     GpuSkinningPipelines& GetGpuSkinningPipelines() noexcept { return m_animationSystem.GetGpuSkinningPipelines(); }
+
+    // task_manager/frame-debugger-7 campaign, PHASE3
+    // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step
+    // 3.1) - mirrors CollectGpuSkinningDispatchRequests() above's own "safe
+    // to call at build-time, before any pass executes" precedent -
+    // RenderSystem::CollectRenderables() only reads already-frozen ECS
+    // component data (Update() already ran this frame and will not run
+    // again until the next real frame), so this is safe to call
+    // synchronously while declaring this frame's Render Graph passes, with
+    // no live VkCommandBuffer/Renderer needed at all. Called once per
+    // capture-trigger frame by Application::Run(), BEFORE
+    // AddFrameDebuggerReplayPasses() is declared, so it knows exactly how
+    // many replay passes (one per real object this frame's "GameView" pass
+    // will draw) to add.
+    //
+    // IMPORTANT documented assumption (do not silently rely on this
+    // elsewhere without re-reading it): this is
+    // `RenderSystem::CollectRenderables(m_registry).size()` - the number of
+    // entities that HAVE a MeshRenderer component. This is NOT
+    // automatically identical to the number of entities that actually end
+    // up issuing a real `renderer.Submit()` call inside
+    // RenderSystem::Draw() - that function's own loop silently skips a
+    // DrawCommand whose mesh/pipeline handle no longer resolves (see
+    // RenderSystem.cpp's own comment), and only a SUCCESSFULLY-resolved
+    // draw calls capture->RecordEntityDraw() (i.e. only successful draws
+    // end up in capture.DrawRecords()). In every scenario this engine
+    // actually exercises today, every MeshRenderer's handles resolve
+    // successfully (mesh/pipeline pools are never partially unregistered
+    // mid-session), so `objectCount == capture.DrawRecords().size()` holds
+    // in practice - but if that ever stops being true (e.g. a future
+    // feature unregisters a mesh while entities still reference it), the
+    // i-th replay pass's own `maxDrawCount` cutoff (see RenderSystem::Draw())
+    // would silently stop lining up 1:1 with the i-th entry of
+    // capture.DrawRecords(), from the first skipped entity onward. Not
+    // reachable with today's engine - recorded here for a future
+    // maintainer who ever adds mesh/pipeline unregistration.
+    std::size_t CountGameViewDrawCommandsThisFrame()
+    {
+        return RenderSystem::CollectRenderables(m_registry).size();
+    }
 
     // Spawns a primitive shape by NAME (network-impl-3 campaign) - the same
     // underlying spawn as CreatePrimitiveEntity() above (shares its GPU mesh/

@@ -469,6 +469,23 @@ public:
     // no-op for NullEditorLayer.
     virtual void NotifyFrameDebuggerStepConsumed() = 0;
 
+    // task_manager/frame-debugger-7 campaign, PHASE3
+    // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step
+    // 3.0) - the EARLY half of the two-bool pending/serviced handshake
+    // this phase introduces, generalizing Phase 2's single-bool deferred-
+    // Enable-edge-capture mechanism to ALL THREE capture triggers (Enable
+    // edge / Step / Capture button). Called ONCE per frame by
+    // Application::Run(), from inside the offscreen `build` lambda, BEFORE
+    // this frame's "GameView" pass (and therefore
+    // AddFrameDebuggerReplayPasses(), if this returns true) is declared -
+    // read-and-clear, true for exactly the one frame following a real
+    // capture trigger. Forwards straight into
+    // FrameDebuggerPanel::ConsumePendingReplayRequest() - see that
+    // method's own doc comment (Panels/FrameDebuggerPanel.h) for the full
+    // two-bool handshake this is one half of. Always false for
+    // NullEditorLayer (a release build has no Frame Debugger to arm).
+    virtual bool ConsumePendingFrameDebuggerReplayRequest() = 0;
+
     // task_manager/frame-debugger-3 campaign, PHASE7
     // (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md) - the
     // HTTP-automation surface for the Frame Debugger window
@@ -503,10 +520,17 @@ public:
     // A no-op for NullEditorLayer.
     virtual void FrameDebuggerSetEnabled(bool enabled) = 0;
 
-    // Forces PHASE3's TriggerCapture() this frame - returns false (a safe
-    // no-op) if the Frame Debugger is not currently enabled (mirroring the
-    // "Capture" button's own BeginDisabled(!m_enabled) guard), true
-    // otherwise. Always false for NullEditorLayer.
+    // Requests a real capture - returns false (a safe no-op) if the Frame
+    // Debugger is not currently enabled (mirroring the "Capture" button's
+    // own BeginDisabled(!m_enabled) guard), true otherwise.
+    // task_manager/frame-debugger-7 campaign, PHASE3
+    // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step
+    // 3.0) - no longer forces a synchronous TriggerCapture() this frame;
+    // only arms the same deferred m_pendingCaptureTrigger flag the
+    // hand-driven "Capture" button now sets, so this frame's worth of
+    // replay passes can be declared before Game::Render() runs on the
+    // NEXT frame - see FrameDebuggerPanel::CaptureNowFromCommand()'s own
+    // doc comment. Always false for NullEditorLayer.
     virtual bool FrameDebuggerCaptureNow() = 0;
 
     // Sets the currently-selected leaf event's global index (clamped via

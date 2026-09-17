@@ -81,18 +81,34 @@ Mat4 RenderSystem::ResolveActiveCameraViewProjection(Registry& registry, float a
     return Mat4::Identity();
 }
 
-void RenderSystem::Draw(
-    Registry& registry, Renderer& renderer, float aspectWidthOverHeight, FrameDebuggerCaptureContext* capture)
+void RenderSystem::Draw(Registry& registry, Renderer& renderer, float aspectWidthOverHeight,
+    FrameDebuggerCaptureContext* capture, std::optional<std::size_t> maxDrawCount)
 {
-    Draw(registry, renderer, ResolveActiveCameraViewProjection(registry, aspectWidthOverHeight), capture);
+    Draw(registry, renderer, ResolveActiveCameraViewProjection(registry, aspectWidthOverHeight), capture, maxDrawCount);
 }
 
-void RenderSystem::Draw(
-    Registry& registry, Renderer& renderer, const Mat4& viewProjection, FrameDebuggerCaptureContext* capture)
+void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& viewProjection,
+    FrameDebuggerCaptureContext* capture, std::optional<std::size_t> maxDrawCount)
 {
     GTE_PROFILE_SCOPE("RenderSystem::Draw");
 
-    for (const DrawCommand& command : CollectRenderables(registry)) {
+    const std::vector<DrawCommand> commands = CollectRenderables(registry);
+
+    // task_manager/frame-debugger-7 campaign, PHASE3
+    // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step
+    // 3.2) - `maxDrawCount`, when set, stops iterating after that many
+    // COMMANDS have been considered (the loop's own iteration count - see
+    // this method's own header doc comment for why this is NOT the same
+    // thing as "successfully resolved draws"). std::nullopt (every
+    // pre-existing call site) means "no cutoff" - iterate every command,
+    // exactly the pre-PHASE3 behavior.
+    std::size_t consideredCount = 0;
+    for (const DrawCommand& command : commands) {
+        if (maxDrawCount.has_value() && consideredCount >= *maxDrawCount) {
+            break;
+        }
+        ++consideredCount;
+
         const Mesh* mesh = m_meshes.TryGet(command.mesh);
         const Pipeline* pipeline = m_pipelines.TryGet(command.pipeline);
         if (mesh != nullptr && pipeline != nullptr) {

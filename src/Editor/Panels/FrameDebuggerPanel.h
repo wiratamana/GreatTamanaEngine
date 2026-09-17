@@ -122,6 +122,26 @@ public:
     // BuildToolbarRow()).
     void NotifyStepConsumed() noexcept;
 
+    // task_manager/frame-debugger-7 campaign, PHASE3
+    // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step
+    // 3.0) - the EARLY half of this phase's two-bool pending/serviced
+    // handshake; see IEditorLayer::ConsumePendingFrameDebuggerReplayRequest()'s
+    // own doc comment (EditorLayer.h) - the real implementation this
+    // forwards to. Called once per frame by Application::Run(), from
+    // inside the offscreen `build` lambda, BEFORE this frame's "GameView"
+    // pass (and therefore AddFrameDebuggerReplayPasses(), if this returns
+    // true) is declared. Read-and-clear: consumes m_pendingCaptureTrigger
+    // (renamed from Phase 2's m_pendingCaptureAfterEnable - see that
+    // member's own doc comment below) and, if it was set, also sets
+    // m_replayServicedThisFrame = true - a same-frame "receipt" so
+    // Build(), running LATER this SAME frame (after this frame's
+    // Game::Render()/replay passes have already executed), knows it is now
+    // safe and correct to call TriggerCapture(). Returns true exactly when
+    // m_pendingCaptureTrigger was consumed this call (i.e. the caller
+    // should go on to declare this frame's N replay passes), false
+    // otherwise.
+    bool ConsumePendingReplayRequest();
+
     // PHASE4 - releases m_previewDescriptor (an ImGui_ImplVulkan_AddTexture()
     // descriptor, see EnsurePreviewDescriptor()'s own doc comment), if one
     // currently exists. MUST be called explicitly by ImGuiEditorLayer's own
@@ -152,8 +172,14 @@ public:
     void SetEnabledFromCommand(EditorContext& ctx, bool enabled);
 
     // Mirrors the "Capture" button's own BeginDisabled(!m_enabled) guard -
-    // returns false (a safe no-op) if not currently enabled, true (after
-    // performing a real TriggerCapture()) otherwise.
+    // returns false (a safe no-op) if not currently enabled, true otherwise.
+    // task_manager/frame-debugger-7 campaign, PHASE3
+    // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step
+    // 3.0) - no longer performs a real TriggerCapture() synchronously; only
+    // sets m_pendingCaptureTrigger = true, exactly like the hand-driven
+    // "Capture" button now does - see TriggerCapture()'s own doc comment
+    // for the full deferred handshake this is one of three trigger sites
+    // for.
     bool CaptureNowFromCommand();
 
     // Mirrors a tree-row click - clamps via ClampSelectedEventIndex()
@@ -197,9 +223,10 @@ private:
     //
     // task_manager/frame-debugger-7 campaign, PHASE2
     // (PHASE2_DEFERRED_CAPTURE_TRIGGER.md) - the false->true edge no longer
-    // captures synchronously; it only sets m_pendingCaptureAfterEnable (see
-    // that member's own doc comment) - see the .cpp body's own doc comment
-    // for the full "why" (fixes Bug 1, the missing-objects first capture).
+    // captures synchronously; it only sets m_pendingCaptureTrigger (RENAMED,
+    // PHASE3, from m_pendingCaptureAfterEnable - see that member's own doc
+    // comment) - see the .cpp body's own doc comment for the full "why"
+    // (fixes Bug 1, the missing-objects first capture).
     void ApplyEnabledEdge(EditorContext& ctx, bool newEnabled);
 
     // PHASE4 - (re)creates m_previewDescriptor whenever the currently-
@@ -243,23 +270,31 @@ private:
     // m_currentCapture.CaptureFrame(), and resets m_selectedEventIndex to -1
     // (a freshly captured frame has nothing selected yet - matches
     // frame-debugger-2's own "freshly opened window starts with nothing
-    // selected" convention). Called from exactly three places, all inside
-    // BuildToolbarRow(): the deferred pending-capture-after-Enable
-    // consumption (see m_pendingCaptureAfterEnable's own doc comment -
-    // task_manager/frame-debugger-7 campaign, PHASE2,
-    // PHASE2_DEFERRED_CAPTURE_TRIGGER.md), the explicit "Capture" button,
-    // and a pending Step-triggered capture (see NotifyStepConsumed() above).
-    // As of PHASE2, EVERY call site is already guaranteed to run on a frame
-    // whose own m_captureContext was armed (via PrepareFrameDebuggerCapture
-    // Context(), called earlier this same frame, before Game::Render() ran)
-    // based on m_enabled/m_pendingCaptureAfterEnable as they stood at the
-    // START of this exact frame - so this method itself never needs to
-    // account for a stale/one-frame-lagged capture context anymore (that
-    // lag used to exist only for the Enable-edge path, and PHASE2 removed
-    // it by deferring the call instead of fixing this method). A safe
-    // no-op if Build() was never called this session yet (defensive only -
-    // unreachable in practice, since BuildToolbarRow() itself is only ever
-    // called from inside Build()).
+    // selected" convention).
+    //
+    // task_manager/frame-debugger-7 campaign, PHASE3
+    // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step
+    // 3.0) - as of this phase, TriggerCapture() is called from exactly ONE
+    // place: the top of Build(), when m_replayServicedThisFrame is true
+    // (read-and-cleared there). ALL THREE former direct-call-sites (the
+    // Enable-edge, the "Capture" button, and a pending Step-triggered
+    // capture) now ONLY ever set m_pendingCaptureTrigger = true inside
+    // BuildToolbarRow() - never call TriggerCapture() synchronously
+    // anymore - see m_pendingCaptureTrigger's own doc comment below and
+    // ConsumePendingReplayRequest()'s own doc comment above for the full
+    // two-bool pending/serviced handshake this generalizes Phase 2's
+    // single-bool mechanism into. By the time Build()'s own
+    // m_replayServicedThisFrame check runs, this exact frame's
+    // Game::Render() (and, on this same frame, AddFrameDebuggerReplayPasses()'s
+    // own N replay passes) have ALREADY executed with the capture context
+    // correctly armed - so this method itself never needs to account for a
+    // stale/one-frame-lagged capture context, exactly like Phase 2's own
+    // conclusion, just one mechanism deeper. A safe no-op if Build() was
+    // never called this session yet (defensive only - unreachable in
+    // practice, since m_replayServicedThisFrame is only ever set inside
+    // Application::Run()'s own call into ConsumePendingReplayRequest(),
+    // itself only ever reachable once this panel's Build() has run at
+    // least once before).
     void TriggerCapture();
 
     // The panel's own "Enable" toggle - toggling it ALSO now triggers the
@@ -388,22 +423,69 @@ private:
     // True for exactly one BuildToolbarRow() call after
     // NotifyStepConsumed() was called (read-and-cleared) - see that
     // method's own doc comment.
+    //
+    // task_manager/frame-debugger-7 campaign, PHASE3
+    // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step
+    // 3.0) - as of this phase, consuming this flag no longer calls
+    // TriggerCapture() directly; it only sets m_pendingCaptureTrigger =
+    // true (see that member's own doc comment below) when m_enabled is
+    // true, deferring the real capture exactly like the Enable-edge and
+    // "Capture" button now both do too.
     bool m_stepCaptureRequested = false;
 
     // task_manager/frame-debugger-7 campaign, PHASE2
-    // (PHASE2_DEFERRED_CAPTURE_TRIGGER.md) - true for exactly one Build()
-    // call after the Enable checkbox's false->true edge fires, consumed at
-    // the START of the NEXT Build() call (via BuildToolbarRow(), before the
-    // checkbox itself is drawn) whose own frame was actually rendered with
-    // the capture context armed - see ApplyEnabledEdge()'s own updated doc
-    // comment. Fixes Bug 1 (the very first captured frame after pressing
-    // "Enable" being missing objects) by deferring TriggerCapture() to that
-    // properly-armed frame instead of calling it synchronously on the click
-    // itself. NOTE: PHASE3 of this same campaign renames this bool to
-    // `m_pendingCaptureTrigger` and generalizes the mechanism to the Step/
-    // Capture-button triggers too - that is expected, not a gap this phase
-    // needs to anticipate.
-    bool m_pendingCaptureAfterEnable = false;
+    // (PHASE2_DEFERRED_CAPTURE_TRIGGER.md) - RENAMED, PHASE3
+    // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step
+    // 3.0), from `m_pendingCaptureAfterEnable` to `m_pendingCaptureTrigger`,
+    // and GENERALIZED from "only the Enable-edge sets this" to "ALL THREE
+    // capture triggers set this" (the Enable checkbox's false->true edge,
+    // a pending Step-triggered capture, and the explicit "Capture" button -
+    // see BuildToolbarRow()). None of the three call TriggerCapture()
+    // synchronously anymore.
+    //
+    // True for exactly one frame - consumed (read-and-cleared) by
+    // ConsumePendingReplayRequest() (see that method's own doc comment
+    // above), called EARLY the NEXT frame by Application::Run(), BEFORE
+    // that frame's "GameView" pass (and this phase's own
+    // AddFrameDebuggerReplayPasses(), if this was set) is declared. That
+    // same consumption also sets m_replayServicedThisFrame = true (below),
+    // which is what LATER that same frame (top of Build()) actually
+    // triggers the real TriggerCapture() call from - see
+    // m_replayServicedThisFrame's own doc comment for why this needs to be
+    // a SEPARATE bool rather than reusing this one.
+    //
+    // This is what fixes Bug 1 (the very first captured frame after
+    // pressing "Enable" being missing objects - Phase 2's own fix) AND
+    // gives this phase's new replay passes the same correctly-armed-before-
+    // Game::Render() timing for the Step/Capture-button triggers too (this
+    // phase's own new requirement - see PHASE3's own Step 3.0).
+    bool m_pendingCaptureTrigger = false;
+
+    // task_manager/frame-debugger-7 campaign, PHASE3
+    // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step
+    // 3.0) - NEW this phase. The LATE half of the two-bool pending/serviced
+    // handshake: set to true by ConsumePendingReplayRequest() (EARLY this
+    // same frame, before Game::Render()/the replay passes ran) whenever
+    // m_pendingCaptureTrigger was actually consumed that call. Read-and-
+    // cleared at the very TOP of Build() (same frame, LATER - after this
+    // frame's Game::Render()/AddFrameDebuggerReplayPasses() have already
+    // executed, since Build() is called from ImGuiEditorLayer::BuildUI(),
+    // which always runs after RenderGraph::Execute() for the offscreen
+    // regime has returned) - when true, that check clears this flag and
+    // calls TriggerCapture(), which is now safe/correct to do because this
+    // exact frame's rendering already happened with the capture context
+    // (and, when applicable, the N replay passes) correctly armed. A
+    // SEPARATE bool from m_pendingCaptureTrigger above is required because
+    // the SAME underlying "a trigger happened" fact must be read at TWO
+    // DIFFERENT points within the same eventual frame (once EARLY, to
+    // decide whether to declare replay passes; once LATE, to decide
+    // whether to call TriggerCapture()) - a single bool cleared by the
+    // early read would leave the late read with nothing to check; a single
+    // bool cleared by the late read would leave the early read unable to
+    // tell "should I declare passes this frame" from "already declared,
+    // don't declare again". See PHASE3's own Step 3.0 for the full
+    // reasoning.
+    bool m_replayServicedThisFrame = false;
 
     // task_manager/frame-debugger-7 campaign, PHASE1
     // (PHASE1_REMOVE_HISTORY_AND_SINGLE_CAPTURE_LIFECYCLE.md) - tracks

@@ -13,6 +13,8 @@
 #include "Renderer/ResourcePool.h"
 #include "Renderer/TextureHandle.h"
 
+#include <cstddef>
+#include <optional>
 #include <vector>
 
 namespace gte {
@@ -137,8 +139,23 @@ public:
     // (Pipeline debug name/MaterialTexture debug name/view-projection
     // matrix) for every resolved draw this call issues - see
     // FrameDebuggerCaptureContext::RecordDraw().
+    //
+    // `maxDrawCount` (task_manager/frame-debugger-7 campaign, PHASE3,
+    // PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step
+    // 3.2) - optional, defaulted LAST parameter, purely additive (every
+    // existing call site keeps compiling unchanged against its
+    // std::nullopt default). When set, this call stops iterating once
+    // `maxDrawCount` COMMANDS (i.e. DrawCommand entries yielded by
+    // CollectRenderables(), the loop's own iteration count - NOT a count of
+    // only the ones that successfully resolve a mesh+pipeline - see
+    // Game::CountGameViewDrawCommandsThisFrame()'s own documented
+    // assumption, Game.h) have been considered - `break`s out of the `for`
+    // loop early, after the `maxDrawCount`-th iteration. Used exclusively
+    // by AddFrameDebuggerReplayPasses() (src/Application/RenderPasses.cpp),
+    // each of its N replay passes requesting a different cutoff (`i + 1`)
+    // so pass `i` redraws exactly objects `[0..i]`.
     void Draw(Registry& registry, Renderer& renderer, float aspectWidthOverHeight,
-        FrameDebuggerCaptureContext* capture = nullptr);
+        FrameDebuggerCaptureContext* capture = nullptr, std::optional<std::size_t> maxDrawCount = std::nullopt);
 
     // Explicit-view-projection overload of Draw() above, for a caller that
     // already has its own view-projection matrix to render with instead of
@@ -153,9 +170,11 @@ public:
     // float-aspect overload above's own comment; Scene View's own call site
     // (unaffected by this campaign - see PHASE0's Locked Design Decision
     // #7) stays at its default nullptr forever, since Scene View is out of
-    // scope for the whole Frame Debugger feature.
+    // scope for the whole Frame Debugger feature. `maxDrawCount` - see the
+    // float-aspect overload above's own comment; this is the overload that
+    // actually owns the real loop/cutoff logic.
     void Draw(Registry& registry, Renderer& renderer, const Mat4& viewProjection,
-        FrameDebuggerCaptureContext* capture = nullptr);
+        FrameDebuggerCaptureContext* capture = nullptr, std::optional<std::size_t> maxDrawCount = std::nullopt);
 
 private:
     ResourcePool<Mesh, MeshHandle> m_meshes;

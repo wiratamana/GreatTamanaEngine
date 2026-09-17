@@ -779,6 +779,15 @@ public:
 
     void NotifyFrameDebuggerStepConsumed() override { m_frameDebuggerPanel.NotifyStepConsumed(); }
 
+    // task_manager/frame-debugger-7 campaign, PHASE3 - see
+    // IEditorLayer::ConsumePendingFrameDebuggerReplayRequest()'s own doc
+    // comment (EditorLayer.h) for the full contract; forwards straight
+    // into m_frameDebuggerPanel's own ConsumePendingReplayRequest().
+    bool ConsumePendingFrameDebuggerReplayRequest() override
+    {
+        return m_frameDebuggerPanel.ConsumePendingReplayRequest();
+    }
+
     // task_manager/frame-debugger-3 campaign, PHASE7
     // (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md) - see
     // EditorLayer.h's own doc comments for the full contract; every one of

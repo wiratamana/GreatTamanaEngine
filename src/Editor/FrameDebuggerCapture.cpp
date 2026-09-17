@@ -76,6 +76,12 @@ void FrameDebuggerCaptureContext::Reset()
     m_drawCallCount = 0;
     m_lastViewProjection = Mat4::Identity();
     m_drawRecords.clear();
+    // task_manager/frame-debugger-7 campaign, PHASE3 - RAII-destroys any
+    // leftover replay-step RenderTextures from a previous armed frame (see
+    // AGENTS.md's own RAII rule) - see SetReplayStepPreviews()'s own doc
+    // comment (FrameDebuggerCapture.h) for why this must be empty on every
+    // frame that isn't itself a capture-trigger frame.
+    m_replayStepPreviews.clear();
 }
 
 } // namespace gte

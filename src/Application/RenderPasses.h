@@ -43,6 +43,7 @@
 
 #include <volk.h>
 
+#include <cstddef>
 #include <functional>
 #include <optional>
 #include <vector>
@@ -115,6 +116,64 @@ void AddGameViewPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& rend
     float aspectWidthOverHeight, const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers = {},
     const std::function<void(VkCommandBuffer)>& recordSkyBackground = {},
     FrameDebuggerCaptureContext* frameDebuggerCapture = nullptr);
+
+// task_manager/frame-debugger-7 campaign, PHASE3
+// (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md) - adds N
+// debug-only, self-contained Render Graph passes (one per real object this
+// frame's "GameView" pass will draw), each redrawing objects [0..i] FROM
+// SCRATCH into its OWN dedicated destination texture, so the Frame
+// Debugger's event tree can eventually show a real, correct "accumulated
+// Game View as of this exact step" image for every object-draw step, not
+// just the whole finished frame - see that phase's own doc for why this is
+// deliberately O(N^2) draws across all N passes rather than a shared-target
+// + mid-pass-copy scheme. Only ever called when a capture trigger was just
+// serviced (see IEditorLayer::ConsumePendingFrameDebuggerReplayRequest()) -
+// a genuine no-op (adds zero passes) whenever `objectCount == 0`. NEVER
+// touches the real "GameView" pass/target in any way - `gameTarget` is only
+// ever READ here (its own Extent()/Format(), to size/format the N
+// destination textures identically), never written. `capture` receives the
+// resulting N retained RenderTexture objects via
+// capture.SetReplayStepPreviews(...) (see FrameDebuggerCapture.h) -
+// populated here (pass-declaration time, where a live Renderer& already
+// exists), filled with FRESH (garbage/uninitialized) content until each
+// pass's own execute lambda actually runs later this same Execute() call.
+// IMPORTANT, CORRECTNESS-CRITICAL - returns every one of the N destination
+// TextureHandles this call just imported/declared a pass for. The CALLER
+// MUST append every one of these into its own `outputs`/finalOutputs root
+// set (RenderGraph::Execute()'s own `build` callback return value) - a
+// TextureHandle that never reaches `finalOutputs` (directly, or
+// transitively via another kept pass) is exactly what
+// RenderGraphCompiler::Compile()'s own backward-reachability culling scan
+// removes, and NONE of these N passes are ever read by any other pass in
+// the graph, so skipping this step silently CULLS every one of them - the
+// destination `RenderTexture`s are still created (Renderer::CreateRenderTexture())
+// and still handed to `capture.SetReplayStepPreviews()`, but each pass's
+// own `execute` lambda (the thing that actually draws real pixels into it)
+// NEVER RUNS, leaving genuinely uninitialized VRAM content behind - a real
+// bug confirmed during this phase's own Step 4 manual visual spot-check
+// (the very first implementation attempt produced exactly this: garbage/
+// noise images, not a rendered scene).
+//
+// This function's own real body is defined ENTIRELY inside
+// `#if GTE_ENABLE_EDITOR` in RenderPasses.cpp (a no-op, returning an empty
+// vector, otherwise) - see that file's own comment for why: unlike
+// `frameDebuggerCapture` above (a bare pointer, never dereferenced anywhere
+// in this CORE, always-compiled file), this function's body genuinely
+// NEEDS the real, complete FrameDebuggerCaptureContext type (to call
+// SetReplayStepPreviews() on it), which does not exist at all in a
+// GTE_ENABLE_EDITOR=OFF build - mirrors
+// task_manager/frame-debugger-3/PHASE1_RENDERER_CAPTURE_INSTRUMENTATION.md's
+// own Step 3.1b rule, applied to a CALLEE's body instead of a passthrough
+// parameter. Still always DECLARED and DEFINED (with an empty/no-op body in
+// that configuration) in every build, since Application::Run() references
+// this symbol unconditionally (even though, at runtime, `frameDebuggerCapture`
+// is always nullptr in that configuration, so the call is never actually
+// reached).
+std::vector<rg::TextureHandle> AddFrameDebuggerReplayPasses(rg::RenderGraphBuilder& builder, Game& game,
+    Renderer& renderer, float aspectWidthOverHeight, std::size_t objectCount,
+    const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers,
+    const std::function<void(VkCommandBuffer)>& recordSkyBackground, RenderTexture& gameTarget,
+    FrameDebuggerCaptureContext& capture);
 
 // The Scene-view equivalent of AddGameViewPass() above - `execute` calls
 // Game::Render() with `sceneViewProjection` as its viewProjectionOverride
