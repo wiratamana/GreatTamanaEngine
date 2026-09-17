@@ -381,6 +381,102 @@ FrameDebuggerEventNode BuildGameViewLeaf(
     return leaf;
 }
 
+// frame-debugger-6 campaign, PHASE4 - one real, individually selectable leaf
+// per real per-entity draw call this frame's "GameView" pass actually issued
+// (FrameDebuggerCaptureContext::DrawRecords(), PHASE3). This is an EXPLICIT,
+// user-approved breaking change to the old "one leaf per PASS, never one
+// leaf per mesh" rule (see PHASE0_MASTER_STRATEGY.md's Locked Design
+// Decision #1) - scoped ONLY to real children of the "GameView" leaf itself,
+// nothing else about pass-level granularity elsewhere in this tree changes.
+FrameDebuggerEventNode BuildGameViewDrawRecordLeaf(
+    const FrameDebuggerDrawRecord& record, const Mat4& sharedViewProjection, int eventIndex)
+{
+    FrameDebuggerEventNode leaf;
+    leaf.name = record.displayName + " (Entity " + std::to_string(record.entityIndex) + ")";
+    leaf.isDrawCall = true;
+    leaf.eventIndex = eventIndex;
+
+    FrameDebuggerEventDetails details;
+    details.eventIndex = eventIndex;
+    details.eventLabel = "Draw Mesh";
+    // IMPORTANT - deliberately NOT the literal string "GameView" (a real
+    // self-contradiction this campaign's own double-check pass caught before
+    // implementation): FrameDebuggerPanel::EnsurePreviewDescriptor()
+    // (src/Editor/Panels/FrameDebuggerPanel.cpp, UNCHANGED by this phase - see
+    // Step 5's own "What We Will NOT Do") decides `isViewingGameViewLeaf`
+    // purely via `details->passName == "GameView"`, an EXACT string compare -
+    // if a per-entity leaf's own passName ALSO literally read "GameView",
+    // clicking it would incorrectly take the SAME branch the real "GameView"
+    // leaf takes (forcing the raw pre-atmosphere-composite `preview` image,
+    // always), contradicting this phase's own Step 5 "falls back to the
+    // existing whole-frame compositedPreview/preview image" scope statement -
+    // see Step 2's own second gotcha and Step 4's new regression test for the
+    // full reasoning. "GameView (Entity Draw)" keeps the Pass row human-
+    // readably tied to the real pass this draw happened inside, while
+    // staying a string DISTINCT from the literal "GameView" pass leaf's own.
+    details.passName = "GameView (Entity Draw)";
+    details.shaderName = record.pipelineDebugName;
+
+    if (!record.materialTextureDebugName.empty()) {
+        FrameDebuggerTextureProperty texture;
+        texture.name = "Material Texture";
+        texture.valueLabel = record.materialTextureDebugName;
+        details.textures.push_back(std::move(texture));
+    }
+
+    // vectors - this ONE draw's own real triangle count (never the whole
+    // pass's aggregate - that stays on the "GameView" leaf itself, unchanged)
+    // plus its own entity identity, useful for any HTTP-side consumer that
+    // wants a stable, non-string key.
+    {
+        FrameDebuggerVectorProperty triangleCount;
+        triangleCount.name = "Triangle Count";
+        triangleCount.x = static_cast<float>(record.triangleCount);
+        details.vectors.push_back(triangleCount);
+
+        FrameDebuggerVectorProperty entityIdentity;
+        entityIdentity.name = "Entity (Index, Generation)";
+        entityIdentity.x = static_cast<float>(record.entityIndex);
+        entityIdentity.y = static_cast<float>(record.entityGeneration);
+        details.vectors.push_back(entityIdentity);
+    }
+
+    // matrices - the SAME shared view-projection every draw in this one real
+    // Game-View pass this frame used (mirrors BuildGameViewLeaf()'s own
+    // reasoning for why "last" is exactly as good as "the" here).
+    {
+        FrameDebuggerMatrixProperty viewProjection;
+        viewProjection.name = "ViewProjection";
+        for (int row = 0; row < 4; ++row) {
+            for (int col = 0; col < 4; ++col) {
+                viewProjection.values[static_cast<std::size_t>(row * 4 + col)] = sharedViewProjection(row, col);
+            }
+        }
+        details.matrices.push_back(viewProjection);
+    }
+
+    // blend/Z/stencil - this engine's real, single, constant Pipeline
+    // configuration, exactly like BuildGameViewLeaf()'s own identical rows
+    // (there is nothing per-mesh to report here yet - see PHASE0's Locked
+    // Design Decision #4).
+    {
+        const FrameDebuggerStandardPipelineState pipelineState = DescribeStandardPipelineState();
+        details.blendMode = pipelineState.blendMode;
+        details.zClip = pipelineState.zClip;
+        details.zTest = pipelineState.zTest;
+        details.zWrite = pipelineState.zWrite;
+        details.cull = pipelineState.cull;
+        details.stencilRef = pipelineState.stencilRef;
+        details.stencilComp = pipelineState.stencilComp;
+        details.stencilPass = pipelineState.stencilPass;
+        details.stencilFail = pipelineState.stencilFail;
+        details.stencilZFail = pipelineState.stencilZFail;
+    }
+
+    leaf.details = std::move(details);
+    return leaf;
+}
+
 } // namespace
 
 FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapshot& graphSnapshot,
@@ -487,7 +583,18 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
     if (!preGameViewGroup.children.empty()) {
         root.children.push_back(std::move(preGameViewGroup));
     }
-    root.children.push_back(BuildGameViewLeaf(*gameViewPass, capture, nextEventIndex++));
+    FrameDebuggerEventNode gameViewLeaf = BuildGameViewLeaf(*gameViewPass, capture, nextEventIndex++);
+    // frame-debugger-6 campaign, PHASE4 - one real child leaf per real per-draw
+    // attribution record captured this frame (PHASE3), indexed strictly AFTER
+    // "GameView"'s own eventIndex and strictly BEFORE anything in the
+    // Post-GameView group below - preserves the exact same "pre < GameView <
+    // post" monotonic-eventIndex invariant this function's own PHASE2 (of
+    // frame-debugger-5) comment already documents, simply extended one level
+    // deeper (pre < GameView < GameView's own children < post).
+    for (const FrameDebuggerDrawRecord& record : capture.DrawRecords()) {
+        gameViewLeaf.children.push_back(BuildGameViewDrawRecordLeaf(record, capture.LastViewProjection(), nextEventIndex++));
+    }
+    root.children.push_back(std::move(gameViewLeaf));
 
     for (int i = gameViewIndex + 1; i < static_cast<int>(graphSnapshot.passesInExecutionOrder.size()); ++i) {
         const rg::RenderGraphPassSnapshot& pass = graphSnapshot.passesInExecutionOrder[static_cast<std::size_t>(i)];

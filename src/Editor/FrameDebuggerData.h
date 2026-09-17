@@ -270,6 +270,29 @@ std::string FormatMatrixProperty(const FrameDebuggerMatrixProperty& matrix);
 // frame, not once per view) and `ViewScope::GameView` both still pass
 // through unchanged.
 //
+// frame-debugger-6 campaign, PHASE4
+// (PHASE4_GAMEVIEW_PER_ENTITY_DRAW_TREE_LEAVES.md) - the "GameView" leaf
+// itself is no longer always a childless leaf: it now also gains one real
+// CHILD leaf per real per-draw attribution record captured this frame
+// (`FrameDebuggerCaptureContext::DrawRecords()`, PHASE3 of this campaign),
+// e.g. `"terrain (Entity 2)"`/`"SmokeTestCube (Entity 3)"` - an EXPLICIT,
+// user-approved breaking change to the historical "one leaf per PASS, never
+// one leaf per mesh/entity" rule (PHASE0_MASTER_STRATEGY.md's Locked Design
+// Decision #1, `frame-debugger-2`'s own original rule). Each child leaf's own
+// `eventIndex` is assigned strictly AFTER "GameView"'s own `eventIndex` and
+// strictly BEFORE anything in the Post-GameView group, preserving the same
+// "pre < GameView < post" monotonic-eventIndex invariant one level deeper
+// (pre < GameView < GameView's own children < post). Each child leaf's own
+// `FrameDebuggerEventDetails::passName` is deliberately NEVER the literal
+// string "GameView" (see `BuildGameViewDrawRecordLeaf()`'s own doc comment in
+// FrameDebuggerData.cpp for the full reasoning) - it would otherwise collide
+// with `FrameDebuggerPanel::EnsurePreviewDescriptor()`'s existing
+// `isViewingGameViewLeaf = (details->passName == "GameView")` exact-string
+// check. Selecting a per-entity leaf still falls back to the existing
+// whole-frame `compositedPreview`/`preview` image via the UNCHANGED
+// `ChooseFrameDebuggerPreviewSource()` rule below (Locked Design Decision #4)
+// - no isolated per-mesh preview image is attempted.
+//
 // `gameViewRenderTargetInfo` is DELIBERATELY a plain, already-resolved
 // parameter rather than this function reaching into a live RenderTexture/
 // Renderer itself - the phase document's own Step 3.1 point 4 asks for real

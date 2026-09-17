@@ -32,14 +32,17 @@ cross-wiring with the Pause/Resume toolbar or the embedded HTTP server:
 
 ## What is real today
 
-- **Capture is genuinely real, but PASS-LEVEL, never per-individual-draw-call
-  — this is a PERMANENT, locked design fact about this feature, not an
-  unfinished gap.** One leaf event = one real `gte::rg::RenderGraphPassSnapshot`
-  -backed pass relevant to the Game View — never one leaf per mesh/entity.
-  This is a deliberate, permanent divergence from Unity's own per-draw-call
-  granularity (`frame-debugger-2`'s own `PHASE0_MASTER_STRATEGY.md`'s Locked
-  Design Decision #1), chosen for implementation-cost reasons — do not mistake
-  the coarser-than-Unity granularity for something still to be finished.
+- **Capture is genuinely real, and PASS-LEVEL for every pass EXCEPT
+  `"GameView"` itself — `"GameView"` now ALSO gets one real, individually
+  selectable CHILD leaf per real per-entity draw call it issued that frame**
+  (`frame-debugger-6` campaign, PHASE4 — see "What's new (`frame-debugger-6`
+  campaign)" below). This is an explicit, user-approved BREAKING change to the
+  historical "one leaf per PASS, never one leaf per mesh/entity" rule
+  `frame-debugger-2`'s own `PHASE0_MASTER_STRATEGY.md` originally locked (its
+  own Locked Design Decision #1) — do not mistake the now-per-entity
+  `"GameView"` children for a mistake or a regression; every OTHER pass in
+  this tree (every compute dispatch, and `"GameView"` itself as a pass-level
+  row) remains exactly one leaf per pass, unchanged.
 - **Every real compute-shader dispatch that ran this frame is now a
   first-class, AUTOMATICALLY DISCOVERED tree citizen — never a hand-maintained
   per-pass-name special case** (`frame-debugger-5` campaign). The tree is:
@@ -51,6 +54,9 @@ cross-wiring with the Pause/Resume toolbar or the embedded HTTP server:
     |     |     index in graphSnapshot.passesInExecutionOrder is BEFORE
     |     |     "GameView"'s own index, in real execution order>
     |-- "GameView" leaf                        (the one real graphics/draw pass)
+    |     |-- <one real child leaf PER real per-entity draw call this pass
+    |     |     issued this frame - e.g. "terrain (Entity 2)",
+    |     |     "SmokeTestCube (Entity 3)" - frame-debugger-6 campaign, PHASE4>
     |-- "Compute Dispatches (Post-GameView)"  (only present if >=1 child)
           |-- <every surviving compute pass whose own real execution-order
           |     index is AFTER "GameView"'s own index, in real execution order>
@@ -195,6 +201,72 @@ cross-wiring with the Pause/Resume toolbar or the embedded HTTP server:
   way** — closing the "manual-verification limitation" both `frame-debugger-1`
   and `frame-debugger-2` had to accept as a documented gap. See "HTTP
   automation" below.
+
+## What's new (`frame-debugger-6` campaign)
+
+`frame-debugger-6` (`task_manager/frame-debugger-6/PHASE0_MASTER_STRATEGY.md`,
+five phases) started from one vague user report ("load scene existing scene
+from project, the terrain seems not get registered on frame debugger"), which
+turned out to be two real, independent findings: a confirmed bug (this engine
+runs a SEPARATE per-view copy of several Atmosphere compute passes for the
+Editor's own Scene View, but both copies were registered under the exact same
+literal pass NAME, producing duplicate/indistinguishable leaves, and even
+leaking a genuinely Scene-View-only debug tool, `"ComputeBlurValidation"`,
+into this Game-View-ONLY tree), and the user's own real underlying ask in
+their own words: **"frame debugger dont have exact step where terrain got
+drawn"**.
+
+- **The duplicate/mis-scoped-pass bug is fixed at the root** (PHASE1/PHASE2) —
+  a new, structurally-tracked `gte::rg::ViewScope` enum (`Shared`/`GameView`/
+  `SceneView`) is stamped once, at the same "choke point"
+  `RenderGraphBuilder::AddPass()`/`AddComputePass()` calls that already exist,
+  by the handful of Application-layer call sites that build a genuinely
+  per-view pass (the Sky-View LUT, Aerial Perspective Volume, Aerial
+  Perspective Composite, `ComputeBlurValidation`) — never a
+  pass-name/resource-suffix string comparison. `FrameDebuggerData.cpp`'s
+  `BuildRealFrameDebuggerSnapshot()` now additionally excludes any surviving
+  compute pass whose `viewScope` is `SceneView` from both Pre-/Post-GameView
+  discovery loops, permanently closing this leak for any future pass that
+  correctly stamps its own `ViewScope` too.
+- **`"GameView"` now has real, individually selectable per-entity CHILD
+  leaves — the actual user-facing feature** (PHASE3/PHASE4) — see "What is
+  real today" above for the current tree shape. A new, never-deduplicated
+  `FrameDebuggerCaptureContext::DrawRecords()` list (PHASE3) captures one
+  `FrameDebuggerDrawRecord` per real draw call `RenderSystem::Draw()` issues
+  this frame (the real ECS `Entity`, its resolved display name, its own real
+  Pipeline/MaterialTexture debug names, and its own real per-draw triangle
+  count), and `BuildGameViewDrawRecordLeaf()` (PHASE4,
+  `src/Editor/FrameDebuggerData.cpp`) turns each one into a real child leaf
+  of the `"GameView"` node, e.g. `"terrain (Entity 2)"` — clicking it shows
+  THAT draw's own real shader name and real triangle count (not the whole
+  pass's aggregate). `FrameDebuggerPanel::RenderEventNode()` (PHASE4) was
+  fixed so a selectable leaf that ALSO has children (this new `"GameView"`
+  shape) actually renders its children on screen — previously, every leaf
+  this engine ever built had no children, so this code path silently assumed
+  `isDrawCall == true` meant "no children", a real gotcha this phase's own
+  double-check pass caught before it could ship as a bug.
+- **What We Will NOT Do (explicit scope limit, unchanged from PHASE0):** no
+  isolated/cropped/masked preview image of just one entity's own pixels —
+  selecting a per-entity leaf still falls back to the existing whole-frame
+  `compositedPreview`/`preview` image via the UNCHANGED
+  `ChooseFrameDebuggerPreviewSource()` rule. Getting a real, isolated per-mesh
+  image would need a stencil/ID-buffer or a full draw-call-level
+  command-buffer replay — a separate, NOT-yet-approved future feature.
+  Relatedly, a per-entity leaf's own `FrameDebuggerEventDetails::passName` is
+  deliberately never the literal string `"GameView"` (it reads
+  `"GameView (Entity Draw)"` instead) specifically so it can never collide
+  with `FrameDebuggerPanel::EnsurePreviewDescriptor()`'s existing
+  `isViewingGameViewLeaf = (details->passName == "GameView")` exact-string
+  check — a real self-contradiction risk this campaign's own double-check
+  pass found and fixed in its own strategy document BEFORE implementation,
+  not a shipped bug.
+
+See `task_manager/frame-debugger-6/CAMPAIGN_COMPLETION_REPORT.md` for the full
+five-phase writeup plus the live, HTTP-driven, screenshot-verified proof both
+the duplicate-pass bug is gone and the new per-entity `terrain` leaf is
+selectable, shows correct data, and the preview box correctly still shows the
+composited whole-frame image rather than colliding with the `"GameView"`
+leaf's own pre-composite-only preview rule.
 
 ## Known limitation, now fixed (`frame-debugger-4` campaign)
 

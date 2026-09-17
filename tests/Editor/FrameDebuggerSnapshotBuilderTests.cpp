@@ -493,6 +493,149 @@ TEST(FrameDebuggerSnapshotBuilderTest, SharedViewScopedPassStillAppearsNormally)
     EXPECT_EQ(snapshot.totalEventCount, 2);
 }
 
+// frame-debugger-6 campaign, PHASE4
+// (PHASE4_GAMEVIEW_PER_ENTITY_DRAW_TREE_LEAVES.md, Step 4) - the actual
+// user-facing feature: the "GameView" node now gets one real child leaf per
+// real FrameDebuggerDrawRecord captured this frame.
+TEST(FrameDebuggerSnapshotBuilderTest, GameViewNodeGetsOneChildLeafPerDrawRecord)
+{
+    rg::RenderGraphSnapshot graphSnapshot;
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+
+    FrameDebuggerCaptureContext capture;
+    capture.RecordEntityDraw(2, 0, "terrain", "Mesh.vert/Mesh.frag (PositionNormal)", "", 1045458);
+    capture.RecordEntityDraw(3, 0, "SmokeTestCube", "Mesh.vert/Mesh.frag (PositionNormal)", "MaterialTexture abc123", 12);
+
+    const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
+
+    ASSERT_EQ(snapshot.rootNodes.size(), 1u);
+    const FrameDebuggerEventNode& root = snapshot.rootNodes[0];
+    ASSERT_EQ(root.children.size(), 1u); // Only "GameView" - no compute-dispatch groups.
+
+    const FrameDebuggerEventNode& gameViewLeaf = root.children[0];
+    EXPECT_TRUE(gameViewLeaf.isDrawCall);
+    EXPECT_EQ(gameViewLeaf.eventIndex, 0);
+    ASSERT_EQ(gameViewLeaf.children.size(), 2u); // (a) exactly that many children.
+
+    // (b) each child's name/eventIndex is correct.
+    const FrameDebuggerEventNode& terrainLeaf = gameViewLeaf.children[0];
+    EXPECT_EQ(terrainLeaf.name, "terrain (Entity 2)");
+    EXPECT_TRUE(terrainLeaf.isDrawCall);
+    EXPECT_EQ(terrainLeaf.eventIndex, 1);
+    ASSERT_TRUE(terrainLeaf.details.has_value());
+    EXPECT_EQ(terrainLeaf.details->shaderName, "Mesh.vert/Mesh.frag (PositionNormal)");
+    EXPECT_TRUE(terrainLeaf.details->textures.empty()); // Untextured draw - no Material Texture row.
+    bool foundTerrainTriangleCount = false;
+    for (const FrameDebuggerVectorProperty& vec : terrainLeaf.details->vectors) {
+        if (vec.name == "Triangle Count") {
+            foundTerrainTriangleCount = true;
+            EXPECT_FLOAT_EQ(vec.x, 1045458.0f); // This ONE draw's own count, never the whole-pass aggregate.
+        }
+    }
+    EXPECT_TRUE(foundTerrainTriangleCount);
+
+    const FrameDebuggerEventNode& cubeLeaf = gameViewLeaf.children[1];
+    EXPECT_EQ(cubeLeaf.name, "SmokeTestCube (Entity 3)");
+    EXPECT_EQ(cubeLeaf.eventIndex, 2);
+    ASSERT_TRUE(cubeLeaf.details.has_value());
+    ASSERT_EQ(cubeLeaf.details->textures.size(), 1u);
+    EXPECT_EQ(cubeLeaf.details->textures[0].name, "Material Texture");
+    EXPECT_EQ(cubeLeaf.details->textures[0].valueLabel, "MaterialTexture abc123");
+
+    // (c) eventIndex stays strictly monotonic increasing: GameView(0) < terrain(1) < cube(2).
+    EXPECT_LT(gameViewLeaf.eventIndex, terrainLeaf.eventIndex);
+    EXPECT_LT(terrainLeaf.eventIndex, cubeLeaf.eventIndex);
+
+    // (d) totalEventCount correctly includes the new children.
+    EXPECT_EQ(snapshot.totalEventCount, 3);
+}
+
+// eventIndex stays strictly monotonic across pre-group -> GameView ->
+// GameView's children -> post-group, extending
+// EventIndexIsMonotonicAcrossPreGameViewGameViewAndPostGameView one level
+// deeper.
+TEST(FrameDebuggerSnapshotBuilderTest, EventIndexIsMonotonicAcrossPreGameViewGameViewChildrenAndPostGameView)
+{
+    rg::RenderGraphSnapshot graphSnapshot;
+    graphSnapshot.passesInExecutionOrder.push_back(MakeComputePass("PreA"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakeComputePass("PostA"));
+
+    FrameDebuggerCaptureContext capture;
+    capture.RecordEntityDraw(2, 0, "terrain", "Mesh.vert/Mesh.frag (PositionNormal)", "", 1045458);
+    capture.RecordEntityDraw(3, 0, "SmokeTestCube", "Mesh.vert/Mesh.frag (PositionNormal)", "", 12);
+
+    const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
+
+    ASSERT_EQ(snapshot.rootNodes.size(), 1u);
+    const FrameDebuggerEventNode& root = snapshot.rootNodes[0];
+    ASSERT_EQ(root.children.size(), 3u);
+
+    const FrameDebuggerEventNode& preGroup = root.children[0];
+    const FrameDebuggerEventNode& gameViewLeaf = root.children[1];
+    const FrameDebuggerEventNode& postGroup = root.children[2];
+
+    ASSERT_EQ(preGroup.children.size(), 1u);
+    ASSERT_EQ(gameViewLeaf.children.size(), 2u);
+    ASSERT_EQ(postGroup.children.size(), 1u);
+
+    EXPECT_EQ(preGroup.children[0].eventIndex, 0);
+    EXPECT_EQ(gameViewLeaf.eventIndex, 1);
+    EXPECT_EQ(gameViewLeaf.children[0].eventIndex, 2);
+    EXPECT_EQ(gameViewLeaf.children[1].eventIndex, 3);
+    EXPECT_EQ(postGroup.children[0].eventIndex, 4);
+    EXPECT_EQ(snapshot.totalEventCount, 5);
+}
+
+// No draw records captured this frame -> "GameView" keeps zero children,
+// exactly like every earlier campaign's behavior (an honestly empty Game
+// View, e.g. before the very first mesh entity is spawned).
+TEST(FrameDebuggerSnapshotBuilderTest, GameViewNodeHasNoChildrenWhenNoDrawRecordsCaptured)
+{
+    rg::RenderGraphSnapshot graphSnapshot;
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+
+    const FrameDebuggerCaptureContext capture;
+    const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
+
+    ASSERT_EQ(snapshot.rootNodes.size(), 1u);
+    const FrameDebuggerEventNode& gameViewLeaf = snapshot.rootNodes[0].children[0];
+    EXPECT_TRUE(gameViewLeaf.children.empty());
+    EXPECT_EQ(snapshot.totalEventCount, 1);
+}
+
+// REQUIRED regression test (found by this campaign's own double-check pass,
+// not a shipped bug, PHASE4's own Step 4) - a per-entity draw-record child
+// leaf's own `details->passName` must NEVER be the literal string "GameView"
+// - only the real "GameView" pass leaf itself may ever carry that exact
+// value. FrameDebuggerPanel::EnsurePreviewDescriptor() (UNCHANGED by this
+// phase) decides `isViewingGameViewLeaf` via `details->passName == "GameView"`
+// - an EXACT string compare - so a collision here would silently force every
+// per-entity leaf to show the pre-atmosphere-composite-only image, directly
+// contradicting this phase's own Step 5 "falls back to the existing
+// whole-frame compositedPreview/preview image" scope statement.
+TEST(FrameDebuggerSnapshotBuilderTest, GameViewDrawRecordLeafPassNameIsNeverLiterallyGameView)
+{
+    rg::RenderGraphSnapshot graphSnapshot;
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+
+    FrameDebuggerCaptureContext capture;
+    capture.RecordEntityDraw(2, 0, "terrain", "Mesh.vert/Mesh.frag (PositionNormal)", "", 1045458);
+
+    const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
+
+    ASSERT_EQ(snapshot.rootNodes.size(), 1u);
+    const FrameDebuggerEventNode& gameViewLeaf = snapshot.rootNodes[0].children[0];
+    ASSERT_EQ(gameViewLeaf.children.size(), 1u);
+    ASSERT_TRUE(gameViewLeaf.children[0].details.has_value());
+    EXPECT_NE(gameViewLeaf.children[0].details->passName, "GameView");
+    // Also confirm the real "GameView" pass leaf itself is unaffected - it
+    // must still carry the literal value, unchanged.
+    ASSERT_TRUE(gameViewLeaf.details.has_value());
+    EXPECT_EQ(gameViewLeaf.details->passName, "GameView");
+}
+
+
 
 // NEW - PHASE2's own Step 3.6 item (c): a culled compute pass must never
 // appear in either group, on EITHER side of "GameView" - a culled pass did

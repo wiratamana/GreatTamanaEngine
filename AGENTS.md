@@ -93,8 +93,9 @@ Debugger" window, opened via Window > Frame Debugger or `GET
 /frame_debugger/open`) together give the Editor a genuinely working,
 Unity-Frame-Debugger-style tool for the Game View render target: enabling it
 freezes and captures one real rendered frame's worth of real Render Graph
-passes (pass-level granularity, not per-draw-call - a deliberate, permanent
-design choice, not a gap), the event tree shows those real passes, selecting
+passes (pass-level granularity for every pass except `"GameView"` itself,
+which - see below - now also gains real per-entity child leaves), the event
+tree shows those real passes, selecting
 one shows real shader/blend/Z/stencil/texture/vector/matrix data plus a real
 preview image reconstructed as of that exact point in the frame. **Every real
 compute-shader dispatch that ran this frame is now a first-class, automatically
@@ -138,6 +139,19 @@ forced onto the main ImGui viewport whenever opened this way so `GET
 /get_swapchain` always sees it. True per-pass "stop"/breakpoint execution
 control (pausing the GPU mid-frame at a specific compute dispatch boundary) is
 a still-deferred future item - see `TODO.md`'s "Frame Debugger" section.
+**`"GameView"` itself now also gains real, individually selectable per-entity
+child leaves** (`frame-debugger-6` campaign, e.g. `"terrain (Entity 2)"`) - an
+explicit, user-approved BREAKING change to the historical "one leaf per pass,
+never one leaf per mesh/entity" rule, answering "which exact step drew this
+entity" directly; every other pass in this tree remains exactly one leaf per
+pass, unchanged, and a per-entity leaf's own preview still falls back to the
+existing whole-frame `compositedPreview`/`preview` image (no isolated
+per-mesh preview image is attempted). The same campaign also fixed a
+duplicate/mis-scoped-pass bug via a new, structural `gte::rg::ViewScope` tag
+(`Shared`/`GameView`/`SceneView`) stamped once at the render graph's own
+`AddPass()`/`AddComputePass()` choke point - see
+`docs/conventions/frame-debugger.md`'s own "What's new (`frame-debugger-6`
+campaign)" section for the full detail.
 
 Full convention: [docs/conventions/frame-debugger.md](docs/conventions/frame-debugger.md).
 

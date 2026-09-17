@@ -356,12 +356,30 @@ void FrameDebuggerPanel::BuildFrameStepperRow(const FrameDebuggerSnapshot& snaps
 
 void FrameDebuggerPanel::RenderEventNode(const FrameDebuggerEventNode& node)
 {
-    if (!node.isDrawCall) {
-        // A group node (e.g. "Drawing", "Render.OpaqueGeometry") - an
-        // expandable tree header; default-open so a shallow real
-        // hierarchy is legible without extra clicking, mirroring the
-        // reference screenshot's own mostly-expanded look.
-        const bool open = ImGui::TreeNodeEx(node.name.c_str(), ImGuiTreeNodeFlags_DefaultOpen);
+    // frame-debugger-6 campaign, PHASE4 - branches on "does this node have
+    // children" FIRST, regardless of `isDrawCall`, so a selectable leaf that
+    // ALSO has real children (the new "GameView" shape, once it has
+    // per-entity draw-record children - see BuildRealFrameDebuggerSnapshot())
+    // renders as an expandable AND selectable row, while every pre-existing
+    // leaf/group shape (no children at all, or a pure group with
+    // isDrawCall == false) keeps rendering exactly as before this phase.
+    if (!node.children.empty()) {
+        // Handles BOTH a pure group (isDrawCall == false, e.g.
+        // "Compute Dispatches (Pre-GameView)") AND a selectable leaf that ALSO
+        // has real children (new this campaign - "GameView" itself, once it
+        // has per-entity draw-record children). ImGuiTreeNodeFlags_Selected
+        // highlights the row exactly like the leaf-only Selectable() branch
+        // below already does; IsItemClicked() right after TreeNodeEx() is
+        // what makes clicking the row (not just its arrow) select it,
+        // mirroring Selectable()'s own click-to-select behavior.
+        ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_DefaultOpen;
+        if (node.isDrawCall && node.eventIndex == m_selectedEventIndex) {
+            flags |= ImGuiTreeNodeFlags_Selected;
+        }
+        const bool open = ImGui::TreeNodeEx(node.name.c_str(), flags);
+        if (node.isDrawCall && ImGui::IsItemClicked()) {
+            m_selectedEventIndex = node.eventIndex;
+        }
         if (open) {
             for (const FrameDebuggerEventNode& child : node.children) {
                 RenderEventNode(child);
@@ -371,9 +389,18 @@ void FrameDebuggerPanel::RenderEventNode(const FrameDebuggerEventNode& node)
         return;
     }
 
-    // A leaf draw-call row - a single selectable line, highlighted when
-    // it matches m_selectedEventIndex; clicking it selects it (feeding
-    // PHASE6's BuildEventDetailsSection() via FindEventDetailsByIndex()).
+    if (!node.isDrawCall) {
+        // Defensive only - every real group this engine builds today only
+        // gets added when it already has >= 1 child (see
+        // BuildRealFrameDebuggerSnapshot()'s own "only add if non-empty"
+        // rule) - this branch should be unreachable in practice.
+        return;
+    }
+
+    // A leaf draw-call row with NO children - unchanged from every prior
+    // campaign. Highlighted when it matches m_selectedEventIndex; clicking
+    // it selects it (feeding PHASE6's BuildEventDetailsSection() via
+    // FindEventDetailsByIndex()).
     const bool isSelected = (node.eventIndex == m_selectedEventIndex);
     if (ImGui::Selectable(node.name.c_str(), isSelected)) {
         m_selectedEventIndex = node.eventIndex;

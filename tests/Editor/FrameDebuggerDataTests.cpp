@@ -95,6 +95,53 @@ TEST(FrameDebuggerDataTest, FindEventDetailsByIndexTest)
     EXPECT_FALSE(FindEventDetailsByIndex(snapshot, -1).has_value());
 }
 
+// frame-debugger-6 campaign, PHASE4
+// (PHASE4_GAMEVIEW_PER_ENTITY_DRAW_TREE_LEAVES.md, Step 4) - proves
+// FindEventDetailsByIndexRecursive() already works correctly against the NEW
+// nested shape (a selectable leaf, e.g. "GameView", that ALSO has its own
+// children) with zero changes needed to this function itself - only
+// RenderEventNode() (the ImGui-side panel code) needed a fix for this phase.
+TEST(FrameDebuggerDataTest, FindEventDetailsByIndexFindsAPerEntityChildLeafOfASelectableParentLeaf)
+{
+    FrameDebuggerEventDetails childDetails;
+    childDetails.eventIndex = 5;
+    childDetails.passName = "GameView (Entity Draw)";
+    childDetails.shaderName = "Mesh.vert/Mesh.frag (PositionNormal)";
+
+    FrameDebuggerEventNode childLeaf;
+    childLeaf.name = "terrain (Entity 2)";
+    childLeaf.isDrawCall = true;
+    childLeaf.eventIndex = 5;
+    childLeaf.details = childDetails;
+
+    // The parent leaf is ITSELF a selectable draw call (isDrawCall == true)
+    // AND has real children - the new shape this phase introduces for the
+    // real "GameView" leaf.
+    FrameDebuggerEventDetails parentDetails;
+    parentDetails.eventIndex = 4;
+    parentDetails.passName = "GameView";
+
+    FrameDebuggerEventNode parentLeaf;
+    parentLeaf.name = "GameView";
+    parentLeaf.isDrawCall = true;
+    parentLeaf.eventIndex = 4;
+    parentLeaf.details = parentDetails;
+    parentLeaf.children.push_back(childLeaf);
+
+    FrameDebuggerSnapshot snapshot;
+    snapshot.rootNodes.push_back(parentLeaf);
+    snapshot.totalEventCount = 2;
+
+    const std::optional<FrameDebuggerEventDetails> foundParent = FindEventDetailsByIndex(snapshot, 4);
+    ASSERT_TRUE(foundParent.has_value());
+    EXPECT_EQ(foundParent->passName, "GameView");
+
+    const std::optional<FrameDebuggerEventDetails> foundChild = FindEventDetailsByIndex(snapshot, 5);
+    ASSERT_TRUE(foundChild.has_value());
+    EXPECT_EQ(foundChild->passName, "GameView (Entity Draw)");
+    EXPECT_EQ(foundChild->shaderName, "Mesh.vert/Mesh.frag (PositionNormal)");
+}
+
 TEST(FrameDebuggerDataTest, FormatVectorPropertyTest)
 {
     FrameDebuggerVectorProperty color;
