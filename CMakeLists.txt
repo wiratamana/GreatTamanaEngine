@@ -264,6 +264,12 @@ add_library(gte_core STATIC
     src/ECS/Components/SkeletalAnimator.h
     src/ECS/Components/ResolvedAnimationPose.h
     src/ECS/Components/DynamicChainRig.h
+    src/ECS/Reflection/MathJsonAdapters.h
+    src/ECS/Reflection/ComponentTypeDescriptor.h
+    src/ECS/Reflection/ComponentTypeRegistry.h
+    src/ECS/Reflection/ComponentTypeRegistry.inl
+    src/ECS/Reflection/ComponentTypeRegistry.cpp
+    src/ECS/Reflection/ReflectFieldMacros.h
     src/Animation/BoneLocalOffset.h
     src/Animation/BoneChainResolver.h
     src/Animation/BonePoseMath.h

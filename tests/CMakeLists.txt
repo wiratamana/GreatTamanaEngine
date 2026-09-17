@@ -1909,6 +1909,7 @@ set(GTE_TEST_SOURCES
     ECS/CameraTests.cpp
     ECS/TransformHierarchyTests.cpp
     ECS/EntityQueryTests.cpp
+    ECS/Reflection/ComponentTypeRegistryTests.cpp
     Game/RenderSystemTests.cpp
     Game/GameEntityCommandsTests.cpp
     Game/GameUpdateFreezeGatingTests.cpp
