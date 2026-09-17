@@ -449,18 +449,67 @@ See `AGENTS.md`'s "Frame Debugger" section and
 `docs/conventions/frame-debugger.md`'s "What's new (`frame-debugger-6`
 campaign)" section for the full root-cause writeup.
 
+A fourth follow-up campaign, `frame-debugger-7`
+(`task_manager/frame-debugger-7/PHASE0_MASTER_STRATEGY.md`, seven phases,
+`CAMPAIGN_COMPLETION_REPORT.md`), fixed TWO more real, user-confirmed bugs and
+made two explicit, LOCKED, user-approved BREAKING CHANGES that supersede two
+of the "DONE" bullets recorded further above (kept there as an accurate
+historical record of what was true AT THE TIME, not a live description of the
+system today):
+
+- ~~The very first captured frame after pressing "Enable" was missing objects
+  entirely (no terrain row at all) - pressing Enable a SECOND time always
+  captured correctly~~ - DONE, fixed. All three real capture triggers
+  (Enable-edge / Step / "Capture" button, HTTP routes included) now only ARM
+  a pending flag; the actual capture is deferred to the next `Build()` call,
+  by which point a full frame's worth of rendering already happened with the
+  capture context correctly armed for its ENTIRE duration.
+- ~~Clicking an object in the event tree never showed the screen as it looked
+  right after THAT object was drawn - it always showed the same whole-frame
+  image~~ - DONE, fixed. N new, debug-only, self-contained Render Graph
+  passes now redraw objects `[0..i]` from scratch into their own dedicated
+  destination textures on every explicit capture trigger, giving every leaf
+  (compute pass OR per-object draw) a real, correct "accumulated Game View as
+  of this exact step" preview.
+- **BREAKING CHANGE, supersedes the "A frame-history ring buffer..." DONE
+  bullet further above**: the 8-slot `FrameDebuggerHistory` ring buffer and
+  its "Frame History" Prev/Next mini-toolbar are REMOVED entirely - exactly
+  ONE captured frame is now ever held in memory
+  (`FrameDebuggerCurrentCapture`), matching Unity's own Frame Debugger, which
+  does not remember past frames either. The eight `/frame_debugger/*` routes
+  mentioned further above are now SEVEN (`GET /frame_debugger/step_history`
+  is gone).
+- **BREAKING CHANGE, supersedes the `frame-debugger-5` per-compute-pass-
+  texture-preview entry further above**: `computePassPreviews`/
+  `CollectComputePassTextureWrites()`/`CollectComputePassVolumeTextureWrites()`
+  are REMOVED entirely - every leaf now shows the SAME kind of unified
+  "accumulated Game View" image instead of a compute pass's own distinct
+  output texture. Raw per-pass texture pixel inspection remains fully
+  possible elsewhere (the "Render Graph" panel / `GET /get_texture`).
+
+See `AGENTS.md`'s "Frame Debugger" section and
+`docs/conventions/frame-debugger.md`'s "What's new (`frame-debugger-7`
+campaign)" section for the full root-cause writeup.
+
 ### Still genuinely deferred (permanent design choices or real future work)
 
-- ~~Per-individual-draw-call event granularity~~ - PARTIALLY DONE
-  (`frame-debugger-6` campaign, PHASE3/PHASE4): `"GameView"` now gets one
-  real, individually selectable per-entity CHILD leaf per real draw call it
-  issued that frame (e.g. `"terrain (Entity 2)"`) - an explicit,
-  user-approved BREAKING change to the old "PERMANENT, pass-level only" rule,
-  but scoped strictly to `"GameView"`'s own children; every OTHER pass in the
-  tree (every compute dispatch, `"GameView"` itself as a pass-level row)
-  remains exactly one leaf per pass, unchanged - see `AGENTS.md`'s "Frame
-  Debugger" section and `docs/conventions/frame-debugger.md`'s "What's new
-  (`frame-debugger-6` campaign)" section for the full detail.
+- ~~Per-individual-draw-call event granularity~~ - MORE DONE
+  (`frame-debugger-6` campaign, PHASE3/PHASE4, extended by `frame-debugger-7`):
+  `"GameView"` gets one real, individually selectable per-entity CHILD leaf
+  per real draw call it issued that frame (e.g. `"terrain (Entity 2)"`) - an
+  explicit, user-approved BREAKING change to the old "PERMANENT, pass-level
+  only" rule, but scoped strictly to `"GameView"`'s own children; every OTHER
+  pass in the tree (every compute dispatch, `"GameView"` itself as a
+  pass-level row) remains exactly one leaf per pass, unchanged. As of
+  `frame-debugger-7`, each per-entity leaf's own preview no longer falls back
+  to the whole-frame image (`frame-debugger-6`'s own explicit "What We Will
+  NOT Do" scope limit) - it now shows a REAL, correct, per-step accumulated
+  image (see below) - the one remaining gap is a genuinely ISOLATED/cropped/
+  masked image of just that one entity's own pixels, which would still need a
+  stencil/ID-buffer or a full draw-call-level command-buffer replay, and is
+  still not attempted - see `AGENTS.md`'s "Frame Debugger" section and
+  `docs/conventions/frame-debugger.md`'s "What's new (`frame-debugger-7`
+  campaign)" section for the full detail.
 - **Scene View or Present-pass capture.** The Frame Debugger's own captured
   event tree is permanently filtered to the Game View's own passes only - a
   clean, well-isolated single-line filter change for some future campaign to

@@ -83,75 +83,34 @@ Full convention: [docs/conventions/time-and-playback-pause.md](docs/conventions/
 `src/Editor/FrameDebuggerData.h/.cpp` (pure data model, real snapshot builder),
 `src/Editor/FrameDebuggerCapture.h/.cpp` (the per-frame capture context
 threaded through `Renderer::Submit()`/`RenderSystem::Draw()`, zero overhead
-when disarmed), `src/Editor/FrameDebuggerHistory.h/.cpp` (a real 8-slot
-multi-frame history ring buffer, each slot holding a real snapshot plus a
-retained GPU copy of that frame's Game View output), `src/Editor/
-FrameDebuggerPreviewProcessing.h/.cpp` (a real Channels/Levels
-preview-compositing CPU oracle + compute shader), and
-`src/Editor/Panels/FrameDebuggerPanel.h/.cpp` (the on-demand floating "Frame
-Debugger" window, opened via Window > Frame Debugger or `GET
-/frame_debugger/open`) together give the Editor a genuinely working,
-Unity-Frame-Debugger-style tool for the Game View render target: enabling it
-freezes and captures one real rendered frame's worth of real Render Graph
-passes (pass-level granularity for every pass except `"GameView"` itself,
-which - see below - now also gains real per-entity child leaves), the event
-tree shows those real passes, selecting
-one shows real shader/blend/Z/stencil/texture/vector/matrix data plus a real
-preview image reconstructed as of that exact point in the frame. **Every real
-compute-shader dispatch that ran this frame is now a first-class, automatically
-discovered citizen of this tree, never a hand-maintained special case**
-(`frame-debugger-5` campaign) - `RenderGraphBuilder::AddComputePass()` is the
-one real "choke point" that stamps a new, structurally-tracked
-`PassRecord::isComputePass`/`RenderGraphPassSnapshot::isComputePass` flag
-(`RenderGraphTypes.h`/`RenderGraphSnapshot.h`), read/write rows are labeled by
-a real per-entry `ResourceKind` (`readKinds`/`writeKinds` - Texture/Buffer/
-VolumeTexture, never guessed), and `FrameDebuggerData.cpp`'s
-`BuildRealFrameDebuggerSnapshot()` walks every surviving compute pass in the
-current frame's `RenderGraphSnapshot` generically, splitting them into two
-tree groups positioned around the real `"GameView"` leaf by each pass's own
-real execution-order index: `"Compute Dispatches (Pre-GameView)"` (e.g. GPU
-Skinning, every Atmosphere LUT pass, the Aerial Perspective Volume pass - all
-of which genuinely run BEFORE `"GameView"` samples them) and
-`"Compute Dispatches (Post-GameView)"` (e.g. the Aerial Perspective Composite
-pass) - never one single group unconditionally placed after `"GameView"`,
-which would misrepresent passes that really ran earlier. A future compute pass
-anywhere in this engine appears here automatically, with zero further
-Frame-Debugger-specific code ever required. Selecting any one of these leaves
-shows THAT PASS'S OWN real output image, not the whole Game View: `
-FrameDebuggerHistory::CaptureFrame()` eagerly retains one more real GPU copy
-per surviving compute pass's own first `Texture`-kind write (sourced from the
-already-existing `RenderGraphDebugTextureRegistry`), and a pass whose only
-visual write is a 3D volume texture (the Aerial Perspective froxel volume)
-instead gets a real ray-marched 2D thumbnail by reusing the already-shipped
-`VolumeTexturePreviewRenderer` (the same renderer `GET /get_texture` already
-uses for a volume) - a pass with neither (e.g. GPU Skinning's own buffer
-write) correctly falls back to the existing whole-frame preview, an honest
-"not available" state, never a wrong or fabricated image. Two whole-frame
-reconstructed points remain genuinely distinct too: selecting the `"GameView"`
-leaf itself shows the frame before atmosphere scattering/aerial-perspective fog
-is applied, and everything else defaults to the final, fog-inclusive image. A
-Frame-History mini-toolbar steps backward/forward through past captured
-frames, and the Channels/Levels controls really affect the preview image via a
-dedicated compositing shader. The entire feature is drivable end-to-end
-over the embedded HTTP server (`GET /frame_debugger/open|enable|capture|
-select_event|step_history|set_channel|set_levels|state`), with the window
-forced onto the main ImGui viewport whenever opened this way so `GET
-/get_swapchain` always sees it. True per-pass "stop"/breakpoint execution
-control (pausing the GPU mid-frame at a specific compute dispatch boundary) is
-a still-deferred future item - see `TODO.md`'s "Frame Debugger" section.
-**`"GameView"` itself now also gains real, individually selectable per-entity
-child leaves** (`frame-debugger-6` campaign, e.g. `"terrain (Entity 2)"`) - an
-explicit, user-approved BREAKING change to the historical "one leaf per pass,
-never one leaf per mesh/entity" rule, answering "which exact step drew this
-entity" directly; every other pass in this tree remains exactly one leaf per
-pass, unchanged, and a per-entity leaf's own preview still falls back to the
-existing whole-frame `compositedPreview`/`preview` image (no isolated
-per-mesh preview image is attempted). The same campaign also fixed a
-duplicate/mis-scoped-pass bug via a new, structural `gte::rg::ViewScope` tag
-(`Shared`/`GameView`/`SceneView`) stamped once at the render graph's own
-`AddPass()`/`AddComputePass()` choke point - see
-`docs/conventions/frame-debugger.md`'s own "What's new (`frame-debugger-6`
-campaign)" section for the full detail.
+when disarmed), `src/Editor/FrameDebuggerHistory.h/.cpp` (the class itself is
+`gte::FrameDebuggerCurrentCapture` - exactly ONE captured frame is ever held
+in memory, no multi-frame history, `frame-debugger-7` campaign - an explicit,
+user-approved BREAKING CHANGE replacing the old 8-slot ring buffer),
+`src/Editor/FrameDebuggerPreviewProcessing.h/.cpp` (a real Channels/Levels
+preview-compositing CPU oracle + compute shader), and `src/Editor/Panels/
+FrameDebuggerPanel.h/.cpp` (the on-demand floating "Frame Debugger" window,
+opened via Window > Frame Debugger or `GET /frame_debugger/open`) together
+give the Editor a genuinely working, Unity-Frame-Debugger-style tool for the
+Game View render target: enabling it captures one real rendered frame's worth
+of real Render Graph passes (every real compute-shader dispatch is a
+first-class, automatically discovered tree citizen, never a hand-maintained
+special case) PLUS one real, individually selectable per-entity child leaf
+under `"GameView"` per real draw call it issued that frame. **Selecting ANY
+leaf - a compute pass or a per-object draw alike - now shows a real, correct
+"accumulated Game View as of this exact step" preview image** (`frame-debugger-7`
+campaign, an explicit, user-approved BREAKING CHANGE replacing the older
+per-compute-pass-distinct-texture preview outright): N debug-only, self-
+contained Render Graph passes redraw objects `[0..i]` from scratch into their
+own dedicated destination textures on every explicit capture trigger (Enable-
+edge / Step / "Capture" button), deferred by exactly one frame so the very
+first capture after "Enable" is never missing objects. The entire feature is
+drivable end-to-end over the embedded HTTP server (`GET
+/frame_debugger/open|enable|capture|select_event|set_channel|set_levels|state`),
+with the window forced onto the main ImGui viewport whenever opened this way.
+True per-pass "stop"/breakpoint execution control (pausing the GPU mid-frame
+at a specific compute dispatch boundary) is a still-deferred future item -
+see `TODO.md`'s "Frame Debugger" section.
 
 Full convention: [docs/conventions/frame-debugger.md](docs/conventions/frame-debugger.md).
 

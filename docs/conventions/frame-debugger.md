@@ -26,9 +26,21 @@ appeared anywhere in the event tree at all — every Atmosphere LUT pass
 the Aerial Perspective Volume Debug-Slice pass, and Compute Blur Validation's
 own pass were completely invisible, regardless of whether they ran that frame
 — see "Known limitation, now fixed (`frame-debugger-5` campaign)" below for the
-full story. **This is the CURRENT, real system** — follow these rules whenever
-touching this window, its data model, its capture instrumentation, or its
-cross-wiring with the Pause/Resume toolbar or the embedded HTTP server:
+full story. A third follow-up campaign, `frame-debugger-6`
+(`task_manager/frame-debugger-6/PHASE0_MASTER_STRATEGY.md`, five phases), gave
+`"GameView"` real, individually selectable per-entity child leaves — see
+"What's new (`frame-debugger-6` campaign)" below. A fourth follow-up campaign,
+`frame-debugger-7` (`task_manager/frame-debugger-7/PHASE0_MASTER_STRATEGY.md`,
+seven phases), then fixed TWO more real, confirmed bugs (a wrong-first-capture
+timing bug, and the preview box never actually showing "the screen as it
+looked right after THIS object was drawn") via two explicit, user-approved
+BREAKING CHANGES — removing the multi-frame history ring buffer entirely, and
+replacing the per-compute-pass distinct-texture preview with a unified,
+genuinely per-step accumulated-image mechanism — see "What's new
+(`frame-debugger-7` campaign)" below for the full story. **This is the
+CURRENT, real system** — follow these rules whenever touching this window,
+its data model, its capture instrumentation, or its cross-wiring with the
+Pause/Resume toolbar or the embedded HTTP server:
 
 ## What is real today
 
@@ -97,11 +109,17 @@ cross-wiring with the Pause/Resume toolbar or the embedded HTTP server:
   existing `readNames`/`writeNames`, PHASE1 of `frame-debugger-5`) — never
   mislabeled, never guessed by probing multiple registries. A culled compute
   pass never appears in either group (it did not really run this frame).
-- **Capture is snapshot-ON-DEMAND, never continuous.** A "frame" is captured
-  exactly once, on a real trigger (Enable's false→true edge, a Step while
-  Enabled, or the explicit "Capture" button), and stays frozen/inspectable
-  until the next trigger fires. `FrameDebuggerPanel` never rebuilds its
-  displayed snapshot on every ImGui frame.
+- **Capture is snapshot-ON-DEMAND, never continuous — and, as of
+  `frame-debugger-7`, genuinely DEFERRED by exactly one frame.** A "frame" is
+  captured once a real trigger fires (Enable's false→true edge, a Step while
+  Enabled, or the explicit "Capture" button/HTTP route) — but the actual
+  capture work now runs on the NEXT `Build()` call, not synchronously inside
+  the trigger's own click handler, so it is always built from a frame whose
+  rendering had the capture context correctly armed for its ENTIRE duration
+  (the Bug 1 fix — see "What's new (`frame-debugger-7` campaign)" below).
+  Once captured, it stays frozen/inspectable until the next trigger fires, or
+  until Disable/Resume clears it (see below). `FrameDebuggerPanel` never
+  rebuilds its displayed snapshot on every ImGui frame.
 - **Scope is Game View ONLY, permanently.** `"SceneView"`/`"Present"` passes
   are deliberately excluded from the Frame Debugger's own captured event tree,
   even though they exist in the same underlying `RenderGraphSnapshot` the
@@ -109,18 +127,18 @@ cross-wiring with the Pause/Resume toolbar or the embedded HTTP server:
   Scene View/Present is a clean, well-isolated future extension point (a
   single line in the snapshot builder's filter), not attempted by any
   campaign so far.
-- **A REAL multi-frame history ring buffer exists**
-  (`FrameDebuggerHistory`/`FrameDebuggerHistoryEntry`,
-  `src/Editor/FrameDebuggerHistory.h/.cpp`), holding the last
-  `kFrameDebuggerHistoryCapacity` (8) captured frames, each a full,
-  independent, already-resolved `FrameDebuggerSnapshot` PLUS its own retained
-  GPU copy textures of that historical frame's real output (see "Preview
-  reconstruction" below for exactly how many, and of what, per slot). A
-  "Frame History" Prev/Next mini-toolbar
-  (`FrameDebuggerPanel::BuildFrameHistoryToolbarRow()`) scrubs across this ring
-  buffer — a SEPARATE axis from the pre-existing "N of M" event-stepper row
-  (position within the CURRENTLY-VIEWED captured frame's own event list); do
-  not conflate the two.
+- **Exactly ONE captured frame is ever held in memory — no multi-frame
+  history (`frame-debugger-7` campaign, an explicit, user-approved BREAKING
+  CHANGE relative to `frame-debugger-3`/`frame-debugger-4`, which introduced
+  and then grew an 8-slot ring buffer).** `FrameDebuggerCurrentCapture`
+  (`src/Editor/FrameDebuggerHistory.h/.cpp` — file name kept, class renamed)
+  holds a single `std::optional<FrameDebuggerHistoryEntry>`, exposed via
+  `HasCapture()`/`CurrentEntry()`/`Clear()`. There is no cursor, no "Frame N
+  of M" scrubbing, and no `GET /frame_debugger/step_history` route anymore —
+  Unity's own Frame Debugger does not remember past frames either. Turning
+  "Enable" off, or resuming playback while still Enabled, immediately frees
+  the captured frame's retained GPU textures via `Clear()` (RAII —
+  `std::optional::reset()`).
 - **Shader/pass-state "reflection" is real, but PASS-scoped, aggregated
   across every real draw call that pass issued that frame — never
   per-individual-mesh.** For the `"GameView"` leaf: `shaderName` lists every
@@ -142,48 +160,53 @@ cross-wiring with the Pause/Resume toolbar or the embedded HTTP server:
   blend/Z/stencil rows all read `"n/a (compute pass)"` (it never issues a draw
   call), and its `vectors` include its own real GPU timing sample whenever one
   is present.
-- **Preview reconstruction is real, but still a cheap "copy right after the
-  relevant real event finishes"** — not a full mid-pass draw-call replay.
-  `FrameDebuggerHistory` retains, per captured frame:
-  - `preview` — the true PRE-atmosphere-composite `"GameView"` output.
-  - `compositedPreview` — the true POST-atmosphere-composite, final
-    `"GameViewComposited"` output (`std::nullopt` only for a capture taken
-    before the atmosphere-composite pass had ever produced anything yet this
-    session — `frame-debugger-4` campaign).
-  - `computePassPreviews` — (`frame-debugger-5` campaign) one retained GPU
-    copy PER real, surviving compute-dispatch pass that had a real visual
-    write this capture, keyed by that pass's own raw name: a pass whose FIRST
-    `Texture`-kind write is found gets a direct GPU-to-GPU copy of that
-    texture (sourced from the already-existing
-    `RenderGraphDebugTextureRegistry`/`RenderGraph::DebugTextureSnapshotFor()`
-    — no new registry needed); a pass whose only visual write is a
-    `VolumeTexture` (today: the Aerial Perspective froxel volume) instead gets
-    a real ray-marched 2D thumbnail, produced by reusing the ALREADY-SHIPPED
-    `VolumeTexturePreviewRenderer::RenderPreview()` (`src/Renderer/
-    VolumeTexturePreviewRenderer.h/.cpp` — the EXACT SAME renderer
-    `GET /get_texture` already uses to preview a volume texture over HTTP,
-    including the SAME shared interpretation-selection rule,
-    `SelectVolumeTexturePreviewInterpretation()`) and uploading its raw RGBA8
-    pixels into a fresh `RenderTexture`. A pass with neither kind of visual
-    write (e.g. GPU Skinning's own `Buffer`-kind write) correctly gets **no**
-    entry at all — a real, honest "not available" state, never a
-    wrong/fabricated image. All of this is eager: every real capture trigger
-    (Enable-edge / Step / explicit Capture) re-populates every retained
-    texture, never a lazy "only copy the one the user happens to click" scheme
-    — every leaf's own preview is instantly available the moment it's clicked.
+- **Preview reconstruction is now a genuine per-step accumulated RE-RENDER,
+  not just a copy right after the fact — and, as of `frame-debugger-7`, every
+  leaf (compute pass OR per-object draw) shows the SAME kind of image: the
+  real Game View exactly as it looked with only the steps up to and including
+  that one applied.** This REPLACES the `frame-debugger-5` campaign's
+  "show this compute pass's own distinct output texture" mechanism outright —
+  an explicit, user-approved BREAKING CHANGE (the raw per-pass texture pixels
+  themselves are still inspectable elsewhere, e.g. the "Render Graph" panel /
+  `GET /get_texture` — no diagnostic capability was actually lost, it just
+  moved out of this window's own big preview box).
 
-  Selecting the literal `"GameView"` leaf shows the pre-composite `preview`
-  image (preserving this feature's original "as of the exact point this event
-  finished" semantics for that one leaf); selecting any compute-dispatch leaf
-  that has its own retained `computePassPreviews` entry shows THAT PASS'S OWN
-  real output image; selecting anything else — including nothing selected, or
-  a compute-dispatch leaf with no retained preview of its own (e.g. GPU
-  Skinning) — falls back to the post-composite, final `compositedPreview`
-  image, i.e. the SAME pixels the "Game" panel / `GET /get_game_view` show.
-  This rule is centralized in a pure, Tier-1-tested function,
-  `ChooseFrameDebuggerPreviewSource()` (`src/Editor/FrameDebuggerData.h/.cpp`),
-  which `Panels/FrameDebuggerPanel.cpp`'s `EnsurePreviewDescriptor()` calls
-  into rather than re-implementing the decision inline.
+  On every explicit capture trigger, `AddFrameDebuggerReplayPasses()`
+  (`src/Application/RenderPasses.h/.cpp`) declares N brand-new, debug-only,
+  self-contained Render Graph passes — one per real object the real
+  `"GameView"` pass draws that frame — each one redrawing objects `[0..i]`
+  FROM SCRATCH into its own dedicated destination `RenderTexture` (the LAST
+  pass also draws the sky background, exactly mirroring the real pass's own
+  ordering). This is a deliberate O(N²) total draw-call cost across all N
+  passes, chosen over an O(N) shared-target-plus-mid-pass-copy scheme because
+  it needs ZERO new Render Graph/`PassContext`/`Renderer` API surface and can
+  NEVER modify or corrupt the real, always-on `"GameView"` pass — an accepted
+  cost since this work only ever runs once per explicit, human-triggered
+  capture (see "Still-deferred future work" below for the O(N) alternative,
+  explicitly deferred rather than attempted). The resulting N images are
+  retained in `FrameDebuggerCaptureContext::ReplayStepPreviews()` (transient)
+  and moved into permanent storage,
+  `FrameDebuggerHistoryEntry::perObjectStepPreviews`, by
+  `FrameDebuggerCurrentCapture::CaptureFrame()`.
+
+  `BuildRealFrameDebuggerSnapshot()` stamps every node it builds with a new
+  `FrameDebuggerStepPreviewKind` — `NotYetDrawn` (a Pre-GameView compute leaf —
+  honestly "nothing drawn to the screen yet", never a fabricated image),
+  `PerObjectStep` (one of `"GameView"`'s own per-entity children —
+  `stepPreviewIndex` selects which of the N replay images), `PreComposite`
+  (the literal `"GameView"` leaf itself, or a Post-GameView leaf strictly
+  before the real atmosphere-composite pass), or `PostComposite` (the
+  composite pass itself, anything after it, or nothing selected). A rewritten
+  `ChooseFrameDebuggerPreviewSource()` picks the actual image from exactly
+  three retained sources — `preview` (pre-composite whole-frame),
+  `compositedPreview` (post-composite whole-frame), or
+  `perObjectStepPreviews[stepPreviewIndex]` — never fabricating one:
+  `NotYetDrawn` always wins outright; `PerObjectStep` shows its own retained
+  replay image or nothing at all (deliberately NEVER falls back to the
+  whole-frame image — this is what makes the Bug 2 fix honest: no atmosphere
+  fog, no later objects, ever, for this bucket); `PreComposite` always shows
+  the pre-composite `preview`; `PostComposite` prefers `compositedPreview`,
+  falling back to `preview` only when absent.
 - **Channels (All/R/G/B/A) and Levels are functionally real**, driven by a
   dedicated preview-compositing module
   (`src/Editor/FrameDebuggerPreviewProcessing.h/.cpp`, mirrored by
@@ -267,6 +290,92 @@ the duplicate-pass bug is gone and the new per-entity `terrain` leaf is
 selectable, shows correct data, and the preview box correctly still shows the
 composited whole-frame image rather than colliding with the `"GameView"`
 leaf's own pre-composite-only preview rule.
+
+## What's new (`frame-debugger-7` campaign)
+
+`frame-debugger-7` (`task_manager/frame-debugger-7/PHASE0_MASTER_STRATEGY.md`,
+seven phases) fixed two more real, user-confirmed bugs in this window: **Bug
+1 — wrong first capture** (load a scene → open Frame Debugger → press
+"Enable" → the very first captured frame was missing objects entirely — no
+terrain row at all — while pressing Enable a SECOND time always captured
+correctly), and **Bug 2 — wrong preview image per selected item** (clicking an
+object in the event tree, e.g. `"SmokeTestCube"`, never showed the screen as
+it looked right after THAT object was drawn — it always showed the same
+whole-frame image, with everything already drawn, exactly unlike Unity's own
+Frame Debugger).
+
+- **Bug 1's fix — a genuinely deferred capture trigger.**
+  `Application::Run()` calls `m_editorLayer->PrepareFrameDebuggerCaptureContext()`
+  BEFORE `Game::Render()` runs, every frame — that call only arms the real
+  capture context (returns non-null) when `ctx.frameDebuggerWindowOpen &&
+  m_enabled` are BOTH already true at that point in the frame. But the Enable
+  checkbox itself is only actually clicked LATER, inside
+  `Build()`/`BuildToolbarRow()`/`ApplyEnabledEdge()` — by which point that
+  SAME frame's rendering has already run with a `nullptr` capture pointer,
+  since `m_enabled` was still `false` when the frame started. The old code
+  called `TriggerCapture()` immediately, right there in the click handler,
+  building a snapshot from that already-stale frame — real render-graph/pass
+  data, but ZERO `FrameDebuggerDrawRecord`s, hence no per-entity children
+  under `"GameView"`. The fix: ALL THREE real capture triggers (the Enable
+  false→true edge, a Step while Enabled, and the "Capture" button/HTTP route)
+  now only ARM a pending flag (`m_pendingCaptureTrigger`); the actual
+  `TriggerCapture()` call is deferred to the NEXT `Build()` call, via a
+  two-bool pending/serviced handshake
+  (`m_pendingCaptureTrigger`/`m_replayServicedThisFrame`,
+  `IEditorLayer::ConsumePendingFrameDebuggerReplayRequest()`) consumed EARLY
+  in `Application::Run()`'s own offscreen `build` lambda (before
+  `Game::Render()` runs) and acted on LATE, at the top of `Build()` (after
+  that same frame's rendering already happened) — so the capture is always
+  built from a frame whose entire rendering ran with the capture context
+  correctly armed from the start.
+- **The removal of the multi-frame history ring buffer** — see "What is real
+  today" above (an explicit, LOCKED, user-approved BREAKING CHANGE relative to
+  `frame-debugger-3`/`frame-debugger-4`, which introduced and grew it).
+  Exactly ONE captured frame is now ever retained
+  (`FrameDebuggerCurrentCapture`), cleared immediately whenever "Enable" is
+  unticked or playback resumes while still Enabled.
+- **The removal of the per-compute-pass distinct-texture preview** (the
+  `frame-debugger-5` campaign's own mechanism) — see "What is real today"
+  above (an explicit, LOCKED, user-approved BREAKING CHANGE). Replaced by the
+  new unified "accumulated Game View as of this exact step" preview shared by
+  EVERY leaf, compute pass or per-object draw alike. Raw per-pass texture
+  pixel inspection remains fully possible elsewhere (the "Render Graph" panel
+  / `GET /get_texture`) — no diagnostic capability was actually lost, it only
+  moved out of this window's own big preview box.
+- **Bug 2's fix — the new per-object replay-rendering mechanism** (this
+  campaign's heaviest, riskiest phase — see "What is real today" above for
+  the full mechanism). N self-contained, debug-only Render Graph passes, each
+  redrawing objects `[0..i]` from scratch into its own dedicated destination
+  texture, run ONLY on an explicit capture-trigger frame and NEVER modify the
+  real, always-on `"GameView"` pass. This was chosen over a shared-target-
+  plus-mid-pass-copy scheme because `rg::PassContext` has no way to obtain a
+  raw `VkImage` to copy from mid-pass without widening a type shared by every
+  other pass in the engine — a broader, higher-risk change than this
+  feature's own scope justified. The accepted cost is O(N²) total draw calls
+  across all N replay passes (and O(N) extra Game-View-resolution render
+  targets) — paid only once per explicit, human-triggered capture, never every
+  ordinary gameplay frame.
+- **Two real bugs were found and fixed during this campaign's own mandatory
+  visual spot-check** (`PHASE3_COMPLETION_REPORT.md`), not just by code
+  review: (a) the very first implementation of the N replay passes never
+  added their destination textures to the render graph's own root output set,
+  so `RenderGraphCompiler`'s backward-reachability culling silently culled
+  every one of them — their `execute` lambdas never ran, and each destination
+  texture showed genuine uninitialized VRAM garbage (confirmed via a
+  temporary debug PNG dump) until `AddFrameDebuggerReplayPasses()` was
+  changed to return every destination handle for the caller to add to
+  `outputs`; (b) `GET /frame_debugger/capture` (the HTTP mirror of the
+  "Capture" button) was initially missed when widening the deferred-trigger
+  mechanism to all three triggers, so a SECOND capture taken via that one
+  route silently carried zero replay-step images — fixed by making it arm
+  `m_pendingCaptureTrigger` exactly like the hand-driven button, instead of
+  calling `TriggerCapture()` directly.
+
+See `task_manager/frame-debugger-7/PHASE0_MASTER_STRATEGY.md` and each
+`PHASEn_COMPLETION_REPORT.md` in that same folder for the full seven-phase
+writeup, and `CAMPAIGN_COMPLETION_REPORT.md` (written at the close of Phase 7)
+for the final, live, HTTP-driven, screenshot-verified proof both bugs are
+fixed.
 
 ## Known limitation, now fixed (`frame-debugger-4` campaign)
 
@@ -353,18 +462,25 @@ with its own correct, distinct real output image.
   described above — `BuildPlaceholderFrameDebuggerSnapshot()` still exists and
   is still used as the honest empty-tree fallback when nothing has been
   captured yet this session), `FormatFrameStepperLabel()`,
-  `FormatFrameHistoryLabel()`, `ClampSelectedEventIndex()`,
+  `FormatFrameHistoryLabel()` (now unused in production code since
+  `frame-debugger-7` removed the "Frame History" mini-toolbar it fed — still
+  compiles and still has its own passing test, left alone rather than deleted
+  since nothing required removing it), `ClampSelectedEventIndex()`,
   `FindEventDetailsByIndex()`, `FormatVectorProperty()`,
-  `FormatMatrixProperty()`, `ChooseFrameDebuggerPreviewSource()` (the pure
-  "which retained image should the preview box show" decision — see "Preview
-  reconstruction" above, widened by `frame-debugger-5` to also consider a
-  selected compute-dispatch leaf's own retained preview), and
-  (`frame-debugger-5` campaign) `CollectComputePassTextureWrites()`/
-  `CollectComputePassVolumeTextureWrites()` (the two pure, CPU-side discovery
-  functions `FrameDebuggerHistory::CaptureFrame()` uses to find which compute
-  passes' own write textures/volume textures to retain a real copy of, reading
-  `rg::RenderGraphSnapshot` directly rather than the Editor's own display
-  strings). Mirrors `JobsPanelData.h`/`ProfilerPanelData.h`'s
+  `FormatMatrixProperty()`, and (`frame-debugger-7` campaign) a new
+  `FrameDebuggerStepPreviewKind` enum (`NotYetDrawn`/`PerObjectStep`/
+  `PreComposite`/`PostComposite`) that `BuildRealFrameDebuggerSnapshot()` now
+  stamps onto every `FrameDebuggerEventDetails` it builds (plus a
+  `stepPreviewIndex` for `PerObjectStep` nodes), and a rewritten
+  `ChooseFrameDebuggerPreviewSource(bool hasEntry, FrameDebuggerStepPreviewKind
+  stepPreviewKind, bool hasPreview, bool hasCompositedPreview, bool
+  hasPerObjectStepPreviewAtIndex)` (the pure "which retained image should the
+  preview box show" decision — see "What's new (`frame-debugger-7` campaign)"
+  below for the full picking rule). The `frame-debugger-5` campaign's own
+  `CollectComputePassTextureWrites()`/`CollectComputePassVolumeTextureWrites()`
+  (the per-compute-pass distinct-texture-write discovery helpers) are GONE —
+  removed outright by `frame-debugger-7`, an explicit, user-approved BREAKING
+  CHANGE (see below). Mirrors `JobsPanelData.h`/`ProfilerPanelData.h`'s
   own "small, dedicated, directly-testable reshaping module" precedent (see
   [Testability & Regression Safety](../../AGENTS.md#testability--regression-safety)).
   Tier-1-tested by `tests/Editor/FrameDebuggerDataTests.cpp` and
@@ -375,22 +491,46 @@ with its own correct, distinct real output image.
   `nullptr`-by-default parameter (zero overhead whenever disarmed — no
   string formatting, no vector work happens on the overwhelmingly common
   "not currently capturing" frame), aggregating every DISTINCT real
-  `Pipeline`/`MaterialTexture` debug name and the last real view-projection
-  matrix used this frame. Also home to `DescribeStandardPipelineState()` (see
-  above). Tier-1-tested by `tests/Editor/FrameDebuggerCaptureTests.cpp`.
-- **`src/Editor/FrameDebuggerHistory.h/.cpp`** — the real ring buffer, now
-  retaining THREE kinds of preview per slot: `FrameDebuggerHistoryEntry::preview`/
-  `compositedPreview` (`frame-debugger-4` campaign, see "Preview
-  reconstruction" above) plus `computePassPreviews` (`frame-debugger-5`
-  campaign — one entry per real compute-dispatch pass with a visual write this
-  capture, 2D-texture-copy OR volume-ray-march-thumbnail as appropriate).
-  Tier-1-tested by `tests/Editor/FrameDebuggerHistoryTests.cpp` (the pure
-  write-state/cursor-clamp arithmetic — `CaptureFrame()`'s own multi-copy
-  `ImmediateSubmit()` body, plus the volume-ray-march branch, stay
-  Tier-2/untested directly, since both need a live `VkDevice` — the PURE
-  discovery logic each one depends on, `CollectComputePassTextureWrites()`/
-  `CollectComputePassVolumeTextureWrites()`, is fully extracted and Tier-1-
-  tested instead, see above).
+  `Pipeline`/`MaterialTexture` debug name, every real per-entity
+  `FrameDebuggerDrawRecord`, and the last real view-projection matrix used
+  this frame. Also home to `DescribeStandardPipelineState()` (see above) and,
+  as of `frame-debugger-7`, `SetReplayStepPreviews()`/`ReplayStepPreviews()` —
+  transient, per-frame storage for the N per-object replay images (see
+  below; moved out into permanent storage by
+  `FrameDebuggerCurrentCapture::CaptureFrame()` before the next armed
+  frame's `Reset()` would otherwise discard them). `RenderSystem::Draw()`'s
+  own new `maxDrawCount` cutoff parameter (the mechanism the N replay passes
+  use to redraw only their own first `i+1` objects) stayed a plain inline
+  loop `break` rather than being extracted into its own pure helper — there
+  is no second boolean/branch to combine it with, so extracting it would
+  have been pure ceremony (see
+  `task_manager/frame-debugger-7/PHASE6_COMPLETION_REPORT.md` for the full
+  reasoning). Tier-1-tested by `tests/Editor/FrameDebuggerCaptureTests.cpp`.
+- **`src/Editor/FrameDebuggerHistory.h/.cpp`** — file name kept as-is
+  (`frame-debugger-7` deliberately minimized include churn), but the class
+  itself is now `gte::FrameDebuggerCurrentCapture` (renamed from
+  `FrameDebuggerHistory` — the 8-slot ring buffer is GONE, an explicit,
+  user-approved BREAKING CHANGE, see "What's new (`frame-debugger-7`
+  campaign)" below). Exactly ONE `std::optional<FrameDebuggerHistoryEntry>
+  m_current` slot exists — `HasCapture()`/`CurrentEntry()`/`Clear()` replace
+  the old `Count()`/`CursorIndex()`/`StepCursor()` cursor arithmetic entirely.
+  `FrameDebuggerHistoryEntry` (the payload struct name itself — kept
+  unchanged) retains `preview`/`compositedPreview` (`frame-debugger-4`
+  campaign) plus a new `perObjectStepPreviews` (`frame-debugger-7` — one
+  real, retained GPU `RenderTexture` per object drawn this capture's
+  `"GameView"` pass, in the SAME order as
+  `FrameDebuggerCaptureContext::DrawRecords()`, moved in from
+  `FrameDebuggerCaptureContext::ReplayStepPreviews()` by `CaptureFrame()`).
+  The `frame-debugger-5` campaign's own `computePassPreviews` field (one
+  retained texture per compute-dispatch pass's OWN distinct write) is GONE —
+  REPLACED by the unified `perObjectStepPreviews`-and-whole-frame-image
+  picking rule every leaf now shares (see below); the whole HDR-round-trip/
+  volume-ray-march capture code `CaptureFrame()` used to run for that
+  mechanism is removed along with it. Tier-1-tested by
+  `tests/Editor/FrameDebuggerHistoryTests.cpp` (the pure `HasCapture()`/
+  `Clear()` state machine of a fresh instance — `CaptureFrame()`'s own body
+  stays Tier-2/untested directly, since it needs a live `VkDevice`, same as
+  before this campaign).
 - **`src/Editor/FrameDebuggerPreviewProcessing.h/.cpp`** — the real
   Channels/Levels compositing (see above). Tier-1-tested by
   `tests/Editor/FrameDebuggerPreviewProcessingTests.cpp`.
@@ -403,15 +543,25 @@ with its own correct, distinct real output image.
   splitter width, the currently-selected leaf event's index
   (`m_selectedEventIndex`, now genuinely reachable via real tree-row clicks
   OR via the HTTP `select_event` command), the real capture context
-  (`m_captureContext`), the real history ring buffer (`m_history`), the real
-  Channels/Levels state (`m_channel`/`m_levelsBlack`/`m_levelsWhite`), its own
-  preview-texture ImGui descriptor (self-owned, mirroring
-  `BoneViewerWindow`'s own "owns its own `ImGui_ImplVulkan_AddTexture()`
-  descriptor" precedent), and its own `FrameDebuggerPreviewRenderer`
-  instance. Called explicitly by name from `ImGuiEditorLayer::BuildUI()` — no
-  `IEditorPanel` interface. As of `frame-debugger-5`, it no longer takes a
-  `gpuSkinningPassNamesThisFrame` parameter anywhere — GPU Skinning passes are
-  discovered exactly like every other compute pass now (see above).
+  (`m_captureContext`), the single real captured frame (`m_currentCapture`,
+  type `FrameDebuggerCurrentCapture` — `frame-debugger-7` renamed this from
+  `m_history`), the real Channels/Levels state
+  (`m_channel`/`m_levelsBlack`/`m_levelsWhite`), its own preview-texture ImGui
+  descriptor (self-owned, mirroring `BoneViewerWindow`'s own "owns its own
+  `ImGui_ImplVulkan_AddTexture()` descriptor" precedent), its own
+  `FrameDebuggerPreviewRenderer` instance, and (`frame-debugger-7`)
+  `m_lastPreviewChoice` (`FrameDebuggerPreviewSourceChoice`, cached each time
+  `EnsurePreviewDescriptor()` runs, so `BuildInspectorPane()` knows which
+  placeholder/real-image state to render). Called explicitly by name from
+  `ImGuiEditorLayer::BuildUI()` — no `IEditorPanel` interface. As of
+  `frame-debugger-5`, it no longer takes a `gpuSkinningPassNamesThisFrame`
+  parameter anywhere — GPU Skinning passes are discovered exactly like every
+  other compute pass now (see above). As of `frame-debugger-7`, none of the
+  three real capture triggers (Enable-edge / Step / "Capture" button, HTTP
+  routes included) call `TriggerCapture()` synchronously anymore — all three
+  only set `m_pendingCaptureTrigger`, consumed one frame later via the
+  two-bool `m_pendingCaptureTrigger`/`m_replayServicedThisFrame` handshake
+  described above.
 - **An ON-DEMAND FLOATING WINDOW, not part of the default dock layout, and
   NOT listed in `EditorPanelCatalog.h`.** Still deliberate (mirroring
   `BoneViewerWindow`'s own precedent) — `EditorPanelCatalog.h` exists purely
@@ -425,55 +575,80 @@ with its own correct, distinct real output image.
   also arms the one-shot main-viewport pin (see "Main-viewport pinning"
   below).
 - **The "Enable" checkbox auto-engages the existing Pause/Resume toolbar AND
-  triggers the first real capture** (see
+  arms a deferred capture trigger** (see
   [Time and Playback Pause](time-and-playback-pause.md)): turning "Enable" ON
   sets `ctx.playbackPaused = true` (the same field `PlaybackControls.cpp`'s
-  own "Pause" button writes) and calls `TriggerCapture()`, both via a shared
-  `ApplyEnabledEdge()` helper used identically by the hand-driven checkbox and
-  the HTTP `SetEnabledFromCommand()` entry point, so the two paths can never
-  silently diverge. Turning "Enable" back OFF still deliberately does **not**
-  auto-resume playback, unchanged from `frame-debugger-2`.
+  own "Pause" button writes) and sets `m_pendingCaptureTrigger = true`, both
+  via a shared `ApplyEnabledEdge()` helper used identically by the
+  hand-driven checkbox and the HTTP `SetEnabledFromCommand()` entry point, so
+  the two paths can never silently diverge. As of `frame-debugger-7`, the
+  real capture no longer happens synchronously inside this same click
+  handler — it is deferred to the next `Build()` call, by which point a full
+  frame's worth of rendering has already happened with the capture context
+  correctly armed for its ENTIRE duration (see "What's new
+  (`frame-debugger-7` campaign)" below for why — this is the actual Bug 1
+  fix). Turning "Enable" back OFF still deliberately does **not** auto-resume
+  playback, unchanged from `frame-debugger-2` — it now ALSO calls
+  `m_currentCapture.Clear()`, freeing the captured frame's retained GPU
+  textures immediately (a NEW lifecycle rule, `frame-debugger-7` — exactly
+  one captured frame is ever held in memory, matching Unity's own Frame
+  Debugger, which does not remember past frames either). Resuming playback
+  while still Enabled ALSO clears the captured data the same way (checked at
+  the very top of `Build()`), but leaves `m_enabled` itself untouched in both
+  cases — only the captured DATA disappears.
 - **The "Editor" mode combo remains a purely cosmetic, permanently-disabled
   stub** — this engine still has no Play/Edit-mode split, so there is nothing
   real for it to switch between.
 - **The event tree pane shows a real, non-empty tree the moment a real
-  capture has happened**, falling back to "No frame captured yet." only in
-  the honest "enabled, but nothing captured this session yet" state. The
-  event-details section shows real Shader/Pass/Blend/Z-state/Stencil/
-  Textures/Vectors/Matrices data once a real leaf is selected, falling back
-  to "No event selected." only when nothing is selected.
+  capture has happened**, falling back to "No frame captured yet." whenever
+  nothing has been captured this session, whenever Disable/Resume just
+  cleared the previous capture (`frame-debugger-7`), or during the one real
+  frame between the Enable checkbox's false→true edge and its deferred
+  capture landing (`frame-debugger-7`, see below). The event-details section
+  shows real Shader/Pass/Blend/Z-state/Stencil/Textures/Vectors/Matrices data
+  once a real leaf is selected, falling back to "No event selected." only
+  when nothing is selected, and the preview box shows a distinct third
+  message, `"Nothing drawn yet at this point in the frame."`, for a
+  Pre-GameView compute leaf specifically (`frame-debugger-7`'s `NotYetDrawn`
+  bucket — see below).
 
 ## HTTP automation (`frame-debugger-3` PHASE7)
 
 A brand-new, fully independent sibling of `EditorUiCommandBridge`,
 `FrameDebuggerCommandBridge` (`src/Application/FrameDebuggerCommandBridge.h/.cpp`
 — never an extension of `EditorUiCommandKind`, per `AGENTS.md`'s own rule that
-a genuinely new KIND of request gets its own bridge), backs eight new routes
-under `src/Network/NetworkRoutes.h/.cpp`/`NetworkServer.cpp`:
+a genuinely new KIND of request gets its own bridge), backs seven routes under
+`src/Network/NetworkRoutes.h/.cpp`/`NetworkServer.cpp` (`frame-debugger-7`
+removed the original eighth route, `GET /frame_debugger/step_history` —
+see "What's new (`frame-debugger-7` campaign)" below):
 
 - `GET /frame_debugger/open` — opens the window (a `false -> true`
   PROGRAMMATIC transition also arms a genuine ONE-SHOT main-viewport pin, see
   below; never affects the manual "Window > Frame Debugger" menu item's own
   drag-anywhere freedom).
 - `GET /frame_debugger/enable?value=true|false` — flips "Enable", exactly
-  mirroring the checkbox's own `ApplyEnabledEdge()` behavior.
-- `GET /frame_debugger/capture` — fires an explicit new capture (equivalent
-  to clicking "Capture").
+  mirroring the checkbox's own `ApplyEnabledEdge()` behavior (as of
+  `frame-debugger-7`, the false→true edge only ARMS a deferred capture
+  trigger — see below — it no longer captures synchronously).
+- `GET /frame_debugger/capture` — arms an explicit new capture trigger
+  (equivalent to clicking "Capture"), consumed on the very next armed frame
+  (`frame-debugger-7` — previously captured synchronously).
 - `GET /frame_debugger/select_event?index=<n>` — selects a leaf event by
   index (`-1` deselects).
-- `GET /frame_debugger/step_history?direction=prev|next` — scrubs the
-  Frame-History ring-buffer cursor.
 - `GET /frame_debugger/set_channel?value=all|r|g|b|a` — sets the Channels
   isolation (completely separate name/value space from `/get_texture`'s own
   `channel=color|depth`, per the Locked Design Decision above).
 - `GET /frame_debugger/set_levels?black=<f>&white=<f>` — sets the Levels
   remap range.
 - `GET /frame_debugger/state` — a flat, no-`"success"`-wrapper JSON dump of
-  every piece of live state (`enabled`/`historyCount`/`historyCursor`/
-  `selectedEventIndex`/`totalEventCount`/`channel`/`levelsBlack`/
-  `levelsWhite`/`windowOpen`). Every OTHER route's response ALSO includes this
-  same `"state"` object (nested under `success`), so a caller can assert
-  state without a second round-trip after every command.
+  every piece of live state (`enabled`/`hasCapturedFrame`/`selectedEventIndex`/
+  `totalEventCount`/`channel`/`levelsBlack`/`levelsWhite`/`windowOpen`) — the
+  `historyCount`/`historyCursor` fields the multi-frame history ring buffer
+  used to report are GONE (`frame-debugger-7` — there is no cursor/count left
+  to report anymore, only a single bool: is a frame currently captured or
+  not). Every OTHER route's response ALSO includes this same `"state"` object
+  (nested under `success`), so a caller can assert state without a second
+  round-trip after every command.
 
 Every route goes through the SAME bridge/pump mechanism (mutex + condition
 variable, `SubmitAndWait()` from the network thread,
@@ -503,39 +678,55 @@ HTTP-driven open.
 
 ## Testing this feature
 
-Every layer above (`FrameDebuggerCaptureContext`, the real snapshot builder
-and its generic compute-dispatch discovery, the history ring buffer's pure
-write-state/cursor arithmetic, the two per-pass write-collection functions,
-the preview compositing CPU oracle, the composite-and-compute-pass-aware
-preview-source picking rule (`ChooseFrameDebuggerPreviewSource()`), the
-command bridge, and every new HTTP query parser/response builder) has
-dedicated Tier-1 test coverage — see `tests/Editor/FrameDebugger*Tests.cpp`,
+Every layer above (`FrameDebuggerCaptureContext` — including its
+`RecordEntityDraw()`/`ReplayStepPreviews()` bookkeeping, the real snapshot
+builder and its generic compute-dispatch discovery PLUS its new
+`FrameDebuggerStepPreviewKind`/`stepPreviewIndex` assignment, the
+single-capture `FrameDebuggerCurrentCapture` state machine
+(`HasCapture()`/`Clear()`), the preview compositing CPU oracle, the
+step-kind-aware preview-source picking rule
+(`ChooseFrameDebuggerPreviewSource()`), the command bridge, and every HTTP
+query parser/response builder) has dedicated Tier-1 test coverage — see
+`tests/Editor/FrameDebugger*Tests.cpp`,
 `tests/Application/FrameDebuggerCommandBridgeTests.cpp`, and the
 `ParseFrameDebugger*`/`BuildFrameDebugger*` cases in
-`tests/Network/NetworkRoutesTests.cpp`. A full, genuine, HTTP-driven,
-screenshot-verified end-to-end smoke test (open → enable → auto-capture →
-select event → explicit capture → step history → set channel → set levels,
-each step visually confirmed via `GET /get_swapchain`) is part of this
-feature's own closing verification — see
+`tests/Network/NetworkRoutesTests.cpp`. `RenderSystem::Draw()`'s own new
+`maxDrawCount` iteration cutoff stayed a plain inline loop `break` rather than
+a separately-tested pure helper (there is no second boolean/branch to combine
+it with — extracting it would have been pure ceremony), and
+`AddFrameDebuggerReplayPasses()` itself (the new N-replay-pass Render Graph
+declaration) needs a live `Renderer`/`RenderGraph` and stays Tier 2/untested
+directly, same as `FrameDebuggerCurrentCapture::CaptureFrame()` always has
+been — both were instead proven correct via a manual, screenshot-verified
+visual spot-check during their own phase
+(`task_manager/frame-debugger-7/PHASE3_COMPLETION_REPORT.md`), the same
+accepted verification bar this codebase already uses for Tier 2 Render Graph
+work (see `AGENTS.md`, "Testability & Regression Safety").
+
+A full, genuine, HTTP-driven, screenshot-verified end-to-end smoke test (open →
+enable → auto-capture → select event → explicit capture → step history → set
+channel → set levels, each step visually confirmed via `GET /get_swapchain`)
+was part of the `frame-debugger-3` campaign's own closing verification — see
 `task_manager/frame-debugger-3/PHASE8_COMPLETION_REPORT.md` and
-`CAMPAIGN_COMPLETION_REPORT.md` for the full evidence. This finally closes the
+`CAMPAIGN_COMPLETION_REPORT.md` for the full evidence (note: the
+`step_history` route it exercised no longer exists as of `frame-debugger-7` —
+see "What's new (`frame-debugger-7` campaign)" below). This finally closed the
 manual-verification gap `frame-debugger-1`/`frame-debugger-2` both had to
 accept — there is no longer any manual-verification limitation for this
 feature. The `frame-debugger-4` campaign's own follow-up live smoke test (see
 `task_manager/frame-debugger-4/PHASE3_COMPLETION_REPORT.md`/
 `CAMPAIGN_COMPLETION_REPORT.md`) re-ran the same HTTP-automation-driven
-approach specifically to prove the atmosphere-compositing bug fix, and the
+approach specifically to prove the atmosphere-compositing bug fix, the
 `frame-debugger-5` campaign's own closing phase
 (`task_manager/frame-debugger-5/PHASE5_COMPLETION_REPORT.md`/
-`CAMPAIGN_COMPLETION_REPORT.md`) ran it once more, specifically proving every
-atmosphere LUT compute pass now appears as its own selectable leaf under the
-split `"Compute Dispatches (Pre-GameView)"`/`"Compute Dispatches
-(Post-GameView)"` groups, each showing its own correct, distinct real output
-image — the Transmittance LUT/Multi-Scattering LUT/Sky-View LUT leaves each
-show their own distinct texture, the Aerial Perspective Volume leaf shows a
-real ray-marched thumbnail, and the Aerial Perspective Composite leaf still
-pixel-matches `GET /get_game_view`, exactly as `frame-debugger-4` already
-proved for that one leaf.
+`CAMPAIGN_COMPLETION_REPORT.md`) ran it once more to prove every atmosphere LUT
+compute pass appears as its own selectable leaf with its own correct, distinct
+real output image, and the `frame-debugger-7` campaign's own closing phase
+(`task_manager/frame-debugger-7/PHASE7_LIVE_VERIFICATION_FULL_BUILD_AND_CAMPAIGN_COMPLETION.md`/
+`CAMPAIGN_COMPLETION_REPORT.md`) is where this feature's own two newly-fixed
+bugs — the wrong-first-capture timing bug and the per-object
+accumulated-preview mechanism — get their own final, live, HTTP-driven,
+screenshot-verified proof.
 
 ## Still-deferred future work
 
@@ -551,3 +742,18 @@ this engine's `Renderer::ImmediateSubmit()`/render-graph model to support a
 partial, resumable command-buffer submission, which it does not today. See
 `TODO.md`'s "Frame Debugger" section for this item tracked as a named, still-
 deferred future item.
+
+**An O(N) shared-target replay optimization** — `frame-debugger-7`'s own
+per-object replay-rendering mechanism (see "What's new (`frame-debugger-7`
+campaign)" below) deliberately pays an O(N²) total draw-call cost (N replay
+passes, redrawing objects `[0..i]` from scratch each time) rather than an O(N)
+scheme that would draw each object exactly once into one shared,
+incrementally-accumulated scratch target and copy an intermediate result out
+after each draw. That O(N) scheme was investigated and explicitly deferred
+(`task_manager/frame-debugger-7/PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md`'s
+own Step 2) because it would require widening `rg::PassContext` with a new
+raw-`VkImage`-copy capability shared by every other pass in the engine — a
+higher-risk, broader-blast-radius change than this feature's own scope
+justified for work that only ever runs once per explicit, human-triggered
+capture. Worth revisiting only if a real scene's object count ever makes the
+O(N²) cost noticeably slow in practice — not a problem observed so far.
