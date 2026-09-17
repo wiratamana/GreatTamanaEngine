@@ -300,6 +300,20 @@ public:
     // many replay passes (one per real object this frame's "GameView" pass
     // will draw) to add.
     //
+    // task_manager/frame-debugger-8 campaign, PHASE1 - as of this campaign,
+    // capture.DrawRecords().size() is NO LONGER always equal to
+    // `objectCount` returned by this method: FrameDebuggerCaptureContext::
+    // RecordSkyBackgroundDraw() (src/Editor/FrameDebuggerCapture.h/.cpp)
+    // appends one additional, non-entity record whenever a Sky Background
+    // draw callback exists this frame (see AddGameViewPass(),
+    // src/Application/RenderPasses.cpp) - so, in the normal case,
+    // `capture.DrawRecords().size() == objectCount + 1`. The pre-existing
+    // caveat below (about a DrawCommand whose mesh/pipeline handle fails to
+    // resolve) still applies identically to the ENTITY portion of that
+    // count; the sky record itself is never affected by it (the sky draw
+    // never goes through RenderSystem::Draw()/DrawCommand resolution at
+    // all - see AtmosphereSkyBackgroundRenderer.h's own header comment).
+    //
     // IMPORTANT documented assumption (do not silently rely on this
     // elsewhere without re-reading it): this is
     // `RenderSystem::CollectRenderables(m_registry).size()` - the number of

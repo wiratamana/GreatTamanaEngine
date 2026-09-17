@@ -10,6 +10,7 @@
 #include "../Renderer/RenderGraph/RenderGraph.h"
 #include "../Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
+#include "../Renderer/Atmosphere/AtmosphereSkyBackgroundRenderer.h"
 
 // task_manager/frame-debugger-7 campaign, PHASE3
 // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step 3.3)
@@ -117,16 +118,41 @@ void AddGameViewPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& rend
         },
         [&game, &renderer, aspectWidthOverHeight, recordSkyBackground, frameDebuggerCapture](rg::PassContext& ctx) {
             renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-            // frameDebuggerCapture is never dereferenced here - only
-            // forwarded onward, as a bare pointer, exactly like PHASE1's
-            // own Step 3.1b requires for a CORE, always-compiled file such
-            // as this one (see task_manager/frame-debugger-3/
+            // frameDebuggerCapture is forwarded onward, as a bare pointer,
+            // into game.Render() below - exactly like PHASE1's own Step
+            // 3.1b requires for a CORE, always-compiled file such as this
+            // one (see task_manager/frame-debugger-3/
             // PHASE3_FRAME_HISTORY_RING_BUFFER_AND_CAPTURE_TRIGGER.md's own
-            // Step 3.4b).
+            // Step 3.4b). frame-debugger-8 campaign, PHASE1 - this same
+            // pointer IS now also directly dereferenced a few lines below,
+            // strictly AFTER recordSkyBackground(ctx.cmd) runs, guarded by
+            // `#if GTE_ENABLE_EDITOR` + a null check (see that call site's
+            // own comment for the full reasoning).
             game.Render(renderer, aspectWidthOverHeight, nullptr, frameDebuggerCapture);
             renderer.EndGraphPassRecording();
             if (recordSkyBackground) {
                 recordSkyBackground(ctx.cmd);
+#if GTE_ENABLE_EDITOR
+                // frame-debugger-8 campaign, PHASE1 - the Sky Background
+                // pass is a real, direct vkCmdDraw() full-screen-triangle
+                // draw (AtmosphereSkyBackgroundRenderer::Draw()) that
+                // bypasses RenderSystem::Draw()/Renderer::Submit() entirely
+                // (see that class's own header comment) - so, unlike every
+                // per-entity draw (RenderSystem::Draw()'s own existing
+                // RecordEntityDraw() call site), it was previously
+                // completely INVISIBLE to the Frame Debugger, even though
+                // it genuinely runs every frame. This one, explicit call
+                // site is the fix - see
+                // task_manager/frame-debugger-8/PHASE0_MASTER_STRATEGY.md
+                // for the full root-cause trail. Guarded exactly like this
+                // same file's own AddFrameDebuggerReplayPasses() body (see
+                // this file's own top-of-file comment) - a real dereference
+                // of an Editor-only type in this CORE, always-compiled
+                // file.
+                if (frameDebuggerCapture != nullptr) {
+                    frameDebuggerCapture->RecordSkyBackgroundDraw(AtmosphereSkyBackgroundRenderer::ShaderDebugName());
+                }
+#endif
             }
         });
 }

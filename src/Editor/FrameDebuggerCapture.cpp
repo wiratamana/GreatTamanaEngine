@@ -35,6 +35,41 @@ FrameDebuggerStandardPipelineState DescribeStandardPipelineState()
     return state;
 }
 
+FrameDebuggerStandardPipelineState DescribeSkyBackgroundPipelineState()
+{
+    // Every value below is transcribed directly from
+    // AtmosphereSkyBackgroundRenderer.cpp's own EnsurePipeline() real,
+    // hardcoded construction code (confirmed at implementation time -
+    // never guessed):
+    //   - colorBlendAttachment.blendEnable = VK_FALSE -> "Opaque (no blend)".
+    //   - rasterizer.depthClampEnable left at its zero-initialized default
+    //     (VK_FALSE) -> ZClip "On" (same as DescribeStandardPipelineState()).
+    //   - depthStencil.depthTestEnable = VK_TRUE, depthCompareOp =
+    //     VK_COMPARE_OP_EQUAL - "Equal", DELIBERATELY DIFFERENT from
+    //     DescribeStandardPipelineState()'s own "Less" - this pass only
+    //     ever survives at a pixel whose depth is still exactly the
+    //     frame's own clear value (see that renderer class's own header
+    //     comment for the full reasoning).
+    //   - depthStencil.depthWriteEnable = VK_FALSE -> "Off", DELIBERATELY
+    //     DIFFERENT from DescribeStandardPipelineState()'s own "On" -
+    //     nothing is ever meant to occlude behind the sky.
+    //   - rasterizer.cullMode = VK_CULL_MODE_NONE -> "None" (same).
+    //   - depthStencil.stencilTestEnable = VK_FALSE, no stencil struct
+    //     populated -> every stencil field "n/a (no stencil test)" (same).
+    FrameDebuggerStandardPipelineState state;
+    state.blendMode = "Opaque (no blend)";
+    state.zClip = "On";
+    state.zTest = "Equal";
+    state.zWrite = "Off";
+    state.cull = "None";
+    state.stencilRef = "n/a (no stencil test)";
+    state.stencilComp = "n/a (no stencil test)";
+    state.stencilPass = "n/a (no stencil test)";
+    state.stencilFail = "n/a (no stencil test)";
+    state.stencilZFail = "n/a (no stencil test)";
+    return state;
+}
+
 void FrameDebuggerCaptureContext::RecordDraw(
     const std::string& pipelineDebugName, const std::string& materialTextureDebugName, const Mat4& viewProjection)
 {
@@ -66,6 +101,28 @@ void FrameDebuggerCaptureContext::RecordEntityDraw(std::uint32_t entityIndex, st
     record.pipelineDebugName = pipelineDebugName;
     record.materialTextureDebugName = materialTextureDebugName;
     record.triangleCount = triangleCount;
+    m_drawRecords.push_back(std::move(record));
+}
+
+void FrameDebuggerCaptureContext::RecordSkyBackgroundDraw(const std::string& pipelineDebugName)
+{
+    // Reuses RecordDraw()'s own existing dedup/draw-call-count/last-view-
+    // projection bookkeeping (Locked Design Decision 6,
+    // PHASE0_MASTER_STRATEGY.md) - this is what makes the PARENT "GameView"
+    // leaf's own aggregate `shaderName` (built by joining
+    // capture.PipelineDebugNames() in FrameDebuggerData.cpp's
+    // BuildGameViewLeaf()) correctly include the sky's own real shader pair
+    // too, alongside whatever mesh shaders ran this frame.
+    RecordDraw(pipelineDebugName, /*materialTextureDebugName=*/std::string(), m_lastViewProjection);
+
+    FrameDebuggerDrawRecord record;
+    record.displayName = pipelineDebugName;
+    record.pipelineDebugName = pipelineDebugName;
+    // A real, honest fact - AtmosphereSkyBackgroundRenderer::Draw() issues
+    // exactly ONE vkCmdDraw(cmd, 3, 1, 0, 0) call (one full-screen
+    // triangle, 3 vertices) - never a placeholder/invented number.
+    record.triangleCount = 1;
+    record.isSkyBackgroundDraw = true;
     m_drawRecords.push_back(std::move(record));
 }
 

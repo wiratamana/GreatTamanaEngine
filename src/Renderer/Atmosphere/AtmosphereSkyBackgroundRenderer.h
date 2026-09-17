@@ -83,6 +83,26 @@ public:
     void Draw(Renderer& renderer, VkCommandBuffer cmd, const Mat4& viewProjection, VkImageView skyViewLutView,
         VkSampler skyViewLutSampler, float eyeHeightKm, float planetRadiusKm, float skyExposure);
 
+    // frame-debugger-8 campaign, PHASE1 - a real, permanent, hand-verified
+    // identifier for the vert+frag shader pair this class's own
+    // EnsurePipeline() actually loads ("shaders/AtmosphereSkyBackground.vert.spv"/
+    // ".frag.spv" - see that method's own ReadShaderFile() calls) - mirrors
+    // Pipeline::DebugName()'s own "X.vert/X.frag" naming convention for a
+    // normal mesh Pipeline (e.g. "Mesh.vert/Mesh.frag"), so the Frame
+    // Debugger's new Sky Background capture leaf (see
+    // task_manager/frame-debugger-8/PHASE1_SKY_DRAW_CAPTURE_INSTRUMENTATION.md)
+    // can label itself with a REAL, verifiable fact instead of an invented
+    // cosmetic name like "Sky Background" - this campaign's own Locked
+    // Design Decision 2 (PHASE0_MASTER_STRATEGY.md). Every future caller
+    // that needs to identify this pass must go through this function -
+    // never duplicate this literal string a second time anywhere else. A
+    // plain `static constexpr` - no VkDevice, no instance state, directly
+    // Tier-1-testable with zero setup.
+    static constexpr const char* ShaderDebugName() noexcept
+    {
+        return "AtmosphereSkyBackground.vert/AtmosphereSkyBackground.frag";
+    }
+
     // Releases the pipeline/pipeline layout/descriptor-set-layout (if
     // built) - waits for the GPU to be idle first, mirrors
     // SceneGridRenderer::Reset()'s own identical reasoning/contract.

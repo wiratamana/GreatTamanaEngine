@@ -189,5 +189,72 @@ TEST(DescribeStandardPipelineStateTest, ReportsRealHardcodedPipelineCppValues)
     EXPECT_FALSE(state.stencilZFail.empty());
 }
 
+// frame-debugger-8 campaign, PHASE1 - DescribeSkyBackgroundPipelineState()/
+// RecordSkyBackgroundDraw() tests.
+
+TEST(DescribeSkyBackgroundPipelineStateTest, ReturnsRealDistinctValues)
+{
+    // Proves DescribeSkyBackgroundPipelineState() only genuinely differs
+    // from DescribeStandardPipelineState() where it should (zTest/zWrite),
+    // and matches it everywhere else (see this phase's own Step 3.5).
+    const FrameDebuggerStandardPipelineState sky = DescribeSkyBackgroundPipelineState();
+    const FrameDebuggerStandardPipelineState standard = DescribeStandardPipelineState();
+
+    EXPECT_EQ(sky.zTest, "Equal");
+    EXPECT_EQ(sky.zWrite, "Off");
+
+    EXPECT_EQ(sky.blendMode, standard.blendMode);
+    EXPECT_EQ(sky.zClip, standard.zClip);
+    EXPECT_EQ(sky.cull, standard.cull);
+    EXPECT_EQ(sky.stencilRef, standard.stencilRef);
+    EXPECT_EQ(sky.stencilComp, standard.stencilComp);
+    EXPECT_EQ(sky.stencilPass, standard.stencilPass);
+    EXPECT_EQ(sky.stencilFail, standard.stencilFail);
+    EXPECT_EQ(sky.stencilZFail, standard.stencilZFail);
+}
+
+TEST(FrameDebuggerCaptureContextTest, RecordSkyBackgroundDrawAppendsOneMarkedRecord)
+{
+    FrameDebuggerCaptureContext capture;
+    capture.RecordSkyBackgroundDraw("Test.vert/Test.frag");
+
+    ASSERT_EQ(capture.DrawRecords().size(), 1u);
+    EXPECT_TRUE(capture.DrawRecords()[0].isSkyBackgroundDraw);
+    EXPECT_EQ(capture.DrawRecords()[0].pipelineDebugName, "Test.vert/Test.frag");
+    EXPECT_EQ(capture.DrawRecords()[0].triangleCount, 1u);
+}
+
+TEST(FrameDebuggerCaptureContextTest, RecordSkyBackgroundDrawAfterEntityDrawsAppendsAtTheEnd)
+{
+    FrameDebuggerCaptureContext capture;
+    capture.RecordEntityDraw(2, 1, "terrain", "Mesh.vert/Mesh.frag (PositionNormal)", "MaterialTexture abc123", 100);
+    capture.RecordEntityDraw(3, 1, "SmokeTestCube", "Mesh.vert/Mesh.frag (PositionNormal)", "", 12);
+    capture.RecordSkyBackgroundDraw("AtmosphereSkyBackground.vert/AtmosphereSkyBackground.frag");
+
+    ASSERT_EQ(capture.DrawRecords().size(), 3u);
+    EXPECT_FALSE(capture.DrawRecords()[0].isSkyBackgroundDraw);
+    EXPECT_FALSE(capture.DrawRecords()[1].isSkyBackgroundDraw);
+    EXPECT_TRUE(capture.DrawRecords()[2].isSkyBackgroundDraw);
+}
+
+TEST(FrameDebuggerCaptureContextTest, RecordSkyBackgroundDrawFeedsPipelineDebugNamesAndDrawCallCount)
+{
+    FrameDebuggerCaptureContext capture;
+    capture.RecordSkyBackgroundDraw("Test.vert/Test.frag");
+
+    ASSERT_EQ(capture.PipelineDebugNames().size(), 1u);
+    EXPECT_EQ(capture.PipelineDebugNames()[0], "Test.vert/Test.frag");
+    EXPECT_EQ(capture.DrawCallCount(), 1);
+}
+
+TEST(FrameDebuggerCaptureContextTest, ResetClearsSkyBackgroundRecordsToo)
+{
+    FrameDebuggerCaptureContext capture;
+    capture.RecordSkyBackgroundDraw("Test.vert/Test.frag");
+    capture.Reset();
+
+    EXPECT_TRUE(capture.DrawRecords().empty());
+}
+
 } // namespace
 } // namespace gte

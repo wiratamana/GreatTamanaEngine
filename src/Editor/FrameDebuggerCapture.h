@@ -73,6 +73,18 @@ struct FrameDebuggerDrawRecord {
     std::string pipelineDebugName;
     std::string materialTextureDebugName; // empty for an untextured draw.
     std::uint32_t triangleCount = 0;
+
+    // frame-debugger-8 campaign, PHASE1 - true for the ONE real record
+    // representing the Sky Background full-screen-triangle draw (see
+    // FrameDebuggerCaptureContext::RecordSkyBackgroundDraw() below) -
+    // false (the default) for every real per-ENTITY record
+    // RecordEntityDraw() produces. `entityIndex`/`entityGeneration` are
+    // left at their default (0, 0) and MUST be ignored by any reader when
+    // this is true - there is no real ECS entity behind this record at
+    // all (see FrameDebuggerData.cpp's BuildGameViewDrawRecordLeaf(), PHASE3
+    // of this campaign, for the one place that already knows to branch on
+    // this flag instead of reading entityIndex/entityGeneration).
+    bool isSkyBackgroundDraw = false;
 };
 
 // Returns this engine's REAL, hardcoded blend/Z/stencil facts, cross-
@@ -81,6 +93,16 @@ struct FrameDebuggerDrawRecord {
 // Tier-1-testable (see tests/Editor/FrameDebuggerCaptureTests.cpp and
 // AGENTS.md, "Testability & Regression Safety").
 FrameDebuggerStandardPipelineState DescribeStandardPipelineState();
+
+// frame-debugger-8 campaign, PHASE1 - this engine's real, hand-verified
+// Sky Background pipeline facts, cross-checked against
+// AtmosphereSkyBackgroundRenderer.cpp's own EnsurePipeline() construction
+// code at implementation time (never guessed) - GENUINELY DIFFERENT from
+// DescribeStandardPipelineState()'s own values (Depth Test EQUAL not LESS,
+// Depth Write OFF not ON - see that class's own header comment for why).
+// Pure and free, exactly like DescribeStandardPipelineState() - directly
+// Tier-1-testable.
+FrameDebuggerStandardPipelineState DescribeSkyBackgroundPipelineState();
 
 // A per-frame recorder of real facts about what RenderSystem::Draw()
 // resolved and submitted for the Game View this exact frame - which real
@@ -128,6 +150,23 @@ public:
     void RecordEntityDraw(std::uint32_t entityIndex, std::uint32_t entityGeneration, const std::string& displayName,
         const std::string& pipelineDebugName, const std::string& materialTextureDebugName,
         std::uint32_t triangleCount);
+
+    // frame-debugger-8 campaign, PHASE1 - records the ONE real Sky
+    // Background draw call this frame's "GameView" pass issues (see
+    // AddGameViewPass(), RenderPasses.cpp) - call this ONCE, immediately
+    // after invoking the real `recordSkyBackground` callback, and ONLY
+    // when this capture context is actually armed (mirrors every other
+    // call site's own "only touch this when non-null" convention). Reuses
+    // RecordDraw()'s own existing dedup/draw-call-count/last-view-
+    // projection bookkeeping internally (Locked Design Decision 6,
+    // PHASE0_MASTER_STRATEGY.md) - the sky uses the exact same view-
+    // projection matrix every other draw in this pass used this frame, so
+    // passing LastViewProjection() back into that shared bookkeeping is
+    // correct, not a placeholder. `pipelineDebugName` should be
+    // `AtmosphereSkyBackgroundRenderer::ShaderDebugName()` - a real,
+    // permanent, non-fabricated identifier (never invent a cosmetic label
+    // like "Sky Background" here - see PHASE0's Locked Design Decision 2).
+    void RecordSkyBackgroundDraw(const std::string& pipelineDebugName);
 
     // Clears every recorded fact back to the empty/default state - call
     // once at the top of every armed frame (mirrors FrameRecorder::
