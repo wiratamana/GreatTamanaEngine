@@ -374,6 +374,66 @@ TEST(RenderGraphSnapshotTest, CulledComputePassStillReportsIsComputePassTrueAndC
     EXPECT_EQ(culled.stats.timing.status, GpuTimingSample::Status::Absent);
 }
 
+// --- frame-debugger-6 campaign, PHASE1 - viewScope --------------------------
+// --- (PHASE1_RENDERGRAPH_VIEWSCOPE_CHOKEPOINT_INFRASTRUCTURE.md) ------------
+
+// viewScope is copied through correctly for BOTH a surviving pass (declared
+// via the new 4-argument AddPass()/AddComputePass() overloads) AND a culled
+// one - both loops in BuildRenderGraphSnapshot() route through the SAME
+// shared BuildPassSnapshot() helper, so one assertion covering each case is
+// enough to prove that one shared line runs correctly regardless of which
+// loop invoked it (see this phase's own strategy document, Step 4).
+TEST(RenderGraphSnapshotTest, ViewScopeIsCopiedThroughForSurvivingAndCulledPasses)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle output = builder.CreateTexture("Output", MakeTextureDesc());
+    const TextureHandle deadEnd = builder.CreateTexture("DeadEnd", MakeTextureDesc());
+    TextureHandle skyView;
+
+    // A plain AddPass() call with no ViewScope at all still defaults to
+    // Shared - unaffected by this phase's own additive overloads.
+    builder.AddPass(
+        "GameView", [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(output); }, NoOpExecute);
+
+    // A surviving compute pass explicitly tagged GameView via the new
+    // 4-argument AddComputePass() overload.
+    builder.AddComputePass(
+        "AtmosphereSkyViewLutPass", ViewScope::GameView,
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            skyView = builder.CreateTexture("SkyView", MakeTextureDesc());
+            pass.WriteTexture(skyView);
+        },
+        NoOpExecute);
+
+    // A CULLED compute pass explicitly tagged SceneView - must still
+    // truthfully report its own viewScope even though it never survives.
+    builder.AddComputePass(
+        "ComputeBlurValidation", ViewScope::SceneView,
+        [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteTexture(deadEnd); }, NoOpExecute);
+
+    CompiledGraphInput input = builder.Finish();
+    const TextureHandle finalOutputs[] = { output, skyView };
+    const CompiledGraph compiled = Compile(input, finalOutputs);
+
+    const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, {});
+    ASSERT_EQ(snapshot.passesInExecutionOrder.size(), 3u);
+
+    const RenderGraphPassSnapshot& gameViewPass = snapshot.passesInExecutionOrder[0];
+    EXPECT_EQ(gameViewPass.name, "GameView");
+    EXPECT_FALSE(gameViewPass.isCulled);
+    EXPECT_EQ(gameViewPass.viewScope, ViewScope::Shared);
+
+    const RenderGraphPassSnapshot& skyViewPass = snapshot.passesInExecutionOrder[1];
+    EXPECT_EQ(skyViewPass.name, "AtmosphereSkyViewLutPass");
+    EXPECT_FALSE(skyViewPass.isCulled);
+    EXPECT_EQ(skyViewPass.viewScope, ViewScope::GameView);
+
+    const RenderGraphPassSnapshot& culledPass = snapshot.passesInExecutionOrder[2];
+    EXPECT_EQ(culledPass.name, "ComputeBlurValidation");
+    EXPECT_TRUE(culledPass.isCulled);
+    EXPECT_EQ(culledPass.viewScope, ViewScope::SceneView);
+}
+
 // A single pass declaring a mix of texture/buffer/volume-texture reads AND
 // writes ends up with readKinds/writeKinds exactly parallel to
 // readNames/writeNames, each entry carrying the correct ResourceKind - and

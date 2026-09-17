@@ -107,7 +107,7 @@ rg::TextureHandle ComputeBlurValidation::AddPass(rg::RenderGraphBuilder& builder
         builder.ImportTexture("BlurredSceneOutput", m_blurredOutput->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
 
     builder.AddComputePass(
-        "ComputeBlurValidation",
+        "ComputeBlurValidation", rg::ViewScope::SceneView, // Confirmed Scene-View-only - see Application.cpp's own AddBlurValidationPass() call site (frame-debugger-6, PHASE1).
         [sceneViewHandle, outputHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
             pass.ReadTexture(sceneViewHandle, rg::ResourceAccess::ShaderRead);
             pass.WriteTexture(outputHandle, rg::ResourceAccess::ComputeShaderWrite);

@@ -374,6 +374,18 @@ public:
         pass.execute = std::function<void(PassContext&)>(std::forward<ExecuteFn>(execute));
     }
 
+    // frame-debugger-6 campaign, PHASE1
+    // (PHASE1_RENDERGRAPH_VIEWSCOPE_CHOKEPOINT_INFRASTRUCTURE.md) - identical
+    // to AddPass() above, plus stamping PassRecord::viewScope. Every
+    // pre-existing 3-argument AddPass() call site is completely unaffected -
+    // this is purely an additive overload.
+    template <typename SetupFn, typename ExecuteFn>
+    void AddPass(const char* name, ViewScope viewScope, SetupFn&& setup, ExecuteFn&& execute)
+    {
+        AddPass(name, std::forward<SetupFn>(setup), std::forward<ExecuteFn>(execute));
+        m_passes.back().viewScope = viewScope;
+    }
+
     // frame-debugger-5 campaign, PHASE1
     // (PHASE1_RENDERGRAPH_COMPUTE_DISPATCH_CHOKEPOINT_INFRASTRUCTURE.md) -
     // UPDATES this method's own former "purely cosmetic" claim: this is now
@@ -394,6 +406,18 @@ public:
     {
         AddPass(name, std::forward<SetupFn>(setup), std::forward<ExecuteFn>(execute));
         m_passes.back().isComputePass = true;
+    }
+
+    // frame-debugger-6 campaign, PHASE1
+    // (PHASE1_RENDERGRAPH_VIEWSCOPE_CHOKEPOINT_INFRASTRUCTURE.md) - identical
+    // to AddComputePass() above, plus stamping PassRecord::viewScope. Every
+    // pre-existing 3-argument AddComputePass() call site is completely
+    // unaffected.
+    template <typename SetupFn, typename ExecuteFn>
+    void AddComputePass(const char* name, ViewScope viewScope, SetupFn&& setup, ExecuteFn&& execute)
+    {
+        AddComputePass(name, std::forward<SetupFn>(setup), std::forward<ExecuteFn>(execute));
+        m_passes.back().viewScope = viewScope;
     }
 
     // Consumes this builder, handing its whole in-progress description

@@ -77,6 +77,13 @@ struct RenderGraphPassSnapshot {
     // convention).
     bool isComputePass = false;
 
+    // frame-debugger-6 campaign, PHASE1
+    // (PHASE1_RENDERGRAPH_VIEWSCOPE_CHOKEPOINT_INFRASTRUCTURE.md) - copied
+    // straight through for BOTH a surviving AND a culled pass, exactly like
+    // isComputePass above (a culled pass must still truthfully report which
+    // view it belonged to).
+    ViewScope viewScope = ViewScope::Shared;
+
     // frame-debugger-5 campaign, PHASE1 - PARALLEL to readNames/writeNames
     // above (same index, same length) - which ResourceKind (RenderGraphTypes.h)
     // each entry actually is, so a consumer never has to guess/probe

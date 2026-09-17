@@ -612,7 +612,8 @@ int Application::Run()
                             const AtmosphereViewLutHandles gameAtmosphere = AddAtmosphereViewLutPasses(b, m_renderer,
                                 m_atmosphereLutRenderer, m_game.GetRegistry(), atmosphereParameters,
                                 m_atmosphereSettings, atmosphereSharedLuts, gameEyeWorldPosition, gameViewProjection,
-                                "AtmosphereSkyViewLut_GameView", "AtmosphereAerialPerspectiveVolume_GameView");
+                                "AtmosphereSkyViewLut_GameView", "AtmosphereAerialPerspectiveVolume_GameView",
+                                rg::ViewScope::GameView);
                             outputs.push_back(gameAtmosphere.skyViewLutHandle);
                             // A VolumeTextureHandle can never go into
                             // `outputs` (TextureHandle-only) - see
@@ -639,7 +640,7 @@ int Application::Run()
                                     gameAtmosphere.aerialPerspectiveVolumeHandle,
                                     "AtmosphereAerialPerspectiveVolume_GameView",
                                     static_cast<std::uint32_t>(m_atmosphereSettings.aerialPerspectiveDebugSliceIndex),
-                                    "AtmosphereAerialPerspectiveVolumeDebugSlice");
+                                    "AtmosphereAerialPerspectiveVolumeDebugSlice", rg::ViewScope::GameView);
                             outputs.push_back(aerialPerspectiveDebugSlice);
 
                             // 3.2 - the Sky Background pass, issued INSIDE
@@ -673,7 +674,8 @@ int Application::Run()
                                 "AtmosphereAerialPerspectiveVolume_GameView", gameAtmosphere.frameUniforms,
                                 gameEyeWorldPosition, m_atmosphereSettings.aerialPerspectiveStrength,
                                 m_atmosphereSettings.aerialPerspectiveMaxDistanceKm,
-                                m_atmosphereSettings.aerialPerspectiveDepthExponent, extent, "GameViewComposited");
+                                m_atmosphereSettings.aerialPerspectiveDepthExponent, extent, "GameViewComposited",
+                                rg::ViewScope::GameView);
                             outputs.push_back(gameComposited);
                         }
                         if (sceneTarget != nullptr) {
@@ -696,7 +698,8 @@ int Application::Run()
                             const AtmosphereViewLutHandles sceneAtmosphere = AddAtmosphereViewLutPasses(b, m_renderer,
                                 m_atmosphereLutRenderer, m_game.GetRegistry(), atmosphereParameters,
                                 m_atmosphereSettings, atmosphereSharedLuts, sceneEyeWorldPosition, sceneViewProjection,
-                                "AtmosphereSkyViewLut_SceneView", "AtmosphereAerialPerspectiveVolume_SceneView");
+                                "AtmosphereSkyViewLut_SceneView", "AtmosphereAerialPerspectiveVolume_SceneView",
+                                rg::ViewScope::SceneView);
                             outputs.push_back(sceneAtmosphere.skyViewLutHandle);
                             b.KeepVolumeTextureOutput(sceneAtmosphere.aerialPerspectiveVolumeHandle);
 
@@ -729,7 +732,8 @@ int Application::Run()
                                 "AtmosphereAerialPerspectiveVolume_SceneView", sceneAtmosphere.frameUniforms,
                                 sceneEyeWorldPosition, m_atmosphereSettings.aerialPerspectiveStrength,
                                 m_atmosphereSettings.aerialPerspectiveMaxDistanceKm,
-                                m_atmosphereSettings.aerialPerspectiveDepthExponent, extent, "SceneViewComposited");
+                                m_atmosphereSettings.aerialPerspectiveDepthExponent, extent, "SceneViewComposited",
+                                rg::ViewScope::SceneView);
                             outputs.push_back(sceneComposited);
 
                             // Phase 7 of the compute-shader campaign

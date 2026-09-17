@@ -52,7 +52,7 @@ void AddGameViewPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& rend
     const std::function<void(VkCommandBuffer)>& recordSkyBackground, FrameDebuggerCaptureContext* frameDebuggerCapture)
 {
     builder.AddPass(
-        "GameView",
+        "GameView", rg::ViewScope::GameView,
         [gameViewTarget, gpuSkinningOutputBuffers](rg::RenderGraphBuilder::PassBuilder& pass) {
             pass.WriteColorAttachment(gameViewTarget, kGameClearColor);
             pass.WriteDepthStencilAttachment(gameViewTarget, kGameClearDepth);
@@ -81,7 +81,7 @@ void AddSceneViewPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& ren
     const std::function<void(VkCommandBuffer)>& recordSkyBackground)
 {
     builder.AddPass(
-        "SceneView",
+        "SceneView", rg::ViewScope::SceneView,
         [sceneViewTarget, gpuSkinningOutputBuffers](rg::RenderGraphBuilder::PassBuilder& pass) {
             pass.WriteColorAttachment(sceneViewTarget, kGameClearColor);
             pass.WriteDepthStencilAttachment(sceneViewTarget, kGameClearDepth);

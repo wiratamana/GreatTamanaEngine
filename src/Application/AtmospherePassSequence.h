@@ -102,7 +102,7 @@ AtmosphereViewLutHandles AddAtmosphereViewLutPasses(rg::RenderGraphBuilder& buil
     AtmosphereLutRenderer& atmosphereLutRenderer, Registry& registry,
     const AtmosphereParametersGpu& atmosphereParameters, const AtmosphereSettings& atmosphereSettings,
     const AtmosphereSharedLutHandles& sharedLuts, Vec3 eyeWorldPosition, const Mat4& viewProjection,
-    const char* skyViewLutName, const char* aerialPerspectiveVolumeName);
+    const char* skyViewLutName, const char* aerialPerspectiveVolumeName, rg::ViewScope viewScope);
 
 // Builds a ready-to-pass-into-AddGameViewPass()/AddSceneViewPass()'s own
 // `recordSkyBackground` parameter (RenderPasses.h) - captures everything
@@ -142,6 +142,6 @@ rg::TextureHandle AddAtmosphereCompositePass(rg::RenderGraphBuilder& builder, Re
     AtmosphereLutRenderer& atmosphereLutRenderer, RenderTexture& viewRenderTexture, rg::TextureHandle sourceColorHandle,
     rg::VolumeTextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,
     const AtmosphereFrameUniforms& frameUniforms, Vec3 eyeWorldPosition, float aerialPerspectiveStrength,
-    float maxDistanceKm, float depthExponent, VkExtent2D extent, const char* outputTextureName);
+    float maxDistanceKm, float depthExponent, VkExtent2D extent, const char* outputTextureName, rg::ViewScope viewScope);
 
 } // namespace gte

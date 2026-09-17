@@ -310,6 +310,26 @@ enum class ResourceKind : std::uint8_t {
     VolumeTexture,
 };
 
+// frame-debugger-6 campaign, PHASE1
+// (PHASE1_RENDERGRAPH_VIEWSCOPE_CHOKEPOINT_INFRASTRUCTURE.md) - which real
+// VIEW (if any) this pass conceptually belongs to. Stamped exactly once, at
+// the same small set of Application-layer call sites that already
+// unambiguously know the answer (see RenderGraphBuilder::AddPass()/
+// AddComputePass()'s new 4-argument overloads below) - never guessed/
+// derived from a pass's own name or resource names. `Shared` (the default -
+// see PassRecord::viewScope below) means "this pass is not duplicated per
+// view" (e.g. the Transmittance/Multi-Scattering LUTs, computed once per
+// frame; GPU Skinning dispatches). A pass tagged GameView/SceneView exists
+// as a genuinely separate PassRecord instance per view that calls it - see
+// AtmospherePassSequence.cpp's own AddAtmosphereViewLutPasses(), called once
+// per view, each call producing its own distinct PassRecord(s) even when two
+// calls happen to share an identical literal pass `name` string.
+enum class ViewScope {
+    Shared,
+    GameView,
+    SceneView,
+};
+
 // A single declared read/write on a texture, a buffer, OR a volume
 // texture. Phase 1 shipped this as a texture-only shape; Phase 2 of the
 // Render Graph campaign grew it into a texture/buffer tagged-union shape
@@ -423,6 +443,14 @@ struct PassRecord {
     // passes that ran this frame were compute dispatches" without needing
     // to already know every compute pass's exact string name in advance.
     bool isComputePass = false;
+
+    // frame-debugger-6 campaign, PHASE1
+    // (PHASE1_RENDERGRAPH_VIEWSCOPE_CHOKEPOINT_INFRASTRUCTURE.md) - see
+    // ViewScope's own doc comment above. Defaults to Shared so every
+    // pre-existing AddPass()/AddComputePass() call site (which never
+    // mentions ViewScope at all) keeps its exact prior behavior/meaning
+    // unchanged.
+    ViewScope viewScope = ViewScope::Shared;
 
     // Captured by RenderGraphBuilder::AddPass() (Phase 2) - stored, never
     // invoked by AddPass()/Finish() themselves. Invoked exactly once by

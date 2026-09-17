@@ -174,10 +174,15 @@ public:
     // TextureHandle return values as arguments). Same "no dirty-flag
     // optimization" / "caller must add the returned handle to this call's
     // own outputs root set" contract as the two methods above.
+    // `viewScope` (frame-debugger-6 campaign, PHASE1 -
+    // PHASE1_RENDERGRAPH_VIEWSCOPE_CHOKEPOINT_INFRASTRUCTURE.md) is forwarded
+    // straight through to the underlying builder.AddComputePass() call - the
+    // caller (AtmospherePassSequence.cpp) always knows unambiguously which
+    // view this call is for.
     rg::TextureHandle AddSkyViewLutPass(rg::RenderGraphBuilder& builder, Renderer& renderer,
         const AtmosphereParametersGpu& params, const AtmosphereFrameUniforms& frameUniforms,
         rg::TextureHandle transmittanceLutHandle, rg::TextureHandle multiScatteringLutHandle,
-        const char* outputTextureName);
+        const char* outputTextureName, rg::ViewScope viewScope);
 
     // Phase 6 (ATMOSPHERE_PHASE6_AERIAL_PERSPECTIVE_FROXEL_VOLUME_v1.md) -
     // declares this frame's Aerial Perspective froxel-volume compute pass
@@ -211,10 +216,13 @@ public:
     // `builder.KeepVolumeTextureOutput(returnedHandle)` explicitly, or this
     // pass's write will be silently culled the next time
     // RenderGraphCompiler::Compile() runs.
+    // `viewScope` (frame-debugger-6 campaign, PHASE1) - see
+    // AddSkyViewLutPass()'s own doc comment above for the identical
+    // reasoning.
     rg::VolumeTextureHandle AddAerialPerspectiveVolumePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
         const AtmosphereParametersGpu& params, const AtmosphereFrameUniforms& frameUniforms,
         rg::TextureHandle transmittanceLutHandle, rg::TextureHandle multiScatteringLutHandle,
-        const char* outputVolumeName);
+        const char* outputVolumeName, rg::ViewScope viewScope);
 
     // Phase 7 (task_manager/atmosphere-scattering-1/
     // ATMOSPHERE_PHASE7_SKY_BACKGROUND_AND_COMPOSITE_PASSES_v1.md) - draws
@@ -283,12 +291,15 @@ public:
     // it to this call's own outputs root set, or this pass's write will be
     // silently culled the next time RenderGraphCompiler::Compile() runs
     // (same contract as every AddXxxLutPass() above).
+    // `viewScope` (frame-debugger-6 campaign, PHASE1) - see
+    // AddSkyViewLutPass()'s own doc comment above for the identical
+    // reasoning.
     rg::TextureHandle AddAerialPerspectiveCompositePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
         rg::TextureHandle sourceColorHandle, VkSampler sourceColorSampler, VkImageView sourceDepthView,
         VkSampler sourceDepthSampler, rg::VolumeTextureHandle aerialPerspectiveVolumeHandle,
         const char* aerialPerspectiveVolumeName, const Mat4& invViewProjection, Vec3 cameraWorldPosition,
         float aerialPerspectiveStrength, float maxDistanceKm, float depthExponent, VkExtent2D extent,
-        const char* outputTextureName);
+        const char* outputTextureName, rg::ViewScope viewScope);
 
     // Returns a pointer to `outputTextureName`'s own persistent composited
     // output RenderTexture (the SAME one AddAerialPerspectiveCompositePass()
@@ -371,9 +382,14 @@ public:
     // call's own ordinary `outputs` root set (finalOutputs) - never
     // `KeepVolumeTextureOutput()`, which only applies to a VolumeTexture
     // WRITE, not a Texture WRITE that merely READS a volume texture.
+    // `viewScope` (frame-debugger-6 campaign, PHASE1) - see
+    // AddSkyViewLutPass()'s own doc comment above for the identical
+    // reasoning; per PHASE1's own Step 3.4, this method never hardcodes an
+    // assumption about which view it is for internally, even though every
+    // call site today happens to pass GameView.
     rg::TextureHandle AddAerialPerspectiveVolumeDebugSlicePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
         rg::VolumeTextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,
-        std::uint32_t debugSliceIndex, const char* outputTextureName);
+        std::uint32_t debugSliceIndex, const char* outputTextureName, rg::ViewScope viewScope);
 
     // atmosphere-scattering-2 campaign, Phase 5
     // (task_manager/atmosphere-scattering-2/PHASE5_AERIAL_LUT_NUMERIC_VALIDATION_TOOL.md,

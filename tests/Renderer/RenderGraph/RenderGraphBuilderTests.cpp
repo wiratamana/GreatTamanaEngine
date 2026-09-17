@@ -422,6 +422,80 @@ TEST(RenderGraphBuilderTest, AddComputePassRecordsIsComputePassTrue)
     EXPECT_TRUE(input.passes[0].isComputePass);
 }
 
+// --- ViewScope (frame-debugger-6 campaign, PHASE1 - --------------------------
+// --- PHASE1_RENDERGRAPH_VIEWSCOPE_CHOKEPOINT_INFRASTRUCTURE.md) -------------
+
+// A plain, pre-existing 3-argument AddPass() call leaves PassRecord::viewScope
+// at its default (Shared) - the new 4-argument overload is purely additive,
+// never changing what the 3-argument one does.
+TEST(RenderGraphBuilderTest, AddPassThreeArgumentOverloadLeavesViewScopeShared)
+{
+    RenderGraphBuilder builder;
+    builder.AddPass(
+        "GraphicsPass",
+        [](RenderGraphBuilder::PassBuilder&) { },
+        NoOpExecute);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes.size(), 1u);
+    EXPECT_EQ(input.passes[0].viewScope, ViewScope::Shared);
+}
+
+// Same idea for AddComputePass()'s own pre-existing 3-argument overload.
+TEST(RenderGraphBuilderTest, AddComputePassThreeArgumentOverloadLeavesViewScopeShared)
+{
+    RenderGraphBuilder builder;
+    builder.AddComputePass(
+        "ComputeDispatchPass",
+        [](RenderGraphBuilder::PassBuilder&) { },
+        NoOpExecute);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes.size(), 1u);
+    EXPECT_EQ(input.passes[0].viewScope, ViewScope::Shared);
+}
+
+// The new 4-argument AddPass() overload correctly stamps the supplied
+// ViewScope onto the resulting PassRecord, and still runs setup/captures
+// execute exactly like the 3-argument overload.
+TEST(RenderGraphBuilderTest, AddPassFourArgumentOverloadStampsViewScope)
+{
+    RenderGraphBuilder builder;
+    int setupCallCount = 0;
+
+    builder.AddPass(
+        "GameView",
+        ViewScope::GameView,
+        [&](RenderGraphBuilder::PassBuilder&) { ++setupCallCount; },
+        NoOpExecute);
+
+    EXPECT_EQ(setupCallCount, 1);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes.size(), 1u);
+    EXPECT_STREQ(input.passes[0].name, "GameView");
+    EXPECT_EQ(input.passes[0].viewScope, ViewScope::GameView);
+    EXPECT_FALSE(input.passes[0].isComputePass);
+}
+
+// The new 4-argument AddComputePass() overload stamps BOTH isComputePass ==
+// true AND the supplied ViewScope - the two flags are independent and both
+// correctly set by this one call.
+TEST(RenderGraphBuilderTest, AddComputePassFourArgumentOverloadStampsViewScopeAndIsComputePass)
+{
+    RenderGraphBuilder builder;
+    builder.AddComputePass(
+        "AtmosphereSkyViewLutPass",
+        ViewScope::SceneView,
+        [](RenderGraphBuilder::PassBuilder&) { },
+        NoOpExecute);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes.size(), 1u);
+    EXPECT_EQ(input.passes[0].viewScope, ViewScope::SceneView);
+    EXPECT_TRUE(input.passes[0].isComputePass);
+}
+
 // frame-debugger-5 campaign, PHASE1 - a single compute pass declaring a
 // mix of ReadTexture/WriteTexture AND ReadBuffer/WriteBuffer AND
 // ReadVolumeTexture/WriteVolumeTexture still populates pass.reads/writes

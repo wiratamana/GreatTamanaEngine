@@ -56,6 +56,7 @@ RenderGraphPassSnapshot BuildPassSnapshot(const PassRecord& pass, const Compiled
     snapshot.name = pass.name != nullptr ? pass.name : "";
     snapshot.isCulled = isCulled;
     snapshot.isComputePass = pass.isComputePass; // frame-debugger-5, PHASE1
+    snapshot.viewScope = pass.viewScope; // frame-debugger-6, PHASE1
 
     snapshot.readNames.reserve(pass.reads.size());
     snapshot.readKinds.reserve(pass.reads.size());          // frame-debugger-5, PHASE1

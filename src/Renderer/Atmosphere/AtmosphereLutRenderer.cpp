@@ -440,7 +440,8 @@ AtmosphereLutRenderer::SkyViewLutViewState& AtmosphereLutRenderer::EnsureSkyView
 
 rg::TextureHandle AtmosphereLutRenderer::AddSkyViewLutPass(rg::RenderGraphBuilder& builder, Renderer& renderer,
     const AtmosphereParametersGpu& params, const AtmosphereFrameUniforms& frameUniforms,
-    rg::TextureHandle transmittanceLutHandle, rg::TextureHandle multiScatteringLutHandle, const char* outputTextureName)
+    rg::TextureHandle transmittanceLutHandle, rg::TextureHandle multiScatteringLutHandle, const char* outputTextureName,
+    rg::ViewScope viewScope)
 {
     (void)params; // Already uploaded into m_atmosphereParametersBuffer by AddTransmittanceLutPass() this same frame.
 
@@ -456,7 +457,7 @@ rg::TextureHandle AtmosphereLutRenderer::AddSkyViewLutPass(rg::RenderGraphBuilde
         builder.ImportTexture(outputTextureName, viewState.output->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
 
     builder.AddComputePass(
-        "AtmosphereSkyViewLutPass",
+        "AtmosphereSkyViewLutPass", viewScope,
         [transmittanceLutHandle, multiScatteringLutHandle, outputHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
             // Real dependency declarations - order this pass strictly
             // after AddTransmittanceLutPass()/AddMultiScatteringLutPass()'s
@@ -577,7 +578,8 @@ AtmosphereLutRenderer::AerialPerspectiveVolumeViewState& AtmosphereLutRenderer::
 
 rg::VolumeTextureHandle AtmosphereLutRenderer::AddAerialPerspectiveVolumePass(rg::RenderGraphBuilder& builder,
     Renderer& renderer, const AtmosphereParametersGpu& params, const AtmosphereFrameUniforms& frameUniforms,
-    rg::TextureHandle transmittanceLutHandle, rg::TextureHandle multiScatteringLutHandle, const char* outputVolumeName)
+    rg::TextureHandle transmittanceLutHandle, rg::TextureHandle multiScatteringLutHandle, const char* outputVolumeName,
+    rg::ViewScope viewScope)
 {
     (void)params; // Already uploaded into m_atmosphereParametersBuffer by AddTransmittanceLutPass() this same frame.
 
@@ -593,7 +595,7 @@ rg::VolumeTextureHandle AtmosphereLutRenderer::AddAerialPerspectiveVolumePass(rg
         builder.ImportVolumeTexture(outputVolumeName, viewState.output->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
 
     builder.AddComputePass(
-        "AtmosphereAerialPerspectiveVolumePass",
+        "AtmosphereAerialPerspectiveVolumePass", viewScope,
         [transmittanceLutHandle, multiScatteringLutHandle, outputHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
             // Real dependency declarations - order this pass strictly
             // after AddTransmittanceLutPass()/AddMultiScatteringLutPass()'s
@@ -714,7 +716,7 @@ rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveCompositePass(rg::R
     VkImageView sourceDepthView, VkSampler sourceDepthSampler, rg::VolumeTextureHandle aerialPerspectiveVolumeHandle,
     const char* aerialPerspectiveVolumeName, const Mat4& invViewProjection, Vec3 cameraWorldPosition,
     float aerialPerspectiveStrength, float maxDistanceKm, float depthExponent, VkExtent2D extent,
-    const char* outputTextureName)
+    const char* outputTextureName, rg::ViewScope viewScope)
 {
     EnsureAerialPerspectiveCompositeInitialized(renderer);
     AerialPerspectiveCompositeViewState& viewState =
@@ -756,7 +758,7 @@ rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveCompositePass(rg::R
     pushConstants.aerialPerspectiveStrengthAndPad[3] = 0.0f;
 
     builder.AddComputePass(
-        "AtmosphereAerialPerspectiveCompositePass",
+        "AtmosphereAerialPerspectiveCompositePass", viewScope,
         [sourceColorHandle, aerialPerspectiveVolumeHandle, outputHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
             // Real dependency declarations - order this pass strictly after
             // whichever GameView/SceneView graphics pass wrote
@@ -899,7 +901,7 @@ AtmosphereLutRenderer::EnsureAerialPerspectiveVolumeDebugSliceViewInitialized(
 
 rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveVolumeDebugSlicePass(rg::RenderGraphBuilder& builder,
     Renderer& renderer, rg::VolumeTextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,
-    std::uint32_t debugSliceIndex, const char* outputTextureName)
+    std::uint32_t debugSliceIndex, const char* outputTextureName, rg::ViewScope viewScope)
 {
     EnsureAerialPerspectiveVolumeDebugSliceInitialized(renderer);
 
@@ -935,7 +937,7 @@ rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveVolumeDebugSlicePas
     pushConstants.sliceCount = sliceCount;
 
     builder.AddComputePass(
-        "AtmosphereAerialPerspectiveVolumeDebugSlicePass",
+        "AtmosphereAerialPerspectiveVolumeDebugSlicePass", viewScope,
         [aerialPerspectiveVolumeHandle, outputHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
             // Real dependency declaration - order this pass strictly after
             // AddAerialPerspectiveVolumePass()'s own write this same frame.
