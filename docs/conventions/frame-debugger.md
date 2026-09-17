@@ -69,6 +69,10 @@ Pause/Resume toolbar or the embedded HTTP server:
     |     |-- <one real child leaf PER real per-entity draw call this pass
     |     |     issued this frame - e.g. "terrain (Entity 2)",
     |     |     "SmokeTestCube (Entity 3)" - frame-debugger-6 campaign, PHASE4>
+    |     |-- <one final real child leaf for the Sky Background full-screen-
+    |     |     triangle draw, always LAST - e.g.
+    |     |     "AtmosphereSkyBackground.vert/AtmosphereSkyBackground.frag" -
+    |     |     frame-debugger-8 campaign>
     |-- "Compute Dispatches (Post-GameView)"  (only present if >=1 child)
           |-- <every surviving compute pass whose own real execution-order
           |     index is AFTER "GameView"'s own index, in real execution order>
@@ -156,7 +160,15 @@ Pause/Resume toolbar or the embedded HTTP server:
   (`Pipeline.cpp`: no blend, `VK_COMPARE_OP_LESS` depth test, no stencil
   test anywhere), so there is nothing to fabricate per-mesh here; a genuine
   future per-material blend/Z/stencil VARIATION would need its own follow-up
-  campaign, not just a data-plumbing change. Every compute-dispatch leaf's
+  campaign, not just a data-plumbing change. The Sky Background leaf
+  (`frame-debugger-8` campaign) is the ONE other real, non-fabricated
+  pipeline-state fact in this window — it reports its own genuinely different
+  `DescribeSkyBackgroundPipelineState()` values (`Depth Test = Equal`, `Depth
+  Write = Off`, both DELIBERATELY different from every mesh's `Less`/`On`) —
+  still not a per-MATERIAL/per-mesh variation (there is still exactly one
+  Pipeline configuration for every real mesh draw), simply a second, distinct,
+  real draw TYPE this tree now honestly distinguishes. Every compute-dispatch
+  leaf's
   blend/Z/stencil rows all read `"n/a (compute pass)"` (it never issues a draw
   call), and its `vectors` include its own real GPU timing sample whenever one
   is present.
@@ -376,6 +388,113 @@ See `task_manager/frame-debugger-7/PHASE0_MASTER_STRATEGY.md` and each
 writeup, and `CAMPAIGN_COMPLETION_REPORT.md` (written at the close of Phase 7)
 for the final, live, HTTP-driven, screenshot-verified proof both bugs are
 fixed.
+
+## What's new (`frame-debugger-8` campaign)
+
+`frame-debugger-8` (`task_manager/frame-debugger-8/PHASE0_MASTER_STRATEGY.md`,
+four phases) fixed one more real, user-confirmed gap: the Sky Background pass
+- a real, direct `vkCmdDraw()` full-screen-triangle draw
+(`AtmosphereSkyBackgroundRenderer::Draw()`, drawn LAST every frame, after
+every real entity, using its own genuinely different `EQUAL`-depth-test
+pipeline state so it only paints pixels nothing else touched yet) - never
+went through `RenderSystem::Draw()`/`Renderer::Submit()` at all, so it was
+COMPLETELY INVISIBLE anywhere in the event tree, even though it genuinely
+runs every single frame. A second, closely-related bug was found (and
+independently spotted by the user, comparing the last object's own preview
+image against the object drawn just before it) while investigating: the LAST
+real entity's own per-step preview image secretly ALREADY included the sky,
+bundled in for an unrelated technical reason, with no way to see "just after
+the last object, before sky" as its own distinct state.
+
+- **A new `FrameDebuggerCaptureContext::RecordSkyBackgroundDraw()` method**
+  (`src/Editor/FrameDebuggerCapture.h/.cpp`) is now called exactly once, from
+  `AddGameViewPass()`'s own `execute` lambda (`src/Application/RenderPasses.cpp`),
+  immediately after the real `recordSkyBackground` callback runs - the same
+  "only touch the capture context when it's actually armed" discipline every
+  other call site already follows. It reuses `RecordDraw()`'s own existing
+  dedup/draw-call-count/last-view-projection bookkeeping internally (the sky
+  uses the exact same view-projection matrix every other draw in the pass
+  used that frame), and appends one new `FrameDebuggerDrawRecord` marked
+  `isSkyBackgroundDraw = true` - a new field appended at the end of that
+  struct, alongside the real per-entity records `RecordEntityDraw()` already
+  produces, always LAST (mirroring the real GPU draw order:
+  every entity, then sky).
+- **The new leaf's own identifying name is a REAL, hand-verified fact, never
+  an invented cosmetic label.** `AtmosphereSkyBackgroundRenderer::ShaderDebugName()`
+  (a new, permanent, `constexpr` static method) returns the actual real
+  shader-file-pair string this pass genuinely loads,
+  `"AtmosphereSkyBackground.vert/AtmosphereSkyBackground.frag"` - this is
+  both the new tree row's own display name AND its Inspector "Shader" row.
+  This deliberately follows the exact same hard-learned lesson the
+  `frame-debugger-5` campaign already established when it REMOVED the old
+  hardcoded "GPU Skinning"/"Aerial Perspective Composite" cosmetic-label
+  special cases (see that campaign's own section above) - never fabricate a
+  friendly name detached from a real, checkable fact. Its own `passName` row
+  reads `"GameView (Sky Draw)"`, mirroring the pre-existing
+  `"GameView (Entity Draw)"` per-entity-leaf convention exactly (a real,
+  structural "which pass did this happen inside" fact, distinct from the
+  literal `"GameView"` pass leaf's own name, for the same
+  string-collision-avoidance reason `frame-debugger-6`'s own PHASE4
+  originally documented).
+- **The new leaf's own Blend/Z/Stencil Inspector rows are genuinely
+  different from every mesh's**, via a new, dedicated
+  `DescribeSkyBackgroundPipelineState()` function
+  (`src/Editor/FrameDebuggerCapture.h/.cpp`), hand-transcribed directly from
+  `AtmosphereSkyBackgroundRenderer.cpp`'s own real
+  `VkPipelineDepthStencilStateCreateInfo` construction: `Depth Test = Equal`
+  (not `Less`) and `Depth Write = Off` (not `On`) - the ONE other place in
+  this whole engine (besides the single, constant
+  `DescribeStandardPipelineState()` every mesh leaf reuses) that reports a
+  genuinely different real Pipeline configuration in this window.
+- **A real, correctly-ordered replay preview for the new leaf** - the
+  `frame-debugger-7` campaign's own per-object replay-rendering mechanism
+  (`AddFrameDebuggerReplayPasses()`, `src/Application/RenderPasses.cpp`) is
+  restructured so the sky is NEVER drawn inside a per-object replay step
+  anymore (fixing the "last object's own image secretly already included
+  sky" bug outright) - instead, exactly ONE new, dedicated replay step is
+  added whenever a sky callback exists that frame, redrawing every real
+  object and then the sky, becoming the new leaf's own correct,
+  pixel-accurate "Game View as of right after the sky was drawn" preview
+  image (pixel-identical to the whole-frame `preview`, by construction - the
+  same useful internal cross-check the OLD, buggy code's own comment already
+  noted, now genuinely isolated onto its own step instead of incorrectly
+  fused onto the last object's). A scene with ZERO mesh entities now also
+  correctly gets exactly one real replay step (the sky alone), instead of
+  zero - the old code's own `if (objectCount == 0) return;` early-out used
+  to skip replay entirely for an empty scene, silently hiding the sky there
+  too.
+- **`BuildGameViewDrawRecordLeaf()` (`src/Editor/FrameDebuggerData.cpp`)
+  branches on the new `isSkyBackgroundDraw` flag** to build this
+  differently-shaped leaf (no fabricated "Entity (Index, Generation)" row,
+  since there is no real ECS entity behind it) - the existing
+  `BuildRealFrameDebuggerSnapshot()` loop that walks
+  `capture.DrawRecords()` needed ZERO structural changes at all; it already
+  iterates the sky record correctly simply because
+  `RecordSkyBackgroundDraw()` appends it in true chronological (real GPU)
+  order.
+- **Scope stayed Game View ONLY, per this feature's own permanent rule** -
+  the underlying `AtmosphereSkyBackgroundRenderer::Draw()` function is
+  genuinely shared/identical for both the Game View and the Editor's own
+  Scene View (same real Vulkan pipeline, same shader files) - only the Frame
+  Debugger's own CAPTURE call site differs, and it was only ever wired into
+  `AddGameViewPass()` to begin with; `AddSceneViewPass()` remains untouched
+  by this campaign, exactly like every other Game-View-only mechanism this
+  window already has.
+- **A known, EXPLICITLY DEFERRED, pre-existing, narrow gap this campaign did
+  NOT fix**: the parent `"GameView"` leaf's own aggregate "Draw Stats
+  (Calls, Tris)" row (sourced from `RenderGraphPassSnapshot::stats.drawStats`,
+  fed only by `Renderer::Submit()`'s own bookkeeping) still does not count
+  the sky's own raw `vkCmdDraw()` call, since that call happens outside any
+  `Renderer::Submit()`/`BeginGraphPassRecording()` bracket - a real, narrow,
+  separate gap from the one this campaign fixed (the sky's OWN dedicated
+  leaf's own "Triangle Count" row is correct in isolation; only the parent
+  aggregate undercounts by exactly one draw call). Left as a clean, isolated
+  future item, not silently forgotten.
+
+See `task_manager/frame-debugger-8/CAMPAIGN_COMPLETION_REPORT.md` for the
+full four-phase writeup plus the live, HTTP-driven, screenshot-verified proof
+both the new Sky Background leaf and the corrected per-step replay preview
+work end-to-end.
 
 ## Known limitation, now fixed (`frame-debugger-4` campaign)
 

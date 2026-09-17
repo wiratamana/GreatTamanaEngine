@@ -96,7 +96,9 @@ Game View render target: enabling it captures one real rendered frame's worth
 of real Render Graph passes (every real compute-shader dispatch is a
 first-class, automatically discovered tree citizen, never a hand-maintained
 special case) PLUS one real, individually selectable per-entity child leaf
-under `"GameView"` per real draw call it issued that frame. **Selecting ANY
+under `"GameView"` per real draw call it issued that frame, including the Sky
+Background pass itself (`frame-debugger-8` campaign) - never only meshes.
+**Selecting ANY
 leaf - a compute pass or a per-object draw alike - now shows a real, correct
 "accumulated Game View as of this exact step" preview image** (`frame-debugger-7`
 campaign, an explicit, user-approved BREAKING CHANGE replacing the older
