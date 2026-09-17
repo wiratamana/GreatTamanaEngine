@@ -1,76 +1,59 @@
 #pragma once
 
-#include "../Assets/AssetTypes.h"
-#include "../Math/Quat.h"
-#include "../Math/Vec3.h"
-#include "../Renderer/Primitives/PrimitiveMeshGenerator.h"
+// task_manager/scene-serialization-2/PHASE3_JSON_SCENE_DOCUMENT_AND_HIERARCHY_SAVE_PLUS_GENERIC_LOAD.md
+// replaced this file's old flat, fixed-schema SceneObjectKind/SceneObjectRecord
+// shape (root-only, PrimitiveSource/MeshAssetSource-only - see
+// task_manager/scene-serialization-1/) with a hierarchy-aware, generic
+// component-bag shape that can represent ANY entity in the Registry, with
+// its full parent/child structure - see PHASE0_MASTER_STRATEGY.md's
+// Appendix A for the exact on-disk JSON shape this maps onto 1:1.
 
+#include <nlohmann/json.hpp> // PHASE0 Locked Design Decision #1 - src/Scene/ now legitimately depends on this.
+#include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace gte {
 
-// Which kind of scene object one SceneObjectRecord describes - the engine
-// currently only knows how to (re)create two kinds of top-level scene
-// object (see task_manager/scene-serialization-1/PHASE0_MASTER_STRATEGY.md):
-// one spawned from a built-in PrimitiveType (Game::CreatePrimitiveEntity()),
-// and one spawned from an imported asset file, referenced by its stable
-// AssetDatabase Guid (Game::CreateMeshEntityFromGtaFile()). Explicit numeric
-// values are NOT pinned here (unlike AssetType) because this enum is never
-// stored as a raw integer in the .gtscene TEXT format itself - see
-// SceneTextFormat.cpp, which writes/reads it as the literal strings
-// "Primitive"/"Asset".
-enum class SceneObjectKind {
-    Primitive,
-    Asset,
+// One serializable entity - see PHASE0_MASTER_STRATEGY.md's Appendix A for
+// the full on-disk shape this maps onto 1:1. Deliberately NOT tied to a
+// live Entity/Registry - a pure, Tier-1-testable snapshot, same spirit as
+// the OLD SceneObjectRecord it replaces.
+struct SceneEntityRecord {
+    // Index into the OWNING SceneDocument::entities array of this entity's
+    // OWN parent, or std::nullopt for a root entity. NEVER a raw Entity
+    // handle (those are session-local and meaningless across a save/load
+    // round trip) - always a document-local, 0-based array index.
+    std::optional<std::size_t> parentIndex;
+
+    std::uint32_t siblingIndex = 0;
+
+    // Empty means "not an asset-recipe root" - see PHASE4 for how/when this
+    // gets populated on Save and consumed on Load. Guid::ToString() format
+    // (32 lowercase hex chars) when present. This phase (PHASE3) never
+    // populates this field - every entity's record leaves it empty; PHASE4
+    // is what actually resolves a MeshAssetSource root's gtaPath to a
+    // stable Guid and writes it here.
+    std::string assetGuid;
+
+    // Generic component bag - one key per registered ComponentTypeRegistry
+    // typeName this entity actually has (e.g. "Transform", "Name",
+    // "Camera") mapped to that component's own serialized fields. Built/
+    // consumed entirely generically by SceneBuilder.cpp/Editor/SceneIO.cpp -
+    // NEVER hand-parsed field-by-field the way the old SceneTextFormat.cpp
+    // was.
+    nlohmann::json components = nlohmann::json::object();
 };
 
-// One serializable top-level scene object - a ROOT entity only (see
-// Scene/SceneBuilder.h's own doc comment for why a multi-part asset's CHILD
-// entities are never individually represented here). Plain data, no
-// Registry/Entity/Renderer dependency of any kind - the exact same
-// "component-style" plain-struct philosophy AGENTS.md already documents for
-// every real ECS component (see ECS/Components/Transform.h), just living
-// outside the ECS entirely since a SceneDocument is a serialization-time
-// snapshot, never a live entity.
-struct SceneObjectRecord {
-    SceneObjectKind kind = SceneObjectKind::Primitive;
-
-    // Optional cosmetic display name (see ECS/Components/Name.h) - empty
-    // means "no Name component on the entity this record produces/came
-    // from".
-    std::string name;
-
-    // World-space* transform this object is spawned/restored with -
-    // *actually the entity's own Transform::position/rotation/scale, which
-    // is genuinely world-space for every entity this campaign ever
-    // serializes, since only ROOT entities (Transform::parent ==
-    // kInvalidEntity) are ever captured - see SceneBuilder.h.
-    Vec3 position = Vec3::Zero();
-    Quat rotation = Quat::Identity();
-    Vec3 scale = Vec3::One();
-
-    // Meaningful only when kind == SceneObjectKind::Primitive - which
-    // built-in shape to recreate via Game::CreatePrimitiveEntity().
-    PrimitiveType primitiveType = PrimitiveType::Cube;
-
-    // Meaningful only when kind == SceneObjectKind::Asset -
-    // AssetDatabase::FindByGuid()'s key for resolving this back to an
-    // absolute *.gta path at load time (see Scene/SceneBuilder.h and
-    // Editor/SceneIO.h). Guid::Invalid() (the default) when kind ==
-    // Primitive. DeserializeSceneDocument() (see SceneTextFormat.h below)
-    // NEVER produces a kind == Asset record with an Invalid() Guid here -
-    // that combination is rejected as a parse failure instead (v2 - see
-    // SceneTextFormat.h's own doc comment).
-    Guid assetGuid;
-};
-
-// A whole serializable scene - just a flat list of top-level object
-// records. Deliberately NOT a tree/hierarchy (see SceneObjectRecord's own
-// doc comment above) - every record is spawned independently and
-// positioned/rotated/scaled in world space.
+// A whole serializable scene - a flat array of SceneEntityRecord values,
+// with hierarchy captured via each record's own parentIndex (an index into
+// THIS SAME array) rather than a nested tree structure - this keeps
+// (de)serialization, and Editor/SceneIO.cpp's own two-pass Load
+// reconstruction, simple array iteration with no recursive JSON walking
+// required.
 struct SceneDocument {
-    std::vector<SceneObjectRecord> objects;
+    std::vector<SceneEntityRecord> entities;
 };
 
 } // namespace gte

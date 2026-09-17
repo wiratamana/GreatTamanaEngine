@@ -1,11 +1,16 @@
 // Unit tests for src/Scene/SceneBuilder.h - BuildSceneDocumentFromRegistry()
 // (Registry + AssetDatabase -> SceneDocument) and
 // ClearSerializableSceneObjects() (wipes only what this feature owns before
-// a Load). Touches a real temp directory (to build a real AssetDatabase
-// against real *.gta files, same pattern as tests/Assets/AssetDatabaseTests.cpp)
-// but no GPU/SDL/ImGui at all - "Tier 1" per tests/CMakeLists.txt's own
-// taxonomy. Always built - src/Scene/ has no GTE_ENABLE_EDITOR/
-// GTE_ENABLE_PROJECT_PANEL dependency.
+// a Load). Rewritten in
+// task_manager/scene-serialization-2/PHASE3_JSON_SCENE_DOCUMENT_AND_HIERARCHY_SAVE_PLUS_GENERIC_LOAD.md
+// (section 3.6) against the NEW SceneDocument/SceneEntityRecord generic-
+// component-bag shape - BuildSceneDocumentFromRegistry() now walks the
+// ENTIRE hierarchy (every entity reachable from the root list, recursively),
+// not just PrimitiveSource/MeshAssetSource-tagged roots. Touches a real temp
+// directory (to build a real AssetDatabase against real *.gta files, same
+// pattern as tests/Assets/AssetDatabaseTests.cpp) but no GPU/SDL/ImGui at
+// all - "Tier 1" per tests/CMakeLists.txt's own taxonomy. Always built -
+// src/Scene/ has no GTE_ENABLE_EDITOR/GTE_ENABLE_PROJECT_PANEL dependency.
 
 #include "Scene/SceneBuilder.h"
 
@@ -58,15 +63,19 @@ TEST_F(SceneBuilderTest, PrimitiveRootProducesOnePrimitiveRecord)
     registry.AddComponent<Name>(entity).value = "MySphere";
 
     const SceneDocument document = BuildSceneDocumentFromRegistry(registry, m_db);
-    ASSERT_EQ(document.objects.size(), 1u);
+    ASSERT_EQ(document.entities.size(), 1u);
 
-    const SceneObjectRecord& record = document.objects[0];
-    EXPECT_EQ(record.kind, SceneObjectKind::Primitive);
-    EXPECT_EQ(record.primitiveType, PrimitiveType::Sphere);
-    EXPECT_EQ(record.name, "MySphere");
-    EXPECT_TRUE(ApproximatelyEqual(record.position, transform.position));
-    EXPECT_TRUE(ApproximatelyEqual(record.rotation, transform.rotation));
-    EXPECT_TRUE(ApproximatelyEqual(record.scale, transform.scale));
+    const SceneEntityRecord& record = document.entities[0];
+    EXPECT_FALSE(record.parentIndex.has_value());
+    ASSERT_TRUE(record.components.contains("PrimitiveSource"));
+    EXPECT_EQ(record.components["PrimitiveSource"]["type"].get<std::string>(), "Sphere");
+    ASSERT_TRUE(record.components.contains("Name"));
+    EXPECT_EQ(record.components["Name"]["value"].get<std::string>(), "MySphere");
+    ASSERT_TRUE(record.components.contains("Transform"));
+    EXPECT_EQ(record.components["Transform"]["position"][0].get<float>(), 1.0f);
+    EXPECT_EQ(record.components["Transform"]["position"][1].get<float>(), 2.0f);
+    EXPECT_EQ(record.components["Transform"]["position"][2].get<float>(), 3.0f);
+    EXPECT_EQ(record.components["Transform"]["scale"][0].get<float>(), 2.0f);
 }
 
 TEST_F(SceneBuilderTest, AssetRootWithTrackedPathProducesOneAssetRecord)
@@ -82,16 +91,21 @@ TEST_F(SceneBuilderTest, AssetRootWithTrackedPathProducesOneAssetRecord)
     registry.AddComponent<MeshAssetSource>(entity).gtaPath = gtaPath.string();
 
     const SceneDocument document = BuildSceneDocumentFromRegistry(registry, m_db);
-    ASSERT_EQ(document.objects.size(), 1u);
-    EXPECT_EQ(document.objects[0].kind, SceneObjectKind::Asset);
-    EXPECT_EQ(document.objects[0].assetGuid, knownGuid);
+    ASSERT_EQ(document.entities.size(), 1u);
+    // PHASE3 does not yet populate asset_guid at all (see SceneBuilder.cpp's
+    // own comment) - PHASE4 is what wires the MeshAssetSource -> Guid
+    // resolution pass in. MeshAssetSource itself is also not a registered
+    // reflectable component (see PHASE2) so its own "components" bag has no
+    // "MeshAssetSource" key either - only its sibling Transform does.
+    EXPECT_TRUE(document.entities[0].assetGuid.empty());
+    EXPECT_TRUE(document.entities[0].components.contains("Transform"));
+    EXPECT_FALSE(document.entities[0].components.contains("MeshAssetSource"));
 }
 
-// (v2) Path-normalization invariant: a differently-spelled-but-equivalent
-// path (built via std::filesystem::path segment joining rather than a raw
-// hand-concatenated string) still resolves correctly, proving this bridge's
-// reliance on AssetDatabase's own std::filesystem::absolute()-based
-// normalization actually holds.
+// (v2) Path-normalization invariant retained from scene-serialization-1,
+// even though PHASE3 doesn't yet ACT on it (see above) - kept as a
+// regression guard that the underlying AssetDatabase path-resolution
+// behavior this feature will depend on again in PHASE4 hasn't drifted.
 TEST_F(SceneBuilderTest, AssetRootResolvesViaNormalizedEquivalentPath)
 {
     const std::filesystem::path gtaPath = m_root / "Sub" / "model.gta";
@@ -100,18 +114,10 @@ TEST_F(SceneBuilderTest, AssetRootResolvesViaNormalizedEquivalentPath)
     ASSERT_TRUE(WriteGtaFile(gtaPath, AssetType::Mesh, knownGuid, AssetFlags::None, {}, {}));
     ASSERT_EQ(m_db.RefreshFromDirectory(m_root), 1u);
 
-    // Build an equivalent path independently, by appending segments one at a
-    // time via std::filesystem::path::operator/= (the same way
-    // SDL_GetBasePath()-derived code builds a path today) rather than reusing
-    // the exact same path object constructed above - std::filesystem::
-    // absolute() does not collapse lexical segments like "." or ".." (only
-    // canonical() does), so this deliberately does NOT introduce one; it only
-    // proves two INDEPENDENTLY-CONSTRUCTED path objects that are already
-    // equivalent still resolve correctly through FindByPath()'s own
-    // absolute()-based normalization.
     std::filesystem::path equivalentPath = m_root;
     equivalentPath /= "Sub";
     equivalentPath /= "model.gta";
+    ASSERT_NE(m_db.FindByPath(equivalentPath.string()), nullptr);
 
     Registry registry;
     const Entity entity = registry.CreateEntity();
@@ -119,34 +125,50 @@ TEST_F(SceneBuilderTest, AssetRootResolvesViaNormalizedEquivalentPath)
     registry.AddComponent<MeshAssetSource>(entity).gtaPath = equivalentPath.string();
 
     const SceneDocument document = BuildSceneDocumentFromRegistry(registry, m_db);
-    ASSERT_EQ(document.objects.size(), 1u);
-    EXPECT_EQ(document.objects[0].kind, SceneObjectKind::Asset);
-    EXPECT_EQ(document.objects[0].assetGuid, knownGuid);
+    ASSERT_EQ(document.entities.size(), 1u);
+    EXPECT_TRUE(document.entities[0].components.contains("Transform"));
 }
 
-TEST_F(SceneBuilderTest, AssetRootWithUntrackedPathIsSkipped)
+TEST_F(SceneBuilderTest, AssetRootWithUntrackedPathStillProducesARecordWithNoGuid)
 {
     Registry registry;
     const Entity entity = registry.CreateEntity();
-    registry.AddComponent<Transform>(entity);
+    Transform& transform = registry.AddComponent<Transform>(entity);
+    transform.position = Vec3(5.0f, 6.0f, 7.0f);
     registry.AddComponent<MeshAssetSource>(entity).gtaPath = (m_root / "NeverImported.gta").string();
 
     const SceneDocument document = BuildSceneDocumentFromRegistry(registry, m_db);
-    EXPECT_TRUE(document.objects.empty());
+    // PHASE0's Locked Design Decision #2 - scope widens to EVERY entity, so
+    // this root is no longer SKIPPED the way scene-serialization-1 used to
+    // - its Transform/Name are still captured generically, only its
+    // (not-yet-implemented-this-phase) asset_guid stays empty.
+    ASSERT_EQ(document.entities.size(), 1u);
+    EXPECT_TRUE(document.entities[0].assetGuid.empty());
+    ASSERT_TRUE(document.entities[0].components.contains("Transform"));
+    EXPECT_EQ(document.entities[0].components["Transform"]["position"][0].get<float>(), 5.0f);
 }
 
-TEST_F(SceneBuilderTest, RootWithNeitherTagIsSkipped)
+TEST_F(SceneBuilderTest, PlainCameraRootProducesACameraRecordToo)
 {
     Registry registry;
     const Entity entity = registry.CreateEntity();
     registry.AddComponent<Transform>(entity);
-    registry.AddComponent<Camera>(entity);
+    Camera& camera = registry.AddComponent<Camera>(entity);
+    camera.nearZ = 0.25f;
+    camera.farZ = 500.0f;
 
     const SceneDocument document = BuildSceneDocumentFromRegistry(registry, m_db);
-    EXPECT_TRUE(document.objects.empty());
+    // PHASE0's Locked Design Decision #2 - a Camera-only root is no longer
+    // skipped at all (scene-serialization-1's old "neither tag present"
+    // skip is gone).
+    ASSERT_EQ(document.entities.size(), 1u);
+    ASSERT_TRUE(document.entities[0].components.contains("Camera"));
+    ASSERT_TRUE(document.entities[0].components.contains("Transform"));
+    EXPECT_EQ(document.entities[0].components["Camera"]["nearZ"].get<float>(), 0.25f);
+    EXPECT_EQ(document.entities[0].components["Camera"]["farZ"].get<float>(), 500.0f);
 }
 
-TEST_F(SceneBuilderTest, ChildEntityIsNeverIndependentlyVisited)
+TEST_F(SceneBuilderTest, ChildEntityIsSerializedWithParentIndex)
 {
     const std::filesystem::path gtaPath = m_root / "model.gta";
     const Guid knownGuid = Guid::Generate();
@@ -161,11 +183,35 @@ TEST_F(SceneBuilderTest, ChildEntityIsNeverIndependentlyVisited)
     const Entity child = registry.CreateEntity();
     Transform& childTransform = registry.AddComponent<Transform>(child);
     childTransform.parent = root;
-    registry.AddComponent<MeshAssetSource>(child).gtaPath = gtaPath.string(); // Even if it also carries the tag.
+    registry.AddComponent<Name>(child).value = "ChildPart";
 
     const SceneDocument document = BuildSceneDocumentFromRegistry(registry, m_db);
-    ASSERT_EQ(document.objects.size(), 1u);
-    EXPECT_EQ(document.objects[0].kind, SceneObjectKind::Asset);
+    // A child entity IS now independently visited/serialized (as its own
+    // SceneEntityRecord with a non-null parentIndex) - this is the OPPOSITE
+    // of scene-serialization-1's old "child entity is never independently
+    // visited" behavior (PHASE0's Locked Design Decision #2 supersedes that
+    // campaign's own Design Decision #3).
+    ASSERT_EQ(document.entities.size(), 2u);
+
+    // Find the root record (no parent) and the child record (has a parent).
+    const SceneEntityRecord* rootRecord = nullptr;
+    const SceneEntityRecord* childRecord = nullptr;
+    for (std::size_t i = 0; i < document.entities.size(); ++i) {
+        if (!document.entities[i].parentIndex.has_value()) {
+            rootRecord = &document.entities[i];
+        } else {
+            childRecord = &document.entities[i];
+        }
+    }
+    ASSERT_NE(rootRecord, nullptr);
+    ASSERT_NE(childRecord, nullptr);
+
+    // childRecord's own parentIndex must point at rootRecord's own array
+    // index.
+    const std::size_t rootIndex = static_cast<std::size_t>(rootRecord - document.entities.data());
+    EXPECT_EQ(*childRecord->parentIndex, rootIndex);
+    ASSERT_TRUE(childRecord->components.contains("Name"));
+    EXPECT_EQ(childRecord->components["Name"]["value"].get<std::string>(), "ChildPart");
 }
 
 TEST_F(SceneBuilderTest, MultipleIndependentRootsAllResolveCorrectly)
@@ -185,29 +231,36 @@ TEST_F(SceneBuilderTest, MultipleIndependentRootsAllResolveCorrectly)
     registry.AddComponent<Transform>(assetEntity);
     registry.AddComponent<MeshAssetSource>(assetEntity).gtaPath = gtaPath.string();
 
-    const Entity skippedEntity = registry.CreateEntity();
-    registry.AddComponent<Transform>(skippedEntity);
-    registry.AddComponent<Camera>(skippedEntity);
+    const Entity cameraEntity = registry.CreateEntity();
+    registry.AddComponent<Transform>(cameraEntity);
+    registry.AddComponent<Camera>(cameraEntity);
 
     const SceneDocument document = BuildSceneDocumentFromRegistry(registry, m_db);
-    ASSERT_EQ(document.objects.size(), 2u);
+    // Every root is now in scope - Primitive, Asset, AND Camera (3, not 2 -
+    // the old test only expected the first two, since a Camera-only root
+    // used to be skipped).
+    ASSERT_EQ(document.entities.size(), 3u);
 
     bool sawPrimitive = false;
-    bool sawAsset = false;
-    for (const SceneObjectRecord& record : document.objects) {
-        if (record.kind == SceneObjectKind::Primitive) {
+    bool sawCamera = false;
+    for (const SceneEntityRecord& record : document.entities) {
+        if (record.components.contains("PrimitiveSource")) {
             sawPrimitive = true;
-            EXPECT_EQ(record.primitiveType, PrimitiveType::Cube);
-        } else if (record.kind == SceneObjectKind::Asset) {
-            sawAsset = true;
-            EXPECT_EQ(record.assetGuid, knownGuid);
+            EXPECT_EQ(record.components["PrimitiveSource"]["type"].get<std::string>(), "Cube");
+        } else if (record.components.contains("Camera")) {
+            sawCamera = true;
         }
     }
     EXPECT_TRUE(sawPrimitive);
-    EXPECT_TRUE(sawAsset);
+    EXPECT_TRUE(sawCamera);
 }
 
 // --- ClearSerializableSceneObjects() -----------------------------------------
+// Deliberately UNCHANGED by PHASE3 (still Primitive/Asset-root-only - see
+// Scene/SceneBuilder.h's own doc comment) - these three tests are
+// therefore unchanged from scene-serialization-1 too, per this phase's own
+// strategy file (section 3.6): "leave these calling
+// ClearSerializableSceneObjects() UNCHANGED in THIS phase".
 
 TEST_F(SceneBuilderTest, ClearDestroysPrimitiveAndAssetRootsPlusTheirChildren)
 {

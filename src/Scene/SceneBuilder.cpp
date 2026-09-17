@@ -1,50 +1,77 @@
 #include "SceneBuilder.h"
 
 #include "../ECS/Components/MeshAssetSource.h"
-#include "../ECS/Components/Name.h"
 #include "../ECS/Components/PrimitiveSource.h"
 #include "../ECS/Components/Transform.h"
+#include "../ECS/Reflection/ComponentTypeRegistry.h"
 #include "../ECS/TransformHierarchy.h"
+
+#include <utility>
 
 namespace gte {
 
-SceneDocument BuildSceneDocumentFromRegistry(Registry& registry, const AssetDatabase& assetDatabase)
+namespace {
+
+// Recursive pre-order walk - visits `entity`, appends its own
+// SceneEntityRecord to `outDocument.entities`, THEN recurses into its
+// children (via GetChildren()) so a parent's own array index is always
+// already known (and thus can be captured by each child's own parentIndex)
+// by the time any child is visited. `outEntityOrder` is index-aligned with
+// `outDocument.entities` - PHASE4 reuses it for its own asset_guid
+// resolution pass (see SceneBuilder.h's own doc comment).
+void WalkEntityRecursive(Registry& registry, Entity entity, std::optional<std::size_t> parentIndex,
+    std::vector<Entity>& outEntityOrder, SceneDocument& outDocument)
 {
-    SceneDocument document;
+    const std::size_t myIndex = outDocument.entities.size();
 
-    for (const Entity entity : GetChildren(registry, kInvalidEntity)) {
-        const Transform* transform = registry.TryGetComponent<Transform>(entity);
-        if (transform == nullptr) {
-            continue; // Should never happen in practice - every Instantiate()'d entity gets one.
-        }
-
-        SceneObjectRecord record;
-        record.position = transform->position;
-        record.rotation = transform->rotation;
-        record.scale = transform->scale;
-        if (const Name* name = registry.TryGetComponent<Name>(entity); name != nullptr) {
-            record.name = name->value;
-        }
-
-        if (const PrimitiveSource* primitiveSource = registry.TryGetComponent<PrimitiveSource>(entity);
-            primitiveSource != nullptr) {
-            record.kind = SceneObjectKind::Primitive;
-            record.primitiveType = primitiveSource->type;
-            document.objects.push_back(record);
-        } else if (const MeshAssetSource* meshAssetSource = registry.TryGetComponent<MeshAssetSource>(entity);
-            meshAssetSource != nullptr) {
-            const AssetRecord* asset = assetDatabase.FindByPath(meshAssetSource->gtaPath);
-            if (asset == nullptr) {
-                continue; // Not (or no longer) a tracked asset - no stable Guid to serialize by.
-            }
-            record.kind = SceneObjectKind::Asset;
-            record.assetGuid = asset->guid;
-            document.objects.push_back(record);
-        }
-        // else: neither tag present (e.g. the default Camera entity) - not
-        // part of this feature's serialization scope, skipped.
+    SceneEntityRecord record;
+    record.parentIndex = parentIndex;
+    if (const Transform* transform = registry.TryGetComponent<Transform>(entity); transform != nullptr) {
+        record.siblingIndex = transform->siblingIndex;
     }
 
+    // Generic component capture - THE key new piece of logic this whole
+    // campaign is built around: walk EVERY registered component type, in
+    // AllSortedByTypeName() order, and if this entity has it, serialize
+    // it. No per-component-type branch anywhere in this function - a
+    // future component becomes part of a saved scene automatically the
+    // moment it registers itself (see PHASE2).
+    for (const ComponentTypeDescriptor& descriptor : ComponentTypeRegistry::Instance().AllSortedByTypeName()) {
+        const void* component = descriptor.tryGetConstComponent(registry, entity);
+        if (component == nullptr) {
+            continue;
+        }
+        nlohmann::json fields = nlohmann::json::object();
+        for (const FieldDescriptor& field : descriptor.fields) {
+            field.writeJson(component, fields);
+        }
+        record.components[descriptor.typeName] = std::move(fields);
+    }
+
+    outEntityOrder.push_back(entity);
+    outDocument.entities.push_back(std::move(record));
+
+    for (const Entity child : GetChildren(registry, entity)) {
+        WalkEntityRecursive(registry, child, myIndex, outEntityOrder, outDocument);
+    }
+}
+
+} // namespace
+
+SceneDocument BuildSceneDocumentFromRegistry(Registry& registry, const AssetDatabase& assetDatabase)
+{
+    // Not yet used by this phase - PHASE4 inserts the MeshAssetSource ->
+    // asset_guid resolution pass here, using `entityOrder`/`assetDatabase`
+    // together with the already-built `document` below (see
+    // SceneBuilder.h's own doc comment for why this parameter is still
+    // accepted, unused, rather than removed and re-added later).
+    (void)assetDatabase;
+
+    SceneDocument document;
+    std::vector<Entity> entityOrder; // index-aligned with document.entities - PHASE4 reuses this for asset_guid resolution.
+    for (const Entity root : GetChildren(registry, kInvalidEntity)) {
+        WalkEntityRecursive(registry, root, std::nullopt, entityOrder, document);
+    }
     return document;
 }
 

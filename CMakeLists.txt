@@ -323,8 +323,8 @@ add_library(gte_core STATIC
     src/Physics/JointPhysicsOverrideApplication.h
     src/Physics/JointPhysicsOverrideApplication.cpp
     src/Scene/SceneDocument.h
-    src/Scene/SceneTextFormat.h
-    src/Scene/SceneTextFormat.cpp
+    src/Scene/SceneJsonFormat.h
+    src/Scene/SceneJsonFormat.cpp
     src/Scene/SceneBuilder.h
     src/Scene/SceneBuilder.cpp
     src/Assets/AssetTypes.h

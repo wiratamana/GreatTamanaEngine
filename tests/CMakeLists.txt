@@ -630,64 +630,103 @@
 #                                            No GPU involved - real temp-file
 #                                            I/O only, same convention as
 #                                            AssetImporterTests.cpp.
-#   Scene/SceneTextFormatTests.cpp          - SerializeSceneDocument()/
+#   Scene/SceneJsonFormatTests.cpp          - SerializeSceneDocument()/
 #                                            DeserializeSceneDocument()
-#                                            round-tripping the new *.gtscene
-#                                            hand-rolled text format (src/
-#                                            Scene/SceneDocument.h,
-#                                            src/Scene/SceneTextFormat.h) -
-#                                            empty/single-Primitive/single-
-#                                            Asset/mixed documents round-trip
-#                                            exactly, malformed input
-#                                            (missing/mismatched magic,
-#                                            unclosed OBJECT, stray END,
-#                                            unrecognized kind/primitiveType,
-#                                            wrong CSV field counts,
-#                                            non-numeric floats, a
-#                                            syntactically malformed
-#                                            assetGuid=) is rejected, the v2
-#                                            kind=Asset cross-field
-#                                            validation (missing assetGuid=
-#                                            or one parsing to
-#                                            Guid::Invalid() both fail) is
-#                                            enforced while kind=Primitive
-#                                            tolerates a stray assetGuid=
-#                                            line, an unrecognized key is
-#                                            silently ignored (forward
-#                                            compatibility), and an absent
-#                                            optional field (e.g. no name=
-#                                            line) simply keeps its default
-#                                            rather than failing. No ECS/
-#                                            Renderer/filesystem I/O involved
-#                                            at all - this module is always
-#                                            compiled, mirroring src/Physics/
-#                                            and src/Jobs/'s own bootstrap.
-#   Scene/SceneBuilderTests.cpp              - BuildSceneDocumentFromRegistry()
+#                                            round-tripping the *.gtscene v2
+#                                            JSON format
+#                                            (task_manager/scene-serialization-2/
+#                                            PHASE3_JSON_SCENE_DOCUMENT_AND_HIERARCHY_SAVE_PLUS_GENERIC_LOAD.md -
+#                                            src/Scene/SceneDocument.h,
+#                                            src/Scene/SceneJsonFormat.h) -
+#                                            replaces the deleted
+#                                            SceneTextFormatTests.cpp: an
+#                                            empty document, a single entity
+#                                            with no parent/no components, a
+#                                            3-level-deep parent chain
+#                                            (root -> child -> grandchild, by
+#                                            array index), and an entity with
+#                                            an arbitrary "components" bag
+#                                            (e.g. {"Transform":{...},
+#                                            "Camera":{...}}) all round-trip
+#                                            exactly; rejection of a wrong/
+#                                            missing gtscene_version, a
+#                                            non-array "entities", an
+#                                            out-of-range "parent" index, and
+#                                            a non-object "components"; and
+#                                            tolerance of an unrecognized
+#                                            extra top-level key (forward-
+#                                            compatibility). No ECS/Renderer/
+#                                            filesystem I/O involved at all -
+#                                            this module is always compiled,
+#                                            mirroring src/Physics/'s and
+#                                            src/Jobs/'s own bootstrap.
+#   Scene/SceneBuilderTests.cpp              - task_manager/scene-serialization-2
+#                                            PHASE3's rewrite:
+#                                            BuildSceneDocumentFromRegistry()
 #                                            (Registry + AssetDatabase ->
-#                                            SceneDocument) and
-#                                            ClearSerializableSceneObjects()
-#                                            (src/Scene/SceneBuilder.h) -
-#                                            a Primitive-tagged root, an
-#                                            Asset-tagged root that resolves
-#                                            via a real temp-directory
-#                                            AssetDatabase (including a
-#                                            differently-spelled-but-
-#                                            equivalent path proving the
-#                                            path-normalization invariant
-#                                            holds), an untracked-asset-path
-#                                            root being skipped, an
-#                                            untagged root (e.g. Camera)
-#                                            being skipped, a child entity
-#                                            never being independently
-#                                            visited, multiple mixed roots
-#                                            resolving together, and
-#                                            ClearSerializableSceneObjects()
-#                                            destroying only what this
-#                                            feature owns (roots +
-#                                            descendants) while leaving
-#                                            everything else alive. Real
-#                                            temp directory, no GPU/SDL/
+#                                            SceneDocument, src/Scene/
+#                                            SceneBuilder.h) now walks the
+#                                            ENTIRE hierarchy generically (not
+#                                            just Primitive/Asset-tagged
+#                                            roots) - a Primitive-tagged root,
+#                                            an Asset-tagged root that
+#                                            resolves via a real
+#                                            temp-directory AssetDatabase
+#                                            (including a differently-
+#                                            spelled-but-equivalent path
+#                                            proving the path-normalization
+#                                            invariant holds), an untracked-
+#                                            asset-path root STILL producing
+#                                            a record now (just with no
+#                                            asset_guid - PHASE4's own job),
+#                                            a plain Camera-only root now ALSO
+#                                            producing its own record, a
+#                                            child entity now being
+#                                            genuinely serialized with its
+#                                            own parentIndex pointing at its
+#                                            root's array index, and multiple
+#                                            mixed roots resolving together -
+#                                            all asserted against the new
+#                                            generic
+#                                            document.entities[i].components
+#                                            JSON bag rather than the deleted
+#                                            SceneObjectRecord's fixed
+#                                            fields. ClearSerializableSceneObjects()
+#                                            itself is UNCHANGED this phase
+#                                            (still Primitive/Asset-root-only
+#                                            - PHASE4 replaces it with
+#                                            ClearEntireScene()), so its own
+#                                            three tests are unchanged too.
+#                                            Real temp directory, no GPU/SDL/
 #                                            ImGui involved.
+#   Scene/SceneRoundTripIntegrationTests.cpp - PHASE3's own required manual
+#                                            sanity check, promoted to a
+#                                            real, permanent, automated
+#                                            regression test: a Camera root
+#                                            with non-default nearZ/farZ/
+#                                            fovYDegrees plus a plain
+#                                            Transform+Name child parented
+#                                            under it round-trips through
+#                                            BuildSceneDocumentFromRegistry()
+#                                            -> SerializeSceneDocument() ->
+#                                            DeserializeSceneDocument() ->
+#                                            the EXACT SAME Pass A/B1/B2/B3
+#                                            reconstruction sequence
+#                                            Editor/SceneIO.cpp's LoadScene()
+#                                            uses (reproduced here against a
+#                                            plain Registry, since LoadScene()
+#                                            itself needs a live Game+Renderer -
+#                                            a Tier 2/GPU dependency this test
+#                                            deliberately avoids) - confirming
+#                                            the Camera's own fields, the
+#                                            child's own parent/child
+#                                            relationship (via a genuinely
+#                                            different, freshly-reconstructed
+#                                            Entity handle), and
+#                                            GetChildren()'s own walk from the
+#                                            reconstructed root all come out
+#                                            exactly right. No ECS/Renderer/
+#                                            filesystem I/O involved at all.
 #   Profiling/FrameProfilerTests.cpp        - FrameProfiler's BeginFrame()/
 #                                            EndFrame()/RecordCpuScope()/
 #                                            SetGpuPassSample()/
@@ -1846,8 +1885,9 @@ set(GTE_TEST_SOURCES
     Assets/RigFileTests.cpp
     Assets/MeshNormalRecomputeTests.cpp
     Assets/MeshNormalRecomputePersistenceTests.cpp
-    Scene/SceneTextFormatTests.cpp
+    Scene/SceneJsonFormatTests.cpp
     Scene/SceneBuilderTests.cpp
+    Scene/SceneRoundTripIntegrationTests.cpp
     Memory/GpuMemoryTrackerTests.cpp
     Memory/SdlMemoryTrackerTests.cpp
     Profiling/FrameProfilerTests.cpp
