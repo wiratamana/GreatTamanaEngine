@@ -1,7 +1,6 @@
 #include "SceneBuilder.h"
 
 #include "../ECS/Components/MeshAssetSource.h"
-#include "../ECS/Components/PrimitiveSource.h"
 #include "../ECS/Components/Transform.h"
 #include "../ECS/Reflection/ComponentTypeRegistry.h"
 #include "../ECS/TransformHierarchy.h"
@@ -17,8 +16,8 @@ namespace {
 // children (via GetChildren()) so a parent's own array index is always
 // already known (and thus can be captured by each child's own parentIndex)
 // by the time any child is visited. `outEntityOrder` is index-aligned with
-// `outDocument.entities` - PHASE4 reuses it for its own asset_guid
-// resolution pass (see SceneBuilder.h's own doc comment).
+// `outDocument.entities` - PHASE4's own asset_guid resolution pass (below)
+// reuses it.
 void WalkEntityRecursive(Registry& registry, Entity entity, std::optional<std::size_t> parentIndex,
     std::vector<Entity>& outEntityOrder, SceneDocument& outDocument)
 {
@@ -60,33 +59,48 @@ void WalkEntityRecursive(Registry& registry, Entity entity, std::optional<std::s
 
 SceneDocument BuildSceneDocumentFromRegistry(Registry& registry, const AssetDatabase& assetDatabase)
 {
-    // Not yet used by this phase - PHASE4 inserts the MeshAssetSource ->
-    // asset_guid resolution pass here, using `entityOrder`/`assetDatabase`
-    // together with the already-built `document` below (see
-    // SceneBuilder.h's own doc comment for why this parameter is still
-    // accepted, unused, rather than removed and re-added later).
-    (void)assetDatabase;
-
     SceneDocument document;
-    std::vector<Entity> entityOrder; // index-aligned with document.entities - PHASE4 reuses this for asset_guid resolution.
+    std::vector<Entity> entityOrder; // index-aligned with document.entities.
     for (const Entity root : GetChildren(registry, kInvalidEntity)) {
         WalkEntityRecursive(registry, root, std::nullopt, entityOrder, document);
     }
+
+    // PHASE4 (task_manager/scene-serialization-2/
+    // PHASE4_RECIPE_SPAWN_RECONCILIATION_AND_LOAD_CORRECTNESS.md, section
+    // 3.1) - the asset_guid resolution pass PHASE3 deferred. Runs AFTER the
+    // recursive walk above finishes, so entityOrder/document are both fully
+    // built and index-aligned.
+    for (std::size_t i = 0; i < entityOrder.size(); ++i) {
+        if (const MeshAssetSource* meshAssetSource = registry.TryGetComponent<MeshAssetSource>(entityOrder[i]);
+            meshAssetSource != nullptr) {
+            if (const AssetRecord* asset = assetDatabase.FindByPath(meshAssetSource->gtaPath); asset != nullptr) {
+                document.entities[i].assetGuid = asset->guid.ToString();
+            }
+            // else: not (or no longer) a tracked asset - leave assetGuid
+            // empty, exactly like scene-serialization-1's own original
+            // behavior - except this campaign does NOT skip/omit the
+            // entity's own record entirely (the old behavior) - it is
+            // still saved, generically, with whatever Transform/Name it
+            // has; it will simply come back on Load as a bare entity with
+            // no re-derived mesh, since Load has no Guid to resolve. This
+            // is a deliberate, small improvement over
+            // scene-serialization-1's old "skip the whole entity
+            // silently" - now at least ITS TRANSFORM/NAME still round-trips,
+            // even if its mesh can't be rebuilt.
+        }
+    }
+
     return document;
 }
 
-void ClearSerializableSceneObjects(Registry& registry)
+void ClearEntireScene(Registry& registry)
 {
     // Snapshot roots BEFORE destroying anything - GetChildren(kInvalidEntity)
     // reads live Transform data that DestroyEntityAndDescendants() below
     // mutates as it goes.
     const std::vector<Entity> roots = GetChildren(registry, kInvalidEntity);
     for (const Entity root : roots) {
-        const bool isPrimitive = registry.HasComponent<PrimitiveSource>(root);
-        const bool isAsset = registry.HasComponent<MeshAssetSource>(root);
-        if (isPrimitive || isAsset) {
-            DestroyEntityAndDescendants(registry, root);
-        }
+        DestroyEntityAndDescendants(registry, root);
     }
 }
 

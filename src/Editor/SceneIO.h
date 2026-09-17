@@ -20,43 +20,60 @@ std::filesystem::path DefaultScenePath();
 
 // Serializes `game`'s current ECS world (Scene/SceneBuilder.h's
 // BuildSceneDocumentFromRegistry() - walks EVERY entity in the Registry,
-// full parent/child hierarchy, generic per-component-type field capture)
-// and writes it, as JSON text (Scene/SceneJsonFormat.h's
+// full parent/child hierarchy, generic per-component-type field capture,
+// PLUS - as of task_manager/scene-serialization-2/PHASE4 - a resolved
+// asset_guid for every MeshAssetSource root whose gtaPath is currently a
+// tracked asset) and writes it, as JSON text (Scene/SceneJsonFormat.h's
 // SerializeSceneDocument()), to DefaultScenePath() - creating the Project
 // folder first if it doesn't exist yet (mirrors Assets/GtaFile.cpp's
 // WriteGtaFile()'s own "creates any missing parent directories first"
 // convention). An AssetDatabase is scanned fresh, right here, against
 // ResolveProjectRootDirectory() - passed through to
-// BuildSceneDocumentFromRegistry() for its own (PHASE4) asset_guid
-// resolution step; never persisted/cached across calls. Always OVERWRITES
-// whatever was previously at DefaultScenePath(), with no confirmation
-// prompt (per this campaign's own "keep it simple" scope). Returns false
-// (and leaves the previous file, if any, untouched where avoidable) on any
-// I/O failure - never throws.
+// BuildSceneDocumentFromRegistry() for its own asset_guid resolution step;
+// never persisted/cached across calls. Always OVERWRITES whatever was
+// previously at DefaultScenePath(), with no confirmation prompt (per this
+// campaign's own "keep it simple" scope). Returns false (and leaves the
+// previous file, if any, untouched where avoidable) on any I/O failure -
+// never throws.
 bool SaveScene(Game& game);
 
 // Reads DefaultScenePath(), parses it (Scene/SceneJsonFormat.h's
 // DeserializeSceneDocument()), and - only if that succeeds - replaces
-// `game`'s current scene content with a GENERIC, hierarchy-aware
-// reconstruction (task_manager/scene-serialization-2/
-// PHASE3_JSON_SCENE_DOCUMENT_AND_HIERARCHY_SAVE_PLUS_GENERIC_LOAD.md):
-// Scene/SceneBuilder.h's ClearSerializableSceneObjects() destroys every
-// entity this feature owns (leaving anything it doesn't own, e.g. the
-// default Camera - untouched; see that function's own doc comment for the
-// PHASE4 follow-up), then every SceneEntityRecord in the parsed document is
-// recreated as a bare entity, reparented to match its saved parentIndex,
-// and has every one of its saved `components` fields applied generically
-// via ComponentTypeRegistry (ECS/Reflection/ComponentTypeRegistry.h) -
-// NEVER a hand-written per-component-type copy. `renderer` is accepted for
-// signature stability with the eventual (PHASE4) recipe-spawn path, which
-// needs one to build/upload GPU mesh data - THIS phase's own generic
-// reconstruction does not yet use it directly.
+// `game`'s current scene content with a full, recipe-aware reconstruction
+// (task_manager/scene-serialization-2/
+// PHASE4_RECIPE_SPAWN_RECONCILIATION_AND_LOAD_CORRECTNESS.md):
 //
-// PHASE3's own known, deliberately incomplete limitation (see that phase's
-// own completion report for the full list): a PrimitiveSource/
-// MeshAssetSource-tagged entity round-trips its Transform/Name/tag fields
-// correctly but gets NO MeshRenderer after Load (not visible) - PHASE4 adds
-// the recipe-aware spawn/reconciliation this needs.
+// Scene/SceneBuilder.h's ClearEntireScene() first destroys EVERY entity
+// currently in the Registry, unconditionally (superseding PHASE3's own,
+// narrower ClearSerializableSceneObjects()) - a Load genuinely REPLACES the
+// whole prior scene, never merges into it. Then, for every SceneEntityRecord
+// in the parsed document, in a recipe-aware Pass A:
+//   - a record carrying a "PrimitiveSource" key is spawned via
+//     Game::CreatePrimitiveEntity() (a REAL, GPU-backed primitive, not a
+//     bare entity);
+//   - a record carrying a non-empty assetGuid that still resolves against a
+//     freshly-scanned AssetDatabase is spawned via
+//     Game::CreateMeshEntityFromGtaFile() (a REAL, GPU-backed multi-part
+//     mesh) - its own saved CHILD records are then reconciled BY NAME
+//     against the live child "part" entities that call just created, so a
+//     hand-edited child part Transform survives the round trip too
+//     (superseding scene-serialization-1's old Design Decision #3 - see
+//     that phase's own strategy file, section 3.2, for the full by-Name
+//     matching algorithm and its documented edge cases);
+//   - everything else (Camera/Light/an empty Transform+Name node/an
+//     unresolvable-asset's now-orphaned saved child) is created as a bare
+//     entity, same as PHASE3.
+// Every record then has its saved `components` fields applied generically
+// via ComponentTypeRegistry (ECS/Reflection/ComponentTypeRegistry.h) -
+// NEVER a hand-written per-component-type copy - and its saved parent/
+// sibling-index restored. `renderer` is what the recipe-spawn helpers above
+// need to build/upload real GPU mesh data.
+//
+// Also calls Game::EnsureDefaultCameraExists() once more, itself, right
+// before returning true - harmless/idempotent when a Camera record WAS
+// present in the loaded document (that method's own live-count guard makes
+// it a no-op), and guarantees a Camera exists immediately after this
+// function returns rather than only on the next rendered frame.
 //
 // Returns false or DOES NOT modify `game`'s registry at all when
 // DefaultScenePath() doesn't exist or fails to parse (a malformed/missing

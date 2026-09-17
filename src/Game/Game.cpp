@@ -332,10 +332,23 @@ InstantiateLightOutcome Game::InstantiateLight(const InstantiateLightParams& par
 
 void Game::EnsureDefaultCameraExists()
 {
-    if (m_defaultCameraEnsured) {
-        return;
+    // task_manager/scene-serialization-2/
+    // PHASE4_RECIPE_SPAWN_RECONCILIATION_AND_LOAD_CORRECTNESS.md (section
+    // 3.4) - fixed from a one-shot bool guard (m_defaultCameraEnsured, now
+    // removed) to an actual LIVE check. ClearEntireScene() (Scene/
+    // SceneBuilder.h, called by Editor/SceneIO.cpp's LoadScene()) destroys
+    // the engine's own default Camera entity too - it is an ordinary
+    // Camera+Transform entity like any other, no special protection (see
+    // PHASE0's Locked Design Decision #2: it is just ordinary serializable
+    // content now). The old one-shot guard would never re-trigger even if a
+    // Load results in ZERO Camera entities in the Registry, leaving the
+    // scene permanently un-renderable with no way to recover except
+    // manually creating a Camera. Checking the live component count instead
+    // makes this function correctly idempotent AND self-healing after ANY
+    // future scene-clearing operation, not just the engine's own startup.
+    if (m_registry.Storage<Camera>().Size() > 0) {
+        return; // A camera already exists (default OR loaded from a scene) - nothing to do.
     }
-    m_defaultCameraEnsured = true;
 
     // The engine's one auto-created entity: a Camera sitting back along -Z
     // (an identity rotation looks straight down +Z - see

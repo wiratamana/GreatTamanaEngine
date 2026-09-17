@@ -376,7 +376,6 @@ public:
     // only for an unrecognized params.lightType.
     InstantiateLightOutcome InstantiateLight(const InstantiateLightParams& params);
 
-private:
     // The engine's one auto-created entity: a Camera sitting back along -Z
     // so a brand-new (or freshly-loaded - see task_manager/
     // scene-serialization-1/) scene always has something to actually look
@@ -386,8 +385,21 @@ private:
     // end; that scaffolding is gone now that real scene content (primitives,
     // imported meshes, and a real save/load loop) exists instead (see
     // TODO.md's "Scene serialization" entry).
+    //
+    // Called once per frame by Render() below (unchanged). Also PUBLIC (a
+    // discrepancy against task_manager/scene-serialization-2/
+    // PHASE4_RECIPE_SPAWN_RECONCILIATION_AND_LOAD_CORRECTNESS.md's own
+    // section 3.4, which assumed this could be called from
+    // Editor/SceneIO.cpp's LoadScene() without checking - it was PRIVATE
+    // before this phase; making it callable from outside Game requires
+    // moving it here) - see PHASE4_COMPLETION_REPORT.md's own "Discrepancy
+    // found" note. Fixed (section 3.4) to check the LIVE Camera component
+    // count instead of a one-shot bool (see Game.cpp) - now self-healing
+    // after ClearEntireScene()/a Load that happens to produce zero Camera
+    // entities, not just idempotent across the engine's own startup.
     void EnsureDefaultCameraExists();
 
+private:
     Registry m_registry;
     RenderSystem m_renderSystem;
 
@@ -404,9 +416,6 @@ private:
     // AnimationSystem above) - it never touches Renderer/Mesh/RenderSystem/
     // MeshInstantiationSystem at all, only the ECS Registry.
     PhysicsSystem m_physicsSystem;
-
-    // Kept only for EnsureDefaultCameraExists()'s own one-time guard above.
-    bool m_defaultCameraEnsured = false;
 };
 
 } // namespace gte

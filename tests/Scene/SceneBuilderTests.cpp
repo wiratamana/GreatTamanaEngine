@@ -1,7 +1,9 @@
 // Unit tests for src/Scene/SceneBuilder.h - BuildSceneDocumentFromRegistry()
-// (Registry + AssetDatabase -> SceneDocument) and
-// ClearSerializableSceneObjects() (wipes only what this feature owns before
-// a Load). Rewritten in
+// (Registry + AssetDatabase -> SceneDocument, including PHASE4's own
+// MeshAssetSource -> asset_guid resolution pass) and ClearEntireScene()
+// (unconditionally wipes EVERY entity before a Load - see PHASE4, section
+// 3.3, which replaced the old, narrower ClearSerializableSceneObjects()).
+// Rewritten in
 // task_manager/scene-serialization-2/PHASE3_JSON_SCENE_DOCUMENT_AND_HIERARCHY_SAVE_PLUS_GENERIC_LOAD.md
 // (section 3.6) against the NEW SceneDocument/SceneEntityRecord generic-
 // component-bag shape - BuildSceneDocumentFromRegistry() now walks the
@@ -92,20 +94,23 @@ TEST_F(SceneBuilderTest, AssetRootWithTrackedPathProducesOneAssetRecord)
 
     const SceneDocument document = BuildSceneDocumentFromRegistry(registry, m_db);
     ASSERT_EQ(document.entities.size(), 1u);
-    // PHASE3 does not yet populate asset_guid at all (see SceneBuilder.cpp's
-    // own comment) - PHASE4 is what wires the MeshAssetSource -> Guid
-    // resolution pass in. MeshAssetSource itself is also not a registered
-    // reflectable component (see PHASE2) so its own "components" bag has no
+    // task_manager/scene-serialization-2/
+    // PHASE4_RECIPE_SPAWN_RECONCILIATION_AND_LOAD_CORRECTNESS.md, section
+    // 3.1 - assetGuid is now actually resolved (a tracked path resolves to
+    // its own AssetRecord's stable Guid::ToString()) - PHASE3 left this
+    // field empty for every entity; PHASE4 is what wires this resolution
+    // pass in. MeshAssetSource itself is still not a registered reflectable
+    // component (see PHASE2) so its own "components" bag still has no
     // "MeshAssetSource" key either - only its sibling Transform does.
-    EXPECT_TRUE(document.entities[0].assetGuid.empty());
+    EXPECT_EQ(document.entities[0].assetGuid, knownGuid.ToString());
     EXPECT_TRUE(document.entities[0].components.contains("Transform"));
     EXPECT_FALSE(document.entities[0].components.contains("MeshAssetSource"));
 }
 
-// (v2) Path-normalization invariant retained from scene-serialization-1,
-// even though PHASE3 doesn't yet ACT on it (see above) - kept as a
-// regression guard that the underlying AssetDatabase path-resolution
-// behavior this feature will depend on again in PHASE4 hasn't drifted.
+// (v2) Path-normalization invariant retained from scene-serialization-1 -
+// PHASE4 now actually ACTS on this (see above), so this test also doubles
+// as a regression guard that the underlying AssetDatabase path-resolution
+// behavior this feature depends on hasn't drifted.
 TEST_F(SceneBuilderTest, AssetRootResolvesViaNormalizedEquivalentPath)
 {
     const std::filesystem::path gtaPath = m_root / "Sub" / "model.gta";
@@ -255,12 +260,15 @@ TEST_F(SceneBuilderTest, MultipleIndependentRootsAllResolveCorrectly)
     EXPECT_TRUE(sawCamera);
 }
 
-// --- ClearSerializableSceneObjects() -----------------------------------------
-// Deliberately UNCHANGED by PHASE3 (still Primitive/Asset-root-only - see
-// Scene/SceneBuilder.h's own doc comment) - these three tests are
-// therefore unchanged from scene-serialization-1 too, per this phase's own
-// strategy file (section 3.6): "leave these calling
-// ClearSerializableSceneObjects() UNCHANGED in THIS phase".
+// --- ClearEntireScene() -------------------------------------------------
+// task_manager/scene-serialization-2/
+// PHASE4_RECIPE_SPAWN_RECONCILIATION_AND_LOAD_CORRECTNESS.md, section 3.3 -
+// ClearSerializableSceneObjects() (Primitive/Asset-root-only) is deleted and
+// replaced by a genuinely unconditional ClearEntireScene(). The first two
+// tests below only needed their call site renamed (their existing
+// assertions already hold true for the new unconditional behavior); the
+// third test's assertion is INVERTED (a Camera-only root is no longer left
+// untouched - see that test's own updated name/body).
 
 TEST_F(SceneBuilderTest, ClearDestroysPrimitiveAndAssetRootsPlusTheirChildren)
 {
@@ -283,7 +291,7 @@ TEST_F(SceneBuilderTest, ClearDestroysPrimitiveAndAssetRootsPlusTheirChildren)
     Transform& assetChild2Transform = registry.AddComponent<Transform>(assetChild2);
     assetChild2Transform.parent = assetRoot;
 
-    ClearSerializableSceneObjects(registry);
+    ClearEntireScene(registry);
 
     EXPECT_FALSE(registry.IsAlive(primitiveRoot));
     EXPECT_FALSE(registry.IsAlive(primitiveChild));
@@ -292,7 +300,7 @@ TEST_F(SceneBuilderTest, ClearDestroysPrimitiveAndAssetRootsPlusTheirChildren)
     EXPECT_FALSE(registry.IsAlive(assetChild2));
 }
 
-TEST_F(SceneBuilderTest, ClearLeavesUntaggedEntitiesUntouched)
+TEST_F(SceneBuilderTest, ClearDestroysEveryEntityIncludingUntaggedOnes)
 {
     Registry registry;
 
@@ -305,19 +313,21 @@ TEST_F(SceneBuilderTest, ClearLeavesUntaggedEntitiesUntouched)
     cameraTransform.position = Vec3(1.0f, 2.0f, 3.0f);
     registry.AddComponent<Camera>(cameraEntity);
 
-    ClearSerializableSceneObjects(registry);
+    ClearEntireScene(registry);
 
+    // ClearEntireScene() is UNCONDITIONAL (unlike the old, deleted
+    // ClearSerializableSceneObjects() this test used to exercise) - a
+    // Camera-only root is NO LONGER left untouched, since PHASE0's Locked
+    // Design Decision #2 means there is no longer any entity kind this
+    // feature does not own.
     EXPECT_FALSE(registry.IsAlive(primitiveRoot));
-    ASSERT_TRUE(registry.IsAlive(cameraEntity));
-    EXPECT_TRUE(registry.HasComponent<Transform>(cameraEntity));
-    EXPECT_TRUE(registry.HasComponent<Camera>(cameraEntity));
-    EXPECT_TRUE(ApproximatelyEqual(registry.GetComponent<Transform>(cameraEntity).position, Vec3(1.0f, 2.0f, 3.0f)));
+    EXPECT_FALSE(registry.IsAlive(cameraEntity));
 }
 
 TEST_F(SceneBuilderTest, ClearOnEmptyRegistryIsASafeNoOp)
 {
     Registry registry;
-    ClearSerializableSceneObjects(registry);
+    ClearEntireScene(registry);
     EXPECT_EQ(registry.AliveEntityCount(), 0u);
 }
 
