@@ -2,7 +2,6 @@
 
 #include "FrameDebuggerData.h"
 #include "../Renderer/RenderTexture.h"
-#include "../Renderer/VolumeTexturePreviewRenderer.h" // frame-debugger-5, PHASE4 - m_volumePreviewRenderer below.
 
 #include <optional>
 #include <string>
@@ -17,6 +16,22 @@
 // GTE_ENABLE_EDITOR, exactly like FrameDebuggerCapture.h/FrameDebuggerData.h
 // themselves) - owned by FrameDebuggerPanel (Panels/FrameDebuggerPanel.h),
 // never a shared/global object.
+//
+// task_manager/frame-debugger-7 campaign, PHASE4
+// (PHASE4_PREVIEW_WIRING_AND_DATA_MODEL.md, Step 3.3) - the frame-debugger-5
+// campaign's own per-compute-pass-distinct-texture preview mechanism
+// (`FrameDebuggerComputePassPreview`/`FrameDebuggerHistoryEntry::
+// computePassPreviews`/`m_volumePreviewRenderer`/the `#include` of
+// `VolumeTexturePreviewRenderer.h`) is REMOVED ENTIRELY from this file - an
+// explicit, user-approved breaking change (PHASE0's Locked Design Decision
+// #3). Every leaf, a compute pass or an object draw alike, now shows the
+// accumulated Game View image as of that exact step instead - see
+// `perObjectStepPreviews` below (the compute-pass leaves reuse the
+// already-existing `preview`/`compositedPreview` fields via their own new
+// `FrameDebuggerStepPreviewKind`, FrameDebuggerData.h). The Render Graph
+// panel / `GET /get_texture` retain their OWN, separate, still-needed way
+// to inspect a raw named texture (`RenderGraphDebugTextureRegistry`/
+// `DebugTextureSnapshotFor()`) - untouched by this removal.
 namespace gte {
 
 class Renderer;
@@ -27,27 +42,10 @@ class Renderer;
 // declaration) so CaptureFrame() below can take a `const rg::RenderGraph&`
 // parameter without this header needing to #include the real,
 // heavyweight RenderGraph.h - only FrameDebuggerHistory.cpp needs the real
-// definition (it calls renderGraph.LastSnapshot()/DebugTextureSnapshotFor()).
+// definition.
 namespace rg {
 class RenderGraph;
 } // namespace rg
-
-// frame-debugger-5 campaign, PHASE3
-// (PHASE3_GENERIC_PER_PASS_RETAINED_PREVIEW_CAPTURE.md) - one real,
-// retained GPU copy of ONE compute-dispatch pass's own real 2D-texture
-// write, as of one specific real capture. `preview` is ALWAYS populated for
-// an entry that exists in FrameDebuggerHistoryEntry::computePassPreviews at
-// all (never std::optional here - unlike `preview`/`compositedPreview`
-// above, a pass either gets a real entry with a real texture, or no entry
-// at all; there is no partially-populated state for this struct). `preview`
-// is intentionally NOT copyable (RenderTexture itself is move-only) - this
-// struct is therefore also move-only, which is exactly what
-// std::vector<FrameDebuggerComputePassPreview>::push_back(std::move(...))
-// needs.
-struct FrameDebuggerComputePassPreview {
-    std::string passName;
-    RenderTexture preview;
-};
 
 // The one, single retained slot: a fully real, already-resolved
 // FrameDebuggerSnapshot (PHASE2's BuildRealFrameDebuggerSnapshot()) plus a
@@ -57,7 +55,7 @@ struct FrameDebuggerComputePassPreview {
 // once written, it is ALWAYS populated (a fresh RenderTexture is created
 // for every single real capture, never left std::nullopt again).
 // `compositedPreview` (below) instead follows its own, different rule - see
-// its own field-level comment. `computePassPreviews` (below) follows a
+// its own field-level comment. `perObjectStepPreviews` (below) follows a
 // THIRD, different rule again - see its own field-level comment.
 struct FrameDebuggerHistoryEntry {
     FrameDebuggerSnapshot snapshot;
@@ -79,41 +77,31 @@ struct FrameDebuggerHistoryEntry {
     // property of the CAPTURE that most recently ran, not a one-way ratchet.
     std::optional<RenderTexture> compositedPreview;
 
-    // (frame-debugger-5 campaign, PHASE3
-    // PHASE3_GENERIC_PER_PASS_RETAINED_PREVIEW_CAPTURE.md; WIDENED, PHASE4
-    // PHASE4_VOLUME_TEXTURE_RAYMARCH_PREVIEW_REUSE.md) - one retained GPU
-    // copy per real compute-dispatch pass THIS capture found with at least
-    // one real 2D-texture write (see FrameDebuggerData.h's own
-    // CollectComputePassTextureWrites(), and FrameDebuggerData.cpp's
-    // generic "Compute Dispatches" tree groups, PHASE2) OR (PHASE4) a real
-    // ray-marched thumbnail for a pass whose only visual write is a 3D
-    // volume texture (see FrameDebuggerData.h's own
-    // CollectComputePassVolumeTextureWrites()). Keyed by the pass's own
-    // real, raw name (matches FrameDebuggerEventNode::name /
-    // FrameDebuggerEventDetails::passName for that leaf exactly) so
-    // EnsurePreviewDescriptor() (Panels/FrameDebuggerPanel.cpp) can look up
-    // "does the CURRENTLY SELECTED leaf have its own retained preview" by a
-    // simple linear name comparison - from that picking logic's point of
-    // view, a volume-derived preview and a plain 2D-texture preview are
-    // indistinguishable, both are just "this pass's own retained preview
-    // texture" (PHASE4 needed ZERO changes to that logic). A pass with
-    // neither a real 2D-texture write NOR a real volume-texture write (e.g.
-    // a buffer-only write, GPU Skinning's own output buffer) simply has NO
-    // entry here at all - never a fake/empty one. This field's OWN rule (a
-    // third, different rule from `preview`'s "once written, always
-    // populated" and `compositedPreview`'s "may legitimately go back to
-    // std::nullopt") is: entirely REBUILT from scratch on every single real
-    // capture (`.clear()`'d, then re-populated) - its size/contents can
-    // legitimately differ from one capture to the next (e.g. a pass that
-    // ran last capture but was culled this one simply has no entry this
-    // time), never assumed stable across captures.
-    //
-    // NOTE (frame-debugger-7 campaign, PHASE1) - this field is left
-    // untouched by this phase on purpose; a future phase (PHASE4 of THIS
-    // campaign) is expected to remove/replace the whole per-compute-pass
-    // distinct-texture preview mechanism outright (see
-    // PHASE0_MASTER_STRATEGY.md's Locked Design Decision #3).
-    std::vector<FrameDebuggerComputePassPreview> computePassPreviews;
+    // task_manager/frame-debugger-7 campaign, PHASE4
+    // (PHASE4_PREVIEW_WIRING_AND_DATA_MODEL.md, Step 3.2) - REPLACES the
+    // old, now-deleted `computePassPreviews` field outright (an explicit,
+    // user-approved breaking change - PHASE0's Locked Design Decision #3).
+    // One real, retained GPU `RenderTexture` per real object drawn this
+    // capture's "GameView" pass, in the SAME order as
+    // `FrameDebuggerCaptureContext::DrawRecords()` (index `i` holds the
+    // real, accumulated Game View image exactly as it looked after objects
+    // `[0..i]` were redrawn from scratch this frame - see PHASE3 of this
+    // campaign's `AddFrameDebuggerReplayPasses()`,
+    // `src/Application/RenderPasses.h/.cpp`). Moved here, PERMANENTLY, from
+    // `FrameDebuggerCaptureContext::ReplayStepPreviews()` (which only ever
+    // lives from mid-frame-N to early-frame-N+1's own `Reset()` call)
+    // inside `CaptureFrame()` below, strictly BEFORE that `Reset()` call
+    // ever runs - the Step 3.0 two-bool handshake (Phase 3) already
+    // guarantees `CaptureFrame()` runs later the SAME frame the replay
+    // passes were declared/executed. Entirely REBUILT from scratch on every
+    // single real capture (a plain `std::move()` assignment below
+    // overwrites whatever this vector held before) - never assumed stable
+    // across captures. Empty whenever this capture's own "GameView" pass
+    // drew zero objects (an honestly empty Game View) - never a fake entry.
+    // Indexed by a selected event node's own
+    // `FrameDebuggerEventDetails::stepPreviewIndex` (only meaningful when
+    // `stepPreviewKind == PerObjectStep` - see FrameDebuggerData.h).
+    std::vector<RenderTexture> perObjectStepPreviews;
 };
 
 // A real, in-memory, SINGLE-CAPTURE slot - see this file's own top-of-file
@@ -138,25 +126,31 @@ public:
     // method's own doc comment on FrameDebuggerHistoryEntry::compositedPreview
     // above) - nullptr is a completely safe, ordinary input, never dereferenced.
     //
-    // `renderGraph` (frame-debugger-5 campaign, PHASE3) - the SAME live
-    // RenderGraph FrameDebuggerPanel::TriggerCapture() already has on hand
-    // (`*m_frameRenderGraph`). Used to (a) re-fetch THIS SAME frame's own
-    // already-built rg::RenderGraphSnapshot (renderGraph.LastSnapshot()) to
-    // discover every real compute-dispatch pass's own first Texture-kind
-    // write (see FrameDebuggerData.h's CollectComputePassTextureWrites())
-    // AND (frame-debugger-5, PHASE4) every real compute-dispatch pass's own
-    // first VolumeTexture-kind write (CollectComputePassVolumeTextureWrites()),
-    // and (b) resolve each discovered write-texture name into its real,
-    // current physical texture + tracked GPU state
-    // (renderGraph.DebugTextureSnapshotFor()/DebugVolumeTextureSnapshotFor())
-    // - see this method's own .cpp body for the full capture sequence. A
-    // volume-texture write additionally goes through this class's own
-    // m_volumePreviewRenderer (below) to produce a real ray-marched 2D
-    // thumbnail, reusing VolumeTexturePreviewRenderer::RenderPreview() -
-    // the EXACT SAME code GET /get_texture already uses to preview a volume
-    // texture over HTTP (PHASE4).
+    // `renderGraph` (frame-debugger-5 campaign, PHASE3) - kept as a
+    // parameter for call-site/signature stability, but as of
+    // task_manager/frame-debugger-7 campaign, PHASE4
+    // (PHASE4_PREVIEW_WIRING_AND_DATA_MODEL.md, Step 3.3), this method's own
+    // body no longer reads it at all - the old compute-pass-texture-write
+    // discovery (`renderGraph.LastSnapshot()`/`DebugTextureSnapshotFor()`/
+    // `DebugVolumeTextureSnapshotFor()`) that used to consume it was removed
+    // outright along with `computePassPreviews` (PHASE0's Locked Design
+    // Decision #3). Removing the parameter itself was out of this phase's
+    // scope (only ADDING the new, LAST `capture` parameter below was
+    // authorized - see PHASE4_PREVIEW_WIRING_AND_DATA_MODEL.md's own
+    // corrected Step 3.2) - a future phase may choose to drop it for real
+    // if nothing else ever needs it again.
+    //
+    // `capture` (task_manager/frame-debugger-7 campaign, PHASE4, Step 3.2) -
+    // NEW, LAST parameter. The SAME live `FrameDebuggerCaptureContext`
+    // `FrameDebuggerPanel::TriggerCapture()` already has on hand
+    // (`m_captureContext`) - its own `ReplayStepPreviews()` (Phase 3) is
+    // `std::move()`'d out into `entry.perObjectStepPreviews` (above) here,
+    // strictly BEFORE the next armed frame's own `Reset()` call would
+    // otherwise wipe it (see `FrameDebuggerCaptureContext::
+    // SetReplayStepPreviews()`'s own doc comment, FrameDebuggerCapture.h,
+    // for the exact ordering requirement this satisfies).
     void CaptureFrame(Renderer& renderer, const rg::RenderGraph& renderGraph, const FrameDebuggerSnapshot& snapshot,
-        RenderTexture& gameViewSource, RenderTexture* compositedGameViewSource);
+        RenderTexture& gameViewSource, RenderTexture* compositedGameViewSource, FrameDebuggerCaptureContext& capture);
 
     // Is there currently a captured frame at all? Replaces the old
     // ring-buffer's `Count()` - nothing needs "how many", only "is there
@@ -176,20 +170,6 @@ public:
 
 private:
     std::optional<FrameDebuggerHistoryEntry> m_current;
-
-    // frame-debugger-5 campaign, PHASE4
-    // (PHASE4_VOLUME_TEXTURE_RAYMARCH_PREVIEW_REUSE.md, Step 3.2 item 2) -
-    // owned directly, mirroring how Application.cpp already owns its own
-    // instance for GET /get_texture's identical volume-preview use case
-    // (VolumeTexturePreviewRenderer is explicitly designed to be cheap to
-    // own one-per-consumer - see its own class comment: "self-contained...
-    // this is invoked at most once per network request" - here, at most
-    // once per real capture trigger, per volume-writing pass). NOT
-    // copyable/movable (see VolumeTexturePreviewRenderer's own class
-    // comment) - this is fine, since FrameDebuggerCurrentCapture itself is
-    // never copied/moved anywhere either (a plain, in-place member of
-    // FrameDebuggerPanel - Panels/FrameDebuggerPanel.h).
-    VolumeTexturePreviewRenderer m_volumePreviewRenderer;
 };
 
 } // namespace gte

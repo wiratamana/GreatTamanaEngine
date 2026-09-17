@@ -198,7 +198,19 @@ public:
     // SetReplayStepPreviews()'s own doc comment above) - Reset() (below)
     // clears this every armed frame, exactly like every other field on
     // this class.
-    const std::vector<RenderTexture>& ReplayStepPreviews() const noexcept { return m_replayStepPreviews; }
+    //
+    // task_manager/frame-debugger-7 campaign, PHASE4
+    // (PHASE4_PREVIEW_WIRING_AND_DATA_MODEL.md, Step 3.2 point 3) - WIDENED
+    // from a const accessor (Phase 3 left this underspecified as "just an
+    // accessor", with no stated constness) to a NON-const accessor
+    // returning a mutable reference, specifically so
+    // FrameDebuggerCurrentCapture::CaptureFrame() (FrameDebuggerHistory.cpp)
+    // can `std::move()` this vector's contents out into permanent storage
+    // (FrameDebuggerHistoryEntry::perObjectStepPreviews) - nothing else in
+    // this codebase needs a read-only view of this particular vector, so a
+    // second, parallel `TakeReplayStepPreviews()` method was deliberately
+    // not added.
+    std::vector<RenderTexture>& ReplayStepPreviews() noexcept { return m_replayStepPreviews; }
 
 private:
     std::vector<std::string> m_pipelineDebugNames;

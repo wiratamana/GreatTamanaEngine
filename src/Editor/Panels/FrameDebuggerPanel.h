@@ -339,6 +339,17 @@ private:
     float m_levelsBlack = 0.0f;
     float m_levelsWhite = 1.0f;
 
+    // task_manager/frame-debugger-7 campaign, PHASE4
+    // (PHASE4_PREVIEW_WIRING_AND_DATA_MODEL.md, Step 3.4) - the most recent
+    // ChooseFrameDebuggerPreviewSource() result, cached by
+    // EnsurePreviewDescriptor() so BuildInspectorPane() (a separate
+    // function, called LATER the SAME Build() call) knows whether to render
+    // the honest "nothing drawn yet" placeholder (FrameDebuggerPreviewSourceChoice::
+    // NotYetDrawn) instead of the ordinary "No Texture" placeholder, without
+    // re-deriving the same FindEventDetailsByIndex()/ChooseFrameDebuggerPreviewSource()
+    // logic a second time.
+    FrameDebuggerPreviewSourceChoice m_lastPreviewChoice = FrameDebuggerPreviewSourceChoice::None;
+
     // PHASE6 - the dedicated, small, on-demand GPU compute dispatcher this
     // panel owns (see FrameDebuggerPreviewProcessing.h's own class comment)
     // - NEVER touches the retained capture's own texture in place; always

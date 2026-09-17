@@ -752,187 +752,140 @@ TEST(FrameDebuggerSnapshotBuilderTest, EventIndexIsMonotonicAcrossPreGameViewGam
     EXPECT_EQ(snapshot.totalEventCount, 5);
 }
 
-// frame-debugger-5 campaign, PHASE3
-// (PHASE3_GENERIC_PER_PASS_RETAINED_PREVIEW_CAPTURE.md, Step 3.6) - Tier-1
-// tests for CollectComputePassTextureWrites() (FrameDebuggerData.h/.cpp),
-// the pure, CPU-side discovery function FrameDebuggerHistory::CaptureFrame()
-// uses to find which compute passes' own write textures to retain a real GPU
-// copy of. Deliberately exercised directly against a hand-fabricated
-// rg::RenderGraphSnapshot - no FrameDebuggerSnapshot/Editor-tree involved at
-// all, per this function's own "reads graphSnapshot directly" design.
+// task_manager/frame-debugger-7 campaign, PHASE4
+// (PHASE4_PREVIEW_WIRING_AND_DATA_MODEL.md, Step 3.5) - the old
+// `CollectComputePassTextureWrites()`/`CollectComputePassVolumeTextureWrites()`
+// tests (frame-debugger-5 campaign) were DELETED along with the functions
+// they covered (PHASE0's Locked Design Decision #3). Replaced below with
+// coverage proving `BuildRealFrameDebuggerSnapshot()` assigns the right
+// `stepPreviewKind`/`stepPreviewIndex` to a Pre-GameView leaf, the
+// "GameView" leaf, each per-object child (in order), a Post-GameView-
+// before-composite leaf, and a Post-GameView-at/after-composite leaf.
 
-TEST(FrameDebuggerSnapshotBuilderTest, CollectComputePassTextureWritesFindsExactlyOneTextureKindWrite)
+TEST(FrameDebuggerSnapshotBuilderTest, PreGameViewLeafGetsNotYetDrawnStepPreviewKind)
 {
     rg::RenderGraphSnapshot graphSnapshot;
-    rg::RenderGraphPassSnapshot pass = MakeComputePass("AtmosphereTransmittanceLutPass");
-    pass.writeNames.push_back("TransmittanceLut");
-    pass.writeKinds.push_back(rg::ResourceKind::Texture);
-    graphSnapshot.passesInExecutionOrder.push_back(pass);
+    graphSnapshot.passesInExecutionOrder.push_back(MakeComputePass("SkinPass_A"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
 
-    const std::vector<FrameDebuggerComputePassTextureWrite> writes = CollectComputePassTextureWrites(graphSnapshot);
-    ASSERT_EQ(writes.size(), 1u);
-    EXPECT_EQ(writes[0].passName, "AtmosphereTransmittanceLutPass");
-    EXPECT_EQ(writes[0].writeTextureName, "TransmittanceLut");
+    const FrameDebuggerCaptureContext capture;
+    const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
+
+    ASSERT_EQ(snapshot.rootNodes.size(), 1u);
+    const FrameDebuggerEventNode& preGroup = snapshot.rootNodes[0].children[0];
+    ASSERT_EQ(preGroup.children.size(), 1u);
+    ASSERT_TRUE(preGroup.children[0].details.has_value());
+    EXPECT_EQ(preGroup.children[0].details->stepPreviewKind, FrameDebuggerStepPreviewKind::NotYetDrawn);
 }
 
-TEST(FrameDebuggerSnapshotBuilderTest, CollectComputePassTextureWritesExcludesBufferAndVolumeTextureOnlyWrites)
+TEST(FrameDebuggerSnapshotBuilderTest, GameViewLeafGetsPreCompositeStepPreviewKind)
 {
     rg::RenderGraphSnapshot graphSnapshot;
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
 
-    rg::RenderGraphPassSnapshot bufferOnly = MakeComputePass("SkinPass_A");
-    bufferOnly.writeNames.push_back("SkinnedVertexBuffer");
-    bufferOnly.writeKinds.push_back(rg::ResourceKind::Buffer);
-    graphSnapshot.passesInExecutionOrder.push_back(bufferOnly);
+    const FrameDebuggerCaptureContext capture;
+    const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
 
-    rg::RenderGraphPassSnapshot volumeOnly = MakeComputePass("AtmosphereAerialPerspectiveVolumePass");
-    volumeOnly.writeNames.push_back("AerialPerspectiveVolume");
-    volumeOnly.writeKinds.push_back(rg::ResourceKind::VolumeTexture);
-    graphSnapshot.passesInExecutionOrder.push_back(volumeOnly);
-
-    const std::vector<FrameDebuggerComputePassTextureWrite> writes = CollectComputePassTextureWrites(graphSnapshot);
-    EXPECT_TRUE(writes.empty());
+    ASSERT_EQ(snapshot.rootNodes.size(), 1u);
+    const FrameDebuggerEventNode& gameViewLeaf = snapshot.rootNodes[0].children[0];
+    ASSERT_TRUE(gameViewLeaf.details.has_value());
+    EXPECT_EQ(gameViewLeaf.details->stepPreviewKind, FrameDebuggerStepPreviewKind::PreComposite);
 }
 
-TEST(FrameDebuggerSnapshotBuilderTest, CollectComputePassTextureWritesExcludesCulledComputePass)
+TEST(FrameDebuggerSnapshotBuilderTest, PerObjectDrawRecordChildrenGetPerObjectStepKindAndIncreasingIndex)
 {
     rg::RenderGraphSnapshot graphSnapshot;
-    rg::RenderGraphPassSnapshot culled = MakeComputePass("CulledComputePass");
-    culled.isCulled = true;
-    culled.writeNames.push_back("SomeTexture");
-    culled.writeKinds.push_back(rg::ResourceKind::Texture);
-    graphSnapshot.passesInExecutionOrder.push_back(culled);
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
 
-    const std::vector<FrameDebuggerComputePassTextureWrite> writes = CollectComputePassTextureWrites(graphSnapshot);
-    EXPECT_TRUE(writes.empty());
+    FrameDebuggerCaptureContext capture;
+    capture.RecordEntityDraw(2, 0, "terrain", "Mesh.vert/Mesh.frag (PositionNormal)", "", 1045458);
+    capture.RecordEntityDraw(3, 0, "SmokeTestCube", "Mesh.vert/Mesh.frag (PositionNormal)", "MaterialTexture abc123", 12);
+
+    const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
+
+    ASSERT_EQ(snapshot.rootNodes.size(), 1u);
+    const FrameDebuggerEventNode& gameViewLeaf = snapshot.rootNodes[0].children[0];
+    ASSERT_EQ(gameViewLeaf.children.size(), 2u);
+
+    ASSERT_TRUE(gameViewLeaf.children[0].details.has_value());
+    EXPECT_EQ(gameViewLeaf.children[0].details->stepPreviewKind, FrameDebuggerStepPreviewKind::PerObjectStep);
+    EXPECT_EQ(gameViewLeaf.children[0].details->stepPreviewIndex, 0);
+
+    ASSERT_TRUE(gameViewLeaf.children[1].details.has_value());
+    EXPECT_EQ(gameViewLeaf.children[1].details->stepPreviewKind, FrameDebuggerStepPreviewKind::PerObjectStep);
+    EXPECT_EQ(gameViewLeaf.children[1].details->stepPreviewIndex, 1);
 }
 
-TEST(FrameDebuggerSnapshotBuilderTest, CollectComputePassTextureWritesExcludesNonComputePass)
+TEST(FrameDebuggerSnapshotBuilderTest, PostGameViewLeafBeforeCompositePassGetsPreCompositeStepPreviewKind)
 {
     rg::RenderGraphSnapshot graphSnapshot;
-    rg::RenderGraphPassSnapshot gameView = MakePass("GameView"); // isComputePass defaults to false.
-    gameView.writeNames.push_back("GameView");
-    gameView.writeKinds.push_back(rg::ResourceKind::Texture);
-    graphSnapshot.passesInExecutionOrder.push_back(gameView);
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakeComputePass("SomeOtherPostGameViewPass"));
 
-    const std::vector<FrameDebuggerComputePassTextureWrite> writes = CollectComputePassTextureWrites(graphSnapshot);
-    EXPECT_TRUE(writes.empty());
+    rg::RenderGraphPassSnapshot composite = MakeComputePass("AtmosphereAerialPerspectiveCompositePass");
+    composite.writeNames.push_back("GameViewComposited");
+    composite.writeKinds.push_back(rg::ResourceKind::Texture);
+    graphSnapshot.passesInExecutionOrder.push_back(composite);
+
+    const FrameDebuggerCaptureContext capture;
+    const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
+
+    ASSERT_EQ(snapshot.rootNodes.size(), 1u);
+    const FrameDebuggerEventNode& postGroup = snapshot.rootNodes[0].children[1];
+    ASSERT_EQ(postGroup.children.size(), 2u);
+    ASSERT_TRUE(postGroup.children[0].details.has_value());
+    EXPECT_EQ(postGroup.children[0].name, "SomeOtherPostGameViewPass");
+    EXPECT_EQ(postGroup.children[0].details->stepPreviewKind, FrameDebuggerStepPreviewKind::PreComposite);
 }
 
-TEST(FrameDebuggerSnapshotBuilderTest, CollectComputePassTextureWritesOnlyCollectsFirstTextureKindWrite)
+TEST(FrameDebuggerSnapshotBuilderTest, CompositePassLeafItselfGetsPostCompositeStepPreviewKind)
 {
     rg::RenderGraphSnapshot graphSnapshot;
-    rg::RenderGraphPassSnapshot pass = MakeComputePass("MixedWritesPass");
-    pass.writeNames = { "FirstTexture", "SecondTexture" };
-    pass.writeKinds = { rg::ResourceKind::Texture, rg::ResourceKind::Texture };
-    graphSnapshot.passesInExecutionOrder.push_back(pass);
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
 
-    const std::vector<FrameDebuggerComputePassTextureWrite> writes = CollectComputePassTextureWrites(graphSnapshot);
-    ASSERT_EQ(writes.size(), 1u);
-    EXPECT_EQ(writes[0].writeTextureName, "FirstTexture");
+    rg::RenderGraphPassSnapshot composite = MakeComputePass("AtmosphereAerialPerspectiveCompositePass");
+    composite.writeNames.push_back("GameViewComposited");
+    composite.writeKinds.push_back(rg::ResourceKind::Texture);
+    graphSnapshot.passesInExecutionOrder.push_back(composite);
+
+    graphSnapshot.passesInExecutionOrder.push_back(MakeComputePass("SomeLaterPostCompositePass"));
+
+    const FrameDebuggerCaptureContext capture;
+    const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
+
+    ASSERT_EQ(snapshot.rootNodes.size(), 1u);
+    const FrameDebuggerEventNode& postGroup = snapshot.rootNodes[0].children[1];
+    ASSERT_EQ(postGroup.children.size(), 2u);
+
+    ASSERT_TRUE(postGroup.children[0].details.has_value());
+    EXPECT_EQ(postGroup.children[0].name, "AtmosphereAerialPerspectiveCompositePass");
+    EXPECT_EQ(postGroup.children[0].details->stepPreviewKind, FrameDebuggerStepPreviewKind::PostComposite);
+
+    // A leaf strictly AFTER the composite pass is ALSO PostComposite.
+    ASSERT_TRUE(postGroup.children[1].details.has_value());
+    EXPECT_EQ(postGroup.children[1].name, "SomeLaterPostCompositePass");
+    EXPECT_EQ(postGroup.children[1].details->stepPreviewKind, FrameDebuggerStepPreviewKind::PostComposite);
 }
 
-// frame-debugger-5 campaign, PHASE4
-// (PHASE4_VOLUME_TEXTURE_RAYMARCH_PREVIEW_REUSE.md, Step 3.3) - Tier-1 tests
-// for CollectComputePassVolumeTextureWrites() (FrameDebuggerData.h/.cpp), the
-// VolumeTexture-kind sibling of CollectComputePassTextureWrites() above.
-
-TEST(FrameDebuggerSnapshotBuilderTest, CollectComputePassVolumeTextureWritesFindsExactlyOneVolumeTextureKindWrite)
+TEST(FrameDebuggerSnapshotBuilderTest, PostGameViewLeavesDefaultToPostCompositeWhenNoCompositePassSurvives)
 {
+    // No pass anywhere writes "GameViewComposited" this frame (e.g. a
+    // capture taken before the atmosphere composite pass has ever run this
+    // session) - FindPostGameViewCompositePassExecutionIndex() returns -1,
+    // and every Post-GameView leaf falls into the PostComposite default
+    // catch-all bucket (Step 2's own "or nothing selected" wording).
     rg::RenderGraphSnapshot graphSnapshot;
-    rg::RenderGraphPassSnapshot pass = MakeComputePass("AtmosphereAerialPerspectiveVolumePass");
-    pass.writeNames.push_back("AerialPerspectiveVolume");
-    pass.writeKinds.push_back(rg::ResourceKind::VolumeTexture);
-    graphSnapshot.passesInExecutionOrder.push_back(pass);
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakeComputePass("SomePostGameViewPassWithNoCompositeWrite"));
 
-    const std::vector<FrameDebuggerComputePassVolumeTextureWrite> writes =
-        CollectComputePassVolumeTextureWrites(graphSnapshot);
-    ASSERT_EQ(writes.size(), 1u);
-    EXPECT_EQ(writes[0].passName, "AtmosphereAerialPerspectiveVolumePass");
-    EXPECT_EQ(writes[0].writeVolumeTextureName, "AerialPerspectiveVolume");
-}
+    const FrameDebuggerCaptureContext capture;
+    const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
 
-TEST(FrameDebuggerSnapshotBuilderTest, CollectComputePassVolumeTextureWritesExcludesTextureAndBufferOnlyWrites)
-{
-    rg::RenderGraphSnapshot graphSnapshot;
-
-    rg::RenderGraphPassSnapshot textureOnly = MakeComputePass("AtmosphereTransmittanceLutPass");
-    textureOnly.writeNames.push_back("TransmittanceLut");
-    textureOnly.writeKinds.push_back(rg::ResourceKind::Texture);
-    graphSnapshot.passesInExecutionOrder.push_back(textureOnly);
-
-    rg::RenderGraphPassSnapshot bufferOnly = MakeComputePass("SkinPass_A");
-    bufferOnly.writeNames.push_back("SkinnedVertexBuffer");
-    bufferOnly.writeKinds.push_back(rg::ResourceKind::Buffer);
-    graphSnapshot.passesInExecutionOrder.push_back(bufferOnly);
-
-    const std::vector<FrameDebuggerComputePassVolumeTextureWrite> writes =
-        CollectComputePassVolumeTextureWrites(graphSnapshot);
-    EXPECT_TRUE(writes.empty());
-}
-
-TEST(FrameDebuggerSnapshotBuilderTest, CollectComputePassVolumeTextureWritesExcludesCulledComputePass)
-{
-    rg::RenderGraphSnapshot graphSnapshot;
-    rg::RenderGraphPassSnapshot culled = MakeComputePass("CulledVolumePass");
-    culled.isCulled = true;
-    culled.writeNames.push_back("SomeVolume");
-    culled.writeKinds.push_back(rg::ResourceKind::VolumeTexture);
-    graphSnapshot.passesInExecutionOrder.push_back(culled);
-
-    const std::vector<FrameDebuggerComputePassVolumeTextureWrite> writes =
-        CollectComputePassVolumeTextureWrites(graphSnapshot);
-    EXPECT_TRUE(writes.empty());
-}
-
-TEST(FrameDebuggerSnapshotBuilderTest, CollectComputePassVolumeTextureWritesExcludesNonComputePass)
-{
-    rg::RenderGraphSnapshot graphSnapshot;
-    rg::RenderGraphPassSnapshot gameView = MakePass("GameView"); // isComputePass defaults to false.
-    gameView.writeNames.push_back("GameView");
-    gameView.writeKinds.push_back(rg::ResourceKind::VolumeTexture); // Hypothetical/defensive only.
-    graphSnapshot.passesInExecutionOrder.push_back(gameView);
-
-    const std::vector<FrameDebuggerComputePassVolumeTextureWrite> writes =
-        CollectComputePassVolumeTextureWrites(graphSnapshot);
-    EXPECT_TRUE(writes.empty());
-}
-
-TEST(FrameDebuggerSnapshotBuilderTest, CollectComputePassVolumeTextureWritesOnlyCollectsFirstVolumeTextureKindWrite)
-{
-    rg::RenderGraphSnapshot graphSnapshot;
-    rg::RenderGraphPassSnapshot pass = MakeComputePass("MixedVolumeWritesPass");
-    pass.writeNames = { "FirstVolume", "SecondVolume" };
-    pass.writeKinds = { rg::ResourceKind::VolumeTexture, rg::ResourceKind::VolumeTexture };
-    graphSnapshot.passesInExecutionOrder.push_back(pass);
-
-    const std::vector<FrameDebuggerComputePassVolumeTextureWrite> writes =
-        CollectComputePassVolumeTextureWrites(graphSnapshot);
-    ASSERT_EQ(writes.size(), 1u);
-    EXPECT_EQ(writes[0].writeVolumeTextureName, "FirstVolume");
-}
-
-// Step 3.3's own explicit third case: a pass with BOTH a Texture-kind AND a
-// VolumeTexture-kind write appears in BOTH CollectComputePassTextureWrites()'s
-// AND CollectComputePassVolumeTextureWrites()'s own results - a hypothetical
-// case for any real pass in this engine today, but the two collection passes
-// deliberately do not assume "exactly one visual write kind per pass".
-TEST(FrameDebuggerSnapshotBuilderTest, PassWithBothTextureAndVolumeTextureWritesAppearsInBothCollections)
-{
-    rg::RenderGraphSnapshot graphSnapshot;
-    rg::RenderGraphPassSnapshot pass = MakeComputePass("HypotheticalDualWritePass");
-    pass.writeNames = { "SomeTexture", "SomeVolume" };
-    pass.writeKinds = { rg::ResourceKind::Texture, rg::ResourceKind::VolumeTexture };
-    graphSnapshot.passesInExecutionOrder.push_back(pass);
-
-    const std::vector<FrameDebuggerComputePassTextureWrite> textureWrites =
-        CollectComputePassTextureWrites(graphSnapshot);
-    const std::vector<FrameDebuggerComputePassVolumeTextureWrite> volumeWrites =
-        CollectComputePassVolumeTextureWrites(graphSnapshot);
-
-    ASSERT_EQ(textureWrites.size(), 1u);
-    EXPECT_EQ(textureWrites[0].writeTextureName, "SomeTexture");
-    ASSERT_EQ(volumeWrites.size(), 1u);
-    EXPECT_EQ(volumeWrites[0].writeVolumeTextureName, "SomeVolume");
+    ASSERT_EQ(snapshot.rootNodes.size(), 1u);
+    const FrameDebuggerEventNode& postGroup = snapshot.rootNodes[0].children[1];
+    ASSERT_EQ(postGroup.children.size(), 1u);
+    ASSERT_TRUE(postGroup.children[0].details.has_value());
+    EXPECT_EQ(postGroup.children[0].details->stepPreviewKind, FrameDebuggerStepPreviewKind::PostComposite);
 }
 
 } // namespace

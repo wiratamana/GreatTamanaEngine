@@ -156,6 +156,41 @@ const rg::RenderGraphPassSnapshot* FindPassByName(
     return nullptr;
 }
 
+// task_manager/frame-debugger-7 campaign, PHASE4
+// (PHASE4_PREVIEW_WIRING_AND_DATA_MODEL.md, Step 3.1) - finds the real
+// execution-order index, among the surviving Post-GameView compute passes,
+// of the pass that writes the "GameViewComposited" texture - the SAME
+// literal texture name FrameDebuggerCurrentCapture::CaptureFrame()'s own
+// `compositedGameViewSource` parameter is always created under
+// (Application.cpp's "GameViewComposited" RenderTexture - see
+// FrameDebuggerHistory.h's own doc comments, which already reference this
+// exact name). This is a STRUCTURAL check against each pass's own real
+// `writeNames` (a real render-graph resource-name fact, cross-checked
+// against `AtmosphereLutRenderer::AddAerialPerspectiveCompositePass()`'s
+// own `outputTextureName` call-site argument at implementation time), NOT
+// a check against the pass's own NAME (e.g.
+// "AtmosphereAerialPerspectiveCompositePass") - so a hypothetical future
+// rename of that pass would not silently break this split. Returns -1 if
+// no surviving Post-GameView pass writes that texture this frame (e.g. a
+// captured frame taken before the composite pass has ever run this
+// session) - every Post-GameView leaf is then treated as PostComposite
+// (Step 2's own "or nothing selected"/default catch-all bucket).
+int FindPostGameViewCompositePassExecutionIndex(const rg::RenderGraphSnapshot& graphSnapshot, int gameViewIndex)
+{
+    for (int i = gameViewIndex + 1; i < static_cast<int>(graphSnapshot.passesInExecutionOrder.size()); ++i) {
+        const rg::RenderGraphPassSnapshot& pass = graphSnapshot.passesInExecutionOrder[static_cast<std::size_t>(i)];
+        if (!pass.isComputePass || pass.isCulled || pass.viewScope == rg::ViewScope::SceneView) {
+            continue;
+        }
+        for (const std::string& writeName : pass.writeNames) {
+            if (writeName == "GameViewComposited") {
+                return i;
+            }
+        }
+    }
+    return -1;
+}
+
 // frame-debugger-5 campaign, PHASE2
 // (PHASE2_GENERIC_COMPUTE_DISPATCH_EVENT_TREE_DISCOVERY.md, Step 3.2) -
 // small, exhaustive-switch row-label helpers for a compute-dispatch leaf's
@@ -200,7 +235,17 @@ const char* WriteRowLabelForKind(rg::ResourceKind kind)
 // dispatch never issues a draw call), but is the SINGLE, UNIFIED
 // replacement for both of those deleted, name-specific functions - see
 // PHASE0_MASTER_STRATEGY.md's Locked Design Decision #6.
-FrameDebuggerEventNode BuildComputeDispatchLeaf(const rg::RenderGraphPassSnapshot& pass, int eventIndex)
+// task_manager/frame-debugger-7 campaign, PHASE4
+// (PHASE4_PREVIEW_WIRING_AND_DATA_MODEL.md, Step 3.1) - new LAST parameter
+// `stepPreviewKind`, the caller's already-decided
+// FrameDebuggerStepPreviewKind for THIS leaf (NotYetDrawn for a
+// Pre-GameView pass, PreComposite/PostComposite for a Post-GameView pass
+// depending on its own position relative to the atmosphere composite
+// pass - see BuildRealFrameDebuggerSnapshot()'s own call sites below).
+// `stepPreviewIndex` is left at its default (-1) - never meaningful for a
+// compute-dispatch leaf (only PerObjectStep leaves use it).
+FrameDebuggerEventNode BuildComputeDispatchLeaf(
+    const rg::RenderGraphPassSnapshot& pass, int eventIndex, FrameDebuggerStepPreviewKind stepPreviewKind)
 {
     FrameDebuggerEventNode leaf;
     leaf.name = pass.name; // The real, raw render-graph pass name - never fabricated/prettified.
@@ -210,6 +255,7 @@ FrameDebuggerEventNode BuildComputeDispatchLeaf(const rg::RenderGraphPassSnapsho
     FrameDebuggerEventDetails details;
     details.eventIndex = eventIndex;
     details.eventLabel = "Compute Dispatch";
+    details.stepPreviewKind = stepPreviewKind;
     // No separate "friendly label" - the real, raw pass name IS the
     // passName too, for every compute leaf uniformly (this is what makes
     // this function correct for a pass this file has never heard of
@@ -288,6 +334,11 @@ FrameDebuggerEventNode BuildGameViewLeaf(
     details.eventIndex = eventIndex;
     details.eventLabel = "Draw Mesh";
     details.passName = "GameView";
+    // task_manager/frame-debugger-7 campaign, PHASE4 - the real "GameView"
+    // leaf always shows the pre-atmosphere-composite `preview` image
+    // (Locked Design Decision #5) - PreComposite carries exactly that
+    // meaning in the new FrameDebuggerStepPreviewKind scheme.
+    details.stepPreviewKind = FrameDebuggerStepPreviewKind::PreComposite;
 
     // shaderName - every DISTINCT real Pipeline debug name recorded this
     // frame, comma-joined (Locked Design Decision #6). Empty (never a
@@ -388,8 +439,16 @@ FrameDebuggerEventNode BuildGameViewLeaf(
 // leaf per mesh" rule (see PHASE0_MASTER_STRATEGY.md's Locked Design
 // Decision #1) - scoped ONLY to real children of the "GameView" leaf itself,
 // nothing else about pass-level granularity elsewhere in this tree changes.
+// task_manager/frame-debugger-7 campaign, PHASE4
+// (PHASE4_PREVIEW_WIRING_AND_DATA_MODEL.md, Step 3.1) - new LAST parameter
+// `stepPreviewIndex` - this record's own 0-based position among
+// FrameDebuggerCaptureContext::DrawRecords() (the SAME index
+// FrameDebuggerHistoryEntry::perObjectStepPreviews uses, PHASE3/PHASE4) -
+// so this leaf's own `stepPreviewKind`/`stepPreviewIndex` let
+// ChooseFrameDebuggerPreviewSource() show the real, accumulated "Game View
+// as of THIS object" image (fixes Bug 2).
 FrameDebuggerEventNode BuildGameViewDrawRecordLeaf(
-    const FrameDebuggerDrawRecord& record, const Mat4& sharedViewProjection, int eventIndex)
+    const FrameDebuggerDrawRecord& record, const Mat4& sharedViewProjection, int eventIndex, int stepPreviewIndex)
 {
     FrameDebuggerEventNode leaf;
     leaf.name = record.displayName + " (Entity " + std::to_string(record.entityIndex) + ")";
@@ -399,17 +458,22 @@ FrameDebuggerEventNode BuildGameViewDrawRecordLeaf(
     FrameDebuggerEventDetails details;
     details.eventIndex = eventIndex;
     details.eventLabel = "Draw Mesh";
+    details.stepPreviewKind = FrameDebuggerStepPreviewKind::PerObjectStep;
+    details.stepPreviewIndex = stepPreviewIndex;
     // IMPORTANT - deliberately NOT the literal string "GameView" (a real
     // self-contradiction this campaign's own double-check pass caught before
-    // implementation): FrameDebuggerPanel::EnsurePreviewDescriptor()
-    // (src/Editor/Panels/FrameDebuggerPanel.cpp, UNCHANGED by this phase - see
-    // Step 5's own "What We Will NOT Do") decides `isViewingGameViewLeaf`
-    // purely via `details->passName == "GameView"`, an EXACT string compare -
+    // implementation): before task_manager/frame-debugger-7's own PHASE4,
+    // FrameDebuggerPanel::EnsurePreviewDescriptor() decided
+    // `isViewingGameViewLeaf` purely via `details->passName == "GameView"`,
+    // an EXACT string compare -
     // if a per-entity leaf's own passName ALSO literally read "GameView",
     // clicking it would incorrectly take the SAME branch the real "GameView"
     // leaf takes (forcing the raw pre-atmosphere-composite `preview` image,
-    // always), contradicting this phase's own Step 5 "falls back to the
-    // existing whole-frame compositedPreview/preview image" scope statement -
+    // always) - this string-distinctness requirement is now moot for THAT
+    // specific mechanism (stepPreviewKind decides it structurally instead),
+    // but the distinct "GameView (Entity Draw)" passName is kept anyway (it
+    // is still a useful, honest display value for the Inspector's "Pass"
+    // row) -
     // see Step 2's own second gotcha and Step 4's new regression test for the
     // full reasoning. "GameView (Entity Draw)" keeps the Pass row human-
     // readably tied to the real pass this draw happened inside, while
@@ -572,7 +636,11 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
         if (!pass.isComputePass || pass.isCulled || pass.viewScope == rg::ViewScope::SceneView) {
             continue;
         }
-        preGameViewGroup.children.push_back(BuildComputeDispatchLeaf(pass, nextEventIndex++));
+        // task_manager/frame-debugger-7 campaign, PHASE4 - a Pre-GameView
+        // compute-dispatch leaf's own "as of this step" image is honestly
+        // "nothing drawn to the screen yet" (Locked Design Decision #6).
+        preGameViewGroup.children.push_back(
+            BuildComputeDispatchLeaf(pass, nextEventIndex++, FrameDebuggerStepPreviewKind::NotYetDrawn));
     }
 
     // Only add either group at all if something real actually survived
@@ -590,12 +658,27 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
     // Post-GameView group below - preserves the exact same "pre < GameView <
     // post" monotonic-eventIndex invariant this function's own PHASE2 (of
     // frame-debugger-5) comment already documents, simply extended one level
-    // deeper (pre < GameView < GameView's own children < post).
+    // task_manager/frame-debugger-7 campaign, PHASE4 - each per-object draw
+    // child leaf's own `stepPreviewIndex` is its 0-based position among
+    // capture.DrawRecords() - the SAME index
+    // FrameDebuggerHistoryEntry::perObjectStepPreviews will use (Phase 3's
+    // ReplayStepPreviews(), moved there by TriggerCapture()/CaptureFrame()).
+    int perObjectStepIndex = 0;
     for (const FrameDebuggerDrawRecord& record : capture.DrawRecords()) {
-        gameViewLeaf.children.push_back(BuildGameViewDrawRecordLeaf(record, capture.LastViewProjection(), nextEventIndex++));
+        gameViewLeaf.children.push_back(BuildGameViewDrawRecordLeaf(
+            record, capture.LastViewProjection(), nextEventIndex++, perObjectStepIndex));
+        ++perObjectStepIndex;
     }
     root.children.push_back(std::move(gameViewLeaf));
 
+    // task_manager/frame-debugger-7 campaign, PHASE4 - a Post-GameView
+    // leaf's own "as of this step" image depends on whether it runs
+    // before or at/after the real atmosphere composite pass (see
+    // FindPostGameViewCompositePassExecutionIndex()'s own doc comment
+    // above) - found STRUCTURALLY, by matching each surviving pass's own
+    // real `writeNames` against the "GameViewComposited" texture name,
+    // never by comparing against the composite pass's own literal NAME.
+    const int compositePassIndex = FindPostGameViewCompositePassExecutionIndex(graphSnapshot, gameViewIndex);
     for (int i = gameViewIndex + 1; i < static_cast<int>(graphSnapshot.passesInExecutionOrder.size()); ++i) {
         const rg::RenderGraphPassSnapshot& pass = graphSnapshot.passesInExecutionOrder[static_cast<std::size_t>(i)];
         // frame-debugger-6 campaign, PHASE2 - identical rule, symmetrically
@@ -605,7 +688,14 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
         if (!pass.isComputePass || pass.isCulled || pass.viewScope == rg::ViewScope::SceneView) {
             continue;
         }
-        postGameViewGroup.children.push_back(BuildComputeDispatchLeaf(pass, nextEventIndex++));
+        // Strictly BEFORE the composite pass's own index -> PreComposite
+        // (the accumulated image is still the pre-atmosphere-fog one);
+        // AT the composite pass's own index (its own leaf) or AFTER it,
+        // or no composite pass found at all this capture -> PostComposite.
+        const FrameDebuggerStepPreviewKind stepPreviewKind = (compositePassIndex >= 0 && i < compositePassIndex)
+            ? FrameDebuggerStepPreviewKind::PreComposite
+            : FrameDebuggerStepPreviewKind::PostComposite;
+        postGameViewGroup.children.push_back(BuildComputeDispatchLeaf(pass, nextEventIndex++, stepPreviewKind));
     }
     if (!postGameViewGroup.children.empty()) {
         root.children.push_back(std::move(postGameViewGroup));
@@ -619,89 +709,57 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
     return snapshot;
 }
 
-// frame-debugger-5 campaign, PHASE3
-// (PHASE3_GENERIC_PER_PASS_RETAINED_PREVIEW_CAPTURE.md, Step 3.3 "Step A") -
-// see FrameDebuggerData.h's own doc comment for the full contract. Pure,
-// CPU-side discovery - reads graphSnapshot.passesInExecutionOrder directly,
-// never the Editor's own already-built event tree/display-string labels.
-std::vector<FrameDebuggerComputePassTextureWrite> CollectComputePassTextureWrites(
-    const rg::RenderGraphSnapshot& graphSnapshot)
-{
-    std::vector<FrameDebuggerComputePassTextureWrite> result;
-    for (const rg::RenderGraphPassSnapshot& pass : graphSnapshot.passesInExecutionOrder) {
-        if (!pass.isComputePass || pass.isCulled) {
-            continue;
-        }
-        for (std::size_t i = 0; i < pass.writeKinds.size() && i < pass.writeNames.size(); ++i) {
-            if (pass.writeKinds[i] == rg::ResourceKind::Texture) {
-                FrameDebuggerComputePassTextureWrite write;
-                write.passName = pass.name;
-                write.writeTextureName = pass.writeNames[i];
-                result.push_back(std::move(write));
-                break; // Known, accepted limitation - only the FIRST Texture-kind write per pass.
-            }
-        }
-    }
-    return result;
-}
-
-// frame-debugger-5 campaign, PHASE4
-// (PHASE4_VOLUME_TEXTURE_RAYMARCH_PREVIEW_REUSE.md, Step 3.1) - the
-// VolumeTexture-kind sibling of CollectComputePassTextureWrites() above - see
-// FrameDebuggerData.h's own doc comment for the full contract. Identical
-// traversal shape, just filtering on rg::ResourceKind::VolumeTexture instead
-// of rg::ResourceKind::Texture.
-std::vector<FrameDebuggerComputePassVolumeTextureWrite> CollectComputePassVolumeTextureWrites(
-    const rg::RenderGraphSnapshot& graphSnapshot)
-{
-    std::vector<FrameDebuggerComputePassVolumeTextureWrite> result;
-    for (const rg::RenderGraphPassSnapshot& pass : graphSnapshot.passesInExecutionOrder) {
-        if (!pass.isComputePass || pass.isCulled) {
-            continue;
-        }
-        for (std::size_t i = 0; i < pass.writeKinds.size() && i < pass.writeNames.size(); ++i) {
-            if (pass.writeKinds[i] == rg::ResourceKind::VolumeTexture) {
-                FrameDebuggerComputePassVolumeTextureWrite write;
-                write.passName = pass.name;
-                write.writeVolumeTextureName = pass.writeNames[i];
-                result.push_back(std::move(write));
-                break; // Known, accepted limitation - only the FIRST VolumeTexture-kind write per pass.
-            }
-        }
-    }
-    return result;
-}
-
 // frame-debugger-4 campaign, PHASE3 - see FrameDebuggerData.h's own doc
-// comment for the full contract. A plain, exhaustive if/else chain over
-// already-resolved booleans - deliberately no live FrameDebuggerHistoryEntry/
+// comment for the full contract. A plain, exhaustive switch over
+// FrameDebuggerStepPreviewKind - deliberately no live FrameDebuggerHistoryEntry/
 // RenderTexture dependency at all.
 //
-// frame-debugger-5 campaign, PHASE3 (Step 3.4) - widened with the new
-// `hasSelectedComputePassPreview` parameter/`ComputePassPreview` branch; every
-// other branch's ORDER and OUTCOME is unchanged.
-FrameDebuggerPreviewSourceChoice ChooseFrameDebuggerPreviewSource(bool hasEntry, bool hasPreview,
-    bool hasCompositedPreview, bool isViewingGameViewLeaf, bool hasSelectedComputePassPreview)
+// task_manager/frame-debugger-7 campaign, PHASE4
+// (PHASE4_PREVIEW_WIRING_AND_DATA_MODEL.md, Step 3.2/3.3) - REWRITTEN. The
+// old `CollectComputePassTextureWrites()`/`CollectComputePassVolumeTextureWrites()`
+// functions (frame-debugger-5 campaign) and the old `hasSelectedComputePassPreview`/
+// `isViewingGameViewLeaf` boolean-soup parameters are GONE (an explicit,
+// user-approved breaking change - PHASE0's Locked Design Decision #3); see
+// FrameDebuggerData.h's own doc comment for the full new contract.
+FrameDebuggerPreviewSourceChoice ChooseFrameDebuggerPreviewSource(bool hasEntry,
+    FrameDebuggerStepPreviewKind stepPreviewKind, bool hasPreview, bool hasCompositedPreview,
+    bool hasPerObjectStepPreviewAtIndex)
 {
     if (!hasEntry) {
         return FrameDebuggerPreviewSourceChoice::None;
     }
-    if (isViewingGameViewLeaf) {
-        // Explicit "GameView" leaf selection always wins - even if
-        // compositedPreview/a compute-pass preview is ALSO present for this
-        // captured frame (Locked Design Decision #5).
+    // Deliberately NO `default:` case - the same exhaustive-switch
+    // convention this file's own ReadRowLabelForKind()/WriteRowLabelForKind()
+    // already establish, so a future fifth FrameDebuggerStepPreviewKind
+    // enumerator fails to compile here until updated.
+    switch (stepPreviewKind) {
+    case FrameDebuggerStepPreviewKind::NotYetDrawn:
+        // Honest "nothing drawn yet" placeholder - always wins outright,
+        // regardless of hasPreview/hasCompositedPreview (Locked Design
+        // Decision #6 - never fabricate an image for this bucket).
+        return FrameDebuggerPreviewSourceChoice::NotYetDrawn;
+    case FrameDebuggerStepPreviewKind::PerObjectStep:
+        // Fixes Bug 2 - the real, accumulated "Game View as of THIS
+        // object" image, or an honest `None` if it somehow isn't
+        // available (never falls back to the fog-inclusive whole-frame
+        // image - that would show later objects/atmosphere fog that
+        // hadn't actually been applied yet at this exact step).
+        return hasPerObjectStepPreviewAtIndex ? FrameDebuggerPreviewSourceChoice::PerObjectStepPreview
+                                               : FrameDebuggerPreviewSourceChoice::None;
+    case FrameDebuggerStepPreviewKind::PreComposite:
+        // The literal "GameView" leaf itself, or a Post-GameView leaf
+        // that runs before the composite pass - always the pre-composite
+        // `preview` (Locked Design Decision #5), never `compositedPreview`.
         return hasPreview ? FrameDebuggerPreviewSourceChoice::Preview : FrameDebuggerPreviewSourceChoice::None;
-    }
-    if (hasSelectedComputePassPreview) {
-        // NEW (PHASE3) - a selected compute-dispatch leaf's own retained
-        // output wins over the whole-frame compositedPreview/preview.
-        return FrameDebuggerPreviewSourceChoice::ComputePassPreview;
-    }
-    if (hasCompositedPreview) {
-        return FrameDebuggerPreviewSourceChoice::CompositedPreview;
-    }
-    if (hasPreview) {
-        return FrameDebuggerPreviewSourceChoice::Preview;
+    case FrameDebuggerStepPreviewKind::PostComposite:
+        // The composite pass itself, anything after it, or nothing
+        // selected at all - prefers the true, final `compositedPreview`,
+        // falling back to `preview` only when this particular captured
+        // frame has no composited image at all.
+        if (hasCompositedPreview) {
+            return FrameDebuggerPreviewSourceChoice::CompositedPreview;
+        }
+        return hasPreview ? FrameDebuggerPreviewSourceChoice::Preview : FrameDebuggerPreviewSourceChoice::None;
     }
     return FrameDebuggerPreviewSourceChoice::None;
 }

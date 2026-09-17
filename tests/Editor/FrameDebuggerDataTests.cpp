@@ -180,60 +180,57 @@ TEST(FrameDebuggerDataTest, FormatMatrixPropertyTest)
 // FrameDebuggerPanel.cpp EnsurePreviewDescriptor(), covering every
 // meaningful input combination the phase document itself calls out.
 //
-// frame-debugger-5 campaign, PHASE3
-// (PHASE3_GENERIC_PER_PASS_RETAINED_PREVIEW_CAPTURE.md, Step 3.5) - widened
-// with the new 5th boolean, `hasSelectedComputePassPreview` - every case
-// below that predates PHASE3 is called with `false` for it and asserts the
-// EXACT SAME outcome as before (this addition changes NOTHING for any
-// pre-existing input combination), plus new cases proving
-// `hasSelectedComputePassPreview == true` wins over
-// `hasCompositedPreview == true` whenever `isViewingGameViewLeaf == false`.
+// task_manager/frame-debugger-7 campaign, PHASE4
+// (PHASE4_PREVIEW_WIRING_AND_DATA_MODEL.md, Step 3.5) - REWRITTEN for the
+// new `FrameDebuggerStepPreviewKind`-based signature (the old
+// `isViewingGameViewLeaf`/`hasSelectedComputePassPreview` booleans and the
+// `ComputePassPreview` choice are GONE - PHASE0's Locked Design Decision
+// #3) - covers all four FrameDebuggerStepPreviewKind values.
 TEST(FrameDebuggerDataTest, ChooseFrameDebuggerPreviewSourceTest)
 {
-    // No entry at all (fresh history) -> None.
-    EXPECT_EQ(
-        ChooseFrameDebuggerPreviewSource(false, false, false, false, false), FrameDebuggerPreviewSourceChoice::None);
+    // No entry at all (fresh capture) -> None, regardless of stepPreviewKind.
+    EXPECT_EQ(ChooseFrameDebuggerPreviewSource(
+                  false, FrameDebuggerStepPreviewKind::PostComposite, false, false, false),
+        FrameDebuggerPreviewSourceChoice::None);
 
-    // Entry exists, nothing selected, compositedPreview present -> CompositedPreview.
-    EXPECT_EQ(ChooseFrameDebuggerPreviewSource(true, true, true, false, false),
+    // NotYetDrawn (a Pre-GameView compute leaf) -> NotYetDrawn, ALWAYS - even
+    // if hasPreview/hasCompositedPreview are (nonsensically) true.
+    EXPECT_EQ(ChooseFrameDebuggerPreviewSource(true, FrameDebuggerStepPreviewKind::NotYetDrawn, true, true, true),
+        FrameDebuggerPreviewSourceChoice::NotYetDrawn);
+    EXPECT_EQ(ChooseFrameDebuggerPreviewSource(true, FrameDebuggerStepPreviewKind::NotYetDrawn, false, false, false),
+        FrameDebuggerPreviewSourceChoice::NotYetDrawn);
+
+    // PreComposite (the literal "GameView" leaf itself, or a Post-GameView
+    // leaf before the composite pass) -> Preview, even if compositedPreview
+    // is ALSO present (explicit pre-composite selection always wins).
+    EXPECT_EQ(ChooseFrameDebuggerPreviewSource(true, FrameDebuggerStepPreviewKind::PreComposite, true, true, false),
+        FrameDebuggerPreviewSourceChoice::Preview);
+    // PreComposite, preview somehow absent (defensive-only, should not
+    // happen in practice) -> None.
+    EXPECT_EQ(ChooseFrameDebuggerPreviewSource(true, FrameDebuggerStepPreviewKind::PreComposite, false, true, false),
+        FrameDebuggerPreviewSourceChoice::None);
+
+    // PostComposite (the composite pass itself, anything after it, or
+    // nothing selected) with compositedPreview present -> CompositedPreview.
+    EXPECT_EQ(ChooseFrameDebuggerPreviewSource(true, FrameDebuggerStepPreviewKind::PostComposite, true, true, false),
         FrameDebuggerPreviewSourceChoice::CompositedPreview);
-
-    // Entry exists, nothing selected, compositedPreview absent, preview present -> Preview.
-    EXPECT_EQ(ChooseFrameDebuggerPreviewSource(true, true, false, false, false),
+    // PostComposite, compositedPreview absent, preview present -> falls back to Preview.
+    EXPECT_EQ(ChooseFrameDebuggerPreviewSource(true, FrameDebuggerStepPreviewKind::PostComposite, true, false, false),
         FrameDebuggerPreviewSourceChoice::Preview);
+    // PostComposite, neither present -> None.
+    EXPECT_EQ(ChooseFrameDebuggerPreviewSource(true, FrameDebuggerStepPreviewKind::PostComposite, false, false, false),
+        FrameDebuggerPreviewSourceChoice::None);
 
-    // Entry exists, "GameView" leaf selected, preview present -> Preview (even if
-    // compositedPreview is ALSO present - explicit leaf selection always wins).
-    EXPECT_EQ(ChooseFrameDebuggerPreviewSource(true, true, true, true, false),
-        FrameDebuggerPreviewSourceChoice::Preview);
-
-    // Entry exists, "GameView" leaf selected, preview somehow absent (defensive-only,
-    // should not happen in practice) -> None.
-    EXPECT_EQ(
-        ChooseFrameDebuggerPreviewSource(true, false, true, true, false), FrameDebuggerPreviewSourceChoice::None);
-
-    // Entry exists, some OTHER leaf selected (e.g. "Aerial Perspective Composite" or
-    // a compute-dispatch leaf with no retained preview of its own), compositedPreview
-    // present -> CompositedPreview.
-    EXPECT_EQ(ChooseFrameDebuggerPreviewSource(true, true, true, false, false),
-        FrameDebuggerPreviewSourceChoice::CompositedPreview);
-
-    // NEW (PHASE3) - entry exists, a non-"GameView" leaf selected, that leaf HAS its
-    // own retained compute-pass preview, compositedPreview ALSO present ->
-    // ComputePassPreview wins.
-    EXPECT_EQ(ChooseFrameDebuggerPreviewSource(true, true, true, false, true),
-        FrameDebuggerPreviewSourceChoice::ComputePassPreview);
-
-    // NEW (PHASE3) - same, but compositedPreview absent (falls back would-have-been
-    // Preview) - ComputePassPreview still wins.
-    EXPECT_EQ(ChooseFrameDebuggerPreviewSource(true, true, false, false, true),
-        FrameDebuggerPreviewSourceChoice::ComputePassPreview);
-
-    // NEW (PHASE3) - the literal "GameView" leaf selected ALWAYS wins over even a
-    // (nonsensical, defensive-only) hasSelectedComputePassPreview == true - the
-    // "GameView" branch is checked FIRST and returns unconditionally.
-    EXPECT_EQ(ChooseFrameDebuggerPreviewSource(true, true, true, true, true),
-        FrameDebuggerPreviewSourceChoice::Preview);
+    // PerObjectStep (fixes Bug 2) - the selected step's own retained image,
+    // when it actually resolves -> PerObjectStepPreview, even if
+    // compositedPreview is ALSO present (never shows the fog-inclusive
+    // whole-frame image for this bucket).
+    EXPECT_EQ(ChooseFrameDebuggerPreviewSource(true, FrameDebuggerStepPreviewKind::PerObjectStep, true, true, true),
+        FrameDebuggerPreviewSourceChoice::PerObjectStepPreview);
+    // PerObjectStep, but the index doesn't resolve to a real retained image
+    // -> None (deliberately NEVER falls back to compositedPreview/preview).
+    EXPECT_EQ(ChooseFrameDebuggerPreviewSource(true, FrameDebuggerStepPreviewKind::PerObjectStep, true, true, false),
+        FrameDebuggerPreviewSourceChoice::None);
 }
 
 } // namespace

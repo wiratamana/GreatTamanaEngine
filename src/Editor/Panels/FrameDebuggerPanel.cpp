@@ -58,60 +58,42 @@ void FrameDebuggerPanel::EnsurePreviewDescriptor()
 {
     const FrameDebuggerHistoryEntry* entry = m_currentCapture.CurrentEntry();
 
-    // PHASE1 (frame-debugger-4 campaign) - decide WHICH retained texture
-    // this call should display, based on the currently-SELECTED tree event
-    // (Locked Design Decision #5/#6, PHASE0_MASTER_STRATEGY.md):
-    //   - the literal "GameView" leaf selected -> the TRUE pre-atmosphere-
-    //     composite image (entry->preview), "as of the exact point this
-    //     specific event finished" - preserves frame-debugger-3's own
-    //     original Locked Design Decision #5 semantics for that one leaf.
-    //   - anything else at all - including nothing selected (a fresh
-    //     capture) - a selected compute-dispatch leaf with its OWN retained
-    //     preview (frame-debugger-5 campaign, PHASE3 - see below) wins next;
-    //     failing that, prefers the TRUE, final, atmosphere-inclusive
-    //     entry->compositedPreview, falling back to entry->preview only when
-    //     compositedPreview is std::nullopt for this particular captured
-    //     frame (e.g. captured before the very first composite pass ever ran
-    //     this session).
-    // PHASE3 (frame-debugger-4 campaign) - the actual decision itself is now
-    // delegated to ChooseFrameDebuggerPreviewSource() (FrameDebuggerData.h), a
-    // pure, Tier-1-tested function extracted specifically so this rule has
-    // real automated regression coverage with no live VkDevice/ImGui context
-    // involved (see tests/Editor/FrameDebuggerDataTests.cpp) - this function
-    // itself now only resolves the plain booleans that function needs, then
-    // maps its enum result back onto a real RenderTexture pointer.
-    bool isViewingGameViewLeaf = false;
-    std::string selectedPassName;
-    bool hasSelectedPassName = false;
+    // task_manager/frame-debugger-7 campaign, PHASE4
+    // (PHASE4_PREVIEW_WIRING_AND_DATA_MODEL.md, Step 3.4) - REWRITTEN. The
+    // old `isViewingGameViewLeaf`/`selectedComputePassPreview` boolean-soup
+    // (frame-debugger-4/frame-debugger-5 campaigns) is GONE - the currently-
+    // selected event node's own `FrameDebuggerEventDetails::stepPreviewKind`/
+    // `stepPreviewIndex` (FrameDebuggerData.h, computed once by
+    // BuildRealFrameDebuggerSnapshot()) now drive
+    // ChooseFrameDebuggerPreviewSource() directly. Nothing selected at all
+    // (m_selectedEventIndex == -1, or no capture yet) defaults to
+    // `PostComposite` - the same "final, fog-inclusive image" bucket an
+    // explicit Post-GameView-at/after-composite selection also falls into
+    // (see ChooseFrameDebuggerPreviewSource()'s own doc comment).
+    FrameDebuggerStepPreviewKind stepPreviewKind = FrameDebuggerStepPreviewKind::PostComposite;
+    int stepPreviewIndex = -1;
     if (entry != nullptr) {
         const std::optional<FrameDebuggerEventDetails> details =
             FindEventDetailsByIndex(entry->snapshot, m_selectedEventIndex);
-        isViewingGameViewLeaf = details.has_value() && details->passName == "GameView";
-        hasSelectedPassName = details.has_value();
-        if (hasSelectedPassName) {
-            selectedPassName = details->passName;
+        if (details.has_value()) {
+            stepPreviewKind = details->stepPreviewKind;
+            stepPreviewIndex = details->stepPreviewIndex;
         }
     }
 
-    // frame-debugger-5 campaign, PHASE3
-    // (PHASE3_GENERIC_PER_PASS_RETAINED_PREVIEW_CAPTURE.md, Step 3.4) - does
-    // the CURRENTLY-SELECTED leaf (whatever it is) have its own entry in
-    // entry->computePassPreviews? A simple linear name match - this vector
-    // is at most a handful of entries per captured frame (one per real
-    // compute-dispatch pass), so no hash map is warranted.
-    const FrameDebuggerComputePassPreview* selectedComputePassPreview = nullptr;
-    if (entry != nullptr && hasSelectedPassName) {
-        for (const FrameDebuggerComputePassPreview& candidate : entry->computePassPreviews) {
-            if (candidate.passName == selectedPassName) {
-                selectedComputePassPreview = &candidate;
-                break;
-            }
-        }
-    }
+    // Does the selected PerObjectStep leaf's own stepPreviewIndex actually
+    // resolve to a real entry in entry->perObjectStepPreviews? Resolved
+    // HERE (the caller), never by ChooseFrameDebuggerPreviewSource() itself
+    // (which stays free of any FrameDebuggerHistoryEntry/RenderTexture
+    // dependency, per that function's own pre-existing philosophy).
+    const bool hasPerObjectStepPreviewAtIndex = entry != nullptr
+        && stepPreviewKind == FrameDebuggerStepPreviewKind::PerObjectStep && stepPreviewIndex >= 0
+        && static_cast<std::size_t>(stepPreviewIndex) < entry->perObjectStepPreviews.size();
 
-    const FrameDebuggerPreviewSourceChoice choice = ChooseFrameDebuggerPreviewSource(entry != nullptr,
+    const FrameDebuggerPreviewSourceChoice choice = ChooseFrameDebuggerPreviewSource(entry != nullptr, stepPreviewKind,
         entry != nullptr && entry->preview.has_value(), entry != nullptr && entry->compositedPreview.has_value(),
-        isViewingGameViewLeaf, selectedComputePassPreview != nullptr);
+        hasPerObjectStepPreviewAtIndex);
+    m_lastPreviewChoice = choice; // Cached for BuildInspectorPane()'s own placeholder-text decision.
 
     const RenderTexture* selectedSource = nullptr;
     switch (choice) {
@@ -121,17 +103,21 @@ void FrameDebuggerPanel::EnsurePreviewDescriptor()
     case FrameDebuggerPreviewSourceChoice::CompositedPreview:
         selectedSource = (entry != nullptr && entry->compositedPreview.has_value()) ? &(*entry->compositedPreview) : nullptr;
         break;
-    case FrameDebuggerPreviewSourceChoice::ComputePassPreview:
-        selectedSource = (selectedComputePassPreview != nullptr) ? &selectedComputePassPreview->preview : nullptr;
+    case FrameDebuggerPreviewSourceChoice::PerObjectStepPreview:
+        selectedSource = hasPerObjectStepPreviewAtIndex
+            ? &entry->perObjectStepPreviews[static_cast<std::size_t>(stepPreviewIndex)]
+            : nullptr;
         break;
+    case FrameDebuggerPreviewSourceChoice::NotYetDrawn:
     case FrameDebuggerPreviewSourceChoice::None:
         break;
     }
 
     if (selectedSource == nullptr) {
         // Nothing to preview right now - see this function's own original
-        // comment (no capture has ever happened yet, or - defensively -
-        // neither retained texture is populated for the current capture).
+        // comment (no capture has ever happened yet, an honest "nothing
+        // drawn yet" NotYetDrawn state, or - defensively - the relevant
+        // retained texture is unpopulated for the current capture).
         ReleasePreviewDescriptor();
         return;
     }
@@ -224,7 +210,14 @@ void FrameDebuggerPanel::TriggerCapture()
 
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, m_captureContext, renderTargetInfo);
 
-    m_currentCapture.CaptureFrame(*m_frameRenderer, *m_frameRenderGraph, snapshot, *m_frameGameView, m_frameGameViewComposited);
+    // task_manager/frame-debugger-7 campaign, PHASE4
+    // (PHASE4_PREVIEW_WIRING_AND_DATA_MODEL.md, Step 3.2 point 2) - widened
+    // CaptureFrame() call with the new, LAST `m_captureContext` argument, so
+    // Phase 3's own ReplayStepPreviews() gets moved into permanent storage
+    // (FrameDebuggerHistoryEntry::perObjectStepPreviews) before this same
+    // frame's later Reset() would otherwise wipe it.
+    m_currentCapture.CaptureFrame(
+        *m_frameRenderer, *m_frameRenderGraph, snapshot, *m_frameGameView, m_frameGameViewComposited, m_captureContext);
     m_selectedEventIndex = -1;
 }
 
@@ -536,25 +529,17 @@ void FrameDebuggerPanel::BuildInspectorPane(
     // too, matching the RenderTarget row's own "frame-level, not
     // event-level" framing immediately above.
     //
-    // frame-debugger-5 campaign, PHASE2
-    // (PHASE2_GENERIC_COMPUTE_DISPATCH_EVENT_TREE_DISCOVERY.md) - the OLD
+    // task_manager/frame-debugger-7 campaign, PHASE4
+    // (PHASE4_PREVIEW_WIRING_AND_DATA_MODEL.md, Step 3.4) - the OLD dead
     // "hide the whole-frame preview specifically for a GPU-skinning leaf"
-    // special case below (`details->passName == "GPU Skinning"`) can NEVER
-    // fire anymore: BuildComputeDispatchLeaf() (FrameDebuggerData.cpp) now
-    // sets `passName` to the pass's own real, raw name for EVERY compute
-    // leaf uniformly, never the literal string "GPU Skinning" - so
-    // `selectedEventIsGpuSkinning` below is permanently false today. This is
-    // NOT a bug: PHASE0_MASTER_STRATEGY.md's own Step 3.7 explicitly
-    // documents that, until PHASE3 lands a real per-compute-pass retained
-    // preview, selecting ANY compute-dispatch leaf (including what used to
-    // be the "GPU Skinning" one) is EXPECTED to fall back to showing the
-    // whole-frame image, exactly like every other still-unhandled leaf -
-    // this dead check is left in place deliberately rather than deleted,
-    // since PHASE3 is expected to replace it outright with a real
-    // per-pass-preview lookup rather than this boolean surviving as-is.
-    const bool selectedEventIsGpuSkinning = details.has_value() && details->passName == "GPU Skinning";
-    const bool showPreviewTexture =
-        (m_previewDescriptor != VK_NULL_HANDLE) && (currentEntry != nullptr) && !selectedEventIsGpuSkinning;
+    // special case (`selectedEventIsGpuSkinning`, frame-debugger-5
+    // campaign) is REMOVED - it is now fully superseded by
+    // `m_lastPreviewChoice` (set by EnsurePreviewDescriptor(), called
+    // earlier this SAME Build() call): `m_previewDescriptor` is already
+    // VK_NULL_HANDLE for EVERY step whose image genuinely isn't available
+    // (including every Pre-GameView compute leaf, not just one hardcoded
+    // name), so `showPreviewTexture` needs no extra special-casing at all.
+    const bool showPreviewTexture = (m_previewDescriptor != VK_NULL_HANDLE) && (currentEntry != nullptr);
 
     const float previewHeight = std::max(120.0f, ImGui::GetContentRegionAvail().y * 0.5f);
     ImGui::BeginChild("FrameDebuggerTexturePreview", ImVec2(0.0f, previewHeight), true);
@@ -566,7 +551,15 @@ void FrameDebuggerPanel::BuildInspectorPane(
             }
         } else {
             const ImVec2 avail = ImGui::GetContentRegionAvail();
-            const char* placeholderText = "No Texture";
+            // task_manager/frame-debugger-7 campaign, PHASE4
+            // (PHASE4_PREVIEW_WIRING_AND_DATA_MODEL.md, Step 3.4) - a second,
+            // distinct placeholder message for the honest "nothing drawn to
+            // the screen yet" NotYetDrawn state (a Pre-GameView compute
+            // leaf), right next to the ordinary "No Texture" one (Locked
+            // Design Decision #6 - never fabricate an image for this bucket).
+            const char* placeholderText = (m_lastPreviewChoice == FrameDebuggerPreviewSourceChoice::NotYetDrawn)
+                ? "Nothing drawn yet at this point in the frame."
+                : "No Texture";
             const ImVec2 textSize = ImGui::CalcTextSize(placeholderText);
             ImGui::SetCursorPos(ImVec2(
                 std::max(0.0f, (avail.x - textSize.x) * 0.5f), std::max(0.0f, (avail.y - textSize.y) * 0.5f)));
