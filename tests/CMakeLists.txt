@@ -1910,6 +1910,7 @@ set(GTE_TEST_SOURCES
     ECS/TransformHierarchyTests.cpp
     ECS/EntityQueryTests.cpp
     ECS/Reflection/ComponentTypeRegistryTests.cpp
+    ECS/Reflection/BuiltinComponentReflectionTests.cpp
     Game/RenderSystemTests.cpp
     Game/GameEntityCommandsTests.cpp
     Game/GameUpdateFreezeGatingTests.cpp

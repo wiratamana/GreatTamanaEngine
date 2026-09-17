@@ -270,6 +270,7 @@ add_library(gte_core STATIC
     src/ECS/Reflection/ComponentTypeRegistry.inl
     src/ECS/Reflection/ComponentTypeRegistry.cpp
     src/ECS/Reflection/ReflectFieldMacros.h
+    src/ECS/Reflection/BuiltinComponentReflection.cpp
     src/Animation/BoneLocalOffset.h
     src/Animation/BoneChainResolver.h
     src/Animation/BonePoseMath.h
