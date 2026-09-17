@@ -888,5 +888,59 @@ TEST(FrameDebuggerSnapshotBuilderTest, PostGameViewLeavesDefaultToPostCompositeW
     EXPECT_EQ(postGroup.children[0].details->stepPreviewKind, FrameDebuggerStepPreviewKind::PostComposite);
 }
 
+// frame-debugger-8 campaign, PHASE3
+// (PHASE3_SNAPSHOT_TREE_LEAF_AND_TESTS.md, Step 3.4) - proves PHASE1 through
+// PHASE3 compose correctly with the PRE-EXISTING pre/post-GameView
+// compute-dispatch split (frame-debugger-5/frame-debugger-6 campaigns) with
+// zero regressions: one Pre-GameView compute leaf, "GameView" itself with
+// two children (entity, then sky), and one Post-GameView compute leaf - all
+// five leaves' eventIndex values strictly monotonic increasing in that
+// exact left-to-right, top-to-bottom order.
+TEST(FrameDebuggerSnapshotBuilderTest, SkyBackgroundLeafSurvivesAlongsideComputeDispatchSplit)
+{
+    rg::RenderGraphSnapshot graphSnapshot;
+    graphSnapshot.passesInExecutionOrder.push_back(MakeComputePass("PreA"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakeComputePass("PostA"));
+
+    FrameDebuggerCaptureContext capture;
+    capture.RecordEntityDraw(2, 0, "terrain", "Mesh.vert/Mesh.frag (PositionNormal)", "", 1045458);
+    capture.RecordSkyBackgroundDraw("AtmosphereSkyBackground.vert/AtmosphereSkyBackground.frag");
+
+    const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
+
+    ASSERT_EQ(snapshot.rootNodes.size(), 1u);
+    const FrameDebuggerEventNode& root = snapshot.rootNodes[0];
+    ASSERT_EQ(root.children.size(), 3u);
+
+    const FrameDebuggerEventNode& preGroup = root.children[0];
+    const FrameDebuggerEventNode& gameViewLeaf = root.children[1];
+    const FrameDebuggerEventNode& postGroup = root.children[2];
+
+    EXPECT_EQ(preGroup.name, "Compute Dispatches (Pre-GameView)");
+    ASSERT_EQ(preGroup.children.size(), 1u);
+
+    EXPECT_EQ(gameViewLeaf.name, "GameView");
+    ASSERT_EQ(gameViewLeaf.children.size(), 2u); // entity, then sky.
+    const FrameDebuggerEventNode& entityLeaf = gameViewLeaf.children[0];
+    const FrameDebuggerEventNode& skyLeaf = gameViewLeaf.children[1];
+    EXPECT_EQ(entityLeaf.name, "terrain (Entity 2)");
+    EXPECT_EQ(skyLeaf.name, "AtmosphereSkyBackground.vert/AtmosphereSkyBackground.frag");
+    ASSERT_TRUE(skyLeaf.details.has_value());
+    EXPECT_EQ(skyLeaf.details->passName, "GameView (Sky Draw)");
+
+    EXPECT_EQ(postGroup.name, "Compute Dispatches (Post-GameView)");
+    ASSERT_EQ(postGroup.children.size(), 1u);
+
+    // eventIndex strictly monotonic across all 5 leaves, left-to-right,
+    // top-to-bottom.
+    EXPECT_EQ(preGroup.children[0].eventIndex, 0);
+    EXPECT_EQ(gameViewLeaf.eventIndex, 1);
+    EXPECT_EQ(entityLeaf.eventIndex, 2);
+    EXPECT_EQ(skyLeaf.eventIndex, 3);
+    EXPECT_EQ(postGroup.children[0].eventIndex, 4);
+    EXPECT_EQ(snapshot.totalEventCount, 5);
+}
+
 } // namespace
 } // namespace gte

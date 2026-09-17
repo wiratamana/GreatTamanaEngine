@@ -447,67 +447,133 @@ FrameDebuggerEventNode BuildGameViewLeaf(
 // so this leaf's own `stepPreviewKind`/`stepPreviewIndex` let
 // ChooseFrameDebuggerPreviewSource() show the real, accumulated "Game View
 // as of THIS object" image (fixes Bug 2).
+//
+// frame-debugger-8 campaign, PHASE3
+// (PHASE3_SNAPSHOT_TREE_LEAF_AND_TESTS.md) - this function now also builds a
+// SECOND, differently-shaped leaf when `record.isSkyBackgroundDraw == true`
+// (the one, real Sky Background full-screen-triangle draw - see
+// FrameDebuggerCapture.h's own FrameDebuggerDrawRecord doc comment) - see
+// this function's own body for the two-branch split. The per-entity `else`
+// branch this comment block already describes above is completely
+// unchanged.
 FrameDebuggerEventNode BuildGameViewDrawRecordLeaf(
     const FrameDebuggerDrawRecord& record, const Mat4& sharedViewProjection, int eventIndex, int stepPreviewIndex)
 {
     FrameDebuggerEventNode leaf;
-    leaf.name = record.displayName + " (Entity " + std::to_string(record.entityIndex) + ")";
     leaf.isDrawCall = true;
     leaf.eventIndex = eventIndex;
 
     FrameDebuggerEventDetails details;
     details.eventIndex = eventIndex;
-    details.eventLabel = "Draw Mesh";
     details.stepPreviewKind = FrameDebuggerStepPreviewKind::PerObjectStep;
     details.stepPreviewIndex = stepPreviewIndex;
-    // IMPORTANT - deliberately NOT the literal string "GameView" (a real
-    // self-contradiction this campaign's own double-check pass caught before
-    // implementation): before task_manager/frame-debugger-7's own PHASE4,
-    // FrameDebuggerPanel::EnsurePreviewDescriptor() decided
-    // `isViewingGameViewLeaf` purely via `details->passName == "GameView"`,
-    // an EXACT string compare -
-    // if a per-entity leaf's own passName ALSO literally read "GameView",
-    // clicking it would incorrectly take the SAME branch the real "GameView"
-    // leaf takes (forcing the raw pre-atmosphere-composite `preview` image,
-    // always) - this string-distinctness requirement is now moot for THAT
-    // specific mechanism (stepPreviewKind decides it structurally instead),
-    // but the distinct "GameView (Entity Draw)" passName is kept anyway (it
-    // is still a useful, honest display value for the Inspector's "Pass"
-    // row) -
-    // see Step 2's own second gotcha and Step 4's new regression test for the
-    // full reasoning. "GameView (Entity Draw)" keeps the Pass row human-
-    // readably tied to the real pass this draw happened inside, while
-    // staying a string DISTINCT from the literal "GameView" pass leaf's own.
-    details.passName = "GameView (Entity Draw)";
-    details.shaderName = record.pipelineDebugName;
 
-    if (!record.materialTextureDebugName.empty()) {
-        FrameDebuggerTextureProperty texture;
-        texture.name = "Material Texture";
-        texture.valueLabel = record.materialTextureDebugName;
-        details.textures.push_back(std::move(texture));
+    // frame-debugger-8 campaign, PHASE3 - the Sky Background draw is not a
+    // real ECS entity (record.entityIndex/entityGeneration are meaningless
+    // for it - see FrameDebuggerCapture.h's own FrameDebuggerDrawRecord doc
+    // comment) - it needs its own, differently-shaped leaf. This branch is
+    // the ONLY change to this function versus its pre-campaign shape; the
+    // `else` arm below is BYTE-FOR-BYTE the same code this function already
+    // had for every real entity, unchanged.
+    if (record.isSkyBackgroundDraw) {
+        // Locked Design Decision 2 (PHASE0_MASTER_STRATEGY.md) - the tree
+        // row's own name AND its Inspector "Shader" row are BOTH the real,
+        // hand-verified shader file pair
+        // (AtmosphereSkyBackgroundRenderer::ShaderDebugName(), threaded
+        // through here via record.pipelineDebugName) - never an invented
+        // cosmetic label like "Sky Background".
+        leaf.name = record.pipelineDebugName;
+        details.eventLabel = "Draw Fullscreen Triangle";
+        // "GameView (Sky Draw)" - a real, structural fact (which real pass
+        // this draw happened inside), DISTINCT from both the literal
+        // "GameView" pass leaf's own passName AND from
+        // "GameView (Entity Draw)" (the per-entity leaves' own passName) -
+        // mirrors that exact, pre-existing distinctness precedent (see this
+        // function's own `else` arm below, and its historical doc comment
+        // above this function for the original "why must this differ from
+        // the literal 'GameView' string" reasoning, which applies here too).
+        details.passName = "GameView (Sky Draw)";
+        details.shaderName = record.pipelineDebugName;
+
+        // vectors - just the real triangle count (always 1 - a single
+        // full-screen triangle, see FrameDebuggerCapture.cpp's own
+        // RecordSkyBackgroundDraw()). Deliberately NO "Entity (Index,
+        // Generation)" row here (unlike the `else` arm below) - there is no
+        // real ECS entity behind this record at all, and fabricating one
+        // would violate this whole tree's own "never invent a fact" rule.
+        {
+            FrameDebuggerVectorProperty triangleCount;
+            triangleCount.name = "Triangle Count";
+            triangleCount.x = static_cast<float>(record.triangleCount);
+            details.vectors.push_back(triangleCount);
+        }
+
+        // blend/Z/stencil - THIS pass's own real, distinct pipeline state
+        // (Locked Design Decision 4, PHASE0_MASTER_STRATEGY.md) - never the
+        // generic per-mesh DescribeStandardPipelineState() every entity
+        // leaf reuses (see the `else` arm below).
+        {
+            const FrameDebuggerStandardPipelineState pipelineState = DescribeSkyBackgroundPipelineState();
+            details.blendMode = pipelineState.blendMode;
+            details.zClip = pipelineState.zClip;
+            details.zTest = pipelineState.zTest;
+            details.zWrite = pipelineState.zWrite;
+            details.cull = pipelineState.cull;
+            details.stencilRef = pipelineState.stencilRef;
+            details.stencilComp = pipelineState.stencilComp;
+            details.stencilPass = pipelineState.stencilPass;
+            details.stencilFail = pipelineState.stencilFail;
+            details.stencilZFail = pipelineState.stencilZFail;
+        }
+    } else {
+        // UNCHANGED from before this campaign - every real per-entity leaf
+        // keeps behaving exactly as it always has.
+        leaf.name = record.displayName + " (Entity " + std::to_string(record.entityIndex) + ")";
+        details.eventLabel = "Draw Mesh";
+        details.passName = "GameView (Entity Draw)";
+        details.shaderName = record.pipelineDebugName;
+
+        if (!record.materialTextureDebugName.empty()) {
+            FrameDebuggerTextureProperty texture;
+            texture.name = "Material Texture";
+            texture.valueLabel = record.materialTextureDebugName;
+            details.textures.push_back(std::move(texture));
+        }
+
+        {
+            FrameDebuggerVectorProperty triangleCount;
+            triangleCount.name = "Triangle Count";
+            triangleCount.x = static_cast<float>(record.triangleCount);
+            details.vectors.push_back(triangleCount);
+
+            FrameDebuggerVectorProperty entityIdentity;
+            entityIdentity.name = "Entity (Index, Generation)";
+            entityIdentity.x = static_cast<float>(record.entityIndex);
+            entityIdentity.y = static_cast<float>(record.entityGeneration);
+            details.vectors.push_back(entityIdentity);
+        }
+
+        {
+            const FrameDebuggerStandardPipelineState pipelineState = DescribeStandardPipelineState();
+            details.blendMode = pipelineState.blendMode;
+            details.zClip = pipelineState.zClip;
+            details.zTest = pipelineState.zTest;
+            details.zWrite = pipelineState.zWrite;
+            details.cull = pipelineState.cull;
+            details.stencilRef = pipelineState.stencilRef;
+            details.stencilComp = pipelineState.stencilComp;
+            details.stencilPass = pipelineState.stencilPass;
+            details.stencilFail = pipelineState.stencilFail;
+            details.stencilZFail = pipelineState.stencilZFail;
+        }
     }
 
-    // vectors - this ONE draw's own real triangle count (never the whole
-    // pass's aggregate - that stays on the "GameView" leaf itself, unchanged)
-    // plus its own entity identity, useful for any HTTP-side consumer that
-    // wants a stable, non-string key.
-    {
-        FrameDebuggerVectorProperty triangleCount;
-        triangleCount.name = "Triangle Count";
-        triangleCount.x = static_cast<float>(record.triangleCount);
-        details.vectors.push_back(triangleCount);
-
-        FrameDebuggerVectorProperty entityIdentity;
-        entityIdentity.name = "Entity (Index, Generation)";
-        entityIdentity.x = static_cast<float>(record.entityIndex);
-        entityIdentity.y = static_cast<float>(record.entityGeneration);
-        details.vectors.push_back(entityIdentity);
-    }
-
-    // matrices - the SAME shared view-projection every draw in this one real
-    // Game-View pass this frame used (mirrors BuildGameViewLeaf()'s own
-    // reasoning for why "last" is exactly as good as "the" here).
+    // matrices - the SAME shared view-projection every draw in this one
+    // real Game-View pass this frame used, for BOTH branches above (the
+    // sky's own fragment shader really does invert this exact matrix - see
+    // AtmosphereSkyBackgroundRenderer::Draw()'s own `viewProjection`
+    // parameter) - UNCHANGED code, simply now shared by both branches
+    // instead of only ever running for the entity case.
     {
         FrameDebuggerMatrixProperty viewProjection;
         viewProjection.name = "ViewProjection";
@@ -517,24 +583,6 @@ FrameDebuggerEventNode BuildGameViewDrawRecordLeaf(
             }
         }
         details.matrices.push_back(viewProjection);
-    }
-
-    // blend/Z/stencil - this engine's real, single, constant Pipeline
-    // configuration, exactly like BuildGameViewLeaf()'s own identical rows
-    // (there is nothing per-mesh to report here yet - see PHASE0's Locked
-    // Design Decision #4).
-    {
-        const FrameDebuggerStandardPipelineState pipelineState = DescribeStandardPipelineState();
-        details.blendMode = pipelineState.blendMode;
-        details.zClip = pipelineState.zClip;
-        details.zTest = pipelineState.zTest;
-        details.zWrite = pipelineState.zWrite;
-        details.cull = pipelineState.cull;
-        details.stencilRef = pipelineState.stencilRef;
-        details.stencilComp = pipelineState.stencilComp;
-        details.stencilPass = pipelineState.stencilPass;
-        details.stencilFail = pipelineState.stencilFail;
-        details.stencilZFail = pipelineState.stencilZFail;
     }
 
     leaf.details = std::move(details);

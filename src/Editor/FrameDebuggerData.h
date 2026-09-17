@@ -356,6 +356,17 @@ std::string FormatMatrixProperty(const FrameDebuggerMatrixProperty& matrix);
 // that does not yet have real live extent/format data on hand (e.g. every
 // Tier-1 test in tests/Editor/FrameDebuggerSnapshotBuilderTests.cpp) can
 // simply omit it.
+//
+// frame-debugger-8 campaign
+// (PHASE3_SNAPSHOT_TREE_LEAF_AND_TESTS.md) - capture.DrawRecords() now
+// carries exactly ONE additional record per captured frame whenever a Sky
+// Background draw actually ran this frame (FrameDebuggerCaptureContext::
+// RecordSkyBackgroundDraw(), always the LAST record, appended strictly
+// after every real per-entity record) - this loop needed NO changes at all
+// to pick it up correctly; only BuildGameViewDrawRecordLeaf() itself
+// (FrameDebuggerData.cpp) gained a new branch for it. See
+// task_manager/frame-debugger-8/PHASE0_MASTER_STRATEGY.md for the full
+// story.
 FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(
     const rg::RenderGraphSnapshot& graphSnapshot,
     const FrameDebuggerCaptureContext& capture,
