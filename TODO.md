@@ -422,12 +422,45 @@ it:
   `docs/conventions/frame-debugger.md`'s "Known limitation, now fixed
   (`frame-debugger-5` campaign)" note for the full root-cause writeup.
 
+A third follow-up campaign, `frame-debugger-6`
+(`task_manager/frame-debugger-6/PHASE0_MASTER_STRATEGY.md`, five phases,
+`CAMPAIGN_COMPLETION_REPORT.md`), started from a vague user report ("load
+scene existing scene from project, the terrain seems not get registered on
+frame debugger") and found/fixed TWO real, independent things:
+
+- ~~This engine runs a SEPARATE per-view copy of several Atmosphere compute
+  passes for the Editor's own Scene View, but both copies were registered
+  under the exact same literal pass name, producing duplicate,
+  indistinguishable leaves in the Game-View-scoped tree (and leaking a
+  genuinely Scene-View-only debug tool, `"ComputeBlurValidation"`, into it
+  too)~~ - DONE, fixed. A new, structurally-tracked `gte::rg::ViewScope` enum
+  (`Shared`/`GameView`/`SceneView`) is now stamped once, at the same
+  `RenderGraphBuilder::AddPass()`/`AddComputePass()` choke point
+  `PassRecord::isComputePass` already uses (PHASE1), and
+  `FrameDebuggerData.cpp` now excludes any surviving compute pass whose
+  `viewScope` is `SceneView` from both Pre-/Post-GameView discovery loops
+  (PHASE2) - never a pass-name/resource-suffix string comparison.
+- The user's own real underlying ask, "frame debugger dont have exact step
+  where terrain got drawn" - DONE. See the "Per-individual-draw-call event
+  granularity" entry below (now partially done) for the new per-entity
+  `"GameView"` child-leaf feature this added (PHASE3/PHASE4).
+
+See `AGENTS.md`'s "Frame Debugger" section and
+`docs/conventions/frame-debugger.md`'s "What's new (`frame-debugger-6`
+campaign)" section for the full root-cause writeup.
+
 ### Still genuinely deferred (permanent design choices or real future work)
 
-- **Per-individual-draw-call event granularity.** A deliberate, PERMANENT
-  divergence from Unity's own reference screenshot (pass-level granularity
-  only) - not a temporary scaffolding gap; a future campaign could relax this,
-  but it is not a bug today.
+- ~~Per-individual-draw-call event granularity~~ - PARTIALLY DONE
+  (`frame-debugger-6` campaign, PHASE3/PHASE4): `"GameView"` now gets one
+  real, individually selectable per-entity CHILD leaf per real draw call it
+  issued that frame (e.g. `"terrain (Entity 2)"`) - an explicit,
+  user-approved BREAKING change to the old "PERMANENT, pass-level only" rule,
+  but scoped strictly to `"GameView"`'s own children; every OTHER pass in the
+  tree (every compute dispatch, `"GameView"` itself as a pass-level row)
+  remains exactly one leaf per pass, unchanged - see `AGENTS.md`'s "Frame
+  Debugger" section and `docs/conventions/frame-debugger.md`'s "What's new
+  (`frame-debugger-6` campaign)" section for the full detail.
 - **Scene View or Present-pass capture.** The Frame Debugger's own captured
   event tree is permanently filtered to the Game View's own passes only - a
   clean, well-isolated single-line filter change for some future campaign to
