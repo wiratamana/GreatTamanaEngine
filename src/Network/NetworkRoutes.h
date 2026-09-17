@@ -606,7 +606,7 @@ std::string BuildListTabsResponseJson();
 
 // --- task_manager/frame-debugger-3 campaign, PHASE7
 // (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md) -
-// GET /frame_debugger/open, /enable, /capture, /select_event, /step_history,
+// GET /frame_debugger/open, /enable, /capture, /select_event,
 // /set_channel, /set_levels, /state. Every function below stays PURE - no
 // httplib/socket/thread/Editor/ImGui/FrameDebuggerCommandBridge dependency
 // of any kind, exactly like every other function in this file (see this
@@ -642,17 +642,6 @@ struct ParsedFrameDebuggerSelectEventQuery {
     int index = -1;
 };
 ParsedFrameDebuggerSelectEventQuery ParseFrameDebuggerSelectEventQuery(const std::string& indexParam);
-
-// Parsed, validated GET /frame_debugger/step_history query. "direction"
-// must be present and EXACTLY "prev" (delta = -1) or "next" (delta = +1) -
-// otherwise "missing or invalid required query parameter: direction - must
-// be \"prev\" or \"next\"".
-struct ParsedFrameDebuggerStepHistoryQuery {
-    bool valid = false;
-    std::string errorMessage;
-    int delta = 0;
-};
-ParsedFrameDebuggerStepHistoryQuery ParseFrameDebuggerStepHistoryQuery(const std::string& directionParam);
 
 // Parsed, validated GET /frame_debugger/set_channel query. "value" must be
 // present and EXACTLY one of "all"/"r"/"g"/"b"/"a" (case-sensitive) -
@@ -696,8 +685,10 @@ ParsedFrameDebuggerSetLevelsQuery ParseFrameDebuggerSetLevelsQuery(
 struct FrameDebuggerStateResponseView {
     bool enabled = false;
     bool windowOpen = false;
-    int historyCount = 0;
-    int historyCursor = 0;
+    // task_manager/frame-debugger-7 campaign, PHASE1 - REPLACES
+    // `historyCount`/`historyCursor` - there is only ever ONE captured
+    // frame now.
+    bool hasCapturedFrame = false;
     int totalEventCount = 0;
     int selectedEventIndex = -1;
     std::string channel = "all";
@@ -707,13 +698,13 @@ struct FrameDebuggerStateResponseView {
 
 // Builds GET /frame_debugger/state's entire response body (a flat object,
 // no "success" wrapper - this is a pure status read, never an action):
-// {"enabled":bool,"windowOpen":bool,"historyCount":int,"historyCursor":int,
+// {"enabled":bool,"windowOpen":bool,"hasCapturedFrame":bool,
 //  "totalEventCount":int,"selectedEventIndex":int,"channel":"all",
 //  "levelsBlack":0.0,"levelsWhite":1.0}
 std::string BuildFrameDebuggerStateResponseJson(const FrameDebuggerStateResponseView& state);
 
 // Builds the response body for every OTHER /frame_debugger/* route
-// (open/enable/capture/select_event/step_history/set_channel/set_levels):
+// (open/enable/capture/select_event/set_channel/set_levels):
 //   - success == true  -> {"success":true,"state":{...same shape as
 //     BuildFrameDebuggerStateResponseJson() above...}}
 //   - success == false -> {"success":false,"error":"<errorMessage>",

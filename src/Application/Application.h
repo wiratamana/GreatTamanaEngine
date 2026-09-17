@@ -149,7 +149,7 @@ private:
     // (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md) - the
     // FOURTH sanctioned cross-thread bridge a Network route handler is
     // allowed to touch, this one for FRAME-DEBUGGER commands (open/enable/
-    // capture/select_event/step_history/set_channel/set_levels/state - see
+    // capture/select_event/set_channel/set_levels/state - see
     // AGENTS.md, "Networking", and FrameDebuggerCommandBridge.h's own
     // header comment). Declared right after m_uiCommandBridge, for the
     // exact same reason: BEFORE m_networkServer (constructed first,

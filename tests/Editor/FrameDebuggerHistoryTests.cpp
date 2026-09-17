@@ -1,16 +1,20 @@
-// Unit tests for the Frame Debugger's real ring-buffer history
-// (src/Editor/FrameDebuggerHistory.h) - covers only the PURE cursor/count/
-// eviction arithmetic (AdvanceFrameDebuggerHistoryWriteState()/
-// ClampFrameDebuggerHistoryCursor(), plus a fresh, never-captured-into
-// FrameDebuggerHistory object's own default state) - no live Renderer/
-// RenderTexture/VkDevice is exercised here, since FrameDebuggerHistory::
+// Unit tests for the Frame Debugger's single-capture lifecycle
+// (src/Editor/FrameDebuggerHistory.h) - covers only the PURE
+// HasCapture()/Clear() state machine of a fresh, never-captured-into
+// FrameDebuggerCurrentCapture object - no live Renderer/RenderTexture/
+// VkDevice is exercised here, since FrameDebuggerCurrentCapture::
 // CaptureFrame() itself is inherently Tier 2 (see AGENTS.md, "Testability &
-// Regression Safety" and this phase's own Step 3.6). Only built when
-// GTE_ENABLE_EDITOR is ON, since FrameDebuggerHistory.h/.cpp are only
-// compiled into gte_core then.
+// Regression Safety") - it needs a live Renderer/RenderGraph to call into,
+// so it stays untested here exactly like the old 8-slot ring buffer's own
+// CaptureFrame() body always was. Only built when GTE_ENABLE_EDITOR is ON,
+// since FrameDebuggerHistory.h/.cpp are only compiled into gte_core then.
 //
-// task_manager/frame-debugger-3 campaign, PHASE3
-// (PHASE3_FRAME_HISTORY_RING_BUFFER_AND_CAPTURE_TRIGGER.md).
+// task_manager/frame-debugger-7 campaign, PHASE1
+// (PHASE1_REMOVE_HISTORY_AND_SINGLE_CAPTURE_LIFECYCLE.md) - REPLACES the old
+// 8-slot ring-buffer tests (AdvanceFrameDebuggerHistoryWriteState()/
+// ClampFrameDebuggerHistoryCursor() - both REMOVED, along with the
+// ring-buffer arithmetic they used to cover) with this smaller, single-slot
+// coverage.
 
 #include "Editor/FrameDebuggerHistory.h"
 
@@ -19,71 +23,19 @@
 namespace gte {
 namespace {
 
-TEST(FrameDebuggerHistoryTest, FreshHistoryIsEmpty)
+TEST(FrameDebuggerCurrentCaptureTest, FreshCaptureHasNoEntry)
 {
-    FrameDebuggerHistory history;
-    EXPECT_EQ(history.Count(), 0);
-    EXPECT_EQ(history.CursorIndex(), 0);
-    EXPECT_EQ(history.CurrentEntry(), nullptr);
+    FrameDebuggerCurrentCapture capture;
+    EXPECT_FALSE(capture.HasCapture());
+    EXPECT_EQ(capture.CurrentEntry(), nullptr);
 }
 
-TEST(FrameDebuggerHistoryTest, StepCursorOnEmptyHistoryIsNoOp)
+TEST(FrameDebuggerCurrentCaptureTest, ClearOnAFreshCaptureIsASafeNoOp)
 {
-    FrameDebuggerHistory history;
-    history.StepCursor(1);
-    EXPECT_EQ(history.CurrentEntry(), nullptr);
-    history.StepCursor(-1);
-    EXPECT_EQ(history.CurrentEntry(), nullptr);
-}
-
-TEST(FrameDebuggerHistoryWriteStateTest, GrowsByOnePerAdvanceUntilCapacity)
-{
-    constexpr int kCapacity = FrameDebuggerHistory::kCapacity;
-    FrameDebuggerHistoryWriteState state;
-
-    for (int i = 0; i < kCapacity; ++i) {
-        state = AdvanceFrameDebuggerHistoryWriteState(state, kCapacity);
-        EXPECT_EQ(state.count, i + 1);
-        EXPECT_EQ(state.nextWriteIndex, (i + 1) % kCapacity);
-    }
-    EXPECT_EQ(state.count, kCapacity);
-}
-
-TEST(FrameDebuggerHistoryWriteStateTest, PinsCountAtCapacityAndKeepsWrappingAfterward)
-{
-    constexpr int kCapacity = FrameDebuggerHistory::kCapacity;
-    FrameDebuggerHistoryWriteState state;
-
-    // Fill it up first.
-    for (int i = 0; i < kCapacity; ++i) {
-        state = AdvanceFrameDebuggerHistoryWriteState(state, kCapacity);
-    }
-    ASSERT_EQ(state.count, kCapacity);
-    ASSERT_EQ(state.nextWriteIndex, 0);
-
-    // Capturing MORE than kCapacity evicts the oldest, keeps Count() ==
-    // kCapacity, and nextWriteIndex keeps circling through every slot.
-    for (int i = 0; i < kCapacity * 2; ++i) {
-        state = AdvanceFrameDebuggerHistoryWriteState(state, kCapacity);
-        EXPECT_EQ(state.count, kCapacity);
-        EXPECT_EQ(state.nextWriteIndex, (i + 1) % kCapacity);
-    }
-}
-
-TEST(ClampFrameDebuggerHistoryCursorTest, ClampsAtBothEndsWithoutWrapping)
-{
-    EXPECT_EQ(ClampFrameDebuggerHistoryCursor(2, 5), 2);
-    EXPECT_EQ(ClampFrameDebuggerHistoryCursor(-3, 5), 0);
-    EXPECT_EQ(ClampFrameDebuggerHistoryCursor(10, 5), 4);
-    EXPECT_EQ(ClampFrameDebuggerHistoryCursor(0, 5), 0);
-    EXPECT_EQ(ClampFrameDebuggerHistoryCursor(4, 5), 4);
-}
-
-TEST(ClampFrameDebuggerHistoryCursorTest, AlwaysZeroForAnEmptyOrInvalidCount)
-{
-    EXPECT_EQ(ClampFrameDebuggerHistoryCursor(0, 0), 0);
-    EXPECT_EQ(ClampFrameDebuggerHistoryCursor(5, 0), 0);
-    EXPECT_EQ(ClampFrameDebuggerHistoryCursor(-5, -1), 0);
+    FrameDebuggerCurrentCapture capture;
+    capture.Clear();
+    EXPECT_FALSE(capture.HasCapture());
+    EXPECT_EQ(capture.CurrentEntry(), nullptr);
 }
 
 } // namespace

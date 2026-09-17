@@ -834,12 +834,10 @@ using gte::Network::ParseFrameDebuggerEnableQuery;
 using gte::Network::ParseFrameDebuggerSelectEventQuery;
 using gte::Network::ParseFrameDebuggerSetChannelQuery;
 using gte::Network::ParseFrameDebuggerSetLevelsQuery;
-using gte::Network::ParseFrameDebuggerStepHistoryQuery;
 using gte::Network::ParsedFrameDebuggerEnableQuery;
 using gte::Network::ParsedFrameDebuggerSelectEventQuery;
 using gte::Network::ParsedFrameDebuggerSetChannelQuery;
 using gte::Network::ParsedFrameDebuggerSetLevelsQuery;
-using gte::Network::ParsedFrameDebuggerStepHistoryQuery;
 
 TEST(ParseFrameDebuggerEnableQueryTests, AcceptsTrue)
 {
@@ -890,24 +888,6 @@ TEST(ParseFrameDebuggerSelectEventQueryTests, RejectsMissingOrNonIntegerIndex)
 
     const ParsedFrameDebuggerSelectEventQuery trailingGarbage = ParseFrameDebuggerSelectEventQuery("3abc");
     EXPECT_FALSE(trailingGarbage.valid);
-}
-
-TEST(ParseFrameDebuggerStepHistoryQueryTests, AcceptsPrevAndNext)
-{
-    const ParsedFrameDebuggerStepHistoryQuery prev = ParseFrameDebuggerStepHistoryQuery("prev");
-    ASSERT_TRUE(prev.valid) << prev.errorMessage;
-    EXPECT_EQ(prev.delta, -1);
-
-    const ParsedFrameDebuggerStepHistoryQuery next = ParseFrameDebuggerStepHistoryQuery("next");
-    ASSERT_TRUE(next.valid) << next.errorMessage;
-    EXPECT_EQ(next.delta, 1);
-}
-
-TEST(ParseFrameDebuggerStepHistoryQueryTests, RejectsUnknownDirection)
-{
-    const ParsedFrameDebuggerStepHistoryQuery result = ParseFrameDebuggerStepHistoryQuery("sideways");
-    EXPECT_FALSE(result.valid);
-    EXPECT_EQ(result.errorMessage, "missing or invalid required query parameter: direction - must be \"prev\" or \"next\"");
 }
 
 struct ParseFrameDebuggerSetChannelQueryValidCase {
@@ -971,8 +951,7 @@ TEST(BuildFrameDebuggerStateResponseJsonTests, ProducesExactExpectedShape)
     FrameDebuggerStateResponseView state;
     state.enabled = true;
     state.windowOpen = true;
-    state.historyCount = 3;
-    state.historyCursor = 2;
+    state.hasCapturedFrame = true;
     state.totalEventCount = 5;
     state.selectedEventIndex = 4;
     state.channel = "r";
@@ -983,8 +962,7 @@ TEST(BuildFrameDebuggerStateResponseJsonTests, ProducesExactExpectedShape)
     const nlohmann::json parsed = nlohmann::json::parse(body);
     EXPECT_EQ(parsed["enabled"], true);
     EXPECT_EQ(parsed["windowOpen"], true);
-    EXPECT_EQ(parsed["historyCount"], 3);
-    EXPECT_EQ(parsed["historyCursor"], 2);
+    EXPECT_EQ(parsed["hasCapturedFrame"], true);
     EXPECT_EQ(parsed["totalEventCount"], 5);
     EXPECT_EQ(parsed["selectedEventIndex"], 4);
     EXPECT_EQ(parsed["channel"], "r");

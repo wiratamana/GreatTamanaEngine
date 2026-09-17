@@ -649,21 +649,6 @@ ParsedFrameDebuggerSelectEventQuery ParseFrameDebuggerSelectEventQuery(const std
     return result;
 }
 
-ParsedFrameDebuggerStepHistoryQuery ParseFrameDebuggerStepHistoryQuery(const std::string& directionParam)
-{
-    ParsedFrameDebuggerStepHistoryQuery result;
-    if (directionParam == "prev") {
-        result.delta = -1;
-    } else if (directionParam == "next") {
-        result.delta = 1;
-    } else {
-        result.errorMessage = "missing or invalid required query parameter: direction - must be \"prev\" or \"next\"";
-        return result;
-    }
-    result.valid = true;
-    return result;
-}
-
 ParsedFrameDebuggerSetChannelQuery ParseFrameDebuggerSetChannelQuery(const std::string& valueParam)
 {
     ParsedFrameDebuggerSetChannelQuery result;
@@ -703,8 +688,7 @@ nlohmann::json FrameDebuggerStateToJson(const FrameDebuggerStateResponseView& st
     nlohmann::json body;
     body["enabled"] = state.enabled;
     body["windowOpen"] = state.windowOpen;
-    body["historyCount"] = state.historyCount;
-    body["historyCursor"] = state.historyCursor;
+    body["hasCapturedFrame"] = state.hasCapturedFrame;
     body["totalEventCount"] = state.totalEventCount;
     body["selectedEventIndex"] = state.selectedEventIndex;
     body["channel"] = state.channel;

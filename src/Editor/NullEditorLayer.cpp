@@ -63,7 +63,6 @@ public:
     void FrameDebuggerSetEnabled(bool /*enabled*/) override { }
     bool FrameDebuggerCaptureNow() override { return false; }
     void FrameDebuggerSelectEvent(int /*index*/) override { }
-    void FrameDebuggerStepHistory(int /*delta*/) override { }
     bool FrameDebuggerSetChannel(const std::string& /*channel*/) override { return false; }
     void FrameDebuggerSetLevels(float /*black*/, float /*white*/) override { }
     FrameDebuggerStateSnapshotView FrameDebuggerGetState() const override { return FrameDebuggerStateSnapshotView{}; }

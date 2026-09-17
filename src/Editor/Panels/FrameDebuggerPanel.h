@@ -37,14 +37,21 @@ class RenderGraph;
 // instance to call an Open()-style method on).
 //
 // task_manager/frame-debugger-3 campaign, PHASE3
-// (PHASE3_FRAME_HISTORY_RING_BUFFER_AND_CAPTURE_TRIGGER.md) - this panel now
-// owns the real capture context (m_captureContext) and the real multi-frame
-// history ring buffer (m_history), and wires the actual capture TRIGGER
-// (Enable's false->true edge, a Step while Enabled, and the new explicit
-// "Capture" button below) - see TriggerCapture()'s own doc comment. PHASE3
-// deliberately does NOT yet switch the displayed event tree/inspector over
-// to m_history's real data (that is PHASE4's job) - Build() still reads
-// BuildPlaceholderFrameDebuggerSnapshot() for its own on-screen content.
+// (PHASE3_FRAME_HISTORY_RING_BUFFER_AND_CAPTURE_TRIGGER.md) - this panel
+// owns the real capture context (m_captureContext) and wires the actual
+// capture TRIGGER (Enable's false->true edge, a Step while Enabled, and the
+// explicit "Capture" button below) - see TriggerCapture()'s own doc comment.
+//
+// task_manager/frame-debugger-7 campaign, PHASE1
+// (PHASE1_REMOVE_HISTORY_AND_SINGLE_CAPTURE_LIFECYCLE.md) - the old 8-slot
+// `FrameDebuggerHistory` ring buffer (and its Prev/Next "Frame History"
+// toolbar) is GONE: `m_currentCapture` (below) is now a
+// `FrameDebuggerCurrentCapture`, holding exactly ONE captured frame's worth
+// of retained data at a time, matching Unity's own Frame Debugger (which
+// does not remember past frames either). It is explicitly cleared - see
+// ApplyEnabledEdge()/Build()'s own new "resume while Enabled" check - on the
+// Enable checkbox's true->false edge, or whenever playback RESUMES while
+// still Enabled.
 //
 // A small STATEFUL CLASS, not a stateless free function - mirrors
 // RenderGraphPanel/ProfilerPanel/BoneViewerWindow's own precedent
@@ -54,14 +61,12 @@ class RenderGraph;
 // NAME from ImGuiEditorLayer::BuildUI() - no IEditorPanel interface
 // introduced.
 // task_manager/frame-debugger-3 campaign, PHASE4
-// (PHASE4_PANEL_REAL_TREE_AND_FRAME_HISTORY_UI.md) - Build() now reads
-// PHASE3's m_history's currently-viewed entry instead of
+// (PHASE4_PANEL_REAL_TREE_AND_FRAME_HISTORY_UI.md) - Build() reads the
+// currently-captured frame's own data instead of
 // BuildPlaceholderFrameDebuggerSnapshot() (falling back to that same
-// placeholder only when m_history has never captured anything yet - still a
-// real, honest, reachable "enabled, but not yet captured" state), a new
-// Frame-History mini-toolbar (BuildFrameHistoryToolbarRow()) lets the user
-// scrub across up to kCapacity past captured frames, and the RenderTarget
-// preview box displays the currently-viewed entry's own real retained
+// placeholder only when nothing has been captured yet - still a real,
+// honest, reachable "enabled, but not yet captured" state), and the
+// RenderTarget preview box displays the current capture's own real retained
 // preview texture (m_previewDescriptor, an ImGui_ImplVulkan_AddTexture()-
 // wrapped VkDescriptorSet this class owns itself - see EnsurePreviewDescriptor()'s
 // own doc comment for why ownership lives HERE rather than in
@@ -90,7 +95,7 @@ public:
     // nullptr on a frame where no composited texture exists yet (mirrors
     // `gameView`'s own "stashed for the rest of THIS call only" contract, just
     // nullable) - see TriggerCapture()'s own doc comment for how this flows into
-    // FrameDebuggerHistory::CaptureFrame().
+    // FrameDebuggerCurrentCapture::CaptureFrame().
     //
     // frame-debugger-5 campaign, PHASE2
     // (PHASE2_GENERIC_COMPUTE_DISPATCH_EVENT_TREE_DISCOVERY.md) - this method
@@ -152,11 +157,8 @@ public:
     bool CaptureNowFromCommand();
 
     // Mirrors a tree-row click - clamps via ClampSelectedEventIndex()
-    // against the currently-viewed captured frame's own totalEventCount.
+    // against the currently-captured frame's own totalEventCount.
     void SelectEventFromCommand(int index);
-
-    // Mirrors a Frame-History Prev/Next button click.
-    void StepFrameHistoryFromCommand(int delta);
 
     // Mirrors a Channels row button click. Returns false (a safe no-op,
     // defense in depth only - see EditorLayer.h's own doc comment) if
@@ -173,7 +175,6 @@ public:
 
 private:
     void BuildToolbarRow(EditorContext& ctx);
-    void BuildFrameHistoryToolbarRow();
     void BuildFrameStepperRow(const FrameDebuggerSnapshot& snapshot);
     void BuildEventTreePane(const FrameDebuggerSnapshot& snapshot);
     void RenderEventNode(const FrameDebuggerEventNode& node);
@@ -186,24 +187,28 @@ private:
     // BuildToolbarRow()'s own original comment (now here) for why the
     // false->true edge auto-engages Pause and triggers the first capture,
     // and why turning Enable back OFF deliberately does NOT auto-resume.
+    //
+    // task_manager/frame-debugger-7 campaign, PHASE1 - the true->false edge
+    // (Enable unticked) now ALSO calls m_currentCapture.Clear() (see this
+    // method's own .cpp body) - the new "clear on Disable" half of this
+    // campaign's Locked Design Decision (PHASE0_MASTER_STRATEGY.md, Step 1).
+    // The checkbox's own value itself is never forced back by this - only
+    // the captured DATA disappears.
     void ApplyEnabledEdge(EditorContext& ctx, bool newEnabled);
 
-    // PHASE4 - (re)creates m_previewDescriptor whenever the currently-viewed
-    // history entry's own retained preview texture's VkImageView differs
-    // from whatever m_previewDescriptor currently wraps (a history-cursor
-    // move, OR a brand-new capture landing on the same cursor position -
-    // either way, FrameDebuggerHistory::CaptureFrame() always creates a
-    // FRESH RenderTexture with a genuinely new VkImageView - see that
-    // method's own doc comment) - mirrors ImGuiEditorLayer::BuildUI()'s own
-    // "only re-wrap when the underlying VkImageView actually changed"
-    // gameViewDescriptor/sceneViewDescriptor caching logic exactly (see
-    // PHASE0_MASTER_STRATEGY.md's own Step 2 finding), just against
-    // PHASE3's retained HISTORICAL copy instead of the live, currently-
-    // rendering Game View. Releases (and leaves null) m_previewDescriptor
-    // whenever there is currently nothing to preview at all (no history
-    // entry yet, or - defensively - an entry whose own preview is
-    // std::nullopt), so BuildInspectorPane() can fall back to the "No
-    // Texture" placeholder with a single, simple `m_previewDescriptor ==
+    // PHASE4 - (re)creates m_previewDescriptor whenever the currently-
+    // captured frame's own retained preview texture's VkImageView differs
+    // from whatever m_previewDescriptor currently wraps (a brand-new capture
+    // always creates a FRESH RenderTexture with a genuinely new VkImageView
+    // - see FrameDebuggerCurrentCapture::CaptureFrame()'s own doc comment) -
+    // mirrors ImGuiEditorLayer::BuildUI()'s own "only re-wrap when the
+    // underlying VkImageView actually changed" gameViewDescriptor/
+    // sceneViewDescriptor caching logic exactly (see
+    // PHASE0_MASTER_STRATEGY.md's own Step 2 finding). Releases (and leaves
+    // null) m_previewDescriptor whenever there is currently nothing to
+    // preview at all (no capture yet, or - defensively - a capture whose own
+    // preview is std::nullopt), so BuildInspectorPane() can fall back to the
+    // "No Texture" placeholder with a single, simple `m_previewDescriptor ==
     // VK_NULL_HANDLE` check.
     //
     // OWNERSHIP CHOICE (this phase's own documented Step 2 finding,
@@ -212,27 +217,25 @@ private:
     // Panels/GamePanel.cpp (that file only ever consumes an ALREADY-WRAPPED
     // VkDescriptorSet, EditorContext::gameViewDescriptor) - it lives in
     // ImGuiEditorLayer.cpp's own BuildUI(). Rather than plumb a THIRD
-    // descriptor field onto the shared EditorContext (and a getter back out
-    // of FrameDebuggerHistory for ImGuiEditorLayer to read every frame, just
-    // to decide whether/what to re-wrap), this new preview descriptor is
-    // instead owned directly by FrameDebuggerPanel itself, exactly like
-    // BoneViewerWindow already owns its own m_descriptor/m_renderTexture
-    // pair (see BoneViewerWindow.h's own class comment: "Owns its GPU
-    // buffers/RenderTexture/ImGui descriptor/pipeline for as long as
-    // they're needed") - FrameDebuggerPanel is already a stateful class that
-    // owns comparable per-frame state (m_captureContext, m_history), so this
-    // is the smallest, most self-contained change: no new EditorContext
-    // field, no new ImGuiEditorLayer method, and the ImGui/Vulkan wrapping
-    // detail stays entirely local to the one class that actually displays
-    // it.
+    // descriptor field onto the shared EditorContext, this new preview
+    // descriptor is instead owned directly by FrameDebuggerPanel itself,
+    // exactly like BoneViewerWindow already owns its own m_descriptor/
+    // m_renderTexture pair (see BoneViewerWindow.h's own class comment:
+    // "Owns its GPU buffers/RenderTexture/ImGui descriptor/pipeline for as
+    // long as they're needed") - FrameDebuggerPanel is already a stateful
+    // class that owns comparable per-frame state (m_captureContext,
+    // m_currentCapture), so this is the smallest, most self-contained
+    // change: no new EditorContext field, no new ImGuiEditorLayer method,
+    // and the ImGui/Vulkan wrapping detail stays entirely local to the one
+    // class that actually displays it.
     void EnsurePreviewDescriptor();
 
     // PHASE3's own Step 3.2 - performs ONE real capture: builds PHASE2's
     // real FrameDebuggerSnapshot from THIS frame's already-cached
     // renderer/renderGraph/gameView/gpuSkinningPassNames (see Build()
     // above), hands it (plus the live Game View texture) to
-    // m_history.CaptureFrame(), and resets m_selectedEventIndex to -1 (a
-    // freshly captured frame has nothing selected yet - matches
+    // m_currentCapture.CaptureFrame(), and resets m_selectedEventIndex to -1
+    // (a freshly captured frame has nothing selected yet - matches
     // frame-debugger-2's own "freshly opened window starts with nothing
     // selected" convention). Called from exactly three places, all inside
     // BuildToolbarRow(): the "Enable" checkbox's own false->true edge, the
@@ -269,14 +272,19 @@ private:
     // arms via PrepareCaptureContextForThisFrame() above.
     FrameDebuggerCaptureContext m_captureContext;
 
-    // PHASE3 - the real multi-frame ring buffer (see FrameDebuggerHistory.h).
-    FrameDebuggerHistory m_history;
+    // task_manager/frame-debugger-7 campaign, PHASE1
+    // (PHASE1_REMOVE_HISTORY_AND_SINGLE_CAPTURE_LIFECYCLE.md) - RENAMED from
+    // `m_history` (was `FrameDebuggerHistory`, an 8-slot ring buffer) - now
+    // `FrameDebuggerCurrentCapture`, holding exactly ONE captured frame's
+    // worth of retained data at a time (see FrameDebuggerHistory.h's own
+    // top-of-file comment).
+    FrameDebuggerCurrentCapture m_currentCapture;
 
     // PHASE6 (task_manager/frame-debugger-3/PHASE6_CHANNELS_AND_LEVELS_REAL_PREVIEW.md)
     // - the real, persisted Channels/Levels state (Locked Design Decision
     // #8, PHASE0_MASTER_STRATEGY.md). Defaults ("All", [0, 1]) are the
     // neutral/no-op case - EnsurePreviewDescriptor() below displays the RAW
-    // retained history texture directly whenever both are still at these
+    // retained capture texture directly whenever both are still at these
     // defaults, skipping the compute dispatch entirely (a valid, cheap
     // optimization - see that phase's own Step 3.2).
     FrameDebuggerPreviewChannel m_channel = FrameDebuggerPreviewChannel::All;
@@ -285,15 +293,15 @@ private:
 
     // PHASE6 - the dedicated, small, on-demand GPU compute dispatcher this
     // panel owns (see FrameDebuggerPreviewProcessing.h's own class comment)
-    // - NEVER touches the retained history entry's own texture in place;
-    // always writes into its own separate, persistent scratch texture.
+    // - NEVER touches the retained capture's own texture in place; always
+    // writes into its own separate, persistent scratch texture.
     FrameDebuggerPreviewRenderer m_previewProcessor;
 
     // PHASE6 - "is the currently-processed preview still up to date"
     // bookkeeping, so EnsurePreviewDescriptor() only actually re-dispatches
     // the compute shader when m_channel/m_levelsBlack/m_levelsWhite/the
-    // viewed history entry's own retained texture genuinely changed since
-    // the last dispatch - never every single ImGui frame (see PHASE6's own
+    // current capture's own retained texture genuinely changed since the
+    // last dispatch - never every single ImGui frame (see PHASE6's own
     // Step 2 "only recompute when dirty" discipline).
     VkImageView m_lastProcessedSourceView = VK_NULL_HANDLE;
     FrameDebuggerPreviewChannel m_lastProcessedChannel = FrameDebuggerPreviewChannel::All;
@@ -301,11 +309,11 @@ private:
     float m_lastProcessedLevelsWhite = 1.0f;
 
     // PHASE4 - this class's own ImGui-side descriptor for the currently-
-    // displayed preview image (PHASE6: either the currently-viewed history
-    // entry's RAW retained texture, or m_previewProcessor's own processed
-    // scratch texture - see EnsurePreviewDescriptor()'s own doc comment
-    // above for exactly which one, and when). VK_NULL_HANDLE whenever there
-    // is nothing to preview right now.
+    // displayed preview image (PHASE6: either the current capture's RAW
+    // retained texture, or m_previewProcessor's own processed scratch
+    // texture - see EnsurePreviewDescriptor()'s own doc comment above for
+    // exactly which one, and when). VK_NULL_HANDLE whenever there is
+    // nothing to preview right now.
     VkDescriptorSet m_previewDescriptor = VK_NULL_HANDLE;
 
     // Which VkImageView m_previewDescriptor currently wraps - compared
@@ -313,22 +321,21 @@ private:
     // view every call to decide whether it needs to re-wrap (mirrors
     // ImGuiEditorLayer's own m_lastKnownGameView/m_lastKnownSceneView
     // convention exactly). PHASE6: this is now DELIBERATELY DIFFERENT from
-    // "which raw history entry is being viewed" (see
-    // m_lastKnownRawPreviewView below) - a non-neutral Channels/Levels
-    // state means this wraps m_previewProcessor's own scratch VkImageView
-    // instead of the raw retained one.
+    // "which raw capture is being viewed" (see m_lastKnownRawPreviewView
+    // below) - a non-neutral Channels/Levels state means this wraps
+    // m_previewProcessor's own scratch VkImageView instead of the raw
+    // retained one.
     VkImageView m_lastKnownPreviewView = VK_NULL_HANDLE;
 
     // PHASE6 - a SEPARATE piece of bookkeeping from m_lastKnownPreviewView
-    // above, tracking ONLY the currently-viewed history entry's own RAW
-    // retained texture VkImageView (never the processed scratch one) -
-    // Build()'s own "did the viewed history entry itself change underneath
-    // us" detection (which resets m_selectedEventIndex to -1 on a
-    // Frame-History Prev/Next navigation) MUST compare against this, not
+    // above, tracking ONLY the current capture's own RAW retained texture
+    // VkImageView (never the processed scratch one) - Build()'s own "did
+    // the captured frame itself change underneath us" detection (which
+    // resets m_selectedEventIndex to -1) MUST compare against this, not
     // m_lastKnownPreviewView - reusing m_lastKnownPreviewView for that check
     // would incorrectly reset the selection on EVERY SINGLE frame whenever
     // a non-neutral Channels/Levels state is active (since it then wraps
-    // the processed view, which never equals the raw entry's own view by
+    // the processed view, which never equals the raw capture's own view by
     // construction). Refreshed unconditionally once per Build() call,
     // before EnsurePreviewDescriptor() runs.
     VkImageView m_lastKnownRawPreviewView = VK_NULL_HANDLE;
@@ -369,6 +376,20 @@ private:
     // NotifyStepConsumed() was called (read-and-cleared) - see that
     // method's own doc comment.
     bool m_stepCaptureRequested = false;
+
+    // task_manager/frame-debugger-7 campaign, PHASE1
+    // (PHASE1_REMOVE_HISTORY_AND_SINGLE_CAPTURE_LIFECYCLE.md) - tracks
+    // `ctx.playbackPaused` as of the END of the PREVIOUS Build() call, so
+    // THIS call can detect a paused->running transition (i.e. "Resume" was
+    // just clicked in PlaybackControls.cpp, which this class has no direct
+    // hook into - it only shares EditorContext) and, if the Frame Debugger
+    // is still Enabled, Clear() the current capture (the new "clear on
+    // Resume-while-Enabled" half of this campaign's Locked Design Decision,
+    // PHASE0_MASTER_STRATEGY.md's Step 1). Refreshed unconditionally at the
+    // very end of that same check, every single Build() call - see Build()'s
+    // own body for the exact check, which deliberately runs at the TOP of
+    // Build(), before anything else.
+    bool m_wasPlaybackPaused = false;
 
     // task_manager/frame-debugger-3 campaign, PHASE7
     // (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md, Step

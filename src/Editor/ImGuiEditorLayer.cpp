@@ -788,7 +788,6 @@ public:
     void FrameDebuggerSetEnabled(bool enabled) override { m_frameDebuggerPanel.SetEnabledFromCommand(m_ctx, enabled); }
     bool FrameDebuggerCaptureNow() override { return m_frameDebuggerPanel.CaptureNowFromCommand(); }
     void FrameDebuggerSelectEvent(int index) override { m_frameDebuggerPanel.SelectEventFromCommand(index); }
-    void FrameDebuggerStepHistory(int delta) override { m_frameDebuggerPanel.StepFrameHistoryFromCommand(delta); }
     bool FrameDebuggerSetChannel(const std::string& channel) override
     {
         return m_frameDebuggerPanel.SetChannelFromCommand(channel);

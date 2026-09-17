@@ -10,40 +10,9 @@
 // HdrComputePassCopySource struct below for the full root-cause writeup.
 #include "../Encoding/HdrColorVisualization.h"
 
-#include <algorithm>
 #include <cstdio>
 
 namespace gte {
-
-FrameDebuggerHistoryWriteState AdvanceFrameDebuggerHistoryWriteState(
-    FrameDebuggerHistoryWriteState state, int capacity) noexcept
-{
-    state.nextWriteIndex = (state.nextWriteIndex + 1) % capacity;
-    if (state.count < capacity) {
-        ++state.count;
-    }
-    return state;
-}
-
-int ClampFrameDebuggerHistoryCursor(int cursor, int count) noexcept
-{
-    if (count <= 0) {
-        return 0;
-    }
-    return std::clamp(cursor, 0, count - 1);
-}
-
-int FrameDebuggerHistory::StorageIndexForLogicalIndex(int logicalIndex) const noexcept
-{
-    // When the ring buffer hasn't wrapped yet (count < kCapacity),
-    // nextWriteIndex == count and logical index 0 (the oldest entry) is
-    // simply storage slot 0 - the `base` below correctly resolves to 0 in
-    // that case. Once full (count == kCapacity), nextWriteIndex is exactly
-    // the slot about to be overwritten NEXT - i.e. the CURRENT oldest entry
-    // - so it is the correct base for logical index 0 in that regime too.
-    const int base = (m_writeState.count == kCapacity) ? m_writeState.nextWriteIndex : 0;
-    return (base + logicalIndex) % kCapacity;
-}
 
 namespace {
 
@@ -96,58 +65,56 @@ struct HdrComputePassCopySource {
 
 } // namespace
 
-void FrameDebuggerHistory::CaptureFrame(Renderer& renderer, const rg::RenderGraph& renderGraph,
+void FrameDebuggerCurrentCapture::CaptureFrame(Renderer& renderer, const rg::RenderGraph& renderGraph,
     const FrameDebuggerSnapshot& snapshot, RenderTexture& gameViewSource, RenderTexture* compositedGameViewSource)
 {
-    const int writeIndex = m_writeState.nextWriteIndex;
-    FrameDebuggerHistoryEntry& entry = m_entries[static_cast<std::size_t>(writeIndex)];
+    // task_manager/frame-debugger-7 campaign, PHASE1
+    // (PHASE1_REMOVE_HISTORY_AND_SINGLE_CAPTURE_LIFECYCLE.md) - there is only
+    // ever one slot now: emplace() destroys whatever the previous capture
+    // held (if any - RAII, via FrameDebuggerHistoryEntry's own destructor)
+    // and default-constructs a brand-new one in place, which this function
+    // then populates exactly like the old ring buffer's "next slot" used to.
+    FrameDebuggerHistoryEntry& entry = m_current.emplace();
     entry.snapshot = snapshot;
 
     const VkExtent2D extent = gameViewSource.Extent();
 
     // Always freshly (re)created, never Resize()d in place - the simplest
-    // way to guarantee this slot's own retained texture matches
+    // way to guarantee this capture's own retained texture matches
     // gameViewSource's CURRENT size/format exactly on every single real
-    // capture (the live Game View can be resized between two captures that
-    // both happen to land on the same ring-buffer slot index), and it
-    // sidesteps needing to track this slot's own previous VkImageLayout
-    // across many past captures: a freshly (re)created RenderTexture's
-    // color image always starts life in VK_IMAGE_LAYOUT_UNDEFINED (see
-    // RenderTexture.cpp's own Create()), so the destination barrier below
-    // never needs to know or trust what state this slot was left in last
-    // time. "Lazy" in the sense this file's own header comment/PHASE3's own
-    // plan describes still holds: no RenderTexture is ever created for a
-    // slot index that has never actually been captured into.
-    char debugNameBuffer[48];
-    std::snprintf(debugNameBuffer, sizeof(debugNameBuffer), "FrameDebuggerHistorySlot%d", writeIndex);
-    entry.preview.emplace(renderer.CreateRenderTexture(static_cast<int>(extent.width),
-        static_cast<int>(extent.height), gameViewSource.Format(), debugNameBuffer));
+    // capture (the live Game View can be resized between two captures), and
+    // it sidesteps needing to track any previous VkImageLayout across past
+    // captures: a freshly (re)created RenderTexture's color image always
+    // starts life in VK_IMAGE_LAYOUT_UNDEFINED (see RenderTexture.cpp's own
+    // Create()), so the destination barrier below never needs to know or
+    // trust what state was left over from last time.
+    entry.preview.emplace(renderer.CreateRenderTexture(
+        static_cast<int>(extent.width), static_cast<int>(extent.height), gameViewSource.Format(),
+        "FrameDebuggerCurrentCapturePreview"));
 
-    // NEW (frame-debugger-4 campaign, PHASE1) - the second retained copy,
-    // only when a real composited source exists this capture. Uses the
+    // (frame-debugger-4 campaign, PHASE1) - the second retained copy, only
+    // when a real composited source exists this capture. Uses the
     // COMPOSITED source's own extent/format (which may legitimately differ
     // in size from gameViewSource's own extent between two captures if a
     // resize landed asymmetrically - in practice both always match the SAME
     // Game View panel's current content-region size, but this function must
-    // not assume that). A distinct debug-name suffix ("Composited") keeps
-    // GPU-memory-debugger tooling (if any reads RenderTexture debug names)
-    // able to tell the two apart.
+    // not assume that). A distinct debug name keeps GPU-memory-debugger
+    // tooling (if any reads RenderTexture debug names) able to tell the two
+    // apart.
     const bool hasCompositedSource = (compositedGameViewSource != nullptr);
-    char compositedDebugNameBuffer[48];
     if (hasCompositedSource) {
-        std::snprintf(compositedDebugNameBuffer, sizeof(compositedDebugNameBuffer),
-            "FrameDebuggerHistorySlot%dComposited", writeIndex);
         const VkExtent2D compositedExtent = compositedGameViewSource->Extent();
         entry.compositedPreview.emplace(renderer.CreateRenderTexture(static_cast<int>(compositedExtent.width),
-            static_cast<int>(compositedExtent.height), compositedGameViewSource->Format(), compositedDebugNameBuffer));
+            static_cast<int>(compositedExtent.height), compositedGameViewSource->Format(),
+            "FrameDebuggerCurrentCapturePreviewComposited"));
     } else {
         entry.compositedPreview.reset();
     }
 
-    // NEW (frame-debugger-5 campaign, PHASE3
-    // PHASE3_GENERIC_PER_PASS_RETAINED_PREVIEW_CAPTURE.md, Step 3.3) -
-    // Step A (pure, CPU-side, before touching Vulkan at all): re-fetch THIS
-    // SAME frame's own already-built rg::RenderGraphSnapshot (the identical
+    // (frame-debugger-5 campaign, PHASE3
+    // PHASE3_GENERIC_PER_PASS_RETAINED_PREVIEW_CAPTURE.md, Step 3.3) - Step A
+    // (pure, CPU-side, before touching Vulkan at all): re-fetch THIS SAME
+    // frame's own already-built rg::RenderGraphSnapshot (the identical
     // snapshot FrameDebuggerPanel::TriggerCapture() already built moments ago
     // to construct `snapshot` above) and discover every real, surviving
     // compute-dispatch pass's own FIRST Texture-kind write.
@@ -163,7 +130,7 @@ void FrameDebuggerHistory::CaptureFrame(Renderer& renderer, const rg::RenderGrap
     // on. entry.computePassPreviews is entirely REBUILT from scratch every
     // single real capture (see that field's own doc comment,
     // FrameDebuggerHistory.h) - never merely appended to.
-entry.computePassPreviews.clear();
+    entry.computePassPreviews.clear();
     std::vector<ComputePassCopySource> computeCopySources;
     computeCopySources.reserve(computeWrites.size());
 
@@ -194,7 +161,7 @@ entry.computePassPreviews.clear();
 
         char computeDebugNameBuffer[96];
         std::snprintf(computeDebugNameBuffer, sizeof(computeDebugNameBuffer),
-            "FrameDebuggerHistorySlot%dCompute%.48s", writeIndex, write.passName.c_str());
+            "FrameDebuggerCurrentCaptureCompute%.48s", write.passName.c_str());
 
         // Aggregate-initialized directly (NOT default-constructed then
         // assigned) - RenderTexture (FrameDebuggerComputePassPreview::preview)
@@ -249,12 +216,12 @@ entry.computePassPreviews.clear();
         // Restore the source back to ShaderRead (a later ImGui sample of
         // the SAME live Game View texture this same frame must be
         // unaffected), and leave the retained copy in ShaderRead too, ready
-        // for PHASE4's own ImGui::Image() display.
+        // for ImGui::Image() display.
         rg::EmitImageBarrier(cmd, gameViewSource.Image(), range, transferSrc, shaderRead);
         rg::EmitImageBarrier(cmd, entry.preview->Image(), range, transferDst, shaderRead);
 
-        // NEW (frame-debugger-4 campaign, PHASE1) - post-composite copy,
-        // only when requested this capture.
+        // (frame-debugger-4 campaign, PHASE1) - post-composite copy, only
+        // when requested this capture.
         if (hasCompositedSource) {
             const VkExtent2D compositedExtent = compositedGameViewSource->Extent();
             rg::EmitImageBarrier(cmd, compositedGameViewSource->Image(), range, shaderRead, transferSrc);
@@ -269,7 +236,7 @@ entry.computePassPreviews.clear();
             rg::EmitImageBarrier(cmd, entry.compositedPreview->Image(), range, transferDst, shaderRead);
         }
 
-        // NEW (frame-debugger-5 campaign, PHASE3) - one more transition-copy-
+        // (frame-debugger-5 campaign, PHASE3) - one more transition-copy-
         // transition-back sequence per discovered compute-pass write texture.
         // CRITICAL: the SOURCE's "previous" state for the first barrier below
         // is `source.colorState` - this pass's own REAL, CURRENTLY-TRACKED
@@ -337,8 +304,8 @@ entry.computePassPreviews.clear();
         }
 
         char hdrDebugNameBuffer[96];
-        std::snprintf(hdrDebugNameBuffer, sizeof(hdrDebugNameBuffer), "FrameDebuggerHistorySlot%dCompute%.48s",
-            writeIndex, hdrSource.passName.c_str());
+        std::snprintf(hdrDebugNameBuffer, sizeof(hdrDebugNameBuffer), "FrameDebuggerCurrentCaptureCompute%.48s",
+            hdrSource.passName.c_str());
 
         // Mirrors the volume-texture-preview upload sequence immediately
         // below exactly (fresh VK_FORMAT_R8G8B8A8_UNORM RenderTexture +
@@ -378,7 +345,7 @@ entry.computePassPreviews.clear();
         entry.computePassPreviews.push_back(
             FrameDebuggerComputePassPreview{ hdrSource.passName, std::move(hdrPreviewTexture) });
     }
-    // NEW (frame-debugger-5 campaign, PHASE4
+    // (frame-debugger-5 campaign, PHASE4
     // PHASE4_VOLUME_TEXTURE_RAYMARCH_PREVIEW_REUSE.md) - Step A' (pure,
     // CPU-side, mirrors Step A above): discover every real, surviving
     // compute-dispatch pass's own FIRST VolumeTexture-kind write this same
@@ -424,7 +391,7 @@ entry.computePassPreviews.clear();
 
         char volumeDebugNameBuffer[96];
         std::snprintf(volumeDebugNameBuffer, sizeof(volumeDebugNameBuffer),
-            "FrameDebuggerHistorySlot%dCompute%.48s", writeIndex, volumeWrite.passName.c_str());
+            "FrameDebuggerCurrentCaptureCompute%.48s", volumeWrite.passName.c_str());
 
         // FrameDebuggerComputePassPreview::preview is a plain RenderTexture
         // (PHASE3), never a Texture2D - RenderPreview() only returns
@@ -469,22 +436,6 @@ entry.computePassPreviews.clear();
         entry.computePassPreviews.push_back(
             FrameDebuggerComputePassPreview{ volumeWrite.passName, std::move(volumePreviewTexture) });
     }
-
-    m_writeState = AdvanceFrameDebuggerHistoryWriteState(m_writeState, kCapacity);
-    m_cursor = ClampFrameDebuggerHistoryCursor(m_writeState.count - 1, m_writeState.count);
-}
-
-void FrameDebuggerHistory::StepCursor(int delta) noexcept
-{
-    m_cursor = ClampFrameDebuggerHistoryCursor(m_cursor + delta, m_writeState.count);
-}
-
-const FrameDebuggerHistoryEntry* FrameDebuggerHistory::CurrentEntry() const noexcept
-{
-    if (m_writeState.count <= 0) {
-        return nullptr;
-    }
-    return &m_entries[static_cast<std::size_t>(StorageIndexForLogicalIndex(m_cursor))];
 }
 
 } // namespace gte

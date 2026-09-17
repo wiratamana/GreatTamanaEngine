@@ -121,8 +121,12 @@ struct ProjectAssetImportResult {
 struct FrameDebuggerStateSnapshotView {
     bool enabled = false;
     bool windowOpen = false;
-    int historyCount = 0;
-    int historyCursor = 0;
+    // task_manager/frame-debugger-7 campaign, PHASE1
+    // (PHASE1_REMOVE_HISTORY_AND_SINGLE_CAPTURE_LIFECYCLE.md) - REPLACES
+    // `historyCount`/`historyCursor` (the old 8-slot ring buffer's own
+    // "how many"/"which one" fields) - there is only ever ONE captured
+    // frame now, so the only meaningful question is "is there one".
+    bool hasCapturedFrame = false;
     int totalEventCount = 0;
     int selectedEventIndex = -1;
     std::string channel = "all";
@@ -506,10 +510,6 @@ public:
     // frame's own totalEventCount, exactly like a tree-row click already
     // does). A no-op for NullEditorLayer.
     virtual void FrameDebuggerSelectEvent(int index) = 0;
-
-    // Steps the Frame-History cursor (+1 next / -1 prev / any other delta -
-    // see FrameDebuggerHistory::StepCursor()). A no-op for NullEditorLayer.
-    virtual void FrameDebuggerStepHistory(int delta) = 0;
 
     // Sets the Channels row's active channel from "all"/"r"/"g"/"b"/"a"
     // (case-sensitive, lowercase-only - mirrors NetworkRoutes.cpp's own

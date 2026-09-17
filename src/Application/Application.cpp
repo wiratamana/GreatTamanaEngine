@@ -410,10 +410,6 @@ int Application::Run()
                 m_editorLayer->FrameDebuggerSelectEvent(fdRequest->selectEvent.index);
                 fdResult.success = true;
                 break;
-            case FrameDebuggerCommandKind::StepFrameHistory:
-                m_editorLayer->FrameDebuggerStepHistory(fdRequest->stepFrameHistory.delta);
-                fdResult.success = true;
-                break;
             case FrameDebuggerCommandKind::SetChannel:
                 fdResult.success = m_editorLayer->FrameDebuggerSetChannel(fdRequest->setChannel.channel);
                 break;
@@ -429,8 +425,7 @@ int Application::Run()
             const FrameDebuggerStateSnapshotView stateView = m_editorLayer->FrameDebuggerGetState();
             fdResult.state.enabled = stateView.enabled;
             fdResult.state.windowOpen = stateView.windowOpen;
-            fdResult.state.historyCount = stateView.historyCount;
-            fdResult.state.historyCursor = stateView.historyCursor;
+            fdResult.state.hasCapturedFrame = stateView.hasCapturedFrame;
             fdResult.state.totalEventCount = stateView.totalEventCount;
             fdResult.state.selectedEventIndex = stateView.selectedEventIndex;
             fdResult.state.channel = stateView.channel;
@@ -1170,7 +1165,7 @@ int Application::Run()
                     // (task_manager/frame-debugger-5/PHASE4_VOLUME_TEXTURE_RAYMARCH_PREVIEW_REUSE.md)
                     // - this rule is now a shared, named, pure function
                     // (VolumeTexturePreviewRenderer.h's SelectVolumeTexturePreviewInterpretation())
-                    // rather than inlined here, since FrameDebuggerHistory::CaptureFrame()
+                    // rather than inlined here, since FrameDebuggerCurrentCapture::CaptureFrame()
                     // now needs the exact same rule for a second real call site - byte-for-byte
                     // unchanged behavior for this call site.
                     const VolumeTexturePreviewInterpretation interpretation =

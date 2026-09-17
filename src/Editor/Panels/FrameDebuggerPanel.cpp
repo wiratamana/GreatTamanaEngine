@@ -56,7 +56,7 @@ void FrameDebuggerPanel::ReleasePreviewDescriptor()
 
 void FrameDebuggerPanel::EnsurePreviewDescriptor()
 {
-    const FrameDebuggerHistoryEntry* entry = m_history.CurrentEntry();
+    const FrameDebuggerHistoryEntry* entry = m_currentCapture.CurrentEntry();
 
     // PHASE1 (frame-debugger-4 campaign) - decide WHICH retained texture
     // this call should display, based on the currently-SELECTED tree event
@@ -66,10 +66,9 @@ void FrameDebuggerPanel::EnsurePreviewDescriptor()
     //     specific event finished" - preserves frame-debugger-3's own
     //     original Locked Design Decision #5 semantics for that one leaf.
     //   - anything else at all - including nothing selected (a fresh
-    //     capture, or a Frame-History navigation that reset the selection) -
-    //     a selected compute-dispatch leaf with its OWN retained preview
-    //     (frame-debugger-5 campaign, PHASE3 - see below) wins next; failing
-    //     that, prefers the TRUE, final, atmosphere-inclusive
+    //     capture) - a selected compute-dispatch leaf with its OWN retained
+    //     preview (frame-debugger-5 campaign, PHASE3 - see below) wins next;
+    //     failing that, prefers the TRUE, final, atmosphere-inclusive
     //     entry->compositedPreview, falling back to entry->preview only when
     //     compositedPreview is std::nullopt for this particular captured
     //     frame (e.g. captured before the very first composite pass ever ran
@@ -132,18 +131,18 @@ void FrameDebuggerPanel::EnsurePreviewDescriptor()
     if (selectedSource == nullptr) {
         // Nothing to preview right now - see this function's own original
         // comment (no capture has ever happened yet, or - defensively -
-        // neither retained texture is populated for the viewed slot).
+        // neither retained texture is populated for the current capture).
         ReleasePreviewDescriptor();
         return;
     }
 
     // PHASE6 (task_manager/frame-debugger-3/PHASE6_CHANNELS_AND_LEVELS_REAL_PREVIEW.md,
     // Step 3.2) - Channels/Levels at their neutral defaults is a valid,
-    // cheap optimization: display the RAW retained history texture
+    // cheap optimization: display the RAW retained capture texture
     // directly, skipping the compute dispatch entirely. Anything else
     // re-dispatches FrameDebuggerPreviewRenderer (only when actually dirty -
     // see below) and displays ITS OWN separate scratch texture instead -
-    // the retained historical copy itself is never mutated in place
+    // the retained captured copy itself is never mutated in place
     // (Locked Design Decision #8). PHASE1 (frame-debugger-4) - every read
     // below is now against `*selectedSource` (the just-decided pointer,
     // above), not unconditionally against `entry->preview` anymore.
@@ -211,7 +210,7 @@ void FrameDebuggerPanel::TriggerCapture()
 
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, m_captureContext, renderTargetInfo);
 
-    m_history.CaptureFrame(*m_frameRenderer, *m_frameRenderGraph, snapshot, *m_frameGameView, m_frameGameViewComposited);
+    m_currentCapture.CaptureFrame(*m_frameRenderer, *m_frameRenderGraph, snapshot, *m_frameGameView, m_frameGameViewComposited);
     m_selectedEventIndex = -1;
 }
 
@@ -226,6 +225,15 @@ void FrameDebuggerPanel::TriggerCapture()
 // deliberately does NOT auto-resume (a user inspecting a paused frame
 // should not be silently un-paused just for closing/disabling this debug
 // window, whether that happened by hand or via GET /frame_debugger/enable).
+//
+// task_manager/frame-debugger-7 campaign, PHASE1
+// (PHASE1_REMOVE_HISTORY_AND_SINGLE_CAPTURE_LIFECYCLE.md) - the true->false
+// edge (Enable unticked) now ALSO clears the current capture
+// (m_currentCapture.Clear()) - "the frame info got removed from memory" is
+// the user's own exact wording for this new rule (PHASE0_MASTER_STRATEGY.md's
+// Step 1) - only the captured DATA disappears; m_enabled itself is already
+// set to `newEnabled` immediately above, exactly wherever the caller wanted
+// it.
 void FrameDebuggerPanel::ApplyEnabledEdge(EditorContext& ctx, bool newEnabled)
 {
     const bool wasEnabled = m_enabled;
@@ -245,6 +253,9 @@ void FrameDebuggerPanel::ApplyEnabledEdge(EditorContext& ctx, bool newEnabled)
         // loop in this codebase already accepts (see e.g.
         // IEditorLayer::IsPlaybackPaused()'s own doc comment).
         TriggerCapture();
+    } else if (!m_enabled && wasEnabled) {
+        // NEW (frame-debugger-7 campaign, PHASE1) - "clear on Disable".
+        m_currentCapture.Clear();
     }
 }
 
@@ -301,48 +312,14 @@ void FrameDebuggerPanel::BuildToolbarRow(EditorContext& ctx)
     }
 }
 
-void FrameDebuggerPanel::BuildFrameHistoryToolbarRow()
-{
-    // PHASE4's new Frame-History mini-toolbar - a COMPLETELY SEPARATE
-    // control from BuildFrameStepperRow() below (Locked Design Decision #4,
-    // PHASE0_MASTER_STRATEGY.md): this one scrubs across WHICH CAPTURED
-    // FRAME (of up to FrameDebuggerHistory::kCapacity) is being viewed, not
-    // which event within it is selected. Deliberately shown regardless of
-    // m_enabled - a user may have disabled further capturing but still want
-    // to scrub back through frames captured earlier this session.
-    const int count = m_history.Count();
-    const int cursor = m_history.CursorIndex();
-
-    ImGui::TextUnformatted("Frame History");
-    ImGui::SameLine();
-
-    ImGui::BeginDisabled(count == 0 || cursor <= 0);
-    if (ImGui::ArrowButton("##FrameDebuggerHistoryPrev", ImGuiDir_Left)) {
-        m_history.StepCursor(-1);
-    }
-    ImGui::EndDisabled();
-
-    ImGui::SameLine();
-    const std::string label = FormatFrameHistoryLabel(cursor, count);
-    ImGui::TextUnformatted(label.c_str());
-    ImGui::SameLine();
-
-    ImGui::BeginDisabled(count == 0 || cursor >= count - 1);
-    if (ImGui::ArrowButton("##FrameDebuggerHistoryNext", ImGuiDir_Right)) {
-        m_history.StepCursor(1);
-    }
-    ImGui::EndDisabled();
-}
-
 void FrameDebuggerPanel::BuildFrameStepperRow(const FrameDebuggerSnapshot& snapshot)
 {
     // PHASE4 - now shows REAL numbers (this is the EXISTING "which event,
-    // within the currently-viewed captured frame, is selected" axis - see
-    // Locked Design Decision #4; do not conflate this with
-    // BuildFrameHistoryToolbarRow() above). The slider itself stays a purely
-    // cosmetic, disabled control (matching the reference screenshot's own
-    // scrubber look) - clicking a tree row (RenderEventNode() below) is
-    // still the only way to change m_selectedEventIndex this campaign.
+    // within the currently-captured frame, is selected" axis). The slider
+    // itself stays a purely cosmetic, disabled control (matching the
+    // reference screenshot's own scrubber look) - clicking a tree row
+    // (RenderEventNode() below) is still the only way to change
+    // m_selectedEventIndex this campaign.
     int stepperValue = m_selectedEventIndex < 0 ? 0 : m_selectedEventIndex;
     ImGui::BeginDisabled();
     ImGui::SetNextItemWidth(200.0f);
@@ -410,10 +387,10 @@ void FrameDebuggerPanel::RenderEventNode(const FrameDebuggerEventNode& node)
 void FrameDebuggerPanel::BuildEventTreePane(const FrameDebuggerSnapshot& snapshot)
 {
     if (snapshot.rootNodes.empty()) {
-        // Real, reachable state whenever m_history has never captured
-        // anything yet (e.g. the window was just opened and "Enable"/
-        // "Capture" hasn't run this session) - see PHASE0_MASTER_STRATEGY.md's
-        // Locked Design Decision #2: zero fake/mock rows, ever.
+        // Real, reachable state whenever nothing has ever been captured yet
+        // (e.g. the window was just opened and "Enable"/"Capture" hasn't run
+        // this session) - see PHASE0_MASTER_STRATEGY.md's Locked Design
+        // Decision #2: zero fake/mock rows, ever.
         ImGui::TextDisabled("No frame captured yet.");
         return;
     }
@@ -496,10 +473,10 @@ void FrameDebuggerPanel::BuildInspectorPane(
     // PHASE0_MASTER_STRATEGY.md): the retained preview texture is a
     // per-CAPTURED-FRAME thing (one real image, taken right when the
     // "GameView" pass finished), not a per-EVENT thing - so it is shown
-    // whenever the currently-viewed history entry actually has one.
-    // Nothing selected (m_selectedEventIndex == -1) falls through to
-    // showing the texture too, matching the RenderTarget row's own
-    // "frame-level, not event-level" framing immediately above.
+    // whenever the current capture actually has one. Nothing selected
+    // (m_selectedEventIndex == -1) falls through to showing the texture
+    // too, matching the RenderTarget row's own "frame-level, not
+    // event-level" framing immediately above.
     //
     // frame-debugger-5 campaign, PHASE2
     // (PHASE2_GENERIC_COMPUTE_DISPATCH_EVENT_TREE_DISCOVERY.md) - the OLD
@@ -627,6 +604,24 @@ void FrameDebuggerPanel::BuildEventDetailsSection(const std::optional<FrameDebug
 void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg::RenderGraph& renderGraph,
     RenderTexture& gameView, RenderTexture* compositedGameView)
 {
+    // task_manager/frame-debugger-7 campaign, PHASE1
+    // (PHASE1_REMOVE_HISTORY_AND_SINGLE_CAPTURE_LIFECYCLE.md) - the new
+    // "clear on Resume-while-Enabled" rule (PHASE0_MASTER_STRATEGY.md's Step
+    // 1), checked at the very TOP of Build(), before anything else runs:
+    // detects a paused->running transition (most likely via the "Resume"
+    // button in PlaybackControls.cpp, which this class has no direct hook
+    // into - it only shares EditorContext) and, if the Frame Debugger is
+    // still Enabled, clears the current capture. m_enabled itself is NOT
+    // forced back to false here - only the captured DATA disappears
+    // (matches the user's own exact wording: "the frame info got removed
+    // from memory"). m_wasPlaybackPaused is refreshed unconditionally right
+    // after, every single Build() call, so the NEXT call can detect the
+    // next such transition.
+    if (m_enabled && m_wasPlaybackPaused && !ctx.playbackPaused) {
+        m_currentCapture.Clear();
+    }
+    m_wasPlaybackPaused = ctx.playbackPaused;
+
     // PHASE3 - cached for TriggerCapture()'s own use for the rest of THIS
     // call (BuildToolbarRow(), below, is the only thing that reads these) -
     // see this class's own header comment for why these are safe,
@@ -698,34 +693,31 @@ void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg:
     // PHASE4 (task_manager/frame-debugger-3/
     // PHASE4_PANEL_REAL_TREE_AND_FRAME_HISTORY_UI.md, Step 3.1) - swap the
     // displayed snapshot's own source from BuildPlaceholderFrameDebuggerSnapshot()
-    // to m_history's currently-viewed entry, falling back to that exact
-    // same placeholder's own empty-tree behavior whenever no real capture
-    // has ever happened yet this session (m_history.CurrentEntry() ==
+    // to the current capture's own data, falling back to that exact same
+    // placeholder's own empty-tree behavior whenever no real capture has
+    // ever happened yet this session (m_currentCapture.CurrentEntry() ==
     // nullptr) - a real, honest, reachable "enabled, but not yet captured"
     // state (see BuildEventTreePane()'s own updated comment above).
-    const FrameDebuggerHistoryEntry* currentEntry = m_history.CurrentEntry();
+    const FrameDebuggerHistoryEntry* currentEntry = m_currentCapture.CurrentEntry();
     const FrameDebuggerSnapshot snapshot =
         (currentEntry != nullptr) ? currentEntry->snapshot : BuildPlaceholderFrameDebuggerSnapshot();
 
-    // PHASE4 - clears any stale event selection whenever the VIEWED history
-    // entry itself changes underneath us (a Frame-History Prev/Next
-    // navigation - see BuildFrameHistoryToolbarRow() below; a brand-new
+    // PHASE4 - clears any stale event selection whenever the CAPTURED entry
+    // itself changes underneath us. eventIndex values are only meaningful
+    // relative to the specific snapshot they were assigned in - a brand-new
     // capture already resets m_selectedEventIndex directly, in
-    // TriggerCapture()). eventIndex values are only meaningful relative to
-    // the specific snapshot they were assigned in - carrying a selection
-    // over to a DIFFERENT captured frame's tree (which may have a
-    // completely different shape, e.g. no GPU-skinning leaves this time)
-    // could otherwise highlight/describe the wrong event by sheer index
-    // coincidence. Compared via the entry's own RAW retained preview
-    // VkImageView (guaranteed fresh on every single real capture - see
-    // FrameDebuggerHistory::CaptureFrame()'s own doc comment) tracked in
-    // m_lastKnownRawPreviewView - PHASE6 deliberately does NOT reuse
-    // m_lastKnownPreviewView for this check anymore, since that field can
-    // now instead hold m_previewProcessor's own processed scratch
-    // VkImageView (a non-neutral Channels/Levels state) - see
-    // m_lastKnownRawPreviewView's own doc comment (FrameDebuggerPanel.h) for
-    // why reusing m_lastKnownPreviewView here would have incorrectly reset
-    // the selection on every single frame in that case.
+    // TriggerCapture(), and Clear() (Disable/Resume-while-Enabled) leaves
+    // currentEntry == nullptr, which this same check below also handles.
+    // Compared via the entry's own RAW retained preview VkImageView
+    // (guaranteed fresh on every single real capture - see
+    // FrameDebuggerCurrentCapture::CaptureFrame()'s own doc comment) tracked
+    // in m_lastKnownRawPreviewView - PHASE6 deliberately does NOT reuse
+    // m_lastKnownPreviewView for this check, since that field can instead
+    // hold m_previewProcessor's own processed scratch VkImageView (a
+    // non-neutral Channels/Levels state) - see m_lastKnownRawPreviewView's
+    // own doc comment (FrameDebuggerPanel.h) for why reusing
+    // m_lastKnownPreviewView here would have incorrectly reset the
+    // selection on every single frame in that case.
     {
         const VkImageView previousRawPreviewView = m_lastKnownRawPreviewView;
         const VkImageView newRawPreviewView =
@@ -737,19 +729,11 @@ void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg:
         m_lastKnownRawPreviewView = newRawPreviewView;
     }
 
-    // PHASE4 - keeps m_previewDescriptor in sync with whichever history
-    // entry is currently being viewed (see EnsurePreviewDescriptor()'s own
-    // doc comment). Called unconditionally here (cheap - a no-op unless the
-    // underlying VkImageView actually changed), not gated on m_enabled,
-    // since the Frame-History toolbar below lets a user scrub through past
-    // captures even while further capturing is currently disabled.
+    // PHASE4 - keeps m_previewDescriptor in sync with the current capture
+    // (see EnsurePreviewDescriptor()'s own doc comment). Called
+    // unconditionally here (cheap - a no-op unless the underlying
+    // VkImageView actually changed).
     EnsurePreviewDescriptor();
-
-    // PHASE4's new Frame-History mini-toolbar - see BuildFrameHistoryToolbarRow()'s
-    // own doc comment for why this is a SEPARATE control from the
-    // event-stepper row immediately below (Locked Design Decision #4).
-    BuildFrameHistoryToolbarRow();
-    ImGui::Separator();
 
     BuildFrameStepperRow(snapshot);
     ImGui::Separator();
@@ -819,20 +803,9 @@ bool FrameDebuggerPanel::CaptureNowFromCommand()
 
 void FrameDebuggerPanel::SelectEventFromCommand(int index)
 {
-    const FrameDebuggerHistoryEntry* currentEntry = m_history.CurrentEntry();
+    const FrameDebuggerHistoryEntry* currentEntry = m_currentCapture.CurrentEntry();
     const int totalEventCount = (currentEntry != nullptr) ? currentEntry->snapshot.totalEventCount : 0;
     m_selectedEventIndex = ClampSelectedEventIndex(index, totalEventCount);
-}
-
-void FrameDebuggerPanel::StepFrameHistoryFromCommand(int delta)
-{
-    // Build()'s own existing "did the viewed history entry itself change"
-    // detection (comparing m_lastKnownRawPreviewView) already resets
-    // m_selectedEventIndex on the very next Build() call this same frame -
-    // no separate handling needed here, exactly mirroring what a real
-    // Prev/Next button click already relies on (see
-    // BuildFrameHistoryToolbarRow()).
-    m_history.StepCursor(delta);
 }
 
 bool FrameDebuggerPanel::SetChannelFromCommand(const std::string& channel)
@@ -875,10 +848,9 @@ FrameDebuggerStateSnapshotView FrameDebuggerPanel::BuildStateSnapshotView(const 
     FrameDebuggerStateSnapshotView view;
     view.enabled = m_enabled;
     view.windowOpen = ctx.frameDebuggerWindowOpen;
-    view.historyCount = m_history.Count();
-    view.historyCursor = m_history.CursorIndex();
+    view.hasCapturedFrame = m_currentCapture.HasCapture();
 
-    const FrameDebuggerHistoryEntry* currentEntry = m_history.CurrentEntry();
+    const FrameDebuggerHistoryEntry* currentEntry = m_currentCapture.CurrentEntry();
     view.totalEventCount = (currentEntry != nullptr) ? currentEntry->snapshot.totalEventCount : 0;
     view.selectedEventIndex = m_selectedEventIndex;
 

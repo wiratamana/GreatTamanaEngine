@@ -22,7 +22,7 @@
 // here is its resulting state". The actual ImGui/Panel work happens inside
 // IEditorLayer's own FrameDebuggerOpenWindow()/FrameDebuggerSetEnabled()/
 // FrameDebuggerCaptureNow()/FrameDebuggerSelectEvent()/
-// FrameDebuggerStepHistory()/FrameDebuggerSetChannel()/
+// FrameDebuggerSetChannel()/
 // FrameDebuggerSetLevels()/FrameDebuggerGetState() methods (EditorLayer.h) -
 // Application::Run() is what bridges the two, exactly like
 // EditorUiCommandBridge's own ActivateTab() plumbing already does for its
@@ -63,7 +63,6 @@ enum class FrameDebuggerCommandKind {
     SetEnabled,
     CaptureNow,
     SelectEvent,
-    StepFrameHistory,
     SetChannel,
     SetLevels,
     GetState,
@@ -75,10 +74,6 @@ struct FrameDebuggerSetEnabledCommand {
 
 struct FrameDebuggerSelectEventCommand {
     int index = -1;
-};
-
-struct FrameDebuggerStepFrameHistoryCommand {
-    int delta = 0; // Typically +1 (next) / -1 (prev), but any delta is accepted (see FrameDebuggerHistory::StepCursor()).
 };
 
 struct FrameDebuggerSetChannelCommand {
@@ -99,7 +94,6 @@ struct FrameDebuggerCommandRequest {
     FrameDebuggerCommandKind kind = FrameDebuggerCommandKind::GetState;
     FrameDebuggerSetEnabledCommand setEnabled;
     FrameDebuggerSelectEventCommand selectEvent;
-    FrameDebuggerStepFrameHistoryCommand stepFrameHistory;
     FrameDebuggerSetChannelCommand setChannel;
     FrameDebuggerSetLevelsCommand setLevels;
 };
@@ -115,8 +109,10 @@ struct FrameDebuggerCommandRequest {
 struct FrameDebuggerStateOutcome {
     bool enabled = false;
     bool windowOpen = false;
-    int historyCount = 0;
-    int historyCursor = 0;
+    // task_manager/frame-debugger-7 campaign, PHASE1 - REPLACES
+    // `historyCount`/`historyCursor` (the old 8-slot ring buffer's own
+    // fields) - there is only ever ONE captured frame now.
+    bool hasCapturedFrame = false;
     int totalEventCount = 0;
     int selectedEventIndex = -1;
     std::string channel = "all";

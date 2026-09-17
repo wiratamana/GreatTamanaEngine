@@ -187,8 +187,7 @@ FrameDebuggerStateResponseView ToFrameDebuggerStateResponseView(const FrameDebug
     FrameDebuggerStateResponseView view;
     view.enabled = outcome.enabled;
     view.windowOpen = outcome.windowOpen;
-    view.historyCount = outcome.historyCount;
-    view.historyCursor = outcome.historyCursor;
+    view.hasCapturedFrame = outcome.hasCapturedFrame;
     view.totalEventCount = outcome.totalEventCount;
     view.selectedEventIndex = outcome.selectedEventIndex;
     view.channel = outcome.channel;
@@ -318,7 +317,7 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
     // task_manager/frame-debugger-3 campaign, PHASE7
     // (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md) -
     // GET /frame_debugger/open, /enable, /capture, /select_event,
-    // /step_history, /set_channel, /set_levels, /state. Every route below
+    // /set_channel, /set_levels, /state. Every route below
     // shares the SAME shape: parse (NetworkRoutes.h) -> bridge-unavailable
     // (503) check -> build a FrameDebuggerCommandRequest ->
     // FrameDebuggerCommandBridge::SubmitAndWait() ->
@@ -383,25 +382,6 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         FrameDebuggerCommandRequest request;
         request.kind = FrameDebuggerCommandKind::SelectEvent;
         request.selectEvent.index = parsed.index;
-        const FrameDebuggerCommandBridge::SubmitResult submit = frameDebuggerCommandBridge->SubmitAndWait(request);
-        RespondWithFrameDebuggerCommandResult(res, submit);
-    });
-
-    server.Get("/frame_debugger/step_history", [frameDebuggerCommandBridge](const httplib::Request& req, httplib::Response& res) {
-        const ParsedFrameDebuggerStepHistoryQuery parsed = ParseFrameDebuggerStepHistoryQuery(req.get_param_value("direction"));
-        if (!parsed.valid) {
-            res.status = 400;
-            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
-            return;
-        }
-        if (frameDebuggerCommandBridge == nullptr) {
-            res.status = 503;
-            res.set_content(BuildGenericErrorResponseJson("frame debugger command bridge not available"), "application/json");
-            return;
-        }
-        FrameDebuggerCommandRequest request;
-        request.kind = FrameDebuggerCommandKind::StepFrameHistory;
-        request.stepFrameHistory.delta = parsed.delta;
         const FrameDebuggerCommandBridge::SubmitResult submit = frameDebuggerCommandBridge->SubmitAndWait(request);
         RespondWithFrameDebuggerCommandResult(res, submit);
     });
