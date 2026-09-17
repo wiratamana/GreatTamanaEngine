@@ -2,6 +2,7 @@
 
 #include "../Math/Mat4.h"
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -56,6 +57,23 @@ struct FrameDebuggerStandardPipelineState {
     std::string stencilZFail;
 };
 
+// frame-debugger-6 campaign, PHASE3 - one real, individual draw call's own
+// attribution facts, in the exact order RecordEntityDraw() was called this
+// frame (never deduplicated - unlike PipelineDebugNames()/
+// MaterialTextureDebugNames() below, a repeated entity/mesh combination is
+// still one entry per real draw, since PHASE4 needs one real, selectable
+// tree leaf per real draw, not per distinct name).
+struct FrameDebuggerDrawRecord {
+    std::uint32_t entityIndex = 0;
+    std::uint32_t entityGeneration = 0;
+    std::string displayName; // e.g. "terrain", or the synthesized
+                              // "Entity <index>" fallback - see
+                              // RenderSystem::Draw()'s own resolution logic.
+    std::string pipelineDebugName;
+    std::string materialTextureDebugName; // empty for an untextured draw.
+    std::uint32_t triangleCount = 0;
+};
+
 // Returns this engine's REAL, hardcoded blend/Z/stencil facts, cross-
 // checked against Pipeline.cpp's actual construction code at implementation
 // time. Pure and free - no parameters, no live VkDevice needed, directly
@@ -97,6 +115,19 @@ public:
     void RecordDraw(
         const std::string& pipelineDebugName, const std::string& materialTextureDebugName, const Mat4& viewProjection);
 
+    // frame-debugger-6 campaign, PHASE3 - records one real, individual draw
+    // call's own attribution facts, IN ADDITION to (never instead of) the
+    // existing deduplicated PipelineDebugNames()/MaterialTextureDebugNames()/
+    // DrawCallCount() bookkeeping RecordDraw() above already performs - call
+    // this alongside RecordDraw() at RenderSystem::Draw()'s own call site.
+    // `triangleCount` is computed the exact same way
+    // DrawStats.h::AccumulateDrawStats() already computes a draw's own
+    // contribution (HasIndexBuffer() ? IndexCount()/3 : VertexCount()/3) -
+    // never a separately-invented formula.
+    void RecordEntityDraw(std::uint32_t entityIndex, std::uint32_t entityGeneration, const std::string& displayName,
+        const std::string& pipelineDebugName, const std::string& materialTextureDebugName,
+        std::uint32_t triangleCount);
+
     // Clears every recorded fact back to the empty/default state - call
     // once at the top of every armed frame (mirrors FrameRecorder::
     // BeginFrame()'s own per-frame-clear convention). A freshly-constructed
@@ -124,11 +155,18 @@ public:
     // since the last Reset().
     const Mat4& LastViewProjection() const noexcept { return m_lastViewProjection; }
 
+    // frame-debugger-6 campaign, PHASE3 - every real per-draw attribution
+    // record captured since the last Reset(), in real draw order (index 0 ==
+    // first draw issued this frame's Game-View pass). Never deduplicated -
+    // see FrameDebuggerDrawRecord's own doc comment above.
+    const std::vector<FrameDebuggerDrawRecord>& DrawRecords() const noexcept { return m_drawRecords; }
+
 private:
     std::vector<std::string> m_pipelineDebugNames;
     std::vector<std::string> m_materialTextureDebugNames;
     int m_drawCallCount = 0;
     Mat4 m_lastViewProjection = Mat4::Identity();
+    std::vector<FrameDebuggerDrawRecord> m_drawRecords;
 };
 
 } // namespace gte

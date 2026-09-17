@@ -1,5 +1,6 @@
 #include "RenderSystem.h"
 
+#include "ECS/Components/Name.h"
 #include "ECS/TransformHierarchy.h"
 #include "Profiling/ScopeTimer.h"
 #include "Renderer/Renderer.h"
@@ -41,7 +42,7 @@ std::vector<DrawCommand> RenderSystem::CollectRenderables(Registry& registry)
         // before parenting existed.
         const Mat4 model = ComputeWorldMatrix(registry, entity);
 
-        commands.push_back(DrawCommand{ meshRenderer.mesh, meshRenderer.pipeline, meshRenderer.texture, model });
+        commands.push_back(DrawCommand{ entity, meshRenderer.mesh, meshRenderer.pipeline, meshRenderer.texture, model });
     }
 
     return commands;
@@ -112,6 +113,32 @@ void RenderSystem::Draw(
                     ? renderer.GetMemoryDebugName(materialTexture->texture.Handle())
                     : std::string();
                 capture->RecordDraw(pipeline->DebugName(), materialTextureDebugName, viewProjection);
+
+                // frame-debugger-6 campaign, PHASE3 - additionally record
+                // this exact draw's own per-entity attribution facts (never
+                // deduplicated, unlike RecordDraw()'s own name lists above -
+                // see FrameDebuggerCaptureContext::RecordEntityDraw()'s own
+                // doc comment). Triangle count uses the exact same
+                // HasIndexBuffer() ? IndexCount()/3 : VertexCount()/3 rule
+                // DrawStats.h::AccumulateDrawStats() already uses, so these
+                // two counts can never drift apart.
+                const std::uint32_t triangleCount =
+                    mesh->HasIndexBuffer() ? (mesh->IndexCount() / 3) : (mesh->VertexCount() / 3);
+
+                std::string displayName;
+                if (const Name* name = registry.TryGetComponent<Name>(command.entity);
+                    name != nullptr && !name->value.empty()) {
+                    displayName = name->value;
+                } else {
+                    // Matches HierarchyPanel::BuildEntityLabel()'s own
+                    // synthesized "Entity %u" fallback format exactly (minus
+                    // its Camera-only " (Camera)" suffix, which never applies
+                    // to a mesh-rendering draw) - see this phase's own Step 2.
+                    displayName = "Entity " + std::to_string(command.entity.index);
+                }
+
+                capture->RecordEntityDraw(command.entity.index, command.entity.generation, displayName,
+                    pipeline->DebugName(), materialTextureDebugName, triangleCount);
             }
 #endif
 

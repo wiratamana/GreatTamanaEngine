@@ -56,6 +56,7 @@ TEST(RenderSystemTest, EntityWithMeshRendererAndTransformUsesWorldMatrix)
     const std::vector<DrawCommand> commands = RenderSystem::CollectRenderables(registry);
 
     ASSERT_EQ(commands.size(), 1u);
+    EXPECT_EQ(commands[0].entity, entity); // frame-debugger-6, PHASE3 - DrawCommand now carries its own Entity.
     EXPECT_EQ(commands[0].mesh, meshHandle);
     EXPECT_EQ(commands[0].pipeline, pipelineHandle);
     EXPECT_TRUE(ApproximatelyEqual(commands[0].model, transform.LocalToWorldMatrix()));
@@ -83,20 +84,25 @@ TEST(RenderSystemTest, MultipleEntitiesEachProduceTheirOwnDrawCommand)
     const MeshHandle meshHandle{ 1, 1 };
     const PipelineHandle pipelineHandle{ 2, 1 };
 
+    std::vector<Entity> createdEntities;
     const float xPositions[3] = { -0.6f, 0.0f, 0.6f };
     for (const float x : xPositions) {
         const Entity entity = registry.CreateEntity();
         Transform& transform = registry.AddComponent<Transform>(entity);
         transform.position = Vec3{ x, 0.0f, 0.0f };
         registry.AddComponent<MeshRenderer>(entity, MeshRenderer{ meshHandle, pipelineHandle });
+        createdEntities.push_back(entity);
     }
 
     const std::vector<DrawCommand> commands = RenderSystem::CollectRenderables(registry);
 
     ASSERT_EQ(commands.size(), 3u);
-    for (const DrawCommand& command : commands) {
-        EXPECT_EQ(command.mesh, meshHandle);
-        EXPECT_EQ(command.pipeline, pipelineHandle);
+    for (std::size_t i = 0; i < commands.size(); ++i) {
+        // frame-debugger-6, PHASE3 - each DrawCommand's own entity matches
+        // the real entity it was collected from, in the same order.
+        EXPECT_EQ(commands[i].entity, createdEntities[i]);
+        EXPECT_EQ(commands[i].mesh, meshHandle);
+        EXPECT_EQ(commands[i].pipeline, pipelineHandle);
     }
 }
 

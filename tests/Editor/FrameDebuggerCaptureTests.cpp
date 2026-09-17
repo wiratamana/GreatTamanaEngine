@@ -26,6 +26,7 @@ TEST(FrameDebuggerCaptureContextTest, StartsEmpty)
     EXPECT_TRUE(capture.MaterialTextureDebugNames().empty());
     EXPECT_EQ(capture.DrawCallCount(), 0);
     EXPECT_TRUE(ApproximatelyEqual(capture.LastViewProjection(), Mat4::Identity()));
+    EXPECT_TRUE(capture.DrawRecords().empty()); // frame-debugger-6, PHASE3.
 }
 
 TEST(FrameDebuggerCaptureContextTest, RecordDrawDeduplicatesRepeatedNames)
@@ -86,12 +87,72 @@ TEST(FrameDebuggerCaptureContextTest, ResetClearsEverythingBackToEmpty)
 {
     FrameDebuggerCaptureContext capture;
     capture.RecordDraw("PipelineA", "TextureA", Mat4::Translation(Vec3(1.0f, 1.0f, 1.0f)));
+    capture.RecordEntityDraw(2, 1, "terrain", "PipelineA", "TextureA", 1045458);
     capture.Reset();
 
     EXPECT_TRUE(capture.PipelineDebugNames().empty());
     EXPECT_TRUE(capture.MaterialTextureDebugNames().empty());
     EXPECT_EQ(capture.DrawCallCount(), 0);
     EXPECT_TRUE(ApproximatelyEqual(capture.LastViewProjection(), Mat4::Identity()));
+    EXPECT_TRUE(capture.DrawRecords().empty()); // frame-debugger-6, PHASE3.
+}
+
+// frame-debugger-6 campaign, PHASE3 - RecordEntityDraw()/DrawRecords() tests.
+
+TEST(FrameDebuggerCaptureContextTest, RecordEntityDrawAppendsOneRecordPerCall)
+{
+    FrameDebuggerCaptureContext capture;
+
+    capture.RecordEntityDraw(2, 1, "terrain", "Mesh.vert/Mesh.frag (PositionNormal)", "MaterialTexture abc123", 1045458);
+    capture.RecordEntityDraw(3, 1, "SmokeTestCube", "Mesh.vert/Mesh.frag (PositionNormal)", "", 12);
+
+    ASSERT_EQ(capture.DrawRecords().size(), 2u);
+
+    const FrameDebuggerDrawRecord& first = capture.DrawRecords()[0];
+    EXPECT_EQ(first.entityIndex, 2u);
+    EXPECT_EQ(first.entityGeneration, 1u);
+    EXPECT_EQ(first.displayName, "terrain");
+    EXPECT_EQ(first.pipelineDebugName, "Mesh.vert/Mesh.frag (PositionNormal)");
+    EXPECT_EQ(first.materialTextureDebugName, "MaterialTexture abc123");
+    EXPECT_EQ(first.triangleCount, 1045458u);
+
+    const FrameDebuggerDrawRecord& second = capture.DrawRecords()[1];
+    EXPECT_EQ(second.entityIndex, 3u);
+    EXPECT_EQ(second.entityGeneration, 1u);
+    EXPECT_EQ(second.displayName, "SmokeTestCube");
+    EXPECT_EQ(second.pipelineDebugName, "Mesh.vert/Mesh.frag (PositionNormal)");
+    EXPECT_TRUE(second.materialTextureDebugName.empty()); // Untextured draw.
+    EXPECT_EQ(second.triangleCount, 12u);
+}
+
+TEST(FrameDebuggerCaptureContextTest, RecordEntityDrawNeverDeduplicatesRepeatedEntityMeshCombinations)
+{
+    FrameDebuggerCaptureContext capture;
+
+    // Unlike RecordDraw()'s own PipelineDebugNames()/MaterialTextureDebugNames(),
+    // repeating the exact same entity/mesh combination must still produce TWO
+    // separate records - one real, selectable tree leaf per real draw (PHASE4).
+    capture.RecordEntityDraw(5, 2, "terrain", "PipelineA", "TextureA", 100);
+    capture.RecordEntityDraw(5, 2, "terrain", "PipelineA", "TextureA", 100);
+
+    ASSERT_EQ(capture.DrawRecords().size(), 2u);
+    EXPECT_EQ(capture.DrawRecords()[0].entityIndex, 5u);
+    EXPECT_EQ(capture.DrawRecords()[1].entityIndex, 5u);
+}
+
+TEST(FrameDebuggerCaptureContextTest, RecordEntityDrawDoesNotAffectRecordDrawBookkeeping)
+{
+    // RecordEntityDraw() is additive - it must never touch PipelineDebugNames()/
+    // MaterialTextureDebugNames()/DrawCallCount()/LastViewProjection(), which
+    // are only ever mutated by RecordDraw() (see this phase's own Step 3.3).
+    FrameDebuggerCaptureContext capture;
+
+    capture.RecordEntityDraw(1, 1, "terrain", "PipelineA", "TextureA", 100);
+
+    EXPECT_TRUE(capture.PipelineDebugNames().empty());
+    EXPECT_TRUE(capture.MaterialTextureDebugNames().empty());
+    EXPECT_EQ(capture.DrawCallCount(), 0);
+    ASSERT_EQ(capture.DrawRecords().size(), 1u);
 }
 
 TEST(DescribeStandardPipelineStateTest, ReportsRealHardcodedPipelineCppValues)

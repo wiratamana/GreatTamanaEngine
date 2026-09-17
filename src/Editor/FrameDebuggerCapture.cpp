@@ -1,6 +1,7 @@
 #include "FrameDebuggerCapture.h"
 
 #include <algorithm>
+#include <utility>
 
 namespace gte {
 
@@ -54,12 +55,27 @@ void FrameDebuggerCaptureContext::RecordDraw(
     m_lastViewProjection = viewProjection;
 }
 
+void FrameDebuggerCaptureContext::RecordEntityDraw(std::uint32_t entityIndex, std::uint32_t entityGeneration,
+    const std::string& displayName, const std::string& pipelineDebugName, const std::string& materialTextureDebugName,
+    std::uint32_t triangleCount)
+{
+    FrameDebuggerDrawRecord record;
+    record.entityIndex = entityIndex;
+    record.entityGeneration = entityGeneration;
+    record.displayName = displayName;
+    record.pipelineDebugName = pipelineDebugName;
+    record.materialTextureDebugName = materialTextureDebugName;
+    record.triangleCount = triangleCount;
+    m_drawRecords.push_back(std::move(record));
+}
+
 void FrameDebuggerCaptureContext::Reset()
 {
     m_pipelineDebugNames.clear();
     m_materialTextureDebugNames.clear();
     m_drawCallCount = 0;
     m_lastViewProjection = Mat4::Identity();
+    m_drawRecords.clear();
 }
 
 } // namespace gte

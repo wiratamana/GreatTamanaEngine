@@ -38,6 +38,12 @@ class FrameDebuggerCaptureContext;
 // nothing but a Registry - no live GPU device, no Renderer, no ResourcePool
 // needed - see AGENTS.md ("Testability & Regression Safety").
 struct DrawCommand {
+    Entity entity; // frame-debugger-6 campaign, PHASE3 - the ECS entity this
+                    // draw call came from, so a capture consumer (see
+                    // FrameDebuggerCaptureContext::RecordEntityDraw()) can
+                    // attribute this exact draw back to a real, selectable
+                    // entity (its own Name, if any) rather than only an
+                    // anonymous mesh/pipeline/texture triple.
     MeshHandle mesh;
     PipelineHandle pipeline;
     TextureHandle texture; // kInvalidTextureHandle (the default) means "no material texture" - see MeshRenderer::texture.
