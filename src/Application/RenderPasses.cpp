@@ -378,8 +378,8 @@ void AddPresentPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& rende
     std::optional<float> directGameRenderAspect, const std::function<void(VkCommandBuffer)>& recordImGui,
     const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers)
 {
-    builder.AddPass(
-        "Present",
+    builder.AddRenderPass(
+        "Present", rg::PassKind::Graphics, rg::ViewScope::Shared, rg::RenderPassCategory::General,
         [swapchainImage, directGameRenderAspect, gpuSkinningOutputBuffers](rg::RenderGraphBuilder::PassBuilder& pass) {
             pass.WriteColorAttachment(swapchainImage, kGameClearColor);
             if (directGameRenderAspect.has_value()) {
@@ -429,8 +429,8 @@ std::vector<rg::BufferHandle> AddGpuSkinningPasses(rg::RenderGraphBuilder& build
         const rg::BufferHandle handle =
             builder.ImportBuffer(request.name, request.outputBuffer, request.outputBufferSize);
 
-        builder.AddComputePass(
-            request.name,
+        builder.AddRenderPass(
+            request.name, rg::PassKind::Compute, rg::ViewScope::Shared, rg::RenderPassCategory::GpuSkinning,
             [handle](rg::RenderGraphBuilder::PassBuilder& pass) {
                 pass.WriteBuffer(handle, rg::ResourceAccess::ComputeShaderWrite);
             },
