@@ -283,7 +283,7 @@ Scattering" section for the full feature writeup.
   not get the atmosphere effect.** `AddPresentPass()`'s own
   `directGameRenderAspect` branch (used only when both "Game" and "Scene" are
   simultaneously hidden, or in a genuinely headless `-DGTE_ENABLE_EDITOR=OFF`
-  release build) does not go through `AddGameViewPass()`/
+  release build) does not go through `AddRenderOpaquePass()`/
   `AddAtmosphereCompositePass()` at all - flagged as an open question across
   Phases 7-9's own completion reports, never resolved. A future session should
   explicitly decide whether this is acceptable long-term scope or whether that

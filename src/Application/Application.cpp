@@ -679,7 +679,8 @@ int Application::Run()
                             // 3.0): consumes m_pendingCaptureTrigger (if
                             // set) and, only then, declares this frame's N
                             // debug-only replay passes - BEFORE any of them
-                            // (or the real "GameView" pass above, which was
+                            // (or the real "RenderOpaque"/"DrawSkyBackground"/
+                            // "RenderTransparent" passes above, which were
                             // only just DECLARED, not yet executed) actually
                             // run, since this whole `build` lambda only
                             // describes the frame; RenderGraph::Execute()
@@ -716,7 +717,8 @@ int Application::Run()
                             }
 
                             // 3.3 - the Aerial Perspective Composite pass -
-                            // declared AFTER the GameView pass above (same
+                            // declared AFTER the RenderOpaque/DrawSkyBackground/
+                            // RenderTransparent passes above (same
                             // builder/Execute() call), reading its own
                             // just-written color+depth (via the new
                             // isDepthResource=true ReadTexture() overload -

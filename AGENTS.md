@@ -96,8 +96,13 @@ Game View render target: enabling it captures one real rendered frame's worth
 of real Render Graph passes (every real compute-shader dispatch is a
 first-class, automatically discovered tree citizen, never a hand-maintained
 special case) PLUS one real, individually selectable per-entity child leaf
-under `"GameView"` per real draw call it issued that frame, including the Sky
-Background pass itself (`frame-debugger-8` campaign) - never only meshes.
+under `"RenderOpaque"` per real draw call it issued that frame - never only
+meshes. The Sky Background draw is its own real, separate, individually
+selectable `"DrawSkyBackground"` pass/leaf too (`render-pass-1` campaign,
+splitting the old monolithic `"GameView"` pass into `"RenderOpaque"` +
+`"DrawSkyBackground"` + a scaffolded, currently-always-empty
+`"RenderTransparent"` - see "Render Pass System" below), not a fabricated
+draw-record hack fused into the mesh-drawing pass like it used to be.
 **Selecting ANY
 leaf - a compute pass or a per-object draw alike - now shows a real, correct
 "accumulated Game View as of this exact step" preview image** (`frame-debugger-7`
@@ -115,6 +120,34 @@ at a specific compute dispatch boundary) is a still-deferred future item -
 see `TODO.md`'s "Frame Debugger" section.
 
 Full convention: [docs/conventions/frame-debugger.md](docs/conventions/frame-debugger.md).
+
+## Render Pass System
+
+`src/Renderer/RenderGraph/RenderGraphBuilder::AddRenderPass()` is the ONE
+official way to declare any render/compute/blit pass in this engine - the
+`render-pass-1` campaign (seven phases,
+`task_manager/render-pass-1/PHASE0_MASTER_STRATEGY.md`) migrated every real
+pass declaration (every Atmosphere LUT/composite pass, the Opaque/Sky-
+Background/Transparent draw passes, GPU Skinning, Present, Frame Debugger
+Replay, Compute Blur Validation) off the old ad-hoc `AddPass()`/
+`AddComputePass()` free-function sprawl and onto this single, uniform
+chokepoint. Every real pass declaration stamps two pieces of metadata:
+`PassKind` (`Graphics`/`Compute` - RENAMED from the older plain `bool
+isComputePass`) and `RenderPassCategory` (`General`/`AtmosphereLut`/
+`GpuSkinning`/`Debug`), both surviving into `RenderGraphPassSnapshot` so
+downstream consumers (the Frame Debugger's own generic tree-building logic -
+see "Frame Debugger" above) can discover and classify every real pass
+structurally, never via a hand-maintained name list or a hardcoded string
+match. The campaign also split the old monolithic `"GameView"` pass into
+three real, separate passes - `"RenderOpaque"`, `"DrawSkyBackground"`, and a
+currently-always-empty `"RenderTransparent"` scaffold (a clean drop-in point
+for a future real transparency system) - declared back-to-back against the
+same render target, in that fixed order (Opaque must run before Sky
+Background, since Sky Background relies on an `EQUAL` depth-test against the
+depth buffer Opaque just wrote).
+
+Full history: `task_manager/render-pass-1/PHASE0_MASTER_STRATEGY.md` and each
+`PHASEn_COMPLETION_REPORT.md` in that same folder.
 
 ## Job System
 

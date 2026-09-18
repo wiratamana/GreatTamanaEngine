@@ -42,77 +42,177 @@ CURRENT, real system** — follow these rules whenever touching this window,
 its data model, its capture instrumentation, or its cross-wiring with the
 Pause/Resume toolbar or the embedded HTTP server:
 
+## What's new (`render-pass-1` campaign)
+
+The `render-pass-1` campaign
+(`task_manager/render-pass-1/PHASE0_MASTER_STRATEGY.md`, seven phases) is not a
+Frame-Debugger-focused bug-fix campaign like every one above — it is a
+broader, engine-wide refactor of HOW every render/compute/blit operation in
+this engine declares itself to the Render Graph (a new, uniform
+`RenderGraphBuilder::AddRenderPass()` chokepoint, replacing the old ad-hoc
+`AddPass()`/`AddComputePass()` free-function sprawl — see
+[the top-level `AGENTS.md`](../../AGENTS.md#render-pass-system) for the
+engine-wide summary). Two of its phases (PHASE2/PHASE4) directly, and
+deliberately, change THIS window's own tree shape — an explicit, user-approved
+BREAKING CHANGE to the tree shape every earlier campaign above (`frame-
+debugger-2` through `frame-debugger-9`) documented:
+
+- **The old monolithic `"GameView"` pass no longer exists at all.** It used to
+  both draw every real entity AND, immediately afterward, inside the exact
+  SAME `vkCmdBeginRendering`/`vkCmdEndRendering` bracket, hand-fuse in the Sky
+  Background full-screen-triangle draw — visible in this tree only via the
+  `frame-debugger-8` campaign's own `FrameDebuggerDrawRecord::
+  isSkyBackgroundDraw` flag / `FrameDebuggerCaptureContext::
+  RecordSkyBackgroundDraw()` bridge call (described further down this file,
+  in the `frame-debugger-8` section — kept as accurate PAST-tense history,
+  not current behavior). `render-pass-1`'s own PHASE2 split this single pass
+  into THREE real, separate `RenderGraphBuilder` passes, declared back-to-back
+  against the exact same imported `"GameView"` render-target handle (the
+  TEXTURE name — completely unchanged, still whatever the "Game" panel/
+  `GET /get_game_view` ultimately reads from):
+  - **`"RenderOpaque"`** — the built-in default mesh-drawing pass. This is
+    simply the old `"GameView"` leaf, RENAMED, with the exact same real
+    per-entity child-leaf mechanism `frame-debugger-6` already gave it
+    (unchanged — see below).
+  - **`"DrawSkyBackground"`** — a REAL, separate, individually selectable
+    leaf now, with no fabricated draw-record hack behind it at all. `LOAD`s
+    both the color and depth attachments (rather than clearing them) so it
+    only paints pixels `"RenderOpaque"` didn't already cover, relying on
+    `AtmosphereSkyBackgroundRenderer`'s own `EQUAL`-depth-test pipeline
+    against the depth buffer `"RenderOpaque"` just wrote.
+  - **`"RenderTransparent"`** — a genuine, currently ALWAYS-EMPTY scaffold
+    pass. There is still no transparency concept anywhere in this engine's
+    ECS/render pipeline (`MeshRenderer` has no `isTransparent`/`renderQueue`
+    field yet), so this pass never actually declares anything and never
+    appears as a tree leaf today — a clean, real, already-wired drop-in point
+    for a genuine future transparency campaign, not a speculative
+    implementation of transparency itself.
+- **A new `"Compute LUT"` tree group** now sits ahead of, and separate from,
+  the pre-existing generic `"Compute Dispatches (Pre-GameView)"` group: the
+  Atmosphere Transmittance/Multi-Scattering/Sky-View/Aerial-Perspective-Volume
+  LUT compute passes (tagged the new `RenderPassCategory::AtmosphereLut`) are
+  pulled out of that old, unlabeled generic bucket into their own clearly-
+  named heading, in real execution order, always presented FIRST regardless
+  of real interleaving with any other pre-view compute pass. Non-atmosphere
+  pre-view compute passes (e.g. GPU Skinning) stay exactly where they always
+  were, in the generic `"Compute Dispatches (Pre-GameView)"` SIBLING group,
+  unmerged with `"Compute LUT"`.
+- **`BuildRealFrameDebuggerSnapshot()`'s hardcoded `"GameView"`-literal pivot
+  search is gone.** It now looks up `"RenderOpaque"` instead — the ONE
+  remaining hardcoded pass-name string literal anywhere in that function —
+  and walks forward from there (a new "view region" walk) collecting every
+  surviving, non-`SceneView`, non-`Debug`-category `Graphics`-kind pass it
+  finds as a real sibling tree leaf (today: `"RenderOpaque"` itself, then
+  `"DrawSkyBackground"`, then `"RenderTransparent"` whenever it is ever
+  real), stopping at the first surviving `Compute`-kind pass — replacing the
+  old single hardcoded `"GameView"` leaf lookup outright. This walk also
+  correctly SKIPS `AddFrameDebuggerReplayPasses()`'s own N debug-only replay
+  passes (tagged `RenderPassCategory::Debug`), which sit structurally inside
+  this exact index range on an explicit capture-trigger frame — they never
+  leak into the tree as spurious extra leaves.
+- **The current, full, as-shipped tree shape is documented below** (see "What
+  is real today" immediately below). No preview-picking rule, no Channels/
+  Levels behavior, no HTTP route, and no per-entity child-leaf mechanism
+  changed as part of this campaign — only the PASS-LEVEL shape around
+  `"RenderOpaque"`/`"DrawSkyBackground"`/`"RenderTransparent"` did.
+
+See `task_manager/render-pass-1/PHASE0_MASTER_STRATEGY.md` and each
+`PHASEn_COMPLETION_REPORT.md` in that same folder for the full seven-phase
+writeup, including PHASE4's own live, HTTP-driven, screenshot-verified proof
+of this exact new tree shape end-to-end.
+
 ## What is real today
 
 - **Capture is genuinely real, and PASS-LEVEL for every pass EXCEPT
-  `"GameView"` itself — `"GameView"` now ALSO gets one real, individually
-  selectable CHILD leaf per real per-entity draw call it issued that frame**
-  (`frame-debugger-6` campaign, PHASE4 — see "What's new (`frame-debugger-6`
-  campaign)" below). This is an explicit, user-approved BREAKING change to the
-  historical "one leaf per PASS, never one leaf per mesh/entity" rule
-  `frame-debugger-2`'s own `PHASE0_MASTER_STRATEGY.md` originally locked (its
-  own Locked Design Decision #1) — do not mistake the now-per-entity
-  `"GameView"` children for a mistake or a regression; every OTHER pass in
-  this tree (every compute dispatch, and `"GameView"` itself as a pass-level
-  row) remains exactly one leaf per pass, unchanged.
+  `"RenderOpaque"` itself — `"RenderOpaque"` now ALSO gets one real,
+  individually selectable CHILD leaf per real per-entity draw call it issued
+  that frame** (`frame-debugger-6` campaign, PHASE4 — see "What's new
+  (`frame-debugger-6` campaign)" below; renamed from `"GameView"` by the
+  `render-pass-1` campaign's own PHASE2/PHASE4 — see "What's new
+  (`render-pass-1` campaign)" above). This is an explicit, user-approved
+  BREAKING change to the historical "one leaf per PASS, never one leaf per
+  mesh/entity" rule `frame-debugger-2`'s own `PHASE0_MASTER_STRATEGY.md`
+  originally locked (its own Locked Design Decision #1) — do not mistake the
+  now-per-entity `"RenderOpaque"` children for a mistake or a regression;
+  every OTHER pass in this tree (every compute dispatch, `"DrawSkyBackground"`,
+  and `"RenderOpaque"` itself as a pass-level row) remains exactly one leaf
+  per pass, unchanged.
 - **Every real compute-shader dispatch that ran this frame is now a
   first-class, AUTOMATICALLY DISCOVERED tree citizen — never a hand-maintained
-  per-pass-name special case** (`frame-debugger-5` campaign). The tree is:
+  per-pass-name special case** (`frame-debugger-5` campaign). The
+  `render-pass-1` campaign's own PHASE4 rewrote this discovery to build the
+  WHOLE tree (not just the compute groups) generically from real `PassKind`/
+  `RenderPassCategory`/`ViewScope`/execution-order metadata (see "What's new
+  (`render-pass-1` campaign)" above). The tree is:
 
   ```
-  "GameView" (root)
-    |-- "Compute Dispatches (Pre-GameView)"   (only present if >=1 child)
-    |     |-- <every surviving compute pass whose own real execution-order
-    |     |     index in graphSnapshot.passesInExecutionOrder is BEFORE
-    |     |     "GameView"'s own index, in real execution order>
-    |-- "GameView" leaf                        (the one real graphics/draw pass)
+  "Game View" (root)
+    |-- "Compute LUT"                          (only present if >=1 child)
+    |     |-- <every surviving AtmosphereLut-category compute pass BEFORE
+    |     |     "RenderOpaque"'s own execution-order index, in real
+    |     |     execution order - e.g. AtmosphereTransmittanceLutPass,
+    |     |     AtmosphereMultiScatteringLutPass, AtmosphereSkyViewLutPass,
+    |     |     AtmosphereAerialPerspectiveVolumePass>
+    |-- "Compute Dispatches (Pre-GameView)"    (only present if >=1 child)
+    |     |-- <every surviving, NON-AtmosphereLut-category compute pass BEFORE
+    |     |     "RenderOpaque"'s own execution-order index - e.g. every
+    |     |     GPU-skinning dispatch request active this frame>
+    |-- "RenderOpaque" leaf                     (the built-in mesh-drawing pass)
     |     |-- <one real child leaf PER real per-entity draw call this pass
     |     |     issued this frame - e.g. "terrain (Entity 2)",
     |     |     "SmokeTestCube (Entity 3)" - frame-debugger-6 campaign, PHASE4>
-    |     |-- <one final real child leaf for the Sky Background full-screen-
-    |     |     triangle draw, always LAST - e.g.
-    |     |     "AtmosphereSkyBackground.vert/AtmosphereSkyBackground.frag" -
-    |     |     frame-debugger-8 campaign>
-    |-- "Compute Dispatches (Post-GameView)"  (only present if >=1 child)
-          |-- <every surviving compute pass whose own real execution-order
-          |     index is AFTER "GameView"'s own index, in real execution order>
+    |-- "DrawSkyBackground" leaf                 (a REAL, separate, individually
+    |                                             selectable leaf - no more
+    |                                             isSkyBackgroundDraw hack)
+    |-- "RenderTransparent" leaf                 (only ever appears once this
+    |                                             currently-always-empty
+    |                                             scaffold pass is real - never
+    |                                             today)
+    |-- "Compute Dispatches (Post-GameView)"    (only present if >=1 child)
+          |-- <every surviving compute pass AFTER the "RenderOpaque"/
+          |     "DrawSkyBackground"/"RenderTransparent" view region - e.g.
+          |     AtmosphereAerialPerspectiveCompositePass>
   ```
 
-  Concretely, on a typical frame with a Sun light present: `"Compute Dispatches
-  (Pre-GameView)"` holds `AtmosphereTransmittanceLutPass`,
-  `AtmosphereMultiScatteringLutPass`, `AtmosphereSkyViewLutPass`,
-  `AtmosphereAerialPerspectiveVolumePass`, plus every GPU-skinning dispatch
-  request active that frame (`RenderPasses.cpp`'s `AddGpuSkinningPasses()`),
-  and `"Compute Dispatches (Post-GameView)"` holds
-  `AtmosphereAerialPerspectiveCompositePass` (and, if the Editor's "Show
-  Compute Blur (debug)" toggle is on, `"ComputeBlurValidation"`). Neither group
-  is ever added at all when it would have zero real children (mirrors every
-  other "never an empty, misleading group" rule elsewhere in this tree) — a
-  single unconditional group placed after `"GameView"` would misrepresent
-  which passes really ran before it (e.g. `"GameView"`'s own Sky-Background
-  sub-draw samples the Sky-View LUT, so that LUT pass must already have run).
-  Discovery is fully generic: `RenderGraphBuilder::AddComputePass()` is the one
-  real "choke point" every compute dispatch in this engine already funnels
-  through, and it now stamps a real, structurally-tracked
-  `PassRecord::isComputePass` flag (survives into
-  `RenderGraphPassSnapshot::isComputePass`, `RenderGraphTypes.h`/
-  `RenderGraphSnapshot.h`) — `FrameDebuggerData.cpp`'s
-  `BuildRealFrameDebuggerSnapshot()` walks every surviving (`isCulled == false`)
-  `isComputePass == true` pass in the current frame's real
-  `RenderGraphSnapshot` and builds one uniform `BuildComputeDispatchLeaf()` per
-  pass — a future compute pass added anywhere in this engine appears here
-  automatically, with **zero further Frame-Debugger-specific code ever
-  required for it to show up.** A compute-dispatch leaf's `passName`/
-  `shaderName`/tree-row text are all the pass's own RAW, real name (never a
-  fabricated friendly label like the old, now-removed `"GPU Skinning"`/
-  `"Aerial Perspective Composite"` special cases used to invent), and every
-  read/write row is labeled by its own real `ResourceKind`
-  (`"Read Texture"`/`"Read Buffer"`/`"Read Volume Texture"`/`"Write Texture"`/
-  `"Write Buffer"`/`"Write Volume Texture"`, from
-  `RenderGraphPassSnapshot::readKinds`/`writeKinds` — parallel vectors to the
-  existing `readNames`/`writeNames`, PHASE1 of `frame-debugger-5`) — never
-  mislabeled, never guessed by probing multiple registries. A culled compute
-  pass never appears in either group (it did not really run this frame).
+  Concretely, on a typical frame with a Sun light present: `"Compute LUT"`
+  holds `AtmosphereTransmittanceLutPass`, `AtmosphereMultiScatteringLutPass`,
+  `AtmosphereSkyViewLutPass`, `AtmosphereAerialPerspectiveVolumePass`;
+  `"Compute Dispatches (Pre-GameView)"` holds every GPU-skinning dispatch
+  request active that frame (`RenderPasses.cpp`'s `AddGpuSkinningPasses()`,
+  only present at all when at least one is active); and `"Compute Dispatches
+  (Post-GameView)"` holds `AtmosphereAerialPerspectiveCompositePass` (and, if
+  the Editor's own "Show Compute Blur (debug)" toggle is on — a genuinely
+  SceneView-scoped tool, excluded from this Game-View-only tree by its own
+  `ViewScope`/`RenderPassCategory::Debug` tagging — it never appears here).
+  Every group is only ever added at all when it has at least one real
+  surviving child this frame (never an empty, misleading group) — a single
+  unconditional group placed after the view region would misrepresent which
+  passes really ran before it (e.g. `"DrawSkyBackground"` samples the
+  Sky-View LUT, so that LUT pass must already have run). Discovery is fully
+  generic: `RenderGraphBuilder::AddRenderPass()` (the `render-pass-1`
+  campaign's own unified chokepoint, replacing the old separate `AddPass()`/
+  `AddComputePass()` free functions) is the one real "choke point" every
+  render/compute/blit operation in this engine now funnels through, and it
+  stamps a real, structurally-tracked `RenderGraphPassSnapshot::kind`
+  (`rg::PassKind::Graphics`/`Compute` — RENAMED from the older plain `bool
+  isComputePass` by this same campaign's own PHASE1) plus a
+  `RenderGraphPassSnapshot::category` (`rg::RenderPassCategory::General`/
+  `AtmosphereLut`/`GpuSkinning`/`Debug`) on every pass — `FrameDebuggerData.cpp`'s
+  `BuildRealFrameDebuggerSnapshot()` walks every surviving (`isCulled ==
+  false`), non-`SceneView` pass in the current frame's real
+  `RenderGraphSnapshot` and routes it into the correct group/leaf purely from
+  this real, structural metadata — a future compute (or graphics) pass added
+  anywhere in this engine appears here automatically, with **zero further
+  Frame-Debugger-specific code ever required for it to show up.** A
+  compute-dispatch leaf's `passName`/`shaderName`/tree-row text are all the
+  pass's own RAW, real name (never a fabricated friendly label like the old,
+  long-removed `"GPU Skinning"`/`"Aerial Perspective Composite"` special
+  cases used to invent), and every read/write row is labeled by its own real
+  `ResourceKind` (`"Read Texture"`/`"Read Buffer"`/`"Read Volume Texture"`/
+  `"Write Texture"`/`"Write Buffer"`/`"Write Volume Texture"`, from
+  `RenderGraphPassSnapshot::readKinds`/`writeKinds`) — never mislabeled,
+  never guessed by probing multiple registries. A culled pass never appears
+  anywhere in the tree (it did not really run this frame).
 - **Capture is snapshot-ON-DEMAND, never continuous — and, as of
   `frame-debugger-7`, genuinely DEFERRED by exactly one frame.** A "frame" is
   captured once a real trigger fires (Enable's false→true edge, a Step while
@@ -145,8 +245,8 @@ Pause/Resume toolbar or the embedded HTTP server:
   `std::optional::reset()`).
 - **Shader/pass-state "reflection" is real, but PASS-scoped, aggregated
   across every real draw call that pass issued that frame — never
-  per-individual-mesh.** For the `"GameView"` leaf: `shaderName` lists every
-  DISTINCT real `Pipeline` debug name actually used that frame (see
+  per-individual-mesh.** For the `"RenderOpaque"` leaf: `shaderName` lists
+  every DISTINCT real `Pipeline` debug name actually used that frame (see
   `Pipeline::DebugName()`/`GpuResourceFactory::CreatePipeline()`'s cosmetic
   `debugName` parameter), `textures` lists every DISTINCT real bound
   `MaterialTexture` debug name, `vectors` includes the real clear color and
@@ -160,8 +260,9 @@ Pause/Resume toolbar or the embedded HTTP server:
   (`Pipeline.cpp`: no blend, `VK_COMPARE_OP_LESS` depth test, no stencil
   test anywhere), so there is nothing to fabricate per-mesh here; a genuine
   future per-material blend/Z/stencil VARIATION would need its own follow-up
-  campaign, not just a data-plumbing change. The Sky Background leaf
-  (`frame-debugger-8` campaign) is the ONE other real, non-fabricated
+  campaign, not just a data-plumbing change. The `"DrawSkyBackground"` leaf
+  (`frame-debugger-8` campaign, now a real, separate pass — see "What's new
+  (`render-pass-1` campaign)" above) is the ONE other real, non-fabricated
   pipeline-state fact in this window — it reports its own genuinely different
   `DescribeSkyBackgroundPipelineState()` values (`Depth Test = Equal`, `Depth
   Write = Off`, both DELIBERATELY different from every mesh's `Less`/`On`) —
@@ -186,29 +287,30 @@ Pause/Resume toolbar or the embedded HTTP server:
   On every explicit capture trigger, `AddFrameDebuggerReplayPasses()`
   (`src/Application/RenderPasses.h/.cpp`) declares N brand-new, debug-only,
   self-contained Render Graph passes — one per real object the real
-  `"GameView"` pass draws that frame — each one redrawing objects `[0..i]`
+  `"RenderOpaque"` pass draws that frame — each one redrawing objects `[0..i]`
   FROM SCRATCH into its own dedicated destination `RenderTexture` (the LAST
-  pass also draws the sky background, exactly mirroring the real pass's own
+  pass also draws the sky background, exactly mirroring the real passes' own
   ordering). This is a deliberate O(N²) total draw-call cost across all N
   passes, chosen over an O(N) shared-target-plus-mid-pass-copy scheme because
   it needs ZERO new Render Graph/`PassContext`/`Renderer` API surface and can
-  NEVER modify or corrupt the real, always-on `"GameView"` pass — an accepted
-  cost since this work only ever runs once per explicit, human-triggered
-  capture (see "Still-deferred future work" below for the O(N) alternative,
-  explicitly deferred rather than attempted). The resulting N images are
-  retained in `FrameDebuggerCaptureContext::ReplayStepPreviews()` (transient)
-  and moved into permanent storage,
-  `FrameDebuggerHistoryEntry::perObjectStepPreviews`, by
-  `FrameDebuggerCurrentCapture::CaptureFrame()`.
+  NEVER modify or corrupt the real, always-on `"RenderOpaque"`/
+  `"DrawSkyBackground"` passes — an accepted cost since this work only ever
+  runs once per explicit, human-triggered capture (see "Still-deferred future
+  work" below for the O(N) alternative, explicitly deferred rather than
+  attempted). The resulting N images are retained in
+  `FrameDebuggerCaptureContext::ReplayStepPreviews()` (transient) and moved
+  into permanent storage, `FrameDebuggerHistoryEntry::perObjectStepPreviews`,
+  by `FrameDebuggerCurrentCapture::CaptureFrame()`.
 
   `BuildRealFrameDebuggerSnapshot()` stamps every node it builds with a new
   `FrameDebuggerStepPreviewKind` — `NotYetDrawn` (a Pre-GameView compute leaf —
   honestly "nothing drawn to the screen yet", never a fabricated image),
-  `PerObjectStep` (one of `"GameView"`'s own per-entity children —
+  `PerObjectStep` (one of `"RenderOpaque"`'s own per-entity children —
   `stepPreviewIndex` selects which of the N replay images), `PreComposite`
-  (the literal `"GameView"` leaf itself, or a Post-GameView leaf strictly
-  before the real atmosphere-composite pass), or `PostComposite` (the
-  composite pass itself, anything after it, or nothing selected). A rewritten
+  (the `"RenderOpaque"`/`"DrawSkyBackground"`/`"RenderTransparent"` leaves
+  themselves, or a Post-GameView leaf strictly before the real atmosphere-
+  composite pass), or `PostComposite` (the composite pass itself, anything
+  after it, or nothing selected). A rewritten
   `ChooseFrameDebuggerPreviewSource()` picks the actual image from exactly
   three retained sources — `preview` (pre-composite whole-frame),
   `compositedPreview` (post-composite whole-frame), or

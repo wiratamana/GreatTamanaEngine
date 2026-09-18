@@ -163,11 +163,10 @@ void AddDrawSkyBackgroundPass(rg::RenderGraphBuilder& builder, Renderer& rendere
 void AddRenderTransparentPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer,
     rg::TextureHandle gameViewTarget, float aspectWidthOverHeight);
 
-
 // task_manager/frame-debugger-7 campaign, PHASE3
 // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md) - adds N
 // debug-only, self-contained Render Graph passes (one per real object this
-// frame's "GameView" pass will draw), each redrawing objects [0..i] FROM
+// frame's "RenderOpaque" pass will draw), each redrawing objects [0..i] FROM
 // SCRATCH into its OWN dedicated destination texture, so the Frame
 // Debugger's event tree can eventually show a real, correct "accumulated
 // Game View as of this exact step" image for every object-draw step, not
@@ -176,7 +175,8 @@ void AddRenderTransparentPass(rg::RenderGraphBuilder& builder, Game& game, Rende
 // + mid-pass-copy scheme. Only ever called when a capture trigger was just
 // serviced (see IEditorLayer::ConsumePendingFrameDebuggerReplayRequest()) -
 // a genuine no-op (adds zero passes) whenever `objectCount == 0`. NEVER
-// touches the real "GameView" pass/target in any way - `gameTarget` is only
+// touches the real "RenderOpaque"/"DrawSkyBackground" passes/target in any
+// way - `gameTarget` is only
 // ever READ here (its own Extent()/Format(), to size/format the N
 // destination textures identically), never written. `capture` receives the
 // resulting N retained RenderTexture objects via
