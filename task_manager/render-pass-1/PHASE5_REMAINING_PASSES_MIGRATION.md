@@ -122,18 +122,50 @@ it, this phase is metadata-only).
 
 Run `search_in_dir` (recursive, `filter: *.cpp`) for the literal
 substrings `.AddPass(` and `.AddComputePass(` across the WHOLE `src/`
-tree. After this phase, the only remaining hits should be: (a) inside
-`RenderGraphBuilder.cpp`/`.h` itself (the low-level primitives
+tree. After this phase, the only remaining hits should be:
+
+(a) inside `RenderGraphBuilder.cpp`/`.h` itself (the low-level primitives
 `AddRenderPass()` is built on — these must stay, see PHASE1's own
-"What We Will NOT Do"), and (b) inside test files that intentionally
-exercise the low-level primitives directly
-(`tests/Renderer/RenderGraph/RenderGraphBuilderTests.cpp`). EVERY
-production (non-test, non-`RenderGraphBuilder` itself) call site should
-now go through `AddRenderPass()`. If you find a remaining production hit
-this phase's own plan didn't already name, that's a real gap this
-document missed — migrate it too, and note it explicitly in the
-completion report (do not silently skip it, and do not silently expand
-scope beyond fixing it either — flag it).
+"What We Will NOT Do");
+
+(b) inside test files that intentionally exercise the low-level primitives
+directly (`tests/Renderer/RenderGraph/RenderGraphBuilderTests.cpp`);
+
+(c) **`AddSceneViewPass()`'s own `"SceneView"` pass declaration**
+(`src/Application/RenderPasses.cpp`, `builder.AddPass("SceneView",
+rg::ViewScope::SceneView, ...)`) — this is a DELIBERATE, PERMANENT
+exception, not a gap this phase (or any later one) is meant to close.
+`PHASE2_RENDER_OPAQUE_SKY_SPLIT_AND_TRANSPARENT_STUB.md`'s own Step 3.3
+already locked this in ("`AddSceneViewPass()`... is explicitly OUT OF
+SCOPE for this split... Leave `AddSceneViewPass()` completely untouched by
+this phase") and no phase in this campaign ever migrates it — the Scene
+View is not part of the Frame Debugger's own Game-View-only scope
+(`docs/conventions/frame-debugger.md`'s long-standing rule) and this whole
+campaign never had a reason to touch it. Expect this ONE surviving
+production `builder.AddPass(` hit forever after this phase — do NOT
+"fix" it by migrating `AddSceneViewPass()` onto `AddRenderPass()`; that
+would be a real, unrequested scope expansion, not a completion of this
+phase's own job;
+
+(d) **`ImGuiEditorLayer.cpp`'s `m_blurValidation.AddPass(builder, renderer,
+sceneViewHandle, m_sceneView.Sampler(), sceneExtent)` call** — a FALSE-
+POSITIVE grep hit. This is a call to `ComputeBlurValidation::AddPass()`'s
+own, unrelated CLASS METHOD (mirroring `AtmosphereLutRenderer`'s own
+`AddXxxLutPass()` method-naming convention — see that class's own header
+comment), not a raw `RenderGraphBuilder::AddPass()`/`AddComputePass()`
+call itself — the substring `.AddPass(` simply also matches this
+unrelated method name. Only `ComputeBlurValidation::AddPass()`'s OWN
+internal `builder.AddComputePass(...)` call (already migrated by 3.4
+above) is this phase's actual concern; do not attempt to rename or
+"migrate" this call SITE itself, there is nothing to migrate here.
+
+Every OTHER production (non-test, non-`RenderGraphBuilder`, non-(c)/(d)
+above) call site should now go through `AddRenderPass()`. If you find a
+remaining production hit this phase's own plan (including the (c)/(d)
+carve-outs above) didn't already name, that's a real gap this document
+missed — migrate it too, and note it explicitly in the completion report
+(do not silently skip it, and do not silently expand scope beyond fixing
+it either — flag it).
 
 ## Definition of Done
 
@@ -141,7 +173,11 @@ scope beyond fixing it either — flag it).
   `AddRenderPass()`, correctly tagged.
 - The `search_in_dir` audit in 3.5 confirms no remaining production
   direct `AddPass()`/`AddComputePass()` call sites outside
-  `RenderGraphBuilder` itself and its own tests.
+  `RenderGraphBuilder` itself and its own tests, EXCEPT the two known,
+  permanent carve-outs from 3.5(c)/(d) (`AddSceneViewPass()`'s own
+  `"SceneView"` pass declaration, and the `ImGuiEditorLayer.cpp`
+  `m_blurValidation.AddPass(...)` false-positive grep hit) — both expected
+  and NOT bugs.
 - The Frame Debugger's tree (re-verify with the same
   `run_app_background`/`gte_send_request` HTTP flow as PHASE4) still
   shows NO leaves at all for the N Frame Debugger replay passes or for

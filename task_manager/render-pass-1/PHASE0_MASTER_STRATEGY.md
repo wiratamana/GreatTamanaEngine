@@ -181,7 +181,14 @@ report.
    engine (Atmosphere LUTs ×4 + composite + debug-slice, Sky Background,
    Opaque, GPU Skinning dispatch, Present, Frame Debugger replay passes,
    Compute Blur Validation) ends this campaign declared through the new
-   chokepoint. See PHASE3/PHASE5.
+   chokepoint. See PHASE3/PHASE5. **Explicit, deliberate exception:
+   `AddSceneViewPass()`'s own `"SceneView"` pass (`RenderPasses.cpp`)
+   stays on plain `builder.AddPass()` forever — it is out of scope for
+   the whole campaign (PHASE2's own Step 3.3 locks this in), since the
+   Scene View is not part of the Frame Debugger's Game-View-only tree
+   this campaign's Frame Debugger rework (PHASE4) cares about. PHASE5's
+   own final grep audit (its Step 3.5) explicitly carves this one call
+   site out as an expected, permanent survivor, not a gap.**
 4. **Breaking changes**: EXPLICITLY ALLOWED and expected — this campaign
    WILL change the Frame Debugger's exact tree shape/pass names (e.g.
    `"GameView"` the PASS no longer exists; `"RenderOpaque"` takes its
