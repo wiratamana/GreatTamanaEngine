@@ -234,8 +234,8 @@ rg::TextureHandle AtmosphereLutRenderer::AddTransmittanceLutPass(
     const rg::TextureHandle outputHandle =
         builder.ImportTexture("AtmosphereTransmittanceLut", target, VK_IMAGE_LAYOUT_UNDEFINED);
 
-    builder.AddComputePass(
-        "AtmosphereTransmittanceLutPass",
+    builder.AddRenderPass(
+        "AtmosphereTransmittanceLutPass", rg::PassKind::Compute, rg::ViewScope::Shared, rg::RenderPassCategory::AtmosphereLut,
         [outputHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
             pass.WriteTexture(outputHandle, rg::ResourceAccess::ComputeShaderWrite);
         },
@@ -319,8 +319,8 @@ rg::TextureHandle AtmosphereLutRenderer::AddMultiScatteringLutPass(rg::RenderGra
     const rg::TextureHandle outputHandle = builder.ImportTexture(
         "AtmosphereMultiScatteringLut", m_multiScatteringLutOutput->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
 
-    builder.AddComputePass(
-        "AtmosphereMultiScatteringLutPass",
+    builder.AddRenderPass(
+        "AtmosphereMultiScatteringLutPass", rg::PassKind::Compute, rg::ViewScope::Shared, rg::RenderPassCategory::AtmosphereLut,
         [transmittanceLutHandle, outputHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
             // The real dependency declaration that makes RenderGraphCompiler
             // order this pass strictly after AddTransmittanceLutPass()'s
@@ -456,8 +456,8 @@ rg::TextureHandle AtmosphereLutRenderer::AddSkyViewLutPass(rg::RenderGraphBuilde
     const rg::TextureHandle outputHandle =
         builder.ImportTexture(outputTextureName, viewState.output->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
 
-    builder.AddComputePass(
-        "AtmosphereSkyViewLutPass", viewScope,
+    builder.AddRenderPass(
+        "AtmosphereSkyViewLutPass", rg::PassKind::Compute, viewScope, rg::RenderPassCategory::AtmosphereLut,
         [transmittanceLutHandle, multiScatteringLutHandle, outputHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
             // Real dependency declarations - order this pass strictly
             // after AddTransmittanceLutPass()/AddMultiScatteringLutPass()'s
@@ -594,8 +594,8 @@ rg::VolumeTextureHandle AtmosphereLutRenderer::AddAerialPerspectiveVolumePass(rg
     const rg::VolumeTextureHandle outputHandle =
         builder.ImportVolumeTexture(outputVolumeName, viewState.output->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
 
-    builder.AddComputePass(
-        "AtmosphereAerialPerspectiveVolumePass", viewScope,
+    builder.AddRenderPass(
+        "AtmosphereAerialPerspectiveVolumePass", rg::PassKind::Compute, viewScope, rg::RenderPassCategory::AtmosphereLut,
         [transmittanceLutHandle, multiScatteringLutHandle, outputHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
             // Real dependency declarations - order this pass strictly
             // after AddTransmittanceLutPass()/AddMultiScatteringLutPass()'s
@@ -757,8 +757,8 @@ rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveCompositePass(rg::R
     pushConstants.aerialPerspectiveStrengthAndPad[2] = depthExponent;
     pushConstants.aerialPerspectiveStrengthAndPad[3] = 0.0f;
 
-    builder.AddComputePass(
-        "AtmosphereAerialPerspectiveCompositePass", viewScope,
+    builder.AddRenderPass(
+        "AtmosphereAerialPerspectiveCompositePass", rg::PassKind::Compute, viewScope, rg::RenderPassCategory::General,
         [sourceColorHandle, aerialPerspectiveVolumeHandle, outputHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
             // Real dependency declarations - order this pass strictly after
             // whichever GameView/SceneView graphics pass wrote
@@ -936,8 +936,8 @@ rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveVolumeDebugSlicePas
     pushConstants.sliceIndex = clampedSliceIndex;
     pushConstants.sliceCount = sliceCount;
 
-    builder.AddComputePass(
-        "AtmosphereAerialPerspectiveVolumeDebugSlicePass", viewScope,
+    builder.AddRenderPass(
+        "AtmosphereAerialPerspectiveVolumeDebugSlicePass", rg::PassKind::Compute, viewScope, rg::RenderPassCategory::AtmosphereLut,
         [aerialPerspectiveVolumeHandle, outputHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
             // Real dependency declaration - order this pass strictly after
             // AddAerialPerspectiveVolumePass()'s own write this same frame.

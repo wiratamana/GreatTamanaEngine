@@ -176,9 +176,10 @@ public:
     // own outputs root set" contract as the two methods above.
     // `viewScope` (frame-debugger-6 campaign, PHASE1 -
     // PHASE1_RENDERGRAPH_VIEWSCOPE_CHOKEPOINT_INFRASTRUCTURE.md) is forwarded
-    // straight through to the underlying builder.AddComputePass() call - the
-    // caller (AtmospherePassSequence.cpp) always knows unambiguously which
-    // view this call is for.
+    // straight through to the underlying builder.AddRenderPass() call (Render
+    // Pass campaign, task_manager/render-pass-1, PHASE3 - was AddComputePass()
+    // before this migration) - the caller (AtmospherePassSequence.cpp) always
+    // knows unambiguously which view this call is for.
     rg::TextureHandle AddSkyViewLutPass(rg::RenderGraphBuilder& builder, Renderer& renderer,
         const AtmosphereParametersGpu& params, const AtmosphereFrameUniforms& frameUniforms,
         rg::TextureHandle transmittanceLutHandle, rg::TextureHandle multiScatteringLutHandle,
