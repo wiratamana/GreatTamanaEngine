@@ -170,6 +170,40 @@ struct FrameDebuggerRenderTargetInfo {
     std::string format = "Default";
 };
 
+// task_manager/frame-debugger-9 campaign, PHASE1 - a plain, ImGui-free
+// rectangle (top-left corner offset + size, all relative to the AVAILABLE
+// drawing area's own origin) describing where to draw a `sourceWidth` x
+// `sourceHeight` image inside an `availableWidth` x `availableHeight` box so
+// it is never stretched: scaled uniformly (same factor on both axes) to the
+// LARGEST size that still fits entirely inside the available box, then
+// centered - the classic "letterbox/pillarbox" fit, exactly like a video
+// player or Unity's own preview boxes. Reused by BOTH the step preview
+// (Panels/FrameDebuggerPanel.cpp's BuildInspectorPane()) and the
+// frame-debugger-9 campaign's new shader-property one-shot texture preview
+// (PHASE3) - see ComputeAspectFitImageRect()'s own doc comment below for the
+// one function that produces this.
+struct FrameDebuggerAspectFitRect {
+    float offsetX = 0.0f;
+    float offsetY = 0.0f;
+    float width = 0.0f;
+    float height = 0.0f;
+};
+
+// Pure geometry - no ImGui/Vulkan dependency at all, Tier-1-testable
+// (tests/Editor/FrameDebuggerDataTests.cpp). Computes the largest
+// FrameDebuggerAspectFitRect that (a) preserves `sourceWidth`/`sourceHeight`'s
+// own aspect ratio exactly, (b) fits entirely within `availableWidth` x
+// `availableHeight`, and (c) is centered within that available box (equal
+// empty space split on whichever axis has slack). Degenerate-input guard: if
+// `availableWidth`/`availableHeight`/`sourceWidth`/`sourceHeight` is <= 0 (a
+// not-yet-laid-out ImGui frame, or a texture with a genuinely zero-sized
+// reported extent), returns a rect that exactly fills the available box at
+// (0, 0) instead of dividing by zero or producing a NaN/negative size - a
+// safe, harmless fallback the caller can still hand straight to
+// ImGui::Image() without a separate zero-check of its own.
+FrameDebuggerAspectFitRect ComputeAspectFitImageRect(
+    float availableWidth, float availableHeight, float sourceWidth, float sourceHeight);
+
 // The whole displayable snapshot for one "frame" of Frame Debugger data.
 // `totalEventCount` backs the stepper row's "N of M" label (see
 // FormatFrameStepperLabel() below) - always 0 this campaign, since

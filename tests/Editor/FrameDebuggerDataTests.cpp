@@ -44,6 +44,77 @@ TEST(FrameDebuggerDataTest, ClampSelectedEventIndexTest)
     EXPECT_EQ(ClampSelectedEventIndex(4, 10), 4); // Identity for an already-valid index.
 }
 
+// task_manager/frame-debugger-9 campaign, PHASE1
+// (PHASE1_ASPECT_RATIO_CORRECT_PREVIEW.md, Step 3.4) - the new pure
+// aspect-fit helper (Locked Design Decision #7, PHASE0_MASTER_STRATEGY.md).
+TEST(FrameDebuggerDataTest, ComputeAspectFitImageRectExactAspectMatchFillsWithNoOffset)
+{
+    // A 800x400 box (2:1) with an 800x400-aspect (2:1) source -> fills
+    // exactly, no offset either axis.
+    const FrameDebuggerAspectFitRect fit = ComputeAspectFitImageRect(800.0f, 400.0f, 1600.0f, 800.0f);
+    EXPECT_FLOAT_EQ(fit.width, 800.0f);
+    EXPECT_FLOAT_EQ(fit.height, 400.0f);
+    EXPECT_FLOAT_EQ(fit.offsetX, 0.0f);
+    EXPECT_FLOAT_EQ(fit.offsetY, 0.0f);
+}
+
+TEST(FrameDebuggerDataTest, ComputeAspectFitImageRectWiderSourceLetterboxesTopAndBottom)
+{
+    // A square 400x400 box with a 800x200 (4:1, much wider) source ->
+    // width-constrained: width fills exactly, height is smaller, centered
+    // vertically (black bars top/bottom).
+    const FrameDebuggerAspectFitRect fit = ComputeAspectFitImageRect(400.0f, 400.0f, 800.0f, 200.0f);
+    EXPECT_FLOAT_EQ(fit.width, 400.0f);
+    EXPECT_LT(fit.height, 400.0f);
+    EXPECT_FLOAT_EQ(fit.offsetX, 0.0f);
+    EXPECT_GT(fit.offsetY, 0.0f);
+}
+
+TEST(FrameDebuggerDataTest, ComputeAspectFitImageRectTallerSourcePillarboxesLeftAndRight)
+{
+    // A square 400x400 box with a 200x800 (1:4, much taller) source ->
+    // height-constrained: height fills exactly, width is smaller, centered
+    // horizontally (black bars left/right).
+    const FrameDebuggerAspectFitRect fit = ComputeAspectFitImageRect(400.0f, 400.0f, 200.0f, 800.0f);
+    EXPECT_FLOAT_EQ(fit.height, 400.0f);
+    EXPECT_LT(fit.width, 400.0f);
+    EXPECT_FLOAT_EQ(fit.offsetY, 0.0f);
+    EXPECT_GT(fit.offsetX, 0.0f);
+}
+
+TEST(FrameDebuggerDataTest, ComputeAspectFitImageRectDegenerateInputFillsAtOrigin)
+{
+    // Any non-positive input -> safe "fill the box at (0, 0)" fallback,
+    // never NaN/negative.
+    {
+        const FrameDebuggerAspectFitRect fit = ComputeAspectFitImageRect(0.0f, 400.0f, 100.0f, 100.0f);
+        EXPECT_FLOAT_EQ(fit.offsetX, 0.0f);
+        EXPECT_FLOAT_EQ(fit.offsetY, 0.0f);
+        EXPECT_FLOAT_EQ(fit.width, 0.0f);
+        EXPECT_FLOAT_EQ(fit.height, 400.0f);
+    }
+    {
+        const FrameDebuggerAspectFitRect fit = ComputeAspectFitImageRect(400.0f, 400.0f, -1.0f, 100.0f);
+        EXPECT_FLOAT_EQ(fit.offsetX, 0.0f);
+        EXPECT_FLOAT_EQ(fit.offsetY, 0.0f);
+        EXPECT_FLOAT_EQ(fit.width, 400.0f);
+        EXPECT_FLOAT_EQ(fit.height, 400.0f);
+    }
+}
+
+TEST(FrameDebuggerDataTest, ComputeAspectFitImageRectRealWorldCase417x333In800x400Box)
+{
+    // This campaign's own reference screenshot's reported resolution
+    // (417x333, aspect ~1.2523) inside an 800x400 box (aspect 2.0) - source
+    // is relatively TALLER than the box -> height-constrained (pillarbox).
+    const FrameDebuggerAspectFitRect fit = ComputeAspectFitImageRect(800.0f, 400.0f, 417.0f, 333.0f);
+    const float expectedWidth = 400.0f * (417.0f / 333.0f); // ~500.9009
+    EXPECT_FLOAT_EQ(fit.height, 400.0f);
+    EXPECT_NEAR(fit.width, expectedWidth, 0.01f);
+    EXPECT_FLOAT_EQ(fit.offsetY, 0.0f);
+    EXPECT_NEAR(fit.offsetX, (800.0f - expectedWidth) * 0.5f, 0.01f);
+}
+
 // task_manager/frame-debugger-3 campaign, PHASE4
 // (PHASE4_PANEL_REAL_TREE_AND_FRAME_HISTORY_UI.md) - the NEW Frame-History
 // mini-toolbar's own label formatter, a completely separate axis from

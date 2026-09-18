@@ -542,12 +542,34 @@ void FrameDebuggerPanel::BuildInspectorPane(
     const bool showPreviewTexture = (m_previewDescriptor != VK_NULL_HANDLE) && (currentEntry != nullptr);
 
     const float previewHeight = std::max(120.0f, ImGui::GetContentRegionAvail().y * 0.5f);
+    // task_manager/frame-debugger-9 campaign, PHASE1
+    // (PHASE1_ASPECT_RATIO_CORRECT_PREVIEW.md, Locked Design Decision #4,
+    // PHASE0_MASTER_STRATEGY.md) - a solid, opaque black background behind
+    // the WHOLE preview child window, whether an image or placeholder text
+    // ends up drawn inside it - the classic letterbox/pillarbox video-player
+    // look, applied uniformly regardless of which branch below actually runs.
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, IM_COL32(0, 0, 0, 255));
     ImGui::BeginChild("FrameDebuggerTexturePreview", ImVec2(0.0f, previewHeight), true);
     {
         if (showPreviewTexture) {
             const ImVec2 avail = ImGui::GetContentRegionAvail();
             if (avail.x >= 1.0f && avail.y >= 1.0f) {
-                ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(m_previewDescriptor)), avail);
+                // task_manager/frame-debugger-9 campaign, PHASE1
+                // (PHASE1_ASPECT_RATIO_CORRECT_PREVIEW.md, Locked Design
+                // Decision #7) - never stretch the real texture to fill
+                // `avail`; instead fit it, preserving its own real aspect
+                // ratio (snapshot.renderTarget.width/height - already
+                // correct for every one of the three possible preview
+                // sources, per this phase's own "Situation" section), and
+                // center the result, leaving solid black bars on whichever
+                // axis has slack.
+                const FrameDebuggerAspectFitRect fit = ComputeAspectFitImageRect(avail.x, avail.y,
+                    static_cast<float>(snapshot.renderTarget.width),
+                    static_cast<float>(snapshot.renderTarget.height));
+                const ImVec2 cursorBase = ImGui::GetCursorPos();
+                ImGui::SetCursorPos(ImVec2(cursorBase.x + fit.offsetX, cursorBase.y + fit.offsetY));
+                ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(m_previewDescriptor)),
+                    ImVec2(fit.width, fit.height));
             }
         } else {
             const ImVec2 avail = ImGui::GetContentRegionAvail();
@@ -567,6 +589,7 @@ void FrameDebuggerPanel::BuildInspectorPane(
         }
     }
     ImGui::EndChild();
+    ImGui::PopStyleColor();
 
     ImGui::Separator();
 

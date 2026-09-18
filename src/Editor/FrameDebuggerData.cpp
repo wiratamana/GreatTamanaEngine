@@ -1,5 +1,6 @@
 #include "FrameDebuggerData.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdio>
 
@@ -40,6 +41,41 @@ int ClampSelectedEventIndex(int requested, int totalEventCount)
         return totalEventCount - 1;
     }
     return requested;
+}
+
+// task_manager/frame-debugger-9 campaign, PHASE1
+// (PHASE1_ASPECT_RATIO_CORRECT_PREVIEW.md, Step 3.1) - see this function's
+// own doc comment in FrameDebuggerData.h for the full contract. Pure
+// geometry: uniform scale-to-fit + centering, with a safe "fill the box at
+// (0, 0)" fallback for any non-positive input.
+FrameDebuggerAspectFitRect ComputeAspectFitImageRect(
+    float availableWidth, float availableHeight, float sourceWidth, float sourceHeight)
+{
+    if (availableWidth <= 0.0f || availableHeight <= 0.0f || sourceWidth <= 0.0f || sourceHeight <= 0.0f) {
+        return FrameDebuggerAspectFitRect{ 0.0f, 0.0f, std::max(0.0f, availableWidth), std::max(0.0f, availableHeight) };
+    }
+
+    const float availableAspect = availableWidth / availableHeight;
+    const float sourceAspect = sourceWidth / sourceHeight;
+
+    float fittedWidth;
+    float fittedHeight;
+    if (sourceAspect > availableAspect) {
+        // Source is relatively WIDER than the box - width-constrained (letterbox: bars top/bottom).
+        fittedWidth = availableWidth;
+        fittedHeight = availableWidth / sourceAspect;
+    } else {
+        // Source is relatively TALLER than (or equal to) the box - height-constrained (pillarbox: bars left/right).
+        fittedHeight = availableHeight;
+        fittedWidth = availableHeight * sourceAspect;
+    }
+
+    FrameDebuggerAspectFitRect rect;
+    rect.width = fittedWidth;
+    rect.height = fittedHeight;
+    rect.offsetX = (availableWidth - fittedWidth) * 0.5f;
+    rect.offsetY = (availableHeight - fittedHeight) * 0.5f;
+    return rect;
 }
 
 std::string FormatFrameHistoryLabel(int cursorIndex, int count)
