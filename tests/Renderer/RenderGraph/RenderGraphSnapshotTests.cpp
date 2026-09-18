@@ -436,6 +436,66 @@ TEST(RenderGraphSnapshotTest, ViewScopeIsCopiedThroughForSurvivingAndCulledPasse
     EXPECT_EQ(culledPass.viewScope, ViewScope::SceneView);
 }
 
+// --- Frame Debugger Pass-Ownership campaign (task_manager/render-pass-2), --
+// --- PHASE1 - drawKind ------------------------------------------------------
+
+// drawKind is copied through correctly for a surviving pass explicitly
+// tagged with a non-default RenderPassDrawKind via the 6-argument
+// AddRenderPass() overload - mirrors ViewScopeIsCopiedThroughForSurvivingAndCulledPasses's
+// own surviving-pass assertion shape, just for the new drawKind field.
+TEST(RenderGraphSnapshotTest, DrawKindIsCopiedThroughForSurvivingPass)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle output = builder.CreateTexture("Output", MakeTextureDesc());
+
+    builder.AddRenderPass(
+        "DrawSkyBackground", PassKind::Graphics, ViewScope::GameView, RenderPassCategory::General,
+        [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(output); }, NoOpExecute,
+        RenderPassDrawKind::DrawQuad);
+
+    CompiledGraphInput input = builder.Finish();
+    const TextureHandle finalOutputs[] = { output };
+    const CompiledGraph compiled = Compile(input, finalOutputs);
+
+    const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, {});
+    ASSERT_EQ(snapshot.passesInExecutionOrder.size(), 1u);
+
+    const RenderGraphPassSnapshot& pass = snapshot.passesInExecutionOrder[0];
+    EXPECT_EQ(pass.name, "DrawSkyBackground");
+    EXPECT_FALSE(pass.isCulled);
+    EXPECT_EQ(pass.drawKind, RenderPassDrawKind::DrawQuad);
+}
+
+// A CULLED pass must still truthfully report the drawKind it WOULD have
+// issued - mirrors ViewScopeIsCopiedThroughForSurvivingAndCulledPasses's own
+// culled-pass assertion shape, just for the new drawKind field.
+TEST(RenderGraphSnapshotTest, DrawKindIsCopiedThroughForCulledPass)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle output = builder.CreateTexture("Output", MakeTextureDesc());
+    const TextureHandle deadEnd = builder.CreateTexture("DeadEnd", MakeTextureDesc());
+
+    builder.AddPass(
+        "Survivor", [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(output); }, NoOpExecute);
+
+    builder.AddRenderPass(
+        "CulledDrawQuadPass", PassKind::Graphics, ViewScope::GameView, RenderPassCategory::General,
+        [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(deadEnd); }, NoOpExecute,
+        RenderPassDrawKind::DrawQuad);
+
+    CompiledGraphInput input = builder.Finish();
+    const TextureHandle finalOutputs[] = { output };
+    const CompiledGraph compiled = Compile(input, finalOutputs);
+
+    const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, {});
+    ASSERT_EQ(snapshot.passesInExecutionOrder.size(), 2u);
+
+    const RenderGraphPassSnapshot& culledPass = snapshot.passesInExecutionOrder[1];
+    EXPECT_EQ(culledPass.name, "CulledDrawQuadPass");
+    EXPECT_TRUE(culledPass.isCulled);
+    EXPECT_EQ(culledPass.drawKind, RenderPassDrawKind::DrawQuad);
+}
+
 // A single pass declaring a mix of texture/buffer/volume-texture reads AND
 // writes ends up with readKinds/writeKinds exactly parallel to
 // readNames/writeNames, each entry carrying the correct ResourceKind - and

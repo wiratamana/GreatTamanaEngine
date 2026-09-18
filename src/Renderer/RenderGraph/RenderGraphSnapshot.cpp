@@ -91,6 +91,7 @@ RenderGraphPassSnapshot BuildPassSnapshot(const PassRecord& pass, const Compiled
     snapshot.isCulled = isCulled;
     snapshot.kind = pass.kind; // Render Pass campaign PHASE1 (task_manager/render-pass-1) - renamed from isComputePass
     snapshot.category = pass.category; // Render Pass campaign PHASE1
+    snapshot.drawKind = pass.drawKind; // Frame Debugger Pass-Ownership campaign (render-pass-2), PHASE1
     snapshot.viewScope = pass.viewScope; // frame-debugger-6, PHASE1
 
     snapshot.readNames.reserve(pass.reads.size());

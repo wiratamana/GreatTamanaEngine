@@ -139,7 +139,13 @@ void AddRenderOpaquePass(rg::RenderGraphBuilder& builder, Game& game, Renderer& 
 // Render Pass campaign, PHASE2 - see RenderPasses.h's own doc comment for
 // the full contract. A true no-op (declares nothing at all) when
 // `recordSkyBackground` is empty, mirroring AddGpuSkinningPasses()'s own
-// "add nothing when nothing to do" pattern.
+// "add nothing when nothing to do" pattern. Frame Debugger Pass-Ownership
+// campaign (task_manager/render-pass-2), PHASE1 - this pass is now
+// explicitly tagged rg::RenderPassDrawKind::DrawQuad (a real, hand-verified
+// full-screen-triangle draw, see AtmosphereSkyBackgroundRenderer.cpp's own
+// vkCmdDraw(cmd, 3, 1, 0, 0)) so a future consumer (PHASE2 of that campaign)
+// can label its Frame Debugger child event correctly without ever
+// hardcoding a pass-name string match.
 void AddDrawSkyBackgroundPass(rg::RenderGraphBuilder& builder, Renderer& renderer, rg::TextureHandle gameViewTarget,
     const std::function<void(VkCommandBuffer)>& recordSkyBackground, FrameDebuggerCaptureContext* frameDebuggerCapture)
 {
@@ -180,7 +186,10 @@ void AddDrawSkyBackgroundPass(rg::RenderGraphBuilder& builder, Renderer& rendere
             // FrameDebuggerData.cpp's BuildRealFrameDebuggerSnapshot()), so
             // it no longer needs to fabricate a draw record at all.
             renderer.EndGraphPassRecording();
-        });
+        },
+        rg::RenderPassDrawKind::DrawQuad); // Frame Debugger Pass-Ownership campaign (render-pass-2), PHASE1 -
+            // see AtmosphereSkyBackgroundRenderer.cpp's own vkCmdDraw(cmd, 3, 1, 0, 0)
+            // - a real full-screen-triangle draw, never a per-object mesh draw.
 }
 
 // Render Pass campaign, PHASE2 - see RenderPasses.h's own doc comment for

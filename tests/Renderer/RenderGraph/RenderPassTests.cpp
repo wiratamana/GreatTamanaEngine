@@ -116,5 +116,69 @@ TEST(RenderPassTest, AddRenderPassExecuteIsNeverInvokedByAddRenderPassOrFinish)
     EXPECT_TRUE(static_cast<bool>(input.passes[0].execute));
 }
 
+// --- Frame Debugger Pass-Ownership campaign (task_manager/render-pass-2),
+// PHASE1 - new trailing, defaulted RenderPassDrawKind parameter -----------
+
+// The 6-argument overload defaults its new trailing drawKind parameter to
+// RenderPassDrawKind::DrawMesh when the caller omits it entirely - every
+// pre-existing 6-argument call site across src/ relies on exactly this.
+TEST(RenderPassTest, AddRenderPassSixArgumentOverloadDefaultsDrawKindToDrawMeshWhenOmitted)
+{
+    RenderGraphBuilder builder;
+
+    builder.AddRenderPass(
+        "RenderOpaque", PassKind::Graphics, ViewScope::GameView, RenderPassCategory::General,
+        [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes.size(), 1u);
+    EXPECT_EQ(input.passes[0].drawKind, RenderPassDrawKind::DrawMesh);
+}
+
+// The 6-argument overload stores exactly the drawKind value explicitly
+// passed as its new trailing argument - mirrors AddDrawSkyBackgroundPass()'s
+// own real RenderPassDrawKind::DrawQuad call site (src/Application/RenderPasses.cpp).
+TEST(RenderPassTest, AddRenderPassSixArgumentOverloadStoresExplicitDrawKind)
+{
+    RenderGraphBuilder builder;
+
+    builder.AddRenderPass(
+        "DrawSkyBackground", PassKind::Graphics, ViewScope::GameView, RenderPassCategory::General,
+        [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute, RenderPassDrawKind::DrawQuad);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes.size(), 1u);
+    EXPECT_EQ(input.passes[0].drawKind, RenderPassDrawKind::DrawQuad);
+}
+
+// The 4-argument convenience overload also defaults its new trailing
+// drawKind parameter to RenderPassDrawKind::DrawMesh when omitted.
+TEST(RenderPassTest, AddRenderPassFourArgumentOverloadDefaultsDrawKindToDrawMeshWhenOmitted)
+{
+    RenderGraphBuilder builder;
+
+    builder.AddRenderPass(
+        "TestPass", PassKind::Graphics, [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes.size(), 1u);
+    EXPECT_EQ(input.passes[0].drawKind, RenderPassDrawKind::DrawMesh);
+}
+
+// The 4-argument convenience overload stores exactly the drawKind value
+// explicitly passed as its new trailing argument.
+TEST(RenderPassTest, AddRenderPassFourArgumentOverloadStoresExplicitDrawKind)
+{
+    RenderGraphBuilder builder;
+
+    builder.AddRenderPass(
+        "TestPass", PassKind::Graphics, [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute,
+        RenderPassDrawKind::DrawQuad);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes.size(), 1u);
+    EXPECT_EQ(input.passes[0].drawKind, RenderPassDrawKind::DrawQuad);
+}
+
 } // namespace
 } // namespace gte::rg

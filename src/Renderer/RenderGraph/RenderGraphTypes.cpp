@@ -91,4 +91,21 @@ const char* ToString(RenderPassCategory category) noexcept
     return "Unknown";
 }
 
+// Frame Debugger Pass-Ownership campaign (task_manager/render-pass-2),
+// PHASE1 - see RenderGraphTypes.h's own comment on RenderPassDrawKind for
+// why this exists.
+const char* ToString(RenderPassDrawKind drawKind) noexcept
+{
+    // Deliberately NO `default:` case - see this file's own header comment.
+    switch (drawKind) {
+    case RenderPassDrawKind::DrawMesh:
+        return "DrawMesh";
+    case RenderPassDrawKind::DrawQuad:
+        return "DrawQuad";
+    case RenderPassDrawKind::Blit:
+        return "Blit";
+    }
+    return "Unknown";
+}
+
 } // namespace gte::rg

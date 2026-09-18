@@ -365,6 +365,42 @@ enum class RenderPassCategory : std::uint8_t {
 
 const char* ToString(RenderPassCategory category) noexcept;
 
+// Frame Debugger Pass-Ownership campaign (task_manager/render-pass-2),
+// PHASE1 - which STRUCTURAL kind of draw operation a Graphics-kind pass
+// issues - PURELY DESCRIPTIVE metadata for the Editor Frame Debugger's own
+// child-event-labeling purposes (PHASE2 of this campaign) ONLY. Nothing in
+// RenderGraph.cpp/RenderGraphCompiler.cpp/RenderGraphBarrierPlanner.cpp ever
+// reads this field - mirrors RenderPassCategory's own identical rule
+// (immediately above). Meaningless for a Compute-kind pass (PassRecord::kind
+// == PassKind::Compute) - a compute dispatch's own Frame Debugger child
+// event is always labeled "Compute Dispatch" regardless of this field's
+// value; every Compute-kind pass simply leaves this at its own default.
+//
+// `Blit` is a REAL, currently COMPLETELY UNUSED scaffold enumerator - no
+// pass in this engine is tagged with it today, and none can be until a
+// FUTURE campaign teaches RenderGraph::Execute() a genuinely new recording
+// path (a real vkCmdBlitImage/vkCmdCopyImage cannot be issued inside a
+// vkCmdBeginRendering/vkCmdEndRendering bracket, which every Graphics-kind
+// pass uses today) - see PHASE0_MASTER_STRATEGY.md's Locked Design Decision
+// #4 for the full reasoning. Adding it now, unused, means that future
+// campaign needs zero further Frame Debugger changes once it lands.
+//
+// Deliberately an exhaustive-switch-friendly small enum, mirroring
+// PassKind's/RenderPassCategory's own "no default: case, ever" convention in
+// this same file.
+enum class RenderPassDrawKind : std::uint8_t {
+    DrawMesh, // The default - a real per-object mesh draw (e.g. "RenderOpaque"'s
+        // own per-entity children, the N FrameDebuggerReplayStepN debug
+        // replay passes, a future real "RenderTransparent").
+    DrawQuad, // A full-screen/screen-space triangle-or-quad draw with no
+        // per-object identity (e.g. "DrawSkyBackground" - see
+        // AtmosphereSkyBackgroundRenderer.cpp's own vkCmdDraw(cmd, 3, 1, 0, 0)).
+    Blit, // A raw image copy/blit - see this enum's own header comment
+        // above for why this is a real-but-unused scaffold value today.
+};
+
+const char* ToString(RenderPassDrawKind drawKind) noexcept;
+
 // A single declared read/write on a texture, a buffer, OR a volume
 // texture. Phase 1 shipped this as a texture-only shape; Phase 2 of the
 // Render Graph campaign grew it into a texture/buffer tagged-union shape
@@ -522,6 +558,15 @@ struct PassRecord {
     // Appended at the END of the struct (never inserted in the middle) -
     // see this file's own header comment / AGENTS.md for why.
     RenderPassCategory category = RenderPassCategory::General;
+
+    // Frame Debugger Pass-Ownership campaign (task_manager/render-pass-2),
+    // PHASE1 - which structural kind of draw operation this pass issues
+    // (see RenderPassDrawKind's own doc comment above) - purely descriptive
+    // metadata for the Editor Frame Debugger's child-event-labeling purposes
+    // (PHASE2), read by NOTHING in RenderGraph.cpp/RenderGraphCompiler.cpp/
+    // RenderGraphBarrierPlanner.cpp. Appended at the END of the struct
+    // (never inserted in the middle) - see this file's own header comment.
+    RenderPassDrawKind drawKind = RenderPassDrawKind::DrawMesh;
 };
 
 } // namespace gte::rg

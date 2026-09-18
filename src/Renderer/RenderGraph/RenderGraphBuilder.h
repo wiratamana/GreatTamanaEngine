@@ -432,9 +432,20 @@ public:
     // removed or deprecated - they remain the low-level primitives this method
     // (and Tier-1 tests) are built on, and existing test-only call sites are
     // free to keep using them directly.
+    // Frame Debugger Pass-Ownership campaign (task_manager/render-pass-2),
+    // PHASE1 - new, TRAILING, DEFAULTED `drawKind` parameter (see
+    // RenderPassDrawKind's own doc comment, RenderGraphTypes.h) - purely
+    // descriptive metadata for the Editor Frame Debugger's child-event-
+    // labeling purposes (PHASE2 of that campaign), stamped in the same
+    // one place `category` already is. A trailing defaulted plain-type
+    // parameter added after the two template-deduced lambda parameters
+    // does not interact with template argument deduction at all, so
+    // EVERY pre-existing call site of this overload (which only ever
+    // supplies `name`/`kind`/`viewScope`/`category`/`setup`/`execute`)
+    // compiles completely unmodified.
     template <typename SetupFn, typename ExecuteFn>
     void AddRenderPass(const char* name, PassKind kind, ViewScope viewScope, RenderPassCategory category,
-        SetupFn&& setup, ExecuteFn&& execute)
+        SetupFn&& setup, ExecuteFn&& execute, RenderPassDrawKind drawKind = RenderPassDrawKind::DrawMesh)
     {
         if (kind == PassKind::Compute) {
             AddComputePass(name, viewScope, std::forward<SetupFn>(setup), std::forward<ExecuteFn>(execute));
@@ -442,17 +453,23 @@ public:
             AddPass(name, viewScope, std::forward<SetupFn>(setup), std::forward<ExecuteFn>(execute));
         }
         m_passes.back().category = category;
+        m_passes.back().drawKind = drawKind; // Frame Debugger Pass-Ownership campaign (render-pass-2), PHASE1
     }
 
     // Convenience overload defaulting `viewScope` to Shared and `category` to
     // General - for the (today, majority of) real call sites that need
     // neither. Mirrors AddPass()'s own pre-existing 3-arg/4-arg overload pair
-    // exactly.
+    // exactly. Also forwards the new trailing, defaulted `drawKind` parameter
+    // (Frame Debugger Pass-Ownership campaign, task_manager/render-pass-2,
+    // PHASE1) - same "trailing defaulted plain-type parameter never touches
+    // template deduction" reasoning as the overload above, so every
+    // pre-existing 4-argument call site compiles completely unmodified.
     template <typename SetupFn, typename ExecuteFn>
-    void AddRenderPass(const char* name, PassKind kind, SetupFn&& setup, ExecuteFn&& execute)
+    void AddRenderPass(const char* name, PassKind kind, SetupFn&& setup, ExecuteFn&& execute,
+        RenderPassDrawKind drawKind = RenderPassDrawKind::DrawMesh)
     {
         AddRenderPass(name, kind, ViewScope::Shared, RenderPassCategory::General,
-            std::forward<SetupFn>(setup), std::forward<ExecuteFn>(execute));
+            std::forward<SetupFn>(setup), std::forward<ExecuteFn>(execute), drawKind);
     }
 
     // Consumes this builder, handing its whole in-progress description

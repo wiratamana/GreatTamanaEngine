@@ -111,6 +111,12 @@ struct RenderGraphPassSnapshot {
     // surviving AND a culled pass, exactly like `kind` above.
     RenderPassCategory category = RenderPassCategory::General;
 
+    // Frame Debugger Pass-Ownership campaign (task_manager/render-pass-2),
+    // PHASE1 - copied straight through for BOTH a surviving AND a culled
+    // pass, exactly like `category` above (a culled pass must still
+    // truthfully report what kind of draw it WOULD have issued).
+    RenderPassDrawKind drawKind = RenderPassDrawKind::DrawMesh;
+
     // frame-debugger-6 campaign, PHASE1
     // (PHASE1_RENDERGRAPH_VIEWSCOPE_CHOKEPOINT_INFRASTRUCTURE.md) - copied
     // straight through for BOTH a surviving AND a culled pass, exactly like

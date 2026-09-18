@@ -459,5 +459,30 @@ TEST(RenderGraphRenderPassCategoryTest, ToStringProducesDistinctNamesForDistinct
     EXPECT_STREQ(ToString(RenderPassCategory::Debug), "Debug");
 }
 
+// --- RenderPassDrawKind (Frame Debugger Pass-Ownership campaign,
+// task_manager/render-pass-2, PHASE1) --------------------------------------
+
+TEST(RenderGraphRenderPassDrawKindTest, ToStringCoversEveryEnumeratorNonNullNonEmpty)
+{
+    const RenderPassDrawKind values[] = {
+        RenderPassDrawKind::DrawMesh,
+        RenderPassDrawKind::DrawQuad,
+        RenderPassDrawKind::Blit,
+    };
+
+    for (const RenderPassDrawKind value : values) {
+        const char* name = ToString(value);
+        ASSERT_NE(name, nullptr);
+        EXPECT_GT(std::string_view(name).size(), 0u);
+    }
+}
+
+TEST(RenderGraphRenderPassDrawKindTest, ToStringProducesDistinctNamesForDistinctEnumerators)
+{
+    EXPECT_STREQ(ToString(RenderPassDrawKind::DrawMesh), "DrawMesh");
+    EXPECT_STREQ(ToString(RenderPassDrawKind::DrawQuad), "DrawQuad");
+    EXPECT_STREQ(ToString(RenderPassDrawKind::Blit), "Blit");
+}
+
 } // namespace
 } // namespace gte::rg
