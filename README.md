@@ -110,6 +110,56 @@ pieces. This section keeps only the most recent entries inline — see
 **[docs/CHANGELOG.md](docs/CHANGELOG.md)** for the complete, reverse-
 chronological project history from the very first triangle demo onward.
 
+- **A follow-up campaign, `render-pass-2`, fixed a confirmed bug where the Frame
+  Debugger's `"DrawSkyBackground"` row rendered flat with no expand arrow,
+  looking like a stray, orphaned row belonging to no render pass** (four
+  phases - `task_manager/render-pass-2/PHASE0_MASTER_STRATEGY.md`) - the
+  confirmed root cause: `BuildRealFrameDebuggerSnapshot()`
+  (`src/Editor/FrameDebuggerData.cpp`) built every real pass leaf other than
+  `"RenderOpaque"` (every individual Atmosphere `"Compute LUT"` sub-pass, every
+  Pre/Post-GameView compute dispatch, and `"DrawSkyBackground"` itself) as a
+  single FLAT `FrameDebuggerEventNode` with no child - a genuine structural
+  gap, not a display bug. Fixed by a new, purely-descriptive
+  `rg::RenderPassDrawKind` enum (`DrawMesh`/`DrawQuad`/`Blit`) threaded through
+  `AddRenderPass()`'s new trailing, defaulted parameter (`"DrawSkyBackground"`
+  explicitly tagged `DrawQuad` - a real, hand-verified 3-vertex
+  full-screen-triangle draw) plus a new shared `WrapPassWithOwnedChildEvent()`
+  helper that turns EVERY real pass leaf into a "v PassName" parent owning
+  exactly one real, independently-selectable child event row (`"Compute
+  Dispatch"` for a Compute-kind pass; `"Draw Mesh"`/`"Draw Quad"`/`"Blit"` for
+  a Graphics-kind pass, chosen purely by its own structural
+  `RenderPassDrawKind` tag, never a pass-name string match) - `"RenderOpaque"`'s
+  own already-correct per-entity-children shape left completely untouched.
+  Verified with a full clean build, a full `ctest` regression pass (1589
+  tests, 100% passing, one pre-existing environment-gated skip), and a live,
+  HTTP-driven, screenshot-verified smoke test confirming `"DrawSkyBackground"`
+  now expands to a `"Draw Quad"` child and every `"Compute LUT"` sub-pass now
+  expands to a `"Compute Dispatch"` child, with both the pass-level row and
+  its new child row independently selectable and showing correct, matching
+  Inspector data. See `task_manager/render-pass-2/CAMPAIGN_COMPLETION_REPORT.md`
+  for the full four-phase writeup.
+- **A prior campaign, `render-pass-1`, replaced this engine's old ad-hoc
+  `AddPass()`/`AddComputePass()` free-function sprawl with a single, official
+  Render Graph pass-declaration chokepoint, `RenderGraphBuilder::AddRenderPass()`,
+  and split the old monolithic `"GameView"` pass into three real, separate
+  passes** (seven phases - `task_manager/render-pass-1/PHASE0_MASTER_STRATEGY.md`)
+  - `"RenderOpaque"`, a brand-new `"DrawSkyBackground"` (previously hand-fused
+  into `"GameView"`'s own execute lambda via a hardcoded
+  `isSkyBackgroundDraw`/`RecordSkyBackgroundDraw()` hack), and a
+  permanently-empty `"RenderTransparent"` scaffold for a future transparency
+  system - every real pass in the engine (5 Atmosphere LUT passes, the Aerial
+  Perspective Composite pass, GPU Skinning, `"Present"`, the Frame Debugger's
+  own replay passes, Compute Blur Validation) now declared through this one
+  chokepoint, tagged with new `PassKind` (`Graphics`/`Compute`) and
+  `RenderPassCategory` (`General`/`AtmosphereLut`/`GpuSkinning`/`Debug`)
+  metadata the Frame Debugger's own tree-building logic discovers
+  generically, never via a hand-maintained name list. Verified with a full
+  clean build, a full `ctest` regression pass (1578 tests, 100% passing, one
+  pre-existing environment-gated skip), and a live, HTTP-driven,
+  screenshot-verified smoke test confirming the new tree shape and
+  `"DrawSkyBackground"`'s own correct, distinct pipeline-state Inspector data.
+  See `task_manager/render-pass-1/CAMPAIGN_COMPLETION_REPORT.md` for the full
+  seven-phase writeup.
 - **A follow-up campaign, `frame-debugger-5`, fixed a confirmed bug where the
   Frame Debugger below only ever showed 3 of this engine's 8+ real
   compute-shader dispatches** (five phases -
