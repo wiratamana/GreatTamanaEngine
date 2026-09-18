@@ -41,10 +41,22 @@
 // AddSceneViewPass()/AddPresentPass() - see each one's own doc comment.
 
 #include "../Math/Mat4.h"
+// render-pass-3 campaign, PHASE2 (PHASE2_GPU_SKINNING_OPAQUE_BLACKBOARD_PROOF.md)
+// - upgraded from a bare `namespace rg { class RenderGraphBuilder; }`
+// forward declaration to a real, full #include: this header now declares
+// DeclareGpuSkinningReads()/kGameClearColor/kGameClearDepth (below), moved
+// here (from RenderPasses.cpp's own former anonymous namespace) so
+// Application.cpp's new "RenderOpaque" RenderPipeline provider can reuse
+// these SAME symbols bit-for-bit rather than duplicating them -
+// DeclareGpuSkinningReads()'s own signature needs the real, complete
+// rg::RenderGraphBuilder::PassBuilder nested type, which a bare forward
+// declaration of the outer class can never provide.
+#include "../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../Renderer/RenderGraph/RenderGraphTypes.h"
 
 #include <volk.h>
 
+#include <array>
 #include <cstddef>
 #include <functional>
 #include <optional>
@@ -71,6 +83,31 @@ class FrameDebuggerCaptureContext;
 namespace rg {
 class RenderGraphBuilder;
 } // namespace rg
+
+// render-pass-3 campaign, PHASE2 (PHASE2_GPU_SKINNING_OPAQUE_BLACKBOARD_PROOF.md)
+// - moved here from RenderPasses.cpp's own former anonymous namespace
+// (UNCHANGED in value/behavior) so Application.cpp's new "RenderOpaque"
+// RenderPipeline provider can declare a BIT-FOR-BIT IDENTICAL initial
+// clear/GPU-skinning-read as this file's own AddRenderOpaquePass() below,
+// rather than risking two independently-hand-maintained copies drifting
+// apart. Matches Game::Render()'s own hardcoded `renderer.Clear(20, 20, 30,
+// 255)` call EXACTLY (src/Game/Game.cpp).
+inline constexpr std::array<float, 4> kGameClearColor{ 20.0f / 255.0f, 20.0f / 255.0f, 30.0f / 255.0f, 1.0f };
+// Far plane - matches FrameRecorder.cpp's own
+// `depthAttachment.clearValue.depthStencil = { 1.0f, 0 }`.
+inline constexpr float kGameClearDepth = 1.0f;
+
+// Declares a phantom ResourceAccess::VertexBufferRead against every handle
+// in `gpuSkinningOutputBuffers` - see GPU_SKINNING_PHASE3_RENDERGRAPH_SYNCHRONIZATION_STRATEGY_v2.md
+// for why this is NOT dead code - do not remove even though the mesh vertex
+// buffer is actually read via a real VkVertexInputAttributeDescription
+// binding, never through this declared handle directly. render-pass-3
+// campaign, PHASE2 - moved here (from RenderPasses.cpp's own former
+// anonymous namespace, UNCHANGED body) for the exact same reason
+// kGameClearColor/kGameClearDepth above were: Application.cpp's new
+// "RenderOpaque" RenderPipeline provider calls this SAME helper too.
+void DeclareGpuSkinningReads(
+    rg::RenderGraphBuilder::PassBuilder& pass, const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers);
 
 // Render Pass campaign (task_manager/render-pass-1), PHASE2
 // (PHASE2_RENDER_OPAQUE_SKY_SPLIT_AND_TRANSPARENT_STUB.md) - RENAMED from

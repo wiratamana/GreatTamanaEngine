@@ -10,6 +10,13 @@
 #include "../Renderer/Atmosphere/AtmosphereLutRenderer.h"
 #include "../Renderer/Renderer.h"
 #include "../Renderer/RenderGraph/RenderGraph.h"
+// render-pass-3 campaign, PHASE2 (PHASE2_GPU_SKINNING_OPAQUE_BLACKBOARD_PROOF.md)
+// - the new, generic pass-DECLARATION layer (PHASE1's own
+// RenderPipeline.h). Application owns the ONE m_offscreenRenderPipeline
+// instance registered with this phase's first two real providers -
+// "GpuSkinning" and "RenderOpaque" - see this class's own member comment
+// below and Application.cpp's RegisterOffscreenRenderPipelineProviders().
+#include "../Renderer/RenderGraph/RenderPipeline.h"
 #include "../Renderer/VolumeTexturePreviewRenderer.h"
 #include "../Window/Window.h"
 #include "AssetImportCommandBridge.h"
@@ -44,6 +51,12 @@ public:
     int Run();
 
 private:
+    // render-pass-3 campaign, PHASE2 (PHASE2_GPU_SKINNING_OPAQUE_BLACKBOARD_PROOF.md)
+    // - registers this phase's first two real providers ("GpuSkinning"/
+    // "RenderOpaque") onto m_offscreenRenderPipeline (below). Called once,
+    // from the constructor body - see Application.cpp.
+    void RegisterOffscreenRenderPipelineProviders();
+
     // RAII guard for SDL_Init()/SDL_Quit(). Declared FIRST so it is
     // constructed before, and destroyed after, every other SDL-owning member
     // below it (Window, Renderer, ...) - this keeps init/shutdown ordering
@@ -66,6 +79,44 @@ private:
     // reference to it) so it's already fully constructed by the time
     // m_editorLayer/m_game below might indirectly need it.
     rg::RenderGraph m_renderGraph;
+
+    // render-pass-3 campaign, PHASE2 (PHASE2_GPU_SKINNING_OPAQUE_BLACKBOARD_PROOF.md)
+    // - the new, generic pass-DECLARATION layer sitting strictly ABOVE
+    // m_renderGraph/RenderGraphBuilder (PHASE0_MASTER_STRATEGY.md's Locked
+    // Design Decision 6: "Two separate RenderPipeline instances, not one" -
+    // this is the OFFSCREEN one, covering every pass declared inside the
+    // SYNCHRONOUS offscreen Execute() call (Game View + Scene View) - a
+    // future PHASE3 m_presentRenderPipeline covers "Present" alone, in the
+    // PIPELINED swapchain Execute() call, which is a SEPARATE graph this
+    // phase does not touch). Registered with its first two real providers
+    // ("GpuSkinning"/"RenderOpaque") by RegisterOffscreenRenderPipelineProviders()
+    // (called once, from the constructor body) - see Run()'s own offscreen
+    // build lambda for where DeclareInto() is actually invoked each frame.
+    rg::RenderPipeline m_offscreenRenderPipeline;
+
+    // render-pass-3 campaign, PHASE2 - populated fresh, every frame, by
+    // Run() itself, IMMEDIATELY BEFORE calling
+    // m_offscreenRenderPipeline.DeclareInto() - a rg::RenderPassProvider
+    // callback (PHASE1's own RenderPipeline.h) has no rg::RenderGraphBuilder&
+    // access of its own to call ImportBuffer() (see this phase's own
+    // completion report for the full "wrinkle" resolution this represents:
+    // resolving BufferHandle values OUTSIDE any provider, by the caller,
+    // rather than growing RenderGraphBuilder.h's own public surface). Read
+    // ONLY by the "GpuSkinning" provider (registered in the constructor,
+    // capturing `this`) - never written to by anything except Run().
+    std::vector<AnimationSystem::GpuSkinningDispatchRequest> m_gpuSkinningRequestsThisFrame;
+    std::vector<rg::BufferHandle> m_gpuSkinningHandlesThisFrame;
+
+    // render-pass-3 campaign, PHASE2 - same "populated fresh every frame by
+    // Run(), read only by a provider" shape as the two members immediately
+    // above, this time for the "RenderOpaque" provider: the Game View's own
+    // imported texture handle/aspect ratio/armed Frame Debugger capture
+    // pointer, all only known inside Run()'s own `if (gameTarget !=
+    // nullptr)` block - see that provider's own registration body
+    // (Application.cpp) for how these are consumed.
+    rg::TextureHandle m_currentGameViewTargetForOffscreenPipeline;
+    float m_currentGameViewAspectForOffscreenPipeline = 1.0f;
+    FrameDebuggerCaptureContext* m_currentFrameDebuggerCaptureForOffscreenPipeline = nullptr;
 
     // Atmosphere Scattering + Aerial Perspective campaign, Phase 3
     // (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE3_TRANSMITTANCE_LUT_v1.md)

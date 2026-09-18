@@ -14,6 +14,14 @@
 #include "../Profiling/FrameProfiler.h"
 #include "../Profiling/ScopeTimer.h"
 #include "../Renderer/Atmosphere/AtmosphereParameters.h"
+// render-pass-3 campaign, PHASE2 (PHASE2_GPU_SKINNING_OPAQUE_BLACKBOARD_PROOF.md)
+// - the "GpuSkinning" RenderPipeline provider (RegisterOffscreenRenderPipelineProviders()
+// below) is a direct, literal translation of RenderPasses.cpp's own
+// AddGpuSkinningPasses() loop body - needs the same two headers that file
+// already includes for the exact same reason (ComputeGroupCount()/
+// kSkinningLocalSizeX, GpuSkinningPipelines).
+#include "../Renderer/ComputeDispatch.h"
+#include "../Renderer/GpuSkinning/GpuSkinningPipelines.h"
 #include "../Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../Renderer/RenderGraph/RenderGraphDebugTextureRegistry.h"
@@ -47,6 +55,19 @@ float AspectRatioOf(int width, int height) noexcept
 // Time::Advance()'s own doc comment, Locked Design Decision #11). A plain
 // 1/60s, never derived from real elapsed time.
 constexpr double kFixedStepSeconds = 1.0 / 60.0;
+
+// render-pass-3 campaign, PHASE2 (PHASE2_GPU_SKINNING_OPAQUE_BLACKBOARD_PROOF.md)
+// - the ONE rg::RenderPassBlackboard key GPU Skinning's "GpuSkinning"
+// provider Publish()es its resulting std::vector<rg::BufferHandle> under,
+// and "RenderOpaque"'s own provider Fetch()es it back from - a real,
+// concrete instance of PHASE1's generic cross-provider hand-off mechanism
+// (RenderPassBlackboard), replacing the OLD hand-threaded
+// `gpuSkinningOutputBuffers` parameter for THIS one call site only (see
+// PHASE0_MASTER_STRATEGY.md's Locked Design Decision 3). `using
+// rg::operator""_passId;` brings PHASE1's own consteval literal operator
+// into scope (it lives in `namespace gte::rg`, not `gte` itself).
+using rg::operator""_passId;
+constexpr rg::RenderPassId kGpuSkinningOutputsKey = "GpuSkinning.OutputBuffers"_passId;
 
 
 
@@ -181,6 +202,13 @@ Application::Application(const std::string& title, int width, int height)
     , m_windowWidth(width)
     , m_windowHeight(height)
 {
+    // render-pass-3 campaign, PHASE2 (PHASE2_GPU_SKINNING_OPAQUE_BLACKBOARD_PROOF.md)
+    // - registers m_offscreenRenderPipeline's first two real providers
+    // ("GpuSkinning"/"RenderOpaque") once, here, at construction time - see
+    // this method's own definition below for the full "GpuSkinning
+    // publishes, RenderOpaque fetches" blackboard hand-off.
+    RegisterOffscreenRenderPipelineProviders();
+
 #if GTE_ENABLE_NETWORK
     // Loopback-only (127.0.0.1 is baked into NetworkServer itself - Start()
     // deliberately has no host parameter, see Phase 2), port 8080 - see
@@ -196,6 +224,116 @@ Application::Application(const std::string& title, int width, int height)
 }
 
 Application::~Application() = default;
+
+// render-pass-3 campaign, PHASE2 (PHASE2_GPU_SKINNING_OPAQUE_BLACKBOARD_PROOF.md)
+// - the first real consumer of PHASE1's whole new declaration layer. Two
+// providers, wired with ZERO direct call or shared captured variable
+// between their own registration lambdas - the ONLY thing that connects
+// them is `frame.blackboard` (kGpuSkinningOutputsKey, above).
+void Application::RegisterOffscreenRenderPipelineProviders()
+{
+    // "GpuSkinning" - ProviderScope::Once (invoked exactly once per
+    // m_offscreenRenderPipeline.DeclareInto() call, regardless of how many
+    // views are active this frame - GPU Skinning's compute dispatch is
+    // view-independent). A direct, literal translation of
+    // RenderPasses.cpp's own AddGpuSkinningPasses() loop body, EXCEPT: this
+    // provider has no rg::RenderGraphBuilder& of its own to call
+    // ImportBuffer() (a RenderPassProvider's signature deliberately has none
+    // - see PHASE1_CORE_VOCABULARY_AND_BLACKBOARD.md) - m_gpuSkinningRequestsThisFrame/
+    // m_gpuSkinningHandlesThisFrame are populated by Run() itself,
+    // immediately BEFORE calling m_offscreenRenderPipeline.DeclareInto(),
+    // using the SAME RenderGraphBuilder& this frame's graph is being built
+    // against (see Run()'s own offscreen build lambda) - this is the
+    // "resolve outside any provider, by the caller" resolution
+    // PHASE2_GPU_SKINNING_OPAQUE_BLACKBOARD_PROOF.md's own Step 3.1
+    // explicitly preferred over growing RenderGraphBuilder.h's own public
+    // surface.
+    m_offscreenRenderPipeline.Register("GpuSkinning", rg::ProviderScope::Once,
+        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
+            GpuSkinningPipelines& pipelines = m_game.GetGpuSkinningPipelines();
+
+            for (std::size_t i = 0; i < m_gpuSkinningRequestsThisFrame.size(); ++i) {
+                const AnimationSystem::GpuSkinningDispatchRequest& request = m_gpuSkinningRequestsThisFrame[i];
+                const rg::BufferHandle handle = m_gpuSkinningHandlesThisFrame[i];
+
+                rg::RenderPassDesc desc;
+                desc.debugName = request.name;
+                desc.kind = rg::PassKind::Compute;
+                desc.order = rg::RenderPassEvent::PreOpaques;
+                desc.view = rg::RenderViewId::Shared();
+                desc.legacyCategory = rg::RenderPassCategory::GpuSkinning;
+                desc.setup = [handle](rg::RenderGraphBuilder::PassBuilder& pass) {
+                    pass.WriteBuffer(handle, rg::ResourceAccess::ComputeShaderWrite);
+                };
+                desc.execute = [this, &pipelines, request](rg::PassContext& ctx) {
+                    const ComputePipeline& pipeline =
+                        request.textured ? pipelines.PositionNormalUvPipeline() : pipelines.PositionNormalPipeline();
+                    const std::uint32_t vertexCount = request.vertexCount;
+
+                    m_renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
+                    m_renderer.Dispatch(pipeline, request.descriptorSet, &vertexCount, sizeof(vertexCount),
+                        ComputeGroupCount(vertexCount, kSkinningLocalSizeX), 1, 1);
+                    m_renderer.EndGraphPassRecording();
+                };
+                out.push_back(std::move(desc));
+            }
+
+            // Published EVERY time this provider runs, even when
+            // m_gpuSkinningHandlesThisFrame is empty (no model needs GPU
+            // skinning this frame, or CPU skinning mode is active) - see
+            // this phase's own Definition of Done: "RenderOpaque" below
+            // ALWAYS Fetch()es this same key, every frame, unconditionally,
+            // so an empty publish is never "unused" (it IS read, it just
+            // reads back an empty vector) - ReportUnusedPublishesIfAny()
+            // never fires for this key in normal operation.
+            frame.blackboard.Publish<std::vector<rg::BufferHandle>>(
+                kGpuSkinningOutputsKey, m_gpuSkinningHandlesThisFrame);
+        });
+
+    // "RenderOpaque" - ProviderScope::PerActiveView. This phase's own
+    // narrow scope (PHASE2_GPU_SKINNING_OPAQUE_BLACKBOARD_PROOF.md's "What
+    // We Will NOT Do") keeps frame.activeViews containing AT MOST the one
+    // Game View id, populated by Run() itself right before DeclareInto() -
+    // see that call site. A direct, literal translation of
+    // RenderPasses.cpp's own AddRenderOpaquePass(), with ONE change:
+    // gpuSkinningOutputBuffers is no longer a captured/threaded parameter -
+    // it is Fetch()'d from the blackboard instead, with ZERO direct
+    // knowledge of the "GpuSkinning" provider above.
+    m_offscreenRenderPipeline.Register("RenderOpaque", rg::ProviderScope::PerActiveView,
+        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
+            const std::vector<rg::BufferHandle> gpuSkinningBuffers =
+                frame.blackboard.Fetch<std::vector<rg::BufferHandle>>(kGpuSkinningOutputsKey)
+                    .value_or(std::vector<rg::BufferHandle>{});
+
+            const rg::TextureHandle gameViewTarget = m_currentGameViewTargetForOffscreenPipeline;
+            const float aspectWidthOverHeight = m_currentGameViewAspectForOffscreenPipeline;
+            FrameDebuggerCaptureContext* frameDebuggerCapture = m_currentFrameDebuggerCaptureForOffscreenPipeline;
+
+            rg::RenderPassDesc desc;
+            desc.debugName = "RenderOpaque";
+            desc.kind = rg::PassKind::Graphics;
+            desc.order = rg::RenderPassEvent::Opaques;
+            desc.view = frame.currentView;
+            // Frame Debugger Pass-Ownership behavior must be BIT-FOR-BIT
+            // IDENTICAL to the old direct AddRenderOpaquePass() call - see
+            // this phase's own "What We Will NOT Do". legacyCategory/
+            // drawKind default to General/DrawMesh respectively (PHASE1's
+            // own RenderPassDesc defaults), matching AddRenderOpaquePass()'s
+            // own call into the OLD AddRenderPass() overload exactly.
+            desc.legacyCategory = rg::RenderPassCategory::General;
+            desc.setup = [gameViewTarget, gpuSkinningBuffers](rg::RenderGraphBuilder::PassBuilder& pass) {
+                pass.WriteColorAttachment(gameViewTarget, kGameClearColor);
+                pass.WriteDepthStencilAttachment(gameViewTarget, kGameClearDepth);
+                DeclareGpuSkinningReads(pass, gpuSkinningBuffers);
+            };
+            desc.execute = [this, aspectWidthOverHeight, frameDebuggerCapture](rg::PassContext& ctx) {
+                m_renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
+                m_game.Render(m_renderer, aspectWidthOverHeight, nullptr, frameDebuggerCapture);
+                m_renderer.EndGraphPassRecording();
+            };
+            out.push_back(std::move(desc));
+        });
+}
 
 int Application::Run()
 {
@@ -550,16 +688,32 @@ int Application::Run()
                     [&](rg::RenderGraphBuilder& b) {
                         std::vector<rg::TextureHandle> outputs;
 
-                        // GPU Vertex Skinning campaign, Phase 5
-                        // (GPU_SKINNING_PHASE5_RUNTIME_CPU_GPU_SWITCH_STRATEGY_v2.md,
-                        // Step 3.3) - declared FIRST, before either view pass
-                        // below, so their own ResourceAccess::VertexBufferRead
-                        // declarations (see RenderPasses.h) have a real
-                        // BufferHandle to reference. A no-op (empty vector,
-                        // nothing declared) in CPU skinning mode or whenever
-                        // no rigged model is currently animating.
-                        const std::vector<rg::BufferHandle> gpuSkinningBuffers =
-                            AddGpuSkinningPasses(b, m_game, m_renderer);
+                        // render-pass-3 campaign, PHASE2 (PHASE2_GPU_SKINNING_OPAQUE_BLACKBOARD_PROOF.md)
+                        // - GPU Skinning's compute-dispatch declaration now goes through
+                        // m_offscreenRenderPipeline's "GpuSkinning" provider INSTEAD of a direct
+                        // AddGpuSkinningPasses() call, but ONLY when the Game View is actually
+                        // visible this frame (gameTarget != nullptr) - see the
+                        // m_offscreenRenderPipeline.DeclareInto() call site inside that `if` block
+                        // below, where m_gpuSkinningRequestsThisFrame/m_gpuSkinningHandlesThisFrame
+                        // are populated and the new pipeline is driven. When Game View is NOT
+                        // visible (gameTarget == nullptr, e.g. only the Editor's "Scene" panel is
+                        // open), that `if` block - and therefore DeclareInto() itself - never runs
+                        // at all this frame, so GPU Skinning's compute dispatch would silently
+                        // never be declared unless something ELSE declares it - Scene View's own
+                        // opaque draw (AddSceneViewPass(), below) still needs these buffers via the
+                        // OLD, unmigrated `gpuSkinningOutputBuffers` parameter (PHASE3's job to
+                        // migrate that call site onto the new system) - so this ONE fallback branch
+                        // keeps calling the OLD, UNCHANGED AddGpuSkinningPasses() free function
+                        // directly, exactly as before this phase, whenever gameTarget == nullptr.
+                        // The two paths are MUTUALLY EXCLUSIVE per frame (this `if`/the new
+                        // pipeline's own "GpuSkinning" provider inside the `if (gameTarget !=
+                        // nullptr)` block below), so GPU Skinning's own compute dispatch is still
+                        // declared EXACTLY ONCE per frame, never twice - see this phase's own
+                        // completion report for the full reasoning.
+                        std::vector<rg::BufferHandle> gpuSkinningBuffers;
+                        if (gameTarget == nullptr) {
+                            gpuSkinningBuffers = AddGpuSkinningPasses(b, m_game, m_renderer);
+                        }
 
                         // Atmosphere Scattering + Aerial Perspective campaign,
                         // Phase 7 (task_manager/atmosphere-scattering-1/
@@ -666,8 +820,59 @@ int Application::Run()
                             // needs to happen once - the Render Graph's own
                             // reachability culling keeps every pass that
                             // touches a kept root's resource alive.
-                            AddRenderOpaquePass(b, m_game, m_renderer, h, aspect, gpuSkinningBuffers,
-                                frameDebuggerCapture);
+                            // render-pass-3 campaign, PHASE2 (PHASE2_GPU_SKINNING_OPAQUE_BLACKBOARD_PROOF.md)
+                            // - the OLD, direct AddGpuSkinningPasses()+AddRenderOpaquePass()
+                            // call PAIR is REPLACED, for the Game View case only, by driving
+                            // m_offscreenRenderPipeline's two new providers ("GpuSkinning"/
+                            // "RenderOpaque") instead - GPU Skinning's output buffer handles
+                            // reach "RenderOpaque" ENTIRELY through the blackboard (see
+                            // RegisterOffscreenRenderPipelineProviders(), Application.cpp),
+                            // never a direct call or shared captured variable between the two
+                            // providers' own registration lambdas.
+                            //
+                            // m_gpuSkinningRequestsThisFrame/m_gpuSkinningHandlesThisFrame are
+                            // populated HERE, using THIS SAME builder `b` (a RenderPassProvider
+                            // has no RenderGraphBuilder& of its own to call ImportBuffer() -
+                            // see this phase's own completion report for the full "wrinkle"
+                            // resolution) - m_currentGameViewTargetForOffscreenPipeline/
+                            // m_currentGameViewAspectForOffscreenPipeline/
+                            // m_currentFrameDebuggerCaptureForOffscreenPipeline are populated
+                            // right after, so the "RenderOpaque" provider (invoked
+                            // synchronously, inside DeclareInto() below) sees this exact
+                            // frame's real gameViewTarget/aspect/frameDebuggerCapture.
+                            m_gpuSkinningRequestsThisFrame = m_game.CollectGpuSkinningDispatchRequests();
+                            m_gpuSkinningHandlesThisFrame.clear();
+                            m_gpuSkinningHandlesThisFrame.reserve(m_gpuSkinningRequestsThisFrame.size());
+                            for (const AnimationSystem::GpuSkinningDispatchRequest& request :
+                                m_gpuSkinningRequestsThisFrame) {
+                                m_gpuSkinningHandlesThisFrame.push_back(
+                                    b.ImportBuffer(request.name, request.outputBuffer, request.outputBufferSize));
+                            }
+
+                            m_currentGameViewTargetForOffscreenPipeline = h;
+                            m_currentGameViewAspectForOffscreenPipeline = aspect;
+                            m_currentFrameDebuggerCaptureForOffscreenPipeline = frameDebuggerCapture;
+
+                            rg::RenderPassBlackboard offscreenPipelineBlackboard;
+                            offscreenPipelineBlackboard.BeginFrame();
+                            rg::RenderPassFrameContext offscreenPipelineFrame{
+                                /* activeViews = */ {}, /* currentView = */ rg::RenderViewId::Shared(),
+                                offscreenPipelineBlackboard
+                            };
+                            offscreenPipelineFrame.activeViews.push_back(rg::RenderViewId::Named("Game"));
+                            m_offscreenRenderPipeline.DeclareInto(b, offscreenPipelineFrame);
+#ifndef NDEBUG
+                            offscreenPipelineBlackboard.ReportUnusedPublishesIfAny();
+#endif
+
+                            // The OLD Scene View/Present call sites (still hand-threaded -
+                            // PHASE3's job to migrate them too) get the SAME handles the
+                            // "RenderOpaque" provider just consumed, fetched back out of the
+                            // blackboard - NEVER a second AddGpuSkinningPasses() call, which
+                            // would double-dispatch the exact same compute work this frame.
+                            gpuSkinningBuffers =
+                                offscreenPipelineBlackboard.Fetch<std::vector<rg::BufferHandle>>(kGpuSkinningOutputsKey)
+                                    .value_or(std::vector<rg::BufferHandle>{});
                             outputs.push_back(h);
                             AddDrawSkyBackgroundPass(b, m_renderer, h, recordGameSkyBackground, frameDebuggerCapture);
                             AddRenderTransparentPass(b, m_game, m_renderer, h, aspect);

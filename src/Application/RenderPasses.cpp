@@ -38,33 +38,13 @@ namespace gte {
 
 namespace {
 
-// Matches Game::Render()'s own hardcoded `renderer.Clear(20, 20, 30, 255)`
-// call EXACTLY (src/Game/Game.cpp) - duplicated here rather than queried
-// from Game/Renderer at Setup time, since a pass's clear color must be
-// declared BEFORE its own `execute` callback (the one that actually calls
-// Game::Render()) ever runs - see this file's own header comment. If
-// Game::Render()'s own hardcoded clear color ever changes, update this
-// constant to match.
-constexpr std::array<float, 4> kGameClearColor{ 20.0f / 255.0f, 20.0f / 255.0f, 30.0f / 255.0f, 1.0f };
-
-// Far plane - matches FrameRecorder.cpp's own
-// `depthAttachment.clearValue.depthStencil = { 1.0f, 0 }`.
-constexpr float kGameClearDepth = 1.0f;
-
-// Declares a phantom ResourceAccess::VertexBufferRead against every handle
-// in `gpuSkinningOutputBuffers` - see this file's own RenderPasses.h header
-// comment (AddGameViewPass()'s doc comment in particular) and
-// GPU_SKINNING_PHASE3_RENDERGRAPH_SYNCHRONIZATION_STRATEGY_v2.md for why
-// this is NOT dead code - do not remove even though the mesh vertex buffer
-// is actually read via a real VkVertexInputAttributeDescription binding,
-// never through this declared handle directly.
-void DeclareGpuSkinningReads(
-    rg::RenderGraphBuilder::PassBuilder& pass, const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers)
-{
-    for (const rg::BufferHandle& handle : gpuSkinningOutputBuffers) {
-        pass.ReadBuffer(handle, rg::ResourceAccess::VertexBufferRead);
-    }
-}
+// render-pass-3 campaign, PHASE2 (PHASE2_GPU_SKINNING_OPAQUE_BLACKBOARD_PROOF.md)
+// - kGameClearColor/kGameClearDepth and DeclareGpuSkinningReads() used to
+// live here, in this anonymous namespace. MOVED to RenderPasses.h (as
+// `inline constexpr`/a plain declaration respectively), UNCHANGED in
+// value/behavior, so Application.cpp's new "RenderOpaque" RenderPipeline
+// provider can reuse these SAME symbols bit-for-bit instead of duplicating
+// them - see RenderPasses.h's own updated header comment.
 
 // task_manager/frame-debugger-7 campaign, PHASE3
 // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step
@@ -103,6 +83,20 @@ const char* ReplayStepPassName(std::size_t index)
 }
 
 } // namespace
+
+// render-pass-3 campaign, PHASE2 (PHASE2_GPU_SKINNING_OPAQUE_BLACKBOARD_PROOF.md)
+// - definition of the declaration now moved to RenderPasses.h (this
+// function's OWN body is completely UNCHANGED from its former anonymous-
+// namespace version - only its linkage/declaration location moved, so
+// Application.cpp's new "RenderOpaque" RenderPipeline provider can call it
+// too).
+void DeclareGpuSkinningReads(
+    rg::RenderGraphBuilder::PassBuilder& pass, const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers)
+{
+    for (const rg::BufferHandle& handle : gpuSkinningOutputBuffers) {
+        pass.ReadBuffer(handle, rg::ResourceAccess::VertexBufferRead);
+    }
+}
 
 // Render Pass campaign (task_manager/render-pass-1), PHASE2 - RENAMED from
 // AddGameViewPass() (see RenderPasses.h's own doc comment). Declared via the
