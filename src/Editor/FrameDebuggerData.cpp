@@ -192,6 +192,29 @@ const rg::RenderGraphPassSnapshot* FindPassByName(
     return nullptr;
 }
 
+// render-pass-3 campaign, PHASE4 - REPLACES the old literal
+// FindPassByName(..., "RenderOpaque") pivot search with a structural,
+// name-free lookup: the first pass, in true execution order, whose
+// rg::RenderPassEvent sort hint is >= RenderPassEvent::Opaques (see
+// RenderGraphTypes.h's own doc comment on that enum - "a principled way
+// to answer 'where does the view region start' ... instead of searching
+// for a specific pass by name"). Deliberately does NOT filter by
+// isCulled/kind/viewScope/category here - this mirrors the OLD
+// FindPassByName() call's own behavior exactly (it never filtered on
+// those either), preserving this function's existing "return nullptr,
+// treated as 'no frame captured yet'" behavior for the one genuinely
+// reachable failure case (an empty/degenerate graph snapshot).
+const rg::RenderGraphPassSnapshot* FindViewRegionPivot(
+    const std::vector<rg::RenderGraphPassSnapshot>& passesInExecutionOrder)
+{
+    for (const rg::RenderGraphPassSnapshot& pass : passesInExecutionOrder) {
+        if (pass.renderPassEvent >= rg::RenderPassEvent::Opaques) {
+            return &pass;
+        }
+    }
+    return nullptr;
+}
+
 // task_manager/frame-debugger-7 campaign, PHASE4
 // (PHASE4_PREVIEW_WIRING_AND_DATA_MODEL.md, Step 3.1) - finds the real
 // execution-order index, among the surviving Post-GameView compute passes,
@@ -691,13 +714,21 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
 {
     // Render Pass campaign (task_manager/render-pass-1), PHASE4
     // (PHASE4_FRAME_DEBUGGER_GENERIC_TREE_REWORK.md, Step 3.1) - the
-    // "RenderOpaque" pivot REPLACES the old literal "GameView" pass lookup -
+    // view-region pivot REPLACES the old literal "GameView" pass lookup -
     // "GameView" the PASS no longer exists at all as of PHASE2 (it split into
     // "RenderOpaque"/"DrawSkyBackground"/"RenderTransparent"); "GameView" the
     // RenderTexture/resource name is a completely separate, unaffected
     // concept (see this function's own `renderTarget.name` literal below).
+    // render-pass-3 campaign, PHASE4 - REPLACED the literal
+    // FindPassByName(..., "RenderOpaque") name-string pivot search with the
+    // structural, name-free FindViewRegionPivot() lookup above (the first
+    // pass, in true execution order, whose RenderPassEvent is >= Opaques).
+    // "RenderOpaque" is still, today, the first pass tagged
+    // RenderPassEvent::Opaques in every real snapshot - this variable is kept
+    // named `renderOpaquePass` purely for readability in the rest of this
+    // function, which already only cares about it as "the pivot pass."
     const rg::RenderGraphPassSnapshot* renderOpaquePass =
-        FindPassByName(graphSnapshot.passesInExecutionOrder, "RenderOpaque");
+        FindViewRegionPivot(graphSnapshot.passesInExecutionOrder);
     if (renderOpaquePass == nullptr) {
         // Honest "no frame captured yet" empty result - see this function's
         // own header-comment contract and PHASE0's Locked Design Decision #2.

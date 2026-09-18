@@ -72,10 +72,27 @@ rg::RenderGraphPassSnapshot MakePass(const std::string& name)
 // frame-debugger-5 campaign, PHASE2 - a plain graphics pass with
 // kind == rg::PassKind::Compute, exactly as RenderGraphBuilder::AddComputePass()
 // (PHASE1) now stamps for every real compute dispatch in this engine.
+//
+// render-pass-3 campaign, PHASE4 - ALSO now defaults `renderPassEvent` to
+// `RenderPassEvent::PreOpaques`, mirroring how every REAL pre-view compute
+// pass in this engine is actually tagged in production (GpuSkinning/every
+// Atmosphere LUT pass - see PHASE0_MASTER_STRATEGY.md's own intended
+// RenderPassEvent mapping, and PHASE2/PHASE3's own completion reports
+// confirming those real passes carry exactly this value). This is required
+// for BuildRealFrameDebuggerSnapshot()'s new FindViewRegionPivot() lookup
+// (which finds the first pass whose renderPassEvent >= Opaques) to keep
+// treating every fixture's "RenderOpaque" pass (built via the plain,
+// unmodified MakePass() - default renderPassEvent is Opaques) as the pivot,
+// exactly like the OLD name-based FindPassByName(..., "RenderOpaque") always
+// did - without this, a synthetic pre-view compute pass built via this
+// helper would share "RenderOpaque"'s own default Opaques value and
+// incorrectly become the pivot itself purely by sitting earlier in the
+// fixture's own passesInExecutionOrder vector.
 rg::RenderGraphPassSnapshot MakeComputePass(const std::string& name)
 {
     rg::RenderGraphPassSnapshot pass = MakePass(name);
     pass.kind = rg::PassKind::Compute;
+    pass.renderPassEvent = rg::RenderPassEvent::PreOpaques;
     return pass;
 }
 
@@ -93,8 +110,22 @@ rg::RenderGraphPassSnapshot MakeGraphicsPassWithCategory(const std::string& name
 TEST(FrameDebuggerSnapshotBuilderTest, NoRenderOpaquePassProducesEmptyResult)
 {
     rg::RenderGraphSnapshot graphSnapshot;
-    graphSnapshot.passesInExecutionOrder.push_back(MakePass("SceneView"));
-    graphSnapshot.passesInExecutionOrder.push_back(MakePass("Present"));
+    // render-pass-3 campaign, PHASE4 - both passes here must be explicitly
+    // tagged BELOW RenderPassEvent::Opaques (MakePass()'s own default IS
+    // Opaques - see MakePass() above), or the new FindViewRegionPivot()
+    // lookup would incorrectly treat one of them as a genuine pivot, since
+    // it never checks a pass's NAME at all. Neither of these two names
+    // corresponds to any REAL pass in production anymore (the old
+    // monolithic "SceneView"/"GameView" passes were split apart back in the
+    // render-pass-1 campaign) - this fixture only needs "some pass, some
+    // other pass, definitely no Opaques-or-later pass" to prove the "empty
+    // result" contract.
+    rg::RenderGraphPassSnapshot sceneView = MakePass("SceneView");
+    sceneView.renderPassEvent = rg::RenderPassEvent::BeforeEverything;
+    graphSnapshot.passesInExecutionOrder.push_back(sceneView);
+    rg::RenderGraphPassSnapshot present = MakePass("Present");
+    present.renderPassEvent = rg::RenderPassEvent::BeforeEverything;
+    graphSnapshot.passesInExecutionOrder.push_back(present);
 
     const FrameDebuggerCaptureContext capture;
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
@@ -128,7 +159,13 @@ TEST(FrameDebuggerSnapshotBuilderTest, RenderOpaqueWithNoComputePassesProducesEx
     // SceneView is a real pass in the SAME underlying snapshot - Locked
     // Design Decision #7 (Game-View-only scope) must exclude it even though
     // it's right here alongside "RenderOpaque".
-    graphSnapshot.passesInExecutionOrder.push_back(MakePass("SceneView"));
+    // render-pass-3 campaign, PHASE4 - explicitly tagged BELOW
+    // RenderPassEvent::Opaques (see MakeComputePass()'s own updated doc
+    // comment above for why this is now required - MakePass()'s own default
+    // renderPassEvent IS Opaques, same as "RenderOpaque" itself).
+    rg::RenderGraphPassSnapshot sceneView = MakePass("SceneView");
+    sceneView.renderPassEvent = rg::RenderPassEvent::BeforeEverything;
+    graphSnapshot.passesInExecutionOrder.push_back(sceneView);
     rg::RenderGraphPassSnapshot renderOpaque = MakePass("RenderOpaque");
     renderOpaque.stats.drawStats.drawCallCount = 7;
     renderOpaque.stats.drawStats.triangleCount = 250;
@@ -288,7 +325,14 @@ TEST(FrameDebuggerSnapshotBuilderTest, OnlyAtmosphereLutCategoryPreGameViewPassP
 TEST(FrameDebuggerSnapshotBuilderTest, NonComputePassIsNeverTreatedAsComputeDispatch)
 {
     rg::RenderGraphSnapshot graphSnapshot;
-    graphSnapshot.passesInExecutionOrder.push_back(MakePass("SomeOrdinaryGraphicsPass"));
+    // render-pass-3 campaign, PHASE4 - explicitly tagged BELOW
+    // RenderPassEvent::Opaques (see MakeComputePass()'s own updated doc
+    // comment above) so it stays correctly invisible to the new
+    // FindViewRegionPivot() lookup too, matching its pre-existing
+    // invisibility to the OLD name-based pivot search exactly.
+    rg::RenderGraphPassSnapshot ordinaryGraphicsPass = MakePass("SomeOrdinaryGraphicsPass");
+    ordinaryGraphicsPass.renderPassEvent = rg::RenderPassEvent::BeforeEverything;
+    graphSnapshot.passesInExecutionOrder.push_back(ordinaryGraphicsPass);
     graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
     const FrameDebuggerCaptureContext capture;
@@ -1492,6 +1536,75 @@ TEST(FrameDebuggerSnapshotBuilderTest, ComputeLutSubPassAlsoOwnsAComputeDispatch
     ASSERT_EQ(lutGroup.children.size(), 1u);
     ASSERT_EQ(lutGroup.children[0].children.size(), 1u);
     EXPECT_EQ(lutGroup.children[0].children[0].name, "Compute Dispatch");
+}
+
+// ---------------------------------------------------------------------------
+// NEW TEST - render-pass-3 campaign, PHASE4
+// (PHASE4_FRAME_DEBUGGER_EVENT_PIVOT_FIX.md, Step 3.3) - the actual
+// regression proof for the fix itself: a pass named something OTHER than
+// "RenderOpaque" (proving the lookup is genuinely name-free), tagged
+// RenderPassEvent::Opaques, is correctly found as the view-region pivot -
+// its own real stats/per-entity draw records flow into the resulting leaf
+// exactly the same way "RenderOpaque" itself always has, and a real pass
+// LITERALLY named "RenderOpaque" sitting BEFORE it in execution order (but
+// tagged BELOW Opaques, i.e. NOT itself eligible to be the pivot) is
+// correctly skipped/ignored - proving this is genuinely a structural,
+// order+tag-driven lookup, never a name comparison in either direction.
+TEST(FrameDebuggerSnapshotBuilderTest, ViewRegionPivotIsFoundStructurallyEvenWhenNotNamedRenderOpaque)
+{
+    rg::RenderGraphSnapshot graphSnapshot;
+
+    // A red herring: literally named "RenderOpaque", but tagged BELOW
+    // Opaques - must NOT be picked as the pivot, proving the lookup never
+    // special-cases this literal string either.
+    rg::RenderGraphPassSnapshot redHerring = MakePass("RenderOpaque");
+    redHerring.renderPassEvent = rg::RenderPassEvent::BeforeEverything;
+    graphSnapshot.passesInExecutionOrder.push_back(redHerring);
+
+    // The REAL pivot - a differently-named pass, tagged Opaques (the value
+    // FindViewRegionPivot() actually keys off of).
+    rg::RenderGraphPassSnapshot renamedOpaquePass = MakePass("MainOpaqueDrawPass");
+    renamedOpaquePass.renderPassEvent = rg::RenderPassEvent::Opaques;
+    renamedOpaquePass.stats.drawStats.drawCallCount = 3;
+    renamedOpaquePass.stats.drawStats.triangleCount = 99;
+    graphSnapshot.passesInExecutionOrder.push_back(renamedOpaquePass);
+
+    FrameDebuggerCaptureContext capture;
+    capture.RecordEntityDraw(5, 0, "renamed-pivot-proof", "Mesh.vert/Mesh.frag (PositionNormal)", "", 42);
+
+    const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
+
+    ASSERT_EQ(snapshot.rootNodes.size(), 1u);
+    const FrameDebuggerEventNode& root = snapshot.rootNodes[0];
+    // Only ONE leaf in the view region - the red herring never produced a
+    // group/leaf of its own (it is Graphics-kind, sits strictly before the
+    // real pivot, and is invisible to both the pre-view compute loop and the
+    // view-region walk, exactly like any other pre-pivot Graphics pass).
+    ASSERT_EQ(root.children.size(), 1u);
+
+    const FrameDebuggerEventNode& leaf = root.children[0];
+    EXPECT_TRUE(leaf.isDrawCall);
+    ASSERT_TRUE(leaf.details.has_value());
+    // BuildRenderOpaqueLeaf() always stamps the literal "RenderOpaque"
+    // display label/passName regardless of the underlying pass's own real
+    // name - this is pre-existing, unchanged behavior (see that function's
+    // own doc comment) - what this test actually proves is that the REAL,
+    // differently-named pass's own DATA (draw stats, per-entity children)
+    // is what got used, not the red herring's.
+    bool foundDrawStats = false;
+    for (const FrameDebuggerVectorProperty& vec : leaf.details->vectors) {
+        if (vec.name == "Draw Stats (Calls, Tris)") {
+            foundDrawStats = true;
+            EXPECT_FLOAT_EQ(vec.x, 3.0f);
+            EXPECT_FLOAT_EQ(vec.y, 99.0f);
+        }
+    }
+    EXPECT_TRUE(foundDrawStats);
+
+    ASSERT_EQ(leaf.children.size(), 1u);
+    EXPECT_EQ(leaf.children[0].name, "renamed-pivot-proof (Entity 5)");
+
+    EXPECT_EQ(snapshot.totalEventCount, 2); // The pivot leaf + its one real child - the red herring consumes zero.
 }
 
 } // namespace

@@ -257,7 +257,20 @@ rg::TextureHandle AtmosphereLutRenderer::AddTransmittanceLutPass(
             renderer.Dispatch(*m_transmittanceLutPipeline, m_transmittanceLutDescriptorSet.Native(), nullptr, 0,
                 groupCounts.width, groupCounts.height, groupCounts.depth);
             renderer.EndGraphPassRecording();
-        });
+        },
+        // render-pass-3 campaign, PHASE4 (root-cause fix) - explicit
+        // RenderPassEvent::PreOpaques, matching PHASE0_MASTER_STRATEGY.md's
+        // own intended mapping ("GPU Skinning dispatch and the Atmosphere
+        // shared LUTs run first (PreOpaques/BeforeEverything)"). Without
+        // this, this pass silently defaulted to the SAME RenderPassEvent::
+        // Opaques value "RenderOpaque" itself uses (this trailing
+        // parameter's own built-in default), which broke
+        // FrameDebuggerData.cpp's new structural FindViewRegionPivot()
+        // lookup (PHASE4) - since this pass runs strictly BEFORE
+        // "RenderOpaque" in real execution order, it was being picked as
+        // the pivot instead, confirmed via live testing. drawKind stays at
+        // its own default (DrawMesh) - irrelevant for a Compute-kind pass.
+        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::PreOpaques);
 
     return outputHandle;
 }
@@ -367,7 +380,10 @@ rg::TextureHandle AtmosphereLutRenderer::AddMultiScatteringLutPass(rg::RenderGra
             renderer.Dispatch(*m_multiScatteringLutPipeline, m_multiScatteringLutDescriptorSet.Native(), nullptr, 0,
                 groupCounts.width, groupCounts.height, groupCounts.depth);
             renderer.EndGraphPassRecording();
-        });
+        },
+        // render-pass-3 campaign, PHASE4 (root-cause fix) - see
+        // AddTransmittanceLutPass()'s own identical comment above.
+        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::PreOpaques);
 
     return outputHandle;
 }
@@ -503,7 +519,11 @@ rg::TextureHandle AtmosphereLutRenderer::AddSkyViewLutPass(rg::RenderGraphBuilde
             renderer.Dispatch(*m_skyViewLutPipeline, viewState.descriptorSet.Native(), nullptr, 0, groupCounts.width,
                 groupCounts.height, groupCounts.depth);
             renderer.EndGraphPassRecording();
-        });
+        },
+        // render-pass-3 campaign, PHASE4 (root-cause fix) - see
+        // AddTransmittanceLutPass()'s own identical comment above (this
+        // per-view LUT pass also runs strictly before "RenderOpaque").
+        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::PreOpaques);
 
     return outputHandle;
 }
@@ -644,7 +664,11 @@ rg::VolumeTextureHandle AtmosphereLutRenderer::AddAerialPerspectiveVolumePass(rg
             renderer.Dispatch(*m_aerialPerspectiveVolumePipeline, viewState.descriptorSet.Native(), nullptr, 0,
                 groupCounts.width, groupCounts.height, groupCounts.depth);
             renderer.EndGraphPassRecording();
-        });
+        },
+        // render-pass-3 campaign, PHASE4 (root-cause fix) - see
+        // AddTransmittanceLutPass()'s own identical comment above (this
+        // per-view volume pass also runs strictly before "RenderOpaque").
+        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::PreOpaques);
 
     return outputHandle;
 }
@@ -806,7 +830,16 @@ rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveCompositePass(rg::R
                 &localPushConstants, sizeof(localPushConstants), groupCounts.width, groupCounts.height,
                 groupCounts.depth);
             renderer.EndGraphPassRecording();
-        });
+        },
+        // render-pass-3 campaign, PHASE4 (root-cause fix) - explicit
+        // RenderPassEvent::AfterTransparents, matching
+        // PHASE0_MASTER_STRATEGY.md's own intended mapping ("the Aerial
+        // Perspective Composite pass is AfterTransparents"). Without this,
+        // this pass silently defaulted to RenderPassEvent::Opaques (same as
+        // every other immediate-declare Atmosphere pass here) - see
+        // AddTransmittanceLutPass()'s own identical comment above for the
+        // full root-cause writeup.
+        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::AfterTransparents);
     return outputHandle;
 }
 
@@ -965,7 +998,13 @@ rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveVolumeDebugSlicePas
                 &localPushConstants, sizeof(localPushConstants), groupCounts.width, groupCounts.height,
                 groupCounts.depth);
             renderer.EndGraphPassRecording();
-        });
+        },
+        // render-pass-3 campaign, PHASE4 (root-cause fix) - see
+        // AddTransmittanceLutPass()'s own identical comment above (this
+        // debug-visibility slice pass also runs strictly before
+        // "RenderOpaque" - see Application.cpp's own "AtmosphereViewLut"
+        // provider, which declares it right after AddAtmosphereViewLutPasses()).
+        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::PreOpaques);
 
     return outputHandle;
 }
