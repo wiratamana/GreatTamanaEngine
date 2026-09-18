@@ -17,7 +17,7 @@
 // below that used to feed BuildRealFrameDebuggerSnapshot() a caller-supplied
 // `gpuSkinningPassNamesThisFrame` name list (REMOVED - see
 // PHASE0_MASTER_STRATEGY.md's Locked Design Decision #2/#6) was rewritten to
-// instead mark the relevant RenderGraphPassSnapshot's own `isComputePass`
+// instead mark the relevant RenderGraphPassSnapshot's own `kind`
 // flag (PHASE1) - discovery is now purely generic. The old, single, always-
 // after-"GameView" "GPU Skinning"/"AtmosphereAerialPerspectiveCompositePass"
 // special-cased tree shape is also gone, replaced by the SPLIT
@@ -40,12 +40,12 @@ rg::RenderGraphPassSnapshot MakePass(const std::string& name)
 }
 
 // frame-debugger-5 campaign, PHASE2 - a plain graphics pass with
-// isComputePass flipped true, exactly as RenderGraphBuilder::AddComputePass()
+// kind == rg::PassKind::Compute, exactly as RenderGraphBuilder::AddComputePass()
 // (PHASE1) now stamps for every real compute dispatch in this engine.
 rg::RenderGraphPassSnapshot MakeComputePass(const std::string& name)
 {
     rg::RenderGraphPassSnapshot pass = MakePass(name);
-    pass.isComputePass = true;
+    pass.kind = rg::PassKind::Compute;
     return pass;
 }
 
@@ -119,8 +119,8 @@ TEST(FrameDebuggerSnapshotBuilderTest, GameViewWithNoComputePassesProducesExactl
 
 // REWRITTEN (was TwoGpuSkinningPassesProduceGroupPlusGameViewLeaf) - the OLD
 // version fed a `gpuSkinningPassNamesThisFrame` name list; discovery is now
-// purely generic via isComputePass, so this test marks the two passes
-// isComputePass directly instead, and asserts the NEW
+// purely generic via `kind`, so this test marks the two passes
+// kind == rg::PassKind::Compute directly instead, and asserts the NEW
 // "Compute Dispatches (Pre-GameView)" group name instead of the OLD
 // "GPU Skinning" one (both passes appear BEFORE "GameView" in
 // passesInExecutionOrder, so both land in the PRE-GameView group). Also
@@ -185,7 +185,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, TwoPreGameViewComputePassesProduceOnePreG
 // scenario ("a caller-supplied name that matches no real pass") can no
 // longer occur at all now that the name-list parameter is gone entirely;
 // this replaces it with the analogous NEW regression: an ordinary pass
-// declared via plain AddPass() (isComputePass defaults to false) must never
+// declared via plain AddPass() (kind defaults to PassKind::Graphics) must never
 // be mistaken for a compute dispatch, no matter what it's named.
 TEST(FrameDebuggerSnapshotBuilderTest, NonComputePassIsNeverTreatedAsComputeDispatch)
 {
@@ -283,7 +283,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, RenderTargetInfoIsRealAndNamedGameView)
 // frame-debugger-4 campaign PHASE2) - the OLD version asserted the hardcoded
 // "Aerial Perspective Composite" friendly passName/"Compute Composite"
 // eventLabel/".comp" shaderName special case (BuildAerialPerspectiveCompositeLeaf(),
-// now DELETED). The pass is now discovered purely via isComputePass, and its
+// now DELETED). The pass is now discovered purely via `kind`, and its
 // leaf carries only real, generic, never-fabricated facts - the raw pass
 // name for passName/shaderName, and the generic "Compute Dispatch"
 // eventLabel every compute leaf now shares. It also now lands under the NEW
@@ -361,7 +361,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, NoComputePassesProduceNeitherGroup)
 // REWRITTEN (was AllThreeGroupsAppearTogetherInRealExecutionOrder) - the OLD
 // version fed a gpuSkinningPassNamesThisFrame name list and asserted the
 // single, always-after-"GameView" "GPU Skinning"/"AtmosphereAerial..." shape.
-// NEW version marks both passes isComputePass directly and asserts the SPLIT
+// NEW version marks both passes kind == rg::PassKind::Compute directly and asserts the SPLIT
 // "Compute Dispatches (Pre-GameView)" -> "GameView" -> "Compute Dispatches
 // (Post-GameView)" three-top-level-sibling shape (Locked Design Decision #8
 // - PHASE2's own Step 3.6 item (a3)).

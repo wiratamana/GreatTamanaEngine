@@ -595,7 +595,7 @@ public:
         // Design Decision #2/#6): GPU Skinning passes, and every other real
         // compute dispatch, are now discovered generically inside
         // BuildRealFrameDebuggerSnapshot() itself, purely via PHASE1's new
-        // RenderGraphPassSnapshot::isComputePass flag - the old
+        // RenderGraphPassSnapshot::kind (== rg::PassKind::Compute) flag - the old
         // `game.CollectGpuSkinningDispatchRequests()` call this block used
         // to make purely to resolve that name list is gone too (confirmed,
         // via a full grep of this file, to have had no other purpose here).

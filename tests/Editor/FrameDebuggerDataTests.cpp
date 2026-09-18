@@ -381,7 +381,7 @@ TEST(FrameDebuggerDataTest, SkyBackgroundLeafEventIndexIsMonotonicallyAfterEntit
 
     rg::RenderGraphPassSnapshot postPass;
     postPass.name = "SomePostGameViewComputePass";
-    postPass.isComputePass = true;
+    postPass.kind = rg::PassKind::Compute;
     graphSnapshot.passesInExecutionOrder.push_back(postPass);
 
     FrameDebuggerCaptureContext capture;

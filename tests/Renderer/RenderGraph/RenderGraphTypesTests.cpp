@@ -354,9 +354,9 @@ TEST(RenderGraphPassRecordTest, DefaultConstructedPassRecordIsEmptyAndNotCulled)
     EXPECT_TRUE(record.reads.empty());
     EXPECT_TRUE(record.writes.empty());
     EXPECT_FALSE(record.isCulled);
-    // frame-debugger-5 campaign, PHASE1
-    // (PHASE1_RENDERGRAPH_COMPUTE_DISPATCH_CHOKEPOINT_INFRASTRUCTURE.md).
-    EXPECT_FALSE(record.isComputePass);
+    // Render Pass campaign (task_manager/render-pass-1), PHASE1 - RENAMED
+    // from the original plain `bool isComputePass` to `PassKind kind`.
+    EXPECT_EQ(record.kind, PassKind::Graphics);
     EXPECT_FALSE(static_cast<bool>(record.execute));
 }
 
@@ -403,6 +403,60 @@ TEST(RenderGraphPassRecordTest, ReadsAndWritesCanBeAppendedIndependently)
     EXPECT_EQ(record.writes[0].kind, ResourceKind::Texture);
     EXPECT_EQ(record.writes[0].texture, (TextureHandle{ 2, 1 }));
     EXPECT_EQ(record.writes[0].access, ResourceAccess::ColorAttachmentWrite);
+}
+
+// Render Pass campaign (task_manager/render-pass-1), PHASE1 -
+// PassRecord::category defaults to General.
+TEST(RenderGraphPassRecordTest, DefaultConstructedPassRecordHasGeneralCategory)
+{
+    const PassRecord record;
+    EXPECT_EQ(record.category, RenderPassCategory::General);
+}
+
+// --- PassKind / RenderPassCategory (Render Pass campaign, PHASE1) --------
+
+TEST(RenderGraphPassKindTest, ToStringCoversEveryEnumeratorNonNullNonEmpty)
+{
+    const PassKind values[] = {
+        PassKind::Graphics,
+        PassKind::Compute,
+    };
+
+    for (const PassKind value : values) {
+        const char* name = ToString(value);
+        ASSERT_NE(name, nullptr);
+        EXPECT_GT(std::string_view(name).size(), 0u);
+    }
+}
+
+TEST(RenderGraphPassKindTest, ToStringProducesDistinctNamesForDistinctEnumerators)
+{
+    EXPECT_STREQ(ToString(PassKind::Graphics), "Graphics");
+    EXPECT_STREQ(ToString(PassKind::Compute), "Compute");
+}
+
+TEST(RenderGraphRenderPassCategoryTest, ToStringCoversEveryEnumeratorNonNullNonEmpty)
+{
+    const RenderPassCategory values[] = {
+        RenderPassCategory::General,
+        RenderPassCategory::AtmosphereLut,
+        RenderPassCategory::GpuSkinning,
+        RenderPassCategory::Debug,
+    };
+
+    for (const RenderPassCategory value : values) {
+        const char* name = ToString(value);
+        ASSERT_NE(name, nullptr);
+        EXPECT_GT(std::string_view(name).size(), 0u);
+    }
+}
+
+TEST(RenderGraphRenderPassCategoryTest, ToStringProducesDistinctNamesForDistinctEnumerators)
+{
+    EXPECT_STREQ(ToString(RenderPassCategory::General), "General");
+    EXPECT_STREQ(ToString(RenderPassCategory::AtmosphereLut), "AtmosphereLut");
+    EXPECT_STREQ(ToString(RenderPassCategory::GpuSkinning), "GpuSkinning");
+    EXPECT_STREQ(ToString(RenderPassCategory::Debug), "Debug");
 }
 
 } // namespace

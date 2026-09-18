@@ -330,6 +330,41 @@ enum class ViewScope {
     SceneView,
 };
 
+// Render Pass campaign (task_manager/render-pass-1), PHASE1 - REPLACES the
+// old plain `bool isComputePass` with a real, extensible enum. Today there
+// are exactly two kinds (a pass either records inside a
+// vkCmdBeginRendering/vkCmdEndRendering bracket, or it doesn't - it issues
+// vkCmdDispatch instead), but "Graphics"/"Compute" as explicit, named
+// values (rather than an anonymous bool) is what lets a THIRD kind (e.g. a
+// future pure-blit/copy pass) be added later without every call site
+// having to re-litigate what `true`/`false` used to mean. Deliberately an
+// exhaustive-switch-friendly small enum, mirroring ResourceAccess's own
+// "no default: case, ever" convention in this same file.
+enum class PassKind : std::uint8_t {
+    Graphics,
+    Compute,
+};
+
+const char* ToString(PassKind kind) noexcept;
+
+// Render Pass campaign, PHASE1 - which conceptual GROUP this pass belongs
+// to, for the Editor Frame Debugger's own tree-grouping purposes ONLY
+// (PHASE4 of this same campaign) - completely orthogonal to PassKind
+// (Graphics/Compute - WHAT this pass technically does) and ViewScope
+// (WHICH view this pass belongs to). Nothing in RenderGraph.cpp/
+// RenderGraphCompiler.cpp/RenderGraphBarrierPlanner.cpp ever reads this
+// field - exactly like ViewScope's own existing "PURELY DESCRIPTIVE
+// metadata" rule (see PassRecord::kind's own doc comment below for the
+// precedent this mirrors).
+enum class RenderPassCategory : std::uint8_t {
+    General,       // The default - no special Frame Debugger grouping treatment.
+    AtmosphereLut, // Every Atmosphere LUT/composite compute pass (PHASE3) - grouped under "Compute LUT".
+    GpuSkinning,   // A per-model GPU vertex-skinning compute dispatch - stays under the existing generic "Compute Dispatches" bucket.
+    Debug,         // Frame-Debugger-internal replay passes / Compute Blur Validation - never a real Frame Debugger tree citizen themselves (already filtered out, or shown under their own separate heading - see PHASE4/PHASE5).
+};
+
+const char* ToString(RenderPassCategory category) noexcept;
+
 // A single declared read/write on a texture, a buffer, OR a volume
 // texture. Phase 1 shipped this as a texture-only shape; Phase 2 of the
 // Render Graph campaign grew it into a texture/buffer tagged-union shape
@@ -429,20 +464,22 @@ struct PassRecord {
     // executor (a culled pass's Execute callback is never invoked).
     bool isCulled = false;
 
-    // frame-debugger-5 campaign, PHASE1
-    // (PHASE1_RENDERGRAPH_COMPUTE_DISPATCH_CHOKEPOINT_INFRASTRUCTURE.md) -
-    // true for every pass declared via RenderGraphBuilder::AddComputePass()
-    // (see that method's own updated doc comment, RenderGraphBuilder.h);
-    // false (the default) for a pass declared via plain AddPass() - i.e.
-    // every real graphics/draw pass in this engine today (e.g. "GameView").
-    // This is PURELY DESCRIPTIVE metadata: nothing in RenderGraph.cpp/
+    // Render Pass campaign (task_manager/render-pass-1), PHASE1 - REPLACES
+    // the old plain `bool isComputePass` (frame-debugger-5 campaign,
+    // PHASE1) with a real `PassKind` enum (see this file's own comment on
+    // `PassKind` above). `PassKind::Compute` for every pass declared via
+    // RenderGraphBuilder::AddComputePass() (see that method's own updated
+    // doc comment, RenderGraphBuilder.h); `PassKind::Graphics` (the
+    // default) for a pass declared via plain AddPass() - i.e. every real
+    // graphics/draw pass in this engine today (e.g. "GameView"). This is
+    // PURELY DESCRIPTIVE metadata: nothing in RenderGraph.cpp/
     // RenderGraphCompiler.cpp reads this field at all - it exists solely so
     // a downstream CONSUMER (RenderGraphSnapshot.h's own
-    // RenderGraphPassSnapshot::isComputePass, read by the Editor's Frame
-    // Debugger - see FrameDebuggerData.cpp) can generically discover "which
-    // passes that ran this frame were compute dispatches" without needing
-    // to already know every compute pass's exact string name in advance.
-    bool isComputePass = false;
+    // RenderGraphPassSnapshot::kind, read by the Editor's Frame Debugger -
+    // see FrameDebuggerData.cpp) can generically discover "which passes
+    // that ran this frame were compute dispatches" without needing to
+    // already know every compute pass's exact string name in advance.
+    PassKind kind = PassKind::Graphics;
 
     // frame-debugger-6 campaign, PHASE1
     // (PHASE1_RENDERGRAPH_VIEWSCOPE_CHOKEPOINT_INFRASTRUCTURE.md) - see
@@ -476,6 +513,15 @@ struct PassRecord {
     // what finally need one (see src/Application/RenderPasses.cpp).
     std::optional<std::array<float, 4>> colorClearValue;
     std::optional<float> depthClearValue;
+
+    // Render Pass campaign (task_manager/render-pass-1), PHASE1 - which
+    // conceptual GROUP this pass belongs to (see RenderPassCategory's own
+    // doc comment above) - purely descriptive metadata for the Editor
+    // Frame Debugger's tree-grouping purposes (PHASE4), read by NOTHING in
+    // RenderGraph.cpp/RenderGraphCompiler.cpp/RenderGraphBarrierPlanner.cpp.
+    // Appended at the END of the struct (never inserted in the middle) -
+    // see this file's own header comment / AGENTS.md for why.
+    RenderPassCategory category = RenderPassCategory::General;
 };
 
 } // namespace gte::rg

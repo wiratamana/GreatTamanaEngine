@@ -69,19 +69,27 @@ struct RenderGraphPassSnapshot {
 
     // frame-debugger-5 campaign, PHASE1
     // (PHASE1_RENDERGRAPH_COMPUTE_DISPATCH_CHOKEPOINT_INFRASTRUCTURE.md) -
-    // true for a real compute dispatch (see PassRecord::isComputePass's own
+    // RENAMED from the original plain `bool isComputePass` to `PassKind kind`
+    // by the Render Pass campaign's own PHASE1 (task_manager/render-pass-1) -
+    // `kind == PassKind::Compute` for a real compute dispatch (see
+    // PassRecord::kind's own doc comment, RenderGraphTypes.h) - copied
+    // straight through for BOTH a surviving AND a culled pass (a culled
+    // compute pass must still truthfully report this - only its `stats`
+    // below stays at its own default for a culled pass, per this struct's
+    // own pre-existing convention).
+    PassKind kind = PassKind::Graphics;
+
+    // Render Pass campaign (task_manager/render-pass-1), PHASE1 - which
+    // conceptual GROUP this pass belongs to (see RenderPassCategory's own
     // doc comment, RenderGraphTypes.h) - copied straight through for BOTH a
-    // surviving AND a culled pass (a culled compute pass must still
-    // truthfully report this - only its `stats` below stays at its own
-    // default for a culled pass, per this struct's own pre-existing
-    // convention).
-    bool isComputePass = false;
+    // surviving AND a culled pass, exactly like `kind` above.
+    RenderPassCategory category = RenderPassCategory::General;
 
     // frame-debugger-6 campaign, PHASE1
     // (PHASE1_RENDERGRAPH_VIEWSCOPE_CHOKEPOINT_INFRASTRUCTURE.md) - copied
     // straight through for BOTH a surviving AND a culled pass, exactly like
-    // isComputePass above (a culled pass must still truthfully report which
-    // view it belonged to).
+    // `kind` above (a culled pass must still truthfully report which view it
+    // belonged to).
     ViewScope viewScope = ViewScope::Shared;
 
     // frame-debugger-5 campaign, PHASE1 - PARALLEL to readNames/writeNames

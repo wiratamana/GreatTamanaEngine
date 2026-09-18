@@ -59,4 +59,36 @@ const char* ToString(ResourceAccess access) noexcept
     return "Unknown";
 }
 
+// Render Pass campaign (task_manager/render-pass-1), PHASE1 - see
+// RenderGraphTypes.h's own comment on PassKind for why this exists.
+const char* ToString(PassKind kind) noexcept
+{
+    // Deliberately NO `default:` case - see this file's own header comment.
+    switch (kind) {
+    case PassKind::Graphics:
+        return "Graphics";
+    case PassKind::Compute:
+        return "Compute";
+    }
+    return "Unknown";
+}
+
+// Render Pass campaign, PHASE1 - see RenderGraphTypes.h's own comment on
+// RenderPassCategory for why this exists.
+const char* ToString(RenderPassCategory category) noexcept
+{
+    // Deliberately NO `default:` case - see this file's own header comment.
+    switch (category) {
+    case RenderPassCategory::General:
+        return "General";
+    case RenderPassCategory::AtmosphereLut:
+        return "AtmosphereLut";
+    case RenderPassCategory::GpuSkinning:
+        return "GpuSkinning";
+    case RenderPassCategory::Debug:
+        return "Debug";
+    }
+    return "Unknown";
+}
+
 } // namespace gte::rg

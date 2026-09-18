@@ -215,7 +215,7 @@ int FindPostGameViewCompositePassExecutionIndex(const rg::RenderGraphSnapshot& g
 {
     for (int i = gameViewIndex + 1; i < static_cast<int>(graphSnapshot.passesInExecutionOrder.size()); ++i) {
         const rg::RenderGraphPassSnapshot& pass = graphSnapshot.passesInExecutionOrder[static_cast<std::size_t>(i)];
-        if (!pass.isComputePass || pass.isCulled || pass.viewScope == rg::ViewScope::SceneView) {
+        if (pass.kind != rg::PassKind::Compute || pass.isCulled || pass.viewScope == rg::ViewScope::SceneView) {
             continue;
         }
         for (const std::string& writeName : pass.writeNames) {
@@ -261,7 +261,7 @@ const char* WriteRowLabelForKind(rg::ResourceKind kind)
 }
 
 // frame-debugger-5 campaign, PHASE2 - the ONE generic leaf builder for ANY
-// real compute dispatch (RenderGraphPassSnapshot::isComputePass == true)
+// real compute dispatch (RenderGraphPassSnapshot::kind == rg::PassKind::Compute)
 // that survived this frame, whatever its name - GPU Skinning, every
 // atmosphere LUT pass, Aerial Perspective Composite, the Aerial
 // Perspective Volume Debug-Slice pass, Compute Blur Validation, and any
@@ -661,7 +661,7 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
     // PHASE0_MASTER_STRATEGY.md's Locked Design Decision #6). Every real,
     // surviving compute pass this frame becomes one leaf here, in real
     // execution order, whatever its name - "GameView" itself is
-    // structurally excluded (it is never isComputePass==true, since it's
+    // structurally excluded (it is never kind == rg::PassKind::Compute, since it's
     // declared via plain AddPass()/WriteColorAttachment(), never
     // AddComputePass()). SPLIT into a pre/post pair (Locked Design
     // Decision #8, v2 review finding) so a pass that genuinely ran BEFORE
@@ -729,7 +729,7 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
         // exact real-world collision that motivated this whole campaign - see
         // PHASE0_MASTER_STRATEGY.md Section 0). `Shared` and `GameView` both
         // still pass through unchanged.
-        if (!pass.isComputePass || pass.isCulled || pass.viewScope == rg::ViewScope::SceneView) {
+        if (pass.kind != rg::PassKind::Compute || pass.isCulled || pass.viewScope == rg::ViewScope::SceneView) {
             continue;
         }
         // task_manager/frame-debugger-7 campaign, PHASE4 - a Pre-GameView
@@ -781,7 +781,7 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
         // applied to the post-GameView half (see the pre-GameView loop's own
         // comment above for the full rationale) - e.g. the real
         // "AtmosphereAerialPerspectiveCompositePass" duplicate scenario.
-        if (!pass.isComputePass || pass.isCulled || pass.viewScope == rg::ViewScope::SceneView) {
+        if (pass.kind != rg::PassKind::Compute || pass.isCulled || pass.viewScope == rg::ViewScope::SceneView) {
             continue;
         }
         // Strictly BEFORE the composite pass's own index -> PreComposite

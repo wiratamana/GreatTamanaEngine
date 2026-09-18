@@ -390,22 +390,23 @@ public:
     // (PHASE1_RENDERGRAPH_COMPUTE_DISPATCH_CHOKEPOINT_INFRASTRUCTURE.md) -
     // UPDATES this method's own former "purely cosmetic" claim: this is now
     // the ONE place in the whole engine that marks a pass as a real compute
-    // dispatch (PassRecord::isComputePass - see RenderGraphTypes.h). Still
-    // otherwise behaviorally identical to plain AddPass() - a pass's actual
-    // barrier/attachment/dispatch behavior is still entirely determined by
-    // what it declares in `reads`/`writes` via `setup`, never by which entry
-    // point created it; this method ONLY additionally stamps one bool. Every
-    // real compute pass in this engine already calls this method (not plain
-    // AddPass()) - see PHASE0_MASTER_STRATEGY.md's Step 2.2 for the full,
-    // confirmed list - so this one flag alone is enough to make every one of
-    // them automatically, generically discoverable by any future consumer
-    // (the Editor's Frame Debugger, frame-debugger-5 PHASE2, is the first
-    // one).
+    // dispatch (PassRecord::kind - see RenderGraphTypes.h; RENAMED from the
+    // original plain `bool isComputePass` by the Render Pass campaign's own
+    // PHASE1, task_manager/render-pass-1). Still otherwise behaviorally
+    // identical to plain AddPass() - a pass's actual barrier/attachment/
+    // dispatch behavior is still entirely determined by what it declares in
+    // `reads`/`writes` via `setup`, never by which entry point created it;
+    // this method ONLY additionally stamps `kind`. Every real compute pass
+    // in this engine already calls this method (not plain AddPass()) - see
+    // PHASE0_MASTER_STRATEGY.md's Step 2.2 for the full, confirmed list - so
+    // this one flag alone is enough to make every one of them automatically,
+    // generically discoverable by any future consumer (the Editor's Frame
+    // Debugger, frame-debugger-5 PHASE2, is the first one).
     template <typename SetupFn, typename ExecuteFn>
     void AddComputePass(const char* name, SetupFn&& setup, ExecuteFn&& execute)
     {
         AddPass(name, std::forward<SetupFn>(setup), std::forward<ExecuteFn>(execute));
-        m_passes.back().isComputePass = true;
+        m_passes.back().kind = PassKind::Compute;
     }
 
     // frame-debugger-6 campaign, PHASE1
@@ -418,6 +419,40 @@ public:
     {
         AddComputePass(name, std::forward<SetupFn>(setup), std::forward<ExecuteFn>(execute));
         m_passes.back().viewScope = viewScope;
+    }
+
+    // Render Pass campaign (task_manager/render-pass-1), PHASE1 - the ONE,
+    // OFFICIAL entry point every real pass declaration in this engine should
+    // use from now on (Application layer AND Renderer layer alike - see
+    // AtmosphereLutRenderer.cpp for a Renderer-layer example, PHASE3). A thin,
+    // lightweight wrapper around the two pre-existing methods below - it adds
+    // NO new capability of its own beyond stamping `kind`/`category` in one
+    // place, by design (PHASE0's Locked Design Decision #1: no polymorphic
+    // pass-object hierarchy). AddPass()/AddComputePass() themselves are NOT
+    // removed or deprecated - they remain the low-level primitives this method
+    // (and Tier-1 tests) are built on, and existing test-only call sites are
+    // free to keep using them directly.
+    template <typename SetupFn, typename ExecuteFn>
+    void AddRenderPass(const char* name, PassKind kind, ViewScope viewScope, RenderPassCategory category,
+        SetupFn&& setup, ExecuteFn&& execute)
+    {
+        if (kind == PassKind::Compute) {
+            AddComputePass(name, viewScope, std::forward<SetupFn>(setup), std::forward<ExecuteFn>(execute));
+        } else {
+            AddPass(name, viewScope, std::forward<SetupFn>(setup), std::forward<ExecuteFn>(execute));
+        }
+        m_passes.back().category = category;
+    }
+
+    // Convenience overload defaulting `viewScope` to Shared and `category` to
+    // General - for the (today, majority of) real call sites that need
+    // neither. Mirrors AddPass()'s own pre-existing 3-arg/4-arg overload pair
+    // exactly.
+    template <typename SetupFn, typename ExecuteFn>
+    void AddRenderPass(const char* name, PassKind kind, SetupFn&& setup, ExecuteFn&& execute)
+    {
+        AddRenderPass(name, kind, ViewScope::Shared, RenderPassCategory::General,
+            std::forward<SetupFn>(setup), std::forward<ExecuteFn>(execute));
     }
 
     // Consumes this builder, handing its whole in-progress description

@@ -362,7 +362,9 @@ TEST(RenderGraphBuilderTest, PassBuilderCanDeclareBothReadAndWriteOfSameTextureF
 // --- AddComputePass() - the compute-dispatch choke point (frame-debugger-5
 // campaign, PHASE1 - PHASE1_RENDERGRAPH_COMPUTE_DISPATCH_CHOKEPOINT_INFRASTRUCTURE.md)
 // --- still behaviorally identical to AddPass() aside from the one new
-// --- isComputePass stamp; renamed from this section's original name/test
+// --- `kind` stamp (RENAMED from the original plain `bool isComputePass` by
+// --- the Render Pass campaign's own PHASE1, task_manager/render-pass-1);
+// --- renamed from this section's original name/test
 // --- ("a thin, purely cosmetic alias of AddPass()") once that claim
 // --- stopped being true - see AddComputePass()'s own updated doc comment,
 // --- RenderGraphBuilder.h. No existing assertion below changed - only the
@@ -392,8 +394,8 @@ TEST(RenderGraphBuilderTest, AddComputePassStillRunsSetupAndCapturesExecuteLikeA
 }
 
 // frame-debugger-5 campaign, PHASE1 - the actual new behavior: a plain
-// AddPass() call's resulting PassRecord has isComputePass == false.
-TEST(RenderGraphBuilderTest, AddPassRecordsIsComputePassFalse)
+// AddPass() call's resulting PassRecord has kind == PassKind::Graphics.
+TEST(RenderGraphBuilderTest, AddPassRecordsGraphicsKind)
 {
     RenderGraphBuilder builder;
     builder.AddPass(
@@ -403,13 +405,13 @@ TEST(RenderGraphBuilderTest, AddPassRecordsIsComputePassFalse)
 
     const CompiledGraphInput input = builder.Finish();
     ASSERT_EQ(input.passes.size(), 1u);
-    EXPECT_FALSE(input.passes[0].isComputePass);
+    EXPECT_EQ(input.passes[0].kind, PassKind::Graphics);
 }
 
 // frame-debugger-5 campaign, PHASE1 - an AddComputePass() call's resulting
-// PassRecord has isComputePass == true - the literal "choke point" this
+// PassRecord has kind == PassKind::Compute - the literal "choke point" this
 // phase exists to build.
-TEST(RenderGraphBuilderTest, AddComputePassRecordsIsComputePassTrue)
+TEST(RenderGraphBuilderTest, AddComputePassRecordsComputeKind)
 {
     RenderGraphBuilder builder;
     builder.AddComputePass(
@@ -419,7 +421,7 @@ TEST(RenderGraphBuilderTest, AddComputePassRecordsIsComputePassTrue)
 
     const CompiledGraphInput input = builder.Finish();
     ASSERT_EQ(input.passes.size(), 1u);
-    EXPECT_TRUE(input.passes[0].isComputePass);
+    EXPECT_EQ(input.passes[0].kind, PassKind::Compute);
 }
 
 // --- ViewScope (frame-debugger-6 campaign, PHASE1 - --------------------------
@@ -475,13 +477,13 @@ TEST(RenderGraphBuilderTest, AddPassFourArgumentOverloadStampsViewScope)
     ASSERT_EQ(input.passes.size(), 1u);
     EXPECT_STREQ(input.passes[0].name, "GameView");
     EXPECT_EQ(input.passes[0].viewScope, ViewScope::GameView);
-    EXPECT_FALSE(input.passes[0].isComputePass);
+    EXPECT_EQ(input.passes[0].kind, PassKind::Graphics);
 }
 
-// The new 4-argument AddComputePass() overload stamps BOTH isComputePass ==
-// true AND the supplied ViewScope - the two flags are independent and both
-// correctly set by this one call.
-TEST(RenderGraphBuilderTest, AddComputePassFourArgumentOverloadStampsViewScopeAndIsComputePass)
+// The new 4-argument AddComputePass() overload stamps BOTH kind ==
+// PassKind::Compute AND the supplied ViewScope - the two flags are
+// independent and both correctly set by this one call.
+TEST(RenderGraphBuilderTest, AddComputePassFourArgumentOverloadStampsViewScopeAndComputeKind)
 {
     RenderGraphBuilder builder;
     builder.AddComputePass(
@@ -493,14 +495,14 @@ TEST(RenderGraphBuilderTest, AddComputePassFourArgumentOverloadStampsViewScopeAn
     const CompiledGraphInput input = builder.Finish();
     ASSERT_EQ(input.passes.size(), 1u);
     EXPECT_EQ(input.passes[0].viewScope, ViewScope::SceneView);
-    EXPECT_TRUE(input.passes[0].isComputePass);
+    EXPECT_EQ(input.passes[0].kind, PassKind::Compute);
 }
 
 // frame-debugger-5 campaign, PHASE1 - a single compute pass declaring a
 // mix of ReadTexture/WriteTexture AND ReadBuffer/WriteBuffer AND
 // ReadVolumeTexture/WriteVolumeTexture still populates pass.reads/writes
 // with the correct ResourceUsage::kind for each - a pure sanity check of
-// pre-existing behavior, now also asserted alongside isComputePass.
+// pre-existing behavior, now also asserted alongside `kind`.
 TEST(RenderGraphBuilderTest, AddComputePassWithMixedReadWriteKindsRecordsEachCorrectly)
 {
     RenderGraphBuilder builder;
@@ -526,7 +528,7 @@ TEST(RenderGraphBuilderTest, AddComputePassWithMixedReadWriteKindsRecordsEachCor
     const CompiledGraphInput input = builder.Finish();
     ASSERT_EQ(input.passes.size(), 1u);
     const PassRecord& pass = input.passes[0];
-    EXPECT_TRUE(pass.isComputePass);
+    EXPECT_EQ(pass.kind, PassKind::Compute);
 
     ASSERT_EQ(pass.reads.size(), 3u);
     EXPECT_EQ(pass.reads[0].kind, ResourceKind::Texture);

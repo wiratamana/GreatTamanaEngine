@@ -305,13 +305,15 @@ TEST(RenderGraphSnapshotTest, EmptyStatsLookupLeavesEveryPassAtDefaultStats)
     EXPECT_EQ(snapshot.passesInExecutionOrder[0].stats.timing.status, GpuTimingSample::Status::Absent);
 }
 
-// --- frame-debugger-5 campaign, PHASE1 - isComputePass / readKinds / -------
-// --- writeKinds (PHASE1_RENDERGRAPH_COMPUTE_DISPATCH_CHOKEPOINT_INFRASTRUCTURE.md) ---
+// --- frame-debugger-5 campaign, PHASE1 - isComputePass (RENAMED to `kind` -----
+// --- by the Render Pass campaign's own PHASE1, task_manager/render-pass-1) --
+// --- / readKinds / writeKinds (PHASE1_RENDERGRAPH_COMPUTE_DISPATCH_CHOKEPOINT_INFRASTRUCTURE.md) ---
 
-// isComputePass is copied through correctly for a surviving graphics pass
-// (AddPass() -> false) vs. a surviving compute pass (AddComputePass() ->
-// true), each keeping its own real name/execution-order position.
-TEST(RenderGraphSnapshotTest, IsComputePassIsCopiedThroughForSurvivingGraphicsAndComputePasses)
+// `kind` is copied through correctly for a surviving graphics pass
+// (AddPass() -> PassKind::Graphics) vs. a surviving compute pass
+// (AddComputePass() -> PassKind::Compute), each keeping its own real
+// name/execution-order position.
+TEST(RenderGraphSnapshotTest, KindIsCopiedThroughForSurvivingGraphicsAndComputePasses)
 {
     RenderGraphBuilder builder;
     const TextureHandle t0 = builder.CreateTexture("T0", MakeTextureDesc());
@@ -336,16 +338,16 @@ TEST(RenderGraphSnapshotTest, IsComputePassIsCopiedThroughForSurvivingGraphicsAn
     ASSERT_EQ(snapshot.passesInExecutionOrder.size(), 2u);
 
     EXPECT_EQ(snapshot.passesInExecutionOrder[0].name, "GraphicsPass");
-    EXPECT_FALSE(snapshot.passesInExecutionOrder[0].isComputePass);
+    EXPECT_EQ(snapshot.passesInExecutionOrder[0].kind, PassKind::Graphics);
 
     EXPECT_EQ(snapshot.passesInExecutionOrder[1].name, "ComputePass");
-    EXPECT_TRUE(snapshot.passesInExecutionOrder[1].isComputePass);
+    EXPECT_EQ(snapshot.passesInExecutionOrder[1].kind, PassKind::Compute);
 }
 
-// A culled compute pass must still truthfully report isComputePass == true
+// A culled compute pass must still truthfully report kind == PassKind::Compute
 // (and correct readKinds/writeKinds) - only `stats` stays defaulted for a
 // culled pass, per this struct's own pre-existing convention.
-TEST(RenderGraphSnapshotTest, CulledComputePassStillReportsIsComputePassTrueAndCorrectWriteKind)
+TEST(RenderGraphSnapshotTest, CulledComputePassStillReportsComputeKindAndCorrectWriteKind)
 {
     RenderGraphBuilder builder;
     const TextureHandle output = builder.CreateTexture("Output", MakeTextureDesc());
@@ -366,7 +368,7 @@ TEST(RenderGraphSnapshotTest, CulledComputePassStillReportsIsComputePassTrueAndC
     const RenderGraphPassSnapshot& culled = snapshot.passesInExecutionOrder[1];
     EXPECT_EQ(culled.name, "CulledCompute");
     EXPECT_TRUE(culled.isCulled);
-    EXPECT_TRUE(culled.isComputePass);
+    EXPECT_EQ(culled.kind, PassKind::Compute);
     ASSERT_EQ(culled.writeKinds.size(), 1u);
     EXPECT_EQ(culled.writeKinds[0], ResourceKind::Texture);
     // stats still default for a culled pass - unchanged pre-existing rule.
@@ -470,7 +472,7 @@ TEST(RenderGraphSnapshotTest, ReadKindsAndWriteKindsMatchDeclaredResourceKindsIn
     ASSERT_EQ(snapshot.passesInExecutionOrder.size(), 1u);
 
     const RenderGraphPassSnapshot& pass = snapshot.passesInExecutionOrder[0];
-    EXPECT_TRUE(pass.isComputePass);
+    EXPECT_EQ(pass.kind, PassKind::Compute);
     EXPECT_FALSE(pass.isCulled);
 
     ASSERT_EQ(pass.readNames.size(), 3u);

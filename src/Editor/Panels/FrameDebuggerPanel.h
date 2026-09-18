@@ -112,7 +112,7 @@ public:
     // Skinning passes (and every other real compute dispatch) are now
     // discovered generically by TriggerCapture()'s own call into
     // BuildRealFrameDebuggerSnapshot(), purely via PHASE1's new
-    // RenderGraphPassSnapshot::isComputePass flag - no externally-supplied
+    // RenderGraphPassSnapshot::kind (== rg::PassKind::Compute) flag - no externally-supplied
     // name list is threaded through this call anymore.
     void Build(EditorContext& ctx, Renderer& renderer, const rg::RenderGraph& renderGraph, RenderTexture& gameView,
         RenderTexture* compositedGameView);
@@ -576,7 +576,7 @@ private:
     // REMOVED here (see PHASE0_MASTER_STRATEGY.md's Locked Design Decision
     // #2/#6) - GPU Skinning passes, and every other real compute dispatch,
     // are discovered generically now, purely via PHASE1's new
-    // RenderGraphPassSnapshot::isComputePass flag inside
+    // RenderGraphPassSnapshot::kind (== rg::PassKind::Compute) flag inside
     // BuildRealFrameDebuggerSnapshot() itself, with no externally-supplied
     // name list threaded through this class at all anymore.
 

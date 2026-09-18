@@ -1942,6 +1942,7 @@ set(GTE_TEST_SOURCES
     Renderer/Atmosphere/DirectionalLightResolverTests.cpp
     Renderer/RenderGraph/RenderGraphTypesTests.cpp
     Renderer/RenderGraph/RenderGraphBuilderTests.cpp
+    Renderer/RenderGraph/RenderPassTests.cpp
     Renderer/RenderGraph/RenderGraphCompilerTests.cpp
     Renderer/RenderGraph/RenderGraphBarrierPlannerTests.cpp
     Renderer/RenderGraph/RenderGraphNameSlotTableTests.cpp

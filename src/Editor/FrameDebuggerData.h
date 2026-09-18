@@ -340,12 +340,12 @@ std::string FormatMatrixProperty(const FrameDebuggerMatrixProperty& matrix);
 // atmosphere LUT/volume pass, the Aerial Perspective Composite pass,
 // Compute Blur Validation, and any future compute pass this engine ever
 // adds - is now discovered GENERICALLY, purely via PHASE1's new
-// `RenderGraphPassSnapshot::isComputePass` flag, never by a hand-maintained
+// `RenderGraphPassSnapshot::kind` (== rg::PassKind::Compute) flag, never by a hand-maintained
 // name list or a hardcoded literal string match.
 //
 // Tree shape produced otherwise: one root group node "Game View", with an
 // OPTIONAL "Compute Dispatches (Pre-GameView)" child group (present only
-// when at least one real, surviving `isComputePass == true` pass's own
+// when at least one real, surviving `kind == rg::PassKind::Compute` pass's own
 // index in `graphSnapshot.passesInExecutionOrder` is STRICTLY LESS THAN
 // the real "GameView" pass's own index - e.g. GPU Skinning, every
 // atmosphere LUT pass), followed by exactly one LEAF for the real
@@ -363,7 +363,7 @@ std::string FormatMatrixProperty(const FrameDebuggerMatrixProperty& matrix);
 // (PHASE2_FRAME_DEBUGGER_VIEWSCOPE_FILTERED_DISCOVERY.md) - BOTH groups
 // above also now REQUIRE `pass.viewScope != rg::ViewScope::SceneView` (a
 // real, PHASE1-stamped, structural field - never a pass-name/resource-suffix
-// string comparison) in addition to `isComputePass`/`!isCulled`/execution-
+// string comparison) in addition to `kind == rg::PassKind::Compute`/`!isCulled`/execution-
 // order position. This engine genuinely runs a SEPARATE per-view copy of
 // several Atmosphere compute passes (Sky-View LUT, Aerial Perspective
 // Volume, Aerial Perspective Composite) - one for the Game View, one for the
