@@ -121,6 +121,72 @@ See `task_manager/render-pass-1/PHASE0_MASTER_STRATEGY.md` and each
 writeup, including PHASE4's own live, HTTP-driven, screenshot-verified proof
 of this exact new tree shape end-to-end.
 
+## What's new (`render-pass-2` campaign)
+
+The `render-pass-2` campaign
+(`task_manager/render-pass-2/PHASE0_MASTER_STRATEGY.md`) is a direct, closely-
+scoped follow-up to `render-pass-1` immediately above, fixing a real,
+user-confirmed structural gap that campaign's own PHASE2/PHASE4 rework
+happened to introduce: `"DrawSkyBackground"` (and, generically, every OTHER
+real pass leaf this window builds except `"RenderOpaque"` itself) rendered as
+a flat, childless row with NO expand arrow, even though its sibling
+`"RenderOpaque"` correctly showed one (owning its own real per-entity
+children) — visually looking like "an orphaned row that belongs to no render
+pass" (the user's own words).
+
+- **A new, purely-descriptive `gte::rg::RenderPassDrawKind` enum**
+  (`DrawMesh`/`DrawQuad`/`Blit`, `src/Renderer/RenderGraph/RenderGraphTypes.h`)
+  is now stamped on every real pass via a new, trailing, DEFAULTED
+  (`DrawMesh`) parameter on both `RenderGraphBuilder::AddRenderPass()`
+  overloads — every pre-existing call site across `src/` compiles completely
+  unmodified. `"DrawSkyBackground"`'s own declaration
+  (`AddDrawSkyBackgroundPass()`, `src/Application/RenderPasses.cpp`) is the one
+  real pass tagged `DrawQuad` today, a real, hand-verified fact
+  (`AtmosphereSkyBackgroundRenderer.cpp` issues a real `vkCmdDraw(cmd, 3, 1, 0,
+  0)` — the classic "full-screen quad via one oversized triangle" technique,
+  never a real per-object mesh draw). `Blit` is a real-but-currently-UNUSED
+  scaffold value — a genuine Vulkan blit/copy pass would need
+  `RenderGraph::Execute()` to grow a whole new recording path outside the
+  `vkCmdBeginRendering`/`vkCmdEndRendering` bracket every Graphics-kind pass
+  uses today, real orchestrator work explicitly out of scope for this
+  campaign (mirrors how `render-pass-1` added the still-always-empty
+  `"RenderTransparent"` scaffold).
+- **Every real pass leaf this window builds — except `"RenderOpaque"`
+  itself — is now a real "v PassName" PARENT owning exactly one real,
+  independently-selectable CHILD event row describing the actual GPU
+  operation that pass issues.** A new shared helper,
+  `WrapPassWithOwnedChildEvent()` (`src/Editor/FrameDebuggerData.cpp`,
+  anonymous namespace), copies an already-built pass-level leaf, retargets the
+  copy's own `name`/`eventIndex`/`details->eventIndex`/`details->eventLabel`
+  to a structural child label, and attaches it as that pass's one and only
+  child — a Compute-kind pass's child is always labeled `"Compute Dispatch"`
+  (unchanged); a Graphics-kind pass's child is labeled `"Draw Mesh"`/`"Draw
+  Quad"`/`"Blit"` via a new `GraphicsChildEventLabelFor(rg::RenderPassDrawKind)`
+  helper, chosen PURELY by that pass's own structural `drawKind` tag — never a
+  hardcoded pass-name string match. Both the pass-level row and its new child
+  row stay independently selectable (`FindEventDetailsByIndexRecursive()`
+  needed zero changes — it already recurses into `children` unconditionally),
+  each showing the SAME real pass-level facts (blend/Z/stencil, textures, GPU
+  timing). `"RenderOpaque"` is explicitly, permanently EXCLUDED from this
+  rework — its own real per-entity-children mechanism
+  (`BuildRenderOpaqueLeaf()`/`BuildRenderOpaqueDrawRecordLeaf()`) is untouched,
+  byte-for-byte, since real per-object identity is not something a generic
+  wrapper could reconstruct for an arbitrary pass anyway.
+- **Every pass that gets wrapped this way now consumes TWO consecutive
+  `eventIndex` values instead of one** (parent, then its owned child, assigned
+  back-to-back) — `BuildRealFrameDebuggerSnapshot()`'s own pre-existing
+  "chronological, monotonically increasing eventIndex" invariant still holds,
+  since both indices for the same pass are always assigned in that fixed
+  order. `src/Editor/Panels/FrameDebuggerPanel.cpp`'s `RenderEventNode()`
+  needed ZERO changes — it already, generically, draws an expandable "v"
+  arrow for any node with `!node.children.empty()`, so every one of these
+  newly-nested rows starts showing the correct arrow automatically.
+
+See `task_manager/render-pass-2/PHASE0_MASTER_STRATEGY.md` and each
+`PHASEn_COMPLETION_REPORT.md` in that same folder for the full phase-by-phase
+writeup, including PHASE4's own live, HTTP-driven, screenshot-verified proof
+of this exact new nested tree shape end-to-end.
+
 ## What is real today
 
 - **Capture is genuinely real, and PASS-LEVEL for every pass EXCEPT
@@ -147,31 +213,46 @@ of this exact new tree shape end-to-end.
 
   ```
   "Game View" (root)
-    |-- "Compute LUT"                          (only present if >=1 child)
-    |     |-- <every surviving AtmosphereLut-category compute pass BEFORE
-    |     |     "RenderOpaque"'s own execution-order index, in real
-    |     |     execution order - e.g. AtmosphereTransmittanceLutPass,
-    |     |     AtmosphereMultiScatteringLutPass, AtmosphereSkyViewLutPass,
-    |     |     AtmosphereAerialPerspectiveVolumePass>
-    |-- "Compute Dispatches (Pre-GameView)"    (only present if >=1 child)
-    |     |-- <every surviving, NON-AtmosphereLut-category compute pass BEFORE
-    |     |     "RenderOpaque"'s own execution-order index - e.g. every
-    |     |     GPU-skinning dispatch request active this frame>
-    |-- "RenderOpaque" leaf                     (the built-in mesh-drawing pass)
-    |     |-- <one real child leaf PER real per-entity draw call this pass
-    |     |     issued this frame - e.g. "terrain (Entity 2)",
-    |     |     "SmokeTestCube (Entity 3)" - frame-debugger-6 campaign, PHASE4>
-    |-- "DrawSkyBackground" leaf                 (a REAL, separate, individually
-    |                                             selectable leaf - no more
-    |                                             isSkyBackgroundDraw hack)
-    |-- "RenderTransparent" leaf                 (only ever appears once this
-    |                                             currently-always-empty
-    |                                             scaffold pass is real - never
-    |                                             today)
-    |-- "Compute Dispatches (Post-GameView)"    (only present if >=1 child)
-          |-- <every surviving compute pass AFTER the "RenderOpaque"/
-          |     "DrawSkyBackground"/"RenderTransparent" view region - e.g.
-          |     AtmosphereAerialPerspectiveCompositePass>
+    v "Compute LUT"                          (only present if >=1 child)
+       v <every surviving AtmosphereLut-category compute pass BEFORE
+          "RenderOpaque"'s own execution-order index, in real execution
+          order - e.g. AtmosphereTransmittanceLutPass,
+          AtmosphereMultiScatteringLutPass, AtmosphereSkyViewLutPass,
+          AtmosphereAerialPerspectiveVolumePass>
+          "Compute Dispatch"                 (its one real owned child event -
+                                              render-pass-2 campaign)
+    v "Compute Dispatches (Pre-GameView)"    (only present if >=1 child)
+       v <every surviving, NON-AtmosphereLut-category compute pass BEFORE
+          "RenderOpaque"'s own execution-order index - e.g. every
+          GPU-skinning dispatch request active this frame>
+          "Compute Dispatch"                 (same owned-child shape as above)
+    v "RenderOpaque" leaf                     (the built-in mesh-drawing pass -
+                                              UNCHANGED shape, explicitly
+                                              EXCLUDED from the render-pass-2
+                                              rework below)
+       <one real child leaf PER real per-entity draw call this pass issued
+        this frame - e.g. "terrain (Entity 2)", "SmokeTestCube (Entity 3)" -
+        frame-debugger-6 campaign, PHASE4>
+    v "DrawSkyBackground" leaf                (a REAL, separate, individually
+                                              selectable "v PassName" PARENT -
+                                              the actual render-pass-2
+                                              campaign fix, see below)
+       "Draw Quad"                            (its one real owned child event -
+                                              labeled by its own real
+                                              RenderPassDrawKind, never a
+                                              pass-name string match)
+    v "RenderTransparent" leaf                (only ever appears once this
+                                              currently-always-empty scaffold
+                                              pass is real - never today; once
+                                              real, gets the same "v PassName"
+                                              -> "Draw Mesh"/"Draw Quad"/"Blit"
+                                              child shape)
+       "Draw Mesh"/"Draw Quad"/"Blit"
+    v "Compute Dispatches (Post-GameView)"    (only present if >=1 child)
+       v <every surviving compute pass AFTER the "RenderOpaque"/
+          "DrawSkyBackground"/"RenderTransparent" view region - e.g.
+          AtmosphereAerialPerspectiveCompositePass>
+          "Compute Dispatch"                 (same owned-child shape as above)
   ```
 
   Concretely, on a typical frame with a Sun light present: `"Compute LUT"`

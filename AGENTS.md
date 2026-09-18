@@ -102,7 +102,17 @@ selectable `"DrawSkyBackground"` pass/leaf too (`render-pass-1` campaign,
 splitting the old monolithic `"GameView"` pass into `"RenderOpaque"` +
 `"DrawSkyBackground"` + a scaffolded, currently-always-empty
 `"RenderTransparent"` - see "Render Pass System" below), not a fabricated
-draw-record hack fused into the mesh-drawing pass like it used to be.
+draw-record hack fused into the mesh-drawing pass like it used to be. Every
+real pass leaf in this tree - except `"RenderOpaque"` itself, which keeps its
+own per-entity mechanism above - is now a real "v PassName" parent OWNING
+exactly one real, independently-selectable CHILD event row describing the
+actual GPU operation that pass issues (`"Compute Dispatch"` for a
+Compute-kind pass; `"Draw Mesh"`/`"Draw Quad"`/`"Blit"` for a Graphics-kind
+pass, chosen purely by that pass's own real, structural `rg::RenderPassDrawKind`
+tag - never a pass-name string comparison - `render-pass-2` campaign,
+`task_manager/render-pass-2/PHASE0_MASTER_STRATEGY.md`, fixing a confirmed bug
+where `"DrawSkyBackground"` rendered as a flat, childless row with no expand
+arrow, looking like an orphaned row belonging to no render pass).
 **Selecting ANY
 leaf - a compute pass or a per-object draw alike - now shows a real, correct
 "accumulated Game View as of this exact step" preview image** (`frame-debugger-7`
@@ -144,10 +154,25 @@ currently-always-empty `"RenderTransparent"` scaffold (a clean drop-in point
 for a future real transparency system) - declared back-to-back against the
 same render target, in that fixed order (Opaque must run before Sky
 Background, since Sky Background relies on an `EQUAL` depth-test against the
-depth buffer Opaque just wrote).
+depth buffer Opaque just wrote). A follow-up campaign, `render-pass-2`
+(`task_manager/render-pass-2/PHASE0_MASTER_STRATEGY.md`), added a third,
+purely-descriptive piece of metadata: `rg::RenderPassDrawKind`
+(`DrawMesh`/`DrawQuad`/`Blit`), stamped via a new, trailing, defaulted
+parameter on both `AddRenderPass()` overloads (every pre-existing call site
+compiles unmodified) - `"DrawSkyBackground"` is the one real pass tagged
+`DrawQuad` today (a hand-verified fact - it issues a real 3-vertex
+full-screen-triangle `vkCmdDraw()`, never a per-object mesh draw); `Blit`
+remains a real-but-unused scaffold value, since a genuine Vulkan blit/copy
+pass would need `RenderGraph::Execute()` to grow a whole new recording path
+outside the `vkCmdBeginRendering`/`vkCmdEndRendering` bracket every
+Graphics-kind pass uses today - real orchestrator work, still out of scope.
+This tag is what lets the Frame Debugger's own generic tree-building logic
+(see "Frame Debugger" above) label a Graphics-kind pass's owned child event
+row correctly, purely structurally, never via a pass-name string match.
 
-Full history: `task_manager/render-pass-1/PHASE0_MASTER_STRATEGY.md` and each
-`PHASEn_COMPLETION_REPORT.md` in that same folder.
+Full history: `task_manager/render-pass-1/PHASE0_MASTER_STRATEGY.md` and
+`task_manager/render-pass-2/PHASE0_MASTER_STRATEGY.md`, and each
+`PHASEn_COMPLETION_REPORT.md` in those same folders.
 
 ## Job System
 
