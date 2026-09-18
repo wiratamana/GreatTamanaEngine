@@ -446,13 +446,49 @@ std::string FormatMatrixProperty(const FrameDebuggerMatrixProperty& matrix);
 //
 //   "Game View" (root, cosmetic label, UNCHANGED - see `root.name` below)
 //     |-- "Compute LUT"                        (AtmosphereLut-category compute passes before the pivot)
+//     |     |-- "AtmosphereTransmittanceLutPass"       (v-parent - owns exactly one child, see below)
+//     |     |     `-- "Compute Dispatch"
+//     |     `-- ... one such v-parent per surviving AtmosphereLut-category pass
 //     |-- "Compute Dispatches (Pre-GameView)"   (every OTHER category compute pass before the pivot)
-//     |-- "RenderOpaque" leaf                   (the old "GameView" leaf, renamed - same per-entity children)
-//     |-- "DrawSkyBackground" leaf              (NEW - a real, separate, individually selectable leaf -
-//     |                                          the old isSkyBackgroundDraw/RecordSkyBackgroundDraw()
+//     |     `-- ... same v-parent/"Compute Dispatch" child shape as above, per surviving pass
+//     |-- "RenderOpaque" leaf                   (the old "GameView" leaf, renamed - same per-entity
+//     |                                          children as always - explicitly UNTOUCHED by the
+//     |                                          Frame Debugger Pass-Ownership campaign below)
+//     |-- "DrawSkyBackground" leaf              (a real, separate, individually selectable v-parent -
+//     |     `-- "Draw Quad"                      the old isSkyBackgroundDraw/RecordSkyBackgroundDraw()
 //     |                                          hack is REMOVED entirely)
-//     |-- "RenderTransparent" leaf              (only once this pass is ever real/non-empty - never today)
-//     |-- "Compute Dispatches (Post-GameView)"  (General-category compute passes after the view region)
+//     |-- "RenderTransparent" leaf              (only once this pass is ever real/non-empty - never
+//     |     `-- "Draw Mesh"/"Draw Quad"/"Blit"   today - would get the same v-parent/child treatment)
+//     `-- "Compute Dispatches (Post-GameView)"  (General-category compute passes after the view region)
+//           `-- ... same v-parent/"Compute Dispatch" child shape as above, per surviving pass
+//
+// Frame Debugger Pass-Ownership campaign (task_manager/render-pass-2), PHASE2
+// - EVERY one of these pass-level leaves (every "Compute LUT"/"Compute
+// Dispatches (Pre|Post-GameView)" entry, and "DrawSkyBackground"/a future
+// real "RenderTransparent") is now a real "v PassName" PARENT owning exactly
+// one real, independently-selectable child event row describing the actual
+// GPU operation that pass issues - "Compute Dispatch" for a Compute-kind
+// pass, or "Draw Mesh"/"Draw Quad"/"Blit" for a Graphics-kind pass (chosen
+// by that pass's own real, structural `rg::RenderPassDrawKind`, PHASE1 -
+// never a pass-name string match). This is built by
+// FrameDebuggerData.cpp's own `WrapPassWithOwnedChildEvent()` helper, called
+// once per surviving pass at each of the three call sites below - it copies
+// the already-built pass-level leaf, retargets the copy's own name/
+// eventIndex/eventLabel to the child's structural label, and attaches it as
+// that pass's one and only child, so both the pass row and its child row
+// stay independently selectable with matching pass-level facts (blend/Z/
+// stencil, textures, GPU timing) - exactly mirroring how "RenderOpaque"
+// already works with its own real per-entity children. THE ONLY EXCEPTION
+// is "RenderOpaque" itself, which keeps its own pre-existing, untouched
+// per-entity-children mechanism (BuildRenderOpaqueLeaf()/
+// BuildRenderOpaqueDrawRecordLeaf()) - real per-object identity no generic
+// wrapper could reconstruct for an arbitrary pass anyway. Every pass that
+// gets wrapped this way now consumes TWO consecutive `nextEventIndex`
+// values instead of one (parent, then child, assigned back-to-back before
+// moving to the next pass) - `BuildRealFrameDebuggerSnapshot()`'s own
+// pre-existing "chronological, monotonically increasing eventIndex" rule
+// still holds, since both indices for the same pass are always assigned in
+// that fixed order.
 //
 // discovered by a GENERIC "view region" walk (see FrameDebuggerData.cpp's own
 // BuildRealFrameDebuggerSnapshot() body) rather than a single hardcoded

@@ -260,6 +260,64 @@ const char* WriteRowLabelForKind(rg::ResourceKind kind)
     return "Write Texture";
 }
 
+// Frame Debugger Pass-Ownership campaign (task_manager/render-pass-2),
+// PHASE2 - the ONE shared mechanism that turns a single, flat "pass IS the
+// draw event" leaf into a real "v PassName" parent OWNING exactly one real
+// child event row - the fix for "DrawSkyBackground seems not owned by any
+// render-pass" (and, generalized, every other flat pass leaf this file used
+// to build - PHASE0_MASTER_STRATEGY.md's Locked Design Decision #1).
+//
+// `passLevelNode` is a fully-built leaf EXACTLY as BuildComputeDispatchLeaf()/
+// BuildGraphicsPassLeaf() already built it before this phase (real name,
+// real eventIndex, real populated `details`) - this function does not
+// change any of that data, it only (a) makes a COPY of it for the new child
+// (Locked Design Decision #2 - both parent and child stay independently
+// selectable, both show the same real pass-level facts), (b) overwrites the
+// COPY's own name/eventIndex/details->eventIndex/details->eventLabel to
+// describe the actual GPU operation instead of the owning pass, and (c)
+// attaches it as `passLevelNode`'s one and only child.
+//
+// `childEventIndex` must be the NEXT value `nextEventIndex` produces AFTER
+// `passLevelNode.eventIndex` was assigned - the caller is responsible for
+// this ordering (see this file's own BuildRealFrameDebuggerSnapshot(), which
+// calls `nextEventIndex++` twice per pass, back-to-back, to guarantee it).
+FrameDebuggerEventNode WrapPassWithOwnedChildEvent(
+    FrameDebuggerEventNode passLevelNode, int childEventIndex, const std::string& childEventLabel)
+{
+    FrameDebuggerEventNode child = passLevelNode; // Copies name/eventIndex/details/children (children is always
+                                                   // empty on passLevelNode at this point - defensive-safe either way).
+    child.name = childEventLabel;
+    child.eventIndex = childEventIndex;
+    child.children.clear();
+    if (child.details.has_value()) {
+        child.details->eventIndex = childEventIndex;
+        child.details->eventLabel = childEventLabel;
+    }
+    passLevelNode.children.push_back(std::move(child));
+    return passLevelNode;
+}
+
+// Frame Debugger Pass-Ownership campaign, PHASE2 - which child-event label a
+// Graphics-kind pass's owned child gets, derived PURELY from its own real,
+// structural rg::RenderPassDrawKind (PHASE1) - NEVER from a pass-name string
+// comparison (PHASE0_MASTER_STRATEGY.md's Locked Design Decision #3).
+// Deliberately NO `default:` case - mirrors ReadRowLabelForKind()/
+// WriteRowLabelForKind()'s own exhaustive-switch convention immediately
+// above in this same file, so a future fourth RenderPassDrawKind enumerator
+// fails to compile here until updated.
+const char* GraphicsChildEventLabelFor(rg::RenderPassDrawKind drawKind)
+{
+    switch (drawKind) {
+    case rg::RenderPassDrawKind::DrawMesh:
+        return "Draw Mesh";
+    case rg::RenderPassDrawKind::DrawQuad:
+        return "Draw Quad";
+    case rg::RenderPassDrawKind::Blit:
+        return "Blit";
+    }
+    return "Draw Mesh";
+}
+
 // frame-debugger-5 campaign, PHASE2 - the ONE generic leaf builder for ANY
 // real compute dispatch (RenderGraphPassSnapshot::kind == rg::PassKind::Compute)
 // that survived this frame, whatever its name - GPU Skinning, every
@@ -592,7 +650,11 @@ FrameDebuggerEventNode BuildGraphicsPassLeaf(
 
     FrameDebuggerEventDetails details;
     details.eventIndex = eventIndex;
-    details.eventLabel = "Draw Pass";
+    // Frame Debugger Pass-Ownership campaign (render-pass-2), PHASE2 - reuses
+    // the SAME structural label its new owned child event row also gets, so
+    // the Inspector's "Event #N: {label}" header is meaningful no matter
+    // which of the two independently-selectable rows is selected.
+    details.eventLabel = GraphicsChildEventLabelFor(pass.drawKind);
     details.stepPreviewKind = stepPreviewKind;
     details.passName = pass.name;
     details.shaderName = pass.name;
@@ -679,6 +741,7 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
         }
         FrameDebuggerEventNode leaf =
             BuildComputeDispatchLeaf(pass, nextEventIndex++, FrameDebuggerStepPreviewKind::NotYetDrawn);
+        leaf = WrapPassWithOwnedChildEvent(std::move(leaf), nextEventIndex++, "Compute Dispatch");
         if (pass.category == rg::RenderPassCategory::AtmosphereLut) {
             computeLutGroup.children.push_back(std::move(leaf));
         } else {
@@ -754,11 +817,18 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
             root.children.push_back(std::move(renderOpaqueLeaf));
             isRenderOpaqueLeaf = false;
         } else {
-            // "DrawSkyBackground" today; a real future "RenderTransparent"
-            // once that pass ever actually exists (Step 3.5 - it never does
-            // today, so this branch is simply never reached for it yet).
-            root.children.push_back(
-                BuildGraphicsPassLeaf(pass, nextEventIndex++, FrameDebuggerStepPreviewKind::PreComposite));
+            // "DrawSkyBackground" today; a real future "RenderTransparent" once
+            // that pass ever actually exists. Frame Debugger Pass-Ownership
+            // campaign (render-pass-2), PHASE2 - this pass now also gets a real
+            // owned child event row, labeled by its own structural
+            // rg::RenderPassDrawKind (never a pass-name string match) - this is
+            // the actual fix for "DrawSkyBackground seems not owned by any
+            // render-pass".
+            FrameDebuggerEventNode leaf =
+                BuildGraphicsPassLeaf(pass, nextEventIndex++, FrameDebuggerStepPreviewKind::PreComposite);
+            leaf = WrapPassWithOwnedChildEvent(
+                std::move(leaf), nextEventIndex++, GraphicsChildEventLabelFor(pass.drawKind));
+            root.children.push_back(std::move(leaf));
         }
     }
 
@@ -787,7 +857,9 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
         const FrameDebuggerStepPreviewKind stepPreviewKind = (compositePassIndex >= 0 && i < compositePassIndex)
             ? FrameDebuggerStepPreviewKind::PreComposite
             : FrameDebuggerStepPreviewKind::PostComposite;
-        postGameViewGroup.children.push_back(BuildComputeDispatchLeaf(pass, nextEventIndex++, stepPreviewKind));
+        FrameDebuggerEventNode leaf = BuildComputeDispatchLeaf(pass, nextEventIndex++, stepPreviewKind);
+        leaf = WrapPassWithOwnedChildEvent(std::move(leaf), nextEventIndex++, "Compute Dispatch");
+        postGameViewGroup.children.push_back(std::move(leaf));
     }
     if (!postGameViewGroup.children.empty()) {
         root.children.push_back(std::move(postGameViewGroup));
