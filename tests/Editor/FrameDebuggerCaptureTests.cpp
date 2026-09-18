@@ -189,8 +189,17 @@ TEST(DescribeStandardPipelineStateTest, ReportsRealHardcodedPipelineCppValues)
     EXPECT_FALSE(state.stencilZFail.empty());
 }
 
-// frame-debugger-8 campaign, PHASE1 - DescribeSkyBackgroundPipelineState()/
-// RecordSkyBackgroundDraw() tests.
+// frame-debugger-8 campaign, PHASE1 - DescribeSkyBackgroundPipelineState()
+// test. Render Pass campaign (task_manager/render-pass-1), PHASE4
+// (PHASE4_FRAME_DEBUGGER_GENERIC_TREE_REWORK.md, Step 3.4/3.6) - the
+// `RecordSkyBackgroundDraw()` tests that used to live here are REMOVED
+// (that method itself no longer exists - the Sky Background draw is now a
+// real, separate, generically-discovered "DrawSkyBackground" Render Graph
+// pass instead of a fabricated FrameDebuggerDrawRecord - see
+// tests/Editor/FrameDebuggerSnapshotBuilderTests.cpp for its new tree-leaf
+// coverage). DescribeSkyBackgroundPipelineState() itself is UNCHANGED and
+// still real, still used (by FrameDebuggerData.cpp's new BuildGraphicsPassLeaf()
+// for the "DrawSkyBackground" leaf), so its own test stays.
 
 TEST(DescribeSkyBackgroundPipelineStateTest, ReturnsRealDistinctValues)
 {
@@ -211,49 +220,6 @@ TEST(DescribeSkyBackgroundPipelineStateTest, ReturnsRealDistinctValues)
     EXPECT_EQ(sky.stencilPass, standard.stencilPass);
     EXPECT_EQ(sky.stencilFail, standard.stencilFail);
     EXPECT_EQ(sky.stencilZFail, standard.stencilZFail);
-}
-
-TEST(FrameDebuggerCaptureContextTest, RecordSkyBackgroundDrawAppendsOneMarkedRecord)
-{
-    FrameDebuggerCaptureContext capture;
-    capture.RecordSkyBackgroundDraw("Test.vert/Test.frag");
-
-    ASSERT_EQ(capture.DrawRecords().size(), 1u);
-    EXPECT_TRUE(capture.DrawRecords()[0].isSkyBackgroundDraw);
-    EXPECT_EQ(capture.DrawRecords()[0].pipelineDebugName, "Test.vert/Test.frag");
-    EXPECT_EQ(capture.DrawRecords()[0].triangleCount, 1u);
-}
-
-TEST(FrameDebuggerCaptureContextTest, RecordSkyBackgroundDrawAfterEntityDrawsAppendsAtTheEnd)
-{
-    FrameDebuggerCaptureContext capture;
-    capture.RecordEntityDraw(2, 1, "terrain", "Mesh.vert/Mesh.frag (PositionNormal)", "MaterialTexture abc123", 100);
-    capture.RecordEntityDraw(3, 1, "SmokeTestCube", "Mesh.vert/Mesh.frag (PositionNormal)", "", 12);
-    capture.RecordSkyBackgroundDraw("AtmosphereSkyBackground.vert/AtmosphereSkyBackground.frag");
-
-    ASSERT_EQ(capture.DrawRecords().size(), 3u);
-    EXPECT_FALSE(capture.DrawRecords()[0].isSkyBackgroundDraw);
-    EXPECT_FALSE(capture.DrawRecords()[1].isSkyBackgroundDraw);
-    EXPECT_TRUE(capture.DrawRecords()[2].isSkyBackgroundDraw);
-}
-
-TEST(FrameDebuggerCaptureContextTest, RecordSkyBackgroundDrawFeedsPipelineDebugNamesAndDrawCallCount)
-{
-    FrameDebuggerCaptureContext capture;
-    capture.RecordSkyBackgroundDraw("Test.vert/Test.frag");
-
-    ASSERT_EQ(capture.PipelineDebugNames().size(), 1u);
-    EXPECT_EQ(capture.PipelineDebugNames()[0], "Test.vert/Test.frag");
-    EXPECT_EQ(capture.DrawCallCount(), 1);
-}
-
-TEST(FrameDebuggerCaptureContextTest, ResetClearsSkyBackgroundRecordsToo)
-{
-    FrameDebuggerCaptureContext capture;
-    capture.RecordSkyBackgroundDraw("Test.vert/Test.frag");
-    capture.Reset();
-
-    EXPECT_TRUE(capture.DrawRecords().empty());
 }
 
 } // namespace

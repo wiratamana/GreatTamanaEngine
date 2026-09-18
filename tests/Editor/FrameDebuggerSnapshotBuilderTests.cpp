@@ -24,6 +24,21 @@
 // "Compute Dispatches (Pre-GameView)"/"Compute Dispatches (Post-GameView)"
 // group pair (Locked Design Decision #8) - see each rewritten test's own
 // comment below for exactly what changed.
+//
+// Render Pass campaign (task_manager/render-pass-1), PHASE4
+// (PHASE4_FRAME_DEBUGGER_GENERIC_TREE_REWORK.md) - the old monolithic
+// "GameView" PASS was already split by PHASE2 of this campaign into
+// "RenderOpaque"/"DrawSkyBackground"/"RenderTransparent"; every fixture below
+// that used to name its pivot pass "GameView" now names it "RenderOpaque"
+// instead (the pivot lookup itself was retargeted - see
+// BuildRealFrameDebuggerSnapshot()'s own updated doc comment), every
+// "GameView"/"GameView (Entity Draw)" literal assertion is now
+// "RenderOpaque"/"RenderOpaque (Entity Draw)", and several NEW tests were
+// added covering the "Compute LUT" vs. "Compute Dispatches (Pre-GameView)"
+// category split (3.2), the new "DrawSkyBackground" leaf (3.3), the
+// `RenderTransparent`-never-appears-when-absent behavior (3.5), and the
+// Debug-category-pass exclusion regression this phase's own pre-check found
+// (3.3b) - see each test's own comment.
 
 #include "Editor/FrameDebuggerData.h"
 
@@ -49,7 +64,18 @@ rg::RenderGraphPassSnapshot MakeComputePass(const std::string& name)
     return pass;
 }
 
-TEST(FrameDebuggerSnapshotBuilderTest, NoGameViewPassProducesEmptyResult)
+// Render Pass campaign (task_manager/render-pass-1), PHASE4 - a graphics
+// pass with a given RenderPassCategory, mirroring how
+// AddFrameDebuggerReplayPasses() (RenderPasses.cpp) now tags its own N
+// replay passes rg::RenderPassCategory::Debug (PHASE4's own 3.3b migration).
+rg::RenderGraphPassSnapshot MakeGraphicsPassWithCategory(const std::string& name, rg::RenderPassCategory category)
+{
+    rg::RenderGraphPassSnapshot pass = MakePass(name);
+    pass.category = category;
+    return pass;
+}
+
+TEST(FrameDebuggerSnapshotBuilderTest, NoRenderOpaquePassProducesEmptyResult)
 {
     rg::RenderGraphSnapshot graphSnapshot;
     graphSnapshot.passesInExecutionOrder.push_back(MakePass("SceneView"));
@@ -62,21 +88,32 @@ TEST(FrameDebuggerSnapshotBuilderTest, NoGameViewPassProducesEmptyResult)
     EXPECT_EQ(snapshot.totalEventCount, 0);
 }
 
-// REWRITTEN (was GameViewWithNoGpuSkinningProducesExactlyOneLeaf) - only the
-// call site (dropped the removed gpuSkinningPassNamesThisFrame argument) and
-// the name/comment changed; every assertion is unchanged.
-TEST(FrameDebuggerSnapshotBuilderTest, GameViewWithNoComputePassesProducesExactlyOneLeaf)
+// REWRITTEN (was GameViewWithNoComputePassesProducesExactlyOneLeaf) - the
+// pivot pass literal ("GameView" -> "RenderOpaque") and the passName
+// assertion changed. Render Pass campaign (task_manager/render-pass-1),
+// PHASE4 - the original fixture also included a trailing "Present" pass
+// AFTER the pivot to prove Game-View-only scope excludes it - this is no
+// longer a safe inclusion under the NEW "view region" walk (Step 3.3), which
+// (correctly, per its own spec) treats ANY surviving, non-SceneView-scoped,
+// non-Debug-category Graphics pass positioned after the pivot as a real view-
+// region leaf - in the REAL engine this scenario never actually arises
+// ("Present" is declared in a completely SEPARATE RenderGraph::Execute() call
+// from "RenderOpaque" - see Application.cpp - so the two are never part of
+// the same RenderGraphSnapshot at all), so artificially combining them in one
+// fixture no longer reflects reality. Dropped from this fixture; "SceneView"
+// stays (BEFORE the pivot, still exercising exclusion the same way it always
+// has - the pre-view loop only ever inspects Compute-kind passes).
+TEST(FrameDebuggerSnapshotBuilderTest, RenderOpaqueWithNoComputePassesProducesExactlyOneLeaf)
 {
     rg::RenderGraphSnapshot graphSnapshot;
-    // SceneView/Present are real passes in the SAME underlying snapshot -
-    // Locked Design Decision #7 (Game-View-only scope) must exclude them
-    // even though they're right here alongside "GameView".
+    // SceneView is a real pass in the SAME underlying snapshot - Locked
+    // Design Decision #7 (Game-View-only scope) must exclude it even though
+    // it's right here alongside "RenderOpaque".
     graphSnapshot.passesInExecutionOrder.push_back(MakePass("SceneView"));
-    rg::RenderGraphPassSnapshot gameView = MakePass("GameView");
-    gameView.stats.drawStats.drawCallCount = 7;
-    gameView.stats.drawStats.triangleCount = 250;
-    graphSnapshot.passesInExecutionOrder.push_back(gameView);
-    graphSnapshot.passesInExecutionOrder.push_back(MakePass("Present"));
+    rg::RenderGraphPassSnapshot renderOpaque = MakePass("RenderOpaque");
+    renderOpaque.stats.drawStats.drawCallCount = 7;
+    renderOpaque.stats.drawStats.triangleCount = 250;
+    graphSnapshot.passesInExecutionOrder.push_back(renderOpaque);
 
     FrameDebuggerCaptureContext capture;
     capture.RecordDraw("Mesh.vert/Mesh.frag (PositionNormal)", "MaterialTexture abc123", Mat4::Identity());
@@ -93,14 +130,14 @@ TEST(FrameDebuggerSnapshotBuilderTest, GameViewWithNoComputePassesProducesExactl
     EXPECT_TRUE(leaf.isDrawCall);
     EXPECT_EQ(leaf.eventIndex, 0);
     ASSERT_TRUE(leaf.details.has_value());
-    EXPECT_EQ(leaf.details->passName, "GameView");
+    EXPECT_EQ(leaf.details->passName, "RenderOpaque");
     EXPECT_EQ(leaf.details->eventLabel, "Draw Mesh");
     EXPECT_EQ(leaf.details->shaderName, "Mesh.vert/Mesh.frag (PositionNormal)");
     ASSERT_EQ(leaf.details->textures.size(), 1u);
     EXPECT_EQ(leaf.details->textures[0].valueLabel, "MaterialTexture abc123");
 
     // vectors: clear color + real aggregate DrawStats from the graph
-    // snapshot's own "GameView" entry (NOT from capture.DrawCallCount()).
+    // snapshot's own "RenderOpaque" entry (NOT from capture.DrawCallCount()).
     ASSERT_EQ(leaf.details->vectors.size(), 2u);
     bool foundDrawStats = false;
     for (const FrameDebuggerVectorProperty& vec : leaf.details->vectors) {
@@ -117,68 +154,86 @@ TEST(FrameDebuggerSnapshotBuilderTest, GameViewWithNoComputePassesProducesExactl
     EXPECT_EQ(leaf.details->zTest, "Less");
 }
 
-// REWRITTEN (was TwoGpuSkinningPassesProduceGroupPlusGameViewLeaf) - the OLD
-// version fed a `gpuSkinningPassNamesThisFrame` name list; discovery is now
-// purely generic via `kind`, so this test marks the two passes
-// kind == rg::PassKind::Compute directly instead, and asserts the NEW
-// "Compute Dispatches (Pre-GameView)" group name instead of the OLD
-// "GPU Skinning" one (both passes appear BEFORE "GameView" in
-// passesInExecutionOrder, so both land in the PRE-GameView group). Also
-// doubles as PHASE2's own Step 3.6 item (a): one buffer-write pass
-// (GPU-Skinning-style) AND one texture-write pass together, both landing
-// under ONE group, each read/write row labeled by its own real
-// ResourceKind (PHASE1).
-TEST(FrameDebuggerSnapshotBuilderTest, TwoPreGameViewComputePassesProduceOnePreGameViewGroup)
+// REWRITTEN (was TwoPreGameViewComputePassesProduceOnePreGameViewGroup) -
+// Render Pass campaign, PHASE4 - this is now the "Compute LUT" vs. "Compute
+// Dispatches (Pre-GameView)" category-split regression test (Step 3.6's own
+// required "mixed" fixture): one AtmosphereLut-category pass ("SkyLutPass")
+// and one GpuSkinning-category pass ("SkinPass_A") in the SAME fixture,
+// declared in an order that DELIBERATELY puts the non-LUT pass BEFORE the
+// LUT pass in real execution order - proving the tree's PRESENTATION order
+// ("Compute LUT" always first) is a fixed rule, never tied to real
+// interleaved execution order.
+TEST(FrameDebuggerSnapshotBuilderTest, MixedComputeLutAndPreGameViewCategoriesProduceBothGroupsInFixedOrder)
 {
     rg::RenderGraphSnapshot graphSnapshot;
 
     rg::RenderGraphPassSnapshot bufferPass = MakeComputePass("SkinPass_A");
+    bufferPass.category = rg::RenderPassCategory::GpuSkinning;
     bufferPass.writeNames.push_back("SkinnedVertexBuffer");
     bufferPass.writeKinds.push_back(rg::ResourceKind::Buffer);
     graphSnapshot.passesInExecutionOrder.push_back(bufferPass);
 
-    rg::RenderGraphPassSnapshot texturePass = MakeComputePass("AtmosphereTransmittanceLutPass");
-    texturePass.writeNames.push_back("TransmittanceLut");
-    texturePass.writeKinds.push_back(rg::ResourceKind::Texture);
-    graphSnapshot.passesInExecutionOrder.push_back(texturePass);
+    rg::RenderGraphPassSnapshot lutPass = MakeComputePass("SkyLutPass");
+    lutPass.category = rg::RenderPassCategory::AtmosphereLut;
+    lutPass.writeNames.push_back("TransmittanceLut");
+    lutPass.writeKinds.push_back(rg::ResourceKind::Texture);
+    graphSnapshot.passesInExecutionOrder.push_back(lutPass);
 
-    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
     const FrameDebuggerCaptureContext capture;
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
 
     ASSERT_EQ(snapshot.rootNodes.size(), 1u);
     const FrameDebuggerEventNode& root = snapshot.rootNodes[0];
-    ASSERT_EQ(root.children.size(), 2u); // "Compute Dispatches (Pre-GameView)" group + "GameView" leaf, siblings.
+    // "Compute LUT" group + "Compute Dispatches (Pre-GameView)" group +
+    // "RenderOpaque" leaf, siblings, IN THAT ORDER regardless of real
+    // execution order.
+    ASSERT_EQ(root.children.size(), 3u);
     EXPECT_EQ(snapshot.totalEventCount, 3);
 
-    const FrameDebuggerEventNode& preGroup = root.children[0];
+    const FrameDebuggerEventNode& lutGroup = root.children[0];
+    EXPECT_FALSE(lutGroup.isDrawCall);
+    EXPECT_EQ(lutGroup.name, "Compute LUT");
+    ASSERT_EQ(lutGroup.children.size(), 1u);
+    EXPECT_EQ(lutGroup.children[0].name, "SkyLutPass");
+    // Real execution order was index 1 (after SkinPass_A) - eventIndex
+    // reflects that TRUE execution order even though the tree lists this
+    // group first.
+    EXPECT_EQ(lutGroup.children[0].eventIndex, 1);
+
+    const FrameDebuggerEventNode& preGroup = root.children[1];
     EXPECT_FALSE(preGroup.isDrawCall);
     EXPECT_EQ(preGroup.name, "Compute Dispatches (Pre-GameView)");
-    ASSERT_EQ(preGroup.children.size(), 2u);
+    ASSERT_EQ(preGroup.children.size(), 1u);
     EXPECT_EQ(preGroup.children[0].name, "SkinPass_A");
     EXPECT_EQ(preGroup.children[0].eventIndex, 0);
-    EXPECT_EQ(preGroup.children[1].name, "AtmosphereTransmittanceLutPass");
-    EXPECT_EQ(preGroup.children[1].eventIndex, 1);
 
-    ASSERT_TRUE(preGroup.children[0].details.has_value());
-    EXPECT_EQ(preGroup.children[0].details->eventLabel, "Compute Dispatch");
-    // Raw pass name now - no fabricated "GPU Skinning" friendly label anymore.
-    EXPECT_EQ(preGroup.children[0].details->passName, "SkinPass_A");
-    EXPECT_EQ(preGroup.children[0].details->blendMode, "n/a (compute pass)");
-    ASSERT_EQ(preGroup.children[0].details->textures.size(), 1u);
-    EXPECT_EQ(preGroup.children[0].details->textures[0].name, "Write Buffer");
-    EXPECT_EQ(preGroup.children[0].details->textures[0].valueLabel, "SkinnedVertexBuffer");
-    EXPECT_TRUE(preGroup.children[0].details->matrices.empty());
+    const FrameDebuggerEventNode& renderOpaqueLeaf = root.children[2];
+    EXPECT_TRUE(renderOpaqueLeaf.isDrawCall);
+    EXPECT_EQ(renderOpaqueLeaf.name, "RenderOpaque");
+    EXPECT_EQ(renderOpaqueLeaf.eventIndex, 2); // Sequential across the WHOLE tree.
+}
 
-    ASSERT_TRUE(preGroup.children[1].details.has_value());
-    ASSERT_EQ(preGroup.children[1].details->textures.size(), 1u);
-    EXPECT_EQ(preGroup.children[1].details->textures[0].name, "Write Texture");
-    EXPECT_EQ(preGroup.children[1].details->textures[0].valueLabel, "TransmittanceLut");
+// NEW - Render Pass campaign, PHASE4 - proves a pre-view compute pass tagged
+// ONLY AtmosphereLut produces ONLY the "Compute LUT" group, never an empty
+// "Compute Dispatches (Pre-GameView)" sibling.
+TEST(FrameDebuggerSnapshotBuilderTest, OnlyAtmosphereLutCategoryPreGameViewPassProducesOnlyComputeLutGroup)
+{
+    rg::RenderGraphSnapshot graphSnapshot;
+    rg::RenderGraphPassSnapshot lutPass = MakeComputePass("AtmosphereTransmittanceLutPass");
+    lutPass.category = rg::RenderPassCategory::AtmosphereLut;
+    graphSnapshot.passesInExecutionOrder.push_back(lutPass);
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
-    const FrameDebuggerEventNode& gameViewLeaf = root.children[1];
-    EXPECT_TRUE(gameViewLeaf.isDrawCall);
-    EXPECT_EQ(gameViewLeaf.eventIndex, 2); // Sequential across the WHOLE tree.
+    const FrameDebuggerCaptureContext capture;
+    const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
+
+    ASSERT_EQ(snapshot.rootNodes.size(), 1u);
+    const FrameDebuggerEventNode& root = snapshot.rootNodes[0];
+    ASSERT_EQ(root.children.size(), 2u); // "Compute LUT" group + "RenderOpaque" leaf, nothing else.
+    EXPECT_EQ(root.children[0].name, "Compute LUT");
+    EXPECT_EQ(root.children[1].name, "RenderOpaque");
 }
 
 // REWRITTEN (was GpuSkinningNameWithNoMatchingRealPassAddsNoGroup) - the OLD
@@ -191,20 +246,24 @@ TEST(FrameDebuggerSnapshotBuilderTest, NonComputePassIsNeverTreatedAsComputeDisp
 {
     rg::RenderGraphSnapshot graphSnapshot;
     graphSnapshot.passesInExecutionOrder.push_back(MakePass("SomeOrdinaryGraphicsPass"));
-    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
     const FrameDebuggerCaptureContext capture;
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
 
     ASSERT_EQ(snapshot.rootNodes.size(), 1u);
-    ASSERT_EQ(snapshot.rootNodes[0].children.size(), 1u); // Only "GameView" - the non-compute pass adds no group.
+    // Only "RenderOpaque" - the non-compute pass sitting BEFORE the pivot is
+    // never visited by the pre-view compute loop (which only inspects
+    // Compute-kind passes) and is never reached by the view-region walk
+    // either (which only starts AT the pivot).
+    ASSERT_EQ(snapshot.rootNodes[0].children.size(), 1u);
     EXPECT_EQ(snapshot.totalEventCount, 1);
 }
 
 TEST(FrameDebuggerSnapshotBuilderTest, DistinctPipelineAndTextureNamesProduceDistinctEntriesNotDuplicates)
 {
     rg::RenderGraphSnapshot graphSnapshot;
-    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
     FrameDebuggerCaptureContext capture;
     capture.RecordDraw("PipelineA", "TextureA", Mat4::Identity());
@@ -225,7 +284,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, DistinctPipelineAndTextureNamesProduceDis
 TEST(FrameDebuggerSnapshotBuilderTest, ViewProjectionMatrixRoundTripsWithoutTransposing)
 {
     rg::RenderGraphSnapshot graphSnapshot;
-    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
     // A hand-picked, deliberately NON-symmetric matrix: column c holds
     // values {4c+1, 4c+2, 4c+3, 4c+4} - so matrix(row, col) is always
@@ -262,7 +321,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, ViewProjectionMatrixRoundTripsWithoutTran
 TEST(FrameDebuggerSnapshotBuilderTest, RenderTargetInfoIsRealAndNamedGameView)
 {
     rg::RenderGraphSnapshot graphSnapshot;
-    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
     const FrameDebuggerCaptureContext capture;
     FrameDebuggerRenderTargetInfo info;
@@ -273,6 +332,9 @@ TEST(FrameDebuggerSnapshotBuilderTest, RenderTargetInfoIsRealAndNamedGameView)
 
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture, info);
 
+    // "GameView" here is the RenderTexture/resource name, completely
+    // unrelated to (and unaffected by) the "RenderOpaque" PASS-name pivot
+    // above - see PHASE0_MASTER_STRATEGY.md's own Step 2 point 4.
     EXPECT_EQ(snapshot.renderTarget.name, "GameView");
     EXPECT_EQ(snapshot.renderTarget.width, 1920);
     EXPECT_EQ(snapshot.renderTarget.height, 1080);
@@ -288,11 +350,11 @@ TEST(FrameDebuggerSnapshotBuilderTest, RenderTargetInfoIsRealAndNamedGameView)
 // name for passName/shaderName, and the generic "Compute Dispatch"
 // eventLabel every compute leaf now shares. It also now lands under the NEW
 // "Compute Dispatches (Post-GameView)" group (since it runs strictly AFTER
-// "GameView") rather than being appended directly as a third top-level leaf.
+// "RenderOpaque") rather than being appended directly as a third top-level leaf.
 TEST(FrameDebuggerSnapshotBuilderTest, PostGameViewComputePassProducesLeafUnderPostGameViewGroup)
 {
     rg::RenderGraphSnapshot graphSnapshot;
-    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
     rg::RenderGraphPassSnapshot composite = MakeComputePass("AtmosphereAerialPerspectiveCompositePass");
     composite.readNames.push_back("GameView");
@@ -308,13 +370,13 @@ TEST(FrameDebuggerSnapshotBuilderTest, PostGameViewComputePassProducesLeafUnderP
 
     ASSERT_EQ(snapshot.rootNodes.size(), 1u);
     const FrameDebuggerEventNode& root = snapshot.rootNodes[0];
-    ASSERT_EQ(root.children.size(), 2u); // "GameView" leaf + new "Compute Dispatches (Post-GameView)" group.
+    ASSERT_EQ(root.children.size(), 2u); // "RenderOpaque" leaf + new "Compute Dispatches (Post-GameView)" group.
     EXPECT_EQ(snapshot.totalEventCount, 2);
 
-    const FrameDebuggerEventNode& gameViewLeaf = root.children[0];
-    EXPECT_TRUE(gameViewLeaf.isDrawCall);
-    EXPECT_EQ(gameViewLeaf.name, "GameView");
-    EXPECT_EQ(gameViewLeaf.eventIndex, 0);
+    const FrameDebuggerEventNode& renderOpaqueLeaf = root.children[0];
+    EXPECT_TRUE(renderOpaqueLeaf.isDrawCall);
+    EXPECT_EQ(renderOpaqueLeaf.name, "RenderOpaque");
+    EXPECT_EQ(renderOpaqueLeaf.eventIndex, 0);
 
     const FrameDebuggerEventNode& postGroup = root.children[1];
     EXPECT_FALSE(postGroup.isDrawCall);
@@ -348,13 +410,13 @@ TEST(FrameDebuggerSnapshotBuilderTest, PostGameViewComputePassProducesLeafUnderP
 TEST(FrameDebuggerSnapshotBuilderTest, NoComputePassesProduceNeitherGroup)
 {
     rg::RenderGraphSnapshot graphSnapshot;
-    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
     const FrameDebuggerCaptureContext capture;
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
 
     ASSERT_EQ(snapshot.rootNodes.size(), 1u);
-    EXPECT_EQ(snapshot.rootNodes[0].children.size(), 1u); // Only "GameView" - neither compute group appears.
+    EXPECT_EQ(snapshot.rootNodes[0].children.size(), 1u); // Only "RenderOpaque" - no compute group appears.
     EXPECT_EQ(snapshot.totalEventCount, 1);
 }
 
@@ -362,14 +424,14 @@ TEST(FrameDebuggerSnapshotBuilderTest, NoComputePassesProduceNeitherGroup)
 // version fed a gpuSkinningPassNamesThisFrame name list and asserted the
 // single, always-after-"GameView" "GPU Skinning"/"AtmosphereAerial..." shape.
 // NEW version marks both passes kind == rg::PassKind::Compute directly and asserts the SPLIT
-// "Compute Dispatches (Pre-GameView)" -> "GameView" -> "Compute Dispatches
+// "Compute Dispatches (Pre-GameView)" -> "RenderOpaque" -> "Compute Dispatches
 // (Post-GameView)" three-top-level-sibling shape (Locked Design Decision #8
 // - PHASE2's own Step 3.6 item (a3)).
 TEST(FrameDebuggerSnapshotBuilderTest, PreAndPostGameViewGroupsAppearTogetherAsSiblingsInRealExecutionOrder)
 {
     rg::RenderGraphSnapshot graphSnapshot;
     graphSnapshot.passesInExecutionOrder.push_back(MakeComputePass("SkinPass_A"));
-    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
     graphSnapshot.passesInExecutionOrder.push_back(MakeComputePass("AtmosphereAerialPerspectiveCompositePass"));
 
     const FrameDebuggerCaptureContext capture;
@@ -383,20 +445,20 @@ TEST(FrameDebuggerSnapshotBuilderTest, PreAndPostGameViewGroupsAppearTogetherAsS
     EXPECT_FALSE(preGroup.isDrawCall);
     EXPECT_EQ(preGroup.name, "Compute Dispatches (Pre-GameView)");
 
-    const FrameDebuggerEventNode& gameViewLeaf = root.children[1];
-    EXPECT_TRUE(gameViewLeaf.isDrawCall);
-    EXPECT_EQ(gameViewLeaf.name, "GameView");
+    const FrameDebuggerEventNode& renderOpaqueLeaf = root.children[1];
+    EXPECT_TRUE(renderOpaqueLeaf.isDrawCall);
+    EXPECT_EQ(renderOpaqueLeaf.name, "RenderOpaque");
 
     const FrameDebuggerEventNode& postGroup = root.children[2];
     EXPECT_FALSE(postGroup.isDrawCall);
     EXPECT_EQ(postGroup.name, "Compute Dispatches (Post-GameView)");
 
     // eventIndex values strictly increasing left-to-right across the whole
-    // tree: 0 (SkinPass_A), 1 (GameView), 2 (AtmosphereAerialPerspectiveCompositePass).
+    // tree: 0 (SkinPass_A), 1 (RenderOpaque), 2 (AtmosphereAerialPerspectiveCompositePass).
     ASSERT_EQ(preGroup.children.size(), 1u);
     ASSERT_EQ(postGroup.children.size(), 1u);
     EXPECT_EQ(preGroup.children[0].eventIndex, 0);
-    EXPECT_EQ(gameViewLeaf.eventIndex, 1);
+    EXPECT_EQ(renderOpaqueLeaf.eventIndex, 1);
     EXPECT_EQ(postGroup.children[0].eventIndex, 2);
     EXPECT_EQ(snapshot.totalEventCount, 3);
 }
@@ -420,14 +482,14 @@ TEST(FrameDebuggerSnapshotBuilderTest, SceneViewScopedPreGameViewPassIsExcludedE
     sceneViewScoped.viewScope = rg::ViewScope::SceneView;
     graphSnapshot.passesInExecutionOrder.push_back(sceneViewScoped);
 
-    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
     const FrameDebuggerCaptureContext capture;
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
 
     ASSERT_EQ(snapshot.rootNodes.size(), 1u);
     const FrameDebuggerEventNode& root = snapshot.rootNodes[0];
-    ASSERT_EQ(root.children.size(), 2u); // "Compute Dispatches (Pre-GameView)" group + "GameView" leaf.
+    ASSERT_EQ(root.children.size(), 2u); // "Compute Dispatches (Pre-GameView)" group + "RenderOpaque" leaf.
 
     const FrameDebuggerEventNode& preGroup = root.children[0];
     EXPECT_EQ(preGroup.name, "Compute Dispatches (Pre-GameView)");
@@ -442,7 +504,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, SceneViewScopedPreGameViewPassIsExcludedE
 TEST(FrameDebuggerSnapshotBuilderTest, SceneViewScopedPostGameViewPassIsExcludedEvenWhenNameCollidesWithGameViewOne)
 {
     rg::RenderGraphSnapshot graphSnapshot;
-    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
     rg::RenderGraphPassSnapshot gameViewScoped = MakeComputePass("AtmosphereAerialPerspectiveCompositePass");
     gameViewScoped.viewScope = rg::ViewScope::GameView;
@@ -457,7 +519,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, SceneViewScopedPostGameViewPassIsExcluded
 
     ASSERT_EQ(snapshot.rootNodes.size(), 1u);
     const FrameDebuggerEventNode& root = snapshot.rootNodes[0];
-    ASSERT_EQ(root.children.size(), 2u); // "GameView" leaf + "Compute Dispatches (Post-GameView)" group.
+    ASSERT_EQ(root.children.size(), 2u); // "RenderOpaque" leaf + "Compute Dispatches (Post-GameView)" group.
 
     const FrameDebuggerEventNode& postGroup = root.children[1];
     EXPECT_EQ(postGroup.name, "Compute Dispatches (Post-GameView)");
@@ -478,7 +540,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, SharedViewScopedPassStillAppearsNormally)
     shared.viewScope = rg::ViewScope::Shared; // Explicit, though this is also the default.
     graphSnapshot.passesInExecutionOrder.push_back(shared);
 
-    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
     const FrameDebuggerCaptureContext capture;
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
@@ -495,12 +557,12 @@ TEST(FrameDebuggerSnapshotBuilderTest, SharedViewScopedPassStillAppearsNormally)
 
 // frame-debugger-6 campaign, PHASE4
 // (PHASE4_GAMEVIEW_PER_ENTITY_DRAW_TREE_LEAVES.md, Step 4) - the actual
-// user-facing feature: the "GameView" node now gets one real child leaf per
-// real FrameDebuggerDrawRecord captured this frame.
-TEST(FrameDebuggerSnapshotBuilderTest, GameViewNodeGetsOneChildLeafPerDrawRecord)
+// user-facing feature: the "RenderOpaque" node now gets one real child leaf
+// per real FrameDebuggerDrawRecord captured this frame.
+TEST(FrameDebuggerSnapshotBuilderTest, RenderOpaqueNodeGetsOneChildLeafPerDrawRecord)
 {
     rg::RenderGraphSnapshot graphSnapshot;
-    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
     FrameDebuggerCaptureContext capture;
     capture.RecordEntityDraw(2, 0, "terrain", "Mesh.vert/Mesh.frag (PositionNormal)", "", 1045458);
@@ -510,15 +572,15 @@ TEST(FrameDebuggerSnapshotBuilderTest, GameViewNodeGetsOneChildLeafPerDrawRecord
 
     ASSERT_EQ(snapshot.rootNodes.size(), 1u);
     const FrameDebuggerEventNode& root = snapshot.rootNodes[0];
-    ASSERT_EQ(root.children.size(), 1u); // Only "GameView" - no compute-dispatch groups.
+    ASSERT_EQ(root.children.size(), 1u); // Only "RenderOpaque" - no compute-dispatch groups.
 
-    const FrameDebuggerEventNode& gameViewLeaf = root.children[0];
-    EXPECT_TRUE(gameViewLeaf.isDrawCall);
-    EXPECT_EQ(gameViewLeaf.eventIndex, 0);
-    ASSERT_EQ(gameViewLeaf.children.size(), 2u); // (a) exactly that many children.
+    const FrameDebuggerEventNode& renderOpaqueLeaf = root.children[0];
+    EXPECT_TRUE(renderOpaqueLeaf.isDrawCall);
+    EXPECT_EQ(renderOpaqueLeaf.eventIndex, 0);
+    ASSERT_EQ(renderOpaqueLeaf.children.size(), 2u); // (a) exactly that many children.
 
     // (b) each child's name/eventIndex is correct.
-    const FrameDebuggerEventNode& terrainLeaf = gameViewLeaf.children[0];
+    const FrameDebuggerEventNode& terrainLeaf = renderOpaqueLeaf.children[0];
     EXPECT_EQ(terrainLeaf.name, "terrain (Entity 2)");
     EXPECT_TRUE(terrainLeaf.isDrawCall);
     EXPECT_EQ(terrainLeaf.eventIndex, 1);
@@ -534,7 +596,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, GameViewNodeGetsOneChildLeafPerDrawRecord
     }
     EXPECT_TRUE(foundTerrainTriangleCount);
 
-    const FrameDebuggerEventNode& cubeLeaf = gameViewLeaf.children[1];
+    const FrameDebuggerEventNode& cubeLeaf = renderOpaqueLeaf.children[1];
     EXPECT_EQ(cubeLeaf.name, "SmokeTestCube (Entity 3)");
     EXPECT_EQ(cubeLeaf.eventIndex, 2);
     ASSERT_TRUE(cubeLeaf.details.has_value());
@@ -542,23 +604,23 @@ TEST(FrameDebuggerSnapshotBuilderTest, GameViewNodeGetsOneChildLeafPerDrawRecord
     EXPECT_EQ(cubeLeaf.details->textures[0].name, "Material Texture");
     EXPECT_EQ(cubeLeaf.details->textures[0].valueLabel, "MaterialTexture abc123");
 
-    // (c) eventIndex stays strictly monotonic increasing: GameView(0) < terrain(1) < cube(2).
-    EXPECT_LT(gameViewLeaf.eventIndex, terrainLeaf.eventIndex);
+    // (c) eventIndex stays strictly monotonic increasing: RenderOpaque(0) < terrain(1) < cube(2).
+    EXPECT_LT(renderOpaqueLeaf.eventIndex, terrainLeaf.eventIndex);
     EXPECT_LT(terrainLeaf.eventIndex, cubeLeaf.eventIndex);
 
     // (d) totalEventCount correctly includes the new children.
     EXPECT_EQ(snapshot.totalEventCount, 3);
 }
 
-// eventIndex stays strictly monotonic across pre-group -> GameView ->
-// GameView's children -> post-group, extending
+// eventIndex stays strictly monotonic across pre-group -> RenderOpaque ->
+// RenderOpaque's children -> post-group, extending
 // EventIndexIsMonotonicAcrossPreGameViewGameViewAndPostGameView one level
 // deeper.
-TEST(FrameDebuggerSnapshotBuilderTest, EventIndexIsMonotonicAcrossPreGameViewGameViewChildrenAndPostGameView)
+TEST(FrameDebuggerSnapshotBuilderTest, EventIndexIsMonotonicAcrossPreGameViewRenderOpaqueChildrenAndPostGameView)
 {
     rg::RenderGraphSnapshot graphSnapshot;
     graphSnapshot.passesInExecutionOrder.push_back(MakeComputePass("PreA"));
-    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
     graphSnapshot.passesInExecutionOrder.push_back(MakeComputePass("PostA"));
 
     FrameDebuggerCaptureContext capture;
@@ -572,52 +634,47 @@ TEST(FrameDebuggerSnapshotBuilderTest, EventIndexIsMonotonicAcrossPreGameViewGam
     ASSERT_EQ(root.children.size(), 3u);
 
     const FrameDebuggerEventNode& preGroup = root.children[0];
-    const FrameDebuggerEventNode& gameViewLeaf = root.children[1];
+    const FrameDebuggerEventNode& renderOpaqueLeaf = root.children[1];
     const FrameDebuggerEventNode& postGroup = root.children[2];
 
     ASSERT_EQ(preGroup.children.size(), 1u);
-    ASSERT_EQ(gameViewLeaf.children.size(), 2u);
+    ASSERT_EQ(renderOpaqueLeaf.children.size(), 2u);
     ASSERT_EQ(postGroup.children.size(), 1u);
 
     EXPECT_EQ(preGroup.children[0].eventIndex, 0);
-    EXPECT_EQ(gameViewLeaf.eventIndex, 1);
-    EXPECT_EQ(gameViewLeaf.children[0].eventIndex, 2);
-    EXPECT_EQ(gameViewLeaf.children[1].eventIndex, 3);
+    EXPECT_EQ(renderOpaqueLeaf.eventIndex, 1);
+    EXPECT_EQ(renderOpaqueLeaf.children[0].eventIndex, 2);
+    EXPECT_EQ(renderOpaqueLeaf.children[1].eventIndex, 3);
     EXPECT_EQ(postGroup.children[0].eventIndex, 4);
     EXPECT_EQ(snapshot.totalEventCount, 5);
 }
 
-// No draw records captured this frame -> "GameView" keeps zero children,
+// No draw records captured this frame -> "RenderOpaque" keeps zero children,
 // exactly like every earlier campaign's behavior (an honestly empty Game
 // View, e.g. before the very first mesh entity is spawned).
-TEST(FrameDebuggerSnapshotBuilderTest, GameViewNodeHasNoChildrenWhenNoDrawRecordsCaptured)
+TEST(FrameDebuggerSnapshotBuilderTest, RenderOpaqueNodeHasNoChildrenWhenNoDrawRecordsCaptured)
 {
     rg::RenderGraphSnapshot graphSnapshot;
-    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
     const FrameDebuggerCaptureContext capture;
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
 
     ASSERT_EQ(snapshot.rootNodes.size(), 1u);
-    const FrameDebuggerEventNode& gameViewLeaf = snapshot.rootNodes[0].children[0];
-    EXPECT_TRUE(gameViewLeaf.children.empty());
+    const FrameDebuggerEventNode& renderOpaqueLeaf = snapshot.rootNodes[0].children[0];
+    EXPECT_TRUE(renderOpaqueLeaf.children.empty());
     EXPECT_EQ(snapshot.totalEventCount, 1);
 }
 
 // REQUIRED regression test (found by this campaign's own double-check pass,
 // not a shipped bug, PHASE4's own Step 4) - a per-entity draw-record child
-// leaf's own `details->passName` must NEVER be the literal string "GameView"
-// - only the real "GameView" pass leaf itself may ever carry that exact
-// value. FrameDebuggerPanel::EnsurePreviewDescriptor() (UNCHANGED by this
-// phase) decides `isViewingGameViewLeaf` via `details->passName == "GameView"`
-// - an EXACT string compare - so a collision here would silently force every
-// per-entity leaf to show the pre-atmosphere-composite-only image, directly
-// contradicting this phase's own Step 5 "falls back to the existing
-// whole-frame compositedPreview/preview image" scope statement.
-TEST(FrameDebuggerSnapshotBuilderTest, GameViewDrawRecordLeafPassNameIsNeverLiterallyGameView)
+// leaf's own `details->passName` must NEVER be the literal string
+// "RenderOpaque" - only the real "RenderOpaque" pass leaf itself may ever
+// carry that exact value.
+TEST(FrameDebuggerSnapshotBuilderTest, RenderOpaqueDrawRecordLeafPassNameIsNeverLiterallyRenderOpaque)
 {
     rg::RenderGraphSnapshot graphSnapshot;
-    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
     FrameDebuggerCaptureContext capture;
     capture.RecordEntityDraw(2, 0, "terrain", "Mesh.vert/Mesh.frag (PositionNormal)", "", 1045458);
@@ -625,21 +682,19 @@ TEST(FrameDebuggerSnapshotBuilderTest, GameViewDrawRecordLeafPassNameIsNeverLite
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
 
     ASSERT_EQ(snapshot.rootNodes.size(), 1u);
-    const FrameDebuggerEventNode& gameViewLeaf = snapshot.rootNodes[0].children[0];
-    ASSERT_EQ(gameViewLeaf.children.size(), 1u);
-    ASSERT_TRUE(gameViewLeaf.children[0].details.has_value());
-    EXPECT_NE(gameViewLeaf.children[0].details->passName, "GameView");
-    // Also confirm the real "GameView" pass leaf itself is unaffected - it
-    // must still carry the literal value, unchanged.
-    ASSERT_TRUE(gameViewLeaf.details.has_value());
-    EXPECT_EQ(gameViewLeaf.details->passName, "GameView");
+    const FrameDebuggerEventNode& renderOpaqueLeaf = snapshot.rootNodes[0].children[0];
+    ASSERT_EQ(renderOpaqueLeaf.children.size(), 1u);
+    ASSERT_TRUE(renderOpaqueLeaf.children[0].details.has_value());
+    EXPECT_NE(renderOpaqueLeaf.children[0].details->passName, "RenderOpaque");
+    // Also confirm the real "RenderOpaque" pass leaf itself is unaffected -
+    // it must still carry the literal value, unchanged.
+    ASSERT_TRUE(renderOpaqueLeaf.details.has_value());
+    EXPECT_EQ(renderOpaqueLeaf.details->passName, "RenderOpaque");
 }
 
-
-
 // NEW - PHASE2's own Step 3.6 item (c): a culled compute pass must never
-// appear in either group, on EITHER side of "GameView" - a culled pass did
-// not really run this frame, so showing it as if it did would be dishonest.
+// appear in either group, on EITHER side of "RenderOpaque" - a culled pass
+// did not really run this frame, so showing it as if it did would be dishonest.
 TEST(FrameDebuggerSnapshotBuilderTest, CulledComputePassIsExcludedFromEitherComputeDispatchGroup)
 {
     rg::RenderGraphSnapshot graphSnapshot;
@@ -649,7 +704,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, CulledComputePassIsExcludedFromEitherComp
     graphSnapshot.passesInExecutionOrder.push_back(culledPre);
 
     graphSnapshot.passesInExecutionOrder.push_back(MakeComputePass("SurvivingPreComputePass"));
-    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
     graphSnapshot.passesInExecutionOrder.push_back(MakeComputePass("SurvivingPostComputePass"));
 
     rg::RenderGraphPassSnapshot culledPost = MakeComputePass("CulledPostComputePass");
@@ -671,7 +726,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, CulledComputePassIsExcludedFromEitherComp
     ASSERT_EQ(postGroup.children.size(), 1u); // The culled post pass never appears.
     EXPECT_EQ(postGroup.children[0].name, "SurvivingPostComputePass");
 
-    EXPECT_EQ(snapshot.totalEventCount, 3); // Only 3 real events: one pre leaf, GameView, one post leaf.
+    EXPECT_EQ(snapshot.totalEventCount, 3); // Only 3 real events: one pre leaf, RenderOpaque, one post leaf.
 }
 
 // NEW - PHASE2's own Step 3.6 item (d): every read/write row is labeled by
@@ -689,7 +744,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, ComputeDispatchLeafLabelsReadWriteRowsByR
     pass.writeKinds
         = { rg::ResourceKind::Texture, rg::ResourceKind::Buffer, rg::ResourceKind::VolumeTexture };
     graphSnapshot.passesInExecutionOrder.push_back(pass);
-    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
     const FrameDebuggerCaptureContext capture;
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
@@ -735,15 +790,15 @@ TEST(FrameDebuggerSnapshotBuilderTest, ComputeDispatchLeafLabelsReadWriteRowsByR
 
 // NEW - PHASE2's own Step 3.6 item (e): eventIndex values across the WHOLE
 // tree are monotonically increasing in true chronological order - every
-// pre-GameView leaf's index < "GameView"'s own index < every post-GameView
+// pre-GameView leaf's index < "RenderOpaque"'s own index < every post-GameView
 // leaf's index. Regression coverage for BuildRealFrameDebuggerSnapshot()'s
-// own documented "do not reorder these three blocks" ordering caveat.
+// own documented "do not reorder these blocks" ordering caveat.
 TEST(FrameDebuggerSnapshotBuilderTest, EventIndexIsMonotonicAcrossPreGameViewGameViewAndPostGameView)
 {
     rg::RenderGraphSnapshot graphSnapshot;
     graphSnapshot.passesInExecutionOrder.push_back(MakeComputePass("PreA"));
     graphSnapshot.passesInExecutionOrder.push_back(MakeComputePass("PreB"));
-    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
     graphSnapshot.passesInExecutionOrder.push_back(MakeComputePass("PostA"));
     graphSnapshot.passesInExecutionOrder.push_back(MakeComputePass("PostB"));
 
@@ -755,7 +810,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, EventIndexIsMonotonicAcrossPreGameViewGam
     ASSERT_EQ(root.children.size(), 3u);
 
     const FrameDebuggerEventNode& preGroup = root.children[0];
-    const FrameDebuggerEventNode& gameViewLeaf = root.children[1];
+    const FrameDebuggerEventNode& renderOpaqueLeaf = root.children[1];
     const FrameDebuggerEventNode& postGroup = root.children[2];
 
     ASSERT_EQ(preGroup.children.size(), 2u);
@@ -763,7 +818,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, EventIndexIsMonotonicAcrossPreGameViewGam
 
     EXPECT_EQ(preGroup.children[0].eventIndex, 0);
     EXPECT_EQ(preGroup.children[1].eventIndex, 1);
-    EXPECT_EQ(gameViewLeaf.eventIndex, 2);
+    EXPECT_EQ(renderOpaqueLeaf.eventIndex, 2);
     EXPECT_EQ(postGroup.children[0].eventIndex, 3);
     EXPECT_EQ(postGroup.children[1].eventIndex, 4);
     EXPECT_EQ(snapshot.totalEventCount, 5);
@@ -776,14 +831,14 @@ TEST(FrameDebuggerSnapshotBuilderTest, EventIndexIsMonotonicAcrossPreGameViewGam
 // they covered (PHASE0's Locked Design Decision #3). Replaced below with
 // coverage proving `BuildRealFrameDebuggerSnapshot()` assigns the right
 // `stepPreviewKind`/`stepPreviewIndex` to a Pre-GameView leaf, the
-// "GameView" leaf, each per-object child (in order), a Post-GameView-
+// "RenderOpaque" leaf, each per-object child (in order), a Post-GameView-
 // before-composite leaf, and a Post-GameView-at/after-composite leaf.
 
 TEST(FrameDebuggerSnapshotBuilderTest, PreGameViewLeafGetsNotYetDrawnStepPreviewKind)
 {
     rg::RenderGraphSnapshot graphSnapshot;
     graphSnapshot.passesInExecutionOrder.push_back(MakeComputePass("SkinPass_A"));
-    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
     const FrameDebuggerCaptureContext capture;
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
@@ -795,24 +850,24 @@ TEST(FrameDebuggerSnapshotBuilderTest, PreGameViewLeafGetsNotYetDrawnStepPreview
     EXPECT_EQ(preGroup.children[0].details->stepPreviewKind, FrameDebuggerStepPreviewKind::NotYetDrawn);
 }
 
-TEST(FrameDebuggerSnapshotBuilderTest, GameViewLeafGetsPreCompositeStepPreviewKind)
+TEST(FrameDebuggerSnapshotBuilderTest, RenderOpaqueLeafGetsPreCompositeStepPreviewKind)
 {
     rg::RenderGraphSnapshot graphSnapshot;
-    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
     const FrameDebuggerCaptureContext capture;
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
 
     ASSERT_EQ(snapshot.rootNodes.size(), 1u);
-    const FrameDebuggerEventNode& gameViewLeaf = snapshot.rootNodes[0].children[0];
-    ASSERT_TRUE(gameViewLeaf.details.has_value());
-    EXPECT_EQ(gameViewLeaf.details->stepPreviewKind, FrameDebuggerStepPreviewKind::PreComposite);
+    const FrameDebuggerEventNode& renderOpaqueLeaf = snapshot.rootNodes[0].children[0];
+    ASSERT_TRUE(renderOpaqueLeaf.details.has_value());
+    EXPECT_EQ(renderOpaqueLeaf.details->stepPreviewKind, FrameDebuggerStepPreviewKind::PreComposite);
 }
 
 TEST(FrameDebuggerSnapshotBuilderTest, PerObjectDrawRecordChildrenGetPerObjectStepKindAndIncreasingIndex)
 {
     rg::RenderGraphSnapshot graphSnapshot;
-    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
     FrameDebuggerCaptureContext capture;
     capture.RecordEntityDraw(2, 0, "terrain", "Mesh.vert/Mesh.frag (PositionNormal)", "", 1045458);
@@ -821,22 +876,22 @@ TEST(FrameDebuggerSnapshotBuilderTest, PerObjectDrawRecordChildrenGetPerObjectSt
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
 
     ASSERT_EQ(snapshot.rootNodes.size(), 1u);
-    const FrameDebuggerEventNode& gameViewLeaf = snapshot.rootNodes[0].children[0];
-    ASSERT_EQ(gameViewLeaf.children.size(), 2u);
+    const FrameDebuggerEventNode& renderOpaqueLeaf = snapshot.rootNodes[0].children[0];
+    ASSERT_EQ(renderOpaqueLeaf.children.size(), 2u);
 
-    ASSERT_TRUE(gameViewLeaf.children[0].details.has_value());
-    EXPECT_EQ(gameViewLeaf.children[0].details->stepPreviewKind, FrameDebuggerStepPreviewKind::PerObjectStep);
-    EXPECT_EQ(gameViewLeaf.children[0].details->stepPreviewIndex, 0);
+    ASSERT_TRUE(renderOpaqueLeaf.children[0].details.has_value());
+    EXPECT_EQ(renderOpaqueLeaf.children[0].details->stepPreviewKind, FrameDebuggerStepPreviewKind::PerObjectStep);
+    EXPECT_EQ(renderOpaqueLeaf.children[0].details->stepPreviewIndex, 0);
 
-    ASSERT_TRUE(gameViewLeaf.children[1].details.has_value());
-    EXPECT_EQ(gameViewLeaf.children[1].details->stepPreviewKind, FrameDebuggerStepPreviewKind::PerObjectStep);
-    EXPECT_EQ(gameViewLeaf.children[1].details->stepPreviewIndex, 1);
+    ASSERT_TRUE(renderOpaqueLeaf.children[1].details.has_value());
+    EXPECT_EQ(renderOpaqueLeaf.children[1].details->stepPreviewKind, FrameDebuggerStepPreviewKind::PerObjectStep);
+    EXPECT_EQ(renderOpaqueLeaf.children[1].details->stepPreviewIndex, 1);
 }
 
 TEST(FrameDebuggerSnapshotBuilderTest, PostGameViewLeafBeforeCompositePassGetsPreCompositeStepPreviewKind)
 {
     rg::RenderGraphSnapshot graphSnapshot;
-    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
     graphSnapshot.passesInExecutionOrder.push_back(MakeComputePass("SomeOtherPostGameViewPass"));
 
     rg::RenderGraphPassSnapshot composite = MakeComputePass("AtmosphereAerialPerspectiveCompositePass");
@@ -858,7 +913,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, PostGameViewLeafBeforeCompositePassGetsPr
 TEST(FrameDebuggerSnapshotBuilderTest, CompositePassLeafItselfGetsPostCompositeStepPreviewKind)
 {
     rg::RenderGraphSnapshot graphSnapshot;
-    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
     rg::RenderGraphPassSnapshot composite = MakeComputePass("AtmosphereAerialPerspectiveCompositePass");
     composite.writeNames.push_back("GameViewComposited");
@@ -892,7 +947,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, PostGameViewLeavesDefaultToPostCompositeW
     // and every Post-GameView leaf falls into the PostComposite default
     // catch-all bucket (Step 2's own "or nothing selected" wording).
     rg::RenderGraphSnapshot graphSnapshot;
-    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
     graphSnapshot.passesInExecutionOrder.push_back(MakeComputePass("SomePostGameViewPassWithNoCompositeWrite"));
 
     const FrameDebuggerCaptureContext capture;
@@ -905,46 +960,58 @@ TEST(FrameDebuggerSnapshotBuilderTest, PostGameViewLeavesDefaultToPostCompositeW
     EXPECT_EQ(postGroup.children[0].details->stepPreviewKind, FrameDebuggerStepPreviewKind::PostComposite);
 }
 
-// frame-debugger-8 campaign, PHASE3
-// (PHASE3_SNAPSHOT_TREE_LEAF_AND_TESTS.md, Step 3.4) - proves PHASE1 through
-// PHASE3 compose correctly with the PRE-EXISTING pre/post-GameView
+// Render Pass campaign (task_manager/render-pass-1), PHASE4
+// (PHASE4_FRAME_DEBUGGER_GENERIC_TREE_REWORK.md, Step 3.3) - REPLACES the old
+// frame-debugger-8 campaign's "SkyBackgroundLeafSurvivesAlongsideComputeDispatchSplit"
+// test (which fed a `RecordSkyBackgroundDraw()` DrawRecord, now REMOVED - see
+// FrameDebuggerCaptureTests.cpp). "DrawSkyBackground" is now a real, separate
+// pass in the fixture itself, discovered by the "view region" walk - proves
+// PHASE1-PHASE4 all compose correctly with the PRE-EXISTING pre/post-GameView
 // compute-dispatch split (frame-debugger-5/frame-debugger-6 campaigns) with
-// zero regressions: one Pre-GameView compute leaf, "GameView" itself with
-// two children (entity, then sky), and one Post-GameView compute leaf - all
-// five leaves' eventIndex values strictly monotonic increasing in that
-// exact left-to-right, top-to-bottom order.
-TEST(FrameDebuggerSnapshotBuilderTest, SkyBackgroundLeafSurvivesAlongsideComputeDispatchSplit)
+// zero regressions: one Pre-GameView compute leaf, "RenderOpaque" itself
+// (with one per-entity child), "DrawSkyBackground" as its own sibling leaf,
+// and one Post-GameView compute leaf - all five leaves' eventIndex values
+// strictly monotonic increasing in that exact left-to-right, top-to-bottom
+// order.
+TEST(FrameDebuggerSnapshotBuilderTest, DrawSkyBackgroundLeafSurvivesAlongsideComputeDispatchSplit)
 {
     rg::RenderGraphSnapshot graphSnapshot;
     graphSnapshot.passesInExecutionOrder.push_back(MakeComputePass("PreA"));
-    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("DrawSkyBackground"));
     graphSnapshot.passesInExecutionOrder.push_back(MakeComputePass("PostA"));
 
     FrameDebuggerCaptureContext capture;
     capture.RecordEntityDraw(2, 0, "terrain", "Mesh.vert/Mesh.frag (PositionNormal)", "", 1045458);
-    capture.RecordSkyBackgroundDraw("AtmosphereSkyBackground.vert/AtmosphereSkyBackground.frag");
 
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
 
     ASSERT_EQ(snapshot.rootNodes.size(), 1u);
     const FrameDebuggerEventNode& root = snapshot.rootNodes[0];
-    ASSERT_EQ(root.children.size(), 3u);
+    ASSERT_EQ(root.children.size(), 4u);
 
     const FrameDebuggerEventNode& preGroup = root.children[0];
-    const FrameDebuggerEventNode& gameViewLeaf = root.children[1];
-    const FrameDebuggerEventNode& postGroup = root.children[2];
+    const FrameDebuggerEventNode& renderOpaqueLeaf = root.children[1];
+    const FrameDebuggerEventNode& skyLeaf = root.children[2];
+    const FrameDebuggerEventNode& postGroup = root.children[3];
 
     EXPECT_EQ(preGroup.name, "Compute Dispatches (Pre-GameView)");
     ASSERT_EQ(preGroup.children.size(), 1u);
 
-    EXPECT_EQ(gameViewLeaf.name, "GameView");
-    ASSERT_EQ(gameViewLeaf.children.size(), 2u); // entity, then sky.
-    const FrameDebuggerEventNode& entityLeaf = gameViewLeaf.children[0];
-    const FrameDebuggerEventNode& skyLeaf = gameViewLeaf.children[1];
+    EXPECT_EQ(renderOpaqueLeaf.name, "RenderOpaque");
+    ASSERT_EQ(renderOpaqueLeaf.children.size(), 1u); // Only the entity - sky is its own sibling leaf now.
+    const FrameDebuggerEventNode& entityLeaf = renderOpaqueLeaf.children[0];
     EXPECT_EQ(entityLeaf.name, "terrain (Entity 2)");
-    EXPECT_EQ(skyLeaf.name, "AtmosphereSkyBackground.vert/AtmosphereSkyBackground.frag");
+
+    EXPECT_EQ(skyLeaf.name, "DrawSkyBackground");
+    EXPECT_TRUE(skyLeaf.isDrawCall);
+    EXPECT_TRUE(skyLeaf.children.empty()); // A childless leaf.
     ASSERT_TRUE(skyLeaf.details.has_value());
-    EXPECT_EQ(skyLeaf.details->passName, "GameView (Sky Draw)");
+    EXPECT_EQ(skyLeaf.details->passName, "DrawSkyBackground");
+    EXPECT_EQ(skyLeaf.details->shaderName, "DrawSkyBackground");
+    EXPECT_EQ(skyLeaf.details->zTest, "Equal");
+    EXPECT_EQ(skyLeaf.details->zWrite, "Off");
+    EXPECT_EQ(skyLeaf.details->stepPreviewKind, FrameDebuggerStepPreviewKind::PreComposite);
 
     EXPECT_EQ(postGroup.name, "Compute Dispatches (Post-GameView)");
     ASSERT_EQ(postGroup.children.size(), 1u);
@@ -952,15 +1019,86 @@ TEST(FrameDebuggerSnapshotBuilderTest, SkyBackgroundLeafSurvivesAlongsideCompute
     // eventIndex strictly monotonic across all 5 leaves, left-to-right,
     // top-to-bottom.
     EXPECT_EQ(preGroup.children[0].eventIndex, 0);
-    EXPECT_EQ(gameViewLeaf.eventIndex, 1);
+    EXPECT_EQ(renderOpaqueLeaf.eventIndex, 1);
     EXPECT_EQ(entityLeaf.eventIndex, 2);
     EXPECT_EQ(skyLeaf.eventIndex, 3);
     EXPECT_EQ(postGroup.children[0].eventIndex, 4);
     EXPECT_EQ(snapshot.totalEventCount, 5);
 }
 
+// NEW - Render Pass campaign, PHASE4, Step 3.5 - the concrete proof the
+// "RenderTransparent" mechanism is genuinely generic, not just "generic in
+// theory": since that pass never actually declares itself in the graph
+// today, a fixture with only "RenderOpaque" + "DrawSkyBackground" (and no
+// "RenderTransparent" anywhere) produces EXACTLY those two leaves in the
+// view region - no third, empty/fake leaf ever appears.
+TEST(FrameDebuggerSnapshotBuilderTest, ViewRegionHasExactlyRenderOpaqueAndDrawSkyBackgroundWhenRenderTransparentAbsent)
+{
+    rg::RenderGraphSnapshot graphSnapshot;
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("DrawSkyBackground"));
+
+    const FrameDebuggerCaptureContext capture;
+    const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
+
+    ASSERT_EQ(snapshot.rootNodes.size(), 1u);
+    const FrameDebuggerEventNode& root = snapshot.rootNodes[0];
+    ASSERT_EQ(root.children.size(), 2u); // Exactly "RenderOpaque" + "DrawSkyBackground" - nothing else.
+    EXPECT_EQ(root.children[0].name, "RenderOpaque");
+    EXPECT_EQ(root.children[1].name, "DrawSkyBackground");
+}
+
+// NEW, REQUIRED by this phase's own 3.3/3.3b fix - Render Pass campaign,
+// PHASE4 - a Graphics-kind, ViewScope::GameView, RenderPassCategory::Debug
+// pass positioned in passesInExecutionOrder BETWEEN "DrawSkyBackground" and
+// the eventual Post-GameView compute pass (mirroring
+// AddFrameDebuggerReplayPasses()'s own real, confirmed position) must
+// produce ZERO extra leaves in the view region (still exactly
+// "RenderOpaque"/"DrawSkyBackground", nothing else) - this is the concrete
+// regression test proving the Frame Debugger's own internal replay passes
+// can never leak into the tree.
+TEST(FrameDebuggerSnapshotBuilderTest, DebugCategoryGraphicsPassInsideViewRegionProducesNoExtraLeaf)
+{
+    rg::RenderGraphSnapshot graphSnapshot;
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("DrawSkyBackground"));
+    graphSnapshot.passesInExecutionOrder.push_back(
+        MakeGraphicsPassWithCategory("FrameDebuggerReplayStep0", rg::RenderPassCategory::Debug));
+    graphSnapshot.passesInExecutionOrder.push_back(
+        MakeGraphicsPassWithCategory("FrameDebuggerReplayStep1", rg::RenderPassCategory::Debug));
+
+    rg::RenderGraphPassSnapshot composite = MakeComputePass("AtmosphereAerialPerspectiveCompositePass");
+    composite.writeNames.push_back("GameViewComposited");
+    composite.writeKinds.push_back(rg::ResourceKind::Texture);
+    graphSnapshot.passesInExecutionOrder.push_back(composite);
+
+    const FrameDebuggerCaptureContext capture;
+    const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
+
+    ASSERT_EQ(snapshot.rootNodes.size(), 1u);
+    const FrameDebuggerEventNode& root = snapshot.rootNodes[0];
+    // "RenderOpaque" + "DrawSkyBackground" + "Compute Dispatches
+    // (Post-GameView)" - the two Debug-category replay passes produce NO
+    // leaves of their own anywhere.
+    ASSERT_EQ(root.children.size(), 3u);
+    EXPECT_EQ(root.children[0].name, "RenderOpaque");
+    EXPECT_EQ(root.children[1].name, "DrawSkyBackground");
+    const FrameDebuggerEventNode& postGroup = root.children[2];
+    EXPECT_EQ(postGroup.name, "Compute Dispatches (Post-GameView)");
+    ASSERT_EQ(postGroup.children.size(), 1u);
+    EXPECT_EQ(postGroup.children[0].name, "AtmosphereAerialPerspectiveCompositePass");
+
+    // eventIndex is monotonic and SKIPS the two Debug-category passes
+    // entirely (they never get an eventIndex at all): RenderOpaque(0),
+    // DrawSkyBackground(1), composite(2).
+    EXPECT_EQ(root.children[0].eventIndex, 0);
+    EXPECT_EQ(root.children[1].eventIndex, 1);
+    EXPECT_EQ(postGroup.children[0].eventIndex, 2);
+    EXPECT_EQ(snapshot.totalEventCount, 3);
+}
+
 // task_manager/frame-debugger-9 campaign, PHASE3 (Step 3.8) - a
-// "Material Texture" row (BuildGameViewDrawRecordLeaf()'s per-entity draw
+// "Material Texture" row (BuildRenderOpaqueDrawRecordLeaf()'s per-entity draw
 // leaf) must have `isRenderGraphResource == false` - it has no render-graph
 // registry entry at all (Locked Design Decision #1, PHASE0_MASTER_STRATEGY.md),
 // so Panels/FrameDebuggerPanel.cpp's ShaderProperties tab must never draw a
@@ -968,7 +1106,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, SkyBackgroundLeafSurvivesAlongsideCompute
 TEST(FrameDebuggerSnapshotBuilderTest, MaterialTextureRowIsNeverARenderGraphResource)
 {
     rg::RenderGraphSnapshot graphSnapshot;
-    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
     FrameDebuggerCaptureContext capture;
     capture.RecordEntityDraw(3, 0, "SmokeTestCube", "Mesh.vert/Mesh.frag (PositionNormal)", "MaterialTexture abc123", 12);
@@ -976,14 +1114,13 @@ TEST(FrameDebuggerSnapshotBuilderTest, MaterialTextureRowIsNeverARenderGraphReso
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
 
     ASSERT_EQ(snapshot.rootNodes.size(), 1u);
-    const FrameDebuggerEventNode& gameViewLeaf = snapshot.rootNodes[0].children[0];
-    ASSERT_EQ(gameViewLeaf.children.size(), 1u);
-    ASSERT_TRUE(gameViewLeaf.children[0].details.has_value());
-    ASSERT_EQ(gameViewLeaf.children[0].details->textures.size(), 1u);
-    EXPECT_EQ(gameViewLeaf.children[0].details->textures[0].name, "Material Texture");
-    EXPECT_FALSE(gameViewLeaf.children[0].details->textures[0].isRenderGraphResource);
+    const FrameDebuggerEventNode& renderOpaqueLeaf = snapshot.rootNodes[0].children[0];
+    ASSERT_EQ(renderOpaqueLeaf.children.size(), 1u);
+    ASSERT_TRUE(renderOpaqueLeaf.children[0].details.has_value());
+    ASSERT_EQ(renderOpaqueLeaf.children[0].details->textures.size(), 1u);
+    EXPECT_EQ(renderOpaqueLeaf.children[0].details->textures[0].name, "Material Texture");
+    EXPECT_FALSE(renderOpaqueLeaf.children[0].details->textures[0].isRenderGraphResource);
 }
-
 
 } // namespace
 } // namespace gte

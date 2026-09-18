@@ -367,25 +367,31 @@ FrameDebuggerEventNode BuildComputeDispatchLeaf(
     return leaf;
 }
 
-// Builds the real "GameView" pass LEAF node - see
-// BuildRealFrameDebuggerSnapshot()'s own header-comment tree-shape
-// description and PHASE0_MASTER_STRATEGY.md's Locked Design Decision #6.
-FrameDebuggerEventNode BuildGameViewLeaf(
-    const rg::RenderGraphPassSnapshot& gameViewPass, const FrameDebuggerCaptureContext& capture, int eventIndex)
+// Render Pass campaign (task_manager/render-pass-1), PHASE4
+// (PHASE4_FRAME_DEBUGGER_GENERIC_TREE_REWORK.md, Step 3.3) - builds the real
+// "RenderOpaque" pass LEAF node (RENAMED from the old "GameView" pass - see
+// PHASE2_RENDER_OPAQUE_SKY_SPLIT_AND_TRANSPARENT_STUB.md, which split the old
+// monolithic "GameView" pass into "RenderOpaque"/"DrawSkyBackground"/
+// "RenderTransparent"). Per-entity children are attached separately by the
+// caller (BuildRealFrameDebuggerSnapshot() below) - this function only ever
+// builds the parent leaf itself, exactly like BuildGameViewLeaf() (this
+// function's own pre-PHASE4 name) always did.
+FrameDebuggerEventNode BuildRenderOpaqueLeaf(
+    const rg::RenderGraphPassSnapshot& renderOpaquePass, const FrameDebuggerCaptureContext& capture, int eventIndex)
 {
     FrameDebuggerEventNode leaf;
-    leaf.name = "GameView";
+    leaf.name = "RenderOpaque";
     leaf.isDrawCall = true;
     leaf.eventIndex = eventIndex;
 
     FrameDebuggerEventDetails details;
     details.eventIndex = eventIndex;
     details.eventLabel = "Draw Mesh";
-    details.passName = "GameView";
-    // task_manager/frame-debugger-7 campaign, PHASE4 - the real "GameView"
+    details.passName = "RenderOpaque";
+    // task_manager/frame-debugger-7 campaign, PHASE4 - the real "RenderOpaque"
     // leaf always shows the pre-atmosphere-composite `preview` image
     // (Locked Design Decision #5) - PreComposite carries exactly that
-    // meaning in the new FrameDebuggerStepPreviewKind scheme.
+    // meaning in the FrameDebuggerStepPreviewKind scheme.
     details.stepPreviewKind = FrameDebuggerStepPreviewKind::PreComposite;
 
     // shaderName - every DISTINCT real Pipeline debug name recorded this
@@ -406,8 +412,7 @@ FrameDebuggerEventNode BuildGameViewLeaf(
 
     // textures - one row per DISTINCT real bound MaterialTexture debug name
     // - there is no per-slot "_MainTex"-style naming in this engine yet, so
-    // `name` is a stable, generic label rather than an invented one (see
-    // this phase's own Step 3.1).
+    // `name` is a stable, generic label rather than an invented one.
     for (const std::string& textureName : capture.MaterialTextureDebugNames()) {
         FrameDebuggerTextureProperty texture;
         texture.name = "Material Texture";
@@ -416,11 +421,9 @@ FrameDebuggerEventNode BuildGameViewLeaf(
     }
 
     // vectors - the real clear color, plus the real aggregate DrawStats
-    // (draw-call count / triangle count) taken directly from
-    // graphSnapshot's own "GameView" pass entry, exactly as this phase's
-    // own Step 3.1 specifies (NOT re-derived from `capture.DrawCallCount()`
-    // - the graph snapshot's own stats are the authoritative source other
-    // panels, e.g. the "Render Graph" panel, already trust).
+    // (draw-call count / triangle count) taken directly from graphSnapshot's
+    // own "RenderOpaque" pass entry, exactly as before this phase (NOT
+    // re-derived from `capture.DrawCallCount()`).
     {
         FrameDebuggerVectorProperty clearColor;
         clearColor.name = "Clear Color";
@@ -432,22 +435,14 @@ FrameDebuggerEventNode BuildGameViewLeaf(
 
         FrameDebuggerVectorProperty drawStats;
         drawStats.name = "Draw Stats (Calls, Tris)";
-        drawStats.x = static_cast<float>(gameViewPass.stats.drawStats.drawCallCount);
-        drawStats.y = static_cast<float>(gameViewPass.stats.drawStats.triangleCount);
+        drawStats.x = static_cast<float>(renderOpaquePass.stats.drawStats.drawCallCount);
+        drawStats.y = static_cast<float>(renderOpaquePass.stats.drawStats.triangleCount);
         details.vectors.push_back(drawStats);
     }
 
     // matrices - the real view-projection matrix this pass actually
-    // rendered with this frame. Mat4 is COLUMN-MAJOR storage
-    // (columns[c][r] via operator()(row, col) - see Math/Mat4.h's own class
-    // comment), but FrameDebuggerMatrixProperty::values is ROW-MAJOR
-    // (values[row*4 + col] is row `row`, column `col` - see
-    // FrameDebuggerData.h's own struct comment) - so this copies through
-    // Mat4::operator()(row, col) element-by-element (which already accounts
-    // for the column-major storage internally) rather than a raw memcpy of
-    // Mat4::Data() (which is column-major and would silently transpose the
-    // displayed matrix - see PHASE2_FRAME_DEBUGGER_SNAPSHOT_BUILDER.md's
-    // own explicit warning about exactly this bug class).
+    // rendered with this frame - see FrameDebuggerData.h's own struct
+    // comment for the row/column-major conversion rule this copies through.
     {
         FrameDebuggerMatrixProperty viewProjection;
         viewProjection.name = "ViewProjection";
@@ -461,7 +456,7 @@ FrameDebuggerEventNode BuildGameViewLeaf(
     }
 
     // blend/Z/stencil rows - this engine's real, single, constant Pipeline
-    // configuration (Locked Design Decision #6).
+    // configuration.
     {
         const FrameDebuggerStandardPipelineState pipelineState = DescribeStandardPipelineState();
         details.blendMode = pipelineState.blendMode;
@@ -481,30 +476,23 @@ FrameDebuggerEventNode BuildGameViewLeaf(
 }
 
 // frame-debugger-6 campaign, PHASE4 - one real, individually selectable leaf
-// per real per-entity draw call this frame's "GameView" pass actually issued
-// (FrameDebuggerCaptureContext::DrawRecords(), PHASE3). This is an EXPLICIT,
-// user-approved breaking change to the old "one leaf per PASS, never one
-// leaf per mesh" rule (see PHASE0_MASTER_STRATEGY.md's Locked Design
-// Decision #1) - scoped ONLY to real children of the "GameView" leaf itself,
-// nothing else about pass-level granularity elsewhere in this tree changes.
-// task_manager/frame-debugger-7 campaign, PHASE4
-// (PHASE4_PREVIEW_WIRING_AND_DATA_MODEL.md, Step 3.1) - new LAST parameter
-// `stepPreviewIndex` - this record's own 0-based position among
-// FrameDebuggerCaptureContext::DrawRecords() (the SAME index
-// FrameDebuggerHistoryEntry::perObjectStepPreviews uses, PHASE3/PHASE4) -
-// so this leaf's own `stepPreviewKind`/`stepPreviewIndex` let
-// ChooseFrameDebuggerPreviewSource() show the real, accumulated "Game View
-// as of THIS object" image (fixes Bug 2).
+// per real per-entity draw call this frame's "RenderOpaque" pass actually
+// issued (FrameDebuggerCaptureContext::DrawRecords(), PHASE3 of that
+// campaign).
 //
-// frame-debugger-8 campaign, PHASE3
-// (PHASE3_SNAPSHOT_TREE_LEAF_AND_TESTS.md) - this function now also builds a
-// SECOND, differently-shaped leaf when `record.isSkyBackgroundDraw == true`
-// (the one, real Sky Background full-screen-triangle draw - see
-// FrameDebuggerCapture.h's own FrameDebuggerDrawRecord doc comment) - see
-// this function's own body for the two-branch split. The per-entity `else`
-// branch this comment block already describes above is completely
-// unchanged.
-FrameDebuggerEventNode BuildGameViewDrawRecordLeaf(
+// Render Pass campaign (task_manager/render-pass-1), PHASE4
+// (PHASE4_FRAME_DEBUGGER_GENERIC_TREE_REWORK.md, Step 3.3/3.4) - the old Sky
+// Background branch (`record.isSkyBackgroundDraw`) is REMOVED entirely: the
+// Sky Background draw is now its own real, separate "DrawSkyBackground" pass
+// leaf (see BuildGraphicsPassLeaf() below), generically discovered by
+// BuildRealFrameDebuggerSnapshot()'s own view-region walk - it no longer
+// needs a fabricated FrameDebuggerDrawRecord at all. This function now ONLY
+// ever builds a per-entity leaf - the single, unbranched shape every
+// FrameDebuggerDrawRecord it receives always has today. Also renamed
+// `passName` from `"GameView (Entity Draw)"` to `"RenderOpaque (Entity
+// Draw)"` - a real, user-visible/HTTP-consumed fact that must stay accurate
+// now that the owning pass itself is named "RenderOpaque".
+FrameDebuggerEventNode BuildRenderOpaqueDrawRecordLeaf(
     const FrameDebuggerDrawRecord& record, const Mat4& sharedViewProjection, int eventIndex, int stepPreviewIndex)
 {
     FrameDebuggerEventNode leaf;
@@ -516,112 +504,45 @@ FrameDebuggerEventNode BuildGameViewDrawRecordLeaf(
     details.stepPreviewKind = FrameDebuggerStepPreviewKind::PerObjectStep;
     details.stepPreviewIndex = stepPreviewIndex;
 
-    // frame-debugger-8 campaign, PHASE3 - the Sky Background draw is not a
-    // real ECS entity (record.entityIndex/entityGeneration are meaningless
-    // for it - see FrameDebuggerCapture.h's own FrameDebuggerDrawRecord doc
-    // comment) - it needs its own, differently-shaped leaf. This branch is
-    // the ONLY change to this function versus its pre-campaign shape; the
-    // `else` arm below is BYTE-FOR-BYTE the same code this function already
-    // had for every real entity, unchanged.
-    if (record.isSkyBackgroundDraw) {
-        // Locked Design Decision 2 (PHASE0_MASTER_STRATEGY.md) - the tree
-        // row's own name AND its Inspector "Shader" row are BOTH the real,
-        // hand-verified shader file pair
-        // (AtmosphereSkyBackgroundRenderer::ShaderDebugName(), threaded
-        // through here via record.pipelineDebugName) - never an invented
-        // cosmetic label like "Sky Background".
-        leaf.name = record.pipelineDebugName;
-        details.eventLabel = "Draw Fullscreen Triangle";
-        // "GameView (Sky Draw)" - a real, structural fact (which real pass
-        // this draw happened inside), DISTINCT from both the literal
-        // "GameView" pass leaf's own passName AND from
-        // "GameView (Entity Draw)" (the per-entity leaves' own passName) -
-        // mirrors that exact, pre-existing distinctness precedent (see this
-        // function's own `else` arm below, and its historical doc comment
-        // above this function for the original "why must this differ from
-        // the literal 'GameView' string" reasoning, which applies here too).
-        details.passName = "GameView (Sky Draw)";
-        details.shaderName = record.pipelineDebugName;
+    leaf.name = record.displayName + " (Entity " + std::to_string(record.entityIndex) + ")";
+    details.eventLabel = "Draw Mesh";
+    details.passName = "RenderOpaque (Entity Draw)";
+    details.shaderName = record.pipelineDebugName;
 
-        // vectors - just the real triangle count (always 1 - a single
-        // full-screen triangle, see FrameDebuggerCapture.cpp's own
-        // RecordSkyBackgroundDraw()). Deliberately NO "Entity (Index,
-        // Generation)" row here (unlike the `else` arm below) - there is no
-        // real ECS entity behind this record at all, and fabricating one
-        // would violate this whole tree's own "never invent a fact" rule.
-        {
-            FrameDebuggerVectorProperty triangleCount;
-            triangleCount.name = "Triangle Count";
-            triangleCount.x = static_cast<float>(record.triangleCount);
-            details.vectors.push_back(triangleCount);
-        }
-
-        // blend/Z/stencil - THIS pass's own real, distinct pipeline state
-        // (Locked Design Decision 4, PHASE0_MASTER_STRATEGY.md) - never the
-        // generic per-mesh DescribeStandardPipelineState() every entity
-        // leaf reuses (see the `else` arm below).
-        {
-            const FrameDebuggerStandardPipelineState pipelineState = DescribeSkyBackgroundPipelineState();
-            details.blendMode = pipelineState.blendMode;
-            details.zClip = pipelineState.zClip;
-            details.zTest = pipelineState.zTest;
-            details.zWrite = pipelineState.zWrite;
-            details.cull = pipelineState.cull;
-            details.stencilRef = pipelineState.stencilRef;
-            details.stencilComp = pipelineState.stencilComp;
-            details.stencilPass = pipelineState.stencilPass;
-            details.stencilFail = pipelineState.stencilFail;
-            details.stencilZFail = pipelineState.stencilZFail;
-        }
-    } else {
-        // UNCHANGED from before this campaign - every real per-entity leaf
-        // keeps behaving exactly as it always has.
-        leaf.name = record.displayName + " (Entity " + std::to_string(record.entityIndex) + ")";
-        details.eventLabel = "Draw Mesh";
-        details.passName = "GameView (Entity Draw)";
-        details.shaderName = record.pipelineDebugName;
-
-        if (!record.materialTextureDebugName.empty()) {
-            FrameDebuggerTextureProperty texture;
-            texture.name = "Material Texture";
-            texture.valueLabel = record.materialTextureDebugName;
-            details.textures.push_back(std::move(texture));
-        }
-
-        {
-            FrameDebuggerVectorProperty triangleCount;
-            triangleCount.name = "Triangle Count";
-            triangleCount.x = static_cast<float>(record.triangleCount);
-            details.vectors.push_back(triangleCount);
-
-            FrameDebuggerVectorProperty entityIdentity;
-            entityIdentity.name = "Entity (Index, Generation)";
-            entityIdentity.x = static_cast<float>(record.entityIndex);
-            entityIdentity.y = static_cast<float>(record.entityGeneration);
-            details.vectors.push_back(entityIdentity);
-        }
-
-        {
-            const FrameDebuggerStandardPipelineState pipelineState = DescribeStandardPipelineState();
-            details.blendMode = pipelineState.blendMode;
-            details.zClip = pipelineState.zClip;
-            details.zTest = pipelineState.zTest;
-            details.zWrite = pipelineState.zWrite;
-            details.cull = pipelineState.cull;
-            details.stencilRef = pipelineState.stencilRef;
-            details.stencilComp = pipelineState.stencilComp;
-            details.stencilPass = pipelineState.stencilPass;
-            details.stencilFail = pipelineState.stencilFail;
-            details.stencilZFail = pipelineState.stencilZFail;
-        }
+    if (!record.materialTextureDebugName.empty()) {
+        FrameDebuggerTextureProperty texture;
+        texture.name = "Material Texture";
+        texture.valueLabel = record.materialTextureDebugName;
+        details.textures.push_back(std::move(texture));
     }
 
-    // matrices - the SAME shared view-projection every draw in this one
-    // real Game-View pass this frame used, for BOTH branches above (the
-    // sky's own fragment shader really does invert this exact matrix - see
-    // AtmosphereSkyBackgroundRenderer::Draw()'s own `viewProjection`
-    // parameter) - UNCHANGED code, simply now shared by both branches
-    // instead of only ever running for the entity case.
+    {
+        FrameDebuggerVectorProperty triangleCount;
+        triangleCount.name = "Triangle Count";
+        triangleCount.x = static_cast<float>(record.triangleCount);
+        details.vectors.push_back(triangleCount);
+
+        FrameDebuggerVectorProperty entityIdentity;
+        entityIdentity.name = "Entity (Index, Generation)";
+        entityIdentity.x = static_cast<float>(record.entityIndex);
+        entityIdentity.y = static_cast<float>(record.entityGeneration);
+        details.vectors.push_back(entityIdentity);
+    }
+
+    {
+        const FrameDebuggerStandardPipelineState pipelineState = DescribeStandardPipelineState();
+        details.blendMode = pipelineState.blendMode;
+        details.zClip = pipelineState.zClip;
+        details.zTest = pipelineState.zTest;
+        details.zWrite = pipelineState.zWrite;
+        details.cull = pipelineState.cull;
+        details.stencilRef = pipelineState.stencilRef;
+        details.stencilComp = pipelineState.stencilComp;
+        details.stencilPass = pipelineState.stencilPass;
+        details.stencilFail = pipelineState.stencilFail;
+        details.stencilZFail = pipelineState.stencilZFail;
+    }
+
     {
         FrameDebuggerMatrixProperty viewProjection;
         viewProjection.name = "ViewProjection";
@@ -637,13 +558,85 @@ FrameDebuggerEventNode BuildGameViewDrawRecordLeaf(
     return leaf;
 }
 
+// Render Pass campaign (task_manager/render-pass-1), PHASE4
+// (PHASE4_FRAME_DEBUGGER_GENERIC_TREE_REWORK.md, Step 3.3) - the ONE generic
+// leaf builder for every OTHER real Graphics-kind pass the view-region walk
+// (BuildRealFrameDebuggerSnapshot(), below) discovers besides "RenderOpaque"
+// itself - today, always exactly "DrawSkyBackground" (a real, separate pass
+// as of PHASE2 of this campaign); once a future transparency campaign makes
+// "RenderTransparent" a real, non-empty pass too, it lands here as well, with
+// no further Frame Debugger code changes required. Mirrors
+// BuildComputeDispatchLeaf()'s own overall shape (the real, raw pass name
+// doubles as both `passName` and `shaderName` - honest, never fabricated -
+// plus real aggregate draw stats from this pass's own RenderGraphPassSnapshot
+// entry) adapted for a Graphics-kind pass's own real blend/Z/stencil facts
+// instead of "n/a (compute pass)".
+//
+// "DrawSkyBackground" specifically reuses DescribeSkyBackgroundPipelineState()
+// verbatim - its own real, genuinely different (EQUAL depth test, depth
+// write off) pipeline state, hand-verified against
+// AtmosphereSkyBackgroundRenderer.cpp (see FrameDebuggerCapture.h/.cpp).
+// Every OTHER pass this function is ever called for (i.e. a real future
+// "RenderTransparent") falls back to the engine's generic
+// DescribeStandardPipelineState() - a deliberate, reasonable default, NOT a
+// verified fact (a real "RenderTransparent" pass's own blend/Z/stencil
+// source is explicitly OUT OF SCOPE for this phase, per its own "What We
+// Will NOT Do" - that pass never actually exists in the graph today).
+FrameDebuggerEventNode BuildGraphicsPassLeaf(
+    const rg::RenderGraphPassSnapshot& pass, int eventIndex, FrameDebuggerStepPreviewKind stepPreviewKind)
+{
+    FrameDebuggerEventNode leaf;
+    leaf.name = pass.name; // The real, raw render-graph pass name - never fabricated/prettified.
+    leaf.isDrawCall = true;
+    leaf.eventIndex = eventIndex;
+
+    FrameDebuggerEventDetails details;
+    details.eventIndex = eventIndex;
+    details.eventLabel = "Draw Pass";
+    details.stepPreviewKind = stepPreviewKind;
+    details.passName = pass.name;
+    details.shaderName = pass.name;
+
+    const FrameDebuggerStandardPipelineState pipelineState =
+        (pass.name == "DrawSkyBackground") ? DescribeSkyBackgroundPipelineState() : DescribeStandardPipelineState();
+    details.blendMode = pipelineState.blendMode;
+    details.zClip = pipelineState.zClip;
+    details.zTest = pipelineState.zTest;
+    details.zWrite = pipelineState.zWrite;
+    details.cull = pipelineState.cull;
+    details.stencilRef = pipelineState.stencilRef;
+    details.stencilComp = pipelineState.stencilComp;
+    details.stencilPass = pipelineState.stencilPass;
+    details.stencilFail = pipelineState.stencilFail;
+    details.stencilZFail = pipelineState.stencilZFail;
+
+    // vectors - real aggregate draw stats from this pass's own real
+    // RenderGraphPassSnapshot entry (never re-derived).
+    FrameDebuggerVectorProperty drawStats;
+    drawStats.name = "Draw Stats (Calls, Tris)";
+    drawStats.x = static_cast<float>(pass.stats.drawStats.drawCallCount);
+    drawStats.y = static_cast<float>(pass.stats.drawStats.triangleCount);
+    details.vectors.push_back(drawStats);
+
+    leaf.details = std::move(details);
+    return leaf;
+}
+
 } // namespace
 
 FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapshot& graphSnapshot,
     const FrameDebuggerCaptureContext& capture, const FrameDebuggerRenderTargetInfo& gameViewRenderTargetInfo)
 {
-    const rg::RenderGraphPassSnapshot* gameViewPass = FindPassByName(graphSnapshot.passesInExecutionOrder, "GameView");
-    if (gameViewPass == nullptr) {
+    // Render Pass campaign (task_manager/render-pass-1), PHASE4
+    // (PHASE4_FRAME_DEBUGGER_GENERIC_TREE_REWORK.md, Step 3.1) - the
+    // "RenderOpaque" pivot REPLACES the old literal "GameView" pass lookup -
+    // "GameView" the PASS no longer exists at all as of PHASE2 (it split into
+    // "RenderOpaque"/"DrawSkyBackground"/"RenderTransparent"); "GameView" the
+    // RenderTexture/resource name is a completely separate, unaffected
+    // concept (see this function's own `renderTarget.name` literal below).
+    const rg::RenderGraphPassSnapshot* renderOpaquePass =
+        FindPassByName(graphSnapshot.passesInExecutionOrder, "RenderOpaque");
+    if (renderOpaquePass == nullptr) {
         // Honest "no frame captured yet" empty result - see this function's
         // own header-comment contract and PHASE0's Locked Design Decision #2.
         return FrameDebuggerSnapshot{};
@@ -655,37 +648,21 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
     root.name = "Game View";
     root.isDrawCall = false;
 
-    // frame-debugger-5 campaign, PHASE2 - THE generic replacement for the
-    // former "GPU Skinning" group AND the former hardcoded
-    // "AtmosphereAerialPerspectiveCompositePass" special case (see
-    // PHASE0_MASTER_STRATEGY.md's Locked Design Decision #6). Every real,
-    // surviving compute pass this frame becomes one leaf here, in real
-    // execution order, whatever its name - "GameView" itself is
-    // structurally excluded (it is never kind == rg::PassKind::Compute, since it's
-    // declared via plain AddPass()/WriteColorAttachment(), never
-    // AddComputePass()). SPLIT into a pre/post pair (Locked Design
-    // Decision #8, v2 review finding) so a pass that genuinely ran BEFORE
-    // "GameView" (e.g. GPU Skinning, every atmosphere LUT pass) is never
-    // shown as if it ran after it.
-    //
-    // frame-debugger-6 campaign, PHASE2
-    // (PHASE2_FRAME_DEBUGGER_VIEWSCOPE_FILTERED_DISCOVERY.md) - BOTH loops
-    // below also now exclude any surviving compute pass whose PHASE1-stamped
-    // `rg::ViewScope` is `SceneView` - this engine genuinely runs a SEPARATE
-    // copy of several Atmosphere compute passes for the Editor's own
-    // Scene-View camera (writing to "..._SceneView"-suffixed resources) in
-    // addition to the Game-View ones, but both copies used to share the exact
-    // same literal pass NAME (e.g. "AtmosphereSkyViewLutPass"), so this tree
-    // used to show duplicate, indistinguishable leaves and even leak a
-    // genuinely Scene-View-only debug tool ("ComputeBlurValidation") into a
-    // tree that this feature's own permanent rule says is Game-View ONLY
-    // (see this campaign's own PHASE0_MASTER_STRATEGY.md Section 0 and Locked
-    // Design Decision #2). `Shared` (e.g.
-    // the Transmittance/Multi-Scattering LUT passes, genuinely computed once
-    // per frame, not once per view) and `GameView` both still pass through
-    // unchanged - this is a structural, one-line boolean filter, never a
-    // pass-name/resource-suffix string comparison.
-    const int gameViewIndex = static_cast<int>(gameViewPass - graphSnapshot.passesInExecutionOrder.data());
+    const int pivotIndex = static_cast<int>(renderOpaquePass - graphSnapshot.passesInExecutionOrder.data());
+
+    // Step 3.2 - the pre-view compute-dispatch discovery is now split into
+    // TWO groups instead of one: "Compute LUT" (every surviving, non-
+    // SceneView-scoped, AtmosphereLut-category compute pass) and "Compute
+    // Dispatches (Pre-GameView)" (every other category - General/GpuSkinning/
+    // Debug). A SINGLE forward loop over [0, pivotIndex) still assigns
+    // eventIndex in true chronological execution order (interleaved across
+    // both groups, exactly as before this phase) - only the TREE
+    // PRESENTATION order (Compute LUT listed FIRST, then Compute Dispatches
+    // (Pre-GameView)) is fixed, per the Locked Design Decision - never tied
+    // to real interleaved execution order.
+    FrameDebuggerEventNode computeLutGroup;
+    computeLutGroup.name = "Compute LUT";
+    computeLutGroup.isDrawCall = false;
 
     FrameDebuggerEventNode preGameViewGroup;
     preGameViewGroup.name = "Compute Dispatches (Pre-GameView)";
@@ -695,99 +672,118 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
     postGameViewGroup.name = "Compute Dispatches (Post-GameView)";
     postGameViewGroup.isDrawCall = false;
 
-    // frame-debugger-5 campaign, PHASE2 - IMPORTANT ("nextEventIndex
-    // ordering" fix vs. the phase document's own inline code sample): the
-    // phase document's Step 3.3 literally showed ONE single loop over the
-    // WHOLE passesInExecutionOrder range that routes each surviving compute
-    // pass into whichever group it belongs to. Re-verified against this
-    // function's own explicitly-documented invariant (and the phase
-    // document's own immediately-following "IMPORTANT (nextEventIndex
-    // ordering caveat)" prose, which says the pre-GameView loop must assign
-    // its leaves' eventIndex values BEFORE "GameView" gets its own, and the
-    // post-GameView loop must assign its leaves' eventIndex values AFTER):
-    // a SINGLE loop over the whole array would assign eventIndex values to
-    // POST-GameView passes BEFORE "GameView" itself ever gets one (since the
-    // single loop finishes completely before BuildGameViewLeaf() is ever
-    // called) - silently breaking the documented "pre < GameView < post"
-    // monotonic ordering for any frame with a POST-GameView compute pass.
-    // Caught by this phase's own new
-    // EventIndexIsMonotonicAcrossPreGameViewGameViewAndPostGameView test
-    // (and 2 others) actually failing against the doc's literal sample.
-    // Fixed here by using TWO range-restricted loops instead - one over
-    // [0, gameViewIndex) BEFORE "GameView"'s own leaf is built, one over
-    // (gameViewIndex, size) AFTER - so eventIndex is genuinely monotonic
-    // increasing in true chronological order, exactly as documented.
-    for (int i = 0; i < gameViewIndex; ++i) {
+    for (int i = 0; i < pivotIndex; ++i) {
         const rg::RenderGraphPassSnapshot& pass = graphSnapshot.passesInExecutionOrder[static_cast<std::size_t>(i)];
-        // frame-debugger-6 campaign, PHASE2
-        // (PHASE2_FRAME_DEBUGGER_VIEWSCOPE_FILTERED_DISCOVERY.md, Step 3.1) -
-        // a pass whose PHASE1-stamped rg::ViewScope is SceneView is NEVER
-        // genuinely part of the Game View's own render/compute chain, even if
-        // it happens to survive this frame and sit before "GameView"'s own
-        // index - e.g. a Scene-View-only copy of an Atmosphere LUT pass that
-        // shares its literal pass NAME with the real Game-View instance (the
-        // exact real-world collision that motivated this whole campaign - see
-        // PHASE0_MASTER_STRATEGY.md Section 0). `Shared` and `GameView` both
-        // still pass through unchanged.
         if (pass.kind != rg::PassKind::Compute || pass.isCulled || pass.viewScope == rg::ViewScope::SceneView) {
             continue;
         }
-        // task_manager/frame-debugger-7 campaign, PHASE4 - a Pre-GameView
-        // compute-dispatch leaf's own "as of this step" image is honestly
-        // "nothing drawn to the screen yet" (Locked Design Decision #6).
-        preGameViewGroup.children.push_back(
-            BuildComputeDispatchLeaf(pass, nextEventIndex++, FrameDebuggerStepPreviewKind::NotYetDrawn));
+        FrameDebuggerEventNode leaf =
+            BuildComputeDispatchLeaf(pass, nextEventIndex++, FrameDebuggerStepPreviewKind::NotYetDrawn);
+        if (pass.category == rg::RenderPassCategory::AtmosphereLut) {
+            computeLutGroup.children.push_back(std::move(leaf));
+        } else {
+            preGameViewGroup.children.push_back(std::move(leaf));
+        }
     }
 
-    // Only add either group at all if something real actually survived
-    // this frame in THAT half - mirrors the deleted "GPU Skinning" group's
-    // own "only add if at least one real pass actually matched" discipline,
-    // applied independently to each half (it is entirely normal/expected
-    // for only one half to have children on a given captured frame).
+    // Only add either group at all if something real actually survived this
+    // frame in THAT bucket - mirrors this tree's own "never an empty,
+    // misleading group" rule, applied independently to each bucket.
+    if (!computeLutGroup.children.empty()) {
+        root.children.push_back(std::move(computeLutGroup));
+    }
     if (!preGameViewGroup.children.empty()) {
         root.children.push_back(std::move(preGameViewGroup));
     }
-    FrameDebuggerEventNode gameViewLeaf = BuildGameViewLeaf(*gameViewPass, capture, nextEventIndex++);
-    // frame-debugger-6 campaign, PHASE4 - one real child leaf per real per-draw
-    // attribution record captured this frame (PHASE3), indexed strictly AFTER
-    // "GameView"'s own eventIndex and strictly BEFORE anything in the
-    // Post-GameView group below - preserves the exact same "pre < GameView <
-    // post" monotonic-eventIndex invariant this function's own PHASE2 (of
-    // frame-debugger-5) comment already documents, simply extended one level
-    // task_manager/frame-debugger-7 campaign, PHASE4 - each per-object draw
-    // child leaf's own `stepPreviewIndex` is its 0-based position among
-    // capture.DrawRecords() - the SAME index
-    // FrameDebuggerHistoryEntry::perObjectStepPreviews will use (Phase 3's
-    // ReplayStepPreviews(), moved there by TriggerCapture()/CaptureFrame()).
-    int perObjectStepIndex = 0;
-    for (const FrameDebuggerDrawRecord& record : capture.DrawRecords()) {
-        gameViewLeaf.children.push_back(BuildGameViewDrawRecordLeaf(
-            record, capture.LastViewProjection(), nextEventIndex++, perObjectStepIndex));
-        ++perObjectStepIndex;
-    }
-    root.children.push_back(std::move(gameViewLeaf));
 
-    // task_manager/frame-debugger-7 campaign, PHASE4 - a Post-GameView
-    // leaf's own "as of this step" image depends on whether it runs
-    // before or at/after the real atmosphere composite pass (see
-    // FindPostGameViewCompositePassExecutionIndex()'s own doc comment
-    // above) - found STRUCTURALLY, by matching each surviving pass's own
-    // real `writeNames` against the "GameViewComposited" texture name,
-    // never by comparing against the composite pass's own literal NAME.
-    const int compositePassIndex = FindPostGameViewCompositePassExecutionIndex(graphSnapshot, gameViewIndex);
-    for (int i = gameViewIndex + 1; i < static_cast<int>(graphSnapshot.passesInExecutionOrder.size()); ++i) {
+    // Step 3.3 - the view-region walk: a flat, ordered sibling list of every
+    // surviving, non-SceneView-scoped, non-Debug-category, Graphics-kind pass
+    // starting at the "RenderOpaque" pivot, stopping at the first surviving
+    // Compute-kind pass encountered (that pass, and everything from there on,
+    // belongs to the "Compute Dispatches (Post-GameView)" discovery below
+    // instead - in today's real engine this is always the Aerial Perspective
+    // Composite pass, but this rule is deliberately name-free). This is what
+    // makes "DrawSkyBackground" a real, separate, individually selectable
+    // leaf (no more isSkyBackgroundDraw hack), and is exactly what lets
+    // AddFrameDebuggerReplayPasses()'s own N debug-only replay passes (real
+    // Graphics-kind, real ViewScope::GameView passes sitting structurally
+    // inside this exact index range) be skipped instead of leaking into the
+    // tree as spurious extra leaves - they are tagged
+    // RenderPassCategory::Debug (PHASE4's own 3.3b migration of
+    // AddFrameDebuggerReplayPasses() onto AddRenderPass()) specifically so
+    // this walk's own `category == Debug` guard actually excludes them.
+    bool isRenderOpaqueLeaf = true;
+    for (int i = pivotIndex; i < static_cast<int>(graphSnapshot.passesInExecutionOrder.size()); ++i) {
+        const rg::RenderGraphPassSnapshot& pass = graphSnapshot.passesInExecutionOrder[static_cast<std::size_t>(i)];
+
+        if (pass.kind == rg::PassKind::Compute) {
+            if (!pass.isCulled) {
+                // A genuine surviving compute-pass survivor - stop the walk
+                // entirely.
+                break;
+            }
+            // A culled compute pass sitting inside the view region never
+            // really ran this frame either way, and can never become a
+            // Graphics leaf here - skip it and keep walking, mirroring this
+            // whole tree's own "never show a culled pass as if it survived"
+            // rule elsewhere.
+            continue;
+        }
+
+        // pass.kind == rg::PassKind::Graphics from here on.
+        if (pass.isCulled || pass.viewScope == rg::ViewScope::SceneView
+            || pass.category == rg::RenderPassCategory::Debug) {
+            continue;
+        }
+
+        if (isRenderOpaqueLeaf) {
+            FrameDebuggerEventNode renderOpaqueLeaf = BuildRenderOpaqueLeaf(pass, capture, nextEventIndex++);
+            // frame-debugger-6 campaign, PHASE4 - one real child leaf per
+            // real per-draw attribution record captured this frame, indexed
+            // strictly AFTER "RenderOpaque"'s own eventIndex and strictly
+            // BEFORE "DrawSkyBackground"/anything else in the view region -
+            // preserving the same "pre < RenderOpaque < post" monotonic-
+            // eventIndex invariant this function has always documented,
+            // simply retargeted at the new pass name.
+            int perObjectStepIndex = 0;
+            for (const FrameDebuggerDrawRecord& record : capture.DrawRecords()) {
+                renderOpaqueLeaf.children.push_back(BuildRenderOpaqueDrawRecordLeaf(
+                    record, capture.LastViewProjection(), nextEventIndex++, perObjectStepIndex));
+                ++perObjectStepIndex;
+            }
+            root.children.push_back(std::move(renderOpaqueLeaf));
+            isRenderOpaqueLeaf = false;
+        } else {
+            // "DrawSkyBackground" today; a real future "RenderTransparent"
+            // once that pass ever actually exists (Step 3.5 - it never does
+            // today, so this branch is simply never reached for it yet).
+            root.children.push_back(
+                BuildGraphicsPassLeaf(pass, nextEventIndex++, FrameDebuggerStepPreviewKind::PreComposite));
+        }
+    }
+
+    // task_manager/frame-debugger-7 campaign, PHASE4 - a Post-GameView leaf's
+    // own "as of this step" image depends on whether it runs before or
+    // at/after the real atmosphere composite pass - found STRUCTURALLY, by
+    // matching each surviving pass's own real `writeNames` against the
+    // "GameViewComposited" texture name, never by comparing against the
+    // composite pass's own literal NAME.
+    const int compositePassIndex = FindPostGameViewCompositePassExecutionIndex(graphSnapshot, pivotIndex);
+    for (int i = pivotIndex + 1; i < static_cast<int>(graphSnapshot.passesInExecutionOrder.size()); ++i) {
         const rg::RenderGraphPassSnapshot& pass = graphSnapshot.passesInExecutionOrder[static_cast<std::size_t>(i)];
         // frame-debugger-6 campaign, PHASE2 - identical rule, symmetrically
-        // applied to the post-GameView half (see the pre-GameView loop's own
-        // comment above for the full rationale) - e.g. the real
-        // "AtmosphereAerialPerspectiveCompositePass" duplicate scenario.
+        // applied to the post-GameView half - e.g. the real
+        // "AtmosphereAerialPerspectiveCompositePass" duplicate scenario. A
+        // Graphics-kind pass encountered here (e.g. "DrawSkyBackground",
+        // already handled above by the view-region walk) is simply skipped -
+        // this loop only ever cares about Compute-kind passes.
         if (pass.kind != rg::PassKind::Compute || pass.isCulled || pass.viewScope == rg::ViewScope::SceneView) {
             continue;
         }
         // Strictly BEFORE the composite pass's own index -> PreComposite
-        // (the accumulated image is still the pre-atmosphere-fog one);
-        // AT the composite pass's own index (its own leaf) or AFTER it,
-        // or no composite pass found at all this capture -> PostComposite.
+        // (the accumulated image is still the pre-atmosphere-fog one); AT
+        // the composite pass's own index (its own leaf) or AFTER it, or no
+        // composite pass found at all this capture -> PostComposite.
         const FrameDebuggerStepPreviewKind stepPreviewKind = (compositePassIndex >= 0 && i < compositePassIndex)
             ? FrameDebuggerStepPreviewKind::PreComposite
             : FrameDebuggerStepPreviewKind::PostComposite;
@@ -801,6 +797,10 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
     snapshot.rootNodes.push_back(std::move(root));
     snapshot.totalEventCount = nextEventIndex;
     snapshot.renderTarget = gameViewRenderTargetInfo;
+    // "GameView" here is the RenderTexture/resource name
+    // (Application.cpp's own `b.ImportTexture("GameView", ...)` call) -
+    // completely unrelated to, and unaffected by, this campaign's pass-name
+    // changes (PHASE0's own Step 2 point 4 draws this exact distinction).
     snapshot.renderTarget.name = "GameView";
     return snapshot;
 }

@@ -10,7 +10,6 @@
 #include "../Renderer/RenderGraph/RenderGraph.h"
 #include "../Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
-#include "../Renderer/Atmosphere/AtmosphereSkyBackgroundRenderer.h"
 
 // task_manager/frame-debugger-7 campaign, PHASE3
 // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step 3.3)
@@ -144,6 +143,15 @@ void AddRenderOpaquePass(rg::RenderGraphBuilder& builder, Game& game, Renderer& 
 void AddDrawSkyBackgroundPass(rg::RenderGraphBuilder& builder, Renderer& renderer, rg::TextureHandle gameViewTarget,
     const std::function<void(VkCommandBuffer)>& recordSkyBackground, FrameDebuggerCaptureContext* frameDebuggerCapture)
 {
+    // Render Pass campaign (task_manager/render-pass-1), PHASE4 - this
+    // parameter is kept for signature symmetry with AddRenderOpaquePass()
+    // above, but is no longer dereferenced anywhere in this function's own
+    // body (see Step 3.4's removal of the temporary
+    // RecordSkyBackgroundDraw() bridge call below) - explicitly cast to
+    // void so this stays a deliberate, documented no-op parameter, not an
+    // accidental dead one.
+    (void)frameDebuggerCapture;
+
     if (!recordSkyBackground) {
         return;
     }
@@ -159,30 +167,18 @@ void AddDrawSkyBackgroundPass(rg::RenderGraphBuilder& builder, Renderer& rendere
             pass.WriteColorAttachment(gameViewTarget);
             pass.WriteDepthStencilAttachment(gameViewTarget);
         },
-        [&renderer, recordSkyBackground, frameDebuggerCapture](rg::PassContext& ctx) {
+        [&renderer, recordSkyBackground](rg::PassContext& ctx) {
             renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
             recordSkyBackground(ctx.cmd);
-#if GTE_ENABLE_EDITOR
-            // frame-debugger-8 campaign, PHASE1 - the Sky Background pass is
-            // a real, direct vkCmdDraw() full-screen-triangle draw
-            // (AtmosphereSkyBackgroundRenderer::Draw()) that bypasses
-            // RenderSystem::Draw()/Renderer::Submit() entirely (see that
-            // class's own header comment), so it needs this explicit,
-            // separate capture call site to be visible to the Frame
-            // Debugger at all - see task_manager/frame-debugger-8/
-            // PHASE0_MASTER_STRATEGY.md for the full root-cause trail. This
-            // whole mechanism is a temporary bridge - PHASE4
-            // (task_manager/render-pass-1/PHASE4_FRAME_DEBUGGER_GENERIC_TREE_REWORK.md)
-            // removes it once the Frame Debugger generically discovers this
-            // real, separate "DrawSkyBackground" pass by name/category
-            // instead. Guarded exactly like this same file's own
-            // AddFrameDebuggerReplayPasses() body (see this file's own
-            // top-of-file comment) - a real dereference of an Editor-only
-            // type in this CORE, always-compiled file.
-            if (frameDebuggerCapture != nullptr) {
-                frameDebuggerCapture->RecordSkyBackgroundDraw(AtmosphereSkyBackgroundRenderer::ShaderDebugName());
-            }
-#endif
+            // Render Pass campaign (task_manager/render-pass-1), PHASE4
+            // (PHASE4_FRAME_DEBUGGER_GENERIC_TREE_REWORK.md, Step 3.4) - the
+            // `frame-debugger-8` campaign's own temporary
+            // `frameDebuggerCapture->RecordSkyBackgroundDraw(...)` bridge
+            // call that used to live here is REMOVED - "DrawSkyBackground"
+            // is now a real, separate Render Graph pass the Frame Debugger
+            // generically discovers by name/category (see
+            // FrameDebuggerData.cpp's BuildRealFrameDebuggerSnapshot()), so
+            // it no longer needs to fabricate a draw record at all.
             renderer.EndGraphPassRecording();
         });
 }
@@ -292,7 +288,17 @@ std::vector<rg::TextureHandle> AddFrameDebuggerReplayPasses(rg::RenderGraphBuild
         // (every entity, then sky, see AddGameViewPass()).
         const std::size_t maxDrawCount = isSkyStep ? objectCount : (i + 1);
 
-        builder.AddPass(passName, rg::ViewScope::GameView,
+        // Render Pass campaign (task_manager/render-pass-1), PHASE4
+        // (PHASE4_FRAME_DEBUGGER_GENERIC_TREE_REWORK.md, Step 3.3b) - these N
+        // debug-only replay passes now declare through the AddRenderPass()
+        // chokepoint (PHASE1), tagged rg::RenderPassCategory::Debug (pulled
+        // forward from PHASE5's originally-planned scope) - this is what lets
+        // BuildRealFrameDebuggerSnapshot()'s own "view region" walk
+        // (FrameDebuggerData.cpp) skip these passes instead of leaking them
+        // into the tree as spurious extra leaves, even on the exact capture
+        // frame that declares them. Same `name`/`setup`/`execute`, zero
+        // behavior change beyond this new stamped metadata.
+        builder.AddRenderPass(passName, rg::PassKind::Graphics, rg::ViewScope::GameView, rg::RenderPassCategory::Debug,
             [destHandle, gpuSkinningOutputBuffers](rg::RenderGraphBuilder::PassBuilder& pass) {
                 pass.WriteColorAttachment(destHandle, kGameClearColor);
                 pass.WriteDepthStencilAttachment(destHandle, kGameClearDepth);

@@ -104,27 +104,12 @@ void FrameDebuggerCaptureContext::RecordEntityDraw(std::uint32_t entityIndex, st
     m_drawRecords.push_back(std::move(record));
 }
 
-void FrameDebuggerCaptureContext::RecordSkyBackgroundDraw(const std::string& pipelineDebugName)
-{
-    // Reuses RecordDraw()'s own existing dedup/draw-call-count/last-view-
-    // projection bookkeeping (Locked Design Decision 6,
-    // PHASE0_MASTER_STRATEGY.md) - this is what makes the PARENT "GameView"
-    // leaf's own aggregate `shaderName` (built by joining
-    // capture.PipelineDebugNames() in FrameDebuggerData.cpp's
-    // BuildGameViewLeaf()) correctly include the sky's own real shader pair
-    // too, alongside whatever mesh shaders ran this frame.
-    RecordDraw(pipelineDebugName, /*materialTextureDebugName=*/std::string(), m_lastViewProjection);
-
-    FrameDebuggerDrawRecord record;
-    record.displayName = pipelineDebugName;
-    record.pipelineDebugName = pipelineDebugName;
-    // A real, honest fact - AtmosphereSkyBackgroundRenderer::Draw() issues
-    // exactly ONE vkCmdDraw(cmd, 3, 1, 0, 0) call (one full-screen
-    // triangle, 3 vertices) - never a placeholder/invented number.
-    record.triangleCount = 1;
-    record.isSkyBackgroundDraw = true;
-    m_drawRecords.push_back(std::move(record));
-}
+// Render Pass campaign (task_manager/render-pass-1), PHASE4
+// (PHASE4_FRAME_DEBUGGER_GENERIC_TREE_REWORK.md, Step 3.4) -
+// RecordSkyBackgroundDraw() REMOVED here - see FrameDebuggerCapture.h's own
+// updated doc comment for why (the Sky Background draw is now a real,
+// separate, generically-discovered "DrawSkyBackground" Render Graph pass,
+// PHASE2 of this campaign, with no fabricated draw record needed at all).
 
 void FrameDebuggerCaptureContext::Reset()
 {

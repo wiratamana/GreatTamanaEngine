@@ -132,12 +132,17 @@ void AddRenderOpaquePass(rg::RenderGraphBuilder& builder, Game& game, Renderer& 
 // own "add nothing when nothing to do" rule) - this can legitimately happen
 // if a future caller has no sky to draw at all.
 //
-// `frameDebuggerCapture` - see AddRenderOpaquePass() above's own doc comment;
-// this pass additionally (Editor builds only) records a real
-// "DrawSkyBackground" leaf via FrameDebuggerCaptureContext::RecordSkyBackgroundDraw() -
-// a temporary bridge PHASE4 removes once the Frame Debugger's tree-building
-// logic generically discovers this pass by name/category instead (see
-// PHASE0_MASTER_STRATEGY.md's own Phase Index).
+// `frameDebuggerCapture` - kept purely for signature symmetry with
+// AddRenderOpaquePass() above (see RenderPasses.cpp's own doc comment on
+// this parameter) - no longer dereferenced anywhere in this pass's own
+// `execute` lambda. Render Pass campaign (task_manager/render-pass-1),
+// PHASE4 (PHASE4_FRAME_DEBUGGER_GENERIC_TREE_REWORK.md, Step 3.4) removed
+// the temporary `FrameDebuggerCaptureContext::RecordSkyBackgroundDraw()`
+// bridge call this pass used to make - "DrawSkyBackground" is now
+// generically discovered by the Frame Debugger's own tree-building logic
+// (BuildRealFrameDebuggerSnapshot(), FrameDebuggerData.cpp) purely via its
+// real pass name/category, exactly like every other Graphics-kind pass in
+// its "view region" - no fabricated draw record needed at all.
 void AddDrawSkyBackgroundPass(rg::RenderGraphBuilder& builder, Renderer& renderer, rg::TextureHandle gameViewTarget,
     const std::function<void(VkCommandBuffer)>& recordSkyBackground,
     FrameDebuggerCaptureContext* frameDebuggerCapture = nullptr);
@@ -211,6 +216,18 @@ void AddRenderTransparentPass(rg::RenderGraphBuilder& builder, Game& game, Rende
 // this symbol unconditionally (even though, at runtime, `frameDebuggerCapture`
 // is always nullptr in that configuration, so the call is never actually
 // reached).
+//
+// Render Pass campaign (task_manager/render-pass-1), PHASE4
+// (PHASE4_FRAME_DEBUGGER_GENERIC_TREE_REWORK.md, Step 3.3b) - each of the N
+// passes this function declares now goes through the AddRenderPass()
+// chokepoint (PHASE1), tagged rg::RenderPassCategory::Debug - this is what
+// lets the Frame Debugger's own generic tree-building logic
+// (BuildRealFrameDebuggerSnapshot()'s "view region" walk,
+// FrameDebuggerData.cpp) exclude these debug-only passes instead of
+// mistaking them for real "DrawSkyBackground"/"RenderTransparent" leaves,
+// even on the exact capture frame that declares them (they sit, by real
+// execution order, structurally between the real view passes above and the
+// Aerial Perspective Composite pass).
 std::vector<rg::TextureHandle> AddFrameDebuggerReplayPasses(rg::RenderGraphBuilder& builder, Game& game,
     Renderer& renderer, float aspectWidthOverHeight, std::size_t objectCount,
     const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers,

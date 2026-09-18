@@ -169,14 +169,20 @@ TEST(FrameDebuggerDataTest, FindEventDetailsByIndexTest)
 // frame-debugger-6 campaign, PHASE4
 // (PHASE4_GAMEVIEW_PER_ENTITY_DRAW_TREE_LEAVES.md, Step 4) - proves
 // FindEventDetailsByIndexRecursive() already works correctly against the NEW
-// nested shape (a selectable leaf, e.g. "GameView", that ALSO has its own
+// nested shape (a selectable leaf, e.g. "RenderOpaque", that ALSO has its own
 // children) with zero changes needed to this function itself - only
 // RenderEventNode() (the ImGui-side panel code) needed a fix for this phase.
+// Render Pass campaign (task_manager/render-pass-1), PHASE4 - fixture
+// literals renamed from "GameView"/"GameView (Entity Draw)" to
+// "RenderOpaque"/"RenderOpaque (Entity Draw)" to stay accurate (this test
+// hand-fabricates its own tree, so the literal string value itself is never
+// load-bearing for THIS test's own recursion logic - only for staying an
+// honest, non-stale example).
 TEST(FrameDebuggerDataTest, FindEventDetailsByIndexFindsAPerEntityChildLeafOfASelectableParentLeaf)
 {
     FrameDebuggerEventDetails childDetails;
     childDetails.eventIndex = 5;
-    childDetails.passName = "GameView (Entity Draw)";
+    childDetails.passName = "RenderOpaque (Entity Draw)";
     childDetails.shaderName = "Mesh.vert/Mesh.frag (PositionNormal)";
 
     FrameDebuggerEventNode childLeaf;
@@ -186,14 +192,14 @@ TEST(FrameDebuggerDataTest, FindEventDetailsByIndexFindsAPerEntityChildLeafOfASe
     childLeaf.details = childDetails;
 
     // The parent leaf is ITSELF a selectable draw call (isDrawCall == true)
-    // AND has real children - the new shape this phase introduces for the
-    // real "GameView" leaf.
+    // AND has real children - the shape this phase introduces for the real
+    // "RenderOpaque" leaf (renamed from "GameView").
     FrameDebuggerEventDetails parentDetails;
     parentDetails.eventIndex = 4;
-    parentDetails.passName = "GameView";
+    parentDetails.passName = "RenderOpaque";
 
     FrameDebuggerEventNode parentLeaf;
-    parentLeaf.name = "GameView";
+    parentLeaf.name = "RenderOpaque";
     parentLeaf.isDrawCall = true;
     parentLeaf.eventIndex = 4;
     parentLeaf.details = parentDetails;
@@ -205,11 +211,11 @@ TEST(FrameDebuggerDataTest, FindEventDetailsByIndexFindsAPerEntityChildLeafOfASe
 
     const std::optional<FrameDebuggerEventDetails> foundParent = FindEventDetailsByIndex(snapshot, 4);
     ASSERT_TRUE(foundParent.has_value());
-    EXPECT_EQ(foundParent->passName, "GameView");
+    EXPECT_EQ(foundParent->passName, "RenderOpaque");
 
     const std::optional<FrameDebuggerEventDetails> foundChild = FindEventDetailsByIndex(snapshot, 5);
     ASSERT_TRUE(foundChild.has_value());
-    EXPECT_EQ(foundChild->passName, "GameView (Entity Draw)");
+    EXPECT_EQ(foundChild->passName, "RenderOpaque (Entity Draw)");
     EXPECT_EQ(foundChild->shaderName, "Mesh.vert/Mesh.frag (PositionNormal)");
 }
 
@@ -271,7 +277,7 @@ TEST(FrameDebuggerDataTest, ChooseFrameDebuggerPreviewSourceTest)
     EXPECT_EQ(ChooseFrameDebuggerPreviewSource(true, FrameDebuggerStepPreviewKind::NotYetDrawn, false, false, false),
         FrameDebuggerPreviewSourceChoice::NotYetDrawn);
 
-    // PreComposite (the literal "GameView" leaf itself, or a Post-GameView
+    // PreComposite (the literal "RenderOpaque" leaf itself, or a Post-GameView
     // leaf before the composite pass) -> Preview, even if compositedPreview
     // is ALSO present (explicit pre-composite selection always wins).
     EXPECT_EQ(ChooseFrameDebuggerPreviewSource(true, FrameDebuggerStepPreviewKind::PreComposite, true, true, false),
@@ -304,141 +310,31 @@ TEST(FrameDebuggerDataTest, ChooseFrameDebuggerPreviewSourceTest)
         FrameDebuggerPreviewSourceChoice::None);
 }
 
-// frame-debugger-8 campaign, PHASE3
-// (PHASE3_SNAPSHOT_TREE_LEAF_AND_TESTS.md, Step 3.3) - proves the new Sky
-// Background branch inside BuildGameViewDrawRecordLeaf() (reached indirectly
-// via the public BuildRealFrameDebuggerSnapshot() entry point, mirroring
-// every other test in this file that exercises that function) builds a
-// real, distinctly-shaped leaf - never mistaken for a per-entity one.
-TEST(FrameDebuggerDataTest, SkyBackgroundDrawRecordProducesDistinctLeaf)
+// Render Pass campaign (task_manager/render-pass-1), PHASE4
+// (PHASE4_FRAME_DEBUGGER_GENERIC_TREE_REWORK.md, Step 3.4/3.6) - the
+// `frame-debugger-8` campaign's own Sky-Background-as-a-fabricated-
+// DrawRecord tests that used to live here (SkyBackgroundDrawRecordProducesDistinctLeaf,
+// SkyBackgroundLeafHasNoEntityIdentityVector,
+// SkyBackgroundLeafEventIndexIsMonotonicallyAfterEntityLeaves,
+// SkyBackgroundLeafStepPreviewIndexMatchesItsPositionInDrawRecords) are
+// REMOVED - `FrameDebuggerCaptureContext::RecordSkyBackgroundDraw()` no
+// longer exists at all (see FrameDebuggerCapture.h's own updated doc
+// comment). The Sky Background draw is now a real, separate, generically-
+// discovered "DrawSkyBackground" Render Graph pass leaf - see
+// tests/Editor/FrameDebuggerSnapshotBuilderTests.cpp for its new coverage
+// (built from a real `RenderGraphPassSnapshot` fixture, not a
+// `FrameDebuggerDrawRecord`).
+//
+// The one remaining regression this file's own sky-related tests used to
+// cover - a per-entity leaf's own shape/passName staying correct - is kept
+// below, renamed and retargeted at "RenderOpaque" (the pass's real name as
+// of PHASE2 of this campaign).
+TEST(FrameDebuggerDataTest, EntityLeafShapeIsCorrect)
 {
     rg::RenderGraphSnapshot graphSnapshot;
-    rg::RenderGraphPassSnapshot gameView;
-    gameView.name = "GameView";
-    graphSnapshot.passesInExecutionOrder.push_back(gameView);
-
-    FrameDebuggerCaptureContext capture;
-    capture.RecordEntityDraw(2, 0, "terrain", "Mesh.vert/Mesh.frag (PositionNormal)", "", 1045458);
-    capture.RecordSkyBackgroundDraw("Sky.vert/Sky.frag");
-
-    const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
-
-    ASSERT_EQ(snapshot.rootNodes.size(), 1u);
-    const FrameDebuggerEventNode& gameViewLeaf = snapshot.rootNodes[0].children[0];
-    ASSERT_EQ(gameViewLeaf.children.size(), 2u);
-
-    const FrameDebuggerEventNode& skyLeaf = gameViewLeaf.children[1];
-    EXPECT_EQ(skyLeaf.name, "Sky.vert/Sky.frag");
-    ASSERT_TRUE(skyLeaf.details.has_value());
-    EXPECT_EQ(skyLeaf.details->passName, "GameView (Sky Draw)");
-    EXPECT_EQ(skyLeaf.details->zTest, "Equal");
-    EXPECT_EQ(skyLeaf.details->zWrite, "Off");
-}
-
-// Step 3.3, test 2 - the sky leaf must never fabricate an ECS entity
-// identity - there is no real entity behind this draw at all.
-TEST(FrameDebuggerDataTest, SkyBackgroundLeafHasNoEntityIdentityVector)
-{
-    rg::RenderGraphSnapshot graphSnapshot;
-    rg::RenderGraphPassSnapshot gameView;
-    gameView.name = "GameView";
-    graphSnapshot.passesInExecutionOrder.push_back(gameView);
-
-    FrameDebuggerCaptureContext capture;
-    capture.RecordEntityDraw(2, 0, "terrain", "Mesh.vert/Mesh.frag (PositionNormal)", "", 1045458);
-    capture.RecordSkyBackgroundDraw("Sky.vert/Sky.frag");
-
-    const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
-
-    ASSERT_EQ(snapshot.rootNodes.size(), 1u);
-    const FrameDebuggerEventNode& gameViewLeaf = snapshot.rootNodes[0].children[0];
-    ASSERT_EQ(gameViewLeaf.children.size(), 2u);
-    const FrameDebuggerEventNode& skyLeaf = gameViewLeaf.children[1];
-    ASSERT_TRUE(skyLeaf.details.has_value());
-
-    bool foundEntityIdentity = false;
-    bool foundTriangleCount = false;
-    for (const FrameDebuggerVectorProperty& vec : skyLeaf.details->vectors) {
-        if (vec.name == "Entity (Index, Generation)") {
-            foundEntityIdentity = true;
-        }
-        if (vec.name == "Triangle Count") {
-            foundTriangleCount = true;
-        }
-    }
-    EXPECT_FALSE(foundEntityIdentity);
-    EXPECT_TRUE(foundTriangleCount);
-}
-
-// Step 3.3, test 3 - direct regression test for this campaign's own
-// cross-phase ordering invariant (PHASE0_MASTER_STRATEGY.md).
-TEST(FrameDebuggerDataTest, SkyBackgroundLeafEventIndexIsMonotonicallyAfterEntityLeaves)
-{
-    rg::RenderGraphSnapshot graphSnapshot;
-    rg::RenderGraphPassSnapshot gameView;
-    gameView.name = "GameView";
-    graphSnapshot.passesInExecutionOrder.push_back(gameView);
-
-    rg::RenderGraphPassSnapshot postPass;
-    postPass.name = "SomePostGameViewComputePass";
-    postPass.kind = rg::PassKind::Compute;
-    graphSnapshot.passesInExecutionOrder.push_back(postPass);
-
-    FrameDebuggerCaptureContext capture;
-    capture.RecordEntityDraw(2, 0, "terrain", "Mesh.vert/Mesh.frag (PositionNormal)", "", 1045458);
-    capture.RecordSkyBackgroundDraw("Sky.vert/Sky.frag");
-
-    const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
-
-    ASSERT_EQ(snapshot.rootNodes.size(), 1u);
-    const FrameDebuggerEventNode& root = snapshot.rootNodes[0];
-    ASSERT_EQ(root.children.size(), 2u); // "GameView" leaf + "Compute Dispatches (Post-GameView)" group.
-    const FrameDebuggerEventNode& gameViewLeaf = root.children[0];
-    ASSERT_EQ(gameViewLeaf.children.size(), 2u);
-
-    const int entityEventIndex = gameViewLeaf.children[0].eventIndex;
-    const int skyEventIndex = gameViewLeaf.children[1].eventIndex;
-    EXPECT_EQ(skyEventIndex, entityEventIndex + 1);
-
-    const FrameDebuggerEventNode& postGroup = root.children[1];
-    ASSERT_EQ(postGroup.children.size(), 1u);
-    EXPECT_LT(skyEventIndex, postGroup.children[0].eventIndex);
-}
-
-// Step 3.3, test 4 - direct regression test for PHASE0's own "Cross-phase
-// invariant" section: the sky leaf's own stepPreviewIndex is its real,
-// 0-based position among capture.DrawRecords().
-TEST(FrameDebuggerDataTest, SkyBackgroundLeafStepPreviewIndexMatchesItsPositionInDrawRecords)
-{
-    rg::RenderGraphSnapshot graphSnapshot;
-    rg::RenderGraphPassSnapshot gameView;
-    gameView.name = "GameView";
-    graphSnapshot.passesInExecutionOrder.push_back(gameView);
-
-    FrameDebuggerCaptureContext capture;
-    capture.RecordEntityDraw(2, 0, "terrain", "Mesh.vert/Mesh.frag (PositionNormal)", "", 1045458);
-    capture.RecordEntityDraw(3, 0, "SmokeTestCube", "Mesh.vert/Mesh.frag (PositionNormal)", "", 12);
-    capture.RecordSkyBackgroundDraw("Sky.vert/Sky.frag");
-
-    const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
-
-    ASSERT_EQ(snapshot.rootNodes.size(), 1u);
-    const FrameDebuggerEventNode& gameViewLeaf = snapshot.rootNodes[0].children[0];
-    ASSERT_EQ(gameViewLeaf.children.size(), 3u);
-    const FrameDebuggerEventNode& skyLeaf = gameViewLeaf.children[2];
-    ASSERT_TRUE(skyLeaf.details.has_value());
-    EXPECT_EQ(skyLeaf.details->stepPreviewIndex, static_cast<int>(capture.DrawRecords().size()) - 1);
-}
-
-// Step 3.3, test 5 - pure regression guard: with no sky record at all, the
-// pre-campaign per-entity leaf shape is completely unchanged (proves the
-// `else` branch of BuildGameViewDrawRecordLeaf() is truly untouched).
-TEST(FrameDebuggerDataTest, EntityLeafShapeIsUnchangedWhenNoSkyRecordExists)
-{
-    rg::RenderGraphSnapshot graphSnapshot;
-    rg::RenderGraphPassSnapshot gameView;
-    gameView.name = "GameView";
-    graphSnapshot.passesInExecutionOrder.push_back(gameView);
+    rg::RenderGraphPassSnapshot renderOpaque;
+    renderOpaque.name = "RenderOpaque";
+    graphSnapshot.passesInExecutionOrder.push_back(renderOpaque);
 
     FrameDebuggerCaptureContext capture;
     capture.RecordEntityDraw(2, 0, "terrain", "Mesh.vert/Mesh.frag (PositionNormal)", "", 1045458);
@@ -446,13 +342,13 @@ TEST(FrameDebuggerDataTest, EntityLeafShapeIsUnchangedWhenNoSkyRecordExists)
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
 
     ASSERT_EQ(snapshot.rootNodes.size(), 1u);
-    const FrameDebuggerEventNode& gameViewLeaf = snapshot.rootNodes[0].children[0];
-    ASSERT_EQ(gameViewLeaf.children.size(), 1u);
+    const FrameDebuggerEventNode& renderOpaqueLeaf = snapshot.rootNodes[0].children[0];
+    ASSERT_EQ(renderOpaqueLeaf.children.size(), 1u);
 
-    const FrameDebuggerEventNode& terrainLeaf = gameViewLeaf.children[0];
+    const FrameDebuggerEventNode& terrainLeaf = renderOpaqueLeaf.children[0];
     EXPECT_EQ(terrainLeaf.name, "terrain (Entity 2)");
     ASSERT_TRUE(terrainLeaf.details.has_value());
-    EXPECT_EQ(terrainLeaf.details->passName, "GameView (Entity Draw)");
+    EXPECT_EQ(terrainLeaf.details->passName, "RenderOpaque (Entity Draw)");
     EXPECT_EQ(terrainLeaf.details->eventLabel, "Draw Mesh");
     EXPECT_EQ(terrainLeaf.details->zTest, "Less");
     EXPECT_EQ(terrainLeaf.details->zWrite, "On");

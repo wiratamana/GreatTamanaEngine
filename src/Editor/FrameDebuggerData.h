@@ -431,6 +431,37 @@ std::string FormatMatrixProperty(const FrameDebuggerMatrixProperty& matrix);
 // (FrameDebuggerData.cpp) gained a new branch for it. See
 // task_manager/frame-debugger-8/PHASE0_MASTER_STRATEGY.md for the full
 // story.
+//
+// Render Pass campaign (task_manager/render-pass-1), PHASE4
+// (PHASE4_FRAME_DEBUGGER_GENERIC_TREE_REWORK.md) - SUPERSEDES every literal
+// "GameView" PASS-NAME reference in the paragraphs above (the "GameView"
+// RenderTexture/resource name mentioned near this function's own
+// `gameViewRenderTargetInfo` parameter, and `renderTarget.name` below, is a
+// completely separate, unaffected concept - see PHASE0_MASTER_STRATEGY.md's
+// own Step 2 point 4). The old monolithic "GameView" PASS was already split
+// by PHASE2 of that campaign into three real, separate passes -
+// "RenderOpaque", "DrawSkyBackground", and (currently always-empty)
+// "RenderTransparent" - and this function's pivot lookup now searches for
+// "RenderOpaque" instead. The tree shape is now:
+//
+//   "Game View" (root, cosmetic label, UNCHANGED - see `root.name` below)
+//     |-- "Compute LUT"                        (AtmosphereLut-category compute passes before the pivot)
+//     |-- "Compute Dispatches (Pre-GameView)"   (every OTHER category compute pass before the pivot)
+//     |-- "RenderOpaque" leaf                   (the old "GameView" leaf, renamed - same per-entity children)
+//     |-- "DrawSkyBackground" leaf              (NEW - a real, separate, individually selectable leaf -
+//     |                                          the old isSkyBackgroundDraw/RecordSkyBackgroundDraw()
+//     |                                          hack is REMOVED entirely)
+//     |-- "RenderTransparent" leaf              (only once this pass is ever real/non-empty - never today)
+//     |-- "Compute Dispatches (Post-GameView)"  (General-category compute passes after the view region)
+//
+// discovered by a GENERIC "view region" walk (see FrameDebuggerData.cpp's own
+// BuildRealFrameDebuggerSnapshot() body) rather than a single hardcoded
+// "GameView" leaf - zero hardcoded pass-name string literals anywhere in this
+// function except the one "RenderOpaque" pivot lookup itself. This walk also
+// correctly SKIPS `AddFrameDebuggerReplayPasses()`'s own N debug-only replay
+// passes (tagged `RenderPassCategory::Debug` as of this same phase), which sit
+// structurally inside this exact index range on an explicit capture-trigger
+// frame - they never leak into the tree as spurious extra leaves.
 FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(
     const rg::RenderGraphSnapshot& graphSnapshot,
     const FrameDebuggerCaptureContext& capture,

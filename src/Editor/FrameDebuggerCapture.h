@@ -74,17 +74,17 @@ struct FrameDebuggerDrawRecord {
     std::string materialTextureDebugName; // empty for an untextured draw.
     std::uint32_t triangleCount = 0;
 
-    // frame-debugger-8 campaign, PHASE1 - true for the ONE real record
-    // representing the Sky Background full-screen-triangle draw (see
-    // FrameDebuggerCaptureContext::RecordSkyBackgroundDraw() below) -
-    // false (the default) for every real per-ENTITY record
-    // RecordEntityDraw() produces. `entityIndex`/`entityGeneration` are
-    // left at their default (0, 0) and MUST be ignored by any reader when
-    // this is true - there is no real ECS entity behind this record at
-    // all (see FrameDebuggerData.cpp's BuildGameViewDrawRecordLeaf(), PHASE3
-    // of this campaign, for the one place that already knows to branch on
-    // this flag instead of reading entityIndex/entityGeneration).
-    bool isSkyBackgroundDraw = false;
+    // Render Pass campaign (task_manager/render-pass-1), PHASE4
+    // (PHASE4_FRAME_DEBUGGER_GENERIC_TREE_REWORK.md, Step 3.4) - the
+    // `frame-debugger-8` campaign's own `isSkyBackgroundDraw` flag (and the
+    // `RecordSkyBackgroundDraw()` method that used to set it - see below)
+    // were REMOVED here: the Sky Background draw is now a real, separate
+    // "DrawSkyBackground" Render Graph pass (PHASE2 of this campaign) that
+    // is generically discovered by BuildRealFrameDebuggerSnapshot()'s own
+    // view-region walk (FrameDebuggerData.cpp) exactly like any other real
+    // Graphics-kind pass - it no longer needs a fabricated
+    // FrameDebuggerDrawRecord to appear in the tree at all. Every record
+    // this struct now describes is a real per-ENTITY draw, unconditionally.
 };
 
 // Returns this engine's REAL, hardcoded blend/Z/stencil facts, cross-
@@ -151,22 +151,16 @@ public:
         const std::string& pipelineDebugName, const std::string& materialTextureDebugName,
         std::uint32_t triangleCount);
 
-    // frame-debugger-8 campaign, PHASE1 - records the ONE real Sky
-    // Background draw call this frame's "GameView" pass issues (see
-    // AddGameViewPass(), RenderPasses.cpp) - call this ONCE, immediately
-    // after invoking the real `recordSkyBackground` callback, and ONLY
-    // when this capture context is actually armed (mirrors every other
-    // call site's own "only touch this when non-null" convention). Reuses
-    // RecordDraw()'s own existing dedup/draw-call-count/last-view-
-    // projection bookkeeping internally (Locked Design Decision 6,
-    // PHASE0_MASTER_STRATEGY.md) - the sky uses the exact same view-
-    // projection matrix every other draw in this pass used this frame, so
-    // passing LastViewProjection() back into that shared bookkeeping is
-    // correct, not a placeholder. `pipelineDebugName` should be
-    // `AtmosphereSkyBackgroundRenderer::ShaderDebugName()` - a real,
-    // permanent, non-fabricated identifier (never invent a cosmetic label
-    // like "Sky Background" here - see PHASE0's Locked Design Decision 2).
-    void RecordSkyBackgroundDraw(const std::string& pipelineDebugName);
+    // Render Pass campaign (task_manager/render-pass-1), PHASE4 - the
+    // `frame-debugger-8` campaign's own `RecordSkyBackgroundDraw()` method
+    // was REMOVED here (it used to be called once, from
+    // AddDrawSkyBackgroundPass()'s own `execute` lambda, to fabricate a
+    // draw record for the Sky Background full-screen-triangle draw). It is
+    // no longer needed at all - "DrawSkyBackground" is now a real, separate
+    // Render Graph pass (PHASE2), generically discovered by
+    // BuildRealFrameDebuggerSnapshot()'s own view-region walk exactly like
+    // any other real Graphics-kind pass, with no fabricated
+    // FrameDebuggerDrawRecord required.
 
     // Clears every recorded fact back to the empty/default state - call
     // once at the top of every armed frame (mirrors FrameRecorder::
