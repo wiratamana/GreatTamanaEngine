@@ -2,6 +2,40 @@
 
 namespace gte::rg {
 
+// Render Pass campaign (task_manager/render-pass-1), PHASE2 - see this
+// function's own doc comment in RenderGraphSnapshot.h for the full
+// contract/rule.
+PassGpuStats CombinePassGpuStats(const std::vector<PassGpuStats>& stats)
+{
+    PassGpuStats combined;
+
+    bool anyPresent = false;
+    bool anyUnsupported = false;
+    double summedPresentMilliseconds = 0.0;
+
+    for (const PassGpuStats& entry : stats) {
+        combined.drawStats.drawCallCount += entry.drawStats.drawCallCount;
+        combined.drawStats.triangleCount += entry.drawStats.triangleCount;
+
+        if (entry.timing.status == GpuTimingSample::Status::Present) {
+            anyPresent = true;
+            summedPresentMilliseconds += entry.timing.milliseconds;
+        } else if (entry.timing.status == GpuTimingSample::Status::Unsupported) {
+            anyUnsupported = true;
+        }
+    }
+
+    if (anyPresent) {
+        combined.timing.status = GpuTimingSample::Status::Present;
+        combined.timing.milliseconds = summedPresentMilliseconds;
+    } else if (anyUnsupported) {
+        combined.timing.status = GpuTimingSample::Status::Unsupported;
+    }
+    // else: leave combined.timing at its default (Status::Absent, 0.0).
+
+    return combined;
+}
+
 namespace {
 
 // Resolves one declared read/write's resource name, from whichever of

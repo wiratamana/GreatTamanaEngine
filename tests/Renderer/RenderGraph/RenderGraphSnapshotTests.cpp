@@ -545,5 +545,99 @@ TEST(RenderGraphSnapshotTest, WriteVolumeTextureAndReadVolumeTextureProduceNonEm
     EXPECT_FALSE(readPass.readNames[0].empty());
 }
 
+// --- Render Pass campaign, PHASE2 - CombinePassGpuStats() --------------------
+
+TEST(RenderGraphSnapshotTest, CombinePassGpuStatsOfEmptyListReturnsDefault)
+{
+    const PassGpuStats combined = CombinePassGpuStats({});
+
+    EXPECT_EQ(combined.drawStats.drawCallCount, 0u);
+    EXPECT_EQ(combined.drawStats.triangleCount, 0u);
+    EXPECT_EQ(combined.timing.status, GpuTimingSample::Status::Absent);
+}
+
+TEST(RenderGraphSnapshotTest, CombinePassGpuStatsSumsDrawStatsAcrossEntries)
+{
+    PassGpuStats opaque;
+    opaque.drawStats.drawCallCount = 3;
+    opaque.drawStats.triangleCount = 100;
+
+    PassGpuStats sky;
+    sky.drawStats.drawCallCount = 1;
+    sky.drawStats.triangleCount = 2; // The sky's own full-screen-triangle draw.
+
+    PassGpuStats transparent; // Genuine no-op today - all-default.
+
+    const PassGpuStats combined = CombinePassGpuStats({ opaque, sky, transparent });
+
+    EXPECT_EQ(combined.drawStats.drawCallCount, 4u);
+    EXPECT_EQ(combined.drawStats.triangleCount, 102u);
+}
+
+TEST(RenderGraphSnapshotTest, CombinePassGpuStatsSumsMillisecondsWhenAllPresent)
+{
+    PassGpuStats a;
+    a.timing.status = GpuTimingSample::Status::Present;
+    a.timing.milliseconds = 1.25;
+
+    PassGpuStats b;
+    b.timing.status = GpuTimingSample::Status::Present;
+    b.timing.milliseconds = 2.75;
+
+    const PassGpuStats combined = CombinePassGpuStats({ a, b });
+
+    EXPECT_EQ(combined.timing.status, GpuTimingSample::Status::Present);
+    EXPECT_DOUBLE_EQ(combined.timing.milliseconds, 4.0);
+}
+
+TEST(RenderGraphSnapshotTest, CombinePassGpuStatsTreatsAbsentEntriesAsZeroWhenAtLeastOneIsPresent)
+{
+    PassGpuStats present;
+    present.timing.status = GpuTimingSample::Status::Present;
+    present.timing.milliseconds = 5.0;
+
+    PassGpuStats absent; // status defaults to Absent, milliseconds 0.0.
+
+    const PassGpuStats combined = CombinePassGpuStats({ present, absent });
+
+    EXPECT_EQ(combined.timing.status, GpuTimingSample::Status::Present);
+    EXPECT_DOUBLE_EQ(combined.timing.milliseconds, 5.0);
+}
+
+TEST(RenderGraphSnapshotTest, CombinePassGpuStatsIsAbsentWhenEveryEntryIsAbsent)
+{
+    const PassGpuStats combined = CombinePassGpuStats({ PassGpuStats{}, PassGpuStats{} });
+
+    EXPECT_EQ(combined.timing.status, GpuTimingSample::Status::Absent);
+    EXPECT_DOUBLE_EQ(combined.timing.milliseconds, 0.0);
+}
+
+TEST(RenderGraphSnapshotTest, CombinePassGpuStatsIsUnsupportedWhenNonePresentButOneUnsupported)
+{
+    PassGpuStats unsupported;
+    unsupported.timing.status = GpuTimingSample::Status::Unsupported;
+
+    PassGpuStats absent;
+
+    const PassGpuStats combined = CombinePassGpuStats({ unsupported, absent });
+
+    EXPECT_EQ(combined.timing.status, GpuTimingSample::Status::Unsupported);
+}
+
+TEST(RenderGraphSnapshotTest, CombinePassGpuStatsPrefersPresentOverUnsupported)
+{
+    PassGpuStats unsupported;
+    unsupported.timing.status = GpuTimingSample::Status::Unsupported;
+
+    PassGpuStats present;
+    present.timing.status = GpuTimingSample::Status::Present;
+    present.timing.milliseconds = 1.0;
+
+    const PassGpuStats combined = CombinePassGpuStats({ unsupported, present });
+
+    EXPECT_EQ(combined.timing.status, GpuTimingSample::Status::Present);
+    EXPECT_DOUBLE_EQ(combined.timing.milliseconds, 1.0);
+}
+
 } // namespace
 } // namespace gte::rg

@@ -52,6 +52,32 @@ struct PassGpuStats {
     GpuTimingSample timing;
 };
 
+// Render Pass campaign (task_manager/render-pass-1), PHASE2
+// (PHASE2_RENDER_OPAQUE_SKY_SPLIT_AND_TRANSPARENT_STUB.md, Step 3.4) -
+// combines N passes' own last-known PassGpuStats into one aggregate, for a
+// group of passes a caller treats as logically "one thing" (e.g.
+// Application.cpp's own Profiling::GpuPass::GameView, which used to read a
+// single "GameView" pass's stats before this campaign split it into
+// "RenderOpaque" + "DrawSkyBackground" + "RenderTransparent"). Pure,
+// allocation-light, Tier-1-testable (see
+// tests/Renderer/RenderGraph/RenderGraphSnapshotTests.cpp) - takes plain
+// PassGpuStats values, no live RenderGraph/VkDevice needed.
+//
+// `drawStats`: a plain sum of every entry's drawCallCount/triangleCount -
+// each pass's own stats already independently reflect its own real draws
+// this frame, so summing them is exactly "how many draws/triangles did this
+// whole logical group issue".
+//
+// `timing`: sums `milliseconds` across every entry whose status is
+// GpuTimingSample::Status::Present (the combined result's own status is
+// Present too, in that case). If NONE are Present, falls back to
+// Unsupported if any entry reports Unsupported (a permanent, device-level
+// condition - see GpuTiming.h's own ResolveGpuTimingStatus() priority
+// order), otherwise Absent (the common case today - every pass's own timing
+// is Absent, see RenderGraph.h's "GPU TIMING NOTE"). An empty `stats` input
+// returns a default-constructed PassGpuStats{} (zero draws, Absent timing).
+PassGpuStats CombinePassGpuStats(const std::vector<PassGpuStats>& stats);
+
 // One pass, ready to display. `name`/`readNames`/`writeNames` are already
 // resolved into plain, OWNED strings (never a raw `const char*` into
 // PassRecord/RenderGraphBuilder's own name tables, which only live as long

@@ -30,6 +30,32 @@ TEST(RenderSystemTest, EmptyRegistryProducesNoDrawCommands)
     EXPECT_TRUE(commands.empty());
 }
 
+// Render Pass campaign (task_manager/render-pass-1), PHASE2 -
+// CollectTransparentRenderables() always returns empty today - see its own
+// doc comment in RenderSystem.h for why (no isTransparent/renderQueue
+// concept exists on MeshRenderer yet). This is a REGRESSION-STYLE test: it
+// must keep passing once a future transparency campaign adds real filtering
+// logic here, at which point a MeshRenderer marked transparent should stop
+// appearing in CollectRenderables() and start appearing here instead - see
+// that future campaign's own test additions.
+TEST(RenderSystemTest, CollectTransparentRenderablesIsAlwaysEmptyToday)
+{
+    Registry registry;
+    const Entity entity = registry.CreateEntity();
+    registry.AddComponent<Transform>(entity);
+    const MeshHandle meshHandle{ 1, 1 };
+    const PipelineHandle pipelineHandle{ 2, 1 };
+    registry.AddComponent<MeshRenderer>(entity, MeshRenderer{ meshHandle, pipelineHandle });
+
+    const std::vector<DrawCommand> transparentCommands = RenderSystem::CollectTransparentRenderables(registry);
+
+    EXPECT_TRUE(transparentCommands.empty());
+    // The SAME entity still shows up in the opaque collection - proving this
+    // is a genuine "nothing is transparent yet" no-op, not an accidental
+    // filter dropping every entity from BOTH lists.
+    EXPECT_EQ(RenderSystem::CollectRenderables(registry).size(), 1u);
+}
+
 TEST(RenderSystemTest, EntityWithoutMeshRendererProducesNoDrawCommand)
 {
     Registry registry;

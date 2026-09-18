@@ -97,6 +97,20 @@ public:
     // is not (it owns real Mesh/Pipeline objects).
     static std::vector<DrawCommand> CollectRenderables(Registry& registry);
 
+    // Render Pass campaign (task_manager/render-pass-1), PHASE2 - the
+    // transparency-equivalent of CollectRenderables() above. Always returns
+    // an EMPTY vector today - there is no isTransparent/renderQueue concept
+    // anywhere on MeshRenderer yet (see PHASE0_MASTER_STRATEGY.md's own Step
+    // 2, point 6) - this exists purely as the real, structural drop-in point
+    // a FUTURE transparency feature extends, mirroring CollectRenderables()'s
+    // own exact shape so that future work is a pure additive change to
+    // MeshRenderer + a real filter added HERE, never a new parallel
+    // mechanism. `registry`'s parameter name is deliberately kept (even
+    // though unused today) so the signature stays stable for that future
+    // change. See src/Application/RenderPasses.cpp's AddRenderTransparentPass()
+    // for this method's one production call site.
+    static std::vector<DrawCommand> CollectTransparentRenderables(Registry& registry);
+
     // Pure camera-resolution step, the Camera equivalent of
     // CollectRenderables() above: finds the first entity (in
     // ComponentStorage<Camera> order) with Camera::active == true and

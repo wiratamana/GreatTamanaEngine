@@ -24,8 +24,10 @@
 // described here - `renderer`, `aspectWidthOverHeight`,
 // `viewProjectionOverride` - task_manager/frame-debugger-3/PHASE3 added one
 // new, always-defaulted, campaign-specific trailing parameter,
-// `frameDebuggerCapture`, on AddGameViewPass() only - see that function's
-// own doc comment below) inside a
+// `frameDebuggerCapture`, on AddRenderOpaquePass() only (RENAMED from
+// AddGameViewPass() by the Render Pass campaign's own PHASE2,
+// task_manager/render-pass-1 - see that function's own doc comment below)
+// inside a
 // Renderer::BeginGraphPassRecording()/EndGraphPassRecording() bracket, so
 // every Renderer::Submit() call Game/RenderSystem already makes internally
 // keeps working completely unmodified - the render graph integration
@@ -35,7 +37,7 @@
 // GPU Vertex Skinning campaign, Phase 5
 // (GPU_SKINNING_PHASE5_RUNTIME_CPU_GPU_SWITCH_STRATEGY_v2.md, Step 3.3)
 // added AddGpuSkinningPasses() below, plus an optional
-// `gpuSkinningOutputBuffers` parameter on AddGameViewPass()/
+// `gpuSkinningOutputBuffers` parameter on AddRenderOpaquePass()/
 // AddSceneViewPass()/AddPresentPass() - see each one's own doc comment.
 
 #include "../Math/Mat4.h"
@@ -62,7 +64,7 @@ class RenderTexture;
 // PHASE3_FRAME_HISTORY_RING_BUFFER_AND_CAPTURE_TRIGGER.md's own Step 3.4b
 // (mirroring src/Game/RenderSystem.h's own identical PHASE1 precedent). A
 // bare forward declaration of a pointee is always legal even when the type
-// is never defined in this translation unit, since AddGameViewPass() below
+// is never defined in this translation unit, since AddRenderOpaquePass() below
 // only ever needs a POINTER to it.
 class FrameDebuggerCaptureContext;
 
@@ -70,12 +72,20 @@ namespace rg {
 class RenderGraphBuilder;
 } // namespace rg
 
-// Declares the "GameView" pass: writes gameViewTarget's color+depth
-// attachments (cleared - see RenderPasses.cpp's own kGameClearColor/
-// kGameClearDepth constants, matching Game::Render()'s own hardcoded clear
-// color exactly), and its `execute` calls Game::Render() with the ECS's own
-// active Camera (RenderSystem::ResolveActiveCameraViewProjection() -
-// unchanged).
+// Render Pass campaign (task_manager/render-pass-1), PHASE2
+// (PHASE2_RENDER_OPAQUE_SKY_SPLIT_AND_TRANSPARENT_STUB.md) - RENAMED from
+// the original AddGameViewPass() (which used to ALSO draw the sky
+// background, hand-fused into this same pass - see PHASE0_MASTER_STRATEGY.md's
+// own Step 2 for the full history of why that was a hack). Declares the
+// "RenderOpaque" pass: writes gameViewTarget's color+depth attachments
+// (cleared - see RenderPasses.cpp's own kGameClearColor/kGameClearDepth
+// constants, matching Game::Render()'s own hardcoded clear color exactly -
+// this is the FIRST pass to touch this target this frame), and its
+// `execute` calls Game::Render() with the ECS's own active Camera
+// (RenderSystem::ResolveActiveCameraViewProjection() - unchanged). The Sky
+// Background draw is now a real, separate pass - see AddDrawSkyBackgroundPass()
+// below - this function no longer takes a `recordSkyBackground` parameter
+// at all.
 //
 // `gpuSkinningOutputBuffers` (GPU Vertex Skinning campaign, Phase 5 - see
 // GPU_SKINNING_PHASE5_RUNTIME_CPU_GPU_SWITCH_STRATEGY_v2.md) is the set of
@@ -90,16 +100,6 @@ class RenderGraphBuilder;
 // actually end up drawing this frame is a harmless, conservative
 // over-synchronization, never a correctness problem.
 //
-// `recordSkyBackground` (Atmosphere Scattering + Aerial Perspective
-// campaign, Phase 7 - task_manager/atmosphere-scattering-1/
-// ATMOSPHERE_PHASE7_SKY_BACKGROUND_AND_COMPOSITE_PASSES_v1.md), if set, is
-// invoked once, immediately after Game::Render()'s own draws for this pass
-// finish (still inside this pass's open dynamic-rendering bracket) -
-// passed this pass's own `cmd` - so a caller (Application::Run(), via
-// AtmosphereLutRenderer::DrawSkyBackground()) can draw the atmosphere sky
-// background wherever the depth buffer still shows the frame's own clear
-// behavior.
-//
 // `frameDebuggerCapture` (task_manager/frame-debugger-3 campaign, PHASE3 -
 // PHASE3_FRAME_HISTORY_RING_BUFFER_AND_CAPTURE_TRIGGER.md, Step 3.4b) -
 // forwarded straight through into this pass's own `game.Render(...)` call
@@ -112,10 +112,52 @@ class RenderGraphBuilder;
 // View is out of scope - Locked Design Decision #7 - and AddPresentPass()'s
 // own direct-render fallback branch must NEVER be handed a real capture
 // pointer either way, see that function's own doc comment below).
-void AddGameViewPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer, rg::TextureHandle gameViewTarget,
-    float aspectWidthOverHeight, const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers = {},
-    const std::function<void(VkCommandBuffer)>& recordSkyBackground = {},
+void AddRenderOpaquePass(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer,
+    rg::TextureHandle gameViewTarget, float aspectWidthOverHeight,
+    const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers = {},
     FrameDebuggerCaptureContext* frameDebuggerCapture = nullptr);
+
+// Render Pass campaign, PHASE2 - the Sky Background draw, now a REAL,
+// separate Render Graph pass in its own right (previously hand-fused inside
+// the old AddGameViewPass()'s own execute lambda - see PHASE0_MASTER_STRATEGY.md's
+// own Step 2 for the full history of why that was a hack). MUST be declared
+// AFTER AddRenderOpaquePass() in the SAME builder call, against the SAME
+// `gameViewTarget` handle - this pass deliberately does NOT clear either
+// attachment (VK_ATTACHMENT_LOAD_OP_LOAD for both color and depth), relying
+// on AtmosphereSkyBackgroundRenderer's own already-existing EQUAL-depth-test
+// pipeline (see DescribeSkyBackgroundPipelineState(),
+// src/Editor/FrameDebuggerCapture.h/.cpp) to only paint pixels
+// AddRenderOpaquePass() didn't already cover. A true no-op (declares
+// NOTHING) if `recordSkyBackground` is empty (mirrors AddGpuSkinningPasses()'s
+// own "add nothing when nothing to do" rule) - this can legitimately happen
+// if a future caller has no sky to draw at all.
+//
+// `frameDebuggerCapture` - see AddRenderOpaquePass() above's own doc comment;
+// this pass additionally (Editor builds only) records a real
+// "DrawSkyBackground" leaf via FrameDebuggerCaptureContext::RecordSkyBackgroundDraw() -
+// a temporary bridge PHASE4 removes once the Frame Debugger's tree-building
+// logic generically discovers this pass by name/category instead (see
+// PHASE0_MASTER_STRATEGY.md's own Phase Index).
+void AddDrawSkyBackgroundPass(rg::RenderGraphBuilder& builder, Renderer& renderer, rg::TextureHandle gameViewTarget,
+    const std::function<void(VkCommandBuffer)>& recordSkyBackground,
+    FrameDebuggerCaptureContext* frameDebuggerCapture = nullptr);
+
+// Render Pass campaign, PHASE2 - the built-in "Render Transparent" pass - a
+// real, permanent call site wired into Application::Run(), currently ALWAYS
+// a no-op (mirrors AddGpuSkinningPasses()'s own "return/declare nothing when
+// there is genuinely nothing to do" pattern) since
+// RenderSystem::CollectTransparentRenderables() always returns empty today.
+// A future transparency campaign's own job is to make THIS function's own
+// body do real work once MeshRenderer gains a real isTransparent/renderQueue
+// flag - this campaign's job is only to make sure the call site, the pass
+// name, and its correct position in the frame (after DrawSkyBackground,
+// before the Aerial Perspective composite pass) already exist and are
+// already wired end-to-end. Runs BETWEEN Sky Background and the Aerial
+// Perspective composite pass (the conventional forward-rendering order:
+// opaque -> sky -> transparent -> post-processing).
+void AddRenderTransparentPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer,
+    rg::TextureHandle gameViewTarget, float aspectWidthOverHeight);
+
 
 // task_manager/frame-debugger-7 campaign, PHASE3
 // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md) - adds N
@@ -175,13 +217,17 @@ std::vector<rg::TextureHandle> AddFrameDebuggerReplayPasses(rg::RenderGraphBuild
     const std::function<void(VkCommandBuffer)>& recordSkyBackground, RenderTexture& gameTarget,
     FrameDebuggerCaptureContext& capture);
 
-// The Scene-view equivalent of AddGameViewPass() above - `execute` calls
+// The Scene-view equivalent of AddRenderOpaquePass() above - `execute` calls
 // Game::Render() with `sceneViewProjection` as its viewProjectionOverride
 // (the Editor's own independently-orbitable EditorCamera - see
 // IEditorLayer::SceneViewProjection()), bypassing ECS camera resolution for
 // this view only, exactly as Application::Run() already did before this
-// migration. `gpuSkinningOutputBuffers` - see AddGameViewPass() above.
-// `recordSkyBackground` - see AddGameViewPass() above; invoked BEFORE
+// migration. `gpuSkinningOutputBuffers` - see AddRenderOpaquePass() above.
+// `recordSkyBackground` - see AddRenderOpaquePass() above. Scene View
+// deliberately keeps its sky background hand-fused inline here (out of
+// scope for this campaign's Opaque/Sky split - see
+// PHASE2_RENDER_OPAQUE_SKY_SPLIT_AND_TRANSPARENT_STUB.md's own Step 3.3),
+// invoked BEFORE
 // `recordSceneOverlay` below (the atmosphere sky background must be drawn
 // before the Editor's own ground-grid overlay, so the grid's own alpha
 // blend correctly composites over the sky wherever it intersects the
@@ -213,7 +259,7 @@ void AddSceneViewPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& ren
 // `recordImGui`, if set, is invoked last, still inside the same dynamic-
 // rendering bracket - mirroring IEditorLayer::Render()'s existing
 // recordExtra contract exactly. `gpuSkinningOutputBuffers` - see
-// AddGameViewPass() above; only meaningful (and only ever declared) when
+// AddRenderOpaquePass() above; only meaningful (and only ever declared) when
 // where this pass itself draws a GPU-skinned mesh directly.
 //
 // task_manager/frame-debugger-3 campaign, PHASE3
@@ -222,10 +268,11 @@ void AddSceneViewPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& ren
 // having a value) calls `game.Render(renderer, *directGameRenderAspect)`
 // with NO explicit `frameDebuggerCapture` argument at all - relying on
 // Game::Render()'s own `nullptr` default rather than accidentally
-// forwarding AddGameViewPass()'s own armed pointer here. This is
+// forwarding AddRenderOpaquePass()'s own armed pointer here. This is
 // deliberate and correct (this fallback path renders in place of, never
-// alongside, the real "GameView" pass this same frame - the two are
-// mutually exclusive per frame by construction, since AddGameViewPass() is
+// alongside, the real Game View render (RenderOpaque/DrawSkyBackground
+// passes) this same frame - the two are mutually exclusive per frame by
+// construction, since AddRenderOpaquePass()/AddDrawSkyBackgroundPass() are
 // simply never declared at all in the frame where this fallback runs), and
 // is exactly why this function's own signature does NOT grow a
 // `frameDebuggerCapture` parameter at all - there being no such parameter
@@ -261,7 +308,7 @@ void FinalizeRenderTextureForExternalSampling(VkCommandBuffer cmd, RenderTexture
 //
 // Returns the imported BufferHandle for every pass declared, in the same
 // order - the caller (Application::Run()) threads this straight into
-// AddGameViewPass()/AddSceneViewPass()/AddPresentPass()'s own
+// AddRenderOpaquePass()/AddSceneViewPass()/AddPresentPass()'s own
 // `gpuSkinningOutputBuffers` parameter, so those passes' declared
 // ResourceAccess::VertexBufferRead correctly orders them after this call's
 // own writes. A no-op (returns an empty vector, declares nothing) whenever

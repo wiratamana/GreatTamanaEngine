@@ -48,6 +48,15 @@ std::vector<DrawCommand> RenderSystem::CollectRenderables(Registry& registry)
     return commands;
 }
 
+// Render Pass campaign, PHASE2 - see this method's own doc comment in
+// RenderSystem.h. Always empty today - `registry` is intentionally unused
+// (kept, named, for signature stability - see that header comment).
+std::vector<DrawCommand> RenderSystem::CollectTransparentRenderables(Registry& registry)
+{
+    (void)registry;
+    return {};
+}
+
 Mat4 RenderSystem::ResolveActiveCameraViewProjection(Registry& registry, float aspectWidthOverHeight)
 {
     ComponentStorage<Camera>& cameras = registry.Storage<Camera>();

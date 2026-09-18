@@ -105,56 +105,110 @@ const char* ReplayStepPassName(std::size_t index)
 
 } // namespace
 
-void AddGameViewPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer, rg::TextureHandle gameViewTarget,
-    float aspectWidthOverHeight, const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers,
-    const std::function<void(VkCommandBuffer)>& recordSkyBackground, FrameDebuggerCaptureContext* frameDebuggerCapture)
+// Render Pass campaign (task_manager/render-pass-1), PHASE2 - RENAMED from
+// AddGameViewPass() (see RenderPasses.h's own doc comment). Declared via the
+// new AddRenderPass() chokepoint (RenderGraphBuilder.h, PHASE1) instead of
+// plain AddPass() - PassKind::Graphics, ViewScope::GameView,
+// RenderPassCategory::General (the default for this campaign's non-
+// Atmosphere passes - see PHASE1's own RenderPassCategory doc comment). No
+// longer draws the sky background at all - see AddDrawSkyBackgroundPass()
+// below for that, now a real, separate pass.
+void AddRenderOpaquePass(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer,
+    rg::TextureHandle gameViewTarget, float aspectWidthOverHeight,
+    const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers, FrameDebuggerCaptureContext* frameDebuggerCapture)
 {
-    builder.AddPass(
-        "GameView", rg::ViewScope::GameView,
+    builder.AddRenderPass(
+        "RenderOpaque", rg::PassKind::Graphics, rg::ViewScope::GameView, rg::RenderPassCategory::General,
         [gameViewTarget, gpuSkinningOutputBuffers](rg::RenderGraphBuilder::PassBuilder& pass) {
             pass.WriteColorAttachment(gameViewTarget, kGameClearColor);
             pass.WriteDepthStencilAttachment(gameViewTarget, kGameClearDepth);
             DeclareGpuSkinningReads(pass, gpuSkinningOutputBuffers);
         },
-        [&game, &renderer, aspectWidthOverHeight, recordSkyBackground, frameDebuggerCapture](rg::PassContext& ctx) {
+        [&game, &renderer, aspectWidthOverHeight, frameDebuggerCapture](rg::PassContext& ctx) {
             renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
             // frameDebuggerCapture is forwarded onward, as a bare pointer,
             // into game.Render() below - exactly like PHASE1's own Step
             // 3.1b requires for a CORE, always-compiled file such as this
             // one (see task_manager/frame-debugger-3/
             // PHASE3_FRAME_HISTORY_RING_BUFFER_AND_CAPTURE_TRIGGER.md's own
-            // Step 3.4b). frame-debugger-8 campaign, PHASE1 - this same
-            // pointer IS now also directly dereferenced a few lines below,
-            // strictly AFTER recordSkyBackground(ctx.cmd) runs, guarded by
-            // `#if GTE_ENABLE_EDITOR` + a null check (see that call site's
-            // own comment for the full reasoning).
+            // Step 3.4b).
             game.Render(renderer, aspectWidthOverHeight, nullptr, frameDebuggerCapture);
             renderer.EndGraphPassRecording();
-            if (recordSkyBackground) {
-                recordSkyBackground(ctx.cmd);
-#if GTE_ENABLE_EDITOR
-                // frame-debugger-8 campaign, PHASE1 - the Sky Background
-                // pass is a real, direct vkCmdDraw() full-screen-triangle
-                // draw (AtmosphereSkyBackgroundRenderer::Draw()) that
-                // bypasses RenderSystem::Draw()/Renderer::Submit() entirely
-                // (see that class's own header comment) - so, unlike every
-                // per-entity draw (RenderSystem::Draw()'s own existing
-                // RecordEntityDraw() call site), it was previously
-                // completely INVISIBLE to the Frame Debugger, even though
-                // it genuinely runs every frame. This one, explicit call
-                // site is the fix - see
-                // task_manager/frame-debugger-8/PHASE0_MASTER_STRATEGY.md
-                // for the full root-cause trail. Guarded exactly like this
-                // same file's own AddFrameDebuggerReplayPasses() body (see
-                // this file's own top-of-file comment) - a real dereference
-                // of an Editor-only type in this CORE, always-compiled
-                // file.
-                if (frameDebuggerCapture != nullptr) {
-                    frameDebuggerCapture->RecordSkyBackgroundDraw(AtmosphereSkyBackgroundRenderer::ShaderDebugName());
-                }
-#endif
-            }
         });
+}
+
+// Render Pass campaign, PHASE2 - see RenderPasses.h's own doc comment for
+// the full contract. A true no-op (declares nothing at all) when
+// `recordSkyBackground` is empty, mirroring AddGpuSkinningPasses()'s own
+// "add nothing when nothing to do" pattern.
+void AddDrawSkyBackgroundPass(rg::RenderGraphBuilder& builder, Renderer& renderer, rg::TextureHandle gameViewTarget,
+    const std::function<void(VkCommandBuffer)>& recordSkyBackground, FrameDebuggerCaptureContext* frameDebuggerCapture)
+{
+    if (!recordSkyBackground) {
+        return;
+    }
+
+    builder.AddRenderPass(
+        "DrawSkyBackground", rg::PassKind::Graphics, rg::ViewScope::GameView, rg::RenderPassCategory::General,
+        [gameViewTarget](rg::RenderGraphBuilder::PassBuilder& pass) {
+            // Deliberately NO clear value on either attachment (std::nullopt
+            // - VK_ATTACHMENT_LOAD_OP_LOAD) - this pass must never erase
+            // AddRenderOpaquePass()'s own just-written pixels/depth. See
+            // RenderPasses.h's own doc comment for the EQUAL-depth-test
+            // reasoning that makes this safe.
+            pass.WriteColorAttachment(gameViewTarget);
+            pass.WriteDepthStencilAttachment(gameViewTarget);
+        },
+        [&renderer, recordSkyBackground, frameDebuggerCapture](rg::PassContext& ctx) {
+            renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
+            recordSkyBackground(ctx.cmd);
+#if GTE_ENABLE_EDITOR
+            // frame-debugger-8 campaign, PHASE1 - the Sky Background pass is
+            // a real, direct vkCmdDraw() full-screen-triangle draw
+            // (AtmosphereSkyBackgroundRenderer::Draw()) that bypasses
+            // RenderSystem::Draw()/Renderer::Submit() entirely (see that
+            // class's own header comment), so it needs this explicit,
+            // separate capture call site to be visible to the Frame
+            // Debugger at all - see task_manager/frame-debugger-8/
+            // PHASE0_MASTER_STRATEGY.md for the full root-cause trail. This
+            // whole mechanism is a temporary bridge - PHASE4
+            // (task_manager/render-pass-1/PHASE4_FRAME_DEBUGGER_GENERIC_TREE_REWORK.md)
+            // removes it once the Frame Debugger generically discovers this
+            // real, separate "DrawSkyBackground" pass by name/category
+            // instead. Guarded exactly like this same file's own
+            // AddFrameDebuggerReplayPasses() body (see this file's own
+            // top-of-file comment) - a real dereference of an Editor-only
+            // type in this CORE, always-compiled file.
+            if (frameDebuggerCapture != nullptr) {
+                frameDebuggerCapture->RecordSkyBackgroundDraw(AtmosphereSkyBackgroundRenderer::ShaderDebugName());
+            }
+#endif
+            renderer.EndGraphPassRecording();
+        });
+}
+
+// Render Pass campaign, PHASE2 - see RenderPasses.h's own doc comment for
+// the full contract. Always a no-op today (declares nothing at all) - see
+// RenderSystem::CollectTransparentRenderables()'s own doc comment for why.
+void AddRenderTransparentPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer,
+    rg::TextureHandle gameViewTarget, float aspectWidthOverHeight)
+{
+    (void)builder;
+    (void)renderer;
+    (void)gameViewTarget;
+    (void)aspectWidthOverHeight;
+
+    const std::vector<DrawCommand> transparentCommands = RenderSystem::CollectTransparentRenderables(game.GetRegistry());
+    if (transparentCommands.empty()) {
+        return;
+    }
+
+    // Unreachable today - RenderSystem::CollectTransparentRenderables()
+    // always returns empty (see its own doc comment) until a future
+    // transparency campaign gives MeshRenderer a real isTransparent/
+    // renderQueue flag. Left deliberately unimplemented beyond this early
+    // return - see RenderPasses.h's own doc comment and PHASE2's own "What
+    // We Will NOT Do".
 }
 
 // task_manager/frame-debugger-7 campaign, PHASE3

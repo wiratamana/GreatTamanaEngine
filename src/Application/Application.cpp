@@ -513,7 +513,7 @@ int Application::Run()
         // is ARMED for THIS frame's Game-View render (nullptr the
         // overwhelmingly common case - see PHASE1's own "zero-overhead-
         // when-disarmed" requirement). Obtained here, BEFORE Game::Render()
-        // ever runs this frame, and threaded straight into AddGameViewPass()
+        // ever runs this frame, and threaded straight into AddRenderOpaquePass()
         // below - see IEditorLayer::PrepareFrameDebuggerCaptureContext()'s
         // own doc comment. `frameDebuggerCapture` is a bare, forward-
         // declared pointer type (see EditorLayer.h) - this whole file never
@@ -638,11 +638,14 @@ int Application::Run()
                                     "AtmosphereAerialPerspectiveVolumeDebugSlice", rg::ViewScope::GameView);
                             outputs.push_back(aerialPerspectiveDebugSlice);
 
-                            // 3.2 - the Sky Background pass, issued INSIDE
-                            // AddGameViewPass()'s own already-open
-                            // vkCmdBeginRendering bracket, right after
-                            // Game::Render()'s own real scene geometry draws
-                            // (see RenderPasses.h's own updated doc comment).
+                            // 3.2 - the Sky Background pass, now a REAL,
+                            // separate Render Graph pass in its own right
+                            // (Render Pass campaign, PHASE2,
+                            // task_manager/render-pass-1) - declared via
+                            // AddDrawSkyBackgroundPass() below, AFTER
+                            // AddRenderOpaquePass()'s own real scene geometry
+                            // draws (see RenderPasses.h's own updated doc
+                            // comment).
                             const std::function<void(VkCommandBuffer)> recordGameSkyBackground =
                                 MakeRecordSkyBackgroundCallback(m_atmosphereLutRenderer, m_renderer, gameViewProjection,
                                     atmosphereParameters, gameAtmosphere.frameUniforms, "AtmosphereSkyViewLut_GameView",
@@ -650,9 +653,24 @@ int Application::Run()
 
                             const rg::TextureHandle h =
                                 b.ImportTexture("GameView", gameTarget->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
-                            AddGameViewPass(b, m_game, m_renderer, h, aspect, gpuSkinningBuffers, recordGameSkyBackground,
+                            // Render Pass campaign, PHASE2 - "GameView" the
+                            // PASS no longer exists; three real, separate
+                            // passes now write this SAME imported texture
+                            // handle `h`, back to back: "RenderOpaque" (the
+                            // built-in default mesh-drawing pass, clears
+                            // color+depth), "DrawSkyBackground" (LOADs both
+                            // attachments, only paints pixels Opaque didn't
+                            // already cover), and "RenderTransparent" (a
+                            // currently-always-empty scaffold - see
+                            // RenderPasses.h). `outputs.push_back(h)` only
+                            // needs to happen once - the Render Graph's own
+                            // reachability culling keeps every pass that
+                            // touches a kept root's resource alive.
+                            AddRenderOpaquePass(b, m_game, m_renderer, h, aspect, gpuSkinningBuffers,
                                 frameDebuggerCapture);
                             outputs.push_back(h);
+                            AddDrawSkyBackgroundPass(b, m_renderer, h, recordGameSkyBackground, frameDebuggerCapture);
+                            AddRenderTransparentPass(b, m_game, m_renderer, h, aspect);
 
                             // task_manager/frame-debugger-7 campaign, PHASE3
                             // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md,
@@ -931,12 +949,31 @@ int Application::Run()
 
         // Not #if GTE_ENABLE_PROFILER-gated - see AGENTS.md's "Profiling"
         // section and this same function's own BeginFrame()/EndFrame()
-        // calls, which aren't gated either; only GTE_PROFILE_SCOPE(...)'s
-        // own macro body is compile-time-gated. "GameView"/"SceneView" must
-        // match RenderPasses.cpp's own AddGameViewPass()/AddSceneViewPass()
+        // calls, which aren't gated either. "RenderOpaque"/"DrawSkyBackground"/
+        // "RenderTransparent"/"SceneView" must match RenderPasses.cpp's own
         // pass name literals exactly.
+        //
+        // Render Pass campaign, PHASE2 - Profiling::GpuPass::GameView used to
+        // read a single "GameView" pass's own LastKnownStatsFor() before this
+        // campaign split it into three real, separate passes
+        // ("RenderOpaque"/"DrawSkyBackground"/"RenderTransparent" - see
+        // RenderPasses.h). CombinePassGpuStats() (RenderGraphSnapshot.h) sums
+        // all three passes' own stats into one aggregate before handing it to
+        // SetGpuPassDrawStats()/SetGpuPassTiming(), so the sky draw's own
+        // real vkCmdDraw() call is now correctly counted too - previously
+        // undercounted by exactly one draw call (see
+        // docs/conventions/frame-debugger.md's frame-debugger-8 section).
+        // "RenderTransparent" contributes nothing today (it is a genuine
+        // no-op - LastKnownStatsFor() safely returns a default, all-zero
+        // PassGpuStats{} for a pass name that was never declared this frame),
+        // but is included here so this call site needs no further changes
+        // once a future transparency campaign gives it real stats.
         if (gameTarget != nullptr) {
-            const rg::PassGpuStats gameViewStats = m_renderGraph.LastKnownStatsFor("GameView");
+            const rg::PassGpuStats gameViewStats = rg::CombinePassGpuStats({
+                m_renderGraph.LastKnownStatsFor("RenderOpaque"),
+                m_renderGraph.LastKnownStatsFor("DrawSkyBackground"),
+                m_renderGraph.LastKnownStatsFor("RenderTransparent"),
+            });
             Profiling::FrameProfiler::Instance().SetGpuPassDrawStats(Profiling::GpuPass::GameView,
                 Profiling::GpuSampleStatus::Present, gameViewStats.drawStats.drawCallCount,
                 gameViewStats.drawStats.triangleCount);
