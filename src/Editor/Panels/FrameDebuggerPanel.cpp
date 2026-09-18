@@ -218,7 +218,25 @@ void FrameDebuggerPanel::TriggerCapture()
     // frame's later Reset() would otherwise wipe it.
     m_currentCapture.CaptureFrame(
         *m_frameRenderer, *m_frameRenderGraph, snapshot, *m_frameGameView, m_frameGameViewComposited, m_captureContext);
-    m_selectedEventIndex = -1;
+    SetSelectedEventIndex(-1);
+}
+
+// task_manager/frame-debugger-9 campaign, PHASE2
+// (PHASE2_DRAGGABLE_FRAME_STEP_SLIDER.md, Step 3.1) - the ONE chokepoint for
+// changing m_selectedEventIndex - see this method's own doc comment
+// (FrameDebuggerPanel.h) for the full contract. `newIndex` is always already
+// clamped by the caller.
+void FrameDebuggerPanel::SetSelectedEventIndex(int newIndex)
+{
+    if (newIndex == m_selectedEventIndex) {
+        return; // No real change - nothing to release/refresh.
+    }
+    m_selectedEventIndex = newIndex;
+    // task_manager/frame-debugger-9 campaign, PHASE3 will add here:
+    // ReleaseShaderPropertyTexturePreview(); - "the user went elsewhere"
+    // (PHASE0_MASTER_STRATEGY.md's Locked Design Decision #2) - left as this
+    // phase's own explicit extension point rather than speculatively adding
+    // an empty method call now.
 }
 
 // task_manager/frame-debugger-3 campaign, PHASE7
@@ -359,17 +377,36 @@ void FrameDebuggerPanel::BuildToolbarRow(EditorContext& ctx)
 
 void FrameDebuggerPanel::BuildFrameStepperRow(const FrameDebuggerSnapshot& snapshot)
 {
-    // PHASE4 - now shows REAL numbers (this is the EXISTING "which event,
-    // within the currently-captured frame, is selected" axis). The slider
-    // itself stays a purely cosmetic, disabled control (matching the
-    // reference screenshot's own scrubber look) - clicking a tree row
-    // (RenderEventNode() below) is still the only way to change
-    // m_selectedEventIndex this campaign.
+    // task_manager/frame-debugger-9 campaign, PHASE2
+    // (PHASE2_DRAGGABLE_FRAME_STEP_SLIDER.md) - REAL, interactive control (was
+    // a purely cosmetic, always-disabled slider before this campaign).
+    // ImGui::SliderInt() returns true on EVERY value change while being
+    // actively dragged (not just on mouse release), so this already satisfies
+    // "drag and see the preview update immediately" with no extra plumbing.
     int stepperValue = m_selectedEventIndex < 0 ? 0 : m_selectedEventIndex;
-    ImGui::BeginDisabled();
+    const bool hasAnyEvents = snapshot.totalEventCount > 0;
+
+    ImGui::BeginDisabled(!hasAnyEvents);
     ImGui::SetNextItemWidth(200.0f);
-    ImGui::SliderInt(
-        "##FrameDebuggerStepper", &stepperValue, 0, std::max(0, snapshot.totalEventCount - 1), "");
+    if (ImGui::SliderInt(
+            "##FrameDebuggerStepper", &stepperValue, 0, std::max(0, snapshot.totalEventCount - 1), "")) {
+        SetSelectedEventIndex(ClampSelectedEventIndex(stepperValue, snapshot.totalEventCount));
+    }
+
+    // task_manager/frame-debugger-9 campaign, PHASE2 - Left/Right arrow-key
+    // nudge, one event at a time, while this slider itself has keyboard focus
+    // (ImGui::IsItemFocused() refers to the SliderInt just drawn above - must
+    // be checked immediately after it, before any other widget steals focus
+    // tracking). `repeat = true` mirrors holding the key down to keep
+    // stepping, matching ordinary OS scrollbar/slider key-repeat behavior.
+    if (hasAnyEvents && ImGui::IsItemFocused()) {
+        if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, /*repeat=*/true)) {
+            SetSelectedEventIndex(ClampSelectedEventIndex(stepperValue - 1, snapshot.totalEventCount));
+        } else if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, /*repeat=*/true)) {
+            SetSelectedEventIndex(ClampSelectedEventIndex(stepperValue + 1, snapshot.totalEventCount));
+        }
+    }
+
     ImGui::SameLine();
     const std::string label = FormatFrameStepperLabel(m_selectedEventIndex, snapshot.totalEventCount);
     ImGui::TextUnformatted(label.c_str());
@@ -400,7 +437,7 @@ void FrameDebuggerPanel::RenderEventNode(const FrameDebuggerEventNode& node)
         }
         const bool open = ImGui::TreeNodeEx(node.name.c_str(), flags);
         if (node.isDrawCall && ImGui::IsItemClicked()) {
-            m_selectedEventIndex = node.eventIndex;
+            SetSelectedEventIndex(node.eventIndex);
         }
         if (open) {
             for (const FrameDebuggerEventNode& child : node.children) {
@@ -425,7 +462,7 @@ void FrameDebuggerPanel::RenderEventNode(const FrameDebuggerEventNode& node)
     // FindEventDetailsByIndex()).
     const bool isSelected = (node.eventIndex == m_selectedEventIndex);
     if (ImGui::Selectable(node.name.c_str(), isSelected)) {
-        m_selectedEventIndex = node.eventIndex;
+        SetSelectedEventIndex(node.eventIndex);
     }
 }
 
@@ -909,7 +946,7 @@ void FrameDebuggerPanel::SelectEventFromCommand(int index)
 {
     const FrameDebuggerHistoryEntry* currentEntry = m_currentCapture.CurrentEntry();
     const int totalEventCount = (currentEntry != nullptr) ? currentEntry->snapshot.totalEventCount : 0;
-    m_selectedEventIndex = ClampSelectedEventIndex(index, totalEventCount);
+    SetSelectedEventIndex(ClampSelectedEventIndex(index, totalEventCount));
 }
 
 bool FrameDebuggerPanel::SetChannelFromCommand(const std::string& channel)

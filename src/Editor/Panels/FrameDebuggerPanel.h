@@ -263,6 +263,24 @@ private:
     // class that actually displays it.
     void EnsurePreviewDescriptor();
 
+    // task_manager/frame-debugger-9 campaign, PHASE2
+    // (PHASE2_DRAGGABLE_FRAME_STEP_SLIDER.md, Step 3.1) - the ONE place
+    // m_selectedEventIndex is ever assigned from now on: a tree-row click
+    // (RenderEventNode()), the now-draggable/arrow-key-nudgeable frame-step
+    // slider (BuildFrameStepperRow(), this same phase), TriggerCapture()'s
+    // own existing reset-to- -1 on a fresh capture, and
+    // SelectEventFromCommand()'s HTTP path all route through this one
+    // method - `newIndex` is always ALREADY clamped by the CALLER (via
+    // ClampSelectedEventIndex()); this method itself does not re-derive
+    // totalEventCount, keeping it a trivial, dependency-free setter. Only
+    // actually writes m_selectedEventIndex (and, in the future, releases any
+    // currently-displayed shader-property one-shot texture preview - see
+    // task_manager/frame-debugger-9's PHASE3, which extends this same method
+    // with exactly one extra call) when `newIndex` genuinely DIFFERS from the
+    // current value - a same-value call (e.g. dragging the slider without
+    // actually crossing an integer boundary) is a correct, cheap no-op.
+    void SetSelectedEventIndex(int newIndex);
+
     // PHASE3's own Step 3.2 - performs ONE real capture: builds PHASE2's
     // real FrameDebuggerSnapshot from THIS frame's already-cached
     // renderer/renderGraph/gameView/gpuSkinningPassNames (see Build()
