@@ -496,6 +496,61 @@ full four-phase writeup plus the live, HTTP-driven, screenshot-verified proof
 both the new Sky Background leaf and the corrected per-step replay preview
 work end-to-end.
 
+## What's new (`frame-debugger-9` campaign)
+
+`frame-debugger-9` (`task_manager/frame-debugger-9/PHASE0_MASTER_STRATEGY.md`, four
+phases) is a pure Quality-of-Life follow-up, adding three user-requested improvements
+with no other behavior change:
+
+- **The step-preview image now respects its own real aspect ratio** (PHASE1) - a new,
+  Tier-1-tested pure helper, `ComputeAspectFitImageRect()`
+  (`src/Editor/FrameDebuggerData.h/.cpp`), computes a centered, uniformly-scaled
+  letterbox/pillarbox rect (solid black bars on the short axis, via a
+  `ImGuiCol_ChildBg` push around the whole preview child window) instead of the old
+  `ImGui::Image(descriptor, avail)` full-stretch call. Verified live: a 417x333 Game
+  View texture now renders correctly pillarboxed (solid black bars left/right) inside
+  its wider preview box, for both the whole-frame step preview and the
+  `"Nothing drawn yet at this point in the frame."` placeholder branch.
+- **The frame-step slider is a real, interactive control** (PHASE2) - mouse-draggable
+  (`ImGui::SliderInt()` reporting every in-progress drag value, not just on release)
+  and Left/Right-arrow-key-nudgeable while focused (`ImGui::IsKeyPressed(...,
+  /*repeat=*/true)`), in addition to the pre-existing tree-row click and `GET
+  /frame_debugger/select_event` HTTP route - all four paths now funnel through one
+  new chokepoint, `FrameDebuggerPanel::SetSelectedEventIndex()`, which also releases
+  any currently-shown Feature-2 one-shot preview whenever the selection genuinely
+  changes.
+- **Any render-graph-registered texture a compute-dispatch leaf's own ShaderProperties
+  tab lists (Read/Write Texture, Read/Write Volume Texture rows) can now actually be
+  viewed** (PHASE3) via a small "View" button next to its row - a strictly ON-DEMAND,
+  ONE-SHOT preview (never a continuously live view): a 2D texture is read back via
+  `Renderer::CaptureImagePixels()` (the exact same primitive `GET /get_texture` already
+  uses, including its BGRA/HDR conversion rules) and re-uploaded into a freshly-owned
+  `Texture2D`; a volume texture is ray-marched via the pre-existing
+  `VolumeTexturePreviewRenderer` (unchanged) and uploaded the same way. Displayed until
+  the user dismisses it ("Back to Step Preview"), selects a different event, takes a new
+  Capture, or Disables/Resumes - never cached or kept continuously up to date. A new
+  `FrameDebuggerTextureProperty::kind`/`isRenderGraphResource` pair (structural, not a
+  string match) gates which rows get a "View" button - never a `rg::ResourceKind::Buffer`
+  row, and never a "Material Texture" row (per-entity/mesh asset textures - a different,
+  non-render-graph system) - a clean, documented, deliberately out-of-scope future item,
+  not silently forgotten.
+
+Live verification (this campaign's own PHASE4) confirmed Features 1 and 3 together via
+`GET /get_swapchain` screenshots after driving `/frame_debugger/open`,
+`/frame_debugger/enable?value=true`, and several `/frame_debugger/select_event?index=N`
+calls in sequence - the preview box correctly pillarboxes the real 417x333 Game View
+texture, the frame-step slider/label track the selection exactly (e.g. "3 of 8"/"6 of
+8"), and the tree highlight plus Event Details section stay in sync. Feature 2's own
+"View" button/ShaderProperties tab click-through could not be additionally exercised in
+this HTTP-only automation environment (no mouse/keyboard input-injection tool available
+for this native SDL/Vulkan window) - it rests on the same thorough code-review-level
+verification, plus the extended Tier-1 `FrameDebuggerSnapshotBuilderTest` coverage for
+`kind`/`isRenderGraphResource`, that PHASE3's own completion report already documents.
+
+See `task_manager/frame-debugger-9/PHASE0_MASTER_STRATEGY.md` and each
+`PHASEn_COMPLETION_REPORT.md`/`CAMPAIGN_COMPLETION_REPORT.md` in that same folder for the
+full four-phase writeup and live verification evidence.
+
 ## Known limitation, now fixed (`frame-debugger-4` campaign)
 
 For the entire lifetime of this feature up through `frame-debugger-3`, the
