@@ -110,6 +110,52 @@ pieces. This section keeps only the most recent entries inline — see
 **[docs/CHANGELOG.md](docs/CHANGELOG.md)** for the complete, reverse-
 chronological project history from the very first triangle demo onward.
 
+- **A follow-up campaign, `render-pass-3`, gave the engine a generic, opt-in
+  `RenderPass` DECLARATION layer sitting strictly above the still-untouched
+  `RenderGraphBuilder::AddRenderPass()` chokepoint** (five phases -
+  `task_manager/render-pass-3/PHASE0_MASTER_STRATEGY.md`) - a new
+  `RenderPipeline`/`RenderPassDesc`/`RenderPassProvider`/`RenderPassBlackboard`
+  system (`src/Renderer/RenderGraph/RenderPipeline.h/.cpp`) turns "add a new
+  pass" into "register a provider once at startup" instead of a hand-written
+  free function called by name from `Application.cpp`'s own ever-growing
+  frame-building function, a new opaque-keyed blackboard lets one provider
+  (GPU Skinning) hand its output buffers to a completely unrelated provider
+  (`"RenderOpaque"`) with zero shared/hand-threaded parameter (the campaign's
+  required real proof case), and `Application.cpp`'s previously
+  hand-duplicated Game View/Scene View `if` blocks collapsed into ONE generic
+  per-view loop that both views now share - Scene View's own Opaque/Sky/
+  Transparent draws are therefore real, separate passes today, mirroring Game
+  View's own already-shipped shape, instead of one old fused `"SceneView"`
+  pass. Every production pass this campaign covers (all six Atmosphere
+  passes, Opaque, Sky, Transparent, GPU Skinning, Present, both views) now
+  goes through this new system; the Frame Debugger's own replay passes and
+  Compute Blur Validation's pass deliberately, permanently stay on the OLD,
+  direct `AddRenderPass()` call style forever, since they only feed Frame
+  Debugger tooling that itself never moved off the old `ViewScope`/
+  `RenderPassCategory`/`RenderPassDrawKind` fields. A small, narrow, related
+  fix (PHASE4) replaced the Frame Debugger's literal `"RenderOpaque"`-name
+  pivot search with a structural, name-free `RenderPassEvent`-based lookup -
+  everything else about the Frame Debugger, including its whole event-tree
+  shape, is byte-for-byte unchanged. **This campaign LOUDLY, DELIBERATELY
+  deviates from its own original design brief**
+  (`task_manager/render-pass-3/GENERIC_RENDERPASS_SYSTEM_DESIGN_V2.md`), which
+  called for the render-graph builder's pass-adding entry point to eventually
+  accept only new opaque types with the old `ViewScope`/`RenderPassCategory`/
+  `RenderPassDrawKind` enums deleted once migration completed - by explicit
+  user decision, that deletion never happens: those enums, and
+  `AddRenderPass()`'s own existing overloads, remain permanently in place,
+  with the new `RenderPipeline` layer translating into them internally
+  instead of replacing them - see
+  `task_manager/render-pass-3/CAMPAIGN_COMPLETION_REPORT.md`'s own dedicated
+  section enumerating every one of the six Locked Design Decisions that
+  reversed or amended the original design doc's stated defaults. Verified
+  with a full build, a full `ctest` regression pass (1616 tests, 100%
+  passing, one pre-existing environment-gated skip - up from `render-pass-2`'s
+  own 1589 baseline), and a live, HTTP-driven smoke test confirming the
+  Game-View Frame Debugger tree shape is completely unchanged, `"RenderOpaque"`
+  still reports correct per-entity children and pipeline-state data, and the
+  Scene View panel (via `SceneViewComposited`) now genuinely renders through
+  its own real, separate Opaque/Sky/Transparent passes.
 - **A follow-up campaign, `render-pass-2`, fixed a confirmed bug where the Frame
   Debugger's `"DrawSkyBackground"` row rendered flat with no expand arrow,
   looking like a stray, orphaned row belonging to no render pass** (four

@@ -170,9 +170,55 @@ This tag is what lets the Frame Debugger's own generic tree-building logic
 (see "Frame Debugger" above) label a Graphics-kind pass's owned child event
 row correctly, purely structurally, never via a pass-name string match.
 
-Full history: `task_manager/render-pass-1/PHASE0_MASTER_STRATEGY.md` and
-`task_manager/render-pass-2/PHASE0_MASTER_STRATEGY.md`, and each
-`PHASEn_COMPLETION_REPORT.md` in those same folders.
+A follow-up campaign, `render-pass-3` (five phases,
+`task_manager/render-pass-3/PHASE0_MASTER_STRATEGY.md`), added a NEW,
+GENERIC declaration layer, `RenderPipeline`/`RenderPassDesc`/
+`RenderPassProvider`/`RenderPassBlackboard`
+(`src/Renderer/RenderGraph/RenderPipeline.h/.cpp`), that sits STRICTLY ABOVE
+the `AddRenderPass()` chokepoint above and NEVER replaces it - every feature
+now registers a `RenderPassProvider` once at startup (`Register()`) instead
+of a hand-written free function called by name from `Application.cpp`, a
+`RenderPassBlackboard` gives one provider (GPU Skinning) a generic,
+opaque-keyed way to hand a value (its output buffers) to another, otherwise
+unrelated provider (`"RenderOpaque"`) with zero shared/hand-threaded
+parameter, and `Application.cpp`'s previously hand-duplicated Game View/Scene
+View `if` blocks collapsed into ONE generic per-view loop
+(`RenderPassViewData`, `ProviderScope::PerActiveView`) that both views now
+share - Scene View's own Opaque/Sky/Transparent draws are therefore real,
+separate passes today (tagged `ViewScope::SceneView`), mirroring Game View's
+own already-shipped shape, instead of the old single fused `"SceneView"`
+pass. **Every production pass this campaign covers (Atmosphere x6, Opaque,
+Sky, Transparent, GPU Skinning, Present, both views) is declared through this
+new provider system; `AddFrameDebuggerReplayPasses()`'s replay steps and
+`ComputeBlurValidation.cpp`'s own pass are DELIBERATELY, PERMANENTLY left on
+the OLD, direct `AddRenderPass()` call style** - they exist purely to feed
+Frame Debugger tooling that itself never moved off `ViewScope`/
+`RenderPassCategory`/`RenderPassDrawKind`, so migrating them would add
+dual-maintenance cost for zero benefit. **LOUD, DELIBERATE DEVIATION from
+this feature's own original design brief
+(`task_manager/render-pass-3/GENERIC_RENDERPASS_SYSTEM_DESIGN_V2.md`)**: that
+document's own Section 0/12 describe the render-graph BUILDER's pass-adding
+entry point itself eventually accepting only the new opaque types, with the
+OLD `ViewScope`/`RenderPassCategory`/`RenderPassDrawKind` enums deleted once
+migration completes - **this did NOT happen, by explicit user decision, and
+never will under this campaign's own scope**: `RenderGraphBuilder::AddRenderPass()`'s
+two overloads, and `ViewScope`/`RenderPassCategory`/`RenderPassDrawKind`
+themselves, remain permanently unchanged and permanently in place: the new
+`RenderPipeline` layer is the ONLY thing that ever sees the new opaque
+`RenderPassId`/`RenderPassTagMask`/`RenderViewId`/`RenderPassEvent` types, and
+it internally TRANSLATES them into the old, unchanged enum values before
+calling the exact same, byte-for-byte-unchanged `AddRenderPass()` chokepoint
+- see `task_manager/render-pass-3/CAMPAIGN_COMPLETION_REPORT.md`'s own
+dedicated "Deviations from the original design doc" section for the full,
+itemized list (six Locked Design Decisions in total) so a future reader of
+the original design doc is never misled into thinking it shipped exactly as
+originally written.
+
+Full history: `task_manager/render-pass-1/PHASE0_MASTER_STRATEGY.md`,
+`task_manager/render-pass-2/PHASE0_MASTER_STRATEGY.md`, and
+`task_manager/render-pass-3/PHASE0_MASTER_STRATEGY.md`, and each
+`PHASEn_COMPLETION_REPORT.md`/`CAMPAIGN_COMPLETION_REPORT.md` in those same
+folders.
 
 ## Job System
 
