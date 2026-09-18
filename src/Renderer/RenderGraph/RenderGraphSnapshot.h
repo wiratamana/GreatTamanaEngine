@@ -124,6 +124,14 @@ struct RenderGraphPassSnapshot {
     // belonged to).
     ViewScope viewScope = ViewScope::Shared;
 
+    // render-pass-3 campaign (task_manager/render-pass-3), PHASE1
+    // (PHASE1_CORE_VOCABULARY_AND_BLACKBOARD.md) - copied straight through
+    // for BOTH a surviving AND a culled pass, exactly like `kind`/`category`/
+    // `drawKind`/`viewScope` above (a culled pass must still truthfully
+    // report where it would have sorted). Nothing reads this yet - PHASE4
+    // is the first real consumer (see RenderPipeline.h's own header comment).
+    RenderPassEvent renderPassEvent = RenderPassEvent::Opaques;
+
     // frame-debugger-5 campaign, PHASE1 - PARALLEL to readNames/writeNames
     // above (same index, same length) - which ResourceKind (RenderGraphTypes.h)
     // each entry actually is, so a consumer never has to guess/probe

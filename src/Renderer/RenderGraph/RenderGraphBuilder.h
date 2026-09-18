@@ -432,7 +432,6 @@ public:
     // removed or deprecated - they remain the low-level primitives this method
     // (and Tier-1 tests) are built on, and existing test-only call sites are
     // free to keep using them directly.
-    // Frame Debugger Pass-Ownership campaign (task_manager/render-pass-2),
     // PHASE1 - new, TRAILING, DEFAULTED `drawKind` parameter (see
     // RenderPassDrawKind's own doc comment, RenderGraphTypes.h) - purely
     // descriptive metadata for the Editor Frame Debugger's child-event-
@@ -443,9 +442,23 @@ public:
     // EVERY pre-existing call site of this overload (which only ever
     // supplies `name`/`kind`/`viewScope`/`category`/`setup`/`execute`)
     // compiles completely unmodified.
+    // render-pass-3 campaign (task_manager/render-pass-3), PHASE1
+    // (PHASE1_CORE_VOCABULARY_AND_BLACKBOARD.md) - a SECOND new, TRAILING,
+    // DEFAULTED parameter, `renderPassEvent` (see RenderPassEvent's own doc
+    // comment, RenderGraphTypes.h), added the exact same way `drawKind` was
+    // by the render-pass-2 campaign - mirroring that identical precedent
+    // one more time, so every pre-existing call site of EITHER overload
+    // (which never mentions this new parameter at all) compiles completely
+    // unmodified. This is the ONE new thing RenderGraphBuilder.h's public
+    // surface needs for the whole render-pass-3 campaign (PHASE0_MASTER_
+    // STRATEGY.md's Locked Design Decision 5) - the new RenderPipeline
+    // declaration layer (src/Renderer/RenderGraph/RenderPipeline.h)
+    // translates its own opaque RenderPassDesc::order into this parameter
+    // before calling into this exact, otherwise-unchanged chokepoint.
     template <typename SetupFn, typename ExecuteFn>
     void AddRenderPass(const char* name, PassKind kind, ViewScope viewScope, RenderPassCategory category,
-        SetupFn&& setup, ExecuteFn&& execute, RenderPassDrawKind drawKind = RenderPassDrawKind::DrawMesh)
+        SetupFn&& setup, ExecuteFn&& execute, RenderPassDrawKind drawKind = RenderPassDrawKind::DrawMesh,
+        RenderPassEvent renderPassEvent = RenderPassEvent::Opaques)
     {
         if (kind == PassKind::Compute) {
             AddComputePass(name, viewScope, std::forward<SetupFn>(setup), std::forward<ExecuteFn>(execute));
@@ -454,6 +467,7 @@ public:
         }
         m_passes.back().category = category;
         m_passes.back().drawKind = drawKind; // Frame Debugger Pass-Ownership campaign (render-pass-2), PHASE1
+        m_passes.back().renderPassEvent = renderPassEvent; // render-pass-3 campaign, PHASE1
     }
 
     // Convenience overload defaulting `viewScope` to Shared and `category` to
@@ -461,15 +475,18 @@ public:
     // neither. Mirrors AddPass()'s own pre-existing 3-arg/4-arg overload pair
     // exactly. Also forwards the new trailing, defaulted `drawKind` parameter
     // (Frame Debugger Pass-Ownership campaign, task_manager/render-pass-2,
-    // PHASE1) - same "trailing defaulted plain-type parameter never touches
-    // template deduction" reasoning as the overload above, so every
-    // pre-existing 4-argument call site compiles completely unmodified.
+    // PHASE1) AND the new trailing, defaulted `renderPassEvent` parameter
+    // (render-pass-3 campaign, PHASE1) - same "trailing defaulted plain-type
+    // parameter never touches template deduction" reasoning as the overload
+    // above, so every pre-existing 4-argument call site compiles completely
+    // unmodified.
     template <typename SetupFn, typename ExecuteFn>
     void AddRenderPass(const char* name, PassKind kind, SetupFn&& setup, ExecuteFn&& execute,
-        RenderPassDrawKind drawKind = RenderPassDrawKind::DrawMesh)
+        RenderPassDrawKind drawKind = RenderPassDrawKind::DrawMesh,
+        RenderPassEvent renderPassEvent = RenderPassEvent::Opaques)
     {
         AddRenderPass(name, kind, ViewScope::Shared, RenderPassCategory::General,
-            std::forward<SetupFn>(setup), std::forward<ExecuteFn>(execute), drawKind);
+            std::forward<SetupFn>(setup), std::forward<ExecuteFn>(execute), drawKind, renderPassEvent);
     }
 
     // Consumes this builder, handing its whole in-progress description

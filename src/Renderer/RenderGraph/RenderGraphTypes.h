@@ -401,6 +401,31 @@ enum class RenderPassDrawKind : std::uint8_t {
 
 const char* ToString(RenderPassDrawKind drawKind) noexcept;
 
+// render-pass-3 campaign (task_manager/render-pass-3), PHASE1
+// (PHASE1_CORE_VOCABULARY_AND_BLACKBOARD.md) - a purely descriptive SORT
+// HINT for the new RenderPipeline declaration layer (src/Renderer/
+// RenderGraph/RenderPipeline.h) sitting strictly ABOVE this builder - NOT a
+// dependency mechanism (real ordering is still fully enforced by
+// RenderGraphCompiler's own RAW/WAW dependency analysis, which never reads
+// this field - see GENERIC_RENDERPASS_SYSTEM_DESIGN_V2.md, Section 6).
+// Lives here (rather than in RenderPipeline.h, where every other PHASE1
+// type lives) because it is ALSO threaded onto PassRecord/
+// RenderGraphPassSnapshot below, mirroring exactly why PassKind/
+// RenderPassCategory/RenderPassDrawKind already live in this same file.
+// Deliberately an exhaustive-switch-friendly small enum, mirroring every
+// sibling enum in this file's own "no default: case, ever" convention.
+enum class RenderPassEvent : std::uint32_t {
+    BeforeEverything = 0,
+    PreOpaques = 1000,
+    Opaques = 2000,
+    AfterOpaques = 2500,
+    Transparents = 3000,
+    AfterTransparents = 4000,
+    AfterEverything = 9000,
+};
+
+const char* ToString(RenderPassEvent renderPassEvent) noexcept;
+
 // A single declared read/write on a texture, a buffer, OR a volume
 // texture. Phase 1 shipped this as a texture-only shape; Phase 2 of the
 // Render Graph campaign grew it into a texture/buffer tagged-union shape
@@ -567,6 +592,18 @@ struct PassRecord {
     // RenderGraphBarrierPlanner.cpp. Appended at the END of the struct
     // (never inserted in the middle) - see this file's own header comment.
     RenderPassDrawKind drawKind = RenderPassDrawKind::DrawMesh;
+
+    // render-pass-3 campaign, PHASE1 - a purely descriptive SORT HINT (see
+    // RenderPassEvent's own doc comment above) - read by NOTHING in
+    // RenderGraph.cpp/RenderGraphCompiler.cpp/RenderGraphBarrierPlanner.cpp,
+    // exactly like every other purely-descriptive PassRecord field before
+    // it. Defaults to Opaques so every pre-existing AddRenderPass() call
+    // site (which never mentions this at all) is completely unaffected -
+    // the default is irrelevant for any pass the Frame Debugger already
+    // excludes via category == Debug (PHASE4 never reads this field for
+    // those). Appended at the END of the struct (never inserted in the
+    // middle) - see this file's own header comment.
+    RenderPassEvent renderPassEvent = RenderPassEvent::Opaques;
 };
 
 } // namespace gte::rg

@@ -108,4 +108,28 @@ const char* ToString(RenderPassDrawKind drawKind) noexcept
     return "Unknown";
 }
 
+// render-pass-3 campaign (task_manager/render-pass-3), PHASE1 - see
+// RenderGraphTypes.h's own comment on RenderPassEvent for why this exists.
+const char* ToString(RenderPassEvent renderPassEvent) noexcept
+{
+    // Deliberately NO `default:` case - see this file's own header comment.
+    switch (renderPassEvent) {
+    case RenderPassEvent::BeforeEverything:
+        return "BeforeEverything";
+    case RenderPassEvent::PreOpaques:
+        return "PreOpaques";
+    case RenderPassEvent::Opaques:
+        return "Opaques";
+    case RenderPassEvent::AfterOpaques:
+        return "AfterOpaques";
+    case RenderPassEvent::Transparents:
+        return "Transparents";
+    case RenderPassEvent::AfterTransparents:
+        return "AfterTransparents";
+    case RenderPassEvent::AfterEverything:
+        return "AfterEverything";
+    }
+    return "Unknown";
+}
+
 } // namespace gte::rg

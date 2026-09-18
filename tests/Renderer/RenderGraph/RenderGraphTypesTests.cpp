@@ -484,5 +484,46 @@ TEST(RenderGraphRenderPassDrawKindTest, ToStringProducesDistinctNamesForDistinct
     EXPECT_STREQ(ToString(RenderPassDrawKind::Blit), "Blit");
 }
 
+// --- RenderPassEvent (render-pass-3 campaign, PHASE1 -
+// PHASE1_CORE_VOCABULARY_AND_BLACKBOARD.md) ---------------------------------
+
+TEST(RenderGraphRenderPassEventTest, ToStringCoversEveryEnumeratorNonNullNonEmpty)
+{
+    const RenderPassEvent values[] = {
+        RenderPassEvent::BeforeEverything,
+        RenderPassEvent::PreOpaques,
+        RenderPassEvent::Opaques,
+        RenderPassEvent::AfterOpaques,
+        RenderPassEvent::Transparents,
+        RenderPassEvent::AfterTransparents,
+        RenderPassEvent::AfterEverything,
+    };
+
+    for (const RenderPassEvent value : values) {
+        const char* name = ToString(value);
+        ASSERT_NE(name, nullptr);
+        EXPECT_GT(std::string_view(name).size(), 0u);
+    }
+}
+
+TEST(RenderGraphRenderPassEventTest, ToStringProducesDistinctNamesForDistinctEnumerators)
+{
+    EXPECT_STREQ(ToString(RenderPassEvent::BeforeEverything), "BeforeEverything");
+    EXPECT_STREQ(ToString(RenderPassEvent::PreOpaques), "PreOpaques");
+    EXPECT_STREQ(ToString(RenderPassEvent::Opaques), "Opaques");
+    EXPECT_STREQ(ToString(RenderPassEvent::AfterOpaques), "AfterOpaques");
+    EXPECT_STREQ(ToString(RenderPassEvent::Transparents), "Transparents");
+    EXPECT_STREQ(ToString(RenderPassEvent::AfterTransparents), "AfterTransparents");
+    EXPECT_STREQ(ToString(RenderPassEvent::AfterEverything), "AfterEverything");
+}
+
+// render-pass-3 campaign, PHASE1 - PassRecord::renderPassEvent defaults to
+// Opaques, mirroring category's own default-value test above.
+TEST(RenderGraphPassRecordTest, DefaultConstructedPassRecordHasOpaquesRenderPassEvent)
+{
+    const PassRecord record;
+    EXPECT_EQ(record.renderPassEvent, RenderPassEvent::Opaques);
+}
+
 } // namespace
 } // namespace gte::rg

@@ -375,6 +375,40 @@
 #                                            RenderGraph.h/.cpp themselves
 #                                            remain Tier 2, see the note
 #                                            below.
+#   - Renderer/RenderGraph/RenderPipelineTests.cpp - render-pass-3 campaign's
+#                                            PHASE1 (task_manager/
+#                                            render-pass-3/
+#                                            PHASE1_CORE_VOCABULARY_AND_BLACKBOARD.md)
+#                                            - the new, generic pass-
+#                                            declaration layer (see
+#                                            src/Renderer/RenderGraph/
+#                                            RenderPipeline.h) - RenderPassId/
+#                                            RenderViewId content-based (never
+#                                            pointer-based) hashing,
+#                                            RenderPassBlackboard's Publish()/
+#                                            Fetch() round-trip (including the
+#                                            never-published and wrong-type
+#                                            cases, both explicitly confirmed
+#                                            rather than assumed) and
+#                                            BeginFrame()'s "reused, not
+#                                            reallocated" capacity contract,
+#                                            and RenderPipeline::DeclareInto()'s
+#                                            Once-vs-PerActiveView provider
+#                                            scoping, ascending-order sort
+#                                            (regardless of registration order
+#                                            or provider scope), and the one
+#                                            regression test directly
+#                                            protecting PHASE0's Locked Design
+#                                            Decision 5 (a pass declared
+#                                            through this NEW layer still
+#                                            stamps the OLD legacyCategory/
+#                                            drawKind fields unchanged onto
+#                                            the produced PassRecord). Uses a
+#                                            real RenderGraphBuilder with zero
+#                                            Vulkan device involved, mirroring
+#                                            RenderGraphBuilderTests.cpp/
+#                                            RenderPassTests.cpp's own
+#                                            precedent exactly.
 #   - Game/RenderSystemTests.cpp             - RenderSystem::CollectRenderables()
 #                                            (the pure ECS -> DrawCommand step)
 #                                            and ResolveActiveCameraViewProjection()
@@ -1949,6 +1983,7 @@ set(GTE_TEST_SOURCES
     Renderer/RenderGraph/RenderGraphSnapshotTests.cpp
     Renderer/RenderGraph/RenderGraphDebugTextureRegistryTests.cpp
     Renderer/RenderGraph/RenderGraphDebugVolumeTextureRegistryTests.cpp
+    Renderer/RenderGraph/RenderPipelineTests.cpp
     Math/Vec2Tests.cpp
     Math/Vec3Tests.cpp
     Math/Mat4Tests.cpp

@@ -503,6 +503,8 @@ add_library(gte_core STATIC
     src/Renderer/RenderGraph/RenderGraphDebugTextureRegistry.cpp
     src/Renderer/RenderGraph/RenderGraphDebugVolumeTextureRegistry.h
     src/Renderer/RenderGraph/RenderGraphDebugVolumeTextureRegistry.cpp
+    src/Renderer/RenderGraph/RenderPipeline.h
+    src/Renderer/RenderGraph/RenderPipeline.cpp
     src/Game/Instantiation/EntityInstantiator.cpp
     src/Game/Instantiation/EntityInstantiator.h
     src/Game/Instantiation/MeshVertexPacking.cpp
