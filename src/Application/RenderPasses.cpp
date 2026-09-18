@@ -347,35 +347,9 @@ std::vector<rg::TextureHandle> AddFrameDebuggerReplayPasses(rg::RenderGraphBuild
     return destHandles;
 }
 
-void AddSceneViewPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer, rg::TextureHandle sceneViewTarget,
-    float aspectWidthOverHeight, const Mat4& sceneViewProjection,
-    const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers,
-    const std::function<void(VkCommandBuffer, const Mat4&)>& recordSceneOverlay,
-    const std::function<void(VkCommandBuffer)>& recordSkyBackground)
-{
-    builder.AddPass(
-        "SceneView", rg::ViewScope::SceneView,
-        [sceneViewTarget, gpuSkinningOutputBuffers](rg::RenderGraphBuilder::PassBuilder& pass) {
-            pass.WriteColorAttachment(sceneViewTarget, kGameClearColor);
-            pass.WriteDepthStencilAttachment(sceneViewTarget, kGameClearDepth);
-            DeclareGpuSkinningReads(pass, gpuSkinningOutputBuffers);
-        },
-        [&game, &renderer, aspectWidthOverHeight, sceneViewProjection, recordSceneOverlay,
-            recordSkyBackground](rg::PassContext& ctx) {
-            renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-            game.Render(renderer, aspectWidthOverHeight, &sceneViewProjection);
-            renderer.EndGraphPassRecording();
-            // Sky background BEFORE the grid overlay - see this file's own
-            // header comment (AddSceneViewPass()'s doc comment) for the
-            // full ordering reasoning.
-            if (recordSkyBackground) {
-                recordSkyBackground(ctx.cmd);
-            }
-            if (recordSceneOverlay) {
-                recordSceneOverlay(ctx.cmd, sceneViewProjection);
-            }
-        });
-}
+// render-pass-3 campaign, PHASE3 - AddSceneViewPass() REMOVED (see
+// RenderPasses.h's own updated doc comment at this same location for the
+// full "why").
 
 void AddPresentPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer, rg::TextureHandle swapchainImage,
     std::optional<float> directGameRenderAspect, const std::function<void(VkCommandBuffer)>& recordImGui,

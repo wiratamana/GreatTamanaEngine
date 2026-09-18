@@ -271,34 +271,22 @@ std::vector<rg::TextureHandle> AddFrameDebuggerReplayPasses(rg::RenderGraphBuild
     const std::function<void(VkCommandBuffer)>& recordSkyBackground, RenderTexture& gameTarget,
     FrameDebuggerCaptureContext& capture);
 
-// The Scene-view equivalent of AddRenderOpaquePass() above - `execute` calls
-// Game::Render() with `sceneViewProjection` as its viewProjectionOverride
-// (the Editor's own independently-orbitable EditorCamera - see
-// IEditorLayer::SceneViewProjection()), bypassing ECS camera resolution for
-// this view only, exactly as Application::Run() already did before this
-// migration. `gpuSkinningOutputBuffers` - see AddRenderOpaquePass() above.
-// `recordSkyBackground` - see AddRenderOpaquePass() above. Scene View
-// deliberately keeps its sky background hand-fused inline here (out of
-// scope for this campaign's Opaque/Sky split - see
-// PHASE2_RENDER_OPAQUE_SKY_SPLIT_AND_TRANSPARENT_STUB.md's own Step 3.3),
-// invoked BEFORE
-// `recordSceneOverlay` below (the atmosphere sky background must be drawn
-// before the Editor's own ground-grid overlay, so the grid's own alpha
-// blend correctly composites over the sky wherever it intersects the
-// ground plane - see this phase's own completion report for the full
-// ordering reasoning). `recordSceneOverlay`, if set, is invoked once,
-// immediately after that (still inside this pass's open dynamic-rendering
-// bracket) - passed this pass's own `cmd` and `sceneViewProjection` again,
-// so a caller (Application::Run(), via IEditorLayer::RenderSceneGrid()) can
-// layer a Scene-view-only visual overlay (the Editor's infinite ground grid
-// - task_manager/editor-enchancements-1/PHASE0_MASTER_STRATEGY.md) on top
-// of the real scene geometry, correctly depth-tested against it. Empty (the
-// default) draws nothing extra - the exact pre-existing behavior.
-void AddSceneViewPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer, rg::TextureHandle sceneViewTarget,
-    float aspectWidthOverHeight, const Mat4& sceneViewProjection,
-    const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers = {},
-    const std::function<void(VkCommandBuffer, const Mat4&)>& recordSceneOverlay = {},
-    const std::function<void(VkCommandBuffer)>& recordSkyBackground = {});
+// render-pass-3 campaign, PHASE3
+// (PHASE3_FULL_PRODUCTION_PASS_MIGRATION_AND_VIEW_UNIFICATION.md, Step 3.4) -
+// AddSceneViewPass() (the old, single, FUSED Scene-View pass - opaque draw +
+// sky background + the Editor's own ground-grid overlay, all inside one
+// builder.AddPass("SceneView", ...) call) is REMOVED. Scene View now goes
+// through the exact SAME "RenderOpaque"/"DrawSkyBackground"/
+// "RenderTransparent" RenderPipeline providers Game View already uses (see
+// Application.cpp's RegisterOffscreenRenderPipelineProviders()) - each one
+// now genuinely declares a SEPARATE PassRecord per view, tagged
+// ViewScope::SceneView for Scene's own copy. The one thing Scene View needs
+// that Game View does not - the ground-grid overlay - is folded into the
+// "RenderTransparent" provider's own body, gated on
+// RenderPassViewData::recordSceneOverlay being set (see
+// src/Application/RenderPassViewData.h). Confirmed zero remaining callers
+// via search_in_dir before deletion - see this phase's own completion
+// report.
 
 // Declares the "Present" pass: writes swapchainImage's color attachment
 // (always cleared, matching FrameRecorder::RecordFrame()'s own old

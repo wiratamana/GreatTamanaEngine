@@ -1,6 +1,8 @@
 #pragma once
 
+#include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "../Core/EngineContext.h"
@@ -17,6 +19,12 @@
 // "GpuSkinning" and "RenderOpaque" - see this class's own member comment
 // below and Application.cpp's RegisterOffscreenRenderPipelineProviders().
 #include "../Renderer/RenderGraph/RenderPipeline.h"
+// render-pass-3 campaign, PHASE3 (PHASE3_FULL_PRODUCTION_PASS_MIGRATION_AND_VIEW_UNIFICATION.md)
+// - the Application-layer "what is a view" data (RenderPassViewData) plus
+// TranslateLegacyViewScope() - see that header's own doc comment for why
+// this stays a separate, Application-layer header rather than living inside
+// RenderPipeline.h itself.
+#include "RenderPassViewData.h"
 #include "../Renderer/VolumeTexturePreviewRenderer.h"
 #include "../Window/Window.h"
 #include "AssetImportCommandBridge.h"
@@ -51,11 +59,24 @@ public:
     int Run();
 
 private:
-    // render-pass-3 campaign, PHASE2 (PHASE2_GPU_SKINNING_OPAQUE_BLACKBOARD_PROOF.md)
-    // - registers this phase's first two real providers ("GpuSkinning"/
-    // "RenderOpaque") onto m_offscreenRenderPipeline (below). Called once,
-    // from the constructor body - see Application.cpp.
+    // render-pass-3 campaign, PHASE2/PHASE3 - registers every remaining
+    // OFFSCREEN-regime provider (Atmosphere ×3 provider wrappers, GPU
+    // Skinning, Opaque, Sky Background, Transparent, Atmosphere Composite)
+    // onto m_offscreenRenderPipeline (below). Called once, from the
+    // constructor body - see Application.cpp.
     void RegisterOffscreenRenderPipelineProviders();
+
+    // render-pass-3 campaign, PHASE3 (Step 3.5) - registers the ONE
+    // "Present" provider onto m_presentRenderPipeline (below). Called once,
+    // from the constructor body - see Application.cpp.
+    void RegisterPresentRenderPipelineProvider();
+
+    // render-pass-3 campaign, PHASE3 (Step 3.1) - looks up THIS frame's own
+    // RenderPassViewData for `view` out of m_currentViewDataThisFrame
+    // (below) - returns nullptr if `view` has no matching entry this frame
+    // (should never happen for a view actually present in
+    // frame.activeViews, but a provider must never assume without checking).
+    const RenderPassViewData* FindViewData(rg::RenderViewId view) const noexcept;
 
     // RAII guard for SDL_Init()/SDL_Quit(). Declared FIRST so it is
     // constructed before, and destroyed after, every other SDL-owning member
@@ -80,19 +101,22 @@ private:
     // m_editorLayer/m_game below might indirectly need it.
     rg::RenderGraph m_renderGraph;
 
-    // render-pass-3 campaign, PHASE2 (PHASE2_GPU_SKINNING_OPAQUE_BLACKBOARD_PROOF.md)
-    // - the new, generic pass-DECLARATION layer sitting strictly ABOVE
-    // m_renderGraph/RenderGraphBuilder (PHASE0_MASTER_STRATEGY.md's Locked
-    // Design Decision 6: "Two separate RenderPipeline instances, not one" -
-    // this is the OFFSCREEN one, covering every pass declared inside the
-    // SYNCHRONOUS offscreen Execute() call (Game View + Scene View) - a
-    // future PHASE3 m_presentRenderPipeline covers "Present" alone, in the
-    // PIPELINED swapchain Execute() call, which is a SEPARATE graph this
-    // phase does not touch). Registered with its first two real providers
-    // ("GpuSkinning"/"RenderOpaque") by RegisterOffscreenRenderPipelineProviders()
-    // (called once, from the constructor body) - see Run()'s own offscreen
-    // build lambda for where DeclareInto() is actually invoked each frame.
+    // render-pass-3 campaign, PHASE2/PHASE3 - the new, generic pass-
+    // DECLARATION layer sitting strictly ABOVE m_renderGraph/RenderGraphBuilder
+    // (PHASE0_MASTER_STRATEGY.md's Locked Design Decision 6: "Two separate
+    // RenderPipeline instances, not one"). m_offscreenRenderPipeline covers
+    // every pass declared inside the SYNCHRONOUS offscreen Execute() call
+    // (GPU Skinning, Atmosphere ×3 wrappers, Opaque, Sky Background,
+    // Transparent - Game View AND Scene View alike, via ONE generic
+    // per-view loop, PHASE3); m_presentRenderPipeline covers "Present"
+    // alone, in the SEPARATE, PIPELINED swapchain Execute() call (PHASE3,
+    // Step 3.5) - the two are NEVER shared, and never see each other's own
+    // blackboard/frame context. Both have their own
+    // SetLegacyViewScopeTranslator(&TranslateLegacyViewScope) wired once, at
+    // construction time (see RegisterOffscreenRenderPipelineProviders()/
+    // RegisterPresentRenderPipelineProvider()).
     rg::RenderPipeline m_offscreenRenderPipeline;
+    rg::RenderPipeline m_presentRenderPipeline;
 
     // render-pass-3 campaign, PHASE2 - populated fresh, every frame, by
     // Run() itself, IMMEDIATELY BEFORE calling
@@ -107,16 +131,42 @@ private:
     std::vector<AnimationSystem::GpuSkinningDispatchRequest> m_gpuSkinningRequestsThisFrame;
     std::vector<rg::BufferHandle> m_gpuSkinningHandlesThisFrame;
 
-    // render-pass-3 campaign, PHASE2 - same "populated fresh every frame by
-    // Run(), read only by a provider" shape as the two members immediately
-    // above, this time for the "RenderOpaque" provider: the Game View's own
-    // imported texture handle/aspect ratio/armed Frame Debugger capture
-    // pointer, all only known inside Run()'s own `if (gameTarget !=
-    // nullptr)` block - see that provider's own registration body
-    // (Application.cpp) for how these are consumed.
-    rg::TextureHandle m_currentGameViewTargetForOffscreenPipeline;
-    float m_currentGameViewAspectForOffscreenPipeline = 1.0f;
+    // render-pass-3 campaign, PHASE3 (Step 3.1) - THIS frame's per-view data
+    // (Game View and/or Scene View, whichever are actually visible this
+    // frame) - populated fresh, every frame, by Run() itself, immediately
+    // before calling m_offscreenRenderPipeline.DeclareInto(). Read by
+    // FindViewData() above, which every per-view provider
+    // ("RenderOpaque"/"DrawSkyBackground"/"RenderTransparent"/
+    // "AtmosphereViewLut"/"AtmosphereComposite") calls to resolve
+    // `frame.currentView`'s own color target/aspect/view-projection/eye
+    // position/scene-overlay callback - see RenderPassViewData.h. REPLACES
+    // PHASE2's own single-view-only
+    // m_currentGameViewTargetForOffscreenPipeline/
+    // m_currentGameViewAspectForOffscreenPipeline scalar members (removed
+    // this phase - PHASE2's own completion report anticipated exactly this
+    // generalization).
+    std::vector<RenderPassViewData> m_currentViewDataThisFrame;
+
+    // render-pass-3 campaign, PHASE2 - Game-View-only (see
+    // RenderPasses.h's own AddRenderOpaquePass() doc comment on why a real,
+    // non-null capture pointer is NEVER handed to Scene View/Present). Still
+    // a scalar Application member (not part of RenderPassViewData) since
+    // only ONE view can ever carry a real, non-null value here per frame.
     FrameDebuggerCaptureContext* m_currentFrameDebuggerCaptureForOffscreenPipeline = nullptr;
+
+    // render-pass-3 campaign, PHASE3 (Step 3.5) - populated fresh, every
+    // frame, by Run() itself, immediately before calling
+    // m_presentRenderPipeline.DeclareInto() from inside the SEPARATE,
+    // PIPELINED swapchain Execute() call's own `build` lambda - read ONLY by
+    // the "Present" provider (registered in the constructor, capturing
+    // `this`). Mirrors the exact same "populate right before DeclareInto(),
+    // read inside the provider" shape already established above for the
+    // offscreen regime.
+    bool m_needsDirectGameRenderThisFrame = false;
+    std::optional<float> m_directGameRenderAspectThisFrame;
+    rg::TextureHandle m_swapchainImageThisFrame;
+    std::function<void(VkCommandBuffer)> m_recordImGuiThisFrame;
+
 
     // Atmosphere Scattering + Aerial Perspective campaign, Phase 3
     // (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE3_TRANSMITTANCE_LUT_v1.md)

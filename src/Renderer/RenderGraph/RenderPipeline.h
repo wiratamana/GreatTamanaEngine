@@ -318,6 +318,28 @@ struct RenderPassFrameContext {
     RenderViewId currentView = RenderViewId::Shared(); // Stamped by RenderPipeline before each PerActiveView provider call.
     RenderPassBlackboard& blackboard;
 
+    // render-pass-3 campaign, PHASE3 (PHASE3_FULL_PRODUCTION_PASS_MIGRATION_AND_VIEW_UNIFICATION.md,
+    // Step 3.3b) - a real, load-bearing gap PHASE1 left open: some legacy
+    // Application-layer free functions this phase wraps (the Atmosphere
+    // pass sequence, AddGpuSkinningPasses()/AddPresentPass() for the
+    // "Present" provider) themselves call `RenderGraphBuilder::AddRenderPass()`/
+    // `ImportTexture()`/`KeepVolumeTextureOutput()` directly, sometimes more
+    // than once, with a genuine data dependency between successive calls -
+    // none of that can be deferred into a single RenderPassDesc.setup/
+    // .execute pair the way an ordinary provider works. Rather than growing
+    // RenderPassProvider's own signature (which would force EVERY provider,
+    // including the simple ones, to thread a builder through), this ONE
+    // additive field lets a provider that genuinely needs it reach the SAME
+    // real RenderGraphBuilder& this frame's graph is being built against -
+    // set once by Application::Run(), immediately before calling
+    // DeclareInto(), to the exact same `b`/builder parameter its own build
+    // lambda already received. A provider using this field therefore
+    // declares its own real pass(es) IMMEDIATELY, during DeclareInto()'s own
+    // provider-invocation loop - see that phase's own completion report for
+    // the full "why", including the resulting declaration-order quirk this
+    // creates versus the deferred RenderPassDesc half of the mechanism.
+    RenderGraphBuilder& builder;
+
     // render-pass-3 campaign, PHASE1 - a real, concrete resolution of a gap
     // GENERIC_RENDERPASS_SYSTEM_DESIGN_V2.md leaves as a "Phase C
     // implementation detail": SOME final TextureHandle/VolumeTextureHandle
@@ -331,8 +353,21 @@ struct RenderPassFrameContext {
     // (Application::Run(), PHASE3) reads both vectors back out AFTER
     // DeclareInto() returns and forwards them to the exact same
     // `outputs`/`KeepVolumeTextureOutput()` mechanism it already uses today.
-    std::vector<TextureHandle> finalTextureOutputs;
-    std::vector<VolumeTextureHandle> finalVolumeTextureOutputs;
+    //
+    // render-pass-3 campaign, PHASE3 - both fields are `mutable`: PHASE1's
+    // own RenderPassProvider signature deliberately takes `const
+    // RenderPassFrameContext&` (a provider is only supposed to "append
+    // data", never rebind `blackboard`/`builder` above), but a plain VALUE
+    // member (unlike a reference member, which stays genuinely mutable
+    // through a const wrapping object regardless of the object's own
+    // constness) would otherwise be read-only from inside a provider -
+    // making PHASE1's own stated intent ("any provider... simply appends it
+    // here directly") actually inexpressible until this phase's first real
+    // consumer (the Atmosphere-wrapping providers, Step 3.3) needed it for
+    // real. A confirmed, narrow, additive fix - see this phase's own
+    // completion report.
+    mutable std::vector<TextureHandle> finalTextureOutputs;
+    mutable std::vector<VolumeTextureHandle> finalVolumeTextureOutputs;
 
     // ... any other plain, opaque-to-the-pipeline per-frame data
     // (camera/target/dt) is added here by whichever LATER phase first
@@ -352,6 +387,43 @@ using RenderPassProvider =
 // current view already stamped into that specific invocation's frame context.
 enum class ProviderScope { Once, PerActiveView };
 
+// render-pass-3 campaign, PHASE3 (PHASE3_FULL_PRODUCTION_PASS_MIGRATION_AND_VIEW_UNIFICATION.md)
+// - a real, LIVE-VERIFICATION-CONFIRMED gap in this mechanism's own Step
+// 3.3b design, fixed here. A provider that reaches `frame.builder` directly
+// (Step 3.3b - the Atmosphere-wrapping/"Present" providers) declares its own
+// real pass(es) IMMEDIATELY, DURING DeclareInto()'s own provider-invocation
+// loop - but a provider using the ordinary DEFERRED RenderPassDesc mechanism
+// (e.g. "RenderOpaque"/"DrawSkyBackground") only actually calls
+// `builder.AddRenderPass()` at the very END of that same DeclareInto() call,
+// after every provider has already run and the collected list has been
+// sorted. That means ANY immediate provider - no matter where it is
+// registered relative to a deferred one - always lands in the underlying
+// pass list BEFORE every deferred pass, regardless of RenderPassEvent. This
+// is harmless for a provider with no ordering requirement against the
+// deferred set (e.g. "AtmosphereSharedLut"/"AtmosphereViewLut", which must
+// run BEFORE "RenderOpaque" anyway), but it is a REAL, CONFIRMED CORRECTNESS
+// BUG for "AtmosphereComposite" specifically: it READS the same texture
+// handle "RenderOpaque"/"DrawSkyBackground" WRITE, so it must be declared
+// STRICTLY AFTER them - live testing during this phase caught this exact
+// failure mode (RenderGraphCompiler::Compile()'s own resource-versioning
+// scan builds a reader's dependency edge against whatever writer it has
+// ALREADY SEEN so far in declaration order, never a writer declared later -
+// with Composite declared first, "RenderOpaque"'s own write became
+// unreachable from any kept root and was silently CULLED).
+//
+// ProviderTiming resolves this generically (not just for these three
+// providers): `BeforeDeferredPasses` (the default - unchanged behavior for
+// every existing call site) runs in Phase 1, immediately followed by that
+// phase's own sort+flush of every entry any Phase-1 provider deferred.
+// `AfterDeferredPasses` providers run in a SEPARATE Phase 2, strictly AFTER
+// that flush - so an immediate `frame.builder` call made by an
+// AfterDeferredPasses provider is GUARANTEED to land after every deferred
+// pass any BeforeDeferredPasses provider contributed, regardless of
+// registration order. Any RenderPassDesc entries an AfterDeferredPasses
+// provider itself defers are sorted and flushed in their OWN, separate
+// Phase-2 flush, symmetric with Phase 1's.
+enum class ProviderTiming { BeforeDeferredPasses, AfterDeferredPasses };
+
 // --- RenderPipeline ---------------------------------------------------------
 //
 // Owns a list of registered providers, collects RenderPassDesc values from
@@ -361,9 +433,28 @@ enum class ProviderScope { Once, PerActiveView };
 
 class RenderPipeline {
 public:
-    void Register(const char* debugName, ProviderScope scope, RenderPassProvider provider)
+    // render-pass-3 campaign, PHASE3 - new, TRAILING, DEFAULTED `timing`
+    // parameter (ProviderTiming::BeforeDeferredPasses default) - every
+    // pre-existing 3-argument Register() call site (PHASE2's own
+    // "GpuSkinning"/"RenderOpaque") compiles completely unmodified.
+    void Register(const char* debugName, ProviderScope scope, RenderPassProvider provider,
+        ProviderTiming timing = ProviderTiming::BeforeDeferredPasses)
     {
-        m_providers.push_back(Entry{ debugName, scope, std::move(provider) });
+        m_providers.push_back(Entry{ debugName, scope, std::move(provider), timing });
+    }
+
+    // render-pass-3 campaign, PHASE3 (Step 3.2 - the Locked Design Decision 5
+    // bridge). `rg::RenderPipeline` itself must never know the strings
+    // "Game"/"Scene" - that Application-specific knowledge is injected here
+    // as a plain callable instead, assigned ONCE by Application when
+    // m_offscreenRenderPipeline/m_presentRenderPipeline are constructed (see
+    // src/Application/RenderPassViewData.h's own TranslateLegacyViewScope()).
+    // Defaults to an empty std::function - DeclareInto() below falls back to
+    // ViewScope::Shared for every desc.view whenever this was never set,
+    // preserving PHASE1/PHASE2's own original stand-in behavior exactly.
+    void SetLegacyViewScopeTranslator(std::function<ViewScope(RenderViewId)> translator)
+    {
+        m_legacyViewScopeTranslator = std::move(translator);
     }
 
     // Light escape hatch (design doc Section 0, point 5) - registering
@@ -390,16 +481,45 @@ public:
         }
     }
 
-    // Called once per graph-build callback. Loops active views for
-    // PerActiveView providers, asks every provider "what do you want to
-    // contribute", sorts the combined result by `order`, then feeds each
-    // one into RenderGraphBuilder - the only place that still calls
-    // AddPass()/AddComputePass()/AddRenderPass().
+    // Called once per graph-build callback. render-pass-3 campaign, PHASE3 -
+    // now a genuine TWO-PHASE model (see ProviderTiming's own doc comment
+    // above for the confirmed correctness bug this fixes): Phase 1 invokes
+    // every `BeforeDeferredPasses` provider (looping active views for
+    // PerActiveView ones), then sorts+flushes whatever THEY deferred; Phase
+    // 2 does the exact same thing for `AfterDeferredPasses` providers,
+    // strictly afterward. Within each phase, a provider that reaches
+    // `frame.builder` directly (Step 3.3b) declares its own real pass(es)
+    // immediately, during that phase's own provider-invocation loop, BEFORE
+    // that SAME phase's own deferred/sorted flush runs.
     void DeclareInto(RenderGraphBuilder& builder, RenderPassFrameContext& frame)
+    {
+        DeclareOnePhase(builder, frame, ProviderTiming::BeforeDeferredPasses);
+        DeclareOnePhase(builder, frame, ProviderTiming::AfterDeferredPasses);
+    }
+
+private:
+    struct Entry {
+        const char* debugName;
+        ProviderScope scope;
+        RenderPassProvider provider;
+        ProviderTiming timing;
+    };
+
+    // render-pass-3 campaign, PHASE3 - the shared body both DeclareInto()
+    // phases run: invoke every registered provider matching `timing` (in
+    // registration order, looping active views for PerActiveView ones),
+    // then sort the resulting deferred RenderPassDesc list by `order` and
+    // flush it into `builder` - see ProviderTiming's own doc comment for why
+    // this must happen exactly TWICE (once per phase) rather than once,
+    // globally, at the end.
+    void DeclareOnePhase(RenderGraphBuilder& builder, RenderPassFrameContext& frame, ProviderTiming timing)
     {
         m_scratchCollected.clear(); // Reused, not reconstructed - see this class's own field comment below.
 
         for (const Entry& entry : m_providers) {
+            if (entry.timing != timing) {
+                continue;
+            }
             if (entry.scope == ProviderScope::Once) {
                 entry.provider(frame, m_scratchCollected);
             } else { // PerActiveView
@@ -416,28 +536,24 @@ public:
         for (RenderPassDesc& desc : m_scratchCollected) {
             // PHASE0_MASTER_STRATEGY.md's own Locked Design Decision 5 -
             // translate into the OLD, byte-for-byte-unchanged
-            // AddRenderPass() call. This phase has no real per-view
-            // translation table yet (that is PHASE3's job, migrating
-            // Game/Scene View onto this system) - every declared pass is
-            // translated as ViewScope::Shared here, regardless of
-            // `desc.view`, exactly as this phase's own doc (Step 3.1)
-            // specifies: "this phase's own test double can use a trivial
-            // Shared-only translation, since no real per-view translation
-            // table exists to call into yet."
-            constexpr ViewScope translatedViewScope = ViewScope::Shared;
+            // AddRenderPass() call. render-pass-3 campaign, PHASE3 - now
+            // uses the REAL, injected m_legacyViewScopeTranslator (Step 3.2)
+            // instead of PHASE1/PHASE2's own trivial Shared-only stand-in -
+            // falls back to ViewScope::Shared only if no translator was ever
+            // set (defensive; every real RenderPipeline instance in
+            // Application always sets one).
+            const ViewScope translatedViewScope =
+                m_legacyViewScopeTranslator ? m_legacyViewScopeTranslator(desc.view) : ViewScope::Shared;
             builder.AddRenderPass(desc.debugName, desc.kind, translatedViewScope, desc.legacyCategory, desc.setup,
                 desc.execute, desc.drawKind, desc.order);
         }
     }
 
-private:
-    struct Entry {
-        const char* debugName;
-        ProviderScope scope;
-        RenderPassProvider provider;
-    };
-
     std::vector<Entry> m_providers;
+
+    // render-pass-3 campaign, PHASE3 (Step 3.2) - see SetLegacyViewScopeTranslator() above.
+    std::function<ViewScope(RenderViewId)> m_legacyViewScopeTranslator;
+
 
     // Owned once, reused every frame: cleared (not reconstructed) at the
     // start of each DeclareInto() call so its capacity survives across

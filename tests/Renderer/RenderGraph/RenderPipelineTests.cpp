@@ -168,7 +168,7 @@ TEST(RenderPipelineTest, OnceProviderContributesExactlyOnceRegardlessOfActiveVie
 
     RenderPassBlackboard blackboard;
     RenderGraphBuilder builder;
-    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, {}, {} };
+    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {}, {} };
     frame.activeViews = { RenderViewId::Named("GameView"), RenderViewId::Named("SceneView") };
 
     pipeline.DeclareInto(builder, frame);
@@ -198,7 +198,7 @@ TEST(RenderPipelineTest, PerActiveViewProviderContributesOncePerActiveViewWithCo
     RenderGraphBuilder builder;
     const RenderViewId gameView = RenderViewId::Named("GameView");
     const RenderViewId sceneView = RenderViewId::Named("SceneView");
-    RenderPassFrameContext frame{ { gameView, sceneView }, RenderViewId::Shared(), blackboard, {}, {} };
+    RenderPassFrameContext frame{ { gameView, sceneView }, RenderViewId::Shared(), blackboard, builder, {}, {} };
 
     pipeline.DeclareInto(builder, frame);
 
@@ -227,7 +227,7 @@ TEST(RenderPipelineTest, PerActiveViewProviderContributesNothingWithZeroActiveVi
 
     RenderPassBlackboard blackboard;
     RenderGraphBuilder builder;
-    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, {}, {} };
+    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {}, {} };
 
     pipeline.DeclareInto(builder, frame);
 
@@ -275,7 +275,7 @@ TEST(RenderPipelineTest, CollectedPassesAreSortedByOrderRegardlessOfRegistration
 
     RenderPassBlackboard blackboard;
     RenderGraphBuilder builder;
-    RenderPassFrameContext frame{ { RenderViewId::Named("GameView") }, RenderViewId::Shared(), blackboard, {}, {} };
+    RenderPassFrameContext frame{ { RenderViewId::Named("GameView") }, RenderViewId::Shared(), blackboard, builder, {}, {} };
 
     pipeline.DeclareInto(builder, frame);
 
@@ -309,7 +309,7 @@ TEST(RenderPipelineTest, LegacyCategoryAndDrawKindSurviveUnchangedIntoTheProduce
 
     RenderPassBlackboard blackboard;
     RenderGraphBuilder builder;
-    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, {}, {} };
+    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {}, {} };
 
     pipeline.DeclareInto(builder, frame);
 
@@ -340,10 +340,166 @@ TEST(RenderPipelineTest, UnregisterRemovesAMatchingProviderByDebugNameContent)
 
     RenderPassBlackboard blackboard;
     RenderGraphBuilder builder;
-    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, {}, {} };
+    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {}, {} };
     pipeline.DeclareInto(builder, frame);
 
     EXPECT_EQ(callCount, 0);
+}
+
+// --- render-pass-3 campaign, PHASE3 additions -------------------------------
+// (PHASE3_FULL_PRODUCTION_PASS_MIGRATION_AND_VIEW_UNIFICATION.md)
+
+// Step 3.2 - with no translator ever set, every desc.view must still
+// translate to ViewScope::Shared (the PHASE1/PHASE2 stand-in behavior),
+// confirming SetLegacyViewScopeTranslator() being unset is a safe, harmless
+// default.
+TEST(RenderPipelineTest, WithNoLegacyViewScopeTranslatorEveryPassTranslatesToShared)
+{
+    RenderPipeline pipeline;
+
+    pipeline.Register("SomeProvider", ProviderScope::Once,
+        [](const RenderPassFrameContext&, std::vector<RenderPassDesc>& outPasses) {
+            RenderPassDesc desc;
+            desc.debugName = "SomePass";
+            desc.view = RenderViewId::Named("GameView");
+            desc.setup = NoOpSetup;
+            desc.execute = NoOpExecute;
+            outPasses.push_back(desc);
+        });
+
+    RenderPassBlackboard blackboard;
+    RenderGraphBuilder builder;
+    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {}, {} };
+    pipeline.DeclareInto(builder, frame);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes.size(), 1u);
+    EXPECT_EQ(input.passes[0].viewScope, ViewScope::Shared);
+}
+
+// Step 3.2 - a real, injected translator's own output must flow all the way
+// through into the produced PassRecord::viewScope - the actual mechanism
+// PHASE3's real Application-layer TranslateLegacyViewScope() relies on.
+TEST(RenderPipelineTest, InjectedLegacyViewScopeTranslatorIsAppliedPerDesc)
+{
+    RenderPipeline pipeline;
+    pipeline.SetLegacyViewScopeTranslator([](RenderViewId view) {
+        if (view == RenderViewId::Named("GameView")) {
+            return ViewScope::GameView;
+        }
+        if (view == RenderViewId::Named("SceneView")) {
+            return ViewScope::SceneView;
+        }
+        return ViewScope::Shared;
+    });
+
+    pipeline.Register("PerViewProvider", ProviderScope::PerActiveView,
+        [](const RenderPassFrameContext& frame, std::vector<RenderPassDesc>& outPasses) {
+            RenderPassDesc desc;
+            desc.debugName = "RenderOpaque";
+            desc.view = frame.currentView;
+            desc.setup = NoOpSetup;
+            desc.execute = NoOpExecute;
+            outPasses.push_back(desc);
+        });
+
+    RenderPassBlackboard blackboard;
+    RenderGraphBuilder builder;
+    RenderPassFrameContext frame{ { RenderViewId::Named("GameView"), RenderViewId::Named("SceneView") },
+        RenderViewId::Shared(), blackboard, builder, {}, {} };
+    pipeline.DeclareInto(builder, frame);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes.size(), 2u);
+    EXPECT_EQ(input.passes[0].viewScope, ViewScope::GameView);
+    EXPECT_EQ(input.passes[1].viewScope, ViewScope::SceneView);
+}
+
+// Step 3.3b - RenderPassFrameContext::builder lets a provider declare its OWN
+// real pass immediately (bypassing the deferred RenderPassDesc mechanism
+// entirely), exactly the mechanism the Atmosphere-wrapping/"Present"
+// providers rely on.
+TEST(RenderPipelineTest, ProviderCanDeclareARealPassDirectlyViaFrameBuilder)
+{
+    RenderPipeline pipeline;
+
+    pipeline.Register("ImmediateProvider", ProviderScope::Once,
+        [](const RenderPassFrameContext& frame, std::vector<RenderPassDesc>&) {
+            frame.builder.AddRenderPass("ImmediatePass", PassKind::Graphics, NoOpSetup, NoOpExecute);
+        });
+
+    RenderPassBlackboard blackboard;
+    RenderGraphBuilder builder;
+    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {}, {} };
+    pipeline.DeclareInto(builder, frame);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes.size(), 1u);
+    EXPECT_STREQ(input.passes[0].name, "ImmediatePass");
+}
+
+// Step 3.3b - a provider taking `const RenderPassFrameContext&` must still be
+// able to append to finalTextureOutputs/finalVolumeTextureOutputs (the
+// `mutable` fix) - this is the exact mechanism the Atmosphere-wrapping
+// providers rely on to replace today's manual `outputs.push_back(...)` calls.
+TEST(RenderPipelineTest, ProviderCanAppendToFinalOutputsThroughAConstFrameReference)
+{
+    RenderPipeline pipeline;
+
+    pipeline.Register("OutputProvider", ProviderScope::Once,
+        [](const RenderPassFrameContext& frame, std::vector<RenderPassDesc>&) {
+            frame.finalTextureOutputs.push_back(TextureHandle{ 7 });
+            frame.finalVolumeTextureOutputs.push_back(VolumeTextureHandle{ 9 });
+        });
+
+    RenderPassBlackboard blackboard;
+    RenderGraphBuilder builder;
+    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {}, {} };
+    pipeline.DeclareInto(builder, frame);
+
+    ASSERT_EQ(frame.finalTextureOutputs.size(), 1u);
+    EXPECT_EQ(frame.finalTextureOutputs[0], TextureHandle{ 7 });
+    ASSERT_EQ(frame.finalVolumeTextureOutputs.size(), 1u);
+    EXPECT_EQ(frame.finalVolumeTextureOutputs[0], VolumeTextureHandle{ 9 });
+}
+
+// Step 3.3b - a REAL, LIVE-VERIFICATION-CONFIRMED correctness bug this test
+// protects against: an `AfterDeferredPasses` provider that reaches
+// `frame.builder` directly (e.g. "AtmosphereComposite") MUST always land in
+// the underlying pass list strictly AFTER every pass a `BeforeDeferredPasses`
+// provider deferred (e.g. "RenderOpaque"), regardless of REGISTRATION order -
+// deliberately registering the AfterDeferredPasses provider FIRST here,
+// to prove ProviderTiming (not registration order) is what actually
+// determines this.
+TEST(RenderPipelineTest, AfterDeferredPassesProviderDeclaresStrictlyAfterEveryBeforeDeferredPassesDeferredPass)
+{
+    RenderPipeline pipeline;
+
+    pipeline.Register(
+        "ImmediateAfterProvider", ProviderScope::Once,
+        [](const RenderPassFrameContext& frame, std::vector<RenderPassDesc>&) {
+            frame.builder.AddRenderPass("CompositeLikePass", PassKind::Graphics, NoOpSetup, NoOpExecute);
+        },
+        ProviderTiming::AfterDeferredPasses);
+
+    pipeline.Register("DeferredBeforeProvider", ProviderScope::Once,
+        [](const RenderPassFrameContext&, std::vector<RenderPassDesc>& outPasses) {
+            RenderPassDesc desc;
+            desc.debugName = "OpaqueLikePass";
+            desc.setup = NoOpSetup;
+            desc.execute = NoOpExecute;
+            outPasses.push_back(desc);
+        });
+
+    RenderPassBlackboard blackboard;
+    RenderGraphBuilder builder;
+    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {}, {} };
+    pipeline.DeclareInto(builder, frame);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes.size(), 2u);
+    EXPECT_STREQ(input.passes[0].name, "OpaqueLikePass");
+    EXPECT_STREQ(input.passes[1].name, "CompositeLikePass");
 }
 
 } // namespace

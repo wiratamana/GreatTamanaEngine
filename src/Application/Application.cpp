@@ -69,6 +69,50 @@ constexpr double kFixedStepSeconds = 1.0 / 60.0;
 using rg::operator""_passId;
 constexpr rg::RenderPassId kGpuSkinningOutputsKey = "GpuSkinning.OutputBuffers"_passId;
 
+// render-pass-3 campaign, PHASE3 (PHASE3_FULL_PRODUCTION_PASS_MIGRATION_AND_VIEW_UNIFICATION.md,
+// Step 3.3) - every remaining blackboard key this phase's own provider set
+// needs, following the exact same "`using rg::operator""_passId;` + file-
+// scope `constexpr rg::RenderPassId`" convention kGpuSkinningOutputsKey
+// above already established.
+//
+// "AtmosphereSharedLut" publishes ONE AtmosphereSharedLutBlackboardEntry
+// (this frame's already-folded-with-groundAlbedoTint AtmosphereParametersGpu
+// PLUS the Transmittance/Multi-Scattering LUT handles) under this ONE key -
+// every per-view Atmosphere-sequence provider below fetches it back.
+constexpr rg::RenderPassId kAtmosphereSharedLutKey = "Atmosphere.SharedLuts"_passId;
+
+// "AtmosphereViewLut" publishes its own per-view AtmosphereViewLutHandles
+// (Sky-View LUT + Aerial Perspective volume handles + this view's own
+// AtmosphereFrameUniforms) under ONE of these two keys, picked purely by
+// which named view is currently being declared (Application already knows
+// there are only ever "Game"/"Scene" real views - Locked Design Decision 1 -
+// so two fixed, distinct compile-time keys are the simplest correct
+// resolution the phase doc's own Step 3.3 table explicitly permits, rather
+// than inventing a runtime-hashed-into-RenderPassId scheme for no real
+// benefit at today's exactly-two-views scale).
+constexpr rg::RenderPassId kAtmosphereViewLutGameKey = "Atmosphere.ViewLut.Game"_passId;
+constexpr rg::RenderPassId kAtmosphereViewLutSceneKey = "Atmosphere.ViewLut.Scene"_passId;
+
+// Step 3.7 - "DrawSkyBackground" republishes the exact
+// std::function<void(VkCommandBuffer)> it just built (via
+// MakeRecordSkyBackgroundCallback()) for its OWN execute lambda, but ONLY
+// for the Game View, so Application::Run() can Fetch() it back out AFTER
+// m_offscreenRenderPipeline.DeclareInto() returns, for
+// AddFrameDebuggerReplayPasses()'s still-unmigrated call site (Locked Design
+// Decision 4) - this is the "or the raw ingredients... whichever is
+// simpler" option the phase doc's own Step 3.3 table explicitly allows.
+constexpr rg::RenderPassId kGameSkyBackgroundCallbackKey = "Atmosphere.GameSkyBackgroundCallback"_passId;
+
+// render-pass-3 campaign, PHASE3 (Step 3.3) - "AtmosphereSharedLut"'s own
+// blackboard payload: bundles the Transmittance/Multi-Scattering LUT handles
+// together with THIS frame's own AtmosphereParametersGpu (built fresh, once,
+// inside that one provider, folding in m_atmosphereSettings.groundAlbedoTint
+// exactly like Application::Run() used to do inline) - every per-view
+// Atmosphere-sequence provider needs BOTH.
+struct AtmosphereSharedLutBlackboardEntry {
+    AtmosphereSharedLutHandles handles;
+    AtmosphereParametersGpu parameters;
+};
 
 
 // Phase 4C (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) - the one, tiny
@@ -202,12 +246,12 @@ Application::Application(const std::string& title, int width, int height)
     , m_windowWidth(width)
     , m_windowHeight(height)
 {
-    // render-pass-3 campaign, PHASE2 (PHASE2_GPU_SKINNING_OPAQUE_BLACKBOARD_PROOF.md)
-    // - registers m_offscreenRenderPipeline's first two real providers
-    // ("GpuSkinning"/"RenderOpaque") once, here, at construction time - see
-    // this method's own definition below for the full "GpuSkinning
-    // publishes, RenderOpaque fetches" blackboard hand-off.
+    // render-pass-3 campaign, PHASE2/PHASE3 - registers both
+    // m_offscreenRenderPipeline (every remaining production pass) and
+    // m_presentRenderPipeline ("Present" alone) once, here, at construction
+    // time - see each method's own definition below.
     RegisterOffscreenRenderPipelineProviders();
+    RegisterPresentRenderPipelineProvider();
 
 #if GTE_ENABLE_NETWORK
     // Loopback-only (127.0.0.1 is baked into NetworkServer itself - Start()
@@ -225,13 +269,57 @@ Application::Application(const std::string& title, int width, int height)
 
 Application::~Application() = default;
 
-// render-pass-3 campaign, PHASE2 (PHASE2_GPU_SKINNING_OPAQUE_BLACKBOARD_PROOF.md)
-// - the first real consumer of PHASE1's whole new declaration layer. Two
-// providers, wired with ZERO direct call or shared captured variable
-// between their own registration lambdas - the ONLY thing that connects
-// them is `frame.blackboard` (kGpuSkinningOutputsKey, above).
+// render-pass-3 campaign, PHASE3 (Step 3.1) - a small, linear scan (the
+// realistic view count is 0-2, so this is never worth a hashed lookup).
+const RenderPassViewData* Application::FindViewData(rg::RenderViewId view) const noexcept
+{
+    for (const RenderPassViewData& viewData : m_currentViewDataThisFrame) {
+        if (viewData.id == view) {
+            return &viewData;
+        }
+    }
+    return nullptr;
+}
+
+// render-pass-3 campaign, PHASE2/PHASE3 - registers every remaining
+// production pass onto m_offscreenRenderPipeline. Registered in the SAME
+// order the old code declared them (readability only - DeclareInto()'s own
+// `.order`-based sort, plus each Atmosphere-wrapping provider's own
+// immediate `frame.builder` calls, are what actually fix declaration order -
+// see PHASE3_FULL_PRODUCTION_PASS_MIGRATION_AND_VIEW_UNIFICATION.md's own
+// Step 3.3b for the full "why").
 void Application::RegisterOffscreenRenderPipelineProviders()
 {
+    m_offscreenRenderPipeline.SetLegacyViewScopeTranslator(&TranslateLegacyViewScope);
+
+    // "AtmosphereSharedLut" - ProviderScope::Once, BeforeEverything. A
+    // deliberate EXCEPTION to "providers only append RenderPassDesc data"
+    // (Step 3.3b): calls AddAtmosphereSharedLutPasses() DIRECTLY against
+    // `frame.builder` (the real RenderGraphBuilder& this frame's graph is
+    // being built against), declaring its real passes IMMEDIATELY rather
+    // than deferring them - AddAtmosphereSharedLutPasses() itself calls
+    // builder.AddRenderPass() twice, with a genuine data dependency between
+    // the two calls (Multi-Scattering needs Transmittance's own just-
+    // returned handle), which cannot be expressed as a single
+    // RenderPassDesc.setup/.execute pair. Publishes the resulting handles +
+    // this frame's own AtmosphereParametersGpu onto the blackboard for every
+    // per-view Atmosphere-sequence provider below to fetch, and appends both
+    // LUT handles to `frame.finalTextureOutputs` (PHASE1's own mechanism -
+    // REPLACES today's manual `outputs.push_back(...)` calls).
+    m_offscreenRenderPipeline.Register("AtmosphereSharedLut", rg::ProviderScope::Once,
+        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&) {
+            AtmosphereSharedLutBlackboardEntry entry;
+            entry.parameters = MakeDefaultEarthAtmosphereParameters();
+            entry.parameters.groundAlbedo = entry.parameters.groundAlbedo * m_atmosphereSettings.groundAlbedoTint;
+            entry.handles =
+                AddAtmosphereSharedLutPasses(frame.builder, m_renderer, m_atmosphereLutRenderer, entry.parameters);
+
+            frame.finalTextureOutputs.push_back(entry.handles.transmittanceLutHandle);
+            frame.finalTextureOutputs.push_back(entry.handles.multiScatteringLutHandle);
+
+            frame.blackboard.Publish<AtmosphereSharedLutBlackboardEntry>(kAtmosphereSharedLutKey, entry);
+        });
+
     // "GpuSkinning" - ProviderScope::Once (invoked exactly once per
     // m_offscreenRenderPipeline.DeclareInto() call, regardless of how many
     // views are active this frame - GPU Skinning's compute dispatch is
@@ -247,7 +335,11 @@ void Application::RegisterOffscreenRenderPipelineProviders()
     // "resolve outside any provider, by the caller" resolution
     // PHASE2_GPU_SKINNING_OPAQUE_BLACKBOARD_PROOF.md's own Step 3.1
     // explicitly preferred over growing RenderGraphBuilder.h's own public
-    // surface.
+    // surface. render-pass-3 campaign, PHASE3 - now called UNCONDITIONALLY
+    // every frame (DeclareInto() itself runs unconditionally now - see
+    // Run()) - retires PHASE2's own "Deviation 2" fallback branch
+    // (`if (gameTarget == nullptr) { AddGpuSkinningPasses(...) }`), which no
+    // longer exists.
     m_offscreenRenderPipeline.Register("GpuSkinning", rg::ProviderScope::Once,
         [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
             GpuSkinningPipelines& pipelines = m_game.GetGpuSkinningPipelines();
@@ -290,24 +382,92 @@ void Application::RegisterOffscreenRenderPipelineProviders()
                 kGpuSkinningOutputsKey, m_gpuSkinningHandlesThisFrame);
         });
 
-    // "RenderOpaque" - ProviderScope::PerActiveView. This phase's own
-    // narrow scope (PHASE2_GPU_SKINNING_OPAQUE_BLACKBOARD_PROOF.md's "What
-    // We Will NOT Do") keeps frame.activeViews containing AT MOST the one
-    // Game View id, populated by Run() itself right before DeclareInto() -
-    // see that call site. A direct, literal translation of
-    // RenderPasses.cpp's own AddRenderOpaquePass(), with ONE change:
-    // gpuSkinningOutputBuffers is no longer a captured/threaded parameter -
-    // it is Fetch()'d from the blackboard instead, with ZERO direct
-    // knowledge of the "GpuSkinning" provider above.
+    // "AtmosphereViewLut" - ProviderScope::PerActiveView, PreOpaques. The
+    // SECOND Atmosphere-wrapping EXCEPTION (Step 3.3b) - calls
+    // AddAtmosphereViewLutPasses() (and, Game View only, the debug-slice
+    // pass) directly against `frame.builder`, fetching the shared LUT
+    // handles/parameters this SAME frame's "AtmosphereSharedLut" provider
+    // already published (registration order above guarantees it already
+    // ran). Publishes its own per-view AtmosphereViewLutHandles for the
+    // Sky Background/Composite providers below to fetch for THIS SAME view.
+    m_offscreenRenderPipeline.Register("AtmosphereViewLut", rg::ProviderScope::PerActiveView,
+        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&) {
+            const RenderPassViewData* viewData = FindViewData(frame.currentView);
+            if (viewData == nullptr) {
+                return; // Defensive - every entry in frame.activeViews always has a matching RenderPassViewData.
+            }
+
+            const std::optional<AtmosphereSharedLutBlackboardEntry> sharedLuts =
+                frame.blackboard.Fetch<AtmosphereSharedLutBlackboardEntry>(kAtmosphereSharedLutKey);
+            if (!sharedLuts.has_value()) {
+                return; // Defensive - "AtmosphereSharedLut" (registered above) always runs first and always publishes.
+            }
+
+            const bool isGameView = (frame.currentView == rg::RenderViewId::Named("Game"));
+            const char* skyViewLutName = isGameView ? "AtmosphereSkyViewLut_GameView" : "AtmosphereSkyViewLut_SceneView";
+            const char* aerialVolumeName =
+                isGameView ? "AtmosphereAerialPerspectiveVolume_GameView" : "AtmosphereAerialPerspectiveVolume_SceneView";
+            const rg::ViewScope legacyViewScope = isGameView ? rg::ViewScope::GameView : rg::ViewScope::SceneView;
+
+            AtmosphereViewLutHandles viewLuts = AddAtmosphereViewLutPasses(frame.builder, m_renderer,
+                m_atmosphereLutRenderer, m_game.GetRegistry(), sharedLuts->parameters, m_atmosphereSettings,
+                sharedLuts->handles, viewData->eyeWorldPosition, viewData->viewProjection, skyViewLutName,
+                aerialVolumeName, legacyViewScope);
+
+            frame.finalTextureOutputs.push_back(viewLuts.skyViewLutHandle);
+            // A VolumeTextureHandle can never go into finalTextureOutputs
+            // (TextureHandle-only) - see
+            // RenderGraphBuilder::KeepVolumeTextureOutput()'s own doc
+            // comment for why this is a separate call.
+            frame.builder.KeepVolumeTextureOutput(viewLuts.aerialPerspectiveVolumeHandle);
+
+            // Phase 9 debug-visibility slice - Game View only (per its own
+            // doc comment), unchanged from before this phase.
+            if (isGameView) {
+                const rg::TextureHandle debugSlice = m_atmosphereLutRenderer.AddAerialPerspectiveVolumeDebugSlicePass(
+                    frame.builder, m_renderer, viewLuts.aerialPerspectiveVolumeHandle, aerialVolumeName,
+                    static_cast<std::uint32_t>(m_atmosphereSettings.aerialPerspectiveDebugSliceIndex),
+                    "AtmosphereAerialPerspectiveVolumeDebugSlice", rg::ViewScope::GameView);
+                frame.finalTextureOutputs.push_back(debugSlice);
+            }
+
+            const rg::RenderPassId viewLutKey = isGameView ? kAtmosphereViewLutGameKey : kAtmosphereViewLutSceneKey;
+            frame.blackboard.Publish<AtmosphereViewLutHandles>(viewLutKey, viewLuts);
+        });
+
+    // "RenderOpaque" - ProviderScope::PerActiveView. render-pass-3 campaign,
+    // PHASE3 - GENERALIZED from PHASE2's own Game-View-only body to read
+    // frame.currentView's own RenderPassViewData via FindViewData() instead
+    // of a single captured gameViewTarget/aspect - this is the one place
+    // Scene View's own opaque draw becomes a REAL, SEPARATE "RenderOpaque"-
+    // shaped pass for the first time (see Step 3.4). gpuSkinningOutputBuffers
+    // is still Fetch()'d from the blackboard, with ZERO direct knowledge of
+    // the "GpuSkinning" provider above (unchanged from PHASE2).
     m_offscreenRenderPipeline.Register("RenderOpaque", rg::ProviderScope::PerActiveView,
         [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
             const std::vector<rg::BufferHandle> gpuSkinningBuffers =
                 frame.blackboard.Fetch<std::vector<rg::BufferHandle>>(kGpuSkinningOutputsKey)
                     .value_or(std::vector<rg::BufferHandle>{});
 
-            const rg::TextureHandle gameViewTarget = m_currentGameViewTargetForOffscreenPipeline;
-            const float aspectWidthOverHeight = m_currentGameViewAspectForOffscreenPipeline;
-            FrameDebuggerCaptureContext* frameDebuggerCapture = m_currentFrameDebuggerCaptureForOffscreenPipeline;
+            const RenderPassViewData* viewData = FindViewData(frame.currentView);
+            if (viewData == nullptr) {
+                return;
+            }
+
+            const rg::TextureHandle viewTarget = viewData->colorTarget;
+            const float aspectWidthOverHeight = viewData->aspectWidthOverHeight;
+            const bool isGameView = (frame.currentView == rg::RenderViewId::Named("Game"));
+            // Game View drives through the ECS's own active Camera
+            // (viewProjectionOverride == nullptr, exactly like
+            // AddRenderOpaquePass() always did); Scene View bypasses ECS
+            // camera resolution via the Editor's own independently-
+            // orbitable camera (viewData->viewProjection), exactly like
+            // AddSceneViewPass() always did. A real, non-null
+            // frameDebuggerCapture is NEVER handed to Scene View (Locked
+            // Design Decision/RenderPasses.h's own doc comment).
+            const Mat4 viewProjectionOverride = viewData->viewProjection;
+            FrameDebuggerCaptureContext* frameDebuggerCapture =
+                isGameView ? m_currentFrameDebuggerCaptureForOffscreenPipeline : nullptr;
 
             rg::RenderPassDesc desc;
             desc.debugName = "RenderOpaque";
@@ -315,25 +475,232 @@ void Application::RegisterOffscreenRenderPipelineProviders()
             desc.order = rg::RenderPassEvent::Opaques;
             desc.view = frame.currentView;
             // Frame Debugger Pass-Ownership behavior must be BIT-FOR-BIT
-            // IDENTICAL to the old direct AddRenderOpaquePass() call - see
-            // this phase's own "What We Will NOT Do". legacyCategory/
-            // drawKind default to General/DrawMesh respectively (PHASE1's
-            // own RenderPassDesc defaults), matching AddRenderOpaquePass()'s
-            // own call into the OLD AddRenderPass() overload exactly.
+            // IDENTICAL to the old direct AddRenderOpaquePass()/
+            // AddSceneViewPass() calls - see this phase's own "What We Will
+            // NOT Do". legacyCategory/drawKind default to General/DrawMesh
+            // respectively (PHASE1's own RenderPassDesc defaults).
             desc.legacyCategory = rg::RenderPassCategory::General;
-            desc.setup = [gameViewTarget, gpuSkinningBuffers](rg::RenderGraphBuilder::PassBuilder& pass) {
-                pass.WriteColorAttachment(gameViewTarget, kGameClearColor);
-                pass.WriteDepthStencilAttachment(gameViewTarget, kGameClearDepth);
+            desc.setup = [viewTarget, gpuSkinningBuffers](rg::RenderGraphBuilder::PassBuilder& pass) {
+                pass.WriteColorAttachment(viewTarget, kGameClearColor);
+                pass.WriteDepthStencilAttachment(viewTarget, kGameClearDepth);
                 DeclareGpuSkinningReads(pass, gpuSkinningBuffers);
             };
-            desc.execute = [this, aspectWidthOverHeight, frameDebuggerCapture](rg::PassContext& ctx) {
+            desc.execute = [this, aspectWidthOverHeight, isGameView, viewProjectionOverride, frameDebuggerCapture](
+                                rg::PassContext& ctx) {
                 m_renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-                m_game.Render(m_renderer, aspectWidthOverHeight, nullptr, frameDebuggerCapture);
+                if (isGameView) {
+                    m_game.Render(m_renderer, aspectWidthOverHeight, nullptr, frameDebuggerCapture);
+                } else {
+                    m_game.Render(m_renderer, aspectWidthOverHeight, &viewProjectionOverride);
+                }
                 m_renderer.EndGraphPassRecording();
             };
             out.push_back(std::move(desc));
         });
+
+    // "DrawSkyBackground" - ProviderScope::PerActiveView, AfterOpaques. Wraps
+    // AddDrawSkyBackgroundPass()'s existing body (unchanged clear/no-clear
+    // rules); fetches this view's own Sky-View LUT + frame uniforms from the
+    // blackboard (published by "AtmosphereViewLut" above, for THIS SAME
+    // view) to build its own recordSkyBackground callback via
+    // MakeRecordSkyBackgroundCallback() - replacing today's manual capture.
+    // Step 3.7 - ALSO republishes that exact callback for the Game View
+    // ONLY, so Run() can hand it to AddFrameDebuggerReplayPasses() (still
+    // unmigrated) after DeclareInto() returns.
+    m_offscreenRenderPipeline.Register("DrawSkyBackground", rg::ProviderScope::PerActiveView,
+        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
+            const RenderPassViewData* viewData = FindViewData(frame.currentView);
+            if (viewData == nullptr) {
+                return;
+            }
+
+            const bool isGameView = (frame.currentView == rg::RenderViewId::Named("Game"));
+            const rg::RenderPassId viewLutKey = isGameView ? kAtmosphereViewLutGameKey : kAtmosphereViewLutSceneKey;
+            const std::optional<AtmosphereViewLutHandles> viewLuts =
+                frame.blackboard.Fetch<AtmosphereViewLutHandles>(viewLutKey);
+            const std::optional<AtmosphereSharedLutBlackboardEntry> sharedLuts =
+                frame.blackboard.Fetch<AtmosphereSharedLutBlackboardEntry>(kAtmosphereSharedLutKey);
+            if (!viewLuts.has_value() || !sharedLuts.has_value()) {
+                return; // Defensive - both are always published earlier this same DeclareInto() call.
+            }
+
+            const char* skyViewLutName = isGameView ? "AtmosphereSkyViewLut_GameView" : "AtmosphereSkyViewLut_SceneView";
+            const std::function<void(VkCommandBuffer)> recordSkyBackground =
+                MakeRecordSkyBackgroundCallback(m_atmosphereLutRenderer, m_renderer, viewData->viewProjection,
+                    sharedLuts->parameters, viewLuts->frameUniforms, skyViewLutName, m_atmosphereSettings.skyExposure);
+
+            if (isGameView) {
+                frame.blackboard.Publish<std::function<void(VkCommandBuffer)>>(
+                    kGameSkyBackgroundCallbackKey, recordSkyBackground);
+            }
+
+            // Mirrors AddDrawSkyBackgroundPass()'s own "add nothing when
+            // nothing to do" rule - unreachable in practice today
+            // (MakeRecordSkyBackgroundCallback() always returns a valid
+            // callable), kept for parity/documentation.
+            if (!recordSkyBackground) {
+                return;
+            }
+
+            const rg::TextureHandle viewTarget = viewData->colorTarget;
+
+            rg::RenderPassDesc desc;
+            desc.debugName = "DrawSkyBackground";
+            desc.kind = rg::PassKind::Graphics;
+            desc.order = rg::RenderPassEvent::AfterOpaques;
+            desc.view = frame.currentView;
+            desc.legacyCategory = rg::RenderPassCategory::General;
+            // Frame Debugger Pass-Ownership campaign (render-pass-2) -
+            // matches AddDrawSkyBackgroundPass()'s own DrawQuad tag exactly
+            // (a real, hand-verified full-screen-triangle draw).
+            desc.drawKind = rg::RenderPassDrawKind::DrawQuad;
+            desc.setup = [viewTarget](rg::RenderGraphBuilder::PassBuilder& pass) {
+                // Deliberately NO clear value on either attachment
+                // (VK_ATTACHMENT_LOAD_OP_LOAD) - this pass must never erase
+                // "RenderOpaque"'s own just-written pixels/depth.
+                pass.WriteColorAttachment(viewTarget);
+                pass.WriteDepthStencilAttachment(viewTarget);
+            };
+            desc.execute = [this, recordSkyBackground](rg::PassContext& ctx) {
+                m_renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
+                recordSkyBackground(ctx.cmd);
+                m_renderer.EndGraphPassRecording();
+            };
+            out.push_back(std::move(desc));
+        });
+
+    // "RenderTransparent" - ProviderScope::PerActiveView, Transparents. Wraps
+    // AddRenderTransparentPass()'s existing (always-empty-today) body
+    // unchanged for the real-transparent-geometry case. render-pass-3
+    // campaign, PHASE3 (Step 3.4) - ALSO folds in the Editor's own ground-
+    // grid overlay for Scene View ONLY (RenderPassViewData::recordSceneOverlay),
+    // replacing the old AddSceneViewPass()'s own fused
+    // "sky then grid, same pass" ordering with "DrawSkyBackground" (above,
+    // AfterOpaques) declared strictly BEFORE this pass (Transparents) - the
+    // exact same relative order AddSceneViewPass() always guaranteed, now
+    // enforced by RenderPassEvent instead of same-pass-body sequencing.
+    m_offscreenRenderPipeline.Register("RenderTransparent", rg::ProviderScope::PerActiveView,
+        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
+            const RenderPassViewData* viewData = FindViewData(frame.currentView);
+            if (viewData == nullptr) {
+                return;
+            }
+
+            const std::vector<DrawCommand> transparentCommands =
+                RenderSystem::CollectTransparentRenderables(m_game.GetRegistry());
+            const bool hasOverlay = static_cast<bool>(viewData->recordSceneOverlay);
+
+            // Real transparent-geometry draws: unreachable today (see
+            // RenderSystem::CollectTransparentRenderables()'s own doc
+            // comment) - left deliberately unimplemented beyond this check,
+            // mirroring AddRenderTransparentPass()'s own scope exactly.
+            if (transparentCommands.empty() && !hasOverlay) {
+                return; // A true no-op, exactly like the old direct call.
+            }
+
+            if (!hasOverlay) {
+                return; // transparentCommands-driven path is unreachable today - nothing further to declare.
+            }
+
+            const rg::TextureHandle viewTarget = viewData->colorTarget;
+            const Mat4 viewProjection = viewData->viewProjection;
+            const std::function<void(VkCommandBuffer, const Mat4&)> recordSceneOverlay = viewData->recordSceneOverlay;
+
+            rg::RenderPassDesc desc;
+            desc.debugName = "RenderTransparent";
+            desc.kind = rg::PassKind::Graphics;
+            desc.order = rg::RenderPassEvent::Transparents;
+            desc.view = frame.currentView;
+            desc.legacyCategory = rg::RenderPassCategory::General;
+            desc.setup = [viewTarget](rg::RenderGraphBuilder::PassBuilder& pass) {
+                pass.WriteColorAttachment(viewTarget);
+                pass.WriteDepthStencilAttachment(viewTarget);
+            };
+            desc.execute = [this, recordSceneOverlay, viewProjection](rg::PassContext& ctx) {
+                m_renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
+                recordSceneOverlay(ctx.cmd, viewProjection);
+                m_renderer.EndGraphPassRecording();
+            };
+            out.push_back(std::move(desc));
+        });
+
+    // "AtmosphereComposite" - ProviderScope::PerActiveView, AfterTransparents,
+    // ProviderTiming::AfterDeferredPasses. The THIRD Atmosphere-wrapping
+    // EXCEPTION (Step 3.3b) - calls AddAtmosphereCompositePass() directly
+    // against `frame.builder`, fetching this view's own Aerial Perspective
+    // volume handle + frame uniforms from the blackboard. Appends its own
+    // output TextureHandle to `frame.finalTextureOutputs`.
+    //
+    // CORRECTNESS-CRITICAL, confirmed by live testing during this phase -
+    // MUST be registered with ProviderTiming::AfterDeferredPasses (see that
+    // enum's own doc comment, RenderPipeline.h): this pass READS the SAME
+    // texture handle "RenderOpaque"/"DrawSkyBackground" WRITE, so it must be
+    // declared STRICTLY AFTER them in the underlying pass list - registering
+    // it with the default BeforeDeferredPasses timing (as an earlier,
+    // untested draft of this phase did) causes RenderGraphCompiler::Compile()'s
+    // own resource-versioning scan to see this pass's read BEFORE any writer
+    // is known, silently CULLING "RenderOpaque"/"DrawSkyBackground" entirely
+    // (confirmed live: Game/Scene View rendered solid white/black, and the
+    // Render Graph panel showed "RenderOpaque" as "culled").
+    m_offscreenRenderPipeline.Register("AtmosphereComposite", rg::ProviderScope::PerActiveView,
+        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&) {
+            const RenderPassViewData* viewData = FindViewData(frame.currentView);
+            if (viewData == nullptr || viewData->renderTexture == nullptr) {
+                return;
+            }
+
+            const bool isGameView = (frame.currentView == rg::RenderViewId::Named("Game"));
+            const rg::RenderPassId viewLutKey = isGameView ? kAtmosphereViewLutGameKey : kAtmosphereViewLutSceneKey;
+            const std::optional<AtmosphereViewLutHandles> viewLuts =
+                frame.blackboard.Fetch<AtmosphereViewLutHandles>(viewLutKey);
+            if (!viewLuts.has_value()) {
+                return;
+            }
+
+            const char* aerialVolumeName =
+                isGameView ? "AtmosphereAerialPerspectiveVolume_GameView" : "AtmosphereAerialPerspectiveVolume_SceneView";
+            const char* outputTextureName = isGameView ? "GameViewComposited" : "SceneViewComposited";
+            const rg::ViewScope legacyViewScope = isGameView ? rg::ViewScope::GameView : rg::ViewScope::SceneView;
+
+            const rg::TextureHandle composited = AddAtmosphereCompositePass(frame.builder, m_renderer,
+                m_atmosphereLutRenderer, *viewData->renderTexture, viewData->colorTarget,
+                viewLuts->aerialPerspectiveVolumeHandle, aerialVolumeName, viewLuts->frameUniforms,
+                viewData->eyeWorldPosition, m_atmosphereSettings.aerialPerspectiveStrength,
+                m_atmosphereSettings.aerialPerspectiveMaxDistanceKm, m_atmosphereSettings.aerialPerspectiveDepthExponent,
+                viewData->renderTexture->Extent(), outputTextureName, legacyViewScope);
+
+            frame.finalTextureOutputs.push_back(composited);
+        },
+        rg::ProviderTiming::AfterDeferredPasses);
 }
+
+// render-pass-3 campaign, PHASE3 (Step 3.5) - the swapchain regime's own
+// RenderPipeline, with exactly one provider, "Present". A deliberate
+// EXCEPTION to "providers only append RenderPassDesc data" (Step 3.3b, same
+// mechanism as the Atmosphere-wrapping providers above) - calls
+// AddGpuSkinningPasses()/AddPresentPass() directly against `frame.builder`,
+// mirroring exactly what Application::Run()'s swapchain-regime `build` lambda
+// used to do inline. NEVER reuses/fetches a rg::BufferHandle the OFFSCREEN
+// regime's own "GpuSkinning" provider published to ITS OWN, separate
+// blackboard this same frame (PHASE0_MASTER_STRATEGY.md's Locked Design
+// Decision 6 and this phase doc's own Step 3.5 correctness note) - a fresh,
+// direct-render-only AddGpuSkinningPasses() call is made here instead,
+// exactly once, ONLY when this pass is also the one drawing Game directly.
+void Application::RegisterPresentRenderPipelineProvider()
+{
+    m_presentRenderPipeline.SetLegacyViewScopeTranslator(&TranslateLegacyViewScope);
+
+    m_presentRenderPipeline.Register("Present", rg::ProviderScope::Once,
+        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&) {
+            const std::vector<rg::BufferHandle> gpuSkinningBuffers = m_needsDirectGameRenderThisFrame
+                ? AddGpuSkinningPasses(frame.builder, m_game, m_renderer)
+                : std::vector<rg::BufferHandle>{};
+
+            AddPresentPass(frame.builder, m_game, m_renderer, m_swapchainImageThisFrame,
+                m_directGameRenderAspectThisFrame, m_recordImGuiThisFrame, gpuSkinningBuffers);
+        });
+}
+
 
 int Application::Run()
 {
@@ -686,65 +1053,56 @@ int Application::Run()
                 const VkCommandBuffer offscreenCmd = m_renderer.BeginOffscreenRenderGraphRecording();
                 m_renderGraph.Execute(offscreenCmd, rg::ExecuteTimingMode::SynchronousImmediateReadback,
                     [&](rg::RenderGraphBuilder& b) {
-                        std::vector<rg::TextureHandle> outputs;
+                        // render-pass-3 campaign, PHASE3
+                        // (PHASE3_FULL_PRODUCTION_PASS_MIGRATION_AND_VIEW_UNIFICATION.md,
+                        // Step 3.6) - this whole build lambda collapses
+                        // today's hand-duplicated `if (gameTarget != nullptr)
+                        // { ...40+ lines... } if (sceneTarget != nullptr) {
+                        // ...40+ lines... }` pair into ONE generic per-view
+                        // loop, driven entirely by m_offscreenRenderPipeline's
+                        // own registered providers
+                        // (RegisterOffscreenRenderPipelineProviders()) - this
+                        // lambda's own job shrinks to: (a) resolve GPU
+                        // Skinning's dispatch requests (needs a real builder,
+                        // unconditionally - see below), (b) build this
+                        // frame's RenderPassViewData for whichever of
+                        // Game/Scene View are actually visible, (c) call
+                        // DeclareInto(), (d) service the two still-
+                        // unmigrated call sites Locked Design Decision 4
+                        // requires (AddFrameDebuggerReplayPasses()/Compute
+                        // Blur Validation - Step 3.7).
 
-                        // render-pass-3 campaign, PHASE2 (PHASE2_GPU_SKINNING_OPAQUE_BLACKBOARD_PROOF.md)
-                        // - GPU Skinning's compute-dispatch declaration now goes through
-                        // m_offscreenRenderPipeline's "GpuSkinning" provider INSTEAD of a direct
-                        // AddGpuSkinningPasses() call, but ONLY when the Game View is actually
-                        // visible this frame (gameTarget != nullptr) - see the
-                        // m_offscreenRenderPipeline.DeclareInto() call site inside that `if` block
-                        // below, where m_gpuSkinningRequestsThisFrame/m_gpuSkinningHandlesThisFrame
-                        // are populated and the new pipeline is driven. When Game View is NOT
-                        // visible (gameTarget == nullptr, e.g. only the Editor's "Scene" panel is
-                        // open), that `if` block - and therefore DeclareInto() itself - never runs
-                        // at all this frame, so GPU Skinning's compute dispatch would silently
-                        // never be declared unless something ELSE declares it - Scene View's own
-                        // opaque draw (AddSceneViewPass(), below) still needs these buffers via the
-                        // OLD, unmigrated `gpuSkinningOutputBuffers` parameter (PHASE3's job to
-                        // migrate that call site onto the new system) - so this ONE fallback branch
-                        // keeps calling the OLD, UNCHANGED AddGpuSkinningPasses() free function
-                        // directly, exactly as before this phase, whenever gameTarget == nullptr.
-                        // The two paths are MUTUALLY EXCLUSIVE per frame (this `if`/the new
-                        // pipeline's own "GpuSkinning" provider inside the `if (gameTarget !=
-                        // nullptr)` block below), so GPU Skinning's own compute dispatch is still
-                        // declared EXACTLY ONCE per frame, never twice - see this phase's own
-                        // completion report for the full reasoning.
-                        std::vector<rg::BufferHandle> gpuSkinningBuffers;
-                        if (gameTarget == nullptr) {
-                            gpuSkinningBuffers = AddGpuSkinningPasses(b, m_game, m_renderer);
+                        // GPU Skinning's compute-dispatch requests are
+                        // resolved HERE, UNCONDITIONALLY (regardless of which
+                        // views are visible - an animated model must keep
+                        // skinning even when only Scene View is open), using
+                        // THIS SAME builder `b` (a RenderPassProvider has no
+                        // RenderGraphBuilder& of its own to call
+                        // ImportBuffer() - PHASE2's own "resolve outside any
+                        // provider, by the caller" resolution). Retires
+                        // PHASE2's own "Game-hidden/Scene-visible fallback"
+                        // special case (Deviation 2 in that phase's own
+                        // completion report) - "GpuSkinning" itself
+                        // (ProviderScope::Once) is now invoked
+                        // unconditionally by DeclareInto() below, every
+                        // frame, so that old dual-code-path is no longer
+                        // needed at all.
+                        m_gpuSkinningRequestsThisFrame = m_game.CollectGpuSkinningDispatchRequests();
+                        m_gpuSkinningHandlesThisFrame.clear();
+                        m_gpuSkinningHandlesThisFrame.reserve(m_gpuSkinningRequestsThisFrame.size());
+                        for (const AnimationSystem::GpuSkinningDispatchRequest& request :
+                            m_gpuSkinningRequestsThisFrame) {
+                            m_gpuSkinningHandlesThisFrame.push_back(
+                                b.ImportBuffer(request.name, request.outputBuffer, request.outputBufferSize));
                         }
 
-                        // Atmosphere Scattering + Aerial Perspective campaign,
-                        // Phase 7 (task_manager/atmosphere-scattering-1/
-                        // ATMOSPHERE_PHASE7_SKY_BACKGROUND_AND_COMPOSITE_PASSES_v1.md)
-                        // - the REAL, PERMANENT per-frame atmosphere pass
-                        // sequence (relocated out of Phases 3-6's own
-                        // temporary `// TODO(ATMOSPHERE_PHASE7)` validation
-                        // call site - see AtmospherePassSequence.h/.cpp).
-                        // Shared LUTs (Transmittance/Multi-Scattering) are
-                        // declared ONCE per frame here (view-independent);
-                        // the Sky-View LUT/Aerial Perspective volume are
-                        // resolved PER VIEW, inside each view's own `if`
-                        // block below, now covering BOTH Game View AND
-                        // Scene View (Phases 5/6 deliberately left Scene
-                        // View unwired - this is what finally wires it up).
-                        // Phase 8 (ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md)
-                        // - m_atmosphereSettings::groundAlbedoTint is folded
-                        // into the default Earth parameters here, once per
-                        // frame, before the shared LUT passes read it (the
-                        // Multi-Scattering LUT's own ground-bounce term is
-                        // the only consumer of AtmosphereParametersGpu::
-                        // groundAlbedo - see AtmosphereParameters.h). No
-                        // dirty-flag optimization (unchanged from every
-                        // prior phase's own "What We Will NOT Do").
-                        AtmosphereParametersGpu atmosphereParameters = MakeDefaultEarthAtmosphereParameters();
-                        atmosphereParameters.groundAlbedo =
-                            atmosphereParameters.groundAlbedo * m_atmosphereSettings.groundAlbedoTint;
-                        const AtmosphereSharedLutHandles atmosphereSharedLuts =
-                            AddAtmosphereSharedLutPasses(b, m_renderer, m_atmosphereLutRenderer, atmosphereParameters);
-                        outputs.push_back(atmosphereSharedLuts.transmittanceLutHandle);
-                        outputs.push_back(atmosphereSharedLuts.multiScatteringLutHandle);
+                        rg::RenderPassBlackboard blackboard;
+                        blackboard.BeginFrame();
+                        rg::RenderPassFrameContext frame{ {}, rg::RenderViewId::Shared(), blackboard, b, {}, {} };
+
+                        m_currentViewDataThisFrame.clear();
+                        m_currentFrameDebuggerCaptureForOffscreenPipeline = nullptr;
+                        float gameAspectForReplay = 1.0f;
 
                         if (gameTarget != nullptr) {
                             const VkExtent2D extent = gameTarget->Extent();
@@ -752,276 +1110,170 @@ int Application::Run()
                                 AspectRatioOf(static_cast<int>(extent.width), static_cast<int>(extent.height));
 
                             // Game View's own eye world position (active ECS
-                            // Camera) and view-projection matrix (Phase 5's
-                            // own helper, now permanently wired here).
+                            // Camera) and view-projection matrix.
                             const Vec3 gameEyeWorldPosition = ResolveActiveCameraWorldPosition(m_game.GetRegistry());
                             const Mat4 gameViewProjection =
                                 RenderSystem::ResolveActiveCameraViewProjection(m_game.GetRegistry(), aspect);
 
-                            const AtmosphereViewLutHandles gameAtmosphere = AddAtmosphereViewLutPasses(b, m_renderer,
-                                m_atmosphereLutRenderer, m_game.GetRegistry(), atmosphereParameters,
-                                m_atmosphereSettings, atmosphereSharedLuts, gameEyeWorldPosition, gameViewProjection,
-                                "AtmosphereSkyViewLut_GameView", "AtmosphereAerialPerspectiveVolume_GameView",
-                                rg::ViewScope::GameView);
-                            outputs.push_back(gameAtmosphere.skyViewLutHandle);
-                            // A VolumeTextureHandle can never go into
-                            // `outputs` (TextureHandle-only) - see
-                            // RenderGraphBuilder::KeepVolumeTextureOutput()'s
-                            // own doc comment for why this is a SEPARATE
-                            // call, and ATMOSPHERE_PHASE6_COMPLETION_REPORT.md
-                            // for the real Phase 2 gap this fixes.
-                            b.KeepVolumeTextureOutput(gameAtmosphere.aerialPerspectiveVolumeHandle);
-
-                            // Phase 9 (ATMOSPHERE_PHASE9_VALIDATION_DEBUG_TOOLING_AND_DOCS_v1.md,
-                            // Step 3.2) - the volume-texture debug-visibility
-                            // gap Phase 2 deliberately deferred: mirrors ONE
-                            // Z slice of the Game View's own aerial-
-                            // perspective volume into a real, registered 2D
-                            // texture, automatically GET /get_texture/
-                            // GET /list_textures-capturable with zero
-                            // further networking changes. Game View only
-                            // (per that method's own doc comment) - a
-                            // plain rg::TextureHandle output, so it goes
-                            // into the ordinary `outputs` root set, unlike
-                            // the VolumeTextureHandle above.
-                            const rg::TextureHandle aerialPerspectiveDebugSlice =
-                                m_atmosphereLutRenderer.AddAerialPerspectiveVolumeDebugSlicePass(b, m_renderer,
-                                    gameAtmosphere.aerialPerspectiveVolumeHandle,
-                                    "AtmosphereAerialPerspectiveVolume_GameView",
-                                    static_cast<std::uint32_t>(m_atmosphereSettings.aerialPerspectiveDebugSliceIndex),
-                                    "AtmosphereAerialPerspectiveVolumeDebugSlice", rg::ViewScope::GameView);
-                            outputs.push_back(aerialPerspectiveDebugSlice);
-
-                            // 3.2 - the Sky Background pass, now a REAL,
-                            // separate Render Graph pass in its own right
-                            // (Render Pass campaign, PHASE2,
-                            // task_manager/render-pass-1) - declared via
-                            // AddDrawSkyBackgroundPass() below, AFTER
-                            // AddRenderOpaquePass()'s own real scene geometry
-                            // draws (see RenderPasses.h's own updated doc
-                            // comment).
-                            const std::function<void(VkCommandBuffer)> recordGameSkyBackground =
-                                MakeRecordSkyBackgroundCallback(m_atmosphereLutRenderer, m_renderer, gameViewProjection,
-                                    atmosphereParameters, gameAtmosphere.frameUniforms, "AtmosphereSkyViewLut_GameView",
-                                    m_atmosphereSettings.skyExposure);
-
                             const rg::TextureHandle h =
                                 b.ImportTexture("GameView", gameTarget->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
-                            // Render Pass campaign, PHASE2 - "GameView" the
-                            // PASS no longer exists; three real, separate
-                            // passes now write this SAME imported texture
-                            // handle `h`, back to back: "RenderOpaque" (the
-                            // built-in default mesh-drawing pass, clears
-                            // color+depth), "DrawSkyBackground" (LOADs both
-                            // attachments, only paints pixels Opaque didn't
-                            // already cover), and "RenderTransparent" (a
-                            // currently-always-empty scaffold - see
-                            // RenderPasses.h). `outputs.push_back(h)` only
-                            // needs to happen once - the Render Graph's own
-                            // reachability culling keeps every pass that
-                            // touches a kept root's resource alive.
-                            // render-pass-3 campaign, PHASE2 (PHASE2_GPU_SKINNING_OPAQUE_BLACKBOARD_PROOF.md)
-                            // - the OLD, direct AddGpuSkinningPasses()+AddRenderOpaquePass()
-                            // call PAIR is REPLACED, for the Game View case only, by driving
-                            // m_offscreenRenderPipeline's two new providers ("GpuSkinning"/
-                            // "RenderOpaque") instead - GPU Skinning's output buffer handles
-                            // reach "RenderOpaque" ENTIRELY through the blackboard (see
-                            // RegisterOffscreenRenderPipelineProviders(), Application.cpp),
-                            // never a direct call or shared captured variable between the two
-                            // providers' own registration lambdas.
-                            //
-                            // m_gpuSkinningRequestsThisFrame/m_gpuSkinningHandlesThisFrame are
-                            // populated HERE, using THIS SAME builder `b` (a RenderPassProvider
-                            // has no RenderGraphBuilder& of its own to call ImportBuffer() -
-                            // see this phase's own completion report for the full "wrinkle"
-                            // resolution) - m_currentGameViewTargetForOffscreenPipeline/
-                            // m_currentGameViewAspectForOffscreenPipeline/
-                            // m_currentFrameDebuggerCaptureForOffscreenPipeline are populated
-                            // right after, so the "RenderOpaque" provider (invoked
-                            // synchronously, inside DeclareInto() below) sees this exact
-                            // frame's real gameViewTarget/aspect/frameDebuggerCapture.
-                            m_gpuSkinningRequestsThisFrame = m_game.CollectGpuSkinningDispatchRequests();
-                            m_gpuSkinningHandlesThisFrame.clear();
-                            m_gpuSkinningHandlesThisFrame.reserve(m_gpuSkinningRequestsThisFrame.size());
-                            for (const AnimationSystem::GpuSkinningDispatchRequest& request :
-                                m_gpuSkinningRequestsThisFrame) {
-                                m_gpuSkinningHandlesThisFrame.push_back(
-                                    b.ImportBuffer(request.name, request.outputBuffer, request.outputBufferSize));
-                            }
 
-                            m_currentGameViewTargetForOffscreenPipeline = h;
-                            m_currentGameViewAspectForOffscreenPipeline = aspect;
+                            RenderPassViewData gameViewData;
+                            gameViewData.id = rg::RenderViewId::Named("Game");
+                            gameViewData.colorTarget = h;
+                            gameViewData.renderTexture = gameTarget;
+                            gameViewData.aspectWidthOverHeight = aspect;
+                            gameViewData.viewProjection = gameViewProjection;
+                            gameViewData.eyeWorldPosition = gameEyeWorldPosition;
+                            m_currentViewDataThisFrame.push_back(gameViewData);
+
+                            frame.activeViews.push_back(rg::RenderViewId::Named("Game"));
+                            // Game-View-only - see RenderPasses.h's own
+                            // AddRenderOpaquePass() doc comment on why a
+                            // real, non-null capture pointer is NEVER handed
+                            // to Scene View/Present.
                             m_currentFrameDebuggerCaptureForOffscreenPipeline = frameDebuggerCapture;
-
-                            rg::RenderPassBlackboard offscreenPipelineBlackboard;
-                            offscreenPipelineBlackboard.BeginFrame();
-                            rg::RenderPassFrameContext offscreenPipelineFrame{
-                                /* activeViews = */ {}, /* currentView = */ rg::RenderViewId::Shared(),
-                                offscreenPipelineBlackboard
-                            };
-                            offscreenPipelineFrame.activeViews.push_back(rg::RenderViewId::Named("Game"));
-                            m_offscreenRenderPipeline.DeclareInto(b, offscreenPipelineFrame);
-#ifndef NDEBUG
-                            offscreenPipelineBlackboard.ReportUnusedPublishesIfAny();
-#endif
-
-                            // The OLD Scene View/Present call sites (still hand-threaded -
-                            // PHASE3's job to migrate them too) get the SAME handles the
-                            // "RenderOpaque" provider just consumed, fetched back out of the
-                            // blackboard - NEVER a second AddGpuSkinningPasses() call, which
-                            // would double-dispatch the exact same compute work this frame.
-                            gpuSkinningBuffers =
-                                offscreenPipelineBlackboard.Fetch<std::vector<rg::BufferHandle>>(kGpuSkinningOutputsKey)
-                                    .value_or(std::vector<rg::BufferHandle>{});
-                            outputs.push_back(h);
-                            AddDrawSkyBackgroundPass(b, m_renderer, h, recordGameSkyBackground, frameDebuggerCapture);
-                            AddRenderTransparentPass(b, m_game, m_renderer, h, aspect);
-
-                            // task_manager/frame-debugger-7 campaign, PHASE3
-                            // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md,
-                            // Step 3.5) - the EARLY half of this phase's
-                            // two-bool pending/serviced handshake (Step
-                            // 3.0): consumes m_pendingCaptureTrigger (if
-                            // set) and, only then, declares this frame's N
-                            // debug-only replay passes - BEFORE any of them
-                            // (or the real "RenderOpaque"/"DrawSkyBackground"/
-                            // "RenderTransparent" passes above, which were
-                            // only just DECLARED, not yet executed) actually
-                            // run, since this whole `build` lambda only
-                            // describes the frame; RenderGraph::Execute()
-                            // records/runs every declared pass after this
-                            // lambda returns. `frameDebuggerCapture` is a
-                            // bare, forward-declared pointer (see
-                            // EditorLayer.h) - never dereferenced by this
-                            // file except via `*frameDebuggerCapture` here,
-                            // which only ever runs once this same `if` has
-                            // already confirmed it is non-null.
-                            if (frameDebuggerCapture != nullptr
-                                && m_editorLayer->ConsumePendingFrameDebuggerReplayRequest()) {
-                                const std::size_t objectCount = m_game.CountGameViewDrawCommandsThisFrame();
-                                // IMPORTANT, CORRECTNESS-CRITICAL (see
-                                // RenderPasses.h's own updated doc comment on
-                                // AddFrameDebuggerReplayPasses()) - every
-                                // returned destination TextureHandle MUST be
-                                // appended to `outputs`, or
-                                // RenderGraphCompiler::Compile()'s own
-                                // backward-reachability culling scan silently
-                                // culls every one of these N passes (their
-                                // writes are never otherwise read by anything
-                                // else in the graph) - confirmed by this
-                                // phase's own Step 4 manual visual spot-check,
-                                // which caught exactly this bug (garbage/
-                                // uninitialized VRAM content instead of a
-                                // real rendered image) before this fix.
-                                const std::vector<rg::TextureHandle> replayStepHandles = AddFrameDebuggerReplayPasses(
-                                    b, m_game, m_renderer, aspect, objectCount, gpuSkinningBuffers,
-                                    recordGameSkyBackground, *gameTarget, *frameDebuggerCapture);
-                                for (const rg::TextureHandle& replayHandle : replayStepHandles) {
-                                    outputs.push_back(replayHandle);
-                                }
-                            }
-
-                            // 3.3 - the Aerial Perspective Composite pass -
-                            // declared AFTER the RenderOpaque/DrawSkyBackground/
-                            // RenderTransparent passes above (same
-                            // builder/Execute() call), reading its own
-                            // just-written color+depth (via the new
-                            // isDepthResource=true ReadTexture() overload -
-                            // see RenderGraphTypes.h) and writing a NEW,
-                            // separate "GameViewComposited" output texture -
-                            // this is what the Editor's "Game" panel and
-                            // `GET /get_game_view` display/capture from now
-                            // on (see the finalize block below).
-                            const rg::TextureHandle gameComposited = AddAtmosphereCompositePass(b, m_renderer,
-                                m_atmosphereLutRenderer, *gameTarget, h, gameAtmosphere.aerialPerspectiveVolumeHandle,
-                                "AtmosphereAerialPerspectiveVolume_GameView", gameAtmosphere.frameUniforms,
-                                gameEyeWorldPosition, m_atmosphereSettings.aerialPerspectiveStrength,
-                                m_atmosphereSettings.aerialPerspectiveMaxDistanceKm,
-                                m_atmosphereSettings.aerialPerspectiveDepthExponent, extent, "GameViewComposited",
-                                rg::ViewScope::GameView);
-                            outputs.push_back(gameComposited);
+                            gameAspectForReplay = aspect;
                         }
+
+                        rg::TextureHandle sceneColorHandleForBlurValidation{};
+                        VkExtent2D sceneExtentForBlurValidation{};
+                        bool sceneVisibleForBlurValidation = false;
+
                         if (sceneTarget != nullptr) {
                             const VkExtent2D extent = sceneTarget->Extent();
                             const float aspect =
                                 AspectRatioOf(static_cast<int>(extent.width), static_cast<int>(extent.height));
-                            // Unlike the Game view above, the Scene view
-                            // renders through the Editor's OWN independently-
+                            // Unlike Game View above, Scene View renders
+                            // through the Editor's OWN independently-
                             // orbitable camera (see src/Editor/EditorCamera.h)
                             // rather than whatever ECS entity currently has
-                            // the active Camera component - see
-                            // IEditorLayer::SceneViewProjection()/
-                            // Game::Render()'s viewProjectionOverride
-                            // parameter. IEditorLayer::SceneViewCameraWorldPosition()
-                            // (new this phase) is this view's own eye
-                            // world-space position equivalent.
+                            // the active Camera component.
                             const Mat4 sceneViewProjection = m_editorLayer->SceneViewProjection(aspect);
                             const Vec3 sceneEyeWorldPosition = m_editorLayer->SceneViewCameraWorldPosition();
 
-                            const AtmosphereViewLutHandles sceneAtmosphere = AddAtmosphereViewLutPasses(b, m_renderer,
-                                m_atmosphereLutRenderer, m_game.GetRegistry(), atmosphereParameters,
-                                m_atmosphereSettings, atmosphereSharedLuts, sceneEyeWorldPosition, sceneViewProjection,
-                                "AtmosphereSkyViewLut_SceneView", "AtmosphereAerialPerspectiveVolume_SceneView",
-                                rg::ViewScope::SceneView);
-                            outputs.push_back(sceneAtmosphere.skyViewLutHandle);
-                            b.KeepVolumeTextureOutput(sceneAtmosphere.aerialPerspectiveVolumeHandle);
-
-                            const std::function<void(VkCommandBuffer)> recordSceneSkyBackground =
-                                MakeRecordSkyBackgroundCallback(m_atmosphereLutRenderer, m_renderer, sceneViewProjection,
-                                    atmosphereParameters, sceneAtmosphere.frameUniforms, "AtmosphereSkyViewLut_SceneView",
-                                    m_atmosphereSettings.skyExposure);
-
                             const rg::TextureHandle h =
                                 b.ImportTexture("SceneView", sceneTarget->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
+
+                            RenderPassViewData sceneViewData;
+                            sceneViewData.id = rg::RenderViewId::Named("Scene");
+                            sceneViewData.colorTarget = h;
+                            sceneViewData.renderTexture = sceneTarget;
+                            sceneViewData.aspectWidthOverHeight = aspect;
+                            sceneViewData.viewProjection = sceneViewProjection;
+                            sceneViewData.eyeWorldPosition = sceneEyeWorldPosition;
                             // The Editor's infinite ground grid (see
-                            // task_manager/editor-enchancements-1/PHASE0_MASTER_STRATEGY.md) - a
-                            // plain std::function keeps RenderPasses.cpp itself completely
-                            // Editor-agnostic (see AGENTS.md, Clean Architecture); only this call
-                            // site (which already legitimately holds m_editorLayer) knows the real
-                            // callback reaches into IEditorLayer::RenderSceneGrid().
-                            const std::function<void(VkCommandBuffer, const Mat4&)> recordSceneGrid =
-                                [this](VkCommandBuffer cmd, const Mat4& viewProj) {
-                                    m_editorLayer->RenderSceneGrid(m_renderer, cmd, viewProj);
-                                };
-                            // Sky background BEFORE the grid overlay - see
-                            // RenderPasses.h's own AddSceneViewPass() doc
-                            // comment for the full ordering reasoning.
-                            AddSceneViewPass(b, m_game, m_renderer, h, aspect, sceneViewProjection, gpuSkinningBuffers,
-                                recordSceneGrid, recordSceneSkyBackground);
-                            outputs.push_back(h);
+                            // task_manager/editor-enchancements-1/PHASE0_MASTER_STRATEGY.md)
+                            // - a plain std::function keeps
+                            // RegisterOffscreenRenderPipelineProviders()'s
+                            // own "RenderTransparent" provider body
+                            // completely Editor-agnostic (see AGENTS.md,
+                            // Clean Architecture); only THIS call site
+                            // (which already legitimately holds
+                            // m_editorLayer) knows the real callback reaches
+                            // into IEditorLayer::RenderSceneGrid().
+                            sceneViewData.recordSceneOverlay = [this](VkCommandBuffer cmd, const Mat4& viewProj) {
+                                m_editorLayer->RenderSceneGrid(m_renderer, cmd, viewProj);
+                            };
+                            m_currentViewDataThisFrame.push_back(sceneViewData);
 
-                            const rg::TextureHandle sceneComposited = AddAtmosphereCompositePass(b, m_renderer,
-                                m_atmosphereLutRenderer, *sceneTarget, h, sceneAtmosphere.aerialPerspectiveVolumeHandle,
-                                "AtmosphereAerialPerspectiveVolume_SceneView", sceneAtmosphere.frameUniforms,
-                                sceneEyeWorldPosition, m_atmosphereSettings.aerialPerspectiveStrength,
-                                m_atmosphereSettings.aerialPerspectiveMaxDistanceKm,
-                                m_atmosphereSettings.aerialPerspectiveDepthExponent, extent, "SceneViewComposited",
-                                rg::ViewScope::SceneView);
-                            outputs.push_back(sceneComposited);
+                            frame.activeViews.push_back(rg::RenderViewId::Named("Scene"));
 
-                            // Phase 7 of the compute-shader campaign
-                            // (COMPUTE_PHASE7_VALIDATION_TESTING_TOOLING_STRATEGY_v2.md)
-                            // - the texture-side validation workload: a
-                            // compute box-blur pass reading THIS call's own
-                            // just-declared Scene view texture `h` (the
-                            // PRE-atmosphere-composite color, unchanged by
-                            // this phase - this debug tool has no reason to
-                            // move onto the composited output) and writing
-                            // the Editor's own persistent blurredSceneOutput
-                            // RWTexture, declared into the SAME builder/
-                            // Execute() call so the render graph's own
-                            // automatic barrier planner synchronizes the
-                            // cross-pass read entirely on its own (see
-                            // ComputeBlurValidation.h). Declared (and this
-                            // handle added to `outputs`) only when the
-                            // Editor's own "Show Compute Blur (debug)"
-                            // toggle is on and "Scene" is visible - see
-                            // IEditorLayer::AddBlurValidationPass()'s own
-                            // doc comment; std::nullopt (always the case
-                            // for NullEditorLayer) means nothing was
-                            // declared at all this call.
-                            if (const std::optional<rg::TextureHandle> blurHandle =
-                                    m_editorLayer->AddBlurValidationPass(b, m_renderer, h, extent)) {
+                            // Phase 7 of the compute-shader campaign - the
+                            // Compute Blur Validation debug tool's own
+                            // still-unmigrated call site (Locked Design
+                            // Decision 4) needs Scene's raw imported color
+                            // handle + extent, resolved here, BEFORE
+                            // DeclareInto() runs (this is the SAME handle
+                            // `h` the now-migrated "RenderOpaque" provider
+                            // will also write this frame).
+                            sceneColorHandleForBlurValidation = h;
+                            sceneExtentForBlurValidation = extent;
+                            sceneVisibleForBlurValidation = true;
+                        }
+
+                        m_offscreenRenderPipeline.DeclareInto(b, frame);
+
+                        // Step 3.7 - fetch this key UNCONDITIONALLY, right
+                        // here (even on the overwhelming majority of frames
+                        // where no Frame Debugger replay actually ends up
+                        // being serviced below) - "DrawSkyBackground"
+                        // (Game View only) publishes it EVERY frame Game
+                        // View is active, but it is only genuinely CONSUMED
+                        // on the rare frame a replay capture is serviced.
+                        // Fetching it unconditionally here (regardless of
+                        // whether the "if" block below ends up using it)
+                        // marks the slot as fetched, so
+                        // ReportUnusedPublishesIfAny() below never flags a
+                        // legitimate "not every frame needs this" hand-off
+                        // as a dangling one - confirmed via a live run of
+                        // this exact phase's own build catching the
+                        // spurious "never fetched this frame" log spam
+                        // before this fix.
+                        const std::optional<std::function<void(VkCommandBuffer)>> gameSkyBackgroundCallbackForReplay =
+                            blackboard.Fetch<std::function<void(VkCommandBuffer)>>(kGameSkyBackgroundCallbackKey);
+#ifndef NDEBUG
+                        blackboard.ReportUnusedPublishesIfAny();
+#endif
+
+                        std::vector<rg::TextureHandle> outputs = std::move(frame.finalTextureOutputs);
+
+                        // task_manager/frame-debugger-7 campaign, PHASE3
+                        // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md,
+                        // Step 3.5) - render-pass-3 campaign, PHASE3 (Step
+                        // 3.7) - AddFrameDebuggerReplayPasses()'s existing
+                        // call site (Locked Design Decision 4 - kept
+                        // UNMIGRATED, called directly, exactly as before)
+                        // moves to HERE, AFTER DeclareInto() returns -
+                        // `blackboard`/`frame` are still ordinary Run()
+                        // locals, still in scope, so this Fetch()es the
+                        // Game View's own GPU Skinning buffers/sky-
+                        // background callback the now-migrated
+                        // "GpuSkinning"/"DrawSkyBackground" providers
+                        // already published onto THIS SAME frame's
+                        // blackboard - this also naturally satisfies the
+                        // pre-existing ordering requirement (replay passes
+                        // declared AFTER "RenderOpaque"/"DrawSkyBackground"/
+                        // "RenderTransparent") for free, since DeclareInto()'s
+                        // own final, sorted loop has already fully returned.
+                        if (gameTarget != nullptr && frameDebuggerCapture != nullptr
+                            && m_editorLayer->ConsumePendingFrameDebuggerReplayRequest()) {
+                            const std::vector<rg::BufferHandle> gpuSkinningBuffersForReplay =
+                                blackboard.Fetch<std::vector<rg::BufferHandle>>(kGpuSkinningOutputsKey)
+                                    .value_or(std::vector<rg::BufferHandle>{});
+                            const std::function<void(VkCommandBuffer)> recordGameSkyBackground =
+                                gameSkyBackgroundCallbackForReplay.value_or(std::function<void(VkCommandBuffer)>{});
+                            const std::size_t objectCount = m_game.CountGameViewDrawCommandsThisFrame();
+                            // IMPORTANT, CORRECTNESS-CRITICAL (see
+                            // RenderPasses.h's own updated doc comment on
+                            // AddFrameDebuggerReplayPasses()) - every
+                            // returned destination TextureHandle MUST be
+                            // appended to `outputs`, or
+                            // RenderGraphCompiler::Compile()'s own
+                            // backward-reachability culling scan silently
+                            // culls every one of these N passes.
+                            const std::vector<rg::TextureHandle> replayStepHandles =
+                                AddFrameDebuggerReplayPasses(b, m_game, m_renderer, gameAspectForReplay, objectCount,
+                                    gpuSkinningBuffersForReplay, recordGameSkyBackground, *gameTarget,
+                                    *frameDebuggerCapture);
+                            for (const rg::TextureHandle& replayHandle : replayStepHandles) {
+                                outputs.push_back(replayHandle);
+                            }
+                        }
+
+                        // Phase 7 of the compute-shader campaign
+                        // (COMPUTE_PHASE7_VALIDATION_TESTING_TOOLING_STRATEGY_v2.md)
+                        // - the texture-side validation workload's own
+                        // still-unmigrated call site (Locked Design Decision
+                        // 4 - never touched by this campaign). Declared (and
+                        // this handle added to `outputs`) only when the
+                        // Editor's own "Show Compute Blur (debug)" toggle is
+                        // on and "Scene" is visible; std::nullopt (always the
+                        // case for NullEditorLayer) means nothing was
+                        // declared at all this call.
+                        if (sceneVisibleForBlurValidation) {
+                            if (const std::optional<rg::TextureHandle> blurHandle = m_editorLayer->AddBlurValidationPass(
+                                    b, m_renderer, sceneColorHandleForBlurValidation, sceneExtentForBlurValidation)) {
                                 outputs.push_back(*blurHandle);
                             }
                         }
@@ -1157,8 +1409,8 @@ int Application::Run()
         // Not #if GTE_ENABLE_PROFILER-gated - see AGENTS.md's "Profiling"
         // section and this same function's own BeginFrame()/EndFrame()
         // calls, which aren't gated either. "RenderOpaque"/"DrawSkyBackground"/
-        // "RenderTransparent"/"SceneView" must match RenderPasses.cpp's own
-        // pass name literals exactly.
+        // "RenderTransparent" must match RenderPasses.cpp's own pass name
+        // literals exactly.
         //
         // Render Pass campaign, PHASE2 - Profiling::GpuPass::GameView used to
         // read a single "GameView" pass's own LastKnownStatsFor() before this
@@ -1175,6 +1427,30 @@ int Application::Run()
         // PassGpuStats{} for a pass name that was never declared this frame),
         // but is included here so this call site needs no further changes
         // once a future transparency campaign gives it real stats.
+        //
+        // render-pass-3 campaign, PHASE3 - KNOWN, DOCUMENTED LIMITATION:
+        // Scene View's own opaque/sky/transparent passes are now ALSO real,
+        // separate PassRecords named "RenderOpaque"/"DrawSkyBackground"/
+        // "RenderTransparent" (Step 3.4 - the same literal names Game View's
+        // own copies use, by this phase's own explicit design). `RenderGraph::
+        // LastKnownStatsFor()`/its own private `m_lastKnownStats` table is
+        // keyed PURELY by pass NAME (RenderGraph.cpp's `UpdateDrawStatsFor()`/
+        // `UpdateTimingFor()`), with NO ViewScope disambiguation - a real,
+        // pre-existing limitation of that mechanism that simply never
+        // mattered before this phase, since no two passes ever shared an
+        // identical literal name within one frame until now. The practical
+        // effect: whichever of Game/Scene View's own same-named pass EXECUTES
+        // LAST this frame (Scene's, given this phase's own per-view provider
+        // loop order) overwrites the other's entry, so
+        // `Profiling::GpuPass::GameView`'s draw-call/triangle-count/timing
+        // numbers below will silently read as SCENE View's own numbers
+        // whenever BOTH panels are visible simultaneously (a Profiler-panel
+        // display-only cosmetic issue - never a rendering-correctness one).
+        // Fixing this for real would mean teaching RenderGraph.cpp's own
+        // by-name lookup to also consider ViewScope, a genuine RenderGraph.cpp
+        // core change deliberately out of scope for this already-heaviest
+        // migration phase - flagged explicitly here and in this phase's own
+        // completion report as a known follow-up for a future phase/campaign.
         if (gameTarget != nullptr) {
             const rg::PassGpuStats gameViewStats = rg::CombinePassGpuStats({
                 m_renderGraph.LastKnownStatsFor("RenderOpaque"),
@@ -1188,7 +1464,16 @@ int Application::Run()
                 ToProfilingGpuSampleStatus(gameViewStats.timing.status), gameViewStats.timing.milliseconds);
         }
         if (sceneTarget != nullptr) {
-            const rg::PassGpuStats sceneViewStats = m_renderGraph.LastKnownStatsFor("SceneView");
+            // render-pass-3 campaign, PHASE3 - "SceneView" (the old, single,
+            // fused pass) no longer exists (Step 3.4) - Scene's own stats are
+            // now aggregated the SAME way Game View's are, from its own
+            // (same-named, see the KNOWN LIMITATION note above)
+            // "RenderOpaque"/"DrawSkyBackground"/"RenderTransparent" passes.
+            const rg::PassGpuStats sceneViewStats = rg::CombinePassGpuStats({
+                m_renderGraph.LastKnownStatsFor("RenderOpaque"),
+                m_renderGraph.LastKnownStatsFor("DrawSkyBackground"),
+                m_renderGraph.LastKnownStatsFor("RenderTransparent"),
+            });
             Profiling::FrameProfiler::Instance().SetGpuPassDrawStats(Profiling::GpuPass::SceneView,
                 Profiling::GpuSampleStatus::Present, sceneViewStats.drawStats.drawCallCount,
                 sceneViewStats.drawStats.triangleCount);
@@ -1249,20 +1534,31 @@ int Application::Run()
             try {
                 presentStats = m_renderer.PresentViaRenderGraph(m_renderGraph, needsDirectGameRender,
                     [&](rg::RenderGraphBuilder& b, rg::TextureHandle swapchainImage) {
-                        // GPU Vertex Skinning campaign, Phase 5 - only
-                        // meaningful when this pass is ALSO the one drawing
-                        // Game directly (needsDirectGameRender); see this
-                        // block's own directGameRenderAspect above. The
-                        // offscreen regime already dispatched GPU skinning
-                        // this frame whenever it ran at all (see the
-                        // offscreen build lambda above) - the two are
-                        // mutually exclusive per frame, so this never
-                        // double-dispatches the same model's compute pass.
-                        const std::vector<rg::BufferHandle> gpuSkinningBuffers = needsDirectGameRender
-                            ? AddGpuSkinningPasses(b, m_game, m_renderer)
-                            : std::vector<rg::BufferHandle>{};
-                        AddPresentPass(b, m_game, m_renderer, swapchainImage, directGameRenderAspect,
-                            [this](VkCommandBuffer cmd) { m_editorLayer->Render(cmd); }, gpuSkinningBuffers);
+                        // render-pass-3 campaign, PHASE3 (Step 3.5) -
+                        // "Present" now goes through m_presentRenderPipeline
+                        // instead of a direct AddGpuSkinningPasses()/
+                        // AddPresentPass() call pair - populate the small set
+                        // of per-frame members its ONE registered provider
+                        // reads (RegisterPresentRenderPipelineProvider()),
+                        // then drive its own SEPARATE
+                        // RenderPassBlackboard/RenderPassFrameContext -
+                        // NEVER shared with the offscreen regime's own
+                        // blackboard/frame context this same frame (Locked
+                        // Design Decision 6).
+                        m_needsDirectGameRenderThisFrame = needsDirectGameRender;
+                        m_directGameRenderAspectThisFrame = directGameRenderAspect;
+                        m_swapchainImageThisFrame = swapchainImage;
+                        m_recordImGuiThisFrame = [this](VkCommandBuffer cmd) { m_editorLayer->Render(cmd); };
+
+                        rg::RenderPassBlackboard presentBlackboard;
+                        presentBlackboard.BeginFrame();
+                        rg::RenderPassFrameContext presentFrame{
+                            {}, rg::RenderViewId::Shared(), presentBlackboard, b, {}, {}
+                        };
+                        m_presentRenderPipeline.DeclareInto(b, presentFrame);
+#ifndef NDEBUG
+                        presentBlackboard.ReportUnusedPublishesIfAny();
+#endif
                         return std::vector<rg::TextureHandle>{ swapchainImage };
                     });
             } catch (const std::exception& e) {
