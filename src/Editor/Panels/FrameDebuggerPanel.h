@@ -4,9 +4,17 @@
 #include "../FrameDebuggerHistory.h"
 #include "../FrameDebuggerPreviewProcessing.h"
 #include "../EditorLayer.h" // FrameDebuggerStateSnapshotView - PHASE7.
+// task_manager/frame-debugger-9 campaign, PHASE3 - full includes (not forward
+// declares) required: m_shaderPropertyVolumeRenderer below is a full
+// VolumeTexturePreviewRenderer member (not a pointer), and
+// m_shaderPropertyPreviewTexture is a std::optional<Texture2D> (std::optional<T>
+// needs T's complete definition even just to declare the member).
+#include "../../Renderer/VolumeTexturePreviewRenderer.h"
+#include "../../Renderer/Texture2D.h"
 
 #include <volk.h>
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -155,6 +163,48 @@ public:
     // even starts. Safe to call repeatedly / on an already-empty instance.
     void ReleasePreviewDescriptor();
 
+    // task_manager/frame-debugger-9 campaign, PHASE3 - releases
+    // m_shaderPropertyPreviewDescriptor/m_shaderPropertyPreviewTexture (if either
+    // currently holds anything) and clears m_shaderPropertyPreviewName/
+    // m_shaderPropertyPreviewLookupFailed - mirrors ReleasePreviewDescriptor()'s
+    // own shape closely, including AssetPreviewTexture::Reset()'s own "wait for
+    // the GPU to actually be idle first, but only when there is something to
+    // wait for" discipline (a rare, explicit, human-driven event - an occasional
+    // full stall here is an accepted, already-precedented cost, exactly like
+    // AssetPreviewTexture::Reset()'s own identical tradeoff). PUBLIC (not
+    // private), for the exact same reason ReleasePreviewDescriptor() immediately
+    // above is public - see that method's own doc comment: MUST be called
+    // explicitly by ImGuiEditorLayer's own destructor BEFORE
+    // ImGui_ImplVulkan_Shutdown() runs, since FrameDebuggerPanel is declared (and
+    // therefore destroyed, in reverse order) BEFORE ImGuiEditorLayer's own
+    // explicit destructor BODY (which calls ImGui_ImplVulkan_Shutdown()) even
+    // starts - relying on THIS class's own destructor alone would run too late.
+    // Safe to call repeatedly / on an already-empty instance.
+    //
+    // Called from: RequestShaderPropertyTexturePreview() itself (always, first,
+    // before doing new work); SetSelectedEventIndex() (PHASE2) whenever the
+    // selected event actually changes - "user go elsewhere" (tree click, slider
+    // drag, arrow-key nudge, or a fresh HTTP select_event); TriggerCapture()
+    // (indirectly, via its own SetSelectedEventIndex(-1) call - a fresh capture
+    // always resets selection, which already routes through the same
+    // chokepoint); ApplyEnabledEdge()'s true->false branch and Build()'s own
+    // "resume while Enabled" branch (both already call m_currentCapture.Clear() -
+    // add an explicit direct call here too, since those two sites do NOT go
+    // through SetSelectedEventIndex()); a new "Back to Step Preview" button in
+    // BuildInspectorPane() (Step 3.6, below); ~FrameDebuggerPanel() (via
+    // ReleasePreviewDescriptor()'s own existing sibling call site - add this call
+    // directly alongside it, after the destructor's own pre-existing
+    // vkDeviceWaitIdle() call); AND ImGuiEditorLayer::~ImGuiEditorLayer()
+    // (src/Editor/ImGuiEditorLayer.cpp) - directly alongside its existing
+    // `m_frameDebuggerPanel.ReleasePreviewDescriptor();` call, BEFORE
+    // ImGui_ImplVulkan_Shutdown() - see this method's own "why public" note
+    // above; the ~FrameDebuggerPanel() call site is still ALSO kept (a safe,
+    // idempotent no-op by the time it runs if ImGuiEditorLayer's destructor
+    // already released it first) purely for defense-in-depth, mirroring
+    // ReleasePreviewDescriptor() being called from both of those exact same two
+    // places today.
+    void ReleaseShaderPropertyTexturePreview();
+
     // task_manager/frame-debugger-3 campaign, PHASE7
     // (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md) - HTTP
     // automation entry points, called from ImGuiEditorLayer's own
@@ -262,6 +312,26 @@ private:
     // and the ImGui/Vulkan wrapping detail stays entirely local to the one
     // class that actually displays it.
     void EnsurePreviewDescriptor();
+
+    // task_manager/frame-debugger-9 campaign, PHASE3 - the "View" button's own
+    // click handler (called directly from BuildEventDetailsSection()'s
+    // ShaderProperties tab loop, THIS SAME Build() call - m_frameRenderer/
+    // m_frameRenderGraph are already valid non-null pointers by the time any
+    // button in this window could possibly be clicked, since Build() sets them
+    // unconditionally at its own top before ever reaching ImGui::Begin()). Always
+    // releases whatever was previously shown first (Locked Design Decision #2,
+    // PHASE0_MASTER_STRATEGY.md - "user click it draw preview once... user go
+    // again draw again" - there is deliberately NO staleness/dirty-check here,
+    // clicking the SAME row's button again always redoes the whole capture from
+    // scratch), then performs EXACTLY ONE fresh capture/raymarch + GPU upload for
+    // `textureName`/`kind`, wiring the result into m_shaderPropertyPreview* above -
+    // or, on a lookup miss OR a GPU upload failure (see this method's own .cpp
+    // body), leaves m_shaderPropertyPreviewLookupFailed = true with no descriptor.
+    // See this method's own .cpp body for the full two-branch (Texture vs.
+    // VolumeTexture) recipe - never called for `kind == rg::ResourceKind::Buffer`
+    // (the caller never draws a "View" button for a Buffer row at all - Locked
+    // Design Decision #8).
+    void RequestShaderPropertyTexturePreview(const std::string& textureName, rg::ResourceKind kind);
 
     // task_manager/frame-debugger-9 campaign, PHASE2
     // (PHASE2_DRAGGABLE_FRAME_STEP_SLIDER.md, Step 3.1) - the ONE place
@@ -416,6 +486,67 @@ private:
     // construction). Refreshed unconditionally once per Build() call,
     // before EnsurePreviewDescriptor() runs.
     VkImageView m_lastKnownRawPreviewView = VK_NULL_HANDLE;
+
+    // task_manager/frame-debugger-9 campaign, PHASE3 - non-empty exactly while the
+    // Inspector's big preview box is showing a one-shot shader-property texture
+    // preview INSTEAD of the ordinary step preview (m_previewDescriptor above) -
+    // the real render-graph resource name currently being shown (matches some
+    // FrameDebuggerTextureProperty::valueLabel the user clicked "View" on).
+    // Cleared (and the GPU resources below released) by
+    // ReleaseShaderPropertyTexturePreview() - see that method's own doc comment
+    // (PUBLIC section, above) for every site that calls it.
+    std::string m_shaderPropertyPreviewName;
+
+    // PHASE3 - which real resource kind m_shaderPropertyPreviewName was resolved
+    // as (only meaningful while m_shaderPropertyPreviewName is non-empty) -
+    // purely informational/for a future UI label; the actual branch already
+    // happened by the time this is set (see RequestShaderPropertyTexturePreview()).
+    rg::ResourceKind m_shaderPropertyPreviewKind = rg::ResourceKind::Texture;
+
+    // PHASE3 - true if `m_shaderPropertyPreviewName`'s currently-displayed image
+    // is a resolved snapshot lookup that FAILED (the name no longer resolves to
+    // anything in either registry - e.g. a stale name from a much older capture -
+    // OR the GPU upload itself failed, see RequestShaderPropertyTexturePreview()'s
+    // own try/catch below) - distinguishes "showing nothing because the user
+    // hasn't clicked View yet" (m_shaderPropertyPreviewName empty) from "showing
+    // nothing because the lookup/upload genuinely failed" (m_shaderPropertyPreviewName
+    // non-empty, this true) so BuildInspectorPane() can display an honest, distinct
+    // placeholder message for the latter rather than silently falling back to the
+    // step preview.
+    bool m_shaderPropertyPreviewLookupFailed = false;
+
+    // PHASE3 - the ONE owned GPU texture behind m_shaderPropertyPreviewDescriptor
+    // below, for EITHER the 2D-copy case OR the volume-raymarch case (both
+    // converge on "own a freshly-uploaded Texture2D" - Locked Design Decisions #9
+    // and #10, PHASE0_MASTER_STRATEGY.md) - never the render graph's own live,
+    // pooled/aliased VkImageView directly (a real dangling-reference risk this
+    // design deliberately avoids - see PHASE0's own Locked Design Decision #9).
+    std::optional<Texture2D> m_shaderPropertyPreviewTexture;
+
+    // PHASE3 - this class's own ImGui descriptor wrapping
+    // m_shaderPropertyPreviewTexture's view/sampler, exactly mirroring
+    // m_previewDescriptor's own ownership shape but COMPLETELY INDEPENDENT of it -
+    // the two are never the same slot, since the user must be able to look at
+    // either kind of preview without the other's state interfering.
+    VkDescriptorSet m_shaderPropertyPreviewDescriptor = VK_NULL_HANDLE;
+
+    // PHASE3 - the real width/height of whichever texture
+    // m_shaderPropertyPreviewDescriptor currently wraps - fed into PHASE1's
+    // ComputeAspectFitImageRect() exactly like snapshot.renderTarget.width/height
+    // already is for the ordinary step preview.
+    VkExtent2D m_shaderPropertyPreviewExtent{};
+
+    // PHASE3 - the dedicated, on-demand volume raymarch renderer this panel now
+    // owns (mirrors m_previewProcessor's own "small, dedicated GPU dispatcher this
+    // panel owns" precedent) - reused, UNCHANGED, from
+    // src/Renderer/VolumeTexturePreviewRenderer.h (the exact same class GET
+    // /get_texture's own volume branch already uses). This member's own internal
+    // GPU resources (pipeline/descriptor set/scratch Texture2D) own no ImGui
+    // descriptor of their own, so - unlike m_shaderPropertyPreviewDescriptor below -
+    // its destruction order relative to ImGui_ImplVulkan_Shutdown() does not
+    // matter; it only needs the GPU to be idle first, already guaranteed by this
+    // class's own destructor's existing unconditional vkDeviceWaitIdle() call.
+    VolumeTexturePreviewRenderer m_shaderPropertyVolumeRenderer;
 
     // The live VkDevice, refreshed unconditionally every Build() call from
     // `renderer.GetVulkanContextInfo().device` (cheap - a few field reads) -

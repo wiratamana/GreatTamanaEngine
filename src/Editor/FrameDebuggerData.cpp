@@ -321,17 +321,29 @@ FrameDebuggerEventNode BuildComputeDispatchLeaf(
     // textures - real read/write resource names, EACH LABELED BY ITS REAL
     // KIND (PHASE1's new readKinds/writeKinds) so a buffer write (e.g. GPU
     // Skinning's own output buffer) is never mislabeled as a texture.
+    // task_manager/frame-debugger-9 campaign, PHASE3 - each row also now
+    // carries its own real `kind` PLUS `isRenderGraphResource = true` (this
+    // IS the one real construction site that has that data - see
+    // FrameDebuggerTextureProperty::isRenderGraphResource's own doc comment,
+    // FrameDebuggerData.h), which is what lets
+    // Panels/FrameDebuggerPanel.cpp's ShaderProperties tab decide which rows
+    // get a "View" button.
     for (std::size_t i = 0; i < pass.readNames.size(); ++i) {
         FrameDebuggerTextureProperty texture;
-        texture.name = ReadRowLabelForKind(i < pass.readKinds.size() ? pass.readKinds[i] : rg::ResourceKind::Texture);
+        const rg::ResourceKind readKind = i < pass.readKinds.size() ? pass.readKinds[i] : rg::ResourceKind::Texture;
+        texture.name = ReadRowLabelForKind(readKind);
         texture.valueLabel = pass.readNames[i];
+        texture.kind = readKind;
+        texture.isRenderGraphResource = true;
         details.textures.push_back(std::move(texture));
     }
     for (std::size_t i = 0; i < pass.writeNames.size(); ++i) {
         FrameDebuggerTextureProperty texture;
-        texture.name
-            = WriteRowLabelForKind(i < pass.writeKinds.size() ? pass.writeKinds[i] : rg::ResourceKind::Texture);
+        const rg::ResourceKind writeKind = i < pass.writeKinds.size() ? pass.writeKinds[i] : rg::ResourceKind::Texture;
+        texture.name = WriteRowLabelForKind(writeKind);
         texture.valueLabel = pass.writeNames[i];
+        texture.kind = writeKind;
+        texture.isRenderGraphResource = true;
         details.textures.push_back(std::move(texture));
     }
 

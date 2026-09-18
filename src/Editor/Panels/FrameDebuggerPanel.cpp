@@ -2,6 +2,8 @@
 
 #include "../EditorContext.h"
 #include "../MemoryPanelData.h" // gte::ToString(VkFormat) - reused for the real render-target format label (PHASE3).
+#include "../../Encoding/HdrColorVisualization.h" // task_manager/frame-debugger-9 campaign, PHASE3 - Encoding::ConvertHdrRgba16fToRgba8().
+#include "../../Encoding/PixelConversion.h" // PHASE3 - Encoding::ConvertBgraToRgbaInPlace().
 #include "../../Renderer/RenderGraph/RenderGraph.h"
 #include "../../Renderer/Renderer.h"
 #include "../../Renderer/RenderTexture.h"
@@ -11,7 +13,10 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
+#include <exception>
 #include <utility>
+#include <vector>
 
 namespace gte {
 
@@ -23,6 +28,15 @@ void BuildPropertyRow(const char* label, const std::string& value)
     ImGui::TextUnformatted(label);
     ImGui::SameLine(150.0f);
     ImGui::TextUnformatted(value.c_str());
+}
+
+// task_manager/frame-debugger-9 campaign, PHASE3 - byte-for-byte duplicate of
+// Application.cpp's own anonymous-namespace IsBgraFormat() (src/Editor/ may
+// never #include src/Application/ headers - Clean Architecture, AGENTS.md).
+// Keep in sync with that copy if it ever changes.
+bool IsBgraFormat(VkFormat format) noexcept
+{
+    return format == VK_FORMAT_B8G8R8A8_UNORM || format == VK_FORMAT_B8G8R8A8_SRGB;
 }
 
 } // namespace
@@ -43,6 +57,14 @@ FrameDebuggerPanel::~FrameDebuggerPanel()
         vkDeviceWaitIdle(m_device);
     }
     ReleasePreviewDescriptor();
+    // task_manager/frame-debugger-9 campaign, PHASE3 - defense-in-depth only
+    // (see ReleaseShaderPropertyTexturePreview()'s own doc comment,
+    // FrameDebuggerPanel.h): the REQUIRED release site is
+    // ImGuiEditorLayer::~ImGuiEditorLayer(), BEFORE ImGui_ImplVulkan_Shutdown()
+    // runs - by the time THIS destructor's own member-destruction-order cleanup
+    // would otherwise run, that has already happened, making this call a safe,
+    // idempotent no-op in ordinary shutdown.
+    ReleaseShaderPropertyTexturePreview();
 }
 
 void FrameDebuggerPanel::ReleasePreviewDescriptor()
@@ -52,6 +74,142 @@ void FrameDebuggerPanel::ReleasePreviewDescriptor()
         m_previewDescriptor = VK_NULL_HANDLE;
         m_lastKnownPreviewView = VK_NULL_HANDLE;
     }
+}
+
+// task_manager/frame-debugger-9 campaign, PHASE3 - see this method's own doc
+// comment (FrameDebuggerPanel.h, PUBLIC section) for the full list of call
+// sites and the "why public" reasoning.
+void FrameDebuggerPanel::ReleaseShaderPropertyTexturePreview()
+{
+    if ((m_shaderPropertyPreviewTexture.has_value() || m_shaderPropertyPreviewDescriptor != VK_NULL_HANDLE)
+        && m_device != VK_NULL_HANDLE) {
+        vkDeviceWaitIdle(m_device); // Mirrors AssetPreviewTexture::Reset()'s own identical, already-accepted tradeoff.
+    }
+    if (m_shaderPropertyPreviewDescriptor != VK_NULL_HANDLE) {
+        ImGui_ImplVulkan_RemoveTexture(m_shaderPropertyPreviewDescriptor);
+        m_shaderPropertyPreviewDescriptor = VK_NULL_HANDLE;
+    }
+    m_shaderPropertyPreviewTexture.reset();
+    m_shaderPropertyPreviewName.clear();
+    m_shaderPropertyPreviewLookupFailed = false;
+    m_shaderPropertyPreviewExtent = VkExtent2D{};
+}
+
+// task_manager/frame-debugger-9 campaign, PHASE3 - the "View" button's own
+// click handler - see this method's own doc comment (FrameDebuggerPanel.h,
+// private section) for the full contract. Always releases whatever was
+// previously shown first (Locked Design Decision #2, PHASE0_MASTER_STRATEGY.md),
+// then performs EXACTLY ONE fresh capture/raymarch + GPU upload for
+// `textureName`/`kind`.
+void FrameDebuggerPanel::RequestShaderPropertyTexturePreview(const std::string& textureName, rg::ResourceKind kind)
+{
+    ReleaseShaderPropertyTexturePreview(); // Locked Design Decision #2 - always start fresh.
+
+    if (m_frameRenderer == nullptr || m_frameRenderGraph == nullptr) {
+        return; // Defensive only - unreachable in practice, see this method's own header doc comment.
+    }
+
+    m_shaderPropertyPreviewKind = kind;
+
+    // task_manager/frame-debugger-9 campaign, PHASE3 - the actual CreateTexture2D()
+    // upload (common to both branches below) is wrapped in try/catch: Texture2D's
+    // real constructor (Texture2D.cpp) can throw std::runtime_error on a genuine
+    // vmaCreateImage/vkCreateImageView/vkCreateSampler failure - a rare but real
+    // GPU-resource-exhaustion edge case that has NOTHING to do with the
+    // allowStorageImageAccess opt-in this call never uses. This mirrors
+    // AssetPreviewTexture::Resolve()'s own identical try/catch around its own,
+    // otherwise-identical CreateTexture2D() call - an uncaught exception here
+    // would unwind straight out of an ImGui button click handler mid-Begin()/
+    // End() pair, almost certainly crashing the Editor process instead of
+    // showing the honest "not currently available" placeholder this method
+    // already has ready for every OTHER failure mode.
+    auto uploadOrFail = [this, &textureName](const void* pixelsRgba8, int width, int height, const char* debugName) -> bool {
+        try {
+            m_shaderPropertyPreviewTexture.emplace(m_frameRenderer->CreateTexture2D(pixelsRgba8, width, height, debugName));
+            return true;
+        } catch (const std::exception&) {
+            m_shaderPropertyPreviewTexture.reset();
+            m_shaderPropertyPreviewName = textureName;
+            m_shaderPropertyPreviewLookupFailed = true;
+            return false;
+        }
+    };
+
+    if (kind == rg::ResourceKind::Texture) {
+        const std::optional<rg::DebugTextureSnapshot> snapshot = m_frameRenderGraph->DebugTextureSnapshotFor(textureName);
+        if (!snapshot.has_value()) {
+            m_shaderPropertyPreviewName = textureName;
+            m_shaderPropertyPreviewLookupFailed = true;
+            return;
+        }
+
+        m_frameRenderer->WaitForGpuIdle(); // Rare, explicit, human-driven - same accepted cost GET /get_texture already pays.
+
+        const bool isHdrColor = (snapshot->target.format == VK_FORMAT_R16G16B16A16_SFLOAT);
+        const int bytesPerPixel = isHdrColor ? 8 : 4;
+        // NON-const, deliberately (found during this document's own double-check):
+        // the BGRA branch below mutates raw.pixels IN PLACE. A `const`-qualified
+        // local here would make that mutation only reachable via a const_cast on a
+        // truly-const object - technically undefined behavior, and NOT how
+        // Application.cpp's own GET /get_texture handler declares its own,
+        // otherwise-identical local (`Renderer::CapturedRawPixels raw = ...;`, no
+        // `const`) - copy that exactly, not a `const`-qualified variant.
+        Renderer::CapturedRawPixels raw = m_frameRenderer->CaptureImagePixels(
+            snapshot->target.image, VK_IMAGE_ASPECT_COLOR_BIT, snapshot->target.format,
+            snapshot->target.extent, snapshot->colorState, bytesPerPixel);
+
+        std::vector<std::uint8_t> hdrConverted;
+        const std::uint8_t* rgba8Pixels = raw.pixels.data();
+        bool ok = true;
+        if (isHdrColor) {
+            hdrConverted.resize(static_cast<std::size_t>(raw.width) * static_cast<std::size_t>(raw.height) * 4);
+            ok = Encoding::ConvertHdrRgba16fToRgba8(raw.pixels.data(), raw.format, raw.width, raw.height, hdrConverted.data());
+            rgba8Pixels = hdrConverted.data();
+        } else if (IsBgraFormat(raw.format)) {
+            // Safe in-place swizzle - CaptureImagePixels() already handed us a
+            // buffer we own exclusively, and `raw` is non-const (see above), so
+            // no const_cast is needed at all.
+            Encoding::ConvertBgraToRgbaInPlace(raw.pixels.data(), raw.width, raw.height);
+        }
+
+        if (!ok) {
+            m_shaderPropertyPreviewName = textureName;
+            m_shaderPropertyPreviewLookupFailed = true;
+            return;
+        }
+
+        if (!uploadOrFail(rgba8Pixels, raw.width, raw.height, "FrameDebuggerShaderPropertyPreview")) {
+            return; // uploadOrFail() already set the lookup-failed state.
+        }
+        m_shaderPropertyPreviewExtent = snapshot->target.extent;
+    } else if (kind == rg::ResourceKind::VolumeTexture) {
+        const std::optional<rg::DebugVolumeTextureSnapshot> snapshot =
+            m_frameRenderGraph->DebugVolumeTextureSnapshotFor(textureName);
+        if (!snapshot.has_value()) {
+            m_shaderPropertyPreviewName = textureName;
+            m_shaderPropertyPreviewLookupFailed = true;
+            return;
+        }
+
+        m_frameRenderer->WaitForGpuIdle();
+
+        const VolumeTexturePreviewInterpretation interpretation = SelectVolumeTexturePreviewInterpretation(textureName);
+        const VolumeTexturePreviewRenderer::CapturedRawPixels raw =
+            m_shaderPropertyVolumeRenderer.RenderPreview(*m_frameRenderer, snapshot->target, snapshot->state, interpretation);
+
+        if (!uploadOrFail(raw.pixels.data(), raw.width, raw.height, "FrameDebuggerShaderPropertyVolumePreview")) {
+            return;
+        }
+        m_shaderPropertyPreviewExtent = VkExtent2D{ static_cast<std::uint32_t>(raw.width), static_cast<std::uint32_t>(raw.height) };
+    } else {
+        return; // rg::ResourceKind::Buffer - never reachable, no "View" button is ever drawn for it (Locked Design Decision #8).
+    }
+
+    m_shaderPropertyPreviewDescriptor = ImGui_ImplVulkan_AddTexture(
+        m_shaderPropertyPreviewTexture->Sampler(), m_shaderPropertyPreviewTexture->View(),
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL); // Correct here (unlike a live registry wrap) - this is a freshly-uploaded, fully-owned Texture2D, always left in this exact layout post-upload.
+    m_shaderPropertyPreviewName = textureName;
+    m_shaderPropertyPreviewLookupFailed = false;
 }
 
 void FrameDebuggerPanel::EnsurePreviewDescriptor()
@@ -232,11 +390,12 @@ void FrameDebuggerPanel::SetSelectedEventIndex(int newIndex)
         return; // No real change - nothing to release/refresh.
     }
     m_selectedEventIndex = newIndex;
-    // task_manager/frame-debugger-9 campaign, PHASE3 will add here:
-    // ReleaseShaderPropertyTexturePreview(); - "the user went elsewhere"
-    // (PHASE0_MASTER_STRATEGY.md's Locked Design Decision #2) - left as this
-    // phase's own explicit extension point rather than speculatively adding
-    // an empty method call now.
+    // task_manager/frame-debugger-9 campaign, PHASE3 - "the user went
+    // elsewhere" (PHASE0_MASTER_STRATEGY.md's Locked Design Decision #2):
+    // whenever the selected event genuinely changes, any currently-displayed
+    // shader-property one-shot texture preview is released, falling back to
+    // the newly-selected event's own ordinary step preview.
+    ReleaseShaderPropertyTexturePreview();
 }
 
 // task_manager/frame-debugger-3 campaign, PHASE7
@@ -305,6 +464,10 @@ void FrameDebuggerPanel::ApplyEnabledEdge(EditorContext& ctx, bool newEnabled)
     } else if (!m_enabled && wasEnabled) {
         // NEW (frame-debugger-7 campaign, PHASE1) - "clear on Disable".
         m_currentCapture.Clear();
+        // task_manager/frame-debugger-9 campaign, PHASE3 - a shader-property
+        // one-shot preview referencing this now-cleared capture must not
+        // linger on screen.
+        ReleaseShaderPropertyTexturePreview();
     }
 }
 
@@ -588,7 +751,44 @@ void FrameDebuggerPanel::BuildInspectorPane(
     ImGui::PushStyleColor(ImGuiCol_ChildBg, IM_COL32(0, 0, 0, 255));
     ImGui::BeginChild("FrameDebuggerTexturePreview", ImVec2(0.0f, previewHeight), true);
     {
-        if (showPreviewTexture) {
+        // task_manager/frame-debugger-9 campaign, PHASE3 - a one-shot
+        // shader-property texture preview (Locked Design Decision #2,
+        // PHASE0_MASTER_STRATEGY.md) takes over this WHOLE box, replacing the
+        // ordinary step preview entirely, whenever one is currently being
+        // shown - the two are never displayed at once.
+        if (!m_shaderPropertyPreviewName.empty()) {
+            ImGui::TextDisabled("Viewing: %s", m_shaderPropertyPreviewName.c_str());
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Back to Step Preview")) {
+                ReleaseShaderPropertyTexturePreview();
+            }
+            if (m_shaderPropertyPreviewDescriptor != VK_NULL_HANDLE) {
+                const ImVec2 avail = ImGui::GetContentRegionAvail();
+                if (avail.x >= 1.0f && avail.y >= 1.0f) {
+                    const FrameDebuggerAspectFitRect fit = ComputeAspectFitImageRect(avail.x, avail.y,
+                        static_cast<float>(m_shaderPropertyPreviewExtent.width),
+                        static_cast<float>(m_shaderPropertyPreviewExtent.height));
+                    const ImVec2 cursorBase = ImGui::GetCursorPos();
+                    ImGui::SetCursorPos(ImVec2(cursorBase.x + fit.offsetX, cursorBase.y + fit.offsetY));
+                    ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(m_shaderPropertyPreviewDescriptor)),
+                        ImVec2(fit.width, fit.height));
+                }
+            } else {
+                const ImVec2 avail = ImGui::GetContentRegionAvail();
+                // PHASE3 - an honest, distinct placeholder for the "lookup or
+                // GPU upload genuinely failed" case, separate from the plain
+                // "No Texture" bucket below (see
+                // m_shaderPropertyPreviewLookupFailed's own doc comment,
+                // FrameDebuggerPanel.h).
+                const char* placeholderText = m_shaderPropertyPreviewLookupFailed
+                    ? "Texture not currently available for preview."
+                    : "No Texture";
+                const ImVec2 textSize = ImGui::CalcTextSize(placeholderText);
+                ImGui::SetCursorPos(ImVec2(
+                    std::max(0.0f, (avail.x - textSize.x) * 0.5f), std::max(0.0f, (avail.y - textSize.y) * 0.5f)));
+                ImGui::TextDisabled("%s", placeholderText);
+            }
+        } else if (showPreviewTexture) {
             const ImVec2 avail = ImGui::GetContentRegionAvail();
             if (avail.x >= 1.0f && avail.y >= 1.0f) {
                 // task_manager/frame-debugger-9 campaign, PHASE1
@@ -674,8 +874,37 @@ void FrameDebuggerPanel::BuildEventDetailsSection(const std::optional<FrameDebug
         if (ImGui::BeginTabItem("ShaderProperties")) {
             if (!d.textures.empty()) {
                 ImGui::SeparatorText("Textures");
-                for (const FrameDebuggerTextureProperty& texture : d.textures) {
+                // task_manager/frame-debugger-9 campaign, PHASE3 - indexed by
+                // this row's own position (i), NOT just texture.valueLabel -
+                // a compute pass that reads AND writes a resource under the
+                // exact same registered name (an in-place/accumulation-style
+                // dispatch) would otherwise produce two rows with an
+                // identical valueLabel, and a "View##" + valueLabel button ID
+                // would collide between them (Dear ImGui IDs must be unique
+                // within the same window/ID-stack scope). No such pass exists
+                // in this engine today, but nothing structurally prevents one
+                // being added later, and indexing the loop instead is free.
+                for (std::size_t i = 0; i < d.textures.size(); ++i) {
+                    const FrameDebuggerTextureProperty& texture = d.textures[i];
                     BuildPropertyRow(texture.name.c_str(), texture.valueLabel);
+                    // Locked Design Decisions #1/#3/#8 (PHASE0_MASTER_STRATEGY.md):
+                    // only a real render-graph 2D/volume texture gets a "View"
+                    // button - never a Buffer row, never a Material Texture row
+                    // (isRenderGraphResource is already false for those).
+                    if (texture.isRenderGraphResource && texture.kind != rg::ResourceKind::Buffer) {
+                        ImGui::SameLine();
+                        const bool isCurrentlyViewing = (m_shaderPropertyPreviewName == texture.valueLabel);
+                        if (isCurrentlyViewing) {
+                            ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+                        }
+                        const std::string buttonId = "View##Texture" + std::to_string(i);
+                        if (ImGui::SmallButton(buttonId.c_str())) {
+                            RequestShaderPropertyTexturePreview(texture.valueLabel, texture.kind);
+                        }
+                        if (isCurrentlyViewing) {
+                            ImGui::PopStyleColor();
+                        }
+                    }
                 }
             }
             if (!d.vectors.empty()) {
@@ -746,6 +975,10 @@ void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg:
     // next such transition.
     if (m_enabled && m_wasPlaybackPaused && !ctx.playbackPaused) {
         m_currentCapture.Clear();
+        // task_manager/frame-debugger-9 campaign, PHASE3 - same "the frame
+        // info got removed from memory" rule applies to a currently-displayed
+        // shader-property one-shot preview too.
+        ReleaseShaderPropertyTexturePreview();
     }
     m_wasPlaybackPaused = ctx.playbackPaused;
 

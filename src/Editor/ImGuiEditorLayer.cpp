@@ -272,6 +272,11 @@ public:
         // own member-order comment below - so its OWN destructor alone
         // would run too late otherwise).
         m_frameDebuggerPanel.ReleasePreviewDescriptor();
+        // task_manager/frame-debugger-9 campaign, PHASE3 - REQUIRED, not
+        // optional (see ReleaseShaderPropertyTexturePreview()'s own doc
+        // comment, FrameDebuggerPanel.h, for the full "why") - same ordering
+        // requirement as ReleasePreviewDescriptor() immediately above.
+        m_frameDebuggerPanel.ReleaseShaderPropertyTexturePreview();
 #if GTE_ENABLE_PROJECT_PANEL
         // Must release its own GPU texture/ImGui descriptor(s) BEFORE
         // ImGui_ImplVulkan_Shutdown() below - member destruction order

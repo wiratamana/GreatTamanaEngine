@@ -39,6 +39,36 @@ namespace gte {
 struct FrameDebuggerTextureProperty {
     std::string name;
     std::string valueLabel;
+
+    // task_manager/frame-debugger-9 campaign, PHASE3 - which real kind of
+    // render-graph resource `valueLabel` names, IF this row is a render-graph
+    // resource at all - see `isRenderGraphResource` below. Meaningless
+    // (left at its default) when `isRenderGraphResource` is false. Populated
+    // directly from the pass's own real rg::ResourceKind
+    // (RenderGraphPassSnapshot::readKinds/writeKinds) at the ONE real
+    // construction site that has that data, BuildComputeDispatchLeaf() -
+    // never guessed from `name`'s own display-label text (e.g. "Read
+    // Texture" vs. "Read Volume Texture"), which would be a fragile,
+    // stringly-typed shortcut this codebase's own ReadRowLabelForKind()/
+    // WriteRowLabelForKind() precedent deliberately avoids elsewhere too.
+    rg::ResourceKind kind = rg::ResourceKind::Texture;
+
+    // task_manager/frame-debugger-9 campaign, PHASE3 - true ONLY for a row
+    // built from a real, name-addressable RenderGraphBuilder resource this
+    // frame's render graph actually declared (a compute pass's own Read/Write
+    // Texture or Read/Write Volume Texture row) - i.e. a row whose
+    // `valueLabel` is guaranteed resolvable via
+    // RenderGraph::DebugTextureSnapshotFor()/DebugVolumeTextureSnapshotFor().
+    // FALSE for a "Material Texture" row (BuildGameViewLeaf()/
+    // BuildGameViewDrawRecordLeaf() - an asset-based mesh texture with no
+    // render-graph registry entry at all - Locked Design Decision #1,
+    // PHASE0_MASTER_STRATEGY.md: explicitly out of scope for the new
+    // Panels/FrameDebuggerPanel.cpp "View" button this campaign adds) and for
+    // a "Read Buffer"/"Write Buffer" row (kind == rg::ResourceKind::Buffer -
+    // never an image at all, Locked Design Decision #8). Defaults to false so
+    // every EXISTING construction site this phase does not touch (Material
+    // Texture rows) is correct with zero code changes there.
+    bool isRenderGraphResource = false;
 };
 
 // One vector property row (e.g. "_Color", "(1, 1, 1, 1)").

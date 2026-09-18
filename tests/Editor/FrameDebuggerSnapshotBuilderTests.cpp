@@ -704,16 +704,33 @@ TEST(FrameDebuggerSnapshotBuilderTest, ComputeDispatchLeafLabelsReadWriteRowsByR
     ASSERT_EQ(details.textures.size(), 6u);
     EXPECT_EQ(details.textures[0].name, "Read Texture");
     EXPECT_EQ(details.textures[0].valueLabel, "SomeTexture");
+    // task_manager/frame-debugger-9 campaign, PHASE3 - each render-graph row
+    // now also carries its own real `kind` PLUS `isRenderGraphResource ==
+    // true` (Step 3.8's own required coverage: a Buffer row IS a real
+    // render-graph resource too, just never image-previewable - `kind` is
+    // what actually gates the "View" button, not this flag alone).
+    EXPECT_EQ(details.textures[0].kind, rg::ResourceKind::Texture);
+    EXPECT_TRUE(details.textures[0].isRenderGraphResource);
     EXPECT_EQ(details.textures[1].name, "Read Buffer");
     EXPECT_EQ(details.textures[1].valueLabel, "SomeBuffer");
+    EXPECT_EQ(details.textures[1].kind, rg::ResourceKind::Buffer);
+    EXPECT_TRUE(details.textures[1].isRenderGraphResource);
     EXPECT_EQ(details.textures[2].name, "Read Volume Texture");
     EXPECT_EQ(details.textures[2].valueLabel, "SomeVolume");
+    EXPECT_EQ(details.textures[2].kind, rg::ResourceKind::VolumeTexture);
+    EXPECT_TRUE(details.textures[2].isRenderGraphResource);
     EXPECT_EQ(details.textures[3].name, "Write Texture");
     EXPECT_EQ(details.textures[3].valueLabel, "OutputTexture");
+    EXPECT_EQ(details.textures[3].kind, rg::ResourceKind::Texture);
+    EXPECT_TRUE(details.textures[3].isRenderGraphResource);
     EXPECT_EQ(details.textures[4].name, "Write Buffer");
     EXPECT_EQ(details.textures[4].valueLabel, "OutputBuffer");
+    EXPECT_EQ(details.textures[4].kind, rg::ResourceKind::Buffer);
+    EXPECT_TRUE(details.textures[4].isRenderGraphResource);
     EXPECT_EQ(details.textures[5].name, "Write Volume Texture");
     EXPECT_EQ(details.textures[5].valueLabel, "OutputVolume");
+    EXPECT_EQ(details.textures[5].kind, rg::ResourceKind::VolumeTexture);
+    EXPECT_TRUE(details.textures[5].isRenderGraphResource);
 }
 
 // NEW - PHASE2's own Step 3.6 item (e): eventIndex values across the WHOLE
@@ -941,6 +958,32 @@ TEST(FrameDebuggerSnapshotBuilderTest, SkyBackgroundLeafSurvivesAlongsideCompute
     EXPECT_EQ(postGroup.children[0].eventIndex, 4);
     EXPECT_EQ(snapshot.totalEventCount, 5);
 }
+
+// task_manager/frame-debugger-9 campaign, PHASE3 (Step 3.8) - a
+// "Material Texture" row (BuildGameViewDrawRecordLeaf()'s per-entity draw
+// leaf) must have `isRenderGraphResource == false` - it has no render-graph
+// registry entry at all (Locked Design Decision #1, PHASE0_MASTER_STRATEGY.md),
+// so Panels/FrameDebuggerPanel.cpp's ShaderProperties tab must never draw a
+// "View" button next to it.
+TEST(FrameDebuggerSnapshotBuilderTest, MaterialTextureRowIsNeverARenderGraphResource)
+{
+    rg::RenderGraphSnapshot graphSnapshot;
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("GameView"));
+
+    FrameDebuggerCaptureContext capture;
+    capture.RecordEntityDraw(3, 0, "SmokeTestCube", "Mesh.vert/Mesh.frag (PositionNormal)", "MaterialTexture abc123", 12);
+
+    const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
+
+    ASSERT_EQ(snapshot.rootNodes.size(), 1u);
+    const FrameDebuggerEventNode& gameViewLeaf = snapshot.rootNodes[0].children[0];
+    ASSERT_EQ(gameViewLeaf.children.size(), 1u);
+    ASSERT_TRUE(gameViewLeaf.children[0].details.has_value());
+    ASSERT_EQ(gameViewLeaf.children[0].details->textures.size(), 1u);
+    EXPECT_EQ(gameViewLeaf.children[0].details->textures[0].name, "Material Texture");
+    EXPECT_FALSE(gameViewLeaf.children[0].details->textures[0].isRenderGraphResource);
+}
+
 
 } // namespace
 } // namespace gte
