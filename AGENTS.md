@@ -214,9 +214,55 @@ itemized list (six Locked Design Decisions in total) so a future reader of
 the original design doc is never misled into thinking it shipped exactly as
 originally written.
 
+A follow-up campaign, `render-pass-4` (three phases,
+`task_manager/render-pass-4/PHASE0_MASTER_STRATEGY.md`), fixed a confirmed
+structural gap in `RenderPassEvent` itself: the enum LOOKED like it decided
+real pass execution order, but `RenderGraphCompiler::Compile()`'s own RAW/WAW
+dependency-edge construction never read it at all - ordering was 100% a
+function of raw C++ declaration order, a fact that already caused one real,
+live, confirmed production bug (`AtmosphereComposite` silently culling
+`RenderOpaque`/`DrawSkyBackground`, patched narrowly by `render-pass-3`'s own
+`ProviderTiming` two-phase split, not fixed at the root). PHASE1 shipped a
+pure, Tier-1-tested safety net first, changing zero scheduling behavior: a new
+`DetectRenderPassEventContradictions()` function wired into `Compile()` that
+reports - via an unconditional `stderr` message plus a debug-build `assert()`
+- the exact moment a pass's declared `RenderPassEvent` contradicts what its
+real, compiler-enforced resource dependencies say must happen. **PHASE2 then
+shipped this campaign's ONE genuine, deliberate behavior change**:
+`RenderGraphCompiler::Compile()` now computes an "effective order" - every
+pass stable-sorted by `(RenderPassEvent, original declaration index)` - and
+walks passes in THAT order, instead of raw declaration order, for both its
+RAW/WAW dependency-edge scan and its Kahn's-algorithm ready-set tie-break.
+`RenderPassEvent` is therefore real, load-bearing ordering input for the
+first time; it keeps its exact original name (never renamed), and
+`RenderGraphBuilder::AddRenderPass()`'s own two overloads remain byte-for-byte
+unchanged - only what order `Compile()` processes already-declared passes in
+changed. A real production-code fix landed alongside it, found by PHASE2's
+required audit and confirmed via `ask_questions`:
+`src/Editor/ComputeBlurValidation.cpp`'s pass is now explicitly tagged
+`RenderPassEvent::AfterTransparents` instead of the implicit default
+`Opaques`, since the new effective order would otherwise have silently walked
+it before `DrawSkyBackground`/`RenderTransparent` (Scene View) - the exact
+"orphan read" bug shape this campaign exists to prevent, this time freshly
+introduced by the reorder itself rather than fixed by it. **What remains true
+about `RenderPassEvent` today: it is a REAL ordering key `Compile()` actually
+uses (not just a sort hint for `RenderPipeline`'s own deferred-pass list), but
+it is still NOT a dependency mechanism** - a pass with a genuinely WRONG
+`RenderPassEvent` tag relative to its real resource reads/writes remains a
+real hazard, now caught by PHASE1's detector instead of silently
+miscompiling. Verified with a full clean build, a full `ctest` regression
+pass (1626 tests, 100% passing, one pre-existing environment-gated skip - up
+from `render-pass-3`'s own 1616 baseline), and a live, HTTP-driven Frame
+Debugger + Scene View smoke test confirming the real production pass tree's
+execution order (Atmosphere LUTs, then Opaque, then Sky, then the Post-Game-
+View Composite pass) is visually unchanged from every prior campaign's own
+final screenshot. See `task_manager/render-pass-4/CAMPAIGN_COMPLETION_REPORT.md`
+for the full three-phase writeup.
+
 Full history: `task_manager/render-pass-1/PHASE0_MASTER_STRATEGY.md`,
-`task_manager/render-pass-2/PHASE0_MASTER_STRATEGY.md`, and
-`task_manager/render-pass-3/PHASE0_MASTER_STRATEGY.md`, and each
+`task_manager/render-pass-2/PHASE0_MASTER_STRATEGY.md`,
+`task_manager/render-pass-3/PHASE0_MASTER_STRATEGY.md`, and
+`task_manager/render-pass-4/PHASE0_MASTER_STRATEGY.md`, and each
 `PHASEn_COMPLETION_REPORT.md`/`CAMPAIGN_COMPLETION_REPORT.md` in those same
 folders.
 
