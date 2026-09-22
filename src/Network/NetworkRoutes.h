@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "../Editor/EditorPanelCatalog.h"
+#include "../Editor/Logger.h"
 
 namespace gte::Network {
 
@@ -868,5 +869,70 @@ ParsedScenePathRequest ParseScenePathRequest(const std::string& jsonBody);
 // Success shape: {"success":true,"resolved_path":"<resolvedPath>"}
 // Failure shape: identical to BuildGenericErrorResponseJson() below.
 std::string BuildScenePathResponseJson(bool success, const std::string& errorMessage, const std::string& resolvedPath);
+
+// --- task_manager/logger-1 campaign, PHASE3
+// (PHASE3_NETWORK_ENDPOINTS_GET_LOGS_AND_CLEAR_LOGS.md) - GET /get_logs and
+// POST /clear_logs. Both call gte::Logger::Query()/Clear() DIRECTLY, with NO
+// new cross-thread bridge - a deliberate, narrow exception to this file's
+// usual "route handler reaches engine state only through a reviewed bridge"
+// rule (see this file's header comment, and every bridge-based route above),
+// documented explicitly in AGENTS.md ("Logging") and
+// docs/conventions/logging.md/docs/conventions/networking.md: Logger is its
+// OWN, purpose-built, thread-safe store (see Editor/Logger.h), not engine
+// state (ECS/Renderer/Game/ImGui) in the sense that rule exists to protect -
+// this exception must NEVER be read as permission for a future route to
+// bypass the bridge rule for actual engine state.
+
+// logger-1 campaign - GET /get_logs' own parsed query parameters. Every
+// httplib::Request::get_param_value(...) call returns "" for a missing
+// param (this project's existing convention - see ParseActivateTabQuery())
+// - an empty string for a given field below means "this filter was not
+// supplied", exactly mirroring LogQueryFilter's own "empty/default means
+// match everything" semantics (see Editor/Logger.h).
+struct ParsedGetLogsQuery {
+    // Defaults to false, matching this file's OWN existing convention for
+    // every other Parsed*Query/Parsed*Request struct (e.g.
+    // ParsedActivateTabQuery) - fail-closed by default, so a future field
+    // added to this struct without updating every return path can never
+    // silently default to "valid". ParseGetLogsQuery()'s own implementation
+    // must explicitly set `valid = true` at the very end, only once every
+    // one of the six parameters below has been confirmed clean.
+    bool valid = false;
+    std::string errorMessage;
+    LogQueryFilter filter;
+};
+
+// Parses the six raw query-string values httplib handed back (all may be
+// "") into a LogQueryFilter, or reports `valid == false` with a
+// human-readable errorMessage for a malformed value:
+//   - sinceIdParam/frameMinParam/frameMaxParam: must each be empty, or a
+//     valid non-negative base-10 integer literal.
+//   - minLevelParam: must be empty, or one of "debug"/"info"/"warning"/
+//     "error" (case-insensitive - see TryParseLogLevel(), Editor/Logger.h).
+//   - limitParam: must be empty, or a valid non-negative base-10 integer
+//     literal - defaults to 200 when empty, and is SILENTLY CLAMPED to
+//     Logger::kCapacity (2000) when larger, rather than treated as an
+//     error (a caller asking for "too many" is harmless, unlike a
+//     genuinely malformed value).
+//   - categoryParam/keywordParam: always valid as-is (any string,
+//     including empty, is acceptable).
+ParsedGetLogsQuery ParseGetLogsQuery(const std::string& sinceIdParam, const std::string& minLevelParam,
+    const std::string& categoryParam, const std::string& keywordParam, const std::string& frameMinParam,
+    const std::string& frameMaxParam, const std::string& limitParam);
+
+// Builds GET /get_logs' JSON response body:
+//   {"logging_enabled": true|false, "count": N, "latest_id": M,
+//    "entries": [{"id":..., "frame":..., "timestamp_seconds":...,
+//                 "level":"Info", "category":"...", "message":"..."}, ...]}
+// `loggingEnabled` should be Logger::IsEnabled() and `latestId` should be
+// Logger::LatestEntryId() - passed in explicitly (not read here) so this
+// function stays a pure, Tier-1-testable function of already-resolved
+// plain values, matching every other Build*ResponseJson() in this file.
+std::string BuildGetLogsResponseJson(
+    const std::vector<LogEntry>& entries, bool loggingEnabled, std::uint64_t latestId);
+
+// Builds POST /clear_logs' JSON response body:
+//   {"success": true, "cleared_count": N}
+std::string BuildClearLogsResponseJson(std::size_t clearedCount);
 
 } // namespace gte::Network

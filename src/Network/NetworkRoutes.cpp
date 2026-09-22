@@ -861,4 +861,148 @@ std::string BuildScenePathResponseJson(bool success, const std::string& errorMes
     return body.dump();
 }
 
+// --- task_manager/logger-1 campaign, PHASE3
+// (PHASE3_NETWORK_ENDPOINTS_GET_LOGS_AND_CLEAR_LOGS.md) - GET /get_logs and
+// POST /clear_logs. See NetworkRoutes.h's own doc comments above each
+// declaration for the exact, locked validation/response rules implemented
+// below.
+
+namespace {
+
+// Strict, whole-string-consumed, NON-NEGATIVE base-10 std::uint64_t parse -
+// since_id/frame_min/frame_max/limit must all reject a leading '-' (unlike
+// TryParseWholeInt() above, which intentionally accepts one for
+// /frame_debugger/select_event's own "-1 means deselect" semantics - not
+// appropriate here, since every one of these four query parameters is
+// always a non-negative count/id).
+bool TryParseNonNegativeUInt64(const std::string& text, std::uint64_t& outValue)
+{
+    if (text.empty()) {
+        return false;
+    }
+    for (char c : text) {
+        if (c < '0' || c > '9') {
+            return false;
+        }
+    }
+    try {
+        std::size_t consumed = 0;
+        const unsigned long long parsed = std::stoull(text, &consumed);
+        if (consumed != text.size()) {
+            return false;
+        }
+        outValue = static_cast<std::uint64_t>(parsed);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+} // namespace
+
+ParsedGetLogsQuery ParseGetLogsQuery(const std::string& sinceIdParam, const std::string& minLevelParam,
+    const std::string& categoryParam, const std::string& keywordParam, const std::string& frameMinParam,
+    const std::string& frameMaxParam, const std::string& limitParam)
+{
+    ParsedGetLogsQuery result;
+
+    if (!sinceIdParam.empty()) {
+        std::uint64_t sinceId = 0;
+        if (!TryParseNonNegativeUInt64(sinceIdParam, sinceId)) {
+            result.errorMessage = "invalid query parameter: since_id - must be a non-negative integer";
+            return result;
+        }
+        result.filter.sinceId = sinceId;
+    }
+
+    if (!minLevelParam.empty()) {
+        LogLevel level = LogLevel::Debug;
+        if (!TryParseLogLevel(minLevelParam, &level)) {
+            result.errorMessage =
+                "invalid query parameter: min_level - must be \"debug\", \"info\", \"warning\", or \"error\"";
+            return result;
+        }
+        result.filter.hasMinLevel = true;
+        result.filter.minLevel = level;
+    }
+
+    // category/keyword: always valid as-is, any string (including empty).
+    result.filter.category = categoryParam;
+    result.filter.keyword = keywordParam;
+
+    if (!frameMinParam.empty()) {
+        std::uint64_t frameMin = 0;
+        if (!TryParseNonNegativeUInt64(frameMinParam, frameMin)) {
+            result.errorMessage = "invalid query parameter: frame_min - must be a non-negative integer";
+            return result;
+        }
+        result.filter.hasFrameMin = true;
+        result.filter.frameMin = frameMin;
+    }
+
+    if (!frameMaxParam.empty()) {
+        std::uint64_t frameMax = 0;
+        if (!TryParseNonNegativeUInt64(frameMaxParam, frameMax)) {
+            result.errorMessage = "invalid query parameter: frame_max - must be a non-negative integer";
+            return result;
+        }
+        result.filter.hasFrameMax = true;
+        result.filter.frameMax = frameMax;
+    }
+
+    if (limitParam.empty()) {
+        result.filter.limit = 200;
+    } else {
+        std::uint64_t limit = 0;
+        if (!TryParseNonNegativeUInt64(limitParam, limit)) {
+            result.errorMessage = "invalid query parameter: limit - must be a non-negative integer";
+            return result;
+        }
+        // Silently clamped to Logger::kCapacity when larger - a caller
+        // asking for "too many" is harmless, unlike a genuinely malformed
+        // value (see NetworkRoutes.h's own doc comment).
+        result.filter.limit =
+            static_cast<std::size_t>(limit > Logger::kCapacity ? Logger::kCapacity : limit);
+    }
+
+    // Every one of the six parameters above has now been checked and none
+    // of them set `valid = false` - see ParsedGetLogsQuery's own doc
+    // comment (Logger-1 PHASE3's corrected Step 3.1/3.2) for why this must
+    // be set explicitly, as the very last statement, rather than defaulted
+    // to true.
+    result.valid = true;
+    return result;
+}
+
+std::string BuildGetLogsResponseJson(
+    const std::vector<LogEntry>& entries, bool loggingEnabled, std::uint64_t latestId)
+{
+    nlohmann::json arr = nlohmann::json::array();
+    for (const LogEntry& entry : entries) {
+        nlohmann::json item;
+        item["id"] = entry.id;
+        item["frame"] = entry.frameNumber;
+        item["timestamp_seconds"] = entry.timestampSeconds;
+        item["level"] = ToString(entry.level);
+        item["category"] = entry.category;
+        item["message"] = entry.message;
+        arr.push_back(std::move(item));
+    }
+
+    nlohmann::json body;
+    body["logging_enabled"] = loggingEnabled;
+    body["count"] = entries.size();
+    body["latest_id"] = latestId;
+    body["entries"] = std::move(arr);
+    return body.dump();
+}
+
+std::string BuildClearLogsResponseJson(std::size_t clearedCount)
+{
+    nlohmann::json body;
+    body["success"] = true;
+    body["cleared_count"] = clearedCount;
+    return body.dump();
+}
+
 } // namespace gte::Network

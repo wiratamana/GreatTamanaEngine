@@ -886,6 +886,36 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         res.status = outcome.success ? 200 : 400;
         res.set_content(BuildScenePathResponseJson(outcome.success, outcome.errorMessage, outcome.resolvedPath), "application/json");
     });
+
+    // task_manager/logger-1 campaign, PHASE3
+    // (PHASE3_NETWORK_ENDPOINTS_GET_LOGS_AND_CLEAR_LOGS.md) - GET /get_logs.
+    // Needs NO bridge at all, exactly like GET /list_tabs above - Logger is
+    // its OWN, purpose-built, thread-safe store (see AGENTS.md, "Logging"),
+    // not engine state reached through the usual bridge rule (see AGENTS.md,
+    // "Networking" - this route is a documented, narrow, deliberate
+    // EXCEPTION to that rule, not a precedent for bypassing it elsewhere).
+    server.Get("/get_logs", [](const httplib::Request& req, httplib::Response& res) {
+        const ParsedGetLogsQuery parsed = ParseGetLogsQuery(req.get_param_value("since_id"),
+            req.get_param_value("min_level"), req.get_param_value("category"),
+            req.get_param_value("keyword"), req.get_param_value("frame_min"),
+            req.get_param_value("frame_max"), req.get_param_value("limit"));
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        const std::vector<LogEntry> entries = Logger::Query(parsed.filter);
+        res.set_content(
+            BuildGetLogsResponseJson(entries, Logger::IsEnabled(), Logger::LatestEntryId()), "application/json");
+    });
+
+    // task_manager/logger-1 campaign, PHASE3 - POST /clear_logs. Same
+    // "no bridge needed" shape as GET /get_logs above.
+    server.Post("/clear_logs", [](const httplib::Request&, httplib::Response& res) {
+        const std::size_t clearedCount = Logger::EntryCount();
+        Logger::Clear();
+        res.set_content(BuildClearLogsResponseJson(clearedCount), "application/json");
+    });
 }
 
 } // namespace

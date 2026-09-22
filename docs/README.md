@@ -72,6 +72,10 @@ than subsystem-specific):
   HTTP server (`gte::Network::NetworkServer`), its cross-thread bridges, and
   every route family (frame/texture capture, ECS-mutating commands, Editor UI
   control) — includes the nested "Named Texture Capture" subsection.
+- **[Logging](conventions/logging.md)** — the Editor-only, thread-safe,
+  in-memory `gte::Logger` log store (`GTE_LOG_DEBUG/INFO/WARNING/ERROR`),
+  its bounded ring buffer, and the `GET /get_logs`/`POST /clear_logs` HTTP
+  endpoints.
 - **[Render Target Format Matching](conventions/render-target-format-matching.md)**
   — always read `Renderer::ColorFormat()`/`DepthFormat()` rather than
   hardcoding a `VkFormat` literal.

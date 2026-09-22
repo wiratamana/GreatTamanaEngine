@@ -51,51 +51,16 @@ double SecondsSinceFirstLog() noexcept
 
 } // namespace
 
-const char* ToString(LogLevel level) noexcept
-{
-    switch (level) {
-        case LogLevel::Debug:
-            return "Debug";
-        case LogLevel::Info:
-            return "Info";
-        case LogLevel::Warning:
-            return "Warning";
-        case LogLevel::Error:
-            return "Error";
-    }
-    return "Unknown";
-}
-
-bool TryParseLogLevel(const std::string& text, LogLevel* outLevel) noexcept
-{
-    if (outLevel == nullptr) {
-        return false;
-    }
-
-    std::string lower;
-    lower.reserve(text.size());
-    for (char c : text) {
-        lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
-    }
-
-    if (lower == "debug") {
-        *outLevel = LogLevel::Debug;
-        return true;
-    }
-    if (lower == "info") {
-        *outLevel = LogLevel::Info;
-        return true;
-    }
-    if (lower == "warning") {
-        *outLevel = LogLevel::Warning;
-        return true;
-    }
-    if (lower == "error") {
-        *outLevel = LogLevel::Error;
-        return true;
-    }
-    return false;
-}
+// ToString(LogLevel)/TryParseLogLevel() used to be DECLARED in Logger.h but
+// DEFINED here - moved to fully `inline`, always-defined definitions
+// directly in Logger.h by PHASE3 (logger-1 campaign,
+// PHASE3_NETWORK_ENDPOINTS_GET_LOGS_AND_CLEAR_LOGS.md), fixing a real link
+// hazard PHASE1_COMPLETION_REPORT.md itself had flagged: Network/
+// NetworkRoutes.cpp (an ALWAYS-compiled translation unit) calls both
+// UNCONDITIONALLY, but this file is only added to the build inside
+// CMakeLists.txt's `if(GTE_ENABLE_EDITOR)` block - see Logger.h's own,
+// much longer comment above each function for the full explanation. Do NOT
+// re-add definitions of either function here.
 
 void Logger::Log(LogLevel level, const std::string& category, const std::string& message)
 {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cctype>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -34,12 +35,79 @@ enum class LogLevel : std::uint8_t { Debug, Info, Warning, Error };
 // "Debug"/"Info"/"Warning"/"Error" - used by the Editor Log panel and by
 // GET /get_logs' own JSON "level" field. An out-of-range value falls back
 // to "Unknown", never reads out of bounds.
-const char* ToString(LogLevel level) noexcept;
+//
+// Defined here, INLINE, UNCONDITIONALLY (not inside any #if
+// GTE_ENABLE_EDITOR branch, and NOT merely declared-here-defined-out-of-
+// line-in-Logger.cpp the way PHASE1 originally shipped it) - PHASE3 fix,
+// flagged as a to-check item by PHASE1_COMPLETION_REPORT.md's own "worth
+// flagging" note: Network/NetworkRoutes.cpp (an ALWAYS-compiled translation
+// unit, never gated by GTE_ENABLE_EDITOR) calls both this function and
+// TryParseLogLevel() below UNCONDITIONALLY at the language level. Logger.cpp
+// (where these two used to be DEFINED) is only ever added to the build
+// inside CMakeLists.txt's `if(GTE_ENABLE_EDITOR)` block, so a hypothetical
+// GTE_ENABLE_EDITOR=OFF build would have failed to LINK
+// NetworkRoutes.cpp.obj (an unresolved external symbol) even though neither
+// function is ever actually reached at runtime in that configuration
+// (Logger::Query() always returns an empty vector, so
+// BuildGetLogsResponseJson() never actually calls ToString() in a real OFF
+// build; ParseGetLogsQuery() only calls TryParseLogLevel() for a non-empty
+// min_level value, but the SYMBOL reference still exists at compile time
+// regardless). Making both fully `inline` here, always-defined regardless
+// of GTE_ENABLE_EDITOR, sidesteps this link hazard entirely for both
+// configurations, with no #ifdef needed at any call site - mirroring this
+// same file's own LogEntry/LogQueryFilter (also always-defined, outside any
+// #if) rather than Logger the class (genuinely dual-defined per branch,
+// since ITS behavior actually differs by configuration - these two free
+// functions' behavior does not).
+inline const char* ToString(LogLevel level) noexcept
+{
+    switch (level) {
+        case LogLevel::Debug:
+            return "Debug";
+        case LogLevel::Info:
+            return "Info";
+        case LogLevel::Warning:
+            return "Warning";
+        case LogLevel::Error:
+            return "Error";
+    }
+    return "Unknown";
+}
 
 // Case-insensitive parse of "debug"/"info"/"warning"/"error" -> LogLevel,
 // used by Network/NetworkRoutes.h's ParseGetLogsQuery() (Phase 3). Returns
-// false (leaving *outLevel untouched) for anything else.
-bool TryParseLogLevel(const std::string& text, LogLevel* outLevel) noexcept;
+// false (leaving *outLevel untouched) for anything else. Inline/always-
+// defined for the exact same link-safety reason as ToString() above.
+inline bool TryParseLogLevel(const std::string& text, LogLevel* outLevel) noexcept
+{
+    if (outLevel == nullptr) {
+        return false;
+    }
+
+    std::string lower;
+    lower.reserve(text.size());
+    for (char c : text) {
+        lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    }
+
+    if (lower == "debug") {
+        *outLevel = LogLevel::Debug;
+        return true;
+    }
+    if (lower == "info") {
+        *outLevel = LogLevel::Info;
+        return true;
+    }
+    if (lower == "warning") {
+        *outLevel = LogLevel::Warning;
+        return true;
+    }
+    if (lower == "error") {
+        *outLevel = LogLevel::Error;
+        return true;
+    }
+    return false;
+}
 
 struct LogEntry {
     std::uint64_t id = 0;              // Monotonic, never reused, never reset by Clear().

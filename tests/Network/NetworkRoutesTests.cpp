@@ -1082,4 +1082,242 @@ TEST(BuildScenePathResponseJsonTests, FailureShapeMatchesGenericError)
     EXPECT_EQ(body, BuildGenericErrorResponseJson("boom"));
 }
 
+// --- task_manager/logger-1 campaign, PHASE3
+// (PHASE3_NETWORK_ENDPOINTS_GET_LOGS_AND_CLEAR_LOGS.md) -
+// GET /get_logs + POST /clear_logs request parsing/response building. See
+// this phase's own Step 3.5: the always-compiled cases below never touch
+// live Logger:: state (ParseGetLogsQuery()'s own pure parsing logic, and
+// BuildGetLogsResponseJson()/BuildClearLogsResponseJson() given a hand-built
+// std::vector<LogEntry>) - the #if GTE_ENABLE_EDITOR-guarded block further
+// below is what actually calls Logger::Log()/Query()/Clear().
+
+using gte::LogEntry;
+using gte::LogLevel;
+using gte::Logger;
+using gte::Network::BuildClearLogsResponseJson;
+using gte::Network::BuildGetLogsResponseJson;
+using gte::Network::ParseGetLogsQuery;
+using gte::Network::ParsedGetLogsQuery;
+
+TEST(ParseGetLogsQueryTests, AllParamsEmptyProducesDocumentedDefaults)
+{
+    const ParsedGetLogsQuery result = ParseGetLogsQuery("", "", "", "", "", "", "");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_EQ(result.filter.sinceId, 0u);
+    EXPECT_FALSE(result.filter.hasMinLevel);
+    EXPECT_EQ(result.filter.category, "");
+    EXPECT_EQ(result.filter.keyword, "");
+    EXPECT_FALSE(result.filter.hasFrameMin);
+    EXPECT_FALSE(result.filter.hasFrameMax);
+    EXPECT_EQ(result.filter.limit, 200u);
+}
+
+TEST(ParseGetLogsQueryTests, EveryFieldParsesWhenSupplied)
+{
+    const ParsedGetLogsQuery result =
+        ParseGetLogsQuery("42", "warning", "Renderer", "boom", "5", "10", "3");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_EQ(result.filter.sinceId, 42u);
+    ASSERT_TRUE(result.filter.hasMinLevel);
+    EXPECT_EQ(result.filter.minLevel, LogLevel::Warning);
+    EXPECT_EQ(result.filter.category, "Renderer");
+    EXPECT_EQ(result.filter.keyword, "boom");
+    ASSERT_TRUE(result.filter.hasFrameMin);
+    EXPECT_EQ(result.filter.frameMin, 5u);
+    ASSERT_TRUE(result.filter.hasFrameMax);
+    EXPECT_EQ(result.filter.frameMax, 10u);
+    EXPECT_EQ(result.filter.limit, 3u);
+}
+
+TEST(ParseGetLogsQueryTests, MinLevelIsCaseInsensitive)
+{
+    const ParsedGetLogsQuery result = ParseGetLogsQuery("", "ERROR", "", "", "", "", "");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    ASSERT_TRUE(result.filter.hasMinLevel);
+    EXPECT_EQ(result.filter.minLevel, LogLevel::Error);
+}
+
+TEST(ParseGetLogsQueryTests, RejectsInvalidSinceId)
+{
+    const ParsedGetLogsQuery negative = ParseGetLogsQuery("-1", "", "", "", "", "", "");
+    EXPECT_FALSE(negative.valid);
+    EXPECT_EQ(negative.errorMessage, "invalid query parameter: since_id - must be a non-negative integer");
+
+    const ParsedGetLogsQuery garbage = ParseGetLogsQuery("12abc", "", "", "", "", "", "");
+    EXPECT_FALSE(garbage.valid);
+}
+
+TEST(ParseGetLogsQueryTests, RejectsInvalidMinLevel)
+{
+    const ParsedGetLogsQuery result = ParseGetLogsQuery("", "bogus", "", "", "", "", "");
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.errorMessage,
+        "invalid query parameter: min_level - must be \"debug\", \"info\", \"warning\", or \"error\"");
+}
+
+TEST(ParseGetLogsQueryTests, RejectsInvalidFrameMin)
+{
+    const ParsedGetLogsQuery result = ParseGetLogsQuery("", "", "", "", "nope", "", "");
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.errorMessage, "invalid query parameter: frame_min - must be a non-negative integer");
+}
+
+TEST(ParseGetLogsQueryTests, RejectsInvalidFrameMax)
+{
+    const ParsedGetLogsQuery result = ParseGetLogsQuery("", "", "", "", "", "-3", "");
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.errorMessage, "invalid query parameter: frame_max - must be a non-negative integer");
+}
+
+TEST(ParseGetLogsQueryTests, RejectsInvalidLimit)
+{
+    const ParsedGetLogsQuery result = ParseGetLogsQuery("", "", "", "", "", "", "abc");
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.errorMessage, "invalid query parameter: limit - must be a non-negative integer");
+}
+
+TEST(ParseGetLogsQueryTests, LimitLargerThanCapacityIsClampedNotRejected)
+{
+    const ParsedGetLogsQuery result = ParseGetLogsQuery("", "", "", "", "", "", "999999999");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_EQ(result.filter.limit, Logger::kCapacity);
+}
+
+TEST(ParseGetLogsQueryTests, CategoryAndKeywordAreAlwaysValidAsIs)
+{
+    const ParsedGetLogsQuery result = ParseGetLogsQuery("", "", "Anything Goes", "any keyword too", "", "", "");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_EQ(result.filter.category, "Anything Goes");
+    EXPECT_EQ(result.filter.keyword, "any keyword too");
+}
+
+TEST(BuildGetLogsResponseJsonTests, EmptyEntriesProducesEmptyArrayShape)
+{
+    const std::string body = BuildGetLogsResponseJson({}, true, 0);
+    const nlohmann::json parsed = nlohmann::json::parse(body);
+    EXPECT_EQ(parsed["logging_enabled"], true);
+    EXPECT_EQ(parsed["count"], 0);
+    EXPECT_EQ(parsed["latest_id"], 0);
+    ASSERT_TRUE(parsed.contains("entries"));
+    EXPECT_TRUE(parsed["entries"].empty());
+}
+
+TEST(BuildGetLogsResponseJsonTests, PopulatedEntriesRoundTripEveryField)
+{
+    LogEntry entry;
+    entry.id = 7;
+    entry.frameNumber = 3;
+    entry.timestampSeconds = 1.5;
+    entry.level = LogLevel::Warning;
+    entry.category = "Renderer";
+    entry.message = "something happened";
+
+    const std::vector<LogEntry> entries = { entry };
+    const std::string body = BuildGetLogsResponseJson(entries, false, 7);
+    const nlohmann::json parsed = nlohmann::json::parse(body);
+    EXPECT_EQ(parsed["logging_enabled"], false);
+    EXPECT_EQ(parsed["count"], 1);
+    EXPECT_EQ(parsed["latest_id"], 7);
+    ASSERT_EQ(parsed["entries"].size(), 1u);
+    EXPECT_EQ(parsed["entries"][0]["id"], 7);
+    EXPECT_EQ(parsed["entries"][0]["frame"], 3);
+    EXPECT_DOUBLE_EQ(parsed["entries"][0]["timestamp_seconds"].get<double>(), 1.5);
+    EXPECT_EQ(parsed["entries"][0]["level"], "Warning");
+    EXPECT_EQ(parsed["entries"][0]["category"], "Renderer");
+    EXPECT_EQ(parsed["entries"][0]["message"], "something happened");
+}
+
+TEST(BuildClearLogsResponseJsonTests, ProducesExpectedShape)
+{
+    const std::string body = BuildClearLogsResponseJson(5);
+    const nlohmann::json parsed = nlohmann::json::parse(body);
+    EXPECT_EQ(parsed["success"], true);
+    EXPECT_EQ(parsed["cleared_count"], 5);
+}
+
+#if GTE_ENABLE_EDITOR
+
+// These cases actually call gte::Logger::Log()/Query()/Clear() - compiled
+// out entirely (rather than left in, quietly passing for the wrong reason)
+// when GTE_ENABLE_EDITOR is OFF, since Logger::Query() always returns an
+// empty vector in that configuration, which would make these assertions
+// FALSE, not just vacuously true - see this phase document's own Step 3.5.
+
+TEST(GetLogsEndToEndTests, ParseAndQueryAndBuildRoundTripRealLoggerState)
+{
+    Logger::Clear();
+    GTE_LOG_INFO("Renderer", "first entry");
+    GTE_LOG_WARNING("Jobs", "second entry");
+    GTE_LOG_ERROR("Renderer", "third entry");
+
+    const ParsedGetLogsQuery parsed = ParseGetLogsQuery("", "", "", "", "", "", "");
+    ASSERT_TRUE(parsed.valid) << parsed.errorMessage;
+
+    const std::vector<LogEntry> entries = Logger::Query(parsed.filter);
+    ASSERT_EQ(entries.size(), 3u);
+
+    const std::string body = BuildGetLogsResponseJson(entries, Logger::IsEnabled(), Logger::LatestEntryId());
+    const nlohmann::json responseJson = nlohmann::json::parse(body);
+    EXPECT_EQ(responseJson["logging_enabled"], true);
+    EXPECT_EQ(responseJson["count"], 3);
+    ASSERT_EQ(responseJson["entries"].size(), 3u);
+    EXPECT_EQ(responseJson["entries"][0]["message"], "first entry");
+    EXPECT_EQ(responseJson["entries"][1]["message"], "second entry");
+    EXPECT_EQ(responseJson["entries"][2]["message"], "third entry");
+
+    Logger::Clear();
+}
+
+TEST(GetLogsEndToEndTests, CategoryFilterAppliesThroughParseAndQuery)
+{
+    Logger::Clear();
+    GTE_LOG_INFO("Renderer", "renderer entry");
+    GTE_LOG_INFO("Jobs", "jobs entry");
+
+    const ParsedGetLogsQuery parsed = ParseGetLogsQuery("", "", "Jobs", "", "", "", "");
+    ASSERT_TRUE(parsed.valid) << parsed.errorMessage;
+
+    const std::vector<LogEntry> entries = Logger::Query(parsed.filter);
+    ASSERT_EQ(entries.size(), 1u);
+    EXPECT_EQ(entries[0].category, "Jobs");
+    EXPECT_EQ(entries[0].message, "jobs entry");
+
+    Logger::Clear();
+}
+
+TEST(GetLogsEndToEndTests, SinceIdCursorAppliesThroughParseAndQuery)
+{
+    Logger::Clear();
+    GTE_LOG_INFO("Renderer", "entry one");
+    const std::uint64_t cursor = Logger::LatestEntryId();
+    GTE_LOG_INFO("Renderer", "entry two");
+
+    const ParsedGetLogsQuery parsed = ParseGetLogsQuery(std::to_string(cursor), "", "", "", "", "", "");
+    ASSERT_TRUE(parsed.valid) << parsed.errorMessage;
+
+    const std::vector<LogEntry> entries = Logger::Query(parsed.filter);
+    ASSERT_EQ(entries.size(), 1u);
+    EXPECT_EQ(entries[0].message, "entry two");
+
+    Logger::Clear();
+}
+
+TEST(ClearLogsEndToEndTests, ClearEmptiesBufferAndReportsPreviousCount)
+{
+    Logger::Clear();
+    GTE_LOG_INFO("Renderer", "one");
+    GTE_LOG_INFO("Renderer", "two");
+    ASSERT_EQ(Logger::EntryCount(), 2u);
+
+    const std::size_t clearedCount = Logger::EntryCount();
+    Logger::Clear();
+    const std::string body = BuildClearLogsResponseJson(clearedCount);
+    const nlohmann::json parsed = nlohmann::json::parse(body);
+    EXPECT_EQ(parsed["success"], true);
+    EXPECT_EQ(parsed["cleared_count"], 2);
+    EXPECT_EQ(Logger::EntryCount(), 0u);
+}
+
+#endif // GTE_ENABLE_EDITOR
+
 } // namespace

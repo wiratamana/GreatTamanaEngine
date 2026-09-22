@@ -291,12 +291,26 @@ dedicated, reviewed cross-thread bridges (`FrameCaptureBridge`,
 today include frame/texture capture (`GET /get_swapchain`/`/get_game_view`/
 `/get_texture`, including "Named Texture Capture" volume-texture support),
 ECS-mutating commands (`POST /instantiate_primitive`/
-`/delete_entity`/`/set_entity_trs`/`/instantiate_light`), and Editor UI
+`/delete_entity`/`/set_entity_trs`/`/instantiate_light`), Editor UI
 control (`GET /activate_tab`/`/list_tabs`, letting an external caller bring
 a specific named Editor panel/tab to the front and enumerate every known
-panel name).
+panel name), and engine log retrieval (`GET /get_logs`/`POST /clear_logs`,
+the ONE documented, narrow exception to this section's own "reach engine
+state only through a reviewed bridge" rule - see "Logging" below).
 
 Full convention: [docs/conventions/networking.md](docs/conventions/networking.md).
+
+## Logging
+
+`src/Editor/Logger.h/.cpp` (`gte::Logger`) is the engine's Editor-only,
+thread-safe, in-memory log store - callable from any thread via the
+GTE_LOG_DEBUG/INFO/WARNING/ERROR macros, which compile to a true empty
+no-op (not even evaluating their arguments) whenever GTE_ENABLE_EDITOR is
+OFF. A bounded 2000-entry ring buffer, filterable by level/category/
+keyword/frame range/an incremental since_id cursor, surfaced by the
+Editor's "Log" panel and by GET /get_logs / POST /clear_logs.
+
+Full convention: [docs/conventions/logging.md](docs/conventions/logging.md).
 
 ## Render Target Format Matching
 

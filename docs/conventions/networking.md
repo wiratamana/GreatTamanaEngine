@@ -375,6 +375,24 @@ module or adding a new endpoint:
   `task_manager/scene-serialization-2/PHASE0_MASTER_STRATEGY.md` for the
   full six-phase campaign writeup.
 
+- **`GET /get_logs`/`POST /clear_logs`** (`task_manager/logger-1` campaign,
+  `task_manager/logger-1/PHASE0_MASTER_STRATEGY.md`, Phase 3) expose the
+  engine's new `gte::Logger` (see [Logging](logging.md)) over HTTP - a
+  smart fetch endpoint filterable by `since_id`/`min_level`/`category`/
+  `keyword`/`frame_min`/`frame_max`/`limit`, plus a companion clear route.
+  **Both routes call `Logger::Query()`/`Logger::Clear()` DIRECTLY, with NO
+  new cross-thread bridge** - a deliberate, narrow, explicitly-documented
+  exception to this file's own "a route handler reaches engine state only
+  through a reviewed bridge" rule (see the bullet list at the top of this
+  file), specific to Logger's own from-day-one thread-safe design (every
+  public `Logger::` method is already safe to call concurrently from ANY
+  thread, unlike `Registry`/`Renderer`/`Game`/ImGui, which were never built
+  with concurrent access in mind) - this must NOT be read as loosening that
+  rule for any other future route. See [Logging](logging.md) for the full
+  query-parameter contract, status-code mapping, and response JSON shape -
+  this bullet exists here only to record the endpoint's existence and cross-
+  link to the authoritative write-up, avoiding duplication.
+
 ## Named Texture Capture (`GET /get_texture`)
 
 `network-impl-4` campaign (`task_manager/network-impl-4/PHASE0_MASTER_STRATEGY.md`)
