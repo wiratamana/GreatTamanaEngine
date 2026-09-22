@@ -138,7 +138,29 @@ rg::TextureHandle ComputeBlurValidation::AddPass(rg::RenderGraphBuilder& builder
             renderer.Dispatch(*m_pipeline, m_descriptorSet.Native(), pushConstants, sizeof(pushConstants),
                 groupCounts.width, groupCounts.height, groupCounts.depth);
             renderer.EndGraphPassRecording();
-        });
+        },
+        rg::RenderPassDrawKind::DrawMesh,
+        // render-pass-4 campaign, PHASE2
+        // (task_manager/render-pass-4/PHASE2_REAL_RENDERPASSEVENT_ORDERING_ENFORCEMENT.md)
+        // - explicitly tagged AfterTransparents (never left at the default
+        // Opaques) because this pass has a REAL, confirmed dependency on
+        // "RenderTransparent" (Scene View): it reads `sceneViewHandle`, the
+        // SAME handle "RenderOpaque"/"DrawSkyBackground"/"RenderTransparent"
+        // (Scene View) all write, and must resolve to the LATEST of those
+        // three writes. Left at the default Opaques, RenderGraphCompiler::
+        // Compile()'s new RenderPassEvent-sorted effective order (PHASE2)
+        // would have silently bound this read to "RenderOpaque"'s own write
+        // instead, potentially scheduling this pass before the sky
+        // background/ground-grid overlay was even drawn - a real, confirmed
+        // regression this explicit tag prevents (found by this phase's own
+        // required audit, confirmed with the user via ask_questions before
+        // fixing here rather than leaving it for a later phase/campaign).
+        // AfterTransparents (rather than the same Transparents tier
+        // "RenderTransparent" itself uses) is deliberately used so this
+        // never depends on stable-sort tie-break-by-declaration-order
+        // subtlety at all - it is unambiguously scheduled after the whole
+        // real Scene View draw chain regardless.
+        rg::RenderPassEvent::AfterTransparents);
 
     m_writtenThisFrame = true;
     return outputHandle;

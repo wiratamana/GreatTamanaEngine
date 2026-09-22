@@ -746,6 +746,136 @@ TEST(RenderGraphCompilerTest, CallingCompileWithAConsistentGraphNeverAborts)
     }
 }
 
+// --- render-pass-4 campaign, PHASE2 -----------------------------------------
+// (task_manager/render-pass-4/PHASE2_REAL_RENDERPASSEVENT_ORDERING_ENFORCEMENT.md)
+//
+// The one genuine, deliberate BEHAVIOR CHANGE in this whole campaign: Compile()
+// now processes passes in an "effective order" (every pass stable-sorted by
+// RenderPassEvent, ties broken by original declaration index) for both its
+// RAW/WAW edge scan and Kahn's-algorithm ready-set tie-break, instead of raw
+// declaration order.
+
+// The permanent regression test for the REAL fix - mirrors PHASE1's own
+// OrphanReadWithLaterWriterIsDetected, but calls the REAL Compile() end-to-end
+// instead of just the detector. Reproduces the exact historical
+// AtmosphereComposite/RenderOpaque bug shape: "Composite" (a reader, tagged
+// AfterTransparents) declared BEFORE "Opaque" (its writer, tagged Opaques).
+TEST(RenderGraphCompilerTest, ReaderTaggedEarlierThanItsTextuallyLaterWriterStillResolvesCorrectly)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle shared = builder.CreateTexture("Shared", MakeTextureDesc());
+    const TextureHandle compositeOutput = builder.CreateTexture("CompositeOutput", MakeTextureDesc());
+
+    builder.AddRenderPass(
+        "Composite", PassKind::Graphics,
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.ReadTexture(shared);
+            pass.WriteColorAttachment(compositeOutput);
+        },
+        NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::AfterTransparents); // index 0 - reader, declared FIRST.
+    builder.AddRenderPass(
+        "Opaque", PassKind::Graphics, [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(shared); },
+        NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::Opaques); // index 1 - writer, declared SECOND.
+
+    CompiledGraphInput input = builder.Finish();
+    const TextureHandle finalOutputs[] = { compositeOutput };
+    const CompiledGraph compiled = Compile(input, finalOutputs);
+
+    // Before this phase: "Opaque" (index 1) had no RAW edge linking it to
+    // "Composite" at all (its write was never "declared so far" when the
+    // reader was processed), and no other path to a final output either - it
+    // was silently CULLED, leaving executionOrder with only "Composite" in
+    // it. After this phase: effective order walks "Opaque" (Opaques) before
+    // "Composite" (AfterTransparents) regardless of declaration order, so the
+    // RAW edge forms correctly and both passes survive, in the correct order.
+    ASSERT_EQ(compiled.executionOrder.size(), 2u);
+    EXPECT_EQ(compiled.executionOrder[0].index, 1u); // "Opaque" (writer) first.
+    EXPECT_EQ(compiled.executionOrder[1].index, 0u); // "Composite" (reader) second.
+    EXPECT_FALSE(input.passes[0].isCulled);
+    EXPECT_FALSE(input.passes[1].isCulled);
+}
+
+// Two passes with NO shared resource at all - proves RenderPassEvent now
+// decides relative order even between passes with zero real dependency on
+// each other (Kahn's-algorithm ready-set tie-break), overriding declaration
+// order, exactly this phase's own stated goal.
+TEST(RenderGraphCompilerTest, TwoIndependentPassesWithNoSharedResourceExecuteInRenderPassEventOrderRegardlessOfDeclarationOrder)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle a = builder.CreateTexture("A", MakeTextureDesc());
+    const TextureHandle b = builder.CreateTexture("B", MakeTextureDesc());
+
+    builder.AddRenderPass(
+        "First", PassKind::Graphics, [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(a); },
+        NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::AfterOpaques); // index 0 - declared FIRST, tagged LATER.
+    builder.AddRenderPass(
+        "Second", PassKind::Graphics, [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(b); },
+        NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::PreOpaques); // index 1 - declared SECOND, tagged EARLIER.
+
+    CompiledGraphInput input = builder.Finish();
+    const TextureHandle finalOutputs[] = { a, b };
+    const CompiledGraph compiled = Compile(input, finalOutputs);
+
+    ASSERT_EQ(compiled.executionOrder.size(), 2u);
+    EXPECT_EQ(compiled.executionOrder[0].index, 1u); // "Second" (PreOpaques) first, despite being declared second.
+    EXPECT_EQ(compiled.executionOrder[1].index, 0u); // "First" (AfterOpaques) second, despite being declared first.
+}
+
+// A second, WAW-shaped regression test for this phase's own reorder - the RAW
+// test above only exercises the read-side "orphan" fix; this one exercises
+// the write-side WAW edge-construction rewire directly.
+TEST(RenderGraphCompilerTest, WriteAfterWriteAcrossDifferentRenderPassEventTiersResolvesByEffectiveOrderNotDeclarationOrder)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle t0 = builder.CreateTexture("T0", MakeTextureDesc());
+
+    builder.AddRenderPass(
+        "Late", PassKind::Graphics, [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(t0); },
+        NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::AfterTransparents); // index 0 - declared FIRST.
+    builder.AddRenderPass(
+        "Early", PassKind::Graphics, [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(t0); },
+        NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::Opaques); // index 1 - declared SECOND, writes the SAME texture.
+
+    CompiledGraphInput input = builder.Finish();
+    const TextureHandle finalOutputs[] = { t0 };
+    const CompiledGraph compiled = Compile(input, finalOutputs);
+
+    // Before this phase: raw declaration order processes "Late" (0) then
+    // "Early" (1), forming a WAW edge 0->1 ("Late" before "Early"). After
+    // this phase: effective order processes "Early" (Opaques) before "Late"
+    // (AfterTransparents), so the edge direction REVERSES (1->0).
+    ASSERT_EQ(compiled.executionOrder.size(), 2u);
+    EXPECT_EQ(compiled.executionOrder[0].index, 1u); // "Early" first.
+    EXPECT_EQ(compiled.executionOrder[1].index, 0u); // "Late" second.
+    EXPECT_FALSE(input.passes[0].isCulled);
+    EXPECT_FALSE(input.passes[1].isCulled);
+}
+
+// Confirms the stable-sort tie-break: two passes sharing the SAME
+// RenderPassEvent tier, with a real WAW dependency between them, must still
+// execute in their original declaration order, byte-identical to before this
+// phase (mirrors MultipleWritersToSameResourcePreserveWriteAfterWriteOrder's
+// own graph shape above, using the AddRenderPass() overload instead).
+TEST(RenderGraphCompilerTest, PassesSharingTheSameRenderPassEventTierPreserveTheirOriginalDeclarationOrder)
+{
+    RenderGraphBuilder builder;
+    const RenderTarget swapchainTarget{};
+    const TextureHandle swapchain = builder.ImportTexture("Swapchain", swapchainTarget, VK_IMAGE_LAYOUT_UNDEFINED);
+
+    builder.AddRenderPass(
+        "ClearPass", PassKind::Graphics, [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(swapchain); },
+        NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::Opaques); // index 0
+    builder.AddRenderPass(
+        "OverlayPass", PassKind::Graphics, [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(swapchain); },
+        NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::Opaques); // index 1 - same tier as ClearPass.
+
+    CompiledGraphInput input = builder.Finish();
+    const TextureHandle finalOutputs[] = { swapchain };
+    const CompiledGraph compiled = Compile(input, finalOutputs);
+
+    EXPECT_TRUE(ExecutionOrderEquals(compiled.executionOrder, { 0, 1 }));
+}
+
 // --- Cycle detection --------------------------------------------------------
 //
 // RENDERGRAPH_PHASE3_COMPILATION_STRATEGY_v1.md's own Step 3.4 asks for a

@@ -402,18 +402,15 @@ enum class RenderPassDrawKind : std::uint8_t {
 const char* ToString(RenderPassDrawKind drawKind) noexcept;
 
 // render-pass-3 campaign (task_manager/render-pass-3), PHASE1
-// (PHASE1_CORE_VOCABULARY_AND_BLACKBOARD.md) - a purely descriptive SORT
-// HINT for the new RenderPipeline declaration layer (src/Renderer/
-// RenderGraph/RenderPipeline.h) sitting strictly ABOVE this builder - NOT a
-// dependency mechanism (real ordering is still fully enforced by
-// RenderGraphCompiler's own RAW/WAW dependency analysis, which never reads
-// this field - see GENERIC_RENDERPASS_SYSTEM_DESIGN_V2.md, Section 6).
-// Lives here (rather than in RenderPipeline.h, where every other PHASE1
-// type lives) because it is ALSO threaded onto PassRecord/
-// RenderGraphPassSnapshot below, mirroring exactly why PassKind/
-// RenderPassCategory/RenderPassDrawKind already live in this same file.
-// Deliberately an exhaustive-switch-friendly small enum, mirroring every
-// sibling enum in this file's own "no default: case, ever" convention.
+// (PHASE1_CORE_VOCABULARY_AND_BLACKBOARD.md) - a descriptive SORT HINT for
+// the new RenderPipeline declaration layer (src/Renderer/RenderGraph/
+// RenderPipeline.h) sitting strictly ABOVE this builder. Lives here (rather
+// than in RenderPipeline.h, where every other PHASE1 type lives) because it
+// is ALSO threaded onto PassRecord/RenderGraphPassSnapshot below, mirroring
+// exactly why PassKind/RenderPassCategory/RenderPassDrawKind already live in
+// this same file. Deliberately an exhaustive-switch-friendly small enum,
+// mirroring every sibling enum in this file's own "no default: case, ever"
+// convention.
 //
 // render-pass-4 campaign, PHASE1
 // (task_manager/render-pass-4/PHASE1_DEPENDENCY_EVENT_CONTRADICTION_SAFETY_NET.md)
@@ -421,10 +418,27 @@ const char* ToString(RenderPassDrawKind drawKind) noexcept;
 // field against every pass's real, declared resource dependencies - see
 // DetectRenderPassEventContradictions() (RenderGraphCompiler.h). A wrong
 // tag here is no longer silent: it is reported to stderr and, in debug
-// builds, fails an assert(). This still does not make RenderPassEvent
-// itself a scheduling mechanism - see
-// task_manager/render-pass-4/PHASE2_REAL_RENDERPASSEVENT_ORDERING_ENFORCEMENT.md
-// for the phase that actually changes that.
+// builds, fails an assert().
+//
+// render-pass-4 campaign, PHASE2
+// (task_manager/render-pass-4/PHASE2_REAL_RENDERPASSEVENT_ORDERING_ENFORCEMENT.md)
+// - CORRECTION to this comment's own former "purely descriptive... NOT a
+// dependency mechanism" wording (accurate through PHASE1, no longer accurate
+// as of PHASE2): this field is now a REAL, load-bearing ordering input.
+// RenderGraphCompiler::Compile() processes passes in a stable sort of this
+// field (ties broken by original declaration order) before building its
+// RAW/WAW dependency edges. It still cannot override a genuine dependency
+// in the opposite direction - a real data dependency always wins - but it
+// now determines execution order between passes that have NO real
+// dependency on each other, and it now determines which writer a read
+// resolves to when a naive declaration-order-only scan would otherwise miss
+// it entirely (the historical "AtmosphereComposite silently culls
+// RenderOpaque" bug shape - see PHASE0_MASTER_STRATEGY.md/
+// PHASE2_REAL_RENDERPASSEVENT_ORDERING_ENFORCEMENT.md under
+// task_manager/render-pass-4/ for the full history). This alone still does
+// NOT make an incorrectly-tagged RenderPassEvent value harmless - see
+// DetectRenderPassEventContradictions() (RenderGraphCompiler.h), now checked
+// against this same effective order.
 enum class RenderPassEvent : std::uint32_t {
     BeforeEverything = 0,
     PreOpaques = 1000,
@@ -604,21 +618,30 @@ struct PassRecord {
     // (never inserted in the middle) - see this file's own header comment.
     RenderPassDrawKind drawKind = RenderPassDrawKind::DrawMesh;
 
-    // render-pass-3 campaign, PHASE1 - a purely descriptive SORT HINT (see
-    // RenderPassEvent's own doc comment above) - read by NOTHING in
-    // RenderGraph.cpp/RenderGraphCompiler.cpp/RenderGraphBarrierPlanner.cpp,
-    // exactly like every other purely-descriptive PassRecord field before
-    // it. Defaults to Opaques so every pre-existing AddRenderPass() call
-    // site (which never mentions this at all) is completely unaffected -
-    // the default is irrelevant for any pass the Frame Debugger already
-    // excludes via category == Debug (PHASE4 never reads this field for
-    // those). Appended at the END of the struct (never inserted in the
-    // middle) - see this file's own header comment.
+    // render-pass-3 campaign, PHASE1 - a SORT HINT (see RenderPassEvent's
+    // own doc comment above - as of render-pass-4 PHASE2, a REAL,
+    // load-bearing one, no longer "purely descriptive") - read by
+    // RenderGraphCompiler::Compile() as of render-pass-4 PHASE2 (unlike
+    // every other purely-descriptive PassRecord field before it, which
+    // genuinely still are read by NOTHING in RenderGraph.cpp/
+    // RenderGraphCompiler.cpp/RenderGraphBarrierPlanner.cpp). Defaults to
+    // Opaques so every pre-existing AddRenderPass() call site (which never
+    // mentions this at all) is completely unaffected - the default is
+    // irrelevant for any pass the Frame Debugger already excludes via
+    // category == Debug (PHASE4 never reads this field for those).
+    // Appended at the END of the struct (never inserted in the middle) -
+    // see this file's own header comment.
     //
-    // render-pass-4 campaign, PHASE1 - this field is now cross-checked
-    // against every pass's real, declared resource dependencies by
+    // render-pass-4 campaign, PHASE1 - this field is cross-checked against
+    // every pass's real, declared resource dependencies by
     // RenderGraphCompiler::Compile() - see RenderPassEvent's own doc
     // comment above for the full write-up.
+    //
+    // render-pass-4 campaign, PHASE2 - and, as of this phase, this field is
+    // also the sort key Compile() stable-sorts every pass by (ties broken by
+    // original declaration order) before its RAW/WAW edge scan and Kahn's
+    // tie-break - see RenderPassEvent's own doc comment above for the full
+    // write-up.
     RenderPassEvent renderPassEvent = RenderPassEvent::Opaques;
 };
 

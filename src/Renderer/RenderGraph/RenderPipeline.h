@@ -31,11 +31,21 @@
 //
 // render-pass-4 campaign, PHASE1
 // (task_manager/render-pass-4/PHASE1_DEPENDENCY_EVENT_CONTRADICTION_SAFETY_NET.md)
-// - RenderPassDesc::order (RenderPassEvent) is now cross-checked by
+// - RenderPassDesc::order (RenderPassEvent) is cross-checked by
 // RenderGraphCompiler::Compile() against every pass's real, declared
 // resource dependencies, reported to stderr (and, in debug builds, an
 // assert()) the moment the two disagree - see
 // DetectRenderPassEventContradictions() (RenderGraphCompiler.h).
+//
+// render-pass-4 campaign, PHASE2
+// (task_manager/render-pass-4/PHASE2_REAL_RENDERPASSEVENT_ORDERING_ENFORCEMENT.md)
+// - RenderPassDesc::order is now, as of this phase, ALSO real, load-bearing
+// ordering input, not merely a cross-checked-but-inert sort hint: see
+// RenderPassEvent's own doc comment (RenderGraphTypes.h) for the full
+// write-up. This layer's own translation of `order` into the underlying
+// PassRecord::renderPassEvent (DeclareInto(), below) is completely
+// unchanged by this - PHASE2's entire behavior change lives inside
+// RenderGraphCompiler::Compile() itself.
 
 #include "RenderGraphBuilder.h"
 #include "RenderGraphTypes.h"
@@ -176,6 +186,9 @@ struct RenderPassDesc {
     // render-pass-4 campaign, PHASE1 - cross-checked against every pass's
     // real, declared resource dependencies by RenderGraphCompiler::Compile()
     // - see RenderPassEvent's own doc comment (RenderGraphTypes.h).
+    // render-pass-4 campaign, PHASE2 - as of this phase, also REAL,
+    // load-bearing ordering input (Compile() stable-sorts every pass by
+    // this field) - see that same doc comment for the full write-up.
     RenderPassEvent order = RenderPassEvent::Opaques;
     RenderPassTagMask tags = 0;
     RenderViewId view = RenderViewId::Shared();

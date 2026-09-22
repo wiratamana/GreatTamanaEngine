@@ -457,10 +457,15 @@ public:
     // before calling into this exact, otherwise-unchanged chokepoint.
     // render-pass-4 campaign, PHASE1
     // (task_manager/render-pass-4/PHASE1_DEPENDENCY_EVENT_CONTRADICTION_SAFETY_NET.md)
-    // - the stamped `renderPassEvent` value is now cross-checked against
+    // - the stamped `renderPassEvent` value is cross-checked against
     // this pass's real, declared resource dependencies by
     // RenderGraphCompiler::Compile() - see RenderPassEvent's own doc
     // comment (RenderGraphTypes.h).
+    // render-pass-4 campaign, PHASE2
+    // (task_manager/render-pass-4/PHASE2_REAL_RENDERPASSEVENT_ORDERING_ENFORCEMENT.md)
+    // - the stamped `renderPassEvent` value is now ALSO real, load-bearing
+    // ordering input Compile() stable-sorts every pass by - see that same
+    // doc comment for the full write-up.
     template <typename SetupFn, typename ExecuteFn>
     void AddRenderPass(const char* name, PassKind kind, ViewScope viewScope, RenderPassCategory category,
         SetupFn&& setup, ExecuteFn&& execute, RenderPassDrawKind drawKind = RenderPassDrawKind::DrawMesh,
@@ -487,7 +492,9 @@ public:
     // above, so every pre-existing 4-argument call site compiles completely
     // unmodified. render-pass-4 campaign, PHASE1 - same cross-check note
     // as the overload above applies here too (this overload simply
-    // forwards into it).
+    // forwards into it). render-pass-4 campaign, PHASE2 - same "now ALSO
+    // real, load-bearing ordering input" note applies here too, for the
+    // same reason.
     template <typename SetupFn, typename ExecuteFn>
     void AddRenderPass(const char* name, PassKind kind, SetupFn&& setup, ExecuteFn&& execute,
         RenderPassDrawKind drawKind = RenderPassDrawKind::DrawMesh,

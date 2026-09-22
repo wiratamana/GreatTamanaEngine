@@ -124,17 +124,18 @@ struct RenderPassEventContradiction {
 // A pure, Tier-1-testable scan - never prints, never asserts, never
 // throws, and never mutates `input`. `processingOrder` must be a
 // permutation of `[0, input.passes.size())`, expressing "which order will
-// the compiler actually resolve a read's nearest prior writer in" -
-// PHASE1 always calls this with the identity permutation (raw declaration
-// order, `[0, 1, 2, ...]`), matching Compile()'s own current algorithm
-// exactly. PHASE2 (PHASE2_REAL_RENDERPASSEVENT_ORDERING_ENFORCEMENT.md)
-// is what will later pass a DIFFERENT permutation here (its new
-// RenderPassEvent-sorted "effective order") - this function's signature
-// is deliberately already shaped for that, so PHASE2 never has to touch
-// this function's own logic, only what it's called with. "Before"/"after"
-// in both RenderPassEventContradictionKind enumerators above always means
-// "earlier/later in `processingOrder`", never "smaller/larger original
-// pass index".
+// the compiler actually resolve a read's nearest prior writer in" - PHASE1
+// (this campaign's first phase) called this with the identity permutation
+// (raw declaration order, `[0, 1, 2, ...]`), matching Compile()'s
+// then-current algorithm exactly. render-pass-4 campaign, PHASE2
+// (PHASE2_REAL_RENDERPASSEVENT_ORDERING_ENFORCEMENT.md) - Compile() now
+// instead passes its own new "effective order" (every pass stable-sorted by
+// RenderPassEvent, then original declaration index) here - this function's
+// signature was deliberately already shaped for that, so PHASE2 never had
+// to touch this function's own logic, only what it is called with.
+// "Before"/"after" in both RenderPassEventContradictionKind enumerators
+// above always means "earlier/later in `processingOrder`", never
+// "smaller/larger original pass index".
 std::vector<RenderPassEventContradiction> DetectRenderPassEventContradictions(
     const CompiledGraphInput& input, std::span<const std::int32_t> processingOrder);
 
@@ -154,11 +155,29 @@ std::vector<RenderPassEventContradiction> DetectRenderPassEventContradictions(
 //
 // render-pass-4 campaign, PHASE1 - Compile() now ALSO runs
 // DetectRenderPassEventContradictions() once, at the very top, against the
-// identity (raw declaration order) permutation, and turns a non-empty
-// result into an unconditional stderr report plus a debug-build assert()
-// - see this header's own RenderPassEventContradiction doc comment above
-// and RenderGraphCompiler.cpp's own wiring. This changes NOTHING about the
+// SAME effective order the algorithm below actually walks (see PHASE2's own
+// update immediately below), and turns a non-empty result into an
+// unconditional stderr report plus a debug-build assert() - see this
+// header's own RenderPassEventContradiction doc comment above and
+// RenderGraphCompiler.cpp's own wiring. This changes NOTHING about the
 // algorithm below; it is a pure diagnostic pre-pass.
+//
+// render-pass-4 campaign, PHASE2
+// (PHASE2_REAL_RENDERPASSEVENT_ORDERING_ENFORCEMENT.md) - Compile() now
+// ALSO computes an "effective order" - every pass stable-sorted by
+// (RenderPassEvent, original declaration index) - and walks passes in THAT
+// order (instead of raw declaration order) for both its RAW/WAW edge scan
+// and Kahn's-algorithm ready-set tie-break. RenderPassEvent is therefore
+// real, load-bearing ordering input for the first time: it can no longer
+// override a genuine data dependency in the opposite direction (a real
+// dependency always wins), but it now determines execution order between
+// passes with no real dependency on each other, and it now determines which
+// writer a read resolves to when a naive declaration-order-only scan would
+// otherwise miss it (the historical "AtmosphereComposite silently culls
+// RenderOpaque" bug shape - see PHASE0_MASTER_STRATEGY.md). This does NOT
+// make an incorrectly-tagged RenderPassEvent value harmless - see
+// DetectRenderPassEventContradictions() above, now checked against this same
+// effective order.
 //
 // `input` is taken by NON-CONST reference (not `const&`, despite this
 // phase's own strategy document sketching a `const&` signature) because

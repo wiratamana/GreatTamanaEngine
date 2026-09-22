@@ -1,5 +1,6 @@
 #include "RenderGraphCompiler.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstdio>
 #include <set>
@@ -135,22 +136,25 @@ std::vector<RenderPassEventContradiction> DetectRenderPassEventContradictions(
 
 // Implementation note on cycle detection (Step 3.2.3's Kahn's-algorithm
 // "naturally detects a cycle" requirement): the edge-construction rule
-// below (Step 3.2.1 - "the most recent pass, among those declared so far,
-// that wrote it") only ever adds an edge from a STRICTLY LOWER declaration
-// index to a STRICTLY HIGHER one (a pass can only depend on a writer that
-// was already declared before it; there is no mechanism here for an
-// earlier-declared pass to depend on a later-declared one). This makes
-// the produced graph a DAG BY CONSTRUCTION, with the passes' own
-// declaration order already being one valid topological order - a real
-// cycle (as sketched in this phase's own strategy document's Step 3.4,
-// "pass A reads what B writes AND writes what B reads") is therefore
-// structurally UNREACHABLE through any graph an author can actually
-// declare via RenderGraphBuilder/AddPass(). The throw below is kept
-// anyway, as genuinely correct defensive code (matching the strategy
-// document's explicit request for Kahn's algorithm's own natural cycle
-// detection) in case a future change to the edge-construction rule above
-// (e.g. a WAR/read-then-later-write hazard edge) ever makes a real cycle
-// possible - see RENDERGRAPH_PHASE3_COMPLETION_REPORT.md for the full
+// below (Step 3.2.1 - "the most recently WALKED pass, among those walked so
+// far in EFFECTIVE order, that wrote it" - render-pass-4 campaign, PHASE2,
+// see effectiveOrder's own doc comment inside Compile() below for what
+// "effective order" means and why it replaced raw declaration order) only
+// ever adds an edge from a strictly earlier EFFECTIVE POSITION to a
+// strictly later one (a pass can only depend on a writer already WALKED, in
+// effective order, before it; there is no mechanism here for a
+// earlier-walked pass to depend on a later-walked one). This makes the
+// produced graph a DAG BY CONSTRUCTION, with the passes' own EFFECTIVE
+// (RenderPassEvent-then-declaration-order) order already being one valid
+// topological order - a real cycle (as sketched in this phase's own
+// strategy document's Step 3.4, "pass A reads what B writes AND writes what
+// B reads") is therefore structurally UNREACHABLE through any graph an
+// author can actually declare via RenderGraphBuilder/AddPass(). The throw
+// below is kept anyway, as genuinely correct defensive code (matching the
+// strategy document's explicit request for Kahn's algorithm's own natural
+// cycle detection) in case a future change to the edge-construction rule
+// above (e.g. a WAR/read-then-later-write hazard edge) ever makes a real
+// cycle possible - see RENDERGRAPH_PHASE3_COMPLETION_REPORT.md for the full
 // write-up of this finding.
 CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> finalOutputs)
 {
@@ -166,21 +170,48 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
     if (passCount == 0) {
         return result;
     }
+    // render-pass-4 campaign, PHASE2
+    // (PHASE2_REAL_RENDERPASSEVENT_ORDERING_ENFORCEMENT.md) - `effectiveOrder`
+    // is a permutation of [0, passCount) - every pass's ORIGINAL declaration
+    // index, reordered by a STABLE sort on (RenderPassEvent, original index).
+    // This is the first time RenderPassEvent becomes real, load-bearing
+    // ordering input: the RAW/WAW edge scan below, and Kahn's-algorithm's own
+    // ready-set tie-break, both walk passes in THIS order from now on,
+    // instead of raw declaration order. A stable sort guarantees two passes
+    // sharing the same RenderPassEvent tier keep their EXACT prior relative
+    // order - byte-identical behavior for every pass that was already
+    // correctly ordered relative to its own tier-mates (see this phase's own
+    // completion report for the full audit confirming this holds for every
+    // pass shipping today).
+    std::vector<std::int32_t> effectiveOrder(static_cast<std::size_t>(passCount));
+    for (std::int32_t i = 0; i < passCount; ++i) {
+        effectiveOrder[static_cast<std::size_t>(i)] = i;
+    }
+    std::stable_sort(effectiveOrder.begin(), effectiveOrder.end(), [&input](std::int32_t a, std::int32_t b) {
+        return input.passes[static_cast<std::size_t>(a)].renderPassEvent
+            < input.passes[static_cast<std::size_t>(b)].renderPassEvent;
+    });
+
+    // effectivePosition[originalPassIndex] = that pass's position in
+    // effectiveOrder - the inverse permutation, used below wherever the
+    // algorithm needs to compare/order by EFFECTIVE position rather than
+    // walk effectiveOrder directly.
+    std::vector<std::int32_t> effectivePosition(static_cast<std::size_t>(passCount), -1);
+    for (std::size_t pos = 0; pos < effectiveOrder.size(); ++pos) {
+        effectivePosition[static_cast<std::size_t>(effectiveOrder[pos])] = static_cast<std::int32_t>(pos);
+    }
 
     // render-pass-4 campaign, PHASE1 - a pure diagnostic pre-pass, changing
-    // NOTHING about the algorithm below. PHASE1 always checks against raw
-    // declaration order (the identity permutation) - matching this
-    // function's own current, unchanged algorithm. See
-    // DetectRenderPassEventContradictions()'s own doc comment
-    // (RenderGraphCompiler.h) for why `processingOrder` is a parameter at
-    // all (PHASE2 will pass something else here).
+    // NOTHING about the algorithm below. render-pass-4 campaign, PHASE2 -
+    // UPDATED to check against `effectiveOrder` (computed just above) instead
+    // of raw declaration order - the detector now reports contradictions
+    // relative to the same effective order the compiler itself actually
+    // walks, matching what "before"/"after" now means for real scheduling.
+    // See DetectRenderPassEventContradictions()'s own doc comment
+    // (RenderGraphCompiler.h) for why `processingOrder` is a parameter at all.
     {
-        std::vector<std::int32_t> declarationOrder(static_cast<std::size_t>(passCount));
-        for (std::int32_t i = 0; i < passCount; ++i) {
-            declarationOrder[static_cast<std::size_t>(i)] = i;
-        }
         const std::vector<RenderPassEventContradiction> contradictions =
-            DetectRenderPassEventContradictions(input, declarationOrder);
+            DetectRenderPassEventContradictions(input, effectiveOrder);
         for (const RenderPassEventContradiction& contradiction : contradictions) {
             const PassRecord& reader = input.passes[static_cast<std::size_t>(contradiction.readerPassIndex)];
             const PassRecord& writer = input.passes[static_cast<std::size_t>(contradiction.writerPassIndex)];
@@ -236,14 +267,21 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
     // fourth resource kind gets this same compile-time safety net too.
     std::vector<std::int32_t> lastVolumeTextureWriter(input.volumeTextureDescs.size(), -1);
 
-    for (std::int32_t i = 0; i < passCount; ++i) {
+    // render-pass-4 campaign, PHASE2 - walk passes in EFFECTIVE order
+    // (RenderPassEvent-then-declaration-order), not raw declaration order -
+    // `i` is still the pass's ORIGINAL index (used to index edgeExists/
+    // lastTextureWriter/etc., all still keyed by original index), only the
+    // ORDER `i` takes each of its values changes.
+    for (std::int32_t effectiveOrderPos = 0; effectiveOrderPos < passCount; ++effectiveOrderPos) {
+        const std::int32_t i = effectiveOrder[static_cast<std::size_t>(effectiveOrderPos)];
         const PassRecord& pass = input.passes[static_cast<std::size_t>(i)];
 
-        // RAW: this pass reads whatever the most recently declared prior
-        // pass wrote to this resource (or nothing, if no prior pass ever
-        // wrote it - a "read of a never-written resource" is simply not
-        // given an edge; it is not this compiler's job to validate that,
-        // see Step 4's "no automatic resource-usage validation").
+        // RAW: this pass reads whatever the most recently WALKED (in
+        // effective order) prior pass wrote to this resource (or nothing,
+        // if no prior pass ever wrote it - a "read of a never-written
+        // resource" is simply not given an edge; it is not this compiler's
+        // job to validate that, see Step 4's "no automatic resource-usage
+        // validation").
         for (const ResourceUsage& usage : pass.reads) {
             std::int32_t writer = -1;
             switch (usage.kind) {
@@ -267,9 +305,9 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
         }
 
         // WAW: this pass writes a resource some prior pass already wrote -
-        // preserve that declaration order (see Step 3.2's "multiple
-        // writers to the same imported resource" case), then become the
-        // new last writer for anything declared after this pass.
+        // preserve that effective order (see Step 3.2's "multiple writers
+        // to the same imported resource" case), then become the new last
+        // writer for anything walked after this pass in effective order.
         for (const ResourceUsage& usage : pass.writes) {
             switch (usage.kind) {
             case ResourceKind::Texture:
@@ -371,11 +409,12 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
     // --- Step 3: topological sort of the kept passes (Step 3.2.3) -------
     //
     // Kahn's algorithm, restricted to the kept subgraph. Ties in the
-    // zero-in-degree "ready" set are broken by lowest original
-    // declaration index (Step 3.3's determinism requirement) - a
-    // std::set stays ordered ascending with no hashing involved
-    // whatsoever, so pulling out the smallest ready index every
-    // iteration is both cheap (pass counts are tiny) and, critically,
+    // zero-in-degree "ready" set are broken by lowest EFFECTIVE POSITION
+    // (RenderPassEvent-then-declaration-index - render-pass-4 campaign,
+    // PHASE2, REPLACES the old "lowest original declaration index" rule) -
+    // a std::set stays ordered ascending with no hashing involved
+    // whatsoever, so pulling out the smallest ready EFFECTIVE POSITION
+    // every iteration is both cheap (pass counts are tiny) and, critically,
     // fully deterministic run after run.
     std::vector<std::int32_t> inDegree(static_cast<std::size_t>(passCount), 0);
     for (std::int32_t to = 0; to < passCount; ++to) {
@@ -390,26 +429,31 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
         }
     }
 
-    std::set<std::int32_t> ready;
+    // render-pass-4 campaign, PHASE2 - `readyByEffectivePosition` stores
+    // EFFECTIVE POSITIONS (indices into effectiveOrder), NOT raw pass
+    // indices - mapped back to the real pass index (`effectiveOrder[...]`)
+    // only when actually popped/pushed to `order` below.
+    std::set<std::int32_t> readyByEffectivePosition;
     for (std::int32_t i = 0; i < passCount; ++i) {
         if (kept[static_cast<std::size_t>(i)] && inDegree[static_cast<std::size_t>(i)] == 0) {
-            ready.insert(i);
+            readyByEffectivePosition.insert(effectivePosition[static_cast<std::size_t>(i)]);
         }
     }
 
     std::vector<std::int32_t> order;
     order.reserve(static_cast<std::size_t>(passCount));
 
-    while (!ready.empty()) {
-        const std::int32_t node = *ready.begin();
-        ready.erase(ready.begin());
+    while (!readyByEffectivePosition.empty()) {
+        const std::int32_t nodePosition = *readyByEffectivePosition.begin();
+        readyByEffectivePosition.erase(readyByEffectivePosition.begin());
+        const std::int32_t node = effectiveOrder[static_cast<std::size_t>(nodePosition)];
         order.push_back(node);
 
         for (std::int32_t successor = 0; successor < passCount; ++successor) {
             if (kept[static_cast<std::size_t>(successor)] &&
                 edgeExists[static_cast<std::size_t>(node)][static_cast<std::size_t>(successor)]) {
                 if (--inDegree[static_cast<std::size_t>(successor)] == 0) {
-                    ready.insert(successor);
+                    readyByEffectivePosition.insert(effectivePosition[static_cast<std::size_t>(successor)]);
                 }
             }
         }
