@@ -111,6 +111,26 @@ touching this module or adding a new call site:
   keep working exactly as they do today, console-only, forever. This module
   is a NEW, parallel mechanism only new call sites use going forward.
 
+## Editor "Log" panel
+
+`src/Editor/LogPanelData.h/.cpp` (pure, ImGui-free: `LogPanelFilterState`,
+`BuildLogQueryFilter()`, `FilterByEnabledLevels()`, `ColorForLevel()`,
+`FormatLogEntryLine()`) plus `src/Editor/Panels/LogPanel.h/.cpp` (the actual
+ImGui window) give the Editor a real, working, Unity-Console-style panel
+docked alongside "Memory"/"Profiler"/"Render Graph"/"Atmosphere"/"Jobs"/
+"Project" - registered in `EditorPanelCatalog.h`/`DockLayout.cpp` under the
+exact panel name `"Log"` (so `GET /activate_tab?name=Log`/`GET /list_tabs`
+already work with zero further Network-layer code). Four always-on-by-default
+level checkboxes filter by an ARBITRARY subset (not a single min-level
+threshold - deliberately different from `GET /get_logs`' own `min_level`
+filter, since a plain ordinal threshold cannot express "Debug + Error but not
+Info/Warning"), plus free-text category/keyword filters and an "Auto-scroll"
+checkbox. Re-queries `Logger::Query()` fresh every frame (no incremental
+`since_id` cursor needed at only up to 2000 entries). The "Clear" button calls
+`Logger::Clear()` directly, no bridge - same justification as `POST
+/clear_logs` below (this runs on the main thread anyway, exactly like every
+other Editor panel's own direct engine calls).
+
 ## `GET /get_logs` / `POST /clear_logs`
 
 `Network/NetworkRoutes.h`'s `ParseGetLogsQuery()`/`BuildGetLogsResponseJson()`/

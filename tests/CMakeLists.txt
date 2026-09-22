@@ -2078,6 +2078,7 @@ if(GTE_ENABLE_EDITOR)
         Editor/FrameDebuggerSnapshotBuilderTests.cpp
         Editor/FrameDebuggerPreviewProcessingTests.cpp
         Editor/AtmosphereAerialPerspectiveLutInspectionTests.cpp
+        Network/LogEndpointsEndToEndTests.cpp
     )
 
     # ProjectPanelData.h/.cpp (see src/Editor/ProjectPanelData.h) is only

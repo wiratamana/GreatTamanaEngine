@@ -110,6 +110,40 @@ pieces. This section keeps only the most recent entries inline — see
 **[docs/CHANGELOG.md](docs/CHANGELOG.md)** for the complete, reverse-
 chronological project history from the very first triangle demo onward.
 
+- **The engine has its first unified logging system: a native, Editor-only
+  `gte::Logger`, a "Log" Editor panel, and a smart `GET /get_logs`/
+  `POST /clear_logs` HTTP endpoint pair** (`logger-1` campaign, five phases -
+  `task_manager/logger-1/PHASE0_MASTER_STRATEGY.md`) - `src/Editor/Logger.h/.cpp`
+  gives any subsystem (Renderer, Jobs, Network, ECS, Application, ...) a
+  process-global, thread-safe, in-memory ring buffer (2000 entries, FIFO
+  eviction) callable from any thread via the `GTE_LOG_DEBUG`/`INFO`/`WARNING`/
+  `ERROR` macros, mirroring `Profiling/ScopeTimer.h`'s `GTE_PROFILE_SCOPE`
+  dual-branch shape so a full release runtime game build (`GTE_ENABLE_EDITOR`
+  OFF) pays exactly zero cost - not even evaluating a log message's own
+  string-building expression. Every entry carries a monotonic, never-reset
+  64-bit `id`, a frame number (`Logger::SetCurrentFrame()`, called once per
+  frame by `Application::Run()`), a wall-clock timestamp, a level (`Debug`/
+  `Info`/`Warning`/`Error`), a free-text `category`, and a plain message
+  string - no existing `fprintf(stderr, ...)` call site anywhere in the
+  engine was touched or migrated, by explicit design; only new call sites use
+  the Logger going forward. `GET /get_logs` filters by `since_id` (an
+  incremental cursor for repeated polling), `min_level`, `category`,
+  `keyword`, `frame_min`/`frame_max`, and a `limit` (silently clamped, never
+  rejected) - and `POST /clear_logs` resets the buffer without ever resetting
+  the `id` counter - both calling `Logger::Query()`/`Clear()` DIRECTLY, a
+  documented, narrow exception to this engine's usual bridge-only networking
+  rule (see `AGENTS.md`, "Logging"), since `Logger` is its own purpose-built,
+  concurrency-safe store, not ECS/Renderer/Game state. The Editor's new "Log"
+  panel (`src/Editor/LogPanelData.h/.cpp` + `Panels/LogPanel.h/.cpp`), docked
+  alongside "Memory"/"Profiler"/"Atmosphere"/"Jobs", shows a live, colored,
+  per-level-filterable, category/keyword-filterable, auto-scrolling list with
+  a Clear button. Verified with a full clean build, a full `ctest` regression
+  pass (1673 tests, 100% passing, one pre-existing environment-gated skip -
+  up from `render-pass-4`'s own 1626 baseline), and a live, HTTP-driven,
+  screenshot-verified smoke test confirming `GET /get_logs` returns real log
+  entries correctly filtered and the "Log" panel shows them live in a running
+  Editor session. See `task_manager/logger-1/CAMPAIGN_COMPLETION_REPORT.md`
+  for the full five-phase writeup.
 - **A follow-up campaign, `render-pass-3`, gave the engine a generic, opt-in
   `RenderPass` DECLARATION layer sitting strictly above the still-untouched
   `RenderGraphBuilder::AddRenderPass()` chokepoint** (five phases -
