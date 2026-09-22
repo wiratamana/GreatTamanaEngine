@@ -7,6 +7,7 @@
 #include "../Application/EngineCommandBridge.h"
 #include "../Application/FrameCaptureBridge.h"
 #include "../Application/FrameDebuggerCommandBridge.h"
+#include "../Editor/Logger.h"
 #include "../Encoding/Base64.h"
 #include "../Math/Quat.h"
 #include "../Math/Vec3.h"
@@ -932,6 +933,13 @@ void NetworkServer::Start(int port)
     if (resolvedPort < 0) {
         std::fprintf(stderr, "NetworkServer: failed to bind %s:%d - network endpoint disabled this run.\n",
             kBindHost, port);
+        // logger-1 campaign, Phase 2 - additive log call next to this
+        // existing fprintf site. This runs on the CALLING thread (the main
+        // thread, since Application calls Start() synchronously during
+        // construction), not the Network background thread - see PHASE2's
+        // own Step 2 for the fact-checked detail.
+        GTE_LOG_ERROR("Network", "failed to bind " + std::string(kBindHost) + ":"
+            + std::to_string(port) + " - network endpoint disabled this run.");
         return; // Non-fatal - see header comment.
     }
 
@@ -944,6 +952,10 @@ void NetworkServer::Start(int port)
     });
 
     std::fprintf(stdout, "NetworkServer: listening on %s:%d\n", kBindHost, resolvedPort);
+    // logger-1 campaign, Phase 2 - additive log call next to this existing
+    // fprintf site (same main-thread caveat as the failed-bind site above).
+    GTE_LOG_INFO("Network", "listening on " + std::string(kBindHost) + ":"
+        + std::to_string(resolvedPort));
 }
 
 void NetworkServer::Stop()

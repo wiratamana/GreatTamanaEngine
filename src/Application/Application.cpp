@@ -6,6 +6,7 @@
 #include "MemorySnapshotBuilder.h"
 #include "RenderPasses.h"
 
+#include "../Editor/Logger.h"
 #include "../Encoding/DepthVisualization.h"
 #include "../Encoding/HdrColorVisualization.h"
 #include "../Encoding/PixelConversion.h"
@@ -265,6 +266,13 @@ Application::Application(const std::string& title, int width, int height)
     // NON-FATAL - the rest of Application still starts normally either way.
     m_networkServer.Start(8080);
 #endif
+
+    // logger-1 campaign, Phase 2 - proves GTE_LOG_* is reachable with zero
+    // #ifdef from Application.cpp's own constructor, right after every other
+    // subsystem (including the network server, above) is already
+    // constructed/started. Unconditional - GTE_LOG_INFO vanishes on its own
+    // when GTE_ENABLE_EDITOR is OFF (see Editor/Logger.h).
+    GTE_LOG_INFO("Application", "GreatTamanaEngine started.");
 }
 
 Application::~Application() = default;
@@ -836,6 +844,13 @@ int Application::Run()
         const bool stepRequestedRaw = m_editorLayer->TryConsumeStepRequest();
         const bool steppedThisFrame = playbackPaused && stepRequestedRaw;
         m_engineContext.time.Advance(deltaSeconds, playbackPaused, steppedThisFrame, kFixedStepSeconds);
+
+        // logger-1 campaign, Phase 2 - stamps every Logger entry recorded
+        // from here until the next Advance() with THIS frame's number. Safe
+        // to call unconditionally, with no #if GTE_ENABLE_EDITOR guard
+        // needed at this call site - Logger::SetCurrentFrame() is a real
+        // no-op in that configuration (see Editor/Logger.h).
+        gte::Logger::SetCurrentFrame(m_engineContext.time.FrameCount());
 
         // task_manager/frame-debugger-3 campaign, PHASE3
         // (PHASE3_FRAME_HISTORY_RING_BUFFER_AND_CAPTURE_TRIGGER.md, Step

@@ -2,6 +2,8 @@
 
 #include "JobSystem.h"
 
+#include "../Editor/Logger.h"
+
 #include <atomic>
 #include <cassert>
 #include <cstdio>
@@ -209,6 +211,17 @@ void ScheduleAfter(JobFunction fn, void* payload, std::span<JobHandle* const> de
                 "never be (or share underlying state with) its own output "
                 "handle - ignoring this dependency to avoid a permanent "
                 "deadlock.\n");
+            // logger-1 campaign, Phase 2 - additive log call next to this
+            // existing fprintf site (this is NOT a proven Job System
+            // worker-thread call site - ScheduleAfter()/DispatchAfter() run
+            // on whichever thread calls them - see PHASE2's own Step 2 for
+            // the fact-checked detail). Mirrors the exact wording already
+            // printed to stderr above, converted to a std::string.
+            GTE_LOG_ERROR("Jobs",
+                "gte::Jobs::ScheduleAfter()/DispatchAfter(): a dependency must "
+                "never be (or share underlying state with) its own output "
+                "handle - ignoring this dependency to avoid a permanent "
+                "deadlock.");
             assert(false && "ScheduleAfter()/DispatchAfter(): self-dependency on output handle");
             continue;
         }
