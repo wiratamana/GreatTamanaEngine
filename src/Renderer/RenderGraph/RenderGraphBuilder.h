@@ -455,6 +455,12 @@ public:
     // declaration layer (src/Renderer/RenderGraph/RenderPipeline.h)
     // translates its own opaque RenderPassDesc::order into this parameter
     // before calling into this exact, otherwise-unchanged chokepoint.
+    // render-pass-4 campaign, PHASE1
+    // (task_manager/render-pass-4/PHASE1_DEPENDENCY_EVENT_CONTRADICTION_SAFETY_NET.md)
+    // - the stamped `renderPassEvent` value is now cross-checked against
+    // this pass's real, declared resource dependencies by
+    // RenderGraphCompiler::Compile() - see RenderPassEvent's own doc
+    // comment (RenderGraphTypes.h).
     template <typename SetupFn, typename ExecuteFn>
     void AddRenderPass(const char* name, PassKind kind, ViewScope viewScope, RenderPassCategory category,
         SetupFn&& setup, ExecuteFn&& execute, RenderPassDrawKind drawKind = RenderPassDrawKind::DrawMesh,
@@ -479,7 +485,9 @@ public:
     // (render-pass-3 campaign, PHASE1) - same "trailing defaulted plain-type
     // parameter never touches template deduction" reasoning as the overload
     // above, so every pre-existing 4-argument call site compiles completely
-    // unmodified.
+    // unmodified. render-pass-4 campaign, PHASE1 - same cross-check note
+    // as the overload above applies here too (this overload simply
+    // forwards into it).
     template <typename SetupFn, typename ExecuteFn>
     void AddRenderPass(const char* name, PassKind kind, SetupFn&& setup, ExecuteFn&& execute,
         RenderPassDrawKind drawKind = RenderPassDrawKind::DrawMesh,

@@ -414,6 +414,17 @@ const char* ToString(RenderPassDrawKind drawKind) noexcept;
 // RenderPassCategory/RenderPassDrawKind already live in this same file.
 // Deliberately an exhaustive-switch-friendly small enum, mirroring every
 // sibling enum in this file's own "no default: case, ever" convention.
+//
+// render-pass-4 campaign, PHASE1
+// (task_manager/render-pass-4/PHASE1_DEPENDENCY_EVENT_CONTRADICTION_SAFETY_NET.md)
+// - as of this campaign, RenderGraphCompiler::Compile() cross-checks this
+// field against every pass's real, declared resource dependencies - see
+// DetectRenderPassEventContradictions() (RenderGraphCompiler.h). A wrong
+// tag here is no longer silent: it is reported to stderr and, in debug
+// builds, fails an assert(). This still does not make RenderPassEvent
+// itself a scheduling mechanism - see
+// task_manager/render-pass-4/PHASE2_REAL_RENDERPASSEVENT_ORDERING_ENFORCEMENT.md
+// for the phase that actually changes that.
 enum class RenderPassEvent : std::uint32_t {
     BeforeEverything = 0,
     PreOpaques = 1000,
@@ -603,6 +614,11 @@ struct PassRecord {
     // excludes via category == Debug (PHASE4 never reads this field for
     // those). Appended at the END of the struct (never inserted in the
     // middle) - see this file's own header comment.
+    //
+    // render-pass-4 campaign, PHASE1 - this field is now cross-checked
+    // against every pass's real, declared resource dependencies by
+    // RenderGraphCompiler::Compile() - see RenderPassEvent's own doc
+    // comment above for the full write-up.
     RenderPassEvent renderPassEvent = RenderPassEvent::Opaques;
 };
 

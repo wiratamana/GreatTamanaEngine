@@ -582,6 +582,170 @@ TEST(RenderGraphCompilerTest, GpuSkinningReadBeforeWriteMitigationPreservesOrder
     EXPECT_FALSE(input.passes[2].isCulled);
 }
 
+// --- render-pass-4 campaign, PHASE1 -----------------------------------------
+// (task_manager/render-pass-4/PHASE1_DEPENDENCY_EVENT_CONTRADICTION_SAFETY_NET.md)
+//
+// DetectRenderPassEventContradictions() is exercised DIRECTLY here (never
+// through Compile()) - it is a pure, side-effect-free function that never
+// prints or asserts, so it is completely safe to call with a deliberately
+// contradicting graph, unlike Compile() itself (which turns a non-empty
+// result into an unconditional stderr report plus a debug-build assert()).
+
+TEST(RenderGraphCompilerTest, NoReadsOrWritesProducesNoContradictions)
+{
+    RenderGraphBuilder builder;
+    CompiledGraphInput input = builder.Finish();
+
+    const std::vector<RenderPassEventContradiction> contradictions =
+        DetectRenderPassEventContradictions(input, {});
+
+    EXPECT_TRUE(contradictions.empty());
+}
+
+TEST(RenderGraphCompilerTest, NormalWriterBeforeReaderProducesNoContradictions)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle t0 = builder.CreateTexture("T0", MakeTextureDesc());
+
+    builder.AddRenderPass(
+        "Opaque", PassKind::Graphics, [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(t0); },
+        NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::Opaques); // index 0
+    builder.AddRenderPass(
+        "AfterOpaque", PassKind::Graphics, [&](RenderGraphBuilder::PassBuilder& pass) { pass.ReadTexture(t0); },
+        NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::AfterOpaques); // index 1
+
+    CompiledGraphInput input = builder.Finish();
+    const std::int32_t identity[] = { 0, 1 };
+
+    const std::vector<RenderPassEventContradiction> contradictions =
+        DetectRenderPassEventContradictions(input, identity);
+
+    EXPECT_TRUE(contradictions.empty());
+}
+
+// The permanent regression test for the exact historical bug (PHASE0's
+// Locked Design Decision 5) - a reader ("Composite") declared BEFORE its
+// writer ("Opaque"), exactly reproducing AtmosphereComposite/RenderOpaque's
+// real, historical shape (see PHASE0_MASTER_STRATEGY.md, Step 2).
+TEST(RenderGraphCompilerTest, OrphanReadWithLaterWriterIsDetected)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle t0 = builder.CreateTexture("T0", MakeTextureDesc());
+
+    builder.AddRenderPass(
+        "Composite", PassKind::Graphics, [&](RenderGraphBuilder::PassBuilder& pass) { pass.ReadTexture(t0); },
+        NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::AfterTransparents); // index 0 - reader, declared FIRST.
+    builder.AddRenderPass(
+        "Opaque", PassKind::Graphics, [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(t0); },
+        NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::Opaques); // index 1 - writer, declared SECOND.
+
+    CompiledGraphInput input = builder.Finish();
+    const std::int32_t identity[] = { 0, 1 };
+
+    const std::vector<RenderPassEventContradiction> contradictions =
+        DetectRenderPassEventContradictions(input, identity);
+
+    ASSERT_EQ(contradictions.size(), 1u);
+    EXPECT_EQ(contradictions[0].kind, RenderPassEventContradictionKind::OrphanReadWithLaterWriter);
+    EXPECT_EQ(contradictions[0].readerPassIndex, 0);
+    EXPECT_EQ(contradictions[0].writerPassIndex, 1);
+}
+
+TEST(RenderGraphCompilerTest, EdgeContradictingDeclaredEventOrderIsDetected)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle t0 = builder.CreateTexture("T0", MakeTextureDesc());
+
+    builder.AddRenderPass(
+        "Opaque", PassKind::Graphics, [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(t0); },
+        NoOpExecute, RenderPassDrawKind::DrawMesh,
+        RenderPassEvent::AfterTransparents); // index 0 - writer, DELIBERATELY mistagged late.
+    builder.AddRenderPass(
+        "Composite", PassKind::Graphics, [&](RenderGraphBuilder::PassBuilder& pass) { pass.ReadTexture(t0); },
+        NoOpExecute, RenderPassDrawKind::DrawMesh,
+        RenderPassEvent::Opaques); // index 1 - reader, DELIBERATELY mistagged early.
+
+    CompiledGraphInput input = builder.Finish();
+    const std::int32_t identity[] = { 0, 1 };
+
+    const std::vector<RenderPassEventContradiction> contradictions =
+        DetectRenderPassEventContradictions(input, identity);
+
+    ASSERT_EQ(contradictions.size(), 1u);
+    EXPECT_EQ(contradictions[0].kind, RenderPassEventContradictionKind::DeclaredEventOrderDisagreesWithRealDependency);
+    EXPECT_EQ(contradictions[0].readerPassIndex, 1);
+    EXPECT_EQ(contradictions[0].writerPassIndex, 0);
+}
+
+TEST(RenderGraphCompilerTest, SameEventTierNeverProducesAContradiction)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle t0 = builder.CreateTexture("T0", MakeTextureDesc());
+
+    builder.AddRenderPass(
+        "Opaque", PassKind::Graphics, [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(t0); },
+        NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::Opaques); // index 0
+    builder.AddRenderPass(
+        "AlsoOpaque", PassKind::Graphics, [&](RenderGraphBuilder::PassBuilder& pass) { pass.ReadTexture(t0); },
+        NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::Opaques); // index 1 - same tier as the writer.
+
+    CompiledGraphInput input = builder.Finish();
+    const std::int32_t identity[] = { 0, 1 };
+
+    const std::vector<RenderPassEventContradiction> contradictions =
+        DetectRenderPassEventContradictions(input, identity);
+
+    EXPECT_TRUE(contradictions.empty());
+}
+
+// Confirms 3.2's new Compile() wiring doesn't fire a false positive against
+// a graph that was always fine, and that executionOrder/isCulled are
+// unchanged from what DiamondDependencyOrdersCorrectlyWithDeterministicSiblingOrder
+// (above) already asserts - a consistent graph must never abort here.
+TEST(RenderGraphCompilerTest, CallingCompileWithAConsistentGraphNeverAborts)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle t0 = builder.CreateTexture("T0", MakeTextureDesc());
+    const TextureHandle t1 = builder.CreateTexture("T1", MakeTextureDesc());
+    const TextureHandle t2 = builder.CreateTexture("T2", MakeTextureDesc());
+    const TextureHandle tFinal = builder.CreateTexture("TFinal", MakeTextureDesc());
+
+    builder.AddRenderPass(
+        "A", PassKind::Graphics, [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(t0); },
+        NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::Opaques); // index 0
+    builder.AddRenderPass(
+        "B", PassKind::Graphics,
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.ReadTexture(t0);
+            pass.WriteColorAttachment(t1);
+        },
+        NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::Opaques); // index 1
+    builder.AddRenderPass(
+        "C", PassKind::Graphics,
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.ReadTexture(t0);
+            pass.WriteColorAttachment(t2);
+        },
+        NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::Opaques); // index 2
+    builder.AddRenderPass(
+        "D", PassKind::Graphics,
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.ReadTexture(t1);
+            pass.ReadTexture(t2);
+            pass.WriteColorAttachment(tFinal);
+        },
+        NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::AfterOpaques); // index 3
+
+    CompiledGraphInput input = builder.Finish();
+    const TextureHandle finalOutputs[] = { tFinal };
+    const CompiledGraph compiled = Compile(input, finalOutputs);
+
+    EXPECT_TRUE(ExecutionOrderEquals(compiled.executionOrder, { 0, 1, 2, 3 }));
+    for (const auto& pass : input.passes) {
+        EXPECT_FALSE(pass.isCulled);
+    }
+}
+
 // --- Cycle detection --------------------------------------------------------
 //
 // RENDERGRAPH_PHASE3_COMPILATION_STRATEGY_v1.md's own Step 3.4 asks for a

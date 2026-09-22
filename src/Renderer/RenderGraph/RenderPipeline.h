@@ -28,6 +28,14 @@
 // (see GENERIC_RENDERPASS_SYSTEM_DESIGN_V2.md's own architecture diagram:
 // feature modules -> RenderPipeline -> RenderGraphBuilder::AddPass()/
 // AddComputePass()).
+//
+// render-pass-4 campaign, PHASE1
+// (task_manager/render-pass-4/PHASE1_DEPENDENCY_EVENT_CONTRADICTION_SAFETY_NET.md)
+// - RenderPassDesc::order (RenderPassEvent) is now cross-checked by
+// RenderGraphCompiler::Compile() against every pass's real, declared
+// resource dependencies, reported to stderr (and, in debug builds, an
+// assert()) the moment the two disagree - see
+// DetectRenderPassEventContradictions() (RenderGraphCompiler.h).
 
 #include "RenderGraphBuilder.h"
 #include "RenderGraphTypes.h"
@@ -165,6 +173,9 @@ struct RenderPassDesc {
     RenderPassId id;
     const char* debugName = nullptr;
     PassKind kind = PassKind::Graphics;
+    // render-pass-4 campaign, PHASE1 - cross-checked against every pass's
+    // real, declared resource dependencies by RenderGraphCompiler::Compile()
+    // - see RenderPassEvent's own doc comment (RenderGraphTypes.h).
     RenderPassEvent order = RenderPassEvent::Opaques;
     RenderPassTagMask tags = 0;
     RenderViewId view = RenderViewId::Shared();

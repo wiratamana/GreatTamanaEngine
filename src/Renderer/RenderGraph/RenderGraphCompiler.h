@@ -80,6 +80,64 @@ struct CompiledGraph {
     std::vector<ResourceLifetime> volumeTextureLifetimes;
 };
 
+// render-pass-4 campaign, PHASE1
+// (PHASE1_DEPENDENCY_EVENT_CONTRADICTION_SAFETY_NET.md) - RenderPassEvent
+// is purely descriptive metadata (see its own doc comment,
+// RenderGraphTypes.h) - Compile()'s own RAW/WAW dependency scan never
+// reads it. This is a SEPARATE, PURE, side-effect-free diagnostic scan
+// that cross-checks the two against each other and reports every place
+// they disagree - it changes NOTHING about what Compile() actually
+// returns. See Compile()'s own doc comment for how a non-empty result is
+// turned into a loud, unmissable diagnostic.
+enum class RenderPassEventContradictionKind : std::uint8_t {
+    // `readerPassIndex` reads a resource with no writer declared anywhere
+    // BEFORE it in `processingOrder` - but `writerPassIndex` (declared
+    // somewhere AFTER it in `processingOrder`) writes that exact same
+    // resource. This is the precise, confirmed root-cause pattern behind
+    // the documented, already-occurred "AtmosphereComposite silently
+    // culls RenderOpaque" bug (see PHASE0_MASTER_STRATEGY.md, Step 2) -
+    // `Compile()`'s own RAW-edge scan can never link this read to that
+    // write, because "the most recent pass, among those declared so far,
+    // that wrote it" (RenderGraphCompiler.cpp's own header comment) never
+    // includes a write that hasn't happened "so far" yet.
+    OrphanReadWithLaterWriter,
+    // A real RAW dependency was formed - `writerPassIndex` genuinely,
+    // provably runs before `readerPassIndex` - but `writerPassIndex`'s own
+    // declared RenderPassEvent is LATER (numerically greater) than
+    // `readerPassIndex`'s. The real dependency is still honored correctly
+    // either way (Compile() doesn't need this to be consistent to be
+    // CORRECT) - but the disagreement is a strong signal that one of the
+    // two passes has the wrong RenderPassEvent tag for what it actually
+    // does, and is worth a human looking at before it becomes a real bug
+    // the next time either pass's real dependency set changes.
+    DeclaredEventOrderDisagreesWithRealDependency,
+};
+
+struct RenderPassEventContradiction {
+    RenderPassEventContradictionKind kind = RenderPassEventContradictionKind::OrphanReadWithLaterWriter;
+    std::int32_t readerPassIndex = -1;
+    std::int32_t writerPassIndex = -1;
+    ResourceKind resourceKind = ResourceKind::Texture;
+    std::uint32_t resourceIndex = 0;
+};
+
+// A pure, Tier-1-testable scan - never prints, never asserts, never
+// throws, and never mutates `input`. `processingOrder` must be a
+// permutation of `[0, input.passes.size())`, expressing "which order will
+// the compiler actually resolve a read's nearest prior writer in" -
+// PHASE1 always calls this with the identity permutation (raw declaration
+// order, `[0, 1, 2, ...]`), matching Compile()'s own current algorithm
+// exactly. PHASE2 (PHASE2_REAL_RENDERPASSEVENT_ORDERING_ENFORCEMENT.md)
+// is what will later pass a DIFFERENT permutation here (its new
+// RenderPassEvent-sorted "effective order") - this function's signature
+// is deliberately already shaped for that, so PHASE2 never has to touch
+// this function's own logic, only what it's called with. "Before"/"after"
+// in both RenderPassEventContradictionKind enumerators above always means
+// "earlier/later in `processingOrder`", never "smaller/larger original
+// pass index".
+std::vector<RenderPassEventContradiction> DetectRenderPassEventContradictions(
+    const CompiledGraphInput& input, std::span<const std::int32_t> processingOrder);
+
 // Compiles `input` against the REQUIRED root set `finalOutputs` - the
 // texture handles the caller actually needs to exist by the end of this
 // frame (e.g. the swapchain image the Present pass writes, and nothing
@@ -93,6 +151,14 @@ struct CompiledGraph {
 // `finalVolumeTextureOutputs` entry is dead code and is culled entirely:
 // excluded from `executionOrder`, and none of its declared reads/writes
 // extend any resource's lifetime.
+//
+// render-pass-4 campaign, PHASE1 - Compile() now ALSO runs
+// DetectRenderPassEventContradictions() once, at the very top, against the
+// identity (raw declaration order) permutation, and turns a non-empty
+// result into an unconditional stderr report plus a debug-build assert()
+// - see this header's own RenderPassEventContradiction doc comment above
+// and RenderGraphCompiler.cpp's own wiring. This changes NOTHING about the
+// algorithm below; it is a pure diagnostic pre-pass.
 //
 // `input` is taken by NON-CONST reference (not `const&`, despite this
 // phase's own strategy document sketching a `const&` signature) because

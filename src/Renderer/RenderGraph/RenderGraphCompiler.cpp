@@ -1,5 +1,7 @@
 #include "RenderGraphCompiler.h"
 
+#include <cassert>
+#include <cstdio>
 #include <set>
 #include <stdexcept>
 
@@ -35,6 +37,102 @@ bool ContainsVolumeTextureHandle(std::span<const VolumeTextureHandle> handles, c
 
 } // namespace
 
+// render-pass-4 campaign, PHASE1
+// (PHASE1_DEPENDENCY_EVENT_CONTRADICTION_SAFETY_NET.md) - see this
+// function's own declaration (RenderGraphCompiler.h) for the full doc
+// comment. Deliberately fully self-contained/independent of Compile()'s
+// own lastTextureWriter/lastBufferWriter/lastVolumeTextureWriter
+// bookkeeping arrays below - this keeps it safely callable from a test
+// with an arbitrary hand-built CompiledGraphInput, with zero dependency
+// on Compile()'s own internals. Never prints, never asserts, never
+// throws, and never mutates `input`.
+std::vector<RenderPassEventContradiction> DetectRenderPassEventContradictions(
+    const CompiledGraphInput& input, std::span<const std::int32_t> processingOrder)
+{
+    std::vector<RenderPassEventContradiction> contradictions;
+
+    // Tiny helper: does `usage` refer to the same resource as `other`?
+    auto sameResource = [](const ResourceUsage& a, const ResourceUsage& b) {
+        if (a.kind != b.kind) {
+            return false;
+        }
+        switch (a.kind) {
+        case ResourceKind::Texture:
+            return a.texture == b.texture;
+        case ResourceKind::Buffer:
+            return a.buffer == b.buffer;
+        case ResourceKind::VolumeTexture:
+            return a.volumeTexture == b.volumeTexture;
+        }
+        return false;
+    };
+
+    for (std::size_t readerPos = 0; readerPos < processingOrder.size(); ++readerPos) {
+        const std::int32_t readerIndex = processingOrder[readerPos];
+        const PassRecord& reader = input.passes[static_cast<std::size_t>(readerIndex)];
+
+        for (const ResourceUsage& read : reader.reads) {
+            // Find the NEAREST writer strictly before readerPos in processingOrder.
+            std::int32_t nearestWriterIndex = -1;
+            for (std::int32_t candidatePos = static_cast<std::int32_t>(readerPos) - 1; candidatePos >= 0;
+                 --candidatePos) {
+                const PassRecord& candidate = input.passes[static_cast<std::size_t>(processingOrder[static_cast<std::size_t>(candidatePos)])];
+                bool writesIt = false;
+                for (const ResourceUsage& write : candidate.writes) {
+                    if (sameResource(write, read)) {
+                        writesIt = true;
+                        break;
+                    }
+                }
+                if (writesIt) {
+                    nearestWriterIndex = processingOrder[static_cast<std::size_t>(candidatePos)];
+                    break;
+                }
+            }
+
+            if (nearestWriterIndex == -1) {
+                // No writer found before this read in processingOrder - is
+                // there one ANYWHERE (i.e. strictly after, in
+                // processingOrder terms)?
+                for (std::int32_t otherPos = static_cast<std::int32_t>(readerPos) + 1;
+                     otherPos < static_cast<std::int32_t>(processingOrder.size()); ++otherPos) {
+                    const std::int32_t otherIndex = processingOrder[static_cast<std::size_t>(otherPos)];
+                    const PassRecord& other = input.passes[static_cast<std::size_t>(otherIndex)];
+                    for (const ResourceUsage& write : other.writes) {
+                        if (sameResource(write, read)) {
+                            RenderPassEventContradiction contradiction;
+                            contradiction.kind = RenderPassEventContradictionKind::OrphanReadWithLaterWriter;
+                            contradiction.readerPassIndex = readerIndex;
+                            contradiction.writerPassIndex = otherIndex;
+                            contradiction.resourceKind = read.kind;
+                            contradiction.resourceIndex = read.kind == ResourceKind::Texture ? read.texture.index
+                                : read.kind == ResourceKind::Buffer                          ? read.buffer.index
+                                                                                              : read.volumeTexture.index;
+                            contradictions.push_back(contradiction);
+                            break; // One report per (reader, resource) pair is enough.
+                        }
+                    }
+                }
+            } else {
+                const PassRecord& writer = input.passes[static_cast<std::size_t>(nearestWriterIndex)];
+                if (writer.renderPassEvent > reader.renderPassEvent) {
+                    RenderPassEventContradiction contradiction;
+                    contradiction.kind = RenderPassEventContradictionKind::DeclaredEventOrderDisagreesWithRealDependency;
+                    contradiction.readerPassIndex = readerIndex;
+                    contradiction.writerPassIndex = nearestWriterIndex;
+                    contradiction.resourceKind = read.kind;
+                    contradiction.resourceIndex = read.kind == ResourceKind::Texture ? read.texture.index
+                        : read.kind == ResourceKind::Buffer                          ? read.buffer.index
+                                                                                       : read.volumeTexture.index;
+                    contradictions.push_back(contradiction);
+                }
+            }
+        }
+    }
+
+    return contradictions;
+}
+
 // Implementation note on cycle detection (Step 3.2.3's Kahn's-algorithm
 // "naturally detects a cycle" requirement): the edge-construction rule
 // below (Step 3.2.1 - "the most recent pass, among those declared so far,
@@ -67,6 +165,40 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
 
     if (passCount == 0) {
         return result;
+    }
+
+    // render-pass-4 campaign, PHASE1 - a pure diagnostic pre-pass, changing
+    // NOTHING about the algorithm below. PHASE1 always checks against raw
+    // declaration order (the identity permutation) - matching this
+    // function's own current, unchanged algorithm. See
+    // DetectRenderPassEventContradictions()'s own doc comment
+    // (RenderGraphCompiler.h) for why `processingOrder` is a parameter at
+    // all (PHASE2 will pass something else here).
+    {
+        std::vector<std::int32_t> declarationOrder(static_cast<std::size_t>(passCount));
+        for (std::int32_t i = 0; i < passCount; ++i) {
+            declarationOrder[static_cast<std::size_t>(i)] = i;
+        }
+        const std::vector<RenderPassEventContradiction> contradictions =
+            DetectRenderPassEventContradictions(input, declarationOrder);
+        for (const RenderPassEventContradiction& contradiction : contradictions) {
+            const PassRecord& reader = input.passes[static_cast<std::size_t>(contradiction.readerPassIndex)];
+            const PassRecord& writer = input.passes[static_cast<std::size_t>(contradiction.writerPassIndex)];
+            const char* kindText = contradiction.kind == RenderPassEventContradictionKind::OrphanReadWithLaterWriter
+                ? "a read resolved to NO prior writer, but a LATER-declared pass writes the same resource - this "
+                  "read may be silently dropped from the dependency graph and its writer may be silently culled"
+                : "a real dependency edge was formed, but the writer's own declared RenderPassEvent is LATER than "
+                  "the reader's - the two passes' RenderPassEvent tags disagree with their real dependency";
+            std::fprintf(stderr,
+                "RenderGraphCompiler: RenderPassEvent contradiction detected - reader pass \"%s\" (RenderPassEvent=%s), "
+                "writer pass \"%s\" (RenderPassEvent=%s): %s.\n",
+                reader.name != nullptr ? reader.name : "<unnamed>", ToString(reader.renderPassEvent),
+                writer.name != nullptr ? writer.name : "<unnamed>", ToString(writer.renderPassEvent), kindText);
+        }
+        assert(contradictions.empty()
+            && "RenderGraphCompiler: one or more passes' declared RenderPassEvent contradicts a real (or "
+               "possibly-missing) resource dependency - see the stderr output immediately above this assert for "
+               "exactly which passes and why. See task_manager/render-pass-4/PHASE1_DEPENDENCY_EVENT_CONTRADICTION_SAFETY_NET.md.");
     }
 
     // --- Step 1: build the dependency graph (Step 3.2.1) --------------
