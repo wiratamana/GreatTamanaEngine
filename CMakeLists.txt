@@ -441,6 +441,8 @@ add_library(gte_core STATIC
     src/Renderer/GpuSkinning/GpuSkinningPipelines.cpp
     src/Renderer/Culling/CullingTypes.h
     src/Renderer/Culling/CullingTypes.cpp
+    src/Renderer/Culling/CullingPipelines.h
+    src/Renderer/Culling/CullingPipelines.cpp
     src/Renderer/IndirectDrawTypes.h
     src/Renderer/Atmosphere/AtmosphereTypes.h
     src/Renderer/Atmosphere/AtmosphereParameters.h
@@ -815,6 +817,15 @@ gte_add_shader(GreatTamanaEngine src/Shaders/Mesh.frag)
 # frag above - GpuResourceFactory.cpp (which loads this) is always
 # compiled into gte_core.
 gte_add_shader(GreatTamanaEngine src/Shaders/MeshInstanced.vert)
+
+# GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+# PHASE3 (task_manager/render-pass-5/
+# PHASE3_FRUSTUM_CULL_COMPUTE_SHADER_AND_PIPELINE.md) - the real culling
+# compute shader (src/Renderer/Culling/CullingPipelines.h/.cpp). Unconditional
+# for the same reason as SkinVerticesPositionNormal.comp below - this is a
+# genuine gameplay/runtime feature (batched-entity frustum culling), not a
+# debug/Editor-only tool, so it must work in a non-Editor, release build too.
+gte_add_shader(GreatTamanaEngine src/Shaders/FrustumCull.comp)
 
 # The TEXTURED half of that same "imported mesh" draw path (src/Renderer/
 # MeshVertex.h's MeshVertexUv, Pipeline.h's VertexLayout::PositionNormalUv,

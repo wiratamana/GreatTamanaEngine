@@ -1,0 +1,182 @@
+#version 450
+
+// ============================================================================
+// GPU-Driven Frustum Culling + Indirect Draw (render-pass-5) - PHASE3: the
+// real culling compute shader.
+// ============================================================================
+// See task_manager/render-pass-5/PHASE3_FRUSTUM_CULL_COMPUTE_SHADER_AND_PIPELINE.md
+// for the full design reasoning (in particular section 3.1's binding table
+// and section 3.2's exact worked example) - this file is a direct,
+// byte-for-byte-faithful implementation of that document's own pinned-down
+// GLSL. Do not "improve"/re-derive the math from memory - re-read that
+// document (and src/Renderer/Culling/CullingTypes.cpp's own
+// AABBIntersectsFrustum(), the permanent CPU oracle this shader mirrors)
+// before changing anything here.
+//
+// Binding table (see CullingTypes.h/IndirectDrawTypes.h for the exact C++
+// mirror struct shapes every binding below must match byte-for-byte):
+//   binding 0 - per-instance input (GpuCullingInstanceInput[], read-only,
+//               std430 array-of-structs - SAFE here: every member is already
+//               16-byte-aligned/sized, so this struct's own std430 stride
+//               (112 bytes) needs no implicit padding).
+//   binding 1 - output indirect-command array (IndirectDrawCommand[], sized
+//               to at least pc.instanceCount entries) - a FLAT,
+//               manually-indexed uint[] array, mirroring
+//               SkinVerticesPositionNormal.comp's own OutputBuffer.values[]
+//               precedent EXACTLY. This is load-bearing, not stylistic: a
+//               plain GLSL `struct` array here would silently misalign (a
+//               32-byte stride instead of the required tightly-packed 20
+//               bytes) and corrupt every element after the first - see the
+//               phase document's own "⚠️ CORRECTED" note.
+//   binding 2 - atomic visible-count buffer (single uint) - MUST already be
+//               0 when this shader is dispatched. This shader ONLY EVER
+//               increments it via atomicAdd - it NEVER resets it itself
+//               (GLSL compute has no cross-workgroup ordering guarantee
+//               within one dispatch, so a "have one invocation reset it
+//               first" scheme would be a genuine data race against every
+//               other workgroup's own atomicAdd). Resetting this buffer to
+//               0 before every dispatch is PHASE5's job (a vkCmdFillBuffer
+//               step, declared as a ResourceAccess::TransferDst write
+//               ordered strictly before this shader's own
+//               ComputeShaderWrite pass, every frame) - see the phase
+//               document's section 3.2.
+//
+// local_size_x = 256 - MUST match src/Renderer/Culling/CullingPipelines.h's
+// own kCullingLocalSizeX constant exactly (hand-maintained pairing, never
+// tool-enforced - see ComputeDispatch.h's own header comment on why this
+// convention is never tool-enforced).
+layout(local_size_x = 256) in;
+
+// Binding 0 - matches GpuCullingInstanceInput (CullingTypes.h) exactly.
+struct CullingInstance {
+    mat4 worldMatrix;
+    vec4 aabbMinAndPad; // .xyz = world-space AABB min (already transformed
+                         // by PHASE4's per-frame CPU packing step - NEVER
+                         // re-transformed here), .w unused
+    vec4 aabbMaxAndPad; // .xyz = ...AABB max, .w unused
+    uvec4 meshOffsets; // .x = firstIndex, .y = indexCount, .z = uint(vertexOffset), .w unused
+};
+layout(std430, binding = 0) readonly buffer InstanceInputBuffer {
+    CullingInstance instances[];
+} instanceInput;
+
+// Binding 1 - matches IndirectDrawCommand (IndirectDrawTypes.h) EXACTLY: 5 x
+// 4-byte fields, tightly packed, 20 bytes/element, stride == 20 - the SAME
+// byte-for-byte shape vkCmdDrawIndexedIndirect(Count) expects. Field order
+// per element: [indexCount, instanceCount, firstIndex, vertexOffset
+// (bit-reinterpreted through uint), firstInstance].
+layout(std430, binding = 1) buffer IndirectCommandOutputBuffer {
+    uint values[]; // values[i*5 + 0..4]
+} indirectCommands;
+
+// Binding 2 - a single atomic uint. See this file's own header comment above
+// for the mandatory external-reset precondition.
+layout(std430, binding = 2) buffer VisibleCountBuffer {
+    uint value;
+} visibleCount;
+
+layout(push_constant) uniform PushConstants {
+    // 6 ALREADY-EXTRACTED frustum planes, computed ONCE per frame on the CPU
+    // via CullingTypes.h's own tested ExtractFrustumPlanes(), never
+    // re-derived in GLSL (see the phase document's own push-constant
+    // byte-budget reasoning for why this is strictly better than in-shader
+    // plane extraction). .xyz = plane normal, .w = plane distance - matches
+    // Plane (CullingTypes.h) byte-for-byte (3 floats + 1 float, 16 bytes,
+    // zero implicit padding).
+    vec4 planes[6]; // 96 bytes
+    uint instanceCount; // total instances in this batch's input array - this
+                        // dispatch's own thread-count bound AND, for
+                        // useCompaction == 0, the EXACT value the CPU must
+                        // also pass as Renderer::SubmitIndirect()'s
+                        // drawCount/maxDrawCount - never a larger, previously
+                        // -grown buffer capacity (see the phase document's
+                        // own "⚠️ CORRECTED" ghost-geometry note).
+    uint useCompaction; // 1 = atomic-append/compacted mode (real
+                        // vkCmdDrawIndexedIndirectCount path); 0 =
+                        // degenerate-padding mode (vkCmdDrawIndexedIndirect
+                        // fallback path). Set ONCE per batch by the CPU from
+                        // Renderer::SupportsDrawIndirectCount() - never
+                        // re-derived in-shader.
+} pc; // 96 + 4 + 4 = 104 bytes total.
+
+// The standard "positive vertex" (p-vertex) AABB-vs-frustum test - mirrors
+// src/Renderer/Culling/CullingTypes.cpp's own AABBIntersectsFrustum() line
+// for line: for each plane, pick the AABB corner furthest ALONG that
+// plane's normal; if even THAT corner is outside, the whole box is outside.
+// A CONSERVATIVE test (never false-culls a box that's actually at least
+// partially visible).
+bool AabbIntersectsFrustum(vec3 worldMin, vec3 worldMax)
+{
+    for (int p = 0; p < 6; ++p) {
+        vec3 normal = pc.planes[p].xyz;
+        float distance = pc.planes[p].w;
+        vec3 pVertex = vec3(
+            normal.x >= 0.0 ? worldMax.x : worldMin.x,
+            normal.y >= 0.0 ? worldMax.y : worldMin.y,
+            normal.z >= 0.0 ? worldMax.z : worldMin.z);
+        if (dot(normal, pVertex) + distance < 0.0) {
+            return false; // fully outside this one plane -> fully outside the frustum
+        }
+    }
+    return true; // inside (or straddling) all 6 planes - the standard conservative accept
+}
+
+// Writes one IndirectDrawCommand-shaped entry at `slot` (see this file's own
+// header comment for binding 1's exact flat-array field layout/order).
+void WriteIndirectCommand(
+    uint slot, uint indexCount, uint instanceCountField, uint firstIndex, int vertexOffset, uint firstInstance)
+{
+    uint base = slot * 5u;
+    indirectCommands.values[base + 0] = indexCount;
+    indirectCommands.values[base + 1] = instanceCountField;
+    indirectCommands.values[base + 2] = firstIndex;
+    indirectCommands.values[base + 3] = uint(vertexOffset);
+    indirectCommands.values[base + 4] = firstInstance;
+}
+
+void main()
+{
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= pc.instanceCount) {
+        // ComputeGroupCount()'s own documented ceiling-division overshoot -
+        // these extra invocations simply do nothing.
+        return;
+    }
+
+    CullingInstance instance = instanceInput.instances[i];
+    vec3 worldMin = instance.aabbMinAndPad.xyz;
+    vec3 worldMax = instance.aabbMaxAndPad.xyz;
+    bool visible = AabbIntersectsFrustum(worldMin, worldMax);
+
+    uint firstIndex = instance.meshOffsets.x;
+    uint indexCount = instance.meshOffsets.y;
+    int vertexOffset = int(instance.meshOffsets.z);
+
+    // The firstInstance field written below is ALWAYS this instance's own
+    // ORIGINAL row index `i` into the (never-compacted) input buffer,
+    // regardless of which branch runs or where the command itself ends up
+    // in the output array - this is the load-bearing trick that lets
+    // Shaders/MeshInstanced.vert read the correct model matrix for THIS
+    // draw via gl_InstanceIndex (gl_InstanceIndex == firstInstance always,
+    // since every emitted command here always has instanceCount == 1 - see
+    // the phase document's own Vulkan-spec-confirmed reasoning).
+    if (pc.useCompaction != 0u) {
+        if (visible) {
+            // atomicAdd returns the PRE-increment value - this thread's own
+            // reserved, uncontended output slot.
+            uint slot = atomicAdd(visibleCount.value, 1u);
+            WriteIndirectCommand(slot, indexCount, 1u, firstIndex, vertexOffset, i);
+        }
+        // Not visible: do nothing at all - the compacted array only ever
+        // grows via the atomicAdd branch above; a culled instance never
+        // gets a slot written.
+    } else {
+        if (visible) {
+            WriteIndirectCommand(i, indexCount, 1u, firstIndex, vertexOffset, i);
+        } else {
+            // A harmless, zero-work degenerate draw - the GPU still
+            // iterates over this slot but does no real work for it.
+            WriteIndirectCommand(i, 0u, 0u, 0u, 0, i);
+        }
+    }
+}
