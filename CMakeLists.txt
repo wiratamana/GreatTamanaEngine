@@ -806,6 +806,16 @@ gte_add_shader(GreatTamanaEngine src/Shaders/Triangle.frag)
 gte_add_shader(GreatTamanaEngine src/Shaders/Mesh.vert)
 gte_add_shader(GreatTamanaEngine src/Shaders/Mesh.frag)
 
+# GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+# PHASE2 (task_manager/render-pass-5/
+# PHASE2_INSTANCED_DRAW_PRIMITIVE_AND_INDIRECT_SUBMIT.md) - the new
+# instanced-draw vertex shader (src/Renderer/Pipeline.h's
+# VertexLayout::PositionNormalInstanced), reusing Mesh.frag above UNCHANGED
+# as its fragment shader. Unconditional, for the same reason as Mesh.vert/
+# frag above - GpuResourceFactory.cpp (which loads this) is always
+# compiled into gte_core.
+gte_add_shader(GreatTamanaEngine src/Shaders/MeshInstanced.vert)
+
 # The TEXTURED half of that same "imported mesh" draw path (src/Renderer/
 # MeshVertex.h's MeshVertexUv, Pipeline.h's VertexLayout::PositionNormalUv,
 # Game::EnsureMeshAsset() - src/Game/Game.h/.cpp) - a per-material PMX

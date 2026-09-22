@@ -74,6 +74,30 @@ bool SupportsDynamicRendering(VkPhysicalDevice device)
     return features13.dynamicRendering == VK_TRUE;
 }
 
+// GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+// PHASE2 (task_manager/render-pass-5/
+// PHASE2_INSTANCED_DRAW_PRIMITIVE_AND_INDIRECT_SUBMIT.md) - queries
+// VkPhysicalDeviceVulkan12Features::drawIndirectCount via a SEPARATE
+// vkGetPhysicalDeviceFeatures2() call, BEFORE vkCreateDevice() - see
+// CreateLogicalDevice() below, which only REQUESTS this feature in the
+// actual device-creation chain if this query reported it available.
+// Enabling an unsupported feature makes vkCreateDevice() fail outright,
+// which would be a real regression for every device that doesn't support
+// it - exactly why Locked Design Decision 4 requires this genuine
+// query-first-then-conditionally-request discipline.
+bool QueryDrawIndirectCountSupport(VkPhysicalDevice device)
+{
+    VkPhysicalDeviceVulkan12Features features12{};
+    features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+
+    VkPhysicalDeviceFeatures2 features2{};
+    features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    features2.pNext = &features12;
+
+    vkGetPhysicalDeviceFeatures2(device, &features2);
+    return features12.drawIndirectCount == VK_TRUE;
+}
+
 bool IsDeviceSuitable(VkPhysicalDevice device, VkSurfaceKHR surface)
 {
     const QueueFamilies families = FindQueueFamilies(device, surface);
@@ -131,6 +155,7 @@ VulkanDevice::VulkanDevice(VulkanDevice&& other) noexcept
     , m_graphicsFamily(other.m_graphicsFamily)
     , m_presentFamily(other.m_presentFamily)
     , m_timestampCapability(other.m_timestampCapability)
+    , m_supportsDrawIndirectCount(other.m_supportsDrawIndirectCount)
 {
 }
 
@@ -145,6 +170,7 @@ VulkanDevice& VulkanDevice::operator=(VulkanDevice&& other) noexcept
         m_graphicsFamily = other.m_graphicsFamily;
         m_presentFamily = other.m_presentFamily;
         m_timestampCapability = other.m_timestampCapability;
+        m_supportsDrawIndirectCount = other.m_supportsDrawIndirectCount;
     }
     return *this;
 }
@@ -204,6 +230,20 @@ void VulkanDevice::CreateLogicalDevice()
     features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
     features13.dynamicRendering = VK_TRUE;
     features13.synchronization2 = VK_TRUE;
+
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE2 - drawIndirectCount capability probe (Locked Design Decision
+    // 4, PHASE0_MASTER_STRATEGY.md): query FIRST
+    // (QueryDrawIndirectCountSupport(), a SEPARATE vkGetPhysicalDeviceFeatures2()
+    // call, before this vkCreateDevice() call), only REQUEST it in the
+    // actual device-creation chain if the query reported it available -
+    // see QueryDrawIndirectCountSupport()'s own comment for why.
+    m_supportsDrawIndirectCount = QueryDrawIndirectCountSupport(m_physicalDevice);
+
+    VkPhysicalDeviceVulkan12Features features12{};
+    features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    features12.drawIndirectCount = m_supportsDrawIndirectCount ? VK_TRUE : VK_FALSE;
+    features13.pNext = &features12;
 
     const char* extensions[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
 

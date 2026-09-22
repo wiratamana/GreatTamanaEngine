@@ -1,5 +1,7 @@
 #include "FrameRecorder.h"
 
+#include "IndirectDrawTypes.h"
+
 #include <cassert>
 #include <cstring>
 #include <iterator>
@@ -44,6 +46,69 @@ void FrameRecorder::IssueDrawCommand(VkCommandBuffer cmd, VkPipeline pipeline, V
     } else {
         vkCmdDraw(cmd, vertexCount, 1, 0, 0);
     }
+}
+
+void FrameRecorder::IssueIndirectDrawCommand(VkCommandBuffer cmd, VkPipeline pipeline, VkPipelineLayout layout,
+    VkBuffer vertexBuffer, VkBuffer indexBuffer, VkDescriptorSet instanceBufferDescriptorSet, const Mat4& viewProj,
+    VkBuffer indirectBuffer, VkDeviceSize indirectOffset, std::uint32_t maxDrawCount, VkBuffer countBuffer,
+    VkDeviceSize countBufferOffset, bool supportsDrawIndirectCount)
+{
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+
+    // Same push-constant SHAPE as every other Pipeline (model then
+    // viewProj, 128 bytes total - see Pipeline.cpp) - the `model` half is
+    // left zero-initialized here (never read by Shaders/MeshInstanced.vert
+    // - see that shader's own header comment for why).
+    struct PushConstants {
+        float model[16];
+        float viewProj[16];
+    } pushConstants{};
+    std::memcpy(pushConstants.viewProj, viewProj.Data(), sizeof(pushConstants.viewProj));
+    vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushConstants), &pushConstants);
+
+    // Unlike IssueDrawCommand()'s optional materialDescriptorSet, this is
+    // NEVER optional - every indirect draw goes through the new
+    // VertexLayout::PositionNormalInstanced pipeline, which always
+    // declares descriptor set 0 for its instance buffer.
+    vkCmdBindDescriptorSets(
+        cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &instanceBufferDescriptorSet, 0, nullptr);
+
+    const VkDeviceSize offset = 0;
+    vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer, &offset);
+    // This campaign is VkDrawIndexedIndirectCommand-only (Locked Design
+    // Decision 6, PHASE0_MASTER_STRATEGY.md) - always indexed, unlike
+    // IssueDrawCommand()'s optional indexBuffer.
+    vkCmdBindIndexBuffer(cmd, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+
+    constexpr std::uint32_t stride = sizeof(IndirectDrawCommand);
+    if (countBuffer != VK_NULL_HANDLE) {
+        assert(supportsDrawIndirectCount
+            && "FrameRecorder::IssueIndirectDrawCommand: a real countBuffer was supplied, but this device does not "
+               "support drawIndirectCount - see Renderer::SubmitIndirect()'s own caller-side contract (PHASE4/5's "
+               "own per-batch resource code must decide this ONCE, per batch, never guess).");
+        if (supportsDrawIndirectCount) {
+            // The REAL, counted path (Locked Design Decision 4) -
+            // vkCmdDrawIndexedIndirectCount reads the actual surviving
+            // instance count from `countBuffer` itself (written by
+            // PHASE3's real culling compute shader), capped at
+            // `maxDrawCount`.
+            vkCmdDrawIndexedIndirectCount(
+                cmd, indirectBuffer, indirectOffset, countBuffer, countBufferOffset, maxDrawCount, stride);
+            return;
+        }
+        // Release-build fallback only (the assert above already caught
+        // this in debug builds as a genuine caller-side logic error) -
+        // fall through to the fixed-maxDrawCount path below instead of
+        // crashing.
+    }
+
+    // The FALLBACK, degenerate-padded path (Locked Design Decision 4) - a
+    // fixed, CPU-known `maxDrawCount`; PHASE3's real culling compute shader
+    // is expected to pad every non-surviving instance's own command with a
+    // degenerate (indexCount == 0) entry on a device that reaches this
+    // branch because it lacks real drawIndirectCount support, so this still
+    // draws exactly the surviving instances, just without a GPU-side count.
+    vkCmdDrawIndexedIndirect(cmd, indirectBuffer, indirectOffset, maxDrawCount, stride);
 }
 
 void FrameRecorder::Clear(std::uint8_t r, std::uint8_t g, std::uint8_t b, std::uint8_t a)

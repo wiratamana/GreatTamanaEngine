@@ -462,6 +462,56 @@ public:
     void Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix = Mat4::Identity(),
         const Mat4& viewProjMatrix = Mat4::Identity(), VkDescriptorSet materialDescriptorSet = VK_NULL_HANDLE);
 
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE2 (task_manager/render-pass-5/
+    // PHASE2_INSTANCED_DRAW_PRIMITIVE_AND_INDIRECT_SUBMIT.md) - the
+    // indirect-draw sibling of Submit() above: issues exactly ONE
+    // vkCmdDrawIndexedIndirectCount/vkCmdDrawIndexedIndirect call instead of
+    // N individual Submit() calls, reading each surviving instance's own
+    // model matrix from `instanceBufferDescriptorSet` (set 0) inside the
+    // vertex shader itself (see Shaders/MeshInstanced.vert), indexed by
+    // gl_InstanceIndex - `pipeline` MUST have been built with
+    // VertexLayout::PositionNormalInstanced (Pipeline.h) and `mesh` MUST be
+    // indexed (Mesh::HasIndexBuffer()) - this campaign is
+    // VkDrawIndexedIndirectCommand-only (Locked Design Decision 6,
+    // PHASE0_MASTER_STRATEGY.md).
+    //
+    // `indirectBuffer`/`indirectOffset` point at a buffer of
+    // IndirectDrawCommand entries (src/Renderer/IndirectDrawTypes.h, a
+    // byte-for-byte mirror of VkDrawIndexedIndirectCommand) - PHASE3
+    // onward's real culling compute shader is the production WRITER of this
+    // buffer; this phase's own throwaway smoke test (section 3.6) is a
+    // hand-authored CPU array instead.
+    //
+    // `countBuffer` == VK_NULL_HANDLE means "use the fixed-`maxDrawCount`,
+    // no-count fallback" (vkCmdDrawIndexedIndirect) - the degenerate-padded
+    // path (Locked Design Decision 4). A non-null `countBuffer` means "use
+    // the real counted path" (vkCmdDrawIndexedIndirectCount), but this is
+    // ALSO gated on SupportsDrawIndirectCount() below - passing a non-null
+    // `countBuffer` on a device that doesn't actually support it is a
+    // caller-side logic error (PHASE4/5's own per-batch resource code
+    // decides which mode a batch uses, ONCE, based on this same capability
+    // query, never per-frame): asserted in debug builds, falls back safely
+    // (the fixed-`maxDrawCount` path) in release.
+    //
+    // Pushes `viewProjMatrix` at the SAME push-constant offset every other
+    // draw uses (the `model` half of that same 128-byte range is left as
+    // whatever convenient value - never read by Shaders/MeshInstanced.vert).
+    //
+    // Like Dispatch(), there is deliberately NO legacy/queued fallback path -
+    // must be called while a render-graph pass is being recorded (see
+    // BeginGraphPassRecording()/EndGraphPassRecording()); asserts in debug
+    // builds and is a safe no-op in release otherwise.
+    //
+    // Never touches DrawStats::drawCallCount/triangleCount - see
+    // DrawStats.h's own "unknown/indirect" bucket (`indirectDrawCount`) doc
+    // comment for why an indirect draw's real object/triangle count is
+    // fundamentally GPU-only knowledge this method must never block to read
+    // back.
+    void SubmitIndirect(const Pipeline& pipeline, const Mesh& mesh, VkBuffer indirectBuffer,
+        VkDeviceSize indirectOffset, std::uint32_t maxDrawCount, VkBuffer countBuffer, VkDeviceSize countBufferOffset,
+        VkDescriptorSet instanceBufferDescriptorSet, const Mat4& viewProjMatrix = Mat4::Identity());
+
     // Factory for graphics pipelines, so callers never need direct access
     // to the VkDevice this Renderer owns internally, and always get a
     // pipeline built against the exact color format this Renderer actually
@@ -482,9 +532,14 @@ public:
     // to Pipeline's own constructor - see Pipeline.h's own `debugName`
     // comment and RenderSystem::Draw()'s FrameDebuggerCaptureContext
     // consumer (task_manager/frame-debugger-3, PHASE1).
+    // `useInstanceBuffer` (GPU-Driven Frustum Culling + Indirect Draw
+    // campaign, render-pass-5, PHASE2 - default false, trailing) mirrors
+    // `useMaterialTexture` above for the SEPARATE, unrelated
+    // VertexLayout::PositionNormalInstanced concept - see
+    // GpuResourceFactory::CreatePipeline()'s own matching comment.
     Pipeline CreatePipeline(const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath,
         VertexLayout vertexLayout = VertexLayout::PositionColor, bool useMaterialTexture = false,
-        const char* debugName = nullptr) const;
+        const char* debugName = nullptr, bool useInstanceBuffer = false) const;
 
     // Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE3 - the
     // N-color-format sibling of CreatePipeline() above: builds a real
@@ -503,7 +558,7 @@ public:
     // own G-buffer pass (task_manager/mrt-1/PHASE4_GBUFFER_VALIDATION_PASS_AND_SHADER.md).
     Pipeline CreatePipeline(std::span<const VkFormat> colorFormats, const std::string& vertexShaderSpirvPath,
         const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor,
-        bool useMaterialTexture = false, const char* debugName = nullptr) const;
+        bool useMaterialTexture = false, const char* debugName = nullptr, bool useInstanceBuffer = false) const;
 
     // Factory for compute pipelines (Phase 2 -
     // COMPUTE_PHASE2_PIPELINE_INFRASTRUCTURE_STRATEGY_v1.md) - so callers
@@ -535,6 +590,31 @@ public:
     // reasoning (in particular why the returned set is never individually
     // freed).
     VkDescriptorSet AllocateComputeDescriptorSet(VkDescriptorSetLayout layout) const;
+
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE2 - the ONE shared instance-buffer descriptor-set-layout every
+    // VertexLayout::PositionNormalInstanced Pipeline is built with (see
+    // CreatePipeline()'s `useInstanceBuffer` above) - forwards straight to
+    // GpuResourceFactory::InstanceBufferDescriptorSetLayout(). A real
+    // VkDescriptorSet built against this layout (pointing at a real
+    // per-batch culling-input buffer) is allocated via
+    // AllocateComputeDescriptorSet() above.
+    VkDescriptorSetLayout InstanceBufferDescriptorSetLayout() const noexcept;
+
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE2 - real, queried-once device capability for
+    // vkCmdDrawIndexedIndirectCount (VulkanDevice::SupportsDrawIndirectCount())
+    // - mirrors LastGpuTiming()/GetVulkanContextInfo().timestampCapability's
+    // own "queried once in the constructor, cached, const accessor, never
+    // re-checked" shape. SubmitIndirect() above queries this itself to pick
+    // its own real-vs-fallback branch; PHASE4/5's own per-batch resource
+    // code decides ONCE, per batch, which of SubmitIndirect()'s two code
+    // paths to use, based on this - NEVER re-queried per-frame. Per Locked
+    // Design Decision 4 (PHASE0_MASTER_STRATEGY.md), this campaign's own
+    // code must never mention or depend on which branch any one
+    // development/CI machine happens to support - the choice is made
+    // EXCLUSIVELY by this runtime capability probe.
+    bool SupportsDrawIndirectCount() const noexcept;
 
     // Phase 4 (COMPUTE_PHASE4_DISPATCH_EXECUTION_STRATEGY_v2.md) - the
     // compute sibling of Submit() above: issues a real vkCmdDispatch
@@ -764,6 +844,12 @@ public:
         // without RenderGraph ever needing direct access to VulkanDevice
         // itself.
         GpuTimestampCapability timestampCapability;
+        // GPU-Driven Frustum Culling + Indirect Draw campaign
+        // (render-pass-5), PHASE2 - mirrors timestampCapability immediately
+        // above: this device's real, queried-once drawIndirectCount support
+        // (VulkanDevice::SupportsDrawIndirectCount()) - see
+        // Renderer::SupportsDrawIndirectCount()'s own doc comment.
+        bool supportsDrawIndirectCount = false;
     };
     VulkanContextInfo GetVulkanContextInfo() const;
 

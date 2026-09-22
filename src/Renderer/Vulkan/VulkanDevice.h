@@ -70,6 +70,23 @@ public:
     // InterpretTimestampCapability()'s pure decision logic.
     const GpuTimestampCapability& TimestampCapability() const noexcept { return m_timestampCapability; }
 
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE2 (task_manager/render-pass-5/
+    // PHASE2_INSTANCED_DRAW_PRIMITIVE_AND_INDIRECT_SUBMIT.md) - whether
+    // this physical device supports VkPhysicalDeviceVulkan12Features::
+    // drawIndirectCount (vkCmdDrawIndexedIndirectCount) - queried ONCE, in
+    // the constructor (via a real vkGetPhysicalDeviceFeatures2() call,
+    // BEFORE vkCreateDevice() - see CreateLogicalDevice()), and never
+    // re-checked afterward (Vulkan device capabilities do not change at
+    // runtime) - mirrors TimestampCapability() immediately above exactly.
+    // Locked Design Decision 4 (PHASE0_MASTER_STRATEGY.md): BOTH the real
+    // (vkCmdDrawIndexedIndirectCount) and fallback (vkCmdDrawIndexedIndirect,
+    // fixed/degenerate-padded count) code paths must compile and be
+    // reviewed regardless of what this reports on any one development/CI
+    // machine - the choice between them is made EXCLUSIVELY by this
+    // runtime probe, never assumed either way.
+    bool SupportsDrawIndirectCount() const noexcept { return m_supportsDrawIndirectCount; }
+
 private:
     void PickPhysicalDevice(VkInstance instance, VkSurfaceKHR surface);
     void CreateLogicalDevice();
@@ -99,6 +116,10 @@ private:
     std::uint32_t m_presentFamily = 0;
 
     GpuTimestampCapability m_timestampCapability;
+
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE2 - see SupportsDrawIndirectCount() above.
+    bool m_supportsDrawIndirectCount = false;
 };
 
 } // namespace gte

@@ -136,9 +136,17 @@ public:
     // human-readable Pipeline identity label - forwarded straight through
     // to Pipeline's own constructor (see Pipeline.h's own `debugName`
     // comment) - task_manager/frame-debugger-3, PHASE1.
+    // `useInstanceBuffer` (GPU-Driven Frustum Culling + Indirect Draw
+    // campaign, render-pass-5, PHASE2 - default false), when true, passes
+    // this factory's own persistent InstanceBufferDescriptorSetLayout()
+    // through to Pipeline's constructor - meaningful (and expected to be
+    // true) only when vertexLayout is VertexLayout::PositionNormalInstanced.
+    // Mirrors `useMaterialTexture` above exactly, as a SEPARATE, unrelated
+    // flag (never combined with it on the same call - Locked Design
+    // Decision 8, PHASE0_MASTER_STRATEGY.md).
     Pipeline CreatePipeline(VkFormat colorFormat, const std::string& vertexShaderSpirvPath,
         const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor,
-        bool useMaterialTexture = false, const char* debugName = nullptr) const;
+        bool useMaterialTexture = false, const char* debugName = nullptr, bool useInstanceBuffer = false) const;
 
     // Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE3 - the
     // N-color-format sibling of CreatePipeline() above, forwarding straight
@@ -149,10 +157,11 @@ public:
     // Renderer::ColorFormat() - a genuine multi-target pass (e.g. a future
     // G-buffer pass) may write into targets of differing formats. Every
     // other parameter behaves identically to the single-format overload
-    // above.
+    // above, including the new trailing `useInstanceBuffer` (render-pass-5
+    // campaign, PHASE2).
     Pipeline CreatePipeline(std::span<const VkFormat> colorFormats, const std::string& vertexShaderSpirvPath,
         const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor,
-        bool useMaterialTexture = false, const char* debugName = nullptr) const;
+        bool useMaterialTexture = false, const char* debugName = nullptr, bool useInstanceBuffer = false) const;
 
     // See Renderer::CreateComputePipeline() (Phase 2 -
     // COMPUTE_PHASE2_PIPELINE_INFRASTRUCTURE_STRATEGY_v1.md). Builds a
@@ -264,6 +273,22 @@ public:
     // factory is always binding-compatible with each other.
     VkDescriptorSetLayout MaterialDescriptorSetLayout() const noexcept { return m_materialSetLayout; }
 
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE2 - the ONE descriptor-set-layout (a single readonly storage
+    // buffer, VERTEX stage, set = 0 binding = 0) every VertexLayout::
+    // PositionNormalInstanced Pipeline is built with (see CreatePipeline()'s
+    // `useInstanceBuffer` above) - created once, for this factory's entire
+    // lifetime, in the constructor, mirroring MaterialDescriptorSetLayout()
+    // above exactly, but for a completely separate, unrelated concept (a
+    // per-instance world-matrix/AABB buffer, not a material texture). A
+    // real VkDescriptorSet built against this layout is allocated via
+    // AllocateComputeDescriptorSet() below (the SAME shared
+    // m_computeDescriptorPool already sized for VK_DESCRIPTOR_TYPE_STORAGE_BUFFER -
+    // this binding's descriptor TYPE is identical to a compute shader's own
+    // StructuredBuffer/RWStructuredBuffer binding, only the consuming SHADER
+    // STAGE differs, which the pool itself does not care about).
+    VkDescriptorSetLayout InstanceBufferDescriptorSetLayout() const noexcept { return m_instanceBufferSetLayout; }
+
     // Like CreateTexture2D() above, but ALSO allocates (from this
     // factory's own persistent m_materialDescriptorPool) and writes a
     // VkDescriptorSet - built against MaterialDescriptorSetLayout() above -
@@ -348,6 +373,15 @@ private:
     // are never individually freed (see MaterialTexture.h's own comment).
     VkDescriptorSetLayout m_materialSetLayout = VK_NULL_HANDLE;
     VkDescriptorPool m_materialDescriptorPool = VK_NULL_HANDLE;
+
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE2 - see InstanceBufferDescriptorSetLayout() above. Created once
+    // in the constructor, destroyed in Destroy(). Descriptor SETS built
+    // against this layout are allocated from m_computeDescriptorPool below
+    // (NOT a third, dedicated pool) - see InstanceBufferDescriptorSetLayout()'s
+    // own comment for why that's safe (same descriptor TYPE, just a
+    // different consuming shader stage).
+    VkDescriptorSetLayout m_instanceBufferSetLayout = VK_NULL_HANDLE;
 
     // Phase 3 (COMPUTE_PHASE3_DESCRIPTOR_BINDING_MODEL_STRATEGY_v1.md) - a
     // SECOND, dedicated descriptor pool for compute-shaped descriptor

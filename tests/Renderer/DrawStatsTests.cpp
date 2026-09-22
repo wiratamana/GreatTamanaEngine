@@ -98,5 +98,42 @@ TEST(DrawStatsTest, RepeatedAccumulateDrawStatsCallsAgreeWithCountDrawStats)
     EXPECT_EQ(accumulated.triangleCount, 106u);
 }
 
+// GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+// PHASE2 - DrawStats::indirectDrawCount + AccumulateIndirectDrawStats().
+TEST(DrawStatsTest, IndirectDrawCountDefaultsToZero)
+{
+    const DrawStats stats;
+
+    EXPECT_EQ(stats.indirectDrawCount, 0u);
+    EXPECT_EQ(stats.drawCallCount, 0u);
+    EXPECT_EQ(stats.triangleCount, 0u);
+}
+
+TEST(DrawStatsTest, AccumulateIndirectDrawStatsIncrementsOnlyIndirectDrawCount)
+{
+    DrawStats stats;
+    AccumulateIndirectDrawStats(stats);
+    AccumulateIndirectDrawStats(stats);
+    AccumulateIndirectDrawStats(stats);
+
+    EXPECT_EQ(stats.indirectDrawCount, 3u);
+    // Never touches drawCallCount/triangleCount - see DrawStats.h's own
+    // "unknown/indirect" bucket doc comment for why these measure
+    // fundamentally different things and must never be summed together.
+    EXPECT_EQ(stats.drawCallCount, 0u);
+    EXPECT_EQ(stats.triangleCount, 0u);
+}
+
+TEST(DrawStatsTest, AccumulateDrawStatsAndAccumulateIndirectDrawStatsAreIndependent)
+{
+    DrawStats stats;
+    AccumulateDrawStats(stats, true, 0, 300); // 1 draw call, 100 triangles
+    AccumulateIndirectDrawStats(stats); // +1 indirect draw
+
+    EXPECT_EQ(stats.drawCallCount, 1u);
+    EXPECT_EQ(stats.triangleCount, 100u);
+    EXPECT_EQ(stats.indirectDrawCount, 1u);
+}
+
 } // namespace
 } // namespace gte

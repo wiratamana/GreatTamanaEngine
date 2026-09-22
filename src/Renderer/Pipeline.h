@@ -44,6 +44,27 @@ enum class VertexLayout {
     // MaterialTexture's own VkDescriptorSet (Renderer/MaterialTexture.h)
     // can be bound before each draw (see FrameRecorder::RecordFrame()).
     PositionNormalUv,
+
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE2 (task_manager/render-pass-5/
+    // PHASE2_INSTANCED_DRAW_PRIMITIVE_AND_INDIRECT_SUBMIT.md) - same vertex
+    // INPUT attributes as PositionNormal (MeshVertex.h - position+normal),
+    // via Shaders/MeshInstanced.vert (reuses Shaders/Mesh.frag UNCHANGED).
+    // UNLIKE every other VertexLayout, the per-draw model matrix is NOT
+    // sourced from this Pipeline's push constant - MeshInstanced.vert reads
+    // it from a per-instance storage buffer (set = 0, binding = 0, vertex
+    // stage), indexed by gl_InstanceIndex, so ONE
+    // vkCmdDrawIndexedIndirect(Count) call (Renderer::SubmitIndirect()) can
+    // render N differently-positioned/oriented objects. A Pipeline built
+    // with this layout carries a descriptor-set-layout for that ONE
+    // readonly storage buffer in its VkPipelineLayout - see this class's
+    // own `instanceBufferSetLayout` constructor parameter and
+    // GpuResourceFactory::InstanceBufferDescriptorSetLayout(). Indexed
+    // meshes ONLY (VkDrawIndexedIndirectCommand-only - Locked Design
+    // Decision 6, PHASE0_MASTER_STRATEGY.md); never used together with
+    // `materialSetLayout` on the same Pipeline (Locked Design Decision 8 -
+    // textured instanced batches are out of scope this campaign).
+    PositionNormalInstanced,
 };
 
 // Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE3 - the
@@ -118,6 +139,21 @@ public:
     // RenderSystem::Draw() when a FrameDebuggerCaptureContext is armed -
     // see DebugName() below.
     //
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE2 - `instanceBufferSetLayout` (default VK_NULL_HANDLE) is only
+    // meaningful for VertexLayout::PositionNormalInstanced - see that
+    // enumerator's own comment - and must be GpuResourceFactory::
+    // InstanceBufferDescriptorSetLayout() exactly. A SEPARATE, independent
+    // parameter from `materialSetLayout` above (never reused/renamed) -
+    // the two concepts (a material texture set, an instance-transform-
+    // buffer set) are unrelated; asserted (debug builds only, see
+    // Pipeline.cpp) to never both be non-VK_NULL_HANDLE at once (Locked
+    // Design Decision 8, PHASE0_MASTER_STRATEGY.md - no Pipeline needs
+    // both today). Appended as a genuinely new TRAILING parameter (after
+    // `debugName`) specifically so every existing call site - which only
+    // ever supplies positional arguments up through `debugName` - keeps
+    // compiling completely unmodified.
+    //
     // Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE3 - this
     // single-VkFormat constructor is now a thin forwarder (see Pipeline.cpp)
     // onto the new std::span<const VkFormat> constructor below, built as a
@@ -126,7 +162,8 @@ public:
     // site keeps compiling and behaving identically.
     Pipeline(VkDevice device, VkFormat colorFormat, VkFormat depthFormat, const std::string& vertexShaderSpirvPath,
         const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor,
-        VkDescriptorSetLayout materialSetLayout = VK_NULL_HANDLE, const char* debugName = nullptr);
+        VkDescriptorSetLayout materialSetLayout = VK_NULL_HANDLE, const char* debugName = nullptr,
+        VkDescriptorSetLayout instanceBufferSetLayout = VK_NULL_HANDLE);
 
     // Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE3 - the
     // real N-color-attachment constructor: builds a VkPipelineRenderingCreateInfo
@@ -137,11 +174,13 @@ public:
     // customization is out of scope for this campaign). `colorFormats` must
     // be non-empty and no larger than kPipelineMaxColorAttachments (asserted
     // in the .cpp, debug builds only). Every other parameter behaves
-    // identically to the single-format constructor above.
+    // identically to the single-format constructor above, including the new
+    // trailing `instanceBufferSetLayout` (render-pass-5 campaign, PHASE2).
     Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFormat depthFormat,
         const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath,
         VertexLayout vertexLayout = VertexLayout::PositionColor,
-        VkDescriptorSetLayout materialSetLayout = VK_NULL_HANDLE, const char* debugName = nullptr);
+        VkDescriptorSetLayout materialSetLayout = VK_NULL_HANDLE, const char* debugName = nullptr,
+        VkDescriptorSetLayout instanceBufferSetLayout = VK_NULL_HANDLE);
     ~Pipeline();
 
     Pipeline(const Pipeline&) = delete;

@@ -292,20 +292,59 @@ void Renderer::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& mo
     m_frameRecorder.Submit(pipeline, mesh, modelMatrix, viewProjMatrix, materialDescriptorSet);
 }
 
+void Renderer::SubmitIndirect(const Pipeline& pipeline, const Mesh& mesh, VkBuffer indirectBuffer,
+    VkDeviceSize indirectOffset, std::uint32_t maxDrawCount, VkBuffer countBuffer, VkDeviceSize countBufferOffset,
+    VkDescriptorSet instanceBufferDescriptorSet, const Mat4& viewProjMatrix)
+{
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE2 - deliberately NO legacy/queued fallback path, same "day-one
+    // render-graph-only" precedent Renderer::Dispatch() already established
+    // for compute (see its own doc comment in Renderer.h) - an indirect
+    // draw call has no pre-existing non-graph call site to preserve
+    // backward compatibility with.
+    assert(m_currentGraphPassCmd != VK_NULL_HANDLE
+        && "Renderer::SubmitIndirect() called outside of a render-graph pass recording - see "
+           "BeginGraphPassRecording()/EndGraphPassRecording().");
+    if (m_currentGraphPassCmd == VK_NULL_HANDLE) {
+        return;
+    }
+
+    // This campaign is VkDrawIndexedIndirectCommand-only (Locked Design
+    // Decision 6, PHASE0_MASTER_STRATEGY.md) - every Pipeline built with
+    // VertexLayout::PositionNormalInstanced is only ever meant to draw an
+    // INDEXED Mesh.
+    assert(mesh.HasIndexBuffer()
+        && "Renderer::SubmitIndirect(): every indirect draw is VkDrawIndexedIndirectCommand-only (indexed meshes "
+           "only) - see PHASE0_MASTER_STRATEGY.md's Locked Design Decision 6.");
+
+    FrameRecorder::IssueIndirectDrawCommand(m_currentGraphPassCmd, pipeline.Native(), pipeline.Layout(),
+        mesh.VertexBuffer(), mesh.IndexBuffer(), instanceBufferDescriptorSet, viewProjMatrix, indirectBuffer,
+        indirectOffset, maxDrawCount, countBuffer, countBufferOffset, m_device.SupportsDrawIndirectCount());
+
+    // Deliberately does NOT touch m_currentGraphPassRecordDrawStats (that
+    // callback only ever mutates DrawStats::drawCallCount/triangleCount,
+    // via Submit()'s own PassContext::recordDraw plumbing) - an indirect
+    // draw's real object/triangle count is GPU-only knowledge this method
+    // must never block to read back. Wiring DrawStats::indirectDrawCount
+    // (see DrawStats.h) into a real per-pass return value is PHASE5's job,
+    // once a real render-graph pass actually calls this method - out of
+    // scope for this phase's own hand-driven smoke test (section 3.6).
+}
+
 Pipeline Renderer::CreatePipeline(const std::string& vertexShaderSpirvPath,
     const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout, bool useMaterialTexture,
-    const char* debugName) const
+    const char* debugName, bool useInstanceBuffer) const
 {
-    return m_resources.CreatePipeline(
-        ColorFormat(), vertexShaderSpirvPath, fragmentShaderSpirvPath, vertexLayout, useMaterialTexture, debugName);
+    return m_resources.CreatePipeline(ColorFormat(), vertexShaderSpirvPath, fragmentShaderSpirvPath, vertexLayout,
+        useMaterialTexture, debugName, useInstanceBuffer);
 }
 
 Pipeline Renderer::CreatePipeline(std::span<const VkFormat> colorFormats, const std::string& vertexShaderSpirvPath,
     const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout, bool useMaterialTexture,
-    const char* debugName) const
+    const char* debugName, bool useInstanceBuffer) const
 {
-    return m_resources.CreatePipeline(
-        colorFormats, vertexShaderSpirvPath, fragmentShaderSpirvPath, vertexLayout, useMaterialTexture, debugName);
+    return m_resources.CreatePipeline(colorFormats, vertexShaderSpirvPath, fragmentShaderSpirvPath, vertexLayout,
+        useMaterialTexture, debugName, useInstanceBuffer);
 }
 
 ComputePipeline Renderer::CreateComputePipeline(const std::string& shaderSpirvPath,
@@ -318,6 +357,16 @@ ComputePipeline Renderer::CreateComputePipeline(const std::string& shaderSpirvPa
 VkDescriptorSet Renderer::AllocateComputeDescriptorSet(VkDescriptorSetLayout layout) const
 {
     return m_resources.AllocateComputeDescriptorSet(layout);
+}
+
+VkDescriptorSetLayout Renderer::InstanceBufferDescriptorSetLayout() const noexcept
+{
+    return m_resources.InstanceBufferDescriptorSetLayout();
+}
+
+bool Renderer::SupportsDrawIndirectCount() const noexcept
+{
+    return m_device.SupportsDrawIndirectCount();
 }
 
 void Renderer::Dispatch(const ComputePipeline& pipeline, VkDescriptorSet descriptorSet, const void* pushConstants,
@@ -419,6 +468,9 @@ Renderer::VulkanContextInfo Renderer::GetVulkanContextInfo() const
     // B.1 (B1_REAL_GPU_TIMING_STRATEGY_v1.md) - the single source of truth
     // gte::rg::RenderGraph's own RenderGraphTimestampPool is built from.
     info.timestampCapability = m_device.TimestampCapability();
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE2 - mirrors timestampCapability immediately above.
+    info.supportsDrawIndirectCount = m_device.SupportsDrawIndirectCount();
     return info;
 }
 

@@ -79,6 +79,33 @@ public:
         VkBuffer vertexBuffer, std::uint32_t vertexCount, VkBuffer indexBuffer, std::uint32_t indexCount,
         const Mat4& model, const Mat4& viewProj, VkDescriptorSet materialDescriptorSet);
 
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE2 (task_manager/render-pass-5/
+    // PHASE2_INSTANCED_DRAW_PRIMITIVE_AND_INDIRECT_SUBMIT.md) - the
+    // indirect-draw sibling of IssueDrawCommand() above: binds `pipeline`,
+    // ALWAYS binds `instanceBufferDescriptorSet` at descriptor set 0
+    // (unlike IssueDrawCommand()'s optional materialDescriptorSet, this is
+    // NEVER optional - every indirect draw goes through the new
+    // VertexLayout::PositionNormalInstanced pipeline, which always
+    // declares descriptor set 0 for its instance buffer), pushes `viewProj`
+    // at the SAME push-constant offset every other draw uses (the `model`
+    // half of the pushed 128 bytes is left zeroed - never read by
+    // Shaders/MeshInstanced.vert), binds `vertexBuffer`/`indexBuffer`
+    // (always both - this campaign is VkDrawIndexedIndirectCommand-only,
+    // Locked Design Decision 6), then issues EXACTLY ONE
+    // vkCmdDrawIndexedIndirectCount (when `countBuffer != VK_NULL_HANDLE`
+    // AND `supportsDrawIndirectCount`) or vkCmdDrawIndexedIndirect
+    // (otherwise, using `maxDrawCount` as a literal, fixed draw count - the
+    // degenerate-padded fallback, Locked Design Decision 4). The caller
+    // (Renderer::SubmitIndirect()) resolves `supportsDrawIndirectCount`
+    // from VulkanDevice::SupportsDrawIndirectCount() ONCE; never re-queried
+    // here. Never touches DrawStats - see Renderer::SubmitIndirect()'s own
+    // doc comment for why.
+    static void IssueIndirectDrawCommand(VkCommandBuffer cmd, VkPipeline pipeline, VkPipelineLayout layout,
+        VkBuffer vertexBuffer, VkBuffer indexBuffer, VkDescriptorSet instanceBufferDescriptorSet, const Mat4& viewProj,
+        VkBuffer indirectBuffer, VkDeviceSize indirectOffset, std::uint32_t maxDrawCount, VkBuffer countBuffer,
+        VkDeviceSize countBufferOffset, bool supportsDrawIndirectCount);
+
     // Records the undefined->color-attachment (and, when target carries a
     // real depth image, undefined->depth-attachment) barriers, the dynamic-
     // rendering clear + every queued Submit() draw + recordExtra, and the

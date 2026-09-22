@@ -30,15 +30,15 @@ bool DepthFormatHasStencil(VkFormat format)
 
 Pipeline::Pipeline(VkDevice device, VkFormat colorFormat, VkFormat depthFormat, const std::string& vertexShaderSpirvPath,
     const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout, VkDescriptorSetLayout materialSetLayout,
-    const char* debugName)
+    const char* debugName, VkDescriptorSetLayout instanceBufferSetLayout)
     : Pipeline(device, std::span<const VkFormat>(&colorFormat, 1), depthFormat, vertexShaderSpirvPath,
-          fragmentShaderSpirvPath, vertexLayout, materialSetLayout, debugName)
+          fragmentShaderSpirvPath, vertexLayout, materialSetLayout, debugName, instanceBufferSetLayout)
 {
 }
 
 Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFormat depthFormat,
     const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout,
-    VkDescriptorSetLayout materialSetLayout, const char* debugName)
+    VkDescriptorSetLayout materialSetLayout, const char* debugName, VkDescriptorSetLayout instanceBufferSetLayout)
     : m_device(device)
     , m_debugName(debugName != nullptr ? debugName : std::string())
 {
@@ -90,7 +90,15 @@ Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFo
         VkVertexInputBindingDescription binding{};
         std::vector<VkVertexInputAttributeDescription> attributes;
         switch (vertexLayout) {
-        case VertexLayout::PositionNormal: {
+        case VertexLayout::PositionNormal:
+        case VertexLayout::PositionNormalInstanced: {
+            // GPU-Driven Frustum Culling + Indirect Draw campaign
+            // (render-pass-5), PHASE2 - PositionNormalInstanced shares the
+            // EXACT same vertex INPUT attributes as PositionNormal (see
+            // Shaders/MeshInstanced.vert's own header comment) - only the
+            // model matrix SOURCE differs (a per-instance storage buffer
+            // instead of the push constant), which is a vertex-SHADER
+            // concern, not a vertex-INPUT-layout one.
             binding = MeshVertex::BindingDescription();
             const auto layoutAttributes = MeshVertex::AttributeDescriptions();
             attributes.assign(layoutAttributes.begin(), layoutAttributes.end());
@@ -200,9 +208,23 @@ Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFo
         layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         layoutInfo.pushConstantRangeCount = 1;
         layoutInfo.pPushConstantRanges = &pushConstantRange;
-        if (materialSetLayout != VK_NULL_HANDLE) {
+
+        // GPU-Driven Frustum Culling + Indirect Draw campaign
+        // (render-pass-5), PHASE2 - `materialSetLayout` and
+        // `instanceBufferSetLayout` are two SEPARATE, unrelated concepts
+        // (see Pipeline.h's own comment on both parameters) that both
+        // happen to occupy descriptor set 0 - never used together on the
+        // same Pipeline today (Locked Design Decision 8,
+        // PHASE0_MASTER_STRATEGY.md: textured instanced batches are out of
+        // scope this campaign), asserted below (debug builds only).
+        assert(!(materialSetLayout != VK_NULL_HANDLE && instanceBufferSetLayout != VK_NULL_HANDLE)
+            && "Pipeline: materialSetLayout and instanceBufferSetLayout are mutually exclusive - no Pipeline needs "
+               "both at once (render-pass-5 campaign, Locked Design Decision 8).");
+        const VkDescriptorSetLayout setLayoutToUse =
+            materialSetLayout != VK_NULL_HANDLE ? materialSetLayout : instanceBufferSetLayout;
+        if (setLayoutToUse != VK_NULL_HANDLE) {
             layoutInfo.setLayoutCount = 1;
-            layoutInfo.pSetLayouts = &materialSetLayout;
+            layoutInfo.pSetLayouts = &setLayoutToUse;
         }
 
         if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &m_layout) != VK_SUCCESS) {

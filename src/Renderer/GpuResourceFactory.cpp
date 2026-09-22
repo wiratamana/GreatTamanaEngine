@@ -1,5 +1,6 @@
 #include "GpuResourceFactory.h"
 
+#include "Vulkan/DescriptorSetLayoutBuilder.h"
 #include "Vulkan/FormatCapabilities.h"
 
 #include <cstddef>
@@ -103,6 +104,25 @@ GpuResourceFactory::GpuResourceFactory(VkPhysicalDevice physicalDevice, VkDevice
         vkDestroyCommandPool(m_device, m_commandPool, nullptr);
         throw std::runtime_error("GpuResourceFactory: vkCreateDescriptorPool (compute) failed");
     }
+
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE2 - the one shared instance-buffer descriptor-set-layout (see
+    // InstanceBufferDescriptorSetLayout()'s own comment in
+    // GpuResourceFactory.h): a single readonly storage buffer, VERTEX
+    // stage, set = 0 binding = 0 - built via DescriptorSetLayoutBuilder
+    // (Vulkan/DescriptorSetLayoutBuilder.h), same pattern
+    // GpuSkinningPipelines.cpp already establishes for its own descriptor-
+    // set layouts.
+    try {
+        DescriptorSetLayoutBuilder instanceBufferLayoutBuilder(m_device);
+        m_instanceBufferSetLayout = instanceBufferLayoutBuilder.AddStorageBuffer(/*binding=*/0, VK_SHADER_STAGE_VERTEX_BIT).Build();
+    } catch (...) {
+        vkDestroyDescriptorPool(m_device, m_computeDescriptorPool, nullptr);
+        vkDestroyDescriptorPool(m_device, m_materialDescriptorPool, nullptr);
+        vkDestroyDescriptorSetLayout(m_device, m_materialSetLayout, nullptr);
+        vkDestroyCommandPool(m_device, m_commandPool, nullptr);
+        throw;
+    }
 }
 
 GpuResourceFactory::~GpuResourceFactory()
@@ -121,6 +141,7 @@ GpuResourceFactory::GpuResourceFactory(GpuResourceFactory&& other) noexcept
     , m_materialSetLayout(std::exchange(other.m_materialSetLayout, VK_NULL_HANDLE))
     , m_materialDescriptorPool(std::exchange(other.m_materialDescriptorPool, VK_NULL_HANDLE))
     , m_computeDescriptorPool(std::exchange(other.m_computeDescriptorPool, VK_NULL_HANDLE))
+    , m_instanceBufferSetLayout(std::exchange(other.m_instanceBufferSetLayout, VK_NULL_HANDLE))
 {
 }
 
@@ -139,6 +160,7 @@ GpuResourceFactory& GpuResourceFactory::operator=(GpuResourceFactory&& other) no
         m_materialSetLayout = std::exchange(other.m_materialSetLayout, VK_NULL_HANDLE);
         m_materialDescriptorPool = std::exchange(other.m_materialDescriptorPool, VK_NULL_HANDLE);
         m_computeDescriptorPool = std::exchange(other.m_computeDescriptorPool, VK_NULL_HANDLE);
+        m_instanceBufferSetLayout = std::exchange(other.m_instanceBufferSetLayout, VK_NULL_HANDLE);
     }
     return *this;
 }
@@ -162,6 +184,10 @@ void GpuResourceFactory::Destroy() noexcept
     if (m_materialSetLayout != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(m_device, m_materialSetLayout, nullptr);
         m_materialSetLayout = VK_NULL_HANDLE;
+    }
+    if (m_instanceBufferSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(m_device, m_instanceBufferSetLayout, nullptr);
+        m_instanceBufferSetLayout = VK_NULL_HANDLE;
     }
     if (m_commandPool != VK_NULL_HANDLE) {
         vkDestroyCommandPool(m_device, m_commandPool, nullptr);
@@ -279,20 +305,22 @@ void GpuResourceFactory::ImmediateSubmit(const std::function<void(VkCommandBuffe
 
 Pipeline GpuResourceFactory::CreatePipeline(VkFormat colorFormat, const std::string& vertexShaderSpirvPath,
     const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout, bool useMaterialTexture,
-    const char* debugName) const
+    const char* debugName, bool useInstanceBuffer) const
 {
     const VkDescriptorSetLayout materialSetLayout = useMaterialTexture ? m_materialSetLayout : VK_NULL_HANDLE;
+    const VkDescriptorSetLayout instanceBufferSetLayout = useInstanceBuffer ? m_instanceBufferSetLayout : VK_NULL_HANDLE;
     return Pipeline(m_device, colorFormat, m_depthFormat, vertexShaderSpirvPath, fragmentShaderSpirvPath, vertexLayout,
-        materialSetLayout, debugName);
+        materialSetLayout, debugName, instanceBufferSetLayout);
 }
 
 Pipeline GpuResourceFactory::CreatePipeline(std::span<const VkFormat> colorFormats,
     const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout,
-    bool useMaterialTexture, const char* debugName) const
+    bool useMaterialTexture, const char* debugName, bool useInstanceBuffer) const
 {
     const VkDescriptorSetLayout materialSetLayout = useMaterialTexture ? m_materialSetLayout : VK_NULL_HANDLE;
+    const VkDescriptorSetLayout instanceBufferSetLayout = useInstanceBuffer ? m_instanceBufferSetLayout : VK_NULL_HANDLE;
     return Pipeline(m_device, colorFormats, m_depthFormat, vertexShaderSpirvPath, fragmentShaderSpirvPath,
-        vertexLayout, materialSetLayout, debugName);
+        vertexLayout, materialSetLayout, debugName, instanceBufferSetLayout);
 }
 
 ComputePipeline GpuResourceFactory::CreateComputePipeline(const std::string& shaderSpirvPath,

@@ -12,6 +12,26 @@ namespace gte {
 struct DrawStats {
     std::uint32_t drawCallCount = 0;
     std::uint32_t triangleCount = 0;
+
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE2 (task_manager/render-pass-5/
+    // PHASE2_INSTANCED_DRAW_PRIMITIVE_AND_INDIRECT_SUBMIT.md) - a COUNT OF
+    // INDIRECT DRAW CALLS ISSUED (e.g. one Renderer::SubmitIndirect() call
+    // == +1 here), which the CPU genuinely does know - NOT a count of the
+    // objects/triangles actually drawn by them, which only the GPU knows
+    // (this campaign's whole point is to avoid a blocking CPU readback to
+    // find that out - mirrors GpuSampleStatus::Absent's own "never
+    // fabricate a bare numeric 0" rule, GpuTiming.h). A future consumer
+    // (the Editor's "Profiler"/"Render Graph" panels) must display this
+    // SEPARATELY from drawCallCount/triangleCount above, never summed into
+    // them - they measure fundamentally different things (an exact,
+    // CPU-known count vs. "at least one indirect batch ran, real
+    // object/triangle count is GPU-side only"). Never incremented by
+    // Renderer::Submit()/AccumulateDrawStats() above - only by
+    // AccumulateIndirectDrawStats() below, mirroring
+    // Renderer::SubmitIndirect()/FrameRecorder::IssueIndirectDrawCommand()'s
+    // own, completely separate call path.
+    std::uint32_t indirectDrawCount = 0;
 };
 
 // Accumulates ONE queued draw's contribution into `stats` - pure,
@@ -34,10 +54,14 @@ struct DrawStats {
 // (otherwise) - mirroring FrameRecorder::RecordFrame()'s own branch
 // exactly. Dividing by 3 is always EXACT for this engine today: every
 // Pipeline is unconditionally built with VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
-// (see Pipeline.cpp), and every draw today has instanceCount == 1 (no
-// instancing exists anywhere in this engine yet). A future non-triangle-
-// list pipeline variant or real instancing support would need this
-// formula (and this comment) revisited - see AGENTS.md's "Profiling"
+// (see Pipeline.cpp), and every draw THROUGH THIS FUNCTION today has
+// instanceCount == 1 (this function is only ever called from
+// Renderer::Submit()'s own per-entity path - GPU-Driven Frustum Culling +
+// Indirect Draw campaign, render-pass-5, PHASE2 added real instancing via a
+// SEPARATE call path, Renderer::SubmitIndirect()/
+// AccumulateIndirectDrawStats() below, which never touches this function or
+// this formula). A future non-triangle-list pipeline variant would need
+// this formula (and this comment) revisited - see AGENTS.md's "Profiling"
 // section. A malformed count not evenly divisible by 3 (never produced by
 // any real importer today) simply truncates via integer division,
 // mirroring what the GPU itself would do with a truncated final
@@ -48,6 +72,24 @@ inline void AccumulateDrawStats(
     ++stats.drawCallCount;
     const std::uint32_t primitiveVertexCount = hasIndexBuffer ? indexCount : vertexCount;
     stats.triangleCount += primitiveVertexCount / 3;
+}
+
+// GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+// PHASE2 (task_manager/render-pass-5/
+// PHASE2_INSTANCED_DRAW_PRIMITIVE_AND_INDIRECT_SUBMIT.md) - accumulates ONE
+// Renderer::SubmitIndirect() call's contribution into `stats` - pure,
+// allocation-free, no Vulkan dependency. Mirrors AccumulateDrawStats()'s
+// own "fused with the real call site" discipline; a future render-graph-
+// wired consumer (PHASE5 onward, once a real pass actually calls
+// Renderer::SubmitIndirect()) is expected to call this from that exact
+// call site - out of scope for PHASE2 itself (see that phase's own "no
+// render-graph/ECS wiring yet" note). Deliberately does NOT touch
+// drawCallCount/triangleCount - see DrawStats::indirectDrawCount's own doc
+// comment for why those two remain completely unaffected by an indirect
+// draw.
+inline void AccumulateIndirectDrawStats(DrawStats& stats) noexcept
+{
+    ++stats.indirectDrawCount;
 }
 
 // One queued draw's pure, countable shape - used ONLY by the test-facing
