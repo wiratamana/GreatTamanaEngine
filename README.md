@@ -110,6 +110,34 @@ pieces. This section keeps only the most recent entries inline — see
 **[docs/CHANGELOG.md](docs/CHANGELOG.md)** for the complete, reverse-
 chronological project history from the very first triangle demo onward.
 
+- **The Render Graph can now write more than one color attachment from a
+  single pass — the foundational Multi-Render-Target (MRT)/G-buffer
+  mechanism — proven end-to-end by a small, additive, debug-only consumer
+  pass** (`mrt-1` campaign, five phases -
+  `task_manager/mrt-1/PHASE0_MASTER_STRATEGY.md`) -
+  `RenderGraphBuilder::PassBuilder::WriteColorAttachment()` is now callable
+  more than once per pass, appending an ordered `PassRecord::colorAttachments`
+  list (attachment index == shader `layout(location = N) out`, capped at 8),
+  `RenderGraph::ExecuteCompiledGraph()` records a real multi-attachment
+  `vkCmdBeginRendering`, and `Pipeline`/`GpuResourceFactory::CreatePipeline()`/
+  `Renderer::CreatePipeline()` all gained a genuine N-color-format PSO path
+  alongside their original single-format overload, which keeps every
+  pre-existing call site compiling and behaving completely unmodified.
+  `RenderGraphCompiler.cpp`/`RenderGraphSnapshot.cpp` needed zero changes -
+  both already handled an arbitrary number of writes per pass generically,
+  confirmed by dedicated new Tier-1 tests rather than merely assumed. A new
+  `src/Editor/GBufferValidation.h/.cpp` (mirroring `ComputeBlurValidation`'s
+  own proven shape) declares a real two-color-target "GBufferValidation"
+  pass plus a second, compute pass that reads one of those outputs back -
+  proving both "N targets written in one draw" and "a later pass reading one
+  of N outputs, cross-pass, barrier-synchronized automatically" - toggled by
+  a "Show GBuffer Validation (debug)" checkbox in the Scene panel, never on
+  by default and never affecting the Game View's own rendered output.
+  Verified with a full clean build, a full `ctest` regression pass, and a
+  live, HTTP-driven, screenshot-verified smoke test confirming the albedo and
+  normal G-buffer outputs are real, independently distinct images. See
+  `task_manager/mrt-1/CAMPAIGN_COMPLETION_REPORT.md` for the full five-phase
+  writeup.
 - **The engine has its first unified logging system: a native, Editor-only
   `gte::Logger`, a "Log" Editor panel, and a smart `GET /get_logs`/
   `POST /clear_logs` HTTP endpoint pair** (`logger-1` campaign, five phases -

@@ -940,5 +940,69 @@ TEST(RenderGraphCompilerTest, PassWithThreeColorWritesSurvivesCompileAndIsNotCul
     EXPECT_FALSE(input.passes[1].isCulled);
 }
 
+// --- Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE5 -------
+//
+// Step 3.2's own required regression guard: PHASE1's `ColorAttachmentDesc`
+// doc comment flags a real risk - "writes order doesn't necessarily match
+// colorAttachments order" - since `PassRecord::writes` (the generic vector
+// every ResourceAccess, of any kind, is pushed onto) and
+// `PassRecord::colorAttachments` (the new, PHASE1-added, color-attachment-
+// only ordered list) are two SEPARATE vectors populated by two SEPARATE
+// code paths. This test proves a pass carrying a real, ordered,
+// multi-entry `colorAttachments` list (the MRT case) coexists correctly,
+// in the SAME graph, with a completely unrelated pass declaring an
+// ordinary non-attachment buffer write (`WriteBuffer()`,
+// `ResourceAccess::ComputeShaderWrite` - never pushed onto
+// `colorAttachments` at all) - both halves must independently cull/order
+// correctly, with neither one's presence perturbing the other's.
+TEST(RenderGraphCompilerTest, MrtPassAndSeparateNonAttachmentBufferWritePassBothCullAndOrderCorrectly)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle albedo = builder.CreateTexture("Albedo", MakeTextureDesc());
+    const TextureHandle normal = builder.CreateTexture("Normal", MakeTextureDesc());
+    const TextureHandle composited = builder.CreateTexture("Composited", MakeTextureDesc());
+    const BufferHandle bufferB = builder.CreateBuffer("B", BufferDesc{ 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
+    const TextureHandle bufferConsumerOutput = builder.CreateTexture("BufferConsumerOutput", MakeTextureDesc());
+
+    builder.AddPass(
+        "GBufferPass",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.WriteColorAttachment(albedo);
+            pass.WriteColorAttachment(normal);
+        },
+        NoOpExecute); // index 0 - the MRT pass under test: a real, ordered 2-entry colorAttachments list.
+    builder.AddPass(
+        "GBufferVisualizePass",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.ReadTexture(albedo);
+            pass.ReadTexture(normal);
+            pass.WriteColorAttachment(composited);
+        },
+        NoOpExecute); // index 1 - keeps both MRT writes reachable.
+    builder.AddPass(
+        "BufferWriterPass",
+        [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteBuffer(bufferB, ResourceAccess::ComputeShaderWrite); },
+        NoOpExecute); // index 2 - an ordinary, non-attachment write; never touches colorAttachments at all.
+    builder.AddPass(
+        "BufferReaderPass",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.ReadBuffer(bufferB, ResourceAccess::ComputeShaderRead);
+            pass.WriteColorAttachment(bufferConsumerOutput);
+        },
+        NoOpExecute); // index 3 - keeps the buffer-write chain reachable, entirely independent of the MRT chain above.
+
+    CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes[0].colorAttachments.size(), 2u);
+    ASSERT_TRUE(input.passes[2].colorAttachments.empty());
+    const TextureHandle finalOutputs[] = { composited, bufferConsumerOutput };
+    const CompiledGraph compiled = Compile(input, finalOutputs);
+
+    EXPECT_TRUE(ExecutionOrderEquals(compiled.executionOrder, { 0, 1, 2, 3 }));
+    EXPECT_FALSE(input.passes[0].isCulled);
+    EXPECT_FALSE(input.passes[1].isCulled);
+    EXPECT_FALSE(input.passes[2].isCulled);
+    EXPECT_FALSE(input.passes[3].isCulled);
+}
+
 } // namespace
 } // namespace gte::rg

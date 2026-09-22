@@ -266,6 +266,64 @@ Full history: `task_manager/render-pass-1/PHASE0_MASTER_STRATEGY.md`,
 `PHASEn_COMPLETION_REPORT.md`/`CAMPAIGN_COMPLETION_REPORT.md` in those same
 folders.
 
+## Multi-Render-Target (MRT) / G-Buffer Support
+
+The `mrt-1` campaign (five phases, `task_manager/mrt-1/PHASE0_MASTER_STRATEGY.md`)
+gave the Render Graph the ability for a single pass to write **more than one
+color attachment at once** - the foundational mechanism a real G-buffer/
+deferred-shading pass needs - and proved it end-to-end with a small, additive,
+debug-only consumer pass, mirroring `ComputeBlurValidation`'s own established
+proof-of-mechanism precedent. `RenderGraphBuilder::PassBuilder::
+WriteColorAttachment()` is now callable **more than once per pass**, appending
+an ordered `PassRecord::colorAttachments` list (`ColorAttachmentDesc{ handle,
+clearColor }`, `RenderGraphTypes.h`) instead of the old "last write silently
+overwrites the previous one" behavior - **attachment index in that list ==
+shader `layout(location = N) out`** - capped at `kMaxColorAttachments = 8`
+(matching typical `VkPhysicalDeviceLimits::maxColorAttachments`), enforced by
+a debug-only `assert()`. `RenderGraph::ExecuteCompiledGraph()` records a real
+`vkCmdBeginRendering` with `colorAttachmentCount` built from that list's real
+size (`FindMismatchedColorAttachmentExtent()` throws `std::runtime_error` if
+two declared attachments on the same pass ever disagree on extent - a real,
+reachable failure mode for a genuinely misconfigured MRT pass, not just a
+defensive assert). `Pipeline` gained a real N-format PSO path - a new
+`std::span<const VkFormat> colorFormats` constructor overload (one
+`VkPipelineColorBlendAttachmentState` per target) - while its original
+single-`VkFormat` constructor is preserved as a genuinely callable overload,
+now just a thin delegating forwarder into the new one; `GpuResourceFactory::
+CreatePipeline()`/`Renderer::CreatePipeline()` each gained a parallel
+`std::span`-taking overload, with every pre-existing single-format call site
+(`MeshAssetGpuCatalog.cpp`'s `Mesh`/`TexturedMesh` pipelines,
+`PrimitiveGpuCatalog.cpp`'s default/Triangle primitive pipeline) compiling and
+behaving completely unmodified. **`RenderGraphCompiler.cpp`/
+`RenderGraphSnapshot.cpp` needed ZERO changes** for any of this - both already
+looped over `pass.writes`/a pass's write list completely generically, with no
+"at most one color write" assumption anywhere, proven by dedicated Tier-1
+tests (`RenderGraphBuilderTests.cpp`/`RenderGraphCompilerTests.cpp`/
+`RenderGraphSnapshotTests.cpp`) rather than merely asserted. The campaign's
+first real consumer, `src/Editor/GBufferValidation.h/.cpp` (`GTE_ENABLE_EDITOR`-
+only, mirroring `ComputeBlurValidation`'s exact shape), declares a real
+"GBufferValidation" graphics pass writing two color targets
+(`outAlbedo`/`outNormal`, `Shaders/GBufferValidation.vert/.frag`) in one draw,
+plus a second, compute "GBufferValidationCopy" pass
+(`Shaders/GBufferCopy.comp`) that reads one of those two outputs back and
+copies it into a third, ImGui-visualizable output - proving both halves of
+the mechanism (N targets written by one pass in one draw; a later pass
+reading one of N outputs, cross-pass, barrier-synchronized automatically by
+the existing, unmodified `RenderGraphBarrierPlanner`) with a single real,
+additive, opt-in workload. Toggled by a "Show GBuffer Validation (debug)"
+checkbox in the Scene panel's toolbar (`EditorContext::
+showGBufferValidationOutput`), `ViewScope::SceneView` + the existing
+`RenderPassCategory::Debug` (no new enumerator was added) - **never on by
+default, and never affecting the Game View's own rendered output in any way**.
+`IEditorLayer` gained two new pure-virtual methods,
+`AddGBufferValidationPass()`/`FinalizeGBufferValidationForSampling()`
+(`EditorLayer.h`), with matching no-op stubs in `NullEditorLayer.cpp` so a
+`GTE_ENABLE_EDITOR=OFF` release build keeps compiling. See
+`task_manager/mrt-1/CAMPAIGN_COMPLETION_REPORT.md` for the full five-phase
+writeup, including the corrected `Renderer::CreatePipeline()` call-site
+enumeration and the depth-attachment/vertex-binding wrinkles this campaign's
+own first real N-format `Pipeline` consumer had to work around.
+
 ## Job System
 
 `src/Jobs/` (`JobTypes.h`, `JobQueue.h/.cpp`, `JobSystem.h/.cpp`,
