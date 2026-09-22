@@ -699,5 +699,57 @@ TEST(RenderGraphSnapshotTest, CombinePassGpuStatsPrefersPresentOverUnsupported)
     EXPECT_DOUBLE_EQ(combined.timing.milliseconds, 1.0);
 }
 
+// --- Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE1 -------
+//
+// Directly proves PHASE0_MASTER_STRATEGY.md's own confirmed claim that
+// BuildRenderGraphSnapshot() needs ZERO changes to already show all 3 write
+// names of a real 3-color-write G-buffer-shaped pass - it already walks
+// `pass.writes` generically (never assuming "at most one ColorAttachmentWrite").
+TEST(RenderGraphSnapshotTest, SnapshotOfThreeColorWritePassListsAllThreeWriteNames)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle albedo = builder.CreateTexture("Albedo", MakeTextureDesc());
+    const TextureHandle normal = builder.CreateTexture("Normal", MakeTextureDesc());
+    const TextureHandle motion = builder.CreateTexture("Motion", MakeTextureDesc());
+    const TextureHandle composited = builder.CreateTexture("Composited", MakeTextureDesc());
+
+    builder.AddPass(
+        "GBufferPass",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.WriteColorAttachment(albedo);
+            pass.WriteColorAttachment(normal);
+            pass.WriteColorAttachment(motion);
+        },
+        NoOpExecute);
+    builder.AddPass(
+        "GBufferVisualizePass",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.ReadTexture(albedo);
+            pass.ReadTexture(normal);
+            pass.ReadTexture(motion);
+            pass.WriteColorAttachment(composited);
+        },
+        NoOpExecute);
+
+    CompiledGraphInput input = builder.Finish();
+    const TextureHandle finalOutputs[] = { composited };
+    const CompiledGraph compiled = Compile(input, finalOutputs);
+
+    const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, {});
+    ASSERT_EQ(snapshot.passesInExecutionOrder.size(), 2u);
+
+    const RenderGraphPassSnapshot& gbufferPass = snapshot.passesInExecutionOrder[0];
+    EXPECT_EQ(gbufferPass.name, "GBufferPass");
+    EXPECT_FALSE(gbufferPass.isCulled);
+    ASSERT_EQ(gbufferPass.writeNames.size(), 3u);
+    ASSERT_EQ(gbufferPass.writeKinds.size(), 3u);
+    EXPECT_EQ(gbufferPass.writeNames[0], "Albedo");
+    EXPECT_EQ(gbufferPass.writeNames[1], "Normal");
+    EXPECT_EQ(gbufferPass.writeNames[2], "Motion");
+    EXPECT_EQ(gbufferPass.writeKinds[0], ResourceKind::Texture);
+    EXPECT_EQ(gbufferPass.writeKinds[1], ResourceKind::Texture);
+    EXPECT_EQ(gbufferPass.writeKinds[2], ResourceKind::Texture);
+}
+
 } // namespace
 } // namespace gte::rg

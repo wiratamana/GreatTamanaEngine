@@ -192,13 +192,26 @@ public:
         // std::nullopt (the default) preserves Phase 6's original-only
         // behavior (VK_ATTACHMENT_LOAD_OP_LOAD - existing contents kept);
         // supplying a value switches that attachment's loadOp to
-        // VK_ATTACHMENT_LOAD_OP_CLEAR with this exact value, recorded onto
-        // this pass's own PassRecord::colorClearValue/depthClearValue (see
-        // RenderGraphTypes.h). A pass with more than one WriteColorAttachment()/
-        // WriteDepthStencilAttachment() call this frame simply has its LAST
-        // supplied clear value (if any) win - the Phases 1-8 MVP never
-        // declares more than one color/depth write per pass anyway (see
-        // RenderGraph.h's own single-color-attachment-per-pass scope note).
+        // VK_ATTACHMENT_LOAD_OP_CLEAR with this exact value.
+        //
+        // Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE1 -
+        // CORRECTED description, replacing the old "the Phases 1-8 MVP never
+        // declares more than one color/depth write per pass anyway"
+        // assumption (no longer true): WriteColorAttachment() is now
+        // callable MORE THAN ONCE per pass, and each call APPENDS a new,
+        // ordered entry to PassRecord::colorAttachments (see
+        // ColorAttachmentDesc, RenderGraphTypes.h) - attachment INDEX in
+        // that list equals the shader's own `layout(location = N) out`
+        // index. Each attachment carries its OWN independent, optional
+        // clear color (no more "last call's clear color silently wins").
+        // Capped at kMaxColorAttachments (8), asserted in the .cpp. For
+        // backward compatibility, PassRecord::colorClearValue is ALSO still
+        // populated with the exact same value every call supplies (last
+        // call wins there, unchanged pre-existing behavior) - it remains
+        // what RenderGraph::ExecuteCompiledGraph() reads until PHASE2 of
+        // this campaign switches it to read `colorAttachments` instead.
+        // `WriteDepthStencilAttachment()` is UNCHANGED by this campaign -
+        // still exactly one depth attachment per pass, by design.
         void WriteColorAttachment(TextureHandle handle, const std::optional<std::array<float, 4>>& clearColor = std::nullopt);
         void WriteDepthStencilAttachment(TextureHandle handle, std::optional<float> clearDepth = std::nullopt);
 

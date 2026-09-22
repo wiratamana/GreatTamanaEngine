@@ -12,10 +12,38 @@ void RenderGraphBuilder::PassBuilder::ReadTexture(TextureHandle handle, Resource
 void RenderGraphBuilder::PassBuilder::WriteColorAttachment(
     TextureHandle handle, const std::optional<std::array<float, 4>>& clearColor)
 {
+    // Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE1 - the
+    // 8-attachment cap (Locked Design Decision 2, PHASE0_MASTER_STRATEGY.md).
+    assert(m_pass.colorAttachments.size() < kMaxColorAttachments &&
+        "RenderGraphBuilder::PassBuilder::WriteColorAttachment: exceeded kMaxColorAttachments per pass");
+
+    // ALWAYS ALSO push a ColorAttachmentWrite onto `writes` (Phase 6's
+    // original behavior, kept byte-for-byte) - this is what keeps
+    // RenderGraphCompiler's dependency-edge/culling computation and
+    // RenderGraph::ApplyUsageBarrierIfNeeded()'s per-usage barrier loop
+    // working per-target with ZERO changes to either - see
+    // task_manager/mrt-1/PHASE0_MASTER_STRATEGY.md's Step 2.
     m_pass.writes.push_back(ResourceUsage::ForTexture(handle, ResourceAccess::ColorAttachmentWrite));
+
+    // MRT campaign, PHASE1 - PassRecord::colorClearValue is kept, byte-for-
+    // byte, exactly as before (RenderGraph::ExecuteCompiledGraph() still
+    // reads it exclusively until PHASE2 lands, and 3 pre-existing tests in
+    // RenderGraphBuilderTests.cpp assert on it directly for the
+    // single-attachment case) - this is a deliberate deviation from a
+    // literal reading of this phase's own strategy doc's illustrative code
+    // sample, which omitted this line; see PHASE1_COMPLETION_REPORT.md's
+    // own "Design decisions" section for the full reasoning. The NEW
+    // ordered `colorAttachments` list (below) is what PHASE2 will read
+    // instead, going forward - both are populated here so nothing regresses
+    // in between.
     if (clearColor.has_value()) {
         m_pass.colorClearValue = clearColor;
     }
+
+    ColorAttachmentDesc desc;
+    desc.handle = handle;
+    desc.clearColor = clearColor;
+    m_pass.colorAttachments.push_back(desc);
 }
 
 void RenderGraphBuilder::PassBuilder::WriteDepthStencilAttachment(TextureHandle handle, std::optional<float> clearDepth)

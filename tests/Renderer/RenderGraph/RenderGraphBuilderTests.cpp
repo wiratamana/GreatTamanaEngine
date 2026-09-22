@@ -300,6 +300,79 @@ TEST(RenderGraphBuilderTest, WriteDepthStencilAttachmentWithClearDepthRecordsItO
     EXPECT_FLOAT_EQ(*input.passes[0].depthClearValue, 1.0f);
 }
 
+// --- Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE1 -------
+// --- ordered, N-ary color-attachment declarations ---------------------------
+
+// Calling WriteColorAttachment() twice on the same pass now APPENDS both
+// calls, in order, to the new PassRecord::colorAttachments list (index ==
+// shader `layout(location = N) out`) - the direct fix for the old "second
+// call's clear color silently wins, no ordered concept at all" gap this
+// phase closes. `pass.writes` also keeps growing by one ColorAttachmentWrite
+// entry per call (unchanged Phase 6 behavior), proving both are populated in
+// lockstep.
+TEST(RenderGraphBuilderTest, WriteColorAttachmentCalledTwiceAppendsBothInOrder)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle handleA = builder.CreateTexture("Albedo", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+    const TextureHandle handleB = builder.CreateTexture("Normal", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+    const std::array<float, 4> clearA{ 0.1f, 0.2f, 0.3f, 1.0f };
+    const std::array<float, 4> clearB{ 0.4f, 0.5f, 0.6f, 1.0f };
+
+    builder.AddPass(
+        "GBufferPass",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.WriteColorAttachment(handleA, clearA);
+            pass.WriteColorAttachment(handleB, clearB);
+        },
+        NoOpExecute);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes[0].colorAttachments.size(), 2u);
+    EXPECT_EQ(input.passes[0].colorAttachments[0].handle, handleA);
+    ASSERT_TRUE(input.passes[0].colorAttachments[0].clearColor.has_value());
+    EXPECT_EQ(*input.passes[0].colorAttachments[0].clearColor, clearA);
+    EXPECT_EQ(input.passes[0].colorAttachments[1].handle, handleB);
+    ASSERT_TRUE(input.passes[0].colorAttachments[1].clearColor.has_value());
+    EXPECT_EQ(*input.passes[0].colorAttachments[1].clearColor, clearB);
+
+    ASSERT_EQ(input.passes[0].writes.size(), 2u);
+    EXPECT_EQ(input.passes[0].writes[0].access, ResourceAccess::ColorAttachmentWrite);
+    EXPECT_EQ(input.passes[0].writes[0].texture, handleA);
+    EXPECT_EQ(input.passes[0].writes[1].access, ResourceAccess::ColorAttachmentWrite);
+    EXPECT_EQ(input.passes[0].writes[1].texture, handleB);
+}
+
+#ifndef NDEBUG
+
+// A death test (mirroring RenderGraphBarrierPlannerDeathTest's own
+// NDEBUG-guarded convention, RenderGraphBarrierPlannerTests.cpp) - calling
+// WriteColorAttachment() kMaxColorAttachments + 1 times on one pass asserts,
+// never silently truncating past the cap (Locked Design Decision 2,
+// PHASE0_MASTER_STRATEGY.md).
+TEST(RenderGraphBuilderDeathTest, WriteColorAttachmentExceedingCapAssertsInDebug)
+{
+    RenderGraphBuilder builder;
+    std::vector<TextureHandle> handles;
+    for (std::uint32_t i = 0; i < kMaxColorAttachments + 1; ++i) {
+        handles.push_back(builder.CreateTexture("Target", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false }));
+    }
+
+    EXPECT_DEATH(
+        {
+            builder.AddPass(
+                "TooManyAttachmentsPass",
+                [&](RenderGraphBuilder::PassBuilder& pass) {
+                    for (const TextureHandle& handle : handles) {
+                        pass.WriteColorAttachment(handle);
+                    }
+                },
+                NoOpExecute);
+        },
+        "");
+}
+
+#endif // !NDEBUG
+
 // --- WriteTexture() (Phase 6 of the compute-shader campaign) ---------------
 
 TEST(RenderGraphBuilderTest, PassBuilderWriteTextureDefaultsToComputeShaderWrite)

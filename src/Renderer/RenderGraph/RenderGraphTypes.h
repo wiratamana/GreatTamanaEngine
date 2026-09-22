@@ -54,6 +54,14 @@ namespace gte::rg {
 // `generation`).
 inline constexpr std::uint32_t kInvalidIndex = 0xFFFFFFFFu;
 
+// Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE1 - matches
+// typical real-world VkPhysicalDeviceLimits::maxColorAttachments (locked via
+// ask_questions, see task_manager/mrt-1/PHASE0_MASTER_STRATEGY.md's Locked
+// Design Decision 2). Enforced by an assert() in
+// RenderGraphBuilder::PassBuilder::WriteColorAttachment()
+// (RenderGraphBuilder.cpp) - never silently truncated.
+inline constexpr std::uint32_t kMaxColorAttachments = 8;
+
 // --- Handles ---------------------------------------------------------------
 //
 // Cheap, POD, generational identifiers - mirrors gte::Entity
@@ -531,6 +539,25 @@ struct ResourceUsage {
 // RENDERGRAPH_PHASE2_BUILDER_API_STRATEGY_v2.md, Step 3.1.
 struct PassContext;
 
+// Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE1 - one
+// ORDERED color-attachment slot on a pass. Attachment INDEX in
+// PassRecord::colorAttachments (below) is the CONTRACT: it equals the
+// shader's own `layout(location = N) out` index for that pass's fragment
+// shader. This is deliberately NOT inferred by scanning `writes` (a pass's
+// `writes` vector may, in the future, also contain non-attachment texture
+// writes once mixed with WriteTexture()-style compute writes on the same
+// pass - order there is declaration order for ALL kinds combined, not
+// guaranteed to match render-target order) - `colorAttachments` is the one
+// and only source of truth for "which handle is attachment slot N", kept
+// in lockstep with a mirrored ColorAttachmentWrite entry in `writes` (see
+// PassBuilder::WriteColorAttachment() below) purely so barrier planning/
+// dependency-edge computation - which only ever reads `writes`, never this
+// new field - keeps working with NO changes at all.
+struct ColorAttachmentDesc {
+    TextureHandle handle;
+    std::optional<std::array<float, 4>> clearColor;
+};
+
 struct PassRecord {
     // Must be a string literal / static-storage-duration const char* -
     // mirrors GTE_PROFILE_SCOPE's own rule (see AGENTS.md, "Profiling":
@@ -643,6 +670,20 @@ struct PassRecord {
     // tie-break - see RenderPassEvent's own doc comment above for the full
     // write-up.
     RenderPassEvent renderPassEvent = RenderPassEvent::Opaques;
+
+    // Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE1 - the
+    // ordered list of this pass's color attachments (index == shader
+    // `layout(location = N) out`) - see ColorAttachmentDesc's own doc
+    // comment above. Populated exclusively by
+    // RenderGraphBuilder::PassBuilder::WriteColorAttachment() (one push_back
+    // per call, in call order) - NEVER read by RenderGraphCompiler.cpp
+    // (culling/lifetime/dependency-edge computation still only ever reads
+    // `writes`, completely unchanged by this campaign) - read ONLY by
+    // RenderGraph::ExecuteCompiledGraph() (PHASE2 of this campaign) to build
+    // the real vkCmdBeginRendering attachment array, in this exact order.
+    // Size is bounded by kMaxColorAttachments (asserted in
+    // WriteColorAttachment(), never here).
+    std::vector<ColorAttachmentDesc> colorAttachments;
 };
 
 } // namespace gte::rg

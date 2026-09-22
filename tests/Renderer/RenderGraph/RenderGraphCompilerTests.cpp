@@ -895,5 +895,50 @@ TEST(RenderGraphCompilerTest, PassesSharingTheSameRenderPassEventTierPreserveThe
 // a `default:` branch of a switch already proven exhaustive by the
 // compiler would have no reachable test either.
 
+// --- Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE1 -------
+//
+// Directly proves PHASE0_MASTER_STRATEGY.md's own confirmed claim that
+// RenderGraphCompiler::Compile() needs ZERO changes to correctly handle a
+// REAL 3-color-write G-buffer-shaped pass (rather than trusting that claim
+// blindly): a single pass declares three WriteColorAttachment() calls
+// against three distinct handles, all three kept reachable via a later pass
+// that reads them all and itself reaches a real finalOutputs root - the
+// G-buffer pass must survive culling entirely (not just partially).
+TEST(RenderGraphCompilerTest, PassWithThreeColorWritesSurvivesCompileAndIsNotCulled)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle albedo = builder.CreateTexture("Albedo", MakeTextureDesc());
+    const TextureHandle normal = builder.CreateTexture("Normal", MakeTextureDesc());
+    const TextureHandle motion = builder.CreateTexture("Motion", MakeTextureDesc());
+    const TextureHandle composited = builder.CreateTexture("Composited", MakeTextureDesc());
+
+    builder.AddPass(
+        "GBufferPass",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.WriteColorAttachment(albedo);
+            pass.WriteColorAttachment(normal);
+            pass.WriteColorAttachment(motion);
+        },
+        NoOpExecute); // index 0 - the G-buffer-shaped 3-write pass under test.
+    builder.AddPass(
+        "GBufferVisualizePass",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.ReadTexture(albedo);
+            pass.ReadTexture(normal);
+            pass.ReadTexture(motion);
+            pass.WriteColorAttachment(composited);
+        },
+        NoOpExecute); // index 1 - keeps all three G-buffer writes reachable.
+
+    CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes[0].colorAttachments.size(), 3u);
+    const TextureHandle finalOutputs[] = { composited };
+    const CompiledGraph compiled = Compile(input, finalOutputs);
+
+    EXPECT_TRUE(ExecutionOrderEquals(compiled.executionOrder, { 0, 1 }));
+    EXPECT_FALSE(input.passes[0].isCulled);
+    EXPECT_FALSE(input.passes[1].isCulled);
+}
+
 } // namespace
 } // namespace gte::rg
