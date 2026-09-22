@@ -301,6 +301,15 @@ TEST(RenderGraphResourceAccessTest, VertexBufferReadIsNotAWrite)
     EXPECT_FALSE(IsWriteAccess(ResourceAccess::VertexBufferRead));
 }
 
+// GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+// PHASE1 (task_manager/render-pass-5/
+// PHASE1_FOUNDATIONS_BOUNDS_INDIRECT_TYPES_AND_VOCABULARY.md) - the fifth
+// new enumerator.
+TEST(RenderGraphResourceAccessTest, VertexShaderStorageReadIsNotAWrite)
+{
+    EXPECT_FALSE(IsWriteAccess(ResourceAccess::VertexShaderStorageRead));
+}
+
 // --- ToString() - one assertion per enumerator, non-empty, non-null ------
 
 TEST(RenderGraphResourceAccessTest, ToStringCoversEveryEnumeratorNonNullNonEmpty)
@@ -315,6 +324,7 @@ TEST(RenderGraphResourceAccessTest, ToStringCoversEveryEnumeratorNonNullNonEmpty
         ResourceAccess::ComputeShaderWrite,
         ResourceAccess::IndirectCommandRead,
         ResourceAccess::VertexBufferRead,
+        ResourceAccess::VertexShaderStorageRead,
     };
 
     for (const ResourceAccess value : values) {
@@ -335,6 +345,7 @@ TEST(RenderGraphResourceAccessTest, ToStringProducesDistinctNamesForDistinctEnum
     EXPECT_STREQ(ToString(ResourceAccess::ComputeShaderWrite), "ComputeShaderWrite");
     EXPECT_STREQ(ToString(ResourceAccess::IndirectCommandRead), "IndirectCommandRead");
     EXPECT_STREQ(ToString(ResourceAccess::VertexBufferRead), "VertexBufferRead");
+    EXPECT_STREQ(ToString(ResourceAccess::VertexShaderStorageRead), "VertexShaderStorageRead");
 }
 
 // --- PassRecord / ResourceUsage - basic plain-data sanity -----------------

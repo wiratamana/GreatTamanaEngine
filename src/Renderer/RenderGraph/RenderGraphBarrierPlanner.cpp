@@ -105,6 +105,19 @@ ResourceState RequiredStateFor(ResourceAccess access, bool isDepthResource) noex
             VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT,
             VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT,
         };
+    case ResourceAccess::VertexShaderStorageRead:
+        // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+        // PHASE1 (task_manager/render-pass-5/
+        // PHASE1_FOUNDATIONS_BOUNDS_INDIRECT_TYPES_AND_VOCABULARY.md) -
+        // buffer-only in practice, same as IndirectCommandRead/VertexBufferRead
+        // above (`layout` left at its default, never read for a buffer
+        // barrier). Distinct from ShaderRead (fragment-stage-only) - this is
+        // a StructuredBuffer read by the VERTEX SHADER stage itself.
+        return ResourceState{
+            VK_IMAGE_LAYOUT_UNDEFINED,
+            VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
+            VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
+        };
     }
     return ResourceState{};
 }

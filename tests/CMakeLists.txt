@@ -146,6 +146,45 @@
 #                                            file is deliberately
 #                                            Vulkan-header-free, same
 #                                            precedent as GpuTiming.h.
+#   - Renderer/Culling/CullingTypesTests.cpp - GPU-Driven Frustum Culling +
+#                                            Indirect Draw campaign
+#                                            (render-pass-5), PHASE1
+#                                            (task_manager/render-pass-5/
+#                                            PHASE1_FOUNDATIONS_BOUNDS_INDIRECT_TYPES_AND_VOCABULARY.md)
+#                                            - the pure bounds/frustum math
+#                                            (src/Renderer/Culling/CullingTypes.h)
+#                                            a future compute culling kernel
+#                                            (PHASE3) and CPU-side per-frame
+#                                            instance-packing step (PHASE4)
+#                                            both depend on: ComputeLocalAABB()
+#                                            (empty input, a single point, a
+#                                            cube's 8 shuffled corners),
+#                                            TransformAABB() (identity is a
+#                                            no-op, a pure translation shifts
+#                                            min/max by exactly that amount, a
+#                                            90-degree yaw produces the
+#                                            expected re-oriented box for a
+#                                            deliberately asymmetric box),
+#                                            ExtractFrustumPlanes() (a
+#                                            hand-computed simple orthographic
+#                                            case, verified against Math/Mat4.h's
+#                                            actual column-major storage
+#                                            convention rather than assumed),
+#                                            AABBIntersectsFrustum() (fully
+#                                            inside, fully outside one plane,
+#                                            straddling one plane), and
+#                                            PackCullingInstanceInput()/every
+#                                            struct's documented byte size
+#                                            (including IndirectDrawCommand's
+#                                            own byte-for-byte
+#                                            VkDrawIndexedIndirectCommand
+#                                            match, src/Renderer/
+#                                            IndirectDrawTypes.h). No Vulkan
+#                                            device/Renderer/live GPU involved
+#                                            at all - deliberately
+#                                            Vulkan-header-free, same
+#                                            precedent as GpuSkinningTypes.h
+#                                            above.
 #   - Renderer/Atmosphere/AtmosphereMathTests.cpp - Atmosphere Scattering +
 #                                            Aerial Perspective campaign,
 #                                            Phase 1 (task_manager/
@@ -1971,6 +2010,7 @@ set(GTE_TEST_SOURCES
     Renderer/VolumeTexturePreviewMathTests.cpp
     Renderer/VolumeTexturePreviewRendererTests.cpp
     Renderer/GpuSkinning/GpuSkinningTypesTests.cpp
+    Renderer/Culling/CullingTypesTests.cpp
     Renderer/Atmosphere/AtmosphereMathTests.cpp
     Renderer/Atmosphere/AtmosphereAerialPerspectiveCompositeMathTests.cpp
     Renderer/Atmosphere/DirectionalLightResolverTests.cpp

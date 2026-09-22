@@ -439,6 +439,9 @@ add_library(gte_core STATIC
     src/Renderer/GpuSkinning/GpuSkinningTypes.cpp
     src/Renderer/GpuSkinning/GpuSkinningPipelines.h
     src/Renderer/GpuSkinning/GpuSkinningPipelines.cpp
+    src/Renderer/Culling/CullingTypes.h
+    src/Renderer/Culling/CullingTypes.cpp
+    src/Renderer/IndirectDrawTypes.h
     src/Renderer/Atmosphere/AtmosphereTypes.h
     src/Renderer/Atmosphere/AtmosphereParameters.h
     src/Renderer/Atmosphere/AtmosphereParameters.cpp

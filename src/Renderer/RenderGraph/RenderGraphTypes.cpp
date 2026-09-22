@@ -29,6 +29,8 @@ bool IsWriteAccess(ResourceAccess access) noexcept
         return false; // The indirect-draw buffer is only ever READ by vkCmdDraw(Indexed)Indirect.
     case ResourceAccess::VertexBufferRead:
         return false; // A vertex buffer bound for drawing is only ever READ by the vertex-input stage.
+    case ResourceAccess::VertexShaderStorageRead:
+        return false; // A vertex-shader storage-buffer read (render-pass-5 campaign) is only ever READ.
     }
     return false;
 }
@@ -55,6 +57,8 @@ const char* ToString(ResourceAccess access) noexcept
         return "IndirectCommandRead";
     case ResourceAccess::VertexBufferRead:
         return "VertexBufferRead";
+    case ResourceAccess::VertexShaderStorageRead:
+        return "VertexShaderStorageRead";
     }
     return "Unknown";
 }

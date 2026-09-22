@@ -131,6 +131,19 @@ TEST(RenderGraphBarrierPlannerTest, RequiredStateForVertexBufferRead)
     EXPECT_EQ(state.accessMask, VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT);
 }
 
+// --- RequiredStateFor() - GPU-Driven Frustum Culling + Indirect Draw -------
+// --- campaign's own PHASE1 (render-pass-5,
+// --- PHASE1_FOUNDATIONS_BOUNDS_INDIRECT_TYPES_AND_VOCABULARY.md) - the -----
+// --- fifth new enumerator ---------------------------------------------------
+
+TEST(RenderGraphBarrierPlannerTest, RequiredStateForVertexShaderStorageRead)
+{
+    const ResourceState state = RequiredStateFor(ResourceAccess::VertexShaderStorageRead, false);
+
+    EXPECT_EQ(state.stageMask, VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT);
+    EXPECT_EQ(state.accessMask, VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
+}
+
 
 // ComputeShaderRead/ComputeShaderWrite must produce the exact SAME
 // ResourceState value regardless of the resource kind it's applied against
@@ -166,6 +179,7 @@ TEST(RenderGraphBarrierPlannerTest, TargetsDepthStateIsTrueOnlyForDepthStencilAt
     EXPECT_FALSE(TargetsDepthState(ResourceAccess::ComputeShaderWrite));
     EXPECT_FALSE(TargetsDepthState(ResourceAccess::IndirectCommandRead));
     EXPECT_FALSE(TargetsDepthState(ResourceAccess::VertexBufferRead));
+    EXPECT_FALSE(TargetsDepthState(ResourceAccess::VertexShaderStorageRead));
 }
 
 // --- IsColorAttachmentWriteAccess() - one case per enumerator --------------
@@ -188,6 +202,7 @@ TEST(RenderGraphBarrierPlannerTest, IsColorAttachmentWriteAccessIsTrueOnlyForCol
     EXPECT_FALSE(IsColorAttachmentWriteAccess(ResourceAccess::ComputeShaderWrite));
     EXPECT_FALSE(IsColorAttachmentWriteAccess(ResourceAccess::IndirectCommandRead));
     EXPECT_FALSE(IsColorAttachmentWriteAccess(ResourceAccess::VertexBufferRead));
+    EXPECT_FALSE(IsColorAttachmentWriteAccess(ResourceAccess::VertexShaderStorageRead));
 }
 
 // --- Texture-side hand-simulated sequence: ComputeShaderWrite (an ---------
@@ -217,6 +232,53 @@ TEST(RenderGraphBarrierPlannerTest, ComputeShaderWriteFollowedByShaderReadEmitsE
     EXPECT_EQ(barrier.srcAccessMask, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
     EXPECT_EQ(barrier.dstStageMask, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
     EXPECT_EQ(barrier.dstAccessMask, VK_ACCESS_2_SHADER_READ_BIT);
+}
+
+// --- Buffer-side hand-simulated sequence: ComputeShaderWrite -> -----------
+// --- IndirectCommandRead - the still-missing regression test flagged, but --
+// --- never closed, by the compute-shader campaign's own Phase 5 -----------
+// --- (render-pass-5 campaign, PHASE1) --------------------------------------
+//
+// The buffer-side sibling of ComputeShaderWriteFollowedByShaderReadEmitsExactlyOneCorrectBarrier
+// immediately above - together the two prove the ResourceAccess extension
+// generalizes correctly across both resource kinds. Confirms exactly one
+// barrier is emitted with the DRAW_INDIRECT stage/INDIRECT_COMMAND_READ
+// access as its destination.
+TEST(RenderGraphBarrierPlannerTest, ComputeShaderWriteFollowedByIndirectCommandReadEmitsExactlyOneCorrectBarrier)
+{
+    const ResourceState afterComputeWrite = RequiredStateFor(ResourceAccess::ComputeShaderWrite, false);
+    const ResourceState afterIndirectRead = RequiredStateFor(ResourceAccess::IndirectCommandRead, false);
+
+    ASSERT_TRUE(RequiresBarrier(afterComputeWrite, afterIndirectRead));
+
+    const VkBufferMemoryBarrier2 barrier =
+        BuildBufferMemoryBarrier2(VK_NULL_HANDLE, 0, VK_WHOLE_SIZE, afterComputeWrite, afterIndirectRead);
+
+    EXPECT_EQ(barrier.srcStageMask, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+    EXPECT_EQ(barrier.srcAccessMask, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+    EXPECT_EQ(barrier.dstStageMask, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
+    EXPECT_EQ(barrier.dstAccessMask, VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT);
+}
+
+// Sibling test proving the new PHASE1 VertexShaderStorageRead enumerator's
+// own barrier fields (VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT/
+// VK_ACCESS_2_SHADER_STORAGE_READ_BIT) - the new instanced graphics pass
+// (PHASE2 onward) declares this against the SAME per-instance buffer the
+// culling compute pass just wrote via ComputeShaderWrite.
+TEST(RenderGraphBarrierPlannerTest, ComputeShaderWriteFollowedByVertexShaderStorageReadEmitsExactlyOneCorrectBarrier)
+{
+    const ResourceState afterComputeWrite = RequiredStateFor(ResourceAccess::ComputeShaderWrite, false);
+    const ResourceState afterVertexShaderStorageRead = RequiredStateFor(ResourceAccess::VertexShaderStorageRead, false);
+
+    ASSERT_TRUE(RequiresBarrier(afterComputeWrite, afterVertexShaderStorageRead));
+
+    const VkBufferMemoryBarrier2 barrier =
+        BuildBufferMemoryBarrier2(VK_NULL_HANDLE, 0, VK_WHOLE_SIZE, afterComputeWrite, afterVertexShaderStorageRead);
+
+    EXPECT_EQ(barrier.srcStageMask, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+    EXPECT_EQ(barrier.srcAccessMask, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+    EXPECT_EQ(barrier.dstStageMask, VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT);
+    EXPECT_EQ(barrier.dstAccessMask, VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
 }
 
 // Two consecutive ComputeShaderWrite usages against the SAME resource (e.g.

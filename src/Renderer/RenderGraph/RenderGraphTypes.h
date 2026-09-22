@@ -208,6 +208,24 @@ enum class ResourceAccess : std::uint8_t {
     // read-after-write hazard between the skinning compute pass and the
     // graphics pass that draws from its output.
     VertexBufferRead,
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE1 (task_manager/render-pass-5/
+    // PHASE1_FOUNDATIONS_BOUNDS_INDIRECT_TYPES_AND_VOCABULARY.md) - a
+    // StructuredBuffer read by the VERTEX SHADER stage itself (as distinct
+    // from ShaderRead, which is fragment-stage sampling only - confirmed by
+    // reading RequiredStateFor() before adding this - and from
+    // ComputeShaderRead, the compute-stage equivalent, and VertexBufferRead,
+    // the fixed-function vertex-INPUT-ASSEMBLER's read of a real bound
+    // vertex buffer, not a shader's own storage-buffer read).
+    // GPU-driven instanced rendering's new instanced graphics pass declares
+    // this against the per-instance GpuCullingInstanceInput buffer it reads
+    // via gl_InstanceIndex for its own model matrix (see
+    // src/Renderer/Culling/CullingTypes.h) - the SAME buffer the culling
+    // compute pass wrote via ComputeShaderWrite. Without this enumerator,
+    // the only existing option (ShaderRead, fragment-stage-only) would
+    // produce a barrier with the WRONG destination stage - a real, silent
+    // GPU hazard, not just an inaccurate label.
+    VertexShaderStorageRead,
 };
 
 // True for any access kind that can WRITE the resource's contents (used by
