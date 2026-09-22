@@ -52,10 +52,32 @@ void BuildScenePanel(Game& game, Renderer& renderer, EditorContext& ctx, EditorC
             // gets (re)created.
             ImGui::Checkbox("Show Compute Blur (debug)", &ctx.showBlurredSceneOutput);
 
+            // task_manager/mrt-1 campaign, PHASE4
+            // (PHASE4_GBUFFER_VALIDATION_PASS_AND_SHADER.md) - a second,
+            // small, independently-toggleable debug checkbox: when on (and
+            // the GBuffer Validation pass's own "visualized" copy-of-
+            // albedo output actually exists), "Scene" displays THAT
+            // instead of the normal Scene view - see
+            // IEditorLayer::AddGBufferValidationPass()/
+            // ImGuiEditorLayer::BuildUI() for how
+            // ctx.gbufferValidationOutputDescriptor gets (re)created. The
+            // pass's own real albedo/normal outputs are independently
+            // inspectable via GET /get_texture/GET /list_textures - this
+            // checkbox only swaps in the small "visualized" copy, never
+            // either of those two directly (see this phase's own
+            // completion report for the full reasoning).
+            ImGui::Checkbox("Show GBuffer Validation (debug)", &ctx.showGBufferValidationOutput);
+
             const bool showingBlurredOutput =
                 ctx.showBlurredSceneOutput && ctx.blurredSceneOutputDescriptor != VK_NULL_HANDLE;
-            const VkDescriptorSet imageDescriptor =
-                showingBlurredOutput ? ctx.blurredSceneOutputDescriptor : ctx.sceneViewDescriptor;
+            // Blurred output takes priority if somehow both debug toggles
+            // are on at once - a rare, harmless combination neither this
+            // panel nor either debug tool needs to forbid outright.
+            const bool showingGBufferValidationOutput = !showingBlurredOutput && ctx.showGBufferValidationOutput
+                && ctx.gbufferValidationOutputDescriptor != VK_NULL_HANDLE;
+            const VkDescriptorSet imageDescriptor = showingBlurredOutput
+                ? ctx.blurredSceneOutputDescriptor
+                : (showingGBufferValidationOutput ? ctx.gbufferValidationOutputDescriptor : ctx.sceneViewDescriptor);
 
             // Its own RenderTexture now (ctx.sceneViewDescriptor) - "Scene"
             // no longer displays the same image as "Game".

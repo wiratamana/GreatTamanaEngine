@@ -1293,6 +1293,37 @@ int Application::Run()
                             }
                         }
 
+                        // task_manager/mrt-1 campaign, PHASE4
+                        // (PHASE4_GBUFFER_VALIDATION_PASS_AND_SHADER.md) -
+                        // this campaign's own first real MRT consumer's
+                        // still-unmigrated call site (mirrors the Compute
+                        // Blur Validation call site immediately above -
+                        // Locked Design Decision 4, PHASE0_MASTER_STRATEGY.md
+                        // - never migrated onto the RenderPipeline provider
+                        // system). Reuses sceneExtentForBlurValidation/
+                        // sceneVisibleForBlurValidation as-is - both already
+                        // describe exactly "is the Scene panel visible this
+                        // frame, and what size is it", the same real input
+                        // this pass needs (it reads no Scene View texture at
+                        // all - see GBufferValidation.h's own header
+                        // comment - so it has no use for
+                        // sceneColorHandleForBlurValidation). Declared (and
+                        // every one of its 3 handles added to `outputs`)
+                        // only when the Editor's own "Show GBuffer
+                        // Validation (debug)" toggle is on and "Scene" is
+                        // visible; std::nullopt (always the case for
+                        // NullEditorLayer) means nothing was declared at all
+                        // this call.
+                        if (sceneVisibleForBlurValidation) {
+                            if (const std::optional<GBufferValidationHandles> gbufferHandles =
+                                    m_editorLayer->AddGBufferValidationPass(
+                                        b, m_renderer, sceneExtentForBlurValidation)) {
+                                outputs.push_back(gbufferHandles->albedo);
+                                outputs.push_back(gbufferHandles->normal);
+                                outputs.push_back(gbufferHandles->visualized);
+                            }
+                        }
+
                         return outputs;
                     });
 
@@ -1367,6 +1398,24 @@ int Application::Run()
                 // result.
                 m_renderGraph.NotifyDebugTextureStateOverride(
                     "BlurredSceneOutput", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
+
+                // task_manager/mrt-1 campaign, PHASE4 - the campaign's own
+                // first real MRT consumer's finalize call, mirroring
+                // FinalizeBlurValidationForSampling() above exactly (a safe
+                // no-op whenever AddGBufferValidationPass() didn't actually
+                // declare a pass this call - tracked purely internally by
+                // GBufferValidation's own private m_writtenThisFrame flag).
+                m_editorLayer->FinalizeGBufferValidationForSampling(offscreenCmd);
+                // Same unconditional-correction reasoning as
+                // "BlurredSceneOutput" immediately above, applied to all
+                // three of this pass's own real, independently-named
+                // outputs.
+                m_renderGraph.NotifyDebugTextureStateOverride(
+                    "GBufferAlbedo", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
+                m_renderGraph.NotifyDebugTextureStateOverride(
+                    "GBufferNormal", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
+                m_renderGraph.NotifyDebugTextureStateOverride(
+                    "GBufferVisualized", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
 
                 m_renderer.EndOffscreenRenderGraphRecording();
 

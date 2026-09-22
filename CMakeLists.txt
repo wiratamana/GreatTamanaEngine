@@ -600,6 +600,8 @@ if(GTE_ENABLE_EDITOR)
         src/Editor/SceneGridRenderer.cpp
         src/Editor/ComputeBlurValidation.h
         src/Editor/ComputeBlurValidation.cpp
+        src/Editor/GBufferValidation.h
+        src/Editor/GBufferValidation.cpp
         src/Editor/GpuSkinningValidation.h
         src/Editor/GpuSkinningValidation.cpp
         src/Editor/AtmosphereTransmittanceLutValidation.h
@@ -856,6 +858,24 @@ endif()
 # block above).
 if(GTE_ENABLE_EDITOR)
     gte_add_shader(GreatTamanaEngine src/Shaders/BoxBlur.comp)
+endif()
+
+# task_manager/mrt-1 campaign (Multi-Render-Target / G-Buffer support),
+# PHASE4 (PHASE4_GBUFFER_VALIDATION_PASS_AND_SHADER.md) - the "GBuffer
+# Validation" debug pass's own shaders (src/Editor/GBufferValidation.h/.cpp):
+# GBufferValidation.vert/.frag (the 2-color-attachment MRT pass itself) and
+# GBufferCopy.comp (the second pass's own trivial imageLoad/imageStore
+# copy). Only compiled/staged when GTE_ENABLE_EDITOR is ON, since
+# GBufferValidation.cpp - the only thing that ever loads these - isn't
+# compiled into gte_core otherwise (same precedent as BoxBlur.comp/
+# SceneGrid.vert/frag above - this is the CORRECT precedent for an
+# Editor-only debug pass, NOT Mesh.frag/TexturedMesh.frag's own
+# unconditional registration, which is for core, always-compiled gameplay
+# shaders instead).
+if(GTE_ENABLE_EDITOR)
+    gte_add_shader(GreatTamanaEngine src/Shaders/GBufferValidation.vert)
+    gte_add_shader(GreatTamanaEngine src/Shaders/GBufferValidation.frag)
+    gte_add_shader(GreatTamanaEngine src/Shaders/GBufferCopy.comp)
 endif()
 
 # Atmosphere Scattering + Aerial Perspective campaign, Phase 3

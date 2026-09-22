@@ -108,6 +108,21 @@ struct ProjectAssetImportResult {
     std::uint64_t meshTriangleCount = 0;
 };
 
+// task_manager/mrt-1 campaign (Multi-Render-Target / G-Buffer support),
+// PHASE4 (PHASE4_GBUFFER_VALIDATION_PASS_AND_SHADER.md) - result of
+// AddGBufferValidationPass() below. Deliberately a SEPARATE, tiny,
+// dependency-free struct (mirrors TabActivationResult's own precedent
+// above) - EditorLayer.h must never depend on src/Editor/GBufferValidation.h
+// (an Editor-only file not compiled at all under GTE_ENABLE_EDITOR=OFF).
+// The CALLER (Application::Run()) must add every one of these three
+// handles to that call's own finalOutputs root set, or PHASE1-3's
+// existing RenderGraphCompiler culling would silently drop whichever one
+// never reaches a root.
+struct GBufferValidationHandles {
+    rg::TextureHandle albedo{};
+    rg::TextureHandle normal{};
+    rg::TextureHandle visualized{};
+};
 
 // task_manager/frame-debugger-3 campaign, PHASE7
 // (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md) - the Frame
@@ -268,6 +283,41 @@ public:
     // that call returns and BEFORE that command buffer is ended/submitted
     // - see Application::Run(). A no-op for NullEditorLayer.
     virtual void FinalizeBlurValidationForSampling(VkCommandBuffer cmd) = 0;
+
+    // task_manager/mrt-1 campaign, PHASE4
+    // (PHASE4_GBUFFER_VALIDATION_PASS_AND_SHADER.md) - declares (if this
+    // implementation's own "Show GBuffer Validation (debug)" toggle is on
+    // AND the "Scene" panel was visible last frame, AND `sceneExtent` is
+    // non-degenerate) this campaign's own first real MRT consumer: a
+    // GRAPHICS pass writing two color attachments (albedo/normal) in one
+    // draw, plus a small compute pass reading one of them back into a
+    // third, independently-inspectable output. Unlike AddBlurValidationPass()
+    // above, this pass reads NO Scene View texture at all - its two color
+    // outputs are entirely self-contained, procedural test content (see
+    // src/Editor/GBufferValidation.h's own header comment), so this method
+    // needs no `sceneViewHandle` parameter. Returns every real output
+    // handle this call declared - the CALLER must add all three to this
+    // call's own finalOutputs root set, or PHASE1-3's existing
+    // RenderGraphCompiler culling would silently drop whichever one never
+    // reaches a root - or std::nullopt if no pass was declared at all this
+    // frame (see GBufferValidation.h for the real implementation this
+    // wraps; always std::nullopt for NullEditorLayer). `renderer` is the
+    // same Renderer Application already owns.
+    virtual std::optional<GBufferValidationHandles> AddGBufferValidationPass(
+        rg::RenderGraphBuilder& builder, Renderer& renderer, VkExtent2D sceneExtent) = 0;
+
+    // Transitions all three GBuffer Validation outputs (if
+    // AddGBufferValidationPass() above actually declared a pass this frame
+    // - a safe no-op otherwise) to a real ShaderRead state, ready for this
+    // implementation's own ImGui::Image() display / GET /get_texture
+    // capture - mirrors FinalizeBlurValidationForSampling() above (the
+    // compute-written visualized output) plus RenderPasses.h's own
+    // FinalizeRenderTextureForExternalSampling() (the graphics-written
+    // albedo/normal outputs). Must be called against the SAME command
+    // buffer the offscreen RenderGraph::Execute() call just recorded into,
+    // AFTER that call returns and BEFORE that command buffer is ended/
+    // submitted - see Application::Run(). A no-op for NullEditorLayer.
+    virtual void FinalizeGBufferValidationForSampling(VkCommandBuffer cmd) = 0;
 
     // Records the Editor's "Scene" panel infinite ground grid (see
     // task_manager/editor-enchancements-1/PHASE0_MASTER_STRATEGY.md) directly

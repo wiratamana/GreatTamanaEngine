@@ -6,6 +6,7 @@
 #include "DockLayout.h"
 #include "EditorCamera.h"
 #include "EditorContext.h"
+#include "GBufferValidation.h"
 #include "ImGuiMemoryTracker.h"
 #include "Panels/AtmospherePanel.h"
 #include "Panels/FrameDebuggerPanel.h"
@@ -266,6 +267,10 @@ public:
         ReleaseGameViewDescriptor();
         ReleaseSceneViewDescriptor();
         ReleaseBlurredSceneOutputDescriptor();
+        // task_manager/mrt-1 campaign, PHASE4 - same "release BEFORE
+        // ImGui_ImplVulkan_Shutdown()" requirement as ReleaseBlurredSceneOutputDescriptor()
+        // immediately above.
+        ReleaseGBufferValidationOutputDescriptor();
         // task_manager/frame-debugger-3 campaign, PHASE4 - same "release
         // BEFORE ImGui_ImplVulkan_Shutdown()" requirement as
         // Release*Descriptor() above (m_frameDebuggerPanel is declared,
@@ -462,6 +467,30 @@ public:
 
     void FinalizeBlurValidationForSampling(VkCommandBuffer cmd) override { m_blurValidation.FinalizeForSampling(cmd); }
 
+    // task_manager/mrt-1 campaign, PHASE4 - see
+    // IEditorLayer::AddGBufferValidationPass()'s own doc comment. Gated on
+    // BOTH the "Show GBuffer Validation (debug)" toggle AND the Scene
+    // panel actually being visible last frame (m_ctx.sceneViewVisible) AND
+    // a non-degenerate extent - mirrors AddBlurValidationPass() above
+    // exactly, minus the Scene-View-texture-read parameter this pass does
+    // not need (see GBufferValidation.h's own header comment).
+    std::optional<GBufferValidationHandles> AddGBufferValidationPass(
+        rg::RenderGraphBuilder& builder, Renderer& renderer, VkExtent2D sceneExtent) override
+    {
+        if (!m_ctx.showGBufferValidationOutput || !m_ctx.sceneViewVisible) {
+            return std::nullopt;
+        }
+        if (sceneExtent.width == 0 || sceneExtent.height == 0) {
+            return std::nullopt;
+        }
+        return m_gbufferValidation.AddPass(builder, renderer, sceneExtent);
+    }
+
+    void FinalizeGBufferValidationForSampling(VkCommandBuffer cmd) override
+    {
+        m_gbufferValidation.FinalizeForSampling(cmd);
+    }
+
     // See IEditorLayer::RenderSceneGrid()'s own doc comment. Always called by
     // Application::Run() whenever "Scene" was rendered at all this frame (see
     // AddSceneViewPass()'s own new recordSceneOverlay parameter,
@@ -541,6 +570,24 @@ public:
                 m_ctx.blurredSceneOutputDescriptor = ImGui_ImplVulkan_AddTexture(
                     blurredOutput->Sampler(), blurredOutput->View(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
                 m_lastKnownBlurredView = blurredOutput->View();
+            }
+        }
+
+        // task_manager/mrt-1 campaign, PHASE4 - the GBuffer Validation
+        // pass's own "visualized" (copy-of-albedo) output ImGui
+        // descriptor, tracked the exact same "recreate whenever the
+        // underlying view actually changed" way blurredOutput's own
+        // descriptor is above (m_gbufferValidation.AddPass() may resize
+        // its own RenderTextures out from under this class at any time
+        // this frame's earlier Execute() call, exactly like
+        // ComputeBlurValidation's own identical reasoning).
+        if (RenderTexture* gbufferVisualized = m_gbufferValidation.OutputTexture()) {
+            if (m_ctx.gbufferValidationOutputDescriptor == VK_NULL_HANDLE
+                || gbufferVisualized->View() != m_lastKnownGBufferValidationView) {
+                ReleaseGBufferValidationOutputDescriptor();
+                m_ctx.gbufferValidationOutputDescriptor = ImGui_ImplVulkan_AddTexture(
+                    gbufferVisualized->Sampler(), gbufferVisualized->View(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                m_lastKnownGBufferValidationView = gbufferVisualized->View();
             }
         }
 
@@ -852,6 +899,18 @@ private:
         }
     }
 
+    // task_manager/mrt-1 campaign, PHASE4 - see ReleaseBlurredSceneOutputDescriptor()
+    // above's own identical shape/reasoning, applied to the GBuffer
+    // Validation pass's own "visualized" output descriptor instead.
+    void ReleaseGBufferValidationOutputDescriptor()
+    {
+        if (m_ctx.gbufferValidationOutputDescriptor != VK_NULL_HANDLE) {
+            ImGui_ImplVulkan_RemoveTexture(m_ctx.gbufferValidationOutputDescriptor);
+            m_ctx.gbufferValidationOutputDescriptor = VK_NULL_HANDLE;
+            m_lastKnownGBufferValidationView = VK_NULL_HANDLE;
+        }
+    }
+
     VkDevice m_device = VK_NULL_HANDLE;
     ImGuiContext* m_context = nullptr;
     RenderTexture m_gameView;
@@ -887,6 +946,17 @@ private:
     // "resize on demand" methods.
     ComputeBlurValidation m_blurValidation;
     VkImageView m_lastKnownBlurredView = VK_NULL_HANDLE;
+
+    // task_manager/mrt-1 campaign, PHASE4 - the campaign's own first real
+    // MRT consumer (see GBufferValidation.h). m_lastKnownGBufferValidationView
+    // mirrors m_lastKnownBlurredView's own identical role immediately
+    // above, tracking whichever VkImageView m_ctx.gbufferValidationOutputDescriptor
+    // was last created against (the "visualized"/copy-of-albedo output
+    // only - the albedo/normal outputs themselves have no ImGui preview of
+    // their own, see this campaign's own PHASE4_COMPLETION_REPORT.md for
+    // the reasoning).
+    GBufferValidation m_gbufferValidation;
+    VkImageView m_lastKnownGBufferValidationView = VK_NULL_HANDLE;
 
     // The Scene view's own, independently-orbitable camera (see
     // EditorCamera.h) - updated once per frame by Panels/ScenePanel.cpp

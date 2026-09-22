@@ -29,6 +29,16 @@ public:
         return std::nullopt;
     }
     void FinalizeBlurValidationForSampling(VkCommandBuffer /*cmd*/) override { }
+
+    // task_manager/mrt-1 campaign, PHASE4 - a release build never declares
+    // this pass at all, mirroring AddBlurValidationPass()/
+    // FinalizeBlurValidationForSampling() above exactly.
+    std::optional<GBufferValidationHandles> AddGBufferValidationPass(
+        rg::RenderGraphBuilder& /*builder*/, Renderer& /*renderer*/, VkExtent2D /*sceneExtent*/) override
+    {
+        return std::nullopt;
+    }
+    void FinalizeGBufferValidationForSampling(VkCommandBuffer /*cmd*/) override { }
     void RenderSceneGrid(Renderer& /*renderer*/, VkCommandBuffer /*cmd*/, const Mat4& /*sceneViewProjection*/) override { }
     void BuildUI(Game& /*game*/, Renderer& /*renderer*/, const rg::RenderGraph& /*renderGraph*/,
         AtmosphereSettings& /*atmosphereSettings*/, AtmosphereLutRenderer& /*atmosphereLutRenderer*/) override

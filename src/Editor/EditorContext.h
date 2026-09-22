@@ -191,6 +191,33 @@ struct EditorContext {
     // to sceneViewDescriptor whenever this is still null.
     VkDescriptorSet blurredSceneOutputDescriptor = VK_NULL_HANDLE;
 
+    // task_manager/mrt-1 campaign (Multi-Render-Target / G-Buffer
+    // support), PHASE4 (PHASE4_GBUFFER_VALIDATION_PASS_AND_SHADER.md) - the
+    // "Scene" panel's own small, permanent "Show GBuffer Validation
+    // (debug)" checkbox (Panels/ScenePanel.cpp) - when true, "Scene"
+    // displays gbufferValidationOutputDescriptor below instead of
+    // sceneViewDescriptor above. Read by
+    // ImGuiEditorLayer::AddGBufferValidationPass()/
+    // FinalizeGBufferValidationForSampling() to decide whether to even
+    // declare the GBuffer Validation pass at all this frame. Deliberately
+    // a SEPARATE field from showBlurredSceneOutput above (never reusing
+    // it) - so the two debug tools stay independently toggleable.
+    bool showGBufferValidationOutput = false;
+
+    // The ImGui-side descriptor for GBufferValidation's own persistent
+    // "visualized" (copy-of-albedo) output RenderTexture (see
+    // GBufferValidation.h) - lazily (re)created by
+    // ImGuiEditorLayer::BuildUI(), same "created on first use, recreated
+    // after a resize" convention as blurredSceneOutputDescriptor above.
+    // VK_NULL_HANDLE until the GBuffer Validation pass has run at least
+    // once - Panels/ScenePanel.cpp falls back to sceneViewDescriptor
+    // whenever this is still null. The pass's own real albedo/normal
+    // outputs have no dedicated ImGui preview of their own - they are
+    // independently inspectable via GET /get_texture/GET /list_textures
+    // (and the Render Graph panel's own texture list) instead, per this
+    // phase's own completion report.
+    VkDescriptorSet gbufferValidationOutputDescriptor = VK_NULL_HANDLE;
+
     // frame-debugger-1 campaign (task_manager/frame-debugger-1/
     // PHASE3_EDITOR_PAUSE_STEP_STATE_AND_TOOLBAR_UI.md) - true whenever the
     // user has toggled gameplay simulation paused via the toolbar's
