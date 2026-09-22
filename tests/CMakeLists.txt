@@ -457,6 +457,30 @@
 #                                            RenderSystem::Draw() itself is
 #                                            Tier 2 (needs a live Renderer),
 #                                            see the note below.
+#   - Game/RenderBatchingTests.cpp           - GPU-Driven Frustum Culling +
+#                                            Indirect Draw campaign
+#                                            (render-pass-5), PHASE4
+#                                            (task_manager/render-pass-5/
+#                                            PHASE4_PER_BATCH_RESOURCE_MANAGEMENT_AND_BATCHING.md)
+#                                            - RenderSystem's pure batching/
+#                                            grouping logic (src/Game/
+#                                            RenderBatching.h/.cpp):
+#                                            GroupDrawCommandsByMeshAndPipeline()
+#                                            (empty input, all-same-group
+#                                            input, several interleaved
+#                                            groups with first-seen order
+#                                            preservation, a same-index-
+#                                            different-generation handle
+#                                            treated as a genuinely
+#                                            different group) and
+#                                            IsGpuDrivenEligible() (every
+#                                            true/false combination of its 4
+#                                            boolean-ish inputs, including the
+#                                            exact boundary at
+#                                            kMinInstancesForGpuDrivenBatch).
+#                                            No Renderer/live GPU involved at
+#                                            all - fed entirely with
+#                                            hand-built DrawCommand values.
 #   - Editor/EditorCameraTests.cpp           - EditorCamera's pure pan/
 #                                            rotate/dolly math (see
 #                                            src/Editor/EditorCamera.h) -
@@ -2037,6 +2061,7 @@ set(GTE_TEST_SOURCES
     ECS/Reflection/ComponentTypeRegistryTests.cpp
     ECS/Reflection/BuiltinComponentReflectionTests.cpp
     Game/RenderSystemTests.cpp
+    Game/RenderBatchingTests.cpp
     Game/GameEntityCommandsTests.cpp
     Game/GameUpdateFreezeGatingTests.cpp
     Game/EntityInstantiatorTests.cpp

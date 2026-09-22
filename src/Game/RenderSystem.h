@@ -1,10 +1,13 @@
 #pragma once
 
+#include "DrawCommand.h"
+#include "RenderBatching.h"
 #include "ECS/Components/Camera.h"
 #include "ECS/Components/MeshRenderer.h"
 #include "ECS/Components/Transform.h"
 #include "ECS/Registry.h"
 #include "Math/Mat4.h"
+#include "Renderer/Culling/GpuDrivenBatchCache.h"
 #include "Renderer/MaterialTexture.h"
 #include "Renderer/Mesh.h"
 #include "Renderer/MeshHandle.h"
@@ -15,6 +18,7 @@
 
 #include <cstddef>
 #include <optional>
+#include <unordered_set>
 #include <vector>
 
 namespace gte {
@@ -32,24 +36,24 @@ class Renderer;
 // needs a POINTER to it.
 class FrameDebuggerCaptureContext;
 
-// One queued draw call's worth of PLAIN data, extracted from the ECS world -
-// a MeshHandle/PipelineHandle/TextureHandle triple (never a Mesh&/Pipeline*/
-// MaterialTexture* - see ECS/Components/MeshRenderer.h) plus the world
-// matrix to draw it with. Carries no live Renderer/Vulkan state at all,
-// which is what keeps RenderSystem::CollectRenderables() callable with
-// nothing but a Registry - no live GPU device, no Renderer, no ResourcePool
-// needed - see AGENTS.md ("Testability & Regression Safety").
-struct DrawCommand {
-    Entity entity; // frame-debugger-6 campaign, PHASE3 - the ECS entity this
-                    // draw call came from, so a capture consumer (see
-                    // FrameDebuggerCaptureContext::RecordEntityDraw()) can
-                    // attribute this exact draw back to a real, selectable
-                    // entity (its own Name, if any) rather than only an
-                    // anonymous mesh/pipeline/texture triple.
+// GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+// PHASE4 - one eligible batch's own frame-local summary, returned by
+// RenderSystem::CollectGpuDrivenBatches() below. Deliberately NOT stored
+// inside GpuDrivenBatchCache itself (that class owns only PERSISTENT GPU
+// buffers, surviving across frames, keyed by GpuDrivenBatchKey alone) - this
+// struct is a fresh, frame-scoped snapshot, rebuilt on every call, carrying
+// exactly what PHASE5's future render-graph pass-declaration code needs:
+// which (MeshHandle, PipelineHandle) batch this is, how many instances it
+// has THIS frame (see GpuDrivenBatchCache::EnsureCapacity()'s own doc
+// comment for why this must never be confused with the cache's own,
+// monotonically-growing buffer capacity), and every original DrawCommand it
+// replaces (so a caller can build a batchedEntities exclusion set from each
+// one's own `entity` field).
+struct GpuDrivenBatchFrameEntry {
     MeshHandle mesh;
     PipelineHandle pipeline;
-    TextureHandle texture; // kInvalidTextureHandle (the default) means "no material texture" - see MeshRenderer::texture.
-    Mat4 model = Mat4::Identity(); // Mat4's own default ctor is all-zero, NOT identity - see Math/Mat4.h.
+    std::size_t instanceCount = 0;
+    std::vector<DrawCommand> commands;
 };
 
 // The "middleman" between the ECS world and Renderer (see AGENTS.md, Clean
@@ -189,6 +193,45 @@ public:
     // actually owns the real loop/cutoff logic.
     void Draw(Registry& registry, Renderer& renderer, const Mat4& viewProjection,
         FrameDebuggerCaptureContext* capture = nullptr, std::optional<std::size_t> maxDrawCount = std::nullopt);
+
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE4 (task_manager/render-pass-5/
+    // PHASE4_PER_BATCH_RESOURCE_MANAGEMENT_AND_BATCHING.md) - groups this
+    // frame's DrawCommands by (MeshHandle, PipelineHandle)
+    // (GroupDrawCommandsByMeshAndPipeline(), RenderBatching.h), resolves
+    // each group's real Mesh&/Pipeline& via this RenderSystem's own pools
+    // (exactly like Draw() above already does), applies
+    // IsGpuDrivenEligible() (Locked Design Decision 7, PHASE0), and for
+    // every eligible group repacks this frame's live Transform/Mesh-bounds
+    // data into `cache`'s persistent per-batch GPU buffers
+    // (GpuDrivenBatchCache::EnsureCapacity()/PackThisFrame()).
+    //
+    // `gpuSkinnedOutputBuffersThisFrame` - Locked Design Decision 7(d)'s
+    // real cross-reference mechanism (confirmed via `ask_questions` during
+    // this phase - see PHASE4_COMPLETION_REPORT.md): the exact
+    // AnimationSystem::GpuSkinningDispatchRequest::outputBuffer VkBuffer
+    // identity of every Mesh currently receiving a real GPU-skinning
+    // dispatch THIS frame (see Game::CollectGpuSkinningDispatchRequests()) -
+    // that request struct carries NO MeshHandle at all, so this set is built
+    // by the CALLER (a Game/Application-level concern - RenderSystem itself
+    // must never depend on AnimationSystem/Game, see AGENTS.md's Clean
+    // Architecture rule) and compared HERE against each candidate group's
+    // own resolved Mesh::VertexBuffer() (which returns the exact same
+    // VkBuffer type/identity - a GPU-skinned model's Mesh IS built directly
+    // from that same output buffer, see GpuSkinningRigCache.h). Left at its
+    // default (empty) by every call site that never deals with GPU-skinned
+    // models at all - always safe, since an empty set can never match any
+    // real Mesh's VertexBuffer().
+    //
+    // Builds NO render-graph pass declarations and issues NO
+    // dispatch/indirect draw of any kind (PHASE5's job). Does NOT modify
+    // Draw()'s own existing per-entity loop behavior in any way - every
+    // DrawCommand, including ones a caller later excludes via a future
+    // batchedEntities-style parameter (PHASE5), is still drawn by Draw()
+    // exactly as before until PHASE5 actually wires that exclusion in.
+    std::vector<GpuDrivenBatchFrameEntry> CollectGpuDrivenBatches(Registry& registry, Renderer& renderer,
+        GpuDrivenBatchCache& cache, const std::unordered_set<VkBuffer>& gpuSkinnedOutputBuffersThisFrame = {},
+        std::size_t minInstancesForGpuDrivenBatch = kMinInstancesForGpuDrivenBatch);
 
 private:
     ResourcePool<Mesh, MeshHandle> m_meshes;

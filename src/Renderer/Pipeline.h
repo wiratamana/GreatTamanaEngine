@@ -193,8 +193,20 @@ public:
     VkPipelineLayout Layout() const noexcept { return m_layout; }
 
     // See `debugName` above - empty string when this Pipeline was built
-    // with no debug name at all.
     const std::string& DebugName() const noexcept { return m_debugName; }
+
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE4 (task_manager/render-pass-5/
+    // PHASE4_PER_BATCH_RESOURCE_MANAGEMENT_AND_BATCHING.md) - which
+    // VertexLayout this Pipeline was actually built with (see the
+    // constructor's own `vertexLayout` parameter above). Needed so
+    // RenderSystem::CollectGpuDrivenBatches() can check PHASE0's Locked
+    // Design Decision 7(c) ("a group's shared Pipeline was built with
+    // EXACTLY VertexLayout::PositionNormal") without this campaign
+    // inventing a second, parallel place to track a fact this class already
+    // knows internally - mirrors DebugName() above's own "small, additive,
+    // purely descriptive accessor" precedent.
+    VertexLayout VertexLayoutKind() const noexcept { return m_vertexLayout; }
 
 private:
     void Destroy() noexcept;
@@ -203,6 +215,7 @@ private:
     VkPipelineLayout m_layout = VK_NULL_HANDLE;
     VkPipeline m_pipeline = VK_NULL_HANDLE;
     std::string m_debugName;
+    VertexLayout m_vertexLayout = VertexLayout::PositionColor;
 };
 
 } // namespace gte

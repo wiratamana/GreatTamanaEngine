@@ -443,6 +443,8 @@ add_library(gte_core STATIC
     src/Renderer/Culling/CullingTypes.cpp
     src/Renderer/Culling/CullingPipelines.h
     src/Renderer/Culling/CullingPipelines.cpp
+    src/Renderer/Culling/GpuDrivenBatchCache.h
+    src/Renderer/Culling/GpuDrivenBatchCache.cpp
     src/Renderer/IndirectDrawTypes.h
     src/Renderer/Atmosphere/AtmosphereTypes.h
     src/Renderer/Atmosphere/AtmosphereParameters.h
@@ -542,6 +544,9 @@ add_library(gte_core STATIC
     src/Game/Game.cpp
     src/Game/Game.h
     src/Game/EngineCommandResults.h
+    src/Game/DrawCommand.h
+    src/Game/RenderBatching.h
+    src/Game/RenderBatching.cpp
     src/Game/RenderSystem.cpp
     src/Game/RenderSystem.h
     src/Profiling/ProfilingTypes.h

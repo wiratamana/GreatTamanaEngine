@@ -41,6 +41,7 @@ Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFo
     VkDescriptorSetLayout materialSetLayout, const char* debugName, VkDescriptorSetLayout instanceBufferSetLayout)
     : m_device(device)
     , m_debugName(debugName != nullptr ? debugName : std::string())
+    , m_vertexLayout(vertexLayout)
 {
     // Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE3 - the
     // 8-attachment cap matches gte::rg::kMaxColorAttachments
@@ -288,6 +289,7 @@ Pipeline::Pipeline(Pipeline&& other) noexcept
     , m_layout(std::exchange(other.m_layout, VK_NULL_HANDLE))
     , m_pipeline(std::exchange(other.m_pipeline, VK_NULL_HANDLE))
     , m_debugName(std::move(other.m_debugName))
+    , m_vertexLayout(other.m_vertexLayout)
 {
 }
 
@@ -299,6 +301,7 @@ Pipeline& Pipeline::operator=(Pipeline&& other) noexcept
         m_layout = std::exchange(other.m_layout, VK_NULL_HANDLE);
         m_pipeline = std::exchange(other.m_pipeline, VK_NULL_HANDLE);
         m_debugName = std::move(other.m_debugName);
+        m_vertexLayout = other.m_vertexLayout;
     }
     return *this;
 }

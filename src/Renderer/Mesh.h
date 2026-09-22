@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Buffer.h"
+#include "Culling/CullingTypes.h" // AABB - render-pass-5 campaign, PHASE4 (see Mesh::LocalBounds() below).
 
 #include <cstddef>
 #include <cstdint>
@@ -132,6 +133,33 @@ public:
     // per frame, not once per Mesh/part.
     void UpdateVertexData(const void* data, std::size_t size) { m_vertexBuffer->Upload(data, size); }
 
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE4 (task_manager/render-pass-5/
+    // PHASE4_PER_BATCH_RESOURCE_MANAGEMENT_AND_BATCHING.md, PHASE0's Locked
+    // Design Decision 3) - the local-space AABB describing this Mesh's own
+    // GEOMETRY, shared by every instance drawn with this Mesh (never
+    // per-entity, which is why it lives HERE and not on MeshRenderer - see
+    // Locked Design Decision 3's own reasoning). Computed ONCE, at load
+    // time, by whichever code path actually builds this Mesh from real
+    // CPU-side vertex-position data (see MeshAssetGpuCatalog.cpp's
+    // untextured/textured submesh creation, which calls
+    // ComputeLocalAABB()/SetLocalBounds() immediately after building the
+    // Mesh) - never mutated afterward. std::nullopt (the default) for a
+    // Mesh whose bounds were never computed - e.g. every
+    // PrimitiveMeshGenerator-built shape (never GPU-driven-batching-
+    // eligible anyway - PHASE0's Locked Design Decision 6/7 - since those
+    // shapes are non-indexed) or a Mesh built via a code path this campaign
+    // didn't touch. Consumed by RenderSystem::CollectGpuDrivenBatches()
+    // (src/Game/RenderSystem.cpp), which treats a missing value as an
+    // all-zero, degenerate AABB via value_or(AABB{}) - safe (never crashes),
+    // though a batch whose Mesh never got real bounds computed would then
+    // be culled/kept based on a meaningless zero-sized box; every real,
+    // currently-eligible content path (see IsGpuDrivenEligible()) computes
+    // real bounds, so this fallback is a defensive default, not an expected
+    // steady-state case.
+    void SetLocalBounds(const AABB& bounds) noexcept { m_localBounds = bounds; }
+    const std::optional<AABB>& LocalBounds() const noexcept { return m_localBounds; }
+
 private:
     std::shared_ptr<Buffer> m_vertexBuffer;
     std::uint32_t m_vertexCount = 0;
@@ -145,6 +173,9 @@ private:
     // vertex buffer is (see this class's own header comment).
     std::optional<Buffer> m_indexBuffer;
     std::uint32_t m_indexCount = 0;
+
+    // See SetLocalBounds()/LocalBounds() above.
+    std::optional<AABB> m_localBounds;
 };
 
 } // namespace gte

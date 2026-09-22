@@ -7,6 +7,7 @@
 #include "../../Assets/MeshFile.h"
 #include "../../Assets/RigFile.h"
 #include "../../Renderer/MeshVertex.h"
+#include "../../Renderer/Culling/CullingTypes.h" // ComputeLocalAABB() - render-pass-5 campaign, PHASE4.
 #include "../../Renderer/Renderer.h"
 #include "MeshMaterialPartitioner.h"
 #include "MeshVertexPacking.h"
@@ -30,6 +31,29 @@ std::string PathToUtf8(const std::filesystem::path& path)
 {
     const std::u8string u8 = path.u8string();
     return std::string(reinterpret_cast<const char*>(u8.data()), u8.size());
+}
+
+// GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+// PHASE4 (task_manager/render-pass-5/
+// PHASE4_PER_BATCH_RESOURCE_MANAGEMENT_AND_BATCHING.md, PHASE0's Locked
+// Design Decision 3) - computes a TIGHT local-space AABB for one submesh
+// (untextured or textured), i.e. only the subset of `positions` this
+// submesh's own `indices` actually reference - not the whole model's
+// vertex array, which `positions` itself always is (every submesh's
+// `indices` are plain indices into that SAME shared array - see
+// MeshData.h). An out-of-range index (should never happen for a
+// successfully-decoded MeshData, but this is CPU-side data read from disk)
+// is skipped rather than read out of bounds.
+AABB ComputeSubsetLocalAABB(const std::vector<Vec3>& positions, const std::vector<std::uint32_t>& indices)
+{
+    std::vector<Vec3> referenced;
+    referenced.reserve(indices.size());
+    for (const std::uint32_t index : indices) {
+        if (index < positions.size()) {
+            referenced.push_back(positions[index]);
+        }
+    }
+    return ComputeLocalAABB(referenced);
 }
 
 } // namespace
@@ -148,6 +172,13 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
                   static_cast<std::uint32_t>(vertices.size()), untexturedIndices.data(),
                   untexturedIndices.size() * sizeof(std::uint32_t),
                   static_cast<std::uint32_t>(untexturedIndices.size()), "ImportedMesh");
+        // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+        // PHASE4 - real, tight local-space bounds for THIS submesh, computed
+        // once here at load time (Locked Design Decision 3) - the one real
+        // content path RenderSystem::CollectGpuDrivenBatches()'s eligibility
+        // rule can actually select today (untextured, PositionNormal, and -
+        // for a non-skinned model - indexed - see IsGpuDrivenEligible()).
+        gpuMesh.SetLocalBounds(ComputeSubsetLocalAABB(mesh->positions, untexturedIndices));
         const MeshHandle handle = renderSystem.RegisterMesh(std::move(gpuMesh));
         // `indices` is only worth keeping around for a SKINNED model - see
         // MeshAssetPart::indices' own doc comment (MeshAssetGpuCatalog.h) -
@@ -192,6 +223,14 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
             Mesh gpuMesh = renderer.CreateMeshFromSharedVertexBuffer(sharedTexturedVertexBuffer, texturedVertexCount,
                 sliceIndices.data(), sliceIndices.size() * sizeof(std::uint32_t),
                 static_cast<std::uint32_t>(sliceIndices.size()), "ImportedTexturedMesh");
+            // GPU-Driven Frustum Culling + Indirect Draw campaign
+            // (render-pass-5), PHASE4 - real, tight local-space bounds for
+            // THIS textured submesh (see the untextured branch above's own
+            // comment for the full reasoning). Textured (PositionNormalUv)
+            // batches are out of scope for this campaign (PHASE0's Locked
+            // Design Decision 8) - computed anyway for consistency/future
+            // use, at negligible one-time load cost.
+            gpuMesh.SetLocalBounds(ComputeSubsetLocalAABB(mesh->positions, sliceIndices));
             const MeshHandle handle = renderSystem.RegisterMesh(std::move(gpuMesh));
             MeshAssetPart part{ handle, slice.texture, slice.name };
             if (skinned) {

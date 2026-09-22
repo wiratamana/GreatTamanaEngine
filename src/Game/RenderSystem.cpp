@@ -172,4 +172,66 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& view
     }
 }
 
+// GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+// PHASE4 - see this method's own doc comment in RenderSystem.h.
+std::vector<GpuDrivenBatchFrameEntry> RenderSystem::CollectGpuDrivenBatches(Registry& registry, Renderer& renderer,
+    GpuDrivenBatchCache& cache, const std::unordered_set<VkBuffer>& gpuSkinnedOutputBuffersThisFrame,
+    std::size_t minInstancesForGpuDrivenBatch)
+{
+    GTE_PROFILE_SCOPE("RenderSystem::CollectGpuDrivenBatches");
+
+    std::vector<GpuDrivenBatchFrameEntry> result;
+
+    const std::vector<DrawCommand> commands = CollectRenderables(registry);
+    const std::vector<RenderBatchGroup> groups = GroupDrawCommandsByMeshAndPipeline(commands);
+
+    for (const RenderBatchGroup& group : groups) {
+        const Mesh* mesh = m_meshes.TryGet(group.mesh);
+        const Pipeline* pipeline = m_pipelines.TryGet(group.pipeline);
+        if (mesh == nullptr || pipeline == nullptr) {
+            continue; // Unresolvable handle - never eligible, mirrors Draw()'s own "skip, never crash" convention.
+        }
+
+        // Locked Design Decision 7(d), PHASE0 - see this method's own doc
+        // comment in RenderSystem.h for the full cross-reference reasoning.
+        const bool isGpuSkinned = gpuSkinnedOutputBuffersThisFrame.contains(mesh->VertexBuffer());
+
+        if (!IsGpuDrivenEligible(group, mesh->HasIndexBuffer(), pipeline->VertexLayoutKind(), isGpuSkinned,
+                minInstancesForGpuDrivenBatch)) {
+            continue;
+        }
+
+        const GpuDrivenBatchKey key{ group.mesh, group.pipeline };
+        const std::size_t instanceCount = group.commands.size();
+
+        cache.EnsureCapacity(renderer, key, instanceCount);
+
+        // Every instance in this batch shares the exact same Mesh, so its
+        // LOCAL bounds are computed once here and re-transformed per
+        // instance below - mirrors this frame's own per-entity Transform
+        // resolution cost exactly (TransformAABB() is as cheap as the
+        // world-matrix multiply CollectRenderables() already did).
+        const AABB localBounds = mesh->LocalBounds().value_or(AABB{});
+
+        std::vector<GpuCullingInstanceInput> instances;
+        instances.reserve(instanceCount);
+        for (const DrawCommand& command : group.commands) {
+            const AABB worldBounds = TransformAABB(localBounds, command.model);
+            instances.push_back(PackCullingInstanceInput(
+                command.model, worldBounds, /*firstIndex=*/0, mesh->IndexCount(), /*vertexOffset=*/0));
+        }
+
+        cache.PackThisFrame(key, instances);
+
+        GpuDrivenBatchFrameEntry entry;
+        entry.mesh = group.mesh;
+        entry.pipeline = group.pipeline;
+        entry.instanceCount = instanceCount;
+        entry.commands = group.commands;
+        result.push_back(std::move(entry));
+    }
+
+    return result;
+}
+
 } // namespace gte
