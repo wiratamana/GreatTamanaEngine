@@ -236,12 +236,12 @@ render graph, for real, in production, for the Game View only:
   per-entity `Renderer::Submit()` path, forever. Nothing in PHASE4's own
   per-batch cache design needs to change as a result (it is correctly keyed
   by `(MeshHandle, PipelineHandle)` alone, with no view dimension, precisely
-  BECAUSE only one view — Game — ever touches it) — but this should be
-  recorded as an explicit Locked Design Decision in `PHASE0_MASTER_STRATEGY.md`
-  during the upcoming whole-campaign review (see this phase's own eventual
-  `PHASE5_STRATEGY_DOUBLE_CHECK_REPORT.md`/completion report for the
-  cross-reference) since PHASE0 currently says nothing about Scene View at
-  all.
+  BECAUSE only one view — Game — ever touches it) — **now recorded verbatim
+  as `PHASE0_MASTER_STRATEGY.md`'s own Locked Design Decision 11** (added
+  during the whole-campaign second-iteration review this document itself
+  anticipated needing — see that decision for the permanent, campaign-wide
+  record of this scope limitation; this document remains the place that
+  explains WHY it's implemented the way it is).
 - `RenderSystem::Draw()` (`RenderSystem.cpp`, line ~92/~98, two overloads)
   currently iterates EVERY `DrawCommand` from `CollectRenderables()`
   unconditionally (`consideredCount`/`maxDrawCount` early-exit aside — an

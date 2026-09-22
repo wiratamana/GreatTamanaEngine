@@ -54,4 +54,59 @@ const GpuDrivenBatchCache::Entry* GpuDrivenBatchCache::TryGet(const GpuDrivenBat
     return found != m_entries.end() ? &found->second : nullptr;
 }
 
+// GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5), PHASE5 -
+// see this method's own doc comment in GpuDrivenBatchCache.h.
+void GpuDrivenBatchCache::EnsureDescriptorSetsWritten(Renderer& renderer, const GpuDrivenBatchKey& key)
+{
+    const auto found = m_entries.find(key);
+    if (found == m_entries.end()) {
+        return; // EnsureCapacity() was never called for this key this frame - degrade gracefully, never crash.
+    }
+    Entry& entry = found->second;
+
+    // Idempotent/safe to call every frame - see CullingPipelines::
+    // EnsureInitialized()'s own doc comment.
+    m_pipelines.EnsureInitialized(renderer);
+
+    const VkDevice device = renderer.GetVulkanContextInfo().device;
+
+    if (entry.cullingDescriptorSet == VK_NULL_HANDLE) {
+        entry.cullingDescriptorSet = renderer.AllocateComputeDescriptorSet(m_pipelines.DescriptorSetLayout());
+    }
+    ComputeDescriptorSet(entry.cullingDescriptorSet)
+        .Rewrite(device,
+            {
+                ComputeDescriptorWrite::StorageBuffer(0, entry.inputBuffer.Native()),
+                ComputeDescriptorWrite::StorageBuffer(1, entry.indirectCommandBuffer.Native()),
+                ComputeDescriptorWrite::StorageBuffer(2, entry.countBuffer.Native()),
+            });
+
+    if (entry.instanceBufferDescriptorSet == VK_NULL_HANDLE) {
+        entry.instanceBufferDescriptorSet =
+            renderer.AllocateComputeDescriptorSet(renderer.InstanceBufferDescriptorSetLayout());
+    }
+    ComputeDescriptorSet(entry.instanceBufferDescriptorSet)
+        .Rewrite(device,
+            {
+                ComputeDescriptorWrite::StorageBuffer(0, entry.inputBuffer.Native()),
+            });
+}
+
+// GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5), PHASE5 -
+// see this method's own doc comment in GpuDrivenBatchCache.h.
+const Pipeline& GpuDrivenBatchCache::ResolveInstancedPipeline(Renderer& renderer, PipelineHandle originalHandle)
+{
+    const auto found = m_instancedPipelines.find(originalHandle);
+    if (found != m_instancedPipelines.end()) {
+        return found->second;
+    }
+
+    Pipeline instanced = renderer.CreatePipeline("shaders/MeshInstanced.vert.spv", "shaders/Mesh.frag.spv",
+        VertexLayout::PositionNormalInstanced, /*useMaterialTexture=*/false,
+        "MeshInstanced.vert/Mesh.frag (PositionNormalInstanced)", /*useInstanceBuffer=*/true);
+    const auto [it, inserted] = m_instancedPipelines.emplace(originalHandle, std::move(instanced));
+    (void)inserted;
+    return it->second;
+}
+
 } // namespace gte

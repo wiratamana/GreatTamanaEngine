@@ -91,13 +91,16 @@ Mat4 RenderSystem::ResolveActiveCameraViewProjection(Registry& registry, float a
 }
 
 void RenderSystem::Draw(Registry& registry, Renderer& renderer, float aspectWidthOverHeight,
-    FrameDebuggerCaptureContext* capture, std::optional<std::size_t> maxDrawCount)
+    FrameDebuggerCaptureContext* capture, std::optional<std::size_t> maxDrawCount,
+    const std::unordered_set<Entity>& batchedEntities)
 {
-    Draw(registry, renderer, ResolveActiveCameraViewProjection(registry, aspectWidthOverHeight), capture, maxDrawCount);
+    Draw(registry, renderer, ResolveActiveCameraViewProjection(registry, aspectWidthOverHeight), capture, maxDrawCount,
+        batchedEntities);
 }
 
 void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& viewProjection,
-    FrameDebuggerCaptureContext* capture, std::optional<std::size_t> maxDrawCount)
+    FrameDebuggerCaptureContext* capture, std::optional<std::size_t> maxDrawCount,
+    const std::unordered_set<Entity>& batchedEntities)
 {
     GTE_PROFILE_SCOPE("RenderSystem::Draw");
 
@@ -117,6 +120,16 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& view
             break;
         }
         ++consideredCount;
+
+        // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+        // PHASE5 - a batched entity is skipped by this per-entity path (its
+        // own indirect-draw pass draws it instead this frame) but STILL
+        // counts toward consideredCount above, matching maxDrawCount's own
+        // "iteration count, not resolved-draw count" contract - see this
+        // method's own header doc comment (RenderSystem.h).
+        if (batchedEntities.contains(command.entity)) {
+            continue;
+        }
 
         const Mesh* mesh = m_meshes.TryGet(command.mesh);
         const Pipeline* pipeline = m_pipelines.TryGet(command.pipeline);
@@ -222,6 +235,19 @@ std::vector<GpuDrivenBatchFrameEntry> RenderSystem::CollectGpuDrivenBatches(Regi
         }
 
         cache.PackThisFrame(key, instances);
+
+        // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+        // PHASE5 - (re)allocates/rewrites this batch's two persistent
+        // descriptor sets (culling + instance-buffer) so they always point
+        // at whatever buffers `cache` currently holds for `key` this frame -
+        // a no-op cost-wise on a frame where EnsureCapacity() above didn't
+        // reallocate (Rewrite() is cheap - see ComputeDescriptorSet's own
+        // "safe/expected every frame" convention). Also lazily
+        // EnsureInitialized()s `cache`'s own shared CullingPipelines the
+        // first time any batch is ever collected this session - see
+        // GpuDrivenBatchCache.h's own doc comment on why PHASE4 deliberately
+        // never did this itself.
+        cache.EnsureDescriptorSetsWritten(renderer, key);
 
         GpuDrivenBatchFrameEntry entry;
         entry.mesh = group.mesh;

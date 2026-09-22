@@ -35,7 +35,9 @@
 #include "CullingPipelines.h"
 #include "CullingTypes.h"
 #include "../Buffer.h"
+#include "../ComputeDescriptorSet.h"
 #include "../MeshHandle.h"
+#include "../Pipeline.h"
 #include "../PipelineHandle.h"
 
 #include <cstddef>
@@ -142,6 +144,25 @@ public:
         Buffer indirectCommandBuffer;
         Buffer countBuffer;
         std::size_t capacity = 0; // Instances currently allocated for - see EnsureCapacity().
+
+        // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+        // PHASE5 (task_manager/render-pass-5/
+        // PHASE5_RENDERGRAPH_PASS_WIRING_AND_PRODUCTION_CUTOVER.md) - this
+        // batch's own two persistent descriptor sets, allocated once (lazily,
+        // on first use) and RE-WRITTEN (never reallocated) by
+        // EnsureDescriptorSetsWritten() below every time the buffers above
+        // are (re)created - VK_NULL_HANDLE until the first
+        // EnsureDescriptorSetsWritten() call for this key.
+        //   - cullingDescriptorSet: bound against
+        //     CullingPipelines::DescriptorSetLayout() (3 storage buffers:
+        //     input/indirect-command/count) - used by the culling compute
+        //     pass.
+        //   - instanceBufferDescriptorSet: bound against
+        //     Renderer::InstanceBufferDescriptorSetLayout() (1 storage
+        //     buffer: input only) - used by the indirect-draw graphics
+        //     pass's own Shaders/MeshInstanced.vert.
+        VkDescriptorSet cullingDescriptorSet = VK_NULL_HANDLE;
+        VkDescriptorSet instanceBufferDescriptorSet = VK_NULL_HANDLE;
     };
 
     // Reallocates (grows only - never shrinks, and never reallocates at all
@@ -187,9 +208,80 @@ public:
     // time it declares a real culling compute pass.
     CullingPipelines& Pipelines() noexcept { return m_pipelines; }
 
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE5 - (re)allocates (once, lazily - never freed/rebuilt after that,
+    // mirroring the buffers' own "created once" shape) and RE-WRITES (every
+    // call - cheap, matches ComputeDescriptorSet's own documented
+    // "safe/expected every frame" convention) this key's two persistent
+    // descriptor sets (Entry::cullingDescriptorSet/instanceBufferDescriptorSet
+    // above) against whatever buffers this key's Entry CURRENTLY holds.
+    // Idempotently EnsureInitialized()s this class's own shared
+    // CullingPipelines (m_pipelines) first, so the very first call across
+    // the whole session is what actually compiles/loads
+    // Shaders/FrustumCull.comp.spv - mirrors CullingPipelines::
+    // EnsureInitialized()'s own "safe to call every frame" contract.
+    //
+    // Must be called AFTER EnsureCapacity()/PackThisFrame() for this key
+    // this frame (needs the entry's real, current buffers) - a no-op
+    // (returns immediately, degrades gracefully) if EnsureCapacity() was
+    // never called for this exact key.
+    void EnsureDescriptorSetsWritten(Renderer& renderer, const GpuDrivenBatchKey& key);
+
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE5 (Section 3.2, PHASE5_RENDERGRAPH_PASS_WIRING_AND_PRODUCTION_CUTOVER.md)
+    // - returns (building lazily, once per distinct `originalHandle`, then
+    // cached forever) the shared VertexLayout::PositionNormalInstanced
+    // sibling Pipeline for a batch's own ORIGINAL Pipeline handle.
+    //
+    // Hardcodes "shaders/MeshInstanced.vert.spv"/"shaders/Mesh.frag.spv" -
+    // confirmed by direct read of src/Game/Instantiation/
+    // MeshAssetGpuCatalog.cpp (this campaign's own PHASE0 Locked Design
+    // Decision 7(c) restricts eligibility to VertexLayout::PositionNormal
+    // groups, and that file's own EnsureMeshPipeline() is the ONLY real
+    // content path that ever builds a Pipeline with that exact layout today
+    // - always this same "shaders/Mesh.vert.spv"/"shaders/Mesh.frag.spv"
+    // pair) - so there is exactly one real shader pair to mirror, never a
+    // more generic "recover the original pipeline's own construction
+    // parameters" mechanism (`Pipeline` itself stores no shader-path
+    // information at all - see Pipeline.h). MeshInstanced.vert reuses
+    // Mesh.frag UNCHANGED (PHASE2).
+    //
+    // May throw (propagated from Renderer::CreatePipeline(), e.g. a missing/
+    // corrupt .spv file) - the caller (RenderSystem::CollectGpuDrivenBatches()/
+    // Application) must catch this and exclude the batch from BOTH the
+    // pass-declaration AND Draw()-exclusion decisions together (this
+    // campaign's own "one source of truth" rule - see PHASE5's own Section
+    // 3.1) rather than leave it half-excluded.
+    const Pipeline& ResolveInstancedPipeline(Renderer& renderer, PipelineHandle originalHandle);
+
 private:
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE5 - PipelineHandle carries no operator< of its own (see
+    // PipelineHandle.h) - a small, local, private comparator (mirroring
+    // GpuDrivenBatchKey's own operator< precedent immediately above in this
+    // same file) avoids adding one to that shared, widely-included header
+    // just for this one std::map's sake.
+    struct PipelineHandleLess {
+        bool operator()(const PipelineHandle& a, const PipelineHandle& b) const noexcept
+        {
+            if (a.index != b.index) {
+                return a.index < b.index;
+            }
+            return a.generation < b.generation;
+        }
+    };
+
     std::map<GpuDrivenBatchKey, Entry> m_entries;
     CullingPipelines m_pipelines;
+
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE5 - see ResolveInstancedPipeline() above. Expected to hold a
+    // single entry in practice (only one real Pipeline can ever pass this
+    // campaign's own eligibility rule today - see that method's own doc
+    // comment), but keyed generically by PipelineHandle in case a future
+    // content path adds a second eligible untextured PositionNormal
+    // pipeline.
+    std::map<PipelineHandle, Pipeline, PipelineHandleLess> m_instancedPipelines;
 };
 
 } // namespace gte

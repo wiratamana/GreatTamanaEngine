@@ -369,7 +369,8 @@ void Game::EnsureDefaultCameraExists()
 }
 
 void Game::Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* viewProjectionOverride,
-    FrameDebuggerCaptureContext* frameDebuggerCapture, std::optional<std::size_t> maxDrawCount)
+    FrameDebuggerCaptureContext* frameDebuggerCapture, std::optional<std::size_t> maxDrawCount,
+    const std::unordered_set<Entity>& batchedEntities)
 {
     renderer.Clear(20, 20, 30, 255);
 
@@ -380,14 +381,20 @@ void Game::Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* v
         // NEVER forwarded into this branch (mirrors frameDebuggerCapture's
         // own exact rule, above/Game.h's own doc comment) - this branch is
         // Scene View's own call site, out of scope for the whole Frame
-        // Debugger feature.
+        // Debugger feature. GPU-Driven Frustum Culling + Indirect Draw
+        // campaign (render-pass-5), PHASE5 - batchedEntities is likewise
+        // NEVER forwarded into this branch (Locked Design Decision 11,
+        // PHASE0_MASTER_STRATEGY.md) - Scene View keeps drawing every
+        // entity, batch-eligible or not, through the fully unmodified
+        // per-entity path forever.
         m_renderSystem.Draw(m_registry, renderer, *viewProjectionOverride);
     } else {
         // frameDebuggerCapture is never dereferenced here (or anywhere else
         // in this file) - only forwarded onward, as a bare pointer, exactly
         // like PHASE1's own Step 3.1b requires for a CORE, always-compiled
         // file such as this one. See Game.h's own updated Render() comment.
-        m_renderSystem.Draw(m_registry, renderer, aspectWidthOverHeight, frameDebuggerCapture, maxDrawCount);
+        m_renderSystem.Draw(
+            m_registry, renderer, aspectWidthOverHeight, frameDebuggerCapture, maxDrawCount, batchedEntities);
     }
 }
 

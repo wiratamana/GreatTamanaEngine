@@ -15,6 +15,7 @@
 #include <cstddef>
 #include <optional>
 #include <string>
+#include <unordered_set>
 
 namespace gte {
 
@@ -114,9 +115,21 @@ public:
     // (src/Application/RenderPasses.cpp), each one of its N replay passes
     // requesting a different cutoff (`i + 1`) so pass `i` redraws exactly
     // objects `[0..i]`.
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE5 (task_manager/render-pass-5/
+    // PHASE5_RENDERGRAPH_PASS_WIRING_AND_PRODUCTION_CUTOVER.md, Section 3.3)
+    // - `batchedEntities` (new, defaulted, TRAILING parameter, empty by
+    // default) is forwarded straight through to the float-aspect
+    // RenderSystem::Draw() overload ONLY (the branch taken when
+    // viewProjectionOverride == nullptr) - mirrors `frameDebuggerCapture`'s
+    // own exact rule above. NEVER forwarded into the viewProjectionOverride
+    // branch (Scene View's own call site) - Scene View keeps drawing every
+    // entity, batch-eligible or not, through the fully unmodified per-entity
+    // path forever (Locked Design Decision 11, PHASE0_MASTER_STRATEGY.md).
     void Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* viewProjectionOverride = nullptr,
         FrameDebuggerCaptureContext* frameDebuggerCapture = nullptr,
-        std::optional<std::size_t> maxDrawCount = std::nullopt);
+        std::optional<std::size_t> maxDrawCount = std::nullopt,
+        const std::unordered_set<Entity>& batchedEntities = {});
 
 
     // Read-only-in-spirit access to the ECS World for the Editor's
@@ -127,6 +140,18 @@ public:
     // panel edits component fields (e.g. dragging a Transform's position) in
     // place; Game itself never calls this on its own registry.
     Registry& GetRegistry() noexcept { return m_registry; }
+
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE5 (task_manager/render-pass-5/
+    // PHASE5_RENDERGRAPH_PASS_WIRING_AND_PRODUCTION_CUTOVER.md) - a real,
+    // visible-in-code accessor for Application's new "GpuDrivenBatches"
+    // provider to call RenderSystem::CollectGpuDrivenBatches()/
+    // TryGetMesh()/TryGetPipeline() directly - mirrors GetRegistry()
+    // immediately above's own "Application/Editor observes through a public
+    // accessor" precedent (GetRegistry() itself is already called directly
+    // from Application.cpp today, e.g.
+    // RenderSystem::CollectTransparentRenderables(m_game.GetRegistry())).
+    RenderSystem& GetRenderSystem() noexcept { return m_renderSystem; }
 
     // Editor-facing accessor (PHASE4,
     // task_manager/verlet-integration-1/PHASE4_PARAMETER_AUTHORING_AND_DATA_DRIVEN_CONFIG.md,

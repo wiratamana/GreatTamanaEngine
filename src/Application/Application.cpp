@@ -23,6 +23,17 @@
 // kSkinningLocalSizeX, GpuSkinningPipelines).
 #include "../Renderer/ComputeDispatch.h"
 #include "../Renderer/GpuSkinning/GpuSkinningPipelines.h"
+// GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5), PHASE5
+// (task_manager/render-pass-5/PHASE5_RENDERGRAPH_PASS_WIRING_AND_PRODUCTION_CUTOVER.md)
+// - the new "GpuDrivenBatches" provider below needs CullingPipelines/
+// kCullingLocalSizeX/kCullingPushConstantSize (already transitively
+// reachable via GpuDrivenBatchCache.h, included explicitly here anyway for
+// the same "state exactly what this file needs" discipline the GpuSkinning
+// include comment immediately above already follows) and Plane/AABB/
+// ExtractFrustumPlanes (CullingTypes.h, transitively included by
+// GpuDrivenBatchCache.h too).
+#include "../Renderer/Culling/CullingPipelines.h"
+#include "../Renderer/Culling/GpuDrivenBatchCache.h"
 #include "../Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../Renderer/RenderGraph/RenderGraphDebugTextureRegistry.h"
@@ -33,6 +44,7 @@
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
+#include <deque>
 #include <stdexcept>
 
 namespace gte {
@@ -183,6 +195,76 @@ std::string DebugTextureColorFormatName(VkFormat format)
     char buffer[32];
     std::snprintf(buffer, sizeof(buffer), "VkFormat(%d)", static_cast<int>(format));
     return std::string(buffer);
+}
+
+// GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5), PHASE5
+// (task_manager/render-pass-5/PHASE5_RENDERGRAPH_PASS_WIRING_AND_PRODUCTION_CUTOVER.md,
+// Section 3.1) - stable (whole-process-lifetime) per-batch pass/resource
+// names, keyed by GpuDrivenBatchKey - mirrors RenderPasses.cpp's own
+// ReplayStepPassNamePool() precedent exactly (a std::deque never invalidates
+// an already-handed-out c_str() pointer on growth - RenderGraphBuilder::
+// AddRenderPass()/ImportBuffer()'s own `name` parameter requires a string
+// literal or otherwise static-storage-duration const char*, see
+// RenderGraphBuilder.h).
+struct GpuDrivenBatchNames {
+    const char* resetPassName = nullptr;
+    const char* cullingPassName = nullptr;
+    const char* indirectDrawPassName = nullptr;
+    const char* inputBufferName = nullptr;
+    const char* indirectBufferName = nullptr;
+    const char* countBufferName = nullptr;
+};
+
+class GpuDrivenBatchNamePool {
+public:
+    // Returns (lazily minting on first request for this exact key, then
+    // reusing the SAME names/pointers forever afterward) the stable name
+    // set for `key` - a small, first-seen-order-preserving linear scan
+    // (mirrors GpuDrivenBatchCache's own std::map "a handful of distinct
+    // batches, never thousands" scale assumption).
+    const GpuDrivenBatchNames& NamesFor(const GpuDrivenBatchKey& key)
+    {
+        for (const Entry& entry : m_entries) {
+            if (entry.key == key) {
+                return entry.names;
+            }
+        }
+
+        const std::size_t index = m_entries.size();
+        Entry entry;
+        entry.key = key;
+        entry.names.resetPassName = Intern("GpuDrivenBatch" + std::to_string(index) + " ResetCount");
+        entry.names.cullingPassName = Intern("GpuDrivenBatch" + std::to_string(index) + " Culling");
+        entry.names.indirectDrawPassName = Intern("GpuDrivenBatch" + std::to_string(index) + " IndirectDraw");
+        entry.names.inputBufferName = Intern("GpuDrivenBatch" + std::to_string(index) + ".Input");
+        entry.names.indirectBufferName = Intern("GpuDrivenBatch" + std::to_string(index) + ".IndirectCommands");
+        entry.names.countBufferName = Intern("GpuDrivenBatch" + std::to_string(index) + ".VisibleCount");
+        m_entries.push_back(std::move(entry));
+        return m_entries.back().names;
+    }
+
+private:
+    const char* Intern(std::string s)
+    {
+        m_storage.push_back(std::move(s));
+        return m_storage.back().c_str();
+    }
+
+    struct Entry {
+        GpuDrivenBatchKey key;
+        GpuDrivenBatchNames names;
+    };
+
+    std::deque<std::string> m_storage; // Never reallocates an already-handed-out c_str() pointer.
+    std::vector<Entry> m_entries;
+};
+
+// A function-local static, mirroring RenderPasses.cpp's own
+// ReplayStepPassNamePool() precedent - whole-process-lifetime, never reset.
+GpuDrivenBatchNamePool& BatchNamePool()
+{
+    static GpuDrivenBatchNamePool pool;
+    return pool;
 }
 
 } // namespace
@@ -497,13 +579,220 @@ void Application::RegisterOffscreenRenderPipelineProviders()
                                 rg::PassContext& ctx) {
                 m_renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
                 if (isGameView) {
-                    m_game.Render(m_renderer, aspectWidthOverHeight, nullptr, frameDebuggerCapture);
+                    // GPU-Driven Frustum Culling + Indirect Draw campaign
+                    // (render-pass-5), PHASE5 - the ONE call site that ever
+                    // passes a real, non-empty `batchedEntities` (Locked
+                    // Design Decision 11, PHASE0_MASTER_STRATEGY.md). See
+                    // m_gpuDrivenBatchedEntitiesThisFrame's own doc comment
+                    // (Application.h).
+                    m_game.Render(m_renderer, aspectWidthOverHeight, nullptr, frameDebuggerCapture, std::nullopt,
+                        m_gpuDrivenBatchedEntitiesThisFrame);
                 } else {
                     m_game.Render(m_renderer, aspectWidthOverHeight, &viewProjectionOverride);
                 }
                 m_renderer.EndGraphPassRecording();
             };
             out.push_back(std::move(desc));
+        });
+
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE5 (task_manager/render-pass-5/
+    // PHASE5_RENDERGRAPH_PASS_WIRING_AND_PRODUCTION_CUTOVER.md, Section
+    // 3.1/3.4) - "GpuDrivenBatches" - ProviderScope::PerActiveView.
+    //
+    // ⚠️ CORRECTNESS-CRITICAL PLACEMENT REQUIREMENT (confirmed by live
+    // testing during this phase, mirroring "AtmosphereComposite"'s own
+    // identical CORRECTNESS-CRITICAL comment on ProviderTiming above): this
+    // Register(...) call MUST stay TEXTUALLY AFTER "RenderOpaque"'s own
+    // Register(...) call (immediately above) and TEXTUALLY BEFORE
+    // "DrawSkyBackground"'s own Register(...) call (immediately below) -
+    // rg::RenderPipeline::DeclareOnePhase() (RenderPipeline.h) collects
+    // every PerActiveView provider's own RenderPassDesc entries into one
+    // scratch list IN REGISTRATION ORDER, then stable-sorts that list by
+    // RenderPassEvent - for two providers sharing the exact same
+    // RenderPassEvent tier ("RenderOpaque" and this provider's own 3 passes
+    // all use RenderPassEvent::Opaques), their relative order after that
+    // stable sort is EXACTLY their registration order. Moving this
+    // Register(...) call anywhere else in this function's body would
+    // silently break the "RenderOpaque" -> this provider's 3 passes ->
+    // "DrawSkyBackground" ordering this whole feature depends on, with NO
+    // compiler error and NO assert - DetectRenderPassEventContradictions()
+    // does not catch this class of hazard (a pure WAW hazard with no
+    // intervening read) - see that document's own preface note, point 3,
+    // and Section 3.4 for the full reasoning.
+    m_offscreenRenderPipeline.Register("GpuDrivenBatches", rg::ProviderScope::PerActiveView,
+        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
+            // Game-View-only cutover (Locked Design Decision 11,
+            // PHASE0_MASTER_STRATEGY.md) - Scene View never receives any of
+            // this provider's passes; mirrors every other per-view
+            // provider's own internal `isGameView`-style branch precedent.
+            if (frame.currentView != rg::RenderViewId::Named("Game")) {
+                return;
+            }
+
+            const RenderPassViewData* viewData = FindViewData(frame.currentView);
+            if (viewData == nullptr) {
+                return; // Defensive - Game is always in frame.activeViews when this provider is invoked for it.
+            }
+            const rg::TextureHandle viewTarget = viewData->colorTarget;
+
+            // Decided ONCE per DeclareInto() call (not per batch) - every
+            // batch this frame shares the exact same Game-View camera.
+            const std::array<Plane, 6> frustumPlanes = ExtractFrustumPlanes(m_gpuDrivenGameViewProjectionThisFrame);
+            const bool useCompaction = m_renderer.SupportsDrawIndirectCount();
+            const Mat4 viewProjection = m_gpuDrivenGameViewProjectionThisFrame;
+
+            for (const GpuDrivenBatchRenderData& batch : m_gpuDrivenBatchesThisFrame) {
+                const rg::BufferHandle inputHandle = batch.inputHandle;
+                const rg::BufferHandle indirectHandle = batch.indirectHandle;
+                const rg::BufferHandle countHandle = batch.countHandle;
+                const VkBuffer indirectBufferNative = batch.indirectBufferNative;
+                const VkBuffer countBufferNative = batch.countBufferNative;
+                const VkDescriptorSet cullingDescriptorSet = batch.cullingDescriptorSet;
+                const VkDescriptorSet instanceBufferDescriptorSet = batch.instanceBufferDescriptorSet;
+                const std::size_t instanceCount = batch.instanceCount;
+                const MeshHandle meshHandle = batch.mesh;
+                const PipelineHandle originalPipelineHandle = batch.originalPipeline;
+
+                // --- "<batch> ResetCount" (Compute) ----------------------
+                {
+                    rg::RenderPassDesc desc;
+                    desc.debugName = batch.resetPassName;
+                    desc.kind = rg::PassKind::Compute;
+                    desc.order = rg::RenderPassEvent::Opaques;
+                    desc.view = frame.currentView;
+                    desc.setup = [countHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
+                        pass.WriteBuffer(countHandle, rg::ResourceAccess::TransferDst);
+                    };
+                    desc.execute = [countBufferNative](rg::PassContext& ctx) {
+                        // PHASE3's own flagged, previously-undeclared-
+                        // anywhere requirement - the atomic visible-count
+                        // buffer must contain exactly 0 before every
+                        // dispatch of Shaders/FrustumCull.comp (see
+                        // PHASE3_FRUSTUM_CULL_COMPUTE_SHADER_AND_PIPELINE.md,
+                        // Section 3.2 - the shader can never safely do this
+                        // itself). A raw vkCmdFillBuffer - no
+                        // BeginGraphPassRecording()/EndGraphPassRecording()
+                        // bracket needed (that pairing only matters for a
+                        // Renderer::Submit()/SubmitIndirect()/Dispatch()
+                        // call, none of which happen here).
+                        vkCmdFillBuffer(ctx.cmd, countBufferNative, 0, sizeof(std::uint32_t), 0);
+                    };
+                    out.push_back(std::move(desc));
+                }
+
+                // --- "<batch> Culling" (Compute) --------------------------
+                {
+                    rg::RenderPassDesc desc;
+                    desc.debugName = batch.cullingPassName;
+                    desc.kind = rg::PassKind::Compute;
+                    desc.order = rg::RenderPassEvent::Opaques;
+                    desc.view = frame.currentView;
+                    desc.setup = [inputHandle, indirectHandle, countHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
+                        pass.ReadBuffer(inputHandle, rg::ResourceAccess::ComputeShaderRead);
+                        pass.WriteBuffer(indirectHandle, rg::ResourceAccess::ComputeShaderWrite);
+                        // The last of these automatically creates a WAW edge
+                        // from "<batch> ResetCount" into this pass (both
+                        // write countHandle) - the reset is therefore
+                        // correctly ordered first via the render graph's
+                        // own existing, unmodified dependency-edge
+                        // machinery, with no special-casing needed here.
+                        pass.WriteBuffer(countHandle, rg::ResourceAccess::ComputeShaderWrite);
+                    };
+                    desc.execute = [this, cullingDescriptorSet, instanceCount, frustumPlanes, useCompaction](
+                                        rg::PassContext& ctx) {
+                        struct CullingPushConstants {
+                            Plane planes[6];
+                            std::uint32_t instanceCount;
+                            std::uint32_t useCompaction;
+                        };
+                        static_assert(sizeof(CullingPushConstants) == kCullingPushConstantSize,
+                            "CullingPushConstants must match Shaders/FrustumCull.comp's own PushConstants block "
+                            "exactly");
+
+                        CullingPushConstants pc{};
+                        for (std::size_t i = 0; i < 6; ++i) {
+                            pc.planes[i] = frustumPlanes[i];
+                        }
+                        pc.instanceCount = static_cast<std::uint32_t>(instanceCount);
+                        // Decided ONCE per batch from
+                        // Renderer::SupportsDrawIndirectCount() (PHASE2) -
+                        // never re-derived per-frame (Locked Design Decision
+                        // 4, PHASE0_MASTER_STRATEGY.md).
+                        pc.useCompaction = useCompaction ? 1u : 0u;
+
+                        m_renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
+                        m_renderer.Dispatch(m_gpuDrivenBatchCache.Pipelines().Pipeline(), cullingDescriptorSet, &pc,
+                            sizeof(pc),
+                            ComputeGroupCount(static_cast<std::uint32_t>(instanceCount), kCullingLocalSizeX), 1, 1);
+                        m_renderer.EndGraphPassRecording();
+                    };
+                    out.push_back(std::move(desc));
+                }
+
+                // --- "<batch> IndirectDraw" (Graphics) --------------------
+                {
+                    rg::RenderPassDesc desc;
+                    desc.debugName = batch.indirectDrawPassName;
+                    desc.kind = rg::PassKind::Graphics;
+                    desc.order = rg::RenderPassEvent::Opaques;
+                    desc.view = frame.currentView;
+                    desc.legacyCategory = rg::RenderPassCategory::General;
+                    desc.setup = [viewTarget, indirectHandle, countHandle, inputHandle](
+                                     rg::RenderGraphBuilder::PassBuilder& pass) {
+                        // Deliberately NO clear value on either attachment -
+                        // mirrors "DrawSkyBackground"'s own "must never
+                        // erase a prior pass's just-written pixels/depth"
+                        // convention.
+                        pass.WriteColorAttachment(viewTarget);
+                        pass.WriteDepthStencilAttachment(viewTarget);
+                        pass.ReadBuffer(indirectHandle, rg::ResourceAccess::IndirectCommandRead);
+                        pass.ReadBuffer(countHandle, rg::ResourceAccess::IndirectCommandRead);
+                        // A SECOND, independent read declaration against the
+                        // SAME inputHandle the culling pass already read via
+                        // ComputeShaderRead - needed because the barrier
+                        // planner tracks access-kind-specific state per
+                        // resource; this is what correctly orders THIS
+                        // pass's own vertex-shader storage-buffer read after
+                        // the culling pass's own compute read/writes, not a
+                        // duplicate/no-op declaration.
+                        pass.ReadBuffer(inputHandle, rg::ResourceAccess::VertexShaderStorageRead);
+                    };
+                    desc.execute = [this, meshHandle, originalPipelineHandle, indirectBufferNative, countBufferNative,
+                                        instanceBufferDescriptorSet, instanceCount, useCompaction, viewProjection](
+                                        rg::PassContext& ctx) {
+                        const Mesh* mesh = m_game.GetRenderSystem().TryGetMesh(meshHandle);
+                        const Pipeline* instancedPipeline = nullptr;
+                        try {
+                            instancedPipeline =
+                                &m_gpuDrivenBatchCache.ResolveInstancedPipeline(m_renderer, originalPipelineHandle);
+                        } catch (const std::exception& e) {
+                            std::fprintf(
+                                stderr, "GpuDrivenBatches: failed to resolve instanced pipeline: %s\n", e.what());
+                        }
+                        if (mesh == nullptr || instancedPipeline == nullptr) {
+                            return; // Defensive - both resolved successfully during this same frame's collection.
+                        }
+
+                        m_renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
+                        // ⚠️ CORRECTED, PHASE3's own flagged invariant - the
+                        // draw count passed here (both as maxDrawCount and,
+                        // implicitly, as the degenerate-padding branch's own
+                        // real drawCount) must be EXACTLY this frame's own
+                        // instanceCount, NEVER the cache's own buffer-
+                        // capacity-only-grows size - see
+                        // GpuDrivenBatchCache::EnsureCapacity()'s own doc
+                        // comment for the "ghost geometry" hazard this
+                        // prevents.
+                        const VkBuffer countBufferForCall = useCompaction ? countBufferNative : VK_NULL_HANDLE;
+                        m_renderer.SubmitIndirect(*instancedPipeline, *mesh, indirectBufferNative,
+                            /*indirectOffset=*/0, static_cast<std::uint32_t>(instanceCount), countBufferForCall,
+                            /*countBufferOffset=*/0, instanceBufferDescriptorSet, viewProjection);
+                        m_renderer.EndGraphPassRecording();
+                    };
+                    out.push_back(std::move(desc));
+                }
+            }
         });
 
     // "DrawSkyBackground" - ProviderScope::PerActiveView, AfterOpaques. Wraps
@@ -1117,6 +1406,19 @@ int Application::Run()
 
                         m_currentViewDataThisFrame.clear();
                         m_currentFrameDebuggerCaptureForOffscreenPipeline = nullptr;
+                        // GPU-Driven Frustum Culling + Indirect Draw campaign
+                        // (render-pass-5), PHASE5 - cleared UNCONDITIONALLY,
+                        // every frame (never left stale from a previous
+                        // frame Game View WAS visible) - only actually
+                        // repopulated inside the `if (gameTarget != nullptr)`
+                        // block below, since Game-View-only (Locked Design
+                        // Decision 11) means neither is ever read on a frame
+                        // Game isn't active anyway (the "GpuDrivenBatches"/
+                        // "RenderOpaque" providers' own per-view loop simply
+                        // never visits "Game" that frame) - cleared here
+                        // anyway purely for hygiene/debuggability.
+                        m_gpuDrivenBatchesThisFrame.clear();
+                        m_gpuDrivenBatchedEntitiesThisFrame.clear();
                         float gameAspectForReplay = 1.0f;
 
                         if (gameTarget != nullptr) {
@@ -1149,6 +1451,88 @@ int Application::Run()
                             // to Scene View/Present.
                             m_currentFrameDebuggerCaptureForOffscreenPipeline = frameDebuggerCapture;
                             gameAspectForReplay = aspect;
+
+                            // GPU-Driven Frustum Culling + Indirect Draw
+                            // campaign (render-pass-5), PHASE5 (task_manager/
+                            // render-pass-5/
+                            // PHASE5_RENDERGRAPH_PASS_WIRING_AND_PRODUCTION_CUTOVER.md,
+                            // Section 3.1) - computed HERE, exactly once
+                            // this frame, Game-View-only (Locked Design
+                            // Decision 11) - uses THIS SAME builder `b` (a
+                            // RenderPassProvider has no RenderGraphBuilder&
+                            // of its own to call ImportBuffer() - mirrors
+                            // the GPU Skinning import loop immediately
+                            // above).
+                            m_gpuDrivenGameViewProjectionThisFrame = gameViewProjection;
+                            {
+                                std::unordered_set<VkBuffer> gpuSkinnedOutputBuffers;
+                                gpuSkinnedOutputBuffers.reserve(m_gpuSkinningRequestsThisFrame.size());
+                                for (const AnimationSystem::GpuSkinningDispatchRequest& request :
+                                    m_gpuSkinningRequestsThisFrame) {
+                                    gpuSkinnedOutputBuffers.insert(request.outputBuffer);
+                                }
+
+                                RenderSystem& renderSystem = m_game.GetRenderSystem();
+                                const std::vector<GpuDrivenBatchFrameEntry> entries =
+                                    renderSystem.CollectGpuDrivenBatches(m_game.GetRegistry(), m_renderer,
+                                        m_gpuDrivenBatchCache, gpuSkinnedOutputBuffers);
+
+                                for (const GpuDrivenBatchFrameEntry& frameEntry : entries) {
+                                    const GpuDrivenBatchKey key{ frameEntry.mesh, frameEntry.pipeline };
+                                    const GpuDrivenBatchCache::Entry* cacheEntry = m_gpuDrivenBatchCache.TryGet(key);
+                                    const Mesh* meshPtr = renderSystem.TryGetMesh(frameEntry.mesh);
+                                    if (cacheEntry == nullptr || meshPtr == nullptr) {
+                                        // One-source-of-truth exclusion rule
+                                        // (Section 3.1) - a batch that can't
+                                        // actually be rendered this frame
+                                        // must be excluded from BOTH the
+                                        // pass-declaration AND the Draw()-
+                                        // exclusion decisions together.
+                                        continue;
+                                    }
+
+                                    bool instancedPipelineResolved = true;
+                                    try {
+                                        m_gpuDrivenBatchCache.ResolveInstancedPipeline(
+                                            m_renderer, frameEntry.pipeline);
+                                    } catch (const std::exception& e) {
+                                        std::fprintf(stderr,
+                                            "GpuDrivenBatches: failed to resolve instanced pipeline for a batch: "
+                                            "%s\n",
+                                            e.what());
+                                        instancedPipelineResolved = false;
+                                    }
+                                    if (!instancedPipelineResolved) {
+                                        continue;
+                                    }
+
+                                    const GpuDrivenBatchNames& names = BatchNamePool().NamesFor(key);
+
+                                    GpuDrivenBatchRenderData data;
+                                    data.mesh = frameEntry.mesh;
+                                    data.originalPipeline = frameEntry.pipeline;
+                                    data.instanceCount = frameEntry.instanceCount;
+                                    data.inputHandle = b.ImportBuffer(names.inputBufferName,
+                                        cacheEntry->inputBuffer.Native(), cacheEntry->inputBuffer.Size());
+                                    data.indirectHandle = b.ImportBuffer(names.indirectBufferName,
+                                        cacheEntry->indirectCommandBuffer.Native(),
+                                        cacheEntry->indirectCommandBuffer.Size());
+                                    data.countHandle = b.ImportBuffer(names.countBufferName,
+                                        cacheEntry->countBuffer.Native(), cacheEntry->countBuffer.Size());
+                                    data.indirectBufferNative = cacheEntry->indirectCommandBuffer.Native();
+                                    data.countBufferNative = cacheEntry->countBuffer.Native();
+                                    data.cullingDescriptorSet = cacheEntry->cullingDescriptorSet;
+                                    data.instanceBufferDescriptorSet = cacheEntry->instanceBufferDescriptorSet;
+                                    data.resetPassName = names.resetPassName;
+                                    data.cullingPassName = names.cullingPassName;
+                                    data.indirectDrawPassName = names.indirectDrawPassName;
+                                    m_gpuDrivenBatchesThisFrame.push_back(data);
+
+                                    for (const DrawCommand& command : frameEntry.commands) {
+                                        m_gpuDrivenBatchedEntitiesThisFrame.insert(command.entity);
+                                    }
+                                }
+                            }
                         }
 
                         rg::TextureHandle sceneColorHandleForBlurValidation{};

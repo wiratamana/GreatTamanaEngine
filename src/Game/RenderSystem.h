@@ -91,6 +91,17 @@ public:
     // frame rather than crash.
     Mesh* TryGetMesh(MeshHandle handle) { return m_meshes.TryGet(handle); }
 
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE5 (task_manager/render-pass-5/
+    // PHASE5_RENDERGRAPH_PASS_WIRING_AND_PRODUCTION_CUTOVER.md) - the
+    // Pipeline sibling of TryGetMesh() above, needed by Application's new
+    // "GpuDrivenBatches" provider to resolve a batch's own ORIGINAL
+    // Pipeline& (e.g. to build/resolve its VertexLayout::
+    // PositionNormalInstanced sibling) - see const Pipeline* TryGetMesh's
+    // own identical doc comment for the "never assert on a bad handle"
+    // convention this mirrors.
+    const Pipeline* TryGetPipeline(PipelineHandle handle) const { return m_pipelines.TryGet(handle); }
+
     // Pure data-collection step: every entity with a MeshRenderer becomes
     // one DrawCommand, using ECS/TransformHierarchy.h's ComputeWorldMatrix()
     // (its Transform's LocalToWorldMatrix() composed all the way up its
@@ -172,8 +183,26 @@ public:
     // by AddFrameDebuggerReplayPasses() (src/Application/RenderPasses.cpp),
     // each of its N replay passes requesting a different cutoff (`i + 1`)
     // so pass `i` redraws exactly objects `[0..i]`.
+    //
+    // `batchedEntities` (GPU-Driven Frustum Culling + Indirect Draw
+    // campaign, render-pass-5, PHASE5 - task_manager/render-pass-5/
+    // PHASE5_RENDERGRAPH_PASS_WIRING_AND_PRODUCTION_CUTOVER.md, Section
+    // 3.3) - optional, defaulted, TRAILING (after `capture`/`maxDrawCount`)
+    // parameter, empty by default - every existing call site keeps
+    // compiling/behaving completely unmodified. A DrawCommand whose
+    // `entity` is in this set is skipped for drawing (and, inside the
+    // `#if GTE_ENABLE_EDITOR` block, for RecordDraw()/RecordEntityDraw())
+    // but still counts toward `consideredCount` for `maxDrawCount`
+    // purposes, matching that parameter's own "iteration count, not
+    // resolved-draw count" contract. Passed a real, non-empty value at
+    // EXACTLY ONE production call site - the Game-View branch of the
+    // "RenderOpaque" provider (Application.cpp) - never Scene View, never
+    // AddFrameDebuggerReplayPasses()'s own per-object replay steps, never
+    // AddPresentPass()'s direct-render-to-swapchain fallback (Locked
+    // Design Decision 11, PHASE0_MASTER_STRATEGY.md).
     void Draw(Registry& registry, Renderer& renderer, float aspectWidthOverHeight,
-        FrameDebuggerCaptureContext* capture = nullptr, std::optional<std::size_t> maxDrawCount = std::nullopt);
+        FrameDebuggerCaptureContext* capture = nullptr, std::optional<std::size_t> maxDrawCount = std::nullopt,
+        const std::unordered_set<Entity>& batchedEntities = {});
 
     // Explicit-view-projection overload of Draw() above, for a caller that
     // already has its own view-projection matrix to render with instead of
@@ -189,10 +218,17 @@ public:
     // (unaffected by this campaign - see PHASE0's Locked Design Decision
     // #7) stays at its default nullptr forever, since Scene View is out of
     // scope for the whole Frame Debugger feature. `maxDrawCount` - see the
-    // float-aspect overload above's own comment; this is the overload that
-    // actually owns the real loop/cutoff logic.
+    // actually owns the real loop/cutoff logic. `batchedEntities` - see the
+    // float-aspect overload above's own comment; this overload owns the
+    // real per-command skip check - EVERY call site to THIS overload
+    // (Scene View, AddFrameDebuggerReplayPasses(), AddPresentPass()'s
+    // fallback) keeps passing the default (empty) forever, per Locked
+    // Design Decision 11 - only the float-aspect overload above's own
+    // Game-View caller ever supplies a real, non-empty value, and it does
+    // so by forwarding straight into this same overload.
     void Draw(Registry& registry, Renderer& renderer, const Mat4& viewProjection,
-        FrameDebuggerCaptureContext* capture = nullptr, std::optional<std::size_t> maxDrawCount = std::nullopt);
+        FrameDebuggerCaptureContext* capture = nullptr, std::optional<std::size_t> maxDrawCount = std::nullopt,
+        const std::unordered_set<Entity>& batchedEntities = {});
 
     // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
     // PHASE4 (task_manager/render-pass-5/

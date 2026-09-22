@@ -4,6 +4,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_set>
 
 #include "../Core/EngineContext.h"
 #include "../Editor/EditorLayer.h"
@@ -153,6 +154,76 @@ private:
     // a scalar Application member (not part of RenderPassViewData) since
     // only ONE view can ever carry a real, non-null value here per frame.
     FrameDebuggerCaptureContext* m_currentFrameDebuggerCaptureForOffscreenPipeline = nullptr;
+
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE5 (task_manager/render-pass-5/
+    // PHASE5_RENDERGRAPH_PASS_WIRING_AND_PRODUCTION_CUTOVER.md) - the ONE
+    // persistent, per-batch GPU resource cache (PHASE4), owned here exactly
+    // like m_atmosphereLutRenderer/m_volumeTexturePreviewRenderer below are:
+    // a stateful, Renderer-layer helper with no ECS/Game dependency of its
+    // own (see GpuDrivenBatchCache.h's own "deliberately kept Renderer-
+    // layer-clean" doc comment), constructed once, reused every frame -
+    // RenderSystem::CollectGpuDrivenBatches() (called via
+    // m_game.GetRenderSystem(), below) never owns this itself, so whoever
+    // calls it every frame must.
+    GpuDrivenBatchCache m_gpuDrivenBatchCache;
+
+    // One eligible batch's own THIS-FRAME render data, ready for the new
+    // "GpuDrivenBatches" provider (registered in
+    // RegisterOffscreenRenderPipelineProviders(), between "RenderOpaque"'s
+    // own Register() call and "DrawSkyBackground"'s own Register() call -
+    // see that function's own comment) to declare its three passes against.
+    // `mesh`/`originalPipeline` are RESOLVED FRESH inside each pass's own
+    // deferred `execute` lambda (never a raw pointer captured here) -
+    // ResourcePool<T,HandleT>'s own backing std::vector may reallocate if a
+    // new Mesh/Pipeline is ever registered, so a pointer captured at
+    // collection time could theoretically dangle by the time a deferred
+    // pass's `execute` callback actually runs later this same Execute()
+    // call - re-resolving by handle at execute time (a cheap pool lookup)
+    // avoids this risk entirely.
+    struct GpuDrivenBatchRenderData {
+        MeshHandle mesh;
+        PipelineHandle originalPipeline;
+        std::size_t instanceCount = 0;
+        rg::BufferHandle inputHandle;
+        rg::BufferHandle indirectHandle;
+        rg::BufferHandle countHandle;
+        VkBuffer indirectBufferNative = VK_NULL_HANDLE;
+        VkBuffer countBufferNative = VK_NULL_HANDLE;
+        VkDescriptorSet cullingDescriptorSet = VK_NULL_HANDLE;
+        VkDescriptorSet instanceBufferDescriptorSet = VK_NULL_HANDLE;
+        // Stable (whole-process-lifetime) pass/resource names - see
+        // Application.cpp's own GpuDrivenBatchNamePool().
+        const char* resetPassName = nullptr;
+        const char* cullingPassName = nullptr;
+        const char* indirectDrawPassName = nullptr;
+    };
+
+    // Populated fresh, every frame, by Run() itself (the offscreen regime's
+    // own `build` lambda), immediately before calling
+    // m_offscreenRenderPipeline.DeclareInto() - mirrors
+    // m_gpuSkinningRequestsThisFrame/m_gpuSkinningHandlesThisFrame's own
+    // exact "populate right before DeclareInto(), read inside the provider"
+    // shape above. Computed and consumed Game-View-only (Locked Design
+    // Decision 11) - left empty on any frame the Game View isn't actually
+    // visible this frame.
+    std::vector<GpuDrivenBatchRenderData> m_gpuDrivenBatchesThisFrame;
+
+    // The exact set of entities that successfully got a batch's worth of
+    // buffers imported THIS frame - built from the SAME result as
+    // m_gpuDrivenBatchesThisFrame above (one source of truth - see
+    // PHASE5_RENDERGRAPH_PASS_WIRING_AND_PRODUCTION_CUTOVER.md's own Section
+    // 3.1). Passed into RenderSystem::Draw()'s new `batchedEntities`
+    // parameter at EXACTLY ONE call site: the Game-View branch of the
+    // "RenderOpaque" provider.
+    std::unordered_set<Entity> m_gpuDrivenBatchedEntitiesThisFrame;
+
+    // The Game View's own view-projection matrix this frame - captured here
+    // (alongside `gameViewData.viewProjection`, computed in the same place)
+    // so the "GpuDrivenBatches" provider's culling/indirect-draw passes
+    // (which run LATER this same frame, inside DeclareInto()) can read it
+    // without re-resolving the active ECS Camera a second time.
+    Mat4 m_gpuDrivenGameViewProjectionThisFrame;
 
     // render-pass-3 campaign, PHASE3 (Step 3.5) - populated fresh, every
     // frame, by Run() itself, immediately before calling
