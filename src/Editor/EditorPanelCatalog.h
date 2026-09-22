@@ -34,6 +34,7 @@ inline constexpr const char* kKnownEditorPanelNames[] = {
     "Render Graph",
     "Jobs",
     "Atmosphere",
+    "Log",
 #if GTE_ENABLE_PROJECT_PANEL
     "Project",
 #endif

@@ -13,6 +13,7 @@
 #include "Panels/HierarchyPanel.h"
 #include "Panels/InspectorPanel.h"
 #include "Panels/JobsPanel.h"
+#include "Panels/LogPanel.h"
 #include "Panels/MemoryPanel.h"
 #include "Panels/ProfilerPanel.h"
 #include "Panels/RenderGraphPanel.h"
@@ -574,6 +575,14 @@ public:
         // BuildHierarchyPanel()/BuildScenePanel() above, which already take
         // `game` for their own reasons).
         m_jobsPanel.Build(m_ctx, game);
+        // task_manager/logger-1 campaign, PHASE4 - the Editor "Log" panel
+        // (Panels/LogPanel.h), docked alongside "Memory"/"Profiler"/"Render
+        // Graph"/"Jobs"/"Atmosphere" (see DockLayout.cpp). A small,
+        // stateful, non-polymorphic class (mirrors JobsPanel above), with
+        // no cross-panel dependency of its own beyond EditorContext - it
+        // reads/mutates Editor/Logger.h's own already-thread-safe state
+        // directly, no bridge (see AGENTS.md, "Logging").
+        m_logPanel.Build(m_ctx);
         // task_manager/frame-debugger-2 campaign (PHASE2) - the Editor's
         // on-demand "Frame Debugger" floating window (Panels/
         // FrameDebuggerPanel.h). Build() itself is a complete no-op
@@ -920,6 +929,13 @@ private:
     // it only depends on gte::Profiling::FrameProfiler/gte::Jobs::JobSystem,
     // both of which are always compiled regardless of that switch.
     JobsPanel m_jobsPanel;
+
+    // task_manager/logger-1 campaign, PHASE4 (Editor "Log" Panel UI - see
+    // Panels/LogPanel.h) - docked alongside "Memory"/"Profiler"/"Render
+    // Graph"/"Jobs"/"Atmosphere" (DockLayout.cpp). Also not gated behind
+    // GTE_ENABLE_PROJECT_PANEL - it only depends on Editor/Logger.h's own
+    // always-compiled-in-an-Editor-build, thread-safe static state.
+    LogPanel m_logPanel;
 
     // task_manager/frame-debugger-2 campaign (PHASE2) - the Editor's
     // on-demand "Frame Debugger" floating window (Panels/

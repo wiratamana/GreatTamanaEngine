@@ -624,6 +624,8 @@ if(GTE_ENABLE_EDITOR)
         src/Editor/ProfilerPanelData.cpp
         src/Editor/JobsPanelData.h
         src/Editor/JobsPanelData.cpp
+        src/Editor/LogPanelData.h
+        src/Editor/LogPanelData.cpp
         src/Editor/FrameDebuggerData.h
         src/Editor/FrameDebuggerData.cpp
         src/Editor/FrameDebuggerCapture.h
@@ -648,6 +650,8 @@ if(GTE_ENABLE_EDITOR)
         src/Editor/Panels/RenderGraphPanel.cpp
         src/Editor/Panels/JobsPanel.h
         src/Editor/Panels/JobsPanel.cpp
+        src/Editor/Panels/LogPanel.h
+        src/Editor/Panels/LogPanel.cpp
         src/Editor/Panels/AtmospherePanel.h
         src/Editor/Panels/AtmospherePanel.cpp
         src/Editor/Panels/FrameDebuggerPanel.h

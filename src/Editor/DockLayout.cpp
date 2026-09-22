@@ -88,6 +88,11 @@ void BuildDefaultDockLayout(ImGuiID dockspaceId, ImVec2 size)
     // alongside Memory/Profiler/Render Graph/Jobs" treatment; it has no
     // GTE_ENABLE_PROJECT_PANEL dependency either.
     ImGui::DockBuilderDockWindow("Atmosphere", bottom);
+    // "Log" (task_manager/logger-1 campaign, PHASE4 - Panels/LogPanel.h) -
+    // same "docked unconditionally alongside Memory/Profiler/Render
+    // Graph/Jobs/Atmosphere" treatment; it has no GTE_ENABLE_PROJECT_PANEL
+    // dependency either.
+    ImGui::DockBuilderDockWindow("Log", bottom);
 #if GTE_ENABLE_PROJECT_PANEL
     // Tabbed alongside "Memory" - Unity's own default layout also puts
     // "Project" (and "Console") along the bottom.

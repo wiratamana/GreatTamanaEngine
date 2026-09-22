@@ -2071,6 +2071,7 @@ if(GTE_ENABLE_EDITOR)
         Editor/LoggerTests.cpp
         Editor/ProfilerPanelDataTests.cpp
         Editor/JobsPanelDataTests.cpp
+        Editor/LogPanelDataTests.cpp
         Editor/FrameDebuggerDataTests.cpp
         Editor/FrameDebuggerCaptureTests.cpp
         Editor/FrameDebuggerHistoryTests.cpp
