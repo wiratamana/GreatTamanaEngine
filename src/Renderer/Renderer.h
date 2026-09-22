@@ -25,6 +25,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -484,6 +485,25 @@ public:
     Pipeline CreatePipeline(const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath,
         VertexLayout vertexLayout = VertexLayout::PositionColor, bool useMaterialTexture = false,
         const char* debugName = nullptr) const;
+
+    // Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE3 - the
+    // N-color-format sibling of CreatePipeline() above: builds a real
+    // multi-color-attachment Pipeline (up to gte::rg::kMaxColorAttachments -
+    // see RenderGraphTypes.h) against a caller-supplied `colorFormats` list,
+    // rather than always exactly ColorFormat() (a single value). A genuine
+    // multi-target pass (e.g. a future G-buffer pass) may write into
+    // targets of differing formats, so this overload does NOT auto-inject
+    // ColorFormat() the way the single-format overload above does - the
+    // caller decides every entry. Forwards straight into
+    // GpuResourceFactory::CreatePipeline()'s own parallel span overload.
+    // Every other parameter (`vertexLayout`/`useMaterialTexture`/
+    // `debugName`) behaves identically to the single-format overload above.
+    // No existing call site needs to change - this is a genuinely new,
+    // additive capability with zero real consumers until a future phase's
+    // own G-buffer pass (task_manager/mrt-1/PHASE4_GBUFFER_VALIDATION_PASS_AND_SHADER.md).
+    Pipeline CreatePipeline(std::span<const VkFormat> colorFormats, const std::string& vertexShaderSpirvPath,
+        const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor,
+        bool useMaterialTexture = false, const char* debugName = nullptr) const;
 
     // Factory for compute pipelines (Phase 2 -
     // COMPUTE_PHASE2_PIPELINE_INFRASTRUCTURE_STRATEGY_v1.md) - so callers

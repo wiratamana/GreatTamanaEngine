@@ -300,6 +300,14 @@ Pipeline Renderer::CreatePipeline(const std::string& vertexShaderSpirvPath,
         ColorFormat(), vertexShaderSpirvPath, fragmentShaderSpirvPath, vertexLayout, useMaterialTexture, debugName);
 }
 
+Pipeline Renderer::CreatePipeline(std::span<const VkFormat> colorFormats, const std::string& vertexShaderSpirvPath,
+    const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout, bool useMaterialTexture,
+    const char* debugName) const
+{
+    return m_resources.CreatePipeline(
+        colorFormats, vertexShaderSpirvPath, fragmentShaderSpirvPath, vertexLayout, useMaterialTexture, debugName);
+}
+
 ComputePipeline Renderer::CreateComputePipeline(const std::string& shaderSpirvPath,
     const std::vector<VkDescriptorSetLayout>& descriptorSetLayouts,
     std::optional<VkPushConstantRange> pushConstantRange) const

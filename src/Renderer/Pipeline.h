@@ -2,6 +2,8 @@
 
 #include <volk.h>
 
+#include <cstddef>
+#include <span>
 #include <string>
 
 namespace gte {
@@ -43,6 +45,20 @@ enum class VertexLayout {
     // can be bound before each draw (see FrameRecorder::RecordFrame()).
     PositionNormalUv,
 };
+
+// Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE3 - the
+// maximum number of color attachments a single Pipeline can be built
+// against. Mirrors gte::rg::kMaxColorAttachments
+// (Renderer/RenderGraph/RenderGraphTypes.h) exactly, but is kept as its own,
+// independent, LOCAL constant here rather than an #include of that
+// higher-level rg:: header - Pipeline is a lower-level Renderer primitive
+// (constructible with no RenderGraph involved at all, e.g. the original
+// hardcoded triangle demo) and should not reach upward into the RenderGraph
+// layer that is built on top of Renderer/Pipeline, not the other way
+// around (see AGENTS.md's "Clean Architecture" guideline). If
+// gte::rg::kMaxColorAttachments is ever changed, update this value to
+// match it.
+inline constexpr std::size_t kPipelineMaxColorAttachments = 8;
 
 // RAII wrapper around a VkPipeline + its VkPipelineLayout, built for dynamic
 // rendering (no VkRenderPass/VkFramebuffer) against an exact color AND
@@ -101,8 +117,30 @@ public:
     // PHASE1_RENDERER_CAPTURE_INSTRUMENTATION.md). Consumed by
     // RenderSystem::Draw() when a FrameDebuggerCaptureContext is armed -
     // see DebugName() below.
+    //
+    // Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE3 - this
+    // single-VkFormat constructor is now a thin forwarder (see Pipeline.cpp)
+    // onto the new std::span<const VkFormat> constructor below, built as a
+    // one-element span. Its own signature/behavior/PSO output are
+    // completely unchanged from before this campaign - every existing call
+    // site keeps compiling and behaving identically.
     Pipeline(VkDevice device, VkFormat colorFormat, VkFormat depthFormat, const std::string& vertexShaderSpirvPath,
         const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor,
+        VkDescriptorSetLayout materialSetLayout = VK_NULL_HANDLE, const char* debugName = nullptr);
+
+    // Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE3 - the
+    // real N-color-attachment constructor: builds a VkPipelineRenderingCreateInfo
+    // with `colorAttachmentCount == colorFormats.size()` and one
+    // VkPipelineColorBlendAttachmentState per entry (all identical - opaque,
+    // no blending, full RGBA write mask, matching this engine's existing
+    // single-target default exactly; per-attachment blend-state
+    // customization is out of scope for this campaign). `colorFormats` must
+    // be non-empty and no larger than kPipelineMaxColorAttachments (asserted
+    // in the .cpp, debug builds only). Every other parameter behaves
+    // identically to the single-format constructor above.
+    Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFormat depthFormat,
+        const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath,
+        VertexLayout vertexLayout = VertexLayout::PositionColor,
         VkDescriptorSetLayout materialSetLayout = VK_NULL_HANDLE, const char* debugName = nullptr);
     ~Pipeline();
 

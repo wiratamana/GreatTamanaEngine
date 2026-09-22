@@ -15,6 +15,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -136,6 +137,20 @@ public:
     // to Pipeline's own constructor (see Pipeline.h's own `debugName`
     // comment) - task_manager/frame-debugger-3, PHASE1.
     Pipeline CreatePipeline(VkFormat colorFormat, const std::string& vertexShaderSpirvPath,
+        const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor,
+        bool useMaterialTexture = false, const char* debugName = nullptr) const;
+
+    // Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE3 - the
+    // N-color-format sibling of CreatePipeline() above, forwarding straight
+    // into Pipeline's new std::span<const VkFormat> constructor
+    // (Pipeline.h). Unlike the single-format overload above, `colorFormats`
+    // is supplied explicitly by the caller (via Renderer::CreatePipeline()'s
+    // own parallel overload) rather than always being exactly
+    // Renderer::ColorFormat() - a genuine multi-target pass (e.g. a future
+    // G-buffer pass) may write into targets of differing formats. Every
+    // other parameter behaves identically to the single-format overload
+    // above.
+    Pipeline CreatePipeline(std::span<const VkFormat> colorFormats, const std::string& vertexShaderSpirvPath,
         const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor,
         bool useMaterialTexture = false, const char* debugName = nullptr) const;
 

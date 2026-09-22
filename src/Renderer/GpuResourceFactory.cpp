@@ -286,6 +286,15 @@ Pipeline GpuResourceFactory::CreatePipeline(VkFormat colorFormat, const std::str
         materialSetLayout, debugName);
 }
 
+Pipeline GpuResourceFactory::CreatePipeline(std::span<const VkFormat> colorFormats,
+    const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout,
+    bool useMaterialTexture, const char* debugName) const
+{
+    const VkDescriptorSetLayout materialSetLayout = useMaterialTexture ? m_materialSetLayout : VK_NULL_HANDLE;
+    return Pipeline(m_device, colorFormats, m_depthFormat, vertexShaderSpirvPath, fragmentShaderSpirvPath,
+        vertexLayout, materialSetLayout, debugName);
+}
+
 ComputePipeline GpuResourceFactory::CreateComputePipeline(const std::string& shaderSpirvPath,
     const std::vector<VkDescriptorSetLayout>& descriptorSetLayouts,
     std::optional<VkPushConstantRange> pushConstantRange) const

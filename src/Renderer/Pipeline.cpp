@@ -5,6 +5,7 @@
 #include "Vulkan/ShaderModule.h"
 
 #include <array>
+#include <cassert>
 #include <cstdint>
 #include <iterator>
 #include <stdexcept>
@@ -30,9 +31,27 @@ bool DepthFormatHasStencil(VkFormat format)
 Pipeline::Pipeline(VkDevice device, VkFormat colorFormat, VkFormat depthFormat, const std::string& vertexShaderSpirvPath,
     const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout, VkDescriptorSetLayout materialSetLayout,
     const char* debugName)
+    : Pipeline(device, std::span<const VkFormat>(&colorFormat, 1), depthFormat, vertexShaderSpirvPath,
+          fragmentShaderSpirvPath, vertexLayout, materialSetLayout, debugName)
+{
+}
+
+Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFormat depthFormat,
+    const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout,
+    VkDescriptorSetLayout materialSetLayout, const char* debugName)
     : m_device(device)
     , m_debugName(debugName != nullptr ? debugName : std::string())
 {
+    // Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE3 - the
+    // 8-attachment cap matches gte::rg::kMaxColorAttachments
+    // (RenderGraphTypes.h) exactly (see kPipelineMaxColorAttachments's own
+    // comment in Pipeline.h for why this is a local, independent constant
+    // rather than an #include of that header). Debug-only, mirroring every
+    // other cap-style assert in this codebase (e.g.
+    // RenderGraphBuilder::PassBuilder::WriteColorAttachment()).
+    assert(!colorFormats.empty() && colorFormats.size() <= kPipelineMaxColorAttachments
+        && "Pipeline: colorFormats must be non-empty and no larger than kPipelineMaxColorAttachments (8).");
+
     // Shader modules are only needed transiently, to build the VkPipeline
     // below - both are destroyed before this constructor returns (success
     // or failure), regardless of what vkCreateGraphicsPipelines does with
@@ -141,15 +160,23 @@ Pipeline::Pipeline(VkDevice device, VkFormat colorFormat, VkFormat depthFormat, 
         depthStencil.depthBoundsTestEnable = VK_FALSE;
         depthStencil.stencilTestEnable = VK_FALSE;
 
-        VkPipelineColorBlendAttachmentState colorBlendAttachment{};
-        colorBlendAttachment.blendEnable = VK_FALSE;
-        colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-            VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+        // Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE3 -
+        // one VkPipelineColorBlendAttachmentState per color target, all
+        // identical (opaque, no blending, full RGBA write mask) - matching
+        // this engine's existing single-target default exactly.
+        // Per-attachment blend-state customization is explicitly out of
+        // scope for this campaign.
+        std::vector<VkPipelineColorBlendAttachmentState> colorBlendAttachments(colorFormats.size());
+        for (VkPipelineColorBlendAttachmentState& state : colorBlendAttachments) {
+            state.blendEnable = VK_FALSE;
+            state.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT |
+                VK_COLOR_COMPONENT_A_BIT;
+        }
 
         VkPipelineColorBlendStateCreateInfo colorBlend{};
         colorBlend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-        colorBlend.attachmentCount = 1;
-        colorBlend.pAttachments = &colorBlendAttachment;
+        colorBlend.attachmentCount = static_cast<std::uint32_t>(colorBlendAttachments.size());
+        colorBlend.pAttachments = colorBlendAttachments.data();
 
         const VkDynamicState dynamicStates[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
         VkPipelineDynamicStateCreateInfo dynamicState{};
@@ -183,7 +210,7 @@ Pipeline::Pipeline(VkDevice device, VkFormat colorFormat, VkFormat depthFormat, 
         }
 
         // Dynamic rendering (no VkRenderPass/VkFramebuffer) - this pipeline
-        // must be built against the exact color AND depth format it will
+        // must be built against the exact color AND depth format(s) it will
         // actually draw into. See AGENTS.md ("Render Target Format
         // Matching"). stencilAttachmentFormat is only set for a combined
         // depth+stencil format (DepthFormatHasStencil() above) - this
@@ -193,8 +220,8 @@ Pipeline::Pipeline(VkDevice device, VkFormat colorFormat, VkFormat depthFormat, 
         const bool depthHasStencil = DepthFormatHasStencil(depthFormat);
         VkPipelineRenderingCreateInfo renderingInfo{};
         renderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
-        renderingInfo.colorAttachmentCount = 1;
-        renderingInfo.pColorAttachmentFormats = &colorFormat;
+        renderingInfo.colorAttachmentCount = static_cast<std::uint32_t>(colorFormats.size());
+        renderingInfo.pColorAttachmentFormats = colorFormats.data();
         renderingInfo.depthAttachmentFormat = depthFormat;
         renderingInfo.stencilAttachmentFormat = depthHasStencil ? depthFormat : VK_FORMAT_UNDEFINED;
 
