@@ -2068,6 +2068,7 @@ if(GTE_ENABLE_EDITOR)
         Editor/SelectionTests.cpp
         Editor/ImGuiMemoryTrackerTests.cpp
         Editor/MemoryPanelDataTests.cpp
+        Editor/LoggerTests.cpp
         Editor/ProfilerPanelDataTests.cpp
         Editor/JobsPanelDataTests.cpp
         Editor/FrameDebuggerDataTests.cpp

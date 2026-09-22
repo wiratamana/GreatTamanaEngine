@@ -616,6 +616,8 @@ if(GTE_ENABLE_EDITOR)
         src/Editor/PlaybackControls.cpp
         src/Editor/ImGuiMemoryTracker.h
         src/Editor/ImGuiMemoryTracker.cpp
+        src/Editor/Logger.h
+        src/Editor/Logger.cpp
         src/Editor/MemoryPanelData.h
         src/Editor/MemoryPanelData.cpp
         src/Editor/ProfilerPanelData.h
