@@ -525,5 +525,58 @@ TEST(RenderGraphPassRecordTest, DefaultConstructedPassRecordHasOpaquesRenderPass
     EXPECT_EQ(record.renderPassEvent, RenderPassEvent::Opaques);
 }
 
+// --- FindMismatchedColorAttachmentExtent (MRT campaign, task_manager/mrt-1,
+// PHASE2) -------------------------------------------------------------------
+//
+// Pure, Vulkan-device-free decision - see RenderGraphTypes.h's own doc
+// comment on this function for the full contract this mirrors
+// (RenderGraph::ExecuteCompiledGraph()'s own mismatched-extent throw is
+// built directly on top of this).
+
+TEST(RenderGraphFindMismatchedColorAttachmentExtentTest, ZeroExtentsHasNoMismatch)
+{
+    const std::vector<VkExtent2D> extents;
+    EXPECT_EQ(FindMismatchedColorAttachmentExtent(extents), std::nullopt);
+}
+
+TEST(RenderGraphFindMismatchedColorAttachmentExtentTest, SingleExtentHasNoMismatch)
+{
+    const std::vector<VkExtent2D> extents{ VkExtent2D{ 1920, 1080 } };
+    EXPECT_EQ(FindMismatchedColorAttachmentExtent(extents), std::nullopt);
+}
+
+TEST(RenderGraphFindMismatchedColorAttachmentExtentTest, IdenticalExtentsHaveNoMismatch)
+{
+    const std::vector<VkExtent2D> extents{
+        VkExtent2D{ 1920, 1080 },
+        VkExtent2D{ 1920, 1080 },
+        VkExtent2D{ 1920, 1080 },
+    };
+    EXPECT_EQ(FindMismatchedColorAttachmentExtent(extents), std::nullopt);
+}
+
+TEST(RenderGraphFindMismatchedColorAttachmentExtentTest, MismatchAtNonZeroIndexIsReported)
+{
+    const std::vector<VkExtent2D> extents{
+        VkExtent2D{ 1920, 1080 },
+        VkExtent2D{ 1920, 1080 },
+        VkExtent2D{ 960, 540 }, // Mismatch at index 2.
+    };
+    const std::optional<std::size_t> mismatch = FindMismatchedColorAttachmentExtent(extents);
+    ASSERT_TRUE(mismatch.has_value());
+    EXPECT_EQ(*mismatch, 2u);
+}
+
+TEST(RenderGraphFindMismatchedColorAttachmentExtentTest, MismatchIsFoundEvenWhenOnlyHeightDiffers)
+{
+    const std::vector<VkExtent2D> extents{
+        VkExtent2D{ 1920, 1080 },
+        VkExtent2D{ 1920, 720 }, // Mismatch at index 1 - width matches, height doesn't.
+    };
+    const std::optional<std::size_t> mismatch = FindMismatchedColorAttachmentExtent(extents);
+    ASSERT_TRUE(mismatch.has_value());
+    EXPECT_EQ(*mismatch, 1u);
+}
+
 } // namespace
 } // namespace gte::rg

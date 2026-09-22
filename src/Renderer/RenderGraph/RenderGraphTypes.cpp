@@ -132,4 +132,23 @@ const char* ToString(RenderPassEvent renderPassEvent) noexcept
     return "Unknown";
 }
 
+// Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE2 - see
+// RenderGraphTypes.h's own doc comment on this function. Plain value
+// comparison against entry 0 - no Vulkan call, no live VkDevice/VkImage
+// involved, which is exactly why this is Tier-1-testable (see
+// tests/Renderer/RenderGraph/RenderGraphTypesTests.cpp).
+std::optional<std::size_t> FindMismatchedColorAttachmentExtent(const std::vector<VkExtent2D>& extents) noexcept
+{
+    if (extents.size() < 2) {
+        return std::nullopt; // 0 or 1 extent - nothing to compare against, vacuously no mismatch.
+    }
+    const VkExtent2D& first = extents[0];
+    for (std::size_t i = 1; i < extents.size(); ++i) {
+        if (extents[i].width != first.width || extents[i].height != first.height) {
+            return i;
+        }
+    }
+    return std::nullopt;
+}
+
 } // namespace gte::rg

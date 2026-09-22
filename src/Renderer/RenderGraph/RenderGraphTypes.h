@@ -38,6 +38,7 @@
 #include <volk.h>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -557,6 +558,23 @@ struct ColorAttachmentDesc {
     TextureHandle handle;
     std::optional<std::array<float, 4>> clearColor;
 };
+
+// Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE2 - PURE,
+// Tier-1-testable (plain VkExtent2D comparison only - no VkDevice/VkImage
+// involved) - given the resolved extents of a pass's declared color
+// attachments, in pass.colorAttachments order, returns the 0-based index of
+// the FIRST entry whose extent differs from entry 0, or std::nullopt if all
+// N extents match (vacuously true for N <= 1 - the single-attachment/
+// no-attachment case every existing pass in the engine hits today).
+// Extracted as its own function, rather than left inline inside
+// RenderGraph::ExecuteCompiledGraph(), specifically so a real Tier-1 test
+// can verify this exact decision with plain data and no live VkDevice -
+// mirroring TargetsDepthState()/IsColorAttachmentWriteAccess()'s own
+// precedent (RenderGraphBarrierPlanner.h) for the identical reason. Lives
+// here (rather than RenderGraphBarrierPlanner.h) since it operates on this
+// campaign's own ColorAttachmentDesc/colorAttachments shape, not on
+// barrier-transition ResourceState.
+std::optional<std::size_t> FindMismatchedColorAttachmentExtent(const std::vector<VkExtent2D>& extents) noexcept;
 
 struct PassRecord {
     // Must be a string literal / static-storage-duration const char* -

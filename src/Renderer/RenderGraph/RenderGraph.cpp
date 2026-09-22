@@ -2,7 +2,9 @@
 
 #include "../Renderer.h"
 
+#include <cassert>
 #include <cstring>
+#include <stdexcept>
 
 namespace gte::rg {
 
@@ -322,37 +324,39 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         // RenderGraphTimestampPool::WriteBegin()'s own doc comment.
         m_timestampPool.WriteBegin(cmd, isPipelined, pipelinedBufferIndex, timingSlot);
 
-        // MVP scope (RENDERGRAPH_PHASE5_BARRIER_SYNTHESIS_STRATEGY_v2.md,
-        // carried into this phase): a SINGLE color attachment plus an
-        // optional depth attachment per pass. A pass with no
-        // ColorAttachmentWrite write (e.g. a future transfer-only/
+        // Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE2 -
+        // replaces the old "scan pass.writes, keep only the LAST
+        // ColorAttachmentWrite" logic with a direct, ordered read of
+        // pass.colorAttachments (PHASE1) - attachment index in that vector is
+        // the shader layout(location = N) contract (see RenderGraphTypes.h's
+        // own ColorAttachmentDesc doc comment). Depth is UNCHANGED - still
+        // found via the exact same pass.writes scan as before (a pass has at
+        // most one depth/stencil attachment - out of scope for this
+        // campaign, see task_manager/mrt-1/PHASE0_MASTER_STRATEGY.md). A
+        // pass with no color attachments at all (e.g. a transfer-only/
         // compute-only pass) gets no vkCmdBeginRendering bracket at all -
-        // its `execute` callback is invoked with a zero-extent
-        // PassContext and is expected to record whatever non-rendering
-        // Vulkan work it needs directly against `cmd`.
-        bool hasColorWrite = false;
-        TextureHandle colorHandle;
+        // its `execute` callback is invoked with a zero-extent PassContext
+        // and is expected to record whatever non-rendering Vulkan work it
+        // needs directly against `cmd`.
         bool hasDepthWrite = false;
         TextureHandle depthHandle;
         for (const ResourceUsage& usage : pass.writes) {
             if (usage.kind != ResourceKind::Texture) {
                 continue;
             }
-            // IsColorAttachmentWriteAccess()/TargetsDepthState() (Phase 5/6
-            // of the compute-shader campaign - RenderGraphBarrierPlanner.h)
-            // are the Tier-1-testable, extracted decisions behind this
-            // scan - a pure ComputeShaderWrite usage (declared via
-            // PassBuilder::WriteTexture()) correctly triggers NEITHER
-            // branch, so a pure compute pass never gets a
-            // vkCmdBeginRendering bracket at all.
-            if (IsColorAttachmentWriteAccess(usage.access)) {
-                colorHandle = usage.texture;
-                hasColorWrite = true;
-            } else if (TargetsDepthState(usage.access)) {
+            if (TargetsDepthState(usage.access)) {
                 depthHandle = usage.texture;
                 hasDepthWrite = true;
             }
         }
+        // This equivalence (hasColorWrite == !pass.colorAttachments.empty())
+        // holds because WriteColorAttachment() (PHASE1) is the ONLY call
+        // site anywhere in this codebase that ever constructs a
+        // ColorAttachmentWrite usage, and it ALWAYS pushes onto both
+        // pass.writes AND pass.colorAttachments in lockstep - see this
+        // campaign's own PHASE2 strategy document, Step 2, for the full
+        // "load-bearing fact" analysis.
+        const bool hasColorWrite = !pass.colorAttachments.empty();
 
         PassContext ctx;
         ctx.cmd = cmd;
@@ -407,30 +411,92 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
 
         bool didBeginRendering = false;
         if (hasColorWrite) {
-            const PhysicalTexture& colorTex = physicalTextures[colorHandle.index];
+            // Multi-Render-Target (MRT) campaign (task_manager/mrt-1),
+            // PHASE2 - one VkRenderingAttachmentInfo PER declared color
+            // attachment, built in the EXACT order pass.colorAttachments
+            // holds them (== shader layout(location = N) out). A plain
+            // std::vector, sized once per pass, is consistent with this
+            // function's own existing allocation profile (e.g.
+            // physicalTextures/physicalBuffers above) - no fixed-capacity/
+            // small_vector convention exists elsewhere in this codebase to
+            // prefer instead.
+            std::vector<VkRenderingAttachmentInfo> colorAttachmentInfos;
+            colorAttachmentInfos.reserve(pass.colorAttachments.size());
 
-            // Phase 7 (RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md)
-            // - loadOp is CLEAR whenever this pass declared a color clear
-            // value (PassRecord::colorClearValue, set via
-            // PassBuilder::WriteColorAttachment()'s own optional parameter -
-            // see RenderGraphBuilder.h), LOAD otherwise (Phase 6's original,
-            // only behavior - never silently discards another pass's, or a
-            // previous frame's, contents a pass author didn't ask to lose).
-            // storeOp = STORE (always): this graph has no way to know yet
-            // whether a later pass/import consumer needs this attachment's
-            // contents, so nothing is ever discarded speculatively.
-            VkRenderingAttachmentInfo colorAttachment{};
-            colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-            colorAttachment.imageView = colorTex.target.imageView;
-            colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-            colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-            if (pass.colorClearValue.has_value()) {
-                colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-                const std::array<float, 4>& c = *pass.colorClearValue;
-                colorAttachment.clearValue.color = { { c[0], c[1], c[2], c[3] } };
-            } else {
-                colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+            std::vector<VkExtent2D> resolvedExtents;
+            resolvedExtents.reserve(pass.colorAttachments.size());
+
+            for (const ColorAttachmentDesc& desc : pass.colorAttachments) {
+                // This handle was ALREADY resolved above, by the exact same
+                // generic `for (const ResourceUsage& usage : pass.writes)`
+                // barrier loop every pass already goes through, completely
+                // unchanged by this phase - WriteColorAttachment() (PHASE1)
+                // always pushes a matching ColorAttachmentWrite usage onto
+                // pass.writes in lockstep with pass.colorAttachments,
+                // specifically so this holds (see this file's own Step 2
+                // analysis in the PHASE2 strategy document). Asserted here
+                // defensively (cheap, debug-only) so a future regression
+                // that ever breaks that lockstep invariant fails LOUDLY,
+                // right here, instead of silently building a
+                // VkRenderingAttachmentInfo around a VK_NULL_HANDLE
+                // imageView that would otherwise only surface as a
+                // confusing validation-layer error deep inside
+                // vkCmdBeginRendering.
+                assert(desc.handle.index < physicalTextures.size() &&
+                    physicalTextures[desc.handle.index].resolved &&
+                    "RenderGraph::ExecuteCompiledGraph: a pass.colorAttachments entry was never "
+                    "resolved - WriteColorAttachment() must always also push a matching "
+                    "ColorAttachmentWrite onto pass.writes (see PHASE1)");
+                const PhysicalTexture& colorTex = physicalTextures[desc.handle.index];
+                resolvedExtents.push_back(colorTex.target.extent);
+
+                // Phase 7 (RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md)
+                // - loadOp is CLEAR whenever THIS attachment declared its
+                // own clear color (ColorAttachmentDesc::clearColor, set via
+                // PassBuilder::WriteColorAttachment()'s own optional
+                // parameter - see RenderGraphBuilder.h), LOAD otherwise
+                // (Phase 6's original, only behavior - never silently
+                // discards another pass's, or a previous frame's, contents
+                // a pass author didn't ask to lose). storeOp = STORE
+                // (always): this graph has no way to know yet whether a
+                // later pass/import consumer needs this attachment's
+                // contents, so nothing is ever discarded speculatively.
+                VkRenderingAttachmentInfo colorAttachment{};
+                colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+                colorAttachment.imageView = colorTex.target.imageView;
+                colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+                colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+                if (desc.clearColor.has_value()) {
+                    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+                    const std::array<float, 4>& c = *desc.clearColor;
+                    colorAttachment.clearValue.color = { { c[0], c[1], c[2], c[3] } };
+                } else {
+                    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+                }
+                colorAttachmentInfos.push_back(colorAttachment);
             }
+
+            // LOCKED (see task_manager/mrt-1/PHASE2_EXECUTE_LAYER_MRT_RECORDING.md's
+            // own Step 3.2 "Decision 2"): a real, unconditional throw - never
+            // a plain assert() a release/NDEBUG build would silently compile
+            // away. Built on the pure, Tier-1-tested decision function above
+            // (RenderGraphTypes.h/.cpp), so this exact check has real,
+            // VkDevice-free test coverage (RenderGraphTypesTests.cpp).
+            if (const std::optional<std::size_t> mismatchIndex =
+                    FindMismatchedColorAttachmentExtent(resolvedExtents)) {
+                const VkExtent2D& first = resolvedExtents[0];
+                const VkExtent2D& bad = resolvedExtents[*mismatchIndex];
+                throw std::runtime_error(
+                    "RenderGraph::ExecuteCompiledGraph: pass \"" +
+                    std::string(pass.name != nullptr ? pass.name : "<unnamed>") +
+                    "\" declared color attachments with mismatched extents - attachment 0 is " +
+                    std::to_string(first.width) + "x" + std::to_string(first.height) + ", attachment " +
+                    std::to_string(*mismatchIndex) + " is " + std::to_string(bad.width) + "x" +
+                    std::to_string(bad.height) +
+                    " - every color attachment on one pass must share the same extent (G-buffer-style "
+                    "targets are always rendered at the same resolution).");
+            }
+            const VkExtent2D firstExtent = resolvedExtents[0];
 
             VkRenderingAttachmentInfo depthAttachment{};
             bool hasDepthAttachment = false;
@@ -453,33 +519,38 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
 
             VkRenderingInfo renderingInfo{};
             renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
-            renderingInfo.renderArea = { { 0, 0 }, colorTex.target.extent };
+            renderingInfo.renderArea = { { 0, 0 }, firstExtent };
             renderingInfo.layerCount = 1;
-            renderingInfo.colorAttachmentCount = 1;
-            renderingInfo.pColorAttachments = &colorAttachment;
+            renderingInfo.colorAttachmentCount = static_cast<std::uint32_t>(colorAttachmentInfos.size());
+            renderingInfo.pColorAttachments = colorAttachmentInfos.data();
             renderingInfo.pDepthAttachment = hasDepthAttachment ? &depthAttachment : nullptr;
 
             vkCmdBeginRendering(cmd, &renderingInfo);
 
             // Phase 5's own header comment on this file's future consumer:
             // viewport/scissor setup is RenderGraph's responsibility, sized
-            // to this pass's own resolved color attachment - mirrors
+            // to this pass's own resolved color attachment(s) - mirrors
             // FrameRecorder::RecordFrame()'s existing behavior exactly.
+            // Multi-Render-Target (MRT) campaign, PHASE2 - sized from
+            // attachment 0 (firstExtent), which every OTHER declared color
+            // attachment on this pass is now guaranteed (by the throw above)
+            // to share exactly - identical to today's single-attachment
+            // behavior for every pre-existing pass in the engine.
             VkViewport viewport{};
             viewport.x = 0.0f;
             viewport.y = 0.0f;
-            viewport.width = static_cast<float>(colorTex.target.extent.width);
-            viewport.height = static_cast<float>(colorTex.target.extent.height);
+            viewport.width = static_cast<float>(firstExtent.width);
+            viewport.height = static_cast<float>(firstExtent.height);
             viewport.minDepth = 0.0f;
             viewport.maxDepth = 1.0f;
             vkCmdSetViewport(cmd, 0, 1, &viewport);
 
             VkRect2D scissor{};
             scissor.offset = { 0, 0 };
-            scissor.extent = colorTex.target.extent;
+            scissor.extent = firstExtent;
             vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-            ctx.colorAttachmentExtent = colorTex.target.extent;
+            ctx.colorAttachmentExtent = firstExtent;
             didBeginRendering = true;
         }
 

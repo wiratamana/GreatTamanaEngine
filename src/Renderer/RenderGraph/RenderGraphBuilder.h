@@ -207,9 +207,17 @@ public:
         // Capped at kMaxColorAttachments (8), asserted in the .cpp. For
         // backward compatibility, PassRecord::colorClearValue is ALSO still
         // populated with the exact same value every call supplies (last
-        // call wins there, unchanged pre-existing behavior) - it remains
-        // what RenderGraph::ExecuteCompiledGraph() reads until PHASE2 of
-        // this campaign switches it to read `colorAttachments` instead.
+        // call wins there, unchanged pre-existing behavior) - kept purely so
+        // the 2 pre-existing RenderGraphBuilderTests.cpp tests that assert on
+        // it directly keep passing unmodified (see
+        // task_manager/mrt-1/PHASE1_COMPLETION_REPORT.md's own "Design
+        // decision" section). As of PHASE2 of this campaign,
+        // RenderGraph::ExecuteCompiledGraph() no longer reads this field at
+        // all - it reads `colorAttachments[i].clearColor` exclusively (see
+        // task_manager/mrt-1/PHASE2_COMPLETION_REPORT.md) - so
+        // `colorClearValue` is genuinely dead weight in production today,
+        // deliberately left in place rather than removed (see that report's
+        // own "colorClearValue disposition" note).
         // `WriteDepthStencilAttachment()` is UNCHANGED by this campaign -
         // still exactly one depth attachment per pass, by design.
         void WriteColorAttachment(TextureHandle handle, const std::optional<std::array<float, 4>>& clearColor = std::nullopt);
