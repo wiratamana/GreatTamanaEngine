@@ -55,31 +55,33 @@ namespace {
 // already audited and converted away from when ResourceKind::VolumeTexture
 // was first added (Atmosphere Scattering campaign, Phase 2) - this one file
 // was missed by that audit, silently resolving every VolumeTexture usage to
-// an empty string. Now a real, exhaustive, `default:`-less three-way
-// `switch (usage.kind)`, mirroring that same established convention, so a
-// future fourth ResourceKind fails to compile here too, until this function
-// is updated to match.
+// an empty string. Was fixed to a real, exhaustive, `default:`-less
+// three-way `switch (usage.kind)`, mirroring that same established
+// convention, so a future fourth ResourceKind fails to compile here too,
+// until this function is updated to match. render-pass-6 campaign, PHASE6
+// (item 2.2) - that hand-rolled switch was converted to a DispatchByKind()
+// call (RenderGraphTypes.h) - same "no default: case, ever" exhaustiveness
+// guarantee, just routed through the shared dispatcher every other
+// ResourceKind branch in the codebase now uses too.
 std::string ResourceUsageName(const ResourceUsage& usage, const CompiledGraphInput& input)
 {
     std::string name;
-    switch (usage.kind) {
-    case ResourceKind::Texture:
-        if (usage.texture.index < input.textures.size() && input.textures[usage.texture.index].name != nullptr) {
-            name = input.textures[usage.texture.index].name;
-        }
-        break;
-    case ResourceKind::Buffer:
-        if (usage.buffer.index < input.buffers.size() && input.buffers[usage.buffer.index].name != nullptr) {
-            name = input.buffers[usage.buffer.index].name;
-        }
-        break;
-    case ResourceKind::VolumeTexture:
-        if (usage.volumeTexture.index < input.volumeTextures.size()
-            && input.volumeTextures[usage.volumeTexture.index].name != nullptr) {
-            name = input.volumeTextures[usage.volumeTexture.index].name;
-        }
-        break;
-    }
+    DispatchByKind(usage,
+        [&](TextureHandle h) {
+            if (h.index < input.textures.size() && input.textures[h.index].name != nullptr) {
+                name = input.textures[h.index].name;
+            }
+        },
+        [&](BufferHandle h) {
+            if (h.index < input.buffers.size() && input.buffers[h.index].name != nullptr) {
+                name = input.buffers[h.index].name;
+            }
+        },
+        [&](VolumeTextureHandle h) {
+            if (h.index < input.volumeTextures.size() && input.volumeTextures[h.index].name != nullptr) {
+                name = input.volumeTextures[h.index].name;
+            }
+        });
     return name;
 }
 

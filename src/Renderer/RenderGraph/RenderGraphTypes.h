@@ -38,10 +38,12 @@
 #include <volk.h>
 
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <stdexcept>
 #include <vector>
 
 namespace gte::rg {
@@ -549,6 +551,79 @@ struct ResourceUsage {
     }
 };
 
+// render-pass-6 campaign, PHASE6 (item 2.2) - REPLACES every independently
+// hand-rolled `switch (usage.kind) { Texture / Buffer / VolumeTexture }`
+// block scattered across RenderGraph.cpp/RenderGraphCompiler.cpp/
+// RenderGraphSnapshot.cpp with ONE generic dispatch point every one of them
+// routes through instead. `usage.kind` still drives a REAL, exhaustive
+// switch internally - deliberately NOT a `default:`-having fallback of any
+// kind, so a future 4th ResourceKind enumerator STILL fails to compile here
+// until every call site's own three (soon four) lambdas are updated - this
+// is the exact same "no default: case, ever" guarantee IsWriteAccess()/
+// ToString() already provide for ResourceAccess, extended to ResourceKind's
+// own dispatch shape.
+//
+// `onTexture`/`onBuffer`/`onVolumeTexture` are three separate callables
+// (never one generic templated callable dispatched via `if constexpr`) -
+// this is deliberate: three DISTINCT lambda parameters, one per kind, means
+// a caller who forgets to handle one kind gets a real compile error
+// (missing function argument) rather than a silently-empty generic body -
+// mirroring this file's own general "plain, explicit code over template-
+// heavy machinery" house style (see ResourceUsage's own doc comment on why
+// it is a tagged struct, not a std::variant).
+//
+// All three callables must return the SAME type (C++ requires every return
+// statement inside a function with a deduced `auto` return type to agree) -
+// `void` is completely valid (RenderGraph.cpp's ApplyUsageBarrierIfNeeded()
+// uses this: all the divergent per-kind logic lives inside the three
+// lambdas, the dispatcher itself returns nothing), as is a shared pointer
+// type (e.g. `ResourceLifetime*`, letting one lambda per kind resolve BOTH
+// "which vector" and "which index" in one step - see RenderGraphCompiler.cpp's
+// lifetime `touch()` lambda) or a shared plain value type (`std::int32_t`,
+// `bool`, `std::string`, ...). This is a per-call-site choice, re-checked
+// independently at each of this template's own instantiations - it is never
+// a global constraint on DispatchByKind() itself.
+template <typename TextureFn, typename BufferFn, typename VolumeTextureFn>
+auto DispatchByKind(const ResourceUsage& usage, TextureFn&& onTexture, BufferFn&& onBuffer,
+    VolumeTextureFn&& onVolumeTexture)
+{
+    switch (usage.kind) {
+    case ResourceKind::Texture:
+        return onTexture(usage.texture);
+    case ResourceKind::Buffer:
+        return onBuffer(usage.buffer);
+    case ResourceKind::VolumeTexture:
+        return onVolumeTexture(usage.volumeTexture);
+    }
+    // Unreachable in practice - the switch above is exhaustive over all 3
+    // current ResourceKind enumerators with no default: case, so this line
+    // is only ever reached if a caller somehow constructed an out-of-range
+    // ResourceKind value directly (never possible through any real
+    // ResourceUsage::ForTexture()/ForBuffer()/ForVolumeTexture() factory).
+    // Kept ONLY for the compiler's own "not all control paths return a
+    // value" diagnostic on some compilers/warning levels (MSVC's C4715 in
+    // particular, which can fire even for a switch that visibly covers
+    // every named enumerator, since it cannot statically rule out a value
+    // outside the enum's named range at runtime).
+    //
+    // Deliberately DOES NOT call onTexture/onBuffer/onVolumeTexture again
+    // as a fallback (unlike naively mirroring IsWriteAccess()/ToString()'s
+    // own "return a safe sentinel" convention) - those two functions return
+    // a concrete, known, always-safe sentinel type (bool/const char*); this
+    // template's return type is caller-chosen and may be a pointer, a pair,
+    // or anything else with no safe default - and, more importantly,
+    // re-invoking one of the three callables here would silently RE-RUN
+    // real, possibly side-effecting per-kind logic (e.g. a barrier site
+    // emitting a second GPU barrier) for a usage.kind value that, if this
+    // line is ever genuinely reached, is already corrupt - doing nothing
+    // and failing loudly is strictly safer than doing something wrong. A
+    // thrown exception is valid for ANY deduced return type (including
+    // void), since a path that always throws never needs to produce a
+    // value.
+    assert(false && "DispatchByKind: ResourceUsage::kind held a value outside ResourceKind's 3 named enumerators");
+    throw std::logic_error(
+        "DispatchByKind: ResourceUsage::kind held a value outside ResourceKind's 3 named enumerators");
+}
 
 // Forward-declared only - fully specified in Phase 6
 // (RENDERGRAPH_PHASE6_EXECUTION_ENGINE_STRATEGY_v2.md), once Phase 4's

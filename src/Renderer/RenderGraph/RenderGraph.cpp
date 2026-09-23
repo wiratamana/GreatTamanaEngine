@@ -168,77 +168,81 @@ void RenderGraph::ApplyUsageBarrierIfNeeded(VkCommandBuffer cmd, const ResourceU
     // been a real, reachable out-of-bounds `physicalBuffers` access the
     // instant a volume-texture usage was ever declared. Converted to a
     // real, exhaustive, `default:`-less three-way `switch (usage.kind)`
-    // BEFORE ResourceKind::VolumeTexture was ever added to the enum.
-    switch (usage.kind) {
-    case ResourceKind::Texture: {
-        EnsureTextureResolved(usage.texture.index, input, physicalTextures);
-        PhysicalTexture& tex = physicalTextures[usage.texture.index];
+    // BEFORE ResourceKind::VolumeTexture was ever added to the enum, and
+    // then (render-pass-6 campaign, PHASE6, item 2.2) to a `void`-returning
+    // DispatchByKind() call (RenderGraphTypes.h) - the three branches
+    // genuinely cannot be unified into one same-return-type dispatch
+    // (Texture legitimately does meaningfully more work than Buffer/
+    // VolumeTexture), so `void` is what every lambda returns; each case's
+    // existing body was moved verbatim into its own lambda, using the
+    // lambda's own handle parameter instead of usage.texture/usage.buffer/
+    // usage.volumeTexture.
+    DispatchByKind(usage,
+        [&](TextureHandle textureHandle) {
+            EnsureTextureResolved(textureHandle.index, input, physicalTextures);
+            PhysicalTexture& tex = physicalTextures[textureHandle.index];
 
-        // Every ResourceAccess kind except DepthStencilAttachmentReadWrite
-        // targets the COLOR image of this handle by default - Atmosphere
-        // Scattering + Aerial Perspective campaign, Phase 7
-        // (ATMOSPHERE_PHASE7_SKY_BACKGROUND_AND_COMPOSITE_PASSES_v1.md)
-        // closes the MVP limitation this comment used to describe outright
-        // ("there is no way today to declare... a distinct usage") by ALSO
-        // consulting the usage's own explicit `isDepthResource` flag
-        // (RenderGraphTypes.h's ResourceUsage/PassBuilder::ReadTexture()) -
-        // this is what lets the Aerial Perspective Composite pass declare a
-        // ShaderRead against the DEPTH half of the Game/Scene View's own
-        // already-imported TextureHandle (which also carries a color
-        // image), without needing a second, separately-imported handle for
-        // the same physical depth image. TargetsDepthState() itself
-        // (RenderGraphBarrierPlanner.h) is UNCHANGED by this addition - it
-        // still only ever returns true for DepthStencilAttachmentReadWrite,
-        // exactly as Phase 5 of the compute-shader campaign
-        // (COMPUTE_PHASE5_SYNCHRONIZATION_STRATEGY_v2.md) confirmed for a
-        // storage-image compute access (ComputeShaderRead/
-        // ComputeShaderWrite), which is still correctly routed to the color
-        // half either way (a compute access can never set isDepthResource
-        // true today - no call site does).
-        const bool isDepthAccess = TargetsDepthState(usage.access) || usage.isDepthResource;
-        ResourceState& state = isDepthAccess ? tex.depthState : tex.colorState;
-        const ResourceState next = RequiredStateFor(usage.access, isDepthAccess);
+            // Every ResourceAccess kind except DepthStencilAttachmentReadWrite
+            // targets the COLOR image of this handle by default - Atmosphere
+            // Scattering + Aerial Perspective campaign, Phase 7
+            // (ATMOSPHERE_PHASE7_SKY_BACKGROUND_AND_COMPOSITE_PASSES_v1.md)
+            // closes the MVP limitation this comment used to describe outright
+            // ("there is no way today to declare... a distinct usage") by ALSO
+            // consulting the usage's own explicit `isDepthResource` flag
+            // (RenderGraphTypes.h's ResourceUsage/PassBuilder::ReadTexture()) -
+            // this is what lets the Aerial Perspective Composite pass declare a
+            // ShaderRead against the DEPTH half of the Game/Scene View's own
+            // already-imported TextureHandle (which also carries a color
+            // image), without needing a second, separately-imported handle for
+            // the same physical depth image. TargetsDepthState() itself
+            // (RenderGraphBarrierPlanner.h) is UNCHANGED by this addition - it
+            // still only ever returns true for DepthStencilAttachmentReadWrite,
+            // exactly as Phase 5 of the compute-shader campaign
+            // (COMPUTE_PHASE5_SYNCHRONIZATION_STRATEGY_v2.md) confirmed for a
+            // storage-image compute access (ComputeShaderRead/
+            // ComputeShaderWrite), which is still correctly routed to the color
+            // half either way (a compute access can never set isDepthResource
+            // true today - no call site does).
+            const bool isDepthAccess = TargetsDepthState(usage.access) || usage.isDepthResource;
+            ResourceState& state = isDepthAccess ? tex.depthState : tex.colorState;
+            const ResourceState next = RequiredStateFor(usage.access, isDepthAccess);
 
-        if (RequiresBarrier(state, next)) {
-            const VkImage image = isDepthAccess ? tex.target.depthImage : tex.target.image;
-            const VkImageAspectFlags aspect = isDepthAccess
-                ? (VK_IMAGE_ASPECT_DEPTH_BIT | (tex.target.depthHasStencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0))
-                : static_cast<VkImageAspectFlags>(VK_IMAGE_ASPECT_COLOR_BIT);
-            const VkImageSubresourceRange range{ aspect, 0, 1, 0, 1 };
-            EmitImageBarrier(cmd, image, range, state, next);
-        }
-        state = next;
-        break;
-    }
-    case ResourceKind::Buffer: {
-        EnsureBufferResolved(usage.buffer.index, input, physicalBuffers);
-        PhysicalBuffer& buf = physicalBuffers[usage.buffer.index];
-        const ResourceState next = RequiredStateFor(usage.access, false);
-        if (RequiresBarrier(buf.state, next)) {
-            EmitBufferBarrier(cmd, buf.buffer, 0, buf.size, buf.state, next);
-        }
-        buf.state = next;
-        break;
-    }
-    case ResourceKind::VolumeTexture: {
-        // Atmosphere Scattering campaign, Phase 2
-        // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md) - a
-        // volume texture has no depth-companion concept at all (unlike a
-        // 2D PhysicalTexture's colorState/depthState split), so this is a
-        // single ResourceState, always targeting the COLOR aspect of the
-        // image (VK_IMAGE_ASPECT_COLOR_BIT - the only aspect a color
-        // VK_FORMAT_R16G16B16A16_SFLOAT-style volume image ever has).
-        EnsureVolumeTextureResolved(usage.volumeTexture.index, input, physicalVolumeTextures);
-        PhysicalVolumeTexture& vol = physicalVolumeTextures[usage.volumeTexture.index];
-        const ResourceState next = RequiredStateFor(usage.access, false);
-        if (RequiresBarrier(vol.state, next)) {
-            const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-            EmitImageBarrier(cmd, vol.target.image, range, vol.state, next);
-        }
-        vol.state = next;
-        break;
-    }
-    }
+            if (RequiresBarrier(state, next)) {
+                const VkImage image = isDepthAccess ? tex.target.depthImage : tex.target.image;
+                const VkImageAspectFlags aspect = isDepthAccess
+                    ? (VK_IMAGE_ASPECT_DEPTH_BIT | (tex.target.depthHasStencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0))
+                    : static_cast<VkImageAspectFlags>(VK_IMAGE_ASPECT_COLOR_BIT);
+                const VkImageSubresourceRange range{ aspect, 0, 1, 0, 1 };
+                EmitImageBarrier(cmd, image, range, state, next);
+            }
+            state = next;
+        },
+        [&](BufferHandle bufferHandle) {
+            EnsureBufferResolved(bufferHandle.index, input, physicalBuffers);
+            PhysicalBuffer& buf = physicalBuffers[bufferHandle.index];
+            const ResourceState next = RequiredStateFor(usage.access, false);
+            if (RequiresBarrier(buf.state, next)) {
+                EmitBufferBarrier(cmd, buf.buffer, 0, buf.size, buf.state, next);
+            }
+            buf.state = next;
+        },
+        [&](VolumeTextureHandle volumeHandle) {
+            // Atmosphere Scattering campaign, Phase 2
+            // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md) - a
+            // volume texture has no depth-companion concept at all (unlike a
+            // 2D PhysicalTexture's colorState/depthState split), so this is a
+            // single ResourceState, always targeting the COLOR aspect of the
+            // image (VK_IMAGE_ASPECT_COLOR_BIT - the only aspect a color
+            // VK_FORMAT_R16G16B16A16_SFLOAT-style volume image ever has).
+            EnsureVolumeTextureResolved(volumeHandle.index, input, physicalVolumeTextures);
+            PhysicalVolumeTexture& vol = physicalVolumeTextures[volumeHandle.index];
+            const ResourceState next = RequiredStateFor(usage.access, false);
+            if (RequiresBarrier(vol.state, next)) {
+                const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+                EmitImageBarrier(cmd, vol.target.image, range, vol.state, next);
+            }
+            vol.state = next;
+        });
 }
 
 // render-pass-6 campaign, PHASE2 (item 2.6), updated by PHASE3 (item 2.7) -

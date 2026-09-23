@@ -398,6 +398,90 @@ TEST(RenderGraphResourceUsageTest, ForVolumeTextureSetsKindAndVolumeTextureField
     EXPECT_EQ(usage.access, ResourceAccess::ComputeShaderWrite);
 }
 
+// --- DispatchByKind() (render-pass-6 campaign, PHASE6, item 2.2) ---------
+//
+// Confirms the generic dispatcher (RenderGraphTypes.h) routes to exactly
+// ONE of its three callables, with the correct handle, for each of the
+// three ResourceKind values, and that a non-void return type round-trips
+// correctly through all three ResourceUsage::For*() factories.
+
+TEST(RenderGraphDispatchByKindTest, TextureUsageDispatchesOnlyToOnTextureWithTheCorrectHandle)
+{
+    const ResourceUsage usage = ResourceUsage::ForTexture(TextureHandle{ 5, 2 }, ResourceAccess::ShaderRead);
+    bool onTextureCalled = false;
+    bool onBufferCalled = false;
+    bool onVolumeTextureCalled = false;
+    TextureHandle received;
+
+    DispatchByKind(usage,
+        [&](TextureHandle h) { onTextureCalled = true; received = h; },
+        [&](BufferHandle) { onBufferCalled = true; },
+        [&](VolumeTextureHandle) { onVolumeTextureCalled = true; });
+
+    EXPECT_TRUE(onTextureCalled);
+    EXPECT_FALSE(onBufferCalled);
+    EXPECT_FALSE(onVolumeTextureCalled);
+    EXPECT_EQ(received, (TextureHandle{ 5, 2 }));
+}
+
+TEST(RenderGraphDispatchByKindTest, BufferUsageDispatchesOnlyToOnBufferWithTheCorrectHandle)
+{
+    const ResourceUsage usage = ResourceUsage::ForBuffer(BufferHandle{ 3, 1 }, ResourceAccess::TransferDst);
+    bool onTextureCalled = false;
+    bool onBufferCalled = false;
+    bool onVolumeTextureCalled = false;
+    BufferHandle received;
+
+    DispatchByKind(usage,
+        [&](TextureHandle) { onTextureCalled = true; },
+        [&](BufferHandle h) { onBufferCalled = true; received = h; },
+        [&](VolumeTextureHandle) { onVolumeTextureCalled = true; });
+
+    EXPECT_FALSE(onTextureCalled);
+    EXPECT_TRUE(onBufferCalled);
+    EXPECT_FALSE(onVolumeTextureCalled);
+    EXPECT_EQ(received, (BufferHandle{ 3, 1 }));
+}
+
+TEST(RenderGraphDispatchByKindTest, VolumeTextureUsageDispatchesOnlyToOnVolumeTextureWithTheCorrectHandle)
+{
+    const ResourceUsage usage =
+        ResourceUsage::ForVolumeTexture(VolumeTextureHandle{ 8, 3 }, ResourceAccess::ComputeShaderWrite);
+    bool onTextureCalled = false;
+    bool onBufferCalled = false;
+    bool onVolumeTextureCalled = false;
+    VolumeTextureHandle received;
+
+    DispatchByKind(usage,
+        [&](TextureHandle) { onTextureCalled = true; },
+        [&](BufferHandle) { onBufferCalled = true; },
+        [&](VolumeTextureHandle h) { onVolumeTextureCalled = true; received = h; });
+
+    EXPECT_FALSE(onTextureCalled);
+    EXPECT_FALSE(onBufferCalled);
+    EXPECT_TRUE(onVolumeTextureCalled);
+    EXPECT_EQ(received, (VolumeTextureHandle{ 8, 3 }));
+}
+
+TEST(RenderGraphDispatchByKindTest, DispatchByKindWithNonVoidReturnTypeProducesTheExpectedValue)
+{
+    const ResourceUsage textureUsage = ResourceUsage::ForTexture(TextureHandle{ 1, 1 }, ResourceAccess::ShaderRead);
+    const ResourceUsage bufferUsage = ResourceUsage::ForBuffer(BufferHandle{ 2, 1 }, ResourceAccess::ShaderRead);
+    const ResourceUsage volumeTextureUsage =
+        ResourceUsage::ForVolumeTexture(VolumeTextureHandle{ 3, 1 }, ResourceAccess::ShaderRead);
+
+    auto dispatch = [](const ResourceUsage& usage) {
+        return DispatchByKind(usage,
+            [](TextureHandle) { return std::int32_t{ 10 }; },
+            [](BufferHandle) { return std::int32_t{ 20 }; },
+            [](VolumeTextureHandle) { return std::int32_t{ 30 }; });
+    };
+
+    EXPECT_EQ(dispatch(textureUsage), 10);
+    EXPECT_EQ(dispatch(bufferUsage), 20);
+    EXPECT_EQ(dispatch(volumeTextureUsage), 30);
+}
+
 
 TEST(RenderGraphPassRecordTest, ReadsAndWritesCanBeAppendedIndependently)
 {

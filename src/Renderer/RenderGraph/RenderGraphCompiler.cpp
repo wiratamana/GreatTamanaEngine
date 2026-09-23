@@ -52,20 +52,20 @@ std::vector<RenderPassEventContradiction> DetectRenderPassEventContradictions(
 {
     std::vector<RenderPassEventContradiction> contradictions;
 
-    // Tiny helper: does `usage` refer to the same resource as `other`?
+    // render-pass-6 campaign, PHASE6 (item 2.2) - converted from a
+    // hand-rolled `switch (a.kind)` to DispatchByKind() (RenderGraphTypes.h).
+    // Permitted per PHASE6_RESOURCEKIND_DISPATCH_TABLE.md's own "PHASE4/
+    // PHASE6 interaction" resolution: this function's PUBLIC signature and
+    // observable return value are unaffected - only this internal lambda's
+    // dispatch mechanism changed.
     auto sameResource = [](const ResourceUsage& a, const ResourceUsage& b) {
         if (a.kind != b.kind) {
             return false;
         }
-        switch (a.kind) {
-        case ResourceKind::Texture:
-            return a.texture == b.texture;
-        case ResourceKind::Buffer:
-            return a.buffer == b.buffer;
-        case ResourceKind::VolumeTexture:
-            return a.volumeTexture == b.volumeTexture;
-        }
-        return false;
+        return DispatchByKind(a,
+            [&](TextureHandle) { return a.texture == b.texture; },
+            [&](BufferHandle) { return a.buffer == b.buffer; },
+            [&](VolumeTextureHandle) { return a.volumeTexture == b.volumeTexture; });
     };
 
     for (std::size_t readerPos = 0; readerPos < processingOrder.size(); ++readerPos) {
@@ -217,26 +217,30 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
     std::vector<std::int32_t> firstTextureWriter(input.textures.size(), -1);
     std::vector<std::int32_t> firstBufferWriter(input.buffers.size(), -1);
     std::vector<std::int32_t> firstVolumeTextureWriter(input.volumeTextures.size(), -1);
+    // render-pass-6 campaign, PHASE6 (item 2.2) - resolves a pointer directly
+    // at the resolved firstXWriter slot for `usage`, mirroring
+    // lastWriterSlotFor below (Step 1's own RAW/WAW scan) - a single shared
+    // std::int32_t* return type across all three ResourceKind branches,
+    // converted from a hand-rolled `switch (usage.kind)` to DispatchByKind()
+    // (RenderGraphTypes.h). Same body moved verbatim into each lambda.
+    auto firstWriterSlotFor = [&](const ResourceUsage& usage) -> std::int32_t* {
+        return DispatchByKind(usage,
+            [&](TextureHandle h) -> std::int32_t* {
+                return h.index < firstTextureWriter.size() ? &firstTextureWriter[h.index] : nullptr;
+            },
+            [&](BufferHandle h) -> std::int32_t* {
+                return h.index < firstBufferWriter.size() ? &firstBufferWriter[h.index] : nullptr;
+            },
+            [&](VolumeTextureHandle h) -> std::int32_t* {
+                return h.index < firstVolumeTextureWriter.size() ? &firstVolumeTextureWriter[h.index] : nullptr;
+            });
+    };
     for (std::int32_t pos = 0; pos < passCount; ++pos) {
         const std::int32_t i = effectiveOrder[static_cast<std::size_t>(pos)];
         for (const ResourceUsage& usage : input.passes[static_cast<std::size_t>(i)].writes) {
-            switch (usage.kind) {
-            case ResourceKind::Texture:
-                if (usage.texture.index < firstTextureWriter.size() && firstTextureWriter[usage.texture.index] == -1) {
-                    firstTextureWriter[usage.texture.index] = i;
-                }
-                break;
-            case ResourceKind::Buffer:
-                if (usage.buffer.index < firstBufferWriter.size() && firstBufferWriter[usage.buffer.index] == -1) {
-                    firstBufferWriter[usage.buffer.index] = i;
-                }
-                break;
-            case ResourceKind::VolumeTexture:
-                if (usage.volumeTexture.index < firstVolumeTextureWriter.size()
-                    && firstVolumeTextureWriter[usage.volumeTexture.index] == -1) {
-                    firstVolumeTextureWriter[usage.volumeTexture.index] = i;
-                }
-                break;
+            std::int32_t* slot = firstWriterSlotFor(usage);
+            if (slot != nullptr && *slot == -1) {
+                *slot = i;
             }
         }
     }
@@ -305,6 +309,29 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
     // fourth resource kind gets this same compile-time safety net too.
     std::vector<std::int32_t> lastVolumeTextureWriter(input.volumeTextures.size(), -1);
 
+    // render-pass-6 campaign, PHASE6 (item 2.2) - the RAW-edge scan and the
+    // WAW-edge scan below both need to "resolve a pointer directly at the
+    // resolved lastXWriter slot for `usage`" - shared here as one helper,
+    // converted from two independent hand-rolled `switch (usage.kind)`
+    // blocks to a single DispatchByKind() call (RenderGraphTypes.h). A
+    // missing/out-of-bounds slot returns nullptr, matching each original
+    // branch's own bounds check exactly - a RAW read then treats a null
+    // slot as "no writer" (writer stays -1, addEdge() is then a documented
+    // no-op), and a WAW write simply skips both the edge and the
+    // write-back.
+    auto lastWriterSlotFor = [&](const ResourceUsage& usage) -> std::int32_t* {
+        return DispatchByKind(usage,
+            [&](TextureHandle h) -> std::int32_t* {
+                return h.index < lastTextureWriter.size() ? &lastTextureWriter[h.index] : nullptr;
+            },
+            [&](BufferHandle h) -> std::int32_t* {
+                return h.index < lastBufferWriter.size() ? &lastBufferWriter[h.index] : nullptr;
+            },
+            [&](VolumeTextureHandle h) -> std::int32_t* {
+                return h.index < lastVolumeTextureWriter.size() ? &lastVolumeTextureWriter[h.index] : nullptr;
+            });
+    };
+
     // render-pass-6 campaign, PHASE4 - fastContradictions is Compile()'s own
     // inline replacement for the standalone DetectRenderPassEventContradictions()
     // call that used to run before this loop even started (see this file's
@@ -330,25 +357,12 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
         // resource" is simply not given an edge; it is not this compiler's
         // job to validate that, see Step 4's "no automatic resource-usage
         // validation").
+        //
+        // render-pass-6 campaign, PHASE6 (item 2.2) - converted from a
+        // hand-rolled `switch (usage.kind)` to lastWriterSlotFor() above.
         for (const ResourceUsage& usage : pass.reads) {
-            std::int32_t writer = -1;
-            switch (usage.kind) {
-            case ResourceKind::Texture:
-                if (usage.texture.index < lastTextureWriter.size()) {
-                    writer = lastTextureWriter[usage.texture.index];
-                }
-                break;
-            case ResourceKind::Buffer:
-                if (usage.buffer.index < lastBufferWriter.size()) {
-                    writer = lastBufferWriter[usage.buffer.index];
-                }
-                break;
-            case ResourceKind::VolumeTexture:
-                if (usage.volumeTexture.index < lastVolumeTextureWriter.size()) {
-                    writer = lastVolumeTextureWriter[usage.volumeTexture.index];
-                }
-                break;
-            }
+            const std::int32_t* writerSlot = lastWriterSlotFor(usage);
+            const std::int32_t writer = writerSlot != nullptr ? *writerSlot : -1;
             addEdge(writer, i);
 
             // render-pass-6 campaign, PHASE4 - the fast-path contradiction
@@ -356,21 +370,13 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
             // updated doc comment on Compile() for why this MUST happen
             // here, reusing `writer`'s exact just-computed value, rather
             // than as a separate pass placed before or after this loop).
+            //
+            // render-pass-6 campaign, PHASE6 (item 2.2) - converted from a
+            // hand-rolled `switch (usage.kind)` to firstWriterSlotFor()
+            // (defined above, alongside the firstXWriter prescan itself).
             if (writer == -1) {
-                std::int32_t laterWriter = -1;
-                switch (usage.kind) {
-                case ResourceKind::Texture:
-                    laterWriter = usage.texture.index < firstTextureWriter.size() ? firstTextureWriter[usage.texture.index] : -1;
-                    break;
-                case ResourceKind::Buffer:
-                    laterWriter = usage.buffer.index < firstBufferWriter.size() ? firstBufferWriter[usage.buffer.index] : -1;
-                    break;
-                case ResourceKind::VolumeTexture:
-                    laterWriter = usage.volumeTexture.index < firstVolumeTextureWriter.size()
-                        ? firstVolumeTextureWriter[usage.volumeTexture.index]
-                        : -1;
-                    break;
-                }
+                const std::int32_t* laterWriterSlot = firstWriterSlotFor(usage);
+                const std::int32_t laterWriter = laterWriterSlot != nullptr ? *laterWriterSlot : -1;
                 // Self-exclusion guard: a pass that reads AND writes the
                 // SAME resource itself (e.g. the "self-loop" depth-
                 // attachment shape) can legitimately BE that resource's own
@@ -406,26 +412,18 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
         // preserve that effective order (see Step 3.2's "multiple writers
         // to the same imported resource" case), then become the new last
         // writer for anything walked after this pass in effective order.
+        //
+        // render-pass-6 campaign, PHASE6 (item 2.2) - converted from a
+        // hand-rolled `switch (usage.kind)` to lastWriterSlotFor() above -
+        // only touches lastXWriter when the slot genuinely exists, exactly
+        // matching the original "if (index < size) { addEdge(...);
+        // lastXWriter[index] = i; }" guard - an out-of-bounds usage gets no
+        // edge and no write, identical to before.
         for (const ResourceUsage& usage : pass.writes) {
-            switch (usage.kind) {
-            case ResourceKind::Texture:
-                if (usage.texture.index < lastTextureWriter.size()) {
-                    addEdge(lastTextureWriter[usage.texture.index], i);
-                    lastTextureWriter[usage.texture.index] = i;
-                }
-                break;
-            case ResourceKind::Buffer:
-                if (usage.buffer.index < lastBufferWriter.size()) {
-                    addEdge(lastBufferWriter[usage.buffer.index], i);
-                    lastBufferWriter[usage.buffer.index] = i;
-                }
-                break;
-            case ResourceKind::VolumeTexture:
-                if (usage.volumeTexture.index < lastVolumeTextureWriter.size()) {
-                    addEdge(lastVolumeTextureWriter[usage.volumeTexture.index], i);
-                    lastVolumeTextureWriter[usage.volumeTexture.index] = i;
-                }
-                break;
+            std::int32_t* slot = lastWriterSlotFor(usage);
+            if (slot != nullptr) {
+                addEdge(*slot, i);
+                *slot = i;
             }
         }
     }
@@ -491,18 +489,17 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
     for (std::int32_t i = 0; i < passCount; ++i) {
         const PassRecord& pass = input.passes[static_cast<std::size_t>(i)];
         for (const ResourceUsage& usage : pass.writes) {
-            bool isRoot = false;
-            switch (usage.kind) {
-            case ResourceKind::Texture:
-                isRoot = ContainsTextureHandle(finalOutputs, usage.texture);
-                break;
-            case ResourceKind::Buffer:
-                isRoot = false;
-                break;
-            case ResourceKind::VolumeTexture:
-                isRoot = ContainsVolumeTextureHandle(input.finalVolumeTextureOutputs, usage.volumeTexture);
-                break;
-            }
+            // render-pass-6 campaign, PHASE6 (item 2.2) - converted from a
+            // hand-rolled `switch (usage.kind)` to DispatchByKind()
+            // (RenderGraphTypes.h) - same three bodies moved verbatim into
+            // each lambda (Buffer can never be a root, matching the
+            // existing, deliberate rule that it never could be one either).
+            const bool isRoot = DispatchByKind(usage,
+                [&](TextureHandle h) { return ContainsTextureHandle(finalOutputs, h); },
+                [&](BufferHandle) { return false; },
+                [&](VolumeTextureHandle h) {
+                    return ContainsVolumeTextureHandle(input.finalVolumeTextureOutputs, h);
+                });
             if (isRoot) {
                 if (!kept[static_cast<std::size_t>(i)]) {
                     kept[static_cast<std::size_t>(i)] = true;
@@ -628,31 +625,31 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
     for (std::size_t pos = 0; pos < order.size(); ++pos) {
         const PassRecord& pass = input.passes[static_cast<std::size_t>(order[pos])];
 
+        // render-pass-6 campaign, PHASE6 (item 2.2) - converted from a
+        // hand-rolled `switch (usage.kind)` to DispatchByKind(), resolving
+        // BOTH "which vector" and "which index" in one pointer return -
+        // strictly simpler than the original two-local-variable
+        // (lifetimes/index) shape it replaces.
         auto touch = [&](const ResourceUsage& usage) {
-            std::vector<ResourceLifetime>* lifetimes = nullptr;
-            std::uint32_t index = 0;
-            switch (usage.kind) {
-            case ResourceKind::Texture:
-                lifetimes = &result.textureLifetimes;
-                index = usage.texture.index;
-                break;
-            case ResourceKind::Buffer:
-                lifetimes = &result.bufferLifetimes;
-                index = usage.buffer.index;
-                break;
-            case ResourceKind::VolumeTexture:
-                lifetimes = &result.volumeTextureLifetimes;
-                index = usage.volumeTexture.index;
-                break;
-            }
-            if (lifetimes == nullptr || index >= lifetimes->size()) {
+            ResourceLifetime* lifetime = DispatchByKind(usage,
+                [&](TextureHandle h) -> ResourceLifetime* {
+                    return h.index < result.textureLifetimes.size() ? &result.textureLifetimes[h.index] : nullptr;
+                },
+                [&](BufferHandle h) -> ResourceLifetime* {
+                    return h.index < result.bufferLifetimes.size() ? &result.bufferLifetimes[h.index] : nullptr;
+                },
+                [&](VolumeTextureHandle h) -> ResourceLifetime* {
+                    return h.index < result.volumeTextureLifetimes.size()
+                        ? &result.volumeTextureLifetimes[h.index]
+                        : nullptr;
+                });
+            if (lifetime == nullptr) {
                 return;
             }
-            ResourceLifetime& lifetime = (*lifetimes)[index];
-            if (lifetime.firstUsePassIndex == -1) {
-                lifetime.firstUsePassIndex = static_cast<std::int32_t>(pos);
+            if (lifetime->firstUsePassIndex == -1) {
+                lifetime->firstUsePassIndex = static_cast<std::int32_t>(pos);
             }
-            lifetime.lastUsePassIndex = static_cast<std::int32_t>(pos);
+            lifetime->lastUsePassIndex = static_cast<std::int32_t>(pos);
         };
 
         for (const ResourceUsage& usage : pass.reads) {
