@@ -4,10 +4,12 @@
 //
 // editor-core-separation-1 campaign, PHASE15
 // (PHASE15_EDITORHOST_COMPOSITION_ROOT_CORE_CONSTRUCTION.md) - constructs
-// EditorHost (src/Editor/EditorHost.h) instead of Application
-// (src/Application/Application.h) - Application itself stays fully intact
-// and unused (Phase 17 retires it once EditorHost fully covers its
-// responsibilities).
+// EditorHost (src/Editor/EditorHost.h) instead of Application. PHASE17
+// (PHASE17_APPLICATION_RETIREMENT_AND_EXECUTABLE_RENAME.md) deleted
+// Application.h/.cpp outright once EditorHost fully covered every one of
+// its former responsibilities, and renamed the built executable target
+// away from GreatTamanaEngine to GreatTamanaEditor (see the root
+// CMakeLists.txt's own add_executable() call).
 //
 // Note: this uses a plain int main(argc, argv). SDL3's <SDL3/SDL_main.h>
 // convention (which lets SDL provide its own WinMain on Windows, needed for

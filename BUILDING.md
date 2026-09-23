@@ -67,7 +67,7 @@ Prerequisites:
 ```
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Debug
-build\Debug\GreatTamanaEngine.exe
+build\Debug\GreatTamanaEditor.exe
 ```
 
 (swap the `-G` generator for whatever matches your installed toolchain, e.g.

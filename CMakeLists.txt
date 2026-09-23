@@ -217,8 +217,9 @@ endif()
 
 # --- Core engine library -----------------------------------------------
 # Every engine source EXCEPT main.cpp lives in this static library, so both
-# the real executable (GreatTamanaEngine, below) and the unit test suite
-# (GreatTamanaEngineTests, see tests/CMakeLists.txt) link against the exact
+# the real executable (GreatTamanaEditor, below - editor-core-separation-1
+# campaign PHASE17 renamed it away from GreatTamanaEngine) and the unit test
+# suite (GreatTamanaEngineTests, see tests/CMakeLists.txt) link against the exact
 # same compiled engine code - the test binary needs no copy of main()/the
 # SDL main loop, and there is no risk of the two ever silently drifting
 # apart (e.g. differing compile flags) the way a naively-duplicated file
@@ -666,26 +667,17 @@ add_library(gte_editor STATIC
     #     already gte_editor).
     #   - Application/EventTranslator.h/.cpp - the SDL_Event -> gte::Event
     #     translator.
-    #   - Application/Application.h/.cpp - today's composition root: owns
-    #     SdlContext (SDL_Init()/SDL_Quit()) and Run()'s own SDL_Event pump
-    #     loop directly, not merely through Window. Application already
-    #     depends on gte_core's own Core/Renderer/Game/RenderGraph (Core.h) -
-    #     moving it here makes that an honest, correctly-directioned
-    #     gte_editor -> gte_core dependency instead of a same-archive
-    #     self-reference. This is a PURE file/target relocation (no class
-    #     redesign, no EditorHost, no executable rename) - Application stays
-    #     the exact same composition-root class Phase 12/13 already extracted
-    #     Core out of; nothing outside main.cpp (gte_editor's own executable,
-    #     since Phase 9) ever included Application.h. See
-    #     PHASE14_COMPLETION_REPORT.md for the full discovery/rationale.
+    #   - Application/Application.h/.cpp - PHASE14 relocated this file here;
+    #     PHASE17 (PHASE17_APPLICATION_RETIREMENT_AND_EXECUTABLE_RENAME.md)
+    #     deleted it outright once EditorHost (below) fully replaced it as
+    #     this repo's real composition root - confirmed via search_in_dir
+    #     that nothing else in this codebase ever referenced it.
     src/Window/Window.h
     src/Window/Window.cpp
     src/Memory/SdlMemoryTracker.h
     src/Memory/SdlMemoryTracker.cpp
     src/Application/EventTranslator.h
     src/Application/EventTranslator.cpp
-    src/Application/Application.h
-    src/Application/Application.cpp
     # editor-core-separation-1 campaign, PHASE15
     # (PHASE15_EDITORHOST_COMPOSITION_ROOT_CORE_CONSTRUCTION.md) - the new
     # composition root REPLACING Application's role (structure only this
@@ -823,19 +815,19 @@ endif()
 
 # gte_editor depends on gte_core - ONE WAY, never the reverse (Rule 2,
 # PHASE0_MASTER_STRATEGY.md). PUBLIC so any consumer of gte_editor
-# (GreatTamanaEngine, GreatTamanaEngineTests) transitively sees gte_core's
+# (GreatTamanaEditor, GreatTamanaEngineTests) transitively sees gte_core's
 # own PUBLIC include directories/compile definitions/link libraries too,
 # without repeating them.
 target_link_libraries(gte_editor PUBLIC gte_core)
 target_link_libraries(gte_editor PRIVATE imgui imguizmo)
 # editor-core-separation-1 campaign, PHASE14
 # (PHASE14_WINDOW_SDL_RELOCATION_TO_EDITOR.md) - SDL3 linkage moves here now
-# that Window.cpp/SdlContext (inside Application.cpp)/EventTranslator.cpp all
+# that Window.cpp/SdlContext (inside EditorHost.cpp)/EventTranslator.cpp all
 # physically compile as part of gte_editor (see this target's own
 # target_sources() block above). PUBLIC (matching gte_core's own former
-# visibility) since gte_editor's public headers (Application.h, transitively
+# visibility) since gte_editor's public headers (EditorHost.h, transitively
 # via EventTranslator.h/Window.h) leak real SDL3 types/declarations to this
-# target's own consumers (GreatTamanaEngine's main.cpp, GreatTamanaEngineTests).
+# target's own consumers (GreatTamanaEditor's main.cpp, GreatTamanaEngineTests).
 target_link_libraries(gte_editor PUBLIC SDL3::SDL3)
 
 # Exposes GTE_ENABLE_PROJECT_PANEL to C++ code as an actual 1/0 preprocessor
@@ -862,7 +854,7 @@ target_compile_definitions(gte_core PUBLIC GTE_ENABLE_PROFILER=$<BOOL:${GTE_ENAB
 target_compile_definitions(gte_core PUBLIC GTE_ENABLE_JOB_SYSTEM=$<BOOL:${GTE_ENABLE_JOB_SYSTEM}>)
 
 # Same idea again - exposes GTE_ENABLE_NETWORK to C++ code as an actual 1/0
-# preprocessor macro, needed by Application.cpp's own
+# preprocessor macro, needed by EditorHost.cpp's own
 # `#if GTE_ENABLE_NETWORK` guard around NetworkServer::Start() (see
 # AGENTS.md, "Networking"). PUBLIC for the same reason as the three
 # definitions above: GreatTamanaEngineTests must see the exact same macro
@@ -870,7 +862,7 @@ target_compile_definitions(gte_core PUBLIC GTE_ENABLE_JOB_SYSTEM=$<BOOL:${GTE_EN
 target_compile_definitions(gte_core PUBLIC GTE_ENABLE_NETWORK=$<BOOL:${GTE_ENABLE_NETWORK}>)
 
 # PUBLIC (not PRIVATE) for the same reason as the compile definition above:
-# any consumer of gte_core (GreatTamanaEngine's main.cpp, and every test in
+# any consumer of gte_core (GreatTamanaEditor's main.cpp, and every test in
 # GreatTamanaEngineTests) #includes engine headers that transitively need
 # volk/vma/stb_image/KTX/httplib's include directories and, ultimately, their
 # libraries at final-link time - PUBLIC is what propagates both automatically
@@ -918,22 +910,23 @@ target_link_libraries(gte_core PUBLIC Threads::Threads)
 target_link_libraries(gte_core PRIVATE saba_pmx)
 
 # --- Final executable ----------------------------------------------------
-add_executable(GreatTamanaEngine src/main.cpp)
+add_executable(GreatTamanaEditor src/main.cpp)
 # editor-core-separation-1 campaign, PHASE9 (PHASE9_CMAKE_TARGET_SPLIT.md,
 # Rule 4) - links gte_editor, NEVER gte_core directly; gte_editor's own
 # PUBLIC dependency on gte_core (above) brings it in transitively. There is
 # no configuration of this repo's own CMakeLists.txt in which this
 # executable links gte_core alone.
 #
-# REAL, DISCOVERED-DURING-THIS-PHASE LINKER WRINKLE (documented here, not
-# silently worked around): `Application.cpp` still physically lives inside
-# gte_core's own source list (Phase 9 is pure file movement only - Phases
-# 12/13 are what actually extract Core's own class body and split its
-# ~30 IEditorLayer call sites away from Application's direct, unconditional
-# calls - see PHASE0_MASTER_STRATEGY.md, Locked Design Decision #8). Until
-# that happens, `Application.cpp`/`RenderSystem.cpp`/`NetworkServer.cpp`
-# (compiled into gte_core) call several real functions/vtables that only
-# gte_editor defines (`CreateEditorLayer()`, `AddFrameDebuggerReplayPasses()`,
+# REAL LINKER WRINKLE, DISCOVERED DURING PHASE 9 OF editor-core-separation-1
+# (documented here, not silently worked around): at Phase 9's own time,
+# `Application.cpp` still physically lived inside gte_core's own source list
+# (Phase 9 was pure file movement only - Phases 12/13 later extracted Core's
+# own class body and split its ~30 IEditorLayer call sites away from
+# Application's direct, unconditional calls - see PHASE0_MASTER_STRATEGY.md,
+# Locked Design Decision #8). Until that happened, `Application.cpp`/
+# `RenderSystem.cpp`/`NetworkServer.cpp` (compiled into gte_core) called
+# several real functions/vtables that only gte_editor defines
+# (`CreateEditorLayer()`, `AddFrameDebuggerReplayPasses()`,
 # `RecordFrameDebuggerDraws()`, `Logger::*`, `EditorSceneIOCapability`'s
 # vtable) - a genuine SYMBOL-level circular need between the two archives,
 # even though the #include/target_link_libraries() DIRECTION stays correctly
@@ -942,12 +935,22 @@ add_executable(GreatTamanaEngine src/main.cpp)
 # `$<LINK_GROUP:RESCAN,...>` (lets the linker re-scan both archives as a pair
 # until nothing new resolves - CMake >= 3.24, GNU/LLD/MSVC linkers), the link
 # fails with "undefined reference to gte::CreateEditorLayer(...)" and several
-# siblings. This wrinkle is EXPECTED to disappear on its own once Phase 13
-# replaces Application's direct Editor-function calls with the nullable
-# `IEditorLayer*` hook pattern - it is not something this phase can or should
-# "fix" architecturally; the link group is the correct, standard, minimal
-# mechanical answer to a real static-archive limitation for right now.
-target_link_libraries(GreatTamanaEngine PRIVATE "$<LINK_GROUP:RESCAN,gte_editor,gte_core>")
+# siblings.
+#
+# UPDATE, PHASE17 (PHASE17_APPLICATION_RETIREMENT_AND_EXECUTABLE_RENAME.md):
+# `Application.cpp`/`Application.h` are now DELETED outright - Phase 13
+# already moved every `IEditorLayer` call site out of it and Phase 16 moved
+# every automation bridge off it, leaving it genuinely dead code, and this
+# phase removed it for good. The prediction two paragraphs up ("EXPECTED to
+# disappear on its own once Phase 13...") turned out to be only PARTIALLY
+# true: `Application.cpp`'s OWN contribution to this wrinkle is gone, but
+# `RenderSystem.cpp`'s call to `RecordFrameDebuggerDraws()` and
+# `NetworkServer.cpp`'s calls to `Logger::Query()`/`Logger::Clear()` (both
+# still physically compiled into gte_core) are REAL, PERMANENT
+# gte_core -> gte_editor-only-symbol dependencies with no further phase
+# planned to remove them - this `$<LINK_GROUP:RESCAN,...>` is therefore a
+# permanent fixture of this build, not a temporary Phase-9-era workaround.
+target_link_libraries(GreatTamanaEditor PRIVATE "$<LINK_GROUP:RESCAN,gte_editor,gte_core>")
 
 # Compiles the engine's GLSL shader sources to SPIR-V at build time (see
 # cmake/CompileShaders.cmake) - staged into "<exe dir>/shaders/" next to the
@@ -955,8 +958,8 @@ target_link_libraries(GreatTamanaEngine PRIVATE "$<LINK_GROUP:RESCAN,gte_editor,
 # loads these compiled .spv files by relative path at runtime. Only the
 # actual game executable needs these staged next to it - the test suite
 # never renders anything, see tests/CMakeLists.txt.
-gte_add_shader(GreatTamanaEngine src/Shaders/Triangle.vert)
-gte_add_shader(GreatTamanaEngine src/Shaders/Triangle.frag)
+gte_add_shader(GreatTamanaEditor src/Shaders/Triangle.vert)
+gte_add_shader(GreatTamanaEditor src/Shaders/Triangle.frag)
 
 # The shared "imported mesh" draw path (src/Renderer/MeshVertex.h,
 # Pipeline.h's VertexLayout::PositionNormal, Game::CreateMeshEntityFromGtaFile()
@@ -966,8 +969,8 @@ gte_add_shader(GreatTamanaEngine src/Shaders/Triangle.frag)
 # Game.cpp (which loads these) is always compiled into gte_core, regardless
 # of whether the Editor's "Project" panel (today's only way to actually
 # trigger a spawn - see Panels/HierarchyPanel.cpp/ScenePanel.cpp) is built.
-gte_add_shader(GreatTamanaEngine src/Shaders/Mesh.vert)
-gte_add_shader(GreatTamanaEngine src/Shaders/Mesh.frag)
+gte_add_shader(GreatTamanaEditor src/Shaders/Mesh.vert)
+gte_add_shader(GreatTamanaEditor src/Shaders/Mesh.frag)
 
 # GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
 # PHASE2 (task_manager/render-pass-5/
@@ -977,7 +980,7 @@ gte_add_shader(GreatTamanaEngine src/Shaders/Mesh.frag)
 # as its fragment shader. Unconditional, for the same reason as Mesh.vert/
 # frag above - GpuResourceFactory.cpp (which loads this) is always
 # compiled into gte_core.
-gte_add_shader(GreatTamanaEngine src/Shaders/MeshInstanced.vert)
+gte_add_shader(GreatTamanaEditor src/Shaders/MeshInstanced.vert)
 
 # GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
 # PHASE3 (task_manager/render-pass-5/
@@ -986,7 +989,7 @@ gte_add_shader(GreatTamanaEngine src/Shaders/MeshInstanced.vert)
 # for the same reason as SkinVerticesPositionNormal.comp below - this is a
 # genuine gameplay/runtime feature (batched-entity frustum culling), not a
 # debug/Editor-only tool, so it must work in a non-Editor, release build too.
-gte_add_shader(GreatTamanaEngine src/Shaders/FrustumCull.comp)
+gte_add_shader(GreatTamanaEditor src/Shaders/FrustumCull.comp)
 
 # The TEXTURED half of that same "imported mesh" draw path (src/Renderer/
 # MeshVertex.h's MeshVertexUv, Pipeline.h's VertexLayout::PositionNormalUv,
@@ -994,8 +997,8 @@ gte_add_shader(GreatTamanaEngine src/Shaders/FrustumCull.comp)
 # submesh whose material resolves to a real texture file uses this pair
 # instead of Mesh.vert/.frag above. Unconditional for the same reason as
 # Mesh.vert/.frag above.
-gte_add_shader(GreatTamanaEngine src/Shaders/TexturedMesh.vert)
-gte_add_shader(GreatTamanaEngine src/Shaders/TexturedMesh.frag)
+gte_add_shader(GreatTamanaEditor src/Shaders/TexturedMesh.vert)
+gte_add_shader(GreatTamanaEditor src/Shaders/TexturedMesh.frag)
 
 # GPU Vertex Skinning, Phase 2 (compute kernels) -
 # task_manager/gpu_skinning/GPU_SKINNING_PHASE2_COMPUTE_KERNEL_STRATEGY_v1.md.
@@ -1005,8 +1008,8 @@ gte_add_shader(GreatTamanaEngine src/Shaders/TexturedMesh.frag)
 # unconditionally (see gte_core's own target_sources() list above) since GPU
 # skinning is a genuine gameplay/runtime feature, not a debug/Editor-only
 # tool - it must work in a non-Editor, release build too.
-gte_add_shader(GreatTamanaEngine src/Shaders/SkinVerticesPositionNormal.comp)
-gte_add_shader(GreatTamanaEngine src/Shaders/SkinVerticesPositionNormalUv.comp)
+gte_add_shader(GreatTamanaEditor src/Shaders/SkinVerticesPositionNormal.comp)
+gte_add_shader(GreatTamanaEditor src/Shaders/SkinVerticesPositionNormalUv.comp)
 
 # The Inspector's Mesh Asset 3D preview viewer (src/Editor/AssetPreviewMesh.h)
 # needs its own small shader pair, compiled/staged the exact same way as
@@ -1017,8 +1020,8 @@ gte_add_shader(GreatTamanaEngine src/Shaders/SkinVerticesPositionNormalUv.comp)
 # that ever loads these - isn't compiled into gte_core otherwise (see
 # GTE_ENABLE_PROJECT_PANEL's target_sources() block above).
 if(GTE_ENABLE_PROJECT_PANEL)
-    gte_add_shader(GreatTamanaEngine src/Shaders/MeshPreview.vert)
-    gte_add_shader(GreatTamanaEngine src/Shaders/MeshPreview.frag)
+    gte_add_shader(GreatTamanaEditor src/Shaders/MeshPreview.vert)
+    gte_add_shader(GreatTamanaEditor src/Shaders/MeshPreview.frag)
 endif()
 
 # The Editor's "Scene" panel infinite ground grid (Unity-style procedural
@@ -1031,8 +1034,8 @@ endif()
 # `if(TRUE)` is a temporary placeholder, see the main Editor source list's
 # own comment above for the full reasoning.
 if(TRUE)
-    gte_add_shader(GreatTamanaEngine src/Shaders/SceneGrid.vert)
-    gte_add_shader(GreatTamanaEngine src/Shaders/SceneGrid.frag)
+    gte_add_shader(GreatTamanaEditor src/Shaders/SceneGrid.vert)
+    gte_add_shader(GreatTamanaEditor src/Shaders/SceneGrid.frag)
 endif()
 
 # Phase 7 of the compute-shader campaign
@@ -1043,7 +1046,7 @@ endif()
 # editor-core-separation-1 campaign, PHASE8 - this `if(TRUE)` is a temporary
 # placeholder, see the main Editor source list's own comment above.
 if(TRUE)
-    gte_add_shader(GreatTamanaEngine src/Shaders/BoxBlur.comp)
+    gte_add_shader(GreatTamanaEditor src/Shaders/BoxBlur.comp)
 endif()
 
 # task_manager/mrt-1 campaign (Multi-Render-Target / G-Buffer support),
@@ -1059,9 +1062,9 @@ endif()
 # always-compiled gameplay shaders instead). editor-core-separation-1
 # campaign, PHASE8 - this `if(TRUE)` is a temporary placeholder.
 if(TRUE)
-    gte_add_shader(GreatTamanaEngine src/Shaders/GBufferValidation.vert)
-    gte_add_shader(GreatTamanaEngine src/Shaders/GBufferValidation.frag)
-    gte_add_shader(GreatTamanaEngine src/Shaders/GBufferCopy.comp)
+    gte_add_shader(GreatTamanaEditor src/Shaders/GBufferValidation.vert)
+    gte_add_shader(GreatTamanaEditor src/Shaders/GBufferValidation.frag)
+    gte_add_shader(GreatTamanaEditor src/Shaders/GBufferCopy.comp)
 endif()
 
 # Atmosphere Scattering + Aerial Perspective campaign, Phase 3
@@ -1077,7 +1080,7 @@ endif()
 # list above). EXTRA_DEPENDS lists the shared AtmosphereCommon.glsl include
 # this shader #includes, so an edit to it correctly triggers glslc to
 # recompile this (and every future atmosphere shader that also lists it).
-gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereTransmittanceLut.comp
+gte_add_shader(GreatTamanaEditor src/Shaders/AtmosphereTransmittanceLut.comp
     EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl)
 
 # Atmosphere Scattering + Aerial Perspective campaign, Phase 4
@@ -1086,7 +1089,7 @@ gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereTransmittanceLut.comp
 # GTE_ENABLE_EDITOR-gated) treatment as the Transmittance LUT shader above,
 # for the exact same reason (Locked Design Decision 4 - always-compiled core
 # rendering feature).
-gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereMultiScatteringLut.comp
+gte_add_shader(GreatTamanaEditor src/Shaders/AtmosphereMultiScatteringLut.comp
     EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl)
 
 # Atmosphere Scattering + Aerial Perspective campaign, Phase 5
@@ -1095,7 +1098,7 @@ gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereMultiScatteringLut.comp
 # GTE_ENABLE_EDITOR-gated) treatment as the Transmittance/Multi-Scattering
 # LUT shaders above, for the exact same reason (Locked Design Decision 4 -
 # always-compiled core rendering feature).
-gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereSkyViewLut.comp
+gte_add_shader(GreatTamanaEditor src/Shaders/AtmosphereSkyViewLut.comp
     EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl)
 
 # Atmosphere Scattering + Aerial Perspective campaign, Phase 6
@@ -1104,7 +1107,7 @@ gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereSkyViewLut.comp
 # (NOT GTE_ENABLE_EDITOR-gated) treatment as the Transmittance/Multi-
 # Scattering/Sky-View LUT shaders above, for the exact same reason (Locked
 # Design Decision 4 - always-compiled core rendering feature).
-gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereAerialPerspectiveVolume.comp
+gte_add_shader(GreatTamanaEditor src/Shaders/AtmosphereAerialPerspectiveVolume.comp
     EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl)
 
 # Atmosphere Scattering + Aerial Perspective campaign, Phase 7
@@ -1117,10 +1120,10 @@ gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereAerialPerspectiveVolume.c
 # rendering feature) - this pass runs in BOTH the Game View (which still
 # renders even in a -DGTE_ENABLE_EDITOR=OFF release build) and the
 # Editor-only Scene View.
-gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereSkyBackground.vert)
-gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereSkyBackground.frag
+gte_add_shader(GreatTamanaEditor src/Shaders/AtmosphereSkyBackground.vert)
+gte_add_shader(GreatTamanaEditor src/Shaders/AtmosphereSkyBackground.frag
     EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl)
-gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereAerialPerspectiveComposite.comp
+gte_add_shader(GreatTamanaEditor src/Shaders/AtmosphereAerialPerspectiveComposite.comp
     EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl)
 
 # Atmosphere Scattering + Aerial Perspective campaign, Phase 9
@@ -1130,7 +1133,7 @@ gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereAerialPerspectiveComposit
 # every other atmosphere shader above - this pass is wired into the SAME
 # always-running Game View pass sequence as the rest of this campaign's
 # shaders. Does NOT #include AtmosphereCommon.glsl, so no EXTRA_DEPENDS.
-gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereAerialPerspectiveVolumeDebugSlice.comp)
+gte_add_shader(GreatTamanaEditor src/Shaders/AtmosphereAerialPerspectiveVolumeDebugSlice.comp)
 
 # network-impl-6 campaign, Phase 3
 # (task_manager/network-impl-6/PHASE3_VOLUME_RAYMARCH_PREVIEW_RENDERER.md) -
@@ -1141,7 +1144,7 @@ gte_add_shader(GreatTamanaEngine src/Shaders/AtmosphereAerialPerspectiveVolumeDe
 # /get_texture's own gating exactly (GTE_ENABLE_NETWORK only, at the HTTP
 # route level, not here). Does NOT #include AtmosphereCommon.glsl, so no
 # EXTRA_DEPENDS.
-gte_add_shader(GreatTamanaEngine src/Shaders/VolumeTexturePreview.comp)
+gte_add_shader(GreatTamanaEditor src/Shaders/VolumeTexturePreview.comp)
 
 # task_manager/frame-debugger-3 campaign, PHASE6
 # (PHASE6_CHANNELS_AND_LEVELS_REAL_PREVIEW.md) - the Frame Debugger's own
@@ -1153,13 +1156,13 @@ gte_add_shader(GreatTamanaEngine src/Shaders/VolumeTexturePreview.comp)
 # AtmosphereCommon.glsl, so no EXTRA_DEPENDS. editor-core-separation-1
 # campaign, PHASE8 - this `if(TRUE)` is a temporary placeholder.
 if(TRUE)
-    gte_add_shader(GreatTamanaEngine src/Shaders/FrameDebuggerPreview.comp)
+    gte_add_shader(GreatTamanaEditor src/Shaders/FrameDebuggerPreview.comp)
 endif()
 
 
 
 # Ensures SDL3.dll is copied next to the built .exe after every build.
-sdl3_copy_runtime_dll(GreatTamanaEngine)
+sdl3_copy_runtime_dll(GreatTamanaEditor)
 
 # Note: no equivalent ktx_copy_runtime_dll() call is needed - KTX-Software is
 # built from source as a STATIC library (see cmake/FetchKTX.cmake), so there

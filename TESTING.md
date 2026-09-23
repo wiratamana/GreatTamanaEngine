@@ -2,7 +2,9 @@
 
 Every engine source file except `src/main.cpp` is compiled into a static
 library, `gte_core` (see `CMakeLists.txt`) - both the real executable
-(`GreatTamanaEngine`) and the unit test suite (`GreatTamanaEngineTests`,
+(`GreatTamanaEditor`, renamed from `GreatTamanaEngine` by the
+editor-core-separation-1 campaign's PHASE17) and the unit test suite
+(`GreatTamanaEngineTests`,
 below) link against it, so tests always exercise the exact same compiled
 engine code the shipped `.exe` does.
 

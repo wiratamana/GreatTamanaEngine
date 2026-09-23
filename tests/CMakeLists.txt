@@ -1990,7 +1990,7 @@
 # now verifies the SAME thread-safety property against the real functions
 # production code actually calls today instead of raw SDL. sdl3_copy_runtime_dll()
 # below keeps handling the SDL3.dll-staging concern, same as for the real
-# GreatTamanaEngine.exe.
+# GreatTamanaEditor.exe (renamed from GreatTamanaEngine.exe by PHASE17).
 # Build/SdlLinkageRegressionTests.cpp (task_manager/editor-core-separation-1/
 # PHASE1_SDL_DEPENDENCY_REGRESSION_BASELINE.md) now carries TWO regression
 # tests reflecting this precisely: the ORIGINAL exe-level PE-import-table
@@ -2269,17 +2269,17 @@ target_compile_definitions(GreatTamanaEngineTests PRIVATE
 
 # editor-core-separation-1 campaign, PHASE9 (PHASE9_CMAKE_TARGET_SPLIT.md,
 # Step 9) - links gte_editor (never gte_core directly, matching
-# GreatTamanaEngine's own Rule-4 precedent above): Editor/*Tests.cpp above
+# GreatTamanaEditor's own Rule-4 precedent above): Editor/*Tests.cpp above
 # (EditorCameraTests.cpp, LoggerTests.cpp, FrameDebuggerDataTests.cpp, ...)
 # needs symbols that now permanently live in gte_editor's own archive.
 # gte_editor's own PUBLIC dependency on gte_core brings it in transitively.
 #
 # Same real, discovered-during-Phase-9 linker wrinkle as the root
-# CMakeLists.txt's own GreatTamanaEngine target (see that file's own
+# CMakeLists.txt's own GreatTamanaEditor target (see that file's own
 # extensive comment right above its matching target_link_libraries() call) -
-# gte_core's own Application.cpp/RenderSystem.cpp/NetworkServer.cpp still
-# call several gte_editor-only symbols directly (CreateEditorLayer(),
-# Logger::*, ...) until Phase 13, so this test binary needs the identical
+# gte_core's own RenderSystem.cpp/NetworkServer.cpp still
+# call several gte_editor-only symbols directly (RecordFrameDebuggerDraws(),
+# Logger::Query()/Clear(), ...) - a real, permanent (not just "until Phase 13")
 # `$<LINK_GROUP:RESCAN,...>` treatment, not just a plain gte_editor link.
 target_link_libraries(GreatTamanaEngineTests PRIVATE
     "$<LINK_GROUP:RESCAN,gte_editor,gte_core>"
