@@ -9,14 +9,10 @@
 #include "../Editor/Logger.h" // PHASE16 of editor-core-separation-1 moves this include (and the InstallLogSink() call in the constructor body below) into EditorHost - Application still needs it directly for now (this file still owns the ONE composition-root call site that installs the real sink).
 // editor-core-separation-1 campaign, PHASE6
 // (PHASE6_EDITOR_CAPABILITY_CALL_SITE_CONVERSION_SCENE_IO.md) - the REAL
-// ISceneIOCapability implementation. Kept behind this SAME temporary
-// `#if GTE_ENABLE_EDITOR` guard as SdlContext::SdlContext()'s own
-// SdlMemoryTracker::Install() call below (Application.cpp still compiles in
-// BOTH configurations today - Phase 8/9 delete GTE_ENABLE_EDITOR outright
-// and Phase 16 moves this whole wiring concern into EditorHost instead).
-#if GTE_ENABLE_EDITOR
+// ISceneIOCapability implementation. Unconditional since PHASE8
+// (GTE_ENABLE_EDITOR no longer exists anywhere in this codebase) - Phase 16
+// moves this whole wiring concern into EditorHost instead.
 #include "../Editor/EditorSceneIOCapability.h"
-#endif
 #include "../Encoding/DepthVisualization.h"
 #include "../Encoding/HdrColorVisualization.h"
 #include "../Encoding/PixelConversion.h"
@@ -289,18 +285,14 @@ GpuDrivenBatchNamePool& BatchNamePool()
 
 Application::SdlContext::SdlContext()
 {
-#if GTE_ENABLE_EDITOR
     // Must be installed before SDL_Init() - indeed, before literally any SDL
-    // call - see SdlMemoryTracker's own doc comment for why. Gated behind
-    // GTE_ENABLE_EDITOR (not installed at all in a release build) since the
-    // only consumer of these numbers is the Editor's "Memory" panel - a
-    // release build would otherwise pay real per-allocation tracking
-    // overhead (an extra pointer-arithmetic header + atomic increment on
-    // EVERY SDL_malloc/calloc/realloc/free call, for the rest of the
-    // process's lifetime) for a feature nothing in that build can ever
-    // display. See AGENTS.md ("CPU Dependency Memory Tracking").
+    // call - see SdlMemoryTracker's own doc comment for why. Unconditional
+    // since PHASE8 of editor-core-separation-1 (GTE_ENABLE_EDITOR no longer
+    // exists anywhere in this codebase) - the only consumer of these numbers
+    // is the Editor's "Memory" panel; a future Player host that never builds
+    // gte_editor's Memory panel simply never reads these tracked numbers.
+    // See AGENTS.md ("CPU Dependency Memory Tracking").
     SdlMemoryTracker::Install();
-#endif
 
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         throw std::runtime_error(std::string("SDL_Init failed: ") + SDL_GetError());
@@ -364,24 +356,16 @@ Application::Application(const std::string& title, int width, int height)
     // ONE real ISceneIOCapability implementation this engine ships
     // (Editor/EditorSceneIOCapability.h) into the nullable pointer
     // EngineCommandDispatch.cpp (Core-destined, always-compiled) now consults
-    // at runtime instead of a compile-time `#if GTE_ENABLE_EDITOR` (PHASE5's
-    // own SetSceneIOCapability() setter). A function-local static (mirrors
+    // at runtime instead of a compile-time `#if` (this call site is now
+    // unconditional since PHASE8 - GTE_ENABLE_EDITOR no longer exists
+    // anywhere in this codebase). A function-local static (mirrors
     // LoggerLogSink::Instance()'s own Meyers-singleton precedent immediately
     // above, and GpuDrivenBatchNamePool()'s own function-local-static
     // precedent further up in this same file) - EditorSceneIOCapability is
     // pure delegation with no state of its own, so one whole-process-
-    // lifetime instance is all this needs. Gated behind GTE_ENABLE_EDITOR
-    // (temporarily - see this file's own include-site comment above) because
-    // EditorSceneIOCapability's real method bodies
-    // (Editor/EditorSceneIOCapability.cpp) are only compiled into this build
-    // at all when the Editor module is (CMakeLists.txt's still-conditional
-    // Editor source list) - a GTE_ENABLE_EDITOR=OFF build never calls this,
-    // leaving m_sceneIOCapability at its PHASE5 default of nullptr, which
-    // EngineCommandDispatch.cpp already degrades gracefully.
-#if GTE_ENABLE_EDITOR
+    // lifetime instance is all this needs.
     static EditorSceneIOCapability s_editorSceneIOCapability;
     SetSceneIOCapability(&s_editorSceneIOCapability);
-#endif
 
     // render-pass-3 campaign, PHASE2/PHASE3 - registers both
     // m_offscreenRenderPipeline (every remaining production pass) and
@@ -1268,6 +1252,7 @@ int Application::Run()
                 const GpuDrivenTestBatchSpawnResult spawned = m_editorLayer->SpawnGpuDrivenTestBatch(
                     m_game, m_renderer, uiRequest->spawnGpuDrivenTestBatch.instanceCount);
                 uiResult.spawnGpuDrivenTestBatch.success = spawned.success;
+                uiResult.spawnGpuDrivenTestBatch.editorAvailable = spawned.editorAvailable;
                 uiResult.spawnGpuDrivenTestBatch.errorMessage = spawned.errorMessage;
                 uiResult.spawnGpuDrivenTestBatch.instanceCount = spawned.instanceCount;
             } else {

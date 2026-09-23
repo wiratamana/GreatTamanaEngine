@@ -34,10 +34,8 @@
 #include "../Renderer/Renderer.h"
 #include "../Window/Window.h"
 
-// Compiled instead of NullEditorLayer.cpp only when GTE_ENABLE_EDITOR is ON
-// (see CMakeLists.txt). This file - together with DockLayout.cpp and every
-// Panels/*.cpp, which are ALSO only ever compiled under GTE_ENABLE_EDITOR -
-// is the deliberate boundary for the Editor: nothing outside src/Editor/
+// This file - together with DockLayout.cpp and every Panels/*.cpp - is the
+// deliberate boundary for the Editor: nothing outside src/Editor/
 // (Application, Renderer, Game) ever includes an ImGui header or knows
 // ImGui exists, exactly like EventTranslator is the deliberate boundary
 // object for SDL in the Application layer (see AGENTS.md, "Editor Module
@@ -806,8 +804,7 @@ public:
     // task_manager/stl-parser-2, PHASE1 - see
     // IEditorLayer::ImportExternalAssetIntoProject()'s own doc comment
     // (EditorLayer.h) for the full contract. #if-gated exactly like
-    // m_projectPanel's own declaration - GTE_ENABLE_PROJECT_PANEL is a
-    // SEPARATE switch from GTE_ENABLE_EDITOR (see CMakeLists.txt), so a real
+    // GTE_ENABLE_PROJECT_PANEL is its own separate switch (see CMakeLists.txt), so a real
     // Editor build can still have this panel compiled out.
     ProjectAssetImportResult ImportExternalAssetIntoProject(
         const std::string& sourceAbsolutePath, const std::string& destinationRelativeFolder) override
@@ -1050,9 +1047,8 @@ private:
     // The Editor's Unity-style "Project" panel (see Panels/ProjectPanel.h) -
     // a live view of a "Project" folder next to the built .exe, plus
     // external drag-and-drop file import. Only compiled/present at all when
-    // GTE_ENABLE_PROJECT_PANEL is ON (a separate switch from
-    // GTE_ENABLE_EDITOR - see the root CMakeLists.txt) - ProcessEvent()
-    // above feeds it SDL_EVENT_DROP_FILE, BuildUI() below calls its Build().
+    // GTE_ENABLE_PROJECT_PANEL is its own switch (see the root CMakeLists.txt)
+    // - ProcessEvent() above feeds it SDL_EVENT_DROP_FILE, BuildUI() below calls its Build().
     ProjectPanel m_projectPanel;
 
     // Backs the Inspector's live image-preview thumbnail (see

@@ -8,8 +8,8 @@ namespace gte {
 // stable, on-disk authoring location uses - the directory containing the
 // built .exe (via SDL_GetBasePath()), plus a "Project" subfolder, exactly
 // matching Panels/ProjectPanel.cpp's own long-standing convention. Pulled
-// out as its own small, UNCONDITIONALLY-GTE_ENABLE_EDITOR-compiled helper
-// (i.e. NOT gated behind the separate GTE_ENABLE_PROJECT_PANEL switch) so
+// out as its own small helper - GTE_ENABLE_EDITOR no longer exists anywhere
+// in this codebase (i.e. NOT gated behind the separate GTE_ENABLE_PROJECT_PANEL switch) so
 // any core Editor feature - not just the "Project" panel itself - can
 // resolve the same folder consistently. See
 // task_manager/scene-serialization-1/PHASE5_EDITOR_SCENE_IO_AND_PROJECT_ROOT_HELPER.md

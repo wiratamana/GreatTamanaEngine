@@ -1096,7 +1096,7 @@ TEST(BuildScenePathResponseJsonTests, FailureShapeMatchesGenericError)
 // this phase's own Step 3.5: the always-compiled cases below never touch
 // live Logger:: state (ParseGetLogsQuery()'s own pure parsing logic, and
 // BuildGetLogsResponseJson()/BuildClearLogsResponseJson() given a hand-built
-// std::vector<LogEntry>) - the #if GTE_ENABLE_EDITOR-guarded block further
+// std::vector<LogEntry>) - the block further
 // below is what actually calls Logger::Log()/Query()/Clear().
 
 using gte::LogEntry;
@@ -1243,14 +1243,10 @@ TEST(BuildClearLogsResponseJsonTests, ProducesExpectedShape)
     EXPECT_EQ(parsed["cleared_count"], 5);
 }
 
-#if GTE_ENABLE_EDITOR
-
-// These cases actually call gte::Logger::Log()/Query()/Clear() - compiled
-// out entirely (rather than left in, quietly passing for the wrong reason)
-// when GTE_ENABLE_EDITOR is OFF, since Logger::Query() always returns an
-// empty vector in that configuration, which would make these assertions
-// FALSE, not just vacuously true - see this phase document's own Step 3.5.
-
+// These cases actually call gte::Logger::Log()/Query()/Clear() - always
+// compiled in since editor-core-separation-1's PHASE8 (GTE_ENABLE_EDITOR no
+// longer exists anywhere in this codebase; Logger::Query() always returns
+// real, live results now).
 TEST(GetLogsEndToEndTests, ParseAndQueryAndBuildRoundTripRealLoggerState)
 {
     Logger::Clear();
@@ -1325,7 +1321,5 @@ TEST(ClearLogsEndToEndTests, ClearEmptiesBufferAndReportsPreviousCount)
     EXPECT_EQ(parsed["cleared_count"], 2);
     EXPECT_EQ(Logger::EntryCount(), 0u);
 }
-
-#endif // GTE_ENABLE_EDITOR
 
 } // namespace

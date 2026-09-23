@@ -12,12 +12,13 @@
 //
 // Deliberately ImGui/SDL/Vulkan-free, and physically living under
 // src/Editor/ despite that - a SECOND explicit, documented exception to
-// "everything under src/Editor/ compiles only under GTE_ENABLE_EDITOR"
+// "everything under src/Editor/ only ever runs as part of the Editor"
 // alongside EditorLayer.h/NullEditorLayer.cpp (see AGENTS.md, "Editor
 // Module Structure"). This is safe because a HEADER with no matching .cpp
-// is never itself gated by CMakeLists.txt's `if(GTE_ENABLE_EDITOR)` block -
-// it simply compiles wherever it is #included, including from
-// src/Network/ (which must build regardless of GTE_ENABLE_EDITOR).
+// simply compiles wherever it is #included, including from src/Network/
+// (editor-core-separation-1 campaign, PHASE8 - GTE_ENABLE_EDITOR no longer
+// exists anywhere in this codebase, so there is no macro to be "regardless
+// of" any more).
 //
 // GTE_ENABLE_PROJECT_PANEL is a PUBLIC compile definition on the gte_core
 // target (see CMakeLists.txt's own target_compile_definitions() call), so

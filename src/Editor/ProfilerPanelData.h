@@ -88,10 +88,10 @@ std::string FormatGpuTimingLine(const Profiling::GpuPassSample& pass);
 // ScopeTimer's body down to a true empty no-op, meaning every CPU scope call
 // site in the engine compiles away entirely). A plain compile-time constant,
 // not a runtime probe - exactly as permanent/unchanging for the life of the
-// process as GTE_ENABLE_EDITOR itself is. GTE_ENABLE_PROFILER is
+// process as any other build-time compile definition is. GTE_ENABLE_PROFILER is
 // PUBLIC-defined on the gte_core target (see the root CMakeLists.txt), the
-// same way GTE_ENABLE_EDITOR/GTE_ENABLE_PROJECT_PANEL already are, so it's
-// visible here exactly like those two already are.
+// same way GTE_ENABLE_PROJECT_PANEL already is, so it's visible here exactly
+// like that one already is.
 inline constexpr bool kCpuScopeInstrumentationCompiledIn =
 #if GTE_ENABLE_PROFILER
     true;

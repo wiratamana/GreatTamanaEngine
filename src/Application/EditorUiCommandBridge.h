@@ -93,10 +93,17 @@ struct ActivateTabOutcome {
 
 // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
 // PHASE6 - outcome of one SpawnGpuDrivenTestBatch command. `success ==
-// false` covers BOTH "instanceCount was 0" and "GTE_ENABLE_EDITOR is OFF"
-// (NullEditorLayer) - `errorMessage` always explains which.
+// false` covers BOTH "instanceCount was 0" and "the Editor module is not
+// available in this build" (NullEditorLayer) - `errorMessage` always
+// explains which. `editorAvailable` (editor-core-separation-1 campaign,
+// PHASE8) is a real, dedicated bool field - mirroring
+// SaveSceneOutcome/ImportExternalFileOutcome's own precedent - so callers
+// never need to sniff `errorMessage`'s own TEXT for the literal substring
+// "GTE_ENABLE_EDITOR" to distinguish "structurally unavailable" from "a
+// caller mistake" (NetworkServer.cpp used to do exactly that before PHASE8).
 struct SpawnGpuDrivenTestBatchOutcome {
     bool success = false;
+    bool editorAvailable = true;
     std::string errorMessage;
     std::uint32_t instanceCount = 0;
 };

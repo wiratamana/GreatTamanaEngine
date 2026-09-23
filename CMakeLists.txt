@@ -15,29 +15,18 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Master switch for the in-engine Editor/Debug UI module (src/Editor/) -
-# Dear ImGui-backed panels (Hierarchy/Inspector/Scene/Game/...). Turning
-# this OFF is what makes a genuine "release/final game build": no ImGui
-# fetch, no ImGui sources compiled, no ImGui symbols linked at all - not
-# just a runtime flag. Application/Renderer/Game never need #ifdefs around
-# this either way - see src/Editor/EditorLayer.h (IEditorLayer interface +
-# CreateEditorLayer() factory) and its two mutually-exclusive
-# implementations, ImGuiEditorLayer.cpp (real, this ON) and
-# NullEditorLayer.cpp (inert no-op, this OFF).
-option(GTE_ENABLE_EDITOR "Build with in-engine Editor/Debug UI (Dear ImGui)" ON)
-
 # Master switch for the Editor's Unity-style "Project" panel (a live view of
 # a "Project" folder created next to the built .exe, plus external
 # drag-and-drop file import - see src/Editor/Panels/ProjectPanel.h/.cpp and
-# src/Editor/ProjectPanelData.h/.cpp). Kept as its OWN switch, separate from
-# GTE_ENABLE_EDITOR above, because this is a newer, still-evolving feature
+# src/Editor/ProjectPanelData.h/.cpp). Kept as its own switch, distinct from
+# the always-built Editor module itself, because this is a newer, still-evolving feature
 # (live filesystem access from inside the Editor, plus OS-level drag-and-
 # drop) that a developer may want to disable independently while it's
 # fleshed out further, without giving up the rest of the Editor - flipping
 # this OFF removes the panel and every bit of its filesystem access
 # entirely, with no #ifdef soup anywhere else (just the small, explicit
 # `#if GTE_ENABLE_PROJECT_PANEL` guards in ImGuiEditorLayer.cpp/
-# DockLayout.cpp). Only meaningful when GTE_ENABLE_EDITOR is also ON - the
+# DockLayout.cpp). The
 # Project panel is part of the ImGui-backed Editor UI and doesn't exist
 # without it.
 option(GTE_ENABLE_PROJECT_PANEL "Build the Editor's Project panel (Project-folder file browser + drag-and-drop import)" ON)
@@ -46,7 +35,7 @@ option(GTE_ENABLE_PROJECT_PANEL "Build the Editor's Project panel (Project-folde
 # cmake/FetchGTest.cmake and tests/CMakeLists.txt. Turning this OFF means a
 # configure never touches the network for GoogleTest and never compiles a
 # single test/GoogleTest source file - same "zero-touch when off" philosophy
-# as GTE_ENABLE_EDITOR above.
+# as every other "zero-touch when off" switch below.
 option(GTE_BUILD_TESTS "Build the GreatTamanaEngineTests unit test suite (GoogleTest)" ON)
 
 # Master switch for the always-compiled Profiling module (src/Profiling/) -
@@ -192,11 +181,12 @@ fetch_ktx()
 include(FetchSaba)
 fetch_saba()
 
-# Dear ImGui itself is only fetched/built at all when the Editor is enabled
-# - a release build configured with -DGTE_ENABLE_EDITOR=OFF never touches
-# the network for this, never compiles a single ImGui source file, and
-# never links it.
-if(GTE_ENABLE_EDITOR)
+# Dear ImGui itself is always fetched/built - the Editor module is always
+# configured in this repo (editor-core-separation-1 campaign, PHASE8 -
+# GTE_ENABLE_EDITOR no longer exists anywhere in this codebase; PHASE9 does
+# the real gte_editor CMake target split this `if(TRUE)` is a placeholder
+# for).
+if(TRUE)
     include(FetchImGui)
 
     # Downloads (if not already present) and stages Dear ImGui for Windows
@@ -601,17 +591,24 @@ add_library(gte_core STATIC
     src/Encoding/HdrColorVisualization.cpp
 )
 
-# Exactly one of these two branches gets compiled in, depending on
-# GTE_ENABLE_EDITOR - both define the same gte::CreateEditorLayer() factory
-# function (see src/Editor/EditorLayer.h), so there's never an ODR conflict
-# and Application never needs to know which one it linked against.
+# Only one of these two branches has EVER been compiled in in this repo's
+# history (this one, or the else() branch further below) - both define the
+# same gte::CreateEditorLayer() factory function (see src/Editor/EditorLayer.h),
+# so there's never an ODR conflict and Application never needs to know which
+# one it linked against.
 #
-# Every file listed in the GTE_ENABLE_EDITOR branch below (besides
-# ImGuiEditorLayer.cpp itself) is part of the same Editor/ImGui boundary -
-# DockLayout.* and Panels/*.* are only ever compiled here, alongside it, and
-# are just as free to include ImGui/SDL headers directly - see AGENTS.md,
-# "Editor Module Structure".
-if(GTE_ENABLE_EDITOR)
+# Every file listed in the branch below (besides ImGuiEditorLayer.cpp itself)
+# is part of the same Editor/ImGui boundary - DockLayout.* and Panels/*.* are
+# only ever compiled here, alongside it, and are just as free to include
+# ImGui/SDL headers directly - see AGENTS.md, "Editor Module Structure".
+#
+# editor-core-separation-1 campaign, PHASE8 - GTE_ENABLE_EDITOR no longer
+# exists anywhere in this codebase; this `if(TRUE)` is a deliberate, TEMPORARY
+# placeholder hardcoding this block to always take its old "ON" branch, until
+# PHASE9 does the real gte_editor CMake target split (moving this whole file
+# list, and the else() branch below, into two real, separately-linked
+# targets).
+if(TRUE)
     target_sources(gte_core PRIVATE
         src/Editor/EditorContext.h
         src/Editor/ProjectRootPath.h
@@ -750,24 +747,7 @@ else()
     target_sources(gte_core PRIVATE src/Editor/NullEditorLayer.cpp)
 endif()
 
-# Exposes GTE_ENABLE_EDITOR to C++ code as an actual preprocessor macro
-# (1 or 0), not just a CMake-time source-selection switch - needed by
-# src/Renderer/Memory/GpuMemoryTracker.h, which uses `#if GTE_ENABLE_EDITOR`
-# to compile debug-name storage into the binary ONLY for Editor builds (see
-# AGENTS.md, "GPU resource memory tracking"). $<BOOL:...> normalizes
-# CMake's ON/OFF (or TRUE/FALSE/1/0/...) into a plain 1 or 0.
-#
-# PUBLIC (not PRIVATE) is deliberate here, unlike most of gte_core's other
-# compile-time details: GpuMemoryTracker.h's `#if GTE_ENABLE_EDITOR` is seen
-# by ANY translation unit that includes that header, including test code in
-# GreatTamanaEngineTests (see tests/Memory/GpuMemoryTrackerTests.cpp) - if
-# this were PRIVATE, the macro would silently evaluate to 0 (undefined) for
-# every consumer of gte_core, regardless of what gte_core itself was
-# actually built with, and Editor-only behavior could never be tested.
-target_compile_definitions(gte_core PUBLIC GTE_ENABLE_EDITOR=$<BOOL:${GTE_ENABLE_EDITOR}>)
-
-# Same idea as GTE_ENABLE_EDITOR's compile definition immediately above -
-# exposes GTE_ENABLE_PROJECT_PANEL to C++ code as an actual 1/0 preprocessor
+# Exposes GTE_ENABLE_PROJECT_PANEL to C++ code as an actual 1/0 preprocessor
 # macro, needed by ImGuiEditorLayer.cpp/DockLayout.cpp's own
 # `#if GTE_ENABLE_PROJECT_PANEL` guards. PUBLIC for the same reason: this
 # header-level guard must be seen identically by gte_core itself and by
@@ -912,13 +892,14 @@ endif()
 
 # The Editor's "Scene" panel infinite ground grid (Unity-style procedural
 # shader grid - see task_manager/editor-enchancements-1/PHASE0_MASTER_STRATEGY.md).
-# Only compiled/staged when GTE_ENABLE_EDITOR is ON, since
-# src/Editor/SceneGridRenderer.cpp (PHASE3) - the only thing that ever
-# loads these - isn't compiled into gte_core otherwise (unlike
-# MeshPreview.vert/frag above, this does NOT additionally need
+# Always compiled/staged, since src/Editor/SceneGridRenderer.cpp (PHASE3) -
+# the only thing that ever loads these - is always compiled into gte_core
+# today (unlike MeshPreview.vert/frag above, this does NOT additionally need
 # GTE_ENABLE_PROJECT_PANEL - SceneGridRenderer has no dependency on the
-# Project panel at all).
-if(GTE_ENABLE_EDITOR)
+# Project panel at all). editor-core-separation-1 campaign, PHASE8 - this
+# `if(TRUE)` is a temporary placeholder, see the main Editor source list's
+# own comment above for the full reasoning.
+if(TRUE)
     gte_add_shader(GreatTamanaEngine src/Shaders/SceneGrid.vert)
     gte_add_shader(GreatTamanaEngine src/Shaders/SceneGrid.frag)
 endif()
@@ -926,11 +907,11 @@ endif()
 # Phase 7 of the compute-shader campaign
 # (COMPUTE_PHASE7_VALIDATION_TESTING_TOOLING_STRATEGY_v2.md) - the compute
 # box-blur validation shader (src/Editor/ComputeBlurValidation.h/.cpp).
-# Only compiled/staged when GTE_ENABLE_EDITOR is ON, since
-# ComputeBlurValidation.cpp - the only thing that ever loads it - isn't
-# compiled into gte_core otherwise (see GTE_ENABLE_EDITOR's target_sources()
-# block above).
-if(GTE_ENABLE_EDITOR)
+# Always compiled/staged, since ComputeBlurValidation.cpp - the only thing
+# that ever loads it - is always compiled into gte_core today.
+# editor-core-separation-1 campaign, PHASE8 - this `if(TRUE)` is a temporary
+# placeholder, see the main Editor source list's own comment above.
+if(TRUE)
     gte_add_shader(GreatTamanaEngine src/Shaders/BoxBlur.comp)
 endif()
 
@@ -939,14 +920,14 @@ endif()
 # Validation" debug pass's own shaders (src/Editor/GBufferValidation.h/.cpp):
 # GBufferValidation.vert/.frag (the 2-color-attachment MRT pass itself) and
 # GBufferCopy.comp (the second pass's own trivial imageLoad/imageStore
-# copy). Only compiled/staged when GTE_ENABLE_EDITOR is ON, since
-# GBufferValidation.cpp - the only thing that ever loads these - isn't
-# compiled into gte_core otherwise (same precedent as BoxBlur.comp/
-# SceneGrid.vert/frag above - this is the CORRECT precedent for an
-# Editor-only debug pass, NOT Mesh.frag/TexturedMesh.frag's own
-# unconditional registration, which is for core, always-compiled gameplay
-# shaders instead).
-if(GTE_ENABLE_EDITOR)
+# copy). Always compiled/staged, since GBufferValidation.cpp - the only
+# thing that ever loads these - is always compiled into gte_core today
+# (same precedent as BoxBlur.comp/SceneGrid.vert/frag above - this is the
+# CORRECT precedent for an Editor-only debug pass, NOT Mesh.frag/
+# TexturedMesh.frag's own unconditional registration, which is for core,
+# always-compiled gameplay shaders instead). editor-core-separation-1
+# campaign, PHASE8 - this `if(TRUE)` is a temporary placeholder.
+if(TRUE)
     gte_add_shader(GreatTamanaEngine src/Shaders/GBufferValidation.vert)
     gte_add_shader(GreatTamanaEngine src/Shaders/GBufferValidation.frag)
     gte_add_shader(GreatTamanaEngine src/Shaders/GBufferCopy.comp)
@@ -1034,12 +1015,13 @@ gte_add_shader(GreatTamanaEngine src/Shaders/VolumeTexturePreview.comp)
 # task_manager/frame-debugger-3 campaign, PHASE6
 # (PHASE6_CHANNELS_AND_LEVELS_REAL_PREVIEW.md) - the Frame Debugger's own
 # Channels/Levels preview-compositing compute shader
-# (src/Editor/FrameDebuggerPreviewProcessing.h/.cpp). Only compiled/staged
-# when GTE_ENABLE_EDITOR is ON, since FrameDebuggerPreviewProcessing.cpp -
-# the only thing that ever loads it - isn't compiled into gte_core otherwise
-# (same precedent as BoxBlur.comp/SceneGrid.vert/frag above). Does NOT
-# #include AtmosphereCommon.glsl, so no EXTRA_DEPENDS.
-if(GTE_ENABLE_EDITOR)
+# (src/Editor/FrameDebuggerPreviewProcessing.h/.cpp). Always compiled/staged,
+# since FrameDebuggerPreviewProcessing.cpp - the only thing that ever loads
+# it - is always compiled into gte_core today (same precedent as
+# BoxBlur.comp/SceneGrid.vert/frag above). Does NOT #include
+# AtmosphereCommon.glsl, so no EXTRA_DEPENDS. editor-core-separation-1
+# campaign, PHASE8 - this `if(TRUE)` is a temporary placeholder.
+if(TRUE)
     gte_add_shader(GreatTamanaEngine src/Shaders/FrameDebuggerPreview.comp)
 endif()
 

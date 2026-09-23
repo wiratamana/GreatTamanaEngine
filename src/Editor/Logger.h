@@ -18,8 +18,6 @@
 
 namespace gte {
 
-#if GTE_ENABLE_EDITOR
-
 // Thread-safe, process-global, Editor-only in-memory log store - see
 // AGENTS.md ("Logging") for the full convention. Not an instance/DI type,
 // same rationale as SdlMemoryTracker (Memory/SdlMemoryTracker.h) - a
@@ -112,43 +110,16 @@ public:
     static constexpr bool IsEnabled() noexcept { return true; }
 };
 
-#else // !GTE_ENABLE_EDITOR
-
-// Compiled-out form: every method is fully inline and does nothing,
-// exactly mirroring Profiling/ScopeTimer.h's own `#else` branch. No
-// Logger.cpp is compiled into the build at all in this configuration
-// (see CMakeLists.txt) - nothing here needs linking.
-class Logger {
-public:
-    static constexpr std::size_t kCapacity = 2000;
-
-    // NOT noexcept, even though this trivial body obviously cannot throw -
-    // see this file's own "Important nuances" note below on why this
-    // branch's signature must stay byte-for-byte identical (including
-    // noexcept-ness) to the ON branch's real, genuinely-throwing-capable
-    // Log().
-    static void Log(LogLevel, const std::string&, const std::string&) { }
-    static void SetCurrentFrame(std::uint64_t) noexcept { }
-    static std::vector<LogEntry> Query(const LogQueryFilter&) { return {}; }
-    // NOT noexcept - same reasoning as Log() above.
-    static void Clear() { }
-    static std::size_t EntryCount() noexcept { return 0; }
-    static std::uint64_t LatestEntryId() noexcept { return 0; }
-    static constexpr bool IsEnabled() noexcept { return false; }
-};
-
-#endif // GTE_ENABLE_EDITOR
-
 // PHASE3 (editor-core-separation-1 campaign) - the ONE concrete ILogSink
 // implementation this engine ships. A small, separate forwarding type
 // (see Logger's own class comment above for exactly why it isn't Logger
 // itself) - installed once via InstallLogSink(&LoggerLogSink::Instance())
 // by Application's constructor today (Phase 16 of this campaign moves that
 // one call site into EditorHost instead - see this file's own future
-// history). Defined identically regardless of GTE_ENABLE_EDITOR (both
-// branches of Logger above share the exact same Log() signature), so this
-// type itself needs no #if - a GTE_ENABLE_EDITOR=OFF build's version simply
-// forwards into Logger's own no-op Log().
+// history). GTE_ENABLE_EDITOR no longer exists anywhere in this codebase
+// (editor-core-separation-1 campaign, PHASE8) - Logger is now always the
+// real, ring-buffer-backed implementation, so this forwarding type needs no
+// #if at all.
 class LoggerLogSink : public ILogSink {
 public:
     void Log(LogLevel level, std::string_view category, std::string_view message) override

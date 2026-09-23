@@ -23,16 +23,12 @@
 // test body below starts with a fresh gte::Logger::Clear() so test execution
 // order never matters and no test observes another test's leftover entries.
 //
-// This whole file is guarded by `#if GTE_ENABLE_EDITOR` (see
-// tests/CMakeLists.txt - added inside the EXISTING if(GTE_ENABLE_EDITOR)
-// block, the SAME one PHASE1's Editor/LoggerTests.cpp was already added to -
-// no GTE_ENABLE_NETWORK condition at all, matching every other
-// Network/*Tests.cpp file's own unconditional-with-respect-to-that-switch
-// treatment, since NetworkServer/NetworkRoutes always compile regardless of
-// GTE_ENABLE_NETWORK - only Application's own production call site is
-// gated), since it calls gte::Logger::Log()/Clear()/SetCurrentFrame()
-// directly and those only have real, observable behavior in that
-// configuration.
+// This whole file used to be guarded by `#if GTE_ENABLE_EDITOR` - removed by
+// editor-core-separation-1 campaign's PHASE8 (GTE_ENABLE_EDITOR no longer
+// exists anywhere in this codebase). Logger.cpp is now always compiled
+// in (see Editor/Logger.h/.cpp's own PHASE8 history), so this file's own
+// gte::Logger::Log()/Clear()/SetCurrentFrame() calls always have real,
+// observable behavior.
 
 #include "Editor/Logger.h"
 #include "Network/NetworkServer.h"
@@ -47,8 +43,6 @@
 #include <cstdint>
 #include <memory>
 #include <string>
-
-#if GTE_ENABLE_EDITOR
 
 namespace gte {
 namespace {
@@ -340,5 +334,3 @@ TEST_F(LogEndpointsEndToEndTest, CombinedFiltersComposeAsLogicalAnd)
 
 } // namespace
 } // namespace gte
-
-#endif // GTE_ENABLE_EDITOR

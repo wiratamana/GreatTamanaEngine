@@ -2156,17 +2156,16 @@ set(GTE_TEST_SOURCES
     Physics/JointPhysicsOverrideApplicationTests.cpp
 )
 
-# Editor/EditorCamera.h/.cpp (see src/Editor/EditorCamera.h) is only
-# compiled into gte_core when GTE_ENABLE_EDITOR is ON - the whole
-# src/Editor/ folder besides EditorLayer.h/NullEditorLayer.cpp is gated on
-# it (see the root CMakeLists.txt's "Editor Module Structure" comment) -
-# so its test file follows the exact same "zero-touch when off" rule: a
-# GTE_ENABLE_EDITOR=OFF configure never even tries to compile/link a test
-# against a class that doesn't exist in that build. EditorCamera itself is
-# still genuinely Tier 1 (see its own file comment) - this guard is purely
-# about it not being COMPILED IN at all when the Editor is off, not about
-# it needing a live Vulkan/SDL/ImGui dependency.
-if(GTE_ENABLE_EDITOR)
+# Editor/EditorCamera.h/.cpp (see src/Editor/EditorCamera.h) is always
+# compiled into gte_core today - the whole src/Editor/ folder besides
+# EditorLayer.h/NullEditorLayer.cpp is part of the same always-compiled
+# Editor source list (see the root CMakeLists.txt's "Editor Module
+# Structure" comment). EditorCamera itself is still genuinely Tier 1 (see
+# its own file comment). editor-core-separation-1 campaign, PHASE8 - this
+# `if(TRUE)` is a deliberate, TEMPORARY placeholder (GTE_ENABLE_EDITOR no
+# longer exists anywhere in this codebase) until PHASE9's real gte_editor
+# CMake target split.
+if(TRUE)
     list(APPEND GTE_TEST_SOURCES
         Editor/EditorCameraTests.cpp
         Editor/SceneGridMathTests.cpp
@@ -2192,7 +2191,7 @@ if(GTE_ENABLE_EDITOR)
 
     # ProjectPanelData.h/.cpp (see src/Editor/ProjectPanelData.h) is only
     # compiled into gte_core when GTE_ENABLE_PROJECT_PANEL is ALSO ON (a
-    # separate switch from GTE_ENABLE_EDITOR - see the root CMakeLists.txt) -
+# separate switch, independent of the Editor module itself - see the root CMakeLists.txt) -
     # same "zero-touch when off" rule as EditorCameraTests.cpp above.
     # ProjectPanelData's own functions are genuinely Tier 1 despite touching
     # the real filesystem: they take/return plain paths/strings and operate
@@ -2222,10 +2221,11 @@ target_link_libraries(GreatTamanaEngineTests PRIVATE
 # gte_core links imgui PRIVATE (see the root CMakeLists.txt), so that
 # include path isn't propagated transitively to consumers of gte_core; this
 # test executable needs its own link against the imgui target for its
-# include directories. Only linked when GTE_ENABLE_EDITOR is ON, since the
-# imgui target itself only exists then (matching every other GTE_ENABLE_EDITOR
-# guard in this file).
-if(GTE_ENABLE_EDITOR)
+# include directories. editor-core-separation-1 campaign, PHASE8 - this
+# `if(TRUE)` is a deliberate, TEMPORARY placeholder (GTE_ENABLE_EDITOR no
+# longer exists anywhere in this codebase) until PHASE9's real gte_editor
+# CMake target split.
+if(TRUE)
     target_link_libraries(GreatTamanaEngineTests PRIVATE imgui)
 endif()
 

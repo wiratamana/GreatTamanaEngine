@@ -17,10 +17,10 @@
 // LatestEntryId() DIRECTLY - a real, pre-existing, ALREADY-DOCUMENTED
 // exception (AGENTS.md, "Logging": "the ONE documented, narrow exception to
 // this section's own reach engine state only through a reviewed bridge
-// rule") that is NOT gated behind any GTE_ENABLE_EDITOR macro at all (both
-// branches of the Logger class already compile and link fine either way -
-// see Editor/Logger.h) and is therefore genuinely OUT OF this phase's own
-// declared scope (fixing the GTE_LOG_* mechanism) - see
+// rule") that is NOT gated behind any macro at all (Logger is a real,
+// unconditionally-compiled class - see Editor/Logger.h) and is therefore
+// genuinely OUT OF this phase's own declared scope (fixing the GTE_LOG_*
+// mechanism) - see
 // PHASE3_COMPLETION_REPORT.md's own "Discovered gap" section for the full
 // explanation of why this file cannot yet drop this #include entirely.
 #include "../Editor/Logger.h"
@@ -367,14 +367,17 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         }
 
         const SpawnGpuDrivenTestBatchOutcome& outcome = submit.result->spawnGpuDrivenTestBatch;
-        // A release build (NullEditorLayer, "GTE_ENABLE_EDITOR is OFF" in
-        // outcome.errorMessage) reports as 503 - "structurally unavailable
-        // in this build", not a caller mistake - mirrors /save_scene's own
-        // "editorAvailable" -> 503 convention. Every other failure (should
-        // be unreachable - ParseSpawnGpuDrivenTestBatchRequest() above
-        // already rejects count < 1) would be a 400.
+        // A release build (NullEditorLayer) reports editorAvailable == false
+        // as 503 - "structurally unavailable in this build", not a caller
+        // mistake - mirrors /save_scene's own "editorAvailable" -> 503
+        // convention. A real, dedicated bool field (editor-core-separation-1
+        // campaign, PHASE8) - never a substring search against
+        // outcome.errorMessage's own TEXT (the previous, fragile shape this
+        // replaces). Every other failure (should be unreachable -
+        // ParseSpawnGpuDrivenTestBatchRequest() above already rejects
+        // count < 1) would be a 400.
         if (!outcome.success) {
-            res.status = (outcome.errorMessage.find("GTE_ENABLE_EDITOR") != std::string::npos) ? 503 : 400;
+            res.status = outcome.editorAvailable ? 400 : 503;
             res.set_content(BuildGenericErrorResponseJson(outcome.errorMessage), "application/json");
             return;
         }
@@ -789,8 +792,8 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         if (!outcome.projectAvailable) {
             res.status = 503;
             res.set_content(BuildGenericErrorResponseJson(
-                "the Editor's \"Project\" panel is not available in this build (GTE_ENABLE_EDITOR/"
-                "GTE_ENABLE_PROJECT_PANEL is OFF)"), "application/json");
+                "the Editor's \"Project\" panel is not available in this build (the Editor "
+                "module, or specifically its \"Project\" panel, is not compiled in)"), "application/json");
             return;
         }
 
@@ -820,7 +823,7 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
     // PHASE0_MASTER_STRATEGY.md's Locked Design Decision #9 for why this is
     // correct (an ECS/Renderer-mutating spawn, not an Editor/Project-panel
     // concern - this route has NO dependency on assetImportCommandBridge at
-    // all, and works identically whether GTE_ENABLE_EDITOR is ON or OFF).
+    // all, and works identically regardless of whether the Editor module is compiled in).
     server.Post("/instantiate_asset", [commandBridge](const httplib::Request& req, httplib::Response& res) {
         const ParsedInstantiateAssetRequest parsed = ParseInstantiateAssetRequest(req.body);
         if (!parsed.valid) {

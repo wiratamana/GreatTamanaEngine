@@ -1,7 +1,5 @@
 #include "Logger.h"
 
-#if GTE_ENABLE_EDITOR
-
 #include <algorithm>
 #include <atomic>
 #include <cctype>
@@ -152,5 +150,3 @@ std::uint64_t Logger::LatestEntryId() noexcept
 }
 
 } // namespace gte
-
-#endif // GTE_ENABLE_EDITOR

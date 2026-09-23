@@ -88,7 +88,8 @@ public:
     {
         GpuDrivenTestBatchSpawnResult result;
         result.success = false;
-        result.errorMessage = "GPU-driven test batch spawning is not available in this build (GTE_ENABLE_EDITOR is OFF)";
+        result.editorAvailable = false;
+        result.errorMessage = "GPU-driven test batch spawning is not available in this build (the Editor module is not compiled in)";
         return result;
     }
 };

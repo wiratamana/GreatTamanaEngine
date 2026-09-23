@@ -20,7 +20,7 @@ struct EditorContext;
 // import a file/folder into it by dragging it in from the OS (Windows
 // Explorer, ...) - see HandleExternalFileDrop() below. Only compiled/used
 // when GTE_ENABLE_PROJECT_PANEL is ON (see the root CMakeLists.txt) - the
-// whole point of that separate switch (distinct from GTE_ENABLE_EDITOR) is
+// whole point of that separate switch is
 // that this feature touches the real filesystem and is still actively
 // evolving, so it can be turned off independently of the rest of the
 // Editor.

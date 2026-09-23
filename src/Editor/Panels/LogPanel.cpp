@@ -60,8 +60,7 @@ void LogPanel::Build(EditorContext& /*ctx*/)
     ImGui::BeginChild("LogScrollRegion", ImVec2(0.0f, 0.0f), true);
     if (matched.empty()) {
         // Logger::IsEnabled() is always true wherever this panel's own
-        // code runs (this panel only exists when GTE_ENABLE_EDITOR is ON,
-        // and Logger has no independent enable switch of its own beyond
+        // code runs (Logger has no independent enable switch of its own beyond
         // that - see PHASE4_EDITOR_LOG_PANEL_UI.md, Step 2) - so there is
         // no "logging disabled in this build" state to distinguish here,
         // unlike e.g. ProfilerPanel's own compiled-out empty message.

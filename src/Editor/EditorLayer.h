@@ -30,8 +30,9 @@ class AtmosphereLutRenderer;
 // compiled file (see task_manager/frame-debugger-3/
 // PHASE1_RENDERER_CAPTURE_INSTRUMENTATION.md's own Step 3.1b, applied here
 // exactly like src/Game/RenderSystem.h already does) that must still
-// compile with GTE_ENABLE_EDITOR=OFF, a build where this type does not
-// exist at all. A bare forward declaration of a pointee is always legal
+// compile in a build where NullEditorLayer.cpp (rather than
+// ImGuiEditorLayer.cpp) is what got linked in - a build where this type does
+// NOT exist at all in that binary. A bare forward declaration of a pointee is always legal
 // even when the type is never defined in this translation unit, since
 // PrepareFrameDebuggerCaptureContext() below only ever needs a POINTER to
 // it.
@@ -45,7 +46,7 @@ class RenderGraphBuilder;
 // Abstraction boundary between engine-core (Application/Renderer/Game) and
 // the optional Editor/Debug UI. Dear ImGui-backed in real builds, but
 // nothing outside src/Editor/ (specifically: nothing outside whichever
-// files there are only ever compiled under GTE_ENABLE_EDITOR - see
+// files there only ever compile as part of the Editor's own build - see
 // AGENTS.md, "Editor Module Structure") ever includes an ImGui header -
 // Application only ever talks to this interface.
 //
@@ -54,8 +55,9 @@ class RenderGraphBuilder;
 // through their existing public accessors (never the other way around) -
 // e.g. Game::GetRegistry() is what lets the Hierarchy/Inspector panels below
 // see and edit the ECS world without Game gaining any Editor awareness.
-// That is what makes turning the Editor off (GTE_ENABLE_EDITOR=OFF in
-// CMakeLists.txt) a genuinely zero-touch operation for gameplay code.
+// That is what makes linking a Player host against NullEditorLayer.cpp
+// alone, without ever seeing ImGuiEditorLayer.cpp's own source, a genuinely
+// zero-touch operation for gameplay code.
 //
 // Two implementations exist, selected entirely by which .cpp got compiled
 // (see CMakeLists.txt) - never both at once, so there's no #ifdef soup
@@ -67,13 +69,14 @@ class RenderGraphBuilder;
 //     content-region size/aspect independently (see GameViewTarget()/
 //     SceneViewTarget() below) - and the Unity-style docked layout
 //     (Hierarchy left, Inspector right, Scene/Game tabbed center, top menu
-//     bar). Only compiled when GTE_ENABLE_EDITOR is ON.
+//     bar). What this repo's own executable always links.
 //   - NullEditorLayer (src/Editor/NullEditorLayer.cpp) - every method is a
 //     no-op and GameViewTarget()/SceneViewTarget() always return nullptr,
 //     meaning "render straight to the swapchain" - i.e. a release build
-//     behaves exactly as if no Editor/ImGui ever existed. Compiled instead
-//     when GTE_ENABLE_EDITOR is OFF, with zero ImGui code or linkage
-//     anywhere in the binary.
+//     behaves exactly as if no Editor/ImGui ever existed. What a future
+//     Player host (linking gte_core alone, never seeing gte_editor's
+//     source) links instead, with zero ImGui code or linkage anywhere in
+//     that binary.
 // Result of ActivateTab() below - deliberately a SEPARATE, tiny,
 // dependency-free type from Application/EditorUiCommandBridge.h's own
 // ActivateTabOutcome (network-impl-7 campaign) - EditorLayer.h must never
@@ -114,7 +117,7 @@ struct ProjectAssetImportResult {
 // AddGBufferValidationPass() below. Deliberately a SEPARATE, tiny,
 // dependency-free struct (mirrors TabActivationResult's own precedent
 // above) - EditorLayer.h must never depend on src/Editor/GBufferValidation.h
-// (an Editor-only file not compiled at all under GTE_ENABLE_EDITOR=OFF).
+// (an Editor-only file a Player host linking gte_core alone never even sees).
 // The CALLER (Application::Run()) must add every one of these three
 // handles to that call's own finalOutputs root set, or PHASE1-3's
 // existing RenderGraphCompiler culling would silently drop whichever one
@@ -192,6 +195,12 @@ struct GpuDrivenBatchDebugInfo {
 // pair in this file for the identical precedent).
 struct GpuDrivenTestBatchSpawnResult {
     bool success = false;
+    // editor-core-separation-1 campaign, PHASE8 - a real, dedicated field
+    // (mirrors ProjectAssetImportResult's own "editorAvailable"-style
+    // convention immediately above) so a caller never needs to sniff
+    // `errorMessage`'s own TEXT for a literal substring to distinguish
+    // "structurally unavailable in this build" from "a caller mistake".
+    bool editorAvailable = true;
     std::string errorMessage;
     std::uint32_t instanceCount = 0;
 };
@@ -677,19 +686,17 @@ public:
     // qualifies. `game`/`renderer` are the SAME Game/Renderer Application
     // owns - mirrors CreatePrimitiveEntity()'s own "Editor hands Game/
     // Renderer through, the real spawn logic lives elsewhere" shape. Always
-    // returns success == false (creates NOTHING) for NullEditorLayer (a
-    // release build has no Editor-only validation tooling to spawn through
-    // at all) - mirrors ImportExternalAssetIntoProject()'s own
-    // "editorAvailable"-style graceful-unavailability precedent, just
-    // spelled as a plain `success` field here since there is no OTHER
-    // reason for this specific call to fail (see
-    // GpuDrivenBatchTestSpawner::Spawn()'s own doc comment).
+    // returns success == false, editorAvailable == false for NullEditorLayer
+    // (a release build has no Editor-only validation tooling to spawn
+    // through at all) - mirrors ImportExternalAssetIntoProject()'s own
+    // "editorAvailable"-style graceful-unavailability precedent (editor-
+    // core-separation-1 campaign, PHASE8 - see GpuDrivenTestBatchSpawnResult's
+    // own doc comment above).
     virtual GpuDrivenTestBatchSpawnResult SpawnGpuDrivenTestBatch(Game& game, Renderer& renderer, std::uint32_t instanceCount) = 0;
 };
 
 // Constructs the real ImGui-backed editor layer, or the inert Null one,
-// depending entirely on which .cpp got linked in (see GTE_ENABLE_EDITOR in
-// CMakeLists.txt) - Application calls this once, at startup, and never
+// depending entirely on which .cpp got linked in - Application calls this once, at startup, and never
 // needs to know or care which one it got.
 std::unique_ptr<IEditorLayer> CreateEditorLayer(Window& window, Renderer& renderer);
 
