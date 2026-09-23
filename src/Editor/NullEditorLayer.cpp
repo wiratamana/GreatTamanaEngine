@@ -1,9 +1,20 @@
 #include "EditorLayer.h"
 
-// Compiled instead of ImGuiEditorLayer.cpp when GTE_ENABLE_EDITOR is OFF
-// (see CMakeLists.txt) - this file, and this file alone, is what a
-// "final/release game build" links for the Editor seam. It has no SDL,
-// Vulkan-beyond-forward-declares, or ImGui dependency whatsoever.
+// editor-core-separation-1 campaign, PHASE9 (PHASE9_CMAKE_TARGET_SPLIT.md,
+// Locked Design Decision #9) - lives in gte_core's own unconditional source
+// list (never gte_editor's), always compiled alongside ImGuiEditorLayer.cpp
+// (gte_editor-only, ALWAYS built per Rule 4) into this repo's own single
+// executable. Its own factory function is named CreateNullEditorLayer() -
+// deliberately NOT CreateEditorLayer() - so both files' factory functions
+// coexist in the same final link with zero ODR conflict (previously safe
+// only because exactly one of the two ever compiled into any given build,
+// selected by the old GTE_ENABLE_EDITOR on/off switch - a precondition that
+// stopped holding the moment gte_editor became unconditionally, always
+// linked). Nothing in THIS repo ever calls CreateNullEditorLayer() - it
+// exists purely so a future Player host (linking gte_core alone, never
+// seeing gte_editor's source) has something to call for a no-op Editor
+// implementation. It has no SDL, Vulkan-beyond-forward-declares, or ImGui
+// dependency whatsoever.
 
 namespace gte {
 
@@ -96,7 +107,7 @@ public:
 
 } // namespace
 
-std::unique_ptr<IEditorLayer> CreateEditorLayer(Window& /*window*/, Renderer& /*renderer*/)
+std::unique_ptr<IEditorLayer> CreateNullEditorLayer(Window& /*window*/, Renderer& /*renderer*/)
 {
     return std::make_unique<NullEditorLayer>();
 }

@@ -388,6 +388,14 @@ add_library(gte_core STATIC
     src/Application/FrameDebuggerCommandBridge.h
     src/Application/FrameDebuggerCommandBridge.cpp
     src/Editor/EditorPanelCatalog.h
+    # editor-core-separation-1 campaign, PHASE9 (PHASE9_CMAKE_TARGET_SPLIT.md,
+    # Locked Design Decision #9) - unlike every other file under src/Editor/,
+    # NullEditorLayer.cpp belongs in gte_core's OWN unconditional source list,
+    # not gte_editor's: a future Player host (linking gte_core alone, never
+    # seeing gte_editor's source) still needs gte::CreateNullEditorLayer()
+    # (see EditorLayer.h) to resolve to something, with zero ImGui/SDL
+    # dependency. This is the ONE Editor-tree file gte_core itself compiles.
+    src/Editor/NullEditorLayer.cpp
     src/Application/EngineCommandDispatch.h
     src/Application/EngineCommandDispatch.cpp
     src/Application/RenderPasses.h
@@ -591,161 +599,165 @@ add_library(gte_core STATIC
     src/Encoding/HdrColorVisualization.cpp
 )
 
-# Only one of these two branches has EVER been compiled in in this repo's
-# history (this one, or the else() branch further below) - both define the
-# same gte::CreateEditorLayer() factory function (see src/Editor/EditorLayer.h),
-# so there's never an ODR conflict and Application never needs to know which
-# one it linked against.
+# --- Editor library ------------------------------------------------------
+# editor-core-separation-1 campaign, PHASE9 (PHASE9_CMAKE_TARGET_SPLIT.md) -
+# a real, separately-linked static library, depending on gte_core, owning
+# everything that used to live behind the old GTE_ENABLE_EDITOR macro
+# (see PHASE8_COMPLETION_REPORT.md) - ImGui/ImGuizmo, gizmos, every panel,
+# the Frame Debugger, and every Editor-only validation/debug tool.
+# ALWAYS built, unconditionally, every single time this repo is configured -
+# there is no CMake option anywhere that skips it (Locked Design Decision #9/
+# Rule 4, PHASE0_MASTER_STRATEGY.md). Every file listed below (besides
+# ImGuiEditorLayer.cpp itself) is part of the same Editor/ImGui boundary -
+# DockLayout.* and Panels/*.* are only ever compiled here, alongside it, and
+# are just as free to include ImGui/SDL headers directly - see AGENTS.md,
+# "Editor Module Structure".
 #
-# Every file listed in the branch below (besides ImGuiEditorLayer.cpp itself)
-# is part of the same Editor/ImGui boundary - DockLayout.* and Panels/*.* are
-# only ever compiled here, alongside it, and are just as free to include
-# ImGui/SDL headers directly - see AGENTS.md, "Editor Module Structure".
-#
-# editor-core-separation-1 campaign, PHASE8 - GTE_ENABLE_EDITOR no longer
-# exists anywhere in this codebase; this `if(TRUE)` is a deliberate, TEMPORARY
-# placeholder hardcoding this block to always take its old "ON" branch, until
-# PHASE9 does the real gte_editor CMake target split (moving this whole file
-# list, and the else() branch below, into two real, separately-linked
-# targets).
-if(TRUE)
-    target_sources(gte_core PRIVATE
-        src/Editor/EditorContext.h
-        src/Editor/ProjectRootPath.h
-        src/Editor/ProjectRootPath.cpp
-        src/Editor/SceneIO.h
-        src/Editor/SceneIO.cpp
-        # editor-core-separation-1 campaign, PHASE6
-        # (PHASE6_EDITOR_CAPABILITY_CALL_SITE_CONVERSION_SCENE_IO.md) - the
-        # real ISceneIOCapability implementation wrapping SceneIO.h above.
-        # Still added to this (still-conditional, for now) Editor source
-        # list; Phase 9 moves this into the real gte_editor target's own
-        # list.
-        src/Editor/EditorSceneIOCapability.h
-        src/Editor/EditorSceneIOCapability.cpp
-        src/Editor/Selection.h
-        src/Editor/Selection.cpp
-        src/Editor/EditorCamera.h
-        src/Editor/EditorCamera.cpp
-        src/Editor/SceneGridMath.h
-        src/Editor/SceneGridMath.cpp
-        src/Editor/SceneGridRenderer.h
-        src/Editor/SceneGridRenderer.cpp
-        src/Editor/ComputeBlurValidation.h
-        src/Editor/ComputeBlurValidation.cpp
-        src/Editor/GBufferValidation.h
-        src/Editor/GBufferValidation.cpp
-        src/Editor/GpuDrivenBatchTestSpawner.h
-        src/Editor/GpuDrivenBatchTestSpawner.cpp
-        src/Editor/GpuSkinningValidation.h
-        src/Editor/GpuSkinningValidation.cpp
-        src/Editor/AtmosphereTransmittanceLutValidation.h
-        src/Editor/AtmosphereTransmittanceLutValidation.cpp
-        src/Editor/AtmosphereAerialPerspectiveLutInspection.h
-        src/Editor/AtmosphereAerialPerspectiveLutInspection.cpp
-        src/Editor/AtmosphereAerialPerspectiveSkyPurityValidation.h
-        src/Editor/AtmosphereAerialPerspectiveSkyPurityValidation.cpp
-        src/Editor/TransformGizmo.h
-        src/Editor/TransformGizmo.cpp
-        src/Editor/DockLayout.h
-        src/Editor/DockLayout.cpp
-        src/Editor/PlaybackControls.h
-        src/Editor/PlaybackControls.cpp
-        src/Editor/ImGuiMemoryTracker.h
-        src/Editor/ImGuiMemoryTracker.cpp
-        src/Editor/Logger.h
-        src/Editor/Logger.cpp
-        src/Editor/MemoryPanelData.h
-        src/Editor/MemoryPanelData.cpp
-        src/Editor/ProfilerPanelData.h
-        src/Editor/ProfilerPanelData.cpp
-        src/Editor/JobsPanelData.h
-        src/Editor/JobsPanelData.cpp
-        src/Editor/LogPanelData.h
-        src/Editor/LogPanelData.cpp
-        src/Editor/FrameDebuggerData.h
-        src/Editor/FrameDebuggerData.cpp
-        src/Editor/FrameDebuggerCapture.h
-        src/Editor/FrameDebuggerCapture.cpp
-        # task_manager/editor-core-separation-1 campaign, PHASE2 - the two
-        # new files holding what used to be #if GTE_ENABLE_EDITOR-guarded
-        # code inside CORE, always-compiled files (RenderPasses.cpp/
-        # RenderSystem.cpp) - see PHASE2_FRAME_DEBUGGER_CAPTURE_POINTER_SAFETY_FIX.md.
-        # Still added to this (still-conditional, for now) Editor source
-        # list; Phase 9 moves this into the real gte_editor target's own
-        # list.
-        src/Editor/FrameDebuggerReplayPasses.cpp
-        src/Editor/FrameDebuggerDrawRecording.cpp
-        # editor-core-separation-1 campaign, PHASE4
-        # (PHASE4_GPU_MEMORY_TRACKER_BUCKET_A_EXTRACTION.md) - the Editor-owned
-        # overlay that gives GPU resources human-readable debug names now that
-        # GpuMemoryTracker itself stores none. Still added to this
-        # (still-conditional, for now) Editor source list; Phase 9 moves this
-        # into the real gte_editor target's own list.
-        src/Editor/EditorGpuMemoryNameOverlay.h
-        src/Editor/EditorGpuMemoryNameOverlay.cpp
-        src/Editor/FrameDebuggerHistory.h
-        src/Editor/FrameDebuggerHistory.cpp
-        src/Editor/FrameDebuggerPreviewProcessing.h
-        src/Editor/FrameDebuggerPreviewProcessing.cpp
-        src/Editor/Panels/HierarchyPanel.h
-        src/Editor/Panels/HierarchyPanel.cpp
-        src/Editor/Panels/InspectorPanel.h
-        src/Editor/Panels/InspectorPanel.cpp
-        src/Editor/Panels/ScenePanel.h
-        src/Editor/Panels/ScenePanel.cpp
-        src/Editor/Panels/GamePanel.h
-        src/Editor/Panels/GamePanel.cpp
-        src/Editor/Panels/MemoryPanel.h
-        src/Editor/Panels/MemoryPanel.cpp
-        src/Editor/Panels/ProfilerPanel.h
-        src/Editor/Panels/ProfilerPanel.cpp
-        src/Editor/Panels/RenderGraphPanel.h
-        src/Editor/Panels/RenderGraphPanel.cpp
-        src/Editor/Panels/JobsPanel.h
-        src/Editor/Panels/JobsPanel.cpp
-        src/Editor/Panels/LogPanel.h
-        src/Editor/Panels/LogPanel.cpp
-        src/Editor/Panels/AtmospherePanel.h
-        src/Editor/Panels/AtmospherePanel.cpp
-        src/Editor/Panels/FrameDebuggerPanel.h
-        src/Editor/Panels/FrameDebuggerPanel.cpp
-        src/Editor/ImGuiEditorLayer.cpp
-    )
-    target_link_libraries(gte_core PRIVATE imgui imguizmo)
+# ODR/link-order hazard fix (Locked Design Decision #9): gte_core's own
+# NullEditorLayer.cpp (added to gte_core's unconditional source list above)
+# and this target's own ImGuiEditorLayer.cpp used to BOTH define
+# gte::CreateEditorLayer() - safe only while exactly one of the two ever
+# compiled into any given build (the old GTE_ENABLE_EDITOR on/off switch).
+# Now that gte_editor is ALWAYS linked alongside gte_core into this repo's
+# one executable, both files being in the SAME final link would have been a
+# real ODR violation with no guaranteed compiler/linker error. Fixed by
+# renaming NullEditorLayer.cpp's own factory function to
+# gte::CreateNullEditorLayer() (see EditorLayer.h/NullEditorLayer.cpp) -
+# gte::CreateEditorLayer() now has exactly ONE definition in the entire
+# repository, right here, in ImGuiEditorLayer.cpp.
+add_library(gte_editor STATIC
+    src/Editor/EditorContext.h
+    src/Editor/ProjectRootPath.h
+    src/Editor/ProjectRootPath.cpp
+    src/Editor/SceneIO.h
+    src/Editor/SceneIO.cpp
+    # editor-core-separation-1 campaign, PHASE6
+    # (PHASE6_EDITOR_CAPABILITY_CALL_SITE_CONVERSION_SCENE_IO.md) - the real
+    # ISceneIOCapability implementation wrapping SceneIO.h above.
+    src/Editor/EditorSceneIOCapability.h
+    src/Editor/EditorSceneIOCapability.cpp
+    src/Editor/Selection.h
+    src/Editor/Selection.cpp
+    src/Editor/EditorCamera.h
+    src/Editor/EditorCamera.cpp
+    src/Editor/SceneGridMath.h
+    src/Editor/SceneGridMath.cpp
+    src/Editor/SceneGridRenderer.h
+    src/Editor/SceneGridRenderer.cpp
+    src/Editor/ComputeBlurValidation.h
+    src/Editor/ComputeBlurValidation.cpp
+    src/Editor/GBufferValidation.h
+    src/Editor/GBufferValidation.cpp
+    src/Editor/GpuDrivenBatchTestSpawner.h
+    src/Editor/GpuDrivenBatchTestSpawner.cpp
+    src/Editor/GpuSkinningValidation.h
+    src/Editor/GpuSkinningValidation.cpp
+    src/Editor/AtmosphereTransmittanceLutValidation.h
+    src/Editor/AtmosphereTransmittanceLutValidation.cpp
+    src/Editor/AtmosphereAerialPerspectiveLutInspection.h
+    src/Editor/AtmosphereAerialPerspectiveLutInspection.cpp
+    src/Editor/AtmosphereAerialPerspectiveSkyPurityValidation.h
+    src/Editor/AtmosphereAerialPerspectiveSkyPurityValidation.cpp
+    src/Editor/TransformGizmo.h
+    src/Editor/TransformGizmo.cpp
+    src/Editor/DockLayout.h
+    src/Editor/DockLayout.cpp
+    src/Editor/PlaybackControls.h
+    src/Editor/PlaybackControls.cpp
+    src/Editor/ImGuiMemoryTracker.h
+    src/Editor/ImGuiMemoryTracker.cpp
+    src/Editor/Logger.h
+    src/Editor/Logger.cpp
+    src/Editor/MemoryPanelData.h
+    src/Editor/MemoryPanelData.cpp
+    src/Editor/ProfilerPanelData.h
+    src/Editor/ProfilerPanelData.cpp
+    src/Editor/JobsPanelData.h
+    src/Editor/JobsPanelData.cpp
+    src/Editor/LogPanelData.h
+    src/Editor/LogPanelData.cpp
+    src/Editor/FrameDebuggerData.h
+    src/Editor/FrameDebuggerData.cpp
+    src/Editor/FrameDebuggerCapture.h
+    src/Editor/FrameDebuggerCapture.cpp
+    # task_manager/editor-core-separation-1 campaign, PHASE2 - the two files
+    # holding what used to be #if GTE_ENABLE_EDITOR-guarded code inside CORE,
+    # always-compiled files (RenderPasses.cpp/RenderSystem.cpp) - see
+    # PHASE2_FRAME_DEBUGGER_CAPTURE_POINTER_SAFETY_FIX.md.
+    src/Editor/FrameDebuggerReplayPasses.cpp
+    src/Editor/FrameDebuggerDrawRecording.cpp
+    # editor-core-separation-1 campaign, PHASE4
+    # (PHASE4_GPU_MEMORY_TRACKER_BUCKET_A_EXTRACTION.md) - the Editor-owned
+    # overlay that gives GPU resources human-readable debug names now that
+    # GpuMemoryTracker itself stores none.
+    src/Editor/EditorGpuMemoryNameOverlay.h
+    src/Editor/EditorGpuMemoryNameOverlay.cpp
+    src/Editor/FrameDebuggerHistory.h
+    src/Editor/FrameDebuggerHistory.cpp
+    src/Editor/FrameDebuggerPreviewProcessing.h
+    src/Editor/FrameDebuggerPreviewProcessing.cpp
+    src/Editor/Panels/HierarchyPanel.h
+    src/Editor/Panels/HierarchyPanel.cpp
+    src/Editor/Panels/InspectorPanel.h
+    src/Editor/Panels/InspectorPanel.cpp
+    src/Editor/Panels/ScenePanel.h
+    src/Editor/Panels/ScenePanel.cpp
+    src/Editor/Panels/GamePanel.h
+    src/Editor/Panels/GamePanel.cpp
+    src/Editor/Panels/MemoryPanel.h
+    src/Editor/Panels/MemoryPanel.cpp
+    src/Editor/Panels/ProfilerPanel.h
+    src/Editor/Panels/ProfilerPanel.cpp
+    src/Editor/Panels/RenderGraphPanel.h
+    src/Editor/Panels/RenderGraphPanel.cpp
+    src/Editor/Panels/JobsPanel.h
+    src/Editor/Panels/JobsPanel.cpp
+    src/Editor/Panels/LogPanel.h
+    src/Editor/Panels/LogPanel.cpp
+    src/Editor/Panels/AtmospherePanel.h
+    src/Editor/Panels/AtmospherePanel.cpp
+    src/Editor/Panels/FrameDebuggerPanel.h
+    src/Editor/Panels/FrameDebuggerPanel.cpp
+    src/Editor/ImGuiEditorLayer.cpp
+)
 
-    # The "Project" panel (see GTE_ENABLE_PROJECT_PANEL above) is
-    # independently toggleable even within an Editor build - only
-    # compiled/linked in when ALSO on. ProjectPanelData.h/.cpp is the pure,
-    # Tier-1-testable logic (see tests/Editor/ProjectPanelDataTests.cpp);
-    # Panels/ProjectPanel.h/.cpp is the ImGui-facing class itself.
-    if(GTE_ENABLE_PROJECT_PANEL)
-        target_sources(gte_core PRIVATE
-            src/Editor/ProjectPanelData.h
-            src/Editor/ProjectPanelData.cpp
-            src/Editor/Panels/ProjectPanel.h
-            src/Editor/Panels/ProjectPanel.cpp
-            src/Editor/AssetInspectorData.h
-            src/Editor/AssetInspectorData.cpp
-            src/Editor/AssetPreviewTexture.h
-            src/Editor/AssetPreviewTexture.cpp
-            src/Editor/AssetPreviewMesh.h
-            src/Editor/AssetPreviewMesh.cpp
-            src/Editor/ModelRigCache.h
-            src/Editor/ModelRigCache.cpp
-            src/Editor/RigidBodyWireframe.h
-            src/Editor/RigidBodyWireframe.cpp
-            src/Editor/RigidBodyGroupSelection.h
-            src/Editor/RigidBodyGroupSelection.cpp
-            src/Editor/FlatListRangeSelection.h
-            src/Editor/FlatListRangeSelection.cpp
-            src/Editor/BoneViewerWindow.h
-            src/Editor/BoneViewerWindow.cpp
-        )
-    endif()
-else()
-    target_sources(gte_core PRIVATE src/Editor/NullEditorLayer.cpp)
+# The "Project" panel (see GTE_ENABLE_PROJECT_PANEL above) is independently
+# toggleable even within the always-built Editor library - only
+# compiled/linked in when ALSO on. ProjectPanelData.h/.cpp is the pure,
+# Tier-1-testable logic (see tests/Editor/ProjectPanelDataTests.cpp);
+# Panels/ProjectPanel.h/.cpp is the ImGui-facing class itself.
+if(GTE_ENABLE_PROJECT_PANEL)
+    target_sources(gte_editor PRIVATE
+        src/Editor/ProjectPanelData.h
+        src/Editor/ProjectPanelData.cpp
+        src/Editor/Panels/ProjectPanel.h
+        src/Editor/Panels/ProjectPanel.cpp
+        src/Editor/AssetInspectorData.h
+        src/Editor/AssetInspectorData.cpp
+        src/Editor/AssetPreviewTexture.h
+        src/Editor/AssetPreviewTexture.cpp
+        src/Editor/AssetPreviewMesh.h
+        src/Editor/AssetPreviewMesh.cpp
+        src/Editor/ModelRigCache.h
+        src/Editor/ModelRigCache.cpp
+        src/Editor/RigidBodyWireframe.h
+        src/Editor/RigidBodyWireframe.cpp
+        src/Editor/RigidBodyGroupSelection.h
+        src/Editor/RigidBodyGroupSelection.cpp
+        src/Editor/FlatListRangeSelection.h
+        src/Editor/FlatListRangeSelection.cpp
+        src/Editor/BoneViewerWindow.h
+        src/Editor/BoneViewerWindow.cpp
+    )
 endif()
+
+# gte_editor depends on gte_core - ONE WAY, never the reverse (Rule 2,
+# PHASE0_MASTER_STRATEGY.md). PUBLIC so any consumer of gte_editor
+# (GreatTamanaEngine, GreatTamanaEngineTests) transitively sees gte_core's
+# own PUBLIC include directories/compile definitions/link libraries too,
+# without repeating them.
+target_link_libraries(gte_editor PUBLIC gte_core)
+target_link_libraries(gte_editor PRIVATE imgui imguizmo)
 
 # Exposes GTE_ENABLE_PROJECT_PANEL to C++ code as an actual 1/0 preprocessor
 # macro, needed by ImGuiEditorLayer.cpp/DockLayout.cpp's own
@@ -816,7 +828,35 @@ target_link_libraries(gte_core PRIVATE saba_pmx)
 
 # --- Final executable ----------------------------------------------------
 add_executable(GreatTamanaEngine src/main.cpp)
-target_link_libraries(GreatTamanaEngine PRIVATE gte_core)
+# editor-core-separation-1 campaign, PHASE9 (PHASE9_CMAKE_TARGET_SPLIT.md,
+# Rule 4) - links gte_editor, NEVER gte_core directly; gte_editor's own
+# PUBLIC dependency on gte_core (above) brings it in transitively. There is
+# no configuration of this repo's own CMakeLists.txt in which this
+# executable links gte_core alone.
+#
+# REAL, DISCOVERED-DURING-THIS-PHASE LINKER WRINKLE (documented here, not
+# silently worked around): `Application.cpp` still physically lives inside
+# gte_core's own source list (Phase 9 is pure file movement only - Phases
+# 12/13 are what actually extract Core's own class body and split its
+# ~30 IEditorLayer call sites away from Application's direct, unconditional
+# calls - see PHASE0_MASTER_STRATEGY.md, Locked Design Decision #8). Until
+# that happens, `Application.cpp`/`RenderSystem.cpp`/`NetworkServer.cpp`
+# (compiled into gte_core) call several real functions/vtables that only
+# gte_editor defines (`CreateEditorLayer()`, `AddFrameDebuggerReplayPasses()`,
+# `RecordFrameDebuggerDraws()`, `Logger::*`, `EditorSceneIOCapability`'s
+# vtable) - a genuine SYMBOL-level circular need between the two archives,
+# even though the #include/target_link_libraries() DIRECTION stays correctly
+# one-way (gte_editor -> gte_core, never declared in reverse - Rule 2 is not
+# violated). GNU ld only scans each archive once by default, so without this
+# `$<LINK_GROUP:RESCAN,...>` (lets the linker re-scan both archives as a pair
+# until nothing new resolves - CMake >= 3.24, GNU/LLD/MSVC linkers), the link
+# fails with "undefined reference to gte::CreateEditorLayer(...)" and several
+# siblings. This wrinkle is EXPECTED to disappear on its own once Phase 13
+# replaces Application's direct Editor-function calls with the nullable
+# `IEditorLayer*` hook pattern - it is not something this phase can or should
+# "fix" architecturally; the link group is the correct, standard, minimal
+# mechanical answer to a real static-archive limitation for right now.
+target_link_libraries(GreatTamanaEngine PRIVATE "$<LINK_GROUP:RESCAN,gte_editor,gte_core>")
 
 # Compiles the engine's GLSL shader sources to SPIR-V at build time (see
 # cmake/CompileShaders.cmake) - staged into "<exe dir>/shaders/" next to the

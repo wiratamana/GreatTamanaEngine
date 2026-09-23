@@ -695,9 +695,22 @@ public:
     virtual GpuDrivenTestBatchSpawnResult SpawnGpuDrivenTestBatch(Game& game, Renderer& renderer, std::uint32_t instanceCount) = 0;
 };
 
-// Constructs the real ImGui-backed editor layer, or the inert Null one,
-// depending entirely on which .cpp got linked in - Application calls this once, at startup, and never
-// needs to know or care which one it got.
+// Constructs the real ImGui-backed editor layer. editor-core-separation-1
+// campaign, PHASE9 (PHASE9_CMAKE_TARGET_SPLIT.md, Locked Design Decision
+// #9) - this is now the ONLY declaration of gte::CreateEditorLayer() in the
+// entire repository with exactly ONE definition (src/Editor/ImGuiEditorLayer.cpp,
+// gte_editor-only) - EditorHost/Application always call this one,
+// unambiguously.
 std::unique_ptr<IEditorLayer> CreateEditorLayer(Window& window, Renderer& renderer);
+
+// Always-available, zero-ImGui/zero-SDL-dependency fallback living inside
+// gte_core itself (src/Editor/NullEditorLayer.cpp) - the ONE thing a future
+// Player host (linking gte_core alone, never seeing gte_editor's source)
+// can call to get a working, no-op IEditorLayer. Never called anywhere in
+// THIS repo - EditorHost/Application always call the real CreateEditorLayer()
+// above instead, which resolves unambiguously to gte_editor's own
+// ImGuiEditorLayer.cpp - there is no longer a second definition of THAT name
+// anywhere in the link (the ODR/link-order hazard this rename fixes).
+std::unique_ptr<IEditorLayer> CreateNullEditorLayer(Window& window, Renderer& renderer);
 
 } // namespace gte

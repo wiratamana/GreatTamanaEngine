@@ -2157,14 +2157,13 @@ set(GTE_TEST_SOURCES
 )
 
 # Editor/EditorCamera.h/.cpp (see src/Editor/EditorCamera.h) is always
-# compiled into gte_core today - the whole src/Editor/ folder besides
+# compiled into gte_editor today - the whole src/Editor/ folder besides
 # EditorLayer.h/NullEditorLayer.cpp is part of the same always-compiled
-# Editor source list (see the root CMakeLists.txt's "Editor Module
-# Structure" comment). EditorCamera itself is still genuinely Tier 1 (see
-# its own file comment). editor-core-separation-1 campaign, PHASE8 - this
-# `if(TRUE)` is a deliberate, TEMPORARY placeholder (GTE_ENABLE_EDITOR no
-# longer exists anywhere in this codebase) until PHASE9's real gte_editor
-# CMake target split.
+# gte_editor source list (see the root CMakeLists.txt's "Editor library"
+# comment). EditorCamera itself is still genuinely Tier 1 (see its own file
+# comment). editor-core-separation-1 campaign, PHASE9 - the `if(TRUE)` below
+# is kept as a harmless, permanently-true wrapper (mechanical file movement
+# only, per this phase's own scope) rather than restructured/de-indented.
 if(TRUE)
     list(APPEND GTE_TEST_SOURCES
         Editor/EditorCameraTests.cpp
@@ -2211,23 +2210,34 @@ endif()
 
 add_executable(GreatTamanaEngineTests ${GTE_TEST_SOURCES})
 
+# editor-core-separation-1 campaign, PHASE9 (PHASE9_CMAKE_TARGET_SPLIT.md,
+# Step 9) - links gte_editor (never gte_core directly, matching
+# GreatTamanaEngine's own Rule-4 precedent above): Editor/*Tests.cpp above
+# (EditorCameraTests.cpp, LoggerTests.cpp, FrameDebuggerDataTests.cpp, ...)
+# needs symbols that now permanently live in gte_editor's own archive.
+# gte_editor's own PUBLIC dependency on gte_core brings it in transitively.
+#
+# Same real, discovered-during-Phase-9 linker wrinkle as the root
+# CMakeLists.txt's own GreatTamanaEngine target (see that file's own
+# extensive comment right above its matching target_link_libraries() call) -
+# gte_core's own Application.cpp/RenderSystem.cpp/NetworkServer.cpp still
+# call several gte_editor-only symbols directly (CreateEditorLayer(),
+# Logger::*, ...) until Phase 13, so this test binary needs the identical
+# `$<LINK_GROUP:RESCAN,...>` treatment, not just a plain gte_editor link.
 target_link_libraries(GreatTamanaEngineTests PRIVATE
-    gte_core
+    "$<LINK_GROUP:RESCAN,gte_editor,gte_core>"
     GTest::gtest
     GTest::gtest_main
 )
 
 # Editor/ImGuiMemoryTrackerTests.cpp (above) includes <imgui.h> directly -
-# gte_core links imgui PRIVATE (see the root CMakeLists.txt), so that
-# include path isn't propagated transitively to consumers of gte_core; this
+# gte_editor links imgui PRIVATE (see the root CMakeLists.txt), so that
+# include path isn't propagated transitively to consumers of gte_editor; this
 # test executable needs its own link against the imgui target for its
-# include directories. editor-core-separation-1 campaign, PHASE8 - this
-# `if(TRUE)` is a deliberate, TEMPORARY placeholder (GTE_ENABLE_EDITOR no
-# longer exists anywhere in this codebase) until PHASE9's real gte_editor
-# CMake target split.
-if(TRUE)
-    target_link_libraries(GreatTamanaEngineTests PRIVATE imgui)
-endif()
+# include directories. editor-core-separation-1 campaign, PHASE9 - this is
+# now permanent (no longer a temporary if(TRUE) placeholder) now that
+# gte_editor is a real, always-built CMake target.
+target_link_libraries(GreatTamanaEngineTests PRIVATE imgui)
 
 # See the file-level comment above for why this is still needed even though
 # no test here ever calls SDL_Init().
