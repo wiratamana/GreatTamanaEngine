@@ -1,9 +1,9 @@
 #pragma once
 
 #include "FrameProfiler.h"
+#include "ProfilingClock.h"
 
 #if GTE_ENABLE_PROFILER
-#include <SDL3/SDL_timer.h>
 #include <cstdint>
 #endif
 
@@ -51,7 +51,7 @@ public:
     {
         if (FrameProfiler::Instance().IsCaptureEnabled()) {
             m_active = true;
-            m_startTicks = SDL_GetPerformanceCounter();
+            m_startTicks = GetProfilingPerformanceCounter();
         }
     }
 
@@ -60,8 +60,8 @@ public:
         if (!m_active) {
             return;
         }
-        const std::uint64_t endTicks = SDL_GetPerformanceCounter();
-        const std::uint64_t frequency = SDL_GetPerformanceFrequency();
+        const std::uint64_t endTicks = GetProfilingPerformanceCounter();
+        const std::uint64_t frequency = GetProfilingPerformanceFrequency();
         const double elapsedMs = frequency != 0
             ? static_cast<double>(endTicks - m_startTicks) * 1000.0 / static_cast<double>(frequency)
             : 0.0;

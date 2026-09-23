@@ -572,6 +572,8 @@ add_library(gte_core STATIC
     src/Game/RenderSystem.cpp
     src/Game/RenderSystem.h
     src/Profiling/ProfilingTypes.h
+    src/Profiling/ProfilingClock.h
+    src/Profiling/ProfilingClock.cpp
     src/Profiling/FrameProfiler.h
     src/Profiling/FrameProfiler.cpp
     src/Profiling/ScopeTimer.h
