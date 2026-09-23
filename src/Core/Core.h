@@ -4,9 +4,24 @@
 #include "IHostServices.h"
 #include "InputFrame.h"
 #include "ISurfaceProvider.h"
+#include "../Application/RenderPassViewData.h"
+#include "../ECS/Entity.h"
 #include "../Game/Game.h"
+#include "../Renderer/Atmosphere/AtmosphereLutRenderer.h"
+#include "../Renderer/Culling/GpuDrivenBatchCache.h"
+#include "../Renderer/Culling/GpuDrivenBatchDebugInfo.h"
+#include "../Renderer/MeshHandle.h"
+#include "../Renderer/PipelineHandle.h"
 #include "../Renderer/Renderer.h"
 #include "../Renderer/RenderGraph/RenderGraph.h"
+#include "../Renderer/RenderGraph/RenderPipeline.h"
+
+#include <volk.h>
+
+#include <functional>
+#include <optional>
+#include <unordered_set>
+#include <vector>
 
 namespace gte {
 
@@ -18,6 +33,12 @@ namespace gte {
 // src/Game/RenderSystem.h's own pre-existing FrameDebuggerCaptureContext*
 // forward-declaration precedent exactly.
 class IEditorLayer;
+
+// Editor-only type (src/Editor/FrameDebuggerCapture.h) - forward-declared
+// ONLY, mirroring RenderPasses.h's/RenderSystem.h's own identical precedent
+// (see those headers' own doc comments) - Core only ever holds/forwards a
+// bare pointer to this type, never dereferences it.
+class FrameDebuggerCaptureContext;
 
 // Placeholder shape (editor-core-separation-1 campaign, PHASE12) - Core's own
 // public contract (design doc Section 5.2) commits to exposing frame
@@ -38,26 +59,32 @@ struct FrameStats {
 // exception is the nullable IEditorLayer* hook above, consulted only
 // through a forward-declared pointer, never a concrete Editor include.
 //
-// editor-core-separation-1 campaign, PHASE12 (Core Class Skeleton and
-// Construction) builds ONLY this skeleton: members, the constructor, plain
-// forwarding accessors, and the SetEditorLayerHook() setter.
-// Update()/BuildFrame()/Present() are deliberately empty stubs pending
-// PHASE13 (Core Frame Orchestration Extraction), which physically moves
-// Application::Run()'s real per-frame body here - this phase must cause
-// ZERO runtime behavior change, so nothing calls these three methods yet,
-// and nothing calls through m_editorLayer yet either.
+// editor-core-separation-1 campaign, PHASE13
+// (PHASE13_CORE_FRAME_ORCHESTRATION_EXTRACTION.md) - Update()/BuildFrame()/
+// Present() now contain the REAL per-frame orchestration logic that used to
+// live inside Application::Run()'s own body: offscreen regime (Game
+// View + Scene View, Atmosphere passes, GPU-skinning dispatch requests,
+// GPU-driven batch culling readback), present regime (the swapchain-present
+// pass), and every render-graph-frame-building IEditorLayer call site
+// (Locked Design Decision #8's first bucket - GameViewTarget()/
+// SceneViewTarget()/SceneViewProjection()/SceneViewCameraWorldPosition()/
+// RenderSceneGrid()/AddBlurValidationPass()/FinalizeBlurValidationForSampling()/
+// AddGBufferValidationPass()/FinalizeGBufferValidationForSampling()/
+// SetGameViewCompositedTexture()/SetSceneViewCompositedTexture()/
+// PrepareFrameDebuggerCaptureContext()/ConsumePendingFrameDebuggerReplayRequest()),
+// reached ONLY through the null-checked m_editorLayer hook below. See
+// PHASE13_COMPLETION_REPORT.md for the full, itemized accounting of every
+// one of Application::Run()'s ~30 IEditorLayer call sites' new home.
 //
-// DEVIATION FROM THE DESIGN DOC'S OWN SECTION 2.1 INVENTORY (documented,
-// evidence-based - see PHASE12_COMPLETION_REPORT.md for the full reasoning):
-// the design doc's own ownership graph also lists "two rg::RenderPipeline
-// instances" as Core-owned. Core's own FROZEN public contract (Section 5.2)
-// exposes no accessor for either RenderPipeline instance at all, and its
-// ONLY real consumers today (Application::RegisterOffscreenRenderPipelineProviders()/
-// RegisterPresentRenderPipelineProvider()/Run()) do not move into Core until
-// PHASE13 - moving the two RenderPipeline instances here now would leave
-// Application with literally no way to reach them. They stay
-// Application-owned members until PHASE13 moves them together with their
-// only real consumer, the per-frame orchestration logic itself.
+// A handful of small, ADDITIVE accessors beyond Core's own originally-frozen
+// minimum (design doc Section 5.3: "Exposed OUT... At minimum:... whatever
+// draw-stats/profiling data the Editor UI displays") were added this phase,
+// each documented at its own declaration below, so host-level code
+// (Application::Run() today, EditorHost later) can keep reaching data that
+// physically moved into Core without Core ever calling back into a host-level
+// automation bridge/IEditorLayer method itself (design doc Section 6.1: "Core
+// stays a pure engine facade: no HTTP server, no automation-bridge knowledge,
+// ever").
 class Core {
 public:
     Core(ISurfaceProvider& surfaceProvider, IHostServices& hostServices);
@@ -67,14 +94,21 @@ public:
     Core(Core&&) = delete;
     Core& operator=(Core&&) = delete;
 
-    // PHASE13 stubs - see that phase's own file for the real body this
-    // campaign eventually gives them (Application::Run()'s own per-frame
-    // orchestration, physically relocated here). Deliberately empty no-ops
-    // today - nothing in this campaign calls any of these three yet;
-    // Application::Run() keeps its own, completely unmodified body/behavior
-    // until PHASE13.
+    // Advances Time (respecting Pause/Resume/Step - see InputFrame.h's own
+    // doc comment on why the already-resolved playbackPaused/stepRequested
+    // booleans travel inside `input` rather than growing this method's own
+    // frozen 2-parameter signature) and dispatches Game::Update() - a safe
+    // no-op if `input.inputState` is null.
     void Update(const InputFrame& input, float deltaTime);
+
+    // The real per-frame Render Graph BUILD-AND-EXECUTE step for the
+    // SYNCHRONOUS offscreen regime (Game View + Scene View together) - see
+    // this class's own doc comment above for the full accounting of what
+    // moved here.
     void BuildFrame();
+
+    // The real per-frame Render Graph BUILD-AND-EXECUTE step for the
+    // PIPELINED swapchain-present regime.
     void Present();
 
     Renderer& GetRenderer() noexcept { return m_renderer; }
@@ -84,6 +118,82 @@ public:
     EngineContext& GetEngineContext() noexcept { return m_engineContext; }
     Time& GetTime() noexcept { return m_engineContext.time; }
     const FrameStats& GetFrameStats() const noexcept { return m_frameStats; }
+
+    // PHASE13 - this frame's freshly-built "instances culled this frame"
+    // readout (GPU-Driven Frustum Culling + Indirect Draw campaign,
+    // render-pass-5, PHASE6), one entry per real, eligible batch - populated
+    // by BuildFrame() every frame. Application::Run()'s own
+    // IEditorLayer::BuildUI() call (a host-level concern that stays directly
+    // on Application, never moving into Core - see Locked Design Decision #8)
+    // needs this value, which now physically lives inside Core - a small,
+    // additive accessor, exactly the kind design doc Section 5.3 anticipates
+    // ("whatever draw-stats/profiling data the Editor UI displays").
+    const std::vector<GpuDrivenBatchDebugInfo>& GetGpuDrivenBatchDebugInfo() const noexcept
+    {
+        return m_gpuDrivenBatchDebugInfoLastFrame;
+    }
+
+    // PHASE13 - the SAME AtmosphereSettings/AtmosphereLutRenderer instances
+    // Core's own per-frame Atmosphere pass-building code (BuildFrame())
+    // reads/writes, now exposed so Application::Run()'s own
+    // IEditorLayer::BuildUI() call (host-level, unmoved - the "Atmosphere"
+    // panel edits atmosphereSettings live, and reads back
+    // atmosphereLutRenderer's real output textures for its own validation
+    // buttons) can keep reaching them by reference, exactly as it already
+    // does for Renderer/Game/RenderGraph (see Application.h's own
+    // m_renderer/m_game/m_renderGraph reference-member precedent, PHASE12).
+    AtmosphereSettings& GetAtmosphereSettings() noexcept { return m_atmosphereSettings; }
+    AtmosphereLutRenderer& GetAtmosphereLutRenderer() noexcept { return m_atmosphereLutRenderer; }
+
+    // PHASE13 - this frame's already-resolved Game View render target (the
+    // SAME value BuildFrame() itself just used internally this frame,
+    // IEditorLayer::GameViewTarget()'s own real, current answer) - nullptr on
+    // any frame the "Game" panel isn't visible (or there is no Editor at
+    // all). Exposed so Application::Run()'s own FrameCaptureBridge servicing
+    // (GET /get_game_view's fast-fail branch + success-path capture) - a
+    // HOST-LEVEL AUTOMATION concern per design doc Section 6.1 ("Core stays a
+    // pure engine facade: no HTTP server, no automation-bridge knowledge,
+    // ever") - can react to it without a second, duplicate
+    // IEditorLayer::GameViewTarget() call site (Locked Design Decision #8's
+    // own Definition of Done: every render-graph-frame-building IEditorLayer
+    // call site "now lives inside Core::BuildFrame()... never directly on
+    // Application anymore"). Safe to read any time after BuildFrame() has
+    // returned this frame.
+    RenderTexture* GetGameViewTargetThisFrame() const noexcept { return m_gameTargetThisFrame; }
+
+    // PHASE13 - Application/EditorHost supplies the ONE callback that
+    // actually calls IEditorLayer::Render(cmd) - explicitly a HOST-LEVEL
+    // IEditorLayer method (Locked Design Decision #8's second bucket:
+    // "called directly against the same IEditorLayer instance... Core never
+    // calls these"). This is NOT Core calling Render() itself - the closure's
+    // own body (defined in Application.cpp/EditorHost.cpp, capturing the
+    // HOST's own m_editorLayer, never Core's) is simply handed to Core as
+    // plain data, for Core's own "Present" RenderPipeline provider to invoke
+    // at the correct point inside the swapchain-present pass - mirrors
+    // exactly what Application::Run()'s own m_recordImGuiThisFrame lambda
+    // already did before this phase (see RenderPasses.h's AddPresentPass()).
+    // Expected to be called exactly ONCE, at host construction time (the
+    // callback's own behavior never varies frame-to-frame) - see
+    // Application::Application()'s own constructor body.
+    void SetPresentImGuiRecorder(std::function<void(VkCommandBuffer)> recorder)
+    {
+        m_presentImGuiRecorder = std::move(recorder);
+    }
+
+    // PHASE13 - keeps Present()'s own "no Game/Scene panel visible, render
+    // Game directly to the swapchain" fallback aspect-ratio computation
+    // correct across a live OS window resize, mirroring Application's own
+    // former m_windowWidth/m_windowHeight cache exactly (Window::Width()/
+    // Height() only ever reflect CONSTRUCTION size, never a later resize -
+    // see Window.h's own doc comment) - called by Application::Run()'s SDL
+    // polling loop (a host-level concern, unmoved) alongside its existing
+    // m_renderer.OnResize()/m_editorLayer->OnWindowResized() calls, on every
+    // real WindowResized event.
+    void NotifyWindowResized(int width, int height) noexcept
+    {
+        m_windowWidth = width;
+        m_windowHeight = height;
+    }
 
     // PHASE0_MASTER_STRATEGY.md's Locked Design Decision #8 - the ONE
     // nullable, "big" opaque hook mirroring FrameDebuggerCaptureContext*'s
@@ -100,6 +210,49 @@ public:
     void SetEditorLayerHook(IEditorLayer* editorLayer) noexcept { m_editorLayer = editorLayer; }
 
 private:
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE5 - one eligible batch's own THIS-FRAME render data, ready for the
+    // "GpuDrivenBatches" provider (registered in
+    // RegisterOffscreenRenderPipelineProviders(), between "RenderOpaque"'s
+    // own Register() call and "DrawSkyBackground"'s own Register() call -
+    // see that function's own comment) to declare its three passes against.
+    // Relocated verbatim from Application.h (editor-core-separation-1
+    // campaign, PHASE13) - see that file's own former doc comment (now here)
+    // for the full reasoning, unchanged.
+    struct GpuDrivenBatchRenderData {
+        MeshHandle mesh;
+        PipelineHandle originalPipeline;
+        std::size_t instanceCount = 0;
+        rg::BufferHandle inputHandle;
+        rg::BufferHandle indirectHandle;
+        rg::BufferHandle countHandle;
+        VkBuffer indirectBufferNative = VK_NULL_HANDLE;
+        VkBuffer countBufferNative = VK_NULL_HANDLE;
+        VkDescriptorSet cullingDescriptorSet = VK_NULL_HANDLE;
+        VkDescriptorSet instanceBufferDescriptorSet = VK_NULL_HANDLE;
+        const char* resetPassName = nullptr;
+        const char* cullingPassName = nullptr;
+        const char* indirectDrawPassName = nullptr;
+        const char* displayName = nullptr;
+    };
+
+    // render-pass-3 campaign, PHASE2/PHASE3 - registers every remaining
+    // production pass onto m_offscreenRenderPipeline. See Core.cpp for the
+    // real body (relocated verbatim from
+    // Application::RegisterOffscreenRenderPipelineProviders(), PHASE13).
+    void RegisterOffscreenRenderPipelineProviders();
+
+    // render-pass-3 campaign, PHASE3 (Step 3.5) - registers the ONE
+    // "Present" provider onto m_presentRenderPipeline. See Core.cpp for the
+    // real body (relocated verbatim from
+    // Application::RegisterPresentRenderPipelineProvider(), PHASE13).
+    void RegisterPresentRenderPipelineProvider();
+
+    // render-pass-3 campaign, PHASE3 (Step 3.1) - looks up THIS frame's own
+    // RenderPassViewData for `view` out of m_currentViewDataThisFrame
+    // (below). Relocated verbatim from Application::FindViewData(), PHASE13.
+    const RenderPassViewData* FindViewData(rg::RenderViewId view) const noexcept;
+
     // Declared first - independent of every other member below, and not
     // itself part of the ctor initializer-list ordering concern the real
     // owned members are (it uses its own default member initializer,
@@ -107,8 +260,7 @@ private:
     IEditorLayer* m_editorLayer = nullptr;
 
     // Ownership relocated here from Application (editor-core-separation-1
-    // campaign, PHASE12) - see design doc Section 2.1's ownership graph and
-    // PHASE12_CORE_CLASS_SKELETON_AND_CONSTRUCTION.md's own Step 3.
+    // campaign, PHASE12) - see design doc Section 2.1's ownership graph.
     // Declaration order matters (matches real constructor-initializer-list
     // order): m_renderer needs `surfaceProvider` (the constructor
     // parameter) only; m_renderGraph needs m_renderer already constructed;
@@ -121,6 +273,102 @@ private:
     // See FrameStats's own doc comment above - a placeholder, never
     // written to by anything in this campaign.
     FrameStats m_frameStats;
+
+    // PHASE13 - see NotifyWindowResized()'s own doc comment above. Seeded
+    // from `surfaceProvider`'s own CONSTRUCTION-time size in Core's
+    // constructor (Core.cpp) - correct because, at that exact moment, no
+    // resize has happened yet.
+    int m_windowWidth = 0;
+    int m_windowHeight = 0;
+
+    // render-pass-3 campaign, PHASE2/PHASE3 - the new, generic pass-
+    // DECLARATION layer sitting strictly ABOVE m_renderGraph/RenderGraphBuilder.
+    // Relocated here (from Application, editor-core-separation-1 campaign,
+    // PHASE13) together with their only real consumer, the per-frame
+    // orchestration logic itself - see PHASE12_COMPLETION_REPORT.md's own
+    // "Genuine ambiguity found" section for why this move was deferred to
+    // this exact phase.
+    rg::RenderPipeline m_offscreenRenderPipeline;
+    rg::RenderPipeline m_presentRenderPipeline;
+
+    // Populated fresh, every frame, by BuildFrame() itself, immediately
+    // before calling m_offscreenRenderPipeline.DeclareInto() - read ONLY by
+    // the "GpuSkinning" provider (registered in the constructor, capturing
+    // `this`) - never written to by anything except BuildFrame().
+    std::vector<AnimationSystem::GpuSkinningDispatchRequest> m_gpuSkinningRequestsThisFrame;
+    std::vector<rg::BufferHandle> m_gpuSkinningHandlesThisFrame;
+
+    // render-pass-3 campaign, PHASE3 (Step 3.1) - THIS frame's per-view data
+    // (Game View and/or Scene View, whichever are actually visible this
+    // frame) - populated fresh, every frame, by BuildFrame() itself,
+    // immediately before calling m_offscreenRenderPipeline.DeclareInto().
+    std::vector<RenderPassViewData> m_currentViewDataThisFrame;
+
+    // render-pass-3 campaign, PHASE2 - Game-View-only (see RenderPasses.h's
+    // own AddRenderOpaquePass() doc comment on why a real, non-null capture
+    // pointer is NEVER handed to Scene View/Present).
+    FrameDebuggerCaptureContext* m_currentFrameDebuggerCaptureForOffscreenPipeline = nullptr;
+
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE5 - the ONE persistent, per-batch GPU resource cache (PHASE4),
+    // constructed once, reused every frame.
+    GpuDrivenBatchCache m_gpuDrivenBatchCache;
+
+    // Populated fresh, every frame, by BuildFrame() itself, immediately
+    // before calling m_offscreenRenderPipeline.DeclareInto(). Computed and
+    // consumed Game-View-only (Locked Design Decision 11) - left empty on
+    // any frame the Game View isn't actually visible this frame.
+    std::vector<GpuDrivenBatchRenderData> m_gpuDrivenBatchesThisFrame;
+
+    // The exact set of entities that successfully got a batch's worth of
+    // buffers imported THIS frame.
+    std::unordered_set<Entity> m_gpuDrivenBatchedEntitiesThisFrame;
+
+    // The Game View's own view-projection matrix this frame.
+    Mat4 m_gpuDrivenGameViewProjectionThisFrame;
+
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE6 - this frame's own "instances culled this frame" readout - see
+    // GetGpuDrivenBatchDebugInfo()'s own doc comment above.
+    std::vector<GpuDrivenBatchDebugInfo> m_gpuDrivenBatchDebugInfoLastFrame;
+
+    // render-pass-3 campaign, PHASE3 (Step 3.5) - populated fresh, every
+    // frame, by Present() itself, immediately before calling
+    // m_presentRenderPipeline.DeclareInto() - read ONLY by the "Present"
+    // provider (registered in the constructor, capturing `this`).
+    bool m_needsDirectGameRenderThisFrame = false;
+    std::optional<float> m_directGameRenderAspectThisFrame;
+    rg::TextureHandle m_swapchainImageThisFrame;
+    std::function<void(VkCommandBuffer)> m_recordImGuiThisFrame;
+
+    // PHASE13 - see SetPresentImGuiRecorder()'s own doc comment above.
+    std::function<void(VkCommandBuffer)> m_presentImGuiRecorder;
+
+    // Atmosphere Scattering + Aerial Perspective campaign - owns every
+    // atmosphere LUT/pass's ComputePipeline/descriptor set/output texture
+    // across frames. Relocated here (from Application, editor-core-
+    // separation-1 campaign, PHASE13) together with its only real per-frame
+    // consumer.
+    AtmosphereLutRenderer m_atmosphereLutRenderer;
+
+    // Atmosphere Scattering + Aerial Perspective campaign, Phase 8 - the
+    // small set of tunable, non-spatial atmosphere knobs edited live via the
+    // Editor's "Atmosphere" panel (host-level, unmoved) - see
+    // GetAtmosphereSettings()'s own doc comment above for why this stays
+    // reachable from the host.
+    AtmosphereSettings m_atmosphereSettings;
+
+    // PHASE13 - this frame's already-resolved Game/Scene View render targets
+    // (IEditorLayer::GameViewTarget()/SceneViewTarget()'s own real answers,
+    // called through this class's own m_editorLayer hook, Locked Design
+    // Decision #8's first bucket) - see GetGameViewTargetThisFrame()'s own
+    // doc comment above for why m_gameTargetThisFrame specifically is also
+    // exposed publicly. m_sceneTargetThisFrame has no host-level consumer
+    // today (kept private, internal-only, mirroring the "only add an
+    // accessor when a real, confirmed need exists" discipline this whole
+    // phase followed for every other new accessor).
+    RenderTexture* m_gameTargetThisFrame = nullptr;
+    RenderTexture* m_sceneTargetThisFrame = nullptr;
 };
 
 } // namespace gte

@@ -1,10 +1,8 @@
 #include "Application.h"
 
-#include "AtmospherePassSequence.h"
 #include "EventTranslator.h"
 #include "EngineCommandDispatch.h"
 #include "MemorySnapshotBuilder.h"
-#include "RenderPasses.h"
 
 #include "../Editor/Logger.h" // PHASE16 of editor-core-separation-1 moves this include (and the InstallLogSink() call in the constructor body below) into EditorHost - Application still needs it directly for now (this file still owns the ONE composition-root call site that installs the real sink).
 // editor-core-separation-1 campaign, PHASE6
@@ -20,139 +18,18 @@
 #include "../Memory/SdlMemoryTracker.h"
 #include "../Profiling/FrameProfiler.h"
 #include "../Profiling/ScopeTimer.h"
-#include "../Renderer/Atmosphere/AtmosphereParameters.h"
-// render-pass-3 campaign, PHASE2 (PHASE2_GPU_SKINNING_OPAQUE_BLACKBOARD_PROOF.md)
-// - the "GpuSkinning" RenderPipeline provider (RegisterOffscreenRenderPipelineProviders()
-// below) is a direct, literal translation of RenderPasses.cpp's own
-// AddGpuSkinningPasses() loop body - needs the same two headers that file
-// already includes for the exact same reason (ComputeGroupCount()/
-// kSkinningLocalSizeX, GpuSkinningPipelines).
-#include "../Renderer/ComputeDispatch.h"
-#include "../Renderer/GpuSkinning/GpuSkinningPipelines.h"
-#include "../Renderer/GpuSkinning/GpuSkinningRenderPassTags.h"
-// GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5), PHASE5
-// (task_manager/render-pass-5/PHASE5_RENDERGRAPH_PASS_WIRING_AND_PRODUCTION_CUTOVER.md)
-// - the new "GpuDrivenBatches" provider below needs CullingPipelines/
-// kCullingLocalSizeX/kCullingPushConstantSize (already transitively
-// reachable via GpuDrivenBatchCache.h, included explicitly here anyway for
-// the same "state exactly what this file needs" discipline the GpuSkinning
-// include comment immediately above already follows) and Plane/AABB/
-// ExtractFrustumPlanes (CullingTypes.h, transitively included by
-// GpuDrivenBatchCache.h too).
-#include "../Renderer/Culling/CullingPipelines.h"
-#include "../Renderer/Culling/GpuDrivenBatchCache.h"
-#include "../Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../Renderer/RenderGraph/RenderGraphDebugTextureRegistry.h"
-#include "ECS/TransformHierarchy.h"
 
 #include <SDL3/SDL.h>
 
-#include <cassert>
 #include <cstdint>
 #include <cstdio>
-#include <deque>
 #include <stdexcept>
 
 namespace gte {
 
 namespace {
-
-// Aspect ratio (width / height) of a render target, for
-// RenderSystem::Draw()/Game::Render() - see Application::Run() below. Falls
-// back to a square (1.0f) for a degenerate/zero-height extent (e.g. a
-// render target caught mid-resize, or a minimized window) rather than
-// dividing by zero.
-float AspectRatioOf(int width, int height) noexcept
-{
-    return height > 0 ? static_cast<float>(width) / static_cast<float>(height) : 1.0f;
-}
-
-// frame-debugger-1 campaign (task_manager/frame-debugger-1/
-// PHASE0_MASTER_STRATEGY.md, Locked Design Decision #4) - the fixed,
-// deterministic amount of simulated time a single Step (PHASE3/PHASE4)
-// advances by, and also what a resume-from-pause frame is clamped to (see
-// Time::Advance()'s own doc comment, Locked Design Decision #11). A plain
-// 1/60s, never derived from real elapsed time.
-constexpr double kFixedStepSeconds = 1.0 / 60.0;
-
-// render-pass-3 campaign, PHASE2 (PHASE2_GPU_SKINNING_OPAQUE_BLACKBOARD_PROOF.md)
-// - the ONE rg::RenderPassBlackboard key GPU Skinning's "GpuSkinning"
-// provider Publish()es its resulting std::vector<rg::BufferHandle> under,
-// and "RenderOpaque"'s own provider Fetch()es it back from - a real,
-// concrete instance of PHASE1's generic cross-provider hand-off mechanism
-// (RenderPassBlackboard), replacing the OLD hand-threaded
-// `gpuSkinningOutputBuffers` parameter for THIS one call site only (see
-// PHASE0_MASTER_STRATEGY.md's Locked Design Decision 3). `using
-// rg::operator""_passId;` brings PHASE1's own consteval literal operator
-// into scope (it lives in `namespace gte::rg`, not `gte` itself).
-using rg::operator""_passId;
-constexpr rg::RenderPassId kGpuSkinningOutputsKey = "GpuSkinning.OutputBuffers"_passId;
-
-// render-pass-3 campaign, PHASE3 (PHASE3_FULL_PRODUCTION_PASS_MIGRATION_AND_VIEW_UNIFICATION.md,
-// Step 3.3) - every remaining blackboard key this phase's own provider set
-// needs, following the exact same "`using rg::operator""_passId;` + file-
-// scope `constexpr rg::RenderPassId`" convention kGpuSkinningOutputsKey
-// above already established.
-//
-// "AtmosphereSharedLut" publishes ONE AtmosphereSharedLutBlackboardEntry
-// (this frame's already-folded-with-groundAlbedoTint AtmosphereParametersGpu
-// PLUS the Transmittance/Multi-Scattering LUT handles) under this ONE key -
-// every per-view Atmosphere-sequence provider below fetches it back.
-constexpr rg::RenderPassId kAtmosphereSharedLutKey = "Atmosphere.SharedLuts"_passId;
-
-// "AtmosphereViewLut" publishes its own per-view AtmosphereViewLutHandles
-// (Sky-View LUT + Aerial Perspective volume handles + this view's own
-// AtmosphereFrameUniforms) under ONE of these two keys, picked purely by
-// which named view is currently being declared (Application already knows
-// there are only ever "Game"/"Scene" real views - Locked Design Decision 1 -
-// so two fixed, distinct compile-time keys are the simplest correct
-// resolution the phase doc's own Step 3.3 table explicitly permits, rather
-// than inventing a runtime-hashed-into-RenderPassId scheme for no real
-// benefit at today's exactly-two-views scale).
-constexpr rg::RenderPassId kAtmosphereViewLutGameKey = "Atmosphere.ViewLut.Game"_passId;
-constexpr rg::RenderPassId kAtmosphereViewLutSceneKey = "Atmosphere.ViewLut.Scene"_passId;
-
-// Step 3.7 - "DrawSkyBackground" republishes the exact
-// std::function<void(VkCommandBuffer)> it just built (via
-// MakeRecordSkyBackgroundCallback()) for its OWN execute lambda, but ONLY
-// for the Game View, so Application::Run() can Fetch() it back out AFTER
-// m_offscreenRenderPipeline.DeclareInto() returns, for
-// AddFrameDebuggerReplayPasses()'s still-unmigrated call site (Locked Design
-// Decision 4) - this is the "or the raw ingredients... whichever is
-// simpler" option the phase doc's own Step 3.3 table explicitly allows.
-constexpr rg::RenderPassId kGameSkyBackgroundCallbackKey = "Atmosphere.GameSkyBackgroundCallback"_passId;
-
-// render-pass-3 campaign, PHASE3 (Step 3.3) - "AtmosphereSharedLut"'s own
-// blackboard payload: bundles the Transmittance/Multi-Scattering LUT handles
-// together with THIS frame's own AtmosphereParametersGpu (built fresh, once,
-// inside that one provider, folding in m_atmosphereSettings.groundAlbedoTint
-// exactly like Application::Run() used to do inline) - every per-view
-// Atmosphere-sequence provider needs BOTH.
-struct AtmosphereSharedLutBlackboardEntry {
-    AtmosphereSharedLutHandles handles;
-    AtmosphereParametersGpu parameters;
-};
-
-
-// Phase 4C (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) - the one, tiny
-// bridge from Renderer's own (Profiling-free) GpuTimingSample::Status into
-// Profiling::GpuSampleStatus - see Application::Run()'s Game/Scene/Present
-// blocks below. Trivial by design (a straightforward 1:1 switch), same
-// judgment already applied to AspectRatioOf() above - not worth its own
-// Tier-1 test file.
-Profiling::GpuSampleStatus ToProfilingGpuSampleStatus(GpuTimingSample::Status status) noexcept
-{
-    switch (status) {
-    case GpuTimingSample::Status::Present:
-        return Profiling::GpuSampleStatus::Present;
-    case GpuTimingSample::Status::Unsupported:
-        return Profiling::GpuSampleStatus::Unsupported;
-    case GpuTimingSample::Status::Absent:
-    default:
-        return Profiling::GpuSampleStatus::Absent;
-    }
-}
 
 // network-impl-2 campaign, Phase 3
 // (PHASE3_GAME_VIEW_CAPTURE_AND_GET_GAME_VIEW_ENDPOINT.md) - true for the
@@ -204,83 +81,6 @@ std::string DebugTextureColorFormatName(VkFormat format)
     return std::string(buffer);
 }
 
-// GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5), PHASE5
-// (task_manager/render-pass-5/PHASE5_RENDERGRAPH_PASS_WIRING_AND_PRODUCTION_CUTOVER.md,
-// Section 3.1) - stable (whole-process-lifetime) per-batch pass/resource
-// names, keyed by GpuDrivenBatchKey - mirrors RenderPasses.cpp's own
-// ReplayStepPassNamePool() precedent exactly (a std::deque never invalidates
-// an already-handed-out c_str() pointer on growth - RenderGraphBuilder::
-// AddRenderPass()/ImportBuffer()'s own `name` parameter requires a string
-// literal or otherwise static-storage-duration const char*, see
-// RenderGraphBuilder.h).
-struct GpuDrivenBatchNames {
-    const char* resetPassName = nullptr;
-    const char* cullingPassName = nullptr;
-    const char* indirectDrawPassName = nullptr;
-    const char* inputBufferName = nullptr;
-    const char* indirectBufferName = nullptr;
-    const char* countBufferName = nullptr;
-    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-    // PHASE6 - the batch's own stable DISPLAY name (e.g. "GpuDrivenBatch0"),
-    // shown by the "Render Graph" panel's new "instances culled this frame"
-    // readout (GpuDrivenBatchDebugInfo::batchName, EditorLayer.h) - NOT a
-    // per-pass name (covers all three of that batch's own passes at once).
-    const char* displayName = nullptr;
-};
-
-class GpuDrivenBatchNamePool {
-public:
-    // Returns (lazily minting on first request for this exact key, then
-    // reusing the SAME names/pointers forever afterward) the stable name
-    // set for `key` - a small, first-seen-order-preserving linear scan
-    // (mirrors GpuDrivenBatchCache's own std::map "a handful of distinct
-    // batches, never thousands" scale assumption).
-    const GpuDrivenBatchNames& NamesFor(const GpuDrivenBatchKey& key)
-    {
-        for (const Entry& entry : m_entries) {
-            if (entry.key == key) {
-                return entry.names;
-            }
-        }
-
-        const std::size_t index = m_entries.size();
-        Entry entry;
-        entry.key = key;
-        entry.names.resetPassName = Intern("GpuDrivenBatch" + std::to_string(index) + " ResetCount");
-        entry.names.cullingPassName = Intern("GpuDrivenBatch" + std::to_string(index) + " Culling");
-        entry.names.indirectDrawPassName = Intern("GpuDrivenBatch" + std::to_string(index) + " IndirectDraw");
-        entry.names.inputBufferName = Intern("GpuDrivenBatch" + std::to_string(index) + ".Input");
-        entry.names.indirectBufferName = Intern("GpuDrivenBatch" + std::to_string(index) + ".IndirectCommands");
-        entry.names.countBufferName = Intern("GpuDrivenBatch" + std::to_string(index) + ".VisibleCount");
-        entry.names.displayName = Intern("GpuDrivenBatch" + std::to_string(index));
-        m_entries.push_back(std::move(entry));
-        return m_entries.back().names;
-    }
-
-private:
-    const char* Intern(std::string s)
-    {
-        m_storage.push_back(std::move(s));
-        return m_storage.back().c_str();
-    }
-
-    struct Entry {
-        GpuDrivenBatchKey key;
-        GpuDrivenBatchNames names;
-    };
-
-    std::deque<std::string> m_storage; // Never reallocates an already-handed-out c_str() pointer.
-    std::vector<Entry> m_entries;
-};
-
-// A function-local static, mirroring RenderPasses.cpp's own
-// ReplayStepPassNamePool() precedent - whole-process-lifetime, never reset.
-GpuDrivenBatchNamePool& BatchNamePool()
-{
-    static GpuDrivenBatchNamePool pool;
-    return pool;
-}
-
 } // namespace
 
 Application::SdlContext::SdlContext()
@@ -314,15 +114,17 @@ Application::Application(const std::string& title, int width, int height)
     // by this point (Application.h's own member declaration order).
     , m_hostServices()
     , m_core(m_window, m_hostServices)
-    // The four lines below now bind REFERENCE members to m_core's own real,
-    // owned instances (see Application.h's own m_renderer/m_renderGraph/
-    // m_game/m_engineContext doc comments for the full "why a reference"
-    // reasoning) - m_core is already fully constructed by this point.
+    // The lines below now bind REFERENCE members to m_core's own real,
+    // owned instances (see Application.h's own member doc comments for the
+    // full "why a reference" reasoning) - m_core is already fully
+    // constructed by this point.
     , m_renderer(m_core.GetRenderer())
     , m_renderGraph(m_core.GetRenderGraph())
     , m_editorLayer(CreateEditorLayer(m_window, m_renderer))
     , m_game(m_core.GetGame())
     , m_engineContext(m_core.GetEngineContext())
+    , m_atmosphereSettings(m_core.GetAtmosphereSettings())
+    , m_atmosphereLutRenderer(m_core.GetAtmosphereLutRenderer())
     // network-impl-2 campaign, Phase 3 - hands FrameCaptureBridge's address
     // into NetworkServer's constructor (a defaulted pointer parameter - see
     // NetworkServer.h) so its /get_game_view route handler can reach it.
@@ -348,19 +150,17 @@ Application::Application(const std::string& title, int width, int height)
     // m_networkServer.
     , m_networkServer(&m_captureBridge, &m_commandBridge, &m_uiCommandBridge, &m_frameDebuggerCommandBridge,
           &m_assetImportCommandBridge)
-    , m_windowWidth(width)
-    , m_windowHeight(height)
 {
     // editor-core-separation-1 campaign, PHASE3
     // (PHASE3_LOGGING_GLOBAL_LOGSINK_EXTRACTION.md) - installs the ONE real
     // ILogSink this engine ships (Editor/Logger.h's LoggerLogSink) into the
     // new global sink mechanism (Core/LogSink.h), FIRST, before anything
-    // else in this constructor body runs (including the two Register*
-    // calls and NetworkServer::Start() immediately below, both of which can
-    // themselves call GTE_LOG_*) - install-once, idempotent, mirrors
-    // SdlMemoryTracker::Install()'s own "before first use" timing rule.
-    // Phase 16 of this same campaign moves this one call site into
-    // EditorHost's own constructor instead, once EditorHost exists.
+    // else in this constructor body runs (including NetworkServer::Start()
+    // immediately below, which can itself call GTE_LOG_*) - install-once,
+    // idempotent, mirrors SdlMemoryTracker::Install()'s own "before first
+    // use" timing rule. Phase 16 of this same campaign moves this one call
+    // site into EditorHost's own constructor instead, once EditorHost
+    // exists.
     gte::InstallLogSink(&gte::LoggerLogSink::Instance());
 
     // editor-core-separation-1 campaign, PHASE12
@@ -371,11 +171,22 @@ Application::Application(const std::string& title, int width, int height)
     // because m_editorLayer must already be fully constructed first - by
     // this point in the body every member's own constructor has already
     // run, so this is safe regardless of m_core's/m_editorLayer's relative
-    // declaration order. Core::BuildFrame() does not yet call through this
-    // pointer at all this phase (that's PHASE13's job) - this call alone
-    // causes zero runtime behavior change, it only proves the hook
-    // compiles/wires safely.
+    // declaration order.
     m_core.SetEditorLayerHook(m_editorLayer.get());
+
+    // editor-core-separation-1 campaign, PHASE13
+    // (PHASE13_CORE_FRAME_ORCHESTRATION_EXTRACTION.md) - hands Core the ONE
+    // callback that actually calls IEditorLayer::Render(cmd) - an explicitly
+    // HOST-LEVEL IEditorLayer method (Locked Design Decision #8's second
+    // bucket) that Application (not Core) must keep calling directly
+    // against its own m_editorLayer. This lambda captures `this`
+    // (Application's own `this`, never Core's), so the real call still
+    // textually happens here, in Application.cpp, exactly as it always has
+    // - Core merely stores/forwards this std::function value, never calling
+    // IEditorLayer::Render() itself. Set once (this callback's own behavior
+    // never varies frame-to-frame) - see Core::SetPresentImGuiRecorder()'s
+    // own doc comment (Core.h).
+    m_core.SetPresentImGuiRecorder([this](VkCommandBuffer cmd) { m_editorLayer->Render(cmd); });
 
     // editor-core-separation-1 campaign, PHASE6
     // (PHASE6_EDITOR_CAPABILITY_CALL_SITE_CONVERSION_SCENE_IO.md) - wires the
@@ -384,21 +195,12 @@ Application::Application(const std::string& title, int width, int height)
     // EngineCommandDispatch.cpp (Core-destined, always-compiled) now consults
     // at runtime instead of a compile-time `#if` (this call site is now
     // unconditional since PHASE8 - GTE_ENABLE_EDITOR no longer exists
-    // anywhere in this codebase). A function-local static (mirrors
+    // anywhere in this codebase). A function-local `static` (mirrors
     // LoggerLogSink::Instance()'s own Meyers-singleton precedent immediately
-    // above, and GpuDrivenBatchNamePool()'s own function-local-static
-    // precedent further up in this same file) - EditorSceneIOCapability is
-    // pure delegation with no state of its own, so one whole-process-
-    // lifetime instance is all this needs.
+    // above) - EditorSceneIOCapability is pure delegation with no state
+    // of its own, so one whole-process-lifetime instance is all this needs.
     static EditorSceneIOCapability s_editorSceneIOCapability;
     SetSceneIOCapability(&s_editorSceneIOCapability);
-
-    // render-pass-3 campaign, PHASE2/PHASE3 - registers both
-    // m_offscreenRenderPipeline (every remaining production pass) and
-    // m_presentRenderPipeline ("Present" alone) once, here, at construction
-    // time - see each method's own definition below.
-    RegisterOffscreenRenderPipelineProviders();
-    RegisterPresentRenderPipelineProvider();
 
 #if GTE_ENABLE_NETWORK
     // Loopback-only (127.0.0.1 is baked into NetworkServer itself - Start()
@@ -424,678 +226,6 @@ Application::Application(const std::string& title, int width, int height)
 }
 
 Application::~Application() = default;
-
-// render-pass-3 campaign, PHASE3 (Step 3.1) - a small, linear scan (the
-// realistic view count is 0-2, so this is never worth a hashed lookup).
-const RenderPassViewData* Application::FindViewData(rg::RenderViewId view) const noexcept
-{
-    for (const RenderPassViewData& viewData : m_currentViewDataThisFrame) {
-        if (viewData.id == view) {
-            return &viewData;
-        }
-    }
-    return nullptr;
-}
-
-// render-pass-3 campaign, PHASE2/PHASE3 - registers every remaining
-// production pass onto m_offscreenRenderPipeline. Registered in the SAME
-// order the old code declared them (readability only - DeclareInto()'s own
-// `.order`-based sort, plus each Atmosphere-wrapping provider's own
-// immediate `frame.builder` calls, are what actually fix declaration order -
-// see PHASE3_FULL_PRODUCTION_PASS_MIGRATION_AND_VIEW_UNIFICATION.md's own
-// Step 3.3b for the full "why").
-void Application::RegisterOffscreenRenderPipelineProviders()
-{
-    m_offscreenRenderPipeline.SetLegacyViewScopeTranslator(&TranslateLegacyViewScope);
-
-    // "AtmosphereSharedLut" - ProviderScope::Once, BeforeEverything. A
-    // deliberate EXCEPTION to "providers only append RenderPassDesc data"
-    // (Step 3.3b): calls AddAtmosphereSharedLutPasses() DIRECTLY against
-    // `frame.builder` (the real RenderGraphBuilder& this frame's graph is
-    // being built against), declaring its real passes IMMEDIATELY rather
-    // than deferring them - AddAtmosphereSharedLutPasses() itself calls
-    // builder.AddRenderPass() twice, with a genuine data dependency between
-    // the two calls (Multi-Scattering needs Transmittance's own just-
-    // returned handle), which cannot be expressed as a single
-    // RenderPassDesc.setup/.execute pair. Publishes the resulting handles +
-    // this frame's own AtmosphereParametersGpu onto the blackboard for every
-    // per-view Atmosphere-sequence provider below to fetch, and appends both
-    // LUT handles to `frame.finalTextureOutputs` (PHASE1's own mechanism -
-    // REPLACES today's manual `outputs.push_back(...)` calls).
-    m_offscreenRenderPipeline.Register("AtmosphereSharedLut", rg::ProviderScope::Once,
-        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&) {
-            AtmosphereSharedLutBlackboardEntry entry;
-            entry.parameters = MakeDefaultEarthAtmosphereParameters();
-            entry.parameters.groundAlbedo = entry.parameters.groundAlbedo * m_atmosphereSettings.groundAlbedoTint;
-            entry.handles =
-                AddAtmosphereSharedLutPasses(frame.builder, m_renderer, m_atmosphereLutRenderer, entry.parameters);
-
-            frame.finalTextureOutputs.push_back(entry.handles.transmittanceLutHandle);
-            frame.finalTextureOutputs.push_back(entry.handles.multiScatteringLutHandle);
-
-            frame.blackboard.Publish<AtmosphereSharedLutBlackboardEntry>(kAtmosphereSharedLutKey, entry);
-        });
-
-    // "GpuSkinning" - ProviderScope::Once (invoked exactly once per
-    // m_offscreenRenderPipeline.DeclareInto() call, regardless of how many
-    // views are active this frame - GPU Skinning's compute dispatch is
-    // view-independent). A direct, literal translation of
-    // RenderPasses.cpp's own AddGpuSkinningPasses() loop body, EXCEPT: this
-    // provider has no rg::RenderGraphBuilder& of its own to call
-    // ImportBuffer() (a RenderPassProvider's signature deliberately has none
-    // - see PHASE1_CORE_VOCABULARY_AND_BLACKBOARD.md) - m_gpuSkinningRequestsThisFrame/
-    // m_gpuSkinningHandlesThisFrame are populated by Run() itself,
-    // immediately BEFORE calling m_offscreenRenderPipeline.DeclareInto(),
-    // using the SAME RenderGraphBuilder& this frame's graph is being built
-    // against (see Run()'s own offscreen build lambda) - this is the
-    // "resolve outside any provider, by the caller" resolution
-    // PHASE2_GPU_SKINNING_OPAQUE_BLACKBOARD_PROOF.md's own Step 3.1
-    // explicitly preferred over growing RenderGraphBuilder.h's own public
-    // surface. render-pass-3 campaign, PHASE3 - now called UNCONDITIONALLY
-    // every frame (DeclareInto() itself runs unconditionally now - see
-    // Run()) - retires PHASE2's own "Deviation 2" fallback branch
-    // (`if (gameTarget == nullptr) { AddGpuSkinningPasses(...) }`), which no
-    // longer exists.
-    m_offscreenRenderPipeline.Register("GpuSkinning", rg::ProviderScope::Once,
-        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
-            GpuSkinningPipelines& pipelines = m_game.GetGpuSkinningPipelines();
-
-            for (std::size_t i = 0; i < m_gpuSkinningRequestsThisFrame.size(); ++i) {
-                const AnimationSystem::GpuSkinningDispatchRequest& request = m_gpuSkinningRequestsThisFrame[i];
-                const rg::BufferHandle handle = m_gpuSkinningHandlesThisFrame[i];
-
-                rg::RenderPassDesc desc;
-                desc.debugName = request.name;
-                desc.kind = rg::PassKind::Compute;
-                desc.order = rg::RenderPassEvent::PreOpaques;
-                desc.view = rg::RenderViewId::Shared();
-                desc.tags = kGpuSkinningDispatchPassTag.bit;
-                desc.setup = [handle](rg::RenderGraphBuilder::PassBuilder& pass) {
-                    pass.WriteBuffer(handle, rg::ResourceAccess::ComputeShaderWrite);
-                };
-                desc.execute = [this, &pipelines, request](rg::PassContext& ctx) {
-                    const ComputePipeline& pipeline =
-                        request.textured ? pipelines.PositionNormalUvPipeline() : pipelines.PositionNormalPipeline();
-                    const std::uint32_t vertexCount = request.vertexCount;
-
-                    m_renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-                    m_renderer.Dispatch(pipeline, request.descriptorSet, &vertexCount, sizeof(vertexCount),
-                        ComputeGroupCount(vertexCount, kSkinningLocalSizeX), 1, 1);
-                    m_renderer.EndGraphPassRecording();
-                };
-                out.push_back(std::move(desc));
-            }
-
-            // Published EVERY time this provider runs, even when
-            // m_gpuSkinningHandlesThisFrame is empty (no model needs GPU
-            // skinning this frame, or CPU skinning mode is active) - see
-            // this phase's own Definition of Done: "RenderOpaque" below
-            // ALWAYS Fetch()es this same key, every frame, unconditionally,
-            // so an empty publish is never "unused" (it IS read, it just
-            // reads back an empty vector) - ReportUnusedPublishesIfAny()
-            // never fires for this key in normal operation.
-            frame.blackboard.Publish<std::vector<rg::BufferHandle>>(
-                kGpuSkinningOutputsKey, m_gpuSkinningHandlesThisFrame);
-        });
-
-    // "AtmosphereViewLut" - ProviderScope::PerActiveView, PreOpaques. The
-    // SECOND Atmosphere-wrapping EXCEPTION (Step 3.3b) - calls
-    // AddAtmosphereViewLutPasses() (and, Game View only, the debug-slice
-    // pass) directly against `frame.builder`, fetching the shared LUT
-    // handles/parameters this SAME frame's "AtmosphereSharedLut" provider
-    // already published (registration order above guarantees it already
-    // ran). Publishes its own per-view AtmosphereViewLutHandles for the
-    // Sky Background/Composite providers below to fetch for THIS SAME view.
-    m_offscreenRenderPipeline.Register("AtmosphereViewLut", rg::ProviderScope::PerActiveView,
-        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&) {
-            const RenderPassViewData* viewData = FindViewData(frame.currentView);
-            if (viewData == nullptr) {
-                return; // Defensive - every entry in frame.activeViews always has a matching RenderPassViewData.
-            }
-
-            const std::optional<AtmosphereSharedLutBlackboardEntry> sharedLuts =
-                frame.blackboard.Fetch<AtmosphereSharedLutBlackboardEntry>(kAtmosphereSharedLutKey);
-            if (!sharedLuts.has_value()) {
-                return; // Defensive - "AtmosphereSharedLut" (registered above) always runs first and always publishes.
-            }
-
-            const bool isGameView = (frame.currentView == rg::RenderViewId::Named("Game"));
-            const char* skyViewLutName = isGameView ? "AtmosphereSkyViewLut_GameView" : "AtmosphereSkyViewLut_SceneView";
-            const char* aerialVolumeName =
-                isGameView ? "AtmosphereAerialPerspectiveVolume_GameView" : "AtmosphereAerialPerspectiveVolume_SceneView";
-            const rg::ViewScope legacyViewScope = isGameView ? rg::ViewScope::GameView : rg::ViewScope::SceneView;
-
-            AtmosphereViewLutHandles viewLuts = AddAtmosphereViewLutPasses(frame.builder, m_renderer,
-                m_atmosphereLutRenderer, m_game.GetRegistry(), sharedLuts->parameters, m_atmosphereSettings,
-                sharedLuts->handles, viewData->eyeWorldPosition, viewData->viewProjection, skyViewLutName,
-                aerialVolumeName, legacyViewScope);
-
-            frame.finalTextureOutputs.push_back(viewLuts.skyViewLutHandle);
-            // A VolumeTextureHandle can never go into finalTextureOutputs
-            // (TextureHandle-only) - see
-            // RenderGraphBuilder::KeepVolumeTextureOutput()'s own doc
-            // comment for why this is a separate call.
-            frame.builder.KeepVolumeTextureOutput(viewLuts.aerialPerspectiveVolumeHandle);
-
-            // Phase 9 debug-visibility slice - Game View only (per its own
-            // doc comment), unchanged from before this phase.
-            if (isGameView) {
-                const rg::TextureHandle debugSlice = m_atmosphereLutRenderer.AddAerialPerspectiveVolumeDebugSlicePass(
-                    frame.builder, m_renderer, viewLuts.aerialPerspectiveVolumeHandle, aerialVolumeName,
-                    static_cast<std::uint32_t>(m_atmosphereSettings.aerialPerspectiveDebugSliceIndex),
-                    "AtmosphereAerialPerspectiveVolumeDebugSlice", rg::ViewScope::GameView);
-                frame.finalTextureOutputs.push_back(debugSlice);
-            }
-
-            const rg::RenderPassId viewLutKey = isGameView ? kAtmosphereViewLutGameKey : kAtmosphereViewLutSceneKey;
-            frame.blackboard.Publish<AtmosphereViewLutHandles>(viewLutKey, viewLuts);
-        });
-
-    // "RenderOpaque" - ProviderScope::PerActiveView. render-pass-3 campaign,
-    // PHASE3 - GENERALIZED from PHASE2's own Game-View-only body to read
-    // frame.currentView's own RenderPassViewData via FindViewData() instead
-    // of a single captured gameViewTarget/aspect - this is the one place
-    // Scene View's own opaque draw becomes a REAL, SEPARATE "RenderOpaque"-
-    // shaped pass for the first time (see Step 3.4). gpuSkinningOutputBuffers
-    // is still Fetch()'d from the blackboard, with ZERO direct knowledge of
-    // the "GpuSkinning" provider above (unchanged from PHASE2).
-    m_offscreenRenderPipeline.Register("RenderOpaque", rg::ProviderScope::PerActiveView,
-        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
-            const std::vector<rg::BufferHandle> gpuSkinningBuffers =
-                frame.blackboard.Fetch<std::vector<rg::BufferHandle>>(kGpuSkinningOutputsKey)
-                    .value_or(std::vector<rg::BufferHandle>{});
-
-            const RenderPassViewData* viewData = FindViewData(frame.currentView);
-            if (viewData == nullptr) {
-                return;
-            }
-
-            const rg::TextureHandle viewTarget = viewData->colorTarget;
-            const float aspectWidthOverHeight = viewData->aspectWidthOverHeight;
-            const bool isGameView = (frame.currentView == rg::RenderViewId::Named("Game"));
-            // Game View drives through the ECS's own active Camera
-            // (viewProjectionOverride == nullptr, exactly like
-            // AddRenderOpaquePass() always did); Scene View bypasses ECS
-            // camera resolution via the Editor's own independently-
-            // orbitable camera (viewData->viewProjection), exactly like
-            // AddSceneViewPass() always did. A real, non-null
-            // frameDebuggerCapture is NEVER handed to Scene View (Locked
-            // Design Decision/RenderPasses.h's own doc comment).
-            const Mat4 viewProjectionOverride = viewData->viewProjection;
-            FrameDebuggerCaptureContext* frameDebuggerCapture =
-                isGameView ? m_currentFrameDebuggerCaptureForOffscreenPipeline : nullptr;
-
-            rg::RenderPassDesc desc;
-            desc.debugName = "RenderOpaque";
-            desc.kind = rg::PassKind::Graphics;
-            desc.order = rg::RenderPassEvent::Opaques;
-            desc.view = frame.currentView;
-            // Frame Debugger Pass-Ownership behavior must be BIT-FOR-BIT
-            // IDENTICAL to the old direct AddRenderOpaquePass()/
-            // AddSceneViewPass() calls - see this phase's own "What We Will
-            // NOT Do". legacyCategory/drawKind default to General/DrawMesh
-            // respectively (PHASE1's own RenderPassDesc defaults).
-            desc.legacyCategory = rg::RenderPassCategory::General;
-            desc.setup = [viewTarget, gpuSkinningBuffers](rg::RenderGraphBuilder::PassBuilder& pass) {
-                pass.WriteColorAttachment(viewTarget, kGameClearColor);
-                pass.WriteDepthStencilAttachment(viewTarget, kGameClearDepth);
-                DeclareGpuSkinningReads(pass, gpuSkinningBuffers);
-            };
-            desc.execute = [this, aspectWidthOverHeight, isGameView, viewProjectionOverride, frameDebuggerCapture](
-                                rg::PassContext& ctx) {
-                m_renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-                if (isGameView) {
-                    // GPU-Driven Frustum Culling + Indirect Draw campaign
-                    // (render-pass-5), PHASE5 - the ONE call site that ever
-                    // passes a real, non-empty `batchedEntities` (Locked
-                    // Design Decision 11, PHASE0_MASTER_STRATEGY.md). See
-                    // m_gpuDrivenBatchedEntitiesThisFrame's own doc comment
-                    // (Application.h).
-                    m_game.Render(m_renderer, aspectWidthOverHeight, nullptr, frameDebuggerCapture, std::nullopt,
-                        m_gpuDrivenBatchedEntitiesThisFrame);
-                } else {
-                    m_game.Render(m_renderer, aspectWidthOverHeight, &viewProjectionOverride);
-                }
-                m_renderer.EndGraphPassRecording();
-            };
-            out.push_back(std::move(desc));
-        });
-
-    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-    // PHASE5 (task_manager/render-pass-5/
-    // PHASE5_RENDERGRAPH_PASS_WIRING_AND_PRODUCTION_CUTOVER.md, Section
-    // 3.1/3.4) - "GpuDrivenBatches" - ProviderScope::PerActiveView.
-    //
-    // ⚠️ CORRECTNESS-CRITICAL PLACEMENT REQUIREMENT (confirmed by live
-    // testing during this phase, mirroring "AtmosphereComposite"'s own
-    // identical CORRECTNESS-CRITICAL comment on ProviderTiming above): this
-    // Register(...) call MUST stay TEXTUALLY AFTER "RenderOpaque"'s own
-    // Register(...) call (immediately above) and TEXTUALLY BEFORE
-    // "DrawSkyBackground"'s own Register(...) call (immediately below) -
-    // rg::RenderPipeline::DeclareOnePhase() (RenderPipeline.h) collects
-    // every PerActiveView provider's own RenderPassDesc entries into one
-    // scratch list IN REGISTRATION ORDER, then stable-sorts that list by
-    // RenderPassEvent - for two providers sharing the exact same
-    // RenderPassEvent tier ("RenderOpaque" and this provider's own 3 passes
-    // all use RenderPassEvent::Opaques), their relative order after that
-    // stable sort is EXACTLY their registration order. Moving this
-    // Register(...) call anywhere else in this function's body would
-    // silently break the "RenderOpaque" -> this provider's 3 passes ->
-    // "DrawSkyBackground" ordering this whole feature depends on, with NO
-    // compiler error and NO assert - DetectRenderPassEventContradictions()
-    // does not catch this class of hazard (a pure WAW hazard with no
-    // intervening read) - see that document's own preface note, point 3,
-    // and Section 3.4 for the full reasoning.
-    m_offscreenRenderPipeline.Register("GpuDrivenBatches", rg::ProviderScope::PerActiveView,
-        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
-            // Game-View-only cutover (Locked Design Decision 11,
-            // PHASE0_MASTER_STRATEGY.md) - Scene View never receives any of
-            // this provider's passes; mirrors every other per-view
-            // provider's own internal `isGameView`-style branch precedent.
-            if (frame.currentView != rg::RenderViewId::Named("Game")) {
-                return;
-            }
-
-            const RenderPassViewData* viewData = FindViewData(frame.currentView);
-            if (viewData == nullptr) {
-                return; // Defensive - Game is always in frame.activeViews when this provider is invoked for it.
-            }
-            const rg::TextureHandle viewTarget = viewData->colorTarget;
-
-            // Decided ONCE per DeclareInto() call (not per batch) - every
-            // batch this frame shares the exact same Game-View camera.
-            const std::array<Plane, 6> frustumPlanes = ExtractFrustumPlanes(m_gpuDrivenGameViewProjectionThisFrame);
-            const bool useCompaction = m_renderer.SupportsDrawIndirectCount();
-            const Mat4 viewProjection = m_gpuDrivenGameViewProjectionThisFrame;
-
-            for (const GpuDrivenBatchRenderData& batch : m_gpuDrivenBatchesThisFrame) {
-                const rg::BufferHandle inputHandle = batch.inputHandle;
-                const rg::BufferHandle indirectHandle = batch.indirectHandle;
-                const rg::BufferHandle countHandle = batch.countHandle;
-                const VkBuffer indirectBufferNative = batch.indirectBufferNative;
-                const VkBuffer countBufferNative = batch.countBufferNative;
-                const VkDescriptorSet cullingDescriptorSet = batch.cullingDescriptorSet;
-                const VkDescriptorSet instanceBufferDescriptorSet = batch.instanceBufferDescriptorSet;
-                const std::size_t instanceCount = batch.instanceCount;
-                const MeshHandle meshHandle = batch.mesh;
-                const PipelineHandle originalPipelineHandle = batch.originalPipeline;
-
-                // --- "<batch> ResetCount" (Compute) ----------------------
-                {
-                    rg::RenderPassDesc desc;
-                    desc.debugName = batch.resetPassName;
-                    desc.kind = rg::PassKind::Compute;
-                    desc.order = rg::RenderPassEvent::Opaques;
-                    desc.view = frame.currentView;
-                    desc.setup = [countHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
-                        pass.WriteBuffer(countHandle, rg::ResourceAccess::TransferDst);
-                    };
-                    desc.execute = [countBufferNative](rg::PassContext& ctx) {
-                        // PHASE3's own flagged, previously-undeclared-
-                        // anywhere requirement - the atomic visible-count
-                        // buffer must contain exactly 0 before every
-                        // dispatch of Shaders/FrustumCull.comp (see
-                        // PHASE3_FRUSTUM_CULL_COMPUTE_SHADER_AND_PIPELINE.md,
-                        // Section 3.2 - the shader can never safely do this
-                        // itself). A raw vkCmdFillBuffer - no
-                        // BeginGraphPassRecording()/EndGraphPassRecording()
-                        // bracket needed (that pairing only matters for a
-                        // Renderer::Submit()/SubmitIndirect()/Dispatch()
-                        // call, none of which happen here).
-                        vkCmdFillBuffer(ctx.cmd, countBufferNative, 0, sizeof(std::uint32_t), 0);
-                    };
-                    out.push_back(std::move(desc));
-                }
-
-                // --- "<batch> Culling" (Compute) --------------------------
-                {
-                    rg::RenderPassDesc desc;
-                    desc.debugName = batch.cullingPassName;
-                    desc.kind = rg::PassKind::Compute;
-                    desc.order = rg::RenderPassEvent::Opaques;
-                    desc.view = frame.currentView;
-                    desc.setup = [inputHandle, indirectHandle, countHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
-                        pass.ReadBuffer(inputHandle, rg::ResourceAccess::ComputeShaderRead);
-                        pass.WriteBuffer(indirectHandle, rg::ResourceAccess::ComputeShaderWrite);
-                        // The last of these automatically creates a WAW edge
-                        // from "<batch> ResetCount" into this pass (both
-                        // write countHandle) - the reset is therefore
-                        // correctly ordered first via the render graph's
-                        // own existing, unmodified dependency-edge
-                        // machinery, with no special-casing needed here.
-                        pass.WriteBuffer(countHandle, rg::ResourceAccess::ComputeShaderWrite);
-                    };
-                    desc.execute = [this, cullingDescriptorSet, instanceCount, frustumPlanes, useCompaction](
-                                        rg::PassContext& ctx) {
-                        struct CullingPushConstants {
-                            Plane planes[6];
-                            std::uint32_t instanceCount;
-                            std::uint32_t useCompaction;
-                        };
-                        static_assert(sizeof(CullingPushConstants) == kCullingPushConstantSize,
-                            "CullingPushConstants must match Shaders/FrustumCull.comp's own PushConstants block "
-                            "exactly");
-
-                        CullingPushConstants pc{};
-                        for (std::size_t i = 0; i < 6; ++i) {
-                            pc.planes[i] = frustumPlanes[i];
-                        }
-                        pc.instanceCount = static_cast<std::uint32_t>(instanceCount);
-                        // Decided ONCE per batch from
-                        // Renderer::SupportsDrawIndirectCount() (PHASE2) -
-                        // never re-derived per-frame (Locked Design Decision
-                        // 4, PHASE0_MASTER_STRATEGY.md).
-                        pc.useCompaction = useCompaction ? 1u : 0u;
-
-                        m_renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-                        m_renderer.Dispatch(m_gpuDrivenBatchCache.Pipelines().Pipeline(), cullingDescriptorSet, &pc,
-                            sizeof(pc),
-                            ComputeGroupCount(static_cast<std::uint32_t>(instanceCount), kCullingLocalSizeX), 1, 1);
-                        m_renderer.EndGraphPassRecording();
-                    };
-                    out.push_back(std::move(desc));
-                }
-
-                // --- "<batch> IndirectDraw" (Graphics) --------------------
-                {
-                    rg::RenderPassDesc desc;
-                    desc.debugName = batch.indirectDrawPassName;
-                    desc.kind = rg::PassKind::Graphics;
-                    desc.order = rg::RenderPassEvent::Opaques;
-                    desc.view = frame.currentView;
-                    desc.legacyCategory = rg::RenderPassCategory::General;
-                    desc.setup = [viewTarget, indirectHandle, countHandle, inputHandle](
-                                     rg::RenderGraphBuilder::PassBuilder& pass) {
-                        // Deliberately NO clear value on either attachment -
-                        // mirrors "DrawSkyBackground"'s own "must never
-                        // erase a prior pass's just-written pixels/depth"
-                        // convention.
-                        pass.WriteColorAttachment(viewTarget);
-                        pass.WriteDepthStencilAttachment(viewTarget);
-                        pass.ReadBuffer(indirectHandle, rg::ResourceAccess::IndirectCommandRead);
-                        pass.ReadBuffer(countHandle, rg::ResourceAccess::IndirectCommandRead);
-                        // A SECOND, independent read declaration against the
-                        // SAME inputHandle the culling pass already read via
-                        // ComputeShaderRead - needed because the barrier
-                        // planner tracks access-kind-specific state per
-                        // resource; this is what correctly orders THIS
-                        // pass's own vertex-shader storage-buffer read after
-                        // the culling pass's own compute read/writes, not a
-                        // duplicate/no-op declaration.
-                        pass.ReadBuffer(inputHandle, rg::ResourceAccess::VertexShaderStorageRead);
-                    };
-                    desc.execute = [this, meshHandle, originalPipelineHandle, indirectBufferNative, countBufferNative,
-                                        instanceBufferDescriptorSet, instanceCount, useCompaction, viewProjection](
-                                        rg::PassContext& ctx) {
-                        const Mesh* mesh = m_game.GetRenderSystem().TryGetMesh(meshHandle);
-                        const Pipeline* instancedPipeline = nullptr;
-                        try {
-                            instancedPipeline =
-                                &m_gpuDrivenBatchCache.ResolveInstancedPipeline(m_renderer, originalPipelineHandle);
-                        } catch (const std::exception& e) {
-                            std::fprintf(
-                                stderr, "GpuDrivenBatches: failed to resolve instanced pipeline: %s\n", e.what());
-                        }
-                        if (mesh == nullptr || instancedPipeline == nullptr) {
-                            return; // Defensive - both resolved successfully during this same frame's collection.
-                        }
-
-                        m_renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-                        // ⚠️ CORRECTED, PHASE3's own flagged invariant - the
-                        // draw count passed here (both as maxDrawCount and,
-                        // implicitly, as the degenerate-padding branch's own
-                        // real drawCount) must be EXACTLY this frame's own
-                        // instanceCount, NEVER the cache's own buffer-
-                        // capacity-only-grows size - see
-                        // GpuDrivenBatchCache::EnsureCapacity()'s own doc
-                        // comment for the "ghost geometry" hazard this
-                        // prevents.
-                        const VkBuffer countBufferForCall = useCompaction ? countBufferNative : VK_NULL_HANDLE;
-                        m_renderer.SubmitIndirect(*instancedPipeline, *mesh, indirectBufferNative,
-                            /*indirectOffset=*/0, static_cast<std::uint32_t>(instanceCount), countBufferForCall,
-                            /*countBufferOffset=*/0, instanceBufferDescriptorSet, viewProjection);
-                        // GPU-Driven Frustum Culling + Indirect Draw campaign
-                        // (render-pass-5), PHASE6 - wires DrawStats::
-                        // indirectDrawCount into a real per-pass return value
-                        // for the first time (see PassContext::
-                        // recordIndirectDraw's own doc comment, RenderGraph.h,
-                        // and Renderer::SubmitIndirect()'s own "PHASE5's job"
-                        // note this closes).
-                        if (ctx.recordIndirectDraw) {
-                            ctx.recordIndirectDraw();
-                        }
-                        m_renderer.EndGraphPassRecording();
-                    };
-                    out.push_back(std::move(desc));
-                }
-
-                // NOTE (GPU-Driven Frustum Culling + Indirect Draw campaign,
-                // render-pass-5, PHASE6): a 4th, buffer-only-write
-                // "<batch> CopyCountForReadback" pass was ATTEMPTED here
-                // (read countHandle as TransferSrc, write the persistent
-                // countReadbackBuffer) but is STRUCTURALLY IMPOSSIBLE to
-                // keep alive through RenderGraphCompiler::Compile()'s own
-                // backward-reachability culling - confirmed by direct re-read
-                // of RenderGraphCompiler.cpp's Step 2 (Buffer writes are
-                // NEVER treated as culling "roots", unlike Texture/
-                // VolumeTexture writes - `isRoot = false` unconditionally
-                // for ResourceKind::Buffer - and a pass with NO texture/
-                // volume-texture write of its own can only survive by being
-                // a predecessor of some OTHER kept pass, which never happens
-                // here since nothing downstream ever reads
-                // countReadbackBuffer through the graph). The count-buffer
-                // readback copy is instead issued as a RAW command directly
-                // against `offscreenCmd`, OUTSIDE the render-graph's
-                // declarative pass system entirely, immediately after this
-                // whole m_renderGraph.Execute(...) call returns (see Run()'s
-                // own code, below) - see that call site's own doc comment
-                // for the full reasoning.
-            }
-        });
-
-    // "DrawSkyBackground" - ProviderScope::PerActiveView, AfterOpaques. Wraps
-    // AddDrawSkyBackgroundPass()'s existing body (unchanged clear/no-clear
-    // rules); fetches this view's own Sky-View LUT + frame uniforms from the
-    // blackboard (published by "AtmosphereViewLut" above, for THIS SAME
-    // view) to build its own recordSkyBackground callback via
-    // MakeRecordSkyBackgroundCallback() - replacing today's manual capture.
-    // Step 3.7 - ALSO republishes that exact callback for the Game View
-    // ONLY, so Run() can hand it to AddFrameDebuggerReplayPasses() (still
-    // unmigrated) after DeclareInto() returns.
-    m_offscreenRenderPipeline.Register("DrawSkyBackground", rg::ProviderScope::PerActiveView,
-        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
-            const RenderPassViewData* viewData = FindViewData(frame.currentView);
-            if (viewData == nullptr) {
-                return;
-            }
-
-            const bool isGameView = (frame.currentView == rg::RenderViewId::Named("Game"));
-            const rg::RenderPassId viewLutKey = isGameView ? kAtmosphereViewLutGameKey : kAtmosphereViewLutSceneKey;
-            const std::optional<AtmosphereViewLutHandles> viewLuts =
-                frame.blackboard.Fetch<AtmosphereViewLutHandles>(viewLutKey);
-            const std::optional<AtmosphereSharedLutBlackboardEntry> sharedLuts =
-                frame.blackboard.Fetch<AtmosphereSharedLutBlackboardEntry>(kAtmosphereSharedLutKey);
-            if (!viewLuts.has_value() || !sharedLuts.has_value()) {
-                return; // Defensive - both are always published earlier this same DeclareInto() call.
-            }
-
-            const char* skyViewLutName = isGameView ? "AtmosphereSkyViewLut_GameView" : "AtmosphereSkyViewLut_SceneView";
-            const std::function<void(VkCommandBuffer)> recordSkyBackground =
-                MakeRecordSkyBackgroundCallback(m_atmosphereLutRenderer, m_renderer, viewData->viewProjection,
-                    sharedLuts->parameters, viewLuts->frameUniforms, skyViewLutName, m_atmosphereSettings.skyExposure);
-
-            if (isGameView) {
-                frame.blackboard.Publish<std::function<void(VkCommandBuffer)>>(
-                    kGameSkyBackgroundCallbackKey, recordSkyBackground);
-            }
-
-            // Mirrors AddDrawSkyBackgroundPass()'s own "add nothing when
-            // nothing to do" rule - unreachable in practice today
-            // (MakeRecordSkyBackgroundCallback() always returns a valid
-            // callable), kept for parity/documentation.
-            if (!recordSkyBackground) {
-                return;
-            }
-
-            const rg::TextureHandle viewTarget = viewData->colorTarget;
-
-            rg::RenderPassDesc desc;
-            desc.debugName = "DrawSkyBackground";
-            desc.kind = rg::PassKind::Graphics;
-            desc.order = rg::RenderPassEvent::AfterOpaques;
-            desc.view = frame.currentView;
-            desc.legacyCategory = rg::RenderPassCategory::General;
-            // Frame Debugger Pass-Ownership campaign (render-pass-2) -
-            // matches AddDrawSkyBackgroundPass()'s own DrawQuad tag exactly
-            // (a real, hand-verified full-screen-triangle draw).
-            desc.drawKind = rg::RenderPassDrawKind::DrawQuad;
-            desc.setup = [viewTarget](rg::RenderGraphBuilder::PassBuilder& pass) {
-                // Deliberately NO clear value on either attachment
-                // (VK_ATTACHMENT_LOAD_OP_LOAD) - this pass must never erase
-                // "RenderOpaque"'s own just-written pixels/depth.
-                pass.WriteColorAttachment(viewTarget);
-                pass.WriteDepthStencilAttachment(viewTarget);
-            };
-            desc.execute = [this, recordSkyBackground](rg::PassContext& ctx) {
-                m_renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-                recordSkyBackground(ctx.cmd);
-                m_renderer.EndGraphPassRecording();
-            };
-            out.push_back(std::move(desc));
-        });
-
-    // "RenderTransparent" - ProviderScope::PerActiveView, Transparents. Wraps
-    // AddRenderTransparentPass()'s existing (always-empty-today) body
-    // unchanged for the real-transparent-geometry case. render-pass-3
-    // campaign, PHASE3 (Step 3.4) - ALSO folds in the Editor's own ground-
-    // grid overlay for Scene View ONLY (RenderPassViewData::recordSceneOverlay),
-    // replacing the old AddSceneViewPass()'s own fused
-    // "sky then grid, same pass" ordering with "DrawSkyBackground" (above,
-    // AfterOpaques) declared strictly BEFORE this pass (Transparents) - the
-    // exact same relative order AddSceneViewPass() always guaranteed, now
-    // enforced by RenderPassEvent instead of same-pass-body sequencing.
-    m_offscreenRenderPipeline.Register("RenderTransparent", rg::ProviderScope::PerActiveView,
-        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
-            const RenderPassViewData* viewData = FindViewData(frame.currentView);
-            if (viewData == nullptr) {
-                return;
-            }
-
-            const std::vector<DrawCommand> transparentCommands =
-                RenderSystem::CollectTransparentRenderables(m_game.GetRegistry());
-            const bool hasOverlay = static_cast<bool>(viewData->recordSceneOverlay);
-
-            // Real transparent-geometry draws: unreachable today (see
-            // RenderSystem::CollectTransparentRenderables()'s own doc
-            // comment) - left deliberately unimplemented beyond this check,
-            // mirroring AddRenderTransparentPass()'s own scope exactly.
-            if (transparentCommands.empty() && !hasOverlay) {
-                return; // A true no-op, exactly like the old direct call.
-            }
-
-            if (!hasOverlay) {
-                return; // transparentCommands-driven path is unreachable today - nothing further to declare.
-            }
-
-            const rg::TextureHandle viewTarget = viewData->colorTarget;
-            const Mat4 viewProjection = viewData->viewProjection;
-            const std::function<void(VkCommandBuffer, const Mat4&)> recordSceneOverlay = viewData->recordSceneOverlay;
-
-            rg::RenderPassDesc desc;
-            desc.debugName = "RenderTransparent";
-            desc.kind = rg::PassKind::Graphics;
-            desc.order = rg::RenderPassEvent::Transparents;
-            desc.view = frame.currentView;
-            desc.legacyCategory = rg::RenderPassCategory::General;
-            desc.setup = [viewTarget](rg::RenderGraphBuilder::PassBuilder& pass) {
-                pass.WriteColorAttachment(viewTarget);
-                pass.WriteDepthStencilAttachment(viewTarget);
-            };
-            desc.execute = [this, recordSceneOverlay, viewProjection](rg::PassContext& ctx) {
-                m_renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-                recordSceneOverlay(ctx.cmd, viewProjection);
-                m_renderer.EndGraphPassRecording();
-            };
-            out.push_back(std::move(desc));
-        });
-
-    // "AtmosphereComposite" - ProviderScope::PerActiveView, AfterTransparents,
-    // ProviderTiming::AfterDeferredPasses. The THIRD Atmosphere-wrapping
-    // EXCEPTION (Step 3.3b) - calls AddAtmosphereCompositePass() directly
-    // against `frame.builder`, fetching this view's own Aerial Perspective
-    // volume handle + frame uniforms from the blackboard. Appends its own
-    // output TextureHandle to `frame.finalTextureOutputs`.
-    //
-    // CORRECTNESS-CRITICAL, confirmed by live testing during this phase -
-    // MUST be registered with ProviderTiming::AfterDeferredPasses (see that
-    // enum's own doc comment, RenderPipeline.h): this pass READS the SAME
-    // texture handle "RenderOpaque"/"DrawSkyBackground" WRITE, so it must be
-    // declared STRICTLY AFTER them in the underlying pass list - registering
-    // it with the default BeforeDeferredPasses timing (as an earlier,
-    // untested draft of this phase did) causes RenderGraphCompiler::Compile()'s
-    // own resource-versioning scan to see this pass's read BEFORE any writer
-    // is known, silently CULLING "RenderOpaque"/"DrawSkyBackground" entirely
-    // (confirmed live: Game/Scene View rendered solid white/black, and the
-    // Render Graph panel showed "RenderOpaque" as "culled").
-    m_offscreenRenderPipeline.Register("AtmosphereComposite", rg::ProviderScope::PerActiveView,
-        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&) {
-            const RenderPassViewData* viewData = FindViewData(frame.currentView);
-            if (viewData == nullptr || viewData->renderTexture == nullptr) {
-                return;
-            }
-
-            const bool isGameView = (frame.currentView == rg::RenderViewId::Named("Game"));
-            const rg::RenderPassId viewLutKey = isGameView ? kAtmosphereViewLutGameKey : kAtmosphereViewLutSceneKey;
-            const std::optional<AtmosphereViewLutHandles> viewLuts =
-                frame.blackboard.Fetch<AtmosphereViewLutHandles>(viewLutKey);
-            if (!viewLuts.has_value()) {
-                return;
-            }
-
-            const char* aerialVolumeName =
-                isGameView ? "AtmosphereAerialPerspectiveVolume_GameView" : "AtmosphereAerialPerspectiveVolume_SceneView";
-            const char* outputTextureName = isGameView ? "GameViewComposited" : "SceneViewComposited";
-            const rg::ViewScope legacyViewScope = isGameView ? rg::ViewScope::GameView : rg::ViewScope::SceneView;
-
-            const rg::TextureHandle composited = AddAtmosphereCompositePass(frame.builder, m_renderer,
-                m_atmosphereLutRenderer, *viewData->renderTexture, viewData->colorTarget,
-                viewLuts->aerialPerspectiveVolumeHandle, aerialVolumeName, viewLuts->frameUniforms,
-                viewData->eyeWorldPosition, m_atmosphereSettings.aerialPerspectiveStrength,
-                m_atmosphereSettings.aerialPerspectiveMaxDistanceKm, m_atmosphereSettings.aerialPerspectiveDepthExponent,
-                viewData->renderTexture->Extent(), outputTextureName, legacyViewScope);
-
-            frame.finalTextureOutputs.push_back(composited);
-        },
-        rg::ProviderTiming::AfterDeferredPasses);
-}
-
-// render-pass-3 campaign, PHASE3 (Step 3.5) - the swapchain regime's own
-// RenderPipeline, with exactly one provider, "Present". A deliberate
-// EXCEPTION to "providers only append RenderPassDesc data" (Step 3.3b, same
-// mechanism as the Atmosphere-wrapping providers above) - calls
-// AddGpuSkinningPasses()/AddPresentPass() directly against `frame.builder`,
-// mirroring exactly what Application::Run()'s swapchain-regime `build` lambda
-// used to do inline. NEVER reuses/fetches a rg::BufferHandle the OFFSCREEN
-// regime's own "GpuSkinning" provider published to ITS OWN, separate
-// blackboard this same frame (PHASE0_MASTER_STRATEGY.md's Locked Design
-// Decision 6 and this phase doc's own Step 3.5 correctness note) - a fresh,
-// direct-render-only AddGpuSkinningPasses() call is made here instead,
-// exactly once, ONLY when this pass is also the one drawing Game directly.
-void Application::RegisterPresentRenderPipelineProvider()
-{
-    m_presentRenderPipeline.SetLegacyViewScopeTranslator(&TranslateLegacyViewScope);
-
-    m_presentRenderPipeline.Register("Present", rg::ProviderScope::Once,
-        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&) {
-            const std::vector<rg::BufferHandle> gpuSkinningBuffers = m_needsDirectGameRenderThisFrame
-                ? AddGpuSkinningPasses(frame.builder, m_game, m_renderer)
-                : std::vector<rg::BufferHandle>{};
-
-            AddPresentPass(frame.builder, m_game, m_renderer, m_swapchainImageThisFrame,
-                m_directGameRenderAspectThisFrame, m_recordImGuiThisFrame, gpuSkinningBuffers);
-        });
-}
-
 
 int Application::Run()
 {
@@ -1143,7 +273,9 @@ int Application::Run()
             while (SDL_PollEvent(&sdlEvent)) {
                 // Editor gets first look at every raw event (its own SDL3
                 // backend tracks mouse/keyboard for ImGui widgets) - a no-op in
-                // a release build (NullEditorLayer).
+                // a release build (NullEditorLayer). HOST-LEVEL (Locked Design
+                // Decision #8's second bucket) - stays directly on
+                // m_editorLayer, never routed through Core.
                 m_editorLayer->ProcessEvent(sdlEvent);
 
                 const std::optional<Event> event = EventTranslator::Translate(sdlEvent, mainWindowId);
@@ -1155,9 +287,15 @@ int Application::Run()
                     running = false;
                 } else if (event->type == EventType::WindowResized) {
                     const auto& resized = std::get<WindowResizedEventData>(event->data);
-                    m_windowWidth = resized.width;
-                    m_windowHeight = resized.height;
                     m_renderer.OnResize(resized.width, resized.height);
+                    // editor-core-separation-1 campaign, PHASE13 - keeps
+                    // Core's own present-regime "no Game/Scene panel
+                    // visible, render Game directly to swapchain" fallback
+                    // aspect-ratio computation correct across a live resize
+                    // (mirrors this call's own former m_windowWidth/
+                    // m_windowHeight cache exactly) - see
+                    // Core::NotifyWindowResized()'s own doc comment.
+                    m_core.NotifyWindowResized(resized.width, resized.height);
                     // Keeps the Editor's Game-view RenderTexture tracking the
                     // window's size (no-op in a release build) - see
                     // ImGuiEditorLayer::OnWindowResized.
@@ -1214,13 +352,13 @@ int Application::Run()
 
         // frame-debugger-1 campaign, PHASE4 - read the Editor's own Pause/Step
         // toolbar state (see PHASE3's IEditorLayer::IsPlaybackPaused()/
-        // TryConsumeStepRequest()) and drive EngineContext::Time with it for
-        // real. This reflects whatever the user last clicked as of the END of
-        // last frame's BuildUI() call - the same one-frame-of-lag every other
-        // Editor<->engine feedback loop in this file already accepts (see e.g.
-        // GameViewTarget()'s own doc comment). Always false/false for a release
-        // build (NullEditorLayer - see PHASE3), so Application behaves exactly
-        // like before this whole campaign whenever GTE_ENABLE_EDITOR is OFF.
+        // TryConsumeStepRequest()) - HOST-LEVEL (Locked Design Decision #8's
+        // second bucket: "Playback pause STATE itself... stays a call
+        // Application makes directly against m_editorLayer BEFORE calling
+        // m_core.Update(), passing the already-resolved paused/step booleans
+        // IN as plain arguments"). Always false/false for a release build
+        // (NullEditorLayer), so Application behaves exactly like before this
+        // whole campaign whenever there is no Editor.
         const bool playbackPaused = m_editorLayer->IsPlaybackPaused();
         // Deliberately called EVERY frame, unconditionally (never short-circuited
         // by `playbackPaused &&`) so a stray/stale pending step request can never
@@ -1230,27 +368,40 @@ int Application::Run()
         // comment.
         const bool stepRequestedRaw = m_editorLayer->TryConsumeStepRequest();
         const bool steppedThisFrame = playbackPaused && stepRequestedRaw;
-        m_engineContext.time.Advance(deltaSeconds, playbackPaused, steppedThisFrame, kFixedStepSeconds);
-
-        // logger-1 campaign, Phase 2 - stamps every Logger entry recorded
-        // from here until the next Advance() with THIS frame's number. Safe
-        // to call unconditionally, with no #if GTE_ENABLE_EDITOR guard
-        // needed at this call site - Logger::SetCurrentFrame() is a real
-        // no-op in that configuration (see Editor/Logger.h).
-        gte::Logger::SetCurrentFrame(m_engineContext.time.FrameCount());
 
         // task_manager/frame-debugger-3 campaign, PHASE3
         // (PHASE3_FRAME_HISTORY_RING_BUFFER_AND_CAPTURE_TRIGGER.md, Step
         // 3.2, call site 2) - records "a Step happened this frame" for the
-        // Frame Debugger's own later use (its real capture, which needs
-        // this frame's now-FINAL RenderGraphSnapshot/Game View pixels, only
-        // actually runs later THIS SAME frame, from inside BuildUI() - see
-        // IEditorLayer::NotifyFrameDebuggerStepConsumed()'s own doc
-        // comment). Called right where TryConsumeStepRequest() above is
-        // already checked - a no-op for NullEditorLayer.
+        // Frame Debugger's own later use - HOST-LEVEL, stays directly on
+        // m_editorLayer (Locked Design Decision #8's second bucket).
         if (steppedThisFrame) {
             m_editorLayer->NotifyFrameDebuggerStepConsumed();
         }
+
+        // editor-core-separation-1 campaign, PHASE13
+        // (PHASE13_CORE_FRAME_ORCHESTRATION_EXTRACTION.md) - advances Time
+        // (respecting the already-resolved Pause/Step booleans above) and
+        // dispatches Game::Update() - see Core::Update()'s own doc comment
+        // and InputFrame.h's own doc comment for why these two booleans
+        // travel inside InputFrame rather than growing Update()'s own frozen
+        // 2-parameter signature.
+        InputFrame inputFrame;
+        inputFrame.inputState = &inputState;
+        inputFrame.playbackPaused = playbackPaused;
+        inputFrame.stepRequested = stepRequestedRaw;
+        m_core.Update(inputFrame, static_cast<float>(deltaSeconds));
+
+        // logger-1 campaign, Phase 2 - stamps every Logger entry recorded
+        // from here until the next Advance() (now inside Core::Update()
+        // above) with THIS frame's number. Safe to call unconditionally -
+        // Logger::SetCurrentFrame() is a real no-op when no sink is
+        // installed. Reads m_engineContext.time.FrameCount() via the
+        // reference member bound to Core's own real EngineContext/Time
+        // instance (PHASE12) - this call itself never touches m_editorLayer,
+        // so it stays here directly on Application rather than moving into
+        // Core (Core must never #include Editor/Logger.h - see
+        // PHASE3_LOGGING_GLOBAL_LOGSINK_EXTRACTION.md).
+        gte::Logger::SetCurrentFrame(m_engineContext.time.FrameCount());
 
         m_editorLayer->NewFrame();
 
@@ -1389,742 +540,56 @@ int Application::Run()
         // chance to queue this frame's - see Renderer::BeginFrame().
         m_renderer.BeginFrame();
 
-        // Game::Update() itself is already wrapped in
-        // GTE_PROFILE_SCOPE("Game::Update") (see src/Game/Game.cpp) - not
-        // wrapped again here too, since the flat, name-keyed CPU scope
-        // aggregation model (see AGENTS.md, "Profiling") would otherwise
-        // double-count identically-named nested scopes rather than
-        // measuring the same call twice for no reason.
-        m_game.Update(m_engineContext, inputState);
-
-        // Ask the Editor where Game's frame(s) should actually land this
-        // frame: an off-screen RenderTexture per visible panel ("Game"
-        // and/or "Scene", each independently - an Editor build), or nullptr
-        // for either/both meaning "not currently visible, don't bother" (a
-        // hidden/inactive dock tab) or "no Editor at all" (a release build -
-        // see NullEditorLayer). This is the one seam that decides
-        // Unity-style Editor-vs-final-build rendering, and it lives here in
-        // Application (the composition root), not in Game.
-        //
-        // Render Graph migration (Phase 7 -
-        // RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md): Game
-        // view / Scene view / Present are recorded via TWO
-        // RenderGraph::Execute() calls per frame - one for the SYNCHRONOUS
-        // offscreen regime (Game+Scene together, sharing FramePresenter's
-        // own dedicated offscreen command buffer/fence), one for the
-        // PIPELINED swapchain regime (Present alone) - see RenderPasses.h
-        // and this class's own m_renderGraph member. A dependency-cycle
-        // exception from RenderGraphCompiler::Compile() is structurally
-        // unreachable through any graph this engine declares today (see
-        // RENDERGRAPH_PHASE3_COMPLETION_REPORT.md) but is still caught
-        // here, loudly, per RENDERGRAPH_PHASE6_COMPLETION_REPORT.md's own
-        // Step 3.5 guidance - never silently swallowed.
-        RenderTexture* gameTarget = m_editorLayer->GameViewTarget();
-        RenderTexture* sceneTarget = m_editorLayer->SceneViewTarget();
-
-        // task_manager/frame-debugger-3 campaign, PHASE3
-        // (PHASE3_FRAME_HISTORY_RING_BUFFER_AND_CAPTURE_TRIGGER.md, Step
-        // 3.4) - decides whether the Frame Debugger's real capture context
-        // is ARMED for THIS frame's Game-View render (nullptr the
-        // overwhelmingly common case - see PHASE1's own "zero-overhead-
-        // when-disarmed" requirement). Obtained here, BEFORE Game::Render()
-        // ever runs this frame, and threaded straight into AddRenderOpaquePass()
-        // below - see IEditorLayer::PrepareFrameDebuggerCaptureContext()'s
-        // own doc comment. `frameDebuggerCapture` is a bare, forward-
-        // declared pointer type (see EditorLayer.h) - this whole file never
-        // dereferences it, so no #if GTE_ENABLE_EDITOR guard is needed here
-        // (see task_manager/frame-debugger-3/
-        // PHASE1_RENDERER_CAPTURE_INSTRUMENTATION.md's own Step 3.1b).
-        FrameDebuggerCaptureContext* frameDebuggerCapture = m_editorLayer->PrepareFrameDebuggerCaptureContext();
+        // editor-core-separation-1 campaign, PHASE13
+        // (PHASE13_CORE_FRAME_ORCHESTRATION_EXTRACTION.md) - the REAL
+        // per-frame Render Graph orchestration (offscreen regime: Game
+        // View + Scene View, Atmosphere passes, GPU-skinning dispatch
+        // requests, GPU-driven batch culling readback, and every
+        // render-graph-frame-building IEditorLayer call site named in
+        // PHASE0_MASTER_STRATEGY.md's Locked Design Decision #8) now lives
+        // entirely inside Core::BuildFrame() - see Core.cpp and
+        // PHASE13_COMPLETION_REPORT.md for the full, itemized accounting of
+        // every one of Run()'s former ~30 IEditorLayer call sites' new home.
+        m_core.BuildFrame();
 
         // network-impl-2 campaign, Phase 3
         // (PHASE3_GAME_VIEW_CAPTURE_AND_GET_GAME_VIEW_ENDPOINT.md) - the
-        // FAST-FAIL branch, placed HERE (unconditionally, every frame,
-        // BEFORE the `if (gameTarget != nullptr || sceneTarget != nullptr)`
-        // block below) rather than inside that block - a release build (or
-        // an Editor build with both "Game"/"Scene" hidden) never enters that
-        // block at all, so a fast-fail placed inside it would never run in
-        // precisely the scenario it exists to handle, silently degrading
-        // every such /get_game_view request to the bridge's full 3-second
-        // timeout (HTTP 504) instead of an immediate HTTP 409. See that
-        // phase document's own "IMPORTANT - a placement gotcha" note.
-        if (gameTarget == nullptr && m_captureBridge.IsCaptureRequested(FrameCaptureKind::GameView)) {
+        // FrameCaptureBridge fast-fail + success-path capture for the Game
+        // View - a HOST-LEVEL AUTOMATION concern (design doc Section 6.1:
+        // "Core stays a pure engine facade: no HTTP server, no automation-
+        // bridge knowledge, ever") that stays here, RELOCATED to run right
+        // AFTER BuildFrame() returns (safe: BuildFrame() already
+        // fence-waited via EndOffscreenRenderGraphRecording() internally
+        // before returning, so every pixel this capture reads is already
+        // final) - see Core::GetGameViewTargetThisFrame()'s own doc comment
+        // (Core.h) and PHASE13_COMPLETION_REPORT.md for the full reasoning.
+        // Reads m_core's own resolved Game View target instead of calling
+        // IEditorLayer::GameViewTarget() a second time (Locked Design
+        // Decision #8's own Definition of Done: this call now lives ONLY
+        // inside Core::BuildFrame()).
+        RenderTexture* gameTargetThisFrame = m_core.GetGameViewTargetThisFrame();
+        if (gameTargetThisFrame == nullptr && m_captureBridge.IsCaptureRequested(FrameCaptureKind::GameView)) {
             m_captureBridge.FailPendingRequest(FrameCaptureKind::GameView, FrameCaptureFailureReason::TargetNotAvailable);
         }
-
-        // Call 1 of 2: the SYNCHRONOUS offscreen regime - Game view + Scene
-        // view together. Runs unconditionally whenever either target is
-        // non-null, completely independent of whatever the swapchain is
-        // doing this frame (a minimized OS window does not affect this
-        // call at all).
-        if (gameTarget != nullptr || sceneTarget != nullptr) {
-            try {
-                GTE_PROFILE_SCOPE("RenderGraph::Execute(Offscreen)");
-                const VkCommandBuffer offscreenCmd = m_renderer.BeginOffscreenRenderGraphRecording();
-                m_renderGraph.Execute(offscreenCmd, rg::ExecuteTimingMode::SynchronousImmediateReadback,
-                    [&](rg::RenderGraphBuilder& b) {
-                        // render-pass-3 campaign, PHASE3
-                        // (PHASE3_FULL_PRODUCTION_PASS_MIGRATION_AND_VIEW_UNIFICATION.md,
-                        // Step 3.6) - this whole build lambda collapses
-                        // today's hand-duplicated `if (gameTarget != nullptr)
-                        // { ...40+ lines... } if (sceneTarget != nullptr) {
-                        // ...40+ lines... }` pair into ONE generic per-view
-                        // loop, driven entirely by m_offscreenRenderPipeline's
-                        // own registered providers
-                        // (RegisterOffscreenRenderPipelineProviders()) - this
-                        // lambda's own job shrinks to: (a) resolve GPU
-                        // Skinning's dispatch requests (needs a real builder,
-                        // unconditionally - see below), (b) build this
-                        // frame's RenderPassViewData for whichever of
-                        // Game/Scene View are actually visible, (c) call
-                        // DeclareInto(), (d) service the two still-
-                        // unmigrated call sites Locked Design Decision 4
-                        // requires (AddFrameDebuggerReplayPasses()/Compute
-                        // Blur Validation - Step 3.7).
-
-                        // GPU Skinning's compute-dispatch requests are
-                        // resolved HERE, UNCONDITIONALLY (regardless of which
-                        // views are visible - an animated model must keep
-                        // skinning even when only Scene View is open), using
-                        // THIS SAME builder `b` (a RenderPassProvider has no
-                        // RenderGraphBuilder& of its own to call
-                        // ImportBuffer() - PHASE2's own "resolve outside any
-                        // provider, by the caller" resolution). Retires
-                        // PHASE2's own "Game-hidden/Scene-visible fallback"
-                        // special case (Deviation 2 in that phase's own
-                        // completion report) - "GpuSkinning" itself
-                        // (ProviderScope::Once) is now invoked
-                        // unconditionally by DeclareInto() below, every
-                        // frame, so that old dual-code-path is no longer
-                        // needed at all.
-                        m_gpuSkinningRequestsThisFrame = m_game.CollectGpuSkinningDispatchRequests();
-                        m_gpuSkinningHandlesThisFrame.clear();
-                        m_gpuSkinningHandlesThisFrame.reserve(m_gpuSkinningRequestsThisFrame.size());
-                        for (const AnimationSystem::GpuSkinningDispatchRequest& request :
-                            m_gpuSkinningRequestsThisFrame) {
-                            m_gpuSkinningHandlesThisFrame.push_back(
-                                b.ImportBuffer(request.name, request.outputBuffer, request.outputBufferSize));
-                        }
-
-                        rg::RenderPassBlackboard blackboard;
-                        blackboard.BeginFrame();
-                        rg::RenderPassFrameContext frame{ {}, rg::RenderViewId::Shared(), blackboard, b, {}, {} };
-
-                        m_currentViewDataThisFrame.clear();
-                        m_currentFrameDebuggerCaptureForOffscreenPipeline = nullptr;
-                        // GPU-Driven Frustum Culling + Indirect Draw campaign
-                        // (render-pass-5), PHASE5 - cleared UNCONDITIONALLY,
-                        // every frame (never left stale from a previous
-                        // frame Game View WAS visible) - only actually
-                        // repopulated inside the `if (gameTarget != nullptr)`
-                        // block below, since Game-View-only (Locked Design
-                        // Decision 11) means neither is ever read on a frame
-                        // Game isn't active anyway (the "GpuDrivenBatches"/
-                        // "RenderOpaque" providers' own per-view loop simply
-                        // never visits "Game" that frame) - cleared here
-                        // anyway purely for hygiene/debuggability.
-                        m_gpuDrivenBatchesThisFrame.clear();
-                        m_gpuDrivenBatchedEntitiesThisFrame.clear();
-                        m_gpuDrivenBatchDebugInfoLastFrame.clear();
-                        float gameAspectForReplay = 1.0f;
-
-                        if (gameTarget != nullptr) {
-                            const VkExtent2D extent = gameTarget->Extent();
-                            const float aspect =
-                                AspectRatioOf(static_cast<int>(extent.width), static_cast<int>(extent.height));
-
-                            // Game View's own eye world position (active ECS
-                            // Camera) and view-projection matrix.
-                            const Vec3 gameEyeWorldPosition = ResolveActiveCameraWorldPosition(m_game.GetRegistry());
-                            const Mat4 gameViewProjection =
-                                RenderSystem::ResolveActiveCameraViewProjection(m_game.GetRegistry(), aspect);
-
-                            const rg::TextureHandle h =
-                                b.ImportTexture("GameView", gameTarget->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
-
-                            RenderPassViewData gameViewData;
-                            gameViewData.id = rg::RenderViewId::Named("Game");
-                            gameViewData.colorTarget = h;
-                            gameViewData.renderTexture = gameTarget;
-                            gameViewData.aspectWidthOverHeight = aspect;
-                            gameViewData.viewProjection = gameViewProjection;
-                            gameViewData.eyeWorldPosition = gameEyeWorldPosition;
-                            m_currentViewDataThisFrame.push_back(gameViewData);
-
-                            frame.activeViews.push_back(rg::RenderViewId::Named("Game"));
-                            // Game-View-only - see RenderPasses.h's own
-                            // AddRenderOpaquePass() doc comment on why a
-                            // real, non-null capture pointer is NEVER handed
-                            // to Scene View/Present.
-                            m_currentFrameDebuggerCaptureForOffscreenPipeline = frameDebuggerCapture;
-                            gameAspectForReplay = aspect;
-
-                            // GPU-Driven Frustum Culling + Indirect Draw
-                            // campaign (render-pass-5), PHASE5 (task_manager/
-                            // render-pass-5/
-                            // PHASE5_RENDERGRAPH_PASS_WIRING_AND_PRODUCTION_CUTOVER.md,
-                            // Section 3.1) - computed HERE, exactly once
-                            // this frame, Game-View-only (Locked Design
-                            // Decision 11) - uses THIS SAME builder `b` (a
-                            // RenderPassProvider has no RenderGraphBuilder&
-                            // of its own to call ImportBuffer() - mirrors
-                            // the GPU Skinning import loop immediately
-                            // above).
-                            m_gpuDrivenGameViewProjectionThisFrame = gameViewProjection;
-                            {
-                                std::unordered_set<VkBuffer> gpuSkinnedOutputBuffers;
-                                gpuSkinnedOutputBuffers.reserve(m_gpuSkinningRequestsThisFrame.size());
-                                for (const AnimationSystem::GpuSkinningDispatchRequest& request :
-                                    m_gpuSkinningRequestsThisFrame) {
-                                    gpuSkinnedOutputBuffers.insert(request.outputBuffer);
-                                }
-
-                                RenderSystem& renderSystem = m_game.GetRenderSystem();
-                                const std::vector<GpuDrivenBatchFrameEntry> entries =
-                                    renderSystem.CollectGpuDrivenBatches(m_game.GetRegistry(), m_renderer,
-                                        m_gpuDrivenBatchCache, gpuSkinnedOutputBuffers);
-
-                                for (const GpuDrivenBatchFrameEntry& frameEntry : entries) {
-                                    const GpuDrivenBatchKey key{ frameEntry.mesh, frameEntry.pipeline };
-                                    const GpuDrivenBatchCache::Entry* cacheEntry = m_gpuDrivenBatchCache.TryGet(key);
-                                    const Mesh* meshPtr = renderSystem.TryGetMesh(frameEntry.mesh);
-                                    if (cacheEntry == nullptr || meshPtr == nullptr) {
-                                        // One-source-of-truth exclusion rule
-                                        // (Section 3.1) - a batch that can't
-                                        // actually be rendered this frame
-                                        // must be excluded from BOTH the
-                                        // pass-declaration AND the Draw()-
-                                        // exclusion decisions together.
-                                        continue;
-                                    }
-
-                                    bool instancedPipelineResolved = true;
-                                    try {
-                                        m_gpuDrivenBatchCache.ResolveInstancedPipeline(
-                                            m_renderer, frameEntry.pipeline);
-                                    } catch (const std::exception& e) {
-                                        std::fprintf(stderr,
-                                            "GpuDrivenBatches: failed to resolve instanced pipeline for a batch: "
-                                            "%s\n",
-                                            e.what());
-                                        instancedPipelineResolved = false;
-                                    }
-                                    if (!instancedPipelineResolved) {
-                                        continue;
-                                    }
-
-                                    const GpuDrivenBatchNames& names = BatchNamePool().NamesFor(key);
-
-                                    GpuDrivenBatchRenderData data;
-                                    data.mesh = frameEntry.mesh;
-                                    data.originalPipeline = frameEntry.pipeline;
-                                    data.instanceCount = frameEntry.instanceCount;
-                                    data.inputHandle = b.ImportBuffer(names.inputBufferName,
-                                        cacheEntry->inputBuffer.Native(), cacheEntry->inputBuffer.Size());
-                                    data.indirectHandle = b.ImportBuffer(names.indirectBufferName,
-                                        cacheEntry->indirectCommandBuffer.Native(),
-                                        cacheEntry->indirectCommandBuffer.Size());
-                                    data.countHandle = b.ImportBuffer(names.countBufferName,
-                                        cacheEntry->countBuffer.Native(), cacheEntry->countBuffer.Size());
-                                    data.indirectBufferNative = cacheEntry->indirectCommandBuffer.Native();
-                                    data.countBufferNative = cacheEntry->countBuffer.Native();
-                                    data.cullingDescriptorSet = cacheEntry->cullingDescriptorSet;
-                                    data.instanceBufferDescriptorSet = cacheEntry->instanceBufferDescriptorSet;
-                                    data.resetPassName = names.resetPassName;
-                                    data.cullingPassName = names.cullingPassName;
-                                    data.indirectDrawPassName = names.indirectDrawPassName;
-                                    data.displayName = names.displayName;
-                                    m_gpuDrivenBatchesThisFrame.push_back(data);
-
-                                    for (const DrawCommand& command : frameEntry.commands) {
-                                        m_gpuDrivenBatchedEntitiesThisFrame.insert(command.entity);
-                                    }
-                                }
-                            }
-                        }
-
-                        rg::TextureHandle sceneColorHandleForBlurValidation{};
-                        VkExtent2D sceneExtentForBlurValidation{};
-                        bool sceneVisibleForBlurValidation = false;
-
-                        if (sceneTarget != nullptr) {
-                            const VkExtent2D extent = sceneTarget->Extent();
-                            const float aspect =
-                                AspectRatioOf(static_cast<int>(extent.width), static_cast<int>(extent.height));
-                            // Unlike Game View above, Scene View renders
-                            // through the Editor's OWN independently-
-                            // orbitable camera (see src/Editor/EditorCamera.h)
-                            // rather than whatever ECS entity currently has
-                            // the active Camera component.
-                            const Mat4 sceneViewProjection = m_editorLayer->SceneViewProjection(aspect);
-                            const Vec3 sceneEyeWorldPosition = m_editorLayer->SceneViewCameraWorldPosition();
-
-                            const rg::TextureHandle h =
-                                b.ImportTexture("SceneView", sceneTarget->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
-
-                            RenderPassViewData sceneViewData;
-                            sceneViewData.id = rg::RenderViewId::Named("Scene");
-                            sceneViewData.colorTarget = h;
-                            sceneViewData.renderTexture = sceneTarget;
-                            sceneViewData.aspectWidthOverHeight = aspect;
-                            sceneViewData.viewProjection = sceneViewProjection;
-                            sceneViewData.eyeWorldPosition = sceneEyeWorldPosition;
-                            // The Editor's infinite ground grid (see
-                            // task_manager/editor-enchancements-1/PHASE0_MASTER_STRATEGY.md)
-                            // - a plain std::function keeps
-                            // RegisterOffscreenRenderPipelineProviders()'s
-                            // own "RenderTransparent" provider body
-                            // completely Editor-agnostic (see AGENTS.md,
-                            // Clean Architecture); only THIS call site
-                            // (which already legitimately holds
-                            // m_editorLayer) knows the real callback reaches
-                            // into IEditorLayer::RenderSceneGrid().
-                            sceneViewData.recordSceneOverlay = [this](VkCommandBuffer cmd, const Mat4& viewProj) {
-                                m_editorLayer->RenderSceneGrid(m_renderer, cmd, viewProj);
-                            };
-                            m_currentViewDataThisFrame.push_back(sceneViewData);
-
-                            frame.activeViews.push_back(rg::RenderViewId::Named("Scene"));
-
-                            // Phase 7 of the compute-shader campaign - the
-                            // Compute Blur Validation debug tool's own
-                            // still-unmigrated call site (Locked Design
-                            // Decision 4) needs Scene's raw imported color
-                            // handle + extent, resolved here, BEFORE
-                            // DeclareInto() runs (this is the SAME handle
-                            // `h` the now-migrated "RenderOpaque" provider
-                            // will also write this frame).
-                            sceneColorHandleForBlurValidation = h;
-                            sceneExtentForBlurValidation = extent;
-                            sceneVisibleForBlurValidation = true;
-                        }
-
-                        m_offscreenRenderPipeline.DeclareInto(b, frame);
-
-                        // Step 3.7 - fetch this key UNCONDITIONALLY, right
-                        // here (even on the overwhelming majority of frames
-                        // where no Frame Debugger replay actually ends up
-                        // being serviced below) - "DrawSkyBackground"
-                        // (Game View only) publishes it EVERY frame Game
-                        // View is active, but it is only genuinely CONSUMED
-                        // on the rare frame a replay capture is serviced.
-                        // Fetching it unconditionally here (regardless of
-                        // whether the "if" block below ends up using it)
-                        // marks the slot as fetched, so
-                        // ReportUnusedPublishesIfAny() below never flags a
-                        // legitimate "not every frame needs this" hand-off
-                        // as a dangling one - confirmed via a live run of
-                        // this exact phase's own build catching the
-                        // spurious "never fetched this frame" log spam
-                        // before this fix.
-                        const std::optional<std::function<void(VkCommandBuffer)>> gameSkyBackgroundCallbackForReplay =
-                            blackboard.Fetch<std::function<void(VkCommandBuffer)>>(kGameSkyBackgroundCallbackKey);
-#ifndef NDEBUG
-                        blackboard.ReportUnusedPublishesIfAny();
-#endif
-
-                        std::vector<rg::TextureHandle> outputs = std::move(frame.finalTextureOutputs);
-
-                        // task_manager/frame-debugger-7 campaign, PHASE3
-                        // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md,
-                        // Step 3.5) - render-pass-3 campaign, PHASE3 (Step
-                        // 3.7) - AddFrameDebuggerReplayPasses()'s existing
-                        // call site (Locked Design Decision 4 - kept
-                        // UNMIGRATED, called directly, exactly as before)
-                        // moves to HERE, AFTER DeclareInto() returns -
-                        // `blackboard`/`frame` are still ordinary Run()
-                        // locals, still in scope, so this Fetch()es the
-                        // Game View's own GPU Skinning buffers/sky-
-                        // background callback the now-migrated
-                        // "GpuSkinning"/"DrawSkyBackground" providers
-                        // already published onto THIS SAME frame's
-                        // blackboard - this also naturally satisfies the
-                        // pre-existing ordering requirement (replay passes
-                        // declared AFTER "RenderOpaque"/"DrawSkyBackground"/
-                        // "RenderTransparent") for free, since DeclareInto()'s
-                        // own final, sorted loop has already fully returned.
-                        if (gameTarget != nullptr && frameDebuggerCapture != nullptr
-                            && m_editorLayer->ConsumePendingFrameDebuggerReplayRequest()) {
-                            const std::vector<rg::BufferHandle> gpuSkinningBuffersForReplay =
-                                blackboard.Fetch<std::vector<rg::BufferHandle>>(kGpuSkinningOutputsKey)
-                                    .value_or(std::vector<rg::BufferHandle>{});
-                            const std::function<void(VkCommandBuffer)> recordGameSkyBackground =
-                                gameSkyBackgroundCallbackForReplay.value_or(std::function<void(VkCommandBuffer)>{});
-                            const std::size_t objectCount = m_game.CountGameViewDrawCommandsThisFrame();
-                            // IMPORTANT, CORRECTNESS-CRITICAL (see
-                            // RenderPasses.h's own updated doc comment on
-                            // AddFrameDebuggerReplayPasses()) - every
-                            // returned destination TextureHandle MUST be
-                            // appended to `outputs`, or
-                            // RenderGraphCompiler::Compile()'s own
-                            // backward-reachability culling scan silently
-                            // culls every one of these N passes.
-                            const std::vector<rg::TextureHandle> replayStepHandles =
-                                AddFrameDebuggerReplayPasses(b, m_game, m_renderer, gameAspectForReplay, objectCount,
-                                    gpuSkinningBuffersForReplay, recordGameSkyBackground, *gameTarget,
-                                    *frameDebuggerCapture);
-                            for (const rg::TextureHandle& replayHandle : replayStepHandles) {
-                                outputs.push_back(replayHandle);
-                            }
-                        }
-
-                        // Phase 7 of the compute-shader campaign
-                        // (COMPUTE_PHASE7_VALIDATION_TESTING_TOOLING_STRATEGY_v2.md)
-                        // - the texture-side validation workload's own
-                        // still-unmigrated call site (Locked Design Decision
-                        // 4 - never touched by this campaign). Declared (and
-                        // this handle added to `outputs`) only when the
-                        // Editor's own "Show Compute Blur (debug)" toggle is
-                        // on and "Scene" is visible; std::nullopt (always the
-                        // case for NullEditorLayer) means nothing was
-                        // declared at all this call.
-                        if (sceneVisibleForBlurValidation) {
-                            if (const std::optional<rg::TextureHandle> blurHandle = m_editorLayer->AddBlurValidationPass(
-                                    b, m_renderer, sceneColorHandleForBlurValidation, sceneExtentForBlurValidation)) {
-                                outputs.push_back(*blurHandle);
-                            }
-                        }
-
-                        // task_manager/mrt-1 campaign, PHASE4
-                        // (PHASE4_GBUFFER_VALIDATION_PASS_AND_SHADER.md) -
-                        // this campaign's own first real MRT consumer's
-                        // still-unmigrated call site (mirrors the Compute
-                        // Blur Validation call site immediately above -
-                        // Locked Design Decision 4, PHASE0_MASTER_STRATEGY.md
-                        // - never migrated onto the RenderPipeline provider
-                        // system). Reuses sceneExtentForBlurValidation/
-                        // sceneVisibleForBlurValidation as-is - both already
-                        // describe exactly "is the Scene panel visible this
-                        // frame, and what size is it", the same real input
-                        // this pass needs (it reads no Scene View texture at
-                        // all - see GBufferValidation.h's own header
-                        // comment - so it has no use for
-                        // sceneColorHandleForBlurValidation). Declared (and
-                        // every one of its 3 handles added to `outputs`)
-                        // only when the Editor's own "Show GBuffer
-                        // Validation (debug)" toggle is on and "Scene" is
-                        // visible; std::nullopt (always the case for
-                        // NullEditorLayer) means nothing was declared at all
-                        // this call.
-                        if (sceneVisibleForBlurValidation) {
-                            if (const std::optional<GBufferValidationHandles> gbufferHandles =
-                                    m_editorLayer->AddGBufferValidationPass(
-                                        b, m_renderer, sceneExtentForBlurValidation)) {
-                                outputs.push_back(gbufferHandles->albedo);
-                                outputs.push_back(gbufferHandles->normal);
-                                outputs.push_back(gbufferHandles->visualized);
-                            }
-                        }
-
-                        return outputs;
-                    });
-
-                // GPU-Driven Frustum Culling + Indirect Draw campaign
-                // (render-pass-5), PHASE6 (task_manager/render-pass-5/
-                // PHASE6_EDITOR_TOOLING_AND_LIVE_VALIDATION.md, Section 3.1)
-                // - copies each eligible batch's own atomic visible-count
-                // buffer into its persistent, host-visible
-                // countReadbackBuffer (GpuDrivenBatchCache::Entry), so this
-                // frame's real "instances culled" number can be read back
-                // moments later (see the ReadLastKnownVisibleCount() call
-                // site below, right after EndOffscreenRenderGraphRecording()
-                // returns) with NO new GPU wait. Issued as RAW commands
-                // directly against `offscreenCmd`, OUTSIDE the render
-                // graph's own declarative pass system entirely - NOT as a
-                // 4th "<batch> CopyCountForReadback" render-graph pass,
-                // because a pass whose only write is a plain BufferHandle
-                // can NEVER survive RenderGraphCompiler::Compile()'s own
-                // backward-reachability culling (confirmed by direct
-                // re-read of RenderGraphCompiler.cpp's Step 2: a Buffer
-                // write is never treated as a culling "root", unlike a
-                // Texture/VolumeTexture write - this was tried first, and
-                // empirically confirmed silently culled every frame, always
-                // reading back a stale/zero value despite the Game View
-                // itself rendering correctly). Recorded here - AFTER every
-                // real pass this call declared has already been recorded
-                // into `offscreenCmd` (so Culling's own atomicAdd writes are
-                // already sequenced earlier in the SAME command buffer) and
-                // BEFORE m_renderer.EndOffscreenRenderGraphRecording() below
-                // submits+fence-waits it - with an explicit
-                // ComputeShaderWrite -> TransferRead pipeline barrier
-                // immediately before each copy (the automatic barrier the
-                // render graph already inserted for "<batch> IndirectDraw"'s
-                // own IndirectCommandRead access does NOT also grant
-                // visibility for a completely different access kind/stage
-                // like this one - a fresh, explicit barrier is required for
-                // correctness, not just for validation-layer silence).
-                for (const GpuDrivenBatchRenderData& batch : m_gpuDrivenBatchesThisFrame) {
-                    const GpuDrivenBatchKey copyKey{ batch.mesh, batch.originalPipeline };
-                    const GpuDrivenBatchCache::Entry* entry = m_gpuDrivenBatchCache.TryGet(copyKey);
-                    if (entry == nullptr) {
-                        continue; // Defensive - this same key's entry was resolved successfully this frame.
-                    }
-
-                    VkBufferMemoryBarrier2 preCopyBarrier{};
-                    preCopyBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
-                    preCopyBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-                    preCopyBarrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT;
-                    preCopyBarrier.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
-                    preCopyBarrier.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
-                    preCopyBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-                    preCopyBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-                    preCopyBarrier.buffer = batch.countBufferNative;
-                    preCopyBarrier.offset = 0;
-                    preCopyBarrier.size = sizeof(std::uint32_t);
-
-                    VkDependencyInfo preCopyDependency{};
-                    preCopyDependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-                    preCopyDependency.bufferMemoryBarrierCount = 1;
-                    preCopyDependency.pBufferMemoryBarriers = &preCopyBarrier;
-                    vkCmdPipelineBarrier2(offscreenCmd, &preCopyDependency);
-
-                    VkBufferCopy region{};
-                    region.srcOffset = 0;
-                    region.dstOffset = 0;
-                    region.size = sizeof(std::uint32_t);
-                    vkCmdCopyBuffer(
-                        offscreenCmd, batch.countBufferNative, entry->countReadbackBuffer.Native(), 1, &region);
-                }
-
-                // Manual finalize: transitions whichever of Game/Scene were
-                // actually rendered this call from ColorAttachmentWrite to a
-                // real ShaderRead layout, for Dear ImGui's own (render-
-                // graph-external) descriptor set to sample during the
-                // Present regime call below - see RenderPasses.h's own doc
-                // comment on FinalizeRenderTextureForExternalSampling().
-                if (gameTarget != nullptr) {
-                    FinalizeRenderTextureForExternalSampling(offscreenCmd, *gameTarget);
-                    // network-impl-4 campaign, Phase 3 - keeps the debug-texture registry's
-                    // OWN idea of "GameView"'s current color state correct across this
-                    // graph-external manual transition - see PHASE0_MASTER_STRATEGY.md's
-                    // Locked Design Decision 7. Must use the EXACT same ResourceState
-                    // FinalizeRenderTextureForExternalSampling() itself just transitioned
-                    // to (ShaderRead) - re-derive via the same rg::RequiredStateFor() call,
-                    // never hand-guessed.
-                    m_renderGraph.NotifyDebugTextureStateOverride(
-                        "GameView", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
-
-                    // Atmosphere Scattering + Aerial Perspective campaign,
-                    // Phase 7 - the FIFTH NotifyDebugTextureStateOverride()
-                    // call site (see AGENTS.md's "Named Texture Capture"
-                    // section - not yet updated there, per this campaign's
-                    // own workflow rule that only Phase 9 touches
-                    // AGENTS.md/README.md/TODO.md): finalizes
-                    // "GameViewComposited" for external (ImGui/
-                    // `/get_game_view`/`/get_texture`) sampling, then hands
-                    // the Editor a stable pointer to it so "Game" displays
-                    // the atmosphere-composited output PERMANENTLY from now
-                    // on (see IEditorLayer::SetGameViewCompositedTexture()).
-                    m_atmosphereLutRenderer.FinalizeAerialPerspectiveCompositeForSampling(
-                        offscreenCmd, "GameViewComposited");
-                    m_renderGraph.NotifyDebugTextureStateOverride(
-                        "GameViewComposited", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
-                    m_editorLayer->SetGameViewCompositedTexture(m_atmosphereLutRenderer.CompositedOutput("GameViewComposited"));
-                }
-                if (sceneTarget != nullptr) {
-                    FinalizeRenderTextureForExternalSampling(offscreenCmd, *sceneTarget);
-                    m_renderGraph.NotifyDebugTextureStateOverride(
-                        "SceneView", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
-
-                    // Same "SceneViewComposited" treatment as "GameViewComposited"
-                    // above, for the Scene view.
-                    m_atmosphereLutRenderer.FinalizeAerialPerspectiveCompositeForSampling(
-                        offscreenCmd, "SceneViewComposited");
-                    m_renderGraph.NotifyDebugTextureStateOverride(
-                        "SceneViewComposited", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
-                    m_editorLayer->SetSceneViewCompositedTexture(m_atmosphereLutRenderer.CompositedOutput("SceneViewComposited"));
-                }
-                // Phase 7 of the compute-shader campaign - finalizes the
-                // blurred-output texture for external (ImGui) sampling too,
-                // a safe no-op whenever AddBlurValidationPass() above
-                // didn't actually declare a pass this call - see
-                // IEditorLayer::FinalizeBlurValidationForSampling()'s own
-                // doc comment.
-                m_editorLayer->FinalizeBlurValidationForSampling(offscreenCmd);
-                // network-impl-4 campaign, Phase 3 - the "BlurredSceneOutput" correction
-                // (Locked Design Decision 7's third of four call sites). Unlike GameView/
-                // SceneView above, Application.cpp has NO visibility into whether
-                // ComputeBlurValidation::FinalizeForSampling() actually did anything this
-                // call (that is tracked purely internally, via its own private
-                // m_writtenThisFrame flag - see ComputeBlurValidation.h's own doc comment
-                // on why) - so this call is made UNCONDITIONALLY, every frame, rather than
-                // guarded by an `if`. This is safe: RenderGraphDebugTextureRegistry::
-                // ApplyColorStateOverride() (Phase 1) is a documented no-op when
-                // "BlurredSceneOutput" isn't a currently-known name (the debug-blur toggle
-                // has never been turned on this session), and idempotent (harmless) when
-                // it's already correctly ShaderRead from an earlier frame's correction -
-                // there is no code path where calling this "too often" produces a wrong
-                // result.
-                m_renderGraph.NotifyDebugTextureStateOverride(
-                    "BlurredSceneOutput", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
-
-                // task_manager/mrt-1 campaign, PHASE4 - the campaign's own
-                // first real MRT consumer's finalize call, mirroring
-                // FinalizeBlurValidationForSampling() above exactly (a safe
-                // no-op whenever AddGBufferValidationPass() didn't actually
-                // declare a pass this call - tracked purely internally by
-                // GBufferValidation's own private m_writtenThisFrame flag).
-                m_editorLayer->FinalizeGBufferValidationForSampling(offscreenCmd);
-                // Same unconditional-correction reasoning as
-                // "BlurredSceneOutput" immediately above, applied to all
-                // three of this pass's own real, independently-named
-                // outputs.
-                m_renderGraph.NotifyDebugTextureStateOverride(
-                    "GBufferAlbedo", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
-                m_renderGraph.NotifyDebugTextureStateOverride(
-                    "GBufferNormal", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
-                m_renderGraph.NotifyDebugTextureStateOverride(
-                    "GBufferVisualized", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
-
-                m_renderer.EndOffscreenRenderGraphRecording();
-
-                // GPU-Driven Frustum Culling + Indirect Draw campaign
-                // (render-pass-5), PHASE6 (task_manager/render-pass-5/
-                // PHASE6_EDITOR_TOOLING_AND_LIVE_VALIDATION.md, Section 3.1)
-                // - reads back this frame's real "instances culled" count
-                // for every eligible batch RIGHT HERE, immediately after
-                // EndOffscreenRenderGraphRecording() returns - the exact
-                // point every buffer this frame's "<batch> CopyCountForReadback"
-                // pass wrote is already fence-proven complete (see
-                // FramePresenter::EndOffscreenRecording()'s own
-                // vkWaitForFences() call) - reusing that ALREADY-HAPPENING
-                // wait, never adding a new one (AGENTS.md, "Profiling").
-                // Game-View-only (m_gpuDrivenBatchesThisFrame is only ever
-                // non-empty when gameTarget != nullptr - Locked Design
-                // Decision 11).
-                for (const GpuDrivenBatchRenderData& batch : m_gpuDrivenBatchesThisFrame) {
-                    const GpuDrivenBatchKey key{ batch.mesh, batch.originalPipeline };
-                    GpuDrivenBatchDebugInfo info;
-                    info.batchName = (batch.displayName != nullptr) ? batch.displayName : "(unnamed batch)";
-                    info.instanceCount = static_cast<std::uint32_t>(batch.instanceCount);
-                    info.visibleCount = m_gpuDrivenBatchCache.ReadLastKnownVisibleCount(key);
-                    m_gpuDrivenBatchDebugInfoLastFrame.push_back(info);
-                }
-
-                // network-impl-2 campaign, Phase 3
-                // (PHASE3_GAME_VIEW_CAPTURE_AND_GET_GAME_VIEW_ENDPOINT.md) -
-                // the SUCCESS-path capture. Guarded by `gameTarget !=
-                // nullptr`, which only evaluates true on a frame where this
-                // whole enclosing `if` block already ran (see this method's
-                // own gameTarget/sceneTarget computation above) - so
-                // EndOffscreenRenderGraphRecording() above is guaranteed to
-                // have already run this frame too. CaptureRenderTexturePixels()
-                // uses its OWN separate ImmediateSubmit() call (a fresh
-                // command buffer/fence) - never `offscreenCmd`, which is
-                // already ended/submitted by the call just above.
-                //
-                // Atmosphere Scattering + Aerial Perspective campaign,
-                // Phase 7 - captures "GameViewComposited" (the atmosphere-
-                // composited output) instead of the original, pre-composite
-                // `*gameTarget`, now that it's PERMANENTLY what the Game
-                // View actually displays - see this phase's own completion
-                // report's explicit flag that every subsequent capture
-                // includes the atmosphere effect. Falls back to `gameTarget`
-                // itself only in the (should-be-unreachable, since the
-                // composite pass above always runs whenever gameTarget !=
-                // nullptr) case the composited texture somehow doesn't
-                // exist yet, so a capture request is never silently dropped.
-                if (gameTarget != nullptr && m_captureBridge.IsCaptureRequested(FrameCaptureKind::GameView)) {
-                    RenderTexture* captureSource = m_atmosphereLutRenderer.CompositedOutput("GameViewComposited");
-                    if (captureSource == nullptr) {
-                        captureSource = gameTarget;
-                    }
-                    Renderer::CapturedRawPixels raw = m_renderer.CaptureRenderTexturePixels(*captureSource);
-                    if (IsBgraFormat(raw.format)) {
-                        Encoding::ConvertBgraToRgbaInPlace(raw.pixels.data(), raw.width, raw.height);
-                    }
-                    std::vector<std::uint8_t> png = Encoding::EncodeRgba8ToPng(raw.pixels.data(), raw.width, raw.height);
-                    m_captureBridge.FulfillPendingRequest(FrameCaptureKind::GameView,
-                        CapturedPngImage{ std::move(png), raw.width, raw.height });
-                }
-
-                // B.1 (B1_REAL_GPU_TIMING_STRATEGY_v1.md) - must run
-                // immediately after EndOffscreenRenderGraphRecording()
-                // returns (i.e. after that call's own fence wait has
-                // already completed) - reads back every real GPU
-                // timestamp written during the SynchronousImmediateReadback
-                // Execute() call just above, for whichever of "GameView"/
-                // "SceneView" actually ran this frame.
-                m_renderGraph.FinalizeSynchronousGpuTiming();
-            } catch (const std::exception& e) {
-                std::fprintf(stderr, "RenderGraph offscreen Execute() failed: %s\n", e.what());
-                assert(false && "RenderGraph offscreen Execute() threw - see stderr");
+        if (gameTargetThisFrame != nullptr && m_captureBridge.IsCaptureRequested(FrameCaptureKind::GameView)) {
+            // Atmosphere Scattering + Aerial Perspective campaign,
+            // Phase 7 - captures "GameViewComposited" (the atmosphere-
+            // composited output) instead of the original, pre-composite
+            // render target, now that it's PERMANENTLY what the Game
+            // View actually displays. Falls back to `gameTargetThisFrame`
+            // itself only in the (should-be-unreachable) case the
+            // composited texture somehow doesn't exist yet.
+            RenderTexture* captureSource = m_atmosphereLutRenderer.CompositedOutput("GameViewComposited");
+            if (captureSource == nullptr) {
+                captureSource = gameTargetThisFrame;
             }
-        }
-
-        // Not #if GTE_ENABLE_PROFILER-gated - see AGENTS.md's "Profiling"
-        // section and this same function's own BeginFrame()/EndFrame()
-        // calls, which aren't gated either. "RenderOpaque"/"DrawSkyBackground"/
-        // "RenderTransparent" must match RenderPasses.cpp's own pass name
-        // literals exactly.
-        //
-        // Render Pass campaign, PHASE2 - Profiling::GpuPass::GameView used to
-        // read a single "GameView" pass's own LastKnownStatsFor() before this
-        // campaign split it into three real, separate passes
-        // ("RenderOpaque"/"DrawSkyBackground"/"RenderTransparent" - see
-        // RenderPasses.h). CombinePassGpuStats() (RenderGraphSnapshot.h) sums
-        // all three passes' own stats into one aggregate before handing it to
-        // SetGpuPassDrawStats()/SetGpuPassTiming(), so the sky draw's own
-        // real vkCmdDraw() call is now correctly counted too - previously
-        // undercounted by exactly one draw call (see
-        // docs/conventions/frame-debugger.md's frame-debugger-8 section).
-        // "RenderTransparent" contributes nothing today (it is a genuine
-        // no-op - LastKnownStatsFor() safely returns a default, all-zero
-        // PassGpuStats{} for a pass name that was never declared this frame),
-        // but is included here so this call site needs no further changes
-        // once a future transparency campaign gives it real stats.
-        //
-        // render-pass-3 campaign, PHASE3 - KNOWN, DOCUMENTED LIMITATION:
-        // Scene View's own opaque/sky/transparent passes are now ALSO real,
-        // separate PassRecords named "RenderOpaque"/"DrawSkyBackground"/
-        // "RenderTransparent" (Step 3.4 - the same literal names Game View's
-        // own copies use, by this phase's own explicit design). `RenderGraph::
-        // LastKnownStatsFor()`/its own private `m_lastKnownStats` table is
-        // keyed PURELY by pass NAME (RenderGraph.cpp's `UpdateDrawStatsFor()`/
-        // `UpdateTimingFor()`), with NO ViewScope disambiguation - a real,
-        // pre-existing limitation of that mechanism that simply never
-        // mattered before this phase, since no two passes ever shared an
-        // identical literal name within one frame until now. The practical
-        // effect: whichever of Game/Scene View's own same-named pass EXECUTES
-        // LAST this frame (Scene's, given this phase's own per-view provider
-        // loop order) overwrites the other's entry, so
-        // `Profiling::GpuPass::GameView`'s draw-call/triangle-count/timing
-        // numbers below will silently read as SCENE View's own numbers
-        // whenever BOTH panels are visible simultaneously (a Profiler-panel
-        // display-only cosmetic issue - never a rendering-correctness one).
-        // Fixing this for real would mean teaching RenderGraph.cpp's own
-        // by-name lookup to also consider ViewScope, a genuine RenderGraph.cpp
-        // core change deliberately out of scope for this already-heaviest
-        // migration phase - flagged explicitly here and in this phase's own
-        // completion report as a known follow-up for a future phase/campaign.
-        if (gameTarget != nullptr) {
-            const rg::PassGpuStats gameViewStats = rg::CombinePassGpuStats({
-                m_renderGraph.LastKnownStatsFor("RenderOpaque"),
-                m_renderGraph.LastKnownStatsFor("DrawSkyBackground"),
-                m_renderGraph.LastKnownStatsFor("RenderTransparent"),
-            });
-            Profiling::FrameProfiler::Instance().SetGpuPassDrawStats(Profiling::GpuPass::GameView,
-                Profiling::GpuSampleStatus::Present, gameViewStats.drawStats.drawCallCount,
-                gameViewStats.drawStats.triangleCount);
-            Profiling::FrameProfiler::Instance().SetGpuPassTiming(Profiling::GpuPass::GameView,
-                ToProfilingGpuSampleStatus(gameViewStats.timing.status), gameViewStats.timing.milliseconds);
-        }
-        if (sceneTarget != nullptr) {
-            // render-pass-3 campaign, PHASE3 - "SceneView" (the old, single,
-            // fused pass) no longer exists (Step 3.4) - Scene's own stats are
-            // now aggregated the SAME way Game View's are, from its own
-            // (same-named, see the KNOWN LIMITATION note above)
-            // "RenderOpaque"/"DrawSkyBackground"/"RenderTransparent" passes.
-            const rg::PassGpuStats sceneViewStats = rg::CombinePassGpuStats({
-                m_renderGraph.LastKnownStatsFor("RenderOpaque"),
-                m_renderGraph.LastKnownStatsFor("DrawSkyBackground"),
-                m_renderGraph.LastKnownStatsFor("RenderTransparent"),
-            });
-            Profiling::FrameProfiler::Instance().SetGpuPassDrawStats(Profiling::GpuPass::SceneView,
-                Profiling::GpuSampleStatus::Present, sceneViewStats.drawStats.drawCallCount,
-                sceneViewStats.drawStats.triangleCount);
-            Profiling::FrameProfiler::Instance().SetGpuPassTiming(Profiling::GpuPass::SceneView,
-                ToProfilingGpuSampleStatus(sceneViewStats.timing.status), sceneViewStats.timing.milliseconds);
+            Renderer::CapturedRawPixels raw = m_renderer.CaptureRenderTexturePixels(*captureSource);
+            if (IsBgraFormat(raw.format)) {
+                Encoding::ConvertBgraToRgbaInPlace(raw.pixels.data(), raw.width, raw.height);
+            }
+            std::vector<std::uint8_t> png = Encoding::EncodeRgba8ToPng(raw.pixels.data(), raw.width, raw.height);
+            m_captureBridge.FulfillPendingRequest(FrameCaptureKind::GameView,
+                CapturedPngImage{ std::move(png), raw.width, raw.height });
         }
 
         // Build every editor panel (Hierarchy/Inspector/Scene/Game/Memory/menu
@@ -2134,11 +599,17 @@ int Application::Run()
         // "Create 3D Object" menu spawns entities via
         // Game::CreatePrimitiveEntity() - see IEditorLayer::BuildUI()) and
         // Renderer itself (Memory - see Renderer::GetMemoryTotals()/
-        // GetMemoryResources()).
+        // GetMemoryResources()). HOST-LEVEL (Locked Design Decision #8's
+        // second bucket) - stays directly on m_editorLayer.
+        // `m_core.GetGpuDrivenBatchDebugInfo()` (editor-core-separation-1
+        // campaign, PHASE13) reads the SAME per-frame readout
+        // Application::m_gpuDrivenBatchDebugInfoLastFrame used to be -
+        // physically relocated into Core together with the GPU-driven-batch
+        // orchestration that produces it (see Core.h's own doc comment).
         {
             GTE_PROFILE_SCOPE("IEditorLayer::BuildUI");
             m_editorLayer->BuildUI(m_game, m_renderer, m_renderGraph, m_atmosphereSettings, m_atmosphereLutRenderer,
-                m_gpuDrivenBatchDebugInfoLastFrame);
+                m_core.GetGpuDrivenBatchDebugInfo());
         }
 
         // File > Exit (or any other future programmatic "close" UI action)
@@ -2149,7 +620,7 @@ int Application::Run()
 
         // network-impl-2 campaign, Phase 5
         // (PHASE5_GET_SWAPCHAIN_ENDPOINT_AND_FORMAT_NEGOTIATION_REUSE.md) -
-        // must run BEFORE PresentViaRenderGraph() below so
+        // must run BEFORE Core::Present() below so
         // SwapchainCaptureService::RecordCaptureIfRequested() (Phase 4) sees
         // m_captureRequested == true in time this frame. Unconditional, at
         // Run()'s own top-level body (never nested inside an
@@ -2163,89 +634,30 @@ int Application::Run()
         if (m_captureBridge.IsCaptureRequested(FrameCaptureKind::Swapchain)) {
             m_renderer.RequestSwapchainCapture();
         }
-        // Call 2 of 2: the PIPELINED swapchain-present regime - Present
-        // alone. In an Editor build this draws the editor's own ImGui
-        // chrome (which itself displays the Game/Scene views above) via the
-        // recordImGui hook; in a release build (or the rare Editor edge
-        // case where both "Game"/"Scene" are simultaneously hidden) it ALSO
-        // renders Game directly into the swapchain first - see
-        // RenderPasses.h's AddPresentPass().
-        {
-            GTE_PROFILE_SCOPE("Renderer::PresentViaRenderGraph");
-            const bool needsDirectGameRender = (gameTarget == nullptr && sceneTarget == nullptr);
-            const std::optional<float> directGameRenderAspect = needsDirectGameRender
-                ? std::optional<float>(AspectRatioOf(m_windowWidth, m_windowHeight))
-                : std::nullopt;
 
-            std::optional<DrawStats> presentStats;
-            try {
-                presentStats = m_renderer.PresentViaRenderGraph(m_renderGraph, needsDirectGameRender,
-                    [&](rg::RenderGraphBuilder& b, rg::TextureHandle swapchainImage) {
-                        // render-pass-3 campaign, PHASE3 (Step 3.5) -
-                        // "Present" now goes through m_presentRenderPipeline
-                        // instead of a direct AddGpuSkinningPasses()/
-                        // AddPresentPass() call pair - populate the small set
-                        // of per-frame members its ONE registered provider
-                        // reads (RegisterPresentRenderPipelineProvider()),
-                        // then drive its own SEPARATE
-                        // RenderPassBlackboard/RenderPassFrameContext -
-                        // NEVER shared with the offscreen regime's own
-                        // blackboard/frame context this same frame (Locked
-                        // Design Decision 6).
-                        m_needsDirectGameRenderThisFrame = needsDirectGameRender;
-                        m_directGameRenderAspectThisFrame = directGameRenderAspect;
-                        m_swapchainImageThisFrame = swapchainImage;
-                        m_recordImGuiThisFrame = [this](VkCommandBuffer cmd) { m_editorLayer->Render(cmd); };
+        // editor-core-separation-1 campaign, PHASE13 - Call 2 of 2: the
+        // PIPELINED swapchain-present regime, now entirely inside
+        // Core::Present() - in an Editor build this draws the editor's own
+        // ImGui chrome (which itself displays the Game/Scene views above)
+        // via the recordImGui hook Application supplied at construction time
+        // (Core::SetPresentImGuiRecorder()); in a release build (or the rare
+        // Editor edge case where both "Game"/"Scene" are simultaneously
+        // hidden) it ALSO renders Game directly into the swapchain first -
+        // see RenderPasses.h's AddPresentPass() and Core.cpp.
+        m_core.Present();
 
-                        rg::RenderPassBlackboard presentBlackboard;
-                        presentBlackboard.BeginFrame();
-                        rg::RenderPassFrameContext presentFrame{
-                            {}, rg::RenderViewId::Shared(), presentBlackboard, b, {}, {}
-                        };
-                        m_presentRenderPipeline.DeclareInto(b, presentFrame);
-#ifndef NDEBUG
-                        presentBlackboard.ReportUnusedPublishesIfAny();
-#endif
-                        return std::vector<rg::TextureHandle>{ swapchainImage };
-                    });
-            } catch (const std::exception& e) {
-                std::fprintf(stderr, "RenderGraph Present Execute() failed: %s\n", e.what());
-                assert(false && "RenderGraph Present Execute() threw - see stderr");
+        // network-impl-2 campaign, Phase 5 - the FrameCaptureBridge
+        // success-path capture for the swapchain - HOST-LEVEL AUTOMATION,
+        // RELOCATED to run right AFTER Present() returns (safe - Present()'s
+        // own Renderer::PresentViaRenderGraph() call already fence-waits
+        // before returning) - see PHASE13_COMPLETION_REPORT.md.
+        if (std::optional<CapturedSwapchainPixels> raw = m_renderer.TakeLastCompletedSwapchainCapture()) {
+            if (IsBgraFormat(raw->format)) {
+                Encoding::ConvertBgraToRgbaInPlace(raw->pixels.data(), raw->width, raw->height);
             }
-
-            // network-impl-2 campaign, Phase 5
-            // (PHASE5_GET_SWAPCHAIN_ENDPOINT_AND_FORMAT_NEGOTIATION_REUSE.md) -
-            // checked unconditionally right after PresentViaRenderGraph()
-            // returns, whether or not it actually recorded/returned a value
-            // this frame (a capture requested several frames ago may
-            // complete on a frame whose own new Present pass was itself
-            // skipped for an unrelated reason) - TakeLastCompletedSwapchainCapture()
-            // is a cheap std::exchange() either way. Mirrors Phase 3's own
-            // Game-view success-path capture shape exactly (BGRA->RGBA
-            // conversion, then PNG encode, then FulfillPendingRequest()).
-            if (std::optional<CapturedSwapchainPixels> raw = m_renderer.TakeLastCompletedSwapchainCapture()) {
-                if (IsBgraFormat(raw->format)) {
-                    Encoding::ConvertBgraToRgbaInPlace(raw->pixels.data(), raw->width, raw->height);
-                }
-                std::vector<std::uint8_t> png = Encoding::EncodeRgba8ToPng(raw->pixels.data(), raw->width, raw->height);
-                m_captureBridge.FulfillPendingRequest(FrameCaptureKind::Swapchain,
-                    CapturedPngImage{ std::move(png), raw->width, raw->height });
-            }
-
-            if (presentStats.has_value()) {
-                Profiling::FrameProfiler::Instance().SetGpuPassDrawStats(Profiling::GpuPass::Present,
-                    Profiling::GpuSampleStatus::Present, presentStats->drawCallCount, presentStats->triangleCount);
-                // "Present" must match RenderPasses.cpp's own
-                // AddPresentPass() pass name literal exactly.
-                const GpuTimingSample presentTiming = m_renderGraph.LastKnownStatsFor("Present").timing;
-                Profiling::FrameProfiler::Instance().SetGpuPassTiming(Profiling::GpuPass::Present,
-                    ToProfilingGpuSampleStatus(presentTiming.status), presentTiming.milliseconds);
-            }
-            // else: PresentViaRenderGraph() recorded nothing this frame
-            // (minimized window, pending resize, or a just-recreated
-            // swapchain) - GpuPass::Present's countStatus AND timingStatus
-            // both correctly stay at their default GpuSampleStatus::Absent,
-            // with no extra code needed.
+            std::vector<std::uint8_t> png = Encoding::EncodeRgba8ToPng(raw->pixels.data(), raw->width, raw->height);
+            m_captureBridge.FulfillPendingRequest(FrameCaptureKind::Swapchain,
+                CapturedPngImage{ std::move(png), raw->width, raw->height });
         }
 
         // Update/present any panel the user has dragged outside the main OS
@@ -2254,7 +666,8 @@ int Application::Run()
         // Deliberately AFTER the main swapchain Present() above: each such
         // window owns its own, completely independent Vulkan swapchain, so
         // there is no ordering requirement against the main window's own
-        // present - see IEditorLayer::RenderPlatformWindows().
+        // present - see IEditorLayer::RenderPlatformWindows(). HOST-LEVEL
+        // (Locked Design Decision #8's second bucket).
         m_editorLayer->RenderPlatformWindows();
 
         // network-impl-4 campaign, Phase 4
@@ -2487,14 +900,14 @@ int Application::Run()
         // inside this BeginFrame()/EndFrame() bracket) so it reflects
         // every resource created/destroyed anywhere this frame, including
         // by IEditorLayer::BuildUI()'s own Inspector/Project-panel asset
-        // loading above. Unconditional - not #if GTE_ENABLE_PROFILER/
-        // GTE_ENABLE_EDITOR-gated, matching this same function's own
-        // BeginFrame()/EndFrame()/SetGpuPassDrawStats() calls, none of
-        // which are gated either (only GTE_PROFILE_SCOPE(...)'s own macro
-        // body is compile-time-gated - see AGENTS.md, "Profiling").
-        // Renderer::GetMemoryTotals() is O(1) and always meaningful (no
-        // "didn't run this frame" concept, unlike a GpuPass's draw-call
-        // count), so this is always GpuSampleStatus::Present.
+        // loading above. Unconditional - not #if GTE_ENABLE_PROFILER-gated,
+        // matching this same function's own BeginFrame()/EndFrame()/
+        // SetGpuPassDrawStats() calls, none of which are gated either (only
+        // GTE_PROFILE_SCOPE(...)'s own macro body is compile-time-gated -
+        // see AGENTS.md, "Profiling"). Renderer::GetMemoryTotals() is O(1)
+        // and always meaningful (no "didn't run this frame" concept, unlike
+        // a GpuPass's draw-call count), so this is always
+        // GpuSampleStatus::Present.
         Profiling::FrameProfiler::Instance().SetMemorySnapshot(BuildMemorySnapshot(m_renderer.GetMemoryTotals()));
 
         Profiling::FrameProfiler::Instance().EndFrame();

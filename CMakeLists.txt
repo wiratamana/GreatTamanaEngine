@@ -476,6 +476,7 @@ add_library(gte_core STATIC
     src/Renderer/Culling/CullingPipelines.cpp
     src/Renderer/Culling/GpuDrivenBatchCache.h
     src/Renderer/Culling/GpuDrivenBatchCache.cpp
+    src/Renderer/Culling/GpuDrivenBatchDebugInfo.h
     src/Renderer/IndirectDrawTypes.h
     src/Renderer/Atmosphere/AtmosphereTypes.h
     src/Renderer/Atmosphere/AtmosphereParameters.h

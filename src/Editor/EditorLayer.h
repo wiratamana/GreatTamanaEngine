@@ -4,6 +4,7 @@
 #include "../Math/Vec3.h"
 #include "../Renderer/Atmosphere/AtmosphereTypes.h"
 #include "../Renderer/RenderTexture.h"
+#include "../Renderer/Culling/GpuDrivenBatchDebugInfo.h"
 #include "../Renderer/RenderGraph/RenderGraphTypes.h"
 
 #include <cstdint>
@@ -155,33 +156,12 @@ struct FrameDebuggerStateSnapshotView {
 
 // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
 // PHASE6 (task_manager/render-pass-5/PHASE6_EDITOR_TOOLING_AND_LIVE_VALIDATION.md)
-// - one eligible batch's own "instances culled this frame" readout, ready
-// for RenderGraphPanel::Build() (the panel that already shows per-pass
-// draw-call/triangle stats) to display. Deliberately a plain, dependency-
-// free struct (mirrors TabActivationResult/GBufferValidationHandles'
-// own precedent above) - Application.cpp (the composition root) builds this
-// list fresh every frame, right after Renderer::EndOffscreenRenderGraphRecording()
-// returns (the exact point every buffer this frame's GPU-driven culling
-// dispatch wrote is already fence-proven complete - see
-// GpuDrivenBatchCache::ReadLastKnownVisibleCount()'s own doc comment for why
-// no NEW GPU wait is ever added to produce this number).
-struct GpuDrivenBatchDebugInfo {
-    // The same stable name shown in the Render Graph panel's own pass list
-    // (e.g. "GpuDrivenBatch0") - NOT a per-pass name (this one line covers
-    // all three/four of that batch's own passes at once).
-    std::string batchName;
-    // This frame's real, CPU-known instance count (the batch's own total
-    // size before culling) - always > 0 (a batch with zero instances is
-    // never collected at all - see RenderSystem::CollectGpuDrivenBatches()).
-    std::uint32_t instanceCount = 0;
-    // The GPU-computed "instances that survived frustum culling this frame"
-    // count, read back from the culling compute pass's own atomic visible-
-    // count buffer - std::nullopt only in the (should be unreachable in
-    // practice) case the readback buffer was never created for this batch
-    // yet (e.g. the very first frame this exact batch ever existed, before
-    // GpuDrivenBatchCache::EnsureCapacity() ever ran for it).
-    std::optional<std::uint32_t> visibleCount;
-};
+// - GpuDrivenBatchDebugInfo itself now lives in
+// src/Renderer/Culling/GpuDrivenBatchDebugInfo.h (editor-core-separation-1
+// campaign, PHASE13) - see that header's own doc comment for why (a plain,
+// dependency-free data type gte_core's own Core::BuildFrame() produces every
+// frame, only ever CONSUMED here via IEditorLayer::BuildUI()'s own trailing
+// parameter below).
 
 // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
 // PHASE6 - result of SpawnGpuDrivenTestBatch() below. Deliberately a plain,
