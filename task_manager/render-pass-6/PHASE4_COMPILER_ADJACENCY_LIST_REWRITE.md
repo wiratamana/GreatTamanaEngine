@@ -657,3 +657,99 @@ reading the actual diff and running the targeted compiler test suite itself
    and "at the very top" in the final diff).
 8. Overwrite this file (`PHASE4_COMPILER_ADJACENCY_LIST_REWRITE.md`) in
    place with any correction found — never create a new numbered file.
+
+## Double-check confirmation (dedicated post-landing review)
+
+A dedicated second reviewer re-verified this phase independently, by reading
+the actual diff/current source and by actually rebuilding and re-running the
+targeted `RenderGraphCompilerTests.cpp` suite — never by trusting
+`PHASE4_COMPLETION_REPORT.md`'s own claims alone. **Result: no correction
+needed — every claim in the completion report checked out.** Evidence,
+item by item (mirroring the 8-point checklist above):
+
+1. **Byte-identical `executionOrder`** — confirmed by actually building
+   (`cmake --build build --target GreatTamanaEngineTests`) and running
+   `tests\GreatTamanaEngineTests.exe --gtest_filter=RenderGraphCompiler*`
+   from a fresh session: **34/34 tests pass** (all 33 pre-existing
+   `RenderGraphCompilerTest` cases, byte-for-byte unmodified per `git show
+   4e24435`'s own diff — the diff only ever APPENDS new test cases after the
+   pre-existing ones, never touching a single pre-existing assertion — plus
+   1 new `RenderGraphCompilerDeathTest` case).
+2. **Duplicate-edge handling** — confirmed `addEdge()`'s `std::find()`-based
+   de-duplication is present and correctly reasoned: independently traced a
+   read-side duplicate (2 reads of the same resource resolving to the same
+   writer) AND a synthetic combined read+write scenario (3 dedup'd reads
+   feeding a downstream 2 dedup'd reads) through the in-degree/successor-list
+   bookkeeping by hand — every real edge is counted/decremented exactly
+   once, `inDegree` reaches 0 at the same logical moment either way, matching
+   both the plan's own self-consistency argument and the actually-chosen
+   de-duplicated design. The two dedicated new tests
+   (`PassWithTwoReadsOfSameResourceResolvingToSameEarlierWriterOrdersCorrectlyWithNoDuplicateEdgeIssues`/
+   `PassWithTwoWritesToDifferentResourcesSharingTheSameEarlierWriterOrdersCorrectlyWithNoDuplicateEdgeIssues`)
+   already cover both shapes and pass.
+3. **Standalone-function call site genuinely removed** — confirmed via
+   `git show 4e24435` and a direct grep of
+   `src/Renderer/RenderGraph/RenderGraphCompiler.cpp`/`.h`:
+   `DetectRenderPassEventContradictions` is only ever *defined* and
+   *documented*, never *called*, anywhere in `Compile()`'s own body. The
+   function's own definition (lines 49-134) and its five direct-call tests
+   (`NoReadsOrWritesProducesNoContradictions`,
+   `NormalWriterBeforeReaderProducesNoContradictions`,
+   `OrphanReadWithLaterWriterIsDetected`,
+   `EdgeContradictingDeclaredEventOrderIsDetected`,
+   `SameEventTierNeverProducesAContradiction`) fall entirely outside the
+   PHASE4 diff's touched line ranges — confirmed byte-for-byte unchanged
+   directly from `git show`, not merely assumed.
+4. **Self-exclusion guard** — verified LIVE, not just read: temporarily
+   edited `RenderGraphCompiler.cpp`'s `if (laterWriter != -1 && laterWriter
+   != i)` down to `if (laterWriter != -1)`, rebuilt, and re-ran
+   `SelfExclusionGuardPreventsFalsePositiveContradictionForSelfLoopReadWriteOfNeverOtherwiseWrittenResource`
+   in isolation — it crashed immediately with the expected
+   `fastContradictions.empty()` assert, stderr correctly naming `"DepthPass"`
+   as contradicting itself. Restored the guard, rebuilt, and re-ran the full
+   34-test targeted suite — all 34 passed again. The working tree is clean
+   (`git status`) after restoring, confirming no stray edit was left behind.
+5. **Fast-path/standalone equivalence test** — confirmed
+   `RenderGraphCompilerDeathTest.FastPathDetectsOrphanReadWithLaterWriterAndAbortsJustLikeTheStandaloneFunctionWould`
+   genuinely proves equivalence (not merely "doesn't crash"): it reproduces
+   the EXACT graph shape `OrphanReadWithLaterWriterIsDetected` already proves
+   the standalone function flags as a contradiction, then asserts `Compile()`
+   itself — driven entirely by the new inline fast path — DOES abort
+   (`EXPECT_DEATH`), which is the correct/only way to observe internal,
+   non-publicly-exposed `fastContradictions` state. Independently re-derived
+   the `DeclaredEventOrderDisagreesWithRealDependency`-unreachability claim
+   from first principles (not just re-read it): `Compile()`'s inline check
+   only ever resolves `writer != -1` from `lastXWriter`, which is only ever
+   set by a WAW write processed at a STRICTLY earlier `effectiveOrderPos`
+   than the current read's own pass (writes are processed after reads within
+   the same pass's own loop iteration, so a pass's own writes can never
+   supply its own reads' `writer` value) — and since `effectiveOrder` is a
+   stable sort ascending by `RenderPassEvent`, a strictly-earlier
+   `effectiveOrderPos` guarantees `writer.renderPassEvent <=
+   reader.renderPassEvent` (never `>`), so the
+   `DeclaredEventOrderDisagreesWithRealDependency` condition
+   (`writer.renderPassEvent > reader.renderPassEvent`) is mathematically
+   unreachable through the inline fast path — confirms the report's claim
+   exactly; no counter-example exists to construct.
+6. **No `default:` case, no new switch construct** — confirmed by grepping
+   `src/Renderer/RenderGraph/` for the literal string `default:`: every hit
+   is inside an explanatory comment about the "no default: case, ever"
+   convention itself, never an actual `case` label. (Note: by the time of
+   this review, PHASE6 had already landed and converted PHASE4's own
+   hand-rolled `switch (usage.kind)` blocks — the `firstXWriter` prescan and
+   the inline contradiction check — into calls to the shared
+   `DispatchByKind()` dispatcher; this is expected, already-anticipated
+   downstream evolution per PHASE6's own strategy doc, not a PHASE4 defect,
+   and does not change this item's answer.)
+7. **Stale-comment fixes** — confirmed by direct grep of
+   `src/Renderer/RenderGraph/`: `edgeExists` has exactly **one** hit
+   (`RenderGraphCompiler.cpp`, an explanatory comment describing what the OLD
+   code used to do), and `"at the very top"` has **zero** hits in
+   `RenderGraphCompiler.h`/`.cpp` (its only remaining hit anywhere in the
+   folder is an unrelated sentence in `RenderGraph.h` about GPU timing
+   readback, exactly as the completion report describes).
+8. This file is being overwritten in place with this exact section — no new
+   numbered file was created.
+
+No code changes were required as a result of this double-check; PHASE4's
+implementation is confirmed correct and complete as landed.
