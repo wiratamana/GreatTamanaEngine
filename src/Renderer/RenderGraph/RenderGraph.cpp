@@ -241,6 +241,249 @@ void RenderGraph::ApplyUsageBarrierIfNeeded(VkCommandBuffer cmd, const ResourceU
     }
 }
 
+// render-pass-6 campaign, PHASE2 (item 2.6) - extracted out of
+// ExecuteCompiledGraph() for readability, zero behavior change - see
+// PHASE2_EXECUTE_COMPILED_GRAPH_EXTRACTION.md. Builds the six resolver/
+// record callbacks a pass's own `execute` callback uses - identical
+// construction (same lambdas, same captures) to what used to be written
+// inline in ExecuteCompiledGraph()'s per-pass loop body.
+PassContext RenderGraph::BuildPassContext(VkCommandBuffer cmd, std::vector<PhysicalTexture>& physicalTextures,
+    std::vector<PhysicalBuffer>& physicalBuffers, std::vector<PhysicalVolumeTexture>& physicalVolumeTextures,
+    DrawStats& passDrawStats)
+{
+    PassContext ctx;
+    ctx.cmd = cmd;
+    // Resolves ANY texture handle already resolved this call - whether
+    // declared via ReadTexture() OR a compute pass's WriteTexture()
+    // (Phase 6 of the compute-shader campaign) - EnsureTextureResolved()
+    // above runs for every declared read AND write, so a write-only
+    // handle is just as resolvable here as a read one by the time a
+    // pass's own `execute` callback runs. `resolveReadTexture` is kept
+    // as the original name (nothing outside this file used it in
+    // production before Phase 6 - see PassContext's own doc comment in
+    // RenderGraph.h); `resolveTexture` is a plain alias with a name
+    // that no longer implies "reads only", for a compute pass rewriting
+    // its own descriptor set against a texture it WRITES.
+    ctx.resolveReadTexture = [&physicalTextures](TextureHandle handle) -> PassContext::ResolvedTexture {
+        if (handle.index < physicalTextures.size() && physicalTextures[handle.index].resolved) {
+            const PhysicalTexture& tex = physicalTextures[handle.index];
+            return PassContext::ResolvedTexture{ tex.target.imageView, tex.sampler };
+        }
+        return PassContext::ResolvedTexture{};
+    };
+    ctx.resolveTexture = ctx.resolveReadTexture;
+
+    // Phase 6 (COMPUTE_PHASE6_RENDERGRAPH_INTEGRATION_STRATEGY_v2.md) -
+    // the buffer sibling of resolveTexture() above, so a compute pass
+    // can rewrite its own ComputeDescriptorSet against a declared
+    // BufferHandle's CURRENT physical VkBuffer before dispatching.
+    ctx.resolveBuffer = [&physicalBuffers](BufferHandle handle) -> VkBuffer {
+        if (handle.index < physicalBuffers.size() && physicalBuffers[handle.index].resolved) {
+            return physicalBuffers[handle.index].buffer;
+        }
+        return VK_NULL_HANDLE;
+    };
+
+    // Atmosphere Scattering campaign, Phase 2
+    // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md) -
+    // the volume-texture sibling of resolveTexture()/resolveBuffer()
+    // above, same "resolve whatever was already resolved above" shape.
+    ctx.resolveVolumeTexture =
+        [&physicalVolumeTextures](VolumeTextureHandle handle) -> PassContext::ResolvedVolumeTexture {
+        if (handle.index < physicalVolumeTextures.size() && physicalVolumeTextures[handle.index].resolved) {
+            return PassContext::ResolvedVolumeTexture{ physicalVolumeTextures[handle.index].target.imageView };
+        }
+        return PassContext::ResolvedVolumeTexture{};
+    };
+
+    ctx.recordDraw = [&passDrawStats](bool hasIndexBuffer, std::uint32_t vertexCount, std::uint32_t indexCount) {
+        AccumulateDrawStats(passDrawStats, hasIndexBuffer, vertexCount, indexCount);
+    };
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE6 - see PassContext::recordIndirectDraw's own doc comment
+    // (RenderGraph.h) for why this is a separate callback from
+    // recordDraw() above.
+    ctx.recordIndirectDraw = [&passDrawStats]() { AccumulateIndirectDrawStats(passDrawStats); };
+
+    return ctx;
+}
+
+// render-pass-6 campaign, PHASE2 (item 2.6) - extracted out of
+// ExecuteCompiledGraph() for readability, zero behavior change - see
+// PHASE2_EXECUTE_COMPILED_GRAPH_EXTRACTION.md.
+std::vector<VkRenderingAttachmentInfo> RenderGraph::BuildColorAttachmentInfos(
+    const PassRecord& pass, const std::vector<PhysicalTexture>& physicalTextures,
+    std::vector<VkExtent2D>& outResolvedExtents) const
+{
+    // Multi-Render-Target (MRT) campaign (task_manager/mrt-1),
+    // PHASE2 - one VkRenderingAttachmentInfo PER declared color
+    // attachment, built in the EXACT order pass.colorAttachments
+    // holds them (== shader layout(location = N) out). A plain
+    // std::vector, sized once per pass, is consistent with this
+    // function's own existing allocation profile (e.g.
+    // physicalTextures/physicalBuffers above) - no fixed-capacity/
+    // small_vector convention exists elsewhere in this codebase to
+    // prefer instead.
+    std::vector<VkRenderingAttachmentInfo> colorAttachmentInfos;
+    colorAttachmentInfos.reserve(pass.colorAttachments.size());
+    outResolvedExtents.reserve(pass.colorAttachments.size());
+
+    for (const ColorAttachmentDesc& desc : pass.colorAttachments) {
+        // This handle was ALREADY resolved above, by the exact same
+        // generic `for (const ResourceUsage& usage : pass.writes)`
+        // barrier loop every pass already goes through, completely
+        // unchanged by this phase - WriteColorAttachment() (PHASE1)
+        // always pushes a matching ColorAttachmentWrite usage onto
+        // pass.writes in lockstep with pass.colorAttachments,
+        // specifically so this holds (see this file's own Step 2
+        // analysis in the PHASE2 strategy document). Asserted here
+        // defensively (cheap, debug-only) so a future regression
+        // that ever breaks that lockstep invariant fails LOUDLY,
+        // right here, instead of silently building a
+        // VkRenderingAttachmentInfo around a VK_NULL_HANDLE
+        // imageView that would otherwise only surface as a
+        // confusing validation-layer error deep inside
+        // vkCmdBeginRendering.
+        assert(desc.handle.index < physicalTextures.size() &&
+            physicalTextures[desc.handle.index].resolved &&
+            "RenderGraph::ExecuteCompiledGraph: a pass.colorAttachments entry was never "
+            "resolved - WriteColorAttachment() must always also push a matching "
+            "ColorAttachmentWrite onto pass.writes (see PHASE1)");
+        const PhysicalTexture& colorTex = physicalTextures[desc.handle.index];
+        outResolvedExtents.push_back(colorTex.target.extent);
+
+        // Phase 7 (RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md)
+        // - loadOp is CLEAR whenever THIS attachment declared its
+        // own clear color (ColorAttachmentDesc::clearColor, set via
+        // PassBuilder::WriteColorAttachment()'s own optional
+        // parameter - see RenderGraphBuilder.h), LOAD otherwise
+        // (Phase 6's original, only behavior - never silently
+        // discards another pass's, or a previous frame's, contents
+        // a pass author didn't ask to lose). storeOp = STORE
+        // (always): this graph has no way to know yet whether a
+        // later pass/import consumer needs this attachment's
+        // contents, so nothing is ever discarded speculatively.
+        VkRenderingAttachmentInfo colorAttachment{};
+        colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+        colorAttachment.imageView = colorTex.target.imageView;
+        colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        if (desc.clearColor.has_value()) {
+            colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+            const std::array<float, 4>& c = *desc.clearColor;
+            colorAttachment.clearValue.color = { { c[0], c[1], c[2], c[3] } };
+        } else {
+            colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+        }
+        colorAttachmentInfos.push_back(colorAttachment);
+    }
+    return colorAttachmentInfos;
+}
+
+// render-pass-6 campaign, PHASE2 (item 2.6) - extracted out of
+// ExecuteCompiledGraph() for readability, zero behavior change - see
+// PHASE2_EXECUTE_COMPILED_GRAPH_EXTRACTION.md. `depthHandle` alone signals
+// "no depth write this call" via its own IsValid() (see this method's
+// declaration in RenderGraph.h for the full reasoning) - identical logic/
+// identical produced VkRenderingAttachmentInfo fields to what used to be
+// written inline.
+std::optional<VkRenderingAttachmentInfo> RenderGraph::BuildDepthAttachmentInfo(
+    const PassRecord& pass, const std::vector<PhysicalTexture>& physicalTextures, TextureHandle depthHandle) const
+{
+    if (!depthHandle.IsValid()) {
+        return std::nullopt;
+    }
+
+    const PhysicalTexture& depthTex = physicalTextures[depthHandle.index];
+    VkRenderingAttachmentInfo depthAttachment{};
+    depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    depthAttachment.imageView = depthTex.target.depthImageView;
+    depthAttachment.imageLayout = depthTex.target.depthHasStencil
+        ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+        : VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    if (pass.depthClearValue.has_value()) {
+        depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        depthAttachment.clearValue.depthStencil = { *pass.depthClearValue, 0 };
+    } else {
+        depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+    }
+    return depthAttachment;
+}
+
+// render-pass-6 campaign, PHASE2 (item 2.6) - extracted verbatim out of
+// ExecuteCompiledGraph()'s own tail, zero behavior change - see
+// PHASE2_EXECUTE_COMPILED_GRAPH_EXTRACTION.md.
+//
+// network-impl-4 campaign, Phase 2 - passive registration: every texture
+// this call actually resolved becomes (or stays) queryable by name via
+// DebugTextureSnapshotFor()/ListDebugTextures(), regardless of which
+// ExecuteTimingMode this call was. An unresolved index this call is
+// skipped, deliberately leaving any PREVIOUS entry for that name
+// untouched - see PHASE2's own Step 2 analysis for why.
+void RenderGraph::RegisterDebugTextureSnapshots(ExecuteTimingMode timingMode, const CompiledGraphInput& input,
+    const std::vector<PhysicalTexture>& physicalTextures)
+{
+    for (std::size_t i = 0; i < physicalTextures.size(); ++i) {
+        const PhysicalTexture& tex = physicalTextures[i];
+        if (!tex.resolved) {
+            continue;
+        }
+        const char* name = input.textureNames[i];
+        if (name == nullptr || name[0] == '\0') {
+            continue; // Defensive - every real call site always supplies a real name (RenderGraphBuilder::CreateTexture()/ImportTexture() both assert a non-null/non-empty name), but never trust that blindly here (an assert compiles out entirely in a release/NDEBUG build).
+        }
+
+        DebugTextureSnapshot snapshot;
+        snapshot.name = name;
+        snapshot.regime = timingMode; // ExecuteCompiledGraph()'s own parameter - confirmed live, exact spelling.
+        snapshot.target = tex.target;
+        snapshot.hasDepth = tex.hasDepth;
+        snapshot.colorState = tex.colorState;
+        snapshot.depthState = tex.depthState;
+        snapshot.lastUpdatedFrameCounter = m_debugTextureFrameCounter;
+        m_debugTextures.Upsert(snapshot);
+    }
+}
+
+// render-pass-6 campaign, PHASE2 (item 2.6) - extracted verbatim out of
+// ExecuteCompiledGraph()'s own tail, zero behavior change - see
+// PHASE2_EXECUTE_COMPILED_GRAPH_EXTRACTION.md.
+//
+// network-impl-6 campaign, Phase 2
+// (task_manager/network-impl-6/PHASE2_RENDERGRAPH_VOLUME_AUTO_REGISTRATION.md) -
+// the volume-texture counterpart of RegisterDebugTextureSnapshots() above,
+// sharing the exact same m_debugTextureFrameCounter stamp (see
+// RenderGraph.h's own CurrentDebugTextureFrameCounter() doc comment for why
+// there is deliberately no separate volume-only counter). input.volumeTextureNames
+// and physicalVolumeTextures are both sized from
+// input.volumeTextureDescs.size() (see RenderGraphBuilder::
+// ImportVolumeTexture(), which always pushes onto both in lockstep), so
+// indexing them together by `i` is safe by construction, exactly like
+// the 2D pair above.
+void RenderGraph::RegisterDebugVolumeTextureSnapshots(ExecuteTimingMode timingMode, const CompiledGraphInput& input,
+    const std::vector<PhysicalVolumeTexture>& physicalVolumeTextures)
+{
+    for (std::size_t i = 0; i < physicalVolumeTextures.size(); ++i) {
+        const PhysicalVolumeTexture& vol = physicalVolumeTextures[i];
+        if (!vol.resolved) {
+            continue;
+        }
+        const char* name = input.volumeTextureNames[i];
+        if (name == nullptr || name[0] == '\0') {
+            continue; // Defensive - RenderGraphBuilder::ImportVolumeTexture() already asserts a non-null/non-empty name, but an assert compiles out entirely in a release/NDEBUG build.
+        }
+
+        DebugVolumeTextureSnapshot snapshot;
+        snapshot.name = name;
+        snapshot.regime = timingMode;
+        snapshot.target = vol.target;
+        snapshot.state = vol.state;
+        snapshot.lastUpdatedFrameCounter = m_debugTextureFrameCounter;
+        m_debugVolumeTextures.Upsert(snapshot);
+    }
+}
+
 void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode timingMode, CompiledGraphInput input,
     const std::vector<TextureHandle>& finalOutputs)
 {
@@ -368,7 +611,12 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         // its `execute` callback is invoked with a zero-extent PassContext
         // and is expected to record whatever non-rendering Vulkan work it
         // needs directly against `cmd`.
-        bool hasDepthWrite = false;
+        // render-pass-6 campaign, PHASE2 (item 2.6) - `hasDepthWrite` (the
+        // original standalone bool this loop used to also maintain) was
+        // dropped: depthHandle.IsValid() is exactly that same signal now
+        // that BuildDepthAttachmentInfo() derives "was a depth write found"
+        // purely from depthHandle itself (see that method's own doc
+        // comment) - never a separate bool parameter.
         TextureHandle depthHandle;
         for (const ResourceUsage& usage : pass.writes) {
             if (usage.kind != ResourceKind::Texture) {
@@ -376,7 +624,6 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
             }
             if (TargetsDepthState(usage.access)) {
                 depthHandle = usage.texture;
-                hasDepthWrite = true;
             }
         }
         // This equivalence (hasColorWrite == !pass.colorAttachments.empty())
@@ -388,128 +635,26 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         // "load-bearing fact" analysis.
         const bool hasColorWrite = !pass.colorAttachments.empty();
 
-        PassContext ctx;
-        ctx.cmd = cmd;
-        // Resolves ANY texture handle already resolved this call - whether
-        // declared via ReadTexture() OR a compute pass's WriteTexture()
-        // (Phase 6 of the compute-shader campaign) - EnsureTextureResolved()
-        // above runs for every declared read AND write, so a write-only
-        // handle is just as resolvable here as a read one by the time a
-        // pass's own `execute` callback runs. `resolveReadTexture` is kept
-        // as the original name (nothing outside this file used it in
-        // production before Phase 6 - see PassContext's own doc comment in
-        // RenderGraph.h); `resolveTexture` is a plain alias with a name
-        // that no longer implies "reads only", for a compute pass rewriting
-        // its own descriptor set against a texture it WRITES.
-        ctx.resolveReadTexture = [&physicalTextures](TextureHandle handle) -> PassContext::ResolvedTexture {
-            if (handle.index < physicalTextures.size() && physicalTextures[handle.index].resolved) {
-                const PhysicalTexture& tex = physicalTextures[handle.index];
-                return PassContext::ResolvedTexture{ tex.target.imageView, tex.sampler };
-            }
-            return PassContext::ResolvedTexture{};
-        };
-        ctx.resolveTexture = ctx.resolveReadTexture;
-
-        // Phase 6 (COMPUTE_PHASE6_RENDERGRAPH_INTEGRATION_STRATEGY_v2.md) -
-        // the buffer sibling of resolveTexture() above, so a compute pass
-        // can rewrite its own ComputeDescriptorSet against a declared
-        // BufferHandle's CURRENT physical VkBuffer before dispatching.
-        ctx.resolveBuffer = [&physicalBuffers](BufferHandle handle) -> VkBuffer {
-            if (handle.index < physicalBuffers.size() && physicalBuffers[handle.index].resolved) {
-                return physicalBuffers[handle.index].buffer;
-            }
-            return VK_NULL_HANDLE;
-        };
-
-        // Atmosphere Scattering campaign, Phase 2
-        // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md) -
-        // the volume-texture sibling of resolveTexture()/resolveBuffer()
-        // above, same "resolve whatever was already resolved above" shape.
-        ctx.resolveVolumeTexture =
-            [&physicalVolumeTextures](VolumeTextureHandle handle) -> PassContext::ResolvedVolumeTexture {
-            if (handle.index < physicalVolumeTextures.size() && physicalVolumeTextures[handle.index].resolved) {
-                return PassContext::ResolvedVolumeTexture{ physicalVolumeTextures[handle.index].target.imageView };
-            }
-            return PassContext::ResolvedVolumeTexture{};
-        };
-
-
+        // render-pass-6 campaign, PHASE2 (item 2.6) - BuildPassContext()
+        // extracted below (see this class's own header comment on that
+        // method for the full reasoning). `passDrawStats` must live in
+        // THIS function's own scope (not inside BuildPassContext() itself)
+        // since UpdateDrawStatsFor(pass.name, passDrawStats) below still
+        // needs to read it after pass.execute(ctx) returns.
         DrawStats passDrawStats;
-        ctx.recordDraw = [&passDrawStats](bool hasIndexBuffer, std::uint32_t vertexCount, std::uint32_t indexCount) {
-            AccumulateDrawStats(passDrawStats, hasIndexBuffer, vertexCount, indexCount);
-        };
-        // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-        // PHASE6 - see PassContext::recordIndirectDraw's own doc comment
-        // (RenderGraph.h) for why this is a separate callback from
-        // recordDraw() above.
-        ctx.recordIndirectDraw = [&passDrawStats]() { AccumulateIndirectDrawStats(passDrawStats); };
+        PassContext ctx = BuildPassContext(cmd, physicalTextures, physicalBuffers, physicalVolumeTextures, passDrawStats);
 
         bool didBeginRendering = false;
         if (hasColorWrite) {
-            // Multi-Render-Target (MRT) campaign (task_manager/mrt-1),
-            // PHASE2 - one VkRenderingAttachmentInfo PER declared color
-            // attachment, built in the EXACT order pass.colorAttachments
-            // holds them (== shader layout(location = N) out). A plain
-            // std::vector, sized once per pass, is consistent with this
-            // function's own existing allocation profile (e.g.
-            // physicalTextures/physicalBuffers above) - no fixed-capacity/
-            // small_vector convention exists elsewhere in this codebase to
-            // prefer instead.
-            std::vector<VkRenderingAttachmentInfo> colorAttachmentInfos;
-            colorAttachmentInfos.reserve(pass.colorAttachments.size());
-
+            // render-pass-6 campaign, PHASE2 (item 2.6) - BuildColorAttachmentInfos()
+            // extracted below; this function still owns the
+            // FindMismatchedColorAttachmentExtent() check, the
+            // vkCmdBeginRendering/vkCmdSetViewport/vkCmdSetScissor calls, and the
+            // ctx.colorAttachmentExtent assignment - see
+            // PHASE2_EXECUTE_COMPILED_GRAPH_EXTRACTION.md, Step 3.2.
             std::vector<VkExtent2D> resolvedExtents;
-            resolvedExtents.reserve(pass.colorAttachments.size());
-
-            for (const ColorAttachmentDesc& desc : pass.colorAttachments) {
-                // This handle was ALREADY resolved above, by the exact same
-                // generic `for (const ResourceUsage& usage : pass.writes)`
-                // barrier loop every pass already goes through, completely
-                // unchanged by this phase - WriteColorAttachment() (PHASE1)
-                // always pushes a matching ColorAttachmentWrite usage onto
-                // pass.writes in lockstep with pass.colorAttachments,
-                // specifically so this holds (see this file's own Step 2
-                // analysis in the PHASE2 strategy document). Asserted here
-                // defensively (cheap, debug-only) so a future regression
-                // that ever breaks that lockstep invariant fails LOUDLY,
-                // right here, instead of silently building a
-                // VkRenderingAttachmentInfo around a VK_NULL_HANDLE
-                // imageView that would otherwise only surface as a
-                // confusing validation-layer error deep inside
-                // vkCmdBeginRendering.
-                assert(desc.handle.index < physicalTextures.size() &&
-                    physicalTextures[desc.handle.index].resolved &&
-                    "RenderGraph::ExecuteCompiledGraph: a pass.colorAttachments entry was never "
-                    "resolved - WriteColorAttachment() must always also push a matching "
-                    "ColorAttachmentWrite onto pass.writes (see PHASE1)");
-                const PhysicalTexture& colorTex = physicalTextures[desc.handle.index];
-                resolvedExtents.push_back(colorTex.target.extent);
-
-                // Phase 7 (RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md)
-                // - loadOp is CLEAR whenever THIS attachment declared its
-                // own clear color (ColorAttachmentDesc::clearColor, set via
-                // PassBuilder::WriteColorAttachment()'s own optional
-                // parameter - see RenderGraphBuilder.h), LOAD otherwise
-                // (Phase 6's original, only behavior - never silently
-                // discards another pass's, or a previous frame's, contents
-                // a pass author didn't ask to lose). storeOp = STORE
-                // (always): this graph has no way to know yet whether a
-                // later pass/import consumer needs this attachment's
-                // contents, so nothing is ever discarded speculatively.
-                VkRenderingAttachmentInfo colorAttachment{};
-                colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-                colorAttachment.imageView = colorTex.target.imageView;
-                colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-                colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-                if (desc.clearColor.has_value()) {
-                    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-                    const std::array<float, 4>& c = *desc.clearColor;
-                    colorAttachment.clearValue.color = { { c[0], c[1], c[2], c[3] } };
-                } else {
-                    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-                }
-                colorAttachmentInfos.push_back(colorAttachment);
-            }
+            const std::vector<VkRenderingAttachmentInfo> colorAttachmentInfos =
+                BuildColorAttachmentInfos(pass, physicalTextures, resolvedExtents);
 
             // LOCKED (see task_manager/mrt-1/PHASE2_EXECUTE_LAYER_MRT_RECORDING.md's
             // own Step 3.2 "Decision 2"): a real, unconditional throw - never
@@ -533,24 +678,8 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
             }
             const VkExtent2D firstExtent = resolvedExtents[0];
 
-            VkRenderingAttachmentInfo depthAttachment{};
-            bool hasDepthAttachment = false;
-            if (hasDepthWrite) {
-                const PhysicalTexture& depthTex = physicalTextures[depthHandle.index];
-                depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-                depthAttachment.imageView = depthTex.target.depthImageView;
-                depthAttachment.imageLayout = depthTex.target.depthHasStencil
-                    ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-                    : VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
-                depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-                if (pass.depthClearValue.has_value()) {
-                    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-                    depthAttachment.clearValue.depthStencil = { *pass.depthClearValue, 0 };
-                } else {
-                    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-                }
-                hasDepthAttachment = true;
-            }
+            const std::optional<VkRenderingAttachmentInfo> depthAttachmentInfo =
+                BuildDepthAttachmentInfo(pass, physicalTextures, depthHandle);
 
             VkRenderingInfo renderingInfo{};
             renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
@@ -558,7 +687,7 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
             renderingInfo.layerCount = 1;
             renderingInfo.colorAttachmentCount = static_cast<std::uint32_t>(colorAttachmentInfos.size());
             renderingInfo.pColorAttachments = colorAttachmentInfos.data();
-            renderingInfo.pDepthAttachment = hasDepthAttachment ? &depthAttachment : nullptr;
+            renderingInfo.pDepthAttachment = depthAttachmentInfo.has_value() ? &depthAttachmentInfo.value() : nullptr;
 
             vkCmdBeginRendering(cmd, &renderingInfo);
 
@@ -621,62 +750,11 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         ++m_pipelinedFrameCounter;
     }
 
-    // network-impl-4 campaign, Phase 2 - passive registration: every texture
-    // this call actually resolved becomes (or stays) queryable by name via
-    // DebugTextureSnapshotFor()/ListDebugTextures(), regardless of which
-    // ExecuteTimingMode this call was. An unresolved index this call is
-    // skipped, deliberately leaving any PREVIOUS entry for that name
-    // untouched - see PHASE2's own Step 2 analysis for why.
-    for (std::size_t i = 0; i < physicalTextures.size(); ++i) {
-        const PhysicalTexture& tex = physicalTextures[i];
-        if (!tex.resolved) {
-            continue;
-        }
-        const char* name = input.textureNames[i];
-        if (name == nullptr || name[0] == '\0') {
-            continue; // Defensive - every real call site always supplies a real name (RenderGraphBuilder::CreateTexture()/ImportTexture() both assert a non-null/non-empty name), but never trust that blindly here (an assert compiles out entirely in a release/NDEBUG build).
-        }
-
-        DebugTextureSnapshot snapshot;
-        snapshot.name = name;
-        snapshot.regime = timingMode; // ExecuteCompiledGraph()'s own parameter - confirmed live, exact spelling.
-        snapshot.target = tex.target;
-        snapshot.hasDepth = tex.hasDepth;
-        snapshot.colorState = tex.colorState;
-        snapshot.depthState = tex.depthState;
-        snapshot.lastUpdatedFrameCounter = m_debugTextureFrameCounter;
-        m_debugTextures.Upsert(snapshot);
-    }
-
-    // network-impl-6 campaign, Phase 2
-    // (task_manager/network-impl-6/PHASE2_RENDERGRAPH_VOLUME_AUTO_REGISTRATION.md) -
-    // the volume-texture counterpart of the loop just above, sharing the
-    // exact same m_debugTextureFrameCounter stamp (see RenderGraph.h's own
-    // CurrentDebugTextureFrameCounter() doc comment for why there is
-    // deliberately no separate volume-only counter). input.volumeTextureNames
-    // and physicalVolumeTextures are both sized from
-    // input.volumeTextureDescs.size() (see RenderGraphBuilder::
-    // ImportVolumeTexture(), which always pushes onto both in lockstep), so
-    // indexing them together by `i` is safe by construction, exactly like
-    // the 2D pair above.
-    for (std::size_t i = 0; i < physicalVolumeTextures.size(); ++i) {
-        const PhysicalVolumeTexture& vol = physicalVolumeTextures[i];
-        if (!vol.resolved) {
-            continue;
-        }
-        const char* name = input.volumeTextureNames[i];
-        if (name == nullptr || name[0] == '\0') {
-            continue; // Defensive - RenderGraphBuilder::ImportVolumeTexture() already asserts a non-null/non-empty name, but an assert compiles out entirely in a release/NDEBUG build.
-        }
-
-        DebugVolumeTextureSnapshot snapshot;
-        snapshot.name = name;
-        snapshot.regime = timingMode;
-        snapshot.target = vol.target;
-        snapshot.state = vol.state;
-        snapshot.lastUpdatedFrameCounter = m_debugTextureFrameCounter;
-        m_debugVolumeTextures.Upsert(snapshot);
-    }
+    // render-pass-6 campaign, PHASE2 (item 2.6) - the two passive-
+    // registration loops that used to run inline here, extracted below -
+    // see PHASE2_EXECUTE_COMPILED_GRAPH_EXTRACTION.md.
+    RegisterDebugTextureSnapshots(timingMode, input, physicalTextures);
+    RegisterDebugVolumeTextureSnapshots(timingMode, input, physicalVolumeTextures);
 
     // Phase 8 (RENDERGRAPH_PHASE8_EDITOR_DEBUG_TOOLING_STRATEGY_v1.md) - built
     // AFTER the whole pass loop above has run, so `statsLookup` (backed by

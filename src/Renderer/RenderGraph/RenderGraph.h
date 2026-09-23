@@ -437,6 +437,51 @@ private:
         std::vector<PhysicalTexture>& physicalTextures, std::vector<PhysicalBuffer>& physicalBuffers,
         std::vector<PhysicalVolumeTexture>& physicalVolumeTextures);
 
+    // render-pass-6 campaign, PHASE2 (item 2.6) - extracted, zero-behavior-
+    // change decomposition of ExecuteCompiledGraph()'s own six interleaved
+    // concerns - see PHASE2_EXECUTE_COMPILED_GRAPH_EXTRACTION.md. Builds the
+    // six resolver/record callbacks a pass's own `execute` callback uses -
+    // identical construction to what used to be written inline in
+    // ExecuteCompiledGraph()'s per-pass loop body.
+    PassContext BuildPassContext(VkCommandBuffer cmd, std::vector<PhysicalTexture>& physicalTextures,
+        std::vector<PhysicalBuffer>& physicalBuffers, std::vector<PhysicalVolumeTexture>& physicalVolumeTextures,
+        DrawStats& passDrawStats);
+
+    // One VkRenderingAttachmentInfo per pass.colorAttachments entry, in that
+    // exact order (== shader layout(location = N) out) - identical logic to
+    // what used to be written inline inside ExecuteCompiledGraph()'s
+    // `if (hasColorWrite) { ... }` block's own color-attachment loop. Also
+    // fills `outResolvedExtents` with each attachment's resolved VkExtent2D (in
+    // the same order), for FindMismatchedColorAttachmentExtent()'s own
+    // existing pure decision function to consume - the caller (
+    // ExecuteCompiledGraph()) is still the one that calls
+    // FindMismatchedColorAttachmentExtent() and throws on mismatch, unchanged.
+    std::vector<VkRenderingAttachmentInfo> BuildColorAttachmentInfos(
+        const PassRecord& pass, const std::vector<PhysicalTexture>& physicalTextures,
+        std::vector<VkExtent2D>& outResolvedExtents) const;
+
+    // The depth/stencil attachment for this pass, if it declared one - mirrors
+    // BuildColorAttachmentInfos() above, just for the single depth attachment a
+    // pass may have. `depthHandle` alone is sufficient to signal "no depth
+    // write this call": a default-constructed TextureHandle (what the caller's
+    // own `TextureHandle depthHandle;` local already is, unless the writes scan
+    // below finds a real DepthStencilAttachmentReadWrite usage) has
+    // `index == kInvalidIndex`, so `depthHandle.IsValid()` is exactly the
+    // `hasDepthWrite` signal this method needs - no separate bool parameter
+    // required. Returns std::nullopt whenever `!depthHandle.IsValid()` -
+    // identical logic/identical produced VkRenderingAttachmentInfo fields to
+    // what used to be written inline.
+    std::optional<VkRenderingAttachmentInfo> BuildDepthAttachmentInfo(
+        const PassRecord& pass, const std::vector<PhysicalTexture>& physicalTextures, TextureHandle depthHandle) const;
+
+    // The two passive-registration loops that used to run inline at the bottom
+    // of ExecuteCompiledGraph(), extracted verbatim (same fields, same skip
+    // conditions, same Upsert() calls) - see network-impl-4/network-impl-6's
+    // own original comments, preserved at the new call sites.
+    void RegisterDebugTextureSnapshots(ExecuteTimingMode timingMode, const CompiledGraphInput& input,
+        const std::vector<PhysicalTexture>& physicalTextures);
+    void RegisterDebugVolumeTextureSnapshots(ExecuteTimingMode timingMode, const CompiledGraphInput& input,
+        const std::vector<PhysicalVolumeTexture>& physicalVolumeTextures);
 
     // B.1 (B1_REAL_GPU_TIMING_STRATEGY_v1.md) - replaces the old, single
     // combined RecordStatsFor(): drawStats and timing are now written by
