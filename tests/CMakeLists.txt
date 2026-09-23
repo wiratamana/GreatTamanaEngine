@@ -1950,7 +1950,12 @@
 # load time regardless of the above (gte_core's Window.cpp references SDL
 # symbols like SDL_CreateWindow, even though no Tier 1 test ever calls
 # SDL_Init() or opens a window) - sdl3_copy_runtime_dll() below handles that,
-# same as for the real GreatTamanaEngine.exe.
+# same as for the real GreatTamanaEngine.exe. Build/SdlLinkageRegressionTests.cpp
+# (task_manager/editor-core-separation-1/
+# PHASE1_SDL_DEPENDENCY_REGRESSION_BASELINE.md) captures this exact fact as a
+# real, mechanically-checkable, standing CTest case - a deliberate "before"
+# snapshot Phase 14 of that same campaign is expected to flip once gte_core
+# drops its SDL3 dependency for good.
 #
 # --- Tier 2 (GPU-dependent) tests: intentionally not implemented yet -------
 #
@@ -1995,6 +2000,7 @@
 # file's own pure, name-keyed slot-assignment helper
 # (RenderGraphNameSlotTable, see above) is pulled out as Tier-1-testable.
 set(GTE_TEST_SOURCES
+    Build/SdlLinkageRegressionTests.cpp
     Core/TimeTests.cpp
     Memory/GpuResourceHandleTests.cpp
     Encoding/Base64Tests.cpp
