@@ -31,8 +31,9 @@ struct MemoryRow {
 };
 
 // Builds one MemoryRow per entry in `entries`, naming each via `nameLookup`
-// (in real use, Renderer::GetMemoryDebugName(); a test can supply any stand-
-// in), sorted by sizeBytes descending, ties broken by handle index for a
+// (in real use, EditorGpuMemoryNameOverlay::GetDebugName() - editor-core-
+// separation-1 campaign, PHASE4; a test can supply any stand-in), sorted by
+// sizeBytes descending, ties broken by handle index for a
 // stable/reproducible order. Biggest-contributor-first is Unity's own
 // Memory Profiler default sort, and is what actually answers "what's
 // contributing to memory usage" at a glance rather than requiring the user

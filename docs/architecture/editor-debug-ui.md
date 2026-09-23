@@ -127,7 +127,7 @@ CMake adds:
   texture bytes/count, device-local vs. host-visible vs. shared bytes)
   followed by a sortable table of every currently-live GPU resource
   (`Renderer::GetMemoryResources()`), biggest first, each row showing its
-  debug name (if any — `Renderer::GetMemoryDebugName()`, Editor-only, empty/
+  debug name (if any — `EditorGpuMemoryNameOverlay::GetDebugName()`, empty/
   "(unnamed)" otherwise), type (Buffer/Texture), memory location, and size;
   and **"GPU Heap Budgets (Driver-Reported)"** — the REAL, driver-reported
   usage/budget for every Vulkan memory heap (`Renderer::GetVmaHeapBudgets()`,

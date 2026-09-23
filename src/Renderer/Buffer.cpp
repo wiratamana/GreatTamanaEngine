@@ -1,4 +1,4 @@
-﻿#include "Buffer.h"
+#include "Buffer.h"
 
 #include <cstdint>
 #include <cstring>
@@ -51,13 +51,12 @@ Buffer::Buffer(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker
     // location it landed in), not just the requested `size`/memoryUsage.
     const GpuMemoryLocation location = ClassifyGpuMemoryLocation(m_allocator, m_allocation);
     m_handle = m_tracker->Track(GpuResourceType::Buffer, location, allocationInfo.size);
-#if GTE_ENABLE_EDITOR
+    // editor-core-separation-1 campaign, PHASE4 - unconditional now (no
+    // `#if GTE_ENABLE_EDITOR` guard anywhere here anymore); SetDebugName()
+    // itself is a cheap no-op when no debug-name observer is installed.
     if (debugName != nullptr) {
         m_tracker->SetDebugName(m_handle, debugName);
     }
-#else
-    (void)debugName;
-#endif
 }
 
 Buffer::~Buffer()

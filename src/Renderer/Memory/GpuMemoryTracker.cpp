@@ -62,9 +62,13 @@ void GpuMemoryTracker::Untrack(GpuResourceHandle handle)
 
     RemoveFromTotals(slot.record);
 
-#if GTE_ENABLE_EDITOR
-    m_debugNames.erase(PackHandle(handle));
-#endif
+    // editor-core-separation-1 campaign, PHASE4 - notifies the installed
+    // debug-name observer (if any) that this handle should be forgotten,
+    // via the documented `name == nullptr` sentinel (see GpuMemoryTracker.h).
+    // Unconditional - no `#if GTE_ENABLE_EDITOR` guard anymore.
+    if (m_debugNameObserver != nullptr) {
+        m_debugNameObserver(m_debugNameObserverUserData, handle, nullptr);
+    }
 
     slot.record = GpuResourceRecord{};
     slot.occupied = false;
@@ -141,21 +145,14 @@ std::vector<GpuMemoryTracker::Entry> GpuMemoryTracker::GetAllResources() const
     return result;
 }
 
-#if GTE_ENABLE_EDITOR
 void GpuMemoryTracker::SetDebugName(GpuResourceHandle handle, const char* name)
 {
     if (!handle.IsValid()) {
         return;
     }
-    m_debugNames[PackHandle(handle)] = (name != nullptr) ? name : "";
+    if (m_debugNameObserver != nullptr) {
+        m_debugNameObserver(m_debugNameObserverUserData, handle, name);
+    }
 }
-
-const std::string& GpuMemoryTracker::GetDebugName(GpuResourceHandle handle) const
-{
-    static const std::string kEmpty;
-    const auto it = m_debugNames.find(PackHandle(handle));
-    return it != m_debugNames.end() ? it->second : kEmpty;
-}
-#endif
 
 } // namespace gte

@@ -56,9 +56,9 @@ namespace gte {
 // deferred rather than speculatively built.
 class VolumeTexture {
 public:
-    // debugName is optional and Editor-only (see GpuMemoryTracker) - same
-    // convention as Buffer/RenderTexture/Texture2D's own debugName
-    // parameter.
+    // debugName is optional and purely cosmetic - same convention as
+    // Buffer/RenderTexture/Texture2D's own debugName parameter (see
+    // Buffer.h's doc comment for the full "who actually stores this" story).
     VolumeTexture(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDevice device, int width,
         int height, int depth, VkFormat format, const char* debugName = nullptr);
     ~VolumeTexture();

@@ -6,6 +6,7 @@
 #include "DockLayout.h"
 #include "EditorCamera.h"
 #include "EditorContext.h"
+#include "EditorGpuMemoryNameOverlay.h"
 #include "GBufferValidation.h"
 #include "GpuDrivenBatchTestSpawner.h"
 #include "ImGuiMemoryTracker.h"
@@ -1124,6 +1125,20 @@ private:
 
 std::unique_ptr<IEditorLayer> CreateEditorLayer(Window& window, Renderer& renderer)
 {
+    // editor-core-separation-1 campaign, PHASE4
+    // (PHASE4_GPU_MEMORY_TRACKER_BUCKET_A_EXTRACTION.md) - installs the
+    // Editor's ONE debug-name overlay BEFORE constructing ImGuiEditorLayer
+    // itself, whose own constructor's member-initializer list immediately
+    // creates its "GameView"/"SceneView" RenderTextures (SetDebugName() is
+    // called from INSIDE RenderTexture's own constructor - too late to
+    // install from inside ImGuiEditorLayer's constructor BODY, which only
+    // runs after every member initializer has already completed). Safe:
+    // `renderer` (and every other Application member constructed before the
+    // Editor layer - AtmosphereLutRenderer, VolumeTexturePreviewRenderer)
+    // creates its own named GPU resources LAZILY, on first real use, well
+    // after this point - confirmed by reading every one of their
+    // constructors during this phase, not assumed.
+    EditorGpuMemoryNameOverlay::Install(*renderer.GetMemoryTracker());
     return std::make_unique<ImGuiEditorLayer>(window, renderer);
 }
 

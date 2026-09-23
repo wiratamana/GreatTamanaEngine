@@ -2173,6 +2173,10 @@ if(GTE_ENABLE_EDITOR)
         Editor/SelectionTests.cpp
         Editor/ImGuiMemoryTrackerTests.cpp
         Editor/MemoryPanelDataTests.cpp
+        # editor-core-separation-1 campaign, PHASE4 - the Editor-owned
+        # debug-name overlay (see src/Editor/EditorGpuMemoryNameOverlay.h).
+        # Genuinely Tier 1 (no live VmaAllocator/VkDevice needed).
+        Editor/EditorGpuMemoryNameOverlayTests.cpp
         Editor/LoggerTests.cpp
         Editor/ProfilerPanelDataTests.cpp
         Editor/JobsPanelDataTests.cpp

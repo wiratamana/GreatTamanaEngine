@@ -6,11 +6,6 @@
 #include <cstdint>
 #include <vector>
 
-#if GTE_ENABLE_EDITOR
-#include <string>
-#include <unordered_map>
-#endif
-
 namespace gte {
 
 // What kind of GPU resource a tracked record describes.
@@ -39,17 +34,22 @@ GpuMemoryLocation ClassifyGpuMemoryLocation(VmaAllocator allocator, VmaAllocatio
 // is what exists in EVERY build, including a final shipped game: just
 // enough to answer "how much memory, of what kind, is live right now"
 // essentially for free. See AGENTS.md for why names are handled completely
-// separately (below, Editor-only).
+// separately (below) - editor-core-separation-1 campaign, PHASE4: names are
+// no longer "compiled out when GTE_ENABLE_EDITOR is OFF" (that macro/switch
+// is being removed campaign-wide) - they are simply never STORED by this
+// class at all, in any build; see SetDebugName()/SetDebugNameObserver()
+// below.
 //
 // `format` is VK_FORMAT_UNDEFINED for a Buffer (format is meaningless for a
 // raw byte buffer) and the resource's actual VkImageCreateInfo::format for a
 // Texture (e.g. VK_FORMAT_B8G8R8A8_UNORM for a color RenderTexture,
 // VK_FORMAT_D32_SFLOAT for a DepthBuffer) - a plain POD enum value, not a
-// string/name, so it stays in this always-compiled record rather than the
-// Editor-only debug-name table below (see AGENTS.md, "GPU Resource Memory
-// Tracking" - only human-readable *names* are Editor-only, not this kind of
-// classification data, which the Editor's "Memory" panel needs in every
-// build the panel itself is compiled into to show a "Format" column).
+// string/name, so it stays in this always-compiled record rather than being
+// routed through the observer hook below (see AGENTS.md, "GPU Resource
+// Memory Tracking" - only human-readable *names* are handled that way, not
+// this kind of classification data, which the Editor's "Memory" panel needs
+// in every build the panel itself is compiled into to show a "Format"
+// column).
 struct GpuResourceRecord {
     GpuResourceType type = GpuResourceType::Buffer;
     GpuMemoryLocation location = GpuMemoryLocation::GpuOnly;
@@ -72,6 +72,25 @@ struct GpuResourceRecord {
 // stays valid no matter how the owning Renderer/VulkanAllocator get moved
 // around later - a Buffer/RenderTexture holding a raw pointer/reference to
 // this class instead would risk dangling if the owner ever relocated.
+//
+// editor-core-separation-1 campaign, PHASE4
+// (task_manager/editor-core-separation-1/PHASE4_GPU_MEMORY_TRACKER_BUCKET_A_EXTRACTION.md):
+// this class carries ZERO `#if GTE_ENABLE_EDITOR` (or any other "is this an
+// Editor build" macro) anywhere, and stores ZERO name/string data itself -
+// human-readable debug names are now entirely an Editor-owned concern (see
+// src/Editor/EditorGpuMemoryNameOverlay.h), which observes SetDebugName()/
+// Untrack() calls via the always-compiled, unconditional hook below rather
+// than this class keeping its own std::unordered_map<..., std::string>.
+// This is the concrete, empirically-confirmed answer to this phase's own
+// documented "real design fork" (does GpuMemoryTracker need a hook, or can
+// the Editor-side overlay own everything): reading Buffer.cpp/DepthBuffer.cpp/
+// Texture2D.cpp/VolumeTexture.cpp/RenderTexture.cpp confirmed SetDebugName()
+// is always called immediately after Track(), from inside the exact
+// gte_core-destined constructor that produced the handle - the Editor-side
+// overlay has no way to intercept that moment on its own, so a hook here is
+// unavoidable; storing the actual name strings, however, does NOT need to
+// live here at all, hence the hook/hand-the-data-out shape below rather than
+// keeping GpuMemoryTracker's own internal map merely macro-ungated.
 class GpuMemoryTracker {
 public:
     GpuMemoryTracker() = default;
@@ -98,7 +117,9 @@ public:
         VkFormat format = VK_FORMAT_UNDEFINED);
 
     // Removes a resource's record. Safe to call with an already-untracked
-    // or otherwise invalid handle (no-op).
+    // or otherwise invalid handle (no-op). Also notifies the installed
+    // debug-name observer (if any) that `handle` should be forgotten - see
+    // SetDebugNameObserver()/SetDebugName() below.
     void Untrack(GpuResourceHandle handle);
 
     struct Totals {
@@ -125,18 +146,45 @@ public:
     // src/Editor/Panels/MemoryPanel.cpp).
     std::vector<Entry> GetAllResources() const;
 
-#if GTE_ENABLE_EDITOR
-    // Editor-only: attaches/reads a human-readable label for a handle,
-    // displayed by the Editor's "Memory" panel (see
-    // src/Editor/Panels/MemoryPanel.cpp). Stored in a completely
-    // separate table from the hot GpuResourceRecord data above (see
-    // AGENTS.md) - compiled out ENTIRELY (not just unused/empty) when
-    // GTE_ENABLE_EDITOR is OFF, so a release build carries zero string cost
-    // for this.
+    // editor-core-separation-1 campaign, PHASE4 - always compiled, no macro
+    // of any kind. A side-table OBSERVER hook: install one (via
+    // SetDebugNameObserver() below) to be notified, in real time, of every
+    // SetDebugName()/Untrack() call THIS tracker instance makes, so an
+    // external type (e.g. the Editor-owned src/Editor/EditorGpuMemoryNameOverlay.h)
+    // can maintain its OWN name storage keyed by GpuResourceHandle, without
+    // this class storing a single byte of name/string data itself.
+    // `userData` is an opaque pointer forwarded back verbatim on every call
+    // (never interpreted by GpuMemoryTracker itself) - lets the observer
+    // avoid a global/static lookup of its own if it doesn't want one.
+    // `name` is nullptr specifically on an Untrack() notification (an
+    // explicit "forget this handle" signal, never a real name to store) -
+    // see Untrack() above and SetDebugName() below.
+    using DebugNameObserver = void (*)(void* userData, GpuResourceHandle handle, const char* name);
+
+    // Installs `observer` (plus `userData`, forwarded back on every call) as
+    // this tracker's ONE debug-name observer. Safe to call more than once -
+    // the LATEST call always wins (last-write-wins, documented, not
+    // asserted - mirrors Core/LogSink.h's own InstallLogSink() precedent).
+    // Pass nullptr to uninstall - the default, so a Player host that never
+    // calls this pays only one branch (a null-pointer check) per
+    // SetDebugName()/Untrack() call, and zero name-storage cost at all.
+    void SetDebugNameObserver(DebugNameObserver observer, void* userData) noexcept
+    {
+        m_debugNameObserver = observer;
+        m_debugNameObserverUserData = userData;
+    }
+
+    // Notifies the installed observer (if any) that `handle` should be
+    // associated with the human-readable label `name`, displayed by the
+    // Editor's "Memory" panel (see src/Editor/Panels/MemoryPanel.cpp) - a
+    // complete no-op (beyond one or two cheap branches) for an
+    // invalid/default-constructed handle, or when no observer is installed.
+    // Called unconditionally (no `#if GTE_ENABLE_EDITOR` guard on either
+    // side of this call anymore, anywhere in this engine) by
+    // Buffer/DepthBuffer/Texture2D/VolumeTexture/RenderTexture's
+    // constructors right after Track() - see AGENTS.md, "GPU Resource
+    // Memory Tracking".
     void SetDebugName(GpuResourceHandle handle, const char* name);
-    // Returns an empty string for an unnamed/invalid/unknown handle.
-    const std::string& GetDebugName(GpuResourceHandle handle) const;
-#endif
 
 private:
     struct Slot {
@@ -145,11 +193,6 @@ private:
         bool occupied = false;
     };
 
-    static std::uint64_t PackHandle(GpuResourceHandle handle) noexcept
-    {
-        return (static_cast<std::uint64_t>(handle.index) << 32) | handle.generation;
-    }
-
     void AddToTotals(const GpuResourceRecord& record);
     void RemoveFromTotals(const GpuResourceRecord& record);
 
@@ -157,9 +200,8 @@ private:
     std::vector<std::uint32_t> m_freeList;
     Totals m_totals;
 
-#if GTE_ENABLE_EDITOR
-    std::unordered_map<std::uint64_t, std::string> m_debugNames;
-#endif
+    DebugNameObserver m_debugNameObserver = nullptr;
+    void* m_debugNameObserverUserData = nullptr;
 };
 
 } // namespace gte

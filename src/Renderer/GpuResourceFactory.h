@@ -319,13 +319,18 @@ public:
     GpuMemoryTracker::Totals GetMemoryTotals() const;
     std::vector<GpuMemoryTracker::Entry> GetMemoryResources() const;
 
-#if GTE_ENABLE_EDITOR
-    // See Renderer::GetMemoryDebugName() - Editor-only, forwards straight to
-    // GpuMemoryTracker::GetDebugName(). Compiled out entirely when
-    // GTE_ENABLE_EDITOR is OFF, same as GpuMemoryTracker's own debug-name
-    // storage (see AGENTS.md, "GPU Resource Memory Tracking").
-    const std::string& GetMemoryDebugName(GpuResourceHandle handle) const;
-#endif
+    // editor-core-separation-1 campaign, PHASE4 - always compiled, no macro.
+    // Returns the SAME GpuMemoryTracker instance every Buffer/RenderTexture/
+    // Texture2D/VolumeTexture this factory creates registers with (see
+    // GpuMemoryTracker.h's own class comment) - lets an external, Editor-
+    // owned observer (see src/Editor/EditorGpuMemoryNameOverlay.h) install
+    // itself via GpuMemoryTracker::SetDebugNameObserver() without this
+    // factory (or GpuMemoryTracker itself) storing a single byte of name/
+    // string data. REPLACES the old, Editor-only GetMemoryDebugName()
+    // forwarder, which forwarded to a GpuMemoryTracker::GetDebugName() that
+    // no longer exists (that lookup now lives entirely on the Editor side -
+    // see EditorGpuMemoryNameOverlay::GetDebugName()).
+    std::shared_ptr<GpuMemoryTracker> GetMemoryTracker() const noexcept { return m_memoryTracker; }
 
 private:
     void Destroy() noexcept;

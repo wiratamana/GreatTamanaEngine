@@ -48,8 +48,9 @@ public:
     // depthFormat should always be exactly Renderer::DepthFormat() - see
     // AGENTS.md ("Render Target Format Matching").
     //
-    // debugName/depthDebugName are optional and Editor-only (see
-    // literal) if provided: this RenderTexture stores each pointer itself
+    // debugName/depthDebugName are optional and purely cosmetic (see
+    // Buffer.h's doc comment for the full "who actually stores this" story)
+    // if provided: this RenderTexture stores each pointer itself
     // (not a copy) so Resize() can re-attach the same names to the fresh
     // handles it creates. debugName names the color image; depthDebugName
     // separately names its companion DepthBuffer (e.g. "GameView" /

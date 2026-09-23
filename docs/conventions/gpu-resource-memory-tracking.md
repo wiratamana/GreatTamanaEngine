@@ -41,20 +41,28 @@ whenever touching GPU resource lifetime code:
   VMA's actual choice can legitimately differ (e.g. falling back to plain
   host-visible system RAM instead of a shared device-local+host-visible
   heap).
-- **Human-readable debug names are Editor-only and live in a completely
-  separate table from the hot resource record.** Pass names as a plain
+- **Human-readable debug names live entirely on the Editor side, in a
+  completely separate table from the hot resource record - editor-core-
+  separation-1 campaign, PHASE4.** `GpuMemoryTracker` itself
+  (`src/Renderer/Memory/GpuMemoryTracker.h`) stores ZERO name/string data
+  and carries no `#if GTE_ENABLE_EDITOR` (or any other macro) at all - it
+  only exposes an always-compiled, unconditional
+  `SetDebugNameObserver(DebugNameObserver, void*)` hook plus
+  `SetDebugName(handle, name)` (which just forwards to whichever observer,
+  if any, is installed). The Editor-owned `EditorGpuMemoryNameOverlay`
+  (`src/Editor/EditorGpuMemoryNameOverlay.h`) installs itself as that
+  observer and keeps its OWN name table keyed by `GpuResourceHandle`,
+  exposing `EditorGpuMemoryNameOverlay::GetDebugName(handle)` for lookups
+  (e.g. the "Memory" panel, the Frame Debugger). Pass names as a plain
   `const char*` (never `std::string`) through an optional `debugName`
-  parameter, and only ever store/attach them via
-  `GpuMemoryTracker::SetDebugName()`, which is guarded by
-  `#if GTE_ENABLE_EDITOR` in `GpuMemoryTracker.h` - this compiles the name
-  table out ENTIRELY (not just unused) in a non-Editor/release build, so a
-  shipped game carries zero string cost for this. Never add a name/string
-  field to `GpuResourceRecord` itself. If a resource's debug name must
-  survive a resize/recreate (see above), store the `const char*` on the
-  resource itself and re-apply it via `SetDebugName()` every time it
-  re-tracks - this requires the caller-supplied string to have static
-  storage duration (e.g. a string literal), since only the pointer is kept,
-  not a copy.
+  parameter - a Player host that never installs an observer pays only one
+  branch (a null-pointer check) per `SetDebugName()`/`Untrack()` call, and
+  zero name-storage cost at all. Never add a name/string field to
+  `GpuResourceRecord` itself. If a resource's debug name must survive a
+  resize/recreate (see above), store the `const char*` on the resource
+  itself and re-apply it via `SetDebugName()` every time it re-tracks - this
+  requires the caller-supplied string to have static storage duration (e.g.
+  a string literal), since only the pointer is kept, not a copy.
 - **Own the tracker via `std::shared_ptr`, never a raw pointer/reference.**
   `Renderer` owns the one `GpuMemoryTracker` and hands a `shared_ptr` copy
   to every `Buffer`/`RenderTexture` it creates, so tracking stays valid no

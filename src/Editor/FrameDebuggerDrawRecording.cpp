@@ -25,6 +25,7 @@
 #include "../Renderer/Mesh.h"
 #include "../Renderer/Pipeline.h"
 #include "../Renderer/Renderer.h"
+#include "EditorGpuMemoryNameOverlay.h"
 #include "FrameDebuggerCapture.h"
 
 #include <cstdint>
@@ -38,12 +39,18 @@ namespace gte {
 // RecordFrameDebuggerDraws() for why this function exists at all. Behavior
 // is UNCHANGED from what used to run inline inside RenderSystem::Draw()'s
 // own `#if GTE_ENABLE_EDITOR` block - only the physical location moved.
-void RecordFrameDebuggerDraws(FrameDebuggerCaptureContext& capture, Registry& registry, Renderer& renderer,
+void RecordFrameDebuggerDraws(FrameDebuggerCaptureContext& capture, Registry& registry, Renderer& /*renderer*/,
     Entity entity, const Mesh& mesh, const Pipeline& pipeline, const MaterialTexture* materialTexture,
     const Mat4& viewProjection)
 {
-    const std::string materialTextureDebugName =
-        materialTexture != nullptr ? renderer.GetMemoryDebugName(materialTexture->texture.Handle()) : std::string();
+    // editor-core-separation-1 campaign, PHASE4 - names now live entirely on
+    // the Editor side (EditorGpuMemoryNameOverlay); `renderer` is kept as a
+    // parameter for signature stability with RenderSystem.h's declaration
+    // (and RenderSystem::Draw()'s own call site), even though it is no
+    // longer used here.
+    const std::string materialTextureDebugName = materialTexture != nullptr
+        ? EditorGpuMemoryNameOverlay::GetDebugName(materialTexture->texture.Handle())
+        : std::string();
     capture.RecordDraw(pipeline.DebugName(), materialTextureDebugName, viewProjection);
 
     // frame-debugger-6 campaign, PHASE3 - additionally record this exact

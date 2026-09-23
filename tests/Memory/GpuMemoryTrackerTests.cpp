@@ -1,7 +1,8 @@
 // Unit tests for GpuMemoryTracker (src/Renderer/Memory/GpuMemoryTracker.h) -
 // exercises the pure bookkeeping logic (Track()/Untrack()/GetTotals()/
-// GetAllResources(), generation-counted handle reuse, and - only in a
-// GTE_ENABLE_EDITOR build - debug names) entirely in isolation. None of this
+// GetAllResources(), generation-counted handle reuse, and the always-
+// compiled SetDebugNameObserver()/SetDebugName() observer hook - editor-
+// core-separation-1 campaign, PHASE4) entirely in isolation. None of this
 // touches a real VmaAllocator/VkDevice: Track() only ever takes plain enums
 // and a byte count (ClassifyGpuMemoryLocation(), which DOES need a real VMA
 // allocation, is exercised indirectly by Buffer/RenderTexture instead - see
@@ -13,6 +14,9 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <optional>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace gte {
@@ -195,46 +199,94 @@ TEST(GpuMemoryTrackerTest, Track_RecordsTheSuppliedFormatForATexture)
     EXPECT_EQ(live.front().record.format, VK_FORMAT_D32_SFLOAT);
 }
 
-#if GTE_ENABLE_EDITOR
+// editor-core-separation-1 campaign, PHASE4
+// (task_manager/editor-core-separation-1/PHASE4_GPU_MEMORY_TRACKER_BUCKET_A_EXTRACTION.md) -
+// GpuMemoryTracker no longer stores debug names itself (see the class
+// comment) - these tests now exercise the always-compiled
+// SetDebugNameObserver()/SetDebugName() OBSERVER HOOK directly, with a
+// small local, test-only observer capturing what it was called with. See
+// tests/Editor/EditorGpuMemoryNameOverlayTests.cpp for the real Editor-side
+// name-storage consumer's own dedicated tests.
 
-TEST(GpuMemoryTrackerTest, DebugName_RoundTripsForAValidHandle)
+TEST(GpuMemoryTrackerTest, SetDebugName_NotifiesTheInstalledObserverWithTheHandleAndName)
 {
     GpuMemoryTracker tracker;
     const GpuResourceHandle handle = tracker.Track(GpuResourceType::Buffer, GpuMemoryLocation::GpuOnly, 128);
+
+    std::vector<std::pair<GpuResourceHandle, std::string>> observed;
+    tracker.SetDebugNameObserver(
+        [](void* userData, GpuResourceHandle h, const char* name) {
+            auto* out = static_cast<std::vector<std::pair<GpuResourceHandle, std::string>>*>(userData);
+            out->emplace_back(h, name != nullptr ? name : "<null>");
+        },
+        &observed);
 
     tracker.SetDebugName(handle, "PlayerVertexBuffer");
 
-    EXPECT_EQ(tracker.GetDebugName(handle), "PlayerVertexBuffer");
+    ASSERT_EQ(observed.size(), 1u);
+    EXPECT_EQ(observed.front().first, handle);
+    EXPECT_EQ(observed.front().second, "PlayerVertexBuffer");
 }
 
-TEST(GpuMemoryTrackerTest, DebugName_UnsetHandleReturnsEmptyString)
+TEST(GpuMemoryTrackerTest, SetDebugName_WithoutAnInstalledObserverIsHarmlessNoop)
+{
+    GpuMemoryTracker tracker; // SetDebugNameObserver() never called.
+    const GpuResourceHandle handle = tracker.Track(GpuResourceType::Buffer, GpuMemoryLocation::GpuOnly, 128);
+
+    tracker.SetDebugName(handle, "Whatever"); // must not crash
+}
+
+TEST(GpuMemoryTrackerTest, SetDebugName_InvalidHandleNeverNotifiesTheObserver)
+{
+    GpuMemoryTracker tracker;
+    int callCount = 0;
+    tracker.SetDebugNameObserver(
+        [](void* userData, GpuResourceHandle, const char*) { ++(*static_cast<int*>(userData)); }, &callCount);
+
+    tracker.SetDebugName(kInvalidGpuResourceHandle, "ShouldBeIgnored");
+
+    EXPECT_EQ(callCount, 0);
+}
+
+TEST(GpuMemoryTrackerTest, Untrack_NotifiesTheObserverWithANullNameToSignalForgetting)
 {
     GpuMemoryTracker tracker;
     const GpuResourceHandle handle = tracker.Track(GpuResourceType::Buffer, GpuMemoryLocation::GpuOnly, 128);
 
-    EXPECT_TRUE(tracker.GetDebugName(handle).empty());
-}
+    // nullopt entries mean the observer saw `name == nullptr` that call.
+    std::vector<std::optional<std::string>> observedNames;
+    tracker.SetDebugNameObserver(
+        [](void* userData, GpuResourceHandle, const char* name) {
+            auto* out = static_cast<std::vector<std::optional<std::string>>*>(userData);
+            out->push_back(name != nullptr ? std::optional<std::string>(name) : std::nullopt);
+        },
+        &observedNames);
 
-TEST(GpuMemoryTrackerTest, DebugName_InvalidHandleReturnsEmptyStringWithoutCrashing)
-{
-    GpuMemoryTracker tracker;
-
-    EXPECT_TRUE(tracker.GetDebugName(kInvalidGpuResourceHandle).empty());
-    tracker.SetDebugName(kInvalidGpuResourceHandle, "ShouldBeIgnored"); // must not crash/insert anything
-}
-
-TEST(GpuMemoryTrackerTest, DebugName_IsForgottenAfterUntrack)
-{
-    GpuMemoryTracker tracker;
-    const GpuResourceHandle handle = tracker.Track(GpuResourceType::Buffer, GpuMemoryLocation::GpuOnly, 128);
     tracker.SetDebugName(handle, "Temp");
-
     tracker.Untrack(handle);
 
-    EXPECT_TRUE(tracker.GetDebugName(handle).empty());
+    ASSERT_EQ(observedNames.size(), 2u);
+    EXPECT_EQ(observedNames[0], "Temp");
+    EXPECT_EQ(observedNames[1], std::nullopt);
 }
 
-#endif // GTE_ENABLE_EDITOR
+TEST(GpuMemoryTrackerTest, SetDebugNameObserver_TheLatestInstallWinsOverAPreviousOne)
+{
+    GpuMemoryTracker tracker;
+    const GpuResourceHandle handle = tracker.Track(GpuResourceType::Buffer, GpuMemoryLocation::GpuOnly, 128);
+
+    int firstObserverCalls = 0;
+    int secondObserverCalls = 0;
+    tracker.SetDebugNameObserver(
+        [](void* userData, GpuResourceHandle, const char*) { ++(*static_cast<int*>(userData)); }, &firstObserverCalls);
+    tracker.SetDebugNameObserver(
+        [](void* userData, GpuResourceHandle, const char*) { ++(*static_cast<int*>(userData)); }, &secondObserverCalls);
+
+    tracker.SetDebugName(handle, "Whichever");
+
+    EXPECT_EQ(firstObserverCalls, 0);
+    EXPECT_EQ(secondObserverCalls, 1);
+}
 
 } // namespace
 } // namespace gte

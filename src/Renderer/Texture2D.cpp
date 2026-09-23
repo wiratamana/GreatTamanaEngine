@@ -64,13 +64,10 @@ Texture2D::Texture2D(
     // to worry about here.
     const GpuMemoryLocation location = ClassifyGpuMemoryLocation(m_allocator, m_allocation);
     m_handle = m_tracker->Track(GpuResourceType::Texture, location, allocationInfo.size, kFormat);
-#if GTE_ENABLE_EDITOR
+    // editor-core-separation-1 campaign, PHASE4 - unconditional now.
     if (debugName != nullptr) {
         m_tracker->SetDebugName(m_handle, debugName);
     }
-#else
-    (void)debugName;
-#endif
 
     VkImageViewCreateInfo viewInfo{};
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;

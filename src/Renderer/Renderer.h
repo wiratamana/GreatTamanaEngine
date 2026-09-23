@@ -764,19 +764,22 @@ public:
     // Full per-object snapshot of every currently-live GPU resource - the
     // primitive behind a Unity-Memory-Profiler-style listing (see the
     // Editor's "Memory" panel, Panels/MemoryPanel.cpp). Carries no names
-    // (see GetMemoryDebugName() below, Editor-only, for that).
+    // (see GetMemoryTracker() below for how a name is now looked up).
     std::vector<GpuMemoryTracker::Entry> GetMemoryResources() const;
 
-#if GTE_ENABLE_EDITOR
-    // Editor-only: the human-readable debug name (if any) attached to a
-    // still-live GPU resource handle via CreateBuffer()/CreateRenderTexture()/
-    // CreateMesh()'s debugName parameter - forwards straight to
-    // GpuMemoryTracker::GetDebugName(). Returns an empty string for an
-    // unnamed/invalid/unknown handle. Compiled out entirely when
-    // GTE_ENABLE_EDITOR is OFF, exactly like GpuMemoryTracker's own
-    // debug-name storage (see AGENTS.md, "GPU Resource Memory Tracking").
-    const std::string& GetMemoryDebugName(GpuResourceHandle handle) const;
-#endif
+    // editor-core-separation-1 campaign, PHASE4 - always compiled, no macro.
+    // Returns the SAME GpuMemoryTracker instance every Buffer/RenderTexture/
+    // Texture2D/VolumeTexture this Renderer creates registers with - lets an
+    // external, Editor-owned observer (see
+    // src/Editor/EditorGpuMemoryNameOverlay.h) install itself via
+    // GpuMemoryTracker::SetDebugNameObserver() so debug names remain
+    // observable WITHOUT this Renderer (or GpuMemoryTracker itself) storing
+    // a single byte of name/string data. REPLACES the old, Editor-only
+    // GetMemoryDebugName() forwarder, which forwarded to a
+    // GpuMemoryTracker::GetDebugName() that no longer exists (that lookup
+    // now lives entirely on the Editor side - see
+    // EditorGpuMemoryNameOverlay::GetDebugName()).
+    std::shared_ptr<GpuMemoryTracker> GetMemoryTracker() const noexcept { return m_resources.GetMemoryTracker(); }
 
     // The REAL, driver-reported memory usage/budget for every Vulkan memory
     // heap on this device (see VulkanAllocator::GetHeapBudgets()) - distinct

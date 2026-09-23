@@ -111,11 +111,10 @@ void DepthBuffer::Create(int width, int height)
     // reflects the NEW size under a fresh handle, never a stale one.
     const GpuMemoryLocation location = ClassifyGpuMemoryLocation(m_allocator, m_allocation);
     m_handle = m_tracker->Track(GpuResourceType::Texture, location, allocationInfo.size, m_format);
-#if GTE_ENABLE_EDITOR
+    // editor-core-separation-1 campaign, PHASE4 - unconditional now.
     if (m_debugName != nullptr) {
         m_tracker->SetDebugName(m_handle, m_debugName);
     }
-#endif
 
     const VkImageAspectFlags aspectMask =
         VK_IMAGE_ASPECT_DEPTH_BIT | (HasStencilComponent() ? VK_IMAGE_ASPECT_STENCIL_BIT : 0);

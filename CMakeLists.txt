@@ -664,6 +664,14 @@ if(GTE_ENABLE_EDITOR)
         # list.
         src/Editor/FrameDebuggerReplayPasses.cpp
         src/Editor/FrameDebuggerDrawRecording.cpp
+        # editor-core-separation-1 campaign, PHASE4
+        # (PHASE4_GPU_MEMORY_TRACKER_BUCKET_A_EXTRACTION.md) - the Editor-owned
+        # overlay that gives GPU resources human-readable debug names now that
+        # GpuMemoryTracker itself stores none. Still added to this
+        # (still-conditional, for now) Editor source list; Phase 9 moves this
+        # into the real gte_editor target's own list.
+        src/Editor/EditorGpuMemoryNameOverlay.h
+        src/Editor/EditorGpuMemoryNameOverlay.cpp
         src/Editor/FrameDebuggerHistory.h
         src/Editor/FrameDebuggerHistory.cpp
         src/Editor/FrameDebuggerPreviewProcessing.h

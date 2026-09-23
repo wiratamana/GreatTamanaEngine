@@ -1,6 +1,7 @@
 #include "MemoryPanel.h"
 
 #include "../EditorContext.h"
+#include "../EditorGpuMemoryNameOverlay.h"
 #include "../ImGuiMemoryTracker.h"
 #include "../MemoryPanelData.h"
 #include "../../Memory/SdlMemoryTracker.h"
@@ -56,8 +57,11 @@ void BuildGpuTrackedSection(Renderer& renderer)
     ImGui::Separator();
 
     const std::vector<GpuMemoryTracker::Entry> entries = renderer.GetMemoryResources();
-    const std::vector<MemoryRow> rows = BuildMemoryRows(
-        entries, [&renderer](GpuResourceHandle handle) { return renderer.GetMemoryDebugName(handle); });
+    // editor-core-separation-1 campaign, PHASE4 - names now live entirely on
+    // the Editor side (EditorGpuMemoryNameOverlay), never inside Renderer/
+    // GpuMemoryTracker itself.
+    const std::vector<MemoryRow> rows =
+        BuildMemoryRows(entries, [](GpuResourceHandle handle) { return EditorGpuMemoryNameOverlay::GetDebugName(handle); });
 
     constexpr ImGuiTableFlags tableFlags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg
         | ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY;

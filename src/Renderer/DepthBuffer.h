@@ -47,8 +47,10 @@ namespace gte {
 // Resize() (a genuinely new allocation) always (re)track a fresh handle.
 class DepthBuffer {
 public:
-    // debugName is optional/Editor-only, same convention as Buffer/
-    // RenderTexture.
+    // debugName is optional and purely cosmetic, same convention as
+    // Buffer/RenderTexture - see Buffer.h's own doc comment for the full
+    // "who actually stores this" story (editor-core-separation-1 campaign,
+    // PHASE4).
     DepthBuffer(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDevice device, int width,
         int height, VkFormat format, const char* debugName = nullptr, bool allowSampledAccess = false);
     ~DepthBuffer();

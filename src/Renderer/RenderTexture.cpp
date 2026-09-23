@@ -145,11 +145,10 @@ void RenderTexture::Create(int width, int height)
     // reflecting the NEW size - the tracker never holds a stale record.
     const GpuMemoryLocation location = ClassifyGpuMemoryLocation(m_allocator, m_allocation);
     m_handle = m_tracker->Track(GpuResourceType::Texture, location, allocationInfo.size, m_format);
-#if GTE_ENABLE_EDITOR
+    // editor-core-separation-1 campaign, PHASE4 - unconditional now.
     if (m_debugName != nullptr) {
         m_tracker->SetDebugName(m_handle, m_debugName);
     }
-#endif
 
     VkImageViewCreateInfo viewInfo{};
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;

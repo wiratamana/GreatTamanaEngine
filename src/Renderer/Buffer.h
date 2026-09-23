@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "Memory/GpuMemoryTracker.h"
 #include "Vulkan/VulkanAllocator.h"
@@ -43,10 +43,13 @@ enum class BufferMemoryUsage {
 // shared) without needing a debugger or an external tool.
 class Buffer {
 public:
-    // debugName is optional and Editor-only (see GpuMemoryTracker) - a
-    // plain, cheap `const char*` rather than a std::string, so passing one
-    // costs nothing beyond a pointer copy even when it IS used, and the
-    // pointed-to string is never stored anywhere outside the Editor build.
+    // debugName is optional and purely cosmetic - a plain, cheap
+    // `const char*` rather than a std::string, so passing one costs nothing
+    // beyond a pointer copy even when it IS used. GpuMemoryTracker itself
+    // never stores it (editor-core-separation-1 campaign, PHASE4) - it is
+    // only ever observed by whichever debug-name observer is installed (see
+    // GpuMemoryTracker::SetDebugNameObserver()), e.g. the Editor's
+    // EditorGpuMemoryNameOverlay.
     Buffer(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDeviceSize size,
         VkBufferUsageFlags usage, BufferMemoryUsage memoryUsage, const char* debugName = nullptr);
     ~Buffer();

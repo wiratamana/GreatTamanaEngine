@@ -38,8 +38,9 @@ namespace gte {
 // in the Editor's "Memory" panel automatically, with zero extra bookkeeping.
 class Texture2D {
 public:
-    // debugName is optional and Editor-only (see GpuMemoryTracker) - same
-    // convention as Buffer/RenderTexture's own debugName parameter.
+    // debugName is optional and purely cosmetic - same convention as
+    // Buffer/RenderTexture's own debugName parameter (see Buffer.h's doc
+    // comment for the full "who actually stores this" story).
     //
     // allowStorageImageAccess (default false - every existing call site is
     // unaffected) opts this Texture2D's image into

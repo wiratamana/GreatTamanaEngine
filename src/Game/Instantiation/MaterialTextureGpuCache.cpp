@@ -54,8 +54,9 @@ TextureHandle MaterialTextureGpuCache::Resolve(
     // frame-debugger-3/PHASE1_RENDERER_CAPTURE_INSTRUMENTATION.md's Step 2:
     // RenderSystem::Draw()'s FrameDebuggerCaptureContext needs every
     // DISTINCT real bound MaterialTexture to actually report a DISTINCT
-    // name (via Renderer::GetMemoryDebugName()), which the old shared
-    // literal string could never do.
+    // name (via EditorGpuMemoryNameOverlay::GetDebugName() - editor-core-
+    // separation-1 campaign, PHASE4; formerly Renderer::GetMemoryDebugName()),
+    // which the old shared literal string could never do.
     const std::string debugName = "MaterialTexture " + textureGuid.ToString();
     const TextureHandle handle = renderSystem.RegisterTexture(renderer.CreateMaterialTexture2D(
         decoded->rgba8Pixels.data(), static_cast<int>(decoded->width), static_cast<int>(decoded->height),
