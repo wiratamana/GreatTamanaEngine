@@ -1,6 +1,6 @@
 #include "FrameProfiler.h"
 
-#include <SDL3/SDL_timer.h>
+#include "ProfilingClock.h" // editor-core-separation-1 campaign, PHASE14 - was <SDL3/SDL_timer.h> directly; gte_core no longer includes any real SDL3 header (mirrors ScopeTimer.h/JobScopeTimer.h's own Phase 11 fix).
 
 #include <algorithm>
 #include <cstring>
@@ -17,8 +17,8 @@ namespace {
 // adjacent, and is always linked regardless of GTE_ENABLE_EDITOR.
 double ElapsedMilliseconds(std::uint64_t startTicks) noexcept
 {
-    const std::uint64_t nowTicks = SDL_GetPerformanceCounter();
-    const std::uint64_t frequency = SDL_GetPerformanceFrequency();
+    const std::uint64_t nowTicks = GetProfilingPerformanceCounter();
+    const std::uint64_t frequency = GetProfilingPerformanceFrequency();
     if (frequency == 0) {
         return 0.0; // Defensive - never divide by a queried value blindly.
     }
@@ -41,7 +41,7 @@ void FrameProfiler::BeginFrame() noexcept
     }
 
     m_frameInProgress = true;
-    m_frameStartTicks = SDL_GetPerformanceCounter();
+    m_frameStartTicks = GetProfilingPerformanceCounter();
     m_current = FrameSample{};
     m_current.frameIndex = m_frameIndex;
     m_current.frameStartTicks = m_frameStartTicks;

@@ -1,20 +1,34 @@
-// Tier 1: verifies SDL_GetPerformanceCounter()/SDL_GetPerformanceFrequency()
-// (the ONE clock this engine's Profiling module is built on - see
-// AGENTS.md, "Profiling") are safe to call CONCURRENTLY, from several
-// threads at once, with no external synchronization of any kind. This is
-// the concrete verification item
+// Tier 1: verifies gte::Profiling::GetProfilingPerformanceCounter()/
+// GetProfilingPerformanceFrequency() (the ONE clock this engine's Profiling
+// module is built on - see AGENTS.md, "Profiling") are safe to call
+// CONCURRENTLY, from several threads at once, with no external
+// synchronization of any kind. This is the concrete verification item
 // JOBSYSTEM_PHASE4_THREAD_SAFETY_AUDIT_INTEGRATION_POINTS_v2.md (Job System
 // Phase 4, Step 3.2) calls for before Phase 5's JobScopeTimer may rely on
 // calling both of these functions from an arbitrary worker thread while the
 // main thread might simultaneously be doing the exact same thing for its
 // own ScopeTimer scopes.
 //
-// No SDL_Init()/video subsystem is needed here - SDL_GetPerformanceCounter()/
-// SDL_GetPerformanceFrequency() are plain, stateless queries against a
-// platform-level monotonic counter, independent of SDL's subsystems (the
-// same "SDL types/functions that don't need SDL_Init()" pattern already
-// established by tests/Memory/SdlMemoryTrackerTests.cpp and
-// tests/Application/EventTranslatorTests.cpp).
+// editor-core-separation-1 campaign, PHASE14
+// (PHASE14_WINDOW_SDL_RELOCATION_TO_EDITOR.md) - this file's own NAME is a
+// historical artifact: it originally called SDL_GetPerformanceCounter()/
+// SDL_GetPerformanceFrequency() directly (from <SDL3/SDL_timer.h>), since
+// that is what ScopeTimer.h/JobScopeTimer.h actually called through at the
+// time. Phase 14 changed the underlying clock these two production headers
+// rely on to std::chrono::steady_clock (see src/Profiling/ProfilingClock.cpp's
+// own comment for why - a real, live SDL-link leak Phase 14's own new
+// archive-content regression test caught) - this test now verifies the
+// SAME thread-safety property against the REAL functions production code
+// actually calls today, gte::Profiling::GetProfilingPerformanceCounter()/
+// GetProfilingPerformanceFrequency(), rather than raw SDL. Left at its
+// original file path/test-suite name (not renamed) to avoid unrelated
+// CMakeLists.txt/build-graph churn in a phase already carrying a large,
+// high-risk diff - the content below is what matters, not the file name.
+//
+// No real SDL_Init()/video subsystem was ever needed for this - both
+// gte::Profiling functions are plain, stateless queries against a
+// platform-level monotonic counter (now std::chrono::steady_clock,
+// previously SDL's own equivalent), independent of any windowing subsystem.
 //
 // Both tests below deliberately use a shared start barrier (every worker
 // thread blocks until every OTHER thread has also registered as ready, then
@@ -26,7 +40,7 @@
 // concurrent calls were subtly unsafe but simply never happened to overlap
 // during a given run.
 
-#include <SDL3/SDL_timer.h>
+#include "Profiling/ProfilingClock.h"
 
 #include <gtest/gtest.h>
 
@@ -83,7 +97,7 @@ TEST(JobSystemSdlClockThreadSafetyTests, FrequencyIsConsistentAcrossConcurrentTh
     for (int i = 0; i < kThreadCount; ++i) {
         threads.emplace_back([&barrier, &frequencies, i]() {
             barrier.Arrive();
-            frequencies[static_cast<std::size_t>(i)] = SDL_GetPerformanceFrequency();
+            frequencies[static_cast<std::size_t>(i)] = Profiling::GetProfilingPerformanceFrequency();
         });
     }
 
@@ -91,8 +105,8 @@ TEST(JobSystemSdlClockThreadSafetyTests, FrequencyIsConsistentAcrossConcurrentTh
         t.join();
     }
 
-    // SDL_GetPerformanceFrequency() is documented as a fixed value for the
-    // life of the process - every thread must observe the exact same,
+    // GetProfilingPerformanceFrequency() is documented as a fixed value for
+    // the life of the process - every thread must observe the exact same,
     // non-zero value, even when every one of them queries it at
     // (approximately) the same instant.
     ASSERT_NE(frequencies[0], static_cast<std::uint64_t>(0));
@@ -121,7 +135,7 @@ TEST(JobSystemSdlClockThreadSafetyTests, CounterIsMonotonicPerThreadUnderConcurr
             barrier.Arrive();
             std::vector<std::uint64_t>& mine = samples[static_cast<std::size_t>(i)];
             for (std::uint64_t& sample : mine) {
-                sample = SDL_GetPerformanceCounter();
+                sample = Profiling::GetProfilingPerformanceCounter();
             }
         });
     }
@@ -134,7 +148,7 @@ TEST(JobSystemSdlClockThreadSafetyTests, CounterIsMonotonicPerThreadUnderConcurr
     // a torn/corrupted read from an unsafe concurrent implementation would
     // show up as a nonsensical backward jump within one thread's own
     // sequence. This is the actual, concrete claim this phase's audit
-    // needed verified: calling SDL_GetPerformanceCounter() from many
+    // needed verified: calling GetProfilingPerformanceCounter() from many
     // threads at the same time never corrupts any individual thread's own
     // results.
     for (int i = 0; i < kThreadCount; ++i) {

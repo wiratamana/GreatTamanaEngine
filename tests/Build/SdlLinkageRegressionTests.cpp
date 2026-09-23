@@ -39,11 +39,35 @@
 // see Assets/GtaFileTests.cpp/PmxLoaderTests.cpp) - zero process spawning,
 // zero OS dialogs, zero antivirus interaction, 100% deterministic.
 //
-// Phase 14 (WINDOW_SDL_RELOCATION_TO_EDITOR) is expected to flip this exact
-// test's own expectation (or add a sibling test asserting the opposite) once
-// Window.cpp/SdlContext move out of gte_core and gte_core drops SDL3::SDL3
-// at link time entirely - at that point, SDL3.dll should no longer appear in
-// GreatTamanaEngineTests.exe's own import table at all.
+// --- PHASE14 outcome (WINDOW_SDL_RELOCATION_TO_EDITOR) - read before trusting
+// the two tests' names below at face value ------------------------------
+//
+// Phase 14 genuinely moved Window.cpp/Application.cpp(SdlContext)/
+// EventTranslator.cpp/SdlMemoryTracker.cpp out of gte_core and into
+// gte_editor, and fixed FrameProfiler.cpp/WorkerTimelineData.cpp to route
+// through Profiling/ProfilingClock.cpp instead of calling SDL directly -
+// gte_core.a itself genuinely, mechanically no longer references a single
+// real SDL3 function symbol (see GteCoreArchiveNoLongerReferencesRealSdl3FunctionSymbols
+// below, the actually-true "flip" this phase achieves).
+//
+// HOWEVER: the EXE-level test immediately below this comment (unchanged in
+// NAME/ASSERTION from Phase 1 - still asserts SDL3.dll IS present) does NOT
+// flip, and CANNOT flip while it remains true, for a genuinely different,
+// newly-understood reason than Phase 1 originally found: this same test
+// BINARY also directly compiles tests/Memory/SdlMemoryTrackerTests.cpp
+// (calls SdlMemoryTracker::Install() -> real SDL_SetMemoryFunctions()) - a
+// DELIBERATE, legitimate Tier 1 test whose own explicit purpose is
+// exercising real SDL3 functions. Test .cpp files are never part of
+// gte_core.a/gte_editor.a (see tests/CMakeLists.txt's own GTE_TEST_SOURCES) -
+// they compile straight into THIS executable's own object files, so the
+// final .exe's PE import table lists SDL3.dll regardless of which static
+// library Window.cpp/SdlMemoryTracker.cpp physically live in. This is a
+// mechanically-confirmed, unavoidable fact, not an incomplete fix - see
+// PHASE14_COMPLETION_REPORT.md for the full investigation. (A second such
+// direct-SDL test, Jobs/JobSystemSdlClockThreadSafetyTests.cpp, was fixed
+// this same phase to no longer touch SDL at all - see that file's own
+// updated header comment - since ScopeTimer.h/JobScopeTimer.h's own
+// underlying clock moved to std::chrono::steady_clock.)
 
 #include <gtest/gtest.h>
 
@@ -386,12 +410,16 @@ TEST(ListImportedDllNamesTest, ReturnsEmptyForAnEmptyBuffer)
     EXPECT_TRUE(ListImportedDllNames({}).empty());
 }
 
-// --- The real "before" snapshot: today's actual GreatTamanaEngineTests.exe -
+// --- The real "before"/"after" snapshot: today's actual GreatTamanaEngineTests.exe -
 
-// A DELIBERATE "before" snapshot - see this file's own header comment.
-// Currently PASSES because SDL3.dll IS genuinely listed in this test
-// binary's own import table today. Phase 14 must revisit this exact
-// assertion once gte_core drops its SDL3 dependency.
+// PHASE14 UPDATE: this test's own NAME/ASSERTION are DELIBERATELY left
+// UNCHANGED (still asserts SDL3.dll IS present) - see this file's own header
+// comment for exactly why this is the mechanically-correct, CONFIRMED
+// outcome, not a leftover unfixed regression: SdlMemoryTrackerTests.cpp
+// compiles a real, direct SDL3 function call straight into this same
+// executable, independent of gte_core/gte_editor's own library split. See
+// GteCoreArchiveNoLongerReferencesRealSdl3FunctionSymbols below for the
+// actually-achieved "flip" this phase delivers.
 TEST(SdlLinkageRegressionTest, SdlLinkageRegression_TestBinaryCurrentlyRequiresSdl3Dll)
 {
     const std::filesystem::path exePath = CurrentExecutablePath();
@@ -411,12 +439,81 @@ TEST(SdlLinkageRegressionTest, SdlLinkageRegression_TestBinaryCurrentlyRequiresS
            "least kernel32.dll), not that the binary genuinely has zero imports.";
 
     EXPECT_TRUE(ContainsDllNameCaseInsensitive(imports, "SDL3.dll"))
-        << "Expected GreatTamanaEngineTests.exe's own PE import table to list SDL3.dll "
-           "(today's known-bad state - gte_core's Window.cpp references real SDL "
-           "symbols even though no Tier-1 test ever opens a window), but it was not "
-           "found. If gte_core no longer needs SDL3.dll, this is actually GOOD NEWS - "
-           "it means Phase 14's fix already landed; update this test's expectation "
-           "accordingly (see this file's own header comment).";
+        << "Expected GreatTamanaEngineTests.exe's own PE import table to list SDL3.dll. "
+           "As of PHASE14, this is CORRECT and EXPECTED for a NEW reason (gte_core.a "
+           "itself no longer references SDL3 at all - see "
+           "GteCoreArchiveNoLongerReferencesRealSdl3FunctionSymbols below): "
+           "Memory/SdlMemoryTrackerTests.cpp directly calls a real SDL3 "
+           "function from this same test binary's own object files. If this ever "
+           "starts failing, either that test was removed/changed (update "
+           "this test's own expectation to match), or something else entirely new is "
+           "pulling SDL3.dll in - investigate before assuming this is 'the fix'.";
+}
+
+// A NEW, PHASE14-authored test - the actually-true, actually-achievable
+// "flip" this phase delivers: gte_core's own BUILT STATIC LIBRARY FILE
+// (never the final .exe - see the big comment above for why the .exe-level
+// check can never flip) mechanically contains zero reference to any real,
+// exported SDL3 function symbol. A compiled object file's symbol table
+// always carries a called function's exact, unmangled name as a plain ASCII
+// string (SDL's entire C API uses extern "C" linkage - no C++ name-mangling
+// to obscure this), so a raw byte-level substring scan over gte_core.a's own
+// contents is a real, mechanical, deterministic proof that NOTHING inside it
+// references these symbols anymore - not merely that CMakeLists.txt SAYS
+// gte_core dropped SDL3::SDL3 (a text-only claim a future edit could
+// silently re-break without anyone noticing).
+TEST(SdlLinkageRegressionTest, GteCoreArchiveNoLongerReferencesRealSdl3FunctionSymbols)
+{
+#ifdef GTE_CORE_ARCHIVE_PATH
+    const std::filesystem::path archivePath(GTE_CORE_ARCHIVE_PATH);
+
+    std::error_code existsError;
+    ASSERT_TRUE(std::filesystem::exists(archivePath, existsError))
+        << "gte_core's own built static library was not found at: " << archivePath
+        << " - GTE_CORE_ARCHIVE_PATH (tests/CMakeLists.txt) may be stale/wrong.";
+
+    const std::vector<std::uint8_t> archiveBytes = ReadWholeFile(archivePath);
+    ASSERT_FALSE(archiveBytes.empty()) << "Failed to read gte_core's own archive bytes from: " << archivePath;
+
+    // Every one of these is a REAL, exported SDL3 function this engine called
+    // directly from BEFORE this phase's own investigation: Window.cpp
+    // (SDL_CreateWindow/SDL_DestroyWindow/SDL_Vulkan_GetInstanceExtensions/
+    // SDL_Vulkan_CreateSurface), Application.cpp's SdlContext (SDL_Init) and
+    // its Run() event pump (SDL_PollEvent/SDL_GetTicksNS), and
+    // SdlMemoryTracker.cpp (SDL_SetMemoryFunctions/
+    // SDL_GetOriginalMemoryFunctions) and FrameProfiler.cpp/
+    // WorkerTimelineData.cpp (SDL_GetPerformanceCounter/
+    // SDL_GetPerformanceFrequency, before the ProfilingClock.cpp fix) - every
+    // one of those files has now either relocated out of gte_core (into
+    // gte_editor) or been fixed to route through ProfilingClock.cpp instead.
+    static constexpr const char* kRealSdl3FunctionSymbols[] = {
+        "SDL_CreateWindow",
+        "SDL_DestroyWindow",
+        "SDL_Vulkan_GetInstanceExtensions",
+        "SDL_Vulkan_CreateSurface",
+        "SDL_Init",
+        "SDL_PollEvent",
+        "SDL_GetTicksNS",
+        "SDL_SetMemoryFunctions",
+        "SDL_GetOriginalMemoryFunctions",
+        "SDL_GetPerformanceCounter",
+        "SDL_GetPerformanceFrequency",
+    };
+
+    for (const char* symbol : kRealSdl3FunctionSymbols) {
+        const std::size_t symbolLength = std::strlen(symbol);
+        const auto found = std::search(
+            archiveBytes.begin(), archiveBytes.end(), symbol, symbol + symbolLength);
+        EXPECT_EQ(found, archiveBytes.end())
+            << "gte_core.a still contains a reference to the real SDL3 symbol '" << symbol
+            << "' - Phase 14's SDL relocation is incomplete for whichever gte_core-side "
+               "file still calls it.";
+    }
+#else
+    GTEST_SKIP() << "GTE_CORE_ARCHIVE_PATH was not defined at compile time - "
+                    "tests/CMakeLists.txt's own target_compile_definitions() call is "
+                    "missing/stale.";
+#endif
 }
 
 } // namespace gte

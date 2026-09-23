@@ -1069,8 +1069,8 @@
 #                                            required verification item
 #                                            (JOBSYSTEM_PHASE4_THREAD_SAFETY_AUDIT_INTEGRATION_POINTS_v2.md,
 #                                            Step 3.2): confirms
-#                                            SDL_GetPerformanceCounter()/
-#                                            SDL_GetPerformanceFrequency()
+#                                            gte::Profiling::GetProfilingPerformanceCounter()/
+#                                            GetProfilingPerformanceFrequency()
 #                                            (the one clock
 #                                            src/Profiling/ScopeTimer.h is
 #                                            built on) are safe to call
@@ -1082,16 +1082,31 @@
 #                                            frequency, and every thread's
 #                                            own sequence of counter reads
 #                                            stays non-decreasing under
-#                                            concurrent load. No SDL_Init()/
-#                                            video subsystem needed (same
-#                                            "SDL functions that don't need
-#                                            SDL_Init()" pattern as
-#                                            Memory/SdlMemoryTrackerTests.cpp).
-#                                            Always built - has no dependency
-#                                            on GTE_ENABLE_JOB_SYSTEM/
-#                                            GTE_ENABLE_PROFILER at all, it
-#                                            calls SDL3's own timer API
-#                                            directly.
+#                                            concurrent load. editor-core-
+#                                            separation-1 campaign, PHASE14
+#                                            (PHASE14_WINDOW_SDL_RELOCATION_TO_EDITOR.md)
+#                                            - this file's own NAME is a
+#                                            historical artifact (not
+#                                            renamed, to avoid unrelated
+#                                            build-graph churn): it used to
+#                                            call SDL_GetPerformanceCounter()/
+#                                            SDL_GetPerformanceFrequency()
+#                                            directly, since that is what
+#                                            ScopeTimer.h/JobScopeTimer.h
+#                                            actually called through at the
+#                                            time; PHASE14 moved that
+#                                            underlying clock to
+#                                            std::chrono::steady_clock (see
+#                                            src/Profiling/ProfilingClock.cpp's
+#                                            own comment), so this test no
+#                                            longer touches SDL at all -
+#                                            Memory/SdlMemoryTrackerTests.cpp
+#                                            is now the ONLY test in this
+#                                            suite that still directly calls
+#                                            a real SDL3 function. Always
+#                                            built - has no dependency on
+#                                            GTE_ENABLE_JOB_SYSTEM/
+#                                            GTE_ENABLE_PROFILER at all.
 #
 #   Network/NetworkRoutesTests.cpp          - network-impl-1 campaign
 #                                            (task_manager/network-impl-1/
@@ -1946,16 +1961,46 @@
 #                                            GPU/Renderer/ImGui involved
 #                                            beyond a plain Registry.
 #
-# Note that the test BINARY still dynamically depends on SDL3.dll at process
-# load time regardless of the above (gte_core's Window.cpp references SDL
-# symbols like SDL_CreateWindow, even though no Tier 1 test ever calls
-# SDL_Init() or opens a window) - sdl3_copy_runtime_dll() below handles that,
-# same as for the real GreatTamanaEngine.exe. Build/SdlLinkageRegressionTests.cpp
-# (task_manager/editor-core-separation-1/
-# PHASE1_SDL_DEPENDENCY_REGRESSION_BASELINE.md) captures this exact fact as a
-# real, mechanically-checkable, standing CTest case - a deliberate "before"
-# snapshot Phase 14 of that same campaign is expected to flip once gte_core
-# drops its SDL3 dependency for good.
+# editor-core-separation-1 campaign, PHASE14
+# (PHASE14_WINDOW_SDL_RELOCATION_TO_EDITOR.md) - UPDATE to the note that used
+# to sit here: gte_core.a itself has genuinely dropped SDL3 at link time (see
+# the root CMakeLists.txt's own PHASE14 comments on gte_core's
+# target_link_libraries()) - Window.cpp/Application.cpp (SdlContext)/
+# EventTranslator.cpp/SdlMemoryTracker.cpp all physically compile as part of
+# gte_editor now, and FrameProfiler.cpp/WorkerTimelineData.cpp were fixed to
+# route through Profiling/ProfilingClock.cpp instead of calling SDL directly.
+#
+# HOWEVER - and this is a real, mechanically-confirmed finding, not a gap -
+# this test BINARY (GreatTamanaEngineTests.exe) STILL dynamically depends on
+# SDL3.dll at process load time, for a COMPLETELY DIFFERENT reason than
+# before: Memory/SdlMemoryTrackerTests.cpp calls SdlMemoryTracker::Install()
+# directly (a real SDL_SetMemoryFunctions()/SDL_GetOriginalMemoryFunctions()
+# call) - test .cpp files are never part of gte_core.a/gte_editor.a (see
+# GTE_TEST_SOURCES below), they compile straight into this one executable's
+# own object files, so the final .exe's own PE import table lists SDL3.dll
+# regardless of which static library SdlMemoryTracker.cpp physically lives
+# in - this is unavoidable while this ONE DELIBERATE, legitimate direct-SDL
+# Tier 1 test stays part of the same test binary (splitting the test suite
+# into multiple executables to avoid this is a separate, out-of-scope idea -
+# see PHASE14_COMPLETION_REPORT.md). Jobs/JobSystemSdlClockThreadSafetyTests.cpp
+# used to be a SECOND such test (calling SDL_GetPerformanceCounter()/
+# SDL_GetPerformanceFrequency() directly) but no longer is - PHASE14 also
+# moved ScopeTimer.h/JobScopeTimer.h's own underlying clock to
+# std::chrono::steady_clock (src/Profiling/ProfilingClock.cpp), so that test
+# now verifies the SAME thread-safety property against the real functions
+# production code actually calls today instead of raw SDL. sdl3_copy_runtime_dll()
+# below keeps handling the SDL3.dll-staging concern, same as for the real
+# GreatTamanaEngine.exe.
+# Build/SdlLinkageRegressionTests.cpp (task_manager/editor-core-separation-1/
+# PHASE1_SDL_DEPENDENCY_REGRESSION_BASELINE.md) now carries TWO regression
+# tests reflecting this precisely: the ORIGINAL exe-level PE-import-table
+# test (still correctly asserts SDL3.dll IS present, now for the
+# above-documented NEW reason, not the old Window.cpp-in-gte_core reason) and
+# a NEW GteCoreArchiveNoLongerReferencesRealSdl3FunctionSymbols test that
+# mechanically scans gte_core's own built static library file
+# ($<TARGET_FILE:gte_core>, see the target_compile_definitions() call below)
+# for any real SDL3 function symbol name and asserts NONE are found - the
+# actually-true, actually-achievable "flip" for this phase.
 #
 # --- Tier 2 (GPU-dependent) tests: intentionally not implemented yet -------
 #
@@ -2209,6 +2254,18 @@ if(TRUE)
 endif()
 
 add_executable(GreatTamanaEngineTests ${GTE_TEST_SOURCES})
+
+# editor-core-separation-1 campaign, PHASE14
+# (PHASE14_WINDOW_SDL_RELOCATION_TO_EDITOR.md) - lets
+# Build/SdlLinkageRegressionTests.cpp's new
+# GteCoreArchiveNoLongerReferencesRealSdl3FunctionSymbols test locate
+# gte_core's own built static library file reliably regardless of build-
+# directory layout/generator (mirrors sdl3_copy_runtime_dll()'s own
+# $<TARGET_FILE:...> generator-expression precedent), so it can mechanically
+# scan gte_core.a's own bytes for any real SDL3 function symbol name.
+target_compile_definitions(GreatTamanaEngineTests PRIVATE
+    GTE_CORE_ARCHIVE_PATH="$<TARGET_FILE:gte_core>"
+)
 
 # editor-core-separation-1 campaign, PHASE9 (PHASE9_CMAKE_TARGET_SPLIT.md,
 # Step 9) - links gte_editor (never gte_core directly, matching

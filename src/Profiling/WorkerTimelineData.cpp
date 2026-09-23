@@ -1,6 +1,6 @@
 #include "WorkerTimelineData.h"
 
-#include <SDL3/SDL_timer.h>
+#include "ProfilingClock.h" // editor-core-separation-1 campaign, PHASE14 - was <SDL3/SDL_timer.h> directly; gte_core no longer includes any real SDL3 header (mirrors ScopeTimer.h/JobScopeTimer.h's own Phase 11 fix).
 
 #include <algorithm>
 
@@ -17,7 +17,7 @@ std::vector<WorkerTimelinePoint> BuildWorkerTimelinePoints(const FrameSample& fr
     // process (see AGENTS.md, "Profiling") - reading it once here, rather
     // than per-sample, is purely an optimization, never a correctness
     // requirement.
-    const std::uint64_t frequency = SDL_GetPerformanceFrequency();
+    const std::uint64_t frequency = GetProfilingPerformanceFrequency();
 
     points.reserve(frame.workerJobCount);
     for (std::size_t i = 0; i < frame.workerJobCount; ++i) {

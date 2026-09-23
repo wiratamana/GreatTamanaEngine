@@ -387,12 +387,17 @@ add_library(gte_core STATIC
     src/Assets/MotionFile.cpp
     src/Assets/RigFile.h
     src/Assets/RigFile.cpp
-    src/Memory/SdlMemoryTracker.h
-    src/Memory/SdlMemoryTracker.cpp
-    src/Application/Application.cpp
-    src/Application/Application.h
-    src/Application/EventTranslator.cpp
-    src/Application/EventTranslator.h
+    # editor-core-separation-1 campaign, PHASE14
+    # (PHASE14_WINDOW_SDL_RELOCATION_TO_EDITOR.md) - live re-investigation
+    # found SdlMemoryTracker.h/.cpp (#include <SDL3/SDL_stdinc.h>),
+    # Application.cpp/.h (#include <SDL3/SDL.h>, SdlContext's SDL_Init()/
+    # SDL_Quit(), Run()'s own SDL_Event pump loop), and
+    # Application/EventTranslator.cpp/.h (#include <SDL3/SDL.h>, the SDL_Event
+    # -> gte::Event translator) ALL directly touch real SDL3 headers/
+    # functions - not just Window.cpp/SdlContext, as this phase's own plan
+    # originally assumed. All three relocated into gte_editor's own
+    # target_sources() below, alongside Window.cpp/.h (see that block's own
+    # comment for the full rationale) - see PHASE14_COMPLETION_REPORT.md.
     src/Application/MemorySnapshotBuilder.h
     src/Application/FrameCaptureBridge.h
     src/Application/FrameCaptureBridge.cpp
@@ -422,8 +427,9 @@ add_library(gte_core STATIC
     src/Event/Event.h
     src/Input/InputState.cpp
     src/Input/InputState.h
-    src/Window/Window.cpp
-    src/Window/Window.h
+    # editor-core-separation-1 campaign, PHASE14 - Window.cpp/.h relocated
+    # into gte_editor's own target_sources() below (see that block's own
+    # comment) - gte_core drops SDL3::SDL3 at link time entirely this phase.
     src/Renderer/Renderer.cpp
     src/Renderer/Renderer.h
     src/Renderer/FramePresenter.cpp
@@ -646,6 +652,40 @@ add_library(gte_core STATIC
 # gte::CreateEditorLayer() now has exactly ONE definition in the entire
 # repository, right here, in ImGuiEditorLayer.cpp.
 add_library(gte_editor STATIC
+    # editor-core-separation-1 campaign, PHASE14
+    # (PHASE14_WINDOW_SDL_RELOCATION_TO_EDITOR.md) - the composition root
+    # (Application) plus every file that directly touches real SDL3 headers/
+    # functions, relocated here from gte_core's own unconditional source list
+    # above so gte_core.a can drop SDL3::SDL3 at link time entirely:
+    #   - Window.cpp/.h - the RAII SDL_Window wrapper (SDL_CreateWindow/
+    #     SDL_DestroyWindow/SDL_Vulkan_GetInstanceExtensions/
+    #     SDL_Vulkan_CreateSurface).
+    #   - Memory/SdlMemoryTracker.h/.cpp - SDL_SetMemoryFunctions() hook (only
+    #     ever installed by SdlContext, below, and only ever read by the
+    #     Editor's own "Memory" panel - src/Editor/Panels/MemoryPanel.cpp,
+    #     already gte_editor).
+    #   - Application/EventTranslator.h/.cpp - the SDL_Event -> gte::Event
+    #     translator.
+    #   - Application/Application.h/.cpp - today's composition root: owns
+    #     SdlContext (SDL_Init()/SDL_Quit()) and Run()'s own SDL_Event pump
+    #     loop directly, not merely through Window. Application already
+    #     depends on gte_core's own Core/Renderer/Game/RenderGraph (Core.h) -
+    #     moving it here makes that an honest, correctly-directioned
+    #     gte_editor -> gte_core dependency instead of a same-archive
+    #     self-reference. This is a PURE file/target relocation (no class
+    #     redesign, no EditorHost, no executable rename) - Application stays
+    #     the exact same composition-root class Phase 12/13 already extracted
+    #     Core out of; nothing outside main.cpp (gte_editor's own executable,
+    #     since Phase 9) ever included Application.h. See
+    #     PHASE14_COMPLETION_REPORT.md for the full discovery/rationale.
+    src/Window/Window.h
+    src/Window/Window.cpp
+    src/Memory/SdlMemoryTracker.h
+    src/Memory/SdlMemoryTracker.cpp
+    src/Application/EventTranslator.h
+    src/Application/EventTranslator.cpp
+    src/Application/Application.h
+    src/Application/Application.cpp
     src/Editor/EditorContext.h
     src/Editor/ProjectRootPath.h
     src/Editor/ProjectRootPath.cpp
@@ -778,6 +818,15 @@ endif()
 # without repeating them.
 target_link_libraries(gte_editor PUBLIC gte_core)
 target_link_libraries(gte_editor PRIVATE imgui imguizmo)
+# editor-core-separation-1 campaign, PHASE14
+# (PHASE14_WINDOW_SDL_RELOCATION_TO_EDITOR.md) - SDL3 linkage moves here now
+# that Window.cpp/SdlContext (inside Application.cpp)/EventTranslator.cpp all
+# physically compile as part of gte_editor (see this target's own
+# target_sources() block above). PUBLIC (matching gte_core's own former
+# visibility) since gte_editor's public headers (Application.h, transitively
+# via EventTranslator.h/Window.h) leak real SDL3 types/declarations to this
+# target's own consumers (GreatTamanaEngine's main.cpp, GreatTamanaEngineTests).
+target_link_libraries(gte_editor PUBLIC SDL3::SDL3)
 
 # Exposes GTE_ENABLE_PROJECT_PANEL to C++ code as an actual 1/0 preprocessor
 # macro, needed by ImGuiEditorLayer.cpp/DockLayout.cpp's own
@@ -813,13 +862,25 @@ target_compile_definitions(gte_core PUBLIC GTE_ENABLE_NETWORK=$<BOOL:${GTE_ENABL
 # PUBLIC (not PRIVATE) for the same reason as the compile definition above:
 # any consumer of gte_core (GreatTamanaEngine's main.cpp, and every test in
 # GreatTamanaEngineTests) #includes engine headers that transitively need
-# SDL3/volk/vma/stb_image/KTX/httplib's include directories and, ultimately,
-# their libraries at final-link time - PUBLIC is what propagates both
-# automatically instead of every consumer having to repeat them. httplib is
-# included here purely as a debugging/tooling dependency (see
-# cmake/FetchHttplib.cmake) - nothing in gte_core uses it yet.
+# volk/vma/stb_image/KTX/httplib's include directories and, ultimately, their
+# libraries at final-link time - PUBLIC is what propagates both automatically
+# instead of every consumer having to repeat them. httplib is included here
+# purely as a debugging/tooling dependency (see cmake/FetchHttplib.cmake) -
+# nothing in gte_core uses it yet.
+#
+# editor-core-separation-1 campaign, PHASE14
+# (PHASE14_WINDOW_SDL_RELOCATION_TO_EDITOR.md) - SDL3::SDL3 REMOVED from this
+# line entirely (it used to be the first entry here). gte_core.a's own
+# translation units contain ZERO #include of any real SDL3 header and ZERO
+# reference to any real SDL3 function symbol as of this phase (Window.cpp/
+# Application.cpp/EventTranslator.cpp/SdlMemoryTracker.cpp all relocated into
+# gte_editor; FrameProfiler.cpp/WorkerTimelineData.cpp fixed to route through
+# Profiling/ProfilingClock.cpp instead, mirroring ScopeTimer.h/JobScopeTimer.h's
+# own Phase 11 fix) - see tests/Build/SdlLinkageRegressionTests.cpp's new
+# GteCoreArchiveNoLongerReferencesRealSdl3FunctionSymbols test, which
+# mechanically proves this against the real, built libgte_core.a bytes.
 target_include_directories(gte_core PUBLIC "${CMAKE_SOURCE_DIR}/src")
-target_link_libraries(gte_core PUBLIC SDL3::SDL3 volk vma stb_image stb_image_write KTX::ktx httplib nlohmann_json)
+target_link_libraries(gte_core PUBLIC volk vma stb_image stb_image_write KTX::ktx httplib nlohmann_json)
 
 # src/Jobs/JobSystem.cpp/.h use std::thread/std::mutex/std::condition_variable
 # unconditionally (the class itself always compiles - see JobSystem.h's own
