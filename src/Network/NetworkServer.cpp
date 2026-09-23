@@ -7,6 +7,22 @@
 #include "../Application/EngineCommandBridge.h"
 #include "../Application/FrameCaptureBridge.h"
 #include "../Application/FrameDebuggerCommandBridge.h"
+#include "../Core/Logging.h"
+// PHASE3 (editor-core-separation-1 campaign,
+// PHASE3_LOGGING_GLOBAL_LOGSINK_EXTRACTION.md) - GTE_LOG_* itself now only
+// needs Core/Logging.h above (no Editor dependency for that). This file
+// keeps a real, direct #include of Editor/Logger.h anyway, UNLIKE every
+// other file this phase touched, because GET /get_logs and POST /clear_logs
+// (below) call gte::Logger::Query()/Clear()/EntryCount()/IsEnabled()/
+// LatestEntryId() DIRECTLY - a real, pre-existing, ALREADY-DOCUMENTED
+// exception (AGENTS.md, "Logging": "the ONE documented, narrow exception to
+// this section's own reach engine state only through a reviewed bridge
+// rule") that is NOT gated behind any GTE_ENABLE_EDITOR macro at all (both
+// branches of the Logger class already compile and link fine either way -
+// see Editor/Logger.h) and is therefore genuinely OUT OF this phase's own
+// declared scope (fixing the GTE_LOG_* mechanism) - see
+// PHASE3_COMPLETION_REPORT.md's own "Discovered gap" section for the full
+// explanation of why this file cannot yet drop this #include entirely.
 #include "../Editor/Logger.h"
 #include "../Encoding/Base64.h"
 #include "../Math/Quat.h"

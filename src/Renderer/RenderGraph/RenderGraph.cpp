@@ -1,7 +1,7 @@
 #include "RenderGraph.h"
 
 #include "../Renderer.h"
-#include "../../Editor/Logger.h" // PHASE1 (render-pass-6 campaign, item 2.4) - GTE_LOG_WARNING for slot-budget overflow.
+#include "../../Core/Logging.h" // PHASE1 (render-pass-6 campaign, item 2.4) - GTE_LOG_WARNING for slot-budget overflow. Moved from Editor/Logger.h to Core/Logging.h by editor-core-separation-1's own PHASE3 (PHASE3_LOGGING_GLOBAL_LOGSINK_EXTRACTION.md) - gte_core must never include anything under src/Editor/.
 
 #include <cassert>
 #include <cstring>

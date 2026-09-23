@@ -1,140 +1,22 @@
 #pragma once
 
-#include <cctype>
-#include <cstdint>
+#include "../Core/LogSink.h"
+#include "../Core/Logging.h"
+
 #include <string>
+#include <string_view>
 #include <vector>
 
-// GTE_LOG_* macros - the ONE sanctioned way any call site anywhere in the
-// engine talks to the Logger (see AGENTS.md, "Logging", and
-// PHASE0_MASTER_STRATEGY.md's Locked Design Decision #13). Defined
-// unconditionally so a call site never needs its own #ifdef - see
-// Profiling/ScopeTimer.h's GTE_PROFILE_SCOPE for the identical precedent.
-//
-// Compile to a true empty no-op (`((void)0)` - the `message`/`category`
-// expressions are NEVER EVEN EVALUATED, not just discarded) when
-// GTE_ENABLE_EDITOR is OFF - a full release runtime game build pays
-// EXACTLY zero cost for every GTE_LOG_* call site in the entire engine,
-// including the cost of building the message string itself.
-#if GTE_ENABLE_EDITOR
-#define GTE_LOG_DEBUG(category, message)   ::gte::Logger::Log(::gte::LogLevel::Debug,   category, message)
-#define GTE_LOG_INFO(category, message)    ::gte::Logger::Log(::gte::LogLevel::Info,    category, message)
-#define GTE_LOG_WARNING(category, message) ::gte::Logger::Log(::gte::LogLevel::Warning, category, message)
-#define GTE_LOG_ERROR(category, message)   ::gte::Logger::Log(::gte::LogLevel::Error,   category, message)
-#else
-#define GTE_LOG_DEBUG(category, message)   ((void)0)
-#define GTE_LOG_INFO(category, message)    ((void)0)
-#define GTE_LOG_WARNING(category, message) ((void)0)
-#define GTE_LOG_ERROR(category, message)   ((void)0)
-#endif
+// PHASE3 (editor-core-separation-1 campaign,
+// PHASE3_LOGGING_GLOBAL_LOGSINK_EXTRACTION.md) - LogLevel/LogEntry/
+// LogQueryFilter/ToString()/TryParseLogLevel()/the GTE_LOG_* macros
+// themselves all moved OUT of this file and into the new, gte_core-owned
+// Core/Logging.h (included above) - see that file's own header comment for
+// the full "why". This file now owns ONLY the real ring-buffer store
+// (Logger, below) and its bridge into the new global ILogSink mechanism
+// (LoggerLogSink, also below) - both genuinely Editor-only concepts.
 
 namespace gte {
-
-enum class LogLevel : std::uint8_t { Debug, Info, Warning, Error };
-
-// "Debug"/"Info"/"Warning"/"Error" - used by the Editor Log panel and by
-// GET /get_logs' own JSON "level" field. An out-of-range value falls back
-// to "Unknown", never reads out of bounds.
-//
-// Defined here, INLINE, UNCONDITIONALLY (not inside any #if
-// GTE_ENABLE_EDITOR branch, and NOT merely declared-here-defined-out-of-
-// line-in-Logger.cpp the way PHASE1 originally shipped it) - PHASE3 fix,
-// flagged as a to-check item by PHASE1_COMPLETION_REPORT.md's own "worth
-// flagging" note: Network/NetworkRoutes.cpp (an ALWAYS-compiled translation
-// unit, never gated by GTE_ENABLE_EDITOR) calls both this function and
-// TryParseLogLevel() below UNCONDITIONALLY at the language level. Logger.cpp
-// (where these two used to be DEFINED) is only ever added to the build
-// inside CMakeLists.txt's `if(GTE_ENABLE_EDITOR)` block, so a hypothetical
-// GTE_ENABLE_EDITOR=OFF build would have failed to LINK
-// NetworkRoutes.cpp.obj (an unresolved external symbol) even though neither
-// function is ever actually reached at runtime in that configuration
-// (Logger::Query() always returns an empty vector, so
-// BuildGetLogsResponseJson() never actually calls ToString() in a real OFF
-// build; ParseGetLogsQuery() only calls TryParseLogLevel() for a non-empty
-// min_level value, but the SYMBOL reference still exists at compile time
-// regardless). Making both fully `inline` here, always-defined regardless
-// of GTE_ENABLE_EDITOR, sidesteps this link hazard entirely for both
-// configurations, with no #ifdef needed at any call site - mirroring this
-// same file's own LogEntry/LogQueryFilter (also always-defined, outside any
-// #if) rather than Logger the class (genuinely dual-defined per branch,
-// since ITS behavior actually differs by configuration - these two free
-// functions' behavior does not).
-inline const char* ToString(LogLevel level) noexcept
-{
-    switch (level) {
-        case LogLevel::Debug:
-            return "Debug";
-        case LogLevel::Info:
-            return "Info";
-        case LogLevel::Warning:
-            return "Warning";
-        case LogLevel::Error:
-            return "Error";
-    }
-    return "Unknown";
-}
-
-// Case-insensitive parse of "debug"/"info"/"warning"/"error" -> LogLevel,
-// used by Network/NetworkRoutes.h's ParseGetLogsQuery() (Phase 3). Returns
-// false (leaving *outLevel untouched) for anything else. Inline/always-
-// defined for the exact same link-safety reason as ToString() above.
-inline bool TryParseLogLevel(const std::string& text, LogLevel* outLevel) noexcept
-{
-    if (outLevel == nullptr) {
-        return false;
-    }
-
-    std::string lower;
-    lower.reserve(text.size());
-    for (char c : text) {
-        lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
-    }
-
-    if (lower == "debug") {
-        *outLevel = LogLevel::Debug;
-        return true;
-    }
-    if (lower == "info") {
-        *outLevel = LogLevel::Info;
-        return true;
-    }
-    if (lower == "warning") {
-        *outLevel = LogLevel::Warning;
-        return true;
-    }
-    if (lower == "error") {
-        *outLevel = LogLevel::Error;
-        return true;
-    }
-    return false;
-}
-
-struct LogEntry {
-    std::uint64_t id = 0;              // Monotonic, never reused, never reset by Clear().
-    std::uint64_t frameNumber = 0;     // Logger::SetCurrentFrame()'s last value at record time.
-    double timestampSeconds = 0.0;     // Seconds since THIS PROCESS's first Logger::Log() call.
-    LogLevel level = LogLevel::Info;
-    std::string category;
-    std::string message;
-};
-
-// Query parameters for Logger::Query() - every field is a filter that is
-// SKIPPED (matches everything) when left at its default/empty value. All
-// filters that ARE set must ALL match for an entry to be included (logical
-// AND), mirroring every other multi-field filter/parse struct already in
-// this codebase (e.g. Network/NetworkRoutes.h's request-parsing structs).
-struct LogQueryFilter {
-    std::uint64_t sinceId = 0;         // Only entries with id > sinceId. 0 = from the very start.
-    bool hasMinLevel = false;
-    LogLevel minLevel = LogLevel::Debug; // Inclusive-and-above by ordinal value (Debug < Info < Warning < Error).
-    std::string category;              // Empty = any. Exact, case-sensitive match otherwise.
-    std::string keyword;                // Empty = any. Case-insensitive substring match on `message`.
-    bool hasFrameMin = false;
-    std::uint64_t frameMin = 0;        // Inclusive.
-    bool hasFrameMax = false;
-    std::uint64_t frameMax = 0;        // Inclusive.
-    std::size_t limit = 0;             // 0 = no limit. Otherwise keep only the NEWEST `limit` matches.
-};
 
 #if GTE_ENABLE_EDITOR
 
@@ -160,6 +42,20 @@ struct LogQueryFilter {
 // append order" can never disagree under concurrent callers).
 // SetCurrentFrame()'s value is a separate, relaxed atomic read/write, not
 // mutex-guarded (see Logger.cpp for why that's still correct).
+//
+// PHASE3 note: Logger deliberately does NOT itself inherit ILogSink (even
+// though it conceptually IS one) - a static Log(LogLevel, const
+// std::string&, const std::string&) (this class's own real, tested,
+// pre-existing API - see Editor/LoggerTests.cpp) and a virtual
+// Log(LogLevel, std::string_view, std::string_view) override
+// (ILogSink's required signature) on the SAME class name a caller invokes
+// via a bare qualified-id (`Logger::Log(...)`, used throughout this
+// engine's own test suite and NetworkRoutes.h's route handlers) genuinely
+// AMBIGUATES overload resolution for any string-literal argument (verified
+// directly via a small standalone g++ repro during this phase - both
+// `const std::string&` and `std::string_view` are equally-ranked
+// user-defined conversion sequences from a `const char*` literal). See
+// LoggerLogSink below instead - a small, separate forwarding type.
 class Logger {
 public:
     static constexpr std::size_t kCapacity = 2000;
@@ -168,11 +64,11 @@ public:
     // value and a timestamp relative to this process's first ever
     // Logger::Log() call. If the ring buffer is already at kCapacity, the
     // single oldest entry is evicted first (FIFO). Never called directly
-    // by feature code - see the GTE_LOG_* macros above. Deliberately NOT
-    // noexcept (see this file's own "Important nuances" note in
-    // PHASE1_CORE_LOGGER_MODULE.md): it locks a mutex and allocates
-    // (std::string/LogEntry copies), either of which can theoretically
-    // throw.
+    // by feature code - see the GTE_LOG_* macros (Core/Logging.h).
+    // Deliberately NOT noexcept (see this file's own "Important nuances"
+    // note in PHASE1_CORE_LOGGER_MODULE.md): it locks a mutex and
+    // allocates (std::string/LogEntry copies), either of which can
+    // theoretically throw.
     static void Log(LogLevel level, const std::string& category, const std::string& message);
 
     // Called ONCE per real engine frame, from Application::Run() (Phase 2)
@@ -242,5 +138,32 @@ public:
 };
 
 #endif // GTE_ENABLE_EDITOR
+
+// PHASE3 (editor-core-separation-1 campaign) - the ONE concrete ILogSink
+// implementation this engine ships. A small, separate forwarding type
+// (see Logger's own class comment above for exactly why it isn't Logger
+// itself) - installed once via InstallLogSink(&LoggerLogSink::Instance())
+// by Application's constructor today (Phase 16 of this campaign moves that
+// one call site into EditorHost instead - see this file's own future
+// history). Defined identically regardless of GTE_ENABLE_EDITOR (both
+// branches of Logger above share the exact same Log() signature), so this
+// type itself needs no #if - a GTE_ENABLE_EDITOR=OFF build's version simply
+// forwards into Logger's own no-op Log().
+class LoggerLogSink : public ILogSink {
+public:
+    void Log(LogLevel level, std::string_view category, std::string_view message) override
+    {
+        Logger::Log(level, std::string(category), std::string(message));
+    }
+
+    // Meyers singleton - lazily constructed on first use, destroyed at
+    // static-destruction time, exactly like every other process-global
+    // singleton accessor already in this codebase.
+    static LoggerLogSink& Instance() noexcept
+    {
+        static LoggerLogSink s_instance;
+        return s_instance;
+    }
+};
 
 } // namespace gte

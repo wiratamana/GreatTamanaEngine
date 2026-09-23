@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "../Editor/EditorPanelCatalog.h"
-#include "../Editor/Logger.h"
+#include "../Core/Logging.h"
 
 namespace gte::Network {
 
@@ -888,7 +888,7 @@ std::string BuildScenePathResponseJson(bool success, const std::string& errorMes
 // param (this project's existing convention - see ParseActivateTabQuery())
 // - an empty string for a given field below means "this filter was not
 // supplied", exactly mirroring LogQueryFilter's own "empty/default means
-// match everything" semantics (see Editor/Logger.h).
+// match everything" semantics (see Core/Logging.h - moved out of Editor/Logger.h by editor-core-separation-1's own PHASE3).
 struct ParsedGetLogsQuery {
     // Defaults to false, matching this file's OWN existing convention for
     // every other Parsed*Query/Parsed*Request struct (e.g.
@@ -908,7 +908,7 @@ struct ParsedGetLogsQuery {
 //   - sinceIdParam/frameMinParam/frameMaxParam: must each be empty, or a
 //     valid non-negative base-10 integer literal.
 //   - minLevelParam: must be empty, or one of "debug"/"info"/"warning"/
-//     "error" (case-insensitive - see TryParseLogLevel(), Editor/Logger.h).
+//     "error" (case-insensitive - see TryParseLogLevel(), Core/Logging.h - moved out of Editor/Logger.h by editor-core-separation-1's own PHASE3).
 //   - limitParam: must be empty, or a valid non-negative base-10 integer
 //     literal - defaults to 200 when empty, and is SILENTLY CLAMPED to
 //     Logger::kCapacity (2000) when larger, rather than treated as an

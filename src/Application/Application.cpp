@@ -6,7 +6,7 @@
 #include "MemorySnapshotBuilder.h"
 #include "RenderPasses.h"
 
-#include "../Editor/Logger.h"
+#include "../Editor/Logger.h" // PHASE16 of editor-core-separation-1 moves this include (and the InstallLogSink() call in the constructor body below) into EditorHost - Application still needs it directly for now (this file still owns the ONE composition-root call site that installs the real sink).
 #include "../Encoding/DepthVisualization.h"
 #include "../Encoding/HdrColorVisualization.h"
 #include "../Encoding/PixelConversion.h"
@@ -337,6 +337,18 @@ Application::Application(const std::string& title, int width, int height)
     , m_windowWidth(width)
     , m_windowHeight(height)
 {
+    // editor-core-separation-1 campaign, PHASE3
+    // (PHASE3_LOGGING_GLOBAL_LOGSINK_EXTRACTION.md) - installs the ONE real
+    // ILogSink this engine ships (Editor/Logger.h's LoggerLogSink) into the
+    // new global sink mechanism (Core/LogSink.h), FIRST, before anything
+    // else in this constructor body runs (including the two Register*
+    // calls and NetworkServer::Start() immediately below, both of which can
+    // themselves call GTE_LOG_*) - install-once, idempotent, mirrors
+    // SdlMemoryTracker::Install()'s own "before first use" timing rule.
+    // Phase 16 of this same campaign moves this one call site into
+    // EditorHost's own constructor instead, once EditorHost exists.
+    gte::InstallLogSink(&gte::LoggerLogSink::Instance());
+
     // render-pass-3 campaign, PHASE2/PHASE3 - registers both
     // m_offscreenRenderPipeline (every remaining production pass) and
     // m_presentRenderPipeline ("Present" alone) once, here, at construction
@@ -357,11 +369,13 @@ Application::Application(const std::string& title, int width, int height)
     m_networkServer.Start(8080);
 #endif
 
-    // logger-1 campaign, Phase 2 - proves GTE_LOG_* is reachable with zero
-    // #ifdef from Application.cpp's own constructor, right after every other
-    // subsystem (including the network server, above) is already
-    // constructed/started. Unconditional - GTE_LOG_INFO vanishes on its own
-    // when GTE_ENABLE_EDITOR is OFF (see Editor/Logger.h).
+    // logger-1 campaign, Phase 2 - proves GTE_LOG_* is reachable, right
+    // after every other subsystem (including the network server, above) is
+    // already constructed/started. Unconditional at the language level
+    // (Core/Logging.h, editor-core-separation-1 campaign's own PHASE3) -
+    // reaches the real Logger only because InstallLogSink() above already
+    // ran; a build/host that never calls InstallLogSink() would make this
+    // a safe, silent no-op instead (see Core/LogSink.h).
     GTE_LOG_INFO("Application", "GreatTamanaEngine started.");
 }
 

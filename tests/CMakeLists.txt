@@ -2002,6 +2002,15 @@
 set(GTE_TEST_SOURCES
     Build/SdlLinkageRegressionTests.cpp
     Core/TimeTests.cpp
+    # editor-core-separation-1 campaign, PHASE3
+    # (PHASE3_LOGGING_GLOBAL_LOGSINK_EXTRACTION.md) - unconditional, since
+    # src/Core/LogSink.h/.cpp is unconditionally in gte_core's own source
+    # list. Also registers the ONE global gtest Environment that installs
+    # the real Logger sink for this whole test binary (see the file's own
+    # header comment) - every OTHER test file below that calls GTE_LOG_*
+    # directly and expects it to reach the real Logger ring buffer depends
+    # on this file being compiled in.
+    Core/LogSinkTests.cpp
     Memory/GpuResourceHandleTests.cpp
     Encoding/Base64Tests.cpp
     Encoding/PixelConversionTests.cpp

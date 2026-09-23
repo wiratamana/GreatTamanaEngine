@@ -1,6 +1,5 @@
 #include "RenderPassGroupRegistry.h"
-
-#include "../../Editor/Logger.h" // PHASE2 - GTE_LOG_WARNING for the "tag re-registered under a different heading" soft diagnostic (see this file's own header comment). Safe to include unconditionally regardless of GTE_ENABLE_EDITOR - see RenderGraph.cpp's own identical precedent.
+#include "../../Core/Logging.h" // PHASE2 - GTE_LOG_WARNING for the "tag re-registered under a different heading" soft diagnostic (see this file's own header comment). Safe to include unconditionally regardless of GTE_ENABLE_EDITOR - see RenderGraph.cpp's own identical precedent. Moved from Editor/Logger.h to Core/Logging.h by editor-core-separation-1's own PHASE3 (PHASE3_LOGGING_GLOBAL_LOGSINK_EXTRACTION.md) - gte_core must never include anything under src/Editor/.
 
 #include <cstring>
 #include <vector>

@@ -1,5 +1,17 @@
 #include "NetworkRoutes.h"
 
+// PHASE3 (editor-core-separation-1 campaign,
+// PHASE3_LOGGING_GLOBAL_LOGSINK_EXTRACTION.md) - NetworkRoutes.h itself no
+// longer includes Editor/Logger.h (it only ever needed ToString()/
+// TryParseLogLevel(), now unconditional in Core/Logging.h - see that
+// header's own #include above). This .cpp, however, still needs the real
+// Editor::Logger CLASS directly: ParseGetLogsQuery() below clamps its
+// `limit` field against Logger::kCapacity. This is a real, pre-existing,
+// NOT-macro-gated dependency this phase's own narrow scope (fixing the
+// GTE_LOG_* mechanism) does not resolve - see PHASE3_COMPLETION_REPORT.md's
+// own "Discovered gap" section.
+#include "../Editor/Logger.h"
+
 #include <nlohmann/json.hpp>
 
 #include <cmath>

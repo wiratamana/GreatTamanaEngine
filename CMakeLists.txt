@@ -237,6 +237,15 @@ add_library(gte_core STATIC
     src/Core/Time.h
     src/Core/Time.cpp
     src/Core/EngineContext.h
+    # editor-core-separation-1 campaign, PHASE3
+    # (PHASE3_LOGGING_GLOBAL_LOGSINK_EXTRACTION.md) - the global,
+    # gte_core-owned logging types/macros (Logging.h) and the registrable
+    # ILogSink mechanism they route through (LogSink.h/.cpp), replacing the
+    # old direct dependency every one of these files used to have on
+    # src/Editor/Logger.h.
+    src/Core/Logging.h
+    src/Core/LogSink.h
+    src/Core/LogSink.cpp
     src/Math/MathTypes.h
     src/Math/Vec2.h
     src/Math/Vec3.h

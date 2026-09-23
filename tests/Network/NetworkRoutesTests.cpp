@@ -1,5 +1,13 @@
 #include "Network/NetworkRoutes.h"
 
+// PHASE3 (editor-core-separation-1 campaign,
+// PHASE3_LOGGING_GLOBAL_LOGSINK_EXTRACTION.md) - NetworkRoutes.h no longer
+// includes Editor/Logger.h (see that header's own updated comment), but
+// several tests below (GetLogsEndToEndTests/ClearLogsEndToEndTests/
+// ParseGetLogsQueryTests) still need the real Editor::Logger class
+// directly. Matches Network/NetworkRoutes.cpp's own identical fix.
+#include "Editor/Logger.h"
+
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 

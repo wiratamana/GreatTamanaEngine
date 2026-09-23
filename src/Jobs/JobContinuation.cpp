@@ -1,8 +1,7 @@
 #include "JobContinuation.h"
 
 #include "JobSystem.h"
-
-#include "../Editor/Logger.h"
+#include "../Core/Logging.h"
 
 #include <atomic>
 #include <cassert>

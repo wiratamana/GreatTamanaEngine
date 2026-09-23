@@ -51,16 +51,16 @@ double SecondsSinceFirstLog() noexcept
 
 } // namespace
 
-// ToString(LogLevel)/TryParseLogLevel() used to be DECLARED in Logger.h but
-// DEFINED here - moved to fully `inline`, always-defined definitions
-// directly in Logger.h by PHASE3 (logger-1 campaign,
-// PHASE3_NETWORK_ENDPOINTS_GET_LOGS_AND_CLEAR_LOGS.md), fixing a real link
-// hazard PHASE1_COMPLETION_REPORT.md itself had flagged: Network/
-// NetworkRoutes.cpp (an ALWAYS-compiled translation unit) calls both
-// UNCONDITIONALLY, but this file is only added to the build inside
-// CMakeLists.txt's `if(GTE_ENABLE_EDITOR)` block - see Logger.h's own,
-// much longer comment above each function for the full explanation. Do NOT
-// re-add definitions of either function here.
+// ToString(LogLevel)/TryParseLogLevel() used to be DECLARED in this file's
+// own Logger.h but DEFINED here - moved to fully `inline`, always-defined
+// definitions in Core/Logging.h instead (editor-core-separation-1
+// campaign's own PHASE3, PHASE3_LOGGING_GLOBAL_LOGSINK_EXTRACTION.md),
+// which itself continued the "make it inline, unconditional, no link
+// hazard" precedent the logger-1 campaign's own PHASE3
+// (PHASE3_NETWORK_ENDPOINTS_GET_LOGS_AND_CLEAR_LOGS.md) originally
+// established when these two functions first moved out of Logger.cpp and
+// into (what was then) Logger.h. Do NOT re-add definitions of either
+// function here - or in this file's own Logger.h - ever again.
 
 void Logger::Log(LogLevel level, const std::string& category, const std::string& message)
 {
