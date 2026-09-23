@@ -481,6 +481,16 @@ private:
     RenderGraphNameSlotTable m_synchronousTimingSlots{ kSynchronousTimingSlotBudget };
     RenderGraphNameSlotTable m_pipelinedTimingSlots{ kPipelinedTimingSlotBudget };
 
+    // PHASE1 (render-pass-6 campaign, item 2.4) - names whose timing-slot
+    // overflow has already been reported this process lifetime, per regime -
+    // so a name that keeps overflowing every single frame is only ever logged
+    // ONCE, not once per frame forever. A plain vector (never a hash set),
+    // matching this engine's "no hashing on the hot path" convention (see
+    // AGENTS.md) - overflow is expected to be a rare, one-time-per-name event,
+    // never a steady-state hot path.
+    std::vector<const char*> m_reportedSynchronousOverflows;
+    std::vector<const char*> m_reportedPipelinedOverflows;
+
     // B.1 - pipelined-regime bookkeeping: incremented once per real
     // PipelinedDeferredReadback Execute() call (never on a frame where
     // FramePresenter::PresentViaRenderGraph() skipped calling Execute() at

@@ -140,5 +140,64 @@ TEST(RenderGraphNameSlotTableTests, NameAtSlotReturnsNullForNegativeOrOutOfRange
     EXPECT_EQ(table.NameAtSlot(999), nullptr);
 }
 
+// --- PHASE1 (render-pass-6 campaign, item 2.4) - JustOverflowed() ------------
+
+TEST(RenderGraphNameSlotTableTests, JustOverflowedIsFalseImmediatelyAfterConstruction)
+{
+    RenderGraphNameSlotTable table(4);
+    EXPECT_FALSE(table.JustOverflowed());
+}
+
+TEST(RenderGraphNameSlotTableTests, JustOverflowedIsFalseAfterASuccessfulAssignmentOfANewNameStillUnderBudget)
+{
+    RenderGraphNameSlotTable table(4);
+    EXPECT_EQ(table.AssignOrGetSlot("GameView"), 0);
+    EXPECT_FALSE(table.JustOverflowed());
+}
+
+TEST(RenderGraphNameSlotTableTests, JustOverflowedIsFalseForANullptrName)
+{
+    RenderGraphNameSlotTable table(4);
+    EXPECT_EQ(table.AssignOrGetSlot(nullptr), kNoNameSlot);
+    EXPECT_FALSE(table.JustOverflowed());
+}
+
+TEST(RenderGraphNameSlotTableTests, JustOverflowedIsFalseWhenRequeryingANameThatAlreadyHasASlot)
+{
+    RenderGraphNameSlotTable table(2);
+    EXPECT_EQ(table.AssignOrGetSlot("A"), 0);
+    EXPECT_EQ(table.AssignOrGetSlot("B"), 1);
+    // Budget is now fully spent, but re-querying an already-assigned name
+    // must never be reported as an overflow - it isn't one.
+    EXPECT_EQ(table.AssignOrGetSlot("A"), 0);
+    EXPECT_FALSE(table.JustOverflowed());
+}
+
+TEST(RenderGraphNameSlotTableTests, JustOverflowedIsTrueExactlyOnTheCallThatFirstOverflowsForANewName)
+{
+    RenderGraphNameSlotTable table(2);
+    EXPECT_EQ(table.AssignOrGetSlot("A"), 0);
+    EXPECT_FALSE(table.JustOverflowed());
+    EXPECT_EQ(table.AssignOrGetSlot("B"), 1);
+    EXPECT_FALSE(table.JustOverflowed());
+    // "C" is a brand-new name and the budget of 2 is already fully spent.
+    EXPECT_EQ(table.AssignOrGetSlot("C"), kNoNameSlot);
+    EXPECT_TRUE(table.JustOverflowed());
+}
+
+TEST(RenderGraphNameSlotTableTests, JustOverflowedIsTrueOnEverySubsequentOverBudgetCallForDifferentNewNames)
+{
+    RenderGraphNameSlotTable table(2);
+    EXPECT_EQ(table.AssignOrGetSlot("A"), 0);
+    EXPECT_EQ(table.AssignOrGetSlot("B"), 1);
+    EXPECT_EQ(table.AssignOrGetSlot("C"), kNoNameSlot);
+    EXPECT_TRUE(table.JustOverflowed());
+    // A second, DIFFERENT brand-new name must ALSO report true - every
+    // over-budget call reports true; the "only log once" de-duplication
+    // lives in RenderGraph, not in this class.
+    EXPECT_EQ(table.AssignOrGetSlot("D"), kNoNameSlot);
+    EXPECT_TRUE(table.JustOverflowed());
+}
+
 } // namespace
 } // namespace gte::rg

@@ -176,6 +176,18 @@ struct RenderGraphSnapshot {
     // surviving prefix, per RenderGraphCompiler.h's own contract).
     std::vector<RenderGraphPassSnapshot> passesInExecutionOrder;
     std::vector<RenderGraphResourceSnapshot> resources;
+
+    // PHASE1 (render-pass-6 campaign, item 2.4) - true if THIS regime's fixed
+    // GPU-timing slot budget (RenderGraph::kSynchronousTimingSlotBudget /
+    // kPipelinedTimingSlotBudget) was already fully assigned to other pass
+    // names at least once during the Execute() call that produced this
+    // snapshot - i.e. at least one surviving pass this call could not be
+    // assigned a timing slot at all, and its own PassGpuStats::timing will
+    // permanently read Status::Absent for as long as this remains true. The
+    // Editor's "Render Graph" panel should surface this structurally (e.g. a
+    // warning banner) rather than leaving a reader to infer it from an
+    // individual pass's timing quietly never updating.
+    bool timingSlotBudgetExhausted = false;
 };
 
 // Pure reshape: `compiled`/`input` are exactly RenderGraphCompiler::Compile()'s
@@ -194,7 +206,14 @@ struct RenderGraphSnapshot {
 // whatever an EARLIER, different call happened to leave behind under the
 // same name (e.g. if this exact pass name survived culling last frame but
 // was culled this frame) would misleadingly suggest it ran again.
+//
+// `timingSlotBudgetExhausted` (PHASE1, render-pass-6 campaign, item 2.4) -
+// trailing, DEFAULTED parameter so every pre-existing 3-argument call site
+// (including all 15 in RenderGraphSnapshotTests.cpp) keeps compiling and
+// behaving unmodified - passed straight through to
+// RenderGraphSnapshot::timingSlotBudgetExhausted, unchanged. See that
+// field's own doc comment above for what it means.
 RenderGraphSnapshot BuildRenderGraphSnapshot(const CompiledGraph& compiled, const CompiledGraphInput& input,
-    const std::function<PassGpuStats(const char*)>& statsLookup);
+    const std::function<PassGpuStats(const char*)>& statsLookup, bool timingSlotBudgetExhausted = false);
 
 } // namespace gte::rg

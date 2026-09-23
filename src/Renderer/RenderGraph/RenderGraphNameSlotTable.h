@@ -62,19 +62,34 @@ public:
     std::int32_t AssignOrGetSlot(const char* name) noexcept
     {
         if (name == nullptr) {
+            m_lastCallOverflowed = false;
             return kNoNameSlot;
         }
         for (std::size_t i = 0; i < m_names.size(); ++i) {
             if (m_names[i] == name || std::strcmp(m_names[i], name) == 0) {
+                m_lastCallOverflowed = false;
                 return static_cast<std::int32_t>(i);
             }
         }
         if (m_names.size() >= static_cast<std::size_t>(m_slotBudget)) {
+            m_lastCallOverflowed = true;
             return kNoNameSlot;
         }
+        m_lastCallOverflowed = false;
         m_names.push_back(name);
         return static_cast<std::int32_t>(m_names.size() - 1);
     }
+
+    // PHASE1 (render-pass-6 campaign, item 2.4) - true if and only if the MOST
+    // RECENT AssignOrGetSlot() call returned kNoNameSlot specifically because
+    // this table's fixed slotBudget was already fully assigned to OTHER names
+    // (a genuinely new name, budget genuinely exhausted) - false for every other
+    // outcome (name == nullptr, or name already had a slot). Lets a caller
+    // distinguish "this exact call just discovered a real overflow" from
+    // "kNoNameSlot for an unrelated, harmless reason", without AssignOrGetSlot()
+    // itself needing to log/assert/mutate any wider state - see RenderGraph.cpp's
+    // own call site for how this drives a real, one-time diagnostic.
+    bool JustOverflowed() const noexcept { return m_lastCallOverflowed; }
 
     // B.1 (B1_REAL_GPU_TIMING_STRATEGY_v1.md) - the exact inverse of
     // AssignOrGetSlot() above: returns the name previously assigned to
@@ -98,6 +113,8 @@ public:
 private:
     std::uint32_t m_slotBudget;
     std::vector<const char*> m_names; // index into this vector == assigned slot.
+    // PHASE1 (render-pass-6 campaign, item 2.4) - see JustOverflowed() above.
+    bool m_lastCallOverflowed = false;
 };
 
 } // namespace gte::rg

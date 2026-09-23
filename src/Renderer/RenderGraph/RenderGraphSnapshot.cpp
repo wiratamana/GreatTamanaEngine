@@ -122,9 +122,10 @@ RenderGraphPassSnapshot BuildPassSnapshot(const PassRecord& pass, const Compiled
 } // namespace
 
 RenderGraphSnapshot BuildRenderGraphSnapshot(const CompiledGraph& compiled, const CompiledGraphInput& input,
-    const std::function<PassGpuStats(const char*)>& statsLookup)
+    const std::function<PassGpuStats(const char*)>& statsLookup, bool timingSlotBudgetExhausted)
 {
     RenderGraphSnapshot snapshot;
+    snapshot.timingSlotBudgetExhausted = timingSlotBudgetExhausted; // PHASE1 (render-pass-6 campaign, item 2.4)
     snapshot.passesInExecutionOrder.reserve(compiled.executionOrder.size() + input.passes.size());
 
     // Surviving passes first, in real execution order.

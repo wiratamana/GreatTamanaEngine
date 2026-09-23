@@ -751,5 +751,47 @@ TEST(RenderGraphSnapshotTest, SnapshotOfThreeColorWritePassListsAllThreeWriteNam
     EXPECT_EQ(gbufferPass.writeKinds[2], ResourceKind::Texture);
 }
 
+// --- PHASE1 (render-pass-6 campaign, item 2.4) - timingSlotBudgetExhausted ---
+
+// The new, trailing, DEFAULTED `timingSlotBudgetExhausted` parameter passes
+// straight through to RenderGraphSnapshot::timingSlotBudgetExhausted
+// unchanged, for both true and false inputs - and every pre-existing
+// 3-argument call site above (there are 15 of them in this file) keeps
+// compiling and defaulting to false, unmodified.
+TEST(RenderGraphSnapshotTest, TimingSlotBudgetExhaustedDefaultsToFalseWhenOmitted)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle t0 = builder.CreateTexture("T0", MakeTextureDesc());
+    builder.AddPass(
+        "A", [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(t0); }, NoOpExecute);
+
+    CompiledGraphInput input = builder.Finish();
+    const TextureHandle finalOutputs[] = { t0 };
+    const CompiledGraph compiled = Compile(input, finalOutputs);
+
+    const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, {});
+    EXPECT_FALSE(snapshot.timingSlotBudgetExhausted);
+}
+
+TEST(RenderGraphSnapshotTest, TimingSlotBudgetExhaustedPassesThroughExplicitTrueAndFalse)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle t0 = builder.CreateTexture("T0", MakeTextureDesc());
+    builder.AddPass(
+        "A", [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(t0); }, NoOpExecute);
+
+    CompiledGraphInput input = builder.Finish();
+    const TextureHandle finalOutputs[] = { t0 };
+    const CompiledGraph compiled = Compile(input, finalOutputs);
+
+    const RenderGraphSnapshot exhaustedSnapshot =
+        BuildRenderGraphSnapshot(compiled, input, {}, /*timingSlotBudgetExhausted=*/true);
+    EXPECT_TRUE(exhaustedSnapshot.timingSlotBudgetExhausted);
+
+    const RenderGraphSnapshot notExhaustedSnapshot =
+        BuildRenderGraphSnapshot(compiled, input, {}, /*timingSlotBudgetExhausted=*/false);
+    EXPECT_FALSE(notExhaustedSnapshot.timingSlotBudgetExhausted);
+}
+
 } // namespace
 } // namespace gte::rg

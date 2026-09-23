@@ -1,6 +1,7 @@
 #include "RenderGraph.h"
 
 #include "../Renderer.h"
+#include "../../Editor/Logger.h" // PHASE1 (render-pass-6 campaign, item 2.4) - GTE_LOG_WARNING for slot-budget overflow.
 
 #include <cassert>
 #include <cstring>
@@ -312,6 +313,35 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         }
 
         const std::int32_t timingSlot = timingSlots.AssignOrGetSlot(pass.name);
+
+        // PHASE1 (render-pass-6 campaign, item 2.4) - the FIRST time a name
+        // is denied a slot because this regime's fixed timing-slot budget is
+        // already fully assigned to other names, report it exactly once
+        // (never once per frame forever) via the engine's own logging
+        // facility - see RenderGraphNameSlotTable::JustOverflowed()'s own
+        // doc comment for why this is distinguishable from every other
+        // kNoNameSlot-returning case.
+        if (timingSlot == kNoNameSlot && timingSlots.JustOverflowed()) {
+            std::vector<const char*>& reported =
+                isPipelined ? m_reportedPipelinedOverflows : m_reportedSynchronousOverflows;
+            bool alreadyReported = false;
+            for (const char* n : reported) {
+                if (n == pass.name || (pass.name != nullptr && n != nullptr && std::strcmp(n, pass.name) == 0)) {
+                    alreadyReported = true;
+                    break;
+                }
+            }
+            if (!alreadyReported) {
+                reported.push_back(pass.name);
+                GTE_LOG_WARNING("RenderGraph",
+                    "Pass \"" + std::string(pass.name != nullptr ? pass.name : "<unnamed>")
+                        + "\" could not be assigned a GPU-timing slot - the "
+                        + std::string(isPipelined ? "pipelined" : "synchronous")
+                        + " regime's fixed timing-slot budget (" + std::to_string(timingSlots.SlotBudget())
+                        + ") is already fully assigned to other pass names. This pass's GPU timing will read as "
+                          "Absent until this budget is increased.");
+            }
+        }
 
         // B.1 - the BEGIN timestamp is written AFTER this pass's own
         // barriers have already been recorded above, so any GPU stall
@@ -661,8 +691,14 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
     // function returns, from Application::Run()) - i.e. one frame stale,
     // same one-frame-of-lag every other Editor Game/Scene-view-sized field
     // already tolerates (see ImGuiEditorLayer.cpp's own class comment).
+    // PHASE1 (render-pass-6 campaign, item 2.4) - "is this table currently at
+    // 100% capacity" at snapshot-build time is exactly the persistent
+    // condition RenderGraphSnapshot::timingSlotBudgetExhausted is meant to
+    // describe - simpler and equally correct than plumbing JustOverflowed()'s
+    // one-shot state through.
+    const bool timingSlotBudgetExhausted = timingSlots.AssignedCount() >= timingSlots.SlotBudget();
     RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(
-        compiled, input, [this](const char* name) { return LastKnownStatsFor(name); });
+        compiled, input, [this](const char* name) { return LastKnownStatsFor(name); }, timingSlotBudgetExhausted);
     if (!isPipelined) {
         m_synchronousSnapshot = std::move(snapshot);
     } else {
