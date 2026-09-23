@@ -662,3 +662,83 @@ spawns immediately after landing)
    document was originally drafted.
 7. Overwrite this file (`PHASE5_RESOURCE_SLOT_VECTOR_COLLAPSE.md`) in place
    with any correction found — never create a new numbered file.
+
+## Dedicated Double-Check Result (performed after PHASE7 had already landed;
+this check's own scope is strictly PHASE5, per its task instructions —
+PHASE6/PHASE7 were read only as read-only context, never touched)
+
+**Clean pass — no correction needed.** Every one of the 7 items above was
+independently re-verified against the real, current source and by actually
+re-running commands (not by trusting `PHASE5_COMPLETION_REPORT.md`'s prose):
+
+1. **Grep sweep** — independently re-ran a full regex sweep of `src/` and
+   `tests/` for all 9 old field names. Found the exact same residual hits the
+   completion report described and nothing else: explanatory comments (e.g.
+   `RenderGraphBuilder.h`'s "REPLACES the old textureDescs/textureNames/
+   textureImportInfo trio..." comment, `RenderGraphCompiler.h`'s reworded
+   `CompiledGraph` doc comment), the still-valid `TextureImportInfo`/
+   `BufferImportInfo`/`VolumeTextureImportInfo` **type** names (never the old
+   **field**/vector names), and genuinely unrelated substring hits
+   (`RenderGraphTypesTests.cpp`'s `...TextureDescsCompareEqual...`/
+   `...BufferDescsDifferingIn...`/`...VolumeTextureDescsDifferingIn...` test
+   names exercising `operator==` in isolation, `RenderGraphSnapshotTests.cpp`'s
+   `...IncludingVolumeTextureNames` test name, `FrameDebuggerSnapshotBuilderTests.cpp`'s
+   `...TextureNamesProduceDistinctEntries...` test name,
+   `ComputeBlurValidation.h`'s comment mentioning the type name). Confirmed
+   each by hand — zero actual unmigrated field access anywhere.
+2. **Public API byte-for-byte check** — read `RenderGraphBuilder.h`'s full
+   current text and cross-checked `git show 6d77536` (the PHASE5 commit)
+   directly: the diff touches only the file's TOP (the new `TextureSlot`/
+   `BufferSlot`/`VolumeTextureSlot` structs and doc-comment rewording above
+   `CompiledGraphInput`) and the `private:` member section at the bottom —
+   the entire `public:` section of `class RenderGraphBuilder` (`PassBuilder`,
+   `CreateTexture`/`CreateBuffer`/`ImportTexture`/`ImportBuffer`/
+   `ImportVolumeTexture`/`KeepVolumeTextureOutput`/`AddPass`/`AddComputePass`/
+   `AddRenderPass`/`Finish`) has ZERO diff lines — confirmed genuinely
+   byte-for-byte unchanged, not just asserted.
+3. **Outside call sites** — read `src/Renderer/Atmosphere/AtmosphereLutRenderer.cpp`
+   (`builder.ImportTexture(...)`/`builder.ImportVolumeTexture(...)`/
+   `builder.AddRenderPass(...)`), `src/Editor/ComputeBlurValidation.cpp` and
+   `src/Editor/GBufferValidation.cpp` (`builder.ImportTexture(...)`/
+   `builder.AddRenderPass(...)`), and `src/Application/RenderPasses.cpp`
+   (GPU-skinning/GPU-driven-batching: `builder.ImportBuffer(request.name,
+   request.outputBuffer, request.outputBufferSize)`) — none of these files
+   appear anywhere in PHASE5's own commit diff, and all five call only the
+   confirmed-unchanged public API. `cmake --build build` from a clean,
+   already-built tree reported `ninja: no work to do` (zero recompilation
+   needed), independently confirming the whole engine, including every one of
+   these consumers, already compiles cleanly against the current source.
+4. **Targeted test re-run** — personally ran
+   `tests\GreatTamanaEngineTests.exe --gtest_filter=RenderGraphBuilder*:RenderGraphCompiler*:RenderGraphSnapshot*`
+   from `build\`: **106/106 tests pass**, exact breakdown matches the
+   completion report's claim precisely — 40 `RenderGraphBuilderTest` + 8
+   `RenderGraphBuilderDeathTest` + 33 `RenderGraphCompilerTest` + 1
+   `RenderGraphCompilerDeathTest` + 24 `RenderGraphSnapshotTest`.
+5. **Import*() mirroring** — read the current, real
+   `RenderGraphBuilder.cpp` directly: `ImportTexture()` mirrors
+   `width`/`height`/`format`/`hasDepth` from `externalTarget` into a
+   freshly-built `TextureDesc` (never a default-constructed one);
+   `ImportBuffer()` mirrors `size` (leaving `usage = 0`, as documented);
+   `ImportVolumeTexture()` mirrors `width`/`height`/`depth`/`format` from
+   `externalVolumeTarget` into a freshly-built `VolumeTextureDesc`. All three
+   push the mirrored desc straight into their slot's `desc` field. Confirmed
+   exactly matching this document's own Step 2/3.3 pre-refactor behavior.
+6. **PHASE4's `firstXWriter` re-sizing** — grepped the current
+   `RenderGraphCompiler.cpp` directly: `firstTextureWriter`/
+   `firstBufferWriter`/`firstVolumeTextureWriter` are sized off
+   `input.textures.size()`/`input.buffers.size()`/`input.volumeTextures.size()`
+   (lines 216-218 of the current file), alongside `lastTextureWriter`/
+   `lastBufferWriter`/`lastVolumeTextureWriter` (lines 300/301/309) — all six
+   correctly re-sized to the new slot-vector shape, exactly the spot this
+   document itself flagged as most likely to be missed. Not missed.
+
+**Additional context (informational only, not a correction)**: at the time
+this double-check ran, PHASE6 and PHASE7 had ALREADY landed on top of PHASE5
+(confirmed via `git_log_oneline`: commits `66014a7` and `e523151`). This
+double-check's own scope stayed strictly limited to re-verifying PHASE5's
+own claims against the current source (which still cleanly contains PHASE5's
+work, unmodified in substance by the later phases) — no PHASE6/PHASE7 work
+was reviewed, implemented, or altered.
+
+No correction was required. `PHASE5_COMPLETION_REPORT.md`'s claims are
+confirmed accurate in every respect checked.
