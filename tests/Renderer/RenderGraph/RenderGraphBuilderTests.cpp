@@ -89,12 +89,12 @@ TEST(RenderGraphBuilderTest, DifferentNamesSameDescStillCompareEqualDescs)
     const TextureHandle b = builder.CreateTexture("SceneView", desc);
 
     const CompiledGraphInput input = builder.Finish();
-    ASSERT_EQ(input.textureDescs.size(), 2u);
-    EXPECT_TRUE(input.textureDescs[a.index] == input.textureDescs[b.index]);
+    ASSERT_EQ(input.textures.size(), 2u);
+    EXPECT_TRUE(input.textures[a.index].desc == input.textures[b.index].desc);
     // The names themselves genuinely differ, proving they were captured
     // independently rather than one clobbering the other.
-    EXPECT_STREQ(input.textureNames[a.index], "GameView");
-    EXPECT_STREQ(input.textureNames[b.index], "SceneView");
+    EXPECT_STREQ(input.textures[a.index].name, "GameView");
+    EXPECT_STREQ(input.textures[b.index].name, "SceneView");
 }
 
 TEST(RenderGraphBuilderTest, CreateBufferDifferentNamesSameDescStillCompareEqualDescs)
@@ -106,10 +106,10 @@ TEST(RenderGraphBuilderTest, CreateBufferDifferentNamesSameDescStillCompareEqual
     const BufferHandle b = builder.CreateBuffer("IndexBufferB", desc);
 
     const CompiledGraphInput input = builder.Finish();
-    ASSERT_EQ(input.bufferDescs.size(), 2u);
-    EXPECT_TRUE(input.bufferDescs[a.index] == input.bufferDescs[b.index]);
-    EXPECT_STREQ(input.bufferNames[a.index], "IndexBufferA");
-    EXPECT_STREQ(input.bufferNames[b.index], "IndexBufferB");
+    ASSERT_EQ(input.buffers.size(), 2u);
+    EXPECT_TRUE(input.buffers[a.index].desc == input.buffers[b.index].desc);
+    EXPECT_STREQ(input.buffers[a.index].name, "IndexBufferA");
+    EXPECT_STREQ(input.buffers[b.index].name, "IndexBufferB");
 }
 
 // --- AddPass() - setup vs. execute timing --------------------------------
@@ -681,9 +681,9 @@ TEST(RenderGraphBuilderTest, ImportTextureIsTaggedAsImportedInCompiledGraphInput
     const TextureHandle transient = builder.CreateTexture("Scratch", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
 
     const CompiledGraphInput input = builder.Finish();
-    ASSERT_EQ(input.textureImportInfo.size(), 2u);
-    EXPECT_TRUE(input.textureImportInfo[imported.index].isImported);
-    EXPECT_FALSE(input.textureImportInfo[transient.index].isImported);
+    ASSERT_EQ(input.textures.size(), 2u);
+    EXPECT_TRUE(input.textures[imported.index].importInfo.isImported);
+    EXPECT_FALSE(input.textures[transient.index].importInfo.isImported);
 }
 
 // v2 regression coverage: this parameter did not exist at all in v1's own
@@ -697,9 +697,9 @@ TEST(RenderGraphBuilderTest, ImportTextureRecordsExactCurrentLayoutSupplied)
         builder.ImportTexture("GameView", gameViewTarget, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
     const CompiledGraphInput input = builder.Finish();
-    ASSERT_EQ(input.textureImportInfo.size(), 1u);
-    EXPECT_TRUE(input.textureImportInfo[imported.index].isImported);
-    EXPECT_EQ(input.textureImportInfo[imported.index].currentLayout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    ASSERT_EQ(input.textures.size(), 1u);
+    EXPECT_TRUE(input.textures[imported.index].importInfo.isImported);
+    EXPECT_EQ(input.textures[imported.index].importInfo.currentLayout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
 TEST(RenderGraphBuilderTest, ImportTextureStoresExternalTargetVerbatim)
@@ -709,7 +709,7 @@ TEST(RenderGraphBuilderTest, ImportTextureStoresExternalTargetVerbatim)
     const TextureHandle imported = builder.ImportTexture("GameView", gameViewTarget, VK_IMAGE_LAYOUT_UNDEFINED);
 
     const CompiledGraphInput input = builder.Finish();
-    const TextureImportInfo& info = input.textureImportInfo[imported.index];
+    const TextureImportInfo& info = input.textures[imported.index].importInfo;
     EXPECT_EQ(info.externalTarget.image, gameViewTarget.image);
     EXPECT_EQ(info.externalTarget.imageView, gameViewTarget.imageView);
     EXPECT_EQ(info.externalTarget.extent.width, gameViewTarget.extent.width);
@@ -725,7 +725,7 @@ TEST(RenderGraphBuilderTest, ImportTextureMirrorsExternalTargetShapeIntoTextureD
     const TextureHandle imported = builder.ImportTexture("GameView", gameViewTarget, VK_IMAGE_LAYOUT_UNDEFINED);
 
     const CompiledGraphInput input = builder.Finish();
-    const TextureDesc& desc = input.textureDescs[imported.index];
+    const TextureDesc& desc = input.textures[imported.index].desc;
     EXPECT_EQ(desc.width, gameViewTarget.extent.width);
     EXPECT_EQ(desc.height, gameViewTarget.extent.height);
     EXPECT_EQ(desc.format, gameViewTarget.format);
@@ -744,9 +744,9 @@ TEST(RenderGraphBuilderTest, ImportedAndTransientTexturesShareOneContiguousHandl
     EXPECT_FALSE(transientA == transientB);
 
     const CompiledGraphInput input = builder.Finish();
-    EXPECT_EQ(input.textureDescs.size(), 3u);
-    EXPECT_EQ(input.textureNames.size(), 3u);
-    EXPECT_EQ(input.textureImportInfo.size(), 3u);
+    EXPECT_EQ(input.textures.size(), 3u);
+    EXPECT_EQ(input.textures.size(), 3u);
+    EXPECT_EQ(input.textures.size(), 3u);
 }
 
 // --- ImportBuffer() (GPU Vertex Skinning campaign, Phase 3 - -----------------
@@ -781,9 +781,9 @@ TEST(RenderGraphBuilderTest, ImportBufferIsTaggedAsImportedInCompiledGraphInput)
     const BufferHandle transient = builder.CreateBuffer("Scratch", BufferDesc{ 256, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
 
     const CompiledGraphInput input = builder.Finish();
-    ASSERT_EQ(input.bufferImportInfo.size(), 2u);
-    EXPECT_TRUE(input.bufferImportInfo[imported.index].isImported);
-    EXPECT_FALSE(input.bufferImportInfo[transient.index].isImported);
+    ASSERT_EQ(input.buffers.size(), 2u);
+    EXPECT_TRUE(input.buffers[imported.index].importInfo.isImported);
+    EXPECT_FALSE(input.buffers[transient.index].importInfo.isImported);
 }
 
 TEST(RenderGraphBuilderTest, ImportBufferStoresExternalBufferAndSizeVerbatim)
@@ -793,7 +793,7 @@ TEST(RenderGraphBuilderTest, ImportBufferStoresExternalBufferAndSizeVerbatim)
     const BufferHandle imported = builder.ImportBuffer("SkinOutput", fakeBuffer, 2048);
 
     const CompiledGraphInput input = builder.Finish();
-    const BufferImportInfo& info = input.bufferImportInfo[imported.index];
+    const BufferImportInfo& info = input.buffers[imported.index].importInfo;
     EXPECT_EQ(info.externalBuffer, fakeBuffer);
     EXPECT_EQ(info.size, 2048u);
 }
@@ -805,7 +805,7 @@ TEST(RenderGraphBuilderTest, ImportBufferMirrorsSizeIntoBufferDesc)
     const BufferHandle imported = builder.ImportBuffer("SkinOutput", fakeBuffer, 4096);
 
     const CompiledGraphInput input = builder.Finish();
-    EXPECT_EQ(input.bufferDescs[imported.index].size, 4096u);
+    EXPECT_EQ(input.buffers[imported.index].desc.size, 4096u);
 }
 
 TEST(RenderGraphBuilderTest, ImportedAndTransientBuffersShareOneContiguousHandleSpace)
@@ -821,9 +821,9 @@ TEST(RenderGraphBuilderTest, ImportedAndTransientBuffersShareOneContiguousHandle
     EXPECT_FALSE(transientA == transientB);
 
     const CompiledGraphInput input = builder.Finish();
-    EXPECT_EQ(input.bufferDescs.size(), 3u);
-    EXPECT_EQ(input.bufferNames.size(), 3u);
-    EXPECT_EQ(input.bufferImportInfo.size(), 3u);
+    EXPECT_EQ(input.buffers.size(), 3u);
+    EXPECT_EQ(input.buffers.size(), 3u);
+    EXPECT_EQ(input.buffers.size(), 3u);
 }
 
 // --- Name validation guard -------------------------------------------------

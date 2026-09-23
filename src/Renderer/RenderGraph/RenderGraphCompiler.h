@@ -69,9 +69,11 @@ struct CompiledGraph {
     // nothing else mints/recycles a PassHandle's generation today.
     std::vector<PassHandle> executionOrder;
 
-    // Parallel to CompiledGraphInput::textureDescs/bufferDescs/
-    // volumeTextureDescs (same index) - one ResourceLifetime per declared
-    // resource, regardless of whether it survived culling.
+    // Parallel to CompiledGraphInput::textures/buffers/volumeTextures (same
+    // index) - one ResourceLifetime per declared resource, regardless of
+    // whether it survived culling. render-pass-6 campaign, PHASE5 (item
+    // 2.1) - reworded from the old textureDescs/bufferDescs/
+    // volumeTextureDescs field names, which no longer exist.
     std::vector<ResourceLifetime> textureLifetimes;
     std::vector<ResourceLifetime> bufferLifetimes;
 

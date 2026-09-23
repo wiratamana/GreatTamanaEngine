@@ -39,8 +39,8 @@ PassGpuStats CombinePassGpuStats(const std::vector<PassGpuStats>& stats)
 namespace {
 
 // Resolves one declared read/write's resource name, from whichever of
-// CompiledGraphInput::textureNames/bufferNames/volumeTextureNames actually
-// applies to its kind - mirrors how RenderGraph.cpp itself resolves a
+// CompiledGraphInput::textures/buffers/volumeTextures' own `name` field
+// actually applies to its kind - mirrors how RenderGraph.cpp itself resolves a
 // ResourceUsage's target (see ApplyUsageBarrierIfNeeded()), just for a NAME
 // instead of a physical resource. Never reads out of bounds (a stale/invalid
 // index degrades to an empty string rather than crashing) - defensive, since
@@ -64,19 +64,19 @@ std::string ResourceUsageName(const ResourceUsage& usage, const CompiledGraphInp
     std::string name;
     switch (usage.kind) {
     case ResourceKind::Texture:
-        if (usage.texture.index < input.textureNames.size() && input.textureNames[usage.texture.index] != nullptr) {
-            name = input.textureNames[usage.texture.index];
+        if (usage.texture.index < input.textures.size() && input.textures[usage.texture.index].name != nullptr) {
+            name = input.textures[usage.texture.index].name;
         }
         break;
     case ResourceKind::Buffer:
-        if (usage.buffer.index < input.bufferNames.size() && input.bufferNames[usage.buffer.index] != nullptr) {
-            name = input.bufferNames[usage.buffer.index];
+        if (usage.buffer.index < input.buffers.size() && input.buffers[usage.buffer.index].name != nullptr) {
+            name = input.buffers[usage.buffer.index].name;
         }
         break;
     case ResourceKind::VolumeTexture:
-        if (usage.volumeTexture.index < input.volumeTextureNames.size()
-            && input.volumeTextureNames[usage.volumeTexture.index] != nullptr) {
-            name = input.volumeTextureNames[usage.volumeTexture.index];
+        if (usage.volumeTexture.index < input.volumeTextures.size()
+            && input.volumeTextures[usage.volumeTexture.index].name != nullptr) {
+            name = input.volumeTextures[usage.volumeTexture.index].name;
         }
         break;
     }
@@ -146,12 +146,12 @@ RenderGraphSnapshot BuildRenderGraphSnapshot(const CompiledGraph& compiled, cons
         snapshot.passesInExecutionOrder.push_back(BuildPassSnapshot(pass, input, /*isCulled=*/true, statsLookup));
     }
 
-    snapshot.resources.reserve(input.textureDescs.size() + input.bufferDescs.size());
+    snapshot.resources.reserve(input.textures.size() + input.buffers.size());
 
-    for (std::size_t i = 0; i < input.textureDescs.size(); ++i) {
+    for (std::size_t i = 0; i < input.textures.size(); ++i) {
         RenderGraphResourceSnapshot resource;
-        resource.name = (i < input.textureNames.size() && input.textureNames[i] != nullptr) ? input.textureNames[i] : "";
-        resource.isImported = (i < input.textureImportInfo.size()) && input.textureImportInfo[i].isImported;
+        resource.name = input.textures[i].name != nullptr ? input.textures[i].name : "";
+        resource.isImported = input.textures[i].importInfo.isImported;
         if (i < compiled.textureLifetimes.size()) {
             resource.firstUsePassIndex = compiled.textureLifetimes[i].firstUsePassIndex;
             resource.lastUsePassIndex = compiled.textureLifetimes[i].lastUsePassIndex;
@@ -159,15 +159,15 @@ RenderGraphSnapshot BuildRenderGraphSnapshot(const CompiledGraph& compiled, cons
         snapshot.resources.push_back(std::move(resource));
     }
 
-    for (std::size_t i = 0; i < input.bufferDescs.size(); ++i) {
+    for (std::size_t i = 0; i < input.buffers.size(); ++i) {
         RenderGraphResourceSnapshot resource;
-        resource.name = (i < input.bufferNames.size() && input.bufferNames[i] != nullptr) ? input.bufferNames[i] : "";
+        resource.name = input.buffers[i].name != nullptr ? input.buffers[i].name : "";
         // GPU Vertex Skinning campaign, Phase 3
         // (GPU_SKINNING_PHASE3_RENDERGRAPH_SYNCHRONIZATION_STRATEGY_v2.md) -
         // a buffer resource CAN now be imported (RenderGraphBuilder::
         // ImportBuffer()) - mirrors the texture branch immediately above,
         // which was already correct.
-        resource.isImported = (i < input.bufferImportInfo.size()) && input.bufferImportInfo[i].isImported;
+        resource.isImported = input.buffers[i].importInfo.isImported;
         if (i < compiled.bufferLifetimes.size()) {
             resource.firstUsePassIndex = compiled.bufferLifetimes[i].firstUsePassIndex;
             resource.lastUsePassIndex = compiled.bufferLifetimes[i].lastUsePassIndex;

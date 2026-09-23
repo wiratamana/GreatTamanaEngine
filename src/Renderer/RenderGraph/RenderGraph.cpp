@@ -40,7 +40,7 @@ void RenderGraph::EnsureTextureResolved(
         return;
     }
 
-    const TextureImportInfo& importInfo = input.textureImportInfo[index];
+    const TextureImportInfo& importInfo = input.textures[index].importInfo;
     if (importInfo.isImported) {
         // Already a real, externally-owned resource (the swapchain image,
         // or the Editor's own persistent Game/Scene RenderTexture) - never
@@ -70,11 +70,11 @@ void RenderGraph::EnsureTextureResolved(
         tex.depthState = ResourceState{};
     } else {
         RenderTexture& renderTexture =
-            m_resourcePool.AcquireTexture(input.textureDescs[index], input.textureNames[index]);
+            m_resourcePool.AcquireTexture(input.textures[index].desc, input.textures[index].name);
         tex.isImported = false;
         tex.target = renderTexture.Target();
         tex.sampler = renderTexture.Sampler();
-        tex.hasDepth = input.textureDescs[index].hasDepth;
+        tex.hasDepth = input.textures[index].desc.hasDepth;
         // A freshly-claimed pooled entry (whether brand-new or reused from
         // a previous frame) always starts this call's tracking at the
         // synthetic "never touched before" state - RenderGraphResourcePool
@@ -104,7 +104,7 @@ void RenderGraph::EnsureBufferResolved(
     // transient/pooled (the original, only behavior) OR an already-live,
     // externally-owned buffer (e.g. a future per-model GPU skinning output
     // buffer).
-    const BufferImportInfo& importInfo = input.bufferImportInfo[index];
+    const BufferImportInfo& importInfo = input.buffers[index].importInfo;
     if (importInfo.isImported) {
         // Already a real, externally-owned resource - never allocated/
         // freed by this graph, mirroring EnsureTextureResolved()'s own
@@ -118,7 +118,7 @@ void RenderGraph::EnsureBufferResolved(
         buf.size = importInfo.size;
         buf.state = ResourceState{};
     } else {
-        Buffer& buffer = m_resourcePool.AcquireBuffer(input.bufferDescs[index], input.bufferNames[index]);
+        Buffer& buffer = m_resourcePool.AcquireBuffer(input.buffers[index].desc, input.buffers[index].name);
         buf.buffer = buffer.Native();
         buf.size = buffer.Size();
         buf.state = ResourceState{};
@@ -142,7 +142,7 @@ void RenderGraph::EnsureVolumeTextureResolved(std::uint32_t index, const Compile
         return;
     }
 
-    const VolumeTextureImportInfo& importInfo = input.volumeTextureImportInfo[index];
+    const VolumeTextureImportInfo& importInfo = input.volumeTextures[index].importInfo;
     if (importInfo.isImported) {
         vol.isImported = true;
         vol.target = importInfo.externalTarget;
@@ -431,7 +431,7 @@ void RenderGraph::RegisterDebugTextureSnapshots(ExecuteTimingMode timingMode, co
         if (!tex.resolved) {
             continue;
         }
-        const char* name = input.textureNames[i];
+        const char* name = input.textures[i].name;
         if (name == nullptr || name[0] == '\0') {
             continue; // Defensive - every real call site always supplies a real name (RenderGraphBuilder::CreateTexture()/ImportTexture() both assert a non-null/non-empty name), but never trust that blindly here (an assert compiles out entirely in a release/NDEBUG build).
         }
@@ -457,9 +457,9 @@ void RenderGraph::RegisterDebugTextureSnapshots(ExecuteTimingMode timingMode, co
 // the volume-texture counterpart of RegisterDebugTextureSnapshots() above,
 // sharing the exact same m_debugTextureFrameCounter stamp (see
 // RenderGraph.h's own CurrentDebugTextureFrameCounter() doc comment for why
-// there is deliberately no separate volume-only counter). input.volumeTextureNames
+// there is deliberately no separate volume-only counter). input.volumeTextures[i].name
 // and physicalVolumeTextures are both sized from
-// input.volumeTextureDescs.size() (see RenderGraphBuilder::
+// input.volumeTextures.size() (see RenderGraphBuilder::
 // ImportVolumeTexture(), which always pushes onto both in lockstep), so
 // indexing them together by `i` is safe by construction, exactly like
 // the 2D pair above.
@@ -471,7 +471,7 @@ void RenderGraph::RegisterDebugVolumeTextureSnapshots(ExecuteTimingMode timingMo
         if (!vol.resolved) {
             continue;
         }
-        const char* name = input.volumeTextureNames[i];
+        const char* name = input.volumeTextures[i].name;
         if (name == nullptr || name[0] == '\0') {
             continue; // Defensive - RenderGraphBuilder::ImportVolumeTexture() already asserts a non-null/non-empty name, but an assert compiles out entirely in a release/NDEBUG build.
         }
@@ -535,10 +535,10 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
     // caller, never be silently swallowed here.
     const CompiledGraph compiled = Compile(input, std::span<const TextureHandle>(finalOutputs));
 
-    std::vector<PhysicalTexture> physicalTextures(input.textureDescs.size());
-    std::vector<PhysicalBuffer> physicalBuffers(input.bufferDescs.size());
+    std::vector<PhysicalTexture> physicalTextures(input.textures.size());
+    std::vector<PhysicalBuffer> physicalBuffers(input.buffers.size());
     // Atmosphere Scattering campaign, Phase 2.
-    std::vector<PhysicalVolumeTexture> physicalVolumeTextures(input.volumeTextureDescs.size());
+    std::vector<PhysicalVolumeTexture> physicalVolumeTextures(input.volumeTextures.size());
 
     RenderGraphNameSlotTable& timingSlots = isPipelined ? m_pipelinedTimingSlots : m_synchronousTimingSlots;
 

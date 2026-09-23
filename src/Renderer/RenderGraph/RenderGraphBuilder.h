@@ -43,10 +43,11 @@ namespace gte::rg {
 
 // Per-texture-slot side information for a texture the graph does NOT own
 // the lifetime of - see RenderGraphBuilder::ImportTexture() below and
-// RENDERGRAPH_PHASE2_BUILDER_API_STRATEGY_v2.md, Step 3.3. Parallel to
-// CompiledGraphInput::textureDescs/textureNames (same index), so a
-// non-imported (transient) texture's entry here is simply
-// `TextureImportInfo{}` (isImported == false) and is never read by Phase 4.
+// RENDERGRAPH_PHASE2_BUILDER_API_STRATEGY_v2.md, Step 3.3. render-pass-6
+// campaign, PHASE5 (item 2.1) - this is the `importInfo` field of the
+// matching TextureSlot entry (see TextureSlot below), so a non-imported
+// (transient) texture's entry here is simply `TextureImportInfo{}`
+// (isImported == false) and is never read by Phase 4.
 struct TextureImportInfo {
     bool isImported = false;
     // Only meaningful when isImported == true - the already-live resource
@@ -68,11 +69,11 @@ struct TextureImportInfo {
 // output buffer - created ONCE, at model-registration time, and
 // re-imported into a freshly-built graph every frame, exactly like the
 // Editor's persistent Game/Scene RenderTexture is re-imported as a texture
-// every frame today - see TextureImportInfo above). Parallel to
-// CompiledGraphInput::bufferDescs/bufferNames (same index), so a
-// non-imported (transient) buffer's entry here is simply
-// `BufferImportInfo{}` (isImported == false) and is never read by
-// RenderGraphResourcePool.
+// every frame today - see TextureImportInfo above). render-pass-6 campaign,
+// PHASE5 (item 2.1) - this is the `importInfo` field of the matching
+// BufferSlot entry (see BufferSlot below), so a non-imported (transient)
+// buffer's entry here is simply `BufferImportInfo{}` (isImported == false)
+// and is never read by RenderGraphResourcePool.
 struct BufferImportInfo {
     bool isImported = false;
     // Only meaningful when isImported == true - the already-live buffer
@@ -85,8 +86,9 @@ struct BufferImportInfo {
 
 // VolumeTexture sibling of TextureImportInfo above - Atmosphere Scattering
 // campaign, Phase 2 (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md).
-// Parallel to CompiledGraphInput::volumeTextureDescs/volumeTextureNames
-// (same index). Every VolumeTextureHandle today is created exclusively via
+// render-pass-6 campaign, PHASE5 (item 2.1) - this is the `importInfo` field
+// of the matching VolumeTextureSlot entry (see VolumeTextureSlot below).
+// Every VolumeTextureHandle today is created exclusively via
 // RenderGraphBuilder::ImportVolumeTexture() below (isImported is therefore
 // always true in practice) - there is deliberately no
 // CreateVolumeTexture()-requested transient/pooled counterpart yet (see
@@ -104,14 +106,45 @@ struct VolumeTextureImportInfo {
     VkImageLayout currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 };
 
+// render-pass-6 campaign, PHASE5 (item 2.1,
+// task_manager/render-pass-6/PHASE5_RESOURCE_SLOT_VECTOR_COLLAPSE.md) -
+// REPLACES the old "textureDescs/textureNames/textureImportInfo trio, three
+// parallel vectors kept in lockstep purely by convention" data shape with
+// one struct-of-3-fields per declared resource. Nothing enforced the old
+// parallelism at compile time - a future edit that pushed to one array
+// without the other two would have been a silent, very-hard-to-debug
+// misalignment bug, not a compile error. This struct makes that bug class
+// structurally impossible: there is only ONE vector to push onto, and its
+// three fields can never independently desynchronize. Mirrors
+// BufferSlot/VolumeTextureSlot below exactly.
+struct TextureSlot {
+    TextureDesc desc;
+    const char* name = nullptr;
+    TextureImportInfo importInfo;
+};
+
+struct BufferSlot {
+    BufferDesc desc;
+    const char* name = nullptr;
+    BufferImportInfo importInfo;
+};
+
+struct VolumeTextureSlot {
+    VolumeTextureDesc desc;
+    const char* name = nullptr;
+    VolumeTextureImportInfo importInfo;
+};
+
 // The "raw material" handed off to Phase 3's compiler
 // (RenderGraphCompiler::Compile(CompiledGraphInput&&)) - NOT yet
 // "compiled" in any real sense (no ordering/culling has happened yet)
 // despite the name; named this way so Phase 3 reads naturally as "the
 // input a compiler consumes". Bundles every pass declared this frame plus
-// the texture/buffer desc tables and their PARALLEL name tables (see
-// RenderGraphBuilder's own class comment below for why a resource's name
-// lives here, and nowhere inside TextureDesc/BufferDesc themselves).
+// the texture/buffer/volume-texture SLOT tables (TextureSlot/BufferSlot/
+// VolumeTextureSlot above - render-pass-6 campaign, PHASE5, REPLACING the
+// old 9-parallel-vector shape) - see RenderGraphBuilder's own class comment
+// below for why a resource's name lives here, and nowhere inside
+// TextureDesc/BufferDesc themselves.
 //
 // This hand-off boundary is itself a natural Tier-1 test seam: a test can
 // build a RenderGraphBuilder, call Finish(), and assert on the resulting
@@ -120,18 +153,11 @@ struct VolumeTextureImportInfo {
 struct CompiledGraphInput {
     std::vector<PassRecord> passes;
 
-    std::vector<TextureDesc> textureDescs;
-    std::vector<const char*> textureNames;
-    std::vector<TextureImportInfo> textureImportInfo;
-
-    std::vector<BufferDesc> bufferDescs;
-    std::vector<const char*> bufferNames;
-    std::vector<BufferImportInfo> bufferImportInfo;
+    std::vector<TextureSlot> textures;
+    std::vector<BufferSlot> buffers;
 
     // Atmosphere Scattering campaign, Phase 2.
-    std::vector<VolumeTextureDesc> volumeTextureDescs;
-    std::vector<const char*> volumeTextureNames;
-    std::vector<VolumeTextureImportInfo> volumeTextureImportInfo;
+    std::vector<VolumeTextureSlot> volumeTextures;
 
     // Atmosphere Scattering campaign, Phase 6
     // (ATMOSPHERE_PHASE6_AERIAL_PERSPECTIVE_FROXEL_VOLUME_v1.md) - fixes a
@@ -535,18 +561,15 @@ public:
 private:
     std::vector<PassRecord> m_passes;
 
-    std::vector<TextureDesc> m_textureDescs;
-    std::vector<const char*> m_textureNames;
-    std::vector<TextureImportInfo> m_textureImportInfo;
-
-    std::vector<BufferDesc> m_bufferDescs;
-    std::vector<const char*> m_bufferNames;
-    std::vector<BufferImportInfo> m_bufferImportInfo;
+    // render-pass-6 campaign, PHASE5 (item 2.1) - REPLACES the old 9
+    // parallel vectors (m_textureDescs/m_textureNames/m_textureImportInfo,
+    // etc.) with exactly 3 slot vectors - see TextureSlot/BufferSlot/
+    // VolumeTextureSlot above.
+    std::vector<TextureSlot> m_textures;
+    std::vector<BufferSlot> m_buffers;
 
     // Atmosphere Scattering campaign, Phase 2.
-    std::vector<VolumeTextureDesc> m_volumeTextureDescs;
-    std::vector<const char*> m_volumeTextureNames;
-    std::vector<VolumeTextureImportInfo> m_volumeTextureImportInfo;
+    std::vector<VolumeTextureSlot> m_volumeTextures;
 
     // Atmosphere Scattering campaign, Phase 6 - see
     // CompiledGraphInput::finalVolumeTextureOutputs above.

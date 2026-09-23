@@ -161,11 +161,11 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
     const std::int32_t passCount = static_cast<std::int32_t>(input.passes.size());
 
     CompiledGraph result;
-    result.textureLifetimes.assign(input.textureDescs.size(), ResourceLifetime{});
-    result.bufferLifetimes.assign(input.bufferDescs.size(), ResourceLifetime{});
+    result.textureLifetimes.assign(input.textures.size(), ResourceLifetime{});
+    result.bufferLifetimes.assign(input.buffers.size(), ResourceLifetime{});
     // Atmosphere Scattering campaign, Phase 2
     // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md).
-    result.volumeTextureLifetimes.assign(input.volumeTextureDescs.size(), ResourceLifetime{});
+    result.volumeTextureLifetimes.assign(input.volumeTextures.size(), ResourceLifetime{});
 
     if (passCount == 0) {
         return result;
@@ -214,9 +214,9 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
     // by the time Step 1 processes each read. A small, separate, O(P+W)
     // preliminary walk (W = total write usages across all passes), run once,
     // before Step 1's own loop.
-    std::vector<std::int32_t> firstTextureWriter(input.textureDescs.size(), -1);
-    std::vector<std::int32_t> firstBufferWriter(input.bufferDescs.size(), -1);
-    std::vector<std::int32_t> firstVolumeTextureWriter(input.volumeTextureDescs.size(), -1);
+    std::vector<std::int32_t> firstTextureWriter(input.textures.size(), -1);
+    std::vector<std::int32_t> firstBufferWriter(input.buffers.size(), -1);
+    std::vector<std::int32_t> firstVolumeTextureWriter(input.volumeTextures.size(), -1);
     for (std::int32_t pos = 0; pos < passCount; ++pos) {
         const std::int32_t i = effectiveOrder[static_cast<std::size_t>(pos)];
         for (const ResourceUsage& usage : input.passes[static_cast<std::size_t>(i)].writes) {
@@ -294,8 +294,8 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
         predecessors[static_cast<std::size_t>(to)].push_back(from);
     };
 
-    std::vector<std::int32_t> lastTextureWriter(input.textureDescs.size(), -1);
-    std::vector<std::int32_t> lastBufferWriter(input.bufferDescs.size(), -1);
+    std::vector<std::int32_t> lastTextureWriter(input.textures.size(), -1);
+    std::vector<std::int32_t> lastBufferWriter(input.buffers.size(), -1);
     // Atmosphere Scattering campaign, Phase 2 - see this file's own
     // pre-implementation precheck (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md,
     // Step 2/3.2): every `usage.kind == ResourceKind::Texture ? ... : ...`
@@ -303,7 +303,7 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
     // exhaustive, `default:`-less three-way `switch (usage.kind)` BEFORE
     // ResourceKind::VolumeTexture was ever added to the enum, so a future
     // fourth resource kind gets this same compile-time safety net too.
-    std::vector<std::int32_t> lastVolumeTextureWriter(input.volumeTextureDescs.size(), -1);
+    std::vector<std::int32_t> lastVolumeTextureWriter(input.volumeTextures.size(), -1);
 
     // render-pass-6 campaign, PHASE4 - fastContradictions is Compile()'s own
     // inline replacement for the standalone DetectRenderPassEventContradictions()

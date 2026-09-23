@@ -82,15 +82,21 @@ void RenderGraphBuilder::PassBuilder::WriteVolumeTexture(VolumeTextureHandle han
 
 // --- RenderGraphBuilder ------------------------------------------------
 
+// render-pass-6 campaign, PHASE5 (item 2.1) - every Create*/Import* method
+// below now pushes exactly ONE entry onto its own single slot vector
+// (m_textures/m_buffers/m_volumeTextures) instead of three separate,
+// hand-kept-in-lockstep vectors - see TextureSlot/BufferSlot/
+// VolumeTextureSlot (RenderGraphBuilder.h) for the full reasoning. Every
+// method's real, observable behavior (what desc/name/importInfo ends up
+// stored, what handle is returned) is byte-for-byte unchanged.
+
 TextureHandle RenderGraphBuilder::CreateTexture(const char* name, const TextureDesc& desc)
 {
     assert(name != nullptr && name[0] != '\0' &&
         "RenderGraphBuilder::CreateTexture requires a non-empty, static-storage-duration name");
 
-    const std::uint32_t index = static_cast<std::uint32_t>(m_textureDescs.size());
-    m_textureDescs.push_back(desc);
-    m_textureNames.push_back(name);
-    m_textureImportInfo.push_back(TextureImportInfo{});
+    const std::uint32_t index = static_cast<std::uint32_t>(m_textures.size());
+    m_textures.push_back(TextureSlot{ desc, name, TextureImportInfo{} });
     return TextureHandle{ index, 1 };
 }
 
@@ -99,10 +105,8 @@ BufferHandle RenderGraphBuilder::CreateBuffer(const char* name, const BufferDesc
     assert(name != nullptr && name[0] != '\0' &&
         "RenderGraphBuilder::CreateBuffer requires a non-empty, static-storage-duration name");
 
-    const std::uint32_t index = static_cast<std::uint32_t>(m_bufferDescs.size());
-    m_bufferDescs.push_back(desc);
-    m_bufferNames.push_back(name);
-    m_bufferImportInfo.push_back(BufferImportInfo{});
+    const std::uint32_t index = static_cast<std::uint32_t>(m_buffers.size());
+    m_buffers.push_back(BufferSlot{ desc, name, BufferImportInfo{} });
     return BufferHandle{ index, 1 };
 }
 
@@ -111,7 +115,7 @@ TextureHandle RenderGraphBuilder::ImportTexture(const char* name, const RenderTa
     assert(name != nullptr && name[0] != '\0' &&
         "RenderGraphBuilder::ImportTexture requires a non-empty, static-storage-duration name");
 
-    const std::uint32_t index = static_cast<std::uint32_t>(m_textureDescs.size());
+    const std::uint32_t index = static_cast<std::uint32_t>(m_textures.size());
 
     // Mirror the external target's own real shape into a TextureDesc
     // purely for informational/debug-display purposes (Phase 8) - Phase 4
@@ -123,15 +127,13 @@ TextureHandle RenderGraphBuilder::ImportTexture(const char* name, const RenderTa
     desc.height = externalTarget.extent.height;
     desc.format = externalTarget.format;
     desc.hasDepth = externalTarget.depthImage != VK_NULL_HANDLE;
-    m_textureDescs.push_back(desc);
-    m_textureNames.push_back(name);
 
     TextureImportInfo importInfo;
     importInfo.isImported = true;
     importInfo.externalTarget = externalTarget;
     importInfo.currentLayout = currentLayout;
-    m_textureImportInfo.push_back(importInfo);
 
+    m_textures.push_back(TextureSlot{ desc, name, importInfo });
     return TextureHandle{ index, 1 };
 }
 
@@ -140,7 +142,7 @@ BufferHandle RenderGraphBuilder::ImportBuffer(const char* name, VkBuffer externa
     assert(name != nullptr && name[0] != '\0' &&
         "RenderGraphBuilder::ImportBuffer requires a non-empty, static-storage-duration name");
 
-    const std::uint32_t index = static_cast<std::uint32_t>(m_bufferDescs.size());
+    const std::uint32_t index = static_cast<std::uint32_t>(m_buffers.size());
 
     // Mirror the external buffer's own real size into a BufferDesc purely
     // for informational/debug-display purposes (Phase 8's snapshot) -
@@ -154,15 +156,13 @@ BufferHandle RenderGraphBuilder::ImportBuffer(const char* name, VkBuffer externa
     BufferDesc desc;
     desc.size = size;
     desc.usage = 0;
-    m_bufferDescs.push_back(desc);
-    m_bufferNames.push_back(name);
 
     BufferImportInfo importInfo;
     importInfo.isImported = true;
     importInfo.externalBuffer = externalBuffer;
     importInfo.size = size;
-    m_bufferImportInfo.push_back(importInfo);
 
+    m_buffers.push_back(BufferSlot{ desc, name, importInfo });
     return BufferHandle{ index, 1 };
 }
 
@@ -172,7 +172,7 @@ VolumeTextureHandle RenderGraphBuilder::ImportVolumeTexture(
     assert(name != nullptr && name[0] != '\0' &&
         "RenderGraphBuilder::ImportVolumeTexture requires a non-empty, static-storage-duration name");
 
-    const std::uint32_t index = static_cast<std::uint32_t>(m_volumeTextureDescs.size());
+    const std::uint32_t index = static_cast<std::uint32_t>(m_volumeTextures.size());
 
     // Mirror the external target's own real shape into a VolumeTextureDesc
     // purely for informational/debug-display purposes - mirrors
@@ -182,15 +182,13 @@ VolumeTextureHandle RenderGraphBuilder::ImportVolumeTexture(
     desc.height = externalVolumeTarget.extent.height;
     desc.depth = externalVolumeTarget.extent.depth;
     desc.format = externalVolumeTarget.format;
-    m_volumeTextureDescs.push_back(desc);
-    m_volumeTextureNames.push_back(name);
 
     VolumeTextureImportInfo importInfo;
     importInfo.isImported = true;
     importInfo.externalTarget = externalVolumeTarget;
     importInfo.currentLayout = currentLayout;
-    m_volumeTextureImportInfo.push_back(importInfo);
 
+    m_volumeTextures.push_back(VolumeTextureSlot{ desc, name, importInfo });
     return VolumeTextureHandle{ index, 1 };
 }
 
@@ -203,15 +201,9 @@ CompiledGraphInput RenderGraphBuilder::Finish()
 {
     CompiledGraphInput input;
     input.passes = std::move(m_passes);
-    input.textureDescs = std::move(m_textureDescs);
-    input.textureNames = std::move(m_textureNames);
-    input.textureImportInfo = std::move(m_textureImportInfo);
-    input.bufferDescs = std::move(m_bufferDescs);
-    input.bufferNames = std::move(m_bufferNames);
-    input.bufferImportInfo = std::move(m_bufferImportInfo);
-    input.volumeTextureDescs = std::move(m_volumeTextureDescs);
-    input.volumeTextureNames = std::move(m_volumeTextureNames);
-    input.volumeTextureImportInfo = std::move(m_volumeTextureImportInfo);
+    input.textures = std::move(m_textures);
+    input.buffers = std::move(m_buffers);
+    input.volumeTextures = std::move(m_volumeTextures);
     input.finalVolumeTextureOutputs = std::move(m_finalVolumeTextureOutputs);
     return input;
 }
