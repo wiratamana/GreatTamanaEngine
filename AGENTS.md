@@ -306,11 +306,61 @@ HTTP-driven smoke test confirming rendering and the "Render Graph" panel are
 visually unchanged. See `task_manager/render-pass-6/CAMPAIGN_COMPLETION_REPORT.md`
 for the full seven-phase writeup.
 
+A follow-up campaign, `render-pass-7` (five phases,
+`task_manager/render-pass-7/PHASE0_MASTER_STRATEGY.md`,
+`CAMPAIGN_COMPLETION_REPORT.md`), de-hardcoded `RenderPassCategory` - a Core
+(Layer 1) file no longer needs to name a specific Layer-2 feature, ever.
+Previously `RenderPassCategory` baked `AtmosphereLut`/`GpuSkinning`
+enumerators directly into a Core render-graph type; it now has exactly two
+enumerators left, `General`/`Debug`, both genuinely Core-level concepts. The
+previously-designed-but-never-wired `RenderPassTag`/`RenderPassTagMask`
+mechanism (`RenderPipeline.h`) was relocated into `RenderGraphTypes.h`
+(mirroring `RenderPassEvent`'s own precedent) and threaded end-to-end for the
+first time: `PassRecord`/`RenderGraphPassSnapshot` gained a real `tags` field,
+both `RenderGraphBuilder::AddRenderPass()` overloads gained a new trailing
+`tags` parameter, and a real, PRE-EXISTING dead-field bug was found and fixed
+along the way (PHASE1) - `RenderPipeline::DeclareOnePhase()`'s own
+`builder.AddRenderPass(...)` call never actually passed `desc.tags` through,
+silently dropping it every frame for every provider, meaning the tag
+mechanism was completely inert for anything routed through `RenderPipeline`
+before this fix. A brand-new, generic Core facility,
+`RenderPassGroupRegistry.h/.cpp` (`RegisterPassGroupLabel()`/
+`FindPassGroupIndexForTags()`, PHASE2), lets any Layer-2 module register its
+own human-readable Frame Debugger tree heading for its own tag, with Core
+itself never learning or caring what any tag or heading means. PHASE3 then
+did the actual de-hardcoding: two new Layer-2 tag headers
+(`AtmosphereRenderPassTags.h`'s `kAtmosphereLutPassTag` = bit 0,
+`GpuSkinningRenderPassTags.h`'s `kGpuSkinningDispatchPassTag` = bit 1, both
+exactly the bit values this campaign's own strategy doc suggested) replaced
+the two deleted enumerators at all 7 real production call sites (5 Atmosphere
+LUT passes, the `"GpuSkinning"` `RenderPipeline` provider,
+`AddGpuSkinningPasses()`'s direct-render-only fallback), and
+`AtmosphereLutRenderer`'s own constructor now self-registers the
+`"Compute LUT"` heading from its own file. PHASE4 rewrote
+`FrameDebuggerData.cpp`'s pre-GameView compute-dispatch grouping logic to
+consume the registry generically - one bucket per currently-registered
+`(tag -> heading)` pair, in registration order, looked up via
+`FindPassGroupIndexForTags(pass.tags)` instead of a hardcoded
+`RenderPassCategory::AtmosphereLut` check - proven genuinely generic by a new
+Tier-1 test that registers a synthetic, test-only tag/heading pair with zero
+relationship to any real feature and confirms it is correctly bucketed by
+code that never mentions it. Verified with a full clean build (both
+`GTE_ENABLE_EDITOR` configs), a full `ctest` regression pass (1753 tests,
+100% passing, one pre-existing environment-gated skip - up from
+`render-pass-6`'s own 1736 baseline), and a live, HTTP-driven smoke test
+confirming the Game View Frame Debugger tree's `"Compute LUT"`/
+`"RenderOpaque"`/`"DrawSkyBackground"`/`"Compute Dispatches (Post-GameView)"`
+grouping and per-pass Inspector data are visually and structurally identical
+to every prior campaign's own documented baseline. See
+`task_manager/render-pass-7/CAMPAIGN_COMPLETION_REPORT.md` for the full
+five-phase writeup.
+
 Full history: `task_manager/render-pass-1/PHASE0_MASTER_STRATEGY.md`,
 `task_manager/render-pass-2/PHASE0_MASTER_STRATEGY.md`,
 `task_manager/render-pass-3/PHASE0_MASTER_STRATEGY.md`,
-`task_manager/render-pass-4/PHASE0_MASTER_STRATEGY.md`, and
-`task_manager/render-pass-6/PHASE0_MASTER_STRATEGY.md`, and each
+`task_manager/render-pass-4/PHASE0_MASTER_STRATEGY.md`,
+`task_manager/render-pass-6/PHASE0_MASTER_STRATEGY.md`, and
+`task_manager/render-pass-7/PHASE0_MASTER_STRATEGY.md`, and each
 `PHASEn_COMPLETION_REPORT.md`/`CAMPAIGN_COMPLETION_REPORT.md` in those same
 folders.
 
