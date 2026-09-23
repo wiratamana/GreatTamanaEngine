@@ -448,6 +448,30 @@
 #                                            RenderGraphBuilderTests.cpp/
 #                                            RenderPassTests.cpp's own
 #                                            precedent exactly.
+#   - Renderer/RenderGraph/RenderPassGroupRegistryTests.cpp - render-pass-7
+#                                            campaign's PHASE2
+#                                            (task_manager/render-pass-7/
+#                                            PHASE2_PASS_GROUP_REGISTRY.md) -
+#                                            the new, generic Core facility
+#                                            (see src/Renderer/RenderGraph/
+#                                            RenderPassGroupRegistry.h) that
+#                                            lets a Layer-2 module register a
+#                                            Frame-Debugger-tree heading for
+#                                            its own RenderPassTag: register/
+#                                            count/lookup-by-index round-trip,
+#                                            FindPassGroupIndexForTags()'s
+#                                            exact-bit/no-bit/multi-bit-first-
+#                                            wins cases, same-tag-same-heading
+#                                            idempotency, same-tag-different-
+#                                            heading in-place update (count
+#                                            unchanged), first-registered-wins
+#                                            ordering across two distinct tags,
+#                                            and ResetPassGroupRegistryForTesting()
+#                                            actually clearing state. Pure
+#                                            Tier 1 - no Vulkan device
+#                                            involved, zero real consumers
+#                                            wired up yet (PHASE3/PHASE4 are
+#                                            the first real callers).
 #   - Game/RenderSystemTests.cpp             - RenderSystem::CollectRenderables()
 #                                            (the pure ECS -> DrawCommand step)
 #                                            and ResolveActiveCameraViewProjection()
@@ -2048,6 +2072,7 @@ set(GTE_TEST_SOURCES
     Renderer/RenderGraph/RenderGraphDebugTextureRegistryTests.cpp
     Renderer/RenderGraph/RenderGraphDebugVolumeTextureRegistryTests.cpp
     Renderer/RenderGraph/RenderPipelineTests.cpp
+    Renderer/RenderGraph/RenderPassGroupRegistryTests.cpp
     Math/Vec2Tests.cpp
     Math/Vec3Tests.cpp
     Math/Mat4Tests.cpp
