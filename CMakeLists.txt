@@ -686,6 +686,16 @@ add_library(gte_editor STATIC
     src/Application/EventTranslator.cpp
     src/Application/Application.h
     src/Application/Application.cpp
+    # editor-core-separation-1 campaign, PHASE15
+    # (PHASE15_EDITORHOST_COMPOSITION_ROOT_CORE_CONSTRUCTION.md) - the new
+    # composition root REPLACING Application's role (structure only this
+    # phase - Run() is a deliberate, temporary stub; the real main loop +
+    # automation bridges are PHASE16's job). main.cpp (this executable's own
+    # entry point) now constructs EditorHost instead of Application.
+    src/Editor/EditorHostServices.h
+    src/Editor/EditorHostServices.cpp
+    src/Editor/EditorHost.h
+    src/Editor/EditorHost.cpp
     src/Editor/EditorContext.h
     src/Editor/ProjectRootPath.h
     src/Editor/ProjectRootPath.cpp

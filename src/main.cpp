@@ -1,6 +1,13 @@
 // Entry point. Kept intentionally minimal - only knows how to construct and
-// run the Application; all SDL details live inside Application/Window/
-// Renderer/Game.
+// run EditorHost; all SDL/Window/Renderer/Core/Editor-UI details live inside
+// EditorHost/Window/Renderer/Core/Game.
+//
+// editor-core-separation-1 campaign, PHASE15
+// (PHASE15_EDITORHOST_COMPOSITION_ROOT_CORE_CONSTRUCTION.md) - constructs
+// EditorHost (src/Editor/EditorHost.h) instead of Application
+// (src/Application/Application.h) - Application itself stays fully intact
+// and unused (Phase 17 retires it once EditorHost fully covers its
+// responsibilities).
 //
 // Note: this uses a plain int main(argc, argv). SDL3's <SDL3/SDL_main.h>
 // convention (which lets SDL provide its own WinMain on Windows, needed for
@@ -8,7 +15,7 @@
 // it's actually needed (e.g. to build as a GUI subsystem app with no console
 // window).
 
-#include "Application/Application.h"
+#include "Editor/EditorHost.h"
 
 #include "Assets/AssetDatabase.h"
 #include "Assets/AssetImporter.h"
@@ -49,8 +56,8 @@ int main(int argc, char* argv[])
     }
 
     try {
-        gte::Application app("Great Tamana Engine", 1280, 720);
-        return app.Run();
+        gte::EditorHost host("Great Tamana Engine", 1280, 720);
+        return host.Run();
     } catch (const std::exception& e) {
         std::fprintf(stderr, "Fatal error: %s\n", e.what());
         return 1;
