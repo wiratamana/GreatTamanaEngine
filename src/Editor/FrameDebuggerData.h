@@ -445,10 +445,13 @@ std::string FormatMatrixProperty(const FrameDebuggerMatrixProperty& matrix);
 // "RenderOpaque" instead. The tree shape is now:
 //
 //   "Game View" (root, cosmetic label, UNCHANGED - see `root.name` below)
-//     |-- "Compute LUT"                        (AtmosphereLut-category compute passes before the pivot)
+//     |-- "Compute LUT"                        (every compute pass before the pivot carrying a tag
+//     |                                          registered via RenderPassGroupRegistry - today that
+//     |                                          is Atmosphere's own tag, but this header must never
+//     |                                          say so as if it were a permanent rule)
 //     |     |-- "AtmosphereTransmittanceLutPass"       (v-parent - owns exactly one child, see below)
 //     |     |     `-- "Compute Dispatch"
-//     |     `-- ... one such v-parent per surviving AtmosphereLut-category pass
+//     |     `-- ... one such v-parent per surviving pass carrying that registered tag
 //     |-- "Compute Dispatches (Pre-GameView)"   (every OTHER category compute pass before the pivot)
 //     |     `-- ... same v-parent/"Compute Dispatch" child shape as above, per surviving pass
 //     |-- "RenderOpaque" leaf                   (the old "GameView" leaf, renamed - same per-entity
@@ -459,7 +462,8 @@ std::string FormatMatrixProperty(const FrameDebuggerMatrixProperty& matrix);
 //     |                                          hack is REMOVED entirely)
 //     |-- "RenderTransparent" leaf              (only once this pass is ever real/non-empty - never
 //     |     `-- "Draw Mesh"/"Draw Quad"/"Blit"   today - would get the same v-parent/child treatment)
-//     `-- "Compute Dispatches (Post-GameView)"  (General-category compute passes after the view region)
+//     `-- "Compute Dispatches (Post-GameView)"  (every compute pass after the view region, regardless
+//           of tag - this group is never subdivided by tag)
 //           `-- ... same v-parent/"Compute Dispatch" child shape as above, per surviving pass
 //
 // Frame Debugger Pass-Ownership campaign (task_manager/render-pass-2), PHASE2

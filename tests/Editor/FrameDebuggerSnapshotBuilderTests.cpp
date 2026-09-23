@@ -1547,6 +1547,48 @@ TEST(FrameDebuggerSnapshotBuilderTest, ComputeLutSubPassAlsoOwnsAComputeDispatch
     EXPECT_EQ(lutGroup.children[0].children[0].name, "Compute Dispatch");
 }
 
+// NEW - render-pass-7 campaign, PHASE4 (Core Campaign 1's own final proof) -
+// the literal, automated, permanent regression guard for the source
+// strategy document's own central claim (CORE_EXPANSION_STRATEGY_v2.md,
+// Section 1.1): "a future plugin... gets equivalent treatment" without
+// editing Core. Registers a synthetic, TEST-LOCAL-ONLY tag/heading pair that
+// has NO relationship to any real feature (a deliberately unused bit, well
+// clear of the two real production bits this campaign actually chose -
+// kAtmosphereLutPassTag = bit 0, kGpuSkinningDispatchPassTag = bit 1 - see
+// PHASE3_COMPLETION_REPORT.md), and confirms BuildRealFrameDebuggerSnapshot()
+// - whose own compiled code never once mentions this string, this tag, or
+// this test - still correctly buckets it purely from registry DATA. If this
+// test ever starts failing, the Core/Layer-2 boundary this whole campaign
+// exists to establish has regressed.
+TEST(FrameDebuggerSnapshotBuilderTest, ASyntheticThirdPartyTagAndHeadingGetsGroupedWithZeroProductionCodeAwareness)
+{
+    rg::ResetPassGroupRegistryForTesting();
+    constexpr rg::RenderPassTag kFakeFuturePluginTag{ 1ull << 40 };
+    rg::RegisterPassGroupLabel(kFakeFuturePluginTag, "Totally Fake Future Plugin Group");
+
+    rg::RenderGraphSnapshot graphSnapshot;
+    rg::RenderGraphPassSnapshot fakePluginPass = MakeComputePass("SyntheticFuturePluginPass");
+    fakePluginPass.tags = kFakeFuturePluginTag.bit;
+    graphSnapshot.passesInExecutionOrder.push_back(fakePluginPass);
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
+
+    const FrameDebuggerCaptureContext capture;
+    const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
+
+    ASSERT_EQ(snapshot.rootNodes.size(), 1u);
+    const FrameDebuggerEventNode& root = snapshot.rootNodes[0];
+    // "Totally Fake Future Plugin Group" + "RenderOpaque" leaf, nothing else
+    // - no "Compute LUT" group at all, since ResetPassGroupRegistryForTesting()
+    // wiped out even that registration for this test.
+    ASSERT_EQ(root.children.size(), 2u);
+    const FrameDebuggerEventNode& fakeGroup = root.children[0];
+    EXPECT_FALSE(fakeGroup.isDrawCall);
+    EXPECT_EQ(fakeGroup.name, "Totally Fake Future Plugin Group");
+    ASSERT_EQ(fakeGroup.children.size(), 1u);
+    EXPECT_EQ(fakeGroup.children[0].name, "SyntheticFuturePluginPass");
+    EXPECT_EQ(root.children[1].name, "RenderOpaque");
+}
+
 // ---------------------------------------------------------------------------
 // NEW TEST - render-pass-3 campaign, PHASE4
 // (PHASE4_FRAME_DEBUGGER_EVENT_PIVOT_FIX.md, Step 3.3) - the actual
