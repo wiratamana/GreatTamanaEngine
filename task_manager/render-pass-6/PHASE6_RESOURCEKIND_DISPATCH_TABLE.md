@@ -1,5 +1,95 @@
 # PHASE6 — Generic `ResourceKind` Dispatch (item 2.2)
 
+---
+
+## ✅ Dedicated double-check — RAN, CLEAN PASS, no correction needed (2026-09-23)
+
+Independently re-executed every item in this document's own "Dedicated
+Double-Check Instructions" section (bottom of this file), against the real,
+committed PHASE6 source (`git show 66014a7`), not merely the completion
+report's own prose. Summary of findings — **nothing needed fixing**:
+
+1. **Scratch 4th-`ResourceKind`-enumerator verification, redone for real**:
+   added `_ScratchFourthKindForVerificationOnly` to `ResourceKind`
+   (`RenderGraphTypes.h`), ran `cmake --build build --target gte_core` —
+   **build succeeded with ZERO errors/warnings**, confirming (not merely
+   trusting) `PHASE6_COMPLETION_REPORT.md`'s own surprising finding: this
+   project's `gte_core`/`GreatTamanaEngine` compile line
+   (`ninja -t commands`, independently inspected) carries no
+   `-Wall`/`-Wextra`/`-Wswitch`/`-Werror` at all, so an unhandled-enumerator
+   diagnostic never fires for `DispatchByKind()` (or any of this codebase's
+   other pre-existing "no `default:`" switches) today. This is a genuine,
+   pre-existing gap in the build configuration, not a regression from this
+   phase and not a discrepancy in the completion report — confirmed
+   accurate, not "loudly reported" as wrong. The scratch enumerator was
+   immediately reverted; `git diff` after reverting is empty (byte-identical
+   to the committed `RenderGraphTypes.h`), and a clean rebuild
+   (`cmake --build build --target gte_core` then `cmake --build build`)
+   succeeded with zero errors both before continuing.
+2. **Fresh re-grep of `RenderGraph.cpp`/`RenderGraphCompiler.cpp`/
+   `RenderGraphSnapshot.cpp` for `switch (usage.kind)` / `switch (a.kind)`**:
+   the only surviving LIVE switch construct anywhere in
+   `src/Renderer/RenderGraph/` is `DispatchByKind()`'s own single switch
+   (`RenderGraphTypes.h`); every other hit is an explanatory comment
+   describing the conversion. The completion report's "nine sites, zero
+   stragglers" count is confirmed accurate, including both of PHASE4's own
+   two additions (`firstXWriter` prescan + inline fast-path consumer).
+3. **Diffed the actual committed change (`git show 66014a7`) against the
+   pre-PHASE6 source**: confirmed, site by site, that every conversion is a
+   pure mechanical `switch` → `DispatchByKind()` transform with each case
+   body moved verbatim into its own lambda — zero logic drift anywhere
+   (barrier computation, RAW/WAW writer resolution, root-marking, lifetime
+   `touch()`, and name resolution all read identically to before, just
+   re-shaped as lambda bodies).
+4. **Site 2 (`sameResource` inside `DetectRenderPassEventContradictions()`)**:
+   confirmed the function's public signature (`RenderGraphCompiler.h`/`.cpp`)
+   is byte-for-byte unchanged; its own direct-call tests
+   (`OrphanReadWithLaterWriterIsDetected`,
+   `EdgeContradictingDeclaredEventOrderIsDetected`, etc.) and PHASE4's
+   fast-path/standalone equivalence death test
+   (`RenderGraphCompilerDeathTest.FastPathDetectsOrphanReadWithLaterWriterAndAbortsJustLikeTheStandaloneFunctionWould`)
+   all still pass.
+5. **"No `default:` case, ever" convention**: confirmed preserved exactly —
+   `DispatchByKind()` has no `default:` case, and its unreachable tail is a
+   real hard-fail (`assert(false, ...)` + `throw std::logic_error(...)`),
+   never a re-invoked callable or a fabricated sentinel, per its own doc
+   comment.
+6. **Re-ran the targeted test suites**: `RenderGraphCompilerTest` (33 cases)
+   + `RenderGraphCompilerDeathTest` (1) + `RenderGraphSnapshotTest` (24) = 58,
+   all pass; `RenderGraphDispatchByKindTest` (4 new cases) run directly, all
+   pass; the full `RenderGraph*` filter (233 tests, 21 suites) also re-run
+   as a broader regression check, all 233 pass. **Minor documentation note**
+   (not a code bug): this document's own suggested
+   `--gtest_filter=RenderGraphCompiler*:RenderGraphSnapshot*:RenderGraphTypes*`
+   command does NOT actually match `RenderGraphDispatchByKindTest`'s cases
+   (that suite's name doesn't start with the literal string
+   `RenderGraphTypes`, since `RenderGraphTypesTests.cpp` contains several
+   independently-named suites, not one `RenderGraphTypes*`-prefixed suite) —
+   harmless in practice since `PHASE6_COMPLETION_REPORT.md` already caught
+   this itself and additionally ran a broader `RenderGraph*` filter, and this
+   double-check independently re-confirmed the 4 new cases pass by filtering
+   on their real suite name directly. A future reader relying on a literal
+   copy-paste of the suggested filter string alone should be aware it misses
+   the new tests.
+7. **Site 1 (`ApplyUsageBarrierIfNeeded`) live smoke test**: independently
+   redone (`run_app_background` + `gte_send_request`), not merely trusted
+   from the completion report — `GET /get_logs?min_level=Warning` returned
+   `{"count":0,...}` both before and after; `GET /get_swapchain` showed the
+   Editor rendering correctly (sky/atmosphere gradient in both Scene and Game
+   panels); `GET /activate_tab?name=Render Graph` + `GET /get_swapchain`
+   showed the "Render Graph" panel listing every real pass (Atmosphere
+   Transmittance/Multi-Scattering/SkyView/Aerial-Perspective LUTs ×2 views,
+   RenderOpaque) with correct real GPU timing and Reads/Writes columns;
+   `GET /get_game_view` rendered correctly; `stop_app_background` cleanly
+   shut the process down.
+
+**Conclusion: no correction was needed anywhere in this phase's
+implementation or in this strategy document's own body.** Everything below
+this notice is preserved exactly as originally written (the phase's own
+strategy/plan), for historical/reference accuracy.
+
+---
+
 ⚠️ **This phase gets its own dedicated `delegate_task` double-check pass
 immediately after it lands, BEFORE the whole-campaign second-iteration
 double-check** — see `PHASE0_MASTER_STRATEGY.md`'s Locked Design Decision 5
