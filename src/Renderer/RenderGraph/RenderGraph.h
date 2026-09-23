@@ -74,111 +74,23 @@ class Renderer;
 
 namespace gte::rg {
 
-// Fully specifies the `struct PassContext;` forward-declared by Phase 1
-// (RenderGraphTypes.h) - PassRecord::execute is a
-// `std::function<void(PassContext&)>`, invoked exactly once per surviving
-// pass by RenderGraph::Execute() below (see PassRecord's own doc comment).
-//
-// Deliberately kept as small as this phase actually needs - see
-// RENDERGRAPH_PHASE6_EXECUTION_ENGINE_STRATEGY_v2.md's own "Step 5: Their
-// Role": "it is far easier to ADD a method to PassContext later than to
-// have over-designed it now against imagined future passes". Both
-// `resolveReadTexture`/`recordDraw` are plain std::function fields (rather
-// than a virtual interface/friend-only private state) so this struct stays
-// a simple, copyable value with no dependency on RenderGraph's own private
-// implementation types.
-struct PassContext {
-    VkCommandBuffer cmd = VK_NULL_HANDLE;
-
-    // The extent of this pass's own resolved color attachment (zero for a
-    // pass that declared no ColorAttachmentWrite - e.g. a future
-    // transfer-only/compute-only pass, which never gets a
-    // vkCmdBeginRendering bracket at all - see RenderGraph::Execute()'s own
-    // implementation comment).
-    VkExtent2D colorAttachmentExtent{};
-
-    struct ResolvedTexture {
-        VkImageView view = VK_NULL_HANDLE;
-        VkSampler sampler = VK_NULL_HANDLE;
-    };
-
-    // Resolves a texture this pass declared as a READ (via
-    // PassBuilder::ReadTexture()) into its already-live VkImageView/
-    // VkSampler pair, wired up by RenderGraph::Execute() right before
-    // invoking this pass's `execute` callback. Returns a null view/sampler
-    // for a handle that never resolved to a physical texture this call
-    // (including an imported resource, which carries no VkSampler of its
-    // own - see RenderGraphBuilder::ImportTexture()'s own TextureImportInfo,
-    // which has no sampler field).
-    std::function<ResolvedTexture(TextureHandle)> resolveReadTexture;
-
-    // Phase 6 (COMPUTE_PHASE6_RENDERGRAPH_INTEGRATION_STRATEGY_v2.md) -
-    // a plain alias of resolveReadTexture() above with a name that no
-    // longer implies "reads only": resolves ANY texture handle this pass
-    // declared, whether via ReadTexture() OR PassBuilder::WriteTexture()
-    // (a compute shader's RWTexture output) - a write-only handle is
-    // resolved just as early as a read one (RenderGraph::Execute() resolves
-    // every declared read AND write before a pass's own `execute` callback
-    // runs), so this is safe to call for either direction. Intended for a
-    // compute pass's `execute` callback to use when rewriting its own
-    // ComputeDescriptorSet (see Renderer/ComputeDescriptorSet.h) against
-    // the CURRENT physical resource behind a declared handle, right before
-    // calling Renderer::Dispatch().
-    std::function<ResolvedTexture(TextureHandle)> resolveTexture;
-
-    // The buffer sibling of resolveTexture() above - resolves a declared
-    // BufferHandle (via ReadBuffer()/WriteBuffer()) into its CURRENT
-    // physical VkBuffer, for the exact same "rewrite my own
-    // ComputeDescriptorSet before dispatching" use case. Returns
-    // VK_NULL_HANDLE for a handle that never resolved to a physical buffer
-    // this call.
-    std::function<VkBuffer(BufferHandle)> resolveBuffer;
-
-    // Atmosphere Scattering campaign, Phase 2
-    // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md) - the
-    // volume-texture sibling of resolveTexture()/resolveBuffer() above.
-    // Deliberately mirrors their exact "hand back plain, already-resolved
-    // Vulkan data, never an owning object" shape - RenderGraph never owns
-    // a VolumeTexture (every VolumeTextureHandle today is imported, see
-    // RenderGraphBuilder::ImportVolumeTexture()), so this returns a plain
-    // ResolvedVolumeTexture{view}, never a "VolumeTexture&" (there is no
-    // such owning reference for RenderGraph to hand out - it only ever
-    // tracks the plain VolumeTarget an external owner supplied). A pass's
-    // `execute` callback uses this to rewrite its own ComputeDescriptorSet
-    // (VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL) against
-    // the CURRENT physical image view behind a declared handle.
-    struct ResolvedVolumeTexture {
-        VkImageView view = VK_NULL_HANDLE;
-    };
-    std::function<ResolvedVolumeTexture(VolumeTextureHandle)> resolveVolumeTexture;
-
-    // Called by a pass's `execute` callback immediately alongside issuing a
-    // real vkCmdDraw/vkCmdDrawIndexed, so this pass's own DrawStats tally
-    // stays fused to the exact call site that actually issued the draw -
-    // mirroring Renderer::Submit()'s existing shape/semantics (see
-    // AGENTS.md's "Profiling" section, AccumulateDrawStats()'s own
-    // correctness rule) but scoped per-PASS here instead of per-frame-queue,
-    // since a pass's execute callback is opaque, caller-authored Vulkan code
-    // RenderGraph itself never sees the inside of (unlike FrameRecorder's
-    // own single, closed draw-queue loop).
-    std::function<void(bool hasIndexBuffer, std::uint32_t vertexCount, std::uint32_t indexCount)> recordDraw;
-
-    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-    // PHASE6 (task_manager/render-pass-5/PHASE6_EDITOR_TOOLING_AND_LIVE_VALIDATION.md)
-    // - the indirect-draw sibling of recordDraw() above. Called by a pass's
-    // `execute` callback immediately alongside issuing a real
-    // Renderer::SubmitIndirect() call, so DrawStats::indirectDrawCount (see
-    // DrawStats.h's own doc comment - a COUNT OF INDIRECT DRAW CALLS ISSUED,
-    // never an object/triangle count) is real, per-pass data for the first
-    // time (PHASE2 built the field; PHASE5 never wired it into a real
-    // render-graph pass's own return value - this closes that gap).
-    // Deliberately a SEPARATE callback from recordDraw() (never a shared one
-    // with an extra bool parameter) - the two update genuinely DIFFERENT
-    // DrawStats fields (indirectDrawCount vs. drawCallCount/triangleCount),
-    // and must never be confused with each other, per DrawStats.h's own
-    // explicit rule.
-    std::function<void()> recordIndirectDraw;
-};
+// `PassContext` is forward-declared by RenderGraphTypes.h (`struct
+// PassContext;`) and used, still only as a reference, by
+// `PassRecord::execute` (`std::function<void(PassContext&)>`) - neither of
+// those needs a COMPLETE type. This header fully specifies `PassContext`
+// only at the very BOTTOM of this file, AFTER `class RenderGraph` below -
+// render-pass-6 campaign, PHASE3 (item 2.7) gave `PassContext` plain,
+// non-owning pointers into RenderGraph's own PRIVATE `PhysicalTexture`/
+// `PhysicalBuffer`/`PhysicalVolumeTexture` nested types (replacing the six
+// freshly-constructed `std::function` closures Phase 6 originally shipped),
+// and naming a class's private nested type from the outside requires that
+// class to have already granted friendship AND to have already been fully
+// parsed (a nested type is only nameable via qualification once the
+// compiler has actually seen it declared) - see `class RenderGraph`'s own
+// `friend struct PassContext;` grant below, and `PassContext`'s own full
+// definition/doc comment at the bottom of this file for the complete
+// reasoning (confirmed via `ask_questions` during PHASE3's own
+// implementation, see `PHASE3_COMPLETION_REPORT.md`).
 
 // Which of this engine's two real submission regimes an Execute() call
 // belongs to - see this header's own top comment for the full reasoning.
@@ -198,7 +110,7 @@ enum class ExecuteTimingMode : std::uint8_t {
 // TIMING NOTE" below) it is now real, driver-measured data for every
 // surviving pass whenever this class's own GpuTimestampCapability reports
 // support and capture is enabled. `drawStats` is real, fused-per-draw-call
-// data (see PassContext::recordDraw above) and always has been.
+// data (see PassContext::recordDraw below) and always has been.
 
 // See this header's own top comment for Execute()'s two-calls-per-frame
 // contract, and RENDERGRAPH_PHASE6_EXECUTION_ENGINE_STRATEGY_v2.md for the
@@ -384,6 +296,21 @@ public:
     void SetGpuTimingCaptureEnabled(bool enabled) noexcept { m_timestampPool.SetCaptureEnabled(enabled); }
 
 private:
+    // render-pass-6 campaign, PHASE3 (item 2.7) - `PassContext` (fully
+    // defined at the bottom of this file, AFTER this class) needs read
+    // access to `PhysicalTexture`/`PhysicalBuffer`/`PhysicalVolumeTexture`
+    // immediately below - normally PRIVATE, implementation-only nested
+    // types - so it can hold plain, non-owning `const std::vector<...>*`
+    // pointers into them and implement its own resolveReadTexture()/
+    // resolveBuffer()/resolveVolumeTexture() member functions. Confirmed via
+    // `ask_questions` (see PHASE3_COMPLETION_REPORT.md, "private nested-type
+    // visibility"): a narrow `friend` grant to `PassContext` alone, rather
+    // than moving these three structs out to full `gte::rg` namespace scope
+    // (which would have made them nameable/constructible from anywhere in
+    // the engine for zero additional benefit - nothing outside RenderGraph's
+    // own executor needs them).
+    friend struct PassContext;
+
     struct PhysicalTexture {
         bool resolved = false;
         bool isImported = false;
@@ -440,9 +367,10 @@ private:
     // render-pass-6 campaign, PHASE2 (item 2.6) - extracted, zero-behavior-
     // change decomposition of ExecuteCompiledGraph()'s own six interleaved
     // concerns - see PHASE2_EXECUTE_COMPILED_GRAPH_EXTRACTION.md. Builds the
-    // six resolver/record callbacks a pass's own `execute` callback uses -
-    // identical construction to what used to be written inline in
-    // ExecuteCompiledGraph()'s per-pass loop body.
+    // PassContext a pass's own `execute` callback uses - as of PHASE3 (item
+    // 2.7) this is now a small, obviously-correct handful of pointer
+    // assignments (see PassContext's own definition below) instead of six
+    // freshly-constructed std::function closures.
     PassContext BuildPassContext(VkCommandBuffer cmd, std::vector<PhysicalTexture>& physicalTextures,
         std::vector<PhysicalBuffer>& physicalBuffers, std::vector<PhysicalVolumeTexture>& physicalVolumeTextures,
         DrawStats& passDrawStats);
@@ -597,6 +525,195 @@ private:
     // own doc comment above for the accepted "Swapchain" freshness caveat
     // this sharing implies.
     std::uint64_t m_debugTextureFrameCounter = 0;
+};
+
+// Fully specifies the `struct PassContext;` forward-declared by Phase 1
+// (RenderGraphTypes.h) - PassRecord::execute is a
+// `std::function<void(PassContext&)>`, invoked exactly once per surviving
+// pass by RenderGraph::Execute() below (see PassRecord's own doc comment).
+//
+// Deliberately kept as small as this phase actually needs - see
+// RENDERGRAPH_PHASE6_EXECUTION_ENGINE_STRATEGY_v2.md's own "Step 5: Their
+// Role": "it is far easier to ADD a method to PassContext later than to
+// have over-designed it now against imagined future passes".
+//
+// render-pass-6 campaign, PHASE3 (item 2.7) - REPLACES the six freshly-
+// constructed `std::function` closures (one heap-capture-shaped object +
+// one indirect vtable-style call per resolve/record, PER PASS, PER
+// Execute() call) Phase 6 originally shipped with plain, non-owning data:
+// `resolveReadTexture`/`resolveTexture`/`resolveBuffer`/`resolveVolumeTexture`
+// are now ordinary, non-virtual member functions indexing plain
+// `const std::vector<RenderGraph::PhysicalX>*` pointers (never null for a
+// PassContext actually built by RenderGraph::BuildPassContext() - only a
+// default-constructed PassContext, never handed to a real pass, leaves them
+// null); `recordDraw`/`recordIndirectDraw` are small, non-owning CALLABLE
+// STRUCT fields (`RecordDrawFn`/`RecordIndirectDrawFn` below) rather than
+// bare member functions - see their own doc comment below for exactly why
+// that distinction is load-bearing, not stylistic. PassContext is never
+// stored/copied beyond one pass's own `execute` call (see this struct's own
+// doc comment above), so every one of these raw pointers' lifetime is
+// always safely bounded by that same call - they all point into
+// RenderGraph::ExecuteCompiledGraph()'s own stack-local physicalX vectors/
+// passDrawStats local, which outlive the entire per-pass loop iteration
+// that hands a PassContext to `pass.execute()`.
+//
+// Every pass author's call site is BYTE-FOR-BYTE UNCHANGED by this phase -
+// `ctx.resolveReadTexture(handle)`, `ctx.recordDraw(...)`,
+// `m_renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw)`, `if
+// (ctx.recordIndirectDraw) { ctx.recordIndirectDraw(); }`, etc. all compile
+// and behave identically - confirmed by a full grep audit of every real
+// production call site (see PHASE3_COMPLETION_REPORT.md).
+struct PassContext {
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+
+    // The extent of this pass's own resolved color attachment (zero for a
+    // pass that declared no ColorAttachmentWrite - e.g. a future
+    // transfer-only/compute-only pass, which never gets a
+    // vkCmdBeginRendering bracket at all - see RenderGraph::Execute()'s own
+    // implementation comment).
+    VkExtent2D colorAttachmentExtent{};
+
+    struct ResolvedTexture {
+        VkImageView view = VK_NULL_HANDLE;
+        VkSampler sampler = VK_NULL_HANDLE;
+    };
+
+    // Atmosphere Scattering campaign, Phase 2
+    // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md) - the
+    // volume-texture sibling of ResolvedTexture above. RenderGraph never
+    // owns a VolumeTexture (every VolumeTextureHandle today is imported, see
+    // RenderGraphBuilder::ImportVolumeTexture()), so this returns a plain
+    // ResolvedVolumeTexture{view}, never a "VolumeTexture&" - there is no
+    // such owning reference for RenderGraph to hand out, it only ever
+    // tracks the plain VolumeTarget an external owner supplied.
+    struct ResolvedVolumeTexture {
+        VkImageView view = VK_NULL_HANDLE;
+    };
+
+    // render-pass-6 campaign, PHASE3 (item 2.7) - plain, non-owning pointers
+    // into RenderGraph::ExecuteCompiledGraph()'s own stack-local physicalX
+    // vectors, set exactly once by RenderGraph::BuildPassContext() (see
+    // RenderGraph.cpp) right before a pass's `execute` callback runs. Never
+    // null for a PassContext actually handed to a pass - only a
+    // default-constructed PassContext (never handed to a real pass) leaves
+    // these null, which is why every resolve method below defensively
+    // null-checks before dereferencing (mirroring this codebase's general
+    // "defensive, cheap check even when a real call site already guarantees
+    // it won't happen" style seen throughout RenderGraph.cpp). Named to
+    // match this struct's own sibling plain-data-struct convention elsewhere
+    // in this file/RenderGraphTypes.h (ResourceUsage, ColorAttachmentDesc,
+    // etc. - no `m_` prefix), rather than RenderGraph's own class-member
+    // `m_`-prefixed convention, since PassContext is a plain value struct,
+    // not a class with real behavior of its own to hide.
+    const std::vector<RenderGraph::PhysicalTexture>* textures = nullptr;
+    const std::vector<RenderGraph::PhysicalBuffer>* buffers = nullptr;
+    const std::vector<RenderGraph::PhysicalVolumeTexture>* volumeTextures = nullptr;
+
+    // Resolves a texture this pass declared as a READ (via
+    // PassBuilder::ReadTexture()) into its already-live VkImageView/
+    // VkSampler pair, wired up by RenderGraph::Execute() right before
+    // invoking this pass's `execute` callback. Returns a null view/sampler
+    // for a handle that never resolved to a physical texture this call
+    // (including an imported resource, which carries no VkSampler of its
+    // own - see RenderGraphBuilder::ImportTexture()'s own TextureImportInfo,
+    // which has no sampler field).
+    ResolvedTexture resolveReadTexture(TextureHandle handle) const noexcept;
+
+    // Phase 6 (COMPUTE_PHASE6_RENDERGRAPH_INTEGRATION_STRATEGY_v2.md) -
+    // a plain alias of resolveReadTexture() above with a name that no
+    // longer implies "reads only": resolves ANY texture handle this pass
+    // declared, whether via ReadTexture() OR PassBuilder::WriteTexture()
+    // (a compute shader's RWTexture output) - a write-only handle is
+    // resolved just as early as a read one (RenderGraph::Execute() resolves
+    // every declared read AND write before a pass's own `execute` callback
+    // runs), so this is safe to call for either direction. Intended for a
+    // compute pass's `execute` callback to use when rewriting its own
+    // ComputeDescriptorSet (see Renderer/ComputeDescriptorSet.h) against
+    // the CURRENT physical resource behind a declared handle, right before
+    // calling Renderer::Dispatch().
+    ResolvedTexture resolveTexture(TextureHandle handle) const noexcept { return resolveReadTexture(handle); }
+
+    // The buffer sibling of resolveTexture() above - resolves a declared
+    // BufferHandle (via ReadBuffer()/WriteBuffer()) into its CURRENT
+    // physical VkBuffer, for the exact same "rewrite my own
+    // ComputeDescriptorSet before dispatching" use case. Returns
+    // VK_NULL_HANDLE for a handle that never resolved to a physical buffer
+    // this call.
+    VkBuffer resolveBuffer(BufferHandle handle) const noexcept;
+
+    // Atmosphere Scattering campaign, Phase 2 - the volume-texture sibling
+    // of resolveTexture()/resolveBuffer() above, same "resolve whatever was
+    // already resolved" shape. A pass's `execute` callback uses this to
+    // rewrite its own ComputeDescriptorSet (VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+    // VK_IMAGE_LAYOUT_GENERAL) against the CURRENT physical image view
+    // behind a declared handle.
+    ResolvedVolumeTexture resolveVolumeTexture(VolumeTextureHandle handle) const noexcept;
+
+    // render-pass-6 campaign, PHASE3 (item 2.7) - recordDraw/
+    // recordIndirectDraw deliberately stay small, non-owning CALLABLE
+    // STRUCT fields rather than becoming bare ordinary member functions
+    // (unlike the four resolve*() methods above) - a full grep audit (this
+    // phase's own Step 3.4) found real production call sites a bare member
+    // function cannot satisfy:
+    //   - ~20 sites do `m_renderer.BeginGraphPassRecording(ctx.cmd,
+    //     ctx.recordDraw);` - passing the field as a plain VALUE into
+    //     Renderer's own `std::function<void(bool, std::uint32_t,
+    //     std::uint32_t)>`-typed parameter, never calling it with parens.
+    //   - Application.cpp does `if (ctx.recordIndirectDraw) {
+    //     ctx.recordIndirectDraw(); }` - a truthiness check before calling.
+    // A bare non-static member function name cannot be used, unqualified,
+    // as a value or in a boolean context (only called with `()`, or
+    // address-of'd via `&PassContext::recordDraw` and bound to an object) -
+    // so converting these two to plain member functions would be a compile
+    // error at every one of those call sites, directly contradicting this
+    // phase's own harder "zero call-site change, whole engine compiles
+    // unmodified" requirement. A small function-object struct (implicitly
+    // convertible to `std::function<...>` via its own `operator()`, exactly
+    // like a lambda would be) keeps every one of those call sites compiling
+    // completely unmodified while still holding only a plain, non-owning
+    // `DrawStats*` - no lambda capture, no PassContext-owned std::function,
+    // no heap allocation of its own. Confirmed via `ask_questions` during
+    // this phase's own implementation (see PHASE3_COMPLETION_REPORT.md).
+    struct RecordDrawFn {
+        DrawStats* drawStats = nullptr;
+
+        // Called by a pass's `execute` callback immediately alongside
+        // issuing a real vkCmdDraw/vkCmdDrawIndexed, so this pass's own
+        // DrawStats tally stays fused to the exact call site that actually
+        // issued the draw - mirroring Renderer::Submit()'s existing shape/
+        // semantics (see AGENTS.md's "Profiling" section, AccumulateDrawStats()'s
+        // own correctness rule) but scoped per-PASS here instead of
+        // per-frame-queue.
+        void operator()(bool hasIndexBuffer, std::uint32_t vertexCount, std::uint32_t indexCount) const;
+    };
+
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE6 (task_manager/render-pass-5/PHASE6_EDITOR_TOOLING_AND_LIVE_VALIDATION.md)
+    // - the indirect-draw sibling of RecordDrawFn above. Called by a pass's
+    // `execute` callback immediately alongside issuing a real
+    // Renderer::SubmitIndirect() call, so DrawStats::indirectDrawCount (see
+    // DrawStats.h's own doc comment - a COUNT OF INDIRECT DRAW CALLS ISSUED,
+    // never an object/triangle count) is real, per-pass data. Deliberately a
+    // SEPARATE type from RecordDrawFn (never a shared one with an extra bool
+    // parameter) - the two update genuinely DIFFERENT DrawStats fields
+    // (indirectDrawCount vs. drawCallCount/triangleCount), and must never be
+    // confused with each other, per DrawStats.h's own explicit rule. Also
+    // carries an explicit `operator bool()` so `if (ctx.recordIndirectDraw)`
+    // (Application.cpp's existing call site) keeps compiling and behaving
+    // identically - true whenever this PassContext was built by
+    // RenderGraph::BuildPassContext() (i.e. `drawStats != nullptr`), exactly
+    // mirroring what a default-constructed `std::function`'s own
+    // `operator bool()` used to report before this phase.
+    struct RecordIndirectDrawFn {
+        DrawStats* drawStats = nullptr;
+
+        void operator()() const;
+
+        explicit operator bool() const noexcept { return drawStats != nullptr; }
+    };
+
+    RecordDrawFn recordDraw;
+    RecordIndirectDrawFn recordIndirectDraw;
 };
 
 } // namespace gte::rg

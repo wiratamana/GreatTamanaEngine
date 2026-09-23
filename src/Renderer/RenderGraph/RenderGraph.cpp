@@ -241,71 +241,73 @@ void RenderGraph::ApplyUsageBarrierIfNeeded(VkCommandBuffer cmd, const ResourceU
     }
 }
 
-// render-pass-6 campaign, PHASE2 (item 2.6) - extracted out of
-// ExecuteCompiledGraph() for readability, zero behavior change - see
-// PHASE2_EXECUTE_COMPILED_GRAPH_EXTRACTION.md. Builds the six resolver/
-// record callbacks a pass's own `execute` callback uses - identical
-// construction (same lambdas, same captures) to what used to be written
-// inline in ExecuteCompiledGraph()'s per-pass loop body.
+// render-pass-6 campaign, PHASE2 (item 2.6), updated by PHASE3 (item 2.7) -
+// extracted out of ExecuteCompiledGraph() for readability (PHASE2), then
+// simplified from six freshly-constructed std::function closures down to a
+// small, obviously-correct handful of pointer assignments (PHASE3) - see
+// PHASE2_EXECUTE_COMPILED_GRAPH_EXTRACTION.md /
+// PHASE3_PASSCONTEXT_PLAIN_RESOLVERS.md. `physicalTextures`/`physicalBuffers`/
+// `physicalVolumeTextures`/`passDrawStats` all outlive the entire per-pass
+// loop iteration that hands the returned PassContext to `pass.execute()` -
+// see PassContext's own doc comment (RenderGraph.h) for the full pointer-
+// lifetime reasoning.
 PassContext RenderGraph::BuildPassContext(VkCommandBuffer cmd, std::vector<PhysicalTexture>& physicalTextures,
     std::vector<PhysicalBuffer>& physicalBuffers, std::vector<PhysicalVolumeTexture>& physicalVolumeTextures,
     DrawStats& passDrawStats)
 {
     PassContext ctx;
     ctx.cmd = cmd;
-    // Resolves ANY texture handle already resolved this call - whether
-    // declared via ReadTexture() OR a compute pass's WriteTexture()
-    // (Phase 6 of the compute-shader campaign) - EnsureTextureResolved()
-    // above runs for every declared read AND write, so a write-only
-    // handle is just as resolvable here as a read one by the time a
-    // pass's own `execute` callback runs. `resolveReadTexture` is kept
-    // as the original name (nothing outside this file used it in
-    // production before Phase 6 - see PassContext's own doc comment in
-    // RenderGraph.h); `resolveTexture` is a plain alias with a name
-    // that no longer implies "reads only", for a compute pass rewriting
-    // its own descriptor set against a texture it WRITES.
-    ctx.resolveReadTexture = [&physicalTextures](TextureHandle handle) -> PassContext::ResolvedTexture {
-        if (handle.index < physicalTextures.size() && physicalTextures[handle.index].resolved) {
-            const PhysicalTexture& tex = physicalTextures[handle.index];
-            return PassContext::ResolvedTexture{ tex.target.imageView, tex.sampler };
-        }
-        return PassContext::ResolvedTexture{};
-    };
-    ctx.resolveTexture = ctx.resolveReadTexture;
-
-    // Phase 6 (COMPUTE_PHASE6_RENDERGRAPH_INTEGRATION_STRATEGY_v2.md) -
-    // the buffer sibling of resolveTexture() above, so a compute pass
-    // can rewrite its own ComputeDescriptorSet against a declared
-    // BufferHandle's CURRENT physical VkBuffer before dispatching.
-    ctx.resolveBuffer = [&physicalBuffers](BufferHandle handle) -> VkBuffer {
-        if (handle.index < physicalBuffers.size() && physicalBuffers[handle.index].resolved) {
-            return physicalBuffers[handle.index].buffer;
-        }
-        return VK_NULL_HANDLE;
-    };
-
-    // Atmosphere Scattering campaign, Phase 2
-    // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md) -
-    // the volume-texture sibling of resolveTexture()/resolveBuffer()
-    // above, same "resolve whatever was already resolved above" shape.
-    ctx.resolveVolumeTexture =
-        [&physicalVolumeTextures](VolumeTextureHandle handle) -> PassContext::ResolvedVolumeTexture {
-        if (handle.index < physicalVolumeTextures.size() && physicalVolumeTextures[handle.index].resolved) {
-            return PassContext::ResolvedVolumeTexture{ physicalVolumeTextures[handle.index].target.imageView };
-        }
-        return PassContext::ResolvedVolumeTexture{};
-    };
-
-    ctx.recordDraw = [&passDrawStats](bool hasIndexBuffer, std::uint32_t vertexCount, std::uint32_t indexCount) {
-        AccumulateDrawStats(passDrawStats, hasIndexBuffer, vertexCount, indexCount);
-    };
-    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-    // PHASE6 - see PassContext::recordIndirectDraw's own doc comment
-    // (RenderGraph.h) for why this is a separate callback from
-    // recordDraw() above.
-    ctx.recordIndirectDraw = [&passDrawStats]() { AccumulateIndirectDrawStats(passDrawStats); };
-
+    ctx.textures = &physicalTextures;
+    ctx.buffers = &physicalBuffers;
+    ctx.volumeTextures = &physicalVolumeTextures;
+    ctx.recordDraw.drawStats = &passDrawStats;
+    ctx.recordIndirectDraw.drawStats = &passDrawStats;
     return ctx;
+}
+
+// render-pass-6 campaign, PHASE3 (item 2.7) - PassContext's own resolve/
+// record member-function bodies, mirroring the exact logic the six
+// std::function closures above used to construct (see this campaign's
+// PHASE2/PHASE3 strategy documents for the full history).
+PassContext::ResolvedTexture PassContext::resolveReadTexture(TextureHandle handle) const noexcept
+{
+    if (textures != nullptr && handle.index < textures->size() && (*textures)[handle.index].resolved) {
+        const RenderGraph::PhysicalTexture& tex = (*textures)[handle.index];
+        return ResolvedTexture{ tex.target.imageView, tex.sampler };
+    }
+    return ResolvedTexture{};
+}
+
+VkBuffer PassContext::resolveBuffer(BufferHandle handle) const noexcept
+{
+    if (buffers != nullptr && handle.index < buffers->size() && (*buffers)[handle.index].resolved) {
+        return (*buffers)[handle.index].buffer;
+    }
+    return VK_NULL_HANDLE;
+}
+
+PassContext::ResolvedVolumeTexture PassContext::resolveVolumeTexture(VolumeTextureHandle handle) const noexcept
+{
+    if (volumeTextures != nullptr && handle.index < volumeTextures->size()
+        && (*volumeTextures)[handle.index].resolved) {
+        return ResolvedVolumeTexture{ (*volumeTextures)[handle.index].target.imageView };
+    }
+    return ResolvedVolumeTexture{};
+}
+
+void PassContext::RecordDrawFn::operator()(
+    bool hasIndexBuffer, std::uint32_t vertexCount, std::uint32_t indexCount) const
+{
+    if (drawStats != nullptr) {
+        AccumulateDrawStats(*drawStats, hasIndexBuffer, vertexCount, indexCount);
+    }
+}
+
+void PassContext::RecordIndirectDrawFn::operator()() const
+{
+    if (drawStats != nullptr) {
+        AccumulateIndirectDrawStats(*drawStats);
+    }
 }
 
 // render-pass-6 campaign, PHASE2 (item 2.6) - extracted out of
