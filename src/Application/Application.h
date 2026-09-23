@@ -7,6 +7,15 @@
 #include <unordered_set>
 
 #include "../Core/EngineContext.h"
+// editor-core-separation-1 campaign, PHASE12 - gte::Core, the new gte_core
+// public facade Application now constructs and delegates its own
+// Renderer/RenderGraph/Game/EngineContext-Time ownership to (see this
+// class's own m_core/m_renderer/m_game/m_engineContext member comments
+// below). Core.h itself already includes EngineContext.h/Renderer.h/
+// RenderGraph.h/Game.h transitively - the explicit includes below/above are
+// kept anyway for this file's own existing "state exactly what this file
+// needs" discipline, unaffected by this addition.
+#include "../Core/Core.h"
 #include "../Core/EditorCapabilities.h"
 #include "../Editor/EditorLayer.h"
 #include "../Game/Game.h"
@@ -109,14 +118,69 @@ private:
 
     SdlContext m_sdlContext;
     Window m_window;
-    Renderer m_renderer;
+
+    // editor-core-separation-1 campaign, PHASE12
+    // (PHASE12_CORE_CLASS_SKELETON_AND_CONSTRUCTION.md) - a trivial,
+    // TEMPORARY IHostServices implementation, needed only because Core's
+    // constructor requires a real IHostServices& (Core's own frozen public
+    // contract, design doc Section 5.2). Routes into the SAME global
+    // log-sink mechanism GTE_LOG_* itself already uses (Core/LogSink.h) -
+    // this is NOT a second, competing logging path, just a thin adapter
+    // satisfying Core's constructor signature. PHASE16 (EditorHost Main
+    // Loop and Automation Bridges) replaces this with EditorHost's own,
+    // permanent IHostServices implementation once EditorHost exists; this
+    // one is not meant to outlive Application itself (retired in PHASE17).
+    struct ApplicationHostServices : IHostServices {
+        void Log(LogLevel level, std::string_view message) override
+        {
+            LogToActiveSink(level, "Core", message);
+        }
+    };
+
+    ApplicationHostServices m_hostServices;
+
+    // editor-core-separation-1 campaign, PHASE12
+    // (PHASE12_CORE_CLASS_SKELETON_AND_CONSTRUCTION.md) - gte_core's own
+    // public facade (src/Core/Core.h). Owns the real Renderer/RenderGraph/
+    // Game/EngineContext-Time instances (see m_renderer's own doc comment
+    // below for why Application still keeps same-named REFERENCE members
+    // bound to these, rather than every call site being rewritten to
+    // `m_core.GetX()` in this phase). Constructed injecting m_window as
+    // ISurfaceProvider& (Window implements it - PHASE10) and m_hostServices
+    // (above) as IHostServices&. `SetEditorLayerHook(m_editorLayer.get())`
+    // is called once, from this class's own constructor BODY (never the
+    // initializer list - m_editorLayer must already be fully constructed
+    // first) - see Application.cpp. Declared right after m_window/
+    // m_hostServices (its own two constructor dependencies) so both are
+    // already fully constructed by the time this runs.
+    Core m_core;
+    // editor-core-separation-1 campaign, PHASE12
+    // (PHASE12_CORE_CLASS_SKELETON_AND_CONSTRUCTION.md) - Renderer/RenderGraph/
+    // Game/EngineContext-Time are no longer owned VALUE members here: the
+    // real instances now physically live inside m_core (below), per the
+    // design doc's own Section 2.1 ownership graph. These four are kept as
+    // same-named REFERENCE members bound to m_core's own accessors at
+    // construction time - a documented, lower-risk DEVIATION from PHASE12's
+    // own literal "rewrite every call site to go through
+    // m_core.GetRenderer()/m_core.GetGame()/etc" instruction: Run() and the
+    // two Register*Provider() methods below (none of which move into Core
+    // until PHASE13) reference these members - and capture `this` in dozens
+    // of lambdas - throughout ~2000+ lines; keeping the same names here lets
+    // every one of those existing call sites keep compiling and behaving
+    // BYTE-FOR-BYTE UNCHANGED this phase, with the literal "go through
+    // m_core.GetX()" rewrite happening naturally in PHASE13 once that code
+    // physically moves into Core's own methods (where it becomes ordinary,
+    // direct member access again). See PHASE12_COMPLETION_REPORT.md for the
+    // full reasoning (confirmed as an acceptable resolution to a genuine
+    // ambiguity this phase's own strategy file left open).
+    Renderer& m_renderer;
     // Phase 7 (RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md) -
     // the ONE shared RenderGraph instance Game view/Scene view/Present are
     // all recorded through (two Execute() calls per frame - see Run() and
     // RenderPasses.h). Declared right after m_renderer (constructed with a
     // reference to it) so it's already fully constructed by the time
     // m_editorLayer/m_game below might indirectly need it.
-    rg::RenderGraph m_renderGraph;
+    rg::RenderGraph& m_renderGraph;
 
     // render-pass-3 campaign, PHASE2/PHASE3 - the new, generic pass-
     // DECLARATION layer sitting strictly ABOVE m_renderGraph/RenderGraphBuilder
@@ -315,7 +379,12 @@ private:
     // Renderer's Vulkan device/instance go away, but its lifetime doesn't
     // need to relate to Game's at all.
     std::unique_ptr<IEditorLayer> m_editorLayer;
-    Game m_game;
+    // editor-core-separation-1 campaign, PHASE12 - REFERENCE, not a real
+    // owned instance anymore: the real Game instance now physically lives
+    // inside m_core (Core::GetGame()) - see m_renderer's own doc comment
+    // above for the full "why a reference, not m_core.GetGame() at every
+    // call site" reasoning (identical here).
+    Game& m_game;
 
     // frame-debugger-1 campaign (task_manager/frame-debugger-1/
     // PHASE0_MASTER_STRATEGY.md) - the ONE EngineContext instance for the
@@ -323,7 +392,18 @@ private:
     // (m_engineContext.time.Advance(...)) and passed by const reference into
     // Game::Update(). See EngineContext.h's own doc comment for why this
     // stays deliberately minimal (just `time` for now).
-    EngineContext m_engineContext;
+    // editor-core-separation-1 campaign, PHASE12 - REFERENCE, not a real
+    // owned instance anymore: the real EngineContext/Time instance now
+    // physically lives inside m_core (Core::GetEngineContext()) - see
+    // m_core's own doc comment below. Kept as a same-named reference member
+    // (a documented, lower-risk deviation from PHASE12's own literal "go
+    // through m_core.GetEngineContext()" call-site-rewrite instruction) so
+    // every one of Run()'s/the Register*Provider() methods' own existing
+    // `m_engineContext.` call sites (still living in THIS file until
+    // PHASE13 physically relocates that code into Core itself) keeps
+    // compiling and behaving byte-for-byte unchanged this phase - see
+    // PHASE12_COMPLETION_REPORT.md for the full reasoning.
+    EngineContext& m_engineContext;
 
     // network-impl-2 campaign (task_manager/network-impl-2/) - the ONE
     // sanctioned cross-thread bridge a Network route handler is allowed to

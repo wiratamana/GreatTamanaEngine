@@ -307,10 +307,22 @@ Application::SdlContext::~SdlContext()
 Application::Application(const std::string& title, int width, int height)
     : m_sdlContext()
     , m_window(title, width, height)
-    , m_renderer(m_window)
-    , m_renderGraph(m_renderer)
+    // editor-core-separation-1 campaign, PHASE12 - m_hostServices has no
+    // constructor dependencies of its own (a stateless adapter); m_core is
+    // constructed injecting m_window (as ISurfaceProvider&) and
+    // m_hostServices (as IHostServices&) - both already fully constructed
+    // by this point (Application.h's own member declaration order).
+    , m_hostServices()
+    , m_core(m_window, m_hostServices)
+    // The four lines below now bind REFERENCE members to m_core's own real,
+    // owned instances (see Application.h's own m_renderer/m_renderGraph/
+    // m_game/m_engineContext doc comments for the full "why a reference"
+    // reasoning) - m_core is already fully constructed by this point.
+    , m_renderer(m_core.GetRenderer())
+    , m_renderGraph(m_core.GetRenderGraph())
     , m_editorLayer(CreateEditorLayer(m_window, m_renderer))
-    , m_game()
+    , m_game(m_core.GetGame())
+    , m_engineContext(m_core.GetEngineContext())
     // network-impl-2 campaign, Phase 3 - hands FrameCaptureBridge's address
     // into NetworkServer's constructor (a defaulted pointer parameter - see
     // NetworkServer.h) so its /get_game_view route handler can reach it.
@@ -350,6 +362,20 @@ Application::Application(const std::string& title, int width, int height)
     // Phase 16 of this same campaign moves this one call site into
     // EditorHost's own constructor instead, once EditorHost exists.
     gte::InstallLogSink(&gte::LoggerLogSink::Instance());
+
+    // editor-core-separation-1 campaign, PHASE12
+    // (PHASE12_CORE_CLASS_SKELETON_AND_CONSTRUCTION.md, PHASE0's Locked
+    // Design Decision #8) - wires m_core's own nullable IEditorLayer* hook
+    // to the real, already-constructed m_editorLayer instance. Called here,
+    // from the constructor BODY (never the initializer list) specifically
+    // because m_editorLayer must already be fully constructed first - by
+    // this point in the body every member's own constructor has already
+    // run, so this is safe regardless of m_core's/m_editorLayer's relative
+    // declaration order. Core::BuildFrame() does not yet call through this
+    // pointer at all this phase (that's PHASE13's job) - this call alone
+    // causes zero runtime behavior change, it only proves the hook
+    // compiles/wires safely.
+    m_core.SetEditorLayerHook(m_editorLayer.get());
 
     // editor-core-separation-1 campaign, PHASE6
     // (PHASE6_EDITOR_CAPABILITY_CALL_SITE_CONVERSION_SCENE_IO.md) - wires the

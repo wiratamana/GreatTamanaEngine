@@ -249,6 +249,17 @@ add_library(gte_core STATIC
     # instead of the concrete Window class (header-only, no .cpp - every
     # method is pure virtual). Window implements it (src/Window/Window.h).
     src/Core/ISurfaceProvider.h
+    # editor-core-separation-1 campaign, PHASE12
+    # (PHASE12_CORE_CLASS_SKELETON_AND_CONSTRUCTION.md) - the new gte::Core
+    # class (skeleton only this phase - no real per-frame orchestration
+    # logic yet, that's PHASE13's job), plus its own small, dedicated
+    # supporting headers (InputFrame.h/IHostServices.h), mirroring
+    # ISurfaceProvider.h's own "one small header per concept" precedent
+    # immediately above.
+    src/Core/InputFrame.h
+    src/Core/IHostServices.h
+    src/Core/Core.h
+    src/Core/Core.cpp
     src/Math/MathTypes.h
     src/Math/Vec2.h
     src/Math/Vec3.h
