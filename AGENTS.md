@@ -612,14 +612,63 @@ Full convention: [docs/conventions/scene-serialization.md](docs/conventions/scen
 
 ## Editor Module Structure
 
-An optional in-engine Editor module lives under `src/Editor/`, compiled only
-when `GTE_ENABLE_EDITOR` is ON - `ImGuiEditorLayer` as its composition root,
-a shared `EditorContext`, a single `Selection` gate-keeper for
-Hierarchy/Project selection changes, `DockLayout`, and a fixed set of
-`Panels/*.cpp` builder functions (deliberately not a polymorphic panel
+The in-engine Editor module lives under `src/Editor/`, compiled into its own real,
+separately-linked static library, `gte_editor` (see "`gte_core`/`gte_editor` Library
+Separation" below - `GTE_ENABLE_EDITOR` no longer exists anywhere in this codebase) -
+`ImGuiEditorLayer` as its composition root, a shared `EditorContext`, a single
+`Selection` gate-keeper for Hierarchy/Project selection changes, `DockLayout`, and a
+fixed set of `Panels/*.cpp` builder functions (deliberately not a polymorphic panel
 registry).
 
 Full convention: [docs/conventions/editor-module-structure.md](docs/conventions/editor-module-structure.md).
+
+## `gte_core` / `gte_editor` Library Separation
+
+A 19-phase campaign, `editor-core-separation-1`
+(`task_manager/editor-core-separation-1/PHASE0_MASTER_STRATEGY.md`,
+`CAMPAIGN_COMPLETION_REPORT.md`), turned the one CMake target that used to contain
+BOTH the engine and the entire Editor/debug-tooling surface (gated by one
+`if(GTE_ENABLE_EDITOR)` block) into **two real, separately-linked static libraries**:
+`gte_core.a` (the engine - Renderer, ECS, Game, Render Graph, Time/EngineContext - a
+new `gte::Core` class is its public facade) and `gte_editor.a` (depends on
+`gte_core.a`, one-way, never the reverse - owns ImGui, gizmos, the Frame Debugger,
+every panel, and the authoring window's own SDL/main-loop glue). A new `EditorHost`
+class replaced the old `Application` (deleted outright) as the real composition root:
+it owns `SdlContext`/`Window`, constructs `Core` by injecting `Window` as an
+`ISurfaceProvider&`, constructs the concrete Editor UI, and owns every automation
+bridge (`EngineCommandBridge`/`FrameCaptureBridge`/`EditorUiCommandBridge`/
+`FrameDebuggerCommandBridge`/`AssetImportCommandBridge`) plus the embedded
+`Network::NetworkServer` - `Core` itself stays a pure engine facade with zero HTTP/
+automation-bridge knowledge, ever. The built executable was renamed
+`GreatTamanaEngine` -> **`GreatTamanaEditor`**, reflecting what it actually is (the
+authoring tool). A manually-invocable, CI-only standalone-core probe
+(`tools/ci/gte_core_standalone_probe/`) configures ONLY `gte_core` - no `gte_editor`,
+no SDL, no ImGui - proving it compiles/archives on its own; a headless
+`ISurfaceProvider` test fixture (`tests/Fakes/HeadlessSurfaceProvider.h`, a real
+`VK_EXT_headless_surface`-based surface, never a fake pointer) proves `Core` can be
+constructed and driven with no real `Window`/SDL involved (it self-skips, correctly,
+on any machine whose Vulkan driver lacks that extension). Verified with a full clean
+build (497/497 steps) and a full `ctest` regression pass (1773 tests, 100% of executed
+tests passing, 2 legitimate environment-gated skips - up from `render-pass-7`'s own
+1753 baseline).
+
+**Honest, load-bearing caveat, restated plainly (not silently smoothed over)**: the
+campaign's own closeout phase (PHASE19) found, and mechanically reproduced with a
+real link attempt, that the design's own "Four Hard Rules" are only PARTIALLY met
+today - `RenderSystem.cpp` (`gte_core`) still carries a real, unresolved reference to
+`gte::RecordFrameDebuggerDraws()` (`gte_editor`-only), and `Network/NetworkServer.cpp`/
+`NetworkRoutes.cpp`/`.h` (`gte_core`) still directly `#include "../Editor/Logger.h"`
+and call the real `Logger` class (a pre-existing, already-documented exception, see
+"Logging" below) - meaning a thin Player-build host linking `gte_core.a` alone would
+NOT yet get a running, renderable engine. Both gaps are pre-existing since early in
+the campaign, honestly disclosed at the time, and never assigned to any of the 19
+phases to close - see `CAMPAIGN_COMPLETION_REPORT.md`'s own dedicated "Four Hard
+Rules" section for the full, itemized evidence and what closing this for real would
+require. **The Player Build Pipeline itself remains explicitly, permanently OUT OF
+SCOPE** - no `<ProjectName>.exe` generation, no per-project build system, no Player
+host template beyond what the standalone-core probe already needs - this campaign
+proves `gte_core.a` is heading in the right direction for that future initiative, it
+does not build it.
 
 ## Testability & Regression Safety
 
