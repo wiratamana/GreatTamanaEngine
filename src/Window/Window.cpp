@@ -47,7 +47,7 @@ Window& Window::operator=(Window&& other) noexcept
     return *this;
 }
 
-std::vector<std::string> Window::VulkanInstanceExtensions()
+std::vector<std::string> Window::VulkanInstanceExtensions() const
 {
     Uint32 count = 0;
     char const* const* extensions = SDL_Vulkan_GetInstanceExtensions(&count);

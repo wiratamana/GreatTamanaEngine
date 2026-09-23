@@ -243,6 +243,12 @@ add_library(gte_core STATIC
     # interfaces live here (and, just as importantly, which candidate
     # capabilities were investigated and found NOT to need one).
     src/Core/EditorCapabilities.h
+    # editor-core-separation-1 campaign, PHASE10
+    # (PHASE10_ISURFACEPROVIDER_INTERFACE_AND_WINDOW_INVERSION.md) - the
+    # abstract surface-provider interface Renderer/VulkanSurface now depend on
+    # instead of the concrete Window class (header-only, no .cpp - every
+    # method is pure virtual). Window implements it (src/Window/Window.h).
+    src/Core/ISurfaceProvider.h
     src/Math/MathTypes.h
     src/Math/Vec2.h
     src/Math/Vec3.h

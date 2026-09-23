@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <volk.h>
 
@@ -18,7 +18,8 @@ namespace gte {
 class VulkanInstance {
 public:
     // requiredExtensions: platform-specific extensions the window system
-    // needs (e.g. from Window::VulkanInstanceExtensions()). enableValidation
+    // needs (e.g. from ISurfaceProvider::VulkanInstanceExtensions() -
+    // Core/ISurfaceProvider.h). enableValidation
     // requests VK_LAYER_KHRONOS_validation + VK_EXT_debug_utils; if the
     // validation layer isn't available on this machine, this silently falls
     // back to running without it rather than failing the whole application.

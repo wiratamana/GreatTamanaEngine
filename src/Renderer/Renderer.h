@@ -36,13 +36,15 @@ class RenderGraphBuilder;
 
 namespace gte {
 
-class Window;
+class ISurfaceProvider;
 
-// Owns the entire Vulkan pipeline for a Window: instance, surface, device,
-// and allocator (acquired piece-by-piece in the constructor, each piece
-// itself RAII-owned - see Vulkan/*), plus three collaborators that do the
-// actual work and are released automatically, in reverse order, in the
-// destructor:
+// Owns the entire Vulkan pipeline for a surface (via ISurfaceProvider -
+// editor-core-separation-1 campaign, PHASE10, see
+// task_manager/editor-core-separation-1/PHASE10_ISURFACEPROVIDER_INTERFACE_AND_WINDOW_INVERSION.md):
+// instance, surface, device, and allocator (acquired piece-by-piece in the
+// constructor, each piece itself RAII-owned - see Vulkan/*), plus three
+// collaborators that do the actual work and are released automatically, in
+// reverse order, in the destructor:
 //   - FramePresenter (FramePresenter.h): owns the swapchain and every
 //     per-frame/per-image synchronization object, and implements
 //     RenderOffscreen()/PresentViaRenderGraph()'s actual Vulkan recording/
@@ -79,7 +81,7 @@ class Window;
 // boundary.
 class Renderer {
 public:
-    explicit Renderer(Window& window);
+    explicit Renderer(ISurfaceProvider& surfaceProvider);
     ~Renderer();
 
     Renderer(const Renderer&) = delete;

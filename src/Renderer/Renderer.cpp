@@ -1,6 +1,6 @@
 #include "Renderer.h"
 
-#include "../Window/Window.h"
+#include "../Core/ISurfaceProvider.h"
 #include "RenderGraph/RenderGraph.h"
 #include "RenderGraph/RenderGraphBarrierPlanner.h"
 
@@ -21,9 +21,9 @@ constexpr bool kEnableValidation = true;
 
 } // namespace
 
-Renderer::Renderer(Window& window)
-    : m_instance("GreatTamanaEngine", Window::VulkanInstanceExtensions(), kEnableValidation)
-    , m_surface(m_instance.Native(), window)
+Renderer::Renderer(ISurfaceProvider& surfaceProvider)
+    : m_instance("GreatTamanaEngine", surfaceProvider.VulkanInstanceExtensions(), kEnableValidation)
+    , m_surface(m_instance.Native(), surfaceProvider)
     , m_device(m_instance.Native(), m_surface.Native())
     , m_depthFormat(m_device.PickDepthFormat())
     // m_memoryTracker uses its default member initializer (see Renderer.h) -
@@ -42,8 +42,8 @@ Renderer::Renderer(Window& window)
     // VkApplicationInfo::apiVersion (see also GetVulkanContextInfo() below).
     , m_allocator(m_instance.Native(), m_device.Physical(), m_device.Native(), VK_API_VERSION_1_3)
     , m_presenter(m_device.Physical(), m_device.Native(), m_surface.Native(), m_device.GraphicsQueueFamily(),
-          m_device.PresentQueueFamily(), m_device.GraphicsQueue(), m_device.PresentQueue(), window.Width(),
-          window.Height(), m_allocator.Native(), m_depthFormat, m_memoryTracker, m_gpuTiming)
+          m_device.PresentQueueFamily(), m_device.GraphicsQueue(), m_device.PresentQueue(), surfaceProvider.Width(),
+          surfaceProvider.Height(), m_allocator.Native(), m_depthFormat, m_memoryTracker, m_gpuTiming)
     , m_resources(m_device.Physical(), m_device.Native(), m_allocator.Native(), m_device.GraphicsQueue(),
           m_device.GraphicsQueueFamily(), m_depthFormat, m_memoryTracker)
 {
