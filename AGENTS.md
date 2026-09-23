@@ -259,10 +259,58 @@ View Composite pass) is visually unchanged from every prior campaign's own
 final screenshot. See `task_manager/render-pass-4/CAMPAIGN_COMPLETION_REPORT.md`
 for the full three-phase writeup.
 
+A further campaign, `render-pass-6` (seven phases,
+`task_manager/render-pass-6/PHASE0_MASTER_STRATEGY.md`,
+`CAMPAIGN_COMPLETION_REPORT.md`), reworked this system's own internals for
+scale and per-frame speed with **zero behavior change and zero public API
+change** - implementing exactly the P0/P1 items of a prior outside-in code
+review (P2's `PassDesc` value type and P3's three opportunistic items were
+explicitly left out of scope). `RenderGraphNameSlotTable`'s previously-silent
+GPU-timing-slot-budget overflow now produces a real, one-time
+`GTE_LOG_WARNING` plus a `RenderGraphSnapshot::timingSlotBudgetExhausted`
+flag the Editor's "Render Graph" panel can surface (PHASE1); `RenderGraph::
+ExecuteCompiledGraph()`'s six previously-inline concerns became named private
+methods (`BuildPassContext()`/`BuildColorAttachmentInfos()`/
+`BuildDepthAttachmentInfo()`/`RegisterDebugTextureSnapshots()`/
+`RegisterDebugVolumeTextureSnapshots()`, PHASE2); `PassContext`'s six
+`std::function` fields (freshly constructed, per pass, per `Execute()` call)
+became plain non-owning pointers plus ordinary member functions - except
+`recordDraw`/`recordIndirectDraw`, which became small non-owning callable
+struct fields (`RecordDrawFn`/`RecordIndirectDrawFn`) since real call sites
+pass them by value/truthiness-check into `Renderer::BeginGraphPassRecording()`
+- with zero change to any pass author's own call-site syntax (PHASE3);
+`RenderGraphCompiler::Compile()`'s dependency-graph construction moved from an
+`O(P^2)` adjacency matrix to `O(P+E)` adjacency lists, with
+`DetectRenderPassEventContradictions()`'s own standalone implementation left
+byte-for-byte unchanged and a new inline fast path reusing `Compile()`'s own
+last-writer bookkeeping - byte-identical `executionOrder` verified against
+the full pre-existing `RenderGraphCompilerTests.cpp` suite (PHASE4); the 9
+parallel builder/`CompiledGraphInput` vectors (`textureDescs`/`textureNames`/
+`textureImportInfo`, etc.) collapsed into 3 per-kind `TextureSlot`/
+`BufferSlot`/`VolumeTextureSlot` vectors, eliminating a whole class of "forgot
+to push to array #3" silent-misalignment bug (PHASE5); and all nine (not the
+original estimate of seven - two more were introduced by PHASE4 itself)
+hand-duplicated `switch (usage.kind)`/`switch (a.kind)` blocks scattered
+across `RenderGraph.cpp`/`RenderGraphCompiler.cpp`/`RenderGraphSnapshot.cpp`
+collapsed into one generic `DispatchByKind()` dispatcher - still a real,
+`default:`-less exhaustive switch internally with a hard-fail unreachable
+tail, though PHASE6 discovered and honestly documented a genuine pre-existing
+gap: this project's build enables no `-Wswitch`/`-Wall`/`-Werror` for its own
+code, so an unhandled `ResourceKind` enumerator does not actually fail to
+compile anywhere in this codebase today, before or after this campaign - the
+"no `default:`, ever" discipline remains a code-review convention, not a
+compiler-enforced one (PHASE6). Verified with a full clean build, a full
+`ctest` regression pass (1736 tests, 100% passing, one pre-existing
+environment-gated skip - up from `logger-1`'s own 1673 baseline), and a live,
+HTTP-driven smoke test confirming rendering and the "Render Graph" panel are
+visually unchanged. See `task_manager/render-pass-6/CAMPAIGN_COMPLETION_REPORT.md`
+for the full seven-phase writeup.
+
 Full history: `task_manager/render-pass-1/PHASE0_MASTER_STRATEGY.md`,
 `task_manager/render-pass-2/PHASE0_MASTER_STRATEGY.md`,
-`task_manager/render-pass-3/PHASE0_MASTER_STRATEGY.md`, and
-`task_manager/render-pass-4/PHASE0_MASTER_STRATEGY.md`, and each
+`task_manager/render-pass-3/PHASE0_MASTER_STRATEGY.md`,
+`task_manager/render-pass-4/PHASE0_MASTER_STRATEGY.md`, and
+`task_manager/render-pass-6/PHASE0_MASTER_STRATEGY.md`, and each
 `PHASEn_COMPLETION_REPORT.md`/`CAMPAIGN_COMPLETION_REPORT.md` in those same
 folders.
 

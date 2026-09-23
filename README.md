@@ -110,6 +110,28 @@ pieces. This section keeps only the most recent entries inline — see
 **[docs/CHANGELOG.md](docs/CHANGELOG.md)** for the complete, reverse-
 chronological project history from the very first triangle demo onward.
 
+- **The Render Graph's own internals (`src/Renderer/RenderGraph/*`) were
+  reworked for scale and per-frame speed with zero behavior change and zero
+  public API change** (`render-pass-6` campaign, seven phases -
+  `task_manager/render-pass-6/PHASE0_MASTER_STRATEGY.md`) - a prior outside-in
+  code review's P0/P1 items landed: `RenderGraphCompiler::Compile()`'s
+  dependency-graph construction moved from an `O(P^2)` adjacency matrix to
+  `O(P+E)` adjacency lists (byte-identical `executionOrder` verified against
+  the full pre-existing test suite), the 9 parallel builder/
+  `CompiledGraphInput` vectors collapsed into 3 per-kind `TextureSlot`/
+  `BufferSlot`/`VolumeTextureSlot` vectors, all nine hand-duplicated
+  `switch (usage.kind)` blocks collapsed into one generic, still
+  `default:`-less exhaustive `DispatchByKind()` dispatcher, `PassContext`'s
+  six `std::function` fields became plain non-owning pointers/callable
+  structs with zero call-site change, and `RenderGraphNameSlotTable`'s
+  previously-silent GPU-timing-slot-budget overflow now produces a real,
+  one-time log warning plus an Editor-visible snapshot flag. Verified with a
+  full clean build, a full `ctest` regression pass (1736 tests, 100% passing,
+  one pre-existing environment-gated skip - up from `logger-1`'s own 1673
+  baseline), and a live, HTTP-driven smoke test confirming rendering and the
+  "Render Graph" panel are visually unchanged. See
+  `task_manager/render-pass-6/CAMPAIGN_COMPLETION_REPORT.md` for the full
+  seven-phase writeup.
 - **The engine now has a real, always-on, PRODUCTION GPU-driven frustum
   culling + indirect-draw path for batches of entities sharing the exact same
   mesh + pipeline — the render graph's own single most novel capability (a
