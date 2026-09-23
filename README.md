@@ -110,6 +110,59 @@ pieces. This section keeps only the most recent entries inline — see
 **[docs/CHANGELOG.md](docs/CHANGELOG.md)** for the complete, reverse-
 chronological project history from the very first triangle demo onward.
 
+- **The engine now has a real, always-on, PRODUCTION GPU-driven frustum
+  culling + indirect-draw path for batches of entities sharing the exact same
+  mesh + pipeline — the render graph's own single most novel capability (a
+  compute pass's buffer WRITE consumed by a later pass's buffer READ,
+  synchronized automatically) proven for a buffer, not just a texture, for
+  the first time** (`render-pass-5` campaign, seven phases -
+  `task_manager/render-pass-5/PHASE0_MASTER_STRATEGY.md`) - any
+  `(MeshHandle, PipelineHandle)` group with at least
+  `kMinInstancesForGpuDrivenBatch` (4) instances, an indexed mesh, an
+  untextured `VertexLayout::PositionNormal` pipeline, and no GPU-skinning
+  involvement (`RenderSystem::CollectGpuDrivenBatches()`,
+  `RenderBatching.h`'s `IsGpuDrivenEligible()`) is automatically rendered
+  through a real compute-shader culling pass (`Shaders/FrustumCull.comp`,
+  mirroring `GpuSkinningPipelines`' own shape via the new
+  `src/Renderer/Culling/CullingPipelines.h/.cpp`/`GpuDrivenBatchCache.h/.cpp`)
+  that tests each instance's world-space AABB against the camera's 6 frustum
+  planes and writes exactly one `VkDrawIndexedIndirectCommand` per surviving
+  instance, consumed by exactly one `vkCmdDrawIndexedIndirectCount` (or, on a
+  device without `drawIndirectCount` — selected purely by a runtime
+  capability probe, never assumed — a degenerate-padded
+  `vkCmdDrawIndexedIndirect` fallback, both genuinely implemented and
+  reviewed) via the new `Renderer::SubmitIndirect()`. A genuinely new
+  vertex-shader/pipeline variant, `VertexLayout::PositionNormalInstanced` +
+  `Shaders/MeshInstanced.vert` (reusing `Shaders/Mesh.frag` unmodified),
+  reads each surviving instance's own model matrix from the same
+  per-instance buffer the culling shader read from, indexed by
+  `gl_InstanceIndex` — this engine's existing 128-byte push-constant
+  model-matrix convention is fundamentally one-draw-one-object and cannot do
+  this, which is why a new `ResourceAccess::VertexShaderStorageRead`
+  enumerator was added. **This cutover is GAME VIEW ONLY** — Scene View and
+  the rare direct-render-to-swapchain fallback both keep rendering every
+  entity, including every batch-eligible one, through the fully unmodified
+  per-entity `Renderer::Submit()` path, forever (confirmed via
+  `ask_questions` during this campaign's own dedicated PHASE5
+  pre-implementation review — a LOUD, DELIBERATE scope decision, not an
+  oversight), which is exactly why the per-batch resource cache is safely
+  keyed by `(MeshHandle, PipelineHandle)` alone with no view dimension. Every
+  other `MeshRenderer` — every primitive shape, every textured submesh, every
+  GPU-skinned model, every group below the threshold — keeps drawing through
+  the byte-for-byte-unchanged per-entity path. A new "instances culled this
+  frame" readout in the Editor's "Render Graph" panel, plus a new
+  `POST /spawn_gpu_driven_test_batch` HTTP endpoint/Editor menu action for
+  on-demand validation content, make the whole feature directly observable
+  and testable without a mouse. Verified with a full clean build, a full
+  `ctest` regression pass, and a live, HTTP-driven, screenshot-verified smoke
+  test confirming the batch renders identically to the old per-entity path
+  and that rotating/moving objects out of the frustum measurably drops the
+  reported visible-instance count in real time. **Deliberately out of
+  scope, restated honestly rather than silently dropped**: no occlusion
+  culling, no hierarchical/two-phase culling, no LOD selection, no
+  textured/bindless batching, no primitive-shape batching, no async compute —
+  see `task_manager/render-pass-5/CAMPAIGN_COMPLETION_REPORT.md` for the full
+  seven-phase writeup and its own "what remains genuinely open" section.
 - **The Render Graph can now write more than one color attachment from a
   single pass — the foundational Multi-Render-Target (MRT)/G-buffer
   mechanism — proven end-to-end by a small, additive, debug-only consumer

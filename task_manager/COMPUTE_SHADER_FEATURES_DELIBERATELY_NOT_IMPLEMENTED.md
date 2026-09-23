@@ -171,19 +171,27 @@ is NOT yet implemented — see Section C below.
 Per `COMPUTE_PHASE7_COMPLETION_REPORT.md`'s own "What remains open"
 section — honestly tracked, not silently dropped:
 
-1. **Buffer-side validation (GPU frustum culling + indirect draw)** — the
-   companion `GPU_DRIVEN_RENDERING_COMPUTE_INDIRECT_STRATEGY_v1.md`
-   document's own Phase D/G. This is NOT yet started. The compute-shader
-   campaign's own `ResourceAccess::ComputeShaderRead/ComputeShaderWrite/
-   IndirectCommandRead` (Phase 5), `CreateStructuredBuffer()` (Phase 1,
-   with its `extraUsage` parameter specifically added for an indirect-draw
-   buffer), and `AddComputePass()` (Phase 6) are all already shipped and
-   ready for that document's own workload to consume directly — see
-   Section D below for the full "what's already reusable" breakdown. Per
-   the master strategy document's own "Their Role" instruction: **do not
-   consider the whole compute-shader campaign complete until this half
-   also lands** and is manually verified with validation layers clean and
-   visually confirmed correct.
+1. **~~Buffer-side validation (GPU frustum culling + indirect draw)~~ - ✅
+   DONE.** The companion `GPU_DRIVEN_RENDERING_COMPUTE_INDIRECT_STRATEGY_v1.md`
+   document's own Phase D onward is now fully shipped by the separate,
+   dedicated `render-pass-5` campaign (seven phases,
+   `task_manager/render-pass-5/PHASE0_MASTER_STRATEGY.md`,
+   `CAMPAIGN_COMPLETION_REPORT.md`) — not merely a "validation workload" as
+   originally scoped here, but a full, always-on PRODUCTION cutover for
+   Game View: `ResourceAccess::ComputeShaderRead/ComputeShaderWrite/
+   IndirectCommandRead` (Phase 5 of this compute-shader campaign) plus a
+   NEW `ResourceAccess::VertexShaderStorageRead` enumerator
+   (`render-pass-5`'s own PHASE1), `CreateStructuredBuffer()`'s `extraUsage`
+   parameter (Phase 1), and `AddComputePass()` (Phase 6) were all consumed
+   directly, exactly as this document predicted. The real
+   `Shaders/FrustumCull.comp` culling shader, `Renderer::SubmitIndirect()`,
+   and the real render-graph pass wiring (a new `"GpuDrivenBatches"`
+   `rg::RenderPassProvider`) are all real, shipped, and manually verified
+   with a live, HTTP-driven, screenshot-verified smoke test confirming
+   culling responds to camera/object movement — see
+   `task_manager/render-pass-5/CAMPAIGN_COMPLETION_REPORT.md` for the full
+   phase-by-phase writeup and its own honest "what remains genuinely open"
+   section.
 2. **Transient (render-graph-pooled) `RWTexture` support** (restated from
    Section A.6) — `rg::TextureDesc` still has no storage-usage opt-in;
    every `RWTexture` in this campaign, including Phase 7's own

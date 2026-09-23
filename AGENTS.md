@@ -401,6 +401,76 @@ permanent oracle the GPU kernel is checked against.
 
 Full convention: [docs/conventions/gpu-vertex-skinning.md](docs/conventions/gpu-vertex-skinning.md).
 
+## GPU-Driven Rendering (Frustum Culling + Indirect Draw)
+
+A seven-phase campaign, `render-pass-5`
+(`task_manager/render-pass-5/PHASE0_MASTER_STRATEGY.md`,
+`CAMPAIGN_COMPLETION_REPORT.md`), replaced this engine's old "walk every
+`MeshRenderer` and issue one `vkCmdDrawIndexed` per entity, unconditionally,
+no culling of any kind" behavior with a real, always-on, PRODUCTION
+GPU-driven path for the common case where several entities share the exact
+same `(MeshHandle, PipelineHandle)` pair (a "batch"): `RenderSystem::
+CollectGpuDrivenBatches()` (`src/Game/RenderBatching.h`) groups this frame's
+draw commands and applies a fixed, four-condition eligibility rule (`>=
+kMinInstancesForGpuDrivenBatch` = 4 instances; `Mesh::HasIndexBuffer()`;
+`Pipeline` built with EXACTLY `VertexLayout::PositionNormal` - untextured,
+non-instanced; not part of this frame's GPU-skinning output-buffer set) -
+every OTHER `MeshRenderer` (every primitive, every textured submesh, every
+GPU-skinned model, every group below the threshold) keeps drawing through the
+byte-for-byte-unchanged per-entity `Renderer::Submit()` path, forever. For
+each eligible batch, a real compute shader (`Shaders/FrustumCull.comp`, one
+thread per instance, mirroring `GpuSkinningPipelines`' own shape via the new
+`src/Renderer/Culling/CullingPipelines.h/.cpp`) tests each instance's
+world-space AABB (`Mesh::LocalBounds()`, computed once at load time by
+`MeshAssetGpuCatalog.cpp`, transformed per-instance per-frame) against the
+real camera's 6 frustum planes and writes exactly one
+`VkDrawIndexedIndirectCommand` per surviving instance into a per-batch
+indirect-command buffer (`src/Renderer/Culling/GpuDrivenBatchCache.h/.cpp`),
+plus an atomic visible count into a companion count buffer (reset to `0` via
+a real `vkCmdFillBuffer` pass every frame - the shader can never safely do
+this itself, since GLSL compute has no cross-workgroup ordering guarantee
+within one dispatch). A new `"GpuDrivenBatches"` `rg::RenderPassProvider`
+(`Application::RegisterOffscreenRenderPipelineProviders()`, registered
+strictly between `"RenderOpaque"` and `"DrawSkyBackground"`'s own
+`Register()` calls - this ordering is real, load-bearing, PROVIDER
+REGISTRATION ORDER, since `DetectRenderPassEventContradictions()` cannot
+catch a pure write-after-write hazard between two same-tier passes) declares,
+per eligible batch, a reset pass, the culling compute pass, and a graphics
+pass that reads the resulting buffer back
+(`ReadBuffer(indirectCommandHandle, ResourceAccess::IndirectCommandRead)`)
+and issues **exactly one** `vkCmdDrawIndexedIndirectCount` (or, on a device
+without `drawIndirectCount` - probed once via `Renderer::
+SupportsDrawIndirectCount()`/`VulkanDevice::QueryDrawIndirectCountSupport()`,
+never assumed - a `vkCmdDrawIndexedIndirect` fallback against a
+degenerate-padded command array, always sized to THIS FRAME'S real instance
+count, never the cache's own monotonically-growing buffer capacity) via the
+new `Renderer::SubmitIndirect()`. Each surviving instance's own model matrix
+is read by a genuinely NEW vertex-shader/pipeline variant,
+`VertexLayout::PositionNormalInstanced` + `Shaders/MeshInstanced.vert`
+(reusing `Shaders/Mesh.frag` unmodified), indexed by `gl_InstanceIndex` from
+the SAME per-instance input buffer the culling shader read from - this
+engine's existing 128-byte push-constant model-matrix convention is
+fundamentally one-draw-one-object and cannot do this, which is why a new
+`ResourceAccess::VertexShaderStorageRead` enumerator (distinct from the
+existing fragment-only `ShaderRead`) was added specifically for this
+buffer's vertex-stage read. **This cutover is GAME VIEW ONLY** - Scene View
+and the rare direct-render-to-swapchain fallback both keep rendering EVERY
+entity, including every batch-eligible one, through the fully unmodified
+per-entity path, forever (confirmed via `ask_questions` during this
+campaign's own dedicated PHASE5 pre-implementation review), which is exactly
+why the per-batch resource cache is safely keyed by `(MeshHandle,
+PipelineHandle)` alone with no view dimension. A new "instances culled this
+frame" readout (the Editor's "Render Graph" panel, plus
+`POST /spawn_gpu_driven_test_batch` for HTTP-driven validation) surfaces the
+GPU-computed visible/culled count live. **Deliberately out of scope**: no
+occlusion culling, no hierarchical/two-phase culling, no LOD selection, no
+textured/bindless batching, no primitive-shape (`VertexLayout::PositionColor`)
+batching, no async compute - see `CAMPAIGN_COMPLETION_REPORT.md`'s own "what
+remains genuinely open" section for the full, honest restatement of every one
+of these Non-Goals.
+
+Full convention: [docs/conventions/gpu-driven-rendering.md](docs/conventions/gpu-driven-rendering.md).
+
 ## Atmosphere Scattering
 
 A nine-phase campaign gave the engine a physically-based, real-time

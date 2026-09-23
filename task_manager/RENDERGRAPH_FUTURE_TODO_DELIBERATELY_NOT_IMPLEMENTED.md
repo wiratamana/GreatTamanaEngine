@@ -90,15 +90,25 @@ proven vs. what remains open" and the Phase 6/7/8 completion reports' own
    originally called out as unproven — now proven, for textures.
    `FinalizeRenderTextureForExternalSampling()` remains in place for Dear
    ImGui's own OUTSIDE-the-graph sampling of Game/Scene views (an
-   unrelated, still-real workaround for a different consumer). **What
-   remains open**: the BUFFER-side equivalent (`ReadBuffer()`,
-   `RequiredStateFor()` for a storage buffer/`IndirectCommandRead`) is
-   still never exercised against a real workload — that remains
-   `GPU_DRIVEN_RENDERING_COMPUTE_INDIRECT_STRATEGY_v1.md`'s own Phase D/G
-   job specifically, and directly relevant for GPU-driven rendering: a GPU
-   culling compute pass writing an indirect-draw buffer that a LATER
-   graphics pass reads is the same pattern, applied to a buffer instead of
-   a texture.
+   unrelated, still-real workaround for a different consumer). **What used to
+   remain open, ~~the BUFFER-side equivalent...~~, is now ✅ DONE (buffer
+   side) too — see the `render-pass-5` campaign**
+   (`task_manager/render-pass-5/PHASE0_MASTER_STRATEGY.md`,
+   `CAMPAIGN_COMPLETION_REPORT.md`). The buffer-side cross-pass read is now
+   proven too: PHASE3's real `Shaders/FrustumCull.comp` culling compute pass
+   declares `WriteBuffer(indirectCommandHandle, ComputeShaderWrite)` +
+   `WriteBuffer(countHandle, ComputeShaderWrite)`, and PHASE5's real
+   `"<batch> IndirectDraw"` graphics pass declares
+   `ReadBuffer(indirectCommandHandle, ResourceAccess::IndirectCommandRead)` +
+   `ReadBuffer(instanceInputHandle, ResourceAccess::VertexShaderStorageRead)`
+   (a NEW enumerator this campaign added specifically for a vertex-shader
+   storage-buffer read, distinct from the existing fragment-only `ShaderRead`)
+   — synchronized entirely by the existing, unmodified
+   `RenderGraphBarrierPlanner`, exactly the same "pass B consumes pass A's
+   output through the graph" pattern already proven for textures, now proven
+   for buffers too. `RenderGraphCompiler.cpp`/`RenderGraphSnapshot.cpp` needed
+   ZERO changes for this, confirmed by PHASE5's own targeted test run, not
+   merely assumed.
 3. **`Renderer::Present()`/`FramePresenter::Present()` (the old
    `FrameRecorder`-based scaffold) is confirmed dead code but was never
    deleted.** Cosmetic cleanup debt, not a functional gap, but worth
@@ -129,42 +139,51 @@ ComputeShaderRead`/`ComputeShaderWrite`/`IndirectCommandRead`, a real
 `AddComputePass()`. See `COMPUTE_PHASE1_COMPLETION_REPORT.md` through
 `COMPUTE_PHASE7_COMPLETION_REPORT.md`, and
 `COMPUTE_SHADER_FEATURES_DELIBERATELY_NOT_IMPLEMENTED.md` for what was
-deliberately left out of that campaign instead. **What remains open**:
-this was only ever the load-bearing gap for the whole next milestone's
+deliberately left out of that campaign instead. **~~What remains open: this
+was only ever the load-bearing gap for the whole next milestone's
 INFRASTRUCTURE half — the actual GPU-driven CULLING feature itself (C.3
-below) and indirect draw support (C.2 below) are still unbuilt.
+below) and indirect draw support (C.2 below) are still unbuilt.~~ ✅ Both C.2
+and C.3 are now DONE too, see the `render-pass-5` campaign** (below).
 
-### C.2 — No indirect draw support anywhere
-`FrameRecorder.cpp`/`RenderGraph.cpp`'s `PassContext::recordDraw` and every
-draw call in the engine goes through `vkCmdDraw`/`vkCmdDrawIndexed` with
-CPU-supplied, per-item parameters (see `DrawStats.h`'s own
-`AccumulateDrawStats()`, which assumes exactly this shape). There is no
-`VkDrawIndexedIndirectCommand` struct anywhere in this codebase, no GPU
-buffer laid out to hold an array of them, and no
-`vkCmdDrawIndexedIndirect`/`vkCmdDrawIndexedIndirectCount` call site. This
-is the second load-bearing gap for GPU-driven rendering — a compute shader
-that CULLS objects is only half the win; the other half is a single
-indirect draw call replacing thousands of individual `Renderer::Submit()`
-calls, and neither half exists today. **Still fully open** — this is
-`GPU_DRIVEN_RENDERING_COMPUTE_INDIRECT_STRATEGY_v1.md`'s own Phase C, and
-none of it was touched by the compute-shader campaign (which is
-buffer-storage/dispatch-shaped, not indirect-draw-shaped). One shipped
-piece it CAN lean on directly: `GpuResourceFactory::CreateStructuredBuffer()`
-already accepts an `extraUsage` parameter for exactly the
-`VK_BUFFER_USAGE_INDIRECT_COMMAND_BIT` flag an indirect-command buffer
-needs — see `COMPUTE_PHASE1_COMPLETION_REPORT.md`.
+### C.2 — ~~No indirect draw support anywhere~~ - CLOSED
+`FrameRecorder.cpp`/`RenderGraph.cpp`'s `PassContext::recordDraw` used to be
+the only recorded-draw shape (every draw call going through
+`vkCmdDraw`/`vkCmdDrawIndexed` with CPU-supplied, per-item parameters — see
+`DrawStats.h`'s own `AccumulateDrawStats()`, which assumed exactly this
+shape). **✅ DONE, see the `render-pass-5` campaign**
+(`task_manager/render-pass-5/PHASE0_MASTER_STRATEGY.md`,
+`CAMPAIGN_COMPLETION_REPORT.md`): `src/Renderer/IndirectDrawTypes.h`'s
+`IndirectDrawCommand` is now a real, `static_assert`-verified byte-for-byte
+mirror of `VkDrawIndexedIndirectCommand`; `Renderer::SubmitIndirect()` issues
+a real `vkCmdDrawIndexedIndirectCount` (compacted mode) or
+`vkCmdDrawIndexedIndirect` (a degenerate-padded fallback, for a device
+without `drawIndirectCount` — selected purely by a runtime capability probe,
+`Renderer::SupportsDrawIndirectCount()`/`VulkanDevice::QueryDrawIndirectCountSupport()`,
+never a build-time assumption); `DrawStats::indirectDrawCount` + a new
+`PassContext::recordIndirectDraw` hook give indirect draws their own honest
+counted bucket (never fabricating a CPU-known triangle/object count for a
+GPU-decided draw). Both branches are genuinely implemented, reviewed, and
+GPU-verified — see `PHASE2_COMPLETION_REPORT.md`/`PHASE3_COMPLETION_REPORT.md`
+for the exact manual verification evidence.
 
-### C.3 — No GPU-side culling of any kind
-`RenderSystem::CollectRenderables()` (`RenderSystem.cpp`) walks every
-`MeshRenderer` in the `Registry` unconditionally, every frame, and submits
-every one of them — no frustum culling, no occlusion culling, not even a
-CPU-side bounding-volume check. For a scene with a meaningful entity count
-this is the actual bottleneck GPU-driven rendering exists to remove — and
-right now there is nothing to accelerate at all, CPU or GPU. **Still fully
-open** — this is `GPU_DRIVEN_RENDERING_COMPUTE_INDIRECT_STRATEGY_v1.md`'s
-own Phase D (`Shaders/FrustumCull.comp` + real pass declaration), unaffected
-by the compute-shader campaign landing its own, unrelated box-blur
-validation workload.
+### C.3 — ~~No GPU-side culling of any kind~~ - CLOSED
+`RenderSystem::CollectRenderables()` (`RenderSystem.cpp`) used to walk every
+`MeshRenderer` in the `Registry` unconditionally, every frame, with no
+frustum culling, no occlusion culling, not even a CPU-side bounding-volume
+check. **✅ DONE (frustum culling only), see the `render-pass-5` campaign**
+(`task_manager/render-pass-5/PHASE0_MASTER_STRATEGY.md`,
+`CAMPAIGN_COMPLETION_REPORT.md`): `Shaders/FrustumCull.comp` (a real compute
+shader, one thread per instance, both a compacted/atomic-append mode and a
+degenerate-padding fallback mode) tests every instance in a qualifying batch
+(>= `kMinInstancesForGpuDrivenBatch` = 4 instances sharing one
+`(MeshHandle, PipelineHandle)` pair, untextured/indexed/non-GPU-skinned —
+see `RenderSystem::CollectGpuDrivenBatches()`/`RenderBatching.h`'s
+`IsGpuDrivenEligible()`) against the real camera's 6 frustum planes and
+writes exactly one `VkDrawIndexedIndirectCommand` per surviving instance.
+**Occlusion culling, hierarchical/two-phase culling, and LOD selection remain
+explicit, permanent Non-Goals** of that campaign, restated in its own
+`CAMPAIGN_COMPLETION_REPORT.md`'s "what remains genuinely open" section — not
+silently dropped.
 
 ### C.4 — No bindless / descriptor-indexing infrastructure
 `GpuResourceFactory::MaterialDescriptorSetLayout()` is one fixed,
@@ -254,10 +273,16 @@ placement becomes something worth debugging.
 
 ## Section D — Prioritized reading, specifically for the GPU-driven-rendering milestone
 
-**UPDATE: items 1, 2, 3 (partial), and 5 below are now DONE** — the
-compute-shader campaign (`COMPUTE_SHADER_MASTER_STRATEGY_v2.md`, Phases
-1-7) shipped the texture-side half of this whole plan, and a separate,
-dedicated effort (`B1_REAL_GPU_TIMING_STRATEGY_v1.md`) closed item 5. See
+**UPDATE: items 1-5 below are now ALL DONE; item 6 remains open by explicit
+design.** Items 1, 2, 3 (partial), and 5 were closed by the compute-shader
+campaign (texture-side half) and the dedicated GPU-timing effort, as already
+noted below. Items 3 (buffer side) and 4 are now ALSO closed by the
+`render-pass-5` campaign (seven phases,
+`task_manager/render-pass-5/PHASE0_MASTER_STRATEGY.md`,
+`CAMPAIGN_COMPLETION_REPORT.md`) — see C.2/C.3 above and B.2's own updated
+entry. Item 6 (async compute, bindless descriptors) remains the one
+genuinely open item in this whole list, an explicit, restated Non-Goal of
+`render-pass-5` itself, not an oversight. See
 `COMPUTE_SHADER_FEATURES_DELIBERATELY_NOT_IMPLEMENTED.md` for the full
 breakdown of what shipped vs. what remains. The list below is kept in its
 original form for historical context, with each item's current status
@@ -268,10 +293,9 @@ indirect buffers into the render graph), here is the dependency order that
 actually matters, cross-referencing the sections above:
 
 1. **C.1 (compute shader capability)** — ✅ **DONE**, see C.1 above — **and
-   C.2 (indirect draw support)** — ⏸ **STILL OPEN** — were the two hard,
-   load-bearing prerequisites. Only C.2 remains; see the companion
-   strategy document's own "Step 0: Status Update" for the full phased
-   plan starting from its Phase C.
+   C.2 (indirect draw support)** — ✅ **DONE**, see C.2 above (`render-pass-5`
+   campaign) — were the two hard, load-bearing prerequisites. Both are now
+   closed.
 2. **A.3 (compute passes as first-class graph citizens)** — ✅ **DONE**,
    see A.3 above — is the render-graph-side integration of C.1/C.2:
    `ResourceAccess` grew the new enumerators, `PassBuilder` gained
@@ -280,25 +304,27 @@ actually matters, cross-referencing the sections above:
    `VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT` — all real, shipped, tested code
    today (`COMPUTE_PHASE5_COMPLETION_REPORT.md`/`COMPUTE_PHASE6_COMPLETION_REPORT.md`).
 3. **B.2 (a real cross-pass READ, never yet exercised)** — ✅ **DONE for
-   textures**, ⏸ **STILL OPEN for buffers** — see B.2 above. The
-   texture-side cross-pass read is now proven by the compute box-blur
-   pass reading the Scene view's own `RenderTexture`. The buffer-side
-   equivalent (a culling compute pass's indirect-draw buffer, read by a
-   later graphics pass's indirect draw call) is what remains — this
-   milestone is STILL what will finally prove out that half of the render
-   graph's own core promise.
-4. **C.3 (no GPU culling exists)** — ⏸ **STILL OPEN** — is the actual
-   FEATURE this milestone delivers — not a prerequisite, the payoff.
+   textures, ✅ DONE for buffers too** — see B.2 above. The texture-side
+   cross-pass read was proven by the compute box-blur pass reading the Scene
+   view's own `RenderTexture`; the buffer-side equivalent (`render-pass-5`'s
+   culling compute pass writing an indirect-draw buffer, read by a later
+   graphics pass's indirect draw call) is now proven too.
+4. **C.3 (no GPU culling exists)** — ✅ **DONE**, see C.3 above
+   (`render-pass-5` campaign) — was the actual FEATURE this milestone
+   delivers, not merely a prerequisite. Frustum culling only — occlusion
+   culling/hierarchical culling/LOD selection remain explicit Non-Goals.
 5. **B.1 (GPU timing not wired up)** — ✅ **DONE**, closed independently
    by `B1_REAL_GPU_TIMING_COMPLETION_REPORT.md` — every `RenderGraph` pass,
-   including a future compute culling pass and its indirect-draw consumer,
-   already gets real, driver-measured GPU milliseconds automatically, with
-   no further plumbing needed.
+   including `render-pass-5`'s own compute culling pass and its
+   indirect-draw consumer, already gets real, driver-measured GPU
+   milliseconds automatically, with no further plumbing needed.
 6. **A.2 (async compute)** and **C.4 (bindless descriptors)** — both
-   ⏸ **STILL OPEN, but now genuinely more actionable** — are the natural,
-   real "what's next" once the buffer-side GPU-driven culling pass (C.2/
-   C.3) is shipped and proven — exactly matching Phase 9's own "never
-   speculatively, only once a real, concrete need appears" discipline.
+   ⏸ **STILL OPEN** — are the natural, real "what's next" now that the
+   buffer-side GPU-driven culling pass (C.2/C.3) has shipped and been
+   proven — exactly matching Phase 9's own "never speculatively, only once
+   a real, concrete need appears" discipline. `render-pass-5`'s own
+   `CAMPAIGN_COMPLETION_REPORT.md` restates both as permanent Non-Goals for
+   that campaign specifically, not a promise either will happen next.
 7. Everything else in Sections A/B/C is either orthogonal (physics, scene
    serialization, audio) or a pure follow-on optimization (barrier
    batching, resource aliasing, stale pool eviction) that should stay

@@ -103,6 +103,35 @@ to Phase C** (below) — Phase A/B's own plans are kept in the sections
 below purely as historical context for how the shared infrastructure was
 originally scoped, not as a to-do list.
 
+**FINAL UPDATE (`render-pass-5` campaign, CLOSED):** Phase C onward — the
+real indirect-draw buffer format/`Renderer::SubmitIndirect()`, the real
+`Shaders/FrustumCull.comp` culling shader, per-batch resource management, the
+real render-graph pass wiring + production cutover, Editor tooling, and
+end-to-end validation — is now ALL SHIPPED, by the separate `render-pass-5`
+campaign (seven phases, `task_manager/render-pass-5/PHASE0_MASTER_STRATEGY.md`,
+`task_manager/render-pass-5/CAMPAIGN_COMPLETION_REPORT.md`). That campaign
+restructured this document's own Phase D onward into its own 7-phase plan,
+with several concrete decisions this document left open now locked (see
+`PHASE0_MASTER_STRATEGY.md`'s own "Locked Design Decisions") — most notably:
+the GPU-driven cutover is **GAME VIEW ONLY** (Scene View and the rare
+direct-render-to-swapchain fallback keep rendering every entity, including
+every batch-eligible one, through the fully unmodified per-entity
+`Renderer::Submit()` path, forever); batching eligibility is restricted to
+untextured (`VertexLayout::PositionNormal`), indexed, non-GPU-skinned groups
+of at least `kMinInstancesForGpuDrivenBatch` (4) instances sharing one
+`(MeshHandle, PipelineHandle)` pair; and a new
+`VertexLayout::PositionNormalInstanced` + `Shaders/MeshInstanced.vert`
+(reusing `Shaders/Mesh.frag` unmodified) is what actually lets one indirect
+draw call render N differently-positioned objects, since this engine's
+existing push-constant model-matrix convention is fundamentally
+one-draw-one-object — a real, necessary addition this document itself never
+explicitly named. See `task_manager/render-pass-5/CAMPAIGN_COMPLETION_REPORT.md`
+for the full phase-by-phase writeup, including its own honest "what remains
+genuinely open" section (occlusion culling, hierarchical culling, LOD
+selection, textured/bindless batching, primitive-shape batching, async
+compute — every one of this document's own deferred items restated there as
+a permanent Non-Goal, not silently dropped).
+
 ---
 
 ## Step 1: The Goal
