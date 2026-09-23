@@ -773,7 +773,18 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
         FrameDebuggerEventNode leaf =
             BuildComputeDispatchLeaf(pass, nextEventIndex++, FrameDebuggerStepPreviewKind::NotYetDrawn);
         leaf = WrapPassWithOwnedChildEvent(std::move(leaf), nextEventIndex++, "Compute Dispatch");
-        if (pass.category == rg::RenderPassCategory::AtmosphereLut) {
+        // render-pass-7 campaign, PHASE3 - RenderPassCategory::AtmosphereLut no
+        // longer exists (Core Campaign 1, "De-hardcode RenderPassCategory") -
+        // this consumer is NOT rewritten to read the new generic tag/registry
+        // mechanism here on purpose; that is PHASE4's own job
+        // (PHASE4_FRAME_DEBUGGER_GENERIC_GROUPING.md). Until PHASE4 lands,
+        // this always evaluates false - EVERY pre-GameView compute pass
+        // (including the real Atmosphere LUT passes) falls into the generic
+        // "Compute Dispatches (Pre-GameView)" bucket, and the "Compute LUT"
+        // heading is never produced - a real, deliberate, documented,
+        // temporary behavior regression (see PHASE3_COMPLETION_REPORT.md),
+        // NOT a silent one.
+        if (false) {
             computeLutGroup.children.push_back(std::move(leaf));
         } else {
             preGameViewGroup.children.push_back(std::move(leaf));

@@ -8,6 +8,7 @@
 // RenderGraphBuilderTests.cpp/RenderPassTests.cpp's own established style
 // (a real RenderGraphBuilder instance with zero Vulkan device involved).
 
+#include "Renderer/Atmosphere/AtmosphereRenderPassTags.h"
 #include "Renderer/RenderGraph/RenderPipeline.h"
 
 #include <gtest/gtest.h>
@@ -299,7 +300,8 @@ TEST(RenderPipelineTest, LegacyCategoryAndDrawKindSurviveUnchangedIntoTheProduce
             RenderPassDesc desc;
             desc.debugName = "DrawSkyBackground";
             desc.kind = PassKind::Graphics;
-            desc.legacyCategory = RenderPassCategory::AtmosphereLut;
+            desc.legacyCategory = RenderPassCategory::General;
+            desc.tags = kAtmosphereLutPassTag.bit;
             desc.drawKind = RenderPassDrawKind::DrawQuad;
             desc.order = RenderPassEvent::AfterOpaques;
             desc.setup = NoOpSetup;
@@ -317,7 +319,8 @@ TEST(RenderPipelineTest, LegacyCategoryAndDrawKindSurviveUnchangedIntoTheProduce
     ASSERT_EQ(input.passes.size(), 1u);
     EXPECT_STREQ(input.passes[0].name, "DrawSkyBackground");
     EXPECT_EQ(input.passes[0].kind, PassKind::Graphics);
-    EXPECT_EQ(input.passes[0].category, RenderPassCategory::AtmosphereLut);
+    EXPECT_EQ(input.passes[0].category, RenderPassCategory::General);
+    EXPECT_EQ(input.passes[0].tags, kAtmosphereLutPassTag.bit);
     EXPECT_EQ(input.passes[0].drawKind, RenderPassDrawKind::DrawQuad);
     EXPECT_EQ(input.passes[0].renderPassEvent, RenderPassEvent::AfterOpaques);
 }

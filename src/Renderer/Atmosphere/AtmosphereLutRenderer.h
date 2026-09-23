@@ -104,7 +104,7 @@ namespace gte {
 
 class AtmosphereLutRenderer {
 public:
-    AtmosphereLutRenderer() = default;
+    AtmosphereLutRenderer();
     ~AtmosphereLutRenderer();
 
     AtmosphereLutRenderer(const AtmosphereLutRenderer&) = delete;

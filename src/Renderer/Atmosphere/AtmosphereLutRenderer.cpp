@@ -6,6 +6,8 @@
 #include "../RenderTarget.h"
 #include "../Renderer.h"
 #include "../RenderGraph/RenderGraph.h"
+#include "../RenderGraph/RenderPassGroupRegistry.h"
+#include "AtmosphereRenderPassTags.h"
 #include "../Vulkan/DescriptorSetLayoutBuilder.h"
 
 #include <algorithm>
@@ -118,6 +120,15 @@ struct AerialPerspectiveVolumeDebugSlicePushConstants {
 };
 
 } // namespace
+
+AtmosphereLutRenderer::AtmosphereLutRenderer()
+{
+    // render-pass-7 campaign, PHASE3 - this feature registers its OWN Frame Debugger
+    // grouping heading for its OWN tag, from its OWN file - Core never learns this string
+    // exists. Idempotent (RenderPassGroupRegistry.h) - safe even if more than one instance
+    // of this class is ever constructed in the same process (e.g. Tier-1 tests).
+    rg::RegisterPassGroupLabel(kAtmosphereLutPassTag, "Compute LUT");
+}
 
 AtmosphereLutRenderer::~AtmosphereLutRenderer()
 {
@@ -235,7 +246,7 @@ rg::TextureHandle AtmosphereLutRenderer::AddTransmittanceLutPass(
         builder.ImportTexture("AtmosphereTransmittanceLut", target, VK_IMAGE_LAYOUT_UNDEFINED);
 
     builder.AddRenderPass(
-        "AtmosphereTransmittanceLutPass", rg::PassKind::Compute, rg::ViewScope::Shared, rg::RenderPassCategory::AtmosphereLut,
+        "AtmosphereTransmittanceLutPass", rg::PassKind::Compute, rg::ViewScope::Shared, rg::RenderPassCategory::General,
         [outputHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
             pass.WriteTexture(outputHandle, rg::ResourceAccess::ComputeShaderWrite);
         },
@@ -270,7 +281,7 @@ rg::TextureHandle AtmosphereLutRenderer::AddTransmittanceLutPass(
         // "RenderOpaque" in real execution order, it was being picked as
         // the pivot instead, confirmed via live testing. drawKind stays at
         // its own default (DrawMesh) - irrelevant for a Compute-kind pass.
-        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::PreOpaques);
+        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::PreOpaques, kAtmosphereLutPassTag.bit);
 
     return outputHandle;
 }
@@ -333,7 +344,7 @@ rg::TextureHandle AtmosphereLutRenderer::AddMultiScatteringLutPass(rg::RenderGra
         "AtmosphereMultiScatteringLut", m_multiScatteringLutOutput->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
 
     builder.AddRenderPass(
-        "AtmosphereMultiScatteringLutPass", rg::PassKind::Compute, rg::ViewScope::Shared, rg::RenderPassCategory::AtmosphereLut,
+        "AtmosphereMultiScatteringLutPass", rg::PassKind::Compute, rg::ViewScope::Shared, rg::RenderPassCategory::General,
         [transmittanceLutHandle, outputHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
             // The real dependency declaration that makes RenderGraphCompiler
             // order this pass strictly after AddTransmittanceLutPass()'s
@@ -383,7 +394,7 @@ rg::TextureHandle AtmosphereLutRenderer::AddMultiScatteringLutPass(rg::RenderGra
         },
         // render-pass-3 campaign, PHASE4 (root-cause fix) - see
         // AddTransmittanceLutPass()'s own identical comment above.
-        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::PreOpaques);
+        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::PreOpaques, kAtmosphereLutPassTag.bit);
 
     return outputHandle;
 }
@@ -473,7 +484,7 @@ rg::TextureHandle AtmosphereLutRenderer::AddSkyViewLutPass(rg::RenderGraphBuilde
         builder.ImportTexture(outputTextureName, viewState.output->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
 
     builder.AddRenderPass(
-        "AtmosphereSkyViewLutPass", rg::PassKind::Compute, viewScope, rg::RenderPassCategory::AtmosphereLut,
+        "AtmosphereSkyViewLutPass", rg::PassKind::Compute, viewScope, rg::RenderPassCategory::General,
         [transmittanceLutHandle, multiScatteringLutHandle, outputHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
             // Real dependency declarations - order this pass strictly
             // after AddTransmittanceLutPass()/AddMultiScatteringLutPass()'s
@@ -523,7 +534,7 @@ rg::TextureHandle AtmosphereLutRenderer::AddSkyViewLutPass(rg::RenderGraphBuilde
         // render-pass-3 campaign, PHASE4 (root-cause fix) - see
         // AddTransmittanceLutPass()'s own identical comment above (this
         // per-view LUT pass also runs strictly before "RenderOpaque").
-        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::PreOpaques);
+        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::PreOpaques, kAtmosphereLutPassTag.bit);
 
     return outputHandle;
 }
@@ -615,7 +626,7 @@ rg::VolumeTextureHandle AtmosphereLutRenderer::AddAerialPerspectiveVolumePass(rg
         builder.ImportVolumeTexture(outputVolumeName, viewState.output->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
 
     builder.AddRenderPass(
-        "AtmosphereAerialPerspectiveVolumePass", rg::PassKind::Compute, viewScope, rg::RenderPassCategory::AtmosphereLut,
+        "AtmosphereAerialPerspectiveVolumePass", rg::PassKind::Compute, viewScope, rg::RenderPassCategory::General,
         [transmittanceLutHandle, multiScatteringLutHandle, outputHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
             // Real dependency declarations - order this pass strictly
             // after AddTransmittanceLutPass()/AddMultiScatteringLutPass()'s
@@ -668,7 +679,7 @@ rg::VolumeTextureHandle AtmosphereLutRenderer::AddAerialPerspectiveVolumePass(rg
         // render-pass-3 campaign, PHASE4 (root-cause fix) - see
         // AddTransmittanceLutPass()'s own identical comment above (this
         // per-view volume pass also runs strictly before "RenderOpaque").
-        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::PreOpaques);
+        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::PreOpaques, kAtmosphereLutPassTag.bit);
 
     return outputHandle;
 }
@@ -970,7 +981,7 @@ rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveVolumeDebugSlicePas
     pushConstants.sliceCount = sliceCount;
 
     builder.AddRenderPass(
-        "AtmosphereAerialPerspectiveVolumeDebugSlicePass", rg::PassKind::Compute, viewScope, rg::RenderPassCategory::AtmosphereLut,
+        "AtmosphereAerialPerspectiveVolumeDebugSlicePass", rg::PassKind::Compute, viewScope, rg::RenderPassCategory::General,
         [aerialPerspectiveVolumeHandle, outputHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
             // Real dependency declaration - order this pass strictly after
             // AddAerialPerspectiveVolumePass()'s own write this same frame.
@@ -1004,7 +1015,7 @@ rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveVolumeDebugSlicePas
         // debug-visibility slice pass also runs strictly before
         // "RenderOpaque" - see Application.cpp's own "AtmosphereViewLut"
         // provider, which declares it right after AddAtmosphereViewLutPasses()).
-        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::PreOpaques);
+        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::PreOpaques, kAtmosphereLutPassTag.bit);
 
     return outputHandle;
 }

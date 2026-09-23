@@ -386,10 +386,8 @@ const char* ToString(PassKind kind) noexcept;
 // metadata" rule (see PassRecord::kind's own doc comment below for the
 // precedent this mirrors).
 enum class RenderPassCategory : std::uint8_t {
-    General,       // The default - no special Frame Debugger grouping treatment.
-    AtmosphereLut, // Every Atmosphere LUT/composite compute pass (PHASE3) - grouped under "Compute LUT".
-    GpuSkinning,   // A per-model GPU vertex-skinning compute dispatch - stays under the existing generic "Compute Dispatches" bucket.
-    Debug,         // Frame-Debugger-internal replay passes / Compute Blur Validation - never a real Frame Debugger tree citizen themselves (already filtered out, or shown under their own separate heading - see PHASE4/PHASE5).
+    General, // The default - no special Frame Debugger grouping treatment.
+    Debug,   // Frame-Debugger-internal replay passes / Compute Blur Validation - never a real Frame Debugger tree citizen themselves (already filtered out, or shown under their own separate heading - see PHASE4/PHASE5).
 };
 
 const char* ToString(RenderPassCategory category) noexcept;

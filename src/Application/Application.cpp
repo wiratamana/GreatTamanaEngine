@@ -23,6 +23,7 @@
 // kSkinningLocalSizeX, GpuSkinningPipelines).
 #include "../Renderer/ComputeDispatch.h"
 #include "../Renderer/GpuSkinning/GpuSkinningPipelines.h"
+#include "../Renderer/GpuSkinning/GpuSkinningRenderPassTags.h"
 // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5), PHASE5
 // (task_manager/render-pass-5/PHASE5_RENDERGRAPH_PASS_WIRING_AND_PRODUCTION_CUTOVER.md)
 // - the new "GpuDrivenBatches" provider below needs CullingPipelines/
@@ -450,7 +451,7 @@ void Application::RegisterOffscreenRenderPipelineProviders()
                 desc.kind = rg::PassKind::Compute;
                 desc.order = rg::RenderPassEvent::PreOpaques;
                 desc.view = rg::RenderViewId::Shared();
-                desc.legacyCategory = rg::RenderPassCategory::GpuSkinning;
+                desc.tags = kGpuSkinningDispatchPassTag.bit;
                 desc.setup = [handle](rg::RenderGraphBuilder::PassBuilder& pass) {
                     pass.WriteBuffer(handle, rg::ResourceAccess::ComputeShaderWrite);
                 };

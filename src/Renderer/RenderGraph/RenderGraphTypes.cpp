@@ -81,14 +81,9 @@ const char* ToString(PassKind kind) noexcept
 // RenderPassCategory for why this exists.
 const char* ToString(RenderPassCategory category) noexcept
 {
-    // Deliberately NO `default:` case - see this file's own header comment.
     switch (category) {
     case RenderPassCategory::General:
         return "General";
-    case RenderPassCategory::AtmosphereLut:
-        return "AtmosphereLut";
-    case RenderPassCategory::GpuSkinning:
-        return "GpuSkinning";
     case RenderPassCategory::Debug:
         return "Debug";
     }

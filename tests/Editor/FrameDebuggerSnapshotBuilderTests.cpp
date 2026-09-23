@@ -56,6 +56,9 @@
 // for the full, independently-re-verified per-test checklist.
 
 #include "Editor/FrameDebuggerData.h"
+#include "Renderer/Atmosphere/AtmosphereRenderPassTags.h"
+#include "Renderer/GpuSkinning/GpuSkinningRenderPassTags.h"
+#include "Renderer/RenderGraph/RenderPassGroupRegistry.h"
 
 #include <gtest/gtest.h>
 
@@ -228,16 +231,18 @@ TEST(FrameDebuggerSnapshotBuilderTest, RenderOpaqueWithNoComputePassesProducesEx
 // both compute leaves.
 TEST(FrameDebuggerSnapshotBuilderTest, MixedComputeLutAndPreGameViewCategoriesProduceBothGroupsInFixedOrder)
 {
+    rg::ResetPassGroupRegistryForTesting();
+    rg::RegisterPassGroupLabel(kAtmosphereLutPassTag, "Compute LUT");
     rg::RenderGraphSnapshot graphSnapshot;
 
     rg::RenderGraphPassSnapshot bufferPass = MakeComputePass("SkinPass_A");
-    bufferPass.category = rg::RenderPassCategory::GpuSkinning;
+    bufferPass.tags = kGpuSkinningDispatchPassTag.bit;
     bufferPass.writeNames.push_back("SkinnedVertexBuffer");
     bufferPass.writeKinds.push_back(rg::ResourceKind::Buffer);
     graphSnapshot.passesInExecutionOrder.push_back(bufferPass);
 
     rg::RenderGraphPassSnapshot lutPass = MakeComputePass("SkyLutPass");
-    lutPass.category = rg::RenderPassCategory::AtmosphereLut;
+    lutPass.tags = kAtmosphereLutPassTag.bit;
     lutPass.writeNames.push_back("TransmittanceLut");
     lutPass.writeKinds.push_back(rg::ResourceKind::Texture);
     graphSnapshot.passesInExecutionOrder.push_back(lutPass);
@@ -296,9 +301,11 @@ TEST(FrameDebuggerSnapshotBuilderTest, MixedComputeLutAndPreGameViewCategoriesPr
 // fixture shape.
 TEST(FrameDebuggerSnapshotBuilderTest, OnlyAtmosphereLutCategoryPreGameViewPassProducesOnlyComputeLutGroup)
 {
+    rg::ResetPassGroupRegistryForTesting();
+    rg::RegisterPassGroupLabel(kAtmosphereLutPassTag, "Compute LUT");
     rg::RenderGraphSnapshot graphSnapshot;
     rg::RenderGraphPassSnapshot lutPass = MakeComputePass("AtmosphereTransmittanceLutPass");
-    lutPass.category = rg::RenderPassCategory::AtmosphereLut;
+    lutPass.tags = kAtmosphereLutPassTag.bit;
     graphSnapshot.passesInExecutionOrder.push_back(lutPass);
     graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
@@ -1519,9 +1526,11 @@ TEST(FrameDebuggerSnapshotBuilderTest, GraphicsChildEventLabelMatchesRenderPassD
 // child event, exactly like every other wrapped compute pass.
 TEST(FrameDebuggerSnapshotBuilderTest, ComputeLutSubPassAlsoOwnsAComputeDispatchChild)
 {
+    rg::ResetPassGroupRegistryForTesting();
+    rg::RegisterPassGroupLabel(kAtmosphereLutPassTag, "Compute LUT");
     rg::RenderGraphSnapshot graphSnapshot;
     rg::RenderGraphPassSnapshot lutPass = MakeComputePass("AtmosphereTransmittanceLutPass");
-    lutPass.category = rg::RenderPassCategory::AtmosphereLut;
+    lutPass.tags = kAtmosphereLutPassTag.bit;
     graphSnapshot.passesInExecutionOrder.push_back(lutPass);
     graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 

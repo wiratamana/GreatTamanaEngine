@@ -6,6 +6,7 @@
 // VkDevice/Renderer/Registry involved at all - mirrors
 // RenderGraphBuilderTests.cpp's own Tier-1 style exactly.
 
+#include "Renderer/Atmosphere/AtmosphereRenderPassTags.h"
 #include "Renderer/RenderGraph/RenderGraphBuilder.h"
 
 #include <gtest/gtest.h>
@@ -65,20 +66,22 @@ TEST(RenderPassTest, AddRenderPassWithComputeKindRunsSetupAndStampsComputeKind)
 
 // --- 4-argument AddRenderPass() overload: explicit ViewScope + category ---
 
-TEST(RenderPassTest, AddRenderPassFourArgumentOverloadStampsViewScopeAndCategory)
+TEST(RenderPassTest, AddRenderPassFourArgumentOverloadStampsViewScopeCategoryAndTags)
 {
     RenderGraphBuilder builder;
 
     builder.AddRenderPass(
-        "AtmosphereSkyViewLutPass", PassKind::Compute, ViewScope::GameView, RenderPassCategory::AtmosphereLut,
-        [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute);
+        "AtmosphereSkyViewLutPass", PassKind::Compute, ViewScope::GameView, RenderPassCategory::General,
+        [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute, RenderPassDrawKind::DrawMesh,
+        RenderPassEvent::Opaques, kAtmosphereLutPassTag.bit);
 
     const CompiledGraphInput input = builder.Finish();
     ASSERT_EQ(input.passes.size(), 1u);
     EXPECT_STREQ(input.passes[0].name, "AtmosphereSkyViewLutPass");
     EXPECT_EQ(input.passes[0].kind, PassKind::Compute);
     EXPECT_EQ(input.passes[0].viewScope, ViewScope::GameView);
-    EXPECT_EQ(input.passes[0].category, RenderPassCategory::AtmosphereLut);
+    EXPECT_EQ(input.passes[0].category, RenderPassCategory::General);
+    EXPECT_EQ(input.passes[0].tags, kAtmosphereLutPassTag.bit);
 }
 
 TEST(RenderPassTest, AddRenderPassFourArgumentOverloadWorksForGraphicsKindToo)
@@ -193,14 +196,14 @@ TEST(RenderPassTest, AddRenderPassNineArgumentOverloadStampsTagsAlongsideEveryOt
     RenderGraphBuilder builder;
 
     builder.AddRenderPass(
-        "AtmosphereSkyViewLutPass", PassKind::Compute, ViewScope::GameView, RenderPassCategory::AtmosphereLut,
+        "AtmosphereSkyViewLutPass", PassKind::Compute, ViewScope::GameView, RenderPassCategory::General,
         [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute, RenderPassDrawKind::DrawQuad,
         RenderPassEvent::PreOpaques, RenderPassTagMask{ 0x4u });
 
     const CompiledGraphInput input = builder.Finish();
     ASSERT_EQ(input.passes.size(), 1u);
     EXPECT_EQ(input.passes[0].viewScope, ViewScope::GameView);
-    EXPECT_EQ(input.passes[0].category, RenderPassCategory::AtmosphereLut);
+    EXPECT_EQ(input.passes[0].category, RenderPassCategory::General);
     EXPECT_EQ(input.passes[0].drawKind, RenderPassDrawKind::DrawQuad);
     EXPECT_EQ(input.passes[0].renderPassEvent, RenderPassEvent::PreOpaques);
     EXPECT_EQ(input.passes[0].tags, RenderPassTagMask{ 0x4u });

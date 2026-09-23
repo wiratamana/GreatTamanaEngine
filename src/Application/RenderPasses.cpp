@@ -5,6 +5,7 @@
 #include "../Renderer/ComputeDispatch.h"
 #include "../Renderer/ComputePipeline.h"
 #include "../Renderer/GpuSkinning/GpuSkinningPipelines.h"
+#include "../Renderer/GpuSkinning/GpuSkinningRenderPassTags.h"
 #include "../Renderer/Renderer.h"
 #include "../Renderer/RenderTexture.h"
 #include "../Renderer/RenderGraph/RenderGraph.h"
@@ -407,7 +408,7 @@ std::vector<rg::BufferHandle> AddGpuSkinningPasses(rg::RenderGraphBuilder& build
             builder.ImportBuffer(request.name, request.outputBuffer, request.outputBufferSize);
 
         builder.AddRenderPass(
-            request.name, rg::PassKind::Compute, rg::ViewScope::Shared, rg::RenderPassCategory::GpuSkinning,
+            request.name, rg::PassKind::Compute, rg::ViewScope::Shared, rg::RenderPassCategory::General,
             [handle](rg::RenderGraphBuilder::PassBuilder& pass) {
                 pass.WriteBuffer(handle, rg::ResourceAccess::ComputeShaderWrite);
             },
@@ -420,7 +421,8 @@ std::vector<rg::BufferHandle> AddGpuSkinningPasses(rg::RenderGraphBuilder& build
                 renderer.Dispatch(pipeline, request.descriptorSet, &vertexCount, sizeof(vertexCount),
                     ComputeGroupCount(vertexCount, kSkinningLocalSizeX), 1, 1);
                 renderer.EndGraphPassRecording();
-            });
+            },
+            rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::Opaques, kGpuSkinningDispatchPassTag.bit);
 
         handles.push_back(handle);
     }

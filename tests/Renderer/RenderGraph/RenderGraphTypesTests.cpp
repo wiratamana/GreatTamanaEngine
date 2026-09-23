@@ -537,8 +537,6 @@ TEST(RenderGraphRenderPassCategoryTest, ToStringCoversEveryEnumeratorNonNullNonE
 {
     const RenderPassCategory values[] = {
         RenderPassCategory::General,
-        RenderPassCategory::AtmosphereLut,
-        RenderPassCategory::GpuSkinning,
         RenderPassCategory::Debug,
     };
 
@@ -552,8 +550,6 @@ TEST(RenderGraphRenderPassCategoryTest, ToStringCoversEveryEnumeratorNonNullNonE
 TEST(RenderGraphRenderPassCategoryTest, ToStringProducesDistinctNamesForDistinctEnumerators)
 {
     EXPECT_STREQ(ToString(RenderPassCategory::General), "General");
-    EXPECT_STREQ(ToString(RenderPassCategory::AtmosphereLut), "AtmosphereLut");
-    EXPECT_STREQ(ToString(RenderPassCategory::GpuSkinning), "GpuSkinning");
     EXPECT_STREQ(ToString(RenderPassCategory::Debug), "Debug");
 }
 
