@@ -506,6 +506,9 @@ TEST(RenderGraphPassRecordTest, DefaultConstructedPassRecordHasGeneralCategory)
 {
     const PassRecord record;
     EXPECT_EQ(record.category, RenderPassCategory::General);
+    // render-pass-7 campaign (task_manager/render-pass-7), PHASE1 -
+    // PassRecord::tags defaults to 0 (no tags).
+    EXPECT_EQ(record.tags, RenderPassTagMask{ 0 });
 }
 
 // --- PassKind / RenderPassCategory (Render Pass campaign, PHASE1) --------

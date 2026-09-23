@@ -430,6 +430,36 @@ enum class RenderPassDrawKind : std::uint8_t {
 
 const char* ToString(RenderPassDrawKind drawKind) noexcept;
 
+// --- RenderPassTag / RenderPassTagMask (design doc Section 7) --------------
+//
+// Fixed 64-bit bitmask (design doc Section 0, point 4) - a tag test stays a
+// free bitwise AND. No feature-specific tag VALUES live here - per the
+// design doc's own Section 7, those belong in each feature's own header
+// (e.g. a future AtmosphereTags::Lut), never in this shared core file.
+//
+// render-pass-7 campaign (task_manager/render-pass-7), PHASE1
+// (PHASE1_TAG_VOCABULARY_AND_THREADING.md, "Core Campaign 1 - De-hardcode
+// RenderPassCategory") - RELOCATED here from RenderPipeline.h, where the
+// render-pass-3 campaign originally defined this type. Reason: PassRecord/
+// RenderGraphPassSnapshot (both below/in RenderGraphSnapshot.h, genuinely
+// lower, more-Core files that RenderPipeline.h itself #includes) need a
+// `tags` field of this exact type, and a lower file cannot depend on a
+// higher one - this is the IDENTICAL reasoning RenderPassEvent's own doc
+// comment above already documents for itself. RenderPassEvent's own doc
+// comment used to describe itself as "the one exception to 'every new
+// PHASE1 type lives in RenderPipeline.h'" - RenderPassTag/RenderPassTagMask
+// is now a SECOND such exception, for the identical reason (see
+// RenderPipeline.h's own updated header comment, which now names both).
+// Nothing in RenderGraph.cpp/RenderGraphCompiler.cpp/
+// RenderGraphBarrierPlanner.cpp reads a RenderPassTagMask value - purely
+// descriptive metadata, mirroring category/drawKind/viewScope's own
+// identical rule (see PassRecord::tags' own doc comment below).
+
+struct RenderPassTag {
+    std::uint64_t bit = 0;
+};
+using RenderPassTagMask = std::uint64_t;
+
 // render-pass-3 campaign (task_manager/render-pass-3), PHASE1
 // (PHASE1_CORE_VOCABULARY_AND_BLACKBOARD.md) - a descriptive SORT HINT for
 // the new RenderPipeline declaration layer (src/Renderer/RenderGraph/
@@ -795,6 +825,22 @@ struct PassRecord {
     // Size is bounded by kMaxColorAttachments (asserted in
     // WriteColorAttachment(), never here).
     std::vector<ColorAttachmentDesc> colorAttachments;
+
+    // render-pass-7 campaign (task_manager/render-pass-7), PHASE1 - Core
+    // Campaign 1 ("De-hardcode RenderPassCategory"). A GENERIC, feature-blind
+    // bitmask a Layer-2 module stamps to identify "which conceptual group(s)
+    // does this pass belong to" WITHOUT Core ever needing to know what any
+    // individual bit means - see RenderPassTag's own doc comment above for
+    // the full contract, and RenderPassGroupRegistry.h (PHASE2) for the one
+    // real consumer (the Editor Frame Debugger's tree-grouping logic,
+    // PHASE4). Read by NOTHING in RenderGraph.cpp/RenderGraphCompiler.cpp/
+    // RenderGraphBarrierPlanner.cpp - purely descriptive metadata, mirroring
+    // category/drawKind/viewScope's own identical rule. Defaults to 0 (no
+    // tags) - every pre-existing AddRenderPass() call site (which never
+    // mentions this field at all) keeps its exact prior behavior/meaning
+    // unchanged. Appended at the END of the struct (never inserted in the
+    // middle) - see this file's own header comment / AGENTS.md for why.
+    RenderPassTagMask tags = 0;
 };
 
 } // namespace gte::rg

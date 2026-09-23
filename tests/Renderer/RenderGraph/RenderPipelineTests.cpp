@@ -322,6 +322,40 @@ TEST(RenderPipelineTest, LegacyCategoryAndDrawKindSurviveUnchangedIntoTheProduce
     EXPECT_EQ(input.passes[0].renderPassEvent, RenderPassEvent::AfterOpaques);
 }
 
+// render-pass-7 campaign (task_manager/render-pass-7), PHASE1 - THE MOST
+// IMPORTANT new test for this phase: a dedicated regression test for the
+// real, confirmed dead-field bug this phase fixes (PHASE0_MASTER_STRATEGY.md,
+// Step 2.4) - RenderPassDesc::tags used to be silently DROPPED by
+// DeclareOnePhase() every single frame, for every provider, since the
+// underlying builder.AddRenderPass() call never forwarded it. This test
+// fails against the pre-PHASE1 code (desc.tags never reaches the produced
+// PassRecord) and passes after this phase's fix.
+TEST(RenderPipelineTest, DeclareIntoForwardsTagsOntoTheUnderlyingPassRecord)
+{
+    RenderPipeline pipeline;
+
+    pipeline.Register("TaggedProvider", ProviderScope::Once,
+        [](const RenderPassFrameContext&, std::vector<RenderPassDesc>& outPasses) {
+            RenderPassDesc desc;
+            desc.debugName = "TaggedPass";
+            desc.tags = 0x4u;
+            desc.setup = NoOpSetup;
+            desc.execute = NoOpExecute;
+            outPasses.push_back(desc);
+        });
+
+    RenderPassBlackboard blackboard;
+    RenderGraphBuilder builder;
+    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {}, {} };
+
+    pipeline.DeclareInto(builder, frame);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes.size(), 1u);
+    EXPECT_STREQ(input.passes[0].name, "TaggedPass");
+    EXPECT_EQ(input.passes[0].tags, 0x4u);
+}
+
 TEST(RenderPipelineTest, UnregisterRemovesAMatchingProviderByDebugNameContent)
 {
     RenderPipeline pipeline;

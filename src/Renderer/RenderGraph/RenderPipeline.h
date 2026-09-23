@@ -18,10 +18,12 @@
 // RenderPassDrawKind values before calling into
 // RenderGraphBuilder::AddRenderPass() - that old vocabulary is never
 // deleted, and this new layer is the ONLY thing that ever sees the new
-// opaque types. RenderPassEvent ITSELF is the one exception to "every new
-// PHASE1 type lives in this file": it lives in RenderGraphTypes.h instead,
-// next to PassRecord/RenderGraphPassSnapshot, which it is also threaded
-// onto - see that file's own comment on RenderPassEvent for why.
+// opaque types. RenderPassEvent, and (as of the render-pass-7 campaign,
+// PHASE1) RenderPassTag/RenderPassTagMask too, are the two exceptions to
+// "every new PHASE1 type lives in this file": both live in
+// RenderGraphTypes.h instead, next to PassRecord/RenderGraphPassSnapshot,
+// which each is also threaded onto - see that file's own comments on
+// RenderPassEvent/RenderPassTag for why.
 //
 // namespace gte::rg, mirroring every other Render Graph file - this is
 // still "the render graph module," just the declaration-layer half of it
@@ -119,17 +121,14 @@ void RegisterPassIdDebugName(RenderPassId id, const char* name) noexcept;
 const char* DebugNameForPassId(RenderPassId id) noexcept; // "<unknown>" if never registered.
 #endif
 
-// --- RenderPassTag / RenderPassTagMask (design doc Section 7) --------------
-//
-// Fixed 64-bit bitmask (design doc Section 0, point 4) - a tag test stays a
-// free bitwise AND. No feature-specific tag VALUES live here - per the
-// design doc's own Section 7, those belong in each feature's own header
-// (e.g. a future AtmosphereTags::Lut), never in this shared core file.
-
-struct RenderPassTag {
-    std::uint64_t bit = 0;
-};
-using RenderPassTagMask = std::uint64_t;
+// render-pass-7 campaign (task_manager/render-pass-7), PHASE1 - RenderPassTag/
+// RenderPassTagMask RELOCATED to RenderGraphTypes.h (see that file's own doc
+// comment on RenderPassTag for the full "why") - PassRecord/
+// RenderGraphPassSnapshot need this type, and a lower file cannot depend on
+// a higher one. This file already #includes RenderGraphTypes.h (above), so
+// every use of gte::rg::RenderPassTag/RenderPassTagMask below (e.g.
+// RenderPassDesc::tags) keeps compiling unmodified - only the physical
+// header moved.
 
 // --- RenderViewId (design doc Section 7) -----------------------------------
 //
@@ -568,8 +567,14 @@ private:
             // Application always sets one).
             const ViewScope translatedViewScope =
                 m_legacyViewScopeTranslator ? m_legacyViewScopeTranslator(desc.view) : ViewScope::Shared;
+            // render-pass-7 campaign (task_manager/render-pass-7), PHASE1 -
+            // forwards desc.tags as a new trailing argument, fixing the
+            // real, confirmed dead-field bug (PHASE0_MASTER_STRATEGY.md,
+            // Step 2.4): RenderPassDesc::tags used to be silently dropped
+            // here every frame, for every provider - it now finally reaches
+            // a real PassRecord.
             builder.AddRenderPass(desc.debugName, desc.kind, translatedViewScope, desc.legacyCategory, desc.setup,
-                desc.execute, desc.drawKind, desc.order);
+                desc.execute, desc.drawKind, desc.order, desc.tags);
         }
     }
 

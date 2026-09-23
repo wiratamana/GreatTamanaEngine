@@ -180,5 +180,77 @@ TEST(RenderPassTest, AddRenderPassFourArgumentOverloadStoresExplicitDrawKind)
     EXPECT_EQ(input.passes[0].drawKind, RenderPassDrawKind::DrawQuad);
 }
 
+// --- render-pass-7 campaign (task_manager/render-pass-7), PHASE1 - new
+// trailing, defaulted RenderPassTagMask parameter -------------------------
+
+// The full (now 9-argument) overload stamps an explicit, non-zero `tags`
+// argument onto the resulting PassRecord alongside every other field this
+// overload already stamps - mirrors
+// AddRenderPassFourArgumentOverloadStampsViewScopeAndCategory's own fixture
+// shape.
+TEST(RenderPassTest, AddRenderPassNineArgumentOverloadStampsTagsAlongsideEveryOtherField)
+{
+    RenderGraphBuilder builder;
+
+    builder.AddRenderPass(
+        "AtmosphereSkyViewLutPass", PassKind::Compute, ViewScope::GameView, RenderPassCategory::AtmosphereLut,
+        [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute, RenderPassDrawKind::DrawQuad,
+        RenderPassEvent::PreOpaques, RenderPassTagMask{ 0x4u });
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes.size(), 1u);
+    EXPECT_EQ(input.passes[0].viewScope, ViewScope::GameView);
+    EXPECT_EQ(input.passes[0].category, RenderPassCategory::AtmosphereLut);
+    EXPECT_EQ(input.passes[0].drawKind, RenderPassDrawKind::DrawQuad);
+    EXPECT_EQ(input.passes[0].renderPassEvent, RenderPassEvent::PreOpaques);
+    EXPECT_EQ(input.passes[0].tags, RenderPassTagMask{ 0x4u });
+}
+
+// The full (now 9-argument) overload defaults its new trailing `tags`
+// parameter to 0 when the caller omits it entirely - every pre-existing
+// call site of this overload relies on exactly this.
+TEST(RenderPassTest, AddRenderPassNineArgumentOverloadDefaultsTagsToZeroWhenOmitted)
+{
+    RenderGraphBuilder builder;
+
+    builder.AddRenderPass(
+        "RenderOpaque", PassKind::Graphics, ViewScope::GameView, RenderPassCategory::General,
+        [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes.size(), 1u);
+    EXPECT_EQ(input.passes[0].tags, RenderPassTagMask{ 0 });
+}
+
+// The convenience (now 7-argument) overload forwards an explicit `tags`
+// value all the way through into the underlying PassRecord - proving it
+// genuinely FORWARDS the argument, not just defaults it.
+TEST(RenderPassTest, AddRenderPassSevenArgumentOverloadStoresExplicitTags)
+{
+    RenderGraphBuilder builder;
+
+    builder.AddRenderPass(
+        "TestPass", PassKind::Graphics, [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute,
+        RenderPassDrawKind::DrawMesh, RenderPassEvent::Opaques, RenderPassTagMask{ 0x8u });
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes.size(), 1u);
+    EXPECT_EQ(input.passes[0].tags, RenderPassTagMask{ 0x8u });
+}
+
+// The convenience (now 7-argument) overload also defaults its new trailing
+// `tags` parameter to 0 when omitted.
+TEST(RenderPassTest, AddRenderPassSevenArgumentOverloadDefaultsTagsToZeroWhenOmitted)
+{
+    RenderGraphBuilder builder;
+
+    builder.AddRenderPass(
+        "TestPass", PassKind::Graphics, [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes.size(), 1u);
+    EXPECT_EQ(input.passes[0].tags, RenderPassTagMask{ 0 });
+}
+
 } // namespace
 } // namespace gte::rg

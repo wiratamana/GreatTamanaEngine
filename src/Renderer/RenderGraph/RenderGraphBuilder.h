@@ -508,15 +508,24 @@ public:
     // this pass's real, declared resource dependencies by
     // RenderGraphCompiler::Compile() - see RenderPassEvent's own doc
     // comment (RenderGraphTypes.h).
-    // render-pass-4 campaign, PHASE2
-    // (task_manager/render-pass-4/PHASE2_REAL_RENDERPASSEVENT_ORDERING_ENFORCEMENT.md)
     // - the stamped `renderPassEvent` value is now ALSO real, load-bearing
     // ordering input Compile() stable-sorts every pass by - see that same
     // doc comment for the full write-up.
+    // render-pass-7 campaign (task_manager/render-pass-7), PHASE1
+    // (PHASE1_TAG_VOCABULARY_AND_THREADING.md, "Core Campaign 1 -
+    // De-hardcode RenderPassCategory") - a THIRD new, TRAILING, DEFAULTED
+    // parameter, `tags` (see RenderPassTagMask's own doc comment,
+    // RenderGraphTypes.h), added the exact same way `drawKind`/
+    // `renderPassEvent` were by the render-pass-2/render-pass-3 campaigns -
+    // mirroring that identical precedent one more time, so every
+    // pre-existing call site of EITHER overload (which never mentions this
+    // new parameter at all) compiles completely unmodified. Defaults to 0
+    // (no tags) - purely descriptive metadata, read by NOTHING in
+    // RenderGraph.cpp/RenderGraphCompiler.cpp/RenderGraphBarrierPlanner.cpp.
     template <typename SetupFn, typename ExecuteFn>
     void AddRenderPass(const char* name, PassKind kind, ViewScope viewScope, RenderPassCategory category,
         SetupFn&& setup, ExecuteFn&& execute, RenderPassDrawKind drawKind = RenderPassDrawKind::DrawMesh,
-        RenderPassEvent renderPassEvent = RenderPassEvent::Opaques)
+        RenderPassEvent renderPassEvent = RenderPassEvent::Opaques, RenderPassTagMask tags = 0)
     {
         if (kind == PassKind::Compute) {
             AddComputePass(name, viewScope, std::forward<SetupFn>(setup), std::forward<ExecuteFn>(execute));
@@ -526,6 +535,7 @@ public:
         m_passes.back().category = category;
         m_passes.back().drawKind = drawKind; // Frame Debugger Pass-Ownership campaign (render-pass-2), PHASE1
         m_passes.back().renderPassEvent = renderPassEvent; // render-pass-3 campaign, PHASE1
+        m_passes.back().tags = tags; // render-pass-7 campaign, PHASE1
     }
 
     // Convenience overload defaulting `viewScope` to Shared and `category` to
@@ -533,22 +543,23 @@ public:
     // neither. Mirrors AddPass()'s own pre-existing 3-arg/4-arg overload pair
     // exactly. Also forwards the new trailing, defaulted `drawKind` parameter
     // (Frame Debugger Pass-Ownership campaign, task_manager/render-pass-2,
-    // PHASE1) AND the new trailing, defaulted `renderPassEvent` parameter
-    // (render-pass-3 campaign, PHASE1) - same "trailing defaulted plain-type
-    // parameter never touches template deduction" reasoning as the overload
-    // above, so every pre-existing 4-argument call site compiles completely
-    // unmodified. render-pass-4 campaign, PHASE1 - same cross-check note
-    // as the overload above applies here too (this overload simply
-    // forwards into it). render-pass-4 campaign, PHASE2 - same "now ALSO
-    // real, load-bearing ordering input" note applies here too, for the
-    // same reason.
+    // PHASE1), the new trailing, defaulted `renderPassEvent` parameter
+    // (render-pass-3 campaign, PHASE1), AND the new trailing, defaulted
+    // `tags` parameter (render-pass-7 campaign, PHASE1) - same "trailing
+    // defaulted plain-type parameter never touches template deduction"
+    // reasoning as the overload above, so every pre-existing 4-argument call
+    // site compiles completely unmodified. render-pass-4 campaign, PHASE1 -
+    // same cross-check note as the overload above applies here too (this
+    // overload simply forwards into it). render-pass-4 campaign, PHASE2 -
+    // same "now ALSO real, load-bearing ordering input" note applies here
+    // too, for the same reason.
     template <typename SetupFn, typename ExecuteFn>
     void AddRenderPass(const char* name, PassKind kind, SetupFn&& setup, ExecuteFn&& execute,
         RenderPassDrawKind drawKind = RenderPassDrawKind::DrawMesh,
-        RenderPassEvent renderPassEvent = RenderPassEvent::Opaques)
+        RenderPassEvent renderPassEvent = RenderPassEvent::Opaques, RenderPassTagMask tags = 0)
     {
         AddRenderPass(name, kind, ViewScope::Shared, RenderPassCategory::General,
-            std::forward<SetupFn>(setup), std::forward<ExecuteFn>(execute), drawKind, renderPassEvent);
+            std::forward<SetupFn>(setup), std::forward<ExecuteFn>(execute), drawKind, renderPassEvent, tags);
     }
 
     // Consumes this builder, handing its whole in-progress description

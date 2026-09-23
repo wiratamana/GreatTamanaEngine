@@ -96,6 +96,7 @@ RenderGraphPassSnapshot BuildPassSnapshot(const PassRecord& pass, const Compiled
     snapshot.drawKind = pass.drawKind; // Frame Debugger Pass-Ownership campaign (render-pass-2), PHASE1
     snapshot.viewScope = pass.viewScope; // frame-debugger-6, PHASE1
     snapshot.renderPassEvent = pass.renderPassEvent; // render-pass-3 campaign, PHASE1
+    snapshot.tags = pass.tags; // render-pass-7 campaign, PHASE1
 
     snapshot.readNames.reserve(pass.reads.size());
     snapshot.readKinds.reserve(pass.reads.size());          // frame-debugger-5, PHASE1

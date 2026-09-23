@@ -146,6 +146,15 @@ struct RenderGraphPassSnapshot {
     // GpuTimingSample) for a CULLED pass - see BuildRenderGraphSnapshot()'s
     // own doc comment below for why.
     PassGpuStats stats;
+
+    // render-pass-7 campaign (task_manager/render-pass-7), PHASE1 - copied
+    // straight through for BOTH a surviving AND a culled pass, exactly like
+    // `category`/`drawKind`/`viewScope`/`renderPassEvent` above (a culled
+    // pass must still truthfully report which conceptual group(s) it
+    // belonged to). Nothing reads this yet - PHASE4 is the first real
+    // consumer (see RenderPassGroupRegistry.h, PHASE2, for the mechanism
+    // it will be checked against).
+    RenderPassTagMask tags = 0;
 };
 
 // One resource, ready to display.
