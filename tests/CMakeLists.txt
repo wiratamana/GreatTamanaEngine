@@ -2047,6 +2047,15 @@
 set(GTE_TEST_SOURCES
     Build/SdlLinkageRegressionTests.cpp
     Core/TimeTests.cpp
+    # editor-core-separation-1 campaign, PHASE18
+    # (PHASE18_HEADLESS_TEST_FIXTURE_AND_CORE_STANDALONE_PROBE.md) - proves
+    # gte::Core constructs/runs Update() headlessly (a fake
+    # HeadlessSurfaceProvider, tests/Fakes/HeadlessSurfaceProvider.h, zero
+    # real Window/SDL involved) with Core::SetEditorLayerHook() deliberately
+    # never called - see that file's own header comment for why a genuinely
+    # null surface is NOT safe here, and why VK_EXT_headless_surface is used
+    # instead.
+    Core/CoreHeadlessConstructionTests.cpp
     # editor-core-separation-1 campaign, PHASE3
     # (PHASE3_LOGGING_GLOBAL_LOGSINK_EXTRACTION.md) - unconditional, since
     # src/Core/LogSink.h/.cpp is unconditionally in gte_core's own source

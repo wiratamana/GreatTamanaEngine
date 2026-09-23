@@ -4,6 +4,10 @@
 /build_network_off/
 /build-editor-off/
 /build-project-panel-off/
+# editor-core-separation-1 campaign, PHASE18 - the standalone-core probe's
+# own build tree (tools/ci/gte_core_standalone_probe/), never committed,
+# same as every other build tree above.
+/build-core-probe/
 /out/
 
 # Local reference-only clones for research (see task_manager/atmosphere-scattering-1/

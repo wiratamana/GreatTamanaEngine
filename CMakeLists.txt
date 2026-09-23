@@ -85,6 +85,23 @@ option(GTE_ENABLE_JOB_SYSTEM "Compile in the Job System's real worker-thread poo
 # either way.
 option(GTE_ENABLE_NETWORK "Compile in and auto-start the embedded, loopback-only HTTP server" ON)
 
+# editor-core-separation-1 campaign, PHASE18
+# (PHASE18_HEADLESS_TEST_FIXTURE_AND_CORE_STANDALONE_PROBE.md) - a
+# CI-only/manually-invocable switch, NEVER meant to be set by a normal
+# developer configure. When ON, this file configures ONLY the gte_core
+# static library target - gte_editor, the main executable, ImGui/ImGuizmo/
+# SDL3 fetching, and the test suite are all skipped entirely (see the
+# matching if(NOT GTE_CORE_STANDALONE_PROBE_ONLY) guards further down this
+# file). This is the ONLY place in this repo where gte_editor is
+# intentionally not configured - it exists purely so
+# tools/ci/gte_core_standalone_probe/ can prove gte_core genuinely builds
+# and links standalone, with zero gte_editor/SDL/ImGui involvement (design
+# doc Section 7.3/9, Phase 10; PHASE0_MASTER_STRATEGY.md's Locked Design
+# Decision #5). Never appears as a user-facing option in any normal build -
+# it is not advertised in BUILDING.md and must never be toggled ON for
+# ordinary development.
+option(GTE_CORE_STANDALONE_PROBE_ONLY "CI-ONLY: configure ONLY gte_core, skipping gte_editor/the executable/tests entirely. Never set this manually." OFF)
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(FetchSDL3)
 include(FetchVulkan)
@@ -96,12 +113,14 @@ include(FetchJson)
 include(FetchKTX)
 include(CompileShaders)
 
+if(NOT GTE_CORE_STANDALONE_PROBE_ONLY) # editor-core-separation-1 PHASE18
 # Downloads (if not already present) and stages SDL3 for Windows:
 #   include/SDL3/*.h  - headers
 #   SDL3.dll          - runtime binary
 #   lib/SDL3.lib      - import library, for linking
 # Also defines the SDL3::SDL3 imported target used below.
 fetch_sdl3()
+endif() # GTE_CORE_STANDALONE_PROBE_ONLY - gte_core dropped SDL3::SDL3 at link time entirely (editor-core-separation-1, PHASE14); the probe needs it no more than gte_core itself does.
 
 # Downloads (if not already present) and stages Vulkan for Windows, with no
 # Vulkan SDK installation required on the machine:
@@ -186,7 +205,7 @@ fetch_saba()
 # GTE_ENABLE_EDITOR no longer exists anywhere in this codebase; PHASE9 does
 # the real gte_editor CMake target split this `if(TRUE)` is a placeholder
 # for).
-if(TRUE)
+if(NOT GTE_CORE_STANDALONE_PROBE_ONLY) # editor-core-separation-1 PHASE18 - skip ImGui/ImGuizmo entirely for the standalone-core probe.
     include(FetchImGui)
 
     # Downloads (if not already present) and stages Dear ImGui for Windows
@@ -626,6 +645,15 @@ add_library(gte_core STATIC
     src/Encoding/HdrColorVisualization.cpp
 )
 
+# editor-core-separation-1 campaign, PHASE18
+# (PHASE18_HEADLESS_TEST_FIXTURE_AND_CORE_STANDALONE_PROBE.md) - gte_editor
+# itself (and everything it needs - ImGui/ImGuizmo/SDL3) is skipped entirely
+# when GTE_CORE_STANDALONE_PROBE_ONLY is ON, so
+# tools/ci/gte_core_standalone_probe/ can prove gte_core links standalone with
+# zero gte_editor/SDL/ImGui involvement (design doc Section 7.3/9, Phase 10).
+# Never set this manually for normal development - it is used exclusively by
+# that probe project.
+if(NOT GTE_CORE_STANDALONE_PROBE_ONLY)
 # --- Editor library ------------------------------------------------------
 # editor-core-separation-1 campaign, PHASE9 (PHASE9_CMAKE_TARGET_SPLIT.md) -
 # a real, separately-linked static library, depending on gte_core, owning
@@ -829,6 +857,7 @@ target_link_libraries(gte_editor PRIVATE imgui imguizmo)
 # via EventTranslator.h/Window.h) leak real SDL3 types/declarations to this
 # target's own consumers (GreatTamanaEditor's main.cpp, GreatTamanaEngineTests).
 target_link_libraries(gte_editor PUBLIC SDL3::SDL3)
+endif() # GTE_CORE_STANDALONE_PROBE_ONLY - matches the if() right before the "--- Editor library ---" comment above.
 
 # Exposes GTE_ENABLE_PROJECT_PANEL to C++ code as an actual 1/0 preprocessor
 # macro, needed by ImGuiEditorLayer.cpp/DockLayout.cpp's own
@@ -909,6 +938,12 @@ target_link_libraries(gte_core PUBLIC Threads::Threads)
 # archive gets linked transitively).
 target_link_libraries(gte_core PRIVATE saba_pmx)
 
+# editor-core-separation-1 campaign, PHASE18
+# (PHASE18_HEADLESS_TEST_FIXTURE_AND_CORE_STANDALONE_PROBE.md) - the entire
+# executable (which always links gte_editor, never gte_core alone - Rule 4,
+# PHASE0_MASTER_STRATEGY.md) is skipped when GTE_CORE_STANDALONE_PROBE_ONLY is
+# ON, so tools/ci/gte_core_standalone_probe/ can configure ONLY gte_core.
+if(NOT GTE_CORE_STANDALONE_PROBE_ONLY)
 # --- Final executable ----------------------------------------------------
 add_executable(GreatTamanaEditor src/main.cpp)
 # editor-core-separation-1 campaign, PHASE9 (PHASE9_CMAKE_TARGET_SPLIT.md,
@@ -1163,6 +1198,7 @@ endif()
 
 # Ensures SDL3.dll is copied next to the built .exe after every build.
 sdl3_copy_runtime_dll(GreatTamanaEditor)
+endif() # GTE_CORE_STANDALONE_PROBE_ONLY - matches the if() right before the "--- Final executable ---" comment below.
 
 # Note: no equivalent ktx_copy_runtime_dll() call is needed - KTX-Software is
 # built from source as a STATIC library (see cmake/FetchKTX.cmake), so there
