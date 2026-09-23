@@ -246,6 +246,13 @@ add_library(gte_core STATIC
     src/Core/Logging.h
     src/Core/LogSink.h
     src/Core/LogSink.cpp
+    # editor-core-separation-1 campaign, PHASE5
+    # (PHASE5_EDITOR_CAPABILITY_INTERFACES_DESIGN.md) - Bucket B capability
+    # interfaces (header-only, no .cpp - every interface here is pure
+    # virtual). See this header's own top-of-file comment for exactly which
+    # interfaces live here (and, just as importantly, which candidate
+    # capabilities were investigated and found NOT to need one).
+    src/Core/EditorCapabilities.h
     src/Math/MathTypes.h
     src/Math/Vec2.h
     src/Math/Vec3.h

@@ -7,6 +7,7 @@
 #include <unordered_set>
 
 #include "../Core/EngineContext.h"
+#include "../Core/EditorCapabilities.h"
 #include "../Editor/EditorLayer.h"
 #include "../Game/Game.h"
 #include "../Network/NetworkServer.h"
@@ -58,6 +59,21 @@ public:
 
     // Runs the main loop until the window is closed. Returns a process exit code.
     int Run();
+
+    // editor-core-separation-1 campaign, PHASE5
+    // (PHASE5_EDITOR_CAPABILITY_INTERFACES_DESIGN.md) - registers the real
+    // Editor-side ISceneIOCapability implementation (Core/EditorCapabilities.h)
+    // that CORE-destined code (EngineCommandDispatch.cpp, PHASE6) will consult
+    // at runtime instead of a compile-time `#if GTE_ENABLE_EDITOR`. Defaults
+    // to nullptr (no capability registered, matching a future Player host
+    // that never calls this) - PHASE5 itself never calls this setter; PHASE6
+    // is what constructs a real EditorSceneIOCapability and wires it here,
+    // from Application's own constructor. This exact nullable-pointer/setter
+    // shape is the TEMPORARY home Application (today's composition root)
+    // provides - PHASE12/PHASE15 relocate ownership into Core/EditorHost
+    // without needing to redesign ISceneIOCapability itself (see this
+    // header's own EditorCapabilities.h include comment).
+    void SetSceneIOCapability(ISceneIOCapability* capability) noexcept { m_sceneIOCapability = capability; }
 
 private:
     // render-pass-3 campaign, PHASE2/PHASE3 - registers every remaining
@@ -379,6 +395,16 @@ private:
     // IEditorLayer::GameViewTarget()/SceneViewTarget()).
     int m_windowWidth = 0;
     int m_windowHeight = 0;
+
+    // editor-core-separation-1 campaign, PHASE5
+    // (PHASE5_EDITOR_CAPABILITY_INTERFACES_DESIGN.md) - the ONE Bucket B
+    // nullable capability pointer this phase declares (Core/EditorCapabilities.h),
+    // wired via SetSceneIOCapability() above. nullptr until PHASE6 constructs
+    // a real EditorSceneIOCapability and registers it - PHASE5 itself never
+    // reads or writes this field beyond its own default-member-initializer,
+    // by design ("Files Touched"/"Out of Scope", PHASE5's own strategy file:
+    // no real call site conversion yet).
+    ISceneIOCapability* m_sceneIOCapability = nullptr;
 };
 
 } // namespace gte
