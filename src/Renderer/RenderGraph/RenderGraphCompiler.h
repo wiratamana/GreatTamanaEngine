@@ -153,14 +153,31 @@ std::vector<RenderPassEventContradiction> DetectRenderPassEventContradictions(
 // excluded from `executionOrder`, and none of its declared reads/writes
 // extend any resource's lifetime.
 //
-// render-pass-4 campaign, PHASE1 - Compile() now ALSO runs
-// DetectRenderPassEventContradictions() once, at the very top, against the
-// SAME effective order the algorithm below actually walks (see PHASE2's own
-// update immediately below), and turns a non-empty result into an
-// unconditional stderr report plus a debug-build assert() - see this
-// header's own RenderPassEventContradiction doc comment above and
-// RenderGraphCompiler.cpp's own wiring. This changes NOTHING about the
-// algorithm below; it is a pure diagnostic pre-pass.
+// render-pass-4 campaign, PHASE1 - Compile() cross-checks every pass's
+// declared RenderPassEvent against its real resource dependencies, turning a
+// disagreement into an unconditional stderr report plus a debug-build
+// assert() - see this header's own RenderPassEventContradiction doc comment
+// above and RenderGraphCompiler.cpp's own wiring. This changes NOTHING about
+// the algorithm below; it is a pure diagnostic side-channel.
+//
+// render-pass-6 campaign, PHASE4 (item 2.3,
+// task_manager/render-pass-6/PHASE4_COMPILER_ADJACENCY_LIST_REWRITE.md) -
+// Compile() no longer calls the standalone DetectRenderPassEventContradictions()
+// function above at all (that function remains fully intact, independently
+// callable/tested exactly as before - it is simply no longer Compile()'s own
+// diagnostic implementation). Instead, Compile() computes an equivalent
+// result INLINE, reusing the exact same last-writer bookkeeping
+// (lastTextureWriter/lastBufferWriter/lastVolumeTextureWriter) its own
+// RAW/WAW edge-construction walk (Step 1, below) already builds - once,
+// reusing that walk's own state, rather than the standalone function's
+// independent O(P^2*R) backward-then-forward scan. The check is threaded
+// through Step 1's per-read-usage loop (exactly where each read's nearest
+// prior writer is already being computed for edge-construction purposes) and
+// reported, via the exact same stderr/assert code as before, once Step 1
+// finishes walking every pass - still strictly BEFORE Step 2's culling, so
+// the OBSERVABLE behavior (stderr text, assert firing before culling/
+// reordering ever happens) is unchanged; only WHERE in the function body this
+// now happens changed, from a separate pre-pass to folded into Step 1 itself.
 //
 // render-pass-4 campaign, PHASE2
 // (PHASE2_REAL_RENDERPASSEVENT_ORDERING_ENFORCEMENT.md) - Compile() now

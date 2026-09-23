@@ -1004,5 +1004,318 @@ TEST(RenderGraphCompilerTest, MrtPassAndSeparateNonAttachmentBufferWritePassBoth
     EXPECT_FALSE(input.passes[3].isCulled);
 }
 
+// --- render-pass-6 campaign, PHASE4 -----------------------------------------
+// (task_manager/render-pass-6/PHASE4_COMPILER_ADJACENCY_LIST_REWRITE.md)
+//
+// RenderGraphCompiler::Compile()'s O(P^2) adjacency-matrix rewrite to
+// adjacency lists. The hard acceptance gate for this phase is byte-identical
+// executionOrder for every fixture ABOVE this point in the file (unmodified)
+// - everything below is NEW coverage targeting the rewrite's own new risk
+// surface (duplicate edges, long WAW chains, larger graphs, the fast-path
+// contradiction check folded into Step 1, and the self-exclusion guard).
+
+// Duplicate-edge scenario (read side): a pass with 2+ reads of the SAME
+// resource, both resolving to the SAME earlier writer - addEdge(writer, i)
+// is called twice with identical arguments. Confirms no crash/infinite loop
+// and the writer still precedes the reader exactly once in executionOrder.
+TEST(RenderGraphCompilerTest, PassWithTwoReadsOfSameResourceResolvingToSameEarlierWriterOrdersCorrectlyWithNoDuplicateEdgeIssues)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle t0 = builder.CreateTexture("T0", MakeTextureDesc());
+    const TextureHandle t1 = builder.CreateTexture("T1", MakeTextureDesc());
+
+    builder.AddPass(
+        "Writer", [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(t0); }, NoOpExecute); // index 0
+    builder.AddPass(
+        "ReaderTwice",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            // Two reads of the SAME resource, both resolving to the SAME
+            // earlier writer.
+            pass.ReadTexture(t0);
+            pass.ReadTexture(t0);
+            pass.WriteColorAttachment(t1);
+        },
+        NoOpExecute); // index 1
+
+    CompiledGraphInput input = builder.Finish();
+    const TextureHandle finalOutputs[] = { t1 };
+    const CompiledGraph compiled = Compile(input, finalOutputs);
+
+    EXPECT_TRUE(ExecutionOrderEquals(compiled.executionOrder, { 0, 1 }));
+    EXPECT_FALSE(input.passes[0].isCulled);
+    EXPECT_FALSE(input.passes[1].isCulled);
+}
+
+// Duplicate-edge scenario (WAW side, the write-side sibling of the read-side
+// duplicate above): a pass with 2+ writes to DIFFERENT resources that both
+// happen to share the SAME earlier writer pass - addEdge(earlierWriter, i)
+// is called twice with identical arguments (once per resource).
+TEST(RenderGraphCompilerTest, PassWithTwoWritesToDifferentResourcesSharingTheSameEarlierWriterOrdersCorrectlyWithNoDuplicateEdgeIssues)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle r1 = builder.CreateTexture("R1", MakeTextureDesc());
+    const TextureHandle r2 = builder.CreateTexture("R2", MakeTextureDesc());
+
+    builder.AddPass(
+        "FirstWriterOfBoth",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.WriteColorAttachment(r1);
+            pass.WriteColorAttachment(r2);
+        },
+        NoOpExecute); // index 0
+    builder.AddPass(
+        "SecondWriterOfBoth",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            // WAW against BOTH r1 and r2, both resolving to the SAME
+            // earlier writer (index 0) - the (0 -> 1) edge is requested
+            // twice, once per resource.
+            pass.WriteColorAttachment(r1);
+            pass.WriteColorAttachment(r2);
+        },
+        NoOpExecute); // index 1
+
+    CompiledGraphInput input = builder.Finish();
+    const TextureHandle finalOutputs[] = { r1, r2 };
+    const CompiledGraph compiled = Compile(input, finalOutputs);
+
+    EXPECT_TRUE(ExecutionOrderEquals(compiled.executionOrder, { 0, 1 }));
+    EXPECT_FALSE(input.passes[0].isCulled);
+    EXPECT_FALSE(input.passes[1].isCulled);
+}
+
+// A long WAW chain (3+ writers in a row) - confirms the adjacency-list edges
+// correctly chain writer1 -> writer2 -> writer3 -> reader, matching the
+// matrix version's own behavior.
+TEST(RenderGraphCompilerTest, LongWriteAfterWriteChainOrdersAllWritersThenTheFinalReaderInSequence)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle shared = builder.CreateTexture("Shared", MakeTextureDesc());
+    const TextureHandle finalOutput = builder.CreateTexture("Final", MakeTextureDesc());
+
+    builder.AddPass(
+        "Writer1", [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(shared); }, NoOpExecute); // index 0
+    builder.AddPass(
+        "Writer2", [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(shared); }, NoOpExecute); // index 1
+    builder.AddPass(
+        "Writer3", [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(shared); }, NoOpExecute); // index 2
+    builder.AddPass(
+        "Reader",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.ReadTexture(shared);
+            pass.WriteColorAttachment(finalOutput);
+        },
+        NoOpExecute); // index 3
+
+    CompiledGraphInput input = builder.Finish();
+    const TextureHandle finalOutputs[] = { finalOutput };
+    const CompiledGraph compiled = Compile(input, finalOutputs);
+
+    EXPECT_TRUE(ExecutionOrderEquals(compiled.executionOrder, { 0, 1, 2, 3 }));
+    for (const auto& pass : input.passes) {
+        EXPECT_FALSE(pass.isCulled);
+    }
+}
+
+// A large-ish synthetic fan-out/fan-in graph (52 passes) - a correctness
+// stress test at a size where an O(P^2)-vs-O(P+E) bug (a missed edge, a
+// duplicate causing a wrong in-degree, an off-by-one in the new list-walk
+// loops) would be far more likely to surface than at single-digit pass
+// counts. One root pass writes a texture 50 independent "fan" passes all
+// read (and each writes its own distinct output); a final pass reads all 50
+// fan outputs. Not a performance-timing assertion (this engine has no
+// timing-based test convention) - purely a correctness check at scale.
+TEST(RenderGraphCompilerTest, LargeFanOutFanInGraphCompilesCorrectlyExercisingTheAdjacencyListPathAtScale)
+{
+    constexpr std::uint32_t kFanCount = 50;
+
+    RenderGraphBuilder builder;
+    const TextureHandle root = builder.CreateTexture("Root", MakeTextureDesc());
+    std::vector<TextureHandle> middle;
+    middle.reserve(kFanCount);
+    for (std::uint32_t i = 0; i < kFanCount; ++i) {
+        middle.push_back(builder.CreateTexture("Middle", MakeTextureDesc()));
+    }
+    const TextureHandle finalOutput = builder.CreateTexture("Final", MakeTextureDesc());
+
+    builder.AddPass(
+        "Root", [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(root); }, NoOpExecute); // index 0
+
+    for (std::uint32_t i = 0; i < kFanCount; ++i) {
+        const TextureHandle handle = middle[i];
+        builder.AddPass(
+            "Middle",
+            [&, handle](RenderGraphBuilder::PassBuilder& pass) {
+                pass.ReadTexture(root);
+                pass.WriteColorAttachment(handle);
+            },
+            NoOpExecute); // index i + 1
+    }
+
+    builder.AddPass(
+        "FinalPass",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            for (const TextureHandle& handle : middle) {
+                pass.ReadTexture(handle);
+            }
+            pass.WriteColorAttachment(finalOutput);
+        },
+        NoOpExecute); // index kFanCount + 1
+
+    CompiledGraphInput input = builder.Finish();
+    const TextureHandle finalOutputs[] = { finalOutput };
+    const CompiledGraph compiled = Compile(input, finalOutputs);
+
+    // Everything here is naturally already in a valid topological order by
+    // declaration index (root -> 50 independent fan passes, in any relative
+    // order among themselves -> final pass), and all 50 fan passes share the
+    // same RenderPassEvent tier/effective position bucket as each other, so
+    // Kahn's tie-break (lowest effective position) resolves them in their
+    // original declaration order - executionOrder is therefore expected to
+    // be the identity permutation [0, 1, ..., kFanCount + 1].
+    std::vector<std::uint32_t> expected(kFanCount + 2);
+    for (std::uint32_t i = 0; i < expected.size(); ++i) {
+        expected[i] = i;
+    }
+    EXPECT_TRUE(ExecutionOrderEquals(compiled.executionOrder, expected));
+    for (const auto& pass : input.passes) {
+        EXPECT_FALSE(pass.isCulled);
+    }
+}
+
+// The self-exclusion guard's OWN dedicated regression test (as opposed to
+// the pre-existing SelfLoopReadAndWriteOfSameResourceDoesNotCrashOrCycle
+// test above, which incidentally also exercises it but was never written
+// with this guard in mind): a pass that reads AND writes the SAME resource
+// nothing else ever writes must never be reported as contradicting itself
+// by Compile()'s new inline fast path (see
+// PHASE4_COMPILER_ADJACENCY_LIST_REWRITE.md, Step 3.4's "required
+// self-exclusion guard" - firstXWriter[resource] can legitimately BE this
+// same pass's own index). If this guard were ever removed, this exact test
+// would silently crash the whole test process via Compile()'s own
+// debug-build assert() instead of reporting a normal gtest failure.
+TEST(RenderGraphCompilerTest, SelfExclusionGuardPreventsFalsePositiveContradictionForSelfLoopReadWriteOfNeverOtherwiseWrittenResource)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle depth = builder.CreateTexture("Depth", TextureDesc{ 64, 64, VK_FORMAT_D32_SFLOAT, true });
+
+    builder.AddRenderPass(
+        "DepthPass", PassKind::Graphics,
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.ReadTexture(depth, ResourceAccess::DepthStencilAttachmentReadWrite);
+            pass.WriteDepthStencilAttachment(depth);
+        },
+        NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::Opaques);
+
+    CompiledGraphInput input = builder.Finish();
+    const TextureHandle finalOutputs[] = { depth };
+
+    // Must not crash/abort - see this test's own header comment above.
+    const CompiledGraph compiled = Compile(input, finalOutputs);
+
+    EXPECT_TRUE(ExecutionOrderEquals(compiled.executionOrder, { 0 }));
+    EXPECT_FALSE(input.passes[0].isCulled);
+}
+
+// The "never-written-resource" equivalence case: a read of a resource
+// nothing ever writes (firstXWriter[resource] == -1) must produce NO
+// contradiction from either the standalone function OR Compile()'s own
+// internal fast path - confirms the "no writer anywhere" case is handled
+// identically to the "writer exists later" case the death tests below
+// cover.
+TEST(RenderGraphCompilerTest, ReadOfNeverWrittenResourceProducesNoContradictionFromEitherPath)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle neverWritten = builder.CreateTexture("NeverWritten", MakeTextureDesc());
+    const TextureHandle output = builder.CreateTexture("Output", MakeTextureDesc());
+
+    builder.AddRenderPass(
+        "ReaderOfNeverWritten", PassKind::Graphics,
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.ReadTexture(neverWritten);
+            pass.WriteColorAttachment(output);
+        },
+        NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::Opaques);
+
+    CompiledGraphInput input = builder.Finish();
+    const std::int32_t identity[] = { 0 };
+
+    const std::vector<RenderPassEventContradiction> standaloneContradictions =
+        DetectRenderPassEventContradictions(input, identity);
+    EXPECT_TRUE(standaloneContradictions.empty());
+
+    const TextureHandle finalOutputs[] = { output };
+    // Must not crash/abort - proves the fast path's firstXWriter[...] == -1
+    // case is handled identically to the standalone function's own "no
+    // writer anywhere" case.
+    const CompiledGraph compiled = Compile(input, finalOutputs);
+    EXPECT_TRUE(ExecutionOrderEquals(compiled.executionOrder, { 0 }));
+    EXPECT_FALSE(input.passes[0].isCulled);
+}
+
+#ifndef NDEBUG
+
+// The mandatory fast-path/standalone-function EQUIVALENCE proof (Step
+// 3.4/3.5's own required test) - the direct proof that folding the
+// contradiction check into Step 1 is a real optimization, not a silent
+// behavior change. fastContradictions is Compile()'s own internal state
+// with no public accessor (a deliberate choice, confirmed via
+// ask_questions - see PHASE4_COMPLETION_REPORT.md for the "internal hook
+// vs. indirect observation" reasoning), so equivalence is observed
+// INDIRECTLY here, mirroring CallingCompileWithAConsistentGraphNeverAborts's
+// own established pattern in REVERSE: reproduce a graph shape the
+// standalone-function-focused OrphanReadWithLaterWriterIsDetected test
+// above already proves the STANDALONE function reports a contradiction for,
+// then confirm Compile() itself - now driven ENTIRELY by its own new inline
+// fast path, with the old standalone-function call site genuinely removed -
+// still aborts via the exact same debug-build assert(), exactly as it did
+// before this phase's rewrite. Death tests spawn a genuine sub-process (see
+// gtest's own death-test docs), so this crash never takes down the real
+// test binary.
+//
+// IMPORTANT, confirmed via ask_questions during this phase's own
+// implementation: only the OrphanReadWithLaterWriter contradiction kind is
+// tested here. DeclaredEventOrderDisagreesWithRealDependency (the OTHER
+// standalone-function-tested kind, see EdgeContradictingDeclaredEventOrderIsDetected
+// above) is STRUCTURALLY UNREACHABLE through a real end-to-end Compile()
+// call, both BEFORE and AFTER this phase (a pre-existing fact this phase
+// merely discovered, not something it changed): Compile()'s own
+// effective-order walk only ever resolves a writer as a real (non-orphan)
+// "nearest writer" for a read if that writer was walked BEFORE the read in
+// effective order, which by construction of the (RenderPassEvent, original
+// index) stable sort always means writer.renderPassEvent <=
+// reader.renderPassEvent - so the "writer.renderPassEvent >
+// reader.renderPassEvent" contradiction condition can never actually be
+// observed from a real Compile() call, only from the standalone function's
+// own direct unit test using a hand-built, deliberately-inconsistent
+// processingOrder (exactly what EdgeContradictingDeclaredEventOrderIsDetected
+// already does, and exactly the same class of "kept as genuinely correct
+// but practically unreachable through any real caller" situation as this
+// file's own existing cycle-detection throw, see Compile()'s own header
+// comment above).
+TEST(RenderGraphCompilerDeathTest, FastPathDetectsOrphanReadWithLaterWriterAndAbortsJustLikeTheStandaloneFunctionWould)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle t0 = builder.CreateTexture("T0", MakeTextureDesc());
+
+    // Same RenderPassEvent tier for both (Opaques) - keeps effective order
+    // identical to declaration order (reader first, writer second), so the
+    // reader is walked BEFORE the writer and genuinely resolves as an
+    // orphan read with a later writer, exactly like
+    // OrphanReadWithLaterWriterIsDetected's own standalone-function fixture
+    // above, but driven through a REAL Compile() call this time.
+    builder.AddRenderPass(
+        "Composite", PassKind::Graphics, [&](RenderGraphBuilder::PassBuilder& pass) { pass.ReadTexture(t0); },
+        NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::Opaques); // index 0 - reader, declared FIRST.
+    builder.AddRenderPass(
+        "Opaque", PassKind::Graphics, [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(t0); },
+        NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::Opaques); // index 1 - writer, declared SECOND, SAME tier.
+
+    CompiledGraphInput input = builder.Finish();
+
+    EXPECT_DEATH({ Compile(input, {}); }, "");
+}
+
+#endif // !NDEBUG
+
 } // namespace
 } // namespace gte::rg
