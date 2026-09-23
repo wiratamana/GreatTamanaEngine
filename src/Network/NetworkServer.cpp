@@ -315,6 +315,58 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         res.set_content(BuildActivateTabResponseJson(outcome.success, outcome.tabExists, parsed.tabName), "application/json");
     });
 
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE6 (task_manager/render-pass-5/PHASE6_EDITOR_TOOLING_AND_LIVE_VALIDATION.md)
+    // - POST /spawn_gpu_driven_test_batch. Reuses the SAME uiCommandBridge
+    // (EditorUiCommandBridge) /activate_tab already uses, mirroring its own
+    // exact "parse -> bridge unavailable check -> build request -> SubmitAndWait
+    // -> map alreadyPending/timedOut/outcome" shape.
+    server.Post("/spawn_gpu_driven_test_batch", [uiCommandBridge](const httplib::Request& req, httplib::Response& res) {
+        const ParsedSpawnGpuDrivenTestBatchRequest parsed = ParseSpawnGpuDrivenTestBatchRequest(req.body);
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        if (uiCommandBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("editor UI command bridge not available"), "application/json");
+            return;
+        }
+
+        EditorUiCommandRequest request;
+        request.kind = EditorUiCommandKind::SpawnGpuDrivenTestBatch;
+        request.spawnGpuDrivenTestBatch.instanceCount = parsed.instanceCount;
+
+        const EditorUiCommandBridge::SubmitResult submit = uiCommandBridge->SubmitAndWait(request);
+        if (submit.alreadyPending) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("another editor UI command is already in progress"), "application/json");
+            return;
+        }
+        if (submit.timedOut) {
+            res.status = 504;
+            res.set_content(BuildGenericErrorResponseJson("editor UI command timed out"), "application/json");
+            return;
+        }
+
+        const SpawnGpuDrivenTestBatchOutcome& outcome = submit.result->spawnGpuDrivenTestBatch;
+        // A release build (NullEditorLayer, "GTE_ENABLE_EDITOR is OFF" in
+        // outcome.errorMessage) reports as 503 - "structurally unavailable
+        // in this build", not a caller mistake - mirrors /save_scene's own
+        // "editorAvailable" -> 503 convention. Every other failure (should
+        // be unreachable - ParseSpawnGpuDrivenTestBatchRequest() above
+        // already rejects count < 1) would be a 400.
+        if (!outcome.success) {
+            res.status = (outcome.errorMessage.find("GTE_ENABLE_EDITOR") != std::string::npos) ? 503 : 400;
+            res.set_content(BuildGenericErrorResponseJson(outcome.errorMessage), "application/json");
+            return;
+        }
+        res.status = 200;
+        res.set_content(
+            BuildSpawnGpuDrivenTestBatchResponseJson(true, "", outcome.instanceCount), "application/json");
+    });
+
     // task_manager/frame-debugger-3 campaign, PHASE7
     // (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md) -
     // GET /frame_debugger/open, /enable, /capture, /select_event,

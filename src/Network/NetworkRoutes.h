@@ -935,4 +935,38 @@ std::string BuildGetLogsResponseJson(
 //   {"success": true, "cleared_count": N}
 std::string BuildClearLogsResponseJson(std::size_t clearedCount);
 
+// --- GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+// PHASE6 (task_manager/render-pass-5/PHASE6_EDITOR_TOOLING_AND_LIVE_VALIDATION.md)
+// - POST /spawn_gpu_driven_test_batch. Every function below stays PURE,
+// same discipline as everything else in this file - NetworkServer.cpp is
+// the one place that converts a parsed request into a real
+// EditorUiCommandRequest and calls EditorUiCommandBridge::SubmitAndWait().
+
+// Parsed, VALIDATED result of a POST /spawn_gpu_driven_test_batch request
+// body: {"count": <uint>} (optional, defaults to 6 - see
+// SpawnGpuDrivenTestBatchCommand's own doc comment,
+// Application/EditorUiCommandBridge.h). `valid == false` means
+// `errorMessage` explains exactly why. Same "an entirely empty/non-JSON
+// body is NOT an error, treated as if 'count' were simply omitted"
+// exception ParseScenePathRequest() above documents (this endpoint's own
+// single-optional-field shape makes "no body at all" a completely
+// reasonable, common request too - "spawn the default-sized batch").
+// "count" (when present) must be a JSON NUMBER that is a positive integer
+// (>= 1) - zero, negative, non-integer, or non-numeric all fail with
+// "count must be a positive integer" - GpuDrivenBatchTestSpawner::Spawn()'s
+// own instanceCount == 0 rejection is defense in depth for its OTHER
+// caller (the Hierarchy panel's menu item), not something this route can
+// actually trigger.
+struct ParsedSpawnGpuDrivenTestBatchRequest {
+    bool valid = false;
+    std::string errorMessage;
+    std::uint32_t instanceCount = 6;
+};
+ParsedSpawnGpuDrivenTestBatchRequest ParseSpawnGpuDrivenTestBatchRequest(const std::string& jsonBody);
+
+// Success shape: {"success":true,"instance_count":<uint>}
+// Failure shape: identical to BuildGenericErrorResponseJson() below.
+std::string BuildSpawnGpuDrivenTestBatchResponseJson(bool success, const std::string& errorMessage,
+    std::uint32_t instanceCount);
+
 } // namespace gte::Network

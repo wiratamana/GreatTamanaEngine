@@ -408,6 +408,11 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         ctx.recordDraw = [&passDrawStats](bool hasIndexBuffer, std::uint32_t vertexCount, std::uint32_t indexCount) {
             AccumulateDrawStats(passDrawStats, hasIndexBuffer, vertexCount, indexCount);
         };
+        // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+        // PHASE6 - see PassContext::recordIndirectDraw's own doc comment
+        // (RenderGraph.h) for why this is a separate callback from
+        // recordDraw() above.
+        ctx.recordIndirectDraw = [&passDrawStats]() { AccumulateIndirectDrawStats(passDrawStats); };
 
         bool didBeginRendering = false;
         if (hasColorWrite) {

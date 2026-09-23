@@ -7,6 +7,7 @@
 #include "EditorCamera.h"
 #include "EditorContext.h"
 #include "GBufferValidation.h"
+#include "GpuDrivenBatchTestSpawner.h"
 #include "ImGuiMemoryTracker.h"
 #include "Panels/AtmospherePanel.h"
 #include "Panels/FrameDebuggerPanel.h"
@@ -504,7 +505,8 @@ public:
     }
 
     void BuildUI(Game& game, Renderer& renderer, const rg::RenderGraph& renderGraph,
-        AtmosphereSettings& atmosphereSettings, AtmosphereLutRenderer& atmosphereLutRenderer) override
+        AtmosphereSettings& atmosphereSettings, AtmosphereLutRenderer& atmosphereLutRenderer,
+        const std::vector<GpuDrivenBatchDebugInfo>& gpuDrivenBatchDebugInfo) override
     {
         ImGui::SetCurrentContext(m_context);
 
@@ -602,7 +604,7 @@ public:
         BuildGamePanel(m_ctx);
         BuildMemoryPanel(m_ctx, renderer);
         m_profilerPanel.Build(m_ctx);
-        m_renderGraphPanel.Build(m_ctx, renderGraph);
+        m_renderGraphPanel.Build(m_ctx, renderGraph, gpuDrivenBatchDebugInfo);
         // Atmosphere Scattering + Aerial Perspective campaign, Phase 8
         // (ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md) - a small,
         // stateless free-function panel (mirrors BuildMemoryPanel()'s own
@@ -780,6 +782,23 @@ public:
         ImGui::SetCurrentContext(m_context);
         TabActivationResult result;
         result.tabExists = FindAndFocusEditorWindow(panelName.c_str());
+        return result;
+    }
+
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE6 - see IEditorLayer::SpawnGpuDrivenTestBatch()'s own doc comment
+    // (EditorLayer.h) for the full contract. A thin forward into
+    // GpuDrivenBatchTestSpawner::Spawn() - the real spawn logic lives there
+    // (not in this composition-root class), mirroring
+    // ImportExternalAssetIntoProject()'s own "thin forward into the real
+    // implementation" shape immediately below.
+    GpuDrivenTestBatchSpawnResult SpawnGpuDrivenTestBatch(Game& game, Renderer& renderer, std::uint32_t instanceCount) override
+    {
+        const GpuDrivenBatchTestSpawnResult spawned = GpuDrivenBatchTestSpawner::Spawn(game, renderer, instanceCount);
+        GpuDrivenTestBatchSpawnResult result;
+        result.success = spawned.success;
+        result.errorMessage = spawned.errorMessage;
+        result.instanceCount = spawned.instanceCount;
         return result;
     }
 

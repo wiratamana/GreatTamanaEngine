@@ -211,9 +211,43 @@ void BuildRegimeSection(const char* label, const char* idSuffix, const rg::Rende
     BuildResourceTable(resourceTableId.c_str(), snapshot);
 }
 
+// GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+// PHASE6 (task_manager/render-pass-5/PHASE6_EDITOR_TOOLING_AND_LIVE_VALIDATION.md,
+// Section 3.1) - one small line per eligible batch: "<batch>: N / M
+// instances visible" - N is the GPU-computed, culling-survived count
+// (visibleCount - a deliberately delayed GPU readback, per
+// GpuDrivenBatchDebugInfo's own doc comment), M is the CPU-known real
+// instance count. Kept clearly labeled as two DIFFERENT kinds of number
+// (PHASE2's own documented rule) - "pending" (never a fabricated 0) for the
+// rare frame visibleCount hasn't been read back yet at all.
+void BuildGpuDrivenBatchesSection(const std::vector<GpuDrivenBatchDebugInfo>& batches)
+{
+    ImGui::SeparatorText("GPU-Driven Batches (instances culled this frame)");
+    if (batches.empty()) {
+        ImGui::TextDisabled(
+            "No GPU-driven-eligible batch is live this frame (Game View only - see PHASE0_MASTER_STRATEGY.md's "
+            "Locked Design Decision 11/7).");
+        return;
+    }
+
+    for (const GpuDrivenBatchDebugInfo& batch : batches) {
+        const std::string name = batch.batchName.empty() ? "(unnamed)" : batch.batchName;
+        if (batch.visibleCount.has_value()) {
+            const std::uint32_t culled =
+                (batch.instanceCount > *batch.visibleCount) ? (batch.instanceCount - *batch.visibleCount) : 0u;
+            ImGui::Text("%s: %u / %u instances visible (%u culled)", name.c_str(), *batch.visibleCount,
+                batch.instanceCount, culled);
+        } else {
+            ImGui::Text("%s: pending / %u instances (GPU readback not yet available)", name.c_str(),
+                batch.instanceCount);
+        }
+    }
+}
+
 } // namespace
 
-void RenderGraphPanel::Build(EditorContext& /*ctx*/, const rg::RenderGraph& renderGraph)
+void RenderGraphPanel::Build(EditorContext& /*ctx*/, const rg::RenderGraph& renderGraph,
+    const std::vector<GpuDrivenBatchDebugInfo>& gpuDrivenBatchDebugInfo)
 {
     ImGui::Begin("Render Graph");
 
@@ -229,6 +263,7 @@ void RenderGraphPanel::Build(EditorContext& /*ctx*/, const rg::RenderGraph& rend
     if (m_paused && !wasPaused) {
         m_frozenOffscreenSnapshot = renderGraph.LastSnapshot(rg::ExecuteTimingMode::SynchronousImmediateReadback);
         m_frozenPresentSnapshot = renderGraph.LastSnapshot(rg::ExecuteTimingMode::PipelinedDeferredReadback);
+        m_frozenGpuDrivenBatchDebugInfo = gpuDrivenBatchDebugInfo;
     }
 
     const rg::RenderGraphSnapshot& offscreenSnapshot = m_paused
@@ -237,6 +272,17 @@ void RenderGraphPanel::Build(EditorContext& /*ctx*/, const rg::RenderGraph& rend
     const rg::RenderGraphSnapshot& presentSnapshot = m_paused
         ? m_frozenPresentSnapshot
         : renderGraph.LastSnapshot(rg::ExecuteTimingMode::PipelinedDeferredReadback);
+    const std::vector<GpuDrivenBatchDebugInfo>& batchesToShow =
+        m_paused ? m_frozenGpuDrivenBatchDebugInfo : gpuDrivenBatchDebugInfo;
+
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE6 - placed FIRST (right after the Pause row), before the two
+    // regime sections below - the "instances culled this frame" readout is
+    // this panel's own newest, most immediately actionable live signal, and
+    // this placement keeps it visible without scrolling past both regimes'
+    // own (often much longer) pass/resource tables.
+    BuildGpuDrivenBatchesSection(batchesToShow);
+    ImGui::Spacing();
 
     BuildRegimeSection("Offscreen Regime (Game View + Scene View)", "Offscreen", offscreenSnapshot);
     ImGui::Spacing();

@@ -41,7 +41,9 @@
 #include "../PipelineHandle.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <map>
+#include <optional>
 #include <vector>
 
 namespace gte {
@@ -146,6 +148,21 @@ public:
         std::size_t capacity = 0; // Instances currently allocated for - see EnsureCapacity().
 
         // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+        // PHASE6 (task_manager/render-pass-5/
+        // PHASE6_EDITOR_TOOLING_AND_LIVE_VALIDATION.md) - a single
+        // std::uint32_t, BufferMemoryUsage::GpuToCpu (host-visible,
+        // persistently mapped, GPU-writes/CPU-reads-back - see Buffer.h's own
+        // doc comment on this usage kind). A raw vkCmdCopyBuffer of
+        // `countBuffer` into this buffer is recorded every frame, inside the
+        // SAME command buffer, immediately after the culling compute pass's
+        // own dispatch - see Application.cpp's own "<batch> CopyCountForReadback"
+        // pass. Sized ONCE (independent of `capacity` - a visible-instance
+        // COUNT is always exactly one std::uint32_t, regardless of how many
+        // instances the batch itself holds), so EnsureCapacity()'s own
+        // "reallocate only when capacity grows" rule deliberately does NOT
+        // apply to this field - see EnsureCapacity()'s own .cpp implementation
+        // for how it is preserved, unchanged, across a capacity grow.
+        Buffer countReadbackBuffer;
         // PHASE5 (task_manager/render-pass-5/
         // PHASE5_RENDERGRAPH_PASS_WIRING_AND_PRODUCTION_CUTOVER.md) - this
         // batch's own two persistent descriptor sets, allocated once (lazily,
@@ -197,6 +214,23 @@ public:
     void PackThisFrame(const GpuDrivenBatchKey& key, const std::vector<GpuCullingInstanceInput>& instances);
 
     const Entry* TryGet(const GpuDrivenBatchKey& key) const;
+
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE6 - a cheap, side-effect-free, NON-BLOCKING read of `key`'s
+    // countReadbackBuffer (Entry::countReadbackBuffer above) - mirrors
+    // GpuTimingService::ReadPresentResultIfAvailable()'s own "read back a
+    // PAST frame's result at the point synchronization already proves it's
+    // safe" pattern exactly (AGENTS.md, "Profiling": never add a new GPU
+    // wait purely to fetch a number sooner). Safe to call ONLY once the
+    // caller has already confirmed (via its own fence wait) that this
+    // frame's "<batch> CopyCountForReadback" pass genuinely completed - see
+    // Application.cpp's own call site, immediately after
+    // Renderer::EndOffscreenRenderGraphRecording() returns (which itself
+    // already fence-waits - see FramePresenter::EndOffscreenRecording()).
+    // Returns std::nullopt only if EnsureCapacity() was never called for
+    // this exact key (degrades gracefully, never crashes - mirrors TryGet()'s
+    // own convention).
+    std::optional<std::uint32_t> ReadLastKnownVisibleCount(const GpuDrivenBatchKey& key) const;
 
     // The ONE shared CullingPipelines instance every batch's own future
     // culling dispatch (PHASE5) binds against - see CullingPipelines.h's

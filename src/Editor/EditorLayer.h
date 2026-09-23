@@ -10,6 +10,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 // Forward-declared so this header needs no SDL dependency at all (matches
 // the Vulkan-handle forward-declare trick already used in Window.h) - only
@@ -147,6 +148,52 @@ struct FrameDebuggerStateSnapshotView {
     std::string channel = "all";
     float levelsBlack = 0.0f;
     float levelsWhite = 1.0f;
+};
+
+// GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+// PHASE6 (task_manager/render-pass-5/PHASE6_EDITOR_TOOLING_AND_LIVE_VALIDATION.md)
+// - one eligible batch's own "instances culled this frame" readout, ready
+// for RenderGraphPanel::Build() (the panel that already shows per-pass
+// draw-call/triangle stats) to display. Deliberately a plain, dependency-
+// free struct (mirrors TabActivationResult/GBufferValidationHandles'
+// own precedent above) - Application.cpp (the composition root) builds this
+// list fresh every frame, right after Renderer::EndOffscreenRenderGraphRecording()
+// returns (the exact point every buffer this frame's GPU-driven culling
+// dispatch wrote is already fence-proven complete - see
+// GpuDrivenBatchCache::ReadLastKnownVisibleCount()'s own doc comment for why
+// no NEW GPU wait is ever added to produce this number).
+struct GpuDrivenBatchDebugInfo {
+    // The same stable name shown in the Render Graph panel's own pass list
+    // (e.g. "GpuDrivenBatch0") - NOT a per-pass name (this one line covers
+    // all three/four of that batch's own passes at once).
+    std::string batchName;
+    // This frame's real, CPU-known instance count (the batch's own total
+    // size before culling) - always > 0 (a batch with zero instances is
+    // never collected at all - see RenderSystem::CollectGpuDrivenBatches()).
+    std::uint32_t instanceCount = 0;
+    // The GPU-computed "instances that survived frustum culling this frame"
+    // count, read back from the culling compute pass's own atomic visible-
+    // count buffer - std::nullopt only in the (should be unreachable in
+    // practice) case the readback buffer was never created for this batch
+    // yet (e.g. the very first frame this exact batch ever existed, before
+    // GpuDrivenBatchCache::EnsureCapacity() ever ran for it).
+    std::optional<std::uint32_t> visibleCount;
+};
+
+// GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+// PHASE6 - result of SpawnGpuDrivenTestBatch() below. Deliberately a plain,
+// dependency-free struct (mirrors ProjectAssetImportResult's own
+// "editorAvailable"-style convention immediately above) - EditorLayer.h must
+// never depend on src/Editor/GpuDrivenBatchTestSpawner.h (an Editor-only
+// file's own real implementation), and must never depend on
+// src/Application/EditorUiCommandBridge.h's own separate outcome type
+// either (Application::Run() is the one place that converts one of these
+// into the other, one field at a time - see every other *Outcome/*Result
+// pair in this file for the identical precedent).
+struct GpuDrivenTestBatchSpawnResult {
+    bool success = false;
+    std::string errorMessage;
+    std::uint32_t instanceCount = 0;
 };
 
 class IEditorLayer {
@@ -381,8 +428,18 @@ public:
     // "Validate Transmittance LUT" button
     // (src/Editor/AtmosphereTransmittanceLutValidation.h) reads back its
     // real, currently-computed output texture through this reference.
+    // `gpuDrivenBatchDebugInfo` (GPU-Driven Frustum Culling + Indirect Draw
+    // campaign, render-pass-5, PHASE6) is this frame's freshly-built
+    // "instances culled this frame" readout, one entry per real, eligible
+    // GPU-driven batch (Game View only - Locked Design Decision 11,
+    // PHASE0_MASTER_STRATEGY.md) - the "Render Graph" panel displays it
+    // alongside its own existing per-pass draw-call/triangle stats. Always
+    // empty on a frame with no eligible batch (including every frame in a
+    // release/non-Editor build, trivially, since this whole method is never
+    // called there).
     virtual void BuildUI(Game& game, Renderer& renderer, const rg::RenderGraph& renderGraph,
-        AtmosphereSettings& atmosphereSettings, AtmosphereLutRenderer& atmosphereLutRenderer) = 0;
+        AtmosphereSettings& atmosphereSettings, AtmosphereLutRenderer& atmosphereLutRenderer,
+        const std::vector<GpuDrivenBatchDebugInfo>& gpuDrivenBatchDebugInfo) = 0;
 
     // Records this frame's UI draw data into cmd. Called from inside
     // Renderer::Present()'s recordExtra hook - i.e. while the swapchain
@@ -608,6 +665,26 @@ public:
     // Debugger's real state currently is. All-default for NullEditorLayer
     // (enabled == false, windowOpen == false, channel == "all", ...).
     virtual FrameDebuggerStateSnapshotView FrameDebuggerGetState() const = 0;
+
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE6 (task_manager/render-pass-5/PHASE6_EDITOR_TOOLING_AND_LIVE_VALIDATION.md)
+    // - spawns `instanceCount` new entities sharing one hand-authored,
+    // untextured, indexed, VertexLayout::PositionNormal Mesh+Pipeline pair
+    // (see src/Editor/GpuDrivenBatchTestSpawner.h) - the real, repeatable
+    // way to get at least one live GPU-driven-eligible batch
+    // (>= kMinInstancesForGpuDrivenBatch) into the scene, confirmed via
+    // ask_questions since no existing demo-scene/asset content already
+    // qualifies. `game`/`renderer` are the SAME Game/Renderer Application
+    // owns - mirrors CreatePrimitiveEntity()'s own "Editor hands Game/
+    // Renderer through, the real spawn logic lives elsewhere" shape. Always
+    // returns success == false (creates NOTHING) for NullEditorLayer (a
+    // release build has no Editor-only validation tooling to spawn through
+    // at all) - mirrors ImportExternalAssetIntoProject()'s own
+    // "editorAvailable"-style graceful-unavailability precedent, just
+    // spelled as a plain `success` field here since there is no OTHER
+    // reason for this specific call to fail (see
+    // GpuDrivenBatchTestSpawner::Spawn()'s own doc comment).
+    virtual GpuDrivenTestBatchSpawnResult SpawnGpuDrivenTestBatch(Game& game, Renderer& renderer, std::uint32_t instanceCount) = 0;
 };
 
 // Constructs the real ImGui-backed editor layer, or the inert Null one,

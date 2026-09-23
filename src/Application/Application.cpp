@@ -213,6 +213,12 @@ struct GpuDrivenBatchNames {
     const char* inputBufferName = nullptr;
     const char* indirectBufferName = nullptr;
     const char* countBufferName = nullptr;
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE6 - the batch's own stable DISPLAY name (e.g. "GpuDrivenBatch0"),
+    // shown by the "Render Graph" panel's new "instances culled this frame"
+    // readout (GpuDrivenBatchDebugInfo::batchName, EditorLayer.h) - NOT a
+    // per-pass name (covers all three of that batch's own passes at once).
+    const char* displayName = nullptr;
 };
 
 class GpuDrivenBatchNamePool {
@@ -239,6 +245,7 @@ public:
         entry.names.inputBufferName = Intern("GpuDrivenBatch" + std::to_string(index) + ".Input");
         entry.names.indirectBufferName = Intern("GpuDrivenBatch" + std::to_string(index) + ".IndirectCommands");
         entry.names.countBufferName = Intern("GpuDrivenBatch" + std::to_string(index) + ".VisibleCount");
+        entry.names.displayName = Intern("GpuDrivenBatch" + std::to_string(index));
         m_entries.push_back(std::move(entry));
         return m_entries.back().names;
     }
@@ -788,10 +795,42 @@ void Application::RegisterOffscreenRenderPipelineProviders()
                         m_renderer.SubmitIndirect(*instancedPipeline, *mesh, indirectBufferNative,
                             /*indirectOffset=*/0, static_cast<std::uint32_t>(instanceCount), countBufferForCall,
                             /*countBufferOffset=*/0, instanceBufferDescriptorSet, viewProjection);
+                        // GPU-Driven Frustum Culling + Indirect Draw campaign
+                        // (render-pass-5), PHASE6 - wires DrawStats::
+                        // indirectDrawCount into a real per-pass return value
+                        // for the first time (see PassContext::
+                        // recordIndirectDraw's own doc comment, RenderGraph.h,
+                        // and Renderer::SubmitIndirect()'s own "PHASE5's job"
+                        // note this closes).
+                        if (ctx.recordIndirectDraw) {
+                            ctx.recordIndirectDraw();
+                        }
                         m_renderer.EndGraphPassRecording();
                     };
                     out.push_back(std::move(desc));
                 }
+
+                // NOTE (GPU-Driven Frustum Culling + Indirect Draw campaign,
+                // render-pass-5, PHASE6): a 4th, buffer-only-write
+                // "<batch> CopyCountForReadback" pass was ATTEMPTED here
+                // (read countHandle as TransferSrc, write the persistent
+                // countReadbackBuffer) but is STRUCTURALLY IMPOSSIBLE to
+                // keep alive through RenderGraphCompiler::Compile()'s own
+                // backward-reachability culling - confirmed by direct re-read
+                // of RenderGraphCompiler.cpp's Step 2 (Buffer writes are
+                // NEVER treated as culling "roots", unlike Texture/
+                // VolumeTexture writes - `isRoot = false` unconditionally
+                // for ResourceKind::Buffer - and a pass with NO texture/
+                // volume-texture write of its own can only survive by being
+                // a predecessor of some OTHER kept pass, which never happens
+                // here since nothing downstream ever reads
+                // countReadbackBuffer through the graph). The count-buffer
+                // readback copy is instead issued as a RAW command directly
+                // against `offscreenCmd`, OUTSIDE the render-graph's
+                // declarative pass system entirely, immediately after this
+                // whole m_renderGraph.Execute(...) call returns (see Run()'s
+                // own code, below) - see that call site's own doc comment
+                // for the full reasoning.
             }
         });
 
@@ -1171,15 +1210,22 @@ int Application::Run()
             GTE_PROFILE_SCOPE("Application::ExecuteEditorUiCommand");
             EditorUiCommandResult uiResult;
             uiResult.kind = uiRequest->kind;
-            // Only one EditorUiCommandKind exists today (ActivateTab) - a
-            // future addition to this bridge (see EditorUiCommandBridge.h's
-            // own doc comment on why it's an enum, not a single hardcoded
-            // shape) would branch on uiRequest->kind here, the exact same
+            // GPU-Driven Frustum Culling + Indirect Draw campaign
+            // (render-pass-5), PHASE6 - a second EditorUiCommandKind now
+            // exists (SpawnGpuDrivenTestBatch) - branches exactly the same
             // shape ExecuteEngineCommand() (EngineCommandDispatch.cpp)
             // already uses for ITS bridge's own multiple kinds.
-            const TabActivationResult activation = m_editorLayer->ActivateTab(uiRequest->activateTab.tabName);
-            uiResult.activateTab.tabExists = activation.tabExists;
-            uiResult.activateTab.success = activation.tabExists;
+            if (uiRequest->kind == EditorUiCommandKind::SpawnGpuDrivenTestBatch) {
+                const GpuDrivenTestBatchSpawnResult spawned = m_editorLayer->SpawnGpuDrivenTestBatch(
+                    m_game, m_renderer, uiRequest->spawnGpuDrivenTestBatch.instanceCount);
+                uiResult.spawnGpuDrivenTestBatch.success = spawned.success;
+                uiResult.spawnGpuDrivenTestBatch.errorMessage = spawned.errorMessage;
+                uiResult.spawnGpuDrivenTestBatch.instanceCount = spawned.instanceCount;
+            } else {
+                const TabActivationResult activation = m_editorLayer->ActivateTab(uiRequest->activateTab.tabName);
+                uiResult.activateTab.tabExists = activation.tabExists;
+                uiResult.activateTab.success = activation.tabExists;
+            }
             m_uiCommandBridge.FulfillCommand(uiResult);
         }
 
@@ -1419,6 +1465,7 @@ int Application::Run()
                         // anyway purely for hygiene/debuggability.
                         m_gpuDrivenBatchesThisFrame.clear();
                         m_gpuDrivenBatchedEntitiesThisFrame.clear();
+                        m_gpuDrivenBatchDebugInfoLastFrame.clear();
                         float gameAspectForReplay = 1.0f;
 
                         if (gameTarget != nullptr) {
@@ -1526,6 +1573,7 @@ int Application::Run()
                                     data.resetPassName = names.resetPassName;
                                     data.cullingPassName = names.cullingPassName;
                                     data.indirectDrawPassName = names.indirectDrawPassName;
+                                    data.displayName = names.displayName;
                                     m_gpuDrivenBatchesThisFrame.push_back(data);
 
                                     for (const DrawCommand& command : frameEntry.commands) {
@@ -1711,6 +1759,73 @@ int Application::Run()
                         return outputs;
                     });
 
+                // GPU-Driven Frustum Culling + Indirect Draw campaign
+                // (render-pass-5), PHASE6 (task_manager/render-pass-5/
+                // PHASE6_EDITOR_TOOLING_AND_LIVE_VALIDATION.md, Section 3.1)
+                // - copies each eligible batch's own atomic visible-count
+                // buffer into its persistent, host-visible
+                // countReadbackBuffer (GpuDrivenBatchCache::Entry), so this
+                // frame's real "instances culled" number can be read back
+                // moments later (see the ReadLastKnownVisibleCount() call
+                // site below, right after EndOffscreenRenderGraphRecording()
+                // returns) with NO new GPU wait. Issued as RAW commands
+                // directly against `offscreenCmd`, OUTSIDE the render
+                // graph's own declarative pass system entirely - NOT as a
+                // 4th "<batch> CopyCountForReadback" render-graph pass,
+                // because a pass whose only write is a plain BufferHandle
+                // can NEVER survive RenderGraphCompiler::Compile()'s own
+                // backward-reachability culling (confirmed by direct
+                // re-read of RenderGraphCompiler.cpp's Step 2: a Buffer
+                // write is never treated as a culling "root", unlike a
+                // Texture/VolumeTexture write - this was tried first, and
+                // empirically confirmed silently culled every frame, always
+                // reading back a stale/zero value despite the Game View
+                // itself rendering correctly). Recorded here - AFTER every
+                // real pass this call declared has already been recorded
+                // into `offscreenCmd` (so Culling's own atomicAdd writes are
+                // already sequenced earlier in the SAME command buffer) and
+                // BEFORE m_renderer.EndOffscreenRenderGraphRecording() below
+                // submits+fence-waits it - with an explicit
+                // ComputeShaderWrite -> TransferRead pipeline barrier
+                // immediately before each copy (the automatic barrier the
+                // render graph already inserted for "<batch> IndirectDraw"'s
+                // own IndirectCommandRead access does NOT also grant
+                // visibility for a completely different access kind/stage
+                // like this one - a fresh, explicit barrier is required for
+                // correctness, not just for validation-layer silence).
+                for (const GpuDrivenBatchRenderData& batch : m_gpuDrivenBatchesThisFrame) {
+                    const GpuDrivenBatchKey copyKey{ batch.mesh, batch.originalPipeline };
+                    const GpuDrivenBatchCache::Entry* entry = m_gpuDrivenBatchCache.TryGet(copyKey);
+                    if (entry == nullptr) {
+                        continue; // Defensive - this same key's entry was resolved successfully this frame.
+                    }
+
+                    VkBufferMemoryBarrier2 preCopyBarrier{};
+                    preCopyBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+                    preCopyBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+                    preCopyBarrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT;
+                    preCopyBarrier.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+                    preCopyBarrier.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
+                    preCopyBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                    preCopyBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                    preCopyBarrier.buffer = batch.countBufferNative;
+                    preCopyBarrier.offset = 0;
+                    preCopyBarrier.size = sizeof(std::uint32_t);
+
+                    VkDependencyInfo preCopyDependency{};
+                    preCopyDependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                    preCopyDependency.bufferMemoryBarrierCount = 1;
+                    preCopyDependency.pBufferMemoryBarriers = &preCopyBarrier;
+                    vkCmdPipelineBarrier2(offscreenCmd, &preCopyDependency);
+
+                    VkBufferCopy region{};
+                    region.srcOffset = 0;
+                    region.dstOffset = 0;
+                    region.size = sizeof(std::uint32_t);
+                    vkCmdCopyBuffer(
+                        offscreenCmd, batch.countBufferNative, entry->countReadbackBuffer.Native(), 1, &region);
+                }
+
                 // Manual finalize: transitions whichever of Game/Scene were
                 // actually rendered this call from ColorAttachmentWrite to a
                 // real ShaderRead layout, for Dear ImGui's own (render-
@@ -1802,6 +1917,29 @@ int Application::Run()
                     "GBufferVisualized", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
 
                 m_renderer.EndOffscreenRenderGraphRecording();
+
+                // GPU-Driven Frustum Culling + Indirect Draw campaign
+                // (render-pass-5), PHASE6 (task_manager/render-pass-5/
+                // PHASE6_EDITOR_TOOLING_AND_LIVE_VALIDATION.md, Section 3.1)
+                // - reads back this frame's real "instances culled" count
+                // for every eligible batch RIGHT HERE, immediately after
+                // EndOffscreenRenderGraphRecording() returns - the exact
+                // point every buffer this frame's "<batch> CopyCountForReadback"
+                // pass wrote is already fence-proven complete (see
+                // FramePresenter::EndOffscreenRecording()'s own
+                // vkWaitForFences() call) - reusing that ALREADY-HAPPENING
+                // wait, never adding a new one (AGENTS.md, "Profiling").
+                // Game-View-only (m_gpuDrivenBatchesThisFrame is only ever
+                // non-empty when gameTarget != nullptr - Locked Design
+                // Decision 11).
+                for (const GpuDrivenBatchRenderData& batch : m_gpuDrivenBatchesThisFrame) {
+                    const GpuDrivenBatchKey key{ batch.mesh, batch.originalPipeline };
+                    GpuDrivenBatchDebugInfo info;
+                    info.batchName = (batch.displayName != nullptr) ? batch.displayName : "(unnamed batch)";
+                    info.instanceCount = static_cast<std::uint32_t>(batch.instanceCount);
+                    info.visibleCount = m_gpuDrivenBatchCache.ReadLastKnownVisibleCount(key);
+                    m_gpuDrivenBatchDebugInfoLastFrame.push_back(info);
+                }
 
                 // network-impl-2 campaign, Phase 3
                 // (PHASE3_GAME_VIEW_CAPTURE_AND_GET_GAME_VIEW_ENDPOINT.md) -
@@ -1939,7 +2077,8 @@ int Application::Run()
         // GetMemoryResources()).
         {
             GTE_PROFILE_SCOPE("IEditorLayer::BuildUI");
-            m_editorLayer->BuildUI(m_game, m_renderer, m_renderGraph, m_atmosphereSettings, m_atmosphereLutRenderer);
+            m_editorLayer->BuildUI(m_game, m_renderer, m_renderGraph, m_atmosphereSettings, m_atmosphereLutRenderer,
+                m_gpuDrivenBatchDebugInfoLastFrame);
         }
 
         // File > Exit (or any other future programmatic "close" UI action)

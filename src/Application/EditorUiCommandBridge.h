@@ -22,6 +22,7 @@
 // be handed into NetworkServer's constructor) - see Application.h (Phase 3).
 
 #include <condition_variable>
+#include <cstdint>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -36,11 +37,31 @@ namespace gte {
 // grew to 4 in network-impl-5, reusing the SAME bridge both times).
 enum class EditorUiCommandKind {
     ActivateTab,
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE6 (task_manager/render-pass-5/PHASE6_EDITOR_TOOLING_AND_LIVE_VALIDATION.md)
+    // - spawns a real, repeatable GPU-driven-eligible validation batch (see
+    // src/Editor/GpuDrivenBatchTestSpawner.h) - reuses this SAME
+    // single-global-slot bridge (mirrors EngineCommandKind's own growth
+    // history above), since it is likewise an editor-only, ECS/GPU-mutating
+    // request.
+    SpawnGpuDrivenTestBatch,
 };
 
 // Plain request payload for one ActivateTab command.
 struct ActivateTabCommand {
     std::string tabName;
+};
+
+// GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+// PHASE6 - plain request payload for one SpawnGpuDrivenTestBatch command.
+struct SpawnGpuDrivenTestBatchCommand {
+    // Must be >= 1 for a real batch to actually be spawned - see
+    // GpuDrivenBatchTestSpawner::Spawn()'s own doc comment. Defaults to 6,
+    // matching PHASE5's own already-verified manual harness (see
+    // PHASE5_COMPLETION_REPORT.md's "Live verification" section) - the
+    // project-owner-confirmed default (via ask_questions) for this new,
+    // caller-configurable spawn helper.
+    std::uint32_t instanceCount = 6;
 };
 
 // One pending Editor UI command, tagged by `kind` - only `activateTab` is
@@ -49,6 +70,7 @@ struct ActivateTabCommand {
 struct EditorUiCommandRequest {
     EditorUiCommandKind kind = EditorUiCommandKind::ActivateTab;
     ActivateTabCommand activateTab;
+    SpawnGpuDrivenTestBatchCommand spawnGpuDrivenTestBatch;
 };
 
 // Outcome of one ActivateTab command. `success` is the single field a
@@ -69,11 +91,22 @@ struct ActivateTabOutcome {
     bool tabExists = false;
 };
 
+// GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+// PHASE6 - outcome of one SpawnGpuDrivenTestBatch command. `success ==
+// false` covers BOTH "instanceCount was 0" and "GTE_ENABLE_EDITOR is OFF"
+// (NullEditorLayer) - `errorMessage` always explains which.
+struct SpawnGpuDrivenTestBatchOutcome {
+    bool success = false;
+    std::string errorMessage;
+    std::uint32_t instanceCount = 0;
+};
+
 // The completed result of one EditorUiCommandRequest - `kind` mirrors the
 // request's own `kind`.
 struct EditorUiCommandResult {
     EditorUiCommandKind kind = EditorUiCommandKind::ActivateTab;
     ActivateTabOutcome activateTab;
+    SpawnGpuDrivenTestBatchOutcome spawnGpuDrivenTestBatch;
 };
 
 class EditorUiCommandBridge {

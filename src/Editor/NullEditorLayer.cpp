@@ -41,7 +41,8 @@ public:
     void FinalizeGBufferValidationForSampling(VkCommandBuffer /*cmd*/) override { }
     void RenderSceneGrid(Renderer& /*renderer*/, VkCommandBuffer /*cmd*/, const Mat4& /*sceneViewProjection*/) override { }
     void BuildUI(Game& /*game*/, Renderer& /*renderer*/, const rg::RenderGraph& /*renderGraph*/,
-        AtmosphereSettings& /*atmosphereSettings*/, AtmosphereLutRenderer& /*atmosphereLutRenderer*/) override
+        AtmosphereSettings& /*atmosphereSettings*/, AtmosphereLutRenderer& /*atmosphereLutRenderer*/,
+        const std::vector<GpuDrivenBatchDebugInfo>& /*gpuDrivenBatchDebugInfo*/) override
     {
     }
     void Render(VkCommandBuffer /*cmd*/) override { }
@@ -77,6 +78,19 @@ public:
     bool FrameDebuggerSetChannel(const std::string& /*channel*/) override { return false; }
     void FrameDebuggerSetLevels(float /*black*/, float /*white*/) override { }
     FrameDebuggerStateSnapshotView FrameDebuggerGetState() const override { return FrameDebuggerStateSnapshotView{}; }
+
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE6 - a release build has no Editor-only validation spawn tooling
+    // at all, mirroring ImportExternalAssetIntoProject()'s own "not
+    // available" precedent above.
+    GpuDrivenTestBatchSpawnResult SpawnGpuDrivenTestBatch(
+        Game& /*game*/, Renderer& /*renderer*/, std::uint32_t /*instanceCount*/) override
+    {
+        GpuDrivenTestBatchSpawnResult result;
+        result.success = false;
+        result.errorMessage = "GPU-driven test batch spawning is not available in this build (GTE_ENABLE_EDITOR is OFF)";
+        return result;
+    }
 };
 
 } // namespace

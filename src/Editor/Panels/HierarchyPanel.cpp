@@ -1,6 +1,7 @@
 #include "HierarchyPanel.h"
 
 #include "../EditorContext.h"
+#include "../GpuDrivenBatchTestSpawner.h"
 #include "../../ECS/Components/Camera.h"
 #include "../../ECS/Components/Name.h"
 #include "../../ECS/Components/Transform.h"
@@ -259,6 +260,19 @@ void BuildHierarchyPanel(Game& game, Renderer& renderer, EditorContext& ctx)
         // just created" UX convention.
         if (ImGui::MenuItem("Create Directional Light")) {
             ctx.selection.SelectEntity(game.CreateDirectionalLightEntity());
+        }
+        // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+        // PHASE6 (task_manager/render-pass-5/PHASE6_EDITOR_TOOLING_AND_LIVE_VALIDATION.md)
+        // - spawns 6 entities sharing one hand-authored, untextured, indexed,
+        // GPU-driven-eligible Mesh+Pipeline (>= kMinInstancesForGpuDrivenBatch
+        // = 4) - the real, repeatable way to get a qualifying batch into the
+        // scene for manual/HTTP-driven validation (see
+        // GpuDrivenBatchTestSpawner.h's own doc comment). Calls the spawner
+        // DIRECTLY (this file is itself Editor-only, so no IEditorLayer
+        // indirection is needed here, unlike the HTTP route's own call site -
+        // see IEditorLayer::SpawnGpuDrivenTestBatch()).
+        if (ImGui::MenuItem("Create GPU-Driven Test Batch")) {
+            GpuDrivenBatchTestSpawner::Spawn(game, renderer, /*instanceCount=*/6);
         }
         ImGui::EndPopup();
     }

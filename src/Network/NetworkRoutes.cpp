@@ -2,6 +2,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cmath>
+
 namespace gte::Network {
 
 std::string HandleHelloWorld()
@@ -1002,6 +1004,56 @@ std::string BuildClearLogsResponseJson(std::size_t clearedCount)
     nlohmann::json body;
     body["success"] = true;
     body["cleared_count"] = clearedCount;
+    return body.dump();
+}
+
+// --- GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+// PHASE6 (task_manager/render-pass-5/PHASE6_EDITOR_TOOLING_AND_LIVE_VALIDATION.md)
+// - POST /spawn_gpu_driven_test_batch. See NetworkRoutes.h's own doc comment
+// above ParseSpawnGpuDrivenTestBatchRequest() for the exact, locked
+// validation rules implemented below.
+
+ParsedSpawnGpuDrivenTestBatchRequest ParseSpawnGpuDrivenTestBatchRequest(const std::string& jsonBody)
+{
+    ParsedSpawnGpuDrivenTestBatchRequest result;
+
+    // Same DELIBERATE EXCEPTION ParseScenePathRequest() above documents -
+    // this endpoint's own single-optional-field shape makes "no body at
+    // all" a completely reasonable, common request ("spawn the
+    // default-sized batch"), not a malformed one.
+    const nlohmann::json parsed = ParseJsonNoThrow(jsonBody);
+    if (parsed.is_discarded() || !parsed.is_object()) {
+        result.valid = true;
+        return result;
+    }
+
+    if (parsed.contains("count") && !parsed["count"].is_null()) {
+        if (!parsed["count"].is_number()) {
+            result.errorMessage = "count must be a positive integer";
+            return result;
+        }
+        const double asDouble = parsed["count"].get<double>();
+        if (asDouble < 1.0 || asDouble != std::floor(asDouble)) {
+            result.errorMessage = "count must be a positive integer";
+            return result;
+        }
+        result.instanceCount = static_cast<std::uint32_t>(asDouble);
+    }
+
+    result.valid = true;
+    return result;
+}
+
+std::string BuildSpawnGpuDrivenTestBatchResponseJson(
+    bool success, const std::string& errorMessage, std::uint32_t instanceCount)
+{
+    if (!success) {
+        return BuildGenericErrorResponseJson(errorMessage);
+    }
+
+    nlohmann::json body;
+    body["success"] = true;
+    body["instance_count"] = instanceCount;
     return body.dump();
 }
 

@@ -162,6 +162,22 @@ struct PassContext {
     // RenderGraph itself never sees the inside of (unlike FrameRecorder's
     // own single, closed draw-queue loop).
     std::function<void(bool hasIndexBuffer, std::uint32_t vertexCount, std::uint32_t indexCount)> recordDraw;
+
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE6 (task_manager/render-pass-5/PHASE6_EDITOR_TOOLING_AND_LIVE_VALIDATION.md)
+    // - the indirect-draw sibling of recordDraw() above. Called by a pass's
+    // `execute` callback immediately alongside issuing a real
+    // Renderer::SubmitIndirect() call, so DrawStats::indirectDrawCount (see
+    // DrawStats.h's own doc comment - a COUNT OF INDIRECT DRAW CALLS ISSUED,
+    // never an object/triangle count) is real, per-pass data for the first
+    // time (PHASE2 built the field; PHASE5 never wired it into a real
+    // render-graph pass's own return value - this closes that gap).
+    // Deliberately a SEPARATE callback from recordDraw() (never a shared one
+    // with an extra bool parameter) - the two update genuinely DIFFERENT
+    // DrawStats fields (indirectDrawCount vs. drawCallCount/triangleCount),
+    // and must never be confused with each other, per DrawStats.h's own
+    // explicit rule.
+    std::function<void()> recordIndirectDraw;
 };
 
 // Which of this engine's two real submission regimes an Execute() call

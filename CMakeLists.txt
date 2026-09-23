@@ -612,6 +612,8 @@ if(GTE_ENABLE_EDITOR)
         src/Editor/ComputeBlurValidation.cpp
         src/Editor/GBufferValidation.h
         src/Editor/GBufferValidation.cpp
+        src/Editor/GpuDrivenBatchTestSpawner.h
+        src/Editor/GpuDrivenBatchTestSpawner.cpp
         src/Editor/GpuSkinningValidation.h
         src/Editor/GpuSkinningValidation.cpp
         src/Editor/AtmosphereTransmittanceLutValidation.h

@@ -197,6 +197,11 @@ private:
         const char* resetPassName = nullptr;
         const char* cullingPassName = nullptr;
         const char* indirectDrawPassName = nullptr;
+        // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+        // PHASE6 - this batch's own stable DISPLAY name (e.g.
+        // "GpuDrivenBatch0") - see GpuDrivenBatchNames's own doc comment
+        // (Application.cpp).
+        const char* displayName = nullptr;
     };
 
     // Populated fresh, every frame, by Run() itself (the offscreen regime's
@@ -224,6 +229,20 @@ private:
     // (which run LATER this same frame, inside DeclareInto()) can read it
     // without re-resolving the active ECS Camera a second time.
     Mat4 m_gpuDrivenGameViewProjectionThisFrame;
+
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE6 (task_manager/render-pass-5/PHASE6_EDITOR_TOOLING_AND_LIVE_VALIDATION.md)
+    // - this frame's own "instances culled this frame" readout, one entry
+    // per real, eligible batch (see m_gpuDrivenBatchesThisFrame above) -
+    // populated by Run() itself, immediately after
+    // Renderer::EndOffscreenRenderGraphRecording() returns (the exact point
+    // every buffer this frame's culling dispatch wrote is already
+    // fence-proven complete - see GpuDrivenBatchCache::
+    // ReadLastKnownVisibleCount()'s own doc comment), then handed into
+    // IEditorLayer::BuildUI()'s new `gpuDrivenBatchDebugInfo` parameter.
+    // Cleared unconditionally every frame, alongside m_gpuDrivenBatchesThisFrame
+    // above (never left stale from a previous frame Game View was active).
+    std::vector<GpuDrivenBatchDebugInfo> m_gpuDrivenBatchDebugInfoLastFrame;
 
     // render-pass-3 campaign, PHASE3 (Step 3.5) - populated fresh, every
     // frame, by Run() itself, immediately before calling

@@ -1,6 +1,9 @@
 #pragma once
 
 #include "../../Renderer/RenderGraph/RenderGraphSnapshot.h"
+#include "../EditorLayer.h"
+
+#include <vector>
 
 namespace gte {
 
@@ -43,7 +46,13 @@ public:
     // `renderGraph` is the SAME gte::rg::RenderGraph Application owns and
     // drives every frame (see Application::m_renderGraph) - this panel only
     // ever reads its two LastSnapshot() results, never mutates it.
-    void Build(EditorContext& ctx, const rg::RenderGraph& renderGraph);
+    // `gpuDrivenBatchDebugInfo` (GPU-Driven Frustum Culling + Indirect Draw
+    // campaign, render-pass-5, PHASE6) is this frame's freshly-built
+    // "instances culled this frame" readout - see
+    // IEditorLayer::BuildUI()'s own doc comment (EditorLayer.h) for the full
+    // contract. Always empty on a frame with no eligible GPU-driven batch.
+    void Build(EditorContext& ctx, const rg::RenderGraph& renderGraph,
+        const std::vector<GpuDrivenBatchDebugInfo>& gpuDrivenBatchDebugInfo);
 
 private:
     // See ProfilerPanel::m_paused's own doc comment for the full Pause
@@ -54,9 +63,13 @@ private:
 
     // The frozen snapshots captured at the moment m_paused most recently
     // became true - one per ExecuteTimingMode regime, mirroring
-    // RenderGraph's own two independent LastSnapshot() results exactly.
     rg::RenderGraphSnapshot m_frozenOffscreenSnapshot;
     rg::RenderGraphSnapshot m_frozenPresentSnapshot;
+
+    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
+    // PHASE6 - frozen alongside the two snapshots above, same "captured
+    // once when m_paused flips false->true" rule.
+    std::vector<GpuDrivenBatchDebugInfo> m_frozenGpuDrivenBatchDebugInfo;
 };
 
 } // namespace gte
