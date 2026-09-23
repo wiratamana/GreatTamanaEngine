@@ -7,6 +7,16 @@
 #include "RenderPasses.h"
 
 #include "../Editor/Logger.h" // PHASE16 of editor-core-separation-1 moves this include (and the InstallLogSink() call in the constructor body below) into EditorHost - Application still needs it directly for now (this file still owns the ONE composition-root call site that installs the real sink).
+// editor-core-separation-1 campaign, PHASE6
+// (PHASE6_EDITOR_CAPABILITY_CALL_SITE_CONVERSION_SCENE_IO.md) - the REAL
+// ISceneIOCapability implementation. Kept behind this SAME temporary
+// `#if GTE_ENABLE_EDITOR` guard as SdlContext::SdlContext()'s own
+// SdlMemoryTracker::Install() call below (Application.cpp still compiles in
+// BOTH configurations today - Phase 8/9 delete GTE_ENABLE_EDITOR outright
+// and Phase 16 moves this whole wiring concern into EditorHost instead).
+#if GTE_ENABLE_EDITOR
+#include "../Editor/EditorSceneIOCapability.h"
+#endif
 #include "../Encoding/DepthVisualization.h"
 #include "../Encoding/HdrColorVisualization.h"
 #include "../Encoding/PixelConversion.h"
@@ -348,6 +358,30 @@ Application::Application(const std::string& title, int width, int height)
     // Phase 16 of this same campaign moves this one call site into
     // EditorHost's own constructor instead, once EditorHost exists.
     gte::InstallLogSink(&gte::LoggerLogSink::Instance());
+
+    // editor-core-separation-1 campaign, PHASE6
+    // (PHASE6_EDITOR_CAPABILITY_CALL_SITE_CONVERSION_SCENE_IO.md) - wires the
+    // ONE real ISceneIOCapability implementation this engine ships
+    // (Editor/EditorSceneIOCapability.h) into the nullable pointer
+    // EngineCommandDispatch.cpp (Core-destined, always-compiled) now consults
+    // at runtime instead of a compile-time `#if GTE_ENABLE_EDITOR` (PHASE5's
+    // own SetSceneIOCapability() setter). A function-local static (mirrors
+    // LoggerLogSink::Instance()'s own Meyers-singleton precedent immediately
+    // above, and GpuDrivenBatchNamePool()'s own function-local-static
+    // precedent further up in this same file) - EditorSceneIOCapability is
+    // pure delegation with no state of its own, so one whole-process-
+    // lifetime instance is all this needs. Gated behind GTE_ENABLE_EDITOR
+    // (temporarily - see this file's own include-site comment above) because
+    // EditorSceneIOCapability's real method bodies
+    // (Editor/EditorSceneIOCapability.cpp) are only compiled into this build
+    // at all when the Editor module is (CMakeLists.txt's still-conditional
+    // Editor source list) - a GTE_ENABLE_EDITOR=OFF build never calls this,
+    // leaving m_sceneIOCapability at its PHASE5 default of nullptr, which
+    // EngineCommandDispatch.cpp already degrades gracefully.
+#if GTE_ENABLE_EDITOR
+    static EditorSceneIOCapability s_editorSceneIOCapability;
+    SetSceneIOCapability(&s_editorSceneIOCapability);
+#endif
 
     // render-pass-3 campaign, PHASE2/PHASE3 - registers both
     // m_offscreenRenderPipeline (every remaining production pass) and
@@ -1160,7 +1194,7 @@ int Application::Run()
         // PHASE0_MASTER_STRATEGY.md's own Locked Design Decision #6).
         if (const std::optional<EngineCommandRequest> request = m_commandBridge.TryPeekPendingCommandRequest()) {
             GTE_PROFILE_SCOPE("Application::ExecuteEngineCommand");
-            const EngineCommandResult result = ExecuteEngineCommand(m_game, m_renderer, *request);
+            const EngineCommandResult result = ExecuteEngineCommand(m_game, m_renderer, m_sceneIOCapability, *request);
             m_commandBridge.FulfillCommand(result);
         }
 

@@ -97,6 +97,21 @@ public:
     // `outErrorMessage` when `scenePath` doesn't exist or fails to parse.
     virtual bool LoadScene(
         Game& game, Renderer& renderer, const std::filesystem::path& scenePath, std::string& outErrorMessage) = 0;
+
+    // editor-core-separation-1 campaign, PHASE6
+    // (PHASE6_EDITOR_CAPABILITY_CALL_SITE_CONVERSION_SCENE_IO.md) - added
+    // during PHASE6's own implementation, not originally sketched by PHASE5:
+    // EngineCommandDispatch.cpp's SaveScene/LoadScene handling needs to
+    // resolve a caller-supplied EMPTY path to the engine's one hardcoded
+    // default scene location - previously done by calling src/Editor/SceneIO.h's
+    // own free `DefaultScenePath()` function directly. That function's real
+    // implementation depends on Editor/ProjectRootPath.h (an
+    // SDL_GetBasePath()-based, genuinely Editor-only helper) - a second,
+    // separate reason (beyond SaveScene()/LoadScene() themselves) this
+    // Core-destined dispatcher can no longer call into src/Editor/ directly.
+    // Mirrors SceneIO.h's real `std::filesystem::path DefaultScenePath()`
+    // signature exactly.
+    virtual std::filesystem::path DefaultScenePath() const = 0;
 };
 
 } // namespace gte

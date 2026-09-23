@@ -618,6 +618,14 @@ if(GTE_ENABLE_EDITOR)
         src/Editor/ProjectRootPath.cpp
         src/Editor/SceneIO.h
         src/Editor/SceneIO.cpp
+        # editor-core-separation-1 campaign, PHASE6
+        # (PHASE6_EDITOR_CAPABILITY_CALL_SITE_CONVERSION_SCENE_IO.md) - the
+        # real ISceneIOCapability implementation wrapping SceneIO.h above.
+        # Still added to this (still-conditional, for now) Editor source
+        # list; Phase 9 moves this into the real gte_editor target's own
+        # list.
+        src/Editor/EditorSceneIOCapability.h
+        src/Editor/EditorSceneIOCapability.cpp
         src/Editor/Selection.h
         src/Editor/Selection.cpp
         src/Editor/EditorCamera.h

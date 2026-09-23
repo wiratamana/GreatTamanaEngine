@@ -5,19 +5,10 @@
 
 #include <filesystem>
 
-// task_manager/scene-serialization-2 campaign, PHASE5
-// (PHASE5_NETWORK_SAVE_LOAD_SCENE_ENDPOINTS.md) - Editor/SceneIO.h is
-// compiled ONLY when GTE_ENABLE_EDITOR is ON (it depends on
-// Editor/ProjectRootPath.h) - this file itself is a CORE, always-compiled
-// file, so this include (and the SaveScene/LoadScene case branches below)
-// must be conditionally compiled.
-#if GTE_ENABLE_EDITOR
-#include "../Editor/SceneIO.h"
-#endif
-
 namespace gte {
 
-EngineCommandResult ExecuteEngineCommand(Game& game, Renderer& renderer, const EngineCommandRequest& request)
+EngineCommandResult ExecuteEngineCommand(
+    Game& game, Renderer& renderer, ISceneIOCapability* sceneIOCapability, const EngineCommandRequest& request)
 {
     EngineCommandResult result;
     result.kind = request.kind;
@@ -56,44 +47,41 @@ EngineCommandResult ExecuteEngineCommand(Game& game, Renderer& renderer, const E
     }
     // task_manager/scene-serialization-2 campaign, PHASE5
     // (PHASE5_NETWORK_SAVE_LOAD_SCENE_ENDPOINTS.md) - thin network bridge
-    // to Editor/SceneIO.h's SaveScene()/LoadScene(). Not compiled at all in
-    // a GTE_ENABLE_EDITOR=OFF build - `result.saveScene.editorAvailable`/
-    // `result.loadScene.editorAvailable` default to `true` (see
-    // EngineCommandResults.h), so the #else branch below must explicitly
-    // set them to `false`.
+    // to Editor/SceneIO.h's SaveScene()/LoadScene(), now reached ONLY
+    // through the nullable ISceneIOCapability* hook (editor-core-separation-1
+    // campaign, PHASE6 - PHASE6_EDITOR_CAPABILITY_CALL_SITE_CONVERSION_SCENE_IO.md)
+    // instead of a compile-time `#if GTE_ENABLE_EDITOR`. `sceneIOCapability
+    // == nullptr` (a future Player host, or today's GTE_ENABLE_EDITOR=OFF
+    // configuration - see Application.cpp's own PHASE6 wiring comment) hits
+    // the EXACT SAME fallback message this function's old `#else` branch
+    // used to set - a behavior-preserving refactor, not a chance to change
+    // what a capability-less build reports.
     case EngineCommandKind::SaveScene: {
-#if GTE_ENABLE_EDITOR
-        const std::filesystem::path path = request.saveScene.path.empty()
-            ? DefaultScenePath()
-            : std::filesystem::path(request.saveScene.path);
-        result.saveScene.success = SaveScene(game, path);
-        result.saveScene.resolvedPath = path.string();
-        if (!result.saveScene.success) {
-            result.saveScene.errorMessage = "failed to write scene file (I/O error) - see engine log";
+        if (sceneIOCapability != nullptr) {
+            const std::filesystem::path path = request.saveScene.path.empty()
+                ? sceneIOCapability->DefaultScenePath()
+                : std::filesystem::path(request.saveScene.path);
+            result.saveScene.success = sceneIOCapability->SaveScene(game, path, result.saveScene.errorMessage);
+            result.saveScene.resolvedPath = path.string();
+        } else {
+            result.saveScene.editorAvailable = false;
+            result.saveScene.errorMessage =
+                "scene save/load requires the Editor module (GTE_ENABLE_EDITOR is OFF in this build)";
         }
-#else
-        result.saveScene.editorAvailable = false;
-        result.saveScene.errorMessage =
-            "scene save/load requires the Editor module (GTE_ENABLE_EDITOR is OFF in this build)";
-#endif
         break;
     }
     case EngineCommandKind::LoadScene: {
-#if GTE_ENABLE_EDITOR
-        const std::filesystem::path path = request.loadScene.path.empty()
-            ? DefaultScenePath()
-            : std::filesystem::path(request.loadScene.path);
-        result.loadScene.success = LoadScene(game, renderer, path);
-        result.loadScene.resolvedPath = path.string();
-        if (!result.loadScene.success) {
+        if (sceneIOCapability != nullptr) {
+            const std::filesystem::path path = request.loadScene.path.empty()
+                ? sceneIOCapability->DefaultScenePath()
+                : std::filesystem::path(request.loadScene.path);
+            result.loadScene.success = sceneIOCapability->LoadScene(game, renderer, path, result.loadScene.errorMessage);
+            result.loadScene.resolvedPath = path.string();
+        } else {
+            result.loadScene.editorAvailable = false;
             result.loadScene.errorMessage =
-                "failed to load scene file - it may not exist, or failed to parse (see engine log)";
+                "scene save/load requires the Editor module (GTE_ENABLE_EDITOR is OFF in this build)";
         }
-#else
-        result.loadScene.editorAvailable = false;
-        result.loadScene.errorMessage =
-            "scene save/load requires the Editor module (GTE_ENABLE_EDITOR is OFF in this build)";
-#endif
         break;
     }
     }
