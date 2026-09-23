@@ -36,6 +36,24 @@ class Renderer;
 // needs a POINTER to it.
 class FrameDebuggerCaptureContext;
 
+// task_manager/editor-core-separation-1 campaign, PHASE2
+// (PHASE2_FRAME_DEBUGGER_CAPTURE_POINTER_SAFETY_FIX.md) - the real body of
+// RenderSystem::Draw()'s own `#if GTE_ENABLE_EDITOR` block (the part
+// dereferencing `capture` - calling RecordDraw()/RecordEntityDraw() on the
+// complete FrameDebuggerCaptureContext type) has moved OUT of
+// RenderSystem.cpp entirely, into this free function - DECLARED here
+// (legal: only needs the forward-declared reference above), DEFINED for
+// real only in a new Editor-side file,
+// src/Editor/FrameDebuggerDrawRecording.cpp. Draw() below keeps its own
+// existing null-check branch shape (`if (capture != nullptr) { ... }`), now
+// calling this DECLARED-BUT-NOT-YET-LINKED-IN-gte_core-ALONE function
+// instead of dereferencing the pointer directly - a real link hazard fix
+// (see PHASE0_MASTER_STRATEGY.md's own Section 2.5), not just an #include
+// hygiene one.
+void RecordFrameDebuggerDraws(FrameDebuggerCaptureContext& capture, Registry& registry, Renderer& renderer,
+    Entity entity, const Mesh& mesh, const Pipeline& pipeline, const MaterialTexture* materialTexture,
+    const Mat4& viewProjection);
+
 // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
 // PHASE4 - one eligible batch's own frame-local summary, returned by
 // RenderSystem::CollectGpuDrivenBatches() below. Deliberately NOT stored
@@ -190,8 +208,8 @@ public:
     // 3.3) - optional, defaulted, TRAILING (after `capture`/`maxDrawCount`)
     // parameter, empty by default - every existing call site keeps
     // compiling/behaving completely unmodified. A DrawCommand whose
-    // `entity` is in this set is skipped for drawing (and, inside the
-    // `#if GTE_ENABLE_EDITOR` block, for RecordDraw()/RecordEntityDraw())
+    // `entity` is in this set is skipped for drawing (and, therefore, for
+    // RecordFrameDebuggerDraws()'s own RecordDraw()/RecordEntityDraw() calls)
     // but still counts toward `consideredCount` for `maxDrawCount`
     // purposes, matching that parameter's own "iteration count, not
     // resolved-draw count" contract. Passed a real, non-empty value at

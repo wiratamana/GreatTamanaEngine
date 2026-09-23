@@ -12,78 +12,23 @@
 #include "../Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
 
-// task_manager/frame-debugger-7 campaign, PHASE3
-// (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step 3.3)
-// - FrameDebuggerCaptureContext (src/Editor/FrameDebuggerCapture.h) is an
-// Editor-only type. This real #include, AND every actual dereference of a
-// `capture` REFERENCE below (AddFrameDebuggerReplayPasses()'s own body),
-// must stay wrapped in `#if GTE_ENABLE_EDITOR` - a GTE_ENABLE_EDITOR=OFF
-// build compiles this whole file fine either way (RenderPasses.h's own
-// forward declaration is enough for the function's SIGNATURE), but would
-// FAIL TO LINK if an unconditional call site referenced a type/function
-// that's never compiled into that configuration at all - mirrors
-// src/Game/RenderSystem.cpp's own identical PHASE1 precedent, applied here
-// to a CALLEE's body instead of a passthrough parameter (see
-// RenderPasses.h's own updated AddFrameDebuggerReplayPasses() doc comment).
-#if GTE_ENABLE_EDITOR
-#include "../Editor/FrameDebuggerCapture.h"
-#endif
+// task_manager/editor-core-separation-1 campaign, PHASE2
+// (PHASE2_FRAME_DEBUGGER_CAPTURE_POINTER_SAFETY_FIX.md) - FrameDebuggerCaptureContext
+// (src/Editor/FrameDebuggerCapture.h) is an Editor-only type. This file used
+// to #include it (behind #if GTE_ENABLE_EDITOR) so
+// AddFrameDebuggerReplayPasses()'s own body could call real methods on the
+// complete type - a genuine link hazard once gte_editor becomes a real,
+// separate CMake target (Phase 9): gte_core would otherwise carry an
+// unresolved external symbol only gte_editor defines. That function's
+// ENTIRE body (the part requiring the complete type) has moved OUT of this
+// file into src/Editor/FrameDebuggerReplayPasses.cpp - this file now
+// contains ZERO #include of FrameDebuggerCapture.h and ZERO reference to
+// the complete type, only the bare forward declaration RenderPasses.h
+// itself already carries (`class FrameDebuggerCaptureContext;`).
 
 #include <cstdint>
-#include <cstdio>
-#include <deque>
-#include <string>
-#include <utility>
 
 namespace gte {
-
-namespace {
-
-// render-pass-3 campaign, PHASE2 (PHASE2_GPU_SKINNING_OPAQUE_BLACKBOARD_PROOF.md)
-// - kGameClearColor/kGameClearDepth and DeclareGpuSkinningReads() used to
-// live here, in this anonymous namespace. MOVED to RenderPasses.h (as
-// `inline constexpr`/a plain declaration respectively), UNCHANGED in
-// value/behavior, so Application.cpp's new "RenderOpaque" RenderPipeline
-// provider can reuse these SAME symbols bit-for-bit instead of duplicating
-// them - see RenderPasses.h's own updated header comment.
-
-// task_manager/frame-debugger-7 campaign, PHASE3
-// (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step
-// 3.3b) - permanent (whole-process-lifetime), ever-growing pool of
-// "FrameDebuggerReplayStepN" pass names. MUST NOT be a per-frame/per-
-// capture temporary: RenderGraphBuilder::AddPass()'s own `name` parameter,
-// and RenderGraphNameSlotTable's own persistent-across-Execute()-calls
-// name table, both require a name that is valid for the rest of this
-// process's lifetime, never just "this frame" - a stack buffer or a
-// function-local std::string/std::vector would produce a real, confirmed
-// dangling-pointer / use-after-free bug the very next time ANY capture
-// happens (the second, third, ... capture this session) - see this
-// campaign's own phase document for the full reasoning. std::deque (never
-// std::vector) so growing this pool NEVER moves an already-handed-out
-// std::string's own character storage - a std::vector<std::string>
-// growing/reallocating would invalidate every c_str() pointer already
-// stored inside a PREVIOUSLY-declared PassRecord::name, which is exactly
-// the same class of bug this whole mechanism exists to avoid.
-std::deque<std::string>& ReplayStepPassNamePool()
-{
-    static std::deque<std::string> pool;
-    return pool;
-}
-
-// Returns a STABLE, permanent const char* naming replay step `index` -
-// lazily grows the pool the first time `index` is ever requested, then
-// reuses the SAME std::string (and therefore the SAME pointer) for that
-// index forever afterwards, across every future capture this session.
-const char* ReplayStepPassName(std::size_t index)
-{
-    std::deque<std::string>& pool = ReplayStepPassNamePool();
-    while (pool.size() <= index) {
-        pool.push_back("FrameDebuggerReplayStep" + std::to_string(pool.size()));
-    }
-    return pool[index].c_str();
-}
-
-} // namespace
 
 // render-pass-3 campaign, PHASE2 (PHASE2_GPU_SKINNING_OPAQUE_BLACKBOARD_PROOF.md)
 // - definition of the declaration now moved to RenderPasses.h (this
@@ -211,142 +156,17 @@ void AddRenderTransparentPass(rg::RenderGraphBuilder& builder, Game& game, Rende
     // We Will NOT Do".
 }
 
-// task_manager/frame-debugger-7 campaign, PHASE3
-// (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md) - see
-// this function's own doc comment in RenderPasses.h for the full contract.
-// The GTE_ENABLE_EDITOR guard below is why this function is declared here,
-// unconditionally, but only ever has a REAL body in an Editor build - see
-// this file's own top-of-file comment for the full "why".
-std::vector<rg::TextureHandle> AddFrameDebuggerReplayPasses(rg::RenderGraphBuilder& builder, Game& game,
-    Renderer& renderer, float aspectWidthOverHeight, std::size_t objectCount,
-    const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers,
-    const std::function<void(VkCommandBuffer)>& recordSkyBackground, RenderTexture& gameTarget,
-    FrameDebuggerCaptureContext& capture)
-{
-    std::vector<rg::TextureHandle> destHandles;
-#if GTE_ENABLE_EDITOR
-    // frame-debugger-8 campaign, PHASE2 - `includeSkyStep`/`totalStepCount`
-    // REPLACE the old `if (objectCount == 0) return;` early-out. A real
-    // scene with ZERO mesh entities (e.g. Camera + Directional Light only)
-    // still genuinely draws the sky every frame - it must still get
-    // exactly one real, selectable replay step, not zero (this is a real,
-    // confirmed, second fix this phase makes as a natural side effect of
-    // the redesign below - see PHASE0_MASTER_STRATEGY.md's own Definition
-    // of Done, "zero mesh entities" bullet).
-    const bool includeSkyStep = static_cast<bool>(recordSkyBackground);
-    const std::size_t totalStepCount = objectCount + (includeSkyStep ? 1 : 0);
-    if (totalStepCount == 0) {
-        return destHandles;
-    }
-    destHandles.reserve(totalStepCount);
-
-    // Same width/height/format as the real GameView target, read directly
-    // off `gameTarget` (never hardcoded - see AGENTS.md's "Render Target
-    // Format Matching") - `gameTarget` itself is NEVER written to here.
-    const VkExtent2D extent = gameTarget.Extent();
-    const int width = static_cast<int>(extent.width);
-    const int height = static_cast<int>(extent.height);
-    const VkFormat format = gameTarget.Format();
-
-    std::vector<RenderTexture> destinations;
-    destinations.reserve(totalStepCount); // ESSENTIAL - every destHandle below imports a POINTER-STABLE
-                                           // Target() from this vector; it must never reallocate after this point.
-    for (std::size_t i = 0; i < totalStepCount; ++i) {
-        // Step 3.3b - these debugName/depthDebugName stack buffers are a
-        // COMPLETELY SEPARATE, unrelated concern from the pass NAME below
-        // (ReplayStepPassName()) - safe ONLY because these RenderTextures
-        // are always freshly (re)created every capture, NEVER Resize()d in
-        // place (mirrors FrameDebuggerHistory.cpp's own identical
-        // reasoning for its own retained-preview textures).
-        char debugNameBuffer[48];
-        std::snprintf(debugNameBuffer, sizeof(debugNameBuffer), "FrameDebuggerReplayStep%zuColor", i);
-        char depthDebugNameBuffer[48];
-        std::snprintf(depthDebugNameBuffer, sizeof(depthDebugNameBuffer), "FrameDebuggerReplayStep%zuDepth", i);
-        // Depth is created automatically (Renderer::CreateRenderTexture()
-        // always builds it against Renderer::DepthFormat() internally) -
-        // see Step 3.3a: a RenderTexture already carries its own paired
-        // depth buffer, no second array needed.
-        destinations.push_back(
-            renderer.CreateRenderTexture(width, height, format, debugNameBuffer, depthDebugNameBuffer));
-    }
-
-    for (std::size_t i = 0; i < totalStepCount; ++i) {
-        const char* passName = ReplayStepPassName(i); // Step 3.3b - NEVER a per-call temporary.
-
-        const rg::TextureHandle destHandle =
-            builder.ImportTexture(passName, destinations[i].Target(), VK_IMAGE_LAYOUT_UNDEFINED);
-
-        // frame-debugger-8 campaign, PHASE2 - THE fix. `isSkyStep` is true
-        // for EXACTLY ONE index: the extra, dedicated step this phase adds
-        // (only reachable when includeSkyStep is true, and only ever equal
-        // to `objectCount` - i.e. the very last index in [0, totalStepCount)).
-        // Every OTHER index (a real per-object step, i in [0, objectCount))
-        // NEVER draws sky, no matter what - this is the actual bug fix:
-        // the OLD code's own "if (i + 1 == objectCount && recordSkyBackground)"
-        // branch inside the per-object loop is GONE, not just moved.
-        const bool isSkyStep = includeSkyStep && (i == objectCount);
-        // Real per-object steps redraw objects [0..i] (maxDrawCount = i+1,
-        // UNCHANGED from before). The one dedicated sky step redraws EVERY
-        // real object (maxDrawCount = objectCount) and then, ADDITIONALLY,
-        // the sky - matching the real "GameView" pass's own true order
-        // (every entity, then sky, see AddGameViewPass()).
-        const std::size_t maxDrawCount = isSkyStep ? objectCount : (i + 1);
-
-        // Render Pass campaign (task_manager/render-pass-1), PHASE4
-        // (PHASE4_FRAME_DEBUGGER_GENERIC_TREE_REWORK.md, Step 3.3b) - these N
-        // debug-only replay passes now declare through the AddRenderPass()
-        // chokepoint (PHASE1), tagged rg::RenderPassCategory::Debug (pulled
-        // forward from PHASE5's originally-planned scope) - this is what lets
-        // BuildRealFrameDebuggerSnapshot()'s own "view region" walk
-        // (FrameDebuggerData.cpp) skip these passes instead of leaking them
-        // into the tree as spurious extra leaves, even on the exact capture
-        // frame that declares them. Same `name`/`setup`/`execute`, zero
-        // behavior change beyond this new stamped metadata.
-        builder.AddRenderPass(passName, rg::PassKind::Graphics, rg::ViewScope::GameView, rg::RenderPassCategory::Debug,
-            [destHandle, gpuSkinningOutputBuffers](rg::RenderGraphBuilder::PassBuilder& pass) {
-                pass.WriteColorAttachment(destHandle, kGameClearColor);
-                pass.WriteDepthStencilAttachment(destHandle, kGameClearDepth);
-                DeclareGpuSkinningReads(pass, gpuSkinningOutputBuffers);
-            },
-            [&game, &renderer, aspectWidthOverHeight, maxDrawCount, isSkyStep, recordSkyBackground](
-                rg::PassContext& ctx) {
-                renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-                // frameDebuggerCapture is ALWAYS nullptr here, NEVER the
-                // real, armed capture context - see this function's own
-                // pre-existing correctness-critical comment (unchanged
-                // reasoning, still applies): RecordDraw()/RecordEntityDraw()
-                // are not idempotent/deduplicated by draw identity, so
-                // feeding a real capture pointer into these N+1 replay
-                // passes' own game.Render() calls would silently balloon
-                // capture.DrawRecords() into O(N^2) duplicated entries.
-                game.Render(renderer, aspectWidthOverHeight, nullptr, /*frameDebuggerCapture=*/nullptr, maxDrawCount);
-                renderer.EndGraphPassRecording();
-                // Sky is drawn ON EXACTLY ONE dedicated step now - the
-                // frame-debugger-8 campaign's own fix for the "last
-                // object's own preview silently already included sky"
-                // bug (see PHASE0_MASTER_STRATEGY.md Step 2, point 5).
-                if (isSkyStep && recordSkyBackground) {
-                    recordSkyBackground(ctx.cmd);
-                }
-            });
-
-        destHandles.push_back(destHandle);
-    }
-
-    capture.SetReplayStepPreviews(std::move(destinations));
-#else
-    (void)builder;
-    (void)game;
-    (void)renderer;
-    (void)aspectWidthOverHeight;
-    (void)objectCount;
-    (void)gpuSkinningOutputBuffers;
-    (void)recordSkyBackground;
-    (void)gameTarget;
-    (void)capture;
-#endif
-    return destHandles;
-}
+// task_manager/editor-core-separation-1 campaign, PHASE2
+// (PHASE2_FRAME_DEBUGGER_CAPTURE_POINTER_SAFETY_FIX.md) - AddFrameDebuggerReplayPasses()
+// (declared in RenderPasses.h - unchanged there) used to be DEFINED here,
+// with its real body wrapped in `#if GTE_ENABLE_EDITOR` (the part calling
+// `capture.SetReplayStepPreviews(...)` on the complete
+// FrameDebuggerCaptureContext type) and an `#else` no-op stub otherwise.
+// Both branches moved OUT of this file entirely - this function's ONLY
+// definition now lives in src/Editor/FrameDebuggerReplayPasses.cpp
+// (unconditional `#include "FrameDebuggerCapture.h"`, no `#if` guard needed
+// there since that file only ever compiles as part of the Editor source
+// list) - see that file for the real body.
 
 // render-pass-3 campaign, PHASE3 - AddSceneViewPass() REMOVED (see
 // RenderPasses.h's own updated doc comment at this same location for the

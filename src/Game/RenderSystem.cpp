@@ -1,23 +1,22 @@
 #include "RenderSystem.h"
 
-#include "ECS/Components/Name.h"
 #include "ECS/TransformHierarchy.h"
 #include "Profiling/ScopeTimer.h"
 #include "Renderer/Renderer.h"
 
-// FrameDebuggerCaptureContext (src/Editor/FrameDebuggerCapture.h) is an
-// Editor-only type - RenderSystem.h above only ever forward-declares it
-// (see that header's own comment). This real #include, AND every actual
-// dereference of a `capture` pointer below, must stay wrapped in
-// `#if GTE_ENABLE_EDITOR` - a GTE_ENABLE_EDITOR=OFF build compiles this
-// whole file fine either way (the forward declaration is enough), but
-// would FAIL TO LINK if an unconditional RecordDraw() call site referenced
-// a type/function that's never compiled into that configuration at all.
-// See task_manager/frame-debugger-3/
-// PHASE1_RENDERER_CAPTURE_INSTRUMENTATION.md's own Step 3.1b.
-#if GTE_ENABLE_EDITOR
-#include "../Editor/FrameDebuggerCapture.h"
-#endif
+// task_manager/editor-core-separation-1 campaign, PHASE2
+// (PHASE2_FRAME_DEBUGGER_CAPTURE_POINTER_SAFETY_FIX.md) - this file used to
+// #include "../Editor/FrameDebuggerCapture.h" (behind #if GTE_ENABLE_EDITOR)
+// so Draw() below could call real methods (RecordDraw()/RecordEntityDraw())
+// on the complete FrameDebuggerCaptureContext type - a genuine link hazard
+// once gte_editor becomes a real, separate CMake target (Phase 9): gte_core
+// would otherwise carry an unresolved external symbol only gte_editor
+// defines. That whole block moved OUT of this file entirely, into a new
+// free function, RecordFrameDebuggerDraws() (declared in RenderSystem.h,
+// defined in src/Editor/FrameDebuggerDrawRecording.cpp) - this file now
+// contains ZERO #include of FrameDebuggerCapture.h and ZERO reference to
+// the complete type, only the bare forward declaration RenderSystem.h
+// itself already carries (`class FrameDebuggerCaptureContext;`).
 
 namespace gte {
 
@@ -138,47 +137,25 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& view
             const VkDescriptorSet descriptorSet =
                 materialTexture != nullptr ? materialTexture->descriptorSet : VK_NULL_HANDLE;
 
-#if GTE_ENABLE_EDITOR
-            // Zero-overhead-when-disarmed: this whole block collapses to
-            // one already-taken "is this pointer null" branch when
-            // `capture` is nullptr (the common case - every frame until
-            // PHASE3 wires a real arming trigger, and every ordinary frame
-            // afterward) - no string formatting, no vector work happens.
-            // See task_manager/frame-debugger-3/
-            // PHASE1_RENDERER_CAPTURE_INSTRUMENTATION.md's own Step 2.
+            // task_manager/editor-core-separation-1 campaign, PHASE2 -
+            // zero-overhead-when-disarmed: this call collapses to one
+            // already-taken "is this pointer null" branch when `capture` is
+            // nullptr (the common case - every frame until PHASE3 wires a
+            // real arming trigger, and every ordinary frame afterward) - no
+            // string formatting, no vector work happens. See
+            // task_manager/frame-debugger-3/
+            // PHASE1_RENDERER_CAPTURE_INSTRUMENTATION.md's own Step 2. The
+            // `#if GTE_ENABLE_EDITOR` wrapper that used to surround this
+            // block is GONE - the null-check itself is now the only gating
+            // needed, since RecordFrameDebuggerDraws() (declared in
+            // RenderSystem.h, defined in
+            // src/Editor/FrameDebuggerDrawRecording.cpp) is DECLARED-BUT-
+            // NOT-YET-LINKED-IN-gte_core-ALONE, never a dereference of the
+            // pointer itself.
             if (capture != nullptr) {
-                const std::string materialTextureDebugName = materialTexture != nullptr
-                    ? renderer.GetMemoryDebugName(materialTexture->texture.Handle())
-                    : std::string();
-                capture->RecordDraw(pipeline->DebugName(), materialTextureDebugName, viewProjection);
-
-                // frame-debugger-6 campaign, PHASE3 - additionally record
-                // this exact draw's own per-entity attribution facts (never
-                // deduplicated, unlike RecordDraw()'s own name lists above -
-                // see FrameDebuggerCaptureContext::RecordEntityDraw()'s own
-                // doc comment). Triangle count uses the exact same
-                // HasIndexBuffer() ? IndexCount()/3 : VertexCount()/3 rule
-                // DrawStats.h::AccumulateDrawStats() already uses, so these
-                // two counts can never drift apart.
-                const std::uint32_t triangleCount =
-                    mesh->HasIndexBuffer() ? (mesh->IndexCount() / 3) : (mesh->VertexCount() / 3);
-
-                std::string displayName;
-                if (const Name* name = registry.TryGetComponent<Name>(command.entity);
-                    name != nullptr && !name->value.empty()) {
-                    displayName = name->value;
-                } else {
-                    // Matches HierarchyPanel::BuildEntityLabel()'s own
-                    // synthesized "Entity %u" fallback format exactly (minus
-                    // its Camera-only " (Camera)" suffix, which never applies
-                    // to a mesh-rendering draw) - see this phase's own Step 2.
-                    displayName = "Entity " + std::to_string(command.entity.index);
-                }
-
-                capture->RecordEntityDraw(command.entity.index, command.entity.generation, displayName,
-                    pipeline->DebugName(), materialTextureDebugName, triangleCount);
+                RecordFrameDebuggerDraws(
+                    *capture, registry, renderer, command.entity, *mesh, *pipeline, materialTexture, viewProjection);
             }
-#endif
 
             renderer.Submit(*pipeline, *mesh, command.model, viewProjection, descriptorSet);
         }

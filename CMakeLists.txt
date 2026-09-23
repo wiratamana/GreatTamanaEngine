@@ -646,6 +646,15 @@ if(GTE_ENABLE_EDITOR)
         src/Editor/FrameDebuggerData.cpp
         src/Editor/FrameDebuggerCapture.h
         src/Editor/FrameDebuggerCapture.cpp
+        # task_manager/editor-core-separation-1 campaign, PHASE2 - the two
+        # new files holding what used to be #if GTE_ENABLE_EDITOR-guarded
+        # code inside CORE, always-compiled files (RenderPasses.cpp/
+        # RenderSystem.cpp) - see PHASE2_FRAME_DEBUGGER_CAPTURE_POINTER_SAFETY_FIX.md.
+        # Still added to this (still-conditional, for now) Editor source
+        # list; Phase 9 moves this into the real gte_editor target's own
+        # list.
+        src/Editor/FrameDebuggerReplayPasses.cpp
+        src/Editor/FrameDebuggerDrawRecording.cpp
         src/Editor/FrameDebuggerHistory.h
         src/Editor/FrameDebuggerHistory.cpp
         src/Editor/FrameDebuggerPreviewProcessing.h

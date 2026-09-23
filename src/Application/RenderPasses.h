@@ -238,21 +238,18 @@ void AddRenderTransparentPass(rg::RenderGraphBuilder& builder, Game& game, Rende
 // (the very first implementation attempt produced exactly this: garbage/
 // noise images, not a rendered scene).
 //
-// This function's own real body is defined ENTIRELY inside
-// `#if GTE_ENABLE_EDITOR` in RenderPasses.cpp (a no-op, returning an empty
-// vector, otherwise) - see that file's own comment for why: unlike
-// `frameDebuggerCapture` above (a bare pointer, never dereferenced anywhere
-// in this CORE, always-compiled file), this function's body genuinely
-// NEEDS the real, complete FrameDebuggerCaptureContext type (to call
-// SetReplayStepPreviews() on it), which does not exist at all in a
-// GTE_ENABLE_EDITOR=OFF build - mirrors
-// task_manager/frame-debugger-3/PHASE1_RENDERER_CAPTURE_INSTRUMENTATION.md's
-// own Step 3.1b rule, applied to a CALLEE's body instead of a passthrough
-// parameter. Still always DECLARED and DEFINED (with an empty/no-op body in
-// that configuration) in every build, since Application::Run() references
-// this symbol unconditionally (even though, at runtime, `frameDebuggerCapture`
-// is always nullptr in that configuration, so the call is never actually
-// reached).
+// task_manager/editor-core-separation-1 campaign, PHASE2
+// (PHASE2_FRAME_DEBUGGER_CAPTURE_POINTER_SAFETY_FIX.md) - this function's
+// own real body is now defined ENTIRELY in a NEW file,
+// src/Editor/FrameDebuggerReplayPasses.cpp (unconditional #include of
+// FrameDebuggerCapture.h, no #if guard needed there - that file only ever
+// compiles as part of the Editor source list, a real link hazard fix: this
+// function's body genuinely NEEDS the real, complete
+// FrameDebuggerCaptureContext type (to call SetReplayStepPreviews() on it),
+// which RenderPasses.cpp (a CORE, always-compiled file destined for
+// gte_core) must never carry a dependency on - see that new file's own
+// header comment. This DECLARATION stays here, unchanged, since it only
+// ever needs the forward-declared reference parameter above.
 //
 // Render Pass campaign (task_manager/render-pass-1), PHASE4
 // (PHASE4_FRAME_DEBUGGER_GENERIC_TREE_REWORK.md, Step 3.3b) - each of the N
