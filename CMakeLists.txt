@@ -1073,6 +1073,23 @@ target_link_libraries(gte_core PRIVATE saba_pmx)
 if(GTE_CORE_STANDALONE_PROBE_ONLY)
     add_executable(gte_core_player_link_probe tools/ci/gte_core_player_link_probe/main.cpp)
     target_link_libraries(gte_core_player_link_probe PRIVATE gte_core)
+    # editor-core-separation-3 campaign, PHASE5
+    # (PHASE5_PLAYER_PROCESS_PLUGIN_ISOLATION_PROBE.md, Step 3.2) - this probe's
+    # main.cpp now genuinely CONSTRUCTS a real, headless gte::Core and calls
+    # Core::LoadPlugins() against a real plugins/ folder (its own bonus check,
+    # self-skipping on a machine without VK_EXT_headless_surface) - it
+    # therefore participates in the plugin ABI boundary for real, not just as
+    # an inert link target, and must get the same CRT-linkage treatment every
+    # other plugin-ABI-boundary binary gets (PHASE0_MASTER_STRATEGY.md's
+    # Locked Design Decision #4's own restated "JOINT requirement" rule).
+    gte_apply_plugin_shared_crt_linkage(gte_core_player_link_probe)
+    # Needs all three demo plugin .dlls to genuinely exist in its own
+    # <inner-build-dir>/plugins/ folder before its bonus check runs (same
+    # reasoning as gte_plugin_abi_handshake_probe's own
+    # add_dependencies(... demo_hello_world) below - CMake has no way to know
+    # a runtime-only LoadLibraryW()/PluginHost::LoadPlugins() dependency on
+    # its own).
+    add_dependencies(gte_core_player_link_probe demo_hello_world demo_render_feature demo_editor_panel)
 
     # PHASE2_PLUGIN_HOST_AND_HELLO_WORLD_HANDSHAKE_PROBE.md, Step 3.6 - a
     # tiny, PERMANENT, checked-in probe proving the whole plugin ABI
@@ -1087,6 +1104,21 @@ if(GTE_CORE_STANDALONE_PROBE_ONLY)
     # it must be spelled out explicitly or a `cmake --build` of only this
     # probe's own target will never actually produce the .dll it needs.
     add_dependencies(gte_plugin_abi_handshake_probe demo_hello_world)
+
+    # PHASE5_PLAYER_PROCESS_PLUGIN_ISOLATION_PROBE.md, Step 3.1 - a tiny,
+    # PERMANENT, checked-in probe proving "always all-in" (source design doc
+    # Section 0/7) stays editor-clean from a genuinely Player-shaped process
+    # (Milestone 3) - links gte_core.a ALONE (no gte_editor/SDL/ImGui), uses
+    # gte::PluginHost directly, and queries ONLY IRenderFeatureModule_v1 -
+    # this probe's own main.cpp never references IEditorPanelModule_v1
+    # anywhere in its own source, which IS the isolation proof itself.
+    add_executable(gte_plugin_isolation_probe tools/ci/gte_plugin_isolation_probe/main.cpp)
+    target_link_libraries(gte_plugin_isolation_probe PRIVATE gte_core gte_plugin_abi)
+    gte_apply_plugin_shared_crt_linkage(gte_plugin_isolation_probe)
+    # This probe's own main.cpp requires LoadedModuleCount() == 3 exactly -
+    # needs all three demo plugin .dlls to genuinely exist in its own
+    # <inner-build-dir>/plugins/ folder before it runs.
+    add_dependencies(gte_plugin_isolation_probe demo_hello_world demo_render_feature demo_editor_panel)
 endif()
 
 # editor-core-separation-1 campaign, PHASE18

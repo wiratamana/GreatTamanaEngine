@@ -16,6 +16,10 @@
 # probe's own build tree (tools/ci/gte_plugin_abi_handshake_probe/), never
 # committed, same as /build-player-link-probe/ above.
 /build-plugin-abi-handshake-probe/
+# editor-core-separation-3 campaign, PHASE5 - the new plugin isolation
+# probe's own build tree (tools/ci/gte_plugin_isolation_probe/), never
+# committed, same as /build-plugin-abi-handshake-probe/ above.
+/build-plugin-isolation-probe/
 /out/
 
 # Local reference-only clones for research (see task_manager/atmosphere-scattering-1/

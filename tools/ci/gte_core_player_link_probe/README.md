@@ -41,13 +41,13 @@ real `gte_core -> gte_editor`-only call sites this campaign's PHASE2/PHASE3
 fixed:
 
 - `void (gte::Core::*)() = &gte::Core::BuildFrame;` - a member-function-
-  pointer expression, never called, that forces `Core.cpp.obj` to be
-  extracted and every one of its own remaining internal references resolved
-  (proves `Core::BuildFrame()`'s own internal call, formerly the free
-  function `gte::AddFrameDebuggerReplayPasses()`, has no remaining undefined
-  reference). This deliberately never actually CONSTRUCTS a `gte::Core` -
-  doing so needs a real `ISurfaceProvider`/Vulkan instance this tiny probe
-  has no business standing up.
+  pointer expression, that forces `Core.cpp.obj` to be extracted and every
+  one of its own remaining internal references resolved (proves
+  `Core::BuildFrame()`'s own internal call, formerly the free function
+  `gte::AddFrameDebuggerReplayPasses()`, has no remaining undefined
+  reference). This expression alone never CONSTRUCTS a `gte::Core` - its own
+  job is purely the LINK-time proof (see the PHASE5 bonus check below for
+  where a real `Core` genuinely IS constructed).
 - An explicitly-typed member-function-pointer expression for
   `&gte::RenderSystem::Draw` (the float-aspect overload - `RenderSystem::Draw()`
   has two overloads, so an explicit target type is required to disambiguate
@@ -65,9 +65,32 @@ fixed:
   reference).
 
 None of these three forced-link mechanisms ever actually RUN any of this
-logic - `main()` only takes addresses / constructs a socket-less server and
-immediately returns `0`. The only thing being tested is whether the FINAL
-LINK STEP succeeds.
+logic - they only take addresses / construct a socket-less server. The only
+thing being tested BY THEM is whether the FINAL LINK STEP succeeds.
+
+## editor-core-separation-3 campaign, PHASE5 - a fourth, genuinely EXECUTED bonus check
+
+`PHASE5_PLAYER_PROCESS_PLUGIN_ISOLATION_PROBE.md`, Step 3.2 added a bonus
+check to this same `main()`, appended after the three forced-link lines
+above: a real, headless `gte::Core` is constructed (via
+`tests/Fakes/HeadlessSurfaceProvider.h`, the same `VK_EXT_headless_surface`
+mechanism `CoreHeadlessConstructionTests.cpp` already uses), wrapped in a
+`try`/`catch` that self-skips, loudly, with a clear message, on any machine
+whose Vulkan driver lacks that extension - mirroring
+`CoreHeadlessConstructionTests.cpp`'s own established precedent exactly
+(there is no separate boolean "is this supported" predicate anywhere in this
+codebase - the skip signal IS the constructor throwing). When it does not
+self-skip, it calls `Core::LoadPlugins()` against this probe's own real,
+shared `plugins/` folder and `Core::BuildFrame()` once, confirming neither
+crashes.
+
+**This means `gte_core_player_link_probe.exe` is now sometimes worth actually
+RUNNING, not just linking** - unlike the original three checks above (which
+only ever prove something at LINK time and do nothing observable if
+executed), this fourth check only ever does anything when the resulting
+`.exe` is genuinely executed. Either outcome (bonus check `PASS` or a clean,
+documented `SKIPPED`) is an acceptable result - only a genuine crash/hang is
+a failure.
 
 ## Exact command to run this by hand
 
@@ -76,13 +99,16 @@ From the repository root:
 ```
 cmake -S tools/ci/gte_core_player_link_probe -B build-player-link-probe
 cmake --build build-player-link-probe
+build-player-link-probe\gte_core_inner_build\gte_core_player_link_probe.exe
 ```
 
 (there is no target literally named `gte_core_player_link_probe` reachable
 from the OUTER build directory besides its own custom target of that exact
 name, which is the `ALL`-default target - a plain `cmake --build
 build-player-link-probe` builds it, no `--target` needed, though passing
-`--target gte_core_player_link_probe` explicitly also works.)
+`--target gte_core_player_link_probe` explicitly also works. The third line -
+actually running the built `.exe` - is now meaningful too, per the PHASE5
+bonus check above; it was previously only ever built/linked, never run.)
 
 ## What a successful run proves
 
@@ -96,16 +122,18 @@ build-player-link-probe` builds it, no `--target` needed, though passing
   a regression here would fail this probe's own build step immediately with
   a genuine `undefined reference` linker error, the same class of failure
   `editor-core-separation-1`'s own Phase 19 throwaway probe once reproduced.
+- (PHASE5) When actually EXECUTED, and this machine's Vulkan driver supports
+  `VK_EXT_headless_surface`: a real, headless `gte::Core` can be constructed,
+  load every plugin `.dll` in the shared `plugins/` folder, and run
+  `BuildFrame()` once, with no crash - the closest this probe can get to "the
+  runtime-tier plugin's render-graph pass renders correctly in the Player
+  probe too" without a real window/swapchain to screenshot.
 
 ## What this probe deliberately does NOT do
 
 - It does not build any part of the actual Player Build Pipeline (design doc
   Section 8) - that is a separate, later initiative, explicitly out of scope
   for this entire campaign (see `PHASE0_MASTER_STRATEGY.md`'s "Non-Goals").
-- It never actually EXECUTES the resulting `gte_core_player_link_probe.exe` -
-  only compiles and links it. Running it would do nothing observable anyway
-  (`main()` immediately returns `0`); the link step succeeding or failing is
-  the entire test.
 - It does not replace `tools/ci/gte_core_standalone_probe/`, which remains
   completely untouched and still correctly catches a different class of bug
   (an accidental `#include` violation, e.g. `gte_core` `#include`-ing
@@ -113,7 +141,8 @@ build-player-link-probe` builds it, no `--target` needed, though passing
 - It is not wired into any GitHub Actions workflow or other real CI system -
   none exists in this repository (Locked Design Decision #5). Run it by
   hand, as documented above, whenever you want to re-confirm `gte_core.a`
-  still links standalone.
+  still links standalone (and, per PHASE5, that a headless `Core` still
+  loads plugins/builds a frame without crashing).
 - It never appears as a user-facing option inside the main build - do not
   set `GTE_CORE_STANDALONE_PROBE_ONLY` manually in a normal
   `cmake -S . -B build` configure.
