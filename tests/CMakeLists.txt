@@ -2072,6 +2072,13 @@ set(GTE_TEST_SOURCES
     # registry). Unconditional, since src/Core/EditorPanelRegistry.h/.cpp is
     # unconditionally in gte_core's own source list.
     Core/EditorPanelRegistryTests.cpp
+    # editor-core-separation-4 campaign, PHASE5
+    # (PHASE5_MULTI_RENDER_FEATURE_PLUGIN_WARNING_AND_REGRESSION_LOCK.md) -
+    # Tier-1 tests for the new, pure CountModulesImplementingRenderFeature()
+    # helper. Unconditional, since src/Core/Plugins/
+    # PluginRenderFeatureDiagnostics.h/.cpp is unconditionally in gte_core's
+    # own source list.
+    Core/PluginRenderFeatureDiagnosticsTests.cpp
     Memory/GpuResourceHandleTests.cpp
     Encoding/Base64Tests.cpp
     Encoding/PixelConversionTests.cpp

@@ -309,6 +309,15 @@ add_library(gte_core STATIC
     # (Core.cpp's own RegisterOffscreenRenderPipelineProviders()).
     src/Core/Plugins/PluginRenderPassBuilderAdapter.h
     src/Core/Plugins/PluginRenderPassBuilderAdapter.cpp
+    # editor-core-separation-4 campaign, PHASE5
+    # (PHASE5_MULTI_RENDER_FEATURE_PLUGIN_WARNING_AND_REGRESSION_LOCK.md) - a
+    # small, pure, Tier-1-testable helper counting how many loaded plugin
+    # modules implement IRenderFeatureModule_v1 - used by Core::LoadPlugins()
+    # to log a warning when 2+ such plugins are loaded (their render output
+    # silently overwrites each other today - see docs/conventions/plugin-
+    # architecture.md).
+    src/Core/Plugins/PluginRenderFeatureDiagnostics.h
+    src/Core/Plugins/PluginRenderFeatureDiagnostics.cpp
     # editor-core-separation-1 campaign, PHASE10
     # (PHASE10_ISURFACEPROVIDER_INTERFACE_AND_WINDOW_INVERSION.md) - the
     # abstract surface-provider interface Renderer/VulkanSurface now depend on
@@ -749,6 +758,12 @@ if(GTE_ENABLE_PLUGINS)
     # (PHASE3_RUNTIME_RENDER_FEATURE_CAPABILITY.md, Step 3.5) - the
     # IRenderFeatureModule_v1 throwaway demo (Milestone 1).
     add_subdirectory(plugins/demo_render_feature)
+    # editor-core-separation-4 campaign, PHASE5
+    # (PHASE5_MULTI_RENDER_FEATURE_PLUGIN_WARNING_AND_REGRESSION_LOCK.md) - a
+    # SECOND, genuinely independent throwaway demo implementing
+    # IRenderFeatureModule_v1, so the "2+ plugins implementing the same
+    # capability" path is exercised for real, not just theorized.
+    add_subdirectory(plugins/demo_render_feature_second)
     # editor-core-separation-3 campaign, PHASE4
     # (PHASE4_EDITOR_PANEL_CAPABILITY_AND_REGISTRY.md, Step 3.9) - the
     # IEditorPanelModule_v1 throwaway demo (Milestone 2). Only depends on
@@ -1137,10 +1152,13 @@ if(GTE_CORE_STANDALONE_PROBE_ONLY)
     add_executable(gte_plugin_isolation_probe tools/ci/gte_plugin_isolation_probe/main.cpp)
     target_link_libraries(gte_plugin_isolation_probe PRIVATE gte_core gte_plugin_abi)
     gte_apply_plugin_shared_crt_linkage(gte_plugin_isolation_probe)
-    # This probe's own main.cpp requires LoadedModuleCount() == 3 exactly -
-    # needs all three demo plugin .dlls to genuinely exist in its own
+    # editor-core-separation-4 campaign, PHASE5
+    # (PHASE5_MULTI_RENDER_FEATURE_PLUGIN_WARNING_AND_REGRESSION_LOCK.md) -
+    # this probe's own main.cpp now requires LoadedModuleCount() == 4 exactly
+    # (was 3) - needs all FOUR demo plugin .dlls (including the new
+    # demo_render_feature_second) to genuinely exist in its own
     # <inner-build-dir>/plugins/ folder before it runs.
-    add_dependencies(gte_plugin_isolation_probe demo_hello_world demo_render_feature demo_editor_panel)
+    add_dependencies(gte_plugin_isolation_probe demo_hello_world demo_render_feature demo_editor_panel demo_render_feature_second)
 endif()
 
 # editor-core-separation-1 campaign, PHASE18

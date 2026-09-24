@@ -56,7 +56,7 @@ namespace {
 // literal Step 3.1 sketch (which used std::filesystem::current_path()) -
 // see this phase's own PHASE5_COMPLETION_REPORT.md for the full reasoning.
 //
-// Both this .exe and the three demo plugin .dll's are built by the SAME
+// Both this .exe and the four demo plugin .dll's are built by the SAME
 // nested, GTE_CORE_STANDALONE_PROBE_ONLY=ON inner configure - this .exe
 // lands directly in that inner build's own CMAKE_BINARY_DIR (no
 // RUNTIME_OUTPUT_DIRECTORY override, mirroring GreatTamanaEditor.exe's own
@@ -81,10 +81,13 @@ int main()
 
     // Explicitly rule out a false-positive pass caused by a folder-path
     // mistake (this phase's own Step 4 point 3 requires this exact check,
-    // not merely "> 0") - all three demo plugins (demo_hello_world,
-    // demo_render_feature, demo_editor_panel) must genuinely load.
-    if (host.LoadedModuleCount() != 3) {
-        std::fprintf(stderr, "FAIL: expected exactly 3 demo plugins to load, loaded %zu.\n", host.LoadedModuleCount());
+    // not merely "> 0") - all FOUR demo plugins (demo_hello_world,
+    // demo_render_feature, demo_render_feature_second, demo_editor_panel)
+    // must genuinely load (editor-core-separation-4 campaign, PHASE5 -
+    // PHASE5_MULTI_RENDER_FEATURE_PLUGIN_WARNING_AND_REGRESSION_LOCK.md -
+    // added demo_render_feature_second, was 3 plugins, now 4).
+    if (host.LoadedModuleCount() != 4) {
+        std::fprintf(stderr, "FAIL: expected exactly 4 demo plugins to load, loaded %zu.\n", host.LoadedModuleCount());
         return 1;
     }
 
@@ -99,12 +102,12 @@ int main()
         }
     }
 
-    if (renderFeatureCount != 1) {
-        std::fprintf(stderr, "FAIL: expected exactly 1 plugin implementing IRenderFeatureModule_v1, found %d.\n", renderFeatureCount);
+    if (renderFeatureCount != 2) {
+        std::fprintf(stderr, "FAIL: expected exactly 2 plugins implementing IRenderFeatureModule_v1, found %d.\n", renderFeatureCount);
         return 1;
     }
 
-    std::printf("PASS: %zu plugin(s) loaded, exactly 1 implements IRenderFeatureModule_v1, "
+    std::printf("PASS: %zu plugin(s) loaded, exactly 2 implement IRenderFeatureModule_v1, "
                 "and this file never once asked any plugin for IEditorPanelModule_v1.\n",
         host.LoadedModuleCount());
     return 0;

@@ -36,6 +36,13 @@
 #include "../../plugins/gte_plugin_abi/IRenderFeatureModule.h"
 #include "../../plugins/gte_plugin_abi/IPluginRenderPassBuilder.h"
 #include "Plugins/PluginRenderPassBuilderAdapter.h"
+// editor-core-separation-4 campaign, PHASE5
+// (PHASE5_MULTI_RENDER_FEATURE_PLUGIN_WARNING_AND_REGRESSION_LOCK.md) -
+// CountModulesImplementingRenderFeature(), used by Core::LoadPlugins() to
+// warn when 2+ loaded plugins implement IRenderFeatureModule_v1. Logging.h
+// for GTE_LOG_WARNING itself.
+#include "Plugins/PluginRenderFeatureDiagnostics.h"
+#include "Logging.h"
 
 #include <cassert>
 #include <cstdint>
@@ -221,6 +228,25 @@ Core::Core(ISurfaceProvider& surfaceProvider, IHostServices& hostServices)
 void Core::LoadPlugins(const std::filesystem::path& pluginsDirectory)
 {
     m_pluginHost.LoadPlugins(pluginsDirectory);
+
+    // editor-core-separation-4 campaign, PHASE5
+    // (PHASE5_MULTI_RENDER_FEATURE_PLUGIN_WARNING_AND_REGRESSION_LOCK.md) -
+    // this system's own render-graph integration ("PluginRenderFeatures"
+    // provider, RegisterOffscreenRenderPipelineProviders() below) hands
+    // EVERY loaded IRenderFeatureModule_v1 the SAME shared render target -
+    // with 2+ such plugins loaded, only the last-registered one's output
+    // ends up visible (a silent overwrite, by design of the CURRENT minimal
+    // implementation - real per-plugin compositing is explicitly deferred,
+    // see this phase's own file). Log this loudly, once, so it is at least
+    // a known, visible fact instead of a silent surprise.
+    const int renderFeatureModuleCount = CountModulesImplementingRenderFeature(m_pluginHost.AllLoadedModules());
+    if (renderFeatureModuleCount > 1) {
+        GTE_LOG_WARNING("PluginHost",
+            std::to_string(renderFeatureModuleCount) + " loaded plugins implement IRenderFeatureModule_v1 - "
+            "only the LAST-registered one's render output will be visible this frame (render-graph "
+            "compositing for multiple render-feature plugins is not implemented - see "
+            "docs/conventions/plugin-architecture.md).");
+    }
 }
 
 void Core::Update(const InputFrame& input, float deltaTime)

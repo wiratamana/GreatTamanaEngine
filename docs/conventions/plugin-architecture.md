@@ -150,6 +150,13 @@ one-time `GTE_LOG_WARNING` naming this exact risk whenever the host's own
 `sharedRuntimeLinkage` reads `0`, so it is visible (via `GET /get_logs`) rather
 than silently, permanently true.
 
+**Multiple `IRenderFeatureModule_v1` plugins (`editor-core-separation-4`
+campaign, PHASE5)**: multiple plugins may implement `IRenderFeatureModule_v1`;
+today, they all render into the same shared target, and only the
+last-registered plugin's output ends up visible — `Core::LoadPlugins()` logs a
+`GTE_LOG_WARNING` when more than one is detected. Per-plugin compositing is
+explicitly deferred, not yet designed.
+
 ## Where things live, physically
 
 - **`plugins/gte_plugin_abi/`** (source, repo root) — this ABI's own

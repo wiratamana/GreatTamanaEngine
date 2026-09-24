@@ -23,6 +23,13 @@ editor-tier plugin (`demo_editor_panel.dll`, `IEditorPanelModule_v1`) sits
 there, loaded, fully inert - never crashing, never producing any visible
 effect, simply never asked for anything.
 
+editor-core-separation-4 campaign, PHASE5
+(`task_manager/editor-core-separation-4/PHASE5_MULTI_RENDER_FEATURE_PLUGIN_WARNING_AND_REGRESSION_LOCK.md`)
+added a SECOND `IRenderFeatureModule_v1` demo plugin (`demo_render_feature_second.dll`)
+so this probe now genuinely exercises "2+ plugins implementing the same
+capability" - it loads 4 demo plugins total (was 3), 2 of which implement
+`IRenderFeatureModule_v1` (was 1).
+
 ## How it works
 
 `main.cpp` uses `gte::PluginHost` directly (a plain `gte_core`-owned class
@@ -31,11 +38,13 @@ with zero GPU/window dependency of its own):
 1. `PluginHost::LoadPlugins()` scans the shared `plugins/` folder (resolved
    relative to this exe's own directory via `GetModuleFileNameW`, mirroring
    `gte_plugin_abi_handshake_probe`'s own precedent) and loads every `.dll`
-   found there - all three demo plugins.
-2. Confirms `LoadedModuleCount() == 3` exactly (not merely `> 0`) - ruling out
+   found there - all four demo plugins (editor-core-separation-4 campaign
+   PHASE5 added `demo_render_feature_second` - was three).
+2. Confirms `LoadedModuleCount() == 4` exactly (not merely `> 0`) - ruling out
    a false-positive pass caused by a folder-path mistake.
 3. Queries `IRenderFeatureModule_v1` on every loaded module, printing which
-   ones implement it, and confirms exactly one does (`demo_render_feature`).
+   ones implement it, and confirms exactly two do (`demo_render_feature` and
+   `demo_render_feature_second`).
 4. **This file never once references `IEditorPanelModule_v1` anywhere in its
    own source** - the isolation mechanism IS this absence of a call, made
    visible/checkable by a human reader of this file, not a runtime assertion.
@@ -66,7 +75,8 @@ that choice automatically.)
   proof (`gte_core_player_link_probe`'s own job).
 - The runtime-tier capability (`IRenderFeatureModule_v1`) resolves correctly
   from a Player-shaped process, exactly as it does inside
-  `GreatTamanaEditor.exe` (PHASE3).
+  `GreatTamanaEditor.exe` (PHASE3), and now for TWO independent plugins at
+  once (PHASE5, editor-core-separation-4 campaign).
 - The editor-tier plugin (`demo_editor_panel.dll`) loads (its fingerprint/
   export handshake succeeds - `PluginHost` never distinguishes "runtime" from
   "editor" plugins at load time) but is never queried for
