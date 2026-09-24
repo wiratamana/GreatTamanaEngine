@@ -50,13 +50,31 @@ struct GtePluginAbiFingerprint {
     std::uint32_t pointerSize;
 
     // 1 if this binary was built with shared (DLL) libgcc/libstdc++
-    // linkage, 0 if statically linked - see PHASE0_MASTER_STRATEGY.md's
-    // Locked Design Decision #4 and this phase's own Step 3.4 below. The
-    // host REFUSES to load ANY plugin - and, more fundamentally, refuses to
-    // even attempt plugin loading at all - unless its OWN fingerprint has
-    // this field set to 1 (see PluginHost's own doc comment, PHASE2), since
-    // a statically-linked host/plugin pair does not share one process-wide
-    // heap even if every other field matches exactly.
+    // linkage, 0 if statically linked - see the source design doc's Section
+    // 8.1 ("Iron Rule") and PHASE0_MASTER_STRATEGY.md's Locked Design
+    // Decision #4. Compared for EQUALITY (like every other field here) by
+    // operator== below - a MISMATCH between host and plugin is refused like
+    // any other fingerprint mismatch. Honest correction (editor-core-
+    // separation-4 campaign, PHASE1): earlier documentation for this field
+    // claimed the host additionally refuses to load ANY plugin outright
+    // whenever its OWN fingerprint has this field read as 0 - THAT
+    // STANDALONE REFUSAL DOES NOT EXIST IN THIS CODE, and is not implemented
+    // by this phase either (this development machine's only usable
+    // toolchain cannot produce a shared-CRT binary at all - see
+    // cmake/MingwRuntime.cmake's own top-of-file comment - so a literal
+    // refusal would disable plugin loading entirely here). What DOES exist,
+    // as of this phase: PluginHost::LoadPlugins() logs a loud, one-time
+    // GTE_LOG_WARNING whenever the HOST's own sharedRuntimeLinkage reads 0,
+    // naming the real, ongoing risk explicitly (statically-linked host and
+    // plugins do not share one process-wide heap - any future capability
+    // that transfers heap ownership across the ABI boundary is undefined
+    // behavior under this condition) - see PluginHost.cpp's own
+    // LogSharedCrtRiskWarningOnce() for the exact wording. Treat this field
+    // as "checked for equality, and its host-side value is loudly warned
+    // about when 0" - not "a hard gate," until a dedicated future decision
+    // implements a real hard gate (e.g. once this repo's active toolchain is
+    // switched to a shared-CRT-capable one and this becomes enforceable
+    // without disabling plugin loading altogether).
     std::uint32_t sharedRuntimeLinkage;
 };
 

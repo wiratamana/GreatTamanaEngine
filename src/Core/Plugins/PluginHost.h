@@ -69,8 +69,18 @@ private:
     // function-pointer typedef out of this header.
     void TryLoadOnePlugin(const std::filesystem::path& dllPath);
 
+    // PHASE1 (editor-core-separation-4 campaign) - logs ONE loud
+    // GTE_LOG_WARNING, at most once per PluginHost instance, the first time
+    // LoadPlugins() runs, if-and-only-if this build's own fingerprint has
+    // sharedRuntimeLinkage == 0 - see GtePluginAbiFingerprint.h's own
+    // corrected doc comment on that field for the full reasoning. A no-op
+    // (correctly silent) on a build that genuinely achieved shared CRT
+    // linkage.
+    void LogSharedCrtRiskWarningOnce();
+
     std::vector<LoadedPlugin> m_loadedPlugins;
     std::vector<IPluginModule*> m_modules; // parallel, public-facing view - m_loadedPlugins[i].module == m_modules[i]
+    bool m_sharedCrtRiskWarningLogged = false;
 };
 
 } // namespace gte

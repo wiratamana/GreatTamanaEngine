@@ -87,6 +87,8 @@ PluginHost::~PluginHost()
 
 void PluginHost::LoadPlugins(const std::filesystem::path& pluginsDirectory)
 {
+    LogSharedCrtRiskWarningOnce();
+
     if (!std::filesystem::exists(pluginsDirectory)) {
         GTE_LOG_INFO("PluginHost", "no plugins directory found at " + pluginsDirectory.string() + ", skipping");
         return;
@@ -101,6 +103,34 @@ void PluginHost::LoadPlugins(const std::filesystem::path& pluginsDirectory)
         }
         TryLoadOnePlugin(entry.path());
     }
+}
+
+// PHASE1 (editor-core-separation-4 campaign) - see PluginHost.h's own doc
+// comment on this method's declaration for the full reasoning. Logs ONE
+// loud GTE_LOG_WARNING, at most once per PluginHost instance, the first
+// time LoadPlugins() runs, if-and-only-if this build's own fingerprint has
+// sharedRuntimeLinkage == 0.
+void PluginHost::LogSharedCrtRiskWarningOnce()
+{
+    if (m_sharedCrtRiskWarningLogged) {
+        return;
+    }
+    m_sharedCrtRiskWarningLogged = true;
+
+    const GtePluginAbiFingerprint hostFingerprint = MakeThisBuildsFingerprint();
+    if (hostFingerprint.sharedRuntimeLinkage != 0) {
+        return; // Genuinely shared-CRT-linked - nothing to warn about.
+    }
+
+    GTE_LOG_WARNING("PluginHost",
+        "This build was NOT linked with shared/DLL CRT (sharedRuntimeLinkage=0). "
+        "A statically-linked host and statically-linked plugin .dll(s) do NOT "
+        "share one process-wide heap - allocating on one side of the plugin ABI "
+        "boundary and freeing on the other (even indirectly) is undefined "
+        "behavior. This is currently a real, unenforced risk on this build - "
+        "see plugins/gte_plugin_abi/GtePluginAbiFingerprint.h's "
+        "sharedRuntimeLinkage field and docs/conventions/plugin-architecture.md "
+        "for the full explanation.");
 }
 
 void PluginHost::TryLoadOnePlugin(const std::filesystem::path& dllPath)

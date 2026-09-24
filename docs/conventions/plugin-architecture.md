@@ -138,6 +138,18 @@ its own final regression phase" rule. Actually flipping the active toolchain
 flag plus runtime-DLL staging working against a genuinely shared-linked
 build) is an explicitly deferred decision for a dedicated later step.
 
+**Honest correction (`editor-core-separation-4` campaign, PHASE1)**: an
+earlier version of `GtePluginAbiFingerprint.h`'s own doc comment claimed the
+host additionally refuses to load ANY plugin outright whenever its own
+fingerprint has `sharedRuntimeLinkage` read as `0` — that standalone hard
+refusal never existed in the real code, and is still not implemented (doing so
+today would disable plugin loading entirely on this development machine, since
+its only usable toolchain cannot produce a shared-CRT binary at all). What
+exists instead, as of this phase: `PluginHost::LoadPlugins()` logs one loud,
+one-time `GTE_LOG_WARNING` naming this exact risk whenever the host's own
+`sharedRuntimeLinkage` reads `0`, so it is visible (via `GET /get_logs`) rather
+than silently, permanently true.
+
 ## Where things live, physically
 
 - **`plugins/gte_plugin_abi/`** (source, repo root) — this ABI's own
