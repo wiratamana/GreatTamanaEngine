@@ -26,6 +26,17 @@
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../Renderer/RenderGraph/RenderGraphDebugTextureRegistry.h"
 
+// editor-core-separation-3 campaign, PHASE3
+// (PHASE3_RUNTIME_RENDER_FEATURE_CAPABILITY.md) - the "PluginRenderFeatures"
+// provider (RegisterOffscreenRenderPipelineProviders(), below) needs
+// IRenderFeatureModule_v1/kIRenderFeatureModule_v1_Name (gte_plugin_abi) and
+// PluginRenderPassBuilderAdapter (gte_core), the latter's own real .cpp body
+// forwarding AddFullscreenClearPass() into a real
+// rg::RenderGraphBuilder::AddRenderPass() call.
+#include "../../plugins/gte_plugin_abi/IRenderFeatureModule.h"
+#include "../../plugins/gte_plugin_abi/IPluginRenderPassBuilder.h"
+#include "Plugins/PluginRenderPassBuilderAdapter.h"
+
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
@@ -69,6 +80,23 @@ constexpr rg::RenderPassId kAtmosphereSharedLutKey = "Atmosphere.SharedLuts"_pas
 constexpr rg::RenderPassId kAtmosphereViewLutGameKey = "Atmosphere.ViewLut.Game"_passId;
 constexpr rg::RenderPassId kAtmosphereViewLutSceneKey = "Atmosphere.ViewLut.Scene"_passId;
 constexpr rg::RenderPassId kGameSkyBackgroundCallbackKey = "Atmosphere.GameSkyBackgroundCallback"_passId;
+
+// editor-core-separation-3 campaign, PHASE3
+// (PHASE3_RUNTIME_RENDER_FEATURE_CAPABILITY.md) - REAL, LIVE-TESTING-
+// DISCOVERED addition (see ask_questions round-trip in this phase's own
+// completion report): "PluginRenderFeatures" must draw on top of the TRUE
+// final, POST-atmosphere-composite image ("GameViewComposited"/
+// "SceneViewComposited" - the one GET /get_game_view/the "Game" panel
+// actually display, per FrameDebuggerHistory.h's own doc comment on
+// compositedPreview), never the raw pre-composite "GameView"/"SceneView"
+// handle alone - a plugin pass writing only the latter is invisible in the
+// actually-displayed image, since nothing re-composites after it runs this
+// same frame. "AtmosphereComposite" publishes its own freshly-computed
+// composited TextureHandle under one of these two keys (mirroring
+// kAtmosphereViewLutGameKey/kAtmosphereViewLutSceneKey's own per-view-key
+// precedent immediately above) so "PluginRenderFeatures" can fetch it back.
+constexpr rg::RenderPassId kGameCompositedOutputKey = "Atmosphere.CompositedOutput.Game"_passId;
+constexpr rg::RenderPassId kSceneCompositedOutputKey = "Atmosphere.CompositedOutput.Scene"_passId;
 
 // render-pass-3 campaign, PHASE3 (Step 3.3) - "AtmosphereSharedLut"'s own
 // blackboard payload.
@@ -629,6 +657,95 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 viewData->renderTexture->Extent(), outputTextureName, legacyViewScope);
 
             frame.finalTextureOutputs.push_back(composited);
+
+            // editor-core-separation-3 campaign, PHASE3 - publish this
+            // view's freshly-computed composited handle so
+            // "PluginRenderFeatures" (registered immediately after this
+            // provider, below) can draw on top of the TRUE final image -
+            // see kGameCompositedOutputKey/kSceneCompositedOutputKey's own
+            // doc comment above for the full "why".
+            frame.blackboard.Publish<rg::TextureHandle>(
+                isGameView ? kGameCompositedOutputKey : kSceneCompositedOutputKey, composited);
+        },
+        rg::ProviderTiming::AfterDeferredPasses);
+
+    // editor-core-separation-3 campaign, PHASE3
+    // (PHASE3_RUNTIME_RENDER_FEATURE_CAPABILITY.md) - the ONE generic,
+    // capability-agnostic loop that lets any loaded plugin .dll contribute a
+    // render-graph pass, with ZERO hardcoded knowledge of any specific plugin
+    // here (source design doc, Section 5). Registered with
+    // ProviderTiming::AfterDeferredPasses (NOT the default) - this provider
+    // calls frame.builder.AddRenderPass() immediately, so only this timing
+    // guarantees it truly runs after every deferred production pass
+    // ("RenderOpaque"/"DrawSkyBackground"/"RenderTransparent") AND after
+    // "AtmosphereComposite"'s own immediate call - see this phase's own Step
+    // 3.4 write-up for the full reasoning. Must be the LAST Register(...)
+    // call in this function, immediately after "AtmosphereComposite"'s own
+    // call.
+    //
+    // THREE REAL, LIVE-TESTING-DISCOVERED corrections beyond the phase
+    // file's own literal Step 3.4 sketch, found and fixed in sequence during
+    // this phase's own mandatory Step 4 verification (a live
+    // GET /get_game_view smoke test kept showing no magenta at all,
+    // confirmed via ask_questions once the root cause stopped being a
+    // simple "wrong line/parameter" mistake and became a genuine
+    // architectural question) - see this phase's own completion report for
+    // the full narrative:
+    //
+    // 1. PluginRenderPassBuilderAdapter::AddFullscreenClearPass() (see that
+    //    file's own doc comment) must tag its pass rg::RenderPassEvent::
+    //    AfterEverything explicitly - the phase file's own sketch leaves it
+    //    at the default (Opaques), which the RAW/WAW edge scan schedules
+    //    right after "RenderOpaque", getting overwritten by every later
+    //    production pass this same frame.
+    // 2. Even correctly ordered, a write-only pass into a handle nothing
+    //    downstream reads is genuinely dead code to
+    //    RenderGraphCompiler::Compile()'s own backward-reachability scan -
+    //    it gets silently culled unless the written handle is itself pushed
+    //    into frame.finalTextureOutputs (below), the exact same mechanism
+    //    "AtmosphereSharedLut"/"AtmosphereViewLut"/"AtmosphereComposite"
+    //    above already use.
+    // 3. Confirmed via ask_questions (a genuine architectural gap, not a
+    //    simple mistake): viewData->colorTarget is the RAW, PRE-atmosphere-
+    //    composite "GameView"/"SceneView" handle - "AtmosphereComposite"
+    //    (registered immediately above, same phase) already reads it and
+    //    produces a SEPARATE "GameViewComposited"/"SceneViewComposited"
+    //    handle, which is the TRUE final image GET /get_game_view/the "Game"
+    //    panel actually display (FrameDebuggerHistory.h's own
+    //    compositedPreview doc comment). A plugin pass writing only the raw
+    //    handle is therefore invisible in the actually-displayed image, no
+    //    matter how correctly it is ordered. Fixed by fetching the
+    //    composited handle "AtmosphereComposite" just published
+    //    (kGameCompositedOutputKey/kSceneCompositedOutputKey, above) and
+    //    using THAT as the plugin's own draw target instead - falling back
+    //    to the raw viewData->colorTarget only on the defensive, should-
+    //    never-normally-happen case where "AtmosphereComposite" didn't
+    //    publish anything this frame for this view (e.g. it returned early -
+    //    see its own guard clauses above).
+    m_offscreenRenderPipeline.Register("PluginRenderFeatures", rg::ProviderScope::PerActiveView,
+        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&) {
+            const RenderPassViewData* viewData = FindViewData(frame.currentView);
+            if (viewData == nullptr) {
+                return;
+            }
+
+            const bool isGameView = (frame.currentView == rg::RenderViewId::Named("Game"));
+            const rg::RenderPassId compositedKey = isGameView ? kGameCompositedOutputKey : kSceneCompositedOutputKey;
+            const rg::TextureHandle pluginTarget =
+                frame.blackboard.Fetch<rg::TextureHandle>(compositedKey).value_or(viewData->colorTarget);
+
+            bool anyPluginFeatureRanThisView = false;
+            for (IPluginModule* module : m_pluginHost.AllLoadedModules()) {
+                if (auto* feature = static_cast<IRenderFeatureModule_v1*>(
+                        module->QueryCapability(kIRenderFeatureModule_v1_Name))) {
+                    PluginRenderPassBuilderAdapter adapter(frame.builder, pluginTarget);
+                    feature->AddRenderGraphPasses(adapter);
+                    anyPluginFeatureRanThisView = true;
+                }
+            }
+            if (anyPluginFeatureRanThisView) {
+                frame.finalTextureOutputs.push_back(pluginTarget);
+            }
         },
         rg::ProviderTiming::AfterDeferredPasses);
 }

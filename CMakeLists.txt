@@ -302,6 +302,13 @@ add_library(gte_core STATIC
     # EditorHost.cpp's m_core.LoadPlugins() call).
     src/Core/Plugins/PluginHost.h
     src/Core/Plugins/PluginHost.cpp
+    # editor-core-separation-3 campaign, PHASE3
+    # (PHASE3_RUNTIME_RENDER_FEATURE_CAPABILITY.md) - PluginRenderPassBuilderAdapter,
+    # the gte_core-side implementation of IPluginRenderPassBuilder, constructed
+    # fresh per-view, per-frame, by the "PluginRenderFeatures" provider
+    # (Core.cpp's own RegisterOffscreenRenderPipelineProviders()).
+    src/Core/Plugins/PluginRenderPassBuilderAdapter.h
+    src/Core/Plugins/PluginRenderPassBuilderAdapter.cpp
     # editor-core-separation-1 campaign, PHASE10
     # (PHASE10_ISURFACEPROVIDER_INTERFACE_AND_WINDOW_INVERSION.md) - the
     # abstract surface-provider interface Renderer/VulkanSurface now depend on
@@ -710,6 +717,10 @@ endif()
 if(GTE_ENABLE_PLUGINS)
     add_subdirectory(plugins/gte_plugin_abi)
     add_subdirectory(plugins/demo_hello_world)
+    # editor-core-separation-3 campaign, PHASE3
+    # (PHASE3_RUNTIME_RENDER_FEATURE_CAPABILITY.md, Step 3.5) - the
+    # IRenderFeatureModule_v1 throwaway demo (Milestone 1).
+    add_subdirectory(plugins/demo_render_feature)
 endif()
 
 # editor-core-separation-1 campaign, PHASE18
