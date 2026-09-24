@@ -108,6 +108,48 @@ TEST(EditorPanelRegistryTest, RegisterPluginPanel_ModulePointerIsUsableAndDrawsT
     EXPECT_EQ(fakeModule.BuildPanelCallCount(), 1);
 }
 
+TEST(EditorPanelRegistryTest, RegisterPluginPanel_RefusesACollisionWithAnAlreadyRegisteredBuiltinName)
+{
+    EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Test_Builtin_For_Collision_Eta");
+
+    FakeEditorPanelModule collidingModule("Test_Builtin_For_Collision_Eta");
+    EditorPanelRegistry::Instance().RegisterPluginPanel("Test_Builtin_For_Collision_Eta", &collidingModule);
+
+    // The name must still resolve to the ORIGINAL (built-in) registration,
+    // never the plugin's - i.e. it must NOT appear a second time in
+    // PluginPanels(), proving the plugin's own registration was refused.
+    int occurrencesInPluginPanels = 0;
+    for (const auto& entry : EditorPanelRegistry::Instance().PluginPanels()) {
+        if (entry.name == "Test_Builtin_For_Collision_Eta") {
+            ++occurrencesInPluginPanels;
+        }
+    }
+    EXPECT_EQ(occurrencesInPluginPanels, 0);
+}
+
+TEST(EditorPanelRegistryTest, RegisterPluginPanel_RefusesACollisionWithAnAlreadyRegisteredPluginName)
+{
+    FakeEditorPanelModule firstModule("Test_Plugin_For_Collision_Theta");
+    EditorPanelRegistry::Instance().RegisterPluginPanel("Test_Plugin_For_Collision_Theta", &firstModule);
+
+    FakeEditorPanelModule secondModule("Test_Plugin_For_Collision_Theta");
+    EditorPanelRegistry::Instance().RegisterPluginPanel("Test_Plugin_For_Collision_Theta", &secondModule);
+
+    // Exactly ONE entry must exist for this name, and it must still point at
+    // the FIRST module (first-registered wins, second is refused) - never
+    // two entries for the same name.
+    int occurrences = 0;
+    const IEditorPanelModule_v1* resolvedModule = nullptr;
+    for (const auto& entry : EditorPanelRegistry::Instance().PluginPanels()) {
+        if (entry.name == "Test_Plugin_For_Collision_Theta") {
+            ++occurrences;
+            resolvedModule = entry.module;
+        }
+    }
+    EXPECT_EQ(occurrences, 1);
+    EXPECT_EQ(resolvedModule, &firstModule);
+}
+
 TEST(EditorPanelRegistryTest, IsKnownName_UnregisteredNameReturnsFalse)
 {
     EXPECT_FALSE(EditorPanelRegistry::Instance().IsKnownName("Test_This_Name_Was_Never_Registered_Epsilon"));
