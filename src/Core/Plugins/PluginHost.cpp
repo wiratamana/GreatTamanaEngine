@@ -19,6 +19,8 @@
 
 #include <cstring>
 
+#include <cctype>
+
 #include <string>
 
 namespace gte {
@@ -98,6 +100,21 @@ bool IsKnownNonPluginFilename(const std::filesystem::path& fileName)
     return false;
 }
 
+// editor-core-separation-4 campaign, PHASE7
+// (PHASE7_CASE_INSENSITIVE_DLL_EXTENSION_MATCHING.md) -
+// std::filesystem::path::extension() is a case-SENSITIVE string return on
+// Windows (NTFS preserves case even though lookups are case-insensitive) -
+// a file literally named "MyPlugin.DLL" must still be recognized as a
+// plugin candidate.
+bool HasDllExtensionCaseInsensitive(const std::filesystem::path& filePath)
+{
+    std::string ext = filePath.extension().string();
+    for (char& c : ext) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    return ext == ".dll";
+}
+
 } // namespace
 
 PluginHost::~PluginHost()
@@ -129,7 +146,8 @@ void PluginHost::LoadPlugins(const std::filesystem::path& pluginsDirectory)
         if (!entry.is_regular_file()) {
             continue;
         }
-        if (entry.path().extension() != ".dll") {
+        if (!HasDllExtensionCaseInsensitive(entry.path())) {
+            GTE_LOG_DEBUG("PluginHost", "Skipping non-.dll file while scanning plugins directory: " + entry.path().string());
             continue;
         }
         if (IsKnownNonPluginFilename(entry.path().filename())) {
