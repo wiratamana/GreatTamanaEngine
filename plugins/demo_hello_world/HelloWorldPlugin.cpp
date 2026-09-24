@@ -1,58 +1,36 @@
 // plugins/demo_hello_world/HelloWorldPlugin.cpp
 //
 // PHASE2_PLUGIN_HOST_AND_HELLO_WORLD_HANDSHAKE_PROBE.md, Step 3.5 - Milestone
-// 0's own handshake proof: implements IPluginModule::GetModuleInfo() and
-// QueryCapability() (returning nullptr unconditionally - zero capabilities),
-// nothing else. This plugin is deliberately tiny/throwaway-quality, per
-// PHASE0_MASTER_STRATEGY.md's own Step 1 - it exists to prove the ABI
+// 0's own handshake proof: implements zero capabilities, nothing else. This
+// plugin is deliberately tiny/throwaway-quality - it exists to prove the ABI
 // boundary works, not to demonstrate a real feature.
+//
+// editor-core-separation-5 campaign, PHASE4
+// (PHASE4_HELLO_WORLD_ZERO_CAPABILITY_SYMMETRY_MIGRATION.md) - migrated onto
+// ZeroCapabilityPluginModule + GTE_DEFINE_PLUGIN_EXPORTS_STATIC_INSTANCE (see
+// PLUGIN_AUTHORING_ERGONOMICS_PROPOSAL_2026-09-24.md's own "What about
+// demo_hello_world (zero capabilities)?" section), completing this campaign's
+// goal of moving all four demo plugins onto the same authoring pattern. This
+// ALSO switches this ONE plugin from the heap-allocated
+// (new/delete-per-load) flavor to the static-instance flavor every other demo
+// plugin already used before this campaign - see
+// PHASE0_MASTER_STRATEGY.md's "Decisions made without ask_questions" #3 for
+// why: this plugin never had any real per-instance construction logic to
+// begin with, so nothing is lost, and it makes all four demo plugins follow
+// one single, consistent pattern. Every string literal below (module
+// name/version/description) is byte-for-byte identical to this file's
+// pre-migration content.
 
-#include "../gte_plugin_abi/IPluginModule.h"
-#include "../gte_plugin_abi/GtePluginModuleInfo.h"
-// PHASE1_COMPLETION_REPORT.md's own "Minor note" - the generated fingerprint
-// header does NOT exist at the literal relative-file-path spelling used by
-// this phase file's own sketch (../gte_plugin_abi/GtePluginAbiFingerprintGenerated.h)
-// - it is a CMake configure_file() output living under
-// <build-dir>/generated/gte_plugin_abi/ instead. The correct spelling relies
-// on gte_plugin_abi's own INTERFACE include directory (brought in via
-// target_link_libraries(demo_hello_world PRIVATE gte_plugin_abi), this
-// folder's own CMakeLists.txt).
-#include "gte_plugin_abi/GtePluginAbiFingerprintGenerated.h"
-
-#include <cstring>
+#include "../gte_plugin_abi/SingleCapabilityPluginModule.h"
+#include "../gte_plugin_abi/PluginExportsMacro.h"
 
 namespace gte {
-
 namespace {
-class HelloWorldPluginModule final : public IPluginModule {
-public:
-    void* QueryCapability(const char*) override { return nullptr; } // implements zero capabilities - Milestone 0 proves ONLY the handshake itself
-    void GetModuleInfo(GtePluginModuleInfo& outInfo) const override
-    {
-        std::strncpy(outInfo.name, "HelloWorldPlugin", sizeof(outInfo.name) - 1);
-        std::strncpy(outInfo.version, "1.0.0", sizeof(outInfo.version) - 1);
-        std::strncpy(outInfo.description, "Milestone 0 handshake proof - implements zero capabilities.", sizeof(outInfo.description) - 1);
-    }
-};
-} // namespace
 
+ZeroCapabilityPluginModule g_module(
+    MakeModuleInfo("HelloWorldPlugin", "1.0.0", "Milestone 0 handshake proof - implements zero capabilities."));
+
+} // namespace
 } // namespace gte
 
-extern "C" {
-
-__declspec(dllexport) gte::GtePluginAbiFingerprint GTE_GetPluginAbiFingerprint()
-{
-    return gte::MakeThisBuildsFingerprint();
-}
-
-__declspec(dllexport) gte::IPluginModule* GTE_CreatePluginModule()
-{
-    return new gte::HelloWorldPluginModule();
-}
-
-__declspec(dllexport) void GTE_DestroyPluginModule(gte::IPluginModule* module)
-{
-    delete module;
-}
-
-} // extern "C"
+GTE_DEFINE_PLUGIN_EXPORTS_STATIC_INSTANCE(gte::g_module)
