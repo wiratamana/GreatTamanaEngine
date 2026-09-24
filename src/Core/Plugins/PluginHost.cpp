@@ -16,6 +16,8 @@
 
 #include <windows.h>
 
+#include <cstring>
+
 #include <string>
 
 namespace gte {
@@ -67,6 +69,34 @@ std::string DescribeFingerprintMismatch(const GtePluginAbiFingerprint& pluginFp,
     return result;
 }
 
+// editor-core-separation-4 campaign, PHASE4
+// (PHASE4_PLUGIN_RUNTIME_DLL_LANDMINE_DEFENSE_IN_DEPTH.md) - a second,
+// independent safety net beyond cmake/MingwRuntime.cmake's own
+// gte_apply_plugin_dll_shared_crt_linkage() fix (which stops these files
+// from ever being COPIED into plugins/ in the first place for a plugin
+// .dll target). This list additionally protects against these exact
+// filenames ending up in plugins/ for any OTHER reason (e.g. a developer
+// manually copying one there, or a future CMake change reintroducing the
+// same mistake this phase fixes) - PluginHost is a load-bearing safety
+// boundary, it should not silently regress if the CMake-level fix is ever
+// undone by accident.
+constexpr const char* kKnownNonPluginFilenames[] = {
+    "libstdc++-6.dll",
+    "libgcc_s_seh-1.dll",
+    "libwinpthread-1.dll",
+};
+
+bool IsKnownNonPluginFilename(const std::filesystem::path& fileName)
+{
+    const std::string name = fileName.string();
+    for (const char* known : kKnownNonPluginFilenames) {
+        if (_stricmp(name.c_str(), known) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 PluginHost::~PluginHost()
@@ -99,6 +129,10 @@ void PluginHost::LoadPlugins(const std::filesystem::path& pluginsDirectory)
             continue;
         }
         if (entry.path().extension() != ".dll") {
+            continue;
+        }
+        if (IsKnownNonPluginFilename(entry.path().filename())) {
+            GTE_LOG_INFO("PluginHost", "Skipping known non-plugin runtime file: " + entry.path().string());
             continue;
         }
         TryLoadOnePlugin(entry.path());

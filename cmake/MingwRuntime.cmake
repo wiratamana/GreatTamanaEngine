@@ -150,3 +150,38 @@ function(gte_apply_plugin_shared_crt_linkage target_name)
     target_link_options(${target_name} PRIVATE -shared-libgcc)
     mingw_copy_runtime_dll(${target_name})
 endfunction()
+
+# editor-core-separation-4 campaign, PHASE4
+# (PHASE4_PLUGIN_RUNTIME_DLL_LANDMINE_DEFENSE_IN_DEPTH.md) - the variant of
+# gte_apply_plugin_shared_crt_linkage() every PLUGIN .dll TARGET must call
+# instead of the original function above. Applies the SAME link-time CRT
+# flip (-shared-libgcc, needed so THIS .dll's own fingerprint correctly
+# reports sharedRuntimeLinkage=1 once a shared-CRT-capable toolchain is
+# active) but DELIBERATELY DOES NOT call mingw_copy_runtime_dll() - a plugin
+# .dll's RUNTIME_OUTPUT_DIRECTORY is ALWAYS the shared plugins/ folder
+# PluginHost::LoadPlugins() scans at startup (GTE_PLUGIN_RUNTIME_OUTPUT_DIR),
+# so copying libstdc++-6.dll/libgcc_s_seh-1.dll/libwinpthread-1.dll there
+# would make PluginHost try to LoadLibraryW() them as if they were plugins
+# (see this phase's own file for the full, confirmed failure mode this
+# fixes). This is safe: the HOST executable (or standalone probe .exe) that
+# actually loads this plugin .dll already stages its OWN copy of these same
+# 3 runtime DLLs next to ITSELF (via the ORIGINAL, unchanged
+# gte_apply_plugin_shared_crt_linkage() above, which every host/probe target
+# must still call) - the Windows DLL search order includes "the directory
+# the loading APPLICATION's own .exe is in" for any DLL resolved by bare
+# name (no path) during another DLL's own import resolution, which is
+# exactly how a plugin .dll's transitive dependency on libstdc++-6.dll etc.
+# gets satisfied here, with zero redundant copy needed inside plugins/
+# itself.
+function(gte_apply_plugin_dll_shared_crt_linkage target_name)
+    if(NOT GTE_ENABLE_PLUGINS)
+        return()
+    endif()
+    if(NOT GTE_PLUGIN_SHARED_CRT_TOOLCHAIN_SUPPORTED)
+        message(WARNING "gte_apply_plugin_dll_shared_crt_linkage(${target_name}): active toolchain has no shared libstdc++ variant - honest no-op, ${target_name} stays statically linked (see this file's own top-of-file comment).")
+        return()
+    endif()
+    target_link_options(${target_name} PRIVATE -shared-libgcc)
+    # Deliberately NOT calling mingw_copy_runtime_dll(${target_name}) here -
+    # see this function's own doc comment above for exactly why.
+endfunction()

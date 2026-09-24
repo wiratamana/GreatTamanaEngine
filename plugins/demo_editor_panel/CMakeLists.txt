@@ -20,4 +20,8 @@ set_target_properties(demo_editor_panel PROPERTIES
     # predictable, prefix-free name.
     PREFIX ""
 )
-gte_apply_plugin_shared_crt_linkage(demo_editor_panel)
+# editor-core-separation-4 campaign, PHASE4
+# (PHASE4_PLUGIN_RUNTIME_DLL_LANDMINE_DEFENSE_IN_DEPTH.md) - a plugin .dll
+# target must call the DLL-specific variant (no runtime DLL staging into
+# the shared plugins/ scan folder), not the original host/probe function.
+gte_apply_plugin_dll_shared_crt_linkage(demo_editor_panel)

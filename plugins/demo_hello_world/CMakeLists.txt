@@ -29,4 +29,8 @@ set_target_properties(demo_hello_world PROPERTIES
     # path against - PREFIX "" strips the "lib" MinGW would otherwise add.
     PREFIX ""
 )
-gte_apply_plugin_shared_crt_linkage(demo_hello_world)
+# editor-core-separation-4 campaign, PHASE4
+# (PHASE4_PLUGIN_RUNTIME_DLL_LANDMINE_DEFENSE_IN_DEPTH.md) - a plugin .dll
+# target must call the DLL-specific variant (no runtime DLL staging into
+# the shared plugins/ scan folder), not the original host/probe function.
+gte_apply_plugin_dll_shared_crt_linkage(demo_hello_world)
