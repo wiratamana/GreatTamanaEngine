@@ -36,6 +36,10 @@ per its own Step 3.3 scope) — a reader of that convention doc today would have
 no idea `PluginExportsMacro.h`/`SingleCapabilityPluginModule.h`/
 `ZeroCapabilityPluginModule` exist, or that every demo plugin now uses them.
 
+Run `git_status` before Step 3.1 (`PHASE0_MASTER_STRATEGY.md` Workflow Rule
+10) — confirm the branch still reads `feature/editor-core-separation` and the
+tree is clean or contains only Phase 1-4's already-committed diffs.
+
 ## Step 3: The Plan
 
 ### 3.1 — Update `docs/conventions/plugin-architecture.md`
@@ -205,6 +209,10 @@ also has, that this report must not skip:**
 
 ## Completion
 
-`git_add` + `git_commit` (message referencing PHASE5 and this campaign's
-closeout, e.g. `"editor-core-separation-5 PHASE5: docs + full regression +
-campaign closeout"`).
+Run `git_status` (Workflow Rule 10) and confirm the diff about to be staged is
+exactly the two docs files (3.1/3.2, plus 3.3's own edit if it made one) and
+`CAMPAIGN_COMPLETION_REPORT.md` — nothing else (no leftover build artifact, no
+stray `build-plugins-off`-style throwaway directory left behind by this phase's
+own regression pass). Then `git_add` + `git_commit` (message referencing PHASE5
+and this campaign's closeout, e.g. `"editor-core-separation-5 PHASE5: docs +
+full regression + campaign closeout"`).
