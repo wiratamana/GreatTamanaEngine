@@ -102,6 +102,20 @@ option(GTE_ENABLE_NETWORK "Compile in and auto-start the embedded, loopback-only
 # ordinary development.
 option(GTE_CORE_STANDALONE_PROBE_ONLY "CI-ONLY: configure ONLY gte_core, skipping gte_editor/the executable/tests entirely. Never set this manually." OFF)
 
+# Master switch for the dynamic, runtime-loadable plugin system
+# (plugins/gte_plugin_abi + src/Core/Plugins/PluginHost, editor-core-
+# separation-3 campaign - task_manager/editor-core-separation-3/
+# PHASE0_MASTER_STRATEGY.md). Same "always compiles, only the runtime call
+# site is gated" precedent as GTE_ENABLE_PROFILER/GTE_ENABLE_JOB_SYSTEM/
+# GTE_ENABLE_NETWORK above: turning this OFF means Core::LoadPlugins() is
+# never actually called with a real, existing plugins/ folder at runtime (no
+# .dll is ever scanned/loaded, at zero cost), while gte_plugin_abi/PluginHost/
+# every capability interface still compiles and is still testable. Also
+# controls whether gte_apply_plugin_shared_crt_linkage() (cmake/
+# MingwRuntime.cmake) actually flips a target's CRT linkage at all - see
+# PHASE1_GTE_PLUGIN_ABI_FOUNDATION.md's own Locked Design Decision #4.
+option(GTE_ENABLE_PLUGINS "Compile in the dynamic plugin-loading system (gte_plugin_abi + PluginHost)" ON)
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(FetchSDL3)
 include(FetchVulkan)
@@ -112,6 +126,14 @@ include(FetchHttplib)
 include(FetchJson)
 include(FetchKTX)
 include(CompileShaders)
+# PHASE1_GTE_PLUGIN_ABI_FOUNDATION.md, Step 3.4 (PHASE0_MASTER_STRATEGY.md's
+# Locked Design Decision #4) - defines mingw_copy_runtime_dll()/
+# gte_apply_plugin_shared_crt_linkage(), the reusable CRT-linkage-flip +
+# runtime-DLL-staging helpers every target on either side of the plugin ABI
+# boundary must call. Visible process-wide once included here (CMake
+# function definitions are not directory-scoped), including from a future
+# plugins/*/CMakeLists.txt subdirectory.
+include(MingwRuntime)
 
 if(NOT GTE_CORE_STANDALONE_PROBE_ONLY) # editor-core-separation-1 PHASE18
 # Downloads (if not already present) and stages SDL3 for Windows:
@@ -1199,6 +1221,17 @@ if(TRUE)
 endif()
 
 
+
+# PHASE1_GTE_PLUGIN_ABI_FOUNDATION.md, Step 3.4 (PHASE0_MASTER_STRATEGY.md's
+# Locked Design Decision #4) - flips this executable to shared (DLL)
+# libgcc/libstdc++ linkage and stages the resulting three runtime DLLs next
+# to it, so it stays a valid "matching pair" with every plugin .dll on the
+# other side of the plugin ABI boundary. Must be called AFTER
+# add_executable(GreatTamanaEditor ...) (it is, by construction, this far
+# down the file) and BEFORE sdl3_copy_runtime_dll() below (ordering between
+# the two POST_BUILD steps themselves does not matter, but this keeps both
+# "stage a runtime dependency next to the .exe" steps textually adjacent).
+gte_apply_plugin_shared_crt_linkage(GreatTamanaEditor)
 
 # Ensures SDL3.dll is copied next to the built .exe after every build.
 sdl3_copy_runtime_dll(GreatTamanaEditor)

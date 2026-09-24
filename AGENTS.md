@@ -670,6 +670,33 @@ host template beyond what the standalone-core probe already needs - this campaig
 proves `gte_core.a` is heading in the right direction for that future initiative, it
 does not build it.
 
+## Plugin Architecture
+
+A real, dynamic, runtime-loadable `.dll` plugin system (`editor-core-
+separation-3` campaign, `task_manager/editor-core-separation-3/
+PHASE0_MASTER_STRATEGY.md`) - a feature ships as one or more `.dll`s dropped
+into a `plugins/` folder next to the built executable, discovered and used
+by the running engine with zero recompilation of the engine itself and zero
+per-plugin code inside `gte_core`/`gte_editor`. PHASE1 laid the foundation:
+`plugins/gte_plugin_abi/` (`GtePluginAbiFingerprint`, `IPluginModule`, the
+three fixed `GTE_*` `extern "C"` exports), a byte-for-byte fingerprint gate
+checked first, always (a mismatch is a clean, logged skip, never a crash),
+and the reusable `gte_apply_plugin_shared_crt_linkage()` CMake helper
+(`cmake/MingwRuntime.cmake`) every target on either side of the plugin ABI
+boundary must call. A plugin `.dll` NEVER links or calls a real
+`gte_core`/`gte_editor` symbol directly - only small, curated, pure-virtual
+wrapper interfaces using solely plain built-in C++ types, implemented
+host-side by a thin adapter forwarding to the real internal type; neither
+`gte_core.a` nor `gte_editor.a` ever becomes a `SHARED`/`.dll` target.
+**Honest, load-bearing caveat**: this repository's own default toolchain (as
+of PHASE1) was built `--disable-shared` and cannot produce a shared-CRT-
+linked binary at all - `gte_apply_plugin_shared_crt_linkage()` detects this
+at configure time and is a clean, honest no-op (fingerprint
+`sharedRuntimeLinkage` correctly reads `0`) until a dedicated later decision
+actually switches the active toolchain.
+
+Full convention: [docs/conventions/plugin-architecture.md](docs/conventions/plugin-architecture.md).
+
 ## Testability & Regression Safety
 
 - **Design new logic to be Tier-1-testable whenever the underlying problem

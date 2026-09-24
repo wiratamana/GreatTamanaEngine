@@ -102,6 +102,10 @@ than subsystem-specific):
   the `src/Editor/` folder boundary, `ImGuiEditorLayer`'s composition root,
   `EditorContext`, `Selection`, `DockLayout`, and the fixed `Panels/*.cpp`
   builder-function convention.
+- **[Plugin Architecture](conventions/plugin-architecture.md)** — the real,
+  dynamic, runtime-loadable `.dll` plugin system: `gte_plugin_abi`'s
+  fingerprint gate, `IPluginModule`, the curated-wrapper-interface rule, and
+  the shared/DLL CRT-linkage requirement.
 
 ## Changelog
 

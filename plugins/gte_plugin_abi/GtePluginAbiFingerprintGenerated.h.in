@@ -1,0 +1,38 @@
+#pragma once
+
+// GENERATED FILE - do not hand-edit. Produced by CMake's configure_file()
+// from plugins/gte_plugin_abi/GtePluginAbiFingerprintGenerated.h.in at
+// configure time - see plugins/gte_plugin_abi/CMakeLists.txt. Regenerated
+// automatically every time CMake reconfigures, so it always reflects the
+// REAL, live compiler/build-config values this exact build used - never
+// hand-typed, never allowed to drift from reality.
+
+#include "GtePluginAbiFingerprint.h"
+
+namespace gte {
+
+// The ONE frozen "ABI contract generation" integer for this whole
+// campaign's initial shape - bump this by hand (and only this - every
+// other field below is auto-derived from the real build) the day
+// gte_plugin_abi's own interfaces change non-additively. Starts at 1.
+inline constexpr std::uint32_t kGtePluginAbiContractGeneration = 1;
+
+inline GtePluginAbiFingerprint MakeThisBuildsFingerprint() noexcept
+{
+    GtePluginAbiFingerprint fp{};
+    fp.abiContractGeneration = kGtePluginAbiContractGeneration;
+
+    constexpr const char* kCompilerId = "@CMAKE_CXX_COMPILER_ID@";
+    constexpr const char* kBuildConfig = "@CMAKE_BUILD_TYPE@";
+    for (int i = 0; kCompilerId[i] != '\0' && i < 15; ++i) { fp.compilerId[i] = kCompilerId[i]; }
+    for (int i = 0; kBuildConfig[i] != '\0' && i < 15; ++i) { fp.buildConfig[i] = kBuildConfig[i]; }
+
+    fp.compilerVersionMajor = @CMAKE_CXX_COMPILER_VERSION_MAJOR@;
+    fp.compilerVersionMinor = @CMAKE_CXX_COMPILER_VERSION_MINOR@;
+    fp.compilerVersionPatch = @CMAKE_CXX_COMPILER_VERSION_PATCH@;
+    fp.pointerSize = static_cast<std::uint32_t>(sizeof(void*));
+    fp.sharedRuntimeLinkage = @GTE_PLUGIN_SHARED_RUNTIME_LINKAGE_INT@; // 0 or 1 - see this phase's Step 3.4.
+    return fp;
+}
+
+} // namespace gte
