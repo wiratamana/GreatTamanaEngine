@@ -820,14 +820,21 @@ TEST(BuildUnknownTabNameResponseJsonTests, Shape)
     EXPECT_EQ(parsed["error"], "unknown tab name 'NotARealTab' - see GET /list_tabs for the currently known names");
 }
 
-TEST(BuildListTabsResponseJsonTests, ContainsEveryKnownPanelName)
+// editor-core-separation-3 campaign, PHASE4 - Core/EditorPanelCatalog.h's
+// former compile-time-fixed kKnownEditorPanelNames[]/kKnownEditorPanelNameCount
+// are gone, replaced by EditorPanelRegistry (a runtime-populated registry,
+// seeded for this whole test binary by tests/Core/EditorPanelRegistryTests.cpp's
+// own global gtest Environment) - compares against the registry's own live
+// state directly instead of a compile-time constant that no longer exists.
+TEST(BuildListTabsResponseJsonTests, ContainsEveryRegisteredPanelName)
 {
     const std::string body = BuildListTabsResponseJson();
     const nlohmann::json parsed = nlohmann::json::parse(body);
     ASSERT_TRUE(parsed.contains("tabs"));
-    ASSERT_EQ(parsed["tabs"].size(), gte::kKnownEditorPanelNameCount);
-    for (std::size_t i = 0; i < gte::kKnownEditorPanelNameCount; ++i) {
-        EXPECT_EQ(parsed["tabs"][i], gte::kKnownEditorPanelNames[i]);
+    const std::vector<std::string>& allNames = gte::EditorPanelRegistry::Instance().AllNames();
+    ASSERT_EQ(parsed["tabs"].size(), allNames.size());
+    for (std::size_t i = 0; i < allNames.size(); ++i) {
+        EXPECT_EQ(parsed["tabs"][i], allNames[i]);
     }
 }
 

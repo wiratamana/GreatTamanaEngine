@@ -269,10 +269,11 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
 
     // network-impl-7 campaign
     // (PHASE4_HTTP_ENDPOINTS_ACTIVATE_TAB_AND_LIST_TABS.md) - GET /list_tabs.
-    // Needs NO bridge at all - the panel catalog is fixed at compile time
-    // (see Core/EditorPanelCatalog.h) - this is the SIMPLEST route in this whole
-    // file: a pure function of build configuration, zero runtime/thread/
-    // bridge dependency.
+    // Needs NO bridge at all - the panel list comes straight from
+    // EditorPanelRegistry::Instance() (editor-core-separation-3 campaign,
+    // PHASE4 - see Core/EditorPanelRegistry.h) - this is the SIMPLEST route in
+    // this whole file: zero runtime/thread/bridge dependency beyond that
+    // process-wide registry.
     server.Get("/list_tabs", [](const httplib::Request&, httplib::Response& res) {
         res.set_content(BuildListTabsResponseJson(), "application/json");
     });

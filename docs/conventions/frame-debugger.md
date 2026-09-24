@@ -920,8 +920,10 @@ with its own correct, distinct real output image.
   two-bool `m_pendingCaptureTrigger`/`m_replayServicedThisFrame` handshake
   described above.
 - **An ON-DEMAND FLOATING WINDOW, not part of the default dock layout, and
-  NOT listed in `EditorPanelCatalog.h`.** Still deliberate (mirroring
-  `BoneViewerWindow`'s own precedent) — `EditorPanelCatalog.h` exists purely
+  NOT registered in `EditorPanelRegistry`** (`src/Core/EditorPanelRegistry.h`,
+  replacing the old compile-time-fixed `EditorPanelCatalog.h` as of the
+  `editor-core-separation-3` campaign's PHASE4). Still deliberate (mirroring
+  `BoneViewerWindow`'s own precedent) — this registry exists purely
   to keep `DockLayout.cpp`'s *permanently-docked default layout* names in
   sync with `GET /activate_tab`/`GET /list_tabs`; this window's own HTTP
   automation goes through its OWN dedicated `/frame_debugger/*` route family

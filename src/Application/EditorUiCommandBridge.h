@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 // The ONE reviewed, thread-safe bridge a Network route handler (background
 // thread) is allowed to touch to make an EDITOR-UI-mutating request happen
@@ -82,7 +82,7 @@ struct EditorUiCommandRequest {
 //                                                this frame (409 - the name
 //                                                itself is fine, nothing to
 //                                                focus RIGHT NOW)
-// A name that isn't even in Core/EditorPanelCatalog.h's known list is rejected
+// A name that isn't even in Core/EditorPanelRegistry.h's known list is rejected
 // BEFORE ever reaching this bridge at all (see NetworkRoutes.cpp's own
 // pre-validation, Phase 4) - this outcome type has no field for that case
 // because it is structurally unreachable here.

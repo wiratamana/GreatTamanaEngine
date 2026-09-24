@@ -4,6 +4,8 @@
 #include "EditorSceneIOCapability.h"
 #include "EditorLogQueryCapability.h" // editor-core-separation-2 campaign, PHASE3.
 #include "ProjectRootPath.h" // editor-core-separation-3 campaign, PHASE2 - ExecutableDirectory().
+#include "../Core/EditorPanelRegistry.h" // editor-core-separation-3 campaign, PHASE4.
+#include "../../plugins/gte_plugin_abi/IEditorPanelModule.h" // editor-core-separation-3 campaign, PHASE4.
 #include "../Application/EventTranslator.h"
 #include "../Application/EngineCommandDispatch.h"
 #include "../Application/MemorySnapshotBuilder.h"
@@ -196,6 +198,41 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
     // precedent this mirrors) - never relative to the current working
     // directory, which is not guaranteed to be the exe's own folder.
     m_core.LoadPlugins(gte::ExecutableDirectory() / "plugins");
+#endif
+
+    // editor-core-separation-3 campaign, PHASE4
+    // (PHASE4_EDITOR_PANEL_CAPABILITY_AND_REGISTRY.md) - seeds
+    // EditorPanelRegistry with every built-in panel name BEFORE any plugin
+    // panel is ever registered (so AllNames()'s own registration order
+    // always lists every built-in panel first, plugins after) - this exact
+    // literal list must match EditorPanelCatalog.h's own former
+    // kKnownEditorPanelNames[] content byte-for-byte (confirmed before this
+    // file was deleted by this same phase).
+    EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Hierarchy");
+    EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Inspector");
+    EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Scene");
+    EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Game");
+    EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Memory");
+    EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Profiler");
+    EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Render Graph");
+    EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Jobs");
+    EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Atmosphere");
+    EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Log");
+#if GTE_ENABLE_PROJECT_PANEL
+    EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Project");
+#endif
+
+#if GTE_ENABLE_PLUGINS
+    // Queried once, immediately after Core::LoadPlugins() above returns -
+    // every loaded plugin exposing IEditorPanelModule_v1 gets its own real,
+    // dockable panel registered here, with zero hardcoded knowledge of any
+    // specific plugin.
+    for (IPluginModule* module : m_core.GetPluginHost().AllLoadedModules()) {
+        if (auto* panel = static_cast<IEditorPanelModule_v1*>(
+                module->QueryCapability(kIEditorPanelModule_v1_Name))) {
+            EditorPanelRegistry::Instance().RegisterPluginPanel(panel->GetPanelName(), panel);
+        }
+    }
 #endif
 
     // editor-core-separation-1 campaign, PHASE16 - wires the ONE real

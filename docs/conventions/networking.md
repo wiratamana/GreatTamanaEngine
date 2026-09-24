@@ -240,9 +240,10 @@ module or adding a new endpoint:
   data. `GET /activate_tab?name=<PanelName>` returns `200`
   (`{"success":true,"activated_tab":"<PanelName>"}`) when the named tab was
   found and focused THIS frame, `400` for a missing/empty `name`, `404` when
-  `name` isn't one of the engine's known panel names
-  (`src/Editor/EditorPanelCatalog.h`'s `kKnownEditorPanelNames`/
-  `IsKnownEditorPanelName()` - the SAME shared source of truth
+  `name` isn't one of the engine's known panel names (`EditorPanelRegistry`,
+  `src/Core/EditorPanelRegistry.h` - a runtime-populated registry, as of the
+  `editor-core-separation-3` campaign's PHASE4, replacing the old compile-time-
+  fixed `EditorPanelCatalog.h` - the SAME shared source of truth
   `DockLayout.cpp`'s own default dock-layout logic already reads from), `409`
   when `name` IS known but has no live window yet this session (either a
   narrow just-started-Editor race in a `GTE_ENABLE_EDITOR=ON` build, or
@@ -252,8 +253,9 @@ module or adding a new endpoint:
   `EditorUiCommandBridge` unconditionally either way), `503` only when the
   bridge pointer itself is null (reachable only in a test that constructs
   `NetworkServer` directly), and `504` on a bridge timeout. `GET /list_tabs`
-  always returns `200` with every currently-known panel name and needs no
-  bridge round-trip at all, since the catalog is compile-time-fixed.
+  always returns `200` with every currently-registered panel name (built-in
+  panels PLUS any loaded plugin's own panel(s)) and needs no bridge round-trip
+  at all - it just reads `EditorPanelRegistry::Instance().AllNames()` directly.
   `Application::Run()` drains this bridge once per frame immediately after
   `m_editorLayer->NewFrame()` and before `BuildUI()` - the one window where
   Dear ImGui's window/dock state is valid to touch AND where the change is

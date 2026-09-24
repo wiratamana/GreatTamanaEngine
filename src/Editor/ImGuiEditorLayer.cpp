@@ -10,6 +10,9 @@
 #include "GBufferValidation.h"
 #include "GpuDrivenBatchTestSpawner.h"
 #include "ImGuiMemoryTracker.h"
+#include "Plugins/PluginPanelDrawContextAdapter.h" // editor-core-separation-3 campaign, PHASE4.
+#include "../Core/EditorPanelRegistry.h" // editor-core-separation-3 campaign, PHASE4.
+#include "../../plugins/gte_plugin_abi/IEditorPanelModule.h" // editor-core-separation-3 campaign, PHASE4.
 #include "Panels/AtmospherePanel.h"
 #include "Panels/FrameDebuggerPanel.h"
 #include "Panels/GamePanel.h"
@@ -678,6 +681,23 @@ public:
         // layout above - Build() itself is a complete no-op whenever it
         // isn't currently open (see BoneViewerWindow.h).
         m_boneViewer.Build(registry, renderer, m_ctx, m_modelRigCache, game.GetPhysicsSystem());
+#endif
+
+#if GTE_ENABLE_PLUGINS
+        // editor-core-separation-3 campaign, PHASE4
+        // (PHASE4_EDITOR_PANEL_CAPABILITY_AND_REGISTRY.md) - every loaded
+        // plugin exposing IEditorPanelModule_v1 gets its own real, dockable
+        // panel here, with zero hardcoded knowledge of any specific plugin.
+        // Begin()/End() themselves are called HOST-SIDE (this function),
+        // never by the plugin - only the CONTENT between them goes through
+        // the curated IPluginPanelDrawContext (PluginPanelDrawContextAdapter).
+        for (const auto& entry : EditorPanelRegistry::Instance().PluginPanels()) {
+            if (ImGui::Begin(entry.name.c_str())) {
+                PluginPanelDrawContextAdapter drawContext;
+                entry.module->BuildPanel(drawContext);
+            }
+            ImGui::End(); // Always called, matching ImGui::Begin()'s own documented contract, even when Begin() returned false.
+        }
 #endif
     }
 

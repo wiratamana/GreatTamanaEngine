@@ -475,7 +475,13 @@ add_library(gte_core STATIC
     src/Application/AssetImportCommandBridge.cpp
     src/Application/FrameDebuggerCommandBridge.h
     src/Application/FrameDebuggerCommandBridge.cpp
-    src/Core/EditorPanelCatalog.h
+    # editor-core-separation-3 campaign, PHASE4
+    # (PHASE4_EDITOR_PANEL_CAPABILITY_AND_REGISTRY.md) - EditorPanelRegistry,
+    # replacing EditorPanelCatalog.h's former fixed kKnownEditorPanelNames[]
+    # array with a real, runtime-populated registry (built-in panels PLUS
+    # every loaded plugin's own IEditorPanelModule_v1::GetPanelName()).
+    src/Core/EditorPanelRegistry.h
+    src/Core/EditorPanelRegistry.cpp
     # editor-core-separation-1 campaign, PHASE9 (PHASE9_CMAKE_TARGET_SPLIT.md,
     # Locked Design Decision #9) - unlike every other file under src/Editor/,
     # NullEditorLayer.cpp belongs in gte_core's OWN unconditional source list,
@@ -721,6 +727,13 @@ if(GTE_ENABLE_PLUGINS)
     # (PHASE3_RUNTIME_RENDER_FEATURE_CAPABILITY.md, Step 3.5) - the
     # IRenderFeatureModule_v1 throwaway demo (Milestone 1).
     add_subdirectory(plugins/demo_render_feature)
+    # editor-core-separation-3 campaign, PHASE4
+    # (PHASE4_EDITOR_PANEL_CAPABILITY_AND_REGISTRY.md, Step 3.9) - the
+    # IEditorPanelModule_v1 throwaway demo (Milestone 2). Only depends on
+    # gte_plugin_abi (Locked Design Decision #2), so it builds correctly even
+    # in a GTE_CORE_STANDALONE_PROBE_ONLY=ON configuration where gte_editor
+    # itself is skipped entirely.
+    add_subdirectory(plugins/demo_editor_panel)
 endif()
 
 # editor-core-separation-1 campaign, PHASE18
@@ -891,6 +904,13 @@ add_library(gte_editor STATIC
     src/Editor/Panels/AtmospherePanel.cpp
     src/Editor/Panels/FrameDebuggerPanel.h
     src/Editor/Panels/FrameDebuggerPanel.cpp
+    # editor-core-separation-3 campaign, PHASE4
+    # (PHASE4_EDITOR_PANEL_CAPABILITY_AND_REGISTRY.md) -
+    # PluginPanelDrawContextAdapter, gte_editor's own implementation of
+    # IPluginPanelDrawContext, closing the ImGui-shared-global-context hazard
+    # (PHASE0_MASTER_STRATEGY.md, Step 2.4).
+    src/Editor/Plugins/PluginPanelDrawContextAdapter.h
+    src/Editor/Plugins/PluginPanelDrawContextAdapter.cpp
     src/Editor/ImGuiEditorLayer.cpp
 )
 

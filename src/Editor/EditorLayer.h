@@ -524,7 +524,7 @@ public:
     // front (Dear ImGui's own SetWindowFocus(), which for a DOCKED window
     // selects it as its dock node's active tab - exactly like a user
     // clicking the tab). `panelName` is expected to already be validated
-    // against Core/EditorPanelCatalog.h's known panel list by the CALLER
+    // against Core/EditorPanelRegistry.h's known panel list by the CALLER
     // (Application::Run(), fed from EditorUiCommandBridge - see Phase 3) -
     // this method itself does no such validation; it just tries to find and
     // focus whatever exact name it's given. Returns tabExists == false, and

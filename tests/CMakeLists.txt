@@ -2065,6 +2065,13 @@ set(GTE_TEST_SOURCES
     # directly and expects it to reach the real Logger ring buffer depends
     # on this file being compiled in.
     Core/LogSinkTests.cpp
+    # editor-core-separation-3 campaign, PHASE4
+    # (PHASE4_EDITOR_PANEL_CAPABILITY_AND_REGISTRY.md) - replaces the deleted
+    # Editor/EditorPanelCatalogTests.cpp (Core/EditorPanelCatalog.h itself was
+    # deleted this same phase, replaced by this real, runtime-populated
+    # registry). Unconditional, since src/Core/EditorPanelRegistry.h/.cpp is
+    # unconditionally in gte_core's own source list.
+    Core/EditorPanelRegistryTests.cpp
     Memory/GpuResourceHandleTests.cpp
     Encoding/Base64Tests.cpp
     Encoding/PixelConversionTests.cpp
@@ -2117,7 +2124,6 @@ set(GTE_TEST_SOURCES
     Application/EditorUiCommandBridgeTests.cpp
     Application/AssetImportCommandBridgeTests.cpp
     Application/FrameDebuggerCommandBridgeTests.cpp
-    Editor/EditorPanelCatalogTests.cpp
     Renderer/VertexTests.cpp
     Renderer/PrimitiveMeshGeneratorTests.cpp
     Renderer/ResourcePoolTests.cpp

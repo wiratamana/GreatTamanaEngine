@@ -544,7 +544,7 @@ ParsedActivateTabQuery ParseActivateTabQuery(const std::string& nameParam)
     }
     result.valid = true;
     result.tabName = nameParam;
-    result.notFound = !IsKnownEditorPanelName(nameParam);
+    result.notFound = !EditorPanelRegistry::Instance().IsKnownName(nameParam);
     return result;
 }
 
@@ -574,7 +574,7 @@ std::string BuildListTabsResponseJson()
 {
     nlohmann::json body;
     body["tabs"] = nlohmann::json::array();
-    for (const char* name : kKnownEditorPanelNames) {
+    for (const std::string& name : EditorPanelRegistry::Instance().AllNames()) {
         body["tabs"].push_back(name);
     }
     return body.dump();

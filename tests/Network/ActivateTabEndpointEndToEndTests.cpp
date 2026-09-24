@@ -1,4 +1,4 @@
-﻿// End-to-end tests for GET /activate_tab and GET /list_tabs - network-impl-7
+// End-to-end tests for GET /activate_tab and GET /list_tabs - network-impl-7
 // campaign, Phase 5 (PHASE5_TESTING_DOCS_AND_REGRESSION_SAFETY.md, Step 3.1).
 // Mirrors tests/Network/EngineCommandEndpointsEndToEndTests.cpp's own proven
 // shape exactly: a real gte::EditorUiCommandBridge + a real
@@ -23,7 +23,7 @@
 // real JSON request/response bodies round-tripping over a real socket.
 
 #include "Application/EditorUiCommandBridge.h"
-#include "Core/EditorPanelCatalog.h"
+#include "Core/EditorPanelRegistry.h"
 #include "Network/NetworkServer.h"
 
 #include "NetworkTestHelpers.h"
@@ -126,6 +126,14 @@ class ActivateTabEndpointEndToEndTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
+        // editor-core-separation-3 campaign, PHASE4 - this test binary never
+        // constructs a real EditorHost, so EditorPanelRegistry is never
+        // seeded with the real built-in panel names the way production does
+        // (EditorHost.cpp's own registration call) - registering "Profiler"
+        // here (idempotent to re-register across multiple SetUp() calls -
+        // IsKnownName()/GET /list_tabs both tolerate a duplicate entry fine)
+        // is what every test below that activates "Profiler" now needs.
+        EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Profiler");
         m_standIn = std::make_unique<FakeEditorUiStandIn>(m_bridge);
         m_server = std::make_unique<Network::NetworkServer>(nullptr, nullptr, &m_bridge);
         m_server->Start(0);
@@ -209,8 +217,17 @@ TEST_F(ActivateTabEndpointEndToEndTest, ActivateTabReturns504WhenNeverFulfilled)
     m_standIn->SetGated(false);
 }
 
-TEST_F(ActivateTabEndpointEndToEndTest, ListTabsReturnsEveryKnownPanelName)
+// editor-core-separation-3 campaign, PHASE4 - Core/EditorPanelCatalog.h's
+// former compile-time-fixed kKnownEditorPanelNames[]/kKnownEditorPanelNameCount
+// are gone, replaced by EditorPanelRegistry (a runtime-populated registry) -
+// this test now proves GET /list_tabs genuinely reflects the registry's own
+// LIVE state (registering one uniquely-named test-only panel first, so this
+// proves real, generic behavior rather than a fixed expected list) instead of
+// asserting against a compile-time constant that no longer exists.
+TEST_F(ActivateTabEndpointEndToEndTest, ListTabsReturnsEveryRegisteredPanelName)
 {
+    EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Test_ListTabs_Panel_Omega");
+
     const httplib::Result res = m_client->Get("/list_tabs");
 
     ASSERT_TRUE(res != nullptr);
@@ -218,10 +235,18 @@ TEST_F(ActivateTabEndpointEndToEndTest, ListTabsReturnsEveryKnownPanelName)
     EXPECT_EQ(res->get_header_value("Content-Type"), "application/json");
     const nlohmann::json parsed = nlohmann::json::parse(res->body);
     ASSERT_TRUE(parsed.contains("tabs"));
-    ASSERT_EQ(parsed["tabs"].size(), kKnownEditorPanelNameCount);
-    for (std::size_t i = 0; i < kKnownEditorPanelNameCount; ++i) {
-        EXPECT_EQ(parsed["tabs"][i], kKnownEditorPanelNames[i]);
+    const std::vector<std::string>& allNames = EditorPanelRegistry::Instance().AllNames();
+    ASSERT_EQ(parsed["tabs"].size(), allNames.size());
+    for (std::size_t i = 0; i < allNames.size(); ++i) {
+        EXPECT_EQ(parsed["tabs"][i], allNames[i]);
     }
+    bool foundTestPanel = false;
+    for (const auto& tab : parsed["tabs"]) {
+        if (tab == "Test_ListTabs_Panel_Omega") {
+            foundTestPanel = true;
+        }
+    }
+    EXPECT_TRUE(foundTestPanel);
 }
 
 // A real (non-nullptr) EditorUiCommandBridge with NO FakeEditorUiStandIn
@@ -260,6 +285,11 @@ TEST(ActivateTabEndpointNoStandInTests, ActivateTabReturns404ForAnUnknownNameWit
 // GET /activate_tab with a KNOWN name, rather than crashing.
 TEST(ActivateTabEndpointNullBridgeTests, ActivateTabReturns503WhenBridgeIsNull)
 {
+    // editor-core-separation-3 campaign, PHASE4 - "Profiler" must be a known
+    // name for this test to correctly exercise the null-bridge 503 path
+    // (rather than a 404 short-circuit) - see this file's own fixture SetUp()
+    // comment above for why this registration is needed at all now.
+    EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Profiler");
     Network::NetworkServer server; // captureBridge/commandBridge/uiCommandBridge all default to nullptr.
     server.Start(0);
     ASSERT_TRUE(server.IsRunning());

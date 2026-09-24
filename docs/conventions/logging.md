@@ -20,7 +20,7 @@ touching this module or adding a new call site:
   signatures) exists when it's OFF - nothing ever needs linking against
   `Logger.cpp` in an OFF build. `Logger.h` itself is a THIRD documented
   exception (alongside `EditorLayer.h`/`NullEditorLayer.cpp` and
-  `EditorPanelCatalog.h`) to "everything under `src/Editor/` compiles only
+  `EditorPanelRegistry.h`) to "everything under `src/Editor/` compiles only
   when `GTE_ENABLE_EDITOR` is ON" - it, and every method it declares, must be
   safely `#include`-able and callable with zero `#ifdef` at the call site,
   from ANY file in the engine, regardless of `GTE_ENABLE_EDITOR`'s value.
@@ -118,7 +118,7 @@ touching this module or adding a new call site:
 `FormatLogEntryLine()`) plus `src/Editor/Panels/LogPanel.h/.cpp` (the actual
 ImGui window) give the Editor a real, working, Unity-Console-style panel
 docked alongside "Memory"/"Profiler"/"Render Graph"/"Atmosphere"/"Jobs"/
-"Project" - registered in `EditorPanelCatalog.h`/`DockLayout.cpp` under the
+"Project" - registered in `EditorPanelRegistry`/`DockLayout.cpp` under the
 exact panel name `"Log"` (so `GET /activate_tab?name=Log`/`GET /list_tabs`
 already work with zero further Network-layer code). Four always-on-by-default
 level checkboxes filter by an ARBITRARY subset (not a single min-level

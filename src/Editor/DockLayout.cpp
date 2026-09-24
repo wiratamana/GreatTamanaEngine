@@ -1,6 +1,6 @@
-﻿#include "DockLayout.h"
+#include "DockLayout.h"
 #include "EditorContext.h"
-#include "../Core/EditorPanelCatalog.h"
+#include "../Core/EditorPanelRegistry.h"
 #include "PlaybackControls.h"
 #include "SceneIO.h"
 
@@ -30,8 +30,8 @@ bool DefaultDockLayoutIsNeeded(ImGuiID dockspaceId)
     if (ImGui::DockBuilderGetNode(dockspaceId) == nullptr) {
         return true;
     }
-    for (const char* panelName : kKnownEditorPanelNames) {
-        const ImGuiWindow* window = ImGui::FindWindowByName(panelName);
+    for (const std::string& panelName : EditorPanelRegistry::Instance().AllNames()) {
+        const ImGuiWindow* window = ImGui::FindWindowByName(panelName.c_str());
         if (window != nullptr && window->DockId == 0) {
             return true;
         }
@@ -99,6 +99,13 @@ void BuildDefaultDockLayout(ImGuiID dockspaceId, ImVec2 size)
     ImGui::DockBuilderDockWindow("Project", bottom);
 #endif
 
+    // editor-core-separation-3 campaign, PHASE4 - every plugin panel gets
+    // tabbed into the SAME bottom node as Memory/Profiler/Render
+    // Graph/Jobs/Atmosphere/Log, generically, with zero hardcoded knowledge of
+    // any specific plugin (source design doc, Section 6).
+    for (const auto& entry : EditorPanelRegistry::Instance().PluginPanels()) {
+        ImGui::DockBuilderDockWindow(entry.name.c_str(), bottom);
+    }
     ImGui::DockBuilderFinish(dockspaceId);
 }
 } // namespace
@@ -220,14 +227,14 @@ void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer
     // undocked floating windows).
     if (!ctx.dockLayoutEnsured) {
         bool allPanelsAccountedFor = true;
-        for (const char* panelName : kKnownEditorPanelNames) {
+        for (const std::string& panelName : EditorPanelRegistry::Instance().AllNames()) {
             // A panel that has never called Begin() yet this session (e.g.
             // this is the very first frame ever, before this same
             // BuildUI() call reaches BuildHierarchyPanel()/etc.) doesn't
             // exist as an ImGuiWindow yet - we can't yet be sure whether
             // it'll end up docked or not, so don't latch "ensured" on this
             // frame; just wait and check again next frame instead.
-            if (ImGui::FindWindowByName(panelName) == nullptr) {
+            if (ImGui::FindWindowByName(panelName.c_str()) == nullptr) {
                 allPanelsAccountedFor = false;
                 break;
             }
