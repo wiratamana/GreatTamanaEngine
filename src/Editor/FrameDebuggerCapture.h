@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../Core/FrameDebuggerCaptureRecorder.h"
 #include "../Math/Mat4.h"
 #include "../Renderer/RenderTexture.h" // frame-debugger-7 campaign, PHASE3 - m_replayStepPreviews below.
 
@@ -23,6 +24,19 @@
 // own signature does NOT change at all for this feature; the only new call
 // site is one layer up, in RenderSystem::Draw() (see RenderSystem.h/.cpp).
 //
+// editor-core-separation-2 campaign, PHASE2 - this class now implements
+// gte::IFrameDebuggerCaptureRecorder (src/Core/FrameDebuggerCaptureRecorder.h),
+// a gte_core-owned pure-virtual interface - every gte_core-tier file that
+// used to hold a bare `FrameDebuggerCaptureContext*` forward declaration
+// (RenderSystem.h/.cpp, Game.h/.cpp, RenderPasses.h/.cpp, Core.h/.cpp,
+// EditorLayer.h) now holds an `IFrameDebuggerCaptureRecorder*` instead, and
+// calls its two virtual methods (RecordFrameDebuggerDraw()/AddReplayPasses())
+// instead of calling a gte_editor-only free function by name (the two former
+// free functions, RecordFrameDebuggerDraws()/AddFrameDebuggerReplayPasses(),
+// are GONE - their bodies are now this class's own two `override` method
+// definitions, in the same two .cpp files they always lived in - see
+// FrameDebuggerDrawRecording.cpp/FrameDebuggerReplayPasses.cpp).
+//
 // IMPORTANT for every CORE, always-compiled file that touches this type
 // (RenderSystem.h/.cpp today; Game.h/.cpp and RenderPasses.h/.cpp from
 // PHASE3 onward) - see this phase's own Step 3.1b: such a file may only
@@ -34,6 +48,24 @@
 // would compile fine (the forward declaration is enough) but FAIL TO LINK,
 // since this type is entirely absent from that configuration.
 namespace gte {
+
+// editor-core-separation-2 campaign, PHASE2 - forward declarations needed by
+// FrameDebuggerCaptureContext's own new IFrameDebuggerCaptureRecorder
+// overrides below (bare forward declarations are enough for a declaration-
+// only header, mirroring RenderSystem.h's/RenderPasses.h's own identical
+// precedent for these exact same types). `RenderTexture` needs no forward
+// declaration here since the #include above already brings in the real,
+// complete type (needed by this class's own pre-existing m_replayStepPreviews
+// member).
+class Registry;
+class Renderer;
+class Mesh;
+class Pipeline;
+struct MaterialTexture; // real definition is a struct, not a class - see FrameDebuggerCaptureRecorder.h's own note.
+class Game;
+namespace rg {
+class RenderGraphBuilder;
+} // namespace rg
 
 // This engine's REAL, constant (not per-material) blend/Z/stencil facts -
 // see Pipeline.cpp's own hardcoded VkPipelineColorBlendAttachmentState/
@@ -119,7 +151,7 @@ FrameDebuggerStandardPipelineState DescribeSkyBackgroundPipelineState();
 // passes nullptr, pays nothing beyond RenderSystem::Draw()'s own single,
 // already-resolved "is this pointer null" branch per draw call - no string
 // formatting, no vector work, no allocation of any kind.
-class FrameDebuggerCaptureContext {
+class FrameDebuggerCaptureContext : public IFrameDebuggerCaptureRecorder {
 public:
     // Records one real, already-resolved draw call. `pipelineDebugName`
     // should be `pipeline.DebugName()` (Pipeline.h) - empty is tolerated
@@ -161,6 +193,24 @@ public:
     // BuildRealFrameDebuggerSnapshot()'s own view-region walk exactly like
     // any other real Graphics-kind pass, with no fabricated
     // FrameDebuggerDrawRecord required.
+
+    // editor-core-separation-2 campaign, PHASE2 - the two
+    // IFrameDebuggerCaptureRecorder overrides (src/Core/
+    // FrameDebuggerCaptureRecorder.h). Replaces the old free functions
+    // gte::RecordFrameDebuggerDraws()/gte::AddFrameDebuggerReplayPasses() -
+    // same parameters (minus the leading/trailing FrameDebuggerCaptureContext&
+    // reference each free function used to take, which becomes the implicit
+    // `this` of these methods instead), same semantics, same call sites
+    // (RenderSystem::Draw()/Core::BuildFrame()). Bodies are defined in the
+    // same two .cpp files their free-function predecessors always lived in -
+    // see FrameDebuggerDrawRecording.cpp/FrameDebuggerReplayPasses.cpp.
+    void RecordFrameDebuggerDraw(Registry& registry, Renderer& renderer, Entity entity, const Mesh& mesh,
+        const Pipeline& pipeline, const MaterialTexture* materialTexture, const Mat4& viewProjection) override;
+
+    std::vector<rg::TextureHandle> AddReplayPasses(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer,
+        float aspectWidthOverHeight, std::size_t objectCount,
+        const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers,
+        const std::function<void(VkCommandBuffer)>& recordSkyBackground, RenderTexture& gameTarget) override;
 
     // Clears every recorded fact back to the empty/default state - call
     // once at the top of every armed frame (mirrors FrameRecorder::

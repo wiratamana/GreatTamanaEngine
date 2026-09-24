@@ -12,19 +12,13 @@
 #include "../Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
 
-// task_manager/editor-core-separation-1 campaign, PHASE2
-// (PHASE2_FRAME_DEBUGGER_CAPTURE_POINTER_SAFETY_FIX.md) - FrameDebuggerCaptureContext
-// (src/Editor/FrameDebuggerCapture.h) is an Editor-only type. This file used
-// to #include it (behind #if GTE_ENABLE_EDITOR) so
-// AddFrameDebuggerReplayPasses()'s own body could call real methods on the
-// complete type - a genuine link hazard once gte_editor becomes a real,
-// separate CMake target (Phase 9): gte_core would otherwise carry an
-// unresolved external symbol only gte_editor defines. That function's
-// ENTIRE body (the part requiring the complete type) has moved OUT of this
-// file into src/Editor/FrameDebuggerReplayPasses.cpp - this file now
-// contains ZERO #include of FrameDebuggerCapture.h and ZERO reference to
-// the complete type, only the bare forward declaration RenderPasses.h
-// itself already carries (`class FrameDebuggerCaptureContext;`).
+// editor-core-separation-2 campaign, PHASE2 - IFrameDebuggerCaptureRecorder
+// (src/Core/FrameDebuggerCaptureRecorder.h) is the new, gte_core-owned
+// abstract interface FrameDebuggerCaptureContext (src/Editor/
+// FrameDebuggerCapture.h, still gte_editor-only) now implements - this file
+// only ever holds/forwards a bare IFrameDebuggerCaptureRecorder* pointer
+// (RenderPasses.h's own #include of that interface header already brings in
+// the complete type), never dereferencing it itself, exactly like before.
 
 #include <cstdint>
 
@@ -54,7 +48,7 @@ void DeclareGpuSkinningReads(
 // below for that, now a real, separate pass.
 void AddRenderOpaquePass(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer,
     rg::TextureHandle gameViewTarget, float aspectWidthOverHeight,
-    const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers, FrameDebuggerCaptureContext* frameDebuggerCapture)
+    const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers, IFrameDebuggerCaptureRecorder* frameDebuggerCapture)
 {
     builder.AddRenderPass(
         "RenderOpaque", rg::PassKind::Graphics, rg::ViewScope::GameView, rg::RenderPassCategory::General,
@@ -87,7 +81,7 @@ void AddRenderOpaquePass(rg::RenderGraphBuilder& builder, Game& game, Renderer& 
 // can label its Frame Debugger child event correctly without ever
 // hardcoding a pass-name string match.
 void AddDrawSkyBackgroundPass(rg::RenderGraphBuilder& builder, Renderer& renderer, rg::TextureHandle gameViewTarget,
-    const std::function<void(VkCommandBuffer)>& recordSkyBackground, FrameDebuggerCaptureContext* frameDebuggerCapture)
+    const std::function<void(VkCommandBuffer)>& recordSkyBackground, IFrameDebuggerCaptureRecorder* frameDebuggerCapture)
 {
     // Render Pass campaign (task_manager/render-pass-1), PHASE4 - this
     // parameter is kept for signature symmetry with AddRenderOpaquePass()
@@ -156,17 +150,19 @@ void AddRenderTransparentPass(rg::RenderGraphBuilder& builder, Game& game, Rende
     // We Will NOT Do".
 }
 
-// task_manager/editor-core-separation-1 campaign, PHASE2
-// (PHASE2_FRAME_DEBUGGER_CAPTURE_POINTER_SAFETY_FIX.md) - AddFrameDebuggerReplayPasses()
-// (declared in RenderPasses.h - unchanged there) used to be DEFINED here,
-// with its real body wrapped in `#if GTE_ENABLE_EDITOR` (the part calling
-// `capture.SetReplayStepPreviews(...)` on the complete
-// FrameDebuggerCaptureContext type) and an `#else` no-op stub otherwise.
-// Both branches moved OUT of this file entirely - this function's ONLY
-// definition now lives in src/Editor/FrameDebuggerReplayPasses.cpp
-// (unconditional `#include "FrameDebuggerCapture.h"`, no `#if` guard needed
-// there since that file only ever compiles as part of the Editor source
-// list) - see that file for the real body.
+// editor-core-separation-2 campaign, PHASE2 - gte::AddFrameDebuggerReplayPasses()
+// (the free function this comment used to describe, and its DECLARATION in
+// RenderPasses.h) is GONE entirely - it is now
+// FrameDebuggerCaptureContext::AddReplayPasses(), a member function of the
+// interface it implements (gte::IFrameDebuggerCaptureRecorder, src/Core/
+// FrameDebuggerCaptureRecorder.h), called through a null-checked
+// IFrameDebuggerCaptureRecorder* pointer from Core::BuildFrame() instead of
+// by name (closing "Defect B" - see PHASE0_MASTER_STRATEGY.md). Its body
+// still lives entirely in src/Editor/FrameDebuggerReplayPasses.cpp
+// (unconditional #include of FrameDebuggerCapture.h, no #if guard needed -
+// that file only ever compiles as part of the Editor source list) - see
+// that file for the real body. Never defined in this file, exactly as
+// before.
 
 // render-pass-3 campaign, PHASE3 - AddSceneViewPass() REMOVED (see
 // RenderPasses.h's own updated doc comment at this same location for the

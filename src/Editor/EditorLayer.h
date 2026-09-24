@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "../Math/Mat4.h"
 #include "../Math/Vec3.h"
@@ -6,6 +6,18 @@
 #include "../Renderer/RenderTexture.h"
 #include "../Renderer/Culling/GpuDrivenBatchDebugInfo.h"
 #include "../Renderer/RenderGraph/RenderGraphTypes.h"
+// editor-core-separation-2 campaign, PHASE2 - the new gte_core-owned
+// IFrameDebuggerCaptureRecorder interface (src/Core/
+// FrameDebuggerCaptureRecorder.h) - a gte_core-owned, ImGui/SDL-free header,
+// so EditorLayer.h (the one documented gte_core-visible exception file - see
+// PHASE0_MASTER_STRATEGY.md's Locked Design Decision #8) including it
+// directly is completely safe and mirrors how this header already includes
+// other gte_core headers it needs. MUST be included here, at file scope
+// (NOT from inside `namespace gte { ... }` below) - this header opens its
+// own `namespace gte { ... }` block, and including it from inside an
+// already-open `namespace gte { ... }` here would create a bogus nested
+// `gte::gte` namespace instead of extending the real `gte` namespace.
+#include "../Core/FrameDebuggerCaptureRecorder.h"
 
 #include <cstdint>
 #include <memory>
@@ -37,7 +49,16 @@ class AtmosphereLutRenderer;
 // even when the type is never defined in this translation unit, since
 // PrepareFrameDebuggerCaptureContext() below only ever needs a POINTER to
 // it.
-class FrameDebuggerCaptureContext;
+//
+// editor-core-separation-2 campaign, PHASE2 - FrameDebuggerCaptureContext is
+// still an Editor-only type, but PrepareFrameDebuggerCaptureContext() below
+// now returns a POINTER TO THE ABSTRACT INTERFACE it implements,
+// IFrameDebuggerCaptureRecorder (#included above, at file scope) - this
+// closes the exact undefined-reference hazard that a bare
+// `class FrameDebuggerCaptureContext;` forward declaration alone could never
+// cause here (this header never dereferences the pointer), but which every
+// DOWNSTREAM gte_core-tier consumer of this return value (Core.cpp) used to
+// hit once it called a gte_editor-only free function on it by name.
 
 namespace rg {
 class RenderGraph;
@@ -550,7 +571,7 @@ public:
     // other Editor<->engine feedback loop in this codebase already has
     // (see e.g. IsPlaybackPaused()'s own doc comment). Always nullptr for
     // NullEditorLayer (a release build has no Frame Debugger to arm).
-    virtual FrameDebuggerCaptureContext* PrepareFrameDebuggerCaptureContext() = 0;
+    virtual IFrameDebuggerCaptureRecorder* PrepareFrameDebuggerCaptureContext() = 0;
 
     // The Frame Debugger's own Step-triggered capture (PHASE3's Step 3.2,
     // call site 2) - called by Application::Run() right where

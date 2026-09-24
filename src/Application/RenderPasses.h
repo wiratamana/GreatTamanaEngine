@@ -53,6 +53,20 @@
 // declaration of the outer class can never provide.
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../Renderer/RenderGraph/RenderGraphTypes.h"
+// editor-core-separation-2 campaign, PHASE2 - this header now #includes the
+// gte_core-owned IFrameDebuggerCaptureRecorder interface (src/Core/
+// FrameDebuggerCaptureRecorder.h) instead of forward-declaring the concrete,
+// gte_editor-only FrameDebuggerCaptureContext type - see that header's own
+// doc comment and PHASE0_MASTER_STRATEGY.md's Locked Design Decision #1.
+// AddRenderOpaquePass()/AddDrawSkyBackgroundPass() below only ever need a
+// POINTER to the interface, never dereferencing it themselves (they only
+// ever forward it onward into game.Render()). MUST be included here, at
+// file scope (NOT from inside `namespace gte { ... }` below) - this header
+// opens its own `namespace gte { ... }` block, and including it from
+// inside an already-open `namespace gte { ... }` here would create a
+// bogus nested `gte::gte` namespace instead of extending the real `gte`
+// namespace.
+#include "../Core/FrameDebuggerCaptureRecorder.h"
 
 #include <volk.h>
 
@@ -67,18 +81,6 @@ namespace gte {
 class Game;
 class Renderer;
 class RenderTexture;
-
-// Editor-only type (src/Editor/FrameDebuggerCapture.h) - forward-declared
-// ONLY (never #included here), since RenderPasses.h is a CORE, always-
-// compiled file that must still compile (and, per RenderPasses.cpp, LINK)
-// cleanly with GTE_ENABLE_EDITOR=OFF, a build where this type does not
-// exist at all - see task_manager/frame-debugger-3/
-// PHASE3_FRAME_HISTORY_RING_BUFFER_AND_CAPTURE_TRIGGER.md's own Step 3.4b
-// (mirroring src/Game/RenderSystem.h's own identical PHASE1 precedent). A
-// bare forward declaration of a pointee is always legal even when the type
-// is never defined in this translation unit, since AddRenderOpaquePass() below
-// only ever needs a POINTER to it.
-class FrameDebuggerCaptureContext;
 
 namespace rg {
 class RenderGraphBuilder;
@@ -152,7 +154,7 @@ void DeclareGpuSkinningReads(
 void AddRenderOpaquePass(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer,
     rg::TextureHandle gameViewTarget, float aspectWidthOverHeight,
     const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers = {},
-    FrameDebuggerCaptureContext* frameDebuggerCapture = nullptr);
+    IFrameDebuggerCaptureRecorder* frameDebuggerCapture = nullptr);
 
 // Render Pass campaign, PHASE2 - the Sky Background draw, now a REAL,
 // separate Render Graph pass in its own right (previously hand-fused inside
@@ -182,7 +184,7 @@ void AddRenderOpaquePass(rg::RenderGraphBuilder& builder, Game& game, Renderer& 
 // its "view region" - no fabricated draw record needed at all.
 void AddDrawSkyBackgroundPass(rg::RenderGraphBuilder& builder, Renderer& renderer, rg::TextureHandle gameViewTarget,
     const std::function<void(VkCommandBuffer)>& recordSkyBackground,
-    FrameDebuggerCaptureContext* frameDebuggerCapture = nullptr);
+    IFrameDebuggerCaptureRecorder* frameDebuggerCapture = nullptr);
 
 // Render Pass campaign, PHASE2 - the built-in "Render Transparent" pass - a
 // real, permanent call site wired into Application::Run(), currently ALWAYS
@@ -203,70 +205,18 @@ void AddRenderTransparentPass(rg::RenderGraphBuilder& builder, Game& game, Rende
 // task_manager/frame-debugger-7 campaign, PHASE3
 // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md) - adds N
 // debug-only, self-contained Render Graph passes (one per real object this
-// frame's "RenderOpaque" pass will draw), each redrawing objects [0..i] FROM
-// SCRATCH into its OWN dedicated destination texture, so the Frame
-// Debugger's event tree can eventually show a real, correct "accumulated
-// Game View as of this exact step" image for every object-draw step, not
-// just the whole finished frame - see that phase's own doc for why this is
-// deliberately O(N^2) draws across all N passes rather than a shared-target
-// + mid-pass-copy scheme. Only ever called when a capture trigger was just
-// serviced (see IEditorLayer::ConsumePendingFrameDebuggerReplayRequest()) -
-// a genuine no-op (adds zero passes) whenever `objectCount == 0`. NEVER
-// touches the real "RenderOpaque"/"DrawSkyBackground" passes/target in any
-// way - `gameTarget` is only
-// ever READ here (its own Extent()/Format(), to size/format the N
-// destination textures identically), never written. `capture` receives the
-// resulting N retained RenderTexture objects via
-// capture.SetReplayStepPreviews(...) (see FrameDebuggerCapture.h) -
-// populated here (pass-declaration time, where a live Renderer& already
-// exists), filled with FRESH (garbage/uninitialized) content until each
-// pass's own execute lambda actually runs later this same Execute() call.
-// IMPORTANT, CORRECTNESS-CRITICAL - returns every one of the N destination
-// TextureHandles this call just imported/declared a pass for. The CALLER
-// MUST append every one of these into its own `outputs`/finalOutputs root
-// set (RenderGraph::Execute()'s own `build` callback return value) - a
-// TextureHandle that never reaches `finalOutputs` (directly, or
-// transitively via another kept pass) is exactly what
-// RenderGraphCompiler::Compile()'s own backward-reachability culling scan
-// removes, and NONE of these N passes are ever read by any other pass in
-// the graph, so skipping this step silently CULLS every one of them - the
-// destination `RenderTexture`s are still created (Renderer::CreateRenderTexture())
-// and still handed to `capture.SetReplayStepPreviews()`, but each pass's
-// own `execute` lambda (the thing that actually draws real pixels into it)
-// NEVER RUNS, leaving genuinely uninitialized VRAM content behind - a real
-// bug confirmed during this phase's own Step 4 manual visual spot-check
-// (the very first implementation attempt produced exactly this: garbage/
-// noise images, not a rendered scene).
-//
-// task_manager/editor-core-separation-1 campaign, PHASE2
-// (PHASE2_FRAME_DEBUGGER_CAPTURE_POINTER_SAFETY_FIX.md) - this function's
-// own real body is now defined ENTIRELY in a NEW file,
-// src/Editor/FrameDebuggerReplayPasses.cpp (unconditional #include of
-// FrameDebuggerCapture.h, no #if guard needed there - that file only ever
-// compiles as part of the Editor source list, a real link hazard fix: this
-// function's body genuinely NEEDS the real, complete
-// FrameDebuggerCaptureContext type (to call SetReplayStepPreviews() on it),
-// which RenderPasses.cpp (a CORE, always-compiled file destined for
-// gte_core) must never carry a dependency on - see that new file's own
-// header comment. This DECLARATION stays here, unchanged, since it only
-// ever needs the forward-declared reference parameter above.
-//
-// Render Pass campaign (task_manager/render-pass-1), PHASE4
-// (PHASE4_FRAME_DEBUGGER_GENERIC_TREE_REWORK.md, Step 3.3b) - each of the N
-// passes this function declares now goes through the AddRenderPass()
-// chokepoint (PHASE1), tagged rg::RenderPassCategory::Debug - this is what
-// lets the Frame Debugger's own generic tree-building logic
-// (BuildRealFrameDebuggerSnapshot()'s "view region" walk,
-// FrameDebuggerData.cpp) exclude these debug-only passes instead of
-// mistaking them for real "DrawSkyBackground"/"RenderTransparent" leaves,
-// even on the exact capture frame that declares them (they sit, by real
-// execution order, structurally between the real view passes above and the
-// Aerial Perspective Composite pass).
-std::vector<rg::TextureHandle> AddFrameDebuggerReplayPasses(rg::RenderGraphBuilder& builder, Game& game,
-    Renderer& renderer, float aspectWidthOverHeight, std::size_t objectCount,
-    const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers,
-    const std::function<void(VkCommandBuffer)>& recordSkyBackground, RenderTexture& gameTarget,
-    FrameDebuggerCaptureContext& capture);
+// frame's "RenderOpaque" pass will draw) - see this method's own doc
+// comment now (editor-core-separation-2 campaign, PHASE2) in
+// src/Core/FrameDebuggerCaptureRecorder.h, gte::IFrameDebuggerCaptureRecorder::
+// AddReplayPasses(), for the full contract this DECLARATION used to carry
+// here as a free function, gte::AddFrameDebuggerReplayPasses(). That free
+// function is GONE - Core::BuildFrame() now calls this through a null-
+// checked IFrameDebuggerCaptureRecorder* pointer instead
+// (`frameDebuggerCapture->AddReplayPasses(...)`), never a gte_editor-only
+// free-function symbol by name (closing editor-core-separation-2's own
+// "Defect B" - see PHASE0_MASTER_STRATEGY.md). Its body is still physically
+// defined in src/Editor/FrameDebuggerReplayPasses.cpp, now as
+// FrameDebuggerCaptureContext::AddReplayPasses().
 
 // render-pass-3 campaign, PHASE3
 // (PHASE3_FULL_PRODUCTION_PASS_MIGRATION_AND_VIEW_UNIFICATION.md, Step 3.4) -

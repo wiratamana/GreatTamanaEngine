@@ -15,6 +15,17 @@
 #include "../Renderer/Renderer.h"
 #include "../Renderer/RenderGraph/RenderGraph.h"
 #include "../Renderer/RenderGraph/RenderPipeline.h"
+// editor-core-separation-2 campaign, PHASE2 - Core only ever holds/forwards
+// a bare IFrameDebuggerCaptureRecorder* pointer (src/Core/
+// FrameDebuggerCaptureRecorder.h, gte_core-owned), never
+// FrameDebuggerCaptureContext directly - see that header's own doc comment
+// and PHASE0_MASTER_STRATEGY.md's Locked Design Decision #1. MUST be
+// included here, at file scope (NOT from inside `namespace gte { ... }`
+// below) - this header opens its own `namespace gte { ... }` block, and
+// including it from inside an already-open `namespace gte { ... }` here
+// would create a bogus nested `gte::gte` namespace instead of extending the
+// real `gte` namespace.
+#include "FrameDebuggerCaptureRecorder.h"
 
 #include <volk.h>
 
@@ -33,12 +44,6 @@ namespace gte {
 // src/Game/RenderSystem.h's own pre-existing FrameDebuggerCaptureContext*
 // forward-declaration precedent exactly.
 class IEditorLayer;
-
-// Editor-only type (src/Editor/FrameDebuggerCapture.h) - forward-declared
-// ONLY, mirroring RenderPasses.h's/RenderSystem.h's own identical precedent
-// (see those headers' own doc comments) - Core only ever holds/forwards a
-// bare pointer to this type, never dereferences it.
-class FrameDebuggerCaptureContext;
 
 // Placeholder shape (editor-core-separation-1 campaign, PHASE12) - Core's own
 // public contract (design doc Section 5.2) commits to exposing frame
@@ -307,7 +312,7 @@ private:
     // render-pass-3 campaign, PHASE2 - Game-View-only (see RenderPasses.h's
     // own AddRenderOpaquePass() doc comment on why a real, non-null capture
     // pointer is NEVER handed to Scene View/Present).
-    FrameDebuggerCaptureContext* m_currentFrameDebuggerCaptureForOffscreenPipeline = nullptr;
+    IFrameDebuggerCaptureRecorder* m_currentFrameDebuggerCaptureForOffscreenPipeline = nullptr;
 
     // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
     // PHASE5 - the ONE persistent, per-batch GPU resource cache (PHASE4),

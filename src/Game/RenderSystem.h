@@ -15,6 +15,21 @@
 #include "Renderer/PipelineHandle.h"
 #include "Renderer/ResourcePool.h"
 #include "Renderer/TextureHandle.h"
+// editor-core-separation-2 campaign, PHASE2 - RenderSystem.h now #includes
+// the gte_core-owned IFrameDebuggerCaptureRecorder interface (src/Core/
+// FrameDebuggerCaptureRecorder.h) instead of forward-declaring the concrete,
+// gte_editor-only FrameDebuggerCaptureContext type - see that header's own
+// doc comment and PHASE0_MASTER_STRATEGY.md's Locked Design Decision #1.
+// Draw() below only ever needs a POINTER to the interface, calling its
+// RecordFrameDebuggerDraw() virtual method instead of the old
+// gte_editor-only free function gte::RecordFrameDebuggerDraws() (which is
+// GONE - see this header's own updated call-site doc comment below, and
+// RenderSystem.cpp). MUST be included here, at file scope (NOT from inside
+// `namespace gte { ... }` below) - this header opens its own
+// `namespace gte { ... }` block, and including it from inside an
+// already-open `namespace gte { ... }` here would create a bogus nested
+// `gte::gte` namespace instead of extending the real `gte` namespace.
+#include "../Core/FrameDebuggerCaptureRecorder.h"
 
 #include <cstddef>
 #include <optional>
@@ -24,35 +39,6 @@
 namespace gte {
 
 class Renderer;
-
-// Editor-only type (src/Editor/FrameDebuggerCapture.h) - forward-declared
-// ONLY (never #included here), since RenderSystem.h is a CORE, always-
-// compiled file that must still compile (and, per RenderSystem.cpp, LINK)
-// cleanly with GTE_ENABLE_EDITOR=OFF, a build where this type does not
-// exist at all - see task_manager/frame-debugger-3/
-// PHASE1_RENDERER_CAPTURE_INSTRUMENTATION.md's own Step 3.1b. A bare
-// forward declaration of a pointee is always legal even when the type is
-// never defined in this translation unit, since Draw() below only ever
-// needs a POINTER to it.
-class FrameDebuggerCaptureContext;
-
-// task_manager/editor-core-separation-1 campaign, PHASE2
-// (PHASE2_FRAME_DEBUGGER_CAPTURE_POINTER_SAFETY_FIX.md) - the real body of
-// RenderSystem::Draw()'s own `#if GTE_ENABLE_EDITOR` block (the part
-// dereferencing `capture` - calling RecordDraw()/RecordEntityDraw() on the
-// complete FrameDebuggerCaptureContext type) has moved OUT of
-// RenderSystem.cpp entirely, into this free function - DECLARED here
-// (legal: only needs the forward-declared reference above), DEFINED for
-// real only in a new Editor-side file,
-// src/Editor/FrameDebuggerDrawRecording.cpp. Draw() below keeps its own
-// existing null-check branch shape (`if (capture != nullptr) { ... }`), now
-// calling this DECLARED-BUT-NOT-YET-LINKED-IN-gte_core-ALONE function
-// instead of dereferencing the pointer directly - a real link hazard fix
-// (see PHASE0_MASTER_STRATEGY.md's own Section 2.5), not just an #include
-// hygiene one.
-void RecordFrameDebuggerDraws(FrameDebuggerCaptureContext& capture, Registry& registry, Renderer& renderer,
-    Entity entity, const Mesh& mesh, const Pipeline& pipeline, const MaterialTexture* materialTexture,
-    const Mat4& viewProjection);
 
 // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
 // PHASE4 - one eligible batch's own frame-local summary, returned by
@@ -177,15 +163,17 @@ public:
     // handle) simply draws with no material texture bound (VK_NULL_HANDLE -
     // see Renderer::Submit()'s own `materialDescriptorSet` parameter).
     //
-    // `capture` (optional, default nullptr - see FrameDebuggerCaptureContext
-    // above, task_manager/frame-debugger-3, PHASE1) is only ever a real,
+    // `capture` (optional, default nullptr - see IFrameDebuggerCaptureRecorder,
+    // src/Core/FrameDebuggerCaptureRecorder.h, task_manager/frame-debugger-3,
+    // PHASE1, upgraded to an abstract interface pointer by
+    // editor-core-separation-2's own PHASE2) is only ever a real,
     // non-null, ARMED pointer for the Game-View-driving call site, and only
     // from PHASE3 onward - every existing call site (including this whole
     // campaign's own PHASE1) keeps compiling completely unchanged against
     // this new parameter's default. When armed, records real per-draw facts
     // (Pipeline debug name/MaterialTexture debug name/view-projection
     // matrix) for every resolved draw this call issues - see
-    // FrameDebuggerCaptureContext::RecordDraw().
+    // IFrameDebuggerCaptureRecorder::RecordFrameDebuggerDraw().
     //
     // `maxDrawCount` (task_manager/frame-debugger-7 campaign, PHASE3,
     // PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step
@@ -219,7 +207,7 @@ public:
     // AddPresentPass()'s direct-render-to-swapchain fallback (Locked
     // Design Decision 11, PHASE0_MASTER_STRATEGY.md).
     void Draw(Registry& registry, Renderer& renderer, float aspectWidthOverHeight,
-        FrameDebuggerCaptureContext* capture = nullptr, std::optional<std::size_t> maxDrawCount = std::nullopt,
+        IFrameDebuggerCaptureRecorder* capture = nullptr, std::optional<std::size_t> maxDrawCount = std::nullopt,
         const std::unordered_set<Entity>& batchedEntities = {});
 
     // Explicit-view-projection overload of Draw() above, for a caller that
@@ -245,7 +233,7 @@ public:
     // Game-View caller ever supplies a real, non-empty value, and it does
     // so by forwarding straight into this same overload.
     void Draw(Registry& registry, Renderer& renderer, const Mat4& viewProjection,
-        FrameDebuggerCaptureContext* capture = nullptr, std::optional<std::size_t> maxDrawCount = std::nullopt,
+        IFrameDebuggerCaptureRecorder* capture = nullptr, std::optional<std::size_t> maxDrawCount = std::nullopt,
         const std::unordered_set<Entity>& batchedEntities = {});
 
     // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),

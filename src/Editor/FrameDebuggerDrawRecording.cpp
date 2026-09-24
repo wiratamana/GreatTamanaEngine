@@ -1,22 +1,24 @@
-// task_manager/editor-core-separation-1 campaign, PHASE2
-// (PHASE2_FRAME_DEBUGGER_CAPTURE_POINTER_SAFETY_FIX.md) - this file is the
-// NEW home for the real body of RenderSystem::Draw()'s own former
-// `#if GTE_ENABLE_EDITOR` block (src/Game/RenderSystem.cpp) - the part that
-// dereferenced a `capture` pointer and called real methods
-// (RecordDraw()/RecordEntityDraw()) on the complete
-// FrameDebuggerCaptureContext type. That was a genuine link hazard once
-// gte_editor becomes a real, separate CMake target (Phase 9): gte_core
-// would otherwise carry an unresolved external symbol only gte_editor
-// defines (see task_manager/editor-core-separation-1/
-// PHASE0_MASTER_STRATEGY.md, Section 2.5).
-//
-// RecordFrameDebuggerDraws() is DECLARED in src/Game/RenderSystem.h
-// (forward-declared FrameDebuggerCaptureContext& parameter only - legal,
-// exactly like the pointer parameter it replaces) and DEFINED for real only
-// here. This file lives under src/Editor/ and only ever compiles as part of
-// the Editor source list, so it needs no `#if`/`#endif` guard of its own at
-// all - its #include of "FrameDebuggerCapture.h" below is therefore
-// unconditional.
+// editor-core-separation-2 campaign, PHASE2 - this file now defines
+// FrameDebuggerCaptureContext::RecordFrameDebuggerDraw(), the concrete
+// implementation of IFrameDebuggerCaptureRecorder::RecordFrameDebuggerDraw()
+// (src/Core/FrameDebuggerCaptureRecorder.h), reachable from gte_core-tier
+// RenderSystem::Draw() only through a virtual call on a null-checked
+// IFrameDebuggerCaptureRecorder* pointer - never a gte_editor-only
+// free-function symbol by name. This closes the exact undefined-reference
+// hazard editor-core-separation-1's own PHASE2
+// (PHASE2_FRAME_DEBUGGER_CAPTURE_POINTER_SAFETY_FIX.md) left open: that
+// phase moved this body OUT of RenderSystem.cpp into a free function
+// (RecordFrameDebuggerDraws(), declared in src/Game/RenderSystem.h, defined
+// only here) specifically because gte_core would otherwise carry an
+// unresolved external symbol only gte_editor defines - but a free function
+// called BY NAME from gte_core-tier code is still, itself, exactly that
+// same hazard (see editor-core-separation-2's own PHASE0_MASTER_STRATEGY.md,
+// "Defect A"). Behavior is UNCHANGED from the old free function's own body -
+// only its shape (a member function instead of a free function taking a
+// FrameDebuggerCaptureContext& parameter) and its call site
+// (RenderSystem::Draw() now calls `capture->RecordFrameDebuggerDraw(...)`
+// through the interface pointer, instead of
+// `RecordFrameDebuggerDraws(*capture, ...)` by name) changed.
 
 #include "../Game/RenderSystem.h"
 
@@ -35,23 +37,24 @@ namespace gte {
 
 // frame-debugger-6 campaign, PHASE3 (per-entity attribution) plus
 // task_manager/frame-debugger-3, PHASE1 (the original RecordDraw() name-list
-// bookkeeping) - see RenderSystem.h's own doc comment on
-// RecordFrameDebuggerDraws() for why this function exists at all. Behavior
-// is UNCHANGED from what used to run inline inside RenderSystem::Draw()'s
-// own `#if GTE_ENABLE_EDITOR` block - only the physical location moved.
-void RecordFrameDebuggerDraws(FrameDebuggerCaptureContext& capture, Registry& registry, Renderer& /*renderer*/,
-    Entity entity, const Mesh& mesh, const Pipeline& pipeline, const MaterialTexture* materialTexture,
-    const Mat4& viewProjection)
+// bookkeeping) - see src/Core/FrameDebuggerCaptureRecorder.h's own doc
+// comment on RecordFrameDebuggerDraw() for why this method exists at all.
+// Behavior is UNCHANGED from what used to run inline inside
+// RenderSystem::Draw()'s own `#if GTE_ENABLE_EDITOR` block, and later inside
+// the free function this method replaces - only the physical location/shape
+// moved.
+void FrameDebuggerCaptureContext::RecordFrameDebuggerDraw(Registry& registry, Renderer& /*renderer*/, Entity entity,
+    const Mesh& mesh, const Pipeline& pipeline, const MaterialTexture* materialTexture, const Mat4& viewProjection)
 {
     // editor-core-separation-1 campaign, PHASE4 - names now live entirely on
     // the Editor side (EditorGpuMemoryNameOverlay); `renderer` is kept as a
-    // parameter for signature stability with RenderSystem.h's declaration
+    // parameter for signature stability with the interface's declaration
     // (and RenderSystem::Draw()'s own call site), even though it is no
     // longer used here.
     const std::string materialTextureDebugName = materialTexture != nullptr
         ? EditorGpuMemoryNameOverlay::GetDebugName(materialTexture->texture.Handle())
         : std::string();
-    capture.RecordDraw(pipeline.DebugName(), materialTextureDebugName, viewProjection);
+    RecordDraw(pipeline.DebugName(), materialTextureDebugName, viewProjection);
 
     // frame-debugger-6 campaign, PHASE3 - additionally record this exact
     // draw's own per-entity attribution facts (never deduplicated, unlike
@@ -73,7 +76,7 @@ void RecordFrameDebuggerDraws(FrameDebuggerCaptureContext& capture, Registry& re
         displayName = "Entity " + std::to_string(entity.index);
     }
 
-    capture.RecordEntityDraw(
+    RecordEntityDraw(
         entity.index, entity.generation, displayName, pipeline.DebugName(), materialTextureDebugName, triangleCount);
 }
 

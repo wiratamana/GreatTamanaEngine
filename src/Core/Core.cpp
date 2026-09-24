@@ -327,7 +327,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             const float aspectWidthOverHeight = viewData->aspectWidthOverHeight;
             const bool isGameView = (frame.currentView == rg::RenderViewId::Named("Game"));
             const Mat4 viewProjectionOverride = viewData->viewProjection;
-            FrameDebuggerCaptureContext* frameDebuggerCapture =
+            IFrameDebuggerCaptureRecorder* frameDebuggerCapture =
                 isGameView ? m_currentFrameDebuggerCaptureForOffscreenPipeline : nullptr;
 
             rg::RenderPassDesc desc;
@@ -655,7 +655,7 @@ void Core::BuildFrame()
     m_gameTargetThisFrame = gameTarget;
     m_sceneTargetThisFrame = sceneTarget;
 
-    FrameDebuggerCaptureContext* frameDebuggerCapture =
+    IFrameDebuggerCaptureRecorder* frameDebuggerCapture =
         (m_editorLayer != nullptr) ? m_editorLayer->PrepareFrameDebuggerCaptureContext() : nullptr;
 
     // Call 1 of 2: the SYNCHRONOUS offscreen regime - Game view + Scene view
@@ -837,10 +837,9 @@ void Core::BuildFrame()
                         const std::function<void(VkCommandBuffer)> recordGameSkyBackground =
                             gameSkyBackgroundCallbackForReplay.value_or(std::function<void(VkCommandBuffer)>{});
                         const std::size_t objectCount = m_game.CountGameViewDrawCommandsThisFrame();
-                        const std::vector<rg::TextureHandle> replayStepHandles =
-                            AddFrameDebuggerReplayPasses(b, m_game, m_renderer, gameAspectForReplay, objectCount,
-                                gpuSkinningBuffersForReplay, recordGameSkyBackground, *gameTarget,
-                                *frameDebuggerCapture);
+                        const std::vector<rg::TextureHandle> replayStepHandles = frameDebuggerCapture->AddReplayPasses(
+                            b, m_game, m_renderer, gameAspectForReplay, objectCount, gpuSkinningBuffersForReplay,
+                            recordGameSkyBackground, *gameTarget);
                         for (const rg::TextureHandle& replayHandle : replayStepHandles) {
                             outputs.push_back(replayHandle);
                         }

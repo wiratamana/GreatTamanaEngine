@@ -4,19 +4,23 @@
 #include "Profiling/ScopeTimer.h"
 #include "Renderer/Renderer.h"
 
-// task_manager/editor-core-separation-1 campaign, PHASE2
-// (PHASE2_FRAME_DEBUGGER_CAPTURE_POINTER_SAFETY_FIX.md) - this file used to
-// #include "../Editor/FrameDebuggerCapture.h" (behind #if GTE_ENABLE_EDITOR)
-// so Draw() below could call real methods (RecordDraw()/RecordEntityDraw())
-// on the complete FrameDebuggerCaptureContext type - a genuine link hazard
-// once gte_editor becomes a real, separate CMake target (Phase 9): gte_core
-// would otherwise carry an unresolved external symbol only gte_editor
-// defines. That whole block moved OUT of this file entirely, into a new
-// free function, RecordFrameDebuggerDraws() (declared in RenderSystem.h,
-// defined in src/Editor/FrameDebuggerDrawRecording.cpp) - this file now
-// contains ZERO #include of FrameDebuggerCapture.h and ZERO reference to
-// the complete type, only the bare forward declaration RenderSystem.h
-// itself already carries (`class FrameDebuggerCaptureContext;`).
+// editor-core-separation-2 campaign, PHASE2 - the free function
+// gte::RecordFrameDebuggerDraws() (declared in RenderSystem.h,
+// PHASE2_FRAME_DEBUGGER_CAPTURE_POINTER_SAFETY_FIX.md's own former fix) is
+// GONE - Draw() below now calls capture->RecordFrameDebuggerDraw(...), a
+// virtual method on the gte_core-owned IFrameDebuggerCaptureRecorder
+// interface (src/Core/FrameDebuggerCaptureRecorder.h) `capture` now points
+// to, instead of a gte_editor-only free function by name (closing
+// "Defect A" - see task_manager/editor-core-separation-2/
+// PHASE0_MASTER_STRATEGY.md). This file still contains ZERO #include of
+// FrameDebuggerCapture.h and ZERO reference to the concrete
+// FrameDebuggerCaptureContext type - RenderSystem.h's own #include of the
+// interface header (never the concrete type) is all this file needs. A
+// virtual call through a pointer to a COMPLETE abstract-interface type
+// needs only a vtable read at runtime (satisfied by whichever concrete
+// object - always FrameDebuggerCaptureContext, gte_editor-owned - the
+// pointer actually points at), requiring ZERO link-time symbol in
+// gte_core.a itself, unlike the old direct free-function call by name.
 
 namespace gte {
 
@@ -90,7 +94,7 @@ Mat4 RenderSystem::ResolveActiveCameraViewProjection(Registry& registry, float a
 }
 
 void RenderSystem::Draw(Registry& registry, Renderer& renderer, float aspectWidthOverHeight,
-    FrameDebuggerCaptureContext* capture, std::optional<std::size_t> maxDrawCount,
+    IFrameDebuggerCaptureRecorder* capture, std::optional<std::size_t> maxDrawCount,
     const std::unordered_set<Entity>& batchedEntities)
 {
     Draw(registry, renderer, ResolveActiveCameraViewProjection(registry, aspectWidthOverHeight), capture, maxDrawCount,
@@ -98,7 +102,7 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, float aspectWidt
 }
 
 void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& viewProjection,
-    FrameDebuggerCaptureContext* capture, std::optional<std::size_t> maxDrawCount,
+    IFrameDebuggerCaptureRecorder* capture, std::optional<std::size_t> maxDrawCount,
     const std::unordered_set<Entity>& batchedEntities)
 {
     GTE_PROFILE_SCOPE("RenderSystem::Draw");
@@ -137,7 +141,7 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& view
             const VkDescriptorSet descriptorSet =
                 materialTexture != nullptr ? materialTexture->descriptorSet : VK_NULL_HANDLE;
 
-            // task_manager/editor-core-separation-1 campaign, PHASE2 -
+            // editor-core-separation-2 campaign, PHASE2 -
             // zero-overhead-when-disarmed: this call collapses to one
             // already-taken "is this pointer null" branch when `capture` is
             // nullptr (the common case - every frame until PHASE3 wires a
@@ -147,14 +151,16 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& view
             // PHASE1_RENDERER_CAPTURE_INSTRUMENTATION.md's own Step 2. The
             // `#if GTE_ENABLE_EDITOR` wrapper that used to surround this
             // block is GONE - the null-check itself is now the only gating
-            // needed, since RecordFrameDebuggerDraws() (declared in
-            // RenderSystem.h, defined in
-            // src/Editor/FrameDebuggerDrawRecording.cpp) is DECLARED-BUT-
-            // NOT-YET-LINKED-IN-gte_core-ALONE, never a dereference of the
-            // pointer itself.
+            // needed, since RecordFrameDebuggerDraw() is a virtual method on
+            // the complete IFrameDebuggerCaptureRecorder interface `capture`
+            // points to (RenderSystem.h's own #include of src/Core/
+            // FrameDebuggerCaptureRecorder.h), reachable through gte_core.a
+            // alone with zero undefined-reference risk - never a
+            // gte_editor-only free-function symbol called by name anymore
+            // (see this file's own updated top-of-file comment).
             if (capture != nullptr) {
-                RecordFrameDebuggerDraws(
-                    *capture, registry, renderer, command.entity, *mesh, *pipeline, materialTexture, viewProjection);
+                capture->RecordFrameDebuggerDraw(
+                    registry, renderer, command.entity, *mesh, *pipeline, materialTexture, viewProjection);
             }
 
             renderer.Submit(*pipeline, *mesh, command.model, viewProjection, descriptorSet);

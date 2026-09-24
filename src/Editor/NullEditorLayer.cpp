@@ -74,7 +74,7 @@ public:
         result.projectAvailable = false;
         return result;
     }
-    FrameDebuggerCaptureContext* PrepareFrameDebuggerCaptureContext() override { return nullptr; }
+    IFrameDebuggerCaptureRecorder* PrepareFrameDebuggerCaptureContext() override { return nullptr; }
     void NotifyFrameDebuggerStepConsumed() override { }
     bool ConsumePendingFrameDebuggerReplayRequest() override { return false; }
 

@@ -1,4 +1,4 @@
-﻿cmake_minimum_required(VERSION 3.19)
+cmake_minimum_required(VERSION 3.19)
 
 # --- Platform gate -----------------------------------------------------
 # This build currently only supports Windows. Everything else is a quick,
@@ -263,6 +263,13 @@ add_library(gte_core STATIC
     # interfaces live here (and, just as importantly, which candidate
     # capabilities were investigated and found NOT to need one).
     src/Core/EditorCapabilities.h
+    # editor-core-separation-2 campaign, PHASE2
+    # (PHASE2_FRAME_DEBUGGER_CAPTURE_RECORDER_INTERFACE.md) - the new
+    # gte_core-owned pure-virtual interface FrameDebuggerCaptureContext
+    # (src/Editor/FrameDebuggerCapture.h) implements (header-only, no .cpp -
+    # every method is pure virtual). Closes Defects A and B (see
+    # PHASE0_MASTER_STRATEGY.md).
+    src/Core/FrameDebuggerCaptureRecorder.h
     # editor-core-separation-1 campaign, PHASE10
     # (PHASE10_ISURFACEPROVIDER_INTERFACE_AND_WINDOW_INVERSION.md) - the
     # abstract surface-provider interface Renderer/VulkanSurface now depend on

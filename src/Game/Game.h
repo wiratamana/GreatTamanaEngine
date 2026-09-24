@@ -11,6 +11,19 @@
 #include "Physics/PhysicsSystem.h"
 #include "Renderer/Primitives/PrimitiveMeshGenerator.h"
 #include "RenderSystem.h"
+// editor-core-separation-2 campaign, PHASE2 - Game.h now #includes the
+// gte_core-owned IFrameDebuggerCaptureRecorder interface (src/Core/
+// FrameDebuggerCaptureRecorder.h) instead of forward-declaring the concrete,
+// gte_editor-only FrameDebuggerCaptureContext type - see that header's own
+// doc comment and PHASE0_MASTER_STRATEGY.md's Locked Design Decision #1.
+// Render() below only ever needs a POINTER to the interface, never
+// dereferencing it itself (it only ever forwards it onward into
+// RenderSystem::Draw()). MUST be included here, at file scope (NOT from
+// inside `namespace gte { ... }` below) - this header opens its own
+// `namespace gte { ... }` block, and including it from inside an
+// already-open `namespace gte { ... }` here would create a bogus nested
+// `gte::gte` namespace instead of extending the real `gte` namespace.
+#include "../Core/FrameDebuggerCaptureRecorder.h"
 
 #include <cstddef>
 #include <optional>
@@ -20,18 +33,6 @@
 namespace gte {
 
 class Renderer;
-
-// Editor-only type (src/Editor/FrameDebuggerCapture.h) - forward-declared
-// ONLY (never #included here), since Game.h is a CORE, always-compiled file
-// that must still compile (and, per Game.cpp, LINK) cleanly with
-// GTE_ENABLE_EDITOR=OFF, a build where this type does not exist at all -
-// see task_manager/frame-debugger-3/
-// PHASE3_FRAME_HISTORY_RING_BUFFER_AND_CAPTURE_TRIGGER.md's own Step 3.4b
-// (mirroring src/Game/RenderSystem.h's own identical PHASE1 precedent). A
-// bare forward declaration of a pointee is always legal even when the type
-// is never defined in this translation unit, since Render() below only
-// ever needs a POINTER to it.
-class FrameDebuggerCaptureContext;
 
 // Sits on top of Window/Renderer and has no direct knowledge of SDL, or of
 // Vulkan beyond the Renderer abstraction. Game is a thin COMPOSITION ROOT:
@@ -127,7 +128,7 @@ public:
     // entity, batch-eligible or not, through the fully unmodified per-entity
     // path forever (Locked Design Decision 11, PHASE0_MASTER_STRATEGY.md).
     void Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* viewProjectionOverride = nullptr,
-        FrameDebuggerCaptureContext* frameDebuggerCapture = nullptr,
+        IFrameDebuggerCaptureRecorder* frameDebuggerCapture = nullptr,
         std::optional<std::size_t> maxDrawCount = std::nullopt,
         const std::unordered_set<Entity>& batchedEntities = {});
 

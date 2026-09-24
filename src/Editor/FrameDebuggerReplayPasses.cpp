@@ -1,25 +1,29 @@
-// task_manager/editor-core-separation-1 campaign, PHASE2
-// (PHASE2_FRAME_DEBUGGER_CAPTURE_POINTER_SAFETY_FIX.md) - this file is the
-// NEW home for AddFrameDebuggerReplayPasses()'s own real body (DECLARED in
-// src/Application/RenderPasses.h - completely unchanged there, since that
-// declaration only ever needed a forward-declared FrameDebuggerCaptureContext&
-// reference parameter). The body used to live in
+// editor-core-separation-2 campaign, PHASE2 - this file now defines
+// FrameDebuggerCaptureContext::AddReplayPasses(), the concrete
+// implementation of IFrameDebuggerCaptureRecorder::AddReplayPasses()
+// (src/Core/FrameDebuggerCaptureRecorder.h), reachable from gte_core-tier
+// Core::BuildFrame() only through a virtual call on a null-checked
+// IFrameDebuggerCaptureRecorder* pointer - never a gte_editor-only
+// free-function symbol by name. This closes the exact undefined-reference
+// hazard editor-core-separation-1's own PHASE2
+// (PHASE2_FRAME_DEBUGGER_CAPTURE_POINTER_SAFETY_FIX.md) left open (see
+// task_manager/editor-core-separation-2/PHASE0_MASTER_STRATEGY.md's own
+// "Defect B"): that phase's own body used to live in
 // src/Application/RenderPasses.cpp, wrapped in `#if GTE_ENABLE_EDITOR`
 // (calling real methods - `capture.SetReplayStepPreviews(...)` - on the
 // complete FrameDebuggerCaptureContext type), with an `#else` no-op stub for
-// the OFF configuration. Moved here UNCHANGED in behavior: this file lives
-// under src/Editor/ and only ever compiles as part of the Editor source
-// list, so it needs no `#if`/`#endif` guard of its own at all - unlike
-// RenderPasses.cpp (a CORE, always-compiled file destined for `gte_core`),
-// this translation unit is ALREADY Editor-only by construction (its
-// #include of "FrameDebuggerCapture.h" below is therefore also
-// unconditional).
-//
-// See task_manager/editor-core-separation-1/PHASE0_MASTER_STRATEGY.md
-// (Step 2, Section 2.5) for why leaving this body inside RenderPasses.cpp
-// would have been a genuine link hazard once gte_editor becomes a real,
-// separate CMake target (Phase 9): gte_core would otherwise carry an
-// unresolved external symbol only gte_editor defines.
+// the OFF configuration, then moved to a dedicated free function
+// (AddFrameDebuggerReplayPasses(), declared in
+// src/Application/RenderPasses.h, defined only here) - but a free function
+// called BY NAME from gte_core-tier code (Core::BuildFrame()) is still,
+// itself, exactly that same hazard. Behavior is UNCHANGED from the old free
+// function's own body - only its shape (a member function instead of a free
+// function taking a trailing FrameDebuggerCaptureContext& parameter, which
+// becomes the implicit `this` instead) and its call site (Core::BuildFrame()
+// now calls `frameDebuggerCapture->AddReplayPasses(...)` through the
+// interface pointer, instead of
+// `AddFrameDebuggerReplayPasses(..., *frameDebuggerCapture)` by name)
+// changed.
 
 #include "../Application/RenderPasses.h"
 
@@ -79,12 +83,12 @@ const char* ReplayStepPassName(std::size_t index)
 
 // task_manager/frame-debugger-7 campaign, PHASE3
 // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md) - see
-// this function's own doc comment in RenderPasses.h for the full contract.
-std::vector<rg::TextureHandle> AddFrameDebuggerReplayPasses(rg::RenderGraphBuilder& builder, Game& game,
-    Renderer& renderer, float aspectWidthOverHeight, std::size_t objectCount,
+// this method's own doc comment in src/Core/FrameDebuggerCaptureRecorder.h
+// for the full contract.
+std::vector<rg::TextureHandle> FrameDebuggerCaptureContext::AddReplayPasses(rg::RenderGraphBuilder& builder,
+    Game& game, Renderer& renderer, float aspectWidthOverHeight, std::size_t objectCount,
     const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers,
-    const std::function<void(VkCommandBuffer)>& recordSkyBackground, RenderTexture& gameTarget,
-    FrameDebuggerCaptureContext& capture)
+    const std::function<void(VkCommandBuffer)>& recordSkyBackground, RenderTexture& gameTarget)
 {
     std::vector<rg::TextureHandle> destHandles;
 
@@ -196,7 +200,7 @@ std::vector<rg::TextureHandle> AddFrameDebuggerReplayPasses(rg::RenderGraphBuild
         destHandles.push_back(destHandle);
     }
 
-    capture.SetReplayStepPreviews(std::move(destinations));
+    SetReplayStepPreviews(std::move(destinations));
     return destHandles;
 }
 

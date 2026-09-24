@@ -369,7 +369,7 @@ void Game::EnsureDefaultCameraExists()
 }
 
 void Game::Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* viewProjectionOverride,
-    FrameDebuggerCaptureContext* frameDebuggerCapture, std::optional<std::size_t> maxDrawCount,
+    IFrameDebuggerCaptureRecorder* frameDebuggerCapture, std::optional<std::size_t> maxDrawCount,
     const std::unordered_set<Entity>& batchedEntities)
 {
     renderer.Clear(20, 20, 30, 255);

@@ -850,7 +850,7 @@ public:
     // for the full contract; both simply forward into m_frameDebuggerPanel,
     // which owns the real FrameDebuggerCaptureContext/FrameDebuggerHistory
     // state.
-    FrameDebuggerCaptureContext* PrepareFrameDebuggerCaptureContext() override
+    IFrameDebuggerCaptureRecorder* PrepareFrameDebuggerCaptureContext() override
     {
         return m_frameDebuggerPanel.PrepareCaptureContextForThisFrame(m_ctx);
     }
