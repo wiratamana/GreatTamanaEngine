@@ -27,6 +27,16 @@
 // real `gte` namespace.
 #include "FrameDebuggerCaptureRecorder.h"
 
+// editor-core-separation-3 campaign, PHASE2
+// (PHASE2_PLUGIN_HOST_AND_HELLO_WORLD_HANDSHAKE_PROBE.md) - PluginHost is a
+// concrete, gte_core-owned mechanism class (not a Bucket-B capability
+// interface), so it is included here directly by name, mirroring
+// FrameDebuggerCaptureRecorder.h's own "MUST be file-scope, not inside
+// namespace gte { ... }" placement discipline immediately above (for the
+// exact same reason - this header opens its own `namespace gte { ... }`
+// block).
+#include "Plugins/PluginHost.h"
+
 #include <volk.h>
 
 #include <functional>
@@ -214,6 +224,25 @@ public:
     // (Application/EditorHost) concern and never reach Core at all.
     void SetEditorLayerHook(IEditorLayer* editorLayer) noexcept { m_editorLayer = editorLayer; }
 
+    // editor-core-separation-3 campaign, PHASE2
+    // (PHASE2_PLUGIN_HOST_AND_HELLO_WORLD_HANDSHAKE_PROBE.md) -
+    // PHASE0_MASTER_STRATEGY.md's Locked Design Decision #9: plugins load
+    // once, at host-construction time, never re-scanned per frame. Mirrors
+    // SetEditorLayerHook()'s own "small, explicitly host-called method, not a
+    // constructor parameter" precedent exactly - EditorHost's constructor
+    // (gte_editor) calls this exactly once, gated behind
+    // `#if GTE_ENABLE_PLUGINS` at THAT call site (this pass-through method
+    // itself always compiles - see PluginHost.h's own doc comment for why
+    // the class it forwards to is capability-agnostic and mechanical).
+    void LoadPlugins(const std::filesystem::path& pluginsDirectory);
+
+    // Read accessor for PHASE3 (render-feature capability lookup) and
+    // PHASE4 (editor-panel capability lookup) - both look up capabilities
+    // via AllLoadedModules(), never re-scanning the plugins/ folder
+    // themselves (PHASE0_MASTER_STRATEGY.md's Locked Design Decision #8 -
+    // exactly ONE PluginHost instance/scan per process).
+    const PluginHost& GetPluginHost() const noexcept { return m_pluginHost; }
+
 private:
     // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
     // PHASE5 - one eligible batch's own THIS-FRAME render data, ready for the
@@ -362,6 +391,13 @@ private:
     // GetAtmosphereSettings()'s own doc comment above for why this stays
     // reachable from the host.
     AtmosphereSettings m_atmosphereSettings;
+
+    // editor-core-separation-3 campaign, PHASE2 - see LoadPlugins()/
+    // GetPluginHost()'s own doc comments above. No constructor dependency on
+    // any other Core member, so appended near the end of the private member
+    // list, immediately before m_gameTargetThisFrame/m_sceneTargetThisFrame,
+    // which similarly have no cross-member dependency.
+    PluginHost m_pluginHost;
 
     // PHASE13 - this frame's already-resolved Game/Scene View render targets
     // (IEditorLayer::GameViewTarget()/SceneViewTarget()'s own real answers,

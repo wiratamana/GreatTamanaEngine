@@ -4,7 +4,13 @@
 
 namespace gte {
 
-std::filesystem::path ResolveProjectRootDirectory()
+namespace {
+
+// editor-core-separation-3 campaign, PHASE2 - the shared
+// SDL_GetBasePath()-resolution logic both ResolveProjectRootDirectory() and
+// ExecutableDirectory() need, pulled out so it exists in exactly one place
+// rather than being duplicated a second time.
+std::filesystem::path ResolveExecutableDirectoryBasePath()
 {
     // SDL_GetBasePath() returns the directory containing the running
     // executable (with a trailing separator), UTF-8 encoded, owned by SDL
@@ -19,7 +25,19 @@ std::filesystem::path ResolveProjectRootDirectory()
     // work regardless of that switch.
     const char* basePath = SDL_GetBasePath();
     const std::string basePathUtf8 = (basePath != nullptr) ? basePath : "./";
-    return std::filesystem::path(std::u8string(basePathUtf8.begin(), basePathUtf8.end())) / "Project";
+    return std::filesystem::path(std::u8string(basePathUtf8.begin(), basePathUtf8.end()));
+}
+
+} // namespace
+
+std::filesystem::path ResolveProjectRootDirectory()
+{
+    return ResolveExecutableDirectoryBasePath() / "Project";
+}
+
+std::filesystem::path ExecutableDirectory()
+{
+    return ResolveExecutableDirectoryBasePath();
 }
 
 } // namespace gte

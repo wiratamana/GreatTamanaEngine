@@ -184,6 +184,17 @@ Core::Core(ISurfaceProvider& surfaceProvider, IHostServices& hostServices)
     RegisterPresentRenderPipelineProvider();
 }
 
+// editor-core-separation-3 campaign, PHASE2
+// (PHASE2_PLUGIN_HOST_AND_HELLO_WORLD_HANDSHAKE_PROBE.md) - a thin
+// pass-through into m_pluginHost, always compiled (see Core.h's own doc
+// comment on this method - only EditorHost.cpp's own call site is gated
+// behind `#if GTE_ENABLE_PLUGINS`, mirroring GTE_ENABLE_NETWORK's own
+// existing "gate the call site, not the class" precedent).
+void Core::LoadPlugins(const std::filesystem::path& pluginsDirectory)
+{
+    m_pluginHost.LoadPlugins(pluginsDirectory);
+}
+
 void Core::Update(const InputFrame& input, float deltaTime)
 {
     const bool steppedThisFrame = input.playbackPaused && input.stepRequested;

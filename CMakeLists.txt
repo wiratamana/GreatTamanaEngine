@@ -292,6 +292,16 @@ add_library(gte_core STATIC
     # every method is pure virtual). Closes Defects A and B (see
     # PHASE0_MASTER_STRATEGY.md).
     src/Core/FrameDebuggerCaptureRecorder.h
+    # editor-core-separation-3 campaign, PHASE2
+    # (PHASE2_PLUGIN_HOST_AND_HELLO_WORLD_HANDSHAKE_PROBE.md) - gte::PluginHost,
+    # the real gte_core-owned mechanism that scans a folder for *.dll,
+    # LoadLibraryW()s each, checks the ABI fingerprint, and holds the
+    # resulting registry. Always compiled (see this class's own doc comment
+    # for why it is mechanical/capability-agnostic and unconditional -
+    # GTE_ENABLE_PLUGINS only gates the real runtime CALL SITE,
+    # EditorHost.cpp's m_core.LoadPlugins() call).
+    src/Core/Plugins/PluginHost.h
+    src/Core/Plugins/PluginHost.cpp
     # editor-core-separation-1 campaign, PHASE10
     # (PHASE10_ISURFACEPROVIDER_INTERFACE_AND_WINDOW_INVERSION.md) - the
     # abstract surface-provider interface Renderer/VulkanSurface now depend on
@@ -674,6 +684,34 @@ add_library(gte_core STATIC
     src/Encoding/HdrColorVisualization.cpp
 )
 
+# PHASE2_PLUGIN_HOST_AND_HELLO_WORLD_HANDSHAKE_PROBE.md, Step 3.5/3.6 - the
+# RUNTIME output folder every built plugin .dll (demo_hello_world here;
+# demo_render_feature/demo_editor_panel in later phases) is copied into. A
+# plain CMake variable, NOT a hardcoded $<TARGET_FILE_DIR:GreatTamanaEditor>
+# generator expression, because GreatTamanaEditor does not exist as a target
+# at all in a GTE_CORE_STANDALONE_PROBE_ONLY=ON configuration (see the guard
+# around its own add_executable() call further down this file) - BOTH this
+# phase's own new standalone handshake probe AND a future isolation probe
+# configure with GTE_CORE_STANDALONE_PROBE_ONLY=ON specifically so they need
+# demo_hello_world.dll to still build successfully there. Placed IMMEDIATELY
+# after gte_core's own add_library() block's closing parenthesis (so it is
+# reached unconditionally, in BOTH a normal configure AND a
+# GTE_CORE_STANDALONE_PROBE_ONLY=ON one) and BEFORE the
+# if(NOT GTE_CORE_STANDALONE_PROBE_ONLY) guard immediately below, which wraps
+# the gte_editor library block - demo_hello_world must build even when
+# gte_editor itself is skipped, and it depends on nothing from gte_core at
+# all (Locked Design Decision #2 - it links ONLY gte_plugin_abi).
+if(GTE_CORE_STANDALONE_PROBE_ONLY)
+    set(GTE_PLUGIN_RUNTIME_OUTPUT_DIR "${CMAKE_BINARY_DIR}/plugins")
+else()
+    set(GTE_PLUGIN_RUNTIME_OUTPUT_DIR "$<TARGET_FILE_DIR:GreatTamanaEditor>/plugins")
+endif()
+
+if(GTE_ENABLE_PLUGINS)
+    add_subdirectory(plugins/gte_plugin_abi)
+    add_subdirectory(plugins/demo_hello_world)
+endif()
+
 # editor-core-separation-1 campaign, PHASE18
 # (PHASE18_HEADLESS_TEST_FIXTURE_AND_CORE_STANDALONE_PROBE.md) - gte_editor
 # itself (and everything it needs - ImGui/ImGuizmo/SDL3) is skipped entirely
@@ -924,6 +962,13 @@ target_compile_definitions(gte_core PUBLIC GTE_ENABLE_JOB_SYSTEM=$<BOOL:${GTE_EN
 # value gte_core itself was built with.
 target_compile_definitions(gte_core PUBLIC GTE_ENABLE_NETWORK=$<BOOL:${GTE_ENABLE_NETWORK}>)
 
+# Same idea again - exposes GTE_ENABLE_PLUGINS to C++ code as an actual 1/0
+# preprocessor macro, needed by EditorHost.cpp's own
+# `#if GTE_ENABLE_PLUGINS` guard around Core::LoadPlugins() (see
+# PHASE0_MASTER_STRATEGY.md's Locked Design Decision #6). PUBLIC for the
+# same reason as the definitions above.
+target_compile_definitions(gte_core PUBLIC GTE_ENABLE_PLUGINS=$<BOOL:${GTE_ENABLE_PLUGINS}>)
+
 # PUBLIC (not PRIVATE) for the same reason as the compile definition above:
 # any consumer of gte_core (GreatTamanaEditor's main.cpp, and every test in
 # GreatTamanaEngineTests) #includes engine headers that transitively need
@@ -946,6 +991,16 @@ target_compile_definitions(gte_core PUBLIC GTE_ENABLE_NETWORK=$<BOOL:${GTE_ENABL
 # mechanically proves this against the real, built libgte_core.a bytes.
 target_include_directories(gte_core PUBLIC "${CMAKE_SOURCE_DIR}/src")
 target_link_libraries(gte_core PUBLIC volk vma stb_image stb_image_write KTX::ktx httplib nlohmann_json)
+
+# editor-core-separation-3 campaign, PHASE2
+# (PHASE2_PLUGIN_HOST_AND_HELLO_WORLD_HANDSHAKE_PROBE.md, Step 3.3) -
+# src/Core/Plugins/PluginHost.cpp needs gte_plugin_abi's own include
+# directories (both the plain committed headers AND the CMake-generated
+# GtePluginAbiFingerprintGenerated.h - see plugins/gte_plugin_abi/CMakeLists.txt).
+# PUBLIC for the same reason as everything else linked into gte_core PUBLIC
+# above - Core.h itself #includes Plugins/PluginHost.h, so any consumer of
+# gte_core needs this propagated too.
+target_link_libraries(gte_core PUBLIC gte_plugin_abi)
 
 # src/Jobs/JobSystem.cpp/.h use std::thread/std::mutex/std::condition_variable
 # unconditionally (the class itself always compiles - see JobSystem.h's own
@@ -987,6 +1042,20 @@ target_link_libraries(gte_core PRIVATE saba_pmx)
 if(GTE_CORE_STANDALONE_PROBE_ONLY)
     add_executable(gte_core_player_link_probe tools/ci/gte_core_player_link_probe/main.cpp)
     target_link_libraries(gte_core_player_link_probe PRIVATE gte_core)
+
+    # PHASE2_PLUGIN_HOST_AND_HELLO_WORLD_HANDSHAKE_PROBE.md, Step 3.6 - a
+    # tiny, PERMANENT, checked-in probe proving the whole plugin ABI
+    # handshake works end-to-end OUTSIDE GreatTamanaEditor.exe entirely -
+    # needs zero gte_core/gte_editor at all, only gte_plugin_abi + a real,
+    # already-built demo_hello_world.dll to LoadLibraryW() at runtime.
+    add_executable(gte_plugin_abi_handshake_probe tools/ci/gte_plugin_abi_handshake_probe/main.cpp)
+    target_link_libraries(gte_plugin_abi_handshake_probe PRIVATE gte_plugin_abi)
+    gte_apply_plugin_shared_crt_linkage(gte_plugin_abi_handshake_probe)
+    # This probe LoadLibraryW()s demo_hello_world.dll at runtime rather than
+    # linking it - CMake has no way to know that dependency on its own, so
+    # it must be spelled out explicitly or a `cmake --build` of only this
+    # probe's own target will never actually produce the .dll it needs.
+    add_dependencies(gte_plugin_abi_handshake_probe demo_hello_world)
 endif()
 
 # editor-core-separation-1 campaign, PHASE18

@@ -3,6 +3,7 @@
 #include "Logger.h" // LoggerLogSink::Instance() - the ONE real ILogSink this engine ships.
 #include "EditorSceneIOCapability.h"
 #include "EditorLogQueryCapability.h" // editor-core-separation-2 campaign, PHASE3.
+#include "ProjectRootPath.h" // editor-core-separation-3 campaign, PHASE2 - ExecutableDirectory().
 #include "../Application/EventTranslator.h"
 #include "../Application/EngineCommandDispatch.h"
 #include "../Application/MemorySnapshotBuilder.h"
@@ -21,6 +22,7 @@
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
 #include <stdexcept>
 
 namespace gte {
@@ -183,6 +185,18 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
     // wiring exactly (PHASE13) - set once, since this callback's own
     // behavior never varies frame-to-frame.
     m_core.SetPresentImGuiRecorder([this](VkCommandBuffer cmd) { m_editorLayer->Render(cmd); });
+
+#if GTE_ENABLE_PLUGINS
+    // PHASE0_MASTER_STRATEGY.md's Locked Design Decision #9 - loaded exactly
+    // once, here, at EditorHost construction time. The plugins/ folder lives
+    // NEXT TO the built executable (ProjectRootPath::ExecutableDirectory(),
+    // the same SDL_GetBasePath() base-path resolution
+    // ResolveProjectRootDirectory() already uses for the Project panel's own
+    // root folder, minus the "Project" subfolder - see that file for the
+    // precedent this mirrors) - never relative to the current working
+    // directory, which is not guaranteed to be the exe's own folder.
+    m_core.LoadPlugins(gte::ExecutableDirectory() / "plugins");
+#endif
 
     // editor-core-separation-1 campaign, PHASE16 - wires the ONE real
     // ISceneIOCapability implementation this engine ships
