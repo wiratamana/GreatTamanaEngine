@@ -2079,6 +2079,12 @@ set(GTE_TEST_SOURCES
     # PluginRenderFeatureDiagnostics.h/.cpp is unconditionally in gte_core's
     # own source list.
     Core/PluginRenderFeatureDiagnosticsTests.cpp
+    # editor-core-separation-4 campaign, PHASE6
+    # (PHASE6_DEFENSIVE_MODULE_INFO_BUFFER_READS.md) - Tier-1 tests for the
+    # new, pure ReadFixedBuffer() helper. Unconditional, since
+    # src/Core/Plugins/FixedBufferReader.h is unconditionally in gte_core's
+    # own source list.
+    Core/FixedBufferReaderTests.cpp
     Memory/GpuResourceHandleTests.cpp
     Encoding/Base64Tests.cpp
     Encoding/PixelConversionTests.cpp

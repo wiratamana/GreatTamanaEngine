@@ -302,6 +302,14 @@ add_library(gte_core STATIC
     # EditorHost.cpp's m_core.LoadPlugins() call).
     src/Core/Plugins/PluginHost.h
     src/Core/Plugins/PluginHost.cpp
+    # editor-core-separation-4 campaign, PHASE6
+    # (PHASE6_DEFENSIVE_MODULE_INFO_BUFFER_READS.md) - a small, header-only,
+    # bounded-read helper for GtePluginModuleInfo's fixed-size char[]
+    # buffers (strnlen(buf, sizeof(buf)) + std::string(buf, len), never
+    # trusting a plugin to self-terminate). Header-only/inline so it is
+    # directly Tier-1-testable from tests/Core/FixedBufferReaderTests.cpp -
+    # used by PluginHost.cpp's own "Loaded plugin '...'" log line.
+    src/Core/Plugins/FixedBufferReader.h
     # editor-core-separation-3 campaign, PHASE3
     # (PHASE3_RUNTIME_RENDER_FEATURE_CAPABILITY.md) - PluginRenderPassBuilderAdapter,
     # the gte_core-side implementation of IPluginRenderPassBuilder, constructed

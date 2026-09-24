@@ -3,6 +3,7 @@
 #include "../Logging.h"
 
 #include "../../../plugins/gte_plugin_abi/PluginExports.h"
+#include "FixedBufferReader.h"
 // PHASE1_COMPLETION_REPORT.md's own "Minor note" - the generated fingerprint
 // header does NOT exist at the literal relative-file-path spelling
 // (../../../plugins/gte_plugin_abi/GtePluginAbiFingerprintGenerated.h) - it
@@ -226,7 +227,13 @@ void PluginHost::TryLoadOnePlugin(const std::filesystem::path& dllPath)
     // 5. Success.
     GtePluginModuleInfo info;
     module->GetModuleInfo(info);
-    GTE_LOG_INFO("PluginHost", std::string("Loaded plugin '") + info.name + "' v" + info.version + " from " + pathStr);
+    // editor-core-separation-4 campaign, PHASE6
+    // (PHASE6_DEFENSIVE_MODULE_INFO_BUFFER_READS.md) - bounded reads via
+    // ReadFixedBuffer() (FixedBufferReader.h), never trusting a plugin's own
+    // GetModuleInfo() implementation to have null-terminated these
+    // fixed-size char[] buffers correctly.
+    GTE_LOG_INFO("PluginHost", "Loaded plugin '" + ReadFixedBuffer(info.name, sizeof(info.name)) + "' v"
+        + ReadFixedBuffer(info.version, sizeof(info.version)) + " from " + pathStr);
 
     LoadedPlugin loaded;
     loaded.moduleHandle = handle;
