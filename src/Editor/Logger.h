@@ -56,7 +56,13 @@ namespace gte {
 // LoggerLogSink below instead - a small, separate forwarding type.
 class Logger {
 public:
-    static constexpr std::size_t kCapacity = 2000;
+    // Relocated VALUE into Core/Logging.h (editor-core-separation-2
+    // campaign, PHASE3) - `kLogCapacity` there so gte_core-tier
+    // Network/NetworkRoutes.cpp can clamp against it without #including
+    // this gte_editor-only header. Same qualified name, same value, same
+    // call sites everywhere else in this codebase - only this line's
+    // right-hand side changed.
+    static constexpr std::size_t kCapacity = kLogCapacity;
 
     // Records one entry, stamping it with the CURRENT SetCurrentFrame()
     // value and a timestamp relative to this process's first ever

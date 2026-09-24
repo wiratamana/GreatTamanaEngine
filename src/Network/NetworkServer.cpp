@@ -1,4 +1,4 @@
-﻿#include "NetworkServer.h"
+#include "NetworkServer.h"
 
 #include "NetworkRoutes.h"
 
@@ -7,23 +7,19 @@
 #include "../Application/EngineCommandBridge.h"
 #include "../Application/FrameCaptureBridge.h"
 #include "../Application/FrameDebuggerCommandBridge.h"
+#include "../Core/EditorCapabilities.h" // ILogQueryCapability - editor-core-separation-2 campaign, PHASE3.
 #include "../Core/Logging.h"
-// PHASE3 (editor-core-separation-1 campaign,
-// PHASE3_LOGGING_GLOBAL_LOGSINK_EXTRACTION.md) - GTE_LOG_* itself now only
-// needs Core/Logging.h above (no Editor dependency for that). This file
-// keeps a real, direct #include of Editor/Logger.h anyway, UNLIKE every
-// other file this phase touched, because GET /get_logs and POST /clear_logs
-// (below) call gte::Logger::Query()/Clear()/EntryCount()/IsEnabled()/
-// LatestEntryId() DIRECTLY - a real, pre-existing, ALREADY-DOCUMENTED
-// exception (AGENTS.md, "Logging": "the ONE documented, narrow exception to
-// this section's own reach engine state only through a reviewed bridge
-// rule") that is NOT gated behind any macro at all (Logger is a real,
-// unconditionally-compiled class - see Editor/Logger.h) and is therefore
-// genuinely OUT OF this phase's own declared scope (fixing the GTE_LOG_*
-// mechanism) - see
-// PHASE3_COMPLETION_REPORT.md's own "Discovered gap" section for the full
-// explanation of why this file cannot yet drop this #include entirely.
-#include "../Editor/Logger.h"
+// editor-core-separation-2 campaign, PHASE3
+// (PHASE3_LOG_QUERY_CAPABILITY_AND_NETWORKROUTES_CLEANUP.md) - this file no
+// longer #includes Editor/Logger.h at all. GET /get_logs and POST
+// /clear_logs (below) now call through the nullable ILogQueryCapability*
+// bridge (Core/EditorCapabilities.h, included above) instead of calling
+// gte::Logger::Query()/Clear()/EntryCount()/IsEnabled()/LatestEntryId()
+// directly - closing the real, pre-existing gte_core -> gte_editor-only-
+// symbol dependency editor-core-separation-1 left open (see that
+// campaign's own CAMPAIGN_COMPLETION_REPORT.md, "What remains genuinely
+// open", option (b), and this campaign's own PHASE0_MASTER_STRATEGY.md,
+// Defect C).
 #include "../Encoding/Base64.h"
 #include "../Math/Quat.h"
 #include "../Math/Vec3.h"
@@ -248,7 +244,7 @@ void RespondWithFrameDebuggerCommandResult(
 // in this lambda.
 void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, EngineCommandBridge* commandBridge,
     EditorUiCommandBridge* uiCommandBridge, FrameDebuggerCommandBridge* frameDebuggerCommandBridge,
-    AssetImportCommandBridge* assetImportCommandBridge)
+    AssetImportCommandBridge* assetImportCommandBridge, ILogQueryCapability* logQueryCapability)
 {
     server.Get("/http_hello_world", [](const httplib::Request&, httplib::Response& res) {
         res.set_content(HandleHelloWorld(), "text/plain; charset=utf-8");
@@ -965,7 +961,12 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
     // not engine state reached through the usual bridge rule (see AGENTS.md,
     // "Networking" - this route is a documented, narrow, deliberate
     // EXCEPTION to that rule, not a precedent for bypassing it elsewhere).
-    server.Get("/get_logs", [](const httplib::Request& req, httplib::Response& res) {
+    // editor-core-separation-2 campaign, PHASE3 - now calls through the
+    // nullable ILogQueryCapability* bridge instead of gte::Logger:: directly
+    // (closes Defect C) - `nullptr` degrades to a 503, mirroring every
+    // other bridge's identical "nullptr -> 503" convention already in this
+    // file (e.g. /get_texture, /instantiate_primitive).
+    server.Get("/get_logs", [logQueryCapability](const httplib::Request& req, httplib::Response& res) {
         const ParsedGetLogsQuery parsed = ParseGetLogsQuery(req.get_param_value("since_id"),
             req.get_param_value("min_level"), req.get_param_value("category"),
             req.get_param_value("keyword"), req.get_param_value("frame_min"),
@@ -975,16 +976,29 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
             res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
             return;
         }
-        const std::vector<LogEntry> entries = Logger::Query(parsed.filter);
+        if (logQueryCapability == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("log query capability not available"), "application/json");
+            return;
+        }
+        const std::vector<LogEntry> entries = logQueryCapability->Query(parsed.filter);
         res.set_content(
-            BuildGetLogsResponseJson(entries, Logger::IsEnabled(), Logger::LatestEntryId()), "application/json");
+            BuildGetLogsResponseJson(entries, logQueryCapability->IsEnabled(), logQueryCapability->LatestEntryId()),
+            "application/json");
     });
 
     // task_manager/logger-1 campaign, PHASE3 - POST /clear_logs. Same
     // "no bridge needed" shape as GET /get_logs above.
-    server.Post("/clear_logs", [](const httplib::Request&, httplib::Response& res) {
-        const std::size_t clearedCount = Logger::EntryCount();
-        Logger::Clear();
+    // editor-core-separation-2 campaign, PHASE3 - same nullable-capability
+    // "nullptr -> 503" conversion as GET /get_logs above.
+    server.Post("/clear_logs", [logQueryCapability](const httplib::Request&, httplib::Response& res) {
+        if (logQueryCapability == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("log query capability not available"), "application/json");
+            return;
+        }
+        const std::size_t clearedCount = logQueryCapability->EntryCount();
+        logQueryCapability->Clear();
         res.set_content(BuildClearLogsResponseJson(clearedCount), "application/json");
     });
 }
@@ -997,13 +1011,14 @@ struct NetworkServer::Impl {
 
 NetworkServer::NetworkServer(FrameCaptureBridge* captureBridge, EngineCommandBridge* commandBridge,
     EditorUiCommandBridge* uiCommandBridge, FrameDebuggerCommandBridge* frameDebuggerCommandBridge,
-    AssetImportCommandBridge* assetImportCommandBridge)
+    AssetImportCommandBridge* assetImportCommandBridge, ILogQueryCapability* logQueryCapability)
     : m_impl(std::make_unique<Impl>())
     , m_captureBridge(captureBridge)
     , m_commandBridge(commandBridge)
     , m_uiCommandBridge(uiCommandBridge)
     , m_frameDebuggerCommandBridge(frameDebuggerCommandBridge)
     , m_assetImportCommandBridge(assetImportCommandBridge)
+    , m_logQueryCapability(logQueryCapability)
 {
     // Registered exactly ONCE per NetworkServer instance, here in the
     // constructor - never inside Start() - so a Start()/Stop()/Start()
@@ -1011,7 +1026,7 @@ NetworkServer::NetworkServer(FrameCaptureBridge* captureBridge, EngineCommandBri
     // NEVER re-register the same route handler onto the same
     // httplib::Server a second time.
     RegisterRoutes(m_impl->server, m_captureBridge, m_commandBridge, m_uiCommandBridge, m_frameDebuggerCommandBridge,
-        m_assetImportCommandBridge);
+        m_assetImportCommandBridge, m_logQueryCapability);
     // task_manager/stl-parser-2 campaign, PHASE2 - m_assetImportCommandBridge
     // is now actually consulted by RegisterRoutes() above (POST /import_asset).
 }

@@ -30,6 +30,7 @@
 // gte::Logger::Log()/Clear()/SetCurrentFrame() calls always have real,
 // observable behavior.
 
+#include "Editor/EditorLogQueryCapability.h" // editor-core-separation-2 campaign, PHASE3.
 #include "Editor/Logger.h"
 #include "Network/NetworkServer.h"
 
@@ -55,11 +56,24 @@ using gte::Network::TestHelpers::WaitUntilAcceptingConnections;
 // state is process-global (not owned by this fixture), so every TEST_F body
 // itself is responsible for calling gte::Logger::Clear() first - see this
 // file's own header comment.
+//
+// editor-core-separation-2 campaign, PHASE3
+// (PHASE3_LOG_QUERY_CAPABILITY_AND_NETWORKROUTES_CLEANUP.md) - GET /get_logs
+// and POST /clear_logs now depend on a nullable ILogQueryCapability* bridge
+// (NetworkServer's sixth constructor argument) instead of calling
+// gte::Logger:: directly - a capability-less `NetworkServer server;` now
+// answers both routes with a 503 instead of real, Logger-backed behavior
+// (see LogEndpointsNullCapabilityTests below for that path's own coverage).
+// m_logQueryCapability is declared BEFORE m_server (member-declaration
+// order below) so it is already fully constructed by the time SetUp()
+// builds m_server - mirrors EditorHost.h's own "declare a dependency before
+// the thing that needs its address" member-ordering convention.
 class LogEndpointsEndToEndTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        m_server = std::make_unique<Network::NetworkServer>();
+        m_server = std::make_unique<Network::NetworkServer>(
+            nullptr, nullptr, nullptr, nullptr, nullptr, &m_logQueryCapability);
         m_server->Start(0);
         ASSERT_TRUE(m_server->IsRunning());
         m_client = std::make_unique<httplib::Client>("127.0.0.1", m_server->BoundPort());
@@ -76,6 +90,7 @@ protected:
         Logger::Clear();
     }
 
+    EditorLogQueryCapability m_logQueryCapability;
     std::unique_ptr<Network::NetworkServer> m_server;
     std::unique_ptr<httplib::Client> m_client;
 };
@@ -330,6 +345,39 @@ TEST_F(LogEndpointsEndToEndTest, CombinedFiltersComposeAsLogicalAnd)
     const nlohmann::json body = nlohmann::json::parse(res->body);
     ASSERT_EQ(body["entries"].size(), 1u);
     EXPECT_EQ(body["entries"][0]["message"], "renderer warning at frame 2");
+}
+
+// editor-core-separation-2 campaign, PHASE3
+// (PHASE3_LOG_QUERY_CAPABILITY_AND_NETWORKROUTES_CLEANUP.md) - a
+// NetworkServer constructed with logQueryCapability == nullptr (mirrors
+// production's own "no logging bridge wired up" contract, see
+// NetworkServer.h's own constructor doc comment) must respond 503 for BOTH
+// GET /get_logs and POST /clear_logs, rather than crashing - mirrors
+// ActivateTabEndpointNullBridgeTests's own exact convention
+// (tests/Network/ActivateTabEndpointEndToEndTests.cpp). Plain `TEST`, not
+// `TEST_F` - deliberately does NOT use LogEndpointsEndToEndTest's own
+// fixture, since that fixture always wires a REAL capability.
+TEST(LogEndpointsNullCapabilityTests, GetLogsAndClearLogsReturn503WhenCapabilityIsNull)
+{
+    Network::NetworkServer server; // Every bridge/capability pointer defaults to nullptr.
+    server.Start(0);
+    ASSERT_TRUE(server.IsRunning());
+    httplib::Client client("127.0.0.1", server.BoundPort());
+    Network::TestHelpers::WaitUntilAcceptingConnections(server, client);
+
+    const httplib::Result getRes = client.Get("/get_logs");
+    ASSERT_TRUE(getRes != nullptr);
+    EXPECT_EQ(getRes->status, 503);
+    const nlohmann::json getBody = nlohmann::json::parse(getRes->body);
+    EXPECT_EQ(getBody["success"], false);
+
+    const httplib::Result clearRes = client.Post("/clear_logs");
+    ASSERT_TRUE(clearRes != nullptr);
+    EXPECT_EQ(clearRes->status, 503);
+    const nlohmann::json clearBody = nlohmann::json::parse(clearRes->body);
+    EXPECT_EQ(clearBody["success"], false);
+
+    server.Stop();
 }
 
 } // namespace

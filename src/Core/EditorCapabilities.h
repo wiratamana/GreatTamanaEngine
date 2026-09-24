@@ -46,8 +46,13 @@
 // carry ZERO remaining macro or fallback-message content at all - nothing to
 // design there either.
 
+#include "Logging.h" // editor-core-separation-2 campaign, PHASE3 - LogEntry/LogQueryFilter for ILogQueryCapability below.
+
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 namespace gte {
 
@@ -112,6 +117,33 @@ public:
     // Mirrors SceneIO.h's real `std::filesystem::path DefaultScenePath()`
     // signature exactly.
     virtual std::filesystem::path DefaultScenePath() const = 0;
+};
+
+// editor-core-separation-2 campaign, PHASE3 - closes the real, pre-existing
+// gte_core -> gte_editor-only-symbol dependency editor-core-separation-1
+// left open (NetworkServer.cpp calling Logger::Query()/Clear()/EntryCount()/
+// IsEnabled()/LatestEntryId() directly - see that campaign's own
+// CAMPAIGN_COMPLETION_REPORT.md, "What remains genuinely open", option (b)).
+// Mirrors ISceneIOCapability exactly: gte_core-tier code (NetworkServer.cpp)
+// holds only a nullable pointer to this interface, asking a plain runtime
+// null-check instead of a compile-time #if - a future Player host that
+// never registers a real implementation gets a safe "logging unavailable"
+// answer for free.
+//
+// `IsEnabled()` mirrors Logger::IsEnabled()'s own real, current signature
+// (a `static constexpr bool` returning `true` unconditionally today) - a
+// `nullptr` ILogQueryCapability* at the NetworkServer.cpp call site is what
+// represents "this build has no logger at all", NOT a `false` return from
+// this method; the two must never be conflated.
+class ILogQueryCapability {
+public:
+    virtual ~ILogQueryCapability() = default;
+
+    virtual std::vector<LogEntry> Query(const LogQueryFilter& filter) = 0;
+    virtual void Clear() = 0;
+    virtual std::size_t EntryCount() const = 0;
+    virtual bool IsEnabled() const = 0;
+    virtual std::uint64_t LatestEntryId() const = 0;
 };
 
 } // namespace gte

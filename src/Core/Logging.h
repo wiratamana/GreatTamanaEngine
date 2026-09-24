@@ -110,6 +110,18 @@ struct LogQueryFilter {
     std::size_t limit = 0;             // 0 = no limit. Otherwise keep only the NEWEST `limit` matches.
 };
 
+// editor-core-separation-2 campaign, PHASE3
+// (PHASE3_LOG_QUERY_CAPABILITY_AND_NETWORKROUTES_CLEANUP.md) - the real
+// VALUE of Editor/Logger.h's own `Logger::kCapacity`, relocated here so
+// Network/NetworkRoutes.cpp (a gte_core-tier file) can clamp GET /get_logs'
+// own `limit` query parameter against it WITHOUT needing to #include the
+// gte_editor-only Logger class just for one compile-time constant.
+// `Logger::kCapacity` itself is unchanged in every other respect (same
+// qualified name, same value, same call sites) - it simply becomes
+// `static constexpr std::size_t kCapacity = kLogCapacity;` instead of
+// re-stating the literal `2000` a second time (see Editor/Logger.h).
+inline constexpr std::size_t kLogCapacity = 2000;
+
 // Forward declarations only - real definitions live in Core/LogSink.h/.cpp
 // (kept in a separate header/translation unit since they need the
 // ILogSink interface, which this file deliberately does NOT define, to

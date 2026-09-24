@@ -44,6 +44,12 @@ namespace gte { class FrameDebuggerCommandBridge; }
 // Design Decision #1 and this phase's own Definition of Done).
 namespace gte { class AssetImportCommandBridge; }
 
+// Forward-declared for the same cheap-header reason as FrameCaptureBridge/
+// EngineCommandBridge/EditorUiCommandBridge/FrameDebuggerCommandBridge/
+// AssetImportCommandBridge above - editor-core-separation-2 campaign, PHASE3
+// (PHASE3_LOG_QUERY_CAPABILITY_AND_NETWORKROUTES_CLEANUP.md).
+namespace gte { class ILogQueryCapability; }
+
 namespace gte::Network {
 
 // Owns a real, embedded HTTP server (cpp-httplib) bound to loopback
@@ -105,13 +111,23 @@ public:
     // `frameDebuggerCommandBridge` so every existing call site keeps
     // compiling unchanged. Non-null in production (Application owns the
     // real AssetImportCommandBridge and passes its address) - genuinely
-    // UNUSED by any route yet (see this class's own private member comment
     // below) until PHASE2 registers `POST /import_asset` against it.
+    // `logQueryCapability` (editor-core-separation-2 campaign, PHASE3) is a
+    // SIXTH defaulted, non-owning pointer, appended AFTER
+    // `assetImportCommandBridge` so every existing call site keeps compiling
+    // unchanged - in particular, tests/Network/NetworkServerTests.cpp's
+    // multiple no-argument `NetworkServer server;` constructions. Non-null
+    // in production (EditorHost owns the real EditorLogQueryCapability and
+    // passes its address - see EditorHost.cpp) - `nullptr` means
+    // "GET /get_logs and POST /clear_logs both respond 503 rather than
+    // crashing" - the exact same "nullptr degrades gracefully to a 503,
+    // never a crash" contract every other bridge above already documents.
     explicit NetworkServer(FrameCaptureBridge* captureBridge = nullptr,
         EngineCommandBridge* commandBridge = nullptr,
         EditorUiCommandBridge* uiCommandBridge = nullptr,
         FrameDebuggerCommandBridge* frameDebuggerCommandBridge = nullptr,
-        AssetImportCommandBridge* assetImportCommandBridge = nullptr);
+        AssetImportCommandBridge* assetImportCommandBridge = nullptr,
+        ILogQueryCapability* logQueryCapability = nullptr);
     ~NetworkServer();
 
     NetworkServer(const NetworkServer&) = delete;
@@ -194,6 +210,10 @@ private:
     // RegisterRoutes() below - PHASE2 is what actually wires a real route
     // handler against it, when POST /import_asset is registered.
     AssetImportCommandBridge* m_assetImportCommandBridge = nullptr;
+    // Non-owning - same lifetime contract as m_captureBridge above
+    // (editor-core-separation-2 campaign, PHASE3). Consulted by
+    // GET /get_logs and POST /clear_logs (RegisterRoutes() below).
+    ILogQueryCapability* m_logQueryCapability = nullptr;
 };
 
 } // namespace gte::Network

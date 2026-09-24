@@ -2,6 +2,7 @@
 
 #include "Logger.h" // LoggerLogSink::Instance() - the ONE real ILogSink this engine ships.
 #include "EditorSceneIOCapability.h"
+#include "EditorLogQueryCapability.h" // editor-core-separation-2 campaign, PHASE3.
 #include "../Application/EventTranslator.h"
 #include "../Application/EngineCommandDispatch.h"
 #include "../Application/MemorySnapshotBuilder.h"
@@ -75,6 +76,26 @@ std::string DebugTextureColorFormatName(VkFormat format)
     return std::string(buffer);
 }
 
+// editor-core-separation-2 campaign, PHASE3
+// (PHASE3_LOG_QUERY_CAPABILITY_AND_NETWORKROUTES_CLEANUP.md) - the ONE real
+// EditorLogQueryCapability instance this engine ships, wired into
+// NetworkServer's constructor below. Pure delegation with no state of its
+// own (mirrors s_editorSceneIOCapability's own identical reasoning) - a
+// single whole-process-lifetime instance is all this needs. Deliberately a
+// NAMESPACE-scope static (not a function-local static declared inside the
+// constructor BODY like s_editorSceneIOCapability below) - its ADDRESS is
+// needed inside EditorHost's own member-INITIALIZER LIST (to construct
+// m_networkServer, since ILogQueryCapability's own wiring destination is
+// NetworkServer's constructor argument list directly, unlike
+// ISceneIOCapability's own EditorHost-owned-member-plus-manual-threading
+// shape - see this phase's own strategy doc, Step 3.5), which runs BEFORE
+// the constructor body - a static declared inside the body would not yet
+// be in scope at that point. Safe as a plain namespace-scope static despite
+// running before main(): this class holds zero data members and its
+// constructor touches no other global, so there is no static-initialization-
+// order risk to guard against.
+EditorLogQueryCapability s_editorLogQueryCapability;
+
 } // namespace
 
 EditorHost::SdlContext::SdlContext()
@@ -126,8 +147,12 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
     // Safe: m_captureBridge is declared (and thus constructed) before
     // m_networkServer, per EditorHost.h's own member ordering. The four
     // other bridge addresses mirror Application's own identical precedent.
+    // editor-core-separation-2 campaign, PHASE3 - the sixth argument,
+    // &s_editorLogQueryCapability (this file's own namespace-scope static,
+    // above), so GET /get_logs/POST /clear_logs can reach the real Logger
+    // singleton through the new ILogQueryCapability bridge.
     , m_networkServer(&m_captureBridge, &m_commandBridge, &m_uiCommandBridge, &m_frameDebuggerCommandBridge,
-          &m_assetImportCommandBridge)
+          &m_assetImportCommandBridge, &s_editorLogQueryCapability)
 {
     // editor-core-separation-1 campaign, PHASE3
     // (PHASE3_LOGGING_GLOBAL_LOGSINK_EXTRACTION.md) - installs the ONE real

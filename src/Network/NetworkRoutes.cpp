@@ -1,16 +1,13 @@
 #include "NetworkRoutes.h"
 
-// PHASE3 (editor-core-separation-1 campaign,
-// PHASE3_LOGGING_GLOBAL_LOGSINK_EXTRACTION.md) - NetworkRoutes.h itself no
-// longer includes Editor/Logger.h (it only ever needed ToString()/
-// TryParseLogLevel(), now unconditional in Core/Logging.h - see that
-// header's own #include above). This .cpp, however, still needs the real
-// Editor::Logger CLASS directly: ParseGetLogsQuery() below clamps its
-// `limit` field against Logger::kCapacity. This is a real, pre-existing,
-// NOT-macro-gated dependency this phase's own narrow scope (fixing the
-// GTE_LOG_* mechanism) does not resolve - see PHASE3_COMPLETION_REPORT.md's
-// own "Discovered gap" section.
-#include "../Editor/Logger.h"
+// editor-core-separation-2 campaign, PHASE3
+// (PHASE3_LOG_QUERY_CAPABILITY_AND_NETWORKROUTES_CLEANUP.md) - this file no
+// longer #includes Editor/Logger.h. ParseGetLogsQuery() below now clamps
+// its `limit` field against `kLogCapacity` (Core/Logging.h, already
+// #included via NetworkRoutes.h) instead of `Logger::kCapacity` - same
+// value (2000), just relocated to a gte_core-owned home so this
+// gte_core-tier file never needs the gte_editor-only Logger CLASS just for
+// one compile-time constant (closes Defect C).
 
 #include <nlohmann/json.hpp>
 
@@ -972,11 +969,11 @@ ParsedGetLogsQuery ParseGetLogsQuery(const std::string& sinceIdParam, const std:
             result.errorMessage = "invalid query parameter: limit - must be a non-negative integer";
             return result;
         }
-        // Silently clamped to Logger::kCapacity when larger - a caller
-        // asking for "too many" is harmless, unlike a genuinely malformed
-        // value (see NetworkRoutes.h's own doc comment).
+        // Silently clamped to kLogCapacity (Core/Logging.h) when larger - a
+        // caller asking for "too many" is harmless, unlike a genuinely
+        // malformed value (see NetworkRoutes.h's own doc comment).
         result.filter.limit =
-            static_cast<std::size_t>(limit > Logger::kCapacity ? Logger::kCapacity : limit);
+            static_cast<std::size_t>(limit > kLogCapacity ? kLogCapacity : limit);
     }
 
     // Every one of the six parameters above has now been checked and none

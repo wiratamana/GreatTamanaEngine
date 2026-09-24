@@ -733,6 +733,11 @@ add_library(gte_editor STATIC
     # ISceneIOCapability implementation wrapping SceneIO.h above.
     src/Editor/EditorSceneIOCapability.h
     src/Editor/EditorSceneIOCapability.cpp
+    # editor-core-separation-2 campaign, PHASE3
+    # (PHASE3_LOG_QUERY_CAPABILITY_AND_NETWORKROUTES_CLEANUP.md) - the real
+    # ILogQueryCapability implementation wrapping Logger.h above.
+    src/Editor/EditorLogQueryCapability.h
+    src/Editor/EditorLogQueryCapability.cpp
     src/Editor/Selection.h
     src/Editor/Selection.cpp
     src/Editor/EditorCamera.h

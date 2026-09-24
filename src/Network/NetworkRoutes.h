@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <cstdint>
 #include <string>
@@ -872,15 +872,21 @@ std::string BuildScenePathResponseJson(bool success, const std::string& errorMes
 
 // --- task_manager/logger-1 campaign, PHASE3
 // (PHASE3_NETWORK_ENDPOINTS_GET_LOGS_AND_CLEAR_LOGS.md) - GET /get_logs and
-// POST /clear_logs. Both call gte::Logger::Query()/Clear() DIRECTLY, with NO
-// new cross-thread bridge - a deliberate, narrow exception to this file's
-// usual "route handler reaches engine state only through a reviewed bridge"
-// rule (see this file's header comment, and every bridge-based route above),
+// POST /clear_logs. Originally called gte::Logger::Query()/Clear() DIRECTLY
+// (NetworkServer.cpp), a deliberate, narrow exception to this file's usual
+// "route handler reaches engine state only through a reviewed bridge" rule
+// (see this file's header comment, and every bridge-based route above),
 // documented explicitly in AGENTS.md ("Logging") and
 // docs/conventions/logging.md/docs/conventions/networking.md: Logger is its
 // OWN, purpose-built, thread-safe store (see Editor/Logger.h), not engine
-// state (ECS/Renderer/Game/ImGui) in the sense that rule exists to protect -
-// this exception must NEVER be read as permission for a future route to
+// state (ECS/Renderer/Game/ImGui) in the sense that rule exists to protect.
+// UPDATE, editor-core-separation-2 campaign, PHASE3
+// (PHASE3_LOG_QUERY_CAPABILITY_AND_NETWORKROUTES_CLEANUP.md): NetworkServer.cpp
+// now calls through the new, nullable ILogQueryCapability* bridge
+// (Core/EditorCapabilities.h) instead of gte::Logger:: directly - the
+// PURE functions in THIS file (below) are completely unaffected either way,
+// since they never touched Logger directly to begin with.
+// This exception must NEVER be read as permission for a future route to
 // bypass the bridge rule for actual engine state.
 
 // logger-1 campaign - GET /get_logs' own parsed query parameters. Every
@@ -911,9 +917,10 @@ struct ParsedGetLogsQuery {
 //     "error" (case-insensitive - see TryParseLogLevel(), Core/Logging.h - moved out of Editor/Logger.h by editor-core-separation-1's own PHASE3).
 //   - limitParam: must be empty, or a valid non-negative base-10 integer
 //     literal - defaults to 200 when empty, and is SILENTLY CLAMPED to
-//     Logger::kCapacity (2000) when larger, rather than treated as an
-//     error (a caller asking for "too many" is harmless, unlike a
-//     genuinely malformed value).
+//     kLogCapacity (2000, Core/Logging.h - relocated from Logger::kCapacity
+//     by editor-core-separation-2's own PHASE3) when larger, rather than
+//     treated as an error (a caller asking for "too many" is harmless,
+//     unlike a genuinely malformed value).
 //   - categoryParam/keywordParam: always valid as-is (any string,
 //     including empty, is acceptable).
 ParsedGetLogsQuery ParseGetLogsQuery(const std::string& sinceIdParam, const std::string& minLevelParam,
