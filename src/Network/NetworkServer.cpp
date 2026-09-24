@@ -1,4 +1,4 @@
-#include "NetworkServer.h"
+﻿#include "NetworkServer.h"
 
 #include "NetworkRoutes.h"
 
@@ -274,7 +274,7 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
     // network-impl-7 campaign
     // (PHASE4_HTTP_ENDPOINTS_ACTIVATE_TAB_AND_LIST_TABS.md) - GET /list_tabs.
     // Needs NO bridge at all - the panel catalog is fixed at compile time
-    // (see EditorPanelCatalog.h) - this is the SIMPLEST route in this whole
+    // (see Core/EditorPanelCatalog.h) - this is the SIMPLEST route in this whole
     // file: a pure function of build configuration, zero runtime/thread/
     // bridge dependency.
     server.Get("/list_tabs", [](const httplib::Request&, httplib::Response& res) {

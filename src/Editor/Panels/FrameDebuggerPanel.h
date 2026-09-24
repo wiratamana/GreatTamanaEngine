@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "../FrameDebuggerData.h"
 #include "../FrameDebuggerHistory.h"
@@ -32,7 +32,7 @@ class RenderGraph;
 // "Frame Debugger" window: a Unity-Frame-Debugger-style tool for
 // inspecting one captured frame's draw-call/render-pass hierarchy. An
 // ON-DEMAND FLOATING WINDOW (like BoneViewerWindow.h), NOT part of the
-// default dock layout and NOT listed in EditorPanelCatalog.h (see
+// default dock layout and NOT listed in Core/EditorPanelCatalog.h (see
 // PHASE0_MASTER_STRATEGY.md's Locked Design Decision #6) - opened/closed
 // via a checkable "Window > Frame Debugger" menu item
 // (DockLayout.cpp's BuildDockspaceAndMenuBar()) that flips

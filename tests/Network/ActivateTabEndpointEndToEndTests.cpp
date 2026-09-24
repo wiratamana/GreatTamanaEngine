@@ -1,4 +1,4 @@
-// End-to-end tests for GET /activate_tab and GET /list_tabs - network-impl-7
+﻿// End-to-end tests for GET /activate_tab and GET /list_tabs - network-impl-7
 // campaign, Phase 5 (PHASE5_TESTING_DOCS_AND_REGRESSION_SAFETY.md, Step 3.1).
 // Mirrors tests/Network/EngineCommandEndpointsEndToEndTests.cpp's own proven
 // shape exactly: a real gte::EditorUiCommandBridge + a real
@@ -23,7 +23,7 @@
 // real JSON request/response bodies round-tripping over a real socket.
 
 #include "Application/EditorUiCommandBridge.h"
-#include "Editor/EditorPanelCatalog.h"
+#include "Core/EditorPanelCatalog.h"
 #include "Network/NetworkServer.h"
 
 #include "NetworkTestHelpers.h"

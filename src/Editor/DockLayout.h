@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 namespace gte {
 
@@ -28,7 +28,7 @@ void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer
 // this session (e.g. requested before this panel's own first Begin() call
 // this session - an accepted, narrow race - see IEditorLayer::ActivateTab()'s
 // own doc comment, EditorLayer.h). Does NOT itself validate `panelName`
-// against EditorPanelCatalog.h's known list - that validation already
+// against Core/EditorPanelCatalog.h's known list - that validation already
 // happened one layer up, in NetworkRoutes.cpp (Phase 4), before this call
 // was ever reached; this function is a dumb, generic "does a window with
 // this exact name exist right now" primitive, reusable for any future

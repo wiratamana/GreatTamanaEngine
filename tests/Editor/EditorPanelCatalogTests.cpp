@@ -1,13 +1,13 @@
-#include "Editor/EditorPanelCatalog.h"
+#include "Core/EditorPanelCatalog.h"
 
 #include <gtest/gtest.h>
 
 // NOTE: unlike every OTHER tests/Editor/*.cpp file, this test is registered
-// in tests/CMakeLists.txt's MAIN, unconditional GTE_TEST_SOURCES list, NOT
-// inside the if(GTE_ENABLE_EDITOR) block - EditorPanelCatalog.h compiles and
-// must be tested in every build configuration, since it is consumed by
-// src/Network/NetworkRoutes.cpp, which always compiles regardless of
-// GTE_ENABLE_EDITOR (see network-impl-7 campaign, PHASE1).
+// in tests/CMakeLists.txt's MAIN, unconditional GTE_TEST_SOURCES list -
+// Core/EditorPanelCatalog.h compiles and must be tested in every build
+// configuration, since it is consumed by src/Network/NetworkRoutes.cpp,
+// which always compiles unconditionally (see network-impl-7 campaign,
+// PHASE1, and editor-core-separation-2 campaign, PHASE1).
 
 namespace gte {
 namespace {

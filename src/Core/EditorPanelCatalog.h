@@ -10,15 +10,15 @@
 // GET /activate_tab / GET /list_tabs routes (see NetworkRoutes.cpp,
 // network-impl-7 campaign) can never silently drift apart from each other.
 //
-// Deliberately ImGui/SDL/Vulkan-free, and physically living under
-// src/Editor/ despite that - a SECOND explicit, documented exception to
-// "everything under src/Editor/ only ever runs as part of the Editor"
-// alongside EditorLayer.h/NullEditorLayer.cpp (see AGENTS.md, "Editor
-// Module Structure"). This is safe because a HEADER with no matching .cpp
-// simply compiles wherever it is #included, including from src/Network/
-// (editor-core-separation-1 campaign, PHASE8 - GTE_ENABLE_EDITOR no longer
-// exists anywhere in this codebase, so there is no macro to be "regardless
-// of" any more).
+// Lives under src/Core/ (relocated from src/Editor/ by the
+// editor-core-separation-2 campaign, PHASE1) because it is pure,
+// gte_core-owned compile-time data (the canonical list of known Editor
+// panel names) that BOTH gte_core-tier code (src/Network/NetworkRoutes.h,
+// for GET /activate_tab/GET /list_tabs) and gte_editor-tier code
+// (src/Editor/DockLayout.cpp, for building the default dock layout) need to
+// agree on - the single source of truth belongs in gte_core precisely
+// because it must be reachable from both tiers, and only gte_core is
+// visible from both.
 //
 // GTE_ENABLE_PROJECT_PANEL is a PUBLIC compile definition on the gte_core
 // target (see CMakeLists.txt's own target_compile_definitions() call), so

@@ -1,6 +1,6 @@
-#include "DockLayout.h"
+﻿#include "DockLayout.h"
 #include "EditorContext.h"
-#include "EditorPanelCatalog.h"
+#include "../Core/EditorPanelCatalog.h"
 #include "PlaybackControls.h"
 #include "SceneIO.h"
 

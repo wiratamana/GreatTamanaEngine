@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.19)
+﻿cmake_minimum_required(VERSION 3.19)
 
 # --- Platform gate -----------------------------------------------------
 # This build currently only supports Windows. Everything else is a quick,
@@ -429,7 +429,7 @@ add_library(gte_core STATIC
     src/Application/AssetImportCommandBridge.cpp
     src/Application/FrameDebuggerCommandBridge.h
     src/Application/FrameDebuggerCommandBridge.cpp
-    src/Editor/EditorPanelCatalog.h
+    src/Core/EditorPanelCatalog.h
     # editor-core-separation-1 campaign, PHASE9 (PHASE9_CMAKE_TARGET_SPLIT.md,
     # Locked Design Decision #9) - unlike every other file under src/Editor/,
     # NullEditorLayer.cpp belongs in gte_core's OWN unconditional source list,

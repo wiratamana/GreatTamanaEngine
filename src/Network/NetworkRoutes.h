@@ -1,10 +1,10 @@
-#pragma once
+﻿#pragma once
 
 #include <cstdint>
 #include <string>
 #include <vector>
 
-#include "../Editor/EditorPanelCatalog.h"
+#include "../Core/EditorPanelCatalog.h"
 #include "../Core/Logging.h"
 
 namespace gte::Network {
@@ -545,7 +545,7 @@ std::string BuildListTexturesResponseJson(const std::vector<TextureListEntryView
 // --- network-impl-7 campaign - GET /activate_tab and GET /list_tabs.
 // Every function below stays PURE - no httplib/socket/thread/Registry/Game/
 // Renderer/ImGui dependency of any kind, exactly like everything above -
-// EditorPanelCatalog.h (included above) is a plain, compile-time-fixed data
+// Core/EditorPanelCatalog.h (included above) is a plain, compile-time-fixed data
 // header with the same "safe to depend on from anywhere" property as
 // <cstdint>/<string>, not an Editor/ImGui dependency in the sense this
 // file's own header comment warns against.
@@ -553,7 +553,7 @@ std::string BuildListTexturesResponseJson(const std::vector<TextureListEntryView
 // Parsed, validated GET /activate_tab query parameters. `valid == false`
 // means `errorMessage` explains exactly why (a 400 response); `notFound ==
 // true` (only meaningful when `valid == true`) means the name did not
-// match anything in EditorPanelCatalog.h's known panel list (a 404
+// match anything in Core/EditorPanelCatalog.h's known panel list (a 404
 // response, NOT a 400 - the request itself was well-formed, the NAME it
 // asked about just isn't one this engine knows about - see
 // PHASE0_MASTER_STRATEGY.md's own locked endpoint contract for the exact
@@ -569,7 +569,7 @@ struct ParsedActivateTabQuery {
 //   1. `nameParam` must be non-empty - otherwise "missing or empty required
 //      query parameter: name" (valid = false).
 //   2. `nameParam` must exactly (case-sensitive) match one entry of
-//      gte::kKnownEditorPanelNames (EditorPanelCatalog.h's
+//      gte::kKnownEditorPanelNames (Core/EditorPanelCatalog.h's
 //      IsKnownEditorPanelName()) - otherwise valid = true, notFound = true,
 //      tabName = nameParam (the caller/route handler is expected to build a
 //      404 response quoting this name - see BuildActivateTabResponseJson()
@@ -598,7 +598,7 @@ std::string BuildUnknownTabNameResponseJson(const std::string& tabName);
 
 // Builds GET /list_tabs's entire response body - needs no request/query
 // input at all, since the panel catalog is fixed at compile time (see
-// EditorPanelCatalog.h): {"tabs":["Hierarchy","Inspector","Scene","Game",
+// Core/EditorPanelCatalog.h): {"tabs":["Hierarchy","Inspector","Scene","Game",
 // "Memory","Profiler","Render Graph","Jobs","Atmosphere"]} (plus "Project"
 // appended at the end when GTE_ENABLE_PROJECT_PANEL is ON - reads directly
 // from gte::kKnownEditorPanelNames, so this list can never drift out of
