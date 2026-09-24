@@ -31,6 +31,15 @@ verification evidence).
 
 - PHASE3: `IRenderFeatureModule_v1` / `IPluginRenderPassBuilder`.
 - PHASE4: `IEditorPanelModule_v1` / `IPluginPanelDrawContext`.
+- editor-core-separation-5 campaign, PHASE1: `PluginExportsMacro.h`
+  (`GTE_DEFINE_PLUGIN_EXPORTS`/`GTE_DEFINE_PLUGIN_EXPORTS_STATIC_INSTANCE`) and
+  `SingleCapabilityPluginModule.h` (`MakeModuleInfo()`,
+  `SingleCapabilityPluginModule<T>`, `ZeroCapabilityPluginModule`) - optional,
+  additive authoring sugar around the existing IPluginModule/extern "C" contract
+  above; zero ABI change, never required, never used by PluginHost itself
+  (PluginHost only ever calls the three fixed extern "C" exports and
+  IPluginModule's own two virtual methods, regardless of which flavor a given
+  plugin .dll used to produce them).
 
 ## Rules every type on this list must follow (Locked Design Decision #3)
 
