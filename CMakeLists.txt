@@ -720,8 +720,30 @@ else()
     set(GTE_PLUGIN_RUNTIME_OUTPUT_DIR "$<TARGET_FILE_DIR:GreatTamanaEditor>/plugins")
 endif()
 
+# editor-core-separation-4 campaign, PHASE2
+# (PHASE2_GTE_ENABLE_PLUGINS_OFF_BUILD_FIX.md) - gte_plugin_abi is an
+# unconditional add_subdirectory() call, ALWAYS run regardless of
+# GTE_ENABLE_PLUGINS. It is a plain, header-only INTERFACE library (cheap to
+# configure - one configure_file() call, zero real compilation), and gte_core
+# unconditionally links against it (see target_link_libraries(gte_core
+# PUBLIC gte_plugin_abi) below) because src/Core/Plugins/PluginHost.h/.cpp
+# are themselves in gte_core's own UNCONDITIONAL source file list - they
+# always compile and always need this target's include directories, in
+# EVERY configuration, including GTE_ENABLE_PLUGINS=OFF (where PluginHost's
+# class still compiles and is still testable, it is simply never CALLED at
+# runtime - EditorHost.cpp's own m_core.LoadPlugins() call site is what is
+# actually gated, via #if GTE_ENABLE_PLUGINS). Confirmed, real, previously-
+# broken bug this phase fixes: before this change, this whole
+# add_subdirectory() call (including gte_plugin_abi's own) was gated behind
+# `if(GTE_ENABLE_PLUGINS)`, so a GTE_ENABLE_PLUGINS=OFF configure meant
+# gte_plugin_abi never existed as a CMake target at all, while
+# target_link_libraries(gte_core PUBLIC gte_plugin_abi) further down this
+# file referenced it completely unconditionally - a guaranteed configure/link
+# failure, never exercised before this phase (see
+# task_manager/editor-core-separation-4/PHASE2_GTE_ENABLE_PLUGINS_OFF_BUILD_FIX.md).
+add_subdirectory(plugins/gte_plugin_abi)
+
 if(GTE_ENABLE_PLUGINS)
-    add_subdirectory(plugins/gte_plugin_abi)
     add_subdirectory(plugins/demo_hello_world)
     # editor-core-separation-3 campaign, PHASE3
     # (PHASE3_RUNTIME_RENDER_FEATURE_CAPABILITY.md, Step 3.5) - the
