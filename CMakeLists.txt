@@ -950,6 +950,23 @@ target_link_libraries(gte_core PUBLIC Threads::Threads)
 # archive gets linked transitively).
 target_link_libraries(gte_core PRIVATE saba_pmx)
 
+# editor-core-separation-2 campaign, PHASE4 - the REAL, mechanical proof
+# that gte_core.a links standalone (design doc Section 1.3, Rule 3) - a
+# genuinely separate concern from GTE_CORE_STANDALONE_PROBE_ONLY's own
+# original job (skipping gte_editor/the main executable/tests so
+# tools/ci/gte_core_standalone_probe/ can build ONLY the gte_core ARCHIVE).
+# This executable target only exists in THIS exact configuration
+# (GTE_CORE_STANDALONE_PROBE_ONLY=ON) - it is never part of a normal
+# `cmake -S . -B build` configure, exactly like gte_editor/GreatTamanaEditor
+# are never part of a GTE_CORE_STANDALONE_PROBE_ONLY=ON configure (the
+# inverse of the guard immediately below this block). See
+# tools/ci/gte_core_player_link_probe/README.md for the exact command to
+# build+link this by hand.
+if(GTE_CORE_STANDALONE_PROBE_ONLY)
+    add_executable(gte_core_player_link_probe tools/ci/gte_core_player_link_probe/main.cpp)
+    target_link_libraries(gte_core_player_link_probe PRIVATE gte_core)
+endif()
+
 # editor-core-separation-1 campaign, PHASE18
 # (PHASE18_HEADLESS_TEST_FIXTURE_AND_CORE_STANDALONE_PROBE.md) - the entire
 # executable (which always links gte_editor, never gte_core alone - Rule 4,
@@ -964,40 +981,15 @@ add_executable(GreatTamanaEditor src/main.cpp)
 # no configuration of this repo's own CMakeLists.txt in which this
 # executable links gte_core alone.
 #
-# REAL LINKER WRINKLE, DISCOVERED DURING PHASE 9 OF editor-core-separation-1
-# (documented here, not silently worked around): at Phase 9's own time,
-# `Application.cpp` still physically lived inside gte_core's own source list
-# (Phase 9 was pure file movement only - Phases 12/13 later extracted Core's
-# own class body and split its ~30 IEditorLayer call sites away from
-# Application's direct, unconditional calls - see PHASE0_MASTER_STRATEGY.md,
-# Locked Design Decision #8). Until that happened, `Application.cpp`/
-# `RenderSystem.cpp`/`NetworkServer.cpp` (compiled into gte_core) called
-# several real functions/vtables that only gte_editor defines
-# (`CreateEditorLayer()`, `AddFrameDebuggerReplayPasses()`,
-# `RecordFrameDebuggerDraws()`, `Logger::*`, `EditorSceneIOCapability`'s
-# vtable) - a genuine SYMBOL-level circular need between the two archives,
-# even though the #include/target_link_libraries() DIRECTION stays correctly
-# one-way (gte_editor -> gte_core, never declared in reverse - Rule 2 is not
-# violated). GNU ld only scans each archive once by default, so without this
-# `$<LINK_GROUP:RESCAN,...>` (lets the linker re-scan both archives as a pair
-# until nothing new resolves - CMake >= 3.24, GNU/LLD/MSVC linkers), the link
-# fails with "undefined reference to gte::CreateEditorLayer(...)" and several
-# siblings.
-#
-# UPDATE, PHASE17 (PHASE17_APPLICATION_RETIREMENT_AND_EXECUTABLE_RENAME.md):
-# `Application.cpp`/`Application.h` are now DELETED outright - Phase 13
-# already moved every `IEditorLayer` call site out of it and Phase 16 moved
-# every automation bridge off it, leaving it genuinely dead code, and this
-# phase removed it for good. The prediction two paragraphs up ("EXPECTED to
-# disappear on its own once Phase 13...") turned out to be only PARTIALLY
-# true: `Application.cpp`'s OWN contribution to this wrinkle is gone, but
-# `RenderSystem.cpp`'s call to `RecordFrameDebuggerDraws()` and
-# `NetworkServer.cpp`'s calls to `Logger::Query()`/`Logger::Clear()` (both
-# still physically compiled into gte_core) are REAL, PERMANENT
-# gte_core -> gte_editor-only-symbol dependencies with no further phase
-# planned to remove them - this `$<LINK_GROUP:RESCAN,...>` is therefore a
-# permanent fixture of this build, not a temporary Phase-9-era workaround.
-target_link_libraries(GreatTamanaEditor PRIVATE "$<LINK_GROUP:RESCAN,gte_editor,gte_core>")
+# gte_editor is linked with a plain, single-pass target_link_libraries()
+# call because gte_core's own object files carry zero unresolved references
+# to any gte_editor-only symbol - see
+# task_manager/editor-core-separation-2/PHASE2_FRAME_DEBUGGER_CAPTURE_RECORDER_INTERFACE.md
+# and PHASE3_LOG_QUERY_CAPABILITY_AND_NETWORKROUTES_CLEANUP.md for the two
+# fixes that made this true, and tools/ci/gte_core_player_link_probe/ for
+# the permanent, mechanical proof (a real executable link against gte_core.a
+# alone, no gte_editor involved at all).
+target_link_libraries(GreatTamanaEditor PRIVATE gte_editor)
 
 # Compiles the engine's GLSL shader sources to SPIR-V at build time (see
 # cmake/CompileShaders.cmake) - staged into "<exe dir>/shaders/" next to the

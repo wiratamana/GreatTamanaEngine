@@ -8,6 +8,10 @@
 # own build tree (tools/ci/gte_core_standalone_probe/), never committed,
 # same as every other build tree above.
 /build-core-probe/
+# editor-core-separation-2 campaign, PHASE4 - the new player-link probe's
+# own build tree (tools/ci/gte_core_player_link_probe/), never committed,
+# same as /build-core-probe/ above.
+/build-player-link-probe/
 /out/
 
 # Local reference-only clones for research (see task_manager/atmosphere-scattering-1/

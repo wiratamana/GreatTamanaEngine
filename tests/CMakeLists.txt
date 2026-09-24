@@ -2283,15 +2283,16 @@ target_compile_definitions(GreatTamanaEngineTests PRIVATE
 # needs symbols that now permanently live in gte_editor's own archive.
 # gte_editor's own PUBLIC dependency on gte_core brings it in transitively.
 #
-# Same real, discovered-during-Phase-9 linker wrinkle as the root
-# CMakeLists.txt's own GreatTamanaEditor target (see that file's own
-# extensive comment right above its matching target_link_libraries() call) -
-# gte_core's own RenderSystem.cpp/NetworkServer.cpp still
-# call several gte_editor-only symbols directly (RecordFrameDebuggerDraws(),
-# Logger::Query()/Clear(), ...) - a real, permanent (not just "until Phase 13")
-# `$<LINK_GROUP:RESCAN,...>` treatment, not just a plain gte_editor link.
+# gte_editor is linked with a plain, single-pass target_link_libraries()
+# call because gte_core's own object files carry zero unresolved references
+# to any gte_editor-only symbol - see
+# task_manager/editor-core-separation-2/PHASE2_FRAME_DEBUGGER_CAPTURE_RECORDER_INTERFACE.md
+# and PHASE3_LOG_QUERY_CAPABILITY_AND_NETWORKROUTES_CLEANUP.md for the two
+# fixes that made this true, and tools/ci/gte_core_player_link_probe/ for
+# the permanent, mechanical proof (a real executable link against gte_core.a
+# alone, no gte_editor involved at all).
 target_link_libraries(GreatTamanaEngineTests PRIVATE
-    "$<LINK_GROUP:RESCAN,gte_editor,gte_core>"
+    gte_editor
     GTest::gtest
     GTest::gtest_main
 )
