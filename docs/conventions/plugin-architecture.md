@@ -157,6 +157,13 @@ last-registered plugin's output ends up visible — `Core::LoadPlugins()` logs a
 `GTE_LOG_WARNING` when more than one is detected. Per-plugin compositing is
 explicitly deferred, not yet designed.
 
+**Failure-path regression coverage (`editor-core-separation-4` campaign,
+PHASE8)**: `PluginHost`'s 4 documented failure/skip paths (missing export,
+fingerprint mismatch, decline-to-load, reverse-order destroy) are covered by
+`tests/Core/Plugins/PluginHostFailurePathTests.cpp`, using deliberately-broken
+fixture `.dll`s under `tests/Fixtures/FakePlugins/` — never the real,
+production demo plugins.
+
 ## Where things live, physically
 
 - **`plugins/gte_plugin_abi/`** (source, repo root) — this ABI's own
