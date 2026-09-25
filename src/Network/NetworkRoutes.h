@@ -6,6 +6,10 @@
 
 #include "../Core/EditorPanelRegistry.h"
 #include "../Core/Logging.h"
+// editor-core-separation-7 campaign, PHASE4 - GET /render_graph's response
+// body needs rg::RenderGraphMetadata's own to_json() (see
+// BuildRenderGraphMetadataResponseJson() below).
+#include "../Renderer/RenderGraph/RenderGraphMetadata.h"
 
 namespace gte::Network {
 
@@ -541,6 +545,20 @@ struct TextureListEntryView {
 // where nothing has rendered a single named texture yet (e.g. queried
 // immediately at startup, before the first frame) is a valid, normal state.
 std::string BuildListTexturesResponseJson(const std::vector<TextureListEntryView>& entries);
+
+// editor-core-separation-7 campaign, PHASE4 - GET /render_graph's response
+// body. Takes the EXACT rg::RenderGraphMetadata FrameCaptureBridge published
+// this session - unlike TextureListEntryView/PublishedTextureListEntry
+// above, this crosses the Application/Network layer boundary AS-IS (no
+// separate, nearly-identical Network-tier struct is introduced) because
+// rg::RenderGraphMetadata::to_json() is ALREADY the fully-resolved,
+// plain-scalars-and-strings JSON shape this route needs - there is no
+// "resolve enums/pointers into strings first" step left for NetworkServer.cpp
+// to do here, unlike TextureListEntryView's own reason for existing. If any
+// field ever needs Network-tier-specific reshaping later, introduce a
+// dedicated view struct then, mirroring TextureListEntryView, rather than
+// fighting this decision after the fact.
+std::string BuildRenderGraphMetadataResponseJson(const gte::rg::RenderGraphMetadata& metadata);
 
 // --- network-impl-7 campaign - GET /activate_tab and GET /list_tabs.
 // Every function below stays PURE - no httplib/socket/thread/Registry/Game/

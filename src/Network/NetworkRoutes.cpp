@@ -530,6 +530,16 @@ std::string BuildListTexturesResponseJson(const std::vector<TextureListEntryView
     return body.dump();
 }
 
+// editor-core-separation-7 campaign, PHASE4 - GET /render_graph. Uses
+// gte::rg::to_json(nlohmann::json&, const RenderGraphMetadata&) via ADL -
+// already the fully-resolved, plain-scalars-and-strings JSON shape (see
+// NetworkRoutes.h's own doc comment above this function's declaration).
+std::string BuildRenderGraphMetadataResponseJson(const gte::rg::RenderGraphMetadata& metadata)
+{
+    nlohmann::json body = metadata;
+    return body.dump();
+}
+
 // --- network-impl-7 campaign - GET /activate_tab and GET /list_tabs. See
 // NetworkRoutes.h's own doc comments above each declaration for the exact,
 // locked validation/response rules implemented below.

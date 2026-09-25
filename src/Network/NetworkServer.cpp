@@ -188,6 +188,26 @@ void RegisterListTexturesRoute(httplib::Server& server, FrameCaptureBridge* capt
     });
 }
 
+// editor-core-separation-7 campaign, PHASE4 - GET /render_graph. No query
+// parameters (PHASE0_MASTER_STRATEGY.md's Locked Design Decision #8). Unlike
+// RegisterListTexturesRoute() above, this DOES need the RenderGraph
+// (gte::rg::)-namespaced type - FrameCaptureBridge::GetPublishedRenderGraphMetadata()
+// already returns the fully-resolved gte::rg::RenderGraphMetadata this
+// route's own response builder needs as-is (see NetworkRoutes.h's own doc
+// comment on BuildRenderGraphMetadataResponseJson()).
+void RegisterRenderGraphRoute(httplib::Server& server, FrameCaptureBridge* captureBridge)
+{
+    server.Get("/render_graph", [captureBridge](const httplib::Request&, httplib::Response& res) {
+        if (captureBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("capture bridge not available"), "application/json");
+            return;
+        }
+        const gte::rg::RenderGraphMetadata metadata = captureBridge->GetPublishedRenderGraphMetadata();
+        res.set_content(BuildRenderGraphMetadataResponseJson(metadata), "application/json");
+    });
+}
+
 // task_manager/frame-debugger-3 campaign, PHASE7
 // (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md) - copies a
 // real FrameDebuggerStateOutcome (src/Application/FrameDebuggerCommandBridge.h)
@@ -266,6 +286,11 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
     // discoverability companion, GET /list_textures.
     RegisterGetTextureRoute(server, captureBridge);
     RegisterListTexturesRoute(server, captureBridge);
+
+    // editor-core-separation-7 campaign, PHASE4 - GET /render_graph, the
+    // real, current-frame render-graph metadata endpoint this whole campaign
+    // exists to ship.
+    RegisterRenderGraphRoute(server, captureBridge);
 
     // network-impl-7 campaign
     // (PHASE4_HTTP_ENDPOINTS_ACTIVATE_TAB_AND_LIST_TABS.md) - GET /list_tabs.

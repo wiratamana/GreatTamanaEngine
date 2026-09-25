@@ -5,11 +5,22 @@
 // engine-produced data. Built as part of the network-impl-2 campaign - see
 // task_manager/network-impl-2/PHASE2_CROSS_THREAD_FRAME_CAPTURE_BRIDGE.md.
 //
-// Deliberately Vulkan-free, Renderer-free, and engine-free: it only ever
-// moves plain std::vector<std::uint8_t> PNG bytes (+ width/height ints)
-// between "the network thread wants one" and "the main thread produced
-// one" - every actual pixel-capturing/PNG-encoding happens elsewhere
-// (Phase 3/4) and hands its *result* to this bridge, never the reverse.
+// Deliberately Vulkan-free and Renderer-free (never a live VkDevice/
+// Renderer&/RenderGraph& crosses this boundary) - this class moves THREE
+// kinds of plain, already-produced/already-resolved payload between "the
+// network thread wants one" and "the main thread produced one this frame":
+//   - Captured PNG images (std::vector<std::uint8_t> bytes + width/height
+//     ints, CapturedPngImage below) - the request/wait half
+//     (RequestCaptureAndWait()/FulfillPendingRequest()/FailPendingRequest()).
+//   - The published texture list (network-impl-4 campaign, Phase 5) -
+//     PublishedTextureListEntry, an already-resolved plain-scalar row per
+//     known texture (PublishTextureList()/GetPublishedTextureList()).
+//   - The published render-graph metadata (editor-core-separation-7
+//     campaign, PHASE4) - a full gte::rg::RenderGraphMetadata, itself
+//     already engine-free/JSON-able (PublishRenderGraphMetadata()/
+//     GetPublishedRenderGraphMetadata()).
+// Every actual pixel-capturing/PNG-encoding/render-graph-execution happens
+// elsewhere and hands its *result* to this bridge, never the reverse.
 //
 // Owned by Application (the composition root), constructed BEFORE
 // NetworkServer (see Application.h) so it can be handed into NetworkServer's
@@ -21,6 +32,8 @@
 #include <optional>
 #include <string>
 #include <vector>
+
+#include "../Renderer/RenderGraph/RenderGraphMetadata.h"
 
 namespace gte {
 
@@ -228,6 +241,29 @@ public:
     // completes) - a valid, normal state, never an error.
     std::vector<PublishedTextureListEntry> GetPublishedTextureList() const;
 
+    // --- GET /render_graph support (editor-core-separation-7 campaign, PHASE4) ---
+    // Same shape as PublishTextureList()/GetPublishedTextureList() immediately
+    // above - guarded by its OWN small, dedicated mutex, independent of every
+    // other mutex in this class (m_textureListMutex, every Slot's own mutex).
+
+    // --- Called from the MAIN thread (EditorHost::Run()) only ----------
+    // Publishes a fresh, COMPLETE RenderGraphMetadata - OVERWRITES whatever was
+    // published before wholesale. Called once per real engine frame - see
+    // EditorHost.cpp's own wiring. Independent of RenderGraphPanel's own
+    // "Pause" checkbox - ALWAYS the truly latest frame's real data
+    // (PHASE0_MASTER_STRATEGY.md's Locked Design Decision #9).
+    void PublishRenderGraphMetadata(rg::RenderGraphMetadata metadata);
+
+    // --- Called from the NETWORK thread (a route handler) only --------------
+    // A cheap, thread-safe COPY of whatever was last published - never blocks.
+    // Returns a default-constructed (schemaVersion == 1, everything else empty)
+    // RenderGraphMetadata if PublishRenderGraphMetadata() has never been called
+    // yet this session - a valid, normal state (e.g. queried before the very
+    // first Run() iteration completes), never an error - mirrors
+    // GetPublishedTextureList()'s own identical "empty vector, not an error"
+    // convention.
+    rg::RenderGraphMetadata GetPublishedRenderGraphMetadata() const;
+
 private:
     struct Slot {
         mutable std::mutex mutex;
@@ -255,6 +291,12 @@ private:
     // by its own dedicated mutex, independent of every Slot above.
     mutable std::mutex m_textureListMutex;
     std::vector<PublishedTextureListEntry> m_publishedTextureList;
+
+    // editor-core-separation-7 campaign, PHASE4 - GET /render_graph support.
+    // Guarded by its own dedicated mutex, independent of every other mutex in
+    // this class (m_textureListMutex, every Slot's own mutex).
+    mutable std::mutex m_renderGraphMetadataMutex;
+    rg::RenderGraphMetadata m_publishedRenderGraphMetadata;
 };
 
 } // namespace gte

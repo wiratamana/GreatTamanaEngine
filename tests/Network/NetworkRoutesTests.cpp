@@ -494,6 +494,102 @@ TEST(BuildListTexturesResponseJsonTests, NameWithQuoteRoundTripsThroughJson)
     EXPECT_EQ(parsed["textures"][0]["name"].get<std::string>(), R"(My"Texture)");
 }
 
+// --- editor-core-separation-7 campaign, PHASE4
+// (PHASE4_CROSS_THREAD_BRIDGE_AND_GET_RENDER_GRAPH_ENDPOINT.md) -
+// GET /render_graph's own response builder. Hand-fabricates a small
+// gte::rg::RenderGraphMetadata directly (mirrors
+// tests/Renderer/RenderGraph/RenderGraphMetadataTests.cpp's own
+// hand-fabrication style - no live RenderGraph/BuildRenderGraphMetadata()
+// call needed here, since this test only exercises the to_json() ->
+// dump() -> parse() round trip this route's own response body is built
+// from).
+
+using gte::Network::BuildRenderGraphMetadataResponseJson;
+
+TEST(BuildRenderGraphMetadataResponseJsonTests, DefaultConstructedMetadataProducesExpectedEmptyShape)
+{
+    const gte::rg::RenderGraphMetadata metadata; // schemaVersion == 1, everything else empty/default.
+    const std::string body = BuildRenderGraphMetadataResponseJson(metadata);
+    const nlohmann::json parsed = nlohmann::json::parse(body);
+
+    EXPECT_EQ(parsed["schema_version"].get<std::uint32_t>(), 1u);
+    ASSERT_TRUE(parsed.contains("offscreen_regime"));
+    // Note: regimeName is only populated by BuildRenderGraphMetadata() itself
+    // (Renderer/RenderGraph/RenderGraphMetadataTests.cpp already covers
+    // that) - a bare, default-constructed RenderGraphMetadata (as fabricated
+    // here, with zero involvement from that function) correctly serializes
+    // its still-default-constructed "" regimeName field, never a fabricated
+    // fallback string.
+    EXPECT_EQ(parsed["offscreen_regime"]["regime_name"].get<std::string>(), "");
+    EXPECT_TRUE(parsed["offscreen_regime"]["passes"].empty());
+    EXPECT_TRUE(parsed["offscreen_regime"]["resources"].empty());
+    ASSERT_TRUE(parsed.contains("present_regime"));
+    EXPECT_EQ(parsed["present_regime"]["regime_name"].get<std::string>(), "");
+    EXPECT_TRUE(parsed["gpu_driven_batches"].empty());
+    EXPECT_TRUE(parsed["render_features"].empty());
+}
+
+TEST(BuildRenderGraphMetadataResponseJsonTests, PopulatedMetadataRoundTripsEveryTopLevelField)
+{
+    gte::rg::RenderGraphMetadata metadata;
+    metadata.schemaVersion = 1;
+
+    gte::rg::RenderGraphPassMetadata pass;
+    pass.name = "RenderOpaque";
+    pass.isCulled = false;
+    pass.kind = "Graphics";
+    pass.category = "General";
+    pass.drawKind = "DrawMesh";
+    pass.viewScope = "Shared";
+    pass.renderPassEvent = "Opaques";
+    pass.reads.push_back(gte::rg::RenderGraphResourceRefMetadata{ "Depth", "Texture" });
+    pass.writes.push_back(gte::rg::RenderGraphResourceRefMetadata{ "Color", "Texture" });
+    pass.drawCallCount = 2;
+    pass.triangleCount = 20;
+    pass.gpuTimingText = "N/A";
+    metadata.offscreenRegime.regimeName = "SynchronousImmediateReadback";
+    metadata.offscreenRegime.passes.push_back(pass);
+
+    metadata.presentRegime.regimeName = "PipelinedDeferredReadback";
+
+    gte::GpuDrivenBatchDebugInfo batch;
+    batch.batchName = "Batch0";
+    batch.instanceCount = 4;
+    metadata.gpuDrivenBatches.push_back(batch);
+
+    gte::RenderFeatureDebugEntry feature;
+    feature.name = "Vignette";
+    feature.stage = "PreUI";
+    feature.priority = 1;
+    feature.blendMode = "Replace";
+    metadata.renderFeatures.push_back(feature);
+
+    const std::string body = BuildRenderGraphMetadataResponseJson(metadata);
+    const nlohmann::json parsed = nlohmann::json::parse(body);
+
+    ASSERT_EQ(parsed["offscreen_regime"]["passes"].size(), 1u);
+    const nlohmann::json& jsonPass = parsed["offscreen_regime"]["passes"][0];
+    EXPECT_EQ(jsonPass["name"].get<std::string>(), "RenderOpaque");
+    EXPECT_FALSE(jsonPass["is_culled"].get<bool>());
+    EXPECT_TRUE(jsonPass["tag_group_label"].is_null());
+    EXPECT_EQ(jsonPass["draw_call_count"].get<std::uint32_t>(), 2u);
+    EXPECT_EQ(jsonPass["triangle_count"].get<std::uint32_t>(), 20u);
+    ASSERT_EQ(jsonPass["reads"].size(), 1u);
+    EXPECT_EQ(jsonPass["reads"][0]["name"].get<std::string>(), "Depth");
+    EXPECT_EQ(jsonPass["reads"][0]["kind"].get<std::string>(), "Texture");
+
+    ASSERT_EQ(parsed["gpu_driven_batches"].size(), 1u);
+    EXPECT_EQ(parsed["gpu_driven_batches"][0]["batch_name"].get<std::string>(), "Batch0");
+    EXPECT_EQ(parsed["gpu_driven_batches"][0]["instance_count"].get<std::uint32_t>(), 4u);
+    EXPECT_TRUE(parsed["gpu_driven_batches"][0]["visible_count"].is_null());
+
+    ASSERT_EQ(parsed["render_features"].size(), 1u);
+    EXPECT_EQ(parsed["render_features"][0]["name"].get<std::string>(), "Vignette");
+    EXPECT_EQ(parsed["render_features"][0]["stage"].get<std::string>(), "PreUI");
+    EXPECT_EQ(parsed["render_features"][0]["priority"].get<std::int32_t>(), 1);
+    EXPECT_EQ(parsed["render_features"][0]["blend_mode"].get<std::string>(), "Replace");
+}
+
 // --- network-impl-5 campaign
 // (PHASE1_NETWORK_ROUTES_REQUEST_PARSING_AND_RESPONSE_BUILDING.md) -
 // POST /set_entity_trs + POST /instantiate_light request parsing/response

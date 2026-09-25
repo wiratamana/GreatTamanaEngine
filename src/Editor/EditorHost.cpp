@@ -23,6 +23,10 @@
 #include "../Profiling/ScopeTimer.h"
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../Renderer/RenderGraph/RenderGraphDebugTextureRegistry.h"
+// editor-core-separation-7 campaign, PHASE4 - GET /render_graph support
+// (BuildRenderGraphMetadata(), called below inside the existing
+// "IEditorLayer::BuildUI" scoped block).
+#include "../Renderer/RenderGraph/RenderGraphMetadata.h"
 
 #include <SDL3/SDL.h>
 
@@ -587,6 +591,18 @@ int EditorHost::Run()
                                                     : std::vector<RenderFeatureDebugEntry>{};
             m_editorLayer->BuildUI(m_game, m_renderer, m_renderGraph, m_atmosphereSettings, m_atmosphereLutRenderer,
                 m_core.GetGpuDrivenBatchDebugInfo(), renderFeatureEntries);
+
+            // editor-core-separation-7 campaign, PHASE4 - GET /render_graph
+            // support. Reuses renderFeatureEntries (still in scope here) so
+            // RenderFeatureCompositor::DebugSnapshot() is never called a
+            // second time this Run() iteration (PHASE0_MASTER_STRATEGY.md's
+            // Locked Design Decision #7). Independent of RenderGraphPanel's
+            // own "Pause" checkbox - always the truly latest frame's real
+            // data (Locked Design Decision #9).
+            m_captureBridge.PublishRenderGraphMetadata(rg::BuildRenderGraphMetadata(
+                m_renderGraph.LastSnapshot(rg::ExecuteTimingMode::SynchronousImmediateReadback),
+                m_renderGraph.LastSnapshot(rg::ExecuteTimingMode::PipelinedDeferredReadback),
+                m_core.GetGpuDrivenBatchDebugInfo(), renderFeatureEntries));
         }
 
         // File > Exit (or any other future programmatic "close" UI action)

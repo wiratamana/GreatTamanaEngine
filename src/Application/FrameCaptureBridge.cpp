@@ -148,4 +148,16 @@ std::vector<PublishedTextureListEntry> FrameCaptureBridge::GetPublishedTextureLi
     return m_publishedTextureList;
 }
 
+void FrameCaptureBridge::PublishRenderGraphMetadata(rg::RenderGraphMetadata metadata)
+{
+    std::lock_guard<std::mutex> lock(m_renderGraphMetadataMutex);
+    m_publishedRenderGraphMetadata = std::move(metadata);
+}
+
+rg::RenderGraphMetadata FrameCaptureBridge::GetPublishedRenderGraphMetadata() const
+{
+    std::lock_guard<std::mutex> lock(m_renderGraphMetadataMutex);
+    return m_publishedRenderGraphMetadata;
+}
+
 } // namespace gte
