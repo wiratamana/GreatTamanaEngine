@@ -326,6 +326,16 @@ add_library(gte_core STATIC
     # architecture.md).
     src/Core/Plugins/PluginRenderFeatureDiagnostics.h
     src/Core/Plugins/PluginRenderFeatureDiagnostics.cpp
+    # editor-core-separation-6 campaign, PHASE2
+    # (PHASE2_PLUGIN_CAPABILITY_ORCHESTRATOR_REGISTRY_AND_RENDER_FEATURE_MIGRATION.md)
+    # - the ONE generic, reusable IPluginCapabilityOrchestrator registry
+    # interface (header-only, no .cpp), plus its first real implementation,
+    # LegacyRenderFeatureOrchestrator (a verbatim relocation of the former
+    # inline IRenderFeatureModule_v1 loop/warning that used to live directly
+    # in Core.cpp).
+    src/Core/Plugins/IPluginCapabilityOrchestrator.h
+    src/Core/Plugins/LegacyRenderFeatureOrchestrator.h
+    src/Core/Plugins/LegacyRenderFeatureOrchestrator.cpp
     # editor-core-separation-1 campaign, PHASE10
     # (PHASE10_ISURFACEPROVIDER_INTERFACE_AND_WINDOW_INVERSION.md) - the
     # abstract surface-provider interface Renderer/VulkanSurface now depend on

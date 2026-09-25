@@ -40,6 +40,7 @@
 #include <volk.h>
 
 #include <functional>
+#include <memory>
 #include <optional>
 #include <unordered_set>
 #include <vector>
@@ -54,6 +55,15 @@ namespace gte {
 // src/Game/RenderSystem.h's own pre-existing FrameDebuggerCaptureContext*
 // forward-declaration precedent exactly.
 class IEditorLayer;
+
+// editor-core-separation-6 campaign, PHASE2
+// (PHASE2_PLUGIN_CAPABILITY_ORCHESTRATOR_REGISTRY_AND_RENDER_FEATURE_MIGRATION.md)
+// - forward-declared only, mirroring IEditorLayer immediately above: Core
+// only ever holds these behind std::unique_ptr in a std::vector (see
+// m_capabilityOrchestrators below), never a concrete instance, so no
+// #include of "Plugins/IPluginCapabilityOrchestrator.h" is needed here -
+// Core.cpp is the one place that includes it for real.
+class IPluginCapabilityOrchestrator;
 
 // Placeholder shape (editor-core-separation-1 campaign, PHASE12) - Core's own
 // public contract (design doc Section 5.2) commits to exposing frame
@@ -103,6 +113,24 @@ struct FrameStats {
 class Core {
 public:
     Core(ISurfaceProvider& surfaceProvider, IHostServices& hostServices);
+
+    // editor-core-separation-6 campaign, PHASE2
+    // (PHASE2_PLUGIN_CAPABILITY_ORCHESTRATOR_REGISTRY_AND_RENDER_FEATURE_MIGRATION.md)
+    // - declared here, DEFINED (as `= default`) in Core.cpp, NOT inline here.
+    // m_capabilityOrchestrators holds std::unique_ptr<IPluginCapabilityOrchestrator>,
+    // and IPluginCapabilityOrchestrator is only ever FORWARD-declared in this
+    // header (see that forward declaration's own doc comment above) - an
+    // implicitly-generated destructor needs the complete type at the point it
+    // is generated, so a plain `class Core { ... };` with no explicit
+    // destructor would fail to compile at every OTHER translation unit that
+    // destroys a Core (e.g. `std::unique_ptr<Core>` in
+    // tests/Core/CoreHeadlessConstructionTests.cpp, or EditorHost's own
+    // `std::unique_ptr<Core> m_core`), long before Core.cpp itself is even
+    // reached - the classic incomplete-type-behind-unique_ptr pitfall.
+    // Defining it out-of-line in Core.cpp (which DOES #include the real
+    // "Plugins/IPluginCapabilityOrchestrator.h") fixes this with zero other
+    // behavior change.
+    ~Core();
 
     Core(const Core&) = delete;
     Core& operator=(const Core&) = delete;
@@ -243,6 +271,28 @@ public:
     // exactly ONE PluginHost instance/scan per process).
     const PluginHost& GetPluginHost() const noexcept { return m_pluginHost; }
 
+    // editor-core-separation-6 campaign, PHASE2
+    // (PHASE2_PLUGIN_CAPABILITY_ORCHESTRATOR_REGISTRY_AND_RENDER_FEATURE_MIGRATION.md,
+    // Step 3.3) - a PUBLIC NESTED type of Core itself (never a free-standing
+    // namespace gte struct), so both LegacyRenderFeatureOrchestrator (this
+    // phase) and RenderFeatureCompositor (PHASE4, which additionally needs
+    // `.extent`) can resolve "this view's current plugin-facing target"
+    // through ONE shared accessor instead of independently re-deriving
+    // isGameView/compositedKey/pluginTarget inline themselves.
+    struct PluginRenderFeatureTargetInfo {
+        rg::TextureHandle target;
+        VkExtent2D extent{};
+    };
+
+    // Returns std::nullopt when `frame.currentView` has no known
+    // RenderPassViewData this frame (mirrors FindViewData()'s own nullptr
+    // return, translated into optional form for this public accessor).
+    // Calls the private FindViewData() internally - callers outside Core.cpp
+    // never need FindViewData() directly, and never need a
+    // `friend class LegacyRenderFeatureOrchestrator;` declaration either.
+    std::optional<PluginRenderFeatureTargetInfo> FindPluginRenderFeatureTarget(
+        const rg::RenderPassFrameContext& frame) const;
+
 private:
     // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
     // PHASE5 - one eligible batch's own THIS-FRAME render data, ready for the
@@ -269,6 +319,16 @@ private:
         const char* indirectDrawPassName = nullptr;
         const char* displayName = nullptr;
     };
+
+    // editor-core-separation-6 campaign, PHASE2
+    // (PHASE2_PLUGIN_CAPABILITY_ORCHESTRATOR_REGISTRY_AND_RENDER_FEATURE_MIGRATION.md,
+    // Step 3.4) - populates m_capabilityOrchestrators (below), called once,
+    // from the constructor, BEFORE RegisterOffscreenRenderPipelineProviders()
+    // (a clearer, more readable convention - not itself load-bearing, since
+    // the "PluginRenderFeatures" provider's lambda captures `this` and reads
+    // m_capabilityOrchestrators at CALL time every frame, not at
+    // registration time).
+    void RegisterBuiltinCapabilityOrchestrators();
 
     // render-pass-3 campaign, PHASE2/PHASE3 - registers every remaining
     // production pass onto m_offscreenRenderPipeline. See Core.cpp for the
@@ -398,6 +458,15 @@ private:
     // list, immediately before m_gameTargetThisFrame/m_sceneTargetThisFrame,
     // which similarly have no cross-member dependency.
     PluginHost m_pluginHost;
+
+    // editor-core-separation-6 campaign, PHASE2
+    // (PHASE2_PLUGIN_CAPABILITY_ORCHESTRATOR_REGISTRY_AND_RENDER_FEATURE_MIGRATION.md,
+    // Step 3.4) - populated ONCE, at construction time, by
+    // RegisterBuiltinCapabilityOrchestrators() (declared above) - never
+    // re-populated per frame. Declared after m_pluginHost (no constructor
+    // dependency on it - orchestrators only ever read m_pluginHost lazily,
+    // at call time, via m_core.GetPluginHost()).
+    std::vector<std::unique_ptr<IPluginCapabilityOrchestrator>> m_capabilityOrchestrators;
 
     // PHASE13 - this frame's already-resolved Game/Scene View render targets
     // (IEditorLayer::GameViewTarget()/SceneViewTarget()'s own real answers,

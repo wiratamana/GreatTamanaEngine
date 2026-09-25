@@ -26,23 +26,19 @@
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../Renderer/RenderGraph/RenderGraphDebugTextureRegistry.h"
 
-// editor-core-separation-3 campaign, PHASE3
-// (PHASE3_RUNTIME_RENDER_FEATURE_CAPABILITY.md) - the "PluginRenderFeatures"
-// provider (RegisterOffscreenRenderPipelineProviders(), below) needs
-// IRenderFeatureModule_v1/kIRenderFeatureModule_v1_Name (gte_plugin_abi) and
-// PluginRenderPassBuilderAdapter (gte_core), the latter's own real .cpp body
-// forwarding AddFullscreenClearPass() into a real
-// rg::RenderGraphBuilder::AddRenderPass() call.
-#include "../../plugins/gte_plugin_abi/IRenderFeatureModule.h"
-#include "../../plugins/gte_plugin_abi/IPluginRenderPassBuilder.h"
-#include "Plugins/PluginRenderPassBuilderAdapter.h"
-// editor-core-separation-4 campaign, PHASE5
-// (PHASE5_MULTI_RENDER_FEATURE_PLUGIN_WARNING_AND_REGRESSION_LOCK.md) -
-// CountModulesImplementingRenderFeature(), used by Core::LoadPlugins() to
-// warn when 2+ loaded plugins implement IRenderFeatureModule_v1. Logging.h
-// for GTE_LOG_WARNING itself.
-#include "Plugins/PluginRenderFeatureDiagnostics.h"
-#include "Logging.h"
+// editor-core-separation-6 campaign, PHASE2
+// (PHASE2_PLUGIN_CAPABILITY_ORCHESTRATOR_REGISTRY_AND_RENDER_FEATURE_MIGRATION.md)
+// - the new IPluginCapabilityOrchestrator registry, plus its first real
+// implementation, LegacyRenderFeatureOrchestrator (a verbatim relocation of
+// the former inline IRenderFeatureModule_v1 loop/warning that used to live
+// directly in this file - see Core::RegisterBuiltinCapabilityOrchestrators()/
+// Core::LoadPlugins()/the "PluginRenderFeatures" provider below). Neither
+// IRenderFeatureModule.h/IPluginRenderPassBuilder.h/PluginRenderPassBuilderAdapter.h/
+// PluginRenderFeatureDiagnostics.h/Logging.h is needed directly by this
+// translation unit anymore - that real logic (and those includes) now live
+// inside LegacyRenderFeatureOrchestrator.cpp itself.
+#include "Plugins/IPluginCapabilityOrchestrator.h"
+#include "Plugins/LegacyRenderFeatureOrchestrator.h"
 
 #include <cassert>
 #include <cstdint>
@@ -209,6 +205,14 @@ Core::Core(ISurfaceProvider& surfaceProvider, IHostServices& hostServices)
     // Core to actually report anything through it.
     (void)hostServices;
 
+    // editor-core-separation-6 campaign, PHASE2
+    // (PHASE2_PLUGIN_CAPABILITY_ORCHESTRATOR_REGISTRY_AND_RENDER_FEATURE_MIGRATION.md,
+    // Step 3.4) - populates m_capabilityOrchestrators. Runs BEFORE
+    // RegisterOffscreenRenderPipelineProviders() below (a clearer, more
+    // readable convention - not itself load-bearing, see
+    // RegisterBuiltinCapabilityOrchestrators()'s own doc comment in Core.h).
+    RegisterBuiltinCapabilityOrchestrators();
+
     // render-pass-3 campaign, PHASE2/PHASE3 - registers both
     // m_offscreenRenderPipeline (every remaining production pass) and
     // m_presentRenderPipeline ("Present" alone) once, here, at construction
@@ -217,6 +221,24 @@ Core::Core(ISurfaceProvider& surfaceProvider, IHostServices& hostServices)
     // these two methods on itself).
     RegisterOffscreenRenderPipelineProviders();
     RegisterPresentRenderPipelineProvider();
+}
+
+// editor-core-separation-6 campaign, PHASE2 - defined here (out-of-line),
+// NOT inline in Core.h, because m_capabilityOrchestrators holds
+// std::unique_ptr<IPluginCapabilityOrchestrator> and that type is only
+// forward-declared in Core.h - see ~Core()'s own doc comment in Core.h for
+// the full "why".
+Core::~Core() = default;
+
+// editor-core-separation-6 campaign, PHASE2
+// (PHASE2_PLUGIN_CAPABILITY_ORCHESTRATOR_REGISTRY_AND_RENDER_FEATURE_MIGRATION.md,
+// Step 3.4) - adding a brand-new capability kind in the future means writing
+// ONE new class implementing IPluginCapabilityOrchestrator and adding ONE
+// line here - never touching Core::LoadPlugins()'s own body, never touching
+// Core::RegisterOffscreenRenderPipelineProviders()'s own body, ever again.
+void Core::RegisterBuiltinCapabilityOrchestrators()
+{
+    m_capabilityOrchestrators.push_back(std::make_unique<LegacyRenderFeatureOrchestrator>(*this));
 }
 
 // editor-core-separation-3 campaign, PHASE2
@@ -229,23 +251,14 @@ void Core::LoadPlugins(const std::filesystem::path& pluginsDirectory)
 {
     m_pluginHost.LoadPlugins(pluginsDirectory);
 
-    // editor-core-separation-4 campaign, PHASE5
-    // (PHASE5_MULTI_RENDER_FEATURE_PLUGIN_WARNING_AND_REGRESSION_LOCK.md) -
-    // this system's own render-graph integration ("PluginRenderFeatures"
-    // provider, RegisterOffscreenRenderPipelineProviders() below) hands
-    // EVERY loaded IRenderFeatureModule_v1 the SAME shared render target -
-    // with 2+ such plugins loaded, only the last-registered one's output
-    // ends up visible (a silent overwrite, by design of the CURRENT minimal
-    // implementation - real per-plugin compositing is explicitly deferred,
-    // see this phase's own file). Log this loudly, once, so it is at least
-    // a known, visible fact instead of a silent surprise.
-    const int renderFeatureModuleCount = CountModulesImplementingRenderFeature(m_pluginHost.AllLoadedModules());
-    if (renderFeatureModuleCount > 1) {
-        GTE_LOG_WARNING("PluginHost",
-            std::to_string(renderFeatureModuleCount) + " loaded plugins implement IRenderFeatureModule_v1 - "
-            "only the LAST-registered one's render output will be visible this frame (render-graph "
-            "compositing for multiple render-feature plugins is not implemented - see "
-            "docs/conventions/plugin-architecture.md).");
+    // editor-core-separation-6 campaign, PHASE2 - each orchestrator
+    // discovers/validates its own capability kind against the freshly-loaded
+    // module list. LegacyRenderFeatureOrchestrator::OnPluginsLoaded() is a
+    // verbatim relocation of the multi-plugin warning that used to live
+    // directly in this method's own body (editor-core-separation-4,
+    // PHASE5) - same trigger condition, same exact warning text.
+    for (auto& orchestrator : m_capabilityOrchestrators) {
+        orchestrator->OnPluginsLoaded(m_pluginHost.AllLoadedModules());
     }
 }
 
@@ -272,6 +285,30 @@ const RenderPassViewData* Core::FindViewData(rg::RenderViewId view) const noexce
         }
     }
     return nullptr;
+}
+
+// editor-core-separation-6 campaign, PHASE2
+// (PHASE2_PLUGIN_CAPABILITY_ORCHESTRATOR_REGISTRY_AND_RENDER_FEATURE_MIGRATION.md,
+// Step 3.3) - the ENTIRE body is exactly the 3 lines that already computed
+// isGameView/compositedKey/pluginTarget inline in the old "PluginRenderFeatures"
+// provider body, plus the view's extent (needed by RenderFeatureCompositor,
+// PHASE4 - LegacyRenderFeatureOrchestrator itself simply never reads
+// `.extent`). Keeps kGameCompositedOutputKey/kSceneCompositedOutputKey
+// exactly where they already are (below) - no risk of a duplicate/
+// out-of-sync copy of those two rg::RenderPassId constants.
+std::optional<Core::PluginRenderFeatureTargetInfo> Core::FindPluginRenderFeatureTarget(
+    const rg::RenderPassFrameContext& frame) const
+{
+    const RenderPassViewData* viewData = FindViewData(frame.currentView);
+    if (viewData == nullptr) {
+        return std::nullopt;
+    }
+    const bool isGameView = (frame.currentView == rg::RenderViewId::Named("Game"));
+    const rg::RenderPassId compositedKey = isGameView ? kGameCompositedOutputKey : kSceneCompositedOutputKey;
+    PluginRenderFeatureTargetInfo info;
+    info.target = frame.blackboard.Fetch<rg::TextureHandle>(compositedKey).value_or(viewData->colorTarget);
+    info.extent = viewData->renderTexture != nullptr ? viewData->renderTexture->Extent() : VkExtent2D{};
+    return info;
 }
 
 // render-pass-3 campaign, PHASE2/PHASE3 - registers every remaining
@@ -695,82 +732,24 @@ void Core::RegisterOffscreenRenderPipelineProviders()
         },
         rg::ProviderTiming::AfterDeferredPasses);
 
-    // editor-core-separation-3 campaign, PHASE3
-    // (PHASE3_RUNTIME_RENDER_FEATURE_CAPABILITY.md) - the ONE generic,
-    // capability-agnostic loop that lets any loaded plugin .dll contribute a
-    // render-graph pass, with ZERO hardcoded knowledge of any specific plugin
-    // here (source design doc, Section 5). Registered with
-    // ProviderTiming::AfterDeferredPasses (NOT the default) - this provider
-    // calls frame.builder.AddRenderPass() immediately, so only this timing
-    // guarantees it truly runs after every deferred production pass
-    // ("RenderOpaque"/"DrawSkyBackground"/"RenderTransparent") AND after
-    // "AtmosphereComposite"'s own immediate call - see this phase's own Step
-    // 3.4 write-up for the full reasoning. Must be the LAST Register(...)
-    // call in this function, immediately after "AtmosphereComposite"'s own
-    // call.
-    //
-    // THREE REAL, LIVE-TESTING-DISCOVERED corrections beyond the phase
-    // file's own literal Step 3.4 sketch, found and fixed in sequence during
-    // this phase's own mandatory Step 4 verification (a live
-    // GET /get_game_view smoke test kept showing no magenta at all,
-    // confirmed via ask_questions once the root cause stopped being a
-    // simple "wrong line/parameter" mistake and became a genuine
-    // architectural question) - see this phase's own completion report for
-    // the full narrative:
-    //
-    // 1. PluginRenderPassBuilderAdapter::AddFullscreenClearPass() (see that
-    //    file's own doc comment) must tag its pass rg::RenderPassEvent::
-    //    AfterEverything explicitly - the phase file's own sketch leaves it
-    //    at the default (Opaques), which the RAW/WAW edge scan schedules
-    //    right after "RenderOpaque", getting overwritten by every later
-    //    production pass this same frame.
-    // 2. Even correctly ordered, a write-only pass into a handle nothing
-    //    downstream reads is genuinely dead code to
-    //    RenderGraphCompiler::Compile()'s own backward-reachability scan -
-    //    it gets silently culled unless the written handle is itself pushed
-    //    into frame.finalTextureOutputs (below), the exact same mechanism
-    //    "AtmosphereSharedLut"/"AtmosphereViewLut"/"AtmosphereComposite"
-    //    above already use.
-    // 3. Confirmed via ask_questions (a genuine architectural gap, not a
-    //    simple mistake): viewData->colorTarget is the RAW, PRE-atmosphere-
-    //    composite "GameView"/"SceneView" handle - "AtmosphereComposite"
-    //    (registered immediately above, same phase) already reads it and
-    //    produces a SEPARATE "GameViewComposited"/"SceneViewComposited"
-    //    handle, which is the TRUE final image GET /get_game_view/the "Game"
-    //    panel actually display (FrameDebuggerHistory.h's own
-    //    compositedPreview doc comment). A plugin pass writing only the raw
-    //    handle is therefore invisible in the actually-displayed image, no
-    //    matter how correctly it is ordered. Fixed by fetching the
-    //    composited handle "AtmosphereComposite" just published
-    //    (kGameCompositedOutputKey/kSceneCompositedOutputKey, above) and
-    //    using THAT as the plugin's own draw target instead - falling back
-    //    to the raw viewData->colorTarget only on the defensive, should-
-    //    never-normally-happen case where "AtmosphereComposite" didn't
-    //    publish anything this frame for this view (e.g. it returned early -
-    //    see its own guard clauses above).
+    // editor-core-separation-6 campaign, PHASE2
+    // (PHASE2_PLUGIN_CAPABILITY_ORCHESTRATOR_REGISTRY_AND_RENDER_FEATURE_MIGRATION.md,
+    // Step 3.4) - this provider's body collapses to the ONE generic loop over
+    // every registered IPluginCapabilityOrchestrator (m_capabilityOrchestrators,
+    // populated once by RegisterBuiltinCapabilityOrchestrators() - see the
+    // constructor above). Core itself no longer hand-codes a bespoke,
+    // capability-specific `for` loop here - LegacyRenderFeatureOrchestrator
+    // (src/Core/Plugins/LegacyRenderFeatureOrchestrator.h/.cpp) is a VERBATIM
+    // relocation of the exact loop body that used to live directly in this
+    // lambda (editor-core-separation-3, PHASE3), so this is a pure,
+    // zero-observable-behavior-change refactor: same warning text, same pass
+    // names, same "AfterDeferredPasses" timing, same LAST-Register(...)-call
+    // position in this function (still immediately after "AtmosphereComposite"'s
+    // own call, above).
     m_offscreenRenderPipeline.Register("PluginRenderFeatures", rg::ProviderScope::PerActiveView,
-        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&) {
-            const RenderPassViewData* viewData = FindViewData(frame.currentView);
-            if (viewData == nullptr) {
-                return;
-            }
-
-            const bool isGameView = (frame.currentView == rg::RenderViewId::Named("Game"));
-            const rg::RenderPassId compositedKey = isGameView ? kGameCompositedOutputKey : kSceneCompositedOutputKey;
-            const rg::TextureHandle pluginTarget =
-                frame.blackboard.Fetch<rg::TextureHandle>(compositedKey).value_or(viewData->colorTarget);
-
-            bool anyPluginFeatureRanThisView = false;
-            for (IPluginModule* module : m_pluginHost.AllLoadedModules()) {
-                if (auto* feature = static_cast<IRenderFeatureModule_v1*>(
-                        module->QueryCapability(kIRenderFeatureModule_v1_Name))) {
-                    PluginRenderPassBuilderAdapter adapter(frame.builder, pluginTarget);
-                    feature->AddRenderGraphPasses(adapter);
-                    anyPluginFeatureRanThisView = true;
-                }
-            }
-            if (anyPluginFeatureRanThisView) {
-                frame.finalTextureOutputs.push_back(pluginTarget);
+        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
+            for (auto& orchestrator : m_capabilityOrchestrators) {
+                orchestrator->ContributeRenderGraphPasses(frame, out);
             }
         },
         rg::ProviderTiming::AfterDeferredPasses);
