@@ -810,6 +810,14 @@ if(GTE_ENABLE_PLUGINS)
     # in a GTE_CORE_STANDALONE_PROBE_ONLY=ON configuration where gte_editor
     # itself is skipped entirely.
     add_subdirectory(plugins/demo_editor_panel)
+    # editor-core-separation-6 campaign, PHASE6
+    # (PHASE6_V2_DEMO_PLUGINS_AND_PIXEL_PROOF.md) - the two PERMANENT _v2
+    # render-feature demo plugins, proving real multi-plugin compositing with
+    # two genuinely different colors/blend modes (never the same-color trick
+    # the original _v1 demos used - see RENDER_FEATURE_COMPOSITING_FINDINGS_
+    # AND_PROPOSAL_2026-09-25.md Part 1.5).
+    add_subdirectory(plugins/demo_render_feature_v2)
+    add_subdirectory(plugins/demo_render_feature_v2_second)
 endif()
 
 # editor-core-separation-1 campaign, PHASE18
