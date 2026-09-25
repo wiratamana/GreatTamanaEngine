@@ -64,40 +64,107 @@ const char* ToString(RenderFeatureBlendMode blendMode) noexcept
     return "Unknown";
 }
 
-// editor-core-separation-9 campaign, PHASE2
-// (PHASE2_OPERATION_REGISTRY_AND_ADAPTER_V3.md Step 3.3) - the simplest
-// correct stand-in for IPluginBlackboard until PHASE4 wires the real,
-// per-frame instance RenderFeatureCompositor will own - a single, static,
-// process-wide, always-empty implementation (Publish() a no-op; Fetch()
-// always returns "not found"). This choice is locked here (rather than left
-// as an open decision) so this phase's own diff is unambiguous, and PHASE4
-// knows exactly what single call site to replace.
-class NoOpPluginBlackboard final : public IPluginBlackboard {
-public:
-    void Publish(const char*, const PluginBlackboardValue&) override
-    {
-        // Intentionally empty - see this class's own doc comment above.
-    }
-
-    bool Fetch(const char*, PluginBlackboardValueKind, PluginBlackboardValue&) const override
-    {
-        return false;
-    }
-};
-
-IPluginBlackboard& GetOrCreateNoOpBlackboard()
+// editor-core-separation-9 campaign, PHASE4
+// (PHASE4_BLACKBOARD_AND_DIAGNOSTICS_INTEGRATION.md, Step 3.1) - file-local
+// helpers used ONLY by RenderFeatureCompositor::BlackboardAdapter::Publish()/
+// Fetch() (below) to build a human-readable diagnostic log line - the plugin
+// ABI (IPluginRenderPassBuilder_v3.h) has no logging capability of its own,
+// so this is the ONLY place a plugin's own Publish()/Fetch() call is ever
+// externally confirmable (GET /get_logs). Mirrors this same file's own
+// ToString(RenderFeatureStage)/ToString(RenderFeatureBlendMode) precedent
+// immediately above: deliberately NO `default:` case.
+const char* ToString(PluginBlackboardValueKind kind) noexcept
 {
-    static NoOpPluginBlackboard s_instance;
-    return s_instance;
+    switch (kind) {
+    case PluginBlackboardValueKind::Texture:
+        return "Texture";
+    case PluginBlackboardValueKind::Buffer:
+        return "Buffer";
+    case PluginBlackboardValueKind::Float:
+        return "Float";
+    case PluginBlackboardValueKind::Int32:
+        return "Int32";
+    case PluginBlackboardValueKind::Float4:
+        return "Float4";
+    }
+    return "Unknown";
+}
+
+std::string DescribeBlackboardValue(const PluginBlackboardValue& value)
+{
+    switch (value.kind) {
+    case PluginBlackboardValueKind::Texture:
+        return "texture{index=" + std::to_string(value.texture.index)
+            + ",generation=" + std::to_string(value.texture.generation) + "}";
+    case PluginBlackboardValueKind::Buffer:
+        return "buffer{index=" + std::to_string(value.buffer.index)
+            + ",generation=" + std::to_string(value.buffer.generation) + "}";
+    case PluginBlackboardValueKind::Float:
+        return "f=" + std::to_string(value.f);
+    case PluginBlackboardValueKind::Int32:
+        return "i=" + std::to_string(value.i);
+    case PluginBlackboardValueKind::Float4:
+        return "f4=[" + std::to_string(value.f4[0]) + "," + std::to_string(value.f4[1]) + ","
+            + std::to_string(value.f4[2]) + "," + std::to_string(value.f4[3]) + "]";
+    }
+    return "?";
 }
 
 } // namespace
+
+// editor-core-separation-9 campaign, PHASE4 - the REAL IPluginBlackboard
+// implementation, replacing PHASE2's NoOpPluginBlackboard stand-in. See
+// RenderFeatureCompositor.h's own doc comment (BlackboardAdapter) for the
+// full contract/reasoning.
+void RenderFeatureCompositor::BlackboardAdapter::Publish(const char* key, const PluginBlackboardValue& value)
+{
+    if (key == nullptr) {
+        return; // defensive - mirrors this ABI's own "never guesses/coerces" discipline elsewhere.
+    }
+    m_owner.m_blackboard[key] = value; // last-publish-wins, mirrors rg::RenderPassBlackboard::Publish()'s own rule.
+
+    if (m_owner.m_blackboardLoggedPublishKeys.insert(key).second) {
+        GTE_LOG_INFO("RenderFeatureCompositor.Blackboard",
+            std::string("Published key '") + key + "' kind=" + ToString(value.kind) + " "
+            + DescribeBlackboardValue(value));
+    }
+}
+
+bool RenderFeatureCompositor::BlackboardAdapter::Fetch(
+    const char* key, PluginBlackboardValueKind expectedKind, PluginBlackboardValue& outValue) const
+{
+    if (key == nullptr) {
+        return false;
+    }
+
+    const auto it = m_owner.m_blackboard.find(key);
+    if (it == m_owner.m_blackboard.end()) {
+        GTE_LOG_WARNING("RenderFeatureCompositor.Blackboard",
+            std::string("Fetch failed - key '") + key + "' was never published this frame.");
+        return false;
+    }
+    if (it->second.kind != expectedKind) {
+        GTE_LOG_WARNING("RenderFeatureCompositor.Blackboard",
+            std::string("Fetch failed - key '") + key + "' was published as kind=" + ToString(it->second.kind)
+            + " but fetched as kind=" + ToString(expectedKind) + " - never guesses/coerces between kinds.");
+        return false;
+    }
+
+    outValue = it->second;
+    if (m_owner.m_blackboardLoggedFetchSuccessKeys.insert(key).second) {
+        GTE_LOG_INFO("RenderFeatureCompositor.Blackboard",
+            std::string("Fetch succeeded - key '") + key + "' kind=" + ToString(outValue.kind) + " "
+            + DescribeBlackboardValue(outValue));
+    }
+    return true;
+}
 
 RenderFeatureCompositor::RenderFeatureCompositor(
     Core& core, Renderer& renderer, PluginRenderOperationRegistry& operationRegistry)
     : m_core(core)
     , m_renderer(renderer)
     , m_operationRegistry(operationRegistry)
+    , m_blackboardAdapter(*this)
 {
 }
 
@@ -303,6 +370,10 @@ std::vector<RenderFeatureDebugEntry> RenderFeatureCompositor::DebugSnapshot() co
             debugEntry.priority = entry.descriptor.priority;
             debugEntry.blendMode = ToString(entry.descriptor.blendMode);
             debugEntry.enabled = entry.enabledOverride;
+            // editor-core-separation-9 campaign, PHASE4 - see
+            // RenderFeatureDebugEntry.h's own doc comment (isV3) for the
+            // full "why".
+            debugEntry.isV3 = (entry.moduleV3 != nullptr);
             snapshot.push_back(std::move(debugEntry));
         }
     };
@@ -485,6 +556,14 @@ void RenderFeatureCompositor::DispatchBlend(rg::RenderGraphBuilder& builder, rg:
 void RenderFeatureCompositor::ContributeRenderGraphPasses(
     const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&)
 {
+    // editor-core-separation-9 campaign, PHASE4
+    // (PHASE4_BLACKBOARD_AND_DIAGNOSTICS_INTEGRATION.md, Step 3.1) - a fresh,
+    // empty blackboard every call (mirrors rg::RenderPassBlackboard's own
+    // per-frame lifetime exactly) - cleared FIRST, before combinedList
+    // construction, so a plugin can never see a stale value a DIFFERENT
+    // view's own earlier-this-frame call published.
+    m_blackboard.clear();
+
     std::vector<Entry> combinedList;
     combinedList.reserve(m_postComposite.size() + m_preUi.size());
     combinedList.insert(combinedList.end(), m_postComposite.begin(), m_postComposite.end());
@@ -562,7 +641,7 @@ void RenderFeatureCompositor::ContributeRenderGraphPasses(
 
         if (entry.moduleV3 != nullptr) {
             PluginRenderPassBuilderAdapter_v3 adapter(frame.builder, privateTarget, m_operationRegistry,
-                GetOrCreateNoOpBlackboard(), resolved->target, resolved->sampler, *this,
+                m_blackboardAdapter, resolved->target, resolved->sampler, *this,
                 pluginName + "_" + viewName + "_");
             entry.moduleV3->AddRenderGraphPasses(adapter);
         } else {

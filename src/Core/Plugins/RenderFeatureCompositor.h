@@ -12,6 +12,7 @@
 #include "../../Renderer/RenderGraph/RenderGraphTypes.h"
 
 #include "../../../plugins/gte_plugin_abi/IRenderFeatureModule.h"
+#include "../../../plugins/gte_plugin_abi/IPluginRenderPassBuilder_v3.h"
 
 #include <volk.h>
 
@@ -19,6 +20,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 // editor-core-separation-6 campaign, PHASE4/PHASE5
@@ -157,6 +159,39 @@ public:
     ComputeDescriptorSet& EnsureV3OpDescriptorSet(const std::string& key, VkDescriptorSetLayout layout);
 
 private:
+    // editor-core-separation-9 campaign, PHASE4
+    // (PHASE4_BLACKBOARD_AND_DIAGNOSTICS_INTEGRATION.md, Step 3.1) - the real
+    // IPluginBlackboard implementation, replacing PHASE2's temporary
+    // NoOpPluginBlackboard stand-in. A thin wrapper around this compositor's
+    // own m_blackboard map (below) - held as ONE instance for this
+    // compositor's entire lifetime (never re-constructed per frame/per
+    // plugin), handed by reference to every _v3 adapter constructed this
+    // frame, since every _v3 plugin declaring passes THIS frame must see the
+    // SAME shared map contents (mirrors rg::RenderPassBlackboard's own
+    // per-frame-shared-instance lifetime, RenderPipeline.h). The plugin ABI
+    // (IPluginRenderPassBuilder_v3.h) has no logging capability of its own,
+    // so Publish()/Fetch() log host-side, on this compositor's behalf - a
+    // one-time-per-key GTE_LOG_INFO the first time a given key is ever
+    // published/successfully fetched (never per-frame spam for the steady-
+    // state success path), and a GTE_LOG_WARNING every time a Fetch() call
+    // genuinely fails (key never published this frame, or published under a
+    // different PluginBlackboardValueKind) - this is the ONLY externally
+    // observable (GET /get_logs) confirmation available for a plugin's own
+    // Publish()/Fetch() calls, since a plugin cannot log anything itself.
+    class BlackboardAdapter final : public IPluginBlackboard {
+    public:
+        explicit BlackboardAdapter(RenderFeatureCompositor& owner) noexcept
+            : m_owner(owner)
+        {
+        }
+
+        void Publish(const char* key, const PluginBlackboardValue& value) override;
+        bool Fetch(const char* key, PluginBlackboardValueKind expectedKind, PluginBlackboardValue& outValue) const override;
+
+    private:
+        RenderFeatureCompositor& m_owner;
+    };
+
     struct Entry {
         // editor-core-separation-9 campaign, PHASE2 - RENAMED from `module`
         // (for symmetry with the new `moduleV3` below) - every pre-existing
@@ -281,6 +316,30 @@ private:
     // m_blendStageStates are already bounded. PERSISTENT for the entire
     // process lifetime - NEVER cleared/recreated per frame.
     std::unordered_map<std::string, ComputeDescriptorSet> m_v3OpDescriptorSets;
+
+    // editor-core-separation-9 campaign, PHASE4 - the REAL, per-frame
+    // cross-plugin blackboard storage (Locked Architecture Decision #13,
+    // PHASE0_MASTER_STRATEGY.md) - cleared at the very START of
+    // ContributeRenderGraphPasses() (mirrors rg::RenderPassBlackboard's own
+    // per-frame lifetime exactly). Shared across BOTH _v2 and _v3 entries in
+    // principle (the storage itself does not care which ABI version
+    // published into it), though only _v3 exposes it to plugins this
+    // campaign.
+    std::unordered_map<std::string, PluginBlackboardValue> m_blackboard;
+
+    // One-time-per-key diagnostic latches (see BlackboardAdapter's own doc
+    // comment above) - deliberately NEVER cleared per frame (unlike
+    // m_blackboard itself), so a key that is published/fetched successfully
+    // every single frame logs exactly once for the whole process lifetime,
+    // not once per frame.
+    std::unordered_set<std::string> m_blackboardLoggedPublishKeys;
+    std::unordered_set<std::string> m_blackboardLoggedFetchSuccessKeys;
+
+    // The ONE BlackboardAdapter instance handed to every _v3 adapter
+    // constructed this frame (ContributeRenderGraphPasses()) - constructed
+    // once, in this compositor's own constructor, alongside every other
+    // member.
+    BlackboardAdapter m_blackboardAdapter;
 };
 
 } // namespace gte

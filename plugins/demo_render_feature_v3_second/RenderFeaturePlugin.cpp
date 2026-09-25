@@ -39,6 +39,17 @@ constexpr int kMaxInFlightPassStates = 4;
 
 struct VignettePassState {
     PluginTextureHandle target;
+    // editor-core-separation-9 campaign, PHASE4
+    // (PHASE4_BLACKBOARD_AND_DIAGNOSTICS_INTEGRATION.md, Step 3.2) - the
+    // FETCHING half of this campaign's real, minimal 2-plugin blackboard
+    // proof. Populated at declare-time (AddRenderGraphPasses(), below) via
+    // IPluginBlackboard::Fetch() - `blurStrengthFetched` records whether the
+    // fetch actually succeeded THIS call, so VignetteExecute() below can
+    // fall back to this plugin's own original, PHASE2-era fixed radius
+    // (0.65) if plugins/demo_render_feature_v3/ (the publisher) were ever
+    // NOT loaded - never a crash, never an assumed value.
+    bool blurStrengthFetched = false;
+    float blurStrength = 0.0f;
 };
 
 VignettePassState g_vignetteStates[kMaxInFlightPassStates];
@@ -54,10 +65,20 @@ void VignetteExecute(IPluginCommandRecorder& recorder, void* userData)
 {
     auto* state = static_cast<VignettePassState*>(userData);
 
-    // Byte-for-byte identical parameters to demo_render_feature_v2_second's
-    // own "DemoRenderFeatureV2Second_Vignette" (RenderFeaturePlugin.cpp,
-    // plugins/demo_render_feature_v2_second/): centerX=0.5, centerY=0.5,
-    // innerRadius=0.15, outerRadius=0.65, color=BLUE opaque.
+    // Base parameters are byte-for-byte identical to
+    // demo_render_feature_v2_second's own "DemoRenderFeatureV2Second_Vignette"
+    // (RenderFeaturePlugin.cpp, plugins/demo_render_feature_v2_second/):
+    // centerX=0.5, centerY=0.5, innerRadius=0.15, outerRadius=0.65,
+    // color=BLUE opaque. editor-core-separation-9 campaign, PHASE4
+    // (PHASE4_BLACKBOARD_AND_DIAGNOSTICS_INTEGRATION.md, Step 3.2) - the
+    // outer radius is now widened by the blackboard-fetched
+    // "DemoV3.BlurStrength" value (published by plugins/demo_render_feature_v3/,
+    // fetched below in AddRenderGraphPasses()) whenever the fetch succeeded -
+    // a REAL, VISIBLE, live proof that a value handed off through
+    // IPluginBlackboard actually reached and influenced this independently-
+    // loaded plugin's own rendering, not merely "was logged and not crashed".
+    // Falls back to the original, unwidened 0.65 radius if the fetch ever
+    // fails (e.g. the publishing plugin is not loaded this session).
     DemoV3OpsPushConstants pushConstants;
     pushConstants.colorRgba[0] = 0.0f;
     pushConstants.colorRgba[1] = 0.0f;
@@ -66,7 +87,7 @@ void VignetteExecute(IPluginCommandRecorder& recorder, void* userData)
     pushConstants.centerAndRadius[0] = 0.5f;
     pushConstants.centerAndRadius[1] = 0.5f;
     pushConstants.centerAndRadius[2] = 0.15f;
-    pushConstants.centerAndRadius[3] = 0.65f;
+    pushConstants.centerAndRadius[3] = state->blurStrengthFetched ? 0.65f * (1.0f + state->blurStrength) : 0.65f;
 
     recorder.BindTexture(0, state->target);
     // See demo_render_feature_v3's own identical doc comment for exactly why
@@ -88,6 +109,26 @@ public:
         VignettePassState& state = g_vignetteStates[g_vignetteStateCounter % kMaxInFlightPassStates];
         ++g_vignetteStateCounter;
         state.target = builder.GetPrivateOutputTarget();
+
+        // editor-core-separation-9 campaign, PHASE4
+        // (PHASE4_BLACKBOARD_AND_DIAGNOSTICS_INTEGRATION.md, Step 3.2) - the
+        // FETCHING half of this campaign's real, minimal 2-plugin blackboard
+        // proof: this plugin (PreUI, priority 0) is ALWAYS declared strictly
+        // AFTER every PostComposite entry (RenderFeatureCompositor::
+        // ContributeRenderGraphPasses()'s own combined list order -
+        // m_postComposite first, m_preUi second) - so by the time THIS
+        // Fetch() call runs, plugins/demo_render_feature_v3/'s own earlier
+        // Publish() call (same frame, same view) has already happened. This
+        // plugin's own source has zero compile-time or link-time dependency
+        // on demo_render_feature_v3 - the two are mutually unaware,
+        // independently loaded .dlls that only agree on a shared, documented
+        // string key ("DemoV3.BlurStrength") and PluginBlackboardValueKind
+        // (Float).
+        PluginBlackboardValue blurStrength;
+        state.blurStrengthFetched =
+            builder.Blackboard().Fetch("DemoV3.BlurStrength", PluginBlackboardValueKind::Float, blurStrength);
+        state.blurStrength = state.blurStrengthFetched ? blurStrength.f : 0.0f;
+
         builder.AddComputePass("DemoRenderFeatureV3Second_Vignette", &VignetteSetup, &VignetteExecute, &state);
     }
 };

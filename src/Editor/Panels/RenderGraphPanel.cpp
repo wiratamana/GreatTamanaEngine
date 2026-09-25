@@ -308,6 +308,19 @@ void BuildPluginRenderFeaturesSection(
         ImGui::Text("[%s] %s - blend %s%s", entry.stage.c_str(), entry.name.c_str(), entry.blendMode.c_str(),
             entry.enabled ? "" : " (DISABLED)");
 
+        // editor-core-separation-9 campaign, PHASE4
+        // (PHASE4_BLACKBOARD_AND_DIAGNOSTICS_INTEGRATION.md, Step 3.3.5) - a
+        // small, additive "v3" label, added after a real, live confirmed
+        // gap: without it, the ONLY way to tell a _v3 (multi-pass, generic
+        // resource-graph) plugin row apart from a _v2 (fixed-op) one is by
+        // eyeballing the plugin's own chosen name string - never a real,
+        // structural signal a third-party plugin author is obligated to
+        // follow.
+        if (entry.isV3) {
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "[v3]");
+        }
+
         ImGui::PopID();
     }
 }

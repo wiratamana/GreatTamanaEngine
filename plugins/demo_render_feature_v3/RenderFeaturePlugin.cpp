@@ -210,6 +210,28 @@ public:
         halfResDesc.format = PluginTextureDesc::Format::Rgba8Unorm;
         state.halfRes = builder.CreateTexture("DemoV3.HalfResBlur", halfResDesc);
 
+        // editor-core-separation-9 campaign, PHASE4
+        // (PHASE4_BLACKBOARD_AND_DIAGNOSTICS_INTEGRATION.md, Step 3.2) - the
+        // PUBLISHING half of this campaign's real, minimal 2-plugin
+        // blackboard proof: this plugin (DemoRenderFeatureV3, PostComposite
+        // priority 0) Publish()es a small Float value under a namespaced key
+        // BEFORE plugins/demo_render_feature_v3_second/ (PreUI, priority 0)
+        // gets its own AddRenderGraphPasses() call this same frame -
+        // PostComposite entries are always declared before ANY PreUI entry
+        // in RenderFeatureCompositor::ContributeRenderGraphPasses()'s own
+        // combined list (m_postComposite is inserted first, m_preUi second -
+        // see that method's own source), so this ordering is real and
+        // load-bearing, not a coincidence of priority values. Neither this
+        // plugin's own code, nor demo_render_feature_v3_second's own code,
+        // needed to change because of the OTHER one existing - each only
+        // knows the shared, documented key/kind convention below, exactly
+        // the Design Doc's own "neither plugin's own code needed to change"
+        // framing this proof exists to demonstrate.
+        PluginBlackboardValue blurStrength;
+        blurStrength.kind = PluginBlackboardValueKind::Float;
+        blurStrength.f = 0.5f;
+        builder.Blackboard().Publish("DemoV3.BlurStrength", blurStrength);
+
         // Pass 1: compute downsample-blur - READS state.sceneColor, WRITES
         // state.halfRes (a DIFFERENT resolution - a genuine downsample).
         builder.AddComputePass("DemoRenderFeatureV3_Downsample", &DownsampleSetup, &DownsampleExecute, &state);

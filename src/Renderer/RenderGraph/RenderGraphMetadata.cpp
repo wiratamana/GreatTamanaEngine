@@ -221,6 +221,12 @@ void to_json(nlohmann::json& j, const RenderFeatureDebugEntry& entry)
         // disable override, reported automatically via the ALREADY-SHIPPING
         // GET /render_graph endpoint (no new endpoint needed for this).
         { "enabled", entry.enabled },
+        // editor-core-separation-9 campaign, PHASE4 - see
+        // RenderFeatureDebugEntry.h's own doc comment (isV3) for the full
+        // "why" - a small, additive label distinguishing a `_v3`
+        // (multi-pass, generic resource-graph) plugin row from a `_v2`
+        // (fixed-op) one.
+        { "is_v3", entry.isV3 },
     };
 }
 

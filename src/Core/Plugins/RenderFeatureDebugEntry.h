@@ -35,6 +35,20 @@ struct RenderFeatureDebugEntry {
     // prior output for a struct that never went through this campaign's own
     // new SetFeatureEnabled() at all.
     bool enabled = true;
+
+    // editor-core-separation-9 campaign, PHASE4
+    // (PHASE4_BLACKBOARD_AND_DIAGNOSTICS_INTEGRATION.md, Step 3.3.5) - a
+    // small, additive label distinguishing a `_v3` (multi-pass, generic
+    // resource-graph) plugin row from a `_v2` (fixed-op) one. Added after a
+    // real, live confirmed gap: without this field, the ONLY way to tell
+    // which ABI a `render_features[]`/"Plugin Render Features" row belongs
+    // to is by eyeballing the plugin's own chosen `name` string (e.g. it
+    // happens to contain "V3") - not a structural signal a third-party
+    // plugin author is in any way obligated to follow. Populated by
+    // RenderFeatureCompositor::DebugSnapshot()'s own appendStage lambda:
+    // `debugEntry.isV3 = (entry.moduleV3 != nullptr);` - trivial, since
+    // Entry already distinguishes moduleV2/moduleV3.
+    bool isV3 = false;
 };
 
 } // namespace gte
