@@ -96,6 +96,43 @@ real `GetProcAddress()` call sites live):
   a legal "I decline to load" signal (not an error).
 - `GTE_DestroyPluginModule` — destroys a previously-returned `IPluginModule*`.
 
+## Authoring sugar — `PluginExportsMacro.h` / `SingleCapabilityPluginModule.h` (optional, additive)
+
+`editor-core-separation-5` campaign added two more header-only files under
+`plugins/gte_plugin_abi/`, purely to reduce how much boilerplate a plugin
+author has to hand-write — neither changes the ABI contract described above
+in any way:
+
+- **`PluginExportsMacro.h`** — `GTE_DEFINE_PLUGIN_EXPORTS(ModuleClass)` and
+  `GTE_DEFINE_PLUGIN_EXPORTS_STATIC_INSTANCE(instanceExpr)` each expand to
+  the exact same `extern "C" { ... }` block of the three fixed exports above,
+  so a plugin author never has to hand-type it.
+- **`SingleCapabilityPluginModule.h`** — `MakeModuleInfo(name, version,
+  description)` (a bounded, always-null-terminated `GtePluginModuleInfo`
+  builder) plus `SingleCapabilityPluginModule<CapabilityInterface>` and
+  `ZeroCapabilityPluginModule`, the two ready-made `IPluginModule` glue
+  classes for the "one capability" and "zero capability" cases — the two
+  shapes every demo plugin in this repo needs.
+
+This is 100% optional, additive, zero-ABI-change sugar: `PluginHost` and
+every existing interface (`IPluginModule`, `IRenderFeatureModule_v1`,
+`IEditorPanelModule_v1`, `IPluginRenderPassBuilder`,
+`IPluginPanelDrawContext`) are completely unaware of which flavor a given
+plugin `.dll` used to produce its three exports or its `IPluginModule` — a
+plugin implementing 2+ capabilities from one module still hand-writes its
+own `IPluginModule`, exactly as before; this sugar only covers the common
+single-capability (or zero-capability) case.
+
+All four of this repository's own demo plugins — `demo_hello_world`,
+`demo_render_feature`, `demo_render_feature_second`, `demo_editor_panel` —
+now use this sugar, as living proof. Their current file contents under
+`plugins/demo_*/` are the canonical, up-to-date example to copy for a new
+plugin — see each header's own doc comments,
+`plugins/gte_plugin_abi/PublicSurface.md`, and the source proposal document
+(`PLUGIN_AUTHORING_ERGONOMICS_PROPOSAL_2026-09-24.md`, referenced by
+`task_manager/editor-core-separation-5/PHASE0_MASTER_STRATEGY.md`) for the
+full rationale and before/after code — not duplicated here.
+
 ## The shared/DLL CRT requirement, and this repository's own real, discovered limitation
 
 The moment ANY memory could conceivably be allocated on one side of the
