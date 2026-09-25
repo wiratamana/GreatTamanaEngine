@@ -51,6 +51,7 @@
 
 #include "RenderGraphBuilder.h"
 #include "RenderGraphTypes.h"
+#include "RenderPassToggleRegistry.h"
 
 #include <algorithm>
 #include <any>
@@ -480,6 +481,16 @@ public:
         m_legacyViewScopeTranslator = std::move(translator);
     }
 
+    // editor-core-separation-8 campaign, PHASE1 - see RenderPassToggleRegistry.h's
+    // own header comment for the full contract. Defaults to nullptr - every
+    // existing call site that never calls this keeps its exact prior behavior
+    // (every pass always enabled), mirroring SetLegacyViewScopeTranslator()'s own
+    // identical "unset = old behavior" discipline immediately above.
+    void SetPassToggleRegistry(RenderPassToggleRegistry* registry) noexcept
+    {
+        m_passToggleRegistry = registry;
+    }
+
     // Light escape hatch (design doc Section 0, point 5) - registering
     // everything once at startup is sufficient; a full unregister-at-
     // runtime facility is not a priority. Linear scan by debugName
@@ -567,6 +578,18 @@ private:
             // Application always sets one).
             const ViewScope translatedViewScope =
                 m_legacyViewScopeTranslator ? m_legacyViewScopeTranslator(desc.view) : ViewScope::Shared;
+            // editor-core-separation-8 campaign, PHASE1 - the ONE generic
+            // choke point every DEFERRED-style built-in pass (and any other
+            // provider using this same RenderPassDesc mechanism) funnels
+            // through, every frame - see RenderPassToggleRegistry.h's own
+            // header comment. Falls back to "always enabled" whenever no
+            // registry was ever injected (mirrors m_legacyViewScopeTranslator's
+            // own identical "unset = old behavior" discipline immediately
+            // above).
+            if (m_passToggleRegistry != nullptr && desc.debugName != nullptr
+                && !m_passToggleRegistry->NoteDeclaredAndCheckEnabled(desc.debugName)) {
+                continue; // Disabled - skipped entirely, exactly as if never declared.
+            }
             // render-pass-7 campaign (task_manager/render-pass-7), PHASE1 -
             // forwards desc.tags as a new trailing argument, fixing the
             // real, confirmed dead-field bug (PHASE0_MASTER_STRATEGY.md,
@@ -582,6 +605,9 @@ private:
 
     // render-pass-3 campaign, PHASE3 (Step 3.2) - see SetLegacyViewScopeTranslator() above.
     std::function<ViewScope(RenderViewId)> m_legacyViewScopeTranslator;
+
+    // editor-core-separation-8 campaign, PHASE1 - see SetPassToggleRegistry() above.
+    RenderPassToggleRegistry* m_passToggleRegistry = nullptr;
 
 
     // Owned once, reused every frame: cleared (not reconstructed) at the

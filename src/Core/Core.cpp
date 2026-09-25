@@ -381,6 +381,9 @@ std::optional<Core::PluginRenderFeatureTargetInfo> Core::FindPluginRenderFeature
 void Core::RegisterOffscreenRenderPipelineProviders()
 {
     m_offscreenRenderPipeline.SetLegacyViewScopeTranslator(&TranslateLegacyViewScope);
+    // editor-core-separation-8 campaign, PHASE1 - see RenderPassToggleRegistry.h's
+    // own header comment for the full contract.
+    m_offscreenRenderPipeline.SetPassToggleRegistry(&m_renderPassToggleRegistry);
 
     // "AtmosphereSharedLut" - ProviderScope::Once, BeforeEverything.
     m_offscreenRenderPipeline.Register("AtmosphereSharedLut", rg::ProviderScope::Once,
@@ -401,6 +404,18 @@ void Core::RegisterOffscreenRenderPipelineProviders()
     m_offscreenRenderPipeline.Register("GpuSkinning", rg::ProviderScope::Once,
         [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
             GpuSkinningPipelines& pipelines = m_game.GetGpuSkinningPipelines();
+
+            // editor-core-separation-8 campaign, PHASE1 (Step 3.4b) - a
+            // single, whole-stage on/off switch: this provider is
+            // ProviderScope::Once and pushes per-dispatch RenderPassDesc
+            // entries under DYNAMIC names (request.name), never the literal
+            // string "GpuSkinning", so RenderPipeline::DeclareOnePhase()'s
+            // own choke point can never see/disable this whole stage by
+            // that name - one of exactly 2 confirmed exceptions needing
+            // their own direct consult of the toggle registry.
+            if (!m_renderPassToggleRegistry.NoteDeclaredAndCheckEnabled("GpuSkinning")) {
+                return;
+            }
 
             for (std::size_t i = 0; i < m_gpuSkinningRequestsThisFrame.size(); ++i) {
                 const AnimationSystem::GpuSkinningDispatchRequest& request = m_gpuSkinningRequestsThisFrame[i];
@@ -758,6 +773,17 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 return;
             }
 
+            // editor-core-separation-8 campaign, PHASE1 (Step 3.4b) - this
+            // provider calls frame.builder.AddRenderPass() (via
+            // AddAtmosphereCompositePass()) DIRECTLY and never reaches
+            // RenderPipeline::DeclareOnePhase()'s own flush loop at all (see
+            // PHASE0_MASTER_STRATEGY.md's own Step 2.1 corrected finding) -
+            // one of exactly 2 confirmed exceptions needing their own direct
+            // consult of the toggle registry.
+            if (!m_renderPassToggleRegistry.NoteDeclaredAndCheckEnabled("AtmosphereComposite")) {
+                return;
+            }
+
             const bool isGameView = (frame.currentView == rg::RenderViewId::Named("Game"));
             const rg::RenderPassId viewLutKey = isGameView ? kAtmosphereViewLutGameKey : kAtmosphereViewLutSceneKey;
             const std::optional<AtmosphereViewLutHandles> viewLuts =
@@ -820,6 +846,9 @@ void Core::RegisterOffscreenRenderPipelineProviders()
 void Core::RegisterPresentRenderPipelineProvider()
 {
     m_presentRenderPipeline.SetLegacyViewScopeTranslator(&TranslateLegacyViewScope);
+    // editor-core-separation-8 campaign, PHASE1 - see RenderPassToggleRegistry.h's
+    // own header comment for the full contract.
+    m_presentRenderPipeline.SetPassToggleRegistry(&m_renderPassToggleRegistry);
 
     m_presentRenderPipeline.Register("Present", rg::ProviderScope::Once,
         [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&) {

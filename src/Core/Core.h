@@ -186,6 +186,19 @@ public:
         return m_gpuDrivenBatchDebugInfoLastFrame;
     }
 
+    // editor-core-separation-8 campaign, PHASE1 - the ONE registry instance
+    // shared by BOTH m_offscreenRenderPipeline and m_presentRenderPipeline (see
+    // the constructor-time wiring, Core.cpp). Non-const, non-null (a plain owned
+    // member, never a pointer) - the "Render Graph" panel (PHASE4) and
+    // RenderGraphControlCommandBridge's pump (PHASE5) both mutate THROUGH this
+    // exact reference, on the main thread only (see
+    // RenderPassToggleRegistry.h's own header comment for why no mutex is
+    // needed).
+    rg::RenderPassToggleRegistry& GetRenderPassToggleRegistryMutable() noexcept
+    {
+        return m_renderPassToggleRegistry;
+    }
+
     // PHASE13 - the SAME AtmosphereSettings/AtmosphereLutRenderer instances
     // Core's own per-frame Atmosphere pass-building code (BuildFrame())
     // reads/writes, now exposed so Application::Run()'s own
@@ -437,6 +450,14 @@ private:
     // this exact phase.
     rg::RenderPipeline m_offscreenRenderPipeline;
     rg::RenderPipeline m_presentRenderPipeline;
+
+    // editor-core-separation-8 campaign, PHASE1 - the ONE registry instance
+    // shared by BOTH m_offscreenRenderPipeline and m_presentRenderPipeline
+    // (see the constructor-time wiring, Core.cpp) - see
+    // GetRenderPassToggleRegistryMutable()'s own doc comment above. A plain
+    // owned value member (no Vulkan/heavy dependency, needs no lazy
+    // construction).
+    rg::RenderPassToggleRegistry m_renderPassToggleRegistry;
 
     // Populated fresh, every frame, by BuildFrame() itself, immediately
     // before calling m_offscreenRenderPipeline.DeclareInto() - read ONLY by

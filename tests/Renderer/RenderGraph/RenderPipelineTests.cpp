@@ -539,5 +539,64 @@ TEST(RenderPipelineTest, AfterDeferredPassesProviderDeclaresStrictlyAfterEveryBe
     EXPECT_STREQ(input.passes[1].name, "CompositeLikePass");
 }
 
+// --- editor-core-separation-8 campaign, PHASE1 additions -------------------
+// (task_manager/editor-core-separation-8/
+// PHASE1_BUILTIN_PASS_TOGGLE_REGISTRY_AND_CHOKEPOINT.md, Step 3.7)
+
+// The new choke point inside DeclareOnePhase(): a pass disabled through the
+// injected RenderPassToggleRegistry must never reach
+// RenderGraphBuilder::AddRenderPass() at all - genuinely skipped, not
+// declared-then-culled.
+TEST(RenderPipelineTest, DisabledPassInToggleRegistryIsNeverDeclaredToTheBuilder)
+{
+    RenderPipeline pipeline;
+    RenderPassToggleRegistry registry;
+    registry.SetEnabled("TestPass", false);
+    pipeline.SetPassToggleRegistry(&registry);
+
+    pipeline.Register("TestProvider", ProviderScope::Once,
+        [](const RenderPassFrameContext&, std::vector<RenderPassDesc>& outPasses) {
+            RenderPassDesc desc;
+            desc.debugName = "TestPass";
+            desc.setup = NoOpSetup;
+            desc.execute = NoOpExecute;
+            outPasses.push_back(desc);
+        });
+
+    RenderPassBlackboard blackboard;
+    RenderGraphBuilder builder;
+    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {}, {} };
+    pipeline.DeclareInto(builder, frame);
+
+    const CompiledGraphInput input = builder.Finish();
+    EXPECT_TRUE(input.passes.empty());
+}
+
+// A symmetric proof that SetPassToggleRegistry() never being called at all
+// (the state of every existing pre-PHASE1 call site) behaves EXACTLY like
+// before this phase - the pass is declared normally, unaffected.
+TEST(RenderPipelineTest, WithNoToggleRegistryEverySetPassIsDeclaredNormally)
+{
+    RenderPipeline pipeline;
+
+    pipeline.Register("TestProvider", ProviderScope::Once,
+        [](const RenderPassFrameContext&, std::vector<RenderPassDesc>& outPasses) {
+            RenderPassDesc desc;
+            desc.debugName = "TestPass";
+            desc.setup = NoOpSetup;
+            desc.execute = NoOpExecute;
+            outPasses.push_back(desc);
+        });
+
+    RenderPassBlackboard blackboard;
+    RenderGraphBuilder builder;
+    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {}, {} };
+    pipeline.DeclareInto(builder, frame);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes.size(), 1u);
+    EXPECT_STREQ(input.passes[0].name, "TestPass");
+}
+
 } // namespace
 } // namespace gte::rg

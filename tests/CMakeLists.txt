@@ -464,6 +464,23 @@ add_subdirectory(Fixtures/FakePlugins)
 #                                            RenderGraphBuilderTests.cpp/
 #                                            RenderPassTests.cpp's own
 #                                            precedent exactly.
+#   - Renderer/RenderGraph/RenderPassToggleRegistryTests.cpp - editor-core-
+#                                            separation-8 campaign's PHASE1
+#                                            (task_manager/
+#                                            editor-core-separation-8/
+#                                            PHASE1_BUILTIN_PASS_TOGGLE_REGISTRY_AND_CHOKEPOINT.md)
+#                                            - the new, generic, debugName-
+#                                            keyed built-in-pass toggle
+#                                            registry (see
+#                                            src/Renderer/RenderGraph/
+#                                            RenderPassToggleRegistry.h) -
+#                                            NoteDeclaredAndCheckEnabled()'s
+#                                            auto-discovery contract,
+#                                            SetEnabled()'s deny-list refusal
+#                                            for "Present", IsEnabled()'s safe
+#                                            default for an unknown name, and
+#                                            ListAll()'s deterministic,
+#                                            lexically-sorted iteration order.
 #   - Renderer/RenderGraph/RenderPassGroupRegistryTests.cpp - render-pass-7
 #                                            campaign's PHASE2
 #                                            (task_manager/render-pass-7/
@@ -2188,6 +2205,7 @@ set(GTE_TEST_SOURCES
     Renderer/RenderGraph/RenderGraphDebugTextureRegistryTests.cpp
     Renderer/RenderGraph/RenderGraphDebugVolumeTextureRegistryTests.cpp
     Renderer/RenderGraph/RenderPipelineTests.cpp
+    Renderer/RenderGraph/RenderPassToggleRegistryTests.cpp
     Renderer/RenderGraph/RenderPassGroupRegistryTests.cpp
     Math/Vec2Tests.cpp
     Math/Vec3Tests.cpp

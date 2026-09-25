@@ -672,6 +672,8 @@ add_library(gte_core STATIC
     src/Renderer/RenderGraph/RenderGraphDebugVolumeTextureRegistry.cpp
     src/Renderer/RenderGraph/RenderPipeline.h
     src/Renderer/RenderGraph/RenderPipeline.cpp
+    src/Renderer/RenderGraph/RenderPassToggleRegistry.h
+    src/Renderer/RenderGraph/RenderPassToggleRegistry.cpp
     src/Renderer/RenderGraph/RenderPassGroupRegistry.h
     src/Renderer/RenderGraph/RenderPassGroupRegistry.cpp
     src/Renderer/RenderGraph/RenderGraphMetadata.h
