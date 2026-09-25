@@ -9,6 +9,7 @@
 #include "EditorGpuMemoryNameOverlay.h"
 #include "GBufferValidation.h"
 #include "GpuDrivenBatchTestSpawner.h"
+#include "ImGuiIdConflictGuard.h" // task_manager/editor-core-separation-10 campaign, PHASE1.
 #include "ImGuiMemoryTracker.h"
 #include "Plugins/PluginPanelDrawContextAdapter.h" // editor-core-separation-3 campaign, PHASE4.
 #include "../Core/EditorPanelRegistry.h" // editor-core-separation-3 campaign, PHASE4.
@@ -357,6 +358,12 @@ public:
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();
+
+        // task_manager/editor-core-separation-10 campaign, PHASE1 - resets
+        // the ID-conflict-detection tracker for this fresh frame. Must run
+        // AFTER ImGui::NewFrame() (so ImGui::GetID() calls later this frame
+        // are meaningful) and BEFORE any panel builds a single widget.
+        ImGuiIdConflictGuard::Instance().BeginFrame();
 
         // Required by ImGuizmo before any Manipulate() call this frame
         // (Panels/ScenePanel.cpp, via TransformGizmo.h) - see

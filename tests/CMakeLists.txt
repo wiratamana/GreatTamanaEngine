@@ -2308,6 +2308,10 @@ if(TRUE)
         # Genuinely Tier 1 (no live VmaAllocator/VkDevice needed).
         Editor/EditorGpuMemoryNameOverlayTests.cpp
         Editor/LoggerTests.cpp
+        # task_manager/editor-core-separation-10 campaign, PHASE1 - pure,
+        # Tier-1 test for ImGuiIdConflictTracker (zero ImGui/Logger
+        # dependency by design - see ImGuiIdConflictTracker.h).
+        Editor/ImGuiIdConflictTrackerTests.cpp
         Editor/ProfilerPanelDataTests.cpp
         Editor/JobsPanelDataTests.cpp
         Editor/LogPanelDataTests.cpp

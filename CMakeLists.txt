@@ -988,6 +988,14 @@ add_library(gte_editor STATIC
     src/Editor/ImGuiMemoryTracker.cpp
     src/Editor/Logger.h
     src/Editor/Logger.cpp
+    # task_manager/editor-core-separation-10 campaign, PHASE1 - the ID-
+    # conflict detection foundation (ImGuiIdConflictTracker is the pure,
+    # Tier-1-tested logic; ImGuiIdConflictGuard is the ImGui/Logger-aware
+    # singleton wrapper around it). See PHASE0_MASTER_STRATEGY.md.
+    src/Editor/ImGuiIdConflictTracker.h
+    src/Editor/ImGuiIdConflictTracker.cpp
+    src/Editor/ImGuiIdConflictGuard.h
+    src/Editor/ImGuiIdConflictGuard.cpp
     src/Editor/MemoryPanelData.h
     src/Editor/MemoryPanelData.cpp
     src/Editor/ProfilerPanelData.h
