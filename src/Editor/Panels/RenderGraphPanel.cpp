@@ -2,6 +2,7 @@
 
 #include "../EditorContext.h"
 #include "../../Renderer/RenderGraph/RenderGraph.h"
+#include "../../Renderer/RenderGraph/RenderGraphSnapshotFormatting.h"
 
 #include <imgui.h>
 
@@ -14,45 +15,6 @@
 namespace gte {
 
 namespace {
-
-// Mirrors Panels/ProfilerPanel.cpp's own FormatGpuTimingLine() convention
-// exactly (never a fabricated "0.00 ms" for Absent/Unsupported - see
-// AGENTS.md, "Profiling") - kept as its own small local helper rather than
-// reused from ProfilerPanelData.h, since that header's own
-// FormatGpuTimingLine() takes a Profiling::GpuPassSample (a different,
-// Profiler-specific type this panel has no reason to depend on) - this one
-// takes a plain gte::GpuTimingSample instead, exactly what
-// rg::PassGpuStats::timing already is.
-std::string FormatGpuTiming(const GpuTimingSample& timing)
-{
-    switch (timing.status) {
-    case GpuTimingSample::Status::Present: {
-        char buffer[32];
-        std::snprintf(buffer, sizeof(buffer), "%.2f ms", timing.milliseconds);
-        return std::string(buffer);
-    }
-    case GpuTimingSample::Status::Unsupported:
-        return "Unsupported";
-    case GpuTimingSample::Status::Absent:
-    default:
-        return "N/A";
-    }
-}
-
-std::string JoinNames(const std::vector<std::string>& names)
-{
-    if (names.empty()) {
-        return "-";
-    }
-    std::string joined;
-    for (const std::string& name : names) {
-        if (!joined.empty()) {
-            joined += ", ";
-        }
-        joined += name.empty() ? "(unnamed)" : name;
-    }
-    return joined;
-}
 
 void BuildPassRow(const rg::RenderGraphPassSnapshot& pass)
 {
@@ -85,18 +47,18 @@ void BuildPassRow(const rg::RenderGraphPassSnapshot& pass)
 
     ImGui::TableSetColumnIndex(3);
     if (!pass.isCulled) {
-        const std::string timingText = FormatGpuTiming(pass.stats.timing);
+        const std::string timingText = rg::FormatGpuTiming(pass.stats.timing);
         ImGui::TextUnformatted(timingText.c_str());
     } else {
         ImGui::TextDisabled("-");
     }
 
     ImGui::TableSetColumnIndex(4);
-    const std::string reads = JoinNames(pass.readNames);
+    const std::string reads = rg::JoinNames(pass.readNames);
     ImGui::TextUnformatted(reads.c_str());
 
     ImGui::TableSetColumnIndex(5);
-    const std::string writes = JoinNames(pass.writeNames);
+    const std::string writes = rg::JoinNames(pass.writeNames);
     ImGui::TextUnformatted(writes.c_str());
 }
 
@@ -141,20 +103,6 @@ void BuildPassTable(const char* tableId, const rg::RenderGraphSnapshot& snapshot
     }
 }
 
-// Resolves a resource's first/last-use POSITION (an index into
-// snapshot.passesInExecutionOrder's own surviving prefix - see
-// RenderGraphResourceSnapshot's own doc comment) back into that pass's real
-// NAME - a raw integer index is meaningless to a human reader; a pass name
-// is what actually answers "when is this resource alive".
-const char* PassNameAtSurvivingIndex(const rg::RenderGraphSnapshot& snapshot, std::int32_t index)
-{
-    if (index < 0 || static_cast<std::size_t>(index) >= snapshot.passesInExecutionOrder.size()) {
-        return "?";
-    }
-    const std::string& name = snapshot.passesInExecutionOrder[static_cast<std::size_t>(index)].name;
-    return name.empty() ? "(unnamed)" : name.c_str();
-}
-
 void BuildResourceTable(const char* tableId, const rg::RenderGraphSnapshot& snapshot)
 {
     if (snapshot.resources.empty()) {
@@ -189,8 +137,8 @@ void BuildResourceTable(const char* tableId, const rg::RenderGraphSnapshot& snap
             if (resource.firstUsePassIndex < 0) {
                 ImGui::TextDisabled("never used (fully culled)");
             } else {
-                ImGui::Text("%s -> %s", PassNameAtSurvivingIndex(snapshot, resource.firstUsePassIndex),
-                    PassNameAtSurvivingIndex(snapshot, resource.lastUsePassIndex));
+                ImGui::Text("%s -> %s", rg::ResolvePassNameAtSurvivingIndex(snapshot, resource.firstUsePassIndex),
+                    rg::ResolvePassNameAtSurvivingIndex(snapshot, resource.lastUsePassIndex));
             }
         }
 
