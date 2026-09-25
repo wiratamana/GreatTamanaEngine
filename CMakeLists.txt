@@ -336,6 +336,13 @@ add_library(gte_core STATIC
     src/Core/Plugins/IPluginCapabilityOrchestrator.h
     src/Core/Plugins/LegacyRenderFeatureOrchestrator.h
     src/Core/Plugins/LegacyRenderFeatureOrchestrator.cpp
+    # editor-core-separation-6 campaign, PHASE3
+    # (PHASE3_EDITOR_PANEL_ORCHESTRATOR_MIGRATION.md) - the second real
+    # IPluginCapabilityOrchestrator implementation, a verbatim relocation of
+    # the former inline IEditorPanelModule_v1 discovery loop that used to
+    # live directly in EditorHost.cpp.
+    src/Core/Plugins/EditorPanelCapabilityOrchestrator.h
+    src/Core/Plugins/EditorPanelCapabilityOrchestrator.cpp
     # editor-core-separation-1 campaign, PHASE10
     # (PHASE10_ISURFACEPROVIDER_INTERFACE_AND_WINDOW_INVERSION.md) - the
     # abstract surface-provider interface Renderer/VulkanSurface now depend on

@@ -5,7 +5,6 @@
 #include "EditorLogQueryCapability.h" // editor-core-separation-2 campaign, PHASE3.
 #include "ProjectRootPath.h" // editor-core-separation-3 campaign, PHASE2 - ExecutableDirectory().
 #include "../Core/EditorPanelRegistry.h" // editor-core-separation-3 campaign, PHASE4.
-#include "../../plugins/gte_plugin_abi/IEditorPanelModule.h" // editor-core-separation-3 campaign, PHASE4.
 #include "../Application/EventTranslator.h"
 #include "../Application/EngineCommandDispatch.h"
 #include "../Application/MemorySnapshotBuilder.h"
@@ -188,18 +187,6 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
     // behavior never varies frame-to-frame.
     m_core.SetPresentImGuiRecorder([this](VkCommandBuffer cmd) { m_editorLayer->Render(cmd); });
 
-#if GTE_ENABLE_PLUGINS
-    // PHASE0_MASTER_STRATEGY.md's Locked Design Decision #9 - loaded exactly
-    // once, here, at EditorHost construction time. The plugins/ folder lives
-    // NEXT TO the built executable (ProjectRootPath::ExecutableDirectory(),
-    // the same SDL_GetBasePath() base-path resolution
-    // ResolveProjectRootDirectory() already uses for the Project panel's own
-    // root folder, minus the "Project" subfolder - see that file for the
-    // precedent this mirrors) - never relative to the current working
-    // directory, which is not guaranteed to be the exe's own folder.
-    m_core.LoadPlugins(gte::ExecutableDirectory() / "plugins");
-#endif
-
     // editor-core-separation-3 campaign, PHASE4
     // (PHASE4_EDITOR_PANEL_CAPABILITY_AND_REGISTRY.md) - seeds
     // EditorPanelRegistry with every built-in panel name BEFORE any plugin
@@ -208,6 +195,13 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
     // literal list must match EditorPanelCatalog.h's own former
     // kKnownEditorPanelNames[] content byte-for-byte (confirmed before this
     // file was deleted by this same phase).
+    //
+    // editor-core-separation-6 campaign, PHASE3
+    // (PHASE3_EDITOR_PANEL_ORCHESTRATOR_MIGRATION.md) - moved to run BEFORE
+    // Core::LoadPlugins() (below), not after, so the "built-ins first"
+    // invariant still holds now that EditorPanelCapabilityOrchestrator
+    // registers every plugin panel automatically INSIDE
+    // Core::LoadPlugins() itself (Locked Design Decision #6).
     EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Hierarchy");
     EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Inspector");
     EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Scene");
@@ -223,16 +217,25 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
 #endif
 
 #if GTE_ENABLE_PLUGINS
-    // Queried once, immediately after Core::LoadPlugins() above returns -
-    // every loaded plugin exposing IEditorPanelModule_v1 gets its own real,
-    // dockable panel registered here, with zero hardcoded knowledge of any
-    // specific plugin.
-    for (IPluginModule* module : m_core.GetPluginHost().AllLoadedModules()) {
-        if (auto* panel = static_cast<IEditorPanelModule_v1*>(
-                module->QueryCapability(kIEditorPanelModule_v1_Name))) {
-            EditorPanelRegistry::Instance().RegisterPluginPanel(panel->GetPanelName(), panel);
-        }
-    }
+    // PHASE0_MASTER_STRATEGY.md's Locked Design Decision #9 - loaded exactly
+    // once, here, at EditorHost construction time. The plugins/ folder lives
+    // NEXT TO the built executable (ProjectRootPath::ExecutableDirectory(),
+    // the same SDL_GetBasePath() base-path resolution
+    // ResolveProjectRootDirectory() already uses for the Project panel's own
+    // root folder, minus the "Project" subfolder - see that file for the
+    // precedent this mirrors) - never relative to the current working
+    // directory, which is not guaranteed to be the exe's own folder.
+    //
+    // editor-core-separation-6 campaign, PHASE3
+    // (PHASE3_EDITOR_PANEL_ORCHESTRATOR_MIGRATION.md) - Core::LoadPlugins()
+    // now ALSO invokes every registered IPluginCapabilityOrchestrator's own
+    // OnPluginsLoaded(), including the new EditorPanelCapabilityOrchestrator
+    // (see Core.cpp's RegisterBuiltinCapabilityOrchestrators()) - this
+    // REPLACES the former inline IEditorPanelModule_v1 discovery loop that
+    // used to run here, right after this call, with zero observable
+    // behavior change (same EditorPanelRegistry::RegisterPluginPanel() call,
+    // same AllLoadedModules() list, same QueryCapability() name).
+    m_core.LoadPlugins(gte::ExecutableDirectory() / "plugins");
 #endif
 
     // editor-core-separation-1 campaign, PHASE16 - wires the ONE real

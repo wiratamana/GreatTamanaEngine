@@ -39,6 +39,12 @@
 // inside LegacyRenderFeatureOrchestrator.cpp itself.
 #include "Plugins/IPluginCapabilityOrchestrator.h"
 #include "Plugins/LegacyRenderFeatureOrchestrator.h"
+// editor-core-separation-6 campaign, PHASE3
+// (PHASE3_EDITOR_PANEL_ORCHESTRATOR_MIGRATION.md) - the second real
+// IPluginCapabilityOrchestrator implementation, proving the registry
+// generalizes beyond render features (a verbatim relocation of
+// EditorHost.cpp's own former inline IEditorPanelModule_v1 discovery loop).
+#include "Plugins/EditorPanelCapabilityOrchestrator.h"
 
 #include <cassert>
 #include <cstdint>
@@ -239,6 +245,12 @@ Core::~Core() = default;
 void Core::RegisterBuiltinCapabilityOrchestrators()
 {
     m_capabilityOrchestrators.push_back(std::make_unique<LegacyRenderFeatureOrchestrator>(*this));
+    // editor-core-separation-6 campaign, PHASE3
+    // (PHASE3_EDITOR_PANEL_ORCHESTRATOR_MIGRATION.md) - the second real
+    // IPluginCapabilityOrchestrator implementation, proving the registry
+    // generalizes beyond render features. See EditorHost.cpp's own
+    // constructor for the matching reordering fix this migration required.
+    m_capabilityOrchestrators.push_back(std::make_unique<EditorPanelCapabilityOrchestrator>());
 }
 
 // editor-core-separation-3 campaign, PHASE2
