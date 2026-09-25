@@ -996,6 +996,11 @@ add_library(gte_editor STATIC
     src/Editor/ImGuiIdConflictTracker.cpp
     src/Editor/ImGuiIdConflictGuard.h
     src/Editor/ImGuiIdConflictGuard.cpp
+    # task_manager/editor-core-separation-10 campaign, PHASE2 - the ONE
+    # mandated public helper for entering a per-iteration ImGui ID scope -
+    # see AGENTS.md's "ImGui Widget ID Uniqueness" section.
+    src/Editor/ImGuiUniqueId.h
+    src/Editor/ImGuiUniqueId.cpp
     src/Editor/MemoryPanelData.h
     src/Editor/MemoryPanelData.cpp
     src/Editor/ProfilerPanelData.h

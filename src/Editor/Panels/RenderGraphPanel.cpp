@@ -6,6 +6,7 @@
 #include "../../Core/Plugins/RenderFeatureCompositor.h"
 #include "../../Renderer/RenderGraph/RenderGraph.h"
 #include "../../Renderer/RenderGraph/RenderGraphSnapshotFormatting.h"
+#include "../ImGuiUniqueId.h"
 
 #include <imgui.h>
 
@@ -47,18 +48,28 @@ std::vector<std::string> ExtractResourceRefNames(const std::vector<rg::RenderGra
 // the first place in this file a checkbox actually MUTATES Core-owned state
 // (rg::RenderPassToggleRegistry) directly from the Editor UI, per
 // PHASE0_MASTER_STRATEGY.md's Step 2.6 (same thread, no bridge needed).
-void BuildPassRow(const rg::RenderGraphPassMetadata& pass, rg::RenderPassToggleRegistry& renderPassToggleRegistry)
+void BuildPassRow(int rowIndex, const rg::RenderGraphPassMetadata& pass, rg::RenderPassToggleRegistry& renderPassToggleRegistry)
 {
+    // task_manager/editor-core-separation-10 campaign, PHASE2 - THE fix for
+    // the reported bug: this row's ImGui ID scope is now keyed by its own
+    // loop index (always distinct per row, per frame, by construction),
+    // never by pass.name alone - so two rows sharing the exact same
+    // pass.name (e.g. "AtmosphereSkyViewLutPass" appearing once for Game
+    // View and once for Scene View - a real, permanent, INTENTIONAL fact
+    // about this table, see PHASE0_MASTER_STRATEGY.md section 2.2) no
+    // longer collide as ImGui widgets, even though they intentionally keep
+    // sharing the exact same renderPassToggleRegistry STATE (pass.name is
+    // still the toggle registry's own lookup key below - that business
+    // logic is completely unchanged).
+    ScopedUniqueId idScope(rowIndex, "RenderGraphPanel::BuildPassRow", pass.name.c_str());
+
     ImGui::TableNextRow();
 
     ImGui::TableSetColumnIndex(0);
     bool enabled = renderPassToggleRegistry.IsEnabled(pass.name);
-    // ImGui::Checkbox's own label must be unique across the WHOLE panel
-    // (ImGui IDs are label-derived by default) - "##Enabled_<passName>"
-    // mirrors this file's own existing "RgPasses##" + idSuffix ImGui-ID-
-    // uniqueness convention (BuildRegimeSection()).
-    const std::string checkboxId = std::string("##Enabled_") + pass.name;
-    if (ImGui::Checkbox(checkboxId.c_str(), &enabled)) {
+    // Uniqueness now comes entirely from the ScopedUniqueId scope above -
+    // this literal, un-suffixed label is intentional and correct.
+    if (ImGui::Checkbox("##Enabled", &enabled)) {
         renderPassToggleRegistry.SetEnabled(pass.name, enabled);
     }
     if (ImGui::IsItemHovered()) {
@@ -150,8 +161,8 @@ void BuildPassTable(
         ImGui::TableSetupColumn("Writes");
         ImGui::TableHeadersRow();
 
-        for (const rg::RenderGraphPassMetadata& pass : regime.passes) {
-            BuildPassRow(pass, renderPassToggleRegistry);
+        for (std::size_t i = 0; i < regime.passes.size(); ++i) {
+            BuildPassRow(static_cast<int>(i), regime.passes[i], renderPassToggleRegistry);
         }
 
         ImGui::EndTable();
@@ -289,8 +300,13 @@ void BuildPluginRenderFeaturesSection(
         return;
     }
 
-    for (const RenderFeatureDebugEntry& entry : entries) {
-        ImGui::PushID(entry.name.c_str());
+    for (std::size_t i = 0; i < entries.size(); ++i) {
+        const RenderFeatureDebugEntry& entry = entries[i];
+        // task_manager/editor-core-separation-10 campaign, PHASE2 - was a
+        // bare ImGui::PushID(entry.name.c_str())/PopID() pair with the same
+        // LATENT "two entries could share a name" shape as the reported
+        // bug, even though no real collision has ever been observed here.
+        ScopedUniqueId idScope(static_cast<int>(i), "RenderGraphPanel::BuildPluginRenderFeaturesSection", entry.name.c_str());
 
         bool enabled = entry.enabled;
         if (ImGui::Checkbox("##FeatureEnabled", &enabled) && renderFeatureCompositor != nullptr) {
@@ -320,8 +336,9 @@ void BuildPluginRenderFeaturesSection(
             ImGui::SameLine();
             ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "[v3]");
         }
-
-        ImGui::PopID();
+        // No manual ImGui::PopID() anymore - ScopedUniqueId's destructor
+        // handles it when idScope goes out of scope at the end of this
+        // loop body.
     }
 }
 
@@ -333,11 +350,8 @@ void BuildPluginRenderFeaturesSection(
 // all). Reads renderPassToggleRegistry.ListAll() directly - the registry
 // itself, not the metadata, is this section's own source of truth.
 //
-// Uses the exact same "##Enabled_" + name checkbox-ID scheme BuildPassRow()
-// above already uses (rather than ImGui::PushID()/PopID() per row) - this is
-// a deliberate, single, consistent ID convention across both of this
-// phase's new checkbox call sites, per this phase doc's own explicit "pick
-// ONE convention... do not mix both styles in the same file" instruction.
+// Uses ScopedUniqueId (see ImGuiUniqueId.h) exactly like BuildPassRow()
+// above - task_manager/editor-core-separation-10 campaign, PHASE2.
 void BuildDisabledBuiltInPassesSection(rg::RenderPassToggleRegistry& renderPassToggleRegistry)
 {
     const std::vector<rg::RenderPassToggleState> allStates = renderPassToggleRegistry.ListAll();
@@ -353,10 +367,14 @@ void BuildDisabledBuiltInPassesSection(rg::RenderPassToggleRegistry& renderPassT
         ImGui::TextDisabled("Every known built-in pass is currently enabled.");
         return;
     }
-    for (const rg::RenderPassToggleState& state : disabled) {
+    for (std::size_t i = 0; i < disabled.size(); ++i) {
+        const rg::RenderPassToggleState& state = disabled[i];
+        // task_manager/editor-core-separation-10 campaign, PHASE2 - same
+        // fix as BuildPassRow() above: index-scoped, not name-scoped.
+        ScopedUniqueId idScope(static_cast<int>(i), "RenderGraphPanel::BuildDisabledBuiltInPassesSection", state.name.c_str());
+
         bool enabled = false; // always false here by construction (this loop only ever sees disabled entries).
-        const std::string checkboxId = "##Enabled_" + state.name;
-        if (ImGui::Checkbox(checkboxId.c_str(), &enabled)) {
+        if (ImGui::Checkbox("##Enabled", &enabled)) {
             renderPassToggleRegistry.SetEnabled(state.name, enabled);
         }
         ImGui::SameLine();
