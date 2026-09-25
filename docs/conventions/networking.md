@@ -613,3 +613,92 @@ registering a new named texture:
   overwritten) and logging the resolved path via `GTE_LOG_INFO`. See
   `task_manager/editor-core-separation-7/PHASE0_MASTER_STRATEGY.md` for the
   full five-phase campaign writeup.
+
+- **`GET /render_graph/set_pass_enabled`, `GET /render_graph/passes`,
+  `GET /render_graph/set_feature_enabled`, `GET /render_graph/set_feature_priority`,
+  `GET /render_graph/set_blur_enabled`, `GET /render_graph/set_gbuffer_enabled`**
+  (`editor-core-separation-8` campaign,
+  `task_manager/editor-core-separation-8/PHASE0_MASTER_STRATEGY.md`) turn the
+  read-only `GET /render_graph` above into a genuinely CONTROLLABLE render
+  graph - the natural next layer on top of `editor-core-separation-7`'s own
+  "observable" milestone. All 6 routes are `GET` + query parameters only (no
+  JSON POST body anywhere in this campaign - every mutated field is a plain
+  bool or int, so a query parameter fits perfectly), and all 6 share ONE new,
+  dedicated cross-thread bridge, `RenderGraphControlCommandBridge`
+  (`src/Application/RenderGraphControlCommandBridge.h/.cpp`) - mirroring
+  `FrameDebuggerCommandBridge`'s own exact "one bridge, several command kinds"
+  shape (mutex + `std::condition_variable` + single pending-request slot,
+  drained once per frame by `EditorHost.cpp`'s own `Run()` loop, immediately
+  after the existing `FrameDebuggerCommandBridge` pump) - never a new enum
+  value bolted onto an existing, unrelated bridge. **Built-in render passes**
+  (`RenderOpaque`, `DrawSkyBackground`, `AtmosphereComposite`, `GpuSkinning`,
+  `RenderTransparent`, ...) get ON/OFF ONLY, keyed by their existing
+  `rg::RenderPassDesc::debugName` string via a new, plain `gte_core` class,
+  `gte::rg::RenderPassToggleRegistry` (`src/Renderer/RenderGraph/
+  RenderPassToggleRegistry.h/.cpp`) - auto-discovering each pass's name the
+  first time it is actually declared this session (default `enabled = true`,
+  zero behavior change for any pass nobody has touched), consulted once per
+  frame from `RenderPipeline::DeclareOnePhase()`'s own existing flush loop
+  (mirroring `SetLegacyViewScopeTranslator()`'s own injection precedent) plus
+  two narrowly-scoped early-return guards inside the `"AtmosphereComposite"`/
+  `"GpuSkinning"` provider lambdas specifically (the only two built-in
+  providers that call `frame.builder.AddRenderPass(...)` directly and never
+  reach that flush loop at all). A small, permanent, hardcoded deny-list
+  (`RenderPassToggleRegistry::IsDenyListed()`) refuses to ever disable
+  `"Present"` - the pass that finally puts pixels on the swapchain. There is
+  NO `RenderPassEvent` reassignment for built-in passes anywhere in this
+  campaign, by explicit product decision - the Investigation this campaign was
+  based on flagged a real crash risk there (a reassigned pass's tier can
+  silently break a real data dependency and trip `RenderGraphCompiler`'s own
+  `DetectRenderPassEventContradictions()` assert). Disabling a shared-name
+  built-in pass (`RenderOpaque`/`DrawSkyBackground`/`RenderTransparent`/
+  `AtmosphereComposite` are each declared with the SAME literal `debugName` for
+  BOTH the Game View and the Scene View) disables it for BOTH views at once -
+  there is no way to disable it in one view only, an accepted, intentional
+  consequence of keeping the registry dead simple. **Plugin "scriptable render
+  features"** (`IRenderFeatureModule_v2`) get ON/OFF AND LIVE runtime priority
+  reassignment (stage - `PostComposite`/`PreUI` - stays fixed; only ordering
+  WITHIN a stage changes), via two new `RenderFeatureCompositor` methods,
+  `SetFeatureEnabled()`/`SetFeaturePriority()` (`src/Core/Plugins/
+  RenderFeatureCompositor.h/.cpp`) - safe because every `_v2` plugin already
+  renders into its own fully private, isolated offscreen target, and the
+  compositing chain is rebuilt fresh from these vectors every single frame.
+  The plugin ABI itself (`GtePluginRenderFeatureDescriptor`) is completely
+  untouched - the new `enabled`/priority-override state is 100% host-side.
+  A disabled plugin feature is never removed from `RenderFeatureCompositor`'s
+  own tracked entries (only skipped during compositing), so
+  `GET /render_graph`'s existing `render_features[]` array now also reports a
+  new `"enabled"` field automatically on every entry - no new discovery
+  endpoint was needed for plugin features. A disabled BUILT-IN pass, by
+  contrast, is never declared at all, so it leaves zero trace in
+  `GET /render_graph`'s own pass tables - this is why built-in passes alone get
+  a brand-new discovery endpoint, `GET /render_graph/passes`, returning
+  `{"passes":[{"name":"...","enabled":true,"ever_declared_this_session":true},
+  ...]}` for every built-in pass name the registry has ever seen this session.
+  **Compute Blur / GBuffer Validation ON/OFF** (already-existing
+  `EditorContext::showBlurredSceneOutput`/`showGBufferValidationOutput` bools,
+  previously only reachable via 2 checkboxes in the "Scene" panel) now also
+  have matching checkboxes in the "Render Graph" panel AND these 2 new HTTP
+  routes, routed through 2 new `IEditorLayer` virtual setters
+  (`SetShowBlurredSceneOutput()`/`SetShowGBufferValidationOutput()`, mirroring
+  `FrameDebuggerSetEnabled()`'s exact existing shape) since this is
+  Editor-owned (`EditorContext`) state, never a direct `Core` call. **Every
+  new toggle/override this campaign adds is IN-MEMORY ONLY** - nothing
+  persists to disk, and a fresh Editor launch always starts with every
+  built-in pass enabled, every plugin feature enabled at its own
+  author-declared priority, and both debug-pass checkboxes off. **The real,
+  as-shipped response shapes** (all confirmed via a live
+  `run_app_background`/`gte_send_request` session, see
+  `task_manager/editor-core-separation-8/PHASE5_COMPLETION_REPORT.md` for the
+  full captured transcript): every mutating route
+  (`set_pass_enabled`/`set_feature_enabled`/`set_feature_priority`/
+  `set_blur_enabled`/`set_gbuffer_enabled`) responds `200` `{"success":true}`
+  on success or a non-200 `{"success":false,"error":"<message>"}` on failure -
+  `400` for a missing/malformed query parameter, `409` for a semantically
+  rejected name (`"Present"` deny-listed, or a plugin feature name that
+  matches no currently-loaded `_v2` plugin), `503` if the bridge pointer
+  itself is null, `504` on a bridge timeout; `GET /render_graph/passes` always
+  responds `200` with the shape shown above, or `503`/`504` on the same bridge
+  failure modes. See
+  `task_manager/editor-core-separation-8/PHASE0_MASTER_STRATEGY.md` for the
+  full six-phase campaign writeup.
