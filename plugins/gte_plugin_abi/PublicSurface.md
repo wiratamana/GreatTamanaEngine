@@ -58,6 +58,26 @@ verification evidence).
   under `src/Core/Plugins/` (`gte_core`-internal), never under
   `plugins/gte_plugin_abi/` - confirmed by direct re-read of every new file
   those phases added before writing this note.
+- editor-core-separation-9 campaign, PHASE5 (campaign closeout): `PluginRenderResource.h`
+  (`PluginTextureHandle`/`PluginBufferHandle`, `PluginResourceAccess`,
+  `PluginTextureDesc`/`PluginBufferDesc`), `IPluginRenderPassBuilder_v3.h`
+  (`IPluginPassSetupContext`, `kPluginComputeDispatchMaxGroupsPerDimension`,
+  `kPluginMaxOperationParamBytes`, `IPluginCommandRecorder`,
+  `PluginBlackboardValueKind`/`PluginBlackboardValue`/`IPluginBlackboard`, and
+  the top-level `IPluginRenderPassBuilder_v3` interface itself), and
+  `IRenderFeatureModule_v3` (appended to the existing `IRenderFeatureModule.h`,
+  `IRenderFeatureModule_v1`/`_v2` completely untouched) - the additive `_v3`
+  render-feature ABI, a second-generation, feature-agnostic replacement for
+  `_v2`'s closed 3-method enumeration (see `docs/conventions/plugin-architecture.md`'s
+  own "`_v3` Generic Render-Feature System" section for the full picture).
+  **Confirmed by direct re-read of every one of these files before writing this
+  bullet, not from memory of the phase plan**: `PluginRenderOperationRegistry.h/.cpp`,
+  `PluginRenderPassBuilderAdapter_v3.h/.cpp`,
+  `PluginRenderResourceTranslation.h/.cpp`, and
+  `PluginRenderPassBuilderAdapterV3Validation.h` all live under
+  `src/Core/Plugins/` (`gte_core`-internal), never under
+  `plugins/gte_plugin_abi/` - a plugin `.dll` never sees any of these four
+  types, only the curated interfaces/structs listed above.
 
 ## Rules every type on this list must follow (Locked Design Decision #3)
 

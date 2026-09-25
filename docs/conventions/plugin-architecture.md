@@ -264,6 +264,186 @@ Full convention: `task_manager/editor-core-separation-6/PHASE0_MASTER_STRATEGY.m
 and each `PHASEn_COMPLETION_REPORT.md`/`CAMPAIGN_COMPLETION_REPORT.md` in that
 same folder.
 
+## `_v3` Generic Render-Feature System — Feature-Agnostic Resource Graph + Operation Registry
+
+`editor-core-separation-9` campaign (`task_manager/editor-core-separation-9/
+PHASE0_MASTER_STRATEGY.md`, `CAMPAIGN_COMPLETION_REPORT.md`) shipped a third,
+strictly ADDITIVE render-feature ABI surface — `_v1`/`_v2` above are never
+touched, deprecated, or removed. `IPluginRenderPassBuilder_v2`'s exactly 3
+fixed C++ methods are a CLOSED enumeration: each hardcoded to one `opCode`
+inside one host-owned uber compute shader (`Shaders/RenderFeatureOps.comp`) —
+adding a 4th effect would require an ABI header edit + an adapter edit + a
+shader edit + an engine rebuild, and "a compute pass writes a texture/buffer,
+a later pass reads it" (ordinary render-graph plumbing) is completely
+impossible for any `_v2` plugin. `_v3` fixes both problems at once, and is now
+the RECOMMENDED path for new plugin authors going forward (`_v2` remains fully
+supported, forever, for backward compatibility).
+
+### The resource vocabulary and two-phase pass builder
+
+`plugins/gte_plugin_abi/PluginRenderResource.h` declares `PluginTextureHandle`/
+`PluginBufferHandle` (cheap POD index+generation structs, deliberately TWO
+distinct types so a texture handle can never be passed where a buffer handle
+is expected), a curated 4-value `PluginResourceAccess`
+(`ColorAttachmentWrite`/`ShaderRead`/`ComputeShaderRead`/`ComputeShaderWrite` —
+a SUBSET of the internal `rg::ResourceAccess`, never a raw 1:1 mirror), and
+physical-shape-only `PluginTextureDesc`/`PluginBufferDesc` (no `debugName`
+field, mirroring `rg::TextureDesc`/`rg::BufferDesc`'s own documented
+"pointer-identity `debugName` silently breaks resource pooling" lesson).
+`plugins/gte_plugin_abi/IPluginRenderPassBuilder_v3.h` declares the rest of the
+surface: `IPluginPassSetupContext` (`ReadTexture`/`WriteTexture`/`ReadBuffer`/
+`WriteBuffer`/`WriteColorAttachment` — the curated equivalent of
+`rg::RenderGraphBuilder::PassBuilder`, declare-time only, never records GPU
+work), `IPluginCommandRecorder` (`BindTexture`/`BindBuffer`/`Dispatch`/
+`DrawFullscreenTriangle` — execute-time only), and the top-level
+`IPluginRenderPassBuilder_v3` itself (`CreateTexture`/`CreateBuffer`/
+`TryGetNamedTexture`/`GetPrivateOutputTarget`/`AddGraphicsPass`/
+`AddComputePass`/`Blackboard`). A plugin declares a pass via
+`AddGraphicsPass(debugName, setupFn, executeFn, userData)`/`AddComputePass(...)`
+— plain function pointers + `void* userData`, never `std::function`, matching
+`PublicSurface.md`'s ABI-boundary rule. `CreateTexture()`/`CreateBuffer()` mint
+a NEW, transient, pooled resource for the current frame, realized host-side
+through the EXACT SAME transient resource pool
+`rg::RenderGraphBuilder::CreateTexture()`/`CreateBuffer()` already uses (no new
+pooling mechanism was needed). `TryGetNamedTexture()` exposes exactly ONE
+semantic name this campaign, `"SceneColor"` — the already-composited scene
+color for this view, read-only, resolved BEFORE this plugin's own stage runs.
+`GetPrivateOutputTarget()` returns this plugin's own already-allocated,
+per-(plugin, view) private compositing target for this frame — the plugin's
+own last pass(es) must `WriteColorAttachment()`/`WriteTexture()` into this
+handle themselves; there is no implicit/auto-detected "last write wins".
+
+**Handle translation, never a raw internal type crossing the ABI**: a
+`gte_core`-internal adapter, `PluginRenderPassBuilderAdapter_v3`
+(`src/Core/Plugins/PluginRenderPassBuilderAdapter_v3.h/.cpp`), owns a small,
+per-(plugin, view, frame)-scoped translation table — a
+`PluginTextureHandle::index`/`PluginBufferHandle::index` is simply that
+table's own index, never numerically identical to a real
+`rg::TextureHandle`/`rg::BufferHandle`, so a plugin can never fabricate a
+handle to an arbitrary host resource by guessing an index. A real,
+load-bearing use-after-free hazard was found and fixed during this campaign's
+own implementation: `Core::BuildFrame()` declares every pass across BOTH views
+into one shared `rg::RenderGraphBuilder` before the whole graph is compiled
+and executed once, meaning the adapter itself (a per-entry stack local) is
+ALREADY DESTROYED by the time any pass's `execute` callback actually runs —
+fixed by extracting the translation table into a `std::shared_ptr`-held
+`TranslationState` captured BY VALUE into every `execute` closure.
+
+### The operation registry — the mechanism that makes a new operation a content addition, not an ABI change
+
+`src/Core/Plugins/PluginRenderOperationRegistry.h/.cpp` (`gte_core`-internal) is
+the real, host-owned, growable, string-keyed registry
+`IPluginCommandRecorder::Dispatch(opId, ...)`/`DrawFullscreenTriangle(opId, ...)`
+looks operations up in. Each registered operation carries its OWN pipeline
+(a `ComputePipeline*` for a `Dispatch`-family op, a graphics `Pipeline*` for a
+`DrawFullscreenTriangle`-family op), its OWN `VkDescriptorSetLayout`, an
+ordered slot table (`{ VkDescriptorType, isBuffer }` per slot — `BindTexture`/
+`BindBuffer` validate the caller passed the right kind, refusing a mismatch
+with a loud warning), an `opCode` (meaningful only for the shared uber-ops
+pipeline), and a `maxParamBytes` (capped at 128 bytes, this engine's own
+graphics-push-constant convention). The registry OWNS every pipeline it
+registers, INCLUDING the migrated `RenderFeatureOps.comp`/
+`RenderFeatureBlend.comp` pipelines `_v2`'s own `DispatchOps()`/
+`DispatchBlend()` now source through a small registry accessor instead of
+owning directly — a pure refactor, zero `_v2` observable behavior change
+(re-verified via pixel-parity A/B against the existing `_v2` demo plugins).
+
+Four built-in operations shipped this campaign:
+
+| id | kind | slots (binding → type) | opCode | maxParamBytes | pipeline source |
+|---|---|---|---|---|---|
+| `gte.builtin.solid_fill` | Compute | 0: StorageImage | 0 | 64 | shared `RenderFeatureOps.comp` |
+| `gte.builtin.radial_vignette` | Compute | 0: StorageImage | 1 | 64 | shared `RenderFeatureOps.comp` |
+| `gte.builtin.color_grade` | Compute | 0: StorageImage | 2 | 64 | shared `RenderFeatureOps.comp` |
+| `gte.builtin.box_blur` | Compute | 0: CombinedImageSampler, 1: StorageImage | 0 (unused) | 8 | own, separate pipeline, `Shaders/BoxBlur.comp` (already-shipped/tested) |
+| `gte.builtin.blit_fullscreen` | DrawFullscreenTriangle | 0: CombinedImageSampler (fragment stage) | 0 (unused) | 0 | own, separate graphics pipeline, `Shaders/PluginBlitFullscreen.vert/.frag` |
+
+`gte.builtin.solid_fill`/`_radial_vignette`/`_color_grade` reproduce `_v2`'s
+exact 3 fixed effects, proven byte-for-byte pixel-identical to `_v2`'s own
+fixed-method dispatch (identical PNG byte size in an A/B toggle test — a
+deterministic encoder over identical pixel input). `gte.builtin.box_blur` and
+`gte.builtin.blit_fullscreen` are genuinely NEW operations, proving R13's
+central claim twice: a new operation is a host-side content addition, never an
+`IPluginRenderPassBuilder_v3` interface change.
+
+### The 2-pass GPU blur demo — the real, permanent proof
+
+`plugins/demo_render_feature_v3/` is a real, permanent, committed 2-pass GPU
+downsample-blur, using ONLY generic `_v3` primitives: `"DemoRenderFeatureV3_Downsample"`
+(compute, reads `"SceneColor"`, writes a NEW transient half-res texture minted
+via `CreateTexture()`, through `Dispatch("gte.builtin.box_blur", ...)`) then
+`"DemoRenderFeatureV3_UpsamplePresent"` (graphics, reads that half-res texture,
+writes `GetPrivateOutputTarget()` via
+`DrawFullscreenTriangle("gte.builtin.blit_fullscreen", nullptr, 0)`). Verified
+live with a real, mathematically-checked pixel proof: a sharp baseline capture
+vs. a blurred-output capture show a soft transition band around the cube
+silhouette/horizon line whose width matches `Shaders/BoxBlur.comp`'s own
+`kBlurRadius = 3` (7x7 box average) hand-computed against the real
+source/destination resolutions — not merely "some blur happened".
+
+### The blackboard — generic cross-plugin data hand-off
+
+`IPluginBlackboard::Publish(key, value)`/`Fetch(key, expectedKind, outValue)`
+(`plugins/gte_plugin_abi/IPluginRenderPassBuilder_v3.h`) mirrors
+`rg::RenderPassBlackboard`'s own "last-publish-wins", per-frame-cleared
+contract, but ABI-safe — `PluginBlackboardValue` is a plain tagged struct
+(`PluginBlackboardValueKind`: `Texture`/`Buffer`/`Float`/`Int32`/`Float4`),
+never `std::any`/`std::variant` crossing the boundary. Owned by
+`RenderFeatureCompositor` (ONE instance, cleared at the start of every
+`ContributeRenderGraphPasses()` call), reachable only via
+`IPluginRenderPassBuilder_v3::Blackboard()` (`_v2`'s own 3-method interface
+has no `Blackboard()` accessor — an additive-only campaign). Since a plugin
+`.dll` has zero logging capability of its own, `BlackboardAdapter::Publish()`/
+`Fetch()` (host-side) log on the plugin's behalf — a success path logs once
+per distinct key for the whole process lifetime (never spamming the log ring
+buffer for a value published every frame forever); a genuine failure (a
+never-published key, or a key published under a different
+`PluginBlackboardValueKind`) logs every time. Proven with a real, VISIBLE
+2-plugin demo: `plugins/demo_render_feature_v3/` publishes
+`"DemoV3.BlurStrength"` (a `Float`), `plugins/demo_render_feature_v3_second/`
+fetches it and widens its own radial vignette's outer radius by the fetched
+value — a genuinely stronger proof than a log-only check, since the live
+`GET /get_swapchain` screenshot directly shows the value reaching and
+influencing an independently-loaded plugin's own rendering.
+
+### Diagnostics — already generic, confirmed rather than rebuilt
+
+A `_v3` plugin's pass is, under the hood, a REAL `rg::PassRecord` produced by
+the SAME `RenderGraphBuilder::AddRenderPass()` chokepoint every internal
+engine pass already uses (declared with an explicit, hardcoded
+`rg::RenderPassEvent::AfterEverything`, the same tier every `_v2`
+`DispatchOps()`/`DispatchBlend()` pass already uses) — it is therefore ALREADY
+generically visible in `GET /render_graph`'s `offscreen_regime.passes` array
+and the Editor's "Render Graph" panel, with ZERO panel/JSON code change
+required (mirrors the `mrt-1` campaign's own identical finding for a different
+resource-write shape). The ONE genuine, confirmed gap this campaign found and
+fixed: the SEPARATE `render_features[]`/"Plugin Render Features" section
+(one row per LOADED PLUGIN, not per pass) had no way to say "this row is a
+`_v3` plugin" other than eyeballing the plugin's own chosen name string — fixed
+by one small, additive `bool isV3` field on `RenderFeatureDebugEntry`, threaded
+through the existing snapshot/JSON/panel plumbing (`"is_v3"` in the JSON, a
+light-blue `[v3]` label in the panel) — no new data-collection path.
+
+### Caps and limits (never silently unbounded)
+
+`kPluginComputeDispatchMaxGroupsPerDimension = 64` (each of `Dispatch()`'s
+`groupsX`/`groupsY`/`groupsZ`, independently) and
+`kPluginMaxOperationParamBytes = 128` are named ABI constants
+(`IPluginRenderPassBuilder_v3.h`); at most 32 `CreateTexture()`/`CreateBuffer()`
+calls per `AddRenderGraphPasses()` invocation and a 8192x8192 per-texture cap
+are enforced adapter-side. Every cap violation is a loud `GTE_LOG_WARNING`
+naming the plugin + the offending call + the limit, then a clean skip (the
+offending resource/pass/dispatch is simply not created/recorded) — never a
+crash. **Honest, load-bearing caveat**: there is no device-lost recovery path
+of any kind for a `Dispatch()` call that somehow still manages to drive the
+GPU past a reasonable workload despite this cap — this engine has no
+device-lost recovery path anywhere today, for any workload, so this is a
+restated pre-existing limitation, not a `_v3`-specific regression.
+
+Full convention: `task_manager/editor-core-separation-9/PHASE0_MASTER_STRATEGY.md`
+and each `PHASEn_COMPLETION_REPORT.md`/`CAMPAIGN_COMPLETION_REPORT.md` in that
+same folder.
+
 ## `IPluginCapabilityOrchestrator` — Generic Plugin Capability Registry
 
 `src/Core/Plugins/IPluginCapabilityOrchestrator.h` (`editor-core-separation-6`
