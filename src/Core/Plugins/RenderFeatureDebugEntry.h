@@ -29,6 +29,12 @@ struct RenderFeatureDebugEntry {
     std::string stage;     // "PostComposite" or "PreUI" (human-readable).
     std::int32_t priority = 0;
     std::string blendMode; // "Replace"/"AlphaOver"/"Additive"/"Multiply"/"ScreenSpaceMask".
+    // editor-core-separation-8 campaign, PHASE2 - the host-side enable/
+    // disable override (RenderFeatureCompositor::Entry::enabledOverride).
+    // Defaults true - matches every existing DebugSnapshot() call site's own
+    // prior output for a struct that never went through this campaign's own
+    // new SetFeatureEnabled() at all.
+    bool enabled = true;
 };
 
 } // namespace gte

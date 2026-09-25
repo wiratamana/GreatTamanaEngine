@@ -105,10 +105,47 @@ public:
     void DispatchOps(rg::RenderGraphBuilder& builder, rg::TextureHandle privateTarget, const char* stateKey,
         const char* debugName, const RenderFeatureOpsPushConstants& pushConstants);
 
+    // editor-core-separation-8 campaign, PHASE2
+    // (PHASE2_PLUGIN_RENDER_FEATURE_ENABLE_DISABLE_AND_PRIORITY.md) - host-side
+    // enable/disable override. Finds `name` in EITHER m_postComposite OR
+    // m_preUi (a plugin's own descriptor.name is unique by construction - two
+    // plugins sharing a name is not a case this engine defends against
+    // anywhere else either) and sets its enabledOverride. Returns false
+    // (no-op) if `name` matches no loaded _v2 plugin - defense-in-depth; a
+    // caller (the panel, PHASE4, or the HTTP bridge, PHASE5) is expected to
+    // only ever pass a name it already saw via DebugSnapshot()/
+    // GET /render_graph's own render_features[] array.
+    bool SetFeatureEnabled(const std::string& name, bool enabled);
+
+    // editor-core-separation-8 campaign, PHASE2 - host-side LIVE priority
+    // override (PHASE0_MASTER_STRATEGY.md's Locked Product Decision #2 -
+    // safe, because ContributeRenderGraphPasses() rebuilds its entire
+    // compositing chain fresh from m_postComposite/m_preUi every single
+    // frame, and every interned target name is keyed by plugin name + view
+    // name, never by list position). Mutates the SAME host-side
+    // Entry::descriptor.priority copy already made once at OnPluginsLoaded()
+    // time (never writes back into the plugin's own memory), then
+    // immediately re-sorts + re-runs the SAME collision-detection/tie-break
+    // logic OnPluginsLoaded() already uses, for ONLY the one stage `name`
+    // belongs to. Returns false if `name` matches no loaded _v2 plugin.
+    bool SetFeaturePriority(const std::string& name, std::int32_t priority);
+
 private:
     struct Entry {
         IRenderFeatureModule_v2* module = nullptr;
         GtePluginRenderFeatureDescriptor descriptor{};
+        // editor-core-separation-8 campaign, PHASE2 - host-side-only
+        // override, NEVER part of the plugin's own descriptor/ABI (the
+        // plugin ABI stays byte-for-byte unchanged - see
+        // PHASE0_MASTER_STRATEGY.md's Step 2.2/Locked Product Decision,
+        // mirroring GtePluginRenderFeatureDescriptor's own "the HOST NEVER
+        // trusts a plugin to self-order at runtime" rule, extended here to
+        // "and the host may now ALSO fully hide a plugin from the
+        // compositing chain, without the plugin itself ever knowing").
+        // Defaults true - every existing loaded plugin behaves EXACTLY as
+        // before this phase until something explicitly calls
+        // SetFeatureEnabled(false).
+        bool enabledOverride = true;
     };
 
     // Bundles exactly what one (plugin, view) private-target slot needs -
@@ -138,6 +175,20 @@ private:
     };
 
     void EnsureTextureSized(std::optional<RenderTexture>& texture, const char* internedName, VkExtent2D extent);
+
+    // editor-core-separation-8 campaign, PHASE2 - extracted VERBATIM from
+    // OnPluginsLoaded()'s own former inline `sortAndDetectCollisions` lambda,
+    // so SetFeaturePriority() can reuse the EXACT same sort+collision-tie-
+    // break behavior for a single re-sort after a live priority change,
+    // without duplicating the logic.
+    static void SortAndDetectCollisionsInStage(std::vector<Entry>& entries, const char* stageName);
+
+    // editor-core-separation-8 campaign, PHASE2 - shared lookup used by both
+    // SetFeatureEnabled() and SetFeaturePriority(): searches m_postComposite
+    // then m_preUi for an Entry whose descriptor.name matches `name` exactly.
+    // Returns nullptr if not found. Non-const overload only (both callers
+    // mutate through it).
+    Entry* FindEntryByName(const std::string& name);
 
     PrivateTargetState& EnsurePrivateTargetState(const char* internedName, VkExtent2D extent);
     BlendStageState& EnsureBlendStageDescriptorOnly(const char* internedName);

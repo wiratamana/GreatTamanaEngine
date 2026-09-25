@@ -309,7 +309,17 @@ public:
     // ->DebugSnapshot() through this pointer, guarded by a null-check at the
     // call site anyway - exactly mirroring every other nullable hook this
     // class already exposes (see m_editorLayer's own doc comment above).
-    const RenderFeatureCompositor* GetRenderFeatureCompositor() const noexcept
+    // editor-core-separation-8 campaign, PHASE2 - return type widened from
+    // `const RenderFeatureCompositor*` to `RenderFeatureCompositor*` (this
+    // method itself stays const - it does not mutate Core; only what it
+    // returns a pointer TO becomes mutable, so a caller can now reach the new
+    // SetFeatureEnabled()/SetFeaturePriority() mutators). Safe/backward-
+    // compatible: m_renderFeatureCompositorPtr was already a non-const
+    // pointer internally, and every existing call site only ever assigns the
+    // result into a const-pointer-typed local or calls const-qualified
+    // methods on it (confirmed via search_in_dir - EditorHost.cpp is the
+    // only real call site).
+    RenderFeatureCompositor* GetRenderFeatureCompositor() const noexcept
     {
         return m_renderFeatureCompositorPtr;
     }

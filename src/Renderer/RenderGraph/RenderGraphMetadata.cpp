@@ -217,6 +217,10 @@ void to_json(nlohmann::json& j, const RenderFeatureDebugEntry& entry)
         { "stage", entry.stage },
         { "priority", entry.priority },
         { "blend_mode", entry.blendMode },
+        // editor-core-separation-8 campaign, PHASE2 - the host-side enable/
+        // disable override, reported automatically via the ALREADY-SHIPPING
+        // GET /render_graph endpoint (no new endpoint needed for this).
+        { "enabled", entry.enabled },
     };
 }
 

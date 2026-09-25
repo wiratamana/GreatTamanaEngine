@@ -297,6 +297,9 @@ TEST(RenderGraphMetadataTest, GpuDrivenBatchesAndRenderFeaturesAreCopiedThroughU
     feature.stage = "PostComposite";
     feature.priority = 5;
     feature.blendMode = "AlphaOver";
+    // editor-core-separation-8 campaign, PHASE2 - the new host-side
+    // enable/disable override field, defaults true.
+    feature.enabled = false;
 
     const RenderGraphSnapshot offscreen;
     const RenderGraphSnapshot present;
@@ -315,6 +318,7 @@ TEST(RenderGraphMetadataTest, GpuDrivenBatchesAndRenderFeaturesAreCopiedThroughU
     EXPECT_EQ(metadata.renderFeatures[0].stage, "PostComposite");
     EXPECT_EQ(metadata.renderFeatures[0].priority, 5);
     EXPECT_EQ(metadata.renderFeatures[0].blendMode, "AlphaOver");
+    EXPECT_FALSE(metadata.renderFeatures[0].enabled);
 }
 
 // --- to_json() round-trip: the actual, real, external JSON contract --------
@@ -347,6 +351,11 @@ TEST(RenderGraphMetadataTest, ToJsonProducesExpectedTopLevelShapeAndNullHandling
     feature.stage = "PreUI";
     feature.priority = 1;
     feature.blendMode = "Replace";
+    // editor-core-separation-8 campaign, PHASE2 - explicit true here (the
+    // struct's own default), so this test also proves the "enabled" key
+    // round-trips through to_json() for the true case too (the sibling test
+    // above already covers the false case).
+    feature.enabled = true;
 
     const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, { batch }, { feature });
 
@@ -384,6 +393,7 @@ TEST(RenderGraphMetadataTest, ToJsonProducesExpectedTopLevelShapeAndNullHandling
     EXPECT_EQ(j["render_features"][0]["stage"].get<std::string>(), "PreUI");
     EXPECT_EQ(j["render_features"][0]["priority"].get<std::int32_t>(), 1);
     EXPECT_EQ(j["render_features"][0]["blend_mode"].get<std::string>(), "Replace");
+    EXPECT_TRUE(j["render_features"][0]["enabled"].get<bool>());
 }
 
 } // namespace

@@ -8,6 +8,7 @@
 #include "../../Renderer/ComputeDispatch.h"
 #include "../../Renderer/Vulkan/DescriptorSetLayoutBuilder.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstring>
 #include <utility>
@@ -67,6 +68,105 @@ RenderFeatureCompositor::RenderFeatureCompositor(Core& core, Renderer& renderer)
 {
 }
 
+// editor-core-separation-8 campaign, PHASE2 - extracted VERBATIM from
+// OnPluginsLoaded()'s own former inline `sortAndDetectCollisions` lambda
+// (zero behavior change), so SetFeaturePriority() can reuse the exact same
+// sort+collision-tie-break logic for a single re-sort after a live priority
+// change, without duplicating it.
+void RenderFeatureCompositor::SortAndDetectCollisionsInStage(std::vector<Entry>& entries, const char* stageName)
+{
+    std::stable_sort(entries.begin(), entries.end(),
+        [](const Entry& a, const Entry& b) { return a.descriptor.priority < b.descriptor.priority; });
+
+    std::size_t i = 0;
+    while (i < entries.size()) {
+        std::size_t j = i;
+        while (j + 1 < entries.size() && entries[j + 1].descriptor.priority == entries[i].descriptor.priority) {
+            ++j;
+        }
+        if (j > i) {
+            // entries[i..j] all declared the identical priority within
+            // this stage - an ambiguous, but never-crashing, situation
+            // (PHASE0_MASTER_STRATEGY.md's own Locked Design Decision,
+            // mirroring the Proposal's Section 3.4 step 3).
+            for (std::size_t k = i; k < j; ++k) {
+                GTE_LOG_WARNING("RenderFeatureCompositor",
+                    std::string(entries[k].descriptor.name) + " and " + entries[k + 1].descriptor.name
+                    + " both declared priority " + std::to_string(entries[k].descriptor.priority) + " in stage "
+                    + stageName + " - this is ambiguous; falling back to a stable, lexical name tie-break. "
+                    "Assign each plugin a distinct priority to remove this warning.");
+            }
+            std::stable_sort(entries.begin() + static_cast<std::ptrdiff_t>(i),
+                entries.begin() + static_cast<std::ptrdiff_t>(j) + 1, [](const Entry& a, const Entry& b) {
+                    return std::strcmp(a.descriptor.name, b.descriptor.name) < 0;
+                });
+        }
+        i = j + 1;
+    }
+}
+
+// editor-core-separation-8 campaign, PHASE2 - shared lookup used by both
+// SetFeatureEnabled() and SetFeaturePriority(): searches m_postComposite then
+// m_preUi for an Entry whose descriptor.name matches `name` exactly. Returns
+// nullptr if not found.
+RenderFeatureCompositor::Entry* RenderFeatureCompositor::FindEntryByName(const std::string& name)
+{
+    for (Entry& entry : m_postComposite) {
+        if (name == entry.descriptor.name) {
+            return &entry;
+        }
+    }
+    for (Entry& entry : m_preUi) {
+        if (name == entry.descriptor.name) {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
+// editor-core-separation-8 campaign, PHASE2 - host-side enable/disable
+// override. See RenderFeatureCompositor.h's own doc comment for the full
+// contract.
+bool RenderFeatureCompositor::SetFeatureEnabled(const std::string& name, bool enabled)
+{
+    Entry* entry = FindEntryByName(name);
+    if (entry == nullptr) {
+        return false;
+    }
+    entry->enabledOverride = enabled;
+    return true;
+}
+
+// editor-core-separation-8 campaign, PHASE2 - host-side LIVE priority
+// override. See RenderFeatureCompositor.h's own doc comment for the full
+// contract.
+bool RenderFeatureCompositor::SetFeaturePriority(const std::string& name, std::int32_t priority)
+{
+    Entry* entry = FindEntryByName(name);
+    if (entry == nullptr) {
+        return false;
+    }
+    entry->descriptor.priority = priority;
+
+    // Re-sort ONLY the stage this entry actually belongs to - determined by
+    // which vector FindEntryByName() actually found it in, not by
+    // entry->descriptor.stage alone (defensive: always re-derive from the
+    // real container to stay correct even if this class's own stage-routing
+    // rules ever change). NOTE: the re-sort below invalidates `entry` itself
+    // (std::stable_sort may reorder/relocate elements) - it is never
+    // dereferenced again after this point.
+    const bool isPostComposite =
+        std::find_if(m_postComposite.begin(), m_postComposite.end(),
+            [&name](const Entry& e) { return name == e.descriptor.name; })
+        != m_postComposite.end();
+    if (isPostComposite) {
+        SortAndDetectCollisionsInStage(m_postComposite, "PostComposite");
+    } else {
+        SortAndDetectCollisionsInStage(m_preUi, "PreUI");
+    }
+    return true;
+}
+
 // editor-core-separation-6 campaign, PHASE4 (Step 3.4) - discovers every
 // loaded IRenderFeatureModule_v2, snapshots its descriptor exactly once,
 // refuses (loudly) any module declaring an unwired stage
@@ -104,39 +204,8 @@ void RenderFeatureCompositor::OnPluginsLoaded(const std::vector<IPluginModule*>&
         }
     }
 
-    auto sortAndDetectCollisions = [](std::vector<Entry>& entries, const char* stageName) {
-        std::stable_sort(entries.begin(), entries.end(),
-            [](const Entry& a, const Entry& b) { return a.descriptor.priority < b.descriptor.priority; });
-
-        std::size_t i = 0;
-        while (i < entries.size()) {
-            std::size_t j = i;
-            while (j + 1 < entries.size() && entries[j + 1].descriptor.priority == entries[i].descriptor.priority) {
-                ++j;
-            }
-            if (j > i) {
-                // entries[i..j] all declared the identical priority within
-                // this stage - an ambiguous, but never-crashing, situation
-                // (PHASE0_MASTER_STRATEGY.md's own Locked Design Decision,
-                // mirroring the Proposal's Section 3.4 step 3).
-                for (std::size_t k = i; k < j; ++k) {
-                    GTE_LOG_WARNING("RenderFeatureCompositor",
-                        std::string(entries[k].descriptor.name) + " and " + entries[k + 1].descriptor.name
-                        + " both declared priority " + std::to_string(entries[k].descriptor.priority) + " in stage "
-                        + stageName + " - this is ambiguous; falling back to a stable, lexical name tie-break. "
-                        "Assign each plugin a distinct priority to remove this warning.");
-                }
-                std::stable_sort(entries.begin() + static_cast<std::ptrdiff_t>(i),
-                    entries.begin() + static_cast<std::ptrdiff_t>(j) + 1, [](const Entry& a, const Entry& b) {
-                        return std::strcmp(a.descriptor.name, b.descriptor.name) < 0;
-                    });
-            }
-            i = j + 1;
-        }
-    };
-
-    sortAndDetectCollisions(m_postComposite, "PostComposite");
-    sortAndDetectCollisions(m_preUi, "PreUI");
+    SortAndDetectCollisionsInStage(m_postComposite, "PostComposite");
+    SortAndDetectCollisionsInStage(m_preUi, "PreUI");
 
     // Populate the name pool for every surviving entry now, for BOTH known
     // views ("Game"/"Scene" - confirmed the only two RenderViewId::Named()
@@ -178,6 +247,7 @@ std::vector<RenderFeatureDebugEntry> RenderFeatureCompositor::DebugSnapshot() co
             debugEntry.stage = ToString(entry.descriptor.stage);
             debugEntry.priority = entry.descriptor.priority;
             debugEntry.blendMode = ToString(entry.descriptor.blendMode);
+            debugEntry.enabled = entry.enabledOverride;
             snapshot.push_back(std::move(debugEntry));
         }
     };
@@ -395,6 +465,14 @@ void RenderFeatureCompositor::ContributeRenderGraphPasses(
     combinedList.reserve(m_postComposite.size() + m_preUi.size());
     combinedList.insert(combinedList.end(), m_postComposite.begin(), m_postComposite.end());
     combinedList.insert(combinedList.end(), m_preUi.begin(), m_preUi.end());
+
+    // editor-core-separation-8 campaign, PHASE2 - a host-disabled plugin
+    // render feature is skipped entirely from this frame's compositing chain
+    // (never contributes a pass, never consumes a private/blend target this
+    // frame) - the entry itself is never removed from m_postComposite/m_preUi
+    // (DebugSnapshot()/GET /render_graph keeps reporting it, disabled).
+    combinedList.erase(std::remove_if(combinedList.begin(), combinedList.end(),
+        [](const Entry& entry) { return !entry.enabledOverride; }), combinedList.end());
     if (combinedList.empty()) {
         return;
     }
