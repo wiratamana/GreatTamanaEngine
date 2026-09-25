@@ -48,7 +48,16 @@ verification evidence).
   untouched) - the additive `_v2` render-feature ABI. Only `PostComposite`
   and `PreUI` stages are actually wired into the live render graph (see
   `task_manager/editor-core-separation-6/PHASE0_MASTER_STRATEGY.md`'s Locked
-  Design Decision #1).
+  Design Decision #1). **Re-confirmed accurate as of PHASE8 (campaign
+  closeout)** against the final, real, shipped shape of every one of these 3
+  files - field names/method signatures did not drift from this bullet's own
+  description during PHASES 4-6's real implementation work. Nothing else
+  crossed this ABI boundary in PHASES 2-7: `IPluginCapabilityOrchestrator`,
+  `LegacyRenderFeatureOrchestrator`, `EditorPanelCapabilityOrchestrator`,
+  `RenderFeatureCompositor`, and `PluginRenderPassBuilderAdapter_v2` all live
+  under `src/Core/Plugins/` (`gte_core`-internal), never under
+  `plugins/gte_plugin_abi/` - confirmed by direct re-read of every new file
+  those phases added before writing this note.
 
 ## Rules every type on this list must follow (Locked Design Decision #3)
 

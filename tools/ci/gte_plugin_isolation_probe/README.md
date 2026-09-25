@@ -23,12 +23,20 @@ editor-tier plugin (`demo_editor_panel.dll`, `IEditorPanelModule_v1`) sits
 there, loaded, fully inert - never crashing, never producing any visible
 effect, simply never asked for anything.
 
-editor-core-separation-4 campaign, PHASE5
-(`task_manager/editor-core-separation-4/PHASE5_MULTI_RENDER_FEATURE_PLUGIN_WARNING_AND_REGRESSION_LOCK.md`)
 added a SECOND `IRenderFeatureModule_v1` demo plugin (`demo_render_feature_second.dll`)
 so this probe now genuinely exercises "2+ plugins implementing the same
 capability" - it loads 4 demo plugins total (was 3), 2 of which implement
 `IRenderFeatureModule_v1` (was 1).
+
+`editor-core-separation-6` campaign, PHASE8
+(`task_manager/editor-core-separation-6/PHASE8_DOCS_FULL_REGRESSION_AND_CAMPAIGN_CLOSEOUT.md`)
+added the 2 new, PERMANENT `_v2` demo plugins from that campaign's own PHASE6
+(`demo_render_feature_v2.dll`, `demo_render_feature_v2_second.dll`) to the
+shared `plugins/` folder - this probe now loads **6** demo plugins total (was
+4), while the count of modules answering `IRenderFeatureModule_v1` stays
+**2** (unchanged - the 2 new plugins answer the ADDITIVE `IRenderFeatureModule_v2`
+capability string instead, which this probe deliberately never queries, mirroring
+its own "queries ONLY IRenderFeatureModule_v1" scope).
 
 ## How it works
 
@@ -38,9 +46,9 @@ with zero GPU/window dependency of its own):
 1. `PluginHost::LoadPlugins()` scans the shared `plugins/` folder (resolved
    relative to this exe's own directory via `GetModuleFileNameW`, mirroring
    `gte_plugin_abi_handshake_probe`'s own precedent) and loads every `.dll`
-   found there - all four demo plugins (editor-core-separation-4 campaign
-   PHASE5 added `demo_render_feature_second` - was three).
-2. Confirms `LoadedModuleCount() == 4` exactly (not merely `> 0`) - ruling out
+   found there - all six demo plugins (editor-core-separation-6 campaign
+   PHASE8 added the 2 new permanent `_v2` demo plugins - was four).
+2. Confirms `LoadedModuleCount() == 6` exactly (not merely `> 0`) - ruling out
    a false-positive pass caused by a folder-path mistake.
 3. Queries `IRenderFeatureModule_v1` on every loaded module, printing which
    ones implement it, and confirms exactly two do (`demo_render_feature` and

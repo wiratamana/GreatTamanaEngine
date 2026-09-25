@@ -187,12 +187,117 @@ one-time `GTE_LOG_WARNING` naming this exact risk whenever the host's own
 `sharedRuntimeLinkage` reads `0`, so it is visible (via `GET /get_logs`) rather
 than silently, permanently true.
 
-**Multiple `IRenderFeatureModule_v1` plugins (`editor-core-separation-4`
-campaign, PHASE5)**: multiple plugins may implement `IRenderFeatureModule_v1`;
-today, they all render into the same shared target, and only the
-last-registered plugin's output ends up visible — `Core::LoadPlugins()` logs a
-`GTE_LOG_WARNING` when more than one is detected. Per-plugin compositing is
-explicitly deferred, not yet designed.
+**Multiple `IRenderFeatureModule_v1` plugins — the LEGACY, still-supported
+`_v1` path (`editor-core-separation-4` campaign, PHASE5)**: multiple plugins
+may implement `IRenderFeatureModule_v1`; today, they all render into the same
+shared target, and only the last-registered plugin's output ends up visible —
+`Core::LoadPlugins()` logs a `GTE_LOG_WARNING` when more than one is detected.
+This "last write wins" behavior is a genuine, permanent, still-real limitation
+of `_v1` specifically — it is never fixed retroactively, since `_v1` itself is
+never touched, deprecated, or removed. **See "`_v2` Render-Feature System"
+immediately below for the real, additive fix** — a plugin that actually wants
+correct multi-plugin compositing implements `IRenderFeatureModule_v2` instead.
+
+## `_v2` Render-Feature System — Real Multi-Plugin Compositing
+
+`editor-core-separation-6` campaign (`task_manager/editor-core-separation-6/
+PHASE0_MASTER_STRATEGY.md`, `CAMPAIGN_COMPLETION_REPORT.md`) shipped a second,
+strictly ADDITIVE render-feature ABI surface — `_v1` above is never touched,
+deprecated, or removed; every existing `_v1` plugin/observable behavior stays
+byte-for-byte identical forever. A plugin implementing the new
+`IRenderFeatureModule_v2` (`plugins/gte_plugin_abi/IRenderFeatureModule.h`,
+queried via `IPluginModule::QueryCapability("IRenderFeatureModule_v2")`)
+declares a fixed-size POD descriptor exactly once, at load time —
+`GtePluginRenderFeatureDescriptor` (`RenderFeatureDescriptor.h`): a
+`stage` (`RenderFeatureStage`), a `priority` (author-declared, lower runs
+first within the same stage — never auto-assigned by the host), and a
+`blendMode` (`RenderFeatureBlendMode`) — and then draws every frame through
+`IPluginRenderPassBuilder_v2`'s exactly 3 fixed operations (`AddSolidFillPass`,
+`AddRadialVignettePass`, `AddColorGradePass`) — never raw Vulkan/`rg::` types,
+never plugin-supplied shader bytecode, mirroring `_v1`'s own
+`AddFullscreenClearPass`-style "small curated palette" discipline, just with
+more than one operation.
+
+The real fix this system delivers: `RenderFeatureCompositor`
+(`src/Core/Plugins/RenderFeatureCompositor.h/.cpp`, `gte_core`-internal, never
+plugin-ABI-facing) gives every loaded `_v2` plugin its OWN PRIVATE offscreen
+render target — never the shared handle `_v1` plugins all clobber — then
+composites them, in the author-declared priority order, through a real,
+host-owned GPU blend compute shader (`RenderFeatureBlend.comp`, one "uber"
+shader, blend mode selected via a push-constant integer): `Replace` (the
+`_v1`-equivalent hard overwrite, still legal for a `_v2` plugin that wants it),
+`AlphaOver`, `Additive`, `Multiply`, `ScreenSpaceMask`. Two (or more) `_v2`
+plugins therefore genuinely, correctly composite into one final image — proven
+with a real, live, HTTP-driven, mathematically-verified per-pixel comparison
+(two differently-colored, differently-shaped, differently-blended permanent
+demo plugins, `plugins/demo_render_feature_v2/` and
+`plugins/demo_render_feature_v2_second/`), not just "looks about right."
+
+**Only 2 of `RenderFeatureStage`'s 5 declared values are actually wired into
+the live render graph this campaign: `PostComposite` (today's existing single
+hook point) and `PreUI`.** `PreOpaque`/`PostOpaque`/`PostTransparent` are
+declared in the enum for ABI future-proofing only — a plugin that declares one
+of them is REFUSED at `RenderFeatureCompositor::OnPluginsLoaded()` time, with a
+loud `GTE_LOG_WARNING` naming the plugin and the unwired stage, and is simply
+never invoked (fail loud, never a silent mis-render). Wiring those 3 remaining
+stages would mean inserting new hook points into the LIVE opaque/transparent
+production render passes — a materially larger, riskier change explicitly
+deferred to a future follow-up campaign. `PostComposite` and `PreUI` are both
+realized at the SAME existing per-view offscreen hook point
+(`"PluginRenderFeatures"`), as two ORDERED, back-to-back sub-stages processed
+in sequence — every `PostComposite` entry composites first, then every `PreUI`
+entry composites on top of that result, all still inside the one existing,
+already-working hook (a deliberate, documented choice — see
+`task_manager/editor-core-separation-6/PHASE0_MASTER_STRATEGY.md`'s Locked
+Design Decision #2 for exactly why `PreUI` is NOT a new `RenderPassEvent` tier
+in this engine today).
+
+**`_v1` and `_v2` render-feature plugins are NOT unified into one
+deterministic composited order** — if a build has both an `_v1` and a `_v2`
+render-feature plugin loaded simultaneously (this repository's own permanent
+demo-plugin set does, deliberately, to exercise exactly this coexistence),
+whichever orchestrator's pass happens to execute later in the shared
+`RenderPassEvent::AfterEverything` tier wins the final pixel for that view — an
+accepted, explicitly out-of-scope edge case, never treated as a bug.
+
+Full convention: `task_manager/editor-core-separation-6/PHASE0_MASTER_STRATEGY.md`
+and each `PHASEn_COMPLETION_REPORT.md`/`CAMPAIGN_COMPLETION_REPORT.md` in that
+same folder.
+
+## `IPluginCapabilityOrchestrator` — Generic Plugin Capability Registry
+
+`src/Core/Plugins/IPluginCapabilityOrchestrator.h` (`editor-core-separation-6`
+campaign, PHASE2/PHASE3) is the general, reusable mechanism for "`Core` reacts
+to a newly-loaded plugin capability" — `Core::LoadPlugins()` no longer
+hand-codes a bespoke `for` loop per plugin capability kind; instead it loops a
+single `std::vector<std::unique_ptr<IPluginCapabilityOrchestrator>>`
+(`Core::RegisterBuiltinCapabilityOrchestrators()`), calling each
+orchestrator's `OnPluginsLoaded(const std::vector<IPluginModule*>&)` once, and
+(every frame, per active view) each orchestrator's `ContributeRenderGraphPasses(...)`
+(a virtual with a default no-op body — an orchestrator with nothing to
+contribute to the render graph, like the editor-panel one below, simply never
+overrides it). Three built-in implementations exist today:
+
+- **`LegacyRenderFeatureOrchestrator`** — the EXISTING `_v1` render-feature
+  loop (multi-plugin warning + shared-target rendering), migrated here
+  verbatim from its old home directly inside `Core::LoadPlugins()`/the
+  `"PluginRenderFeatures"` provider lambda, with zero observable behavior
+  change.
+- **`EditorPanelCapabilityOrchestrator`** — the EXISTING `IEditorPanelModule_v1`
+  discovery loop, migrated here verbatim from its old home directly inside
+  `EditorHost.cpp`'s constructor, again with zero observable behavior change
+  (this required a small, deliberate reordering of `EditorHost.cpp`'s own
+  constructor — the 10/11 `RegisterBuiltinPanelName(...)` calls now run BEFORE
+  `Core::LoadPlugins()`, not after, so `EditorPanelRegistry`'s own documented
+  "built-ins always list first" invariant still holds now that plugin-panel
+  registration happens automatically INSIDE `Core::LoadPlugins()`).
+- **`RenderFeatureCompositor`** — the new `_v2` compositor described above.
+
+A future capability kind (a third render-graph-contributing capability, or any
+other "Core reacts once a plugin loads" need) should add a FOURTH orchestrator
+here, never hand-edit `Core::LoadPlugins()`'s or
+`Core::RegisterOffscreenRenderPipelineProviders()`'s own bodies again — this
+registry is the whole point.
 
 **Failure-path regression coverage (`editor-core-separation-4` campaign,
 PHASE8)**: `PluginHost`'s 4 documented failure/skip paths (missing export,

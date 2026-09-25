@@ -10,11 +10,11 @@ cmake_minimum_required(VERSION 3.19)
 # builds ONE MORE target that ONLY exists in that configuration:
 # gte_plugin_isolation_probe - a tiny executable, linked against gte_core.a
 # ALONE (no gte_editor/SDL/ImGui at all), that loads EVERY .dll in the shared
-# plugins/ folder (all four demo plugins, as of editor-core-separation-4
-# campaign PHASE5, which added demo_render_feature_second - was three) via
-# the real, production gte::PluginHost class and mechanically proves "always
-# all-in" stays editor-clean in a genuinely Player-shaped process
-# (Milestone 3).
+# plugins/ folder (all six demo plugins, as of editor-core-separation-6
+# campaign PHASE8, which added the 2 new permanent _v2 demo plugins from that
+# campaign's own PHASE6 - was four) via the real, production gte::PluginHost
+# class and mechanically proves "always all-in" stays editor-clean in a
+# genuinely Player-shaped process (Milestone 3).
 project(GtePluginIsolationProbe LANGUAGES NONE)
 
 get_filename_component(GTE_REPO_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
@@ -32,7 +32,7 @@ add_custom_target(gte_plugin_isolation_probe ALL
     COMMAND "${CMAKE_COMMAND}"
             --build "${GTE_PLUGIN_ISOLATION_PROBE_INNER_BUILD_DIR}"
             --target gte_plugin_isolation_probe
-    COMMENT "Configuring + building gte_plugin_isolation_probe (+ all four demo plugin .dlls transitively) in ${GTE_PLUGIN_ISOLATION_PROBE_INNER_BUILD_DIR}"
+    COMMENT "Configuring + building gte_plugin_isolation_probe (+ all six demo plugin .dlls transitively) in ${GTE_PLUGIN_ISOLATION_PROBE_INNER_BUILD_DIR}"
     VERBATIM
     USES_TERMINAL
 )

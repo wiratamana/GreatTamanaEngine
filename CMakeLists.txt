@@ -1205,7 +1205,19 @@ if(GTE_CORE_STANDALONE_PROBE_ONLY)
     # (was 3) - needs all FOUR demo plugin .dlls (including the new
     # demo_render_feature_second) to genuinely exist in its own
     # <inner-build-dir>/plugins/ folder before it runs.
-    add_dependencies(gte_plugin_isolation_probe demo_hello_world demo_render_feature demo_editor_panel demo_render_feature_second)
+    # editor-core-separation-6 campaign, PHASE8
+    # (PHASE8_DOCS_FULL_REGRESSION_AND_CAMPAIGN_CLOSEOUT.md) - real, confirmed
+    # bug found during this phase's own probe re-run: this add_dependencies()
+    # list never gained the 2 new PERMANENT _v2 demo plugins PHASE6 added to
+    # the shared plugins/ folder, so `cmake --build ... --target
+    # gte_plugin_isolation_probe` (which only builds THIS target's own
+    # dependency closure, not every CMake target) never actually built
+    # demo_render_feature_v2/_second's own .dll into this probe's own inner
+    # <inner-build-dir>/plugins/ folder - main.cpp's own LoadedModuleCount()
+    # == 6 requirement (below) would have silently, permanently failed
+    # without this fix. Now requires all SIX demo plugin .dlls to genuinely
+    # exist before it runs.
+    add_dependencies(gte_plugin_isolation_probe demo_hello_world demo_render_feature demo_editor_panel demo_render_feature_second demo_render_feature_v2 demo_render_feature_v2_second)
 endif()
 
 # editor-core-separation-1 campaign, PHASE18

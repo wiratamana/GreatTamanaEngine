@@ -56,7 +56,7 @@ namespace {
 // literal Step 3.1 sketch (which used std::filesystem::current_path()) -
 // see this phase's own PHASE5_COMPLETION_REPORT.md for the full reasoning.
 //
-// Both this .exe and the four demo plugin .dll's are built by the SAME
+// Both this .exe and the six demo plugin .dll's are built by the SAME
 // nested, GTE_CORE_STANDALONE_PROBE_ONLY=ON inner configure - this .exe
 // lands directly in that inner build's own CMAKE_BINARY_DIR (no
 // RUNTIME_OUTPUT_DIRECTORY override, mirroring GreatTamanaEditor.exe's own
@@ -81,13 +81,14 @@ int main()
 
     // Explicitly rule out a false-positive pass caused by a folder-path
     // mistake (this phase's own Step 4 point 3 requires this exact check,
-    // not merely "> 0") - all FOUR demo plugins (demo_hello_world,
-    // demo_render_feature, demo_render_feature_second, demo_editor_panel)
-    // must genuinely load (editor-core-separation-4 campaign, PHASE5 -
-    // PHASE5_MULTI_RENDER_FEATURE_PLUGIN_WARNING_AND_REGRESSION_LOCK.md -
-    // added demo_render_feature_second, was 3 plugins, now 4).
-    if (host.LoadedModuleCount() != 4) {
-        std::fprintf(stderr, "FAIL: expected exactly 4 demo plugins to load, loaded %zu.\n", host.LoadedModuleCount());
+    // not merely "> 0") - all SIX demo plugins (demo_hello_world,
+    // demo_render_feature, demo_render_feature_second, demo_editor_panel,
+    // demo_render_feature_v2, demo_render_feature_v2_second) must genuinely
+    // load (editor-core-separation-6 campaign, PHASE8 -
+    // PHASE8_DOCS_FULL_REGRESSION_AND_CAMPAIGN_CLOSEOUT.md - added the 2 new
+    // permanent _v2 demo plugins from that campaign's own PHASE6, was 4).
+    if (host.LoadedModuleCount() != 6) {
+        std::fprintf(stderr, "FAIL: expected exactly 6 demo plugins to load, loaded %zu.\n", host.LoadedModuleCount());
         return 1;
     }
 
