@@ -1,0 +1,390 @@
+// Unit tests for editor-core-separation-7 campaign's PHASE2
+// (task_manager/editor-core-separation-7/PHASE2_RENDERGRAPH_METADATA_MODEL_AND_JSON.md)
+// - the new, pure, engine-free RenderGraphMetadata data model + BuildRenderGraphMetadata()
+// + its to_json() JSON shape. Entirely Tier 1 - no live RenderGraph/VkDevice involved
+// anywhere in this file. Mirrors RenderGraphSnapshotTests.cpp's own hand-fabrication
+// style, but goes one step further: since BuildRenderGraphMetadata() itself takes an
+// already-built RenderGraphSnapshot (never a CompiledGraph/CompiledGraphInput), every
+// fixture below constructs RenderGraphSnapshot/RenderGraphPassSnapshot/
+// RenderGraphResourceSnapshot values DIRECTLY, by hand - no RenderGraphBuilder, no
+// RenderGraphCompiler::Compile() call anywhere in this file.
+
+#include "Renderer/RenderGraph/RenderGraphMetadata.h"
+
+#include "Renderer/RenderGraph/RenderPassGroupRegistry.h"
+
+#include <gtest/gtest.h>
+
+namespace gte::rg {
+namespace {
+
+RenderGraphPassSnapshot MakeSurvivingPass(const char* name)
+{
+    RenderGraphPassSnapshot pass;
+    pass.name = name;
+    pass.isCulled = false;
+    return pass;
+}
+
+// --- Empty snapshots -----------------------------------------------------
+
+TEST(RenderGraphMetadataTest, EmptySnapshotsProduceEmptyMetadata)
+{
+    ResetPassGroupRegistryForTesting();
+
+    const RenderGraphSnapshot offscreen;
+    const RenderGraphSnapshot present;
+
+    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {}, {});
+
+    EXPECT_EQ(metadata.schemaVersion, 1u);
+    EXPECT_EQ(metadata.offscreenRegime.regimeName, "SynchronousImmediateReadback");
+    EXPECT_TRUE(metadata.offscreenRegime.passes.empty());
+    EXPECT_TRUE(metadata.offscreenRegime.resources.empty());
+    EXPECT_FALSE(metadata.offscreenRegime.timingSlotBudgetExhausted);
+
+    EXPECT_EQ(metadata.presentRegime.regimeName, "PipelinedDeferredReadback");
+    EXPECT_TRUE(metadata.presentRegime.passes.empty());
+    EXPECT_TRUE(metadata.presentRegime.resources.empty());
+    EXPECT_FALSE(metadata.presentRegime.timingSlotBudgetExhausted);
+
+    EXPECT_TRUE(metadata.gpuDrivenBatches.empty());
+    EXPECT_TRUE(metadata.renderFeatures.empty());
+}
+
+// --- tagGroupLabel resolution ---------------------------------------------
+
+TEST(RenderGraphMetadataTest, SurvivingPassWithRegisteredTagResolvesTagGroupLabel)
+{
+    ResetPassGroupRegistryForTesting();
+    RegisterPassGroupLabel(RenderPassTag{ 0x1 }, "Compute LUT");
+
+    RenderGraphPassSnapshot pass = MakeSurvivingPass("AtmosphereTransmittanceLutPass");
+    pass.tags = 0x1;
+    pass.readNames = { "Input" };
+    pass.readKinds = { ResourceKind::Texture };
+    pass.writeNames = { "Output" };
+    pass.writeKinds = { ResourceKind::Texture };
+
+    RenderGraphSnapshot offscreen;
+    offscreen.passesInExecutionOrder.push_back(pass);
+    const RenderGraphSnapshot present;
+
+    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {}, {});
+
+    ASSERT_EQ(metadata.offscreenRegime.passes.size(), 1u);
+    const RenderGraphPassMetadata& built = metadata.offscreenRegime.passes[0];
+    ASSERT_TRUE(built.tagGroupLabel.has_value());
+    EXPECT_EQ(*built.tagGroupLabel, "Compute LUT");
+
+    ASSERT_EQ(built.reads.size(), 1u);
+    EXPECT_EQ(built.reads[0].name, "Input");
+    EXPECT_EQ(built.reads[0].kind, "Texture");
+    ASSERT_EQ(built.writes.size(), 1u);
+    EXPECT_EQ(built.writes[0].name, "Output");
+    EXPECT_EQ(built.writes[0].kind, "Texture");
+
+    ResetPassGroupRegistryForTesting();
+}
+
+TEST(RenderGraphMetadataTest, PassWithNoRegisteredTagHasNulloptTagGroupLabel)
+{
+    ResetPassGroupRegistryForTesting();
+
+    RenderGraphPassSnapshot pass = MakeSurvivingPass("RenderOpaque");
+    pass.tags = 0; // no tags at all - the common case today.
+
+    RenderGraphSnapshot offscreen;
+    offscreen.passesInExecutionOrder.push_back(pass);
+    const RenderGraphSnapshot present;
+
+    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {}, {});
+
+    ASSERT_EQ(metadata.offscreenRegime.passes.size(), 1u);
+    EXPECT_FALSE(metadata.offscreenRegime.passes[0].tagGroupLabel.has_value());
+}
+
+TEST(RenderGraphMetadataTest, PassWithUnregisteredTagBitHasNulloptTagGroupLabel)
+{
+    ResetPassGroupRegistryForTesting();
+    RegisterPassGroupLabel(RenderPassTag{ 0x1 }, "Compute LUT");
+
+    RenderGraphPassSnapshot pass = MakeSurvivingPass("GpuSkinning");
+    pass.tags = 0x2; // a real bit, but nobody registered a label for it.
+
+    RenderGraphSnapshot offscreen;
+    offscreen.passesInExecutionOrder.push_back(pass);
+    const RenderGraphSnapshot present;
+
+    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {}, {});
+
+    ASSERT_EQ(metadata.offscreenRegime.passes.size(), 1u);
+    EXPECT_FALSE(metadata.offscreenRegime.passes[0].tagGroupLabel.has_value());
+
+    ResetPassGroupRegistryForTesting();
+}
+
+// --- Culled pass: still fully describable, stats/timing at their defaults --
+
+TEST(RenderGraphMetadataTest, CulledPassIsStillFullyDescribedWithZeroedStatsAndNATiming)
+{
+    ResetPassGroupRegistryForTesting();
+
+    RenderGraphPassSnapshot pass;
+    pass.name = "UnusedPass";
+    pass.isCulled = true;
+    pass.kind = PassKind::Compute;
+    pass.category = RenderPassCategory::Debug;
+    pass.drawKind = RenderPassDrawKind::Blit;
+    pass.viewScope = ViewScope::SceneView;
+    pass.renderPassEvent = RenderPassEvent::AfterTransparents;
+    pass.readNames = { "SomeInput" };
+    pass.readKinds = { ResourceKind::Buffer };
+    pass.writeNames = { "DeadEnd" };
+    pass.writeKinds = { ResourceKind::VolumeTexture };
+    // pass.stats left at its default (empty DrawStats, Absent GpuTimingSample)
+    // - exactly what BuildRenderGraphSnapshot() itself always leaves a culled
+    // pass with.
+
+    RenderGraphSnapshot offscreen;
+    offscreen.passesInExecutionOrder.push_back(pass);
+    const RenderGraphSnapshot present;
+
+    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {}, {});
+
+    ASSERT_EQ(metadata.offscreenRegime.passes.size(), 1u);
+    const RenderGraphPassMetadata& built = metadata.offscreenRegime.passes[0];
+
+    EXPECT_EQ(built.name, "UnusedPass");
+    EXPECT_TRUE(built.isCulled);
+    EXPECT_EQ(built.kind, "Compute");
+    EXPECT_EQ(built.category, "Debug");
+    EXPECT_EQ(built.drawKind, "Blit");
+    EXPECT_EQ(built.viewScope, "SceneView");
+    EXPECT_EQ(built.renderPassEvent, "AfterTransparents");
+
+    ASSERT_EQ(built.reads.size(), 1u);
+    EXPECT_EQ(built.reads[0].name, "SomeInput");
+    EXPECT_EQ(built.reads[0].kind, "Buffer");
+    ASSERT_EQ(built.writes.size(), 1u);
+    EXPECT_EQ(built.writes[0].name, "DeadEnd");
+    EXPECT_EQ(built.writes[0].kind, "VolumeTexture");
+
+    EXPECT_EQ(built.drawCallCount, 0u);
+    EXPECT_EQ(built.triangleCount, 0u);
+    EXPECT_EQ(built.gpuTimingText, "N/A");
+    EXPECT_FALSE(built.gpuTimingMilliseconds.has_value());
+}
+
+// --- Resource first/last-use pass NAME resolution --------------------------
+
+TEST(RenderGraphMetadataTest, ResourceWithValidUseIndicesResolvesBothPassNames)
+{
+    ResetPassGroupRegistryForTesting();
+
+    RenderGraphSnapshot offscreen;
+    offscreen.passesInExecutionOrder.push_back(MakeSurvivingPass("WritePass"));
+    offscreen.passesInExecutionOrder.push_back(MakeSurvivingPass("ReadPass"));
+
+    RenderGraphResourceSnapshot resource;
+    resource.name = "Scratch";
+    resource.isImported = false;
+    resource.firstUsePassIndex = 0;
+    resource.lastUsePassIndex = 1;
+    offscreen.resources.push_back(resource);
+
+    const RenderGraphSnapshot present;
+
+    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {}, {});
+
+    ASSERT_EQ(metadata.offscreenRegime.resources.size(), 1u);
+    const RenderGraphResourceMetadata& built = metadata.offscreenRegime.resources[0];
+    EXPECT_EQ(built.name, "Scratch");
+    EXPECT_FALSE(built.isImported);
+    EXPECT_EQ(built.firstUsePassIndex, 0);
+    EXPECT_EQ(built.lastUsePassIndex, 1);
+    ASSERT_TRUE(built.firstUsePassName.has_value());
+    EXPECT_EQ(*built.firstUsePassName, "WritePass");
+    ASSERT_TRUE(built.lastUsePassName.has_value());
+    EXPECT_EQ(*built.lastUsePassName, "ReadPass");
+}
+
+TEST(RenderGraphMetadataTest, NeverUsedResourceHasNulloptPassNamesForNegativeIndices)
+{
+    ResetPassGroupRegistryForTesting();
+
+    RenderGraphSnapshot offscreen;
+    offscreen.passesInExecutionOrder.push_back(MakeSurvivingPass("SomePass"));
+
+    RenderGraphResourceSnapshot resource;
+    resource.name = "NeverUsed";
+    resource.isImported = true;
+    resource.firstUsePassIndex = -1;
+    resource.lastUsePassIndex = -1;
+    offscreen.resources.push_back(resource);
+
+    const RenderGraphSnapshot present;
+
+    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {}, {});
+
+    ASSERT_EQ(metadata.offscreenRegime.resources.size(), 1u);
+    const RenderGraphResourceMetadata& built = metadata.offscreenRegime.resources[0];
+    EXPECT_EQ(built.name, "NeverUsed");
+    EXPECT_TRUE(built.isImported);
+    EXPECT_EQ(built.firstUsePassIndex, -1);
+    EXPECT_EQ(built.lastUsePassIndex, -1);
+    EXPECT_FALSE(built.firstUsePassName.has_value());
+    EXPECT_FALSE(built.lastUsePassName.has_value());
+}
+
+// --- GpuTimingSample::Status::Present carries a real numeric value too -----
+
+TEST(RenderGraphMetadataTest, PresentGpuTimingProducesMatchingTextAndNumericMilliseconds)
+{
+    ResetPassGroupRegistryForTesting();
+
+    RenderGraphPassSnapshot pass = MakeSurvivingPass("TimedPass");
+    pass.stats.timing.status = GpuTimingSample::Status::Present;
+    pass.stats.timing.milliseconds = 3.14;
+    pass.stats.drawStats.drawCallCount = 7;
+    pass.stats.drawStats.triangleCount = 42;
+
+    RenderGraphSnapshot offscreen;
+    offscreen.passesInExecutionOrder.push_back(pass);
+    const RenderGraphSnapshot present;
+
+    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {}, {});
+
+    ASSERT_EQ(metadata.offscreenRegime.passes.size(), 1u);
+    const RenderGraphPassMetadata& built = metadata.offscreenRegime.passes[0];
+    EXPECT_EQ(built.drawCallCount, 7u);
+    EXPECT_EQ(built.triangleCount, 42u);
+    EXPECT_EQ(built.gpuTimingText, "3.14 ms");
+    ASSERT_TRUE(built.gpuTimingMilliseconds.has_value());
+    EXPECT_DOUBLE_EQ(*built.gpuTimingMilliseconds, 3.14);
+}
+
+// --- timingSlotBudgetExhausted passes straight through ----------------------
+
+TEST(RenderGraphMetadataTest, TimingSlotBudgetExhaustedIsCopiedThroughPerRegime)
+{
+    ResetPassGroupRegistryForTesting();
+
+    RenderGraphSnapshot offscreen;
+    offscreen.timingSlotBudgetExhausted = true;
+    RenderGraphSnapshot present;
+    present.timingSlotBudgetExhausted = false;
+
+    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {}, {});
+
+    EXPECT_TRUE(metadata.offscreenRegime.timingSlotBudgetExhausted);
+    EXPECT_FALSE(metadata.presentRegime.timingSlotBudgetExhausted);
+}
+
+// --- GpuDrivenBatchDebugInfo / RenderFeatureDebugEntry are reused directly --
+
+TEST(RenderGraphMetadataTest, GpuDrivenBatchesAndRenderFeaturesAreCopiedThroughUnchanged)
+{
+    ResetPassGroupRegistryForTesting();
+
+    GpuDrivenBatchDebugInfo batch;
+    batch.batchName = "GpuDrivenBatch0";
+    batch.instanceCount = 10;
+    batch.visibleCount = 6u;
+
+    RenderFeatureDebugEntry feature;
+    feature.name = "Bloom";
+    feature.stage = "PostComposite";
+    feature.priority = 5;
+    feature.blendMode = "AlphaOver";
+
+    const RenderGraphSnapshot offscreen;
+    const RenderGraphSnapshot present;
+
+    const RenderGraphMetadata metadata =
+        BuildRenderGraphMetadata(offscreen, present, { batch }, { feature });
+
+    ASSERT_EQ(metadata.gpuDrivenBatches.size(), 1u);
+    EXPECT_EQ(metadata.gpuDrivenBatches[0].batchName, "GpuDrivenBatch0");
+    EXPECT_EQ(metadata.gpuDrivenBatches[0].instanceCount, 10u);
+    ASSERT_TRUE(metadata.gpuDrivenBatches[0].visibleCount.has_value());
+    EXPECT_EQ(*metadata.gpuDrivenBatches[0].visibleCount, 6u);
+
+    ASSERT_EQ(metadata.renderFeatures.size(), 1u);
+    EXPECT_EQ(metadata.renderFeatures[0].name, "Bloom");
+    EXPECT_EQ(metadata.renderFeatures[0].stage, "PostComposite");
+    EXPECT_EQ(metadata.renderFeatures[0].priority, 5);
+    EXPECT_EQ(metadata.renderFeatures[0].blendMode, "AlphaOver");
+}
+
+// --- to_json() round-trip: the actual, real, external JSON contract --------
+
+TEST(RenderGraphMetadataTest, ToJsonProducesExpectedTopLevelShapeAndNullHandling)
+{
+    ResetPassGroupRegistryForTesting();
+
+    RenderGraphPassSnapshot pass = MakeSurvivingPass("RenderOpaque");
+    pass.readNames = { "Depth" };
+    pass.readKinds = { ResourceKind::Texture };
+    pass.writeNames = { "Color" };
+    pass.writeKinds = { ResourceKind::Texture };
+    pass.stats.drawStats.drawCallCount = 2;
+    pass.stats.drawStats.triangleCount = 20;
+    // tags == 0, no registered label -> tagGroupLabel stays nullopt -> JSON null.
+    // stats.timing stays at its default (Absent) -> gpu_timing_milliseconds JSON null.
+
+    RenderGraphSnapshot offscreen;
+    offscreen.passesInExecutionOrder.push_back(pass);
+    const RenderGraphSnapshot present;
+
+    GpuDrivenBatchDebugInfo batch;
+    batch.batchName = "Batch0";
+    batch.instanceCount = 4;
+    // visibleCount left at std::nullopt -> JSON null.
+
+    RenderFeatureDebugEntry feature;
+    feature.name = "Vignette";
+    feature.stage = "PreUI";
+    feature.priority = 1;
+    feature.blendMode = "Replace";
+
+    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, { batch }, { feature });
+
+    nlohmann::json j = metadata;
+
+    EXPECT_EQ(j["schema_version"].get<std::uint32_t>(), 1u);
+
+    ASSERT_TRUE(j.contains("offscreen_regime"));
+    EXPECT_EQ(j["offscreen_regime"]["regime_name"].get<std::string>(), "SynchronousImmediateReadback");
+    ASSERT_EQ(j["offscreen_regime"]["passes"].size(), 1u);
+    const nlohmann::json& jsonPass = j["offscreen_regime"]["passes"][0];
+    EXPECT_EQ(jsonPass["name"].get<std::string>(), "RenderOpaque");
+    EXPECT_FALSE(jsonPass["is_culled"].get<bool>());
+    EXPECT_TRUE(jsonPass["tag_group_label"].is_null());
+    EXPECT_TRUE(jsonPass["gpu_timing_milliseconds"].is_null());
+    EXPECT_EQ(jsonPass["gpu_timing_text"].get<std::string>(), "N/A");
+    EXPECT_EQ(jsonPass["draw_call_count"].get<std::uint32_t>(), 2u);
+    EXPECT_EQ(jsonPass["triangle_count"].get<std::uint32_t>(), 20u);
+    ASSERT_EQ(jsonPass["reads"].size(), 1u);
+    EXPECT_EQ(jsonPass["reads"][0]["name"].get<std::string>(), "Depth");
+    EXPECT_EQ(jsonPass["reads"][0]["kind"].get<std::string>(), "Texture");
+    ASSERT_EQ(jsonPass["writes"].size(), 1u);
+    EXPECT_EQ(jsonPass["writes"][0]["name"].get<std::string>(), "Color");
+
+    EXPECT_EQ(j["present_regime"]["regime_name"].get<std::string>(), "PipelinedDeferredReadback");
+    EXPECT_TRUE(j["present_regime"]["passes"].empty());
+
+    ASSERT_EQ(j["gpu_driven_batches"].size(), 1u);
+    EXPECT_EQ(j["gpu_driven_batches"][0]["batch_name"].get<std::string>(), "Batch0");
+    EXPECT_EQ(j["gpu_driven_batches"][0]["instance_count"].get<std::uint32_t>(), 4u);
+    EXPECT_TRUE(j["gpu_driven_batches"][0]["visible_count"].is_null());
+
+    ASSERT_EQ(j["render_features"].size(), 1u);
+    EXPECT_EQ(j["render_features"][0]["name"].get<std::string>(), "Vignette");
+    EXPECT_EQ(j["render_features"][0]["stage"].get<std::string>(), "PreUI");
+    EXPECT_EQ(j["render_features"][0]["priority"].get<std::int32_t>(), 1);
+    EXPECT_EQ(j["render_features"][0]["blend_mode"].get<std::string>(), "Replace");
+}
+
+} // namespace
+} // namespace gte::rg

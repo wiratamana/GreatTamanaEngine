@@ -674,6 +674,8 @@ add_library(gte_core STATIC
     src/Renderer/RenderGraph/RenderPipeline.cpp
     src/Renderer/RenderGraph/RenderPassGroupRegistry.h
     src/Renderer/RenderGraph/RenderPassGroupRegistry.cpp
+    src/Renderer/RenderGraph/RenderGraphMetadata.h
+    src/Renderer/RenderGraph/RenderGraphMetadata.cpp
     src/Game/Instantiation/EntityInstantiator.cpp
     src/Game/Instantiation/EntityInstantiator.h
     src/Game/Instantiation/MeshVertexPacking.cpp
