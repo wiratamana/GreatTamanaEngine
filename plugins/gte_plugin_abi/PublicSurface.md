@@ -40,6 +40,15 @@ verification evidence).
   (PluginHost only ever calls the three fixed extern "C" exports and
   IPluginModule's own two virtual methods, regardless of which flavor a given
   plugin .dll used to produce them).
+- editor-core-separation-6 campaign, PHASE1: `RenderFeatureDescriptor.h`
+  (`RenderFeatureStage`, `RenderFeatureBlendMode`,
+  `GtePluginRenderFeatureDescriptor`, `MakeRenderFeatureDescriptor()`),
+  `IPluginRenderPassBuilder_v2.h`, and `IRenderFeatureModule_v2` (appended to
+  the existing `IRenderFeatureModule.h`, `IRenderFeatureModule_v1` completely
+  untouched) - the additive `_v2` render-feature ABI. Only `PostComposite`
+  and `PreUI` stages are actually wired into the live render graph (see
+  `task_manager/editor-core-separation-6/PHASE0_MASTER_STRATEGY.md`'s Locked
+  Design Decision #1).
 
 ## Rules every type on this list must follow (Locked Design Decision #3)
 

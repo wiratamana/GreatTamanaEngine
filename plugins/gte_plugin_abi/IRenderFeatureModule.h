@@ -1,5 +1,7 @@
 #pragma once
 
+#include "RenderFeatureDescriptor.h"
+
 // editor-core-separation-3 campaign, PHASE3
 // (PHASE3_RUNTIME_RENDER_FEATURE_CAPABILITY.md) - maps to the source design
 // doc's Milestone 1: the capability a plugin implements to contribute
@@ -27,5 +29,35 @@ public:
 };
 
 inline constexpr const char* kIRenderFeatureModule_v1_Name = "IRenderFeatureModule_v1";
+
+class IPluginRenderPassBuilder_v2;
+
+// editor-core-separation-6 campaign, PHASE1
+// (PHASE1_RENDER_FEATURE_ABI_V2_FOUNDATION.md) - ADDITIVE new interface,
+// _v1 (above) completely untouched. See RenderFeatureDescriptor.h and
+// IPluginRenderPassBuilder_v2.h.
+class IRenderFeatureModule_v2 {
+public:
+    virtual ~IRenderFeatureModule_v2() = default;
+
+    // Called exactly once, right after this plugin loads (RenderFeatureCompositor::
+    // OnPluginsLoaded(), PHASE4) - the returned descriptor is snapshotted and
+    // reused for this plugin's entire loaded lifetime; this method is never
+    // called again afterward (mirrors the Proposal's own Section 3.4 step 1).
+    virtual GtePluginRenderFeatureDescriptor GetRenderFeatureDescriptor() const = 0;
+
+    // Called once per frame, per active view (Game View and/or Scene View),
+    // ONLY while this plugin's own declared stage is one RenderFeatureCompositor
+    // actually processes this frame - mirrors IRenderFeatureModule_v1::
+    // AddRenderGraphPasses()'s own "a plugin does not need to know Game
+    // View/Scene View exist as a distinct concept" contract exactly.
+    // `builder` targets THIS PLUGIN'S OWN PRIVATE offscreen target for this
+    // call - never a target shared with any other loaded plugin (PHASE0_
+    // MASTER_STRATEGY.md Locked Design Decision, the single most important
+    // structural difference vs. _v1).
+    virtual void AddRenderGraphPasses(IPluginRenderPassBuilder_v2& builder) = 0;
+};
+
+inline constexpr const char* kIRenderFeatureModule_v2_Name = "IRenderFeatureModule_v2";
 
 } // namespace gte
