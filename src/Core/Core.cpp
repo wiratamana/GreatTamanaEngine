@@ -45,6 +45,11 @@
 // generalizes beyond render features (a verbatim relocation of
 // EditorHost.cpp's own former inline IEditorPanelModule_v1 discovery loop).
 #include "Plugins/EditorPanelCapabilityOrchestrator.h"
+// editor-core-separation-6 campaign, PHASE4
+// (PHASE4_RENDER_FEATURE_COMPOSITOR_CORE_AND_ORDERING.md) - the third real
+// IPluginCapabilityOrchestrator implementation, the real `_v2` render-feature
+// compositing pipeline (PHASE0_MASTER_STRATEGY.md's whole reason to exist).
+#include "Plugins/RenderFeatureCompositor.h"
 
 #include <cassert>
 #include <cstdint>
@@ -251,6 +256,13 @@ void Core::RegisterBuiltinCapabilityOrchestrators()
     // generalizes beyond render features. See EditorHost.cpp's own
     // constructor for the matching reordering fix this migration required.
     m_capabilityOrchestrators.push_back(std::make_unique<EditorPanelCapabilityOrchestrator>());
+    // editor-core-separation-6 campaign, PHASE4
+    // (PHASE4_RENDER_FEATURE_COMPOSITOR_CORE_AND_ORDERING.md) - the third real
+    // IPluginCapabilityOrchestrator implementation, the real `_v2`
+    // render-feature compositing pipeline - reuses the SAME m_renderer
+    // member AddAtmosphereCompositePass()/every other real pass in this file
+    // already reads (never a second, duplicate Renderer instance).
+    m_capabilityOrchestrators.push_back(std::make_unique<RenderFeatureCompositor>(*this, m_renderer));
 }
 
 // editor-core-separation-3 campaign, PHASE2
@@ -308,8 +320,22 @@ const RenderPassViewData* Core::FindViewData(rg::RenderViewId view) const noexce
 // `.extent`). Keeps kGameCompositedOutputKey/kSceneCompositedOutputKey
 // exactly where they already are (below) - no risk of a duplicate/
 // out-of-sync copy of those two rg::RenderPassId constants.
+//
+// editor-core-separation-6 campaign, PHASE4
+// (PHASE4_RENDER_FEATURE_COMPOSITOR_CORE_AND_ORDERING.md) - gained a real
+// `.sampler` resolution step (see PluginRenderFeatureTargetInfo::sampler's
+// own doc comment, Core.h, for why this method is no longer `const`).
+// `compositedTexture` resolves the SAME persistent RenderTexture
+// "AtmosphereComposite" (above) just registered `composited` under this
+// exact frame - `AtmosphereLutRenderer::CompositedOutput()` looks it up by
+// the SAME literal name ("GameViewComposited"/"SceneViewComposited")
+// "AtmosphereComposite" passed to `AddAtmosphereCompositePass()`'s own
+// `outputTextureName` parameter. Falls back to `viewData->renderTexture`'s
+// own sampler (the raw, pre-composite view target) in the same defensive
+// case `.target` itself already falls back to `viewData->colorTarget` -
+// see this method's own pre-existing caveat about that fallback case above.
 std::optional<Core::PluginRenderFeatureTargetInfo> Core::FindPluginRenderFeatureTarget(
-    const rg::RenderPassFrameContext& frame) const
+    const rg::RenderPassFrameContext& frame)
 {
     const RenderPassViewData* viewData = FindViewData(frame.currentView);
     if (viewData == nullptr) {
@@ -317,11 +343,22 @@ std::optional<Core::PluginRenderFeatureTargetInfo> Core::FindPluginRenderFeature
     }
     const bool isGameView = (frame.currentView == rg::RenderViewId::Named("Game"));
     const rg::RenderPassId compositedKey = isGameView ? kGameCompositedOutputKey : kSceneCompositedOutputKey;
+    const std::optional<rg::TextureHandle> composited = frame.blackboard.Fetch<rg::TextureHandle>(compositedKey);
+
     PluginRenderFeatureTargetInfo info;
-    info.target = frame.blackboard.Fetch<rg::TextureHandle>(compositedKey).value_or(viewData->colorTarget);
+    info.target = composited.value_or(viewData->colorTarget);
     info.extent = viewData->renderTexture != nullptr ? viewData->renderTexture->Extent() : VkExtent2D{};
+
+    RenderTexture* compositedTexture = composited.has_value()
+        ? m_atmosphereLutRenderer.CompositedOutput(isGameView ? "GameViewComposited" : "SceneViewComposited")
+        : nullptr;
+    info.sampler = compositedTexture != nullptr
+        ? compositedTexture->Sampler()
+        : (viewData->renderTexture != nullptr ? viewData->renderTexture->Sampler() : VK_NULL_HANDLE);
+
     return info;
 }
+
 
 // render-pass-3 campaign, PHASE2/PHASE3 - registers every remaining
 // production pass onto m_offscreenRenderPipeline. Relocated verbatim from

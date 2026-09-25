@@ -282,6 +282,16 @@ public:
     struct PluginRenderFeatureTargetInfo {
         rg::TextureHandle target;
         VkExtent2D extent{};
+        // editor-core-separation-6 campaign, PHASE4
+        // (PHASE4_RENDER_FEATURE_COMPOSITOR_CORE_AND_ORDERING.md) -
+        // RenderFeatureCompositor (unlike LegacyRenderFeatureOrchestrator,
+        // which never reads this field) needs a REAL VkSampler for `target`
+        // to seed its own blend chain by sampling the view's CURRENT
+        // composited image - an imported TextureHandle's own
+        // PassContext::resolveTexture() never carries a sampler (see
+        // RenderGraph.cpp). See FindPluginRenderFeatureTarget()'s own
+        // updated doc comment (Core.cpp) for exactly how this is resolved.
+        VkSampler sampler = VK_NULL_HANDLE;
     };
 
     // Returns std::nullopt when `frame.currentView` has no known
@@ -290,8 +300,21 @@ public:
     // Calls the private FindViewData() internally - callers outside Core.cpp
     // never need FindViewData() directly, and never need a
     // `friend class LegacyRenderFeatureOrchestrator;` declaration either.
+    //
+    // editor-core-separation-6 campaign, PHASE4 - NOT `const` (a real,
+    // confirmed adjustment from PHASE2's own original signature): resolving
+    // `.sampler` above needs AtmosphereLutRenderer::CompositedOutput(),
+    // which is itself a non-const method (it returns a non-const
+    // RenderTexture*, matching every other AtmosphereLutRenderer accessor -
+    // see that class's own header) - calling it from a `const Core*` would
+    // require either a `mutable` AtmosphereLutRenderer member or a parallel
+    // const overload on AtmosphereLutRenderer itself, both a larger,
+    // less-honest change than simply dropping `const` here. Confirmed via
+    // search_in_dir: the only real call site (LegacyRenderFeatureOrchestrator)
+    // already holds a non-const `Core&`, so this is a safe, zero-impact
+    // widening.
     std::optional<PluginRenderFeatureTargetInfo> FindPluginRenderFeatureTarget(
-        const rg::RenderPassFrameContext& frame) const;
+        const rg::RenderPassFrameContext& frame);
 
 private:
     // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),

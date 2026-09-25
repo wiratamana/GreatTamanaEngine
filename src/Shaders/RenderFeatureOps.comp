@@ -1,0 +1,77 @@
+#version 450
+
+// editor-core-separation-6 campaign, PHASE4
+// (PHASE4_RENDER_FEATURE_COMPOSITOR_CORE_AND_ORDERING.md) - the 3 fixed
+// IPluginRenderPassBuilder_v2 drawing operations (RenderFeatureDescriptor.h
+// / IPluginRenderPassBuilder_v2.h, PHASE1), each ALWAYS writing a value at
+// EVERY pixel of this plugin's own PRIVATE target (never a partial-coverage
+// write - no separate "clear to transparent first" pass is needed, see
+// PHASE1's own IPluginRenderPassBuilder_v2.h doc comment).
+//
+// opCode 0 = Solid Fill: constant color at every pixel.
+// opCode 1 = Radial Vignette: normalized center/inner/outer radius falloff;
+//            alpha naturally reaches 0 outside outerRadius.
+// opCode 2 = Color Grade: brightness/contrast/saturation/tint applied to
+//            whatever is ALREADY in this plugin's own private target before
+//            this dispatch (seeded fully transparent/black - a color grade
+//            with nothing underneath it is a fixed, well-defined neutral
+//            gray-ish result; a _v2 plugin wanting a REAL grade-of-the-
+//            scene effect combines this with AddSolidFillPass in the same
+//            AddRenderGraphPasses() call, in that order, since ops within
+//            one plugin's own private target compose top-to-bottom in
+//            call order - document this plainly for plugin authors, PHASE1's
+//            own IPluginRenderPassBuilder_v2.h doc comment references this).
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(push_constant) uniform PushConstants {
+    // .x = opCode (as a float, cast to int in-shader - keeps ONE uniform
+    // push-constant block shape for all 3 ops, matching this campaign's
+    // "one uber shader" decision, PHASE0_MASTER_STRATEGY.md).
+    vec4 opCodeAndPad;
+    vec4 colorRgba;           // solid fill color / vignette color / tint color
+    vec4 centerAndRadius;     // vignette: centerX, centerY, innerRadius, outerRadius
+    vec4 gradeParams;         // color grade: brightness, contrast, saturation, tintStrength
+} pc;
+
+layout(binding = 0, rgba8) uniform image2D privateTarget;
+
+vec3 ApplyColorGrade(vec3 color, float brightness, float contrast, float saturation, vec3 tint, float tintStrength)
+{
+    vec3 graded = color * brightness;
+    graded = (graded - 0.5) * contrast + 0.5;
+    float luma = dot(graded, vec3(0.2126, 0.7152, 0.0722));
+    graded = mix(vec3(luma), graded, saturation);
+    graded = mix(graded, tint, tintStrength);
+    return graded;
+}
+
+void main()
+{
+    ivec2 size = imageSize(privateTarget);
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    if (texel.x >= size.x || texel.y >= size.y) {
+        return;
+    }
+
+    int opCode = int(pc.opCodeAndPad.x);
+    vec2 uv = (vec2(texel) + vec2(0.5)) / vec2(size);
+
+    if (opCode == 0) {
+        imageStore(privateTarget, texel, pc.colorRgba);
+    } else if (opCode == 1) {
+        vec2 aspectCorrectedUv = uv;
+        aspectCorrectedUv.x *= float(size.x) / float(size.y);
+        vec2 aspectCorrectedCenter = pc.centerAndRadius.xy;
+        aspectCorrectedCenter.x *= float(size.x) / float(size.y);
+        float dist = distance(aspectCorrectedUv, aspectCorrectedCenter);
+        float innerR = pc.centerAndRadius.z;
+        float outerR = pc.centerAndRadius.w;
+        float falloff = 1.0 - clamp((dist - innerR) / max(outerR - innerR, 1e-5), 0.0, 1.0);
+        imageStore(privateTarget, texel, vec4(pc.colorRgba.rgb, pc.colorRgba.a * falloff));
+    } else {
+        vec4 existing = imageLoad(privateTarget, texel);
+        vec3 graded = ApplyColorGrade(existing.rgb, pc.gradeParams.x, pc.gradeParams.y, pc.gradeParams.z,
+            pc.colorRgba.rgb, pc.gradeParams.w);
+        imageStore(privateTarget, texel, vec4(graded, existing.a));
+    }
+}
