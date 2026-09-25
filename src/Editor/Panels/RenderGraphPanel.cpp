@@ -251,7 +251,9 @@ void BuildPluginRenderFeaturesSection(const std::vector<RenderFeatureDebugEntry>
 
 void RenderGraphPanel::Build(EditorContext& /*ctx*/, const rg::RenderGraph& renderGraph,
     const std::vector<GpuDrivenBatchDebugInfo>& gpuDrivenBatchDebugInfo,
-    const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries)
+    const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries,
+    rg::RenderPassToggleRegistry& /*renderPassToggleRegistry*/, // editor-core-separation-8, PHASE3: signature-only - PHASE4 wires real UI.
+    RenderFeatureCompositor* /*renderFeatureCompositor*/) // editor-core-separation-8, PHASE3: signature-only - PHASE4 wires real UI.
 {
     ImGui::Begin("Render Graph");
 

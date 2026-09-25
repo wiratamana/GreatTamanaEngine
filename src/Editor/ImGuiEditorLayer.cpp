@@ -509,7 +509,9 @@ public:
     void BuildUI(Game& game, Renderer& renderer, const rg::RenderGraph& renderGraph,
         AtmosphereSettings& atmosphereSettings, AtmosphereLutRenderer& atmosphereLutRenderer,
         const std::vector<GpuDrivenBatchDebugInfo>& gpuDrivenBatchDebugInfo,
-        const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries) override
+        const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries,
+        rg::RenderPassToggleRegistry& renderPassToggleRegistry,
+        RenderFeatureCompositor* renderFeatureCompositor) override
     {
         ImGui::SetCurrentContext(m_context);
 
@@ -607,7 +609,8 @@ public:
         BuildGamePanel(m_ctx);
         BuildMemoryPanel(m_ctx, renderer);
         m_profilerPanel.Build(m_ctx);
-        m_renderGraphPanel.Build(m_ctx, renderGraph, gpuDrivenBatchDebugInfo, renderFeatureEntries);
+        m_renderGraphPanel.Build(m_ctx, renderGraph, gpuDrivenBatchDebugInfo, renderFeatureEntries,
+            renderPassToggleRegistry, renderFeatureCompositor);
         // Atmosphere Scattering + Aerial Perspective campaign, Phase 8
         // (ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md) - a small,
         // stateless free-function panel (mirrors BuildMemoryPanel()'s own
@@ -894,6 +897,13 @@ public:
     // *FromCommand()/RequestOpenWindow()/BuildStateSnapshotView() method.
     void FrameDebuggerOpenWindow() override { m_frameDebuggerPanel.RequestOpenWindow(m_ctx); }
     void FrameDebuggerSetEnabled(bool enabled) override { m_frameDebuggerPanel.SetEnabledFromCommand(m_ctx, enabled); }
+
+    // editor-core-separation-8 campaign, PHASE3 - see EditorLayer.h's own
+    // doc comments for the full contract; both simply flip the matching
+    // EditorContext bool directly, exactly like ScenePanel.cpp's own two
+    // checkboxes already do.
+    void SetShowBlurredSceneOutput(bool enabled) override { m_ctx.showBlurredSceneOutput = enabled; }
+    void SetShowGBufferValidationOutput(bool enabled) override { m_ctx.showGBufferValidationOutput = enabled; }
     bool FrameDebuggerCaptureNow() override { return m_frameDebuggerPanel.CaptureNowFromCommand(); }
     void FrameDebuggerSelectEvent(int index) override { m_frameDebuggerPanel.SelectEventFromCommand(index); }
     bool FrameDebuggerSetChannel(const std::string& channel) override

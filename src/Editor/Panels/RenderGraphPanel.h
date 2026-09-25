@@ -2,6 +2,11 @@
 
 #include "../../Core/Plugins/RenderFeatureDebugEntry.h"
 #include "../../Renderer/RenderGraph/RenderGraphMetadata.h"
+// editor-core-separation-8 campaign, PHASE3 - a small, plain, dependency-free
+// gte_core header (a sibling of RenderGraphMetadata.h/RenderPipeline.h) -
+// direct #include is fine here, mirroring RenderGraphMetadata.h's own
+// precedent immediately above exactly.
+#include "../../Renderer/RenderGraph/RenderPassToggleRegistry.h"
 #include "../EditorLayer.h"
 
 #include <vector>
@@ -9,6 +14,13 @@
 namespace gte {
 
 struct EditorContext;
+
+// editor-core-separation-8 campaign, PHASE2/PHASE3 - forward-declared only,
+// mirrors EditorLayer.h's own forward-declare-only precedent exactly (the
+// REAL header, src/Core/Plugins/RenderFeatureCompositor.h, is heavy and is
+// only #included by RenderGraphPanel.cpp, once it actually calls a method on
+// this pointer - PHASE4).
+class RenderFeatureCompositor;
 
 namespace rg {
 class RenderGraph;
@@ -59,9 +71,19 @@ public:
     // comment (EditorLayer.h) for the full contract. Always empty when there
     // is no compositor/no loaded `_v2` plugin this session. Placed LAST so
     // this new argument is a pure addition to this method's own signature.
+    // `renderPassToggleRegistry`/`renderFeatureCompositor` (editor-core-
+    // separation-8 campaign, PHASE3 - see IEditorLayer::BuildUI()'s own doc
+    // comment (EditorLayer.h) for the full contract) are Core's own
+    // PHASE1/PHASE2 objects, threaded straight through unchanged - the
+    // former is NEVER null, the latter is nullable (mirrors
+    // Core::GetRenderFeatureCompositor()'s own existing nullability). PHASE3
+    // itself does not yet use either (signature-only widening); PHASE4 wires
+    // the real "Enabled" checkbox column/per-feature controls through them.
     void Build(EditorContext& ctx, const rg::RenderGraph& renderGraph,
         const std::vector<GpuDrivenBatchDebugInfo>& gpuDrivenBatchDebugInfo,
-        const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries);
+        const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries,
+        rg::RenderPassToggleRegistry& renderPassToggleRegistry,
+        RenderFeatureCompositor* renderFeatureCompositor);
 
 private:
     // See ProfilerPanel::m_paused's own doc comment for the full Pause

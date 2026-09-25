@@ -70,7 +70,17 @@ class AtmosphereLutRenderer;
 namespace rg {
 class RenderGraph;
 class RenderGraphBuilder;
+class RenderPassToggleRegistry; // editor-core-separation-8 campaign, PHASE1/PHASE3.
 } // namespace rg
+
+// editor-core-separation-8 campaign, PHASE2/PHASE3 - forward-declared only,
+// mirrors "class Core;"'s own forward-declare-only precedent elsewhere in
+// this codebase - the REAL header (src/Core/Plugins/RenderFeatureCompositor.h)
+// is heavy (pulls in ComputeDescriptorSet.h/ComputePipeline.h/RenderTexture.h/
+// volk.h) and is only ever #included by the .cpp files that actually CALL a
+// method on this pointer (ImGuiEditorLayer.cpp, RenderGraphPanel.cpp) - this
+// header itself only ever passes the pointer through, never dereferences it.
+class RenderFeatureCompositor;
 
 // Abstraction boundary between engine-core (Application/Renderer/Game) and
 // the optional Editor/Debug UI. Dear ImGui-backed in real builds, but
@@ -467,7 +477,25 @@ public:
     virtual void BuildUI(Game& game, Renderer& renderer, const rg::RenderGraph& renderGraph,
         AtmosphereSettings& atmosphereSettings, AtmosphereLutRenderer& atmosphereLutRenderer,
         const std::vector<GpuDrivenBatchDebugInfo>& gpuDrivenBatchDebugInfo,
-        const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries) = 0;
+        const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries,
+        // editor-core-separation-8 campaign, PHASE3 - NEVER null (Core owns
+        // exactly one instance as a plain value member - see
+        // Core::GetRenderPassToggleRegistryMutable()). The "Render Graph" panel
+        // (PHASE4) reads/writes THROUGH this exact reference to draw and mutate
+        // its own "Enabled" checkbox column - see PHASE0_MASTER_STRATEGY.md's
+        // Step 2.6 for why this is passed as a plain mutable reference rather
+        // than routed through a bridge: both this call and
+        // RenderPipeline::DeclareOnePhase()'s own consult of the SAME registry
+        // happen on the main thread only, so there is no data race to guard
+        // against here (unlike the genuinely cross-thread HTTP path, PHASE5).
+        rg::RenderPassToggleRegistry& renderPassToggleRegistry,
+        // editor-core-separation-8 campaign, PHASE3 - NULLABLE, mirroring
+        // Core::GetRenderFeatureCompositor()'s own existing nullability exactly
+        // (null whenever no loaded _v2 plugin exists this session). The "Render
+        // Graph" panel's own per-plugin-feature "Enabled" checkbox + priority
+        // DragInt (PHASE4) call SetFeatureEnabled()/SetFeaturePriority()
+        // directly through this pointer, always null-checked first.
+        RenderFeatureCompositor* renderFeatureCompositor) = 0;
 
     // Records this frame's UI draw data into cmd. Called from inside
     // Renderer::Present()'s recordExtra hook - i.e. while the swapchain
@@ -654,6 +682,21 @@ public:
     // BuildToolbarRow()/ApplyEnabledEdge() doc comments for the full "why").
     // A no-op for NullEditorLayer.
     virtual void FrameDebuggerSetEnabled(bool enabled) = 0;
+
+    // editor-core-separation-8 campaign, PHASE3 - HTTP automation entry point
+    // (GET /render_graph/set_blur_enabled, PHASE5) for exactly the SAME state
+    // ScenePanel.cpp's own "Show Compute Blur (debug)" checkbox already flips
+    // directly (EditorContext::showBlurredSceneOutput) - and, per
+    // PHASE0_MASTER_STRATEGY.md's Locked Product Decision #10, also what the
+    // "Render Graph" panel's own NEW matching checkbox (PHASE4) calls. Mirrors
+    // FrameDebuggerSetEnabled(bool)'s exact shape - a plain, always-succeeding
+    // setter (no return value; there is no failure mode for flipping a bool).
+    virtual void SetShowBlurredSceneOutput(bool enabled) = 0;
+
+    // editor-core-separation-8 campaign, PHASE3 - the GBuffer Validation
+    // equivalent of SetShowBlurredSceneOutput() immediately above - same
+    // contract, same reasoning, mirrors EditorContext::showGBufferValidationOutput.
+    virtual void SetShowGBufferValidationOutput(bool enabled) = 0;
 
     // Requests a real capture - returns false (a safe no-op) if the Frame
     // Debugger is not currently enabled (mirroring the "Capture" button's

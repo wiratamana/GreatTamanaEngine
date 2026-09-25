@@ -590,7 +590,20 @@ int EditorHost::Run()
                 renderFeatureCompositor != nullptr ? renderFeatureCompositor->DebugSnapshot()
                                                     : std::vector<RenderFeatureDebugEntry>{};
             m_editorLayer->BuildUI(m_game, m_renderer, m_renderGraph, m_atmosphereSettings, m_atmosphereLutRenderer,
-                m_core.GetGpuDrivenBatchDebugInfo(), renderFeatureEntries);
+                m_core.GetGpuDrivenBatchDebugInfo(), renderFeatureEntries,
+                // editor-core-separation-8 campaign, PHASE3 - 2 new trailing
+                // arguments. NOTE: deliberately calling
+                // m_core.GetRenderFeatureCompositor() a SECOND, fresh time
+                // here rather than reusing the `renderFeatureCompositor`
+                // local declared a few lines above - that local is typed
+                // `const RenderFeatureCompositor*` (its own declared type
+                // never changed; only Core::GetRenderFeatureCompositor()'s
+                // OWN return type widened in PHASE2) and would not compile
+                // against BuildUI()'s new plain (non-const)
+                // `RenderFeatureCompositor*` parameter. This second call is
+                // cheap (Core.h's own noexcept accessor just returns an
+                // already-cached pointer).
+                m_core.GetRenderPassToggleRegistryMutable(), m_core.GetRenderFeatureCompositor());
 
             // editor-core-separation-7 campaign, PHASE4 - GET /render_graph
             // support. Reuses renderFeatureEntries (still in scope here) so

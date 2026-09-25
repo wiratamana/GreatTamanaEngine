@@ -54,7 +54,9 @@ public:
     void BuildUI(Game& /*game*/, Renderer& /*renderer*/, const rg::RenderGraph& /*renderGraph*/,
         AtmosphereSettings& /*atmosphereSettings*/, AtmosphereLutRenderer& /*atmosphereLutRenderer*/,
         const std::vector<GpuDrivenBatchDebugInfo>& /*gpuDrivenBatchDebugInfo*/,
-        const std::vector<RenderFeatureDebugEntry>& /*renderFeatureEntries*/) override
+        const std::vector<RenderFeatureDebugEntry>& /*renderFeatureEntries*/,
+        rg::RenderPassToggleRegistry& /*renderPassToggleRegistry*/,
+        RenderFeatureCompositor* /*renderFeatureCompositor*/) override
     {
     }
     void Render(VkCommandBuffer /*cmd*/) override { }
@@ -85,6 +87,12 @@ public:
     // affect at all).
     void FrameDebuggerOpenWindow() override { }
     void FrameDebuggerSetEnabled(bool /*enabled*/) override { }
+
+    // editor-core-separation-8 campaign, PHASE3 - a release build has no
+    // Blur/GBuffer debug checkboxes to affect at all, mirroring
+    // FrameDebuggerSetEnabled() immediately above.
+    void SetShowBlurredSceneOutput(bool /*enabled*/) override { }
+    void SetShowGBufferValidationOutput(bool /*enabled*/) override { }
     bool FrameDebuggerCaptureNow() override { return false; }
     void FrameDebuggerSelectEvent(int /*index*/) override { }
     bool FrameDebuggerSetChannel(const std::string& /*channel*/) override { return false; }
