@@ -1,6 +1,7 @@
 #include "InspectorPanel.h"
 
 #include "../EditorContext.h"
+#include "../ImGuiUniqueId.h"
 #include "../../ECS/Components/Camera.h"
 #include "../../ECS/Components/DirectionalLight.h"
 #include "../../ECS/Components/DynamicChainRig.h"
@@ -753,27 +754,24 @@ void BuildEntityInspector(Registry& registry, EditorContext& ctx, PhysicsSystem&
 
                 for (std::size_t chainIndex = 0; chainIndex < model->chains.size(); ++chainIndex) {
                     DynamicChainDefinition& chain = model->chains[chainIndex];
-                    ImGui::PushID(static_cast<int>(chainIndex));
+                    // task_manager/editor-core-separation-10 campaign, PHASE3.
+                    ScopedUniqueId chainIdScope(static_cast<int>(chainIndex), "InspectorPanel::VerletChainSection");
                     char chainLabel[64];
                     std::snprintf(chainLabel, sizeof(chainLabel), "Chain %zu (%zu joints)", chainIndex,
                         chain.jointBoneIndices.size());
                     if (ImGui::TreeNode(chainLabel)) {
                         for (std::size_t jointIndex = 0; jointIndex < chain.jointSettings.size(); ++jointIndex) {
                             DynamicJointSettings& settings = chain.jointSettings[jointIndex];
-                            ImGui::PushID(static_cast<int>(jointIndex));
+                            // task_manager/editor-core-separation-10 campaign, PHASE3.
+                            ScopedUniqueId jointIdScope(static_cast<int>(jointIndex), "InspectorPanel::VerletJointSection");
                             ImGui::Text("Joint %zu", jointIndex);
                             ImGui::DragFloat("Damping", &settings.damping, 0.005f, 0.0f, 1.0f);
                             ImGui::DragFloat("Stiffness", &settings.stiffness, 0.005f, 0.0f, 1.0f);
                             ImGui::DragFloat("Weight (Mass)", &settings.mass, 0.01f, 0.01f, 100.0f);
-                            // task_manager/verlet-integration-10, PHASE4 -
-                            // read-only, derived from this joint's own PMX
-                            // rigid body shape/size (see the single-part
-                            // Inspector's own identical readout above for
-                            // the full rationale).
                             ImGui::BeginDisabled();
                             ImGui::DragFloat("Collision Radius (from PMX rigid body shape)", &settings.collisionRadius);
                             ImGui::EndDisabled();
-                            ImGui::PopID();
+                            // No manual ImGui::PopID(); anymore.
                         }
 
                         // task_manager/verlet-integration-9, PHASE5 -
@@ -804,7 +802,7 @@ void BuildEntityInspector(Registry& registry, EditorContext& ctx, PhysicsSystem&
                         }
                         ImGui::TreePop();
                     }
-                    ImGui::PopID();
+                    // No manual ImGui::PopID(); anymore.
                 }
             }
 

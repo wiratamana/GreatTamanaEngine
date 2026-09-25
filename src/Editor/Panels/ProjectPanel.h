@@ -166,9 +166,9 @@ private:
     void ReconcileCurrentFolderAfterRescan();
 
     void RenderLeftPane(EditorContext& ctx);
-    void RenderLeftPaneFolder(EditorContext& ctx, const ProjectEntry& entry);
+    void RenderLeftPaneFolder(EditorContext& ctx, int siblingIndex, const ProjectEntry& entry);
     void RenderRightPane(EditorContext& ctx);
-    void RenderRightPaneEntry(EditorContext& ctx, const ProjectEntry& entry);
+    void RenderRightPaneEntry(EditorContext& ctx, int entryIndex, const ProjectEntry& entry);
     void RenderBreadcrumb();
     void RenderContextMenu(EditorContext& ctx, const char* popupId);
     void RecordFolderDropZone(const std::string& relativePath);

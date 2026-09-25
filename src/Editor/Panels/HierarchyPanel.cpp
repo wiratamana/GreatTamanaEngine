@@ -2,6 +2,7 @@
 
 #include "../EditorContext.h"
 #include "../GpuDrivenBatchTestSpawner.h"
+#include "../ImGuiUniqueId.h"
 #include "../../ECS/Components/Camera.h"
 #include "../../ECS/Components/Name.h"
 #include "../../ECS/Components/Transform.h"
@@ -68,7 +69,14 @@ std::string BuildEntityLabel(Registry& registry, Entity entity)
 // from BuildHierarchyPanel() below.
 void RenderEntityNode(Game& game, Renderer& renderer, EditorContext& ctx, Registry& registry, Entity entity)
 {
-    ImGui::PushID(static_cast<int>(entity.index));
+    // task_manager/editor-core-separation-10 campaign, PHASE3 - was
+    // ImGui::PushID(static_cast<int>(entity.index)) alone. entity.index is
+    // already genuinely unique per live entity, so this is uniform-coverage
+    // hardening (LDD1), not a bug fix - it ALSO now gets
+    // ImGuiIdConflictGuard's logging for free, which would catch a future
+    // hierarchy-CYCLE bug (the same entity visited twice in one recursive
+    // walk) that nothing today detects.
+    ScopedUniqueId idScope(static_cast<int>(entity.index), "HierarchyPanel::RenderEntityNode");
 
     const std::string label = BuildEntityLabel(registry, entity);
     const std::vector<Entity> children = GetChildren(registry, entity);
@@ -174,7 +182,7 @@ void RenderEntityNode(Game& game, Renderer& renderer, EditorContext& ctx, Regist
         ImGui::TreePop();
     }
 
-    ImGui::PopID();
+    // No manual ImGui::PopID(); anymore - ScopedUniqueId's destructor handles it.
 }
 
 } // namespace

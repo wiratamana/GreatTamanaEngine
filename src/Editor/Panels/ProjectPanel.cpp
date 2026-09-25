@@ -3,6 +3,7 @@
 #include "../EditorContext.h"
 #include "../ProjectRootPath.h"
 #include "../../Assets/AssetImporter.h"
+#include "../ImGuiUniqueId.h"
 #include "../MemoryPanelData.h" // FormatBytes() - reused for the file-size tooltip below.
 
 #include <imgui.h>
@@ -127,13 +128,20 @@ void ProjectPanel::RecordFolderDropZone(const std::string& relativePath)
     m_folderDropZones.push_back(FolderDropZone{ relativePath, Rect{ min.x, min.y, max.x - min.x, max.y - min.y } });
 }
 
-void ProjectPanel::RenderLeftPaneFolder(EditorContext& ctx, const ProjectEntry& entry)
+void ProjectPanel::RenderLeftPaneFolder(EditorContext& ctx, int siblingIndex, const ProjectEntry& entry)
 {
     if (!entry.isDirectory) {
         return; // Left pane is folders-only, like Unity/Explorer's own tree.
     }
 
-    ImGui::PushID(entry.relativePath.c_str());
+    // task_manager/editor-core-separation-10 campaign, PHASE3 - was
+    // ImGui::PushID(entry.relativePath.c_str()) alone. A relative
+    // filesystem path is very likely unique in practice, but "very likely"
+    // is exactly the assumption this whole campaign exists to stop relying
+    // on - siblingIndex (this call's own position among its immediate
+    // siblings) is what actually guarantees uniqueness now; relativePath is
+    // kept only as the debug key.
+    ScopedUniqueId idScope(siblingIndex, "ProjectPanel::RenderLeftPaneFolder", entry.relativePath.c_str());
 
     const bool hasSubfolders = HasSubfolders(entry);
     ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
@@ -153,13 +161,13 @@ void ProjectPanel::RenderLeftPaneFolder(EditorContext& ctx, const ProjectEntry& 
     }
 
     if (hasSubfolders && open) {
-        for (const ProjectEntry& child : entry.children) {
-            RenderLeftPaneFolder(ctx, child);
+        for (std::size_t i = 0; i < entry.children.size(); ++i) {
+            RenderLeftPaneFolder(ctx, static_cast<int>(i), entry.children[i]);
         }
         ImGui::TreePop();
     }
-
-    ImGui::PopID();
+    // No manual ImGui::PopID() anymore - ScopedUniqueId's destructor
+    // handles it.
 }
 
 void ProjectPanel::RenderLeftPane(EditorContext& ctx)
@@ -179,8 +187,8 @@ void ProjectPanel::RenderLeftPane(EditorContext& ctx)
     }
 
     if (rootOpen) {
-        for (const ProjectEntry& entry : m_tree) {
-            RenderLeftPaneFolder(ctx, entry);
+        for (std::size_t i = 0; i < m_tree.size(); ++i) {
+            RenderLeftPaneFolder(ctx, static_cast<int>(i), m_tree[i]);
         }
         ImGui::TreePop();
     }
@@ -207,11 +215,13 @@ void ProjectPanel::RenderBreadcrumb()
         ImGui::SameLine();
         ImGui::TextUnformatted("/");
         ImGui::SameLine();
-        ImGui::PushID(segmentIndex++);
-        if (ImGui::SmallButton(segment.c_str())) {
-            m_currentFolderRelativePath = accumulated;
+        // task_manager/editor-core-separation-10 campaign, PHASE3.
+        {
+            ScopedUniqueId idScope(segmentIndex++, "ProjectPanel::RenderBreadcrumb", segment.c_str());
+            if (ImGui::SmallButton(segment.c_str())) {
+                m_currentFolderRelativePath = accumulated;
+            }
         }
-        ImGui::PopID();
 
         if (slash == std::string::npos) {
             break;
@@ -220,9 +230,11 @@ void ProjectPanel::RenderBreadcrumb()
     }
 }
 
-void ProjectPanel::RenderRightPaneEntry(EditorContext& ctx, const ProjectEntry& entry)
+void ProjectPanel::RenderRightPaneEntry(EditorContext& ctx, int entryIndex, const ProjectEntry& entry)
 {
-    ImGui::PushID(entry.relativePath.c_str());
+    // task_manager/editor-core-separation-10 campaign, PHASE3 - was
+    // ImGui::PushID(entry.relativePath.c_str()) alone.
+    ScopedUniqueId idScope(entryIndex, "ProjectPanel::RenderRightPaneEntry", entry.relativePath.c_str());
 
     const bool isSelected = ctx.selection.IsAssetSelected(entry.relativePath);
     const std::string label = entry.isDirectory ? ("[Folder] " + entry.name) : entry.name;
@@ -265,7 +277,7 @@ void ProjectPanel::RenderRightPaneEntry(EditorContext& ctx, const ProjectEntry& 
         ImGui::SetTooltip("%s", FormatBytes(entry.sizeBytes).c_str());
     }
 
-    ImGui::PopID();
+    // No manual ImGui::PopID() anymore - ScopedUniqueId's destructor handles it.
 }
 
 void ProjectPanel::RenderRightPane(EditorContext& ctx)
@@ -279,8 +291,8 @@ void ProjectPanel::RenderRightPane(EditorContext& ctx)
         return;
     }
 
-    for (const ProjectEntry& entry : *children) {
-        RenderRightPaneEntry(ctx, entry);
+    for (std::size_t i = 0; i < children->size(); ++i) {
+        RenderRightPaneEntry(ctx, static_cast<int>(i), (*children)[i]);
     }
 }
 

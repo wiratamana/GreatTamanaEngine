@@ -2,6 +2,7 @@
 
 #include "EditorContext.h"
 #include "ModelRigCache.h"
+#include "ImGuiUniqueId.h"
 #include "ProjectPanelData.h" // Utf8ToPath()
 #include "RigidBodyWireframe.h"
 #include "../Assets/AssetTypes.h" // AssetType
@@ -585,7 +586,8 @@ void BoneViewerWindow::RenderBoneTreeNode(std::int32_t boneIndex, const std::str
 
     const std::string label = bone.name.empty() ? ("Bone " + std::to_string(boneIndex)) : bone.name;
 
-    ImGui::PushID(boneIndex);
+    // task_manager/editor-core-separation-10 campaign, PHASE3.
+    ScopedUniqueId idScope(boneIndex, "BoneViewerWindow::RenderBoneTreeNode", bone.name.c_str());
     const bool opened = ImGui::TreeNodeEx(label.c_str(), flags);
 
     if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
@@ -628,7 +630,7 @@ void BoneViewerWindow::RenderBoneTreeNode(std::int32_t boneIndex, const std::str
         ImGui::TreePop();
     }
 
-    ImGui::PopID();
+    // No manual ImGui::PopID(); anymore.
 }
 
 void BoneViewerWindow::RenderFlatPartRow(ModelPartKind kind, std::int32_t index, const std::string& name,
@@ -641,7 +643,8 @@ void BoneViewerWindow::RenderFlatPartRow(ModelPartKind kind, std::int32_t index,
     const bool isSelected = ctx.selection.IsModelPartSelected(m_targetEntity, kind, index);
     const std::string label = name.empty() ? ("Part " + std::to_string(index)) : name;
 
-    ImGui::PushID(index);
+    // task_manager/editor-core-separation-10 campaign, PHASE3.
+    ScopedUniqueId idScope(index, "BoneViewerWindow::RenderFlatPartRow", name.c_str());
     if (ImGui::Selectable(label.c_str(), isSelected)) {
         // v2 (task_manager/verlet-integration-4/PHASE0_MASTER_STRATEGY.md's
         // Revision Notes, finding #2): Ctrl-click TOGGLES exactly this one
@@ -681,7 +684,7 @@ void BoneViewerWindow::RenderFlatPartRow(ModelPartKind kind, std::int32_t index,
             m_camTarget = position;
         }
     }
-    ImGui::PopID();
+    // No manual ImGui::PopID(); anymore.
 }
 
 void BoneViewerWindow::RenderVerletChainNode(std::int32_t chainIndex, const DynamicChainDefinition& chain,
@@ -710,7 +713,8 @@ void BoneViewerWindow::RenderVerletChainNode(std::int32_t chainIndex, const Dyna
     std::snprintf(header, sizeof(header), "Chain %d - Root: %s (%zu joints)", chainIndex, rootName,
         chain.jointBoneIndices.size());
 
-    ImGui::PushID(chainIndex);
+    // task_manager/editor-core-separation-10 campaign, PHASE3.
+    ScopedUniqueId idScope(chainIndex, "BoneViewerWindow::RenderVerletChainNode");
     if (ImGui::TreeNodeEx(header, ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth)) {
         for (std::size_t j = 0; j < chain.jointBoneIndices.size(); ++j) {
             const std::int32_t boneIndex = chain.jointBoneIndices[j];
@@ -745,7 +749,7 @@ void BoneViewerWindow::RenderVerletChainNode(std::int32_t chainIndex, const Dyna
         }
         ImGui::TreePop();
     }
-    ImGui::PopID();
+    // No manual ImGui::PopID(); anymore.
 }
 
 void BoneViewerWindow::BuildPartListPane(
