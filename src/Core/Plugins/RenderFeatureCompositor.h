@@ -1,6 +1,7 @@
 #pragma once
 
 #include "IPluginCapabilityOrchestrator.h"
+#include "PluginRenderOperationRegistry.h"
 #include "RenderFeatureDebugEntry.h"
 #include "RenderFeatureNamePool.h"
 
@@ -40,6 +41,19 @@
 // push constant - the ordering/private-target/collision-detection/seeding
 // mechanism PHASE4 built is completely unchanged; only WHAT the blend pass
 // computes changed.
+//
+// editor-core-separation-9 campaign, PHASE2
+// (PHASE2_OPERATION_REGISTRY_AND_ADAPTER_V3.md) - this class no longer OWNS
+// the "uber ops"/blend `ComputePipeline`s/`VkDescriptorSetLayout`s directly -
+// that ownership moved into the new, host-owned `PluginRenderOperationRegistry`
+// (`m_operationRegistry` below, a reference to the ONE instance `Core` owns) -
+// a pure refactor, zero `_v2` behavior change. This class ALSO gained a
+// second, alternate per-entry module pointer (`Entry::moduleV3`) and a new,
+// PERSISTENT (never-recreated-per-frame) descriptor-set cache
+// (`m_v3OpDescriptorSets`/`EnsureV3OpDescriptorSet()`) for `_v3` plugins' own
+// `Dispatch()`/`DrawFullscreenTriangle()` calls - see that method's own doc
+// comment for the real, load-bearing Vulkan descriptor-set-pool-lifetime
+// hazard this exists to close (PHASE0_MASTER_STRATEGY.md Step 2.6).
 namespace gte {
 
 class Core; // forward declaration only - this header must not #include "../Core.h"
@@ -52,30 +66,9 @@ class Renderer; // forward declaration only - held as a plain reference member;
                  // the .cpp file #includes "../Core.h", which transitively pulls
                  // in the real Renderer.h for every real method call.
 
-// The C++-side push-constant struct mirroring RenderFeatureOps.comp's own
-// `PushConstants` GLSL block byte-for-byte (4 vec4s, 64 bytes total, no
-// padding) - mirrors AerialPerspectiveCompositePushConstants's own plain-
-// float[]-members shape exactly (AtmosphereLutRenderer.h). Used by both
-// RenderFeatureCompositor::DispatchOps() and PluginRenderPassBuilderAdapter_v2.
-struct RenderFeatureOpsPushConstants {
-    float opCodeAndPad[4] = {};       // .x = opCode (0=SolidFill, 1=RadialVignette, 2=ColorGrade)
-    float colorRgba[4] = {};          // solid fill color / vignette color / tint color
-    float centerAndRadius[4] = {};    // vignette: centerX, centerY, innerRadius, outerRadius
-    float gradeParams[4] = {};        // color grade: brightness, contrast, saturation, tintStrength
-};
-
-// editor-core-separation-6 campaign, PHASE5 - the C++-side push-constant
-// struct mirroring RenderFeatureBlend.comp's own `PushConstants` GLSL block
-// byte-for-byte (1 vec4, 16 bytes). Used by RenderFeatureCompositor::
-// DispatchBlend() - `.x` carries the RenderFeatureBlendMode, cast to float
-// (matching the shader's own `int(pc.blendModeAndPad.x)` cast).
-struct RenderFeatureBlendPushConstants {
-    float blendModeAndPad[4] = {}; // .x = RenderFeatureBlendMode, as a float cast to int in-shader
-};
-
 class RenderFeatureCompositor final : public IPluginCapabilityOrchestrator {
 public:
-    explicit RenderFeatureCompositor(Core& core, Renderer& renderer);
+    RenderFeatureCompositor(Core& core, Renderer& renderer, PluginRenderOperationRegistry& operationRegistry);
 
     void OnPluginsLoaded(const std::vector<IPluginModule*>& modules) override;
     void ContributeRenderGraphPasses(
@@ -130,9 +123,51 @@ public:
     // belongs to. Returns false if `name` matches no loaded _v2 plugin.
     bool SetFeaturePriority(const std::string& name, std::int32_t priority);
 
+    // editor-core-separation-9 campaign, PHASE2 (PHASE0_MASTER_STRATEGY.md
+    // Step 2.6/Locked Architecture Decision #9) - the FIX for a real,
+    // load-bearing Vulkan descriptor-set-pool-lifetime hazard found during
+    // this campaign's own review pass: a naive `_v3` adapter-instance-scoped
+    // descriptor-set cache would call `AllocateComputeDescriptorSet()` again
+    // EVERY FRAME (a fresh PluginRenderPassBuilderAdapter_v3 is constructed
+    // per plugin/per view/per frame, mirroring `_v2`'s own adapter lifetime),
+    // permanently consuming one more of `GpuResourceFactory`'s fixed 256-set
+    // compute descriptor pool slots each time - exhausting it within seconds
+    // of real runtime. `key` must be stable across frames for the SAME
+    // literal `AddGraphicsPass()`/`AddComputePass()` declaration (built by the
+    // adapter as `"<Plugin>_<View>_" + debugName` - see
+    // PluginRenderPassBuilderAdapter_v3::Dispatch()/DrawFullscreenTriangle())
+    // - lazily allocates (ONCE, ever, per distinct `key`) or returns the
+    // ALREADY-existing `ComputeDescriptorSet` for `key`, exactly mirroring
+    // `EnsurePrivateTargetState()`'s own "lazily created once, `Rewrite()`-only
+    // thereafter, never recreated per frame" lifetime discipline. Because the
+    // cache key includes the pass's own literal `debugName`, a SINGLE plugin
+    // dispatching the SAME `opId` twice in one frame from two DIFFERENT
+    // `AddComputePass()`/`AddGraphicsPass()` declarations (two different
+    // `debugName`s) gets two DIFFERENT, independent, persistent descriptor
+    // sets - closing a second, independent same-frame descriptor-content
+    // collision hazard alongside the pool-exhaustion one (see
+    // PHASE2_OPERATION_REGISTRY_AND_ADAPTER_V3.md Step 2.6 for the full
+    // mechanical reasoning behind both). A plugin author calling `Dispatch()`
+    // more than once inside the SAME pass's `execute` callback with different
+    // bindings against the same `opId` is still sharing ONE descriptor set
+    // within that one call - document this as a real, narrow constraint
+    // ("call `Dispatch()` at most once per real bound-resource combination
+    // per declared pass") - no real use case in this campaign's own PHASE2/
+    // PHASE3 scope ever needs more than that.
+    ComputeDescriptorSet& EnsureV3OpDescriptorSet(const std::string& key, VkDescriptorSetLayout layout);
+
 private:
     struct Entry {
-        IRenderFeatureModule_v2* module = nullptr;
+        // editor-core-separation-9 campaign, PHASE2 - RENAMED from `module`
+        // (for symmetry with the new `moduleV3` below) - every pre-existing
+        // reference updated in the same edit (OnPluginsLoaded()/
+        // ContributeRenderGraphPasses()). A loaded plugin implements EITHER
+        // `_v2` OR `_v3`, never both (OnPluginsLoaded() queries `_v3` FIRST,
+        // since it is now the recommended path - PHASE0_MASTER_STRATEGY.md
+        // Locked Product Decision #1) - so exactly one of moduleV2/moduleV3
+        // is non-null for any real Entry.
+        IRenderFeatureModule_v2* moduleV2 = nullptr;
+        IRenderFeatureModule_v3* moduleV3 = nullptr;
         GtePluginRenderFeatureDescriptor descriptor{};
         // editor-core-separation-8 campaign, PHASE2 - host-side-only
         // override, NEVER part of the plugin's own descriptor/ABI (the
@@ -194,9 +229,6 @@ private:
     BlendStageState& EnsureBlendStageDescriptorOnly(const char* internedName);
     BlendStageState& EnsureBlendStageState(const char* internedName, VkExtent2D extent);
 
-    void EnsureOpsInitialized(Renderer& renderer);
-    void EnsureBlendPipelineInitialized(Renderer& renderer);
-
     // The real, permanent blend/seed dispatch (RenderFeatureBlend.comp,
     // PHASE5) - `state` supplies the dedicated descriptor set this dispatch
     // rewrites/binds; its own `.texture` field is irrelevant here (the
@@ -215,14 +247,19 @@ private:
     Renderer& m_renderer;
     VkDevice m_device = VK_NULL_HANDLE;
 
+    // editor-core-separation-9 campaign, PHASE2 - the ONE
+    // PluginRenderOperationRegistry instance `Core` owns
+    // (`Core::m_pluginRenderOperationRegistry`), shared by this compositor's
+    // own `_v2` DispatchOps()/DispatchBlend() (which now source
+    // m_opsPipeline/m_opsDescriptorSetLayout/m_blendPipeline/
+    // m_blendDescriptorSetLayout through it instead of owning them directly)
+    // AND every `_v3` plugin's own PluginRenderPassBuilderAdapter_v3
+    // (constructed by ContributeRenderGraphPasses() below, one per entry).
+    PluginRenderOperationRegistry& m_operationRegistry;
+
     std::vector<Entry> m_postComposite; // sorted by priority ascending
     std::vector<Entry> m_preUi;         // sorted by priority ascending
     RenderFeatureNamePool m_namePool;
-
-    std::optional<ComputePipeline> m_opsPipeline;
-    VkDescriptorSetLayout m_opsDescriptorSetLayout = VK_NULL_HANDLE;
-    std::optional<ComputePipeline> m_blendPipeline; // RenderFeatureBlend.comp (PHASE5).
-    VkDescriptorSetLayout m_blendDescriptorSetLayout = VK_NULL_HANDLE;
 
     // Keyed by RenderFeatureNamePool's own interned "<Plugin>_<View>_Private" names.
     std::unordered_map<std::string, PrivateTargetState> m_privateTargetStates;
@@ -231,6 +268,19 @@ private:
     // they never collide, since interned names always carry either "_Accum"
     // or "_Seed" as an unambiguous suffix).
     std::unordered_map<std::string, BlendStageState> m_blendStageStates;
+
+    // editor-core-separation-9 campaign, PHASE2 - see EnsureV3OpDescriptorSet()'s
+    // own doc comment above for the full, load-bearing reasoning. Keyed by
+    // "<Plugin>_<View>_<PassDebugName>" (a plain std::string key - no
+    // RenderFeatureNamePool interning needed here, since this map is never
+    // consulted by anything that needs a stable const char*, unlike
+    // PassRecord::name). ONE entry per literal AddGraphicsPass()/
+    // AddComputePass() debugName a _v3 plugin ever declares, for its own
+    // lifetime - bounded by (loaded _v3 plugin count) x (that plugin's own
+    // pass count) x (2 views), exactly like m_privateTargetStates/
+    // m_blendStageStates are already bounded. PERSISTENT for the entire
+    // process lifetime - NEVER cleared/recreated per frame.
+    std::unordered_map<std::string, ComputeDescriptorSet> m_v3OpDescriptorSets;
 };
 
 } // namespace gte

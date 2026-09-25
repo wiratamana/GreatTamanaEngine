@@ -1,9 +1,13 @@
 #include "RenderFeatureCompositor.h"
 
 #include "PluginRenderPassBuilderAdapter_v2.h"
+#include "PluginRenderPassBuilderAdapter_v3.h"
 
 #include "../Core.h"
 #include "../Logging.h"
+
+#include "../../../plugins/gte_plugin_abi/GtePluginModuleInfo.h"
+#include "../../../plugins/gte_plugin_abi/IPluginRenderPassBuilder_v3.h"
 
 #include "../../Renderer/ComputeDispatch.h"
 #include "../../Renderer/Vulkan/DescriptorSetLayoutBuilder.h"
@@ -60,11 +64,40 @@ const char* ToString(RenderFeatureBlendMode blendMode) noexcept
     return "Unknown";
 }
 
+// editor-core-separation-9 campaign, PHASE2
+// (PHASE2_OPERATION_REGISTRY_AND_ADAPTER_V3.md Step 3.3) - the simplest
+// correct stand-in for IPluginBlackboard until PHASE4 wires the real,
+// per-frame instance RenderFeatureCompositor will own - a single, static,
+// process-wide, always-empty implementation (Publish() a no-op; Fetch()
+// always returns "not found"). This choice is locked here (rather than left
+// as an open decision) so this phase's own diff is unambiguous, and PHASE4
+// knows exactly what single call site to replace.
+class NoOpPluginBlackboard final : public IPluginBlackboard {
+public:
+    void Publish(const char*, const PluginBlackboardValue&) override
+    {
+        // Intentionally empty - see this class's own doc comment above.
+    }
+
+    bool Fetch(const char*, PluginBlackboardValueKind, PluginBlackboardValue&) const override
+    {
+        return false;
+    }
+};
+
+IPluginBlackboard& GetOrCreateNoOpBlackboard()
+{
+    static NoOpPluginBlackboard s_instance;
+    return s_instance;
+}
+
 } // namespace
 
-RenderFeatureCompositor::RenderFeatureCompositor(Core& core, Renderer& renderer)
+RenderFeatureCompositor::RenderFeatureCompositor(
+    Core& core, Renderer& renderer, PluginRenderOperationRegistry& operationRegistry)
     : m_core(core)
     , m_renderer(renderer)
+    , m_operationRegistry(operationRegistry)
 {
 }
 
@@ -168,24 +201,46 @@ bool RenderFeatureCompositor::SetFeaturePriority(const std::string& name, std::i
 }
 
 // editor-core-separation-6 campaign, PHASE4 (Step 3.4) - discovers every
-// loaded IRenderFeatureModule_v2, snapshots its descriptor exactly once,
+// loaded IRenderFeatureModule_v2/_v3, snapshots its descriptor exactly once,
 // refuses (loudly) any module declaring an unwired stage
 // (PHASE0_MASTER_STRATEGY.md's Locked Design Decision #1), then sorts each
 // stage's own surviving entries by priority ascending with a documented,
 // stable, lexical tie-break for a same-priority collision (never left to
 // std::sort's own unspecified-for-equal-keys behavior).
+//
+// editor-core-separation-9 campaign, PHASE2 - queries `_v3` FIRST (the
+// recommended path, Locked Product Decision #1), falling back to `_v2` only
+// if a module does not implement `_v3`. A module declaring BOTH capabilities
+// is a plugin-author error - loud GTE_LOG_WARNING, `_v3` wins (mirrors this
+// codebase's general "loud, never silent" collision discipline).
 void RenderFeatureCompositor::OnPluginsLoaded(const std::vector<IPluginModule*>& modules)
 {
     for (IPluginModule* module : modules) {
-        auto* feature =
+        auto* v3Feature =
+            static_cast<IRenderFeatureModule_v3*>(module->QueryCapability(kIRenderFeatureModule_v3_Name));
+        auto* v2Feature =
             static_cast<IRenderFeatureModule_v2*>(module->QueryCapability(kIRenderFeatureModule_v2_Name));
-        if (feature == nullptr) {
+
+        if (v3Feature == nullptr && v2Feature == nullptr) {
             continue;
         }
 
+        if (v3Feature != nullptr && v2Feature != nullptr) {
+            GtePluginModuleInfo info;
+            module->GetModuleInfo(info);
+            GTE_LOG_WARNING("RenderFeatureCompositor",
+                std::string(info.name) + " declared BOTH IRenderFeatureModule_v3 and IRenderFeatureModule_v2 - "
+                "a plugin must implement exactly one. Using _v3 and ignoring _v2 for this module.");
+        }
+
         Entry entry;
-        entry.module = feature;
-        entry.descriptor = feature->GetRenderFeatureDescriptor();
+        if (v3Feature != nullptr) {
+            entry.moduleV3 = v3Feature;
+            entry.descriptor = v3Feature->GetRenderFeatureDescriptor();
+        } else {
+            entry.moduleV2 = v2Feature;
+            entry.descriptor = v2Feature->GetRenderFeatureDescriptor();
+        }
 
         if (entry.descriptor.stage == RenderFeatureStage::PreOpaque
             || entry.descriptor.stage == RenderFeatureStage::PostOpaque
@@ -290,7 +345,8 @@ RenderFeatureCompositor::PrivateTargetState& RenderFeatureCompositor::EnsurePriv
     }
 
     PrivateTargetState state;
-    state.opsDescriptorSet = ComputeDescriptorSet(m_renderer.AllocateComputeDescriptorSet(m_opsDescriptorSetLayout));
+    state.opsDescriptorSet =
+        ComputeDescriptorSet(m_renderer.AllocateComputeDescriptorSet(m_operationRegistry.OpsDescriptorSetLayout()));
     EnsureTextureSized(state.texture, internedName, extent);
     const auto inserted = m_privateTargetStates.emplace(internedName, std::move(state));
     return inserted.first->second;
@@ -305,8 +361,8 @@ RenderFeatureCompositor::BlendStageState& RenderFeatureCompositor::EnsureBlendSt
     }
 
     BlendStageState state;
-    state.blendDescriptorSet =
-        ComputeDescriptorSet(m_renderer.AllocateComputeDescriptorSet(m_blendDescriptorSetLayout));
+    state.blendDescriptorSet = ComputeDescriptorSet(
+        m_renderer.AllocateComputeDescriptorSet(m_operationRegistry.BlendDescriptorSetLayout()));
     const auto inserted = m_blendStageStates.emplace(internedName, std::move(state));
     return inserted.first->second;
 }
@@ -319,61 +375,19 @@ RenderFeatureCompositor::BlendStageState& RenderFeatureCompositor::EnsureBlendSt
     return state;
 }
 
-void RenderFeatureCompositor::EnsureOpsInitialized(Renderer& renderer)
+// editor-core-separation-9 campaign, PHASE2 - see this method's own doc
+// comment (RenderFeatureCompositor.h) for the full, load-bearing reasoning.
+ComputeDescriptorSet& RenderFeatureCompositor::EnsureV3OpDescriptorSet(
+    const std::string& key, VkDescriptorSetLayout layout)
 {
-    if (m_opsPipeline.has_value()) {
-        return;
+    const auto existing = m_v3OpDescriptorSets.find(key);
+    if (existing != m_v3OpDescriptorSets.end()) {
+        return existing->second;
     }
 
-    const Renderer::VulkanContextInfo context = renderer.GetVulkanContextInfo();
-    m_device = context.device;
-
-    // Binding convention (matches Shaders/RenderFeatureOps.comp exactly):
-    // binding 0 = privateTarget, the ONLY binding - a single read-write
-    // storage image this shader always fully overwrites/reads back
-    // (opCode 2 only) via imageLoad/imageStore, never sampled.
-    DescriptorSetLayoutBuilder layoutBuilder(m_device);
-    m_opsDescriptorSetLayout = layoutBuilder.AddStorageImage(/*binding=*/0).Build();
-
-    VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(RenderFeatureOpsPushConstants);
-
-    m_opsPipeline.emplace(renderer.CreateComputePipeline("shaders/RenderFeatureOps.comp.spv",
-        std::vector<VkDescriptorSetLayout>{ m_opsDescriptorSetLayout }, pushConstantRange));
-}
-
-void RenderFeatureCompositor::EnsureBlendPipelineInitialized(Renderer& renderer)
-{
-    if (m_blendPipeline.has_value()) {
-        return;
-    }
-
-    const Renderer::VulkanContextInfo context = renderer.GetVulkanContextInfo();
-    m_device = context.device;
-
-    // Binding convention (matches Shaders/RenderFeatureBlend.comp exactly):
-    // binding 0 = dstIn, binding 1 = srcIn (both read-only combined image
-    // samplers), binding 2 = destinationImage (a write-only storage image) -
-    // deliberately identical in shape to PHASE4's own throwaway
-    // RenderFeatureBlendStub.comp (PHASE4_RENDER_FEATURE_COMPOSITOR_CORE_AND_ORDERING.md's
-    // own Step 3.6), so this swap needed zero descriptor-set-layout/
-    // binding-kind change - only a new push-constant range and a new shader
-    // module.
-    DescriptorSetLayoutBuilder layoutBuilder(m_device);
-    m_blendDescriptorSetLayout = layoutBuilder.AddCombinedImageSampler(/*binding=*/0)
-                                      .AddCombinedImageSampler(/*binding=*/1)
-                                      .AddStorageImage(/*binding=*/2)
-                                      .Build();
-
-    VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(RenderFeatureBlendPushConstants);
-
-    m_blendPipeline.emplace(renderer.CreateComputePipeline("shaders/RenderFeatureBlend.comp.spv",
-        std::vector<VkDescriptorSetLayout>{ m_blendDescriptorSetLayout }, pushConstantRange));
+    ComputeDescriptorSet descriptorSet(m_renderer.AllocateComputeDescriptorSet(layout));
+    const auto inserted = m_v3OpDescriptorSets.emplace(key, std::move(descriptorSet));
+    return inserted.first->second;
 }
 
 void RenderFeatureCompositor::DispatchOps(rg::RenderGraphBuilder& builder, rg::TextureHandle privateTarget,
@@ -407,8 +421,9 @@ void RenderFeatureCompositor::DispatchOps(rg::RenderGraphBuilder& builder, rg::T
                 ComputeGroupCount3D(Extent3D{ extent.width, extent.height, 1 }, Extent3D{ 16, 16, 1 });
 
             m_renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-            m_renderer.Dispatch(*m_opsPipeline, state.opsDescriptorSet.Native(), &localPushConstants,
-                sizeof(localPushConstants), groupCounts.width, groupCounts.height, groupCounts.depth);
+            m_renderer.Dispatch(m_operationRegistry.OpsPipeline(), state.opsDescriptorSet.Native(),
+                &localPushConstants, sizeof(localPushConstants), groupCounts.width, groupCounts.height,
+                groupCounts.depth);
             m_renderer.EndGraphPassRecording();
         },
         rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::AfterEverything);
@@ -443,8 +458,8 @@ void RenderFeatureCompositor::DispatchBlend(rg::RenderGraphBuilder& builder, rg:
                 ComputeGroupCount3D(Extent3D{ extent.width, extent.height, 1 }, Extent3D{ 16, 16, 1 });
 
             m_renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-            m_renderer.Dispatch(*m_blendPipeline, state.blendDescriptorSet.Native(), &pushConstants,
-                sizeof(pushConstants), groupCounts.width, groupCounts.height, groupCounts.depth);
+            m_renderer.Dispatch(m_operationRegistry.BlendPipeline(), state.blendDescriptorSet.Native(),
+                &pushConstants, sizeof(pushConstants), groupCounts.width, groupCounts.height, groupCounts.depth);
             m_renderer.EndGraphPassRecording();
         },
         rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::AfterEverything);
@@ -458,6 +473,15 @@ void RenderFeatureCompositor::DispatchBlend(rg::RenderGraphBuilder& builder, rg:
 // multi-mode RenderFeatureBlend.comp as of PHASE5) into either the next
 // accumulator or (for the LAST entry) directly into the view's own real,
 // final handle (PHASE0_MASTER_STRATEGY.md's Locked Design Decision #10).
+//
+// editor-core-separation-9 campaign, PHASE2 - the per-entry loop now
+// branches on which ABI version this entry implements: a `moduleV3` entry
+// builds a PluginRenderPassBuilderAdapter_v3 (new); a `moduleV2` entry keeps
+// building a PluginRenderPassBuilderAdapter_v2 (byte-for-byte unchanged) -
+// everything AFTER this branch (the DispatchBlend() call reading
+// `privateTarget`) is completely unchanged either way, since both adapters
+// ultimately fill the SAME EnsurePrivateTargetState()-provided private
+// RenderTexture.
 void RenderFeatureCompositor::ContributeRenderGraphPasses(
     const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&)
 {
@@ -482,9 +506,6 @@ void RenderFeatureCompositor::ContributeRenderGraphPasses(
         return;
     }
 
-    EnsureOpsInitialized(m_renderer);
-    EnsureBlendPipelineInitialized(m_renderer);
-
     const bool isGameView = (frame.currentView == rg::RenderViewId::Named("Game"));
     const std::string viewName = isGameView ? "Game" : "Scene";
     const VkExtent2D extent = resolved->extent;
@@ -497,7 +518,28 @@ void RenderFeatureCompositor::ContributeRenderGraphPasses(
     // reading and writing the exact same storage image in one dispatch).
     // The seed dispatch is always a plain Replace copy, regardless of any
     // individual plugin's own declared blend mode (PHASE5_BLEND_MODE_COMPUTE_SHADER_AND_PREUI_STAGE.md's
-    // own Step 3.2).
+    // own Step 3.2). This method calls m_operationRegistry.EnsureBuiltinsRegistered()
+    // directly, here, before any per-frame descriptor-set/pipeline access
+    // below - so both a _v2-only frame AND a _v3-only frame always have the
+    // registry initialized before the per-entry loop runs; a _v3 plugin's
+    // own Dispatch() call therefore never needs a separate
+    // EnsureBuiltinsRegistered() call site of its own.
+    //
+    // editor-core-separation-9 campaign, PHASE2 - a REAL BUG found and fixed
+    // during this phase's own required live smoke test (not merely "compiles
+    // and doesn't crash"): EnsureOpsInitialized()/EnsureBlendPipelineInitialized()
+    // used to be the ONLY methods that ever set this class's own `m_device`
+    // member (used by EnsureTextureSized()'s vkDeviceWaitIdle() and every
+    // DispatchOps()/DispatchBlend() Rewrite() call) - deleting them as part
+    // of the pipeline-ownership migration (Step 3.2) silently left `m_device`
+    // permanently VK_NULL_HANDLE, a real, confirmed ACCESS VIOLATION crash
+    // (0xC0000005) the very first time this method actually did GPU work.
+    // Fixed by sourcing `m_device` from the registry's own already-resolved
+    // VkDevice (GetDevice()) - guaranteed valid immediately after
+    // EnsureBuiltinsRegistered() returns.
+    m_operationRegistry.EnsureBuiltinsRegistered();
+    m_device = m_operationRegistry.GetDevice();
+
     const char* seedName = m_namePool.SeedName(viewName);
     BlendStageState& seedState = EnsureBlendStageState(seedName, extent);
     const rg::TextureHandle seedHandle =
@@ -518,8 +560,15 @@ void RenderFeatureCompositor::ContributeRenderGraphPasses(
         const rg::TextureHandle privateTarget =
             frame.builder.ImportTexture(privateName, privateState.texture->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
 
-        PluginRenderPassBuilderAdapter_v2 adapter(frame.builder, privateTarget, *this, privateName);
-        entry.module->AddRenderGraphPasses(adapter);
+        if (entry.moduleV3 != nullptr) {
+            PluginRenderPassBuilderAdapter_v3 adapter(frame.builder, privateTarget, m_operationRegistry,
+                GetOrCreateNoOpBlackboard(), resolved->target, resolved->sampler, *this,
+                pluginName + "_" + viewName + "_");
+            entry.moduleV3->AddRenderGraphPasses(adapter);
+        } else {
+            PluginRenderPassBuilderAdapter_v2 adapter(frame.builder, privateTarget, *this, privateName);
+            entry.moduleV2->AddRenderGraphPasses(adapter);
+        }
 
         rg::TextureHandle outputTarget;
         BlendStageState* outputState = nullptr;

@@ -2134,6 +2134,12 @@ set(GTE_TEST_SOURCES
     # Unconditional, since src/Core/Plugins/PluginRenderResourceTranslation.h/.cpp
     # is unconditionally in gte_core's own source list.
     Core/Plugins/PluginRenderResourceTranslationTests.cpp
+    # editor-core-separation-9 campaign, PHASE2
+    # (PHASE2_OPERATION_REGISTRY_AND_ADAPTER_V3.md, Step 3.6) - Tier-1 tests for
+    # PluginRenderPassBuilderAdapter_v3's own pure validation logic. Unconditional,
+    # since src/Core/Plugins/PluginRenderPassBuilderAdapterV3Validation.h is
+    # unconditionally in gte_core's own source list.
+    Core/Plugins/PluginRenderPassBuilderAdapterV3ValidationTests.cpp
     Memory/GpuResourceHandleTests.cpp
     Encoding/Base64Tests.cpp
     Encoding/PixelConversionTests.cpp

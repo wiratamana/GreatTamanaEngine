@@ -200,6 +200,9 @@ GpuDrivenBatchNamePool& BatchNamePool()
 
 Core::Core(ISurfaceProvider& surfaceProvider, IHostServices& hostServices)
     : m_renderer(surfaceProvider)
+    // editor-core-separation-9 campaign, PHASE2 - constructed right after
+    // m_renderer (which it needs by reference), before m_renderGraph.
+    , m_pluginRenderOperationRegistry(m_renderer)
     , m_renderGraph(m_renderer)
     , m_game()
     , m_engineContext()
@@ -270,7 +273,12 @@ void Core::RegisterBuiltinCapabilityOrchestrators()
     // m_capabilityOrchestrators - see Core.h's own doc comment on
     // GetRenderFeatureCompositor()/m_renderFeatureCompositorPtr for why this
     // is a plain, zero-cost pointer with no dynamic_cast/RTTI involved.
-    auto renderFeatureCompositor = std::make_unique<RenderFeatureCompositor>(*this, m_renderer);
+    // editor-core-separation-9 campaign, PHASE2 - RenderFeatureCompositor's
+    // constructor gained a new trailing parameter, PluginRenderOperationRegistry&
+    // - passing the SAME m_pluginRenderOperationRegistry instance this class
+    // itself owns (never a second, duplicate registry instance).
+    auto renderFeatureCompositor =
+        std::make_unique<RenderFeatureCompositor>(*this, m_renderer, m_pluginRenderOperationRegistry);
     m_renderFeatureCompositorPtr = renderFeatureCompositor.get();
     m_capabilityOrchestrators.push_back(std::move(renderFeatureCompositor));
 }

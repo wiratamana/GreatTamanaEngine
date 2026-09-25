@@ -365,6 +365,21 @@ add_library(gte_core STATIC
     # real PluginRenderPassBuilderAdapter_v3 is the first real consumer.
     src/Core/Plugins/PluginRenderResourceTranslation.h
     src/Core/Plugins/PluginRenderResourceTranslation.cpp
+    # editor-core-separation-9 campaign, PHASE2
+    # (PHASE2_OPERATION_REGISTRY_AND_ADAPTER_V3.md) - the REAL, host-owned,
+    # growable, string-keyed PluginRenderOperationRegistry (also the new
+    # PERMANENT home of the RenderFeatureOps.comp/RenderFeatureBlend.comp
+    # pipeline ownership, migrated out of RenderFeatureCompositor - a pure
+    # refactor, zero _v2 behavior change), the real PluginRenderPassBuilderAdapter_v3
+    # (the gte_core-side IPluginRenderPassBuilder_v3 implementation), and its
+    # own small, pure, Tier-1-testable validation-logic header (no .cpp - every
+    # function is a small inline pure function, mirroring
+    # PluginRenderResourceTranslation.h's own PHASE1 precedent).
+    src/Core/Plugins/PluginRenderOperationRegistry.h
+    src/Core/Plugins/PluginRenderOperationRegistry.cpp
+    src/Core/Plugins/PluginRenderPassBuilderAdapter_v3.h
+    src/Core/Plugins/PluginRenderPassBuilderAdapter_v3.cpp
+    src/Core/Plugins/PluginRenderPassBuilderAdapterV3Validation.h
     # editor-core-separation-1 campaign, PHASE10
     # (PHASE10_ISURFACEPROVIDER_INTERFACE_AND_WINDOW_INVERSION.md) - the
     # abstract surface-provider interface Renderer/VulkanSurface now depend on
@@ -840,6 +855,19 @@ if(GTE_ENABLE_PLUGINS)
     # AND_PROPOSAL_2026-09-25.md Part 1.5).
     add_subdirectory(plugins/demo_render_feature_v2)
     add_subdirectory(plugins/demo_render_feature_v2_second)
+    # editor-core-separation-9 campaign, PHASE2
+    # (PHASE2_OPERATION_REGISTRY_AND_ADAPTER_V3.md, Step 3.5) - the three
+    # PERMANENT _v3 demo plugins, proving the new, generic Dispatch(opId, ...)
+    # mechanism faithfully reimplements _v2's exact 3 existing effects -
+    # demo_render_feature_v3 (RED solid fill, A/B against demo_render_feature_v2),
+    # demo_render_feature_v3_second (BLUE radial vignette, A/B against
+    # demo_render_feature_v2_second), demo_render_feature_v3_third
+    # (solid-fill-then-color-grade, no existing _v2 baseline - see
+    # PHASE2_COMPLETION_REPORT.md). demo_render_feature_v3 is also the
+    # PRIMARY _v3 demo plugin PHASE3 adds its own 2-pass GPU blur demo to.
+    add_subdirectory(plugins/demo_render_feature_v3)
+    add_subdirectory(plugins/demo_render_feature_v3_second)
+    add_subdirectory(plugins/demo_render_feature_v3_third)
 endif()
 
 # editor-core-separation-1 campaign, PHASE18

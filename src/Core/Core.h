@@ -12,6 +12,14 @@
 #include "../Renderer/Culling/GpuDrivenBatchDebugInfo.h"
 #include "../Renderer/MeshHandle.h"
 #include "../Renderer/PipelineHandle.h"
+// editor-core-separation-9 campaign, PHASE2
+// (PHASE2_OPERATION_REGISTRY_AND_ADAPTER_V3.md) - a plain VALUE member
+// (m_pluginRenderOperationRegistry below), never a pointer/unique_ptr/
+// forward-declared reference - Core.h must #include the FULL type here
+// (unlike IPluginCapabilityOrchestrator/RenderFeatureCompositor, both only
+// ever forward-declared, since Core only ever holds THOSE behind
+// std::unique_ptr/a raw non-owning pointer).
+#include "Plugins/PluginRenderOperationRegistry.h"
 #include "../Renderer/Renderer.h"
 #include "../Renderer/RenderGraph/RenderGraph.h"
 #include "../Renderer/RenderGraph/RenderPipeline.h"
@@ -436,6 +444,16 @@ private:
     // parameter) only; m_renderGraph needs m_renderer already constructed;
     // m_game/m_engineContext have no dependency on either.
     Renderer m_renderer;
+    // editor-core-separation-9 campaign, PHASE2
+    // (PHASE2_OPERATION_REGISTRY_AND_ADAPTER_V3.md) - the ONE
+    // PluginRenderOperationRegistry instance, shared by RenderFeatureCompositor
+    // for the entire process lifetime (constructed in RegisterBuiltinCapabilityOrchestrators(),
+    // called from this class's own constructor BODY - i.e. after every member
+    // is already constructed - so declaration ORDER here only has to satisfy
+    // this member's OWN constructor, which takes `Renderer&` by reference:
+    // must be declared AFTER m_renderer, which it is). Deliberately declared
+    // BEFORE m_capabilityOrchestrators (far below) per this phase's own plan.
+    PluginRenderOperationRegistry m_pluginRenderOperationRegistry;
     rg::RenderGraph m_renderGraph;
     Game m_game;
     EngineContext m_engineContext;
