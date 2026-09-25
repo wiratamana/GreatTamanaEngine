@@ -3,6 +3,7 @@
 #include "../EditorContext.h"
 #include "../RenderGraphDotExport.h"
 #include "../../Core/Logging.h"
+#include "../../Core/Plugins/RenderFeatureCompositor.h"
 #include "../../Renderer/RenderGraph/RenderGraph.h"
 #include "../../Renderer/RenderGraph/RenderGraphSnapshotFormatting.h"
 
@@ -38,18 +39,45 @@ std::vector<std::string> ExtractResourceRefNames(const std::vector<rg::RenderGra
     return names;
 }
 
-void BuildPassRow(const rg::RenderGraphPassMetadata& pass)
+// editor-core-separation-8 campaign, PHASE4
+// (PHASE4_RENDER_GRAPH_PANEL_CONTROLS.md, Step 3.1) - the new FIRST column,
+// "Enabled". Placed before "Pass" (rather than appended at the end) so an
+// unchecked box sits immediately to the LEFT of the pass name it controls -
+// every other column below is simply shifted by a uniform +1 index. This is
+// the first place in this file a checkbox actually MUTATES Core-owned state
+// (rg::RenderPassToggleRegistry) directly from the Editor UI, per
+// PHASE0_MASTER_STRATEGY.md's Step 2.6 (same thread, no bridge needed).
+void BuildPassRow(const rg::RenderGraphPassMetadata& pass, rg::RenderPassToggleRegistry& renderPassToggleRegistry)
 {
     ImGui::TableNextRow();
 
     ImGui::TableSetColumnIndex(0);
+    bool enabled = renderPassToggleRegistry.IsEnabled(pass.name);
+    // ImGui::Checkbox's own label must be unique across the WHOLE panel
+    // (ImGui IDs are label-derived by default) - "##Enabled_<passName>"
+    // mirrors this file's own existing "RgPasses##" + idSuffix ImGui-ID-
+    // uniqueness convention (BuildRegimeSection()).
+    const std::string checkboxId = std::string("##Enabled_") + pass.name;
+    if (ImGui::Checkbox(checkboxId.c_str(), &enabled)) {
+        renderPassToggleRegistry.SetEnabled(pass.name, enabled);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Unchecking this disables \"%s\" starting next frame - it will stop appearing in this "
+                           "table entirely once disabled (see the \"Disabled Built-In Passes\" section below). "
+                           "If this same name appears in BOTH the Offscreen Regime table (Game View + Scene View "
+                           "share it), toggling it here affects EVERY row with this exact name at once - there is "
+                           "no per-view control (see PHASE0_MASTER_STRATEGY.md's Step 2.1).",
+            pass.name.c_str());
+    }
+
+    ImGui::TableSetColumnIndex(1); // was 0
     if (pass.isCulled) {
         ImGui::TextDisabled("%s", pass.name.empty() ? "(unnamed)" : pass.name.c_str());
     } else {
         ImGui::TextUnformatted(pass.name.empty() ? "(unnamed)" : pass.name.c_str());
     }
 
-    ImGui::TableSetColumnIndex(1);
+    ImGui::TableSetColumnIndex(2); // was 1
     if (pass.isCulled) {
         ImGui::TextDisabled("culled");
         if (ImGui::IsItemHovered()) {
@@ -60,30 +88,31 @@ void BuildPassRow(const rg::RenderGraphPassMetadata& pass)
         ImGui::Text("%u", pass.drawCallCount);
     }
 
-    ImGui::TableSetColumnIndex(2);
+    ImGui::TableSetColumnIndex(3); // was 2
     if (!pass.isCulled) {
         ImGui::Text("%u", pass.triangleCount);
     } else {
         ImGui::TextDisabled("-");
     }
 
-    ImGui::TableSetColumnIndex(3);
+    ImGui::TableSetColumnIndex(4); // was 3
     if (!pass.isCulled) {
         ImGui::TextUnformatted(pass.gpuTimingText.c_str());
     } else {
         ImGui::TextDisabled("-");
     }
 
-    ImGui::TableSetColumnIndex(4);
+    ImGui::TableSetColumnIndex(5); // was 4
     const std::string reads = rg::JoinNames(ExtractResourceRefNames(pass.reads));
     ImGui::TextUnformatted(reads.c_str());
 
-    ImGui::TableSetColumnIndex(5);
+    ImGui::TableSetColumnIndex(6); // was 5
     const std::string writes = rg::JoinNames(ExtractResourceRefNames(pass.writes));
     ImGui::TextUnformatted(writes.c_str());
 }
 
-void BuildPassTable(const char* tableId, const rg::RenderGraphRegimeMetadata& regime)
+void BuildPassTable(
+    const char* tableId, const rg::RenderGraphRegimeMetadata& regime, rg::RenderPassToggleRegistry& renderPassToggleRegistry)
 {
     if (regime.passes.empty()) {
         ImGui::TextDisabled("No passes were declared the last time this regime ran.");
@@ -107,7 +136,12 @@ void BuildPassTable(const char* tableId, const rg::RenderGraphRegimeMetadata& re
     // below, so a corrupted weight can never survive to be reloaded.
     constexpr ImGuiTableFlags tableFlags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable
         | ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings;
-    if (ImGui::BeginTable(tableId, 6, tableFlags)) {
+    // editor-core-separation-8 campaign, PHASE4 - column count is now 7 (was
+    // 6): the new "Enabled" column is the FIRST TableSetupColumn() call
+    // below, matching BuildPassRow()'s own new column-index-0 checkbox
+    // exactly. Every other TableSetupColumn() call below is unchanged.
+    if (ImGui::BeginTable(tableId, 7, tableFlags)) {
+        ImGui::TableSetupColumn("Enabled", ImGuiTableColumnFlags_WidthFixed, 60.0f);
         ImGui::TableSetupColumn("Pass", ImGuiTableColumnFlags_WidthFixed, 110.0f);
         ImGui::TableSetupColumn("Draws", ImGuiTableColumnFlags_WidthFixed, 55.0f);
         ImGui::TableSetupColumn("Tris", ImGuiTableColumnFlags_WidthFixed, 65.0f);
@@ -117,7 +151,7 @@ void BuildPassTable(const char* tableId, const rg::RenderGraphRegimeMetadata& re
         ImGui::TableHeadersRow();
 
         for (const rg::RenderGraphPassMetadata& pass : regime.passes) {
-            BuildPassRow(pass);
+            BuildPassRow(pass, renderPassToggleRegistry);
         }
 
         ImGui::EndTable();
@@ -174,12 +208,13 @@ void BuildResourceTable(const char* tableId, const rg::RenderGraphRegimeMetadata
     }
 }
 
-void BuildRegimeSection(const char* label, const char* idSuffix, const rg::RenderGraphRegimeMetadata& regime)
+void BuildRegimeSection(const char* label, const char* idSuffix, const rg::RenderGraphRegimeMetadata& regime,
+    rg::RenderPassToggleRegistry& renderPassToggleRegistry)
 {
     ImGui::SeparatorText(label);
 
     const std::string passTableId = std::string("RgPasses##") + idSuffix;
-    BuildPassTable(passTableId.c_str(), regime);
+    BuildPassTable(passTableId.c_str(), regime, renderPassToggleRegistry);
 
     ImGui::Spacing();
     ImGui::TextDisabled("Resources");
@@ -233,7 +268,20 @@ void BuildGpuDrivenBatchesSection(const std::vector<GpuDrivenBatchDebugInfo>& ba
 // resolves this ordering exactly ONCE, at plugin-load time, and it never
 // changes again for the remaining lifetime of the process, so there is
 // nothing for "Pause" to usefully freeze here.
-void BuildPluginRenderFeaturesSection(const std::vector<RenderFeatureDebugEntry>& entries)
+//
+// editor-core-separation-8 campaign, PHASE4
+// (PHASE4_RENDER_GRAPH_PANEL_CONTROLS.md, Step 3.3) - gains a per-entry
+// "Enabled" checkbox and an editable priority field, both live-mutating
+// `renderFeatureCompositor` directly (main-thread-only, same as
+// BuildPassRow()'s new checkbox above - see PHASE0_MASTER_STRATEGY.md's Step
+// 2.6). `renderFeatureCompositor == nullptr` (no loaded _v2 plugin / a
+// degraded build) means the widgets still render but any edit is silently a
+// no-op - mirrors this whole campaign's "null bridge/pointer degrades
+// gracefully, never crashes" discipline; deliberately NOT wrapped in
+// ImGui::BeginDisabled() for this, since a transient null is not a real,
+// reachable, steady-state UI mode worth a special disabled-look here.
+void BuildPluginRenderFeaturesSection(
+    const std::vector<RenderFeatureDebugEntry>& entries, RenderFeatureCompositor* renderFeatureCompositor)
 {
     ImGui::SeparatorText("Plugin Render Features");
     if (entries.empty()) {
@@ -242,18 +290,77 @@ void BuildPluginRenderFeaturesSection(const std::vector<RenderFeatureDebugEntry>
     }
 
     for (const RenderFeatureDebugEntry& entry : entries) {
-        ImGui::Text("[%s] %s - priority %d, blend %s", entry.stage.c_str(), entry.name.c_str(), entry.priority,
-            entry.blendMode.c_str());
+        ImGui::PushID(entry.name.c_str());
+
+        bool enabled = entry.enabled;
+        if (ImGui::Checkbox("##FeatureEnabled", &enabled) && renderFeatureCompositor != nullptr) {
+            renderFeatureCompositor->SetFeatureEnabled(entry.name, enabled);
+        }
+        ImGui::SameLine();
+
+        int priority = entry.priority;
+        ImGui::SetNextItemWidth(80.0f);
+        if (ImGui::InputInt("##FeaturePriority", &priority) && renderFeatureCompositor != nullptr) {
+            renderFeatureCompositor->SetFeaturePriority(entry.name, priority);
+        }
+        ImGui::SameLine();
+
+        ImGui::Text("[%s] %s - blend %s%s", entry.stage.c_str(), entry.name.c_str(), entry.blendMode.c_str(),
+            entry.enabled ? "" : " (DISABLED)");
+
+        ImGui::PopID();
+    }
+}
+
+// editor-core-separation-8 campaign, PHASE4
+// (PHASE4_RENDER_GRAPH_PANEL_CONTROLS.md, Step 3.2) - the ONLY place a
+// built-in pass the caller has switched OFF is still visible at all (see
+// PHASE0_MASTER_STRATEGY.md's Step 2.4 - a disabled pass leaves ZERO trace
+// in rg::RenderGraphMetadata, since it is never declared into the graph at
+// all). Reads renderPassToggleRegistry.ListAll() directly - the registry
+// itself, not the metadata, is this section's own source of truth.
+//
+// Uses the exact same "##Enabled_" + name checkbox-ID scheme BuildPassRow()
+// above already uses (rather than ImGui::PushID()/PopID() per row) - this is
+// a deliberate, single, consistent ID convention across both of this
+// phase's new checkbox call sites, per this phase doc's own explicit "pick
+// ONE convention... do not mix both styles in the same file" instruction.
+void BuildDisabledBuiltInPassesSection(rg::RenderPassToggleRegistry& renderPassToggleRegistry)
+{
+    const std::vector<rg::RenderPassToggleState> allStates = renderPassToggleRegistry.ListAll();
+    std::vector<rg::RenderPassToggleState> disabled;
+    for (const rg::RenderPassToggleState& state : allStates) {
+        if (!state.enabled) {
+            disabled.push_back(state);
+        }
+    }
+
+    ImGui::SeparatorText("Disabled Built-In Passes");
+    if (disabled.empty()) {
+        ImGui::TextDisabled("Every known built-in pass is currently enabled.");
+        return;
+    }
+    for (const rg::RenderPassToggleState& state : disabled) {
+        bool enabled = false; // always false here by construction (this loop only ever sees disabled entries).
+        const std::string checkboxId = "##Enabled_" + state.name;
+        if (ImGui::Checkbox(checkboxId.c_str(), &enabled)) {
+            renderPassToggleRegistry.SetEnabled(state.name, enabled);
+        }
+        ImGui::SameLine();
+        ImGui::TextUnformatted(state.name.c_str());
+        if (!state.everDeclaredThisSession) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("(never run yet this session)");
+        }
     }
 }
 
 } // namespace
 
-void RenderGraphPanel::Build(EditorContext& /*ctx*/, const rg::RenderGraph& renderGraph,
+void RenderGraphPanel::Build(EditorContext& ctx, const rg::RenderGraph& renderGraph,
     const std::vector<GpuDrivenBatchDebugInfo>& gpuDrivenBatchDebugInfo,
     const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries,
-    rg::RenderPassToggleRegistry& /*renderPassToggleRegistry*/, // editor-core-separation-8, PHASE3: signature-only - PHASE4 wires real UI.
-    RenderFeatureCompositor* /*renderFeatureCompositor*/) // editor-core-separation-8, PHASE3: signature-only - PHASE4 wires real UI.
+    rg::RenderPassToggleRegistry& renderPassToggleRegistry, RenderFeatureCompositor* renderFeatureCompositor)
 {
     ImGui::Begin("Render Graph");
 
@@ -305,12 +412,39 @@ void RenderGraphPanel::Build(EditorContext& /*ctx*/, const rg::RenderGraph& rend
     // GPU-Driven Batches section (same "live, actionable ordering signal,
     // shown early, before the two much-longer regime pass/resource tables"
     // placement logic that section's own comment already documents).
-    BuildPluginRenderFeaturesSection(metadata.renderFeatures);
+    BuildPluginRenderFeaturesSection(metadata.renderFeatures, renderFeatureCompositor);
     ImGui::Spacing();
 
-    BuildRegimeSection("Offscreen Regime (Game View + Scene View)", "Offscreen", metadata.offscreenRegime);
+    // editor-core-separation-8 campaign, PHASE4
+    // (PHASE4_RENDER_GRAPH_PANEL_CONTROLS.md, Step 3.4) - placed immediately
+    // after Plugin Render Features and BEFORE the two regime sections, so a
+    // caller sees "what's currently OFF" before scrolling past the (often
+    // much longer) live pass/resource tables - mirrors this file's own
+    // existing placement rationale for GPU-Driven Batches/Plugin Render
+    // Features above ("this panel's own newest, most immediately actionable
+    // live signal, shown early").
+    BuildDisabledBuiltInPassesSection(renderPassToggleRegistry);
     ImGui::Spacing();
-    BuildRegimeSection("Pipelined Regime (Present)", "Present", metadata.presentRegime);
+
+    BuildRegimeSection(
+        "Offscreen Regime (Game View + Scene View)", "Offscreen", metadata.offscreenRegime, renderPassToggleRegistry);
+    ImGui::Spacing();
+    BuildRegimeSection("Pipelined Regime (Present)", "Present", metadata.presentRegime, renderPassToggleRegistry);
+
+    // editor-core-separation-8 campaign, PHASE4 (Step 3.4) - a natural final
+    // "debug toggles" grouping, placed AFTER both regime sections and BEFORE
+    // "Export" - the exact same EditorContext bools ScenePanel.cpp's own two
+    // checkboxes already flip (never a copy/duplicate field), so this panel
+    // finally becomes a genuine one-stop place to toggle them too. These are
+    // PLAIN, direct EditorContext field writes, NOT routed through
+    // IEditorLayer - mirrors ScenePanel.cpp's own existing checkboxes exactly
+    // (see PHASE4_RENDER_GRAPH_PANEL_CONTROLS.md's Step 3.4 for why the 2
+    // IEditorLayer setters PHASE3 added exist only for the HTTP path,
+    // PHASE5).
+    ImGui::Spacing();
+    ImGui::SeparatorText("Debug Passes");
+    ImGui::Checkbox("Show Compute Blur (debug)", &ctx.showBlurredSceneOutput);
+    ImGui::Checkbox("Show GBuffer Validation (debug)", &ctx.showGBufferValidationOutput);
 
     // editor-core-separation-7 campaign, PHASE3 - the real "Export DOT"
     // implementation, finally wired up (disabled since the original Render
