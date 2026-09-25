@@ -2128,6 +2128,12 @@ set(GTE_TEST_SOURCES
     # of this file). Unconditional, since src/Core/Plugins/PluginHost.h/.cpp
     # is unconditionally in gte_core's own source list.
     Core/Plugins/PluginHostFailurePathTests.cpp
+    # editor-core-separation-9 campaign, PHASE1
+    # (PHASE1_RESOURCE_VOCABULARY_AND_ABI_FOUNDATION.md) - Tier-1 tests for
+    # the new, pure PluginRenderResourceTranslation.h/.cpp mapping functions.
+    # Unconditional, since src/Core/Plugins/PluginRenderResourceTranslation.h/.cpp
+    # is unconditionally in gte_core's own source list.
+    Core/Plugins/PluginRenderResourceTranslationTests.cpp
     Memory/GpuResourceHandleTests.cpp
     Encoding/Base64Tests.cpp
     Encoding/PixelConversionTests.cpp

@@ -357,6 +357,14 @@ add_library(gte_core STATIC
     src/Core/Plugins/PluginRenderPassBuilderAdapter_v2.cpp
     src/Core/Plugins/RenderFeatureCompositor.h
     src/Core/Plugins/RenderFeatureCompositor.cpp
+    # editor-core-separation-9 campaign, PHASE1
+    # (PHASE1_RESOURCE_VOCABULARY_AND_ABI_FOUNDATION.md) - the pure,
+    # Tier-1-tested, gte_core-internal translation layer mapping the new
+    # plugins/gte_plugin_abi/PluginRenderResource.h vocabulary onto the real
+    # internal rg:: render-graph types. Nothing calls this yet - PHASE2's
+    # real PluginRenderPassBuilderAdapter_v3 is the first real consumer.
+    src/Core/Plugins/PluginRenderResourceTranslation.h
+    src/Core/Plugins/PluginRenderResourceTranslation.cpp
     # editor-core-separation-1 campaign, PHASE10
     # (PHASE10_ISURFACEPROVIDER_INTERFACE_AND_WINDOW_INVERSION.md) - the
     # abstract surface-provider interface Renderer/VulkanSurface now depend on

@@ -60,4 +60,35 @@ public:
 
 inline constexpr const char* kIRenderFeatureModule_v2_Name = "IRenderFeatureModule_v2";
 
+class IPluginRenderPassBuilder_v3;
+
+// editor-core-separation-9 campaign, PHASE1
+// (PHASE1_RESOURCE_VOCABULARY_AND_ABI_FOUNDATION.md) - ADDITIVE new
+// interface, _v1/_v2 (above) completely untouched. See PluginRenderResource.h
+// and IPluginRenderPassBuilder_v3.h. This is the RECOMMENDED path for new
+// plugin authors going forward (PHASE0_MASTER_STRATEGY.md Locked Product
+// Decision #1) - _v2 remains fully supported, forever, for backward
+// compatibility. Forward-declares IPluginRenderPassBuilder_v3 rather than
+// #include-ing IPluginRenderPassBuilder_v3.h, mirroring how this same file
+// already forward-declares IPluginRenderPassBuilder_v2 for _v2's own
+// identical reason: keep this header light for anything that only needs
+// IRenderFeatureModule_v1.
+class IRenderFeatureModule_v3 {
+public:
+    virtual ~IRenderFeatureModule_v3() = default;
+
+    // Called exactly once, right after this plugin loads - identical
+    // contract to IRenderFeatureModule_v2::GetRenderFeatureDescriptor()
+    // above (same GtePluginRenderFeatureDescriptor struct, unchanged).
+    virtual GtePluginRenderFeatureDescriptor GetRenderFeatureDescriptor() const = 0;
+
+    // Called once per frame, per active view, ONLY while this plugin's own
+    // declared stage is one RenderFeatureCompositor actually processes this
+    // frame - identical calling contract to IRenderFeatureModule_v2::
+    // AddRenderGraphPasses() above, just with the new, generic _v3 builder.
+    virtual void AddRenderGraphPasses(IPluginRenderPassBuilder_v3& builder) = 0;
+};
+
+inline constexpr const char* kIRenderFeatureModule_v3_Name = "IRenderFeatureModule_v3";
+
 } // namespace gte
