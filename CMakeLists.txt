@@ -1397,6 +1397,21 @@ if(TRUE)
     gte_add_shader(GreatTamanaEditor src/Shaders/BoxBlur.comp)
 endif()
 
+# editor-core-separation-9 campaign, PHASE3
+# (PHASE3_GENERIC_RESOURCE_PLUMBING_AND_BLUR_DEMO_PROOF.md, Step 3.1) - the
+# `gte.builtin.blit_fullscreen` plugin registry operation's own shaders
+# (src/Core/Plugins/PluginRenderOperationRegistry.cpp's own
+# RegisterBlitFullscreen()) - a minimal fullscreen-triangle passthrough
+# fragment shader, this campaign's one brand-new, tiny, additive
+# GRAPHICS-kind registry operation. Always compiled/staged, since
+# PluginRenderOperationRegistry.cpp - the only thing that ever loads these -
+# is always compiled into gte_core today (same precedent as BoxBlur.comp
+# immediately above).
+if(TRUE)
+    gte_add_shader(GreatTamanaEditor src/Shaders/PluginBlitFullscreen.vert)
+    gte_add_shader(GreatTamanaEditor src/Shaders/PluginBlitFullscreen.frag)
+endif()
+
 # task_manager/mrt-1 campaign (Multi-Render-Target / G-Buffer support),
 # PHASE4 (PHASE4_GBUFFER_VALIDATION_PASS_AND_SHADER.md) - the "GBuffer
 # Validation" debug pass's own shaders (src/Editor/GBufferValidation.h/.cpp):

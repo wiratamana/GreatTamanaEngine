@@ -29,6 +29,8 @@
 // registry's own small read-only accessors instead of owning them directly.
 
 #include "../../Renderer/ComputePipeline.h"
+#include "../../Renderer/Mesh.h"
+#include "../../Renderer/Pipeline.h"
 
 #include <volk.h>
 
@@ -42,8 +44,10 @@
 namespace gte {
 
 class Renderer;
-class Pipeline; // forward declaration only - DrawFullscreenTriangle-kind entries' own
-                 // graphics Pipeline* (PHASE3 is the first real registrant of one).
+// editor-core-separation-9 campaign, PHASE3 - `Pipeline` (Renderer/Pipeline.h)
+// is now fully #included above (no longer merely forward-declared) - this
+// registry's own RegisterBlitFullscreen() constructs a real
+// std::optional<Pipeline> member, which needs the complete type.
 
 // The C++-side push-constant struct mirroring RenderFeatureOps.comp's own
 // `PushConstants` GLSL block byte-for-byte (4 vec4s, 64 bytes total, no
@@ -110,6 +114,19 @@ struct PluginRenderOpInfo {
     VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
     // DrawFullscreenTriangle-kind entries only (PHASE3 is the first real registrant):
     const Pipeline* graphicsPipeline = nullptr;
+    // editor-core-separation-9 campaign, PHASE3 - DrawFullscreenTriangle-kind
+    // entries only. `graphicsPipeline` above is built through the standard,
+    // shared `Pipeline` class (Renderer/Pipeline.h), which ALWAYS declares a
+    // real vertex-input binding (VertexLayout::PositionColor here) with no
+    // way to opt out - so SOMETHING real must be bound at that binding
+    // number before `vkCmdDraw()` or it is invalid Vulkan usage. This is a
+    // real (but throwaway/never-read-by-the-shader) 3-vertex Mesh's own
+    // VkBuffer, mirroring src/Editor/GBufferValidation.cpp's own identical
+    // "m_dummyTriangle" workaround for the exact same underlying reason
+    // (both this op's own vertex shader and GBufferValidation.vert derive a
+    // full-screen triangle purely from gl_VertexIndex, never reading real
+    // vertex attribute data).
+    VkBuffer dummyVertexBuffer = VK_NULL_HANDLE;
 };
 
 // Host-owned, growable, string-keyed operation registry - the Design Doc's
@@ -175,6 +192,15 @@ public:
 private:
     void RegisterUberOp(const char* id, std::uint32_t opCode);
     void RegisterBoxBlur();
+    // editor-core-separation-9 campaign, PHASE3
+    // (PHASE3_GENERIC_RESOURCE_PLUMBING_AND_BLUR_DEMO_PROOF.md, Step 3.2) -
+    // registers `gte.builtin.blit_fullscreen`, this campaign's ONE brand-new,
+    // tiny, additive GRAPHICS-kind registry operation (a minimal
+    // fullscreen-triangle passthrough fragment shader) - the second real
+    // proof, alongside RegisterBoxBlur() above (PHASE2), that a new
+    // operation lands with ZERO IPluginRenderPassBuilder_v3 interface
+    // change, this time for a GRAPHICS-kind operation.
+    void RegisterBlitFullscreen();
 
     // Shared helper both of the above call at the very end, once their own
     // PluginRenderOpInfo is otherwise fully filled in - a debug-only assert
@@ -208,6 +234,34 @@ private:
     // was written).
     std::optional<ComputePipeline> m_boxBlurPipeline;
     VkDescriptorSetLayout m_boxBlurDescriptorSetLayout = VK_NULL_HANDLE;
+
+    // editor-core-separation-9 campaign, PHASE3 - `gte.builtin.blit_fullscreen`'s
+    // OWN, separate graphics Pipeline/descriptor-set-layout, plus a real (but
+    // throwaway/never-read-by-the-shader) 3-vertex dummy Mesh - see
+    // PluginRenderOpInfo::dummyVertexBuffer's own doc comment above for
+    // exactly why the dummy Mesh is required (Pipeline's mandatory vertex
+    // binding, mirroring src/Editor/GBufferValidation.cpp's own identical
+    // "m_dummyTriangle" workaround). Built against a HARDCODED
+    // VK_FORMAT_R8G8B8A8_UNORM color format (deliberately NOT
+    // Renderer::ColorFormat()) - this op only ever draws into a `_v3`
+    // plugin's own private compositing target
+    // (RenderFeatureCompositor::EnsurePrivateTargetState()), which is ALWAYS
+    // created at that exact fixed format (RenderFeatureCompositor.cpp's own
+    // EnsureTextureSized()), never the swapchain's own negotiated
+    // Renderer::ColorFormat() - mirrors ComputeBlurValidation.cpp's/
+    // GBufferValidation.cpp's own identical, already-documented reasoning
+    // for their own private outputs ("this texture has no pipeline-sharing
+    // requirement with the swapchain/Game/Scene views at all, so there is no
+    // reason to inherit the swapchain's own negotiated format"). The depth
+    // format DOES use the real, negotiated Renderer::DepthFormat() (AGENTS.md's
+    // "Render Target Format Matching" rule applies normally there, since
+    // every RenderTexture's own companion DepthBuffer - including a `_v3`
+    // plugin's own private target - is always created against that same
+    // real depth format, never a fixed literal - see RenderTexture.h/
+    // GpuResourceFactory::CreateRenderTexture()).
+    std::optional<Pipeline> m_blitPipeline;
+    VkDescriptorSetLayout m_blitDescriptorSetLayout = VK_NULL_HANDLE;
+    std::optional<Mesh> m_blitDummyTriangle;
 
     std::unordered_map<std::string, PluginRenderOpInfo> m_ops;
 };

@@ -166,6 +166,37 @@ void PluginRenderPassBuilderAdapter_v3::AddGraphicsPass(
             if (setup != nullptr) {
                 setup(ctxAdapter, userData);
             }
+            // editor-core-separation-9 campaign, PHASE3
+            // (PHASE3_GENERIC_RESOURCE_PLUMBING_AND_BLUR_DEMO_PROOF.md) - a
+            // FIFTH, real hazard found while implementing this phase's own
+            // gte.builtin.blit_fullscreen (the first real
+            // DrawFullscreenTriangle-kind operation): its graphics Pipeline
+            // is built through the standard, shared `Pipeline` class
+            // (Renderer/Pipeline.h), which ALWAYS unconditionally enables a
+            // real depth test (VK_COMPARE_OP_LESS) with no way to opt out
+            // (see Pipeline.h's own class comment) - confirmed by direct
+            // code reading, the EXACT same finding
+            // src/Editor/GBufferValidation.cpp's own header comment already
+            // documents for the identical underlying shader technique. A
+            // `_v3` plugin's own ABI (IPluginPassSetupContext) has NO method
+            // to declare a depth attachment itself (the Design Doc's own
+            // curated PluginResourceAccess vocabulary never included one -
+            // PHASE0_MASTER_STRATEGY.md Step 2.4), so this adapter
+            // transparently attaches a scratch/unused depth-stencil write
+            // against THIS PLUGIN'S OWN private output target's companion
+            // depth buffer (every RenderTexture always owns one -
+            // RenderTexture.h/RenderFeatureCompositor's own
+            // EnsurePrivateTargetState()) - cleared to 1.0f every time,
+            // mirroring GBufferValidation.cpp's own identical
+            // kGBufferScratchClearDepth=1.0f workaround exactly (a real,
+            // hand-verified value that guarantees this op's own full-screen
+            // triangle, drawn at a fixed NDC z=0.0, always survives the
+            // mandatory VK_COMPARE_OP_LESS test: 0.0 < 1.0). Safe for THIS
+            // CAMPAIGN'S OWN SCOPE, where the only registered
+            // DrawFullscreenTriangle-kind operation always draws its real
+            // color output into GetPrivateOutputTarget() (Locked Product
+            // Decision #5) - never a texture minted via CreateTexture().
+            pass.WriteDepthStencilAttachment(m_privateTarget, 1.0f);
         },
         // NOT SAFE to capture `this` here - see this file's own top-of-file
         // "FOURTH hazard" doc comment. Every captured name below is either a
@@ -467,14 +498,15 @@ bool PluginRenderPassBuilderAdapter_v3::CommandRecorderAdapter::DrawFullscreenTr
         return false;
     }
 
-    // PHASE2 registers no DrawFullscreenTriangle-kind operation yet (PHASE3's
-    // gte.builtin.blit_fullscreen is the first real registrant) - this
-    // branch is therefore never reachable today (ValidateCommon() above
-    // already refuses any opId whose registered `kind` does not match
-    // PluginRenderOpKind::DrawFullscreenTriangle, and no such entry exists
-    // yet) - implemented defensively anyway, per this phase's own plan
-    // ("implement the full method now so PHASE3 does not need to touch this
-    // file again").
+    // editor-core-separation-9 campaign, PHASE3
+    // (PHASE3_GENERIC_RESOURCE_PLUMBING_AND_BLUR_DEMO_PROOF.md) -
+    // `gte.builtin.blit_fullscreen` is this campaign's first real
+    // DrawFullscreenTriangle-kind registrant (PluginRenderOperationRegistry::
+    // RegisterBlitFullscreen()), so this branch is genuinely reachable now -
+    // kept as a real, defensive guard regardless (a future registry entry
+    // whose own registration failed partway through, leaving
+    // graphicsPipeline null, must still be refused loudly here rather than
+    // dereferencing a null pointer below).
     if (op->graphicsPipeline == nullptr) {
         GTE_LOG_WARNING("PluginRenderPassBuilderAdapter_v3",
             std::string("DrawFullscreenTriangle refused - opId \"") + opId
@@ -498,6 +530,25 @@ bool PluginRenderPassBuilderAdapter_v3::CommandRecorderAdapter::DrawFullscreenTr
     vkCmdBindPipeline(m_ctx.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, op->graphicsPipeline->Native());
     vkCmdBindDescriptorSets(
         m_ctx.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, op->graphicsPipeline->Layout(), 0, 1, &descriptorSet, 0, nullptr);
+    // editor-core-separation-9 campaign, PHASE3 - unlike
+    // AtmosphereSkyBackgroundRenderer's own raw, hand-rolled VkPipeline
+    // (which declares NO vertex input state at all), this op's own
+    // graphicsPipeline is built through the standard, shared `Pipeline`
+    // class (Renderer/Pipeline.h), which ALWAYS declares a real
+    // VertexLayout::PositionColor vertex-input binding with no way to opt
+    // out - so SOMETHING real must be bound at that binding number before
+    // this draw, or it is invalid Vulkan usage (mirrors
+    // src/Editor/GBufferValidation.cpp's own identical "m_dummyTriangle"
+    // workaround exactly - see PluginRenderOperationRegistry::
+    // RegisterBlitFullscreen()'s own doc comment for the full reasoning).
+    // This op's own vertex shader (Shaders/PluginBlitFullscreen.vert) never
+    // reads this data - it derives a full-screen triangle purely from
+    // gl_VertexIndex.
+    if (op->dummyVertexBuffer != VK_NULL_HANDLE) {
+        const VkBuffer vertexBuffer = op->dummyVertexBuffer;
+        const VkDeviceSize offset = 0;
+        vkCmdBindVertexBuffers(m_ctx.cmd, 0, 1, &vertexBuffer, &offset);
+    }
     if (op->maxParamBytes > 0) {
         vkCmdPushConstants(m_ctx.cmd, op->graphicsPipeline->Layout(), VK_SHADER_STAGE_FRAGMENT_BIT, 0,
             static_cast<std::uint32_t>(op->maxParamBytes), scratch);
