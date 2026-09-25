@@ -1418,19 +1418,20 @@ gte_add_shader(GreatTamanaEditor src/Shaders/AtmosphereAerialPerspectiveVolumeDe
 # EXTRA_DEPENDS.
 gte_add_shader(GreatTamanaEditor src/Shaders/VolumeTexturePreview.comp)
 
-# editor-core-separation-6 campaign, PHASE4
-# (PHASE4_RENDER_FEATURE_COMPOSITOR_CORE_AND_ORDERING.md) - the `_v2`
+# editor-core-separation-6 campaign, PHASE4/PHASE5
+# (PHASE4_RENDER_FEATURE_COMPOSITOR_CORE_AND_ORDERING.md /
+# PHASE5_BLEND_MODE_COMPUTE_SHADER_AND_PREUI_STAGE.md) - the `_v2`
 # render-feature compositor's own two compute shaders: RenderFeatureOps.comp
 # (the "uber" shader implementing all 3 fixed IPluginRenderPassBuilder_v2
-# drawing operations, opCode-selected) and RenderFeatureBlendStub.comp (this
-# phase's own THROWAWAY, Replace-equivalent blend/seed dispatch - PHASE5
-# deletes it, replacing it with the real, permanent, multi-mode
-# RenderFeatureBlend.comp). Same unconditional (NOT GTE_ENABLE_EDITOR-gated)
-# treatment as every other core Renderer-tier shader above - RenderFeatureCompositor
-# is always compiled into gte_core (src/Core/Plugins/RenderFeatureCompositor.cpp).
-# Neither #includes AtmosphereCommon.glsl, so no EXTRA_DEPENDS.
+# drawing operations, opCode-selected) and RenderFeatureBlend.comp (the
+# real, permanent, 5-mode blend uber-shader - PHASE5 replaced PHASE4's own
+# throwaway RenderFeatureBlendStub.comp with this). Same unconditional (NOT
+# GTE_ENABLE_EDITOR-gated) treatment as every other core Renderer-tier
+# shader above - RenderFeatureCompositor is always compiled into gte_core
+# (src/Core/Plugins/RenderFeatureCompositor.cpp). Neither #includes
+# AtmosphereCommon.glsl, so no EXTRA_DEPENDS.
 gte_add_shader(GreatTamanaEditor src/Shaders/RenderFeatureOps.comp)
-gte_add_shader(GreatTamanaEditor src/Shaders/RenderFeatureBlendStub.comp)
+gte_add_shader(GreatTamanaEditor src/Shaders/RenderFeatureBlend.comp)
 
 # task_manager/frame-debugger-3 campaign, PHASE6
 # (PHASE6_CHANNELS_AND_LEVELS_REAL_PREVIEW.md) - the Frame Debugger's own

@@ -161,7 +161,7 @@ RenderFeatureCompositor::BlendStageState& RenderFeatureCompositor::EnsureBlendSt
 
     BlendStageState state;
     state.blendDescriptorSet =
-        ComputeDescriptorSet(m_renderer.AllocateComputeDescriptorSet(m_blendStubDescriptorSetLayout));
+        ComputeDescriptorSet(m_renderer.AllocateComputeDescriptorSet(m_blendDescriptorSetLayout));
     const auto inserted = m_blendStageStates.emplace(internedName, std::move(state));
     return inserted.first->second;
 }
@@ -199,30 +199,36 @@ void RenderFeatureCompositor::EnsureOpsInitialized(Renderer& renderer)
         std::vector<VkDescriptorSetLayout>{ m_opsDescriptorSetLayout }, pushConstantRange));
 }
 
-void RenderFeatureCompositor::EnsureBlendStubInitialized(Renderer& renderer)
+void RenderFeatureCompositor::EnsureBlendPipelineInitialized(Renderer& renderer)
 {
-    if (m_blendStubPipeline.has_value()) {
+    if (m_blendPipeline.has_value()) {
         return;
     }
 
     const Renderer::VulkanContextInfo context = renderer.GetVulkanContextInfo();
     m_device = context.device;
 
-    // Binding convention (matches Shaders/RenderFeatureBlendStub.comp
-    // exactly): binding 0 = dstIn, binding 1 = srcIn (both read-only
-    // combined image samplers), binding 2 = destinationImage (a write-only
-    // storage image) - DELIBERATELY IDENTICAL in shape to PHASE5's own real,
-    // permanent RenderFeatureBlend.comp, so that future swap requires no
-    // descriptor-set-layout/binding-kind change (PHASE4_RENDER_FEATURE_COMPOSITOR_CORE_AND_ORDERING.md's
-    // own Step 3.6).
+    // Binding convention (matches Shaders/RenderFeatureBlend.comp exactly):
+    // binding 0 = dstIn, binding 1 = srcIn (both read-only combined image
+    // samplers), binding 2 = destinationImage (a write-only storage image) -
+    // deliberately identical in shape to PHASE4's own throwaway
+    // RenderFeatureBlendStub.comp (PHASE4_RENDER_FEATURE_COMPOSITOR_CORE_AND_ORDERING.md's
+    // own Step 3.6), so this swap needed zero descriptor-set-layout/
+    // binding-kind change - only a new push-constant range and a new shader
+    // module.
     DescriptorSetLayoutBuilder layoutBuilder(m_device);
-    m_blendStubDescriptorSetLayout = layoutBuilder.AddCombinedImageSampler(/*binding=*/0)
-                                          .AddCombinedImageSampler(/*binding=*/1)
-                                          .AddStorageImage(/*binding=*/2)
-                                          .Build();
+    m_blendDescriptorSetLayout = layoutBuilder.AddCombinedImageSampler(/*binding=*/0)
+                                      .AddCombinedImageSampler(/*binding=*/1)
+                                      .AddStorageImage(/*binding=*/2)
+                                      .Build();
 
-    m_blendStubPipeline.emplace(renderer.CreateComputePipeline(
-        "shaders/RenderFeatureBlendStub.comp.spv", std::vector<VkDescriptorSetLayout>{ m_blendStubDescriptorSetLayout }));
+    VkPushConstantRange pushConstantRange{};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = sizeof(RenderFeatureBlendPushConstants);
+
+    m_blendPipeline.emplace(renderer.CreateComputePipeline("shaders/RenderFeatureBlend.comp.spv",
+        std::vector<VkDescriptorSetLayout>{ m_blendDescriptorSetLayout }, pushConstantRange));
 }
 
 void RenderFeatureCompositor::DispatchOps(rg::RenderGraphBuilder& builder, rg::TextureHandle privateTarget,
@@ -263,9 +269,9 @@ void RenderFeatureCompositor::DispatchOps(rg::RenderGraphBuilder& builder, rg::T
         rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::AfterEverything);
 }
 
-void RenderFeatureCompositor::DispatchBlendStub(rg::RenderGraphBuilder& builder, rg::TextureHandle dstIn,
+void RenderFeatureCompositor::DispatchBlend(rg::RenderGraphBuilder& builder, rg::TextureHandle dstIn,
     VkSampler dstInSampler, rg::TextureHandle srcIn, VkSampler srcInSampler, rg::TextureHandle destination,
-    BlendStageState& state, const char* debugName, VkExtent2D extent)
+    BlendStageState& state, const char* debugName, VkExtent2D extent, RenderFeatureBlendMode blendMode)
 {
     builder.AddRenderPass(debugName, rg::PassKind::Compute, rg::ViewScope::Shared, rg::RenderPassCategory::General,
         [dstIn, srcIn, destination](rg::RenderGraphBuilder::PassBuilder& pass) {
@@ -273,7 +279,7 @@ void RenderFeatureCompositor::DispatchBlendStub(rg::RenderGraphBuilder& builder,
             pass.ReadTexture(srcIn, rg::ResourceAccess::ShaderRead);
             pass.WriteTexture(destination, rg::ResourceAccess::ComputeShaderWrite);
         },
-        [this, &state, dstIn, dstInSampler, srcIn, srcInSampler, destination, extent](rg::PassContext& ctx) {
+        [this, &state, dstIn, dstInSampler, srcIn, srcInSampler, destination, extent, blendMode](rg::PassContext& ctx) {
             const rg::PassContext::ResolvedTexture dstResolved = ctx.resolveTexture(dstIn);
             const rg::PassContext::ResolvedTexture srcResolved = ctx.resolveTexture(srcIn);
             const rg::PassContext::ResolvedTexture destResolved = ctx.resolveTexture(destination);
@@ -285,25 +291,28 @@ void RenderFeatureCompositor::DispatchBlendStub(rg::RenderGraphBuilder& builder,
                     ComputeDescriptorWrite::StorageImage(2, destResolved.view),
                 });
 
+            RenderFeatureBlendPushConstants pushConstants;
+            pushConstants.blendModeAndPad[0] = static_cast<float>(static_cast<std::uint32_t>(blendMode));
+
             const Extent3D groupCounts =
                 ComputeGroupCount3D(Extent3D{ extent.width, extent.height, 1 }, Extent3D{ 16, 16, 1 });
 
             m_renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-            m_renderer.Dispatch(*m_blendStubPipeline, state.blendDescriptorSet.Native(), nullptr, 0,
-                groupCounts.width, groupCounts.height, groupCounts.depth);
+            m_renderer.Dispatch(*m_blendPipeline, state.blendDescriptorSet.Native(), &pushConstants,
+                sizeof(pushConstants), groupCounts.width, groupCounts.height, groupCounts.depth);
             m_renderer.EndGraphPassRecording();
         },
         rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::AfterEverything);
 }
 
-// editor-core-separation-6 campaign, PHASE4 (Step 3.4) - the real
-// end-to-end pipeline: seed the chain (closing the same-physical-image
-// read+write hazard for the N == 1 case), then walk every entry in this
-// view's combined (PostComposite, then PreUI) list, giving each its own
-// private target to draw into and its own dedicated blend dispatch into
-// either the next accumulator or (for the LAST entry) directly into the
-// view's own real, final handle (PHASE0_MASTER_STRATEGY.md's Locked Design
-// Decision #10).
+// editor-core-separation-6 campaign, PHASE4/PHASE5 - the real end-to-end
+// pipeline: seed the chain (closing the same-physical-image read+write
+// hazard for the N == 1 case), then walk every entry in this view's
+// combined (PostComposite, then PreUI) list, giving each its own private
+// target to draw into and its own dedicated blend dispatch (real,
+// multi-mode RenderFeatureBlend.comp as of PHASE5) into either the next
+// accumulator or (for the LAST entry) directly into the view's own real,
+// final handle (PHASE0_MASTER_STRATEGY.md's Locked Design Decision #10).
 void RenderFeatureCompositor::ContributeRenderGraphPasses(
     const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&)
 {
@@ -321,7 +330,7 @@ void RenderFeatureCompositor::ContributeRenderGraphPasses(
     }
 
     EnsureOpsInitialized(m_renderer);
-    EnsureBlendStubInitialized(m_renderer);
+    EnsureBlendPipelineInitialized(m_renderer);
 
     const bool isGameView = (frame.currentView == rg::RenderViewId::Named("Game"));
     const std::string viewName = isGameView ? "Game" : "Scene";
@@ -333,12 +342,15 @@ void RenderFeatureCompositor::ContributeRenderGraphPasses(
     // (resolved->target) in the SAME dispatch whenever the combined list has
     // exactly one entry (N == 1) - a real GPU hazard (a compute pass
     // reading and writing the exact same storage image in one dispatch).
+    // The seed dispatch is always a plain Replace copy, regardless of any
+    // individual plugin's own declared blend mode (PHASE5_BLEND_MODE_COMPUTE_SHADER_AND_PREUI_STAGE.md's
+    // own Step 3.2).
     const char* seedName = m_namePool.SeedName(viewName);
     BlendStageState& seedState = EnsureBlendStageState(seedName, extent);
     const rg::TextureHandle seedHandle =
         frame.builder.ImportTexture(seedName, seedState.texture->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
-    DispatchBlendStub(frame.builder, resolved->target, resolved->sampler, resolved->target, resolved->sampler,
-        seedHandle, seedState, m_namePool.SeedCopyPassName(viewName), extent);
+    DispatchBlend(frame.builder, resolved->target, resolved->sampler, resolved->target, resolved->sampler,
+        seedHandle, seedState, m_namePool.SeedCopyPassName(viewName), extent, RenderFeatureBlendMode::Replace);
 
     rg::TextureHandle currentInput = seedHandle;
     VkSampler currentInputSampler = seedState.texture->Sampler();
@@ -370,9 +382,9 @@ void RenderFeatureCompositor::ContributeRenderGraphPasses(
             outputTarget = frame.builder.ImportTexture(accumName, outputState->texture->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
         }
 
-        DispatchBlendStub(frame.builder, currentInput, currentInputSampler, privateTarget,
+        DispatchBlend(frame.builder, currentInput, currentInputSampler, privateTarget,
             privateState.texture->Sampler(), outputTarget, *outputState, m_namePool.BlendPassName(pluginName, viewName),
-            extent);
+            extent, entry.descriptor.blendMode);
 
         currentInput = outputTarget;
         currentInputSampler = isLast ? VK_NULL_HANDLE : outputState->texture->Sampler();

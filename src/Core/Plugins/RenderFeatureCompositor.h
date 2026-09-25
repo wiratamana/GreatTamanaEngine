@@ -19,8 +19,9 @@
 #include <unordered_map>
 #include <vector>
 
-// editor-core-separation-6 campaign, PHASE4
-// (PHASE4_RENDER_FEATURE_COMPOSITOR_CORE_AND_ORDERING.md) - the second real
+// editor-core-separation-6 campaign, PHASE4/PHASE5
+// (PHASE4_RENDER_FEATURE_COMPOSITOR_CORE_AND_ORDERING.md,
+// PHASE5_BLEND_MODE_COMPUTE_SHADER_AND_PREUI_STAGE.md) - the second real
 // IPluginCapabilityOrchestrator implementation: the PERMANENT home for the
 // `_v2` render-feature pipeline (PHASE0_MASTER_STRATEGY.md's whole reason to
 // exist). Every loaded IRenderFeatureModule_v2 gets its OWN private
@@ -30,14 +31,14 @@
 // (LegacyRenderFeatureOrchestrator) still works, forever, by design (Locked
 // Design Decision #9 - `_v1` and `_v2` are never unified).
 //
-// THIS PHASE's own scope: the blend between two plugins/stages is
-// TEMPORARILY hardcoded to a single, simple, Replace-equivalent behavior
-// (see EnsureBlendStubInitialized()/DispatchBlendStub() below) - proving the
-// real ordering/private-target/collision-detection/seeding mechanism works
-// end-to-end BEFORE PHASE5 replaces just the blend shader's own body with
-// the real, multi-mode RenderFeatureBlend.comp (same descriptor-set-layout
-// shape, by design - see PHASE4_RENDER_FEATURE_COMPOSITOR_CORE_AND_ORDERING.md's
-// own Step 3.6).
+// PHASE5 replaced PHASE4's own temporary, Replace-equivalent blend stub
+// (`RenderFeatureBlendStub.comp`/`m_blendStubPipeline`) with the real,
+// permanent, 5-mode `RenderFeatureBlend.comp` uber blend shader (Replace /
+// AlphaOver / Additive / Multiply / ScreenSpaceMask), selected per-plugin via
+// `GtePluginRenderFeatureDescriptor::blendMode` at dispatch time through a
+// push constant - the ordering/private-target/collision-detection/seeding
+// mechanism PHASE4 built is completely unchanged; only WHAT the blend pass
+// computes changed.
 namespace gte {
 
 class Core; // forward declaration only - this header must not #include "../Core.h"
@@ -60,6 +61,15 @@ struct RenderFeatureOpsPushConstants {
     float colorRgba[4] = {};          // solid fill color / vignette color / tint color
     float centerAndRadius[4] = {};    // vignette: centerX, centerY, innerRadius, outerRadius
     float gradeParams[4] = {};        // color grade: brightness, contrast, saturation, tintStrength
+};
+
+// editor-core-separation-6 campaign, PHASE5 - the C++-side push-constant
+// struct mirroring RenderFeatureBlend.comp's own `PushConstants` GLSL block
+// byte-for-byte (1 vec4, 16 bytes). Used by RenderFeatureCompositor::
+// DispatchBlend() - `.x` carries the RenderFeatureBlendMode, cast to float
+// (matching the shader's own `int(pc.blendModeAndPad.x)` cast).
+struct RenderFeatureBlendPushConstants {
+    float blendModeAndPad[4] = {}; // .x = RenderFeatureBlendMode, as a float cast to int in-shader
 };
 
 class RenderFeatureCompositor final : public IPluginCapabilityOrchestrator {
@@ -118,17 +128,21 @@ private:
     BlendStageState& EnsureBlendStageState(const char* internedName, VkExtent2D extent);
 
     void EnsureOpsInitialized(Renderer& renderer);
-    void EnsureBlendStubInitialized(Renderer& renderer); // PHASE5 replaces this with EnsureBlendPipelineInitialized().
+    void EnsureBlendPipelineInitialized(Renderer& renderer);
 
-    // THIS PHASE'S temporary, simplified (Replace-equivalent) blend/seed
-    // dispatch - see RenderFeatureBlendStub.comp's own doc comment. `state`
-    // supplies the dedicated descriptor set this dispatch rewrites/binds;
-    // its own `.texture` field is irrelevant here (the destination handle is
-    // passed explicitly, since the LAST entry in a view's combined list
-    // writes into a handle `state` itself never owns).
-    void DispatchBlendStub(rg::RenderGraphBuilder& builder, rg::TextureHandle dstIn, VkSampler dstInSampler,
+    // The real, permanent blend/seed dispatch (RenderFeatureBlend.comp,
+    // PHASE5) - `state` supplies the dedicated descriptor set this dispatch
+    // rewrites/binds; its own `.texture` field is irrelevant here (the
+    // destination handle is passed explicitly, since the LAST entry in a
+    // view's combined list writes into a handle `state` itself never owns).
+    // `blendMode` selects the blend formula via the push constant -
+    // RenderFeatureCompositor's own per-view "seed" dispatch always passes
+    // RenderFeatureBlendMode::Replace explicitly, regardless of any
+    // individual plugin's own declared blend mode; every per-plugin dispatch
+    // passes that plugin's own `descriptor.blendMode`.
+    void DispatchBlend(rg::RenderGraphBuilder& builder, rg::TextureHandle dstIn, VkSampler dstInSampler,
         rg::TextureHandle srcIn, VkSampler srcInSampler, rg::TextureHandle destination, BlendStageState& state,
-        const char* debugName, VkExtent2D extent);
+        const char* debugName, VkExtent2D extent, RenderFeatureBlendMode blendMode);
 
     Core& m_core;
     Renderer& m_renderer;
@@ -140,8 +154,8 @@ private:
 
     std::optional<ComputePipeline> m_opsPipeline;
     VkDescriptorSetLayout m_opsDescriptorSetLayout = VK_NULL_HANDLE;
-    std::optional<ComputePipeline> m_blendStubPipeline; // PHASE5 renames/replaces this.
-    VkDescriptorSetLayout m_blendStubDescriptorSetLayout = VK_NULL_HANDLE;
+    std::optional<ComputePipeline> m_blendPipeline; // RenderFeatureBlend.comp (PHASE5).
+    VkDescriptorSetLayout m_blendDescriptorSetLayout = VK_NULL_HANDLE;
 
     // Keyed by RenderFeatureNamePool's own interned "<Plugin>_<View>_Private" names.
     std::unordered_map<std::string, PrivateTargetState> m_privateTargetStates;
