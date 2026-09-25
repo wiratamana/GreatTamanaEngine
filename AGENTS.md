@@ -468,6 +468,39 @@ Editor's "Log" panel and by GET /get_logs / POST /clear_logs.
 
 Full convention: [docs/conventions/logging.md](docs/conventions/logging.md).
 
+## ImGui Widget ID Uniqueness
+
+`src/Editor/ImGuiUniqueId.h` (`gte::ScopedUniqueId`) is the ONE mandated way
+to enter a per-iteration Dear ImGui ID scope for any widget built inside a
+loop over runtime data - construct it with the loop's own distinct iteration
+index (never a data-derived string alone) plus an optional human-readable
+debug key, and let it manage `ImGui::PushID()`/`PopID()` for you. This
+exists because a real, live bug shipped from doing exactly the unsafe thing
+this class now prevents: `src/Editor/Panels/RenderGraphPanel.cpp`'s
+"Offscreen Regime" table legitimately shows the same render-graph pass name
+twice in one frame (Game View and Scene View both declare an Atmosphere LUT
+pass under the same hard-coded name - a permanent, intentional design
+choice, `task_manager/editor-core-separation-10` campaign,
+`PHASE0_MASTER_STRATEGY.md` section 2.2), and that file's own checkbox ID
+used to be built purely from that (sometimes-duplicate) pass name, so Dear
+ImGui's own built-in `io.ConfigDebugHighlightIdConflicts` safety net (left
+at its default `true`, still on today, still a final backstop) would flash
+a "Programmer error: N visible items with conflicting ID!" red-highlight
+the instant either row was hovered. A second, proactive layer,
+`src/Editor/ImGuiIdConflictTracker.h`/`ImGuiIdConflictGuard.h` (the former
+pure and Tier-1-tested, the latter the real ImGui/`Logger`-aware singleton,
+reset once per frame from `ImGuiEditorLayer::NewFrame()`), catches any
+future collision the moment it happens and logs it exactly once per new
+incident via `GTE_LOG_ERROR("ImGuiIdConflict", ...)` - visible in the "Log"
+panel and `GET /get_logs?category=ImGuiIdConflict` - rather than relying on
+a human happening to hover the right widget and correctly recognizing what
+Dear ImGui's own red highlight means. Every pre-existing `PushID()` call
+site under `src/Editor/` was migrated onto `ScopedUniqueId` by this same
+campaign, so this is a real, engine-wide, present-day guarantee, not just a
+rule for new code.
+
+Full convention: [docs/conventions/imgui-id-uniqueness.md](docs/conventions/imgui-id-uniqueness.md).
+
 ## Render Target Format Matching
 
 Vulkan pipelines are built against an exact color format

@@ -76,6 +76,10 @@ than subsystem-specific):
   in-memory `gte::Logger` log store (`GTE_LOG_DEBUG/INFO/WARNING/ERROR`),
   its bounded ring buffer, and the `GET /get_logs`/`POST /clear_logs` HTTP
   endpoints.
+- **[ImGui Widget ID Uniqueness](conventions/imgui-id-uniqueness.md)** —
+  `gte::ScopedUniqueId`, the mandated way to enter a per-iteration Dear ImGui
+  ID scope for any widget built inside a loop over runtime data, plus the
+  proactive `ImGuiIdConflictTracker`/`ImGuiIdConflictGuard` detection layer.
 - **[Render Target Format Matching](conventions/render-target-format-matching.md)**
   — always read `Renderer::ColorFormat()`/`DepthFormat()` rather than
   hardcoding a `VkFormat` literal.
