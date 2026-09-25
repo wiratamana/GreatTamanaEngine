@@ -567,3 +567,49 @@ registering a new named texture:
   color-interpretation mode, see [Atmosphere Scattering](atmosphere-scattering.md) below) — every OTHER
   volume texture still resolves through this bullet's own original
   `ComputeVolumeCameraSetup()`/`IntersectRayBox()` path, unmodified.
+
+- **`GET /render_graph`** (`editor-core-separation-7` campaign,
+  `task_manager/editor-core-separation-7/PHASE0_MASTER_STRATEGY.md`) returns
+  the exact same data the Editor's "Render Graph" panel shows, as one
+  versioned JSON object - built on `FrameCaptureBridge`'s existing "publish
+  once per frame from the main thread, read a thread-safe copy from the
+  network thread" pattern (a SECOND `Publish*`/`Get*` pair,
+  `PublishRenderGraphMetadata()`/`GetPublishedRenderGraphMetadata()`,
+  alongside its existing texture-list pair - not a new, sixth bridge class;
+  see that campaign's PHASE0 Locked Design Decision #4 for why). The response
+  body is `gte::rg::RenderGraphMetadata::to_json()` verbatim: `schema_version`
+  (an integer, bumped only on a future breaking shape change - currently
+  `1`), `offscreen_regime`/`present_regime` (each one `ExecuteTimingMode`
+  regime's own `regime_name`/`passes`/`resources`/
+  `timing_slot_budget_exhausted` - every enum already resolved to a human
+  string - `kind`, `category`, `draw_kind`, `view_scope`,
+  `render_pass_event` - every GPU timing value already resolved to BOTH a
+  display string (`gpu_timing_text`) AND a raw nullable number
+  (`gpu_timing_milliseconds`), every pass's `RenderPassTagMask` already
+  resolved to at most one human `tag_group_label` via
+  `RenderPassGroupRegistry` - `null` when untagged or tagged but nobody
+  registered a heading, and every resource carrying both its raw
+  `first_use_pass_index`/`last_use_pass_index` AND the already-resolved
+  `first_use_pass_name`/`last_use_pass_name`, `null` when never used),
+  `gpu_driven_batches` (the same "instances culled this frame" readout the
+  panel's own GPU-Driven Batches section shows), and `render_features` (the
+  same loaded `_v2` plugin ordering/blend-mode readout the panel's own Plugin
+  Render Features section shows). ALWAYS reflects the truly latest real
+  engine frame, completely independent of whether a human has the Editor
+  panel's own "Pause" checkbox ticked (that checkbox only freezes what ONE
+  ImGui window displays - see that campaign's PHASE0 Locked Design Decision
+  #9). Responds `200` on success, `503` if the bridge pointer itself is null
+  (reachable only in a test that constructs `NetworkServer` directly, the
+  same convention every other bridge-backed route above already documents).
+  No query parameters in this first version - see that campaign's own PHASE0
+  Locked Design Decision #8 for why a future `?regime=`/`?pass=` filter is
+  deliberately deferred rather than spun up speculatively. This same campaign
+  also shipped a real "Export DOT" implementation for the Editor's own
+  "Render Graph" panel (`BuildRenderGraphDot()`/`ExportRenderGraphDotToFile()`,
+  `src/Editor/RenderGraphDotExport.h/.cpp`, `gte_editor`-tier, no HTTP surface
+  of its own) - a pre-existing "Planned for Phase 9" disabled button, now
+  real and enabled, writing a Graphviz `.dot` file to a fixed,
+  working-directory-relative path (`render_graph_export.dot`, always
+  overwritten) and logging the resolved path via `GTE_LOG_INFO`. See
+  `task_manager/editor-core-separation-7/PHASE0_MASTER_STRATEGY.md` for the
+  full five-phase campaign writeup.
