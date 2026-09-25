@@ -995,4 +995,100 @@ ParsedSpawnGpuDrivenTestBatchRequest ParseSpawnGpuDrivenTestBatchRequest(const s
 std::string BuildSpawnGpuDrivenTestBatchResponseJson(bool success, const std::string& errorMessage,
     std::uint32_t instanceCount);
 
+// --- editor-core-separation-8 campaign, PHASE5
+// (PHASE5_CROSS_THREAD_BRIDGE_AND_HTTP_ENDPOINTS.md) -
+// GET /render_graph/set_pass_enabled, /passes, /set_feature_enabled,
+// /set_feature_priority, /set_blur_enabled, /set_gbuffer_enabled. Every
+// function below stays PURE - no httplib/socket/thread/Core/Editor/
+// RenderGraphControlCommandBridge dependency of any kind, exactly like
+// every other function in this file (see this file's own header comment).
+// NetworkServer.cpp is the one place that converts a parsed query into a
+// real RenderGraphControlCommandRequest and calls
+// RenderGraphControlCommandBridge::SubmitAndWait().
+
+// Parsed, validated GET /render_graph/set_pass_enabled query. `valid ==
+// false` means `errorMessage` explains exactly why (a 400 response).
+// Validation: "name" must be non-empty; "enabled" must be exactly "true"
+// or "false" (case-sensitive, mirrors ParseFrameDebuggerEnableQuery()'s own
+// exact convention) - otherwise "missing or invalid required query
+// parameter: enabled - must be \"true\" or \"false\"".
+struct ParsedRenderGraphSetPassEnabledQuery {
+    bool valid = false;
+    std::string errorMessage;
+    std::string name;
+    bool enabled = false;
+};
+ParsedRenderGraphSetPassEnabledQuery ParseRenderGraphSetPassEnabledQuery(
+    const std::string& nameParam, const std::string& enabledParam);
+
+// An IDENTICAL shape to ParsedRenderGraphSetPassEnabledQuery above, for
+// GET /render_graph/set_feature_enabled - kept as its own, separate
+// struct/function rather than shared, mirroring this file's own existing
+// precedent of NOT sharing parse logic across genuinely different
+// endpoints even when the shape happens to match exactly.
+struct ParsedRenderGraphSetFeatureEnabledQuery {
+    bool valid = false;
+    std::string errorMessage;
+    std::string name;
+    bool enabled = false;
+};
+ParsedRenderGraphSetFeatureEnabledQuery ParseRenderGraphSetFeatureEnabledQuery(
+    const std::string& nameParam, const std::string& enabledParam);
+
+// Parsed, validated GET /render_graph/set_feature_priority query. "name"
+// must be non-empty; "priority" must parse as a valid base-10 integer
+// (mirrors ParseFrameDebuggerSelectEventQuery()'s own whole-integer parse,
+// optionally negative) - otherwise "missing or invalid required query
+// parameter: priority - must be an integer".
+struct ParsedRenderGraphSetFeaturePriorityQuery {
+    bool valid = false;
+    std::string errorMessage;
+    std::string name;
+    std::int32_t priority = 0;
+};
+ParsedRenderGraphSetFeaturePriorityQuery ParseRenderGraphSetFeaturePriorityQuery(
+    const std::string& nameParam, const std::string& priorityParam);
+
+// Parsed, validated GET /render_graph/set_blur_enabled (and, with an
+// identical shape, /set_gbuffer_enabled) query. "enabled" must be exactly
+// "true" or "false".
+struct ParsedRenderGraphSetBoolQuery {
+    bool valid = false;
+    std::string errorMessage;
+    bool enabled = false;
+};
+ParsedRenderGraphSetBoolQuery ParseRenderGraphSetBoolQuery(const std::string& enabledParam);
+
+// Builds the response body shared by every /render_graph/* MUTATION route
+// (set_pass_enabled/set_feature_enabled/set_feature_priority/
+// set_blur_enabled/set_gbuffer_enabled):
+//   - success == true  -> {"success":true}
+//   - success == false -> {"success":false,"error":"<errorMessage>"}
+// Deliberately narrower than BuildFrameDebuggerCommandResponseJson() (no
+// "state" echo) - PHASE0_MASTER_STRATEGY.md's own locked contract for this
+// campaign's mutation endpoints never echoes a rich resulting state; a
+// caller wanting fresh state makes a SEPARATE GET /render_graph/passes or
+// GET /render_graph call instead.
+std::string BuildRenderGraphControlCommandResponseJson(bool success, const std::string& errorMessage);
+
+// A plain, RenderGraphControlCommandBridge-independent view of one known
+// built-in pass's toggle state, for
+// BuildRenderGraphControlPassStatesResponseJson() below - NetworkServer.cpp
+// is the one place that copies a real RenderGraphControlPassStateOutcome
+// (src/Application/RenderGraphControlCommandBridge.h) into this struct,
+// one field at a time, mirroring FrameDebuggerStateResponseView's own "a
+// struct crossing a layer boundary is never accepted directly here"
+// precedent.
+struct RenderGraphControlPassStateResponseView {
+    std::string name;
+    bool enabled = false;
+    bool everDeclaredThisSession = false;
+};
+
+// Builds GET /render_graph/passes' entire response body:
+// {"passes":[{"name":"RenderOpaque","enabled":true,
+//             "ever_declared_this_session":true}, ...]}
+std::string BuildRenderGraphControlPassStatesResponseJson(
+    const std::vector<RenderGraphControlPassStateResponseView>& passStates);
+
 } // namespace gte::Network

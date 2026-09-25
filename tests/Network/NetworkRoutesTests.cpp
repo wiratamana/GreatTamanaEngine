@@ -1425,4 +1425,160 @@ TEST(ClearLogsEndToEndTests, ClearEmptiesBufferAndReportsPreviousCount)
     EXPECT_EQ(Logger::EntryCount(), 0u);
 }
 
+// --- editor-core-separation-8 campaign, PHASE5
+// (PHASE5_CROSS_THREAD_BRIDGE_AND_HTTP_ENDPOINTS.md) -
+// GET /render_graph/set_pass_enabled, /passes, /set_feature_enabled,
+// /set_feature_priority, /set_blur_enabled, /set_gbuffer_enabled request
+// parsing/response building.
+
+using gte::Network::BuildRenderGraphControlCommandResponseJson;
+using gte::Network::BuildRenderGraphControlPassStatesResponseJson;
+using gte::Network::ParseRenderGraphSetBoolQuery;
+using gte::Network::ParseRenderGraphSetFeatureEnabledQuery;
+using gte::Network::ParseRenderGraphSetFeaturePriorityQuery;
+using gte::Network::ParseRenderGraphSetPassEnabledQuery;
+using gte::Network::ParsedRenderGraphSetBoolQuery;
+using gte::Network::ParsedRenderGraphSetFeatureEnabledQuery;
+using gte::Network::ParsedRenderGraphSetFeaturePriorityQuery;
+using gte::Network::ParsedRenderGraphSetPassEnabledQuery;
+using gte::Network::RenderGraphControlPassStateResponseView;
+
+TEST(ParseRenderGraphSetPassEnabledQueryTests, AcceptsValidNameAndBool)
+{
+    const ParsedRenderGraphSetPassEnabledQuery trueCase = ParseRenderGraphSetPassEnabledQuery("RenderOpaque", "true");
+    ASSERT_TRUE(trueCase.valid) << trueCase.errorMessage;
+    EXPECT_EQ(trueCase.name, "RenderOpaque");
+    EXPECT_TRUE(trueCase.enabled);
+
+    const ParsedRenderGraphSetPassEnabledQuery falseCase = ParseRenderGraphSetPassEnabledQuery("RenderOpaque", "false");
+    ASSERT_TRUE(falseCase.valid) << falseCase.errorMessage;
+    EXPECT_FALSE(falseCase.enabled);
+}
+
+TEST(ParseRenderGraphSetPassEnabledQueryTests, RejectsEmptyName)
+{
+    const ParsedRenderGraphSetPassEnabledQuery result = ParseRenderGraphSetPassEnabledQuery("", "true");
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.errorMessage, "missing or invalid required query parameter: name - must be non-empty");
+}
+
+TEST(ParseRenderGraphSetPassEnabledQueryTests, RejectsMissingOrInvalidEnabled)
+{
+    const ParsedRenderGraphSetPassEnabledQuery missing = ParseRenderGraphSetPassEnabledQuery("RenderOpaque", "");
+    EXPECT_FALSE(missing.valid);
+    EXPECT_EQ(missing.errorMessage, "missing or invalid required query parameter: enabled - must be \"true\" or \"false\"");
+
+    const ParsedRenderGraphSetPassEnabledQuery wrongCase = ParseRenderGraphSetPassEnabledQuery("RenderOpaque", "True");
+    EXPECT_FALSE(wrongCase.valid);
+}
+
+TEST(ParseRenderGraphSetFeatureEnabledQueryTests, AcceptsValidNameAndBool)
+{
+    const ParsedRenderGraphSetFeatureEnabledQuery result = ParseRenderGraphSetFeatureEnabledQuery("DemoRenderFeatureV2", "false");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_EQ(result.name, "DemoRenderFeatureV2");
+    EXPECT_FALSE(result.enabled);
+}
+
+TEST(ParseRenderGraphSetFeatureEnabledQueryTests, RejectsEmptyNameOrInvalidEnabled)
+{
+    const ParsedRenderGraphSetFeatureEnabledQuery emptyName = ParseRenderGraphSetFeatureEnabledQuery("", "true");
+    EXPECT_FALSE(emptyName.valid);
+    EXPECT_EQ(emptyName.errorMessage, "missing or invalid required query parameter: name - must be non-empty");
+
+    const ParsedRenderGraphSetFeatureEnabledQuery badBool = ParseRenderGraphSetFeatureEnabledQuery("Demo", "nope");
+    EXPECT_FALSE(badBool.valid);
+    EXPECT_EQ(badBool.errorMessage, "missing or invalid required query parameter: enabled - must be \"true\" or \"false\"");
+}
+
+TEST(ParseRenderGraphSetFeaturePriorityQueryTests, AcceptsValidNameAndInteger)
+{
+    const ParsedRenderGraphSetFeaturePriorityQuery result = ParseRenderGraphSetFeaturePriorityQuery("Demo", "-3");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_EQ(result.name, "Demo");
+    EXPECT_EQ(result.priority, -3);
+}
+
+TEST(ParseRenderGraphSetFeaturePriorityQueryTests, RejectsEmptyNameOrNonIntegerPriority)
+{
+    const ParsedRenderGraphSetFeaturePriorityQuery emptyName = ParseRenderGraphSetFeaturePriorityQuery("", "3");
+    EXPECT_FALSE(emptyName.valid);
+    EXPECT_EQ(emptyName.errorMessage, "missing or invalid required query parameter: name - must be non-empty");
+
+    const ParsedRenderGraphSetFeaturePriorityQuery notAnInt = ParseRenderGraphSetFeaturePriorityQuery("Demo", "abc");
+    EXPECT_FALSE(notAnInt.valid);
+    EXPECT_EQ(notAnInt.errorMessage, "missing or invalid required query parameter: priority - must be an integer");
+
+    const ParsedRenderGraphSetFeaturePriorityQuery trailingGarbage = ParseRenderGraphSetFeaturePriorityQuery("Demo", "3abc");
+    EXPECT_FALSE(trailingGarbage.valid);
+}
+
+TEST(ParseRenderGraphSetBoolQueryTests, AcceptsTrueAndFalse)
+{
+    const ParsedRenderGraphSetBoolQuery trueCase = ParseRenderGraphSetBoolQuery("true");
+    ASSERT_TRUE(trueCase.valid) << trueCase.errorMessage;
+    EXPECT_TRUE(trueCase.enabled);
+
+    const ParsedRenderGraphSetBoolQuery falseCase = ParseRenderGraphSetBoolQuery("false");
+    ASSERT_TRUE(falseCase.valid) << falseCase.errorMessage;
+    EXPECT_FALSE(falseCase.enabled);
+}
+
+TEST(ParseRenderGraphSetBoolQueryTests, RejectsMissingOrInvalidValue)
+{
+    const ParsedRenderGraphSetBoolQuery missing = ParseRenderGraphSetBoolQuery("");
+    EXPECT_FALSE(missing.valid);
+    EXPECT_EQ(missing.errorMessage, "missing or invalid required query parameter: enabled - must be \"true\" or \"false\"");
+
+    const ParsedRenderGraphSetBoolQuery wrongCase = ParseRenderGraphSetBoolQuery("TRUE");
+    EXPECT_FALSE(wrongCase.valid);
+}
+
+TEST(BuildRenderGraphControlCommandResponseJsonTests, SuccessShapeHasNoErrorField)
+{
+    const std::string body = BuildRenderGraphControlCommandResponseJson(true, "");
+    const nlohmann::json parsed = nlohmann::json::parse(body);
+    EXPECT_EQ(parsed["success"], true);
+    EXPECT_FALSE(parsed.contains("error"));
+}
+
+TEST(BuildRenderGraphControlCommandResponseJsonTests, FailureShapeIncludesError)
+{
+    const std::string body = BuildRenderGraphControlCommandResponseJson(false, "\"Present\" cannot be disabled (deny-listed).");
+    const nlohmann::json parsed = nlohmann::json::parse(body);
+    EXPECT_EQ(parsed["success"], false);
+    EXPECT_EQ(parsed["error"], "\"Present\" cannot be disabled (deny-listed).");
+}
+
+TEST(BuildRenderGraphControlPassStatesResponseJsonTests, ProducesExpectedShapeForEmptyAndNonEmptyLists)
+{
+    const std::string emptyBody = BuildRenderGraphControlPassStatesResponseJson({});
+    const nlohmann::json emptyParsed = nlohmann::json::parse(emptyBody);
+    ASSERT_TRUE(emptyParsed.contains("passes"));
+    EXPECT_TRUE(emptyParsed["passes"].is_array());
+    EXPECT_EQ(emptyParsed["passes"].size(), 0u);
+
+    RenderGraphControlPassStateResponseView enabledPass;
+    enabledPass.name = "RenderOpaque";
+    enabledPass.enabled = true;
+    enabledPass.everDeclaredThisSession = true;
+
+    RenderGraphControlPassStateResponseView neverDeclaredPass;
+    neverDeclaredPass.name = "SomePass";
+    neverDeclaredPass.enabled = false;
+    neverDeclaredPass.everDeclaredThisSession = false;
+
+    const std::string body =
+        BuildRenderGraphControlPassStatesResponseJson({ enabledPass, neverDeclaredPass });
+    const nlohmann::json parsed = nlohmann::json::parse(body);
+    ASSERT_TRUE(parsed.contains("passes"));
+    ASSERT_EQ(parsed["passes"].size(), 2u);
+    EXPECT_EQ(parsed["passes"][0]["name"], "RenderOpaque");
+    EXPECT_EQ(parsed["passes"][0]["enabled"], true);
+    EXPECT_EQ(parsed["passes"][0]["ever_declared_this_session"], true);
+    EXPECT_EQ(parsed["passes"][1]["name"], "SomePass");
+    EXPECT_EQ(parsed["passes"][1]["enabled"], false);
+    EXPECT_EQ(parsed["passes"][1]["ever_declared_this_session"], false);
+}
+
 } // namespace

@@ -2180,6 +2180,7 @@ set(GTE_TEST_SOURCES
     Application/EditorUiCommandBridgeTests.cpp
     Application/AssetImportCommandBridgeTests.cpp
     Application/FrameDebuggerCommandBridgeTests.cpp
+    Application/RenderGraphControlCommandBridgeTests.cpp
     Renderer/VertexTests.cpp
     Renderer/PrimitiveMeshGeneratorTests.cpp
     Renderer/ResourcePoolTests.cpp

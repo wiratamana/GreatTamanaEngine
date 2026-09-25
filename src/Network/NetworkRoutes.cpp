@@ -1075,5 +1075,112 @@ std::string BuildSpawnGpuDrivenTestBatchResponseJson(
     body["instance_count"] = instanceCount;
     return body.dump();
 }
+// --- editor-core-separation-8 campaign, PHASE5
+// (PHASE5_CROSS_THREAD_BRIDGE_AND_HTTP_ENDPOINTS.md) - see NetworkRoutes.h's
+// own doc comments above each declaration for the exact, locked validation/
+// response rules implemented below.
+
+ParsedRenderGraphSetPassEnabledQuery ParseRenderGraphSetPassEnabledQuery(
+    const std::string& nameParam, const std::string& enabledParam)
+{
+    ParsedRenderGraphSetPassEnabledQuery result;
+    if (nameParam.empty()) {
+        result.errorMessage = "missing or invalid required query parameter: name - must be non-empty";
+        return result;
+    }
+    if (enabledParam == "true") {
+        result.enabled = true;
+    } else if (enabledParam == "false") {
+        result.enabled = false;
+    } else {
+        result.errorMessage = "missing or invalid required query parameter: enabled - must be \"true\" or \"false\"";
+        return result;
+    }
+    result.name = nameParam;
+    result.valid = true;
+    return result;
+}
+
+ParsedRenderGraphSetFeatureEnabledQuery ParseRenderGraphSetFeatureEnabledQuery(
+    const std::string& nameParam, const std::string& enabledParam)
+{
+    ParsedRenderGraphSetFeatureEnabledQuery result;
+    if (nameParam.empty()) {
+        result.errorMessage = "missing or invalid required query parameter: name - must be non-empty";
+        return result;
+    }
+    if (enabledParam == "true") {
+        result.enabled = true;
+    } else if (enabledParam == "false") {
+        result.enabled = false;
+    } else {
+        result.errorMessage = "missing or invalid required query parameter: enabled - must be \"true\" or \"false\"";
+        return result;
+    }
+    result.name = nameParam;
+    result.valid = true;
+    return result;
+}
+
+ParsedRenderGraphSetFeaturePriorityQuery ParseRenderGraphSetFeaturePriorityQuery(
+    const std::string& nameParam, const std::string& priorityParam)
+{
+    ParsedRenderGraphSetFeaturePriorityQuery result;
+    if (nameParam.empty()) {
+        result.errorMessage = "missing or invalid required query parameter: name - must be non-empty";
+        return result;
+    }
+    int parsedPriority = 0;
+    if (!TryParseWholeInt(priorityParam, parsedPriority)) {
+        result.errorMessage = "missing or invalid required query parameter: priority - must be an integer";
+        return result;
+    }
+    result.name = nameParam;
+    result.priority = static_cast<std::int32_t>(parsedPriority);
+    result.valid = true;
+    return result;
+}
+
+ParsedRenderGraphSetBoolQuery ParseRenderGraphSetBoolQuery(const std::string& enabledParam)
+{
+    ParsedRenderGraphSetBoolQuery result;
+    if (enabledParam == "true") {
+        result.enabled = true;
+    } else if (enabledParam == "false") {
+        result.enabled = false;
+    } else {
+        result.errorMessage = "missing or invalid required query parameter: enabled - must be \"true\" or \"false\"";
+        return result;
+    }
+    result.valid = true;
+    return result;
+}
+
+std::string BuildRenderGraphControlCommandResponseJson(bool success, const std::string& errorMessage)
+{
+    nlohmann::json body;
+    body["success"] = success;
+    if (!success) {
+        body["error"] = errorMessage;
+    }
+    return body.dump();
+}
+
+std::string BuildRenderGraphControlPassStatesResponseJson(
+    const std::vector<RenderGraphControlPassStateResponseView>& passStates)
+{
+    nlohmann::json arr = nlohmann::json::array();
+    for (const RenderGraphControlPassStateResponseView& state : passStates) {
+        nlohmann::json item;
+        item["name"] = state.name;
+        item["enabled"] = state.enabled;
+        item["ever_declared_this_session"] = state.everDeclaredThisSession;
+        arr.push_back(std::move(item));
+    }
+
+    nlohmann::json body;
+    body["passes"] = std::move(arr);
+    return body.dump();
+}
 
 } // namespace gte::Network

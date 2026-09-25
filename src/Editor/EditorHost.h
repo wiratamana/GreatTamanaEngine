@@ -20,6 +20,10 @@
 #include "../Application/EditorUiCommandBridge.h"
 #include "../Application/FrameCaptureBridge.h"
 #include "../Application/FrameDebuggerCommandBridge.h"
+// editor-core-separation-8 campaign, PHASE5
+// (PHASE5_CROSS_THREAD_BRIDGE_AND_HTTP_ENDPOINTS.md) - the new
+// RenderGraphControlCommandBridge (m_renderGraphControlCommandBridge below).
+#include "../Application/RenderGraphControlCommandBridge.h"
 
 namespace gte {
 
@@ -153,6 +157,12 @@ private:
     EditorUiCommandBridge m_uiCommandBridge;
     FrameDebuggerCommandBridge m_frameDebuggerCommandBridge;
     AssetImportCommandBridge m_assetImportCommandBridge;
+    // editor-core-separation-8 campaign, PHASE5
+    // (PHASE5_CROSS_THREAD_BRIDGE_AND_HTTP_ENDPOINTS.md) - the new bridge
+    // backing the 6 GET /render_graph/* mutation/discovery routes. Same
+    // "declared BEFORE m_networkServer" placement reasoning as every other
+    // bridge above.
+    RenderGraphControlCommandBridge m_renderGraphControlCommandBridge;
 
     // Networking campaign (task_manager/network-impl-1/) - an embedded,
     // loopback-only HTTP server (see AGENTS.md, "Networking"). Declared

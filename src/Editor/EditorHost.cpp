@@ -164,8 +164,11 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
     // &s_editorLogQueryCapability (this file's own namespace-scope static,
     // above), so GET /get_logs/POST /clear_logs can reach the real Logger
     // singleton through the new ILogQueryCapability bridge.
+    // editor-core-separation-8 campaign, PHASE5 - the seventh argument,
+    // &m_renderGraphControlCommandBridge, so the 6 new GET /render_graph/*
+    // routes can reach it.
     , m_networkServer(&m_captureBridge, &m_commandBridge, &m_uiCommandBridge, &m_frameDebuggerCommandBridge,
-          &m_assetImportCommandBridge, &s_editorLogQueryCapability)
+          &m_assetImportCommandBridge, &s_editorLogQueryCapability, &m_renderGraphControlCommandBridge)
 {
     // editor-core-separation-1 campaign, PHASE3
     // (PHASE3_LOGGING_GLOBAL_LOGSINK_EXTRACTION.md) - installs the ONE real
@@ -507,6 +510,84 @@ int EditorHost::Run()
             fdResult.state.levelsWhite = stateView.levelsWhite;
 
             m_frameDebuggerCommandBridge.FulfillCommand(fdResult);
+        }
+
+        // editor-core-separation-8 campaign, PHASE5
+        // (PHASE5_CROSS_THREAD_BRIDGE_AND_HTTP_ENDPOINTS.md) - drains at most
+        // ONE pending render-graph-control command per frame, at the SAME
+        // point in the loop every other bridge's own pump immediately above
+        // already runs. Built-in-pass/plugin-feature mutations go straight
+        // to m_core (Core-owned state); Blur/GBuffer mutations go through
+        // m_editorLayer (Editor-owned EditorContext state) - see
+        // PHASE0_MASTER_STRATEGY.md's Step 2.6 for exactly why these two
+        // categories are routed differently even though they share this one
+        // bridge.
+        if (const std::optional<RenderGraphControlCommandRequest> rgcRequest =
+                m_renderGraphControlCommandBridge.TryPeekPendingCommandRequest()) {
+            GTE_PROFILE_SCOPE("EditorHost::ExecuteRenderGraphControlCommand");
+            RenderGraphControlCommandResult rgcResult;
+            rgcResult.kind = rgcRequest->kind;
+            switch (rgcRequest->kind) {
+            case RenderGraphControlCommandKind::SetBuiltInPassEnabled: {
+                const bool applied = m_core.GetRenderPassToggleRegistryMutable().SetEnabled(
+                    rgcRequest->setPassEnabled.name, rgcRequest->setPassEnabled.enabled);
+                rgcResult.success = applied;
+                if (!applied) {
+                    rgcResult.errorMessage = "\"" + rgcRequest->setPassEnabled.name + "\" cannot be disabled (deny-listed).";
+                }
+                break;
+            }
+            case RenderGraphControlCommandKind::ListPassStates: {
+                for (const rg::RenderPassToggleState& state : m_core.GetRenderPassToggleRegistryMutable().ListAll()) {
+                    RenderGraphControlPassStateOutcome outcome;
+                    outcome.name = state.name;
+                    outcome.enabled = state.enabled;
+                    outcome.everDeclaredThisSession = state.everDeclaredThisSession;
+                    rgcResult.passStates.push_back(std::move(outcome));
+                }
+                rgcResult.success = true;
+                break;
+            }
+            case RenderGraphControlCommandKind::SetFeatureEnabled: {
+                RenderFeatureCompositor* compositor = m_core.GetRenderFeatureCompositor();
+                if (compositor == nullptr) {
+                    rgcResult.success = false;
+                    rgcResult.errorMessage = "no render feature compositor available this session";
+                } else {
+                    rgcResult.success = compositor->SetFeatureEnabled(
+                        rgcRequest->setFeatureEnabled.name, rgcRequest->setFeatureEnabled.enabled);
+                    if (!rgcResult.success) {
+                        rgcResult.errorMessage =
+                            "\"" + rgcRequest->setFeatureEnabled.name + "\" matches no loaded plugin render feature.";
+                    }
+                }
+                break;
+            }
+            case RenderGraphControlCommandKind::SetFeaturePriority: {
+                RenderFeatureCompositor* compositor = m_core.GetRenderFeatureCompositor();
+                if (compositor == nullptr) {
+                    rgcResult.success = false;
+                    rgcResult.errorMessage = "no render feature compositor available this session";
+                } else {
+                    rgcResult.success = compositor->SetFeaturePriority(
+                        rgcRequest->setFeaturePriority.name, rgcRequest->setFeaturePriority.priority);
+                    if (!rgcResult.success) {
+                        rgcResult.errorMessage =
+                            "\"" + rgcRequest->setFeaturePriority.name + "\" matches no loaded plugin render feature.";
+                    }
+                }
+                break;
+            }
+            case RenderGraphControlCommandKind::SetBlurEnabled:
+                m_editorLayer->SetShowBlurredSceneOutput(rgcRequest->setBlurEnabled.enabled);
+                rgcResult.success = true;
+                break;
+            case RenderGraphControlCommandKind::SetGBufferEnabled:
+                m_editorLayer->SetShowGBufferValidationOutput(rgcRequest->setGBufferEnabled.enabled);
+                rgcResult.success = true;
+                break;
+            }
+            m_renderGraphControlCommandBridge.FulfillCommand(rgcResult);
         }
 
         // task_manager/stl-parser-2, PHASE1 - drains at most ONE pending

@@ -523,6 +523,14 @@ add_library(gte_core STATIC
     src/Application/AssetImportCommandBridge.cpp
     src/Application/FrameDebuggerCommandBridge.h
     src/Application/FrameDebuggerCommandBridge.cpp
+    # editor-core-separation-8 campaign, PHASE5
+    # (PHASE5_CROSS_THREAD_BRIDGE_AND_HTTP_ENDPOINTS.md) - the new
+    # RenderGraphControlCommandBridge, confirmed (Step 3.7) to belong in this
+    # SAME gte_core source list as every other src/Application/*.cpp bridge
+    # above - there is no separate gte_application CMake target in this
+    # codebase.
+    src/Application/RenderGraphControlCommandBridge.h
+    src/Application/RenderGraphControlCommandBridge.cpp
     # editor-core-separation-3 campaign, PHASE4
     # (PHASE4_EDITOR_PANEL_CAPABILITY_AND_REGISTRY.md) - EditorPanelRegistry,
     # replacing EditorPanelCatalog.h's former fixed kKnownEditorPanelNames[]

@@ -50,6 +50,12 @@ namespace gte { class AssetImportCommandBridge; }
 // (PHASE3_LOG_QUERY_CAPABILITY_AND_NETWORKROUTES_CLEANUP.md).
 namespace gte { class ILogQueryCapability; }
 
+// Forward-declared for the same cheap-header reason as FrameCaptureBridge/
+// EngineCommandBridge/EditorUiCommandBridge/FrameDebuggerCommandBridge/
+// AssetImportCommandBridge/ILogQueryCapability above - editor-core-separation-8
+// campaign, PHASE5 (PHASE5_CROSS_THREAD_BRIDGE_AND_HTTP_ENDPOINTS.md).
+namespace gte { class RenderGraphControlCommandBridge; }
+
 namespace gte::Network {
 
 // Owns a real, embedded HTTP server (cpp-httplib) bound to loopback
@@ -122,12 +128,23 @@ public:
     // "GET /get_logs and POST /clear_logs both respond 503 rather than
     // crashing" - the exact same "nullptr degrades gracefully to a 503,
     // never a crash" contract every other bridge above already documents.
+    // `renderGraphControlCommandBridge` (editor-core-separation-8 campaign,
+    // PHASE5 - PHASE5_CROSS_THREAD_BRIDGE_AND_HTTP_ENDPOINTS.md) is a
+    // SEVENTH defaulted, non-owning pointer, appended AFTER
+    // `logQueryCapability` so every existing call site keeps compiling
+    // unchanged. Non-null in production (EditorHost owns the real
+    // RenderGraphControlCommandBridge and passes its address) - `nullptr`
+    // means "every GET /render_graph/* route added by this campaign
+    // responds 503 rather than crashing" - the exact same "nullptr
+    // degrades gracefully to a 503, never a crash" contract every other
+    // bridge above already documents.
     explicit NetworkServer(FrameCaptureBridge* captureBridge = nullptr,
         EngineCommandBridge* commandBridge = nullptr,
         EditorUiCommandBridge* uiCommandBridge = nullptr,
         FrameDebuggerCommandBridge* frameDebuggerCommandBridge = nullptr,
         AssetImportCommandBridge* assetImportCommandBridge = nullptr,
-        ILogQueryCapability* logQueryCapability = nullptr);
+        ILogQueryCapability* logQueryCapability = nullptr,
+        RenderGraphControlCommandBridge* renderGraphControlCommandBridge = nullptr);
     ~NetworkServer();
 
     NetworkServer(const NetworkServer&) = delete;
@@ -214,6 +231,11 @@ private:
     // (editor-core-separation-2 campaign, PHASE3). Consulted by
     // GET /get_logs and POST /clear_logs (RegisterRoutes() below).
     ILogQueryCapability* m_logQueryCapability = nullptr;
+    // Non-owning - same lifetime contract as m_captureBridge above
+    // (editor-core-separation-8 campaign, PHASE5). Consulted by every
+    // GET /render_graph/* mutation/discovery route this campaign adds
+    // (RegisterRoutes() below).
+    RenderGraphControlCommandBridge* m_renderGraphControlCommandBridge = nullptr;
 };
 
 } // namespace gte::Network

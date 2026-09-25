@@ -7,6 +7,11 @@
 #include "../Application/EngineCommandBridge.h"
 #include "../Application/FrameCaptureBridge.h"
 #include "../Application/FrameDebuggerCommandBridge.h"
+// editor-core-separation-8 campaign, PHASE5
+// (PHASE5_CROSS_THREAD_BRIDGE_AND_HTTP_ENDPOINTS.md) - the new
+// RenderGraphControlCommandBridge, and the 6 new GET /render_graph/* routes
+// registered below.
+#include "../Application/RenderGraphControlCommandBridge.h"
 #include "../Core/EditorCapabilities.h" // ILogQueryCapability - editor-core-separation-2 campaign, PHASE3.
 #include "../Core/Logging.h"
 // editor-core-separation-2 campaign, PHASE3
@@ -257,6 +262,33 @@ void RespondWithFrameDebuggerCommandResult(
         "application/json");
 }
 
+// editor-core-separation-8 campaign, PHASE5
+// (PHASE5_CROSS_THREAD_BRIDGE_AND_HTTP_ENDPOINTS.md) - shared tail for
+// every /render_graph/* MUTATION route (set_pass_enabled/
+// set_feature_enabled/set_feature_priority/set_blur_enabled/
+// set_gbuffer_enabled) - mirrors RespondWithFrameDebuggerCommandResult()'s
+// own exact alreadyPending/timedOut/outcome.success mapping immediately
+// above. GET /render_graph/passes does NOT use this helper - it is
+// read-only and has its own response shape (mirrors /frame_debugger/state's
+// own special-cased handling).
+void RespondWithRenderGraphControlCommandResult(
+    httplib::Response& res, const RenderGraphControlCommandBridge::SubmitResult& submit)
+{
+    if (submit.alreadyPending) {
+        res.status = 503;
+        res.set_content(BuildGenericErrorResponseJson("another render graph control command is already in progress"), "application/json");
+        return;
+    }
+    if (submit.timedOut) {
+        res.status = 504;
+        res.set_content(BuildGenericErrorResponseJson("render graph control command timed out"), "application/json");
+        return;
+    }
+    const RenderGraphControlCommandResult& result = *submit.result;
+    res.status = result.success ? 200 : 409;
+    res.set_content(BuildRenderGraphControlCommandResponseJson(result.success, result.errorMessage), "application/json");
+}
+
 // The one, hand-written route table for this campaign - see
 // PHASE0_MASTER_STRATEGY.md's locked "Endpoint contract". A future endpoint
 // is added here as one more server.Get(...)/Post(...) line, forwarding to
@@ -264,7 +296,8 @@ void RespondWithFrameDebuggerCommandResult(
 // in this lambda.
 void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, EngineCommandBridge* commandBridge,
     EditorUiCommandBridge* uiCommandBridge, FrameDebuggerCommandBridge* frameDebuggerCommandBridge,
-    AssetImportCommandBridge* assetImportCommandBridge, ILogQueryCapability* logQueryCapability)
+    AssetImportCommandBridge* assetImportCommandBridge, ILogQueryCapability* logQueryCapability,
+    RenderGraphControlCommandBridge* renderGraphControlCommandBridge)
 {
     server.Get("/http_hello_world", [](const httplib::Request&, httplib::Response& res) {
         res.set_content(HandleHelloWorld(), "text/plain; charset=utf-8");
@@ -546,6 +579,158 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         }
         res.status = 200;
         res.set_content(BuildFrameDebuggerStateResponseJson(ToFrameDebuggerStateResponseView(submit.result->state)), "application/json");
+    });
+
+    // editor-core-separation-8 campaign, PHASE5
+    // (PHASE5_CROSS_THREAD_BRIDGE_AND_HTTP_ENDPOINTS.md) -
+    // GET /render_graph/set_pass_enabled, /passes, /set_feature_enabled,
+    // /set_feature_priority, /set_blur_enabled, /set_gbuffer_enabled. Every
+    // route below shares the SAME shape as every other bridge-backed route
+    // in this file: parse (NetworkRoutes.h) -> bridge-unavailable (503)
+    // check -> build a RenderGraphControlCommandRequest ->
+    // RenderGraphControlCommandBridge::SubmitAndWait() ->
+    // RespondWithRenderGraphControlCommandResult() maps alreadyPending/
+    // timedOut/outcome to a status code + response body - EXCEPT
+    // /render_graph/passes, which is read-only and has its own response
+    // shape (mirrors /frame_debugger/state's own special-cased handling
+    // immediately above).
+    server.Get("/render_graph/set_pass_enabled",
+        [renderGraphControlCommandBridge](const httplib::Request& req, httplib::Response& res) {
+        const ParsedRenderGraphSetPassEnabledQuery parsed =
+            ParseRenderGraphSetPassEnabledQuery(req.get_param_value("name"), req.get_param_value("enabled"));
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        if (renderGraphControlCommandBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("render graph control command bridge not available"), "application/json");
+            return;
+        }
+        RenderGraphControlCommandRequest request;
+        request.kind = RenderGraphControlCommandKind::SetBuiltInPassEnabled;
+        request.setPassEnabled.name = parsed.name;
+        request.setPassEnabled.enabled = parsed.enabled;
+        const RenderGraphControlCommandBridge::SubmitResult submit = renderGraphControlCommandBridge->SubmitAndWait(request);
+        RespondWithRenderGraphControlCommandResult(res, submit);
+    });
+
+    server.Get("/render_graph/passes",
+        [renderGraphControlCommandBridge](const httplib::Request&, httplib::Response& res) {
+        if (renderGraphControlCommandBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("render graph control command bridge not available"), "application/json");
+            return;
+        }
+        RenderGraphControlCommandRequest request;
+        request.kind = RenderGraphControlCommandKind::ListPassStates;
+        const RenderGraphControlCommandBridge::SubmitResult submit = renderGraphControlCommandBridge->SubmitAndWait(request);
+        if (submit.alreadyPending) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("another render graph control command is already in progress"), "application/json");
+            return;
+        }
+        if (submit.timedOut) {
+            res.status = 504;
+            res.set_content(BuildGenericErrorResponseJson("render graph control command timed out"), "application/json");
+            return;
+        }
+        std::vector<RenderGraphControlPassStateResponseView> views;
+        views.reserve(submit.result->passStates.size());
+        for (const RenderGraphControlPassStateOutcome& outcome : submit.result->passStates) {
+            RenderGraphControlPassStateResponseView view;
+            view.name = outcome.name;
+            view.enabled = outcome.enabled;
+            view.everDeclaredThisSession = outcome.everDeclaredThisSession;
+            views.push_back(std::move(view));
+        }
+        res.status = 200;
+        res.set_content(BuildRenderGraphControlPassStatesResponseJson(views), "application/json");
+    });
+
+    server.Get("/render_graph/set_feature_enabled",
+        [renderGraphControlCommandBridge](const httplib::Request& req, httplib::Response& res) {
+        const ParsedRenderGraphSetFeatureEnabledQuery parsed =
+            ParseRenderGraphSetFeatureEnabledQuery(req.get_param_value("name"), req.get_param_value("enabled"));
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        if (renderGraphControlCommandBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("render graph control command bridge not available"), "application/json");
+            return;
+        }
+        RenderGraphControlCommandRequest request;
+        request.kind = RenderGraphControlCommandKind::SetFeatureEnabled;
+        request.setFeatureEnabled.name = parsed.name;
+        request.setFeatureEnabled.enabled = parsed.enabled;
+        const RenderGraphControlCommandBridge::SubmitResult submit = renderGraphControlCommandBridge->SubmitAndWait(request);
+        RespondWithRenderGraphControlCommandResult(res, submit);
+    });
+
+    server.Get("/render_graph/set_feature_priority",
+        [renderGraphControlCommandBridge](const httplib::Request& req, httplib::Response& res) {
+        const ParsedRenderGraphSetFeaturePriorityQuery parsed =
+            ParseRenderGraphSetFeaturePriorityQuery(req.get_param_value("name"), req.get_param_value("priority"));
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        if (renderGraphControlCommandBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("render graph control command bridge not available"), "application/json");
+            return;
+        }
+        RenderGraphControlCommandRequest request;
+        request.kind = RenderGraphControlCommandKind::SetFeaturePriority;
+        request.setFeaturePriority.name = parsed.name;
+        request.setFeaturePriority.priority = parsed.priority;
+        const RenderGraphControlCommandBridge::SubmitResult submit = renderGraphControlCommandBridge->SubmitAndWait(request);
+        RespondWithRenderGraphControlCommandResult(res, submit);
+    });
+
+    server.Get("/render_graph/set_blur_enabled",
+        [renderGraphControlCommandBridge](const httplib::Request& req, httplib::Response& res) {
+        const ParsedRenderGraphSetBoolQuery parsed = ParseRenderGraphSetBoolQuery(req.get_param_value("enabled"));
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        if (renderGraphControlCommandBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("render graph control command bridge not available"), "application/json");
+            return;
+        }
+        RenderGraphControlCommandRequest request;
+        request.kind = RenderGraphControlCommandKind::SetBlurEnabled;
+        request.setBlurEnabled.enabled = parsed.enabled;
+        const RenderGraphControlCommandBridge::SubmitResult submit = renderGraphControlCommandBridge->SubmitAndWait(request);
+        RespondWithRenderGraphControlCommandResult(res, submit);
+    });
+
+    server.Get("/render_graph/set_gbuffer_enabled",
+        [renderGraphControlCommandBridge](const httplib::Request& req, httplib::Response& res) {
+        const ParsedRenderGraphSetBoolQuery parsed = ParseRenderGraphSetBoolQuery(req.get_param_value("enabled"));
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        if (renderGraphControlCommandBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("render graph control command bridge not available"), "application/json");
+            return;
+        }
+        RenderGraphControlCommandRequest request;
+        request.kind = RenderGraphControlCommandKind::SetGBufferEnabled;
+        request.setGBufferEnabled.enabled = parsed.enabled;
+        const RenderGraphControlCommandBridge::SubmitResult submit = renderGraphControlCommandBridge->SubmitAndWait(request);
+        RespondWithRenderGraphControlCommandResult(res, submit);
     });
 
     // network-impl-3 campaign, Phase 5
@@ -1037,7 +1222,8 @@ struct NetworkServer::Impl {
 
 NetworkServer::NetworkServer(FrameCaptureBridge* captureBridge, EngineCommandBridge* commandBridge,
     EditorUiCommandBridge* uiCommandBridge, FrameDebuggerCommandBridge* frameDebuggerCommandBridge,
-    AssetImportCommandBridge* assetImportCommandBridge, ILogQueryCapability* logQueryCapability)
+    AssetImportCommandBridge* assetImportCommandBridge, ILogQueryCapability* logQueryCapability,
+    RenderGraphControlCommandBridge* renderGraphControlCommandBridge)
     : m_impl(std::make_unique<Impl>())
     , m_captureBridge(captureBridge)
     , m_commandBridge(commandBridge)
@@ -1045,6 +1231,7 @@ NetworkServer::NetworkServer(FrameCaptureBridge* captureBridge, EngineCommandBri
     , m_frameDebuggerCommandBridge(frameDebuggerCommandBridge)
     , m_assetImportCommandBridge(assetImportCommandBridge)
     , m_logQueryCapability(logQueryCapability)
+    , m_renderGraphControlCommandBridge(renderGraphControlCommandBridge)
 {
     // Registered exactly ONCE per NetworkServer instance, here in the
     // constructor - never inside Start() - so a Start()/Stop()/Start()
@@ -1052,9 +1239,12 @@ NetworkServer::NetworkServer(FrameCaptureBridge* captureBridge, EngineCommandBri
     // NEVER re-register the same route handler onto the same
     // httplib::Server a second time.
     RegisterRoutes(m_impl->server, m_captureBridge, m_commandBridge, m_uiCommandBridge, m_frameDebuggerCommandBridge,
-        m_assetImportCommandBridge, m_logQueryCapability);
+        m_assetImportCommandBridge, m_logQueryCapability, m_renderGraphControlCommandBridge);
     // task_manager/stl-parser-2 campaign, PHASE2 - m_assetImportCommandBridge
     // is now actually consulted by RegisterRoutes() above (POST /import_asset).
+    // editor-core-separation-8 campaign, PHASE5 - m_renderGraphControlCommandBridge
+    // is now actually consulted by RegisterRoutes() above (the 6 new
+    // GET /render_graph/* routes).
 }
 
 NetworkServer::~NetworkServer()
