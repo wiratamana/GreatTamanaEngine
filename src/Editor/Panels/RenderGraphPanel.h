@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../../Core/Plugins/RenderFeatureDebugEntry.h"
 #include "../../Renderer/RenderGraph/RenderGraphSnapshot.h"
 #include "../EditorLayer.h"
 
@@ -51,8 +52,16 @@ public:
     // "instances culled this frame" readout - see
     // IEditorLayer::BuildUI()'s own doc comment (EditorLayer.h) for the full
     // contract. Always empty on a frame with no eligible GPU-driven batch.
+    // `renderFeatureEntries` (editor-core-separation-6 campaign, PHASE7 -
+    // PHASE7_RENDER_GRAPH_PANEL_VISIBILITY.md) is this frame's freshly-built
+    // snapshot of every loaded `_v2` render-feature plugin's own REAL,
+    // resolved ordering decision - see IEditorLayer::BuildUI()'s own doc
+    // comment (EditorLayer.h) for the full contract. Always empty when there
+    // is no compositor/no loaded `_v2` plugin this session. Placed LAST so
+    // this new argument is a pure addition to this method's own signature.
     void Build(EditorContext& ctx, const rg::RenderGraph& renderGraph,
-        const std::vector<GpuDrivenBatchDebugInfo>& gpuDrivenBatchDebugInfo);
+        const std::vector<GpuDrivenBatchDebugInfo>& gpuDrivenBatchDebugInfo,
+        const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries);
 
 private:
     // See ProfilerPanel::m_paused's own doc comment for the full Pause

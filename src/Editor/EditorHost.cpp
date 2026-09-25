@@ -5,6 +5,12 @@
 #include "EditorLogQueryCapability.h" // editor-core-separation-2 campaign, PHASE3.
 #include "ProjectRootPath.h" // editor-core-separation-3 campaign, PHASE2 - ExecutableDirectory().
 #include "../Core/EditorPanelRegistry.h" // editor-core-separation-3 campaign, PHASE4.
+// editor-core-separation-6 campaign, PHASE7
+// (PHASE7_RENDER_GRAPH_PANEL_VISIBILITY.md) - needed for the real
+// RenderFeatureCompositor::DebugSnapshot() call below (Core.h itself only
+// forward-declares the type for its own GetRenderFeatureCompositor()
+// accessor).
+#include "../Core/Plugins/RenderFeatureCompositor.h"
 #include "../Application/EventTranslator.h"
 #include "../Application/EngineCommandDispatch.h"
 #include "../Application/MemorySnapshotBuilder.h"
@@ -567,8 +573,20 @@ int EditorHost::Run()
         // bucket) - stays directly on m_editorLayer.
         {
             GTE_PROFILE_SCOPE("IEditorLayer::BuildUI");
+            // editor-core-separation-6 campaign, PHASE7
+            // (PHASE7_RENDER_GRAPH_PANEL_VISIBILITY.md) - mirrors
+            // m_core.GetGpuDrivenBatchDebugInfo()'s own exact "computed here,
+            // passed as a plain trailing argument" precedent immediately
+            // below: null-checked, since GetRenderFeatureCompositor() can, in
+            // principle, be null (see Core.h's own doc comment) even though
+            // RegisterBuiltinCapabilityOrchestrators() always registers one
+            // today.
+            const RenderFeatureCompositor* renderFeatureCompositor = m_core.GetRenderFeatureCompositor();
+            const std::vector<RenderFeatureDebugEntry> renderFeatureEntries =
+                renderFeatureCompositor != nullptr ? renderFeatureCompositor->DebugSnapshot()
+                                                    : std::vector<RenderFeatureDebugEntry>{};
             m_editorLayer->BuildUI(m_game, m_renderer, m_renderGraph, m_atmosphereSettings, m_atmosphereLutRenderer,
-                m_core.GetGpuDrivenBatchDebugInfo());
+                m_core.GetGpuDrivenBatchDebugInfo(), renderFeatureEntries);
         }
 
         // File > Exit (or any other future programmatic "close" UI action)

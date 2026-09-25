@@ -244,10 +244,38 @@ void BuildGpuDrivenBatchesSection(const std::vector<GpuDrivenBatchDebugInfo>& ba
     }
 }
 
+// editor-core-separation-6 campaign, PHASE7
+// (PHASE7_RENDER_GRAPH_PANEL_VISIBILITY.md) - one line per loaded
+// `IRenderFeatureModule_v2` entry, mirroring
+// BuildGpuDrivenBatchesSection()'s own exact shape immediately above: a
+// free function taking a small, already-CPU-side-collected
+// std::vector<RenderFeatureDebugEntry>, `ImGui::SeparatorText(...)` + a loop
+// of `ImGui::Text(...)` calls - no new ImGui widget kind, no new panel, no
+// per-frame GPU readback. `entries` is never frozen by this panel's own
+// Pause control (unlike the two RenderGraphSnapshot regimes and the
+// GPU-driven-batch readout above) - RenderFeatureCompositor::OnPluginsLoaded()
+// resolves this ordering exactly ONCE, at plugin-load time, and it never
+// changes again for the remaining lifetime of the process, so there is
+// nothing for "Pause" to usefully freeze here.
+void BuildPluginRenderFeaturesSection(const std::vector<RenderFeatureDebugEntry>& entries)
+{
+    ImGui::SeparatorText("Plugin Render Features");
+    if (entries.empty()) {
+        ImGui::TextDisabled("No loaded plugin implements IRenderFeatureModule_v2 this session.");
+        return;
+    }
+
+    for (const RenderFeatureDebugEntry& entry : entries) {
+        ImGui::Text("[%s] %s - priority %d, blend %s", entry.stage.c_str(), entry.name.c_str(), entry.priority,
+            entry.blendMode.c_str());
+    }
+}
+
 } // namespace
 
 void RenderGraphPanel::Build(EditorContext& /*ctx*/, const rg::RenderGraph& renderGraph,
-    const std::vector<GpuDrivenBatchDebugInfo>& gpuDrivenBatchDebugInfo)
+    const std::vector<GpuDrivenBatchDebugInfo>& gpuDrivenBatchDebugInfo,
+    const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries)
 {
     ImGui::Begin("Render Graph");
 
@@ -282,6 +310,14 @@ void RenderGraphPanel::Build(EditorContext& /*ctx*/, const rg::RenderGraph& rend
     // this placement keeps it visible without scrolling past both regimes'
     // own (often much longer) pass/resource tables.
     BuildGpuDrivenBatchesSection(batchesToShow);
+    ImGui::Spacing();
+
+    // editor-core-separation-6 campaign, PHASE7
+    // (PHASE7_RENDER_GRAPH_PANEL_VISIBILITY.md) - placed right after the
+    // GPU-Driven Batches section (same "live, actionable ordering signal,
+    // shown early, before the two much-longer regime pass/resource tables"
+    // placement logic that section's own comment already documents).
+    BuildPluginRenderFeaturesSection(renderFeatureEntries);
     ImGui::Spacing();
 
     BuildRegimeSection("Offscreen Regime (Game View + Scene View)", "Offscreen", offscreenSnapshot);

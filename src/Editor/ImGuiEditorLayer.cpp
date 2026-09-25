@@ -508,7 +508,8 @@ public:
 
     void BuildUI(Game& game, Renderer& renderer, const rg::RenderGraph& renderGraph,
         AtmosphereSettings& atmosphereSettings, AtmosphereLutRenderer& atmosphereLutRenderer,
-        const std::vector<GpuDrivenBatchDebugInfo>& gpuDrivenBatchDebugInfo) override
+        const std::vector<GpuDrivenBatchDebugInfo>& gpuDrivenBatchDebugInfo,
+        const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries) override
     {
         ImGui::SetCurrentContext(m_context);
 
@@ -606,7 +607,7 @@ public:
         BuildGamePanel(m_ctx);
         BuildMemoryPanel(m_ctx, renderer);
         m_profilerPanel.Build(m_ctx);
-        m_renderGraphPanel.Build(m_ctx, renderGraph, gpuDrivenBatchDebugInfo);
+        m_renderGraphPanel.Build(m_ctx, renderGraph, gpuDrivenBatchDebugInfo, renderFeatureEntries);
         // Atmosphere Scattering + Aerial Perspective campaign, Phase 8
         // (ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md) - a small,
         // stateless free-function panel (mirrors BuildMemoryPanel()'s own

@@ -65,6 +65,16 @@ class IEditorLayer;
 // Core.cpp is the one place that includes it for real.
 class IPluginCapabilityOrchestrator;
 
+// editor-core-separation-6 campaign, PHASE7
+// (PHASE7_RENDER_GRAPH_PANEL_VISIBILITY.md) - forward-declared only,
+// mirroring IPluginCapabilityOrchestrator immediately above: Core only ever
+// holds a raw, non-owning pointer into m_capabilityOrchestrators's own
+// RenderFeatureCompositor entry (see m_renderFeatureCompositorPtr below), so
+// no #include of "Plugins/RenderFeatureCompositor.h" is needed here -
+// Core.cpp is the one place that #includes it for real, to construct the
+// owned instance.
+class RenderFeatureCompositor;
+
 // Placeholder shape (editor-core-separation-1 campaign, PHASE12) - Core's own
 // public contract (design doc Section 5.2) commits to exposing frame
 // statistics via GetFrameStats(), but no phase in this 19-phase campaign
@@ -270,6 +280,26 @@ public:
     // themselves (PHASE0_MASTER_STRATEGY.md's Locked Design Decision #8 -
     // exactly ONE PluginHost instance/scan per process).
     const PluginHost& GetPluginHost() const noexcept { return m_pluginHost; }
+
+    // editor-core-separation-6 campaign, PHASE7
+    // (PHASE7_RENDER_GRAPH_PANEL_VISIBILITY.md) - a plain, zero-cost,
+    // non-owning pointer into m_capabilityOrchestrators's own
+    // RenderFeatureCompositor entry (never a dynamic_cast/RTTI lookup - this
+    // codebase uses no RTTI anywhere, confirmed via search_in_dir for
+    // "dynamic_cast" across the whole src/ tree during this phase's own
+    // review). Set once, at construction time, by
+    // RegisterBuiltinCapabilityOrchestrators() (the SAME statement that
+    // pushes the owning std::unique_ptr into m_capabilityOrchestrators - see
+    // Core.cpp), so this is never null after construction completes. The
+    // "Render Graph" panel (RenderGraphPanel::Build(), reached via
+    // IEditorLayer::BuildUI()'s own trailing parameter) calls
+    // ->DebugSnapshot() through this pointer, guarded by a null-check at the
+    // call site anyway - exactly mirroring every other nullable hook this
+    // class already exposes (see m_editorLayer's own doc comment above).
+    const RenderFeatureCompositor* GetRenderFeatureCompositor() const noexcept
+    {
+        return m_renderFeatureCompositorPtr;
+    }
 
     // editor-core-separation-6 campaign, PHASE2
     // (PHASE2_PLUGIN_CAPABILITY_ORCHESTRATOR_REGISTRY_AND_RENDER_FEATURE_MIGRATION.md,
@@ -490,6 +520,14 @@ private:
     // dependency on it - orchestrators only ever read m_pluginHost lazily,
     // at call time, via m_core.GetPluginHost()).
     std::vector<std::unique_ptr<IPluginCapabilityOrchestrator>> m_capabilityOrchestrators;
+
+    // editor-core-separation-6 campaign, PHASE7
+    // (PHASE7_RENDER_GRAPH_PANEL_VISIBILITY.md) - see GetRenderFeatureCompositor()'s
+    // own doc comment above for exactly why this exists and how it stays in
+    // sync with m_capabilityOrchestrators (set at the SAME statement that
+    // pushes the owning std::unique_ptr, inside
+    // RegisterBuiltinCapabilityOrchestrators() - Core.cpp).
+    RenderFeatureCompositor* m_renderFeatureCompositorPtr = nullptr;
 
     // PHASE13 - this frame's already-resolved Game/Scene View render targets
     // (IEditorLayer::GameViewTarget()/SceneViewTarget()'s own real answers,

@@ -5,6 +5,13 @@
 #include "../Renderer/Atmosphere/AtmosphereTypes.h"
 #include "../Renderer/RenderTexture.h"
 #include "../Renderer/Culling/GpuDrivenBatchDebugInfo.h"
+// editor-core-separation-6 campaign, PHASE7
+// (PHASE7_RENDER_GRAPH_PANEL_VISIBILITY.md) - a small, dependency-free
+// gte_core-owned struct (see that header's own doc comment for why it lives
+// there, co-located with RenderFeatureCompositor.h, instead of being defined
+// inline here) - included directly, mirroring GpuDrivenBatchDebugInfo.h
+// immediately above exactly.
+#include "../Core/Plugins/RenderFeatureDebugEntry.h"
 #include "../Renderer/RenderGraph/RenderGraphTypes.h"
 // editor-core-separation-2 campaign, PHASE2 - the new gte_core-owned
 // IFrameDebuggerCaptureRecorder interface (src/Core/
@@ -447,9 +454,20 @@ public:
     // empty on a frame with no eligible batch (including every frame in a
     // release/non-Editor build, trivially, since this whole method is never
     // called there).
+    // `renderFeatureEntries` (editor-core-separation-6 campaign, PHASE7 -
+    // PHASE7_RENDER_GRAPH_PANEL_VISIBILITY.md) is this frame's freshly-built
+    // snapshot of every loaded `_v2` render-feature plugin's own REAL,
+    // resolved ordering decision (Core::GetRenderFeatureCompositor()-
+    // >DebugSnapshot(), or an empty vector when there is no compositor/no
+    // loaded `_v2` plugin) - the "Render Graph" panel's new "Plugin Render
+    // Features" section displays it, mirroring `gpuDrivenBatchDebugInfo`
+    // immediately above exactly (always empty on a frame/build with nothing
+    // to show). Placed LAST so every existing call site needs only one new
+    // trailing argument, never a full argument-order rewrite.
     virtual void BuildUI(Game& game, Renderer& renderer, const rg::RenderGraph& renderGraph,
         AtmosphereSettings& atmosphereSettings, AtmosphereLutRenderer& atmosphereLutRenderer,
-        const std::vector<GpuDrivenBatchDebugInfo>& gpuDrivenBatchDebugInfo) = 0;
+        const std::vector<GpuDrivenBatchDebugInfo>& gpuDrivenBatchDebugInfo,
+        const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries) = 0;
 
     // Records this frame's UI draw data into cmd. Called from inside
     // Renderer::Present()'s recordExtra hook - i.e. while the swapchain

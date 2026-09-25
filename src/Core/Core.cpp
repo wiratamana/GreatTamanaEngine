@@ -262,7 +262,17 @@ void Core::RegisterBuiltinCapabilityOrchestrators()
     // render-feature compositing pipeline - reuses the SAME m_renderer
     // member AddAtmosphereCompositePass()/every other real pass in this file
     // already reads (never a second, duplicate Renderer instance).
-    m_capabilityOrchestrators.push_back(std::make_unique<RenderFeatureCompositor>(*this, m_renderer));
+    //
+    // editor-core-separation-6 campaign, PHASE7
+    // (PHASE7_RENDER_GRAPH_PANEL_VISIBILITY.md) - m_renderFeatureCompositorPtr
+    // is captured HERE, at the exact same statement that constructs the
+    // owning std::unique_ptr, BEFORE it is moved into
+    // m_capabilityOrchestrators - see Core.h's own doc comment on
+    // GetRenderFeatureCompositor()/m_renderFeatureCompositorPtr for why this
+    // is a plain, zero-cost pointer with no dynamic_cast/RTTI involved.
+    auto renderFeatureCompositor = std::make_unique<RenderFeatureCompositor>(*this, m_renderer);
+    m_renderFeatureCompositorPtr = renderFeatureCompositor.get();
+    m_capabilityOrchestrators.push_back(std::move(renderFeatureCompositor));
 }
 
 // editor-core-separation-3 campaign, PHASE2

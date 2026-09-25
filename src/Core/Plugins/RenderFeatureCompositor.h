@@ -1,6 +1,7 @@
 #pragma once
 
 #include "IPluginCapabilityOrchestrator.h"
+#include "RenderFeatureDebugEntry.h"
 #include "RenderFeatureNamePool.h"
 
 #include "../../Renderer/ComputeDescriptorSet.h"
@@ -79,6 +80,21 @@ public:
     void OnPluginsLoaded(const std::vector<IPluginModule*>& modules) override;
     void ContributeRenderGraphPasses(
         const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) override;
+
+    // editor-core-separation-6 campaign, PHASE7
+    // (PHASE7_RENDER_GRAPH_PANEL_VISIBILITY.md) - a read-only, `_v2`-ABI-free
+    // snapshot of this compositor's own REAL, resolved ordering decision:
+    // walks m_postComposite then m_preUi (the exact same combined order
+    // ContributeRenderGraphPasses() itself uses), converting each Entry's
+    // descriptor fields into small, human-readable strings (see the
+    // RenderFeatureCompositor.cpp-local ToString(RenderFeatureStage)/
+    // ToString(RenderFeatureBlendMode) helpers, mirroring RenderPassEvent's
+    // own existing ToString() free-function precedent, RenderGraphTypes.h/
+    // .cpp). Consumed by the Editor's "Render Graph" panel
+    // (RenderGraphPanel::Build()) via Core::GetRenderFeatureCompositor()-
+    // >DebugSnapshot(). Safe to call at most once per Editor frame - never
+    // on a hot render path, and never mutates any of this class's own state.
+    std::vector<RenderFeatureDebugEntry> DebugSnapshot() const;
 
     // Called by PluginRenderPassBuilderAdapter_v2 - dispatches one of the 3
     // fixed drawing operations (RenderFeatureOps.comp) against the private

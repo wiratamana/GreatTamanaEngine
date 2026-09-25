@@ -14,6 +14,53 @@
 
 namespace gte {
 
+namespace {
+
+// editor-core-separation-6 campaign, PHASE7
+// (PHASE7_RENDER_GRAPH_PANEL_VISIBILITY.md) - file-local helpers used ONLY by
+// RenderFeatureCompositor::DebugSnapshot() below, mirroring
+// RenderGraphTypes.cpp's own ToString(RenderPassEvent)/ToString(RenderPassDrawKind)
+// precedent exactly: deliberately NO `default:` case, so a future new
+// enumerator fails to compile-warn (this codebase enables no `-Wswitch`, per
+// AGENTS.md's own "Render Pass System" section, but the discipline is kept
+// anyway) rather than silently falling through - "Unknown" is the one
+// deliberate fallback return.
+const char* ToString(RenderFeatureStage stage) noexcept
+{
+    switch (stage) {
+    case RenderFeatureStage::PreOpaque:
+        return "PreOpaque";
+    case RenderFeatureStage::PostOpaque:
+        return "PostOpaque";
+    case RenderFeatureStage::PostTransparent:
+        return "PostTransparent";
+    case RenderFeatureStage::PostComposite:
+        return "PostComposite";
+    case RenderFeatureStage::PreUI:
+        return "PreUI";
+    }
+    return "Unknown";
+}
+
+const char* ToString(RenderFeatureBlendMode blendMode) noexcept
+{
+    switch (blendMode) {
+    case RenderFeatureBlendMode::Replace:
+        return "Replace";
+    case RenderFeatureBlendMode::AlphaOver:
+        return "AlphaOver";
+    case RenderFeatureBlendMode::Additive:
+        return "Additive";
+    case RenderFeatureBlendMode::Multiply:
+        return "Multiply";
+    case RenderFeatureBlendMode::ScreenSpaceMask:
+        return "ScreenSpaceMask";
+    }
+    return "Unknown";
+}
+
+} // namespace
+
 RenderFeatureCompositor::RenderFeatureCompositor(Core& core, Renderer& renderer)
     : m_core(core)
     , m_renderer(renderer)
@@ -111,6 +158,34 @@ void RenderFeatureCompositor::OnPluginsLoaded(const std::vector<IPluginModule*>&
             m_namePool.BlendPassName(entry.descriptor.name, viewName);
         }
     }
+}
+
+// editor-core-separation-6 campaign, PHASE7
+// (PHASE7_RENDER_GRAPH_PANEL_VISIBILITY.md) - see this method's own doc
+// comment (RenderFeatureCompositor.h) for the full contract. Walks the exact
+// same combined (m_postComposite, then m_preUi) order
+// ContributeRenderGraphPasses() itself uses, so the panel's displayed order
+// always matches the REAL execution order this frame.
+std::vector<RenderFeatureDebugEntry> RenderFeatureCompositor::DebugSnapshot() const
+{
+    std::vector<RenderFeatureDebugEntry> snapshot;
+    snapshot.reserve(m_postComposite.size() + m_preUi.size());
+
+    auto appendStage = [&snapshot](const std::vector<Entry>& entries) {
+        for (const Entry& entry : entries) {
+            RenderFeatureDebugEntry debugEntry;
+            debugEntry.name = entry.descriptor.name;
+            debugEntry.stage = ToString(entry.descriptor.stage);
+            debugEntry.priority = entry.descriptor.priority;
+            debugEntry.blendMode = ToString(entry.descriptor.blendMode);
+            snapshot.push_back(std::move(debugEntry));
+        }
+    };
+
+    appendStage(m_postComposite);
+    appendStage(m_preUi);
+
+    return snapshot;
 }
 
 void RenderFeatureCompositor::EnsureTextureSized(
