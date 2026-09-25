@@ -970,6 +970,12 @@ add_library(gte_editor STATIC
     src/Editor/FrameDebuggerHistory.cpp
     src/Editor/FrameDebuggerPreviewProcessing.h
     src/Editor/FrameDebuggerPreviewProcessing.cpp
+    # editor-core-separation-7 campaign, PHASE3
+    # (PHASE3_EDITOR_PANEL_DATA_DRIVEN_MIGRATION_AND_EXPORT_DOT.md) - the real
+    # "Export DOT" implementation, gte_editor-tier (Locked Design Decision #14
+    # - not a gte_core sibling of RenderGraphMetadata.h/.cpp).
+    src/Editor/RenderGraphDotExport.h
+    src/Editor/RenderGraphDotExport.cpp
     src/Editor/Panels/HierarchyPanel.h
     src/Editor/Panels/HierarchyPanel.cpp
     src/Editor/Panels/InspectorPanel.h

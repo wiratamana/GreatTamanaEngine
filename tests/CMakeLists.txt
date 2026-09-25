@@ -2286,6 +2286,9 @@ if(TRUE)
         Editor/FrameDebuggerSnapshotBuilderTests.cpp
         Editor/FrameDebuggerPreviewProcessingTests.cpp
         Editor/AtmosphereAerialPerspectiveLutInspectionTests.cpp
+        # editor-core-separation-7 campaign, PHASE3 - gte_editor-tier "Export
+        # DOT" pure functions (src/Editor/RenderGraphDotExport.h/.cpp).
+        Editor/RenderGraphDotExportTests.cpp
         Network/LogEndpointsEndToEndTests.cpp
     )
 

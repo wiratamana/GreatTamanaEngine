@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../../Core/Plugins/RenderFeatureDebugEntry.h"
-#include "../../Renderer/RenderGraph/RenderGraphSnapshot.h"
+#include "../../Renderer/RenderGraph/RenderGraphMetadata.h"
 #include "../EditorLayer.h"
 
 #include <vector>
@@ -70,15 +70,16 @@ private:
     // since every section below just reads m_paused's current value).
     bool m_paused = false;
 
-    // The frozen snapshots captured at the moment m_paused most recently
-    // became true - one per ExecuteTimingMode regime, mirroring
-    rg::RenderGraphSnapshot m_frozenOffscreenSnapshot;
-    rg::RenderGraphSnapshot m_frozenPresentSnapshot;
-
-    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-    // PHASE6 - frozen alongside the two snapshots above, same "captured
-    // once when m_paused flips false->true" rule.
-    std::vector<GpuDrivenBatchDebugInfo> m_frozenGpuDrivenBatchDebugInfo;
+    // The frozen metadata captured at the moment m_paused most recently
+    // became true - editor-core-separation-7 campaign, PHASE3
+    // (PHASE3_EDITOR_PANEL_DATA_DRIVEN_MIGRATION_AND_EXPORT_DOT.md): this ONE
+    // field replaces the old three separate frozen fields
+    // (m_frozenOffscreenSnapshot/m_frozenPresentSnapshot/
+    // m_frozenGpuDrivenBatchDebugInfo) - rg::RenderGraphMetadata already folds
+    // in both regimes PLUS the GPU-driven-batch readout PLUS the plugin
+    // render-feature readout (see PHASE0_MASTER_STRATEGY.md's Locked Design
+    // Decisions #1/#2), so ONE frozen copy is enough.
+    rg::RenderGraphMetadata m_frozenMetadata;
 };
 
 } // namespace gte
