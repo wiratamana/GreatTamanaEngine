@@ -20,6 +20,24 @@
 # probe's own build tree (tools/ci/gte_plugin_isolation_probe/), never
 # committed, same as /build-plugin-abi-handshake-probe/ above.
 /build-plugin-isolation-probe/
+# editor-core-separation-11 campaign, PHASE2 - the new Project Assembly link
+# probe's own build tree (tools/ci/gte_project_assembly_link_probe/), never
+# committed, same as /build-plugin-isolation-probe/ above. This probe is a
+# genuinely standalone CMake project (not a nested-invocation wrapper around
+# the real root CMakeLists.txt like the 4 probes above it), so it also
+# fetches its OWN, independent copies of SDL3/Vulkan-Headers+volk/ImGui
+# straight into its own source directory (see that probe's own CMakeLists.txt
+# for why) - those fetched artifacts must never be committed either.
+/build-project-assembly-link-probe/
+/tools/ci/gte_project_assembly_link_probe/include/
+/tools/ci/gte_project_assembly_link_probe/lib/
+/tools/ci/gte_project_assembly_link_probe/SDL3.dll
+/tools/ci/gte_project_assembly_link_probe/third_party/
+# Optional scratch binary dir used to reproduce PHASE2's own Step 4(b)
+# ("WINDOWS_EXPORT_ALL_SYMBOLS OFF should fail to link") experiment by hand -
+# never a permanent fixture, but ignored defensively in case someone forgets
+# to delete it after running the experiment.
+/build-project-assembly-link-probe-scratch-off/
 /out/
 
 # Local reference-only clones for research (see task_manager/atmosphere-scattering-1/
