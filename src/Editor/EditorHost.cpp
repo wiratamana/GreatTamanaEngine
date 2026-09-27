@@ -251,6 +251,20 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
     m_core.LoadPlugins(gte::ExecutableDirectory() / "plugins");
 #endif
 
+    // editor-core-separation-11 campaign (Project Assembly system), PHASE5 -
+    // loaded exactly once, here, at EditorHost construction time, mirroring
+    // Core::LoadPlugins()'s own call immediately above. Deliberately its OWN,
+    // separate scan (GTE_PROJECT_ASSEMBLY_OUTPUT_DIR's own runtime folder,
+    // "<exe dir>/project_assemblies/" - NEVER "<exe dir>/plugins/") - the two
+    // coexisting systems must never be confused for one another. `this`
+    // (EditorHost) is passed as the live gte::EditorHost& every loaded
+    // "*_Editor.dll" receives. Gated by GTE_ENABLE_PROJECT_ASSEMBLIES - its
+    // OWN flag, never GTE_ENABLE_PLUGINS (PHASE0_MASTER_STRATEGY.md, Finding
+    // D).
+#if GTE_ENABLE_PROJECT_ASSEMBLIES
+    m_core.LoadProjectAssemblies(gte::ExecutableDirectory() / "project_assemblies", this);
+#endif
+
     // editor-core-separation-1 campaign, PHASE16 - wires the ONE real
     // ISceneIOCapability implementation this engine ships
     // (Editor/EditorSceneIOCapability.h) into the nullable pointer

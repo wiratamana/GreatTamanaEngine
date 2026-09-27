@@ -45,6 +45,11 @@
 // block).
 #include "Plugins/PluginHost.h"
 
+// editor-core-separation-11 campaign (Project Assembly system), PHASE5 -
+// mirrors Plugins/PluginHost.h's own "concrete, gte_core-owned mechanism
+// class, included by name" precedent immediately above exactly.
+#include "Plugins/ProjectAssemblyHost.h"
+
 #include <volk.h>
 
 #include <functional>
@@ -63,6 +68,13 @@ namespace gte {
 // src/Game/RenderSystem.h's own pre-existing FrameDebuggerCaptureContext*
 // forward-declaration precedent exactly.
 class IEditorLayer;
+
+// editor-core-separation-11 campaign (Project Assembly system), PHASE5 -
+// mirrors IEditorLayer's own forward-declaration-only precedent immediately
+// above: Core only ever holds a bare, nullable EditorHost* PARAMETER passed
+// through LoadProjectAssemblies() (never a member), so no #include of the
+// real src/Editor/EditorHost.h header is needed here at all.
+class EditorHost;
 
 // editor-core-separation-6 campaign, PHASE2
 // (PHASE2_PLUGIN_CAPABILITY_ORCHESTRATOR_REGISTRY_AND_RENDER_FEATURE_MIGRATION.md)
@@ -294,6 +306,17 @@ public:
     // itself always compiles - see PluginHost.h's own doc comment for why
     // the class it forwards to is capability-agnostic and mechanical).
     void LoadPlugins(const std::filesystem::path& pluginsDirectory);
+
+    // editor-core-separation-11 campaign (Project Assembly system), PHASE5 -
+    // thin pass-through, mirroring LoadPlugins() immediately above exactly.
+    // `editorHost` is nullptr for a Player-shaped host that never
+    // constructs one (a "*_Editor.dll" found in that case is skipped with a
+    // loud, logged warning by ProjectAssemblyHost itself, never crashed on).
+    // EditorHost's constructor (gte_editor) calls this exactly once, gated
+    // behind `#if GTE_ENABLE_PROJECT_ASSEMBLIES` at THAT call site - its OWN,
+    // separate flag, never GTE_ENABLE_PLUGINS (PHASE0_MASTER_STRATEGY.md,
+    // Finding D) - this pass-through method itself always compiles.
+    void LoadProjectAssemblies(const std::filesystem::path& outputDirectory, EditorHost* editorHost);
 
     // Read accessor for PHASE3 (render-feature capability lookup) and
     // PHASE4 (editor-panel capability lookup) - both look up capabilities
@@ -560,6 +583,13 @@ private:
     // list, immediately before m_gameTargetThisFrame/m_sceneTargetThisFrame,
     // which similarly have no cross-member dependency.
     PluginHost m_pluginHost;
+
+    // editor-core-separation-11 campaign (Project Assembly system), PHASE5 -
+    // sibling to, but SEPARATE from, m_pluginHost above (LDD1: this is a
+    // new, additive, parallel system, never edits PluginHost itself).
+    // Mirrors m_pluginHost's own "no constructor dependency on any other
+    // Core member" placement exactly.
+    ProjectAssemblyHost m_projectAssemblyHost;
 
     // editor-core-separation-6 campaign, PHASE2
     // (PHASE2_PLUGIN_CAPABILITY_ORCHESTRATOR_REGISTRY_AND_RENDER_FEATURE_MIGRATION.md,

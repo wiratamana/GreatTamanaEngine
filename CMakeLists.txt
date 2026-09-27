@@ -331,6 +331,16 @@ add_library(gte_core STATIC
     # directly Tier-1-testable from tests/Core/FixedBufferReaderTests.cpp -
     # used by PluginHost.cpp's own "Loaded plugin '...'" log line.
     src/Core/Plugins/FixedBufferReader.h
+    # editor-core-separation-11 campaign (Project Assembly system), PHASE5 -
+    # gte::ProjectAssemblyHost, the sibling-but-separate mechanism that
+    # scans GTE_PROJECT_ASSEMBLY_OUTPUT_DIR for *_Game.dll/*_Editor.dll,
+    # LoadLibraryW()s each, and calls its GTE_RegisterProject export exactly
+    # once. Always compiled (mirrors PluginHost.h/.cpp's own "mechanism
+    # class is unconditional, only the runtime call site is gated"
+    # precedent immediately above - GTE_ENABLE_PROJECT_ASSEMBLIES only
+    # gates EditorHost.cpp's m_core.LoadProjectAssemblies() call).
+    src/Core/Plugins/ProjectAssemblyHost.h
+    src/Core/Plugins/ProjectAssemblyHost.cpp
     # editor-core-separation-3 campaign, PHASE3
     # (PHASE3_RUNTIME_RENDER_FEATURE_CAPABILITY.md) - PluginRenderPassBuilderAdapter,
     # the gte_core-side implementation of IPluginRenderPassBuilder, constructed
@@ -1198,6 +1208,15 @@ target_compile_definitions(gte_core PUBLIC GTE_ENABLE_NETWORK=$<BOOL:${GTE_ENABL
 # PHASE0_MASTER_STRATEGY.md's Locked Design Decision #6). PUBLIC for the
 # same reason as the definitions above.
 target_compile_definitions(gte_core PUBLIC GTE_ENABLE_PLUGINS=$<BOOL:${GTE_ENABLE_PLUGINS}>)
+
+# editor-core-separation-11 campaign (Project Assembly system), PHASE5 -
+# exposes GTE_ENABLE_PROJECT_ASSEMBLIES to C++ code as an actual 1/0
+# preprocessor macro, needed by EditorHost.cpp's own
+# `#if GTE_ENABLE_PROJECT_ASSEMBLIES` guard around Core::LoadProjectAssemblies()
+# (PHASE0_MASTER_STRATEGY.md's Locked Design Decision #9 - its OWN,
+# independent flag, never GTE_ENABLE_PLUGINS, Finding D). PUBLIC for the
+# same reason as the definition above.
+target_compile_definitions(gte_core PUBLIC GTE_ENABLE_PROJECT_ASSEMBLIES=$<BOOL:${GTE_ENABLE_PROJECT_ASSEMBLIES}>)
 
 # PUBLIC (not PRIVATE) for the same reason as the compile definition above:
 # any consumer of gte_core (GreatTamanaEditor's main.cpp, and every test in

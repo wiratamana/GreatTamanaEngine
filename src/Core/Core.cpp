@@ -304,6 +304,16 @@ void Core::LoadPlugins(const std::filesystem::path& pluginsDirectory)
     }
 }
 
+// editor-core-separation-11 campaign (Project Assembly system), PHASE5 -
+// thin pass-through into m_projectAssemblyHost, mirroring LoadPlugins()
+// immediately above exactly (always compiled - only EditorHost.cpp's own
+// call site is gated, behind `#if GTE_ENABLE_PROJECT_ASSEMBLIES`, its own,
+// separate flag, never GTE_ENABLE_PLUGINS).
+void Core::LoadProjectAssemblies(const std::filesystem::path& outputDirectory, EditorHost* editorHost)
+{
+    m_projectAssemblyHost.LoadProjectAssemblies(outputDirectory, *this, editorHost);
+}
+
 void Core::Update(const InputFrame& input, float deltaTime)
 {
     const bool steppedThisFrame = input.playbackPaused && input.stepRequested;
