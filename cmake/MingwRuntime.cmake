@@ -185,3 +185,42 @@ function(gte_apply_plugin_dll_shared_crt_linkage target_name)
     # Deliberately NOT calling mingw_copy_runtime_dll(${target_name}) here -
     # see this function's own doc comment above for exactly why.
 endfunction()
+
+# editor-core-separation-11 campaign (Project Assembly system), PHASE3
+# (PHASE0_MASTER_STRATEGY.md, Finding D) - the variant of
+# gte_apply_plugin_dll_shared_crt_linkage() every Project Assembly _Game.dll/
+# _Editor.dll TARGET must call instead. Applies the exact SAME link-time CRT
+# flip (-shared-libgcc) but is gated ONLY by GTE_ENABLE_PROJECT_ASSEMBLIES +
+# GTE_PLUGIN_SHARED_CRT_TOOLCHAIN_SUPPORTED - NEVER by GTE_ENABLE_PLUGINS,
+# which controls the completely separate, unrelated gte_plugin_abi system.
+# Reusing gte_apply_plugin_dll_shared_crt_linkage() as-is here would silently
+# leave a Project Assembly .dll CRT-mismatched (and therefore genuinely
+# unsafe for the real std::string/std::vector cross-boundary traffic this
+# whole system exists for) the moment a developer sets GTE_ENABLE_PLUGINS=OFF
+# for the unrelated OTHER system, with a log message that never even
+# mentions "Project Assembly" - a real, confirmed hazard this function
+# exists specifically to close. Deliberately does NOT call
+# mingw_copy_runtime_dll() here (mirrors gte_apply_plugin_dll_shared_crt_linkage()'s
+# own identical reasoning): a Project Assembly .dll's own
+# RUNTIME_OUTPUT_DIRECTORY (GTE_PROJECT_ASSEMBLY_OUTPUT_DIR, root
+# CMakeLists.txt) is NEVER scanned by ProjectAssemblyHost for anything other
+# than "*_Game.dll"/"*_Editor.dll" (PHASE5) - unlike PluginHost, which scans
+# EVERY *.dll in its own folder - so copying the 3 runtime DLLs there would
+# not itself break anything, but is still unnecessary: GreatTamanaEditor.exe
+# already stages its own copy of these same 3 DLLs (via a direct, always-run
+# mingw_copy_runtime_dll(GreatTamanaEditor) call root CMakeLists.txt adds
+# unconditionally, PHASE3 Step 3.1 - closing exactly the same
+# GTE_ENABLE_PLUGINS=OFF gap this function itself exists to close), and
+# Windows' own DLL search order already includes "the directory the loading
+# APPLICATION's own .exe is in" for any DLL a loaded .dll's own transitive
+# dependency resolves by bare name.
+function(gte_apply_project_assembly_shared_crt_linkage target_name)
+    if(NOT GTE_ENABLE_PROJECT_ASSEMBLIES)
+        return()
+    endif()
+    if(NOT GTE_PLUGIN_SHARED_CRT_TOOLCHAIN_SUPPORTED)
+        message(WARNING "gte_apply_project_assembly_shared_crt_linkage(${target_name}): active toolchain has no shared libstdc++ variant - honest no-op, ${target_name} stays statically linked (see this file's own top-of-file comment).")
+        return()
+    endif()
+    target_link_options(${target_name} PRIVATE -shared-libgcc)
+endfunction()

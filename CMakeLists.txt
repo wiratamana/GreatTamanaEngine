@@ -116,6 +116,19 @@ option(GTE_CORE_STANDALONE_PROBE_ONLY "CI-ONLY: configure ONLY gte_core, skippin
 # PHASE1_GTE_PLUGIN_ABI_FOUNDATION.md's own Locked Design Decision #4.
 option(GTE_ENABLE_PLUGINS "Compile in the dynamic plugin-loading system (gte_plugin_abi + PluginHost)" ON)
 
+# editor-core-separation-11 campaign (Project Assembly system), PHASE3 -
+# master switch for the WHOLE Project Assembly system: the CMake
+# auto-discovery block below (Step 6) AND the runtime
+# Core::LoadProjectAssemblies() call site (PHASE5's own EditorHost.cpp
+# edit) are BOTH gated by this SAME flag - mirrors GTE_ENABLE_PLUGINS'
+# own identical "one flag gates both the CMake side and the runtime call
+# site" shape exactly. Deliberately its OWN, independent flag - never
+# reuses GTE_ENABLE_PLUGINS, which controls the completely unrelated
+# gte_plugin_abi system (see cmake/MingwRuntime.cmake's own
+# gte_apply_project_assembly_shared_crt_linkage() for why conflating the
+# two flags is a real, confirmed hazard, not a style preference).
+option(GTE_ENABLE_PROJECT_ASSEMBLIES "Auto-discover and load per-developer Projects/<Name>/ Project Assembly .dll's (editor-core-separation-11)" ON)
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(FetchSDL3)
 include(FetchVulkan)
@@ -134,6 +147,14 @@ include(CompileShaders)
 # function definitions are not directory-scoped), including from a future
 # plugins/*/CMakeLists.txt subdirectory.
 include(MingwRuntime)
+# editor-core-separation-11 campaign (Project Assembly system), PHASE3
+# (PHASE0_MASTER_STRATEGY.md, Locked Design Decision #10) - defines
+# gte_add_project()/gte_project_assembly_apply_header_paths()/
+# gte_project_assembly_apply_editor_header_paths() (cmake/GteProject.cmake).
+# Bare module name via CMAKE_MODULE_PATH, NEVER include(cmake/GteProject.cmake)
+# - matches this file's own existing include(CompileShaders)/include(MingwRuntime)
+# convention exactly.
+include(GteProject)
 
 if(NOT GTE_CORE_STANDALONE_PROBE_ONLY) # editor-core-separation-1 PHASE18
 # Downloads (if not already present) and stages SDL3 for Windows:
@@ -805,6 +826,31 @@ else()
     set(GTE_PLUGIN_RUNTIME_OUTPUT_DIR "$<TARGET_FILE_DIR:GreatTamanaEditor>/plugins")
 endif()
 
+# editor-core-separation-11 campaign (Project Assembly system), PHASE3 -
+# deliberately a SEPARATE folder from GTE_PLUGIN_RUNTIME_OUTPUT_DIR (<exe
+# dir>/plugins/): the two coexisting systems (gte_plugin_abi .dll plugins vs.
+# Project Assembly .dll's) must never share one scan folder, so neither
+# system's loader (PluginHost vs. PHASE5's ProjectAssemblyHost) can ever
+# confuse the other's .dll for its own. Deliberately NOT wrapped in the same
+# if(GTE_CORE_STANDALONE_PROBE_ONLY)/else()/endif() split
+# GTE_PLUGIN_RUNTIME_OUTPUT_DIR itself uses (confirmed lines 801-805) - that
+# split exists ONLY because GTE_PLUGIN_RUNTIME_OUTPUT_DIR is genuinely
+# CONSUMED even in a GTE_CORE_STANDALONE_PROBE_ONLY=ON configure (demo
+# plugin subdirectories are add_subdirectory()-ed unconditionally elsewhere,
+# see the comment immediately above add_subdirectory(plugins/gte_plugin_abi)
+# in root CMakeLists.txt), where GreatTamanaEditor never exists as a target
+# and a literal $<TARGET_FILE_DIR:GreatTamanaEditor> generator expression
+# WOULD be a real generate-time error if actually evaluated against a real
+# target property. GTE_PROJECT_ASSEMBLY_OUTPUT_DIR has no such consumer in
+# that configuration - its ONLY consumer is the auto-discovery block further
+# down this file, which is placed INSIDE the SAME if(NOT
+# GTE_CORE_STANDALONE_PROBE_ONLY) guard as GreatTamanaEditor's own
+# definition - so this plain, unconditional set() is safe: an unused CMake
+# variable holding an un-evaluated generator-expression string is inert,
+# never checked against real targets unless actually attached to a real
+# target property at generate time.
+set(GTE_PROJECT_ASSEMBLY_OUTPUT_DIR "$<TARGET_FILE_DIR:GreatTamanaEditor>/project_assemblies")
+
 # editor-core-separation-4 campaign, PHASE2
 # (PHASE2_GTE_ENABLE_PLUGINS_OFF_BUILD_FIX.md) - gte_plugin_abi is an
 # unconditional add_subdirectory() call, ALWAYS run regardless of
@@ -1313,6 +1359,47 @@ add_executable(GreatTamanaEditor src/main.cpp)
 # alone, no gte_editor involved at all).
 target_link_libraries(GreatTamanaEditor PRIVATE gte_editor)
 
+# editor-core-separation-11 campaign (Project Assembly system), PHASE3 - the
+# Locked Architecture Decision (LDD2, PHASE0_MASTER_STRATEGY.md): makes this
+# executable export symbols so a Project Assembly .dll (which links THIS
+# target, never gte_core/gte_editor directly) resolves its unresolved
+# gte_core/gte_editor references straight back into this ALREADY-RUNNING
+# image - exactly one physical copy of every gte_core/gte_editor global in
+# the process. WINDOWS_EXPORT_ALL_SYMBOLS is a documented NO-OP on this
+# repo's real MinGW/GNU-ld toolchain (confirmed,
+# PHASE2_ENABLE_EXPORTS_FEASIBILITY_PROBE.md's own completion report,
+# "Deviation 2" - `cmake --help-property WINDOWS_EXPORT_ALL_SYMBOLS` states
+# this property "is implemented only for MS-compatible tools on Windows" -
+# kept here anyway, harmless, for forward-compatibility in case of a future
+# MSVC/clang-cl switch). The REAL, load-bearing mechanism on THIS toolchain
+# is GNU ld's own native `--export-all-symbols` flag, added explicitly
+# below - PHASE2's own probe mechanically proved omitting it leaves
+# non-dllexport-marked symbols (e.g. HostPlainAdd/ImGui::GetCurrentContext)
+# unresolved at link time.
+set_target_properties(GreatTamanaEditor PROPERTIES
+    ENABLE_EXPORTS ON
+    WINDOWS_EXPORT_ALL_SYMBOLS ON
+)
+target_link_options(GreatTamanaEditor PRIVATE "-Wl,--export-all-symbols")
+
+# editor-core-separation-11 campaign (Project Assembly system), PHASE3, Step
+# 3.1 - a Project Assembly .dll depends on the SAME process-wide shared CRT
+# GreatTamanaEditor.exe itself needs loaded correctly, but the EXISTING
+# gte_apply_plugin_shared_crt_linkage(GreatTamanaEditor) call further down
+# this file (which stages these same 3 DLLs) is gated by GTE_ENABLE_PLUGINS
+# internally (cmake/MingwRuntime.cmake) - a GTE_ENABLE_PLUGINS=OFF +
+# GTE_ENABLE_PROJECT_ASSEMBLIES=ON configuration would otherwise leave
+# GreatTamanaEditor.exe itself without its 3 runtime DLLs staged next to it.
+# This unconditional call (gated ONLY by toolchain support, never by either
+# GTE_ENABLE_PLUGINS or GTE_ENABLE_PROJECT_ASSEMBLIES) closes that gap.
+# mingw_copy_runtime_dll()'s own copy_if_different is idempotent, so no
+# double-stage warning/error results if GTE_ENABLE_PLUGINS is also ON and
+# the later gte_apply_plugin_shared_crt_linkage(GreatTamanaEditor) call
+# stages the same 3 DLLs again.
+if(GTE_PLUGIN_SHARED_CRT_TOOLCHAIN_SUPPORTED)
+    mingw_copy_runtime_dll(GreatTamanaEditor)
+endif()
+
 # Compiles the engine's GLSL shader sources to SPIR-V at build time (see
 # cmake/CompileShaders.cmake) - staged into "<exe dir>/shaders/" next to the
 # built .exe, never committed as a binary (see .gitignore). Pipeline.cpp
@@ -1565,6 +1652,26 @@ gte_apply_plugin_shared_crt_linkage(GreatTamanaEditor)
 
 # Ensures SDL3.dll is copied next to the built .exe after every build.
 sdl3_copy_runtime_dll(GreatTamanaEditor)
+
+# editor-core-separation-11 campaign (Project Assembly system), PHASE3.
+# CONFIGURE_DEPENDS makes a brand-new/removed Projects/<Name>/ folder
+# automatically re-run CMake's configure step before the next build - no
+# manual "reconfigure" step needed to pick up a newly-created project. Gated
+# by GTE_ENABLE_PROJECT_ASSEMBLIES (LDD9) - mirrors GTE_ENABLE_PLUGINS' own
+# identical "gate both the CMake side and the runtime call site with one
+# flag" shape. Must run AFTER GreatTamanaEditor/gte_core/gte_editor are
+# fully defined (their targets must already exist for
+# target_link_libraries(... PRIVATE GreatTamanaEditor) inside a project's
+# own Libraries/CMakeLists.txt to resolve).
+if(GTE_ENABLE_PROJECT_ASSEMBLIES AND IS_DIRECTORY "${CMAKE_SOURCE_DIR}/Projects")
+    file(GLOB GTE_PROJECT_DIRS CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/Projects/*")
+    foreach(GTE_PROJECT_DIR ${GTE_PROJECT_DIRS})
+        if(IS_DIRECTORY "${GTE_PROJECT_DIR}" AND EXISTS "${GTE_PROJECT_DIR}/Libraries/CMakeLists.txt")
+            add_subdirectory("${GTE_PROJECT_DIR}/Libraries")
+        endif()
+    endforeach()
+endif()
+
 endif() # GTE_CORE_STANDALONE_PROBE_ONLY - matches the if() right before the "--- Final executable ---" comment below.
 
 # Note: no equivalent ktx_copy_runtime_dll() call is needed - KTX-Software is
