@@ -4,6 +4,10 @@
 #include "EditorSceneIOCapability.h"
 #include "EditorLogQueryCapability.h" // editor-core-separation-2 campaign, PHASE3.
 #include "EditorHotReloadDebugCapability.h" // editor-core-separation-12 campaign, PHASE3.
+// editor-core-separation-16 campaign (On-Engine Project Workflow plan,
+// BIG-STEP 2), PHASE3 - EditorProjectLifecycleCapability/ActiveProjectAssemblyState.
+#include "EditorProjectLifecycleCapability.h"
+#include "ActiveProjectAssemblyState.h"
 // editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
 // BIG-STEP 2), PHASE4 - ResolveProjectAssemblyOutputDirectory(), the shared
 // gte_core-tier helper this file's own LoadProjectAssemblies() call site
@@ -128,6 +132,15 @@ EditorLogQueryCapability s_editorLogQueryCapability;
 // immediately above.
 EditorHotReloadDebugCapability s_editorHotReloadDebugCapability;
 
+// editor-core-separation-16 campaign (On-Engine Project Workflow plan,
+// BIG-STEP 2), PHASE3 - the ONE real EditorProjectLifecycleCapability
+// instance this engine ships. Wiring into NetworkServer's constructor and
+// into m_editorLayer (for the "New Project..." ImGui window) is PHASE4's
+// job - this phase only needs the instance to exist and be wireable. Same
+// namespace-scope-static reasoning as s_editorHotReloadDebugCapability
+// immediately above.
+EditorProjectLifecycleCapability s_editorProjectLifecycleCapability;
+
 } // namespace
 
 EditorHost::SdlContext::SdlContext()
@@ -223,6 +236,13 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
     // Core::m_projectAssemblyHost itself is an unconditional Core member -
     // only the LoadProjectAssemblies() CALL SITE below is gated.
     s_editorHotReloadDebugCapability.SetProjectAssemblyHost(m_core.GetProjectAssemblyHost());
+
+    // editor-core-separation-16 campaign (On-Engine Project Workflow plan,
+    // BIG-STEP 2), PHASE3 - gives ActiveProjectAssemblyState a live
+    // ProjectAssemblyHost& so GetActive()'s own isLoaded field is real, not
+    // always-false. Same "setter, not a constructor parameter" placement as
+    // every capability wiring call immediately above.
+    ActiveProjectAssemblyState::Instance().SetProjectAssemblyHost(m_core.GetProjectAssemblyHost());
 
     // editor-core-separation-14 campaign (Project Assembly Hot Reload plan,
     // BIG-STEP 3), PHASE3 - hands EditorHotReloadDebugCapability a live

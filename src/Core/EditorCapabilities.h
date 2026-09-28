@@ -202,10 +202,9 @@ public:
     };
     virtual LedgerEntry GetLedgerEntry(const std::string& projectName) const = 0;
 
-    // Placeholder until a future BIG-STEP 2 campaign adds a real
-    // GetLoadedAssemblyFileNames() accessor to ProjectAssemblyHost itself -
-    // this campaign's own implementation (PHASE2) always returns an empty
-    // vector, never an error.
+    // Genuinely real, live, today - a thin wrapper over
+    // ProjectAssemblyHost::GetLoadedAssemblyFileNames(), guarded by
+    // GetHotReloadEngineStateMutex().
     virtual std::vector<std::string> GetLoadedAssemblyFileNames() const = 0;
 
     // Genuinely real, live, today - a thin wrapper over
@@ -255,6 +254,32 @@ public:
     // non-goals, editor-core-separation-12's PHASE0/BIG-STEP-1 file, Section
     // 2(f-g)'s closing paragraph).
     virtual bool SetProbeHotReloadMarkerValueForTesting(int value) = 0;
+};
+
+// editor-core-separation-16 campaign (On-Engine Project Workflow plan,
+// BIG-STEP 2) - answers "can this build create a Project Assembly's
+// on-disk source folder at all" - mirrors IHotReloadDebugCapability's own
+// "gte_core-tier NetworkServer.cpp holds only a nullable pointer" contract.
+// nullptr means every route backed by this interface answers 503.
+class IProjectLifecycleCapability {
+public:
+    virtual ~IProjectLifecycleCapability() = default;
+
+    struct CreateProjectOutcome {
+        bool success = false;
+        std::string errorMessage; // only meaningful when success == false
+        std::string createdSourceDirectory; // absolute path, only meaningful when success == true
+    };
+
+    // Validates `name` (IsValidProjectAssemblyIdentifierName()), rejects a
+    // name that already exists as a folder (or any file) under the
+    // resolved Project Assembly source root, then writes the 3-file
+    // scaffold and marks the result as the new ActiveProjectAssemblyState.
+    // Pure filesystem + a synchronous `cmake` reconfigure child-process
+    // call - safe to call from ANY thread (never touches live
+    // Core/Registry/GPU state), so this method needs NO cross-thread
+    // bridge, unlike a future hot-reload-shaped capability.
+    virtual CreateProjectOutcome CreateNewProjectAssembly(const std::string& name) = 0;
 };
 
 } // namespace gte

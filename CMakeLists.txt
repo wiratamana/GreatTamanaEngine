@@ -1073,6 +1073,14 @@ add_library(gte_editor STATIC
     # wrapping ComponentTypeRegistry/SceneBuilder/ProjectAssemblyBuildRunner.
     src/Editor/EditorHotReloadDebugCapability.h
     src/Editor/EditorHotReloadDebugCapability.cpp
+    # editor-core-separation-16 campaign (On-Engine Project Workflow plan,
+    # BIG-STEP 2), PHASE3 - the shared ActiveProjectAssemblyState singleton
+    # plus the real IProjectLifecycleCapability implementation wrapping
+    # ProjectAssemblyBuildRunner/ProjectAssemblyNameValidation.
+    src/Editor/ActiveProjectAssemblyState.h
+    src/Editor/ActiveProjectAssemblyState.cpp
+    src/Editor/EditorProjectLifecycleCapability.h
+    src/Editor/EditorProjectLifecycleCapability.cpp
     src/Editor/Selection.h
     src/Editor/Selection.cpp
     src/Editor/EditorCamera.h
