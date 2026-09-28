@@ -341,6 +341,14 @@ add_library(gte_core STATIC
     # gates EditorHost.cpp's m_core.LoadProjectAssemblies() call).
     src/Core/Plugins/ProjectAssemblyHost.h
     src/Core/Plugins/ProjectAssemblyHost.cpp
+    # editor-core-separation-14 campaign (Project Assembly Hot Reload plan,
+    # BIG-STEP 3), PHASE3 - PerformProjectAssemblyHotReload(), the orchestrator
+    # (temporary body this phase, replaced in full by PHASE4). Always
+    # compiled - added here explicitly, right next to ProjectAssemblyHost.h/
+    # .cpp above, because gte_core's own source list is hand-maintained, NOT
+    # a file(GLOB ...).
+    src/Core/Plugins/ProjectAssemblyHotReload.h
+    src/Core/Plugins/ProjectAssemblyHotReload.cpp
     # editor-core-separation-11 campaign (Project Assembly system), PHASE6
     # (PHASE6_COMPILE_TRIGGER_AND_BUILD_AUTOMATION.md) - TriggerProjectAssemblyCompile(),
     # the "Compile" build-automation mechanism. Always compiled (mirrors
@@ -616,6 +624,12 @@ add_library(gte_core STATIC
     # codebase.
     src/Application/RenderGraphControlCommandBridge.h
     src/Application/RenderGraphControlCommandBridge.cpp
+    # editor-core-separation-14 campaign (Project Assembly Hot Reload plan,
+    # BIG-STEP 3), PHASE3 - ProjectAssemblyHotReloadCommandBridge, confirmed
+    # to belong in this SAME gte_core source list as every other
+    # src/Application/*.cpp bridge above.
+    src/Application/ProjectAssemblyHotReloadCommandBridge.h
+    src/Application/ProjectAssemblyHotReloadCommandBridge.cpp
     # editor-core-separation-3 campaign, PHASE4
     # (PHASE4_EDITOR_PANEL_CAPABILITY_AND_REGISTRY.md) - EditorPanelRegistry,
     # replacing EditorPanelCatalog.h's former fixed kKnownEditorPanelNames[]

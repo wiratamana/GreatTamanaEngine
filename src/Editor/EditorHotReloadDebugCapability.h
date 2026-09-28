@@ -5,6 +5,9 @@
 namespace gte {
 
 class ProjectAssemblyHost;
+// editor-core-separation-14 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 3), PHASE3.
+class ProjectAssemblyHotReloadCommandBridge;
 
 // editor-core-separation-12 campaign (Project Assembly Hot Reload plan,
 // BIG-STEP 1), PHASE2 - the real, gte_editor-owned implementation of
@@ -47,6 +50,14 @@ public:
     // Step 2, for the full reasoning).
     void SetProjectAssemblyHost(ProjectAssemblyHost& projectAssemblyHost) noexcept;
 
+    // editor-core-separation-14 campaign (Project Assembly Hot Reload plan,
+    // BIG-STEP 3), PHASE3 - gives this capability a live
+    // ProjectAssemblyHotReloadCommandBridge& to submit a hot-reload request
+    // through (see TriggerHotReload()'s own .cpp body). Same "setter, not a
+    // constructor parameter" reasoning as SetProjectAssemblyHost() above -
+    // called exactly once, from EditorHost's own constructor body.
+    void SetHotReloadCommandBridge(ProjectAssemblyHotReloadCommandBridge& bridge) noexcept;
+
 private:
     // editor-core-separation-13 campaign, PHASE4 - defaulted null so this
     // class's existing default, no-argument constructor is completely
@@ -54,6 +65,11 @@ private:
     // reach GetLoadedAssemblyFileNames() (see that method's own .cpp-side
     // comment for the setter-call-ordering guarantee).
     ProjectAssemblyHost* m_projectAssemblyHost = nullptr;
+    // editor-core-separation-14 campaign, PHASE3 - defaulted null so this
+    // class's existing default, no-argument constructor is completely
+    // untouched; TriggerHotReload() defensively returns false if this is
+    // still null (should never happen in real production wiring).
+    ProjectAssemblyHotReloadCommandBridge* m_hotReloadCommandBridge = nullptr;
 };
 
 } // namespace gte

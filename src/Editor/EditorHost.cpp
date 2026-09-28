@@ -9,6 +9,10 @@
 // gte_core-tier helper this file's own LoadProjectAssemblies() call site
 // below now uses instead of an inline "/ \"project_assemblies\"" literal.
 #include "../Core/Plugins/ProjectAssemblyBuildRunner.h"
+// editor-core-separation-14 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 3), PHASE3 - PerformProjectAssemblyHotReload(), called from this
+// file's own new Run() drain point below.
+#include "../Core/Plugins/ProjectAssemblyHotReload.h"
 #include "ProjectRootPath.h" // editor-core-separation-3 campaign, PHASE2 - ExecutableDirectory().
 #include "../Core/EditorPanelRegistry.h" // editor-core-separation-3 campaign, PHASE4.
 // editor-core-separation-6 campaign, PHASE7
@@ -219,6 +223,14 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
     // Core::m_projectAssemblyHost itself is an unconditional Core member -
     // only the LoadProjectAssemblies() CALL SITE below is gated.
     s_editorHotReloadDebugCapability.SetProjectAssemblyHost(m_core.GetProjectAssemblyHost());
+
+    // editor-core-separation-14 campaign (Project Assembly Hot Reload plan,
+    // BIG-STEP 3), PHASE3 - hands EditorHotReloadDebugCapability a live
+    // ProjectAssemblyHotReloadCommandBridge& (m_hotReloadCommandBridge, this
+    // class's own member, already constructed by this point in the
+    // initializer list), so TriggerHotReload() can submit into it. Same
+    // "setter, not a constructor parameter" placement as the call above.
+    s_editorHotReloadDebugCapability.SetHotReloadCommandBridge(m_hotReloadCommandBridge);
 
     // editor-core-separation-1 campaign, PHASE16 - hands Core the ONE
     // callback that actually calls IEditorLayer::Render(cmd) - an explicitly
@@ -441,6 +453,31 @@ int EditorHost::Run()
             const EngineCommandResult result =
                 ExecuteEngineCommand(m_game, m_renderer, m_sceneIOCapability, &s_editorHotReloadDebugCapability, *request);
             m_commandBridge.FulfillCommand(result);
+        }
+
+        // editor-core-separation-14 campaign (Project Assembly Hot Reload plan,
+        // BIG-STEP 3), PHASE3 - drained at most once per frame, exactly like the
+        // existing EngineCommandBridge block immediately above. Unlike that
+        // bridge, servicing this request BLOCKS this same thread for the ENTIRE
+        // duration of PerformProjectAssemblyHotReload() once PHASE4 replaces its
+        // temporary body (LDD-HR4) - this is intentional: the whole point of this
+        // feature is a hard, synchronous freeze. No other per-frame work below
+        // this point runs until it returns.
+        if (const std::optional<std::string> requestedProject = m_hotReloadCommandBridge.TryPeekPendingProjectName()) {
+            GTE_PROFILE_SCOPE("EditorHost::PerformProjectAssemblyHotReload");
+            // Resolved HERE, on the main thread (gte_editor-tier - this file already
+            // includes ProjectRootPath.h/ProjectAssemblyBuildRunner.h for its own
+            // LoadProjectAssemblies() call above), and passed into the orchestrator
+            // as plain std::filesystem::path VALUES - PerformProjectAssemblyHotReload()
+            // itself lives in src/Core/Plugins/ (gte_core-tier, see that header's own
+            // doc comment) and must NEVER call gte::ExecutableDirectory() itself
+            // (gte_editor-tier, defined only in ProjectRootPath.cpp) - see
+            // PHASE0_MASTER_STRATEGY.md, Section 2.2 item 6, for the full layering
+            // hazard this avoids.
+            const std::filesystem::path outputDirectory = ResolveProjectAssemblyOutputDirectory(gte::ExecutableDirectory());
+            const std::filesystem::path buildDirectory = ResolveCMakeBuildDirectory(gte::ExecutableDirectory());
+            PerformProjectAssemblyHotReload(*requestedProject, m_core, m_renderer, this, outputDirectory, buildDirectory);
+            m_hotReloadCommandBridge.FulfillPending();
         }
 
         const Uint64 nowTicksNs = SDL_GetTicksNS();
