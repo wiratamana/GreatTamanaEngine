@@ -2383,6 +2383,13 @@ if(TRUE)
         # ProjectAssemblyHotReloadEndpointsEndToEndTests.cpp's own precedent
         # immediately above.
         Network/CreateProjectEndpointEndToEndTests.cpp
+        # editor-core-separation-17 campaign, PHASE5 - On-Engine Project
+        # Workflow plan (BIG-STEP 3)'s new POST /project_assembly/open_project
+        # and GET /project_assembly/list_projects routes. Needs a real
+        # EditorProjectLifecycleCapability (gte_editor-tier), mirroring
+        # CreateProjectEndpointEndToEndTests.cpp's own precedent immediately
+        # above.
+        Network/OpenProjectEndpointEndToEndTests.cpp
     )
 
     # ProjectPanelData.h/.cpp (see src/Editor/ProjectPanelData.h) is only
