@@ -44,7 +44,16 @@ namespace gte {
 // build is still in flight is a harmless, logged no-op (see this file's
 // own .cpp for the simple, single-flag-per-project guard), never two
 // overlapping child processes racing each other's output.
-void TriggerProjectAssemblyCompile(const std::string& projectName, const std::string& buildDirectory);
+// editor-core-separation-12 campaign, PHASE2 (Project Assembly Hot Reload
+// plan, BIG-STEP 1) - return type changed from void to bool so a caller
+// (EditorHotReloadDebugCapability::TriggerCompileOnly()) can honestly
+// report "started" vs. "rejected, a build for this project is already in
+// flight" - confirmed zero existing callers anywhere in this codebase
+// before this change, so this is a zero-risk signature change. Returns
+// true the moment the background build thread is actually registered
+// (before any compiler output exists yet) - false only when
+// TryMarkInFlight() rejects it.
+bool TriggerProjectAssemblyCompile(const std::string& projectName, const std::string& buildDirectory);
 
 // Walks upward from `startDirectory` (typically gte::ExecutableDirectory())
 // looking for a real CMakeCache.txt file, up to `maxParentLevels` parent

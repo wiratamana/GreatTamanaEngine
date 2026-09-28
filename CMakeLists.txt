@@ -1032,6 +1032,11 @@ add_library(gte_editor STATIC
     # ILogQueryCapability implementation wrapping Logger.h above.
     src/Editor/EditorLogQueryCapability.h
     src/Editor/EditorLogQueryCapability.cpp
+    # editor-core-separation-12 campaign (Project Assembly Hot Reload plan,
+    # BIG-STEP 1), PHASE2 - the real IHotReloadDebugCapability implementation
+    # wrapping ComponentTypeRegistry/SceneBuilder/ProjectAssemblyBuildRunner.
+    src/Editor/EditorHotReloadDebugCapability.h
+    src/Editor/EditorHotReloadDebugCapability.cpp
     src/Editor/Selection.h
     src/Editor/Selection.cpp
     src/Editor/EditorCamera.h

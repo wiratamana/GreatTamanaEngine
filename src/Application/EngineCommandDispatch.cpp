@@ -7,8 +7,8 @@
 
 namespace gte {
 
-EngineCommandResult ExecuteEngineCommand(
-    Game& game, Renderer& renderer, ISceneIOCapability* sceneIOCapability, const EngineCommandRequest& request)
+EngineCommandResult ExecuteEngineCommand(Game& game, Renderer& renderer, ISceneIOCapability* sceneIOCapability,
+    IHotReloadDebugCapability* hotReloadDebugCapability, const EngineCommandRequest& request)
 {
     EngineCommandResult result;
     result.kind = request.kind;
@@ -81,6 +81,23 @@ EngineCommandResult ExecuteEngineCommand(
             result.loadScene.editorAvailable = false;
             result.loadScene.errorMessage =
                 "scene save/load requires the Editor module (GTE_ENABLE_EDITOR is OFF in this build)";
+        }
+        break;
+    }
+    // editor-core-separation-12 campaign, PHASE2 (Project Assembly Hot
+    // Reload plan, BIG-STEP 1) - reuses this SAME single-global-slot bridge
+    // for a READ-ONLY ECS world/scene snapshot request (see
+    // Core/EditorCapabilities.h's IHotReloadDebugCapability doc comment for
+    // why this must run through the main-thread-only bridge rather than a
+    // direct network-thread read of the live Registry).
+    case EngineCommandKind::GetSceneSnapshot: {
+        if (hotReloadDebugCapability != nullptr) {
+            result.getSceneSnapshot.sceneJson = hotReloadDebugCapability->BuildSceneSnapshotJson(game);
+            result.getSceneSnapshot.success = true;
+        } else {
+            result.getSceneSnapshot.editorAvailable = false;
+            result.getSceneSnapshot.errorMessage =
+                "scene snapshot requires the Editor module (GTE_ENABLE_EDITOR is OFF in this build)";
         }
         break;
     }

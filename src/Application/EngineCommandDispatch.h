@@ -34,7 +34,16 @@ class Renderer;
 // capability" (a future Player host, or today's GTE_ENABLE_EDITOR=OFF
 // configuration) - the exact same "not available" fallback message/behavior
 // as before is preserved for that case.
-EngineCommandResult ExecuteEngineCommand(
-    Game& game, Renderer& renderer, ISceneIOCapability* sceneIOCapability, const EngineCommandRequest& request);
+// editor-core-separation-12 campaign, PHASE2 - `hotReloadDebugCapability`
+// is a NEW, FOURTH parameter, appended AFTER `sceneIOCapability` (never
+// inserted before it) so this remains a backward-compatible-in-spirit
+// change - its own single call site (EditorHost.cpp) is updated in PHASE3.
+// nullptr means "this build/host never registered a hot-reload debug
+// capability" - EngineCommandKind::GetSceneSnapshot answers with
+// GetSceneSnapshotOutcome::editorAvailable == false in that case, mirroring
+// SaveScene/LoadScene's own identical nullptr-degrades-gracefully
+// convention exactly.
+EngineCommandResult ExecuteEngineCommand(Game& game, Renderer& renderer, ISceneIOCapability* sceneIOCapability,
+    IHotReloadDebugCapability* hotReloadDebugCapability, const EngineCommandRequest& request);
 
 } // namespace gte

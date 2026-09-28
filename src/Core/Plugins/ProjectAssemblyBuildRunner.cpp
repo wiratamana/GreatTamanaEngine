@@ -287,12 +287,12 @@ void RunBuildThreadBody(std::string projectName, std::string buildDirectory, std
 
 } // namespace
 
-void TriggerProjectAssemblyCompile(const std::string& projectName, const std::string& buildDirectory)
+bool TriggerProjectAssemblyCompile(const std::string& projectName, const std::string& buildDirectory)
 {
     if (!TryMarkInFlight(projectName)) {
         GTE_LOG_WARNING("ProjectAssemblyBuild",
             "A build for Project Assembly '" + projectName + "' is already in progress - ignoring this new request.");
-        return;
+        return false;
     }
 
     auto completionFlag = std::make_shared<std::atomic<bool>>(false);
@@ -303,6 +303,7 @@ void TriggerProjectAssemblyCompile(const std::string& projectName, const std::st
     // reasoning, and JobContinuation.cpp's WatchDependencyWithFallback()
     // for the real, working precedent this mirrors.
     gte::Jobs::JobSystem::Instance().RegisterBackgroundThread(std::move(buildThread), completionFlag);
+    return true;
 }
 
 std::filesystem::path ResolveCMakeBuildDirectory(const std::filesystem::path& startDirectory, int maxParentLevels)
