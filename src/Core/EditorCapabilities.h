@@ -146,4 +146,95 @@ public:
     virtual std::uint64_t LatestEntryId() const = 0;
 };
 
+// editor-core-separation-12 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 1) - answers "what is the live, ground-truth state of the
+// Project Assembly Hot Reload system RIGHT NOW", and lets an external HTTP
+// caller (gte_send_request) trigger a bare compile, or (once a future
+// BIG-STEP 3 campaign fills in the real body) a full compile+reload cycle.
+// Mirrors ISceneIOCapability/ILogQueryCapability's own "gte_core-tier
+// NetworkServer.cpp holds only a nullable pointer" contract exactly -
+// nullptr means every route backed by this interface answers 503, never
+// crashes.
+//
+// DEVIATION from this feature's own external design doc
+// (HOTRELOAD_BIGSTEP_01_LIVE_DEBUG_AND_COMPILE_RELOAD_TRIGGERS_2026-09-28.txt,
+// Section 3): that doc sketches a plain, no-argument
+// `virtual std::string GetSceneSnapshotJson() const = 0;`, implying a
+// lock-free, direct network-thread read of the live ECS Registry. This is
+// UNSAFE - the Registry is mutated every frame by the main thread with no
+// synchronization of its own (see AGENTS.md, "Entity-Component-System").
+// `BuildSceneSnapshotJson(Game&)` below is instead called ONLY from the
+// main thread (via a new EngineCommandBridge command - see
+// Application/EngineCommandDispatch.cpp), exactly mirroring how
+// ISceneIOCapability::SaveScene/LoadScene are already, correctly, only ever
+// called with a live Game& handed to them by that SAME main-thread-only
+// dispatch path. See task_manager/editor-core-separation-12/
+// PHASE0_MASTER_STRATEGY.md, Section 3.1, Correction 1, for the full
+// reasoning.
+class IHotReloadDebugCapability {
+public:
+    virtual ~IHotReloadDebugCapability() = default;
+
+    // "Idle" whenever no cycle is currently running (always "Idle" until a
+    // future BIG-STEP 3 campaign starts calling
+    // ProjectAssemblyHotReloadDebugStatus::Set()/Finish()). lastOutcome/
+    // lastErrorMessage describe the MOST RECENTLY COMPLETED cycle (persist
+    // across the transition back to Idle) - both "" until the first cycle
+    // ever completes.
+    struct Status {
+        std::string phase = "Idle";
+        std::string projectName;
+        std::uint64_t cycleId = 0;
+        std::uint64_t phaseElapsedMilliseconds = 0;
+        std::string lastOutcome;       // "" | "Success" | "RolledBack" | "CriticalFailure"
+        std::string lastErrorMessage;  // "" unless lastOutcome needs explaining
+    };
+    virtual Status GetHotReloadStatus() const = 0;
+
+    // Placeholder-shaped until a future BIG-STEP 2 campaign builds the real
+    // ProjectAssemblyRegistrationLedger class - this campaign's own
+    // implementation (PHASE2) always returns every list empty, never an
+    // error.
+    struct LedgerEntry {
+        std::vector<std::string> renderPassNames;
+        std::vector<std::string> panelNames;
+        std::vector<std::string> componentTypeNames;
+    };
+    virtual LedgerEntry GetLedgerEntry(const std::string& projectName) const = 0;
+
+    // Placeholder until a future BIG-STEP 2 campaign adds a real
+    // GetLoadedAssemblyFileNames() accessor to ProjectAssemblyHost itself -
+    // this campaign's own implementation (PHASE2) always returns an empty
+    // vector, never an error.
+    virtual std::vector<std::string> GetLoadedAssemblyFileNames() const = 0;
+
+    // Genuinely real, live, today - a thin wrapper over
+    // ComponentTypeRegistry::Instance().AllSortedByTypeName().
+    virtual std::vector<std::string> GetRegisteredComponentTypeNames() const = 0;
+
+    // Genuinely real, live, today - builds the SAME generic SceneDocument
+    // JSON File > Save Scene/POST /save_scene already produce, but returns
+    // it in-memory (never written to disk). MUST be called only from the
+    // main thread with a live Game& (see this interface's own header
+    // comment above, and Application/EngineCommandDispatch.cpp's new
+    // EngineCommandKind::GetSceneSnapshot case, PHASE2) - never called
+    // directly from a NetworkServer.cpp route handler.
+    virtual std::string BuildSceneSnapshotJson(Game& game) = 0;
+
+    // Fire-and-forget - calls the EXISTING TriggerProjectAssemblyCompile()
+    // directly (already backgrounded, already thread-safe against
+    // concurrent triggers for the SAME project). Returns false only if the
+    // in-flight guard rejects it (a build for this project is already
+    // running) - never blocks waiting for the compile itself to finish;
+    // the caller polls GET /get_logs to watch it happen.
+    virtual bool TriggerCompileOnly(const std::string& projectName) = 0;
+
+    // THIS campaign's OWN implementation (PHASE2) is a permanent placeholder
+    // for this whole campaign's lifetime - always returns false, does
+    // nothing else. A future BIG-STEP 3 campaign replaces ONLY this
+    // method's body - this interface's own signature never changes for
+    // that.
+    virtual bool TriggerHotReload(const std::string& projectName) = 0;
+};
+
 } // namespace gte

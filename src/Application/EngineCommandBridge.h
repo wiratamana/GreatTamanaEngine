@@ -53,6 +53,16 @@ enum class EngineCommandKind {
     // PHASE0_MASTER_STRATEGY.md's Locked Design Decision #5 - unchanged).
     SaveScene,
     LoadScene,
+    // editor-core-separation-12 campaign, PHASE1 (Project Assembly Hot
+    // Reload plan, BIG-STEP 1) - reuses this SAME single-global-slot bridge
+    // for a READ-ONLY ECS world/scene snapshot request. Needed because the
+    // live ECS Registry is mutated every frame by the main thread with no
+    // synchronization of its own - unlike GetHotReloadStatus/
+    // GetLedgerEntry/GetLoadedAssemblyFileNames/
+    // GetRegisteredComponentTypeNames (Core/EditorCapabilities.h's new
+    // IHotReloadDebugCapability), which correctly bypass this bridge via a
+    // dedicated mutex instead (see HotReloadEngineStateMutex.h).
+    GetSceneSnapshot,
 };
 
 // Plain request payload for one InstantiatePrimitive command - copied
@@ -86,6 +96,10 @@ struct LoadSceneCommand {
     std::string path;
 };
 
+// editor-core-separation-12 campaign, PHASE1 - no payload needed, the
+// snapshot always covers the WHOLE live scene.
+struct GetSceneSnapshotCommand {};
+
 // One pending engine command, tagged by `kind` - EXACTLY one of
 // `instantiatePrimitive`/`deleteEntity`/`setEntityTrs`/`instantiateLight` is
 // meaningful, selected by `kind` (deliberately a plain tagged struct, not
@@ -108,6 +122,8 @@ struct EngineCommandRequest {
     // task_manager/scene-serialization-2 campaign, PHASE5
     SaveSceneCommand saveScene;
     LoadSceneCommand loadScene;
+    // editor-core-separation-12 campaign, PHASE1
+    GetSceneSnapshotCommand getSceneSnapshot;
 };
 
 // The completed result of one EngineCommandRequest - `kind` mirrors the
@@ -126,6 +142,8 @@ struct EngineCommandResult {
     // task_manager/scene-serialization-2 campaign, PHASE5
     SaveSceneOutcome saveScene;
     LoadSceneOutcome loadScene;
+    // editor-core-separation-12 campaign, PHASE1
+    GetSceneSnapshotOutcome getSceneSnapshot;
 };
 
 class EngineCommandBridge {

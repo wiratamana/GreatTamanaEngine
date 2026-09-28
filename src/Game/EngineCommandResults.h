@@ -255,4 +255,18 @@ struct LoadSceneOutcome {
     std::string resolvedPath; // the ABSOLUTE path actually read from, meaningful only when success == true.
 };
 
+// editor-core-separation-12 campaign, PHASE1 (Project Assembly Hot Reload
+// plan, BIG-STEP 1) - outcome of one
+// IHotReloadDebugCapability::BuildSceneSnapshotJson(Game&) call, wrapped for
+// EngineCommandBridge/EngineCommandDispatch.cpp, mirroring SaveSceneOutcome/
+// LoadSceneOutcome's exact shape immediately above. `editorAvailable ==
+// false` means this build has no IHotReloadDebugCapability registered (a
+// future Player host, or a build with the Editor module compiled out).
+struct GetSceneSnapshotOutcome {
+    bool success = false;
+    bool editorAvailable = true;
+    std::string errorMessage;
+    std::string sceneJson; // meaningful only when success == true.
+};
+
 } // namespace gte

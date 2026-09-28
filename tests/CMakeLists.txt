@@ -2140,6 +2140,12 @@ set(GTE_TEST_SOURCES
     # since src/Core/Plugins/PluginRenderPassBuilderAdapterV3Validation.h is
     # unconditionally in gte_core's own source list.
     Core/Plugins/PluginRenderPassBuilderAdapterV3ValidationTests.cpp
+    # editor-core-separation-12 campaign, PHASE1 (Project Assembly Hot
+    # Reload plan, BIG-STEP 1) - Tier-1 tests for the new, pure
+    # ProjectAssemblyHotReloadDebugStatus singleton. Unconditional, since
+    # src/Core/Plugins/ProjectAssemblyHotReloadDebugStatus.h/.cpp is
+    # unconditionally in gte_core's own source list.
+    Core/Plugins/ProjectAssemblyHotReloadDebugStatusTests.cpp
     Memory/GpuResourceHandleTests.cpp
     Encoding/Base64Tests.cpp
     Encoding/PixelConversionTests.cpp

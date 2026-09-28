@@ -350,6 +350,17 @@ add_library(gte_core STATIC
     # completion report flagged this exact gap for PHASE6's benefit).
     src/Core/Plugins/ProjectAssemblyBuildRunner.h
     src/Core/Plugins/ProjectAssemblyBuildRunner.cpp
+    # editor-core-separation-12 campaign, PHASE1 (Project Assembly Hot
+    # Reload plan, BIG-STEP 1) - ProjectAssemblyHotReloadDebugStatus (the
+    # push-status singleton a future BIG-STEP 3 hot-reload cycle will report
+    # its own live progress into) and HotReloadEngineStateMutex (the shared
+    # mutex guarding ComponentTypeRegistry/EditorPanelRegistry/
+    # ProjectAssemblyHost reads/future mutations). See
+    # task_manager/editor-core-separation-12/PHASE1_CAPABILITY_INTERFACE_AND_STATUS_SINGLETON.md.
+    src/Core/Plugins/ProjectAssemblyHotReloadDebugStatus.h
+    src/Core/Plugins/ProjectAssemblyHotReloadDebugStatus.cpp
+    src/Core/Plugins/HotReloadEngineStateMutex.h
+    src/Core/Plugins/HotReloadEngineStateMutex.cpp
     # editor-core-separation-3 campaign, PHASE3
     # (PHASE3_RUNTIME_RENDER_FEATURE_CAPABILITY.md) - PluginRenderPassBuilderAdapter,
     # the gte_core-side implementation of IPluginRenderPassBuilder, constructed
