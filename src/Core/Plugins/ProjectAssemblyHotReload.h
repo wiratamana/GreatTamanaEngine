@@ -3,30 +3,47 @@
 #include <filesystem>
 #include <string>
 
+#include "../../Scene/SceneDocument.h"
+
 namespace gte {
 
 class Core;
 class Renderer;
 class EditorHost;
 
-// editor-core-separation-14 campaign (Project Assembly Hot Reload plan,
-// BIG-STEP 3), PHASE4. A deliberately EMPTY placeholder value type - a
-// future BIG-STEP 4 campaign
-// (HOTRELOAD_BIGSTEP_04_STATE_SNAPSHOT_RESTORE_AND_VERIFICATION_PLAN_2026-09-28.txt)
-// gives this real fields (reusing gte::SceneDocument - see that file's own
-// design). Kept as a named type (not "just skip these two calls entirely")
-// so this orchestrator's own call sites/control flow never need to change
-// shape when BIG-STEP 4 lands - only these two functions' BODIES change.
-struct HotReloadStateSnapshot {};
+// editor-core-separation-15 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 4), PHASE2 - the real snapshot value type. `document` is exactly
+// what Scene/SceneBuilder.h's BuildSceneDocumentFromRegistry() already
+// produces for the live world - the SAME value type Editor/SceneIO.cpp's own
+// SaveScene() and EditorHotReloadDebugCapability::BuildSceneSnapshotJson()
+// (GET /project_assembly/debug/scene_snapshot) both already build, from the
+// SAME function. Captures every entity, every built-in AND
+// Project-Assembly-defined custom reflected component - see
+// PHASE0_MASTER_STRATEGY.md Section 2 for the full "why this is already
+// almost the whole feature" reasoning. Deliberately does NOT capture
+// anything outside the ECS Registry - see the permanent honest-boundary
+// documentation this campaign's own PHASE5 adds to
+// docs/conventions/project-assembly-system.md.
+struct HotReloadStateSnapshot {
+    SceneDocument document;
+};
 
-// HOOK POINT A - called BEFORE anything is torn down. No-op stub this
-// campaign (returns a default-constructed, empty snapshot).
-HotReloadStateSnapshot CaptureProjectAssemblyHotReloadState(Core& core);
+// HOOK POINT A - called BEFORE anything is torn down. Builds a full, generic
+// ECS-Registry snapshot via Scene/SceneBuilder.h's
+// BuildSceneDocumentFromRegistry() - THE SAME function
+// EditorHotReloadDebugCapability::BuildSceneSnapshotJson() (GET
+// /project_assembly/debug/scene_snapshot) already uses for the identical
+// live world, which is this phase's own primary live cross-check tool.
+// Refreshes core.GetAssetDatabase() exactly ONCE per cycle
+// (PHASE0_MASTER_STRATEGY.md, LDD-HR7) - RestoreProjectAssemblyHotReloadState()
+// (PHASE3) reuses this SAME, already-refreshed instance later in the SAME
+// cycle, without refreshing it a second time.
+HotReloadStateSnapshot CaptureProjectAssemblyHotReloadState(Core& core, const std::filesystem::path& projectRootDirectory);
 
 // HOOK POINT B - called AFTER the (new-or-rolled-back) code's own
 // GTE_RegisterProject has already run, so every render-pass/panel/
 // component-type registration the now-running code needs already exists.
-// No-op stub this campaign.
+// No-op stub this campaign (PHASE2) - PHASE3 gives this its real body.
 void RestoreProjectAssemblyHotReloadState(Core& core, const HotReloadStateSnapshot& snapshot);
 
 // editor-core-separation-14 campaign (Project Assembly Hot Reload plan,

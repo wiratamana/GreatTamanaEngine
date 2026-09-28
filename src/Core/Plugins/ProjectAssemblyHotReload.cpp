@@ -5,6 +5,7 @@
 #include "ProjectAssemblyBuildRunner.h"
 #include "ProjectAssemblyHotReloadDebugStatus.h"
 #include "../../Renderer/Renderer.h"
+#include "../../Scene/SceneBuilder.h"
 // Deliberately NO "../../Editor/ProjectRootPath.h" include here, and NO call
 // to gte::ExecutableDirectory() anywhere in this file - this is gte_core-tier
 // code (src/Core/Plugins/, same CMake source list as ProjectAssemblyHost.cpp/
@@ -17,15 +18,28 @@
 
 namespace gte {
 
-// editor-core-separation-14 campaign, PHASE4 - HOOK POINT A. No-op stub
-// this campaign (BIG-STEP 4 not yet implemented) - logs once, at INFO
-// level, so a live test can confirm this was reached without needing to
-// guess.
-HotReloadStateSnapshot CaptureProjectAssemblyHotReloadState(Core& /*core*/)
+// editor-core-separation-15 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 4), PHASE2 - HOOK POINT A's real body. Refreshes
+// core.GetAssetDatabase() exactly ONCE per cycle (LDD-HR7), then builds a
+// full SceneDocument snapshot of the live world via
+// Scene/SceneBuilder.h's BuildSceneDocumentFromRegistry() - the SAME
+// function EditorHotReloadDebugCapability::BuildSceneSnapshotJson() (GET
+// /project_assembly/debug/scene_snapshot) already uses for the identical
+// live world.
+HotReloadStateSnapshot CaptureProjectAssemblyHotReloadState(Core& core, const std::filesystem::path& projectRootDirectory)
 {
+    // LDD-HR7 - refreshed here, exactly once per cycle. Safe even if
+    // projectRootDirectory doesn't exist (RefreshFromDirectory()'s own
+    // existing, already-relied-upon tolerant behavior - mirrors
+    // Editor/SceneIO.cpp's own SaveScene()'s identical comment).
+    core.GetAssetDatabase().RefreshFromDirectory(projectRootDirectory);
+
+    HotReloadStateSnapshot snapshot;
+    snapshot.document = BuildSceneDocumentFromRegistry(core.GetGame().GetRegistry(), core.GetAssetDatabase());
+
     GTE_LOG_INFO("ProjectAssemblyHotReload",
-        "CaptureProjectAssemblyHotReloadState: no-op stub (BIG-STEP 4 not yet implemented).");
-    return HotReloadStateSnapshot{};
+        "CaptureProjectAssemblyHotReloadState: captured " + std::to_string(snapshot.document.entities.size()) + " entities.");
+    return snapshot;
 }
 
 // editor-core-separation-14 campaign, PHASE4 - HOOK POINT B. No-op stub
@@ -88,12 +102,12 @@ void PumpWindowsMessagesDuringHotReloadFreeze()
 
 void PerformProjectAssemblyHotReload(const std::string& projectName, Core& core, Renderer& renderer,
     EditorHost* editorHost, const std::filesystem::path& outputDirectory, const std::filesystem::path& buildDirectory,
-    const std::filesystem::path& /*projectRootDirectory*/)
+    const std::filesystem::path& projectRootDirectory)
 {
     GTE_LOG_INFO("ProjectAssemblyHotReload", "Hot reload requested for '" + projectName + "' - freezing engine.");
     ProjectAssemblyHotReloadDebugStatus::Instance().Set("CapturingState", projectName);
 
-    const HotReloadStateSnapshot snapshot = CaptureProjectAssemblyHotReloadState(core);
+    const HotReloadStateSnapshot snapshot = CaptureProjectAssemblyHotReloadState(core, projectRootDirectory);
 
     if (buildDirectory.empty()) {
         GTE_LOG_ERROR("ProjectAssemblyHotReload", "Aborting - could not resolve the CMake build directory for '" + projectName + "'.");
