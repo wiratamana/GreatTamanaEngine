@@ -72,6 +72,25 @@ struct BuildOutcome {
 BuildOutcome RunProjectAssemblyBuildAndWait(const std::string& projectName, const std::string& buildDirectory,
     const std::function<void()>& onIdleTick = {});
 
+// editor-core-separation-16 campaign (On-Engine Project Workflow plan,
+// BIG-STEP 2), PHASE1 (LDD-CP2, PHASE0_MASTER_STRATEGY.md). Runs a bare,
+// no-target `cmake -S <sourceDirectory> -B <buildDirectory>` as a real
+// child process and BLOCKS THE CALLING THREAD until it exits - reuses the
+// EXACT SAME child-process-spawn/pipe-drain primitive
+// RunOneBuildTarget() already uses internally (factored out below as
+// RunChildProcessAndWait(), never a second, independently-written
+// mechanism). Streams stdout/stderr into GTE_LOG_INFO/GTE_LOG_ERROR
+// ("ProjectAssemblyBuild" category), exactly like every other child
+// process this file spawns. Returns true (exit code 0) or false (any
+// non-zero exit code, or a failure to even launch the process at all -
+// both logged via GTE_LOG_ERROR before returning). Safe to call from ANY
+// thread - this campaign's own real call site (PHASE3's
+// CreateNewProjectAssembly()) calls it synchronously, inline, since
+// "Create" itself is already a plain, synchronous filesystem operation
+// with no cross-thread bridge of its own (see IProjectLifecycleCapability's
+// own class comment, PHASE3, for why this is safe).
+bool RunPlainCMakeReconfigureAndWait(const std::filesystem::path& sourceDirectory, const std::filesystem::path& buildDirectory);
+
 // The synchronous counterpart of TriggerProjectAssemblyCompile() - shares
 // the EXACT SAME per-project in-flight guard (g_inFlightProjects) as that
 // existing async path: a hot-reload request for a project whose own async
@@ -116,6 +135,18 @@ bool TriggerProjectAssemblyCompile(const std::string& projectName, const std::st
 // shape). Returns an empty path (after logging one GTE_LOG_ERROR) if no
 // CMakeCache.txt is found within the bound.
 std::filesystem::path ResolveCMakeBuildDirectory(const std::filesystem::path& startDirectory, int maxParentLevels = 5);
+
+// editor-core-separation-16 campaign (On-Engine Project Workflow plan,
+// BIG-STEP 2), PHASE1. Reads CMAKE_HOME_DIRECTORY straight out of
+// `buildDirectory`'s own CMakeCache.txt (the SAME file
+// ResolveCMakeBuildDirectory() just proved exists at this exact path) and
+// appends "Projects" onto it - the one, authoritative, always-correct way
+// to find the real Project Assembly SOURCE tree at runtime, without ever
+// hardcoding a path or inventing a new build-time #define. Returns an
+// empty path (after one GTE_LOG_ERROR) if CMakeCache.txt is missing/
+// unreadable, or the CMAKE_HOME_DIRECTORY line itself is missing/
+// malformed - never throws.
+std::filesystem::path ResolveProjectAssemblySourceRootDirectory(const std::filesystem::path& buildDirectory);
 
 // editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
 // BIG-STEP 2), PHASE4. Appends "project_assemblies" onto a CALLER-SUPPLIED

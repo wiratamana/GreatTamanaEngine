@@ -12,6 +12,7 @@
 
 #include <atomic>
 #include <cctype>
+#include <fstream>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -120,34 +121,25 @@ std::wstring QuoteWindowsArgument(const std::wstring& argument)
     return quoted;
 }
 
-// Runs ONE `cmake --build <buildDirectory> --target <targetName>`
-// invocation as a real Windows child process (CreateProcessW(), per this
-// phase's own doc file), redirecting its combined stdout/stderr to an
-// anonymous pipe and reading that pipe, line by line, on the SAME thread
-// that calls this function. PHASE2 (editor-core-separation-14 campaign)
-// replaced the original plain blocking ReadFile() loop with a
-// PeekNamedPipe()-driven poll loop (see the loop body below) so an
-// optional `onIdleTick` callback runs on a genuinely fixed ~50ms cadence,
-// independent of how chatty the child process is - this is what a future
-// synchronous caller running on the main/window-owning thread uses to keep
-// pumping Windows messages during a long build, without touching
-// game/render state itself. Every completed line is forwarded to
-// GTE_LOG_INFO/WARNING/ERROR via a simple, best-effort, explicitly
-// NOT-guaranteed-correct keyword heuristic (never parsed further than
-// that). Returns the child's real exit code, or a negative sentinel if the
-// process itself could not even be created/piped. `targetMissingHeuristicHit`
-// is set true if the output looks like Ninja/CMake reporting that
-// `targetName` simply does not exist - the caller uses this to distinguish
-// "no Editor/ sources, perfectly normal" from a genuine build failure (this
-// phase's own "STEP 2" doc-file reasoning). `onIdleTick`, if non-empty, is
-// invoked once per poll iteration whenever no build output is currently
-// available - pass an empty std::function (the default) from any call site
-// that is NOT running on the main/window-owning thread.
-int RunOneBuildTarget(const std::string& buildDirectory, const std::string& targetName, bool& targetMissingHeuristicHit,
-    const std::function<void()>& onIdleTick = {})
+// editor-core-separation-16 campaign (On-Engine Project Workflow plan,
+// BIG-STEP 2), PHASE1. Generic "spawn this exact command line, stream its
+// combined stdout/stderr into GTE_LOG_INFO/WARNING/ERROR (logCategory)
+// line-by-line, block until it exits" - the ONE real child-process
+// mechanism this whole file uses, shared by RunOneBuildTarget() (existing,
+// refactored by this phase to call this) and RunPlainCMakeReconfigureAndWait()
+// (new, this phase). Returns the child's real exit code, or a negative
+// sentinel if the process could not even be created/piped (mirrors
+// RunOneBuildTarget()'s own former exact contract). `onLine`, if provided
+// (RunOneBuildTarget() provides one; RunPlainCMakeReconfigureAndWait()
+// passes the default, empty one - it needs no per-line inspection, only
+// the final exit code), is invoked once per completed output line,
+// ADDITIONALLY to (never instead of) this function's own internal
+// keyword-based error/warning/info logging below - callers must not
+// assume their own onLine call means the line was not already logged.
+int RunChildProcessAndWait(const std::wstring& commandLine, const std::filesystem::path& workingDirectory,
+    const char* logCategory, const std::function<void()>& onIdleTick,
+    const std::function<void(const std::string&)>& onLine = {})
 {
-    targetMissingHeuristicHit = false;
-
     SECURITY_ATTRIBUTES pipeSecurityAttributes{};
     pipeSecurityAttributes.nLength = sizeof(SECURITY_ATTRIBUTES);
     pipeSecurityAttributes.bInheritHandle = TRUE;
@@ -156,7 +148,7 @@ int RunOneBuildTarget(const std::string& buildDirectory, const std::string& targ
     HANDLE readPipe = nullptr;
     HANDLE writePipe = nullptr;
     if (!CreatePipe(&readPipe, &writePipe, &pipeSecurityAttributes, 0)) {
-        GTE_LOG_ERROR("ProjectAssemblyBuild", "CreatePipe() failed - cannot capture 'cmake --build' output for target " + targetName + ".");
+        GTE_LOG_ERROR(logCategory, std::string("CreatePipe() failed - cannot capture child process output."));
         return -1;
     }
     // The parent's own read end must never be inherited by the child - only
@@ -164,15 +156,9 @@ int RunOneBuildTarget(const std::string& buildDirectory, const std::string& targ
     // be inherited.
     SetHandleInformation(readPipe, HANDLE_FLAG_INHERIT, 0);
 
-    const std::wstring buildDirectoryWide = Utf8ToWide(buildDirectory);
-    // QuoteWindowsArgument() (above) - NOT a naive "\"...\"" wrap - see that
-    // function's own doc comment for the exact bug this avoids (a trailing
-    // backslash, always present on buildDirectory per SDL_GetBasePath()'s
-    // convention, would otherwise escape the closing quote).
-    std::wstring commandLine = L"cmake --build " + QuoteWindowsArgument(buildDirectoryWide)
-        + L" --target " + QuoteWindowsArgument(Utf8ToWide(targetName));
     std::vector<wchar_t> mutableCommandLine(commandLine.begin(), commandLine.end());
     mutableCommandLine.push_back(L'\0');
+    const std::wstring workingDirectoryWide = workingDirectory.wstring();
 
     STARTUPINFOW startupInfo{};
     startupInfo.cb = sizeof(STARTUPINFOW);
@@ -184,7 +170,7 @@ int RunOneBuildTarget(const std::string& buildDirectory, const std::string& targ
     PROCESS_INFORMATION processInfo{};
     const BOOL created = CreateProcessW(
         nullptr, mutableCommandLine.data(), nullptr, nullptr, /*bInheritHandles=*/TRUE,
-        CREATE_NO_WINDOW, nullptr, buildDirectoryWide.c_str(), &startupInfo, &processInfo);
+        CREATE_NO_WINDOW, nullptr, workingDirectoryWide.c_str(), &startupInfo, &processInfo);
 
     // The parent's own copy of the write end must be closed right after
     // CreateProcessW(), regardless of success/failure - otherwise ReadFile()
@@ -195,8 +181,8 @@ int RunOneBuildTarget(const std::string& buildDirectory, const std::string& targ
 
     if (!created) {
         CloseHandle(readPipe);
-        GTE_LOG_ERROR("ProjectAssemblyBuild",
-            "CreateProcessW() failed (GetLastError=" + std::to_string(GetLastError()) + ") for target " + targetName + ".");
+        GTE_LOG_ERROR(logCategory,
+            "CreateProcessW() failed (GetLastError=" + std::to_string(GetLastError()) + ").");
         return -1;
     }
 
@@ -211,7 +197,7 @@ int RunOneBuildTarget(const std::string& buildDirectory, const std::string& targ
             if (onIdleTick) {
                 onIdleTick();
             }
-            Sleep(50); // Fixed poll cadence - see this function's own updated doc comment (PHASE2).
+            Sleep(50); // Fixed poll cadence - see RunOneBuildTarget()'s own former doc comment (PHASE2).
             continue;
         }
         DWORD bytesRead = 0;
@@ -230,22 +216,23 @@ int RunOneBuildTarget(const std::string& buildDirectory, const std::string& targ
                 continue;
             }
             const std::string lower = ToLowerAscii(line);
-            if (lower.find("unknown target") != std::string::npos
-                || lower.find("no rule to make target") != std::string::npos
-                || lower.find("targets not built") != std::string::npos) {
-                targetMissingHeuristicHit = true;
-                GTE_LOG_WARNING("ProjectAssemblyBuild", line);
-            } else if (lower.find("error") != std::string::npos) {
-                GTE_LOG_ERROR("ProjectAssemblyBuild", line);
+            if (lower.find("error") != std::string::npos) {
+                GTE_LOG_ERROR(logCategory, line);
             } else if (lower.find("warning") != std::string::npos) {
-                GTE_LOG_WARNING("ProjectAssemblyBuild", line);
+                GTE_LOG_WARNING(logCategory, line);
             } else {
-                GTE_LOG_INFO("ProjectAssemblyBuild", line);
+                GTE_LOG_INFO(logCategory, line);
+            }
+            if (onLine) {
+                onLine(line);
             }
         }
     }
     if (!lineBuffer.empty()) {
-        GTE_LOG_INFO("ProjectAssemblyBuild", lineBuffer);
+        GTE_LOG_INFO(logCategory, lineBuffer);
+        if (onLine) {
+            onLine(lineBuffer);
+        }
     }
     CloseHandle(readPipe);
 
@@ -261,6 +248,52 @@ int RunOneBuildTarget(const std::string& buildDirectory, const std::string& targ
     CloseHandle(processInfo.hThread);
 
     return static_cast<int>(exitCode);
+}
+
+// Runs ONE `cmake --build <buildDirectory> --target <targetName>`
+// invocation via the shared RunChildProcessAndWait() helper above (PHASE1,
+// editor-core-separation-16 campaign - this function's own former inline
+// CreateProcessW()/pipe-drain body was extracted into that generic helper;
+// this function's behavior is otherwise unchanged). Returns the child's
+// real exit code, or a negative sentinel if the process itself could not
+// even be created/piped. `targetMissingHeuristicHit` is set true if the
+// output looks like Ninja/CMake reporting that `targetName` simply does
+// not exist - the caller uses this to distinguish "no Editor/ sources,
+// perfectly normal" from a genuine build failure (this phase's own
+// "STEP 2" doc-file reasoning) - detected here via a dedicated `onLine`
+// callback that does NOT re-log the line itself (RunChildProcessAndWait()'s
+// own internal keyword-based classification already logged it once).
+// `onIdleTick`, if non-empty, is invoked once per poll iteration whenever
+// no build output is currently available - pass an empty std::function
+// (the default) from any call site that is NOT running on the
+// main/window-owning thread.
+int RunOneBuildTarget(const std::string& buildDirectory, const std::string& targetName, bool& targetMissingHeuristicHit,
+    const std::function<void()>& onIdleTick = {})
+{
+    targetMissingHeuristicHit = false;
+
+    const std::wstring buildDirectoryWide = Utf8ToWide(buildDirectory);
+    // QuoteWindowsArgument() (above) - NOT a naive "\"...\"" wrap - see that
+    // function's own doc comment for the exact bug this avoids (a trailing
+    // backslash, always present on buildDirectory per SDL_GetBasePath()'s
+    // convention, would otherwise escape the closing quote).
+    const std::wstring commandLine = L"cmake --build " + QuoteWindowsArgument(buildDirectoryWide)
+        + L" --target " + QuoteWindowsArgument(Utf8ToWide(targetName));
+
+    bool* const targetMissingHeuristicHitPtr = &targetMissingHeuristicHit;
+    const std::function<void(const std::string&)> onLine = [targetMissingHeuristicHitPtr](const std::string& line) {
+        const std::string lower = ToLowerAscii(line);
+        if (lower.find("unknown target") != std::string::npos
+            || lower.find("no rule to make target") != std::string::npos
+            || lower.find("targets not built") != std::string::npos) {
+            *targetMissingHeuristicHitPtr = true;
+        }
+    };
+
+    // buildDirectoryWide is constructed directly from the SAME
+    // std::filesystem::path type RunChildProcessAndWait() expects, avoiding
+    // a second, potentially divergent re-encoding of buildDirectory.
+    return RunChildProcessAndWait(commandLine, std::filesystem::path(buildDirectoryWide), "ProjectAssemblyBuild", onIdleTick, onLine);
 }
 
 // The actual background-thread body, registered via
@@ -327,6 +360,36 @@ BuildOutcome RunProjectAssemblyBuildAndWait(const std::string& projectName, cons
     return outcome;
 }
 
+// editor-core-separation-16 campaign (On-Engine Project Workflow plan,
+// BIG-STEP 2), PHASE1. See this function's own doc comment in
+// ProjectAssemblyBuildRunner.h for the full contract. Reuses the SAME
+// shared RunChildProcessAndWait() helper RunOneBuildTarget() uses
+// internally (defined above, in this file's own anonymous namespace) -
+// never a second, independently-written child-process mechanism. Neither
+// onIdleTick nor onLine are needed here (this call site has no message
+// pump to service, and no per-line inspection of its own - only the
+// final exit code matters).
+bool RunPlainCMakeReconfigureAndWait(const std::filesystem::path& sourceDirectory, const std::filesystem::path& buildDirectory)
+{
+    const std::wstring commandLine = L"cmake -S " + QuoteWindowsArgument(sourceDirectory.wstring())
+        + L" -B " + QuoteWindowsArgument(buildDirectory.wstring());
+
+    // buildDirectory is used as the child's working directory - it is
+    // guaranteed to already exist (ResolveCMakeBuildDirectory() only ever
+    // returns a directory that already contains a real CMakeCache.txt),
+    // unlike sourceDirectory, which this function must tolerate being
+    // bogus/non-existent (see this phase's own
+    // PlainReconfigureFailsCleanlyAgainstANonExistentSourceDirectory test).
+    const int exitCode = RunChildProcessAndWait(commandLine, buildDirectory, "ProjectAssemblyBuild", {}, {});
+    if (exitCode != 0) {
+        GTE_LOG_ERROR("ProjectAssemblyBuild",
+            "RunPlainCMakeReconfigureAndWait() - 'cmake -S " + sourceDirectory.string() + " -B " +
+            buildDirectory.string() + "' failed (exit code " + std::to_string(exitCode) + ").");
+        return false;
+    }
+    return true;
+}
+
 // editor-core-separation-14 campaign (Project Assembly Hot Reload plan,
 // BIG-STEP 3), PHASE2. See this function's own doc comment in
 // ProjectAssemblyBuildRunner.h for the full contract - shares the EXACT
@@ -382,6 +445,31 @@ std::filesystem::path ResolveCMakeBuildDirectory(const std::filesystem::path& st
         " parent director" + std::string(maxParentLevels == 1 ? "y" : "ies") +
         " starting from " + startDirectory.string() + " - cannot resolve the CMake build directory.");
     return std::filesystem::path();
+}
+
+// editor-core-separation-16 campaign (On-Engine Project Workflow plan,
+// BIG-STEP 2), PHASE1. See this function's own doc comment in
+// ProjectAssemblyBuildRunner.h for the full contract.
+std::filesystem::path ResolveProjectAssemblySourceRootDirectory(const std::filesystem::path& buildDirectory)
+{
+    const std::filesystem::path cachePath = buildDirectory / "CMakeCache.txt";
+    std::ifstream file(cachePath);
+    if (!file.is_open()) {
+        GTE_LOG_ERROR("ProjectAssemblyBuild",
+            "ResolveProjectAssemblySourceRootDirectory: could not open " + cachePath.string());
+        return {};
+    }
+    constexpr const char* kPrefix = "CMAKE_HOME_DIRECTORY:INTERNAL=";
+    std::string line;
+    while (std::getline(file, line)) {
+        if (line.rfind(kPrefix, 0) == 0) {
+            std::filesystem::path sourceRoot(line.substr(std::string(kPrefix).length()));
+            return sourceRoot / "Projects";
+        }
+    }
+    GTE_LOG_ERROR("ProjectAssemblyBuild",
+        "ResolveProjectAssemblySourceRootDirectory: no CMAKE_HOME_DIRECTORY line found in " + cachePath.string());
+    return {};
 }
 
 // editor-core-separation-13 campaign (Project Assembly Hot Reload plan,

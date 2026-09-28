@@ -2165,6 +2165,12 @@ set(GTE_TEST_SOURCES
     # src/Core/Plugins/ProjectAssemblyBuildRunner.h/.cpp is unconditionally
     # in gte_core's own source list.
     Core/Plugins/ProjectAssemblyBuildRunnerBackupRestoreTests.cpp
+    # editor-core-separation-16 campaign (On-Engine Project Workflow plan,
+    # BIG-STEP 2), PHASE1 - Tier-1 tests for the new
+    # ResolveProjectAssemblySourceRootDirectory()/RunPlainCMakeReconfigureAndWait()
+    # additions. Unconditional, since src/Core/Plugins/ProjectAssemblyBuildRunner.h/.cpp
+    # is unconditionally in gte_core's own source list.
+    Core/Plugins/ProjectAssemblyBuildRunnerSourceRootTests.cpp
     Memory/GpuResourceHandleTests.cpp
     Encoding/Base64Tests.cpp
     Encoding/PixelConversionTests.cpp
