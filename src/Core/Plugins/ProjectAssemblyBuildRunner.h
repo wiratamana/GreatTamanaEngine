@@ -67,4 +67,47 @@ bool TriggerProjectAssemblyCompile(const std::string& projectName, const std::st
 // CMakeCache.txt is found within the bound.
 std::filesystem::path ResolveCMakeBuildDirectory(const std::filesystem::path& startDirectory, int maxParentLevels = 5);
 
+// editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 2), PHASE4. Appends "project_assemblies" onto a CALLER-SUPPLIED
+// executable directory - the ONE place this joining happens, replacing the
+// identical inline expression at src/Editor/EditorHost.cpp's own
+// LoadProjectAssemblies() call site (updated by this phase to call this
+// function instead, to avoid a second, independently-drifting copy of the
+// same path literal). Deliberately takes `executableDirectory` as an
+// EXPLICIT, REQUIRED parameter, mirroring ResolveCMakeBuildDirectory()'s
+// own "take the starting directory as a parameter, never resolve it
+// internally" precedent immediately above - see this phase's own layering
+// note (PHASE4_PROJECT_ASSEMBLY_HOST_UNLOAD_GPU_SAFETY_AND_BINARY_BACKUP.md,
+// section 3.4) for exactly why (gte::ExecutableDirectory() is
+// gte_editor-tier; this file is gte_core-tier).
+std::filesystem::path ResolveProjectAssemblyOutputDirectory(const std::filesystem::path& executableDirectory);
+
+// Copies the CURRENT, presumed-good <projectName>_Game.dll (and, if
+// present, _Editor.dll) from `outputDirectory` to a dedicated backup slot,
+// <outputDirectory>/.hotreload_backup/<name>_Game.dll.bak (/_Editor.dll.bak)
+// - a plain file copy, safe to perform WHILE the original is still
+// LoadLibraryW()'d (an already-mapped .dll permits shared-read access; only
+// a WRITE-mode open, e.g. the linker overwriting it, is blocked).
+// `outputDirectory` is an EXPLICIT, REQUIRED parameter (never defaulted to
+// an internally-resolved value - see this phase's own layering note above)
+// - the real, production caller passes
+// ResolveProjectAssemblyOutputDirectory(gte::ExecutableDirectory()); a test
+// passes a throwaway temp directory instead, with zero special-casing
+// needed on either side. MUST be called BEFORE
+// ProjectAssemblyHost::UnloadProjectAssembly() for the SAME projectName,
+// every hot-reload cycle - the backup is unconditionally OVERWRITTEN each
+// time. Returns false (GTE_LOG_ERROR, never throws) if the copy fails for
+// any reason - the caller MUST treat false as "abort before ever calling
+// UnloadProjectAssembly()".
+bool BackupProjectAssemblyBinaries(const std::string& projectName, const std::filesystem::path& outputDirectory);
+
+// The rollback half - copies the .hotreload_backup/<name>_*.dll.bak files
+// BACK, overwriting whatever a failed compile may have left at the real
+// <outputDirectory>/<name>_*.dll paths. Safe ONLY after
+// UnloadProjectAssembly() has already run for this project (nothing has the
+// target path open). Same explicit, required `outputDirectory` parameter as
+// BackupProjectAssemblyBinaries() above, for the identical reason. Returns
+// false (GTE_LOG_ERROR) if the backup itself is missing/unreadable.
+bool RestoreProjectAssemblyBinariesFromBackup(const std::string& projectName, const std::filesystem::path& outputDirectory);
+
 } // namespace gte

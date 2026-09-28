@@ -47,6 +47,7 @@ namespace gte {
 
 class Core;
 class EditorHost;
+class Renderer;
 
 class ProjectAssemblyHost {
 public:
@@ -74,6 +75,34 @@ public:
         Core& core, EditorHost* editorHost);
 
     std::size_t LoadedAssemblyCount() const noexcept { return m_loadedAssemblies.size(); }
+
+    // editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
+    // BIG-STEP 2), PHASE4. Reverses TryLoadOneAssembly()'s own effects for BOTH
+    // the _Game.dll and (if it exists) the _Editor.dll of `projectName`, in
+    // this EXACT order, none of which may be skipped or reordered:
+    //   1. renderer.WaitForGpuIdle() - MUST run before step 2/3, since
+    //      FreeLibrary() may run this .dll's own static destructors
+    //      (DllMain's DLL_PROCESS_DETACH), which may release GPU resources this
+    //      project's own render pass owns while a frame could still be in
+    //      flight (BIG-STEP 0, Hazard 4).
+    //   2. ProjectAssemblyRegistrationLedger::Instance().UnregisterEverythingFor(
+    //      projectName, core) - removes every render-pass/panel/component-type
+    //      registration this project ever made (Hazards 1/2 fix). MUST run
+    //      before step 3 - a dangling pointer left registered past FreeLibrary()
+    //      is a guaranteed crash the very next frame/graph-declare.
+    //   3. FreeLibrary() on BOTH module handles (Editor first, then Game -
+    //      reverse of TryLoadOneAssembly()'s own Game-then-Editor load order),
+    //      removing both entries from m_loadedAssemblies.
+    // Safe to call for a projectName that was never loaded, or is already
+    // unloaded - a no-op, logged at INFO level, never a crash or a warning.
+    void UnloadProjectAssembly(const std::string& projectName, Core& core, Renderer& renderer);
+
+    // editor-core-separation-13 campaign, PHASE4 - read-only list of every
+    // currently-open .dll's own file name (e.g. "ProjectAssemblyProbe_Game.dll"),
+    // for EditorHotReloadDebugCapability::GetLoadedAssemblyFileNames() (GET
+    // /project_assembly/debug/loaded_assemblies). Deliberately returns plain
+    // strings, never the raw HMODULE.
+    std::vector<std::string> GetLoadedAssemblyFileNames() const;
 
 private:
     struct LoadedAssembly {

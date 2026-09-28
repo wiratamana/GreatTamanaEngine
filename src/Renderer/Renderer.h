@@ -343,6 +343,15 @@ public:
     // deliberately adds ZERO GPU stall and must stay that way - this method
     // must never be called from anywhere those two endpoints' own code paths
     // reach.
+    //
+    // editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
+    // BIG-STEP 2), PHASE4 - a SECOND sanctioned caller now exists:
+    // ProjectAssemblyHost::UnloadProjectAssembly(), which MUST call this
+    // BEFORE any Project-Assembly-owned GPU resource can be released via
+    // FreeLibrary()'s own static-destructor path (BIG-STEP 0, Hazard 4) -
+    // this remains NOT safe to call from any per-frame path; it is reserved
+    // exclusively for these two rare, explicit, synchronous teardown/capture
+    // call sites.
     void WaitForGpuIdle() const;
 
     // network-impl-2 campaign, Phase 4

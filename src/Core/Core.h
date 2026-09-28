@@ -341,6 +341,16 @@ public:
     // any Project Assembly's own authored code directly.
     void UnregisterProjectRenderPassProvider(const char* debugName);
 
+    // editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
+    // BIG-STEP 2), PHASE4 - mirrors GetRenderer()'s own existing precedent
+    // exactly. Needed so EditorHotReloadDebugCapability (a gte_editor-tier
+    // class, constructed as a namespace-scope static BEFORE any Core exists
+    // - see that class's own SetProjectAssemblyHost() doc comment for the
+    // full reasoning) can be handed a live ProjectAssemblyHost& once, from
+    // EditorHost's own constructor BODY, strictly AFTER m_core already
+    // exists.
+    ProjectAssemblyHost& GetProjectAssemblyHost() noexcept { return m_projectAssemblyHost; }
+
     // Read accessor for PHASE3 (render-feature capability lookup) and
     // PHASE4 (editor-panel capability lookup) - both look up capabilities
     // via AllLoadedModules(), never re-scanning the plugins/ folder

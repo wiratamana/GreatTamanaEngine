@@ -4,6 +4,7 @@
 #include "../Assets/AssetDatabase.h"
 #include "../Core/Plugins/HotReloadEngineStateMutex.h"
 #include "../Core/Plugins/ProjectAssemblyBuildRunner.h"
+#include "../Core/Plugins/ProjectAssemblyHost.h"
 #include "../Core/Plugins/ProjectAssemblyHotReloadDebugStatus.h"
 #include "../Core/Plugins/ProjectAssemblyRegistrationLedger.h"
 #include "../ECS/Reflection/ComponentTypeRegistry.h"
@@ -42,11 +43,15 @@ IHotReloadDebugCapability::LedgerEntry EditorHotReloadDebugCapability::GetLedger
 
 std::vector<std::string> EditorHotReloadDebugCapability::GetLoadedAssemblyFileNames() const
 {
-    // editor-core-separation-12 campaign, PHASE2 - PLACEHOLDER. ProjectAssemblyHost
-    // has no accessor for its own loaded-assembly list yet - a future
-    // BIG-STEP 2 campaign adds one and replaces ONLY this method's body.
     std::lock_guard<std::mutex> lock(GetHotReloadEngineStateMutex());
-    return {};
+    // editor-core-separation-13 campaign, PHASE4 - REAL now, no longer a
+    // placeholder. m_projectAssemblyHost is guaranteed non-null by the time
+    // any real HTTP request can reach this method (see SetProjectAssemblyHost()'s
+    // own doc comment for the setter-call-ordering guarantee) - a null check
+    // here would only ever hide a genuine construction-order regression,
+    // never a legitimate runtime state, so this deliberately dereferences
+    // directly rather than defensively branching.
+    return m_projectAssemblyHost->GetLoadedAssemblyFileNames();
 }
 
 std::vector<std::string> EditorHotReloadDebugCapability::GetRegisteredComponentTypeNames() const
@@ -92,6 +97,16 @@ bool EditorHotReloadDebugCapability::TriggerHotReload(const std::string& /*proje
     // PerformProjectAssemblyHotReload() call - this method's signature
     // never changes for that.
     return false;
+}
+
+// editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 2), PHASE4 - see this method's own doc comment in
+// EditorHotReloadDebugCapability.h for the full "why a setter, not a
+// constructor parameter" reasoning. Called exactly once, from EditorHost's
+// own constructor body.
+void EditorHotReloadDebugCapability::SetProjectAssemblyHost(ProjectAssemblyHost& projectAssemblyHost) noexcept
+{
+    m_projectAssemblyHost = &projectAssemblyHost;
 }
 
 } // namespace gte

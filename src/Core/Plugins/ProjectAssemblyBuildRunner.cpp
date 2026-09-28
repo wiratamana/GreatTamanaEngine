@@ -326,4 +326,136 @@ std::filesystem::path ResolveCMakeBuildDirectory(const std::filesystem::path& st
     return std::filesystem::path();
 }
 
+// editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 2), PHASE4 - see this function's own doc comment in
+// ProjectAssemblyBuildRunner.h for the full layering-constraint reasoning
+// (this function NEVER calls gte::ExecutableDirectory() itself).
+std::filesystem::path ResolveProjectAssemblyOutputDirectory(const std::filesystem::path& executableDirectory)
+{
+    return executableDirectory / "project_assemblies";
+}
+
+namespace {
+
+// editor-core-separation-13 campaign, PHASE4 - the shared backup-slot
+// naming convention both BackupProjectAssemblyBinaries() and
+// RestoreProjectAssemblyBinariesFromBackup() use, kept in exactly one
+// place so the two halves can never independently drift apart.
+std::filesystem::path BackupDirectoryFor(const std::filesystem::path& outputDirectory)
+{
+    return outputDirectory / ".hotreload_backup";
+}
+
+std::filesystem::path GameDllPath(const std::filesystem::path& outputDirectory, const std::string& projectName)
+{
+    return outputDirectory / (projectName + "_Game.dll");
+}
+
+std::filesystem::path EditorDllPath(const std::filesystem::path& outputDirectory, const std::string& projectName)
+{
+    return outputDirectory / (projectName + "_Editor.dll");
+}
+
+std::filesystem::path GameBackupPath(const std::filesystem::path& outputDirectory, const std::string& projectName)
+{
+    return BackupDirectoryFor(outputDirectory) / (projectName + "_Game.dll.bak");
+}
+
+std::filesystem::path EditorBackupPath(const std::filesystem::path& outputDirectory, const std::string& projectName)
+{
+    return BackupDirectoryFor(outputDirectory) / (projectName + "_Editor.dll.bak");
+}
+
+} // namespace
+
+bool BackupProjectAssemblyBinaries(const std::string& projectName, const std::filesystem::path& outputDirectory)
+{
+    const std::filesystem::path gameSource = GameDllPath(outputDirectory, projectName);
+    if (!std::filesystem::exists(gameSource)) {
+        GTE_LOG_ERROR("ProjectAssemblyBuild",
+            "BackupProjectAssemblyBinaries('" + projectName + "') - no _Game.dll found at " + gameSource.string() +
+            " - this is not a valid, currently-loaded Project Assembly to back up.");
+        return false;
+    }
+
+    const std::filesystem::path backupDirectory = BackupDirectoryFor(outputDirectory);
+    std::error_code createDirectoriesError;
+    std::filesystem::create_directories(backupDirectory, createDirectoriesError);
+    if (createDirectoriesError) {
+        GTE_LOG_ERROR("ProjectAssemblyBuild",
+            "BackupProjectAssemblyBinaries('" + projectName + "') - could not create backup directory " +
+            backupDirectory.string() + " (" + createDirectoriesError.message() + ").");
+        return false;
+    }
+
+    std::error_code copyError;
+    std::filesystem::copy_file(gameSource, GameBackupPath(outputDirectory, projectName),
+        std::filesystem::copy_options::overwrite_existing, copyError);
+    if (copyError) {
+        GTE_LOG_ERROR("ProjectAssemblyBuild",
+            "BackupProjectAssemblyBinaries('" + projectName + "') - failed to copy " + gameSource.string() +
+            " (" + copyError.message() + ").");
+        return false;
+    }
+
+    // _Editor.dll is OPTIONAL (a project may have no Editor sources - mirrors
+    // RunBuildThreadBody()'s own existing "no Editor target is normal, not a
+    // failure" handling) - only attempt this copy if it actually exists.
+    const std::filesystem::path editorSource = EditorDllPath(outputDirectory, projectName);
+    if (std::filesystem::exists(editorSource)) {
+        std::error_code editorCopyError;
+        std::filesystem::copy_file(editorSource, EditorBackupPath(outputDirectory, projectName),
+            std::filesystem::copy_options::overwrite_existing, editorCopyError);
+        if (editorCopyError) {
+            GTE_LOG_ERROR("ProjectAssemblyBuild",
+                "BackupProjectAssemblyBinaries('" + projectName + "') - failed to copy " + editorSource.string() +
+                " (" + editorCopyError.message() + ").");
+            return false;
+        }
+    }
+
+    GTE_LOG_INFO("ProjectAssemblyBuild", "BackupProjectAssemblyBinaries('" + projectName + "') succeeded.");
+    return true;
+}
+
+bool RestoreProjectAssemblyBinariesFromBackup(const std::string& projectName, const std::filesystem::path& outputDirectory)
+{
+    const std::filesystem::path gameBackup = GameBackupPath(outputDirectory, projectName);
+    if (!std::filesystem::exists(gameBackup)) {
+        GTE_LOG_ERROR("ProjectAssemblyBuild",
+            "RestoreProjectAssemblyBinariesFromBackup('" + projectName + "') - no backup found at " +
+            gameBackup.string() + ".");
+        return false;
+    }
+
+    std::error_code copyError;
+    std::filesystem::copy_file(gameBackup, GameDllPath(outputDirectory, projectName),
+        std::filesystem::copy_options::overwrite_existing, copyError);
+    if (copyError) {
+        GTE_LOG_ERROR("ProjectAssemblyBuild",
+            "RestoreProjectAssemblyBinariesFromBackup('" + projectName + "') - failed to restore " +
+            gameBackup.string() + " (" + copyError.message() + ").");
+        return false;
+    }
+
+    // _Editor.dll's backup is OPTIONAL - only restore it if a backup of it
+    // was actually ever taken (mirrors BackupProjectAssemblyBinaries()'s own
+    // identical "_Editor.dll is optional" handling).
+    const std::filesystem::path editorBackup = EditorBackupPath(outputDirectory, projectName);
+    if (std::filesystem::exists(editorBackup)) {
+        std::error_code editorCopyError;
+        std::filesystem::copy_file(editorBackup, EditorDllPath(outputDirectory, projectName),
+            std::filesystem::copy_options::overwrite_existing, editorCopyError);
+        if (editorCopyError) {
+            GTE_LOG_ERROR("ProjectAssemblyBuild",
+                "RestoreProjectAssemblyBinariesFromBackup('" + projectName + "') - failed to restore " +
+                editorBackup.string() + " (" + editorCopyError.message() + ").");
+            return false;
+        }
+    }
+
+    GTE_LOG_INFO("ProjectAssemblyBuild", "RestoreProjectAssemblyBinariesFromBackup('" + projectName + "') succeeded.");
+    return true;
+}
+
 } // namespace gte

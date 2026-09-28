@@ -4,6 +4,8 @@
 
 namespace gte {
 
+class ProjectAssemblyHost;
+
 // editor-core-separation-12 campaign (Project Assembly Hot Reload plan,
 // BIG-STEP 1), PHASE2 - the real, gte_editor-owned implementation of
 // IHotReloadDebugCapability (Core/EditorCapabilities.h). Constructed once,
@@ -28,6 +30,30 @@ public:
     std::string BuildSceneSnapshotJson(Game& game) override;
     bool TriggerCompileOnly(const std::string& projectName) override;
     bool TriggerHotReload(const std::string& projectName) override;
+
+    // editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
+    // BIG-STEP 2), PHASE4 - called exactly once, from EditorHost's own
+    // constructor BODY (mirrors Core::SetEditorLayerHook()'s existing
+    // "setter called once after construction" precedent exactly -
+    // Core.h/.cpp), strictly AFTER m_core already exists but BEFORE
+    // m_networkServer.Start() ever accepts a real HTTP request. NOT a
+    // constructor parameter: `s_editorHotReloadDebugCapability` is a
+    // namespace-scope static, constructed via ordinary C++ static
+    // initialization BEFORE main() (and therefore strictly before any
+    // Core/ProjectAssemblyHost object is ever constructed anywhere in the
+    // process) - a constructor parameter of type ProjectAssemblyHost& would
+    // require an already-constructed object to exist at that point, which
+    // is impossible (see PHASE4_PROJECT_ASSEMBLY_HOST_UNLOAD_GPU_SAFETY_AND_BINARY_BACKUP.md,
+    // Step 2, for the full reasoning).
+    void SetProjectAssemblyHost(ProjectAssemblyHost& projectAssemblyHost) noexcept;
+
+private:
+    // editor-core-separation-13 campaign, PHASE4 - defaulted null so this
+    // class's existing default, no-argument constructor is completely
+    // untouched. Guaranteed non-null by the time any real HTTP request can
+    // reach GetLoadedAssemblyFileNames() (see that method's own .cpp-side
+    // comment for the setter-call-ordering guarantee).
+    ProjectAssemblyHost* m_projectAssemblyHost = nullptr;
 };
 
 } // namespace gte

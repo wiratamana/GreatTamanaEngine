@@ -2152,6 +2152,19 @@ set(GTE_TEST_SOURCES
     # src/Core/Plugins/ProjectAssemblyRegistrationLedger.h/.cpp is
     # unconditionally in gte_core's own source list.
     Core/Plugins/ProjectAssemblyRegistrationLedgerTests.cpp
+    # editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
+    # BIG-STEP 2), PHASE4 - Tier-1 tests for the new
+    # ProjectAssemblyHost::UnloadProjectAssembly()/GetLoadedAssemblyFileNames()
+    # additions. Unconditional, since src/Core/Plugins/ProjectAssemblyHost.h/.cpp
+    # is unconditionally in gte_core's own source list.
+    Core/Plugins/ProjectAssemblyHostTests.cpp
+    # editor-core-separation-13 campaign, PHASE4 - Tier-1 tests for the new
+    # ProjectAssemblyBuildRunner::BackupProjectAssemblyBinaries()/
+    # RestoreProjectAssemblyBinariesFromBackup()/
+    # ResolveProjectAssemblyOutputDirectory() additions. Unconditional, since
+    # src/Core/Plugins/ProjectAssemblyBuildRunner.h/.cpp is unconditionally
+    # in gte_core's own source list.
+    Core/Plugins/ProjectAssemblyBuildRunnerBackupRestoreTests.cpp
     Memory/GpuResourceHandleTests.cpp
     Encoding/Base64Tests.cpp
     Encoding/PixelConversionTests.cpp

@@ -3,14 +3,15 @@
 // editor-core-separation-11 campaign (Project Assembly system), PHASE5.
 // See ProjectAssemblyHost.h's own header comment for the full design
 // rationale (mirrors PluginHost.cpp's own LoadLibraryW/GetProcAddress/
-// logging idiom, minus the ABI-fingerprint check, which is unnecessary here
 // by construction - PHASE0_MASTER_STRATEGY.md, section 2.2).
 #include "ProjectAssemblyHost.h"
-
 #include "../Logging.h"
 #include "ProjectAssemblyRegistrationLedger.h"
+#include "../../Renderer/Renderer.h"
 
+#include <algorithm>
 #include <cstring>
+#include <functional>
 #include <windows.h>
 
 namespace gte {
@@ -134,6 +135,61 @@ void ProjectAssemblyHost::TryLoadOneAssembly(
     loaded.moduleHandle = module;
     loaded.dllFileName = fileName;
     m_loadedAssemblies.push_back(loaded);
+}
+
+// editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 2), PHASE4 - see this method's own doc comment in
+// ProjectAssemblyHost.h for the exact, non-negotiable 3-step order this
+// implements.
+void ProjectAssemblyHost::UnloadProjectAssembly(const std::string& projectName, Core& core, Renderer& renderer)
+{
+    // Find every m_loadedAssemblies entry whose derived project name matches,
+    // BEFORE touching anything - this method must be all-or-nothing-safe to
+    // call for a projectName with zero matching entries.
+    std::vector<std::size_t> matchingIndices;
+    for (std::size_t i = 0; i < m_loadedAssemblies.size(); ++i) {
+        if (DeriveProjectNameFromDllFileName(m_loadedAssemblies[i].dllFileName) == projectName) {
+            matchingIndices.push_back(i);
+        }
+    }
+    if (matchingIndices.empty()) {
+        GTE_LOG_INFO("ProjectAssembly", "UnloadProjectAssembly('" + projectName + "') - nothing currently loaded for this project, no-op.");
+        return;
+    }
+
+    // Step 1 - Hazard 4 fix. MUST happen before any FreeLibrary() below.
+    renderer.WaitForGpuIdle();
+
+    // Step 2 - Hazards 1/2 fix. MUST happen before any FreeLibrary() below.
+    ProjectAssemblyRegistrationLedger::Instance().UnregisterEverythingFor(projectName, core);
+
+    // Step 3 - FreeLibrary(), Editor entry(s) first, then Game (reverse load
+    // order) - sort matchingIndices so "_Editor.dll" entries are freed first.
+    std::sort(matchingIndices.begin(), matchingIndices.end(), [this](std::size_t a, std::size_t b) {
+        const bool aIsEditor = m_loadedAssemblies[a].dllFileName.ends_with("_Editor.dll");
+        const bool bIsEditor = m_loadedAssemblies[b].dllFileName.ends_with("_Editor.dll");
+        return aIsEditor && !bIsEditor; // Editor entries sort first.
+    });
+    for (const std::size_t index : matchingIndices) {
+        GTE_LOG_INFO("ProjectAssembly", "Unloading '" + m_loadedAssemblies[index].dllFileName + "'.");
+        FreeLibrary(static_cast<HMODULE>(m_loadedAssemblies[index].moduleHandle));
+    }
+    // Erase in DESCENDING index order so earlier indices remain valid while erasing.
+    std::sort(matchingIndices.begin(), matchingIndices.end(), std::greater<std::size_t>());
+    for (const std::size_t index : matchingIndices) {
+        m_loadedAssemblies.erase(m_loadedAssemblies.begin() + static_cast<std::ptrdiff_t>(index));
+    }
+    GTE_LOG_INFO("ProjectAssembly", "UnloadProjectAssembly('" + projectName + "') complete.");
+}
+
+std::vector<std::string> ProjectAssemblyHost::GetLoadedAssemblyFileNames() const
+{
+    std::vector<std::string> names;
+    names.reserve(m_loadedAssemblies.size());
+    for (const LoadedAssembly& loaded : m_loadedAssemblies) {
+        names.push_back(loaded.dllFileName);
+    }
+    return names;
 }
 
 } // namespace gte

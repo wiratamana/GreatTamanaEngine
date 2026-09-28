@@ -4,6 +4,11 @@
 #include "EditorSceneIOCapability.h"
 #include "EditorLogQueryCapability.h" // editor-core-separation-2 campaign, PHASE3.
 #include "EditorHotReloadDebugCapability.h" // editor-core-separation-12 campaign, PHASE3.
+// editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 2), PHASE4 - ResolveProjectAssemblyOutputDirectory(), the shared
+// gte_core-tier helper this file's own LoadProjectAssemblies() call site
+// below now uses instead of an inline "/ \"project_assemblies\"" literal.
+#include "../Core/Plugins/ProjectAssemblyBuildRunner.h"
 #include "ProjectRootPath.h" // editor-core-separation-3 campaign, PHASE2 - ExecutableDirectory().
 #include "../Core/EditorPanelRegistry.h" // editor-core-separation-3 campaign, PHASE4.
 // editor-core-separation-6 campaign, PHASE7
@@ -202,6 +207,19 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
     assert(m_editorLayer != nullptr && "EditorHost: m_editorLayer must be non-null before SetEditorLayerHook()");
     m_core.SetEditorLayerHook(m_editorLayer.get());
 
+    // editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
+    // BIG-STEP 2), PHASE4 - hands EditorHotReloadDebugCapability a live
+    // ProjectAssemblyHost& (via Core::GetProjectAssemblyHost()), strictly
+    // AFTER m_core already exists but BEFORE m_networkServer.Start(8080)
+    // below ever accepts a real HTTP request - see
+    // EditorHotReloadDebugCapability::SetProjectAssemblyHost()'s own doc
+    // comment for the full "why a setter, not a constructor parameter"
+    // reasoning. Placed UNCONDITIONALLY (never inside the
+    // `#if GTE_ENABLE_PROJECT_ASSEMBLIES` guard below) because
+    // Core::m_projectAssemblyHost itself is an unconditional Core member -
+    // only the LoadProjectAssemblies() CALL SITE below is gated.
+    s_editorHotReloadDebugCapability.SetProjectAssemblyHost(m_core.GetProjectAssemblyHost());
+
     // editor-core-separation-1 campaign, PHASE16 - hands Core the ONE
     // callback that actually calls IEditorLayer::Render(cmd) - an explicitly
     // HOST-LEVEL IEditorLayer method (Locked Design Decision #8's second
@@ -276,7 +294,7 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
     // OWN flag, never GTE_ENABLE_PLUGINS (PHASE0_MASTER_STRATEGY.md, Finding
     // D).
 #if GTE_ENABLE_PROJECT_ASSEMBLIES
-    m_core.LoadProjectAssemblies(gte::ExecutableDirectory() / "project_assemblies", this);
+    m_core.LoadProjectAssemblies(ResolveProjectAssemblyOutputDirectory(gte::ExecutableDirectory()), this);
 #endif
 
     // editor-core-separation-1 campaign, PHASE16 - wires the ONE real
