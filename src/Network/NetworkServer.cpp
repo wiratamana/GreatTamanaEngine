@@ -1330,19 +1330,15 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
             "application/json");
     });
 
-    // editor-core-separation-12 campaign, PHASE3 - the AGREED, STABLE route
-    // contract for a future BIG-STEP 3 campaign. Currently ALWAYS answers
-    // 501 - TriggerHotReload()'s own PHASE2 body always returns false, so
-    // this handler's shape already correctly degrades once a future
-    // campaign changes ONLY that method's body to sometimes return true -
-    // this handler's own code will need a small follow-up then (a 200
-    // success path), but its ROUTE/METHOD/QUERY-PARAM CONTRACT never
-    // changes. The final `res.status = 500;` below is UNREACHABLE for this
-    // whole campaign's lifetime (TriggerHotReload() never returns true
-    // until a future BIG-STEP 3 campaign changes it) - it exists purely as
-    // a defensive, explicit status code so this branch never silently
-    // answers with httplib's default 200 alongside an "unexpected" error
-    // body if that invariant is ever accidentally broken later.
+    // editor-core-separation-14 campaign (Project Assembly Hot Reload plan,
+    // BIG-STEP 3), PHASE4 - the AGREED route contract from BIG-STEP 1's own
+    // PHASE3 is UNCHANGED (method/path/query-param shape) - only this
+    // handler's OWN body changed, from a permanent 501 placeholder to the
+    // real thing: TriggerHotReload() now genuinely submits into
+    // ProjectAssemblyHotReloadCommandBridge and BLOCKS until either the
+    // whole synchronous hot-reload cycle finishes on the main thread, or
+    // this HTTP request's own SubmitAndWait() call times out waiting for it
+    // (see that bridge's own doc comment for its default timeout).
     server.Post("/project_assembly/hot_reload",
         [hotReloadDebugCapability](const httplib::Request& req, httplib::Response& res) {
         const ParsedProjectNameQuery parsed = ParseProjectNameQuery(req.get_param_value("name"));
@@ -1356,15 +1352,27 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
             res.set_content(BuildGenericErrorResponseJson("hot reload debug capability not available"), "application/json");
             return;
         }
+        // `started` here means "the cycle ran to completion" (regardless of
+        // Success/RolledBack/CriticalFailure - see GetHotReloadStatus()
+        // below for that), NOT "the cycle succeeded". `false` means
+        // REJECTED (already in flight elsewhere, or this HTTP caller gave
+        // up waiting - see SubmitAndWait()'s own doc comment for the
+        // latter; the cycle itself, if it had already started, keeps
+        // running on the main thread regardless).
         const bool started = hotReloadDebugCapability->TriggerHotReload(parsed.projectName);
         if (!started) {
-            res.status = 501;
+            res.status = 503;
             res.set_content(
-                BuildGenericErrorResponseJson("hot reload orchestrator not yet wired - see BIG-STEP 3"), "application/json");
+                BuildGenericErrorResponseJson("hot reload rejected - a build for this project may already be in progress, or this request timed out waiting for the main thread"),
+                "application/json");
             return;
         }
-        res.status = 500;
-        res.set_content(BuildGenericErrorResponseJson("unexpected: TriggerHotReload() reported success in a build with no real orchestrator"), "application/json");
+        // Reuses the EXISTING BuildHotReloadStatusResponseJson() builder
+        // (already used by GET /project_assembly/hot_reload/status since
+        // BIG-STEP 1) - zero new JSON-shape code needed. IHotReloadDebugCapability
+        // itself needed ZERO signature changes across this whole campaign,
+        // exactly as BIG-STEP 1/2 promised downstream campaigns (LDD-HR3).
+        res.set_content(BuildHotReloadStatusResponseJson(hotReloadDebugCapability->GetHotReloadStatus()), "application/json");
     });
 }
 

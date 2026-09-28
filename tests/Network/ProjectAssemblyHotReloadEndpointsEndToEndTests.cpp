@@ -28,6 +28,7 @@
 // exits, exactly like it would for any other Project Assembly build.
 
 #include "Application/EngineCommandBridge.h"
+#include "Application/ProjectAssemblyHotReloadCommandBridge.h"
 #include "Editor/EditorHotReloadDebugCapability.h"
 #include "Network/NetworkServer.h"
 
@@ -190,18 +191,122 @@ TEST_F(ProjectAssemblyHotReloadEndpointsEndToEndTest, HotReloadMissingNameQueryP
     EXPECT_EQ(body["success"], false);
 }
 
-// The AGREED, STABLE, permanent-for-this-campaign contract - always 501
-// until a future BIG-STEP 3 campaign fills in the real orchestrator (see
-// this route's own NetworkServer.cpp doc comment).
-TEST_F(ProjectAssemblyHotReloadEndpointsEndToEndTest, HotReloadValidNameReturns501NotImplemented)
+// --- POST /project_assembly/hot_reload - the two new tests replacing the
+// now-obsolete HotReloadValidNameReturns501NotImplemented (editor-core-
+// separation-14 campaign, BIG-STEP 3, PHASE4, Section 3.6 - that route
+// never answers 501 again once PHASE4's real route-handler body lands).
+
+// This file's own existing m_capability fixture (above) never calls
+// SetHotReloadCommandBridge() (there is no EditorHost in this network-only
+// fixture) - so TriggerHotReload() hits its own m_hotReloadCommandBridge ==
+// nullptr guard (PHASE3) and returns false immediately, proving the route's
+// OWN new 503 branch (PHASE4, NetworkServer.cpp), never the deleted 501 one.
+TEST_F(ProjectAssemblyHotReloadEndpointsEndToEndTest, HotReloadValidNameReturns503WhenBridgeIsNotWired)
 {
     const httplib::Result res = m_client->Post("/project_assembly/hot_reload?name=SomeProject");
     ASSERT_TRUE(res != nullptr);
-    EXPECT_EQ(res->status, 501);
+    EXPECT_EQ(res->status, 503);
     const nlohmann::json body = nlohmann::json::parse(res->body);
     EXPECT_EQ(body["success"], false);
     ASSERT_TRUE(body.contains("error"));
     EXPECT_FALSE(body["error"].get<std::string>().empty());
+}
+
+// Mirrors FakeSceneSnapshotStandIn's own precedent below in this same file
+// exactly: a small background thread that loops calling
+// ProjectAssemblyHotReloadCommandBridge::TryPeekPendingProjectName()/
+// FulfillPending() - it deliberately NEVER calls the real
+// PerformProjectAssemblyHotReload(), exactly like FakeSceneSnapshotStandIn
+// never calls the real BuildSceneSnapshotJson(). Proves the
+// capability<->bridge<->route wiring succeeds end-to-end with a real 200
+// response and a well-formed status JSON body, without needing a real
+// EditorHost/compile/reload at all - that end-to-end proof is PHASE5's own
+// live verification job, not this Tier-1-adjacent test's.
+class FakeHotReloadStandIn {
+public:
+    explicit FakeHotReloadStandIn(ProjectAssemblyHotReloadCommandBridge& bridge)
+        : m_bridge(bridge)
+    {
+        m_thread = std::thread([this] { Run(); });
+    }
+
+    ~FakeHotReloadStandIn()
+    {
+        m_stop.store(true);
+        if (m_thread.joinable()) {
+            m_thread.join();
+        }
+    }
+
+    FakeHotReloadStandIn(const FakeHotReloadStandIn&) = delete;
+    FakeHotReloadStandIn& operator=(const FakeHotReloadStandIn&) = delete;
+
+private:
+    void Run()
+    {
+        while (!m_stop.load()) {
+            if (m_bridge.TryPeekPendingProjectName().has_value()) {
+                m_bridge.FulfillPending();
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+    }
+
+    ProjectAssemblyHotReloadCommandBridge& m_bridge;
+    std::atomic<bool> m_stop{ false };
+    std::thread m_thread;
+};
+
+class ProjectAssemblyHotReloadTriggerEndToEndTest : public ::testing::Test {
+protected:
+    void SetUp() override
+    {
+        // Unlike the OTHER capability-fixture class in this file, this one
+        // DOES call SetHotReloadCommandBridge() - that is the entire point
+        // of this test.
+        m_capability.SetHotReloadCommandBridge(m_bridge);
+        m_standIn = std::make_unique<FakeHotReloadStandIn>(m_bridge);
+        m_server = std::make_unique<Network::NetworkServer>(
+            nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, &m_capability);
+        m_server->Start(0);
+        ASSERT_TRUE(m_server->IsRunning());
+        m_client = std::make_unique<httplib::Client>("127.0.0.1", m_server->BoundPort());
+        Network::TestHelpers::WaitUntilAcceptingConnections(*m_server, *m_client);
+    }
+
+    void TearDown() override
+    {
+        m_client.reset();
+        m_server.reset();
+        m_standIn.reset();
+    }
+
+    ProjectAssemblyHotReloadCommandBridge m_bridge;
+    EditorHotReloadDebugCapability m_capability;
+    std::unique_ptr<FakeHotReloadStandIn> m_standIn;
+    std::unique_ptr<Network::NetworkServer> m_server;
+    std::unique_ptr<httplib::Client> m_client;
+};
+
+TEST_F(ProjectAssemblyHotReloadTriggerEndToEndTest, HotReloadValidNameReturns200WithRealStatusBodyWhenBridgeIsServiced)
+{
+    const httplib::Result res = m_client->Post("/project_assembly/hot_reload?name=SomeProject");
+    ASSERT_TRUE(res != nullptr);
+    EXPECT_EQ(res->status, 200);
+    EXPECT_EQ(res->get_header_value("Content-Type"), "application/json");
+
+    // The real GetHotReloadStatus() body shape (this is the SAME builder
+    // GET /project_assembly/hot_reload/status already uses) - not asserting
+    // on a specific phase/outcome value since FakeHotReloadStandIn never
+    // calls the real orchestrator (see this class's own doc comment above),
+    // only proving the wiring itself produced a well-formed response.
+    const nlohmann::json body = nlohmann::json::parse(res->body);
+    ASSERT_TRUE(body["phase"].is_string());
+    ASSERT_TRUE(body["project_name"].is_string());
+    ASSERT_TRUE(body["cycle_id"].is_number_unsigned());
+    ASSERT_TRUE(body["phase_elapsed_ms"].is_number_unsigned());
+    ASSERT_TRUE(body["last_outcome"].is_string());
+    ASSERT_TRUE(body["last_error_message"].is_string());
 }
 
 // --- GET /project_assembly/debug/scene_snapshot - the ONE OBSERVE route
