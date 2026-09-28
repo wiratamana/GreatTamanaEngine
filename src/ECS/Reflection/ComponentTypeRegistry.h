@@ -29,6 +29,24 @@ public:
     // runtime occurrence.
     void RegisterDescriptor(ComponentTypeDescriptor descriptor);
 
+    // editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
+    // BIG-STEP 2, Hazard 1 fix) - removes a previously-registered descriptor
+    // by typeName, if present. A silent no-op if `typeName` was never
+    // registered, or was already removed - mirrors this class's own existing
+    // "unrecognized key is silently ignored" forward-compatibility
+    // philosophy (see Find()'s own doc comment). MUST be called for every
+    // typeName a Project Assembly's own GTE_RegisterProject call registered,
+    // BEFORE that Project Assembly's .dll is FreeLibrary()'d - see
+    // ProjectAssemblyRegistrationLedger
+    // (src/Core/Plugins/ProjectAssemblyRegistrationLedger.h, this same
+    // campaign's PHASE3) for the mechanism that guarantees this
+    // automatically. Never asserts on a missing typeName (unlike
+    // RegisterDescriptor()'s own assert on a DUPLICATE) - removing something
+    // that both existed and didn't is meaningfully different from
+    // registering something twice; only the latter is unconditionally a
+    // programmer error.
+    void UnregisterDescriptor(const std::string& typeName);
+
     // Looks up a previously-registered descriptor by its exact typeName -
     // nullptr if unknown (see FieldDescriptor's own doc comment: an
     // unrecognized component-type key in a loaded scene file is a silent,

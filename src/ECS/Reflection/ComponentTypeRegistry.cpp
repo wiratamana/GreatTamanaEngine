@@ -39,6 +39,21 @@ void ComponentTypeRegistry::RegisterDescriptor(ComponentTypeDescriptor descripto
     });
 }
 
+// editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 2, Hazard 1 fix) - see this method's own doc comment in
+// ComponentTypeRegistry.h for the full reasoning.
+void ComponentTypeRegistry::UnregisterDescriptor(const std::string& typeName)
+{
+    m_descriptors.erase(
+        std::remove_if(m_descriptors.begin(), m_descriptors.end(),
+            [&typeName](const ComponentTypeDescriptor& d) { return d.typeName == typeName; }),
+        m_descriptors.end());
+    // No re-sort needed - std::vector::erase() preserves the relative order
+    // of every remaining element, and the vector was already sorted before
+    // this call (RegisterDescriptor()'s own invariant) - removing entries
+    // can never un-sort what remains.
+}
+
 const ComponentTypeDescriptor* ComponentTypeRegistry::Find(const std::string& typeName) const
 {
     for (const ComponentTypeDescriptor& descriptor : m_descriptors) {

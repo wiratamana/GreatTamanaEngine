@@ -254,5 +254,111 @@ TEST(ComponentTypeRegistryTest, AllSortedByTypeNameIsAlphabeticalRegardlessOfReg
     EXPECT_LT(indexA, indexZ);
 }
 
+// --- editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 2, Hazard 1 fix): ComponentTypeRegistry::UnregisterDescriptor()
+// coverage below. Each test below uses its own, unique, nowhere-else-used
+// typeName(s) - exactly the existing convention this file already follows -
+// and cleans up any throwaway typeName it leaves registered at the end of
+// its own body, so nothing leaks forward into an unrelated, later-running
+// TEST() in this same process-wide-singleton-backed binary.
+
+struct UnregisterableDummyComponent { int v = 0; };
+
+TEST(ComponentTypeRegistryTest, UnregisterDescriptorRemovesAPreviouslyRegisteredDescriptor)
+{
+    RegisterComponentType<UnregisterableDummyComponent>("UnregisterableDummyComponent", {
+        GTE_REFLECT_FIELD(UnregisterableDummyComponent, v),
+    });
+    ASSERT_NE(ComponentTypeRegistry::Instance().Find("UnregisterableDummyComponent"), nullptr);
+
+    ComponentTypeRegistry::Instance().UnregisterDescriptor("UnregisterableDummyComponent");
+    EXPECT_EQ(ComponentTypeRegistry::Instance().Find("UnregisterableDummyComponent"), nullptr);
+    // Already unregistered - nothing left to clean up.
+}
+
+struct ReRegisterableDummyComponent { int v = 0; };
+
+TEST(ComponentTypeRegistryTest, ReRegisteringSameTypeNameAfterUnregisterDoesNotAssert)
+{
+    RegisterComponentType<ReRegisterableDummyComponent>("ReRegisterableDummyComponent", {
+        GTE_REFLECT_FIELD(ReRegisterableDummyComponent, v),
+    });
+    ASSERT_NE(ComponentTypeRegistry::Instance().Find("ReRegisterableDummyComponent"), nullptr);
+
+    ComponentTypeRegistry::Instance().UnregisterDescriptor("ReRegisterableDummyComponent");
+    ASSERT_EQ(ComponentTypeRegistry::Instance().Find("ReRegisterableDummyComponent"), nullptr);
+
+    // Registering the exact same typeName again, after it was fully
+    // unregistered, must NOT trip RegisterDescriptor()'s own
+    // duplicate-registration assert() - this is the whole point of Hazard
+    // 1's fix (a register-unregister-register-same-name sequence, exactly
+    // what a future Project Assembly reload does, must succeed cleanly).
+    EXPECT_NO_FATAL_FAILURE({
+        RegisterComponentType<ReRegisterableDummyComponent>("ReRegisterableDummyComponent", {
+            GTE_REFLECT_FIELD(ReRegisterableDummyComponent, v),
+        });
+    });
+    EXPECT_NE(ComponentTypeRegistry::Instance().Find("ReRegisterableDummyComponent"), nullptr);
+
+    // Clean up - do not leak this throwaway typeName forward.
+    ComponentTypeRegistry::Instance().UnregisterDescriptor("ReRegisterableDummyComponent");
+}
+
+TEST(ComponentTypeRegistryTest, UnregisterDescriptorForAnUnknownTypeNameIsASafeNoOp)
+{
+    const std::size_t sizeBefore = ComponentTypeRegistry::Instance().AllSortedByTypeName().size();
+
+    ComponentTypeRegistry::Instance().UnregisterDescriptor("SomeTypeNameNeverRegisteredForUnregisterNoOpTest");
+
+    EXPECT_EQ(ComponentTypeRegistry::Instance().AllSortedByTypeName().size(), sizeBefore);
+    EXPECT_EQ(ComponentTypeRegistry::Instance().Find("SomeTypeNameNeverRegisteredForUnregisterNoOpTest"), nullptr);
+}
+
+struct Hazard1MiddleDummyComponentA { int v = 0; };
+struct Hazard1MiddleDummyComponentB { int v = 0; };
+struct Hazard1MiddleDummyComponentC { int v = 0; };
+
+TEST(ComponentTypeRegistryTest, UnregisterDescriptorRemovingAMiddleElementKeepsRemainingSorted)
+{
+    RegisterComponentType<Hazard1MiddleDummyComponentA>("Hazard1MiddleDummyComponentA", {
+        GTE_REFLECT_FIELD(Hazard1MiddleDummyComponentA, v),
+    });
+    RegisterComponentType<Hazard1MiddleDummyComponentB>("Hazard1MiddleDummyComponentB", {
+        GTE_REFLECT_FIELD(Hazard1MiddleDummyComponentB, v),
+    });
+    RegisterComponentType<Hazard1MiddleDummyComponentC>("Hazard1MiddleDummyComponentC", {
+        GTE_REFLECT_FIELD(Hazard1MiddleDummyComponentC, v),
+    });
+
+    ASSERT_NE(ComponentTypeRegistry::Instance().Find("Hazard1MiddleDummyComponentA"), nullptr);
+    ASSERT_NE(ComponentTypeRegistry::Instance().Find("Hazard1MiddleDummyComponentB"), nullptr);
+    ASSERT_NE(ComponentTypeRegistry::Instance().Find("Hazard1MiddleDummyComponentC"), nullptr);
+
+    ComponentTypeRegistry::Instance().UnregisterDescriptor("Hazard1MiddleDummyComponentB");
+
+    EXPECT_EQ(ComponentTypeRegistry::Instance().Find("Hazard1MiddleDummyComponentB"), nullptr);
+    EXPECT_NE(ComponentTypeRegistry::Instance().Find("Hazard1MiddleDummyComponentA"), nullptr);
+    EXPECT_NE(ComponentTypeRegistry::Instance().Find("Hazard1MiddleDummyComponentC"), nullptr);
+
+    const std::vector<ComponentTypeDescriptor>& all = ComponentTypeRegistry::Instance().AllSortedByTypeName();
+    for (std::size_t i = 1; i < all.size(); ++i) {
+        EXPECT_LE(all[i - 1].typeName, all[i].typeName);
+    }
+
+    int indexA = -1;
+    int indexC = -1;
+    for (std::size_t i = 0; i < all.size(); ++i) {
+        if (all[i].typeName == "Hazard1MiddleDummyComponentA") { indexA = static_cast<int>(i); }
+        if (all[i].typeName == "Hazard1MiddleDummyComponentC") { indexC = static_cast<int>(i); }
+    }
+    ASSERT_NE(indexA, -1);
+    ASSERT_NE(indexC, -1);
+    EXPECT_LT(indexA, indexC);
+
+    // Clean up - do not leak these throwaway typeNames forward.
+    ComponentTypeRegistry::Instance().UnregisterDescriptor("Hazard1MiddleDummyComponentA");
+    ComponentTypeRegistry::Instance().UnregisterDescriptor("Hazard1MiddleDummyComponentC");
+}
+
 } // namespace
 } // namespace gte
