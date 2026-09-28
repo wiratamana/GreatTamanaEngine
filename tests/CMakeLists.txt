@@ -2234,6 +2234,7 @@ set(GTE_TEST_SOURCES
     Application/EngineCommandBridgeTests.cpp
     Application/EditorUiCommandBridgeTests.cpp
     Application/AssetImportCommandBridgeTests.cpp
+    Application/ProjectLifecycleLoadCommandBridgeTests.cpp
     Application/FrameDebuggerCommandBridgeTests.cpp
     Application/RenderGraphControlCommandBridgeTests.cpp
     Application/ProjectAssemblyHotReloadCommandBridgeTests.cpp

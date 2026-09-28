@@ -625,6 +625,12 @@ add_library(gte_core STATIC
     src/Application/EditorUiCommandBridge.cpp
     src/Application/AssetImportCommandBridge.h
     src/Application/AssetImportCommandBridge.cpp
+    # editor-core-separation-17 campaign (On-Engine Project Workflow plan,
+    # BIG-STEP 3), PHASE2 - ProjectLifecycleLoadCommandBridge, confirmed to
+    # belong in this SAME gte_core source list as every other
+    # src/Application/*.cpp bridge above.
+    src/Application/ProjectLifecycleLoadCommandBridge.h
+    src/Application/ProjectLifecycleLoadCommandBridge.cpp
     src/Application/FrameDebuggerCommandBridge.h
     src/Application/FrameDebuggerCommandBridge.cpp
     # editor-core-separation-8 campaign, PHASE5
