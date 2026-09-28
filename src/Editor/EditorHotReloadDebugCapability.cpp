@@ -5,6 +5,7 @@
 #include "../Core/Plugins/HotReloadEngineStateMutex.h"
 #include "../Core/Plugins/ProjectAssemblyBuildRunner.h"
 #include "../Core/Plugins/ProjectAssemblyHotReloadDebugStatus.h"
+#include "../Core/Plugins/ProjectAssemblyRegistrationLedger.h"
 #include "../ECS/Reflection/ComponentTypeRegistry.h"
 #include "../Game/Game.h"
 #include "../Scene/SceneBuilder.h"
@@ -20,16 +21,23 @@ IHotReloadDebugCapability::Status EditorHotReloadDebugCapability::GetHotReloadSt
 }
 
 IHotReloadDebugCapability::LedgerEntry EditorHotReloadDebugCapability::GetLedgerEntry(
-    const std::string& /*projectName*/) const
+    const std::string& projectName) const
 {
-    // editor-core-separation-12 campaign, PHASE2 - PLACEHOLDER. The real
-    // ProjectAssemblyRegistrationLedger class does not exist yet - a
-    // future BIG-STEP 2 campaign builds it and replaces ONLY this method's
-    // body with a real PeekEntry(projectName) lookup. Locked (even though
-    // there is nothing to protect yet) so a future campaign's own mutating
-    // code has an already-established convention to follow.
+    // editor-core-separation-13 campaign, PHASE3 - REAL now, no longer a
+    // placeholder. ProjectAssemblyRegistrationLedger is the real class a
+    // future BIG-STEP 2 campaign (this one) built; this method is a
+    // trivial 1-to-1 field copy of its own Entry struct into this
+    // interface's own identically-shaped LedgerEntry struct (see
+    // ProjectAssemblyRegistrationLedger.h's own header comment for why the
+    // field names/order are guaranteed identical).
     std::lock_guard<std::mutex> lock(GetHotReloadEngineStateMutex());
-    return LedgerEntry{};
+    const ProjectAssemblyRegistrationLedger::Entry entry =
+        ProjectAssemblyRegistrationLedger::Instance().PeekEntry(projectName);
+    LedgerEntry result;
+    result.renderPassNames = entry.renderPassNames;
+    result.panelNames = entry.panelNames;
+    result.componentTypeNames = entry.componentTypeNames;
+    return result;
 }
 
 std::vector<std::string> EditorHotReloadDebugCapability::GetLoadedAssemblyFileNames() const

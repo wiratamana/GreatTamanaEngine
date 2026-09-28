@@ -335,6 +335,12 @@ public:
     // for the one "Present" swapchain-blit provider).
     void RegisterProjectRenderPassProvider(const char* debugName, rg::ProviderScope scope, rg::RenderPassProvider provider);
 
+    // editor-core-separation-13 campaign, PHASE3 - the teardown counterpart of
+    // RegisterProjectRenderPassProvider() (immediately above), called ONLY by
+    // ProjectAssemblyRegistrationLedger::UnregisterEverythingFor() - never by
+    // any Project Assembly's own authored code directly.
+    void UnregisterProjectRenderPassProvider(const char* debugName);
+
     // Read accessor for PHASE3 (render-feature capability lookup) and
     // PHASE4 (editor-panel capability lookup) - both look up capabilities
     // via AllLoadedModules(), never re-scanning the plugins/ folder

@@ -8,10 +8,32 @@
 #include "ProjectAssemblyHost.h"
 
 #include "../Logging.h"
+#include "ProjectAssemblyRegistrationLedger.h"
 
+#include <cstring>
 #include <windows.h>
 
 namespace gte {
+
+namespace {
+// editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 2), PHASE3 - strips a known Project Assembly .dll suffix to
+// recover the plain project name - the ONE place this derivation is needed
+// (TryLoadOneAssembly() already has `fileName` computed locally, right
+// before this).
+std::string DeriveProjectNameFromDllFileName(const std::string& fileName)
+{
+    static constexpr const char* kGameSuffix = "_Game.dll";
+    static constexpr const char* kEditorSuffix = "_Editor.dll";
+    if (fileName.size() > std::strlen(kGameSuffix) && fileName.ends_with(kGameSuffix)) {
+        return fileName.substr(0, fileName.size() - std::strlen(kGameSuffix));
+    }
+    if (fileName.size() > std::strlen(kEditorSuffix) && fileName.ends_with(kEditorSuffix)) {
+        return fileName.substr(0, fileName.size() - std::strlen(kEditorSuffix));
+    }
+    return fileName; // unreachable in practice - TryLoadOneAssembly() already filtered by these two suffixes.
+}
+} // namespace
 
 ProjectAssemblyHost::~ProjectAssemblyHost()
 {
@@ -80,7 +102,16 @@ void ProjectAssemblyHost::TryLoadOneAssembly(
             FreeLibrary(module);
             return;
         }
+        // editor-core-separation-13 campaign (Project Assembly Hot Reload
+        // plan, BIG-STEP 2), PHASE3 - brackets this GTE_RegisterProject call
+        // so every RegisterDescriptor()/RegisterPluginPanel()/
+        // RegisterProjectRenderPassProvider() call it makes gets attributed
+        // to this project's own ledger entry, additive/safe - does not
+        // change what gets loaded, in what order, or with what arguments.
+        const std::string projectName = DeriveProjectNameFromDllFileName(fileName);
+        ProjectAssemblyRegistrationLedger::Instance().BeginRecordingFor(projectName);
         entry(core, *editorHost);
+        ProjectAssemblyRegistrationLedger::Instance().EndRecording();
     } else { // isGameAssembly
         using GameEntryFn = void (*)(Core&);
         auto entry = reinterpret_cast<GameEntryFn>(reinterpret_cast<void*>(GetProcAddress(module, "GTE_RegisterProject")));
@@ -89,7 +120,12 @@ void ProjectAssemblyHost::TryLoadOneAssembly(
             FreeLibrary(module);
             return;
         }
+        // editor-core-separation-13 campaign, PHASE3 - same bracket as the
+        // _Editor branch above (see that comment for the full reasoning).
+        const std::string projectName = DeriveProjectNameFromDllFileName(fileName);
+        ProjectAssemblyRegistrationLedger::Instance().BeginRecordingFor(projectName);
         entry(core);
+        ProjectAssemblyRegistrationLedger::Instance().EndRecording();
     }
 
     GTE_LOG_INFO("ProjectAssembly", "Loaded Project Assembly '" + fileName + "' from " + dllPath.string());

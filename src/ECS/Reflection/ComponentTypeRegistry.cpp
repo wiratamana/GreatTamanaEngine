@@ -1,4 +1,11 @@
 #include "ComponentTypeRegistry.h"
+// editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 2), PHASE3 - RecordComponentType()'s own no-op-outside-a-bracket
+// call, added to RegisterDescriptor() below. Confirmed ../../ (2 levels):
+// src/ECS/Reflection/ -> src/ECS/ -> src/, then into Core/Plugins/ - mirrors
+// this same directory's sibling file BuiltinComponentReflection.cpp's own
+// identical-depth include of "../../Renderer/Primitives/PrimitiveMeshGenerator.h".
+#include "../../Core/Plugins/ProjectAssemblyRegistrationLedger.h"
 
 #include <algorithm>
 #include <cassert>
@@ -33,10 +40,12 @@ void ComponentTypeRegistry::RegisterDescriptor(ComponentTypeDescriptor descripto
 {
     assert(Find(descriptor.typeName) == nullptr && "ComponentTypeRegistry::RegisterDescriptor() called twice for the same typeName - always a programmer error");
 
+    const std::string typeName = descriptor.typeName; // copy BEFORE std::move below - editor-core-separation-13, PHASE3.
     m_descriptors.push_back(std::move(descriptor));
     std::sort(m_descriptors.begin(), m_descriptors.end(), [](const ComponentTypeDescriptor& a, const ComponentTypeDescriptor& b) {
         return a.typeName < b.typeName;
     });
+    ProjectAssemblyRegistrationLedger::Instance().RecordComponentType(typeName); // editor-core-separation-13, PHASE3.
 }
 
 // editor-core-separation-13 campaign (Project Assembly Hot Reload plan,

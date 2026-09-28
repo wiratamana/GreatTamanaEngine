@@ -50,6 +50,10 @@
 // IPluginCapabilityOrchestrator implementation, the real `_v2` render-feature
 // compositing pipeline (PHASE0_MASTER_STRATEGY.md's whole reason to exist).
 #include "Plugins/RenderFeatureCompositor.h"
+// editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 2), PHASE3 - RecordRenderPass()'s own no-op-outside-a-bracket
+// call, added to RegisterProjectRenderPassProvider() below.
+#include "Plugins/ProjectAssemblyRegistrationLedger.h"
 
 #include <cassert>
 #include <cstdint>
@@ -338,6 +342,19 @@ void Core::LoadProjectAssemblies(const std::filesystem::path& outputDirectory, E
 void Core::RegisterProjectRenderPassProvider(const char* debugName, rg::ProviderScope scope, rg::RenderPassProvider provider)
 {
     m_offscreenRenderPipeline.Register(debugName, scope, std::move(provider));
+    // editor-core-separation-13 campaign, PHASE3 - safe no-op outside an
+    // active ProjectAssemblyRegistrationLedger::BeginRecordingFor() bracket.
+    ProjectAssemblyRegistrationLedger::Instance().RecordRenderPass(debugName);
+}
+
+// editor-core-separation-13 campaign, PHASE3 - the teardown counterpart of
+// RegisterProjectRenderPassProvider() immediately above, called ONLY by
+// ProjectAssemblyRegistrationLedger::UnregisterEverythingFor() (see that
+// class for the full reasoning) - never by any Project Assembly's own
+// authored code directly.
+void Core::UnregisterProjectRenderPassProvider(const char* debugName)
+{
+    m_offscreenRenderPipeline.Unregister(debugName);
 }
 
 void Core::Update(const InputFrame& input, float deltaTime)

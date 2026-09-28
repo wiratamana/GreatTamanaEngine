@@ -1,6 +1,9 @@
 #include "EditorPanelRegistry.h"
-
 #include "Logging.h"
+// editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 2), PHASE3 - RecordPanel()'s own no-op-outside-a-bracket call,
+// added to RegisterPluginPanel() below.
+#include "Plugins/ProjectAssemblyRegistrationLedger.h"
 
 #include <algorithm>
 
@@ -45,6 +48,7 @@ void EditorPanelRegistry::RegisterPluginPanel(const std::string& name, IEditorPa
 
     m_allNames.push_back(name);
     m_pluginPanels.push_back(PluginPanelEntry{ name, module });
+    ProjectAssemblyRegistrationLedger::Instance().RecordPanel(name); // editor-core-separation-13, PHASE3.
 }
 
 // editor-core-separation-13 campaign (Project Assembly Hot Reload plan,

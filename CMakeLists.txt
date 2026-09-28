@@ -361,6 +361,17 @@ add_library(gte_core STATIC
     src/Core/Plugins/ProjectAssemblyHotReloadDebugStatus.cpp
     src/Core/Plugins/HotReloadEngineStateMutex.h
     src/Core/Plugins/HotReloadEngineStateMutex.cpp
+    # editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
+    # BIG-STEP 2), PHASE3 - ProjectAssemblyRegistrationLedger, the class
+    # recording every render-pass/panel/component-type name a Project
+    # Assembly's own GTE_RegisterProject call registers, and the teardown
+    # method (UnregisterEverythingFor()) a future PHASE4's own
+    # ProjectAssemblyHost::UnloadProjectAssembly() calls. Added here
+    # explicitly - gte_core's own source list is hand-maintained, NOT a
+    # file(GLOB ...) (see PHASE5-of-11's own completion report, which
+    # flagged this exact gap).
+    src/Core/Plugins/ProjectAssemblyRegistrationLedger.h
+    src/Core/Plugins/ProjectAssemblyRegistrationLedger.cpp
     # editor-core-separation-3 campaign, PHASE3
     # (PHASE3_RUNTIME_RENDER_FEATURE_CAPABILITY.md) - PluginRenderPassBuilderAdapter,
     # the gte_core-side implementation of IPluginRenderPassBuilder, constructed
