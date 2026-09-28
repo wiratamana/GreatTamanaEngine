@@ -75,7 +75,18 @@ public:
     // reflected correctly the very next time ANY panel/menu reads this,
     // with no manual "refresh" button. If SetProjectAssemblyHost() has
     // never been called (should only happen in an isolated unit test),
-    // isLoaded is always false rather than crashing.
+    // isLoaded is always false rather than crashing. LOAD-BEARING: this
+    // method locks gte::GetHotReloadEngineStateMutex()
+    // (Core/Plugins/HotReloadEngineStateMutex.h) around the
+    // GetLoadedAssemblyFileNames() call - mirrors
+    // EditorHotReloadDebugCapability::GetLoadedAssemblyFileNames()'s own
+    // real, current precedent EXACTLY (confirmed by reading that method's
+    // real .cpp body) - ProjectAssemblyHost::GetLoadedAssemblyFileNames()
+    // itself takes NO internal lock (a plain std::vector), so any caller
+    // reading it while a future BIG-STEP 3 hot-reload cycle concurrently
+    // mutates m_loadedAssemblies on the main thread would otherwise be a
+    // genuine data race - this matters the moment a future "Open Project"
+    // campaign exposes this state to a network-thread HTTP route.
     ActiveProjectAssemblyInfo GetActive() const;
 
     void Clear();
@@ -108,6 +119,11 @@ private:
 #include "ProjectRootPath.h" // gte::ExecutableDirectory()
 #include "../Core/Plugins/ProjectAssemblyBuildRunner.h" // ResolveProjectAssemblyOutputDirectory()
 #include "../Core/Plugins/ProjectAssemblyHost.h" // GetLoadedAssemblyFileNames()
+// GetHotReloadEngineStateMutex() - REQUIRED around the GetLoadedAssemblyFileNames()
+// call inside GetActive() below (see that method's own doc comment in the
+// header for the full "why" - ProjectAssemblyHost::GetLoadedAssemblyFileNames()
+// itself takes no internal lock).
+#include "../Core/Plugins/HotReloadEngineStateMutex.h"
 
 #include <algorithm>
 
@@ -158,6 +174,15 @@ ActiveProjectAssemblyInfo ActiveProjectAssemblyState::GetActive() const
     info.isCompiled = std::filesystem::exists(outputDirectory / (info.name + "_Game.dll"));
 
     if (m_projectAssemblyHost != nullptr) {
+        // Mirrors EditorHotReloadDebugCapability::GetLoadedAssemblyFileNames()'s
+        // own real, current precedent EXACTLY - ProjectAssemblyHost::
+        // GetLoadedAssemblyFileNames() itself takes no internal lock, so this
+        // read must be guarded by the SAME shared mutex a future hot-reload
+        // cycle's own mutation of m_loadedAssemblies is required to hold too
+        // (HotReloadEngineStateMutex.h's own header comment) - without this,
+        // a future "Open Project"/HTTP-exposed caller of GetActive() from a
+        // network thread would race a main-thread hot-reload cycle.
+        std::lock_guard<std::mutex> loadedAssembliesLock(GetHotReloadEngineStateMutex());
         const std::vector<std::string> loaded = m_projectAssemblyHost->GetLoadedAssemblyFileNames();
         info.isLoaded = std::find(loaded.begin(), loaded.end(), info.name + "_Game.dll") != loaded.end();
     }
@@ -206,6 +231,26 @@ public:
 };
 ```
 
+**Small, free, zero-risk cleanup while this exact file is already open**:
+`IHotReloadDebugCapability::GetLoadedAssemblyFileNames()`'s own doc comment
+(a few lines above where you just inserted `IProjectLifecycleCapability`)
+still reads "Placeholder until a future BIG-STEP 2 campaign adds a real
+GetLoadedAssemblyFileNames() accessor to ProjectAssemblyHost itself - this
+campaign's own implementation (PHASE2) always returns an empty vector,
+never an error." This is now STALE - `editor-core-separation-13`'s own
+BIG-STEP 2 shipped that real accessor long ago (confirmed:
+`ProjectAssemblyHost::GetLoadedAssemblyFileNames()`, `src/Core/Plugins/
+ProjectAssemblyHost.h` line 104, and `EditorHotReloadDebugCapability::
+GetLoadedAssemblyFileNames()`'s own real body genuinely calls it, both
+re-verified against the real, current repo during this campaign's own
+PHASE0 preparation - see that file's Section 2.2, Correction 2). Since you
+are editing this exact file for `IProjectLifecycleCapability` anyway,
+replace that stale comment with something like "Genuinely real, live,
+today - a thin wrapper over `ProjectAssemblyHost::
+GetLoadedAssemblyFileNames()`, guarded by `GetHotReloadEngineStateMutex()`."
+This is a pure comment fix (zero behavior change) - do not touch the
+method's signature.
+
 ## STEP 3 — `EditorProjectLifecycleCapability` (the real implementation)
 
 New files, `src/Editor/EditorProjectLifecycleCapability.h/.cpp`
@@ -240,7 +285,15 @@ public:
 #include "ProjectRootPath.h" // gte::ExecutableDirectory()
 #include "../Core/Plugins/ProjectAssemblyBuildRunner.h" // ResolveCMakeBuildDirectory/ResolveProjectAssemblySourceRootDirectory/RunPlainCMakeReconfigureAndWait
 #include "../Core/Plugins/ProjectAssemblyNameValidation.h"
-#include "../Core/LogSink.h" // GTE_LOG_ERROR/GTE_LOG_INFO
+// CONFIRMED (not a guess): the GTE_LOG_ERROR/GTE_LOG_INFO macros themselves
+// are declared/defined in Core/Logging.h, NOT Core/LogSink.h - LogSink.h
+// only carries the ILogSink interface/InstallLogSink() (what EditorHost.cpp
+// calls once, at startup, to plug Logger in) and is NOT needed just to call
+// the macros. Every other real call site in this codebase that only needs
+// to LOG (never install a sink) includes Logging.h directly - e.g.
+// Network/NetworkServer.cpp, Jobs/JobContinuation.cpp,
+// Editor/ImGuiIdConflictGuard.cpp. Do not include LogSink.h here.
+#include "../Core/Logging.h"
 
 #include <fstream>
 #include <system_error>
@@ -296,6 +349,26 @@ IProjectLifecycleCapability::CreateProjectOutcome EditorProjectLifecycleCapabili
 {
     CreateProjectOutcome outcome;
 
+    // Cheap, load-bearing defensive check that is NOT in either source
+    // document verbatim, added here because it closes a real, honest gap:
+    // `GTE_ENABLE_PROJECT_ASSEMBLIES` (default ON - confirmed real,
+    // current CMakeCache.txt on this machine) is what gates BOTH root
+    // CMakeLists.txt's own `Projects/*` CONFIGURE_DEPENDS auto-discovery
+    // block (confirmed lines 1735-1741) AND Core::LoadProjectAssemblies()'s
+    // own call site - if a build genuinely has this OFF, writing a new
+    // project's files here would silently succeed while the project can
+    // never actually be picked up by CMake at all (LDD-CP2's own
+    // reconfigure step would run but find nothing new to configure,
+    // since the whole `if(GTE_ENABLE_PROJECT_ASSEMBLIES AND ...)` block
+    // that would `add_subdirectory()` it is compiled out of the CMake
+    // script itself). Failing loudly here, before any filesystem write,
+    // is strictly better than a "successful" Create that quietly can
+    // never be compiled.
+#if !GTE_ENABLE_PROJECT_ASSEMBLIES
+    outcome.errorMessage = "this build was configured with GTE_ENABLE_PROJECT_ASSEMBLIES=OFF - "
+        "Project Assemblies (including a brand-new one) cannot be created or loaded";
+    return outcome;
+#else
     std::string validationError;
     if (!IsValidProjectAssemblyIdentifierName(name, validationError)) {
         outcome.errorMessage = validationError;
@@ -313,6 +386,14 @@ IProjectLifecycleCapability::CreateProjectOutcome EditorProjectLifecycleCapabili
         outcome.errorMessage = "could not resolve the project source directory - is this a real, configured CMake build?";
         return outcome;
     }
+    // The real repo root - ResolveProjectAssemblySourceRootDirectory()
+    // returns exactly "<repo root>/Projects" (PHASE1), so its own parent IS
+    // the repo root, always. Computed exactly ONCE, here, and reused below
+    // both for locating the template AND for the reconfigure call - do NOT
+    // recompute this a second time via a different (and, in an earlier
+    // draft of this file, subtly WRONG - it tested buildDirectory's own
+    // parent instead of sourceRoot's) expression.
+    const std::filesystem::path repoRoot = sourceRoot.parent_path();
 
     const std::filesystem::path projectDirectory = sourceRoot / name;
     if (std::filesystem::exists(projectDirectory)) {
@@ -332,10 +413,9 @@ IProjectLifecycleCapability::CreateProjectOutcome EditorProjectLifecycleCapabili
     // hand-retyped (PHASE0_MASTER_STRATEGY.md Step 4's own reasoning: a
     // silent drift between the template and a hand-typed copy is exactly
     // the kind of bug a future engine change to that template would
-    // otherwise reintroduce invisibly).
-    const std::filesystem::path templateSource = buildDirectory.parent_path().empty()
-        ? std::filesystem::path() // unreachable in practice - buildDirectory always has a parent.
-        : sourceRoot.parent_path() / "cmake" / "templates" / "ProjectAssemblyExports.h";
+    // otherwise reintroduce invisibly). Confirmed real, current path:
+    // "<repo root>/cmake/templates/ProjectAssemblyExports.h".
+    const std::filesystem::path templateSource = repoRoot / "cmake" / "templates" / "ProjectAssemblyExports.h";
     scaffoldOk = scaffoldOk
         && std::filesystem::copy_file(templateSource, librariesDirectory / "ProjectAssemblyExports.h",
                std::filesystem::copy_options::overwrite_existing, errorCode);
@@ -346,7 +426,20 @@ IProjectLifecycleCapability::CreateProjectOutcome EditorProjectLifecycleCapabili
     if (!scaffoldOk) {
         std::error_code removeError;
         std::filesystem::remove_all(projectDirectory, removeError);
-        outcome.errorMessage = "failed to write the new project's scaffold files (" + errorCode.message() + ")";
+        // `errorCode` is only ever SET by the two std::filesystem calls
+        // above that take it (create_directories()/copy_file()) - the two
+        // WriteTextFile() calls report failure through `scaffoldOk` alone
+        // and never touch `errorCode` at all. Guard with `errorCode`'s own
+        // bool conversion (true only when it actually represents an error)
+        // before quoting its .message() - blindly appending
+        // errorCode.message() unconditionally would, on a build where the
+        // FIRST failing step was actually one of the WriteTextFile() calls,
+        // silently print a stale/misleading "(The operation completed
+        // successfully.)"-style message instead of an honest one.
+        outcome.errorMessage = "failed to write the new project's scaffold files";
+        if (errorCode) {
+            outcome.errorMessage += " (" + errorCode.message() + ")";
+        }
         GTE_LOG_ERROR("ProjectLifecycle", "CreateNewProjectAssembly('" + name + "'): " + outcome.errorMessage);
         return outcome;
     }
@@ -356,7 +449,6 @@ IProjectLifecycleCapability::CreateProjectOutcome EditorProjectLifecycleCapabili
     // glob would already have picked this project up on its own. See that
     // decision's own reasoning for why this campaign deliberately does not
     // try to detect/branch on which CMake behavior is actually true here.
-    const std::filesystem::path repoRoot = sourceRoot.parent_path();
     if (!RunPlainCMakeReconfigureAndWait(repoRoot, buildDirectory)) {
         outcome.errorMessage =
             "project files were written successfully, but the automatic CMake reconfigure step failed - "
@@ -372,6 +464,7 @@ IProjectLifecycleCapability::CreateProjectOutcome EditorProjectLifecycleCapabili
     outcome.createdSourceDirectory = projectDirectory.string();
     GTE_LOG_INFO("ProjectLifecycle", "CreateNewProjectAssembly('" + name + "'): created at " + outcome.createdSourceDirectory);
     return outcome;
+#endif
 }
 
 } // namespace gte
@@ -381,20 +474,18 @@ Register both new files in root `CMakeLists.txt`'s `gte_editor` source
 list, immediately after `ActiveProjectAssemblyState.h/.cpp` (STEP 1
 above).
 
-**Re-verify concretely before trusting the snippet above unchanged**:
-- The exact current name of this engine's logging macros
-  (`GTE_LOG_ERROR`/`GTE_LOG_INFO`) and their real header (`../Core/LogSink.h`
-  is this file's own best guess based on `EditorHotReloadDebugCapability.cpp`'s
-  own `#include` list — confirm by reading that file's own includes
-  directly before trusting this path).
-- `templateSource`'s exact relative path — the snippet computes it as
-  `sourceRoot.parent_path() / "cmake" / "templates" / ...`, i.e. repo root
-  + `cmake/templates/...`; confirm this really is a real, existing path on
-  disk (it should be, since `cmake/templates/ProjectAssemblyExports.h` is
-  confirmed to exist at the repo root today) before shipping this.
-- Never use raw C/C++ `printf`/`std::cout`/`fprintf` anywhere in this file
-  — this whole engine's own convention (and this task's own governing
-  instruction) requires the engine's internal `GTE_LOG_*` macros only.
+**One remaining thing to re-verify at implementation time** (everything
+else in this STEP was directly, mechanically confirmed against the real,
+current repo while writing this file — the log header, the
+repoRoot/templateSource path, and the errorCode conflation bug above are
+all fixed, not merely flagged): `Core.h`'s real signature for
+`GTE_ENABLE_PROJECT_ASSEMBLIES` as a preprocessor value (confirmed it is
+propagated as a real `0`/`1` integer via `target_compile_definitions(gte_core
+PUBLIC GTE_ENABLE_PROJECT_ASSEMBLIES=$<BOOL:...>)`, root `CMakeLists.txt`
+line 1269, so `#if GTE_ENABLE_PROJECT_ASSEMBLIES` — never `#ifdef` — is the
+correct, already-established idiom this file's new STEP 3 code above uses,
+matching `Core.cpp`/`Core.h`'s own existing `#if GTE_ENABLE_PROJECT_ASSEMBLIES`
+call sites exactly).
 
 ## STEP 4 — Wiring: `EditorHost.cpp`
 
@@ -421,9 +512,11 @@ above).
    3-5 today).
 
 `s_editorProjectLifecycleCapability`'s own address is threaded into
-`NetworkServer`'s constructor call in PHASE4, not this phase — this phase
-only needs it to exist and be wireable; PHASE4 adds the 9th constructor
-argument.
+`NetworkServer`'s constructor call **and** into `m_editorLayer` (via a new
+`IEditorLayer::SetProjectLifecycleCapability()` setter, so the "New
+Project..." ImGui window - PHASE4's own `NewProjectWindow` - can call the
+exact same method the HTTP route calls) in PHASE4, not this phase — this
+phase only needs it to exist and be wireable.
 
 ## STEP 5 — Verification (incremental build + a real, LIVE call — no full ctest)
 
@@ -461,11 +554,14 @@ argument.
 
 - [ ] `ActiveProjectAssemblyState` exists, compiles, `GetActive()` returns
       a correctly-shaped, all-false/empty result before any project is
-      ever created.
+      ever created, and its `isLoaded` derivation genuinely locks
+      `GetHotReloadEngineStateMutex()` around the
+      `GetLoadedAssemblyFileNames()` call (confirm by re-reading the diff,
+      not merely assumed).
 - [ ] `IProjectLifecycleCapability`/`EditorProjectLifecycleCapability`
       exist, compile, and `CreateNewProjectAssembly()`'s real body matches
-      STEP 3 above (validate -> resolve -> exists-check -> scaffold ->
-      reconfigure -> mark active).
+      STEP 3 above (guard on `GTE_ENABLE_PROJECT_ASSEMBLIES` -> validate ->
+      resolve -> exists-check -> scaffold -> reconfigure -> mark active).
 - [ ] `EditorHost.cpp`'s two new wiring lines (STEP 4) exist and compile.
 - [ ] The scratch, manual, live verification (STEP 5) was actually
       performed and its outcome is written down, verbatim, in this
@@ -482,7 +578,7 @@ argument.
 - Does NOT add any HTTP route or ImGui window — `CreateNewProjectAssembly()`
   is only reachable via direct C++ call from this phase's own scratch
   verification step; PHASE4 is what makes it reachable from outside the
-  process.
+  process (both from HTTP and from the ImGui "New Project..." window).
 - Does NOT scaffold an `Assets/Editor/` folder.
 - Does NOT auto-compile the freshly-created project (only reconfigures
   CMake so a LATER, separate compile step succeeds — reconfigure and

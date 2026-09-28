@@ -109,34 +109,62 @@ Implementation approach, `ProjectAssemblyBuildRunner.cpp`:
    `GTE_LOG_INFO`/`GTE_LOG_ERROR` line-by-line until the child exits and
    `GetExitCodeProcess()` is read.
 2. Extract that unit into a new, private (anonymous-namespace or static),
-   generic helper, e.g.:
+   generic helper. **Important, concrete design correction versus an
+   earlier draft of this file**: the helper below returns `int` (the
+   child's real exit code), NOT `bool` - `RunOneBuildTarget()` itself
+   MUST keep returning the real numeric exit code to ITS OWN callers
+   (e.g. `RunProjectAssemblyBuildAndWait()`'s `outcome.exitCode` and its
+   own `gameExitCode == 0`/`editorExitCode` checks), so a helper that only
+   returned `bool` would silently break that contract. The helper also
+   takes an optional per-line callback, `onLine`, so `RunOneBuildTarget()`
+   can keep detecting its own "unknown target"/"no rule to make target"/
+   "targets not built" heuristic (`targetMissingHeuristicHit`) WITHOUT the
+   generic helper needing to know anything about that heuristic itself -
+   the helper's own existing keyword-based INFO/WARNING/ERROR
+   classification/logging still happens internally, unconditionally;
+   `onLine` fires in ADDITION to that, never instead of it:
    ```cpp
    namespace {
    // Generic "spawn this exact command line, stream its combined
-   // stdout/stderr into GTE_LOG_INFO/GTE_LOG_ERROR (logCategory), block
-   // until it exits" - the ONE real child-process mechanism this whole
-   // file uses, now shared by RunOneBuildTarget() (existing) and
-   // RunPlainCMakeReconfigureAndWait() (new, PHASE1).
-   bool RunChildProcessAndWait(const std::wstring& commandLine, const std::filesystem::path& workingDirectory,
-       const char* logCategory, const std::function<void()>& onIdleTick);
+   // stdout/stderr into GTE_LOG_INFO/WARNING/ERROR (logCategory)
+   // line-by-line, block until it exits" - the ONE real child-process
+   // mechanism this whole file uses, now shared by RunOneBuildTarget()
+   // (existing) and RunPlainCMakeReconfigureAndWait() (new, PHASE1).
+   // Returns the child's real exit code, or a negative sentinel if the
+   // process could not even be created/piped (mirrors RunOneBuildTarget()'s
+   // own existing exact contract). `onLine`, if provided (RunOneBuildTarget()
+   // provides one; RunPlainCMakeReconfigureAndWait() passes the default,
+   // empty one - it needs no per-line inspection, only the final exit
+   // code), is invoked once per completed output line, ADDITIONALLY to
+   // (never instead of) this function's own internal keyword-based
+   // logging.
+   int RunChildProcessAndWait(const std::wstring& commandLine, const std::filesystem::path& workingDirectory,
+       const char* logCategory, const std::function<void()>& onIdleTick,
+       const std::function<void(const std::string&)>& onLine = {});
    }
    ```
    `RunOneBuildTarget()` itself is updated to call this shared helper
-   instead of duplicating the `CreateProcessW()`/pipe code inline — this is
-   a pure, behavior-preserving refactor of EXISTING code; the existing
+   instead of duplicating the `CreateProcessW()`/pipe code inline - its own
+   `onLine` lambda inspects each line for the 3 target-missing substrings
+   and sets `targetMissingHeuristicHit = true` on a match (it does NOT
+   re-log the line itself - the generic helper's own internal
+   classification already logged it once). This is a pure,
+   behavior-preserving refactor of EXISTING code; the existing
    `ProjectAssemblyBuildRunnerBackupRestoreTests.cpp`
    `ConcurrentSynchronousBuildsForTheSameProjectAreMutuallyExclusive` test
    (and any other existing test exercising a real child-process spawn)
-   MUST still pass unchanged after this extraction — this is this phase's
+   MUST still pass unchanged after this extraction - this is this phase's
    own concrete proof the refactor did not change observable behavior.
 3. `RunPlainCMakeReconfigureAndWait()`'s own body builds the command line
    `cmake -S "<sourceDirectory>" -B "<buildDirectory>"` (both paths
    quoted, exactly like `RunOneBuildTarget()`'s own existing
    `--target` command line already quotes its own paths — re-verify the
    exact quoting convention used there and match it byte-for-byte, do not
-   invent a new one) and calls the shared helper with `onIdleTick` empty
-   (this is only ever called from a context with no message pump to
-   service, per PHASE3's own design).
+   invent a new one) and calls the shared helper with `onIdleTick` AND
+   `onLine` both left at their default, empty values (this call site is
+   only ever reached from a context with no message pump to service, per
+   PHASE3's own design, and needs no per-line inspection of its own -
+   just the final `int` exit code, compared against `0`).
 
 ## STEP 3 — Tier-1 tests (new file)
 
