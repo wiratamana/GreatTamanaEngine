@@ -1050,6 +1050,81 @@ several seconds of continued normal rendering afterward). See
 `task_manager/editor-core-separation-13/CAMPAIGN_COMPLETION_REPORT.md` for
 the full five-phase writeup.
 
+### Project Assembly Hot Reload — Synchronous Compile & Atomic Swap Orchestrator (BIG-STEP 3)
+
+A five-phase campaign, `editor-core-separation-14`
+(`task_manager/editor-core-separation-14/PHASE0_MASTER_STRATEGY.md`,
+`CAMPAIGN_COMPLETION_REPORT.md`), implements "BIG-STEP 3" (synchronous
+compile/atomic swap orchestrator) of the same four-part external master plan
+BIG-STEP 1/BIG-STEP 2 (above) established; BIG-STEP 4 (state snapshot/
+restore) remains FULLY UNIMPLEMENTED. `POST /project_assembly/hot_reload?name=<X>`
+is no longer a permanent `501` - it is REAL: it freezes the whole engine main
+loop, backs up the targeted Project Assembly's current `_Game.dll`/`_Editor.dll`,
+cleanly unloads them (`ProjectAssemblyHost::UnloadProjectAssembly()`,
+`editor-core-separation-13`'s own BIG-STEP 2 machinery, unchanged), recompiles
+them SYNCHRONOUSLY on the calling (main) thread, and either loads the fresh
+binaries on success or restores the backup and reloads the old, still-good
+pair on ANY failure (a bad compile, or the shared in-flight build guard
+rejecting the attempt because an unrelated async `compile_only` for the same
+project is already running) - all inside ONE single, non-yielding main-loop
+iteration (confirmed live: every phase-transition log line for one cycle
+shares the exact same frame number). `GET /project_assembly/hot_reload/status`,
+polled from a SECOND, concurrent connection while the first request is still
+blocked, genuinely reports live progress through real phase names
+(`CapturingState` -> `BackingUpBinaries` -> `Unloading` -> `Compiling` ->
+`ReloadingNewCode`/`RollingBack` -> `RestoringState` -> `Idle`), ending
+`lastOutcome` = `"Success"`, `"RolledBack"`, or (only in a documented,
+low-probability "failure of failure" case, e.g. the backup restore-copy
+itself failing) `"CriticalFailure"`. **Zero change to `GreatTamanaEditor.exe`'s
+own compiled-in `gte_core`/`gte_editor`** - only the targeted project's own two
+`.dll`s are ever touched (LDD-HR2), and `IHotReloadDebugCapability`'s own
+method signatures never changed across the whole campaign (LDD-HR3).
+
+New files: `src/Core/Plugins/ProjectAssemblyHotReload.h/.cpp` (the
+orchestrator itself, `PerformProjectAssemblyHotReload()`, plus HOOK POINT A/B
+- `CaptureProjectAssemblyHotReloadState()`/`RestoreProjectAssemblyHotReloadState()`
+- both permanent, logged no-op stubs for BIG-STEP 4 to fill in later, and
+`PumpWindowsMessagesDuringHotReloadFreeze()`, a real `PeekMessage`/
+`TranslateMessage`/`DispatchMessage` loop keeping Windows from marking the
+frozen main window "Not Responding" during a long compile - `hWnd = nullptr`
+deliberately, so any ImGui multi-viewport window torn off the main OS window
+is serviced too) and `src/Application/ProjectAssemblyHotReloadCommandBridge.h/.cpp`
+(a network-thread -> main-thread request bridge mirroring `EngineCommandBridge`'s
+proven shape, with ONE deliberate divergence: a timed-out `SubmitAndWait()`
+does NOT clear the pending request - only `FulfillPending()` ever does - so a
+slow/timed-out HTTP client never causes the main thread to silently skip a
+reload cycle it already committed to). `ProjectAssemblyHost` gained two new
+public methods, `LoadOneProjectAssemblyFromExactPath()`/
+`...IfExistsOnANonExistentPath()` (the latter treats a non-existent path,
+e.g. a project with no `_Editor.dll`, as a normal, successful no-op), and both
+it and `UnloadProjectAssembly()` now lock `GetHotReloadEngineStateMutex()`
+around their whole body - closing an obligation `editor-core-separation-13`'s
+own mutex header comment had required but never actually implemented.
+`ProjectAssemblyBuildRunner` gained a shared `RunProjectAssemblyBuildAndWait()`/
+`BuildOutcome` pair and `TryRunProjectAssemblyBuildSynchronously()` (reusing
+the exact same in-flight guard the pre-existing async `TriggerProjectAssemblyCompile()`
+already uses), and its build-output read loop became `PeekNamedPipe()`-driven
+so an injected idle-tick callback (the message pump above) runs on a fixed
+cadence independent of how chatty the child `cmake`/`ninja` process is. A
+**genuine `gte_core` -> `gte_editor` layering violation** in the external
+plan's own pseudocode (having the orchestrator itself call
+`gte::ExecutableDirectory()`, a `gte_editor`-only function, from
+`gte_core`-tier code) and a **genuine timeout-semantics bug** in the bridge's
+own pseudocode (which would have silently broken every timed-out hot-reload
+request) were BOTH found and corrected during this campaign's own PHASE0
+double-check pass, before any implementation began - see
+`CAMPAIGN_COMPLETION_REPORT.md`'s own "Deliberate deviations" section for the
+full detail. Verified with a full clean build, a full `ctest` regression pass
+(1934 tests, 100% passing, 7 legitimate environment-gated skips - up from
+`editor-core-separation-13`'s own 1925/5 baseline), and a live, HTTP-driven
+14-point verification against a real running `GreatTamanaEditor.exe`
+(baseline, a real deliberately-broken-compile rollback with live status
+polling mid-cycle, a real successful reload with a visibly different output,
+a slow-build check proving the main thread stays genuinely frozen without
+being force-closed by Windows, and both directions of the shared in-flight
+build guard). See `task_manager/editor-core-separation-14/CAMPAIGN_COMPLETION_REPORT.md`
+for the full five-phase writeup.
+
 ## Testability & Regression Safety
 
 - **Design new logic to be Tier-1-testable whenever the underlying problem
