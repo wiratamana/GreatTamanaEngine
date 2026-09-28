@@ -82,6 +82,12 @@ class RenderPassToggleRegistry; // editor-core-separation-8 campaign, PHASE1/PHA
 // header itself only ever passes the pointer through, never dereferences it.
 class RenderFeatureCompositor;
 
+// editor-core-separation-16 campaign (On-Engine Project Workflow plan,
+// BIG-STEP 2), PHASE4 - forward-declared only, mirrors
+// "class RenderFeatureCompositor;" immediately above: this header only
+// ever stores/passes a POINTER to it, never dereferences one itself.
+class IProjectLifecycleCapability;
+
 // Abstraction boundary between engine-core (Application/Renderer/Game) and
 // the optional Editor/Debug UI. Dear ImGui-backed in real builds, but
 // nothing outside src/Editor/ (specifically: nothing outside whichever
@@ -697,6 +703,22 @@ public:
     // equivalent of SetShowBlurredSceneOutput() immediately above - same
     // contract, same reasoning, mirrors EditorContext::showGBufferValidationOutput.
     virtual void SetShowGBufferValidationOutput(bool enabled) = 0;
+
+    // editor-core-separation-16 campaign (On-Engine Project Workflow plan,
+    // BIG-STEP 2), PHASE4 - hands the real ImGui implementation a live
+    // IProjectLifecycleCapability* (Core/EditorCapabilities.h) so its own
+    // "New Project..." floating window (NewProjectWindow.h) can call
+    // CreateNewProjectAssembly() directly - the exact SAME method
+    // POST /project_assembly/create_project calls (LDD-PW5's "one function,
+    // two callers" rule). Called exactly ONCE, from EditorHost's own
+    // constructor body, immediately after Core::SetEditorLayerHook() -
+    // never per-frame, unlike BuildUI()'s own trailing parameters, since
+    // this pointer's value never changes for the life of the process
+    // (mirrors how m_sceneIOCapability/the hot-reload-debug-capability
+    // static are each wired exactly once too). Always a safe no-op for
+    // NullEditorLayer (a release build has no "New Project..." window to
+    // give a capability to at all).
+    virtual void SetProjectLifecycleCapability(IProjectLifecycleCapability* capability) = 0;
 
     // Requests a real capture - returns false (a safe no-op) if the Frame
     // Debugger is not currently enabled (mirroring the "Capture" button's

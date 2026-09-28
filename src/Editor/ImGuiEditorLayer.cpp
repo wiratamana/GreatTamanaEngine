@@ -11,6 +11,7 @@
 #include "GpuDrivenBatchTestSpawner.h"
 #include "ImGuiIdConflictGuard.h" // task_manager/editor-core-separation-10 campaign, PHASE1.
 #include "ImGuiMemoryTracker.h"
+#include "NewProjectWindow.h" // editor-core-separation-16 campaign (On-Engine Project Workflow plan, BIG-STEP 2), PHASE4.
 #include "Plugins/PluginPanelDrawContextAdapter.h" // editor-core-separation-3 campaign, PHASE4.
 #include "../Core/EditorPanelRegistry.h" // editor-core-separation-3 campaign, PHASE4.
 #include "../../plugins/gte_plugin_abi/IEditorPanelModule.h" // editor-core-separation-3 campaign, PHASE4.
@@ -526,6 +527,13 @@ public:
 
         BuildDockspaceAndMenuBar(m_ctx, game, renderer);
 
+        // editor-core-separation-16 campaign (On-Engine Project Workflow
+        // plan, BIG-STEP 2), PHASE4 - the "New Project..." floating window
+        // must be available in every real Editor build regardless of
+        // GTE_ENABLE_PROJECT_PANEL (that switch only gates the UNRELATED
+        // content-asset "Project" panel/Bone Viewer further down).
+        m_newProjectWindow.Build(m_ctx, m_projectLifecycleCapability);
+
         // Lazily (re)create the ImGui-side descriptors for the Game/Scene
         // view textures - needed on first use, and again after
         // GameViewTarget()/SceneViewTarget() invalidated the previous one
@@ -924,6 +932,17 @@ public:
     // checkboxes already do.
     void SetShowBlurredSceneOutput(bool enabled) override { m_ctx.showBlurredSceneOutput = enabled; }
     void SetShowGBufferValidationOutput(bool enabled) override { m_ctx.showGBufferValidationOutput = enabled; }
+
+    // editor-core-separation-16 campaign (On-Engine Project Workflow
+    // plan, BIG-STEP 2), PHASE4 - see IEditorLayer::
+    // SetProjectLifecycleCapability()'s own doc comment for the full
+    // contract. Stored, never called from here - m_newProjectWindow's
+    // own Build() call (below, inside BuildUI()) is what actually
+    // invokes it.
+    void SetProjectLifecycleCapability(IProjectLifecycleCapability* capability) override
+    {
+        m_projectLifecycleCapability = capability;
+    }
     bool FrameDebuggerCaptureNow() override { return m_frameDebuggerPanel.CaptureNowFromCommand(); }
     void FrameDebuggerSelectEvent(int index) override { m_frameDebuggerPanel.SelectEventFromCommand(index); }
     bool FrameDebuggerSetChannel(const std::string& channel) override
@@ -1136,6 +1155,20 @@ private:
     // silently-divergible reloads of the same file.
     ModelRigCache m_modelRigCache;
 #endif
+
+    // editor-core-separation-16 campaign (On-Engine Project Workflow
+    // plan, BIG-STEP 2), PHASE4 - the "Create New Project" floating
+    // utility window (NewProjectWindow.h), opened on demand via
+    // "Project > New Project..." (DockLayout.cpp). No GPU resources, so
+    // unlike m_boneViewer above it needs no explicit Reset() in this
+    // class's own destructor. NOT inside the "#if GTE_ENABLE_PROJECT_PANEL"
+    // block above - this window is independent of the (content-asset)
+    // "Project" panel and must exist in every build.
+    NewProjectWindow m_newProjectWindow;
+    // Non-owning - see IEditorLayer::SetProjectLifecycleCapability()'s
+    // own doc comment for the lifetime contract (EditorHost's own
+    // s_editorProjectLifecycleCapability static outlives this object).
+    IProjectLifecycleCapability* m_projectLifecycleCapability = nullptr;
 
     // Shared state read/written by DockLayout.cpp's
     // BuildDockspaceAndMenuBar() and every Panels/*.cpp builder called from

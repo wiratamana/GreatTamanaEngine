@@ -173,6 +173,23 @@ void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer
             ImGui::MenuItem("Frame Debugger", nullptr, &ctx.frameDebuggerWindowOpen);
             ImGui::EndMenu();
         }
+        if (ImGui::BeginMenu("Project")) {
+            if (ImGui::MenuItem("New Project...")) {
+                ctx.newProjectWindowOpen = true;
+            }
+            // editor-core-separation-16 campaign - reserved, disabled
+            // placeholders for the "Open Project" (BIG-STEP 3) and
+            // "Compile" (BIG-STEP 5) campaigns, named exactly as
+            // PROJECTWORKFLOW_BIGSTEP_01...txt's own LDD-PW1 requires (all
+            // three items share ONE menu) - never wired to any real action
+            // by THIS campaign. The trailing `false` disables the item
+            // (ImGui::MenuItem's 4th parameter); remove it, and add the
+            // real handler, only when that later campaign actually lands.
+            if (ImGui::MenuItem("Open Project...", nullptr, false, false)) {}
+            ImGui::Separator();
+            if (ImGui::MenuItem("Compile", nullptr, false, false)) {}
+            ImGui::EndMenu();
+        }
         ImGui::EndMenuBar();
     }
 
@@ -268,6 +285,21 @@ void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer
             ImGui::TextColored(color, "%s", ctx.sceneIoStatusMessage.c_str());
         } else {
             ctx.sceneIoStatusMessage.clear();
+        }
+    }
+
+    // editor-core-separation-16 campaign (On-Engine Project Workflow plan,
+    // BIG-STEP 2), PHASE4 - the shared "Project" menu action status toast
+    // (ctx.projectWorkflowStatusMessage's own doc comment, EditorContext.h) -
+    // mirrors the sceneIoStatusMessage block immediately above, exactly.
+    if (!ctx.projectWorkflowStatusMessage.empty()) {
+        constexpr std::chrono::milliseconds kProjectWorkflowStatusLifetime{ 4000 };
+        if (std::chrono::steady_clock::now() - ctx.projectWorkflowStatusSetTime < kProjectWorkflowStatusLifetime) {
+            const ImVec4 color = ctx.projectWorkflowStatusIsError ? ImVec4(1.0f, 0.4f, 0.4f, 1.0f)
+                                                                   : ImVec4(0.6f, 0.85f, 0.6f, 1.0f);
+            ImGui::TextColored(color, "%s", ctx.projectWorkflowStatusMessage.c_str());
+        } else {
+            ctx.projectWorkflowStatusMessage.clear();
         }
     }
 

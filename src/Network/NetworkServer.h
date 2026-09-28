@@ -62,6 +62,12 @@ namespace gte { class RenderGraphControlCommandBridge; }
 // BIG-STEP 1).
 namespace gte { class IHotReloadDebugCapability; }
 
+// Forward-declared for the same cheap-header reason as
+// FrameCaptureBridge/.../IHotReloadDebugCapability above -
+// editor-core-separation-16 campaign (On-Engine Project Workflow plan,
+// BIG-STEP 2), PHASE4.
+namespace gte { class IProjectLifecycleCapability; }
+
 namespace gte::Network {
 
 // Owns a real, embedded HTTP server (cpp-httplib) bound to loopback
@@ -154,6 +160,15 @@ public:
     // than crashing" - the exact same "nullptr degrades gracefully to a
     // 503, never a crash" contract every other bridge above already
     // documents.
+    // `projectLifecycleCapability` (editor-core-separation-16 campaign, On-
+    // Engine Project Workflow plan, BIG-STEP 2) is a NINTH defaulted,
+    // non-owning pointer, appended AFTER `hotReloadDebugCapability` so
+    // every existing call site keeps compiling unchanged. Non-null in
+    // production (EditorHost owns the real EditorProjectLifecycleCapability
+    // and passes its address) - `nullptr` means "POST
+    // /project_assembly/create_project responds 503 rather than crashing" -
+    // the exact same "nullptr degrades gracefully to a 503, never a crash"
+    // contract every other bridge above already documents.
     explicit NetworkServer(FrameCaptureBridge* captureBridge = nullptr,
         EngineCommandBridge* commandBridge = nullptr,
         EditorUiCommandBridge* uiCommandBridge = nullptr,
@@ -161,7 +176,8 @@ public:
         AssetImportCommandBridge* assetImportCommandBridge = nullptr,
         ILogQueryCapability* logQueryCapability = nullptr,
         RenderGraphControlCommandBridge* renderGraphControlCommandBridge = nullptr,
-        IHotReloadDebugCapability* hotReloadDebugCapability = nullptr);
+        IHotReloadDebugCapability* hotReloadDebugCapability = nullptr,
+        IProjectLifecycleCapability* projectLifecycleCapability = nullptr);
     ~NetworkServer();
 
     NetworkServer(const NetworkServer&) = delete;
@@ -258,6 +274,11 @@ private:
     // GET/POST /project_assembly/* route this campaign adds
     // (RegisterRoutes() below).
     IHotReloadDebugCapability* m_hotReloadDebugCapability = nullptr;
+    // Non-owning - same lifetime contract as m_captureBridge above
+    // (editor-core-separation-16 campaign, On-Engine Project Workflow plan,
+    // BIG-STEP 2). Consulted by POST /project_assembly/create_project
+    // (RegisterRoutes() below).
+    IProjectLifecycleCapability* m_projectLifecycleCapability = nullptr;
 };
 
 } // namespace gte::Network

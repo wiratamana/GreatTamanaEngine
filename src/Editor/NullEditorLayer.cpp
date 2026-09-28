@@ -93,6 +93,13 @@ public:
     // FrameDebuggerSetEnabled() immediately above.
     void SetShowBlurredSceneOutput(bool /*enabled*/) override { }
     void SetShowGBufferValidationOutput(bool /*enabled*/) override { }
+
+    // editor-core-separation-16 campaign (On-Engine Project Workflow plan,
+    // BIG-STEP 2), PHASE4 - a release build has no "New Project..." window
+    // to give a capability to at all - see IEditorLayer::
+    // SetProjectLifecycleCapability()'s own doc comment for the full
+    // contract.
+    void SetProjectLifecycleCapability(IProjectLifecycleCapability* /*capability*/) override { }
     bool FrameDebuggerCaptureNow() override { return false; }
     void FrameDebuggerSelectEvent(int /*index*/) override { }
     bool FrameDebuggerSetChannel(const std::string& /*channel*/) override { return false; }

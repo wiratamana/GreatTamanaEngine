@@ -297,7 +297,8 @@ void RespondWithRenderGraphControlCommandResult(
 void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, EngineCommandBridge* commandBridge,
     EditorUiCommandBridge* uiCommandBridge, FrameDebuggerCommandBridge* frameDebuggerCommandBridge,
     AssetImportCommandBridge* assetImportCommandBridge, ILogQueryCapability* logQueryCapability,
-    RenderGraphControlCommandBridge* renderGraphControlCommandBridge, IHotReloadDebugCapability* hotReloadDebugCapability)
+    RenderGraphControlCommandBridge* renderGraphControlCommandBridge, IHotReloadDebugCapability* hotReloadDebugCapability,
+    IProjectLifecycleCapability* projectLifecycleCapability)
 {
     server.Get("/http_hello_world", [](const httplib::Request&, httplib::Response& res) {
         res.set_content(HandleHelloWorld(), "text/plain; charset=utf-8");
@@ -1330,6 +1331,36 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
             "application/json");
     });
 
+    // editor-core-separation-16 campaign (On-Engine Project Workflow plan,
+    // BIG-STEP 2), PHASE4 - POST /project_assembly/create_project. Placed
+    // immediately after /project_assembly/debug/compile_only, same file,
+    // same section, same style.
+    server.Post("/project_assembly/create_project",
+        [projectLifecycleCapability](const httplib::Request& req, httplib::Response& res) {
+        // Deliberately does NOT go through ParseProjectNameQuery() -
+        // CreateNewProjectAssembly() itself already validates the name far
+        // more strictly (IsValidProjectAssemblyIdentifierName(), PHASE2)
+        // than that older, permissive helper ever did; duplicating a
+        // weaker check in front of a stronger one adds nothing.
+        const std::string name = req.get_param_value("name");
+        if (projectLifecycleCapability == nullptr) {
+            res.status = 503;
+            res.set_content(
+                BuildGenericErrorResponseJson("project lifecycle capability not available"), "application/json");
+            return;
+        }
+        const IProjectLifecycleCapability::CreateProjectOutcome outcome =
+            projectLifecycleCapability->CreateNewProjectAssembly(name);
+        if (!outcome.success) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(outcome.errorMessage), "application/json");
+            return;
+        }
+        nlohmann::json body;
+        body["created_source_directory"] = outcome.createdSourceDirectory;
+        res.set_content(body.dump(), "application/json");
+    });
+
     // editor-core-separation-14 campaign (Project Assembly Hot Reload plan,
     // BIG-STEP 3), PHASE4 - the AGREED route contract from BIG-STEP 1's own
     // PHASE3 is UNCHANGED (method/path/query-param shape) - only this
@@ -1409,7 +1440,8 @@ struct NetworkServer::Impl {
 NetworkServer::NetworkServer(FrameCaptureBridge* captureBridge, EngineCommandBridge* commandBridge,
     EditorUiCommandBridge* uiCommandBridge, FrameDebuggerCommandBridge* frameDebuggerCommandBridge,
     AssetImportCommandBridge* assetImportCommandBridge, ILogQueryCapability* logQueryCapability,
-    RenderGraphControlCommandBridge* renderGraphControlCommandBridge, IHotReloadDebugCapability* hotReloadDebugCapability)
+    RenderGraphControlCommandBridge* renderGraphControlCommandBridge, IHotReloadDebugCapability* hotReloadDebugCapability,
+    IProjectLifecycleCapability* projectLifecycleCapability)
     : m_impl(std::make_unique<Impl>())
     , m_captureBridge(captureBridge)
     , m_commandBridge(commandBridge)
@@ -1419,6 +1451,7 @@ NetworkServer::NetworkServer(FrameCaptureBridge* captureBridge, EngineCommandBri
     , m_logQueryCapability(logQueryCapability)
     , m_renderGraphControlCommandBridge(renderGraphControlCommandBridge)
     , m_hotReloadDebugCapability(hotReloadDebugCapability)
+    , m_projectLifecycleCapability(projectLifecycleCapability)
 {
     // Registered exactly ONCE per NetworkServer instance, here in the
     // constructor - never inside Start() - so a Start()/Stop()/Start()
@@ -1426,7 +1459,8 @@ NetworkServer::NetworkServer(FrameCaptureBridge* captureBridge, EngineCommandBri
     // NEVER re-register the same route handler onto the same
     // httplib::Server a second time.
     RegisterRoutes(m_impl->server, m_captureBridge, m_commandBridge, m_uiCommandBridge, m_frameDebuggerCommandBridge,
-        m_assetImportCommandBridge, m_logQueryCapability, m_renderGraphControlCommandBridge, m_hotReloadDebugCapability);
+        m_assetImportCommandBridge, m_logQueryCapability, m_renderGraphControlCommandBridge, m_hotReloadDebugCapability,
+        m_projectLifecycleCapability);
     // task_manager/stl-parser-2 campaign, PHASE2 - m_assetImportCommandBridge
     // is now actually consulted by RegisterRoutes() above (POST /import_asset).
     // editor-core-separation-8 campaign, PHASE5 - m_renderGraphControlCommandBridge
@@ -1435,6 +1469,9 @@ NetworkServer::NetworkServer(FrameCaptureBridge* captureBridge, EngineCommandBri
     // editor-core-separation-12 campaign - m_hotReloadDebugCapability is now
     // actually consulted by RegisterRoutes() above (the 7 new
     // GET/POST /project_assembly/* routes).
+    // editor-core-separation-16 campaign (On-Engine Project Workflow plan,
+    // BIG-STEP 2), PHASE4 - m_projectLifecycleCapability is now actually
+    // consulted by RegisterRoutes() above (POST /project_assembly/create_project).
 }
 
 NetworkServer::~NetworkServer()

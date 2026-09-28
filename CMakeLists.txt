@@ -1081,6 +1081,12 @@ add_library(gte_editor STATIC
     src/Editor/ActiveProjectAssemblyState.cpp
     src/Editor/EditorProjectLifecycleCapability.h
     src/Editor/EditorProjectLifecycleCapability.cpp
+    # editor-core-separation-16 campaign (On-Engine Project Workflow plan,
+    # BIG-STEP 2), PHASE4 - the "Create New Project" floating ImGui utility
+    # window, opened via the new "Project > New Project..." menu item
+    # (DockLayout.cpp).
+    src/Editor/NewProjectWindow.h
+    src/Editor/NewProjectWindow.cpp
     src/Editor/Selection.h
     src/Editor/Selection.cpp
     src/Editor/EditorCamera.h

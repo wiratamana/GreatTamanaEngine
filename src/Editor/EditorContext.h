@@ -250,6 +250,26 @@ struct EditorContext {
     // private member (see FrameDebuggerPanel.h's own class comment for
     // why).
     bool frameDebuggerWindowOpen = false;
+
+    // editor-core-separation-16 campaign (On-Engine Project Workflow plan,
+    // BIG-STEP 2), PHASE4 - true whenever NewProjectWindow.h's floating
+    // window is currently open. Flipped by the new "Project > New
+    // Project..." menu item (DockLayout.cpp) and by the window's own
+    // titlebar [x] close button (ImGui::Begin()'s p_open parameter keeps
+    // both in sync automatically) - mirrors frameDebuggerWindowOpen's own
+    // exact convention immediately above.
+    bool newProjectWindowOpen = false;
+
+    // Short-lived, colored status feedback shared by every "Project"-menu
+    // action this whole 5-file plan adds (New Project this campaign; Open
+    // Project/Compile in later campaigns) - mirrors sceneIoStatusMessage/
+    // sceneIoStatusIsError/sceneIoStatusSetTime's own exact convention
+    // above, just for a different family of actions, so a later campaign's
+    // "Open Project" success/failure toast reuses this SAME field rather
+    // than inventing a third status-toast mechanism.
+    std::string projectWorkflowStatusMessage;
+    bool projectWorkflowStatusIsError = false;
+    std::chrono::steady_clock::time_point projectWorkflowStatusSetTime;
 };
 
 } // namespace gte
