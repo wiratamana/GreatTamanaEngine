@@ -1093,6 +1093,12 @@ add_library(gte_editor STATIC
     # (DockLayout.cpp).
     src/Editor/NewProjectWindow.h
     src/Editor/NewProjectWindow.cpp
+    # editor-core-separation-17 campaign (On-Engine Project Workflow plan,
+    # BIG-STEP 3), PHASE4 - the "Open Project" floating ImGui utility
+    # window, opened via the "Project > Open Project..." menu item
+    # (DockLayout.cpp).
+    src/Editor/OpenProjectWindow.h
+    src/Editor/OpenProjectWindow.cpp
     src/Editor/Selection.h
     src/Editor/Selection.cpp
     src/Editor/EditorCamera.h

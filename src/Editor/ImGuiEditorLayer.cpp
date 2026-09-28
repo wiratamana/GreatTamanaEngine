@@ -12,6 +12,7 @@
 #include "ImGuiIdConflictGuard.h" // task_manager/editor-core-separation-10 campaign, PHASE1.
 #include "ImGuiMemoryTracker.h"
 #include "NewProjectWindow.h" // editor-core-separation-16 campaign (On-Engine Project Workflow plan, BIG-STEP 2), PHASE4.
+#include "OpenProjectWindow.h" // editor-core-separation-17 campaign (On-Engine Project Workflow plan, BIG-STEP 3), PHASE4.
 #include "Plugins/PluginPanelDrawContextAdapter.h" // editor-core-separation-3 campaign, PHASE4.
 #include "../Core/EditorPanelRegistry.h" // editor-core-separation-3 campaign, PHASE4.
 #include "../../plugins/gte_plugin_abi/IEditorPanelModule.h" // editor-core-separation-3 campaign, PHASE4.
@@ -533,6 +534,11 @@ public:
         // GTE_ENABLE_PROJECT_PANEL (that switch only gates the UNRELATED
         // content-asset "Project" panel/Bone Viewer further down).
         m_newProjectWindow.Build(m_ctx, m_projectLifecycleCapability);
+        // editor-core-separation-17 campaign (On-Engine Project Workflow
+        // plan, BIG-STEP 3), PHASE4 - same "always available regardless
+        // of GTE_ENABLE_PROJECT_PANEL" reasoning as m_newProjectWindow
+        // immediately above.
+        m_openProjectWindow.Build(m_ctx, m_projectLifecycleCapability);
 
         // Lazily (re)create the ImGui-side descriptors for the Game/Scene
         // view textures - needed on first use, and again after
@@ -1165,6 +1171,13 @@ private:
     // block above - this window is independent of the (content-asset)
     // "Project" panel and must exist in every build.
     NewProjectWindow m_newProjectWindow;
+    // editor-core-separation-17 campaign (On-Engine Project Workflow plan,
+    // BIG-STEP 3), PHASE4 - the "Open Project" floating utility window
+    // (OpenProjectWindow.h), opened on demand via "Project > Open
+    // Project..." (DockLayout.cpp). Same "no GPU resources, always exists
+    // regardless of GTE_ENABLE_PROJECT_PANEL" reasoning as
+    // m_newProjectWindow immediately above.
+    OpenProjectWindow m_openProjectWindow;
     // Non-owning - see IEditorLayer::SetProjectLifecycleCapability()'s
     // own doc comment for the lifetime contract (EditorHost's own
     // s_editorProjectLifecycleCapability static outlives this object).

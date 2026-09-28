@@ -260,6 +260,12 @@ struct EditorContext {
     // exact convention immediately above.
     bool newProjectWindowOpen = false;
 
+    // editor-core-separation-17 campaign (On-Engine Project Workflow plan,
+    // BIG-STEP 3), PHASE4 - true whenever OpenProjectWindow.h's floating
+    // window is currently open. Same open/close convention as
+    // newProjectWindowOpen immediately above.
+    bool openProjectWindowOpen = false;
+
     // Short-lived, colored status feedback shared by every "Project"-menu
     // action this whole 5-file plan adds (New Project this campaign; Open
     // Project/Compile in later campaigns) - mirrors sceneIoStatusMessage/

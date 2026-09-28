@@ -1361,6 +1361,59 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         res.set_content(body.dump(), "application/json");
     });
 
+    // editor-core-separation-17 campaign (On-Engine Project Workflow plan,
+    // BIG-STEP 3), PHASE4 - POST /project_assembly/open_project. Calls
+    // OpenProjectAssembly() (the network-thread-safe one, NOT
+    // OpenProjectAssemblyOnMainThread() - see EditorCapabilities.h's own doc
+    // comments on each for why this distinction is load-bearing).
+    server.Post("/project_assembly/open_project",
+        [projectLifecycleCapability](const httplib::Request& req, httplib::Response& res) {
+        // Deliberately does NOT go through ParseProjectNameQuery() - same
+        // reasoning as /project_assembly/create_project immediately above:
+        // the capability's own IsValidProjectAssemblyIdentifierName() call
+        // is already strictly correct.
+        const std::string name = req.get_param_value("name");
+        if (projectLifecycleCapability == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("project lifecycle capability not available"), "application/json");
+            return;
+        }
+        const IProjectLifecycleCapability::OpenProjectOutcome outcome =
+            projectLifecycleCapability->OpenProjectAssembly(name);
+        if (!outcome.success) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(outcome.errorMessage), "application/json");
+            return;
+        }
+        nlohmann::json body;
+        body["status_message"] = outcome.statusMessage;
+        body["load_attempted"] = outcome.loadAttempted;
+        body["load_succeeded"] = outcome.loadSucceeded;
+        res.set_content(body.dump(), "application/json");
+    });
+
+    // editor-core-separation-17 campaign (On-Engine Project Workflow plan,
+    // BIG-STEP 3), PHASE4 - GET /project_assembly/list_projects - read-only,
+    // any-thread-safe. Takes no query parameter at all.
+    server.Get("/project_assembly/list_projects",
+        [projectLifecycleCapability](const httplib::Request& /*req*/, httplib::Response& res) {
+        if (projectLifecycleCapability == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("project lifecycle capability not available"), "application/json");
+            return;
+        }
+        const std::vector<IProjectLifecycleCapability::ProjectListEntry> entries =
+            projectLifecycleCapability->ListProjectAssemblies();
+        nlohmann::json body = nlohmann::json::array();
+        for (const auto& entry : entries) {
+            nlohmann::json entryJson;
+            entryJson["name"] = entry.name;
+            entryJson["tier"] = entry.tierName;
+            body.push_back(entryJson);
+        }
+        res.set_content(body.dump(), "application/json");
+    });
+
     // editor-core-separation-14 campaign (Project Assembly Hot Reload plan,
     // BIG-STEP 3), PHASE4 - the AGREED route contract from BIG-STEP 1's own
     // PHASE3 is UNCHANGED (method/path/query-param shape) - only this

@@ -178,14 +178,21 @@ void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer
                 ctx.newProjectWindowOpen = true;
             }
             // editor-core-separation-16 campaign - reserved, disabled
-            // placeholders for the "Open Project" (BIG-STEP 3) and
-            // "Compile" (BIG-STEP 5) campaigns, named exactly as
-            // PROJECTWORKFLOW_BIGSTEP_01...txt's own LDD-PW1 requires (all
-            // three items share ONE menu) - never wired to any real action
-            // by THIS campaign. The trailing `false` disables the item
-            // (ImGui::MenuItem's 4th parameter); remove it, and add the
-            // real handler, only when that later campaign actually lands.
-            if (ImGui::MenuItem("Open Project...", nullptr, false, false)) {}
+            // placeholder for the "Compile" (BIG-STEP 5) campaign, named
+            // exactly as PROJECTWORKFLOW_BIGSTEP_01...txt's own LDD-PW1
+            // requires (all three items share ONE menu) - never wired to
+            // any real action by THIS campaign. The trailing `false`
+            // disables the item (ImGui::MenuItem's 4th parameter); remove
+            // it, and add the real handler, only when that later campaign
+            // actually lands.
+            //
+            // editor-core-separation-17 campaign (On-Engine Project
+            // Workflow plan, BIG-STEP 3), PHASE4 - "Open Project..." is now
+            // real: wired to ctx.openProjectWindowOpen, opening
+            // OpenProjectWindow.h.
+            if (ImGui::MenuItem("Open Project...")) {
+                ctx.openProjectWindowOpen = true;
+            }
             ImGui::Separator();
             if (ImGui::MenuItem("Compile", nullptr, false, false)) {}
             ImGui::EndMenu();
