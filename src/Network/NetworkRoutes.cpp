@@ -1182,5 +1182,68 @@ std::string BuildRenderGraphControlPassStatesResponseJson(
     body["passes"] = std::move(arr);
     return body.dump();
 }
+// --- editor-core-separation-12 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 1) - see NetworkRoutes.h's own doc comments above each
+// declaration for the exact, locked response/validation shapes implemented
+// below.
+
+std::string BuildHotReloadStatusResponseJson(const IHotReloadDebugCapability::Status& status)
+{
+    nlohmann::json body;
+    body["phase"] = status.phase;
+    body["project_name"] = status.projectName;
+    body["cycle_id"] = status.cycleId;
+    body["phase_elapsed_ms"] = status.phaseElapsedMilliseconds;
+    body["last_outcome"] = status.lastOutcome;
+    body["last_error_message"] = status.lastErrorMessage;
+    return body.dump();
+}
+
+ParsedProjectNameQuery ParseProjectNameQuery(const std::string& nameParam)
+{
+    ParsedProjectNameQuery parsed;
+    if (nameParam.empty()) {
+        parsed.errorMessage = "'name' query parameter is required";
+        return parsed;
+    }
+    parsed.projectName = nameParam;
+    parsed.valid = true;
+    return parsed;
+}
+
+std::string BuildLedgerEntryResponseJson(
+    const std::string& projectName, const IHotReloadDebugCapability::LedgerEntry& entry)
+{
+    nlohmann::json body;
+    body["project_name"] = projectName;
+    body["render_pass_names"] = entry.renderPassNames;
+    body["panel_names"] = entry.panelNames;
+    body["component_type_names"] = entry.componentTypeNames;
+    return body.dump();
+}
+
+std::string BuildLoadedAssembliesResponseJson(const std::vector<std::string>& dllFileNames)
+{
+    nlohmann::json body;
+    body["dll_file_names"] = dllFileNames;
+    return body.dump();
+}
+
+std::string BuildComponentTypeNamesResponseJson(const std::vector<std::string>& typeNames)
+{
+    nlohmann::json body;
+    body["type_names"] = typeNames;
+    return body.dump();
+}
+
+std::string BuildCompileOnlyTriggerResponseJson(bool started, const std::string& reason)
+{
+    nlohmann::json body;
+    body["started"] = started;
+    if (!started) {
+        body["reason"] = reason;
+    }
+    return body.dump();
+}
 
 } // namespace gte::Network

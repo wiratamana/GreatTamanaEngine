@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "../Core/EditorPanelRegistry.h"
+#include "../Core/EditorCapabilities.h" // IHotReloadDebugCapability::Status/LedgerEntry - editor-core-separation-12 campaign, PHASE3.
 #include "../Core/Logging.h"
 // editor-core-separation-7 campaign, PHASE4 - GET /render_graph's response
 // body needs rg::RenderGraphMetadata's own to_json() (see
@@ -1090,5 +1091,51 @@ struct RenderGraphControlPassStateResponseView {
 //             "ever_declared_this_session":true}, ...]}
 std::string BuildRenderGraphControlPassStatesResponseJson(
     const std::vector<RenderGraphControlPassStateResponseView>& passStates);
+
+// --- editor-core-separation-12 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 1) - 7 new routes: 5 OBSERVE (status/ledger/loaded_assemblies/
+// component_types/scene_snapshot), 2 TRIGGER (compile_only/hot_reload).
+
+// GET /project_assembly/hot_reload/status - no query params, no parsing
+// needed. Builds:
+//   {"phase":"...","project_name":"...","cycle_id":N,
+//    "phase_elapsed_ms":N,"last_outcome":"...","last_error_message":"..."}
+std::string BuildHotReloadStatusResponseJson(const IHotReloadDebugCapability::Status& status);
+
+// Shared by GET /project_assembly/debug/ledger, POST
+// /project_assembly/debug/compile_only, and POST /project_assembly/hot_reload
+// - all three take a REQUIRED `name` query parameter. `valid == false`
+// means `errorMessage` explains why (missing/empty `name`).
+struct ParsedProjectNameQuery {
+    bool valid = false;
+    std::string errorMessage;
+    std::string projectName;
+};
+ParsedProjectNameQuery ParseProjectNameQuery(const std::string& nameParam);
+
+// GET /project_assembly/debug/ledger?name=<X> - builds:
+//   {"project_name":"...","render_pass_names":[...],"panel_names":[...],
+//    "component_type_names":[...]}
+std::string BuildLedgerEntryResponseJson(
+    const std::string& projectName, const IHotReloadDebugCapability::LedgerEntry& entry);
+
+// GET /project_assembly/debug/loaded_assemblies - builds:
+//   {"dll_file_names":[...]}
+std::string BuildLoadedAssembliesResponseJson(const std::vector<std::string>& dllFileNames);
+
+// GET /project_assembly/debug/component_types - builds:
+//   {"type_names":[...]}
+std::string BuildComponentTypeNamesResponseJson(const std::vector<std::string>& typeNames);
+
+// GET /project_assembly/debug/scene_snapshot has NO dedicated build
+// function - NetworkServer.cpp sets the raw GetSceneSnapshotOutcome::sceneJson
+// string directly as the response body (see this feature's own BIG-STEP 1
+// design doc, Section 5 - "the raw SerializeSceneDocument() JSON string,
+// returned directly as the response body").
+
+// POST /project_assembly/debug/compile_only?name=<X> - builds:
+//   {"started":true} or {"started":false,"reason":"..."}
+// (200 either way - "already building" is a normal, non-error outcome).
+std::string BuildCompileOnlyTriggerResponseJson(bool started, const std::string& reason);
 
 } // namespace gte::Network

@@ -2331,6 +2331,12 @@ if(TRUE)
         # DOT" pure functions (src/Editor/RenderGraphDotExport.h/.cpp).
         Editor/RenderGraphDotExportTests.cpp
         Network/LogEndpointsEndToEndTests.cpp
+        # editor-core-separation-12 campaign, PHASE3 - Project Assembly Hot
+        # Reload plan (BIG-STEP 1)'s 7 new GET/POST /project_assembly/*
+        # routes. Needs a real EditorHotReloadDebugCapability (gte_editor-tier),
+        # mirroring LogEndpointsEndToEndTests.cpp's own precedent immediately
+        # above.
+        Network/ProjectAssemblyHotReloadEndpointsEndToEndTests.cpp
     )
 
     # ProjectPanelData.h/.cpp (see src/Editor/ProjectPanelData.h) is only

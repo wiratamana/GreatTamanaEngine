@@ -3,6 +3,7 @@
 #include "Logger.h" // LoggerLogSink::Instance() - the ONE real ILogSink this engine ships.
 #include "EditorSceneIOCapability.h"
 #include "EditorLogQueryCapability.h" // editor-core-separation-2 campaign, PHASE3.
+#include "EditorHotReloadDebugCapability.h" // editor-core-separation-12 campaign, PHASE3.
 #include "ProjectRootPath.h" // editor-core-separation-3 campaign, PHASE2 - ExecutableDirectory().
 #include "../Core/EditorPanelRegistry.h" // editor-core-separation-3 campaign, PHASE4.
 // editor-core-separation-6 campaign, PHASE7
@@ -109,6 +110,15 @@ std::string DebugTextureColorFormatName(VkFormat format)
 // order risk to guard against.
 EditorLogQueryCapability s_editorLogQueryCapability;
 
+// editor-core-separation-12 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 1) - the ONE real EditorHotReloadDebugCapability instance this
+// engine ships, wired into NetworkServer's constructor below AND used
+// directly by the ExecuteEngineCommand() call site (Run()'s own
+// EngineCommandBridge servicing code) for GetSceneSnapshot. Same
+// namespace-scope-static reasoning as s_editorLogQueryCapability
+// immediately above.
+EditorHotReloadDebugCapability s_editorHotReloadDebugCapability;
+
 } // namespace
 
 EditorHost::SdlContext::SdlContext()
@@ -167,8 +177,12 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
     // editor-core-separation-8 campaign, PHASE5 - the seventh argument,
     // &m_renderGraphControlCommandBridge, so the 6 new GET /render_graph/*
     // routes can reach it.
+    // editor-core-separation-12 campaign (Project Assembly Hot Reload plan,
+    // BIG-STEP 1) - the eighth argument, &s_editorHotReloadDebugCapability,
+    // so every GET/POST /project_assembly/* route can reach it.
     , m_networkServer(&m_captureBridge, &m_commandBridge, &m_uiCommandBridge, &m_frameDebuggerCommandBridge,
-          &m_assetImportCommandBridge, &s_editorLogQueryCapability, &m_renderGraphControlCommandBridge)
+          &m_assetImportCommandBridge, &s_editorLogQueryCapability, &m_renderGraphControlCommandBridge,
+          &s_editorHotReloadDebugCapability)
 {
     // editor-core-separation-1 campaign, PHASE3
     // (PHASE3_LOGGING_GLOBAL_LOGSINK_EXTRACTION.md) - installs the ONE real
@@ -406,7 +420,8 @@ int EditorHost::Run()
         // Physics/Animation run this frame.
         if (const std::optional<EngineCommandRequest> request = m_commandBridge.TryPeekPendingCommandRequest()) {
             GTE_PROFILE_SCOPE("EditorHost::ExecuteEngineCommand");
-            const EngineCommandResult result = ExecuteEngineCommand(m_game, m_renderer, m_sceneIOCapability, *request);
+            const EngineCommandResult result =
+                ExecuteEngineCommand(m_game, m_renderer, m_sceneIOCapability, &s_editorHotReloadDebugCapability, *request);
             m_commandBridge.FulfillCommand(result);
         }
 

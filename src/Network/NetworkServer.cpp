@@ -297,7 +297,7 @@ void RespondWithRenderGraphControlCommandResult(
 void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, EngineCommandBridge* commandBridge,
     EditorUiCommandBridge* uiCommandBridge, FrameDebuggerCommandBridge* frameDebuggerCommandBridge,
     AssetImportCommandBridge* assetImportCommandBridge, ILogQueryCapability* logQueryCapability,
-    RenderGraphControlCommandBridge* renderGraphControlCommandBridge)
+    RenderGraphControlCommandBridge* renderGraphControlCommandBridge, IHotReloadDebugCapability* hotReloadDebugCapability)
 {
     server.Get("/http_hello_world", [](const httplib::Request&, httplib::Response& res) {
         res.set_content(HandleHelloWorld(), "text/plain; charset=utf-8");
@@ -1212,6 +1212,160 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         logQueryCapability->Clear();
         res.set_content(BuildClearLogsResponseJson(clearedCount), "application/json");
     });
+    // --- editor-core-separation-12 campaign (Project Assembly Hot Reload
+    // plan, BIG-STEP 1) - see that campaign's PHASE3 doc for the full
+    // design. All 5 OBSERVE routes below (status/ledger/loaded_assemblies/
+    // component_types) EXCEPT scene_snapshot bypass EngineCommandBridge
+    // entirely (mirrors GET /get_logs's own "no bridge needed" shape) -
+    // scene_snapshot is the ONE exception, routed through commandBridge
+    // instead, because it touches the live ECS Registry (see
+    // Core/EditorCapabilities.h's own IHotReloadDebugCapability doc comment
+    // for why).
+
+    server.Get("/project_assembly/hot_reload/status",
+        [hotReloadDebugCapability](const httplib::Request&, httplib::Response& res) {
+        if (hotReloadDebugCapability == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("hot reload debug capability not available"), "application/json");
+            return;
+        }
+        res.set_content(BuildHotReloadStatusResponseJson(hotReloadDebugCapability->GetHotReloadStatus()), "application/json");
+    });
+
+    server.Get("/project_assembly/debug/ledger",
+        [hotReloadDebugCapability](const httplib::Request& req, httplib::Response& res) {
+        const ParsedProjectNameQuery parsed = ParseProjectNameQuery(req.get_param_value("name"));
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        if (hotReloadDebugCapability == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("hot reload debug capability not available"), "application/json");
+            return;
+        }
+        res.set_content(
+            BuildLedgerEntryResponseJson(parsed.projectName, hotReloadDebugCapability->GetLedgerEntry(parsed.projectName)),
+            "application/json");
+    });
+
+    server.Get("/project_assembly/debug/loaded_assemblies",
+        [hotReloadDebugCapability](const httplib::Request&, httplib::Response& res) {
+        if (hotReloadDebugCapability == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("hot reload debug capability not available"), "application/json");
+            return;
+        }
+        res.set_content(
+            BuildLoadedAssembliesResponseJson(hotReloadDebugCapability->GetLoadedAssemblyFileNames()), "application/json");
+    });
+
+    server.Get("/project_assembly/debug/component_types",
+        [hotReloadDebugCapability](const httplib::Request&, httplib::Response& res) {
+        if (hotReloadDebugCapability == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("hot reload debug capability not available"), "application/json");
+            return;
+        }
+        res.set_content(
+            BuildComponentTypeNamesResponseJson(hotReloadDebugCapability->GetRegisteredComponentTypeNames()), "application/json");
+    });
+
+    // scene_snapshot is the ONE OBSERVE route routed through
+    // EngineCommandBridge (see this campaign's PHASE0 doc, Correction 1) -
+    // mirrors GET-via-POST-style /save_scene//load_scene's own
+    // SubmitAndWait() shape exactly (lines ~1130-1165 above), even though
+    // this route is itself a GET.
+    server.Get("/project_assembly/debug/scene_snapshot",
+        [commandBridge](const httplib::Request&, httplib::Response& res) {
+        if (commandBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("engine command bridge not available"), "application/json");
+            return;
+        }
+        EngineCommandRequest request;
+        request.kind = EngineCommandKind::GetSceneSnapshot;
+        const EngineCommandBridge::SubmitResult submit = commandBridge->SubmitAndWait(request);
+        if (submit.alreadyPending) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("another engine command is already in progress"), "application/json");
+            return;
+        }
+        if (submit.timedOut) {
+            res.status = 504;
+            res.set_content(BuildGenericErrorResponseJson("engine command timed out"), "application/json");
+            return;
+        }
+        const GetSceneSnapshotOutcome& outcome = submit.result->getSceneSnapshot;
+        if (!outcome.editorAvailable) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson(outcome.errorMessage), "application/json");
+            return;
+        }
+        if (!outcome.success) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(outcome.errorMessage), "application/json");
+            return;
+        }
+        res.set_content(outcome.sceneJson, "application/json");
+    });
+
+    server.Post("/project_assembly/debug/compile_only",
+        [hotReloadDebugCapability](const httplib::Request& req, httplib::Response& res) {
+        const ParsedProjectNameQuery parsed = ParseProjectNameQuery(req.get_param_value("name"));
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        if (hotReloadDebugCapability == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("hot reload debug capability not available"), "application/json");
+            return;
+        }
+        const bool started = hotReloadDebugCapability->TriggerCompileOnly(parsed.projectName);
+        res.set_content(
+            BuildCompileOnlyTriggerResponseJson(started, started ? "" : "a build for this project is already in progress"),
+            "application/json");
+    });
+
+    // editor-core-separation-12 campaign, PHASE3 - the AGREED, STABLE route
+    // contract for a future BIG-STEP 3 campaign. Currently ALWAYS answers
+    // 501 - TriggerHotReload()'s own PHASE2 body always returns false, so
+    // this handler's shape already correctly degrades once a future
+    // campaign changes ONLY that method's body to sometimes return true -
+    // this handler's own code will need a small follow-up then (a 200
+    // success path), but its ROUTE/METHOD/QUERY-PARAM CONTRACT never
+    // changes. The final `res.status = 500;` below is UNREACHABLE for this
+    // whole campaign's lifetime (TriggerHotReload() never returns true
+    // until a future BIG-STEP 3 campaign changes it) - it exists purely as
+    // a defensive, explicit status code so this branch never silently
+    // answers with httplib's default 200 alongside an "unexpected" error
+    // body if that invariant is ever accidentally broken later.
+    server.Post("/project_assembly/hot_reload",
+        [hotReloadDebugCapability](const httplib::Request& req, httplib::Response& res) {
+        const ParsedProjectNameQuery parsed = ParseProjectNameQuery(req.get_param_value("name"));
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        if (hotReloadDebugCapability == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("hot reload debug capability not available"), "application/json");
+            return;
+        }
+        const bool started = hotReloadDebugCapability->TriggerHotReload(parsed.projectName);
+        if (!started) {
+            res.status = 501;
+            res.set_content(
+                BuildGenericErrorResponseJson("hot reload orchestrator not yet wired - see BIG-STEP 3"), "application/json");
+            return;
+        }
+        res.status = 500;
+        res.set_content(BuildGenericErrorResponseJson("unexpected: TriggerHotReload() reported success in a build with no real orchestrator"), "application/json");
+    });
 }
 
 } // namespace
@@ -1223,7 +1377,7 @@ struct NetworkServer::Impl {
 NetworkServer::NetworkServer(FrameCaptureBridge* captureBridge, EngineCommandBridge* commandBridge,
     EditorUiCommandBridge* uiCommandBridge, FrameDebuggerCommandBridge* frameDebuggerCommandBridge,
     AssetImportCommandBridge* assetImportCommandBridge, ILogQueryCapability* logQueryCapability,
-    RenderGraphControlCommandBridge* renderGraphControlCommandBridge)
+    RenderGraphControlCommandBridge* renderGraphControlCommandBridge, IHotReloadDebugCapability* hotReloadDebugCapability)
     : m_impl(std::make_unique<Impl>())
     , m_captureBridge(captureBridge)
     , m_commandBridge(commandBridge)
@@ -1232,6 +1386,7 @@ NetworkServer::NetworkServer(FrameCaptureBridge* captureBridge, EngineCommandBri
     , m_assetImportCommandBridge(assetImportCommandBridge)
     , m_logQueryCapability(logQueryCapability)
     , m_renderGraphControlCommandBridge(renderGraphControlCommandBridge)
+    , m_hotReloadDebugCapability(hotReloadDebugCapability)
 {
     // Registered exactly ONCE per NetworkServer instance, here in the
     // constructor - never inside Start() - so a Start()/Stop()/Start()
@@ -1239,12 +1394,15 @@ NetworkServer::NetworkServer(FrameCaptureBridge* captureBridge, EngineCommandBri
     // NEVER re-register the same route handler onto the same
     // httplib::Server a second time.
     RegisterRoutes(m_impl->server, m_captureBridge, m_commandBridge, m_uiCommandBridge, m_frameDebuggerCommandBridge,
-        m_assetImportCommandBridge, m_logQueryCapability, m_renderGraphControlCommandBridge);
+        m_assetImportCommandBridge, m_logQueryCapability, m_renderGraphControlCommandBridge, m_hotReloadDebugCapability);
     // task_manager/stl-parser-2 campaign, PHASE2 - m_assetImportCommandBridge
     // is now actually consulted by RegisterRoutes() above (POST /import_asset).
     // editor-core-separation-8 campaign, PHASE5 - m_renderGraphControlCommandBridge
     // is now actually consulted by RegisterRoutes() above (the 6 new
     // GET /render_graph/* routes).
+    // editor-core-separation-12 campaign - m_hotReloadDebugCapability is now
+    // actually consulted by RegisterRoutes() above (the 7 new
+    // GET/POST /project_assembly/* routes).
 }
 
 NetworkServer::~NetworkServer()
