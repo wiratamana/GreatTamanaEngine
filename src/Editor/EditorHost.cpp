@@ -476,7 +476,15 @@ int EditorHost::Run()
             // hazard this avoids.
             const std::filesystem::path outputDirectory = ResolveProjectAssemblyOutputDirectory(gte::ExecutableDirectory());
             const std::filesystem::path buildDirectory = ResolveCMakeBuildDirectory(gte::ExecutableDirectory());
-            PerformProjectAssemblyHotReload(*requestedProject, m_core, m_renderer, this, outputDirectory, buildDirectory);
+            // editor-core-separation-15 campaign (Project Assembly Hot Reload
+            // plan, BIG-STEP 4), PHASE1 - resolved HERE for the exact same
+            // reason outputDirectory/buildDirectory are: this file is
+            // gte_editor-tier (already includes ProjectRootPath.h - confirmed,
+            // this translation unit's own #include list), and
+            // PerformProjectAssemblyHotReload() itself is gte_core-tier and
+            // must never resolve this path internally.
+            const std::filesystem::path projectRootDirectory = ResolveProjectRootDirectory();
+            PerformProjectAssemblyHotReload(*requestedProject, m_core, m_renderer, this, outputDirectory, buildDirectory, projectRootDirectory);
             m_hotReloadCommandBridge.FulfillPending();
         }
 

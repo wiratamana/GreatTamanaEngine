@@ -40,20 +40,26 @@ void RestoreProjectAssemblyHotReloadState(Core& core, const HotReloadStateSnapsh
 // Called SYNCHRONOUSLY from EditorHost::Run()'s own main loop - blocks the
 // calling (main) thread for its entire duration (LDD-HR4). Targets exactly
 // one project (LDD-HR5).
-// `outputDirectory`/`buildDirectory` are RESOLVED BY THE CALLER
-// (EditorHost::Run()'s drain point, gte_editor-tier) and handed in as plain
-// values - this function must NEVER call gte::ExecutableDirectory() itself:
-// this file lives in src/Core/Plugins/, compiled into gte_core (see every
-// OTHER file in this same folder in CMakeLists.txt's gte_core source list),
-// and gte::ExecutableDirectory() is gte_editor-tier (defined only in
-// src/Editor/ProjectRootPath.cpp, never linked into gte_core alone) -
 // mirrors ResolveProjectAssemblyOutputDirectory()/ResolveCMakeBuildDirectory()'s
 // own identical "take the resolved directory as an explicit parameter,
 // never resolve it internally" precedent (ProjectAssemblyBuildRunner.h),
 // for the exact same layering reason. Just use the two parameters as handed
 // in by the caller - do not re-resolve them, and do not #include
 // "../../Editor/ProjectRootPath.h" here.
+//
+// editor-core-separation-15 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 4), PHASE1 - resolved by the CALLER (EditorHost::Run()'s own
+// drain point, gte_editor-tier), exactly mirroring
+// outputDirectory/buildDirectory's own existing precedent immediately
+// above (see this whole file's own header comment, and
+// PHASE0_MASTER_STRATEGY.md Section 2.2, for the full layering hazard
+// this avoids: ResolveProjectRootDirectory() is gte_editor-tier only,
+// defined in src/Editor/ProjectRootPath.cpp, and this file must never
+// call it directly). PHASE2/PHASE3 (this same campaign) pass this
+// straight through, unchanged, into CaptureProjectAssemblyHotReloadState()/
+// RestoreProjectAssemblyHotReloadState() respectively.
 void PerformProjectAssemblyHotReload(const std::string& projectName, Core& core, Renderer& renderer,
-    EditorHost* editorHost, const std::filesystem::path& outputDirectory, const std::filesystem::path& buildDirectory);
+    EditorHost* editorHost, const std::filesystem::path& outputDirectory, const std::filesystem::path& buildDirectory,
+    const std::filesystem::path& projectRootDirectory);
 
 } // namespace gte

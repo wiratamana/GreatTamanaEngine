@@ -50,6 +50,10 @@
 // class, included by name" precedent immediately above exactly.
 #include "Plugins/ProjectAssemblyHost.h"
 
+// editor-core-separation-15 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 4), PHASE1.
+#include "../Assets/AssetDatabase.h"
+
 #include <volk.h>
 
 #include <functional>
@@ -351,6 +355,22 @@ public:
     // exists.
     ProjectAssemblyHost& GetProjectAssemblyHost() noexcept { return m_projectAssemblyHost; }
 
+    // editor-core-separation-15 campaign (Project Assembly Hot Reload plan,
+    // BIG-STEP 4), PHASE1 - a persistent, engine-owned AssetDatabase,
+    // refreshed exactly ONCE per hot-reload cycle by
+    // CaptureProjectAssemblyHotReloadState() (PHASE2), then reused AS-IS by
+    // RestoreProjectAssemblyHotReloadState() (PHASE3) later in the SAME
+    // cycle - mirrors Unity's own persistent Assets-folder database concept
+    // (kept live, not rescanned from scratch on every single operation).
+    // Deliberately a SEPARATE instance from Editor/Panels/ProjectPanel.h's
+    // own separately-owned, separately-refreshed AssetDatabase (used by the
+    // Project Browser panel), and separate again from the throwaway one-shot
+    // instances Editor/SceneIO.cpp's SaveScene()/LoadScene() already build
+    // fresh on every call - unifying all three is real, legitimate, OUT OF
+    // SCOPE future work (PHASE0_MASTER_STRATEGY.md, LDD-HR7) - do not attempt
+    // it as part of this phase.
+    AssetDatabase& GetAssetDatabase() noexcept { return m_assetDatabase; }
+
     // Read accessor for PHASE3 (render-feature capability lookup) and
     // PHASE4 (editor-panel capability lookup) - both look up capabilities
     // via AllLoadedModules(), never re-scanning the plugins/ folder
@@ -623,6 +643,13 @@ private:
     // Mirrors m_pluginHost's own "no constructor dependency on any other
     // Core member" placement exactly.
     ProjectAssemblyHost m_projectAssemblyHost;
+
+    // editor-core-separation-15 campaign, PHASE1 - see GetAssetDatabase()'s
+    // own doc comment above. Default-constructed, empty, until the first hot
+    // reload cycle calls RefreshFromDirectory() on it (PHASE2) - never
+    // refreshed at engine startup by this phase, deliberately (nothing reads
+    // it before PHASE2 exists).
+    AssetDatabase m_assetDatabase;
 
     // editor-core-separation-6 campaign, PHASE2
     // (PHASE2_PLUGIN_CAPABILITY_ORCHESTRATOR_REGISTRY_AND_RENDER_FEATURE_MIGRATION.md,

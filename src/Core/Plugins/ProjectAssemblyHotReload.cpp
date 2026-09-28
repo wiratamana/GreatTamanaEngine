@@ -87,7 +87,8 @@ void PumpWindowsMessagesDuringHotReloadFreeze()
 } // namespace
 
 void PerformProjectAssemblyHotReload(const std::string& projectName, Core& core, Renderer& renderer,
-    EditorHost* editorHost, const std::filesystem::path& outputDirectory, const std::filesystem::path& buildDirectory)
+    EditorHost* editorHost, const std::filesystem::path& outputDirectory, const std::filesystem::path& buildDirectory,
+    const std::filesystem::path& /*projectRootDirectory*/)
 {
     GTE_LOG_INFO("ProjectAssemblyHotReload", "Hot reload requested for '" + projectName + "' - freezing engine.");
     ProjectAssemblyHotReloadDebugStatus::Instance().Set("CapturingState", projectName);
