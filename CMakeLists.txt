@@ -480,6 +480,7 @@ add_library(gte_core STATIC
     src/ECS/EntityManager.h
     src/ECS/ComponentStorage.h
     src/ECS/Registry.h
+    src/ECS/Registry.cpp
     src/ECS/TransformHierarchy.h
     src/ECS/TransformHierarchy.cpp
     src/ECS/EntityQuery.h

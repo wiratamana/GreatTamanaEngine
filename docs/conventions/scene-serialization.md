@@ -270,6 +270,23 @@ embedded HTTP server, with an optional `path` JSON field (omitted/empty means
 shape, status-code mapping, and the `GTE_ENABLE_EDITOR`-off `503` precedent
 both routes follow.
 
+## Project Assembly Hot Reload's own use of this system
+
+`Scene/SceneBuilder.cpp`'s `BuildSceneDocumentFromRegistry()`/
+`ReconstructSceneFromDocument()` are also the exact capture/restore
+machinery behind `POST /project_assembly/hot_reload?name=<X>`'s own HOOK
+POINT A/B (`src/Core/Plugins/ProjectAssemblyHotReload.cpp`,
+`editor-core-separation-15` campaign) - a real hot-reload cycle for a
+Project Assembly's own `.dll` pair genuinely preserves the live ECS
+world's state (every entity, every built-in AND Project-Assembly-defined
+custom reflected component) across the freeze/unload/recompile/reload-or-
+rollback cycle, by reusing these SAME two functions, unmodified, rather
+than any separate mechanism. See
+[docs/conventions/project-assembly-system.md](project-assembly-system.md)'s
+own `## Hot Reload` section for the full picture, including this whole
+feature's own honest, permanent boundary (non-ECS C++ state does not
+survive a reload).
+
 ## `nlohmann::json` scope
 
 As of `scene-serialization-2`, `nlohmann::json` is a legitimate dependency of

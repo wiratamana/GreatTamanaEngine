@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "ComponentStorage.h"
 #include "Entity.h"
@@ -7,6 +7,8 @@
 #include <cassert>
 #include <cstddef>
 #include <memory>
+#include <string>
+#include <typeinfo>
 #include <utility>
 #include <vector>
 
@@ -14,23 +16,48 @@ namespace gte {
 
 namespace detail {
 
-// Assigns each distinct component type T a small, dense, monotonically
-// increasing integer id the first time it's used (a Meyer's-singleton
-// counter per T) - deliberately NOT std::type_index/RTTI-based hashing, so
-// Registry can index m_pools directly by id (an O(1) array lookup) instead
-// of hashing a type_index on every single AddComponent<T>()/GetComponent<T>()
-// call. Same "no hashing on the hot path, index directly instead" philosophy
-// as GpuMemoryTracker's handle-indexed slot array (see AGENTS.md).
-inline std::size_t NextComponentTypeId() noexcept
-{
-    static std::size_t next = 0;
-    return next++;
-}
+// editor-core-separation-15 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 4), PHASE5 - REAL FIX for a confirmed, live, active
+// memory-corruption bug (see task_manager/editor-core-separation-15/
+// PHASE5_COMPLETION_REPORT.md's "New gaps found (fixed)" section for the
+// full incident writeup). ComponentTypeId<T>() used to hand out ids from a
+// per-BINARY-IMAGE local static counter (a Meyer's singleton INSIDE this
+// header-only inline function) - correct only as long as every caller of
+// Storage<T>()/FindStorage<T>() for a given T is compiled into the SAME
+// image. A Project Assembly .dll gets its OWN, independent copy of that
+// counter (standard, expected PE-COFF behavior for an inline function's
+// function-local static across a module boundary) - so the exact same C++
+// type could get assigned a DIFFERENT numeric slot depending on whether the
+// call happened to run inside GreatTamanaEditor.exe's own compiled code or
+// inside a Project Assembly .dll's - and since Registry::m_pools is one
+// single, shared std::vector, two UNRELATED types landing on the same
+// numeric slot silently REINTERPRET each other's live ComponentStorage<T>
+// object, corrupting real engine data (confirmed, live: a Project
+// Assembly's own first custom component type collided with the real,
+// built-in Transform component's slot and corrupted its storage the moment
+// registry.AddComponent<CustomType>() ran).
+//
+// The fix: resolve each type's slot through ONE single, shared,
+// PROCESS-WIDE authority - ResolveComponentTypeIdByName() below - defined
+// out-of-line in Registry.cpp (compiled ONLY into gte_core, i.e. into
+// GreatTamanaEditor.exe's own image) and correctly resolved/imported as the
+// SAME single exported symbol from a Project Assembly .dll, mirroring
+// ComponentTypeRegistry::Instance()'s own already-proven-correct shape (a
+// plain out-of-line singleton in a real .cpp file, never a header-only
+// inline/template Meyer's singleton). typeid(T).name() is used ONLY as a
+// stable per-type STRING KEY into that shared table (never for RTTI-based
+// dynamic dispatch, never on any hot path - looked up exactly once per (T,
+// image) pair, then cached in ComponentTypeId<T>()'s own local static
+// below, so every ordinary AddComponent<T>()/GetComponent<T>() call still
+// pays zero extra cost) - this restores the original header comment's
+// "small, dense, monotonically increasing integer id" property globally,
+// process-wide, instead of merely per-image.
+std::size_t ResolveComponentTypeIdByName(const std::string& mangledTypeName);
 
 template <typename T>
 std::size_t ComponentTypeId() noexcept
 {
-    static const std::size_t id = NextComponentTypeId();
+    static const std::size_t id = ResolveComponentTypeIdByName(typeid(T).name());
     return id;
 }
 
@@ -134,6 +161,53 @@ public:
             m_pools[id] = std::make_unique<ComponentStorage<T>>();
         }
         return static_cast<ComponentStorage<T>&>(*m_pools[id]);
+    }
+
+    // editor-core-separation-15 campaign (Project Assembly Hot Reload plan,
+    // BIG-STEP 4), PHASE5 - a SECOND, related fix for a confirmed, live
+    // crash found alongside the ComponentTypeId<T>() collision bug above.
+    // A Project Assembly .dll's own custom component type's ComponentStorage<T>
+    // pool object is heap-allocated (Storage<T>() above) but its VIRTUAL
+    // FUNCTION TABLE (IComponentPool - ECS/ComponentStorage.h) is compiled
+    // INTO that same .dll's own image. Once that .dll is FreeLibrary()'d
+    // (ProjectAssemblyHost::UnloadProjectAssembly(), BIG-STEP 2), the pool
+    // object itself still physically sits in Registry::m_pools (nothing
+    // about an ordinary DLL unload touches the OTHER, unrelated Registry
+    // object it happens to live inside) - but its vtable pointer now
+    // dangles into unmapped memory. Any LATER virtual call through that
+    // same IComponentPool* (e.g. DestroyEntity()'s own `pool->Remove(entity)`
+    // loop over EVERY pool, called by ClearEntireScene() during ANY future
+    // hot-reload cycle's own HOOK POINT B) is undefined behavior - confirmed,
+    // live, via gdb: a real SIGSEGV inside Registry::DestroyEntity() on the
+    // SECOND consecutive hot-reload cycle in one process session (the FIRST
+    // cycle's own dangling pointer happened to still be readable/reusable
+    // right after FreeLibrary() returned - the OS had not yet reused that
+    // address range - making this bug intermittent rather than always-
+    // reproducible on the very first reload).
+    //
+    // The fix: ResetStoragePool<T>() destroys (resets to nullptr) T's own
+    // pool - called by ComponentTypeDescriptor::destroyPool
+    // (ECS/Reflection/ComponentTypeRegistry.inl), in turn called by
+    // ProjectAssemblyRegistrationLedger::UnregisterEverythingFor() for every
+    // CUSTOM component typeName a specific Project Assembly's own ledger
+    // entry recorded - BEFORE that assembly's .dll is FreeLibrary()'d, and
+    // BEFORE ComponentTypeRegistry::UnregisterDescriptor() removes its
+    // descriptor. Never called for a BUILT-IN component type (Transform,
+    // Name, Camera, ...) - RegisterBuiltinComponentReflections() runs
+    // OUTSIDE any project's own BeginRecordingFor()/EndRecording() bracket,
+    // so its own typeNames are never recorded in ANY project's ledger entry
+    // to begin with. Safe to call for a T whose pool doesn't currently
+    // exist (id >= m_pools.size(), or m_pools[id] already null) - a no-op,
+    // matching this whole file's own established "no-op on the
+    // already-torn-down/never-built case" convention (e.g. DestroyEntity()
+    // on an already-dead entity).
+    template <typename T>
+    void ResetStoragePool()
+    {
+        const std::size_t id = detail::ComponentTypeId<T>();
+        if (id < m_pools.size()) {
+            m_pools[id].reset();
+        }
     }
 
 private:

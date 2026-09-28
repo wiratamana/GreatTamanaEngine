@@ -61,10 +61,15 @@ tree already IS the shared-CRT tree.
 - **`Projects/` is `.gitignore`d, single-developer, same-toolchain,
   same-build-run only.** Never design anything to survive being zipped up and
   handed to a different machine/toolchain version.
-- **No hot reload, anywhere, ever.** A Project Assembly `.dll` is scanned/
+- ~~No hot reload, anywhere, ever. A Project Assembly `.dll` is scanned/
   loaded exactly once, at `GreatTamanaEditor.exe` startup. A changed/
   recompiled `.dll` requires a full close+relaunch. No file-watcher, no
-  reload button, no `OnBeforeUnload` hook.
+  reload button, no `OnBeforeUnload` hook.~~ **SUPERSEDED, 2026-09-28
+  onward** - see `task_manager/editor-core-separation-12/` through `-15/`
+  (the "Project Assembly Hot Reload" 4-campaign effort) and this file's own
+  new `## Hot Reload` section below for the full, current, honest picture.
+  The strikethrough text above is the ORIGINAL, now-historical Locked
+  Design Decision, kept for the record, not deleted.
 - **This is a NEW, ADDITIVE, PARALLEL system.** It never modifies
   `plugins/gte_plugin_abi/`, `src/Core/Plugins/PluginHost.h/.cpp`, or any
   existing `IRenderFeatureModule_*`/`IEditorPanelModule_v1` ABI type.
@@ -153,8 +158,15 @@ the target's own `.cpp` (forces a real relink, which reliably re-runs the
   that never constructs one) is skipped with a loud `GTE_LOG_WARNING`, never
   crashed on.
 - Keeps every `HMODULE` alive forever — never `FreeLibrary()`'d except on the
-  "declined/invalid" early-return paths where the export was never called
-  (LDD4 — no hot reload, ever).
+  "declined/invalid" early-return paths where the export was never called,
+  ~~(LDD4 — no hot reload, ever)~~ **or during a real, later
+  `POST /project_assembly/hot_reload` cycle's own unload phase
+  (`ProjectAssemblyHost::UnloadProjectAssembly()`) - SUPERSEDED, 2026-09-28
+  onward, see this file's own new `## Hot Reload` section below.** This
+  file's own initial `LoadProjectAssemblies()` scan/load pass itself is
+  still exactly-once-at-startup, unchanged - only a LATER, explicit,
+  user-triggered hot-reload cycle ever unloads/reloads an already-loaded
+  assembly.
 
 `Core::LoadProjectAssemblies()` is a thin public pass-through into
 `m_projectAssemblyHost`, mirroring `Core::LoadPlugins()`'s own identical
@@ -301,11 +313,96 @@ until a future campaign adds real handle-aliasing support to
 render-graph capability is "the pass is real and visible in the Render Graph
 panel/HTTP endpoint" — never on-screen compositing.
 
+## Hot Reload
+
+A four-campaign effort, `editor-core-separation-12` through `-15` (each own
+`PHASE0_MASTER_STRATEGY.md`/`CAMPAIGN_COMPLETION_REPORT.md` under
+`task_manager/`), gave this whole system a real, working hot reload -
+`POST /project_assembly/hot_reload?name=<X>` genuinely recompiles and swaps
+in ONE named, already-loaded Project Assembly's `<Name>_Game.dll`/
+`_Editor.dll` pair, in place, while `GreatTamanaEditor.exe` keeps running -
+`gte_core`/`gte_editor` themselves are NEVER recompiled or reloaded, only
+the targeted project's own two `.dll`s ever are.
+
+**What one cycle actually does, in order**: freeze the whole engine main
+loop (synchronous, on the main thread, for the cycle's entire duration) ->
+capture the live ECS world's full state -> back up the current `.dll` pair
+-> cleanly unload it (`ProjectAssemblyHost::UnloadProjectAssembly()`,
+BIG-STEP 2) -> recompile synchronously (`cmake --build`) -> on success,
+load the fresh binaries; on ANY failure (a bad compile, or a rejected
+in-flight-guard race), restore the backed-up binaries and reload the OLD,
+still-good pair instead (LDD-HR3 - a failed reload is indistinguishable
+from the button never having been pressed, other than the one proof this
+section exists to make honest: the ECS state below still reflects whatever
+was live immediately before the button was pressed, not a cold start) ->
+restore the captured ECS world state -> unfreeze. `GET
+/project_assembly/hot_reload/status`, polled from a second connection
+while the first request blocks, reports live phase progress
+(`CapturingState` -> `BackingUpBinaries` -> `Unloading` -> `Compiling` ->
+`ReloadingNewCode`/`RollingBack` -> `RestoringState` -> `Idle`), ending
+`lastOutcome`: `"Success"`, `"RolledBack"`, or (rare) `"CriticalFailure"`.
+
+**The honest boundary, stated as plainly as this whole effort's own
+external master plan states it**: everything living in the ECS `Registry`
+survives a reload cycle, faithfully - every entity, every built-in
+reflected component (Transform, Name, Camera, ...), AND every
+Project-Assembly-defined CUSTOM reflected component type (proven live by
+this system's own permanent `Projects/ProjectAssemblyProbe/` fixture's
+`ProbeHotReloadMarker` component, whose runtime-MUTATED value survives both
+a successful reload AND a rolled-back one). Anything a Project Assembly's
+own code keeps OUTSIDE the ECS Registry - a bare C++ global, a non-ECS
+manager object, GPU resources a render pass owns opaquely (like this same
+probe fixture's own lazily-built `ComputePipeline`) - does NOT survive: it
+is destroyed and rebuilt from scratch, exactly like a fresh process start,
+on every single reload. The concrete, already-existing example: a
+hypothetical `ProbeEditorPanel::m_clickCount` (a plain `int` tracking how
+many times a button was clicked) resets to `0` on every reload, by
+construction - there is no mechanism, and none is planned, to preserve
+arbitrary non-ECS C++ state across a reload. A future, explicitly
+NOT-YET-BUILT option for a Project Assembly author who needs this anyway:
+an opt-in `GTE_SerializeProjectState()`/`GTE_RestoreProjectState()` export
+pair the reload orchestrator would call if present - named here as real,
+deliberately deferred future work, not built by this 4-campaign effort.
+
+**Two further, explicitly out-of-scope limitations, stated honestly rather
+than silently smoothed over**:
+- The engine's own persistent `AssetDatabase` (refreshed once per reload
+  cycle, `Core::GetAssetDatabase()`) is a SEPARATE instance from the one
+  `src/Editor/Panels/ProjectPanel.h` already owns for the Project Browser
+  panel, and separate again from `Editor/SceneIO.cpp`'s own throwaway
+  per-call instances - this effort does not unify all three into one
+  single engine-wide instance.
+- A reload cycle's own restore step briefly clears and rebuilds the
+  ENTIRE live world (every entity, regardless of which Project Assembly -
+  if more than one is loaded - originally created it), so every entity's
+  numeric `Entity` ID/handle changes across a cycle, for every
+  currently-loaded project, not just the one actually being reloaded. This
+  is an accepted, currently-uncommon limitation (in practice only one
+  Project Assembly is ever loaded at a time), not a scoped, per-project-only
+  restore - building that would need an entity-to-owning-project
+  attribution system that does not exist today.
+
+See `docs/conventions/scene-serialization.md` for the shared reconstruction
+machinery (`Scene/SceneBuilder.cpp`'s `BuildSceneDocumentFromRegistry()`/
+`ReconstructSceneFromDocument()`) this whole feature's own capture/restore
+hook points reuse verbatim - the SAME functions `Editor::SaveScene()`/
+`LoadScene()` (Ctrl+S/Ctrl+O) already use, unmodified.
+
+Full history: `task_manager/editor-core-separation-12/PHASE0_MASTER_STRATEGY.md`
+through `task_manager/editor-core-separation-15/PHASE0_MASTER_STRATEGY.md`,
+and each campaign's own `CAMPAIGN_COMPLETION_REPORT.md`.
+
 ## What this system does NOT do (explicit Non-Goals)
 
 - No gameplay/"MonoBehaviour"-style scripting bridge (per-entity
   `Update()`/`Start()`, ECS component authoring, Input access).
-- No hot reload, ever.
+- ~~No hot reload, ever.~~ **SUPERSEDED, 2026-09-28 onward** - this WAS a
+  real, permanent non-goal of THIS campaign (`editor-core-separation-11`),
+  and remained true through `editor-core-separation-14`'s own PHASE4/PHASE5
+  reports right up until the `editor-core-separation-12` through `-15`
+  4-campaign "Project Assembly Hot Reload" effort shipped it for real - see
+  this file's own new `## Hot Reload` section below for the current, full,
+  honest picture, including its own remaining boundaries/limitations.
 - No cross-machine/cross-checkout portability — `Projects/` is
   `.gitignore`d, single-developer, same-build-run only.
 - No separate Player executable — both `_Game.dll`/`_Editor.dll` load into

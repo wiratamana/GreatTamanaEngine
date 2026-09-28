@@ -30,6 +30,11 @@ void RegisterComponentType(const std::string& typeName, std::vector<FieldDescrip
             registry.AddComponent<T>(entity);
         }
     };
+    // editor-core-separation-15 campaign (Project Assembly Hot Reload plan,
+    // BIG-STEP 4), PHASE5 - see ComponentTypeDescriptor::destroyPool's own
+    // doc comment (ComponentTypeDescriptor.h) and Registry::ResetStoragePool<T>()'s
+    // own doc comment (ECS/Registry.h) for the full "why".
+    descriptor.destroyPool = [](Registry& registry) { registry.ResetStoragePool<T>(); };
     descriptor.fields = std::move(fields);
     ComponentTypeRegistry::Instance().RegisterDescriptor(std::move(descriptor));
 }

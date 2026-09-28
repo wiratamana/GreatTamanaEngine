@@ -96,6 +96,17 @@ void ProjectAssemblyRegistrationLedger::UnregisterEverythingFor(const std::strin
     // Reverse registration order for each category - the mirror image of
     // how construction typically unwinds (last-registered, first-torn-down).
     for (auto nameIt = entry.componentTypeNames.rbegin(); nameIt != entry.componentTypeNames.rend(); ++nameIt) {
+        // editor-core-separation-15 campaign (Project Assembly Hot Reload
+        // plan, BIG-STEP 4), PHASE5 - destroy this custom component type's
+        // own ComponentStorage<T> pool BEFORE removing its descriptor and
+        // BEFORE the caller's own subsequent FreeLibrary() - see
+        // Registry::ResetStoragePool<T>()'s own doc comment (ECS/Registry.h)
+        // for the full "why" (a confirmed, live, gdb-diagnosed crash this
+        // closes).
+        if (const ComponentTypeDescriptor* descriptor = ComponentTypeRegistry::Instance().Find(*nameIt);
+            descriptor != nullptr && descriptor->destroyPool) {
+            descriptor->destroyPool(core.GetGame().GetRegistry());
+        }
         ComponentTypeRegistry::Instance().UnregisterDescriptor(*nameIt);
     }
     for (auto nameIt = entry.panelNames.rbegin(); nameIt != entry.panelNames.rend(); ++nameIt) {

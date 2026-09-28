@@ -85,6 +85,17 @@ struct ComponentTypeDescriptor {
     // first).
     std::function<void(Registry& registry, Entity entity)> ensureDefaultComponent;
 
+    // editor-core-separation-15 campaign (Project Assembly Hot Reload plan,
+    // BIG-STEP 4), PHASE5 - a type-erased Registry::ResetStoragePool<T>()
+    // (ECS/Registry.h). Destroys T's own ComponentStorage<T> pool object
+    // entirely (reset to nullptr), NOT just this one entity's component -
+    // see Registry::ResetStoragePool<T>()'s own doc comment for the full
+    // "why": a Project Assembly's own custom component type's pool carries
+    // a vtable compiled into that assembly's .dll, which goes dangling the
+    // moment that .dll is FreeLibrary()'d, and must be destroyed BEFORE
+    // that happens - never populated for a BUILT-IN component type.
+    std::function<void(Registry& registry)> destroyPool;
+
     std::vector<FieldDescriptor> fields;
 };
 

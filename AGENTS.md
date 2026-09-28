@@ -914,16 +914,21 @@ tree; no separate `build-shared-crt` tree was ever created or is ever needed.
 
 Full convention: [docs/conventions/project-assembly-system.md](docs/conventions/project-assembly-system.md).
 
-### Project Assembly Hot Reload — Live Debug Surface (BIG-STEP 1 only)
+### Project Assembly Hot Reload — Live Debug Surface (BIG-STEP 1 of 4 - the whole 4-BIG-STEP effort is now COMPLETE, see "BIG-STEP 4" below)
 
 A four-phase campaign, `editor-core-separation-12`
 (`task_manager/editor-core-separation-12/PHASE0_MASTER_STRATEGY.md`,
 `CAMPAIGN_COMPLETION_REPORT.md`), gave the Project Assembly system above its
 first HTTP visibility - implementing ONLY "BIG-STEP 1" (live debug + compile/
-reload triggers) of a larger four-part external master plan; BIG-STEP 2
+reload triggers) of a larger four-part external master plan - BIG-STEP 2
 (teardown safety/registration ledger), BIG-STEP 3 (synchronous compile/atomic
-swap orchestrator), and BIG-STEP 4 (state snapshot/restore) remain FULLY
-UNIMPLEMENTED, deliberately deferred future campaigns. A new Bucket B
+swap orchestrator), and BIG-STEP 4 (state snapshot/restore) were, AT THE TIME
+this campaign shipped, deliberately deferred future campaigns - **all three
+are now DONE too, see "BIG-STEP 4" below for the closing writeup; this
+sentence is kept, historically accurate for what was true when this
+campaign itself shipped, not silently updated to imply BIG-STEP 1 shipped
+the whole effort**.
+A new Bucket B
 capability interface, `IHotReloadDebugCapability`
 (`src/Core/EditorCapabilities.h`), implemented by `EditorHotReloadDebugCapability`
 (`src/Editor/EditorHotReloadDebugCapability.h/.cpp`, wired into `NetworkServer`'s
@@ -967,9 +972,13 @@ A five-phase campaign, `editor-core-separation-13`
 (`task_manager/editor-core-separation-13/PHASE0_MASTER_STRATEGY.md`,
 `CAMPAIGN_COMPLETION_REPORT.md`), implements "BIG-STEP 2" (teardown safety +
 registration ledger) of the same four-part external master plan BIG-STEP 1
-(above) established; BIG-STEP 3 (synchronous compile/atomic swap orchestrator)
-and BIG-STEP 4 (state snapshot/restore) remain FULLY UNIMPLEMENTED - `POST
-/project_assembly/hot_reload` still answers a permanent `501`, unchanged.
+(above) established; BIG-STEP 3 (synchronous compile/atomic swap
+orchestrator) and BIG-STEP 4 (state snapshot/restore) were, AT THE TIME
+this campaign shipped, FULLY UNIMPLEMENTED - `POST
+/project_assembly/hot_reload` still answered a permanent `501` back then;
+**both are now DONE, see "BIG-STEP 4" below - this sentence is kept as an
+accurate historical snapshot of this campaign's own moment in time, not
+updated to imply otherwise**.
 This campaign's own success bar: an already-loaded Project Assembly can now be
 safely, cleanly UNLOADED, on command, leaving zero dangling pointers anywhere
 in the engine and the process running normally afterward - proven live, not
@@ -1057,7 +1066,10 @@ A five-phase campaign, `editor-core-separation-14`
 `CAMPAIGN_COMPLETION_REPORT.md`), implements "BIG-STEP 3" (synchronous
 compile/atomic swap orchestrator) of the same four-part external master plan
 BIG-STEP 1/BIG-STEP 2 (above) established; BIG-STEP 4 (state snapshot/
-restore) remains FULLY UNIMPLEMENTED. `POST /project_assembly/hot_reload?name=<X>`
+restore) was, AT THE TIME this campaign shipped, FULLY UNIMPLEMENTED -
+**now DONE, see "BIG-STEP 4" below - this sentence is kept as an accurate
+historical snapshot of this campaign's own moment in time**. `POST
+/project_assembly/hot_reload?name=<X>`
 is no longer a permanent `501` - it is REAL: it freezes the whole engine main
 loop, backs up the targeted Project Assembly's current `_Game.dll`/`_Editor.dll`,
 cleanly unloads them (`ProjectAssemblyHost::UnloadProjectAssembly()`,
@@ -1124,6 +1136,104 @@ a slow-build check proving the main thread stays genuinely frozen without
 being force-closed by Windows, and both directions of the shared in-flight
 build guard). See `task_manager/editor-core-separation-14/CAMPAIGN_COMPLETION_REPORT.md`
 for the full five-phase writeup.
+
+### Project Assembly Hot Reload — State Snapshot, Restore, and Campaign Closeout (BIG-STEP 4 of 4 - THE WHOLE 4-BIG-STEP EFFORT IS NOW DONE)
+
+A five-phase campaign, `editor-core-separation-15`
+(`task_manager/editor-core-separation-15/PHASE0_MASTER_STRATEGY.md`,
+`CAMPAIGN_COMPLETION_REPORT.md`), implements "BIG-STEP 4" (state
+snapshot/restore) of the same four-part external master plan BIG-STEP
+1/2/3 (above) established - **the final BIG-STEP of the whole effort.**
+HOOK POINT A/B (`CaptureProjectAssemblyHotReloadState()`/
+`RestoreProjectAssemblyHotReloadState()`, `src/Core/Plugins/
+ProjectAssemblyHotReload.h/.cpp`, permanent, logged no-op stubs since
+`editor-core-separation-14`) now have real bodies: capture builds a full
+`SceneDocument` snapshot of the live ECS world via the SAME
+`Scene/SceneBuilder.h` function `GET /project_assembly/debug/scene_snapshot`
+already used (`BuildSceneDocumentFromRegistry()`), and restore reuses a
+NEWLY-EXTRACTED, genuinely `gte_core`-tier function,
+`Scene/SceneBuilder.cpp`'s `ReconstructSceneFromDocument()` - the SAME
+recipe-aware reconstruction algorithm `Editor::LoadScene()`'s own Ctrl+O
+already used, moved out of `Editor/SceneIO.cpp` (which is now a thin
+wrapper around it) per the user's own explicit direction that "Load Scene
+is a core engine feature", mirroring Unity's own `SceneManager.LoadScene()`
+being available in a Player build, not just the Editor. `Core` gained a
+persistent, engine-owned `AssetDatabase` (`Core::GetAssetDatabase()`),
+refreshed exactly once per cycle. `POST /project_assembly/hot_reload?name=<X>`
+now genuinely preserves the live ECS world - every entity, every built-in
+reflected component, AND every Project-Assembly-defined CUSTOM reflected
+component type, including values MUTATED AT RUNTIME - across BOTH a
+successful reload and an automatic rollback, proven live for both outcomes
+via `Projects/ProjectAssemblyProbe/`'s own permanent `ProbeHotReloadMarker`
+fixture and its one new, narrow, testing-only mutation route, `POST
+/project_assembly/debug/set_probe_marker_value?value=<N>`
+(`IHotReloadDebugCapability::SetProbeHotReloadMarkerValueForTesting()` -
+hardcoded to this ONE component/field, permanently, never a generic
+mutation surface).
+
+**Two genuine, previously-latent `src/ECS/Registry.h` safety bugs were
+found and fixed live by this campaign's own final live-verification
+phase** - both confirmed via `gdb`, both required for this campaign's own
+mandatory success/rollback tests to pass at all: (1) `detail::ComponentTypeId<T>()`
+used to hand out a component type's numeric storage slot from a counter
+LOCAL TO EACH BINARY IMAGE (a Meyer's singleton inside a header-only inline
+function) - correct only when every caller of a given type is compiled
+into the same image, which is false the moment a Project Assembly `.dll`
+registers its own custom component type, silently corrupting whichever
+real, built-in component's storage happened to already occupy the same
+numeric slot in the `.exe`'s own numbering (confirmed, live: this exact
+collision landed on the real `Transform` component and crashed the engine
+via a corrupted `std::vector` the moment `ClearEntireScene()` walked it
+during a real hot-reload cycle) - fixed by resolving every type's slot
+through one single, shared, out-of-line, process-wide authority,
+`detail::ResolveComponentTypeIdByName()` (new `src/ECS/Registry.cpp`),
+keyed by `typeid(T).name()` as a stable string, mirroring
+`ComponentTypeRegistry::Instance()`'s own already-correct "real singleton
+in a real `.cpp` file" shape; (2) a Project-Assembly-registered custom
+component's `ComponentStorage<T>` pool object kept a dangling virtual
+function table across that assembly's own `.dll` unload (its vtable is
+compiled into the unloading `.dll`'s own image), reliably crashing on the
+SECOND consecutive hot-reload cycle in one process session - fixed by a
+new `Registry::ResetStoragePool<T>()` (destroys a type's pool entirely),
+wired through a new `ComponentTypeDescriptor::destroyPool` callback that
+`ProjectAssemblyRegistrationLedger::UnregisterEverythingFor()` now invokes
+for every custom component type a project's own ledger entry recorded,
+BEFORE that project's `.dll` is `FreeLibrary()`'d. Both fixes are scoped
+generically - they protect ANY future Project Assembly's own custom
+component type, not merely this one probe fixture, and never touch
+built-in component types' own pools at all.
+
+**The one, permanent, honest boundary of this whole feature, restated
+here plainly**: everything living in the ECS `Registry` survives a reload
+cycle - every entity, every built-in AND custom reflected component;
+anything a Project Assembly's own code keeps OUTSIDE the ECS Registry (a
+bare C++ global, a non-ECS manager object, GPU resources a render pass
+owns opaquely) does NOT survive - it is destroyed and rebuilt from
+scratch, exactly like a fresh process start, on every single reload. Two
+further, explicitly out-of-scope limitations remain, unchanged from this
+campaign's own plan: the engine's persistent `AssetDatabase` is not yet
+unified with `ProjectPanel`'s/`SceneIO.cpp`'s own separate instances, and a
+reload cycle briefly clears/restores the ENTIRE live world, so every
+entity's numeric ID changes for every currently-loaded project, not just
+the one being reloaded (accepted - in practice only one project is ever
+loaded at a time). See `docs/conventions/project-assembly-system.md`'s own
+`## Hot Reload` section (which also corrects that file's own previously
+stale `LDD4`, "no hot reload, anywhere, ever") for the complete, permanent,
+current picture. Verified with a full clean build, a full `ctest`
+regression pass (1934 tests, 100% passing, 7 legitimate environment-gated
+skips - byte-for-byte unchanged from `editor-core-separation-14`'s own
+baseline, despite this campaign touching the Tier-1-foundational
+`src/ECS/Registry.h` every ECS-dependent test transitively exercises), and
+a live, HTTP-driven verification covering both the success path (a runtime-
+mutated custom-component value AND a genuinely changed compute-shader
+render feature both confirmed live from the SAME reload cycle) and the
+rollback path (the same mutated value AND the OLD, unchanged render
+feature both confirmed intact after a deliberately-broken compile). See
+`task_manager/editor-core-separation-15/CAMPAIGN_COMPLETION_REPORT.md` for
+the full five-phase writeup.
+
+**This closes the entire, 4-campaign "Project Assembly Hot Reload" effort
+(`editor-core-separation-12` through `-15`) for good.**
 
 ## Testability & Regression Safety
 
