@@ -46,11 +46,24 @@ std::vector<std::string> EditorHotReloadDebugCapability::GetLoadedAssemblyFileNa
     std::lock_guard<std::mutex> lock(GetHotReloadEngineStateMutex());
     // editor-core-separation-13 campaign, PHASE4 - REAL now, no longer a
     // placeholder. m_projectAssemblyHost is guaranteed non-null by the time
-    // any real HTTP request can reach this method (see SetProjectAssemblyHost()'s
-    // own doc comment for the setter-call-ordering guarantee) - a null check
-    // here would only ever hide a genuine construction-order regression,
-    // never a legitimate runtime state, so this deliberately dereferences
-    // directly rather than defensively branching.
+    // any real HTTP request can reach this method THROUGH THE REAL PRODUCTION
+    // WIRING (see SetProjectAssemblyHost()'s own doc comment for the
+    // setter-call-ordering guarantee) - but PHASE5's own full ctest
+    // regression pass found and fixed a genuine null-pointer crash here: a
+    // pre-existing BIG-STEP1 test
+    // (tests/Network/ProjectAssemblyHotReloadEndpointsEndToEndTests.cpp,
+    // `LoadedAssembliesReturnsHonestEmptyPlaceholderList`) constructs a bare
+    // `EditorHotReloadDebugCapability` directly and legitimately never calls
+    // SetProjectAssemblyHost() at all - this class's own doc comment's prior
+    // claim ("never a legitimate runtime state") was simply wrong, confirmed
+    // by a real SEGFAULT the very first time this whole campaign's own full
+    // `ctest` pass ran this test alongside PHASE4's real body. Fixed with a
+    // defensive null check, mirroring this whole engine's own "unknown/
+    // unset state degrades to an honest empty result, never a crash"
+    // philosophy used everywhere else in this class and its siblings.
+    if (m_projectAssemblyHost == nullptr) {
+        return {};
+    }
     return m_projectAssemblyHost->GetLoadedAssemblyFileNames();
 }
 

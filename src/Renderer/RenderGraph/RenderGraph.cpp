@@ -571,17 +571,23 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         // doc comment for why this is distinguishable from every other
         // kNoNameSlot-returning case.
         if (timingSlot == kNoNameSlot && timingSlots.JustOverflowed()) {
-            std::vector<const char*>& reported =
+            // editor-core-separation-13 campaign, PHASE5 - `reported` is now
+            // OWNED std::string entries (see this vector's own doc comment,
+            // RenderGraph.h) - `pass.name` (this frame's own, still-valid
+            // pointer) is compared/stored safely either way.
+            std::vector<std::string>& reported =
                 isPipelined ? m_reportedPipelinedOverflows : m_reportedSynchronousOverflows;
             bool alreadyReported = false;
-            for (const char* n : reported) {
-                if (n == pass.name || (pass.name != nullptr && n != nullptr && std::strcmp(n, pass.name) == 0)) {
-                    alreadyReported = true;
-                    break;
+            if (pass.name != nullptr) {
+                for (const std::string& n : reported) {
+                    if (n == pass.name) {
+                        alreadyReported = true;
+                        break;
+                    }
                 }
             }
             if (!alreadyReported) {
-                reported.push_back(pass.name);
+                reported.emplace_back(pass.name != nullptr ? pass.name : "<unnamed>");
                 GTE_LOG_WARNING("RenderGraph",
                     "Pass \"" + std::string(pass.name != nullptr ? pass.name : "<unnamed>")
                         + "\" could not be assigned a GPU-timing slot - the "
@@ -821,8 +827,13 @@ void RenderGraph::UpdateDrawStatsFor(const char* name, const DrawStats& drawStat
     if (name == nullptr) {
         return;
     }
+    // editor-core-separation-13 campaign, PHASE5 - `entry.name` is now an
+    // OWNED std::string (see NamedStats' own doc comment, RenderGraph.h) -
+    // compares safely against the incoming, still-guaranteed-valid-this-
+    // frame `name` via std::string::operator==(const char*), never
+    // std::strcmp() against a possibly-already-FreeLibrary()'d pointer.
     for (NamedStats& entry : m_lastKnownStats) {
-        if (entry.name == name || std::strcmp(entry.name, name) == 0) {
+        if (entry.name == name) {
             entry.stats.drawStats = drawStats;
             return;
         }
@@ -837,8 +848,10 @@ void RenderGraph::UpdateTimingFor(const char* name, const GpuTimingSample& timin
     if (name == nullptr) {
         return;
     }
+    // editor-core-separation-13 campaign, PHASE5 - see UpdateDrawStatsFor()'s
+    // own identical comment immediately above.
     for (NamedStats& entry : m_lastKnownStats) {
-        if (entry.name == name || std::strcmp(entry.name, name) == 0) {
+        if (entry.name == name) {
             entry.stats.timing = timing;
             return;
         }
@@ -851,8 +864,10 @@ void RenderGraph::UpdateTimingFor(const char* name, const GpuTimingSample& timin
 PassGpuStats RenderGraph::LastKnownStatsFor(const char* passName) const
 {
     if (passName != nullptr) {
+        // editor-core-separation-13 campaign, PHASE5 - see
+        // UpdateDrawStatsFor()'s own identical comment above.
         for (const NamedStats& entry : m_lastKnownStats) {
-            if (entry.name == passName || std::strcmp(entry.name, passName) == 0) {
+            if (entry.name == passName) {
                 return entry.stats;
             }
         }

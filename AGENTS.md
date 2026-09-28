@@ -961,6 +961,95 @@ streaming into `GET /get_logs` and a confirmed in-flight-guard race. See
 `task_manager/editor-core-separation-12/CAMPAIGN_COMPLETION_REPORT.md` for
 the full four-phase writeup.
 
+### Project Assembly Hot Reload — Teardown Safety & Registration Ledger (BIG-STEP 2)
+
+A five-phase campaign, `editor-core-separation-13`
+(`task_manager/editor-core-separation-13/PHASE0_MASTER_STRATEGY.md`,
+`CAMPAIGN_COMPLETION_REPORT.md`), implements "BIG-STEP 2" (teardown safety +
+registration ledger) of the same four-part external master plan BIG-STEP 1
+(above) established; BIG-STEP 3 (synchronous compile/atomic swap orchestrator)
+and BIG-STEP 4 (state snapshot/restore) remain FULLY UNIMPLEMENTED - `POST
+/project_assembly/hot_reload` still answers a permanent `501`, unchanged.
+This campaign's own success bar: an already-loaded Project Assembly can now be
+safely, cleanly UNLOADED, on command, leaving zero dangling pointers anywhere
+in the engine and the process running normally afterward - proven live, not
+just by code review. `ComponentTypeRegistry::UnregisterDescriptor(typeName)`
+(`src/ECS/Reflection/ComponentTypeRegistry.h/.cpp`) removes a previously
+registered component descriptor so the same typeName can be re-registered
+without tripping `RegisterDescriptor()`'s own duplicate-registration assert
+(Hazard 1). `EditorPanelRegistry::UnregisterPluginPanel(name)`
+(`src/Core/EditorPanelRegistry.h/.cpp`) removes a panel from BOTH
+`m_pluginPanels` AND `m_allNames` (Hazard 2) - the `m_allNames` half is a
+deliberate fix beyond the external plan's own sketch, which left it stale;
+leaving it stale would have permanently blocked every reload after the first
+one from ever re-registering the same panel name again. A new class,
+`ProjectAssemblyRegistrationLedger`
+(`src/Core/Plugins/ProjectAssemblyRegistrationLedger.h/.cpp`, its own private
+mutex, never `HotReloadEngineStateMutex`), wraps
+`Core::RegisterProjectRenderPassProvider()`/`EditorPanelRegistry::
+RegisterPluginPanel()`/`ComponentTypeRegistry::RegisterDescriptor()` so every
+render-pass/panel/component-type name a given Project Assembly's own
+`GTE_RegisterProject` call registers is recorded under that project's own
+ledger entry (`BeginRecordingFor()`/`EndRecording()` bracket both
+`ProjectAssemblyHost::TryLoadOneAssembly()` call sites), and
+`UnregisterEverythingFor(projectName, core)` tears every one of them back
+down, in reverse order, in one call.
+`ProjectAssemblyHost::UnloadProjectAssembly(projectName, core, renderer)`
+(`src/Core/Plugins/ProjectAssemblyHost.h/.cpp`) is the new orchestration
+point: `renderer.WaitForGpuIdle()` (Hazard 4) -> ledger teardown -> `FreeLibrary()`
+(Editor `.dll` first, then Game), in that exact, non-negotiable order;
+`GetLoadedAssemblyFileNames()` is a plain accessor for what is currently
+loaded. `ProjectAssemblyBuildRunner` gained
+`BackupProjectAssemblyBinaries()`/`RestoreProjectAssemblyBinariesFromBackup()`
+(`.hotreload_backup/` next to `project_assemblies/`), purely file-based, no
+live engine state, so a future BIG-STEP 3 rollback is physically possible.
+`EditorHotReloadDebugCapability::GetLedgerEntry()`/`GetLoadedAssemblyFileNames()`
+now return REAL data (previously permanent BIG-STEP 1 placeholders); their
+signatures, and the whole `IHotReloadDebugCapability` interface, are
+unchanged. `Projects/ProjectAssemblyProbe/Assets/HelloGame.cpp` gained a
+throwaway custom ECS component, `ProbeHotReloadMarker`, specifically so this
+campaign's own live isolation test exercises Hazard 1 for real (a genuine
+Project Assembly `.dll`, not just an isolated unit test) - it carries no
+meaningful runtime value and is never attached to an entity (state
+snapshot/restore is BIG-STEP 4's job). Two genuine, previously-latent
+dangling-pointer/null-pointer defects were found and fixed live by this
+campaign's own isolation test, both now permanently guarded against for any
+future Project Assembly, not just this one: (1)
+`ComponentTypeRegistry::Instance()`'s lazy `RegisterBuiltinComponentReflections()`
+bootstrap could fire from INSIDE a Project Assembly's own registration
+bracket if that assembly's own `RegisterComponentType<T>()` call happened to
+be the first ever call into that registry in the whole process, silently
+misattributing every built-in component type to that assembly's own ledger
+entry - fixed by forcing the bootstrap, unconditionally, at the very top of
+`ProjectAssemblyHost::LoadProjectAssemblies()`, before any assembly's own
+bracket can ever open; (2) `RenderGraphNameSlotTable`
+(`src/Renderer/RenderGraph/RenderGraphNameSlotTable.h`) and
+`RenderGraph::NamedStats`/its own overflow-report vectors
+(`src/Renderer/RenderGraph/RenderGraph.h/.cpp`) used to store a raw,
+non-owning `const char*` per pass name, correct only as long as every
+debugName is a process-lifetime string literal - a Project Assembly's own
+debugName literal lives inside that assembly's own `.dll` image and stops
+being valid the instant `FreeLibrary()` runs; since these tables persist a
+name PAST any one pass's own single-frame declaration lifetime, the very
+next frame after an unload crashed the whole process
+(`RenderGraph::FinalizeSynchronousGpuTiming()`'s own per-frame readback loop
+dereferencing an already-unmapped pointer) - fixed by making both tables OWN
+a `std::string` copy of every name instead. Verified with a full clean
+build, a full `ctest` regression pass (1925 tests, 100% passing, 5
+legitimate environment-gated skips - up from `editor-core-separation-12`'s
+own 1903 baseline; one genuine regression this campaign's own full-suite run
+surfaced and fixed - `EditorHotReloadDebugCapability::
+GetLoadedAssemblyFileNames()` unconditionally dereferencing a possibly-null
+`ProjectAssemblyHost*`, crashing a pre-existing BIG-STEP 1 test fixture that
+never calls `SetProjectAssemblyHost()` - now a defensive null check, safe
+empty-list fallback), and a live, HTTP-driven 13-point verification against
+a real running `GreatTamanaEditor.exe` (register, confirm all three hazards
+live/non-empty via the real ledger, unload via a throwaway direct test hook,
+confirm empty/gone across every observe route, confirm the process survives
+several seconds of continued normal rendering afterward). See
+`task_manager/editor-core-separation-13/CAMPAIGN_COMPLETION_REPORT.md` for
+the full five-phase writeup.
+
 ## Testability & Regression Safety
 
 - **Design new logic to be Tier-1-testable whenever the underlying problem

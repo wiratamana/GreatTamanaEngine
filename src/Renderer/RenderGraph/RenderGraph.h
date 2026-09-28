@@ -60,6 +60,8 @@
 #include "../DrawStats.h"
 #include "../GpuTiming.h"
 
+#include <string>
+
 #include <volk.h>
 
 #include <cstdint>
@@ -344,8 +346,21 @@ private:
         ResourceState state;
     };
 
+    // editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
+    // BIG-STEP 2), PHASE5 - found-and-fixed the SAME dangling-pointer hazard
+    // RenderGraphNameSlotTable.h's own file-header comment documents in
+    // full: `name` used to be a raw, non-owning `const char*` (correct only
+    // as long as every debugName is a process-lifetime string literal - an
+    // assumption a Project Assembly's own FreeLibrary()'d debugName breaks).
+    // This vector persists PAST any one pass's own single-frame declaration
+    // lifetime (never pruned when a pass disappears), so it is - exactly
+    // like RenderGraphNameSlotTable - a place a name must be OWNED, not
+    // borrowed. Confirmed by the same live crash that hazard produced:
+    // std::strcmp() against a stale `entry.name` here crashes on literally
+    // the very first frame after ProjectAssemblyHost::UnloadProjectAssembly()
+    // removes a pass whose name this vector had already cached.
     struct NamedStats {
-        const char* name = nullptr;
+        std::string name;
         PassGpuStats stats;
     };
 
@@ -461,8 +476,13 @@ private:
     // matching this engine's "no hashing on the hot path" convention (see
     // AGENTS.md) - overflow is expected to be a rare, one-time-per-name event,
     // never a steady-state hot path.
-    std::vector<const char*> m_reportedSynchronousOverflows;
-    std::vector<const char*> m_reportedPipelinedOverflows;
+    // editor-core-separation-13 campaign, PHASE5 - OWNED std::string, not a
+    // raw `const char*` - see RenderGraphNameSlotTable.h's own file-header
+    // comment and NamedStats' own doc comment above for the full "why" (the
+    // same class of dangling-pointer hazard: this vector persists forever,
+    // past any one pass's own single-frame declaration lifetime).
+    std::vector<std::string> m_reportedSynchronousOverflows;
+    std::vector<std::string> m_reportedPipelinedOverflows;
 
     // B.1 - pipelined-regime bookkeeping: incremented once per real
     // PipelinedDeferredReadback Execute() call (never on a frame where

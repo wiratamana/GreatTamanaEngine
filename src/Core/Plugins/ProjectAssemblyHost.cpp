@@ -7,6 +7,7 @@
 #include "ProjectAssemblyHost.h"
 #include "../Logging.h"
 #include "ProjectAssemblyRegistrationLedger.h"
+#include "../../ECS/Reflection/ComponentTypeRegistry.h"
 #include "../../Renderer/Renderer.h"
 
 #include <algorithm>
@@ -51,6 +52,29 @@ ProjectAssemblyHost::~ProjectAssemblyHost()
 void ProjectAssemblyHost::LoadProjectAssemblies(
     const std::filesystem::path& outputDirectory, Core& core, EditorHost* editorHost)
 {
+    // editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
+    // BIG-STEP 2), PHASE5 - found-and-fixed regression, confirmed LIVE by
+    // this phase's own isolation test. ComponentTypeRegistry::Instance()
+    // self-bootstraps RegisterBuiltinComponentReflections() lazily, on ITS
+    // OWN first call, from ANYWHERE in the process (ComponentTypeRegistry.cpp).
+    // If that first-ever call happens to land INSIDE a Project Assembly's own
+    // BeginRecordingFor()/EndRecording() bracket - which it did here, because
+    // ProjectAssemblyProbe's own _Game.dll GTE_RegisterProject is the first
+    // code anywhere to ever call RegisterComponentType<T>() (this phase's own
+    // new ProbeHotReloadMarker) - every one of the engine's own BUILT-IN
+    // component types gets misattributed to THAT project's own ledger entry.
+    // Confirmed live: GET /project_assembly/debug/ledger?name=ProjectAssemblyProbe
+    // listed "Transform"/"Name"/"Camera"/"DirectionalLight"/"PrimitiveSource"
+    // alongside its own real "ProbeHotReloadMarker" - none of the five
+    // built-ins are ProjectAssemblyProbe's own registrations. Forcing the
+    // bootstrap HERE, unconditionally, before the very first
+    // TryLoadOneAssembly() call below (and therefore before any project's
+    // own BeginRecordingFor() bracket can ever open), guarantees it always
+    // happens OUTSIDE any such bracket, regardless of directory-iteration
+    // order or which project's own registration function happens to be the
+    // first in the whole process to touch ComponentTypeRegistry.
+    ComponentTypeRegistry::Instance();
+
     if (!std::filesystem::exists(outputDirectory)) {
         GTE_LOG_INFO("ProjectAssembly", "no project_assemblies directory found at " + outputDirectory.string() + ", skipping");
         return;
