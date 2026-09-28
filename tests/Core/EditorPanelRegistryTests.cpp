@@ -163,6 +163,99 @@ TEST(EditorPanelRegistryTest, IsKnownName_IsCaseSensitive)
     EXPECT_FALSE(EditorPanelRegistry::Instance().IsKnownName("test_case_sensitive_zeta"));
 }
 
+// editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 2, PHASE2 - Hazard 2 fix) - Tier-1 coverage for
+// EditorPanelRegistry::UnregisterPluginPanel(), including the
+// m_allNames-collision-guard regression this phase exists to prevent (see
+// PHASE2_EDITOR_PANEL_REGISTRY_UNREGISTER_HAZARD2.md, Step 3.4, items 1-4).
+// Each test uses its own unique, nowhere-else-used name(s) and tears down
+// (via UnregisterPluginPanel()) whatever it registers, mirroring this file's
+// own pre-existing convention exactly.
+
+TEST(EditorPanelRegistryTest, UnregisterPluginPanel_RemovesFromBothAllNamesAndPluginPanels)
+{
+    FakeEditorPanelModule fakeModule("Test_Plugin_Panel_Iota");
+    EditorPanelRegistry::Instance().RegisterPluginPanel("Test_Plugin_Panel_Iota", &fakeModule);
+
+    ASSERT_TRUE(EditorPanelRegistry::Instance().IsKnownName("Test_Plugin_Panel_Iota"));
+    ASSERT_TRUE(Contains(EditorPanelRegistry::Instance().AllNames(), "Test_Plugin_Panel_Iota"));
+
+    EditorPanelRegistry::Instance().UnregisterPluginPanel("Test_Plugin_Panel_Iota");
+
+    EXPECT_FALSE(EditorPanelRegistry::Instance().IsKnownName("Test_Plugin_Panel_Iota"));
+    EXPECT_FALSE(Contains(EditorPanelRegistry::Instance().AllNames(), "Test_Plugin_Panel_Iota"));
+    for (const auto& entry : EditorPanelRegistry::Instance().PluginPanels()) {
+        EXPECT_NE(entry.name, "Test_Plugin_Panel_Iota");
+    }
+}
+
+TEST(EditorPanelRegistryTest, UnregisterPluginPanel_ThenReRegisteringSameNameSucceedsWithoutCollisionRefusal)
+{
+    // This is the exact regression this phase exists to prevent: the
+    // external plan's own sketch left m_allNames untouched, which would
+    // make this second RegisterPluginPanel() call be silently refused by
+    // IsKnownName()'s own collision guard - precisely what every reload
+    // after the first does, for the campaign's own permanent
+    // ProjectAssemblyProbe fixture's "Probe Panel".
+    FakeEditorPanelModule firstModule("Test_Plugin_Panel_Kappa");
+    EditorPanelRegistry::Instance().RegisterPluginPanel("Test_Plugin_Panel_Kappa", &firstModule);
+    EditorPanelRegistry::Instance().UnregisterPluginPanel("Test_Plugin_Panel_Kappa");
+
+    FakeEditorPanelModule secondModule("Test_Plugin_Panel_Kappa");
+    EditorPanelRegistry::Instance().RegisterPluginPanel("Test_Plugin_Panel_Kappa", &secondModule);
+
+    EXPECT_TRUE(EditorPanelRegistry::Instance().IsKnownName("Test_Plugin_Panel_Kappa"));
+    int occurrences = 0;
+    const IEditorPanelModule_v1* resolvedModule = nullptr;
+    for (const auto& entry : EditorPanelRegistry::Instance().PluginPanels()) {
+        if (entry.name == "Test_Plugin_Panel_Kappa") {
+            ++occurrences;
+            resolvedModule = entry.module;
+        }
+    }
+    EXPECT_EQ(occurrences, 1);
+    EXPECT_EQ(resolvedModule, &secondModule);
+
+    EditorPanelRegistry::Instance().UnregisterPluginPanel("Test_Plugin_Panel_Kappa");
+}
+
+TEST(EditorPanelRegistryTest, UnregisterPluginPanel_NeverRegisteredNameIsASafeNoOp)
+{
+    EXPECT_NO_FATAL_FAILURE(
+        EditorPanelRegistry::Instance().UnregisterPluginPanel("Test_Plugin_Panel_Never_Registered_Lambda"));
+    EXPECT_FALSE(EditorPanelRegistry::Instance().IsKnownName("Test_Plugin_Panel_Never_Registered_Lambda"));
+}
+
+TEST(EditorPanelRegistryTest, UnregisterPluginPanel_DoesNotWeakenBuiltinNameCollisionProtection)
+{
+    EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Test_Builtin_For_Collision_Mu");
+
+    FakeEditorPanelModule collidingModule("Test_Builtin_For_Collision_Mu");
+    EditorPanelRegistry::Instance().RegisterPluginPanel("Test_Builtin_For_Collision_Mu", &collidingModule);
+
+    // The plugin registration must still be refused - only plugin-registered
+    // names become unregisterable, built-in names are untouched by this
+    // phase's own change. NOTE: deliberately NOT calling
+    // UnregisterPluginPanel("Test_Builtin_For_Collision_Mu") here to "clean
+    // up" - per this method's own documented, spec-exact behavior it removes
+    // ANY matching name from m_allNames regardless of how it got there, so
+    // doing that here would actually remove this built-in name too, which is
+    // not what this test is checking and would be a self-inflicted false
+    // assumption, not a real bug (EditorPanelRegistry has no reset method by
+    // design - see this file's own header comment - so built-in names
+    // registered by tests are expected to persist for the rest of this test
+    // binary's lifetime, exactly like every other RegisterBuiltinPanelName
+    // test above).
+    int occurrencesInPluginPanels = 0;
+    for (const auto& entry : EditorPanelRegistry::Instance().PluginPanels()) {
+        if (entry.name == "Test_Builtin_For_Collision_Mu") {
+            ++occurrencesInPluginPanels;
+        }
+    }
+    EXPECT_EQ(occurrencesInPluginPanels, 0);
+    EXPECT_TRUE(EditorPanelRegistry::Instance().IsKnownName("Test_Builtin_For_Collision_Mu"));
+}
+
 } // namespace
 } // namespace gte
 

@@ -37,11 +37,41 @@ public:
     // Called once per loaded plugin exposing IEditorPanelModule_v1,
     // immediately after Core::LoadPlugins() returns (gte_editor's own new
     // post-load step, PHASE4 Step 3.6) - `module` is a non-owning pointer
-    // into PluginHost's own registry, valid for the engine's entire
-    // remaining lifetime (PluginHost never unloads a plugin before process
-    // exit - Milestone 4/hot-reload is explicitly out of scope, see
-    // PHASE0_MASTER_STRATEGY.md's Non-Goals).
+    // into PluginHost's own registry, valid until EITHER process exit OR an
+    // explicit UnregisterPluginPanel(name) call for that same name, whichever
+    // comes first (editor-core-separation-13 campaign, BIG-STEP 2, PHASE2 -
+    // previously this comment said PluginHost never unloads a plugin before
+    // process exit; that is no longer the whole story once
+    // UnregisterPluginPanel() below exists and is actually called by
+    // ProjectAssemblyRegistrationLedger::UnregisterEverythingFor() and
+    // ProjectAssemblyHost::UnloadProjectAssembly(), both this same
+    // campaign's PHASE3/PHASE4).
     void RegisterPluginPanel(const std::string& name, IEditorPanelModule_v1* module);
+
+    // editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
+    // BIG-STEP 2, Hazard 2 fix) - removes a previously-registered plugin panel
+    // by name, if present, from BOTH m_pluginPanels (the vector holding the
+    // dangerous raw IEditorPanelModule_v1* - unsafe to leave dangling past a
+    // FreeLibrary()) AND m_allNames (the plain-string list IsKnownName()'s own
+    // collision guard reads - leaving a stale entry there would permanently
+    // block this exact same name from EVER being registered again, which is
+    // precisely what every reload after the first needs to do; confirmed a
+    // real, guaranteed regression, not a hypothetical one - see this campaign's
+    // PHASE2 strategy file for the full reasoning). MUST be called for every
+    // panel name a Project Assembly's own GTE_RegisterProject call registered,
+    // BEFORE that Project Assembly's .dll is FreeLibrary()'d - see
+    // ProjectAssemblyRegistrationLedger (src/Core/Plugins/
+    // ProjectAssemblyRegistrationLedger.h, this same campaign's PHASE3) for the
+    // mechanism that guarantees this automatically. A silent no-op if `name`
+    // was never registered, or was already removed.
+    //
+    // NOTE this INTENTIONALLY DEVIATES from this feature's own external design
+    // doc (HOTRELOAD_BIGSTEP_02_TEARDOWN_SAFETY_AND_REGISTRATION_LEDGER_2026-09-28.txt,
+    // Step 2), which left "does this also clean up m_allNames" as an open
+    // question deferred to a later phase - that deferral was incorrect (see
+    // this campaign's PHASE2 strategy file); this method removes from BOTH
+    // vectors, unconditionally.
+    void UnregisterPluginPanel(const std::string& name);
 
     bool IsKnownName(const std::string& name) const noexcept;
 

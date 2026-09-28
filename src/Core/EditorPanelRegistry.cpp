@@ -2,6 +2,8 @@
 
 #include "Logging.h"
 
+#include <algorithm>
+
 namespace gte {
 
 EditorPanelRegistry& EditorPanelRegistry::Instance()
@@ -43,6 +45,29 @@ void EditorPanelRegistry::RegisterPluginPanel(const std::string& name, IEditorPa
 
     m_allNames.push_back(name);
     m_pluginPanels.push_back(PluginPanelEntry{ name, module });
+}
+
+// editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 2, Hazard 2 fix) - see EditorPanelRegistry.h's own doc comment on
+// this method for the full reasoning. Removes `name` from BOTH
+// m_pluginPanels AND m_allNames, so (a) the dangling IEditorPanelModule_v1*
+// is never iterated again after its owning Project Assembly .dll is
+// FreeLibrary()'d, and (b) IsKnownName()'s own collision guard does not
+// permanently block a future re-registration under this exact same name -
+// a deliberate, documented deviation from this feature's external design
+// doc, which left m_allNames untouched (see this campaign's PHASE2 strategy
+// file, Step 2, for the full reasoning on why that would be a guaranteed
+// regression). Silent no-op if `name` was never registered.
+void EditorPanelRegistry::UnregisterPluginPanel(const std::string& name)
+{
+    m_pluginPanels.erase(
+        std::remove_if(m_pluginPanels.begin(), m_pluginPanels.end(),
+            [&name](const PluginPanelEntry& e) { return e.name == name; }),
+        m_pluginPanels.end());
+    m_allNames.erase(
+        std::remove_if(m_allNames.begin(), m_allNames.end(),
+            [&name](const std::string& candidate) { return candidate == name; }),
+        m_allNames.end());
 }
 
 bool EditorPanelRegistry::IsKnownName(const std::string& name) const noexcept
