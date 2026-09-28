@@ -358,6 +358,16 @@ add_library(gte_core STATIC
     # completion report flagged this exact gap for PHASE6's benefit).
     src/Core/Plugins/ProjectAssemblyBuildRunner.h
     src/Core/Plugins/ProjectAssemblyBuildRunner.cpp
+    # editor-core-separation-16 campaign (On-Engine Project Workflow plan,
+    # BIG-STEP 2), PHASE2 (PHASE2_STRICT_NAME_VALIDATOR_AND_ROUTE_HARDENING.md)
+    # - IsValidProjectAssemblyIdentifierName(), the ONE shared strict
+    # name validator reused by both NetworkRoutes.cpp's ParseProjectNameQuery()
+    # (LDD-CP3) and PHASE3's CreateNewProjectAssembly() write path. Always
+    # compiled, zero dependencies beyond <string> - added here explicitly
+    # because gte_core's own source list is hand-maintained, NOT a
+    # file(GLOB ...).
+    src/Core/Plugins/ProjectAssemblyNameValidation.h
+    src/Core/Plugins/ProjectAssemblyNameValidation.cpp
     # editor-core-separation-12 campaign, PHASE1 (Project Assembly Hot
     # Reload plan, BIG-STEP 1) - ProjectAssemblyHotReloadDebugStatus (the
     # push-status singleton a future BIG-STEP 3 hot-reload cycle will report

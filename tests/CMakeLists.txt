@@ -2171,6 +2171,12 @@ set(GTE_TEST_SOURCES
     # additions. Unconditional, since src/Core/Plugins/ProjectAssemblyBuildRunner.h/.cpp
     # is unconditionally in gte_core's own source list.
     Core/Plugins/ProjectAssemblyBuildRunnerSourceRootTests.cpp
+    # editor-core-separation-16 campaign (On-Engine Project Workflow plan,
+    # BIG-STEP 2), PHASE2 - Tier-1 tests for the new
+    # IsValidProjectAssemblyIdentifierName() strict name validator.
+    # Unconditional, since src/Core/Plugins/ProjectAssemblyNameValidation.h/.cpp
+    # is unconditionally in gte_core's own source list.
+    Core/Plugins/ProjectAssemblyNameValidationTests.cpp
     Memory/GpuResourceHandleTests.cpp
     Encoding/Base64Tests.cpp
     Encoding/PixelConversionTests.cpp

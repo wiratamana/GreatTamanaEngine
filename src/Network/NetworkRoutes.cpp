@@ -9,6 +9,8 @@
 // gte_core-tier file never needs the gte_editor-only Logger CLASS just for
 // one compile-time constant (closes Defect C).
 
+#include "Core/Plugins/ProjectAssemblyNameValidation.h"
+
 #include <nlohmann/json.hpp>
 
 #include <cmath>
@@ -1202,8 +1204,9 @@ std::string BuildHotReloadStatusResponseJson(const IHotReloadDebugCapability::St
 ParsedProjectNameQuery ParseProjectNameQuery(const std::string& nameParam)
 {
     ParsedProjectNameQuery parsed;
-    if (nameParam.empty()) {
-        parsed.errorMessage = "'name' query parameter is required";
+    std::string validationError;
+    if (!IsValidProjectAssemblyIdentifierName(nameParam, validationError)) {
+        parsed.errorMessage = nameParam.empty() ? "'name' query parameter is required" : validationError;
         return parsed;
     }
     parsed.projectName = nameParam;
