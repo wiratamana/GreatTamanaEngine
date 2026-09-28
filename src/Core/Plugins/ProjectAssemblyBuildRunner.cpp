@@ -10,6 +10,7 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cctype>
 #include <fstream>
@@ -479,6 +480,76 @@ std::filesystem::path ResolveProjectAssemblySourceRootDirectory(const std::files
 std::filesystem::path ResolveProjectAssemblyOutputDirectory(const std::filesystem::path& executableDirectory)
 {
     return executableDirectory / "project_assemblies";
+}
+
+// editor-core-separation-17 campaign (On-Engine Project Workflow plan,
+// BIG-STEP 3), PHASE1. See this function's own doc comment in
+// ProjectAssemblyBuildRunner.h for the full contract. Mirrors
+// gte_add_project()'s own real, current body (cmake/GteProject.cmake) -
+// re-confirmed by directly reading it before writing this: ONE recursive
+// glob (file(GLOB_RECURSE ALL_CPP CONFIGURE_DEPENDS "${ASSETS}/*.cpp"))
+// over Assets/, bucketed into GAME_SOURCES/EDITOR_SOURCES purely by
+// whether each file's own absolute path contains the literal substring
+// "/Editor/" anywhere at any depth (if(SRC MATCHES "/Editor/")) - a .cpp
+// file nested several folders deep under Assets/ is still real, buildable
+// Game source as far as CMake is concerned, so this uses
+// recursive_directory_iterator (never a plain, one-level
+// directory_iterator), and checks generic_string() (always forward
+// slashes, regardless of platform) so this substring check behaves
+// identically to CMake's own match on an absolute path.
+ProjectValidityTier ClassifyProjectAssemblyFolder(
+    const std::filesystem::path& candidateFolder,
+    const std::filesystem::path& outputDirectory,
+    const std::vector<std::string>& loadedDllFileNames)
+{
+    std::error_code isDirectoryError;
+    if (!std::filesystem::is_directory(candidateFolder, isDirectoryError)) {
+        return ProjectValidityTier::NotAProject;
+    }
+    std::error_code cmakeListsExistsError;
+    if (!std::filesystem::exists(candidateFolder / "Libraries" / "CMakeLists.txt", cmakeListsExistsError)) {
+        return ProjectValidityTier::NotAProject;
+    }
+
+    // RECURSIVE, mirroring gte_add_project()'s own GLOB_RECURSE - a .cpp
+    // file nested several folders deep under Assets/ is still real,
+    // buildable Game source as far as CMake is concerned, so a plain
+    // one-level directory_iterator here would silently disagree with the
+    // build system and misclassify a valid project as NotBuildable.
+    bool hasRealGameSource = false;
+    std::error_code iterationError;
+    const std::filesystem::path assetsDirectory = candidateFolder / "Assets";
+    if (std::filesystem::is_directory(assetsDirectory, iterationError)) {
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(assetsDirectory, iterationError)) {
+            if (!entry.is_regular_file() || entry.path().extension() != ".cpp") {
+                continue;
+            }
+            // generic_string() always uses forward slashes regardless of
+            // platform, so this substring check behaves identically to
+            // CMake's own `if(SRC MATCHES "/Editor/")` on this same
+            // absolute path - never re-derive this from a relative path,
+            // which could disagree with CMake's own ABSOLUTE-path match.
+            if (entry.path().generic_string().find("/Editor/") != std::string::npos) {
+                continue; // Editor-only source - never counts as Game source.
+            }
+            hasRealGameSource = true;
+            break;
+        }
+    }
+    if (!hasRealGameSource) {
+        return ProjectValidityTier::NotBuildable;
+    }
+
+    const std::string name = candidateFolder.filename().string();
+    const std::string dllFileName = name + "_Game.dll";
+    std::error_code dllExistsError;
+    if (!std::filesystem::exists(outputDirectory / dllFileName, dllExistsError)) {
+        return ProjectValidityTier::NotCompiled;
+    }
+
+    const bool alreadyLoaded = std::find(loadedDllFileNames.begin(), loadedDllFileNames.end(), dllFileName)
+        != loadedDllFileNames.end();
+    return alreadyLoaded ? ProjectValidityTier::AlreadyLoaded : ProjectValidityTier::Compiled;
 }
 
 namespace {

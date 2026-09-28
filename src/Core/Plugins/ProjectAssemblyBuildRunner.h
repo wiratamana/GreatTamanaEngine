@@ -34,6 +34,7 @@
 #include <filesystem>
 #include <functional>
 #include <string>
+#include <vector>
 
 namespace gte {
 
@@ -162,6 +163,47 @@ std::filesystem::path ResolveProjectAssemblySourceRootDirectory(const std::files
 // section 3.4) for exactly why (gte::ExecutableDirectory() is
 // gte_editor-tier; this file is gte_core-tier).
 std::filesystem::path ResolveProjectAssemblyOutputDirectory(const std::filesystem::path& executableDirectory);
+
+// editor-core-separation-17 campaign (On-Engine Project Workflow plan,
+// BIG-STEP 3), PHASE1. The 5-tier validity model a candidate
+// Projects/<Name>/ folder can be in, from the "Open Project" feature's own
+// point of view - see PROJECTWORKFLOW_BIGSTEP_03_OPEN_PROJECT_2026-09-28.txt,
+// STEP 2, for the full narrative. Ordered from "least ready" to "most
+// ready" on purpose - a future caller may reasonably compare tiers with
+// `<`/`>=` (e.g. "selectable" == `tier != ProjectValidityTier::NotAProject`).
+enum class ProjectValidityTier {
+    NotAProject,    // missing Libraries/CMakeLists.txt - invisible to CMake entirely.
+    NotBuildable,    // has Libraries/CMakeLists.txt, but no real Game .cpp source yet.
+    NotCompiled,     // has real Game source, but no matching _Game.dll exists yet.
+    Compiled,        // a matching _Game.dll exists at the output directory.
+    AlreadyLoaded,   // that _Game.dll's own file name is already in loadedDllFileNames.
+};
+
+// Classifies `candidateFolder` (expected to be one direct child of the
+// resolved Project Assembly source root, e.g.
+// "<repo root>/Projects/MyProject") into exactly one ProjectValidityTier.
+// Pure, synchronous, filesystem-only (plus a plain string-vector scan) -
+// touches NO live engine state, safe to call from ANY thread. Mirrors
+// gte_add_project()'s own real early-exit checks (cmake/GteProject.cmake -
+// its `IS_DIRECTORY "${ASSETS}"` guard and its `GAME_SOURCES`/
+// `EDITOR_SOURCES` bucketing `if`/`else`) and root CMakeLists.txt's own
+// project auto-discovery loop's `EXISTS ".../Libraries/CMakeLists.txt"`
+// gate - never invents a new rule that contradicts what the build system
+// itself already decides. `outputDirectory` is the resolved Project
+// Assembly OUTPUT directory (ResolveProjectAssemblyOutputDirectory()'s own
+// return value) - an EXPLICIT, REQUIRED parameter, mirroring every sibling
+// resolver in this file's own "never resolve a path internally" convention.
+// `loadedDllFileNames` is a plain snapshot (e.g. from
+// ProjectAssemblyHost::GetLoadedAssemblyFileNames(), taken by the CALLER
+// under GetHotReloadEngineStateMutex() if a live race is possible - this
+// function itself takes no lock, since it only reads a plain,
+// already-captured std::vector<std::string> the caller handed it).
+// `candidateFolder` not existing at all, or not being a directory, returns
+// NotAProject (never throws/crashes).
+ProjectValidityTier ClassifyProjectAssemblyFolder(
+    const std::filesystem::path& candidateFolder,
+    const std::filesystem::path& outputDirectory,
+    const std::vector<std::string>& loadedDllFileNames);
 
 // Copies the CURRENT, presumed-good <projectName>_Game.dll (and, if
 // present, _Editor.dll) from `outputDirectory` to a dedicated backup slot,
