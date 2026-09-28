@@ -280,6 +280,56 @@ public:
     // Core/Registry/GPU state), so this method needs NO cross-thread
     // bridge, unlike a future hot-reload-shaped capability.
     virtual CreateProjectOutcome CreateNewProjectAssembly(const std::string& name) = 0;
+
+    // editor-core-separation-17 campaign (On-Engine Project Workflow plan,
+    // BIG-STEP 3), PHASE3. Outcome of one "Open Project" attempt.
+    struct OpenProjectOutcome {
+        bool success = false;         // true even for Tier NotBuildable/NotCompiled (LDD-PW4) - false only for NotAProject or an internal error
+        std::string errorMessage;     // only meaningful when success == false
+        std::string statusMessage;    // human-readable outcome, ALWAYS populated when success == true
+        bool loadAttempted = false;
+        bool loadSucceeded = false;
+    };
+
+    // Struct used by ListProjectAssemblies() below - deliberately a plain,
+    // dependency-free value type (no ProjectValidityTier leaked through this
+    // public interface header would be fine too, since ProjectAssemblyBuildRunner.h
+    // is already gte_core-tier and safe to include here - but a plain int/
+    // string pair keeps this specific interface's own JSON-shaping trivial for
+    // NetworkRoutes.cpp, mirroring this file's existing preference for plain
+    // scalars in every outcome struct above).
+    struct ProjectListEntry {
+        std::string name;
+        std::string tierName; // "NotAProject" / "NotBuildable" / "NotCompiled" / "Compiled" / "AlreadyLoaded"
+    };
+
+    // Callable from ANY thread. For a Tier 3 ("Compiled") folder, this method
+    // BLOCKS the calling thread until the real load has been performed on the
+    // main thread (via ProjectLifecycleLoadCommandBridge) - safe for a network
+    // route handler (a genuinely separate OS thread), NEVER safe to call from
+    // the engine's own main thread (see OpenProjectAssemblyOnMainThread() right
+    // below for that caller instead - calling THIS method from the main thread
+    // deadlocks the whole Editor, see EditorProjectLifecycleCapability.cpp's
+    // own top-of-file comment for the full reasoning).
+    virtual OpenProjectOutcome OpenProjectAssembly(const std::string& name) = 0;
+
+    // Callable ONLY from the engine's own main thread (e.g. from inside
+    // OpenProjectWindow::Build(), itself called from EditorHost::Run()'s own
+    // per-frame ImGui build step). Identical outcome/business logic to
+    // OpenProjectAssembly() above, but the Tier 3 real-load step is performed
+    // DIRECTLY, inline, with NO cross-thread bridge/wait at all - there is no
+    // thread to hop to, since the caller already IS the main thread. Mirrors
+    // IEditorLayer::ImportExternalAssetIntoProject()'s own "one real function,
+    // called directly by main-thread ImGui code" precedent.
+    virtual OpenProjectOutcome OpenProjectAssemblyOnMainThread(const std::string& name) = 0;
+
+    // Callable from ANY thread - a plain, read-only filesystem enumeration +
+    // classification, touches no mutable engine state beyond a
+    // GetHotReloadEngineStateMutex()-guarded read of the currently-loaded
+    // assembly list (identical safety contract to ActiveProjectAssemblyState::
+    // GetActive()). Enumerates every one-level-deep folder directly under the
+    // resolved Project Assembly source root.
+    virtual std::vector<ProjectListEntry> ListProjectAssemblies() = 0;
 };
 
 } // namespace gte

@@ -1,9 +1,19 @@
 // src/Editor/EditorProjectLifecycleCapability.cpp
+//
+// PHASE0_MASTER_STRATEGY.md, Section 2.2 (editor-core-separation-17
+// campaign) - OpenProjectAssembly() and OpenProjectAssemblyOnMainThread()
+// are NOT interchangeable. OpenProjectAssembly() may BLOCK its own calling
+// thread waiting for EditorHost::Run()'s own bridge-drain point to service
+// it - calling it from the main thread itself deadlocks the whole Editor,
+// since that drain point is reached earlier in the SAME frame's own call
+// stack and cannot run again until this call returns. Always call
+// OpenProjectAssembly() from a network route handler; always call
+// OpenProjectAssemblyOnMainThread() from ImGui/main-thread code.
 #include "EditorProjectLifecycleCapability.h"
 
 #include "ActiveProjectAssemblyState.h"
 #include "ProjectRootPath.h" // gte::ExecutableDirectory()
-#include "../Core/Plugins/ProjectAssemblyBuildRunner.h" // ResolveCMakeBuildDirectory/ResolveProjectAssemblySourceRootDirectory/RunPlainCMakeReconfigureAndWait
+#include "../Core/Plugins/ProjectAssemblyBuildRunner.h" // ResolveCMakeBuildDirectory/ResolveProjectAssemblySourceRootDirectory/RunPlainCMakeReconfigureAndWait/ClassifyProjectAssemblyFolder/ProjectValidityTier
 #include "../Core/Plugins/ProjectAssemblyNameValidation.h"
 // CONFIRMED (not a guess): the GTE_LOG_ERROR/GTE_LOG_INFO macros themselves
 // are declared/defined in Core/Logging.h, NOT Core/LogSink.h - LogSink.h
@@ -14,6 +24,24 @@
 // Network/NetworkServer.cpp, Jobs/JobContinuation.cpp,
 // Editor/ImGuiIdConflictGuard.cpp. Do not include LogSink.h here.
 #include "../Core/Logging.h"
+// editor-core-separation-17 campaign (On-Engine Project Workflow plan,
+// BIG-STEP 3), PHASE3 - needed for the full Core class definition
+// (m_core->GetProjectAssemblyHost() below needs it - this header only
+// forward-declares `class Core;`). Transitively pulls in
+// Plugins/ProjectAssemblyHost.h too (confirmed by reading Core.h's own
+// include list), so no separate include for that one is needed.
+#include "../Core/Core.h"
+// editor-core-separation-17 campaign, PHASE3 - GetHotReloadEngineStateMutex(),
+// used below exactly like ActiveProjectAssemblyState::GetActive()'s own
+// already-shipped precedent.
+#include "../Core/Plugins/HotReloadEngineStateMutex.h"
+// editor-core-separation-17 campaign, PHASE3 - the real
+// ProjectLifecycleLoadCommandBridge::SubmitResult/
+// LoadProjectAssemblyCommandRequest/LoadProjectAssemblyCommandResult types -
+// this file's own header only forward-declares
+// `class ProjectLifecycleLoadCommandBridge;`, which is not enough to call
+// SubmitAndWait() or read its result fields.
+#include "../Application/ProjectLifecycleLoadCommandBridge.h"
 
 #include <fstream>
 #include <system_error>
@@ -60,6 +88,21 @@ bool WriteTextFile(const std::filesystem::path& path, const std::string& content
     }
     stream << content;
     return stream.good();
+}
+
+// editor-core-separation-17 campaign, PHASE3 - maps each ProjectValidityTier
+// to the exact string ProjectListEntry::tierName's own doc comment
+// (Core/EditorCapabilities.h) promises.
+std::string ToTierName(ProjectValidityTier tier)
+{
+    switch (tier) {
+    case ProjectValidityTier::NotAProject: return "NotAProject";
+    case ProjectValidityTier::NotBuildable: return "NotBuildable";
+    case ProjectValidityTier::NotCompiled: return "NotCompiled";
+    case ProjectValidityTier::Compiled: return "Compiled";
+    case ProjectValidityTier::AlreadyLoaded: return "AlreadyLoaded";
+    }
+    return "NotAProject"; // unreachable - silences a "not all control paths return a value" warning.
 }
 
 } // namespace
@@ -185,6 +228,164 @@ IProjectLifecycleCapability::CreateProjectOutcome EditorProjectLifecycleCapabili
     GTE_LOG_INFO("ProjectLifecycle", "CreateNewProjectAssembly('" + name + "'): created at " + outcome.createdSourceDirectory);
     return outcome;
 #endif
+}
+
+EditorProjectLifecycleCapability::PreLoadResult EditorProjectLifecycleCapability::ClassifyAndMarkActive(
+    const std::string& name)
+{
+    PreLoadResult result;
+#if !GTE_ENABLE_PROJECT_ASSEMBLIES
+    result.outcome.errorMessage = "this build was configured with GTE_ENABLE_PROJECT_ASSEMBLIES=OFF";
+    return result;
+#else
+    std::string validationError;
+    if (!IsValidProjectAssemblyIdentifierName(name, validationError)) {
+        result.outcome.errorMessage = validationError;
+        return result;
+    }
+
+    const std::filesystem::path executableDirectory = gte::ExecutableDirectory();
+    const std::filesystem::path buildDirectory = ResolveCMakeBuildDirectory(executableDirectory);
+    const std::filesystem::path sourceRoot = buildDirectory.empty()
+        ? std::filesystem::path{} : ResolveProjectAssemblySourceRootDirectory(buildDirectory);
+    if (sourceRoot.empty()) {
+        result.outcome.errorMessage = "could not resolve the project source directory - is this a real, configured CMake build?";
+        return result;
+    }
+
+    const std::filesystem::path candidateFolder = sourceRoot / name;
+    const std::filesystem::path outputDirectory = ResolveProjectAssemblyOutputDirectory(executableDirectory);
+
+    std::vector<std::string> loadedDllFileNames;
+    if (m_core != nullptr) {
+        std::lock_guard<std::mutex> lock(GetHotReloadEngineStateMutex());
+        loadedDllFileNames = m_core->GetProjectAssemblyHost().GetLoadedAssemblyFileNames();
+    }
+
+    const ProjectValidityTier tier = ClassifyProjectAssemblyFolder(candidateFolder, outputDirectory, loadedDllFileNames);
+    if (tier == ProjectValidityTier::NotAProject) {
+        result.outcome.errorMessage = "not a valid project folder (missing Libraries/CMakeLists.txt)";
+        return result;
+    }
+
+    ActiveProjectAssemblyState::Instance().SetActive(name, candidateFolder);
+    result.resolvedProjectName = name;
+    result.outcome.success = true;
+
+    switch (tier) {
+    case ProjectValidityTier::NotBuildable:
+        result.outcome.statusMessage = "opened '" + name + "' - no buildable source yet; use the Assets panel's "
+            "Create menu to add a Render Pass/Compute Shader, or add your own .cpp file";
+        break;
+    case ProjectValidityTier::NotCompiled:
+        result.outcome.statusMessage = "opened '" + name + "' - not yet compiled, use Compile to build it";
+        break;
+    case ProjectValidityTier::Compiled:
+        result.outcome.statusMessage = "opened '" + name + "' - loading...";
+        result.needsLoad = true;
+        break;
+    case ProjectValidityTier::AlreadyLoaded:
+        result.outcome.statusMessage = "opened '" + name + "' - already loaded and running "
+            "(use the existing Compile & Reload feature to update its code, not Open)";
+        break;
+    case ProjectValidityTier::NotAProject:
+        break; // unreachable - handled above.
+    }
+    return result;
+#endif
+}
+
+IProjectLifecycleCapability::OpenProjectOutcome EditorProjectLifecycleCapability::OpenProjectAssembly(
+    const std::string& name)
+{
+    PreLoadResult pre = ClassifyAndMarkActive(name);
+    if (!pre.outcome.success || !pre.needsLoad) {
+        return pre.outcome;
+    }
+    if (m_loadCommandBridge == nullptr) {
+        pre.outcome.statusMessage += " (warning: load command bridge unavailable - marked active only)";
+        GTE_LOG_ERROR("ProjectLifecycle", "OpenProjectAssembly('" + name + "'): load command bridge unavailable");
+        return pre.outcome;
+    }
+    LoadProjectAssemblyCommandRequest request;
+    request.projectName = pre.resolvedProjectName;
+    const ProjectLifecycleLoadCommandBridge::SubmitResult submit = m_loadCommandBridge->SubmitAndWait(request);
+    pre.outcome.loadAttempted = true;
+    if (submit.result.has_value()) {
+        pre.outcome.loadSucceeded = submit.result->loadSucceeded;
+        pre.outcome.statusMessage = pre.outcome.loadSucceeded
+            ? ("opened '" + name + "' - loaded successfully")
+            : ("opened '" + name + "' - marked active, but the load itself failed; see the engine log");
+    } else {
+        pre.outcome.statusMessage = "opened '" + name + "' - marked active, but the load request "
+            + std::string(submit.alreadyPending ? "was rejected (another load is already in progress)" : "timed out");
+    }
+    GTE_LOG_INFO("ProjectLifecycle", "OpenProjectAssembly('" + name + "'): " + pre.outcome.statusMessage);
+    return pre.outcome;
+}
+
+IProjectLifecycleCapability::OpenProjectOutcome EditorProjectLifecycleCapability::OpenProjectAssemblyOnMainThread(
+    const std::string& name)
+{
+    PreLoadResult pre = ClassifyAndMarkActive(name);
+    if (!pre.outcome.success || !pre.needsLoad) {
+        return pre.outcome;
+    }
+    if (m_core == nullptr) {
+        pre.outcome.statusMessage += " (warning: engine reference unavailable - marked active only)";
+        GTE_LOG_ERROR("ProjectLifecycle", "OpenProjectAssemblyOnMainThread('" + name + "'): engine reference unavailable");
+        return pre.outcome;
+    }
+    const std::filesystem::path outputDirectory = ResolveProjectAssemblyOutputDirectory(gte::ExecutableDirectory());
+    pre.outcome.loadAttempted = true;
+    pre.outcome.loadSucceeded =
+        m_core->GetProjectAssemblyHost().LoadOneProjectAssemblyFromExactPath(
+            outputDirectory / (pre.resolvedProjectName + "_Game.dll"), *m_core, m_editorHost)
+        && m_core->GetProjectAssemblyHost().LoadOneProjectAssemblyFromExactPathIfExists(
+            outputDirectory / (pre.resolvedProjectName + "_Editor.dll"), *m_core, m_editorHost);
+    pre.outcome.statusMessage = pre.outcome.loadSucceeded
+        ? ("opened '" + name + "' - loaded successfully")
+        : ("opened '" + name + "' - marked active, but the load itself failed; see the engine log");
+    GTE_LOG_INFO("ProjectLifecycle", "OpenProjectAssemblyOnMainThread('" + name + "'): " + pre.outcome.statusMessage);
+    return pre.outcome;
+}
+
+std::vector<IProjectLifecycleCapability::ProjectListEntry> EditorProjectLifecycleCapability::ListProjectAssemblies()
+{
+    std::vector<ProjectListEntry> entries;
+#if GTE_ENABLE_PROJECT_ASSEMBLIES
+    const std::filesystem::path executableDirectory = gte::ExecutableDirectory();
+    const std::filesystem::path buildDirectory = ResolveCMakeBuildDirectory(executableDirectory);
+    if (buildDirectory.empty()) return entries;
+    const std::filesystem::path sourceRoot = ResolveProjectAssemblySourceRootDirectory(buildDirectory);
+    if (sourceRoot.empty() || !std::filesystem::is_directory(sourceRoot)) return entries;
+    const std::filesystem::path outputDirectory = ResolveProjectAssemblyOutputDirectory(executableDirectory);
+
+    std::vector<std::string> loadedDllFileNames;
+    if (m_core != nullptr) {
+        std::lock_guard<std::mutex> lock(GetHotReloadEngineStateMutex());
+        loadedDllFileNames = m_core->GetProjectAssemblyHost().GetLoadedAssemblyFileNames();
+    }
+
+    std::error_code iterationError;
+    for (const auto& entry : std::filesystem::directory_iterator(sourceRoot, iterationError)) {
+        if (!entry.is_directory()) continue;
+        const ProjectValidityTier tier = ClassifyProjectAssemblyFolder(entry.path(), outputDirectory, loadedDllFileNames);
+        entries.push_back({ entry.path().filename().string(), ToTierName(tier) });
+    }
+#endif
+    return entries;
+}
+
+void EditorProjectLifecycleCapability::SetLoadCommandBridge(ProjectLifecycleLoadCommandBridge& bridge) noexcept
+{
+    m_loadCommandBridge = &bridge;
+}
+
+void EditorProjectLifecycleCapability::SetEngineReferences(Core& core, EditorHost* editorHost) noexcept
+{
+    m_core = &core;
+    m_editorHost = editorHost;
 }
 
 } // namespace gte

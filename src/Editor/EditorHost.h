@@ -28,6 +28,10 @@
 // BIG-STEP 3), PHASE3 - the new ProjectAssemblyHotReloadCommandBridge
 // (m_hotReloadCommandBridge below).
 #include "../Application/ProjectAssemblyHotReloadCommandBridge.h"
+// editor-core-separation-17 campaign (On-Engine Project Workflow plan,
+// BIG-STEP 3), PHASE3 - the new ProjectLifecycleLoadCommandBridge
+// (m_projectLifecycleLoadCommandBridge below).
+#include "../Application/ProjectLifecycleLoadCommandBridge.h"
 
 namespace gte {
 
@@ -176,6 +180,16 @@ private:
     // SetHotReloadCommandBridge(), this same phase, for how the route reaches
     // it instead).
     ProjectAssemblyHotReloadCommandBridge m_hotReloadCommandBridge;
+
+    // editor-core-separation-17 campaign (On-Engine Project Workflow plan,
+    // BIG-STEP 3), PHASE3 - the cross-thread hand-off for the "Open
+    // Project" Tier-3 real .dll load, submitted ONLY by
+    // EditorProjectLifecycleCapability::OpenProjectAssembly() (the
+    // network-thread-facing method - OpenProjectAssemblyOnMainThread(),
+    // the ImGui-facing method, never touches this bridge at all, see
+    // PHASE0_MASTER_STRATEGY.md Section 2.2). Same "declared BEFORE
+    // m_networkServer" placement reasoning as every other bridge above.
+    ProjectLifecycleLoadCommandBridge m_projectLifecycleLoadCommandBridge;
 
     // Networking campaign (task_manager/network-impl-1/) - an embedded,
     // loopback-only HTTP server (see AGENTS.md, "Networking"). Declared

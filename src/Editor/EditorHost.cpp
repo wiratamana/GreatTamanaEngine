@@ -273,6 +273,15 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
     // as the two calls above.
     s_editorHotReloadDebugCapability.SetEngineCommandBridge(m_commandBridge);
 
+    // editor-core-separation-17 campaign (On-Engine Project Workflow plan,
+    // BIG-STEP 3), PHASE3 - hands EditorProjectLifecycleCapability the new
+    // bridge + a live Core&/EditorHost* so OpenProjectAssembly()/
+    // OpenProjectAssemblyOnMainThread() can both do real work. Same "setter,
+    // not a constructor parameter" placement as every capability wiring call
+    // above.
+    s_editorProjectLifecycleCapability.SetLoadCommandBridge(m_projectLifecycleLoadCommandBridge);
+    s_editorProjectLifecycleCapability.SetEngineReferences(m_core, this);
+
     // editor-core-separation-1 campaign, PHASE16 - hands Core the ONE
     // callback that actually calls IEditorLayer::Render(cmd) - an explicitly
     // HOST-LEVEL IEditorLayer method (Locked Design Decision #8's second
@@ -747,6 +756,27 @@ int EditorHost::Run()
             outcome.meshVertexCount = layerResult.meshVertexCount;
             outcome.meshTriangleCount = layerResult.meshTriangleCount;
             m_assetImportCommandBridge.FulfillCommand(importResult);
+        }
+
+        // editor-core-separation-17 campaign (On-Engine Project Workflow plan,
+        // BIG-STEP 3), PHASE3 - drains at most ONE pending Tier-3 "Open Project"
+        // load request per frame, submitted ONLY by
+        // EditorProjectLifecycleCapability::OpenProjectAssembly() (the
+        // network-thread-facing method) - the ImGui-facing
+        // OpenProjectAssemblyOnMainThread() never reaches this bridge at all (see
+        // PHASE0_MASTER_STRATEGY.md, Section 2.2).
+        if (const std::optional<LoadProjectAssemblyCommandRequest> loadRequest =
+                m_projectLifecycleLoadCommandBridge.TryPeekPendingCommandRequest()) {
+            GTE_PROFILE_SCOPE("EditorHost::ExecuteProjectLifecycleLoad");
+            const std::filesystem::path outputDirectory = ResolveProjectAssemblyOutputDirectory(gte::ExecutableDirectory());
+            const std::string& name = loadRequest->projectName;
+            LoadProjectAssemblyCommandResult loadResult;
+            loadResult.loadSucceeded =
+                m_core.GetProjectAssemblyHost().LoadOneProjectAssemblyFromExactPath(
+                    outputDirectory / (name + "_Game.dll"), m_core, this)
+                && m_core.GetProjectAssemblyHost().LoadOneProjectAssemblyFromExactPathIfExists(
+                    outputDirectory / (name + "_Editor.dll"), m_core, this);
+            m_projectLifecycleLoadCommandBridge.FulfillCommand(loadResult);
         }
 
         // Clears last frame's queued Submit() draw items before Game gets a
