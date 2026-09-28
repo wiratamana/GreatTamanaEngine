@@ -235,12 +235,16 @@ above) and re-run a quick compile-check to confirm the revert is clean.
 ### 3.5 — If anything in 3.4 fails
 
 Diagnose using `GET /get_logs` (never guess, never add raw console
-logging). If the root cause is a genuine defect in PHASE1-4's own work, use
-`delegate_task` (this phase itself must NOT delegate further sub-tasks per
-this campaign's own top-level workflow rule — only escalate a fix back to
-whichever earlier phase actually owns the broken code, citing the exact
-failing check number from 3.4, the exact expected-vs-actual response body,
-and the exact log lines observed).
+logging). This phase itself must NOT call `delegate_task` under any
+circumstance, per this whole session's own top-level workflow rule — if the
+root cause is a genuine defect in PHASE1-4's own work, fix it DIRECTLY,
+within this same session (the broken code is almost certainly still fresh
+in context from reading PHASE1-4's own files/reports at the start of this
+phase). Cite the exact failing check number from 3.4, the exact
+expected-vs-actual response body, and the exact log lines observed, in this
+phase's own completion report (3.7 below) as a found-and-fixed regression.
+Only escalate to a human via `ask_questions` if the failure turns out to be
+a genuine design ambiguity, not a plain code defect.
 
 ### 3.6 — Full regression pass
 
@@ -254,8 +258,9 @@ this campaign's own final numbers once known, do not just repeat this
 number blindly if `AGENTS.md` shows a more recent baseline from some other
 campaign that ran in between). Any newly-failing test (not one of the two
 pre-existing, environment-gated skips) is a real regression this campaign
-introduced — diagnose and fix (via `delegate_task` back to the owning
-phase, per 3.5's own rule) before declaring this campaign done.
+introduced — diagnose and fix it DIRECTLY, within this same session (per
+3.5's own rule: this phase must NOT call `delegate_task`), before declaring
+this campaign done.
 
 ### 3.7 — Campaign completion report
 
