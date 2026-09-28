@@ -341,6 +341,15 @@ add_library(gte_core STATIC
     # gates EditorHost.cpp's m_core.LoadProjectAssemblies() call).
     src/Core/Plugins/ProjectAssemblyHost.h
     src/Core/Plugins/ProjectAssemblyHost.cpp
+    # editor-core-separation-11 campaign (Project Assembly system), PHASE6
+    # (PHASE6_COMPILE_TRIGGER_AND_BUILD_AUTOMATION.md) - TriggerProjectAssemblyCompile(),
+    # the "Compile" build-automation mechanism. Always compiled (mirrors
+    # ProjectAssemblyHost.h/.cpp's own "mechanism class is unconditional"
+    # precedent immediately above) - added here explicitly because gte_core's
+    # own source list is hand-maintained, NOT a file(GLOB ...) (PHASE5's own
+    # completion report flagged this exact gap for PHASE6's benefit).
+    src/Core/Plugins/ProjectAssemblyBuildRunner.h
+    src/Core/Plugins/ProjectAssemblyBuildRunner.cpp
     # editor-core-separation-3 campaign, PHASE3
     # (PHASE3_RUNTIME_RENDER_FEATURE_CAPABILITY.md) - PluginRenderPassBuilderAdapter,
     # the gte_core-side implementation of IPluginRenderPassBuilder, constructed
