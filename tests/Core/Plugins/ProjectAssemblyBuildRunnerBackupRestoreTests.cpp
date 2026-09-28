@@ -12,9 +12,12 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <string>
+#include <thread>
 
 namespace gte {
 namespace {
@@ -125,6 +128,72 @@ TEST(ProjectAssemblyBuildRunnerBackupRestoreTest, ResolveProjectAssemblyOutputDi
 {
     const std::filesystem::path executableDirectory = std::filesystem::path("C:") / "some" / "exe" / "dir";
     EXPECT_EQ(ResolveProjectAssemblyOutputDirectory(executableDirectory), executableDirectory / "project_assemblies");
+}
+
+// editor-core-separation-14 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 3), PHASE2, section 3.5. Proves TryRunProjectAssemblyBuildSynchronously()
+// shares the EXACT SAME per-project in-flight guard (g_inFlightProjects,
+// ProjectAssemblyBuildRunner.cpp's own anonymous namespace) the existing
+// async path (TriggerProjectAssemblyCompile) already uses - a second
+// synchronous call for the SAME project name, while the first is still
+// genuinely running, must be rejected (returns false), never allowed to
+// race a second overlapping child process.
+//
+// Deterministic approach (avoids a real, multi-minute build and avoids a
+// pure-luck std::thread-launch race): `buildDirectory` below is a real,
+// EXISTING directory (TempOutputDirectory - so CreateProcessW() genuinely
+// succeeds and spawns a real `cmake.exe` child) that deliberately has no
+// CMakeCache.txt in it, so the build fails fast (cmake reports it cannot
+// load the cache and exits) without touching any real project. Because a
+// freshly spawned child process always needs some non-zero wall-clock time
+// to even begin executing (OS process-creation/scheduling latency), the
+// FIRST PeekNamedPipe() poll inside RunOneBuildTarget()'s read loop is, in
+// practice, guaranteed to see zero bytes available and invoke `onIdleTick`
+// at least once - this test uses that one guaranteed callback to
+// synchronously launch and JOIN a second TryRunProjectAssemblyBuildSynchronously()
+// call for the exact SAME project name, on a second thread, from STRICTLY
+// INSIDE the window where the first (outer) call's own TryMarkInFlight()
+// has already succeeded and not yet been cleared - proving the shared
+// guard actually rejects the overlap, rather than merely hoping two
+// independently-scheduled std::thread launches happen to race.
+TEST(ProjectAssemblyBuildRunnerBackupRestoreTest, ConcurrentSynchronousBuildsForTheSameProjectAreMutuallyExclusive)
+{
+    TempOutputDirectory buildDirectory("Concurrency_BuildDir");
+    const std::string projectName = "GteConcurrencyGuardTestProject";
+
+    std::atomic<bool> nestedCallMade{false};
+    bool nestedTryResult = true; // Deliberately wrong default - must flip to false below.
+    BuildOutcome nestedOutcome;
+
+    const std::function<void()> onIdleTick = [&]() {
+        bool expected = false;
+        if (nestedCallMade.compare_exchange_strong(expected, true)) {
+            std::thread nestedThread([&]() {
+                nestedTryResult = TryRunProjectAssemblyBuildSynchronously(
+                    projectName, buildDirectory.Path().string(), nestedOutcome);
+            });
+            nestedThread.join();
+        }
+    };
+
+    BuildOutcome outerOutcome;
+    const bool outerResult =
+        TryRunProjectAssemblyBuildSynchronously(projectName, buildDirectory.Path().string(), outerOutcome, onIdleTick);
+
+    // The outer call was never in-flight before the test started, so it
+    // must have been accepted and actually run to completion.
+    EXPECT_TRUE(outerResult);
+    // Neither call points at a real CMakeCache.txt - both builds are
+    // expected to fail, never succeed.
+    EXPECT_FALSE(outerOutcome.success);
+
+    EXPECT_TRUE(nestedCallMade.load())
+        << "onIdleTick was never invoked - the concurrency guard was not actually exercised "
+           "this run (the child process would have had to produce output or exit before the "
+           "very first poll tick, which should not happen in practice).";
+    // The nested call genuinely raced the still-in-flight outer build - it
+    // MUST have been rejected by the shared in-flight guard.
+    EXPECT_FALSE(nestedTryResult);
 }
 
 } // namespace gte

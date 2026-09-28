@@ -124,18 +124,27 @@ std::wstring QuoteWindowsArgument(const std::wstring& argument)
 // invocation as a real Windows child process (CreateProcessW(), per this
 // phase's own doc file), redirecting its combined stdout/stderr to an
 // anonymous pipe and reading that pipe, line by line, on the SAME thread
-// that calls this function - this thread's entire job IS this blocking
-// read loop (ReadFile() blocking is fine here, see this phase's own doc
-// file). Every completed line is forwarded to GTE_LOG_INFO/WARNING/ERROR
-// via a simple, best-effort, explicitly NOT-guaranteed-correct keyword
-// heuristic (never parsed further than that). Returns the child's real
-// exit code, or a negative sentinel if the process itself could not even
-// be created/piped. `targetMissingHeuristicHit` is set true if the output
-// looks like Ninja/CMake reporting that `targetName` simply does not exist
-// - the caller uses this to distinguish "no Editor/ sources, perfectly
-// normal" from a genuine build failure (this phase's own "STEP 2" doc-file
-// reasoning).
-int RunOneBuildTarget(const std::string& buildDirectory, const std::string& targetName, bool& targetMissingHeuristicHit)
+// that calls this function. PHASE2 (editor-core-separation-14 campaign)
+// replaced the original plain blocking ReadFile() loop with a
+// PeekNamedPipe()-driven poll loop (see the loop body below) so an
+// optional `onIdleTick` callback runs on a genuinely fixed ~50ms cadence,
+// independent of how chatty the child process is - this is what a future
+// synchronous caller running on the main/window-owning thread uses to keep
+// pumping Windows messages during a long build, without touching
+// game/render state itself. Every completed line is forwarded to
+// GTE_LOG_INFO/WARNING/ERROR via a simple, best-effort, explicitly
+// NOT-guaranteed-correct keyword heuristic (never parsed further than
+// that). Returns the child's real exit code, or a negative sentinel if the
+// process itself could not even be created/piped. `targetMissingHeuristicHit`
+// is set true if the output looks like Ninja/CMake reporting that
+// `targetName` simply does not exist - the caller uses this to distinguish
+// "no Editor/ sources, perfectly normal" from a genuine build failure (this
+// phase's own "STEP 2" doc-file reasoning). `onIdleTick`, if non-empty, is
+// invoked once per poll iteration whenever no build output is currently
+// available - pass an empty std::function (the default) from any call site
+// that is NOT running on the main/window-owning thread.
+int RunOneBuildTarget(const std::string& buildDirectory, const std::string& targetName, bool& targetMissingHeuristicHit,
+    const std::function<void()>& onIdleTick = {})
 {
     targetMissingHeuristicHit = false;
 
@@ -193,8 +202,22 @@ int RunOneBuildTarget(const std::string& buildDirectory, const std::string& targ
 
     std::string lineBuffer;
     char readBuffer[4096];
-    DWORD bytesRead = 0;
-    while (ReadFile(readPipe, readBuffer, sizeof(readBuffer), &bytesRead, nullptr) && bytesRead > 0) {
+    for (;;) {
+        DWORD bytesAvailable = 0;
+        if (!PeekNamedPipe(readPipe, nullptr, 0, nullptr, &bytesAvailable, nullptr)) {
+            break; // Pipe closed (child exited) or a genuine error - both end this loop, matching ReadFile()'s own former "false -> stop" contract.
+        }
+        if (bytesAvailable == 0) {
+            if (onIdleTick) {
+                onIdleTick();
+            }
+            Sleep(50); // Fixed poll cadence - see this function's own updated doc comment (PHASE2).
+            continue;
+        }
+        DWORD bytesRead = 0;
+        if (!ReadFile(readPipe, readBuffer, sizeof(readBuffer), &bytesRead, nullptr) || bytesRead == 0) {
+            break;
+        }
         lineBuffer.append(readBuffer, bytesRead);
         std::size_t newlinePos = 0;
         while ((newlinePos = lineBuffer.find('\n')) != std::string::npos) {
@@ -242,40 +265,23 @@ int RunOneBuildTarget(const std::string& buildDirectory, const std::string& targ
 
 // The actual background-thread body, registered via
 // JobSystem::RegisterBackgroundThread() (never Schedule() - see this file's
-// own header comment). Builds `<projectName>_Game` first; only attempts
-// `<projectName>_Editor` if the `_Game` build succeeded, and treats a
-// missing `_Editor` target (a project with no Editor/ sources - a
-// perfectly normal, valid case per gte_add_project()'s own conditional
-// target creation) as success, not failure - per this phase's own "STEP 2"
-// doc-file instruction.
+// own header comment). PHASE2 (editor-core-separation-14 campaign)
+// extracted the actual Game-then-Editor build sequencing into the new,
+// shared, non-static gte::RunProjectAssemblyBuildAndWait() below - this
+// function is now a thin wrapper around it, preserving its EXACT existing
+// final log line text/exit-code semantics (a hot-reload caller must never
+// see this "relaunch GreatTamanaEditor.exe..." wording - see the NEW
+// synchronous path's own, different final line instead).
 void RunBuildThreadBody(std::string projectName, std::string buildDirectory, std::shared_ptr<std::atomic<bool>> completionFlag)
 {
-    GTE_LOG_INFO("ProjectAssemblyBuild",
-        "Starting build for Project Assembly '" + projectName + "' (build directory: " + buildDirectory + ")...");
-
-    bool gameTargetMissing = false;
-    const int gameExitCode = RunOneBuildTarget(buildDirectory, projectName + "_Game", gameTargetMissing);
-
-    int editorExitCode = 0;
-    if (gameExitCode == 0) {
-        bool editorTargetMissing = false;
-        editorExitCode = RunOneBuildTarget(buildDirectory, projectName + "_Editor", editorTargetMissing);
-        if (editorExitCode != 0 && editorTargetMissing) {
-            GTE_LOG_INFO("ProjectAssemblyBuild",
-                "Project '" + projectName + "' has no '_Editor' target (no Editor/ sources) - this is normal, not a build failure.");
-            editorExitCode = 0;
-        }
-    } else {
-        GTE_LOG_ERROR("ProjectAssemblyBuild",
-            "'" + projectName + "_Game' target build failed (exit code " + std::to_string(gameExitCode) + ") - skipping the '_Editor' target attempt.");
-    }
-
-    const int finalExitCode = (gameExitCode != 0) ? gameExitCode : editorExitCode;
+    // No onIdleTick - a background thread owns no window to pump messages
+    // for; doing so would be a pointless no-op.
+    const BuildOutcome outcome = RunProjectAssemblyBuildAndWait(projectName, buildDirectory);
     // This exact reminder MUST appear in the final log line, every time
     // (success or failure) - see this phase's own doc file, and LDD4
     // (Project Assemblies are never hot-reloaded).
     GTE_LOG_INFO("ProjectAssemblyBuild",
-        "Build finished with exit code " + std::to_string(finalExitCode) +
+        "Build finished with exit code " + std::to_string(outcome.exitCode) +
         " - relaunch GreatTamanaEditor.exe to use the result (Project Assemblies are not hot-reloaded, see PHASE0_MASTER_STRATEGY.md, LDD4).");
 
     ClearInFlight(projectName);
@@ -286,6 +292,58 @@ void RunBuildThreadBody(std::string projectName, std::string buildDirectory, std
 }
 
 } // namespace
+
+// editor-core-separation-14 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 3), PHASE2. See this function's own doc comment in
+// ProjectAssemblyBuildRunner.h for the full contract. Extracted from
+// RunBuildThreadBody's own former inline body (this phase) - identical
+// Game-then-Editor sequencing/target-missing heuristic, byte-for-byte.
+BuildOutcome RunProjectAssemblyBuildAndWait(const std::string& projectName, const std::string& buildDirectory,
+    const std::function<void()>& onIdleTick)
+{
+    GTE_LOG_INFO("ProjectAssemblyBuild",
+        "Starting build for Project Assembly '" + projectName + "' (build directory: " + buildDirectory + ")...");
+
+    bool gameTargetMissing = false;
+    const int gameExitCode = RunOneBuildTarget(buildDirectory, projectName + "_Game", gameTargetMissing, onIdleTick);
+
+    int editorExitCode = 0;
+    if (gameExitCode == 0) {
+        bool editorTargetMissing = false;
+        editorExitCode = RunOneBuildTarget(buildDirectory, projectName + "_Editor", editorTargetMissing, onIdleTick);
+        if (editorExitCode != 0 && editorTargetMissing) {
+            GTE_LOG_INFO("ProjectAssemblyBuild",
+                "Project '" + projectName + "' has no '_Editor' target (no Editor/ sources) - this is normal, not a build failure.");
+            editorExitCode = 0;
+        }
+    } else {
+        GTE_LOG_ERROR("ProjectAssemblyBuild",
+            "'" + projectName + "_Game' target build failed (exit code " + std::to_string(gameExitCode) + ") - skipping the '_Editor' target attempt.");
+    }
+
+    BuildOutcome outcome;
+    outcome.exitCode = (gameExitCode != 0) ? gameExitCode : editorExitCode;
+    outcome.success = (outcome.exitCode == 0);
+    return outcome;
+}
+
+// editor-core-separation-14 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 3), PHASE2. See this function's own doc comment in
+// ProjectAssemblyBuildRunner.h for the full contract - shares the EXACT
+// SAME per-project in-flight guard (g_inFlightProjects, anonymous namespace
+// above) as the existing async path (TriggerProjectAssemblyCompile).
+bool TryRunProjectAssemblyBuildSynchronously(const std::string& projectName, const std::string& buildDirectory,
+    BuildOutcome& outOutcome, const std::function<void()>& onIdleTick)
+{
+    if (!TryMarkInFlight(projectName)) {
+        GTE_LOG_WARNING("ProjectAssemblyBuild",
+            "Synchronous build for Project Assembly '" + projectName + "' rejected - a build for this project is already in progress.");
+        return false;
+    }
+    outOutcome = RunProjectAssemblyBuildAndWait(projectName, buildDirectory, onIdleTick);
+    ClearInFlight(projectName);
+    return true;
+}
 
 bool TriggerProjectAssemblyCompile(const std::string& projectName, const std::string& buildDirectory)
 {

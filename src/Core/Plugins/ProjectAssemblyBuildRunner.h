@@ -32,9 +32,59 @@
 #pragma once
 
 #include <filesystem>
+#include <functional>
 #include <string>
 
 namespace gte {
+
+// editor-core-separation-14 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 3), PHASE2. The value-type result of one full build attempt
+// (both TARGETS: _Game, then _Editor if present) - shared by BOTH the
+// existing async path (RunBuildThreadBody) and the new synchronous path
+// below (TryRunProjectAssemblyBuildSynchronously).
+struct BuildOutcome {
+    bool success = false;
+    int exitCode = 0;
+    // Deliberately NOT the existing async path's own "relaunch
+    // GreatTamanaEditor.exe..." wording (that advice is wrong for a
+    // hot-reload caller) - each CALLER writes its own final summary log
+    // line using this struct's exitCode/success; this field is reserved
+    // for a future caller that wants a single ready-made human string
+    // without composing one itself (unused by this phase - a future
+    // orchestrator phase composes its own line instead).
+    std::string finalSummaryLine;
+};
+
+// Builds <projectName>_Game (then _Editor, if that target exists),
+// IDENTICAL sequencing/target-missing heuristic as the existing async
+// path (RunBuildThreadBody) - BLOCKS THE CALLING THREAD for the whole
+// duration. Does NOT touch the per-project in-flight guard itself - see
+// TryRunProjectAssemblyBuildSynchronously() below for the one sanctioned
+// way a NEW caller uses this together with that guard; RunBuildThreadBody
+// (the EXISTING async path) continues to guard it exactly as it already
+// does today, unchanged. `onIdleTick`, if provided, is invoked from
+// RunOneBuildTarget()'s own poll loop on a fixed ~50ms cadence whenever no
+// build output is currently available - see that function's own updated
+// doc comment (PHASE2) for why. Pass an empty std::function (the default)
+// from any call site that is NOT running on the main/window-owning thread
+// (a background thread has no window to pump messages for - doing so
+// would be a pointless no-op, never do it).
+BuildOutcome RunProjectAssemblyBuildAndWait(const std::string& projectName, const std::string& buildDirectory,
+    const std::function<void()>& onIdleTick = {});
+
+// The synchronous counterpart of TriggerProjectAssemblyCompile() - shares
+// the EXACT SAME per-project in-flight guard (g_inFlightProjects) as that
+// existing async path: a hot-reload request for a project whose own async
+// "Compile" build (the button OR /compile_only) is ALREADY running is
+// rejected here (returns false, outOutcome left untouched), exactly
+// mirroring TriggerProjectAssemblyCompile()'s own existing rejection of a
+// second overlapping async request - and vice versa (a fresh async
+// request is rejected while THIS function's own synchronous build is
+// still running), since both now go through the SAME g_inFlightProjects
+// set. Returns true once the build genuinely ran to completion (regardless
+// of whether it succeeded - check outOutcome.success for that).
+bool TryRunProjectAssemblyBuildSynchronously(const std::string& projectName, const std::string& buildDirectory,
+    BuildOutcome& outOutcome, const std::function<void()>& onIdleTick = {});
 
 // Kicks off an ASYNCHRONOUS build of `<projectName>_Game` and (if it
 // exists) `<projectName>_Editor` against `buildDirectory`. Returns
