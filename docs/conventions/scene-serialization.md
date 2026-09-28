@@ -67,7 +67,20 @@ phase-by-phase history of how it got here.
     were DELETED by `scene-serialization-2` Phase 3** - if you remember that
     name from an older reading of this codebase, it is gone; `SceneJsonFormat.h/.cpp`
     is its full replacement.
-  - `SceneBuilder.h/.cpp` - the ECS-facing bridge, still Renderer-free:
+  - `SceneBuilder.h/.cpp` - the ECS-facing bridge between a live `Registry` and
+    a plain `SceneDocument`. **As of the `editor-core-separation-15` campaign
+    (Project Assembly Hot Reload plan, BIG-STEP 4), PHASE3, this file is NO
+    LONGER Renderer-free** - it now also owns the LOAD half
+    (`ReconstructSceneFromDocument()`, described below), which needs a live
+    `Renderer` exactly like `Editor/SceneIO.cpp`'s `LoadScene()` always did.
+    This is genuinely `gte_core`-tier (every type it touches - `Game`,
+    `Renderer`, `Registry`, `ComponentTypeRegistry`, `AssetDatabase` - already
+    was), reused by both `Editor::LoadScene()` (now a thin wrapper, see below)
+    and Project Assembly Hot Reload's own restore path
+    (`Core/Plugins/ProjectAssemblyHotReload.cpp`'s
+    `RestoreProjectAssemblyHotReloadState()`) - mirroring Unity's own
+    `SceneManager.LoadScene()` being a runtime/Player capability, not merely
+    an Editor one:
     - `BuildSceneDocumentFromRegistry(Registry&, const AssetDatabase&)` - the
       SAVE half. Recursively walks **every root entity and every one of its
       descendants** (`ECS/TransformHierarchy.h`'s `GetChildren()`), not just
@@ -89,6 +102,20 @@ phase-by-phase history of how it got here.
       `PrimitiveSource`/`MeshAssetSource`-tagged root, silently leaving e.g.
       the default Camera untouched) - there is no longer any entity kind this
       feature does not own, so there is nothing left to selectively preserve.
+    - `ReconstructSceneFromDocument(Game&, Renderer&, const SceneDocument&, const AssetDatabase&)` -
+      the LOAD half (`editor-core-separation-15`, PHASE3). A faithful,
+      unmodified copy of what used to be `Editor/SceneIO.cpp`'s own
+      `LoadScene()` recipe-aware reconstruction body - a record carrying a
+      `"PrimitiveSource"` key spawns via `Game::CreatePrimitiveEntity()`; a
+      record with a resolvable `assetGuid` spawns via
+      `Game::CreateMeshEntityFromGtaFile()` with by-Name child
+      reconciliation; everything else becomes a bare entity - every record's
+      saved `components` fields are then applied generically via
+      `ComponentTypeRegistry`, and its saved parent/sibling-index restored,
+      ending with one more `Game::EnsureDefaultCameraExists()` call. Does
+      **not** clear the scene or scan an `AssetDatabase` itself - both of
+      those remain each caller's own responsibility (see the "Recipe-spawn
+      reconciliation" section below for the full algorithm).
 - **`src/Editor/SceneIO.h/.cpp`** (`GTE_ENABLE_EDITOR`-only) - the
   Game/Renderer/filesystem-touching glue:
   - `SaveScene(Game&, const std::filesystem::path&)` / `SaveScene(Game&)` (the
@@ -96,8 +123,12 @@ phase-by-phase history of how it got here.
     unchanged behavior - still what `Editor/DockLayout.cpp`'s Ctrl+S calls).
   - `LoadScene(Game&, Renderer&, const std::filesystem::path&)` /
     `LoadScene(Game&, Renderer&)` (same forwarding shape - still what Ctrl+O
-    calls). `LoadScene()`'s reconstruction is the "recipe-spawn
-    reconciliation" algorithm - see below.
+    calls). **As of `editor-core-separation-15`, PHASE3, this is now a thin
+    wrapper**: it reads+parses the `*.gtscene` file, resolves the project
+    root, scans a fresh `AssetDatabase`, calls `Scene/SceneBuilder.h`'s
+    `ClearEntireScene()`, then calls that same file's
+    `ReconstructSceneFromDocument()` (the real "recipe-spawn reconciliation"
+    algorithm, described below, which now lives there instead of here).
 
 ## Full hierarchy, every entity - not just tagged roots
 
@@ -122,8 +153,10 @@ A generic field-copy alone cannot correctly restore a `MeshRenderer` (it holds
 live, session-local GPU resource handles - see "What is never reflected"
 below) or a multi-part imported mesh's own child "part" entities (freshly
 re-derived from the source `*.gta` every time, since that's the only way to
-get a REAL, GPU-backed mesh back). `Editor/SceneIO.cpp`'s `LoadScene()` solves
-this with a recipe-aware, multi-pass reconstruction (see that file's own
+get a REAL, GPU-backed mesh back). **As of `editor-core-separation-15`,
+PHASE3, this algorithm's real, current home is `Scene/SceneBuilder.cpp`'s
+`ReconstructSceneFromDocument()`** (moved out of `Editor/SceneIO.cpp`'s
+`LoadScene()`, which now just calls into it - see that function's own
 extensive inline comments for the full algorithm, including every edge case
 and the exact guard flags used):
 

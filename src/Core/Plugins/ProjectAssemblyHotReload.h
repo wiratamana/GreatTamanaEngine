@@ -41,10 +41,22 @@ struct HotReloadStateSnapshot {
 HotReloadStateSnapshot CaptureProjectAssemblyHotReloadState(Core& core, const std::filesystem::path& projectRootDirectory);
 
 // HOOK POINT B - called AFTER the (new-or-rolled-back) code's own
-// GTE_RegisterProject has already run, so every render-pass/panel/
-// component-type registration the now-running code needs already exists.
-// No-op stub this campaign (PHASE2) - PHASE3 gives this its real body.
-void RestoreProjectAssemblyHotReloadState(Core& core, const HotReloadStateSnapshot& snapshot);
+// GTE_RegisterProject has already run (see PerformProjectAssemblyHotReload()'s
+// own sequencing, editor-core-separation-14 PHASE4 - unchanged by this
+// campaign), so every render-pass/panel/component-type registration the
+// now-running code needs already exists BEFORE this call ever tries to
+// apply saved component data referencing it - this ordering is what makes
+// applying a saved custom-component field safe (ComponentTypeRegistry::Find()
+// would return nullptr, and the field would be silently, confusingly
+// dropped, if this ran too early). Real body, as of PHASE3 (this campaign) -
+// reuses Scene/SceneBuilder.h's ClearEntireScene() + the new
+// ReconstructSceneFromDocument(), sharing the SAME code the Editor's own
+// Ctrl+O LoadScene() now goes through. Note the new Renderer& parameter -
+// ReconstructSceneFromDocument() needs one, and
+// PerformProjectAssemblyHotReload() already has a live Renderer& renderer in
+// scope at its own call site.
+void RestoreProjectAssemblyHotReloadState(Core& core, Renderer& renderer, const HotReloadStateSnapshot& snapshot,
+    const std::filesystem::path& projectRootDirectory);
 
 // editor-core-separation-14 campaign (Project Assembly Hot Reload plan,
 // BIG-STEP 3). THE orchestrator - PHASE4 (this file, as of PHASE4) gives

@@ -42,14 +42,25 @@ HotReloadStateSnapshot CaptureProjectAssemblyHotReloadState(Core& core, const st
     return snapshot;
 }
 
-// editor-core-separation-14 campaign, PHASE4 - HOOK POINT B. No-op stub
-// this campaign (BIG-STEP 4 not yet implemented) - logs once, at INFO
-// level, so a live test can confirm this was reached without needing to
-// guess.
-void RestoreProjectAssemblyHotReloadState(Core& /*core*/, const HotReloadStateSnapshot& /*snapshot*/)
+// editor-core-separation-15 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 4), PHASE3 - HOOK POINT B's real body. Reuses the SAME
+// Scene/SceneBuilder.h ClearEntireScene() + ReconstructSceneFromDocument()
+// the Editor's own Ctrl+O LoadScene() (Editor/SceneIO.cpp) now goes
+// through.
+void RestoreProjectAssemblyHotReloadState(Core& core, Renderer& renderer, const HotReloadStateSnapshot& snapshot,
+    const std::filesystem::path& /*projectRootDirectory*/)
 {
+    // LDD-HR7 - reuses the SAME core.GetAssetDatabase() instance
+    // CaptureProjectAssemblyHotReloadState() already refreshed earlier in
+    // THIS SAME cycle (PHASE2) - deliberately NOT refreshed a second time
+    // here (nothing could have added a new on-disk asset during the
+    // freeze - the whole engine, including any file-watching, was frozen
+    // solid the entire time, LDD-HR4).
+    ClearEntireScene(core.GetGame().GetRegistry());
+    ReconstructSceneFromDocument(core.GetGame(), renderer, snapshot.document, core.GetAssetDatabase());
+
     GTE_LOG_INFO("ProjectAssemblyHotReload",
-        "RestoreProjectAssemblyHotReloadState: no-op stub (BIG-STEP 4 not yet implemented).");
+        "RestoreProjectAssemblyHotReloadState: restored " + std::to_string(snapshot.document.entities.size()) + " entities.");
 }
 
 namespace {
@@ -203,7 +214,7 @@ void PerformProjectAssemblyHotReload(const std::string& projectName, Core& core,
     }
 
     ProjectAssemblyHotReloadDebugStatus::Instance().Set("RestoringState", projectName);
-    RestoreProjectAssemblyHotReloadState(core, snapshot);
+    RestoreProjectAssemblyHotReloadState(core, renderer, snapshot, projectRootDirectory);
 
     GTE_LOG_INFO("ProjectAssemblyHotReload",
         "Hot reload cycle for '" + projectName + "' complete (" + (reloadedSuccessfully ? "new code" : "rolled back") + ") - engine unfrozen.");

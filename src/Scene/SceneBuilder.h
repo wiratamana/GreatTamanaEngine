@@ -7,13 +7,24 @@
 namespace gte {
 
 // The ECS-facing bridge between a live Registry and a plain SceneDocument
-// (Scene/SceneDocument.h) - the SAVE half (BuildSceneDocumentFromRegistry())
-// and the "make room for a fresh Load" half (ClearEntireScene()) of this
-// feature. Deliberately still Renderer-free - spawning new entities from a
-// SceneDocument (the rest of "Load") needs a live Renderer
-// (Game::CreatePrimitiveEntity()/CreateMeshEntityFromGtaFile() both do), so
-// THAT half lives in Editor/SceneIO.h instead, not here - keeping this file
-// Tier-1-testable exactly like Scene/SceneJsonFormat.h.
+// (Scene/SceneDocument.h) - the SAVE half (BuildSceneDocumentFromRegistry()),
+// the "make room for a fresh Load" half (ClearEntireScene()), and - as of the
+// editor-core-separation-15 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 4), PHASE3 - the LOAD half too (ReconstructSceneFromDocument()
+// below). This file DOES need a live Renderer now (ReconstructSceneFromDocument()'s
+// own recipe-spawn helpers, Game::CreatePrimitiveEntity()/
+// CreateMeshEntityFromGtaFile(), both do) - this is NOT a layering problem:
+// Renderer has always been gte_core-tier, exactly like Game/Registry/
+// AssetDatabase/ComponentTypeRegistry, so this whole bridge is genuinely a
+// core-engine capability, not merely an Editor-only one (mirrors Unity's own
+// SceneManager.LoadScene() being available in a Player build, not just the
+// Editor). The OLD claim that this file was "still Renderer-free" is now
+// stale/incorrect - corrected here. Editor/SceneIO.cpp's LoadScene() is now a
+// thin wrapper around ReconstructSceneFromDocument() below (resolve the
+// project root, scan a fresh AssetDatabase, parse the file, clear the scene,
+// then call the shared function) - see that function's own doc comment for
+// the full extraction history and its second real caller (Project Assembly
+// Hot Reload's own restore path).
 //
 // task_manager/scene-serialization-2/PHASE0_MASTER_STRATEGY.md's Locked
 // Design Decision #2 widened this function's scope to EVERY entity in the
@@ -95,5 +106,45 @@ SceneDocument BuildSceneDocumentFromRegistry(Registry& registry, const AssetData
 // stale, pre-Load entity - the Registry contains ONLY entities that SAME
 // LoadScene() call has created so far, by construction.
 void ClearEntireScene(Registry& registry);
+
+class Game; // forward-declare - do not #include Game/Game.h from this header if avoidable; SceneBuilder.cpp needs the full type, this header does not.
+class Renderer;
+
+// editor-core-separation-15 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 4), PHASE3 - the LOAD half of this ECS-facing bridge, extracted
+// from Editor/SceneIO.cpp's own LoadScene() (which now becomes a thin
+// wrapper: resolve the project root + a fresh AssetDatabase + parse the
+// *.gtscene file, then call this SAME function). Genuinely gte_core-tier -
+// every type this function touches already is (Game, Renderer, Registry,
+// ComponentTypeRegistry, AssetDatabase) - moved here, per the user's own
+// explicit direction, because "Load Scene is a core engine feature that can
+// be controlled on the editor side also" (mirrors Unity's own
+// SceneManager.LoadScene() being available in a Player build, not merely
+// the Editor). Reused verbatim by Core/Plugins/ProjectAssemblyHotReload.cpp's
+// own RestoreProjectAssemblyHotReloadState() (HOOK POINT B) - see that file
+// for the second real caller.
+//
+// CALLER'S OWN RESPONSIBILITY, NOT this function's: calling
+// ClearEntireScene(game.GetRegistry()) FIRST, exactly once, before this
+// call - this function does NOT clear the scene itself (both of its two
+// real callers already have their own, slightly different reasons for
+// when/whether a fresh AssetDatabase needs scanning around that same clear
+// step, so the ordering is left explicit at each call site rather than
+// hidden inside this one shared function).
+//
+// Recipe-aware: a record carrying "PrimitiveSource" is spawned via
+// Game::CreatePrimitiveEntity(); a record with a resolvable assetGuid is
+// spawned via Game::CreateMeshEntityFromGtaFile() with by-Name child
+// reconciliation; everything else becomes a bare entity. Every record's
+// saved `components` fields are then applied generically via
+// ComponentTypeRegistry, and its saved parent/sibling-index restored. See
+// the ORIGINAL Editor/SceneIO.cpp LoadScene() body (now superseded/thinned
+// by this extraction) for the full, exact, already-proven algorithm - do
+// NOT re-derive it from scratch; copy its real, working logic verbatim,
+// changing only the enclosing function's own name/signature/file.
+//
+// Also calls game.EnsureDefaultCameraExists() once, at the end - matches
+// LoadScene()'s own existing final guarantee.
+void ReconstructSceneFromDocument(Game& game, Renderer& renderer, const SceneDocument& document, const AssetDatabase& assetDatabase);
 
 } // namespace gte
