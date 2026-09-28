@@ -392,6 +392,92 @@ Full history: `task_manager/editor-core-separation-12/PHASE0_MASTER_STRATEGY.md`
 through `task_manager/editor-core-separation-15/PHASE0_MASTER_STRATEGY.md`,
 and each campaign's own `CAMPAIGN_COMPLETION_REPORT.md`.
 
+## Creating a New Project (On-Engine Project Workflow, BIG-STEP 2)
+
+A five-phase campaign, `editor-core-separation-16`
+(`task_manager/editor-core-separation-16/PHASE0_MASTER_STRATEGY.md`,
+`CAMPAIGN_COMPLETION_REPORT.md`), implements "BIG-STEP 2" ("Create New
+Project") of a larger, five-part external "On-Engine Project Workflow"
+master plan - BIG-STEP 1 (a shared `ActiveProjectAssemblyState` primitive)
+shipped as part of the same campaign; BIG-STEP 3 ("Open Project"), BIG-STEP
+4 ("Create Script Asset"), and BIG-STEP 5 (a real "Compile" menu action)
+remain separate, later campaigns, explicitly out of scope here.
+
+A brand-new, empty `Projects/<Name>/` folder - the exact 3-file scaffold
+this file's own "Folder layout" section above describes (`Libraries/
+CMakeLists.txt`, `Libraries/ProjectAssemblyExports.h` copied byte-for-byte
+from `cmake/templates/ProjectAssemblyExports.h`, `Assets/<Name>Game.cpp`, a
+real, immediately-compileable stub) - can now be created two ways, both
+calling the exact same underlying method,
+`gte::EditorProjectLifecycleCapability::CreateNewProjectAssembly()`
+(`src/Editor/EditorProjectLifecycleCapability.h/.cpp`):
+
+- Clicking **Project > New Project...** in the running Editor's menu bar
+  (a new top-level menu, alongside "File"/"Window"), typing a name, and
+  clicking "Create" (`src/Editor/NewProjectWindow.h/.cpp`) - an inline red
+  error message keeps the window open on failure.
+- `POST http://127.0.0.1:8080/project_assembly/create_project?name=<X>`
+  (`src/Network/NetworkServer.cpp`'s `RegisterRoutes()`).
+
+A name is validated by a new, shared, dependency-free validator,
+`gte::IsValidProjectAssemblyIdentifierName()`
+(`src/Core/Plugins/ProjectAssemblyNameValidation.h/.cpp` - matches
+`^[A-Za-z_][A-Za-z0-9_]*$` and rejects Windows' reserved device names),
+**before any filesystem write happens** - an empty/illegal/colliding name is
+rejected with a clear, human-readable error, in both the ImGui window and
+the HTTP response (`400` + a JSON error body). The exact same validator also
+hardened the pre-existing `NetworkRoutes.cpp`'s `ParseProjectNameQuery()`
+(previously only checked for an empty string) - every other
+`/project_assembly/*` route this repo already shipped benefits from the
+same stricter rule, backward-compatibly. A name colliding with an existing
+folder or file under `Projects/` is rejected the same way - "already
+exists" - creating or overwriting nothing.
+
+"Create" always runs one synchronous, unconditional `cmake -S <repoRoot> -B
+<buildDirectory>` reconfigure step immediately after writing the new
+scaffold (`RunPlainCMakeReconfigureAndWait()`,
+`src/Core/Plugins/ProjectAssemblyBuildRunner.h/.cpp`) - a deliberate,
+permanent simplification over branching on which of two possible real CMake
+behaviors is true on a given machine (this campaign's own live verification
+found BOTH mechanisms work correctly and independently on the reference
+development machine - the plain `file(GLOB CONFIGURE_DEPENDS ...)`
+auto-pickup this whole system's own "Folder layout" section above already
+describes would, on its own, have been enough; the explicit reconfigure
+step is a safe, redundant belt-and-suspenders guarantee, not the thing that
+actually made the difference there - but is kept unconditional, always,
+since a different machine's real CMake behavior is not something this
+system gambles on). The result: the EXISTING, unmodified
+`POST /project_assembly/debug/compile_only?name=<X>` route (or a future
+"Compile" menu item, BIG-STEP 5) can build a brand-new project's
+`<Name>_Game.dll` successfully, on the very first try, with zero manual
+`cmake` reconfigure step ever required from a human.
+
+The engine now has exactly one, single, shared, always-fresh concept of
+"the currently active Project Assembly",
+`gte::ActiveProjectAssemblyState` (`src/Editor/ActiveProjectAssemblyState.h/.cpp`,
+a Meyers singleton) - `GetActive()` re-derives `isCompiled`
+(`std::filesystem::exists()` against the resolved output `.dll` path) and
+`isLoaded` (a scan of `ProjectAssemblyHost::GetLoadedAssemblyFileNames()`,
+guarded by the same `GetHotReloadEngineStateMutex()` the Hot Reload feature
+above already uses) fresh, on every single call - never cached. A
+successful "Create" calls `SetActive()`; this is the ONE, single, new
+authority the "Open Project"/"Create Script Asset"/"Compile menu" campaigns
+that come after this one are expected to read and extend, never a second,
+competing concept.
+
+**Honest, permanent scope boundary, stated plainly**: this capability only
+scaffolds a brand-new project and marks it active - it does NOT
+auto-compile it (a human, or a later "Compile" UI/an HTTP call to the
+existing `compile_only` route, still triggers the actual build), does NOT
+scaffold an `Assets/Editor/` folder (Game-only by default), does NOT open
+any in-engine code editor (none exists), and does NOT support renaming or
+deleting a project.
+
+Full campaign writeup:
+`task_manager/editor-core-separation-16/PHASE0_MASTER_STRATEGY.md`, each
+`PHASEn_COMPLETION_REPORT.md` in that same folder, and
+`CAMPAIGN_COMPLETION_REPORT.md`.
+
 ## What this system does NOT do (explicit Non-Goals)
 
 - No gameplay/"MonoBehaviour"-style scripting bridge (per-entity
@@ -409,8 +495,13 @@ and each campaign's own `CAMPAIGN_COMPLETION_REPORT.md`.
   the one existing `GreatTamanaEditor.exe` process.
 - No change of any kind to `plugins/gte_plugin_abi`, `PluginHost`, or any
   existing ABI-versioned interface.
-- No scaffolding/"New Project" wizard tool — a human creates
-  `Projects/<Name>/{Assets,Libraries}` by hand today.
+- ~~No scaffolding/"New Project" wizard tool — a human creates
+  `Projects/<Name>/{Assets,Libraries}` by hand today.~~ **SUPERSEDED,
+  2026-09-28 onward** - see `task_manager/editor-core-separation-16/` (the
+  "On-Engine Project Workflow" plan's BIG-STEP 2, "Create New Project") and
+  this file's own new `## Creating a New Project` section below for the
+  full, current, honest picture. The strikethrough text above is the
+  ORIGINAL, now-historical Non-Goal, kept for the record, not deleted.
 - No UI-design decision for where a permanent "Compile" button/menu item
   lives — `TriggerProjectAssemblyCompile()` is the mechanism; a future
   campaign decides the UI.
