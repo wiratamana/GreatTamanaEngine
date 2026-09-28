@@ -110,6 +110,12 @@ than subsystem-specific):
   dynamic, runtime-loadable `.dll` plugin system: `gte_plugin_abi`'s
   fingerprint gate, `IPluginModule`, the curated-wrapper-interface rule, and
   the shared/DLL CRT-linkage requirement.
+- **[Project Assembly System](conventions/project-assembly-system.md)** — the
+  per-developer `Projects/<Name>/` source tree that compiles into two `.dll`s
+  (`<Name>_Game.dll`/`<Name>_Editor.dll`) linked directly against
+  `GreatTamanaEditor.exe`, calling real, non-ABI-wrapped engine types
+  (`gte::Core&`, real ImGui, real `rg::RenderGraphBuilder`) with zero engine
+  recompilation.
 
 ## Changelog
 

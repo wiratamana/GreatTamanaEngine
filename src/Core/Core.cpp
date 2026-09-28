@@ -314,6 +314,32 @@ void Core::LoadProjectAssemblies(const std::filesystem::path& outputDirectory, E
     m_projectAssemblyHost.LoadProjectAssemblies(outputDirectory, *this, editorHost);
 }
 
+// editor-core-separation-11 campaign (Project Assembly system), PHASE8
+// (Finding B) - thin pass-through into m_offscreenRenderPipeline.Register(),
+// mirroring LoadPlugins()/LoadProjectAssemblies() immediately above exactly.
+// Always compiled (no #if guard here - a Project Assembly's own
+// GTE_RegisterProject entry point calls this directly, unconditionally,
+// exactly as LoadProjectAssemblies() itself is called from PHASE5's own
+// ProjectAssemblyHost, which only ever runs when GTE_ENABLE_PROJECT_ASSEMBLIES
+// is already on). m_offscreenRenderPipeline is confirmed the correct target:
+// it is the pipeline every production Game-View/Scene-View pass
+// ("AtmosphereSharedLut", "GpuSkinning", "AtmosphereViewLut", "RenderOpaque",
+// "GpuDrivenBatches", ...) registers onto (see
+// RegisterOffscreenRenderPipelineProviders() below) - m_presentRenderPipeline
+// is the separate, narrower pipeline used ONLY for the one "Present"
+// swapchain-blit provider, the wrong target for a general-purpose content
+// pass. Safe to call any time after Core's own constructor has run (a
+// Project Assembly's GTE_RegisterProject runs from EditorHost.cpp's
+// constructor body, strictly after Core's own construction) - Register()
+// merely appends to an internal std::vector read fresh, in full, every
+// frame by DeclareInto(), so registering after construction but before the
+// first real frame renders behaves identically to registering during
+// construction.
+void Core::RegisterProjectRenderPassProvider(const char* debugName, rg::ProviderScope scope, rg::RenderPassProvider provider)
+{
+    m_offscreenRenderPipeline.Register(debugName, scope, std::move(provider));
+}
+
 void Core::Update(const InputFrame& input, float deltaTime)
 {
     const bool steppedThisFrame = input.playbackPaused && input.stepRequested;

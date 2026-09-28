@@ -790,6 +790,130 @@ full five-phase writeup.
 
 Full convention: [docs/conventions/plugin-architecture.md](docs/conventions/plugin-architecture.md).
 
+## Project Assembly System
+
+A per-developer, single-project, `.gitignore`d source tree (`Projects/<Name>/`)
+holding REAL, user-authored C++ and GLSL shader source that compiles into two
+ordinary Windows `.dll`s (`<Name>_Game.dll`, `<Name>_Editor.dll`) which
+`GreatTamanaEditor.exe` loads at its own startup and which then call real,
+live, non-ABI-wrapped engine types (`gte::Core&`, real ImGui, real
+`rg::RenderGraphBuilder`) directly - zero recompilation of the engine itself
+for a content change, and zero new per-feature ABI surface to design/maintain
+(unlike `plugins/gte_plugin_abi`, which this system never touches, edits, or
+depends on - `editor-core-separation-11` campaign,
+`task_manager/editor-core-separation-11/PHASE0_MASTER_STRATEGY.md`,
+`CAMPAIGN_COMPLETION_REPORT.md`).
+
+**Permanent toolchain disclosure (do not lose this again).** Every campaign
+through `editor-core-separation-9`/`editor-enchancements-1` ran against this
+repo's OLD default toolchain (`scoop/apps/gcc/current`, built
+`--disable-shared`), which could not produce a shared-CRT-linked binary at
+all - see the "Plugin Architecture" section above's own honest caveat.
+Sometime between `editor-core-separation-9` and 2026-09-28, **the active
+toolchain was switched, quietly, outside any tracked campaign**, to a
+shared-CRT-capable GCC 16.2.0 `mingw-builds-binaries` toolchain
+(`scoop/apps/mingw/current`) - confirmed, mechanically, at the start of this
+campaign's PHASE1: `build/CMakeCache.txt`'s `CMAKE_CXX_COMPILER` points at
+`scoop/apps/mingw/current/bin/c++.exe`,
+`GTE_PLUGIN_SHARED_CRT_TOOLCHAIN_SUPPORTED` reads `TRUE`, and the generated
+plugin ABI fingerprint's `sharedRuntimeLinkage` field reads `1`, not `0`. This
+whole "Project Assembly" system is only possible BECAUSE this switch already
+happened - a `.dll` that links against `GreatTamanaEditor.exe`'s own import
+library and freely passes real `std::string`/`std::vector` values across that
+boundary is only safe on a shared-CRT toolchain. **Nobody should ever again
+read an older campaign's own "no actual switch happened" caveat and assume it
+is still true today** - this section is the permanent, load-bearing
+correction. The existing default `build/` tree already IS the shared-CRT
+tree; no separate `build-shared-crt` tree was ever created or is ever needed.
+
+**System shape:**
+- `Projects/<Name>/{Assets,Libraries}` - `Assets/` holds a project's own C++
+  (`.cpp`)/shader (`.vert`/`.frag`/`.comp`) source, with an `Assets/Editor/`
+  sub-folder for `_Editor.dll`-only source; `Libraries/CMakeLists.txt` calls
+  `gte_add_project(<Name>)` (`cmake/GteProject.cmake`), which auto-discovers
+  every source file (`CONFIGURE_DEPENDS` globs, never a hand-maintained
+  list), builds the shader pipeline (`gte_add_project_shaders()`, a thin
+  wrapper around the engine's own unmodified `gte_add_shader()`), applies the
+  new, independent `gte_apply_project_assembly_shared_crt_linkage()` CRT
+  linkage (`cmake/MingwRuntime.cmake` - never
+  `gte_apply_plugin_*_shared_crt_linkage()`, a different, unrelated
+  mechanism), and propagates every header search path `gte_core`/`gte_editor`
+  themselves declare `PUBLIC` via explicit
+  `$<TARGET_PROPERTY:<dep>,INTERFACE_INCLUDE_DIRECTORIES>` generator
+  expressions (needed because `GreatTamanaEditor` links `gte_editor`
+  `PRIVATE` - CMake usage-requirement propagation does not flow past that).
+- **One new CMake option, `GTE_ENABLE_PROJECT_ASSEMBLIES` (default `ON`)**,
+  gates the entire system end to end: both the root `CMakeLists.txt`
+  auto-discovery `add_subdirectory()` loop over `Projects/*/Libraries/` and
+  the runtime `Core::LoadProjectAssemblies()` call site
+  (`src/Editor/EditorHost.cpp`, its own constructor) - completely independent
+  of `GTE_ENABLE_PLUGINS`, the OTHER, unrelated system's flag.
+  `src/Editor/ImGuiEditorLayer.cpp`'s per-frame `EditorPanelRegistry::
+  PluginPanels()` `BuildPanel()` call loop is gated by
+  `#if GTE_ENABLE_PLUGINS || GTE_ENABLE_PROJECT_ASSEMBLIES` (both systems
+  share that one registry) so a Project Assembly Editor panel still draws
+  even with `GTE_ENABLE_PLUGINS=OFF`.
+- `src/Core/Plugins/ProjectAssemblyHost.h/.cpp` - a `PluginHost`-shaped
+  runtime loader, `LoadLibraryW()`-ing every `<Name>_Game.dll`/
+  `<Name>_Editor.dll` under `<exe dir>/project_assemblies/` exactly once, at
+  startup, and calling its ONE fixed `GTE_RegisterProject` export
+  (`Libraries/ProjectAssemblyExports.h`'s `GTE_DEFINE_PROJECT_EXPORTS_GAME`/
+  `_EDITOR` macros) with a real, live `gte::Core&` (and, for `_Editor.dll`, a
+  real `gte::EditorHost&`) - never re-scanned, never `FreeLibrary()`'d before
+  process exit (no hot reload, ever, by design).
+- `src/Core/Plugins/ProjectAssemblyBuildRunner.h/.cpp` -
+  `TriggerProjectAssemblyCompile()`, a real, non-blocking `cmake --build`
+  child process on its own dedicated `JobSystem::RegisterBackgroundThread()`
+  thread (never `Schedule()`, which would tie up a fixed worker-pool thread
+  for a multi-minute build), streaming output into `GTE_LOG_INFO`/
+  `WARNING`/`ERROR`. **Known, permanent limitation, not a bug**: a Project
+  Assembly `.dll` already loaded by the CURRENTLY RUNNING instance can never
+  be successfully recompiled by that same instance (Windows locks a mapped
+  DLL image against being overwritten by the linker) - the realistic
+  workflow is edit source, close the Editor, rebuild, relaunch.
+- Two real, working capabilities are proven end-to-end by one shared,
+  permanent smoke-test fixture, `Projects/ProjectAssemblyProbe/` (never
+  deleted - this system's own permanent regression fixture, mirroring how
+  `plugins/demo_hello_world/` serves that role for `gte_plugin_abi`):
+  1. **A custom Editor panel** ("Probe Panel") - `ProjectAssemblyProbe_Editor.dll`
+     implements `gte::IEditorPanelModule_v1` directly, ignoring the ABI's
+     `ctx` parameter, calling real `ImGui::*` functions, registered through
+     the existing, unmodified `EditorPanelRegistry::RegisterPluginPanel()`.
+  2. **A custom render-graph pass** ("ProjectAssemblyProbe.FillTexture") -
+     `ProjectAssemblyProbe_Game.dll` calls the new public
+     `Core::RegisterProjectRenderPassProvider()` (a thin pass-through onto
+     `m_offscreenRenderPipeline.Register()`, mirroring `Core::LoadPlugins()`'s
+     own "private member, public forwarder" shape), mints its own transient
+     256x256 texture via `RenderGraphBuilder::CreateTexture()` (called
+     directly inside the provider's lambda, since `PassBuilder` itself has no
+     `CreateTexture()`), and fills it with a real compute shader
+     (`project_assemblies/shaders/ProbeCompute.comp.spv`) - visible in both
+     the Editor's real "Render Graph" panel and `GET /render_graph`'s JSON.
+- **Explicit Non-Goals** (never expand scope onto these without a new,
+  separate campaign): no gameplay/"MonoBehaviour"-style scripting bridge, no
+  hot reload, no cross-machine/cross-toolchain portability (`Projects/` is
+  `.gitignore`d, single-developer, same-build-run only), no separate Player
+  executable, no scaffolding/"New Project" wizard (a human creates
+  `Projects/<Name>/{Assets,Libraries}` by hand), no UI-design decision for
+  where a permanent "Compile" button/menu item lives.
+- **Confirmed-unsafe, deliberately deferred future work**: a Project
+  Assembly's own render pass writing directly into the real, on-screen Game
+  View (via `Core::GetGameViewTargetThisFrame()` + a second
+  `ImportTexture()` of that same physical resource) is NOT safe as this
+  engine's `RenderGraph` exists today - `RenderGraph::EnsureTextureResolved()`
+  tracks resource state PER `TextureHandle`, never per underlying physical
+  resource, so a second, independent `ImportTexture()` of an
+  already-imported physical image gets NO automatic memory barrier against
+  the engine's own internal Game-View-compositing chain's reads/writes of
+  that identical image - a real, structural gap (no mechanism exists
+  anywhere in this codebase to tell the compiler "this handle aliases that
+  other, already-tracked handle"), not merely an untried idea. A Project
+  Assembly's render-graph capability is therefore proven ONLY as far as the
+  Render Graph panel/HTTP endpoint, never on-screen compositing, until a
+  future campaign adds real handle-aliasing support to `RenderGraphBuilder`.
+
+Full convention: [docs/conventions/project-assembly-system.md](docs/conventions/project-assembly-system.md).
+
 ## Testability & Regression Safety
 
 - **Design new logic to be Tier-1-testable whenever the underlying problem

@@ -318,6 +318,23 @@ public:
     // Finding D) - this pass-through method itself always compiles.
     void LoadProjectAssemblies(const std::filesystem::path& outputDirectory, EditorHost* editorHost);
 
+    // editor-core-separation-11 campaign (Project Assembly system), PHASE8
+    // (Finding B). Core::RegisterOffscreenRenderPipelineProviders() itself
+    // stays PRIVATE and unmodified - this is a NEW, separate, public thin
+    // pass-through, mirroring LoadPlugins()'s own identical shape (a private
+    // m_pluginHost member, a public one-line forwarding method). A Project
+    // Assembly _Game.dll calls this directly, from its own GTE_RegisterProject
+    // entry point, to contribute a real render-graph provider using the exact
+    // same rg::RenderPipeline::Register() every internal engine pass already
+    // goes through - no ABI wrapper, no curated operation registry (this
+    // system has no ABI boundary to protect, unlike gte_plugin_abi's
+    // IPluginRenderPassBuilder_v3). Forwards onto m_offscreenRenderPipeline
+    // (confirmed correct target - see Core.cpp for the reasoning: this is the
+    // pipeline every production Game-View/Scene-View pass registers onto;
+    // m_presentRenderPipeline is the separate, narrower pipeline used ONLY
+    // for the one "Present" swapchain-blit provider).
+    void RegisterProjectRenderPassProvider(const char* debugName, rg::ProviderScope scope, rg::RenderPassProvider provider);
+
     // Read accessor for PHASE3 (render-feature capability lookup) and
     // PHASE4 (editor-panel capability lookup) - both look up capabilities
     // via AllLoadedModules(), never re-scanning the plugins/ folder
