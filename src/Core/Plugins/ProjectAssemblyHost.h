@@ -104,13 +104,32 @@ public:
     // strings, never the raw HMODULE.
     std::vector<std::string> GetLoadedAssemblyFileNames() const;
 
+    // editor-core-separation-14 campaign (Project Assembly Hot Reload plan,
+    // BIG-STEP 3), PHASE1. Loads exactly ONE .dll at an EXACT, caller-supplied
+    // path (never scanning a directory) and calls its GTE_RegisterProject
+    // export - reused by PerformProjectAssemblyHotReload() (PHASE4) for BOTH
+    // the success-path fresh-compile load and the failure-path backup-restore
+    // load, since both are mechanically identical: "load this exact .dll file
+    // and call its export". Thin wrapper over the now-public-facing
+    // TryLoadOneAssembly() - same suffix-based _Game/_Editor dispatch, same
+    // ProjectAssemblyRegistrationLedger bracketing, same LoadedAssembly
+    // bookkeeping. Returns false (logged) if LoadLibraryW fails or the export
+    // is missing - never crashes.
+    bool LoadOneProjectAssemblyFromExactPath(const std::filesystem::path& dllPath, Core& core, EditorHost* editorHost);
+
+    // Same as above, but a NON-EXISTENT dllPath is a normal, valid, TRUE
+    // ("nothing to do here") result, not an error - mirrors
+    // ProjectAssemblyBuildRunner's own "no Editor target is a normal, valid
+    // case" precedent, for a project with no _Editor.dll at all.
+    bool LoadOneProjectAssemblyFromExactPathIfExists(const std::filesystem::path& dllPath, Core& core, EditorHost* editorHost);
+
 private:
     struct LoadedAssembly {
         void* moduleHandle = nullptr; // HMODULE, stored as void* - mirrors PluginHost's identical convention.
         std::string dllFileName;
     };
 
-    void TryLoadOneAssembly(const std::filesystem::path& dllPath, Core& core, EditorHost* editorHost);
+    bool TryLoadOneAssembly(const std::filesystem::path& dllPath, Core& core, EditorHost* editorHost);
 
     std::vector<LoadedAssembly> m_loadedAssemblies;
 };

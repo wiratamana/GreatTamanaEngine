@@ -74,4 +74,67 @@ TEST(ProjectAssemblyHostTest, UnloadProjectAssemblyOnANeverLoadedHostIsASafeNoOp
     EXPECT_TRUE(host.GetLoadedAssemblyFileNames().empty());
 }
 
+// editor-core-separation-14 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 3), PHASE1 - LoadOneProjectAssemblyFromExactPath()/
+// ...IfExists() new-public-method tests. Mirror
+// UnloadProjectAssemblyOnANeverLoadedHostIsASafeNoOp's own exact
+// HeadlessSurfaceProvider/NoopHostServices/Core construction fixture -
+// TryLoadOneAssembly() only ever dereferences `core`/`editorHost` past a
+// successful LoadLibraryW(), which never happens for a non-existent path,
+// but the real signature still requires a real Core& to pass in.
+TEST(ProjectAssemblyHostTest, LoadOneProjectAssemblyFromExactPathOnANonExistentPathReturnsFalse)
+{
+    HeadlessSurfaceProvider surfaceProvider;
+    NoopHostServices hostServices;
+
+    std::unique_ptr<Core> core;
+    try {
+        core = std::make_unique<Core>(surfaceProvider, hostServices);
+    } catch (const std::exception& e) {
+        GTEST_SKIP() << "Core construction needs a real, valid VkSurfaceKHR (Renderer's constructor eagerly "
+                        "builds a full Vulkan instance/device/swapchain against it, unconditionally - see "
+                        "HeadlessSurfaceProvider.h's own top-of-file comment) - this machine's Vulkan "
+                        "driver/loader apparently does not support VK_EXT_headless_surface, the only mechanism "
+                        "this fixture uses to obtain a valid surface without a real OS window/SDL. Real "
+                        "failure: "
+                     << e.what();
+    }
+    ASSERT_NE(core, nullptr);
+
+    ProjectAssemblyHost host;
+    const std::filesystem::path nonExistentPath =
+        std::filesystem::temp_directory_path() / "GteNonExistentProjectAssemblyForTest_Game.dll";
+    EXPECT_FALSE(host.LoadOneProjectAssemblyFromExactPath(nonExistentPath, *core, nullptr));
+    EXPECT_EQ(host.LoadedAssemblyCount(), 0u);
+}
+
+TEST(ProjectAssemblyHostTest, LoadOneProjectAssemblyFromExactPathIfExistsOnANonExistentPathReturnsTrue)
+{
+    HeadlessSurfaceProvider surfaceProvider;
+    NoopHostServices hostServices;
+
+    std::unique_ptr<Core> core;
+    try {
+        core = std::make_unique<Core>(surfaceProvider, hostServices);
+    } catch (const std::exception& e) {
+        GTEST_SKIP() << "Core construction needs a real, valid VkSurfaceKHR (Renderer's constructor eagerly "
+                        "builds a full Vulkan instance/device/swapchain against it, unconditionally - see "
+                        "HeadlessSurfaceProvider.h's own top-of-file comment) - this machine's Vulkan "
+                        "driver/loader apparently does not support VK_EXT_headless_surface, the only mechanism "
+                        "this fixture uses to obtain a valid surface without a real OS window/SDL. Real "
+                        "failure: "
+                     << e.what();
+    }
+    ASSERT_NE(core, nullptr);
+
+    ProjectAssemblyHost host;
+    const std::filesystem::path nonExistentPath =
+        std::filesystem::temp_directory_path() / "GteNonExistentProjectAssemblyForTest_Editor.dll";
+    // "Nothing to do here" is a normal, valid TRUE result - mirrors
+    // ProjectAssemblyBuildRunner's own "no Editor target is a normal, valid
+    // case" precedent (see ProjectAssemblyHost.h's own doc comment).
+    EXPECT_TRUE(host.LoadOneProjectAssemblyFromExactPathIfExists(nonExistentPath, *core, nullptr));
+    EXPECT_EQ(host.LoadedAssemblyCount(), 0u);
+}
+
 } // namespace gte

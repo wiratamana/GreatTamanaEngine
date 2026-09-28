@@ -7,6 +7,7 @@
 #include "ProjectAssemblyHost.h"
 #include "../Logging.h"
 #include "ProjectAssemblyRegistrationLedger.h"
+#include "HotReloadEngineStateMutex.h"
 #include "../../ECS/Reflection/ComponentTypeRegistry.h"
 #include "../../Renderer/Renderer.h"
 
@@ -88,20 +89,31 @@ void ProjectAssemblyHost::LoadProjectAssemblies(
     }
 }
 
-void ProjectAssemblyHost::TryLoadOneAssembly(
+bool ProjectAssemblyHost::TryLoadOneAssembly(
     const std::filesystem::path& dllPath, Core& core, EditorHost* editorHost)
 {
+    // editor-core-separation-14 campaign (BIG-STEP 3), PHASE1 - closes the
+    // obligation HotReloadEngineStateMutex.h's own header comment already
+    // states ("a future BIG-STEP 2/3 campaign MUST lock this... around
+    // every ... ProjectAssemblyHost load/unload call"). Safe to nest:
+    // ProjectAssemblyRegistrationLedger's own methods (called below, via
+    // GTE_RegisterProject's own registration calls) only ever take THEIR
+    // OWN internal mutex, never this one (confirmed,
+    // ProjectAssemblyRegistrationLedger.h's own header comment) - no
+    // deadlock risk.
+    std::lock_guard<std::mutex> lock(GetHotReloadEngineStateMutex());
+
     const std::string fileName = dllPath.filename().string();
     const bool isEditorAssembly = fileName.ends_with("_Editor.dll");
     const bool isGameAssembly = fileName.ends_with("_Game.dll");
     if (!isEditorAssembly && !isGameAssembly) {
-        return; // Not a Project Assembly output - ignore silently.
+        return false; // Not a Project Assembly output - ignore silently.
     }
 
     HMODULE module = LoadLibraryW(dllPath.c_str());
     if (module == nullptr) {
         GTE_LOG_WARNING("ProjectAssembly", "Failed to LoadLibraryW: " + dllPath.string() + " (GetLastError=" + std::to_string(GetLastError()) + ")");
-        return;
+        return false;
     }
 
     // LOAD-BEARING: the exported symbol name is the SAME,
@@ -118,14 +130,14 @@ void ProjectAssemblyHost::TryLoadOneAssembly(
         if (editorHost == nullptr) {
             GTE_LOG_WARNING("ProjectAssembly", fileName + " is an _Editor assembly but no EditorHost exists in this process - skipped.");
             FreeLibrary(module); // Safe here - its export was never called.
-            return;
+            return false;
         }
         using EditorEntryFn = void (*)(Core&, EditorHost&);
         auto entry = reinterpret_cast<EditorEntryFn>(reinterpret_cast<void*>(GetProcAddress(module, "GTE_RegisterProject")));
         if (entry == nullptr) {
             GTE_LOG_WARNING("ProjectAssembly", fileName + " is missing export GTE_RegisterProject, not a valid Project Assembly, skipping");
             FreeLibrary(module);
-            return;
+            return false;
         }
         // editor-core-separation-13 campaign (Project Assembly Hot Reload
         // plan, BIG-STEP 2), PHASE3 - brackets this GTE_RegisterProject call
@@ -143,7 +155,7 @@ void ProjectAssemblyHost::TryLoadOneAssembly(
         if (entry == nullptr) {
             GTE_LOG_WARNING("ProjectAssembly", fileName + " is missing export GTE_RegisterProject, not a valid Project Assembly, skipping");
             FreeLibrary(module);
-            return;
+            return false;
         }
         // editor-core-separation-13 campaign, PHASE3 - same bracket as the
         // _Editor branch above (see that comment for the full reasoning).
@@ -159,6 +171,31 @@ void ProjectAssemblyHost::TryLoadOneAssembly(
     loaded.moduleHandle = module;
     loaded.dllFileName = fileName;
     m_loadedAssemblies.push_back(loaded);
+    return true;
+}
+
+// editor-core-separation-14 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 3), PHASE1. Thin wrapper over the now-public-facing
+// TryLoadOneAssembly() - see ProjectAssemblyHost.h's own doc comment for the
+// full reasoning (reused by PerformProjectAssemblyHotReload(), PHASE4, for
+// both the success-path fresh-compile load and the failure-path
+// backup-restore load).
+bool ProjectAssemblyHost::LoadOneProjectAssemblyFromExactPath(
+    const std::filesystem::path& dllPath, Core& core, EditorHost* editorHost)
+{
+    return TryLoadOneAssembly(dllPath, core, editorHost);
+}
+
+bool ProjectAssemblyHost::LoadOneProjectAssemblyFromExactPathIfExists(
+    const std::filesystem::path& dllPath, Core& core, EditorHost* editorHost)
+{
+    if (!std::filesystem::exists(dllPath)) {
+        GTE_LOG_INFO("ProjectAssembly",
+            "LoadOneProjectAssemblyFromExactPathIfExists: " + dllPath.string() +
+            " does not exist - treating as a normal 'no Editor assembly for this project' case.");
+        return true;
+    }
+    return LoadOneProjectAssemblyFromExactPath(dllPath, core, editorHost);
 }
 
 // editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
@@ -167,6 +204,14 @@ void ProjectAssemblyHost::TryLoadOneAssembly(
 // implements.
 void ProjectAssemblyHost::UnloadProjectAssembly(const std::string& projectName, Core& core, Renderer& renderer)
 {
+    // editor-core-separation-14 campaign (BIG-STEP 3), PHASE1 - closes the
+    // obligation HotReloadEngineStateMutex.h's own header comment already
+    // states. Covers the whole function, including the "nothing loaded,
+    // no-op" early-return below, so a concurrent read of
+    // GetLoadedAssemblyFileNames()/the registration ledger can never
+    // straddle that decision.
+    std::lock_guard<std::mutex> lock(GetHotReloadEngineStateMutex());
+
     // Find every m_loadedAssemblies entry whose derived project name matches,
     // BEFORE touching anything - this method must be all-or-nothing-safe to
     // call for a projectName with zero matching entries.
