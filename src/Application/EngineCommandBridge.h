@@ -63,6 +63,13 @@ enum class EngineCommandKind {
     // IHotReloadDebugCapability), which correctly bypass this bridge via a
     // dedicated mutex instead (see HotReloadEngineStateMutex.h).
     GetSceneSnapshot,
+    // editor-core-separation-15 campaign, PHASE4 (Project Assembly Hot
+    // Reload plan, BIG-STEP 4) - LDD-HR6. Reuses this SAME single-global-slot
+    // bridge for the ONE narrow, testing-only mutation route
+    // (EditorHotReloadDebugCapability::SetProbeHotReloadMarkerValueForTesting()),
+    // never m_hotReloadCommandBridge (that bridge is only for a FULL
+    // hot-reload cycle).
+    SetProbeHotReloadMarkerValueForTesting,
 };
 
 // Plain request payload for one InstantiatePrimitive command - copied
@@ -100,6 +107,14 @@ struct LoadSceneCommand {
 // snapshot always covers the WHOLE live scene.
 struct GetSceneSnapshotCommand {};
 
+// editor-core-separation-15 campaign, PHASE4 - LDD-HR6. Payload for the ONE
+// narrow, hardcoded, testing-only ProbeHotReloadMarker mutation command -
+// see EditorHotReloadDebugCapability::SetProbeHotReloadMarkerValueForTesting()'s
+// own doc comment.
+struct SetProbeHotReloadMarkerValueForTestingCommand {
+    int value = 0;
+};
+
 // One pending engine command, tagged by `kind` - EXACTLY one of
 // `instantiatePrimitive`/`deleteEntity`/`setEntityTrs`/`instantiateLight` is
 // meaningful, selected by `kind` (deliberately a plain tagged struct, not
@@ -124,6 +139,8 @@ struct EngineCommandRequest {
     LoadSceneCommand loadScene;
     // editor-core-separation-12 campaign, PHASE1
     GetSceneSnapshotCommand getSceneSnapshot;
+    // editor-core-separation-15 campaign, PHASE4
+    SetProbeHotReloadMarkerValueForTestingCommand setProbeHotReloadMarkerValueForTesting;
 };
 
 // The completed result of one EngineCommandRequest - `kind` mirrors the
@@ -144,6 +161,8 @@ struct EngineCommandResult {
     LoadSceneOutcome loadScene;
     // editor-core-separation-12 campaign, PHASE1
     GetSceneSnapshotOutcome getSceneSnapshot;
+    // editor-core-separation-15 campaign, PHASE4
+    SetProbeHotReloadMarkerValueForTestingOutcome setProbeHotReloadMarkerValueForTesting;
 };
 
 class EngineCommandBridge {

@@ -10,6 +10,9 @@
 // editor-core-separation-14 campaign (Project Assembly Hot Reload plan,
 // BIG-STEP 3), PHASE3.
 #include "../Application/ProjectAssemblyHotReloadCommandBridge.h"
+// editor-core-separation-15 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 4), PHASE4.
+#include "../Application/EngineCommandBridge.h"
 #include "../ECS/Reflection/ComponentTypeRegistry.h"
 #include "../Game/Game.h"
 #include "../Scene/SceneBuilder.h"
@@ -130,6 +133,35 @@ bool EditorHotReloadDebugCapability::TriggerHotReload(const std::string& project
     return true;
 }
 
+bool EditorHotReloadDebugCapability::SetProbeHotReloadMarkerValueForTesting(int value)
+{
+    // Called from the NETWORK thread (a route handler) - the live
+    // Registry has no synchronization of its own (see this whole class's
+    // own header comment), so this submits a new EngineCommandKind
+    // through EditorHost's general EngineCommandBridge and blocks until
+    // the main thread's own per-frame drain point services it - mirrors
+    // GetSceneSnapshot's identical bridge-based precedent (Application/
+    // EngineCommandDispatch.cpp), NOT TriggerHotReload()'s own separate,
+    // dedicated ProjectAssemblyHotReloadCommandBridge (that bridge is only
+    // for a FULL hot-reload cycle, never for a plain, fast, single-frame
+    // Registry mutation like this one).
+    if (m_engineCommandBridge == nullptr) {
+        return false; // Should never happen in real production wiring - see SetEngineCommandBridge()'s own call-ordering guarantee.
+    }
+    EngineCommandRequest request;
+    request.kind = EngineCommandKind::SetProbeHotReloadMarkerValueForTesting;
+    request.setProbeHotReloadMarkerValueForTesting.value = value;
+    const EngineCommandBridge::SubmitResult submit = m_engineCommandBridge->SubmitAndWait(request);
+    if (submit.alreadyPending || submit.timedOut || !submit.result.has_value()) {
+        // Mirrors every other bool-returning method on this same
+        // interface (TriggerCompileOnly/TriggerHotReload): a submission
+        // failure collapses to a plain, honest `false`, never a crash and
+        // never a dereference of an empty std::optional.
+        return false;
+    }
+    return submit.result->setProbeHotReloadMarkerValueForTesting.success;
+}
+
 // editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
 // BIG-STEP 2), PHASE4 - see this method's own doc comment in
 // EditorHotReloadDebugCapability.h for the full "why a setter, not a
@@ -147,6 +179,15 @@ void EditorHotReloadDebugCapability::SetProjectAssemblyHost(ProjectAssemblyHost&
 void EditorHotReloadDebugCapability::SetHotReloadCommandBridge(ProjectAssemblyHotReloadCommandBridge& bridge) noexcept
 {
     m_hotReloadCommandBridge = &bridge;
+}
+
+// editor-core-separation-15 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 4), PHASE4 - see this method's own doc comment in
+// EditorHotReloadDebugCapability.h. Called exactly once, from EditorHost's
+// own constructor body.
+void EditorHotReloadDebugCapability::SetEngineCommandBridge(EngineCommandBridge& bridge) noexcept
+{
+    m_engineCommandBridge = &bridge;
 }
 
 } // namespace gte

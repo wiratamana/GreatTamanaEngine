@@ -1246,4 +1246,20 @@ std::string BuildCompileOnlyTriggerResponseJson(bool started, const std::string&
     return body.dump();
 }
 
+// editor-core-separation-15 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 4), PHASE4 - LDD-HR6. Mirrors ParseFrameDebuggerSelectEventQuery()'s
+// own body exactly, substituting the field name/message.
+ParsedSetProbeMarkerValueQuery ParseSetProbeMarkerValueQuery(const std::string& valueParam)
+{
+    ParsedSetProbeMarkerValueQuery result;
+    int parsedValue = 0;
+    if (!TryParseWholeInt(valueParam, parsedValue)) {
+        result.errorMessage = "missing or invalid required query parameter: value - must be an integer";
+        return result;
+    }
+    result.value = parsedValue;
+    result.valid = true;
+    return result;
+}
+
 } // namespace gte::Network

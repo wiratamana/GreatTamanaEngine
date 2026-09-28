@@ -269,4 +269,17 @@ struct GetSceneSnapshotOutcome {
     std::string sceneJson; // meaningful only when success == true.
 };
 
+// editor-core-separation-15 campaign, PHASE4 (Project Assembly Hot Reload
+// plan, BIG-STEP 4) - LDD-HR6. Outcome of one
+// EditorHotReloadDebugCapability::SetProbeHotReloadMarkerValueForTesting()
+// call. Deliberately WITHOUT SaveSceneOutcome/GetSceneSnapshotOutcome's own
+// editorAvailable/errorMessage fields: this method's own caller,
+// EditorHotReloadDebugCapability itself, is the ONLY thing that ever
+// submits this command, so "the Editor module isn't available" can never
+// actually happen for this one - kept genuinely minimal, matching
+// LDD-HR6's own "narrow, not general" spirit.
+struct SetProbeHotReloadMarkerValueForTestingOutcome {
+    bool success = false;
+};
+
 } // namespace gte

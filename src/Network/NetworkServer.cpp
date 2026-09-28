@@ -1374,6 +1374,30 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         // exactly as BIG-STEP 1/2 promised downstream campaigns (LDD-HR3).
         res.set_content(BuildHotReloadStatusResponseJson(hotReloadDebugCapability->GetHotReloadStatus()), "application/json");
     });
+
+    // editor-core-separation-15 campaign (Project Assembly Hot Reload plan,
+    // BIG-STEP 4), PHASE4 - LDD-HR6. The ONE narrow, hardcoded, testing-only
+    // mutation route - see IHotReloadDebugCapability::
+    // SetProbeHotReloadMarkerValueForTesting()'s own doc comment
+    // (Core/EditorCapabilities.h) for the full "why narrow" reasoning.
+    server.Post("/project_assembly/debug/set_probe_marker_value",
+        [hotReloadDebugCapability](const httplib::Request& req, httplib::Response& res) {
+        const ParsedSetProbeMarkerValueQuery parsed = ParseSetProbeMarkerValueQuery(req.get_param_value("value"));
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        if (hotReloadDebugCapability == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("hot reload debug capability not available"), "application/json");
+            return;
+        }
+        const bool success = hotReloadDebugCapability->SetProbeHotReloadMarkerValueForTesting(parsed.value);
+        nlohmann::json body;
+        body["success"] = success;
+        res.set_content(body.dump(), "application/json");
+    });
 }
 
 } // namespace

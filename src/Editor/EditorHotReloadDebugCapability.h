@@ -8,6 +8,9 @@ class ProjectAssemblyHost;
 // editor-core-separation-14 campaign (Project Assembly Hot Reload plan,
 // BIG-STEP 3), PHASE3.
 class ProjectAssemblyHotReloadCommandBridge;
+// editor-core-separation-15 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 4), PHASE4.
+class EngineCommandBridge;
 
 // editor-core-separation-12 campaign (Project Assembly Hot Reload plan,
 // BIG-STEP 1), PHASE2 - the real, gte_editor-owned implementation of
@@ -33,6 +36,7 @@ public:
     std::string BuildSceneSnapshotJson(Game& game) override;
     bool TriggerCompileOnly(const std::string& projectName) override;
     bool TriggerHotReload(const std::string& projectName) override;
+    bool SetProbeHotReloadMarkerValueForTesting(int value) override;
 
     // editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
     // BIG-STEP 2), PHASE4 - called exactly once, from EditorHost's own
@@ -58,6 +62,18 @@ public:
     // called exactly once, from EditorHost's own constructor body.
     void SetHotReloadCommandBridge(ProjectAssemblyHotReloadCommandBridge& bridge) noexcept;
 
+    // editor-core-separation-15 campaign, PHASE4 - gives this capability a
+    // live EngineCommandBridge& to submit the one new
+    // SetProbeHotReloadMarkerValueForTesting engine command through (this is
+    // EditorHost's own GENERAL m_commandBridge - the SAME bridge
+    // GetSceneSnapshot/SaveScene/LoadScene/etc already share - NOT
+    // m_hotReloadCommandBridge, which is a separate, dedicated bridge only
+    // for a full hot-reload CYCLE). Same "setter, not a constructor
+    // parameter" reasoning as SetProjectAssemblyHost()/
+    // SetHotReloadCommandBridge() above - called exactly once, from
+    // EditorHost's own constructor body.
+    void SetEngineCommandBridge(EngineCommandBridge& bridge) noexcept;
+
 private:
     // editor-core-separation-13 campaign, PHASE4 - defaulted null so this
     // class's existing default, no-argument constructor is completely
@@ -70,6 +86,12 @@ private:
     // untouched; TriggerHotReload() defensively returns false if this is
     // still null (should never happen in real production wiring).
     ProjectAssemblyHotReloadCommandBridge* m_hotReloadCommandBridge = nullptr;
+    // editor-core-separation-15 campaign, PHASE4 - defaulted null so this
+    // class's existing default, no-argument constructor is completely
+    // untouched; SetProbeHotReloadMarkerValueForTesting() defensively returns
+    // false if this is still null (should never happen in real production
+    // wiring).
+    EngineCommandBridge* m_engineCommandBridge = nullptr;
 };
 
 } // namespace gte

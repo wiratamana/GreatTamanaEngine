@@ -1,5 +1,7 @@
 #include "EngineCommandDispatch.h"
 
+#include "../ECS/Reflection/ComponentTypeRegistry.h"
+#include "../ECS/TransformHierarchy.h"
 #include "../Game/Game.h"
 #include "../Renderer/Renderer.h"
 
@@ -99,6 +101,50 @@ EngineCommandResult ExecuteEngineCommand(Game& game, Renderer& renderer, ISceneI
             result.getSceneSnapshot.errorMessage =
                 "scene snapshot requires the Editor module (GTE_ENABLE_EDITOR is OFF in this build)";
         }
+        break;
+    }
+    // editor-core-separation-15 campaign, PHASE4 (Project Assembly Hot
+    // Reload plan, BIG-STEP 4) - LDD-HR6. The ONE narrow, hardcoded,
+    // testing-only mutation route - sets the live "ProbeHotReloadMarker"
+    // component's own "value" field on whichever entity currently carries
+    // it, via the SAME generic, already-existing reflection primitives
+    // every other generic field-apply call site in this engine already
+    // uses - the ENTITY LOOKUP and the COMPONENT/FIELD NAMES this one case
+    // targets are hardcoded, permanently, to "ProbeHotReloadMarker"/"value"
+    // only (see Core/EditorCapabilities.h's own doc comment on this method).
+    case EngineCommandKind::SetProbeHotReloadMarkerValueForTesting: {
+        bool success = false;
+        if (const ComponentTypeDescriptor* descriptor = ComponentTypeRegistry::Instance().Find("ProbeHotReloadMarker");
+            descriptor != nullptr) {
+            for (const Entity root : GetChildren(game.GetRegistry(), kInvalidEntity)) {
+                if (void* component = descriptor->tryGetMutableComponent(game.GetRegistry(), root); component != nullptr) {
+                    // MUST be a JSON OBJECT keyed by the field's own name
+                    // ("value"), never the bare scalar itself -
+                    // FieldDescriptor::readJson()'s real implementation
+                    // (ReflectFieldMacros.h's GTE_REFLECT_FIELD-generated
+                    // lambda) does `in.contains(#member)` /
+                    // `in.at(#member)` internally - passing a bare
+                    // nlohmann::json(value) here would make contains()
+                    // silently return false (nlohmann::json::contains() on
+                    // a non-object value is well-defined and simply
+                    // returns false, never throws), so readJson() would
+                    // silently return true having written NOTHING - a
+                    // false-positive "success" that never actually mutates
+                    // anything. Confirmed against the real, current
+                    // ReflectFieldMacros.h before writing this.
+                    nlohmann::json fields;
+                    fields["value"] = request.setProbeHotReloadMarkerValueForTesting.value;
+                    std::string errorMessage;
+                    for (const FieldDescriptor& field : descriptor->fields) {
+                        if (field.name == "value") {
+                            success = field.readJson(component, fields, errorMessage);
+                        }
+                    }
+                    break; // First live entity carrying this component wins - Step 1's own fixture is a single, plain root, so this is unambiguous.
+                }
+            }
+        }
+        result.setProbeHotReloadMarkerValueForTesting.success = success;
         break;
     }
     }

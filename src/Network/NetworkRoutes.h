@@ -1138,4 +1138,16 @@ std::string BuildComponentTypeNamesResponseJson(const std::vector<std::string>& 
 // (200 either way - "already building" is a normal, non-error outcome).
 std::string BuildCompileOnlyTriggerResponseJson(bool started, const std::string& reason);
 
+// editor-core-separation-15 campaign (Project Assembly Hot Reload plan,
+// BIG-STEP 4), PHASE4 - LDD-HR6. GET/POST value=<N> query parsing for
+// POST /project_assembly/debug/set_probe_marker_value - "value" must be
+// present and parse as a whole decimal integer, otherwise "missing or
+// invalid required query parameter: value - must be an integer".
+struct ParsedSetProbeMarkerValueQuery {
+    bool valid = false;
+    std::string errorMessage;
+    int value = 0;
+};
+ParsedSetProbeMarkerValueQuery ParseSetProbeMarkerValueQuery(const std::string& valueParam);
+
 } // namespace gte::Network

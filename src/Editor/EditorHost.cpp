@@ -232,6 +232,15 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
     // "setter, not a constructor parameter" placement as the call above.
     s_editorHotReloadDebugCapability.SetHotReloadCommandBridge(m_hotReloadCommandBridge);
 
+    // editor-core-separation-15 campaign (Project Assembly Hot Reload plan,
+    // BIG-STEP 4), PHASE4 - hands EditorHotReloadDebugCapability a live
+    // EngineCommandBridge& (m_commandBridge, EditorHost's own GENERAL
+    // command bridge - already constructed by this point in the
+    // initializer list), so SetProbeHotReloadMarkerValueForTesting() can
+    // submit into it. Same "setter, not a constructor parameter" placement
+    // as the two calls above.
+    s_editorHotReloadDebugCapability.SetEngineCommandBridge(m_commandBridge);
+
     // editor-core-separation-1 campaign, PHASE16 - hands Core the ONE
     // callback that actually calls IEditorLayer::Render(cmd) - an explicitly
     // HOST-LEVEL IEditorLayer method (Locked Design Decision #8's second

@@ -235,6 +235,26 @@ public:
     // method's body - this interface's own signature never changes for
     // that.
     virtual bool TriggerHotReload(const std::string& projectName) = 0;
+
+    // editor-core-separation-15 campaign (Project Assembly Hot Reload plan,
+    // BIG-STEP 4), PHASE4 - LDD-HR6 (PHASE0_MASTER_STRATEGY.md). Sets the
+    // live "ProbeHotReloadMarker" component's own "value" field on whichever
+    // entity currently carries it (see EditorHotReloadDebugCapability.cpp's
+    // own real body for the exact, generic-reflection-based mechanism this
+    // reuses) - returns false if no such entity currently exists (e.g. the
+    // probe project is not currently loaded), or if the request could not be
+    // serviced (see this method's own .cpp-side comment for the full list of
+    // honest false-return reasons). DELIBERATELY NARROW: this method's own
+    // hardcoded target ("ProbeHotReloadMarker"'s "value" field) can never be
+    // repurposed to mutate any OTHER component/field - it exists SOLELY so
+    // this campaign's own live verification test (PHASE5) can prove a
+    // genuinely runtime-mutated custom-component value survives a hot
+    // reload, not merely whatever a cold start would produce. This is NOT a
+    // general "set any component field over HTTP" capability, and must never
+    // be widened into one (see this same interface's own pre-existing
+    // non-goals, editor-core-separation-12's PHASE0/BIG-STEP-1 file, Section
+    // 2(f-g)'s closing paragraph).
+    virtual bool SetProbeHotReloadMarkerValueForTesting(int value) = 0;
 };
 
 } // namespace gte
