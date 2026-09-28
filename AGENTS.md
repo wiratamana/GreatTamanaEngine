@@ -914,6 +914,53 @@ tree; no separate `build-shared-crt` tree was ever created or is ever needed.
 
 Full convention: [docs/conventions/project-assembly-system.md](docs/conventions/project-assembly-system.md).
 
+### Project Assembly Hot Reload — Live Debug Surface (BIG-STEP 1 only)
+
+A four-phase campaign, `editor-core-separation-12`
+(`task_manager/editor-core-separation-12/PHASE0_MASTER_STRATEGY.md`,
+`CAMPAIGN_COMPLETION_REPORT.md`), gave the Project Assembly system above its
+first HTTP visibility - implementing ONLY "BIG-STEP 1" (live debug + compile/
+reload triggers) of a larger four-part external master plan; BIG-STEP 2
+(teardown safety/registration ledger), BIG-STEP 3 (synchronous compile/atomic
+swap orchestrator), and BIG-STEP 4 (state snapshot/restore) remain FULLY
+UNIMPLEMENTED, deliberately deferred future campaigns. A new Bucket B
+capability interface, `IHotReloadDebugCapability`
+(`src/Core/EditorCapabilities.h`), implemented by `EditorHotReloadDebugCapability`
+(`src/Editor/EditorHotReloadDebugCapability.h/.cpp`, wired into `NetworkServer`'s
+new 8th constructor parameter exactly like `EditorLogQueryCapability`'s own
+precedent), backs 7 new routes: `GET /project_assembly/hot_reload/status`
+(always reports `"Idle"` today - a real, new `ProjectAssemblyHotReloadDebugStatus`
+push-status singleton nothing yet calls `Set()`/`Finish()` on), `GET
+/project_assembly/debug/ledger?name=<X>` and `GET
+/project_assembly/debug/loaded_assemblies` (honest, permanent, always-empty
+placeholders until BIG-STEP 2 adds a real registration ledger/`ProjectAssemblyHost`
+introspection), `GET /project_assembly/debug/component_types` (genuinely
+real, live `ComponentTypeRegistry` data today), `GET
+/project_assembly/debug/scene_snapshot` (genuinely real, live `SceneDocument`
+JSON of the running ECS world - routed through a new
+`EngineCommandKind::GetSceneSnapshot` + `EngineCommandBridge`, main-thread-only,
+deliberately NOT a direct network-thread `Registry` read, since the live ECS
+`Registry` has no thread-safety mechanism of its own), `POST
+/project_assembly/debug/compile_only?name=<X>` (a real, already-existing
+`cmake --build` trigger - `TriggerProjectAssemblyCompile()`'s return type
+changed `void`->`bool` so this route can honestly report
+`{"started":false,"reason":"a build for this project is already in
+progress"}` for a racing second request), and `POST
+/project_assembly/hot_reload?name=<X>` (a stable, permanent `501 Not
+Implemented` placeholder contract for a future BIG-STEP 3 campaign to fill in
+without ever changing its own shape). A new, tiny, shared
+`HotReloadEngineStateMutex` (`src/Core/Plugins/HotReloadEngineStateMutex.h/.cpp`)
+protects the three ledger/loaded-assemblies/component-types OBSERVE routes -
+any future BIG-STEP 2/3 mutator is REQUIRED to also lock it. Verified with a
+full clean build, a full `ctest` regression pass (1903 tests, 100% of
+executed tests passing, 2 legitimate environment-gated skips - up from
+`editor-core-separation-11`'s own 1888 baseline), and a live, HTTP-driven
+10-point verification against a real running `GreatTamanaEditor.exe`,
+including a real `compile_only` build of `Projects/ProjectAssemblyProbe`
+streaming into `GET /get_logs` and a confirmed in-flight-guard race. See
+`task_manager/editor-core-separation-12/CAMPAIGN_COMPLETION_REPORT.md` for
+the full four-phase writeup.
+
 ## Testability & Regression Safety
 
 - **Design new logic to be Tier-1-testable whenever the underlying problem
