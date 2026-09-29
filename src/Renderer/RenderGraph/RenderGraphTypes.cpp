@@ -86,6 +86,8 @@ const char* ToString(RenderPassCategory category) noexcept
         return "General";
     case RenderPassCategory::Debug:
         return "Debug";
+    case RenderPassCategory::FrameDebuggerInternal:
+        return "FrameDebuggerInternal";
     }
     return "Unknown";
 }

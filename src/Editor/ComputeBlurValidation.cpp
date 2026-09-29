@@ -107,7 +107,7 @@ rg::TextureHandle ComputeBlurValidation::AddPass(rg::RenderGraphBuilder& builder
         builder.ImportTexture("BlurredSceneOutput", m_blurredOutput->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
 
     builder.AddRenderPass(
-        "ComputeBlurValidation", rg::PassKind::Compute, rg::ViewScope::SceneView, rg::RenderPassCategory::Debug, // Confirmed Scene-View-only - see Application.cpp's own AddBlurValidationPass() call site (frame-debugger-6, PHASE1). Debug category (render-pass-1 campaign, PHASE5) - already excluded from the Frame Debugger's Game-View-only tree by the ViewScope::SceneView filter; the Debug tag is a second, independent safety net for consistency/future-proofing.
+        "ComputeBlurValidation", rg::PassKind::Compute, rg::ViewScope::SceneView, rg::RenderPassCategory::Debug, // Confirmed Scene-View-only - see Application.cpp's own AddBlurValidationPass() call site (frame-debugger-6, PHASE1). Debug category (render-pass-1 campaign, PHASE5) - this pass's invisibility from the Frame Debugger's Game-View-only tree comes ENTIRELY from the ViewScope::SceneView filter above; RenderPassCategory::Debug itself no longer implies any hiding at all (editor-core-separation-22 campaign, PHASE4 corrected its meaning to "a real, visible, optional/debug-flavored FEATURE pass" - see RenderGraphTypes.h).
         [sceneViewHandle, outputHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
             pass.ReadTexture(sceneViewHandle, rg::ResourceAccess::ShaderRead);
             pass.WriteTexture(outputHandle, rg::ResourceAccess::ComputeShaderWrite);

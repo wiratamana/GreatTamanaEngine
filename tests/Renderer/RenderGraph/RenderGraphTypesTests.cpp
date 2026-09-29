@@ -538,6 +538,7 @@ TEST(RenderGraphRenderPassCategoryTest, ToStringCoversEveryEnumeratorNonNullNonE
     const RenderPassCategory values[] = {
         RenderPassCategory::General,
         RenderPassCategory::Debug,
+        RenderPassCategory::FrameDebuggerInternal,
     };
 
     for (const RenderPassCategory value : values) {
@@ -551,6 +552,7 @@ TEST(RenderGraphRenderPassCategoryTest, ToStringProducesDistinctNamesForDistinct
 {
     EXPECT_STREQ(ToString(RenderPassCategory::General), "General");
     EXPECT_STREQ(ToString(RenderPassCategory::Debug), "Debug");
+    EXPECT_STREQ(ToString(RenderPassCategory::FrameDebuggerInternal), "FrameDebuggerInternal");
 }
 
 // --- RenderPassDrawKind (Frame Debugger Pass-Ownership campaign,

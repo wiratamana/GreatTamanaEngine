@@ -20,7 +20,13 @@ namespace gte {
 // RenderPassCategory::Debug (not General) is the deliberate, correct
 // category for every plugin-contributed pass - mirrors
 // GBufferValidation.cpp's own precedent of tagging genuinely optional/
-// debug-flavored passes this way.
+// debug-flavored passes this way. editor-core-separation-22 campaign,
+// PHASE4 - CONFIRMED still correct under `Debug`'s own corrected meaning ("a
+// real, optional/debug-flavored FEATURE pass, fully visible in the Frame
+// Debugger tree when it runs" - RenderGraphTypes.h): this pass is exactly
+// that (a real, user-toggleable feature, never Frame-Debugger-internal
+// scaffolding), so no change was needed here - only the ENUM's own
+// documented meaning was corrected, not this call site's tag.
 //
 // REAL, LIVE-TESTING-DISCOVERED DEVIATION from the phase file's own literal
 // Step 3.3 sketch (which leaves `renderPassEvent` at its DEFAULT,

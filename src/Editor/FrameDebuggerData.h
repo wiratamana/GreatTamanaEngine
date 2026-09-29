@@ -462,22 +462,33 @@ std::string FormatMatrixProperty(const FrameDebuggerMatrixProperty& matrix);
 //     |                                          hack is REMOVED entirely)
 //     |-- "RenderTransparent" leaf              (only once this pass is ever real/non-empty - never
 //     |     `-- "Draw Mesh"/"Draw Quad"/"Blit"   today - would get the same v-parent/child treatment)
-//     `-- "Compute Dispatches (Post-GameView)"  (every compute pass after the view region, regardless
-//           of tag - this group is never subdivided by tag)
-//           `-- ... same v-parent/"Compute Dispatch" child shape as above, per surviving pass
+//     |-- "Compute Dispatches (Post-GameView)"  (every compute pass after the view region, regardless
+//     |     of tag - this group is never subdivided by tag)
+//     |     `-- ... same v-parent/"Compute Dispatch" child shape as above, per surviving pass
+//     `-- "Other Render Passes"                 (editor-core-separation-22 campaign, PHASE4, NEW - the
+//           final, generic "nothing survives silently dropped" sweep: ANY surviving pass, Graphics
+//           or Compute, at ANY index/RenderPassEvent tier, that none of the buckets/walks above already
+//           claimed - e.g. a real, user-toggleable Graphics-kind pass tagged
+//           RenderPassEvent::AfterEverything, like "DemoRenderFeaturePlugin_Clear", which the old
+//           two-loop-plus-walk shape used to silently drop entirely. Only appears at all once
+//           non-empty, exactly like every other group here)
+//           `-- ... same v-parent/"Compute Dispatch"/"Draw Mesh"/"Draw Quad"/"Blit" child shape as above,
+//               per swept-up surviving pass
 //
 // Frame Debugger Pass-Ownership campaign (task_manager/render-pass-2), PHASE2
 // - EVERY one of these pass-level leaves (every "Compute LUT"/"Compute
-// Dispatches (Pre|Post-GameView)" entry, and "DrawSkyBackground"/a future
-// real "RenderTransparent") is now a real "v PassName" PARENT owning exactly
-// one real, independently-selectable child event row describing the actual
-// GPU operation that pass issues - "Compute Dispatch" for a Compute-kind
-// pass, or "Draw Mesh"/"Draw Quad"/"Blit" for a Graphics-kind pass (chosen
-// by that pass's own real, structural `rg::RenderPassDrawKind`, PHASE1 -
-// never a pass-name string match). This is built by
-// FrameDebuggerData.cpp's own `WrapPassWithOwnedChildEvent()` helper, called
-// once per surviving pass at each of the three call sites below - it copies
-// the already-built pass-level leaf, retargets the copy's own name/
+// Dispatches (Pre|Post-GameView)"/"Other Render Passes" entry, and
+// "DrawSkyBackground"/a future real "RenderTransparent") is now a real
+// "v PassName" PARENT owning exactly one real, independently-selectable
+// child event row describing the actual GPU operation that pass issues -
+// "Compute Dispatch" for a Compute-kind pass, or "Draw Mesh"/"Draw Quad"/
+// "Blit" for a Graphics-kind pass (chosen by that pass's own real,
+// structural `rg::RenderPassDrawKind`, PHASE1 - never a pass-name string
+// match). This is built by FrameDebuggerData.cpp's own
+// `WrapPassWithOwnedChildEvent()` helper, called once per surviving pass at
+// each of the FOUR call sites below (editor-core-separation-22 campaign,
+// PHASE4 added the fourth, the "Other Render Passes" sweep) - it copies the
+// already-built pass-level leaf, retargets the copy's own name/
 // eventIndex/eventLabel to the child's structural label, and attaches it as
 // that pass's one and only child, so both the pass row and its child row
 // stay independently selectable with matching pass-level facts (blend/Z/
@@ -499,9 +510,21 @@ std::string FormatMatrixProperty(const FrameDebuggerMatrixProperty& matrix);
 // "GameView" leaf - zero hardcoded pass-name string literals anywhere in this
 // function except the one "RenderOpaque" pivot lookup itself. This walk also
 // correctly SKIPS `AddFrameDebuggerReplayPasses()`'s own N debug-only replay
-// passes (tagged `RenderPassCategory::Debug` as of this same phase), which sit
-// structurally inside this exact index range on an explicit capture-trigger
-// frame - they never leak into the tree as spurious extra leaves.
+// passes (tagged `RenderPassCategory::FrameDebuggerInternal` as of
+// editor-core-separation-22 campaign, PHASE4 - RENAMED from the old, misused
+// `RenderPassCategory::Debug` value, which now correctly means "a real,
+// visible, optional/debug-flavored FEATURE pass" instead, fully visible in
+// this tree like any other survivor - see RenderGraphTypes.h's own updated
+// doc comments), which sit structurally inside this exact index range on an
+// explicit capture-trigger frame - they never leak into the tree as spurious
+// extra leaves. Every OTHER surviving pass that none of the specialized
+// buckets/walks above claims (by index, tracked via an internal `claimed`
+// array) is guaranteed to still surface, via the new "Other Render Passes"
+// sweep described in the tree diagram above - this is what makes the whole
+// tree STRUCTURALLY complete: no future pass, of any kind/tier/category
+// (other than the one genuinely-internal `FrameDebuggerInternal` exception),
+// can ever be silently dropped again, without anyone needing to touch this
+// file at all (editor-core-separation-22 campaign, PHASE4's own Step 1 goal).
 FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(
     const rg::RenderGraphSnapshot& graphSnapshot,
     const FrameDebuggerCaptureContext& capture,

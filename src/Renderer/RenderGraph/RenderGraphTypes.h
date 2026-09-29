@@ -387,7 +387,25 @@ const char* ToString(PassKind kind) noexcept;
 // precedent this mirrors).
 enum class RenderPassCategory : std::uint8_t {
     General, // The default - no special Frame Debugger grouping treatment.
-    Debug,   // Frame-Debugger-internal replay passes / Compute Blur Validation - never a real Frame Debugger tree citizen themselves (already filtered out, or shown under their own separate heading - see PHASE4/PHASE5).
+    Debug,   // editor-core-separation-22 campaign, PHASE4 - CORRECTED meaning: a
+        // real, optional/debug-flavored FEATURE pass (e.g. GBufferValidation,
+        // ComputeBlurValidation, PluginRenderPassBuilderAdapter's own
+        // fullscreen clear pass) - fully visible in the Frame Debugger tree
+        // like any other survivor, when it runs. This value used to
+        // (incorrectly) mean "never a real Frame Debugger tree citizen" -
+        // that meaning now belongs EXCLUSIVELY to FrameDebuggerInternal below.
+        // Never assume this hides a pass from the tree - if a pass genuinely
+        // needs to stay invisible, it must be tagged FrameDebuggerInternal
+        // instead, not this value.
+    FrameDebuggerInternal, // editor-core-separation-22 campaign, PHASE4 (NEW) -
+        // genuinely, permanently Frame-Debugger-OWNED ephemeral scaffolding
+        // (today: FrameDebuggerReplayStepN, see FrameDebuggerReplayPasses.cpp)
+        // - the ONLY category value that is unconditionally invisible to the
+        // Frame Debugger's own tree, regardless of what it does or does not
+        // survive culling as. Never use this for a real, user-facing feature
+        // pass, no matter how "debug-flavored" it feels - use `Debug` (or
+        // `General`) for that instead; see this enum's own updated `Debug`
+        // doc comment above.
 };
 
 const char* ToString(RenderPassCategory category) noexcept;

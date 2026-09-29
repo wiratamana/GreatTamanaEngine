@@ -174,14 +174,20 @@ std::vector<rg::TextureHandle> FrameDebuggerCaptureContext::AddReplayPasses(rg::
         // Render Pass campaign (task_manager/render-pass-1), PHASE4
         // (PHASE4_FRAME_DEBUGGER_GENERIC_TREE_REWORK.md, Step 3.3b) - these N
         // debug-only replay passes now declare through the AddRenderPass()
-        // chokepoint (PHASE1), tagged rg::RenderPassCategory::Debug (pulled
-        // forward from PHASE5's originally-planned scope) - this is what lets
+        // chokepoint (PHASE1), tagged rg::RenderPassCategory::FrameDebuggerInternal
+        // (RENAMED by editor-core-separation-22 campaign, PHASE4, from the
+        // old, misused RenderPassCategory::Debug value - see
+        // RenderGraphTypes.h's own updated doc comments: Debug now correctly
+        // means "a real, visible, optional/debug-flavored FEATURE pass",
+        // never "invisible"; FrameDebuggerInternal is the one value that
+        // genuinely means that now) - this is what lets
         // BuildRealFrameDebuggerSnapshot()'s own "view region" walk
         // (FrameDebuggerData.cpp) skip these passes instead of leaking them
         // into the tree as spurious extra leaves, even on the exact capture
         // frame that declares them. Same `name`/`setup`/`execute`, zero
         // behavior change beyond this new stamped metadata.
-        builder.AddRenderPass(passName, rg::PassKind::Graphics, rg::ViewScope::GameView, rg::RenderPassCategory::Debug,
+        builder.AddRenderPass(passName, rg::PassKind::Graphics, rg::ViewScope::GameView,
+            rg::RenderPassCategory::FrameDebuggerInternal,
             [destHandle, gpuSkinningOutputBuffers](rg::RenderGraphBuilder::PassBuilder& pass) {
                 pass.WriteColorAttachment(destHandle, kGameClearColor);
                 pass.WriteDepthStencilAttachment(destHandle, kGameClearDepth);
