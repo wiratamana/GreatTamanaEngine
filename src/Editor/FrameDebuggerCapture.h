@@ -210,7 +210,8 @@ public:
     std::vector<rg::TextureHandle> AddReplayPasses(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer,
         float aspectWidthOverHeight, std::size_t objectCount,
         const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers,
-        const std::function<void(VkCommandBuffer)>& recordSkyBackground, RenderTexture& gameTarget) override;
+        const std::function<void(VkCommandBuffer)>& recordSkyBackground, RenderTexture& gameTarget,
+        rg::RenderPassToggleRegistry* toggleRegistry = nullptr) override;
 
     // Clears every recorded fact back to the empty/default state - call
     // once at the top of every armed frame (mirrors FrameRecorder::

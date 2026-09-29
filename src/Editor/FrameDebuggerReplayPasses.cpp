@@ -33,6 +33,7 @@
 #include "../Renderer/RenderGraph/RenderGraph.h"
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "FrameDebuggerCapture.h"
+#include "../Renderer/RenderGraph/RenderPassToggleRegistry.h"
 
 #include <cstdio>
 #include <deque>
@@ -88,9 +89,20 @@ const char* ReplayStepPassName(std::size_t index)
 std::vector<rg::TextureHandle> FrameDebuggerCaptureContext::AddReplayPasses(rg::RenderGraphBuilder& builder,
     Game& game, Renderer& renderer, float aspectWidthOverHeight, std::size_t objectCount,
     const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers,
-    const std::function<void(VkCommandBuffer)>& recordSkyBackground, RenderTexture& gameTarget)
+    const std::function<void(VkCommandBuffer)>& recordSkyBackground, RenderTexture& gameTarget,
+    rg::RenderPassToggleRegistry* toggleRegistry)
 {
     std::vector<rg::TextureHandle> destHandles;
+
+    // editor-core-separation-21 campaign, PHASE4 (fixing PHASE3's
+    // confirmed-lie finding #24) - a single, whole-mechanism on/off switch,
+    // checked BEFORE any per-step RenderTexture/pass declaration - see this
+    // method's own doc comment in FrameDebuggerCaptureRecorder.h for why
+    // this is one umbrella toggle rather than one per dynamically-named
+    // "FrameDebuggerReplayStepN" pass.
+    if (toggleRegistry != nullptr && !toggleRegistry->NoteDeclaredAndCheckEnabled("FrameDebuggerReplay")) {
+        return destHandles;
+    }
 
     // frame-debugger-8 campaign, PHASE2 - `includeSkyStep`/`totalStepCount`
     // REPLACE the old `if (objectCount == 0) return;` early-out. A real

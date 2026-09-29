@@ -1,5 +1,6 @@
 #include "PluginRenderPassBuilderAdapter.h"
 
+#include "../../Renderer/RenderGraph/RenderPassToggleRegistry.h"
 #include "../../Renderer/RenderGraph/RenderGraphBuilder.h"
 
 #include <array>
@@ -49,8 +50,26 @@ namespace gte {
 // schedules the resulting pass into. Confirmed via a second live
 // GET /get_game_view smoke test after this fix - see this phase's own
 // completion report.
+// editor-core-separation-21 campaign, PHASE4 (fixing a confirmed lie from
+// PHASE3's own audit, findings #18/#19: "DemoRenderFeaturePlugin_Clear"/
+// "DemoRenderFeatureSecondPlugin_Clear" used to declare unconditionally,
+// with zero RenderPassToggleRegistry consult, even though the "Render
+// Graph" panel already drew a real, apparently-functional "Enabled"
+// checkbox for them) - mirrors AtmosphereLutRenderer's own five-method
+// precedent exactly: check-then-early-return, BEFORE any
+// RenderPassEvent/attachment-declaration logic below, so a disabled clear
+// pass declares NOTHING at all this frame (no downstream consumer reads
+// this pass's own written target - confirmed by re-reading
+// LegacyRenderFeatureOrchestrator::ContributeRenderGraphPasses(), which
+// only pushes `resolved->target` into `frame.finalTextureOutputs` once,
+// unconditionally, regardless of whether this clear pass itself ran - a
+// harmless root reference to a texture some OTHER already-declared pass
+// may still have validly written this same frame).
 void PluginRenderPassBuilderAdapter::AddFullscreenClearPass(const char* debugName, float r, float g, float b, float a)
 {
+    if (m_toggleRegistry != nullptr && !m_toggleRegistry->NoteDeclaredAndCheckEnabled(debugName)) {
+        return;
+    }
     m_builder.AddRenderPass(debugName, rg::PassKind::Graphics, rg::ViewScope::Shared, rg::RenderPassCategory::Debug,
         [this, r, g, b, a](rg::RenderGraphBuilder::PassBuilder& pass) {
             pass.WriteColorAttachment(m_viewTarget, std::array<float, 4>{ r, g, b, a });

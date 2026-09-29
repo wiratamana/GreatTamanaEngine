@@ -84,6 +84,7 @@ class RenderTexture;
 
 namespace rg {
 class RenderGraphBuilder;
+class RenderPassToggleRegistry;
 } // namespace rg
 
 // render-pass-3 campaign, PHASE2 (PHASE2_GPU_SKINNING_OPAQUE_BLACKBOARD_PROOF.md)
@@ -310,6 +311,17 @@ void FinalizeRenderTextureForExternalSampling(VkCommandBuffer cmd, RenderTexture
 // DIFFERENT Execute() call could never be ordered against them by the
 // compiler at all (each Execute() call compiles/executes its own,
 // completely independent graph).
-std::vector<rg::BufferHandle> AddGpuSkinningPasses(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer);
+// editor-core-separation-21 campaign, PHASE4 (fixing PHASE3's confirmed-lie
+// finding #9) - `toggleRegistry` (default nullptr) lets this function
+// honestly consult RenderPassToggleRegistry::NoteDeclaredAndCheckEnabled(
+// "GpuSkinning") ONCE, whole-stage, mirroring Core.cpp's own OFFSCREEN
+// "GpuSkinning" provider's identical single-whole-stage-switch shape
+// (Core.cpp ~line 476) - this is the direct-render-to-swapchain fallback's
+// own separate call path (Core::Present()'s needsDirectGameRender branch),
+// which used to declare every per-request dispatch pass unconditionally
+// with zero registry consult at all, even though both paths share the
+// exact same "GpuSkinning" checkbox in the "Render Graph" panel.
+std::vector<rg::BufferHandle> AddGpuSkinningPasses(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer,
+    rg::RenderPassToggleRegistry* toggleRegistry = nullptr);
 
 } // namespace gte

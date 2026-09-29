@@ -9,8 +9,8 @@
 #include "../Renderer/Renderer.h"
 #include "../Renderer/RenderTexture.h"
 #include "../Renderer/RenderGraph/RenderGraph.h"
-#include "../Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
+#include "../Renderer/RenderGraph/RenderPassToggleRegistry.h"
 
 // editor-core-separation-2 campaign, PHASE2 - IFrameDebuggerCaptureRecorder
 // (src/Core/FrameDebuggerCaptureRecorder.h) is the new, gte_core-owned
@@ -207,9 +207,20 @@ void FinalizeRenderTextureForExternalSampling(VkCommandBuffer cmd, RenderTexture
     rg::EmitImageBarrier(cmd, texture.Image(), range, previous, next);
 }
 
-std::vector<rg::BufferHandle> AddGpuSkinningPasses(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer)
+std::vector<rg::BufferHandle> AddGpuSkinningPasses(
+    rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer, rg::RenderPassToggleRegistry* toggleRegistry)
 {
     std::vector<rg::BufferHandle> handles;
+
+    // editor-core-separation-21 campaign, PHASE4 (fixing PHASE3's
+    // confirmed-lie finding #9) - a single, whole-stage on/off switch,
+    // mirroring Core.cpp's own OFFSCREEN "GpuSkinning" provider's identical
+    // shape (both consult the SAME registry entry name, so one checkbox
+    // honestly gates whichever of the two paths is actually reachable this
+    // frame).
+    if (toggleRegistry != nullptr && !toggleRegistry->NoteDeclaredAndCheckEnabled("GpuSkinning")) {
+        return handles;
+    }
 
     const std::vector<AnimationSystem::GpuSkinningDispatchRequest> requests = game.CollectGpuSkinningDispatchRequests();
     if (requests.empty()) {

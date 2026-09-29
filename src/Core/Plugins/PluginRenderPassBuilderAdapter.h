@@ -15,13 +15,27 @@
 namespace gte {
 namespace rg {
 class RenderGraphBuilder;
+class RenderPassToggleRegistry;
 } // namespace rg
 
 class PluginRenderPassBuilderAdapter final : public IPluginRenderPassBuilder {
 public:
-    PluginRenderPassBuilderAdapter(rg::RenderGraphBuilder& builder, rg::TextureHandle viewTarget) noexcept
+    // editor-core-separation-21 campaign, PHASE4 (fixing a confirmed lie
+    // from PHASE3's own audit, findings #18/#19) - `toggleRegistry` is
+    // OPTIONAL (nullptr-safe, mirroring AtmosphereLutRenderer's own
+    // established default-nullptr precedent) so AddFullscreenClearPass()
+    // below can honestly consult RenderPassToggleRegistry::
+    // NoteDeclaredAndCheckEnabled(debugName) before ever calling
+    // m_builder.AddRenderPass() - the ONE real construction site
+    // (LegacyRenderFeatureOrchestrator::ContributeRenderGraphPasses())
+    // always passes a real, non-null pointer; nullptr is only kept as a
+    // safety fallback (treated as "always enabled", zero behavior change)
+    // for any future construction site that doesn't have one handy.
+    PluginRenderPassBuilderAdapter(rg::RenderGraphBuilder& builder, rg::TextureHandle viewTarget,
+        rg::RenderPassToggleRegistry* toggleRegistry = nullptr) noexcept
         : m_builder(builder)
         , m_viewTarget(viewTarget)
+        , m_toggleRegistry(toggleRegistry)
     {
     }
 
@@ -30,6 +44,7 @@ public:
 private:
     rg::RenderGraphBuilder& m_builder;
     rg::TextureHandle m_viewTarget;
+    rg::RenderPassToggleRegistry* m_toggleRegistry = nullptr;
 };
 
 } // namespace gte

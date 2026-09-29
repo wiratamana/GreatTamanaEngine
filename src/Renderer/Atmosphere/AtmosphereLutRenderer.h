@@ -396,9 +396,20 @@ public:
     // reasoning; per PHASE1's own Step 3.4, this method never hardcodes an
     // assumption about which view it is for internally, even though every
     // call site today happens to pass GameView.
+    //
+    // editor-core-separation-21 campaign, PHASE4 (fixing PHASE3's
+    // confirmed-lie finding #6) - `toggleRegistry` (default nullptr,
+    // mirroring every other toggle-aware AddXxxPass() method in this same
+    // class) lets this method honestly consult RenderPassToggleRegistry::
+    // NoteDeclaredAndCheckEnabled("AtmosphereAerialPerspectiveVolumeDebugSlicePass")
+    // BEFORE declaring anything - previously this pass declared
+    // unconditionally with zero registry consult, even though the "Render
+    // Graph" panel already drew a real, apparently-functional "Enabled"
+    // checkbox for it.
     rg::TextureHandle AddAerialPerspectiveVolumeDebugSlicePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
         rg::VolumeTextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,
-        std::uint32_t debugSliceIndex, const char* outputTextureName, rg::ViewScope viewScope);
+        std::uint32_t debugSliceIndex, const char* outputTextureName, rg::ViewScope viewScope,
+        rg::RenderPassToggleRegistry* toggleRegistry = nullptr);
 
     // atmosphere-scattering-2 campaign, Phase 5
     // (task_manager/atmosphere-scattering-2/PHASE5_AERIAL_LUT_NUMERIC_VALIDATION_TOOL.md,

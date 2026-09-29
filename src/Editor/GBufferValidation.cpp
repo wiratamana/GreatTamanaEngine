@@ -4,6 +4,7 @@
 #include "../Renderer/RenderGraph/RenderGraph.h"
 #include "../Renderer/Renderer.h"
 #include "../Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
+#include "../Renderer/RenderGraph/RenderPassToggleRegistry.h"
 #include "../Renderer/Vertex.h"
 #include "../Renderer/Vulkan/DescriptorSetLayoutBuilder.h"
 
@@ -115,8 +116,20 @@ void GBufferValidation::EnsureInitialized(Renderer& renderer, VkExtent2D initial
 }
 
 GBufferValidationHandles GBufferValidation::AddPass(
-    rg::RenderGraphBuilder& builder, Renderer& renderer, VkExtent2D sceneExtent)
+    rg::RenderGraphBuilder& builder, Renderer& renderer, VkExtent2D sceneExtent, rg::RenderPassToggleRegistry* toggleRegistry)
 {
+    // editor-core-separation-21 campaign, PHASE4 (fixing PHASE3's
+    // confirmed-lie finding #22) - the graphics half's own toggle gates
+    // BOTH passes: the compute half below has no valid `albedoHandle` to
+    // read at all if this one never declares. Checked BEFORE
+    // EnsureInitialized()/any resource creation, mirroring
+    // AtmosphereLutRenderer's own five-method early-return precedent.
+    const bool graphicsEnabled =
+        toggleRegistry == nullptr || toggleRegistry->NoteDeclaredAndCheckEnabled("GBufferValidation");
+    if (!graphicsEnabled) {
+        return GBufferValidationHandles{};
+    }
+
     EnsureInitialized(renderer, sceneExtent);
 
     const VkExtent2D currentExtent = m_albedoOutput->Extent();
@@ -140,8 +153,6 @@ GBufferValidationHandles GBufferValidation::AddPass(
         builder.ImportTexture("GBufferAlbedo", m_albedoOutput->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
     const rg::TextureHandle normalHandle =
         builder.ImportTexture("GBufferNormal", m_normalOutput->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
-    const rg::TextureHandle visualizedHandle =
-        builder.ImportTexture("GBufferVisualized", m_visualizedOutput->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
 
     // The MRT graphics pass itself - PHASE1-3's own mechanism's first real
     // consumer. Reuses m_albedoOutput's own companion DepthBuffer (every
@@ -172,6 +183,7 @@ GBufferValidationHandles GBufferValidation::AddPass(
     // this pass reads no Scene-View texture at all (see this class's own
     // header comment) - there is no cross-pass ordering hazard a future
     // render-pass-4-style effective-order change could ever expose.
+    m_graphicsWrittenThisFrame = true;
 
     // The second, small compute pass - proves "a later pass reading one of
     // N MRT outputs, cross-pass, barrier-synchronized automatically by the
@@ -179,56 +191,68 @@ GBufferValidationHandles GBufferValidation::AddPass(
     // trivial imageLoad/imageStore copy (Shaders/GBufferCopy.comp) -
     // mirrors ComputeBlurValidation's own compute-pass shape almost
     // verbatim.
-    builder.AddRenderPass(
-        "GBufferValidationCopy", rg::PassKind::Compute, rg::ViewScope::SceneView, rg::RenderPassCategory::Debug,
-        [albedoHandle, visualizedHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
-            pass.ReadTexture(albedoHandle, rg::ResourceAccess::ShaderRead);
-            pass.WriteTexture(visualizedHandle, rg::ResourceAccess::ComputeShaderWrite);
-        },
-        [this, &renderer, albedoHandle, visualizedHandle, sceneExtent](rg::PassContext& ctx) {
-            const rg::PassContext::ResolvedTexture source = ctx.resolveTexture(albedoHandle);
-            const rg::PassContext::ResolvedTexture dest = ctx.resolveTexture(visualizedHandle);
+    //
+    // editor-core-separation-21 campaign, PHASE4 (fixing PHASE3's
+    // confirmed-lie finding #23) - INDEPENDENTLY gated from the graphics
+    // half above: disabling ONLY "GBufferValidationCopy" still lets
+    // "GBufferValidation" declare/write albedo/normal normally; only
+    // `visualizedHandle` comes back invalid/unwritten this frame.
+    rg::TextureHandle visualizedHandle{};
+    const bool copyEnabled =
+        toggleRegistry == nullptr || toggleRegistry->NoteDeclaredAndCheckEnabled("GBufferValidationCopy");
+    if (copyEnabled) {
+        visualizedHandle =
+            builder.ImportTexture("GBufferVisualized", m_visualizedOutput->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
 
-            m_copyDescriptorSet.Rewrite(m_device,
-                std::vector<ComputeDescriptorWrite>{
-                    ComputeDescriptorWrite::CombinedImageSampler(0, source.view, m_albedoOutput->Sampler()),
-                    ComputeDescriptorWrite::StorageImage(1, dest.view),
-                });
+        builder.AddRenderPass(
+            "GBufferValidationCopy", rg::PassKind::Compute, rg::ViewScope::SceneView, rg::RenderPassCategory::Debug,
+            [albedoHandle, visualizedHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
+                pass.ReadTexture(albedoHandle, rg::ResourceAccess::ShaderRead);
+                pass.WriteTexture(visualizedHandle, rg::ResourceAccess::ComputeShaderWrite);
+            },
+            [this, &renderer, albedoHandle, visualizedHandle, sceneExtent](rg::PassContext& ctx) {
+                const rg::PassContext::ResolvedTexture source = ctx.resolveTexture(albedoHandle);
+                const rg::PassContext::ResolvedTexture dest = ctx.resolveTexture(visualizedHandle);
 
-            const std::uint32_t pushConstants[2] = { sceneExtent.width, sceneExtent.height };
-            const Extent3D groupCounts = ComputeGroupCount3D(Extent3D{ sceneExtent.width, sceneExtent.height, 1 },
-                Extent3D{ kGBufferCopyLocalSizeX, kGBufferCopyLocalSizeY, 1 });
+                m_copyDescriptorSet.Rewrite(m_device,
+                    std::vector<ComputeDescriptorWrite>{
+                        ComputeDescriptorWrite::CombinedImageSampler(0, source.view, m_albedoOutput->Sampler()),
+                        ComputeDescriptorWrite::StorageImage(1, dest.view),
+                    });
 
-            renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-            renderer.Dispatch(*m_copyPipeline, m_copyDescriptorSet.Native(), pushConstants, sizeof(pushConstants),
-                groupCounts.width, groupCounts.height, groupCounts.depth);
-            renderer.EndGraphPassRecording();
-        });
-    // Default drawKind (unused/meaningless for a Compute-kind pass) and
-    // default RenderPassEvent::Opaques - this pass's own real dependency
-    // on "GBufferValidation" having already written albedoHandle is a
-    // structural RAW resource dependency the compiler already tracks
-    // (exactly like every other pass in this engine), not something a
-    // RenderPassEvent tag needs to additionally encode - both passes are
-    // also always declared back-to-back, in this fixed order, every frame.
+                const std::uint32_t pushConstants[2] = { sceneExtent.width, sceneExtent.height };
+                const Extent3D groupCounts = ComputeGroupCount3D(Extent3D{ sceneExtent.width, sceneExtent.height, 1 },
+                    Extent3D{ kGBufferCopyLocalSizeX, kGBufferCopyLocalSizeY, 1 });
 
-    m_writtenThisFrame = true;
+                renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
+                renderer.Dispatch(*m_copyPipeline, m_copyDescriptorSet.Native(), pushConstants, sizeof(pushConstants),
+                    groupCounts.width, groupCounts.height, groupCounts.depth);
+                renderer.EndGraphPassRecording();
+            });
+        // Default drawKind (unused/meaningless for a Compute-kind pass) and
+        // default RenderPassEvent::Opaques - this pass's own real dependency
+        // on "GBufferValidation" having already written albedoHandle is a
+        // structural RAW resource dependency the compiler already tracks
+        // (exactly like every other pass in this engine), not something a
+        // RenderPassEvent tag needs to additionally encode - both passes are
+        // also always declared back-to-back, in this fixed order, every frame.
+        m_copyWrittenThisFrame = true;
+    }
+
     return GBufferValidationHandles{ albedoHandle, normalHandle, visualizedHandle };
 }
 
 void GBufferValidation::FinalizeForSampling(VkCommandBuffer cmd)
 {
-    if (!m_writtenThisFrame) {
-        return;
-    }
-    m_writtenThisFrame = false;
-
     const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
     // albedo/normal: written by a real graphics pass (ColorAttachmentWrite)
     // - mirrors RenderPasses.h's own
-    // FinalizeRenderTextureForExternalSampling().
-    {
+    // FinalizeRenderTextureForExternalSampling(). Only transitioned when
+    // this half genuinely wrote something THIS frame (editor-core-
+    // separation-21 campaign, PHASE4 - independently toggle-gated now).
+    if (m_graphicsWrittenThisFrame) {
+        m_graphicsWrittenThisFrame = false;
         const rg::ResourceState previous = rg::RequiredStateFor(rg::ResourceAccess::ColorAttachmentWrite, false);
         const rg::ResourceState next = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
         rg::EmitImageBarrier(cmd, m_albedoOutput->Image(), range, previous, next);
@@ -236,8 +260,10 @@ void GBufferValidation::FinalizeForSampling(VkCommandBuffer cmd)
     }
 
     // visualized: written by the compute copy pass (ComputeShaderWrite) -
-    // mirrors ComputeBlurValidation::FinalizeForSampling() exactly.
-    {
+    // mirrors ComputeBlurValidation::FinalizeForSampling() exactly. Only
+    // transitioned when this half genuinely wrote something THIS frame.
+    if (m_copyWrittenThisFrame) {
+        m_copyWrittenThisFrame = false;
         const rg::ResourceState previous = rg::RequiredStateFor(rg::ResourceAccess::ComputeShaderWrite, false);
         const rg::ResourceState next = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
         rg::EmitImageBarrier(cmd, m_visualizedOutput->Image(), range, previous, next);

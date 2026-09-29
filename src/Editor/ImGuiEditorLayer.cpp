@@ -1,5 +1,5 @@
 #include "EditorLayer.h"
-#include "AtmosphereAerialPerspectiveLutInspection.h"
+
 #include "AtmosphereAerialPerspectiveSkyPurityValidation.h"
 #include "AtmosphereTransmittanceLutValidation.h"
 #include "ComputeBlurValidation.h"
@@ -38,6 +38,7 @@
 #include "Panels/ScenePanel.h"
 #include "TransformGizmo.h"
 #include "../Game/Game.h"
+#include "../Renderer/RenderGraph/RenderPassToggleRegistry.h"
 #include "../Renderer/Renderer.h"
 #include "../Window/Window.h"
 
@@ -467,12 +468,21 @@ public:
     // non-degenerate extent - mirroring GameViewTarget()/SceneViewTarget()'s
     // own "only resize/act when the extent is non-zero" guard.
     std::optional<rg::TextureHandle> AddBlurValidationPass(rg::RenderGraphBuilder& builder, Renderer& renderer,
-        rg::TextureHandle sceneViewHandle, VkExtent2D sceneExtent) override
+        rg::TextureHandle sceneViewHandle, VkExtent2D sceneExtent,
+        rg::RenderPassToggleRegistry* toggleRegistry) override
     {
         if (!m_ctx.showBlurredSceneOutput || !m_ctx.sceneViewVisible) {
             return std::nullopt;
         }
         if (sceneExtent.width == 0 || sceneExtent.height == 0) {
+            return std::nullopt;
+        }
+        // editor-core-separation-21 campaign, PHASE4 - an ADDITIONAL,
+        // independent gate on top of the ctx.showBlurredSceneOutput toggle
+        // above, fixing PHASE3's confirmed-lie finding #21 (this pass's own
+        // per-row "Enabled" checkbox in the "Render Graph" panel used to be
+        // 100% cosmetic).
+        if (toggleRegistry != nullptr && !toggleRegistry->NoteDeclaredAndCheckEnabled("ComputeBlurValidation")) {
             return std::nullopt;
         }
         return m_blurValidation.AddPass(builder, renderer, sceneViewHandle, m_sceneView.Sampler(), sceneExtent);
@@ -487,8 +497,8 @@ public:
     // a non-degenerate extent - mirrors AddBlurValidationPass() above
     // exactly, minus the Scene-View-texture-read parameter this pass does
     // not need (see GBufferValidation.h's own header comment).
-    std::optional<GBufferValidationHandles> AddGBufferValidationPass(
-        rg::RenderGraphBuilder& builder, Renderer& renderer, VkExtent2D sceneExtent) override
+    std::optional<GBufferValidationHandles> AddGBufferValidationPass(rg::RenderGraphBuilder& builder,
+        Renderer& renderer, VkExtent2D sceneExtent, rg::RenderPassToggleRegistry* toggleRegistry) override
     {
         if (!m_ctx.showGBufferValidationOutput || !m_ctx.sceneViewVisible) {
             return std::nullopt;
@@ -496,7 +506,7 @@ public:
         if (sceneExtent.width == 0 || sceneExtent.height == 0) {
             return std::nullopt;
         }
-        return m_gbufferValidation.AddPass(builder, renderer, sceneExtent);
+        return m_gbufferValidation.AddPass(builder, renderer, sceneExtent, toggleRegistry);
     }
 
     void FinalizeGBufferValidationForSampling(VkCommandBuffer cmd) override

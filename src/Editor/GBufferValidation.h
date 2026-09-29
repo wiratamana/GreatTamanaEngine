@@ -93,6 +93,10 @@
 
 namespace gte {
 
+namespace rg {
+class RenderPassToggleRegistry;
+} // namespace rg
+
 class Renderer;
 
 // GBufferValidationHandles - see EditorLayer.h's own definition (this
@@ -121,7 +125,22 @@ public:
     // in both dimensions - the caller is expected to have already checked
     // this (mirrors ComputeBlurValidation::AddPass()'s own identical
     // expectation).
-    GBufferValidationHandles AddPass(rg::RenderGraphBuilder& builder, Renderer& renderer, VkExtent2D sceneExtent);
+    //
+    // editor-core-separation-21 campaign, PHASE4 - `toggleRegistry`
+    // (default nullptr) fixes PHASE3's confirmed-lie findings #22/#23: the
+    // graphics half ("GBufferValidation" - albedo/normal) and the compute
+    // half ("GBufferValidationCopy" - visualized) are now each
+    // INDEPENDENTLY gated via RenderPassToggleRegistry::
+    // NoteDeclaredAndCheckEnabled(). If the graphics half is disabled,
+    // NEITHER half declares anything this frame (the compute half has no
+    // valid source to read without it) and every returned handle is
+    // invalid/default. If only the compute half is disabled, the graphics
+    // half still declares/writes albedo/normal normally, and only
+    // `visualized` comes back invalid. A caller pushing an invalid handle
+    // into its own finalOutputs root set is harmless - RenderGraphCompiler
+    // simply finds no pass that wrote it.
+    GBufferValidationHandles AddPass(rg::RenderGraphBuilder& builder, Renderer& renderer, VkExtent2D sceneExtent,
+        rg::RenderPassToggleRegistry* toggleRegistry = nullptr);
 
     // Transitions all three outputs from whatever write state AddPass()
     // above leaves them in (ColorAttachmentWrite for albedo/normal,
@@ -166,10 +185,17 @@ private:
     std::optional<ComputePipeline> m_copyPipeline;
     ComputeDescriptorSet m_copyDescriptorSet;
 
-    // See ComputeBlurValidation::m_writtenThisFrame's own doc comment for
-    // why this is tracked internally rather than trusted to match the
-    // caller's own enable/visibility condition every time.
-    bool m_writtenThisFrame = false;
+    // editor-core-separation-21 campaign, PHASE4 - REPLACES the old single
+    // `m_writtenThisFrame` bool with TWO independent flags, since the
+    // graphics half (albedo/normal) and the compute half (visualized) can
+    // now be independently toggled off - FinalizeForSampling() below only
+    // emits a barrier for whichever half genuinely wrote something THIS
+    // frame, never assuming both always run together anymore. See
+    // ComputeBlurValidation::m_writtenThisFrame's own doc comment for why
+    // this is tracked internally rather than trusted to match the caller's
+    // own enable/visibility condition every time.
+    bool m_graphicsWrittenThisFrame = false;
+    bool m_copyWrittenThisFrame = false;
 };
 
 } // namespace gte

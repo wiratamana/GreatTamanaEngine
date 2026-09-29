@@ -362,8 +362,17 @@ public:
     // real implementation this wraps; always std::nullopt for
     // NullEditorLayer, which never declares a pass at all). `renderer` is
     // the same Renderer Application already owns.
-    virtual std::optional<rg::TextureHandle> AddBlurValidationPass(
-        rg::RenderGraphBuilder& builder, Renderer& renderer, rg::TextureHandle sceneViewHandle, VkExtent2D sceneExtent) = 0;
+    // editor-core-separation-21 campaign, PHASE4 - `toggleRegistry` (default
+    // nullptr, mirroring AtmosphereLutRenderer's own established precedent)
+    // lets this method honestly consult RenderPassToggleRegistry::
+    // NoteDeclaredAndCheckEnabled("ComputeBlurValidation") as an ADDITIONAL,
+    // independent gate ON TOP OF the existing ctx.showBlurredSceneOutput
+    // feature toggle - fixing PHASE3's confirmed-lie finding #21 (the
+    // "Render Graph" panel's own per-row "ComputeBlurValidation" checkbox
+    // used to be 100% cosmetic).
+    virtual std::optional<rg::TextureHandle> AddBlurValidationPass(rg::RenderGraphBuilder& builder, Renderer& renderer,
+        rg::TextureHandle sceneViewHandle, VkExtent2D sceneExtent,
+        rg::RenderPassToggleRegistry* toggleRegistry = nullptr) = 0;
 
     // Transitions the blurred-output texture (if AddBlurValidationPass()
     // above actually declared a pass this frame - a safe no-op otherwise)
@@ -394,9 +403,18 @@ public:
     // reaches a root - or std::nullopt if no pass was declared at all this
     // frame (see GBufferValidation.h for the real implementation this
     // wraps; always std::nullopt for NullEditorLayer). `renderer` is the
-    // same Renderer Application already owns.
-    virtual std::optional<GBufferValidationHandles> AddGBufferValidationPass(
-        rg::RenderGraphBuilder& builder, Renderer& renderer, VkExtent2D sceneExtent) = 0;
+    // editor-core-separation-21 campaign, PHASE4 - `toggleRegistry` (default
+    // nullptr) lets this method honestly, INDEPENDENTLY consult
+    // RenderPassToggleRegistry::NoteDeclaredAndCheckEnabled() for BOTH
+    // "GBufferValidation" (the graphics half - albedo/normal) AND
+    // "GBufferValidationCopy" (the compute half - visualized) as ADDITIONAL
+    // gates on top of the existing ctx.showGBufferValidationOutput feature
+    // toggle - fixing PHASE3's confirmed-lie findings #22/#23 (the "Render
+    // Graph" panel's own per-row checkboxes for these two used to be 100%
+    // cosmetic). See GBufferValidation.h for the exact independent-gating
+    // contract.
+    virtual std::optional<GBufferValidationHandles> AddGBufferValidationPass(rg::RenderGraphBuilder& builder,
+        Renderer& renderer, VkExtent2D sceneExtent, rg::RenderPassToggleRegistry* toggleRegistry = nullptr) = 0;
 
     // Transitions all three GBuffer Validation outputs (if
     // AddGBufferValidationPass() above actually declared a pass this frame

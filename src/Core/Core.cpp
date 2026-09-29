@@ -552,7 +552,8 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 const rg::TextureHandle debugSlice = m_atmosphereLutRenderer.AddAerialPerspectiveVolumeDebugSlicePass(
                     frame.builder, m_renderer, viewLuts.aerialPerspectiveVolumeHandle, aerialVolumeName,
                     static_cast<std::uint32_t>(m_atmosphereSettings.aerialPerspectiveDebugSliceIndex),
-                    "AtmosphereAerialPerspectiveVolumeDebugSlice", rg::ViewScope::GameView);
+                    "AtmosphereAerialPerspectiveVolumeDebugSlice", rg::ViewScope::GameView,
+                    &m_renderPassToggleRegistry);
                 frame.finalTextureOutputs.push_back(debugSlice);
             }
 
@@ -1019,7 +1020,7 @@ void Core::RegisterPresentRenderPipelineProvider()
     m_presentRenderPipeline.Register("Present", rg::ProviderScope::Once,
         [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&) {
             const std::vector<rg::BufferHandle> gpuSkinningBuffers = m_needsDirectGameRenderThisFrame
-                ? AddGpuSkinningPasses(frame.builder, m_game, m_renderer)
+                ? AddGpuSkinningPasses(frame.builder, m_game, m_renderer, &m_renderPassToggleRegistry)
                 : std::vector<rg::BufferHandle>{};
 
             AddPresentPass(frame.builder, m_game, m_renderer, m_swapchainImageThisFrame,
@@ -1226,7 +1227,7 @@ void Core::BuildFrame()
                         const std::size_t objectCount = m_game.CountGameViewDrawCommandsThisFrame();
                         const std::vector<rg::TextureHandle> replayStepHandles = frameDebuggerCapture->AddReplayPasses(
                             b, m_game, m_renderer, gameAspectForReplay, objectCount, gpuSkinningBuffersForReplay,
-                            recordGameSkyBackground, *gameTarget);
+                            recordGameSkyBackground, *gameTarget, &m_renderPassToggleRegistry);
                         for (const rg::TextureHandle& replayHandle : replayStepHandles) {
                             outputs.push_back(replayHandle);
                         }
@@ -1234,7 +1235,8 @@ void Core::BuildFrame()
 
                     if (sceneVisibleForBlurValidation && m_editorLayer != nullptr) {
                         if (const std::optional<rg::TextureHandle> blurHandle = m_editorLayer->AddBlurValidationPass(
-                                b, m_renderer, sceneColorHandleForBlurValidation, sceneExtentForBlurValidation)) {
+                                b, m_renderer, sceneColorHandleForBlurValidation, sceneExtentForBlurValidation,
+                                &m_renderPassToggleRegistry)) {
                             outputs.push_back(*blurHandle);
                         }
                     }
@@ -1242,7 +1244,7 @@ void Core::BuildFrame()
                     if (sceneVisibleForBlurValidation && m_editorLayer != nullptr) {
                         if (const std::optional<GBufferValidationHandles> gbufferHandles =
                                 m_editorLayer->AddGBufferValidationPass(
-                                    b, m_renderer, sceneExtentForBlurValidation)) {
+                                    b, m_renderer, sceneExtentForBlurValidation, &m_renderPassToggleRegistry)) {
                             outputs.push_back(gbufferHandles->albedo);
                             outputs.push_back(gbufferHandles->normal);
                             outputs.push_back(gbufferHandles->visualized);

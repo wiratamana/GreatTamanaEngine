@@ -45,7 +45,14 @@ void LegacyRenderFeatureOrchestrator::ContributeRenderGraphPasses(
     for (IPluginModule* module : m_core.GetPluginHost().AllLoadedModules()) {
         if (auto* feature = static_cast<IRenderFeatureModule_v1*>(
                 module->QueryCapability(kIRenderFeatureModule_v1_Name))) {
-            PluginRenderPassBuilderAdapter adapter(frame.builder, resolved->target);
+            // editor-core-separation-21 campaign, PHASE4 - the toggle
+            // registry is now threaded through so AddFullscreenClearPass()
+            // can honestly consult it (fixing PHASE3's confirmed-lie
+            // findings #18/#19) - Core::GetRenderPassToggleRegistryMutable()
+            // returns the SAME single registry instance every other
+            // built-in/toggle-aware pass in this engine already consults.
+            PluginRenderPassBuilderAdapter adapter(
+                frame.builder, resolved->target, &m_core.GetRenderPassToggleRegistryMutable());
             feature->AddRenderGraphPasses(adapter);
             anyPluginFeatureRanThisView = true;
         }

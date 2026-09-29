@@ -54,6 +54,7 @@ class RenderTexture;
 
 namespace rg {
 class RenderGraphBuilder;
+class RenderPassToggleRegistry;
 } // namespace rg
 
 class IFrameDebuggerCaptureRecorder {
@@ -71,10 +72,21 @@ public:
     // same parameters (minus the trailing FrameDebuggerCaptureContext&,
     // which becomes the implicit `this`), same semantics, same call site
     // (Core::BuildFrame()).
+    //
+    // editor-core-separation-21 campaign, PHASE4 (fixing PHASE3's
+    // confirmed-lie finding #24) - `toggleRegistry` (default nullptr) lets
+    // this method honestly consult RenderPassToggleRegistry::
+    // NoteDeclaredAndCheckEnabled("FrameDebuggerReplay") ONCE, as a single
+    // whole-mechanism switch (mirroring AddGpuSkinningPasses()'s own
+    // "GpuSkinning" whole-stage precedent) rather than per dynamically-
+    // named "FrameDebuggerReplayStepN" pass - these are ephemeral, one-
+    // capture-lifetime debug tooling passes, not real content, so one
+    // umbrella toggle is the correct granularity.
     virtual std::vector<rg::TextureHandle> AddReplayPasses(rg::RenderGraphBuilder& builder, Game& game,
         Renderer& renderer, float aspectWidthOverHeight, std::size_t objectCount,
         const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers,
-        const std::function<void(VkCommandBuffer)>& recordSkyBackground, RenderTexture& gameTarget) = 0;
+        const std::function<void(VkCommandBuffer)>& recordSkyBackground, RenderTexture& gameTarget,
+        rg::RenderPassToggleRegistry* toggleRegistry = nullptr) = 0;
 };
 
 } // namespace gte

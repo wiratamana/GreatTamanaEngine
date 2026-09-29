@@ -35,7 +35,8 @@ public:
     void SetGameViewCompositedTexture(RenderTexture* /*texture*/) override { }
     void SetSceneViewCompositedTexture(RenderTexture* /*texture*/) override { }
     std::optional<rg::TextureHandle> AddBlurValidationPass(rg::RenderGraphBuilder& /*builder*/,
-        Renderer& /*renderer*/, rg::TextureHandle /*sceneViewHandle*/, VkExtent2D /*sceneExtent*/) override
+        Renderer& /*renderer*/, rg::TextureHandle /*sceneViewHandle*/, VkExtent2D /*sceneExtent*/,
+        rg::RenderPassToggleRegistry* /*toggleRegistry*/) override
     {
         return std::nullopt;
     }
@@ -44,8 +45,8 @@ public:
     // task_manager/mrt-1 campaign, PHASE4 - a release build never declares
     // this pass at all, mirroring AddBlurValidationPass()/
     // FinalizeBlurValidationForSampling() above exactly.
-    std::optional<GBufferValidationHandles> AddGBufferValidationPass(
-        rg::RenderGraphBuilder& /*builder*/, Renderer& /*renderer*/, VkExtent2D /*sceneExtent*/) override
+    std::optional<GBufferValidationHandles> AddGBufferValidationPass(rg::RenderGraphBuilder& /*builder*/,
+        Renderer& /*renderer*/, VkExtent2D /*sceneExtent*/, rg::RenderPassToggleRegistry* /*toggleRegistry*/) override
     {
         return std::nullopt;
     }

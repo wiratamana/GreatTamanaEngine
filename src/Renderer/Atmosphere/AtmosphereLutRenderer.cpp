@@ -983,8 +983,18 @@ AtmosphereLutRenderer::EnsureAerialPerspectiveVolumeDebugSliceViewInitialized(
 
 rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveVolumeDebugSlicePass(rg::RenderGraphBuilder& builder,
     Renderer& renderer, rg::VolumeTextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,
-    std::uint32_t debugSliceIndex, const char* outputTextureName, rg::ViewScope viewScope)
+    std::uint32_t debugSliceIndex, const char* outputTextureName, rg::ViewScope viewScope,
+    rg::RenderPassToggleRegistry* toggleRegistry)
 {
+    // editor-core-separation-21 campaign, PHASE4 (fixing PHASE3's
+    // confirmed-lie finding #6) - checked BEFORE any resource
+    // initialization/lookup, mirroring every other toggle-aware
+    // AddXxxPass() method in this class.
+    if (toggleRegistry != nullptr
+        && !toggleRegistry->NoteDeclaredAndCheckEnabled("AtmosphereAerialPerspectiveVolumeDebugSlicePass")) {
+        return rg::TextureHandle{};
+    }
+
     EnsureAerialPerspectiveVolumeDebugSliceInitialized(renderer);
 
     // The SAME AerialPerspectiveVolumeViewState AddAerialPerspectiveVolumePass()
