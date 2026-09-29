@@ -131,6 +131,25 @@ see `TODO.md`'s "Frame Debugger" section.
 
 Full convention: [docs/conventions/frame-debugger.md](docs/conventions/frame-debugger.md).
 
+## Project Assembly On-Screen Render Feature Compositing
+
+A Project Assembly's own `_Game.dll` can register a genuine, visible, ON-SCREEN
+render feature - composited into the same Game View/Scene View image real
+users see - via `Core::RegisterProjectRenderFeature()`/
+`UnregisterProjectRenderFeature()` (`editor-core-separation-23` campaign,
+`task_manager/editor-core-separation-23/PHASE0_MASTER_STRATEGY.md`,
+`CAMPAIGN_COMPLETION_REPORT.md`). It plugs in as a third, additive module kind
+alongside `gte_plugin_abi`'s `IRenderFeatureModule_v2`/`_v3`, reusing the exact
+same, already-proven `RenderFeatureCompositor` blend chain, with its own
+bounded, reusable GPU-state slot pool (`kMaxConcurrentProjectRenderFeatures`)
+so an unbounded register/rename/unregister session across many hot-reload
+cycles never starves the shared compute descriptor pool. This is BIG-STEP 1 of
+2 only - there is no Editor UI menu item for it yet; a Project Assembly author
+must call it directly from their own `RegisterProject()`.
+
+Full convention: [docs/conventions/project-assembly-system.md](docs/conventions/project-assembly-system.md)'s
+own `### On-screen Game View compositing` section.
+
 ## Render Pass System
 
 `src/Renderer/RenderGraph/RenderGraphBuilder::AddRenderPass()` is the ONE

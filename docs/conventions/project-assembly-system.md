@@ -287,31 +287,117 @@ dispatches `ProbeCompute.comp` (a solid-color fill shader,
 axes) against it every frame — confirmed, live, visible in both the Editor's
 real "Render Graph" panel and `GET /render_graph`'s JSON.
 
-### On-screen Game View compositing — investigated, confirmed NOT safe today
+### On-screen Game View compositing — safe today via `Core::RegisterProjectRenderFeature()`
 
-A Project Assembly has real, direct access to
-`Core::GetGameViewTargetThisFrame()` (public, confirmed already resolved by
-the time any provider runs, same frame). One might expect
-`ImportTexture()`-ing that same `RenderTexture*` a second time, from a
-Project Assembly's own pass, would let it write directly into the on-screen
-Game View with no compositor needed. **This is NOT safe as this engine's
-`RenderGraph` exists today, and is a confirmed, structural gap, not merely an
-untried idea**: `RenderGraph::EnsureTextureResolved()` tracks resource state
-PER `TextureHandle`, never per underlying physical resource. Two INDEPENDENT
-`ImportTexture()` calls against the exact same physical `RenderTarget`/
-`VkImage` mint TWO completely separate `PhysicalTexture` tracking slots, each
-independently seeded — `RenderGraphCompiler`'s dependency-graph construction
-(the RAW/WAW edges the barrier planner relies on) is built purely from
-`TextureHandle` IDENTITY, and no mechanism anywhere in this codebase today
-tells the compiler "this newly-imported handle is really the same physical
-resource as that OTHER already-tracked handle." Concretely: a second
-import/write against an already-imported `RenderTarget` gets NO automatic
-`VkImageMemoryBarrier` against the engine's own internal Game-View-compositing
-chain's reads/writes of the identical physical image. **Do not attempt this**
-until a future campaign adds real handle-aliasing support to
-`RenderGraphBuilder`. The honest Definition of Done for this system's
-render-graph capability is "the pass is real and visible in the Render Graph
-panel/HTTP endpoint" — never on-screen compositing.
+A Project Assembly can register a genuine, visible, on-screen render feature —
+composited into the SAME Game View / Scene View image real users see — without
+writing any manual `ImportTexture()`/handle-aliasing code of its own. This is
+`editor-core-separation-23`'s own campaign (BIG-STEP 1 of a two-part effort;
+BIG-STEP 2, an Editor "Create → Screen Post-Process Pass" menu item, is a
+separate, future, still-unstarted campaign): rather than inventing a new
+compositing mechanism, it plugs a Project Assembly in as a THIRD, additive
+"module kind" alongside `gte_plugin_abi`'s existing `IRenderFeatureModule_v2`/
+`_v3` plugins, reusing the exact same, already-proven, hazard-free
+`RenderFeatureCompositor` blend chain those plugins already use.
+
+**The API** (`src/Core/Core.h`/`.cpp`, two new public methods, thin
+pass-throughs onto `RenderFeatureCompositor::RegisterProjectFeature()`/
+`UnregisterProjectFeature()`):
+
+```cpp
+bool RegisterProjectRenderFeature(const char* debugName, RenderFeatureStage stage,
+    RenderFeatureBlendMode blendMode, std::int32_t priority, ProjectRenderFeatureCallback callback);
+
+void UnregisterProjectRenderFeature(const char* debugName);
+```
+
+`ProjectRenderFeatureCallback` (`src/Core/Plugins/ProjectRenderFeatureCallback.h`,
+a brand-new, free-standing header — never nested inside `RenderFeatureCompositor`,
+so `Core.h` can keep forward-declaring that still-incomplete class) is
+`std::function<void(rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D)>` —
+handed the current frame's real Game View/Scene View PRIVATE compositing target
+and its extent, directly, with no adapter object in between. Call it from your
+own `_Game.dll`'s `RegisterProject()` entry point, exactly once per feature.
+
+`RegisterProjectRenderFeature()` REJECTS (never silently truncates) any
+`debugName` longer than 63 bytes — the first call site in this engine building
+this descriptor's name from free-form, un-length-checked input, deliberately
+diverging from `gte_plugin_abi`'s own silent-truncation precedent.
+
+**This is a plain, non-ABI-versioned path, deliberately separate from
+`gte_plugin_abi`'s `IRenderFeatureModule_v2`/`_v3`** — a Project Assembly calls
+straight into a real, live `gte::Core&`, exactly like every other Project
+Assembly capability above; it never touches the ABI-wrapped plugin interfaces
+at all, and registering/unregistering a project render feature has zero effect
+on any loaded `_v2`/`_v3` plugin's own behavior.
+
+**Bounded GPU-state slot design.** Unlike a `gte_plugin_abi` plugin (loaded
+once, for the life of the process), a Project Assembly is registered, renamed,
+and re-registered repeatedly over one long, live Editor session (edit source,
+hot-reload, repeat) — keying its GPU state (private render target, blend-stage
+descriptor set) by its own human-typed `descriptor.name`, the way a plugin
+feature's name already is, would let an unbounded rename-cycle session
+permanently starve the shared, fixed-256-set compute descriptor pool
+(`GpuResourceFactory.cpp`'s `kMaxComputeDescriptorSets`). Instead, a Project
+Assembly feature's GPU state is keyed by a small, fixed-size, reusable slot
+index — `kMaxConcurrentProjectRenderFeatures = 16`, a named constant — drawn
+from a free-list that a live 20-cycle rename test confirmed reuses the exact
+same slot every time, indefinitely, with zero unbounded growth. `descriptor.name`
+itself is unaffected by this — it is still what a human sees everywhere
+(`GET /render_graph`, the "Render Graph" panel, every log line).
+
+**Hot-reload teardown guarantee.** `ProjectAssemblyRegistrationLedger` records
+every render feature a Project Assembly registers, and
+`UnregisterEverythingFor()` tears them all down — releasing their GPU-state
+slots back to the free list — BEFORE tearing down that same project's
+render-pass providers, on every hot-reload/unload cycle. This closes the one
+hard requirement this whole capability depends on: a `projectCallback`
+`std::function` whose captured state lives inside a Project Assembly's own
+`.dll` image would otherwise dangle the instant `FreeLibrary()` runs on it after
+an unload — the ledger's teardown always removes it first, on the GPU-idle main
+thread, strictly before that `.dll` image is ever unmapped.
+
+**`RenderPassEvent::AfterEverything` is the ONLY tag any pass this callback
+declares may use** — this is what keeps the whole on-screen compositing chain
+provably last, unconditionally, matching every other pass `RenderFeatureCompositor`
+itself declares. `DetectRenderPassEventContradictions()` confirms zero
+contradictions for this shape, live.
+
+**A registered feature is visible, and structurally distinguishable from a
+`gte_plugin_abi` plugin feature**, via `GET /render_graph`'s `render_features[]`
+array (a `"is_project_feature": true` field, sibling to the existing `"is_v3"`)
+and the Editor's "Render Graph" panel (a light-green `"[Project]"` tag next to
+the feature's row, mirroring `"[v3]"`'s own precedent).
+
+**Working example**, from `Projects/ProjectAssemblyProbe/Assets/HelloGame.cpp`'s
+own permanent `"ProjectAssemblyProbe.ScreenTint"` feature (a translucent red
+tint over the whole Game View — `priority=100` places it after every existing
+demo plugin's own `PostComposite` entries, including any `Replace`-blend one,
+so it survives to the final composited image):
+
+```cpp
+core.RegisterProjectRenderFeature(
+    "ProjectAssemblyProbe.ScreenTint", gte::RenderFeatureStage::PostComposite,
+    gte::RenderFeatureBlendMode::AlphaOver,
+    /*priority=*/100,
+    [](gte::rg::RenderGraphBuilder& builder, gte::rg::TextureHandle privateTarget, VkExtent2D /*extent*/) {
+        builder.AddRenderPass(
+            "ProjectAssemblyProbe.ScreenTint.Clear", gte::rg::PassKind::Graphics,
+            [privateTarget](gte::rg::RenderGraphBuilder::PassBuilder& pass) {
+                pass.WriteColorAttachment(privateTarget, std::array<float, 4>{ 1.0f, 0.0f, 0.0f, 0.15f });
+            },
+            [](gte::rg::PassContext&) {},
+            gte::rg::RenderPassDrawKind::DrawQuad, gte::rg::RenderPassEvent::AfterEverything);
+    });
+```
+
+**Explicitly, still BIG-STEP 1 only — there is no Editor UI menu item for this
+yet.** A Project Assembly author must call `Core::RegisterProjectRenderFeature()`
+directly from their own `RegisterProject()`; a future, separate campaign
+(BIG-STEP 2) adds a "Create → Screen Post-Process Pass" Editor menu item/scaffold
+template on top of this same, already-proven mechanism. See
+`task_manager/editor-core-separation-23/PHASE0_MASTER_STRATEGY.md`/
+`CAMPAIGN_COMPLETION_REPORT.md` for the full seven-phase writeup.
 
 ## Hot Reload
 
@@ -508,7 +594,13 @@ Full campaign writeup:
 - No resolution of every possible future render-graph capability (reading
   `SceneDepth`, multiple render targets, cross-Project-Assembly-pass
   chaining, a safe way to alias an imported handle onto an already-tracked
-  physical resource, on-screen Game View compositing — see above).
+  physical resource — this generic handle-aliasing gap remains real and
+  unresolved). **On-screen Game View compositing itself is NO LONGER an open
+  gap** — `editor-core-separation-23` solved it via a dedicated compositor
+  path, `Core::RegisterProjectRenderFeature()`, that never needs handle
+  aliasing at all; see this file's own rewritten
+  `### On-screen Game View compositing` section above for the full, current
+  picture.
 
 Full campaign writeup: `task_manager/editor-core-separation-11/PHASE0_MASTER_STRATEGY.md`,
 each `PHASEn_COMPLETION_REPORT.md` in that same folder, and
