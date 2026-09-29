@@ -173,6 +173,13 @@ private:
     void RenderContextMenu(EditorContext& ctx, const char* popupId);
     void RecordFolderDropZone(const std::string& relativePath);
 
+    // editor-core-separation-18 campaign (On-Engine Project Workflow plan,
+    // BIG-STEP 4), PHASE2 - the synthetic "[Active Project] <Name>" row +
+    // its own Create submenu (see ProjectPanel.cpp for the mutual-exclusion
+    // reasoning against RenderContextMenu()'s own BeginPopupContextWindow()).
+    void RenderActiveProjectAssetsRow(EditorContext& ctx);
+    void RescanActiveProjectAssetsIfNeeded();
+
     const std::vector<ProjectEntry>* CurrentFolderChildren() const;
 
     void SetStatus(const std::string& message, bool isError);
@@ -241,6 +248,24 @@ private:
     std::string m_statusMessage;
     bool m_statusIsError = false;
     std::chrono::steady_clock::time_point m_statusSetTime{};
+
+    // editor-core-separation-18 campaign (On-Engine Project Workflow plan,
+    // BIG-STEP 4), PHASE2 - one-level (non-recursive), display-only listing
+    // of the active project's own Assets/ folder - LDD-CA3
+    // (PHASE0_MASTER_STRATEGY.md): these entries are NEVER independently
+    // selectable/navigable/drag-droppable, unlike m_tree above. Refreshed on
+    // the SAME throttle as m_tree (see EnsureRootAndMaybeRescan()).
+    std::vector<std::string> m_activeProjectAssetFileNames;
+    std::string m_activeProjectNameLastScanned; // "" if none - detects a DIFFERENT project becoming active between rescans, forcing an immediate refresh rather than waiting a full throttle interval.
+
+    // New private member, ProjectPanel.h - reset to false at the TOP of
+    // every Build() call, set true (for the REST of this same frame only)
+    // the instant RenderActiveProjectAssetsRow()'s own popup opens or is
+    // already open. Deterministic, mechanical mutual exclusion - never
+    // relies on hoping ImGui's own internal per-widget click arbitration
+    // happens to agree between an item-scoped and a window-scoped popup
+    // check.
+    bool m_suppressPaneContextMenuThisFrame = false;
 };
 
 } // namespace gte

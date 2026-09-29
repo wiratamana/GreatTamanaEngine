@@ -10,6 +10,19 @@
 
 namespace gte {
 
+// editor-core-separation-18 campaign (On-Engine Project Workflow plan,
+// BIG-STEP 4) - forward declaration only, NOT a full #include of
+// Core/EditorCapabilities.h (that header pulls in Logging.h/<filesystem>/
+// etc., and EditorContext.h is included by nearly every panel in this
+// codebase - see PHASE0_MASTER_STRATEGY.md's own risk register). Legal: a
+// plain C++11 scoped enum with the implicit default `int` underlying type
+// is used identically on both this forward declaration and the real
+// definition (Core/EditorCapabilities.h) - the two declarations are
+// therefore compatible, confirmed by the C++ standard's own rule that an
+// opaque-enum-declaration and its later definition must agree on the
+// (here, both-implicit, both-int) underlying type.
+enum class AssetScaffoldKind;
+
 // Shared ImGui drag-and-drop payload type identifier for "a file path
 // dragged out of the Project panel" (see Panels/ProjectPanel.cpp's
 // RenderRightPaneEntry() - the drag SOURCE - and Panels/HierarchyPanel.cpp/
@@ -265,6 +278,27 @@ struct EditorContext {
     // window is currently open. Same open/close convention as
     // newProjectWindowOpen immediately above.
     bool openProjectWindowOpen = false;
+
+    // editor-core-separation-18 campaign (On-Engine Project Workflow plan,
+    // BIG-STEP 4), PHASE2 - true whenever CreateAssetWindow.h's floating
+    // window (PHASE3) is currently open. Set by ProjectPanel's own new
+    // "[Active Project] <Name>" row's Create submenu (Panels/ProjectPanel.cpp);
+    // read/cleared the same open/close way as newProjectWindowOpen/
+    // openProjectWindowOpen above.
+    bool createAssetWindowOpen = false;
+
+    // Which AssetScaffoldKind CreateAssetWindow should scaffold - only
+    // meaningful while createAssetWindowOpen is true; written at the same time
+    // as createAssetWindowOpen, immediately before it's set true, never read
+    // beforehand. Defaulted via static_cast<AssetScaffoldKind>(0) rather than
+    // the enumerator name RenderPass itself, because EditorContext.h only
+    // FORWARD-declares AssetScaffoldKind above (an incomplete type has no
+    // visible enumerators yet) - 0 is correct PROVIDED RenderPass really is
+    // declared first in Core/EditorCapabilities.h's own
+    // `enum class AssetScaffoldKind { RenderPass, ComputeShader, ShaderPair };`
+    // (confirmed - RenderPass is listed first, so its implicit value is 0). If
+    // that enum's ordering is ever changed, this literal must be updated too.
+    AssetScaffoldKind createAssetWindowPendingKind = static_cast<AssetScaffoldKind>(0); // RenderPass
 
     // Short-lived, colored status feedback shared by every "Project"-menu
     // action this whole 5-file plan adds (New Project this campaign; Open

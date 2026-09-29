@@ -6,6 +6,14 @@
 #include "../ImGuiUniqueId.h"
 #include "../MemoryPanelData.h" // FormatBytes() - reused for the file-size tooltip below.
 
+// editor-core-separation-18 campaign (On-Engine Project Workflow plan,
+// BIG-STEP 4), PHASE2 - the synthetic "[Active Project] <Name>" row's own
+// data source + the AssetScaffoldKind enum's REAL definition (only this
+// .cpp needs the full Core/EditorCapabilities.h - see EditorContext.h's own
+// forward-declare comment for why the header only forward-declares it).
+#include "../ActiveProjectAssemblyState.h"
+#include "../../Core/EditorCapabilities.h"
+
 #include <imgui.h>
 
 #include <algorithm>
@@ -70,8 +78,41 @@ void ProjectPanel::EnsureRootAndMaybeRescan()
 
     ReconcileCurrentFolderAfterRescan();
 
+    // editor-core-separation-18 campaign, PHASE2 - added to the SAME
+    // throttled rescan; completely independent filesystem root from
+    // m_rootPath above (LDD-PW3, PROJECTWORKFLOW_BIGSTEP_01...txt), never
+    // touches m_tree/m_rootExists/m_assetDatabase.
+    RescanActiveProjectAssetsIfNeeded();
+
     m_lastScanTime = now;
     m_needsRescan = false;
+}
+
+// editor-core-separation-18 campaign (On-Engine Project Workflow plan,
+// BIG-STEP 4), PHASE2 - refreshes m_activeProjectAssetFileNames/
+// m_activeProjectNameLastScanned from the CURRENTLY active Project
+// Assembly's own Assets/ folder (ActiveProjectAssemblyState::GetActive()) -
+// a completely independent filesystem root from m_rootPath (LDD-PW3), never
+// touches m_tree/m_rootExists/m_assetDatabase. Called from
+// EnsureRootAndMaybeRescan() on the SAME 500ms throttle as the rest of this
+// panel's own state (see that method's own call site above).
+void ProjectPanel::RescanActiveProjectAssetsIfNeeded()
+{
+    const ActiveProjectAssemblyInfo active = ActiveProjectAssemblyState::Instance().GetActive();
+    if (!active.hasActiveProject) {
+        m_activeProjectAssetFileNames.clear();
+        m_activeProjectNameLastScanned.clear();
+        return;
+    }
+    m_activeProjectAssetFileNames.clear();
+    std::error_code iterationError;
+    for (const auto& entry : std::filesystem::directory_iterator(active.assetsDirectory, iterationError)) {
+        if (entry.is_regular_file()) {
+            m_activeProjectAssetFileNames.push_back(PathToUtf8(entry.path().filename()));
+        }
+    }
+    std::sort(m_activeProjectAssetFileNames.begin(), m_activeProjectAssetFileNames.end());
+    m_activeProjectNameLastScanned = active.name;
 }
 
 void ProjectPanel::ReconcileCurrentFolderAfterRescan()
@@ -170,8 +211,79 @@ void ProjectPanel::RenderLeftPaneFolder(EditorContext& ctx, int siblingIndex, co
     // handles it.
 }
 
+// editor-core-separation-18 campaign (On-Engine Project Workflow plan,
+// BIG-STEP 4), PHASE2 - the synthetic "[Active Project] <Name>" row,
+// rendered as a SIBLING to the existing "Project" root node (see
+// RenderLeftPane() below) - a no-op (returns immediately) whenever no
+// Project Assembly is currently active (Definition of Done item 1,
+// PHASE0_MASTER_STRATEGY.md).
+void ProjectPanel::RenderActiveProjectAssetsRow(EditorContext& ctx)
+{
+    if (m_activeProjectNameLastScanned.empty()) {
+        return; // No active project right now - the whole row is absent.
+    }
+
+    const std::string label = "[Active Project] " + m_activeProjectNameLastScanned;
+    ImGui::TreeNodeEx(label.c_str(),
+        ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow);
+
+    // Item-scoped popup, tied to the tree node widget rendered IMMEDIATELY
+    // above - fires ONLY when THIS SPECIFIC row was right-clicked, never
+    // from elsewhere in the pane.
+    //
+    // Mechanically re-verified against this repo's own vendored ImGui
+    // source (third_party/imgui/imgui.cpp) rather than assumed:
+    // BeginPopupContextItem()'s trailing `return BeginPopupEx(id, ...)` call
+    // is UNCONDITIONAL - it does not merely fire on the frame the popup
+    // first opens. BeginPopupEx() renders the popup on EVERY frame this
+    // exact call site executes while `id` is still on ImGui's own internal
+    // open-popup stack, regardless of whether THIS frame's own
+    // IsItemHovered()/IsMouseReleased() trigger condition (which only gates
+    // the earlier OpenPopupEx() call) is true. Since
+    // RenderActiveProjectAssetsRow() itself runs unconditionally every frame
+    // the row exists, the `if` branch below is therefore already entered on
+    // EVERY frame this popup is open - including while a nested "Create"
+    // submenu is open on top of it - not just the single frame it was first
+    // triggered. A separate `else if (ImGui::IsPopupOpen(...))` fallback is
+    // therefore unreachable dead code and is deliberately NOT used here.
+    if (ImGui::BeginPopupContextItem("ProjectAssemblySourceContextMenu")) {
+        // Set on every frame this popup renders (see above) - closes the
+        // double-popup hazard deterministically for the FULL lifetime of
+        // this popup, not just its opening frame.
+        m_suppressPaneContextMenuThisFrame = true;
+        if (ImGui::BeginMenu("Create")) {
+            if (ImGui::MenuItem("Render Pass...")) {
+                ctx.createAssetWindowPendingKind = AssetScaffoldKind::RenderPass;
+                ctx.createAssetWindowOpen = true;
+            }
+            if (ImGui::MenuItem("Compute Shader...")) {
+                ctx.createAssetWindowPendingKind = AssetScaffoldKind::ComputeShader;
+                ctx.createAssetWindowOpen = true;
+            }
+            if (ImGui::MenuItem("Vertex/Fragment Shader Pair...")) {
+                ctx.createAssetWindowPendingKind = AssetScaffoldKind::ShaderPair;
+                ctx.createAssetWindowOpen = true;
+            }
+            ImGui::EndMenu();
+        }
+        ImGui::EndPopup();
+    }
+
+    ImGui::TreePush("ProjectAssemblySourceChildren");
+    for (const std::string& fileName : m_activeProjectAssetFileNames) {
+        ImGui::BulletText("%s", fileName.c_str()); // display-only (LDD-CA3) - no Selectable/click/drag handling at all.
+    }
+    ImGui::TreePop();
+
+    ImGui::TreePop(); // matches the outer TreeNodeEx() above (ImGuiTreeNodeFlags_DefaultOpen means this is always "open" and always needs its matching TreePop()).
+}
+
 void ProjectPanel::RenderLeftPane(EditorContext& ctx)
 {
+    // editor-core-separation-18 campaign, PHASE2 - rendered BEFORE the
+    // existing "Project" root node below; a no-op row (returns immediately)
+    // when no project is active.
+    RenderActiveProjectAssetsRow(ctx);
     ImGuiTreeNodeFlags rootFlags
         = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_DefaultOpen;
     if (m_currentFolderRelativePath.empty()) {
@@ -353,6 +465,9 @@ void ProjectPanel::DeleteSelected(EditorContext& ctx)
 
 void ProjectPanel::RenderContextMenu(EditorContext& ctx, const char* popupId)
 {
+    if (m_suppressPaneContextMenuThisFrame) {
+        return; // editor-core-separation-18 campaign, PHASE2 - see RenderActiveProjectAssetsRow()'s own comment for why.
+    }
     if (ImGui::BeginPopupContextWindow(popupId)) {
         if (ImGui::MenuItem("Refresh")) {
             m_needsRescan = true;
@@ -372,6 +487,7 @@ void ProjectPanel::RenderContextMenu(EditorContext& ctx, const char* popupId)
 void ProjectPanel::Build(EditorContext& ctx)
 {
     EnsureRootAndMaybeRescan();
+    m_suppressPaneContextMenuThisFrame = false; // editor-core-separation-18 campaign, PHASE2 - reset once, at the very top, before either pane renders this frame.
 
     m_panelVisible = ImGui::Begin("Project");
     if (m_panelVisible) {
