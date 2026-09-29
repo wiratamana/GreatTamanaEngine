@@ -475,14 +475,88 @@ permanent, standalone reference on how to correctly gate any FUTURE pass that by
 `RenderPipeline::DeclareOnePhase()` flush loop, and
 `task_manager/editor-core-separation-21/CAMPAIGN_COMPLETION_REPORT.md` for the full six-phase writeup.
 
+A follow-up bug-fix campaign, `editor-core-separation-22` ("The Engine Is STILL Lying", seven phases,
+`task_manager/editor-core-separation-22/PHASE0_MASTER_STRATEGY.md`, `CAMPAIGN_COMPLETION_REPORT.md`),
+fixed THREE MORE, DIFFERENT confirmed bugs that `editor-core-separation-21`'s own detector structurally
+could not see: (1) the "Render Graph" panel's own live pass table and its "Disabled Built-In Passes"
+section presented two different, unexplained cardinalities for the same pass name (e.g. two
+`"RenderOpaque"` rows live, one row once disabled) - a UI/data-model mismatch, not a toggle-logic bug;
+(2) `DemoRenderFeaturePlugin_Clear`/`DemoRenderFeatureSecondPlugin_Clear` appeared as real, enabled rows
+in the "Render Graph" panel but produced zero visible nodes anywhere in the Frame Debugger's own captured
+event tree; (3) disabling `"DrawSkyBackground"` did not stop the sky from being visible in either the
+Frame Debugger's own captured preview OR the live Game View - a DIFFERENT mechanism than the
+`AtmosphereAerialPerspectiveCompositePass` bug `editor-core-separation-21` fixed. **Root cause #3, fixed
+first (PHASE1)**: `"DrawSkyBackground"`'s own provider used to build its `recordSkyBackground` callback
+and `Publish()` it to the blackboard UNCONDITIONALLY, before any toggle check - a new, generalized,
+reusable helper, `src/Renderer/RenderGraph/RenderPassToggleGuard.h`'s
+`ShouldDeclareBuiltInPassThisFrame()`, is now the mandated pattern for gating ANY side effect (a
+blackboard publish, a cached callback, a member-variable mutation) a provider produces BEFORE that side
+effect happens - not merely before its own `RenderPassDesc` reaches the graph. **PHASE2's systemic audit**
+(22 ledger rows, zero code change) found exactly one further Confirmed-Lie, the INVERSE shape of a
+side-channel leak: `"GpuDrivenBatches"`'s per-batch entity-exclusion set used to be populated
+UNCONDITIONALLY at collection time, before that batch's own `"<batch> IndirectDraw"` pass had even had
+its own toggle checked - disabling one batch's indirect-draw pass made its own entities silently,
+completely invisible (excluded from the normal path, undrawn by the disabled indirect path). **PHASE3**
+fixed this via a new pure helper, `src/Core/GpuDrivenBatchEntityExclusionLogic.h`, deferring exclusion-set
+population until each batch's own toggle state is resolved. **Root cause #2, fixed by PHASE4**:
+`RenderPassCategory::Debug` was being misused by `PluginRenderPassBuilderAdapter.cpp` (and, latently,
+`GBufferValidation.cpp`/`ComputeBlurValidation.cpp`) to mean "a real, optional feature pass" when its OWN
+documented contract actually means "Frame-Debugger-internal replay scaffolding, never a real tree
+citizen" - PHASE4 added a new, correctly-scoped `RenderPassCategory::FrameDebuggerInternal` enumerator for
+the scaffolding meaning, restored `Debug`'s own original meaning (a real, visible feature pass), and gave
+`BuildRealFrameDebuggerSnapshot()` a generic, structural "Other Render Passes" final sweep bucket - any
+non-culled, non-`FrameDebuggerInternal`, non-`SceneView` survivor left unclaimed by every earlier bucket
+(the "nothing survives silently dropped" guarantee this campaign's own Clause B, below, now also enforces
+automatically) is swept into this bucket, of either `PassKind`, at any index - closing the exact gap that
+let `DemoRenderFeaturePlugin_Clear`'s `RenderPassEvent::AfterEverything` tier position it after every
+surviving compute pass, past both the view-region walk and the post-GameView compute loop, invisible to
+either. **Root cause #1, fixed by PHASE5**: `src/Renderer/RenderGraph/RenderGraphMetadata.h`'s new
+`RenderGraphGroupedPassMetadata`/`GroupPassMetadataByName()` reworks the "Render Graph" panel's live pass
+table to render exactly ONE row per unique pass name per regime, annotated by a `viewLabel` badge (e.g.
+`"Game+Scene"`/`"Game only"`/`"Scene only"`) built from that name's own NON-CULLED instances only (a pass
+surviving in one view but culled in the other reads as that surviving view only, never invented as
+"both"), summed draws/triangles, a per-view GPU-timing breakdown, and a click-to-expand
+(`ImGui::TreeNodeEx()`) raw per-instance sub-row for anyone who needs the old, ungrouped detail - matching
+the "Disabled Built-In Passes" section's own one-row-per-name cardinality for good. **PHASE6 made the
+extended iron rule self-enforcing, permanently, in code, alongside `editor-core-separation-21`'s own
+UNTOUCHED, still-passing Clause A detector**: Clause B ("a pass that genuinely ran, non-culled, must show
+somewhere in the Frame Debugger tree") is enforced by
+`src/Editor/FrameDebuggerCoverageChecker.h`/`.cpp`+`FrameDebuggerCoverageGuard.h`/`.cpp`
+(`GTE_LOG_ERROR("FrameDebuggerCoverage", ...)`, `GET /get_logs?category=FrameDebuggerCoverage`); Clause C
+("a disabled pass's own blackboard-published side effect must never still be visible") is enforced by
+`src/Editor/FrameDebuggerSideChannelChecker.h`/`.cpp`+`FrameDebuggerSideChannelGuard.h`/`.cpp`
+(`GTE_LOG_ERROR("FrameDebuggerSideChannel", ...)`, `GET /get_logs?category=FrameDebuggerSideChannel`) via
+a deliberately narrow, hand-curated allowlist (`KnownRiskBlackboardKeyRules()`, 4 entries today -
+`"Atmosphere.GameSkyBackgroundCallback"`/`"GpuSkinning.OutputBuffers"`/
+`"Atmosphere.CompositedOutput.Game"`/`"...Scene"`) of blackboard keys known to carry this exact risk shape,
+each gated by exactly one named toggle - closing this gap required promoting `Core::BuildFrame()`'s own
+offscreen `RenderPassBlackboard` from a stack-local variable to a real `Core` member
+(`m_offscreenBlackboardThisFrame`, `Core::GetOffscreenBlackboardForFrameDebugger()`) so it survives long
+enough for `FrameDebuggerPanel::TriggerCapture()` to inspect it, plus a new, presence-only
+`RenderPassBlackboard::WasPublishedThisFrame(RenderPassId)` accessor. **Any future new blackboard key with
+this exact risk shape (a provider Publishes a value some OTHER, independently-toggled pass reads back to
+reproduce a visual/behavioral effect) MUST be manually added to `KnownRiskBlackboardKeyRules()`** - this
+is a permanent, honestly-documented, curated-allowlist limitation, not a fully general detector. Verified
+with a full clean build (611/611 steps, zero errors), a full `ctest` regression pass (2036 tests, 100% of
+executed tests passing, 8 legitimate environment-gated skips - up from `editor-core-separation-21`'s own
+2004 baseline), and a final, live, HTTP-driven, end-to-end verification reproducing all three original
+screenshot scenarios one more time against the fully rebuilt binary, each now proven fixed, with every
+detector's own log category staying empty throughout correct-behavior checks and firing exactly once when
+Root Cause #3 was deliberately, temporarily reintroduced then fully reverted (confirmed via `git status`
+showing zero net diff). See `docs/conventions/render-pass-side-channel-honesty.md` for the permanent,
+standalone convention this campaign adds (narrower, and layered on top of
+`docs/conventions/render-pass-toggle-honesty.md` - never a replacement for it), and
+`task_manager/editor-core-separation-22/CAMPAIGN_COMPLETION_REPORT.md` for the full seven-phase writeup.
+
 Full history: `task_manager/render-pass-1/PHASE0_MASTER_STRATEGY.md`,
 `task_manager/render-pass-2/PHASE0_MASTER_STRATEGY.md`,
 `task_manager/render-pass-3/PHASE0_MASTER_STRATEGY.md`,
 `task_manager/render-pass-4/PHASE0_MASTER_STRATEGY.md`,
 `task_manager/render-pass-6/PHASE0_MASTER_STRATEGY.md`,
 `task_manager/render-pass-7/PHASE0_MASTER_STRATEGY.md`,
-`task_manager/editor-core-separation-20/PHASE0_MASTER_STRATEGY.md`, and
-`task_manager/editor-core-separation-21/PHASE0_MASTER_STRATEGY.md`, and each
+`task_manager/editor-core-separation-20/PHASE0_MASTER_STRATEGY.md`,
+`task_manager/editor-core-separation-21/PHASE0_MASTER_STRATEGY.md`, and
+`task_manager/editor-core-separation-22/PHASE0_MASTER_STRATEGY.md`, and each
 `PHASEn_COMPLETION_REPORT.md`/`CAMPAIGN_COMPLETION_REPORT.md` in those same
 folders.
 

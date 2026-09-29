@@ -122,6 +122,13 @@ than subsystem-specific):
   bypassing the generic `RenderPipeline::DeclareOnePhase()` flush loop must
   consult `RenderPassToggleRegistry` itself, and the permanent, automatic
   `RenderPassHonestyChecker`/`RenderPassHonestyGuard` mismatch detector.
+- **[Render Pass Side-Channel Honesty](conventions/render-pass-side-channel-honesty.md)** —
+  a narrower layer on top of the above: gating every side effect a
+  `RenderPipeline` provider produces (not just its own `RenderPassDesc`), the
+  `RenderPassCategory::Debug` vs `FrameDebuggerInternal` distinction, the
+  "Other Render Passes" structural fallback bucket, and the two additional
+  permanent, automatic `FrameDebuggerCoverageChecker`/`FrameDebuggerSideChannelChecker`
+  detectors (Clause B/Clause C).
 
 ## Changelog
 
