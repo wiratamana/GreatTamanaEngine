@@ -60,7 +60,12 @@ std::vector<RenderPassToggleState> RenderPassToggleRegistry::ListAll() const
 
 bool RenderPassToggleRegistry::IsDenyListed(const std::string& name) noexcept
 {
-    return name == "Present";
+    // editor-core-separation-20 campaign, PHASE1 - "ClearViewTarget" added:
+    // the ONE guaranteed clear of the Game/Scene View target every frame -
+    // disabling it would defeat the entire fix this pass exists for (see
+    // task_manager/editor-core-separation-20/PHASE0_MASTER_STRATEGY.md's
+    // Root Cause #1) with no in-process recovery, exactly like "Present".
+    return name == "Present" || name == "ClearViewTarget";
 }
 
 } // namespace gte::rg

@@ -548,6 +548,77 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             frame.blackboard.Publish<AtmosphereViewLutHandles>(viewLutKey, viewLuts);
         });
 
+    // editor-core-separation-20 campaign, PHASE1 - "ClearViewTarget" -
+    // ProviderScope::PerActiveView, BeforeEverything. The ONE guaranteed clear
+    // of each active view's color+depth render target, decoupled from whether
+    // "RenderOpaque" itself is enabled this frame - see
+    // task_manager/editor-core-separation-20/PHASE1_GUARANTEED_VIEW_TARGET_CLEAR.md
+    // for the full "why" (a confirmed, live bug: disabling "RenderOpaque" via
+    // the "Render Graph" panel/HTTP used to leave this exact resource
+    // completely uncleared for the whole frame, since "DrawSkyBackground"
+    // deliberately never clears either - relying on RenderOpaque's own EQUAL-
+    // depth-test setup instead). RenderPassEvent::BeforeEverything makes
+    // RenderGraphCompiler::Compile()'s own effective-order sort
+    // (render-pass-4 campaign) place this pass before every other pass
+    // touching the same resource, regardless of provider registration order -
+    // this is genuinely load-bearing here, not just documentation. Permanently
+    // denylisted (RenderPassToggleRegistry::IsDenyListed(), updated below) -
+    // can never be turned off via the panel/HTTP, exactly like "Present": a
+    // view with no defined clear has no safe fallback content to show.
+    m_offscreenRenderPipeline.Register("ClearViewTarget", rg::ProviderScope::PerActiveView,
+        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
+            const RenderPassViewData* viewData = FindViewData(frame.currentView);
+            if (viewData == nullptr) {
+                return;
+            }
+
+            const rg::TextureHandle viewTarget = viewData->colorTarget;
+
+            // CRITICAL - not decorative. RenderGraphCompiler::Compile() only
+            // keeps a declared pass alive if its own write is reachable
+            // (directly or transitively) from this frame's finalOutputs/
+            // finalVolumeTextureOutputs root set (RenderGraphCompiler.h's own
+            // "Step 2: backward reachability from finalOutputs" doc comment) -
+            // an imported/externally-owned resource (like this view's own
+            // persistent RenderTexture) gets NO automatic exemption from that
+            // culling merely because it is externally visible outside the
+            // graph. Nothing else in this file ever adds `viewTarget` itself to
+            // frame.finalTextureOutputs (only DERIVED handles - the Atmosphere
+            // LUT outputs, the composited output - are ever added as roots),
+            // and the only pass that currently reads `viewTarget` back is
+            // "AtmosphereComposite" - so whenever that pass (or every pass,
+            // this campaign's own primary repro case) is disabled/absent this
+            // frame, NOTHING keeps this pass's own write alive without the line
+            // below. This provider is the one pass guaranteed to run every
+            // frame for every active view (deny-listed, PerActiveView), so it
+            // is the correct, single place to make this guarantee - every OTHER
+            // real writer of viewTarget (RenderOpaque/DrawSkyBackground/
+            // RenderTransparent, whichever of them are enabled this frame) then
+            // survives culling too, via the ordinary write-after-write
+            // dependency chain back to this pass's own write. This exact
+            // "multiple writers to one resource that is itself listed in
+            // finalOutputs" shape is an already-tested, proven-safe pattern in
+            // this codebase - see RenderGraphCompilerTests.cpp's own
+            // MultipleWritersToSameResourcePreserveWriteAfterWriteOrder test.
+            frame.finalTextureOutputs.push_back(viewTarget);
+
+            rg::RenderPassDesc desc;
+            desc.debugName = "ClearViewTarget";
+            desc.kind = rg::PassKind::Graphics;
+            desc.order = rg::RenderPassEvent::BeforeEverything;
+            desc.view = frame.currentView;
+            desc.legacyCategory = rg::RenderPassCategory::General;
+            desc.setup = [viewTarget](rg::RenderGraphBuilder::PassBuilder& pass) {
+                pass.WriteColorAttachment(viewTarget, kGameClearColor);
+                pass.WriteDepthStencilAttachment(viewTarget, kGameClearDepth);
+            };
+            // Deliberately NO desc.execute - RenderGraph::ExecuteCompiledGraph()
+            // already tolerates a null execute (`if (pass.execute) { ... }`,
+            // RenderGraph.cpp) - this pass's entire job is the load-op CLEAR its
+            // attachment writes above request; it issues no draw call of its own.
+            out.push_back(std::move(desc));
+        });
+
     // "RenderOpaque" - ProviderScope::PerActiveView.
     m_offscreenRenderPipeline.Register("RenderOpaque", rg::ProviderScope::PerActiveView,
         [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
@@ -574,8 +645,15 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             desc.view = frame.currentView;
             desc.legacyCategory = rg::RenderPassCategory::General;
             desc.setup = [viewTarget, gpuSkinningBuffers](rg::RenderGraphBuilder::PassBuilder& pass) {
-                pass.WriteColorAttachment(viewTarget, kGameClearColor);
-                pass.WriteDepthStencilAttachment(viewTarget, kGameClearDepth);
+                // editor-core-separation-20 campaign, PHASE1 - no clear value here
+                // anymore: "ClearViewTarget" (registered above, BeforeEverything, deny-
+                // listed) now owns the ONE guaranteed clear of this exact resource,
+                // every frame, regardless of whether THIS pass is itself enabled. LOAD
+                // is therefore correct and intentional here, mirroring
+                // "DrawSkyBackground"'s own pre-existing identical choice against the
+                // SAME resource, just below.
+                pass.WriteColorAttachment(viewTarget);
+                pass.WriteDepthStencilAttachment(viewTarget);
                 DeclareGpuSkinningReads(pass, gpuSkinningBuffers);
             };
             desc.execute = [this, aspectWidthOverHeight, isGameView, viewProjectionOverride, frameDebuggerCapture](

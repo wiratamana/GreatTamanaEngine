@@ -84,9 +84,12 @@ public:
     std::vector<RenderPassToggleState> ListAll() const;
 
     // True for a small, fixed, permanent set of pass names that can NEVER be
-    // disabled via SetEnabled() - currently: "Present" only (the pass that
-    // finally writes the swapchain image; disabling it leaves the Editor
-    // rendering nothing to the screen with no in-process recovery). A plain
+    // disabled via SetEnabled() - currently: "Present" (the pass that finally
+    // writes the swapchain image; disabling it leaves the Editor rendering
+    // nothing to the screen with no in-process recovery) and, since the
+    // editor-core-separation-20 campaign's PHASE1, "ClearViewTarget" (the ONE
+    // guaranteed clear of the Game/Scene View render target every frame - a
+    // view with no defined clear has no safe fallback content to show). A plain
     // static function (not a data member) so it has zero interaction with
     // any registry instance's own state - deliberately extensible (add
     // another `name ==` comparison here later) without ever needing to
