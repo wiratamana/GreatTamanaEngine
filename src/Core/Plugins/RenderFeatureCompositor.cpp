@@ -232,6 +232,19 @@ RenderFeatureCompositor::Entry* RenderFeatureCompositor::FindEntryByName(const s
     return nullptr;
 }
 
+// editor-core-separation-23 campaign, PHASE5
+// (PHASE5_ORDERING_SAFETY_NET_AND_LIFETIME_CONFIRMATION.md, Step 3.2) - see
+// this method's own doc comment (RenderFeatureCompositor.h) for the full
+// "why". A cheap, debug-build-only check - assert() is a true no-op in a
+// release (NDEBUG) build.
+void RenderFeatureCompositor::AssertCalledFromMainThread() const
+{
+    assert(std::this_thread::get_id() == m_mainThreadId
+        && "RenderFeatureCompositor::RegisterProjectFeature()/UnregisterProjectFeature() are documented "
+           "main-thread-only contracts (exactly like ContributeRenderGraphPasses() itself) - this call came from a "
+           "different thread.");
+}
+
 // editor-core-separation-8 campaign, PHASE2 - host-side enable/disable
 // override. See RenderFeatureCompositor.h's own doc comment for the full
 // contract.
@@ -281,6 +294,8 @@ bool RenderFeatureCompositor::SetFeaturePriority(const std::string& name, std::i
 bool RenderFeatureCompositor::RegisterProjectFeature(
     const GtePluginRenderFeatureDescriptor& descriptor, ProjectRenderFeatureCallback callback)
 {
+    AssertCalledFromMainThread();
+
     if (m_freeProjectFeatureSlots.empty()) {
         GTE_LOG_WARNING("RenderFeatureCompositor",
             std::string("RegisterProjectFeature('") + descriptor.name + "') refused - every one of the "
@@ -347,6 +362,8 @@ bool RenderFeatureCompositor::RegisterProjectFeature(
 // comment (RenderFeatureCompositor.h) for the full contract.
 bool RenderFeatureCompositor::UnregisterProjectFeature(const char* name)
 {
+    AssertCalledFromMainThread();
+
     if (name == nullptr) {
         return false;
     }

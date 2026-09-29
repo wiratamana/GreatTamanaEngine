@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -302,6 +303,26 @@ private:
     // mutate through it).
     Entry* FindEntryByName(const std::string& name);
 
+    // editor-core-separation-23 campaign, PHASE5
+    // (PHASE5_ORDERING_SAFETY_NET_AND_LIFETIME_CONFIRMATION.md, Step 3.2) - a
+    // real, cheap, debug-build-only main-thread-affinity guard for
+    // RegisterProjectFeature()/UnregisterProjectFeature() below (both are
+    // documented, convention-only, main-thread-only contracts, exactly like
+    // ContributeRenderGraphPasses() itself - see this class's own header
+    // comment history) - catches a future violation immediately and loudly
+    // via assert(), instead of relying on convention/comments alone. No
+    // reusable engine-wide thread-affinity helper exists anywhere in this
+    // codebase (confirmed via a fresh, whole-src/ search_in_dir sweep before
+    // writing this) and nothing else in this engine needs one yet, so this
+    // stays the SMALLEST possible mechanism, scoped to this one class alone
+    // (an ask_questions checkpoint this phase's own file called out
+    // explicitly - resolved this way, left to implementer judgment). Calls
+    // assert() directly - already a true no-op in a release (NDEBUG) build,
+    // matching every other assert() call site in this codebase (none of them
+    // are separately wrapped in an explicit #ifndef NDEBUG either), so no
+    // extra preprocessor guard is needed to keep this debug-build-only.
+    void AssertCalledFromMainThread() const;
+
     PrivateTargetState& EnsurePrivateTargetState(const char* internedName, VkExtent2D extent);
     BlendStageState& EnsureBlendStageDescriptorOnly(const char* internedName);
     BlendStageState& EnsureBlendStageState(const char* internedName, VkExtent2D extent);
@@ -323,6 +344,13 @@ private:
     Core& m_core;
     Renderer& m_renderer;
     VkDevice m_device = VK_NULL_HANDLE;
+
+    // editor-core-separation-23 campaign, PHASE5 - captured once, here, at
+    // construction time (this object is always constructed on the engine's
+    // own main thread, exactly like every other Core-owned orchestrator -
+    // Core::RegisterBuiltinCapabilityOrchestrators(), called from Core's own
+    // constructor). Compared against by AssertCalledFromMainThread() above.
+    const std::thread::id m_mainThreadId = std::this_thread::get_id();
 
     // editor-core-separation-9 campaign, PHASE2 - the ONE
     // PluginRenderOperationRegistry instance `Core` owns

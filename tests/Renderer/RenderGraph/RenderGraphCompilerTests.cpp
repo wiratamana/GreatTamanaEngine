@@ -698,6 +698,29 @@ TEST(RenderGraphCompilerTest, SameEventTierNeverProducesAContradiction)
     EXPECT_TRUE(contradictions.empty());
 }
 
+TEST(RenderGraphCompilerTest, ProjectRenderFeatureStyleAfterEverythingPassesNeverContradict)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle privateTarget = builder.CreateTexture("ProjectFeatureSlot0_Game_Private", MakeTextureDesc());
+
+    builder.AddRenderPass(
+        "MyProject.ScreenTint.Clear", PassKind::Graphics,
+        [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(privateTarget); },
+        NoOpExecute, RenderPassDrawKind::DrawQuad, RenderPassEvent::AfterEverything); // index 0 - the project's own pass.
+    builder.AddRenderPass(
+        "ProjectFeatureSlot0_Game_Blend", PassKind::Graphics,
+        [&](RenderGraphBuilder::PassBuilder& pass) { pass.ReadTexture(privateTarget); },
+        NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::AfterEverything); // index 1 - stands in for DispatchBlend().
+
+    CompiledGraphInput input = builder.Finish();
+    const std::int32_t identity[] = { 0, 1 };
+
+    const std::vector<RenderPassEventContradiction> contradictions =
+        DetectRenderPassEventContradictions(input, identity);
+
+    EXPECT_TRUE(contradictions.empty());
+}
+
 // Confirms 3.2's new Compile() wiring doesn't fire a false positive against
 // a graph that was always fine, and that executionOrder/isCulled are
 // unchanged from what DiamondDependencyOrdersCorrectlyWithDeterministicSiblingOrder
