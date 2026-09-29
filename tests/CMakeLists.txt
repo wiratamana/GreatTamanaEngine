@@ -2257,6 +2257,7 @@ set(GTE_TEST_SOURCES
     Renderer/Atmosphere/AtmosphereMathTests.cpp
     Renderer/Atmosphere/AtmosphereAerialPerspectiveCompositeMathTests.cpp
     Renderer/Atmosphere/DirectionalLightResolverTests.cpp
+    Renderer/Atmosphere/AtmospherePassToggleLogicTests.cpp
     Renderer/RenderGraph/RenderGraphTypesTests.cpp
     Renderer/RenderGraph/RenderGraphBuilderTests.cpp
     Renderer/RenderGraph/RenderPassTests.cpp

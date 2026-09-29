@@ -8,6 +8,8 @@
 #include "../RenderGraph/RenderGraph.h"
 #include "../RenderGraph/RenderPassGroupRegistry.h"
 #include "AtmosphereRenderPassTags.h"
+#include "AtmospherePassToggleLogic.h"
+#include "../RenderGraph/RenderPassToggleRegistry.h"
 #include "../Vulkan/DescriptorSetLayoutBuilder.h"
 
 #include <algorithm>
@@ -217,8 +219,15 @@ void AtmosphereLutRenderer::EnsureTransmittanceLutInitialized(Renderer& renderer
 }
 
 rg::TextureHandle AtmosphereLutRenderer::AddTransmittanceLutPass(
-    rg::RenderGraphBuilder& builder, Renderer& renderer, const AtmosphereParametersGpu& params)
+    rg::RenderGraphBuilder& builder, Renderer& renderer, const AtmosphereParametersGpu& params,
+    rg::RenderPassToggleRegistry* toggleRegistry)
 {
+    const bool passEnabledThisFrame =
+        toggleRegistry == nullptr || toggleRegistry->NoteDeclaredAndCheckEnabled("AtmosphereTransmittanceLutPass");
+    if (!ShouldDeclareAtmospherePassThisFrame(passEnabledThisFrame, /*allUpstreamHandlesValid=*/true)) {
+        return rg::TextureHandle{};
+    }
+
     EnsureTransmittanceLutInitialized(renderer, params);
 
     // Step 4's own "What We Will NOT Do": no dirty-flag optimization yet -
@@ -334,8 +343,15 @@ void AtmosphereLutRenderer::EnsureMultiScatteringLutInitialized(Renderer& render
 }
 
 rg::TextureHandle AtmosphereLutRenderer::AddMultiScatteringLutPass(rg::RenderGraphBuilder& builder, Renderer& renderer,
-    const AtmosphereParametersGpu& params, rg::TextureHandle transmittanceLutHandle)
+    const AtmosphereParametersGpu& params, rg::TextureHandle transmittanceLutHandle,
+    rg::RenderPassToggleRegistry* toggleRegistry)
 {
+    const bool passEnabledThisFrame =
+        toggleRegistry == nullptr || toggleRegistry->NoteDeclaredAndCheckEnabled("AtmosphereMultiScatteringLutPass");
+    if (!ShouldDeclareAtmospherePassThisFrame(passEnabledThisFrame, transmittanceLutHandle.IsValid())) {
+        return rg::TextureHandle{};
+    }
+
     (void)params; // Already uploaded into m_atmosphereParametersBuffer by AddTransmittanceLutPass() this same frame.
 
     EnsureMultiScatteringLutInitialized(renderer);
@@ -468,8 +484,15 @@ AtmosphereLutRenderer::SkyViewLutViewState& AtmosphereLutRenderer::EnsureSkyView
 rg::TextureHandle AtmosphereLutRenderer::AddSkyViewLutPass(rg::RenderGraphBuilder& builder, Renderer& renderer,
     const AtmosphereParametersGpu& params, const AtmosphereFrameUniforms& frameUniforms,
     rg::TextureHandle transmittanceLutHandle, rg::TextureHandle multiScatteringLutHandle, const char* outputTextureName,
-    rg::ViewScope viewScope)
+    rg::ViewScope viewScope, rg::RenderPassToggleRegistry* toggleRegistry)
 {
+    const bool passEnabledThisFrame =
+        toggleRegistry == nullptr || toggleRegistry->NoteDeclaredAndCheckEnabled("AtmosphereSkyViewLutPass");
+    if (!ShouldDeclareAtmospherePassThisFrame(
+            passEnabledThisFrame, transmittanceLutHandle.IsValid() && multiScatteringLutHandle.IsValid())) {
+        return rg::TextureHandle{};
+    }
+
     (void)params; // Already uploaded into m_atmosphereParametersBuffer by AddTransmittanceLutPass() this same frame.
 
     EnsureSkyViewLutInitialized(renderer);
@@ -610,8 +633,15 @@ AtmosphereLutRenderer::AerialPerspectiveVolumeViewState& AtmosphereLutRenderer::
 rg::VolumeTextureHandle AtmosphereLutRenderer::AddAerialPerspectiveVolumePass(rg::RenderGraphBuilder& builder,
     Renderer& renderer, const AtmosphereParametersGpu& params, const AtmosphereFrameUniforms& frameUniforms,
     rg::TextureHandle transmittanceLutHandle, rg::TextureHandle multiScatteringLutHandle, const char* outputVolumeName,
-    rg::ViewScope viewScope)
+    rg::ViewScope viewScope, rg::RenderPassToggleRegistry* toggleRegistry)
 {
+    const bool passEnabledThisFrame = toggleRegistry == nullptr
+        || toggleRegistry->NoteDeclaredAndCheckEnabled("AtmosphereAerialPerspectiveVolumePass");
+    if (!ShouldDeclareAtmospherePassThisFrame(
+            passEnabledThisFrame, transmittanceLutHandle.IsValid() && multiScatteringLutHandle.IsValid())) {
+        return rg::VolumeTextureHandle{};
+    }
+
     (void)params; // Already uploaded into m_atmosphereParametersBuffer by AddTransmittanceLutPass() this same frame.
 
     EnsureAerialPerspectiveVolumeInitialized(renderer);
@@ -751,8 +781,14 @@ rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveCompositePass(rg::R
     VkImageView sourceDepthView, VkSampler sourceDepthSampler, rg::VolumeTextureHandle aerialPerspectiveVolumeHandle,
     const char* aerialPerspectiveVolumeName, const Mat4& invViewProjection, Vec3 cameraWorldPosition,
     float aerialPerspectiveStrength, float maxDistanceKm, float depthExponent, VkExtent2D extent,
-    const char* outputTextureName, rg::ViewScope viewScope)
+    const char* outputTextureName, rg::ViewScope viewScope, rg::RenderPassToggleRegistry* toggleRegistry)
 {
+    const bool passEnabledThisFrame = toggleRegistry == nullptr
+        || toggleRegistry->NoteDeclaredAndCheckEnabled("AtmosphereAerialPerspectiveCompositePass");
+    if (!ShouldDeclareAtmospherePassThisFrame(passEnabledThisFrame, aerialPerspectiveVolumeHandle.IsValid())) {
+        return rg::TextureHandle{};
+    }
+
     EnsureAerialPerspectiveCompositeInitialized(renderer);
     AerialPerspectiveCompositeViewState& viewState =
         EnsureAerialPerspectiveCompositeViewInitialized(renderer, outputTextureName, extent);

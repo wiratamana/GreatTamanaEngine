@@ -100,6 +100,10 @@
 #include <string>
 #include <unordered_map>
 
+namespace gte::rg {
+class RenderPassToggleRegistry;
+} // namespace gte::rg
+
 namespace gte {
 
 class AtmosphereLutRenderer {
@@ -132,8 +136,8 @@ public:
     // be silently culled the next time RenderGraphCompiler::Compile() runs
     // (mirrors ComputeBlurValidation::AddPass()'s own identical
     // requirement).
-    rg::TextureHandle AddTransmittanceLutPass(
-        rg::RenderGraphBuilder& builder, Renderer& renderer, const AtmosphereParametersGpu& params);
+    rg::TextureHandle AddTransmittanceLutPass(rg::RenderGraphBuilder& builder, Renderer& renderer,
+        const AtmosphereParametersGpu& params, rg::RenderPassToggleRegistry* toggleRegistry = nullptr);
 
     // Phase 4 (ATMOSPHERE_PHASE4_MULTISCATTERING_LUT_v1.md) - declares this
     // frame's Multi-Scattering LUT compute pass into `builder`: reads
@@ -151,7 +155,8 @@ public:
     // above, and the same "caller must add the returned handle to this
     // call's own outputs root set or the pass is silently culled" contract.
     rg::TextureHandle AddMultiScatteringLutPass(rg::RenderGraphBuilder& builder, Renderer& renderer,
-        const AtmosphereParametersGpu& params, rg::TextureHandle transmittanceLutHandle);
+        const AtmosphereParametersGpu& params, rg::TextureHandle transmittanceLutHandle,
+        rg::RenderPassToggleRegistry* toggleRegistry = nullptr);
 
     // Phase 5 (ATMOSPHERE_PHASE5_SKYVIEW_LUT_v1.md) - declares this frame's
     // Sky-View LUT compute pass into `builder` for ONE view: reads
@@ -183,7 +188,8 @@ public:
     rg::TextureHandle AddSkyViewLutPass(rg::RenderGraphBuilder& builder, Renderer& renderer,
         const AtmosphereParametersGpu& params, const AtmosphereFrameUniforms& frameUniforms,
         rg::TextureHandle transmittanceLutHandle, rg::TextureHandle multiScatteringLutHandle,
-        const char* outputTextureName, rg::ViewScope viewScope);
+        const char* outputTextureName, rg::ViewScope viewScope,
+        rg::RenderPassToggleRegistry* toggleRegistry = nullptr);
 
     // Phase 6 (ATMOSPHERE_PHASE6_AERIAL_PERSPECTIVE_FROXEL_VOLUME_v1.md) -
     // declares this frame's Aerial Perspective froxel-volume compute pass
@@ -223,7 +229,8 @@ public:
     rg::VolumeTextureHandle AddAerialPerspectiveVolumePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
         const AtmosphereParametersGpu& params, const AtmosphereFrameUniforms& frameUniforms,
         rg::TextureHandle transmittanceLutHandle, rg::TextureHandle multiScatteringLutHandle,
-        const char* outputVolumeName, rg::ViewScope viewScope);
+        const char* outputVolumeName, rg::ViewScope viewScope,
+        rg::RenderPassToggleRegistry* toggleRegistry = nullptr);
 
     // Phase 7 (task_manager/atmosphere-scattering-1/
     // ATMOSPHERE_PHASE7_SKY_BACKGROUND_AND_COMPOSITE_PASSES_v1.md) - draws
@@ -300,7 +307,8 @@ public:
         VkSampler sourceDepthSampler, rg::VolumeTextureHandle aerialPerspectiveVolumeHandle,
         const char* aerialPerspectiveVolumeName, const Mat4& invViewProjection, Vec3 cameraWorldPosition,
         float aerialPerspectiveStrength, float maxDistanceKm, float depthExponent, VkExtent2D extent,
-        const char* outputTextureName, rg::ViewScope viewScope);
+        const char* outputTextureName, rg::ViewScope viewScope,
+        rg::RenderPassToggleRegistry* toggleRegistry = nullptr);
 
     // Returns a pointer to `outputTextureName`'s own persistent composited
     // output RenderTexture (the SAME one AddAerialPerspectiveCompositePass()

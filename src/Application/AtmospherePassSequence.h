@@ -38,6 +38,7 @@ class RenderTexture;
 
 namespace rg {
 class RenderGraphBuilder;
+class RenderPassToggleRegistry;
 } // namespace rg
 
 // Resolves the eye world-space position for the FIRST active ECS Camera
@@ -64,7 +65,8 @@ struct AtmosphereSharedLutHandles {
     rg::TextureHandle multiScatteringLutHandle;
 };
 AtmosphereSharedLutHandles AddAtmosphereSharedLutPasses(rg::RenderGraphBuilder& builder, Renderer& renderer,
-    AtmosphereLutRenderer& atmosphereLutRenderer, const AtmosphereParametersGpu& atmosphereParameters);
+    AtmosphereLutRenderer& atmosphereLutRenderer, const AtmosphereParametersGpu& atmosphereParameters,
+    rg::RenderPassToggleRegistry* toggleRegistry = nullptr);
 
 // Resolves ONE view's own AtmosphereFrameUniforms (via
 // AtmosphereLutRenderer.h's ResolveAtmosphereFrameUniforms(), still Phase
@@ -102,7 +104,8 @@ AtmosphereViewLutHandles AddAtmosphereViewLutPasses(rg::RenderGraphBuilder& buil
     AtmosphereLutRenderer& atmosphereLutRenderer, Registry& registry,
     const AtmosphereParametersGpu& atmosphereParameters, const AtmosphereSettings& atmosphereSettings,
     const AtmosphereSharedLutHandles& sharedLuts, Vec3 eyeWorldPosition, const Mat4& viewProjection,
-    const char* skyViewLutName, const char* aerialPerspectiveVolumeName, rg::ViewScope viewScope);
+    const char* skyViewLutName, const char* aerialPerspectiveVolumeName, rg::ViewScope viewScope,
+    rg::RenderPassToggleRegistry* toggleRegistry = nullptr);
 
 // Builds a ready-to-pass-into-AddGameViewPass()/AddSceneViewPass()'s own
 // `recordSkyBackground` parameter (RenderPasses.h) - captures everything
@@ -142,6 +145,7 @@ rg::TextureHandle AddAtmosphereCompositePass(rg::RenderGraphBuilder& builder, Re
     AtmosphereLutRenderer& atmosphereLutRenderer, RenderTexture& viewRenderTexture, rg::TextureHandle sourceColorHandle,
     rg::VolumeTextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,
     const AtmosphereFrameUniforms& frameUniforms, Vec3 eyeWorldPosition, float aerialPerspectiveStrength,
-    float maxDistanceKm, float depthExponent, VkExtent2D extent, const char* outputTextureName, rg::ViewScope viewScope);
+    float maxDistanceKm, float depthExponent, VkExtent2D extent, const char* outputTextureName, rg::ViewScope viewScope,
+    rg::RenderPassToggleRegistry* toggleRegistry = nullptr);
 
 } // namespace gte

@@ -452,8 +452,8 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             AtmosphereSharedLutBlackboardEntry entry;
             entry.parameters = MakeDefaultEarthAtmosphereParameters();
             entry.parameters.groundAlbedo = entry.parameters.groundAlbedo * m_atmosphereSettings.groundAlbedoTint;
-            entry.handles =
-                AddAtmosphereSharedLutPasses(frame.builder, m_renderer, m_atmosphereLutRenderer, entry.parameters);
+            entry.handles = AddAtmosphereSharedLutPasses(
+                frame.builder, m_renderer, m_atmosphereLutRenderer, entry.parameters, &m_renderPassToggleRegistry);
 
             frame.finalTextureOutputs.push_back(entry.handles.transmittanceLutHandle);
             frame.finalTextureOutputs.push_back(entry.handles.multiScatteringLutHandle);
@@ -531,12 +531,24 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             AtmosphereViewLutHandles viewLuts = AddAtmosphereViewLutPasses(frame.builder, m_renderer,
                 m_atmosphereLutRenderer, m_game.GetRegistry(), sharedLuts->parameters, m_atmosphereSettings,
                 sharedLuts->handles, viewData->eyeWorldPosition, viewData->viewProjection, skyViewLutName,
-                aerialVolumeName, legacyViewScope);
+                aerialVolumeName, legacyViewScope, &m_renderPassToggleRegistry);
 
             frame.finalTextureOutputs.push_back(viewLuts.skyViewLutHandle);
             frame.builder.KeepVolumeTextureOutput(viewLuts.aerialPerspectiveVolumeHandle);
 
-            if (isGameView) {
+            // editor-core-separation-20 campaign, PHASE2 (Step 3.7, item 2b) -
+            // THE CONFIRMED CRASH FIX: viewLuts.aerialPerspectiveVolumeHandle can
+            // now legitimately be invalid this frame (e.g. AtmosphereTransmittanceLutPass
+            // disabled, cascading down) even though m_aerialPerspectiveVolumeViewStates
+            // still has a stale entry for aerialVolumeName from an earlier, successful
+            // frame - AddAerialPerspectiveVolumeDebugSlicePass() itself only checks
+            // MAP EXISTENCE, never THIS-FRAME HANDLE VALIDITY, so calling it
+            // unconditionally would declare pass.ReadVolumeTexture() against an
+            // invalid handle and crash the instant RenderGraph::Execute() tries to
+            // resolve it (EnsureVolumeTextureResolved() has no bounds check at all).
+            // LDD-5 still fully honored: AddAerialPerspectiveVolumeDebugSlicePass()'s
+            // own signature/body is untouched - only its caller gained this guard.
+            if (isGameView && viewLuts.aerialPerspectiveVolumeHandle.IsValid()) {
                 const rg::TextureHandle debugSlice = m_atmosphereLutRenderer.AddAerialPerspectiveVolumeDebugSlicePass(
                     frame.builder, m_renderer, viewLuts.aerialPerspectiveVolumeHandle, aerialVolumeName,
                     static_cast<std::uint32_t>(m_atmosphereSettings.aerialPerspectiveDebugSliceIndex),
@@ -822,7 +834,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 frame.blackboard.Fetch<AtmosphereViewLutHandles>(viewLutKey);
             const std::optional<AtmosphereSharedLutBlackboardEntry> sharedLuts =
                 frame.blackboard.Fetch<AtmosphereSharedLutBlackboardEntry>(kAtmosphereSharedLutKey);
-            if (!viewLuts.has_value() || !sharedLuts.has_value()) {
+            if (!viewLuts.has_value() || !sharedLuts.has_value() || !viewLuts->skyViewLutHandle.IsValid()) {
                 return;
             }
 
@@ -927,7 +939,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             const rg::RenderPassId viewLutKey = isGameView ? kAtmosphereViewLutGameKey : kAtmosphereViewLutSceneKey;
             const std::optional<AtmosphereViewLutHandles> viewLuts =
                 frame.blackboard.Fetch<AtmosphereViewLutHandles>(viewLutKey);
-            if (!viewLuts.has_value()) {
+            if (!viewLuts.has_value() || !viewLuts->aerialPerspectiveVolumeHandle.IsValid()) {
                 return;
             }
 
@@ -941,7 +953,21 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 viewLuts->aerialPerspectiveVolumeHandle, aerialVolumeName, viewLuts->frameUniforms,
                 viewData->eyeWorldPosition, m_atmosphereSettings.aerialPerspectiveStrength,
                 m_atmosphereSettings.aerialPerspectiveMaxDistanceKm, m_atmosphereSettings.aerialPerspectiveDepthExponent,
-                viewData->renderTexture->Extent(), outputTextureName, legacyViewScope);
+                viewData->renderTexture->Extent(), outputTextureName, legacyViewScope, &m_renderPassToggleRegistry);
+
+            if (!composited.IsValid()) {
+                // editor-core-separation-20 campaign, PHASE2 (Step 3.7, item 4b) -
+                // "AtmosphereAerialPerspectiveCompositePass" was individually toggled
+                // off this frame even though its own upstream volume is valid this
+                // frame - degrade gracefully: publish NOTHING under
+                // kGameCompositedOutputKey/kSceneCompositedOutputKey this frame, so
+                // FindPluginRenderFeatureTarget()'s own composited.value_or(...)
+                // correctly falls back to viewData->colorTarget (always valid by
+                // construction) instead of an invalid handle silently reaching a
+                // real ReadTexture()/WriteTexture() declaration on the
+                // "PluginRenderFeatures" pass.
+                return;
+            }
 
             frame.finalTextureOutputs.push_back(composited);
 
