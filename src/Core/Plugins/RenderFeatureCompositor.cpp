@@ -166,6 +166,14 @@ RenderFeatureCompositor::RenderFeatureCompositor(
     , m_operationRegistry(operationRegistry)
     , m_blackboardAdapter(*this)
 {
+    // editor-core-separation-23 campaign, PHASE2 - the bounded, reusable
+    // GPU-state slot free-list, fully populated at construction time. See
+    // this class's own kMaxConcurrentProjectRenderFeatures/
+    // m_freeProjectFeatureSlots doc comments (RenderFeatureCompositor.h) for
+    // the full reasoning.
+    for (int i = 0; i < kMaxConcurrentProjectRenderFeatures; ++i) {
+        m_freeProjectFeatureSlots.push_back(i);
+    }
 }
 
 // editor-core-separation-8 campaign, PHASE2 - extracted VERBATIM from
@@ -264,6 +272,122 @@ bool RenderFeatureCompositor::SetFeaturePriority(const std::string& name, std::i
     } else {
         SortAndDetectCollisionsInStage(m_preUi, "PreUI");
     }
+    return true;
+}
+
+// editor-core-separation-23 campaign, PHASE2
+// (PHASE2_REGISTER_PROJECT_FEATURE_AND_SLOT_POOL.md, Step 3.3) - see this
+// method's own doc comment (RenderFeatureCompositor.h) for the full contract.
+bool RenderFeatureCompositor::RegisterProjectFeature(
+    const GtePluginRenderFeatureDescriptor& descriptor, ProjectRenderFeatureCallback callback)
+{
+    if (m_freeProjectFeatureSlots.empty()) {
+        GTE_LOG_WARNING("RenderFeatureCompositor",
+            std::string("RegisterProjectFeature('") + descriptor.name + "') refused - every one of the "
+            + std::to_string(kMaxConcurrentProjectRenderFeatures)
+            + " kMaxConcurrentProjectRenderFeatures slots is currently claimed by another still-registered "
+              "project render feature.");
+        return false;
+    }
+
+    if (FindEntryByName(descriptor.name) != nullptr) {
+        GTE_LOG_WARNING("RenderFeatureCompositor",
+            std::string("RegisterProjectFeature('") + descriptor.name
+            + "') refused - a render feature with this name is already registered.");
+        return false;
+    }
+
+    const int claimedSlot = m_freeProjectFeatureSlots.back();
+    m_freeProjectFeatureSlots.pop_back();
+
+    Entry entry;
+    entry.projectCallback = std::move(callback);
+    entry.descriptor = descriptor;
+    entry.projectFeatureSlot = claimedSlot;
+
+    if (entry.descriptor.stage == RenderFeatureStage::PreOpaque
+        || entry.descriptor.stage == RenderFeatureStage::PostOpaque
+        || entry.descriptor.stage == RenderFeatureStage::PostTransparent) {
+        // Mirrors OnPluginsLoaded()'s own identical refusal block - an
+        // unwired stage never claims a permanent slot; release it back
+        // before returning.
+        GTE_LOG_WARNING("RenderFeatureCompositor",
+            std::string(entry.descriptor.name) + " declared a RenderFeatureStage that is not wired in this "
+            "engine build - this feature will not run any frame. See "
+            "task_manager/editor-core-separation-6/PHASE0_MASTER_STRATEGY.md's Locked Design Decision #1.");
+        m_freeProjectFeatureSlots.push_back(claimedSlot);
+        return false;
+    }
+
+    const bool isPreUi = (entry.descriptor.stage == RenderFeatureStage::PreUI);
+    std::vector<Entry>& targetStage = isPreUi ? m_preUi : m_postComposite;
+    targetStage.push_back(std::move(entry));
+    SortAndDetectCollisionsInStage(targetStage, isPreUi ? "PreUI" : "PostComposite");
+
+    // Re-seed the name pool for the newly-added entry, for BOTH known views -
+    // mirroring OnPluginsLoaded()'s own trailing loop, with the ONE
+    // deliberate difference: the string fed into PrivateName()/AccumName()/
+    // BlendPassName() is the slot-derived gpuStateKey, never descriptor.name
+    // (PHASE0_MASTER_STRATEGY.md's Locked Decision #4).
+    const std::string gpuStateKey = "ProjectFeatureSlot" + std::to_string(claimedSlot);
+    static constexpr const char* kViewNames[] = { "Game", "Scene" };
+    for (const char* viewName : kViewNames) {
+        m_namePool.PrivateName(gpuStateKey, viewName);
+        m_namePool.AccumName(gpuStateKey, viewName);
+        m_namePool.BlendPassName(gpuStateKey, viewName);
+    }
+
+    GTE_LOG_INFO("RenderFeatureCompositor",
+        std::string("RegisterProjectFeature('") + descriptor.name + "') succeeded - claimed GPU-state slot "
+        + std::to_string(claimedSlot) + ".");
+    return true;
+}
+
+// editor-core-separation-23 campaign, PHASE2 - see this method's own doc
+// comment (RenderFeatureCompositor.h) for the full contract.
+bool RenderFeatureCompositor::UnregisterProjectFeature(const char* name)
+{
+    if (name == nullptr) {
+        return false;
+    }
+
+    Entry* entry = FindEntryByName(name);
+    if (entry == nullptr) {
+        return false;
+    }
+
+    if (!entry->projectCallback) {
+        GTE_LOG_WARNING("RenderFeatureCompositor",
+            std::string("UnregisterProjectFeature('") + name + "') refused - this entry is not a Project "
+            "Assembly render feature (it is a loaded plugin's own moduleV2/moduleV3 entry).");
+        return false;
+    }
+
+    // Release the slot back to the free list BEFORE erasing the entry
+    // (erase() invalidates `entry` itself - never dereferenced again after
+    // this point). Deliberately do NOT touch m_privateTargetStates/
+    // m_blendStageStates entries for this slot's own interned names - see
+    // this method's own header doc comment for why.
+    m_freeProjectFeatureSlots.push_back(entry->projectFeatureSlot);
+
+    const std::string nameStr = name;
+    const bool isPostComposite =
+        std::find_if(m_postComposite.begin(), m_postComposite.end(),
+            [&nameStr](const Entry& e) { return nameStr == e.descriptor.name; })
+        != m_postComposite.end();
+    if (isPostComposite) {
+        m_postComposite.erase(std::remove_if(m_postComposite.begin(), m_postComposite.end(),
+                                   [&nameStr](const Entry& e) { return nameStr == e.descriptor.name; }),
+            m_postComposite.end());
+    } else {
+        m_preUi.erase(std::remove_if(m_preUi.begin(), m_preUi.end(),
+                           [&nameStr](const Entry& e) { return nameStr == e.descriptor.name; }),
+            m_preUi.end());
+    }
+
+    GTE_LOG_INFO("RenderFeatureCompositor",
+        std::string("UnregisterProjectFeature('") + name + "') succeeded - released GPU-state slot back to the "
+        "free list.");
     return true;
 }
 
@@ -374,6 +498,10 @@ std::vector<RenderFeatureDebugEntry> RenderFeatureCompositor::DebugSnapshot() co
             // RenderFeatureDebugEntry.h's own doc comment (isV3) for the
             // full "why".
             debugEntry.isV3 = (entry.moduleV3 != nullptr);
+            // editor-core-separation-23 campaign, PHASE2 - see
+            // RenderFeatureDebugEntry.h's own doc comment (isProjectFeature)
+            // for the full "why" - mirrors isV3's own exact precedent.
+            debugEntry.isProjectFeature = static_cast<bool>(entry.projectCallback);
             snapshot.push_back(std::move(debugEntry));
         }
     };
@@ -631,10 +759,21 @@ void RenderFeatureCompositor::ContributeRenderGraphPasses(
 
     for (std::size_t i = 0; i < combinedList.size(); ++i) {
         const Entry& entry = combinedList[i];
-        const std::string pluginName = entry.descriptor.name;
+        const std::string pluginName = entry.descriptor.name; // unchanged - still used for FindEntryByName()/logs/adapter construction.
+        // editor-core-separation-23 campaign, PHASE2
+        // (PHASE2_REGISTER_PROJECT_FEATURE_AND_SLOT_POOL.md, Step 3.4) - a
+        // Project Assembly's own render-feature GPU state is NEVER keyed by
+        // its human-typed descriptor.name (PHASE0_MASTER_STRATEGY.md's
+        // Locked Decision #4) - it uses a bounded, slot-derived key instead.
+        // For every moduleV2/moduleV3 entry this is a complete no-op:
+        // gpuStateKey == pluginName exactly, byte-for-byte, since
+        // entry.projectCallback is always unset for them.
+        const std::string gpuStateKey = (entry.projectCallback)
+            ? ("ProjectFeatureSlot" + std::to_string(entry.projectFeatureSlot))
+            : pluginName;
         const bool isLast = (i + 1 == combinedList.size());
 
-        const char* privateName = m_namePool.PrivateName(pluginName, viewName);
+        const char* privateName = m_namePool.PrivateName(gpuStateKey, viewName);
         PrivateTargetState& privateState = EnsurePrivateTargetState(privateName, extent);
         const rg::TextureHandle privateTarget =
             frame.builder.ImportTexture(privateName, privateState.texture->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
@@ -648,12 +787,11 @@ void RenderFeatureCompositor::ContributeRenderGraphPasses(
             PluginRenderPassBuilderAdapter_v2 adapter(frame.builder, privateTarget, *this, privateName);
             entry.moduleV2->AddRenderGraphPasses(adapter);
         } else if (entry.projectCallback) {
-            // editor-core-separation-23 campaign, PHASE1 - currently DEAD
-            // CODE: nothing constructs an Entry with projectCallback set yet
-            // (that is PHASE2's job, RenderFeatureCompositor::RegisterProjectFeature()).
-            // No adapter object needed here (unlike the other two arms) - the
-            // callback already receives the real RenderGraphBuilder&/
-            // TextureHandle/VkExtent2D directly.
+            // editor-core-separation-23 campaign, PHASE2 - now REACHABLE:
+            // RegisterProjectFeature() constructs Entry objects with
+            // projectCallback set. No adapter object needed here (unlike the
+            // other two arms) - the callback already receives the real
+            // RenderGraphBuilder&/TextureHandle/VkExtent2D directly.
             entry.projectCallback(frame.builder, privateTarget, extent);
         }
 
@@ -664,15 +802,15 @@ void RenderFeatureCompositor::ContributeRenderGraphPasses(
             // LAST entry's blend writes back into the SAME handle the
             // legacy `_v1` path already writes into.
             outputTarget = resolved->target;
-            outputState = &EnsureBlendStageDescriptorOnly(m_namePool.AccumName(pluginName, viewName));
+            outputState = &EnsureBlendStageDescriptorOnly(m_namePool.AccumName(gpuStateKey, viewName));
         } else {
-            const char* accumName = m_namePool.AccumName(pluginName, viewName);
+            const char* accumName = m_namePool.AccumName(gpuStateKey, viewName);
             outputState = &EnsureBlendStageState(accumName, extent);
             outputTarget = frame.builder.ImportTexture(accumName, outputState->texture->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
         }
 
         DispatchBlend(frame.builder, currentInput, currentInputSampler, privateTarget,
-            privateState.texture->Sampler(), outputTarget, *outputState, m_namePool.BlendPassName(pluginName, viewName),
+            privateState.texture->Sampler(), outputTarget, *outputState, m_namePool.BlendPassName(gpuStateKey, viewName),
             extent, entry.descriptor.blendMode);
 
         currentInput = outputTarget;

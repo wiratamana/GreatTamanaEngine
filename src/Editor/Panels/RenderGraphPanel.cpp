@@ -462,6 +462,15 @@ void BuildPluginRenderFeaturesSection(
             ImGui::SameLine();
             ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "[v3]");
         }
+        // editor-core-separation-23 campaign, PHASE2 - see
+        // RenderFeatureDebugEntry.h's own doc comment (isProjectFeature) for
+        // the full "why" - mirrors the "[v3]" tag's own exact precedent, so a
+        // Project Assembly's own render feature is visually distinguishable
+        // from a gte_plugin_abi plugin's at a glance.
+        if (entry.isProjectFeature) {
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.6f, 1.0f, 0.5f, 1.0f), "[Project]");
+        }
         // No manual ImGui::PopID() anymore - ScopedUniqueId's destructor
         // handles it when idScope goes out of scope at the end of this
         // loop body.

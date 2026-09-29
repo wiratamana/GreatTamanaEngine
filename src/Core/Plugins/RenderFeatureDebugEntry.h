@@ -49,6 +49,19 @@ struct RenderFeatureDebugEntry {
     // `debugEntry.isV3 = (entry.moduleV3 != nullptr);` - trivial, since
     // Entry already distinguishes moduleV2/moduleV3.
     bool isV3 = false;
+
+    // editor-core-separation-23 campaign, PHASE2
+    // (PHASE2_REGISTER_PROJECT_FEATURE_AND_SLOT_POOL.md, Step 3.5) - a
+    // Project Assembly's own on-screen render feature
+    // (Core::RegisterProjectRenderFeature(), editor-core-separation-23
+    // campaign) - mutually exclusive with isV3 (a moduleV2/moduleV3 entry
+    // never sets this; a projectCallback entry never sets isV3). Added for
+    // the identical reason isV3 itself was added: without a structural
+    // field, a Project Assembly feature and a real _v2 plugin feature are
+    // indistinguishable at this observation layer (both show isV3 == false).
+    // Populated by RenderFeatureCompositor::DebugSnapshot()'s own appendStage
+    // lambda: `debugEntry.isProjectFeature = static_cast<bool>(entry.projectCallback);`.
+    bool isProjectFeature = false;
 };
 
 } // namespace gte

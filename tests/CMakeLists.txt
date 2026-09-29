@@ -2223,6 +2223,13 @@ set(GTE_TEST_SOURCES
     # src/Core/Plugins/ProjectRenderFeatureCallback.h header. Unconditional,
     # since that header is unconditionally in gte_core's own source list.
     Core/Plugins/ProjectRenderFeatureCallbackHeaderCompilesStandaloneTests.cpp
+    # editor-core-separation-23 campaign, PHASE2
+    # (PHASE2_REGISTER_PROJECT_FEATURE_AND_SLOT_POOL.md, Step 3.6) - Tier-1
+    # tests for RenderFeatureCompositor::RegisterProjectFeature()/
+    # UnregisterProjectFeature() and the bounded GPU-state slot pool.
+    # Unconditional, since src/Core/Plugins/RenderFeatureCompositor.h/.cpp is
+    # unconditionally in gte_core's own source list.
+    Core/Plugins/RenderFeatureCompositorProjectFeatureTests.cpp
     Memory/GpuResourceHandleTests.cpp
     Encoding/Base64Tests.cpp
     Encoding/PixelConversionTests.cpp

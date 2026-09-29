@@ -23,11 +23,23 @@
 //
 // The set of loaded _v2 plugins AND the set of known views ("Game"/"Scene")
 // are both fixed for the process's entire remaining lifetime (PluginHost
-// never unloads before process exit; hot reload is a permanent non-goal; no
-// third named view is ever introduced without an engine-wide
-// RenderViewId::Named() change) - so every name below is looked up once,
-// lazily, the first time it's needed, and reused for the rest of the
-// process's lifetime, never re-interned per frame.
+// never unloads before process exit; no third named view is ever introduced
+// without an engine-wide RenderViewId::Named() change).
+//
+// editor-core-separation-23 campaign, PHASE2
+// (PHASE2_REGISTER_PROJECT_FEATURE_AND_SLOT_POOL.md, Step 3.4) - a second
+// consumer, RenderFeatureCompositor's own Project Assembly render-feature
+// path, DOES hot-reload repeatedly over one session - but it never feeds a
+// raw, unbounded plugin/project NAME into this pool. It feeds a synthetic
+// "ProjectFeatureSlot0".."ProjectFeatureSlot15" key instead
+// (kMaxConcurrentProjectRenderFeatures = 16, RenderFeatureCompositor.h) - a
+// small, FIXED, bounded universe of possible keys for the process's entire
+// lifetime, which is what actually makes this pool's own "look up once,
+// lazily, and reuse forever, never re-interned per frame" discipline safe
+// for that consumer too. The real invariant this whole pool depends on is
+// therefore "the set of distinct KEYS ever looked up is bounded for the
+// process's entire lifetime" - not "nothing here is ever reloaded", which is
+// no longer an accurate description of every consumer.
 
 namespace gte {
 

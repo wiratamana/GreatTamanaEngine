@@ -159,6 +159,33 @@ public:
     // PHASE3 scope ever needs more than that.
     ComputeDescriptorSet& EnsureV3OpDescriptorSet(const std::string& key, VkDescriptorSetLayout layout);
 
+    // editor-core-separation-23 campaign, PHASE2
+    // (PHASE2_REGISTER_PROJECT_FEATURE_AND_SLOT_POOL.md, Step 3.2) - callable
+    // incrementally, any time after this object exists (unlike
+    // OnPluginsLoaded()'s one-time bulk scan) - a Project Assembly registers
+    // its own render feature(s) from its own GTE_RegisterProject entry point.
+    // `descriptor` must already be fully built (via MakeRenderFeatureDescriptor(),
+    // plugins/gte_plugin_abi/RenderFeatureDescriptor.h) before this is called -
+    // this method never touches descriptor.name's own length/validity itself
+    // (Core::RegisterProjectRenderFeature(), PHASE3, does that BEFORE calling
+    // this). Returns false (GTE_LOG_WARNING, never crashes) if descriptor.name
+    // already exists in either m_postComposite or m_preUi (mirrors
+    // FindEntryByName()'s own linear-scan convention), if descriptor.stage is
+    // not wired in this engine build (mirrors OnPluginsLoaded()'s own
+    // refusal), OR if every one of the kMaxConcurrentProjectRenderFeatures
+    // slots is currently claimed by some other still-registered project
+    // render feature.
+    bool RegisterProjectFeature(const GtePluginRenderFeatureDescriptor& descriptor, ProjectRenderFeatureCallback callback);
+
+    // Removes a previously-registered project feature by name, releasing its
+    // claimed GPU-state slot back to the free list so a LATER registration
+    // (this project's, a renamed replacement, or a different project's) can
+    // reuse it. Returns false if no entry with that name exists, or if the
+    // found entry is NOT a project feature (its `projectCallback` is unset) -
+    // a harmless, logged no-op either way; never touches a
+    // moduleV2/moduleV3 entry's slot bookkeeping (it never held one).
+    bool UnregisterProjectFeature(const char* name);
+
 private:
     // editor-core-separation-9 campaign, PHASE4
     // (PHASE4_BLACKBOARD_AND_DIAGNOSTICS_INTEGRATION.md, Step 3.1) - the real
@@ -331,6 +358,28 @@ private:
     // m_blendStageStates are already bounded. PERSISTENT for the entire
     // process lifetime - NEVER cleared/recreated per frame.
     std::unordered_map<std::string, ComputeDescriptorSet> m_v3OpDescriptorSets;
+
+    // editor-core-separation-23 campaign, PHASE2
+    // (PHASE2_REGISTER_PROJECT_FEATURE_AND_SLOT_POOL.md, Step 3.1) -
+    // generously sized against realistic usage (mirrors GpuResourceFactory's
+    // own "generously sized, a low hundreds not thousands" compute-pool
+    // sizing philosophy) - 16 concurrently REGISTERED Project Assembly render
+    // features (summed across every currently-loaded project) is far beyond
+    // what any real session needs at once, while costing at most 16 (slots) x
+    // 2 (views) x 2 (private + blend descriptor sets per slot) = 64 permanent
+    // entries out of the shared pool's fixed 256 - comfortable headroom
+    // alongside every other existing compute consumer (confirmed against
+    // GpuResourceFactory.cpp's real, current pool sizing, kMaxComputeDescriptorSets
+    // = 256, re-confirmed live during this phase).
+    static constexpr int kMaxConcurrentProjectRenderFeatures = 16;
+
+    // A Project Assembly's own render-feature GPU state is NEVER keyed by its
+    // human-typed descriptor.name (PHASE0_MASTER_STRATEGY.md's Locked
+    // Decision #4) - it is keyed by one of these small, fixed, reusable slot
+    // indices instead. Initialized in the constructor to
+    // {0, 1, ..., kMaxConcurrentProjectRenderFeatures - 1}; RegisterProjectFeature()
+    // pops one off, UnregisterProjectFeature() pushes it back.
+    std::vector<int> m_freeProjectFeatureSlots;
 
     // editor-core-separation-9 campaign, PHASE4 - the REAL, per-frame
     // cross-plugin blackboard storage (Locked Architecture Decision #13,

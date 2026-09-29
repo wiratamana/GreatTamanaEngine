@@ -421,6 +421,10 @@ void to_json(nlohmann::json& j, const RenderFeatureDebugEntry& entry)
         // (multi-pass, generic resource-graph) plugin row from a `_v2`
         // (fixed-op) one.
         { "is_v3", entry.isV3 },
+        // editor-core-separation-23 campaign, PHASE2 - see
+        // RenderFeatureDebugEntry.h's own doc comment (isProjectFeature) for
+        // the full "why" - mirrors is_v3's own exact precedent.
+        { "is_project_feature", entry.isProjectFeature },
     };
 }
 
