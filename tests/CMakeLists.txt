@@ -2390,6 +2390,12 @@ if(TRUE)
         # CreateProjectEndpointEndToEndTests.cpp's own precedent immediately
         # above.
         Network/OpenProjectEndpointEndToEndTests.cpp
+        # editor-core-separation-18 campaign, PHASE4 - On-Engine Project
+        # Workflow plan (BIG-STEP 4)'s new POST /project_assembly/create_asset
+        # route. Needs a real EditorProjectLifecycleCapability (gte_editor-tier),
+        # mirroring OpenProjectEndpointEndToEndTests.cpp's own precedent
+        # immediately above.
+        Network/CreateAssetEndpointEndToEndTests.cpp
         # editor-core-separation-18 campaign, PHASE1 - On-Engine Project
         # Workflow plan (BIG-STEP 4)'s new IAssetScaffoldingCapability /
         # EditorProjectLifecycleCapability::CreateAssetScaffold() addition.
