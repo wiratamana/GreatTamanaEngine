@@ -358,7 +358,7 @@ public:
 // every capability interface above: gte_core-tier code (NetworkServer.cpp)
 // holds only a nullable pointer; nullptr means every route backed by this
 // interface answers 503.
-enum class AssetScaffoldKind { RenderPass, ComputeShader, ShaderPair };
+enum class AssetScaffoldKind { RenderPass, ComputeShader, ShaderPair, ScreenPostProcessPass };
 
 class IAssetScaffoldingCapability {
 public:

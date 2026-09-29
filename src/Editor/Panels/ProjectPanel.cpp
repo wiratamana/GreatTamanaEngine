@@ -264,6 +264,10 @@ void ProjectPanel::RenderActiveProjectAssetsRow(EditorContext& ctx)
                 ctx.createAssetWindowPendingKind = AssetScaffoldKind::ShaderPair;
                 ctx.createAssetWindowOpen = true;
             }
+            if (ImGui::MenuItem("Screen Post-Process Pass...")) {
+                ctx.createAssetWindowPendingKind = AssetScaffoldKind::ScreenPostProcessPass;
+                ctx.createAssetWindowOpen = true;
+            }
             ImGui::EndMenu();
         }
         ImGui::EndPopup();

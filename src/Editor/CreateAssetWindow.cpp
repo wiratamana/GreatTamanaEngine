@@ -15,6 +15,7 @@ const char* TitleForKind(AssetScaffoldKind kind)
     case AssetScaffoldKind::RenderPass: return "Create New Render Pass";
     case AssetScaffoldKind::ComputeShader: return "Create New Compute Shader";
     case AssetScaffoldKind::ShaderPair: return "Create New Vertex/Fragment Shader Pair";
+    case AssetScaffoldKind::ScreenPostProcessPass: return "Create New Screen Post-Process Pass";
     }
     return "Create New Asset"; // unreachable - silences a "not all control paths return a value" warning.
 }
