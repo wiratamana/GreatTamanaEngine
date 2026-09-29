@@ -5,9 +5,12 @@
 #include "../../Encoding/HdrColorVisualization.h" // task_manager/frame-debugger-9 campaign, PHASE3 - Encoding::ConvertHdrRgba16fToRgba8().
 #include "../../Encoding/PixelConversion.h" // PHASE3 - Encoding::ConvertBgraToRgbaInPlace().
 #include "../../Renderer/RenderGraph/RenderGraph.h"
+#include "../../Renderer/RenderGraph/RenderPassToggleRegistry.h" // editor-core-separation-21 campaign, PHASE5 - IsEnabled() lookup for the honesty detector.
 #include "../../Renderer/Renderer.h"
 #include "../../Renderer/RenderTexture.h"
 #include "../../Core/Logging.h" // editor-core-separation-21 campaign, PHASE2 - the new auto-recapture-on-toggle log line (Build()).
+#include "../RenderPassHonestyChecker.h" // editor-core-separation-21 campaign, PHASE5 - the pure mismatch detector.
+#include "../RenderPassHonestyGuard.h" // editor-core-separation-21 campaign, PHASE5 - log-once-per-new-incident wrapper.
 
 #include <backends/imgui_impl_vulkan.h>
 #include <imgui.h>
@@ -360,21 +363,32 @@ void FrameDebuggerPanel::TriggerCapture()
 
     const rg::RenderGraphSnapshot graphSnapshot =
         m_frameRenderGraph->LastSnapshot(rg::ExecuteTimingMode::SynchronousImmediateReadback);
-    // TODO(editor-core-separation-21 PHASE5): this is the natural spot for
-    // the campaign's planned permanent "Render Pass Honesty" mismatch
-    // detector - comparing THIS graphSnapshot.passesInExecutionOrder (the
-    // real, just-captured set of executed/non-culled passes) against
-    // RenderPassToggleRegistry's own recorded enabled state for every pass
-    // name found here, and firing a loud GTE_LOG_ERROR the instant they ever
-    // disagree (mirroring ImGuiIdConflictTracker/
-    // DetectRenderPassEventContradictions's own precedent - see
-    // PHASE5_IRON_RULE_PERMANENT_MISMATCH_DETECTOR.md). PHASE1's own
-    // temporary, single-pass-name-hardcoded diagnostic logging that used to
-    // live here (category "RenderPassHonestyDiag") already proved this exact
+
+    // task_manager/editor-core-separation-21 campaign, PHASE5
+    // (PHASE5_IRON_RULE_PERMANENT_MISMATCH_DETECTOR.md) - the permanent,
+    // self-enforcing "Render Pass Honesty" detector, run once per real
+    // capture (mirrors ImGuiIdConflictTracker/DetectRenderPassEventContradictions's
+    // own precedent - see AGENTS.md). Compares THIS graphSnapshot.passesInExecutionOrder
+    // (the real, just-captured set of executed/non-culled passes) against
+    // m_frameToggleRegistry's own recorded enabled state for every pass name
+    // found here - any pass that is BOTH non-culled AND reports disabled is
+    // a genuine contradiction: the render pass and the Frame Debugger
+    // disagree. A no-op whenever m_frameToggleRegistry is null (defensive
+    // only - every real production call site supplies a real registry, see
+    // Build()'s own new parameter). PHASE1's own temporary,
+    // single-pass-name-hardcoded diagnostic logging that used to live here
+    // (category "RenderPassHonestyDiag") already proved this exact
     // comparison is what pins down a real mismatch - see
     // PHASE1_COMPLETION_REPORT.md - it was removed once PHASE2 landed the
     // real fix (the stale-capture root cause), since it added noisy
-    // per-capture logging with no permanent, generic value on its own.
+    // per-capture logging with no permanent, generic value on its own; THIS
+    // detector is that permanent, generic replacement.
+    if (m_frameToggleRegistry != nullptr) {
+        const std::vector<std::string> mismatches = DetectRenderPassHonestyMismatches(
+            graphSnapshot.passesInExecutionOrder,
+            [this](const std::string& name) { return m_frameToggleRegistry->IsEnabled(name); });
+        RenderPassHonestyGuard::Instance().ReportCaptureMismatches(mismatches);
+    }
 
     FrameDebuggerRenderTargetInfo renderTargetInfo;
     const VkExtent2D extent = m_frameGameView->Extent();
@@ -958,7 +972,7 @@ void FrameDebuggerPanel::BuildEventDetailsSection(const std::optional<FrameDebug
 }
 
 void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg::RenderGraph& renderGraph,
-    RenderTexture& gameView, RenderTexture* compositedGameView)
+    RenderTexture& gameView, RenderTexture* compositedGameView, rg::RenderPassToggleRegistry* toggleRegistry)
 {
     // task_manager/frame-debugger-7 campaign, PHASE3
     // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step
@@ -1040,6 +1054,7 @@ void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg:
     m_frameRenderGraph = &renderGraph;
     m_frameGameView = &gameView;
     m_frameGameViewComposited = compositedGameView; // PHASE1 (frame-debugger-4) - nullable, see header comment.
+    m_frameToggleRegistry = toggleRegistry; // editor-core-separation-21 campaign, PHASE5 - nullable, see header comment.
 
     // PHASE4 - refreshed unconditionally every call, cheap, mirrors
     // BoneViewerWindow's own m_device precedent - only ever actually read by

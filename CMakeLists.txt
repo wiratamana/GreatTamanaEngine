@@ -1146,6 +1146,17 @@ add_library(gte_editor STATIC
     src/Editor/ImGuiIdConflictTracker.cpp
     src/Editor/ImGuiIdConflictGuard.h
     src/Editor/ImGuiIdConflictGuard.cpp
+    # task_manager/editor-core-separation-21 campaign, PHASE5
+    # (PHASE5_IRON_RULE_PERMANENT_MISMATCH_DETECTOR.md) - the permanent,
+    # self-enforcing "Render Pass Honesty" detector (RenderPassHonestyChecker
+    # is the pure, Tier-1-tested logic; RenderPassHonestyGuard is the
+    # Logger-aware singleton wrapper around it) - mirrors
+    # ImGuiIdConflictTracker/ImGuiIdConflictGuard's own exact precedent
+    # immediately above.
+    src/Editor/RenderPassHonestyChecker.h
+    src/Editor/RenderPassHonestyChecker.cpp
+    src/Editor/RenderPassHonestyGuard.h
+    src/Editor/RenderPassHonestyGuard.cpp
     # task_manager/editor-core-separation-10 campaign, PHASE2 - the ONE
     # mandated public helper for entering a per-iteration ImGui ID scope -
     # see AGENTS.md's "ImGui Widget ID Uniqueness" section.

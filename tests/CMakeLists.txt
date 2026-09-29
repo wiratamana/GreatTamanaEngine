@@ -2387,6 +2387,11 @@ if(TRUE)
         # Tier-1 test for ImGuiIdConflictTracker (zero ImGui/Logger
         # dependency by design - see ImGuiIdConflictTracker.h).
         Editor/ImGuiIdConflictTrackerTests.cpp
+        # task_manager/editor-core-separation-21 campaign, PHASE5 - pure,
+        # Tier-1 test for the "Render Pass Honesty" mismatch detector (zero
+        # ImGui/Logger/live-RenderGraph dependency by design - see
+        # RenderPassHonestyChecker.h).
+        Editor/RenderPassHonestyCheckerTests.cpp
         Editor/ProfilerPanelDataTests.cpp
         Editor/JobsPanelDataTests.cpp
         Editor/LogPanelDataTests.cpp

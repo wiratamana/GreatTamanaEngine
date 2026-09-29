@@ -713,7 +713,15 @@ public:
         // rather than introducing a second, differently-named local -
         // m_gameViewComposited is a plain member, safe to read directly
         // here too.
-        m_frameDebuggerPanel.Build(m_ctx, renderer, renderGraph, m_gameView, m_gameViewComposited);
+        //
+        // editor-core-separation-21 campaign, PHASE5
+        // (PHASE5_IRON_RULE_PERMANENT_MISMATCH_DETECTOR.md) - the new,
+        // trailing `&renderPassToggleRegistry` argument feeds
+        // TriggerCapture()'s own new permanent "Render Pass Honesty"
+        // mismatch detector (RenderPassHonestyChecker.h/RenderPassHonestyGuard.h) -
+        // the SAME registry instance RenderGraphPanel::Build() (above) reads/
+        // mutates from its own checkboxes.
+        m_frameDebuggerPanel.Build(m_ctx, renderer, renderGraph, m_gameView, m_gameViewComposited, &renderPassToggleRegistry);
 #if GTE_ENABLE_PROJECT_PANEL
         m_projectPanel.Build(m_ctx);
         // The Bone Viewer is its own floating window (opened on demand via

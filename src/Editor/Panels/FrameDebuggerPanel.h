@@ -26,6 +26,7 @@ class RenderTexture;
 
 namespace rg {
 class RenderGraph;
+class RenderPassToggleRegistry; // editor-core-separation-21 campaign, PHASE5 - Build()'s new optional parameter.
 } // namespace rg
 
 // task_manager/frame-debugger-2 campaign (PHASE2) - the Editor's
@@ -115,7 +116,7 @@ public:
     // RenderGraphPassSnapshot::kind (== rg::PassKind::Compute) flag - no externally-supplied
     // name list is threaded through this call anymore.
     void Build(EditorContext& ctx, Renderer& renderer, const rg::RenderGraph& renderGraph, RenderTexture& gameView,
-        RenderTexture* compositedGameView);
+        RenderTexture* compositedGameView, rg::RenderPassToggleRegistry* toggleRegistry = nullptr);
 
     // See IEditorLayer::PrepareFrameDebuggerCaptureContext()'s own doc
     // comment (EditorLayer.h) - the real implementation this forwards to.
@@ -571,6 +572,18 @@ private:
         // ImGuiEditorLayer::m_gameViewComposited's own "nullptr until the atmosphere
         // composite pass has produced something at least once this session" contract exactly
         // - see Build()'s own new parameter doc comment.
+    // task_manager/editor-core-separation-21 campaign, PHASE5
+    // (PHASE5_IRON_RULE_PERMANENT_MISMATCH_DETECTOR.md) - cached the SAME
+    // way as the other m_frame* pointers above, for TriggerCapture()'s own
+    // use: the real, live RenderPassToggleRegistry this frame's captured
+    // rg::RenderGraphSnapshot should be checked against via the new
+    // RenderPassHonestyChecker.h/RenderPassHonestyGuard.h detector.
+    // Nullable - a caller that has no registry to pass (defensive only,
+    // e.g. a future test harness) simply disables the detector for that
+    // capture, exactly like every other toggleRegistry == nullptr guard
+    // already in this codebase (see AtmosphereLutRenderer.cpp's own
+    // precedent).
+    rg::RenderPassToggleRegistry* m_frameToggleRegistry = nullptr;
     // frame-debugger-5 campaign, PHASE2 - m_frameGpuSkinningPassNames (the
     // old, name-list-driven "which passes are GPU Skinning" cache) was
     // REMOVED here (see PHASE0_MASTER_STRATEGY.md's Locked Design Decision
