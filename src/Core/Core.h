@@ -478,6 +478,19 @@ private:
         const char* cullingPassName = nullptr;
         const char* indirectDrawPassName = nullptr;
         const char* displayName = nullptr;
+        // editor-core-separation-22 campaign, PHASE3
+        // (PHASE3_FIX_AUDIT_FINDINGS_SIDE_CHANNEL_LEAKS.md) - fixes
+        // PHASE2_COMPLETION_REPORT.md's own finding #19: every original
+        // DrawCommand::entity this batch replaces, carried alongside the
+        // batch's own render data (instead of being inserted into
+        // m_gpuDrivenBatchedEntitiesThisFrame unconditionally at COLLECTION
+        // time, before this batch's own "<batch> IndirectDraw" pass toggle
+        // state is even known) - see GpuDrivenBatchEntityExclusionLogic.h and
+        // the "GpuDrivenBatches" provider's own body in Core.cpp for the real
+        // fix: this list is only folded into the exclusion set once that
+        // SPECIFIC pass is confirmed to have survived its own toggle check
+        // this frame.
+        std::vector<Entity> entities;
     };
 
     // editor-core-separation-6 campaign, PHASE2

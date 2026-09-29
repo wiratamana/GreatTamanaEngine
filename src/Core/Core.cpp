@@ -32,6 +32,14 @@
 // 3.2 of that phase file).
 #include "../Renderer/RenderGraph/RenderPassToggleGuard.h"
 
+// editor-core-separation-22 campaign, PHASE3
+// (task_manager/editor-core-separation-22/
+// PHASE3_FIX_AUDIT_FINDINGS_SIDE_CHANNEL_LEAKS.md) - the pure "which of this
+// batch's own entities are safe to exclude from RenderOpaque's own normal
+// per-entity draw path THIS frame" decision, used by the "GpuDrivenBatches"
+// provider below (fixes PHASE2_COMPLETION_REPORT.md's own finding #19).
+#include "GpuDrivenBatchEntityExclusionLogic.h"
+
 // editor-core-separation-6 campaign, PHASE2
 // (PHASE2_PLUGIN_CAPABILITY_ORCHESTRATOR_REGISTRY_AND_RENDER_FEATURE_MIGRATION.md)
 // - the new IPluginCapabilityOrchestrator registry, plus its first real
@@ -725,6 +733,26 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 const MeshHandle meshHandle = batch.mesh;
                 const PipelineHandle originalPipelineHandle = batch.originalPipeline;
 
+                // editor-core-separation-22 campaign, PHASE3
+                // (PHASE2_COMPLETION_REPORT.md finding #19,
+                // GpuDrivenBatchEntityExclusionLogic.h) - resolves THIS batch's
+                // own "<batch> IndirectDraw" pass toggle state EARLY, before
+                // that pass's own RenderPassDesc is even built below. Safe to
+                // call here: RenderPassToggleRegistry::NoteDeclaredAndCheckEnabled()
+                // is idempotent within a frame for a given name (see
+                // RenderPassToggleGuard.h's own doc comment) - RenderPipeline::
+                // DeclareOnePhase()'s own later, generic gate re-checks this
+                // exact name again once this batch's IndirectDraw desc reaches
+                // it below, and is guaranteed to agree with this answer.
+                // RenderOpaque's own exclusion set must only ever contain this
+                // batch's entities when this pass is actually going to draw
+                // them - never merely because the batch was ELIGIBLE for
+                // batching at collection time.
+                const bool indirectDrawEnabledThisFrame = rg::ShouldDeclareBuiltInPassThisFrame(
+                    &m_renderPassToggleRegistry, batch.indirectDrawPassName);
+                AppendGpuDrivenBatchEntityExclusionsIfIndirectDrawEnabled(
+                    indirectDrawEnabledThisFrame, batch.entities, m_gpuDrivenBatchedEntitiesThisFrame);
+
                 // --- "<batch> ResetCount" (Compute) ----------------------
                 {
                     rg::RenderPassDesc desc;
@@ -1179,11 +1207,22 @@ void Core::BuildFrame()
                                 data.cullingPassName = names.cullingPassName;
                                 data.indirectDrawPassName = names.indirectDrawPassName;
                                 data.displayName = names.displayName;
-                                m_gpuDrivenBatchesThisFrame.push_back(data);
-
+                                // editor-core-separation-22 campaign, PHASE3
+                                // (PHASE2_COMPLETION_REPORT.md finding #19) -
+                                // this batch's own entities are no longer
+                                // inserted into m_gpuDrivenBatchedEntitiesThisFrame
+                                // HERE, unconditionally, before this batch's
+                                // own "<batch> IndirectDraw" pass toggle state
+                                // is even known - carried on `data` instead,
+                                // and only folded into the exclusion set by
+                                // the "GpuDrivenBatches" provider below, once
+                                // that SPECIFIC pass is confirmed to have
+                                // survived its own toggle check this frame.
+                                data.entities.reserve(frameEntry.commands.size());
                                 for (const DrawCommand& command : frameEntry.commands) {
-                                    m_gpuDrivenBatchedEntitiesThisFrame.insert(command.entity);
+                                    data.entities.push_back(command.entity);
                                 }
+                                m_gpuDrivenBatchesThisFrame.push_back(std::move(data));
                             }
                         }
                     }

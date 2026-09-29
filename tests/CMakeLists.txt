@@ -2111,6 +2111,12 @@ set(GTE_TEST_SOURCES
     # null surface is NOT safe here, and why VK_EXT_headless_surface is used
     # instead.
     Core/CoreHeadlessConstructionTests.cpp
+    # editor-core-separation-22 campaign, PHASE3
+    # (PHASE3_FIX_AUDIT_FINDINGS_SIDE_CHANNEL_LEAKS.md) - Tier-1 tests for the
+    # pure fix to PHASE2_COMPLETION_REPORT.md's own finding #19
+    # (src/Core/GpuDrivenBatchEntityExclusionLogic.h). No Vulkan/Core instance
+    # involved.
+    Core/GpuDrivenBatchEntityExclusionLogicTests.cpp
     # editor-core-separation-1 campaign, PHASE3
     # (PHASE3_LOGGING_GLOBAL_LOGSINK_EXTRACTION.md) - unconditional, since
     # src/Core/LogSink.h/.cpp is unconditionally in gte_core's own source
