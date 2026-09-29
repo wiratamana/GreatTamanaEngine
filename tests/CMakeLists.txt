@@ -2230,6 +2230,13 @@ set(GTE_TEST_SOURCES
     # Unconditional, since src/Core/Plugins/RenderFeatureCompositor.h/.cpp is
     # unconditionally in gte_core's own source list.
     Core/Plugins/RenderFeatureCompositorProjectFeatureTests.cpp
+    # editor-core-separation-23 campaign, PHASE3
+    # (PHASE3_CORE_REGISTER_PROJECT_RENDER_FEATURE_API.md, Step 3.4) - Tier-1
+    # tests for the new Core::RegisterProjectRenderFeature()/
+    # UnregisterProjectRenderFeature() thin pass-through API, including the
+    # 63-vs-64-byte debugName boundary rejection rule. Unconditional, since
+    # src/Core/Core.h/.cpp is unconditionally in gte_core's own source list.
+    Core/RegisterProjectRenderFeatureApiTests.cpp
     Memory/GpuResourceHandleTests.cpp
     Encoding/Base64Tests.cpp
     Encoding/PixelConversionTests.cpp

@@ -54,6 +54,15 @@
 // BIG-STEP 4), PHASE1.
 #include "../Assets/AssetDatabase.h"
 
+// editor-core-separation-23 campaign, PHASE3
+// (PHASE3_CORE_REGISTER_PROJECT_RENDER_FEATURE_API.md) - Core::RegisterProjectRenderFeature()/
+// UnregisterProjectRenderFeature() below need both of these directly, by
+// value/signature - ProjectRenderFeatureCallback.h is PHASE1's own new,
+// free-standing, zero-Core-dependency header; RenderFeatureDescriptor.h has
+// zero dependencies beyond <cstdint>/<cstddef> (confirmed, PHASE0 Step 2).
+#include "Plugins/ProjectRenderFeatureCallback.h"
+#include "../../plugins/gte_plugin_abi/RenderFeatureDescriptor.h"
+
 #include <volk.h>
 
 #include <functional>
@@ -362,6 +371,35 @@ public:
     // ProjectAssemblyRegistrationLedger::UnregisterEverythingFor() - never by
     // any Project Assembly's own authored code directly.
     void UnregisterProjectRenderPassProvider(const char* debugName);
+
+    // editor-core-separation-23 campaign, PHASE3
+    // (PHASE3_CORE_REGISTER_PROJECT_RENDER_FEATURE_API.md) - a thin
+    // pass-through into m_renderFeatureCompositorPtr's own
+    // RegisterProjectFeature()/UnregisterProjectFeature() (PHASE2) - NOT
+    // m_offscreenRenderPipeline (the target RegisterProjectRenderPassProvider()
+    // above forwards to). RenderFeatureCompositor is a separate object, owned
+    // by one of Core's m_capabilityOrchestrators entries, resolved through
+    // the exact same m_renderFeatureCompositorPtr GetRenderFeatureCompositor()
+    // already returns - never a second, freshly-constructed instance. Returns
+    // false (logged, never crashes) if no RenderFeatureCompositor orchestrator
+    // exists in this build, if debugName is null, if debugName's length
+    // exceeds 63 bytes (GtePluginRenderFeatureDescriptor::name is a fixed
+    // char[64] - this is the FIRST call site in this engine building that
+    // string from free-form, un-length-checked input, so it REJECTS outright
+    // rather than silently truncating - see Core.cpp for the full reasoning),
+    // or if RenderFeatureCompositor::RegisterProjectFeature() itself refuses
+    // (duplicate name, unwired stage, slot pool exhausted).
+    bool RegisterProjectRenderFeature(const char* debugName, RenderFeatureStage stage,
+        RenderFeatureBlendMode blendMode, std::int32_t priority, ProjectRenderFeatureCallback callback);
+
+    // editor-core-separation-23 campaign, PHASE3 - the teardown counterpart
+    // of RegisterProjectRenderFeature() immediately above, mirroring
+    // UnregisterProjectRenderPassProvider()'s own shape. Null-safe; a safe
+    // no-op if debugName was never successfully registered (an over-length
+    // name could never have registered in the first place, so this simply
+    // reports "not found," the same harmless outcome as any other unknown
+    // name - no separate length check needed here).
+    void UnregisterProjectRenderFeature(const char* debugName);
 
     // editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
     // BIG-STEP 2), PHASE4 - mirrors GetRenderer()'s own existing precedent

@@ -72,6 +72,7 @@
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <deque>
 #include <stdexcept>
 
@@ -369,6 +370,59 @@ void Core::RegisterProjectRenderPassProvider(const char* debugName, rg::Provider
 void Core::UnregisterProjectRenderPassProvider(const char* debugName)
 {
     m_offscreenRenderPipeline.Unregister(debugName);
+}
+
+// editor-core-separation-23 campaign, PHASE3
+// (PHASE3_CORE_REGISTER_PROJECT_RENDER_FEATURE_API.md) - a thin pass-through
+// into m_renderFeatureCompositorPtr's own RegisterProjectFeature() (PHASE2 -
+// PHASE2_REGISTER_PROJECT_FEATURE_AND_SLOT_POOL.md), NOT
+// m_offscreenRenderPipeline (RegisterProjectRenderPassProvider() above's own
+// target) - RenderFeatureCompositor is a separate object, owned by one of
+// Core's m_capabilityOrchestrators entries, resolved through the exact same
+// m_renderFeatureCompositorPtr GetRenderFeatureCompositor() already returns.
+bool Core::RegisterProjectRenderFeature(const char* debugName, RenderFeatureStage stage,
+    RenderFeatureBlendMode blendMode, std::int32_t priority, ProjectRenderFeatureCallback callback)
+{
+    if (m_renderFeatureCompositorPtr == nullptr) {
+        GTE_LOG_WARNING("Core", "RegisterProjectRenderFeature('" + std::string(debugName != nullptr ? debugName : "<null>")
+            + "') failed - no RenderFeatureCompositor orchestrator is registered in this build.");
+        return false;
+    }
+    if (debugName == nullptr) {
+        GTE_LOG_WARNING("Core", "RegisterProjectRenderFeature() failed - debugName is null.");
+        return false;
+    }
+    // GtePluginRenderFeatureDescriptor::name is a fixed char[64] (63 usable
+    // bytes + null terminator). This is the FIRST call site in this engine
+    // that builds this string from free-form, un-length-checked input -
+    // silently truncating here would defeat this whole system's own
+    // "collision-checked by name" promise (two long names sharing the same
+    // first 63 bytes would be reported identical with no diagnostic). Reject
+    // outright instead - never truncate-and-proceed.
+    if (std::strlen(debugName) > 63) {
+        GTE_LOG_WARNING("Core", "RegisterProjectRenderFeature('" + std::string(debugName)
+            + "') failed - name exceeds the 63-byte limit for GtePluginRenderFeatureDescriptor::name; "
+            "shorten it (never silently truncated).");
+        return false;
+    }
+
+    const GtePluginRenderFeatureDescriptor descriptor =
+        MakeRenderFeatureDescriptor(debugName, stage, priority, blendMode);
+    return m_renderFeatureCompositorPtr->RegisterProjectFeature(descriptor, std::move(callback));
+}
+
+// editor-core-separation-23 campaign, PHASE3 - the teardown counterpart of
+// RegisterProjectRenderFeature() immediately above. Null-safe; forwards
+// straight to UnregisterProjectFeature() - no length check needed (an
+// over-length name could never have been successfully registered in the
+// first place, so FindEntryByName() simply reports "not found," the same
+// harmless outcome as any other unknown name).
+void Core::UnregisterProjectRenderFeature(const char* debugName)
+{
+    if (m_renderFeatureCompositorPtr == nullptr || debugName == nullptr) {
+        return;
+    }
+    m_renderFeatureCompositorPtr->UnregisterProjectFeature(debugName);
 }
 
 void Core::Update(const InputFrame& input, float deltaTime)
