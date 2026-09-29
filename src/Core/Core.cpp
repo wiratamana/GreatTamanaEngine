@@ -25,6 +25,12 @@
 #include "../Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../Renderer/RenderGraph/RenderGraphDebugTextureRegistry.h"
+// editor-core-separation-22 campaign, PHASE1
+// (task_manager/editor-core-separation-22/
+// PHASE1_FIX_DRAWSKYBACKGROUND_TOGGLE_SIDE_CHANNEL_LEAK.md) - the generic,
+// early toggle guard used by the "DrawSkyBackground" provider below (Step
+// 3.2 of that phase file).
+#include "../Renderer/RenderGraph/RenderPassToggleGuard.h"
 
 // editor-core-separation-6 campaign, PHASE2
 // (PHASE2_PLUGIN_CAPABILITY_ORCHESTRATOR_REGISTRY_AND_RENDER_FEATURE_MIGRATION.md)
@@ -824,6 +830,22 @@ void Core::RegisterOffscreenRenderPipelineProviders()
     // "DrawSkyBackground" - ProviderScope::PerActiveView, AfterOpaques.
     m_offscreenRenderPipeline.Register("DrawSkyBackground", rg::ProviderScope::PerActiveView,
         [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
+            // editor-core-separation-22 campaign, PHASE1
+            // (task_manager/editor-core-separation-22/
+            // PHASE1_FIX_DRAWSKYBACKGROUND_TOGGLE_SIDE_CHANNEL_LEAK.md) -
+            // the confirmed root cause: this provider used to build
+            // `recordSkyBackground` and Publish() it to the blackboard
+            // UNCONDITIONALLY, before any toggle check - a disabled
+            // "DrawSkyBackground" pass still leaked its own visual effect
+            // through that cached callback into
+            // FrameDebuggerReplayPasses.cpp's own "sky step". This early
+            // guard runs BEFORE FindViewData()/any other work, for EVERY
+            // ProviderScope::PerActiveView invocation of this provider (once
+            // per active view, same frame) - so a disabled pass now performs
+            // NO side effect of any kind, for either view, this frame.
+            if (!rg::ShouldDeclareBuiltInPassThisFrame(&m_renderPassToggleRegistry, "DrawSkyBackground")) {
+                return;
+            }
             const RenderPassViewData* viewData = FindViewData(frame.currentView);
             if (viewData == nullptr) {
                 return;
