@@ -644,9 +644,17 @@ void RenderFeatureCompositor::ContributeRenderGraphPasses(
                 m_blackboardAdapter, resolved->target, resolved->sampler, *this,
                 pluginName + "_" + viewName + "_");
             entry.moduleV3->AddRenderGraphPasses(adapter);
-        } else {
+        } else if (entry.moduleV2 != nullptr) {
             PluginRenderPassBuilderAdapter_v2 adapter(frame.builder, privateTarget, *this, privateName);
             entry.moduleV2->AddRenderGraphPasses(adapter);
+        } else if (entry.projectCallback) {
+            // editor-core-separation-23 campaign, PHASE1 - currently DEAD
+            // CODE: nothing constructs an Entry with projectCallback set yet
+            // (that is PHASE2's job, RenderFeatureCompositor::RegisterProjectFeature()).
+            // No adapter object needed here (unlike the other two arms) - the
+            // callback already receives the real RenderGraphBuilder&/
+            // TextureHandle/VkExtent2D directly.
+            entry.projectCallback(frame.builder, privateTarget, extent);
         }
 
         rg::TextureHandle outputTarget;

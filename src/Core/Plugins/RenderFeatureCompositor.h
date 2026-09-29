@@ -2,6 +2,7 @@
 
 #include "IPluginCapabilityOrchestrator.h"
 #include "PluginRenderOperationRegistry.h"
+#include "ProjectRenderFeatureCallback.h"
 #include "RenderFeatureDebugEntry.h"
 #include "RenderFeatureNamePool.h"
 
@@ -216,6 +217,20 @@ private:
         // before this phase until something explicitly calls
         // SetFeatureEnabled(false).
         bool enabledOverride = true;
+
+        // editor-core-separation-23 campaign, PHASE1
+        // (PHASE1_PROJECT_RENDER_FEATURE_CALLBACK_HEADER_AND_ENTRY_THIRD_KIND.md) -
+        // a Project Assembly's own on-screen render feature: a plain
+        // std::function-based callback, no ABI, no QueryCapability() - the
+        // third, additive module-kind alongside moduleV2/moduleV3 above.
+        // `operator bool() == false` when unused (a plugin-authored Entry
+        // never sets this). `projectFeatureSlot` is meaningful ONLY when
+        // `projectCallback` is set - PHASE2 owns its assignment/meaning (the
+        // bounded, reusable GPU-state slot index, never keyed by
+        // descriptor.name - see PHASE0_MASTER_STRATEGY.md's Locked Decision
+        // #4).
+        ProjectRenderFeatureCallback projectCallback; // operator bool() == false when unused.
+        int projectFeatureSlot = -1;                  // meaningful ONLY when projectCallback is set.
     };
 
     // Bundles exactly what one (plugin, view) private-target slot needs -

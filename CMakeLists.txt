@@ -435,6 +435,14 @@ add_library(gte_core STATIC
     src/Core/Plugins/RenderFeatureNamePool.h
     src/Core/Plugins/PluginRenderPassBuilderAdapter_v2.h
     src/Core/Plugins/PluginRenderPassBuilderAdapter_v2.cpp
+    # editor-core-separation-23 campaign, PHASE1
+    # (PHASE1_PROJECT_RENDER_FEATURE_CALLBACK_HEADER_AND_ENTRY_THIRD_KIND.md) -
+    # the one new callback type a Project Assembly's own on-screen render
+    # feature registration is built around - a brand-new, free-standing,
+    # zero-Core-dependency header (never nested inside RenderFeatureCompositor,
+    # since Core.h only ever forward-declares that class). Header-only, no
+    # .cpp.
+    src/Core/Plugins/ProjectRenderFeatureCallback.h
     src/Core/Plugins/RenderFeatureCompositor.h
     src/Core/Plugins/RenderFeatureCompositor.cpp
     # editor-core-separation-9 campaign, PHASE1

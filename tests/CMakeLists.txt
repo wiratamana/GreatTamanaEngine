@@ -2217,6 +2217,12 @@ set(GTE_TEST_SOURCES
     # Unconditional, since src/Core/Plugins/ProjectAssemblyNameValidation.h/.cpp
     # is unconditionally in gte_core's own source list.
     Core/Plugins/ProjectAssemblyNameValidationTests.cpp
+    # editor-core-separation-23 campaign, PHASE1
+    # (PHASE1_PROJECT_RENDER_FEATURE_CALLBACK_HEADER_AND_ENTRY_THIRD_KIND.md,
+    # Step 3.2) - trivial standalone-compile proof for the new
+    # src/Core/Plugins/ProjectRenderFeatureCallback.h header. Unconditional,
+    # since that header is unconditionally in gte_core's own source list.
+    Core/Plugins/ProjectRenderFeatureCallbackHeaderCompilesStandaloneTests.cpp
     Memory/GpuResourceHandleTests.cpp
     Encoding/Base64Tests.cpp
     Encoding/PixelConversionTests.cpp
