@@ -120,6 +120,61 @@ RenderGraphMetadata BuildRenderGraphMetadata(const RenderGraphSnapshot& offscree
     const std::vector<GpuDrivenBatchDebugInfo>& gpuDrivenBatches,
     const std::vector<RenderFeatureDebugEntry>& renderFeatures);
 
+// editor-core-separation-22 campaign, PHASE5
+// (PHASE5_UNIFY_DUPLICATE_PASS_ROWS_RENDER_GRAPH_PANEL.md) - one row's worth
+// of GROUPED-BY-NAME pass metadata: unifies every RenderGraphPassMetadata
+// instance sharing the same `name` (e.g. a ProviderScope::PerActiveView
+// pass like "RenderOpaque"/"DrawSkyBackground", declared once per active
+// view - see RenderPipeline::DeclareOnePhase()) into exactly ONE row,
+// closing the "two rows in the live pass table vs one row in the Disabled
+// Built-In Passes section" cardinality mismatch (PHASE0_MASTER_STRATEGY.md's
+// Root Cause #1, Step 2.1). `instances` keeps every ungrouped, raw
+// RenderGraphPassMetadata this group was built from, in their ORIGINAL
+// relative order, so the panel's own click-to-expand raw-breakdown UX
+// (Step 3.4) has something real to show - never re-derived/re-fetched.
+struct RenderGraphGroupedPassMetadata {
+    std::string name;
+    // Human-readable label describing which view(s) actually contributed a
+    // real, NON-CULLED instance this frame (e.g. "Game+Scene", "Game only",
+    // "Scene only", "Shared"). If EVERY instance sharing this name was
+    // culled this frame (isCulled below is true), there is no "real"
+    // contribution to prefer, so this falls back to listing every
+    // instance's own viewScope instead (still deterministic, still useful
+    // context) - see GroupPassMetadataByName()'s own BuildViewLabel() helper
+    // in RenderGraphMetadata.cpp for the exact rule.
+    std::string viewLabel;
+    // True only if EVERY instance sharing this name was culled this frame -
+    // a pass surviving in one view but culled in the other must NOT read as
+    // fully culled (PHASE0_MASTER_STRATEGY.md's own explicit warning, Step
+    // 3.2 of this phase's own file).
+    bool isCulled = false;
+    std::uint32_t drawCallCount = 0; // summed across every instance sharing this name (a culled instance always contributes 0, by construction - see RenderGraphPassMetadata::drawCallCount's own doc comment).
+    std::uint32_t triangleCount = 0; // same rule.
+    // Per-view GPU timing breakdown, e.g. "Game: 0.12 ms, Scene: 0.08 ms" -
+    // deliberately NEVER summed/maxed (locked decision, via ask_questions,
+    // PHASE5_COMPLETION_REPORT.md) since GPU timing is not meaningfully
+    // additive/comparable across two logically-separate view passes the way
+    // draw/triangle counts are. A single-instance group (this name was only
+    // ever declared by one view/regime this frame) shows that one
+    // instance's own gpuTimingText verbatim, with no redundant view-name
+    // prefix (the row's own viewLabel badge already states the view).
+    std::string gpuTimingText;
+    std::vector<std::string> reads;  // combined, de-duplicated resource NAMES across every instance (order-preserving, first-seen) - the full per-instance kind-resolved breakdown is still available via `instances` below.
+    std::vector<std::string> writes; // same rule.
+    std::vector<RenderGraphPassMetadata> instances; // raw, ungrouped, original per-instance breakdown, in their original relative order - see struct doc comment above.
+};
+
+// Pure, Tier-1-testable (mirrors BuildRenderGraphMetadata()'s own "no live
+// RenderGraph&/VkDevice&/Renderer&" precedent exactly) - groups `ungrouped`
+// (typically a RenderGraphRegimeMetadata::passes vector) by `name`, in
+// SORTED, deterministic order (mirrors RenderPassToggleRegistry::ListAll()'s
+// own "sorted, deterministic iteration order" discipline - the panel's own
+// row order must not visibly jitter frame-to-frame for no reason, and must
+// not depend on `ungrouped`'s own input order either - see this phase's own
+// Step 3.5 item (e)).
+std::vector<RenderGraphGroupedPassMetadata> GroupPassMetadataByName(
+    const std::vector<RenderGraphPassMetadata>& ungrouped);
+
 // ADL free function - nlohmann::json's own standard pattern (mirrors
 // src/ECS/Reflection/MathJsonAdapters.h's to_json(nlohmann::json&, const Vec3&)
 // precedent exactly). Every nested to_json() this depends on

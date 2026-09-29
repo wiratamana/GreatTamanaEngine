@@ -396,5 +396,190 @@ TEST(RenderGraphMetadataTest, ToJsonProducesExpectedTopLevelShapeAndNullHandling
     EXPECT_TRUE(j["render_features"][0]["enabled"].get<bool>());
 }
 
+// --- editor-core-separation-22 campaign, PHASE5
+// (PHASE5_UNIFY_DUPLICATE_PASS_ROWS_RENDER_GRAPH_PANEL.md) - GroupPassMetadataByName()
+// coverage. Unlike every fixture above (which hand-builds a RenderGraphSnapshot
+// and calls BuildRenderGraphMetadata()), GroupPassMetadataByName() itself takes
+// an already-built std::vector<RenderGraphPassMetadata> directly - so these
+// fixtures construct RenderGraphPassMetadata values BY HAND, exactly like the
+// grouping function's own real caller (RenderGraphPanel.cpp's BuildPassTable())
+// does with a RenderGraphRegimeMetadata::passes vector. ------------------------
+
+RenderGraphPassMetadata MakeGroupInputPass(const std::string& name, const std::string& viewScope, bool isCulled = false)
+{
+    RenderGraphPassMetadata pass;
+    pass.name = name;
+    pass.viewScope = viewScope;
+    pass.isCulled = isCulled;
+    pass.gpuTimingText = "N/A";
+    return pass;
+}
+
+TEST(RenderGraphGroupedPassMetadataTest, EmptyInputProducesEmptyResult)
+{
+    const std::vector<RenderGraphPassMetadata> ungrouped;
+    const std::vector<RenderGraphGroupedPassMetadata> grouped = GroupPassMetadataByName(ungrouped);
+    EXPECT_TRUE(grouped.empty());
+}
+
+// (a) two same-named instances (Game+Scene), both non-culled, group into
+// one row with summed stats and a "both views" label.
+TEST(RenderGraphGroupedPassMetadataTest, TwoNonCulledInstancesAcrossGameAndSceneGroupIntoOneRowWithSummedStatsAndBothViewsLabel)
+{
+    RenderGraphPassMetadata gameInstance = MakeGroupInputPass("RenderOpaque", "GameView");
+    gameInstance.drawCallCount = 10;
+    gameInstance.triangleCount = 100;
+    gameInstance.gpuTimingText = "0.12 ms";
+
+    RenderGraphPassMetadata sceneInstance = MakeGroupInputPass("RenderOpaque", "SceneView");
+    sceneInstance.drawCallCount = 5;
+    sceneInstance.triangleCount = 50;
+    sceneInstance.gpuTimingText = "0.08 ms";
+
+    const std::vector<RenderGraphPassMetadata> ungrouped{ gameInstance, sceneInstance };
+    const std::vector<RenderGraphGroupedPassMetadata> grouped = GroupPassMetadataByName(ungrouped);
+
+    ASSERT_EQ(grouped.size(), 1u);
+    const RenderGraphGroupedPassMetadata& group = grouped[0];
+    EXPECT_EQ(group.name, "RenderOpaque");
+    EXPECT_FALSE(group.isCulled);
+    EXPECT_EQ(group.viewLabel, "Game+Scene");
+    EXPECT_EQ(group.drawCallCount, 15u);
+    EXPECT_EQ(group.triangleCount, 150u);
+    // Locked decision (via ask_questions, see PHASE5_COMPLETION_REPORT.md) -
+    // per-view breakdown, never summed/maxed.
+    EXPECT_EQ(group.gpuTimingText, "Game: 0.12 ms, Scene: 0.08 ms");
+    ASSERT_EQ(group.instances.size(), 2u);
+}
+
+// (b) one instance culled, the other not, produces isCulled == false for the
+// GROUP with a label reflecting only the surviving view.
+TEST(RenderGraphGroupedPassMetadataTest, OneCulledOneSurvivingInstanceGroupsToNonCulledWithSurvivingViewLabel)
+{
+    RenderGraphPassMetadata gameInstance = MakeGroupInputPass("AtmosphereSkyViewLutPass", "GameView", /*isCulled=*/true);
+    RenderGraphPassMetadata sceneInstance = MakeGroupInputPass("AtmosphereSkyViewLutPass", "SceneView", /*isCulled=*/false);
+    sceneInstance.drawCallCount = 3;
+
+    const std::vector<RenderGraphPassMetadata> ungrouped{ gameInstance, sceneInstance };
+    const std::vector<RenderGraphGroupedPassMetadata> grouped = GroupPassMetadataByName(ungrouped);
+
+    ASSERT_EQ(grouped.size(), 1u);
+    const RenderGraphGroupedPassMetadata& group = grouped[0];
+    EXPECT_FALSE(group.isCulled); // a pass surviving in ONE view must never read as fully culled.
+    EXPECT_EQ(group.viewLabel, "Scene only"); // reflects ONLY the surviving contributor - the culled Game View instance is not counted here.
+    EXPECT_EQ(group.drawCallCount, 3u); // the culled instance contributes 0, by construction.
+}
+
+// (c) both instances culled groups to isCulled == true, with the viewLabel
+// fallback listing every instance (there is no "real" contribution to
+// prefer once the whole group is culled).
+TEST(RenderGraphGroupedPassMetadataTest, BothInstancesCulledGroupsToCulledTrue)
+{
+    RenderGraphPassMetadata gameInstance = MakeGroupInputPass("UnusedFeaturePass", "GameView", /*isCulled=*/true);
+    RenderGraphPassMetadata sceneInstance = MakeGroupInputPass("UnusedFeaturePass", "SceneView", /*isCulled=*/true);
+
+    const std::vector<RenderGraphPassMetadata> ungrouped{ gameInstance, sceneInstance };
+    const std::vector<RenderGraphGroupedPassMetadata> grouped = GroupPassMetadataByName(ungrouped);
+
+    ASSERT_EQ(grouped.size(), 1u);
+    const RenderGraphGroupedPassMetadata& group = grouped[0];
+    EXPECT_TRUE(group.isCulled);
+    EXPECT_EQ(group.viewLabel, "Game+Scene"); // fallback: every instance's own viewScope, since none "really" contributed.
+    EXPECT_EQ(group.drawCallCount, 0u);
+}
+
+// (d) a name appearing in only one view groups correctly with a
+// single-view label, and its gpuTimingText is the one instance's own text
+// verbatim (no redundant view-name prefix).
+TEST(RenderGraphGroupedPassMetadataTest, SingleViewInstanceGroupsWithSingleViewLabelAndVerbatimGpuTiming)
+{
+    RenderGraphPassMetadata gameOnlyInstance = MakeGroupInputPass("DemoRenderFeaturePlugin_Clear", "GameView");
+    gameOnlyInstance.gpuTimingText = "0.05 ms";
+
+    const std::vector<RenderGraphPassMetadata> ungrouped{ gameOnlyInstance };
+    const std::vector<RenderGraphGroupedPassMetadata> grouped = GroupPassMetadataByName(ungrouped);
+
+    ASSERT_EQ(grouped.size(), 1u);
+    const RenderGraphGroupedPassMetadata& group = grouped[0];
+    EXPECT_EQ(group.viewLabel, "Game only");
+    ASSERT_EQ(group.instances.size(), 1u);
+    EXPECT_EQ(group.gpuTimingText, "0.05 ms"); // verbatim - no "Game: " prefix for a single-instance group.
+}
+
+// A lone Shared-scope instance (ViewScope::Shared - "not duplicated per
+// view") gets a bare "Shared" label, never "Shared only" - Shared is
+// already inherently singular.
+TEST(RenderGraphGroupedPassMetadataTest, SharedViewScopeSingleInstanceLabelHasNoOnlySuffix)
+{
+    const std::vector<RenderGraphPassMetadata> ungrouped{ MakeGroupInputPass("GpuSkinning", "Shared") };
+    const std::vector<RenderGraphGroupedPassMetadata> grouped = GroupPassMetadataByName(ungrouped);
+
+    ASSERT_EQ(grouped.size(), 1u);
+    EXPECT_EQ(grouped[0].viewLabel, "Shared");
+}
+
+// (e) grouping is stable/deterministic regardless of input order - mirrors
+// RenderPassToggleRegistry::ListAll()'s own "sorted, deterministic
+// iteration order" discipline.
+TEST(RenderGraphGroupedPassMetadataTest, GroupingIsStableAndDeterministicRegardlessOfInputOrder)
+{
+    RenderGraphPassMetadata alphaGame = MakeGroupInputPass("Alpha", "GameView");
+    alphaGame.drawCallCount = 1;
+    RenderGraphPassMetadata alphaScene = MakeGroupInputPass("Alpha", "SceneView");
+    alphaScene.drawCallCount = 2;
+    RenderGraphPassMetadata betaGame = MakeGroupInputPass("Beta", "GameView");
+    betaGame.drawCallCount = 4;
+    RenderGraphPassMetadata betaScene = MakeGroupInputPass("Beta", "SceneView");
+    betaScene.drawCallCount = 8;
+
+    const std::vector<RenderGraphPassMetadata> orderOne{ betaGame, alphaScene, alphaGame, betaScene };
+    const std::vector<RenderGraphPassMetadata> orderTwo{ alphaGame, betaScene, alphaScene, betaGame };
+
+    const std::vector<RenderGraphGroupedPassMetadata> groupedOne = GroupPassMetadataByName(orderOne);
+    const std::vector<RenderGraphGroupedPassMetadata> groupedTwo = GroupPassMetadataByName(orderTwo);
+
+    ASSERT_EQ(groupedOne.size(), 2u);
+    ASSERT_EQ(groupedTwo.size(), 2u);
+    // Sorted-by-name order ("Alpha" before "Beta"), regardless of either
+    // input vector's own insertion order.
+    EXPECT_EQ(groupedOne[0].name, "Alpha");
+    EXPECT_EQ(groupedOne[1].name, "Beta");
+    EXPECT_EQ(groupedTwo[0].name, "Alpha");
+    EXPECT_EQ(groupedTwo[1].name, "Beta");
+
+    EXPECT_EQ(groupedOne[0].drawCallCount, groupedTwo[0].drawCallCount);
+    EXPECT_EQ(groupedOne[1].drawCallCount, groupedTwo[1].drawCallCount);
+    EXPECT_EQ(groupedOne[0].viewLabel, groupedTwo[0].viewLabel);
+    EXPECT_EQ(groupedOne[1].viewLabel, groupedTwo[1].viewLabel);
+}
+
+// Reads/writes are combined and de-duplicated (order-preserving, first-seen)
+// across every instance sharing a group's own name.
+TEST(RenderGraphGroupedPassMetadataTest, ReadsAndWritesAreCombinedAndDeduplicatedAcrossInstances)
+{
+    RenderGraphPassMetadata gameInstance = MakeGroupInputPass("RenderOpaque", "GameView");
+    gameInstance.reads = { RenderGraphResourceRefMetadata{ "Depth", "Texture" },
+        RenderGraphResourceRefMetadata{ "Shared", "Buffer" } };
+    gameInstance.writes = { RenderGraphResourceRefMetadata{ "ColorGame", "Texture" } };
+
+    RenderGraphPassMetadata sceneInstance = MakeGroupInputPass("RenderOpaque", "SceneView");
+    sceneInstance.reads = { RenderGraphResourceRefMetadata{ "Shared", "Buffer" },
+        RenderGraphResourceRefMetadata{ "DepthScene", "Texture" } };
+    sceneInstance.writes = { RenderGraphResourceRefMetadata{ "ColorScene", "Texture" } };
+
+    const std::vector<RenderGraphPassMetadata> ungrouped{ gameInstance, sceneInstance };
+    const std::vector<RenderGraphGroupedPassMetadata> grouped = GroupPassMetadataByName(ungrouped);
+
+    ASSERT_EQ(grouped.size(), 1u);
+    const RenderGraphGroupedPassMetadata& group = grouped[0];
+    ASSERT_EQ(group.reads.size(), 3u); // "Shared" appears in both instances - de-duplicated to one entry.
+    EXPECT_EQ(group.reads[0], "Depth");
+    EXPECT_EQ(group.reads[1], "Shared");
+    EXPECT_EQ(group.reads[2], "DepthScene");
+    ASSERT_EQ(group.writes.size(), 2u);
+    EXPECT_EQ(group.writes[0], "ColorGame");
+    EXPECT_EQ(group.writes[1], "ColorScene");
+}
+
 } // namespace
 } // namespace gte::rg

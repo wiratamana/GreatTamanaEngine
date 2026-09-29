@@ -41,6 +41,79 @@ std::vector<std::string> ExtractResourceRefNames(const std::vector<rg::RenderGra
     return names;
 }
 
+// editor-core-separation-22 campaign, PHASE5
+// (PHASE5_UNIFY_DUPLICATE_PASS_ROWS_RENDER_GRAPH_PANEL.md, Step 3.4) - one
+// RAW, ungrouped instance's own Draws/Tris/GPU Time/Reads/Writes columns
+// (columns 2-6 - "Enabled"/"Pass" are handled by the caller, differently,
+// for a raw sub-row vs. the grouped summary row). Shared by BOTH the
+// click-to-expand raw-breakdown sub-rows below AND nothing else today (the
+// grouped summary row's own columns use SUMMED/combined values, a genuinely
+// different shape - see BuildGroupedPassRow() below) - kept as its own
+// function anyway since "one instance's own stats columns" is a real,
+// nameable concept a future caller (e.g. a possible future JSON reveal
+// endpoint) may also want.
+void BuildInstanceStatsColumns(const rg::RenderGraphPassMetadata& pass)
+{
+    ImGui::TableSetColumnIndex(2);
+    if (pass.isCulled) {
+        ImGui::TextDisabled("culled");
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Culled: no path from this pass's declared writes to this call's own "
+                               "final output(s) was found - see RenderGraphCompiler.h.");
+        }
+    } else {
+        ImGui::Text("%u", pass.drawCallCount);
+    }
+
+    ImGui::TableSetColumnIndex(3);
+    if (!pass.isCulled) {
+        ImGui::Text("%u", pass.triangleCount);
+    } else {
+        ImGui::TextDisabled("-");
+    }
+
+    ImGui::TableSetColumnIndex(4);
+    if (!pass.isCulled) {
+        ImGui::TextUnformatted(pass.gpuTimingText.c_str());
+    } else {
+        ImGui::TextDisabled("-");
+    }
+
+    ImGui::TableSetColumnIndex(5);
+    const std::string reads = rg::JoinNames(ExtractResourceRefNames(pass.reads));
+    ImGui::TextUnformatted(reads.c_str());
+
+    ImGui::TableSetColumnIndex(6);
+    const std::string writes = rg::JoinNames(ExtractResourceRefNames(pass.writes));
+    ImGui::TextUnformatted(writes.c_str());
+}
+
+// editor-core-separation-22 campaign, PHASE5 (Step 3.4) - one RAW,
+// ungrouped instance's own sub-row, indented under its own group's
+// click-to-expand tree row (BuildGroupedPassRow() below). Non-interactive
+// (plain text only, no checkbox/button) - no new ImGui ID uniqueness risk,
+// so this deliberately does NOT open its own ScopedUniqueId scope (nothing
+// here needs a stable per-iteration ID).
+void BuildRawInstanceSubRow(const rg::RenderGraphPassMetadata& instance)
+{
+    ImGui::TableNextRow();
+
+    ImGui::TableSetColumnIndex(0); // "Enabled" column - blank for a raw sub-row (the checkbox above already controls every instance of this name at once).
+    ImGui::TextDisabled("-");
+
+    ImGui::TableSetColumnIndex(1);
+    ImGui::Indent();
+    const std::string label = std::string("- ") + instance.viewScope; // plain ASCII prefix (never a UTF-8 glyph literal here - this codebase's own char8_t/std::string interop across MinGW is inconsistent, see this phase's own build log) - the leading "- " plus this row's own ImGui::Indent() below is enough to read as "a child of the row above".
+    if (instance.isCulled) {
+        ImGui::TextDisabled("%s", label.c_str());
+    } else {
+        ImGui::TextUnformatted(label.c_str());
+    }
+    ImGui::Unindent();
+
+    BuildInstanceStatsColumns(instance);
+}
+
 // editor-core-separation-8 campaign, PHASE4
 // (PHASE4_RENDER_GRAPH_PANEL_CONTROLS.md, Step 3.1) - the new FIRST column,
 // "Enabled". Placed before "Pass" (rather than appended at the end) so an
@@ -49,20 +122,34 @@ std::vector<std::string> ExtractResourceRefNames(const std::vector<rg::RenderGra
 // the first place in this file a checkbox actually MUTATES Core-owned state
 // (rg::RenderPassToggleRegistry) directly from the Editor UI, per
 // PHASE0_MASTER_STRATEGY.md's Step 2.6 (same thread, no bridge needed).
-void BuildPassRow(int rowIndex, const rg::RenderGraphPassMetadata& pass, rg::RenderPassToggleRegistry& renderPassToggleRegistry)
+//
+// editor-core-separation-22 campaign, PHASE5
+// (PHASE5_UNIFY_DUPLICATE_PASS_ROWS_RENDER_GRAPH_PANEL.md) - REWORKED to
+// render exactly ONE row per rg::RenderGraphGroupedPassMetadata group
+// (renamed from BuildPassRow(), which rendered one row per raw, ungrouped
+// snapshot entry - the exact "two RenderOpaque rows here, one row there"
+// cardinality mismatch this whole phase exists to close, see
+// PHASE0_MASTER_STRATEGY.md's Root Cause #1). The pass name column is now a
+// click-to-expand ImGui::TreeNodeEx() (locked decision, via ask_questions,
+// see PHASE5_COMPLETION_REPORT.md) - expanding it reveals the RAW,
+// ungrouped, per-view-instance breakdown this group was built from (Step
+// 3.4), so nothing the old, ungrouped table used to show is actually lost,
+// merely one click away instead of always-on-screen. A single-instance
+// group (this name was declared by only one view/regime this frame) is
+// rendered as a plain, non-expandable Leaf - there is no meaningful raw
+// breakdown to reveal for it.
+void BuildGroupedPassRow(int rowIndex, const rg::RenderGraphGroupedPassMetadata& pass, rg::RenderPassToggleRegistry& renderPassToggleRegistry)
 {
     // task_manager/editor-core-separation-10 campaign, PHASE2 - THE fix for
-    // the reported bug: this row's ImGui ID scope is now keyed by its own
-    // loop index (always distinct per row, per frame, by construction),
-    // never by pass.name alone - so two rows sharing the exact same
-    // pass.name (e.g. "AtmosphereSkyViewLutPass" appearing once for Game
-    // View and once for Scene View - a real, permanent, INTENTIONAL fact
-    // about this table, see PHASE0_MASTER_STRATEGY.md section 2.2) no
-    // longer collide as ImGui widgets, even though they intentionally keep
-    // sharing the exact same renderPassToggleRegistry STATE (pass.name is
-    // still the toggle registry's own lookup key below - that business
-    // logic is completely unchanged).
-    ScopedUniqueId idScope(rowIndex, "RenderGraphPanel::BuildPassRow", pass.name.c_str());
+    // the reported bug: this row's ImGui ID scope is keyed by its own loop
+    // index (always distinct per row, per frame, by construction). Now that
+    // every row is genuinely ONE unique pass NAME per regime (this phase's
+    // own fix), a plain name-keyed scope would actually be safe too - but
+    // this stays index-scoped anyway, matching this whole file's own
+    // established discipline (task_manager/editor-core-separation-10,
+    // PHASE2) rather than re-litigating a settled convention for zero
+    // benefit.
+    ScopedUniqueId idScope(rowIndex, "RenderGraphPanel::BuildGroupedPassRow", pass.name.c_str());
 
     ImGui::TableNextRow();
 
@@ -74,27 +161,48 @@ void BuildPassRow(int rowIndex, const rg::RenderGraphPassMetadata& pass, rg::Ren
         renderPassToggleRegistry.SetEnabled(pass.name, enabled);
     }
     if (ImGui::IsItemHovered()) {
+        // editor-core-separation-22 campaign, PHASE5 - tooltip text updated:
+        // the OLD premise ("if this same name appears in BOTH the Offscreen
+        // Regime table (Game View + Scene View share it)...") no longer
+        // applies now that there is only ever ONE row per name in this
+        // table - but the underlying caveat (toggling here affects every
+        // instance of this name at once, there is no per-view control) is
+        // still just as true and still worth stating.
         ImGui::SetTooltip("Unchecking this disables \"%s\" starting next frame - it will stop appearing in this "
                            "table entirely once disabled (see the \"Disabled Built-In Passes\" section below). "
-                           "If this same name appears in BOTH the Offscreen Regime table (Game View + Scene View "
-                           "share it), toggling it here affects EVERY row with this exact name at once - there is "
-                           "no per-view control (see PHASE0_MASTER_STRATEGY.md's Step 2.1).",
-            pass.name.c_str());
+                           "This one row already represents every instance of this pass name across every active "
+                           "view this frame (%s) - toggling here affects all of them at once; there is no "
+                           "per-view control (see PHASE0_MASTER_STRATEGY.md's Step 2.1).",
+            pass.name.c_str(), pass.viewLabel.c_str());
     }
 
     ImGui::TableSetColumnIndex(1); // was 0
+    const bool expandable = pass.instances.size() > 1;
+    ImGuiTreeNodeFlags treeFlags = ImGuiTreeNodeFlags_SpanAvailWidth;
+    if (!expandable) {
+        treeFlags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+    }
+    char label[320];
+    std::snprintf(label, sizeof(label), "%s  (%s)", pass.name.empty() ? "(unnamed)" : pass.name.c_str(),
+        pass.viewLabel.c_str());
     if (pass.isCulled) {
-        ImGui::TextDisabled("%s", pass.name.empty() ? "(unnamed)" : pass.name.c_str());
-    } else {
-        ImGui::TextUnformatted(pass.name.empty() ? "(unnamed)" : pass.name.c_str());
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    }
+    const bool opened = ImGui::TreeNodeEx(label, treeFlags);
+    if (pass.isCulled) {
+        ImGui::PopStyleColor();
+    }
+    if (ImGui::IsItemHovered() && expandable) {
+        ImGui::SetTooltip("Click to reveal the raw, per-view breakdown this row was grouped from (%zu instances).",
+            pass.instances.size());
     }
 
     ImGui::TableSetColumnIndex(2); // was 1
     if (pass.isCulled) {
         ImGui::TextDisabled("culled");
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Culled: no path from this pass's declared writes to this call's own "
-                               "final output(s) was found - see RenderGraphCompiler.h.");
+            ImGui::SetTooltip("Culled: EVERY instance of this pass name was culled this frame - no path from any "
+                               "of them to this call's own final output(s) was found - see RenderGraphCompiler.h.");
         }
     } else {
         ImGui::Text("%u", pass.drawCallCount);
@@ -115,14 +223,27 @@ void BuildPassRow(int rowIndex, const rg::RenderGraphPassMetadata& pass, rg::Ren
     }
 
     ImGui::TableSetColumnIndex(5); // was 4
-    const std::string reads = rg::JoinNames(ExtractResourceRefNames(pass.reads));
+    const std::string reads = rg::JoinNames(pass.reads);
     ImGui::TextUnformatted(reads.c_str());
 
     ImGui::TableSetColumnIndex(6); // was 5
-    const std::string writes = rg::JoinNames(ExtractResourceRefNames(pass.writes));
+    const std::string writes = rg::JoinNames(pass.writes);
     ImGui::TextUnformatted(writes.c_str());
+
+    if (opened && expandable) {
+        for (const rg::RenderGraphPassMetadata& instance : pass.instances) {
+            BuildRawInstanceSubRow(instance);
+        }
+        ImGui::TreePop();
+    }
 }
 
+// editor-core-separation-22 campaign, PHASE5 - now groups `regime.passes`
+// by name (rg::GroupPassMetadataByName()) before iterating, and calls
+// BuildGroupedPassRow() (renamed from BuildPassRow()) once per GROUP
+// instead of once per raw snapshot entry - this is the actual fix for the
+// "two rows here, one row there" cardinality mismatch
+// (PHASE0_MASTER_STRATEGY.md's Root Cause #1).
 void BuildPassTable(
     const char* tableId, const rg::RenderGraphRegimeMetadata& regime, rg::RenderPassToggleRegistry& renderPassToggleRegistry)
 {
@@ -131,39 +252,43 @@ void BuildPassTable(
         return;
     }
 
-    // ImGuiTableFlags_NoSavedSettings is REQUIRED here, not cosmetic - see the
-    // matching comment on BuildResourceTable()'s own tableFlags below for the
-    // full "why": without it, a column's width/weight can get corrupted (an
-    // observed real case: the two stretch columns below, "Reads"/"Writes",
-    // persisted into imgui.ini with Weight=nan after this table was first
-    // laid out at a degenerate zero/near-zero available width - e.g. the
-    // very first frame this panel's dock tab existed but wasn't yet the
-    // visible/selected one) and, once written to disk, silently keeps
-    // reloading that same NaN weight on every future launch - collapsing
-    // both columns down to an unreadable "..", and reportedly crashing the
-    // app outright the moment a user tries to drag (expand) one of them
-    // back out, since ImGui's stretch-weight redistribution math has no
-    // NaN-recovery path. NoSavedSettings makes this table always start each
-    // session from the sane, freshly-computed proportional widths declared
-    // below, so a corrupted weight can never survive to be reloaded.
+    const std::vector<rg::RenderGraphGroupedPassMetadata> groupedPasses = rg::GroupPassMetadataByName(regime.passes);
+
+    // ImGuiTableFlags_NoSavedSettings is REQUIRED here, not cosmetic - see
+    // the matching comment on BuildResourceTable()'s own tableFlags below for
+    // the full "why": without it, a column's width/weight can get corrupted
+    // (an observed real case: the two stretch columns below, "Reads"/
+    // "Writes", persisted into imgui.ini with Weight=nan after this table
+    // was first laid out at a degenerate zero/near-zero available width -
+    // e.g. the very first frame this panel's dock tab existed but wasn't
+    // yet the visible/selected one) and, once written to disk, silently
+    // keeps reloading that same NaN weight on every future launch -
+    // collapsing both columns down to an unreadable "..", and reportedly
+    // crashing the app outright the moment a user tries to drag (expand)
+    // one of them back out, since ImGui's stretch-weight redistribution
+    // math has no NaN-recovery path. NoSavedSettings makes this table
+    // always start each session from the sane, freshly-computed
+    // proportional widths declared below, so a corrupted weight can never
+    // survive to be reloaded.
     constexpr ImGuiTableFlags tableFlags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable
         | ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings;
     // editor-core-separation-8 campaign, PHASE4 - column count is now 7 (was
     // 6): the new "Enabled" column is the FIRST TableSetupColumn() call
-    // below, matching BuildPassRow()'s own new column-index-0 checkbox
-    // exactly. Every other TableSetupColumn() call below is unchanged.
+    // below, matching BuildGroupedPassRow()'s own new column-index-0
+    // checkbox exactly. Every other TableSetupColumn() call below is
+    // unchanged.
     if (ImGui::BeginTable(tableId, 7, tableFlags)) {
         ImGui::TableSetupColumn("Enabled", ImGuiTableColumnFlags_WidthFixed, 60.0f);
-        ImGui::TableSetupColumn("Pass", ImGuiTableColumnFlags_WidthFixed, 110.0f);
+        ImGui::TableSetupColumn("Pass", ImGuiTableColumnFlags_WidthFixed, 170.0f); // widened slightly (was 110.0f) - now also carries the "(Game+Scene)"/"(Game only)"/"(Scene only)"/"Shared" view-label badge (PHASE5).
         ImGui::TableSetupColumn("Draws", ImGuiTableColumnFlags_WidthFixed, 55.0f);
         ImGui::TableSetupColumn("Tris", ImGuiTableColumnFlags_WidthFixed, 65.0f);
-        ImGui::TableSetupColumn("GPU Time", ImGuiTableColumnFlags_WidthFixed, 75.0f);
+        ImGui::TableSetupColumn("GPU Time", ImGuiTableColumnFlags_WidthFixed, 130.0f); // widened (was 75.0f) - now shows a per-view breakdown ("Game: 0.12 ms, Scene: 0.08 ms") for a multi-instance group, not just a single number.
         ImGui::TableSetupColumn("Reads");
         ImGui::TableSetupColumn("Writes");
         ImGui::TableHeadersRow();
 
-        for (std::size_t i = 0; i < regime.passes.size(); ++i) {
-            BuildPassRow(static_cast<int>(i), regime.passes[i], renderPassToggleRegistry);
+        for (std::size_t i = 0; i < groupedPasses.size(); ++i) {
+            BuildGroupedPassRow(static_cast<int>(i), groupedPasses[i], renderPassToggleRegistry);
         }
 
         ImGui::EndTable();
