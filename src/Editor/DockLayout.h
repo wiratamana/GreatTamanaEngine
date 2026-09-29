@@ -5,6 +5,7 @@ namespace gte {
 struct EditorContext;
 class Game;
 class Renderer;
+class IHotReloadDebugCapability; // editor-core-separation-19 campaign, PHASE1.
 
 // Hosts a full-viewport, invisible window carrying the top menu bar (File >
 // Save Scene/Open Scene/Exit, ...) and the DockSpace every other Editor panel
@@ -14,7 +15,8 @@ class Renderer;
 // optimization). Also handles the Ctrl+S/Ctrl+O global keyboard shortcuts for
 // Save/Open Scene (Editor/SceneIO.h). Called once per frame by
 // ImGuiEditorLayer::BuildUI(), before any panel builder (Panels/*.h) runs.
-void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer);
+void BuildDockspaceAndMenuBar(
+    EditorContext& ctx, Game& game, Renderer& renderer, IHotReloadDebugCapability* hotReloadDebugCapability);
 
 // network-impl-7 campaign - the ONE place ImGui::FindWindowByName()
 // (imgui_internal.h) is called from for the GET /activate_tab feature,

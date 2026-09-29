@@ -125,6 +125,17 @@ bool TryRunProjectAssemblyBuildSynchronously(const std::string& projectName, con
 // TryMarkInFlight() rejects it.
 bool TriggerProjectAssemblyCompile(const std::string& projectName, const std::string& buildDirectory);
 
+// editor-core-separation-19 campaign (On-Engine Project Workflow plan,
+// BIG-STEP 5), PHASE1. Read-only query over the SAME g_inFlightProjects set
+// TryMarkInFlight()/ClearInFlight() (ProjectAssemblyBuildRunner.cpp's own
+// anonymous namespace) already guard TriggerProjectAssemblyCompile()/
+// TryRunProjectAssemblyBuildSynchronously() with - never mutates anything,
+// safe to call from ANY thread (guarded by the same g_inFlightMutex).
+// Lets a UI surface (the "Project > Compile" menu item, DockLayout.cpp) show
+// a "(compiling...)" hint without a new, separate, independently-drifting
+// tracking mechanism of its own.
+bool IsProjectAssemblyBuildInFlight(const std::string& projectName);
+
 // Walks upward from `startDirectory` (typically gte::ExecutableDirectory())
 // looking for a real CMakeCache.txt file, up to `maxParentLevels` parent
 // directories (default 5) - see this phase's own doc file's "STEP 2"

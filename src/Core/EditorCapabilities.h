@@ -228,6 +228,16 @@ public:
     // the caller polls GET /get_logs to watch it happen.
     virtual bool TriggerCompileOnly(const std::string& projectName) = 0;
 
+    // editor-core-separation-19 campaign (On-Engine Project Workflow plan,
+    // BIG-STEP 5), PHASE1. Thin wrapper over
+    // Core/Plugins/ProjectAssemblyBuildRunner.h's own
+    // IsProjectAssemblyBuildInFlight() - lets a UI surface show a
+    // "(compiling...)" hint for the CURRENTLY ACTIVE project without
+    // depending on ProjectAssemblyBuildRunner.h directly (mirrors this
+    // whole interface's existing "gte_core-tier code never needs to see
+    // the real implementation header" contract).
+    virtual bool IsCompileInFlight(const std::string& projectName) const = 0;
+
     // THIS campaign's OWN implementation (PHASE2) is a permanent placeholder
     // for this whole campaign's lifetime - always returns false, does
     // nothing else. A future BIG-STEP 3 campaign replaces ONLY this

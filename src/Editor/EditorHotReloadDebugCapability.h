@@ -35,6 +35,7 @@ public:
     std::vector<std::string> GetRegisteredComponentTypeNames() const override;
     std::string BuildSceneSnapshotJson(Game& game) override;
     bool TriggerCompileOnly(const std::string& projectName) override;
+    bool IsCompileInFlight(const std::string& projectName) const override;
     bool TriggerHotReload(const std::string& projectName) override;
     bool SetProbeHotReloadMarkerValueForTesting(int value) override;
 

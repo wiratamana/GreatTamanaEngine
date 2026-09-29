@@ -94,6 +94,12 @@ class IProjectLifecycleCapability;
 // ever stores/passes a POINTER to it, never dereferences one itself.
 class IAssetScaffoldingCapability;
 
+// editor-core-separation-19 campaign (On-Engine Project Workflow plan,
+// BIG-STEP 5), PHASE1 - forward-declared only, mirrors
+// "class IAssetScaffoldingCapability;" immediately above: this header only
+// ever stores/passes a POINTER to it, never dereferences one itself.
+class IHotReloadDebugCapability;
+
 // Abstraction boundary between engine-core (Application/Renderer/Game) and
 // the optional Editor/Debug UI. Dear ImGui-backed in real builds, but
 // nothing outside src/Editor/ (specifically: nothing outside whichever
@@ -737,6 +743,19 @@ public:
     // EditorHost's own constructor body. Always a safe no-op for
     // NullEditorLayer.
     virtual void SetAssetScaffoldingCapability(IAssetScaffoldingCapability* capability) = 0;
+
+    // editor-core-separation-19 campaign (On-Engine Project Workflow plan,
+    // BIG-STEP 5), PHASE1 - hands the real ImGui implementation a live
+    // IHotReloadDebugCapability* (Core/EditorCapabilities.h) so
+    // DockLayout.cpp's own "Project > Compile" menu item can call
+    // TriggerCompileOnly()/IsCompileInFlight() directly - the exact SAME
+    // methods POST /project_assembly/debug/compile_only already calls
+    // (LDD-PW5's "one function, two callers" rule, mirroring
+    // SetProjectLifecycleCapability's own precedent above). Called exactly
+    // ONCE, from EditorHost's own constructor body. Always a safe no-op for
+    // NullEditorLayer (a release build has no menu bar to wire this into at
+    // all).
+    virtual void SetHotReloadDebugCapability(IHotReloadDebugCapability* capability) = 0;
 
     // Requests a real capture - returns false (a safe no-op) if the Frame
     // Debugger is not currently enabled (mirroring the "Capture" button's

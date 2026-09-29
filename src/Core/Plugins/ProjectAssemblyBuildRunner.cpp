@@ -428,6 +428,15 @@ bool TriggerProjectAssemblyCompile(const std::string& projectName, const std::st
     return true;
 }
 
+// editor-core-separation-19 campaign (On-Engine Project Workflow plan,
+// BIG-STEP 5), PHASE1. See this function's own doc comment in
+// ProjectAssemblyBuildRunner.h for the full contract.
+bool IsProjectAssemblyBuildInFlight(const std::string& projectName)
+{
+    std::lock_guard<std::mutex> lock(g_inFlightMutex);
+    return g_inFlightProjects.count(projectName) != 0;
+}
+
 std::filesystem::path ResolveCMakeBuildDirectory(const std::filesystem::path& startDirectory, int maxParentLevels)
 {
     std::filesystem::path current = startDirectory;

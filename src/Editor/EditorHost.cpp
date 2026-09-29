@@ -252,6 +252,17 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
     // to its two base sub-objects.
     m_editorLayer->SetAssetScaffoldingCapability(&s_editorProjectLifecycleCapability);
 
+    // editor-core-separation-19 campaign (On-Engine Project Workflow plan,
+    // BIG-STEP 5), PHASE1 - gives the real ImGui implementation
+    // (ImGuiEditorLayer) a live IHotReloadDebugCapability* so its own
+    // "Project > Compile" menu item can call TriggerCompileOnly()/
+    // IsCompileInFlight() directly. Safe here: s_editorHotReloadDebugCapability
+    // (this same file's own namespace-scope static) already exists via
+    // ordinary static initialization, strictly before this constructor body
+    // ever runs - the exact SAME pointer already passed as m_networkServer's
+    // 8th constructor argument (line 214).
+    m_editorLayer->SetHotReloadDebugCapability(&s_editorHotReloadDebugCapability);
+
     // editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
     // BIG-STEP 2), PHASE4 - hands EditorHotReloadDebugCapability a live
     // ProjectAssemblyHost& (via Core::GetProjectAssemblyHost()), strictly

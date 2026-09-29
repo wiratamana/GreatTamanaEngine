@@ -527,7 +527,7 @@ public:
 
         Registry& registry = game.GetRegistry();
 
-        BuildDockspaceAndMenuBar(m_ctx, game, renderer);
+        BuildDockspaceAndMenuBar(m_ctx, game, renderer, m_hotReloadDebugCapability);
 
         // editor-core-separation-16 campaign (On-Engine Project Workflow
         // plan, BIG-STEP 2), PHASE4 - the "New Project..." floating window
@@ -966,6 +966,17 @@ public:
     {
         m_assetScaffoldingCapability = capability;
     }
+
+    // editor-core-separation-19 campaign (On-Engine Project Workflow plan,
+    // BIG-STEP 5), PHASE1 - see IEditorLayer::
+    // SetHotReloadDebugCapability()'s own doc comment for the full
+    // contract. Stored, never called from here - DockLayout.cpp's own
+    // BuildDockspaceAndMenuBar() call (below, inside BuildUI()) is what
+    // actually invokes it.
+    void SetHotReloadDebugCapability(IHotReloadDebugCapability* capability) override
+    {
+        m_hotReloadDebugCapability = capability;
+    }
     bool FrameDebuggerCaptureNow() override { return m_frameDebuggerPanel.CaptureNowFromCommand(); }
     void FrameDebuggerSelectEvent(int index) override { m_frameDebuggerPanel.SelectEventFromCommand(index); }
     bool FrameDebuggerSetChannel(const std::string& channel) override
@@ -1211,6 +1222,17 @@ private:
     // doc comment for the lifetime contract (EditorHost's own
     // s_editorProjectLifecycleCapability static outlives this object).
     IAssetScaffoldingCapability* m_assetScaffoldingCapability = nullptr;
+    // editor-core-separation-19 campaign (On-Engine Project Workflow plan,
+    // BIG-STEP 5), PHASE1 - non-owning, see
+    // IEditorLayer::SetHotReloadDebugCapability()'s own doc comment for the
+    // lifetime contract (EditorHost's own s_editorHotReloadDebugCapability
+    // static outlives this object). Read directly by
+    // DockLayout.cpp's BuildDockspaceAndMenuBar() call below - unlike
+    // m_projectLifecycleCapability/m_assetScaffoldingCapability, this one
+    // is NOT handed to a separate floating-window Build() call, since the
+    // "Compile" menu item lives INSIDE the menu bar itself, not a later,
+    // separate window.
+    IHotReloadDebugCapability* m_hotReloadDebugCapability = nullptr;
 
     // Shared state read/written by DockLayout.cpp's
     // BuildDockspaceAndMenuBar() and every Panels/*.cpp builder called from

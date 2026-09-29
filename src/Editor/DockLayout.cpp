@@ -3,6 +3,8 @@
 #include "../Core/EditorPanelRegistry.h"
 #include "PlaybackControls.h"
 #include "SceneIO.h"
+#include "../Core/EditorCapabilities.h" // IHotReloadDebugCapability - dereferenced below, needs the full type.
+#include "ActiveProjectAssemblyState.h"
 
 #include "../Game/Game.h"
 
@@ -110,7 +112,8 @@ void BuildDefaultDockLayout(ImGuiID dockspaceId, ImVec2 size)
 }
 } // namespace
 
-void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer)
+void BuildDockspaceAndMenuBar(
+    EditorContext& ctx, Game& game, Renderer& renderer, IHotReloadDebugCapability* hotReloadDebugCapability)
 {
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
@@ -177,15 +180,6 @@ void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer
             if (ImGui::MenuItem("New Project...")) {
                 ctx.newProjectWindowOpen = true;
             }
-            // editor-core-separation-16 campaign - reserved, disabled
-            // placeholder for the "Compile" (BIG-STEP 5) campaign, named
-            // exactly as PROJECTWORKFLOW_BIGSTEP_01...txt's own LDD-PW1
-            // requires (all three items share ONE menu) - never wired to
-            // any real action by THIS campaign. The trailing `false`
-            // disables the item (ImGui::MenuItem's 4th parameter); remove
-            // it, and add the real handler, only when that later campaign
-            // actually lands.
-            //
             // editor-core-separation-17 campaign (On-Engine Project
             // Workflow plan, BIG-STEP 3), PHASE4 - "Open Project..." is now
             // real: wired to ctx.openProjectWindowOpen, opening
@@ -194,7 +188,32 @@ void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer
                 ctx.openProjectWindowOpen = true;
             }
             ImGui::Separator();
-            if (ImGui::MenuItem("Compile", nullptr, false, false)) {}
+            // editor-core-separation-19 campaign (On-Engine Project Workflow plan,
+            // BIG-STEP 5), PHASE1 - real now. Reads the SAME ActiveProjectAssemblyState
+            // singleton BIG-STEP 2/3/4 already read/wrote (LDD-PW2 - exactly one
+            // active project). The item stays ENABLED (never disabled) while a
+            // build is already in flight for this project - clicking it again must
+            // still be possible, to observe the "already in progress" status
+            // message (PHASE0_MASTER_STRATEGY.md, Section 3.4) - only its own label
+            // gains a "(compiling...)" suffix as a purely informational cue.
+            {
+                const ActiveProjectAssemblyInfo active = ActiveProjectAssemblyState::Instance().GetActive();
+                const bool buildInFlight = (hotReloadDebugCapability != nullptr && active.hasActiveProject)
+                    && hotReloadDebugCapability->IsCompileInFlight(active.name);
+                std::string compileLabel = active.hasActiveProject ? ("Compile '" + active.name + "'") : "Compile";
+                if (buildInFlight) {
+                    compileLabel += " (compiling...)";
+                }
+                const bool compileEnabled = active.hasActiveProject && hotReloadDebugCapability != nullptr;
+                if (ImGui::MenuItem(compileLabel.c_str(), nullptr, false, compileEnabled)) {
+                    const bool started = hotReloadDebugCapability->TriggerCompileOnly(active.name);
+                    ctx.projectWorkflowStatusMessage = started
+                        ? ("Compiling '" + active.name + "' - watch the Log panel for progress.")
+                        : ("A build for '" + active.name + "' is already in progress.");
+                    ctx.projectWorkflowStatusIsError = !started;
+                    ctx.projectWorkflowStatusSetTime = std::chrono::steady_clock::now();
+                }
+            }
             ImGui::EndMenu();
         }
         ImGui::EndMenuBar();

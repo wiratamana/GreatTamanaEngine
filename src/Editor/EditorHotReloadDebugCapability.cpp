@@ -108,6 +108,11 @@ bool EditorHotReloadDebugCapability::TriggerCompileOnly(const std::string& proje
     return TriggerProjectAssemblyCompile(projectName, buildDirectory.string());
 }
 
+bool EditorHotReloadDebugCapability::IsCompileInFlight(const std::string& projectName) const
+{
+    return IsProjectAssemblyBuildInFlight(projectName);
+}
+
 bool EditorHotReloadDebugCapability::TriggerHotReload(const std::string& projectName)
 {
     // editor-core-separation-14 campaign (Project Assembly Hot Reload plan,

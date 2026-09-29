@@ -106,6 +106,12 @@ public:
     // to give a capability to at all, mirroring
     // SetProjectLifecycleCapability() immediately above.
     void SetAssetScaffoldingCapability(IAssetScaffoldingCapability* /*capability*/) override { }
+
+    // editor-core-separation-19 campaign (On-Engine Project Workflow plan,
+    // BIG-STEP 5), PHASE1 - a release build has no menu bar to wire this
+    // into at all, mirroring SetAssetScaffoldingCapability() immediately
+    // above.
+    void SetHotReloadDebugCapability(IHotReloadDebugCapability* /*capability*/) override { }
     bool FrameDebuggerCaptureNow() override { return false; }
     void FrameDebuggerSelectEvent(int /*index*/) override { }
     bool FrameDebuggerSetChannel(const std::string& /*channel*/) override { return false; }
