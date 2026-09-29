@@ -1113,9 +1113,24 @@ void Core::BuildFrame()
                             b.ImportBuffer(request.name, request.outputBuffer, request.outputBufferSize));
                     }
 
-                    rg::RenderPassBlackboard blackboard;
-                    blackboard.BeginFrame();
-                    rg::RenderPassFrameContext frame{ {}, rg::RenderViewId::Shared(), blackboard, b, {}, {} };
+                    // editor-core-separation-22 campaign, PHASE6
+                    // (PHASE6_IRON_RULE_V2_BIDIRECTIONAL_DETECTOR.md, Step
+                    // 3.3 item 2) - `blackboard` is now a real Core MEMBER
+                    // (m_offscreenBlackboardThisFrame, see Core.h's own doc
+                    // comment on it) rather than a plain stack local, so it
+                    // survives past this callback's own return - the SAME
+                    // object Application/EditorHost's own IEditorLayer::
+                    // BuildUI() call later reads back through
+                    // Core::GetOffscreenBlackboardForFrameDebugger() for the
+                    // new Clause C "disabled side effect still visible"
+                    // detector. `.BeginFrame()` is still called here, every
+                    // frame, exactly as before - this promotion changes
+                    // nothing about WHEN/HOW OFTEN this blackboard's own
+                    // contents are cleared and rebuilt, only how long the
+                    // object itself lives.
+                    m_offscreenBlackboardThisFrame.BeginFrame();
+                    rg::RenderPassFrameContext frame{
+                        {}, rg::RenderViewId::Shared(), m_offscreenBlackboardThisFrame, b, {}, {} };
 
                     m_currentViewDataThisFrame.clear();
                     m_currentFrameDebuggerCaptureForOffscreenPipeline = nullptr;
@@ -1271,9 +1286,10 @@ void Core::BuildFrame()
                     m_offscreenRenderPipeline.DeclareInto(b, frame);
 
                     const std::optional<std::function<void(VkCommandBuffer)>> gameSkyBackgroundCallbackForReplay =
-                        blackboard.Fetch<std::function<void(VkCommandBuffer)>>(kGameSkyBackgroundCallbackKey);
+                        m_offscreenBlackboardThisFrame.Fetch<std::function<void(VkCommandBuffer)>>(
+                            kGameSkyBackgroundCallbackKey);
 #ifndef NDEBUG
-                    blackboard.ReportUnusedPublishesIfAny();
+                    m_offscreenBlackboardThisFrame.ReportUnusedPublishesIfAny();
 #endif
 
                     std::vector<rg::TextureHandle> outputs = std::move(frame.finalTextureOutputs);
@@ -1281,7 +1297,7 @@ void Core::BuildFrame()
                     if (gameTarget != nullptr && frameDebuggerCapture != nullptr && m_editorLayer != nullptr
                         && m_editorLayer->ConsumePendingFrameDebuggerReplayRequest()) {
                         const std::vector<rg::BufferHandle> gpuSkinningBuffersForReplay =
-                            blackboard.Fetch<std::vector<rg::BufferHandle>>(kGpuSkinningOutputsKey)
+                            m_offscreenBlackboardThisFrame.Fetch<std::vector<rg::BufferHandle>>(kGpuSkinningOutputsKey)
                                 .value_or(std::vector<rg::BufferHandle>{});
                         const std::function<void(VkCommandBuffer)> recordGameSkyBackground =
                             gameSkyBackgroundCallbackForReplay.value_or(std::function<void(VkCommandBuffer)>{});

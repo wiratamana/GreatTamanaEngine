@@ -6,11 +6,16 @@
 #include "../../Encoding/PixelConversion.h" // PHASE3 - Encoding::ConvertBgraToRgbaInPlace().
 #include "../../Renderer/RenderGraph/RenderGraph.h"
 #include "../../Renderer/RenderGraph/RenderPassToggleRegistry.h" // editor-core-separation-21 campaign, PHASE5 - IsEnabled() lookup for the honesty detector.
+#include "../../Renderer/RenderGraph/RenderPipeline.h" // editor-core-separation-22 campaign, PHASE6 - rg::RenderPassBlackboard::WasPublishedThisFrame() for the Clause C detector.
 #include "../../Renderer/Renderer.h"
 #include "../../Renderer/RenderTexture.h"
 #include "../../Core/Logging.h" // editor-core-separation-21 campaign, PHASE2 - the new auto-recapture-on-toggle log line (Build()).
 #include "../RenderPassHonestyChecker.h" // editor-core-separation-21 campaign, PHASE5 - the pure mismatch detector.
 #include "../RenderPassHonestyGuard.h" // editor-core-separation-21 campaign, PHASE5 - log-once-per-new-incident wrapper.
+#include "../FrameDebuggerCoverageChecker.h" // editor-core-separation-22 campaign, PHASE6 - Clause B pure detector.
+#include "../FrameDebuggerCoverageGuard.h" // editor-core-separation-22 campaign, PHASE6 - Clause B log-once-per-new-incident wrapper.
+#include "../FrameDebuggerSideChannelChecker.h" // editor-core-separation-22 campaign, PHASE6 - Clause C pure detector.
+#include "../FrameDebuggerSideChannelGuard.h" // editor-core-separation-22 campaign, PHASE6 - Clause C log-once-per-new-incident wrapper.
 
 #include <backends/imgui_impl_vulkan.h>
 #include <imgui.h>
@@ -390,6 +395,24 @@ void FrameDebuggerPanel::TriggerCapture()
         RenderPassHonestyGuard::Instance().ReportCaptureMismatches(mismatches);
     }
 
+    // editor-core-separation-22 campaign, PHASE6
+    // (PHASE6_IRON_RULE_V2_BIDIRECTIONAL_DETECTOR.md, Step 3.3) - Clause C
+    // "disabled side effect still visible" detector: a narrow, curated
+    // allowlist of previously-leaky `RenderPassBlackboard` keys
+    // (FrameDebuggerSideChannelChecker.h's own `KnownRiskBlackboardKeyRules()`
+    // - see PHASE6_COMPLETION_REPORT.md's own "honest scoping" section for
+    // why this is intentionally NOT a fully general detector). A no-op
+    // whenever EITHER m_frameToggleRegistry or m_frameBlackboard is null
+    // (defensive only - every real production call site supplies both, see
+    // Build()'s own new parameter).
+    if (m_frameToggleRegistry != nullptr && m_frameBlackboard != nullptr) {
+        const std::vector<std::string> leaks = DetectDisabledPassBlackboardKeyLeaks(
+            KnownRiskBlackboardKeyRules(),
+            [this](const std::string& name) { return m_frameToggleRegistry->IsEnabled(name); },
+            [this](rg::RenderPassId key) { return m_frameBlackboard->WasPublishedThisFrame(key); });
+        FrameDebuggerSideChannelGuard::Instance().ReportCaptureMismatches(leaks);
+    }
+
     FrameDebuggerRenderTargetInfo renderTargetInfo;
     const VkExtent2D extent = m_frameGameView->Extent();
     renderTargetInfo.width = static_cast<int>(extent.width);
@@ -397,6 +420,20 @@ void FrameDebuggerPanel::TriggerCapture()
     renderTargetInfo.format = ToString(m_frameGameView->Format());
 
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, m_captureContext, renderTargetInfo);
+
+    // editor-core-separation-22 campaign, PHASE6
+    // (PHASE6_IRON_RULE_V2_BIDIRECTIONAL_DETECTOR.md, Step 3.1) - the
+    // permanent, self-enforcing Clause B "ran but not shown" detector, run
+    // once per real capture, mirroring RenderPassHonestyGuard's own
+    // "log-once-per-new-incident" shape immediately above (Clause A) but
+    // against a DIFFERENT contradiction: a pass that genuinely, non-culled,
+    // executed this frame (per `graphSnapshot`) yet has NO corresponding
+    // leaf anywhere in the just-built `snapshot` tree. Always runs (no
+    // toggle-registry/blackboard nullability concern here - both inputs are
+    // already unconditionally available at this point in TriggerCapture()).
+    const std::vector<std::string> missingFromTree =
+        DetectPassesMissingFromFrameDebuggerTree(graphSnapshot.passesInExecutionOrder, snapshot);
+    FrameDebuggerCoverageGuard::Instance().ReportCaptureMismatches(missingFromTree);
 
     // task_manager/frame-debugger-7 campaign, PHASE4
     // (PHASE4_PREVIEW_WIRING_AND_DATA_MODEL.md, Step 3.2 point 2) - widened
@@ -972,7 +1009,8 @@ void FrameDebuggerPanel::BuildEventDetailsSection(const std::optional<FrameDebug
 }
 
 void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg::RenderGraph& renderGraph,
-    RenderTexture& gameView, RenderTexture* compositedGameView, rg::RenderPassToggleRegistry* toggleRegistry)
+    RenderTexture& gameView, RenderTexture* compositedGameView, rg::RenderPassToggleRegistry* toggleRegistry,
+    const rg::RenderPassBlackboard* offscreenBlackboard) // editor-core-separation-22 campaign, PHASE6.
 {
     // task_manager/frame-debugger-7 campaign, PHASE3
     // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step
@@ -1055,6 +1093,7 @@ void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg:
     m_frameGameView = &gameView;
     m_frameGameViewComposited = compositedGameView; // PHASE1 (frame-debugger-4) - nullable, see header comment.
     m_frameToggleRegistry = toggleRegistry; // editor-core-separation-21 campaign, PHASE5 - nullable, see header comment.
+    m_frameBlackboard = offscreenBlackboard; // editor-core-separation-22 campaign, PHASE6 - nullable, see header comment.
 
     // PHASE4 - refreshed unconditionally every call, cheap, mirrors
     // BoneViewerWindow's own m_device precedent - only ever actually read by

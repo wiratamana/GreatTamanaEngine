@@ -223,6 +223,24 @@ public:
         return m_renderPassToggleRegistry;
     }
 
+    // editor-core-separation-22 campaign, PHASE6
+    // (PHASE6_IRON_RULE_V2_BIDIRECTIONAL_DETECTOR.md, Step 3.3 item 2) - the
+    // SAME `rg::RenderPassBlackboard` BuildFrame()'s own offscreen Execute()
+    // callback declares every provider against this frame, now exposed
+    // read-only so Application/EditorHost's own IEditorLayer::BuildUI() call
+    // (and, through it, Panels/FrameDebuggerPanel.cpp's TriggerCapture(), the
+    // new Clause C "disabled side effect still visible" detector) can ask
+    // "was key X published THIS frame" via RenderPassBlackboard::
+    // WasPublishedThisFrame() - see m_offscreenBlackboardThisFrame's own
+    // member comment below for why this is safe to read any time after
+    // BuildFrame() has returned (mirrors GetGpuDrivenBatchDebugInfo()'s own
+    // "populated fresh every frame, safe to read afterward" contract
+    // immediately above).
+    const rg::RenderPassBlackboard& GetOffscreenBlackboardForFrameDebugger() const noexcept
+    {
+        return m_offscreenBlackboardThisFrame;
+    }
+
     // PHASE13 - the SAME AtmosphereSettings/AtmosphereLutRenderer instances
     // Core's own per-frame Atmosphere pass-building code (BuildFrame())
     // reads/writes, now exposed so Application::Run()'s own
@@ -575,6 +593,26 @@ private:
     // owned value member (no Vulkan/heavy dependency, needs no lazy
     // construction).
     rg::RenderPassToggleRegistry m_renderPassToggleRegistry;
+
+    // editor-core-separation-22 campaign, PHASE6
+    // (PHASE6_IRON_RULE_V2_BIDIRECTIONAL_DETECTOR.md, Step 3.3 item 2) -
+    // PROMOTED from a lambda-local variable (BuildFrame()'s own offscreen
+    // Execute() callback used to declare `rg::RenderPassBlackboard
+    // blackboard;` as a plain stack local, destroyed the instant that
+    // callback returned) to a real Core member, so it survives long enough
+    // for GetOffscreenBlackboardForFrameDebugger() (above) to read it back
+    // AFTER BuildFrame() has returned this same frame - the ONLY behavior
+    // change this promotion causes is that the object's OWN LIFETIME is
+    // longer; `.BeginFrame()` is still called exactly once per offscreen
+    // Execute() call, at the exact same call site, so its CONTENTS are
+    // still cleared and rebuilt fresh every single frame, byte-identical to
+    // the old local-variable behavior. Game-View/Scene-View-shared, exactly
+    // like the local it replaces (this is the OFFSCREEN regime's own
+    // blackboard only - the separate PIPELINED "presentBlackboard" local a
+    // few hundred lines later in Core.cpp is UNRELATED and untouched by
+    // this phase, since nothing the Frame Debugger's Clause C detector
+    // cares about is ever published there).
+    rg::RenderPassBlackboard m_offscreenBlackboardThisFrame;
 
     // Populated fresh, every frame, by BuildFrame() itself, immediately
     // before calling m_offscreenRenderPipeline.DeclareInto() - read ONLY by

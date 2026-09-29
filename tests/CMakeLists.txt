@@ -2399,6 +2399,13 @@ if(TRUE)
         # ImGui/Logger/live-RenderGraph dependency by design - see
         # RenderPassHonestyChecker.h).
         Editor/RenderPassHonestyCheckerTests.cpp
+        # task_manager/editor-core-separation-22 campaign, PHASE6
+        # (PHASE6_IRON_RULE_V2_BIDIRECTIONAL_DETECTOR.md) - pure, Tier-1
+        # tests for the two NEW detectors (zero ImGui/Logger/live-RenderGraph
+        # dependency by design, mirroring RenderPassHonestyCheckerTests.cpp
+        # immediately above).
+        Editor/FrameDebuggerCoverageCheckerTests.cpp
+        Editor/FrameDebuggerSideChannelCheckerTests.cpp
         Editor/ProfilerPanelDataTests.cpp
         Editor/JobsPanelDataTests.cpp
         Editor/LogPanelDataTests.cpp

@@ -27,6 +27,7 @@ class RenderTexture;
 namespace rg {
 class RenderGraph;
 class RenderPassToggleRegistry; // editor-core-separation-21 campaign, PHASE5 - Build()'s new optional parameter.
+class RenderPassBlackboard; // editor-core-separation-22 campaign, PHASE6 - Build()'s new optional parameter (Clause C).
 } // namespace rg
 
 // task_manager/frame-debugger-2 campaign (PHASE2) - the Editor's
@@ -116,7 +117,16 @@ public:
     // RenderGraphPassSnapshot::kind (== rg::PassKind::Compute) flag - no externally-supplied
     // name list is threaded through this call anymore.
     void Build(EditorContext& ctx, Renderer& renderer, const rg::RenderGraph& renderGraph, RenderTexture& gameView,
-        RenderTexture* compositedGameView, rg::RenderPassToggleRegistry* toggleRegistry = nullptr);
+        RenderTexture* compositedGameView, rg::RenderPassToggleRegistry* toggleRegistry = nullptr,
+        // editor-core-separation-22 campaign, PHASE6
+        // (PHASE6_IRON_RULE_V2_BIDIRECTIONAL_DETECTOR.md, Step 3.3 item 2) -
+        // NEW, TRAILING, nullable parameter, mirroring `toggleRegistry`'s
+        // own exact nullability convention immediately above (a caller with
+        // no live blackboard to pass - defensive only - simply disables the
+        // new Clause C detector for that capture). Fed by
+        // ImGuiEditorLayer::BuildUI()'s own new `offscreenBlackboard`
+        // parameter (Core::GetOffscreenBlackboardForFrameDebugger()).
+        const rg::RenderPassBlackboard* offscreenBlackboard = nullptr);
 
     // See IEditorLayer::PrepareFrameDebuggerCaptureContext()'s own doc
     // comment (EditorLayer.h) - the real implementation this forwards to.
@@ -584,6 +594,13 @@ private:
     // already in this codebase (see AtmosphereLutRenderer.cpp's own
     // precedent).
     rg::RenderPassToggleRegistry* m_frameToggleRegistry = nullptr;
+    // editor-core-separation-22 campaign, PHASE6
+    // (PHASE6_IRON_RULE_V2_BIDIRECTIONAL_DETECTOR.md, Step 3.3 item 2) -
+    // cached the SAME way as m_frameToggleRegistry immediately above, for
+    // TriggerCapture()'s own new Clause C "disabled side effect still
+    // visible" detector (FrameDebuggerSideChannelChecker.h/
+    // FrameDebuggerSideChannelGuard.h). Nullable, same defensive reasoning.
+    const rg::RenderPassBlackboard* m_frameBlackboard = nullptr;
     // frame-debugger-5 campaign, PHASE2 - m_frameGpuSkinningPassNames (the
     // old, name-list-driven "which passes are GPU Skinning" cache) was
     // REMOVED here (see PHASE0_MASTER_STRATEGY.md's Locked Design Decision

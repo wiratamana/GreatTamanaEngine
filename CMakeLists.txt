@@ -1157,6 +1157,20 @@ add_library(gte_editor STATIC
     src/Editor/RenderPassHonestyChecker.cpp
     src/Editor/RenderPassHonestyGuard.h
     src/Editor/RenderPassHonestyGuard.cpp
+    # task_manager/editor-core-separation-22 campaign, PHASE6
+    # (PHASE6_IRON_RULE_V2_BIDIRECTIONAL_DETECTOR.md) - TWO new detectors,
+    # each mirroring RenderPassHonestyChecker/RenderPassHonestyGuard's own
+    # exact "pure logic + Logger-aware singleton wrapper" precedent
+    # immediately above: Clause B ("ran but not shown") and Clause C
+    # ("disabled side effect still visible").
+    src/Editor/FrameDebuggerCoverageChecker.h
+    src/Editor/FrameDebuggerCoverageChecker.cpp
+    src/Editor/FrameDebuggerCoverageGuard.h
+    src/Editor/FrameDebuggerCoverageGuard.cpp
+    src/Editor/FrameDebuggerSideChannelChecker.h
+    src/Editor/FrameDebuggerSideChannelChecker.cpp
+    src/Editor/FrameDebuggerSideChannelGuard.h
+    src/Editor/FrameDebuggerSideChannelGuard.cpp
     # task_manager/editor-core-separation-10 campaign, PHASE2 - the ONE
     # mandated public helper for entering a per-iteration ImGui ID scope -
     # see AGENTS.md's "ImGui Widget ID Uniqueness" section.

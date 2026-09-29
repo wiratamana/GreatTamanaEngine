@@ -71,6 +71,7 @@ namespace rg {
 class RenderGraph;
 class RenderGraphBuilder;
 class RenderPassToggleRegistry; // editor-core-separation-8 campaign, PHASE1/PHASE3.
+class RenderPassBlackboard; // editor-core-separation-22 campaign, PHASE6 - BuildUI()'s new trailing parameter.
 } // namespace rg
 
 // editor-core-separation-8 campaign, PHASE2/PHASE3 - forward-declared only,
@@ -531,7 +532,19 @@ public:
         // Graph" panel's own per-plugin-feature "Enabled" checkbox + priority
         // DragInt (PHASE4) call SetFeatureEnabled()/SetFeaturePriority()
         // directly through this pointer, always null-checked first.
-        RenderFeatureCompositor* renderFeatureCompositor) = 0;
+        RenderFeatureCompositor* renderFeatureCompositor,
+        // editor-core-separation-22 campaign, PHASE6
+        // (PHASE6_IRON_RULE_V2_BIDIRECTIONAL_DETECTOR.md, Step 3.3 item 2) -
+        // NEW, TRAILING parameter (every pre-existing call site keeps
+        // compiling with exactly one new argument, mirroring every prior
+        // BuildUI() extension above). NEVER null - Core owns exactly one
+        // instance as a plain value member (Core::m_offscreenBlackboardThisFrame),
+        // exposed via Core::GetOffscreenBlackboardForFrameDebugger() - see
+        // that accessor's own doc comment (Core.h) for why reading it here,
+        // AFTER Core::BuildFrame() has already returned this same frame, is
+        // safe. Forwarded through to Panels/FrameDebuggerPanel.cpp's new
+        // Clause C "disabled side effect still visible" detector.
+        const rg::RenderPassBlackboard& offscreenBlackboard) = 0;
 
     // Records this frame's UI draw data into cmd. Called from inside
     // Renderer::Present()'s recordExtra hook - i.e. while the swapchain

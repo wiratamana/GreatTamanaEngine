@@ -531,7 +531,8 @@ public:
         const std::vector<GpuDrivenBatchDebugInfo>& gpuDrivenBatchDebugInfo,
         const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries,
         rg::RenderPassToggleRegistry& renderPassToggleRegistry,
-        RenderFeatureCompositor* renderFeatureCompositor) override
+        RenderFeatureCompositor* renderFeatureCompositor,
+        const rg::RenderPassBlackboard& offscreenBlackboard) override // editor-core-separation-22 campaign, PHASE6.
     {
         ImGui::SetCurrentContext(m_context);
 
@@ -721,7 +722,15 @@ public:
         // mismatch detector (RenderPassHonestyChecker.h/RenderPassHonestyGuard.h) -
         // the SAME registry instance RenderGraphPanel::Build() (above) reads/
         // mutates from its own checkboxes.
-        m_frameDebuggerPanel.Build(m_ctx, renderer, renderGraph, m_gameView, m_gameViewComposited, &renderPassToggleRegistry);
+        // editor-core-separation-22 campaign, PHASE6
+        // (PHASE6_IRON_RULE_V2_BIDIRECTIONAL_DETECTOR.md, Step 3.3 item 2) -
+        // the new, trailing `&offscreenBlackboard` argument feeds
+        // TriggerCapture()'s own new Clause C "disabled side effect still
+        // visible" detector - the SAME blackboard instance BuildFrame()'s
+        // own offscreen Execute() callback just declared every provider
+        // against this frame (Core::GetOffscreenBlackboardForFrameDebugger()).
+        m_frameDebuggerPanel.Build(m_ctx, renderer, renderGraph, m_gameView, m_gameViewComposited,
+            &renderPassToggleRegistry, &offscreenBlackboard);
 #if GTE_ENABLE_PROJECT_PANEL
         m_projectPanel.Build(m_ctx);
         // The Bone Viewer is its own floating window (opened on demand via

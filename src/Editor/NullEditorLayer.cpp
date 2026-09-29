@@ -57,7 +57,8 @@ public:
         const std::vector<GpuDrivenBatchDebugInfo>& /*gpuDrivenBatchDebugInfo*/,
         const std::vector<RenderFeatureDebugEntry>& /*renderFeatureEntries*/,
         rg::RenderPassToggleRegistry& /*renderPassToggleRegistry*/,
-        RenderFeatureCompositor* /*renderFeatureCompositor*/) override
+        RenderFeatureCompositor* /*renderFeatureCompositor*/,
+        const rg::RenderPassBlackboard& /*offscreenBlackboard*/) override // editor-core-separation-22, PHASE6.
     {
     }
     void Render(VkCommandBuffer /*cmd*/) override { }

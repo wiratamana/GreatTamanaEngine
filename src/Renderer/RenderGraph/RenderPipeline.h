@@ -273,6 +273,29 @@ public:
         return std::nullopt;
     }
 
+    // editor-core-separation-22 campaign, PHASE6
+    // (PHASE6_IRON_RULE_V2_BIDIRECTIONAL_DETECTOR.md, Step 3.3 item 2) - a
+    // small, additive presence check that needs no knowledge of the
+    // published value's own TYPE (unlike Fetch<T>(), which needs the exact
+    // type to std::any_cast against) - this is exactly what the new Clause C
+    // "disabled side effect still visible" detector
+    // (src/Editor/FrameDebuggerSideChannelChecker.h) needs: "was this key
+    // published at all this frame", never "what was published". Debug-only
+    // wasFetched bookkeeping is untouched by this method (a linear scan by
+    // key only, mirrors Fetch<T>()'s own scan, but never marks/reads
+    // `wasFetched` - this is a presence PROBE, not a real fetch, and must
+    // never perturb ReportUnusedPublishesIfAny()'s own "was this ever
+    // legitimately fetched" bookkeeping).
+    bool WasPublishedThisFrame(RenderPassId key) const noexcept
+    {
+        for (const Slot& slot : m_slots) {
+            if (slot.key == key) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // Called once at the start of each frame's declaration. Clears entries
     // but keeps whatever backing storage was already reserved from the
     // previous frame's high-water mark (vector::clear() never releases

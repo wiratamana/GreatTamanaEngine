@@ -891,7 +891,12 @@ int EditorHost::Run()
                 // `RenderFeatureCompositor*` parameter. This second call is
                 // cheap (Core.h's own noexcept accessor just returns an
                 // already-cached pointer).
-                m_core.GetRenderPassToggleRegistryMutable(), m_core.GetRenderFeatureCompositor());
+                m_core.GetRenderPassToggleRegistryMutable(), m_core.GetRenderFeatureCompositor(),
+                // editor-core-separation-22 campaign, PHASE6
+                // (PHASE6_IRON_RULE_V2_BIDIRECTIONAL_DETECTOR.md, Step 3.3
+                // item 2) - the new, LAST trailing argument, feeding
+                // Panels/FrameDebuggerPanel.cpp's own new Clause C detector.
+                m_core.GetOffscreenBlackboardForFrameDebugger());
 
             // editor-core-separation-7 campaign, PHASE4 - GET /render_graph
             // support. Reuses renderFeatureEntries (still in scope here) so
