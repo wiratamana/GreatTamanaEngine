@@ -355,12 +355,61 @@ to every prior campaign's own documented baseline. See
 `task_manager/render-pass-7/CAMPAIGN_COMPLETION_REPORT.md` for the full
 five-phase writeup.
 
+A follow-up bug-fix campaign, `editor-core-separation-20` (three phases,
+`task_manager/editor-core-separation-20/PHASE0_MASTER_STRATEGY.md`,
+`CAMPAIGN_COMPLETION_REPORT.md`), fixed a confirmed, user-reported bug where disabling built-in
+passes via the "Render Graph" panel / `GET /render_graph/set_pass_enabled` could turn the Game/Scene
+View solid magenta/pink instead of a sane fallback, and a second, independent bug where 5 real
+Atmosphere passes' own "Enabled" checkbox was completely inert. **Root cause 1**: the Game/Scene
+View's own `CLEAR` load-op used to be a side effect bolted onto `"RenderOpaque"` - the very pass a
+user is most likely to disable first - so disabling it left the view target's color+depth attachment
+never cleared that frame (`LOAD_OP_LOAD` on undefined memory, which this GPU/driver combination
+happens to display as flat magenta). Fixed by a new, permanently deny-listed (`RenderPassToggleRegistry::
+IsDenyListed()`), always-on `"ClearViewTarget"` provider (`Core.cpp`, `RenderPassEvent::BeforeEverything`
+- the first real production consumer of that enum value) that owns the one guaranteed clear and
+unconditionally appends the view's own target handle to `frame.finalTextureOutputs` every frame, so it
+(and the write-after-write chain built on it) always survives `RenderGraphCompiler::Compile()`'s
+backward-reachability culling even when every other pass that would otherwise read that resource back
+is disabled. `"RenderOpaque"` itself switched its own color/depth attachment writes from `CLEAR` to
+`LOAD`, since it no longer owns the clear. **Root cause 2**: `AtmosphereTransmittanceLutPass`/
+`AtmosphereMultiScatteringLutPass`/`AtmosphereSkyViewLutPass`/`AtmosphereAerialPerspectiveVolumePass`/
+`AtmosphereAerialPerspectiveCompositePass` are all declared via direct `builder.AddRenderPass()` calls
+inside `AtmosphereLutRenderer.cpp`, which never consulted `RenderPassToggleRegistry` at all - toggling
+them off via the panel/HTTP updated bookkeeping only, with the pass still running every frame
+unconditionally. Fixed by a new, pure, Tier-1-tested helper,
+`src/Renderer/Atmosphere/AtmospherePassToggleLogic.h`'s `ShouldDeclareAtmospherePassThisFrame()`,
+threaded through all 5 methods (plus `AtmospherePassSequence.h/.cpp`'s 3 wrapper functions) with
+cascading, `IsValid()`-based upstream-handle skip logic through the whole LUT dependency chain
+(Transmittance -> MultiScattering -> SkyView/AerialPerspectiveVolume -> Composite) - a real,
+previously-latent engine-crashing hazard (an out-of-bounds `physicalVolumeTextures[0xFFFFFFFF]` access
+inside `RenderGraph::ApplyUsageBarrierIfNeeded()`, reachable the instant an upstream LUT pass was
+disabled while the Frame-Debugger-only `AddAerialPerspectiveVolumeDebugSlicePass()` call still ran
+unconditionally) was found and fixed live during this campaign's own investigation, confirmed via a
+dedicated regression check before this campaign shipped. **Explicitly, permanently out of scope**:
+`AddAerialPerspectiveVolumeDebugSlicePass()` itself never gained its own toggle-registry consult (only
+its caller gained a validity guard); the Plugin Render Feature system (`RenderFeatureCompositor`,
+`demo_render_feature*` plugins) was never touched, including its own separately-inert demo-plugin clear
+toggles; `src/Application/RenderPasses.cpp`'s confirmed-dead `AddRenderOpaquePass()`/
+`AddDrawSkyBackgroundPass()` free functions were never touched. Verified with a full clean build, a full
+`ctest` regression pass (1993 tests, 100% of executed tests passing, 8 legitimate environment-gated
+skips - this campaign's own attributable contribution is exactly +4 tests over its own actual starting
+point, since the prior documented `editor-core-separation-15` baseline of 1934 tests/7 skips had already
+drifted upward by +55 tests/+1 skip via undocumented interim work before this campaign even started -
+see `CAMPAIGN_COMPLETION_REPORT.md` for the full, honest accounting), and a live, HTTP-driven smoke test
+confirming all 5 of this campaign's own success criteria: disabling every content/atmosphere pass shows
+a solid, defined dark clear color (never magenta) with `"ClearViewTarget"` confirmed genuinely
+un-culled; disabling only `RenderOpaque` still shows a real, visible rendered sky; disabling
+`AtmosphereTransmittanceLutPass` alone genuinely removes it and its whole downstream cascade from the
+render graph with zero crash; and re-enabling everything returns to the exact prior, byte-identical
+baseline image.
+
 Full history: `task_manager/render-pass-1/PHASE0_MASTER_STRATEGY.md`,
 `task_manager/render-pass-2/PHASE0_MASTER_STRATEGY.md`,
 `task_manager/render-pass-3/PHASE0_MASTER_STRATEGY.md`,
 `task_manager/render-pass-4/PHASE0_MASTER_STRATEGY.md`,
-`task_manager/render-pass-6/PHASE0_MASTER_STRATEGY.md`, and
-`task_manager/render-pass-7/PHASE0_MASTER_STRATEGY.md`, and each
+`task_manager/render-pass-6/PHASE0_MASTER_STRATEGY.md`,
+`task_manager/render-pass-7/PHASE0_MASTER_STRATEGY.md`, and
+`task_manager/editor-core-separation-20/PHASE0_MASTER_STRATEGY.md`, and each
 `PHASEn_COMPLETION_REPORT.md`/`CAMPAIGN_COMPLETION_REPORT.md` in those same
 folders.
 

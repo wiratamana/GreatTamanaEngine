@@ -274,6 +274,21 @@ TEST(RenderPipelineTest, CollectedPassesAreSortedByOrderRegardlessOfRegistration
             outPasses.push_back(desc);
         });
 
+    // Registered LAST (deliberately, after every other provider above), to
+    // prove RenderPassEvent::BeforeEverything (PHASE1 of the
+    // editor-core-separation-20 campaign's "ClearViewTarget" fix) always
+    // sorts strictly first, regardless of registration order - the exact
+    // load-bearing property that fix depends on.
+    pipeline.Register("ClearViewTargetLikeProvider", ProviderScope::PerActiveView,
+        [](const RenderPassFrameContext&, std::vector<RenderPassDesc>& outPasses) {
+            RenderPassDesc desc;
+            desc.debugName = "ClearViewTargetLikePass";
+            desc.order = RenderPassEvent::BeforeEverything;
+            desc.setup = NoOpSetup;
+            desc.execute = NoOpExecute;
+            outPasses.push_back(desc);
+        });
+
     RenderPassBlackboard blackboard;
     RenderGraphBuilder builder;
     RenderPassFrameContext frame{ { RenderViewId::Named("GameView") }, RenderViewId::Shared(), blackboard, builder, {}, {} };
@@ -281,10 +296,11 @@ TEST(RenderPipelineTest, CollectedPassesAreSortedByOrderRegardlessOfRegistration
     pipeline.DeclareInto(builder, frame);
 
     const CompiledGraphInput input = builder.Finish();
-    ASSERT_EQ(input.passes.size(), 3u);
-    EXPECT_STREQ(input.passes[0].name, "PreOpaquesPass");
-    EXPECT_STREQ(input.passes[1].name, "OpaquePass");
-    EXPECT_STREQ(input.passes[2].name, "TransparentsPass");
+    ASSERT_EQ(input.passes.size(), 4u);
+    EXPECT_STREQ(input.passes[0].name, "ClearViewTargetLikePass");
+    EXPECT_STREQ(input.passes[1].name, "PreOpaquesPass");
+    EXPECT_STREQ(input.passes[2].name, "OpaquePass");
+    EXPECT_STREQ(input.passes[3].name, "TransparentsPass");
 }
 
 // The ONE test in this file that directly protects PHASE0's Locked Design

@@ -62,6 +62,15 @@ TEST(RenderPassToggleRegistryTest, SetEnabledFalseOnPresentIsRefusedByTheDenyLis
     EXPECT_TRUE(registry.IsEnabled("Present")); // Unchanged - still enabled.
 }
 
+TEST(RenderPassToggleRegistryTest, SetEnabledFalseOnClearViewTargetIsRefusedByTheDenyList)
+{
+    RenderPassToggleRegistry registry;
+
+    const bool applied = registry.SetEnabled("ClearViewTarget", false);
+    EXPECT_FALSE(applied);
+    EXPECT_TRUE(registry.IsEnabled("ClearViewTarget"));
+}
+
 TEST(RenderPassToggleRegistryTest, SetEnabledOnNeverDeclaredNameCreatesAnEntryNotYetDeclaredThisSession)
 {
     RenderPassToggleRegistry registry;
