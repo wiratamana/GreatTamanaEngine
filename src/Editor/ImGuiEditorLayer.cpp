@@ -13,6 +13,7 @@
 #include "ImGuiMemoryTracker.h"
 #include "NewProjectWindow.h" // editor-core-separation-16 campaign (On-Engine Project Workflow plan, BIG-STEP 2), PHASE4.
 #include "OpenProjectWindow.h" // editor-core-separation-17 campaign (On-Engine Project Workflow plan, BIG-STEP 3), PHASE4.
+#include "CreateAssetWindow.h" // editor-core-separation-18 campaign (On-Engine Project Workflow plan, BIG-STEP 4), PHASE3.
 #include "Plugins/PluginPanelDrawContextAdapter.h" // editor-core-separation-3 campaign, PHASE4.
 #include "../Core/EditorPanelRegistry.h" // editor-core-separation-3 campaign, PHASE4.
 #include "../../plugins/gte_plugin_abi/IEditorPanelModule.h" // editor-core-separation-3 campaign, PHASE4.
@@ -539,6 +540,11 @@ public:
         // of GTE_ENABLE_PROJECT_PANEL" reasoning as m_newProjectWindow
         // immediately above.
         m_openProjectWindow.Build(m_ctx, m_projectLifecycleCapability);
+        // editor-core-separation-18 campaign (On-Engine Project Workflow
+        // plan, BIG-STEP 4), PHASE3 - same "always available regardless
+        // of GTE_ENABLE_PROJECT_PANEL" reasoning as m_newProjectWindow/
+        // m_openProjectWindow immediately above.
+        m_createAssetWindow.Build(m_ctx, m_assetScaffoldingCapability);
 
         // Lazily (re)create the ImGui-side descriptors for the Game/Scene
         // view textures - needed on first use, and again after
@@ -949,6 +955,17 @@ public:
     {
         m_projectLifecycleCapability = capability;
     }
+
+    // editor-core-separation-18 campaign (On-Engine Project Workflow
+    // plan, BIG-STEP 4), PHASE3 - see IEditorLayer::
+    // SetAssetScaffoldingCapability()'s own doc comment for the full
+    // contract. Stored, never called from here - m_createAssetWindow's
+    // own Build() call (above, inside BuildUI()) is what actually
+    // invokes it.
+    void SetAssetScaffoldingCapability(IAssetScaffoldingCapability* capability) override
+    {
+        m_assetScaffoldingCapability = capability;
+    }
     bool FrameDebuggerCaptureNow() override { return m_frameDebuggerPanel.CaptureNowFromCommand(); }
     void FrameDebuggerSelectEvent(int index) override { m_frameDebuggerPanel.SelectEventFromCommand(index); }
     bool FrameDebuggerSetChannel(const std::string& channel) override
@@ -1182,6 +1199,18 @@ private:
     // own doc comment for the lifetime contract (EditorHost's own
     // s_editorProjectLifecycleCapability static outlives this object).
     IProjectLifecycleCapability* m_projectLifecycleCapability = nullptr;
+    // editor-core-separation-18 campaign (On-Engine Project Workflow plan,
+    // BIG-STEP 4), PHASE3 - the "Create New Asset" floating utility window
+    // (CreateAssetWindow.h), opened on demand via the Project panel's own
+    // "[Active Project] <Name>" synthetic row's right-click "Create"
+    // submenu (ProjectPanel.cpp, PHASE2). Same "no GPU resources, always
+    // exists regardless of GTE_ENABLE_PROJECT_PANEL" reasoning as
+    // m_newProjectWindow/m_openProjectWindow immediately above.
+    CreateAssetWindow m_createAssetWindow;
+    // Non-owning - see IEditorLayer::SetAssetScaffoldingCapability()'s own
+    // doc comment for the lifetime contract (EditorHost's own
+    // s_editorProjectLifecycleCapability static outlives this object).
+    IAssetScaffoldingCapability* m_assetScaffoldingCapability = nullptr;
 
     // Shared state read/written by DockLayout.cpp's
     // BuildDockspaceAndMenuBar() and every Panels/*.cpp builder called from

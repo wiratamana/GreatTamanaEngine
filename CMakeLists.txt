@@ -1099,6 +1099,13 @@ add_library(gte_editor STATIC
     # (DockLayout.cpp).
     src/Editor/OpenProjectWindow.h
     src/Editor/OpenProjectWindow.cpp
+    # editor-core-separation-18 campaign (On-Engine Project Workflow plan,
+    # BIG-STEP 4), PHASE3 - the "Create New Asset" floating ImGui utility
+    # window, opened via the Project panel's own "[Active Project] <Name>"
+    # synthetic row's right-click "Create" submenu (ProjectPanel.cpp,
+    # PHASE2).
+    src/Editor/CreateAssetWindow.h
+    src/Editor/CreateAssetWindow.cpp
     src/Editor/Selection.h
     src/Editor/Selection.cpp
     src/Editor/EditorCamera.h

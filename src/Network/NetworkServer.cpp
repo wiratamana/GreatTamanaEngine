@@ -298,7 +298,7 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
     EditorUiCommandBridge* uiCommandBridge, FrameDebuggerCommandBridge* frameDebuggerCommandBridge,
     AssetImportCommandBridge* assetImportCommandBridge, ILogQueryCapability* logQueryCapability,
     RenderGraphControlCommandBridge* renderGraphControlCommandBridge, IHotReloadDebugCapability* hotReloadDebugCapability,
-    IProjectLifecycleCapability* projectLifecycleCapability)
+    IProjectLifecycleCapability* projectLifecycleCapability, IAssetScaffoldingCapability* assetScaffoldingCapability)
 {
     server.Get("/http_hello_world", [](const httplib::Request&, httplib::Response& res) {
         res.set_content(HandleHelloWorld(), "text/plain; charset=utf-8");
@@ -1361,6 +1361,46 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         res.set_content(body.dump(), "application/json");
     });
 
+    // editor-core-separation-18 campaign (On-Engine Project Workflow plan,
+    // BIG-STEP 4), PHASE3 - POST /project_assembly/create_asset. Calls the
+    // EXACT SAME CreateAssetScaffold() method CreateAssetWindow's own "Create"
+    // button calls (LDD-PW5).
+    server.Post("/project_assembly/create_asset",
+        [assetScaffoldingCapability](const httplib::Request& req, httplib::Response& res) {
+        const std::string kindParam = req.get_param_value("kind"); // "render_pass" | "compute_shader" | "shader_pair"
+        const std::string name = req.get_param_value("name");
+        AssetScaffoldKind kind;
+        if (kindParam == "render_pass") {
+            kind = AssetScaffoldKind::RenderPass;
+        } else if (kindParam == "compute_shader") {
+            kind = AssetScaffoldKind::ComputeShader;
+        } else if (kindParam == "shader_pair") {
+            kind = AssetScaffoldKind::ShaderPair;
+        } else {
+            res.status = 400;
+            res.set_content(
+                BuildGenericErrorResponseJson("'kind' must be render_pass, compute_shader, or shader_pair"),
+                "application/json");
+            return;
+        }
+        if (assetScaffoldingCapability == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("asset scaffolding capability not available"), "application/json");
+            return;
+        }
+        const IAssetScaffoldingCapability::ScaffoldOutcome outcome =
+            assetScaffoldingCapability->CreateAssetScaffold(kind, name);
+        if (!outcome.success) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(outcome.errorMessage), "application/json");
+            return;
+        }
+        nlohmann::json body;
+        body["created_files"] = outcome.createdFiles;
+        body["reminder_message"] = outcome.reminderMessage;
+        res.set_content(body.dump(), "application/json");
+    });
+
     // editor-core-separation-17 campaign (On-Engine Project Workflow plan,
     // BIG-STEP 3), PHASE4 - POST /project_assembly/open_project. Calls
     // OpenProjectAssembly() (the network-thread-safe one, NOT
@@ -1494,7 +1534,7 @@ NetworkServer::NetworkServer(FrameCaptureBridge* captureBridge, EngineCommandBri
     EditorUiCommandBridge* uiCommandBridge, FrameDebuggerCommandBridge* frameDebuggerCommandBridge,
     AssetImportCommandBridge* assetImportCommandBridge, ILogQueryCapability* logQueryCapability,
     RenderGraphControlCommandBridge* renderGraphControlCommandBridge, IHotReloadDebugCapability* hotReloadDebugCapability,
-    IProjectLifecycleCapability* projectLifecycleCapability)
+    IProjectLifecycleCapability* projectLifecycleCapability, IAssetScaffoldingCapability* assetScaffoldingCapability)
     : m_impl(std::make_unique<Impl>())
     , m_captureBridge(captureBridge)
     , m_commandBridge(commandBridge)
@@ -1505,6 +1545,7 @@ NetworkServer::NetworkServer(FrameCaptureBridge* captureBridge, EngineCommandBri
     , m_renderGraphControlCommandBridge(renderGraphControlCommandBridge)
     , m_hotReloadDebugCapability(hotReloadDebugCapability)
     , m_projectLifecycleCapability(projectLifecycleCapability)
+    , m_assetScaffoldingCapability(assetScaffoldingCapability)
 {
     // Registered exactly ONCE per NetworkServer instance, here in the
     // constructor - never inside Start() - so a Start()/Stop()/Start()
@@ -1513,7 +1554,7 @@ NetworkServer::NetworkServer(FrameCaptureBridge* captureBridge, EngineCommandBri
     // httplib::Server a second time.
     RegisterRoutes(m_impl->server, m_captureBridge, m_commandBridge, m_uiCommandBridge, m_frameDebuggerCommandBridge,
         m_assetImportCommandBridge, m_logQueryCapability, m_renderGraphControlCommandBridge, m_hotReloadDebugCapability,
-        m_projectLifecycleCapability);
+        m_projectLifecycleCapability, m_assetScaffoldingCapability);
     // task_manager/stl-parser-2 campaign, PHASE2 - m_assetImportCommandBridge
     // is now actually consulted by RegisterRoutes() above (POST /import_asset).
     // editor-core-separation-8 campaign, PHASE5 - m_renderGraphControlCommandBridge
@@ -1525,6 +1566,9 @@ NetworkServer::NetworkServer(FrameCaptureBridge* captureBridge, EngineCommandBri
     // editor-core-separation-16 campaign (On-Engine Project Workflow plan,
     // BIG-STEP 2), PHASE4 - m_projectLifecycleCapability is now actually
     // consulted by RegisterRoutes() above (POST /project_assembly/create_project).
+    // editor-core-separation-18 campaign (On-Engine Project Workflow plan,
+    // BIG-STEP 4), PHASE3 - m_assetScaffoldingCapability is now actually
+    // consulted by RegisterRoutes() above (POST /project_assembly/create_asset).
 }
 
 NetworkServer::~NetworkServer()

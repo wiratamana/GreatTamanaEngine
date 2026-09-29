@@ -88,6 +88,12 @@ class RenderFeatureCompositor;
 // ever stores/passes a POINTER to it, never dereferences one itself.
 class IProjectLifecycleCapability;
 
+// editor-core-separation-18 campaign (On-Engine Project Workflow plan,
+// BIG-STEP 4), PHASE3 - forward-declared only, mirrors
+// "class IProjectLifecycleCapability;" immediately above: this header only
+// ever stores/passes a POINTER to it, never dereferences one itself.
+class IAssetScaffoldingCapability;
+
 // Abstraction boundary between engine-core (Application/Renderer/Game) and
 // the optional Editor/Debug UI. Dear ImGui-backed in real builds, but
 // nothing outside src/Editor/ (specifically: nothing outside whichever
@@ -719,6 +725,18 @@ public:
     // NullEditorLayer (a release build has no "New Project..." window to
     // give a capability to at all).
     virtual void SetProjectLifecycleCapability(IProjectLifecycleCapability* capability) = 0;
+
+    // editor-core-separation-18 campaign (On-Engine Project Workflow plan,
+    // BIG-STEP 4), PHASE3 - hands the real ImGui implementation a live
+    // IAssetScaffoldingCapability* (Core/EditorCapabilities.h) so its own
+    // "Create -> Render Pass/Compute Shader/Shader Pair" floating window
+    // (CreateAssetWindow.h) can call CreateAssetScaffold() directly - the exact
+    // SAME method POST /project_assembly/create_asset calls (LDD-PW5's "one
+    // function, two callers" rule, mirroring SetProjectLifecycleCapability's
+    // own precedent immediately above). Called exactly ONCE, from
+    // EditorHost's own constructor body. Always a safe no-op for
+    // NullEditorLayer.
+    virtual void SetAssetScaffoldingCapability(IAssetScaffoldingCapability* capability) = 0;
 
     // Requests a real capture - returns false (a safe no-op) if the Frame
     // Debugger is not currently enabled (mirroring the "Capture" button's

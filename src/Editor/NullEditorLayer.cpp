@@ -100,6 +100,12 @@ public:
     // SetProjectLifecycleCapability()'s own doc comment for the full
     // contract.
     void SetProjectLifecycleCapability(IProjectLifecycleCapability* /*capability*/) override { }
+
+    // editor-core-separation-18 campaign (On-Engine Project Workflow plan,
+    // BIG-STEP 4), PHASE3 - a release build has no "Create New Asset" window
+    // to give a capability to at all, mirroring
+    // SetProjectLifecycleCapability() immediately above.
+    void SetAssetScaffoldingCapability(IAssetScaffoldingCapability* /*capability*/) override { }
     bool FrameDebuggerCaptureNow() override { return false; }
     void FrameDebuggerSelectEvent(int /*index*/) override { }
     bool FrameDebuggerSetChannel(const std::string& /*channel*/) override { return false; }

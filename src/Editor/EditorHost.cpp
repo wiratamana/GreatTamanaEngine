@@ -205,9 +205,14 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
     // editor-core-separation-16 campaign (On-Engine Project Workflow plan,
     // BIG-STEP 2), PHASE4 - the ninth argument, &s_editorProjectLifecycleCapability,
     // so POST /project_assembly/create_project can reach it.
+    // editor-core-separation-18 campaign (On-Engine Project Workflow plan,
+    // BIG-STEP 4), PHASE3 - the tenth argument, &s_editorProjectLifecycleCapability
+    // again (legal - two independently-typed base-sub-object pointers into the
+    // SAME object, see PHASE3's own doc comment for why), so POST
+    // /project_assembly/create_asset can reach it.
     , m_networkServer(&m_captureBridge, &m_commandBridge, &m_uiCommandBridge, &m_frameDebuggerCommandBridge,
           &m_assetImportCommandBridge, &s_editorLogQueryCapability, &m_renderGraphControlCommandBridge,
-          &s_editorHotReloadDebugCapability, &s_editorProjectLifecycleCapability)
+          &s_editorHotReloadDebugCapability, &s_editorProjectLifecycleCapability, &s_editorProjectLifecycleCapability)
 {
     // editor-core-separation-1 campaign, PHASE3
     // (PHASE3_LOGGING_GLOBAL_LOGSINK_EXTRACTION.md) - installs the ONE real
@@ -235,6 +240,17 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
     // static) already exists via ordinary static initialization, strictly
     // before this constructor body ever runs.
     m_editorLayer->SetProjectLifecycleCapability(&s_editorProjectLifecycleCapability);
+
+    // editor-core-separation-18 campaign (On-Engine Project Workflow plan,
+    // BIG-STEP 4), PHASE3 - gives the real ImGui implementation
+    // (ImGuiEditorLayer) a live IAssetScaffoldingCapability* so its "Create ->
+    // Render Pass/Compute Shader/Shader Pair" window can call
+    // CreateAssetScaffold() directly. Safe here: same
+    // s_editorProjectLifecycleCapability static already exists via ordinary
+    // static initialization, strictly before this constructor body ever runs -
+    // multiple inheritance means one object, two independently-typed pointers
+    // to its two base sub-objects.
+    m_editorLayer->SetAssetScaffoldingCapability(&s_editorProjectLifecycleCapability);
 
     // editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
     // BIG-STEP 2), PHASE4 - hands EditorHotReloadDebugCapability a live

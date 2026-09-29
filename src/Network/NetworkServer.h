@@ -68,6 +68,12 @@ namespace gte { class IHotReloadDebugCapability; }
 // BIG-STEP 2), PHASE4.
 namespace gte { class IProjectLifecycleCapability; }
 
+// Forward-declared for the same cheap-header reason as
+// FrameCaptureBridge/.../IProjectLifecycleCapability above -
+// editor-core-separation-18 campaign (On-Engine Project Workflow plan,
+// BIG-STEP 4), PHASE3.
+namespace gte { class IAssetScaffoldingCapability; }
+
 namespace gte::Network {
 
 // Owns a real, embedded HTTP server (cpp-httplib) bound to loopback
@@ -177,7 +183,8 @@ public:
         ILogQueryCapability* logQueryCapability = nullptr,
         RenderGraphControlCommandBridge* renderGraphControlCommandBridge = nullptr,
         IHotReloadDebugCapability* hotReloadDebugCapability = nullptr,
-        IProjectLifecycleCapability* projectLifecycleCapability = nullptr);
+        IProjectLifecycleCapability* projectLifecycleCapability = nullptr,
+        IAssetScaffoldingCapability* assetScaffoldingCapability = nullptr);
     ~NetworkServer();
 
     NetworkServer(const NetworkServer&) = delete;
@@ -279,6 +286,11 @@ private:
     // BIG-STEP 2). Consulted by POST /project_assembly/create_project
     // (RegisterRoutes() below).
     IProjectLifecycleCapability* m_projectLifecycleCapability = nullptr;
+    // Non-owning - same lifetime contract as m_captureBridge above
+    // (editor-core-separation-18 campaign, On-Engine Project Workflow plan,
+    // BIG-STEP 4). Consulted by POST /project_assembly/create_asset
+    // (RegisterRoutes() below).
+    IAssetScaffoldingCapability* m_assetScaffoldingCapability = nullptr;
 };
 
 } // namespace gte::Network
