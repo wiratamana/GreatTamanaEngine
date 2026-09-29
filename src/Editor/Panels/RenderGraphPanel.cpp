@@ -6,6 +6,7 @@
 #include "../../Core/Plugins/RenderFeatureCompositor.h"
 #include "../../Renderer/RenderGraph/RenderGraph.h"
 #include "../../Renderer/RenderGraph/RenderGraphSnapshotFormatting.h"
+#include "../../Renderer/RenderGraph/RenderPassToggleChangeDetectionLogic.h"
 #include "../ImGuiUniqueId.h"
 
 #include <imgui.h>
@@ -446,6 +447,16 @@ void RenderGraphPanel::Build(EditorContext& ctx, const rg::RenderGraph& renderGr
     BuildPluginRenderFeaturesSection(metadata.renderFeatures, renderFeatureCompositor);
     ImGui::Spacing();
 
+    // editor-core-separation-21 campaign, PHASE2
+    // (PHASE2_FIX_AERIAL_PERSPECTIVE_COMPOSITE_TOGGLE_LIE.md) - snapshotted
+    // BEFORE any of this panel's own checkbox-drawing sections below run this
+    // frame, so the comparison right after BOTH BuildRegimeSection() calls
+    // (the last section whose own BuildPassRow() can call
+    // renderPassToggleRegistry.SetEnabled()) can tell "did a checkbox click
+    // somewhere in this whole block actually flip anything". See
+    // EditorContext::renderPassToggleRegistryChangedThisFrame's own doc
+    // comment for the full contract this feeds.
+    const std::vector<rg::RenderPassToggleState> toggleStatesBeforeThisPanelsOwnUi = renderPassToggleRegistry.ListAll();
     // editor-core-separation-8 campaign, PHASE4
     // (PHASE4_RENDER_GRAPH_PANEL_CONTROLS.md, Step 3.4) - placed immediately
     // after Plugin Render Features and BEFORE the two regime sections, so a
@@ -462,6 +473,16 @@ void RenderGraphPanel::Build(EditorContext& ctx, const rg::RenderGraph& renderGr
     ImGui::Spacing();
     BuildRegimeSection("Pipelined Regime (Present)", "Present", metadata.presentRegime, renderPassToggleRegistry);
 
+    // editor-core-separation-21 campaign, PHASE2 - the "after" half of the
+    // comparison started above: if any checkbox this panel drew anywhere in
+    // this whole block actually changed the registry, tell the Frame
+    // Debugger (via the shared EditorContext flag) to request a fresh
+    // capture on the very next frame it runs, instead of silently leaving a
+    // stale, now-contradicting event tree on screen (PHASE1_COMPLETION_REPORT.md's
+    // confirmed root cause).
+    if (rg::DidRenderPassToggleEnabledStatesChange(toggleStatesBeforeThisPanelsOwnUi, renderPassToggleRegistry.ListAll())) {
+        ctx.renderPassToggleRegistryChangedThisFrame = true;
+    }
     // editor-core-separation-8 campaign, PHASE4 (Step 3.4) - a natural final
     // "debug toggles" grouping, placed AFTER both regime sections and BEFORE
     // "Export" - the exact same EditorContext bools ScenePanel.cpp's own two

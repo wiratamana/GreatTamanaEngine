@@ -11,7 +11,6 @@
 #include "AtmospherePassToggleLogic.h"
 #include "../RenderGraph/RenderPassToggleRegistry.h"
 #include "../Vulkan/DescriptorSetLayoutBuilder.h"
-#include "../../Core/Logging.h" // editor-core-separation-21 campaign, PHASE1 - TEMPORARY diagnostic instrumentation.
 
 #include <algorithm>
 #include <cstdint>
@@ -788,16 +787,6 @@ rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveCompositePass(rg::R
         || toggleRegistry->NoteDeclaredAndCheckEnabled("AtmosphereAerialPerspectiveCompositePass");
     const bool willDeclare =
         ShouldDeclareAtmospherePassThisFrame(passEnabledThisFrame, aerialPerspectiveVolumeHandle.IsValid());
-    // editor-core-separation-21 campaign, PHASE1 - TEMPORARY diagnostic
-    // instrumentation (category "RenderPassHonestyDiag") - the DECLARE-TIME
-    // guard itself: does this call actually see passEnabledThisFrame==false
-    // when the registry has been toggled off, and does it actually return
-    // early (never call builder.AddRenderPass()) when that happens?
-    GTE_LOG_DEBUG("RenderPassHonestyDiag",
-        "AddAerialPerspectiveCompositePass() - toggleRegistry=" + std::string(toggleRegistry == nullptr ? "null" : "non-null")
-            + ", passEnabledThisFrame=" + std::string(passEnabledThisFrame ? "true" : "false")
-            + ", aerialPerspectiveVolumeHandle.IsValid()=" + std::string(aerialPerspectiveVolumeHandle.IsValid() ? "true" : "false")
-            + ", willDeclare=" + std::string(willDeclare ? "true" : "false"));
     if (!willDeclare) {
         return rg::TextureHandle{};
     }

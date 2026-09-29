@@ -7,7 +7,7 @@
 #include "../../Renderer/RenderGraph/RenderGraph.h"
 #include "../../Renderer/Renderer.h"
 #include "../../Renderer/RenderTexture.h"
-#include "../../Core/Logging.h" // editor-core-separation-21 campaign, PHASE1 - TEMPORARY diagnostic instrumentation.
+#include "../../Core/Logging.h" // editor-core-separation-21 campaign, PHASE2 - the new auto-recapture-on-toggle log line (Build()).
 
 #include <backends/imgui_impl_vulkan.h>
 #include <imgui.h>
@@ -360,27 +360,21 @@ void FrameDebuggerPanel::TriggerCapture()
 
     const rg::RenderGraphSnapshot graphSnapshot =
         m_frameRenderGraph->LastSnapshot(rg::ExecuteTimingMode::SynchronousImmediateReadback);
-    // editor-core-separation-21 campaign, PHASE1 - TEMPORARY diagnostic
-    // instrumentation (category "RenderPassHonestyDiag") - reports exactly
-    // what THIS call's own graphSnapshot contains for the one pass this
-    // phase is diagnosing, so a live /get_logs pull can be correlated
-    // directly against the totalEventCount this same capture reports.
-    {
-        bool found = false;
-        bool isCulled = false;
-        for (const rg::RenderGraphPassSnapshot& p : graphSnapshot.passesInExecutionOrder) {
-            if (p.name == "AtmosphereAerialPerspectiveCompositePass") {
-                found = true;
-                isCulled = p.isCulled;
-                break;
-            }
-        }
-        GTE_LOG_DEBUG("RenderPassHonestyDiag",
-            "TriggerCapture() - graphSnapshot.passesInExecutionOrder.size()="
-                + std::to_string(graphSnapshot.passesInExecutionOrder.size())
-                + ", AtmosphereAerialPerspectiveCompositePass found=" + std::string(found ? "true" : "false")
-                + (found ? (", isCulled=" + std::string(isCulled ? "true" : "false")) : std::string()));
-    }
+    // TODO(editor-core-separation-21 PHASE5): this is the natural spot for
+    // the campaign's planned permanent "Render Pass Honesty" mismatch
+    // detector - comparing THIS graphSnapshot.passesInExecutionOrder (the
+    // real, just-captured set of executed/non-culled passes) against
+    // RenderPassToggleRegistry's own recorded enabled state for every pass
+    // name found here, and firing a loud GTE_LOG_ERROR the instant they ever
+    // disagree (mirroring ImGuiIdConflictTracker/
+    // DetectRenderPassEventContradictions's own precedent - see
+    // PHASE5_IRON_RULE_PERMANENT_MISMATCH_DETECTOR.md). PHASE1's own
+    // temporary, single-pass-name-hardcoded diagnostic logging that used to
+    // live here (category "RenderPassHonestyDiag") already proved this exact
+    // comparison is what pins down a real mismatch - see
+    // PHASE1_COMPLETION_REPORT.md - it was removed once PHASE2 landed the
+    // real fix (the stale-capture root cause), since it added noisy
+    // per-capture logging with no permanent, generic value on its own.
 
     FrameDebuggerRenderTargetInfo renderTargetInfo;
     const VkExtent2D extent = m_frameGameView->Extent();
@@ -1003,6 +997,37 @@ void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg:
         ReleaseShaderPropertyTexturePreview();
     }
     m_wasPlaybackPaused = ctx.playbackPaused;
+
+    // editor-core-separation-21 campaign, PHASE2
+    // (PHASE2_FIX_AERIAL_PERSPECTIVE_COMPOSITE_TOGGLE_LIE.md) - the FOURTH
+    // capture trigger (joining the Enable-edge/Step/explicit "Capture"
+    // button triggers documented in AGENTS.md's "Frame Debugger" section):
+    // RenderGraphPanel::Build() (called earlier THIS SAME frame - see
+    // ImGuiEditorLayer::BuildUI()'s own call order) sets this shared
+    // EditorContext flag the instant a checkbox click there actually changed
+    // RenderPassToggleRegistry state. Consumed (read-and-cleared)
+    // unconditionally right here, every single Build() call - fixes
+    // PHASE1_COMPLETION_REPORT.md's confirmed root cause: a disabled pass
+    // used to keep showing up as a real, populated Frame Debugger leaf until
+    // a human/HTTP caller remembered to request a SECOND capture after the
+    // toggle. Mirrors ApplyEnabledEdge()'s own false->true edge exactly -
+    // only arms m_pendingCaptureTrigger (never calls TriggerCapture()
+    // synchronously) and only while m_enabled is actually true (matches
+    // CaptureNowFromCommand()'s own "Capture" button guard). The OTHER
+    // mutation path (GET /render_graph/set_pass_enabled, EditorHost.cpp's
+    // RenderGraphControlCommandBridge pump, which runs BEFORE BuildUI() even
+    // starts) does not go through this flag at all - it calls
+    // IEditorLayer::FrameDebuggerCaptureNow() directly at its own call site
+    // instead (see EditorHost.cpp's SetBuiltInPassEnabled case).
+    if (ctx.renderPassToggleRegistryChangedThisFrame) {
+        ctx.renderPassToggleRegistryChangedThisFrame = false;
+        if (m_enabled) {
+            m_pendingCaptureTrigger = true;
+            GTE_LOG_DEBUG("FrameDebugger",
+                "Build() - RenderPassToggleRegistry changed this frame while Enabled - arming an automatic "
+                "re-capture for the next frame (editor-core-separation-21 campaign, PHASE2).");
+        }
+    }
 
     // PHASE3 - cached for TriggerCapture()'s own use for the rest of THIS
     // call (BuildToolbarRow(), below, is the only thing that reads these) -

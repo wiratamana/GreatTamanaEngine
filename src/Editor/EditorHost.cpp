@@ -703,6 +703,23 @@ int EditorHost::Run()
                 rgcResult.success = applied;
                 if (!applied) {
                     rgcResult.errorMessage = "\"" + rgcRequest->setPassEnabled.name + "\" cannot be disabled (deny-listed).";
+                } else {
+                    // editor-core-separation-21 campaign, PHASE2
+                    // (PHASE2_FIX_AERIAL_PERSPECTIVE_COMPOSITE_TOGGLE_LIE.md) -
+                    // this mutation runs BEFORE BuildUI() even starts this
+                    // frame (see this loop's own placement, above
+                    // m_editorLayer->BuildUI() further down), so it cannot
+                    // use RenderGraphPanel::Build()'s own same-frame
+                    // EditorContext flag (see that flag's own doc comment,
+                    // EditorContext.h) - it tells the Frame Debugger directly
+                    // instead, exactly like FrameDebuggerCommandKind::CaptureNow
+                    // above already does: a safe no-op (returns false,
+                    // ignored here) whenever the Frame Debugger isn't
+                    // currently Enabled, otherwise arms one fresh capture for
+                    // the next frame - fixes PHASE1_COMPLETION_REPORT.md's
+                    // confirmed root cause for this, the HTTP-driven mutation
+                    // path.
+                    m_editorLayer->FrameDebuggerCaptureNow();
                 }
                 break;
             }

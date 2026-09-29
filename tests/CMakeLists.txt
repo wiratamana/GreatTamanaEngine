@@ -505,6 +505,28 @@ add_subdirectory(Fixtures/FakePlugins)
 #                                            involved, zero real consumers
 #                                            wired up yet (PHASE3/PHASE4 are
 #                                            the first real callers).
+#   - Renderer/RenderGraph/RenderPassToggleChangeDetectionLogicTests.cpp
+#                                            - editor-core-separation-21
+#                                            campaign's PHASE2
+#                                            (task_manager/
+#                                            editor-core-separation-21/
+#                                            PHASE2_FIX_AERIAL_PERSPECTIVE_COMPOSITE_TOGGLE_LIE.md)
+#                                            - the new, pure "did the toggle
+#                                            registry's own enabled states
+#                                            actually change" comparison (see
+#                                            src/Renderer/RenderGraph/
+#                                            RenderPassToggleChangeDetectionLogic.h)
+#                                            that RenderGraphPanel::Build()
+#                                            uses to detect a same-frame
+#                                            checkbox click and tell the Frame
+#                                            Debugger to request a fresh
+#                                            capture - identical/empty
+#                                            snapshots, a toggled pass, a
+#                                            newly-registered pass, and
+#                                            confirming everDeclaredThisSession
+#                                            alone never counts as a change.
+#                                            Pure Tier 1 - no live registry
+#                                            instance involved at all.
 #   - Game/RenderSystemTests.cpp             - RenderSystem::CollectRenderables()
 #                                            (the pure ECS -> DrawCommand step)
 #                                            and ResolveActiveCameraViewProjection()
@@ -2272,6 +2294,7 @@ set(GTE_TEST_SOURCES
     Renderer/RenderGraph/RenderPipelineTests.cpp
     Renderer/RenderGraph/RenderPassToggleRegistryTests.cpp
     Renderer/RenderGraph/RenderPassGroupRegistryTests.cpp
+    Renderer/RenderGraph/RenderPassToggleChangeDetectionLogicTests.cpp
     Math/Vec2Tests.cpp
     Math/Vec3Tests.cpp
     Math/Mat4Tests.cpp

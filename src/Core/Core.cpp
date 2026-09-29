@@ -25,7 +25,6 @@
 #include "../Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../Renderer/RenderGraph/RenderGraphDebugTextureRegistry.h"
-#include "Logging.h" // editor-core-separation-21 campaign, PHASE1 - TEMPORARY diagnostic instrumentation.
 
 // editor-core-separation-6 campaign, PHASE2
 // (PHASE2_PLUGIN_CAPABILITY_ORCHESTRATOR_REGISTRY_AND_RENDER_FEATURE_MIGRATION.md)
@@ -933,16 +932,6 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             // one of exactly 2 confirmed exceptions needing their own direct
             // consult of the toggle registry.
             const bool atmosphereCompositeEnabled = m_renderPassToggleRegistry.NoteDeclaredAndCheckEnabled("AtmosphereComposite");
-            // editor-core-separation-21 campaign, PHASE1 - TEMPORARY diagnostic
-            // instrumentation (category "RenderPassHonestyDiag") - the OUTER
-            // provider-level guard, per view (Game/Scene both call this lambda).
-            // No RenderViewId::ToDebugString() exists - identify the view by
-            // comparing against the one named value this file already uses
-            // below (frame.currentView == rg::RenderViewId::Named("Game")).
-            GTE_LOG_DEBUG("RenderPassHonestyDiag",
-                "\"AtmosphereComposite\" provider - isGameView=" + std::string(
-                    (frame.currentView == rg::RenderViewId::Named("Game")) ? "true" : "false")
-                    + ", atmosphereCompositeEnabled=" + std::string(atmosphereCompositeEnabled ? "true" : "false"));
             if (!atmosphereCompositeEnabled) {
                 return;
             }
@@ -966,13 +955,6 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 viewData->eyeWorldPosition, m_atmosphereSettings.aerialPerspectiveStrength,
                 m_atmosphereSettings.aerialPerspectiveMaxDistanceKm, m_atmosphereSettings.aerialPerspectiveDepthExponent,
                 viewData->renderTexture->Extent(), outputTextureName, legacyViewScope, &m_renderPassToggleRegistry);
-
-            // editor-core-separation-21 campaign, PHASE1 - TEMPORARY diagnostic
-            // instrumentation (category "RenderPassHonestyDiag").
-            GTE_LOG_DEBUG("RenderPassHonestyDiag",
-                "\"AtmosphereComposite\" provider - isGameView=" + std::string(isGameView ? "true" : "false")
-                    + ", AddAtmosphereCompositePass() returned composited.IsValid()="
-                    + std::string(composited.IsValid() ? "true" : "false"));
 
             if (!composited.IsValid()) {
                 // editor-core-separation-20 campaign, PHASE2 (Step 3.7, item 4b) -

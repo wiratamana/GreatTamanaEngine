@@ -264,6 +264,27 @@ struct EditorContext {
     // why).
     bool frameDebuggerWindowOpen = false;
 
+    // editor-core-separation-21 campaign, PHASE2
+    // (PHASE2_FIX_AERIAL_PERSPECTIVE_COMPOSITE_TOGGLE_LIE.md) - set to true by
+    // Panels/RenderGraphPanel.cpp's own two checkbox click sites (BuildPassRow()/
+    // BuildDisabledBuiltInPassesSection()) the instant a built-in pass's
+    // RenderPassToggleRegistry::SetEnabled() call actually flips ANY pass's
+    // (name, enabled) pair this frame (see
+    // RenderPassToggleChangeDetectionLogic.h's own DidRenderPassToggleEnabledStatesChange()).
+    // Consumed (read-and-cleared) by FrameDebuggerPanel::Build(), called LATER
+    // this SAME frame from ImGuiEditorLayer::BuildUI() - the fourth Frame
+    // Debugger capture TRIGGER (joining the Enable-edge/Step/explicit
+    // "Capture" button triggers already documented in AGENTS.md's "Frame
+    // Debugger" section), fixing PHASE1_COMPLETION_REPORT.md's confirmed root
+    // cause: a disabled pass used to keep showing up as a real, populated
+    // Frame Debugger leaf until a human/HTTP caller remembered to request a
+    // SECOND capture after the toggle. The OTHER mutation path
+    // (GET /render_graph/set_pass_enabled, EditorHost.cpp's
+    // RenderGraphControlCommandBridge pump) does not go through this flag at
+    // all - that pump runs BEFORE BuildUI() even starts, so it instead calls
+    // IEditorLayer::FrameDebuggerCaptureNow() directly at its own call site.
+    bool renderPassToggleRegistryChangedThisFrame = false;
+
     // editor-core-separation-16 campaign (On-Engine Project Workflow plan,
     // BIG-STEP 2), PHASE4 - true whenever NewProjectWindow.h's floating
     // window is currently open. Flipped by the new "Project > New
