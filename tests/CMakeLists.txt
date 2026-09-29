@@ -2390,6 +2390,16 @@ if(TRUE)
         # CreateProjectEndpointEndToEndTests.cpp's own precedent immediately
         # above.
         Network/OpenProjectEndpointEndToEndTests.cpp
+        # editor-core-separation-18 campaign, PHASE1 - On-Engine Project
+        # Workflow plan (BIG-STEP 4)'s new IAssetScaffoldingCapability /
+        # EditorProjectLifecycleCapability::CreateAssetScaffold() addition.
+        # Needs a real EditorProjectLifecycleCapability (gte_editor-tier),
+        # mirroring OpenProjectEndpointEndToEndTests.cpp's own precedent
+        # immediately above - lives in tests/Editor/, NOT tests/Core/Plugins/,
+        # since EditorProjectLifecycleCapability is gte_editor-tier code (see
+        # this new test file's own top-of-file comment for the full
+        # reasoning).
+        Editor/AssetScaffoldTemplateTests.cpp
     )
 
     # ProjectPanelData.h/.cpp (see src/Editor/ProjectPanelData.h) is only

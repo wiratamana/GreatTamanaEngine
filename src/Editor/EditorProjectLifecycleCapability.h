@@ -13,7 +13,8 @@ class ProjectLifecycleLoadCommandBridge;
 // (Core/EditorCapabilities.h). Constructed once, as a namespace-scope
 // static inside EditorHost.cpp (mirrors s_editorHotReloadDebugCapability's
 // exact precedent).
-class EditorProjectLifecycleCapability : public IProjectLifecycleCapability {
+class EditorProjectLifecycleCapability : public IProjectLifecycleCapability,
+                                          public IAssetScaffoldingCapability {
 public:
     CreateProjectOutcome CreateNewProjectAssembly(const std::string& name) override;
 
@@ -25,6 +26,11 @@ public:
     OpenProjectOutcome OpenProjectAssembly(const std::string& name) override;
     OpenProjectOutcome OpenProjectAssemblyOnMainThread(const std::string& name) override;
     std::vector<ProjectListEntry> ListProjectAssemblies() override;
+
+    // editor-core-separation-18 campaign (On-Engine Project Workflow plan,
+    // BIG-STEP 4). See IAssetScaffoldingCapability's own doc comment
+    // (Core/EditorCapabilities.h) for the full contract.
+    ScaffoldOutcome CreateAssetScaffold(AssetScaffoldKind kind, const std::string& name) override;
 
     // Called once, from EditorHost's own constructor body - mirrors
     // EditorHotReloadDebugCapability's own 3-setter precedent exactly

@@ -332,4 +332,39 @@ public:
     virtual std::vector<ProjectListEntry> ListProjectAssemblies() = 0;
 };
 
+// editor-core-separation-18 campaign (On-Engine Project Workflow plan,
+// BIG-STEP 4) - answers "can this build scaffold a new Render Pass/Compute
+// Shader/Shader-Pair source file into the CURRENTLY ACTIVE Project
+// Assembly's Assets/ folder". A deliberately SEPARATE interface from
+// IProjectLifecycleCapability immediately above - scaffolding a file inside
+// an already-active project is a genuinely different capability question
+// from creating/opening the project itself (this file's own long-standing
+// "one interface per genuinely new capability gap" convention). Mirrors
+// every capability interface above: gte_core-tier code (NetworkServer.cpp)
+// holds only a nullable pointer; nullptr means every route backed by this
+// interface answers 503.
+enum class AssetScaffoldKind { RenderPass, ComputeShader, ShaderPair };
+
+class IAssetScaffoldingCapability {
+public:
+    virtual ~IAssetScaffoldingCapability() = default;
+
+    struct ScaffoldOutcome {
+        bool success = false;
+        std::string errorMessage;              // meaningful only when success == false
+        std::vector<std::string> createdFiles; // relative to Assets/, meaningful only when success == true
+        std::string reminderMessage;           // "" for ShaderPair (no companion .cpp is generated for that kind)
+    };
+
+    // Callable from ANY thread - pure filesystem I/O against the CURRENT
+    // ActiveProjectAssemblyState, plus (LDD-CA1, PHASE0_MASTER_STRATEGY.md)
+    // deliberately NO CMake reconfigure call - gte_add_project()'s own
+    // CONFIGURE_DEPENDS glob over Assets/*.cpp (and the *.vert/*.frag/*.comp
+    // shader glob) already re-triggers CMake's configure step automatically
+    // on the NEXT `cmake --build`, unlike CreateNewProjectAssembly()'s own
+    // brand-new-FOLDER case. Never touches ActiveProjectAssemblyState's own
+    // "which project is active" state - only reads it.
+    virtual ScaffoldOutcome CreateAssetScaffold(AssetScaffoldKind kind, const std::string& name) = 0;
+};
+
 } // namespace gte
