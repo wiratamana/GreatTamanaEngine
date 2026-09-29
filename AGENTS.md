@@ -403,13 +403,86 @@ un-culled; disabling only `RenderOpaque` still shows a real, visible rendered sk
 render graph with zero crash; and re-enabling everything returns to the exact prior, byte-identical
 baseline image.
 
+A follow-up bug-fix campaign, `editor-core-separation-21` ("The Engine Is Lying", six phases,
+`task_manager/editor-core-separation-21/PHASE0_MASTER_STRATEGY.md`, `CAMPAIGN_COMPLETION_REPORT.md`),
+fixed a confirmed, user-reported bug where disabling `AtmosphereAerialPerspectiveCompositePass` via the
+"Render Graph" panel / `GET /render_graph/set_pass_enabled` left the Frame Debugger's own event tree still
+showing it as a REAL, EXECUTED compute-dispatch event, fully populated with live GPU-timing/read/write
+data. **Confirmed root cause (PHASE1), mechanically, with log evidence — NOT a toggle-registry
+correctness bug**: the render-pass-toggle mechanism itself was already 100% correct every frame; the real
+bug is a genuine, reproducible staleness in `FrameDebuggerPanel::CaptureNowFromCommand()` (the handler
+behind `GET /frame_debugger/capture`) - it only ARMS a deferred capture trigger and returns immediately,
+before the real capture (`TriggerCapture()`, deferred by design since the `frame-debugger-7` campaign)
+actually runs on the next engine frame, so the very first `GET /frame_debugger/capture` issued after any
+toggle mutation always reports whatever the PREVIOUS, already-completed capture produced. **PHASE2's fix**:
+a new, pure `RenderPassToggleChangeDetectionLogic.h`'s `DidRenderPassToggleEnabledStatesChange()` detects a
+real enabled-state change across two `RenderPassToggleRegistry::ListAll()` snapshots, wired into a FOURTH
+automatic Frame Debugger capture trigger (joining the pre-existing Enable-edge / Step / explicit "Capture"
+button) via two mutation paths - `RenderGraphPanel::Build()`'s own checkboxes set a new
+`EditorContext::renderPassToggleRegistryChangedThisFrame` flag `FrameDebuggerPanel::Build()` consumes
+same-frame, and `GET /render_graph/set_pass_enabled`'s `EditorHost.cpp` handler (which runs BEFORE
+`BuildUI()` even starts that frame) calls `IEditorLayer::FrameDebuggerCaptureNow()` directly - so a toggle
+mutation now genuinely, automatically triggers a fresh capture, closing the staleness window for good.
+**PHASE3's systemic audit found ONE root cause behind almost every other "lie" in the engine**:
+`RenderGraphPanel::BuildPassRow()` draws an identical, apparently-functional "Enabled" checkbox for EVERY
+pass name in a captured snapshot, with zero knowledge of whether that pass's own declare-time code path
+actually consults `RenderPassToggleRegistry` at all - a pass declared via the generic
+`RenderPipeline::DeclareOnePhase()` flush loop is honestly gated for free, but a pass declared via a
+DIRECT `builder.AddRenderPass()` call bypasses this entirely unless its own call site was hand-written to
+separately consult the registry. Six such Confirmed-Lie instances were live-confirmed and ALL SIX fixed by
+PHASE4 (per an explicit `ask_questions` decision to fix every one, with zero permanent exceptions carried
+over): the already-known `DemoRenderFeaturePlugin_Clear`/`DemoRenderFeatureSecondPlugin_Clear` inert
+plugin-demo toggles (`PluginRenderPassBuilderAdapter`), `ComputeBlurValidation`'s and
+`GBufferValidation`/`GBufferValidationCopy`'s own per-row checkboxes (previously cosmetic despite each
+having a real, separate, ALREADY-honest feature toggle of its own -
+`ctx.showBlurredSceneOutput`/`showGBufferValidationOutput` - the registry consult is now an ADDITIONAL,
+independent layer of granularity on top of that, with `GBufferValidation::AddPass()` gaining genuinely
+independent per-half gating), `AtmosphereAerialPerspectiveVolumeDebugSlicePass`,
+`AddGpuSkinningPasses()`'s direct-render-to-swapchain fallback (now sharing the SAME `"GpuSkinning"`
+registry entry the offscreen provider already used, so one checkbox honestly gates both reachable code
+paths), and `FrameDebuggerReplayStepN`'s dynamically-named per-replay-step passes (gated by a single new
+whole-mechanism `"FrameDebuggerReplay"` toggle, mirroring the `AddGpuSkinningPasses()` precedent rather
+than inventing one registry entry per ever-growing dynamic name). **PHASE5 made the iron rule
+self-enforcing, permanently, in code**: `DetectRenderPassHonestyMismatches()`
+(`src/Editor/RenderPassHonestyChecker.h/.cpp`, pure, Tier-1-tested, mirrors `ImGuiIdConflictTracker.h`'s
+own precedent) compares a captured `RenderGraphSnapshot`'s own non-culled passes against
+`RenderPassToggleRegistry`'s recorded enabled state, and `RenderPassHonestyGuard`
+(`src/Editor/RenderPassHonestyGuard.h/.cpp`, mirrors `ImGuiIdConflictGuard`'s log-once-per-new-incident
+shape) fires a `GTE_LOG_ERROR("RenderPassHonesty", ...)` the instant a future regression of this exact bug
+class reappears, wired into `FrameDebuggerPanel::TriggerCapture()` - the same chokepoint PHASE1's own
+diagnostic logging used. Verified live: deliberately reintroducing the original bug made the detector fire
+a real, fresh log entry immediately (confirmed via `GET /get_logs?category=RenderPassHonesty`), the
+already-fixed production code stayed completely silent (zero false positives), and the temporary
+reintroduction hack was fully reverted (confirmed via `git diff --stat` showing zero net change). Verified
+with a full clean build (603/603 steps, zero errors), a full `ctest` regression pass (2004 tests, 100% of
+executed tests passing, 8 legitimate environment-gated skips - up from `editor-core-separation-20`'s own
+1993/8 baseline, a clean +11 from this campaign's own PHASE2 (5 tests) and PHASE5 (6 tests)), and a final,
+live, HTTP-driven, end-to-end verification reproducing the FULL original bug report end-to-end one last
+time: disabling `AtmosphereAerialPerspectiveCompositePass` now genuinely removes it from the very next
+Frame Debugger capture with zero extra manual re-capture needed, re-enabling restores it, the Game View
+still renders the exact same byte-identical (158923-byte) sane image throughout, and
+`GET /get_logs?category=RenderPassHonesty` stayed completely empty across the whole verification sequence.
+**Honest, permanent limitation, restated plainly**: `AddGpuSkinningPasses()`'s direct-render-to-swapchain
+fallback branch and `FrameDebuggerReplayStepN`'s own per-step declaration could not be DIRECTLY,
+live-exercised through their own dishonest branch this session either before or after the fix (the former
+needs both the Game View AND Scene View panels hidden simultaneously - no Editor/HTTP control exists to
+force that; the latter's own capture snapshot has already rolled forward past the one frame that declares
+these passes by the time any HTTP response is built) - both fixes are proven correct by direct code
+reading (the guard is unconditional and runs identically regardless of which caller reaches it) plus their
+own registry entry now genuinely existing and mutating cleanly, the same evidentiary standard PHASE3's own
+audit already used for these two findings. See `docs/conventions/render-pass-toggle-honesty.md` for the
+permanent, standalone reference on how to correctly gate any FUTURE pass that bypasses the generic
+`RenderPipeline::DeclareOnePhase()` flush loop, and
+`task_manager/editor-core-separation-21/CAMPAIGN_COMPLETION_REPORT.md` for the full six-phase writeup.
+
 Full history: `task_manager/render-pass-1/PHASE0_MASTER_STRATEGY.md`,
 `task_manager/render-pass-2/PHASE0_MASTER_STRATEGY.md`,
 `task_manager/render-pass-3/PHASE0_MASTER_STRATEGY.md`,
 `task_manager/render-pass-4/PHASE0_MASTER_STRATEGY.md`,
 `task_manager/render-pass-6/PHASE0_MASTER_STRATEGY.md`,
-`task_manager/render-pass-7/PHASE0_MASTER_STRATEGY.md`, and
-`task_manager/editor-core-separation-20/PHASE0_MASTER_STRATEGY.md`, and each
+`task_manager/render-pass-7/PHASE0_MASTER_STRATEGY.md`,
+`task_manager/editor-core-separation-20/PHASE0_MASTER_STRATEGY.md`, and
+`task_manager/editor-core-separation-21/PHASE0_MASTER_STRATEGY.md`, and each
 `PHASEn_COMPLETION_REPORT.md`/`CAMPAIGN_COMPLETION_REPORT.md` in those same
 folders.
 

@@ -116,6 +116,12 @@ than subsystem-specific):
   `GreatTamanaEditor.exe`, calling real, non-ABI-wrapped engine types
   (`gte::Core&`, real ImGui, real `rg::RenderGraphBuilder`) with zero engine
   recompilation.
+- **[Render Pass Toggle Honesty](conventions/render-pass-toggle-honesty.md)** —
+  the iron rule that a render pass's declared/enabled state and the Frame
+  Debugger's own displayed event tree must never disagree, how a pass
+  bypassing the generic `RenderPipeline::DeclareOnePhase()` flush loop must
+  consult `RenderPassToggleRegistry` itself, and the permanent, automatic
+  `RenderPassHonestyChecker`/`RenderPassHonestyGuard` mismatch detector.
 
 ## Changelog
 
