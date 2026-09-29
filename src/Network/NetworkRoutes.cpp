@@ -1220,6 +1220,10 @@ std::string BuildLedgerEntryResponseJson(
     nlohmann::json body;
     body["project_name"] = projectName;
     body["render_pass_names"] = entry.renderPassNames;
+    // editor-core-separation-23 campaign, PHASE4
+    // (PHASE4_HOT_RELOAD_LEDGER_TEARDOWN_WIRING.md) - snake_case, matching
+    // every sibling key in this exact JSON body.
+    body["render_feature_names"] = entry.renderFeatureNames;
     body["panel_names"] = entry.panelNames;
     body["component_type_names"] = entry.componentTypeNames;
     return body.dump();

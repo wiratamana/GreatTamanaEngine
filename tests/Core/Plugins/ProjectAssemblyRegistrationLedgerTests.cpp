@@ -16,12 +16,22 @@
 // (HeadlessSurfaceProvider + a trivial NoopHostServices), GTEST_SKIP()-ing
 // identically if this machine's Vulkan driver/loader doesn't support
 // VK_EXT_headless_surface (editor-core-separation-1 campaign, PHASE18).
+//
+// editor-core-separation-23 campaign, PHASE4
+// (PHASE4_HOT_RELOAD_LEDGER_TEARDOWN_WIRING.md) - extended with
+// RecordRenderFeature()/renderFeatureNames coverage, plus a real
+// Core::RegisterProjectRenderFeature() end-to-end round trip mirroring
+// FullRoundTripThroughARealComponentTypeRegistrationProvesTheWholeWiring's
+// own precedent, and an explicit render-feature-before-render-pass-provider
+// teardown ordering test.
 
 #include "Core/Plugins/ProjectAssemblyRegistrationLedger.h"
 #include "Core/Core.h"
 #include "Core/IHostServices.h"
 #include "ECS/Reflection/ComponentTypeRegistry.h"
 #include "ECS/Reflection/ReflectFieldMacros.h"
+#include "Core/Plugins/RenderFeatureCompositor.h"
+#include "Core/Plugins/RenderFeatureDebugEntry.h"
 #include "../../Fakes/HeadlessSurfaceProvider.h"
 
 #include <gtest/gtest.h>
@@ -49,15 +59,32 @@ struct LedgerRoundTripDummyComponent {
     float value = 0.0f;
 };
 
+// Finds `name` inside a RenderFeatureCompositor::DebugSnapshot() result, or
+// nullptr if absent - mirrors RenderFeatureCompositorProjectFeatureTests.cpp's
+// own identical helper.
+const RenderFeatureDebugEntry* FindByName(const std::vector<RenderFeatureDebugEntry>& snapshot, const std::string& name)
+{
+    for (const RenderFeatureDebugEntry& entry : snapshot) {
+        if (entry.name == name) {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
 } // namespace
 
-TEST(ProjectAssemblyRegistrationLedgerTest, BeginRecordThenEndCapturesPanelAndComponentTypeUnderTheActiveProject)
+// editor-core-separation-23 campaign, PHASE4 - extended to also assert on
+// renderFeatureNames (RecordRenderFeature()) alongside the pre-existing
+// panel/component-type coverage.
+TEST(ProjectAssemblyRegistrationLedgerTest, BeginRecordThenEndCapturesPanelComponentTypeAndRenderFeatureUnderTheActiveProject)
 {
     ProjectAssemblyRegistrationLedger& ledger = ProjectAssemblyRegistrationLedger::Instance();
 
     ledger.BeginRecordingFor("LedgerTestProject_Alpha");
     ledger.RecordPanel("LedgerTestProject_Alpha_PanelA");
     ledger.RecordComponentType("LedgerTestProject_Alpha_CompA");
+    ledger.RecordRenderFeature("LedgerTestProject_Alpha_RenderFeatureA");
     ledger.EndRecording();
 
     const ProjectAssemblyRegistrationLedger::Entry entry = ledger.PeekEntry("LedgerTestProject_Alpha");
@@ -65,10 +92,15 @@ TEST(ProjectAssemblyRegistrationLedgerTest, BeginRecordThenEndCapturesPanelAndCo
     EXPECT_EQ(entry.panelNames[0], "LedgerTestProject_Alpha_PanelA");
     ASSERT_EQ(entry.componentTypeNames.size(), 1u);
     EXPECT_EQ(entry.componentTypeNames[0], "LedgerTestProject_Alpha_CompA");
+    ASSERT_EQ(entry.renderFeatureNames.size(), 1u);
+    EXPECT_EQ(entry.renderFeatureNames[0], "LedgerTestProject_Alpha_RenderFeatureA");
     EXPECT_TRUE(entry.renderPassNames.empty());
 }
 
-TEST(ProjectAssemblyRegistrationLedgerTest, RecordPanelWithNoActiveBracketIsSilentlyIgnored)
+// editor-core-separation-23 campaign, PHASE4 - extended to also cover
+// RecordRenderFeature()'s identical no-active-bracket-is-a-safe-no-op
+// contract.
+TEST(ProjectAssemblyRegistrationLedgerTest, RecordPanelAndRenderFeatureWithNoActiveBracketAreSilentlyIgnored)
 {
     ProjectAssemblyRegistrationLedger& ledger = ProjectAssemblyRegistrationLedger::Instance();
 
@@ -76,6 +108,7 @@ TEST(ProjectAssemblyRegistrationLedgerTest, RecordPanelWithNoActiveBracketIsSile
     // safe, silent no-op, never a crash, and must never leak into any
     // project's own ledger entry.
     ledger.RecordPanel("LedgerTestProject_ShouldBeIgnored_PanelName");
+    ledger.RecordRenderFeature("LedgerTestProject_ShouldBeIgnored_RenderFeatureName");
 
     // Confirm it did not create a spurious entry under its own literal text
     // (were it ever mistakenly treated as a project name by a bug).
@@ -83,15 +116,20 @@ TEST(ProjectAssemblyRegistrationLedgerTest, RecordPanelWithNoActiveBracketIsSile
     EXPECT_TRUE(stray.panelNames.empty());
     EXPECT_TRUE(stray.componentTypeNames.empty());
     EXPECT_TRUE(stray.renderPassNames.empty());
+    EXPECT_TRUE(stray.renderFeatureNames.empty());
+    const ProjectAssemblyRegistrationLedger::Entry strayRenderFeature =
+        ledger.PeekEntry("LedgerTestProject_ShouldBeIgnored_RenderFeatureName");
+    EXPECT_TRUE(strayRenderFeature.renderFeatureNames.empty());
 
     // Confirm a genuinely fresh project, begun/ended immediately afterward,
-    // is not polluted by the ignored call above.
+    // is not polluted by the ignored calls above.
     ledger.BeginRecordingFor("LedgerTestProject_Zeta");
     ledger.EndRecording();
     const ProjectAssemblyRegistrationLedger::Entry zeta = ledger.PeekEntry("LedgerTestProject_Zeta");
     EXPECT_TRUE(zeta.panelNames.empty());
     EXPECT_TRUE(zeta.componentTypeNames.empty());
     EXPECT_TRUE(zeta.renderPassNames.empty());
+    EXPECT_TRUE(zeta.renderFeatureNames.empty());
 }
 
 TEST(ProjectAssemblyRegistrationLedgerTest, NestedBeginEndBracketsForTheSameProjectAccumulateIntoOneEntry)
@@ -121,6 +159,7 @@ TEST(ProjectAssemblyRegistrationLedgerTest, PeekEntryForANeverLoadedProjectRetur
     const ProjectAssemblyRegistrationLedger::Entry entry =
         ProjectAssemblyRegistrationLedger::Instance().PeekEntry("LedgerTestProject_NeverLoaded_Peek");
     EXPECT_TRUE(entry.renderPassNames.empty());
+    EXPECT_TRUE(entry.renderFeatureNames.empty());
     EXPECT_TRUE(entry.panelNames.empty());
     EXPECT_TRUE(entry.componentTypeNames.empty());
 }
@@ -150,6 +189,7 @@ TEST(ProjectAssemblyRegistrationLedgerTest, UnregisterEverythingForANeverLoadedP
     const ProjectAssemblyRegistrationLedger::Entry entry =
         ProjectAssemblyRegistrationLedger::Instance().PeekEntry("LedgerTestProject_NeverLoaded_Unregister");
     EXPECT_TRUE(entry.renderPassNames.empty());
+    EXPECT_TRUE(entry.renderFeatureNames.empty());
     EXPECT_TRUE(entry.panelNames.empty());
     EXPECT_TRUE(entry.componentTypeNames.empty());
 }
@@ -199,6 +239,122 @@ TEST(ProjectAssemblyRegistrationLedgerTest, FullRoundTripThroughARealComponentTy
     const ProjectAssemblyRegistrationLedger::Entry afterUnregister = ledger.PeekEntry(projectName);
     EXPECT_TRUE(afterUnregister.componentTypeNames.empty());
     EXPECT_TRUE(afterUnregister.panelNames.empty());
+    EXPECT_TRUE(afterUnregister.renderPassNames.empty());
+    EXPECT_TRUE(afterUnregister.renderFeatureNames.empty());
+}
+
+// editor-core-separation-23 campaign, PHASE4 - the render-feature mirror of
+// FullRoundTripThroughARealComponentTypeRegistrationProvesTheWholeWiring
+// immediately above: a real Project Assembly render feature, registered
+// through Core::RegisterProjectRenderFeature() (PHASE3) INSIDE a
+// BeginRecordingFor()/EndRecording() bracket, must (a) actually land in
+// RenderFeatureCompositor::DebugSnapshot(), (b) be recorded by the ledger,
+// and then UnregisterEverythingFor() must remove it from BOTH places -
+// proving PHASE4's own teardown wiring genuinely reaches
+// RenderFeatureCompositor::UnregisterProjectFeature(), not merely clears the
+// ledger's own bookkeeping.
+TEST(ProjectAssemblyRegistrationLedgerTest, FullRoundTripThroughARealRenderFeatureRegistrationProvesTheWholeWiring)
+{
+    HeadlessSurfaceProvider surfaceProvider;
+    NoopHostServices hostServices;
+
+    std::unique_ptr<Core> core;
+    try {
+        core = std::make_unique<Core>(surfaceProvider, hostServices);
+    } catch (const std::exception& e) {
+        GTEST_SKIP() << "Core construction needs a real, valid VkSurfaceKHR - this machine's Vulkan "
+                        "driver/loader apparently does not support VK_EXT_headless_surface (see "
+                        "HeadlessSurfaceProvider.h's own top-of-file comment). Real failure: "
+                     << e.what();
+    }
+    ASSERT_NE(core, nullptr);
+
+    const std::string projectName = "LedgerTestProject_Delta_RenderFeatureRoundTrip";
+    const std::string featureName = "LedgerTestProject_Delta_RenderFeatureRoundTrip_Feature";
+
+    ProjectAssemblyRegistrationLedger& ledger = ProjectAssemblyRegistrationLedger::Instance();
+
+    ledger.BeginRecordingFor(projectName);
+    const bool registered = core->RegisterProjectRenderFeature(featureName.c_str(), RenderFeatureStage::PostComposite,
+        RenderFeatureBlendMode::Replace, 0, [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { });
+    ledger.EndRecording();
+    ASSERT_TRUE(registered);
+
+    RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
+    ASSERT_NE(compositor, nullptr);
+    ASSERT_NE(FindByName(compositor->DebugSnapshot(), featureName), nullptr);
+
+    const ProjectAssemblyRegistrationLedger::Entry beforeUnregister = ledger.PeekEntry(projectName);
+    ASSERT_EQ(beforeUnregister.renderFeatureNames.size(), 1u);
+    EXPECT_EQ(beforeUnregister.renderFeatureNames[0], featureName);
+
+    ledger.UnregisterEverythingFor(projectName, *core);
+
+    EXPECT_EQ(FindByName(compositor->DebugSnapshot(), featureName), nullptr);
+    const ProjectAssemblyRegistrationLedger::Entry afterUnregister = ledger.PeekEntry(projectName);
+    EXPECT_TRUE(afterUnregister.renderFeatureNames.empty());
+    EXPECT_TRUE(afterUnregister.componentTypeNames.empty());
+    EXPECT_TRUE(afterUnregister.panelNames.empty());
+    EXPECT_TRUE(afterUnregister.renderPassNames.empty());
+}
+
+// editor-core-separation-23 campaign, PHASE4 - the teardown ORDERING claim
+// itself: registers BOTH a render feature AND a render-pass provider for the
+// SAME test project (in that order), then confirms UnregisterEverythingFor()
+// removes BOTH cleanly. Directly observing "feature torn down strictly
+// before provider" from outside this class is impractical without a deeper
+// instrumentation hook (neither UnregisterProjectFeature() nor
+// UnregisterProjectRenderPassProvider() invoke their own owning
+// callback/provider on teardown, so there is no externally-observable side
+// effect to hook) - per this phase file's own explicitly-offered fallback
+// (section 3.4, item 4), the actual execution-order guarantee is confirmed
+// by DIRECT CODE REVIEW of ProjectAssemblyRegistrationLedger.cpp's own
+// UnregisterEverythingFor() body (the renderFeatureNames loop appears
+// strictly BEFORE the renderPassNames loop in source order - see this
+// phase's own completion report for the exact line citation), with the live,
+// real hot-reload dynamic proof deferred to PHASE6.
+TEST(ProjectAssemblyRegistrationLedgerTest, UnregisterEverythingForTearsDownBothRenderFeatureAndRenderPassProviderCleanly)
+{
+    HeadlessSurfaceProvider surfaceProvider;
+    NoopHostServices hostServices;
+
+    std::unique_ptr<Core> core;
+    try {
+        core = std::make_unique<Core>(surfaceProvider, hostServices);
+    } catch (const std::exception& e) {
+        GTEST_SKIP() << "Core construction needs a real, valid VkSurfaceKHR - this machine's Vulkan "
+                        "driver/loader apparently does not support VK_EXT_headless_surface (see "
+                        "HeadlessSurfaceProvider.h's own top-of-file comment). Real failure: "
+                     << e.what();
+    }
+    ASSERT_NE(core, nullptr);
+
+    const std::string projectName = "LedgerTestProject_Epsilon_OrderingProof";
+    const std::string featureName = "LedgerTestProject_Epsilon_OrderingProof_Feature";
+    const std::string renderPassName = "LedgerTestProject_Epsilon_OrderingProof_Pass";
+
+    ProjectAssemblyRegistrationLedger& ledger = ProjectAssemblyRegistrationLedger::Instance();
+
+    ledger.BeginRecordingFor(projectName);
+    ASSERT_TRUE(core->RegisterProjectRenderFeature(featureName.c_str(), RenderFeatureStage::PostComposite,
+        RenderFeatureBlendMode::Replace, 0, [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { }));
+    core->RegisterProjectRenderPassProvider(renderPassName.c_str(), rg::ProviderScope::Once,
+        [](const rg::RenderPassFrameContext&, std::vector<rg::RenderPassDesc>&) { });
+    ledger.EndRecording();
+
+    const ProjectAssemblyRegistrationLedger::Entry beforeUnregister = ledger.PeekEntry(projectName);
+    ASSERT_EQ(beforeUnregister.renderFeatureNames.size(), 1u);
+    ASSERT_EQ(beforeUnregister.renderPassNames.size(), 1u);
+
+    RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
+    ASSERT_NE(compositor, nullptr);
+    ASSERT_NE(FindByName(compositor->DebugSnapshot(), featureName), nullptr);
+
+    ledger.UnregisterEverythingFor(projectName, *core);
+
+    EXPECT_EQ(FindByName(compositor->DebugSnapshot(), featureName), nullptr);
+    const ProjectAssemblyRegistrationLedger::Entry afterUnregister = ledger.PeekEntry(projectName);
+    EXPECT_TRUE(afterUnregister.renderFeatureNames.empty());
     EXPECT_TRUE(afterUnregister.renderPassNames.empty());
 }
 

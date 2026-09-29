@@ -42,6 +42,7 @@ IHotReloadDebugCapability::LedgerEntry EditorHotReloadDebugCapability::GetLedger
         ProjectAssemblyRegistrationLedger::Instance().PeekEntry(projectName);
     LedgerEntry result;
     result.renderPassNames = entry.renderPassNames;
+    result.renderFeatureNames = entry.renderFeatureNames; // editor-core-separation-23 campaign, PHASE4.
     result.panelNames = entry.panelNames;
     result.componentTypeNames = entry.componentTypeNames;
     return result;

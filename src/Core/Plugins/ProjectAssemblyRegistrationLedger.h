@@ -63,11 +63,25 @@ public:
     // whenever no BeginRecordingFor() bracket is currently active (the
     // engine's own built-in registrations never run inside one).
     void RecordRenderPass(const std::string& debugName);
+    // editor-core-separation-23 campaign, PHASE4
+    // (PHASE4_HOT_RELOAD_LEDGER_TEARDOWN_WIRING.md) - called by
+    // Core::RegisterProjectRenderFeature() on ITS OWN success path only
+    // (unlike RecordRenderPass(), which Core::RegisterProjectRenderPassProvider()
+    // calls unconditionally, since that underlying call can never itself
+    // fail) - mirrors RecordRenderPass()'s own body shape exactly.
+    void RecordRenderFeature(const std::string& debugName);
     void RecordPanel(const std::string& panelName);
     void RecordComponentType(const std::string& typeName);
 
     struct Entry {
         std::vector<std::string> renderPassNames;
+        // editor-core-separation-23 campaign, PHASE4 - a Project Assembly's
+        // own on-screen render feature name(s) (Core::RegisterProjectRenderFeature(),
+        // editor-core-separation-23 campaign). Field ORDER here is not itself
+        // semantically load-bearing - only UnregisterEverythingFor()'s own
+        // real teardown LOOP order (renderFeatureNames before renderPassNames)
+        // is.
+        std::vector<std::string> renderFeatureNames;
         std::vector<std::string> panelNames;
         std::vector<std::string> componentTypeNames;
     };

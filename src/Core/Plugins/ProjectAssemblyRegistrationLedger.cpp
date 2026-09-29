@@ -60,6 +60,21 @@ void ProjectAssemblyRegistrationLedger::RecordRenderPass(const std::string& debu
     GetOrCreateEntryLocked(m_activeProjectStack.back()).renderPassNames.push_back(debugName);
 }
 
+// editor-core-separation-23 campaign, PHASE4
+// (PHASE4_HOT_RELOAD_LEDGER_TEARDOWN_WIRING.md) - mirrors RecordRenderPass()'s
+// own body shape exactly. Called ONLY from Core::RegisterProjectRenderFeature()'s
+// own success path (that call can genuinely fail - duplicate name/unwired
+// stage/slot exhaustion - unlike RegisterProjectRenderPassProvider(), which
+// never fails), so no over-eager/spurious name ever lands in the ledger.
+void ProjectAssemblyRegistrationLedger::RecordRenderFeature(const std::string& debugName)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_activeProjectStack.empty()) {
+        return; // Safe no-op - no active BeginRecordingFor() bracket (e.g. an engine built-in registration).
+    }
+    GetOrCreateEntryLocked(m_activeProjectStack.back()).renderFeatureNames.push_back(debugName);
+}
+
 void ProjectAssemblyRegistrationLedger::RecordPanel(const std::string& panelName)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
@@ -112,6 +127,21 @@ void ProjectAssemblyRegistrationLedger::UnregisterEverythingFor(const std::strin
     for (auto nameIt = entry.panelNames.rbegin(); nameIt != entry.panelNames.rend(); ++nameIt) {
         EditorPanelRegistry::Instance().UnregisterPluginPanel(*nameIt);
     }
+    // editor-core-separation-23 campaign, PHASE4
+    // (PHASE4_HOT_RELOAD_LEDGER_TEARDOWN_WIRING.md) - render FEATURES are
+    // torn down BEFORE render-pass PROVIDERS: a render feature's own
+    // callback may reference a project's own offscreen render-pass output
+    // via the blackboard, so the CONSUMER (the render feature) must be
+    // torn down before the PRODUCER it may depend on (the render-pass
+    // provider) - the same cross-category dependency direction already
+    // established by componentTypeNames -> panelNames above. This also
+    // releases each torn-down feature's own claimed GPU-state slot
+    // (RenderFeatureCompositor::UnregisterProjectFeature()'s own existing
+    // contract, PHASE2) back to the free list as part of the SAME call -
+    // no separate slot bookkeeping needed here.
+    for (auto nameIt = entry.renderFeatureNames.rbegin(); nameIt != entry.renderFeatureNames.rend(); ++nameIt) {
+        core.UnregisterProjectRenderFeature(nameIt->c_str());
+    }
     for (auto nameIt = entry.renderPassNames.rbegin(); nameIt != entry.renderPassNames.rend(); ++nameIt) {
         core.UnregisterProjectRenderPassProvider(nameIt->c_str());
     }
@@ -120,6 +150,7 @@ void ProjectAssemblyRegistrationLedger::UnregisterEverythingFor(const std::strin
         "UnregisterEverythingFor('" + projectName + "') - unregistered " +
         std::to_string(entry.componentTypeNames.size()) + " component type(s), " +
         std::to_string(entry.panelNames.size()) + " panel(s), " +
+        std::to_string(entry.renderFeatureNames.size()) + " render feature(s), " +
         std::to_string(entry.renderPassNames.size()) + " render pass(es).");
 
     m_entries.erase(it);

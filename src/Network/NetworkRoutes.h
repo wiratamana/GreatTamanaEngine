@@ -1114,8 +1114,8 @@ struct ParsedProjectNameQuery {
 ParsedProjectNameQuery ParseProjectNameQuery(const std::string& nameParam);
 
 // GET /project_assembly/debug/ledger?name=<X> - builds:
-//   {"project_name":"...","render_pass_names":[...],"panel_names":[...],
-//    "component_type_names":[...]}
+//   {"project_name":"...","render_pass_names":[...],"render_feature_names":[...],
+//    "panel_names":[...],"component_type_names":[...]}
 std::string BuildLedgerEntryResponseJson(
     const std::string& projectName, const IHotReloadDebugCapability::LedgerEntry& entry);
 

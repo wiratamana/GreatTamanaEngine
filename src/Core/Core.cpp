@@ -408,7 +408,21 @@ bool Core::RegisterProjectRenderFeature(const char* debugName, RenderFeatureStag
 
     const GtePluginRenderFeatureDescriptor descriptor =
         MakeRenderFeatureDescriptor(debugName, stage, priority, blendMode);
-    return m_renderFeatureCompositorPtr->RegisterProjectFeature(descriptor, std::move(callback));
+    const bool registered = m_renderFeatureCompositorPtr->RegisterProjectFeature(descriptor, std::move(callback));
+    if (registered) {
+        // editor-core-separation-23 campaign, PHASE4
+        // (PHASE4_HOT_RELOAD_LEDGER_TEARDOWN_WIRING.md) - safe no-op outside
+        // an active ProjectAssemblyRegistrationLedger::BeginRecordingFor()
+        // bracket, mirroring RegisterProjectRenderPassProvider()'s own
+        // RecordRenderPass() call immediately above - but, UNLIKE that call,
+        // gated on success: this underlying call CAN genuinely fail
+        // (duplicate name/unwired stage/slot exhaustion), so recording it
+        // unconditionally would let the ledger track a name that was never
+        // actually registered, breaking UnregisterEverythingFor()'s own
+        // later teardown call for it.
+        ProjectAssemblyRegistrationLedger::Instance().RecordRenderFeature(debugName);
+    }
+    return registered;
 }
 
 // editor-core-separation-23 campaign, PHASE3 - the teardown counterpart of

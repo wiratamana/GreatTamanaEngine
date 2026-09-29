@@ -197,6 +197,11 @@ public:
     // error.
     struct LedgerEntry {
         std::vector<std::string> renderPassNames;
+        // editor-core-separation-23 campaign, PHASE4
+        // (PHASE4_HOT_RELOAD_LEDGER_TEARDOWN_WIRING.md) - mirrors
+        // ProjectAssemblyRegistrationLedger::Entry's own new field exactly
+        // (same name, same position relative to renderPassNames).
+        std::vector<std::string> renderFeatureNames;
         std::vector<std::string> panelNames;
         std::vector<std::string> componentTypeNames;
     };
