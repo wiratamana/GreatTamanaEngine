@@ -7,6 +7,7 @@
 #include "../../Renderer/RenderGraph/RenderGraph.h"
 #include "../../Renderer/Renderer.h"
 #include "../../Renderer/RenderTexture.h"
+#include "../../Core/Logging.h" // editor-core-separation-21 campaign, PHASE1 - TEMPORARY diagnostic instrumentation.
 
 #include <backends/imgui_impl_vulkan.h>
 #include <imgui.h>
@@ -359,6 +360,27 @@ void FrameDebuggerPanel::TriggerCapture()
 
     const rg::RenderGraphSnapshot graphSnapshot =
         m_frameRenderGraph->LastSnapshot(rg::ExecuteTimingMode::SynchronousImmediateReadback);
+    // editor-core-separation-21 campaign, PHASE1 - TEMPORARY diagnostic
+    // instrumentation (category "RenderPassHonestyDiag") - reports exactly
+    // what THIS call's own graphSnapshot contains for the one pass this
+    // phase is diagnosing, so a live /get_logs pull can be correlated
+    // directly against the totalEventCount this same capture reports.
+    {
+        bool found = false;
+        bool isCulled = false;
+        for (const rg::RenderGraphPassSnapshot& p : graphSnapshot.passesInExecutionOrder) {
+            if (p.name == "AtmosphereAerialPerspectiveCompositePass") {
+                found = true;
+                isCulled = p.isCulled;
+                break;
+            }
+        }
+        GTE_LOG_DEBUG("RenderPassHonestyDiag",
+            "TriggerCapture() - graphSnapshot.passesInExecutionOrder.size()="
+                + std::to_string(graphSnapshot.passesInExecutionOrder.size())
+                + ", AtmosphereAerialPerspectiveCompositePass found=" + std::string(found ? "true" : "false")
+                + (found ? (", isCulled=" + std::string(isCulled ? "true" : "false")) : std::string()));
+    }
 
     FrameDebuggerRenderTargetInfo renderTargetInfo;
     const VkExtent2D extent = m_frameGameView->Extent();
