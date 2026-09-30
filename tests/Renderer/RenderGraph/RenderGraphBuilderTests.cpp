@@ -1047,5 +1047,152 @@ TEST(RenderGraphBuilderTest, AddPassAndAddComputePassNeverCallTheSink)
     EXPECT_EQ(sink.EntryCountForTesting(), 0u);
 }
 
+// --- editor-core-separation-26 campaign, PHASE5 - AddBlitPass() ------------
+// (PHASE5_ADDBLITPASS_BUILDER_ENTRYPOINT.md) - the real, official,
+// first-class pass-declaration entry point for a raw image blit/copy. Every
+// test below is Tier-1/GPU-free - no Vulkan call is added until PHASE6.
+
+TEST(RenderGraphBuilderTest, AddBlitPassProducesCorrectlyPopulatedPassRecord)
+{
+    RenderGraphBuilder builder;
+    const TextureDesc desc{ 1920, 1080, VK_FORMAT_R8G8B8A8_UNORM, true };
+    const TextureHandle srcHandle = builder.CreateTexture("BlitSrc", desc);
+    const TextureHandle dstHandle = builder.CreateTexture("BlitDst", desc);
+
+    BlitSpec spec;
+    spec.src = srcHandle;
+    spec.dst = dstHandle;
+
+    builder.AddBlitPass("TestBlit", spec);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes.size(), 1u);
+    const PassRecord& pass = input.passes[0];
+
+    EXPECT_EQ(pass.kind, PassKind::Blit);
+    ASSERT_TRUE(pass.blitCommand.has_value());
+    EXPECT_TRUE(pass.blitCommand->src == srcHandle);
+    EXPECT_TRUE(pass.blitCommand->dst == dstHandle);
+
+    ASSERT_EQ(pass.reads.size(), 1u);
+    EXPECT_TRUE(pass.reads[0].texture == srcHandle);
+    EXPECT_EQ(pass.reads[0].access, ResourceAccess::TransferSrc);
+
+    ASSERT_EQ(pass.writes.size(), 1u);
+    EXPECT_TRUE(pass.writes[0].texture == dstHandle);
+    EXPECT_EQ(pass.writes[0].access, ResourceAccess::TransferDst);
+}
+
+TEST(RenderGraphBuilderTest, AddBlitPassWithDstIsDepthTrueProducesDepthFlaggedWrite)
+{
+    RenderGraphBuilder builder;
+    const TextureDesc desc{ 1920, 1080, VK_FORMAT_D32_SFLOAT, true };
+    const TextureHandle srcHandle = builder.CreateTexture("BlitSrc", desc);
+    const TextureHandle dstHandle = builder.CreateTexture("BlitDst", desc);
+
+    BlitSpec spec;
+    spec.src = srcHandle;
+    spec.dst = dstHandle;
+    spec.dstIsDepth = true;
+
+    builder.AddBlitPass("TestBlit", spec);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes.size(), 1u);
+    ASSERT_EQ(input.passes[0].writes.size(), 1u);
+    EXPECT_TRUE(input.passes[0].writes[0].isDepthResource);
+}
+
+TEST(RenderGraphBuilderTest, AddBlitPassWithSrcIsDepthTrueProducesDepthFlaggedRead)
+{
+    RenderGraphBuilder builder;
+    const TextureDesc desc{ 1920, 1080, VK_FORMAT_D32_SFLOAT, true };
+    const TextureHandle srcHandle = builder.CreateTexture("BlitSrc", desc);
+    const TextureHandle dstHandle = builder.CreateTexture("BlitDst", desc);
+
+    BlitSpec spec;
+    spec.src = srcHandle;
+    spec.dst = dstHandle;
+    spec.srcIsDepth = true;
+
+    builder.AddBlitPass("TestBlit", spec);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes.size(), 1u);
+    ASSERT_EQ(input.passes[0].reads.size(), 1u);
+    EXPECT_TRUE(input.passes[0].reads[0].isDepthResource);
+}
+
+TEST(RenderGraphBuilderTest, AddBlitPassCallsSinkWithBlitDrawKindAndSuppliedCategoryAndTags)
+{
+    RenderGraphBuilder builder;
+    FakeMetadataSink sink;
+    builder.SetDebugMetadataSink(&sink);
+
+    const TextureDesc desc{ 256, 256, VK_FORMAT_R8G8B8A8_UNORM, true };
+    const TextureHandle srcHandle = builder.CreateTexture("BlitSrc", desc);
+    const TextureHandle dstHandle = builder.CreateTexture("BlitDst", desc);
+
+    BlitSpec spec;
+    spec.src = srcHandle;
+    spec.dst = dstHandle;
+
+    builder.AddBlitPass("TestBlit", spec, RenderPassEvent::Opaques, ViewScope::Shared,
+        RenderPassCategory::Debug, RenderPassTagMask{ 0x4u });
+
+    ASSERT_EQ(sink.EntryCountForTesting(), 1u);
+    PassDebugMetadata metadata;
+    ASSERT_TRUE(sink.QueryPassDebugMetadata(0, metadata));
+    EXPECT_EQ(metadata.drawKind, RenderPassDrawKind::Blit);
+    EXPECT_EQ(metadata.category, RenderPassCategory::Debug);
+    EXPECT_EQ(metadata.tags, RenderPassTagMask{ 0x4u });
+}
+
+TEST(RenderGraphBuilderTest, AddBlitPassCallerSuppliedRenderPassEventReachesPassRecordUnchanged)
+{
+    RenderGraphBuilder builder;
+    const TextureDesc desc{ 256, 256, VK_FORMAT_R8G8B8A8_UNORM, true };
+    const TextureHandle srcHandle = builder.CreateTexture("BlitSrc", desc);
+    const TextureHandle dstHandle = builder.CreateTexture("BlitDst", desc);
+
+    BlitSpec spec;
+    spec.src = srcHandle;
+    spec.dst = dstHandle;
+
+    builder.AddBlitPass("TestBlit", spec, RenderPassEvent::AfterEverything);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes.size(), 1u);
+    EXPECT_EQ(input.passes[0].renderPassEvent, RenderPassEvent::AfterEverything);
+}
+
+TEST(RenderGraphBuilderTest, AddBlitPassDefaultsViewScopeToSharedAndCategoryToGeneral)
+{
+    RenderGraphBuilder builder;
+    FakeMetadataSink sink;
+    builder.SetDebugMetadataSink(&sink);
+
+    const TextureDesc desc{ 256, 256, VK_FORMAT_R8G8B8A8_UNORM, true };
+    const TextureHandle srcHandle = builder.CreateTexture("BlitSrc", desc);
+    const TextureHandle dstHandle = builder.CreateTexture("BlitDst", desc);
+
+    BlitSpec spec;
+    spec.src = srcHandle;
+    spec.dst = dstHandle;
+
+    builder.AddBlitPass("TestBlit", spec);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes.size(), 1u);
+    EXPECT_EQ(input.passes[0].viewScope, ViewScope::Shared);
+
+    ASSERT_EQ(sink.EntryCountForTesting(), 1u);
+    PassDebugMetadata metadata;
+    ASSERT_TRUE(sink.QueryPassDebugMetadata(0, metadata));
+    EXPECT_EQ(metadata.category, RenderPassCategory::General);
+    EXPECT_EQ(metadata.tags, RenderPassTagMask{ 0u });
+}
+
+
 } // namespace
 } // namespace gte::rg

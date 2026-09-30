@@ -612,6 +612,42 @@ public:
             std::forward<SetupFn>(setup), std::forward<ExecuteFn>(execute), drawKind, renderPassEvent, tags);
     }
 
+    // editor-core-separation-26 campaign, PHASE5
+    // (PHASE5_ADDBLITPASS_BUILDER_ENTRYPOINT.md) - the real, official,
+    // first-class pass-declaration entry point for a raw image blit/copy
+    // (vkCmdBlitImage) - mirrors AddRenderPass()'s own trailing-defaulted-
+    // parameter convention, but is NOT built on top of AddPass()/
+    // AddComputePass() (neither accepts a setup/execute callback pair shaped
+    // like a blit needs - a blit has no callback at all): this constructs its
+    // own PassRecord directly, the ONE new function in this whole campaign
+    // that does so. Declares ReadTexture(spec.src, ResourceAccess::TransferSrc,
+    // spec.srcIsDepth) and WriteTexture(spec.dst, ResourceAccess::TransferDst,
+    // spec.dstIsDepth) internally (using PHASE2's new isDepthResource
+    // parameter), stores `spec` on PassRecord::blitCommand, stamps
+    // `pass.kind = PassKind::Blit`, and forwards
+    // drawKind = RenderPassDrawKind::Blit (ALWAYS this fixed value - never a
+    // caller-supplied parameter, since a blit pass's draw-kind is always,
+    // definitionally, Blit) to the installed debug-metadata sink, exactly
+    // like AddRenderPass() already does for its own category/drawKind/tags
+    // parameters.
+    //
+    // `renderPassEvent` deliberately has NO special-cased default beyond the
+    // ordinary RenderPassEvent::Opaques every other pass-declaring method
+    // already defaults to: a blit with no real in-frame reader has no data
+    // dependency to order it by, so it MUST have an explicit way to be placed
+    // at a real RenderPassEvent tier - a caller with a genuine ordering
+    // requirement (e.g. "this blit must run AFTER every transparent draw")
+    // supplies its own explicit value here, exactly like any other pass.
+    //
+    // Still pure data as of this phase - PHASE6 supplies the actual
+    // vkCmdBlitImage call, directly inside RenderGraph::ExecuteCompiledGraph(),
+    // never via a pass-author-supplied callback.
+    void AddBlitPass(const char* name, const BlitSpec& spec,
+        RenderPassEvent renderPassEvent = RenderPassEvent::Opaques,
+        ViewScope viewScope = ViewScope::Shared,
+        RenderPassCategory category = RenderPassCategory::General,
+        RenderPassTagMask tags = 0);
+
     // editor-core-separation-25 campaign - optional, nullable, zero-cost-
     // when-absent. Forwarded into this builder by RenderGraph::Execute()'s
     // own template body (PHASE4), immediately after constructing a fresh

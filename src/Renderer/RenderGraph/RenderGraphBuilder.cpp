@@ -206,6 +206,34 @@ void RenderGraphBuilder::KeepBufferOutput(BufferHandle handle)
     m_finalBufferOutputs.push_back(handle);
 }
 
+// editor-core-separation-26 campaign, PHASE5
+// (PHASE5_ADDBLITPASS_BUILDER_ENTRYPOINT.md) - see AddBlitPass()'s own
+// declaration (RenderGraphBuilder.h) for the full reasoning. This is NOT
+// built on top of AddPass()/AddComputePass() - it constructs its own
+// PassRecord directly, mirroring AddPass()'s own internal shape.
+void RenderGraphBuilder::AddBlitPass(const char* name, const BlitSpec& spec, RenderPassEvent renderPassEvent,
+    ViewScope viewScope, RenderPassCategory category, RenderPassTagMask tags)
+{
+    assert(name != nullptr && name[0] != '\0' &&
+        "RenderGraphBuilder::AddBlitPass requires a non-empty, static-storage-duration pass name");
+
+    m_passes.push_back(PassRecord{});
+    PassRecord& pass = m_passes.back();
+    pass.name = name;
+    pass.kind = PassKind::Blit;
+    pass.viewScope = viewScope;
+    pass.renderPassEvent = renderPassEvent;
+    pass.blitCommand = spec;
+
+    PassBuilder passBuilder(pass);
+    passBuilder.ReadTexture(spec.src, ResourceAccess::TransferSrc, spec.srcIsDepth);
+    passBuilder.WriteTexture(spec.dst, ResourceAccess::TransferDst, spec.dstIsDepth);
+
+    if (m_debugMetadataSink != nullptr) {
+        m_debugMetadataSink->OnPassDeclared(m_passes.size() - 1, category, RenderPassDrawKind::Blit, tags);
+    }
+}
+
 CompiledGraphInput RenderGraphBuilder::Finish()
 {
     CompiledGraphInput input;
