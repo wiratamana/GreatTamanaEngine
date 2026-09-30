@@ -1226,6 +1226,12 @@ add_library(gte_editor STATIC
     # GpuMemoryTracker itself stores none.
     src/Editor/EditorGpuMemoryNameOverlay.h
     src/Editor/EditorGpuMemoryNameOverlay.cpp
+    # editor-core-separation-25 campaign, PHASE2
+    # (PHASE2_EDITOR_FRAME_DEBUGGER_PASS_METADATA_RECORDER.md) - the
+    # Editor-owned, header-only implementation of BOTH
+    # rg::IPassDebugMetadataSink and rg::IPassDebugMetadataProvider (see
+    # src/Renderer/RenderGraph/RenderGraphDebugMetadataSink.h).
+    src/Editor/FrameDebuggerPassMetadataRecorder.h
     src/Editor/FrameDebuggerHistory.h
     src/Editor/FrameDebuggerHistory.cpp
     src/Editor/FrameDebuggerPreviewProcessing.h

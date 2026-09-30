@@ -2409,6 +2409,12 @@ if(TRUE)
         # debug-name overlay (see src/Editor/EditorGpuMemoryNameOverlay.h).
         # Genuinely Tier 1 (no live VmaAllocator/VkDevice needed).
         Editor/EditorGpuMemoryNameOverlayTests.cpp
+        # editor-core-separation-25 campaign, PHASE2
+        # (PHASE2_EDITOR_FRAME_DEBUGGER_PASS_METADATA_RECORDER.md) - pure,
+        # Tier-1 test for FrameDebuggerPassMetadataRecorder (zero
+        # RenderGraphBuilder/RenderGraph/live-device dependency by design -
+        # see src/Editor/FrameDebuggerPassMetadataRecorder.h).
+        Editor/FrameDebuggerPassMetadataRecorderTests.cpp
         Editor/LoggerTests.cpp
         # task_manager/editor-core-separation-10 campaign, PHASE1 - pure,
         # Tier-1 test for ImGuiIdConflictTracker (zero ImGui/Logger
