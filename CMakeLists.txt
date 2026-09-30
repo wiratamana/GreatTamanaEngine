@@ -799,6 +799,7 @@ add_library(gte_core STATIC
     src/Renderer/RenderGraph/RenderGraphSnapshotFormatting.h
     src/Renderer/RenderGraph/RenderGraphSnapshotFormatting.cpp
     src/Renderer/RenderGraph/RenderGraphDebugTextureRegistry.h
+    src/Renderer/RenderGraph/RenderGraphDebugMetadataSink.h
     src/Renderer/RenderGraph/RenderGraphDebugTextureRegistry.cpp
     src/Renderer/RenderGraph/RenderGraphDebugVolumeTextureRegistry.h
     src/Renderer/RenderGraph/RenderGraphDebugVolumeTextureRegistry.cpp
