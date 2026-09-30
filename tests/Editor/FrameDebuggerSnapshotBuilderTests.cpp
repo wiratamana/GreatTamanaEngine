@@ -115,6 +115,21 @@ rg::RenderGraphPassSnapshot MakeGraphicsPassWithCategory(const std::string& name
     return pass;
 }
 
+// editor-core-separation-26 campaign, PHASE4 - a plain graphics-tier pass
+// with kind == rg::PassKind::Blit/drawKind == rg::RenderPassDrawKind::Blit,
+// exactly as a real RenderGraphBuilder::AddBlitPass() call (PHASE5, not yet
+// producible anywhere in the engine as of this phase) will stamp. Uses
+// MakePass()'s own default renderPassEvent (Opaques) - a real blit pass
+// declared with no explicit RenderPassEvent tag defaults the same way every
+// other builder-declared pass does.
+rg::RenderGraphPassSnapshot MakeBlitPass(const std::string& name)
+{
+    rg::RenderGraphPassSnapshot pass = MakePass(name);
+    pass.kind = rg::PassKind::Blit;
+    pass.drawKind = rg::RenderPassDrawKind::Blit;
+    return pass;
+}
+
 TEST(FrameDebuggerSnapshotBuilderTest, NoRenderOpaquePassProducesEmptyResult)
 {
     rg::RenderGraphSnapshot graphSnapshot;
@@ -1784,6 +1799,99 @@ TEST(FrameDebuggerSnapshotBuilderTest, GraphicsPassAfterSurvivingComputePassIsSw
 
     // RenderOpaque(0), composite parent(1) + child(2), pluginClear parent(3) + child(4).
     EXPECT_EQ(snapshot.totalEventCount, 5);
+}
+
+// editor-core-separation-26 campaign, PHASE4 - the required companion audit's
+// own literal Part B.3 "Frame Debugger correctness" acceptance proof: a real
+// PassKind::Blit pass sitting immediately after the "RenderOpaque" pivot
+// inside the view-region walk must NEVER be mistaken for "RenderOpaque"
+// itself, and must NEVER consume/displace the real "RenderOpaque" leaf.
+// FindViewRegionPivot() (re-confirmed by direct code reading before writing
+// this fixture) returns the FIRST pass, in true execution order, whose
+// renderPassEvent >= Opaques - "RenderOpaque" here (built via the plain,
+// unmodified MakePass(), whose default renderPassEvent IS Opaques) is
+// therefore genuinely THE pivot (pivotIndex == 0), and the view-region walk
+// itself starts AT pivotIndex (i.e. it re-visits and consumes the pivot pass
+// as its own very first iteration) - confirmed structurally, not guessed.
+TEST(FrameDebuggerSnapshotBuilderTest, BlitPassImmediatelyAfterPivotIsNeverTreatedAsRenderOpaqueAndDoesNotDisplaceRealRenderOpaque)
+{
+    rg::RenderGraphSnapshot graphSnapshot;
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakeBlitPass("HistoryBufferBlit"));
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("DrawSkyBackground"));
+
+    const FrameDebuggerCaptureContext capture;
+    const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
+
+    ASSERT_EQ(snapshot.rootNodes.size(), 1u);
+    const FrameDebuggerEventNode& root = snapshot.rootNodes[0];
+    // RenderOpaque leaf + HistoryBufferBlit leaf + DrawSkyBackground leaf -
+    // no compute group of either flavor exists in this minimal fixture.
+    ASSERT_EQ(root.children.size(), 3u);
+
+    const FrameDebuggerEventNode& renderOpaqueLeaf = root.children[0];
+    EXPECT_EQ(renderOpaqueLeaf.name, "RenderOpaque");
+    // No DrawRecords() in this fixture's capture - genuinely zero children,
+    // never fabricated ones borrowed from the Blit pass that follows it.
+    EXPECT_TRUE(renderOpaqueLeaf.children.empty());
+
+    const FrameDebuggerEventNode& blitLeaf = root.children[1];
+    EXPECT_EQ(blitLeaf.name, "HistoryBufferBlit"); // Its own real name - never "RenderOpaque".
+    EXPECT_TRUE(blitLeaf.isDrawCall);
+    ASSERT_EQ(blitLeaf.children.size(), 1u); // Owns exactly one real child event, like every Graphics-family leaf.
+    EXPECT_EQ(blitLeaf.children[0].name, "Blit"); // GraphicsChildEventLabelFor(RenderPassDrawKind::Blit).
+
+    // THE actual displacement-proof assertion: the real "DrawSkyBackground"
+    // pass, arriving strictly AFTER the Blit pass, is still built as a normal
+    // Graphics leaf - it was never silently consumed/mislabeled by the Blit
+    // pass sitting in front of it, and "RenderOpaque" above was never
+    // re-triggered a second time either.
+    const FrameDebuggerEventNode& skyLeaf = root.children[2];
+    EXPECT_EQ(skyLeaf.name, "DrawSkyBackground");
+    ASSERT_EQ(skyLeaf.children.size(), 1u);
+    EXPECT_EQ(skyLeaf.children[0].name, "Draw Mesh"); // Default RenderPassDrawKind::DrawMesh (fixture never set it).
+}
+
+// editor-core-separation-26 campaign, PHASE4 - the second literal Part B.3
+// proof: a real PassKind::Blit pass swept up by the final "Other Render
+// Passes" catch-all (e.g. positioned structurally AFTER a surviving
+// Post-GameView compute pass, mirroring the pre-existing
+// "DemoRenderFeaturePlugin_Clear"-shaped fixture immediately above this one)
+// gets a correctly labeled "Blit" child event, not a "Draw Mesh"/"Compute
+// Dispatch" mislabel.
+TEST(FrameDebuggerSnapshotBuilderTest, BlitPassInOtherRenderPassesSweepGetsCorrectBlitLabel)
+{
+    rg::RenderGraphSnapshot graphSnapshot;
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
+
+    rg::RenderGraphPassSnapshot composite = MakeComputePass("AtmosphereAerialPerspectiveCompositePass");
+    composite.writeNames.push_back("GameViewComposited");
+    composite.writeKinds.push_back(rg::ResourceKind::Texture);
+    graphSnapshot.passesInExecutionOrder.push_back(composite);
+
+    rg::RenderGraphPassSnapshot blitPass = MakeBlitPass("PostEverythingBlit");
+    blitPass.renderPassEvent = rg::RenderPassEvent::AfterEverything;
+    graphSnapshot.passesInExecutionOrder.push_back(blitPass);
+
+    const FrameDebuggerCaptureContext capture;
+    const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
+
+    ASSERT_EQ(snapshot.rootNodes.size(), 1u);
+    const FrameDebuggerEventNode& root = snapshot.rootNodes[0];
+    // "RenderOpaque" leaf + "Compute Dispatches (Post-GameView)" group + the
+    // "Other Render Passes" group holding the swept-up Blit pass.
+    ASSERT_EQ(root.children.size(), 3u);
+    EXPECT_EQ(root.children[0].name, "RenderOpaque");
+    EXPECT_EQ(root.children[1].name, "Compute Dispatches (Post-GameView)");
+
+    const FrameDebuggerEventNode& otherGroup = root.children[2];
+    EXPECT_EQ(otherGroup.name, "Other Render Passes");
+    ASSERT_EQ(otherGroup.children.size(), 1u);
+    const FrameDebuggerEventNode& leaf = otherGroup.children[0];
+    EXPECT_EQ(leaf.name, "PostEverythingBlit");
+    EXPECT_TRUE(leaf.isDrawCall);
+    ASSERT_EQ(leaf.children.size(), 1u);
+    EXPECT_EQ(leaf.children[0].name, "Blit"); // GraphicsChildEventLabelFor(RenderPassDrawKind::Blit) - never a mislabel.
 }
 
 // editor-core-separation-22 campaign, PHASE4 - a real Debug-category FEATURE

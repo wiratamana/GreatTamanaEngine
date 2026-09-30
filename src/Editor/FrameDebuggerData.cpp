@@ -239,6 +239,14 @@ int FindPostGameViewCompositePassExecutionIndex(const rg::RenderGraphSnapshot& g
 {
     for (int i = gameViewIndex + 1; i < static_cast<int>(graphSnapshot.passesInExecutionOrder.size()); ++i) {
         const rg::RenderGraphPassSnapshot& pass = graphSnapshot.passesInExecutionOrder[static_cast<std::size_t>(i)];
+        // editor-core-separation-26 campaign, PHASE4's own companion audit -
+        // confirmed safe for `PassKind::Blit` too: this is a one-way
+        // Compute-only FILTER (a Blit pass is simply skipped, exactly like a
+        // Graphics pass already is), never a disguised "not Compute =
+        // Graphics" binary branch; the only field read below (`writeNames`)
+        // is valid for any `PassKind`. Not one of the 3 sites the source
+        // document names for conversion - see PHASE0_MASTER_STRATEGY.md's
+        // Locked Decision 2.
         if (pass.kind != rg::PassKind::Compute || pass.isCulled || pass.viewScope == rg::ViewScope::SceneView) {
             continue;
         }
@@ -806,7 +814,16 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
 
     for (int i = 0; i < pivotIndex; ++i) {
         const rg::RenderGraphPassSnapshot& pass = graphSnapshot.passesInExecutionOrder[static_cast<std::size_t>(i)];
-        if (pass.kind != rg::PassKind::Compute) {
+        bool isComputeKind = false;
+        switch (pass.kind) {
+        case rg::PassKind::Compute:
+            isComputeKind = true;
+            break;
+        case rg::PassKind::Graphics:
+        case rg::PassKind::Blit:
+            break;
+        }
+        if (!isComputeKind) {
             continue; // Not this loop's concern - see this loop's own header comment above.
         }
         if (pass.isCulled || pass.viewScope == rg::ViewScope::SceneView) {
@@ -868,13 +885,23 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
     for (int i = pivotIndex; i < static_cast<int>(graphSnapshot.passesInExecutionOrder.size()); ++i) {
         const rg::RenderGraphPassSnapshot& pass = graphSnapshot.passesInExecutionOrder[static_cast<std::size_t>(i)];
 
-        if (pass.kind == rg::PassKind::Compute) {
+        bool isComputeKind = false;
+        switch (pass.kind) {
+        case rg::PassKind::Compute:
+            isComputeKind = true;
+            break;
+        case rg::PassKind::Graphics:
+        case rg::PassKind::Blit:
+            break;
+        }
+
+        if (isComputeKind) {
             if (!pass.isCulled) {
                 // A genuine surviving compute-pass survivor - stop the walk
                 // entirely. Deliberately NOT marked `claimed` here - the
                 // post-GameView compute loop below (which starts at
                 // pivotIndex + 1) re-visits this exact index and claims it.
-                break;
+                break; // OUTSIDE the switch above - this correctly still breaks the for loop.
             }
             // A culled compute pass sitting inside the view region never
             // really ran this frame either way, and can never become a
@@ -885,7 +912,12 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
             continue;
         }
 
-        // pass.kind == rg::PassKind::Graphics from here on.
+        // pass.kind is Graphics or Blit from here on - NEVER assume Graphics
+        // (editor-core-separation-26 campaign, PHASE4 - the actual
+        // correctness fix this whole audit exists for: a PassKind::Blit pass
+        // must never be treated as, or silently displace, "RenderOpaque" -
+        // see the `isRenderOpaqueLeaf && pass.kind == rg::PassKind::Graphics`
+        // guard below).
         if (pass.isCulled || pass.viewScope == rg::ViewScope::SceneView
             || pass.category == rg::RenderPassCategory::FrameDebuggerInternal) {
             claimed[static_cast<std::size_t>(i)] = true;
@@ -893,7 +925,12 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
         }
         claimed[static_cast<std::size_t>(i)] = true;
 
-        if (isRenderOpaqueLeaf) {
+        // THE FIX: a Blit pass is NEVER treated as RenderOpaque, and -
+        // critically - does NOT consume isRenderOpaqueLeaf when it isn't.
+        // This is what lets the REAL RenderOpaque pass, whenever it is next
+        // encountered, still correctly claim the slot even if one or more
+        // Blit passes sat in front of it.
+        if (isRenderOpaqueLeaf && pass.kind == rg::PassKind::Graphics) {
             FrameDebuggerEventNode renderOpaqueLeaf = BuildRenderOpaqueLeaf(pass, capture, nextEventIndex++);
             // frame-debugger-6 campaign, PHASE4 - one real child leaf per
             // real per-draw attribution record captured this frame, indexed
@@ -917,7 +954,11 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
             // owned child event row, labeled by its own structural
             // rg::RenderPassDrawKind (never a pass-name string match) - this is
             // the actual fix for "DrawSkyBackground seems not owned by any
-            // render-pass".
+            // render-pass". editor-core-separation-26 campaign, PHASE4 - this
+            // branch also now correctly covers a real PassKind::Blit pass (e.g.
+            // a future "HistoryBufferBlit") - isRenderOpaqueLeaf is
+            // DELIBERATELY NOT touched here, so a Blit pass sitting in front of
+            // the real RenderOpaque pass can never consume its slot.
             FrameDebuggerEventNode leaf =
                 BuildGraphicsPassLeaf(pass, nextEventIndex++, FrameDebuggerStepPreviewKind::PreComposite);
             leaf = WrapPassWithOwnedChildEvent(
@@ -948,6 +989,14 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
         // "Other Render Passes" sweep below instead of being silently lost -
         // this is the actual structural fix for PHASE0_MASTER_STRATEGY.md's
         // Step 2.2.
+        // editor-core-separation-26 campaign, PHASE4 - RE-VERIFIED, not just
+        // cited: confirmed safe for `PassKind::Blit` too - this is a one-way
+        // Compute-only FILTER (a Blit pass here is simply skipped, exactly like
+        // a Graphics pass already is, and correctly falls through to the final
+        // "Other Render Passes" sweep below). Not one of the 3 sites the source
+        // document names for conversion - this is structurally identical to
+        // FindPostGameViewCompositePassExecutionIndex()'s own already-safe check
+        // above (Site 1) - see PHASE0_MASTER_STRATEGY.md's Locked Decision 2.
         if (pass.kind != rg::PassKind::Compute) {
             continue;
         }
@@ -1008,13 +1057,26 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
             ? FrameDebuggerStepPreviewKind::NotYetDrawn
             : ((compositePassIndex >= 0 && index < compositePassIndex) ? FrameDebuggerStepPreviewKind::PreComposite
                                                                         : FrameDebuggerStepPreviewKind::PostComposite);
-        FrameDebuggerEventNode leaf = (pass.kind == rg::PassKind::Compute)
-            ? WrapPassWithOwnedChildEvent(
-                  BuildComputeDispatchLeaf(pass, nextEventIndex++, stepPreviewKind), nextEventIndex++,
-                  "Compute Dispatch")
-            : WrapPassWithOwnedChildEvent(
-                  BuildGraphicsPassLeaf(pass, nextEventIndex++, stepPreviewKind), nextEventIndex++,
-                  GraphicsChildEventLabelFor(pass.drawKind));
+        // editor-core-separation-26 campaign, PHASE4 - converted to a real,
+        // exhaustive, compiler-enforced 3-way dispatch (one of the 3 sites the
+        // source document names) - defensively future-proofed even though this
+        // ternary's own "else" arm was already functionally correct for
+        // PassKind::Blit today (BuildGraphicsPassLeaf()/GraphicsChildEventLabelFor()
+        // already handle it).
+        FrameDebuggerEventNode leaf;
+        switch (pass.kind) {
+        case rg::PassKind::Compute:
+            leaf = WrapPassWithOwnedChildEvent(
+                BuildComputeDispatchLeaf(pass, nextEventIndex++, stepPreviewKind), nextEventIndex++,
+                "Compute Dispatch");
+            break;
+        case rg::PassKind::Graphics:
+        case rg::PassKind::Blit:
+            leaf = WrapPassWithOwnedChildEvent(
+                BuildGraphicsPassLeaf(pass, nextEventIndex++, stepPreviewKind), nextEventIndex++,
+                GraphicsChildEventLabelFor(pass.drawKind));
+            break;
+        }
         otherPassesGroup.children.push_back(std::move(leaf));
     }
     if (!otherPassesGroup.children.empty()) {
