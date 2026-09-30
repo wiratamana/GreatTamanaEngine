@@ -2312,6 +2312,12 @@ set(GTE_TEST_SOURCES
     Renderer/RenderGraph/RenderGraphCompilerTests.cpp
     Renderer/RenderGraph/RenderGraphBarrierPlannerTests.cpp
     Renderer/RenderGraph/RenderGraphNameSlotTableTests.cpp
+    # editor-core-separation-27 campaign, PHASE4
+    # (PHASE4_HEADLESS_TEST_FIXTURE_AND_CACHE_CONSTRUCTION.md) - Tier-2 (real,
+    # headless GPU, tests/Fakes/HeadlessRenderGraphFixture.h) tests for
+    # RenderGraphPersistentResourceCache's own construction/ownership/
+    # exception-safety core.
+    Renderer/RenderGraph/RenderGraphPersistentResourceCacheTests.cpp
     Renderer/RenderGraph/RenderGraphSnapshotTests.cpp
     Renderer/RenderGraph/RenderGraphSnapshotFormattingTests.cpp
     Renderer/RenderGraph/RenderGraphMetadataTests.cpp
