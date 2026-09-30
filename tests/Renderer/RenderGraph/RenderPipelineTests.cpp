@@ -10,6 +10,7 @@
 
 #include "Renderer/Atmosphere/AtmosphereRenderPassTags.h"
 #include "Renderer/RenderGraph/RenderPipeline.h"
+#include "Renderer/RenderGraph/RenderGraphDebugMetadataSink.h" // editor-core-separation-25 campaign, PHASE3
 
 #include <gtest/gtest.h>
 
@@ -20,6 +21,36 @@ namespace {
 
 void NoOpExecute(PassContext&) { }
 void NoOpSetup(RenderGraphBuilder::PassBuilder&) { }
+
+// editor-core-separation-25 campaign - a minimal, test-local, dual-interface
+// fake sink, mirroring RenderGraphSnapshotTests.cpp's own FakeMetadataSink
+// exactly (see that file for the full rationale) - needed here since
+// RenderPipeline::DeclareInto() ultimately calls the SAME
+// RenderGraphBuilder::AddRenderPass() chokepoint that no longer stores
+// category/drawKind/tags directly on PassRecord.
+class FakeMetadataSink : public IPassDebugMetadataSink, public IPassDebugMetadataProvider {
+public:
+    void OnPassDeclared(std::size_t declarationIndexThisFrame, RenderPassCategory category, RenderPassDrawKind drawKind,
+        RenderPassTagMask tags) override
+    {
+        ASSERT_EQ(declarationIndexThisFrame, m_table.size());
+        m_table.push_back(PassDebugMetadata{ category, drawKind, tags });
+    }
+
+    void BeginFrame() override { m_table.clear(); }
+
+    bool QueryPassDebugMetadata(std::size_t declarationIndex, PassDebugMetadata& outMetadata) const override
+    {
+        if (declarationIndex >= m_table.size()) {
+            return false;
+        }
+        outMetadata = m_table[declarationIndex];
+        return true;
+    }
+
+private:
+    std::vector<PassDebugMetadata> m_table;
+};
 
 // --- RenderPassId / RenderViewId hashing -----------------------------------
 
@@ -327,6 +358,8 @@ TEST(RenderPipelineTest, LegacyCategoryAndDrawKindSurviveUnchangedIntoTheProduce
 
     RenderPassBlackboard blackboard;
     RenderGraphBuilder builder;
+    FakeMetadataSink sink;
+    builder.SetDebugMetadataSink(&sink);
     RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {}, {} };
 
     pipeline.DeclareInto(builder, frame);
@@ -335,10 +368,13 @@ TEST(RenderPipelineTest, LegacyCategoryAndDrawKindSurviveUnchangedIntoTheProduce
     ASSERT_EQ(input.passes.size(), 1u);
     EXPECT_STREQ(input.passes[0].name, "DrawSkyBackground");
     EXPECT_EQ(input.passes[0].kind, PassKind::Graphics);
-    EXPECT_EQ(input.passes[0].category, RenderPassCategory::General);
-    EXPECT_EQ(input.passes[0].tags, kAtmosphereLutPassTag.bit);
-    EXPECT_EQ(input.passes[0].drawKind, RenderPassDrawKind::DrawQuad);
     EXPECT_EQ(input.passes[0].renderPassEvent, RenderPassEvent::AfterOpaques);
+
+    PassDebugMetadata metadata;
+    ASSERT_TRUE(sink.QueryPassDebugMetadata(0, metadata));
+    EXPECT_EQ(metadata.category, RenderPassCategory::General);
+    EXPECT_EQ(metadata.tags, kAtmosphereLutPassTag.bit);
+    EXPECT_EQ(metadata.drawKind, RenderPassDrawKind::DrawQuad);
 }
 
 // render-pass-7 campaign (task_manager/render-pass-7), PHASE1 - THE MOST
@@ -365,6 +401,8 @@ TEST(RenderPipelineTest, DeclareIntoForwardsTagsOntoTheUnderlyingPassRecord)
 
     RenderPassBlackboard blackboard;
     RenderGraphBuilder builder;
+    FakeMetadataSink sink;
+    builder.SetDebugMetadataSink(&sink);
     RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {}, {} };
 
     pipeline.DeclareInto(builder, frame);
@@ -372,7 +410,10 @@ TEST(RenderPipelineTest, DeclareIntoForwardsTagsOntoTheUnderlyingPassRecord)
     const CompiledGraphInput input = builder.Finish();
     ASSERT_EQ(input.passes.size(), 1u);
     EXPECT_STREQ(input.passes[0].name, "TaggedPass");
-    EXPECT_EQ(input.passes[0].tags, 0x4u);
+
+    PassDebugMetadata metadata;
+    ASSERT_TRUE(sink.QueryPassDebugMetadata(0, metadata));
+    EXPECT_EQ(metadata.tags, 0x4u);
 }
 
 TEST(RenderPipelineTest, UnregisterRemovesAMatchingProviderByDebugNameContent)

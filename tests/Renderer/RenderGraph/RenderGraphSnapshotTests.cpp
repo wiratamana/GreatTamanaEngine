@@ -54,6 +54,49 @@ public:
     std::vector<std::string> calledWith;
 };
 
+// editor-core-separation-25 campaign - a minimal, test-local, dual-
+// interface fake sink, mirroring FrameDebuggerPassMetadataRecorder's own
+// contract exactly (PHASE2) but kept LOCAL to this test file rather than
+// `#include`-ing src/Editor/FrameDebuggerPassMetadataRecorder.h from a
+// Renderer/RenderGraph-tier test file - this keeps the same one-way
+// gte_core -> gte_editor layering this whole campaign exists to preserve
+// visible at the TEST level too (note: GreatTamanaEngineTests, the one
+// unified test binary, already links gte_editor for unrelated reasons -
+// see tests/CMakeLists.txt - so this is a source-layering/clarity choice,
+// never a real link-time requirement).
+class FakeMetadataSink : public rg::IPassDebugMetadataSink, public rg::IPassDebugMetadataProvider {
+public:
+    void OnPassDeclared(std::size_t declarationIndexThisFrame, rg::RenderPassCategory category,
+        rg::RenderPassDrawKind drawKind, rg::RenderPassTagMask tags) override
+    {
+        ASSERT_EQ(declarationIndexThisFrame, m_table.size());
+        m_table.push_back(rg::PassDebugMetadata{ category, drawKind, tags });
+    }
+
+    void BeginFrame() override { m_table.clear(); }
+
+    bool QueryPassDebugMetadata(std::size_t declarationIndex, rg::PassDebugMetadata& outMetadata) const override
+    {
+        if (declarationIndex >= m_table.size()) {
+            return false;
+        }
+        outMetadata = m_table[declarationIndex];
+        return true;
+    }
+
+    // Bind-able directly as BuildRenderGraphSnapshot()'s own metadataLookup
+    // parameter.
+    std::function<bool(std::size_t, rg::PassDebugMetadata&)> AsLookup()
+    {
+        return [this](std::size_t declarationIndex, rg::PassDebugMetadata& out) {
+            return QueryPassDebugMetadata(declarationIndex, out);
+        };
+    }
+
+private:
+    std::vector<rg::PassDebugMetadata> m_table;
+};
+
 // --- Empty graph -------------------------------------------------------------
 
 TEST(RenderGraphSnapshotTest, EmptyGraphProducesEmptySnapshot)
@@ -446,6 +489,8 @@ TEST(RenderGraphSnapshotTest, ViewScopeIsCopiedThroughForSurvivingAndCulledPasse
 TEST(RenderGraphSnapshotTest, DrawKindIsCopiedThroughForSurvivingPass)
 {
     RenderGraphBuilder builder;
+    FakeMetadataSink sink;
+    builder.SetDebugMetadataSink(&sink);
     const TextureHandle output = builder.CreateTexture("Output", MakeTextureDesc());
 
     builder.AddRenderPass(
@@ -457,7 +502,7 @@ TEST(RenderGraphSnapshotTest, DrawKindIsCopiedThroughForSurvivingPass)
     const TextureHandle finalOutputs[] = { output };
     const CompiledGraph compiled = Compile(input, finalOutputs);
 
-    const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, {});
+    const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, {}, false, sink.AsLookup());
     ASSERT_EQ(snapshot.passesInExecutionOrder.size(), 1u);
 
     const RenderGraphPassSnapshot& pass = snapshot.passesInExecutionOrder[0];
@@ -469,14 +514,30 @@ TEST(RenderGraphSnapshotTest, DrawKindIsCopiedThroughForSurvivingPass)
 // A CULLED pass must still truthfully report the drawKind it WOULD have
 // issued - mirrors ViewScopeIsCopiedThroughForSurvivingAndCulledPasses's own
 // culled-pass assertion shape, just for the new drawKind field.
+//
+// editor-core-separation-25 campaign, PHASE3 - REQUIRED fix (see this
+// campaign's own PHASE3 plan, Step 3.5, item 4): the "keep-alive" pass used
+// to be declared via a plain builder.AddPass("Survivor", ...) call, which
+// never fires OnPassDeclared() at all (Locked Decision 4) - once a sink is
+// installed, that would leave the sink's own dense index space with a gap
+// (the real pass under test would arrive as declarationIndexThisFrame == 1
+// while the sink's own table is still at size 0), tripping
+// FakeMetadataSink's own ASSERT_EQ. Changed to builder.AddRenderPass(...) so
+// BOTH passes in this builder go through the one real production chokepoint
+// and fire OnPassDeclared() in the same order they are declared - this
+// changes NOTHING the test actually asserts on (every parameter left at its
+// own default reproduces AddPass()'s exact prior behavior).
 TEST(RenderGraphSnapshotTest, DrawKindIsCopiedThroughForCulledPass)
 {
     RenderGraphBuilder builder;
+    FakeMetadataSink sink;
+    builder.SetDebugMetadataSink(&sink);
     const TextureHandle output = builder.CreateTexture("Output", MakeTextureDesc());
     const TextureHandle deadEnd = builder.CreateTexture("DeadEnd", MakeTextureDesc());
 
-    builder.AddPass(
-        "Survivor", [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(output); }, NoOpExecute);
+    builder.AddRenderPass(
+        "Survivor", PassKind::Graphics,
+        [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(output); }, NoOpExecute);
 
     builder.AddRenderPass(
         "CulledDrawQuadPass", PassKind::Graphics, ViewScope::GameView, RenderPassCategory::General,
@@ -487,7 +548,7 @@ TEST(RenderGraphSnapshotTest, DrawKindIsCopiedThroughForCulledPass)
     const TextureHandle finalOutputs[] = { output };
     const CompiledGraph compiled = Compile(input, finalOutputs);
 
-    const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, {});
+    const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, {}, false, sink.AsLookup());
     ASSERT_EQ(snapshot.passesInExecutionOrder.size(), 2u);
 
     const RenderGraphPassSnapshot& culledPass = snapshot.passesInExecutionOrder[1];
@@ -505,6 +566,8 @@ TEST(RenderGraphSnapshotTest, DrawKindIsCopiedThroughForCulledPass)
 TEST(RenderGraphSnapshotTest, TagsIsCopiedThroughForSurvivingPass)
 {
     RenderGraphBuilder builder;
+    FakeMetadataSink sink;
+    builder.SetDebugMetadataSink(&sink);
     const TextureHandle output = builder.CreateTexture("Output", MakeTextureDesc());
 
     builder.AddRenderPass(
@@ -516,7 +579,7 @@ TEST(RenderGraphSnapshotTest, TagsIsCopiedThroughForSurvivingPass)
     const TextureHandle finalOutputs[] = { output };
     const CompiledGraph compiled = Compile(input, finalOutputs);
 
-    const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, {});
+    const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, {}, false, sink.AsLookup());
     ASSERT_EQ(snapshot.passesInExecutionOrder.size(), 1u);
 
     const RenderGraphPassSnapshot& pass = snapshot.passesInExecutionOrder[0];
@@ -527,15 +590,20 @@ TEST(RenderGraphSnapshotTest, TagsIsCopiedThroughForSurvivingPass)
 
 // A CULLED pass must still truthfully report the tags it WOULD have carried
 // - mirrors DrawKindIsCopiedThroughForCulledPass's own culled-pass assertion
-// shape, just for the new tags field.
+// shape, just for the new tags field. editor-core-separation-25 campaign,
+// PHASE3 - same REQUIRED "Survivor" fix as DrawKindIsCopiedThroughForCulledPass
+// above, for the exact same reason.
 TEST(RenderGraphSnapshotTest, TagsIsCopiedThroughForCulledPass)
 {
     RenderGraphBuilder builder;
+    FakeMetadataSink sink;
+    builder.SetDebugMetadataSink(&sink);
     const TextureHandle output = builder.CreateTexture("Output", MakeTextureDesc());
     const TextureHandle deadEnd = builder.CreateTexture("DeadEnd", MakeTextureDesc());
 
-    builder.AddPass(
-        "Survivor", [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(output); }, NoOpExecute);
+    builder.AddRenderPass(
+        "Survivor", PassKind::Graphics,
+        [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(output); }, NoOpExecute);
 
     builder.AddRenderPass(
         "CulledTaggedPass", PassKind::Graphics, ViewScope::GameView, RenderPassCategory::General,
@@ -546,13 +614,68 @@ TEST(RenderGraphSnapshotTest, TagsIsCopiedThroughForCulledPass)
     const TextureHandle finalOutputs[] = { output };
     const CompiledGraph compiled = Compile(input, finalOutputs);
 
-    const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, {});
+    const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, {}, false, sink.AsLookup());
     ASSERT_EQ(snapshot.passesInExecutionOrder.size(), 2u);
 
     const RenderGraphPassSnapshot& culledPass = snapshot.passesInExecutionOrder[1];
     EXPECT_EQ(culledPass.name, "CulledTaggedPass");
     EXPECT_TRUE(culledPass.isCulled);
     EXPECT_EQ(culledPass.tags, RenderPassTagMask{ 0x2u });
+}
+
+// editor-core-separation-25 campaign - proves one shared sink correctly
+// resets its own declaration-index space across two independent
+// "declare a graph, BeginFrame(), declare a DIFFERENT graph" cycles - the
+// exact sequence RenderGraph::Execute() drives in production (PHASE4),
+// simulated here at the builder/snapshot layer (no live RenderGraph/
+// VkDevice needed).
+TEST(RenderGraphSnapshotTest, SharedSinkAcrossTwoDeclarationCyclesNeverLeaksStaleEntries)
+{
+    FakeMetadataSink sink;
+
+    // --- Cycle 1: one pass, DrawQuad / tag 0x1.
+    {
+        sink.BeginFrame();
+        RenderGraphBuilder builder;
+        builder.SetDebugMetadataSink(&sink);
+        const TextureHandle output = builder.CreateTexture("Output", MakeTextureDesc());
+        builder.AddRenderPass(
+            "CycleOnePass", PassKind::Graphics, ViewScope::GameView, RenderPassCategory::General,
+            [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(output); }, NoOpExecute,
+            RenderPassDrawKind::DrawQuad, RenderPassEvent::Opaques, RenderPassTagMask{ 0x1u });
+
+        CompiledGraphInput input = builder.Finish();
+        const TextureHandle finalOutputs[] = { output };
+        const CompiledGraph compiled = Compile(input, finalOutputs);
+        const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, {}, false, sink.AsLookup());
+
+        ASSERT_EQ(snapshot.passesInExecutionOrder.size(), 1u);
+        EXPECT_EQ(snapshot.passesInExecutionOrder[0].drawKind, RenderPassDrawKind::DrawQuad);
+        EXPECT_EQ(snapshot.passesInExecutionOrder[0].tags, RenderPassTagMask{ 0x1u });
+    }
+
+    // --- Cycle 2: a DIFFERENT single pass, DrawMesh / tag 0x2 - must NOT
+    // see cycle 1's stale DrawQuad/0x1 entry, even though it also declares
+    // exactly one pass at the same declarationIndex (0).
+    {
+        sink.BeginFrame();
+        RenderGraphBuilder builder;
+        builder.SetDebugMetadataSink(&sink);
+        const TextureHandle output = builder.CreateTexture("Output", MakeTextureDesc());
+        builder.AddRenderPass(
+            "CycleTwoPass", PassKind::Graphics, ViewScope::GameView, RenderPassCategory::General,
+            [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(output); }, NoOpExecute,
+            RenderPassDrawKind::DrawMesh, RenderPassEvent::Opaques, RenderPassTagMask{ 0x2u });
+
+        CompiledGraphInput input = builder.Finish();
+        const TextureHandle finalOutputs[] = { output };
+        const CompiledGraph compiled = Compile(input, finalOutputs);
+        const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, {}, false, sink.AsLookup());
+
+        ASSERT_EQ(snapshot.passesInExecutionOrder.size(), 1u);
+        EXPECT_EQ(snapshot.passesInExecutionOrder[0].drawKind, RenderPassDrawKind::DrawMesh);
+        EXPECT_EQ(snapshot.passesInExecutionOrder[0].tags, RenderPassTagMask{ 0x2u });
+    }
 }
 
 // A single pass declaring a mix of texture/buffer/volume-texture reads AND

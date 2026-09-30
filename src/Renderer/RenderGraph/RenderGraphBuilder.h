@@ -28,6 +28,7 @@
 // here besides RenderGraphTypes.h itself.
 
 #include "RenderGraphTypes.h"
+#include "RenderGraphDebugMetadataSink.h" // editor-core-separation-25 campaign, PHASE3
 #include "../RenderTarget.h"
 #include "../VolumeTarget.h"
 
@@ -532,10 +533,16 @@ public:
         } else {
             AddPass(name, viewScope, std::forward<SetupFn>(setup), std::forward<ExecuteFn>(execute));
         }
-        m_passes.back().category = category;
-        m_passes.back().drawKind = drawKind; // Frame Debugger Pass-Ownership campaign (render-pass-2), PHASE1
-        m_passes.back().renderPassEvent = renderPassEvent; // render-pass-3 campaign, PHASE1
-        m_passes.back().tags = tags; // render-pass-7 campaign, PHASE1
+        m_passes.back().renderPassEvent = renderPassEvent; // render-pass-3 campaign, PHASE1 - UNCHANGED, still real ordering input, not migrated
+        // editor-core-separation-25 campaign - category/drawKind/tags no
+        // longer stored on PassRecord (see RenderGraphTypes.h's own
+        // PassRecord doc comment) - forwarded to the installed sink
+        // instead, exactly once per declared pass, only if a sink is
+        // actually installed (a headless/Player build's builder never has
+        // one - this is the ONE branch that build pays for this feature).
+        if (m_debugMetadataSink != nullptr) {
+            m_debugMetadataSink->OnPassDeclared(m_passes.size() - 1, category, drawKind, tags);
+        }
     }
 
     // Convenience overload defaulting `viewScope` to Shared and `category` to
@@ -562,6 +569,16 @@ public:
             std::forward<SetupFn>(setup), std::forward<ExecuteFn>(execute), drawKind, renderPassEvent, tags);
     }
 
+    // editor-core-separation-25 campaign - optional, nullable, zero-cost-
+    // when-absent. Forwarded into this builder by RenderGraph::Execute()'s
+    // own template body (PHASE4), immediately after constructing a fresh
+    // RenderGraphBuilder, before that call's own build(builder) callback
+    // runs. A test may also call this directly (see RenderGraphSnapshotTests.cpp's
+    // own updated tests, PHASE3) - RenderGraphBuilder itself has no
+    // opinion about who installs this or how often; it is a plain,
+    // unconditional setter.
+    void SetDebugMetadataSink(IPassDebugMetadataSink* sink) noexcept { m_debugMetadataSink = sink; }
+
     // Consumes this builder, handing its whole in-progress description
     // over to Phase 3's compiler. Safe to call at most meaningfully once
     // per builder instance (a builder is a one-frame-lifetime object, per
@@ -571,6 +588,10 @@ public:
 
 private:
     std::vector<PassRecord> m_passes;
+
+    // editor-core-separation-25 campaign - optional, nullable, zero-cost-
+    // when-absent. See SetDebugMetadataSink() above.
+    IPassDebugMetadataSink* m_debugMetadataSink = nullptr;
 
     // render-pass-6 campaign, PHASE5 (item 2.1) - REPLACES the old 9
     // parallel vectors (m_textureDescs/m_textureNames/m_textureImportInfo,

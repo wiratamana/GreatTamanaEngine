@@ -500,16 +500,17 @@ TEST(RenderGraphPassRecordTest, ReadsAndWritesCanBeAppendedIndependently)
     EXPECT_EQ(record.writes[0].access, ResourceAccess::ColorAttachmentWrite);
 }
 
-// Render Pass campaign (task_manager/render-pass-1), PHASE1 -
-// PassRecord::category defaults to General.
-TEST(RenderGraphPassRecordTest, DefaultConstructedPassRecordHasGeneralCategory)
-{
-    const PassRecord record;
-    EXPECT_EQ(record.category, RenderPassCategory::General);
-    // render-pass-7 campaign (task_manager/render-pass-7), PHASE1 -
-    // PassRecord::tags defaults to 0 (no tags).
-    EXPECT_EQ(record.tags, RenderPassTagMask{ 0 });
-}
+// editor-core-separation-25 campaign, PHASE3
+// (PHASE3_PASSRECORD_FIELD_MIGRATION_AND_SNAPSHOT_REWIRING.md) - the old
+// DefaultConstructedPassRecordHasGeneralCategory test (Render Pass campaign,
+// task_manager/render-pass-1, PHASE1 / render-pass-7 campaign, PHASE1) was
+// REMOVED here: PassRecord::category/::tags no longer exist on this struct
+// at all (moved to RenderGraphDebugMetadataSink.h's own PassDebugMetadata -
+// see RenderGraphTypes.h's own PassRecord doc comment) - there is nothing
+// left to assert a default value for on THIS struct. Coverage for
+// PassDebugMetadata's own defaults now lives in
+// FrameDebuggerPassMetadataRecorderTests.cpp/RenderGraphSnapshotTests.cpp
+// instead.
 
 // --- PassKind / RenderPassCategory (Render Pass campaign, PHASE1) --------
 

@@ -29,6 +29,7 @@
 // now just includes this file and uses PassGpuStats from here.
 
 #include "RenderGraphBuilder.h"
+#include "RenderGraphDebugMetadataSink.h" // editor-core-separation-25 campaign, PHASE3
 #include "RenderGraphCompiler.h"
 #include "../DrawStats.h"
 #include "../GpuTiming.h"
@@ -222,7 +223,23 @@ struct RenderGraphSnapshot {
 // behaving unmodified - passed straight through to
 // RenderGraphSnapshot::timingSlotBudgetExhausted, unchanged. See that
 // field's own doc comment above for what it means.
+// editor-core-separation-25 campaign - NEW, trailing, DEFAULTED parameter.
+// Resolves ONE declared pass's category/drawKind/tags by declarationIndex
+// (the SAME index space CompiledGraphInput::passes already uses - see
+// RenderGraphBuilder::AddRenderPass()'s own OnPassDeclared() call,
+// PHASE3). Returns false (or is left empty/unset) to mean "no metadata
+// available for this index" - BuildPassSnapshot() leaves
+// RenderGraphPassSnapshot::category/::drawKind/::tags at their own struct
+// defaults in that case, exactly matching this function's pre-existing
+// behavior for every call site that does not care about these 3 fields
+// (including most existing tests). In production, RenderGraph::
+// ExecuteCompiledGraph() (PHASE4) supplies a real lookup backed by its own
+// installed IPassDebugMetadataProvider*; a test can supply any stand-in
+// (e.g. a lambda closing over a small local table), which is exactly what
+// keeps this function itself Tier-1-testable with no live sink/RenderGraph
+// at all.
 RenderGraphSnapshot BuildRenderGraphSnapshot(const CompiledGraph& compiled, const CompiledGraphInput& input,
-    const std::function<PassGpuStats(const char*)>& statsLookup, bool timingSlotBudgetExhausted = false);
+    const std::function<PassGpuStats(const char*)>& statsLookup, bool timingSlotBudgetExhausted = false,
+    const std::function<bool(std::size_t, PassDebugMetadata&)>& metadataLookup = {});
 
 } // namespace gte::rg

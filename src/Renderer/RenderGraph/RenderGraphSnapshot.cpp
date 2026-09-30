@@ -85,18 +85,33 @@ std::string ResourceUsageName(const ResourceUsage& usage, const CompiledGraphInp
     return name;
 }
 
-RenderGraphPassSnapshot BuildPassSnapshot(const PassRecord& pass, const CompiledGraphInput& input, bool isCulled,
-    const std::function<PassGpuStats(const char*)>& statsLookup)
+RenderGraphPassSnapshot BuildPassSnapshot(const PassRecord& pass, std::size_t declarationIndex,
+    const CompiledGraphInput& input, bool isCulled, const std::function<PassGpuStats(const char*)>& statsLookup,
+    const std::function<bool(std::size_t, PassDebugMetadata&)>& metadataLookup)
 {
     RenderGraphPassSnapshot snapshot;
     snapshot.name = pass.name != nullptr ? pass.name : "";
     snapshot.isCulled = isCulled;
     snapshot.kind = pass.kind; // Render Pass campaign PHASE1 (task_manager/render-pass-1) - renamed from isComputePass
-    snapshot.category = pass.category; // Render Pass campaign PHASE1
-    snapshot.drawKind = pass.drawKind; // Frame Debugger Pass-Ownership campaign (render-pass-2), PHASE1
     snapshot.viewScope = pass.viewScope; // frame-debugger-6, PHASE1
     snapshot.renderPassEvent = pass.renderPassEvent; // render-pass-3 campaign, PHASE1
-    snapshot.tags = pass.tags; // render-pass-7 campaign, PHASE1
+
+    // editor-core-separation-25 campaign - category/drawKind/tags no
+    // longer live on PassRecord. snapshot.category/.drawKind/.tags start
+    // at RenderGraphPassSnapshot's own struct defaults (General/DrawMesh/0)
+    // and are only overwritten when metadataLookup is supplied AND
+    // actually has an entry for this exact declarationIndex - this is the
+    // graceful, zero-behavior-change fallback for a headless build (no
+    // sink ever installed) and for every pre-existing test/call site that
+    // does not pass a metadataLookup at all.
+    if (metadataLookup) {
+        PassDebugMetadata metadata;
+        if (metadataLookup(declarationIndex, metadata)) {
+            snapshot.category = metadata.category;
+            snapshot.drawKind = metadata.drawKind;
+            snapshot.tags = metadata.tags;
+        }
+    }
 
     snapshot.readNames.reserve(pass.reads.size());
     snapshot.readKinds.reserve(pass.reads.size());          // frame-debugger-5, PHASE1
@@ -125,28 +140,37 @@ RenderGraphPassSnapshot BuildPassSnapshot(const PassRecord& pass, const Compiled
 } // namespace
 
 RenderGraphSnapshot BuildRenderGraphSnapshot(const CompiledGraph& compiled, const CompiledGraphInput& input,
-    const std::function<PassGpuStats(const char*)>& statsLookup, bool timingSlotBudgetExhausted)
+    const std::function<PassGpuStats(const char*)>& statsLookup, bool timingSlotBudgetExhausted,
+    const std::function<bool(std::size_t, PassDebugMetadata&)>& metadataLookup)
 {
     RenderGraphSnapshot snapshot;
     snapshot.timingSlotBudgetExhausted = timingSlotBudgetExhausted; // PHASE1 (render-pass-6 campaign, item 2.4)
     snapshot.passesInExecutionOrder.reserve(compiled.executionOrder.size() + input.passes.size());
 
-    // Surviving passes first, in real execution order.
+    // Surviving passes first, in real execution order. handle.index IS this
+    // pass's own declarationIndex - the SAME index space
+    // CompiledGraphInput::passes already uses (PassHandle::index), so no new
+    // correlation problem is introduced.
     for (const PassHandle& handle : compiled.executionOrder) {
         if (handle.index >= input.passes.size()) {
             continue; // Defensive - never expected against a real Compile() result.
         }
-        snapshot.passesInExecutionOrder.push_back(
-            BuildPassSnapshot(input.passes[handle.index], input, /*isCulled=*/false, statsLookup));
+        snapshot.passesInExecutionOrder.push_back(BuildPassSnapshot(
+            input.passes[handle.index], handle.index, input, /*isCulled=*/false, statsLookup, metadataLookup));
     }
 
     // Culled passes appended afterwards, in their original declaration
-    // order - still visible, per this file's own header comment.
-    for (const PassRecord& pass : input.passes) {
+    // order - still visible, per this file's own header comment. The loop
+    // index IS this pass's own declarationIndex (an explicit index loop,
+    // replacing the old range-for that had no index to give
+    // BuildPassSnapshot()).
+    for (std::size_t i = 0; i < input.passes.size(); ++i) {
+        const PassRecord& pass = input.passes[i];
         if (!pass.isCulled) {
             continue;
         }
-        snapshot.passesInExecutionOrder.push_back(BuildPassSnapshot(pass, input, /*isCulled=*/true, statsLookup));
+        snapshot.passesInExecutionOrder.push_back(
+            BuildPassSnapshot(pass, i, input, /*isCulled=*/true, statsLookup, metadataLookup));
     }
 
     snapshot.resources.reserve(input.textures.size() + input.buffers.size());

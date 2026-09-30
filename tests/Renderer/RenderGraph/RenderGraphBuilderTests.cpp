@@ -905,5 +905,106 @@ TEST(RenderGraphBuilderDeathTest, AddPassRejectsEmptyName)
 
 #endif // !NDEBUG
 
+// --- editor-core-separation-25 campaign - AddRenderPass()'s new sink -----
+// --- wiring (PHASE3_PASSRECORD_FIELD_MIGRATION_AND_SNAPSHOT_REWIRING.md, --
+// --- Step 3.6) -------------------------------------------------------------
+//
+// Brand-new ground - AddRenderPass()'s sink-wiring behavior has no prior
+// test to "fix" (there is no pre-existing coverage of it at all), per
+// AGENTS.md's "every phase must add a Tier-1 test wherever the underlying
+// problem allows it" rule.
+
+// A minimal, test-local, dual-interface fake sink, mirroring
+// RenderGraphSnapshotTests.cpp's own FakeMetadataSink exactly.
+class FakeMetadataSink : public IPassDebugMetadataSink, public IPassDebugMetadataProvider {
+public:
+    void OnPassDeclared(std::size_t declarationIndexThisFrame, RenderPassCategory category, RenderPassDrawKind drawKind,
+        RenderPassTagMask tags) override
+    {
+        ASSERT_EQ(declarationIndexThisFrame, m_table.size());
+        m_table.push_back(PassDebugMetadata{ category, drawKind, tags });
+    }
+
+    void BeginFrame() override { m_table.clear(); }
+
+    bool QueryPassDebugMetadata(std::size_t declarationIndex, PassDebugMetadata& outMetadata) const override
+    {
+        if (declarationIndex >= m_table.size()) {
+            return false;
+        }
+        outMetadata = m_table[declarationIndex];
+        return true;
+    }
+
+    std::size_t EntryCountForTesting() const noexcept { return m_table.size(); }
+
+private:
+    std::vector<PassDebugMetadata> m_table;
+};
+
+TEST(RenderGraphBuilderTest, AddRenderPassCallsSinkExactlyOnceWithCorrectDeclarationIndex)
+{
+    RenderGraphBuilder builder;
+    FakeMetadataSink sink;
+    builder.SetDebugMetadataSink(&sink);
+
+    builder.AddRenderPass(
+        "PassZero", PassKind::Graphics, ViewScope::GameView, RenderPassCategory::General,
+        [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute, RenderPassDrawKind::DrawQuad,
+        RenderPassEvent::Opaques, RenderPassTagMask{ 0x1u });
+    builder.AddRenderPass(
+        "PassOne", PassKind::Compute, ViewScope::SceneView, RenderPassCategory::Debug,
+        [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute, RenderPassDrawKind::Blit,
+        RenderPassEvent::PreOpaques, RenderPassTagMask{ 0x2u });
+
+    EXPECT_EQ(sink.EntryCountForTesting(), 2u);
+
+    PassDebugMetadata first;
+    ASSERT_TRUE(sink.QueryPassDebugMetadata(0, first));
+    EXPECT_EQ(first.category, RenderPassCategory::General);
+    EXPECT_EQ(first.drawKind, RenderPassDrawKind::DrawQuad);
+    EXPECT_EQ(first.tags, RenderPassTagMask{ 0x1u });
+
+    PassDebugMetadata second;
+    ASSERT_TRUE(sink.QueryPassDebugMetadata(1, second));
+    EXPECT_EQ(second.category, RenderPassCategory::Debug);
+    EXPECT_EQ(second.drawKind, RenderPassDrawKind::Blit);
+    EXPECT_EQ(second.tags, RenderPassTagMask{ 0x2u });
+}
+
+// A builder with NO sink installed at all never crashes when AddRenderPass()
+// is called - the null-pointer-guarded branch (RenderGraphBuilder.h). A
+// simple "it compiles and runs to completion" proof is sufficient here.
+TEST(RenderGraphBuilderTest, AddRenderPassNeverCallsSinkWhenNoneInstalled)
+{
+    RenderGraphBuilder builder;
+
+    builder.AddRenderPass(
+        "NoSinkPass", PassKind::Graphics,
+        [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes.size(), 1u);
+    EXPECT_STREQ(input.passes[0].name, "NoSinkPass");
+}
+
+// AddPass()/AddComputePass() never call the sink, even when one is
+// installed on the SAME builder - the direct, regression-proof confirmation
+// of the source document's own Section 2 scope boundary (AddPass()/
+// AddComputePass() are permanently out of scope for this whole campaign).
+TEST(RenderGraphBuilderTest, AddPassAndAddComputePassNeverCallTheSink)
+{
+    RenderGraphBuilder builder;
+    FakeMetadataSink sink;
+    builder.SetDebugMetadataSink(&sink);
+
+    builder.AddPass(
+        "PlainPass", [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute);
+    builder.AddComputePass(
+        "PlainComputePass", [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute);
+
+    EXPECT_EQ(sink.EntryCountForTesting(), 0u);
+}
+
 } // namespace
 } // namespace gte::rg

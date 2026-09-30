@@ -353,7 +353,14 @@ enum class ResourceKind : std::uint8_t {
 // AtmospherePassSequence.cpp's own AddAtmosphereViewLutPasses(), called once
 // per view, each call producing its own distinct PassRecord(s) even when two
 // calls happen to share an identical literal pass `name` string.
-enum class ViewScope {
+//
+// editor-core-separation-25 campaign, PHASE3
+// (PHASE3_PASSRECORD_FIELD_MIGRATION_AND_SNAPSHOT_REWIRING.md, TR6) - given
+// an explicit std::uint8_t underlying type (previously defaulted to `int`,
+// 4 bytes, despite only ever needing 1) - a small, free, additive
+// tightening; no existing comparison/arithmetic anywhere in the engine
+// depends on this enum's size or signedness.
+enum class ViewScope : std::uint8_t {
     Shared,
     GameView,
     SceneView,
@@ -784,23 +791,25 @@ struct PassRecord {
     std::optional<std::array<float, 4>> colorClearValue;
     std::optional<float> depthClearValue;
 
-    // Render Pass campaign (task_manager/render-pass-1), PHASE1 - which
-    // conceptual GROUP this pass belongs to (see RenderPassCategory's own
-    // doc comment above) - purely descriptive metadata for the Editor
-    // Frame Debugger's tree-grouping purposes (PHASE4), read by NOTHING in
-    // RenderGraph.cpp/RenderGraphCompiler.cpp/RenderGraphBarrierPlanner.cpp.
-    // Appended at the END of the struct (never inserted in the middle) -
-    // see this file's own header comment / AGENTS.md for why.
-    RenderPassCategory category = RenderPassCategory::General;
-
-    // Frame Debugger Pass-Ownership campaign (task_manager/render-pass-2),
-    // PHASE1 - which structural kind of draw operation this pass issues
-    // (see RenderPassDrawKind's own doc comment above) - purely descriptive
-    // metadata for the Editor Frame Debugger's child-event-labeling purposes
-    // (PHASE2), read by NOTHING in RenderGraph.cpp/RenderGraphCompiler.cpp/
-    // RenderGraphBarrierPlanner.cpp. Appended at the END of the struct
-    // (never inserted in the middle) - see this file's own header comment.
-    RenderPassDrawKind drawKind = RenderPassDrawKind::DrawMesh;
+    // editor-core-separation-25 campaign, PHASE3
+    // (PHASE3_PASSRECORD_FIELD_MIGRATION_AND_SNAPSHOT_REWIRING.md) - category/
+    // drawKind/tags USED TO live here (RenderPassCategory category;
+    // RenderPassDrawKind drawKind; RenderPassTagMask tags;) - each,
+    // individually, PURELY DESCRIPTIVE metadata read by NOTHING in
+    // RenderGraph.cpp/RenderGraphCompiler.cpp/RenderGraphBarrierPlanner.cpp,
+    // with their only real reader being the Editor's Frame Debugger. All
+    // three have been REMOVED from this hot, always-live struct and moved to
+    // a brand-new, Core-owned, opaque, zero-cost-when-absent hook instead -
+    // see RenderGraphDebugMetadataSink.h's own PassDebugMetadata/
+    // IPassDebugMetadataSink/IPassDebugMetadataProvider. The one production
+    // WRITE call site (RenderGraphBuilder::AddRenderPass()) now forwards
+    // these three values into an installed IPassDebugMetadataSink* instead
+    // of stamping them here; the one Core READ call site
+    // (RenderGraphSnapshot.cpp's BuildPassSnapshot()) now resolves them via
+    // a caller-supplied metadataLookup callable instead of reading them off
+    // this struct. PassRecord::kind/::viewScope (below/above) are NOT part
+    // of this migration - they remain real fields on this struct, forever
+    // (see the source document's own Section 2 for the full reasoning).
 
     // render-pass-3 campaign, PHASE1 - a SORT HINT (see RenderPassEvent's
     // own doc comment above - as of render-pass-4 PHASE2, a REAL,
@@ -842,21 +851,10 @@ struct PassRecord {
     // WriteColorAttachment(), never here).
     std::vector<ColorAttachmentDesc> colorAttachments;
 
-    // render-pass-7 campaign (task_manager/render-pass-7), PHASE1 - Core
-    // Campaign 1 ("De-hardcode RenderPassCategory"). A GENERIC, feature-blind
-    // bitmask a Layer-2 module stamps to identify "which conceptual group(s)
-    // does this pass belong to" WITHOUT Core ever needing to know what any
-    // individual bit means - see RenderPassTag's own doc comment above for
-    // the full contract, and RenderPassGroupRegistry.h (PHASE2) for the one
-    // real consumer (the Editor Frame Debugger's tree-grouping logic,
-    // PHASE4). Read by NOTHING in RenderGraph.cpp/RenderGraphCompiler.cpp/
-    // RenderGraphBarrierPlanner.cpp - purely descriptive metadata, mirroring
-    // category/drawKind/viewScope's own identical rule. Defaults to 0 (no
-    // tags) - every pre-existing AddRenderPass() call site (which never
-    // mentions this field at all) keeps its exact prior behavior/meaning
-    // unchanged. Appended at the END of the struct (never inserted in the
-    // middle) - see this file's own header comment / AGENTS.md for why.
-    RenderPassTagMask tags = 0;
+    // editor-core-separation-25 campaign, PHASE3 - `tags` USED TO live here
+    // too (RenderPassTagMask tags = 0;) - see this struct's own doc comment
+    // above (where category/drawKind used to sit) for the full migration
+    // note; it applies to `tags` identically.
 };
 
 } // namespace gte::rg
