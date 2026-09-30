@@ -195,6 +195,32 @@ public:
         return entry != nullptr && entry->epoch == entryEpoch && entry->epoch != 0;
     }
 
+    // PHASE8 (editor-core-separation-27 campaign,
+    // PHASE8_BUILDER_GETORCREATEPERSISTENTTEXTURE_AND_HONEST_LAYOUT_WIRING.md)
+    // - the token-based fast path's own resolve call: the caller
+    // (RenderGraphBuilder::GetOrCreatePersistentTexture()'s token overload)
+    // must already have confirmed IsTokenLive(token.entry, token.entryEpoch)
+    // before reaching here - never call this against a possibly-stale
+    // entry pointer. Shares ALL of Resolve()'s own validation/age-tracking/
+    // resize logic via the private ResolveAgainstEntry() helper below - see
+    // that method's own doc comment.
+    std::optional<ResolvedTexture> ResolveFast(
+        PersistentResourceCacheEntry* entry, const TextureDesc& desc, std::uint64_t currentFrame,
+        ExecuteTimingMode timingMode);
+
+    // PHASE8 - Section 5.1: records the FINAL VkImageLayout a persistent
+    // texture's color image was actually left in at the end of the real
+    // frame it was used - called once per persistent texture per real
+    // frame, from RenderGraph::ExecuteCompiledGraph()'s own tail hook,
+    // using the SAME combined "<owner>::<name>" key already flowing
+    // through this whole class (TextureSlot::name / ImportTexture()'s own
+    // `name` argument for a persistent-cache-backed handle). A safe no-op
+    // if `key` is null or does not (or no longer) match a live entry -
+    // "should not happen in steady state" defensive, mirrors
+    // RegisterDebugTextureSnapshots()'s own `if (!tex.resolved) continue;`
+    // guard in spirit.
+    void RecordFinalLayout(const char* key, VkImageLayout layout);
+
     // PHASE6 - Section 5.5/FR8: flushes every QUEUED resize (see Resolve()
     // above) behind EXACTLY ONE combined vkDeviceWaitIdle(), no matter how
     // many entries need resizing this real frame - a no-op (no stall of any
@@ -215,6 +241,23 @@ private:
     // Last request THIS frame wins for the SAME entry - matches "single
     // builder, single frame" reasoning used elsewhere in this engine.
     void QueueResize(PersistentResourceCacheEntry* entry, std::uint32_t newWidth, std::uint32_t newHeight);
+
+    // PHASE8 - the shared tail both Resolve() (right after its own
+    // try_emplace/construction step has guaranteed `entry.texture.has_value()`
+    // and `entry.ownKeyForDebugAssert != nullptr`) and ResolveFast() above
+    // call: the same-real-frame double-request refusal (Section 5.3),
+    // age-stamping, the format-change/resize-request handling (PHASE5/
+    // PHASE6), and the final ResolvedTexture construction. Extracting this
+    // ONE shared implementation guarantees the token-based fast path can
+    // never accidentally skip a check the slow path enforces. For a
+    // brand-new entry, Resolve()'s own construction step already set
+    // `entry.desc = desc` before calling this, so the format/width/height
+    // comparison below is always a structural no-op the very first time any
+    // identity is ever resolved - equivalent to the OLD, pre-PHASE8 code's
+    // explicit `if (!inserted) { ... }` guard, without needing to thread
+    // `inserted` through this shared helper at all.
+    std::optional<ResolvedTexture> ResolveAgainstEntry(PersistentResourceCacheEntry& entry, const TextureDesc& desc,
+        std::uint64_t currentFrame, ExecuteTimingMode timingMode);
 
     Renderer* m_renderer = nullptr;
     VkDevice m_device = VK_NULL_HANDLE; // PHASE6 - cached once, at construction, from

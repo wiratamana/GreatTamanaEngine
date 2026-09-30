@@ -845,6 +845,26 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
     RegisterDebugTextureSnapshots(timingMode, input, physicalTextures);
     RegisterDebugVolumeTextureSnapshots(timingMode, input, physicalVolumeTextures);
 
+    // editor-core-separation-27 campaign, PHASE8 (BIG_STEP_3, Section
+    // 5.1/5.5) - honest layout recording, every regime, every call (a
+    // persistent texture's real color image layout must survive frame-to-
+    // frame HONESTLY, never guessed/hardcoded); batched resize flush,
+    // SynchronousImmediateReadback only (mirrors m_resourcePool.BeginFrame()'s
+    // own `if (!isPipelined) { ... }` gating a few lines above this
+    // function's own pass-recording loop - a resize must never be triggered
+    // from the pipelined/Present regime, which must never issue a
+    // vkDeviceWaitIdle()).
+    for (const TextureHandle& h : input.persistentCacheTextures) {
+        if (h.index >= physicalTextures.size() || !physicalTextures[h.index].resolved) {
+            continue; // defensive - mirrors RegisterDebugTextureSnapshots()'s own identical guard.
+        }
+        m_persistentResourceCache.RecordFinalLayout(
+            input.textures[h.index].name, physicalTextures[h.index].colorState.layout);
+    }
+    if (!isPipelined) {
+        m_persistentResourceCache.FlushPendingResizes();
+    }
+
     // Phase 8 (RENDERGRAPH_PHASE8_EDITOR_DEBUG_TOOLING_STRATEGY_v1.md) - built
     // AFTER the whole pass loop above has run, so `statsLookup` (backed by
     // LastKnownStatsFor(), already updated by UpdateDrawStatsFor()/

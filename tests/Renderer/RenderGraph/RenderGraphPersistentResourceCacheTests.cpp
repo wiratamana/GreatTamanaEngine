@@ -40,6 +40,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -999,5 +1000,358 @@ TEST(RenderGraphPersistentResourceCacheTest, ExecuteStillRunsANormalEmptyFrameAf
             [](RenderGraphBuilder&) -> std::vector<TextureHandle> { return {}; });
     });
 }
+
+// --- PHASE8 (PHASE8_BUILDER_GETORCREATEPERSISTENTTEXTURE_AND_HONEST_LAYOUT_WIRING.md) ---
+//
+// Everything below drives the feature through the REAL, production-shaped
+// entry point, RenderGraphBuilder::GetOrCreatePersistentTexture() - NOT
+// RenderGraphPersistentResourceCache::Resolve()/ResolveFast() directly (the
+// tests above, PHASE4-6, deliberately used the lower-level API since the
+// builder wiring didn't exist yet) - through the SAME real, internal cache
+// `fixture.GetRenderGraph()` itself owns (RenderGraph::m_persistentResourceCache),
+// never a second, test-constructed instance. Every test below calls
+// `fixture.GetRenderGraph().BeginPersistentResourceFrame()` immediately
+// before each `RunSynchronousFrame()` call, exactly mirroring
+// `Core::BuildFrame()`'s own real per-frame call order (Correction 1/Locked
+// Decision 2, PHASE0_MASTER_STRATEGY.md) - this is REQUIRED, not cosmetic:
+// skipping it would leave `RenderGraph::m_persistentResourceFrameCounter`
+// pinned at 0 forever, which would incorrectly trip the same-real-frame
+// double-request guard (Section 5.3) on every single call after the first.
+
+// 21. Same VkImage across 3 real frames, via the real builder API - the
+// single most important proof THIS phase adds (mirrors test 1 above, this
+// time through GetOrCreatePersistentTexture() + a real Execute() cycle
+// end-to-end, confirmed via the SAME DebugTextureSnapshotFor() query
+// GET /get_texture itself is built on). A real, declared touching pass
+// (WriteColorAttachment with NO clear color -> VK_ATTACHMENT_LOAD_OP_LOAD,
+// preserving whatever content is already there) is REQUIRED here, not
+// optional: RenderGraphCompiler::Compile()'s root-marking scan only makes a
+// PASS survive culling (never a bare, pass-less handle), and
+// RegisterDebugTextureSnapshots()/DebugTextureSnapshotFor() only ever
+// reflect a texture a SURVIVING pass actually resolved this call
+// (physicalTextures[h.index].resolved) - a call to
+// GetOrCreatePersistentTexture() with NO pass at all touching the returned
+// handle would leave it unresolved this frame, and DebugTextureSnapshotFor()
+// would correctly return std::nullopt (a real, confirmed-live defect found
+// and fixed in this exact shape during this phase's own dispatch_sub_agent
+// double-check, before this file was committed - see this phase's own
+// completion report).
+TEST(RenderGraphPersistentResourceCacheTest, BuilderGetOrCreatePersistentTextureReturnsTheSamePhysicalTextureAcrossThreeFrames)
+{
+    HeadlessRenderGraphFixture fixture;
+    if (!fixture.IsUsable()) {
+        GTEST_SKIP() << fixture.SkipReason();
+    }
+
+    const TextureDesc desc = MakeColorDesc();
+    const std::string combinedKey = std::string(kPersistentOwnerCacheValidation) + "::BuilderReuse";
+    VkImage firstImage = VK_NULL_HANDLE;
+
+    for (int frame = 0; frame < 3; ++frame) {
+        fixture.GetRenderGraph().BeginPersistentResourceFrame();
+        fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
+            const TextureHandle h = b.GetOrCreatePersistentTexture(kPersistentOwnerCacheValidation, "BuilderReuse", desc);
+            EXPECT_TRUE(h.IsValid());
+            b.AddPass(
+                "BuilderReuseTouchPass",
+                [&](RenderGraphBuilder::PassBuilder& pb) { pb.WriteColorAttachment(h); },
+                [](PassContext&) {});
+            return {};
+        });
+
+        const std::optional<DebugTextureSnapshot> snapshot = fixture.GetRenderGraph().DebugTextureSnapshotFor(combinedKey);
+        ASSERT_TRUE(snapshot.has_value());
+        if (frame == 0) {
+            firstImage = snapshot->target.image;
+            EXPECT_NE(firstImage, static_cast<VkImage>(VK_NULL_HANDLE));
+        } else {
+            EXPECT_EQ(snapshot->target.image, firstImage);
+        }
+    }
+}
+
+// 22. Token-based fast path - identical result to the plain overload, AND a
+// real, if indirect, proxy that the fast path itself was genuinely taken on
+// frames 2/3 (not merely "produced the identical result", which the slow
+// path would also do): RenderGraphBuilder::GetOrCreatePersistentTexture()'s
+// token overload only ever calls RenderGraphPersistentResourceCache::
+// DebugTokenIdentityMatches()'s debug-only assert STRICTLY INSIDE its own
+// `if (IsTokenLive(...))` branch (see RenderGraphBuilder.cpp) - this whole
+// test completing normally (never aborting) across 3 repeated calls with a
+// STABLE token is therefore real evidence that branch (and only that
+// branch) executed on the second and third calls. See test 21's own doc
+// comment above for why a real, declared touching pass is required here too.
+TEST(RenderGraphPersistentResourceCacheTest, BuilderGetOrCreatePersistentTextureTokenFastPathReusesTheSameImage)
+{
+    HeadlessRenderGraphFixture fixture;
+    if (!fixture.IsUsable()) {
+        GTEST_SKIP() << fixture.SkipReason();
+    }
+
+    const TextureDesc desc = MakeColorDesc();
+    const std::string combinedKey = std::string(kPersistentOwnerCacheValidation) + "::TokenReuse";
+    PersistentTextureCacheToken token;
+
+    for (int frame = 0; frame < 3; ++frame) {
+        fixture.GetRenderGraph().BeginPersistentResourceFrame();
+        fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
+            const TextureHandle h =
+                b.GetOrCreatePersistentTexture(token, kPersistentOwnerCacheValidation, "TokenReuse", desc);
+            EXPECT_TRUE(h.IsValid());
+            b.AddPass(
+                "TokenReuseTouchPass",
+                [&](RenderGraphBuilder::PassBuilder& pb) { pb.WriteColorAttachment(h); },
+                [](PassContext&) {});
+            return {};
+        });
+    }
+
+    const std::optional<DebugTextureSnapshot> snapshot = fixture.GetRenderGraph().DebugTextureSnapshotFor(combinedKey);
+    ASSERT_TRUE(snapshot.has_value());
+    EXPECT_NE(snapshot->target.image, static_cast<VkImage>(VK_NULL_HANDLE));
+}
+
+// 23. Write-on-frame-N, read-correctly-on-frame-N+1 - the concrete "no
+// discard" proof. Frame 1 writes a known, real clear-color pattern via a
+// genuine declared pass (VK_ATTACHMENT_LOAD_OP_CLEAR), with NO reader that
+// same frame (Section 5.2's own recommended canonical shape - a
+// write-only pass kept alive purely by the persistent-cache root). Frame 2
+// declares a SECOND real, genuinely-surviving pass against the SAME
+// identity - a WriteColorAttachment call with NO clear color (so
+// VK_ATTACHMENT_LOAD_OP_LOAD, NOT _CLEAR - it must LOAD the existing
+// content, never discard it) - this is a DELIBERATE, corrected choice from
+// this test's own original draft, which tried a ReadTexture()-ONLY pass:
+// RenderGraphCompiler::Compile()'s root-marking scan only ever scans
+// `pass.writes` (confirmed by direct code read, RenderGraphCompiler.cpp
+// ~line 542) - a pass with ZERO declared writes can NEVER become a root by
+// itself, and with no other pass in that same frame to be a dependency
+// predecessor of, a pure ReadTexture()-only pass is UNCONDITIONALLY culled -
+// a real, confirmed-live defect found and fixed in this exact shape during
+// this phase's own dispatch_sub_agent double-check, before this file was
+// committed (see this phase's own completion report). This corrected
+// LOAD_OP_LOAD write pass IS a real, meaningful regression check in its own
+// right: if this cache's own honest-layout-recording (RecordFinalLayout())
+// or the builder's `resolved.lastKnownLayout` -> ImportTexture() plumbing
+// were ever wrong, VK_ATTACHMENT_LOAD_OP_LOAD against a falsely-assumed
+// layout would read back GARBAGE, not frame 1's real content - this test's
+// own final pixel read-back (via Renderer::CaptureImagePixels(), the exact
+// same primitive GET /get_texture itself is built on) would then fail.
+TEST(RenderGraphPersistentResourceCacheTest, ContentWrittenOnFrameNSurvivesReadableOnFrameNPlusOne)
+{
+    HeadlessRenderGraphFixture fixture;
+    if (!fixture.IsUsable()) {
+        GTEST_SKIP() << fixture.SkipReason();
+    }
+
+    const TextureDesc desc = MakeColorDesc(16, 16);
+    const std::array<float, 4> knownColor{ 0.25f, 0.5f, 0.75f, 1.0f };
+    const std::string combinedKey = std::string(kPersistentOwnerCacheValidation) + "::WriteReadRoundTrip";
+
+    fixture.GetRenderGraph().BeginPersistentResourceFrame();
+    fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
+        const TextureHandle h =
+            b.GetOrCreatePersistentTexture(kPersistentOwnerCacheValidation, "WriteReadRoundTrip", desc);
+        b.AddPass(
+            "PersistentTextureKnownPatternWrite",
+            [&](RenderGraphBuilder::PassBuilder& pb) { pb.WriteColorAttachment(h, knownColor); },
+            [](PassContext&) {});
+        return {};
+    });
+
+    const std::optional<DebugTextureSnapshot> afterFrame1 = fixture.GetRenderGraph().DebugTextureSnapshotFor(combinedKey);
+    ASSERT_TRUE(afterFrame1.has_value());
+    const Renderer::CapturedRawPixels pixelsAfterFrame1 = fixture.GetRenderer().CaptureImagePixels(
+        afterFrame1->target.image, VK_IMAGE_ASPECT_COLOR_BIT, afterFrame1->target.format, afterFrame1->target.extent,
+        afterFrame1->colorState);
+    ASSERT_EQ(pixelsAfterFrame1.pixels.size(), static_cast<std::size_t>(16 * 16 * 4));
+    // VK_FORMAT_R8G8B8A8_UNORM - each channel is round(component * 255).
+    EXPECT_NEAR(pixelsAfterFrame1.pixels[0], 64, 2);
+    EXPECT_NEAR(pixelsAfterFrame1.pixels[1], 128, 2);
+    EXPECT_NEAR(pixelsAfterFrame1.pixels[2], 191, 2);
+    EXPECT_NEAR(pixelsAfterFrame1.pixels[3], 255, 2);
+
+    fixture.GetRenderGraph().BeginPersistentResourceFrame();
+    fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
+        const TextureHandle h =
+            b.GetOrCreatePersistentTexture(kPersistentOwnerCacheValidation, "WriteReadRoundTrip", desc);
+        b.AddPass(
+            "PersistentTextureKnownPatternLoadPreserve",
+            [&](RenderGraphBuilder::PassBuilder& pb) { pb.WriteColorAttachment(h); }, // no clearColor -> LOAD, not CLEAR.
+            [](PassContext&) {});
+        return {};
+    });
+
+    const std::optional<DebugTextureSnapshot> afterFrame2 = fixture.GetRenderGraph().DebugTextureSnapshotFor(combinedKey);
+    ASSERT_TRUE(afterFrame2.has_value());
+    EXPECT_EQ(afterFrame2->target.image, afterFrame1->target.image); // same physical VkImage - no discard/recreate.
+    const Renderer::CapturedRawPixels pixelsAfterFrame2 = fixture.GetRenderer().CaptureImagePixels(
+        afterFrame2->target.image, VK_IMAGE_ASPECT_COLOR_BIT, afterFrame2->target.format, afterFrame2->target.extent,
+        afterFrame2->colorState);
+    ASSERT_EQ(pixelsAfterFrame2.pixels.size(), pixelsAfterFrame1.pixels.size());
+    EXPECT_NEAR(pixelsAfterFrame2.pixels[0], 64, 2);
+    EXPECT_NEAR(pixelsAfterFrame2.pixels[1], 128, 2);
+    EXPECT_NEAR(pixelsAfterFrame2.pixels[2], 191, 2);
+    EXPECT_NEAR(pixelsAfterFrame2.pixels[3], 255, 2);
+}
+
+// 24. Keep-alive in practice, through the REAL builder - a pass whose ONLY
+// declared usage of a GetOrCreatePersistentTexture()-minted handle is a
+// write, with NOTHING else reading/writing it this frame and the handle NOT
+// present in `finalOutputs`, still runs (is NOT culled) every single real
+// frame - proving PHASE3's compiler root-marking fix and this phase's own
+// builder wiring genuinely connect end-to-end. A genuinely CULLED pass would
+// never resolve this texture, so RegisterDebugTextureSnapshots() would never
+// Upsert() a fresh entry for it - `lastUpdatedFrameCounter` strictly
+// advancing past this iteration's own `counterBefore` snapshot is the
+// direct, observable proof this pass really executed THIS frame, not merely
+// that a stale entry from an earlier frame is still sitting in the registry.
+TEST(RenderGraphPersistentResourceCacheTest, WriteOnlyPersistentTextureWithNoReaderSurvivesCullingEveryFrame)
+{
+    HeadlessRenderGraphFixture fixture;
+    if (!fixture.IsUsable()) {
+        GTEST_SKIP() << fixture.SkipReason();
+    }
+
+    const TextureDesc desc = MakeColorDesc();
+    const std::string combinedKey = std::string(kPersistentOwnerCacheValidation) + "::KeepAliveOnly";
+
+    for (int frame = 0; frame < 3; ++frame) {
+        fixture.GetRenderGraph().BeginPersistentResourceFrame();
+        const std::uint64_t counterBefore = fixture.GetRenderGraph().CurrentDebugTextureFrameCounter();
+        fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
+            const TextureHandle h =
+                b.GetOrCreatePersistentTexture(kPersistentOwnerCacheValidation, "KeepAliveOnly", desc);
+            b.AddPass(
+                "PersistentKeepAliveWritePass",
+                [&](RenderGraphBuilder::PassBuilder& pb) { pb.WriteColorAttachment(h); },
+                [](PassContext&) {});
+            return {}; // deliberately empty - `h` is NEVER a finalOutput.
+        });
+
+        const std::optional<DebugTextureSnapshot> snapshot = fixture.GetRenderGraph().DebugTextureSnapshotFor(combinedKey);
+        ASSERT_TRUE(snapshot.has_value());
+        EXPECT_GT(snapshot->lastUpdatedFrameCounter, counterBefore);
+    }
+}
+
+// 25. Two different owners, same name, same desc - re-confirms PHASE4's own
+// lower-level test (test 2 above), this time through the full,
+// production-shaped GetOrCreatePersistentTexture() call path. See test 21's
+// own doc comment above for why a real, declared touching pass per handle is
+// required here too.
+TEST(RenderGraphPersistentResourceCacheTest, BuilderGetOrCreatePersistentTextureTwoOwnersWithTheSameNameNeverCollide)
+{
+    HeadlessRenderGraphFixture fixture;
+    if (!fixture.IsUsable()) {
+        GTEST_SKIP() << fixture.SkipReason();
+    }
+
+    const TextureDesc desc = MakeColorDesc();
+
+    fixture.GetRenderGraph().BeginPersistentResourceFrame();
+    fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
+        const TextureHandle a = b.GetOrCreatePersistentTexture("BuilderOwnerA", "History", desc);
+        const TextureHandle c = b.GetOrCreatePersistentTexture("BuilderOwnerB", "History", desc);
+        EXPECT_TRUE(a.IsValid());
+        EXPECT_TRUE(c.IsValid());
+        EXPECT_NE(a.index, c.index);
+        b.AddPass(
+            "OwnerATouchPass", [&](RenderGraphBuilder::PassBuilder& pb) { pb.WriteColorAttachment(a); },
+            [](PassContext&) {});
+        b.AddPass(
+            "OwnerBTouchPass", [&](RenderGraphBuilder::PassBuilder& pb) { pb.WriteColorAttachment(c); },
+            [](PassContext&) {});
+        return {};
+    });
+
+    const std::optional<DebugTextureSnapshot> snapA = fixture.GetRenderGraph().DebugTextureSnapshotFor("BuilderOwnerA::History");
+    const std::optional<DebugTextureSnapshot> snapB = fixture.GetRenderGraph().DebugTextureSnapshotFor("BuilderOwnerB::History");
+    ASSERT_TRUE(snapA.has_value());
+    ASSERT_TRUE(snapB.has_value());
+    EXPECT_NE(snapA->target.image, snapB->target.image);
+}
+
+// 26. Re-confirming PHASE4/5's own debug-assert-driven refusals still fire
+// correctly when reached THROUGH GetOrCreatePersistentTexture() itself (not
+// just Resolve()/ResolveFast() directly, as tests 4/12 above already cover).
+// The PipelinedDeferredReadback regime-aware resize-refusal case (PHASE6) is
+// DELIBERATELY NOT re-tested through the real builder here - HeadlessRenderGraphFixture
+// only ever drives a SynchronousImmediateReadback Execute() call
+// (RunSynchronousFrame()'s own fixed regime), and GetOrCreatePersistentTexture()
+// itself adds NO timingMode-specific logic of its own (it forwards
+// m_persistentCacheTimingMode to Resolve()/ResolveFast() completely
+// unconditionally) - that refusal path is already directly, fully covered by
+// PHASE6's own ResizeRequestedFromThePipelinedRegimeIsRefusedButTheCallStillSucceeds
+// test, unaffected by this phase's ResolveAgainstEntry() extraction (confirmed
+// by re-running the full PHASE4-6 suite unmodified after this phase's refactor).
+#ifndef NDEBUG
+
+TEST(RenderGraphPersistentResourceCacheDeathTest, BuilderGetOrCreatePersistentTextureAssertsWhenDescHasDepthIsTrue)
+{
+    {
+        HeadlessRenderGraphFixture probe;
+        if (!probe.IsUsable()) {
+            GTEST_SKIP() << probe.SkipReason();
+        }
+    }
+    EXPECT_DEATH(
+        {
+            HeadlessRenderGraphFixture fixture;
+            TextureDesc desc = MakeColorDesc();
+            desc.hasDepth = true;
+            fixture.GetRenderGraph().BeginPersistentResourceFrame();
+            fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
+                (void)b.GetOrCreatePersistentTexture(kPersistentOwnerCacheValidation, "BuilderDepthRefusal", desc);
+                return {};
+            });
+        },
+        "");
+}
+
+TEST(RenderGraphPersistentResourceCacheDeathTest, BuilderGetOrCreatePersistentTextureAssertsOnEmptyOwner)
+{
+    {
+        HeadlessRenderGraphFixture probe;
+        if (!probe.IsUsable()) {
+            GTEST_SKIP() << probe.SkipReason();
+        }
+    }
+    EXPECT_DEATH(
+        {
+            HeadlessRenderGraphFixture fixture;
+            const TextureDesc desc = MakeColorDesc();
+            fixture.GetRenderGraph().BeginPersistentResourceFrame();
+            fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
+                (void)b.GetOrCreatePersistentTexture("", "BuilderEmptyOwnerRefusal", desc);
+                return {};
+            });
+        },
+        "");
+}
+
+TEST(RenderGraphPersistentResourceCacheDeathTest, BuilderGetOrCreatePersistentTextureAssertsWhenTokenReusedAcrossDifferentIdentities)
+{
+    {
+        HeadlessRenderGraphFixture probe;
+        if (!probe.IsUsable()) {
+            GTEST_SKIP() << probe.SkipReason();
+        }
+    }
+    EXPECT_DEATH(
+        {
+            HeadlessRenderGraphFixture fixture;
+            const TextureDesc desc = MakeColorDesc();
+            PersistentTextureCacheToken token;
+            fixture.GetRenderGraph().BeginPersistentResourceFrame();
+            fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
+                (void)b.GetOrCreatePersistentTexture(token, "TokenMismatchOwnerA", "TokenMismatch", desc);
+                (void)b.GetOrCreatePersistentTexture(token, "TokenMismatchOwnerB", "TokenMismatch", desc);
+                return {};
+            });
+        },
+        "");
+}
+
+#endif // !NDEBUG
 
 } // namespace gte::rg

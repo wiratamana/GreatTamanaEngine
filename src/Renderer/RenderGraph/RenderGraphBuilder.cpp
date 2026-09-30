@@ -1,5 +1,11 @@
 #include "RenderGraphBuilder.h"
 
+#include "../../Core/Logging.h" // editor-core-separation-27 campaign, PHASE8 - GTE_LOG_ERROR for
+    // GetOrCreatePersistentTexture()'s own "no persistent cache installed" refusal branch - the
+    // FIRST GTE_LOG_ERROR call site in this file (confirmed via search_in_dir before this phase).
+    // Same relative path RenderGraph.cpp/RenderPassGroupRegistry.cpp already use from this exact
+    // folder.
+
 namespace gte::rg {
 
 // --- RenderGraphBuilder::PassBuilder ---------------------------------------
@@ -232,6 +238,78 @@ void RenderGraphBuilder::AddBlitPass(const char* name, const BlitSpec& spec, Ren
     if (m_debugMetadataSink != nullptr) {
         m_debugMetadataSink->OnPassDeclared(m_passes.size() - 1, category, RenderPassDrawKind::Blit, tags);
     }
+}
+
+// editor-core-separation-27 campaign, PHASE8 (BIG_STEP_3, Section 5.1/5.2) -
+// the ONE place either GetOrCreatePersistentTexture() overload mints this
+// frame's real TextureHandle from a successful Resolve()/ResolveFast()
+// result - see this method's own declaration (RenderGraphBuilder.h) for the
+// full reasoning.
+TextureHandle RenderGraphBuilder::MintPersistentHandle(
+    const RenderGraphPersistentResourceCache::ResolvedTexture& resolved)
+{
+    const TextureHandle handle =
+        ImportTexture(resolved.combinedKey->c_str(), resolved.texture->Target(), resolved.lastKnownLayout);
+    m_persistentCacheTextures.push_back(handle);
+    return handle;
+}
+
+TextureHandle RenderGraphBuilder::GetOrCreatePersistentTexture(
+    const char* owner, const char* name, const TextureDesc& desc)
+{
+    assert(m_persistentCache != nullptr
+        && "RenderGraphBuilder::GetOrCreatePersistentTexture requires a RenderGraphBuilder obtained through "
+           "RenderGraph::Execute() (a bare, default-constructed RenderGraphBuilder has no persistent cache)");
+    if (m_persistentCache == nullptr) {
+        GTE_LOG_ERROR("RenderGraphBuilder",
+            "GetOrCreatePersistentTexture() called with no persistent cache installed - refusing.");
+        return TextureHandle{};
+    }
+    const std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> resolved = m_persistentCache->Resolve(
+        owner, name, desc, m_persistentCacheCurrentFrame, m_persistentCacheTimingMode);
+    if (!resolved.has_value()) {
+        return TextureHandle{}; // Resolve() already logged the specific reason - never a second log here.
+    }
+    return MintPersistentHandle(*resolved);
+}
+
+TextureHandle RenderGraphBuilder::GetOrCreatePersistentTexture(
+    PersistentTextureCacheToken& token, const char* owner, const char* name, const TextureDesc& desc)
+{
+    assert(m_persistentCache != nullptr
+        && "RenderGraphBuilder::GetOrCreatePersistentTexture requires a RenderGraphBuilder obtained through "
+           "RenderGraph::Execute()");
+    if (m_persistentCache == nullptr) {
+        GTE_LOG_ERROR("RenderGraphBuilder",
+            "GetOrCreatePersistentTexture() called with no persistent cache installed - refusing.");
+        return TextureHandle{};
+    }
+
+    if (m_persistentCache->IsTokenLive(token.entry, token.entryEpoch)) {
+#ifndef NDEBUG
+        assert(m_persistentCache->DebugTokenIdentityMatches(token.entry, owner, name)
+            && "RenderGraphBuilder::GetOrCreatePersistentTexture: this token was already resolved against a "
+               "DIFFERENT (owner, name) identity - a token must never be reused across two unrelated identities");
+#endif
+        const std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> resolved =
+            m_persistentCache->ResolveFast(
+                token.entry, desc, m_persistentCacheCurrentFrame, m_persistentCacheTimingMode);
+        if (!resolved.has_value()) {
+            return TextureHandle{}; // e.g. a same-frame double-request - already logged inside Resolve*().
+        }
+        return MintPersistentHandle(*resolved);
+    }
+
+    // Slow path - identical to the no-token overload, then refresh `token`
+    // for every subsequent call this session.
+    const std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> resolved = m_persistentCache->Resolve(
+        owner, name, desc, m_persistentCacheCurrentFrame, m_persistentCacheTimingMode);
+    if (!resolved.has_value()) {
+        return TextureHandle{};
+    }
+    token.entry = resolved->entry;
+    token.entryEpoch = resolved->entryEpoch;
+    return MintPersistentHandle(*resolved);
 }
 
 CompiledGraphInput RenderGraphBuilder::Finish()

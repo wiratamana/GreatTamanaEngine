@@ -58,26 +58,6 @@ RenderGraphPersistentResourceCache::Resolve(const char* owner, const char* name,
     // step reads the key back OUT of the map).
     auto [it, inserted] = m_entries.try_emplace(key);
 
-    // Section 5.3 - refuse a second request for the SAME identity within the
-    // SAME real frame, regardless of which ExecuteTimingMode regime called
-    // first. A brand-new entry's lastRequestedFrame defaults to 0, which
-    // currentFrame (always >= 1 - see PHASE7's frame-counter seeding) can
-    // never coincidentally equal, so this never misfires for the first-ever
-    // request of a new identity.
-    if (!inserted && it->second.lastRequestedFrame == currentFrame) {
-        if (!it->second.hasLoggedDoubleRequest) {
-            GTE_LOG_ERROR("RenderGraphPersistentResourceCache",
-                "\"" + key + "\" was requested twice within the same real frame (frame "
-                    + std::to_string(currentFrame) + ") - refusing the second request. Two "
-                      "ExecuteTimingMode regimes racing on the same shared VkImage would be a "
-                      "genuine GPU data race - see BIG_STEP_3 Section 5.3.");
-            it->second.hasLoggedDoubleRequest = true;
-        }
-        return std::nullopt;
-    }
-    it->second.lastRequestedFrame = currentFrame;
-    it->second.lastUsedFrame = currentFrame; // Section 8's own eviction input - stamped every call, fast path included (PHASE8).
-
     // Step 2/3 - if a real RenderTexture does not exist here yet,
     // construct it, referencing the MAP'S OWN, now-stable key
     // (it->first.c_str()) as debugName - NEVER `owner`/`name`/`key`
@@ -104,47 +84,107 @@ RenderGraphPersistentResourceCache::Resolve(const char* owner, const char* name,
         }
     }
 
-    // PHASE6 (Section 5.5/FR4/FR8) - a genuinely PRE-EXISTING entry
-    // (never a brand-new one, hence !inserted) being re-requested with a
-    // different format/width/height.
-    if (!inserted) {
-        if (desc.format != it->second.desc.format) {
-            // A format (or, by extension, hasDepth) change on an EXISTING
-            // entry is ALWAYS a caller bug, independent of regime - logged
-            // loudly, never silently reinterpreted, never queued as a
-            // resize.
+    // PHASE8 - the shared tail (double-request refusal, age-stamping,
+    // resize/format handling, final ResolvedTexture construction) - see
+    // ResolveAgainstEntry()'s own doc comment (header) for why this is
+    // always a structural no-op for a brand-new entry (entry.desc was
+    // JUST set equal to `desc` above).
+    return ResolveAgainstEntry(it->second, desc, currentFrame, timingMode);
+}
+
+std::optional<RenderGraphPersistentResourceCache::ResolvedTexture>
+RenderGraphPersistentResourceCache::ResolveFast(PersistentResourceCacheEntry* entry, const TextureDesc& desc,
+    std::uint64_t currentFrame, ExecuteTimingMode timingMode)
+{
+    assert(entry != nullptr && "RenderGraphPersistentResourceCache::ResolveFast requires a non-null entry");
+    return ResolveAgainstEntry(*entry, desc, currentFrame, timingMode);
+}
+
+std::optional<RenderGraphPersistentResourceCache::ResolvedTexture>
+RenderGraphPersistentResourceCache::ResolveAgainstEntry(PersistentResourceCacheEntry& entry, const TextureDesc& desc,
+    std::uint64_t currentFrame, ExecuteTimingMode timingMode)
+{
+    assert(entry.texture.has_value()
+        && "RenderGraphPersistentResourceCache::ResolveAgainstEntry requires an already-constructed entry");
+    assert(entry.ownKeyForDebugAssert != nullptr
+        && "RenderGraphPersistentResourceCache::ResolveAgainstEntry requires entry.ownKeyForDebugAssert to already "
+           "be set");
+    const std::string& key = *entry.ownKeyForDebugAssert;
+
+    // Section 5.3 - refuse a second request for the SAME identity within the
+    // SAME real frame, regardless of which ExecuteTimingMode regime called
+    // first. A brand-new entry's lastRequestedFrame defaults to 0, which
+    // currentFrame (always >= 1 - see PHASE7's frame-counter seeding) can
+    // never coincidentally equal, so this never misfires for the first-ever
+    // request of a new identity.
+    if (entry.lastRequestedFrame == currentFrame) {
+        if (!entry.hasLoggedDoubleRequest) {
             GTE_LOG_ERROR("RenderGraphPersistentResourceCache",
-                "\"" + key + "\" was re-requested with a DIFFERENT format than its existing entry - "
-                  "this is always a caller bug, refusing this call.");
-            return std::nullopt;
+                "\"" + key + "\" was requested twice within the same real frame (frame "
+                    + std::to_string(currentFrame) + ") - refusing the second request. Two "
+                      "ExecuteTimingMode regimes racing on the same shared VkImage would be a "
+                      "genuine GPU data race - see BIG_STEP_3 Section 5.3.");
+            entry.hasLoggedDoubleRequest = true;
         }
-        if (desc.width != it->second.desc.width || desc.height != it->second.desc.height) {
-            if (timingMode == ExecuteTimingMode::PipelinedDeferredReadback) {
-                // A resize request from the pipelined/Present regime is
-                // refused immediately: keep the entry's CURRENT extent,
-                // ignore desc.width/height for THIS call only - never
-                // queued, never batched, since that regime must never
-                // issue a vkDeviceWaitIdle() at all.
-                GTE_LOG_ERROR("RenderGraphPersistentResourceCache",
-                    "\"" + key + "\" resize requested from the PipelinedDeferredReadback regime - refusing "
-                      "the resize (keeping the current extent) for this call only; a resize must be "
-                      "requested from the SynchronousImmediateReadback regime.");
-            } else {
-                QueueResize(&it->second, desc.width, desc.height);
-            }
-            // Either way, THIS call's own returned texture/extent is still
-            // the entry's CURRENT (old) one - never the newly-requested size.
+        return std::nullopt;
+    }
+    entry.lastRequestedFrame = currentFrame;
+    entry.lastUsedFrame = currentFrame; // Section 8's own eviction input - stamped every call, fast path included.
+
+    // PHASE6 (Section 5.5/FR4/FR8) - a re-request with a different
+    // format/width/height than what this entry was LAST successfully built
+    // with. For a brand-new entry, entry.desc was JUST set equal to `desc`
+    // by Resolve()'s own construction step, so both comparisons below are
+    // always false the very first time any identity is ever resolved -
+    // equivalent to the OLD code's explicit `if (!inserted) { ... }` guard.
+    if (desc.format != entry.desc.format) {
+        // A format (or, by extension, hasDepth) change on an EXISTING
+        // entry is ALWAYS a caller bug, independent of regime - logged
+        // loudly, never silently reinterpreted, never queued as a
+        // resize.
+        GTE_LOG_ERROR("RenderGraphPersistentResourceCache",
+            "\"" + key + "\" was re-requested with a DIFFERENT format than its existing entry - "
+              "this is always a caller bug, refusing this call.");
+        return std::nullopt;
+    }
+    if (desc.width != entry.desc.width || desc.height != entry.desc.height) {
+        if (timingMode == ExecuteTimingMode::PipelinedDeferredReadback) {
+            // A resize request from the pipelined/Present regime is
+            // refused immediately: keep the entry's CURRENT extent,
+            // ignore desc.width/height for THIS call only - never
+            // queued, never batched, since that regime must never
+            // issue a vkDeviceWaitIdle() at all.
+            GTE_LOG_ERROR("RenderGraphPersistentResourceCache",
+                "\"" + key + "\" resize requested from the PipelinedDeferredReadback regime - refusing "
+                  "the resize (keeping the current extent) for this call only; a resize must be "
+                  "requested from the SynchronousImmediateReadback regime.");
+        } else {
+            QueueResize(&entry, desc.width, desc.height);
         }
+        // Either way, THIS call's own returned texture/extent is still
+        // the entry's CURRENT (old) one - never the newly-requested size.
     }
 
     // Step 4 - hand back what GetOrCreatePersistentTexture() needs.
     ResolvedTexture result;
-    result.texture = &it->second.texture.value();
-    result.lastKnownLayout = it->second.lastKnownLayout;
-    result.combinedKey = &it->first;
-    result.entry = &it->second;
-    result.entryEpoch = it->second.epoch;
+    result.texture = &entry.texture.value();
+    result.lastKnownLayout = entry.lastKnownLayout;
+    result.combinedKey = entry.ownKeyForDebugAssert;
+    result.entry = &entry;
+    result.entryEpoch = entry.epoch;
     return result;
+}
+
+void RenderGraphPersistentResourceCache::RecordFinalLayout(const char* key, VkImageLayout layout)
+{
+    if (key == nullptr) {
+        return;
+    }
+    const auto it = m_entries.find(std::string(key));
+    if (it == m_entries.end()) {
+        return; // defensive - should not happen in steady state.
+    }
+    it->second.lastKnownLayout = layout;
 }
 
 void RenderGraphPersistentResourceCache::BeginFrame(std::uint64_t currentFrame, std::uint64_t staleThresholdFrames)

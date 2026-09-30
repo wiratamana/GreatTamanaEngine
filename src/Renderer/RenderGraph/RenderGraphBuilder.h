@@ -694,6 +694,41 @@ public:
         m_persistentCacheCurrentFrame = currentFrame;
     }
 
+    // editor-core-separation-27 campaign, PHASE8 (BIG_STEP_3, FR1) - the
+    // plain, always-correct, always-safe entry point any pass author uses to
+    // reach a persistent, named, cross-frame GPU color texture - usable
+    // exactly like an ImportTexture()-minted handle in
+    // ReadTexture()/WriteTexture()/WriteColorAttachment() afterward. `owner`
+    // MUST be a built-in feature's own constant from
+    // RenderGraphPersistentResourceOwners.h, or a `_v2`/`_v3` plugin/Project
+    // Assembly feature's own already-unique `descriptor.name` (Section 6.2) -
+    // never a locally hand-typed literal. Returns a default-constructed
+    // (invalid) TextureHandle if this builder has no persistent cache
+    // installed (asserted in debug builds - see this class's own
+    // SetPersistentResourceCache()) or if the underlying
+    // RenderGraphPersistentResourceCache::Resolve() call itself refuses the
+    // request (already logged there - see that method's own doc comment) -
+    // never a second log here. May THROW std::runtime_error if the
+    // underlying RenderTexture construction genuinely fails (Section 6.1) -
+    // never caught/swallowed here either.
+    TextureHandle GetOrCreatePersistentTexture(const char* owner, const char* name, const TextureDesc& desc);
+
+    // editor-core-separation-27 campaign, PHASE8 (BIG_STEP_3, FR7) - the
+    // token-based fast path for a caller's own steady-state hot path: skips
+    // the owned-string build and hash-map lookup whenever `token` still
+    // references a live entry (RenderGraphPersistentResourceCache::
+    // IsTokenLive()) - identical result to the plain overload above either
+    // way, since both ultimately funnel through the SAME shared
+    // RenderGraphPersistentResourceCache::ResolveAgainstEntry() helper. On
+    // the slow path (token not yet live), `token` is refreshed for every
+    // subsequent call this session. In debug builds, re-using `token`
+    // against a DIFFERENT (owner, name) identity than it was originally
+    // resolved against is asserted (RenderGraphPersistentResourceCache::
+    // DebugTokenIdentityMatches()) - a token must never be shared across two
+    // unrelated identities.
+    TextureHandle GetOrCreatePersistentTexture(
+        PersistentTextureCacheToken& token, const char* owner, const char* name, const TextureDesc& desc);
+
     // Consumes this builder, handing its whole in-progress description
     // over to Phase 3's compiler. Safe to call at most meaningfully once
     // per builder instance (a builder is a one-frame-lifetime object, per
@@ -702,6 +737,18 @@ public:
     CompiledGraphInput Finish();
 
 private:
+    // editor-core-separation-27 campaign, PHASE8 - the ONE place either
+    // GetOrCreatePersistentTexture() overload mints this frame's real
+    // TextureHandle from a successful RenderGraphPersistentResourceCache::
+    // Resolve()/ResolveFast() result - calls the pre-existing, unchanged
+    // ImportTexture() using `resolved.combinedKey->c_str()` (a pointer into
+    // the CACHE's own permanently-stable std::string, TR4) as `name`, then
+    // pushes the resulting handle onto m_persistentCacheTextures so
+    // RenderGraphCompiler::Compile()'s PHASE3 root-marking fix keeps it
+    // alive every frame with zero further action needed from the pass
+    // author.
+    TextureHandle MintPersistentHandle(const RenderGraphPersistentResourceCache::ResolvedTexture& resolved);
+
     std::vector<PassRecord> m_passes;
 
     // editor-core-separation-25 campaign - optional, nullable, zero-cost-
