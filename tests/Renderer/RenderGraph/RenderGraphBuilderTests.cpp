@@ -407,6 +407,47 @@ TEST(RenderGraphBuilderTest, PassBuilderWriteTextureAppendsWithGivenAccess)
     EXPECT_EQ(input.passes[0].writes[0].access, ResourceAccess::TransferDst);
 }
 
+// editor-core-separation-26 campaign (Gap B, PHASE2) - WriteTexture()'s new,
+// trailing, defaulted isDepthResource parameter (mirrors ReadTexture()'s own
+// existing one). Supplying isDepthResource=true records it verbatim onto the
+// resulting ResourceUsage - this is what a future Blit/Copy pass
+// (AddBlitPass(), PHASE5) needs to correctly mark a TransferDst write as
+// targeting a texture's DEPTH half rather than its color half.
+TEST(RenderGraphBuilderTest, WriteTextureWithIsDepthResourceTrueProducesDepthFlaggedResourceUsage)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle handle = builder.CreateTexture("Depth", TextureDesc{ 64, 64, VK_FORMAT_D32_SFLOAT, true });
+
+    builder.AddPass(
+        "BlitDstPass",
+        [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteTexture(handle, ResourceAccess::TransferDst, /*isDepthResource=*/true); },
+        NoOpExecute);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes[0].writes.size(), 1u);
+    EXPECT_EQ(input.passes[0].writes[0].texture, handle);
+    EXPECT_EQ(input.passes[0].writes[0].access, ResourceAccess::TransferDst);
+    EXPECT_TRUE(input.passes[0].writes[0].isDepthResource);
+}
+
+// TR3 (backward compatibility) for this specific method: omitting the third
+// argument entirely still defaults isDepthResource to false, matching every
+// pre-existing WriteTexture() call site's implicit behavior exactly.
+TEST(RenderGraphBuilderTest, WriteTextureWithoutIsDepthResourceDefaultsToFalse)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle handle = builder.CreateTexture("Output", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+
+    builder.AddPass(
+        "ComputeWritePass",
+        [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteTexture(handle, ResourceAccess::ComputeShaderWrite); },
+        NoOpExecute);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes[0].writes.size(), 1u);
+    EXPECT_FALSE(input.passes[0].writes[0].isDepthResource);
+}
+
 // A read-modify-write RWTexture declares BOTH a ReadTexture(ComputeShaderRead)
 // AND a WriteTexture(ComputeShaderWrite) usage on the SAME handle - mirroring
 // ReadBuffer()/WriteBuffer()'s own existing two-calls-combined convention.

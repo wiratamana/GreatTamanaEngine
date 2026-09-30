@@ -54,9 +54,9 @@ void RenderGraphBuilder::PassBuilder::WriteDepthStencilAttachment(TextureHandle 
     }
 }
 
-void RenderGraphBuilder::PassBuilder::WriteTexture(TextureHandle handle, ResourceAccess access)
+void RenderGraphBuilder::PassBuilder::WriteTexture(TextureHandle handle, ResourceAccess access, bool isDepthResource)
 {
-    m_pass.writes.push_back(ResourceUsage::ForTexture(handle, access));
+    m_pass.writes.push_back(ResourceUsage::ForTexture(handle, access, isDepthResource));
 }
 
 void RenderGraphBuilder::PassBuilder::ReadBuffer(BufferHandle handle, ResourceAccess access)

@@ -286,7 +286,19 @@ public:
         // `pass.WriteTexture(handle)` on the SAME handle - mirroring how
         // ReadBuffer()/WriteBuffer() below are already two separate calls a
         // caller combines for buffers.
-        void WriteTexture(TextureHandle handle, ResourceAccess access = ResourceAccess::ComputeShaderWrite);
+        // editor-core-separation-26 campaign (Gap B, PHASE2) - added a third,
+        // trailing, DEFAULTED `isDepthResource` parameter mirroring
+        // ReadTexture()'s own existing one (see ResourceUsage::isDepthResource,
+        // RenderGraphTypes.h). Defaults to `false`, matching every pre-existing
+        // call site's implicit behavior exactly (TR3 - zero behavior change).
+        // This is the prerequisite a future Blit/Copy pass
+        // (RenderGraphBuilder::AddBlitPass(), PHASE5) needs to correctly mark a
+        // TransferDst write as targeting a texture's DEPTH half rather than its
+        // color half - without it, RenderGraph.cpp's ApplyUsageBarrierIfNeeded()
+        // has no way to learn that fact, and a blit into a depth destination
+        // would be barriered against the wrong physical image/aspect mask.
+        void WriteTexture(TextureHandle handle, ResourceAccess access = ResourceAccess::ComputeShaderWrite,
+            bool isDepthResource = false);
 
         // Symmetric buffer counterparts, for a future compute pass (Phase
         // 9 backlog) - no real Phases 1-8 pass needs these yet, but
