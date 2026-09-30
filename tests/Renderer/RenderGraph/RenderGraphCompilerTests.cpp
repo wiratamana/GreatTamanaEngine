@@ -654,6 +654,108 @@ TEST(RenderGraphCompilerTest, GpuSkinningReadBeforeWriteMitigationPreservesOrder
     EXPECT_FALSE(input.passes[2].isCulled);
 }
 
+// --- editor-core-separation-27 campaign, PHASE3's own TextureHandle
+// persistent-cache root-set fix
+// (BIG_STEP_3_PERSISTENT_RESOURCE_CACHE_HONEST_LAYOUT_HISTORY_REV2_2026-09-30.txt,
+// Section 5.2, "the keep-alive guarantee") -
+//
+// GetOrCreatePersistentTexture() does not exist yet (PHASE8's job) - these
+// tests build a CompiledGraphInput via a real RenderGraphBuilder/Finish(),
+// then directly push_back() onto its own persistentCacheTextures field
+// before calling Compile(), exactly mirroring
+// BufferOnlyWriteSurvivesCullingOnlyWhenExplicitlyKeptAsOutput's own
+// hand-fabrication approach above - Compile() only ever READS this vector,
+// with zero opinion on how it got populated.
+
+TEST(RenderGraphCompilerTest, PersistentCacheTextureWriteSurvivesCullingWithNoFinalOutputsAtAll)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle history = builder.CreateTexture("History", MakeTextureDesc());
+
+    builder.AddComputePass(
+        "WritesHistory",
+        [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteTexture(history); },
+        NoOpExecute); // index 0 - its only write is a persistent-cache texture, no in-frame reader.
+
+    CompiledGraphInput input = builder.Finish();
+    input.persistentCacheTextures.push_back(history);
+
+    // Deliberately EMPTY finalOutputs - proves the persistent-cache vector
+    // alone is enough to keep this pass alive.
+    const CompiledGraph compiled = Compile(input, {});
+
+    EXPECT_TRUE(ExecutionOrderEquals(compiled.executionOrder, { 0 }));
+    EXPECT_FALSE(input.passes[0].isCulled);
+}
+
+TEST(RenderGraphCompilerTest, TextureWriteNotInPersistentCacheOrFinalOutputsIsStillCulled)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle history = builder.CreateTexture("History", MakeTextureDesc());
+
+    builder.AddComputePass(
+        "WritesHistory",
+        [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteTexture(history); },
+        NoOpExecute);
+
+    // Deliberately never push onto persistentCacheTextures, and finalOutputs
+    // is empty too - proves this fix is additive, not accidentally
+    // permissive for every texture write.
+    CompiledGraphInput input = builder.Finish();
+    const CompiledGraph compiled = Compile(input, {});
+
+    EXPECT_TRUE(compiled.executionOrder.empty());
+    EXPECT_TRUE(input.passes[0].isCulled);
+}
+
+TEST(RenderGraphCompilerTest, OrdinaryFinalOutputsRootStillWorksWithEmptyPersistentCacheTextures)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle color = builder.CreateTexture("Color", MakeTextureDesc());
+
+    builder.AddPass(
+        "Opaque", [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(color); }, NoOpExecute);
+
+    // input.persistentCacheTextures stays empty (default) - confirms the
+    // pre-existing finalOutputs path is completely untouched by this fix.
+    CompiledGraphInput input = builder.Finish();
+    const TextureHandle finalOutputs[] = { color };
+    const CompiledGraph compiled = Compile(input, finalOutputs);
+
+    EXPECT_TRUE(ExecutionOrderEquals(compiled.executionOrder, { 0 }));
+    EXPECT_FALSE(input.passes[0].isCulled);
+}
+
+TEST(RenderGraphCompilerTest, PersistentCacheRootDoesNotCrossContaminateAnUnrelatedPass)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle history = builder.CreateTexture("History", MakeTextureDesc());
+    const TextureHandle otherColor = builder.CreateTexture("OtherColor", MakeTextureDesc());
+    const TextureHandle unrelatedDeadTexture = builder.CreateTexture("UnrelatedDead", MakeTextureDesc());
+
+    builder.AddComputePass(
+        "WritesHistory",
+        [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteTexture(history); },
+        NoOpExecute); // index 0 - kept via persistentCacheTextures below.
+    builder.AddPass(
+        "WritesOtherColor",
+        [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(otherColor); },
+        NoOpExecute); // index 1 - kept via finalOutputs below, unrelated to index 0.
+    builder.AddPass(
+        "WritesUnrelatedDead",
+        [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(unrelatedDeadTexture); },
+        NoOpExecute); // index 2 - never kept/read by anything, must stay culled.
+
+    CompiledGraphInput input = builder.Finish();
+    input.persistentCacheTextures.push_back(history);
+    const TextureHandle finalOutputs[] = { otherColor };
+    const CompiledGraph compiled = Compile(input, finalOutputs);
+
+    EXPECT_FALSE(input.passes[0].isCulled);
+    EXPECT_FALSE(input.passes[1].isCulled);
+    EXPECT_TRUE(input.passes[2].isCulled);
+}
+
 // --- render-pass-4 campaign, PHASE1 -----------------------------------------
 // (task_manager/render-pass-4/PHASE1_DEPENDENCY_EVENT_CONTRADICTION_SAFETY_NET.md)
 //

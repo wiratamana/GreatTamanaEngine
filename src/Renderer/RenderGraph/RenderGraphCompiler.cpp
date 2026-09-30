@@ -513,6 +513,28 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
     // RenderGraphBuilder::KeepBufferOutput() - see RenderGraphBuilder.h)
     // for a Buffer write - a THIRD, independent, opt-in root set mirroring
     // finalVolumeTextureOutputs exactly.
+    //
+    // UPDATED AGAIN (editor-core-separation-27 campaign, PHASE3 -
+    // BIG_STEP_3_PERSISTENT_RESOURCE_CACHE_HONEST_LAYOUT_HISTORY_REV2_2026-09-30.txt,
+    // Section 5.2, "the keep-alive guarantee"): a TextureHandle already had
+    // `finalOutputs` as its own root set - unlike Buffer/VolumeTexture, which
+    // had NONE before their own fixes above - but that single root set was
+    // never enough for a persistent-cache texture (RenderGraphPersistentResourceCache,
+    // PHASE4 onward): a pass whose ONLY write is a persistent-cache
+    // TextureHandle, with nothing else reading/writing it this frame, and the
+    // handle not present in this call's own `finalOutputs`, was silently
+    // culled every frame, forever - with no crash, no error, no log, just a
+    // history buffer that quietly never updates. Fixed here by ALSO checking
+    // `input.persistentCacheTextures` (populated internally by
+    // RenderGraphBuilder::GetOrCreatePersistentTexture() - PHASE8; the vector
+    // itself already exists, unpopulated, since PHASE2) for a Texture write -
+    // an OR of TWO vectors for TextureHandle specifically, since ordinary
+    // textures keep their pre-existing `finalOutputs` root set unchanged and
+    // this campaign adds a second, independent way for a TextureHandle write
+    // to qualify as a root. No new helper function was needed:
+    // ContainsTextureHandle() (top of this file) already takes
+    // `std::span<const TextureHandle>`, so it is reused directly for the
+    // second vector too.
     std::vector<bool> kept(static_cast<std::size_t>(passCount), false);
     std::vector<std::int32_t> stack;
 
@@ -527,9 +549,15 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
             // (RenderGraphBuilder::KeepBufferOutput()), mirroring the
             // VolumeTextureHandle lambda immediately below exactly - a
             // buffer is still culled unless explicitly kept or read by
-            // something else that is itself kept.
+            // something else that is itself kept. editor-core-separation-27
+            // campaign, PHASE3 - the TextureHandle lambda now ALSO checks
+            // `input.persistentCacheTextures`, see this block's own comment
+            // above for the full reasoning.
             const bool isRoot = DispatchByKind(usage,
-                [&](TextureHandle h) { return ContainsTextureHandle(finalOutputs, h); },
+                [&](TextureHandle h) {
+                    return ContainsTextureHandle(finalOutputs, h)
+                        || ContainsTextureHandle(input.persistentCacheTextures, h);
+                },
                 [&](BufferHandle h) { return ContainsBufferHandle(input.finalBufferOutputs, h); },
                 [&](VolumeTextureHandle h) {
                     return ContainsVolumeTextureHandle(input.finalVolumeTextureOutputs, h);
