@@ -1367,7 +1367,7 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
     // button calls (LDD-PW5).
     server.Post("/project_assembly/create_asset",
         [assetScaffoldingCapability](const httplib::Request& req, httplib::Response& res) {
-        const std::string kindParam = req.get_param_value("kind"); // "render_pass" | "compute_shader" | "shader_pair"
+        const std::string kindParam = req.get_param_value("kind"); // "render_pass" | "compute_shader" | "shader_pair" | "screen_post_process_pass"
         const std::string name = req.get_param_value("name");
         AssetScaffoldKind kind;
         if (kindParam == "render_pass") {
@@ -1376,10 +1376,13 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
             kind = AssetScaffoldKind::ComputeShader;
         } else if (kindParam == "shader_pair") {
             kind = AssetScaffoldKind::ShaderPair;
+        } else if (kindParam == "screen_post_process_pass") {
+            kind = AssetScaffoldKind::ScreenPostProcessPass;
         } else {
             res.status = 400;
             res.set_content(
-                BuildGenericErrorResponseJson("'kind' must be render_pass, compute_shader, or shader_pair"),
+                BuildGenericErrorResponseJson(
+                    "'kind' must be render_pass, compute_shader, shader_pair, or screen_post_process_pass"),
                 "application/json");
             return;
         }

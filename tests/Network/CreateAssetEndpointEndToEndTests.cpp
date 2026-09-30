@@ -154,12 +154,12 @@ TEST_F(CreateAssetEndpointEndToEndTest, NoActiveProjectReturns400WithClearMessag
     RestoreActiveProjectAssemblyState(before);
 }
 
-// Scenario 2 - invalid `kind` query value: 400, error message names the 3
+// Scenario 2 - invalid `kind` query value: 400, error message names the 4
 // valid values. Deliberately does NOT touch ActiveProjectAssemblyState at
 // all - the route's own kind-parsing happens BEFORE the capability is even
 // consulted (NetworkServer.cpp), so this is true regardless of whatever
 // active-project state this test binary happens to be in when it runs.
-TEST_F(CreateAssetEndpointEndToEndTest, InvalidKindReturns400NamingTheThreeValidValues)
+TEST_F(CreateAssetEndpointEndToEndTest, InvalidKindReturns400NamingTheFourValidValues)
 {
     const httplib::Result res = m_client->Post("/project_assembly/create_asset?kind=not_a_real_kind&name=X");
     ASSERT_TRUE(res != nullptr);
@@ -170,6 +170,7 @@ TEST_F(CreateAssetEndpointEndToEndTest, InvalidKindReturns400NamingTheThreeValid
     EXPECT_NE(errorMessage.find("render_pass"), std::string::npos);
     EXPECT_NE(errorMessage.find("compute_shader"), std::string::npos);
     EXPECT_NE(errorMessage.find("shader_pair"), std::string::npos);
+    EXPECT_NE(errorMessage.find("screen_post_process_pass"), std::string::npos);
 }
 
 // Scenario 3 - a real active project (this test's own scratch directory),
@@ -297,6 +298,78 @@ TEST_F(CreateAssetEndpointEndToEndTest, SameNameDifferentCaseCalledTwiceRejectsS
     const nlohmann::json secondBody = nlohmann::json::parse(secondRes->body);
     ASSERT_TRUE(secondBody.contains("error"));
     EXPECT_NE(secondBody["error"].get<std::string>().find("already exists"), std::string::npos);
+
+    RestoreActiveProjectAssemblyState(before);
+}
+
+// Scenario 6 (editor-core-separation-24 campaign, PHASE7, design doc Step 5,
+// STEP 3.1 item 2) - kind=screen_post_process_pass against this file's own
+// scratch project fixture, which has an Assets/ folder but NO
+// <ScratchProjectName>Game.cpp file at all. This means
+// TryAutoWireRegisterCall() hits its own "file cannot be opened" branch -
+// mirrors the real Projects/ProjectAssemblyProbe/ case PHASE6's own live
+// check exercises (that project's own Game-half file is named
+// HelloGame.cpp, never <ProjectName>Game.cpp) - so the reminder message here
+// MUST be the fallback (never-auto-wired) wording, never the auto-wired one.
+TEST_F(CreateAssetEndpointEndToEndTest, ScreenPostProcessPassScaffoldWritesExpectedFileWithFallbackReminder)
+{
+    const ActiveProjectAssemblyInfo before =
+        ActivateScratchProjectAndCaptureBeforeSnapshot("GteE2ECreateAssetScratchProjectScreenPass");
+
+    const httplib::Result res = m_client->Post("/project_assembly/create_asset?kind=screen_post_process_pass&name=Tint");
+    ASSERT_TRUE(res != nullptr);
+    ASSERT_EQ(res->status, 200);
+    EXPECT_EQ(res->get_header_value("Content-Type"), "application/json");
+    const nlohmann::json body = nlohmann::json::parse(res->body);
+    ASSERT_TRUE(body.contains("created_files"));
+    const std::vector<std::string> createdFiles = body["created_files"].get<std::vector<std::string>>();
+    ASSERT_EQ(createdFiles.size(), 1u);
+    EXPECT_EQ(createdFiles[0], "TintScreenPass.cpp");
+    ASSERT_TRUE(body.contains("reminder_message"));
+    const std::string reminderMessage = body["reminder_message"].get<std::string>();
+    EXPECT_NE(reminderMessage.find("could not auto-wire it in"), std::string::npos);
+    EXPECT_NE(reminderMessage.find("RegisterTintScreenPass(core)"), std::string::npos);
+    // Never the auto-wired wording - this scratch fixture has no
+    // <Name>Game.cpp at all for TryAutoWireRegisterCall() to patch.
+    EXPECT_EQ(reminderMessage.find("automatically wired"), std::string::npos);
+
+    const std::filesystem::path filePath = m_scratchAssetsDirectory / "TintScreenPass.cpp";
+    ASSERT_TRUE(std::filesystem::exists(filePath));
+    std::ifstream stream(filePath, std::ios::binary);
+    const std::string content((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+    EXPECT_EQ(content.find("__NAME__"), std::string::npos);
+    EXPECT_EQ(content.find("@@PRIORITY@@"), std::string::npos);
+    EXPECT_NE(content.find("RegisterTintScreenPass(gte::Core& core)"), std::string::npos);
+    EXPECT_NE(content.find("\"Tint.ScreenTint\""), std::string::npos);
+    // First Screen Post-Process Pass in this scratch project - auto-assigned
+    // priority must be 0 (ComputeNextScreenPassPriority() finds no sibling
+    // *ScreenPass.cpp file to scan yet).
+    EXPECT_NE(content.find("/*priority=*/0,"), std::string::npos);
+
+    RestoreActiveProjectAssemblyState(before);
+}
+
+// Scenario 7 (STEP 3.1 item 3) - a name long enough that "<name>.ScreenTint"
+// exceeds the 63-usable-byte GtePluginRenderFeatureDescriptor::name limit:
+// 400, "name is too long" message, and zero file written.
+TEST_F(CreateAssetEndpointEndToEndTest, ScreenPostProcessPassNameTooLongReturns400AndWritesNoFile)
+{
+    const ActiveProjectAssemblyInfo before =
+        ActivateScratchProjectAndCaptureBeforeSnapshot("GteE2ECreateAssetScratchProjectTooLong");
+
+    // ".ScreenTint" is 11 characters - a 60-character name pushes the
+    // combined debug name to 71, comfortably over the 63-byte limit.
+    const std::string tooLongName(60, 'A');
+    const httplib::Result res =
+        m_client->Post("/project_assembly/create_asset?kind=screen_post_process_pass&name=" + tooLongName);
+    ASSERT_TRUE(res != nullptr);
+    EXPECT_EQ(res->status, 400);
+    const nlohmann::json body = nlohmann::json::parse(res->body);
+    ASSERT_TRUE(body.contains("error"));
+    EXPECT_NE(body["error"].get<std::string>().find("name is too long"), std::string::npos);
+
+    const std::filesystem::path filePath = m_scratchAssetsDirectory / (tooLongName + "ScreenPass.cpp");
+    EXPECT_FALSE(std::filesystem::exists(filePath));
 
     RestoreActiveProjectAssemblyState(before);
 }
