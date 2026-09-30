@@ -51,6 +51,15 @@ public:
         return std::nullopt;
     }
     void FinalizeGBufferValidationForSampling(VkCommandBuffer /*cmd*/) override { }
+
+    // editor-core-separation-26 campaign, PHASE6 - a release build never
+    // declares this pass at all, mirroring AddBlurValidationPass()/
+    // AddGBufferValidationPass() above exactly.
+    std::optional<rg::TextureHandle> AddBlitValidationPass(rg::RenderGraphBuilder& /*builder*/,
+        Renderer& /*renderer*/, rg::RenderPassToggleRegistry* /*toggleRegistry*/) override
+    {
+        return std::nullopt; // Headless/Player build - no Frame Debugger, no Debug-category passes at all.
+    }
     void RenderSceneGrid(Renderer& /*renderer*/, VkCommandBuffer /*cmd*/, const Mat4& /*sceneViewProjection*/) override { }
     void BuildUI(Game& /*game*/, Renderer& /*renderer*/, const rg::RenderGraph& /*renderGraph*/,
         AtmosphereSettings& /*atmosphereSettings*/, AtmosphereLutRenderer& /*atmosphereLutRenderer*/,

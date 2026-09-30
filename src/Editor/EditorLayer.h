@@ -430,6 +430,29 @@ public:
     // submitted - see Application::Run(). A no-op for NullEditorLayer.
     virtual void FinalizeGBufferValidationForSampling(VkCommandBuffer cmd) = 0;
 
+    // editor-core-separation-26 campaign, PHASE6 (Locked Decision 3) - a
+    // small, permanent, Debug-category live proof that AddBlitPass() works,
+    // verified purely via GET /get_texture (no ImGui display/bespoke
+    // feature-enable toggle of any kind needed, unlike
+    // AddBlurValidationPass()/AddGBufferValidationPass() above) - it always
+    // runs when an Editor layer is present, so it needs no gate of its own.
+    // `toggleRegistry` is still required, though (docs/conventions/
+    // render-pass-toggle-honesty.md's iron rule) - this pass's own
+    // "BlitValidationSourceFill"/"BlitValidationBlit" passes are declared via
+    // a DIRECT builder.AddRenderPass()/AddBlitPass() call inside
+    // BlitValidation::AddPass(), bypassing the generic
+    // RenderPipeline::DeclareOnePhase() flush loop that would otherwise gate
+    // them for free - without an explicit consult here, their own rows in
+    // the "Render Graph" panel would be purely cosmetic checkboxes. Returns
+    // the persistent "BlitValidationOutput" texture's handle - the CALLER
+    // must add it to this call's own finalOutputs root set, or
+    // RenderGraphCompiler culling would silently drop the whole
+    // "BlitValidationBlit" pass every frame (it has zero in-frame readers).
+    // Always std::nullopt for NullEditorLayer.
+    virtual std::optional<rg::TextureHandle> AddBlitValidationPass(
+        rg::RenderGraphBuilder& builder, Renderer& renderer,
+        rg::RenderPassToggleRegistry* toggleRegistry = nullptr) = 0;
+
     // Records the Editor's "Scene" panel infinite ground grid (see
     // task_manager/editor-enchancements-1/PHASE0_MASTER_STRATEGY.md) directly
     // against `cmd` - called by Application::Run() from INSIDE

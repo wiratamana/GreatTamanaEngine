@@ -1,5 +1,7 @@
 #include "VulkanDevice.h"
 
+#include "FormatCapabilities.h"
+
 #include <cstring>
 #include <optional>
 #include <set>
@@ -140,6 +142,11 @@ VulkanDevice::VulkanDevice(VkInstance instance, VkSurfaceKHR surface)
     PickPhysicalDevice(instance, surface);
     CreateLogicalDevice();
     QueryTimestampCapability();
+    // editor-core-separation-26 campaign, PHASE6 (Locked Decision 4) - see
+    // SupportsDepthBlit()'s own doc comment (VulkanDevice.h). PickDepthFormat()
+    // only needs m_physicalDevice (no VkDevice), so it is already safe to
+    // call at this point.
+    m_supportsDepthBlit = SupportsBlitSrcDst(m_physicalDevice, PickDepthFormat());
 }
 
 VulkanDevice::~VulkanDevice()
@@ -156,6 +163,7 @@ VulkanDevice::VulkanDevice(VulkanDevice&& other) noexcept
     , m_presentFamily(other.m_presentFamily)
     , m_timestampCapability(other.m_timestampCapability)
     , m_supportsDrawIndirectCount(other.m_supportsDrawIndirectCount)
+    , m_supportsDepthBlit(other.m_supportsDepthBlit)
 {
 }
 
@@ -171,6 +179,7 @@ VulkanDevice& VulkanDevice::operator=(VulkanDevice&& other) noexcept
         m_presentFamily = other.m_presentFamily;
         m_timestampCapability = other.m_timestampCapability;
         m_supportsDrawIndirectCount = other.m_supportsDrawIndirectCount;
+        m_supportsDepthBlit = other.m_supportsDepthBlit;
     }
     return *this;
 }

@@ -489,6 +489,16 @@ private:
 
     RenderGraphResourcePool m_resourcePool;
 
+    // editor-core-separation-26 campaign, PHASE6 - non-owning, mirrors
+    // RenderGraphResourcePool::m_renderer's own identical "pointer, not
+    // reference, so the owning class stays assignable" shape and reasoning.
+    // Renderer outlives this RenderGraph for its entire lifetime
+    // (RenderGraph is a plain member of Core, constructed with Core's own
+    // Renderer - see Core.h). Needed starting this phase so
+    // ExecuteCompiledGraph()'s new PassKind::Blit branch can call
+    // SupportsDepthBlit().
+    Renderer* m_renderer = nullptr;
+
     // editor-core-separation-25 campaign - see SetDebugMetadataSink()/
     // SetDebugMetadataProvider() above. Both nullptr forever in a
     // Player-style build that links `gte_core` alone (never `gte_editor` -

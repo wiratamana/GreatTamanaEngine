@@ -30,6 +30,9 @@ RenderGraph::RenderGraph(Renderer& renderer)
           QueryVulkanContextInfo(renderer).graphicsQueueFamily, QueryVulkanContextInfo(renderer).timestampCapability,
           kSynchronousTimingSlotBudget, kPipelinedTimingSlotBudget, kGpuTimingFramesInFlight)
 {
+    // editor-core-separation-26 campaign, PHASE6 - see RenderGraph.h's own
+    // m_renderer doc comment.
+    m_renderer = &renderer;
 }
 
 void RenderGraph::EnsureTextureResolved(
@@ -732,6 +735,68 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
 
         if (pass.execute) {
             pass.execute(ctx);
+        } else if (pass.kind == PassKind::Blit && pass.blitCommand.has_value()) {
+            // editor-core-separation-26 campaign, PHASE6 - the vkCmdBlitImage2
+            // execution branch for a real, producible RenderGraphBuilder::
+            // AddBlitPass() pass. The generic per-usage barrier loop
+            // (ApplyUsageBarrierIfNeeded()) already ran, for THIS pass, above -
+            // physicalTextures[spec.src.index]/[spec.dst.index] are ALREADY
+            // resolved AND already correctly barriered (into
+            // VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL/_DST_OPTIMAL) by this point -
+            // this branch reads them, it never re-resolves or re-barriers
+            // anything.
+            const BlitSpec& spec = *pass.blitCommand;
+
+            const PhysicalTexture& srcTex = physicalTextures[spec.src.index];
+            const PhysicalTexture& dstTex = physicalTextures[spec.dst.index];
+
+            const VkImage srcImage = spec.srcIsDepth ? srcTex.target.depthImage : srcTex.target.image;
+            const VkImage dstImage = spec.dstIsDepth ? dstTex.target.depthImage : dstTex.target.image;
+            const VkImageAspectFlags srcAspect = spec.srcIsDepth
+                ? (VK_IMAGE_ASPECT_DEPTH_BIT | (srcTex.target.depthHasStencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0))
+                : static_cast<VkImageAspectFlags>(VK_IMAGE_ASPECT_COLOR_BIT);
+            const VkImageAspectFlags dstAspect = spec.dstIsDepth
+                ? (VK_IMAGE_ASPECT_DEPTH_BIT | (dstTex.target.depthHasStencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0))
+                : static_cast<VkImageAspectFlags>(VK_IMAGE_ASPECT_COLOR_BIT);
+
+            const ResolvedBlitRegion srcRegion =
+                ResolveBlitRegion(spec.srcRegionMin, spec.srcRegionMax, srcTex.target.extent);
+            const ResolvedBlitRegion dstRegion =
+                ResolveBlitRegion(spec.dstRegionMin, spec.dstRegionMax, dstTex.target.extent);
+            assert(IsValidBlitRegion(srcRegion, srcTex.target.extent) &&
+                "RenderGraph::ExecuteCompiledGraph: blit pass declared an invalid SRC region");
+            assert(IsValidBlitRegion(dstRegion, dstTex.target.extent) &&
+                "RenderGraph::ExecuteCompiledGraph: blit pass declared an invalid DST region");
+
+            // Source document's own "CAUTION" bullet - a real, engine-checked
+            // precondition (Locked Decision 4), never a documented-only trust.
+            assert(((!spec.srcIsDepth && !spec.dstIsDepth) || m_renderer->SupportsDepthBlit())
+                && "RenderGraph::ExecuteCompiledGraph: blit pass declared srcIsDepth/dstIsDepth but this "
+                   "device does not report VK_FORMAT_FEATURE_BLIT_SRC_BIT/_DST_BIT support for the engine's "
+                   "real depth format - see VulkanDevice::SupportsDepthBlit().");
+
+            const VkFilter effectiveFilter = ResolveEffectiveBlitFilter(spec);
+
+            VkImageBlit2 region{};
+            region.sType = VK_STRUCTURE_TYPE_IMAGE_BLIT_2;
+            region.srcSubresource = VkImageSubresourceLayers{ srcAspect, 0, 0, 1 };
+            region.srcOffsets[0] = srcRegion.min;
+            region.srcOffsets[1] = srcRegion.max;
+            region.dstSubresource = VkImageSubresourceLayers{ dstAspect, 0, 0, 1 };
+            region.dstOffsets[0] = dstRegion.min;
+            region.dstOffsets[1] = dstRegion.max;
+
+            VkBlitImageInfo2 blitInfo{};
+            blitInfo.sType = VK_STRUCTURE_TYPE_BLIT_IMAGE_INFO_2;
+            blitInfo.srcImage = srcImage;
+            blitInfo.srcImageLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+            blitInfo.dstImage = dstImage;
+            blitInfo.dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+            blitInfo.regionCount = 1;
+            blitInfo.pRegions = &region;
+            blitInfo.filter = effectiveFilter;
+
+            vkCmdBlitImage2(cmd, &blitInfo);
         }
 
         if (didBeginRendering) {

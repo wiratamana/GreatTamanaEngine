@@ -1142,6 +1142,11 @@ add_library(gte_editor STATIC
     src/Editor/SceneGridRenderer.cpp
     src/Editor/ComputeBlurValidation.h
     src/Editor/ComputeBlurValidation.cpp
+    # editor-core-separation-26 campaign, PHASE6 - the one part of that
+    # whole campaign that needed a real, brand-new source file (see
+    # src/Editor/BlitValidation.h/.cpp's own header comment).
+    src/Editor/BlitValidation.h
+    src/Editor/BlitValidation.cpp
     src/Editor/GBufferValidation.h
     src/Editor/GBufferValidation.cpp
     src/Editor/GpuDrivenBatchTestSpawner.h

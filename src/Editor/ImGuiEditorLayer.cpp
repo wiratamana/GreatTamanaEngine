@@ -2,6 +2,7 @@
 
 #include "AtmosphereAerialPerspectiveSkyPurityValidation.h"
 #include "AtmosphereTransmittanceLutValidation.h"
+#include "BlitValidation.h" // editor-core-separation-26 campaign, PHASE6.
 #include "ComputeBlurValidation.h"
 #include "DockLayout.h"
 #include "EditorCamera.h"
@@ -512,6 +513,15 @@ public:
     void FinalizeGBufferValidationForSampling(VkCommandBuffer cmd) override
     {
         m_gbufferValidation.FinalizeForSampling(cmd);
+    }
+
+    // editor-core-separation-26 campaign, PHASE6 - see
+    // IEditorLayer::AddBlitValidationPass()'s own doc comment.
+    std::optional<rg::TextureHandle> AddBlitValidationPass(
+        rg::RenderGraphBuilder& builder, Renderer& renderer,
+        rg::RenderPassToggleRegistry* toggleRegistry) override
+    {
+        return m_blitValidation.AddPass(builder, renderer, toggleRegistry);
     }
 
     // See IEditorLayer::RenderSceneGrid()'s own doc comment. Always called by
@@ -1105,6 +1115,11 @@ private:
     // the reasoning).
     GBufferValidation m_gbufferValidation;
     VkImageView m_lastKnownGBufferValidationView = VK_NULL_HANDLE;
+
+    // editor-core-separation-26 campaign, PHASE6 - see BlitValidation.h.
+    // No ImGui-facing preview view needed (Locked Decision 3 - verified
+    // purely via GET /get_texture, no in-Editor display).
+    BlitValidation m_blitValidation;
 
     // The Scene view's own, independently-orbitable camera (see
     // EditorCamera.h) - updated once per frame by Panels/ScenePanel.cpp

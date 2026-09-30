@@ -25,4 +25,15 @@ namespace gte {
 // std::runtime_error, never a silent fallback) if it reports false.
 bool SupportsStorageImageUsage(VkPhysicalDevice physicalDevice, VkFormat format);
 
+// editor-core-separation-26 campaign, PHASE6 - queries whether `format`
+// supports BOTH VK_FORMAT_FEATURE_BLIT_SRC_BIT and
+// VK_FORMAT_FEATURE_BLIT_DST_BIT (i.e. vkCmdBlitImage2 is legal against
+// this format as EITHER side) on `physicalDevice` - mirrors
+// SupportsStorageImageUsage()'s own exact shape, for a different feature
+// bit pair. This exists because depth-format blit support is NOT
+// guaranteed by the Vulkan spec and is commonly UNSUPPORTED on real GPU
+// drivers even where the equivalent color-format support is universal -
+// see VulkanDevice::SupportsDepthBlit(), the ONE real caller.
+bool SupportsBlitSrcDst(VkPhysicalDevice physicalDevice, VkFormat format);
+
 } // namespace gte

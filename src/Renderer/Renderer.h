@@ -627,6 +627,14 @@ public:
     // EXCLUSIVELY by this runtime capability probe.
     bool SupportsDrawIndirectCount() const noexcept;
 
+    // editor-core-separation-26 campaign, PHASE6 (Locked Decision 4) - real,
+    // queried-once device capability for depth-format vkCmdBlitImage2
+    // support (VulkanDevice::SupportsDepthBlit()) - mirrors
+    // SupportsDrawIndirectCount() immediately above exactly, for a
+    // different capability. See VulkanDevice::SupportsDepthBlit()'s own doc
+    // comment for the full reasoning.
+    bool SupportsDepthBlit() const noexcept;
+
     // Phase 4 (COMPUTE_PHASE4_DISPATCH_EXECUTION_STRATEGY_v2.md) - the
     // compute sibling of Submit() above: issues a real vkCmdDispatch
     // against whichever render-graph pass is currently being recorded (see

@@ -87,6 +87,21 @@ public:
     // runtime probe, never assumed either way.
     bool SupportsDrawIndirectCount() const noexcept { return m_supportsDrawIndirectCount; }
 
+    // editor-core-separation-26 campaign, PHASE6 (Locked Decision 4) -
+    // whether this physical device supports BOTH VK_FORMAT_FEATURE_BLIT_SRC_BIT
+    // and VK_FORMAT_FEATURE_BLIT_DST_BIT for this engine's REAL depth format
+    // (PickDepthFormat()) - queried ONCE, in the constructor (via the new
+    // SupportsBlitSrcDst(), FormatCapabilities.h/.cpp), and never re-checked
+    // afterward (Vulkan device capabilities do not change at runtime) -
+    // mirrors SupportsDrawIndirectCount() above exactly, for a different
+    // capability. Depth-format blit support is NOT guaranteed by the Vulkan
+    // spec and is commonly unsupported on real GPU drivers even where the
+    // equivalent color-format support is universal - a real, engine-checked
+    // precondition (never a documented-only trust) for any pass that ever
+    // sets BlitSpec::srcIsDepth/dstIsDepth true - see RenderGraph.cpp's own
+    // execution branch, which debug-asserts against this.
+    bool SupportsDepthBlit() const noexcept { return m_supportsDepthBlit; }
+
 private:
     void PickPhysicalDevice(VkInstance instance, VkSurfaceKHR surface);
     void CreateLogicalDevice();
@@ -120,6 +135,10 @@ private:
     // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
     // PHASE2 - see SupportsDrawIndirectCount() above.
     bool m_supportsDrawIndirectCount = false;
+
+    // editor-core-separation-26 campaign, PHASE6 - see SupportsDepthBlit()
+    // above.
+    bool m_supportsDepthBlit = false;
 };
 
 } // namespace gte

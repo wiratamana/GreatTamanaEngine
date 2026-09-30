@@ -1396,6 +1396,23 @@ void Core::BuildFrame()
                         }
                     }
 
+                    // editor-core-separation-26 campaign, PHASE6 (Locked
+                    // Decision 3) - always declared when an Editor layer is
+                    // present (no bespoke feature toggle of its own - see
+                    // IEditorLayer::AddBlitValidationPass()'s own doc
+                    // comment). This outputs.push_back() is NOT optional/
+                    // cosmetic - "BlitValidationOutput"'s TextureHandle has
+                    // zero in-frame readers; without reaching this Execute()
+                    // call's own finalOutputs root set,
+                    // RenderGraphCompiler::Compile() culls the whole
+                    // "BlitValidationBlit" pass every single frame.
+                    if (m_editorLayer != nullptr) {
+                        if (const std::optional<rg::TextureHandle> blitValidationHandle =
+                                m_editorLayer->AddBlitValidationPass(b, m_renderer, &m_renderPassToggleRegistry)) {
+                            outputs.push_back(*blitValidationHandle);
+                        }
+                    }
+
                     return outputs;
                 });
 

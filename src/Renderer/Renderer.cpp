@@ -369,6 +369,11 @@ bool Renderer::SupportsDrawIndirectCount() const noexcept
     return m_device.SupportsDrawIndirectCount();
 }
 
+bool Renderer::SupportsDepthBlit() const noexcept
+{
+    return m_device.SupportsDepthBlit();
+}
+
 void Renderer::Dispatch(const ComputePipeline& pipeline, VkDescriptorSet descriptorSet, const void* pushConstants,
     std::uint32_t pushConstantBytes, std::uint32_t groupCountX, std::uint32_t groupCountY, std::uint32_t groupCountZ)
 {
