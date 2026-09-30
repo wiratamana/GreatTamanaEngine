@@ -12,6 +12,19 @@
 
 namespace gte::rg {
 
+// PHASE6 - forward-declared here (never defined here) to avoid a circular
+// include: ExecuteTimingMode is declared, in full, inside RenderGraph.h,
+// and RenderGraph.h (PHASE7) is planned to include THIS header, so a
+// reverse include here would be a genuine header-to-header cycle - mirrors
+// RenderGraphDebugTextureRegistry.h/RenderGraphDebugVolumeTextureRegistry.h's
+// own identical precedent exactly. A forward declaration with a fixed
+// underlying type is a complete-enough type for a function
+// parameter/member declaration - it is NOT enough for a .cpp body that
+// needs the actual enumerator VALUES, which is why
+// RenderGraphPersistentResourceCache.cpp (only the .cpp, never this
+// header) additionally includes "RenderGraph.h" directly.
+enum class ExecuteTimingMode : std::uint8_t;
+
 // Opaque outside RenderGraphPersistentResourceCache.cpp - see PHASE4.
 struct PersistentResourceCacheEntry;
 
@@ -41,6 +54,7 @@ bool IsStaleCacheEntry(
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace gte {
 class Renderer;
@@ -74,6 +88,10 @@ struct PersistentResourceCacheEntry {
         // Section 5.1's honest layout. PHASE4 never sets this to anything
         // other than its own default (UNDEFINED) - correct, since "nothing
         // to remember yet" IS the honest value for a brand-new entry.
+        // PHASE6 - a resize atomically resets this back to UNDEFINED too
+        // (see FlushPendingResizes() below) - a freshly recreated VkImage
+        // really is VK_IMAGE_LAYOUT_UNDEFINED again (RenderTexture::Create()'s
+        // own imageInfo.initialLayout).
     const std::string* ownKeyForDebugAssert = nullptr; // PHASE5 - Section 4's
         // debug-only misuse guard input. Points at this entry's OWN key
         // inside m_entries (stable forever - TR4, std::unordered_map node
@@ -91,10 +109,19 @@ inline constexpr std::uint64_t kPersistentResourceStaleThresholdFrames = 300;
 
 class RenderGraphPersistentResourceCache {
 public:
-    explicit RenderGraphPersistentResourceCache(Renderer& renderer) noexcept
-        : m_renderer(&renderer)
-    {
-    }
+    // PHASE6 - now ALSO caches this Renderer's own raw VkDevice (via
+    // Renderer::GetVulkanContextInfo().device, a plain, non-throwing getter
+    // over already-live state) for FlushPendingResizes()'s own direct
+    // vkDeviceWaitIdle(VkDevice) call below - mirrors
+    // RenderGraphTimestampPool's own identical construction precedent, and
+    // RenderFeatureCompositor::EnsureTextureSized()'s own precedent for WHY
+    // the raw Vulkan call is used directly instead of
+    // Renderer::WaitForGpuIdle() (that wrapper's own doc comment forbids any
+    // per-frame-path caller - FlushPendingResizes() runs on exactly such a
+    // path, PHASE8). Defined out-of-line (.cpp) now, since calling a
+    // Renderer member function needs Renderer's full definition, which this
+    // header deliberately still only forward-declares.
+    explicit RenderGraphPersistentResourceCache(Renderer& renderer) noexcept;
 
     // What a successful Resolve() call hands back - everything
     // GetOrCreatePersistentTexture() (PHASE8) needs to mint this frame's
@@ -111,15 +138,26 @@ public:
     };
 
     // PHASE4 scope: construction/ownership/exception-safety (Section 6,
-    // 6.1, 6.2) + "color only" enforcement (Section 7). Returns
-    // std::nullopt for a validation refusal (empty owner/name,
-    // desc.hasDepth == true) - each refusal is asserted in debug builds
-    // and GTE_LOG_ERROR'd in release, mirroring this codebase's "assert in
+    // 6.1, 6.2) + "color only" enforcement (Section 7). PHASE5 scope: age
+    // stamping + the same-real-frame double-request refusal (Section 5.3).
+    // PHASE6 scope (this phase): on a genuinely PRE-EXISTING entry, a
+    // DIFFERENT desc.format is always a caller bug (refused regardless of
+    // regime); a DIFFERENT desc.width/height QUEUES a resize (Section
+    // 5.5/FR4/FR8) instead of resizing inline - THIS call still returns the
+    // entry's CURRENT (soon-to-be-stale but valid) texture/extent - unless
+    // `timingMode` is `ExecuteTimingMode::PipelinedDeferredReadback`, in
+    // which case the resize portion is refused outright (logged, extent
+    // left unchanged, nothing queued) since that regime must never trigger
+    // FlushPendingResizes()'s own vkDeviceWaitIdle(). Returns std::nullopt
+    // for a validation refusal (empty owner/name, desc.hasDepth == true, a
+    // same-frame double request, or a format change on an existing entry) -
+    // each refusal is asserted in debug builds (where applicable) and
+    // GTE_LOG_ERROR'd in release, mirroring this codebase's "assert in
     // debug, log-and-refuse in release, never crash" discipline. May THROW
     // std::runtime_error if the underlying RenderTexture construction
     // genuinely fails (Section 6.1) - never caught/swallowed here.
-    std::optional<ResolvedTexture> Resolve(
-        const char* owner, const char* name, const TextureDesc& desc, std::uint64_t currentFrame);
+    std::optional<ResolvedTexture> Resolve(const char* owner, const char* name, const TextureDesc& desc,
+        std::uint64_t currentFrame, ExecuteTimingMode timingMode);
 
     // Section 8's eviction sweep - the ONE method RenderGraph::
     // BeginPersistentResourceFrame() (PHASE7) calls, from a DIFFERENT class
@@ -157,10 +195,34 @@ public:
         return entry != nullptr && entry->epoch == entryEpoch && entry->epoch != 0;
     }
 
+    // PHASE6 - Section 5.5/FR8: flushes every QUEUED resize (see Resolve()
+    // above) behind EXACTLY ONE combined vkDeviceWaitIdle(), no matter how
+    // many entries need resizing this real frame - a no-op (no stall of any
+    // kind) when nothing is pending. NOT wired into RenderGraph::
+    // ExecuteCompiledGraph() yet - that call site is PHASE8's own job,
+    // alongside RecordFinalLayout()'s loop, same cadence, same
+    // !isPipelined gating.
+    void FlushPendingResizes();
+
 private:
+    // PHASE6 - one entry's queued-but-not-yet-applied resize request.
+    struct PendingResize {
+        PersistentResourceCacheEntry* entry = nullptr;
+        std::uint32_t newWidth = 0;
+        std::uint32_t newHeight = 0;
+    };
+
+    // Last request THIS frame wins for the SAME entry - matches "single
+    // builder, single frame" reasoning used elsewhere in this engine.
+    void QueueResize(PersistentResourceCacheEntry* entry, std::uint32_t newWidth, std::uint32_t newHeight);
+
     Renderer* m_renderer = nullptr;
+    VkDevice m_device = VK_NULL_HANDLE; // PHASE6 - cached once, at construction, from
+        // Renderer::GetVulkanContextInfo().device - see FlushPendingResizes() below.
     std::unordered_map<std::string, PersistentResourceCacheEntry> m_entries;
     std::uint64_t m_nextEntryEpoch = 1; // 0 is reserved, never a real epoch.
+    std::vector<PendingResize> m_pendingResizes; // PHASE6 - Section 5.5's batched-resize queue,
+        // flushed by FlushPendingResizes() (see above).
 };
 
 } // namespace gte::rg

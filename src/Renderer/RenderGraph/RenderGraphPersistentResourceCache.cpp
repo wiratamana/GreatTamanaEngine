@@ -2,9 +2,15 @@
 
 #include "../Renderer.h"
 #include "../../Core/Logging.h" // PHASE4 (editor-core-separation-27 campaign) - GTE_LOG_ERROR for
-    // Resolve()'s own validation-refusal branches (empty owner/name, desc.hasDepth == true). Safe to
+    // Resolve()'s own validation-refusal branches (empty owner/name, desc.hasDepth == true, a
+    // same-frame double request, a format change, a pipelined-regime resize refusal). Safe to
     // include unconditionally regardless of GTE_ENABLE_EDITOR - see RenderGraph.cpp's own identical
     // precedent (this file's header comment).
+#include "RenderGraph.h" // PHASE6 - this .cpp (never the header - see RenderGraphPersistentResourceCache.h's
+    // own forward-declare comment) needs the actual ExecuteTimingMode ENUMERATOR VALUE
+    // (PipelinedDeferredReadback) Resolve()'s own body compares against. Safe regardless of whether
+    // PHASE7 has made RenderGraph.h include this header in return, since a .cpp file is never itself
+    // included by anything else, so this can never participate in a header cycle.
 
 #include <cassert>
 
@@ -16,9 +22,15 @@ bool IsStaleCacheEntry(
     return (currentFrame - lastUsedFrame) > staleThresholdFrames;
 }
 
+RenderGraphPersistentResourceCache::RenderGraphPersistentResourceCache(Renderer& renderer) noexcept
+    : m_renderer(&renderer)
+    , m_device(renderer.GetVulkanContextInfo().device)
+{
+}
+
 std::optional<RenderGraphPersistentResourceCache::ResolvedTexture>
-RenderGraphPersistentResourceCache::Resolve(
-    const char* owner, const char* name, const TextureDesc& desc, std::uint64_t currentFrame)
+RenderGraphPersistentResourceCache::Resolve(const char* owner, const char* name, const TextureDesc& desc,
+    std::uint64_t currentFrame, ExecuteTimingMode timingMode)
 {
     assert(owner != nullptr && owner[0] != '\0'
         && "RenderGraphPersistentResourceCache::Resolve requires a non-empty owner");
@@ -65,6 +77,7 @@ RenderGraphPersistentResourceCache::Resolve(
     }
     it->second.lastRequestedFrame = currentFrame;
     it->second.lastUsedFrame = currentFrame; // Section 8's own eviction input - stamped every call, fast path included (PHASE8).
+
     // Step 2/3 - if a real RenderTexture does not exist here yet,
     // construct it, referencing the MAP'S OWN, now-stable key
     // (it->first.c_str()) as debugName - NEVER `owner`/`name`/`key`
@@ -88,6 +101,39 @@ RenderGraphPersistentResourceCache::Resolve(
                 m_entries.erase(it);
             }
             throw;
+        }
+    }
+
+    // PHASE6 (Section 5.5/FR4/FR8) - a genuinely PRE-EXISTING entry
+    // (never a brand-new one, hence !inserted) being re-requested with a
+    // different format/width/height.
+    if (!inserted) {
+        if (desc.format != it->second.desc.format) {
+            // A format (or, by extension, hasDepth) change on an EXISTING
+            // entry is ALWAYS a caller bug, independent of regime - logged
+            // loudly, never silently reinterpreted, never queued as a
+            // resize.
+            GTE_LOG_ERROR("RenderGraphPersistentResourceCache",
+                "\"" + key + "\" was re-requested with a DIFFERENT format than its existing entry - "
+                  "this is always a caller bug, refusing this call.");
+            return std::nullopt;
+        }
+        if (desc.width != it->second.desc.width || desc.height != it->second.desc.height) {
+            if (timingMode == ExecuteTimingMode::PipelinedDeferredReadback) {
+                // A resize request from the pipelined/Present regime is
+                // refused immediately: keep the entry's CURRENT extent,
+                // ignore desc.width/height for THIS call only - never
+                // queued, never batched, since that regime must never
+                // issue a vkDeviceWaitIdle() at all.
+                GTE_LOG_ERROR("RenderGraphPersistentResourceCache",
+                    "\"" + key + "\" resize requested from the PipelinedDeferredReadback regime - refusing "
+                      "the resize (keeping the current extent) for this call only; a resize must be "
+                      "requested from the SynchronousImmediateReadback regime.");
+            } else {
+                QueueResize(&it->second, desc.width, desc.height);
+            }
+            // Either way, THIS call's own returned texture/extent is still
+            // the entry's CURRENT (old) one - never the newly-requested size.
         }
     }
 
@@ -142,5 +188,46 @@ bool RenderGraphPersistentResourceCache::DebugTokenIdentityMatches(
     return *entry->ownKeyForDebugAssert == (std::string(owner) + "::" + name);
 }
 #endif
+
+void RenderGraphPersistentResourceCache::QueueResize(
+    PersistentResourceCacheEntry* entry, std::uint32_t newWidth, std::uint32_t newHeight)
+{
+    // Last request THIS frame wins for the SAME entry - matches "single
+    // builder, single frame" reasoning used elsewhere in this engine.
+    for (PendingResize& pending : m_pendingResizes) {
+        if (pending.entry == entry) {
+            pending.newWidth = newWidth;
+            pending.newHeight = newHeight;
+            return;
+        }
+    }
+    m_pendingResizes.push_back(PendingResize{ entry, newWidth, newHeight });
+}
+
+void RenderGraphPersistentResourceCache::FlushPendingResizes()
+{
+    if (m_pendingResizes.empty()) {
+        return;
+    }
+    // Exactly ONE combined stall for the WHOLE batch, no matter how many
+    // entries need resizing this frame (Section 5.5/FR8) - mirrors
+    // RenderFeatureCompositor::EnsureTextureSized()'s own direct
+    // vkDeviceWaitIdle(VkDevice) call, NEVER Renderer::WaitForGpuIdle()
+    // (see this class's own constructor doc comment for why that wrapper
+    // is wrong here).
+    vkDeviceWaitIdle(m_device);
+    for (const PendingResize& pending : m_pendingResizes) {
+        pending.entry->texture->Resize(
+            static_cast<int>(pending.newWidth), static_cast<int>(pending.newHeight));
+        pending.entry->desc.width = pending.newWidth;
+        pending.entry->desc.height = pending.newHeight;
+        // Section 5.1 - a resize atomically resets the remembered layout:
+        // a freshly vmaCreateImage()'d VkImage is always
+        // VK_IMAGE_LAYOUT_UNDEFINED (see RenderTexture::Create()'s own
+        // imageInfo.initialLayout).
+        pending.entry->lastKnownLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    }
+    m_pendingResizes.clear();
+}
 
 } // namespace gte::rg
