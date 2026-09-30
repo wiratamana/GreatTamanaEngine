@@ -528,6 +528,78 @@ TEST(RenderGraphCompilerTest, VolumeTextureWriteNeverKeptIsCulledEvenWithNoTextu
     EXPECT_TRUE(input.passes[0].isCulled);
 }
 
+// --- editor-core-separation-26 campaign, PHASE1's own BufferHandle
+// root-set fix (BIG_STEP_2_BUFFER_ROOTS_AND_BLIT_PASSES_2026-09-29.txt,
+// Part A) -
+//
+// Before this phase, `finalOutputs` (TextureHandle-only) and
+// `finalVolumeTextureOutputs` (VolumeTextureHandle-only, Atmosphere
+// Scattering campaign, Phase 6) were the only two root sets Compile() ever
+// consulted - a pass whose ONLY declared write was a BufferHandle had
+// structurally NO way to survive culling on its own (see
+// BufferOnlyWriteSurvivesCullingOnlyWhenAReaderReachesATextureFinalOutput
+// above, which proves the pre-existing TRANSITIVE case only).
+// RenderGraphBuilder::KeepBufferOutput() is the fix: a THIRD, independent
+// root set (CompiledGraphInput::finalBufferOutputs) Compile() now also
+// checks. bufferA is explicitly kept via KeepBufferOutput() and must
+// survive; bufferB is written but never kept/read by anything and must
+// still be culled, proving this fix is correctly OPT-IN, not a blanket
+// "every buffer write always survives" regression.
+TEST(RenderGraphCompilerTest, BufferOnlyWriteSurvivesCullingOnlyWhenExplicitlyKeptAsOutput)
+{
+    RenderGraphBuilder builder;
+    const BufferHandle bufferA =
+        builder.ImportBuffer("BufA", VK_NULL_HANDLE, 1024);
+    const BufferHandle bufferB =
+        builder.ImportBuffer("BufB", VK_NULL_HANDLE, 1024);
+
+    builder.AddComputePass(
+        "WritesKeptBuffer",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.WriteBuffer(bufferA, ResourceAccess::ComputeShaderWrite);
+        },
+        NoOpExecute); // index 0 - its only write is explicitly kept as a root below.
+    builder.AddComputePass(
+        "WritesUnkeptBuffer",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.WriteBuffer(bufferB, ResourceAccess::ComputeShaderWrite);
+        },
+        NoOpExecute); // index 1 - writes a DIFFERENT buffer, never kept/read - dead code.
+
+    builder.KeepBufferOutput(bufferA);
+
+    CompiledGraphInput input = builder.Finish();
+    const CompiledGraph compiled = Compile(input, {});
+
+    EXPECT_TRUE(ExecutionOrderEquals(compiled.executionOrder, { 0 }));
+    EXPECT_FALSE(input.passes[0].isCulled);
+    EXPECT_TRUE(input.passes[1].isCulled);
+}
+
+TEST(RenderGraphCompilerTest, BufferWriteNeverKeptIsCulledEvenWithNoTextureFinalOutputsAtAll)
+{
+    RenderGraphBuilder builder;
+    const BufferHandle buffer =
+        builder.ImportBuffer("Buf", VK_NULL_HANDLE, 1024);
+
+    builder.AddComputePass(
+        "WritesBuffer",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.WriteBuffer(buffer, ResourceAccess::ComputeShaderWrite);
+        },
+        NoOpExecute);
+
+    // Deliberately never call KeepBufferOutput() - this is the exact
+    // pre-fix behavior (and remains correct post-fix): a buffer write
+    // nobody ever marks as a root is dead code, same as any other
+    // never-read/never-kept resource.
+    CompiledGraphInput input = builder.Finish();
+    const CompiledGraph compiled = Compile(input, {});
+
+    EXPECT_TRUE(compiled.executionOrder.empty());
+    EXPECT_TRUE(input.passes[0].isCulled);
+}
+
 // --- GPU Vertex Skinning campaign, Phase 3's own WAW-hazard mitigation -----
 // (GPU_SKINNING_PHASE3_RENDERGRAPH_SYNCHRONIZATION_STRATEGY_v2.md, Step 3.6) -
 //

@@ -36,6 +36,24 @@ bool ContainsVolumeTextureHandle(std::span<const VolumeTextureHandle> handles, c
     return false;
 }
 
+// editor-core-separation-26 campaign, PHASE1
+// (BIG_STEP_2_BUFFER_ROOTS_AND_BLIT_PASSES_2026-09-29.txt, Part A) - the
+// BufferHandle sibling of ContainsVolumeTextureHandle() above, used by the
+// root-marking scan below to fix a genuine, long-standing gap: a
+// BufferHandle used to have NO equivalent root set at all and could never
+// be a root, no matter what a pass declared - see
+// RenderGraphBuilder::KeepBufferOutput()'s own doc comment
+// (RenderGraphBuilder.h) for the full reasoning.
+bool ContainsBufferHandle(std::span<const BufferHandle> handles, const BufferHandle& handle)
+{
+    for (const BufferHandle& candidate : handles) {
+        if (candidate == handle) {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 // render-pass-4 campaign, PHASE1
@@ -480,9 +498,21 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
     // ATMOSPHERE_PHASE6_COMPLETION_REPORT.md). Fixed here by ALSO checking
     // `input.finalVolumeTextureOutputs` (populated via
     // RenderGraphBuilder::KeepVolumeTextureOutput() - see
-    // RenderGraphBuilder.h) for a VolumeTexture write - a BufferHandle
-    // still can never be a root (matching the existing, deliberate rule
-    // that it never could be one either).
+    // RenderGraphBuilder.h) for a VolumeTexture write.
+    //
+    // UPDATED AGAIN (editor-core-separation-26 campaign, PHASE1 -
+    // BIG_STEP_2_BUFFER_ROOTS_AND_BLIT_PASSES_2026-09-29.txt, Part A): the
+    // sentence directly above used to end "a BufferHandle still can never
+    // be a root (matching the existing, deliberate rule that it never
+    // could be one either)" - that was true right up until this phase,
+    // which closes this exact gap: a compute pass whose only observable
+    // effect is a buffer write, with no in-frame reader (e.g. "fill this
+    // buffer this frame purely for a LATER frame's own ImportBuffer() to
+    // read"), used to be silently culled no matter what it declared. Fixed
+    // here by ALSO checking `input.finalBufferOutputs` (populated via
+    // RenderGraphBuilder::KeepBufferOutput() - see RenderGraphBuilder.h)
+    // for a Buffer write - a THIRD, independent, opt-in root set mirroring
+    // finalVolumeTextureOutputs exactly.
     std::vector<bool> kept(static_cast<std::size_t>(passCount), false);
     std::vector<std::int32_t> stack;
 
@@ -492,11 +522,15 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
             // render-pass-6 campaign, PHASE6 (item 2.2) - converted from a
             // hand-rolled `switch (usage.kind)` to DispatchByKind()
             // (RenderGraphTypes.h) - same three bodies moved verbatim into
-            // each lambda (Buffer can never be a root, matching the
-            // existing, deliberate rule that it never could be one either).
+            // each lambda. editor-core-separation-26 campaign, PHASE1 - the
+            // BufferHandle lambda now ALSO checks `input.finalBufferOutputs`
+            // (RenderGraphBuilder::KeepBufferOutput()), mirroring the
+            // VolumeTextureHandle lambda immediately below exactly - a
+            // buffer is still culled unless explicitly kept or read by
+            // something else that is itself kept.
             const bool isRoot = DispatchByKind(usage,
                 [&](TextureHandle h) { return ContainsTextureHandle(finalOutputs, h); },
-                [&](BufferHandle) { return false; },
+                [&](BufferHandle h) { return ContainsBufferHandle(input.finalBufferOutputs, h); },
                 [&](VolumeTextureHandle h) {
                     return ContainsVolumeTextureHandle(input.finalVolumeTextureOutputs, h);
                 });

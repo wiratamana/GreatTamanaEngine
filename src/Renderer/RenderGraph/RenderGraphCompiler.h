@@ -148,8 +148,11 @@ std::vector<RenderPassEventContradiction> DetectRenderPassEventContradictions(
 // Scattering campaign, Phase 6 -
 // ATMOSPHERE_PHASE6_AERIAL_PERSPECTIVE_FROXEL_VOLUME_v1.md - see
 // RenderGraphBuilder::KeepVolumeTextureOutput()) as a SECOND, independent
-// root set for VolumeTextureHandle writes - a `BufferHandle` still has no
-// equivalent root set and can never be a root. A pass with no path (direct
+// root set for VolumeTextureHandle writes, and ALSO reads
+// `input.finalBufferOutputs` (editor-core-separation-26 campaign, PHASE1 -
+// BIG_STEP_2_BUFFER_ROOTS_AND_BLIT_PASSES_2026-09-29.txt, Part A - see
+// RenderGraphBuilder::KeepBufferOutput()) as a THIRD, independent root set
+// for BufferHandle writes. A pass with no path (direct
 // or transitive, through declared reads/writes) to any `finalOutputs`/
 // `finalVolumeTextureOutputs` entry is dead code and is culled entirely:
 // excluded from `executionOrder`, and none of its declared reads/writes

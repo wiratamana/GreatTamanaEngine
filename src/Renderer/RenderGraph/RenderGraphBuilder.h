@@ -177,6 +177,23 @@ struct CompiledGraphInput {
     // (it already takes `CompiledGraphInput&`) rather than needing a new
     // parameter of its own.
     std::vector<VolumeTextureHandle> finalVolumeTextureOutputs;
+
+    // editor-core-separation-26 campaign, PHASE1
+    // (BIG_STEP_2_BUFFER_ROOTS_AND_BLIT_PASSES_2026-09-29.txt, Part A) -
+    // the BufferHandle sibling of finalVolumeTextureOutputs immediately
+    // above, closing the exact same shape of gap for buffers:
+    // RenderGraphCompiler::Compile()'s `finalOutputs` root set is
+    // TextureHandle-only, and finalVolumeTextureOutputs (Atmosphere
+    // Scattering campaign, Phase 6) is VolumeTextureHandle-only - a pass
+    // whose ONLY write is a BufferHandle (e.g. a compute pass that fills a
+    // buffer this frame purely for a LATER frame's own ImportBuffer() to
+    // read, with no in-frame reader) used to be silently culled no matter
+    // what it declared. RenderGraphBuilder gained a SEPARATE, opt-in way
+    // to mark a BufferHandle as a required root - see
+    // RenderGraphBuilder::KeepBufferOutput() below. RenderGraphCompiler::
+    // Compile() reads THIS field directly off `input`, exactly like
+    // finalVolumeTextureOutputs.
+    std::vector<BufferHandle> finalBufferOutputs;
 };
 
 
@@ -383,6 +400,20 @@ public:
     // handle (idempotent - RenderGraphCompiler::Compile()'s own root-
     // marking scan only ever needs `handle` to appear at least once).
     void KeepVolumeTextureOutput(VolumeTextureHandle handle);
+
+    // editor-core-separation-26 campaign, PHASE1
+    // (BIG_STEP_2_BUFFER_ROOTS_AND_BLIT_PASSES_2026-09-29.txt, Part A) -
+    // marks `handle` as a REQUIRED root the compiler must keep alive, the
+    // BufferHandle counterpart of KeepVolumeTextureOutput() immediately
+    // above - see CompiledGraphInput::finalBufferOutputs above for the
+    // full reasoning behind this specific shape. A pass whose only write
+    // is a BufferHandle that is NEVER passed to this method (directly, or
+    // read by some other pass that is itself kept alive) is silently
+    // culled, exactly like an ordinary TextureHandle that never reaches
+    // `finalOutputs`. Safe to call more than once for the same handle
+    // (idempotent - RenderGraphCompiler::Compile()'s own root-marking scan
+    // only ever needs `handle` to appear at least once).
+    void KeepBufferOutput(BufferHandle handle);
 
     // `name` must be a string literal (mirrors GTE_PROFILE_SCOPE's own
     // static-storage-duration requirement - see AGENTS.md, "Profiling").
@@ -606,6 +637,10 @@ private:
     // Atmosphere Scattering campaign, Phase 6 - see
     // CompiledGraphInput::finalVolumeTextureOutputs above.
     std::vector<VolumeTextureHandle> m_finalVolumeTextureOutputs;
+
+    // editor-core-separation-26 campaign, PHASE1 - see
+    // CompiledGraphInput::finalBufferOutputs above.
+    std::vector<BufferHandle> m_finalBufferOutputs;
 };
 
 } // namespace gte::rg

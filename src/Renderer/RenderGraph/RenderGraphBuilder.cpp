@@ -197,6 +197,15 @@ void RenderGraphBuilder::KeepVolumeTextureOutput(VolumeTextureHandle handle)
     m_finalVolumeTextureOutputs.push_back(handle);
 }
 
+// editor-core-separation-26 campaign, PHASE1 - see
+// RenderGraphBuilder::KeepBufferOutput()'s own declaration
+// (RenderGraphBuilder.h) for the full reasoning; mirrors
+// KeepVolumeTextureOutput() immediately above verbatim.
+void RenderGraphBuilder::KeepBufferOutput(BufferHandle handle)
+{
+    m_finalBufferOutputs.push_back(handle);
+}
+
 CompiledGraphInput RenderGraphBuilder::Finish()
 {
     CompiledGraphInput input;
@@ -205,6 +214,7 @@ CompiledGraphInput RenderGraphBuilder::Finish()
     input.buffers = std::move(m_buffers);
     input.volumeTextures = std::move(m_volumeTextures);
     input.finalVolumeTextureOutputs = std::move(m_finalVolumeTextureOutputs);
+    input.finalBufferOutputs = std::move(m_finalBufferOutputs);
     return input;
 }
 
