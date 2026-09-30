@@ -17,7 +17,8 @@ bool IsStaleCacheEntry(
 }
 
 std::optional<RenderGraphPersistentResourceCache::ResolvedTexture>
-RenderGraphPersistentResourceCache::Resolve(const char* owner, const char* name, const TextureDesc& desc)
+RenderGraphPersistentResourceCache::Resolve(
+    const char* owner, const char* name, const TextureDesc& desc, std::uint64_t currentFrame)
 {
     assert(owner != nullptr && owner[0] != '\0'
         && "RenderGraphPersistentResourceCache::Resolve requires a non-empty owner");
@@ -45,6 +46,25 @@ RenderGraphPersistentResourceCache::Resolve(const char* owner, const char* name,
     // step reads the key back OUT of the map).
     auto [it, inserted] = m_entries.try_emplace(key);
 
+    // Section 5.3 - refuse a second request for the SAME identity within the
+    // SAME real frame, regardless of which ExecuteTimingMode regime called
+    // first. A brand-new entry's lastRequestedFrame defaults to 0, which
+    // currentFrame (always >= 1 - see PHASE7's frame-counter seeding) can
+    // never coincidentally equal, so this never misfires for the first-ever
+    // request of a new identity.
+    if (!inserted && it->second.lastRequestedFrame == currentFrame) {
+        if (!it->second.hasLoggedDoubleRequest) {
+            GTE_LOG_ERROR("RenderGraphPersistentResourceCache",
+                "\"" + key + "\" was requested twice within the same real frame (frame "
+                    + std::to_string(currentFrame) + ") - refusing the second request. Two "
+                      "ExecuteTimingMode regimes racing on the same shared VkImage would be a "
+                      "genuine GPU data race - see BIG_STEP_3 Section 5.3.");
+            it->second.hasLoggedDoubleRequest = true;
+        }
+        return std::nullopt;
+    }
+    it->second.lastRequestedFrame = currentFrame;
+    it->second.lastUsedFrame = currentFrame; // Section 8's own eviction input - stamped every call, fast path included (PHASE8).
     // Step 2/3 - if a real RenderTexture does not exist here yet,
     // construct it, referencing the MAP'S OWN, now-stable key
     // (it->first.c_str()) as debugName - NEVER `owner`/`name`/`key`
@@ -58,6 +78,7 @@ RenderGraphPersistentResourceCache::Resolve(const char* owner, const char* name,
                 /*allowDepthSampledAccess=*/false, /*createDepthCompanion=*/false));
             it->second.epoch = m_nextEntryEpoch++;
             it->second.desc = desc;
+            it->second.ownKeyForDebugAssert = &it->first; // stable forever (TR4) - Section 4's debug-only misuse guard.
         } catch (...) {
             // Exception safety (Section 6.1): only erase if THIS call
             // inserted the key - an earlier call's own already-failed
@@ -79,5 +100,47 @@ RenderGraphPersistentResourceCache::Resolve(const char* owner, const char* name,
     result.entryEpoch = it->second.epoch;
     return result;
 }
+
+void RenderGraphPersistentResourceCache::BeginFrame(std::uint64_t currentFrame, std::uint64_t staleThresholdFrames)
+{
+    for (auto it = m_entries.begin(); it != m_entries.end();) {
+        if (IsStaleCacheEntry(it->second.lastUsedFrame, currentFrame, staleThresholdFrames)) {
+            it = m_entries.erase(it); // destroys the RenderTexture (its destructor runs here).
+        } else {
+            ++it;
+        }
+    }
+}
+
+std::optional<std::uint64_t> RenderGraphPersistentResourceCache::FramesUntilEviction(
+    const std::string& combinedIdentity, std::uint64_t currentFrame) const
+{
+    const auto it = m_entries.find(combinedIdentity);
+    if (it == m_entries.end()) {
+        return std::nullopt;
+    }
+    const std::uint64_t elapsed = currentFrame - it->second.lastUsedFrame;
+    if (elapsed >= kPersistentResourceStaleThresholdFrames) {
+        return 0; // already past due (should be evicted on the NEXT BeginFrame() call).
+    }
+    return kPersistentResourceStaleThresholdFrames - elapsed;
+}
+
+std::optional<std::uint64_t> RenderGraphPersistentResourceCache::FramesUntilEviction(
+    const char* owner, const char* name, std::uint64_t currentFrame) const
+{
+    return FramesUntilEviction(std::string(owner) + "::" + name, currentFrame);
+}
+
+#ifndef NDEBUG
+bool RenderGraphPersistentResourceCache::DebugTokenIdentityMatches(
+    const PersistentResourceCacheEntry* entry, const char* owner, const char* name) const
+{
+    if (entry == nullptr || entry->ownKeyForDebugAssert == nullptr) {
+        return true; // nothing to compare against - never a false failure.
+    }
+    return *entry->ownKeyForDebugAssert == (std::string(owner) + "::" + name);
+}
+#endif
 
 } // namespace gte::rg

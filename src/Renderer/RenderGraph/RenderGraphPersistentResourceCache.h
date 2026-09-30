@@ -74,7 +74,20 @@ struct PersistentResourceCacheEntry {
         // Section 5.1's honest layout. PHASE4 never sets this to anything
         // other than its own default (UNDEFINED) - correct, since "nothing
         // to remember yet" IS the honest value for a brand-new entry.
+    const std::string* ownKeyForDebugAssert = nullptr; // PHASE5 - Section 4's
+        // debug-only misuse guard input. Points at this entry's OWN key
+        // inside m_entries (stable forever - TR4, std::unordered_map node
+        // stability) - never re-pointed after first construction.
 };
+
+// PHASE5 - Locked Decision 4 (PHASE0_MASTER_STRATEGY.md) - default
+// stale-eviction threshold: an entry unused for this many real frames is
+// evicted by BeginFrame() (Section 8). NAMESPACE-SCOPE, never a class
+// `static constexpr` member - mirrors RenderGraphNameSlotTable.h's own
+// `kNoNameSlot` precedent exactly, so a DIFFERENT class (PHASE7's
+// RenderGraph.cpp) can reference it unqualified merely by including this
+// header.
+inline constexpr std::uint64_t kPersistentResourceStaleThresholdFrames = 300;
 
 class RenderGraphPersistentResourceCache {
 public:
@@ -105,7 +118,44 @@ public:
     // debug, log-and-refuse in release, never crash" discipline. May THROW
     // std::runtime_error if the underlying RenderTexture construction
     // genuinely fails (Section 6.1) - never caught/swallowed here.
-    std::optional<ResolvedTexture> Resolve(const char* owner, const char* name, const TextureDesc& desc);
+    std::optional<ResolvedTexture> Resolve(
+        const char* owner, const char* name, const TextureDesc& desc, std::uint64_t currentFrame);
+
+    // Section 8's eviction sweep - the ONE method RenderGraph::
+    // BeginPersistentResourceFrame() (PHASE7) calls, from a DIFFERENT class
+    // (cannot be private). Also stamps this frame's own age bookkeeping via
+    // Resolve() above - see that method for the double-request guard.
+    void BeginFrame(std::uint64_t currentFrame, std::uint64_t staleThresholdFrames);
+
+    // Section 9 - external consumers (a future Editor "Render Graph" panel/
+    // HTTP handler) query how many frames remain before an identity is
+    // evicted. PRIMARY overload takes the already-combined identity string
+    // (the SAME string a persistent-cache-backed DebugTextureSnapshot::name
+    // already exposes); the convenience overload builds the same combined
+    // key internally and forwards.
+    std::optional<std::uint64_t> FramesUntilEviction(
+        const std::string& combinedIdentity, std::uint64_t currentFrame) const;
+    std::optional<std::uint64_t> FramesUntilEviction(
+        const char* owner, const char* name, std::uint64_t currentFrame) const;
+
+#ifndef NDEBUG
+    // Section 4's debug-only misuse guard - infrastructure only in PHASE5;
+    // PHASE8's RenderGraphBuilder token overload is the real caller. Guarded
+    // so a release build never even declares/compiles this.
+    bool DebugTokenIdentityMatches(const PersistentResourceCacheEntry* entry, const char* owner, const char* name) const;
+#endif
+
+    // Token liveness check - deliberately NOT #ifndef NDEBUG-guarded (the
+    // real functional fast/slow-path gate PHASE8 needs in release builds
+    // too, not merely a debug-only assert helper). Deliberately does NOT
+    // dereference `entry` through m_entries in any way that requires it to
+    // still be a live node - see this campaign's PHASE5 .md "Situation"
+    // section for the accepted, narrow risk this implies, and the required
+    // live test proving it in practice on this project's actual toolchain.
+    bool IsTokenLive(const PersistentResourceCacheEntry* entry, std::uint64_t entryEpoch) const noexcept
+    {
+        return entry != nullptr && entry->epoch == entryEpoch && entry->epoch != 0;
+    }
 
 private:
     Renderer* m_renderer = nullptr;
