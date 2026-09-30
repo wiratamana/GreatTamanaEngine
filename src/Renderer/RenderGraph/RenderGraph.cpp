@@ -26,6 +26,7 @@ Renderer::VulkanContextInfo QueryVulkanContextInfo(Renderer& renderer)
 
 RenderGraph::RenderGraph(Renderer& renderer)
     : m_resourcePool(renderer)
+    , m_persistentResourceCache(renderer)
     , m_timestampPool(QueryVulkanContextInfo(renderer).device, QueryVulkanContextInfo(renderer).graphicsQueue,
           QueryVulkanContextInfo(renderer).graphicsQueueFamily, QueryVulkanContextInfo(renderer).timestampCapability,
           kSynchronousTimingSlotBudget, kPipelinedTimingSlotBudget, kGpuTimingFramesInFlight)
@@ -33,6 +34,17 @@ RenderGraph::RenderGraph(Renderer& renderer)
     // editor-core-separation-26 campaign, PHASE6 - see RenderGraph.h's own
     // m_renderer doc comment.
     m_renderer = &renderer;
+}
+
+// editor-core-separation-27 campaign, PHASE7 - see RenderGraph.h's own doc
+// comment. Must be called EXACTLY once per real engine frame, by
+// Core::BuildFrame(), before either ExecuteTimingMode regime's Execute()
+// call runs that frame.
+void RenderGraph::BeginPersistentResourceFrame() noexcept
+{
+    ++m_persistentResourceFrameCounter;
+    m_persistentResourceCache.BeginFrame(
+        m_persistentResourceFrameCounter, kPersistentResourceStaleThresholdFrames);
 }
 
 void RenderGraph::EnsureTextureResolved(

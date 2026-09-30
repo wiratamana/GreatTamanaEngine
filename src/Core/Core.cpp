@@ -1148,6 +1148,15 @@ void Core::RegisterPresentRenderPipelineProvider()
 
 void Core::BuildFrame()
 {
+    // editor-core-separation-27 campaign, PHASE7 (BIG STEP 3 of 4) - must
+    // run EXACTLY once per real engine frame, unconditionally, strictly
+    // before either ExecuteTimingMode regime's Execute() call this frame -
+    // see BIG_STEP_3 Section 8. Core::Present() (a SEPARATE method, called
+    // AFTER this one returns by EditorHost::Run()'s own per-frame loop)
+    // issues the OTHER regime's Execute() call - this call must precede
+    // BOTH.
+    m_renderGraph.BeginPersistentResourceFrame();
+
     // editor-core-separation-1 campaign, PHASE13 (Locked Design Decision #8's
     // first bucket) - GameViewTarget()/SceneViewTarget()/
     // PrepareFrameDebuggerCaptureContext() are called ONLY here, through

@@ -29,6 +29,7 @@
 
 #include "RenderGraphTypes.h"
 #include "RenderGraphDebugMetadataSink.h" // editor-core-separation-25 campaign, PHASE3
+#include "RenderGraphPersistentResourceCache.h" // editor-core-separation-27 campaign, PHASE7
 #include "../RenderTarget.h"
 #include "../VolumeTarget.h"
 
@@ -41,6 +42,8 @@
 #include <vector>
 
 namespace gte::rg {
+
+enum class ExecuteTimingMode : std::uint8_t; // see RenderGraph.h - forward-declared to avoid a circular include (mirrors RenderGraphDebugTextureRegistry.h's own identical precedent).
 
 // Per-texture-slot side information for a texture the graph does NOT own
 // the lifetime of - see RenderGraphBuilder::ImportTexture() below and
@@ -673,6 +676,24 @@ public:
     // unconditional setter.
     void SetDebugMetadataSink(IPassDebugMetadataSink* sink) noexcept { m_debugMetadataSink = sink; }
 
+    // editor-core-separation-27 campaign, PHASE7 - forwarded into this
+    // builder by RenderGraph::Execute()'s own template body, immediately
+    // after constructing a fresh RenderGraphBuilder. `timingMode` is needed
+    // by GetOrCreatePersistentTexture()'s own regime-aware resize-refusal
+    // logic (PHASE8/FR4); `currentFrame` is needed by
+    // RenderGraphPersistentResourceCache::Resolve()'s own same-frame
+    // double-request guard and age-stamping (PHASE5/PHASE8) - bundled here
+    // (never a separate setter for either) since RenderGraph::Execute()
+    // already has all three values on hand at exactly the point it makes
+    // this one call.
+    void SetPersistentResourceCache(
+        RenderGraphPersistentResourceCache* cache, ExecuteTimingMode timingMode, std::uint64_t currentFrame) noexcept
+    {
+        m_persistentCache = cache;
+        m_persistentCacheTimingMode = timingMode;
+        m_persistentCacheCurrentFrame = currentFrame;
+    }
+
     // Consumes this builder, handing its whole in-progress description
     // over to Phase 3's compiler. Safe to call at most meaningfully once
     // per builder instance (a builder is a one-frame-lifetime object, per
@@ -708,6 +729,20 @@ private:
     // editor-core-separation-27 campaign, PHASE2/PHASE8 - see
     // CompiledGraphInput::persistentCacheTextures above.
     std::vector<TextureHandle> m_persistentCacheTextures;
+
+    // editor-core-separation-27 campaign, PHASE7 - optional, nullable,
+    // zero-cost-when-absent, mirroring m_debugMetadataSink's exact shape
+    // (see SetPersistentResourceCache() above). `{}` value-initializes to
+    // 0 == ExecuteTimingMode::SynchronousImmediateReadback (RenderGraph.h) -
+    // the enumerator NAME itself is not visible here since ExecuteTimingMode
+    // is only forward-declared in this header, mirroring
+    // RenderGraphDebugTextureRegistry.h's own DebugTextureSnapshot::regime{}
+    // identical precedent. Never actually read before SetPersistentResourceCache()
+    // overwrites it (RenderGraph::Execute() calls it unconditionally, every
+    // call, before build(builder) runs).
+    RenderGraphPersistentResourceCache* m_persistentCache = nullptr;
+    ExecuteTimingMode m_persistentCacheTimingMode{};
+    std::uint64_t m_persistentCacheCurrentFrame = 0;
 };
 
 } // namespace gte::rg

@@ -54,6 +54,7 @@
 #include "RenderGraphDebugTextureRegistry.h"
 #include "RenderGraphDebugVolumeTextureRegistry.h"
 #include "RenderGraphNameSlotTable.h"
+#include "RenderGraphPersistentResourceCache.h" // editor-core-separation-27 campaign, PHASE7
 #include "RenderGraphResourcePool.h"
 #include "RenderGraphTimestampPool.h"
 #include "RenderGraphSnapshot.h"
@@ -186,6 +187,10 @@ public:
         // must happen exactly here, exactly once, before any pass this
         // call declares.
         builder.SetDebugMetadataSink(m_debugMetadataSink);
+        // editor-core-separation-27 campaign, PHASE7 - see
+        // RenderGraphBuilder::SetPersistentResourceCache()'s own doc comment
+        // for why all three values are bundled into this one call.
+        builder.SetPersistentResourceCache(&m_persistentResourceCache, timingMode, m_persistentResourceFrameCounter);
         if (m_debugMetadataSink != nullptr) {
             m_debugMetadataSink->BeginFrame();
         }
@@ -285,6 +290,19 @@ public:
     // is intentional (see PHASE0_MASTER_STRATEGY.md's own Locked Design
     // Decision 4 caveat), not a bug to fix by adding a second counter.
     std::uint64_t CurrentDebugTextureFrameCounter() const noexcept;
+
+    // editor-core-separation-27 campaign, PHASE7 - called EXACTLY once per
+    // real engine frame, by Core::BuildFrame(), as the very first thing it
+    // does, strictly before either ExecuteTimingMode regime's Execute() call
+    // runs that frame - see BIG_STEP_3 Section 8.
+    void BeginPersistentResourceFrame() noexcept;
+
+    // The counterpart of CurrentDebugTextureFrameCounter(), for THIS cache's
+    // own dedicated, regime-agnostic counter - a caller must use THIS value,
+    // never CurrentDebugTextureFrameCounter(), when computing
+    // RenderGraphPersistentResourceCache::FramesUntilEviction()'s own
+    // `currentFrame` argument.
+    std::uint64_t CurrentPersistentResourceFrameCounter() const noexcept { return m_persistentResourceFrameCounter; }
 
     // B.1 (B1_REAL_GPU_TIMING_STRATEGY_v1.md) - must be called EXACTLY
     // once, by Application::Run(), immediately after
@@ -489,6 +507,10 @@ private:
 
     RenderGraphResourcePool m_resourcePool;
 
+    // editor-core-separation-27 campaign, PHASE7 - mirrors m_resourcePool's
+    // exact ownership shape (BIG STEP 3 of 4).
+    RenderGraphPersistentResourceCache m_persistentResourceCache;
+
     // editor-core-separation-26 campaign, PHASE6 - non-owning, mirrors
     // RenderGraphResourcePool::m_renderer's own identical "pointer, not
     // reference, so the owning class stays assignable" shape and reasoning.
@@ -594,6 +616,17 @@ private:
     // own doc comment above for the accepted "Swapchain" freshness caveat
     // this sharing implies.
     std::uint64_t m_debugTextureFrameCounter = 0;
+
+    // editor-core-separation-27 campaign, PHASE7 - a NEW, dedicated,
+    // regime-agnostic counter, deliberately SEPARATE from
+    // m_debugTextureFrameCounter (see this class's own
+    // CurrentDebugTextureFrameCounter() doc comment for why that one's
+    // regime-gated advancement would be wrong to reuse here - see
+    // BIG_STEP_3 Section 5.3/Section 8). Starts at 0;
+    // BeginPersistentResourceFrame() pre-increments, so its first-ever real
+    // value is 1 - matching PersistentResourceCacheEntry::lastRequestedFrame's
+    // own "0 is never a real frame" sentinel convention.
+    std::uint64_t m_persistentResourceFrameCounter = 0;
 };
 
 // Fully specifies the `struct PassContext;` forward-declared by Phase 1

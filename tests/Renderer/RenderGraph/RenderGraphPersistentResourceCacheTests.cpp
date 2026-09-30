@@ -949,4 +949,55 @@ TEST(RenderGraphPersistentResourceCacheTest, ReRequestingAnExistingEntryWithADif
     EXPECT_FALSE(refusedPipelined.has_value());
 }
 
+// --- PHASE7 (PHASE7_RENDERGRAPH_INTEGRATION_AND_FRAME_COUNTER.md) ---
+
+// 19. CurrentPersistentResourceFrameCounter() - starts at 0, pre-increments
+// on every BeginPersistentResourceFrame() call (1 after the first, 2 after
+// the second, etc.) - the direct regression test for this phase's own
+// frame-counter plumbing, using the SAME HeadlessRenderGraphFixture (a real
+// rg::RenderGraph, via fixture.GetRenderGraph()) every other test in this
+// file already uses.
+TEST(RenderGraphPersistentResourceCacheTest, CurrentPersistentResourceFrameCounterAdvancesOncePerBeginCall)
+{
+    HeadlessRenderGraphFixture fixture;
+    if (!fixture.IsUsable()) {
+        GTEST_SKIP() << fixture.SkipReason();
+    }
+
+    RenderGraph& renderGraph = fixture.GetRenderGraph();
+    EXPECT_EQ(renderGraph.CurrentPersistentResourceFrameCounter(), 0u);
+
+    renderGraph.BeginPersistentResourceFrame();
+    EXPECT_EQ(renderGraph.CurrentPersistentResourceFrameCounter(), 1u);
+
+    renderGraph.BeginPersistentResourceFrame();
+    EXPECT_EQ(renderGraph.CurrentPersistentResourceFrameCounter(), 2u);
+
+    renderGraph.BeginPersistentResourceFrame();
+    EXPECT_EQ(renderGraph.CurrentPersistentResourceFrameCounter(), 3u);
+}
+
+// 20. RenderGraph::Execute()'s own template body now ALSO calls
+// SetPersistentResourceCache() every single call (this phase's own new
+// wiring) - a basic smoke check confirming an ordinary, empty-build
+// SynchronousImmediateReadback frame still runs with zero crash/misbehavior
+// now that this extra setter call happens on every Execute(). Full
+// end-to-end confirmation that the THREE values genuinely reach
+// GetOrCreatePersistentTexture() correctly is deliberately deferred to
+// PHASE8's own tests (that method does not exist yet this phase) - see this
+// phase's own .md, Step 4 item 2.
+TEST(RenderGraphPersistentResourceCacheTest, ExecuteStillRunsANormalEmptyFrameAfterGainingTheNewSetterCall)
+{
+    HeadlessRenderGraphFixture fixture;
+    if (!fixture.IsUsable()) {
+        GTEST_SKIP() << fixture.SkipReason();
+    }
+
+    fixture.GetRenderGraph().BeginPersistentResourceFrame();
+    EXPECT_NO_THROW({
+        fixture.RunSynchronousFrame(
+            [](RenderGraphBuilder&) -> std::vector<TextureHandle> { return {}; });
+    });
+}
+
 } // namespace gte::rg
