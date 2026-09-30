@@ -391,13 +391,137 @@ core.RegisterProjectRenderFeature(
     });
 ```
 
-**Explicitly, still BIG-STEP 1 only — there is no Editor UI menu item for this
-yet.** A Project Assembly author must call `Core::RegisterProjectRenderFeature()`
-directly from their own `RegisterProject()`; a future, separate campaign
-(BIG-STEP 2) adds a "Create → Screen Post-Process Pass" Editor menu item/scaffold
-template on top of this same, already-proven mechanism. See
+**BIG-STEP 1 (`editor-core-separation-23`) shipped this on-screen compositing
+mechanism itself; BIG-STEP 2 (`editor-core-separation-24`) then added the
+Editor "Create → Screen Post-Process Pass" menu item and its own auto-wire
+mechanism on top of it — the entire 2-BIG-STEP effort is now closed. See
 `task_manager/editor-core-separation-23/PHASE0_MASTER_STRATEGY.md`/
-`CAMPAIGN_COMPLETION_REPORT.md` for the full seven-phase writeup.
+`CAMPAIGN_COMPLETION_REPORT.md` for the full seven-phase BIG-STEP 1 writeup,
+and this file's own new
+`### Screen Post-Process Pass scaffolding` section immediately below for
+BIG-STEP 2's own full picture.
+
+### Screen Post-Process Pass scaffolding — Editor "Create" menu + auto-wire (BIG-STEP 2)
+
+An eight-phase campaign, `editor-core-separation-24`
+(`task_manager/editor-core-separation-24/PHASE0_MASTER_STRATEGY.md`,
+`CAMPAIGN_COMPLETION_REPORT.md`), closes the gap the paragraph above used to
+describe as still-open: a Project Assembly author no longer has to hand-write
+a call to `Core::RegisterProjectRenderFeature()` at all to get a genuine,
+visible, on-screen render feature working end to end.
+
+**A new, fourth `AssetScaffoldKind`** (`src/Core/EditorCapabilities.h`):
+`enum class AssetScaffoldKind { RenderPass, ComputeShader, ShaderPair,
+ScreenPostProcessPass };`. Reachable two ways, exactly like the three
+pre-existing scaffold kinds:
+
+- Right-click the "[Active Project] `<Name>`" row in the Project panel →
+  "Create" → **"Screen Post-Process Pass..."** (a fourth `ImGui::MenuItem`,
+  `src/Editor/Panels/ProjectPanel.cpp`) → type a name → "Create" (the window's
+  own title bar correctly reads "Create New Screen Post-Process Pass",
+  `src/Editor/CreateAssetWindow.cpp`'s `TitleForKind()`).
+- `POST /project_assembly/create_asset?kind=screen_post_process_pass&name=<X>`
+  (the SAME existing route every other scaffold kind already uses —
+  `src/Network/NetworkServer.cpp`'s `kindParam` chain gained one more
+  `else if` branch; its 400 error message now lists all four valid kinds).
+
+**The generated template** (`BuildScreenPostProcessPassCppContent()`,
+`src/Editor/EditorProjectLifecycleCapability.cpp`) writes exactly ONE new
+file, `Assets/<Name>ScreenPass.cpp` — a real, immediately-compileable,
+working translucent red tint (`RenderFeatureStage::PostComposite` +
+`RenderFeatureBlendMode::AlphaOver`, `RenderPassEvent::AfterEverything`,
+`RenderPassDrawKind::DrawQuad`), calling `Core::RegisterProjectRenderFeature()`
+correctly — the exact same API BIG-STEP 1 above already proved, never a new
+mechanism. A generated debug name (`"<Name>.ScreenTint"`) that would exceed
+`GtePluginRenderFeatureDescriptor::name`'s 63-usable-byte limit is REJECTED at
+scaffold time, before any file is written — never silently truncated, and
+never merely deferred to compile-and-run time (mirroring BIG-STEP 1's own
+`RegisterProjectRenderFeature()` reject-not-truncate precedent).
+
+**Priority auto-assignment** (`ComputeNextScreenPassPriority()`,
+`src/Editor/ScreenPassPriorityAssignment.h/.cpp`) keeps scaffolding the SAME
+kind of pass more than once into the SAME project collision-free, with zero
+manual editing: it scans every sibling `*ScreenPass.cpp` file
+(case-insensitive) already in the project's `Assets/` folder, reads back each
+one's own real, still-present `/*priority=*/<N>` integer literal, and assigns
+one more than the HIGHEST SURVIVING value found — never a plain file count,
+which would silently collide the moment any sibling file is deleted outside
+the Editor and a new one is then created. The first Screen Post-Process Pass
+ever scaffolded into a project gets priority `0`; deleting a middle-priority
+sibling and scaffolding a new one afterward correctly skips straight past the
+gap (confirmed live: three passes at priorities `0, 1, 2`, the priority-`1`
+one deleted from disk, a fourth scaffold correctly reads priority `3`, never
+`1` or `2` again).
+
+**The auto-wire mechanism** (`TryAutoWireRegisterCall()`,
+`src/Editor/ScreenPassAutoWire.h/.cpp`) tries to automatically insert the one
+required call, `Register<Name>ScreenPass(core);`, into the active project's
+own `RegisterProject()` function (`Assets/<ProjectName>Game.cpp`) — zero
+manual C++ editing required to see a fresh scaffold live, end to end: compile,
+reload, done. This depends on a small, one-time template change
+(`BuildGameStubCppContent()`, the "New Project" scaffold): every project
+created from this point forward has its `RegisterProject(gte::Core& core)`
+parameter named (not commented out) and carries two exact, stable,
+machine-readable anchor comments (`GTE_AUTO_REGISTER_FORWARD_DECLARATIONS`/
+`GTE_AUTO_REGISTER_ANCHOR`) the auto-wire helper searches for.
+
+**Honest, permanent, two-sided boundary — the single most important thing to
+understand about this mechanism**:
+
+- **A project created AFTER this campaign shipped** (this file's own
+  permanent proof fixture: `Projects/ScreenPassAutoWireProbe/`, created fresh
+  via `POST /project_assembly/create_project` specifically to prove this
+  path) has both anchors, so auto-wiring genuinely succeeds — confirmed live,
+  repeatedly, across several scaffold-then-compile-then-reload cycles in the
+  same running Editor session.
+- **A project created BEFORE this campaign shipped** (this system's own other
+  permanent fixture, `Projects/ProjectAssemblyProbe/` — BIG-STEP 1's proof
+  artifact, predating this campaign) has NEITHER anchor, and its
+  `RegisterProject` parameter is still `gte::Core& /*core*/` (commented out).
+  Scaffolding a Screen Post-Process Pass into it is still 100% safe — the
+  `.cpp` file is written either way — but auto-wiring correctly, safely
+  refuses, and the reminder message falls back to the original, fully-manual
+  "remember to add this line yourself" wording, forever, unless a human
+  manually adds the two anchors and un-comments `core` themselves. **A naming
+  quirk worth stating explicitly, since it is easy to get wrong**:
+  `ProjectAssemblyProbe`'s own Game-half source file is named
+  `Assets/HelloGame.cpp`, NOT `Assets/ProjectAssemblyProbeGame.cpp` (which has
+  never existed — this project predates the `<Name>Game.cpp` naming
+  convention `CreateNewProjectAssembly()` later established) — so
+  `TryAutoWireRegisterCall()` actually fails via its own "the target file
+  cannot be opened at all" branch for this specific fixture, not the "anchors
+  are missing" branch — the exact same safe, harmless, zero-file-touched
+  observable outcome, just a different, confirmed real reason. Confirmed
+  live: scaffolding into `ProjectAssemblyProbe/` leaves `HelloGame.cpp`
+  byte-for-byte, 252-lines identical, before and after.
+- This campaign does NOT retroactively rewrite any project created before the
+  template change shipped, and does NOT extend auto-wiring to the two OLDER
+  scaffold kinds (`RenderPass`/`ComputeShader`) — both keep their fully
+  manual, reminder-only behavior, unchanged, forever, unless some future,
+  separate campaign decides otherwise.
+- The idempotency guard correctly treats a PREVIOUSLY auto-wired call line a
+  human later comments out (e.g. to temporarily disable one effect) as NOT
+  currently wired — re-scaffolding under that same name inserts a fresh,
+  active call line alongside the untouched, still-commented old one, rather
+  than mistaking the comment for still-active wiring (confirmed live, not
+  merely by the dedicated `tests/Editor/ScreenPassAutoWireTests.cpp` Tier-1
+  suite this behavior also has).
+
+**Live-proven realistic churn, not just a one-shot demo**: on
+`Projects/ScreenPassAutoWireProbe/`, five full cycles of "scaffold, decide
+against the name, delete the `.cpp` file, remove the now-dangling forward
+declaration/call by hand, scaffold a differently-named replacement, compile,
+hot-reload" ran back to back in the same live Editor session with zero
+failures, zero stale/duplicate `GET /render_graph` entries, and — checked via
+`GET /get_logs?category=RenderFeatureCompositor` — every single one of the
+five replacement passes claimed the EXACT SAME bounded GPU-state slot each
+time (mirroring BIG-STEP 1's own 20-rename-cycle proof methodology), never
+growing without bound.
+
+Full campaign writeup:
+`task_manager/editor-core-separation-24/PHASE0_MASTER_STRATEGY.md`, each
+`PHASEn_COMPLETION_REPORT.md` in that same folder, and
+`CAMPAIGN_COMPLETION_REPORT.md`.
 
 ## Hot Reload
 

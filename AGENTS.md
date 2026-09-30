@@ -145,10 +145,51 @@ bounded, reusable GPU-state slot pool (`kMaxConcurrentProjectRenderFeatures`)
 so an unbounded register/rename/unregister session across many hot-reload
 cycles never starves the shared compute descriptor pool. This is BIG-STEP 1 of
 2 only - there is no Editor UI menu item for it yet; a Project Assembly author
-must call it directly from their own `RegisterProject()`.
+must call it directly from their own `RegisterProject()`. **This was true AT
+THE TIME `editor-core-separation-23` shipped - it is no longer true today,
+see the very next paragraph below; this sentence is kept, historically
+accurate for what was true when that campaign itself shipped, not silently
+updated to imply the whole 2-BIG-STEP effort landed in one go.**
+
+A follow-up campaign, `editor-core-separation-24` (eight phases,
+`task_manager/editor-core-separation-24/PHASE0_MASTER_STRATEGY.md`,
+`CAMPAIGN_COMPLETION_REPORT.md`), implements "BIG-STEP 2" (Editor
+integration) of the same 2-BIG-STEP effort above - **the entire, 2-BIG-STEP
+"Project Assembly On-Screen Render Feature Compositing" effort is now
+CLOSED.** A Project Assembly author no longer has to hand-write a call to
+`Core::RegisterProjectRenderFeature()` at all: a new, fourth
+`AssetScaffoldKind::ScreenPostProcessPass` is reachable via the Project
+panel's right-click "Create" submenu ("Screen Post-Process Pass...") or
+`POST /project_assembly/create_asset?kind=screen_post_process_pass&name=<X>`
+(the SAME pre-existing route/dispatch mechanism every other scaffold kind
+already uses), writing one real, immediately-compileable
+`Assets/<Name>ScreenPass.cpp` (a working translucent red tint, calling
+`Core::RegisterProjectRenderFeature()` correctly - the exact same BIG-STEP 1
+API, never a new mechanism) with an auto-assigned, collision-free priority
+(`ComputeNextScreenPassPriority()` - "highest surviving `/*priority=*/`
+literal among sibling `*ScreenPass.cpp` files, plus one", never a plain file
+count, so a manual delete-then-recreate cycle stays correct). A new
+auto-wire helper (`TryAutoWireRegisterCall()`) then tries to automatically
+insert the one required call into the active project's own
+`RegisterProject()` function via two exact, stable anchor comments a small,
+one-time "New Project" template change now embeds - a project created AFTER
+this campaign shipped gets a fully automatic, zero-manual-C++-editing
+experience (proven live: scaffold, compile, hot-reload, and the tint is
+genuinely visible in the running Editor's Game View, with zero hand edits);
+a project created BEFORE this campaign shipped (BIG-STEP 1's own
+`Projects/ProjectAssemblyProbe/` fixture) safely, gracefully falls back to
+the original fully-manual reminder message, forever, unless a human manually
+adds the two anchors themselves. Verified live with five back-to-back
+scaffold/delete/recreate/compile/reload cycles on a fresh permanent fixture,
+`Projects/ScreenPassAutoWireProbe/`, confirming zero stale/duplicate render
+features and a bounded, reused GPU-state slot count throughout - mirroring
+BIG-STEP 1's own 20-cycle rename proof methodology. See
+`task_manager/editor-core-separation-24/CAMPAIGN_COMPLETION_REPORT.md` for
+the full eight-phase writeup.
 
 Full convention: [docs/conventions/project-assembly-system.md](docs/conventions/project-assembly-system.md)'s
-own `### On-screen Game View compositing` section.
+own `### On-screen Game View compositing` and `### Screen Post-Process Pass
+scaffolding` sections.
 
 ## Render Pass System
 
