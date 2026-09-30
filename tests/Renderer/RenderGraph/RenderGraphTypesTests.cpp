@@ -519,6 +519,7 @@ TEST(RenderGraphPassKindTest, ToStringCoversEveryEnumeratorNonNullNonEmpty)
     const PassKind values[] = {
         PassKind::Graphics,
         PassKind::Compute,
+        PassKind::Blit,
     };
 
     for (const PassKind value : values) {
@@ -532,6 +533,7 @@ TEST(RenderGraphPassKindTest, ToStringProducesDistinctNamesForDistinctEnumerator
 {
     EXPECT_STREQ(ToString(PassKind::Graphics), "Graphics");
     EXPECT_STREQ(ToString(PassKind::Compute), "Compute");
+    EXPECT_STREQ(ToString(PassKind::Blit), "Blit");
 }
 
 TEST(RenderGraphRenderPassCategoryTest, ToStringCoversEveryEnumeratorNonNullNonEmpty)
@@ -673,6 +675,90 @@ TEST(RenderGraphFindMismatchedColorAttachmentExtentTest, MismatchIsFoundEvenWhen
     const std::optional<std::size_t> mismatch = FindMismatchedColorAttachmentExtent(extents);
     ASSERT_TRUE(mismatch.has_value());
     EXPECT_EQ(*mismatch, 1u);
+}
+
+// --- BlitSpec / ResolveEffectiveBlitFilter / ResolveBlitRegion /
+// IsValidBlitRegion (editor-core-separation-26 campaign, PHASE3 -
+// PHASE3_BLITSPEC_PASSKIND_AND_PURE_HELPERS.md, Locked Decision 1) --------
+//
+// Pure, Vulkan-device-free decisions - no VkDevice/VkImage/vkCmdBlitImage
+// call involved anywhere in this block, mirroring
+// FindMismatchedColorAttachmentExtent()'s own precedent immediately above.
+
+TEST(RenderGraphResolveEffectiveBlitFilterTest, ReturnsSpecFilterWhenNeitherSideIsDepth)
+{
+    BlitSpec spec;
+    spec.srcIsDepth = false;
+    spec.dstIsDepth = false;
+    spec.filter = VK_FILTER_LINEAR;
+    EXPECT_EQ(ResolveEffectiveBlitFilter(spec), VK_FILTER_LINEAR);
+}
+
+TEST(RenderGraphResolveEffectiveBlitFilterTest, ForcesNearestWhenSrcIsDepth)
+{
+    BlitSpec spec;
+    spec.srcIsDepth = true;
+    spec.dstIsDepth = false;
+    spec.filter = VK_FILTER_LINEAR;
+    EXPECT_EQ(ResolveEffectiveBlitFilter(spec), VK_FILTER_NEAREST);
+}
+
+TEST(RenderGraphResolveEffectiveBlitFilterTest, ForcesNearestWhenDstIsDepth)
+{
+    BlitSpec spec;
+    spec.srcIsDepth = false;
+    spec.dstIsDepth = true;
+    spec.filter = VK_FILTER_LINEAR;
+    EXPECT_EQ(ResolveEffectiveBlitFilter(spec), VK_FILTER_NEAREST);
+}
+
+TEST(RenderGraphResolveBlitRegionTest, AllZeroSentinelResolvesToFullExtent)
+{
+    const VkOffset3D regionMin{};
+    const VkOffset3D regionMax{};
+    const VkExtent2D extent{ 512, 256 };
+    const ResolvedBlitRegion resolved = ResolveBlitRegion(regionMin, regionMax, extent);
+    EXPECT_EQ(resolved.min.x, 0);
+    EXPECT_EQ(resolved.min.y, 0);
+    EXPECT_EQ(resolved.min.z, 0);
+    EXPECT_EQ(resolved.max.x, 512);
+    EXPECT_EQ(resolved.max.y, 256);
+    EXPECT_EQ(resolved.max.z, 1);
+}
+
+TEST(RenderGraphResolveBlitRegionTest, NonSentinelPassesThroughUnchanged)
+{
+    const VkOffset3D regionMin{ 10, 20, 0 };
+    const VkOffset3D regionMax{ 100, 200, 1 };
+    const VkExtent2D extent{ 512, 256 };
+    const ResolvedBlitRegion resolved = ResolveBlitRegion(regionMin, regionMax, extent);
+    EXPECT_EQ(resolved.min.x, 10);
+    EXPECT_EQ(resolved.min.y, 20);
+    EXPECT_EQ(resolved.min.z, 0);
+    EXPECT_EQ(resolved.max.x, 100);
+    EXPECT_EQ(resolved.max.y, 200);
+    EXPECT_EQ(resolved.max.z, 1);
+}
+
+TEST(RenderGraphIsValidBlitRegionTest, RejectsInvertedAxis)
+{
+    const ResolvedBlitRegion region{ VkOffset3D{ 100, 0, 0 }, VkOffset3D{ 50, 200, 1 } }; // max.x <= min.x.
+    const VkExtent2D extent{ 512, 256 };
+    EXPECT_FALSE(IsValidBlitRegion(region, extent));
+}
+
+TEST(RenderGraphIsValidBlitRegionTest, RejectsOutOfBoundsMax)
+{
+    const ResolvedBlitRegion region{ VkOffset3D{ 0, 0, 0 }, VkOffset3D{ 1000, 200, 1 } }; // max.x exceeds extent.width.
+    const VkExtent2D extent{ 512, 256 };
+    EXPECT_FALSE(IsValidBlitRegion(region, extent));
+}
+
+TEST(RenderGraphIsValidBlitRegionTest, AcceptsFullResolvedExtent)
+{
+    const VkExtent2D extent{ 512, 256 };
+    const ResolvedBlitRegion resolved = ResolveBlitRegion(VkOffset3D{}, VkOffset3D{}, extent);
+    EXPECT_TRUE(IsValidBlitRegion(resolved, extent));
 }
 
 } // namespace

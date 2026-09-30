@@ -73,6 +73,8 @@ const char* ToString(PassKind kind) noexcept
         return "Graphics";
     case PassKind::Compute:
         return "Compute";
+    case PassKind::Blit:
+        return "Blit";
     }
     return "Unknown";
 }
@@ -150,6 +152,47 @@ std::optional<std::size_t> FindMismatchedColorAttachmentExtent(const std::vector
         }
     }
     return std::nullopt;
+}
+
+// editor-core-separation-26 campaign, PHASE3 - see RenderGraphTypes.h's own
+// doc comment on this function. Genuinely this simple - do not
+// over-engineer it.
+VkFilter ResolveEffectiveBlitFilter(const BlitSpec& spec) noexcept
+{
+    return (spec.srcIsDepth || spec.dstIsDepth) ? VK_FILTER_NEAREST : spec.filter;
+}
+
+// editor-core-separation-26 campaign, PHASE3 - see RenderGraphTypes.h's own
+// doc comment on this function.
+ResolvedBlitRegion ResolveBlitRegion(
+    VkOffset3D regionMin, VkOffset3D regionMax, VkExtent2D resolvedExtent) noexcept
+{
+    const bool isAllZeroSentinel =
+        regionMin.x == 0 && regionMin.y == 0 && regionMin.z == 0 &&
+        regionMax.x == 0 && regionMax.y == 0 && regionMax.z == 0;
+    if (isAllZeroSentinel) {
+        return ResolvedBlitRegion{
+            VkOffset3D{ 0, 0, 0 },
+            VkOffset3D{
+                static_cast<std::int32_t>(resolvedExtent.width),
+                static_cast<std::int32_t>(resolvedExtent.height),
+                1 },
+        };
+    }
+    return ResolvedBlitRegion{ regionMin, regionMax };
+}
+
+// editor-core-separation-26 campaign, PHASE3 - see RenderGraphTypes.h's own
+// doc comment on this function.
+bool IsValidBlitRegion(const ResolvedBlitRegion& region, VkExtent2D resolvedExtent) noexcept
+{
+    return region.max.x > region.min.x &&
+        region.max.y > region.min.y &&
+        region.max.z > region.min.z &&
+        region.min.x >= 0 && region.min.y >= 0 && region.min.z >= 0 &&
+        static_cast<std::uint32_t>(region.max.x) <= resolvedExtent.width &&
+        static_cast<std::uint32_t>(region.max.y) <= resolvedExtent.height &&
+        region.max.z <= 1;
 }
 
 } // namespace gte::rg

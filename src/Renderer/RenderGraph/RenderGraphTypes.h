@@ -376,9 +376,23 @@ enum class ViewScope : std::uint8_t {
 // having to re-litigate what `true`/`false` used to mean. Deliberately an
 // exhaustive-switch-friendly small enum, mirroring ResourceAccess's own
 // "no default: case, ever" convention in this same file.
+//
+// editor-core-separation-26 campaign, PHASE3
+// (PHASE3_BLITSPEC_PASSKIND_AND_PURE_HELPERS.md) - this is now that future
+// third kind: `Blit`, added below. A `PassKind::Blit` pass carries its
+// blit description on `PassRecord::blitCommand` (`std::optional<BlitSpec>`,
+// see `BlitSpec` further down this file) instead of the usual `setup`/
+// `execute` callback pair - see `RenderGraphBuilder::AddBlitPass()`
+// (PHASE5) for the real, producible entry point. Every pre-existing
+// consumer of this enum outside `RenderGraph.cpp`/`RenderGraphCompiler.cpp`/
+// `RenderGraphBarrierPlanner.cpp` was independently re-audited for an
+// implicit, non-exhaustive "not Compute => Graphics" assumption BEFORE this
+// enumerator was added - see PHASE4 (`src/Editor/FrameDebuggerData.cpp`'s
+// own required companion audit).
 enum class PassKind : std::uint8_t {
     Graphics,
     Compute,
+    Blit,
 };
 
 const char* ToString(PassKind kind) noexcept;
@@ -722,6 +736,75 @@ struct ColorAttachmentDesc {
 // barrier-transition ResourceState.
 std::optional<std::size_t> FindMismatchedColorAttachmentExtent(const std::vector<VkExtent2D>& extents) noexcept;
 
+// editor-core-separation-26 campaign, PHASE3
+// (PHASE3_BLITSPEC_PASSKIND_AND_PURE_HELPERS.md) - a raw image copy/blit is
+// NOT a generic "arbitrary setup+execute" pass; it has one fixed shape,
+// captured here as a small, typed, POD-shaped spec struct rather than an
+// open-ended callback pair. See `RenderGraphBuilder::AddBlitPass()`
+// (PHASE5) for the real, producible entry point that constructs one of
+// these and stores it on `PassRecord::blitCommand` (below).
+struct BlitSpec {
+    TextureHandle src;
+    TextureHandle dst;
+    VkFilter filter = VK_FILTER_LINEAR;
+    bool srcIsDepth = false;
+    bool dstIsDepth = false;
+    // Defaults to the FULL resolved extent of each handle when left at
+    // {0,0,0}/{0,0,0} — an explicit sub-region is opt-in, not required.
+    // A region is malformed (and must be rejected, debug-asserted against,
+    // at minimum, per this section's own "region validation" bullet below)
+    // if either axis's max is not strictly greater than its min, UNLESS
+    // both min and max are simultaneously {0,0,0} (the "use full extent"
+    // sentinel) - that exact all-zero shape is the only degenerate value
+    // this struct ever treats as meaningful.
+    VkOffset3D srcRegionMin{};
+    VkOffset3D srcRegionMax{};
+    VkOffset3D dstRegionMin{};
+    VkOffset3D dstRegionMax{};
+};
+
+// Resolves BlitSpec::filter into the EFFECTIVE filter a real
+// vkCmdBlitImage call must use: verbatim when neither srcIsDepth nor
+// dstIsDepth is set, forced to VK_FILTER_NEAREST otherwise (Vulkan
+// disallows linear filtering against a depth/stencil format
+// unconditionally - there is no valid caller intent to trust either
+// build configuration with here, unlike ResolveBlitRegion()/
+// IsValidBlitRegion() below). The ONE official place BlitSpec::filter
+// is ever turned into a real Vulkan filter value - see RenderGraph.cpp's
+// own execution branch, which calls this rather than reading
+// spec.filter directly.
+VkFilter ResolveEffectiveBlitFilter(const BlitSpec& spec) noexcept;
+
+// One resolved [min, max) 3D region, in the SAME coordinate space
+// vkCmdBlitImage's own VkOffset3D srcOffsets[2]/dstOffsets[2] expect.
+struct ResolvedBlitRegion {
+    VkOffset3D min{};
+    VkOffset3D max{};
+};
+
+// Resolves ONE side (src or dst) of a BlitSpec's region fields against
+// that side's own physically resolved 2D extent: the all-zero sentinel
+// (regionMin AND regionMax both {0,0,0}) resolves to the FULL extent
+// ({0,0,0} to {extent.width, extent.height, 1}); any other value is
+// passed through UNCHANGED (validation is IsValidBlitRegion()'s job
+// below, not this function's - this function only ever expands the
+// sentinel, it never rejects/clamps anything).
+ResolvedBlitRegion ResolveBlitRegion(
+    VkOffset3D regionMin, VkOffset3D regionMax, VkExtent2D resolvedExtent) noexcept;
+
+// Debug-assert-level validation (source document's own "REGION
+// VALIDATION" bullet, Part B.2) against an ALREADY-RESOLVED region
+// (i.e. called AFTER ResolveBlitRegion() above, never against raw,
+// possibly-sentinel input) - true only if max is STRICTLY greater than
+// min on every one of the 3 axes, AND the whole region's min/max both
+// fall within [0, resolvedExtent] on x/y and within [0, 1] on z (a 2D
+// texture's own resolved extent has no meaningful 3rd dimension beyond
+// exactly 1). A release build is permitted to trust the caller and
+// never call this at all (this engine's general "asserts are the
+// safety net, not a runtime check" convention) - see RenderGraph.cpp's
+// own execution branch for where this is actually asserted.
+bool IsValidBlitRegion(const ResolvedBlitRegion& region, VkExtent2D resolvedExtent) noexcept;
+
 struct PassRecord {
     // Must be a string literal / static-storage-duration const char* -
     // mirrors GTE_PROFILE_SCOPE's own rule (see AGENTS.md, "Profiling":
@@ -855,6 +938,14 @@ struct PassRecord {
     // too (RenderPassTagMask tags = 0;) - see this struct's own doc comment
     // above (where category/drawKind used to sit) for the full migration
     // note; it applies to `tags` identically.
+
+    // editor-core-separation-26 campaign, PHASE3
+    // (PHASE3_BLITSPEC_PASSKIND_AND_PURE_HELPERS.md) - only meaningful when
+    // `kind == PassKind::Blit` - see `RenderGraphBuilder::AddBlitPass()`
+    // (PHASE5). `std::nullopt` for every other pass. Appended at the END of
+    // the struct (never inserted in the middle), per this file's own header
+    // comment.
+    std::optional<BlitSpec> blitCommand;
 };
 
 } // namespace gte::rg
