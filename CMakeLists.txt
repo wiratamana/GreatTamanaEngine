@@ -1103,6 +1103,15 @@ add_library(gte_editor STATIC
     # tests/Editor/ScreenPassAutoWireTests.cpp can call it directly).
     src/Editor/ScreenPassAutoWire.h
     src/Editor/ScreenPassAutoWire.cpp
+    # editor-core-separation-24 campaign ("Project Assembly On-Screen Render
+    # Feature Compositing", BIG-STEP 2), PHASE5
+    # (PHASE5_PRIORITY_AUTO_ASSIGNMENT_HELPER.md) - the real,
+    # externally-linked ComputeNextScreenPassPriority() helper (kept OUT of
+    # EditorProjectLifecycleCapability.cpp's own anonymous namespace so
+    # tests/Editor/ScreenPassPriorityAssignmentTests.cpp can call it
+    # directly).
+    src/Editor/ScreenPassPriorityAssignment.h
+    src/Editor/ScreenPassPriorityAssignment.cpp
     # editor-core-separation-16 campaign (On-Engine Project Workflow plan,
     # BIG-STEP 2), PHASE4 - the "Create New Project" floating ImGui utility
     # window, opened via the new "Project > New Project..." menu item
