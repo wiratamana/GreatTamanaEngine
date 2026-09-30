@@ -260,9 +260,21 @@ public:
     // DepthBuffer into VK_IMAGE_USAGE_SAMPLED_BIT plus a real (nearest-
     // filter) VkSampler, so a later pass can bind it as `sampler2D`. See
     // DepthBuffer.h/RenderTexture.h for the full reasoning.
+    //
+    // `createDepthCompanion` (default true, editor-core-separation-27
+    // campaign, BIG STEP 3 of 4 - Persistent Resource Cache) forwards
+    // straight through to RenderTexture's own identically-named constructor
+    // parameter - when false, the returned RenderTexture carries NO depth
+    // companion at all (a true GPU-memory statement, not just a
+    // render-graph bookkeeping one). The one real consumer is
+    // RenderGraphPersistentResourceCache (a later phase of that same
+    // campaign, called via RenderGraphResourcePool::AcquireTexture()'s own
+    // existing call chain through this method); every other caller keeps
+    // getting a depth companion, byte-for-byte unchanged.
     RenderTexture CreateRenderTexture(int width, int height, VkFormat format = VK_FORMAT_UNDEFINED,
         const char* debugName = nullptr, const char* depthDebugName = nullptr,
-        bool allowStorageImageAccess = false, bool allowDepthSampledAccess = false) const;
+        bool allowStorageImageAccess = false, bool allowDepthSampledAccess = false,
+        bool createDepthCompanion = true) const;
 
     // network-impl-2 campaign, Phase 3
     // (PHASE3_GAME_VIEW_CAPTURE_AND_GET_GAME_VIEW_ENDPOINT.md) - synchronous,

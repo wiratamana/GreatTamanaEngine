@@ -84,11 +84,24 @@ public:
     // Composite pass can bind it as `sampler2D sourceDepth`. Applied to the
     // Game/Scene View's own RenderTexture (see ImGuiEditorLayer.cpp) - no
     // other call site needs this.
+    // createDepthCompanion (default true - every existing call site is
+    // unaffected) - editor-core-separation-27 campaign, BIG STEP 3 of 4
+    // (Persistent Resource Cache). When false, Create() skips building the
+    // companion DepthBuffer entirely - m_depthBuffer simply stays null for
+    // this RenderTexture's whole lifetime (every existing consumer already
+    // null-checks it - see Target()/DepthSampler() below). This is what
+    // turns a color-only render-graph resource (TextureDesc::hasDepth ==
+    // false) into a true GPU-memory statement (exactly one tracked
+    // allocation) instead of a bookkeeping-only one that still silently
+    // carries an unused depth allocation. The one real consumer is
+    // RenderGraphPersistentResourceCache (introduced in a later phase of
+    // that same campaign) - every other caller keeps getting a depth
+    // companion, byte-for-byte unchanged.
     RenderTexture(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDevice device, int width,
         int height, VkFormat format = VK_FORMAT_B8G8R8A8_UNORM,
         VkFormat depthFormat = VK_FORMAT_D32_SFLOAT, const char* debugName = nullptr,
         const char* depthDebugName = nullptr, bool allowStorageImageAccess = false,
-        bool allowDepthSampledAccess = false);
+        bool allowDepthSampledAccess = false, bool createDepthCompanion = true);
     ~RenderTexture();
 
     RenderTexture(const RenderTexture&) = delete;
@@ -158,6 +171,9 @@ private:
     VkFormat m_depthFormat = VK_FORMAT_D32_SFLOAT;
     bool m_allowStorageImageAccess = false;
     bool m_allowDepthSampledAccess = false;
+    // editor-core-separation-27 campaign, BIG STEP 3 of 4 (Persistent
+    // Resource Cache) - see the constructor's own doc comment above.
+    bool m_createDepthCompanion = true;
 
     VkImage m_image = VK_NULL_HANDLE;
     VmaAllocation m_allocation = VK_NULL_HANDLE;

@@ -62,15 +62,24 @@ public:
     // std::runtime_error loudly if it doesn't, rather than silently
     // creating a RenderTexture a compute shader can't actually bind as a
     // storage image. `allowDepthSampledAccess` (default false) - Atmosphere
-    // Scattering campaign, Phase 7 - forwards straight through to
+    // Scattering + Aerial Perspective campaign, Phase 7 - forwards straight
+    // through to RenderTexture's own identically-named constructor
+    // parameter (see RenderTexture.h); no format-capability check needed
+    // here (unlike allowStorageImageAccess above), since a depth format's
+    // own VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT support is effectively
+    // universal on every conformant Vulkan implementation.
+    // `createDepthCompanion` (default true, editor-core-separation-27
+    // campaign, BIG STEP 3 of 4) forwards straight through to
     // RenderTexture's own identically-named constructor parameter (see
-    // RenderTexture.h); no format-capability check needed here (unlike
-    // allowStorageImageAccess above), since a depth format's own
-    // VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT support is effectively universal
-    // on every conformant Vulkan implementation.
+    // RenderTexture.h) - when false, the returned RenderTexture carries NO
+    // depth companion at all (a true GPU-memory statement, not just a
+    // render-graph bookkeeping one). The one real consumer is
+    // RenderGraphPersistentResourceCache (a later phase of that same
+    // campaign); every other caller keeps getting a depth companion,
+    // byte-for-byte unchanged.
     RenderTexture CreateRenderTexture(int width, int height, VkFormat format, const char* debugName,
         const char* depthDebugName = nullptr, bool allowStorageImageAccess = false,
-        bool allowDepthSampledAccess = false) const;
+        bool allowDepthSampledAccess = false, bool createDepthCompanion = true) const;
 
     // See Renderer::CreateBuffer().
     Buffer CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, BufferMemoryUsage memoryUsage,
