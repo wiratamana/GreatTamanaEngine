@@ -2475,6 +2475,15 @@ if(TRUE)
         # this new test file's own top-of-file comment for the full
         # reasoning).
         Editor/AssetScaffoldTemplateTests.cpp
+        # editor-core-separation-24 campaign ("Project Assembly On-Screen
+        # Render Feature Compositing", BIG-STEP 2), PHASE4
+        # (PHASE4_AUTO_WIRE_HELPER_TRY_AUTO_WIRE_REGISTER_CALL.md) - direct
+        # Tier-1 tests for the new, externally-linked
+        # Editor/ScreenPassAutoWire.h's TryAutoWireRegisterCall(), which
+        # needed its own dedicated header/source pair (rather than living in
+        # EditorProjectLifecycleCapability.cpp's own anonymous namespace)
+        # specifically so this test file can call it directly.
+        Editor/ScreenPassAutoWireTests.cpp
     )
 
     # ProjectPanelData.h/.cpp (see src/Editor/ProjectPanelData.h) is only

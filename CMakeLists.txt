@@ -1095,6 +1095,14 @@ add_library(gte_editor STATIC
     src/Editor/ActiveProjectAssemblyState.cpp
     src/Editor/EditorProjectLifecycleCapability.h
     src/Editor/EditorProjectLifecycleCapability.cpp
+    # editor-core-separation-24 campaign ("Project Assembly On-Screen Render
+    # Feature Compositing", BIG-STEP 2), PHASE4
+    # (PHASE4_AUTO_WIRE_HELPER_TRY_AUTO_WIRE_REGISTER_CALL.md) - the real,
+    # externally-linked TryAutoWireRegisterCall() helper (kept OUT of
+    # EditorProjectLifecycleCapability.cpp's own anonymous namespace so
+    # tests/Editor/ScreenPassAutoWireTests.cpp can call it directly).
+    src/Editor/ScreenPassAutoWire.h
+    src/Editor/ScreenPassAutoWire.cpp
     # editor-core-separation-16 campaign (On-Engine Project Workflow plan,
     # BIG-STEP 2), PHASE4 - the "Create New Project" floating ImGui utility
     # window, opened via the new "Project > New Project..." menu item
