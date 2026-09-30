@@ -243,6 +243,7 @@ CompiledGraphInput RenderGraphBuilder::Finish()
     input.volumeTextures = std::move(m_volumeTextures);
     input.finalVolumeTextureOutputs = std::move(m_finalVolumeTextureOutputs);
     input.finalBufferOutputs = std::move(m_finalBufferOutputs);
+    input.persistentCacheTextures = std::move(m_persistentCacheTextures);
     return input;
 }
 

@@ -112,6 +112,20 @@ TEST(RenderGraphBuilderTest, CreateBufferDifferentNamesSameDescStillCompareEqual
     EXPECT_STREQ(input.buffers[b.index].name, "IndexBufferB");
 }
 
+// editor-core-separation-27 campaign, PHASE2
+// (BIG_STEP_3_PERSISTENT_RESOURCE_CACHE_HONEST_LAYOUT_HISTORY_REV2_2026-09-30.txt,
+// Section 5.1/5.2) - a fresh builder's Finish() must produce an EMPTY
+// persistentCacheTextures: this phase adds no public API to populate it
+// (that is PHASE8's GetOrCreatePersistentTexture() job) - a cheap, direct
+// proof that the new field/move-wiring compiles and behaves as an inert
+// no-op for now.
+TEST(RenderGraphBuilderTest, FreshBuilderFinishProducesEmptyPersistentCacheTextures)
+{
+    RenderGraphBuilder builder;
+    const CompiledGraphInput input = builder.Finish();
+    EXPECT_TRUE(input.persistentCacheTextures.empty());
+}
+
 // --- AddPass() - setup vs. execute timing --------------------------------
 
 TEST(RenderGraphBuilderTest, AddPassSetupRunsSynchronouslyExactlyOnce)

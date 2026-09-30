@@ -7,6 +7,7 @@
 // mirrors.
 
 #include "Renderer/RenderGraph/RenderGraphTypes.h"
+#include "Renderer/RenderGraph/RenderGraphPersistentResourceCache.h"
 
 #include <gtest/gtest.h>
 
@@ -759,6 +760,49 @@ TEST(RenderGraphIsValidBlitRegionTest, AcceptsFullResolvedExtent)
     const VkExtent2D extent{ 512, 256 };
     const ResolvedBlitRegion resolved = ResolveBlitRegion(VkOffset3D{}, VkOffset3D{}, extent);
     EXPECT_TRUE(IsValidBlitRegion(resolved, extent));
+}
+
+// --- IsStaleCacheEntry() / PersistentTextureCacheToken (editor-core-
+// separation-27 campaign, PHASE2 -
+// BIG_STEP_3_PERSISTENT_RESOURCE_CACHE_HONEST_LAYOUT_HISTORY_REV2_2026-09-30.txt,
+// Section 8/Section 4) -------------------------------------------------------
+//
+// Pure, Vulkan-device-free decisions - no RenderGraphPersistentResourceCache
+// instance involved anywhere in this block, mirroring
+// FindMismatchedColorAttachmentExtent()/IsValidBlitRegion()'s own precedent
+// above.
+
+TEST(RenderGraphIsStaleCacheEntryTest, ZeroFramesIdleIsNeverStaleRegardlessOfThreshold)
+{
+    EXPECT_FALSE(IsStaleCacheEntry(/*lastUsedFrame=*/100, /*currentFrame=*/100, /*staleThresholdFrames=*/300));
+}
+
+TEST(RenderGraphIsStaleCacheEntryTest, ZeroFramesIdleWithZeroThresholdIsStillNotStale)
+{
+    // "more than" is strictly-greater - 0 idle frames is never > 0.
+    EXPECT_FALSE(IsStaleCacheEntry(/*lastUsedFrame=*/100, /*currentFrame=*/100, /*staleThresholdFrames=*/0));
+}
+
+TEST(RenderGraphIsStaleCacheEntryTest, ExactlyAtThresholdIsNotYetStale)
+{
+    EXPECT_FALSE(IsStaleCacheEntry(/*lastUsedFrame=*/0, /*currentFrame=*/300, /*staleThresholdFrames=*/300));
+}
+
+TEST(RenderGraphIsStaleCacheEntryTest, OneFrameBeyondThresholdIsStale)
+{
+    EXPECT_TRUE(IsStaleCacheEntry(/*lastUsedFrame=*/0, /*currentFrame=*/301, /*staleThresholdFrames=*/300));
+}
+
+TEST(RenderGraphIsStaleCacheEntryTest, LargeRealisticGapIsStale)
+{
+    EXPECT_TRUE(IsStaleCacheEntry(/*lastUsedFrame=*/0, /*currentFrame=*/10000, /*staleThresholdFrames=*/300));
+}
+
+TEST(RenderGraphPersistentTextureCacheTokenTest, DefaultConstructedTokenIsNeverResolvedYet)
+{
+    const PersistentTextureCacheToken token;
+    EXPECT_EQ(token.entry, nullptr);
+    EXPECT_EQ(token.entryEpoch, 0u);
 }
 
 } // namespace

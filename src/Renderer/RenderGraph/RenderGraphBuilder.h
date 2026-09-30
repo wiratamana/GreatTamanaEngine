@@ -194,6 +194,21 @@ struct CompiledGraphInput {
     // Compile() reads THIS field directly off `input`, exactly like
     // finalVolumeTextureOutputs.
     std::vector<BufferHandle> finalBufferOutputs;
+
+    // editor-core-separation-27 campaign, PHASE2/PHASE8
+    // (BIG_STEP_3_PERSISTENT_RESOURCE_CACHE_HONEST_LAYOUT_HISTORY_REV2_2026-09-30.txt,
+    // Section 5.1/5.2) - every handle either GetOrCreatePersistentTexture()
+    // overload mints (PHASE8) is pushed here too, alongside its normal
+    // TextureSlot entry - this is what RenderGraphCompiler::Compile()'s
+    // root-marking scan (PHASE3) treats as an ALWAYS-required root, with
+    // zero action needed from the pass author, and what
+    // RenderGraph::ExecuteCompiledGraph()'s own honest-layout-recording
+    // loop (PHASE8) walks at the end of every call. UNLIKE
+    // finalVolumeTextureOutputs/finalBufferOutputs above, nothing outside
+    // RenderGraphBuilder ever pushes onto this directly - there is no
+    // public "KeepPersistentTextureOutput()" method; population is
+    // entirely internal to GetOrCreatePersistentTexture() itself (PHASE8).
+    std::vector<TextureHandle> persistentCacheTextures;
 };
 
 
@@ -689,6 +704,10 @@ private:
     // editor-core-separation-26 campaign, PHASE1 - see
     // CompiledGraphInput::finalBufferOutputs above.
     std::vector<BufferHandle> m_finalBufferOutputs;
+
+    // editor-core-separation-27 campaign, PHASE2/PHASE8 - see
+    // CompiledGraphInput::persistentCacheTextures above.
+    std::vector<TextureHandle> m_persistentCacheTextures;
 };
 
 } // namespace gte::rg
