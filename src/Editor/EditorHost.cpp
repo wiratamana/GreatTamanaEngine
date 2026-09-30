@@ -222,6 +222,25 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
     // call GTE_LOG_*) - install-once, idempotent.
     gte::InstallLogSink(&gte::LoggerLogSink::Instance());
 
+    // editor-core-separation-25 campaign - installs this session's ONE
+    // pass-debug-metadata sink/provider onto the ONE real, live
+    // RenderGraph this EditorHost owns (m_renderGraph, bound above via
+    // this constructor's own member-initializer list, already fully
+    // constructed by the time this body runs) - mirrors
+    // EditorGpuMemoryNameOverlay::Install()'s own "install this session's
+    // one X" placement precedent, grouped here rather than inside
+    // CreateEditorLayer() because CreateEditorLayer(Window&, Renderer&)
+    // has no RenderGraph& to install onto (see this phase's own strategy
+    // file, task_manager/editor-core-separation-25/
+    // PHASE4_RENDERGRAPH_PRODUCTION_WIRING_AND_EDITOR_INSTALL.md, for the
+    // full reasoning). Safe here regardless of ordering relative to
+    // SetEditorLayerHook() below - RenderGraph::Execute() is never called
+    // during construction of anything this constructor builds, only much
+    // later, from inside Core::BuildFrame() once Run()'s own main loop
+    // starts.
+    m_renderGraph.SetDebugMetadataSink(&m_passMetadataRecorder);
+    m_renderGraph.SetDebugMetadataProvider(&m_passMetadataRecorder);
+
     // PHASE0_MASTER_STRATEGY.md's Locked Design Decision #8 - the ONE new
     // wiring call this whole campaign exists to add: Core::BuildFrame()'s
     // own render-graph-frame-building hooks (Phase 13) need a genuinely

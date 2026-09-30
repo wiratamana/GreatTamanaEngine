@@ -50,6 +50,7 @@
 #include "RenderGraphBarrierPlanner.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphCompiler.h"
+#include "RenderGraphDebugMetadataSink.h" // editor-core-separation-25 campaign, PHASE4
 #include "RenderGraphDebugTextureRegistry.h"
 #include "RenderGraphDebugVolumeTextureRegistry.h"
 #include "RenderGraphNameSlotTable.h"
@@ -176,6 +177,18 @@ public:
     void Execute(VkCommandBuffer cmd, ExecuteTimingMode timingMode, BuildFn&& build)
     {
         RenderGraphBuilder builder;
+        // editor-core-separation-25 campaign - forwarded into THIS call's
+        // own fresh builder, before build(builder) ever runs, so every
+        // pass this call declares (via AddRenderPass()) reaches the
+        // installed sink, if any. BeginFrame() marks the start of a fresh
+        // declaration sequence - see IPassDebugMetadataSink::BeginFrame()'s
+        // own doc comment (RenderGraphDebugMetadataSink.h) for why this
+        // must happen exactly here, exactly once, before any pass this
+        // call declares.
+        builder.SetDebugMetadataSink(m_debugMetadataSink);
+        if (m_debugMetadataSink != nullptr) {
+            m_debugMetadataSink->BeginFrame();
+        }
         const std::vector<TextureHandle> finalOutputs = build(builder);
         ExecuteCompiledGraph(cmd, timingMode, builder.Finish(), finalOutputs);
     }
@@ -296,6 +309,22 @@ public:
     // Renderer<->Profiling bridge's own convention (see AGENTS.md,
     // "Profiling").
     void SetGpuTimingCaptureEnabled(bool enabled) noexcept { m_timestampPool.SetCaptureEnabled(enabled); }
+
+    // editor-core-separation-25 campaign - installed EXACTLY ONCE per
+    // session, by Editor-tier startup code (EditorHost's own constructor,
+    // PHASE4) - mirrors GpuMemoryTracker::SetDebugNameObserver()'s own
+    // "install once, on the one persistent owning object" placement
+    // (docs/conventions/gpu-resource-memory-tracking.md), extended with a
+    // SECOND, separate read-only pointer (see RenderGraphDebugMetadataSink.h's
+    // own header comment for why one interface could not serve both
+    // directions). A Player build that never calls either setter pays one
+    // null-pointer branch per pass declaration (via the builder this
+    // sink is forwarded into, every Execute() call) plus one more per
+    // Execute() call (the BeginFrame() call below) plus one more per
+    // ExecuteCompiledGraph() call (the metadataLookup construction below)
+    // - and stores nothing.
+    void SetDebugMetadataSink(IPassDebugMetadataSink* sink) noexcept { m_debugMetadataSink = sink; }
+    void SetDebugMetadataProvider(IPassDebugMetadataProvider* provider) noexcept { m_debugMetadataProvider = provider; }
 
 private:
     // render-pass-6 campaign, PHASE3 (item 2.7) - `PassContext` (fully
@@ -459,6 +488,16 @@ private:
     static constexpr std::uint32_t kPipelinedTimingSlotBudget = 8;
 
     RenderGraphResourcePool m_resourcePool;
+
+    // editor-core-separation-25 campaign - see SetDebugMetadataSink()/
+    // SetDebugMetadataProvider() above. Both nullptr forever in a
+    // Player-style build that links `gte_core` alone (never `gte_editor` -
+    // this codebase has no `GTE_ENABLE_EDITOR` preprocessor macro anymore,
+    // see AGENTS.md's "`gte_core` / `gte_editor` Library Separation"
+    // section) - neither setter is ever called from Core, only from
+    // Editor-tier startup code.
+    IPassDebugMetadataSink* m_debugMetadataSink = nullptr;
+    IPassDebugMetadataProvider* m_debugMetadataProvider = nullptr;
 
     // B.1 (B1_REAL_GPU_TIMING_STRATEGY_v1.md) - constructed from
     // Renderer::GetVulkanContextInfo()'s own device/graphicsQueue/

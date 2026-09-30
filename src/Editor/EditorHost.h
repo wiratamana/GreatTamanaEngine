@@ -32,6 +32,9 @@
 // BIG-STEP 3), PHASE3 - the new ProjectLifecycleLoadCommandBridge
 // (m_projectLifecycleLoadCommandBridge below).
 #include "../Application/ProjectLifecycleLoadCommandBridge.h"
+// editor-core-separation-25 campaign, PHASE4 - the new
+// FrameDebuggerPassMetadataRecorder (m_passMetadataRecorder below).
+#include "FrameDebuggerPassMetadataRecorder.h"
 
 namespace gte {
 
@@ -126,6 +129,20 @@ private:
     // m_core.GetX() at every call site.
     Renderer& m_renderer;
     rg::RenderGraph& m_renderGraph;
+
+    // editor-core-separation-25 campaign - the ONE, persistent, whole-
+    // session Editor-owned implementation of IPassDebugMetadataSink AND
+    // IPassDebugMetadataProvider, installed onto m_renderGraph once, below
+    // (EditorHost.cpp's own constructor body) - mirrors
+    // EditorGpuMemoryNameOverlay's own role for GpuMemoryTracker, kept as
+    // a plain, non-global member here (rather than all-static/global like
+    // that overlay) since nothing OUTSIDE this exact install call ever
+    // needs to reach this object directly - every real consumer
+    // (FrameDebuggerData.cpp, RenderGraphMetadata.cpp, etc.) already reads
+    // the resolved category/drawKind/tags values straight off
+    // RenderGraphPassSnapshot, which m_renderGraph itself populates using
+    // this object internally (PHASE3/PHASE4's own metadataLookup wiring).
+    FrameDebuggerPassMetadataRecorder m_passMetadataRecorder;
 
     // Declared after Renderer/RenderGraph (and before Game) so it is
     // destroyed before Renderer's Vulkan device/instance go away, but its

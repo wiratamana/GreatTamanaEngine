@@ -787,8 +787,26 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
     // describe - simpler and equally correct than plumbing JustOverflowed()'s
     // one-shot state through.
     const bool timingSlotBudgetExhausted = timingSlots.AssignedCount() >= timingSlots.SlotBudget();
-    RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(
-        compiled, input, [this](const char* name) { return LastKnownStatsFor(name); }, timingSlotBudgetExhausted);
+
+    // editor-core-separation-25 campaign - built fresh every call, exactly
+    // like the statsLookup lambda immediately above it (which this
+    // mirrors precisely) - std::function is cheap here, this runs once
+    // per Execute() call, not once per pass. Left as a default-constructed
+    // (empty) std::function when no provider is installed - BuildPassSnapshot()
+    // (RenderGraphSnapshot.cpp) already treats an empty metadataLookup
+    // exactly like "no entry found for this index" (PHASE3), so a headless
+    // build takes this exact same code path with zero extra cost beyond
+    // the one null-pointer check below.
+    std::function<bool(std::size_t, PassDebugMetadata&)> metadataLookup;
+    if (m_debugMetadataProvider != nullptr) {
+        IPassDebugMetadataProvider* provider = m_debugMetadataProvider;
+        metadataLookup = [provider](std::size_t declarationIndex, PassDebugMetadata& outMetadata) {
+            return provider->QueryPassDebugMetadata(declarationIndex, outMetadata);
+        };
+    }
+
+    RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input,
+        [this](const char* name) { return LastKnownStatsFor(name); }, timingSlotBudgetExhausted, metadataLookup);
     if (!isPipelined) {
         m_synchronousSnapshot = std::move(snapshot);
     } else {
