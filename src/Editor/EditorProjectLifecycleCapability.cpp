@@ -42,7 +42,14 @@
 // `class ProjectLifecycleLoadCommandBridge;`, which is not enough to call
 // SubmitAndWait() or read its result fields.
 #include "../Application/ProjectLifecycleLoadCommandBridge.h"
-
+// editor-core-separation-24 campaign ("Project Assembly On-Screen Render
+// Feature Compositing", BIG-STEP 2), PHASE6 - CreateAssetScaffold()'s new
+// ScreenPostProcessPass branch below calls TryAutoWireRegisterCall()/
+// ComputeNextScreenPassPriority(), both declared with EXTERNAL linkage in
+// their own header/source pairs (PHASE4/PHASE5, Locked Decision 16) - without
+// these two includes the calls below would not compile at all.
+#include "ScreenPassAutoWire.h"
+#include "ScreenPassPriorityAssignment.h"
 #include <algorithm> // editor-core-separation-18 campaign, PHASE1 - std::transform/std::find (CreateAssetScaffold()'s case-insensitive collision scan below).
 #include <cctype>    // editor-core-separation-18 campaign, PHASE1 - std::tolower (ToLowerAscii() below).
 #include <cstdint>   // editor-core-separation-24 campaign, PHASE3 - std::int32_t (BuildScreenPostProcessPassCppContent()'s priority parameter below).
@@ -687,6 +694,75 @@ IAssetScaffoldingCapability::ScaffoldOutcome EditorProjectLifecycleCapability::C
     std::string validationError;
     if (!IsValidProjectAssemblyIdentifierName(name, validationError)) {
         outcome.errorMessage = validationError;
+        return outcome;
+    }
+
+    // editor-core-separation-24 campaign ("Project Assembly On-Screen Render
+    // Feature Compositing", BIG-STEP 2), PHASE6 - a dedicated, early-returning
+    // branch for the new 4th scaffold kind. This never reaches
+    // BuildScaffoldFileSpecs()/the generic collision-scan/write-loop/
+    // ReminderMessageForKind() flow below at all - it produces exactly ONE
+    // file with its own dynamic (priority-carrying) content and its own
+    // dynamic (auto-wire-aware) reminder message, neither of which fits that
+    // generic flow's own fixed-content-per-kind shape.
+    if (kind == AssetScaffoldKind::ScreenPostProcessPass) {
+        // The generated template registers this feature under the debug
+        // name "<Name>.ScreenTint" - GtePluginRenderFeatureDescriptor::name
+        // is a fixed char[64] (63 usable bytes). Checking this HERE, before
+        // writing any file, gives the user a clear, immediate "name too long"
+        // error at scaffold time, rather than a silent truncation discovered
+        // only later, at compile-and-run time, inside
+        // Core::RegisterProjectRenderFeature() (which itself independently
+        // refuses an over-length debugName rather than truncating it - BIG-STEP
+        // 1 - this check merely surfaces the SAME limit earlier, with a
+        // friendlier, scaffold-time error message).
+        static const std::string kDebugNameSuffix = ".ScreenTint";
+        if (name.size() + kDebugNameSuffix.size() > 63) {
+            outcome.errorMessage = "name is too long - \"" + name + kDebugNameSuffix
+                + "\" would exceed the engine's 63-character render feature name limit; choose a shorter name";
+            return outcome;
+        }
+
+        const std::filesystem::path filePath = active.assetsDirectory / (name + "ScreenPass.cpp");
+        if (std::filesystem::exists(filePath)) {
+            outcome.errorMessage = "a file named '" + filePath.filename().string() + "' already exists";
+            return outcome;
+        }
+
+        // Best-effort directory creation, mirroring the generic flow's own
+        // create_directories() tolerance (below) for a hand-authored/
+        // externally-copied project that is missing Assets/ - this MUST run
+        // before WriteTextFile() below, whose std::ofstream open would
+        // otherwise silently fail if Assets/ does not exist yet
+        // (ComputeNextScreenPassPriority() itself already tolerates a missing
+        // directory by returning 0, but WriteTextFile() does not, so this
+        // call is still required ahead of it).
+        std::error_code createDirectoriesError;
+        std::filesystem::create_directories(active.assetsDirectory, createDirectoriesError);
+
+        const std::int32_t priority = ComputeNextScreenPassPriority(active.assetsDirectory);
+
+        const std::string content = BuildScreenPostProcessPassCppContent(name, priority);
+        if (!WriteTextFile(filePath, content)) {
+            outcome.errorMessage = "failed to write '" + filePath.filename().string() + "'";
+            return outcome;
+        }
+
+        const std::string registerFn = "Register" + name + "ScreenPass";
+        const std::filesystem::path gameCppPath = active.assetsDirectory / (active.name + "Game.cpp");
+        const bool autoWired = TryAutoWireRegisterCall(gameCppPath, registerFn);
+
+        outcome.success = true;
+        outcome.createdFiles = { filePath.filename().string() };
+        outcome.reminderMessage = autoWired
+            ? ("Created Assets/" + filePath.filename().string()
+                  + " and automatically wired " + registerFn + "(core) into your project's RegisterProject() - "
+                  "compile to see the tint live!")
+            : ("Created Assets/" + filePath.filename().string()
+                  + " - could not auto-wire it in (this project may pre-date auto-wiring support) - remember to call "
+                  + registerFn + "(core) from your project's RegisterProject() yourself!");
+        GTE_LOG_INFO("ProjectLifecycle", "CreateAssetScaffold('" + name + "', ScreenPostProcessPass): "
+            + outcome.reminderMessage);
         return outcome;
     }
 
