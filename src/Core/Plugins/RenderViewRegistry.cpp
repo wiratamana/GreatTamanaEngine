@@ -74,7 +74,19 @@ rg::RenderViewId RenderViewRegistry::CreateOrGetView(const char* name, const Ren
         try {
             it->second.target.emplace(m_renderer->CreateRenderTexture(
                 static_cast<int>(desc.width), static_cast<int>(desc.height), desc.colorFormat,
-                /*debugName=*/it->first.c_str(), /*depthDebugName=*/nullptr,
+                // better-render-pass-3 campaign, BLOCK2 PHASE4 - found live
+                // during this phase's own Memory-panel verification: passing
+                // depthDebugName=nullptr meant a depth-only view's ONE real
+                // GPU allocation (its depth buffer) showed up in the
+                // Editor's "Memory" panel as "(unnamed)" instead of by its
+                // own view name, making the required "exactly one row named
+                // <ViewName>" check unverifiable by name. Reusing this same
+                // map-owned, stable key string for BOTH debugName AND
+                // depthDebugName is exactly as safe as using it once (see
+                // this method's own two-phase construction comment above -
+                // `it->first` outlives this RenderTexture for the registry's
+                // entire process lifetime).
+                /*debugName=*/it->first.c_str(), /*depthDebugName=*/it->first.c_str(),
                 /*allowStorageImageAccess=*/false, /*allowDepthSampledAccess=*/false,
                 /*createDepthCompanion=*/desc.hasDepth, /*createColorImage=*/desc.hasColor));
             it->second.id = rg::RenderViewId::Named(it->first.c_str());

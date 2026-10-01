@@ -972,6 +972,24 @@ int EditorHost::Run()
                     // Positively known, permanent-for-this-registration failure -
                     // fail fast (409) rather than waiting out the full timeout.
                     m_captureBridge.FailPendingRequest(FrameCaptureKind::NamedTexture, FrameCaptureFailureReason::TargetNotAvailable);
+                } else if (!wantsDepth && snapshot->target.image == VK_NULL_HANDLE) {
+                    // better-render-pass-3 campaign, BLOCK2 PHASE4 (Arbitrary
+                    // Render Views) - the mirror-image gap of the check
+                    // immediately above, found live during this phase's own
+                    // verification: a genuinely colorless (depth-only,
+                    // RenderTexture::createColorImage == false) registered
+                    // texture's target.image stays VK_NULL_HANDLE for its
+                    // whole lifetime (see RenderTexture.h). The default/
+                    // explicit "color" channel request against one of these
+                    // used to fall straight through to the capture path
+                    // below and call vkCmdCopyImageToBuffer() against a
+                    // VK_NULL_HANDLE image - a real, confirmed, reproducible
+                    // ENGINE CRASH (see
+                    // task_manager/better-render-pass-4/PHASE4_COMPLETION_REPORT.md
+                    // for the live repro). A positively known, permanent-
+                    // for-this-registration failure, so fail fast instead of
+                    // crashing or waiting out the full timeout.
+                    m_captureBridge.FailPendingRequest(FrameCaptureKind::NamedTexture, FrameCaptureFailureReason::TargetNotAvailable);
                 } else {
                     // PHASE0_MASTER_STRATEGY.md's (network-impl-4 campaign)
                     // Locked Design Decision 4 - computed BEFORE
