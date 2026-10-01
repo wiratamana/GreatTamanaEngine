@@ -431,6 +431,14 @@ add_library(gte_core STATIC
     src/Core/Plugins/RenderFeatureDescriptor.h
     src/Core/Plugins/RenderFeatureCompositor.h
     src/Core/Plugins/RenderFeatureCompositor.cpp
+    # better-render-pass-3 campaign, BLOCK 2 (Arbitrary Render Views), PHASE2
+    # (PHASE2_RENDER_VIEW_REGISTRY_CORE.md) - the new registry owning every
+    # dynamically-created, named render view's persistent RenderTexture.
+    # Added here now (incremental compile check), ahead of PHASE3's own
+    # Core.h/.cpp wiring, per PHASE2's own "Compile/Test Check" instruction -
+    # PHASE3 should confirm this is already present, not duplicate it.
+    src/Core/Plugins/RenderViewRegistry.h
+    src/Core/Plugins/RenderViewRegistry.cpp
     # better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
     # PluginRenderResourceTranslation.h/.cpp, PluginRenderOperationRegistry.h/.cpp,
     # PluginRenderPassBuilderAdapter_v3.h/.cpp, and

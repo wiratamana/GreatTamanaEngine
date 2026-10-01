@@ -2205,6 +2205,12 @@ set(GTE_TEST_SOURCES
     # Unconditional, since src/Core/Plugins/RenderFeatureCompositor.h/.cpp is
     # unconditionally in gte_core's own source list.
     Core/Plugins/RenderFeatureCompositorProjectFeatureTests.cpp
+    # better-render-pass-3 campaign, BLOCK 2 (Arbitrary Render Views), PHASE2
+    # (PHASE2_RENDER_VIEW_REGISTRY_CORE.md) - Tier-2 (real, headless GPU)
+    # tests for the new RenderViewRegistry class. Unconditional, since
+    # src/Core/Plugins/RenderViewRegistry.h/.cpp is unconditionally in
+    # gte_core's own source list (see CMakeLists.txt).
+    Core/Plugins/RenderViewRegistryTests.cpp
     # editor-core-separation-23 campaign, PHASE3
     # (PHASE3_CORE_REGISTER_PROJECT_RENDER_FEATURE_API.md, Step 3.4) - Tier-1
     # tests for the new Core::RegisterProjectRenderFeature()/
