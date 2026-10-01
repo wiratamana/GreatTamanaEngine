@@ -326,24 +326,17 @@ add_library(gte_core STATIC
     # every method is pure virtual). Closes Defects A and B (see
     # PHASE0_MASTER_STRATEGY.md).
     src/Core/FrameDebuggerCaptureRecorder.h
-    # editor-core-separation-3 campaign, PHASE2
-    # (PHASE2_PLUGIN_HOST_AND_HELLO_WORLD_HANDSHAKE_PROBE.md) - gte::PluginHost,
-    # the real gte_core-owned mechanism that scans a folder for *.dll,
-    # LoadLibraryW()s each, checks the ABI fingerprint, and holds the
-    # resulting registry. Always compiled (see this class's own doc comment
-    # for why it is mechanical/capability-agnostic and unconditional -
-    # GTE_ENABLE_PLUGINS only gates the real runtime CALL SITE,
-    # EditorHost.cpp's m_core.LoadPlugins() call).
-    src/Core/Plugins/PluginHost.h
-    src/Core/Plugins/PluginHost.cpp
-    # editor-core-separation-4 campaign, PHASE6
-    # (PHASE6_DEFENSIVE_MODULE_INFO_BUFFER_READS.md) - a small, header-only,
-    # bounded-read helper for GtePluginModuleInfo's fixed-size char[]
-    # buffers (strnlen(buf, sizeof(buf)) + std::string(buf, len), never
-    # trusting a plugin to self-terminate). Header-only/inline so it is
-    # directly Tier-1-testable from tests/Core/FixedBufferReaderTests.cpp -
-    # used by PluginHost.cpp's own "Loaded plugin '...'" log line.
-    src/Core/Plugins/FixedBufferReader.h
+    # editor-core-separation-3 campaign, PHASE2 originally added gte::PluginHost
+    # (the real gte_core-owned mechanism that scanned a folder for *.dll,
+    # LoadLibraryW()'d each, checked the ABI fingerprint, and held the
+    # resulting registry) here. better-render-pass-2 campaign, PHASE3
+    # (PHASE3_DELETE_ABI_HOST_CODE.md) deletes PluginHost.h/.cpp and
+    # FixedBufferReader.h (its own small, bounded-read helper) outright
+    # (ABI-only) - Core::LoadPlugins()/Core::GetPluginHost() and the
+    # m_pluginHost member were removed from Core.h/.cpp in this same phase as
+    # a direct, mechanical consequence (Core.h unconditionally held a
+    # PluginHost member/included this header) - PHASE4's own plan to delete
+    # "Core::LoadPlugins() itself" therefore finds this already done.
     # editor-core-separation-11 campaign (Project Assembly system), PHASE5 -
     # gte::ProjectAssemblyHost, the sibling-but-separate mechanism that
     # scans GTE_PROJECT_ASSEMBLY_OUTPUT_DIR for *_Game.dll/*_Editor.dll,
@@ -403,51 +396,31 @@ add_library(gte_core STATIC
     # flagged this exact gap).
     src/Core/Plugins/ProjectAssemblyRegistrationLedger.h
     src/Core/Plugins/ProjectAssemblyRegistrationLedger.cpp
-    # editor-core-separation-3 campaign, PHASE3
-    # (PHASE3_RUNTIME_RENDER_FEATURE_CAPABILITY.md) - PluginRenderPassBuilderAdapter,
-    # the gte_core-side implementation of IPluginRenderPassBuilder, constructed
-    # fresh per-view, per-frame, by the "PluginRenderFeatures" provider
-    # (Core.cpp's own RegisterOffscreenRenderPipelineProviders()).
-    src/Core/Plugins/PluginRenderPassBuilderAdapter.h
-    src/Core/Plugins/PluginRenderPassBuilderAdapter.cpp
-    # editor-core-separation-4 campaign, PHASE5
-    # (PHASE5_MULTI_RENDER_FEATURE_PLUGIN_WARNING_AND_REGRESSION_LOCK.md) - a
-    # small, pure, Tier-1-testable helper counting how many loaded plugin
-    # modules implement IRenderFeatureModule_v1 - used by Core::LoadPlugins()
-    # to log a warning when 2+ such plugins are loaded (their render output
-    # silently overwrites each other today - see docs/conventions/plugin-
-    # architecture.md).
-    src/Core/Plugins/PluginRenderFeatureDiagnostics.h
-    src/Core/Plugins/PluginRenderFeatureDiagnostics.cpp
+    # better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
+    # PluginRenderPassBuilderAdapter.h/.cpp (the `_v1` one) and
+    # PluginRenderFeatureDiagnostics.h/.cpp deleted outright (ABI-only).
     # editor-core-separation-6 campaign, PHASE2
     # (PHASE2_PLUGIN_CAPABILITY_ORCHESTRATOR_REGISTRY_AND_RENDER_FEATURE_MIGRATION.md)
     # - the ONE generic, reusable IPluginCapabilityOrchestrator registry
-    # interface (header-only, no .cpp), plus its first real implementation,
-    # LegacyRenderFeatureOrchestrator (a verbatim relocation of the former
-    # inline IRenderFeatureModule_v1 loop/warning that used to live directly
-    # in Core.cpp).
+    # interface (header-only, no .cpp). better-render-pass-2 campaign, PHASE2
+    # (PHASE2_DISABLE_RUNTIME_CALL_SITES.md) removed its two ABI-only
+    # implementors' registration from Core::RegisterBuiltinCapabilityOrchestrators()
+    # (LegacyRenderFeatureOrchestrator/EditorPanelCapabilityOrchestrator);
+    # PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) deletes both classes' own
+    # .h/.cpp files outright - RenderFeatureCompositor is this interface's
+    # one surviving implementor (Locked Conclusion D3, PHASE0_MASTER_STRATEGY.md).
     src/Core/Plugins/IPluginCapabilityOrchestrator.h
-    src/Core/Plugins/LegacyRenderFeatureOrchestrator.h
-    src/Core/Plugins/LegacyRenderFeatureOrchestrator.cpp
-    # editor-core-separation-6 campaign, PHASE3
-    # (PHASE3_EDITOR_PANEL_ORCHESTRATOR_MIGRATION.md) - the second real
-    # IPluginCapabilityOrchestrator implementation, a verbatim relocation of
-    # the former inline IEditorPanelModule_v1 discovery loop that used to
-    # live directly in EditorHost.cpp.
-    src/Core/Plugins/EditorPanelCapabilityOrchestrator.h
-    src/Core/Plugins/EditorPanelCapabilityOrchestrator.cpp
     # editor-core-separation-6 campaign, PHASE4
     # (PHASE4_RENDER_FEATURE_COMPOSITOR_CORE_AND_ORDERING.md) - the third
     # real IPluginCapabilityOrchestrator implementation, the real `_v2`
     # render-feature compositing pipeline: RenderFeatureCompositor (the
-    # per-plugin private-target/blend/ordering engine),
-    # PluginRenderPassBuilderAdapter_v2 (the gte_core-side
-    # IPluginRenderPassBuilder_v2 implementation), and RenderFeatureNamePool
+    # per-plugin private-target/blend/ordering engine) and RenderFeatureNamePool
     # (header-only - stable interned pass/resource names, mirroring
-    # Core.cpp's own GpuDrivenBatchNamePool precedent).
+    # Core.cpp's own GpuDrivenBatchNamePool precedent). better-render-pass-2
+    # campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) - deleted
+    # PluginRenderPassBuilderAdapter_v2.h/.cpp outright (ABI-only, the `_v2`
+    # uber-shader adapter).
     src/Core/Plugins/RenderFeatureNamePool.h
-    src/Core/Plugins/PluginRenderPassBuilderAdapter_v2.h
-    src/Core/Plugins/PluginRenderPassBuilderAdapter_v2.cpp
     # editor-core-separation-23 campaign, PHASE1
     # (PHASE1_PROJECT_RENDER_FEATURE_CALLBACK_HEADER_AND_ENTRY_THIRD_KIND.md) -
     # the one new callback type a Project Assembly's own on-screen render
@@ -458,29 +431,13 @@ add_library(gte_core STATIC
     src/Core/Plugins/ProjectRenderFeatureCallback.h
     src/Core/Plugins/RenderFeatureCompositor.h
     src/Core/Plugins/RenderFeatureCompositor.cpp
-    # editor-core-separation-9 campaign, PHASE1
-    # (PHASE1_RESOURCE_VOCABULARY_AND_ABI_FOUNDATION.md) - the pure,
-    # Tier-1-tested, gte_core-internal translation layer mapping the new
-    # plugins/gte_plugin_abi/PluginRenderResource.h vocabulary onto the real
-    # internal rg:: render-graph types. Nothing calls this yet - PHASE2's
-    # real PluginRenderPassBuilderAdapter_v3 is the first real consumer.
-    src/Core/Plugins/PluginRenderResourceTranslation.h
-    src/Core/Plugins/PluginRenderResourceTranslation.cpp
-    # editor-core-separation-9 campaign, PHASE2
-    # (PHASE2_OPERATION_REGISTRY_AND_ADAPTER_V3.md) - the REAL, host-owned,
-    # growable, string-keyed PluginRenderOperationRegistry (also the new
-    # PERMANENT home of the RenderFeatureOps.comp/RenderFeatureBlend.comp
-    # pipeline ownership, migrated out of RenderFeatureCompositor - a pure
-    # refactor, zero _v2 behavior change), the real PluginRenderPassBuilderAdapter_v3
-    # (the gte_core-side IPluginRenderPassBuilder_v3 implementation), and its
-    # own small, pure, Tier-1-testable validation-logic header (no .cpp - every
-    # function is a small inline pure function, mirroring
-    # PluginRenderResourceTranslation.h's own PHASE1 precedent).
-    src/Core/Plugins/PluginRenderOperationRegistry.h
-    src/Core/Plugins/PluginRenderOperationRegistry.cpp
-    src/Core/Plugins/PluginRenderPassBuilderAdapter_v3.h
-    src/Core/Plugins/PluginRenderPassBuilderAdapter_v3.cpp
-    src/Core/Plugins/PluginRenderPassBuilderAdapterV3Validation.h
+    # better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
+    # PluginRenderResourceTranslation.h/.cpp, PluginRenderOperationRegistry.h/.cpp,
+    # PluginRenderPassBuilderAdapter_v3.h/.cpp, and
+    # PluginRenderPassBuilderAdapterV3Validation.h deleted outright (ABI-only -
+    # the one piece of PluginRenderOperationRegistry Project Assembly actually
+    # needed, the RenderFeatureBlend.comp pipeline, was already pulled fully
+    # into RenderFeatureCompositor by PHASE1).
     # editor-core-separation-1 campaign, PHASE10
     # (PHASE10_ISURFACEPROVIDER_INTERFACE_AND_WINDOW_INVERSION.md) - the
     # abstract surface-provider interface Renderer/VulkanSurface now depend on

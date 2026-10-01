@@ -374,11 +374,12 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
     // `#if GTE_ENABLE_PLUGINS m_core.LoadPlugins(gte::ExecutableDirectory() /
     // "plugins"); #endif`, the one call site that ever scanned plugins/ at
     // runtime. Deleted outright (Decision D2, PHASE0_MASTER_STRATEGY.md
-    // Section 2.4) - Core::LoadPlugins() and PluginHost itself are left
-    // intact for now (PHASE3/PHASE4 delete them); this is purely "never
-    // invoke it again". Confirmed harmless: RenderFeatureCompositor (the one
-    // orchestrator Project Assembly actually depends on) never needed
-    // OnPluginsLoaded() to run in the first place.
+    // Section 2.4) - this is purely "never invoke it again". PHASE3
+    // (PHASE3_DELETE_ABI_HOST_CODE.md) has since deleted Core::LoadPlugins()
+    // and PluginHost themselves outright too. Confirmed harmless:
+    // RenderFeatureCompositor (the one orchestrator Project Assembly
+    // actually depends on) never needed OnPluginsLoaded() to run in the
+    // first place.
 
     // editor-core-separation-11 campaign (Project Assembly system), PHASE5 -
     // loaded exactly once, here, at EditorHost construction time, mirroring

@@ -8,21 +8,12 @@
 # SDL3/Vulkan/VMA/ImGui (see cmake/Fetch*.cmake).
 #
 #
-# --- Fixtures (editor-core-separation-4 campaign, PHASE8) -------------------
-# PHASE8_PLUGINHOST_FAILURE_PATH_REGRESSION_TESTS_AND_CAMPAIGN_CLOSEOUT.md -
-# defines the 5 deliberately-broken/instrumented fixture .dll targets
-# (fake_plugin_missing_export/fake_plugin_bad_fingerprint/
-# fake_plugin_declines_to_load/fake_plugin_destroy_order_a/
-# fake_plugin_destroy_order_b) PLUS the gte_fake_plugin_fixtures_dirs
-# INTERFACE library exposing their generated fixtures-directory header, used
-# ONLY by Core/Plugins/PluginHostFailurePathTests.cpp below. Added here,
-# near the TOP of this file, BEFORE the GTE_TEST_SOURCES list/
-# add_executable(GreatTamanaEngineTests ...) call, so these targets exist
-# before anything downstream needs them (mirrors this repo's own
-# add_subdirectory()-defines-dependency-targets-before-add_executable()
-# convention already used by the root CMakeLists.txt's own probe
-# dependencies).
-add_subdirectory(Fixtures/FakePlugins)
+
+# better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
+# the Fixtures/FakePlugins/ fixture (5 fake_plugin_*.dll targets plus the
+# gte_fake_plugin_fixtures_dirs INTERFACE library) existed solely to feed
+# Core/Plugins/PluginHostFailurePathTests.cpp, deleted alongside it this
+# phase - the whole folder is deleted outright (ABI-only).
 # --- Test taxonomy ---------------------------------------------------------
 #
 # Every test file below is "Tier 1": pure logic, with NO live Vulkan device,
@@ -2133,41 +2124,13 @@ set(GTE_TEST_SOURCES
     # registry). Unconditional, since src/Core/EditorPanelRegistry.h/.cpp is
     # unconditionally in gte_core's own source list.
     Core/EditorPanelRegistryTests.cpp
-    # editor-core-separation-4 campaign, PHASE5
-    # (PHASE5_MULTI_RENDER_FEATURE_PLUGIN_WARNING_AND_REGRESSION_LOCK.md) -
-    # Tier-1 tests for the new, pure CountModulesImplementingRenderFeature()
-    # helper. Unconditional, since src/Core/Plugins/
-    # PluginRenderFeatureDiagnostics.h/.cpp is unconditionally in gte_core's
-    # own source list.
-    Core/PluginRenderFeatureDiagnosticsTests.cpp
-    # editor-core-separation-4 campaign, PHASE6
-    # (PHASE6_DEFENSIVE_MODULE_INFO_BUFFER_READS.md) - Tier-1 tests for the
-    # new, pure ReadFixedBuffer() helper. Unconditional, since
-    # src/Core/Plugins/FixedBufferReader.h is unconditionally in gte_core's
-    # own source list.
-    Core/FixedBufferReaderTests.cpp
-    # editor-core-separation-4 campaign, PHASE8
-    # (PHASE8_PLUGINHOST_FAILURE_PATH_REGRESSION_TESTS_AND_CAMPAIGN_CLOSEOUT.md)
-    # - real, automated GoogleTest coverage for all 4 of PluginHost's own
-    # documented failure/skip paths (missing export, fingerprint mismatch,
-    # decline-to-load, reverse-order destroy), using the 5 deliberately-
-    # broken/instrumented fixture .dll targets defined by
-    # Fixtures/FakePlugins/CMakeLists.txt (add_subdirectory()'d near the top
-    # of this file). Unconditional, since src/Core/Plugins/PluginHost.h/.cpp
-    # is unconditionally in gte_core's own source list.
-    Core/Plugins/PluginHostFailurePathTests.cpp
-    # editor-core-separation-9 campaign, PHASE1
-    # (PHASE1_RESOURCE_VOCABULARY_AND_ABI_FOUNDATION.md) - Tier-1 tests for
-    # the new, pure PluginRenderResourceTranslation.h/.cpp mapping functions.
-    # Unconditional, since src/Core/Plugins/PluginRenderResourceTranslation.h/.cpp
-    # is unconditionally in gte_core's own source list.
-    Core/Plugins/PluginRenderResourceTranslationTests.cpp
-    # editor-core-separation-9 campaign, PHASE2
-    # (PHASE2_OPERATION_REGISTRY_AND_ADAPTER_V3.md, Step 3.6) - Tier-1 tests for
-    # PluginRenderPassBuilderAdapter_v3's own pure validation logic. Unconditional,
-    # since src/Core/Plugins/PluginRenderPassBuilderAdapterV3Validation.h is
-    # unconditionally in gte_core's own source list.
-    Core/Plugins/PluginRenderPassBuilderAdapterV3ValidationTests.cpp
+    # better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
+    # Core/PluginRenderFeatureDiagnosticsTests.cpp, Core/FixedBufferReaderTests.cpp,
+    # Core/Plugins/PluginHostFailurePathTests.cpp,
+    # Core/Plugins/PluginRenderResourceTranslationTests.cpp, and
+    # Core/Plugins/PluginRenderPassBuilderAdapterV3ValidationTests.cpp all
+    # removed from this list - their own backing src/Core/Plugins/*.h/.cpp
+    # files are deleted outright this phase (ABI-only).
     # editor-core-separation-12 campaign, PHASE1 (Project Assembly Hot
     # Reload plan, BIG-STEP 1) - Tier-1 tests for the new, pure
     # ProjectAssemblyHotReloadDebugStatus singleton. Unconditional, since
@@ -2622,28 +2585,6 @@ target_link_libraries(GreatTamanaEngineTests PRIVATE
 # now permanent (no longer a temporary if(TRUE) placeholder) now that
 # gte_editor is a real, always-built CMake target.
 target_link_libraries(GreatTamanaEngineTests PRIVATE imgui)
-
-# editor-core-separation-4 campaign, PHASE8
-# (PHASE8_PLUGINHOST_FAILURE_PATH_REGRESSION_TESTS_AND_CAMPAIGN_CLOSEOUT.md) -
-# Fixtures/FakePlugins/CMakeLists.txt's own gte_fake_plugin_fixtures_dirs
-# INTERFACE library is what actually lets
-# Core/Plugins/PluginHostFailurePathTests.cpp's own
-# #include "generated/FakePluginFixturesDirGenerated.h" resolve - without
-# this line, that #include fails to compile with "No such file or
-# directory" the moment this target is built.
-target_link_libraries(GreatTamanaEngineTests PRIVATE gte_fake_plugin_fixtures_dirs)
-
-# PluginHostFailurePathTests.cpp LoadLibraryW()s these 5 fixture .dll's at
-# runtime rather than linking them - CMake has no way to know that
-# dependency on its own (same reasoning as every demo-plugin
-# add_dependencies() call already in root CMakeLists.txt).
-add_dependencies(GreatTamanaEngineTests
-    fake_plugin_missing_export
-    fake_plugin_bad_fingerprint
-    fake_plugin_declines_to_load
-    fake_plugin_destroy_order_a
-    fake_plugin_destroy_order_b
-)
 
 # See the file-level comment above for why this is still needed even though
 # no test here ever calls SDL_Init().

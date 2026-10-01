@@ -47,23 +47,14 @@
 
 // editor-core-separation-6 campaign, PHASE2
 // (PHASE2_PLUGIN_CAPABILITY_ORCHESTRATOR_REGISTRY_AND_RENDER_FEATURE_MIGRATION.md)
-// - the new IPluginCapabilityOrchestrator registry, plus its first real
-// implementation, LegacyRenderFeatureOrchestrator (a verbatim relocation of
-// the former inline IRenderFeatureModule_v1 loop/warning that used to live
-// directly in this file - see Core::RegisterBuiltinCapabilityOrchestrators()/
-// Core::LoadPlugins()/the "PluginRenderFeatures" provider below). Neither
-// IRenderFeatureModule.h/IPluginRenderPassBuilder.h/PluginRenderPassBuilderAdapter.h/
-// PluginRenderFeatureDiagnostics.h/Logging.h is needed directly by this
-// translation unit anymore - that real logic (and those includes) now live
-// inside LegacyRenderFeatureOrchestrator.cpp itself.
+// - the ONE generic IPluginCapabilityOrchestrator registry. better-render-pass-2
+// campaign, PHASE2 (PHASE2_DISABLE_RUNTIME_CALL_SITES.md) already removed
+// this file's own registration of its two ABI-only implementors
+// (LegacyRenderFeatureOrchestrator/EditorPanelCapabilityOrchestrator);
+// PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) now also removes their own
+// #include lines below, since both classes' .h/.cpp files are deleted
+// outright this phase.
 #include "Plugins/IPluginCapabilityOrchestrator.h"
-#include "Plugins/LegacyRenderFeatureOrchestrator.h"
-// editor-core-separation-6 campaign, PHASE3
-// (PHASE3_EDITOR_PANEL_ORCHESTRATOR_MIGRATION.md) - the second real
-// IPluginCapabilityOrchestrator implementation, proving the registry
-// generalizes beyond render features (a verbatim relocation of
-// EditorHost.cpp's own former inline IEditorPanelModule_v1 discovery loop).
-#include "Plugins/EditorPanelCapabilityOrchestrator.h"
 // editor-core-separation-6 campaign, PHASE4
 // (PHASE4_RENDER_FEATURE_COMPOSITOR_CORE_AND_ORDERING.md) - the third real
 // IPluginCapabilityOrchestrator implementation, the real `_v2` render-feature
@@ -224,9 +215,9 @@ GpuDrivenBatchNamePool& BatchNamePool()
 
 Core::Core(ISurfaceProvider& surfaceProvider, IHostServices& hostServices)
     : m_renderer(surfaceProvider)
-    // editor-core-separation-9 campaign, PHASE2 - constructed right after
-    // m_renderer (which it needs by reference), before m_renderGraph.
-    , m_pluginRenderOperationRegistry(m_renderer)
+    // better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
+    // `, m_pluginRenderOperationRegistry(m_renderer)` removed - that member
+    // (and its type) are deleted outright this phase (ABI-only).
     , m_renderGraph(m_renderer)
     , m_game()
     , m_engineContext()
@@ -301,36 +292,21 @@ void Core::RegisterBuiltinCapabilityOrchestrators()
     // m_capabilityOrchestrators - see Core.h's own doc comment on
     // GetRenderFeatureCompositor()/m_renderFeatureCompositorPtr for why this
     // is a plain, zero-cost pointer with no dynamic_cast/RTTI involved.
-    // editor-core-separation-9 campaign, PHASE2 - RenderFeatureCompositor's
-    // constructor gained a new trailing parameter, PluginRenderOperationRegistry&
-    // - passing the SAME m_pluginRenderOperationRegistry instance this class
-    // itself owns (never a second, duplicate registry instance).
-    auto renderFeatureCompositor =
-        std::make_unique<RenderFeatureCompositor>(*this, m_renderer, m_pluginRenderOperationRegistry);
+    // better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
+    // RenderFeatureCompositor's constructor no longer takes a trailing
+    // PluginRenderOperationRegistry& parameter (that type is deleted outright
+    // this phase, ABI-only).
+    auto renderFeatureCompositor = std::make_unique<RenderFeatureCompositor>(*this, m_renderer);
     m_renderFeatureCompositorPtr = renderFeatureCompositor.get();
     m_capabilityOrchestrators.push_back(std::move(renderFeatureCompositor));
 }
 
-// editor-core-separation-3 campaign, PHASE2
-// (PHASE2_PLUGIN_HOST_AND_HELLO_WORLD_HANDSHAKE_PROBE.md) - a thin
-// pass-through into m_pluginHost, always compiled (see Core.h's own doc
-// comment on this method - only EditorHost.cpp's own call site is gated
-// behind `#if GTE_ENABLE_PLUGINS`, mirroring GTE_ENABLE_NETWORK's own
-// existing "gate the call site, not the class" precedent).
-void Core::LoadPlugins(const std::filesystem::path& pluginsDirectory)
-{
-    m_pluginHost.LoadPlugins(pluginsDirectory);
-
-    // editor-core-separation-6 campaign, PHASE2 - each orchestrator
-    // discovers/validates its own capability kind against the freshly-loaded
-    // module list. LegacyRenderFeatureOrchestrator::OnPluginsLoaded() is a
-    // verbatim relocation of the multi-plugin warning that used to live
-    // directly in this method's own body (editor-core-separation-4,
-    // PHASE5) - same trigger condition, same exact warning text.
-    for (auto& orchestrator : m_capabilityOrchestrators) {
-        orchestrator->OnPluginsLoaded(m_pluginHost.AllLoadedModules());
-    }
-}
+// better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
+// Core::LoadPlugins() removed outright, along with its private m_pluginHost
+// member (Core.h) - PluginHost.h/.cpp are deleted this phase (ABI-only; the
+// one call site that ever invoked this method, EditorHost.cpp's own, was
+// already removed by PHASE2, per Locked Conclusion D2,
+// PHASE0_MASTER_STRATEGY.md Section 2.4).
 
 // editor-core-separation-11 campaign (Project Assembly system), PHASE5 -
 // thin pass-through into m_projectAssemblyHost, mirroring LoadPlugins()

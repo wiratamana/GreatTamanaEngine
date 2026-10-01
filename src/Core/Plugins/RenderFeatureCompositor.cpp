@@ -1,8 +1,14 @@
 #include "RenderFeatureCompositor.h"
 
-#include "PluginRenderPassBuilderAdapter_v2.h"
-#include "PluginRenderPassBuilderAdapter_v3.h"
-
+// better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
+// #include "PluginRenderPassBuilderAdapter_v2.h"/"PluginRenderPassBuilderAdapter_v3.h"
+// removed - both classes are deleted outright this phase (ABI-only). A
+// direct #include of the real IPluginModule.h is now needed here (this
+// .cpp's own OnPluginsLoaded() calls module->QueryCapability()/
+// GetModuleInfo() directly) - it used to reach gte_core transitively
+// through the two deleted adapter headers above; IPluginCapabilityOrchestrator.h
+// only forward-declares IPluginModule.
+#include "../../../plugins/gte_plugin_abi/IPluginModule.h"
 #include "../Core.h"
 #include "../Logging.h"
 
@@ -158,11 +164,9 @@ bool RenderFeatureCompositor::BlackboardAdapter::Fetch(
     return true;
 }
 
-RenderFeatureCompositor::RenderFeatureCompositor(
-    Core& core, Renderer& renderer, PluginRenderOperationRegistry& operationRegistry)
+RenderFeatureCompositor::RenderFeatureCompositor(Core& core, Renderer& renderer)
     : m_core(core)
     , m_renderer(renderer)
-    , m_operationRegistry(operationRegistry)
     , m_blackboardAdapter(*this)
 {
     // editor-core-separation-23 campaign, PHASE2 - the bounded, reusable
@@ -559,9 +563,11 @@ RenderFeatureCompositor::PrivateTargetState& RenderFeatureCompositor::EnsurePriv
         return existing->second;
     }
 
+    // better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
+    // `state.opsDescriptorSet = ComputeDescriptorSet(...)` removed - that
+    // field is deleted from PrivateTargetState (it was only ever consumed by
+    // the now-deleted DispatchOps()).
     PrivateTargetState state;
-    state.opsDescriptorSet =
-        ComputeDescriptorSet(m_renderer.AllocateComputeDescriptorSet(m_operationRegistry.OpsDescriptorSetLayout()));
     EnsureTextureSized(state.texture, internedName, extent);
     const auto inserted = m_privateTargetStates.emplace(internedName, std::move(state));
     return inserted.first->second;
@@ -609,44 +615,11 @@ ComputeDescriptorSet& RenderFeatureCompositor::EnsureV3OpDescriptorSet(
     return inserted.first->second;
 }
 
-void RenderFeatureCompositor::DispatchOps(rg::RenderGraphBuilder& builder, rg::TextureHandle privateTarget,
-    const char* stateKey, const char* debugName, const RenderFeatureOpsPushConstants& pushConstants)
-{
-    const auto it = m_privateTargetStates.find(stateKey);
-    // Must already exist - ContributeRenderGraphPasses() creates/resizes it
-    // before constructing the PluginRenderPassBuilderAdapter_v2 that calls
-    // this - a missing entry here is a programmer error, not a
-    // runtime-recoverable one.
-    assert(it != m_privateTargetStates.end()
-        && "RenderFeatureCompositor::DispatchOps: stateKey was never created by ContributeRenderGraphPasses() this "
-           "frame");
-    if (it == m_privateTargetStates.end()) {
-        return;
-    }
-    PrivateTargetState& state = it->second;
-    const VkExtent2D extent = state.texture->Extent();
-
-    builder.AddRenderPass(debugName, rg::PassKind::Compute, rg::ViewScope::Shared, rg::RenderPassCategory::General,
-        [privateTarget](rg::RenderGraphBuilder::PassBuilder& pass) {
-            pass.WriteTexture(privateTarget, rg::ResourceAccess::ComputeShaderWrite);
-        },
-        [this, &state, privateTarget, pushConstants, extent](rg::PassContext& ctx) {
-            const rg::PassContext::ResolvedTexture dest = ctx.resolveTexture(privateTarget);
-            state.opsDescriptorSet.Rewrite(
-                m_device, std::vector<ComputeDescriptorWrite>{ ComputeDescriptorWrite::StorageImage(0, dest.view) });
-
-            RenderFeatureOpsPushConstants localPushConstants = pushConstants;
-            const Extent3D groupCounts =
-                ComputeGroupCount3D(Extent3D{ extent.width, extent.height, 1 }, Extent3D{ 16, 16, 1 });
-
-            m_renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-            m_renderer.Dispatch(m_operationRegistry.OpsPipeline(), state.opsDescriptorSet.Native(),
-                &localPushConstants, sizeof(localPushConstants), groupCounts.width, groupCounts.height,
-                groupCounts.depth);
-            m_renderer.EndGraphPassRecording();
-        },
-        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::AfterEverything);
-}
+// better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
+// DispatchOps() (the `_v2` uber-shader dispatch, RenderFeatureOps.comp)
+// removed outright - its only real caller, PluginRenderPassBuilderAdapter_v2,
+// is deleted this same phase, and its own RenderFeatureOpsPushConstants
+// parameter type lived in the now-deleted PluginRenderOperationRegistry.h.
 
 // better-render-pass-2 campaign, PHASE1 (PHASE1_RELOCATE_SHARED_DEPENDENCIES.md) -
 // the shared blend pipeline (RenderFeatureBlend.comp) construction, RELOCATED
@@ -767,28 +740,17 @@ void RenderFeatureCompositor::ContributeRenderGraphPasses(
     // exactly one entry (N == 1) - a real GPU hazard (a compute pass
     // reading and writing the exact same storage image in one dispatch).
     // The seed dispatch is always a plain Replace copy, regardless of any
-    // individual plugin's own declared blend mode (PHASE5_BLEND_MODE_COMPUTE_SHADER_AND_PREUI_STAGE.md's
-    // own Step 3.2). This method calls m_operationRegistry.EnsureBuiltinsRegistered()
-    // directly, here, before any per-frame descriptor-set/pipeline access
-    // below - so both a _v2-only frame AND a _v3-only frame always have the
-    // registry initialized before the per-entry loop runs; a _v3 plugin's
-    // own Dispatch() call therefore never needs a separate
-    // EnsureBuiltinsRegistered() call site of its own.
+    // individual plugin's own declared blend mode. `m_device` is resolved
+    // directly from m_renderer.GetVulkanContextInfo().device below, before
+    // any per-frame descriptor-set/pipeline access.
     //
-    // editor-core-separation-9 campaign, PHASE2 - a REAL BUG found and fixed
-    // during this phase's own required live smoke test (not merely "compiles
-    // and doesn't crash"): EnsureOpsInitialized()/EnsureBlendPipelineInitialized()
-    // used to be the ONLY methods that ever set this class's own `m_device`
-    // member (used by EnsureTextureSized()'s vkDeviceWaitIdle() and every
-    // DispatchOps()/DispatchBlend() Rewrite() call) - deleting them as part
-    // of the pipeline-ownership migration (Step 3.2) silently left `m_device`
-    // permanently VK_NULL_HANDLE, a real, confirmed ACCESS VIOLATION crash
-    // (0xC0000005) the very first time this method actually did GPU work.
-    // Fixed by sourcing `m_device` from the registry's own already-resolved
-    // VkDevice (GetDevice()) - guaranteed valid immediately after
-    // EnsureBuiltinsRegistered() returns.
-    m_operationRegistry.EnsureBuiltinsRegistered();
-    m_device = m_operationRegistry.GetDevice();
+    // better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
+    // this used to be sourced via m_operationRegistry.EnsureBuiltinsRegistered()/
+    // GetDevice() (editor-core-separation-9 campaign, PHASE2's own fix for a
+    // real, confirmed ACCESS VIOLATION crash from an uninitialized m_device) -
+    // PluginRenderOperationRegistry is deleted outright this phase (ABI-only),
+    // so this now reads the SAME real VkDevice directly off Renderer instead.
+    m_device = m_renderer.GetVulkanContextInfo().device;
 
     const char* seedName = m_namePool.SeedName(viewName);
     BlendStageState& seedState = EnsureBlendStageState(seedName, extent);
@@ -821,20 +783,15 @@ void RenderFeatureCompositor::ContributeRenderGraphPasses(
         const rg::TextureHandle privateTarget =
             frame.builder.ImportTexture(privateName, privateState.texture->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
 
-        if (entry.moduleV3 != nullptr) {
-            PluginRenderPassBuilderAdapter_v3 adapter(frame.builder, privateTarget, m_operationRegistry,
-                m_blackboardAdapter, resolved->target, resolved->sampler, *this,
-                pluginName + "_" + viewName + "_");
-            entry.moduleV3->AddRenderGraphPasses(adapter);
-        } else if (entry.moduleV2 != nullptr) {
-            PluginRenderPassBuilderAdapter_v2 adapter(frame.builder, privateTarget, *this, privateName);
-            entry.moduleV2->AddRenderGraphPasses(adapter);
-        } else if (entry.projectCallback) {
-            // editor-core-separation-23 campaign, PHASE2 - now REACHABLE:
-            // RegisterProjectFeature() constructs Entry objects with
-            // projectCallback set. No adapter object needed here (unlike the
-            // other two arms) - the callback already receives the real
-            // RenderGraphBuilder&/TextureHandle/VkExtent2D directly.
+        // better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
+        // the `entry.moduleV3`/`entry.moduleV2` branches
+        // (PluginRenderPassBuilderAdapter_v3/_v2, both deleted outright this
+        // phase, ABI-only) are removed - neither field is ever set anymore
+        // (nothing can load a plugin since PHASE2 removed the one call site
+        // that ever invoked Core::LoadPlugins()), so this was always a
+        // no-op dead branch at runtime; only the Project Assembly path
+        // survives, completely unchanged.
+        if (entry.projectCallback) {
             entry.projectCallback(frame.builder, privateTarget, extent);
         }
 

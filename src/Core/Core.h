@@ -12,14 +12,13 @@
 #include "../Renderer/Culling/GpuDrivenBatchDebugInfo.h"
 #include "../Renderer/MeshHandle.h"
 #include "../Renderer/PipelineHandle.h"
-// editor-core-separation-9 campaign, PHASE2
-// (PHASE2_OPERATION_REGISTRY_AND_ADAPTER_V3.md) - a plain VALUE member
-// (m_pluginRenderOperationRegistry below), never a pointer/unique_ptr/
-// forward-declared reference - Core.h must #include the FULL type here
-// (unlike IPluginCapabilityOrchestrator/RenderFeatureCompositor, both only
-// ever forward-declared, since Core only ever holds THOSE behind
-// std::unique_ptr/a raw non-owning pointer).
-#include "Plugins/PluginRenderOperationRegistry.h"
+// better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
+// #include "Plugins/PluginRenderOperationRegistry.h" removed, along with
+// the m_pluginRenderOperationRegistry member it backed -
+// PluginRenderOperationRegistry.h/.cpp are deleted outright this phase
+// (ABI-only; the one piece RenderFeatureCompositor still needed from it,
+// the RenderFeatureBlend.comp pipeline, was already pulled fully in-house
+// by PHASE1).
 #include "../Renderer/Renderer.h"
 #include "../Renderer/RenderGraph/RenderGraph.h"
 #include "../Renderer/RenderGraph/RenderPipeline.h"
@@ -35,15 +34,11 @@
 // real `gte` namespace.
 #include "FrameDebuggerCaptureRecorder.h"
 
-// editor-core-separation-3 campaign, PHASE2
-// (PHASE2_PLUGIN_HOST_AND_HELLO_WORLD_HANDSHAKE_PROBE.md) - PluginHost is a
-// concrete, gte_core-owned mechanism class (not a Bucket-B capability
-// interface), so it is included here directly by name, mirroring
-// FrameDebuggerCaptureRecorder.h's own "MUST be file-scope, not inside
-// namespace gte { ... }" placement discipline immediately above (for the
-// exact same reason - this header opens its own `namespace gte { ... }`
-// block).
-#include "Plugins/PluginHost.h"
+// better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
+// #include "Plugins/PluginHost.h" removed, along with the m_pluginHost
+// member/LoadPlugins()/GetPluginHost() it backed - PluginHost.h/.cpp are
+// deleted outright this phase (ABI-only; nothing has called
+// Core::LoadPlugins() since PHASE2 removed EditorHost.cpp's own call site).
 
 // editor-core-separation-11 campaign (Project Assembly system), PHASE5 -
 // mirrors Plugins/PluginHost.h's own "concrete, gte_core-owned mechanism
@@ -326,17 +321,11 @@ public:
     // (Application/EditorHost) concern and never reach Core at all.
     void SetEditorLayerHook(IEditorLayer* editorLayer) noexcept { m_editorLayer = editorLayer; }
 
-    // editor-core-separation-3 campaign, PHASE2
-    // (PHASE2_PLUGIN_HOST_AND_HELLO_WORLD_HANDSHAKE_PROBE.md) -
-    // PHASE0_MASTER_STRATEGY.md's Locked Design Decision #9: plugins load
-    // once, at host-construction time, never re-scanned per frame. Mirrors
-    // SetEditorLayerHook()'s own "small, explicitly host-called method, not a
-    // constructor parameter" precedent exactly - EditorHost's constructor
-    // (gte_editor) calls this exactly once, gated behind
-    // `#if GTE_ENABLE_PLUGINS` at THAT call site (this pass-through method
-    // itself always compiles - see PluginHost.h's own doc comment for why
-    // the class it forwards to is capability-agnostic and mechanical).
-    void LoadPlugins(const std::filesystem::path& pluginsDirectory);
+    // better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
+    // LoadPlugins() removed outright - PluginHost (and the one call site
+    // that ever invoked this method, EditorHost.cpp's own, removed by
+    // PHASE2) are both gone; this mechanism is no longer reachable from
+    // anywhere.
 
     // editor-core-separation-11 campaign (Project Assembly system), PHASE5 -
     // thin pass-through, mirroring LoadPlugins() immediately above exactly.
@@ -445,12 +434,10 @@ public:
     // it as part of this phase.
     AssetDatabase& GetAssetDatabase() noexcept { return m_assetDatabase; }
 
-    // Read accessor for PHASE3 (render-feature capability lookup) and
-    // PHASE4 (editor-panel capability lookup) - both look up capabilities
-    // via AllLoadedModules(), never re-scanning the plugins/ folder
-    // themselves (PHASE0_MASTER_STRATEGY.md's Locked Design Decision #8 -
-    // exactly ONE PluginHost instance/scan per process).
-    const PluginHost& GetPluginHost() const noexcept { return m_pluginHost; }
+    // better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
+    // GetPluginHost() removed outright, along with PluginHost itself
+    // (ABI-only) - its one real caller, LegacyRenderFeatureOrchestrator, is
+    // deleted this same phase.
 
     // editor-core-separation-6 campaign, PHASE7
     // (PHASE7_RENDER_GRAPH_PANEL_VISIBILITY.md) - a plain, zero-cost,
@@ -607,16 +594,11 @@ private:
     // parameter) only; m_renderGraph needs m_renderer already constructed;
     // m_game/m_engineContext have no dependency on either.
     Renderer m_renderer;
-    // editor-core-separation-9 campaign, PHASE2
-    // (PHASE2_OPERATION_REGISTRY_AND_ADAPTER_V3.md) - the ONE
-    // PluginRenderOperationRegistry instance, shared by RenderFeatureCompositor
-    // for the entire process lifetime (constructed in RegisterBuiltinCapabilityOrchestrators(),
-    // called from this class's own constructor BODY - i.e. after every member
-    // is already constructed - so declaration ORDER here only has to satisfy
-    // this member's OWN constructor, which takes `Renderer&` by reference:
-    // must be declared AFTER m_renderer, which it is). Deliberately declared
-    // BEFORE m_capabilityOrchestrators (far below) per this phase's own plan.
-    PluginRenderOperationRegistry m_pluginRenderOperationRegistry;
+    // better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
+    // `PluginRenderOperationRegistry m_pluginRenderOperationRegistry` deleted
+    // outright, along with the type itself (ABI-only; the one piece
+    // RenderFeatureCompositor still needed from it was already pulled fully
+    // in-house by PHASE1).
     rg::RenderGraph m_renderGraph;
     Game m_game;
     EngineContext m_engineContext;
@@ -737,16 +719,16 @@ private:
     // reachable from the host.
     AtmosphereSettings m_atmosphereSettings;
 
-    // editor-core-separation-3 campaign, PHASE2 - see LoadPlugins()/
-    // GetPluginHost()'s own doc comments above. No constructor dependency on
-    // any other Core member, so appended near the end of the private member
-    // list, immediately before m_gameTargetThisFrame/m_sceneTargetThisFrame,
-    // which similarly have no cross-member dependency.
-    PluginHost m_pluginHost;
+    // better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
+    // `PluginHost m_pluginHost` (plus `LoadPlugins()`/`GetPluginHost()`,
+    // removed above) deleted outright - `PluginHost` itself is deleted this
+    // phase (ABI-only; nothing has invoked `Core::LoadPlugins()` since PHASE2
+    // removed `EditorHost.cpp`'s own call site).
 
     // editor-core-separation-11 campaign (Project Assembly system), PHASE5 -
-    // sibling to, but SEPARATE from, m_pluginHost above (LDD1: this is a
-    // new, additive, parallel system, never edits PluginHost itself).
+    // a new, additive, parallel system, sibling to (but always separate from)
+    // the ABI plugin system's own former PluginHost mechanism (deleted,
+    // better-render-pass-2 campaign, PHASE3).
     // Mirrors m_pluginHost's own "no constructor dependency on any other
     // Core member" placement exactly.
     ProjectAssemblyHost m_projectAssemblyHost;

@@ -1,7 +1,12 @@
 #pragma once
 
 #include "IPluginCapabilityOrchestrator.h"
-#include "PluginRenderOperationRegistry.h"
+// better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
+// #include "PluginRenderOperationRegistry.h" removed - that header/its
+// backing .cpp are deleted outright this phase (ABI-only); the one piece
+// this class needed from it (the RenderFeatureBlend.comp pipeline) was
+// already pulled fully in-house by PHASE1 (see m_blendPipeline/
+// m_blendDescriptorSetLayout below).
 #include "ProjectRenderFeatureCallback.h"
 #include "RenderFeatureDebugEntry.h"
 #include "RenderFeatureNamePool.h"
@@ -88,7 +93,10 @@ class Renderer; // forward declaration only - held as a plain reference member;
 
 class RenderFeatureCompositor final : public IPluginCapabilityOrchestrator {
 public:
-    RenderFeatureCompositor(Core& core, Renderer& renderer, PluginRenderOperationRegistry& operationRegistry);
+    // better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
+    // trailing `PluginRenderOperationRegistry& operationRegistry` parameter
+    // removed (that type is deleted outright this phase).
+    RenderFeatureCompositor(Core& core, Renderer& renderer);
 
     void OnPluginsLoaded(const std::vector<IPluginModule*>& modules) override;
     void ContributeRenderGraphPasses(
@@ -109,14 +117,11 @@ public:
     // on a hot render path, and never mutates any of this class's own state.
     std::vector<RenderFeatureDebugEntry> DebugSnapshot() const;
 
-    // Called by PluginRenderPassBuilderAdapter_v2 - dispatches one of the 3
-    // fixed drawing operations (RenderFeatureOps.comp) against the private
-    // target already imported/created for `stateKey` this frame (a
-    // programmer error, not a runtime-recoverable one, if `stateKey` was
-    // never seen by ContributeRenderGraphPasses() first this frame - see
-    // .cpp).
-    void DispatchOps(rg::RenderGraphBuilder& builder, rg::TextureHandle privateTarget, const char* stateKey,
-        const char* debugName, const RenderFeatureOpsPushConstants& pushConstants);
+    // better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
+    // DispatchOps() (the `_v2` uber-shader dispatch, RenderFeatureOps.comp)
+    // removed outright - its only real caller, PluginRenderPassBuilderAdapter_v2,
+    // is deleted this same phase, and its own RenderFeatureOpsPushConstants
+    // parameter type lived in the now-deleted PluginRenderOperationRegistry.h.
 
     // editor-core-separation-8 campaign, PHASE2
     // (PHASE2_PLUGIN_RENDER_FEATURE_ENABLE_DISABLE_AND_PRIORITY.md) - host-side
@@ -284,8 +289,11 @@ private:
     // descriptor set must never be Rewrite()-ed and dispatched against more
     // than once per frame for two DIFFERENT physical resources).
     struct PrivateTargetState {
-        ComputeDescriptorSet opsDescriptorSet; // allocated once, at state-creation time.
-        std::optional<RenderTexture> texture;  // created lazily, first use; resized in place on extent change.
+        // better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
+        // `ComputeDescriptorSet opsDescriptorSet` removed - it was allocated
+        // here unconditionally but only ever consumed by the now-deleted
+        // DispatchOps() (`_v2` uber-shader path, ABI-only).
+        std::optional<RenderTexture> texture; // created lazily, first use; resized in place on extent change.
     };
 
     // Bundles one blend-stage physical slot: either a per-(plugin, view)
@@ -381,16 +389,14 @@ private:
     // constructor). Compared against by AssertCalledFromMainThread() above.
     const std::thread::id m_mainThreadId = std::this_thread::get_id();
 
-    // editor-core-separation-9 campaign, PHASE2 - the ONE
-    // PluginRenderOperationRegistry instance `Core` owns
-    // (`Core::m_pluginRenderOperationRegistry`), shared by this compositor's
-    // own `_v2` DispatchOps() (which sources m_opsPipeline/
-    // m_opsDescriptorSetLayout through it instead of owning them directly)
-    // AND every `_v3` plugin's own PluginRenderPassBuilderAdapter_v3
-    // (constructed by ContributeRenderGraphPasses() below, one per entry).
-    // better-render-pass-2 campaign, PHASE1 - DispatchBlend() no longer
-    // sources anything through this registry - see m_blendPipeline below.
-    PluginRenderOperationRegistry& m_operationRegistry;
+    // better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
+    // `PluginRenderOperationRegistry& m_operationRegistry` removed, along with
+    // the constructor parameter that supplied it - `PluginRenderOperationRegistry`
+    // itself is deleted outright this phase (ABI-only: it backed the `_v2`
+    // DispatchOps() uber-shader dispatch and the `_v3` adapter's own op
+    // registry, both deleted alongside it). `m_device` is now resolved
+    // directly from `m_renderer.GetVulkanContextInfo().device` instead (see
+    // ContributeRenderGraphPasses(), RenderFeatureCompositor.cpp).
 
     // better-render-pass-2 campaign, PHASE1 (PHASE1_RELOCATE_SHARED_DEPENDENCIES.md) -
     // RELOCATED here from PluginRenderOperationRegistry (m_blendPipeline/
