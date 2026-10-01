@@ -62,4 +62,80 @@ TEST(ShaderReflectionTests, NonExistentFileThrowsRuntimeErrorRatherThanCrashing)
         std::runtime_error);
 }
 
+// task_manager/better-render-pass-1 campaign, PHASE2
+// (PHASE2_REFLECTION_BASED_COMPUTE_PIPELINE_CREATION.md) - Tier-1 tests for
+// the new, pure gte::GroupDescriptorBindingsBySet() helper
+// ComputePipeline's own reflection-driven constructor path uses to build
+// one VkDescriptorSetLayout per distinct `set` a shader declares. Hand-
+// built ReflectedDescriptorBinding fixtures only - no real .spv file/VkDevice
+// involved.
+
+namespace {
+
+gte::ReflectedDescriptorBinding MakeBinding(std::uint32_t set, std::uint32_t binding, VkDescriptorType type)
+{
+    gte::ReflectedDescriptorBinding result;
+    result.set = set;
+    result.binding = binding;
+    result.type = type;
+    result.count = 1;
+    return result;
+}
+
+} // namespace
+
+TEST(ShaderReflectionTests, GroupDescriptorBindingsBySetEmptyInputReturnsEmptyResult)
+{
+    const std::vector<gte::ReflectedDescriptorBinding> empty;
+    const std::vector<gte::DescriptorBindingSetGroup> groups = gte::GroupDescriptorBindingsBySet(empty);
+    EXPECT_TRUE(groups.empty());
+}
+
+TEST(ShaderReflectionTests, GroupDescriptorBindingsBySetAllBindingsInSetZero)
+{
+    const std::vector<gte::ReflectedDescriptorBinding> bindings{
+        MakeBinding(0, 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+        MakeBinding(0, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE),
+        MakeBinding(0, 2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
+    };
+
+    const std::vector<gte::DescriptorBindingSetGroup> groups = gte::GroupDescriptorBindingsBySet(bindings);
+
+    ASSERT_EQ(groups.size(), 1u);
+    EXPECT_EQ(groups[0].set, 0u);
+    ASSERT_EQ(groups[0].bindings.size(), 3u);
+    // Relative order within the set must be preserved - never reordered by
+    // binding number.
+    EXPECT_EQ(groups[0].bindings[0].binding, 0u);
+    EXPECT_EQ(groups[0].bindings[1].binding, 1u);
+    EXPECT_EQ(groups[0].bindings[2].binding, 2u);
+}
+
+TEST(ShaderReflectionTests, GroupDescriptorBindingsBySetSplitsAcrossSetZeroAndSetOneInAscendingOrder)
+{
+    // Deliberately interleaved input order (set 1 binding declared before a
+    // later set 0 binding) to prove grouping is driven purely by `.set`,
+    // and the OUTPUT group order is still ascending by set number
+    // regardless of input order.
+    const std::vector<gte::ReflectedDescriptorBinding> bindings{
+        MakeBinding(1, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
+        MakeBinding(0, 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+        MakeBinding(0, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE),
+        MakeBinding(1, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE),
+    };
+
+    const std::vector<gte::DescriptorBindingSetGroup> groups = gte::GroupDescriptorBindingsBySet(bindings);
+
+    ASSERT_EQ(groups.size(), 2u);
+    EXPECT_EQ(groups[0].set, 0u);
+    ASSERT_EQ(groups[0].bindings.size(), 2u);
+    EXPECT_EQ(groups[0].bindings[0].binding, 0u);
+    EXPECT_EQ(groups[0].bindings[1].binding, 1u);
+
+    EXPECT_EQ(groups[1].set, 1u);
+    ASSERT_EQ(groups[1].bindings.size(), 2u);
+    EXPECT_EQ(groups[1].bindings[0].binding, 0u);
+    EXPECT_EQ(groups[1].bindings[1].binding, 1u);
+}
+
 } // namespace

@@ -3,6 +3,7 @@
 #include <spirv_reflect.h>
 
 #include <fstream>
+#include <map>
 #include <stdexcept>
 
 namespace gte {
@@ -141,6 +142,30 @@ ShaderReflectionResult ReflectComputeShader(const std::string& shaderSpirvPath)
         spvReflectDestroyShaderModule(&module);
         throw;
     }
+}
+
+// task_manager/better-render-pass-1 campaign, PHASE2
+// (PHASE2_REFLECTION_BASED_COMPUTE_PIPELINE_CREATION.md) - a plain std::map
+// keyed by `set` keeps distinct set numbers in ascending order "for free"
+// (map iteration order == key order), and each bucket's own std::vector
+// preserves the original relative order of bindings pushed into it
+// (push_back never reorders).
+std::vector<DescriptorBindingSetGroup> GroupDescriptorBindingsBySet(const std::vector<ReflectedDescriptorBinding>& bindings)
+{
+    std::map<std::uint32_t, std::vector<ReflectedDescriptorBinding>> bindingsBySet;
+    for (const ReflectedDescriptorBinding& binding : bindings) {
+        bindingsBySet[binding.set].push_back(binding);
+    }
+
+    std::vector<DescriptorBindingSetGroup> result;
+    result.reserve(bindingsBySet.size());
+    for (auto& [set, groupBindings] : bindingsBySet) {
+        DescriptorBindingSetGroup group;
+        group.set = set;
+        group.bindings = std::move(groupBindings);
+        result.push_back(std::move(group));
+    }
+    return result;
 }
 
 } // namespace gte

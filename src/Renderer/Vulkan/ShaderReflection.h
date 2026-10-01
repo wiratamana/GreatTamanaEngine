@@ -64,4 +64,28 @@ struct ShaderReflectionResult {
 // own three static factories).
 ShaderReflectionResult ReflectComputeShader(const std::string& shaderSpirvPath);
 
+// task_manager/better-render-pass-1 campaign, PHASE2
+// (PHASE2_REFLECTION_BASED_COMPUTE_PIPELINE_CREATION.md) - one `set`
+// number's worth of reflected descriptor bindings, produced by
+// GroupDescriptorBindingsBySet() below so ComputePipeline's new
+// reflection-driven constructor path can build one VkDescriptorSetLayout
+// per distinct `set` a shader declares. Every real compute shader in this
+// engine today uses set = 0 exclusively - this is not hardcoded as an
+// assumption anywhere in the grouping logic itself, though
+// ComputePipeline's own consumption of this result is only proven correct
+// for the contiguous-from-zero case real shaders use (see that class's own
+// comment).
+struct DescriptorBindingSetGroup {
+    std::uint32_t set = 0;
+    std::vector<ReflectedDescriptorBinding> bindings;
+};
+
+// Groups `bindings` by their own `.set` field, returning one
+// DescriptorBindingSetGroup per distinct set value present, in ASCENDING
+// set-number order - each group's own `bindings` preserves the original
+// relative order of the bindings that share that set (never reordered by
+// binding number). An empty `bindings` input returns an empty result. Pure
+// logic, Tier-1-testable - no VkDevice involved anywhere.
+std::vector<DescriptorBindingSetGroup> GroupDescriptorBindingsBySet(const std::vector<ReflectedDescriptorBinding>& bindings);
+
 } // namespace gte
