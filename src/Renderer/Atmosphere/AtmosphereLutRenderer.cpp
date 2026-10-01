@@ -10,7 +10,6 @@
 #include "AtmosphereRenderPassTags.h"
 #include "AtmospherePassToggleLogic.h"
 #include "../RenderGraph/RenderPassToggleRegistry.h"
-#include "../Vulkan/DescriptorSetLayoutBuilder.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -22,26 +21,12 @@ namespace gte {
 
 namespace {
 
-// MUST match Shaders/AtmosphereTransmittanceLut.comp's own
-// `layout(local_size_x = 16, local_size_y = 16) in;` exactly - see
-// ComputeDispatch.h's own header comment on why this pairing is a
-// hand-maintained, per-shader convention rather than something the build
-// system enforces (mirrors ComputeBlurValidation.cpp's own
-// kBoxBlurLocalSizeX/Y precedent).
-constexpr std::uint32_t kTransmittanceLutLocalSizeX = 16;
-constexpr std::uint32_t kTransmittanceLutLocalSizeY = 16;
-
 // Transmittance LUT resolution - see
 // task_manager/atmosphere-scattering-1/ATMOSPHERE_REFERENCE_NOTES.md,
 // Section 2 ("256 x 256", cited from the cloned reference's own
 // tTransmissionLutResolution, src/app.c lines ~203-206).
 constexpr int kTransmittanceLutWidth = 256;
 constexpr int kTransmittanceLutHeight = 256;
-
-// MUST match Shaders/AtmosphereMultiScatteringLut.comp's own
-// `layout(local_size_x = 16, local_size_y = 16) in;` exactly.
-constexpr std::uint32_t kMultiScatteringLutLocalSizeX = 16;
-constexpr std::uint32_t kMultiScatteringLutLocalSizeY = 16;
 
 // Multi-Scattering LUT resolution - see
 // task_manager/atmosphere-scattering-1/ATMOSPHERE_REFERENCE_NOTES.md,
@@ -50,28 +35,12 @@ constexpr std::uint32_t kMultiScatteringLutLocalSizeY = 16;
 constexpr int kMultiScatteringLutWidth = 64;
 constexpr int kMultiScatteringLutHeight = 64;
 
-// MUST match Shaders/AtmosphereSkyViewLut.comp's own
-// `layout(local_size_x = 8, local_size_y = 8) in;` exactly - THIS LUT
-// deliberately uses 8x8, not 16x16, matching the cloned reference's own
-// established convention for this one shader specifically (see
-// _reference/pl-sky/shaders/sky_lut.comp).
-constexpr std::uint32_t kSkyViewLutLocalSizeX = 8;
-constexpr std::uint32_t kSkyViewLutLocalSizeY = 8;
-
 // Sky-View LUT resolution - see
 // task_manager/atmosphere-scattering-1/ATMOSPHERE_REFERENCE_NOTES.md,
 // Section 2 ("200 x 100", cited from the cloned reference's own
 // tSkyLutResolution, src/app.c lines ~203-206).
 constexpr int kSkyViewLutWidth = 200;
 constexpr int kSkyViewLutHeight = 100;
-
-// MUST match Shaders/AtmosphereAerialPerspectiveVolume.comp's own
-// `layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;`
-// exactly - one invocation per froxel COLUMN (the Z loop happens INSIDE
-// each invocation, never a third dispatch axis).
-constexpr std::uint32_t kAerialPerspectiveVolumeLocalSizeX = 8;
-constexpr std::uint32_t kAerialPerspectiveVolumeLocalSizeY = 8;
-constexpr std::uint32_t kAerialPerspectiveVolumeLocalSizeZ = 1;
 
 // Aerial Perspective volume resolution - see
 // task_manager/atmosphere-scattering-1/ATMOSPHERE_REFERENCE_NOTES.md,
@@ -80,11 +49,6 @@ constexpr std::uint32_t kAerialPerspectiveVolumeLocalSizeZ = 1;
 constexpr int kAerialPerspectiveVolumeWidth = 128;
 constexpr int kAerialPerspectiveVolumeHeight = 128;
 constexpr int kAerialPerspectiveVolumeDepth = 32;
-
-// Phase 7 - MUST match Shaders/AtmosphereAerialPerspectiveComposite.comp's
-// own `layout(local_size_x = 16, local_size_y = 16) in;` exactly.
-constexpr std::uint32_t kAerialPerspectiveCompositeLocalSizeX = 16;
-constexpr std::uint32_t kAerialPerspectiveCompositeLocalSizeY = 16;
 
 // Push constants for the Aerial Perspective Composite compute pass - MUST
 // match Shaders/AtmosphereAerialPerspectiveComposite.comp's own
@@ -134,36 +98,27 @@ AtmosphereLutRenderer::AtmosphereLutRenderer()
 
 AtmosphereLutRenderer::~AtmosphereLutRenderer()
 {
+    // better-render-pass-1 campaign, PHASE5
+    // (PHASE5_MIGRATE_ATMOSPHERE_COMPUTE_PASSES.md) - every one of this
+    // class's six VkDescriptorSetLayout handles
+    // (m_transmittanceLutDescriptorSetLayout/
+    // m_multiScatteringLutDescriptorSetLayout/
+    // m_skyViewLutDescriptorSetLayout/
+    // m_aerialPerspectiveVolumeDescriptorSetLayout/
+    // m_aerialPerspectiveCompositeDescriptorSetLayout/
+    // m_aerialPerspectiveVolumeDebugSliceDescriptorSetLayout) is now
+    // BORROWED from its own ComputePipeline's own reflected
+    // ReflectedDescriptorSetLayout(0) - owned and destroyed by that
+    // ComputePipeline itself (ComputePipeline::Destroy()'s own
+    // m_ownedReflectedLayouts cleanup, PHASE2). This destructor must
+    // NEVER destroy any of them itself anymore - doing so would be a
+    // genuine double-free (see PHASE4_COMPLETION_REPORT.md's own
+    // identical finding for CullingPipelines/GpuSkinningPipelines).
     // m_transmittanceLutOutput/m_multiScatteringLutOutput/
     // m_skyViewLutViewStates' own RenderTexture/Buffer members/
     // m_atmosphereParametersBuffer/m_transmittanceLutPipeline/
-    // m_multiScatteringLutPipeline/m_skyViewLutPipeline are RAII types and
-    // clean up themselves; m_transmittanceLutDescriptorSetLayout/
-    // m_multiScatteringLutDescriptorSetLayout/
-    // m_skyViewLutDescriptorSetLayout are plain Vulkan handles this class
-    // owns directly, mirroring ComputeBlurValidation's own identical
-    // destructor shape. Safe to call unconditionally - this object is only
-    // ever owned for as long as the Renderer/VkDevice it was built against
-    // is still alive (its owner is destroyed well before the device goes
-    // away).
-    if (m_transmittanceLutDescriptorSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(m_device, m_transmittanceLutDescriptorSetLayout, nullptr);
-    }
-    if (m_multiScatteringLutDescriptorSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(m_device, m_multiScatteringLutDescriptorSetLayout, nullptr);
-    }
-    if (m_skyViewLutDescriptorSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(m_device, m_skyViewLutDescriptorSetLayout, nullptr);
-    }
-    if (m_aerialPerspectiveVolumeDescriptorSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(m_device, m_aerialPerspectiveVolumeDescriptorSetLayout, nullptr);
-    }
-    if (m_aerialPerspectiveCompositeDescriptorSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(m_device, m_aerialPerspectiveCompositeDescriptorSetLayout, nullptr);
-    }
-    if (m_aerialPerspectiveVolumeDebugSliceDescriptorSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(m_device, m_aerialPerspectiveVolumeDebugSliceDescriptorSetLayout, nullptr);
-    }
+    // m_multiScatteringLutPipeline/m_skyViewLutPipeline/every other
+    // ComputePipeline above are all RAII types and clean up themselves.
 }
 
 void AtmosphereLutRenderer::EnsureTransmittanceLutInitialized(Renderer& renderer, const AtmosphereParametersGpu& params)
@@ -175,18 +130,16 @@ void AtmosphereLutRenderer::EnsureTransmittanceLutInitialized(Renderer& renderer
     const Renderer::VulkanContextInfo context = renderer.GetVulkanContextInfo();
     m_device = context.device;
 
-    // Binding convention (Vulkan/DescriptorSetLayoutBuilder.h's own
-    // documented rule): binding 0 is the read-only AtmosphereParametersGpu
-    // STORAGE buffer (NOT a true uniform buffer - see this class's own
-    // header comment and the strategy document's own "Revision Notes"),
-    // binding 1 is the output image2D - must match
-    // Shaders/AtmosphereTransmittanceLut.comp exactly.
-    DescriptorSetLayoutBuilder layoutBuilder(m_device);
-    m_transmittanceLutDescriptorSetLayout =
-        layoutBuilder.AddStorageBuffer(/*binding=*/0).AddStorageImage(/*binding=*/1).Build();
-
-    m_transmittanceLutPipeline.emplace(renderer.CreateComputePipeline("shaders/AtmosphereTransmittanceLut.comp.spv",
-        std::vector<VkDescriptorSetLayout>{ m_transmittanceLutDescriptorSetLayout }));
+    // Binding convention (better-render-pass-1 campaign, PHASE5 - now
+    // read directly from Shaders/AtmosphereTransmittanceLut.comp's own
+    // compiled SPIR-V via reflection, instead of hand-built here):
+    // binding 0 is the read-only AtmosphereParametersGpu STORAGE buffer
+    // (NOT a true uniform buffer - see this class's own header comment
+    // and the strategy document's own "Revision Notes"), binding 1 is
+    // the output image2D.
+    m_transmittanceLutPipeline.emplace(
+        renderer.CreateComputePipeline("shaders/AtmosphereTransmittanceLut.comp.spv"));
+    m_transmittanceLutDescriptorSetLayout = m_transmittanceLutPipeline->ReflectedDescriptorSetLayout(/*set=*/0);
 
     m_transmittanceLutDescriptorSet =
         ComputeDescriptorSet(renderer.AllocateComputeDescriptorSet(m_transmittanceLutDescriptorSetLayout));
@@ -259,7 +212,7 @@ rg::TextureHandle AtmosphereLutRenderer::AddTransmittanceLutPass(
         [outputHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
             pass.WriteTexture(outputHandle, rg::ResourceAccess::ComputeShaderWrite);
         },
-        [this, &renderer, outputHandle](rg::PassContext& ctx) {
+        [this, outputHandle](rg::PassContext& ctx) {
             const rg::PassContext::ResolvedTexture dest = ctx.resolveTexture(outputHandle);
 
             m_transmittanceLutDescriptorSet.Rewrite(m_device,
@@ -268,15 +221,15 @@ rg::TextureHandle AtmosphereLutRenderer::AddTransmittanceLutPass(
                     ComputeDescriptorWrite::StorageImage(1, dest.view),
                 });
 
-            const Extent3D groupCounts = ComputeGroupCount3D(
-                Extent3D{ static_cast<std::uint32_t>(kTransmittanceLutWidth),
-                    static_cast<std::uint32_t>(kTransmittanceLutHeight), 1 },
-                Extent3D{ kTransmittanceLutLocalSizeX, kTransmittanceLutLocalSizeY, 1 });
-
-            renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-            renderer.Dispatch(*m_transmittanceLutPipeline, m_transmittanceLutDescriptorSet.Native(), nullptr, 0,
-                groupCounts.width, groupCounts.height, groupCounts.depth);
-            renderer.EndGraphPassRecording();
+            // better-render-pass-1 campaign, PHASE5 - migrated onto
+            // rg::CommandBuffer (PHASE3) - DispatchOverSize() reads this
+            // pipeline's own reflected LocalGroupSize() instead of the
+            // now-deleted kTransmittanceLutLocalSizeX/Y constants.
+            auto cmd = ctx.Cmd();
+            cmd.BindComputePipeline(*m_transmittanceLutPipeline);
+            cmd.BindDescriptorSet(m_transmittanceLutDescriptorSet.Native());
+            cmd.DispatchOverSize(static_cast<std::uint32_t>(kTransmittanceLutWidth),
+                static_cast<std::uint32_t>(kTransmittanceLutHeight), 1);
         },
         // render-pass-3 campaign, PHASE4 (root-cause fix) - explicit
         // RenderPassEvent::PreOpaques, matching PHASE0_MASTER_STRATEGY.md's
@@ -311,20 +264,17 @@ void AtmosphereLutRenderer::EnsureMultiScatteringLutInitialized(Renderer& render
     m_device = context.device;
 
     // Binding convention (matches
-    // Shaders/AtmosphereMultiScatteringLut.comp exactly): binding 0 is the
-    // read-only AtmosphereParametersGpu STORAGE buffer (the SAME buffer
-    // AddTransmittanceLutPass() already created/uploads - reused, not
-    // duplicated), binding 1 is the read-only transmittanceLut combined
-    // image sampler, binding 2 is the output image2D.
-    DescriptorSetLayoutBuilder layoutBuilder(m_device);
-    m_multiScatteringLutDescriptorSetLayout = layoutBuilder.AddStorageBuffer(/*binding=*/0)
-                                                   .AddCombinedImageSampler(/*binding=*/1)
-                                                   .AddStorageImage(/*binding=*/2)
-                                                   .Build();
-
+    // Shaders/AtmosphereMultiScatteringLut.comp exactly): binding 0 is
+    // the read-only AtmosphereParametersGpu STORAGE buffer (the SAME
+    // buffer AddTransmittanceLutPass() already created/uploads - reused,
+    // not duplicated), binding 1 is the read-only transmittanceLut
+    // combined image sampler, binding 2 is the output image2D - all now
+    // read directly from Shaders/AtmosphereMultiScatteringLut.comp's own
+    // compiled SPIR-V via reflection (better-render-pass-1 campaign,
+    // PHASE5), instead of hand-built here.
     m_multiScatteringLutPipeline.emplace(
-        renderer.CreateComputePipeline("shaders/AtmosphereMultiScatteringLut.comp.spv",
-            std::vector<VkDescriptorSetLayout>{ m_multiScatteringLutDescriptorSetLayout }));
+        renderer.CreateComputePipeline("shaders/AtmosphereMultiScatteringLut.comp.spv"));
+    m_multiScatteringLutDescriptorSetLayout = m_multiScatteringLutPipeline->ReflectedDescriptorSetLayout(/*set=*/0);
 
     m_multiScatteringLutDescriptorSet =
         ComputeDescriptorSet(renderer.AllocateComputeDescriptorSet(m_multiScatteringLutDescriptorSetLayout));
@@ -380,7 +330,7 @@ rg::TextureHandle AtmosphereLutRenderer::AddMultiScatteringLutPass(rg::RenderGra
             pass.ReadTexture(transmittanceLutHandle, rg::ResourceAccess::ShaderRead);
             pass.WriteTexture(outputHandle, rg::ResourceAccess::ComputeShaderWrite);
         },
-        [this, &renderer, outputHandle](rg::PassContext& ctx) {
+        [this, outputHandle](rg::PassContext& ctx) {
             const rg::PassContext::ResolvedTexture dest = ctx.resolveTexture(outputHandle);
 
             // m_transmittanceLutOutput is the SAME Texture2D
@@ -398,15 +348,15 @@ rg::TextureHandle AtmosphereLutRenderer::AddMultiScatteringLutPass(rg::RenderGra
                     ComputeDescriptorWrite::StorageImage(2, dest.view),
                 });
 
-            const Extent3D groupCounts = ComputeGroupCount3D(
-                Extent3D{ static_cast<std::uint32_t>(kMultiScatteringLutWidth),
-                    static_cast<std::uint32_t>(kMultiScatteringLutHeight), 1 },
-                Extent3D{ kMultiScatteringLutLocalSizeX, kMultiScatteringLutLocalSizeY, 1 });
-
-            renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-            renderer.Dispatch(*m_multiScatteringLutPipeline, m_multiScatteringLutDescriptorSet.Native(), nullptr, 0,
-                groupCounts.width, groupCounts.height, groupCounts.depth);
-            renderer.EndGraphPassRecording();
+            // better-render-pass-1 campaign, PHASE5 - migrated onto
+            // rg::CommandBuffer (PHASE3) - DispatchOverSize() reads this
+            // pipeline's own reflected LocalGroupSize() instead of the
+            // now-deleted kMultiScatteringLutLocalSizeX/Y constants.
+            auto cmd = ctx.Cmd();
+            cmd.BindComputePipeline(*m_multiScatteringLutPipeline);
+            cmd.BindDescriptorSet(m_multiScatteringLutDescriptorSet.Native());
+            cmd.DispatchOverSize(static_cast<std::uint32_t>(kMultiScatteringLutWidth),
+                static_cast<std::uint32_t>(kMultiScatteringLutHeight), 1);
         },
         // render-pass-3 campaign, PHASE4 (root-cause fix) - see
         // AddTransmittanceLutPass()'s own identical comment above.
@@ -434,21 +384,16 @@ void AtmosphereLutRenderer::EnsureSkyViewLutInitialized(Renderer& renderer)
     // Binding convention (matches Shaders/AtmosphereSkyViewLut.comp
     // exactly): binding 0 = AtmosphereParametersGpu (the SAME buffer
     // AddTransmittanceLutPass() already created/uploads - reused, not
-    // duplicated), binding 1 = AtmosphereFrameUniforms (a SECOND read-only
-    // storage buffer, per-VIEW - see m_skyViewLutViewStates), binding 2 =
-    // the read-only transmittanceLut combined image sampler, binding 3 =
-    // the read-only multiScatteringLut combined image sampler, binding 4 =
-    // the output image2D.
-    DescriptorSetLayoutBuilder layoutBuilder(m_device);
-    m_skyViewLutDescriptorSetLayout = layoutBuilder.AddStorageBuffer(/*binding=*/0)
-                                          .AddStorageBuffer(/*binding=*/1)
-                                          .AddCombinedImageSampler(/*binding=*/2)
-                                          .AddCombinedImageSampler(/*binding=*/3)
-                                          .AddStorageImage(/*binding=*/4)
-                                          .Build();
-
-    m_skyViewLutPipeline.emplace(renderer.CreateComputePipeline(
-        "shaders/AtmosphereSkyViewLut.comp.spv", std::vector<VkDescriptorSetLayout>{ m_skyViewLutDescriptorSetLayout }));
+    // duplicated), binding 1 = AtmosphereFrameUniforms (a SECOND
+    // read-only storage buffer, per-VIEW - see m_skyViewLutViewStates),
+    // binding 2 = the read-only transmittanceLut combined image sampler,
+    // binding 3 = the read-only multiScatteringLut combined image
+    // sampler, binding 4 = the output image2D - all now read directly
+    // from Shaders/AtmosphereSkyViewLut.comp's own compiled SPIR-V via
+    // reflection (better-render-pass-1 campaign, PHASE5), instead of
+    // hand-built here.
+    m_skyViewLutPipeline.emplace(renderer.CreateComputePipeline("shaders/AtmosphereSkyViewLut.comp.spv"));
+    m_skyViewLutDescriptorSetLayout = m_skyViewLutPipeline->ReflectedDescriptorSetLayout(/*set=*/0);
 }
 
 AtmosphereLutRenderer::SkyViewLutViewState& AtmosphereLutRenderer::EnsureSkyViewLutViewInitialized(
@@ -517,7 +462,7 @@ rg::TextureHandle AtmosphereLutRenderer::AddSkyViewLutPass(rg::RenderGraphBuilde
             pass.ReadTexture(multiScatteringLutHandle, rg::ResourceAccess::ShaderRead);
             pass.WriteTexture(outputHandle, rg::ResourceAccess::ComputeShaderWrite);
         },
-        [this, &renderer, &viewState, outputHandle](rg::PassContext& ctx) {
+        [this, &viewState, outputHandle](rg::PassContext& ctx) {
             const rg::PassContext::ResolvedTexture dest = ctx.resolveTexture(outputHandle);
 
             // m_transmittanceLutOutput/m_multiScatteringLutOutput are the
@@ -545,14 +490,15 @@ rg::TextureHandle AtmosphereLutRenderer::AddSkyViewLutPass(rg::RenderGraphBuilde
                     ComputeDescriptorWrite::StorageImage(4, dest.view),
                 });
 
-            const Extent3D groupCounts = ComputeGroupCount3D(
-                Extent3D{ static_cast<std::uint32_t>(kSkyViewLutWidth), static_cast<std::uint32_t>(kSkyViewLutHeight), 1 },
-                Extent3D{ kSkyViewLutLocalSizeX, kSkyViewLutLocalSizeY, 1 });
-
-            renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-            renderer.Dispatch(*m_skyViewLutPipeline, viewState.descriptorSet.Native(), nullptr, 0, groupCounts.width,
-                groupCounts.height, groupCounts.depth);
-            renderer.EndGraphPassRecording();
+            // better-render-pass-1 campaign, PHASE5 - migrated onto
+            // rg::CommandBuffer (PHASE3) - DispatchOverSize() reads this
+            // pipeline's own reflected LocalGroupSize() instead of the
+            // now-deleted kSkyViewLutLocalSizeX/Y constants.
+            auto cmd = ctx.Cmd();
+            cmd.BindComputePipeline(*m_skyViewLutPipeline);
+            cmd.BindDescriptorSet(viewState.descriptorSet.Native());
+            cmd.DispatchOverSize(
+                static_cast<std::uint32_t>(kSkyViewLutWidth), static_cast<std::uint32_t>(kSkyViewLutHeight), 1);
         },
         // render-pass-3 campaign, PHASE4 (root-cause fix) - see
         // AddTransmittanceLutPass()'s own identical comment above (this
@@ -586,18 +532,14 @@ void AtmosphereLutRenderer::EnsureAerialPerspectiveVolumeInitialized(Renderer& r
     // - see m_aerialPerspectiveVolumeViewStates), binding 2 = the read-only
     // transmittanceLut combined image sampler, binding 3 = the read-only
     // multiScatteringLut combined image sampler, binding 4 = the output
-    // image3D.
-    DescriptorSetLayoutBuilder layoutBuilder(m_device);
-    m_aerialPerspectiveVolumeDescriptorSetLayout = layoutBuilder.AddStorageBuffer(/*binding=*/0)
-                                                        .AddStorageBuffer(/*binding=*/1)
-                                                        .AddCombinedImageSampler(/*binding=*/2)
-                                                        .AddCombinedImageSampler(/*binding=*/3)
-                                                        .AddStorageImage(/*binding=*/4)
-                                                        .Build();
-
+    // image3D - all now read directly from
+    // Shaders/AtmosphereAerialPerspectiveVolume.comp's own compiled
+    // SPIR-V via reflection (better-render-pass-1 campaign, PHASE5),
+    // instead of hand-built here.
     m_aerialPerspectiveVolumePipeline.emplace(
-        renderer.CreateComputePipeline("shaders/AtmosphereAerialPerspectiveVolume.comp.spv",
-            std::vector<VkDescriptorSetLayout>{ m_aerialPerspectiveVolumeDescriptorSetLayout }));
+        renderer.CreateComputePipeline("shaders/AtmosphereAerialPerspectiveVolume.comp.spv"));
+    m_aerialPerspectiveVolumeDescriptorSetLayout =
+        m_aerialPerspectiveVolumePipeline->ReflectedDescriptorSetLayout(/*set=*/0);
 }
 
 AtmosphereLutRenderer::AerialPerspectiveVolumeViewState& AtmosphereLutRenderer::EnsureAerialPerspectiveVolumeViewInitialized(
@@ -666,7 +608,7 @@ rg::VolumeTextureHandle AtmosphereLutRenderer::AddAerialPerspectiveVolumePass(rg
             pass.ReadTexture(multiScatteringLutHandle, rg::ResourceAccess::ShaderRead);
             pass.WriteVolumeTexture(outputHandle, rg::ResourceAccess::ComputeShaderWrite);
         },
-        [this, &renderer, &viewState, outputHandle](rg::PassContext& ctx) {
+        [this, &viewState, outputHandle](rg::PassContext& ctx) {
             const rg::PassContext::ResolvedVolumeTexture dest = ctx.resolveVolumeTexture(outputHandle);
 
             // m_transmittanceLutOutput/m_multiScatteringLutOutput are the
@@ -691,20 +633,20 @@ rg::VolumeTextureHandle AtmosphereLutRenderer::AddAerialPerspectiveVolumePass(rg
                 });
 
             // One dispatch group covers exactly ONE froxel column each -
-            // never dispatched across Z at all (kAerialPerspectiveVolumeLocalSizeZ
-            // == 1, and the Z axis's own "total items" is 1, not the
-            // volume's real depth - each invocation loops every Z slice
-            // internally, see AtmosphereAerialPerspectiveVolume.comp).
-            const Extent3D groupCounts = ComputeGroupCount3D(
-                Extent3D{ static_cast<std::uint32_t>(kAerialPerspectiveVolumeWidth),
-                    static_cast<std::uint32_t>(kAerialPerspectiveVolumeHeight), 1 },
-                Extent3D{ kAerialPerspectiveVolumeLocalSizeX, kAerialPerspectiveVolumeLocalSizeY,
-                    kAerialPerspectiveVolumeLocalSizeZ });
-
-            renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-            renderer.Dispatch(*m_aerialPerspectiveVolumePipeline, viewState.descriptorSet.Native(), nullptr, 0,
-                groupCounts.width, groupCounts.height, groupCounts.depth);
-            renderer.EndGraphPassRecording();
+            // never dispatched across Z at all (the pipeline's own
+            // reflected LocalGroupSize().depth == 1, and this call's own Z
+            // "total items" argument is 1, not the volume's real depth -
+            // each invocation loops every Z slice internally, see
+            // AtmosphereAerialPerspectiveVolume.comp). better-render-pass-1
+            // campaign, PHASE5 - migrated onto rg::CommandBuffer (PHASE3) -
+            // DispatchOverSize() reads this pipeline's own reflected
+            // LocalGroupSize() instead of the now-deleted
+            // kAerialPerspectiveVolumeLocalSizeX/Y/Z constants.
+            auto cmd = ctx.Cmd();
+            cmd.BindComputePipeline(*m_aerialPerspectiveVolumePipeline);
+            cmd.BindDescriptorSet(viewState.descriptorSet.Native());
+            cmd.DispatchOverSize(static_cast<std::uint32_t>(kAerialPerspectiveVolumeWidth),
+                static_cast<std::uint32_t>(kAerialPerspectiveVolumeHeight), 1);
         },
         // render-pass-3 campaign, PHASE4 (root-cause fix) - see
         // AddTransmittanceLutPass()'s own identical comment above (this
@@ -723,29 +665,17 @@ void AtmosphereLutRenderer::EnsureAerialPerspectiveCompositeInitialized(Renderer
     const Renderer::VulkanContextInfo context = renderer.GetVulkanContextInfo();
     m_device = context.device;
 
-    // Binding convention (matches
-    // Shaders/AtmosphereAerialPerspectiveComposite.comp exactly): binding 0
-    // = sourceColor, binding 1 = sourceDepth, binding 2 =
-    // aerialPerspectiveVolume (all read-only combined image samplers),
-    // binding 3 = the output image2D.
-    DescriptorSetLayoutBuilder layoutBuilder(m_device);
-    m_aerialPerspectiveCompositeDescriptorSetLayout = layoutBuilder.AddCombinedImageSampler(/*binding=*/0)
-                                                            .AddCombinedImageSampler(/*binding=*/1)
-                                                            .AddCombinedImageSampler(/*binding=*/2)
-                                                            .AddStorageImage(/*binding=*/3)
-                                                            .Build();
-
-    // Compute-stage push constants - never a per-view uniform/storage
-    // buffer here (see this class's own header comment) - matches
-    // BoxBlur.comp's own simple push-constant convention.
-    VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(AerialPerspectiveCompositePushConstants);
-
+    // better-render-pass-1 campaign, PHASE5
+    // (PHASE5_MIGRATE_ATMOSPHERE_COMPUTE_PASSES.md) - path-only
+    // CreateComputePipeline(): binding 0 = sourceColor, binding 1 =
+    // sourceDepth, binding 2 = aerialPerspectiveVolume, binding 3 = the
+    // output image2D, plus the push-constant block - all now read
+    // directly from Shaders/AtmosphereAerialPerspectiveComposite.comp's
+    // own compiled SPIR-V via reflection, instead of hand-built here.
     m_aerialPerspectiveCompositePipeline.emplace(
-        renderer.CreateComputePipeline("shaders/AtmosphereAerialPerspectiveComposite.comp.spv",
-            std::vector<VkDescriptorSetLayout>{ m_aerialPerspectiveCompositeDescriptorSetLayout }, pushConstantRange));
+        renderer.CreateComputePipeline("shaders/AtmosphereAerialPerspectiveComposite.comp.spv"));
+    m_aerialPerspectiveCompositeDescriptorSetLayout =
+        m_aerialPerspectiveCompositePipeline->ReflectedDescriptorSetLayout(/*set=*/0);
 }
 
 AtmosphereLutRenderer::AerialPerspectiveCompositeViewState&
@@ -845,7 +775,7 @@ rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveCompositePass(rg::R
             pass.ReadVolumeTexture(aerialPerspectiveVolumeHandle, rg::ResourceAccess::ShaderRead);
             pass.WriteTexture(outputHandle, rg::ResourceAccess::ComputeShaderWrite);
         },
-        [this, &renderer, &viewState, sourceColorHandle, sourceColorSampler, sourceDepthView, sourceDepthSampler,
+        [this, &viewState, sourceColorHandle, sourceColorSampler, sourceDepthView, sourceDepthSampler,
             aerialPerspectiveVolumeHandle, aerialVolumeSampler, outputHandle, pushConstants,
             extent](rg::PassContext& ctx) {
             const rg::PassContext::ResolvedTexture sourceColor = ctx.resolveTexture(sourceColorHandle);
@@ -871,14 +801,15 @@ rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveCompositePass(rg::R
 
             AerialPerspectiveCompositePushConstants localPushConstants = pushConstants;
 
-            const Extent3D groupCounts = ComputeGroupCount3D(Extent3D{ extent.width, extent.height, 1 },
-                Extent3D{ kAerialPerspectiveCompositeLocalSizeX, kAerialPerspectiveCompositeLocalSizeY, 1 });
-
-            renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-            renderer.Dispatch(*m_aerialPerspectiveCompositePipeline, viewState.descriptorSet.Native(),
-                &localPushConstants, sizeof(localPushConstants), groupCounts.width, groupCounts.height,
-                groupCounts.depth);
-            renderer.EndGraphPassRecording();
+            // better-render-pass-1 campaign, PHASE5 - migrated onto
+            // rg::CommandBuffer (PHASE3) - DispatchOverSize() reads this
+            // pipeline's own reflected LocalGroupSize() instead of the
+            // now-deleted kAerialPerspectiveCompositeLocalSizeX/Y constants.
+            auto cmd = ctx.Cmd();
+            cmd.BindComputePipeline(*m_aerialPerspectiveCompositePipeline);
+            cmd.BindDescriptorSet(viewState.descriptorSet.Native());
+            cmd.SetPushConstants(localPushConstants);
+            cmd.DispatchOverSize(extent.width, extent.height, 1);
         },
         // render-pass-3 campaign, PHASE4 (root-cause fix) - explicit
         // RenderPassEvent::AfterTransparents, matching
@@ -935,23 +866,17 @@ void AtmosphereLutRenderer::EnsureAerialPerspectiveVolumeDebugSliceInitialized(R
     const Renderer::VulkanContextInfo context = renderer.GetVulkanContextInfo();
     m_device = context.device;
 
-    // Binding convention (matches
-    // Shaders/AtmosphereAerialPerspectiveVolumeDebugSlice.comp exactly):
-    // binding 0 = the source volume's own trilinear sampler3D (read-only
-    // combined image sampler), binding 1 = the output image2D.
-    DescriptorSetLayoutBuilder layoutBuilder(m_device);
-    m_aerialPerspectiveVolumeDebugSliceDescriptorSetLayout =
-        layoutBuilder.AddCombinedImageSampler(/*binding=*/0).AddStorageImage(/*binding=*/1).Build();
-
-    VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(AerialPerspectiveVolumeDebugSlicePushConstants);
-
+    // better-render-pass-1 campaign, PHASE5
+    // (PHASE5_MIGRATE_ATMOSPHERE_COMPUTE_PASSES.md) - path-only
+    // CreateComputePipeline(): binding 0 = the source volume's own
+    // trilinear sampler3D, binding 1 = the output image2D, plus the
+    // push-constant block - all now read directly from
+    // Shaders/AtmosphereAerialPerspectiveVolumeDebugSlice.comp's own
+    // compiled SPIR-V via reflection, instead of hand-built here.
     m_aerialPerspectiveVolumeDebugSlicePipeline.emplace(
-        renderer.CreateComputePipeline("shaders/AtmosphereAerialPerspectiveVolumeDebugSlice.comp.spv",
-            std::vector<VkDescriptorSetLayout>{ m_aerialPerspectiveVolumeDebugSliceDescriptorSetLayout },
-            pushConstantRange));
+        renderer.CreateComputePipeline("shaders/AtmosphereAerialPerspectiveVolumeDebugSlice.comp.spv"));
+    m_aerialPerspectiveVolumeDebugSliceDescriptorSetLayout =
+        m_aerialPerspectiveVolumeDebugSlicePipeline->ReflectedDescriptorSetLayout(/*set=*/0);
 }
 
 AtmosphereLutRenderer::AerialPerspectiveVolumeDebugSliceViewState&
@@ -1036,7 +961,7 @@ rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveVolumeDebugSlicePas
             pass.ReadVolumeTexture(aerialPerspectiveVolumeHandle, rg::ResourceAccess::ShaderRead);
             pass.WriteTexture(outputHandle, rg::ResourceAccess::ComputeShaderWrite);
         },
-        [this, &renderer, &viewState, sourceVolumeView, sourceVolumeSampler, outputHandle, pushConstants, volumeWidth,
+        [this, &viewState, sourceVolumeView, sourceVolumeSampler, outputHandle, pushConstants, volumeWidth,
             volumeHeight](rg::PassContext& ctx) {
             const rg::PassContext::ResolvedTexture dest = ctx.resolveTexture(outputHandle);
 
@@ -1048,15 +973,19 @@ rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveVolumeDebugSlicePas
 
             AerialPerspectiveVolumeDebugSlicePushConstants localPushConstants = pushConstants;
 
-            const Extent3D groupCounts = ComputeGroupCount3D(
-                Extent3D{ static_cast<std::uint32_t>(volumeWidth), static_cast<std::uint32_t>(volumeHeight), 1 },
-                Extent3D{ kAerialPerspectiveVolumeDebugSliceLocalSizeX, kAerialPerspectiveVolumeDebugSliceLocalSizeY, 1 });
-
-            renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-            renderer.Dispatch(*m_aerialPerspectiveVolumeDebugSlicePipeline, viewState.descriptorSet.Native(),
-                &localPushConstants, sizeof(localPushConstants), groupCounts.width, groupCounts.height,
-                groupCounts.depth);
-            renderer.EndGraphPassRecording();
+            // better-render-pass-1 campaign, PHASE5 - migrated onto
+            // rg::CommandBuffer (PHASE3) - DispatchOverSize() reads this
+            // pipeline's own reflected LocalGroupSize() instead of the
+            // hand-restated kAerialPerspectiveVolumeDebugSliceLocalSizeX/Y
+            // constants (still kept - CaptureAerialPerspectiveVolumeSliceImmediate()
+            // below still references them directly for its own raw,
+            // non-RenderGraph vkCmdDispatch() call).
+            auto cmd = ctx.Cmd();
+            cmd.BindComputePipeline(*m_aerialPerspectiveVolumeDebugSlicePipeline);
+            cmd.BindDescriptorSet(viewState.descriptorSet.Native());
+            cmd.SetPushConstants(localPushConstants);
+            cmd.DispatchOverSize(
+                static_cast<std::uint32_t>(volumeWidth), static_cast<std::uint32_t>(volumeHeight), 1);
         },
         // render-pass-3 campaign, PHASE4 (root-cause fix) - see
         // AddTransmittanceLutPass()'s own identical comment above (this
