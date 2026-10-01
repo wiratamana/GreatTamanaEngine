@@ -393,36 +393,40 @@ void BuildGpuDrivenBatchesSection(const std::vector<GpuDrivenBatchDebugInfo>& ba
 }
 
 // editor-core-separation-6 campaign, PHASE7
-// (PHASE7_RENDER_GRAPH_PANEL_VISIBILITY.md) - one line per loaded
-// `IRenderFeatureModule_v2` entry, mirroring
-// BuildGpuDrivenBatchesSection()'s own exact shape immediately above: a
-// free function taking a small, already-CPU-side-collected
-// std::vector<RenderFeatureDebugEntry>, `ImGui::SeparatorText(...)` + a loop
-// of `ImGui::Text(...)` calls - no new ImGui widget kind, no new panel, no
-// per-frame GPU readback. `entries` is never frozen by this panel's own
-// Pause control (unlike the two RenderGraphSnapshot regimes and the
-// GPU-driven-batch readout above) - RenderFeatureCompositor::OnPluginsLoaded()
-// resolves this ordering exactly ONCE, at plugin-load time, and it never
-// changes again for the remaining lifetime of the process, so there is
-// nothing for "Pause" to usefully freeze here.
+// (PHASE7_RENDER_GRAPH_PANEL_VISIBILITY.md) - one line per registered
+// render-feature entry, mirroring BuildGpuDrivenBatchesSection()'s own exact
+// shape immediately above: a free function taking a small, already-CPU-side-
+// collected std::vector<RenderFeatureDebugEntry>, `ImGui::SeparatorText(...)`
+// + a loop of `ImGui::Text(...)` calls - no new ImGui widget kind, no new
+// panel, no per-frame GPU readback. `entries` is never frozen by this
+// panel's own Pause control (unlike the two RenderGraphSnapshot regimes and
+// the GPU-driven-batch readout above).
 //
 // editor-core-separation-8 campaign, PHASE4
 // (PHASE4_RENDER_GRAPH_PANEL_CONTROLS.md, Step 3.3) - gains a per-entry
 // "Enabled" checkbox and an editable priority field, both live-mutating
 // `renderFeatureCompositor` directly (main-thread-only, same as
 // BuildPassRow()'s new checkbox above - see PHASE0_MASTER_STRATEGY.md's Step
-// 2.6). `renderFeatureCompositor == nullptr` (no loaded _v2 plugin / a
-// degraded build) means the widgets still render but any edit is silently a
-// no-op - mirrors this whole campaign's "null bridge/pointer degrades
-// gracefully, never crashes" discipline; deliberately NOT wrapped in
-// ImGui::BeginDisabled() for this, since a transient null is not a real,
-// reachable, steady-state UI mode worth a special disabled-look here.
-void BuildPluginRenderFeaturesSection(
+// 2.6). `renderFeatureCompositor == nullptr` (a degraded build) means the
+// widgets still render but any edit is silently a no-op - mirrors this whole
+// campaign's "null bridge/pointer degrades gracefully, never crashes"
+// discipline; deliberately NOT wrapped in ImGui::BeginDisabled() for this,
+// since a transient null is not a real, reachable, steady-state UI mode
+// worth a special disabled-look here.
+//
+// better-render-pass-2 campaign, PHASE5 (PHASE5_CLEAN_RENDER_FEATURE_COMPOSITOR_INTERNALS.md,
+// STEP 5.2.4) - renamed from BuildPluginRenderFeaturesSection()/"Plugin
+// Render Features" to BuildRenderFeaturesSection()/"Render Features" - the
+// `plugins/gte_plugin_abi` ABI system this section used to describe is fully
+// removed as of this campaign; every surviving entry here is a Project
+// Assembly render feature (see entry.isProjectFeature's own "[Project]" tag
+// below). Purely cosmetic - zero behavior change.
+void BuildRenderFeaturesSection(
     const std::vector<RenderFeatureDebugEntry>& entries, RenderFeatureCompositor* renderFeatureCompositor)
 {
-    ImGui::SeparatorText("Plugin Render Features");
+    ImGui::SeparatorText("Render Features");
     if (entries.empty()) {
-        ImGui::TextDisabled("No loaded plugin implements IRenderFeatureModule_v2 this session.");
+        ImGui::TextDisabled("No render features are currently registered.");
         return;
     }
 
@@ -432,7 +436,7 @@ void BuildPluginRenderFeaturesSection(
         // bare ImGui::PushID(entry.name.c_str())/PopID() pair with the same
         // LATENT "two entries could share a name" shape as the reported
         // bug, even though no real collision has ever been observed here.
-        ScopedUniqueId idScope(static_cast<int>(i), "RenderGraphPanel::BuildPluginRenderFeaturesSection", entry.name.c_str());
+        ScopedUniqueId idScope(static_cast<int>(i), "RenderGraphPanel::BuildRenderFeaturesSection", entry.name.c_str());
 
         bool enabled = entry.enabled;
         if (ImGui::Checkbox("##FeatureEnabled", &enabled) && renderFeatureCompositor != nullptr) {
@@ -567,7 +571,7 @@ void RenderGraphPanel::Build(EditorContext& ctx, const rg::RenderGraph& renderGr
     // GPU-Driven Batches section (same "live, actionable ordering signal,
     // shown early, before the two much-longer regime pass/resource tables"
     // placement logic that section's own comment already documents).
-    BuildPluginRenderFeaturesSection(metadata.renderFeatures, renderFeatureCompositor);
+    BuildRenderFeaturesSection(metadata.renderFeatures, renderFeatureCompositor);
     ImGui::Spacing();
 
     // editor-core-separation-21 campaign, PHASE2
@@ -582,12 +586,12 @@ void RenderGraphPanel::Build(EditorContext& ctx, const rg::RenderGraph& renderGr
     const std::vector<rg::RenderPassToggleState> toggleStatesBeforeThisPanelsOwnUi = renderPassToggleRegistry.ListAll();
     // editor-core-separation-8 campaign, PHASE4
     // (PHASE4_RENDER_GRAPH_PANEL_CONTROLS.md, Step 3.4) - placed immediately
-    // after Plugin Render Features and BEFORE the two regime sections, so a
+    // after Render Features and BEFORE the two regime sections, so a
     // caller sees "what's currently OFF" before scrolling past the (often
     // much longer) live pass/resource tables - mirrors this file's own
-    // existing placement rationale for GPU-Driven Batches/Plugin Render
-    // Features above ("this panel's own newest, most immediately actionable
-    // live signal, shown early").
+    // existing placement rationale for GPU-Driven Batches/Render Features
+    // above ("this panel's own newest, most immediately actionable live
+    // signal, shown early").
     BuildDisabledBuiltInPassesSection(renderPassToggleRegistry);
     ImGui::Spacing();
 

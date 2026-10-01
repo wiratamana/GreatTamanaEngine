@@ -1549,20 +1549,12 @@ if(TRUE)
     gte_add_shader(GreatTamanaEditor src/Shaders/BoxBlur.comp)
 endif()
 
-# editor-core-separation-9 campaign, PHASE3
-# (PHASE3_GENERIC_RESOURCE_PLUMBING_AND_BLUR_DEMO_PROOF.md, Step 3.1) - the
-# `gte.builtin.blit_fullscreen` plugin registry operation's own shaders
-# (src/Core/Plugins/PluginRenderOperationRegistry.cpp's own
-# RegisterBlitFullscreen()) - a minimal fullscreen-triangle passthrough
-# fragment shader, this campaign's one brand-new, tiny, additive
-# GRAPHICS-kind registry operation. Always compiled/staged, since
-# PluginRenderOperationRegistry.cpp - the only thing that ever loads these -
-# is always compiled into gte_core today (same precedent as BoxBlur.comp
-# immediately above).
-if(TRUE)
-    gte_add_shader(GreatTamanaEditor src/Shaders/PluginBlitFullscreen.vert)
-    gte_add_shader(GreatTamanaEditor src/Shaders/PluginBlitFullscreen.frag)
-endif()
+# better-render-pass-2 campaign, PHASE5 (PHASE5_CLEAN_RENDER_FEATURE_COMPOSITOR_INTERNALS.md,
+# STEP 5.3) - the `gte.builtin.blit_fullscreen` plugin registry operation's own
+# shaders (PluginBlitFullscreen.vert/.frag) removed outright, alongside
+# `src/Shaders/PluginBlitFullscreen.vert`/`.frag` themselves - ABI-only, their
+# one registrant (`PluginRenderOperationRegistry::RegisterBlitFullscreen()`)
+# was already deleted in PHASE3 of this same campaign.
 
 # task_manager/mrt-1 campaign (Multi-Render-Target / G-Buffer support),
 # PHASE4 (PHASE4_GBUFFER_VALIDATION_PASS_AND_SHADER.md) - the "GBuffer
@@ -1663,17 +1655,19 @@ gte_add_shader(GreatTamanaEditor src/Shaders/VolumeTexturePreview.comp)
 
 # editor-core-separation-6 campaign, PHASE4/PHASE5
 # (PHASE4_RENDER_FEATURE_COMPOSITOR_CORE_AND_ORDERING.md /
-# PHASE5_BLEND_MODE_COMPUTE_SHADER_AND_PREUI_STAGE.md) - the `_v2`
-# render-feature compositor's own two compute shaders: RenderFeatureOps.comp
-# (the "uber" shader implementing all 3 fixed IPluginRenderPassBuilder_v2
-# drawing operations, opCode-selected) and RenderFeatureBlend.comp (the
-# real, permanent, 5-mode blend uber-shader - PHASE5 replaced PHASE4's own
-# throwaway RenderFeatureBlendStub.comp with this). Same unconditional (NOT
-# GTE_ENABLE_EDITOR-gated) treatment as every other core Renderer-tier
-# shader above - RenderFeatureCompositor is always compiled into gte_core
-# (src/Core/Plugins/RenderFeatureCompositor.cpp). Neither #includes
-# AtmosphereCommon.glsl, so no EXTRA_DEPENDS.
-gte_add_shader(GreatTamanaEditor src/Shaders/RenderFeatureOps.comp)
+# PHASE5_BLEND_MODE_COMPUTE_SHADER_AND_PREUI_STAGE.md) - RenderFeatureBlend.comp,
+# the real, permanent, 5-mode blend uber-shader (Replace/AlphaOver/Additive/
+# Multiply/ScreenSpaceMask), now fully owned by RenderFeatureCompositor
+# (better-render-pass-2 campaign, PHASE1 - RELOCATE_SHARED_DEPENDENCIES.md).
+# Same unconditional (NOT GTE_ENABLE_EDITOR-gated) treatment as every other
+# core Renderer-tier shader above - RenderFeatureCompositor is always
+# compiled into gte_core (src/Core/Plugins/RenderFeatureCompositor.cpp).
+# Does NOT #include AtmosphereCommon.glsl, so no EXTRA_DEPENDS.
+# better-render-pass-2 campaign, PHASE5 (PHASE5_CLEAN_RENDER_FEATURE_COMPOSITOR_INTERNALS.md,
+# STEP 5.3) - RenderFeatureOps.comp (the `_v2` uber-shader implementing the 3
+# fixed IPluginRenderPassBuilder_v2 drawing operations, opCode-selected) and
+# its own gte_add_shader() line removed outright - ABI-only, unreachable
+# since DispatchOps() itself was deleted in PHASE3 of this same campaign.
 gte_add_shader(GreatTamanaEditor src/Shaders/RenderFeatureBlend.comp)
 
 # task_manager/frame-debugger-3 campaign, PHASE6
