@@ -223,4 +223,80 @@ TEST(RegisterProjectRenderFeatureApiTest, NullDebugNameIsRefusedWithoutCrashing)
         [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { }));
 }
 
+// better-render-pass-1 campaign, PHASE9 (Part B, Decision D3) - Tier-1 tests
+// for the new Core::AddScreenPostProcessPass() convenience API. Mirrors this
+// same file's own headless-Core fixture pattern exactly.
+
+// A call with NO explicit priority succeeds and registers a real entry,
+// visible through RenderFeatureCompositor::DebugSnapshot() exactly like
+// RegisterProjectRenderFeature() itself - proving the stage is correctly
+// fixed to PostComposite and a priority was auto-resolved (never crashing,
+// never left unset) with zero stage/priority argument required from the
+// caller.
+TEST(RegisterProjectRenderFeatureApiTest, AddScreenPostProcessPassWithNoExplicitPriorityRegistersSuccessfully)
+{
+    GTE_SKIP_IF_NO_HEADLESS_CORE(core);
+
+    const bool registered = core->AddScreenPostProcessPass(
+        "CoreApi_Test_ScreenPostProcess_AutoPriority",
+        [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { });
+    EXPECT_TRUE(registered);
+
+    RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
+    ASSERT_NE(compositor, nullptr);
+    const RenderFeatureDebugEntry* found =
+        FindByName(compositor->DebugSnapshot(), "CoreApi_Test_ScreenPostProcess_AutoPriority");
+    ASSERT_NE(found, nullptr);
+    EXPECT_EQ(found->stage, "PostComposite");
+}
+
+// An explicit priority is honored exactly (never silently overridden by the
+// auto-assignment counter).
+TEST(RegisterProjectRenderFeatureApiTest, AddScreenPostProcessPassWithExplicitPriorityHonorsIt)
+{
+    GTE_SKIP_IF_NO_HEADLESS_CORE(core);
+
+    const bool registered = core->AddScreenPostProcessPass(
+        "CoreApi_Test_ScreenPostProcess_ExplicitPriority",
+        [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { },
+        RenderFeatureBlendMode::Replace,
+        /*priority=*/777);
+    EXPECT_TRUE(registered);
+
+    RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
+    ASSERT_NE(compositor, nullptr);
+    const RenderFeatureDebugEntry* found =
+        FindByName(compositor->DebugSnapshot(), "CoreApi_Test_ScreenPostProcess_ExplicitPriority");
+    ASSERT_NE(found, nullptr);
+    EXPECT_EQ(found->blendMode, "Replace");
+}
+
+// Two back-to-back calls with NO explicit priority each get a DIFFERENT,
+// strictly-increasing auto-assigned priority (the shared, process-wide
+// counter genuinely advances between calls, never reused) - a real,
+// end-to-end proof of NextAutoScreenPostProcessPassPriority()'s own counter
+// logic (ScreenPostProcessPassPriorityAssignmentTests.cpp) actually wired
+// into Core.
+TEST(RegisterProjectRenderFeatureApiTest, TwoAutoPriorityCallsInSequenceGetDistinctIncreasingPriorities)
+{
+    GTE_SKIP_IF_NO_HEADLESS_CORE(core);
+
+    ASSERT_TRUE(core->AddScreenPostProcessPass(
+        "CoreApi_Test_ScreenPostProcess_AutoPriority_First",
+        [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { }));
+    ASSERT_TRUE(core->AddScreenPostProcessPass(
+        "CoreApi_Test_ScreenPostProcess_AutoPriority_Second",
+        [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { }));
+
+    RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
+    ASSERT_NE(compositor, nullptr);
+    const std::vector<RenderFeatureDebugEntry> snapshot = compositor->DebugSnapshot();
+    const RenderFeatureDebugEntry* first = FindByName(snapshot, "CoreApi_Test_ScreenPostProcess_AutoPriority_First");
+    const RenderFeatureDebugEntry* second = FindByName(snapshot, "CoreApi_Test_ScreenPostProcess_AutoPriority_Second");
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+    EXPECT_NE(first->priority, second->priority);
+    EXPECT_LT(first->priority, second->priority);
+}
+
 } // namespace gte

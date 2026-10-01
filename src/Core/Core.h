@@ -401,6 +401,24 @@ public:
     // name - no separate length check needed here).
     void UnregisterProjectRenderFeature(const char* debugName);
 
+    // better-render-pass-1 campaign, PHASE9 (Decision D3) - additive
+    // convenience wrapper over RegisterProjectRenderFeature() immediately
+    // above: fixes stage to RenderFeatureStage::PostComposite (the one,
+    // real "draw over the final composited screen" hook point this concept
+    // means), and auto-assigns a collision-tolerant priority at RUNTIME (a
+    // simple, monotonically-incrementing counter - see Core.cpp) when the
+    // caller does not supply one explicitly. Cuts the common case down to
+    // ONE call: core.AddScreenPostProcessPass("Name",
+    // [](rg::RenderGraphBuilder& builder, rg::TextureHandle target,
+    // VkExtent2D extent) { ... }); - no stage/priority argument required at
+    // all. RegisterProjectRenderFeature() itself is UNCHANGED and remains
+    // available for any caller needing explicit stage/blend/priority
+    // control (e.g. RenderFeatureStage::PreUI, or a specific hand-chosen
+    // priority for managed cross-plugin compositing order).
+    bool AddScreenPostProcessPass(const char* debugName, ProjectRenderFeatureCallback callback,
+        RenderFeatureBlendMode blendMode = RenderFeatureBlendMode::AlphaOver,
+        std::optional<std::int32_t> priority = std::nullopt);
+
     // editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
     // BIG-STEP 2), PHASE4 - mirrors GetRenderer()'s own existing precedent
     // exactly. Needed so EditorHotReloadDebugCapability (a gte_editor-tier

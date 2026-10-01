@@ -39,6 +39,12 @@
 // provider below (fixes PHASE2_COMPLETION_REPORT.md's own finding #19).
 #include "GpuDrivenBatchEntityExclusionLogic.h"
 
+// better-render-pass-1 campaign, PHASE9 (Decision D3) - the pure,
+// Tier-1-testable counter-increment logic backing
+// Core::AddScreenPostProcessPass()'s own RUNTIME auto-priority assignment
+// (see Core::AddScreenPostProcessPass() below for the full reasoning).
+#include "ScreenPostProcessPassPriorityAssignment.h"
+
 // editor-core-separation-6 campaign, PHASE2
 // (PHASE2_PLUGIN_CAPABILITY_ORCHESTRATOR_REGISTRY_AND_RENDER_FEATURE_MIGRATION.md)
 // - the new IPluginCapabilityOrchestrator registry, plus its first real
@@ -436,6 +442,37 @@ void Core::UnregisterProjectRenderFeature(const char* debugName)
         return;
     }
     m_renderFeatureCompositorPtr->UnregisterProjectFeature(debugName);
+}
+
+// better-render-pass-1 campaign, PHASE9 (Decision D3) - additive convenience
+// wrapper over RegisterProjectRenderFeature() immediately above: fixes stage
+// to RenderFeatureStage::PostComposite (the one, real "draw over the final
+// composited screen" hook point "screen post-process pass" means today -
+// only PostComposite/PreUI are actually wired into the live render graph at
+// all, see RenderFeatureDescriptor.h's own doc comment), and auto-assigns a
+// collision-tolerant priority at RUNTIME via a simple, monotonically-
+// incrementing, function-local `static` counter (shared process-wide, never
+// reset - a function-local static is the lower-risk, smaller-diff choice
+// over a dedicated private Core member, and Core is a singleton-per-process
+// composition root in practice) when the caller does not supply one
+// explicitly. `RenderFeatureCompositor`'s own documented collision policy
+// (RenderFeatureDescriptor.h's `priority` field doc comment) already
+// tolerates a priority collision gracefully (a loud GTE_LOG_WARNING + a
+// stable, deterministic lexical tie-break, never a crash) - a simple
+// incrementing counter is therefore a SAFE choice even though it does not
+// guarantee global uniqueness against a caller who ALSO separately calls the
+// full RegisterProjectRenderFeature() with an explicit, colliding priority
+// value; this is an accepted, already-documented degrade, not a new risk
+// this phase introduces.
+bool Core::AddScreenPostProcessPass(const char* debugName, ProjectRenderFeatureCallback callback,
+    RenderFeatureBlendMode blendMode, std::optional<std::int32_t> priority)
+{
+    static std::int32_t s_autoScreenPostProcessPassPriorityCounter = 0;
+    const std::int32_t resolvedPriority = priority.has_value()
+        ? *priority
+        : NextAutoScreenPostProcessPassPriority(s_autoScreenPostProcessPassPriorityCounter);
+    return RegisterProjectRenderFeature(
+        debugName, RenderFeatureStage::PostComposite, blendMode, resolvedPriority, std::move(callback));
 }
 
 void Core::Update(const InputFrame& input, float deltaTime)

@@ -498,6 +498,14 @@ add_library(gte_core STATIC
     src/Core/IHostServices.h
     src/Core/Core.h
     src/Core/Core.cpp
+    # better-render-pass-1 campaign, PHASE9 (Decision D3) - the pure,
+    # Tier-1-testable counter-increment logic backing
+    # Core::AddScreenPostProcessPass()'s own RUNTIME auto-priority
+    # assignment. Added here explicitly, right next to Core.h/.cpp above,
+    # because gte_core's own source list is hand-maintained, NOT a
+    # file(GLOB ...).
+    src/Core/ScreenPostProcessPassPriorityAssignment.h
+    src/Core/ScreenPostProcessPassPriorityAssignment.cpp
     src/Math/MathTypes.h
     src/Math/Vec2.h
     src/Math/Vec3.h

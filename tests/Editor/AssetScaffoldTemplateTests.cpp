@@ -359,7 +359,14 @@ TEST(AssetScaffoldTemplateTest, ScreenPostProcessPassFirstScaffoldWithBothAnchor
     EXPECT_EQ(screenPassContent.find("__NAME__"), std::string::npos);
     EXPECT_NE(screenPassContent.find("RegisterFooScreenPass"), std::string::npos);
     EXPECT_NE(screenPassContent.find("\"Foo.ScreenTint\""), std::string::npos);
-    EXPECT_NE(screenPassContent.find("/*priority=*/0,"), std::string::npos);
+    // better-render-pass-1 campaign, PHASE9 (Decision D3) - the generated
+    // template now calls core.AddScreenPostProcessPass(), whose signature
+    // puts `priority` as its LAST positional argument (after the callback/
+    // blendMode) - the generated line therefore ends in a closing paren +
+    // semicolon ("/*priority=*/0);"), never a trailing comma like the old
+    // core.RegisterProjectRenderFeature()-based template did.
+    EXPECT_NE(screenPassContent.find("/*priority=*/0);"), std::string::npos);
+    EXPECT_NE(screenPassContent.find("core.AddScreenPostProcessPass("), std::string::npos);
 
     // The scratch project's own Game.cpp now contains the correct forward
     // declaration + call line, auto-wired in.
@@ -393,7 +400,10 @@ TEST(AssetScaffoldTemplateTest, ScreenPostProcessPassSecondScaffoldSameProjectIn
     EXPECT_NE(second.reminderMessage.find("automatically wired"), std::string::npos);
 
     const std::string secondContent = ReadFile(scratch.AssetsPath() / "BarScreenPass.cpp");
-    EXPECT_NE(secondContent.find("/*priority=*/1,"), std::string::npos);
+    // better-render-pass-1 campaign, PHASE9 (Decision D3) - see the matching
+    // comment in the first-scaffold test above for why this is now
+    // "/*priority=*/1);" (closing paren), not a trailing comma.
+    EXPECT_NE(secondContent.find("/*priority=*/1);"), std::string::npos);
 
     // The FIRST scaffold's own forward declaration/call line is still
     // present, unduplicated, alongside the new one - the concrete regression

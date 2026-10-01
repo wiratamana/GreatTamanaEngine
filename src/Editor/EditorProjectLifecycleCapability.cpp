@@ -263,14 +263,28 @@ std::string BuildFragmentShaderContent(const std::string& /*name*/)
 // Unlike BuildRenderPassCppContent() above, this is a REAL, WORKING tint, not
 // a placeholder - see docs/conventions/project-assembly-system.md's
 // "On-screen Game View compositing" section for the mechanism this calls
-// into (Core::RegisterProjectRenderFeature(), editor-core-separation-23
-// campaign, BIG-STEP 1).
+// into. better-render-pass-1 campaign, PHASE9 (Decision D3): this now
+// generates a call to the newer, simpler Core::AddScreenPostProcessPass()
+// convenience API instead of the original full
+// Core::RegisterProjectRenderFeature() ceremony (editor-core-separation-23
+// campaign, BIG-STEP 1, still available/unchanged for advanced callers) -
+// no `stage`/`RenderFeatureStage` argument to explain in the generated
+// comment anymore, since AddScreenPostProcessPass() always fixes stage to
+// RenderFeatureStage::PostComposite internally.
 //
 // Uses "@@PRIORITY@@", NOT "__PRIORITY__", as its second substitution token -
 // see this phase's own Step 3.1 for the exact, confirmed name-collision bug
 // this choice closes (a valid project/pass name may legally contain the
 // literal substring "__PRIORITY__", which would otherwise corrupt the
-// generated function name during the second ReplaceAll() pass).
+// generated function name during the second ReplaceAll() pass). The
+// priority is still resolved via ComputeNextScreenPassPriority() at
+// SCAFFOLD TIME (see the call site below) and passed through as an explicit
+// `priority` argument - this remains strictly better than leaving it to
+// AddScreenPostProcessPass()'s own RUNTIME auto-assignment for a SCAFFOLDED
+// file specifically, since scaffold-time scanning already correctly avoids
+// collisions among sibling scaffolded files (the RUNTIME auto-assignment
+// exists for the case where NO scaffolding tool was ever used at all - see
+// Core::AddScreenPostProcessPass()'s own doc comment, Core.h).
 std::string BuildScreenPostProcessPassCppContent(const std::string& name, std::int32_t priority)
 {
     static const char* kTemplate =
@@ -296,11 +310,8 @@ std::string BuildScreenPostProcessPassCppContent(const std::string& name, std::i
         "\n"
         "void Register__NAME__ScreenPass(gte::Core& core)\n"
         "{\n"
-        "    const bool registered = core.RegisterProjectRenderFeature(\n"
+        "    const bool registered = core.AddScreenPostProcessPass(\n"
         "        \"__NAME__.ScreenTint\",\n"
-        "        gte::RenderFeatureStage::PostComposite,\n"
-        "        gte::RenderFeatureBlendMode::AlphaOver,\n"
-        "        /*priority=*/@@PRIORITY@@, // auto-assigned - keeps multiple Screen Post-Process Passes in this same project collision-free; change by hand only if you want a specific relative blend order. This number is only guaranteed unique among YOUR OWN project's Screen Post-Process Passes - a currently-loaded plugin may already use the same priority in the same stage; that is safe (logged, never crashing), just check the engine log if the blend order looks wrong.\n"
         "        [](gte::rg::RenderGraphBuilder& builder, gte::rg::TextureHandle privateTarget, VkExtent2D /*extent*/) {\n"
         "            // This is the whole effect: clear your own private target to\n"
         "            // a translucent red every frame - only Render Graph API calls\n"
@@ -321,8 +332,10 @@ std::string BuildScreenPostProcessPassCppContent(const std::string& name, std::i
         "                    // Projects/ProjectAssemblyProbe/Assets/HelloGame.cpp.\n"
         "                },\n"
         "                gte::rg::RenderPassDrawKind::DrawQuad, gte::rg::RenderPassEvent::AfterEverything);\n"
-        "        });\n"
-        "    // `registered` is intentionally unused here - Core::RegisterProjectRenderFeature()\n"
+        "        },\n"
+        "        /*blendMode=*/gte::RenderFeatureBlendMode::AlphaOver,\n"
+        "        /*priority=*/@@PRIORITY@@); // auto-assigned - keeps multiple Screen Post-Process Passes in this same project collision-free; change by hand only if you want a specific relative blend order. This number is only guaranteed unique among YOUR OWN project's Screen Post-Process Passes - a currently-loaded plugin may already use the same priority in the same stage; that is safe (logged, never crashing), just check the engine log if the blend order looks wrong.\n"
+        "    // `registered` is intentionally unused here - Core::AddScreenPostProcessPass()\n"
         "    // already logs a loud, specific reason (duplicate name, over-length\n"
         "    // name, or no free project-feature slot available) on failure; this\n"
         "    // generated stub has nothing more useful to add on top of that log\n"

@@ -343,8 +343,12 @@ TEST_F(CreateAssetEndpointEndToEndTest, ScreenPostProcessPassScaffoldWritesExpec
     EXPECT_NE(content.find("\"Tint.ScreenTint\""), std::string::npos);
     // First Screen Post-Process Pass in this scratch project - auto-assigned
     // priority must be 0 (ComputeNextScreenPassPriority() finds no sibling
-    // *ScreenPass.cpp file to scan yet).
-    EXPECT_NE(content.find("/*priority=*/0,"), std::string::npos);
+    // *ScreenPass.cpp file to scan yet). better-render-pass-1 campaign,
+    // PHASE9 (Decision D3) - the generated template now calls
+    // core.AddScreenPostProcessPass(), whose signature puts `priority` as
+    // its LAST positional argument, so the generated line ends in a closing
+    // paren ("/*priority=*/0);"), never a trailing comma.
+    EXPECT_NE(content.find("/*priority=*/0);"), std::string::npos);
 
     RestoreActiveProjectAssemblyState(before);
 }

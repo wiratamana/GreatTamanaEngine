@@ -37,10 +37,30 @@
 //    forward-declaration anchor; the closing "}" for the body anchor) -
 //    user-confirmed as the cleaner option over splitting a line into the
 //    middle of the wrapped comment paragraph.
+//
+// better-render-pass-1 campaign, PHASE9 (R6 - Finding 10(b)), IDEMPOTENCY
+// GUARD FIX: the ORIGINAL idempotency guard (Step 3, below, before this
+// phase) only ever scanned for an already-ACTIVE call line
+// (`registerFunctionName + "(core);"` on a non-comment line) - if that
+// single scan found nothing, BOTH a new forward declaration AND a new call
+// line were inserted unconditionally. If a human manually commented out
+// ONLY the call line (e.g. "// RegisterFooScreenPass(core);", to
+// temporarily disable one effect - a workflow this file's own header
+// comment above already anticipates) while the forward declaration itself
+// remained active/un-commented, re-triggering the scaffolding tool for that
+// same pass name produced a genuine, confirmed DUPLICATE forward
+// declaration (the old, still-active one survives; a second one gets
+// inserted right alongside it). Fixed by making each of the two presence
+// checks - "is the forward declaration already active?" and "is the call
+// already active?" - fully INDEPENDENT, each gating its own, independent
+// insertion. The two insertions are resolved against ONE shared ordering
+// helper (see InsertPendingLines() below) so this remains correct whether
+// BOTH lines need inserting, or only ONE of them does.
 #include "ScreenPassAutoWire.h"
 
 #include "../Core/Logging.h"
 
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 #include <vector>
@@ -120,6 +140,22 @@ std::size_t FindLineContaining(const std::vector<std::string>& lines, const char
     return kNotFound;
 }
 
+// True if some NON-COMMENT line contains `needle` - the shared primitive
+// behind BOTH of PHASE9's independent "is this already active?" checks
+// (the active call line, and the active forward-declaration line).
+bool AnyNonCommentLineContains(const std::vector<std::string>& lines, const std::string& needle)
+{
+    for (const std::string& line : lines) {
+        if (IsCommentLine(line)) {
+            continue;
+        }
+        if (line.find(needle) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // User-confirmed placement rule: skip every comment line immediately
 // following the marker's own line (the rest of that same wrapped comment
 // paragraph), and return the index of the first non-comment line after it -
@@ -133,6 +169,45 @@ std::size_t FindInsertionIndexAfterAnchorBlock(const std::vector<std::string>& l
         ++i;
     }
     return i;
+}
+
+// better-render-pass-1 campaign, PHASE9 - one line still waiting to be
+// inserted, at the index that was resolved against the ORIGINAL,
+// pre-any-insertion `lines` vector.
+struct PendingLineInsertion {
+    std::size_t index;
+    std::string line;
+};
+
+// Inserts every entry of `insertions` into `lines`, each at the index it
+// was originally resolved against (BEFORE any of these insertions
+// happened). Insertions are applied in DESCENDING index order so an
+// earlier-applied insertion's own already-resolved index is never
+// invalidated by a later one that lands before it - this is exactly the
+// ORIGINAL (pre-PHASE9) "insert at the larger index first" discipline
+// (Step 3.3), generalized here to correctly handle EITHER one OR both
+// pending insertions actually happening, with no duplicated branching
+// logic for the two cases.
+//
+// When two insertions tie at the exact same resolved index,
+// std::stable_sort preserves their RELATIVE ORDER from `insertions` itself
+// - and since a later-processed insertion at an identical index always
+// ends up landing IN FRONT of an earlier one already inserted there (the
+// earlier one gets pushed one slot further along), whichever entry appears
+// LATER in `insertions` ends up physically BEFORE the one that appears
+// EARLIER, once both have been applied. Callers needing a specific
+// relative order for a same-index tie must therefore order `insertions`
+// with that in mind (see TryAutoWireRegisterCall() below, which relies on
+// this to put the forward declaration before the call line for a tied
+// index, exactly matching the ORIGINAL implementation's own tie-breaking
+// behavior).
+void InsertPendingLines(std::vector<std::string>& lines, std::vector<PendingLineInsertion> insertions)
+{
+    std::stable_sort(insertions.begin(), insertions.end(),
+        [](const PendingLineInsertion& a, const PendingLineInsertion& b) { return a.index > b.index; });
+    for (const PendingLineInsertion& insertion : insertions) {
+        lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(insertion.index), insertion.line);
+    }
 }
 
 } // namespace
@@ -169,37 +244,42 @@ bool TryAutoWireRegisterCall(const std::filesystem::path& projectGameCppPath,
         return false;
     }
 
-    // Step 3 (idempotency guard): scan every NON-COMMENT line for an already
-    // active call. A commented-out call (e.g. a human manually disabling one
-    // effect: "// RegisterFooScreenPass(core);") must NOT be mistaken for
-    // still-active - skip any line that is itself a comment line.
+    // Step 3 (idempotency guard, PHASE9: TWO INDEPENDENT presence checks,
+    // not one): scan every NON-COMMENT line for an already-active CALL, and
+    // separately for an already-active FORWARD DECLARATION. A commented-out
+    // line (e.g. a human manually disabling one effect:
+    // "// RegisterFooScreenPass(core);") must NOT be mistaken for
+    // still-active - IsCommentLine() skips any such line in both checks.
     const std::string activeCallNeedle = registerFunctionName + "(core);";
-    for (const std::string& line : lines) {
-        if (IsCommentLine(line)) {
-            continue;
-        }
-        if (line.find(activeCallNeedle) != std::string::npos) {
-            // Already correctly, ACTIVELY wired - nothing to do.
-            return true;
-        }
-    }
-
     const std::string forwardDeclLine = "void " + registerFunctionName + "(gte::Core& core);";
     const std::string callLine = "    " + registerFunctionName + "(core);";
 
+    const bool callAlreadyActive = AnyNonCommentLineContains(lines, activeCallNeedle);
+    if (callAlreadyActive) {
+        // Already correctly, ACTIVELY wired - nothing to do, regardless of
+        // the forward declaration's own state (if the call is active, the
+        // forward declaration must already be active too, or this project
+        // would not compile - nothing further to check or insert).
+        return true;
+    }
+    const bool forwardDeclAlreadyActive = AnyNonCommentLineContains(lines, forwardDeclLine);
+
     // Resolve BOTH insertion indices from the ORIGINAL (pre-insert) lines
-    // vector first, then insert at the LARGER index first, so an earlier
-    // insertion never shifts a not-yet-processed insertion point (Step 3.3).
+    // vector first - PHASE9: each of the two lines below is now inserted
+    // INDEPENDENTLY, conditioned on its OWN already-active flag. Having
+    // reached this point, `callAlreadyActive` is always false (the function
+    // already returned early above if it were true), so the call line is
+    // unconditionally scheduled for insertion; only the forward-declaration
+    // insertion is truly conditional.
     const std::size_t forwardDeclInsertionIndex = FindInsertionIndexAfterAnchorBlock(lines, forwardDeclAnchorIndex);
     const std::size_t bodyInsertionIndex = FindInsertionIndexAfterAnchorBlock(lines, bodyAnchorIndex);
 
-    if (bodyInsertionIndex >= forwardDeclInsertionIndex) {
-        lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(bodyInsertionIndex), callLine);
-        lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(forwardDeclInsertionIndex), forwardDeclLine);
-    } else {
-        lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(forwardDeclInsertionIndex), forwardDeclLine);
-        lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(bodyInsertionIndex), callLine);
+    std::vector<PendingLineInsertion> insertions;
+    insertions.push_back({ bodyInsertionIndex, callLine });
+    if (!forwardDeclAlreadyActive) {
+        insertions.push_back({ forwardDeclInsertionIndex, forwardDeclLine });
     }
+    InsertPendingLines(lines, std::move(insertions));
 
     const std::string newContent = JoinLines(lines);
 

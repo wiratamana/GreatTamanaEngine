@@ -2237,6 +2237,13 @@ set(GTE_TEST_SOURCES
     # 63-vs-64-byte debugName boundary rejection rule. Unconditional, since
     # src/Core/Core.h/.cpp is unconditionally in gte_core's own source list.
     Core/RegisterProjectRenderFeatureApiTests.cpp
+    # better-render-pass-1 campaign, PHASE9 (Part B, Decision D3, Step 5) -
+    # Tier-1 tests for the new, pure
+    # NextAutoScreenPostProcessPassPriority() counter-increment helper
+    # backing Core::AddScreenPostProcessPass()'s own RUNTIME auto-priority
+    # assignment. Brand-new file - registered here per this campaign's own
+    # cross-cutting rule (PHASE0_MASTER_STRATEGY.md).
+    Core/ScreenPostProcessPassPriorityAssignmentTests.cpp
     Memory/GpuResourceHandleTests.cpp
     Encoding/Base64Tests.cpp
     Encoding/PixelConversionTests.cpp
