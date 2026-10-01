@@ -2282,6 +2282,11 @@ set(GTE_TEST_SOURCES
     Renderer/ComputeDispatchTests.cpp
     Renderer/VolumeTexturePreviewMathTests.cpp
     Renderer/VolumeTexturePreviewRendererTests.cpp
+    # better-render-pass-3 campaign, BLOCK2 PHASE1
+    # (task_manager/better-render-pass-4/PHASE1_RENDERTEXTURE_COLORLESS_EXTENSION.md)
+    # - Tier-2 (real, headless GPU, tests/Fakes/HeadlessRenderGraphFixture.h)
+    # tests for RenderTexture's new createColorImage constructor parameter.
+    Renderer/RenderTextureColorlessTests.cpp
     Renderer/GpuSkinning/GpuSkinningTypesTests.cpp
     Renderer/Culling/CullingTypesTests.cpp
     Renderer/Atmosphere/AtmosphereMathTests.cpp

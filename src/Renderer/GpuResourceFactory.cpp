@@ -197,7 +197,7 @@ void GpuResourceFactory::Destroy() noexcept
 
 RenderTexture GpuResourceFactory::CreateRenderTexture(int width, int height, VkFormat format, const char* debugName,
     const char* depthDebugName, bool allowStorageImageAccess, bool allowDepthSampledAccess,
-    bool createDepthCompanion) const
+    bool createDepthCompanion, bool createColorImage) const
 {
     if (allowStorageImageAccess && !SupportsStorageImageUsage(m_physicalDevice, format)) {
         throw std::runtime_error(
@@ -205,7 +205,7 @@ RenderTexture GpuResourceFactory::CreateRenderTexture(int width, int height, VkF
             "physical device does not support VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT for the requested format.");
     }
     return RenderTexture(m_allocator, m_memoryTracker, m_device, width, height, format, m_depthFormat, debugName,
-        depthDebugName, allowStorageImageAccess, allowDepthSampledAccess, createDepthCompanion);
+        depthDebugName, allowStorageImageAccess, allowDepthSampledAccess, createDepthCompanion, createColorImage);
 }
 
 Buffer GpuResourceFactory::CreateBuffer(

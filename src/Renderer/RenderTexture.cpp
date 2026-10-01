@@ -1,5 +1,6 @@
 #include "RenderTexture.h"
 
+#include <cassert>
 #include <cstdint>
 #include <stdexcept>
 #include <utility>
@@ -8,7 +9,7 @@ namespace gte {
 
 RenderTexture::RenderTexture(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDevice device,
     int width, int height, VkFormat format, VkFormat depthFormat, const char* debugName, const char* depthDebugName,
-    bool allowStorageImageAccess, bool allowDepthSampledAccess, bool createDepthCompanion)
+    bool allowStorageImageAccess, bool allowDepthSampledAccess, bool createDepthCompanion, bool createColorImage)
     : m_allocator(allocator)
     , m_tracker(std::move(tracker))
     , m_debugName(debugName)
@@ -19,7 +20,10 @@ RenderTexture::RenderTexture(VmaAllocator allocator, std::shared_ptr<GpuMemoryTr
     , m_allowStorageImageAccess(allowStorageImageAccess)
     , m_allowDepthSampledAccess(allowDepthSampledAccess)
     , m_createDepthCompanion(createDepthCompanion)
+    , m_createColorImage(createColorImage)
 {
+    assert((m_createColorImage || m_createDepthCompanion)
+        && "RenderTexture: a RenderTexture with neither a color image nor a depth companion is meaningless");
     Create(width, height);
 }
 
@@ -40,6 +44,7 @@ RenderTexture::RenderTexture(RenderTexture&& other) noexcept
     , m_allowStorageImageAccess(other.m_allowStorageImageAccess)
     , m_allowDepthSampledAccess(other.m_allowDepthSampledAccess)
     , m_createDepthCompanion(other.m_createDepthCompanion)
+    , m_createColorImage(other.m_createColorImage)
     , m_image(std::exchange(other.m_image, VK_NULL_HANDLE))
     , m_allocation(std::exchange(other.m_allocation, VK_NULL_HANDLE))
     , m_imageView(std::exchange(other.m_imageView, VK_NULL_HANDLE))
@@ -64,6 +69,7 @@ RenderTexture& RenderTexture::operator=(RenderTexture&& other) noexcept
         m_allowStorageImageAccess = other.m_allowStorageImageAccess;
         m_allowDepthSampledAccess = other.m_allowDepthSampledAccess;
         m_createDepthCompanion = other.m_createDepthCompanion;
+        m_createColorImage = other.m_createColorImage;
         m_image = std::exchange(other.m_image, VK_NULL_HANDLE);
         m_allocation = std::exchange(other.m_allocation, VK_NULL_HANDLE);
         m_imageView = std::exchange(other.m_imageView, VK_NULL_HANDLE);
@@ -100,89 +106,102 @@ void RenderTexture::Create(int width, int height)
 {
     // Clamp to at least 1x1 - a docked Editor panel can transiently report
     // zero size while collapsed/hidden, and a zero-sized VkImage is invalid.
+    // Computed UNCONDITIONALLY, before the createColorImage branch below -
+    // a depth-only RenderTexture still needs a correct Extent() (its
+    // DepthBuffer is sized from these same locals, and Extent()'s callers
+    // need the real size regardless of which half exists).
     m_extent.width = static_cast<std::uint32_t>(width > 0 ? width : 1);
     m_extent.height = static_cast<std::uint32_t>(height > 0 ? height : 1);
 
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.format = m_format;
-    imageInfo.extent = { m_extent.width, m_extent.height, 1 };
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    // COLOR_ATTACHMENT so Renderer::RenderOffscreen() can draw into it,
-    // SAMPLED so it can be displayed later (e.g. an Editor panel wrapping
-    // it in an ImGui descriptor set). STORAGE_BIT is ADDITIONALLY OR'd in
-    // when this RenderTexture was created with allowStorageImageAccess =
-    // true (an `RWTexture` - see
-    // COMPUTE_PHASE1_RESOURCE_VOCABULARY_STRATEGY_v2.md) - the caller
-    // (GpuResourceFactory::CreateRenderTexture()) is responsible for having
-    // already confirmed `m_format` supports
-    // VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT via SupportsStorageImageUsage()
-    // before ever reaching here.
-    imageInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    if (m_allowStorageImageAccess) {
-        imageInfo.usage |= VK_IMAGE_USAGE_STORAGE_BIT;
-    }
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    // better-render-pass-3 campaign, BLOCK 2 (Arbitrary Render Views) - the
+    // COLOR-side mirror of the m_createDepthCompanion branch below. Skipped
+    // entirely when m_createColorImage is false - m_image/m_imageView/
+    // m_sampler simply stay VK_NULL_HANDLE, and the color image is NEVER
+    // registered with GpuMemoryTracker at all (not tracked-then-untracked -
+    // never tracked). Every existing consumer already null-checks these
+    // (see Target()/Image()/View()/Sampler()).
+    if (m_createColorImage) {
+        VkImageCreateInfo imageInfo{};
+        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        imageInfo.imageType = VK_IMAGE_TYPE_2D;
+        imageInfo.format = m_format;
+        imageInfo.extent = { m_extent.width, m_extent.height, 1 };
+        imageInfo.mipLevels = 1;
+        imageInfo.arrayLayers = 1;
+        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+        imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+        // COLOR_ATTACHMENT so Renderer::RenderOffscreen() can draw into it,
+        // SAMPLED so it can be displayed later (e.g. an Editor panel wrapping
+        // it in an ImGui descriptor set). STORAGE_BIT is ADDITIONALLY OR'd in
+        // when this RenderTexture was created with allowStorageImageAccess =
+        // true (an `RWTexture` - see
+        // COMPUTE_PHASE1_RESOURCE_VOCABULARY_STRATEGY_v2.md) - the caller
+        // (GpuResourceFactory::CreateRenderTexture()) is responsible for having
+        // already confirmed `m_format` supports
+        // VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT via SupportsStorageImageUsage()
+        // before ever reaching here.
+        imageInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        if (m_allowStorageImageAccess) {
+            imageInfo.usage |= VK_IMAGE_USAGE_STORAGE_BIT;
+        }
+        imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
-    // VMA_MEMORY_USAGE_AUTO lets VMA pick the right memory type from the
-    // image's usage flags (device-local here, since it's a color attachment)
-    // - replaces the manual FindMemoryType()/vkAllocateMemory()/
-    // vkBindImageMemory() dance this used to do by hand.
-    VmaAllocationCreateInfo allocCreateInfo{};
-    allocCreateInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        // VMA_MEMORY_USAGE_AUTO lets VMA pick the right memory type from the
+        // image's usage flags (device-local here, since it's a color attachment)
+        // - replaces the manual FindMemoryType()/vkAllocateMemory()/
+        // vkBindImageMemory() dance this used to do by hand.
+        VmaAllocationCreateInfo allocCreateInfo{};
+        allocCreateInfo.usage = VMA_MEMORY_USAGE_AUTO;
 
-    VmaAllocationInfo allocationInfo{};
-    if (vmaCreateImage(m_allocator, &imageInfo, &allocCreateInfo, &m_image, &m_allocation, &allocationInfo) !=
-        VK_SUCCESS) {
-        throw std::runtime_error("RenderTexture: vmaCreateImage failed.");
-    }
+        VmaAllocationInfo allocationInfo{};
+        if (vmaCreateImage(m_allocator, &imageInfo, &allocCreateInfo, &m_image, &m_allocation, &allocationInfo) !=
+            VK_SUCCESS) {
+            throw std::runtime_error("RenderTexture: vmaCreateImage failed.");
+        }
 
-    // Registers this exact allocation - see AGENTS.md ("GPU resource
-    // memory tracking"). Called from here (not just the constructor) so a
-    // Resize() (Destroy() + Create()) always re-tracks with a fresh handle
-    // reflecting the NEW size - the tracker never holds a stale record.
-    const GpuMemoryLocation location = ClassifyGpuMemoryLocation(m_allocator, m_allocation);
-    m_handle = m_tracker->Track(GpuResourceType::Texture, location, allocationInfo.size, m_format);
-    // editor-core-separation-1 campaign, PHASE4 - unconditional now.
-    if (m_debugName != nullptr) {
-        m_tracker->SetDebugName(m_handle, m_debugName);
-    }
+        // Registers this exact allocation - see AGENTS.md ("GPU resource
+        // memory tracking"). Called from here (not just the constructor) so a
+        // Resize() (Destroy() + Create()) always re-tracks with a fresh handle
+        // reflecting the NEW size - the tracker never holds a stale record.
+        const GpuMemoryLocation location = ClassifyGpuMemoryLocation(m_allocator, m_allocation);
+        m_handle = m_tracker->Track(GpuResourceType::Texture, location, allocationInfo.size, m_format);
+        // editor-core-separation-1 campaign, PHASE4 - unconditional now.
+        if (m_debugName != nullptr) {
+            m_tracker->SetDebugName(m_handle, m_debugName);
+        }
 
-    VkImageViewCreateInfo viewInfo{};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image = m_image;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = m_format;
-    viewInfo.components = { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
-                             VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY };
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 1;
-    viewInfo.subresourceRange.baseArrayLayer = 0;
-    viewInfo.subresourceRange.layerCount = 1;
+        VkImageViewCreateInfo viewInfo{};
+        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        viewInfo.image = m_image;
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        viewInfo.format = m_format;
+        viewInfo.components = { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
+                                 VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY };
+        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        viewInfo.subresourceRange.baseMipLevel = 0;
+        viewInfo.subresourceRange.levelCount = 1;
+        viewInfo.subresourceRange.baseArrayLayer = 0;
+        viewInfo.subresourceRange.layerCount = 1;
 
-    if (vkCreateImageView(m_device, &viewInfo, nullptr, &m_imageView) != VK_SUCCESS) {
-        throw std::runtime_error("RenderTexture: vkCreateImageView failed.");
-    }
+        if (vkCreateImageView(m_device, &viewInfo, nullptr, &m_imageView) != VK_SUCCESS) {
+            throw std::runtime_error("RenderTexture: vkCreateImageView failed.");
+        }
 
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = 1.0f;
+        VkSamplerCreateInfo samplerInfo{};
+        samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        samplerInfo.magFilter = VK_FILTER_LINEAR;
+        samplerInfo.minFilter = VK_FILTER_LINEAR;
+        samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        samplerInfo.minLod = 0.0f;
+        samplerInfo.maxLod = 1.0f;
 
-    if (vkCreateSampler(m_device, &samplerInfo, nullptr, &m_sampler) != VK_SUCCESS) {
-        throw std::runtime_error("RenderTexture: vkCreateSampler failed.");
+        if (vkCreateSampler(m_device, &samplerInfo, nullptr, &m_sampler) != VK_SUCCESS) {
+            throw std::runtime_error("RenderTexture: vkCreateSampler failed.");
+        }
     }
 
     // This RenderTexture's own companion depth buffer - see the class

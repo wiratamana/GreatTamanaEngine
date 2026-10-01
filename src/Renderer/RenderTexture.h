@@ -97,11 +97,26 @@ public:
     // RenderGraphPersistentResourceCache (introduced in a later phase of
     // that same campaign) - every other caller keeps getting a depth
     // companion, byte-for-byte unchanged.
+    //
+    // createColorImage (default true - every existing call site is
+    // unaffected) - better-render-pass-3 campaign, BLOCK 2 (Arbitrary
+    // Render Views). The COLOR-side mirror of createDepthCompanion
+    // immediately above. When false, Create() skips building the color
+    // VkImage/VkImageView/VkSampler entirely - m_image/m_imageView/
+    // m_sampler simply stay VK_NULL_HANDLE for this RenderTexture's whole
+    // lifetime, and the color image is NEVER registered with
+    // GpuMemoryTracker at all (not tracked-then-untracked - never
+    // tracked). Asserted: createColorImage || createDepthCompanion (a
+    // RenderTexture with NEITHER half is meaningless). The one real
+    // consumer is RenderViewRegistry (a later phase of that same campaign)
+    // for a genuinely colorless shadow-map-style view; every other caller
+    // keeps getting a color image, byte-for-byte unchanged.
     RenderTexture(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDevice device, int width,
         int height, VkFormat format = VK_FORMAT_B8G8R8A8_UNORM,
         VkFormat depthFormat = VK_FORMAT_D32_SFLOAT, const char* debugName = nullptr,
         const char* depthDebugName = nullptr, bool allowStorageImageAccess = false,
-        bool allowDepthSampledAccess = false, bool createDepthCompanion = true);
+        bool allowDepthSampledAccess = false, bool createDepthCompanion = true,
+        bool createColorImage = true);
     ~RenderTexture();
 
     RenderTexture(const RenderTexture&) = delete;
@@ -124,6 +139,11 @@ public:
     // Renderer::RenderOffscreen() to draw into.
     RenderTarget Target() const noexcept;
 
+    // Image()/View()/Sampler() legitimately return VK_NULL_HANDLE for a
+    // RenderTexture constructed with createColorImage == false (see this
+    // class's own constructor comment) - every existing caller that
+    // doesn't pass createColorImage keeps getting a real color image,
+    // byte-for-byte unchanged.
     VkImage Image() const noexcept { return m_image; }
     VkImageView View() const noexcept { return m_imageView; }
     // Sampler suitable for reading this texture in a shader/ImGui
@@ -174,6 +194,9 @@ private:
     // editor-core-separation-27 campaign, BIG STEP 3 of 4 (Persistent
     // Resource Cache) - see the constructor's own doc comment above.
     bool m_createDepthCompanion = true;
+    // better-render-pass-3 campaign, BLOCK 2 (Arbitrary Render Views) - see
+    // the constructor's own doc comment above.
+    bool m_createColorImage = true;
 
     VkImage m_image = VK_NULL_HANDLE;
     VmaAllocation m_allocation = VK_NULL_HANDLE;

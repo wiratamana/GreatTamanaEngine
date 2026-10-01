@@ -271,10 +271,19 @@ public:
     // campaign, called via RenderGraphResourcePool::AcquireTexture()'s own
     // existing call chain through this method); every other caller keeps
     // getting a depth companion, byte-for-byte unchanged.
+    //
+    // `createColorImage` (default true, better-render-pass-3 campaign,
+    // BLOCK 2 - Arbitrary Render Views) forwards straight through to
+    // RenderTexture's own identically-named constructor parameter - the
+    // COLOR-side mirror of createDepthCompanion immediately above; when
+    // false, the returned RenderTexture carries NO color image at all. The
+    // one real consumer is RenderViewRegistry (a later phase of that same
+    // campaign); every other caller keeps getting a color image,
+    // byte-for-byte unchanged.
     RenderTexture CreateRenderTexture(int width, int height, VkFormat format = VK_FORMAT_UNDEFINED,
         const char* debugName = nullptr, const char* depthDebugName = nullptr,
         bool allowStorageImageAccess = false, bool allowDepthSampledAccess = false,
-        bool createDepthCompanion = true) const;
+        bool createDepthCompanion = true, bool createColorImage = true) const;
 
     // network-impl-2 campaign, Phase 3
     // (PHASE3_GAME_VIEW_CAPTURE_AND_GET_GAME_VIEW_ENDPOINT.md) - synchronous,
