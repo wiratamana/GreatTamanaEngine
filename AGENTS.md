@@ -608,6 +608,68 @@ standalone convention this campaign adds (narrower, and layered on top of
 `docs/conventions/render-pass-toggle-honesty.md` - never a replacement for it), and
 `task_manager/editor-core-separation-22/CAMPAIGN_COMPLETION_REPORT.md` for the full seven-phase writeup.
 
+A further campaign, `better-render-pass-1` ("Render Pass Authoring Rehaul", ten phases,
+`task_manager/better-render-pass-1/PHASE0_MASTER_STRATEGY.md`, `CAMPAIGN_COMPLETION_REPORT.md`),
+implements Milestone 1 of a from-scratch investigation into this engine's compute-pipeline-authoring
+ceremony ("Case of the Copy-Pasted Red Tint") - a brand-new, engine-owned `gte::rg::CommandBuffer`
+(`src/Renderer/RenderGraph/CommandBuffer.h/.cpp`, obtained via `PassContext::Cmd()`) gives any real pass's
+`execute` callback a `BindComputePipeline`/`BindDescriptorSet`/`SetPushConstants<T>()`/`Dispatch`/
+`DispatchOverSize`/`Draw` method set, replacing the old three-call `BeginGraphPassRecording`/
+`Renderer::Dispatch`/`EndGraphPassRecording` sequence every compute pass previously hand-wrote;
+`GpuResourceFactory::CreateComputePipeline(path)`/`Renderer::CreateComputePipeline(path)` now work with
+ONLY A PATH in the common case, powered by real SPIRV-Reflect binary parsing
+(`src/Renderer/Vulkan/ShaderReflection.h/.cpp`, a new vendored `spirv_reflect` third-party dependency) that
+reads every descriptor binding, push-constant block, and `layout(local_size_x/y/z)` work-group size
+directly from the compiled `.spv`, with the existing fully-manual constructor overload kept, byte-for-byte,
+as a permanent escape hatch for exotic cases. `SetPushConstants<T>()` debug-asserts `sizeof(T)` against the
+bound pipeline's own reflected push-constant size (R4) - a brand-new, previously-impossible safety net that
+catches a struct/shader-size mismatch before it ever reaches the GPU. Every real `ComputePipeline` in the
+engine - `CullingPipelines`, `GpuSkinningPipelines` (x2), all six `AtmosphereLutRenderer` passes,
+`ComputeBlurValidation`, `GBufferValidation`'s compute half, `FrameDebuggerPreviewProcessing`'s/
+`VolumeTexturePreviewRenderer`'s pipeline construction (their own single `ImmediateSubmit()`-based dispatch
+call sites are architecturally incompatible with `CommandBuffer` and were deliberately left untouched,
+mirroring the identical, already-established precedent for `GpuSkinningValidation.cpp`'s/
+`CaptureAerialPerspectiveVolumeSliceImmediate()`'s own standalone dispatch), and
+`PluginRenderOperationRegistry`'s three host-side pipelines - were migrated onto this new reflection-based
+path, closing R2's own explicit "no two competing conventions live indefinitely" requirement, confirmed by a
+full-repository grep audit (PHASE7) finding zero remaining production `DescriptorSetLayoutBuilder`/
+manual-`VkPushConstantRange` call site outside this campaign's own reflection internals and a small, fully
+enumerated, genuinely-exotic set of graphics-pipeline exceptions. `TextureDesc` gained a genuine,
+equality-compared `usage` bitmask field (`TextureUsage::None | Sampled | Storage | TransferSrc |
+TransferDst`, `RenderGraphTypes.h`), with `RenderGraphResourcePool::AcquireTexture()` now threading
+`HasFlag(desc.usage, TextureUsage::Storage)` into `Renderer::CreateRenderTexture()`'s own
+`allowStorageImageAccess` parameter - a render-graph-declared, POOLED/TRANSIENT `CreateTexture()` resource
+can now genuinely become a storage image (`RWTexture`) for the first time, live-verified by a real compute
+shader writing a solid color into a pooled texture's storage-image descriptor binding. A confirmed, live
+idempotency bug in `src/Editor/ScreenPassAutoWire.cpp`'s scaffolding auto-wire guard (commenting out only a
+pass's active `Register...(core);` call, while its forward declaration stayed active, then re-scaffolding
+the same pass name produced a genuine duplicate forward declaration) is fixed for good: the guard now
+performs TWO independent "already active?" presence checks (one for the call line, one for the forward
+declaration) instead of one, proven both by a dedicated regression test (confirmed to fail before the fix
+and pass after) and by a live, HTTP-driven reproduction against the real
+`Projects/ScreenPassAutoWireProbe/` fixture this campaign's own PHASE10 closeout ran. A new, additive
+`Core::AddScreenPostProcessPass()` convenience method (`src/Core/Core.h/.cpp`) cuts the common "draw one
+clear/tint over the screen" case down to one direct, hand-writable function call with automatic
+`RenderFeatureStage::PostComposite` stage and a runtime-auto-assigned, collision-tolerant priority -
+`Core::RegisterProjectRenderFeature()` itself remains completely untouched, byte-for-byte, as the
+still-fully-supported path for advanced/managed-compositing users, and the Editor's own "Screen
+Post-Process Pass..." scaffold template now generates a call to this simpler API instead of the full
+`RegisterProjectRenderFeature()` ceremony. Verified with a full clean build (636/636 steps, zero errors,
+zero new warnings) and a full `ctest` regression pass (2176 tests, 100% of executed tests passing, 60
+legitimate environment-gated skips - up from `editor-core-separation-27`'s own 2153/57 baseline, a clean
++23 tests/+3 skips, fully reconciled against every phase's own reported test count), plus a live,
+HTTP-driven Game/Scene View smoke test confirming every migrated compute pass (GPU-driven frustum culling
+correctly dropping its visible count when an instance leaves the frustum, both real Atmosphere LUTs, the
+Blur/GBuffer Validation debug tools, the Frame Debugger's Channel/Levels preview, and the `_v3` demo plugin
+chain) still renders identically, with zero new log warnings/errors throughout. **Deliberately, explicitly
+deferred to a future `better-render-pass-2` campaign, restated honestly rather than silently dropped**:
+Milestone 2 (R3, a real bindless resource system - this campaign's reflection work makes a future bindless
+migration easier, since binding tables are now machine-derived rather than hand-typed, but building the
+bindless array itself was never attempted here) and R8 (an Atmosphere dirty-flag/change-detection
+optimization touching the same four Atmosphere passes PHASE5 migrated here, for a completely orthogonal,
+compute/upload-skipping reason). See `task_manager/better-render-pass-1/CAMPAIGN_COMPLETION_REPORT.md` for
+the full ten-phase writeup.
+
 Full history: `task_manager/render-pass-1/PHASE0_MASTER_STRATEGY.md`,
 `task_manager/render-pass-2/PHASE0_MASTER_STRATEGY.md`,
 `task_manager/render-pass-3/PHASE0_MASTER_STRATEGY.md`,
@@ -615,8 +677,9 @@ Full history: `task_manager/render-pass-1/PHASE0_MASTER_STRATEGY.md`,
 `task_manager/render-pass-6/PHASE0_MASTER_STRATEGY.md`,
 `task_manager/render-pass-7/PHASE0_MASTER_STRATEGY.md`,
 `task_manager/editor-core-separation-20/PHASE0_MASTER_STRATEGY.md`,
-`task_manager/editor-core-separation-21/PHASE0_MASTER_STRATEGY.md`, and
-`task_manager/editor-core-separation-22/PHASE0_MASTER_STRATEGY.md`, and each
+`task_manager/editor-core-separation-21/PHASE0_MASTER_STRATEGY.md`,
+`task_manager/editor-core-separation-22/PHASE0_MASTER_STRATEGY.md`, and
+`task_manager/better-render-pass-1/PHASE0_MASTER_STRATEGY.md`, and each
 `PHASEn_COMPLETION_REPORT.md`/`CAMPAIGN_COMPLETION_REPORT.md` in those same
 folders.
 
