@@ -482,11 +482,18 @@ bool PluginRenderPassBuilderAdapter_v3::CommandRecorderAdapter::Dispatch(const c
         std::memcpy(scratch, &opCodeAsFloat, sizeof(float));
     }
 
-    Renderer& renderer = m_operationRegistry.GetRenderer();
-    renderer.BeginGraphPassRecording(m_ctx.cmd, m_ctx.recordDraw);
-    renderer.Dispatch(*op->computePipeline, descriptorSet, scratch, static_cast<std::uint32_t>(op->maxParamBytes),
-        groupsX, groupsY, groupsZ);
-    renderer.EndGraphPassRecording();
+    // task_manager/better-render-pass-1 campaign, PHASE7
+    // (PHASE7_MIGRATE_PLUGIN_RENDER_OPERATION_REGISTRY.md, Step 2.3) - migrated
+    // onto rg::CommandBuffer: m_ctx (a real rg::PassContext&) is genuinely
+    // available at this call site, so this is a clean, low-risk,
+    // ABI-surface-safe internal change - BeginGraphPassRecording()/
+    // EndGraphPassRecording() are no longer called directly; CommandBuffer::
+    // Dispatch() opens/closes that exact same bracket internally.
+    rg::CommandBuffer cmd = m_ctx.Cmd();
+    cmd.BindComputePipeline(*op->computePipeline);
+    cmd.BindDescriptorSet(descriptorSet);
+    cmd.SetPushConstants(scratch, static_cast<std::uint32_t>(op->maxParamBytes));
+    cmd.Dispatch(groupsX, groupsY, groupsZ);
     return true;
 }
 

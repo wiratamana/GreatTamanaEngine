@@ -10,7 +10,6 @@
 #include "../../../plugins/gte_plugin_abi/IPluginRenderPassBuilder_v3.h"
 
 #include "../../Renderer/ComputeDispatch.h"
-#include "../../Renderer/Vulkan/DescriptorSetLayoutBuilder.h"
 
 #include <algorithm>
 #include <cassert>

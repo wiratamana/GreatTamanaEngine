@@ -43,17 +43,15 @@ void PluginRenderOperationRegistry::RegisterBoxBlur()
     // exactly): binding 0 = read-only sampler2D sourceTexture (CombinedImageSampler),
     // binding 1 = writeonly rgba8 image2D destinationImage (StorageImage), a
     // (width, height) uint32 push-constant pair (8 bytes).
-    DescriptorSetLayoutBuilder layoutBuilder(m_device);
-    m_boxBlurDescriptorSetLayout =
-        layoutBuilder.AddCombinedImageSampler(/*binding=*/0).AddStorageImage(/*binding=*/1).Build();
-
-    VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(std::uint32_t) * 2;
-
-    m_boxBlurPipeline.emplace(m_renderer.CreateComputePipeline("shaders/BoxBlur.comp.spv",
-        std::vector<VkDescriptorSetLayout>{ m_boxBlurDescriptorSetLayout }, pushConstantRange));
+    // task_manager/better-render-pass-1 campaign, PHASE7
+    // (PHASE7_MIGRATE_PLUGIN_RENDER_OPERATION_REGISTRY.md) - a path-only
+    // CreateComputePipeline() call: real SPIR-V reflection builds the
+    // descriptor-set layout and push-constant range directly from
+    // shaders/BoxBlur.comp.spv's own compiled binding/push-constant
+    // metadata, instead of a hand-built DescriptorSetLayoutBuilder layout +
+    // a manually restated VkPushConstantRange.
+    m_boxBlurPipeline.emplace(m_renderer.CreateComputePipeline("shaders/BoxBlur.comp.spv"));
+    m_boxBlurDescriptorSetLayout = m_boxBlurPipeline->ReflectedDescriptorSetLayout(/*set=*/0);
 
     PluginRenderOpInfo info;
     info.id = "gte.builtin.box_blur";
@@ -180,16 +178,15 @@ void PluginRenderOperationRegistry::EnsureBuiltinsRegistered()
     // relocated. Binding convention (matches Shaders/RenderFeatureOps.comp
     // exactly): binding 0 = privateTarget, the ONLY binding - a single
     // read-write storage image. ---
-    DescriptorSetLayoutBuilder opsLayoutBuilder(m_device);
-    m_opsDescriptorSetLayout = opsLayoutBuilder.AddStorageImage(/*binding=*/0).Build();
-
-    VkPushConstantRange opsPushConstantRange{};
-    opsPushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    opsPushConstantRange.offset = 0;
-    opsPushConstantRange.size = sizeof(RenderFeatureOpsPushConstants);
-
-    m_opsPipeline.emplace(m_renderer.CreateComputePipeline("shaders/RenderFeatureOps.comp.spv",
-        std::vector<VkDescriptorSetLayout>{ m_opsDescriptorSetLayout }, opsPushConstantRange));
+    // task_manager/better-render-pass-1 campaign, PHASE7
+    // (PHASE7_MIGRATE_PLUGIN_RENDER_OPERATION_REGISTRY.md) - a path-only
+    // CreateComputePipeline() call: real SPIR-V reflection builds the
+    // descriptor-set layout and push-constant range directly from
+    // shaders/RenderFeatureOps.comp.spv's own compiled binding/push-constant
+    // metadata, instead of a hand-built DescriptorSetLayoutBuilder layout +
+    // a manually restated VkPushConstantRange.
+    m_opsPipeline.emplace(m_renderer.CreateComputePipeline("shaders/RenderFeatureOps.comp.spv"));
+    m_opsDescriptorSetLayout = m_opsPipeline->ReflectedDescriptorSetLayout(/*set=*/0);
 
     RegisterUberOp("gte.builtin.solid_fill", /*opCode=*/0);
     RegisterUberOp("gte.builtin.radial_vignette", /*opCode=*/1);
@@ -203,19 +200,15 @@ void PluginRenderOperationRegistry::EnsureBuiltinsRegistered()
     // convention (matches Shaders/RenderFeatureBlend.comp exactly): binding 0
     // = dstIn, binding 1 = srcIn (both read-only combined image samplers),
     // binding 2 = destinationImage (a write-only storage image). ---
-    DescriptorSetLayoutBuilder blendLayoutBuilder(m_device);
-    m_blendDescriptorSetLayout = blendLayoutBuilder.AddCombinedImageSampler(/*binding=*/0)
-                                      .AddCombinedImageSampler(/*binding=*/1)
-                                      .AddStorageImage(/*binding=*/2)
-                                      .Build();
-
-    VkPushConstantRange blendPushConstantRange{};
-    blendPushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    blendPushConstantRange.offset = 0;
-    blendPushConstantRange.size = sizeof(RenderFeatureBlendPushConstants);
-
-    m_blendPipeline.emplace(m_renderer.CreateComputePipeline("shaders/RenderFeatureBlend.comp.spv",
-        std::vector<VkDescriptorSetLayout>{ m_blendDescriptorSetLayout }, blendPushConstantRange));
+    // task_manager/better-render-pass-1 campaign, PHASE7
+    // (PHASE7_MIGRATE_PLUGIN_RENDER_OPERATION_REGISTRY.md) - a path-only
+    // CreateComputePipeline() call: real SPIR-V reflection builds the
+    // descriptor-set layout and push-constant range directly from
+    // shaders/RenderFeatureBlend.comp.spv's own compiled binding/push-constant
+    // metadata, instead of a hand-built DescriptorSetLayoutBuilder layout +
+    // a manually restated VkPushConstantRange.
+    m_blendPipeline.emplace(m_renderer.CreateComputePipeline("shaders/RenderFeatureBlend.comp.spv"));
+    m_blendDescriptorSetLayout = m_blendPipeline->ReflectedDescriptorSetLayout(/*set=*/0);
 
     // --- gte.builtin.box_blur - the genuinely NEW operation PHASE2 added
     // (Design Doc R13's central proof, a COMPUTE-kind operation), reusing
