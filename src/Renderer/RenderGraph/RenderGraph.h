@@ -47,6 +47,7 @@
 // resource claimed during the first call must stay correctly marked
 // "claimed this frame" through the second call too.
 
+#include "CommandBuffer.h" // task_manager/better-render-pass-1 campaign, PHASE3 - PassContext::Cmd()
 #include "RenderGraphBarrierPlanner.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphCompiler.h"
@@ -711,6 +712,22 @@ struct PassContext {
     const std::vector<RenderGraph::PhysicalBuffer>* buffers = nullptr;
     const std::vector<RenderGraph::PhysicalVolumeTexture>* volumeTextures = nullptr;
 
+    // task_manager/better-render-pass-1 campaign, PHASE3
+    // (PHASE3_ENGINE_COMMAND_BUFFER_AND_TYPE_SAFE_PUSH_CONSTANTS.md) - the
+    // ONE new field this phase adds to PassContext (everything else on this
+    // struct is completely untouched). Plain, non-owning, set exactly once
+    // by RenderGraph::BuildPassContext() (mirrors textures/buffers/
+    // volumeTextures above exactly) - RenderGraph already holds this same
+    // non-owning Renderer* as its own m_renderer member (added by
+    // editor-core-separation-26 campaign, PHASE6), so this is zero new
+    // plumbing, just one more pointer forwarded into the PassContext this
+    // method already builds. Never null for a PassContext actually handed to
+    // a pass - only a default-constructed PassContext (never handed to a
+    // real pass) leaves this null, which is why Cmd() below is only ever
+    // meaningful when this is non-null (CommandBuffer itself defensively
+    // asserts/no-ops on a null Renderer - see CommandBuffer.h).
+    Renderer* renderer = nullptr;
+
     // Resolves a texture this pass declared as a READ (via
     // PassBuilder::ReadTexture()) into its already-live VkImageView/
     // VkSampler pair, wired up by RenderGraph::Execute() right before
@@ -816,6 +833,19 @@ struct PassContext {
 
     RecordDrawFn recordDraw;
     RecordIndirectDrawFn recordIndirectDraw;
+
+    // task_manager/better-render-pass-1 campaign, PHASE3
+    // (PHASE3_ENGINE_COMMAND_BUFFER_AND_TYPE_SAFE_PUSH_CONSTANTS.md) - builds
+    // a fresh gte::rg::CommandBuffer (CommandBuffer.h) from this
+    // PassContext's own cmd/renderer/recordDraw.drawStats fields, every time
+    // it's called - never cached/stored by PassContext itself. The returned
+    // CommandBuffer must not outlive the `execute` callback that obtained it,
+    // mirroring PassContext's own lifetime discipline (see this struct's own
+    // doc comment above). Safe to call even on a default-constructed
+    // PassContext (renderer/recordDraw.drawStats simply stay null - every
+    // CommandBuffer method defensively asserts/no-ops on that, see
+    // CommandBuffer.h).
+    CommandBuffer Cmd() const noexcept { return CommandBuffer(cmd, renderer, recordDraw.drawStats); }
 };
 
 } // namespace gte::rg

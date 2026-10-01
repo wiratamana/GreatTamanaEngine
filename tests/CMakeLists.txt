@@ -2338,6 +2338,13 @@ set(GTE_TEST_SOURCES
     Renderer/RenderGraph/RenderPassGroupRegistryTests.cpp
     Renderer/RenderGraph/RenderPassToggleChangeDetectionLogicTests.cpp
     Renderer/RenderGraph/RenderPassToggleGuardTests.cpp
+    # task_manager/better-render-pass-1 campaign, PHASE3
+    # (PHASE3_ENGINE_COMMAND_BUFFER_AND_TYPE_SAFE_PUSH_CONSTANTS.md) - Tier-1
+    # test for the new, pure gte::rg::PushConstantSizeMatches()
+    # (src/Renderer/RenderGraph/CommandBuffer.h) - the rest of CommandBuffer
+    # needs a live VkCommandBuffer/Renderer/VkDevice and is only verified live
+    # (Tier 2), see PHASE3_COMPLETION_REPORT.md.
+    Renderer/RenderGraph/CommandBufferTests.cpp
     Math/Vec2Tests.cpp
     Math/Vec3Tests.cpp
     Math/Mat4Tests.cpp

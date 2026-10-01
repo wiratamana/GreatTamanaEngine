@@ -279,6 +279,11 @@ PassContext RenderGraph::BuildPassContext(VkCommandBuffer cmd, std::vector<Physi
     ctx.textures = &physicalTextures;
     ctx.buffers = &physicalBuffers;
     ctx.volumeTextures = &physicalVolumeTextures;
+    // task_manager/better-render-pass-1 campaign, PHASE3 - forwards this
+    // RenderGraph's own non-owning m_renderer member into the PassContext,
+    // so a pass's `execute` callback can call ctx.Cmd() to obtain a
+    // CommandBuffer (CommandBuffer.h).
+    ctx.renderer = m_renderer;
     ctx.recordDraw.drawStats = &passDrawStats;
     ctx.recordIndirectDraw.drawStats = &passDrawStats;
     return ctx;
