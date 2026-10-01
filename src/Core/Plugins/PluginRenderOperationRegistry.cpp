@@ -192,23 +192,12 @@ void PluginRenderOperationRegistry::EnsureBuiltinsRegistered()
     RegisterUberOp("gte.builtin.radial_vignette", /*opCode=*/1);
     RegisterUberOp("gte.builtin.color_grade", /*opCode=*/2);
 
-    // --- The shared blend pipeline (RenderFeatureBlend.comp) - migrated
-    // verbatim from RenderFeatureCompositor::EnsureBlendPipelineInitialized() -
-    // NOT itself a PluginRenderOpInfo entry (no plugin ever Dispatch()es this
-    // directly - it is purely RenderFeatureCompositor's own internal
-    // compositing mechanism, unreachable from any _v3 opId). Binding
-    // convention (matches Shaders/RenderFeatureBlend.comp exactly): binding 0
-    // = dstIn, binding 1 = srcIn (both read-only combined image samplers),
-    // binding 2 = destinationImage (a write-only storage image). ---
-    // task_manager/better-render-pass-1 campaign, PHASE7
-    // (PHASE7_MIGRATE_PLUGIN_RENDER_OPERATION_REGISTRY.md) - a path-only
-    // CreateComputePipeline() call: real SPIR-V reflection builds the
-    // descriptor-set layout and push-constant range directly from
-    // shaders/RenderFeatureBlend.comp.spv's own compiled binding/push-constant
-    // metadata, instead of a hand-built DescriptorSetLayoutBuilder layout +
-    // a manually restated VkPushConstantRange.
-    m_blendPipeline.emplace(m_renderer.CreateComputePipeline("shaders/RenderFeatureBlend.comp.spv"));
-    m_blendDescriptorSetLayout = m_blendPipeline->ReflectedDescriptorSetLayout(/*set=*/0);
+    // better-render-pass-2 campaign, PHASE1 (PHASE1_RELOCATE_SHARED_DEPENDENCIES.md) -
+    // the shared blend pipeline (RenderFeatureBlend.comp) construction used to
+    // live here; it was pulled back OUT of this registry and fully into
+    // RenderFeatureCompositor::EnsureBlendPipelineInitialized() (its own only
+    // real consumer, via DispatchBlend()) - see RenderFeatureCompositor.h/.cpp
+    // for the current home of that construction code.
 
     // --- gte.builtin.box_blur - the genuinely NEW operation PHASE2 added
     // (Design Doc R13's central proof, a COMPUTE-kind operation), reusing
@@ -240,17 +229,6 @@ const ComputePipeline& PluginRenderOperationRegistry::OpsPipeline() const noexce
 VkDescriptorSetLayout PluginRenderOperationRegistry::OpsDescriptorSetLayout() const noexcept
 {
     return m_opsDescriptorSetLayout;
-}
-
-const ComputePipeline& PluginRenderOperationRegistry::BlendPipeline() const noexcept
-{
-    assert(m_blendPipeline.has_value() && "PluginRenderOperationRegistry::BlendPipeline: EnsureBuiltinsRegistered() was never called");
-    return *m_blendPipeline;
-}
-
-VkDescriptorSetLayout PluginRenderOperationRegistry::BlendDescriptorSetLayout() const noexcept
-{
-    return m_blendDescriptorSetLayout;
 }
 
 } // namespace gte

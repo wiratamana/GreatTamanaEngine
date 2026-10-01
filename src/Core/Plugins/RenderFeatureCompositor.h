@@ -60,6 +60,22 @@
 // hazard this exists to close (PHASE0_MASTER_STRATEGY.md Step 2.6).
 namespace gte {
 
+// better-render-pass-2 campaign, PHASE1 (PHASE1_RELOCATE_SHARED_DEPENDENCIES.md) -
+// `PluginRenderOperationRegistry` used to ALSO own the `RenderFeatureBlend.comp`
+// blend pipeline/descriptor-set-layout (m_blendPipeline/m_blendDescriptorSetLayout)
+// plus the `RenderFeatureBlendPushConstants` struct below - this class is their
+// own ONLY real consumer (via DispatchBlend()), so that construction was pulled
+// back OUT of the registry and fully into this class instead
+// (EnsureBlendPipelineInitialized(), lazy-init-on-first-call, mirroring the
+// registry's own prior idempotency discipline). The registry keeps owning the
+// `_v2` uber-shader ops pipeline (m_opsPipeline/OpsPipeline()/
+// OpsDescriptorSetLayout()) and the `_v3` string-keyed op registry - both
+// genuinely ABI-only, unlike the blend pipeline, which is load-bearing for
+// EVERY composited feature regardless of origin (plugin OR Project Assembly).
+struct RenderFeatureBlendPushConstants {
+    float blendModeAndPad[4] = {}; // .x = RenderFeatureBlendMode, as a float cast to int in-shader
+};
+
 class Core; // forward declaration only - this header must not #include "../Core.h"
             // (that would be a circular include: Core.h itself will gain a member
             // of type std::unique_ptr<IPluginCapabilityOrchestrator>, and
@@ -327,6 +343,19 @@ private:
     BlendStageState& EnsureBlendStageDescriptorOnly(const char* internedName);
     BlendStageState& EnsureBlendStageState(const char* internedName, VkExtent2D extent);
 
+    // better-render-pass-2 campaign, PHASE1 (PHASE1_RELOCATE_SHARED_DEPENDENCIES.md) -
+    // lazily builds m_blendPipeline/m_blendDescriptorSetLayout on first call
+    // (mirrors PluginRenderOperationRegistry::EnsureBuiltinsRegistered()'s own
+    // prior idempotency discipline, moved here alongside the pipeline itself) -
+    // idempotent, safe to call from more than one call site per frame. Called
+    // from both EnsureBlendStageDescriptorOnly() (which needs
+    // m_blendDescriptorSetLayout to allocate a ComputeDescriptorSet) and
+    // DispatchBlend() itself (which needs m_blendPipeline) - calling it from
+    // both guarantees correctness regardless of which is reached first, since
+    // EnsureBlendStageDescriptorOnly() always runs before the DispatchBlend()
+    // call that consumes its result at every real call site in this file.
+    void EnsureBlendPipelineInitialized();
+
     // The real, permanent blend/seed dispatch (RenderFeatureBlend.comp,
     // PHASE5) - `state` supplies the dedicated descriptor set this dispatch
     // rewrites/binds; its own `.texture` field is irrelevant here (the
@@ -355,12 +384,23 @@ private:
     // editor-core-separation-9 campaign, PHASE2 - the ONE
     // PluginRenderOperationRegistry instance `Core` owns
     // (`Core::m_pluginRenderOperationRegistry`), shared by this compositor's
-    // own `_v2` DispatchOps()/DispatchBlend() (which now source
-    // m_opsPipeline/m_opsDescriptorSetLayout/m_blendPipeline/
-    // m_blendDescriptorSetLayout through it instead of owning them directly)
+    // own `_v2` DispatchOps() (which sources m_opsPipeline/
+    // m_opsDescriptorSetLayout through it instead of owning them directly)
     // AND every `_v3` plugin's own PluginRenderPassBuilderAdapter_v3
     // (constructed by ContributeRenderGraphPasses() below, one per entry).
+    // better-render-pass-2 campaign, PHASE1 - DispatchBlend() no longer
+    // sources anything through this registry - see m_blendPipeline below.
     PluginRenderOperationRegistry& m_operationRegistry;
+
+    // better-render-pass-2 campaign, PHASE1 (PHASE1_RELOCATE_SHARED_DEPENDENCIES.md) -
+    // RELOCATED here from PluginRenderOperationRegistry (m_blendPipeline/
+    // m_blendDescriptorSetLayout there) - this class is their own ONLY real
+    // consumer (DispatchBlend()/EnsureBlendStageDescriptorOnly()), so pipeline
+    // ownership was pulled fully in-house instead of reaching through the
+    // registry's own accessors. Lazily built by
+    // EnsureBlendPipelineInitialized() on first use.
+    std::optional<ComputePipeline> m_blendPipeline; // RenderFeatureBlend.comp.
+    VkDescriptorSetLayout m_blendDescriptorSetLayout = VK_NULL_HANDLE;
 
     std::vector<Entry> m_postComposite; // sorted by priority ascending
     std::vector<Entry> m_preUi;         // sorted by priority ascending

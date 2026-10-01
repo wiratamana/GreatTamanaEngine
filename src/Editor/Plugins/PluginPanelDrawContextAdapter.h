@@ -4,7 +4,7 @@
 // (PHASE4_EDITOR_PANEL_CAPABILITY_AND_REGISTRY.md) - gte_editor's own
 // implementation of IPluginPanelDrawContext.
 
-#include "../../../plugins/gte_plugin_abi/IPluginPanelDrawContext.h"
+#include "../../Core/EditorPanelModule.h" // relocated here, better-render-pass-2 PHASE1.
 
 namespace gte {
 

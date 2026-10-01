@@ -18,15 +18,18 @@
 // zero `IPluginRenderPassBuilder_v3` interface change - the concrete,
 // load-bearing proof of the Design Doc's R13 central claim.
 //
-// This is ALSO the new PERMANENT home of the two pipelines
-// RenderFeatureCompositor used to own directly
-// (m_opsPipeline/m_opsDescriptorSetLayout/m_blendPipeline/
-// m_blendDescriptorSetLayout, plus RenderFeatureOpsPushConstants/
-// RenderFeatureBlendPushConstants themselves) - a pure ownership migration,
-// zero `_v2` behavior change (this phase's own Step 3.2) -
-// RenderFeatureCompositor::DispatchOps()/DispatchBlend() keep their exact
-// own byte-for-byte behavior, just sourcing these four things through this
-// registry's own small read-only accessors instead of owning them directly.
+// This is ALSO the home of the `_v2` uber-shader ops pipeline
+// (m_opsPipeline/m_opsDescriptorSetLayout, plus RenderFeatureOpsPushConstants
+// itself) - a pure ownership migration from RenderFeatureCompositor, zero
+// `_v2` behavior change - RenderFeatureCompositor::DispatchOps() keeps its
+// exact own byte-for-byte behavior, just sourcing these two things through
+// this registry's own small read-only accessors instead of owning them
+// directly. better-render-pass-2 campaign, PHASE1
+// (PHASE1_RELOCATE_SHARED_DEPENDENCIES.md) - the BLEND pipeline
+// (m_blendPipeline/m_blendDescriptorSetLayout/RenderFeatureBlendPushConstants)
+// was pulled back OUT of this registry and fully into RenderFeatureCompositor
+// itself (its own only real consumer, via DispatchBlend()) - see
+// RenderFeatureCompositor.h's own doc comment for the full "why".
 
 #include "../../Renderer/ComputePipeline.h"
 #include "../../Renderer/Mesh.h"
@@ -63,14 +66,6 @@ struct RenderFeatureOpsPushConstants {
     float colorRgba[4] = {};       // solid fill color / vignette color / tint color
     float centerAndRadius[4] = {}; // vignette: centerX, centerY, innerRadius, outerRadius
     float gradeParams[4] = {};     // color grade: brightness, contrast, saturation, tintStrength
-};
-
-// The C++-side push-constant struct mirroring RenderFeatureBlend.comp's own
-// `PushConstants` GLSL block byte-for-byte (1 vec4, 16 bytes). RELOCATED
-// here alongside RenderFeatureOpsPushConstants above, for the identical
-// reason.
-struct RenderFeatureBlendPushConstants {
-    float blendModeAndPad[4] = {}; // .x = RenderFeatureBlendMode, as a float cast to int in-shader
 };
 
 // A registered operation is EITHER a compute dispatch (IPluginCommandRecorder::
@@ -163,14 +158,15 @@ public:
 
     const PluginRenderOpInfo* Find(const std::string& id) const noexcept;
 
-    // Read-only access for RenderFeatureCompositor's OWN _v2 DispatchOps()/
-    // DispatchBlend() to source the shared "uber ops"/blend pipeline through
-    // - never used by any plugin-facing code directly. Only valid to call
-    // after EnsureBuiltinsRegistered() has run at least once.
+    // Read-only access for RenderFeatureCompositor's OWN _v2 DispatchOps() to
+    // source the shared "uber ops" pipeline through - never used by any
+    // plugin-facing code directly. Only valid to call after
+    // EnsureBuiltinsRegistered() has run at least once. better-render-pass-2
+    // campaign, PHASE1 - BlendPipeline()/BlendDescriptorSetLayout() were
+    // removed from here; RenderFeatureCompositor now owns that pipeline
+    // directly (its own only real consumer, via DispatchBlend()).
     const ComputePipeline& OpsPipeline() const noexcept;
     VkDescriptorSetLayout OpsDescriptorSetLayout() const noexcept;
-    const ComputePipeline& BlendPipeline() const noexcept;
-    VkDescriptorSetLayout BlendDescriptorSetLayout() const noexcept;
 
     // editor-core-separation-9 campaign, PHASE2 - the SAME Renderer&
     // instance this registry was constructed with - so
@@ -223,8 +219,6 @@ private:
     // rewritten.
     std::optional<ComputePipeline> m_opsPipeline;
     VkDescriptorSetLayout m_opsDescriptorSetLayout = VK_NULL_HANDLE;
-    std::optional<ComputePipeline> m_blendPipeline; // RenderFeatureBlend.comp.
-    VkDescriptorSetLayout m_blendDescriptorSetLayout = VK_NULL_HANDLE;
 
     // gte.builtin.box_blur's OWN, separate pipeline/layout - a genuinely
     // DIFFERENT ComputePipeline instance than whatever ComputeBlurValidation.cpp

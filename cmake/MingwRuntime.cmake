@@ -133,12 +133,24 @@ endfunction()
 # loads a real plugin .dll (PHASE2's handshake probe, PHASE5's isolation
 # probe, PHASE5's extended gte_core_player_link_probe) - never assume
 # flipping just the host is sufficient.
-function(gte_apply_plugin_shared_crt_linkage target_name)
+# better-render-pass-2 campaign, PHASE1 (PHASE1_RELOCATE_SHARED_DEPENDENCIES.md,
+# Landmine C) - the neutral, non-"plugin"-named rename of this function
+# (`gte_apply_plugin_shared_crt_linkage` below is kept as a one-line
+# deprecated forwarder to this one, so its own 3 CI-probe call sites
+# - gte_core_player_link_probe, gte_plugin_abi_handshake_probe,
+# gte_plugin_isolation_probe - keep compiling unmodified until PHASE4
+# deletes them along with the ABI system). `GreatTamanaEditor` itself now
+# calls THIS function directly (root CMakeLists.txt) - this flips the HOST
+# executable to shared libgcc/libstdc++ linkage, which Project Assembly's own
+# docs state is load-bearing for ANY `.dll` that links against
+# `GreatTamanaEditor.exe`'s own import library, independent of whether the
+# unrelated `gte_plugin_abi` system is even enabled.
+function(gte_apply_shared_crt_linkage target_name)
     if(NOT GTE_ENABLE_PLUGINS)
         return()
     endif()
     if(NOT GTE_PLUGIN_SHARED_CRT_TOOLCHAIN_SUPPORTED)
-        message(WARNING "gte_apply_plugin_shared_crt_linkage(${target_name}): active toolchain has no shared libstdc++ variant - honest no-op, ${target_name} stays statically linked (see this file's own top-of-file comment).")
+        message(WARNING "gte_apply_shared_crt_linkage(${target_name}): active toolchain has no shared libstdc++ variant - honest no-op, ${target_name} stays statically linked (see this file's own top-of-file comment).")
         return()
     endif()
     # -shared-libgcc IS a real, valid GCC/G++ driver option (unlike
@@ -149,6 +161,17 @@ function(gte_apply_plugin_shared_crt_linkage target_name)
     # actually produces the shared link here.
     target_link_options(${target_name} PRIVATE -shared-libgcc)
     mingw_copy_runtime_dll(${target_name})
+endfunction()
+
+# DEPRECATED - kept only as a one-line forwarder so pre-existing call sites
+# (the 3 CI-probe executables - gte_core_player_link_probe,
+# gte_plugin_abi_handshake_probe, gte_plugin_isolation_probe - deleted
+# wholesale in PHASE4 alongside the rest of the ABI system) keep compiling
+# unmodified. New call sites should use gte_apply_shared_crt_linkage()
+# directly (above) - GreatTamanaEditor's own call site already does
+# (better-render-pass-2 campaign, PHASE1).
+function(gte_apply_plugin_shared_crt_linkage target_name)
+    gte_apply_shared_crt_linkage(${target_name})
 endfunction()
 
 # editor-core-separation-4 campaign, PHASE4

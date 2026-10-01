@@ -1874,7 +1874,7 @@ endif()
 # down the file) and BEFORE sdl3_copy_runtime_dll() below (ordering between
 # the two POST_BUILD steps themselves does not matter, but this keeps both
 # "stage a runtime dependency next to the .exe" steps textually adjacent).
-gte_apply_plugin_shared_crt_linkage(GreatTamanaEditor)
+gte_apply_shared_crt_linkage(GreatTamanaEditor) # renamed, better-render-pass-2 campaign, PHASE1 (Landmine C).
 
 # Ensures SDL3.dll is copied next to the built .exe after every build.
 sdl3_copy_runtime_dll(GreatTamanaEditor)

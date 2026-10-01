@@ -2,7 +2,7 @@
 
 #include "../EditorPanelRegistry.h"
 
-#include "../../../plugins/gte_plugin_abi/IEditorPanelModule.h"
+#include "../EditorPanelModule.h" // relocated here, better-render-pass-2 PHASE1.
 #include "../../../plugins/gte_plugin_abi/IPluginModule.h"
 
 namespace gte {

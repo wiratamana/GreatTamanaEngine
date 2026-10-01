@@ -575,9 +575,13 @@ RenderFeatureCompositor::BlendStageState& RenderFeatureCompositor::EnsureBlendSt
         return existing->second;
     }
 
+    // better-render-pass-2 campaign, PHASE1 - must run before the
+    // AllocateComputeDescriptorSet() call just below, since that call reads
+    // m_blendDescriptorSetLayout, which this lazily builds on first use.
+    EnsureBlendPipelineInitialized();
+
     BlendStageState state;
-    state.blendDescriptorSet = ComputeDescriptorSet(
-        m_renderer.AllocateComputeDescriptorSet(m_operationRegistry.BlendDescriptorSetLayout()));
+    state.blendDescriptorSet = ComputeDescriptorSet(m_renderer.AllocateComputeDescriptorSet(m_blendDescriptorSetLayout));
     const auto inserted = m_blendStageStates.emplace(internedName, std::move(state));
     return inserted.first->second;
 }
@@ -644,10 +648,33 @@ void RenderFeatureCompositor::DispatchOps(rg::RenderGraphBuilder& builder, rg::T
         rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::AfterEverything);
 }
 
+// better-render-pass-2 campaign, PHASE1 (PHASE1_RELOCATE_SHARED_DEPENDENCIES.md) -
+// the shared blend pipeline (RenderFeatureBlend.comp) construction, RELOCATED
+// here VERBATIM from PluginRenderOperationRegistry::EnsureBuiltinsRegistered() -
+// same descriptor bindings (binding 0/1 = CombinedImageSampler for dstIn/srcIn,
+// binding 2 = StorageImage for destination), same real SPIR-V-reflection-based
+// CreateComputePipeline()/ReflectedDescriptorSetLayout() path. Idempotent -
+// safe to call more than once per frame, from more than one call site (see
+// this method's own doc comment, RenderFeatureCompositor.h).
+void RenderFeatureCompositor::EnsureBlendPipelineInitialized()
+{
+    if (m_blendPipeline.has_value()) {
+        return;
+    }
+    m_blendPipeline.emplace(m_renderer.CreateComputePipeline("shaders/RenderFeatureBlend.comp.spv"));
+    m_blendDescriptorSetLayout = m_blendPipeline->ReflectedDescriptorSetLayout(/*set=*/0);
+}
+
 void RenderFeatureCompositor::DispatchBlend(rg::RenderGraphBuilder& builder, rg::TextureHandle dstIn,
     VkSampler dstInSampler, rg::TextureHandle srcIn, VkSampler srcInSampler, rg::TextureHandle destination,
     BlendStageState& state, const char* debugName, VkExtent2D extent, RenderFeatureBlendMode blendMode)
 {
+    // better-render-pass-2 campaign, PHASE1 - ensures m_blendPipeline is ready
+    // even on the rare path where this is reached without
+    // EnsureBlendStageDescriptorOnly() having run first this process
+    // lifetime (defense-in-depth; idempotent, cheap no-op after the first
+    // real call from either call site).
+    EnsureBlendPipelineInitialized();
     builder.AddRenderPass(debugName, rg::PassKind::Compute, rg::ViewScope::Shared, rg::RenderPassCategory::General,
         [dstIn, srcIn, destination](rg::RenderGraphBuilder::PassBuilder& pass) {
             pass.ReadTexture(dstIn, rg::ResourceAccess::ShaderRead);
@@ -673,7 +700,7 @@ void RenderFeatureCompositor::DispatchBlend(rg::RenderGraphBuilder& builder, rg:
                 ComputeGroupCount3D(Extent3D{ extent.width, extent.height, 1 }, Extent3D{ 16, 16, 1 });
 
             m_renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-            m_renderer.Dispatch(m_operationRegistry.BlendPipeline(), state.blendDescriptorSet.Native(),
+            m_renderer.Dispatch(*m_blendPipeline, state.blendDescriptorSet.Native(),
                 &pushConstants, sizeof(pushConstants), groupCounts.width, groupCounts.height, groupCounts.depth);
             m_renderer.EndGraphPassRecording();
         },

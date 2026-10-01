@@ -20,8 +20,7 @@
 // registered name(s) round-trip correctly.
 
 #include "Core/EditorPanelRegistry.h"
-#include "../../plugins/gte_plugin_abi/IEditorPanelModule.h"
-#include "../../plugins/gte_plugin_abi/IPluginPanelDrawContext.h"
+#include "Core/EditorPanelModule.h" // relocated here, better-render-pass-2 PHASE1.
 
 #include <gtest/gtest.h>
 

@@ -16,8 +16,7 @@
 // literal below (panel name, panel text, module name/version/description) is
 // byte-for-byte identical to this file's pre-migration content.
 
-#include "../gte_plugin_abi/IEditorPanelModule.h"
-#include "../gte_plugin_abi/IPluginPanelDrawContext.h"
+#include "../../src/Core/EditorPanelModule.h" // relocated here, better-render-pass-2 PHASE1.
 #include "../gte_plugin_abi/SingleCapabilityPluginModule.h"
 #include "../gte_plugin_abi/PluginExportsMacro.h"
 

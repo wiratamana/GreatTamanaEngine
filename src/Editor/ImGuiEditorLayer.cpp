@@ -17,7 +17,7 @@
 #include "CreateAssetWindow.h" // editor-core-separation-18 campaign (On-Engine Project Workflow plan, BIG-STEP 4), PHASE3.
 #include "Plugins/PluginPanelDrawContextAdapter.h" // editor-core-separation-3 campaign, PHASE4.
 #include "../Core/EditorPanelRegistry.h" // editor-core-separation-3 campaign, PHASE4.
-#include "../../plugins/gte_plugin_abi/IEditorPanelModule.h" // editor-core-separation-3 campaign, PHASE4.
+#include "../Core/EditorPanelModule.h" // relocated here, better-render-pass-2 PHASE1.
 #include "Panels/AtmospherePanel.h"
 #include "Panels/FrameDebuggerPanel.h"
 #include "Panels/GamePanel.h"
