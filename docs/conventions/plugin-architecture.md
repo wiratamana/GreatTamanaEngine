@@ -3,6 +3,21 @@
 _Part of [GreatTamanaEngine](../../AGENTS.md)'s contributor conventions. See
 [docs/README.md](../README.md) for the full documentation index._
 
+> **REMOVED, `better-render-pass-2` campaign.** This entire ABI-versioned, runtime-`.dll`
+> plugin system (`plugins/gte_plugin_abi`, `PluginHost`, `IRenderFeatureModule_v1/_v2/_v3`,
+> `IPluginRenderPassBuilder/_v2/_v3`, `IEditorPanelModule_v1` as an ABI-versioned interface,
+> `PluginRenderOperationRegistry`, every `demo_*` plugin folder) was fully removed by the
+> `better-render-pass-2` campaign (`task_manager/better-render-pass-2/PHASE0_MASTER_STRATEGY.md`,
+> `CAMPAIGN_COMPLETION_REPORT.md`). See `docs/conventions/project-assembly-system.md` for the
+> system that replaced it as this engine's one remaining loadable-module mechanism -
+> `IEditorPanelModule_v1`/`IPluginPanelDrawContext` were relocated (not deleted) into
+> `src/Core/EditorPanelModule.h`, since Project Assembly's own custom Editor panel capability
+> still implements them directly; `RenderFeatureCompositor`'s blend-compositing pipeline was
+> kept and is reached today only through `Core::RegisterProjectRenderFeature()`/
+> `Core::AddScreenPostProcessPass()`. **Everything below this notice is kept, verbatim, as a
+> historical record of the removed design - it describes a system that no longer exists in
+> this codebase.**
+
 `plugins/gte_plugin_abi/` is the engine's frozen, versioned, minimal ABI
 contract for a REAL, runtime-loadable `.dll` plugin system (`editor-core-
 separation-3` campaign, `task_manager/editor-core-separation-3/

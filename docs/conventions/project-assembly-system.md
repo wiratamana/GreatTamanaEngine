@@ -12,9 +12,9 @@ that compiles into two ordinary Windows `.dll`s (`<Name>_Game.dll`,
 and which then call **real, live, non-ABI-wrapped engine types** (`gte::Core&`,
 real ImGui, real `rg::RenderGraphBuilder`) directly — with **zero
 recompilation of the engine itself** for a content change, and **zero new
-per-feature ABI surface** to design/maintain (unlike the existing
-`plugins/gte_plugin_abi` system, which this system never touches, edits, or
-depends on).
+per-feature ABI surface** to design/maintain (unlike the OLD, now fully-removed
+`plugins/gte_plugin_abi` system this system never touched, edited, or depended
+on while it still existed — see "`better-render-pass-2` ..." note below).
 
 Built by the `editor-core-separation-11` campaign
 (`task_manager/editor-core-separation-11/PHASE0_MASTER_STRATEGY.md`, 8
@@ -70,9 +70,16 @@ tree already IS the shared-CRT tree.
   new `## Hot Reload` section below for the full, current, honest picture.
   The strikethrough text above is the ORIGINAL, now-historical Locked
   Design Decision, kept for the record, not deleted.
-- **This is a NEW, ADDITIVE, PARALLEL system.** It never modifies
+- ~~This is a NEW, ADDITIVE, PARALLEL system. It never modifies
   `plugins/gte_plugin_abi/`, `src/Core/Plugins/PluginHost.h/.cpp`, or any
-  existing `IRenderFeatureModule_*`/`IEditorPanelModule_v1` ABI type.
+  existing `IRenderFeatureModule_*`/`IEditorPanelModule_v1` ABI type.~~
+  **NO LONGER A MEANINGFUL CONSTRAINT, `better-render-pass-2` campaign onward** -
+  the OTHER system (`plugins/gte_plugin_abi`) this bullet used to promise never
+  to touch was itself fully, deliberately removed by that campaign
+  (`task_manager/better-render-pass-2/PHASE0_MASTER_STRATEGY.md`,
+  `CAMPAIGN_COMPLETION_REPORT.md`) - Project Assembly is this engine's ONLY
+  loadable-module system today. The strikethrough text above is the ORIGINAL,
+  now-historical Locked Design Decision, kept for the record, not deleted.
 
 ## Folder layout and the CMake mechanism
 
@@ -111,13 +118,17 @@ Projects/<Name>/
   process — the exact hazard this whole system exists to avoid).
 - Applies `gte_apply_project_assembly_shared_crt_linkage(target)`
   (`cmake/MingwRuntime.cmake`) — a genuinely SEPARATE function from
-  `gte_apply_plugin_*_shared_crt_linkage()` (the OTHER, unrelated
-  `gte_plugin_abi` system's own CRT-linkage helper), gated ONLY by
-  `GTE_ENABLE_PROJECT_ASSEMBLIES` + `GTE_PLUGIN_SHARED_CRT_TOOLCHAIN_SUPPORTED`
-  — never by `GTE_ENABLE_PLUGINS`. This exists because the two systems are
-  logically independent: a developer who sets `GTE_ENABLE_PLUGINS=OFF` (to
-  disable the OTHER, ABI-based plugin system) must still get correct,
-  shared-CRT-linked Project Assembly `.dll`s.
+  `gte_apply_shared_crt_linkage()` (the unrelated host-executable CRT-linkage
+  helper `better-render-pass-2` renamed from the OLD, now fully-removed
+  `plugins/gte_plugin_abi` system's own `gte_apply_plugin_shared_crt_linkage()`),
+  gated ONLY by `GTE_ENABLE_PROJECT_ASSEMBLIES` +
+  `GTE_PLUGIN_SHARED_CRT_TOOLCHAIN_SUPPORTED` — this historically was ALSO never
+  gated by the OLD, now-removed `GTE_ENABLE_PLUGINS` flag, back when that flag
+  still existed, because the two systems were always logically independent -
+  a build with the ABI plugin system disabled still had to get correct,
+  shared-CRT-linked Project Assembly `.dll`s. That flag, and the whole system
+  it gated, no longer exist at all (`better-render-pass-2` campaign) - this
+  function's own gating is unchanged either way.
 
 **One new CMake option, `GTE_ENABLE_PROJECT_ASSEMBLIES` (default `ON`)**,
 gates the entire system end to end: both the root `CMakeLists.txt`
@@ -206,10 +217,15 @@ the Editor (releases the lock), rebuild (externally, or via a future
 ## Capability #1 — a custom Editor panel
 
 An `_Editor.dll`'s own registration function implements
-`gte::IEditorPanelModule_v1` directly (the SAME ABI interface
-`gte_plugin_abi` panels implement — deliberately reused, since this system
-has no reason to invent a parallel one), **ignoring** the `ctx`
-(`IPluginPanelDrawContext&`) parameter entirely and calling real `ImGui::*`
+`gte::IEditorPanelModule_v1` directly — originally the SAME ABI interface
+`plugins/gte_plugin_abi` panels implemented (deliberately reused, since this
+system had no reason to invent a parallel one); today, after `better-render-pass-2`
+fully removed that OTHER system, `IEditorPanelModule_v1`/`IPluginPanelDrawContext`
+live in a small, `gte_core`-owned header, `src/Core/EditorPanelModule.h` — the
+SAME interface, same method shapes, just relocated rather than ABI-versioned,
+since Project Assembly's own custom-panel capability is now its one remaining
+real consumer. `BuildPanel()` **ignores** the `ctx`
+(`IPluginPanelDrawContext&`) parameter entirely and calls real `ImGui::*`
 functions directly instead, then registers itself through the existing,
 unmodified `gte::EditorPanelRegistry::Instance().RegisterPluginPanel(name, module)`.
 No new registry, no new panel-hosting mechanism.
@@ -217,13 +233,16 @@ No new registry, no new panel-hosting mechanism.
 **Finding G, resolved**: `src/Editor/ImGuiEditorLayer.cpp`'s per-frame loop
 that calls `entry.module->BuildPanel(drawContext)` for every
 `EditorPanelRegistry::PluginPanels()` entry used to sit inside
-`#if GTE_ENABLE_PLUGINS` only — the OTHER system's flag. Widened to
-`#if GTE_ENABLE_PLUGINS || GTE_ENABLE_PROJECT_ASSEMBLIES` so a Project
-Assembly panel actually draws even with `GTE_ENABLE_PLUGINS=OFF` (it still
-gets a dock slot either way — `src/Editor/DockLayout.cpp`'s own separate loop
+`#if GTE_ENABLE_PLUGINS` only — the OTHER, now fully-removed system's own flag.
+Widened, at the time, to `#if GTE_ENABLE_PLUGINS || GTE_ENABLE_PROJECT_ASSEMBLIES`
+so a Project Assembly panel actually drew even with `GTE_ENABLE_PLUGINS=OFF` (it
+still got a dock slot either way — `src/Editor/DockLayout.cpp`'s own separate loop
 over the same registry was never gated by either flag — but without this fix
-it would be a permanently blank tab, which looks like a bug rather than a
-configuration choice).
+it would have been a permanently blank tab, which looks like a bug rather than a
+configuration choice). **`better-render-pass-2` then narrowed this guard to
+`#if GTE_ENABLE_PROJECT_ASSEMBLIES` alone**, since `GTE_ENABLE_PLUGINS` no
+longer exists anywhere in this codebase — this loop's own observable behavior
+is completely unchanged for Project Assembly, which is all that is left to gate.
 
 ## Capability #2 — a custom render-graph pass
 
@@ -703,8 +722,14 @@ Full campaign writeup:
   `.gitignore`d, single-developer, same-build-run only.
 - No separate Player executable — both `_Game.dll`/`_Editor.dll` load into
   the one existing `GreatTamanaEditor.exe` process.
-- No change of any kind to `plugins/gte_plugin_abi`, `PluginHost`, or any
-  existing ABI-versioned interface.
+- ~~No change of any kind to `plugins/gte_plugin_abi`, `PluginHost`, or any
+  existing ABI-versioned interface.~~ **NO LONGER A MEANINGFUL NON-GOAL,
+  `better-render-pass-2` campaign onward** - the OTHER system this bullet
+  promised never to touch was itself fully, deliberately removed by that
+  campaign (`task_manager/better-render-pass-2/PHASE0_MASTER_STRATEGY.md`,
+  `CAMPAIGN_COMPLETION_REPORT.md`); Project Assembly is this engine's ONLY
+  loadable-module system today. The strikethrough text above is the ORIGINAL,
+  now-historical Non-Goal, kept for the record, not deleted.
 - ~~No scaffolding/"New Project" wizard tool — a human creates
   `Projects/<Name>/{Assets,Libraries}` by hand today.~~ **SUPERSEDED,
   2026-09-28 onward** - see `task_manager/editor-core-separation-16/` (the

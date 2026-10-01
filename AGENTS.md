@@ -1022,92 +1022,30 @@ host template beyond what the standalone-core probe already needs - this campaig
 proves `gte_core.a` is heading in the right direction for that future initiative, it
 does not build it.
 
-## Plugin Architecture
+## Plugin Architecture (REMOVED)
 
-A real, dynamic, runtime-loadable `.dll` plugin system (`editor-core-
-separation-3` campaign, `task_manager/editor-core-separation-3/
-PHASE0_MASTER_STRATEGY.md`) - a feature ships as one or more `.dll`s dropped
-into a `plugins/` folder next to the built executable, discovered and used
-by the running engine with zero recompilation of the engine itself and zero
-per-plugin code inside `gte_core`/`gte_editor`. PHASE1 laid the foundation:
-`plugins/gte_plugin_abi/` (`GtePluginAbiFingerprint`, `IPluginModule`, the
-three fixed `GTE_*` `extern "C"` exports), a byte-for-byte fingerprint gate
-checked first, always (a mismatch is a clean, logged skip, never a crash),
-and the reusable `gte_apply_plugin_shared_crt_linkage()` CMake helper
-(`cmake/MingwRuntime.cmake`) every target on either side of the plugin ABI
-boundary must call. A plugin `.dll` NEVER links or calls a real
-`gte_core`/`gte_editor` symbol directly - only small, curated, pure-virtual
-wrapper interfaces using solely plain built-in C++ types, implemented
-host-side by a thin adapter forwarding to the real internal type; neither
-`gte_core.a` nor `gte_editor.a` ever becomes a `SHARED`/`.dll` target.
-**Honest, load-bearing caveat**: this repository's own default toolchain (as
-of PHASE1) was built `--disable-shared` and cannot produce a shared-CRT-
-linked binary at all - `gte_apply_plugin_shared_crt_linkage()` detects this
-at configure time and is a clean, honest no-op (fingerprint
-`sharedRuntimeLinkage` correctly reads `0`) until a dedicated later decision
-actually switches the active toolchain.
-
-A five-phase campaign, `editor-core-separation-9`
-(`task_manager/editor-core-separation-9/PHASE0_MASTER_STRATEGY.md`,
-`CAMPAIGN_COMPLETION_REPORT.md`), shipped a second, strictly ADDITIVE
-render-feature-authoring surface, `IPluginRenderPassBuilder_v3` (paired with a
-new `IRenderFeatureModule_v3`), fixing the closed-enumeration problem
-`IPluginRenderPassBuilder_v2` had - `_v2` hardcodes exactly 3 fixed C++ methods
-(`AddSolidFillPass`/`AddRadialVignettePass`/`AddColorGradePass`), each bound to
-one `opCode` inside one host-owned uber compute shader, so a plugin author can
-never add a genuinely new visual effect and "a compute pass writes a
-texture/buffer, a later pass reads it" is impossible. `_v3` instead gives a
-plugin a real, curated, two-phase setup/execute resource-graph builder
-(`PluginTextureHandle`/`PluginBufferHandle`, `CreateTexture`/`CreateBuffer`/
-`ReadTexture`/`WriteTexture`/`ReadBuffer`/`WriteBuffer`/`WriteColorAttachment`,
-mirroring `rg::RenderGraphBuilder::PassBuilder` almost exactly but ABI-safe)
-plus a growable, string-keyed, HOST-OWNED `PluginRenderOperationRegistry` a
-plugin calls through (`IPluginCommandRecorder::Dispatch(opId, ...)`/
-`DrawFullscreenTriangle(opId, ...)`) instead of one fixed method per effect -
-a brand-new operation (this campaign shipped two: `gte.builtin.box_blur` and
-`gte.builtin.blit_fullscreen`) is now a HOST-SIDE CONTENT ADDITION, never an
-ABI change. `_v3` is now the RECOMMENDED path for new plugin authors going
-forward - `_v2` (and `_v1`) remain fully supported forever, never touched,
-deprecated, or removed. The campaign's own concrete, permanent proof is a real
-2-pass GPU downsample-blur demo plugin (`plugins/demo_render_feature_v3/`): a
-compute pass reads the new curated `"SceneColor"` named resource and writes a
-transient half-res texture via `gte.builtin.box_blur`, then a graphics pass
-reads that texture and draws it into the plugin's own private compositing
-target via `gte.builtin.blit_fullscreen` - verified with a real, live,
-HTTP-driven, mathematically-checked pixel proof (sharp-vs-blurred captures
-matching the shader's own hand-computed kernel radius). `_v3` reuses the EXACT
-SAME per-plugin private-target + 5-mode blend pipeline `_v2` already has
-(`RenderFeatureCompositor`) - it only changes HOW a plugin's own private
-target gets filled, never how it gets composited afterward - and every `_v3`
-pass is, under the hood, a REAL `rg::PassRecord` produced by the SAME
-`RenderGraphBuilder::AddRenderPass()` chokepoint every internal engine pass
-uses, so it is already generically visible in `GET /render_graph`/the Editor's
-"Render Graph" panel with zero panel/JSON code change (a small, additive
-`is_v3` field was added to the separate, per-loaded-plugin "Plugin Render
-Features" section only, so a `_v3` row is visually distinguishable from a
-`_v2` row at a glance). A new `IPluginBlackboard::Publish`/`Fetch` gives two
-independently-loaded `_v3` plugins a generic, ABI-safe, string-keyed
-cross-plugin data hand-off, proven by a real, live, VISIBLE demo (one plugin's
-published blur strength widens a second, unrelated plugin's own vignette
-radius). **Honest, load-bearing caveat, restated plainly**: `Dispatch()`'s
-group-count cap (64x64x1 groups per call, host-enforced with a loud warning
-and a clean skip, never a crash) has NO device-lost recovery path anywhere in
-this engine today - a plugin that somehow drives the GPU into a lost-device
-state has no documented recovery story, exactly as true for every other GPU
-workload this engine already runs. No plugin-supplied shader bytecode of any
-kind is possible yet - `PluginRenderOperationRegistry` remains 100%
-host-authored/curated this whole campaign, a separate, future,
-security-reviewed campaign's job. Verified with a full clean build, a full
-`ctest` regression pass (1882 tests, 100% of executed tests passing, 2
-legitimate environment-gated skips - unchanged from this campaign's own PHASE1
-baseline), and a live, HTTP-driven smoke test with BOTH `_v2` and `_v3` demo
-plugins loaded and rendering simultaneously, exercising resource creation, the
-operation registry, and the blackboard all at once with zero unexpected
-warnings or errors. See
-`task_manager/editor-core-separation-9/CAMPAIGN_COMPLETION_REPORT.md` for the
-full five-phase writeup.
-
-Full convention: [docs/conventions/plugin-architecture.md](docs/conventions/plugin-architecture.md).
+The ABI-versioned, runtime-`.dll` plugin system (`plugins/gte_plugin_abi`, `PluginHost`,
+`IRenderFeatureModule_v1/_v2/_v3`, `IPluginRenderPassBuilder/_v2/_v3`, `IEditorPanelModule_v1` as an
+ABI-versioned interface, `PluginRenderOperationRegistry`, every `demo_*` plugin folder, the two CI ABI
+probes) was **fully removed by the `better-render-pass-2` campaign** (six phases,
+`task_manager/better-render-pass-2/PHASE0_MASTER_STRATEGY.md`, `CAMPAIGN_COMPLETION_REPORT.md`) - zero
+folder, zero host-side implementation file, zero CMake wiring survives (`GTE_ENABLE_PLUGINS` does not
+exist anywhere in this codebase anymore). Its editor-panel interface shape was RELOCATED (never left
+ABI-versioned) into a new, small, `gte_core`-owned header, `src/Core/EditorPanelModule.h`
+(`IEditorPanelModule_v1`/`IPluginPanelDrawContext`), since Project Assembly's own custom Editor panel
+capability (see "Project Assembly System" below) genuinely needs it and implements it directly. Its
+render-feature blend-compositing mechanism (`RenderFeatureCompositor`, `src/Shaders/RenderFeatureBlend.comp`)
+was KEPT, with the one real Vulkan pipeline it needs pulled fully into `RenderFeatureCompositor` itself
+(no longer split out into a separate ABI-serving registry) - it is now reached ONLY through
+`Core::RegisterProjectRenderFeature()`/`Core::AddScreenPostProcessPass()`, with zero remaining
+ABI-plugin caller of any kind. `RenderFeatureNamePool.h` and `IPluginCapabilityOrchestrator.h` (plus its
+generic `Core::m_capabilityOrchestrators` vector mechanism) both survive unconditionally, unrelated to
+the ABI deletion - `RenderFeatureCompositor` is simply their one remaining registered
+implementor/consumer today. See "Project Assembly System" below for the one remaining, non-ABI way to
+add a loadable render-feature/Editor-panel module to this engine, and
+`docs/conventions/plugin-architecture.md` (now a short pointer notice followed by the original design's
+full content, kept verbatim as a historical record, never deleted) for the complete, original writeup of
+the now-removed system.
 
 ## Project Assembly System
 

@@ -12,19 +12,18 @@
 # own build tree (tools/ci/gte_core_player_link_probe/), never committed,
 # same as /build-core-probe/ above.
 /build-player-link-probe/
-# editor-core-separation-3 campaign, PHASE2 - the new plugin ABI handshake
-# probe's own build tree (tools/ci/gte_plugin_abi_handshake_probe/), never
-# committed, same as /build-player-link-probe/ above.
-/build-plugin-abi-handshake-probe/
-# editor-core-separation-3 campaign, PHASE5 - the new plugin isolation
-# probe's own build tree (tools/ci/gte_plugin_isolation_probe/), never
-# committed, same as /build-plugin-abi-handshake-probe/ above.
-/build-plugin-isolation-probe/
+# editor-core-separation-3 campaign, PHASE2/PHASE5 originally added two more
+# ignore rules here for tools/ci/gte_plugin_abi_handshake_probe/'s and
+# tools/ci/gte_plugin_isolation_probe/'s own build trees
+# (/build-plugin-abi-handshake-probe/, /build-plugin-isolation-probe/) - both
+# probes, and both ignore rules, are REMOVED (better-render-pass-2 campaign,
+# PHASE4) now that plugins/gte_plugin_abi/ itself is fully deleted - nothing
+# to ignore here anymore.
 # editor-core-separation-11 campaign, PHASE2 - the new Project Assembly link
 # probe's own build tree (tools/ci/gte_project_assembly_link_probe/), never
-# committed, same as /build-plugin-isolation-probe/ above. This probe is a
+# committed, same as /build-player-link-probe/ above. This probe is a
 # genuinely standalone CMake project (not a nested-invocation wrapper around
-# the real root CMakeLists.txt like the 4 probes above it), so it also
+# the real root CMakeLists.txt like the 2 probes above it), so it also
 # fetches its OWN, independent copies of SDL3/Vulkan-Headers+volk/ImGui
 # straight into its own source directory (see that probe's own CMakeLists.txt
 # for why) - those fetched artifacts must never be committed either.

@@ -82,11 +82,12 @@ public:
     const std::vector<std::string>& AllNames() const noexcept { return m_allNames; }
 
     // Just the plugin-registered subset, in registration order - what
-    // DockLayout.cpp's new generic bottom-dock loop and
-    // ImGuiEditorLayer.cpp's new generic BuildUI() loop both iterate (PHASE4
-    // Step 3.5/3.7). Empty whenever GTE_ENABLE_PLUGINS is OFF or no
-    // loaded plugin implements this capability - a fully safe, empty-by-
-    // default state.
+    // DockLayout.cpp's generic bottom-dock loop and ImGuiEditorLayer.cpp's
+    // generic BuildUI() loop both iterate. Empty whenever no loaded Project
+    // Assembly `_Editor.dll` implements this capability (the ABI-versioned
+    // `plugins/gte_plugin_abi` system that used to be this registry's OTHER
+    // populating source was fully removed by the `better-render-pass-2`
+    // campaign) - a fully safe, empty-by-default state.
     struct PluginPanelEntry {
         std::string name;
         IEditorPanelModule_v1* module = nullptr;

@@ -106,10 +106,10 @@ than subsystem-specific):
   the `src/Editor/` folder boundary, `ImGuiEditorLayer`'s composition root,
   `EditorContext`, `Selection`, `DockLayout`, and the fixed `Panels/*.cpp`
   builder-function convention.
-- **[Plugin Architecture](conventions/plugin-architecture.md)** — the real,
-  dynamic, runtime-loadable `.dll` plugin system: `gte_plugin_abi`'s
-  fingerprint gate, `IPluginModule`, the curated-wrapper-interface rule, and
-  the shared/DLL CRT-linkage requirement.
+- **[Plugin Architecture](conventions/plugin-architecture.md)** — **REMOVED**
+  by the `better-render-pass-2` campaign; the file is kept as a short pointer
+  notice plus the original, now-historical ABI-versioned `.dll` plugin system
+  design, verbatim, for the record.
 - **[Project Assembly System](conventions/project-assembly-system.md)** — the
   per-developer `Projects/<Name>/` source tree that compiles into two `.dll`s
   (`<Name>_Game.dll`/`<Name>_Editor.dll`) linked directly against
