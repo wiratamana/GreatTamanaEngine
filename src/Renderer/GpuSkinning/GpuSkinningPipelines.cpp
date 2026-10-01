@@ -1,26 +1,24 @@
 #include "GpuSkinningPipelines.h"
 
 #include "../Renderer.h"
-#include "../Vulkan/DescriptorSetLayoutBuilder.h"
-
-#include <cstdint>
 
 namespace gte {
 
 GpuSkinningPipelines::~GpuSkinningPipelines()
 {
-    // m_positionNormalPipeline/m_positionNormalUvPipeline are RAII types
-    // (ComputePipeline) and clean up themselves; the two descriptor-set
-    // layouts are plain Vulkan handles this class owns directly - mirrors
-    // ComputeBlurValidation's own destructor exactly (see that class's own
-    // comment on why this is safe to call unconditionally: the device is
-    // already idle by the time any owning object's members are destroyed).
-    if (m_positionNormalLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(m_device, m_positionNormalLayout, nullptr);
-    }
-    if (m_positionNormalUvLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(m_device, m_positionNormalUvLayout, nullptr);
-    }
+    // task_manager/better-render-pass-1 campaign, PHASE4
+    // (PHASE4_MIGRATE_CULLING_AND_GPU_SKINNING_COMPUTE_PASSES.md) -
+    // m_positionNormalPipeline/m_positionNormalUvPipeline (both
+    // ComputePipeline, RAII) now own and destroy
+    // m_positionNormalLayout/m_positionNormalUvLayout themselves (both are
+    // BORROWED from their own pipeline's own ReflectedDescriptorSetLayout(0)
+    // - see ComputePipeline::Destroy()'s own m_ownedReflectedLayouts
+    // cleanup). This destructor therefore does NOT call
+    // vkDestroyDescriptorSetLayout() on either layout anymore - doing so
+    // would be a genuine double-free of handles this class no longer owns.
+    // See PHASE4_COMPLETION_REPORT.md for the full "destructor double-free
+    // fix" writeup (first found/fixed for CullingPipelines in this same
+    // migration batch).
 }
 
 void GpuSkinningPipelines::EnsureInitialized(Renderer& renderer)
@@ -29,49 +27,29 @@ void GpuSkinningPipelines::EnsureInitialized(Renderer& renderer)
         return;
     }
 
-    const Renderer::VulkanContextInfo context = renderer.GetVulkanContextInfo();
-    m_device = context.device;
-
-    // Plain, per-shader push-constant convention (see ComputePipeline.h) -
-    // a single uint32 (vertexCount), matching both .comp files' own
-    // `PushConstants` block exactly.
-    VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(std::uint32_t);
+    // task_manager/better-render-pass-1 campaign, PHASE4
+    // (PHASE4_MIGRATE_CULLING_AND_GPU_SKINNING_COMPUTE_PASSES.md) -
+    // path-only CreateComputePipeline() calls: real SPIR-V reflection
+    // (ShaderReflection.h, PHASE1/PHASE2) builds each descriptor-set layout
+    // and push-constant range directly from each shader's own compiled
+    // binding/push-constant metadata, instead of a hand-built
+    // DescriptorSetLayoutBuilder layout + a manually restated
+    // VkPushConstantRange shared (incorrectly implying a single range) by
+    // both variants.
 
     // PositionNormal variant - bindings 0-3, per GpuSkinningTypes.h's own
     // documented table (see SkinVerticesPositionNormal.comp's own header
     // comment for the full per-binding reasoning).
-    {
-        DescriptorSetLayoutBuilder layoutBuilder(m_device);
-        m_positionNormalLayout = layoutBuilder.AddStorageBuffer(/*binding=*/0) // bind pose
-                                      .AddStorageBuffer(/*binding=*/1) // skin weights
-                                      .AddStorageBuffer(/*binding=*/2) // bone matrices
-                                      .AddStorageBuffer(/*binding=*/3) // output
-                                      .Build();
-
-        m_positionNormalPipeline.emplace(renderer.CreateComputePipeline("shaders/SkinVerticesPositionNormal.comp.spv",
-            std::vector<VkDescriptorSetLayout>{ m_positionNormalLayout }, pushConstantRange));
-    }
+    m_positionNormalPipeline.emplace(renderer.CreateComputePipeline("shaders/SkinVerticesPositionNormal.comp.spv"));
+    m_positionNormalLayout = m_positionNormalPipeline->ReflectedDescriptorSetLayout(/*set=*/0);
 
     // PositionNormalUv variant - bindings 0-4, adding the bind-pose UV
     // buffer at binding 4 (a Phase 2 addition on top of GpuSkinningTypes.h's
     // own 4-binding table - see SkinVerticesPositionNormalUv.comp's own
     // header comment for why this is additive, not a redefinition).
-    {
-        DescriptorSetLayoutBuilder layoutBuilder(m_device);
-        m_positionNormalUvLayout = layoutBuilder.AddStorageBuffer(/*binding=*/0) // bind pose
-                                        .AddStorageBuffer(/*binding=*/1) // skin weights
-                                        .AddStorageBuffer(/*binding=*/2) // bone matrices
-                                        .AddStorageBuffer(/*binding=*/3) // output
-                                        .AddStorageBuffer(/*binding=*/4) // bind-pose UVs (Uv variant only)
-                                        .Build();
-
-        m_positionNormalUvPipeline.emplace(
-            renderer.CreateComputePipeline("shaders/SkinVerticesPositionNormalUv.comp.spv",
-                std::vector<VkDescriptorSetLayout>{ m_positionNormalUvLayout }, pushConstantRange));
-    }
+    m_positionNormalUvPipeline.emplace(
+        renderer.CreateComputePipeline("shaders/SkinVerticesPositionNormalUv.comp.spv"));
+    m_positionNormalUvLayout = m_positionNormalUvPipeline->ReflectedDescriptorSetLayout(/*set=*/0);
 }
 
 } // namespace gte

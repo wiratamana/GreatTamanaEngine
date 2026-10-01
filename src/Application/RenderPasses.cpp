@@ -2,7 +2,6 @@
 
 #include "../Game/Animation/AnimationSystem.h"
 #include "../Game/Game.h"
-#include "../Renderer/ComputeDispatch.h"
 #include "../Renderer/ComputePipeline.h"
 #include "../Renderer/GpuSkinning/GpuSkinningPipelines.h"
 #include "../Renderer/GpuSkinning/GpuSkinningRenderPassTags.h"
@@ -210,6 +209,16 @@ void FinalizeRenderTextureForExternalSampling(VkCommandBuffer cmd, RenderTexture
 std::vector<rg::BufferHandle> AddGpuSkinningPasses(
     rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer, rg::RenderPassToggleRegistry* toggleRegistry)
 {
+    // better-render-pass-1 campaign, PHASE4
+    // (PHASE4_MIGRATE_CULLING_AND_GPU_SKINNING_COMPUTE_PASSES.md) - `renderer`
+    // is no longer dereferenced anywhere in this function's own body (the
+    // real dispatch below now goes entirely through rg::CommandBuffer, which
+    // reaches its own Renderer* via PassContext::Cmd() instead) - kept as a
+    // parameter for signature stability (every existing call site still
+    // passes one), explicitly cast to void so this stays a deliberate,
+    // documented no-op parameter, mirroring AddRenderTransparentPass()'s own
+    // precedent immediately below in this same file.
+    (void)renderer;
     std::vector<rg::BufferHandle> handles;
 
     // editor-core-separation-21 campaign, PHASE4 (fixing PHASE3's
@@ -239,15 +248,26 @@ std::vector<rg::BufferHandle> AddGpuSkinningPasses(
             [handle](rg::RenderGraphBuilder::PassBuilder& pass) {
                 pass.WriteBuffer(handle, rg::ResourceAccess::ComputeShaderWrite);
             },
-            [&renderer, &pipelines, request](rg::PassContext& ctx) {
+            [&pipelines, request](rg::PassContext& ctx) {
                 const ComputePipeline& pipeline =
                     request.textured ? pipelines.PositionNormalUvPipeline() : pipelines.PositionNormalPipeline();
                 const std::uint32_t vertexCount = request.vertexCount;
 
-                renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-                renderer.Dispatch(pipeline, request.descriptorSet, &vertexCount, sizeof(vertexCount),
-                    ComputeGroupCount(vertexCount, kSkinningLocalSizeX), 1, 1);
-                renderer.EndGraphPassRecording();
+                // better-render-pass-1 campaign, PHASE4
+                // (PHASE4_MIGRATE_CULLING_AND_GPU_SKINNING_COMPUTE_PASSES.md)
+                // - migrated onto rg::CommandBuffer (PHASE3) -
+                // DispatchOverSize() computes the correct groupX/Y/Z from
+                // the bound pipeline's own reflected LocalGroupSize() (==
+                // {256,1,1}, matching the old kSkinningLocalSizeX constant
+                // exactly) via ComputeDispatch.h's existing
+                // ComputeGroupCount3D(), degrading correctly to the previous
+                // 1D ComputeGroupCount() call for this flat vertexCount
+                // dispatch.
+                rg::CommandBuffer cmd = ctx.Cmd();
+                cmd.BindComputePipeline(pipeline);
+                cmd.BindDescriptorSet(request.descriptorSet);
+                cmd.SetPushConstants(vertexCount);
+                cmd.DispatchOverSize(vertexCount, 1, 1);
             },
             rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::Opaques, kGpuSkinningDispatchPassTag.bit);
 

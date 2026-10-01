@@ -27,6 +27,16 @@ class Renderer;
 // PHASE3 pre-implementation strategy-document double-check
 // (PHASE3_STRATEGY_DOUBLE_CHECK_REPORT.md).
 //
+// task_manager/better-render-pass-1 campaign, PHASE4
+// (PHASE4_MIGRATE_CULLING_AND_GPU_SKINNING_COMPUTE_PASSES.md) - EnsureInitialized()
+// now builds m_pipeline via a path-only Renderer::CreateComputePipeline() call
+// (real SPIR-V reflection - see ComputePipeline.h's own PHASE2 class comment)
+// instead of hand-building a DescriptorSetLayoutBuilder layout plus a
+// manually restated VkPushConstantRange. m_layout is therefore now BORROWED
+// from m_pipeline->ReflectedDescriptorSetLayout(0) - owned and destroyed by
+// m_pipeline (ComputePipeline) itself, never by this class directly (see
+// ~CullingPipelines() below).
+//
 // Deliberately does NOT decide dispatch math, descriptor-set ALLOCATION per
 // batch, or per-batch buffer/resource lifetime - that is PHASE4's job (the
 // per-batch GPU-driven-batch resource cache). This class only ever answers
@@ -61,11 +71,11 @@ public:
     CullingPipelines(CullingPipelines&&) = delete;
     CullingPipelines& operator=(CullingPipelines&&) = delete;
 
-    // Builds the descriptor-set layout and the ComputePipeline the first
-    // time this is called; every subsequent call is a no-op. Safe to call
-    // every frame from a hot path that only sometimes needs GPU-driven
-    // culling (mirrors GpuSkinningPipelines::EnsureInitialized()'s own
-    // documented contract).
+    // Builds the reflection-based ComputePipeline (see the class comment
+    // above) the first time this is called; every subsequent call is a
+    // no-op. Safe to call every frame from a hot path that only sometimes
+    // needs GPU-driven culling (mirrors GpuSkinningPipelines::EnsureInitialized()'s
+    // own documented contract).
     void EnsureInitialized(Renderer& renderer);
 
     bool IsInitialized() const noexcept { return m_pipeline.has_value(); }
@@ -73,32 +83,27 @@ public:
     // Binding 0 (per-instance input) / binding 1 (output indirect-command
     // array) / binding 2 (atomic visible-count buffer) - see
     // Shaders/FrustumCull.comp's own header comment for the full
-    // per-binding reasoning.
+    // per-binding reasoning. BORROWED from
+    // m_pipeline->ReflectedDescriptorSetLayout(0) (better-render-pass-1
+    // campaign, PHASE4) - owned/destroyed by m_pipeline itself, never by
+    // this class.
     VkDescriptorSetLayout DescriptorSetLayout() const noexcept { return m_layout; }
     const ComputePipeline& Pipeline() const noexcept { return *m_pipeline; }
 
 private:
-    VkDevice m_device = VK_NULL_HANDLE;
-
     VkDescriptorSetLayout m_layout = VK_NULL_HANDLE;
 
     std::optional<ComputePipeline> m_pipeline;
 };
 
-// MUST match Shaders/FrustumCull.comp's own `layout(local_size_x = 256) in;`
-// exactly - see ComputeDispatch.h's own header comment on why this pairing
-// is a hand-maintained, per-shader convention, never enforced by the build
-// system. Named and exposed here (rather than buried inside a .cpp) so
-// PHASE4/5's future dispatch call site(s) can reference it directly instead
-// of re-declaring a duplicate magic constant of their own - mirrors
-// GpuSkinningPipelines.h's own kSkinningLocalSizeX precedent exactly.
-inline constexpr std::uint32_t kCullingLocalSizeX = 256;
-
 // The exact byte size of Shaders/FrustumCull.comp's own PushConstants block
-// (6 vec4 planes + 2 uint = 96 + 4 + 4 = 104 bytes) - named here so every
-// caller building a VkPushConstantRange against CullingPipelines::Pipeline()
-// agrees on the same value, mirroring this file's own kCullingLocalSizeX
-// precedent (a hand-maintained, GLSL-vs-C++ pairing, never tool-enforced).
+// (6 vec4 planes + 2 uint = 96 + 4 + 4 = 104 bytes). Still named here (even
+// though better-render-pass-1 campaign, PHASE4 made the real
+// VkPushConstantRange itself come from reflection - ComputePipeline::
+// PushConstantSize() - instead of this constant) because Core.cpp's own
+// CullingPushConstants struct uses it in a static_assert, catching a C++-side
+// struct typo at COMPILE time - something reflection (a runtime-only check,
+// see CommandBuffer::SetPushConstants()'s debug assert) cannot do.
 inline constexpr std::uint32_t kCullingPushConstantSize = 104;
 
 } // namespace gte

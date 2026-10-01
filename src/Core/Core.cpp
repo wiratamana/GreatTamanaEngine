@@ -18,7 +18,6 @@
 #include "../Profiling/FrameProfiler.h"
 #include "../Profiling/ScopeTimer.h"
 #include "../Renderer/Atmosphere/AtmosphereParameters.h"
-#include "../Renderer/ComputeDispatch.h"
 #include "../Renderer/GpuSkinning/GpuSkinningPipelines.h"
 #include "../Renderer/GpuSkinning/GpuSkinningRenderPassTags.h"
 #include "../Renderer/Culling/CullingPipelines.h"
@@ -578,10 +577,21 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                         request.textured ? pipelines.PositionNormalUvPipeline() : pipelines.PositionNormalPipeline();
                     const std::uint32_t vertexCount = request.vertexCount;
 
-                    m_renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-                    m_renderer.Dispatch(pipeline, request.descriptorSet, &vertexCount, sizeof(vertexCount),
-                        ComputeGroupCount(vertexCount, kSkinningLocalSizeX), 1, 1);
-                    m_renderer.EndGraphPassRecording();
+                    // better-render-pass-1 campaign, PHASE4
+                    // (PHASE4_MIGRATE_CULLING_AND_GPU_SKINNING_COMPUTE_PASSES.md)
+                    // - migrated onto rg::CommandBuffer (PHASE3) -
+                    // DispatchOverSize() computes the correct groupX/Y/Z from
+                    // the bound pipeline's own reflected LocalGroupSize()
+                    // (== {256,1,1}, matching the old kSkinningLocalSizeX
+                    // constant exactly) via ComputeDispatch.h's existing
+                    // ComputeGroupCount3D(), degrading correctly to the
+                    // previous 1D ComputeGroupCount() call for this flat
+                    // vertexCount dispatch.
+                    rg::CommandBuffer cmd = ctx.Cmd();
+                    cmd.BindComputePipeline(pipeline);
+                    cmd.BindDescriptorSet(request.descriptorSet);
+                    cmd.SetPushConstants(vertexCount);
+                    cmd.DispatchOverSize(vertexCount, 1, 1);
                 };
                 out.push_back(std::move(desc));
             }
@@ -867,11 +877,22 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                         pc.instanceCount = static_cast<std::uint32_t>(instanceCount);
                         pc.useCompaction = useCompaction ? 1u : 0u;
 
-                        m_renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-                        m_renderer.Dispatch(m_gpuDrivenBatchCache.Pipelines().Pipeline(), cullingDescriptorSet, &pc,
-                            sizeof(pc),
-                            ComputeGroupCount(static_cast<std::uint32_t>(instanceCount), kCullingLocalSizeX), 1, 1);
-                        m_renderer.EndGraphPassRecording();
+                        // better-render-pass-1 campaign, PHASE4
+                        // (PHASE4_MIGRATE_CULLING_AND_GPU_SKINNING_COMPUTE_PASSES.md)
+                        // - migrated onto rg::CommandBuffer (PHASE3) -
+                        // DispatchOverSize() computes the correct groupX/Y/Z
+                        // from CullingPipelines::Pipeline()'s own reflected
+                        // LocalGroupSize() (== {256,1,1}, matching the old,
+                        // now-deleted kCullingLocalSizeX constant exactly)
+                        // via ComputeDispatch.h's existing
+                        // ComputeGroupCount3D(), degrading correctly to the
+                        // previous 1D ComputeGroupCount() call for this flat
+                        // instanceCount dispatch.
+                        rg::CommandBuffer cmd = ctx.Cmd();
+                        cmd.BindComputePipeline(m_gpuDrivenBatchCache.Pipelines().Pipeline());
+                        cmd.BindDescriptorSet(cullingDescriptorSet);
+                        cmd.SetPushConstants(pc);
+                        cmd.DispatchOverSize(static_cast<std::uint32_t>(instanceCount), 1, 1);
                     };
                     out.push_back(std::move(desc));
                 }
