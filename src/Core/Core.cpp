@@ -276,17 +276,21 @@ Core::~Core() = default;
 // Core::RegisterOffscreenRenderPipelineProviders()'s own body, ever again.
 void Core::RegisterBuiltinCapabilityOrchestrators()
 {
-    m_capabilityOrchestrators.push_back(std::make_unique<LegacyRenderFeatureOrchestrator>(*this));
-    // editor-core-separation-6 campaign, PHASE3
-    // (PHASE3_EDITOR_PANEL_ORCHESTRATOR_MIGRATION.md) - the second real
-    // IPluginCapabilityOrchestrator implementation, proving the registry
-    // generalizes beyond render features. See EditorHost.cpp's own
-    // constructor for the matching reordering fix this migration required.
-    m_capabilityOrchestrators.push_back(std::make_unique<EditorPanelCapabilityOrchestrator>());
+    // better-render-pass-2 campaign, PHASE2
+    // (PHASE2_DISABLE_RUNTIME_CALL_SITES.md) - the two ABI-only orchestrator
+    // registrations that used to live here, LegacyRenderFeatureOrchestrator
+    // and EditorPanelCapabilityOrchestrator, are removed outright (Locked
+    // Conclusion D2, PHASE0_MASTER_STRATEGY.md Section 2.4). Both classes
+    // are left intact for now (PHASE3 deletes them) - this is purely "never
+    // register them again". RenderFeatureCompositor below is the one
+    // surviving orchestrator - left completely untouched, since Project
+    // Assembly's on-screen compositing depends on its
+    // ContributeRenderGraphPasses() still being called every frame via the
+    // still-intact generic m_capabilityOrchestrators loop (Decision D3).
+    //
     // editor-core-separation-6 campaign, PHASE4
-    // (PHASE4_RENDER_FEATURE_COMPOSITOR_CORE_AND_ORDERING.md) - the third real
-    // IPluginCapabilityOrchestrator implementation, the real `_v2`
-    // render-feature compositing pipeline - reuses the SAME m_renderer
+    // (PHASE4_RENDER_FEATURE_COMPOSITOR_CORE_AND_ORDERING.md) - the real
+    // `_v2` render-feature compositing pipeline - reuses the SAME m_renderer
     // member AddAtmosphereCompositePass()/every other real pass in this file
     // already reads (never a second, duplicate Renderer instance).
     //

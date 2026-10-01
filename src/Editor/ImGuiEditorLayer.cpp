@@ -751,20 +751,22 @@ public:
         m_boneViewer.Build(registry, renderer, m_ctx, m_modelRigCache, game.GetPhysicsSystem());
 #endif
 
-#if GTE_ENABLE_PLUGINS || GTE_ENABLE_PROJECT_ASSEMBLIES
+#if GTE_ENABLE_PROJECT_ASSEMBLIES
         // editor-core-separation-11 campaign (Project Assembly system),
         // PHASE7, Finding G fix (PHASE0_MASTER_STRATEGY.md section 2.4) - this gate
         // used to be GTE_ENABLE_PLUGINS only, the flag for the OTHER,
-        // unrelated gte_plugin_abi system. DockLayout.cpp's own, separate
-        // loop over this same PluginPanels() list (used to assign a default
-        // dock slot) has NO such gate at all, so a Project Assembly panel
-        // registered via EditorPanelRegistry::RegisterPluginPanel() would get
-        // a visible dock tab but never actually draw anything whenever a
-        // developer had GTE_ENABLE_PLUGINS=OFF - an empty, permanently-blank
-        // panel that looks like a bug, not a configuration choice. Widened to
-        // cover both systems; safe, because the loop body only ever iterates
-        // whatever is ACTUALLY present in the registry at runtime, regardless
-        // of which system populated it.
+        // unrelated gte_plugin_abi system, then was WIDENED to
+        // `#if GTE_ENABLE_PLUGINS || GTE_ENABLE_PROJECT_ASSEMBLIES` so a
+        // Project Assembly panel wasn't left with a visible-but-blank dock
+        // tab whenever a developer had GTE_ENABLE_PLUGINS=OFF.
+        // better-render-pass-2 campaign, PHASE2
+        // (PHASE2_DISABLE_RUNTIME_CALL_SITES.md) - GTE_ENABLE_PLUGINS is
+        // going away entirely (PHASE4 of that campaign), so this gate is
+        // narrowed back down to GTE_ENABLE_PROJECT_ASSEMBLIES alone - safe,
+        // because the loop body only ever iterates whatever is ACTUALLY
+        // present in the registry at runtime, and nothing populates it via
+        // the ABI plugin system anymore (Core::LoadPlugins() is never
+        // invoked, as of this same PHASE2).
         // editor-core-separation-3 campaign, PHASE4
         // (PHASE4_EDITOR_PANEL_CAPABILITY_AND_REGISTRY.md) - every loaded
         // plugin exposing IEditorPanelModule_v1 gets its own real, dockable
