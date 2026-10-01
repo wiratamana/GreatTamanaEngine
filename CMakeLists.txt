@@ -1413,6 +1413,44 @@ add_executable(GreatTamanaEditor src/main.cpp)
 # alone, no gte_editor involved at all).
 target_link_libraries(GreatTamanaEditor PRIVATE gte_editor)
 
+# better-render-pass-3 campaign, BLOCK1 PHASE4
+# (PHASE4_SMOKE_TEST_AND_FULL_REGRESSION.md) - LIVE, CONFIRMED ROOT-CAUSE FIX,
+# found and fixed in THIS phase (not merely theorized): a GNU ld static
+# archive (gte_core.a) only extracts an object file (.o) from the archive if
+# something ALREADY linked has an unresolved reference into it. A brand-new,
+# self-contained translation unit whose ONLY public entry point
+# (gte::DrawScene, src/Game/SceneQuery.cpp, this same Block's PHASE2) is never
+# called from ANYWHERE inside gte_core/gte_editor/GreatTamanaEditor's own
+# main.cpp is therefore genuinely never linked into the final
+# GreatTamanaEditor.exe binary at all, regardless of the
+# "--export-all-symbols" flag below (you cannot export a symbol that was
+# never linked into the binary in the first place). Confirmed live: linking
+# Projects/SceneQueryProbe/'s own _Game.dll against GreatTamanaEditor.exe's
+# import library failed with "undefined reference to gte::DrawScene(...)"
+# until this fix was added. This undermines this engine's own documented
+# "a Project Assembly .dll resolves its unresolved gte_core/gte_editor
+# references straight back into this ALREADY-RUNNING image" promise
+# (editor-core-separation-11 campaign, LDD2, see the comment block
+# immediately below) for ANY currently-internally-unused gte_core symbol, not
+# only gte::DrawScene - so the fix is applied generically (wrap the WHOLE
+# gte_core static archive), not as a narrow, symbol-specific patch. GNU ld's
+# --whole-archive forces EVERY object file inside gte_core.a to be linked
+# into GreatTamanaEditor.exe unconditionally, so every public gte_core symbol
+# - used internally or not - is genuinely present in the final binary and
+# therefore exportable by --export-all-symbols below. Scoped to gte_core only
+# (not gte_editor) since that is where this Block's own new code
+# (SceneQuery.cpp) lives and where the confirmed failure was reproduced;
+# gte_editor has no known "orphan" translation unit reachable only from a
+# Project Assembly today. CMake still separately propagates gte_core as a
+# normal (non-whole-archive) dependency of gte_editor's own PUBLIC link
+# requirement - this is harmless and produces no duplicate-symbol error: by
+# the time that second, ordinary mention of gte_core.a is processed, every
+# one of its symbols is already resolved by the explicit --whole-archive pass
+# below, so GNU ld's normal archive scan finds nothing left to extract from
+# it.
+target_link_options(GreatTamanaEditor PRIVATE
+    "-Wl,--whole-archive" "$<TARGET_FILE:gte_core>" "-Wl,--no-whole-archive")
+
 # editor-core-separation-11 campaign (Project Assembly system), PHASE3 - the
 # Locked Architecture Decision (LDD2, PHASE0_MASTER_STRATEGY.md): makes this
 # executable export symbols so a Project Assembly .dll (which links THIS
