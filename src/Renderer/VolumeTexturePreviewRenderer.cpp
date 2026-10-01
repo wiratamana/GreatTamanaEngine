@@ -2,7 +2,6 @@
 
 #include "ComputeDispatch.h"
 #include "Renderer.h"
-#include "Vulkan/DescriptorSetLayoutBuilder.h"
 #include "VolumeTexturePreviewMath.h"
 
 #include <stdexcept>
@@ -84,17 +83,22 @@ VolumeTexturePreviewInterpretation SelectVolumeTexturePreviewInterpretation(cons
 VolumeTexturePreviewRenderer::~VolumeTexturePreviewRenderer()
 {
     // m_pipeline/m_outputTexture are RAII types and clean up themselves;
-    // m_volumeSampler/m_descriptorSetLayout are plain Vulkan handles this
-    // class owns directly, mirroring AtmosphereLutRenderer's own identical
-    // destructor shape. m_descriptorSet (a ComputeDescriptorSet) owns no
-    // Vulkan handle of its own - the descriptor set it wraps was allocated
-    // from a shared pool and is never individually freed (see
-    // ComputeDescriptorSet.h's own class comment).
+    // m_volumeSampler is a plain Vulkan handle this class owns directly,
+    // mirroring AtmosphereLutRenderer's own identical destructor shape.
+    // m_descriptorSetLayout is now BORROWED from m_pipeline's own
+    // ReflectedDescriptorSetLayout(0) - owned and destroyed by m_pipeline
+    // itself (ComputePipeline::Destroy()'s own m_ownedReflectedLayouts
+    // cleanup, PHASE2 of task_manager/better-render-pass-1). Keeping the old
+    // vkDestroyDescriptorSetLayout() call here would be a genuine
+    // double-free the instant this destructor ran - see
+    // task_manager/better-render-pass-1/PHASE4_COMPLETION_REPORT.md's own
+    // identical fix for the first-ever precedent of this exact bug class.
+    // m_descriptorSet (a ComputeDescriptorSet) owns no Vulkan handle of its
+    // own - the descriptor set it wraps was allocated from a shared pool
+    // and is never individually freed (see ComputeDescriptorSet.h's own
+    // class comment).
     if (m_volumeSampler != VK_NULL_HANDLE) {
         vkDestroySampler(m_device, m_volumeSampler, nullptr);
-    }
-    if (m_descriptorSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(m_device, m_descriptorSetLayout, nullptr);
     }
 }
 
@@ -125,19 +129,15 @@ void VolumeTexturePreviewRenderer::EnsureInitialized(Renderer& renderer)
         throw std::runtime_error("VolumeTexturePreviewRenderer: vkCreateSampler failed.");
     }
 
-    // Binding convention (matches src/Shaders/VolumeTexturePreview.comp
-    // exactly): binding 0 = the source volume's own trilinear sampler3D
-    // (read-only combined image sampler), binding 1 = the output image2D.
-    DescriptorSetLayoutBuilder layoutBuilder(m_device);
-    m_descriptorSetLayout = layoutBuilder.AddCombinedImageSampler(/*binding=*/0).AddStorageImage(/*binding=*/1).Build();
-
-    VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(PushConstants);
-
-    m_pipeline.emplace(renderer.CreateComputePipeline("shaders/VolumeTexturePreview.comp.spv",
-        std::vector<VkDescriptorSetLayout>{ m_descriptorSetLayout }, pushConstantRange));
+    // task_manager/better-render-pass-1 campaign, PHASE6 - path-only,
+    // reflection-based pipeline creation (PHASE2) replaces the old hand-built
+    // DescriptorSetLayoutBuilder + manual VkPushConstantRange entirely.
+    // Binding 0 (the source volume's own trilinear sampler3D, read-only) /
+    // binding 1 (the output image2D) and this file's own PushConstants block
+    // are both now read directly from
+    // Shaders/VolumeTexturePreview.comp.spv's own compiled reflection data.
+    m_pipeline.emplace(renderer.CreateComputePipeline("shaders/VolumeTexturePreview.comp.spv"));
+    m_descriptorSetLayout = m_pipeline->ReflectedDescriptorSetLayout(/*set=*/0);
 
     m_descriptorSet = ComputeDescriptorSet(renderer.AllocateComputeDescriptorSet(m_descriptorSetLayout));
 
@@ -238,11 +238,17 @@ VolumeTexturePreviewRenderer::CapturedRawPixels VolumeTexturePreviewRenderer::Re
     renderer.ImmediateSubmit([&](VkCommandBuffer cmd) {
         const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
-        // Never renderer.Dispatch() here - that method is gated to
-        // render-graph-pass recording only (asserts/no-ops otherwise, see
-        // Renderer::Dispatch()'s own doc comment), and this dispatch runs
-        // inside a plain ImmediateSubmit() callback instead - so every
-        // Vulkan call below is issued directly.
+        // Never renderer.Dispatch()/gte::rg::CommandBuffer here - both only
+        // work from inside an active render-graph pass recording, and this
+        // dispatch runs inside a plain ImmediateSubmit() callback instead -
+        // so every Vulkan call below is issued directly (task_manager/
+        // better-render-pass-1 campaign, PHASE6 - this dispatch is
+        // architecturally incompatible with rg::CommandBuffer for the exact
+        // same reason PHASE4's GpuSkinningValidation.cpp/PHASE5's
+        // CaptureAerialPerspectiveVolumeSliceImmediate() were both left on
+        // this same raw-dispatch shape: there is no rg::PassContext here at
+        // all, only EnsureInitialized()'s pipeline CREATION was migrated
+        // onto the reflection path above).
         rg::EmitImageBarrier(cmd, volumeImage, range, previousState, volumeSampledState);
         rg::EmitImageBarrier(cmd, outputImage, range, outputPreviousState, outputWriteState);
 

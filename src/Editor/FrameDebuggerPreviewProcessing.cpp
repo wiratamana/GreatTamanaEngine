@@ -2,7 +2,6 @@
 
 #include "../Renderer/Renderer.h"
 #include "../Renderer/RenderTexture.h"
-#include "../Renderer/Vulkan/DescriptorSetLayoutBuilder.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -67,15 +66,18 @@ std::array<float, 4> ApplyFrameDebuggerPreviewTransform(
 
 FrameDebuggerPreviewRenderer::~FrameDebuggerPreviewRenderer()
 {
-    // m_pipeline/m_outputTexture are RAII types and clean up themselves;
-    // m_descriptorSetLayout is a plain Vulkan handle this class owns
-    // directly - mirrors VolumeTexturePreviewRenderer's own identical
-    // destructor shape. m_descriptorSet (a ComputeDescriptorSet) owns no
-    // Vulkan handle of its own (allocated from a shared pool, never
-    // individually freed - see ComputeDescriptorSet.h's own class comment).
-    if (m_descriptorSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(m_device, m_descriptorSetLayout, nullptr);
-    }
+    // m_pipeline/m_outputTexture are RAII types and clean up themselves.
+    // m_descriptorSetLayout is now BORROWED from m_pipeline's own
+    // ReflectedDescriptorSetLayout(0) - owned and destroyed by m_pipeline
+    // itself (ComputePipeline::Destroy()'s own m_ownedReflectedLayouts
+    // cleanup, PHASE2 of task_manager/better-render-pass-1). Keeping the old
+    // vkDestroyDescriptorSetLayout() call here would be a genuine
+    // double-free the instant this destructor ran - see
+    // task_manager/better-render-pass-1/PHASE4_COMPLETION_REPORT.md's own
+    // identical fix for the first-ever precedent of this exact bug class.
+    // m_descriptorSet (a ComputeDescriptorSet) owns no Vulkan handle of its
+    // own (allocated from a shared pool, never individually freed - see
+    // ComputeDescriptorSet.h's own class comment).
 }
 
 void FrameDebuggerPreviewRenderer::EnsureInitialized(Renderer& renderer)
@@ -87,22 +89,15 @@ void FrameDebuggerPreviewRenderer::EnsureInitialized(Renderer& renderer)
     const Renderer::VulkanContextInfo context = renderer.GetVulkanContextInfo();
     m_device = context.device;
 
-    // Binding convention (matches src/Shaders/FrameDebuggerPreview.comp
-    // exactly - see Vulkan/DescriptorSetLayoutBuilder.h's own documented
-    // "read-only Texture first, RWTexture output last" ordering): binding 0
-    // = the source retained history preview texture's own combined image
-    // sampler (read-only), binding 1 = this class's own persistent output
-    // storage image.
-    DescriptorSetLayoutBuilder layoutBuilder(m_device);
-    m_descriptorSetLayout = layoutBuilder.AddCombinedImageSampler(/*binding=*/0).AddStorageImage(/*binding=*/1).Build();
-
-    VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(PushConstants);
-
-    m_pipeline.emplace(renderer.CreateComputePipeline("shaders/FrameDebuggerPreview.comp.spv",
-        std::vector<VkDescriptorSetLayout>{ m_descriptorSetLayout }, pushConstantRange));
+    // task_manager/better-render-pass-1 campaign, PHASE6 - path-only,
+    // reflection-based pipeline creation (PHASE2) replaces the old hand-built
+    // DescriptorSetLayoutBuilder + manual VkPushConstantRange entirely.
+    // Binding 0 (read-only source history preview texture) / binding 1
+    // (RWTexture output) and this file's own 3-field PushConstants block are
+    // both now read directly from
+    // Shaders/FrameDebuggerPreview.comp.spv's own compiled reflection data.
+    m_pipeline.emplace(renderer.CreateComputePipeline("shaders/FrameDebuggerPreview.comp.spv"));
+    m_descriptorSetLayout = m_pipeline->ReflectedDescriptorSetLayout(/*set=*/0);
 
     m_descriptorSet = ComputeDescriptorSet(renderer.AllocateComputeDescriptorSet(m_descriptorSetLayout));
 
@@ -166,7 +161,8 @@ const Texture2D& FrameDebuggerPreviewRenderer::RenderPreview(Renderer& renderer,
     // different PIPELINE STAGE/ACCESS mask (same layout though) - no
     // ResourceAccess enumerator exists for this exact combination, so this
     // ResourceState is built by hand, exactly mirroring
-    // VolumeTexturePreviewRenderer::RenderPreview()'s own volumeSampledState.
+    // VolumeTexturePreviewRenderer::RenderPreview()'s own identical
+    // volumeSampledState.
     const rg::ResourceState sourcePreviousState = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
     const rg::ResourceState sourceComputeSampledState{
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
@@ -193,15 +189,22 @@ const Texture2D& FrameDebuggerPreviewRenderer::RenderPreview(Renderer& renderer,
     renderer.ImmediateSubmit([&](VkCommandBuffer cmd) {
         const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
-        // Never renderer.Dispatch() here - that method only works from
-        // inside an active render-graph pass recording
-        // (BeginGraphPassRecording()/EndGraphPassRecording()) and asserts/
-        // silently no-ops otherwise; FrameDebuggerPanel::Build() runs during
-        // ImGui UI construction, never inside such a bracket - so every
-        // Vulkan call below is issued directly against this plain
-        // ImmediateSubmit() callback instead, mirroring
-        // VolumeTexturePreviewRenderer::RenderPreview()'s own identical
-        // precedent/comment.
+        // Never renderer.Dispatch()/gte::rg::CommandBuffer here - both only
+        // work from inside an active render-graph pass recording
+        // (BeginGraphPassRecording()/EndGraphPassRecording(), or a real
+        // rg::PassContext to obtain a CommandBuffer from via ctx.Cmd());
+        // FrameDebuggerPanel::Build() runs during ImGui UI construction,
+        // never inside such a bracket - so every Vulkan call below is issued
+        // directly against this plain ImmediateSubmit() callback instead,
+        // mirroring VolumeTexturePreviewRenderer::RenderPreview()'s own
+        // identical precedent/comment (task_manager/better-render-pass-1
+        // campaign, PHASE6 - this dispatch is architecturally incompatible
+        // with rg::CommandBuffer for the exact same reason PHASE4's
+        // GpuSkinningValidation.cpp/PHASE5's
+        // CaptureAerialPerspectiveVolumeSliceImmediate() were both left on
+        // this same raw-dispatch shape: there is no rg::PassContext here at
+        // all, only EnsureInitialized()'s pipeline CREATION was migrated
+        // onto the reflection path above).
         rg::EmitImageBarrier(cmd, sourceImage, range, sourcePreviousState, sourceComputeSampledState);
         rg::EmitImageBarrier(cmd, outputImage, range, outputPreviousState, outputWriteState);
 

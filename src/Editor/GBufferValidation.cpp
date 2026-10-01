@@ -1,12 +1,10 @@
 #include "GBufferValidation.h"
 
-#include "../Renderer/ComputeDispatch.h"
 #include "../Renderer/RenderGraph/RenderGraph.h"
 #include "../Renderer/Renderer.h"
 #include "../Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
 #include "../Renderer/RenderGraph/RenderPassToggleRegistry.h"
 #include "../Renderer/Vertex.h"
-#include "../Renderer/Vulkan/DescriptorSetLayoutBuilder.h"
 
 #include <array>
 #include <cstdint>
@@ -29,28 +27,20 @@ constexpr VkFormat kGBufferFormat = VK_FORMAT_R8G8B8A8_UNORM;
 // header comment on why a real depth attachment is required at all here).
 constexpr float kGBufferScratchClearDepth = 1.0f;
 
-// MUST match Shaders/GBufferCopy.comp's own `layout(local_size_x = 16,
-// local_size_y = 16) in;` exactly - see ComputeDispatch.h's own header
-// comment on why this pairing is a hand-maintained, per-shader convention
-// rather than something the build system enforces.
-constexpr std::uint32_t kGBufferCopyLocalSizeX = 16;
-constexpr std::uint32_t kGBufferCopyLocalSizeY = 16;
-
 } // namespace
 
 GBufferValidation::~GBufferValidation()
 {
     // m_*Output/m_gbufferPipeline/m_copyPipeline/m_dummyTriangle are RAII
-    // types and clean up themselves; m_copyDescriptorSetLayout is a plain
-    // Vulkan handle this class owns directly (mirrors
-    // ComputeBlurValidation::~ComputeBlurValidation()'s own identical
-    // pattern). Safe to call unconditionally - the device is already idle
-    // by this point (ImGuiEditorLayer's own destructor calls
-    // vkDeviceWaitIdle() before any of its members, including this one,
-    // are destroyed).
-    if (m_copyDescriptorSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(m_device, m_copyDescriptorSetLayout, nullptr);
-    }
+    // types and clean up themselves. m_copyDescriptorSetLayout is now
+    // BORROWED from m_copyPipeline's own ReflectedDescriptorSetLayout(0) -
+    // owned and destroyed by m_copyPipeline itself (ComputePipeline::
+    // Destroy()'s own m_ownedReflectedLayouts cleanup, PHASE2 of
+    // task_manager/better-render-pass-1). Keeping the old
+    // vkDestroyDescriptorSetLayout() call here would be a genuine
+    // double-free the instant this destructor ran - see
+    // task_manager/better-render-pass-1/PHASE4_COMPLETION_REPORT.md's own
+    // identical fix for the first-ever precedent of this exact bug class.
 }
 
 void GBufferValidation::EnsureInitialized(Renderer& renderer, VkExtent2D initialExtent)
@@ -73,7 +63,11 @@ void GBufferValidation::EnsureInitialized(Renderer& renderer, VkExtent2D initial
         "GBufferVisualizedDepth", /*allowStorageImageAccess=*/true));
 
     // PHASE3's new N-format Renderer::CreatePipeline() overload - this
-    // pass's own real, first-ever consumer.
+    // pass's own real, first-ever consumer. This is the GRAPHICS pipeline
+    // path (Pipeline, not ComputePipeline) - genuinely out of scope for this
+    // whole campaign (see PHASE0_MASTER_STRATEGY.md's own Step 2.1/task doc's
+    // Step 3 item 2 - "the graphics Pipeline/CreatePipeline() path is
+    // untouched by this whole campaign") - left completely unmodified.
     const std::array<VkFormat, 2> colorFormats{ kGBufferFormat, kGBufferFormat };
     m_gbufferPipeline.emplace(renderer.CreatePipeline(colorFormats, "shaders/GBufferValidation.vert.spv",
         "shaders/GBufferValidation.frag.spv", VertexLayout::PositionColor,
@@ -92,25 +86,16 @@ void GBufferValidation::EnsureInitialized(Renderer& renderer, VkExtent2D initial
     m_dummyTriangle.emplace(
         renderer.CreateMesh(dummyVertices, sizeof(dummyVertices), 3, "GBufferValidationDummyTriangle"));
 
-    // The second pass's own compute copy pipeline - binding 0 is the
-    // read-only GBufferAlbedo input, binding 1 is the RWTexture
-    // GBufferVisualized output - MUST match Shaders/GBufferCopy.comp's own
-    // layout(binding = ...) declarations exactly (see
-    // Vulkan/DescriptorSetLayoutBuilder.h's own binding-number convention).
-    DescriptorSetLayoutBuilder layoutBuilder(m_device);
-    m_copyDescriptorSetLayout =
-        layoutBuilder.AddCombinedImageSampler(/*binding=*/0).AddStorageImage(/*binding=*/1).Build();
-
-    // Plain, per-shader push-constant convention (see ComputePipeline.h) -
-    // two uint32s (width, height), matching Shaders/GBufferCopy.comp's own
-    // PushConstants block exactly.
-    VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(std::uint32_t) * 2;
-
-    m_copyPipeline.emplace(renderer.CreateComputePipeline("shaders/GBufferCopy.comp.spv",
-        std::vector<VkDescriptorSetLayout>{ m_copyDescriptorSetLayout }, pushConstantRange));
+    // task_manager/better-render-pass-1 campaign, PHASE6 - the second pass's
+    // own compute copy pipeline, now built via path-only, reflection-based
+    // pipeline creation (PHASE2), replacing the old hand-built
+    // DescriptorSetLayoutBuilder + manual VkPushConstantRange entirely.
+    // Binding 0 (read-only GBufferAlbedo input) / binding 1 (RWTexture
+    // GBufferVisualized output) and the 2x uint32 (width, height)
+    // push-constant block are both now read directly from
+    // Shaders/GBufferCopy.comp.spv's own compiled reflection data.
+    m_copyPipeline.emplace(renderer.CreateComputePipeline("shaders/GBufferCopy.comp.spv"));
+    m_copyDescriptorSetLayout = m_copyPipeline->ReflectedDescriptorSetLayout(/*set=*/0);
 
     m_copyDescriptorSet = ComputeDescriptorSet(renderer.AllocateComputeDescriptorSet(m_copyDescriptorSetLayout));
 }
@@ -160,7 +145,13 @@ GBufferValidationHandles GBufferValidation::AddPass(
     // real (scratch/unused) depth attachment, mirroring
     // AddRenderOpaquePass()'s own exact "one shared TextureHandle used for
     // both a color write AND the depth write" pattern
-    // (src/Application/RenderPasses.cpp).
+    // (src/Application/RenderPasses.cpp). This GRAPHICS pass's own dispatch
+    // is untouched by this campaign (see EnsureInitialized()'s own comment
+    // above) - still a plain renderer.BeginGraphPassRecording()/
+    // vkCmdBindPipeline()/vkCmdDraw()/renderer.EndGraphPassRecording()
+    // sequence, never rg::CommandBuffer (which this phase's own task doc
+    // scopes to the COMPUTE half only - see PHASE6_MIGRATE_EDITOR_DEBUG_COMPUTE_TOOLING.md's
+    // Step 3 item 2).
     builder.AddRenderPass(
         "GBufferValidation", rg::PassKind::Graphics, rg::ViewScope::SceneView, rg::RenderPassCategory::Debug,
         [albedoHandle, normalHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
@@ -190,13 +181,14 @@ GBufferValidationHandles GBufferValidation::AddPass(
     // existing RenderGraphBarrierPlanner, with zero new barrier code". A
     // trivial imageLoad/imageStore copy (Shaders/GBufferCopy.comp) -
     // mirrors ComputeBlurValidation's own compute-pass shape almost
-    // verbatim.
+    // verbatim - now migrated onto rg::CommandBuffer too (task_manager/
+    // better-render-pass-1 campaign, PHASE6).
     //
     // editor-core-separation-21 campaign, PHASE4 (fixing PHASE3's
     // confirmed-lie finding #23) - INDEPENDENTLY gated from the graphics
     // half above: disabling ONLY "GBufferValidationCopy" still lets
     // "GBufferValidation" declare/write albedo/normal normally; only
-    // `visualizedHandle` comes back invalid/unwritten this frame.
+    // `visualized` comes back invalid/unwritten this frame.
     rg::TextureHandle visualizedHandle{};
     const bool copyEnabled =
         toggleRegistry == nullptr || toggleRegistry->NoteDeclaredAndCheckEnabled("GBufferValidationCopy");
@@ -210,7 +202,7 @@ GBufferValidationHandles GBufferValidation::AddPass(
                 pass.ReadTexture(albedoHandle, rg::ResourceAccess::ShaderRead);
                 pass.WriteTexture(visualizedHandle, rg::ResourceAccess::ComputeShaderWrite);
             },
-            [this, &renderer, albedoHandle, visualizedHandle, sceneExtent](rg::PassContext& ctx) {
+            [this, albedoHandle, visualizedHandle, sceneExtent](rg::PassContext& ctx) {
                 const rg::PassContext::ResolvedTexture source = ctx.resolveTexture(albedoHandle);
                 const rg::PassContext::ResolvedTexture dest = ctx.resolveTexture(visualizedHandle);
 
@@ -221,13 +213,12 @@ GBufferValidationHandles GBufferValidation::AddPass(
                     });
 
                 const std::uint32_t pushConstants[2] = { sceneExtent.width, sceneExtent.height };
-                const Extent3D groupCounts = ComputeGroupCount3D(Extent3D{ sceneExtent.width, sceneExtent.height, 1 },
-                    Extent3D{ kGBufferCopyLocalSizeX, kGBufferCopyLocalSizeY, 1 });
 
-                renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-                renderer.Dispatch(*m_copyPipeline, m_copyDescriptorSet.Native(), pushConstants, sizeof(pushConstants),
-                    groupCounts.width, groupCounts.height, groupCounts.depth);
-                renderer.EndGraphPassRecording();
+                rg::CommandBuffer cmd = ctx.Cmd();
+                cmd.BindComputePipeline(*m_copyPipeline);
+                cmd.BindDescriptorSet(m_copyDescriptorSet.Native());
+                cmd.SetPushConstants(pushConstants, sizeof(pushConstants));
+                cmd.DispatchOverSize(sceneExtent.width, sceneExtent.height);
             });
         // Default drawKind (unused/meaningless for a Compute-kind pass) and
         // default RenderPassEvent::Opaques - this pass's own real dependency

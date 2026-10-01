@@ -1,39 +1,25 @@
 #include "ComputeBlurValidation.h"
 
-#include "../Renderer/ComputeDispatch.h"
 #include "../Renderer/RenderGraph/RenderGraph.h"
 #include "../Renderer/Renderer.h"
 #include "../Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
-#include "../Renderer/Vulkan/DescriptorSetLayoutBuilder.h"
 
 #include <cstdint>
 #include <vector>
 
 namespace gte {
 
-namespace {
-
-// MUST match Shaders/BoxBlur.comp's own `layout(local_size_x = 16,
-// local_size_y = 16) in;` exactly - see ComputeDispatch.h's own header
-// comment on why this pairing is a hand-maintained, per-shader convention
-// rather than something the build system enforces.
-constexpr std::uint32_t kBoxBlurLocalSizeX = 16;
-constexpr std::uint32_t kBoxBlurLocalSizeY = 16;
-
-} // namespace
-
 ComputeBlurValidation::~ComputeBlurValidation()
 {
     // m_blurredOutput/m_pipeline are RAII types and clean up themselves;
-    // m_descriptorSetLayout is a plain Vulkan handle this class owns
-    // directly (mirrors GpuResourceFactory's own m_materialSetLayout - see
-    // GpuResourceFactory.cpp's Destroy()). Safe to call unconditionally -
-    // the device is already idle by this point: ImGuiEditorLayer's own
-    // destructor calls vkDeviceWaitIdle() before any of its members
-    // (including this one) are destroyed.
-    if (m_descriptorSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(m_device, m_descriptorSetLayout, nullptr);
-    }
+    // m_descriptorSetLayout is now BORROWED from m_pipeline's own
+    // ReflectedDescriptorSetLayout(0) - owned and destroyed by m_pipeline
+    // itself (ComputePipeline::Destroy()'s own m_ownedReflectedLayouts
+    // cleanup, PHASE2 of task_manager/better-render-pass-1). Keeping the old
+    // vkDestroyDescriptorSetLayout() call here would be a genuine
+    // double-free the instant this destructor ran - see
+    // task_manager/better-render-pass-1/PHASE4_COMPLETION_REPORT.md's own
+    // identical fix for the first-ever precedent of this exact bug class.
 }
 
 void ComputeBlurValidation::EnsureInitialized(Renderer& renderer, VkExtent2D initialExtent)
@@ -45,23 +31,14 @@ void ComputeBlurValidation::EnsureInitialized(Renderer& renderer, VkExtent2D ini
     const Renderer::VulkanContextInfo context = renderer.GetVulkanContextInfo();
     m_device = context.device;
 
-    // Binding convention (see Vulkan/DescriptorSetLayoutBuilder.h's own
-    // documented rule): binding 0 is the read-only `Texture` input,
-    // binding 1 is the `RWTexture` output - must match Shaders/BoxBlur.comp
-    // exactly.
-    DescriptorSetLayoutBuilder layoutBuilder(m_device);
-    m_descriptorSetLayout = layoutBuilder.AddCombinedImageSampler(/*binding=*/0).AddStorageImage(/*binding=*/1).Build();
-
-    // Plain, per-shader push-constant convention (see ComputePipeline.h) -
-    // two uint32s (width, height), matching Shaders/BoxBlur.comp's own
-    // `PushConstants` block exactly.
-    VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(std::uint32_t) * 2;
-
-    m_pipeline.emplace(renderer.CreateComputePipeline(
-        "shaders/BoxBlur.comp.spv", std::vector<VkDescriptorSetLayout>{ m_descriptorSetLayout }, pushConstantRange));
+    // task_manager/better-render-pass-1 campaign, PHASE6 - path-only,
+    // reflection-based pipeline creation (PHASE2) replaces the old hand-built
+    // DescriptorSetLayoutBuilder + manual VkPushConstantRange entirely.
+    // Binding 0 (read-only Texture input) / binding 1 (RWTexture output) and
+    // the 2x uint32 (width, height) push-constant block are both now read
+    // directly from Shaders/BoxBlur.comp.spv's own compiled reflection data.
+    m_pipeline.emplace(renderer.CreateComputePipeline("shaders/BoxBlur.comp.spv"));
+    m_descriptorSetLayout = m_pipeline->ReflectedDescriptorSetLayout(/*set=*/0);
 
     m_descriptorSet = ComputeDescriptorSet(renderer.AllocateComputeDescriptorSet(m_descriptorSetLayout));
 
@@ -116,11 +93,13 @@ rg::TextureHandle ComputeBlurValidation::AddPass(rg::RenderGraphBuilder& builder
         // reference to a `build`-lambda-local variable - see
         // COMPUTE_PHASE6_COMPLETION_REPORT.md's own "Handoff notes" for
         // exactly why (a dangling-reference bug this phase's own
-        // predecessor already found and fixed once). `this`/`&renderer`
-        // are both long-lived (this object outlives the whole Execute()
-        // call; `renderer` is Application's own Renderer member) - safe to
-        // capture by reference/pointer.
-        [this, &renderer, sceneViewHandle, outputHandle, sceneViewSampler, sceneExtent](rg::PassContext& ctx) {
+        // predecessor already found and fixed once). `this` is long-lived
+        // (this object outlives the whole Execute() call) - safe to
+        // capture by pointer. `&renderer` is no longer captured -
+        // task_manager/better-render-pass-1 campaign, PHASE6 migrated this
+        // dispatch onto rg::CommandBuffer (obtained from ctx.Cmd()), which
+        // needs no direct Renderer& reference of its own.
+        [this, sceneViewHandle, outputHandle, sceneViewSampler, sceneExtent](rg::PassContext& ctx) {
             const rg::PassContext::ResolvedTexture source = ctx.resolveTexture(sceneViewHandle);
             const rg::PassContext::ResolvedTexture dest = ctx.resolveTexture(outputHandle);
 
@@ -131,13 +110,12 @@ rg::TextureHandle ComputeBlurValidation::AddPass(rg::RenderGraphBuilder& builder
                 });
 
             const std::uint32_t pushConstants[2] = { sceneExtent.width, sceneExtent.height };
-            const Extent3D groupCounts = ComputeGroupCount3D(Extent3D{ sceneExtent.width, sceneExtent.height, 1 },
-                Extent3D{ kBoxBlurLocalSizeX, kBoxBlurLocalSizeY, 1 });
 
-            renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-            renderer.Dispatch(*m_pipeline, m_descriptorSet.Native(), pushConstants, sizeof(pushConstants),
-                groupCounts.width, groupCounts.height, groupCounts.depth);
-            renderer.EndGraphPassRecording();
+            rg::CommandBuffer cmd = ctx.Cmd();
+            cmd.BindComputePipeline(*m_pipeline);
+            cmd.BindDescriptorSet(m_descriptorSet.Native());
+            cmd.SetPushConstants(pushConstants, sizeof(pushConstants));
+            cmd.DispatchOverSize(sceneExtent.width, sceneExtent.height);
         },
         rg::RenderPassDrawKind::DrawMesh,
         // render-pass-4 campaign, PHASE2
