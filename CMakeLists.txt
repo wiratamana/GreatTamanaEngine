@@ -102,31 +102,24 @@ option(GTE_ENABLE_NETWORK "Compile in and auto-start the embedded, loopback-only
 # ordinary development.
 option(GTE_CORE_STANDALONE_PROBE_ONLY "CI-ONLY: configure ONLY gte_core, skipping gte_editor/the executable/tests entirely. Never set this manually." OFF)
 
-# Master switch for the dynamic, runtime-loadable plugin system
-# (plugins/gte_plugin_abi + src/Core/Plugins/PluginHost, editor-core-
-# separation-3 campaign - task_manager/editor-core-separation-3/
-# PHASE0_MASTER_STRATEGY.md). Same "always compiles, only the runtime call
-# site is gated" precedent as GTE_ENABLE_PROFILER/GTE_ENABLE_JOB_SYSTEM/
-# GTE_ENABLE_NETWORK above: turning this OFF means Core::LoadPlugins() is
-# never actually called with a real, existing plugins/ folder at runtime (no
-# .dll is ever scanned/loaded, at zero cost), while gte_plugin_abi/PluginHost/
-# every capability interface still compiles and is still testable. Also
-# controls whether gte_apply_plugin_shared_crt_linkage() (cmake/
-# MingwRuntime.cmake) actually flips a target's CRT linkage at all - see
-# PHASE1_GTE_PLUGIN_ABI_FOUNDATION.md's own Locked Design Decision #4.
-option(GTE_ENABLE_PLUGINS "Compile in the dynamic plugin-loading system (gte_plugin_abi + PluginHost)" ON)
+# better-render-pass-2 campaign, PHASE4 (PHASE4_DELETE_PLUGINS_FOLDER_AND_CMAKE.md) -
+# GTE_ENABLE_PLUGINS (the master switch for the dynamic, runtime-loadable
+# plugins/gte_plugin_abi + src/Core/Plugins/PluginHost system,
+# editor-core-separation-3 campaign) is REMOVED outright - the whole system
+# it gated no longer exists anywhere in this repository (see "the real 'fully
+# removed' milestone" in that phase file's own Step 1).
 
 # editor-core-separation-11 campaign (Project Assembly system), PHASE3 -
 # master switch for the WHOLE Project Assembly system: the CMake
 # auto-discovery block below (Step 6) AND the runtime
 # Core::LoadProjectAssemblies() call site (PHASE5's own EditorHost.cpp
-# edit) are BOTH gated by this SAME flag - mirrors GTE_ENABLE_PLUGINS'
-# own identical "one flag gates both the CMake side and the runtime call
-# site" shape exactly. Deliberately its OWN, independent flag - never
-# reuses GTE_ENABLE_PLUGINS, which controls the completely unrelated
-# gte_plugin_abi system (see cmake/MingwRuntime.cmake's own
-# gte_apply_project_assembly_shared_crt_linkage() for why conflating the
-# two flags is a real, confirmed hazard, not a style preference).
+# edit) are BOTH gated by this SAME flag. Deliberately its OWN, independent
+# flag - this repository used to also have a completely unrelated
+# GTE_ENABLE_PLUGINS flag for the (now fully deleted, better-render-pass-2
+# campaign) gte_plugin_abi system - the two were never meant to be conflated
+# (see cmake/MingwRuntime.cmake's own gte_apply_project_assembly_shared_crt_linkage()
+# for why that would have been a real, confirmed hazard, not a style
+# preference).
 option(GTE_ENABLE_PROJECT_ASSEMBLIES "Auto-discover and load per-developer Projects/<Name>/ Project Assembly .dll's (editor-core-separation-11)" ON)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
@@ -429,6 +422,13 @@ add_library(gte_core STATIC
     # since Core.h only ever forward-declares that class). Header-only, no
     # .cpp.
     src/Core/Plugins/ProjectRenderFeatureCallback.h
+    # better-render-pass-2 campaign, PHASE4 (PHASE4_DELETE_PLUGINS_FOLDER_AND_CMAKE.md) -
+    # relocated here, verbatim, from the now-deleted
+    # plugins/gte_plugin_abi/RenderFeatureDescriptor.h (Landmine A-style
+    # relocation missed by the original campaign audit) - genuinely,
+    # permanently needed by Core::RegisterProjectRenderFeature()/
+    # RenderFeatureCompositor::RegisterProjectFeature(), never ABI-only.
+    src/Core/Plugins/RenderFeatureDescriptor.h
     src/Core/Plugins/RenderFeatureCompositor.h
     src/Core/Plugins/RenderFeatureCompositor.cpp
     # better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
@@ -879,118 +879,33 @@ add_library(gte_core STATIC
     src/Encoding/HdrColorVisualization.cpp
 )
 
-# PHASE2_PLUGIN_HOST_AND_HELLO_WORLD_HANDSHAKE_PROBE.md, Step 3.5/3.6 - the
-# RUNTIME output folder every built plugin .dll (demo_hello_world here;
-# demo_render_feature/demo_editor_panel in later phases) is copied into. A
-# plain CMake variable, NOT a hardcoded $<TARGET_FILE_DIR:GreatTamanaEditor>
-# generator expression, because GreatTamanaEditor does not exist as a target
-# at all in a GTE_CORE_STANDALONE_PROBE_ONLY=ON configuration (see the guard
-# around its own add_executable() call further down this file) - BOTH this
-# phase's own new standalone handshake probe AND a future isolation probe
-# configure with GTE_CORE_STANDALONE_PROBE_ONLY=ON specifically so they need
-# demo_hello_world.dll to still build successfully there. Placed IMMEDIATELY
-# after gte_core's own add_library() block's closing parenthesis (so it is
-# reached unconditionally, in BOTH a normal configure AND a
-# GTE_CORE_STANDALONE_PROBE_ONLY=ON one) and BEFORE the
-# if(NOT GTE_CORE_STANDALONE_PROBE_ONLY) guard immediately below, which wraps
-# the gte_editor library block - demo_hello_world must build even when
-# gte_editor itself is skipped, and it depends on nothing from gte_core at
-# all (Locked Design Decision #2 - it links ONLY gte_plugin_abi).
-if(GTE_CORE_STANDALONE_PROBE_ONLY)
-    set(GTE_PLUGIN_RUNTIME_OUTPUT_DIR "${CMAKE_BINARY_DIR}/plugins")
-else()
-    set(GTE_PLUGIN_RUNTIME_OUTPUT_DIR "$<TARGET_FILE_DIR:GreatTamanaEditor>/plugins")
-endif()
+# better-render-pass-2 campaign, PHASE4 (PHASE4_DELETE_PLUGINS_FOLDER_AND_CMAKE.md) -
+# GTE_PLUGIN_RUNTIME_OUTPUT_DIR (the <exe dir>/plugins/ runtime folder every
+# built plugin .dll used to be copied into, editor-core-separation-3
+# campaign) is REMOVED outright, alongside both its own if(GTE_CORE_STANDALONE_PROBE_ONLY)/
+# else()/endif() branches - nothing populates or scans that folder anymore.
 
-# editor-core-separation-11 campaign (Project Assembly system), PHASE3 -
-# deliberately a SEPARATE folder from GTE_PLUGIN_RUNTIME_OUTPUT_DIR (<exe
-# dir>/plugins/): the two coexisting systems (gte_plugin_abi .dll plugins vs.
-# Project Assembly .dll's) must never share one scan folder, so neither
-# system's loader (PluginHost vs. PHASE5's ProjectAssemblyHost) can ever
-# confuse the other's .dll for its own. Deliberately NOT wrapped in the same
-# if(GTE_CORE_STANDALONE_PROBE_ONLY)/else()/endif() split
-# GTE_PLUGIN_RUNTIME_OUTPUT_DIR itself uses (confirmed lines 801-805) - that
-# split exists ONLY because GTE_PLUGIN_RUNTIME_OUTPUT_DIR is genuinely
-# CONSUMED even in a GTE_CORE_STANDALONE_PROBE_ONLY=ON configure (demo
-# plugin subdirectories are add_subdirectory()-ed unconditionally elsewhere,
-# see the comment immediately above add_subdirectory(plugins/gte_plugin_abi)
-# in root CMakeLists.txt), where GreatTamanaEditor never exists as a target
-# and a literal $<TARGET_FILE_DIR:GreatTamanaEditor> generator expression
-# WOULD be a real generate-time error if actually evaluated against a real
-# target property. GTE_PROJECT_ASSEMBLY_OUTPUT_DIR has no such consumer in
-# that configuration - its ONLY consumer is the auto-discovery block further
-# down this file, which is placed INSIDE the SAME if(NOT
-# GTE_CORE_STANDALONE_PROBE_ONLY) guard as GreatTamanaEditor's own
-# definition - so this plain, unconditional set() is safe: an unused CMake
-# variable holding an un-evaluated generator-expression string is inert,
-# never checked against real targets unless actually attached to a real
-# target property at generate time.
+# editor-core-separation-11 campaign (Project Assembly system), PHASE3 - the
+# runtime output folder every Project Assembly's own *_Game.dll/*_Editor.dll
+# is copied into (ProjectAssemblyHost scans this folder at startup). Used to
+# be documented here as "deliberately a SEPARATE folder from
+# GTE_PLUGIN_RUNTIME_OUTPUT_DIR, so the two coexisting systems never share one
+# scan folder" - there is only one system now (better-render-pass-2 campaign,
+# PHASE4 deleted the gte_plugin_abi system outright), so that comparison no
+# longer applies; this set() call itself, and its own placement (unconditional,
+# safe even in a GTE_CORE_STANDALONE_PROBE_ONLY=ON configure, since an unused
+# CMake variable holding an un-evaluated generator-expression string is inert
+# until actually attached to a real target property at generate time), are
+# both unchanged.
 set(GTE_PROJECT_ASSEMBLY_OUTPUT_DIR "$<TARGET_FILE_DIR:GreatTamanaEditor>/project_assemblies")
 
-# editor-core-separation-4 campaign, PHASE2
-# (PHASE2_GTE_ENABLE_PLUGINS_OFF_BUILD_FIX.md) - gte_plugin_abi is an
-# unconditional add_subdirectory() call, ALWAYS run regardless of
-# GTE_ENABLE_PLUGINS. It is a plain, header-only INTERFACE library (cheap to
-# configure - one configure_file() call, zero real compilation), and gte_core
-# unconditionally links against it (see target_link_libraries(gte_core
-# PUBLIC gte_plugin_abi) below) because src/Core/Plugins/PluginHost.h/.cpp
-# are themselves in gte_core's own UNCONDITIONAL source file list - they
-# always compile and always need this target's include directories, in
-# EVERY configuration, including GTE_ENABLE_PLUGINS=OFF (where PluginHost's
-# class still compiles and is still testable, it is simply never CALLED at
-# runtime - EditorHost.cpp's own m_core.LoadPlugins() call site is what is
-# actually gated, via #if GTE_ENABLE_PLUGINS). Confirmed, real, previously-
-# broken bug this phase fixes: before this change, this whole
-# add_subdirectory() call (including gte_plugin_abi's own) was gated behind
-# `if(GTE_ENABLE_PLUGINS)`, so a GTE_ENABLE_PLUGINS=OFF configure meant
-# gte_plugin_abi never existed as a CMake target at all, while
-# target_link_libraries(gte_core PUBLIC gte_plugin_abi) further down this
-# file referenced it completely unconditionally - a guaranteed configure/link
-# failure, never exercised before this phase (see
-# task_manager/editor-core-separation-4/PHASE2_GTE_ENABLE_PLUGINS_OFF_BUILD_FIX.md).
-add_subdirectory(plugins/gte_plugin_abi)
-
-if(GTE_ENABLE_PLUGINS)
-    add_subdirectory(plugins/demo_hello_world)
-    # editor-core-separation-3 campaign, PHASE3
-    # (PHASE3_RUNTIME_RENDER_FEATURE_CAPABILITY.md, Step 3.5) - the
-    # IRenderFeatureModule_v1 throwaway demo (Milestone 1).
-    add_subdirectory(plugins/demo_render_feature)
-    # editor-core-separation-4 campaign, PHASE5
-    # (PHASE5_MULTI_RENDER_FEATURE_PLUGIN_WARNING_AND_REGRESSION_LOCK.md) - a
-    # SECOND, genuinely independent throwaway demo implementing
-    # IRenderFeatureModule_v1, so the "2+ plugins implementing the same
-    # capability" path is exercised for real, not just theorized.
-    add_subdirectory(plugins/demo_render_feature_second)
-    # editor-core-separation-3 campaign, PHASE4
-    # (PHASE4_EDITOR_PANEL_CAPABILITY_AND_REGISTRY.md, Step 3.9) - the
-    # IEditorPanelModule_v1 throwaway demo (Milestone 2). Only depends on
-    # gte_plugin_abi (Locked Design Decision #2), so it builds correctly even
-    # in a GTE_CORE_STANDALONE_PROBE_ONLY=ON configuration where gte_editor
-    # itself is skipped entirely.
-    add_subdirectory(plugins/demo_editor_panel)
-    # editor-core-separation-6 campaign, PHASE6
-    # (PHASE6_V2_DEMO_PLUGINS_AND_PIXEL_PROOF.md) - the two PERMANENT _v2
-    # render-feature demo plugins, proving real multi-plugin compositing with
-    # two genuinely different colors/blend modes (never the same-color trick
-    # the original _v1 demos used - see RENDER_FEATURE_COMPOSITING_FINDINGS_
-    # AND_PROPOSAL_2026-09-25.md Part 1.5).
-    add_subdirectory(plugins/demo_render_feature_v2)
-    add_subdirectory(plugins/demo_render_feature_v2_second)
-    # editor-core-separation-9 campaign, PHASE2
-    # (PHASE2_OPERATION_REGISTRY_AND_ADAPTER_V3.md, Step 3.5) - the three
-    # PERMANENT _v3 demo plugins, proving the new, generic Dispatch(opId, ...)
-    # mechanism faithfully reimplements _v2's exact 3 existing effects -
-    # demo_render_feature_v3 (RED solid fill, A/B against demo_render_feature_v2),
-    # demo_render_feature_v3_second (BLUE radial vignette, A/B against
-    # demo_render_feature_v2_second), demo_render_feature_v3_third
-    # (solid-fill-then-color-grade, no existing _v2 baseline - see
-    # PHASE2_COMPLETION_REPORT.md). demo_render_feature_v3 is also the
-    # PRIMARY _v3 demo plugin PHASE3 adds its own 2-pass GPU blur demo to.
-    add_subdirectory(plugins/demo_render_feature_v3)
-    add_subdirectory(plugins/demo_render_feature_v3_second)
-    add_subdirectory(plugins/demo_render_feature_v3_third)
-endif()
+# better-render-pass-2 campaign, PHASE4 (PHASE4_DELETE_PLUGINS_FOLDER_AND_CMAKE.md) -
+# add_subdirectory(plugins/gte_plugin_abi) (the unconditional one,
+# editor-core-separation-4 campaign PHASE2) and the whole
+# if(GTE_ENABLE_PLUGINS) ... endif() block containing 9
+# add_subdirectory(plugins/demo_...) calls are REMOVED outright - every one of
+# those folders is deleted this same phase (plugins/gte_plugin_abi/ and all 9
+# plugins/demo_*/ folders).
 
 # editor-core-separation-1 campaign, PHASE18
 # (PHASE18_HEADLESS_TEST_FIXTURE_AND_CORE_STANDALONE_PROBE.md) - gte_editor
@@ -1353,12 +1268,12 @@ target_compile_definitions(gte_core PUBLIC GTE_ENABLE_JOB_SYSTEM=$<BOOL:${GTE_EN
 # value gte_core itself was built with.
 target_compile_definitions(gte_core PUBLIC GTE_ENABLE_NETWORK=$<BOOL:${GTE_ENABLE_NETWORK}>)
 
-# Same idea again - exposes GTE_ENABLE_PLUGINS to C++ code as an actual 1/0
-# preprocessor macro, needed by EditorHost.cpp's own
-# `#if GTE_ENABLE_PLUGINS` guard around Core::LoadPlugins() (see
-# PHASE0_MASTER_STRATEGY.md's Locked Design Decision #6). PUBLIC for the
-# same reason as the definitions above.
-target_compile_definitions(gte_core PUBLIC GTE_ENABLE_PLUGINS=$<BOOL:${GTE_ENABLE_PLUGINS}>)
+# better-render-pass-2 campaign, PHASE4 (PHASE4_DELETE_PLUGINS_FOLDER_AND_CMAKE.md) -
+# target_compile_definitions(gte_core PUBLIC GTE_ENABLE_PLUGINS=...) removed
+# outright - GTE_ENABLE_PLUGINS itself no longer exists anywhere in this
+# repository (its one real preprocessor consumer, EditorHost.cpp's own
+# `#if GTE_ENABLE_PLUGINS` guard, was already removed by PHASE2 of this same
+# campaign).
 
 # editor-core-separation-11 campaign (Project Assembly system), PHASE5 -
 # exposes GTE_ENABLE_PROJECT_ASSEMBLIES to C++ code as an actual 1/0
@@ -1405,15 +1320,12 @@ target_link_libraries(gte_core PUBLIC volk vma stb_image stb_image_write KTX::kt
 # reason).
 target_link_libraries(gte_core PRIVATE spirv_reflect)
 
-# editor-core-separation-3 campaign, PHASE2
-# (PHASE2_PLUGIN_HOST_AND_HELLO_WORLD_HANDSHAKE_PROBE.md, Step 3.3) -
-# src/Core/Plugins/PluginHost.cpp needs gte_plugin_abi's own include
-# directories (both the plain committed headers AND the CMake-generated
-# GtePluginAbiFingerprintGenerated.h - see plugins/gte_plugin_abi/CMakeLists.txt).
-# PUBLIC for the same reason as everything else linked into gte_core PUBLIC
-# above - Core.h itself #includes Plugins/PluginHost.h, so any consumer of
-# gte_core needs this propagated too.
-target_link_libraries(gte_core PUBLIC gte_plugin_abi)
+# better-render-pass-2 campaign, PHASE4 (PHASE4_DELETE_PLUGINS_FOLDER_AND_CMAKE.md) -
+# target_link_libraries(gte_core PUBLIC gte_plugin_abi) removed outright -
+# src/Core/Plugins/PluginHost.h/.cpp (the one real consumer of gte_plugin_abi's
+# own headers) were deleted by PHASE3 of this same campaign, and the
+# gte_plugin_abi CMake target itself no longer exists (plugins/gte_plugin_abi/
+# deleted this phase).
 
 # src/Jobs/JobSystem.cpp/.h use std::thread/std::mutex/std::condition_variable
 # unconditionally (the class itself always compiles - see JobSystem.h's own
@@ -1455,67 +1367,24 @@ target_link_libraries(gte_core PRIVATE saba_pmx)
 if(GTE_CORE_STANDALONE_PROBE_ONLY)
     add_executable(gte_core_player_link_probe tools/ci/gte_core_player_link_probe/main.cpp)
     target_link_libraries(gte_core_player_link_probe PRIVATE gte_core)
-    # editor-core-separation-3 campaign, PHASE5
-    # (PHASE5_PLAYER_PROCESS_PLUGIN_ISOLATION_PROBE.md, Step 3.2) - this probe's
-    # main.cpp now genuinely CONSTRUCTS a real, headless gte::Core and calls
-    # Core::LoadPlugins() against a real plugins/ folder (its own bonus check,
-    # self-skipping on a machine without VK_EXT_headless_surface) - it
-    # therefore participates in the plugin ABI boundary for real, not just as
-    # an inert link target, and must get the same CRT-linkage treatment every
-    # other plugin-ABI-boundary binary gets (PHASE0_MASTER_STRATEGY.md's
-    # Locked Design Decision #4's own restated "JOINT requirement" rule).
-    gte_apply_plugin_shared_crt_linkage(gte_core_player_link_probe)
-    # Needs all three demo plugin .dlls to genuinely exist in its own
-    # <inner-build-dir>/plugins/ folder before its bonus check runs (same
-    # reasoning as gte_plugin_abi_handshake_probe's own
-    # add_dependencies(... demo_hello_world) below - CMake has no way to know
-    # a runtime-only LoadLibraryW()/PluginHost::LoadPlugins() dependency on
-    # its own).
-    add_dependencies(gte_core_player_link_probe demo_hello_world demo_render_feature demo_editor_panel)
+    # better-render-pass-2 campaign, PHASE4 (PHASE4_DELETE_PLUGINS_FOLDER_AND_CMAKE.md) -
+    # this probe's own "bonus check" (constructing a real, headless gte::Core
+    # and calling Core::LoadPlugins() against a real plugins/ folder) is
+    # deleted outright from tools/ci/gte_core_player_link_probe/main.cpp
+    # (PluginHost no longer exists, PHASE3 of this same campaign) - this
+    # probe no longer participates in any plugin ABI boundary at all, so its
+    # own gte_apply_plugin_shared_crt_linkage(gte_core_player_link_probe) call
+    # and its add_dependencies(... demo_hello_world demo_render_feature
+    # demo_editor_panel) line (those targets no longer exist either) are both
+    # removed.
 
-    # PHASE2_PLUGIN_HOST_AND_HELLO_WORLD_HANDSHAKE_PROBE.md, Step 3.6 - a
-    # tiny, PERMANENT, checked-in probe proving the whole plugin ABI
-    # handshake works end-to-end OUTSIDE GreatTamanaEditor.exe entirely -
-    # needs zero gte_core/gte_editor at all, only gte_plugin_abi + a real,
-    # already-built demo_hello_world.dll to LoadLibraryW() at runtime.
-    add_executable(gte_plugin_abi_handshake_probe tools/ci/gte_plugin_abi_handshake_probe/main.cpp)
-    target_link_libraries(gte_plugin_abi_handshake_probe PRIVATE gte_plugin_abi)
-    gte_apply_plugin_shared_crt_linkage(gte_plugin_abi_handshake_probe)
-    # This probe LoadLibraryW()s demo_hello_world.dll at runtime rather than
-    # linking it - CMake has no way to know that dependency on its own, so
-    # it must be spelled out explicitly or a `cmake --build` of only this
-    # probe's own target will never actually produce the .dll it needs.
-    add_dependencies(gte_plugin_abi_handshake_probe demo_hello_world)
-
-    # PHASE5_PLAYER_PROCESS_PLUGIN_ISOLATION_PROBE.md, Step 3.1 - a tiny,
-    # PERMANENT, checked-in probe proving "always all-in" (source design doc
-    # Section 0/7) stays editor-clean from a genuinely Player-shaped process
-    # (Milestone 3) - links gte_core.a ALONE (no gte_editor/SDL/ImGui), uses
-    # gte::PluginHost directly, and queries ONLY IRenderFeatureModule_v1 -
-    # this probe's own main.cpp never references IEditorPanelModule_v1
-    # anywhere in its own source, which IS the isolation proof itself.
-    add_executable(gte_plugin_isolation_probe tools/ci/gte_plugin_isolation_probe/main.cpp)
-    target_link_libraries(gte_plugin_isolation_probe PRIVATE gte_core gte_plugin_abi)
-    gte_apply_plugin_shared_crt_linkage(gte_plugin_isolation_probe)
-    # editor-core-separation-4 campaign, PHASE5
-    # (PHASE5_MULTI_RENDER_FEATURE_PLUGIN_WARNING_AND_REGRESSION_LOCK.md) -
-    # this probe's own main.cpp now requires LoadedModuleCount() == 4 exactly
-    # (was 3) - needs all FOUR demo plugin .dlls (including the new
-    # demo_render_feature_second) to genuinely exist in its own
-    # <inner-build-dir>/plugins/ folder before it runs.
-    # editor-core-separation-6 campaign, PHASE8
-    # (PHASE8_DOCS_FULL_REGRESSION_AND_CAMPAIGN_CLOSEOUT.md) - real, confirmed
-    # bug found during this phase's own probe re-run: this add_dependencies()
-    # list never gained the 2 new PERMANENT _v2 demo plugins PHASE6 added to
-    # the shared plugins/ folder, so `cmake --build ... --target
-    # gte_plugin_isolation_probe` (which only builds THIS target's own
-    # dependency closure, not every CMake target) never actually built
-    # demo_render_feature_v2/_second's own .dll into this probe's own inner
-    # <inner-build-dir>/plugins/ folder - main.cpp's own LoadedModuleCount()
-    # == 6 requirement (below) would have silently, permanently failed
-    # without this fix. Now requires all SIX demo plugin .dlls to genuinely
-    # exist before it runs.
-    add_dependencies(gte_plugin_isolation_probe demo_hello_world demo_render_feature demo_editor_panel demo_render_feature_second demo_render_feature_v2 demo_render_feature_v2_second)
+    # better-render-pass-2 campaign, PHASE4 (PHASE4_DELETE_PLUGINS_FOLDER_AND_CMAKE.md) -
+    # gte_plugin_abi_handshake_probe (PHASE2_PLUGIN_HOST_AND_HELLO_WORLD_HANDSHAKE_PROBE.md,
+    # Step 3.6) and gte_plugin_isolation_probe (PHASE5_PLAYER_PROCESS_PLUGIN_ISOLATION_PROBE.md,
+    # Step 3.1) are DELETED outright, whole folders and all
+    # (tools/ci/gte_plugin_abi_handshake_probe/, tools/ci/gte_plugin_isolation_probe/)
+    # - both existed solely to prove the now fully-removed ABI plugin system
+    # worked end-to-end.
 endif()
 
 # editor-core-separation-1 campaign, PHASE18

@@ -20,7 +20,7 @@
 #include "Core/IHostServices.h"
 #include "../../Fakes/HeadlessSurfaceProvider.h"
 
-#include "../../../plugins/gte_plugin_abi/RenderFeatureDescriptor.h"
+#include "Core/Plugins/RenderFeatureDescriptor.h"
 
 #include <gtest/gtest.h>
 
@@ -95,7 +95,8 @@ TEST(RenderFeatureCompositorProjectFeatureTest, RegisterProjectFeatureSucceedsFo
     const RenderFeatureDebugEntry* found = FindByName(snapshot, "PF_Test_FreshUniqueName");
     ASSERT_NE(found, nullptr);
     EXPECT_TRUE(found->isProjectFeature);
-    EXPECT_FALSE(found->isV3);
+    // better-render-pass-2 campaign, PHASE4 - isV3 assertion removed, the
+    // field itself is deleted (RenderFeatureDebugEntry.h).
 }
 
 // 2. Registering a duplicate name fails and does not consume an extra slot -
@@ -247,8 +248,9 @@ TEST(RenderFeatureCompositorProjectFeatureTest, AnUnwiredStageIsRefusedWithoutLe
 }
 
 // 9. A registered project feature's DebugSnapshot() entry has
-// isProjectFeature == true AND isV3 == false - the single most important
-// assertion for that new field's own correctness (see 3.5 above).
+// isProjectFeature == true - the single most important assertion for that
+// field's own correctness (see 3.5 above). isV3 itself was deleted outright
+// by the better-render-pass-2 campaign, PHASE4.
 TEST(RenderFeatureCompositorProjectFeatureTest, DebugSnapshotEntryIsMarkedAsProjectFeatureNotV3)
 {
     GTE_SKIP_IF_NO_HEADLESS_CORE(core);
@@ -265,7 +267,6 @@ TEST(RenderFeatureCompositorProjectFeatureTest, DebugSnapshotEntryIsMarkedAsProj
     const RenderFeatureDebugEntry* found = FindByName(snapshot, "PF_Test_DebugSnapshotMarking");
     ASSERT_NE(found, nullptr);
     EXPECT_TRUE(found->isProjectFeature);
-    EXPECT_FALSE(found->isV3);
     EXPECT_EQ(found->stage, "PreUI");
     EXPECT_EQ(found->blendMode, "AlphaOver");
 }

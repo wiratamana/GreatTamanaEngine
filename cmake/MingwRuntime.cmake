@@ -121,34 +121,37 @@ endfunction()
 # add_executable already called for it) at the point this is invoked -
 # unlike target_link_libraries()'s own forward-reference tolerance for
 # LIST ITEMS, the target this command is called ON must already be a real
-# CMake target. A no-op when GTE_ENABLE_PLUGINS is OFF, matching that
-# configuration's own fingerprint sharedRuntimeLinkage=0 value - AND a
-# no-op (with a clear per-target warning) when the ACTIVE toolchain itself
-# has no shared libstdc++ variant at all (GTE_PLUGIN_SHARED_CRT_TOOLCHAIN_SUPPORTED
-# is FALSE - see this file's own top-of-file detection/comment; this is the
-# real, current state of this repository's default configure as of PHASE1).
-# Call this for the host executable (GreatTamanaEditor) AND for EVERY plugin
-# .dll target (PHASE2/3/4's demo_hello_world/demo_render_feature/
-# demo_editor_panel) AND for every standalone probe executable that ever
-# loads a real plugin .dll (PHASE2's handshake probe, PHASE5's isolation
-# probe, PHASE5's extended gte_core_player_link_probe) - never assume
-# flipping just the host is sufficient.
+# CMake target. A no-op (with a clear per-target warning) when the ACTIVE
+# toolchain itself has no shared libstdc++ variant at all
+# (GTE_PLUGIN_SHARED_CRT_TOOLCHAIN_SUPPORTED is FALSE - see this file's own
+# top-of-file detection/comment).
 # better-render-pass-2 campaign, PHASE1 (PHASE1_RELOCATE_SHARED_DEPENDENCIES.md,
 # Landmine C) - the neutral, non-"plugin"-named rename of this function
-# (`gte_apply_plugin_shared_crt_linkage` below is kept as a one-line
-# deprecated forwarder to this one, so its own 3 CI-probe call sites
-# - gte_core_player_link_probe, gte_plugin_abi_handshake_probe,
-# gte_plugin_isolation_probe - keep compiling unmodified until PHASE4
-# deletes them along with the ABI system). `GreatTamanaEditor` itself now
-# calls THIS function directly (root CMakeLists.txt) - this flips the HOST
-# executable to shared libgcc/libstdc++ linkage, which Project Assembly's own
-# docs state is load-bearing for ANY `.dll` that links against
-# `GreatTamanaEditor.exe`'s own import library, independent of whether the
-# unrelated `gte_plugin_abi` system is even enabled.
+# (`gte_apply_plugin_shared_crt_linkage` below was kept as a one-line
+# deprecated forwarder to this one during PHASE1-3, deleted outright by
+# PHASE4 - PHASE4_DELETE_PLUGINS_FOLDER_AND_CMAKE.md - once its own 3
+# CI-probe call sites - gte_core_player_link_probe, gte_plugin_abi_handshake_probe,
+# gte_plugin_isolation_probe - no longer existed to need it). `GreatTamanaEditor`
+# itself calls THIS function directly (root CMakeLists.txt) - this flips the
+# HOST executable to shared libgcc/libstdc++ linkage, which Project
+# Assembly's own docs state is load-bearing for ANY `.dll` that links against
+# `GreatTamanaEditor.exe`'s own import library.
+#
+# better-render-pass-2 campaign, PHASE4 (PHASE4_DELETE_PLUGINS_FOLDER_AND_CMAKE.md) -
+# the `if(NOT GTE_ENABLE_PLUGINS) return()` early-out this function used to
+# have (PHASE1-3) is REMOVED outright - GTE_ENABLE_PLUGINS itself no longer
+# exists anywhere in this repository as of this phase. This function is no
+# longer gated by ANY option - it unconditionally applies shared-CRT linkage
+# to GreatTamanaEditor (its one real call site) whenever the active toolchain
+# genuinely supports it (GTE_PLUGIN_SHARED_CRT_TOOLCHAIN_SUPPORTED). A real,
+# confirmed hazard this fix closes: leaving the stale GTE_ENABLE_PLUGINS check
+# in place after deleting the option() block that defined it would have made
+# CMake treat the now-permanently-undefined variable as empty/falsy, so
+# `NOT GTE_ENABLE_PLUGINS` would ALWAYS evaluate true - silently, permanently
+# disabling shared-CRT linkage for GreatTamanaEditor itself, exactly the
+# regression Landmine C (PHASE0_MASTER_STRATEGY.md Section 2.2) exists to
+# prevent.
 function(gte_apply_shared_crt_linkage target_name)
-    if(NOT GTE_ENABLE_PLUGINS)
-        return()
-    endif()
     if(NOT GTE_PLUGIN_SHARED_CRT_TOOLCHAIN_SUPPORTED)
         message(WARNING "gte_apply_shared_crt_linkage(${target_name}): active toolchain has no shared libstdc++ variant - honest no-op, ${target_name} stays statically linked (see this file's own top-of-file comment).")
         return()
@@ -163,77 +166,44 @@ function(gte_apply_shared_crt_linkage target_name)
     mingw_copy_runtime_dll(${target_name})
 endfunction()
 
-# DEPRECATED - kept only as a one-line forwarder so pre-existing call sites
-# (the 3 CI-probe executables - gte_core_player_link_probe,
-# gte_plugin_abi_handshake_probe, gte_plugin_isolation_probe - deleted
-# wholesale in PHASE4 alongside the rest of the ABI system) keep compiling
-# unmodified. New call sites should use gte_apply_shared_crt_linkage()
-# directly (above) - GreatTamanaEditor's own call site already does
-# (better-render-pass-2 campaign, PHASE1).
-function(gte_apply_plugin_shared_crt_linkage target_name)
-    gte_apply_shared_crt_linkage(${target_name})
-endfunction()
+# better-render-pass-2 campaign, PHASE4 (PHASE4_DELETE_PLUGINS_FOLDER_AND_CMAKE.md) -
+# gte_apply_plugin_shared_crt_linkage() (the deprecated one-line forwarder to
+# gte_apply_shared_crt_linkage() above, kept during PHASE1-3 purely so the 3
+# CI-probe call sites - gte_core_player_link_probe, gte_plugin_abi_handshake_probe,
+# gte_plugin_isolation_probe - kept compiling unmodified) is DELETED outright
+# this phase - all 3 call sites are gone (the latter two probes' whole folders
+# deleted; the first's own call site removed, see root CMakeLists.txt).
 
-# editor-core-separation-4 campaign, PHASE4
-# (PHASE4_PLUGIN_RUNTIME_DLL_LANDMINE_DEFENSE_IN_DEPTH.md) - the variant of
-# gte_apply_plugin_shared_crt_linkage() every PLUGIN .dll TARGET must call
-# instead of the original function above. Applies the SAME link-time CRT
-# flip (-shared-libgcc, needed so THIS .dll's own fingerprint correctly
-# reports sharedRuntimeLinkage=1 once a shared-CRT-capable toolchain is
-# active) but DELIBERATELY DOES NOT call mingw_copy_runtime_dll() - a plugin
-# .dll's RUNTIME_OUTPUT_DIRECTORY is ALWAYS the shared plugins/ folder
-# PluginHost::LoadPlugins() scans at startup (GTE_PLUGIN_RUNTIME_OUTPUT_DIR),
-# so copying libstdc++-6.dll/libgcc_s_seh-1.dll/libwinpthread-1.dll there
-# would make PluginHost try to LoadLibraryW() them as if they were plugins
-# (see this phase's own file for the full, confirmed failure mode this
-# fixes). This is safe: the HOST executable (or standalone probe .exe) that
-# actually loads this plugin .dll already stages its OWN copy of these same
-# 3 runtime DLLs next to ITSELF (via the ORIGINAL, unchanged
-# gte_apply_plugin_shared_crt_linkage() above, which every host/probe target
-# must still call) - the Windows DLL search order includes "the directory
-# the loading APPLICATION's own .exe is in" for any DLL resolved by bare
-# name (no path) during another DLL's own import resolution, which is
-# exactly how a plugin .dll's transitive dependency on libstdc++-6.dll etc.
-# gets satisfied here, with zero redundant copy needed inside plugins/
-# itself.
-function(gte_apply_plugin_dll_shared_crt_linkage target_name)
-    if(NOT GTE_ENABLE_PLUGINS)
-        return()
-    endif()
-    if(NOT GTE_PLUGIN_SHARED_CRT_TOOLCHAIN_SUPPORTED)
-        message(WARNING "gte_apply_plugin_dll_shared_crt_linkage(${target_name}): active toolchain has no shared libstdc++ variant - honest no-op, ${target_name} stays statically linked (see this file's own top-of-file comment).")
-        return()
-    endif()
-    target_link_options(${target_name} PRIVATE -shared-libgcc)
-    # Deliberately NOT calling mingw_copy_runtime_dll(${target_name}) here -
-    # see this function's own doc comment above for exactly why.
-endfunction()
-
+# better-render-pass-2 campaign, PHASE4 (PHASE4_DELETE_PLUGINS_FOLDER_AND_CMAKE.md) -
+# gte_apply_plugin_dll_shared_crt_linkage() (the variant every PLUGIN .dll
+# TARGET used to have to call instead of gte_apply_shared_crt_linkage() above)
+# is DELETED outright this phase - its only callers were the 9 demo plugin
+# CMakeLists.txt files (deleted this phase, plugins/demo_*/) and
+# tests/Fixtures/FakePlugins/CMakeLists.txt's 5 fixture targets (already
+# deleted by PHASE3's own Step 3.5) - zero callers remain.
+#
 # editor-core-separation-11 campaign (Project Assembly system), PHASE3
 # (PHASE0_MASTER_STRATEGY.md, Finding D) - the variant of
-# gte_apply_plugin_dll_shared_crt_linkage() every Project Assembly _Game.dll/
+# gte_apply_shared_crt_linkage() every Project Assembly _Game.dll/
 # _Editor.dll TARGET must call instead. Applies the exact SAME link-time CRT
 # flip (-shared-libgcc) but is gated ONLY by GTE_ENABLE_PROJECT_ASSEMBLIES +
-# GTE_PLUGIN_SHARED_CRT_TOOLCHAIN_SUPPORTED - NEVER by GTE_ENABLE_PLUGINS,
-# which controls the completely separate, unrelated gte_plugin_abi system.
-# Reusing gte_apply_plugin_dll_shared_crt_linkage() as-is here would silently
-# leave a Project Assembly .dll CRT-mismatched (and therefore genuinely
-# unsafe for the real std::string/std::vector cross-boundary traffic this
-# whole system exists for) the moment a developer sets GTE_ENABLE_PLUGINS=OFF
-# for the unrelated OTHER system, with a log message that never even
-# mentions "Project Assembly" - a real, confirmed hazard this function
-# exists specifically to close. Deliberately does NOT call
-# mingw_copy_runtime_dll() here (mirrors gte_apply_plugin_dll_shared_crt_linkage()'s
-# own identical reasoning): a Project Assembly .dll's own
+# GTE_PLUGIN_SHARED_CRT_TOOLCHAIN_SUPPORTED - a real, confirmed hazard this
+# function exists specifically to close: reusing gte_apply_shared_crt_linkage()
+# as-is here would behave identically today (both are unconditional now that
+# GTE_ENABLE_PLUGINS is gone), but this stays its OWN, independent function -
+# a Project Assembly .dll's own gating (GTE_ENABLE_PROJECT_ASSEMBLIES) is a
+# genuinely separate concern from the host executable's own call, and a
+# future reintroduction of a plugin-system-specific gate on
+# gte_apply_shared_crt_linkage() must never silently also affect Project
+# Assembly .dll's without a deliberate, separate decision. Deliberately does
+# NOT call mingw_copy_runtime_dll() here: a Project Assembly .dll's own
 # RUNTIME_OUTPUT_DIRECTORY (GTE_PROJECT_ASSEMBLY_OUTPUT_DIR, root
 # CMakeLists.txt) is NEVER scanned by ProjectAssemblyHost for anything other
-# than "*_Game.dll"/"*_Editor.dll" (PHASE5) - unlike PluginHost, which scans
-# EVERY *.dll in its own folder - so copying the 3 runtime DLLs there would
+# than "*_Game.dll"/"*_Editor.dll" - so copying the 3 runtime DLLs there would
 # not itself break anything, but is still unnecessary: GreatTamanaEditor.exe
 # already stages its own copy of these same 3 DLLs (via a direct, always-run
 # mingw_copy_runtime_dll(GreatTamanaEditor) call root CMakeLists.txt adds
-# unconditionally, PHASE3 Step 3.1 - closing exactly the same
-# GTE_ENABLE_PLUGINS=OFF gap this function itself exists to close), and
+# unconditionally, via gte_apply_shared_crt_linkage(GreatTamanaEditor)), and
 # Windows' own DLL search order already includes "the directory the loading
 # APPLICATION's own .exe is in" for any DLL a loaded .dll's own transitive
 # dependency resolves by bare name.

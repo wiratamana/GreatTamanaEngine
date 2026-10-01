@@ -415,15 +415,12 @@ void to_json(nlohmann::json& j, const RenderFeatureDebugEntry& entry)
         // disable override, reported automatically via the ALREADY-SHIPPING
         // GET /render_graph endpoint (no new endpoint needed for this).
         { "enabled", entry.enabled },
-        // editor-core-separation-9 campaign, PHASE4 - see
-        // RenderFeatureDebugEntry.h's own doc comment (isV3) for the full
-        // "why" - a small, additive label distinguishing a `_v3`
-        // (multi-pass, generic resource-graph) plugin row from a `_v2`
-        // (fixed-op) one.
-        { "is_v3", entry.isV3 },
+        // better-render-pass-2 campaign, PHASE4 (PHASE4_DELETE_PLUGINS_FOLDER_AND_CMAKE.md) -
+        // "is_v3" JSON field removed outright, alongside RenderFeatureDebugEntry::isV3
+        // itself (meaningless once no plugin of either kind can ever load again).
         // editor-core-separation-23 campaign, PHASE2 - see
         // RenderFeatureDebugEntry.h's own doc comment (isProjectFeature) for
-        // the full "why" - mirrors is_v3's own exact precedent.
+        // the full "why".
         { "is_project_feature", entry.isProjectFeature },
     };
 }

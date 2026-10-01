@@ -17,7 +17,7 @@
 #include "Core/Plugins/RenderFeatureDebugEntry.h"
 #include "../Fakes/HeadlessSurfaceProvider.h"
 
-#include "../../plugins/gte_plugin_abi/RenderFeatureDescriptor.h"
+#include "Core/Plugins/RenderFeatureDescriptor.h"
 
 #include <gtest/gtest.h>
 

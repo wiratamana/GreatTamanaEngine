@@ -86,22 +86,33 @@ endfunction()
 # that one dependency). FULL, verified dependency list as of PHASE3
 # (re-verify against the real, current root CMakeLists.txt before trusting
 # unchanged - dependencies can be added later): gte_core links
-# volk/vma/stb_image/stb_image_write/KTX::ktx/httplib/nlohmann_json PUBLIC
-# (line ~1176), gte_plugin_abi PUBLIC (line ~1186, its own header comment
-# there states the exact same "any consumer of gte_core needs this
-# propagated too" reasoning this function exists for - PluginHost.h, which
-# Core.h transitively #includes, needs it), and Threads::Threads PUBLIC
-# (line ~1199, included below purely for completeness/symmetry with that
-# same reasoning - it is a link-only imported target with no real headers
-# of its own, so this entry is a harmless no-op in practice, not a
-# functional requirement). gte_core's ONE PRIVATE dependency, saba_pmx (plus
-# its own glm dependency), is correctly NEVER listed here - PRIVATE never
-# propagates, and PmxLoader.h's/VmdLoader.h's public APIs never leak a
+# volk/vma/stb_image/stb_image_write/KTX::ktx/httplib/nlohmann_json PUBLIC,
+# and Threads::Threads PUBLIC (included below purely for completeness/
+# symmetry with that same reasoning - it is a link-only imported target with
+# no real headers of its own, so this entry is a harmless no-op in practice,
+# not a functional requirement). gte_core's ONE PRIVATE dependency, saba_pmx
+# (plus its own glm dependency), is correctly NEVER listed here - PRIVATE
+# never propagates, and PmxLoader.h's/VmdLoader.h's public APIs never leak a
 # saba::/glm:: type, so no consumer of gte_core (including a Project
 # Assembly) needs its headers. gte_editor links imgui/imguizmo PRIVATE
 # (handled separately, PHASE7 only, _Editor targets only - see
 # gte_project_assembly_apply_editor_header_paths() below) and SDL3::SDL3
 # PUBLIC (line ~1114).
+#
+# better-render-pass-2 campaign, PHASE4 (PHASE4_DELETE_PLUGINS_FOLDER_AND_CMAKE.md) -
+# the `$<TARGET_PROPERTY:gte_plugin_abi,INTERFACE_INCLUDE_DIRECTORIES>` entry
+# this function used to list (gte_core used to link gte_plugin_abi PUBLIC,
+# since the now-deleted PluginHost.h/.cpp needed its headers) is REMOVED
+# outright - the `gte_plugin_abi` CMake target no longer exists at all as of
+# this phase (plugins/gte_plugin_abi/ deleted, its add_subdirectory() call
+# removed from root CMakeLists.txt). This was a REAL, confirmed hazard this
+# phase had to fix: leaving a `$<TARGET_PROPERTY:gte_plugin_abi,...>`
+# generator expression referencing a target that no longer exists is a hard,
+# unconditional CMake GENERATE-time error ("Target \"gte_plugin_abi\" not
+# found") for EVERY Project Assembly target's own configure - this would have
+# broken the exact thing this whole campaign promises to keep working. Not
+# itemized in PHASE0_MASTER_STRATEGY.md's own Section 2.2 "Three Landmines"
+# audit - a fourth landmine that audit missed; see PHASE4_COMPLETION_REPORT.md.
 function(gte_project_assembly_apply_header_paths TARGET_NAME)
     target_include_directories(${TARGET_NAME} PRIVATE
         $<TARGET_PROPERTY:gte_core,INTERFACE_INCLUDE_DIRECTORIES>
@@ -113,7 +124,6 @@ function(gte_project_assembly_apply_header_paths TARGET_NAME)
         $<TARGET_PROPERTY:KTX::ktx,INTERFACE_INCLUDE_DIRECTORIES>
         $<TARGET_PROPERTY:httplib,INTERFACE_INCLUDE_DIRECTORIES>
         $<TARGET_PROPERTY:nlohmann_json,INTERFACE_INCLUDE_DIRECTORIES>
-        $<TARGET_PROPERTY:gte_plugin_abi,INTERFACE_INCLUDE_DIRECTORIES>
         $<TARGET_PROPERTY:Threads::Threads,INTERFACE_INCLUDE_DIRECTORIES>
         $<TARGET_PROPERTY:SDL3::SDL3,INTERFACE_INCLUDE_DIRECTORIES>
     )

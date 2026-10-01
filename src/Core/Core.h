@@ -56,7 +56,12 @@
 // free-standing, zero-Core-dependency header; RenderFeatureDescriptor.h has
 // zero dependencies beyond <cstdint>/<cstddef> (confirmed, PHASE0 Step 2).
 #include "Plugins/ProjectRenderFeatureCallback.h"
-#include "../../plugins/gte_plugin_abi/RenderFeatureDescriptor.h"
+// better-render-pass-2 campaign, PHASE4 (PHASE4_DELETE_PLUGINS_FOLDER_AND_CMAKE.md) -
+// relocated from "../../plugins/gte_plugin_abi/RenderFeatureDescriptor.h" into
+// gte_core's own tree (Landmine A-style relocation, missed by the original
+// campaign audit) - GtePluginRenderFeatureDescriptor is genuinely, permanently
+// needed here, not ABI-only (see that header's own top-of-file comment).
+#include "Plugins/RenderFeatureDescriptor.h"
 
 #include <volk.h>
 

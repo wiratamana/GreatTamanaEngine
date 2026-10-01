@@ -2,18 +2,18 @@
 
 // better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
 // #include "PluginRenderPassBuilderAdapter_v2.h"/"PluginRenderPassBuilderAdapter_v3.h"
-// removed - both classes are deleted outright this phase (ABI-only). A
-// direct #include of the real IPluginModule.h is now needed here (this
-// .cpp's own OnPluginsLoaded() calls module->QueryCapability()/
-// GetModuleInfo() directly) - it used to reach gte_core transitively
-// through the two deleted adapter headers above; IPluginCapabilityOrchestrator.h
-// only forward-declares IPluginModule.
-#include "../../../plugins/gte_plugin_abi/IPluginModule.h"
+// removed - both classes are deleted outright this phase (ABI-only).
+//
+// better-render-pass-2 campaign, PHASE4 (PHASE4_DELETE_PLUGINS_FOLDER_AND_CMAKE.md) -
+// the direct #includes of "../../../plugins/gte_plugin_abi/IPluginModule.h"/
+// "GtePluginModuleInfo.h"/"IPluginRenderPassBuilder_v3.h" this file used to
+// need (OnPluginsLoaded()'s own plugin-discovery scan body, the
+// BlackboardAdapter/IPluginBlackboard implementation) are removed outright,
+// alongside the code that needed them - see OnPluginsLoaded()'s own new,
+// empty body below and the deleted BlackboardAdapter class
+// (RenderFeatureCompositor.h).
 #include "../Core.h"
 #include "../Logging.h"
-
-#include "../../../plugins/gte_plugin_abi/GtePluginModuleInfo.h"
-#include "../../../plugins/gte_plugin_abi/IPluginRenderPassBuilder_v3.h"
 
 #include "../../Renderer/ComputeDispatch.h"
 
@@ -69,105 +69,11 @@ const char* ToString(RenderFeatureBlendMode blendMode) noexcept
     return "Unknown";
 }
 
-// editor-core-separation-9 campaign, PHASE4
-// (PHASE4_BLACKBOARD_AND_DIAGNOSTICS_INTEGRATION.md, Step 3.1) - file-local
-// helpers used ONLY by RenderFeatureCompositor::BlackboardAdapter::Publish()/
-// Fetch() (below) to build a human-readable diagnostic log line - the plugin
-// ABI (IPluginRenderPassBuilder_v3.h) has no logging capability of its own,
-// so this is the ONLY place a plugin's own Publish()/Fetch() call is ever
-// externally confirmable (GET /get_logs). Mirrors this same file's own
-// ToString(RenderFeatureStage)/ToString(RenderFeatureBlendMode) precedent
-// immediately above: deliberately NO `default:` case.
-const char* ToString(PluginBlackboardValueKind kind) noexcept
-{
-    switch (kind) {
-    case PluginBlackboardValueKind::Texture:
-        return "Texture";
-    case PluginBlackboardValueKind::Buffer:
-        return "Buffer";
-    case PluginBlackboardValueKind::Float:
-        return "Float";
-    case PluginBlackboardValueKind::Int32:
-        return "Int32";
-    case PluginBlackboardValueKind::Float4:
-        return "Float4";
-    }
-    return "Unknown";
-}
-
-std::string DescribeBlackboardValue(const PluginBlackboardValue& value)
-{
-    switch (value.kind) {
-    case PluginBlackboardValueKind::Texture:
-        return "texture{index=" + std::to_string(value.texture.index)
-            + ",generation=" + std::to_string(value.texture.generation) + "}";
-    case PluginBlackboardValueKind::Buffer:
-        return "buffer{index=" + std::to_string(value.buffer.index)
-            + ",generation=" + std::to_string(value.buffer.generation) + "}";
-    case PluginBlackboardValueKind::Float:
-        return "f=" + std::to_string(value.f);
-    case PluginBlackboardValueKind::Int32:
-        return "i=" + std::to_string(value.i);
-    case PluginBlackboardValueKind::Float4:
-        return "f4=[" + std::to_string(value.f4[0]) + "," + std::to_string(value.f4[1]) + ","
-            + std::to_string(value.f4[2]) + "," + std::to_string(value.f4[3]) + "]";
-    }
-    return "?";
-}
-
 } // namespace
-
-// editor-core-separation-9 campaign, PHASE4 - the REAL IPluginBlackboard
-// implementation, replacing PHASE2's NoOpPluginBlackboard stand-in. See
-// RenderFeatureCompositor.h's own doc comment (BlackboardAdapter) for the
-// full contract/reasoning.
-void RenderFeatureCompositor::BlackboardAdapter::Publish(const char* key, const PluginBlackboardValue& value)
-{
-    if (key == nullptr) {
-        return; // defensive - mirrors this ABI's own "never guesses/coerces" discipline elsewhere.
-    }
-    m_owner.m_blackboard[key] = value; // last-publish-wins, mirrors rg::RenderPassBlackboard::Publish()'s own rule.
-
-    if (m_owner.m_blackboardLoggedPublishKeys.insert(key).second) {
-        GTE_LOG_INFO("RenderFeatureCompositor.Blackboard",
-            std::string("Published key '") + key + "' kind=" + ToString(value.kind) + " "
-            + DescribeBlackboardValue(value));
-    }
-}
-
-bool RenderFeatureCompositor::BlackboardAdapter::Fetch(
-    const char* key, PluginBlackboardValueKind expectedKind, PluginBlackboardValue& outValue) const
-{
-    if (key == nullptr) {
-        return false;
-    }
-
-    const auto it = m_owner.m_blackboard.find(key);
-    if (it == m_owner.m_blackboard.end()) {
-        GTE_LOG_WARNING("RenderFeatureCompositor.Blackboard",
-            std::string("Fetch failed - key '") + key + "' was never published this frame.");
-        return false;
-    }
-    if (it->second.kind != expectedKind) {
-        GTE_LOG_WARNING("RenderFeatureCompositor.Blackboard",
-            std::string("Fetch failed - key '") + key + "' was published as kind=" + ToString(it->second.kind)
-            + " but fetched as kind=" + ToString(expectedKind) + " - never guesses/coerces between kinds.");
-        return false;
-    }
-
-    outValue = it->second;
-    if (m_owner.m_blackboardLoggedFetchSuccessKeys.insert(key).second) {
-        GTE_LOG_INFO("RenderFeatureCompositor.Blackboard",
-            std::string("Fetch succeeded - key '") + key + "' kind=" + ToString(outValue.kind) + " "
-            + DescribeBlackboardValue(outValue));
-    }
-    return true;
-}
 
 RenderFeatureCompositor::RenderFeatureCompositor(Core& core, Renderer& renderer)
     : m_core(core)
     , m_renderer(renderer)
-    , m_blackboardAdapter(*this)
 {
     // editor-core-separation-23 campaign, PHASE2 - the bounded, reusable
     // GPU-state slot free-list, fully populated at construction time. See
@@ -179,11 +85,11 @@ RenderFeatureCompositor::RenderFeatureCompositor(Core& core, Renderer& renderer)
     }
 }
 
-// editor-core-separation-8 campaign, PHASE2 - extracted VERBATIM from
-// OnPluginsLoaded()'s own former inline `sortAndDetectCollisions` lambda
-// (zero behavior change), so SetFeaturePriority() can reuse the exact same
-// sort+collision-tie-break logic for a single re-sort after a live priority
-// change, without duplicating it.
+// editor-core-separation-8 campaign, PHASE2 - extracted VERBATIM from the
+// former inline `sortAndDetectCollisions` lambda (zero behavior change), so
+// SetFeaturePriority() can reuse the exact same sort+collision-tie-break
+// logic for a single re-sort after a live priority change, without
+// duplicating it.
 void RenderFeatureCompositor::SortAndDetectCollisionsInStage(std::vector<Entry>& entries, const char* stageName)
 {
     std::stable_sort(entries.begin(), entries.end(),
@@ -205,7 +111,7 @@ void RenderFeatureCompositor::SortAndDetectCollisionsInStage(std::vector<Entry>&
                     std::string(entries[k].descriptor.name) + " and " + entries[k + 1].descriptor.name
                     + " both declared priority " + std::to_string(entries[k].descriptor.priority) + " in stage "
                     + stageName + " - this is ambiguous; falling back to a stable, lexical name tie-break. "
-                    "Assign each plugin a distinct priority to remove this warning.");
+                    "Assign each feature a distinct priority to remove this warning.");
             }
             std::stable_sort(entries.begin() + static_cast<std::ptrdiff_t>(i),
                 entries.begin() + static_cast<std::ptrdiff_t>(j) + 1, [](const Entry& a, const Entry& b) {
@@ -326,8 +232,7 @@ bool RenderFeatureCompositor::RegisterProjectFeature(
     if (entry.descriptor.stage == RenderFeatureStage::PreOpaque
         || entry.descriptor.stage == RenderFeatureStage::PostOpaque
         || entry.descriptor.stage == RenderFeatureStage::PostTransparent) {
-        // Mirrors OnPluginsLoaded()'s own identical refusal block - an
-        // unwired stage never claims a permanent slot; release it back
+        // An unwired stage never claims a permanent slot; release it back
         // before returning.
         GTE_LOG_WARNING("RenderFeatureCompositor",
             std::string(entry.descriptor.name) + " declared a RenderFeatureStage that is not wired in this "
@@ -343,10 +248,9 @@ bool RenderFeatureCompositor::RegisterProjectFeature(
     SortAndDetectCollisionsInStage(targetStage, isPreUi ? "PreUI" : "PostComposite");
 
     // Re-seed the name pool for the newly-added entry, for BOTH known views -
-    // mirroring OnPluginsLoaded()'s own trailing loop, with the ONE
-    // deliberate difference: the string fed into PrivateName()/AccumName()/
-    // BlendPassName() is the slot-derived gpuStateKey, never descriptor.name
-    // (PHASE0_MASTER_STRATEGY.md's Locked Decision #4).
+    // the string fed into PrivateName()/AccumName()/BlendPassName() is the
+    // slot-derived gpuStateKey, never descriptor.name (PHASE0_MASTER_STRATEGY.md's
+    // Locked Decision #4).
     const std::string gpuStateKey = "ProjectFeatureSlot" + std::to_string(claimedSlot);
     static constexpr const char* kViewNames[] = { "Game", "Scene" };
     for (const char* viewName : kViewNames) {
@@ -377,9 +281,16 @@ bool RenderFeatureCompositor::UnregisterProjectFeature(const char* name)
     }
 
     if (!entry->projectCallback) {
+        // better-render-pass-2 campaign, PHASE4 (PHASE4_DELETE_PLUGINS_FOLDER_AND_CMAKE.md) -
+        // this branch is now structurally unreachable (every surviving Entry
+        // always has projectCallback set, since the moduleV2/moduleV3
+        // alternative was removed) - kept as a defensive guard, never
+        // removed, since FindEntryByName() returning a non-null Entry whose
+        // projectCallback happens to be unset is still a real, checkable
+        // invariant worth refusing loudly rather than assuming away.
         GTE_LOG_WARNING("RenderFeatureCompositor",
             std::string("UnregisterProjectFeature('") + name + "') refused - this entry is not a Project "
-            "Assembly render feature (it is a loaded plugin's own moduleV2/moduleV3 entry).");
+            "Assembly render feature.");
         return false;
     }
 
@@ -411,88 +322,19 @@ bool RenderFeatureCompositor::UnregisterProjectFeature(const char* name)
     return true;
 }
 
-// editor-core-separation-6 campaign, PHASE4 (Step 3.4) - discovers every
-// loaded IRenderFeatureModule_v2/_v3, snapshots its descriptor exactly once,
-// refuses (loudly) any module declaring an unwired stage
-// (PHASE0_MASTER_STRATEGY.md's Locked Design Decision #1), then sorts each
-// stage's own surviving entries by priority ascending with a documented,
-// stable, lexical tie-break for a same-priority collision (never left to
-// std::sort's own unspecified-for-equal-keys behavior).
-//
-// editor-core-separation-9 campaign, PHASE2 - queries `_v3` FIRST (the
-// recommended path, Locked Product Decision #1), falling back to `_v2` only
-// if a module does not implement `_v3`. A module declaring BOTH capabilities
-// is a plugin-author error - loud GTE_LOG_WARNING, `_v3` wins (mirrors this
-// codebase's general "loud, never silent" collision discipline).
-void RenderFeatureCompositor::OnPluginsLoaded(const std::vector<IPluginModule*>& modules)
+// better-render-pass-2 campaign, PHASE4 (PHASE4_DELETE_PLUGINS_FOLDER_AND_CMAKE.md) -
+// intentionally empty as of this campaign: `IPluginCapabilityOrchestrator`
+// requires an override (its own OnPluginsLoaded() is a pure virtual with no
+// default body - IPluginCapabilityOrchestrator.h), but nothing calls this
+// anymore (Decision D2, PHASE0_MASTER_STRATEGY.md Section 2.4 - provably true
+// since PHASE2 of this same campaign removed EditorHost.cpp's one-and-only
+// Core::LoadPlugins() call site) - kept only to satisfy the pure-virtual
+// contract. The former body (the `_v2`/`_v3` plugin-discovery scan, stage
+// collision detection, and name-pool pre-warm loop) is deleted outright,
+// along with the `Entry::moduleV2`/`moduleV3` fields it populated
+// (RenderFeatureCompositor.h).
+void RenderFeatureCompositor::OnPluginsLoaded(const std::vector<IPluginModule*>& /*modules*/)
 {
-    for (IPluginModule* module : modules) {
-        auto* v3Feature =
-            static_cast<IRenderFeatureModule_v3*>(module->QueryCapability(kIRenderFeatureModule_v3_Name));
-        auto* v2Feature =
-            static_cast<IRenderFeatureModule_v2*>(module->QueryCapability(kIRenderFeatureModule_v2_Name));
-
-        if (v3Feature == nullptr && v2Feature == nullptr) {
-            continue;
-        }
-
-        if (v3Feature != nullptr && v2Feature != nullptr) {
-            GtePluginModuleInfo info;
-            module->GetModuleInfo(info);
-            GTE_LOG_WARNING("RenderFeatureCompositor",
-                std::string(info.name) + " declared BOTH IRenderFeatureModule_v3 and IRenderFeatureModule_v2 - "
-                "a plugin must implement exactly one. Using _v3 and ignoring _v2 for this module.");
-        }
-
-        Entry entry;
-        if (v3Feature != nullptr) {
-            entry.moduleV3 = v3Feature;
-            entry.descriptor = v3Feature->GetRenderFeatureDescriptor();
-        } else {
-            entry.moduleV2 = v2Feature;
-            entry.descriptor = v2Feature->GetRenderFeatureDescriptor();
-        }
-
-        if (entry.descriptor.stage == RenderFeatureStage::PreOpaque
-            || entry.descriptor.stage == RenderFeatureStage::PostOpaque
-            || entry.descriptor.stage == RenderFeatureStage::PostTransparent) {
-            GTE_LOG_WARNING("RenderFeatureCompositor",
-                std::string(entry.descriptor.name) + " declared a RenderFeatureStage that is not wired in this "
-                "engine build - this feature will not run any frame. See "
-                "task_manager/editor-core-separation-6/PHASE0_MASTER_STRATEGY.md's Locked Design Decision #1.");
-            continue;
-        }
-
-        if (entry.descriptor.stage == RenderFeatureStage::PreUI) {
-            m_preUi.push_back(entry);
-        } else {
-            m_postComposite.push_back(entry);
-        }
-    }
-
-    SortAndDetectCollisionsInStage(m_postComposite, "PostComposite");
-    SortAndDetectCollisionsInStage(m_preUi, "PreUI");
-
-    // Populate the name pool for every surviving entry now, for BOTH known
-    // views ("Game"/"Scene" - confirmed the only two RenderViewId::Named()
-    // values anywhere in this engine, PHASE4's own Step 2 evidence) - the set
-    // of loaded plugins AND the set of views are both fixed for the
-    // process's entire remaining lifetime, never re-interned per frame.
-    static constexpr const char* kViewNames[] = { "Game", "Scene" };
-    for (const char* viewName : kViewNames) {
-        m_namePool.SeedName(viewName);
-        m_namePool.SeedCopyPassName(viewName);
-        for (const Entry& entry : m_postComposite) {
-            m_namePool.PrivateName(entry.descriptor.name, viewName);
-            m_namePool.AccumName(entry.descriptor.name, viewName);
-            m_namePool.BlendPassName(entry.descriptor.name, viewName);
-        }
-        for (const Entry& entry : m_preUi) {
-            m_namePool.PrivateName(entry.descriptor.name, viewName);
-            m_namePool.AccumName(entry.descriptor.name, viewName);
-            m_namePool.BlendPassName(entry.descriptor.name, viewName);
-        }
-    }
 }
 
 // editor-core-separation-6 campaign, PHASE7
@@ -514,13 +356,9 @@ std::vector<RenderFeatureDebugEntry> RenderFeatureCompositor::DebugSnapshot() co
             debugEntry.priority = entry.descriptor.priority;
             debugEntry.blendMode = ToString(entry.descriptor.blendMode);
             debugEntry.enabled = entry.enabledOverride;
-            // editor-core-separation-9 campaign, PHASE4 - see
-            // RenderFeatureDebugEntry.h's own doc comment (isV3) for the
-            // full "why".
-            debugEntry.isV3 = (entry.moduleV3 != nullptr);
             // editor-core-separation-23 campaign, PHASE2 - see
             // RenderFeatureDebugEntry.h's own doc comment (isProjectFeature)
-            // for the full "why" - mirrors isV3's own exact precedent.
+            // for the full "why".
             debugEntry.isProjectFeature = static_cast<bool>(entry.projectCallback);
             snapshot.push_back(std::move(debugEntry));
         }
@@ -689,34 +527,23 @@ void RenderFeatureCompositor::DispatchBlend(rg::RenderGraphBuilder& builder, rg:
 // accumulator or (for the LAST entry) directly into the view's own real,
 // final handle (PHASE0_MASTER_STRATEGY.md's Locked Design Decision #10).
 //
-// editor-core-separation-9 campaign, PHASE2 - the per-entry loop now
-// branches on which ABI version this entry implements: a `moduleV3` entry
-// builds a PluginRenderPassBuilderAdapter_v3 (new); a `moduleV2` entry keeps
-// building a PluginRenderPassBuilderAdapter_v2 (byte-for-byte unchanged) -
-// everything AFTER this branch (the DispatchBlend() call reading
-// `privateTarget`) is completely unchanged either way, since both adapters
-// ultimately fill the SAME EnsurePrivateTargetState()-provided private
-// RenderTexture.
+// better-render-pass-2 campaign, PHASE4 (PHASE4_DELETE_PLUGINS_FOLDER_AND_CMAKE.md) -
+// the per-entry loop below only ever has the entry.projectCallback branch now
+// (PHASE3 of that same campaign already removed the moduleV2/moduleV3
+// branches, since neither field could ever be set anymore) - this phase
+// removed the fields themselves.
 void RenderFeatureCompositor::ContributeRenderGraphPasses(
     const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&)
 {
-    // editor-core-separation-9 campaign, PHASE4
-    // (PHASE4_BLACKBOARD_AND_DIAGNOSTICS_INTEGRATION.md, Step 3.1) - a fresh,
-    // empty blackboard every call (mirrors rg::RenderPassBlackboard's own
-    // per-frame lifetime exactly) - cleared FIRST, before combinedList
-    // construction, so a plugin can never see a stale value a DIFFERENT
-    // view's own earlier-this-frame call published.
-    m_blackboard.clear();
-
     std::vector<Entry> combinedList;
     combinedList.reserve(m_postComposite.size() + m_preUi.size());
     combinedList.insert(combinedList.end(), m_postComposite.begin(), m_postComposite.end());
     combinedList.insert(combinedList.end(), m_preUi.begin(), m_preUi.end());
 
-    // editor-core-separation-8 campaign, PHASE2 - a host-disabled plugin
-    // render feature is skipped entirely from this frame's compositing chain
-    // (never contributes a pass, never consumes a private/blend target this
-    // frame) - the entry itself is never removed from m_postComposite/m_preUi
+    // editor-core-separation-8 campaign, PHASE2 - a host-disabled render
+    // feature is skipped entirely from this frame's compositing chain (never
+    // contributes a pass, never consumes a private/blend target this frame) -
+    // the entry itself is never removed from m_postComposite/m_preUi
     // (DebugSnapshot()/GET /render_graph keeps reporting it, disabled).
     combinedList.erase(std::remove_if(combinedList.begin(), combinedList.end(),
         [](const Entry& entry) { return !entry.enabledOverride; }), combinedList.end());
@@ -733,22 +560,17 @@ void RenderFeatureCompositor::ContributeRenderGraphPasses(
     const std::string viewName = isGameView ? "Game" : "Scene";
     const VkExtent2D extent = resolved->extent;
 
-    // Seed the chain - see this class's own header comment/PHASE4's own
-    // Step 3.4 point 4 for exactly why: without this, `currentInput` and the
-    // LAST entry's own `outputTarget` would be the SAME handle
-    // (resolved->target) in the SAME dispatch whenever the combined list has
-    // exactly one entry (N == 1) - a real GPU hazard (a compute pass
-    // reading and writing the exact same storage image in one dispatch).
-    // The seed dispatch is always a plain Replace copy, regardless of any
-    // individual plugin's own declared blend mode. `m_device` is resolved
-    // directly from m_renderer.GetVulkanContextInfo().device below, before
-    // any per-frame descriptor-set/pipeline access.
+    // Seed the chain - see this class's own header comment for exactly why:
+    // without this, `currentInput` and the LAST entry's own `outputTarget`
+    // would be the SAME handle (resolved->target) in the SAME dispatch
+    // whenever the combined list has exactly one entry (N == 1) - a real GPU
+    // hazard (a compute pass reading and writing the exact same storage
+    // image in one dispatch). The seed dispatch is always a plain Replace
+    // copy, regardless of any individual feature's own declared blend mode.
     //
     // better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
     // this used to be sourced via m_operationRegistry.EnsureBuiltinsRegistered()/
-    // GetDevice() (editor-core-separation-9 campaign, PHASE2's own fix for a
-    // real, confirmed ACCESS VIOLATION crash from an uninitialized m_device) -
-    // PluginRenderOperationRegistry is deleted outright this phase (ABI-only),
+    // GetDevice() - PluginRenderOperationRegistry is deleted outright (ABI-only),
     // so this now reads the SAME real VkDevice directly off Renderer instead.
     m_device = m_renderer.GetVulkanContextInfo().device;
 
@@ -764,18 +586,15 @@ void RenderFeatureCompositor::ContributeRenderGraphPasses(
 
     for (std::size_t i = 0; i < combinedList.size(); ++i) {
         const Entry& entry = combinedList[i];
-        const std::string pluginName = entry.descriptor.name; // unchanged - still used for FindEntryByName()/logs/adapter construction.
+        const std::string featureName = entry.descriptor.name; // still used for FindEntryByName()/logs.
         // editor-core-separation-23 campaign, PHASE2
         // (PHASE2_REGISTER_PROJECT_FEATURE_AND_SLOT_POOL.md, Step 3.4) - a
         // Project Assembly's own render-feature GPU state is NEVER keyed by
         // its human-typed descriptor.name (PHASE0_MASTER_STRATEGY.md's
         // Locked Decision #4) - it uses a bounded, slot-derived key instead.
-        // For every moduleV2/moduleV3 entry this is a complete no-op:
-        // gpuStateKey == pluginName exactly, byte-for-byte, since
-        // entry.projectCallback is always unset for them.
         const std::string gpuStateKey = (entry.projectCallback)
             ? ("ProjectFeatureSlot" + std::to_string(entry.projectFeatureSlot))
-            : pluginName;
+            : featureName;
         const bool isLast = (i + 1 == combinedList.size());
 
         const char* privateName = m_namePool.PrivateName(gpuStateKey, viewName);
@@ -783,14 +602,6 @@ void RenderFeatureCompositor::ContributeRenderGraphPasses(
         const rg::TextureHandle privateTarget =
             frame.builder.ImportTexture(privateName, privateState.texture->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
 
-        // better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
-        // the `entry.moduleV3`/`entry.moduleV2` branches
-        // (PluginRenderPassBuilderAdapter_v3/_v2, both deleted outright this
-        // phase, ABI-only) are removed - neither field is ever set anymore
-        // (nothing can load a plugin since PHASE2 removed the one call site
-        // that ever invoked Core::LoadPlugins()), so this was always a
-        // no-op dead branch at runtime; only the Project Assembly path
-        // survives, completely unchanged.
         if (entry.projectCallback) {
             entry.projectCallback(frame.builder, privateTarget, extent);
         }

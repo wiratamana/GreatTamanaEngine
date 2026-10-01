@@ -35,30 +35,22 @@ struct RenderFeatureDebugEntry {
     // prior output for a struct that never went through this campaign's own
     // new SetFeatureEnabled() at all.
     bool enabled = true;
-
-    // editor-core-separation-9 campaign, PHASE4
-    // (PHASE4_BLACKBOARD_AND_DIAGNOSTICS_INTEGRATION.md, Step 3.3.5) - a
-    // small, additive label distinguishing a `_v3` (multi-pass, generic
-    // resource-graph) plugin row from a `_v2` (fixed-op) one. Added after a
-    // real, live confirmed gap: without this field, the ONLY way to tell
-    // which ABI a `render_features[]`/"Plugin Render Features" row belongs
-    // to is by eyeballing the plugin's own chosen `name` string (e.g. it
-    // happens to contain "V3") - not a structural signal a third-party
-    // plugin author is in any way obligated to follow. Populated by
-    // RenderFeatureCompositor::DebugSnapshot()'s own appendStage lambda:
-    // `debugEntry.isV3 = (entry.moduleV3 != nullptr);` - trivial, since
-    // Entry already distinguishes moduleV2/moduleV3.
-    bool isV3 = false;
+    // better-render-pass-2 campaign, PHASE4 (PHASE4_DELETE_PLUGINS_FOLDER_AND_CMAKE.md) -
+    // `isV3` (a label distinguishing a `_v3` multi-pass plugin row from a
+    // `_v2` fixed-op one, editor-core-separation-9 campaign, PHASE4) removed
+    // outright - meaningless once no plugin of either kind can ever load
+    // again (nothing has been able to call Core::LoadPlugins() since PHASE2
+    // of this same campaign).
 
     // editor-core-separation-23 campaign, PHASE2
     // (PHASE2_REGISTER_PROJECT_FEATURE_AND_SLOT_POOL.md, Step 3.5) - a
     // Project Assembly's own on-screen render feature
     // (Core::RegisterProjectRenderFeature(), editor-core-separation-23
-    // campaign) - mutually exclusive with isV3 (a moduleV2/moduleV3 entry
-    // never sets this; a projectCallback entry never sets isV3). Added for
-    // the identical reason isV3 itself was added: without a structural
-    // field, a Project Assembly feature and a real _v2 plugin feature are
-    // indistinguishable at this observation layer (both show isV3 == false).
+    // campaign). Always true today - better-render-pass-2 campaign, PHASE4
+    // removed every other kind of entry this struct could ever describe
+    // (the `_v2`/`_v3` plugin-discovery `isV3` field, above) - kept as a
+    // real, non-dead field anyway, since a future non-Project-Assembly
+    // render-feature origin is not structurally impossible.
     // Populated by RenderFeatureCompositor::DebugSnapshot()'s own appendStage
     // lambda: `debugEntry.isProjectFeature = static_cast<bool>(entry.projectCallback);`.
     bool isProjectFeature = false;
