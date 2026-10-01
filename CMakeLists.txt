@@ -137,6 +137,7 @@ include(FetchSTB)
 include(FetchSTBImageWrite)
 include(FetchHttplib)
 include(FetchJson)
+include(FetchSpirvReflect)
 include(FetchKTX)
 include(CompileShaders)
 # PHASE1_GTE_PLUGIN_ABI_FOUNDATION.md, Step 3.4 (PHASE0_MASTER_STRATEGY.md's
@@ -216,6 +217,18 @@ fetch_httplib()
 # Also defines the `nlohmann_json` INTERFACE target, linked into gte_core
 # below.
 fetch_json()
+
+# task_manager/better-render-pass-1 campaign, PHASE1
+# (PHASE1_SPIRV_REFLECT_DEPENDENCY_AND_SHADER_REFLECTION_CORE.md) - vendors
+# (if not already present) SPIRV-Reflect for Windows:
+#   third_party/spirv_reflect/spirv_reflect.h/.c         - the library itself
+#   third_party/spirv_reflect/include/spirv/unified1/spirv.h - SPIR-V header
+#                                                               it depends on
+# Also defines the `spirv_reflect` STATIC library target, linked into gte_core
+# below. See cmake/FetchSpirvReflect.cmake's own header comment - this
+# campaign's own copy was vendored by hand from a locally-downloaded
+# SPIRV-Reflect-main.zip (offline setup, no network access used).
+fetch_spirv_reflect()
 
 # Builds KTX-Software from source in-tree (headers + a STATIC `ktx` library,
 # with Basis Universal/astc-encoder support baked in - no ktx.dll needed at
@@ -779,6 +792,13 @@ add_library(gte_core STATIC
     src/Renderer/Vulkan/ShaderModule.h
     src/Renderer/Vulkan/DescriptorSetLayoutBuilder.cpp
     src/Renderer/Vulkan/DescriptorSetLayoutBuilder.h
+    # task_manager/better-render-pass-1 campaign, PHASE1
+    # (PHASE1_SPIRV_REFLECT_DEPENDENCY_AND_SHADER_REFLECTION_CORE.md) - pure,
+    # Tier-1-testable SPIR-V reflection (descriptor bindings/push-constant
+    # range/local work-group size) read straight out of an already-compiled
+    # .comp.spv file via the vendored spirv_reflect library.
+    src/Renderer/Vulkan/ShaderReflection.cpp
+    src/Renderer/Vulkan/ShaderReflection.h
     src/Renderer/RenderGraph/RenderGraphTypes.h
     src/Renderer/RenderGraph/RenderGraphTypes.cpp
     src/Renderer/RenderGraph/RenderGraphBuilder.h
@@ -1399,6 +1419,19 @@ target_compile_definitions(gte_core PUBLIC GTE_ENABLE_PROJECT_ASSEMBLIES=$<BOOL:
 # mechanically proves this against the real, built libgte_core.a bytes.
 target_include_directories(gte_core PUBLIC "${CMAKE_SOURCE_DIR}/src")
 target_link_libraries(gte_core PUBLIC volk vma stb_image stb_image_write KTX::ktx httplib nlohmann_json)
+
+# task_manager/better-render-pass-1 campaign, PHASE1
+# (PHASE1_SPIRV_REFLECT_DEPENDENCY_AND_SHADER_REFLECTION_CORE.md) - SPIRV-Reflect
+# (cmake/FetchSpirvReflect.cmake), used by the new
+# src/Renderer/Vulkan/ShaderReflection.h/.cpp module to read descriptor
+# binding/push-constant/local-size metadata straight out of an
+# already-compiled .comp.spv file. PRIVATE (not PUBLIC) - ShaderReflection.h's
+# own public API (ShaderReflectionResult et al.) never exposes a
+# spirv_reflect:: type, only plain gte:: structs/VkDescriptorType, so no
+# consumer of gte_core needs spirv_reflect's own include directory propagated
+# to it (mirrors saba_pmx's own PRIVATE linkage immediately below for the same
+# reason).
+target_link_libraries(gte_core PRIVATE spirv_reflect)
 
 # editor-core-separation-3 campaign, PHASE2
 # (PHASE2_PLUGIN_HOST_AND_HELLO_WORLD_HANDSHAKE_PROBE.md, Step 3.3) -

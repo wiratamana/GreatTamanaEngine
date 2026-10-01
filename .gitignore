@@ -102,6 +102,12 @@
 # automatically on configure — see CMakeLists.txt / cmake/FetchJson.cmake)
 /third_party/json/
 
+# SPIRV-Reflect artifacts fetched/vendored by cmake/FetchSpirvReflect.cmake
+# (regenerated automatically on configure — see CMakeLists.txt /
+# cmake/FetchSpirvReflect.cmake. task_manager/better-render-pass-1 campaign,
+# PHASE1)
+/third_party/spirv_reflect/
+
 # Compiled shader binaries (SPIR-V) built from src/Shaders/*.vert/*.frag by
 # cmake/CompileShaders.cmake (glslc) - regenerated automatically on every
 # build into "<exe dir>/shaders/", never committed. Only the GLSL source is

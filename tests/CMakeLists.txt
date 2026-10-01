@@ -2312,6 +2312,16 @@ set(GTE_TEST_SOURCES
     Renderer/RenderGraph/RenderGraphCompilerTests.cpp
     Renderer/RenderGraph/RenderGraphBarrierPlannerTests.cpp
     Renderer/RenderGraph/RenderGraphNameSlotTableTests.cpp
+    # task_manager/better-render-pass-1 campaign, PHASE1
+    # (PHASE1_SPIRV_REFLECT_DEPENDENCY_AND_SHADER_REFLECTION_CORE.md) - Tier-1
+    # test for the new, pure gte::ReflectComputeShader()
+    # (src/Renderer/Vulkan/ShaderReflection.h/.cpp), asserted against the
+    # real, already-compiled Shaders/BoxBlur.comp.spv fixture (see
+    # gte_add_shader(GreatTamanaEngineTests ...) + the
+    # GTE_TEST_BOXBLUR_SPV_PATH compile definition added below,
+    # near add_executable(GreatTamanaEngineTests ...)). No Vulkan device
+    # involved at all - pure SPIR-V binary parsing.
+    Renderer/Vulkan/ShaderReflectionTests.cpp
     # editor-core-separation-27 campaign, PHASE4
     # (PHASE4_HEADLESS_TEST_FIXTURE_AND_CACHE_CONSTRUCTION.md) - Tier-2 (real,
     # headless GPU, tests/Fakes/HeadlessRenderGraphFixture.h) tests for
@@ -2529,6 +2539,33 @@ if(TRUE)
 endif()
 
 add_executable(GreatTamanaEngineTests ${GTE_TEST_SOURCES})
+
+# task_manager/better-render-pass-1 campaign, PHASE1
+# (PHASE1_SPIRV_REFLECT_DEPENDENCY_AND_SHADER_REFLECTION_CORE.md) -
+# Renderer/Vulkan/ShaderReflectionTests.cpp asserts gte::ReflectComputeShader()
+# against the real, already-compiled Shaders/BoxBlur.comp.spv fixture.
+# DELIBERATE DEVIATION from this phase's own task doc, confirmed live: the
+# doc assumed this would be the FIRST gte_add_shader() call for BoxBlur.comp
+# anywhere in the project, but the root CMakeLists.txt already calls
+# gte_add_shader(GreatTamanaEditor src/Shaders/BoxBlur.comp) - that function's
+# own OUTPUT-based add_custom_command targets a FIXED,
+# target-name-independent path ("${CMAKE_BINARY_DIR}/shaders/BoxBlur.comp.spv"),
+# and CMake/ninja both reject a second add_custom_command declaring the same
+# OUTPUT ("multiple rules generate shaders/BoxBlur.comp.spv", confirmed via a
+# real failed ninja generate). Since root CMakeLists.txt's
+# add_subdirectory(tests) runs AFTER that existing call, the custom command
+# already exists by the time this file is processed - so this test target
+# just depends on that SAME already-declared generated file directly (a
+# plain target_sources() of the existing generated path) instead of calling
+# gte_add_shader() a second time for the identical shader source.
+# GTE_TEST_BOXBLUR_SPV_PATH bakes in the real, absolute, build-resolved path
+# at compile time (gtest_discover_tests() does not guarantee the test
+# binary's current working directory equals its own directory) - mirrors
+# this same file's own GTE_CORE_ARCHIVE_PATH idiom immediately below.
+target_sources(GreatTamanaEngineTests PRIVATE "${CMAKE_BINARY_DIR}/shaders/BoxBlur.comp.spv")
+target_compile_definitions(GreatTamanaEngineTests PRIVATE
+    GTE_TEST_BOXBLUR_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/BoxBlur.comp.spv"
+)
 
 # editor-core-separation-1 campaign, PHASE14
 # (PHASE14_WINDOW_SDL_RELOCATION_TO_EDITOR.md) - lets
