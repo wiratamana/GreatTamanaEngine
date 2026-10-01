@@ -843,6 +843,8 @@ add_library(gte_core STATIC
     src/Game/RenderBatching.cpp
     src/Game/RenderSystem.cpp
     src/Game/RenderSystem.h
+    src/Game/SceneQuery.cpp
+    src/Game/SceneQuery.h
     src/Profiling/ProfilingTypes.h
     src/Profiling/ProfilingClock.h
     src/Profiling/ProfilingClock.cpp
