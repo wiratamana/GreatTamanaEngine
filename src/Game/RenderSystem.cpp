@@ -1,5 +1,6 @@
 #include "RenderSystem.h"
 
+#include "../Core/Logging.h"
 #include "ECS/TransformHierarchy.h"
 #include "Profiling/ScopeTimer.h"
 #include "Renderer/Renderer.h"
@@ -103,7 +104,7 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, float aspectWidt
 
 void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& viewProjection,
     IFrameDebuggerCaptureRecorder* capture, std::optional<std::size_t> maxDrawCount,
-    const std::unordered_set<Entity>& batchedEntities)
+    const std::unordered_set<Entity>& batchedEntities, std::optional<PipelineHandle> pipelineOverride)
 {
     GTE_PROFILE_SCOPE("RenderSystem::Draw");
 
@@ -117,6 +118,25 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& view
     // thing as "successfully resolved draws"). std::nullopt (every
     // pre-existing call site) means "no cutoff" - iterate every command,
     // exactly the pre-PHASE3 behavior.
+    // better-render-pass-3 campaign, PHASE1 - resolved ONCE here, before the
+    // loop (not per-DrawCommand - see RenderSystem.h's own doc comment on
+    // this parameter for the full "LDD-1: inline resolution" reasoning). A
+    // bad/stale/never-registered pipelineOverride handle is a call-scoped
+    // (not per-entity) silent skip of EVERY entity this call would have
+    // drawn - overridePipeline stays nullptr, so the existing
+    // "mesh != nullptr && pipeline != nullptr" guard below already skips
+    // every DrawCommand with zero new conditional logic - only the one
+    // warning log below is new.
+    const bool hasPipelineOverride = pipelineOverride.has_value();
+    const Pipeline* overridePipeline = hasPipelineOverride ? m_pipelines.TryGet(*pipelineOverride) : nullptr;
+
+    if (hasPipelineOverride && overridePipeline == nullptr) {
+        GTE_LOG_WARNING("RenderSystem",
+            "Draw(): pipelineOverride does not resolve to a live Pipeline (stale, never-registered, or "
+            "already-removed handle) - every entity in this call is being skipped this frame. Check the "
+            "override handle passed in.");
+    }
+
     std::size_t consideredCount = 0;
     for (const DrawCommand& command : commands) {
         if (maxDrawCount.has_value() && consideredCount >= *maxDrawCount) {
@@ -135,7 +155,7 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& view
         }
 
         const Mesh* mesh = m_meshes.TryGet(command.mesh);
-        const Pipeline* pipeline = m_pipelines.TryGet(command.pipeline);
+        const Pipeline* pipeline = hasPipelineOverride ? overridePipeline : m_pipelines.TryGet(command.pipeline);
         if (mesh != nullptr && pipeline != nullptr) {
             const MaterialTexture* materialTexture = m_textures.TryGet(command.texture);
             const VkDescriptorSet descriptorSet =
