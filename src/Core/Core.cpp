@@ -215,6 +215,11 @@ GpuDrivenBatchNamePool& BatchNamePool()
 
 Core::Core(ISurfaceProvider& surfaceProvider, IHostServices& hostServices)
     : m_renderer(surfaceProvider)
+    // better-render-pass-3 campaign, BLOCK 2 (Arbitrary Render Views) -
+    // needs a live Renderer&, constructed immediately after m_renderer
+    // (declaration order matches Core.h - see m_renderViewRegistry's own
+    // member doc comment there).
+    , m_renderViewRegistry(m_renderer)
     // better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
     // `, m_pluginRenderOperationRegistry(m_renderer)` removed - that member
     // (and its type) are deleted outright this phase (ABI-only).
@@ -355,6 +360,30 @@ void Core::RegisterProjectRenderPassProvider(const char* debugName, rg::Provider
 void Core::UnregisterProjectRenderPassProvider(const char* debugName)
 {
     m_offscreenRenderPipeline.Unregister(debugName);
+}
+
+// better-render-pass-3 campaign, BLOCK 2 (Arbitrary Render Views) - thin
+// pass-throughs into m_renderViewRegistry. `depthOnly` (default false)
+// translates to RenderViewDesc{ hasColor = !depthOnly, hasDepth = true } -
+// a depth-only view always keeps its depth half and never allocates a
+// color image (RenderTexture's own createColorImage constructor
+// parameter, PHASE1). See Core.h's own doc comment on
+// CreateRenderView()/FindRenderViewTarget() for the full "why
+// RegisterProjectRenderPassProvider(), never AddScreenPostProcessPass()"
+// reasoning the writer pass itself must follow.
+rg::RenderViewId Core::CreateRenderView(const char* name, std::uint32_t width, std::uint32_t height, bool depthOnly)
+{
+    RenderViewDesc desc;
+    desc.width = width;
+    desc.height = height;
+    desc.hasColor = !depthOnly;
+    desc.hasDepth = true;
+    return m_renderViewRegistry.CreateOrGetView(name, desc);
+}
+
+RenderTexture* Core::FindRenderViewTarget(rg::RenderViewId view) const noexcept
+{
+    return m_renderViewRegistry.FindViewTarget(view);
 }
 
 // editor-core-separation-23 campaign, PHASE3
