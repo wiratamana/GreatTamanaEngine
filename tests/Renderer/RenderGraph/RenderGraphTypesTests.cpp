@@ -160,6 +160,76 @@ TEST(RenderGraphDescTest, TextureDescsDifferingInHasDepthCompareUnequal)
     EXPECT_FALSE(a == b);
 }
 
+// --- TextureUsage / TextureDesc::usage (better-render-pass-1 campaign,
+// PHASE8 - PHASE8_TEXTUREDESC_USAGE_FIELD_AND_RESOURCE_POOL_AUDIT.md, R5)
+// ---------------------------------------------------------------------------
+
+TEST(RenderGraphTextureUsageTest, DefaultIsNone)
+{
+    EXPECT_EQ(TextureUsage::None, TextureUsage{});
+}
+
+TEST(RenderGraphTextureUsageTest, OrCombinesDistinctBits)
+{
+    const TextureUsage combined = TextureUsage::Storage | TextureUsage::TransferSrc;
+    EXPECT_TRUE(HasFlag(combined, TextureUsage::Storage));
+    EXPECT_TRUE(HasFlag(combined, TextureUsage::TransferSrc));
+    EXPECT_FALSE(HasFlag(combined, TextureUsage::TransferDst));
+    EXPECT_FALSE(HasFlag(combined, TextureUsage::Sampled));
+}
+
+TEST(RenderGraphTextureUsageTest, OrAssignMutatesInPlace)
+{
+    TextureUsage usage = TextureUsage::Sampled;
+    usage |= TextureUsage::Storage;
+    EXPECT_TRUE(HasFlag(usage, TextureUsage::Sampled));
+    EXPECT_TRUE(HasFlag(usage, TextureUsage::Storage));
+}
+
+TEST(RenderGraphTextureUsageTest, HasFlagIsFalseForNoneAgainstAnyRealBit)
+{
+    EXPECT_FALSE(HasFlag(TextureUsage::None, TextureUsage::Storage));
+    EXPECT_FALSE(HasFlag(TextureUsage::None, TextureUsage::Sampled));
+    EXPECT_FALSE(HasFlag(TextureUsage::None, TextureUsage::TransferSrc));
+    EXPECT_FALSE(HasFlag(TextureUsage::None, TextureUsage::TransferDst));
+}
+
+// This is the core pooling-safety property this whole phase exists to
+// guarantee - two TextureDesc values differing ONLY in `usage` must compare
+// UNEQUAL, so RenderGraphResourcePool::AcquireTexture() never silently
+// hands a non-storage-capable pooled entry back to a caller that asked for
+// TextureUsage::Storage (or vice versa).
+TEST(RenderGraphDescTest, TextureDescsDifferingOnlyInUsageCompareUnequal)
+{
+    TextureDesc a{ 1920, 1080, VK_FORMAT_R8G8B8A8_UNORM, true };
+    a.usage = TextureUsage::None;
+    TextureDesc b{ 1920, 1080, VK_FORMAT_R8G8B8A8_UNORM, true };
+    b.usage = TextureUsage::Storage;
+    EXPECT_FALSE(a == b);
+}
+
+TEST(RenderGraphDescTest, TextureDescsWithIdenticalUsageCompareEqual)
+{
+    TextureDesc a{ 1920, 1080, VK_FORMAT_R8G8B8A8_UNORM, true };
+    a.usage = TextureUsage::Storage;
+    TextureDesc b{ 1920, 1080, VK_FORMAT_R8G8B8A8_UNORM, true };
+    b.usage = TextureUsage::Storage;
+    EXPECT_TRUE(a == b);
+}
+
+// No existing test in this suite covers a plain default-constructed
+// TextureDesc at all (confirmed by direct reading before this phase) - add
+// one here, asserting every field's default, not just the new `usage` one.
+TEST(RenderGraphDescTest, DefaultConstructedTextureDescHasExpectedDefaults)
+{
+    const TextureDesc desc{};
+    EXPECT_EQ(desc.width, 0u);
+    EXPECT_EQ(desc.height, 0u);
+    EXPECT_EQ(desc.format, VK_FORMAT_UNDEFINED);
+    EXPECT_FALSE(desc.hasDepth);
+    EXPECT_EQ(desc.usage, TextureUsage::None);
+}
+
 // v2 regression test: this exact class of struct used to (v1) carry a
 // `debugName` field compared by raw pointer identity - two structurally
 // identical descs built from entirely separate, non-string-literal-folded

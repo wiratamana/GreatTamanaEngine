@@ -247,6 +247,67 @@ bool IsWriteAccess(ResourceAccess access) noexcept;
 // nullptr.
 const char* ToString(ResourceAccess access) noexcept;
 
+// --- TextureUsage ---------------------------------------------------------
+//
+// better-render-pass-1 campaign, PHASE8
+// (PHASE8_TEXTUREDESC_USAGE_FIELD_AND_RESOURCE_POOL_AUDIT.md, R5) - a
+// VkFlags-shaped bitmask describing what a TextureDesc-declared (transient/
+// pooled) texture may be used FOR, mirroring ResourceAccess's own "named
+// after WHAT THEY DO" convention immediately above. `Sampled` is the
+// real-world default-equivalent meaning every RenderTexture already has
+// unconditionally today (VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+// VK_IMAGE_USAGE_SAMPLED_BIT, see RenderTexture::Create()) - it carries no
+// separate CreateRenderTexture() plumbing of its own, it exists purely so
+// `TextureUsage::None` (the universal default) is distinguishable from "I
+// explicitly want a plain sampled texture" in caller code, if that
+// distinction is ever useful. `Storage` is the one bit genuinely wired all
+// the way through today - RenderGraphResourcePool::AcquireTexture() (see
+// RenderGraphResourcePool.cpp) translates HasFlag(desc.usage,
+// TextureUsage::Storage) into Renderer::CreateRenderTexture()'s own
+// `allowStorageImageAccess` parameter, making a genuinely TRANSIENT/pooled
+// `RWTexture` possible for the first time (closing
+// COMPUTE_SHADER_FEATURES_DELIBERATELY_NOT_IMPLEMENTED.md's Section A.6/C.2
+// gap). `TransferSrc`/`TransferDst` are added now purely as vocabulary for a
+// FUTURE phase/campaign - confirmed, by direct reading of
+// RenderTexture::Create(), that `imageInfo.usage` never includes
+// VK_IMAGE_USAGE_TRANSFER_SRC_BIT/_DST_BIT under any condition today, and
+// this engine's one real AddBlitPass() consumer (src/Editor/BlitValidation.cpp)
+// always blits between directly-owned, imported RenderTexture instances,
+// never a pooled/TextureDesc-driven builder.CreateTexture() resource - so
+// these two bits have ZERO wired CreateRenderTexture() plumbing behind them
+// yet; a future pass needing to blit into a pooled resource would need to
+// add that plumbing then, mirroring how Storage/allowStorageImageAccess
+// already works.
+enum class TextureUsage : std::uint32_t {
+    None = 0,
+    Sampled = 1u << 0,
+    Storage = 1u << 1,
+    // NOT YET WIRED into RenderTexture::Create()'s own image-usage flags -
+    // no CreateRenderTexture() parameter accepts this yet. See this enum's
+    // own doc comment above for the full reasoning.
+    TransferSrc = 1u << 2,
+    // NOT YET WIRED into RenderTexture::Create()'s own image-usage flags -
+    // no CreateRenderTexture() parameter accepts this yet. See this enum's
+    // own doc comment above for the full reasoning.
+    TransferDst = 1u << 3,
+};
+
+constexpr TextureUsage operator|(TextureUsage a, TextureUsage b) noexcept
+{
+    return static_cast<TextureUsage>(static_cast<std::uint32_t>(a) | static_cast<std::uint32_t>(b));
+}
+
+constexpr TextureUsage& operator|=(TextureUsage& a, TextureUsage b) noexcept
+{
+    a = a | b;
+    return a;
+}
+
+constexpr bool HasFlag(TextureUsage value, TextureUsage flag) noexcept
+{
+    return (static_cast<std::uint32_t>(value) & static_cast<std::uint32_t>(flag)) != 0u;
+}
+
 // --- Resource descriptors ------------------------------------------------
 //
 // The "what do you want," independent of "what you got" - Phase 4's
@@ -287,6 +348,15 @@ struct TextureDesc {
     // Whether this logical resource also carries a companion DepthBuffer,
     // mirroring RenderTexture's own shape (see src/Renderer/RenderTexture.h).
     bool hasDepth = false;
+    // better-render-pass-1 campaign, PHASE8
+    // (PHASE8_TEXTUREDESC_USAGE_FIELD_AND_RESOURCE_POOL_AUDIT.md, R5) -
+    // appended at the END per this struct's own universal field-append
+    // rule, genuinely belongs here per the "standing rule" comment above:
+    // a storage-capable image and a non-storage image are NOT
+    // Vulkan-interchangeable, so `usage` genuinely changes whether two
+    // requests can share one physical allocation. Compared automatically by
+    // the `= default` operator== below, exactly like `hasDepth` already is.
+    TextureUsage usage = TextureUsage::None;
 
     friend bool operator==(const TextureDesc&, const TextureDesc&) noexcept = default;
 };
