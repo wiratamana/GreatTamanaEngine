@@ -424,4 +424,185 @@ TEST(ProjectAssemblyRegistrationLedgerTest, UnregisterEverythingForTearsDownBoth
     EXPECT_TRUE(afterUnregister.renderPassNames.empty());
 }
 
+// PostOpaque/PostTransparent sibling of
+// BeginRecordThenEndCapturesPanelComponentTypeAndRenderFeatureUnderTheActiveProject
+// above - RecordPostOpaqueFeature()/RecordPostTransparentFeature() correctly
+// append to Entry::postOpaqueFeatureNames/postTransparentFeatureNames only
+// while a BeginRecordingFor() bracket is active.
+TEST(ProjectAssemblyRegistrationLedgerTest, RecordPostOpaqueAndPostTransparentFeatureUnderTheActiveProject)
+{
+    ProjectAssemblyRegistrationLedger& ledger = ProjectAssemblyRegistrationLedger::Instance();
+
+    ledger.BeginRecordingFor("LedgerTestProject_Theta_PostStages");
+    ledger.RecordPostOpaqueFeature("LedgerTestProject_Theta_PostOpaqueA");
+    ledger.RecordPostTransparentFeature("LedgerTestProject_Theta_PostTransparentA");
+    ledger.EndRecording();
+
+    const ProjectAssemblyRegistrationLedger::Entry entry = ledger.PeekEntry("LedgerTestProject_Theta_PostStages");
+    ASSERT_EQ(entry.postOpaqueFeatureNames.size(), 1u);
+    EXPECT_EQ(entry.postOpaqueFeatureNames[0], "LedgerTestProject_Theta_PostOpaqueA");
+    ASSERT_EQ(entry.postTransparentFeatureNames.size(), 1u);
+    EXPECT_EQ(entry.postTransparentFeatureNames[0], "LedgerTestProject_Theta_PostTransparentA");
+}
+
+// Mirrors RecordPanelAndRenderFeatureWithNoActiveBracketAreSilentlyIgnored's
+// own "stray, ignored outside the bracket" shape for the two new categories.
+TEST(ProjectAssemblyRegistrationLedgerTest, RecordPostOpaqueAndPostTransparentFeatureWithNoActiveBracketAreSilentlyIgnored)
+{
+    ProjectAssemblyRegistrationLedger& ledger = ProjectAssemblyRegistrationLedger::Instance();
+
+    ledger.RecordPostOpaqueFeature("LedgerTestProject_ShouldBeIgnored_PostOpaqueName");
+    ledger.RecordPostTransparentFeature("LedgerTestProject_ShouldBeIgnored_PostTransparentName");
+
+    const ProjectAssemblyRegistrationLedger::Entry strayPostOpaque =
+        ledger.PeekEntry("LedgerTestProject_ShouldBeIgnored_PostOpaqueName");
+    EXPECT_TRUE(strayPostOpaque.postOpaqueFeatureNames.empty());
+    const ProjectAssemblyRegistrationLedger::Entry strayPostTransparent =
+        ledger.PeekEntry("LedgerTestProject_ShouldBeIgnored_PostTransparentName");
+    EXPECT_TRUE(strayPostTransparent.postTransparentFeatureNames.empty());
+
+    ledger.BeginRecordingFor("LedgerTestProject_Iota");
+    ledger.EndRecording();
+    const ProjectAssemblyRegistrationLedger::Entry iota = ledger.PeekEntry("LedgerTestProject_Iota");
+    EXPECT_TRUE(iota.postOpaqueFeatureNames.empty());
+    EXPECT_TRUE(iota.postTransparentFeatureNames.empty());
+}
+
+// PeekEntry() for a never-loaded project reports genuinely empty lists for
+// both new categories too.
+TEST(ProjectAssemblyRegistrationLedgerTest, PeekEntryReportsEmptyPostOpaqueAndPostTransparentListsForANeverLoadedProject)
+{
+    const ProjectAssemblyRegistrationLedger::Entry entry =
+        ProjectAssemblyRegistrationLedger::Instance().PeekEntry("LedgerTestProject_NeverLoaded_PostStagesPeek");
+    EXPECT_TRUE(entry.postOpaqueFeatureNames.empty());
+    EXPECT_TRUE(entry.postTransparentFeatureNames.empty());
+}
+
+// The full round trip through a real Core::AddPostOpaquePass()/
+// AddPostTransparentPass() registration, mirroring
+// FullRoundTripThroughARealPreOpaqueFeatureRegistrationProvesTheWholeWiring's
+// own shape - proves UnregisterEverythingFor() genuinely reaches
+// RenderFeatureCompositor::UnregisterPostOpaqueFeature()/
+// UnregisterPostTransparentFeature(), not merely clears the ledger's own
+// bookkeeping.
+TEST(ProjectAssemblyRegistrationLedgerTest, FullRoundTripThroughARealPostOpaqueAndPostTransparentFeatureRegistrationProvesTheWholeWiring)
+{
+    HeadlessSurfaceProvider surfaceProvider;
+    NoopHostServices hostServices;
+
+    std::unique_ptr<Core> core;
+    try {
+        core = std::make_unique<Core>(surfaceProvider, hostServices);
+    } catch (const std::exception& e) {
+        GTEST_SKIP() << "Core construction needs a real, valid VkSurfaceKHR - this machine's Vulkan "
+                        "driver/loader apparently does not support VK_EXT_headless_surface (see "
+                        "HeadlessSurfaceProvider.h's own top-of-file comment). Real failure: "
+                     << e.what();
+    }
+    ASSERT_NE(core, nullptr);
+
+    const std::string projectName = "LedgerTestProject_Kappa_PostStagesRoundTrip";
+    const std::string postOpaqueFeatureName = "LedgerTestProject_Kappa_PostOpaqueFeature";
+    const std::string postTransparentFeatureName = "LedgerTestProject_Kappa_PostTransparentFeature";
+
+    ProjectAssemblyRegistrationLedger& ledger = ProjectAssemblyRegistrationLedger::Instance();
+
+    ledger.BeginRecordingFor(projectName);
+    const bool postOpaqueRegistered = core->AddPostOpaquePass(postOpaqueFeatureName.c_str(),
+        [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { });
+    const bool postTransparentRegistered = core->AddPostTransparentPass(postTransparentFeatureName.c_str(),
+        [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { });
+    ledger.EndRecording();
+    ASSERT_TRUE(postOpaqueRegistered);
+    ASSERT_TRUE(postTransparentRegistered);
+
+    RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
+    ASSERT_NE(compositor, nullptr);
+    ASSERT_NE(FindByName(compositor->DebugSnapshot(), postOpaqueFeatureName), nullptr);
+    ASSERT_NE(FindByName(compositor->DebugSnapshot(), postTransparentFeatureName), nullptr);
+
+    const ProjectAssemblyRegistrationLedger::Entry beforeUnregister = ledger.PeekEntry(projectName);
+    ASSERT_EQ(beforeUnregister.postOpaqueFeatureNames.size(), 1u);
+    EXPECT_EQ(beforeUnregister.postOpaqueFeatureNames[0], postOpaqueFeatureName);
+    ASSERT_EQ(beforeUnregister.postTransparentFeatureNames.size(), 1u);
+    EXPECT_EQ(beforeUnregister.postTransparentFeatureNames[0], postTransparentFeatureName);
+
+    ledger.UnregisterEverythingFor(projectName, *core);
+
+    EXPECT_EQ(FindByName(compositor->DebugSnapshot(), postOpaqueFeatureName), nullptr);
+    EXPECT_EQ(FindByName(compositor->DebugSnapshot(), postTransparentFeatureName), nullptr);
+    const ProjectAssemblyRegistrationLedger::Entry afterUnregister = ledger.PeekEntry(projectName);
+    EXPECT_TRUE(afterUnregister.postOpaqueFeatureNames.empty());
+    EXPECT_TRUE(afterUnregister.postTransparentFeatureNames.empty());
+}
+
+// The teardown ORDER itself - registers a fake render feature
+// (renderFeatureNames), a fake PostOpaque feature (postOpaqueFeatureNames),
+// and a fake render pass (renderPassNames) under the same bracket, then
+// confirms UnregisterEverythingFor() removes all three cleanly. Directly
+// observing "PostOpaque torn down strictly after renderFeatureNames and
+// strictly before renderPassNames" from outside this class is impractical
+// (none of UnregisterProjectFeature()/UnregisterPostOpaqueFeature()/
+// UnregisterProjectRenderPassProvider() invoke their own owning
+// callback/provider on teardown, so there is no externally-observable side
+// effect to hook) - mirrors
+// UnregisterEverythingForTearsDownBothRenderFeatureAndRenderPassProviderCleanly's
+// own documented fallback exactly: the real execution-order guarantee is
+// confirmed by direct code review of
+// ProjectAssemblyRegistrationLedger.cpp's own UnregisterEverythingFor() body
+// (the renderFeatureNames loop appears strictly before the
+// postOpaqueFeatureNames/postTransparentFeatureNames loops, which appear
+// strictly before the renderPassNames loop, in source order).
+TEST(ProjectAssemblyRegistrationLedgerTest, UnregisterEverythingForTearsDownRenderFeaturePostOpaqueAndRenderPassProviderCleanly)
+{
+    HeadlessSurfaceProvider surfaceProvider;
+    NoopHostServices hostServices;
+
+    std::unique_ptr<Core> core;
+    try {
+        core = std::make_unique<Core>(surfaceProvider, hostServices);
+    } catch (const std::exception& e) {
+        GTEST_SKIP() << "Core construction needs a real, valid VkSurfaceKHR - this machine's Vulkan "
+                        "driver/loader apparently does not support VK_EXT_headless_surface (see "
+                        "HeadlessSurfaceProvider.h's own top-of-file comment). Real failure: "
+                     << e.what();
+    }
+    ASSERT_NE(core, nullptr);
+
+    const std::string projectName = "LedgerTestProject_Lambda_PostOpaqueOrderingProof";
+    const std::string renderFeatureName = "LedgerTestProject_Lambda_OrderingProof_RenderFeature";
+    const std::string postOpaqueFeatureName = "LedgerTestProject_Lambda_OrderingProof_PostOpaqueFeature";
+    const std::string renderPassName = "LedgerTestProject_Lambda_OrderingProof_Pass";
+
+    ProjectAssemblyRegistrationLedger& ledger = ProjectAssemblyRegistrationLedger::Instance();
+
+    ledger.BeginRecordingFor(projectName);
+    ASSERT_TRUE(core->RegisterProjectRenderFeature(renderFeatureName.c_str(), RenderFeatureStage::PostComposite,
+        RenderFeatureBlendMode::Replace, 0, [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { }));
+    ASSERT_TRUE(core->AddPostOpaquePass(postOpaqueFeatureName.c_str(),
+        [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
+    core->RegisterProjectRenderPassProvider(renderPassName.c_str(), rg::ProviderScope::Once,
+        [](const rg::RenderPassFrameContext&, std::vector<rg::RenderPassDesc>&) { });
+    ledger.EndRecording();
+
+    const ProjectAssemblyRegistrationLedger::Entry beforeUnregister = ledger.PeekEntry(projectName);
+    ASSERT_EQ(beforeUnregister.renderFeatureNames.size(), 1u);
+    ASSERT_EQ(beforeUnregister.postOpaqueFeatureNames.size(), 1u);
+    ASSERT_EQ(beforeUnregister.renderPassNames.size(), 1u);
+
+    RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
+    ASSERT_NE(compositor, nullptr);
+    ASSERT_NE(FindByName(compositor->DebugSnapshot(), renderFeatureName), nullptr);
+    ASSERT_NE(FindByName(compositor->DebugSnapshot(), postOpaqueFeatureName), nullptr);
+
+    ledger.UnregisterEverythingFor(projectName, *core);
+
+    EXPECT_EQ(FindByName(compositor->DebugSnapshot(), renderFeatureName), nullptr);
+    EXPECT_EQ(FindByName(compositor->DebugSnapshot(), postOpaqueFeatureName), nullptr);
+    const ProjectAssemblyRegistrationLedger::Entry afterUnregister = ledger.PeekEntry(projectName);
+    EXPECT_TRUE(afterUnregister.renderFeatureNames.empty());
+    EXPECT_TRUE(afterUnregister.postOpaqueFeatureNames.empty());
+    EXPECT_TRUE(afterUnregister.renderPassNames.empty());
+}
+
 } // namespace gte

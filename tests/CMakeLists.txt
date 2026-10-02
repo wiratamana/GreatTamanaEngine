@@ -2212,6 +2212,23 @@ set(GTE_TEST_SOURCES
     # src/Core/Plugins/RenderFeatureCompositor.h/.cpp is unconditionally
     # in gte_core's own source list.
     Core/Plugins/RenderFeatureCompositorPreOpaqueTests.cpp
+    # Tier-1 tests for RenderFeatureCompositor::RegisterPostOpaqueFeature()/
+    # UnregisterPostOpaqueFeature() and RegisterPostTransparentFeature()/
+    # UnregisterPostTransparentFeature(), mirroring
+    # RenderFeatureCompositorPreOpaqueTests.cpp's own shape. Unconditional,
+    # since src/Core/Plugins/RenderFeatureCompositor.h/.cpp is
+    # unconditionally in gte_core's own source list.
+    Core/Plugins/RenderFeatureCompositorPostOpaqueTests.cpp
+    Core/Plugins/RenderFeatureCompositorPostTransparentTests.cpp
+    # A dedicated Tier-1 test proving all five RenderFeatureCompositor
+    # registration stages genuinely share one global feature-name namespace,
+    # in every ordered direction. Unconditional, for the same reason as the
+    # two files immediately above.
+    Core/Plugins/RenderFeatureCompositorFiveStageNamespaceTests.cpp
+    # Tier-1 tests proving the PostOpaque/PostTransparent enabledOverride
+    # host-side toggle genuinely skips a feature's own callback at runtime.
+    # Unconditional, for the same reason as the files immediately above.
+    Core/Plugins/RenderFeatureCompositorPostStageRuntimeToggleTests.cpp
     # Trivial standalone-compile proof for the new
     # src/Core/Plugins/ProjectScenePassCallback.h header. Unconditional,
     # since that header is unconditionally in gte_core's own source list.
@@ -2234,6 +2251,13 @@ set(GTE_TEST_SOURCES
     # pass-through API. Unconditional, since src/Core/Core.h/.cpp is
     # unconditionally in gte_core's own source list.
     Core/AddPreOpaquePassApiTests.cpp
+    # Tier-1 tests for the new Core::AddPostOpaquePass()/RemovePostOpaquePass()
+    # and Core::AddPostTransparentPass()/RemovePostTransparentPass() thin
+    # pass-through APIs, mirroring AddPreOpaquePassApiTests.cpp's own shape.
+    # Unconditional, since src/Core/Core.h/.cpp is unconditionally in
+    # gte_core's own source list.
+    Core/AddPostOpaquePassApiTests.cpp
+    Core/AddPostTransparentPassApiTests.cpp
     # better-render-pass-1 campaign, PHASE9 (Part B, Decision D3, Step 5) -
     # Tier-1 tests for the new, pure
     # NextAutoScreenPostProcessPassPriority() counter-increment helper
@@ -2333,6 +2357,12 @@ set(GTE_TEST_SOURCES
     # src/Renderer/RenderGraph/RenderGraphBuilder.h/.cpp are unconditionally
     # in gte_core's own source list.
     Renderer/RenderGraph/ScenePassSafetyNetTests.cpp
+    # Tier-1 tests for the PostOpaque/PostTransparent stage ordering
+    # guarantee and runtime safety net, mirroring
+    # PreOpaqueStageOrderingTests.cpp's own shape. Unconditional, for the
+    # same reason as that file.
+    Renderer/RenderGraph/PostOpaqueStageOrderingTests.cpp
+    Renderer/RenderGraph/PostTransparentStageOrderingTests.cpp
     Renderer/RenderGraph/RenderGraphBarrierPlannerTests.cpp
     Renderer/RenderGraph/RenderGraphNameSlotTableTests.cpp
     # task_manager/better-render-pass-1 campaign, PHASE1
@@ -2371,6 +2401,10 @@ set(GTE_TEST_SOURCES
     # qualification guarantee, driven entirely through rg::RenderPipeline/
     # RenderGraphBuilder/RenderPassBlackboard with no live Vulkan device.
     Renderer/RenderGraph/PreOpaqueRenderPipelineBlackboardQualificationTests.cpp
+    # The PostOpaque/PostTransparent sibling of the test immediately above -
+    # the same per-view Blackboard qualification guarantee, for both new
+    # stages, combined into one file.
+    Renderer/RenderGraph/PostOpaqueRenderPipelineBlackboardQualificationTests.cpp
     Renderer/RenderGraph/RenderPassToggleRegistryTests.cpp
     Renderer/RenderGraph/RenderPassGroupRegistryTests.cpp
     Renderer/RenderGraph/RenderPassToggleChangeDetectionLogicTests.cpp
