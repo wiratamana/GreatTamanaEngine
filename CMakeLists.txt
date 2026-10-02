@@ -707,6 +707,12 @@ add_library(gte_core STATIC
     src/Renderer/ComputePipeline.h
     src/Renderer/ComputeDescriptorSet.cpp
     src/Renderer/ComputeDescriptorSet.h
+    # Block 4 "Global Scene Services Descriptor Set" campaign
+    # (task_manager/better-render-pass-6), PHASE1 - pure-logic
+    # SceneServiceSlot/SceneServiceResourceKind/SceneServiceBlackboardKey()
+    # vocabulary; the full SceneServicesDescriptorSet class is added by PHASE2.
+    src/Renderer/SceneServicesDescriptorSet.cpp
+    src/Renderer/SceneServicesDescriptorSet.h
     src/Renderer/ComputeDispatch.h
     src/Renderer/Vertex.h
     src/Renderer/MeshVertex.h

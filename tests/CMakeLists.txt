@@ -2346,6 +2346,10 @@ set(GTE_TEST_SOURCES
     Renderer/RenderGraph/RenderGraphDebugTextureRegistryTests.cpp
     Renderer/RenderGraph/RenderGraphDebugVolumeTextureRegistryTests.cpp
     Renderer/RenderGraph/RenderPipelineTests.cpp
+    # Block 4 "Global Scene Services Descriptor Set" campaign
+    # (task_manager/better-render-pass-6), PHASE1 - pure-logic distinctness
+    # test for SceneServiceBlackboardKey() (src/Renderer/SceneServicesDescriptorSet.h).
+    Renderer/SceneServicesDescriptorSetTests.cpp
     # better-render-pass-5 effort, BLOCK 3, PHASE6 - the extra,
     # user-requested Tier-1 in-process proof of the per-view Blackboard
     # qualification guarantee, driven entirely through rg::RenderPipeline/

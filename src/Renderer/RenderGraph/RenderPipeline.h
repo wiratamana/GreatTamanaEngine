@@ -168,6 +168,14 @@ public:
 
     bool operator==(const RenderViewId&) const noexcept = default;
 
+    // Block 4 (task_manager/better-render-pass-6) - a read-only accessor onto
+    // this class's own opaque hash, needed by SceneServiceBlackboardKey()
+    // (Renderer/SceneServicesDescriptorSet.h) to fold a view's identity into a
+    // per-(slot, view) RenderPassBlackboard key. Purely additive - changes
+    // nothing about RenderViewId's existing equality semantics or Shared()/
+    // Named() factories.
+    std::uint64_t Hash() const noexcept { return m_hash; }
+
 private:
     std::uint64_t m_hash = 0;
 };
