@@ -1,5 +1,6 @@
 #include "GpuResourceFactory.h"
 
+#include "SceneServicesDescriptorSet.h" // Block 4 - gte::kSceneServiceSlotCount, for this file's own static_asserts.
 #include "Vulkan/DescriptorSetLayoutBuilder.h"
 #include "Vulkan/FormatCapabilities.h"
 
@@ -83,6 +84,20 @@ GpuResourceFactory::GpuResourceFactory(VkPhysicalDevice physicalDevice, VkDevice
     constexpr std::uint32_t kMaxComputeStorageImages = 128;
     constexpr std::uint32_t kMaxComputeCombinedImageSamplers = 128;
     constexpr std::uint32_t kMaxComputeDescriptorSets = 256;
+
+    // Block 4 "Global Scene Services Descriptor Set"
+    // (task_manager/better-render-pass-6) - SceneServicesDescriptorSet
+    // allocates kSceneServiceSlotCount (8) COMBINED_IMAGE_SAMPLER descriptors
+    // PER concurrently-tracked render view (today: Game + Scene = 2), plus one
+    // whole VkDescriptorSet per view, from this SAME shared pool. A cheap,
+    // compiler-checked first line of defense for TODAY's own numbers only -
+    // re-derive by hand whenever slot count, tracked-view count, or
+    // GPU-driven-batch descriptor consumption sharing this pool actually grows.
+    static_assert(gte::kSceneServiceSlotCount * 2 <= kMaxComputeCombinedImageSamplers,
+        "SceneServicesDescriptorSet: 2 known views * 8 slots must fit the shared compute-descriptor-sampler budget.");
+    static_assert(2 <= kMaxComputeDescriptorSets,
+        "SceneServicesDescriptorSet: at least 2 concurrently-tracked views (Game, Scene) must fit the shared "
+        "compute-descriptor-set budget.");
 
     VkDescriptorPoolSize computePoolSizes[3]{};
     computePoolSizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;

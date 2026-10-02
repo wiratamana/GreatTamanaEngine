@@ -1,15 +1,27 @@
 // Unit tests for Block 4 "Global Scene Services Descriptor Set" campaign
-// (task_manager/better-render-pass-6), PHASE1
+// (task_manager/better-render-pass-6). PHASE1
 // (PHASE1_SCENE_SERVICE_TYPES_AND_BLACKBOARD_KEY.md) -
 // SceneServiceBlackboardKey()'s per-(slot, view) distinctness guarantee.
 // Entirely Tier-1 - no live VkDevice needed, mirroring
 // Renderer/RenderGraph/RenderPipelineTests.cpp's own established style (a
 // real rg::RenderViewId with zero Vulkan device involved).
+//
+// PHASE2 (PHASE2_SCENE_SERVICES_DESCRIPTOR_SET_CLASS.md) EXTENDS this SAME
+// file with real, Tier-2 (live headless VkDevice) integration tests for the
+// SceneServicesDescriptorSet CLASS itself, using the SAME
+// HeadlessRenderGraphFixture (tests/Fakes/HeadlessRenderGraphFixture.h)
+// every other real-device Renderer/RenderGraph test in this codebase already
+// uses - GTEST_SKIP()-guarded exactly like every other HeadlessSurfaceProvider
+// consumer whenever this machine's Vulkan driver/loader doesn't report
+// VK_EXT_headless_surface.
 
 #include "Renderer/SceneServicesDescriptorSet.h"
 
+#include "../Fakes/HeadlessRenderGraphFixture.h"
+
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -86,6 +98,90 @@ TEST(SceneServiceSlotResourceKindTest, OnlyVolumetricFogIsImage3D)
         const auto slot = static_cast<SceneServiceSlot>(slotIndex);
         EXPECT_EQ(SceneServiceSlotResourceKind(slot), SceneServiceResourceKind::Image2D);
     }
+}
+
+// --- PHASE2 (PHASE2_SCENE_SERVICES_DESCRIPTOR_SET_CLASS.md) ---------------
+//
+// Real, Tier-2 integration tests for the SceneServicesDescriptorSet class
+// itself, against a real headless VkDevice (HeadlessRenderGraphFixture).
+
+// 1. Construct a real SceneServicesDescriptorSet, Rewrite() for one view
+// with every slot left all-defaulted (VK_NULL_HANDLE/VK_NULL_HANDLE) -
+// confirms the returned VkDescriptorSet is non-null, and that the real,
+// uploaded dummy resources themselves are valid/non-null and correctly
+// typed (see this phase's own "Testability correction" for why this is the
+// buildable equivalent of the source spec's Section 6 item 2 - there is no
+// live-descriptor-set-introspection mechanism to use instead).
+TEST(SceneServicesDescriptorSetTest, RewriteWithAllDefaultedSlotsReturnsAValidSetBackedByRealDummies)
+{
+    HeadlessRenderGraphFixture fixture;
+    if (!fixture.IsUsable()) {
+        GTEST_SKIP() << fixture.SkipReason();
+    }
+
+    SceneServicesDescriptorSet sceneServices(fixture.GetRenderer());
+
+    std::array<SceneServicesDescriptorSet::ResolvedSlot, kSceneServiceSlotCount> resolved{};
+    const VkDescriptorSet set = sceneServices.Rewrite(rg::RenderViewId::Named("Game"), resolved);
+
+    EXPECT_NE(set, static_cast<VkDescriptorSet>(VK_NULL_HANDLE));
+
+    EXPECT_NE(sceneServices.DummyImage2DTextureFor(SceneServiceSlot::ShadowMap).View(),
+        static_cast<VkImageView>(VK_NULL_HANDLE));
+    EXPECT_NE(sceneServices.DummyImage2DTextureFor(SceneServiceSlot::ShadowMap).Sampler(),
+        static_cast<VkSampler>(VK_NULL_HANDLE));
+    EXPECT_NE(sceneServices.DummyImage2DTextureFor(SceneServiceSlot::GIVolume).View(),
+        static_cast<VkImageView>(VK_NULL_HANDLE));
+
+    EXPECT_NE(sceneServices.DummyVolumetricFogTexture().View(), static_cast<VkImageView>(VK_NULL_HANDLE));
+    EXPECT_NE(sceneServices.DummyVolumetricFogTexture().Sampler(), static_cast<VkSampler>(VK_NULL_HANDLE));
+    // Proof it is genuinely a real, 1x1x1 3D volume, not a 2D texture
+    // masquerading as one - no Vulkan-level image-type query is even
+    // necessary once the test holds a true const VolumeTexture&.
+    EXPECT_EQ(sceneServices.DummyVolumetricFogTexture().Depth(), 1);
+}
+
+// 2. Two different views, two different resolved inputs, two different
+// VkDescriptorSet handles - PHASE0's global rule 5 (one VkDescriptorSet PER
+// concurrently-active rg::RenderViewId, never one shared instance), proven
+// as a plain handle-identity comparison.
+TEST(SceneServicesDescriptorSetTest, RewriteForTwoDifferentViewsProducesTwoDifferentDescriptorSets)
+{
+    HeadlessRenderGraphFixture fixture;
+    if (!fixture.IsUsable()) {
+        GTEST_SKIP() << fixture.SkipReason();
+    }
+
+    SceneServicesDescriptorSet sceneServices(fixture.GetRenderer());
+
+    std::array<SceneServicesDescriptorSet::ResolvedSlot, kSceneServiceSlotCount> resolvedA{};
+    std::array<SceneServicesDescriptorSet::ResolvedSlot, kSceneServiceSlotCount> resolvedB{};
+
+    const rg::RenderViewId viewA = rg::RenderViewId::Named("Game");
+    const rg::RenderViewId viewB = rg::RenderViewId::Named("Scene");
+
+    const VkDescriptorSet setA = sceneServices.Rewrite(viewA, resolvedA);
+    const VkDescriptorSet setB = sceneServices.Rewrite(viewB, resolvedB);
+
+    EXPECT_NE(setA, static_cast<VkDescriptorSet>(VK_NULL_HANDLE));
+    EXPECT_NE(setB, static_cast<VkDescriptorSet>(VK_NULL_HANDLE));
+    EXPECT_NE(sceneServices.DescriptorSetFor(viewA), sceneServices.DescriptorSetFor(viewB));
+    EXPECT_EQ(sceneServices.DescriptorSetFor(viewA), setA);
+    EXPECT_EQ(sceneServices.DescriptorSetFor(viewB), setB);
+}
+
+// 3. DescriptorSetFor() for a view Rewrite() was never called for reports
+// VK_NULL_HANDLE, not some stale/default value.
+TEST(SceneServicesDescriptorSetTest, DescriptorSetForAnUnseenViewIsNullHandle)
+{
+    HeadlessRenderGraphFixture fixture;
+    if (!fixture.IsUsable()) {
+        GTEST_SKIP() << fixture.SkipReason();
+    }
+
+    SceneServicesDescriptorSet sceneServices(fixture.GetRenderer());
+    EXPECT_EQ(sceneServices.DescriptorSetFor(rg::RenderViewId::Named("NeverRewritten")),
+        static_cast<VkDescriptorSet>(VK_NULL_HANDLE));
 }
 
 } // namespace

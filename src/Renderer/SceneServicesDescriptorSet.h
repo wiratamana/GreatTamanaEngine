@@ -8,15 +8,23 @@
 // SceneServiceSlot, its resource-kind classifier, and the per-(slot, view)
 // RenderPassBlackboard key function that lets a PreOpaque feature publish
 // data without colliding across concurrently-active render views (Game +
-// Scene, same frame). This phase is pure logic only - no Vulkan device
-// object is touched, no descriptor set is created yet; the full
-// SceneServicesDescriptorSet CLASS (owned layout, per-view VkDescriptorSets,
-// dummy fallback resources, Rewrite()/DescriptorSetFor()) is added by PHASE2
-// (PHASE2_SCENE_SERVICES_DESCRIPTOR_SET_CLASS.md).
+// Scene, same frame).
+//
+// PHASE2 (PHASE2_SCENE_SERVICES_DESCRIPTOR_SET_CLASS.md) EXTENDS this same
+// header with the real, owning SceneServicesDescriptorSet CLASS below - the
+// owned VkDescriptorSetLayout, per-view VkDescriptorSets, real uploaded
+// dummy fallback resources, and Rewrite()/DescriptorSetFor().
 
 #include "RenderGraph/RenderPipeline.h" // rg::RenderPassId, rg::RenderViewId
+#include "Texture2D.h"
+#include "VolumeTexture.h"
 
+#include <volk.h>
+
+#include <array>
 #include <cstdint>
+#include <unordered_map>
+#include <vector>
 
 namespace gte {
 
@@ -60,5 +68,74 @@ constexpr SceneServiceResourceKind SceneServiceSlotResourceKind(SceneServiceSlot
 // concurrently-active views (this engine always has Game+Scene active
 // together whenever the Editor is up) must never alias onto the same key.
 rg::RenderPassId SceneServiceBlackboardKey(SceneServiceSlot slot, rg::RenderViewId view) noexcept;
+
+class Renderer; // forward-declared only - the .cpp includes Renderer.h.
+
+// Owns ONE reserved "scene services" descriptor-set LAYOUT (set = 1 at the
+// Pipeline level - see Pipeline.h's own new sceneServicesSetLayout
+// constructor parameter, PHASE3) and ONE real VkDescriptorSet PER
+// concurrently-active rg::RenderViewId (never one shared instance - see
+// PHASE0's global rule 5 for why a shared set is unsafe with this engine's
+// confirmed same-frame Game+Scene dual-view rendering).
+class SceneServicesDescriptorSet {
+public:
+    explicit SceneServicesDescriptorSet(Renderer& renderer);
+    ~SceneServicesDescriptorSet();
+
+    SceneServicesDescriptorSet(const SceneServicesDescriptorSet&) = delete;
+    SceneServicesDescriptorSet& operator=(const SceneServicesDescriptorSet&) = delete;
+    // Core owns exactly ONE instance for its entire lifetime (mirrors
+    // RenderViewRegistry's own "create once, never torn down" convention) -
+    // move is intentionally NOT provided; add it later only if a genuine
+    // need arises, following Pipeline's own move-safety discipline exactly
+    // (see PHASE0 global rule 9) if that day comes.
+
+    VkDescriptorSetLayout Layout() const noexcept { return m_layout; }
+
+    struct ResolvedSlot {
+        VkImageView view = VK_NULL_HANDLE;
+        VkSampler sampler = VK_NULL_HANDLE;
+    };
+
+    // Rewrites (ONE vkUpdateDescriptorSets call) the VkDescriptorSet
+    // belonging to `view`, allocating/caching it on first use for that
+    // view. A slot counts as "really published this call" ONLY when BOTH
+    // resolved[slot].view AND .sampler are non-VK_NULL_HANDLE (PHASE0
+    // global rule 12 - an imported-texture-handle edge case can otherwise
+    // resolve a valid view with a null sampler) - every other slot gets
+    // this class's own dummy resource substituted in, selected via
+    // SceneServiceSlotResourceKind(slot). Call ONCE per view per frame,
+    // from inside the SAME pass's own execute() callback that is about to
+    // Submit() against it (see PHASE7) - never from outside a pass's
+    // execution window.
+    VkDescriptorSet Rewrite(rg::RenderViewId view, const std::array<ResolvedSlot, kSceneServiceSlotCount>& resolved);
+
+    // The most recent Rewrite()-produced VkDescriptorSet for `view`, or
+    // VK_NULL_HANDLE if Rewrite() was never called for that view yet.
+    VkDescriptorSet DescriptorSetFor(rg::RenderViewId view) const noexcept;
+
+    // Test-facing accessors - see this phase's own "Testability correction"
+    // (PHASE2_SCENE_SERVICES_DESCRIPTOR_SET_CLASS.md, Step 2) for why these
+    // exist instead of a live-descriptor-set-introspection helper.
+    const Texture2D& DummyImage2DTextureFor(SceneServiceSlot slot) const;
+    const VolumeTexture& DummyVolumetricFogTexture() const noexcept { return m_dummyVolumetricFogTexture; }
+
+private:
+    Renderer* m_renderer = nullptr;
+    VkDevice m_device = VK_NULL_HANDLE; // cached at construction, for Destroy().
+    VkDescriptorSetLayout m_layout = VK_NULL_HANDLE; // owned - hand-built, NOT reflected; must be destroyed by this class.
+
+    struct PerViewSet {
+        rg::RenderViewId view;
+        VkDescriptorSet set = VK_NULL_HANDLE;
+    };
+    std::vector<PerViewSet> m_perViewSets;
+
+    // Deliberately TWO SEPARATE, correctly-typed dummy containers - see
+    // PHASE0 global rule 4. Keyed by raw slot index; the one Image3D slot
+    // (VolumetricFog) is never populated in this map.
+    std::unordered_map<std::uint32_t, Texture2D> m_dummyImage2DTextures;
+    VolumeTexture m_dummyVolumetricFogTexture;
+};
 
 } // namespace gte
