@@ -671,8 +671,125 @@ core.AddPreOpaquePass(
     /*priority=*/0);
 ```
 
-`PostOpaque`/`PostTransparent` remain fully unwired — declaring either
-one, through any entry point, is still refused loudly.
+### PostOpaque / PostTransparent passes — safe today via `Core::AddPostOpaquePass()`/`Core::AddPostTransparentPass()`
+
+Two further, SEPARATE entry points, mirroring PreOpaque's own precedent
+exactly. Unlike PreOpaque (which draws into its own self-managed render
+view, with nothing yet to read back from), a PostOpaque/PostTransparent
+callback is handed the CURRENT VIEW's own already-rendered color and
+depth directly, strictly to sample/derive data from. **This is a
+READ-ONLY entry point — no private target, no blend mode, no way to
+write new pixels back into the view's own composited image.** A feature
+that needs to blend new contribution onto the screen still belongs on
+PostComposite/PreUI, consuming whatever this callback `Publish()`ed as
+an ordinary Blackboard input.
+
+**The API** (`src/Core/Core.h`/`.cpp`):
+
+```cpp
+bool AddPostOpaquePass(const char* debugName, ProjectScenePassCallback callback, std::int32_t priority = 0);
+void RemovePostOpaquePass(const char* debugName);
+bool AddPostTransparentPass(const char* debugName, ProjectScenePassCallback callback, std::int32_t priority = 0);
+void RemovePostTransparentPass(const char* debugName);
+```
+
+`ProjectScenePassCallback` (`src/Core/Plugins/ProjectScenePassCallback.h`)
+is `std::function<void(rg::RenderGraphBuilder& builder,
+rg::RenderPassBlackboard& blackboard, rg::RenderViewId currentView, const
+ScenePassReadHandles& currentViewHandles)>` — ONE shared type for both
+stages, carrying a real Blackboard reference so the callback can
+`Publish()` directly. `ScenePassReadHandles` carries the current view's
+own already-rendered color/depth in two shapes: `colorHandle`/
+`depthHandle` (`rg::TextureHandle`, for the mandatory graph-dependency
+declaration — see Rule 2 below) and `colorSampler`/`depthImageView`/
+`depthSampler` (raw, already-resolved Vulkan handles, since the generic
+`rg::PassContext::resolveReadTexture()` path cannot produce a working
+sampler for this specific, imported-texture resource shape). **All five
+fields are valid for EXACTLY the single callback invocation they were
+handed in — never store a copy past it.**
+
+**Rule 1 (bolded, not a suggestion): every pass a PostOpaque callback
+declares MUST carry `rg::RenderPassEvent::AfterOpaques`; every pass a
+PostTransparent callback declares MUST carry
+`rg::RenderPassEvent::AfterTransparents`.** Exactly like PreOpaque's own
+Rule 1 above, a wrongly-tagged pass is silently uncaught by
+`DetectRenderPassEventContradictions()` (which only fires on a strictly
+LATER tag, never an equal one) — the engine's own `"PostOpaqueFeatures"`/
+`"PostTransparentFeatures"` providers (`Core.cpp`) each run a second,
+independent, debug-asserted runtime check for exactly this reason: a
+violation logs a `GTE_LOG_WARNING` (category `"RenderFeatureCompositor"`)
+naming your feature and the offending pass, and fails an `assert()` in
+debug builds.
+
+**Rule 2 (bolded, not a suggestion): whenever your callback declares at
+least one pass, at least one of those passes must declare a real
+`ReadTexture()` usage against `currentViewHandles.colorHandle` or
+`.depthHandle`.** A second, independent runtime check catches a callback
+that declares passes but never actually reads the handles it was given —
+same `GTE_LOG_WARNING`/`assert()` shape as Rule 1. Known, accepted
+limitation: this check cannot distinguish a correctly color/depth-aspected
+declaration from a wrongly-aspected one, since both handles carry the
+identical underlying value today.
+
+**Rule 3 (bolded, not a suggestion): every Blackboard key you `Publish()`
+under MUST incorporate your callback's own `currentView` parameter** —
+the identical hazard, and identical fix, as PreOpaque's own Rule 2 above
+(two separate `rg::RenderPassId` constants, or an equivalent per-view
+derivation) — restated here independently since both providers are
+`ProviderScope::PerActiveView` too.
+
+**Both stages ARE tracked by `ProjectAssemblyRegistrationLedger` and ARE
+torn down automatically on hot reload** — nothing extra required from you
+for this guarantee to hold.
+
+**A registered PostOpaque/PostTransparent feature is visible** via `GET
+/render_graph`'s `render_features[]` array (`"stage": "PostOpaque"`/
+`"PostTransparent"`, `"blend_mode": "None"`) and the Editor's "Render
+Graph" panel — enable/disable and live priority re-ordering both work for
+both stages.
+
+**A PostOpaque/PostTransparent feature's name shares ONE GLOBAL namespace
+with every PreOpaque/PostComposite/PreUI feature's name** — five stages,
+one namespace. Reusing a name already claimed by any other stage is
+refused, loudly.
+
+**Working example** (mirrors PreOpaque's own `"MyProject.ShadowMap"`
+example shape above, but reads the CURRENT view's own depth instead of
+drawing a brand-new one):
+
+```cpp
+constexpr gte::rg::RenderPassId kMyDepthMarkerGameKey = "MyProject.DepthMarker.Game"_passId;
+constexpr gte::rg::RenderPassId kMyDepthMarkerSceneKey = "MyProject.DepthMarker.Scene"_passId;
+
+core.AddPostOpaquePass(
+    "MyProject.DepthMarker",
+    [](gte::rg::RenderGraphBuilder& builder, gte::rg::RenderPassBlackboard& blackboard,
+        gte::rg::RenderViewId currentView, const gte::ScenePassReadHandles& handles) {
+        const bool isGameView = (currentView == gte::rg::RenderViewId::Named("Game"));
+        const gte::rg::TextureHandle output = builder.CreateTexture(
+            isGameView ? "MyProject_DepthMarker_Game" : "MyProject_DepthMarker_Scene",
+            gte::rg::TextureDesc{ /*width=*/64, /*height=*/64, VK_FORMAT_R8G8B8A8_UNORM, /*hasDepth=*/false,
+                gte::rg::TextureUsage::Sampled });
+
+        builder.AddRenderPass("MyProject.DepthMarker", gte::rg::PassKind::Graphics, gte::rg::ViewScope::Shared,
+            gte::rg::RenderPassCategory::General,
+            [handles, output](gte::rg::RenderGraphBuilder::PassBuilder& pass) {
+                pass.ReadTexture(handles.depthHandle, gte::rg::ResourceAccess::ShaderRead, /*isDepthResource=*/true);
+                pass.WriteTexture(output, gte::rg::ResourceAccess::ComputeShaderWrite);
+            },
+            [/* bind handles.depthImageView/handles.depthSampler here */](gte::rg::PassContext&) { },
+            gte::rg::RenderPassDrawKind::DrawMesh, gte::rg::RenderPassEvent::AfterOpaques); // <- Rule 1 above.
+
+        // Rule 3 above - the key MUST incorporate currentView.
+        blackboard.Publish<gte::rg::TextureHandle>(isGameView ? kMyDepthMarkerGameKey : kMyDepthMarkerSceneKey, output);
+    });
+```
+
+(Illustrative, not a literal compiling snippet for every engine API shape
+— the real pass's execute callback must bind `handles.colorSampler`/
+`depthImageView`/`depthSampler` into its own compute/graphics pipeline
+descriptor set, omitted here for brevity, mirroring how PreOpaque's own
+example above leaves its real `DrawScene()` call commented out.)
 
 ## Hot Reload
 

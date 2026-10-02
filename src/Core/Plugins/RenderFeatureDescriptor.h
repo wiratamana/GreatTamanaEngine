@@ -48,16 +48,21 @@ namespace gte {
 // RenderPassBlackboard. See docs/conventions/project-assembly-system.md's
 // own "PreOpaque passes" subsection for the full, authoritative contract.
 //
-// PostOpaque/PostTransparent remain NOT WIRED, under BOTH entry points -
-// declared here for ABI future-proofing ONLY - a caller that declares
-// either one today is refused, loudly (GTE_LOG_WARNING naming the feature
-// and the unwired stage), and is simply never invoked. Numeric values are
-// stable and must never be renumbered once shipped.
+// PostOpaque/PostTransparent are wired via their OWN, separate entry
+// points - Core::AddPostOpaquePass()/Core::AddPostTransparentPass()
+// (src/Core/Plugins/RenderFeatureCompositor.h, RegisterPostOpaqueFeature()/
+// RegisterPostTransparentFeature()) - mirroring PreOpaque's own precedent
+// exactly. RegisterProjectFeature() (the OLD, blend-chain-shaped entry
+// point) still refuses all three of PreOpaque/PostOpaque/PostTransparent,
+// unchanged. Numeric values are stable and must never be renumbered once
+// shipped.
 enum class RenderFeatureStage : std::uint32_t {
     PreOpaque       = 0,  // WIRED - but ONLY via Core::AddPreOpaquePass();
                           // RegisterProjectFeature() still refuses it (see above).
-    PostOpaque      = 1,  // NOT WIRED - declared, refused if used, under either entry point.
-    PostTransparent = 2,  // NOT WIRED - declared, refused if used, under either entry point.
+    PostOpaque      = 1,  // WIRED - but ONLY via Core::AddPostOpaquePass();
+                          // RegisterProjectFeature() still refuses it (see above).
+    PostTransparent = 2,  // WIRED - but ONLY via Core::AddPostTransparentPass();
+                          // RegisterProjectFeature() still refuses it (see above).
     PostComposite   = 3,  // WIRED - today's existing single hook point.
     PreUI           = 4,  // WIRED - runs immediately AFTER every PostComposite
                           // entry, same hook point, same frame.
