@@ -2205,6 +2205,13 @@ set(GTE_TEST_SOURCES
     # Unconditional, since src/Core/Plugins/RenderFeatureCompositor.h/.cpp is
     # unconditionally in gte_core's own source list.
     Core/Plugins/RenderFeatureCompositorProjectFeatureTests.cpp
+    # better-render-pass-5 effort, BLOCK 3, PHASE2/PHASE6
+    # (task_manager/better-render-pass-5/PHASE6_TIER1_TEST_COVERAGE.md) -
+    # Tier-1 tests for RenderFeatureCompositor::RegisterPreOpaqueFeature()/
+    # UnregisterPreOpaqueFeature(). Unconditional, since
+    # src/Core/Plugins/RenderFeatureCompositor.h/.cpp is unconditionally
+    # in gte_core's own source list.
+    Core/Plugins/RenderFeatureCompositorPreOpaqueTests.cpp
     # better-render-pass-3 campaign, BLOCK 2 (Arbitrary Render Views), PHASE2
     # (PHASE2_RENDER_VIEW_REGISTRY_CORE.md) - Tier-2 (real, headless GPU)
     # tests for the new RenderViewRegistry class. Unconditional, since
@@ -2218,6 +2225,11 @@ set(GTE_TEST_SOURCES
     # 63-vs-64-byte debugName boundary rejection rule. Unconditional, since
     # src/Core/Core.h/.cpp is unconditionally in gte_core's own source list.
     Core/RegisterProjectRenderFeatureApiTests.cpp
+    # better-render-pass-5 effort, BLOCK 3, PHASE3/PHASE6 - Tier-1 tests
+    # for the new Core::AddPreOpaquePass()/RemovePreOpaquePass() thin
+    # pass-through API. Unconditional, since src/Core/Core.h/.cpp is
+    # unconditionally in gte_core's own source list.
+    Core/AddPreOpaquePassApiTests.cpp
     # better-render-pass-1 campaign, PHASE9 (Part B, Decision D3, Step 5) -
     # Tier-1 tests for the new, pure
     # NextAutoScreenPostProcessPassPriority() counter-increment helper
@@ -2303,6 +2315,13 @@ set(GTE_TEST_SOURCES
     Renderer/RenderGraph/RenderGraphBuilderTests.cpp
     Renderer/RenderGraph/RenderPassTests.cpp
     Renderer/RenderGraph/RenderGraphCompilerTests.cpp
+    # better-render-pass-5 effort, BLOCK 3, PHASE1/PHASE6 - Tier-1 tests
+    # for the new PreOpaque stage ordering guarantee and the
+    # FindPassesNotTaggedPreOpaque() runtime safety-net logic.
+    # Unconditional, since both src/Core/Plugins/ProjectPreOpaqueCallback.h
+    # and src/Renderer/RenderGraph/RenderGraphCompiler.h/.cpp are
+    # unconditionally in gte_core's own source list.
+    Renderer/RenderGraph/PreOpaqueStageOrderingTests.cpp
     Renderer/RenderGraph/RenderGraphBarrierPlannerTests.cpp
     Renderer/RenderGraph/RenderGraphNameSlotTableTests.cpp
     # task_manager/better-render-pass-1 campaign, PHASE1
@@ -2327,6 +2346,11 @@ set(GTE_TEST_SOURCES
     Renderer/RenderGraph/RenderGraphDebugTextureRegistryTests.cpp
     Renderer/RenderGraph/RenderGraphDebugVolumeTextureRegistryTests.cpp
     Renderer/RenderGraph/RenderPipelineTests.cpp
+    # better-render-pass-5 effort, BLOCK 3, PHASE6 - the extra,
+    # user-requested Tier-1 in-process proof of the per-view Blackboard
+    # qualification guarantee, driven entirely through rg::RenderPipeline/
+    # RenderGraphBuilder/RenderPassBlackboard with no live Vulkan device.
+    Renderer/RenderGraph/PreOpaqueRenderPipelineBlackboardQualificationTests.cpp
     Renderer/RenderGraph/RenderPassToggleRegistryTests.cpp
     Renderer/RenderGraph/RenderPassGroupRegistryTests.cpp
     Renderer/RenderGraph/RenderPassToggleChangeDetectionLogicTests.cpp

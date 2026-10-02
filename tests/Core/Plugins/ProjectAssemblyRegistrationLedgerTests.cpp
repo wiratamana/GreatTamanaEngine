@@ -85,6 +85,7 @@ TEST(ProjectAssemblyRegistrationLedgerTest, BeginRecordThenEndCapturesPanelCompo
     ledger.RecordPanel("LedgerTestProject_Alpha_PanelA");
     ledger.RecordComponentType("LedgerTestProject_Alpha_CompA");
     ledger.RecordRenderFeature("LedgerTestProject_Alpha_RenderFeatureA");
+    ledger.RecordPreOpaqueFeature("LedgerTestProject_Alpha_PreOpaqueFeatureA");
     ledger.EndRecording();
 
     const ProjectAssemblyRegistrationLedger::Entry entry = ledger.PeekEntry("LedgerTestProject_Alpha");
@@ -94,6 +95,8 @@ TEST(ProjectAssemblyRegistrationLedgerTest, BeginRecordThenEndCapturesPanelCompo
     EXPECT_EQ(entry.componentTypeNames[0], "LedgerTestProject_Alpha_CompA");
     ASSERT_EQ(entry.renderFeatureNames.size(), 1u);
     EXPECT_EQ(entry.renderFeatureNames[0], "LedgerTestProject_Alpha_RenderFeatureA");
+    ASSERT_EQ(entry.preOpaqueFeatureNames.size(), 1u);
+    EXPECT_EQ(entry.preOpaqueFeatureNames[0], "LedgerTestProject_Alpha_PreOpaqueFeatureA");
     EXPECT_TRUE(entry.renderPassNames.empty());
 }
 
@@ -109,6 +112,7 @@ TEST(ProjectAssemblyRegistrationLedgerTest, RecordPanelAndRenderFeatureWithNoAct
     // project's own ledger entry.
     ledger.RecordPanel("LedgerTestProject_ShouldBeIgnored_PanelName");
     ledger.RecordRenderFeature("LedgerTestProject_ShouldBeIgnored_RenderFeatureName");
+    ledger.RecordPreOpaqueFeature("LedgerTestProject_ShouldBeIgnored_PreOpaqueFeatureName");
 
     // Confirm it did not create a spurious entry under its own literal text
     // (were it ever mistakenly treated as a project name by a bug).
@@ -117,9 +121,11 @@ TEST(ProjectAssemblyRegistrationLedgerTest, RecordPanelAndRenderFeatureWithNoAct
     EXPECT_TRUE(stray.componentTypeNames.empty());
     EXPECT_TRUE(stray.renderPassNames.empty());
     EXPECT_TRUE(stray.renderFeatureNames.empty());
+    EXPECT_TRUE(stray.preOpaqueFeatureNames.empty());
     const ProjectAssemblyRegistrationLedger::Entry strayRenderFeature =
         ledger.PeekEntry("LedgerTestProject_ShouldBeIgnored_RenderFeatureName");
     EXPECT_TRUE(strayRenderFeature.renderFeatureNames.empty());
+    EXPECT_TRUE(strayRenderFeature.preOpaqueFeatureNames.empty());
 
     // Confirm a genuinely fresh project, begun/ended immediately afterward,
     // is not polluted by the ignored calls above.
@@ -130,6 +136,7 @@ TEST(ProjectAssemblyRegistrationLedgerTest, RecordPanelAndRenderFeatureWithNoAct
     EXPECT_TRUE(zeta.componentTypeNames.empty());
     EXPECT_TRUE(zeta.renderPassNames.empty());
     EXPECT_TRUE(zeta.renderFeatureNames.empty());
+    EXPECT_TRUE(zeta.preOpaqueFeatureNames.empty());
 }
 
 TEST(ProjectAssemblyRegistrationLedgerTest, NestedBeginEndBracketsForTheSameProjectAccumulateIntoOneEntry)
@@ -162,6 +169,7 @@ TEST(ProjectAssemblyRegistrationLedgerTest, PeekEntryForANeverLoadedProjectRetur
     EXPECT_TRUE(entry.renderFeatureNames.empty());
     EXPECT_TRUE(entry.panelNames.empty());
     EXPECT_TRUE(entry.componentTypeNames.empty());
+    EXPECT_TRUE(entry.preOpaqueFeatureNames.empty());
 }
 
 TEST(ProjectAssemblyRegistrationLedgerTest, UnregisterEverythingForANeverLoadedProjectIsASafeNoOp)
@@ -192,6 +200,7 @@ TEST(ProjectAssemblyRegistrationLedgerTest, UnregisterEverythingForANeverLoadedP
     EXPECT_TRUE(entry.renderFeatureNames.empty());
     EXPECT_TRUE(entry.panelNames.empty());
     EXPECT_TRUE(entry.componentTypeNames.empty());
+    EXPECT_TRUE(entry.preOpaqueFeatureNames.empty());
 }
 
 // The single most important test in this whole phase - proves the ENTIRE
@@ -292,6 +301,63 @@ TEST(ProjectAssemblyRegistrationLedgerTest, FullRoundTripThroughARealRenderFeatu
 
     EXPECT_EQ(FindByName(compositor->DebugSnapshot(), featureName), nullptr);
     const ProjectAssemblyRegistrationLedger::Entry afterUnregister = ledger.PeekEntry(projectName);
+    EXPECT_TRUE(afterUnregister.renderFeatureNames.empty());
+    EXPECT_TRUE(afterUnregister.componentTypeNames.empty());
+    EXPECT_TRUE(afterUnregister.panelNames.empty());
+    EXPECT_TRUE(afterUnregister.renderPassNames.empty());
+}
+
+// better-render-pass-5 effort, BLOCK 3, PHASE6 - the PreOpaque mirror of
+// FullRoundTripThroughARealRenderFeatureRegistrationProvesTheWholeWiring
+// immediately above: a real PreOpaque feature, registered through
+// Core::AddPreOpaquePass() (PHASE3) INSIDE a BeginRecordingFor()/
+// EndRecording() bracket, must (a) actually land in
+// RenderFeatureCompositor::DebugSnapshot(), (b) be recorded by the
+// ledger under preOpaqueFeatureNames, and then UnregisterEverythingFor()
+// must remove it from BOTH places - proving PHASE4's own teardown
+// wiring genuinely reaches RenderFeatureCompositor::UnregisterPreOpaqueFeature(),
+// not merely clears the ledger's own bookkeeping. This is the source
+// spec's (BLOCK3_WIRE_PRE_POST_OPAQUE_STAGES.txt, Section 7) own Test 5.
+TEST(ProjectAssemblyRegistrationLedgerTest, FullRoundTripThroughARealPreOpaqueFeatureRegistrationProvesTheWholeWiring)
+{
+    HeadlessSurfaceProvider surfaceProvider;
+    NoopHostServices hostServices;
+
+    std::unique_ptr<Core> core;
+    try {
+        core = std::make_unique<Core>(surfaceProvider, hostServices);
+    } catch (const std::exception& e) {
+        GTEST_SKIP() << "Core construction needs a real, valid VkSurfaceKHR - this machine's Vulkan "
+                        "driver/loader apparently does not support VK_EXT_headless_surface (see "
+                        "HeadlessSurfaceProvider.h's own top-of-file comment). Real failure: "
+                     << e.what();
+    }
+    ASSERT_NE(core, nullptr);
+
+    const std::string projectName = "LedgerTestProject_Eta_PreOpaqueRoundTrip";
+    const std::string featureName = "LedgerTestProject_Eta_PreOpaqueRoundTrip_Feature";
+
+    ProjectAssemblyRegistrationLedger& ledger = ProjectAssemblyRegistrationLedger::Instance();
+
+    ledger.BeginRecordingFor(projectName);
+    const bool registered = core->AddPreOpaquePass(
+        featureName.c_str(), [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId) { });
+    ledger.EndRecording();
+    ASSERT_TRUE(registered);
+
+    RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
+    ASSERT_NE(compositor, nullptr);
+    ASSERT_NE(FindByName(compositor->DebugSnapshot(), featureName), nullptr);
+
+    const ProjectAssemblyRegistrationLedger::Entry beforeUnregister = ledger.PeekEntry(projectName);
+    ASSERT_EQ(beforeUnregister.preOpaqueFeatureNames.size(), 1u);
+    EXPECT_EQ(beforeUnregister.preOpaqueFeatureNames[0], featureName);
+
+    ledger.UnregisterEverythingFor(projectName, *core);
+
+    EXPECT_EQ(FindByName(compositor->DebugSnapshot(), featureName), nullptr);
+    const ProjectAssemblyRegistrationLedger::Entry afterUnregister = ledger.PeekEntry(projectName);
+    EXPECT_TRUE(afterUnregister.preOpaqueFeatureNames.empty());
     EXPECT_TRUE(afterUnregister.renderFeatureNames.empty());
     EXPECT_TRUE(afterUnregister.componentTypeNames.empty());
     EXPECT_TRUE(afterUnregister.panelNames.empty());
