@@ -137,6 +137,10 @@ constexpr rg::RenderPassId kGameSkyBackgroundCallbackKey = "Atmosphere.GameSkyBa
 constexpr rg::RenderPassId kGameCompositedOutputKey = "Atmosphere.CompositedOutput.Game"_passId;
 constexpr rg::RenderPassId kSceneCompositedOutputKey = "Atmosphere.CompositedOutput.Scene"_passId;
 
+// The scene-service slot index "SceneServicesExampleShadowFeature" claims at
+// startup and publishes its blackboard entry under every frame.
+constexpr std::uint32_t kSceneServicesExampleShadowSlotIndex = 0;
+
 // render-pass-3 campaign, PHASE3 (Step 3.3) - "AtmosphereSharedLut"'s own
 // blackboard payload.
 struct AtmosphereSharedLutBlackboardEntry {
@@ -839,35 +843,27 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             out.push_back(std::move(desc));
         });
 
-    // Block 4 (task_manager/better-render-pass-6), PHASE8
-    // (PHASE8_EXAMPLE_SHADER_AND_FULL_VERIFICATION.md) - "SceneServicesExampleShadowFeature" -
-    // ProviderScope::PerActiveView, BeforeDeferredPasses (the DEFAULT
-    // ProviderTiming, same phase "RenderOpaque" itself runs in - left
-    // unspecified here exactly like "PreOpaqueFeatures"/"RenderOpaque" below).
-    // A small, PERMANENT, always-registered proof-of-contract feature -
-    // publishes a real, GPU-cleared, visibly dark texture into
-    // SceneServiceSlot::ShadowMap for the Game View ONLY (never Scene View -
-    // this asymmetry is the live, IN-SESSION proof that two concurrently-
-    // active views get independently-correct scene-service data the SAME
-    // frame, PHASE0's global rules 5/6/7 - no restart/rebuild needed to
-    // observe it, see PHASE8_COMPLETION_REPORT.md's own live-verification
-    // section). Registered TEXTUALLY (and RenderPassEvent-tier-wise:
-    // PreOpaques (1000) < Opaques (2000)) before "RenderOpaque"'s own
-    // Register(...) call below, so this provider's own Publish() below always
-    // runs first within this same DeclareOnePhase() pass (render-pass-3
-    // campaign, PHASE3 - provider callbacks run in registration order, one
-    // full per-view loop per provider, before the NEXT provider's own loop
-    // starts). Early-gated by ShouldDeclareBuiltInPassThisFrame() BEFORE its
-    // one real side effect (the blackboard Publish() at the bottom) - mirrors
-    // "DrawSkyBackground"'s own fix for the exact side-channel-leak bug class
-    // (editor-core-separation-22 campaign, PHASE1) - so toggling this OFF via
-    // the EXISTING GET /render_graph/set_pass_enabled?name=
-    // SceneServicesExampleShadowFeature&enabled=false route genuinely stops
-    // publishing, not merely stops the pass itself from reaching the graph.
-    // This is NOT a real shadow-map feature - Block 4 itself ships none
-    // (future work, see PHASE7_CORE_WIRING_RENDEROPAQUE_PROVIDER.md's own
-    // Step 1, item 3) - it exists purely so PHASE8's own live verification
-    // has something real to toggle/observe with zero new HTTP plumbing.
+    // A small, permanent, always-registered proof-of-contract feature -
+    // publishes a real, GPU-cleared, visibly dark texture into its own
+    // registered scene-service slot (index 0, see
+    // kSceneServicesExampleShadowSlotIndex above) for the Game View ONLY
+    // (Scene View deliberately never publishes - proving two concurrently-
+    // active views get independently-correct scene-service data the same
+    // frame). Registered textually before "RenderOpaque"'s own Register(...)
+    // call below so this provider's own Publish() always runs first within
+    // the same per-view pass. Early-gated by ShouldDeclareBuiltInPassThisFrame()
+    // before its one real side effect (the blackboard Publish() at the
+    // bottom), so toggling it off via GET /render_graph/set_pass_enabled
+    // genuinely stops publishing, not merely stops the pass itself from
+    // reaching the graph. This is not a real shadow-map feature - it exists
+    // purely to give this mechanism something real to toggle/observe.
+    const std::uint32_t sceneServicesExampleShadowSlot = RegisterSceneServiceSlot(
+        "SceneServicesExampleShadowFeature", SceneServiceResourceKind::Image2D,
+        /*preferredIndex=*/kSceneServicesExampleShadowSlotIndex);
+    assert(std::strcmp(SceneServiceSlotDebugName(sceneServicesExampleShadowSlot),
+               "SceneServicesExampleShadowFeature")
+            == 0
+        && "SceneServicesExampleShadowFeature lost its preferred scene-service slot to a name collision.");
     m_offscreenRenderPipeline.Register("SceneServicesExampleShadowFeature", rg::ProviderScope::PerActiveView,
         [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
             if (!rg::ShouldDeclareBuiltInPassThisFrame(
@@ -901,7 +897,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             out.push_back(std::move(desc));
 
             frame.blackboard.Publish<rg::TextureHandle>(
-                SceneServiceBlackboardKey(SceneServiceSlot::ShadowMap, frame.currentView), shadowHandle);
+                SceneServiceBlackboardKey(kSceneServicesExampleShadowSlotIndex, frame.currentView), shadowHandle);
         });
 
     // "PreOpaqueFeatures" - ProviderScope::PerActiveView,
@@ -1005,9 +1001,8 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             // - see PHASE7_CORE_WIRING_RENDEROPAQUE_PROVIDER.md's own hazard warning.
             std::array<std::optional<rg::TextureHandle>, kSceneServiceSlotCount> publishedServiceSlots{};
             for (std::uint32_t slotIndex = 0; slotIndex < kSceneServiceSlotCount; ++slotIndex) {
-                const SceneServiceSlot slot = static_cast<SceneServiceSlot>(slotIndex);
-                publishedServiceSlots[slotIndex] =
-                    frame.blackboard.Fetch<rg::TextureHandle>(SceneServiceBlackboardKey(slot, frame.currentView));
+                publishedServiceSlots[slotIndex] = frame.blackboard.Fetch<rg::TextureHandle>(
+                    SceneServiceBlackboardKey(slotIndex, frame.currentView));
             }
             const rg::RenderViewId currentViewForServices = frame.currentView; // plain by-value copy - see hazard warning above.
 

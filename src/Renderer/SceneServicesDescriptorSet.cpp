@@ -54,7 +54,7 @@ bool& SceneServiceRegistrySealedFlag()
 
 namespace gte {
 
-rg::RenderPassId SceneServiceBlackboardKey(SceneServiceSlot slot, rg::RenderViewId view) noexcept
+rg::RenderPassId SceneServiceBlackboardKey(std::uint32_t slotIndex, rg::RenderViewId view) noexcept
 {
     // Reuses the EXACT SAME FNV-1a offset-basis/prime this codebase's own
     // operator""_passId / RenderViewId::Named() already use (RenderPipeline.h)
@@ -76,9 +76,8 @@ rg::RenderPassId SceneServiceBlackboardKey(SceneServiceSlot slot, rg::RenderView
         hash *= 16777619u;
     }
 
-    const std::uint32_t slotValue = static_cast<std::uint32_t>(slot);
-    unsigned char slotBytes[sizeof(slotValue)];
-    std::memcpy(slotBytes, &slotValue, sizeof(slotValue));
+    unsigned char slotBytes[sizeof(slotIndex)];
+    std::memcpy(slotBytes, &slotIndex, sizeof(slotIndex));
     for (unsigned char b : slotBytes) {
         hash ^= static_cast<std::uint64_t>(b);
         hash *= 16777619u;
@@ -240,7 +239,7 @@ SceneServicesDescriptorSet::SceneServicesDescriptorSet(Renderer& renderer)
     // branch is needed in practice (confirmed live by this phase's own
     // integration test actually constructing this class against a real
     // device).
-    , m_dummyVolumetricFogTexture(renderer.CreateVolumeTexture(1, 1, 1, VK_FORMAT_R8G8B8A8_UNORM, "VolumetricFog dummy"))
+    , m_dummyImage3DTexture(renderer.CreateVolumeTexture(1, 1, 1, VK_FORMAT_R8G8B8A8_UNORM, "SceneServiceImage3DDummy"))
 {
     // The one reserved "scene services" descriptor-set layout - 8 combined-
     // image-sampler bindings, fragment-stage visible (this set is consumed
@@ -254,13 +253,12 @@ SceneServicesDescriptorSet::SceneServicesDescriptorSet(Renderer& renderer)
     m_layout = layoutBuilder.Build();
 
     // Every Image2D-kind slot's real, uploaded dummy - a single opaque-white
-    // {255,255,255,255} pixel (semantically "fully lit / no shadow / no
-    // fog contribution" - correct for ShadowMap; re-confirm per-slot
-    // semantics the day GIVolume grows real consumers).
+    // {255,255,255,255} pixel (semantically "fully lit / neutral / no extra
+    // contribution" - re-confirm this neutral meaning against any future
+    // slot's own real semantics before relying on it).
     const unsigned char whitePixel[4] = { 255, 255, 255, 255 };
     for (std::uint32_t i = 0; i < kSceneServiceSlotCount; ++i) {
-        const auto slot = static_cast<SceneServiceSlot>(i);
-        if (SceneServiceSlotResourceKind(slot) == SceneServiceResourceKind::Image2D) {
+        if (SceneServiceSlotResourceKind(i) == SceneServiceResourceKind::Image2D) {
             const std::string debugName = "SceneServiceSlot" + std::to_string(i) + "Dummy";
             m_dummyImage2DTextures.emplace(i, renderer.CreateTexture2D(whitePixel, 1, 1, debugName.c_str()));
         }
@@ -299,23 +297,21 @@ VkDescriptorSet SceneServicesDescriptorSet::Rewrite(
     std::array<VkWriteDescriptorSet, kSceneServiceSlotCount> writes{};
 
     for (std::uint32_t i = 0; i < kSceneServiceSlotCount; ++i) {
-        const auto slot = static_cast<SceneServiceSlot>(i);
-
         VkImageView view_ = resolved[i].view;
         VkSampler sampler = resolved[i].sampler;
 
-        // PHASE0 global rule 12 - a slot counts as "really published this
-        // call" ONLY when BOTH halves are non-null; a half-null pair (e.g.
-        // a resolved IMPORTED texture handle with a null sampler) falls
-        // back to the dummy instead of ever reaching vkUpdateDescriptorSets().
+        // A slot counts as "really published this call" ONLY when BOTH
+        // halves are non-null; a half-null pair (e.g. a resolved IMPORTED
+        // texture handle with a null sampler) falls back to the dummy
+        // instead of ever reaching vkUpdateDescriptorSets().
         if (view_ == VK_NULL_HANDLE || sampler == VK_NULL_HANDLE) {
-            if (SceneServiceSlotResourceKind(slot) == SceneServiceResourceKind::Image2D) {
+            if (SceneServiceSlotResourceKind(i) == SceneServiceResourceKind::Image2D) {
                 const Texture2D& dummy = m_dummyImage2DTextures.at(i);
                 view_ = dummy.View();
                 sampler = dummy.Sampler();
             } else {
-                view_ = m_dummyVolumetricFogTexture.View();
-                sampler = m_dummyVolumetricFogTexture.Sampler();
+                view_ = m_dummyImage3DTexture.View();
+                sampler = m_dummyImage3DTexture.Sampler();
             }
         }
 
@@ -347,11 +343,11 @@ VkDescriptorSet SceneServicesDescriptorSet::DescriptorSetFor(rg::RenderViewId vi
     return VK_NULL_HANDLE;
 }
 
-const Texture2D& SceneServicesDescriptorSet::DummyImage2DTextureFor(SceneServiceSlot slot) const
+const Texture2D& SceneServicesDescriptorSet::DummyImage2DTextureFor(std::uint32_t slotIndex) const
 {
-    assert(SceneServiceSlotResourceKind(slot) == SceneServiceResourceKind::Image2D
-        && "SceneServicesDescriptorSet::DummyImage2DTextureFor: slot is not an Image2D-kind slot.");
-    return m_dummyImage2DTextures.at(static_cast<std::uint32_t>(slot));
+    assert(SceneServiceSlotResourceKind(slotIndex) == SceneServiceResourceKind::Image2D
+        && "SceneServicesDescriptorSet::DummyImage2DTextureFor: slotIndex is not an Image2D-kind slot.");
+    return m_dummyImage2DTextures.at(slotIndex);
 }
 
 } // namespace gte

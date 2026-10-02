@@ -47,9 +47,8 @@ TEST(SceneServiceBlackboardKeyTest, Every824SlotViewPairProducesAPairwiseDistinc
     keys.reserve(kSceneServiceSlotCount * views.size());
 
     for (std::uint32_t slotIndex = 0; slotIndex < kSceneServiceSlotCount; ++slotIndex) {
-        const auto slot = static_cast<SceneServiceSlot>(slotIndex);
         for (const rg::RenderViewId& view : views) {
-            keys.push_back(SceneServiceBlackboardKey(slot, view).hash);
+            keys.push_back(SceneServiceBlackboardKey(slotIndex, view).hash);
         }
     }
 
@@ -68,9 +67,8 @@ TEST(SceneServiceBlackboardKeyTest, Every824SlotViewPairProducesAPairwiseDistinc
 // same frame) Block 4's whole design exists to prevent.
 TEST(SceneServiceBlackboardKeyTest, SameSlotDifferentViewsNeverAlias)
 {
-    const rg::RenderPassId gameKey = SceneServiceBlackboardKey(SceneServiceSlot::ShadowMap, rg::RenderViewId::Named("Game"));
-    const rg::RenderPassId sceneKey =
-        SceneServiceBlackboardKey(SceneServiceSlot::ShadowMap, rg::RenderViewId::Named("Scene"));
+    const rg::RenderPassId gameKey = SceneServiceBlackboardKey(0u, rg::RenderViewId::Named("Game"));
+    const rg::RenderPassId sceneKey = SceneServiceBlackboardKey(0u, rg::RenderViewId::Named("Scene"));
 
     EXPECT_FALSE(gameKey == sceneKey);
 }
@@ -80,25 +78,24 @@ TEST(SceneServiceBlackboardKeyTest, SameSlotDifferentViewsNeverAlias)
 TEST(SceneServiceBlackboardKeyTest, SameViewDifferentSlotsNeverAlias)
 {
     const rg::RenderViewId gameView = rg::RenderViewId::Named("Game");
-    const rg::RenderPassId shadowKey = SceneServiceBlackboardKey(SceneServiceSlot::ShadowMap, gameView);
-    const rg::RenderPassId fogKey = SceneServiceBlackboardKey(SceneServiceSlot::VolumetricFog, gameView);
+    const rg::RenderPassId firstKey = SceneServiceBlackboardKey(0u, gameView);
+    const rg::RenderPassId secondKey = SceneServiceBlackboardKey(2u, gameView);
 
-    EXPECT_FALSE(shadowKey == fogKey);
+    EXPECT_FALSE(firstKey == secondKey);
 }
 
-// SceneServiceSlotResourceKind() - the ONE Image3D-kind slot among today's 3
-// named slots is VolumetricFog; every other slot (named or reserved) is
+// SceneServiceSlotResourceKind() - a slot's kind is whatever was last
+// registered for it; an unregistered (or out-of-range) slot defaults to
 // Image2D.
-TEST(SceneServiceSlotResourceKindTest, OnlyVolumetricFogIsImage3D)
+TEST(SceneServiceSlotResourceKindTest, DefaultsToImage2DUntilRegisteredOtherwise)
 {
-    EXPECT_EQ(SceneServiceSlotResourceKind(SceneServiceSlot::ShadowMap), SceneServiceResourceKind::Image2D);
-    EXPECT_EQ(SceneServiceSlotResourceKind(SceneServiceSlot::GIVolume), SceneServiceResourceKind::Image2D);
-    EXPECT_EQ(SceneServiceSlotResourceKind(SceneServiceSlot::VolumetricFog), SceneServiceResourceKind::Image3D);
-
-    for (std::uint32_t slotIndex = 3; slotIndex < kSceneServiceSlotCount; ++slotIndex) {
-        const auto slot = static_cast<SceneServiceSlot>(slotIndex);
-        EXPECT_EQ(SceneServiceSlotResourceKind(slot), SceneServiceResourceKind::Image2D);
-    }
+    ResetSceneServiceRegistryForTesting();
+    EXPECT_EQ(SceneServiceSlotResourceKind(0u), SceneServiceResourceKind::Image2D);
+    const std::uint32_t slot = RegisterSceneServiceSlot("Fog", SceneServiceResourceKind::Image3D, /*preferredIndex=*/2u);
+    ASSERT_NE(slot, kInvalidSceneServiceSlotIndex);
+    EXPECT_EQ(SceneServiceSlotResourceKind(slot), SceneServiceResourceKind::Image3D);
+    EXPECT_EQ(SceneServiceSlotResourceKind(0u), SceneServiceResourceKind::Image2D);
+    ResetSceneServiceRegistryForTesting();
 }
 
 // --- PHASE2 (PHASE2_SCENE_SERVICES_DESCRIPTOR_SET_CLASS.md) ---------------
@@ -127,19 +124,16 @@ TEST(SceneServicesDescriptorSetTest, RewriteWithAllDefaultedSlotsReturnsAValidSe
 
     EXPECT_NE(set, static_cast<VkDescriptorSet>(VK_NULL_HANDLE));
 
-    EXPECT_NE(sceneServices.DummyImage2DTextureFor(SceneServiceSlot::ShadowMap).View(),
-        static_cast<VkImageView>(VK_NULL_HANDLE));
-    EXPECT_NE(sceneServices.DummyImage2DTextureFor(SceneServiceSlot::ShadowMap).Sampler(),
-        static_cast<VkSampler>(VK_NULL_HANDLE));
-    EXPECT_NE(sceneServices.DummyImage2DTextureFor(SceneServiceSlot::GIVolume).View(),
-        static_cast<VkImageView>(VK_NULL_HANDLE));
+    EXPECT_NE(sceneServices.DummyImage2DTextureFor(0u).View(), static_cast<VkImageView>(VK_NULL_HANDLE));
+    EXPECT_NE(sceneServices.DummyImage2DTextureFor(0u).Sampler(), static_cast<VkSampler>(VK_NULL_HANDLE));
+    EXPECT_NE(sceneServices.DummyImage2DTextureFor(1u).View(), static_cast<VkImageView>(VK_NULL_HANDLE));
 
-    EXPECT_NE(sceneServices.DummyVolumetricFogTexture().View(), static_cast<VkImageView>(VK_NULL_HANDLE));
-    EXPECT_NE(sceneServices.DummyVolumetricFogTexture().Sampler(), static_cast<VkSampler>(VK_NULL_HANDLE));
+    EXPECT_NE(sceneServices.DummyImage3DTexture().View(), static_cast<VkImageView>(VK_NULL_HANDLE));
+    EXPECT_NE(sceneServices.DummyImage3DTexture().Sampler(), static_cast<VkSampler>(VK_NULL_HANDLE));
     // Proof it is genuinely a real, 1x1x1 3D volume, not a 2D texture
     // masquerading as one - no Vulkan-level image-type query is even
     // necessary once the test holds a true const VolumeTexture&.
-    EXPECT_EQ(sceneServices.DummyVolumetricFogTexture().Depth(), 1);
+    EXPECT_EQ(sceneServices.DummyImage3DTexture().Depth(), 1);
     ResetSceneServiceRegistryForTesting();
 }
 

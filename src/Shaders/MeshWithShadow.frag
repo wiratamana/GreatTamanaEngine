@@ -1,29 +1,23 @@
 #version 450
 
-// Block 4 "Global Scene Services Descriptor Set"
-// (task_manager/better-render-pass-6/PHASE0_MASTER_STRATEGY.md), PHASE8
-// (PHASE8_EXAMPLE_SHADER_AND_FULL_VERIFICATION.md) - the proof-of-contract
-// shader for this whole campaign: a Pipeline built from this shader (plus
-// Mesh.vert, reused unchanged) and Core::GetSceneServicesDescriptorSet().
-// Layout() (passed as Renderer::CreatePipeline()'s PHASE4 trailing
-// sceneServicesSetLayout parameter) gets a real, working `set = 1, binding =
-// 0` descriptor with ZERO further Pipeline.h/Renderer.h change needed for
-// THIS shader specifically - every bit of plumbing it relies on already
-// shipped in PHASE1-7. Based directly on Mesh.frag - same lambert term, same
-// flat "clay" base color - plus exactly one addition: sampling the reserved
-// scene-services shadow slot and multiplying it into the final color.
+// Proof-of-contract shader for a feature sampling the reserved "scene
+// services" descriptor set (set = 1) - based directly on Mesh.frag (same
+// lambert term, same flat "clay" base color) plus exactly one addition:
+// sampling this feature's own registered scene-service slot and multiplying
+// it into the final color.
 
 layout(location = 0) in vec3 inWorldNormal;
 
 layout(location = 0) out vec4 outColor;
 
-// The ONE reserved "scene services" descriptor set (SceneServicesDescriptorSet.h) -
-// binding 0 is SceneServiceSlot::ShadowMap. Whatever this resolves to THIS
-// frame/view - a real published texture (Core.cpp's
-// "SceneServicesExampleShadowFeature" provider, PHASE8) or this class's own
-// dummy opaque-white fallback when nothing published - is sampled directly
-// here.
-layout(set = 1, binding = 0) uniform sampler2D u_SceneShadowMap;
+// The one reserved "scene services" descriptor set
+// (SceneServicesDescriptorSet.h) - binding 0 is the scene-service slot this
+// feature was assigned, currently index 0 (see the owning feature's own
+// registration call in Core.cpp for the authoritative constant). Whatever
+// this resolves to THIS frame/view - a real published texture or this
+// class's own dummy opaque-white fallback when nothing published - is
+// sampled directly here.
+layout(set = 1, binding = 0) uniform sampler2D u_SceneServiceSlot0;
 
 void main()
 {
@@ -40,11 +34,10 @@ void main()
     vec3 shaded = baseColor * (ambient + diffuse * (1.0 - ambient));
 
     // Fixed UV - this proof-of-contract shader exists to show `set = 1`
-    // sampling works at all, not to implement real shadow-map projection
-    // (Block 4 ships no real shadow feature - see PHASE7's own doc comment).
+    // sampling works at all, not to implement any real per-pixel sampling.
     // The dummy fallback is opaque white (1.0, i.e. "no darkening"); a real
     // feature publishing darker data here visibly darkens the surface -
     // that visible difference is this shader's entire reason to exist.
-    float shadowFactor = texture(u_SceneShadowMap, vec2(0.5, 0.5)).r;
-    outColor = vec4(shaded * shadowFactor, 1.0);
+    float sceneServiceFactor = texture(u_SceneServiceSlot0, vec2(0.5, 0.5)).r;
+    outColor = vec4(shaded * sceneServiceFactor, 1.0);
 }

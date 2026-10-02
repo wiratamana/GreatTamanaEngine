@@ -29,22 +29,9 @@
 
 namespace gte {
 
-// FIXED, versioned, engine-owned list - append-only. NEVER renumber once
-// shipped; a shipped slot's numeric value is a durable ABI/shader contract
+// Fixed upper bound on how many scene-service slots can ever be registered -
+// a shipped feature's own preferredIndex is a durable shader-binding contract
 // (every consuming .frag file hardcodes `layout(set = 1, binding = N)`).
-enum class SceneServiceSlot : std::uint32_t {
-    ShadowMap = 0, // sampler2D - a 2D shadow depth/visibility map.
-    GIVolume = 1, // sampler2D - a baked GI data atlas (2D-shaped TODAY -
-                  // see SceneServiceSlotResourceKind()'s own doc comment
-                  // before ever reinterpreting this as a real 3D volume).
-    VolumetricFog = 2, // sampler3D - a REAL VK_IMAGE_TYPE_3D volume/froxel
-                       // texture (VolumeTexture.h). The ONE Image3D-kind slot
-                       // among today's 3 named slots.
-    // Reserved = 3..7. Document each real slot's resource kind explicitly in
-    // SceneServiceSlotResourceKind() the moment it is actually added - never
-    // leave it implicit. Bump kSceneServiceSlotCount only when a slot 3+ is
-    // actually wired, not before.
-};
 inline constexpr std::uint32_t kSceneServiceSlotCount = 8;
 
 // Every slot is a VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER at the Vulkan
@@ -91,12 +78,6 @@ SceneServiceResourceKind SceneServiceSlotResourceKind(std::uint32_t slotIndex) n
 // the failure-memory table, and the Runtime Sealing latch.
 void ResetSceneServiceRegistryForTesting() noexcept;
 
-constexpr SceneServiceResourceKind SceneServiceSlotResourceKind(SceneServiceSlot slot) noexcept
-{
-    return slot == SceneServiceSlot::VolumetricFog ? SceneServiceResourceKind::Image3D
-                                                    : SceneServiceResourceKind::Image2D;
-}
-
 // The RenderPassBlackboard key a PreOpaque feature Publish()es its
 // rg::TextureHandle under for `slot`, for the specific render view ITS OWN
 // callback was invoked with (never a cached/stale view). CRITICAL: folds
@@ -104,7 +85,7 @@ constexpr SceneServiceResourceKind SceneServiceSlotResourceKind(SceneServiceSlot
 // (see this header's own implementation comment in the .cpp) - two
 // concurrently-active views (this engine always has Game+Scene active
 // together whenever the Editor is up) must never alias onto the same key.
-rg::RenderPassId SceneServiceBlackboardKey(SceneServiceSlot slot, rg::RenderViewId view) noexcept;
+rg::RenderPassId SceneServiceBlackboardKey(std::uint32_t slotIndex, rg::RenderViewId view) noexcept;
 
 class Renderer; // forward-declared only - the .cpp includes Renderer.h.
 
@@ -151,11 +132,11 @@ public:
     // VK_NULL_HANDLE if Rewrite() was never called for that view yet.
     VkDescriptorSet DescriptorSetFor(rg::RenderViewId view) const noexcept;
 
-    // Test-facing accessors - see this phase's own "Testability correction"
-    // (PHASE2_SCENE_SERVICES_DESCRIPTOR_SET_CLASS.md, Step 2) for why these
-    // exist instead of a live-descriptor-set-introspection helper.
-    const Texture2D& DummyImage2DTextureFor(SceneServiceSlot slot) const;
-    const VolumeTexture& DummyVolumetricFogTexture() const noexcept { return m_dummyVolumetricFogTexture; }
+    // Test-facing accessors confirming the real, uploaded dummy fallback
+    // resources backing an unresolved slot are valid.
+    const Texture2D& DummyImage2DTextureFor(std::uint32_t slotIndex) const;
+    // Backs the Image3D-kind slot(s) registered so far - today, only ever one.
+    const VolumeTexture& DummyImage3DTexture() const noexcept { return m_dummyImage3DTexture; }
 
 private:
     Renderer* m_renderer = nullptr;
@@ -168,11 +149,14 @@ private:
     };
     std::vector<PerViewSet> m_perViewSets;
 
-    // Deliberately TWO SEPARATE, correctly-typed dummy containers - see
-    // PHASE0 global rule 4. Keyed by raw slot index; the one Image3D slot
-    // (VolumetricFog) is never populated in this map.
+    // Deliberately TWO SEPARATE, correctly-typed dummy containers. Keyed by
+    // raw slot index - only the Image2D map is populated per-slot; the single
+    // Image3D dummy below backs any Image3D-kind slot directly.
     std::unordered_map<std::uint32_t, Texture2D> m_dummyImage2DTextures;
-    VolumeTexture m_dummyVolumetricFogTexture;
+    // Built unconditionally regardless of registry state. Safe only while at
+    // most one Image3D-kind slot is ever registered before this constructor
+    // runs.
+    VolumeTexture m_dummyImage3DTexture;
 };
 
 } // namespace gte
