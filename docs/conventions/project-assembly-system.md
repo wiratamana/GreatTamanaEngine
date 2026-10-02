@@ -542,6 +542,138 @@ Full campaign writeup:
 `PHASEn_COMPLETION_REPORT.md` in that same folder, and
 `CAMPAIGN_COMPLETION_REPORT.md`.
 
+### PreOpaque passes — safe today via `Core::AddPreOpaquePass()`
+
+A Project Assembly can register a pass that is PROVABLY GUARANTEED to
+finish before the engine's own `"RenderOpaque"` pass runs, for every
+active view — the mechanism shadow maps, GI, and any other
+"must-finish-before-the-main-scene-draw" technique needs.
+`better-render-pass-5`'s BLOCK 3 campaign
+(`task_manager/better-render-pass-5/PHASE0_MASTER_STRATEGY.md`) wired
+this; `RenderFeatureStage::PreOpaque` is no longer refused.
+
+**This is a genuinely different, SIMPLER mechanism than the
+PostComposite/PreUI compositing chain described above — no private
+target, no blend mode, no GPU-state slot pool.** A PreOpaque pass has
+nothing to blend onto (nothing has been drawn yet this point in the
+frame) — it draws into its own, self-managed render view
+(`Core::CreateRenderView()`) and `Publish()`es whatever it produces
+directly onto the `RenderPassBlackboard` itself. Nothing reads a
+PreOpaque pass's output except by Blackboard key — never by a
+hardcoded cross-pass texture reference.
+
+**The API** (`src/Core/Core.h`/`.cpp`):
+
+```cpp
+bool AddPreOpaquePass(const char* debugName, ProjectPreOpaqueCallback callback, std::int32_t priority = 0);
+void RemovePreOpaquePass(const char* debugName);
+```
+
+`ProjectPreOpaqueCallback` (`src/Core/Plugins/ProjectPreOpaqueCallback.h`) is
+`std::function<void(rg::RenderGraphBuilder& builder, rg::RenderPassBlackboard& blackboard, rg::RenderViewId currentView)>` —
+deliberately NOT the same type as `ProjectRenderFeatureCallback` above:
+there is no `privateTarget`/`extent` parameter at all, and - unlike
+every OTHER immediate provider's callback shape in this engine - it is
+handed the frame's own `RenderPassBlackboard&` DIRECTLY, since a
+Project Assembly callback has no other way to reach it (it is not a
+singleton, not reachable through `Core`). The callback is expected to
+call `core.CreateRenderView(...)` and `gte::DrawScene(...)`
+(`src/Game/SceneQuery.h`) itself, entirely self-contained.
+
+**Rule 1 (bolded, not a suggestion): `rg::RenderPassEvent::PreOpaques` is
+the ONLY tag any pass this callback declares may use.** Tagging a pass
+with the implicit `AddRenderPass()` default (`RenderPassEvent::Opaques`
+— the SAME tier `"RenderOpaque"` itself uses) means your pass is no
+longer provably guaranteed to run first — and this exact mistake is
+silently uncaught by `DetectRenderPassEventContradictions()`, which only
+fires on a STRICTLY LATER tag, never an EQUAL one. The engine's own
+`"PreOpaqueFeatures"` provider (`Core.cpp`) runs a second, independent,
+debug-asserted runtime check for exactly this reason — a violation logs
+a `GTE_LOG_WARNING` (category `"RenderFeatureCompositor"`) naming your
+feature and the offending pass, and fails an `assert()` in debug
+builds.
+
+**Rule 2 (bolded, not a suggestion): every Blackboard key you
+`Publish()` under MUST incorporate your callback's own `currentView`
+parameter.** The provider this callback is reached through is
+`ProviderScope::PerActiveView` — your SAME callback runs once per
+active view, in the SAME frame, against the SAME
+`RenderPassBlackboard`. `Publish()`ing one shared, view-agnostic key
+means the SECOND view processed this frame silently overwrites the
+FIRST view's result (`RenderPassBlackboard::Publish()`'s own documented
+"last-publish-wins" contract) — and the later per-view reader for the
+FIRST view then `Fetch()`es the SECOND view's data instead. Wrong,
+silent, and uncaught by any existing diagnostic. Mirror this engine's
+own already-shipped `"AtmosphereViewLut"` precedent
+(`kAtmosphereViewLutGameKey`/`kAtmosphereViewLutSceneKey`, `Core.cpp`):
+maintain two separate `rg::RenderPassId` constants (or hash/derive a
+distinct one per view name) and select between them based on
+`currentView`.
+
+**A PreOpaque feature IS tracked by `ProjectAssemblyRegistrationLedger`
+and IS torn down automatically on hot reload**, exactly like
+PostComposite/PreUI features above — nothing extra required from you
+for this guarantee to hold.
+
+**A registered PreOpaque feature is visible** via `GET /render_graph`'s
+`render_features[]` array (`"stage": "PreOpaque"`, `"blend_mode":
+"None"`) and the Editor's "Render Graph" panel, exactly like every
+other wired stage — enable/disable and live priority re-ordering both
+work for it too.
+
+**A PreOpaque feature's name shares ONE GLOBAL namespace with every
+PostComposite/PreUI feature's name** — not its own, separate one.
+Reusing a name already claimed by a PostComposite/PreUI feature (or
+vice versa) is refused, loudly, exactly like reusing a name within the
+same stage already is.
+
+**Working example** (mirrors `"ProjectAssemblyProbe.ScreenTint"`'s own
+precedent above, but for PreOpaque — writes a distinct per-view marker
+texture and Publish()es it under a view-qualified key):
+
+```cpp
+constexpr gte::rg::RenderPassId kMyShadowMapGameKey = "MyProject.ShadowMap.Game"_passId;
+constexpr gte::rg::RenderPassId kMyShadowMapSceneKey = "MyProject.ShadowMap.Scene"_passId;
+
+core.AddPreOpaquePass(
+    "MyProject.ShadowMap",
+    [&core](gte::rg::RenderGraphBuilder& builder, gte::rg::RenderPassBlackboard& blackboard,
+        gte::rg::RenderViewId currentView) {
+        const bool isGameView = (currentView == gte::rg::RenderViewId::Named("Game"));
+        const gte::rg::RenderViewId shadowView = core.CreateRenderView(
+            isGameView ? "MyProject.ShadowMap.GameView" : "MyProject.ShadowMap.SceneView",
+            /*width=*/1024, /*height=*/1024, /*depthOnly=*/true);
+        gte::RenderTexture* shadowTarget = core.FindRenderViewTarget(shadowView);
+        if (shadowTarget == nullptr) {
+            return;
+        }
+        const gte::rg::TextureHandle shadowHandle = builder.ImportTexture(
+            isGameView ? "MyProject.ShadowMap.GameView" : "MyProject.ShadowMap.SceneView",
+            shadowTarget->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
+
+        builder.AddRenderPass(
+            "MyProject.ShadowMap.Draw", gte::rg::PassKind::Graphics, gte::rg::ViewScope::Shared,
+            gte::rg::RenderPassCategory::General,
+            [shadowHandle](gte::rg::RenderGraphBuilder::PassBuilder& pass) {
+                pass.WriteDepthStencilAttachment(shadowHandle, /*clearDepth=*/1.0f);
+            },
+            [&core](gte::rg::PassContext& ctx) {
+                // gte::DrawScene(core.GetGame().GetRenderSystem(), core.GetRegistry(),
+                //     core.GetRenderer(), request) - see src/Game/SceneQuery.h.
+            },
+            gte::rg::RenderPassDrawKind::DrawMesh,
+            gte::rg::RenderPassEvent::PreOpaques); // <- THE one legal tag, Rule 1 above.
+
+        // Rule 2 above - the key MUST incorporate currentView.
+        const gte::rg::RenderPassId key = isGameView ? kMyShadowMapGameKey : kMyShadowMapSceneKey;
+        blackboard.Publish<gte::rg::TextureHandle>(key, shadowHandle);
+    },
+    /*priority=*/0);
+```
+
+`PostOpaque`/`PostTransparent` remain fully unwired — declaring either
+one, through any entry point, is still refused loudly.
+
 ## Hot Reload
 
 A four-campaign effort, `editor-core-separation-12` through `-15` (each own

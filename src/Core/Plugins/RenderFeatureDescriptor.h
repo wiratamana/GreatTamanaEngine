@@ -27,16 +27,37 @@ namespace gte {
 
 // PHASE0_MASTER_STRATEGY.md Locked Design Decision #1 (editor-core-separation-6
 // campaign): as of that campaign, ONLY RenderFeatureStage::PostComposite and
-// RenderFeatureStage::PreUI are actually wired into the live render graph
-// (RenderFeatureCompositor). PreOpaque/PostOpaque/PostTransparent are declared
-// here for ABI future-proofing ONLY - a caller that declares one of them today
-// is refused, loudly (GTE_LOG_WARNING naming the feature and the unwired
-// stage), and is simply never invoked. Numeric values are stable and must
-// never be renumbered once shipped.
+// RenderFeatureStage::PreUI were wired into the live render graph through
+// THIS enum's own entry point (RenderFeatureCompositor::RegisterProjectFeature(),
+// reached via Core::RegisterProjectRenderFeature()).
+//
+// better-render-pass-5 effort, BLOCK 3
+// (task_manager/better-render-pass-5/PHASE0_MASTER_STRATEGY.md) -
+// RenderFeatureStage::PreOpaque is now ALSO real and wired, but through a
+// DIFFERENT, SEPARATE, PreOpaque-specific entry point:
+// Core::AddPreOpaquePass() / RenderFeatureCompositor::RegisterPreOpaqueFeature()
+// (src/Core/Plugins/RenderFeatureCompositor.h) - NOT RegisterProjectFeature().
+// A caller that still passes RenderFeatureStage::PreOpaque to
+// RegisterProjectFeature() (the OLD, blend-chain-shaped entry point built
+// for PostComposite/PreUI) is STILL refused, loudly, exactly as before -
+// that entry point's own storage shape (a bounded GPU-state slot pool, a
+// private blend target to composite onto) simply does not apply to a
+// PreOpaque pass, which has no "screen so far" to blend onto (nothing has
+// been drawn yet this point in the frame) - it draws into its own,
+// self-managed render view instead and Publish()es straight to the
+// RenderPassBlackboard. See docs/conventions/project-assembly-system.md's
+// own "PreOpaque passes" subsection for the full, authoritative contract.
+//
+// PostOpaque/PostTransparent remain NOT WIRED, under BOTH entry points -
+// declared here for ABI future-proofing ONLY - a caller that declares
+// either one today is refused, loudly (GTE_LOG_WARNING naming the feature
+// and the unwired stage), and is simply never invoked. Numeric values are
+// stable and must never be renumbered once shipped.
 enum class RenderFeatureStage : std::uint32_t {
-    PreOpaque       = 0,  // NOT WIRED - declared, refused if used.
-    PostOpaque      = 1,  // NOT WIRED - declared, refused if used.
-    PostTransparent = 2,  // NOT WIRED - declared, refused if used.
+    PreOpaque       = 0,  // WIRED - but ONLY via Core::AddPreOpaquePass();
+                          // RegisterProjectFeature() still refuses it (see above).
+    PostOpaque      = 1,  // NOT WIRED - declared, refused if used, under either entry point.
+    PostTransparent = 2,  // NOT WIRED - declared, refused if used, under either entry point.
     PostComposite   = 3,  // WIRED - today's existing single hook point.
     PreUI           = 4,  // WIRED - runs immediately AFTER every PostComposite
                           // entry, same hook point, same frame.
