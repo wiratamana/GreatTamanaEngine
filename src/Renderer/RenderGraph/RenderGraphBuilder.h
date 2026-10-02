@@ -729,6 +729,33 @@ public:
     TextureHandle GetOrCreatePersistentTexture(
         PersistentTextureCacheToken& token, const char* owner, const char* name, const TextureDesc& desc);
 
+    // render-pass-3-campaign (better-render-pass-5 effort), BLOCK 3,
+    // PHASE1 - two tiny, read-only accessors over m_passes (below),
+    // added SPECIFICALLY so a provider that invokes a Project Assembly
+    // callback which declares passes directly against this builder
+    // (e.g. the new "PreOpaqueFeatures" provider, Core.cpp) can snapshot
+    // "how many passes existed before the callback ran" and "how many
+    // exist after", then inspect every NEWLY added pass's own
+    // RenderPassEvent - this is the ONLY mechanism in this engine that
+    // can catch a pass whose RenderPassEvent tag EXACTLY EQUALS (not
+    // strictly later than) a known-bad default, since
+    // DetectRenderPassEventContradictions() (RenderGraphCompiler.h) only
+    // ever fires on a STRICT inequality. Deliberately tiny/read-only -
+    // no new mutation surface, no new invariant to maintain beyond what
+    // m_passes already guarantees.
+    std::size_t DeclaredPassCount() const noexcept { return m_passes.size(); }
+
+    // `index` must be < DeclaredPassCount() - asserted in debug builds
+    // (mirrors this class's own existing AddPass() assert-on-misuse
+    // discipline); out-of-range access in a release build is undefined
+    // behavior, exactly like any other unchecked std::vector::operator[]
+    // use already present in this file.
+    RenderPassEvent PassEventAt(std::size_t index) const
+    {
+        assert(index < m_passes.size() && "RenderGraphBuilder::PassEventAt() - index out of range");
+        return m_passes[index].renderPassEvent;
+    }
+
     // Consumes this builder, handing its whole in-progress description
     // over to Phase 3's compiler. Safe to call at most meaningfully once
     // per builder instance (a builder is a one-frame-lifetime object, per
