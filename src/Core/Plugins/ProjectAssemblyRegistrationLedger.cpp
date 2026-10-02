@@ -75,6 +75,20 @@ void ProjectAssemblyRegistrationLedger::RecordRenderFeature(const std::string& d
     GetOrCreateEntryLocked(m_activeProjectStack.back()).renderFeatureNames.push_back(debugName);
 }
 
+// better-render-pass-5 effort, BLOCK 3, PHASE4 - mirrors
+// RecordRenderFeature()'s own body shape exactly. Called ONLY from
+// Core::AddPreOpaquePass()'s own success path (that call can genuinely
+// fail - duplicate name), so no over-eager/spurious name ever lands in
+// the ledger.
+void ProjectAssemblyRegistrationLedger::RecordPreOpaqueFeature(const std::string& debugName)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_activeProjectStack.empty()) {
+        return; // Safe no-op - no active BeginRecordingFor() bracket (e.g. an engine built-in registration).
+    }
+    GetOrCreateEntryLocked(m_activeProjectStack.back()).preOpaqueFeatureNames.push_back(debugName);
+}
+
 void ProjectAssemblyRegistrationLedger::RecordPanel(const std::string& panelName)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
@@ -127,6 +141,19 @@ void ProjectAssemblyRegistrationLedger::UnregisterEverythingFor(const std::strin
     for (auto nameIt = entry.panelNames.rbegin(); nameIt != entry.panelNames.rend(); ++nameIt) {
         EditorPanelRegistry::Instance().UnregisterPluginPanel(*nameIt);
     }
+    // better-render-pass-5 effort, BLOCK 3, PHASE4 - PreOpaque features
+    // are torn down in the SAME teardown pass as renderFeatureNames,
+    // immediately BEFORE it (a PreOpaque feature's own callback is
+    // exactly as hazardous across a hot-reload cycle as an existing
+    // PostComposite/PreUI feature's callback already is - a
+    // std::function closure capturing state that lives inside the
+    // registering Project Assembly's own .dll image - and is itself a
+    // pure producer with no dependency, in this teardown call, on any
+    // other category also being torn down here).
+    for (auto nameIt = entry.preOpaqueFeatureNames.rbegin(); nameIt != entry.preOpaqueFeatureNames.rend();
+        ++nameIt) {
+        core.RemovePreOpaquePass(nameIt->c_str());
+    }
     // editor-core-separation-23 campaign, PHASE4
     // (PHASE4_HOT_RELOAD_LEDGER_TEARDOWN_WIRING.md) - render FEATURES are
     // torn down BEFORE render-pass PROVIDERS: a render feature's own
@@ -150,6 +177,7 @@ void ProjectAssemblyRegistrationLedger::UnregisterEverythingFor(const std::strin
         "UnregisterEverythingFor('" + projectName + "') - unregistered " +
         std::to_string(entry.componentTypeNames.size()) + " component type(s), " +
         std::to_string(entry.panelNames.size()) + " panel(s), " +
+        std::to_string(entry.preOpaqueFeatureNames.size()) + " pre-opaque feature(s), " +
         std::to_string(entry.renderFeatureNames.size()) + " render feature(s), " +
         std::to_string(entry.renderPassNames.size()) + " render pass(es).");
 

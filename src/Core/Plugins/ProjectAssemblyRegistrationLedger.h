@@ -70,6 +70,11 @@ public:
     // calls unconditionally, since that underlying call can never itself
     // fail) - mirrors RecordRenderPass()'s own body shape exactly.
     void RecordRenderFeature(const std::string& debugName);
+    // better-render-pass-5 effort, BLOCK 3, PHASE4 - mirrors
+    // RecordRenderFeature()'s own body shape exactly. Called ONLY from
+    // Core::AddPreOpaquePass()'s own success path (that call can
+    // genuinely fail - duplicate name), never unconditionally.
+    void RecordPreOpaqueFeature(const std::string& debugName);
     void RecordPanel(const std::string& panelName);
     void RecordComponentType(const std::string& typeName);
 
@@ -82,6 +87,16 @@ public:
         // real teardown LOOP order (renderFeatureNames before renderPassNames)
         // is.
         std::vector<std::string> renderFeatureNames;
+        // better-render-pass-5 effort, BLOCK 3, PHASE4 - a Project
+        // Assembly's own PreOpaque feature name(s)
+        // (Core::AddPreOpaquePass(), better-render-pass-5 effort). Torn
+        // down in the SAME teardown pass as renderFeatureNames,
+        // immediately before it (see UnregisterEverythingFor()'s own
+        // ordering comment, .cpp) - a PreOpaque feature is itself a pure
+        // producer with no dependency, in THIS teardown call, on any
+        // other Project-Assembly-registered category also being torn
+        // down here.
+        std::vector<std::string> preOpaqueFeatureNames;
         std::vector<std::string> panelNames;
         std::vector<std::string> componentTypeNames;
     };
