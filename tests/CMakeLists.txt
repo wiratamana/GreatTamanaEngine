@@ -2347,6 +2347,11 @@ set(GTE_TEST_SOURCES
     Renderer/RenderGraph/RenderGraphDebugVolumeTextureRegistryTests.cpp
     Renderer/RenderGraph/RenderPipelineTests.cpp
     # Block 4 "Global Scene Services Descriptor Set" campaign
+    # (task_manager/better-render-pass-6), PHASE3 - minimal, device-backed
+    # smoke test for Pipeline's new, trailing, defaulted
+    # `sceneServicesSetLayout` constructor parameter (src/Renderer/Pipeline.h).
+    Renderer/PipelineTests.cpp
+    # Block 4 "Global Scene Services Descriptor Set" campaign
     # (task_manager/better-render-pass-6), PHASE1 - pure-logic distinctness
     # test for SceneServiceBlackboardKey() (src/Renderer/SceneServicesDescriptorSet.h).
     Renderer/SceneServicesDescriptorSetTests.cpp

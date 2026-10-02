@@ -149,10 +149,24 @@ public:
     // buffer set) are unrelated; asserted (debug builds only, see
     // Pipeline.cpp) to never both be non-VK_NULL_HANDLE at once (Locked
     // Design Decision 8, PHASE0_MASTER_STRATEGY.md - no Pipeline needs
-    // both today). Appended as a genuinely new TRAILING parameter (after
-    // `debugName`) specifically so every existing call site - which only
-    // ever supplies positional arguments up through `debugName` - keeps
-    // compiling completely unmodified.
+    // both today).
+    //
+    // Global Scene Services Descriptor Set campaign (better-render-pass-6),
+    // PHASE3 (task_manager/better-render-pass-6/PHASE3_PIPELINE_SET1_WIRING.md)
+    // - `sceneServicesSetLayout` (default VK_NULL_HANDLE) is a genuinely NEW,
+    // trailing parameter, appended AFTER `instanceBufferSetLayout` so every
+    // existing call site (which only ever supplies positional arguments up
+    // through `instanceBufferSetLayout`) keeps compiling completely
+    // unmodified. When non-VK_NULL_HANDLE, it must be Core's one
+    // SceneServicesDescriptorSet::Layout() exactly, and the resulting
+    // VkPipelineLayout carries it at `set = 1`, CONTIGUOUSLY with whatever
+    // (if anything) occupies `set = 0` - Vulkan forbids a hole at `set = 0`
+    // if `set = 1` is present, so when neither `materialSetLayout` nor
+    // `instanceBufferSetLayout` is supplied, this Pipeline synthesizes its
+    // own small, owned, zero-binding filler layout for `set = 0` (see
+    // Pipeline.cpp) rather than leaving a gap. Owned by whoever calls in
+    // (Core's one SceneServicesDescriptorSet instance), never reached-for by
+    // Pipeline itself. See HasSceneServicesSet() below.
     //
     // Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE3 - this
     // single-VkFormat constructor is now a thin forwarder (see Pipeline.cpp)
@@ -163,7 +177,8 @@ public:
     Pipeline(VkDevice device, VkFormat colorFormat, VkFormat depthFormat, const std::string& vertexShaderSpirvPath,
         const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor,
         VkDescriptorSetLayout materialSetLayout = VK_NULL_HANDLE, const char* debugName = nullptr,
-        VkDescriptorSetLayout instanceBufferSetLayout = VK_NULL_HANDLE);
+        VkDescriptorSetLayout instanceBufferSetLayout = VK_NULL_HANDLE,
+        VkDescriptorSetLayout sceneServicesSetLayout = VK_NULL_HANDLE);
 
     // Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE3 - the
     // real N-color-attachment constructor: builds a VkPipelineRenderingCreateInfo
@@ -175,12 +190,14 @@ public:
     // be non-empty and no larger than kPipelineMaxColorAttachments (asserted
     // in the .cpp, debug builds only). Every other parameter behaves
     // identically to the single-format constructor above, including the new
-    // trailing `instanceBufferSetLayout` (render-pass-5 campaign, PHASE2).
+    // trailing `instanceBufferSetLayout` (render-pass-5 campaign, PHASE2) and
+    // `sceneServicesSetLayout` (better-render-pass-6 campaign, PHASE3).
     Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFormat depthFormat,
         const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath,
         VertexLayout vertexLayout = VertexLayout::PositionColor,
         VkDescriptorSetLayout materialSetLayout = VK_NULL_HANDLE, const char* debugName = nullptr,
-        VkDescriptorSetLayout instanceBufferSetLayout = VK_NULL_HANDLE);
+        VkDescriptorSetLayout instanceBufferSetLayout = VK_NULL_HANDLE,
+        VkDescriptorSetLayout sceneServicesSetLayout = VK_NULL_HANDLE);
     ~Pipeline();
 
     Pipeline(const Pipeline&) = delete;
@@ -208,6 +225,17 @@ public:
     // purely descriptive accessor" precedent.
     VertexLayout VertexLayoutKind() const noexcept { return m_vertexLayout; }
 
+    // Global Scene Services Descriptor Set campaign (better-render-pass-6),
+    // PHASE3 - true if this Pipeline was built with a non-VK_NULL_HANDLE
+    // `sceneServicesSetLayout` (see the constructor's own comment above),
+    // i.e. its VkPipelineLayout carries a real `set = 1`. Mirrors
+    // VertexLayoutKind() above's own "small, additive, purely descriptive
+    // accessor" precedent - used downstream (PHASE5) to gate whether
+    // Renderer::Submit() is given a scene-services VkDescriptorSet to bind,
+    // and (PHASE0 global rule 10) to assert Renderer::SubmitIndirect() is
+    // never called with a Pipeline built this way.
+    bool HasSceneServicesSet() const noexcept { return m_hasSceneServicesSet; }
+
 private:
     void Destroy() noexcept;
 
@@ -216,6 +244,15 @@ private:
     VkPipeline m_pipeline = VK_NULL_HANDLE;
     std::string m_debugName;
     VertexLayout m_vertexLayout = VertexLayout::PositionColor;
+
+    // Global Scene Services Descriptor Set campaign (better-render-pass-6),
+    // PHASE3 - see HasSceneServicesSet() above.
+    bool m_hasSceneServicesSet = false;
+    // Owned ONLY when this Pipeline needed a zero-binding filler at set = 0
+    // (sceneServicesSetLayout != VK_NULL_HANDLE AND neither
+    // materialSetLayout nor instanceBufferSetLayout was supplied).
+    // VK_NULL_HANDLE otherwise.
+    VkDescriptorSetLayout m_syntheticSetZeroLayout = VK_NULL_HANDLE;
 };
 
 } // namespace gte

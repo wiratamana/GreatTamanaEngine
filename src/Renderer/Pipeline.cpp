@@ -30,15 +30,17 @@ bool DepthFormatHasStencil(VkFormat format)
 
 Pipeline::Pipeline(VkDevice device, VkFormat colorFormat, VkFormat depthFormat, const std::string& vertexShaderSpirvPath,
     const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout, VkDescriptorSetLayout materialSetLayout,
-    const char* debugName, VkDescriptorSetLayout instanceBufferSetLayout)
+    const char* debugName, VkDescriptorSetLayout instanceBufferSetLayout, VkDescriptorSetLayout sceneServicesSetLayout)
     : Pipeline(device, std::span<const VkFormat>(&colorFormat, 1), depthFormat, vertexShaderSpirvPath,
-          fragmentShaderSpirvPath, vertexLayout, materialSetLayout, debugName, instanceBufferSetLayout)
+          fragmentShaderSpirvPath, vertexLayout, materialSetLayout, debugName, instanceBufferSetLayout,
+          sceneServicesSetLayout)
 {
 }
 
 Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFormat depthFormat,
     const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout,
-    VkDescriptorSetLayout materialSetLayout, const char* debugName, VkDescriptorSetLayout instanceBufferSetLayout)
+    VkDescriptorSetLayout materialSetLayout, const char* debugName, VkDescriptorSetLayout instanceBufferSetLayout,
+    VkDescriptorSetLayout sceneServicesSetLayout)
     : m_device(device)
     , m_debugName(debugName != nullptr ? debugName : std::string())
     , m_vertexLayout(vertexLayout)
@@ -68,7 +70,6 @@ Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFo
         vkDestroyShaderModule(device, vertModule, nullptr);
         throw;
     }
-
     try {
         VkPipelineShaderStageCreateInfo stages[2]{};
         stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -218,14 +219,50 @@ Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFo
         // same Pipeline today (Locked Design Decision 8,
         // PHASE0_MASTER_STRATEGY.md: textured instanced batches are out of
         // scope this campaign), asserted below (debug builds only).
+        m_hasSceneServicesSet = (sceneServicesSetLayout != VK_NULL_HANDLE);
+
         assert(!(materialSetLayout != VK_NULL_HANDLE && instanceBufferSetLayout != VK_NULL_HANDLE)
             && "Pipeline: materialSetLayout and instanceBufferSetLayout are mutually exclusive - no Pipeline needs "
                "both at once (render-pass-5 campaign, Locked Design Decision 8).");
-        const VkDescriptorSetLayout setLayoutToUse =
+
+        const VkDescriptorSetLayout setZeroLayout =
             materialSetLayout != VK_NULL_HANDLE ? materialSetLayout : instanceBufferSetLayout;
-        if (setLayoutToUse != VK_NULL_HANDLE) {
-            layoutInfo.setLayoutCount = 1;
-            layoutInfo.pSetLayouts = &setLayoutToUse;
+
+        // Global Scene Services Descriptor Set campaign (better-render-pass-6),
+        // PHASE3 (task_manager/better-render-pass-6/PHASE3_PIPELINE_SET1_WIRING.md)
+        // - when sceneServicesSetLayout is supplied, build a CONTIGUOUS set-
+        // layout array ([set 0][set 1]) - Vulkan forbids a hole at set = 0
+        // if set = 1 is present. If nothing already occupies set = 0,
+        // synthesize a small, owned, zero-binding filler layout rather than
+        // leaving a gap (a descriptor set layout with zero bindings is never
+        // "statically used" by any shader stage, so Vulkan's binding
+        // validation never requires anything bound for set 0 in this case -
+        // no filler VkDescriptorSet is ever needed, only the filler
+        // VkDescriptorSetLayout). `setLayouts` must stay alive until
+        // vkCreatePipelineLayout() is actually called a few lines below -
+        // it is a local in this same scope, same as setZeroLayout above.
+        std::vector<VkDescriptorSetLayout> setLayouts;
+        if (sceneServicesSetLayout != VK_NULL_HANDLE) {
+            if (setZeroLayout != VK_NULL_HANDLE) {
+                setLayouts = { setZeroLayout, sceneServicesSetLayout };
+            } else {
+                VkDescriptorSetLayoutCreateInfo fillerInfo{};
+                fillerInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+                fillerInfo.bindingCount = 0;
+                if (vkCreateDescriptorSetLayout(device, &fillerInfo, nullptr, &m_syntheticSetZeroLayout) !=
+                    VK_SUCCESS) {
+                    throw std::runtime_error(
+                        "Pipeline: vkCreateDescriptorSetLayout (synthetic set-0 filler) failed.");
+                }
+                setLayouts = { m_syntheticSetZeroLayout, sceneServicesSetLayout };
+            }
+        } else if (setZeroLayout != VK_NULL_HANDLE) {
+            setLayouts = { setZeroLayout };
+        }
+
+        if (!setLayouts.empty()) {
+            layoutInfo.setLayoutCount = static_cast<std::uint32_t>(setLayouts.size());
+            layoutInfo.pSetLayouts = setLayouts.data();
         }
 
         if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &m_layout) != VK_SUCCESS) {
@@ -270,6 +307,16 @@ Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFo
             throw std::runtime_error("Pipeline: vkCreateGraphicsPipelines failed.");
         }
     } catch (...) {
+        // Global Scene Services Descriptor Set campaign (better-render-pass-6),
+        // PHASE3 - if the synthetic set-0 filler layout was already created
+        // before a LATER failure (vkCreatePipelineLayout/
+        // vkCreateGraphicsPipelines), it must be cleaned up here too - it is
+        // never referenced by m_layout/m_pipeline, so nothing else would
+        // ever destroy it on this failure path.
+        if (m_syntheticSetZeroLayout != VK_NULL_HANDLE) {
+            vkDestroyDescriptorSetLayout(device, m_syntheticSetZeroLayout, nullptr);
+            m_syntheticSetZeroLayout = VK_NULL_HANDLE;
+        }
         vkDestroyShaderModule(device, fragModule, nullptr);
         vkDestroyShaderModule(device, vertModule, nullptr);
         throw;
@@ -290,6 +337,8 @@ Pipeline::Pipeline(Pipeline&& other) noexcept
     , m_pipeline(std::exchange(other.m_pipeline, VK_NULL_HANDLE))
     , m_debugName(std::move(other.m_debugName))
     , m_vertexLayout(other.m_vertexLayout)
+    , m_hasSceneServicesSet(other.m_hasSceneServicesSet)
+    , m_syntheticSetZeroLayout(std::exchange(other.m_syntheticSetZeroLayout, VK_NULL_HANDLE))
 {
 }
 
@@ -302,6 +351,8 @@ Pipeline& Pipeline::operator=(Pipeline&& other) noexcept
         m_pipeline = std::exchange(other.m_pipeline, VK_NULL_HANDLE);
         m_debugName = std::move(other.m_debugName);
         m_vertexLayout = other.m_vertexLayout;
+        m_hasSceneServicesSet = other.m_hasSceneServicesSet;
+        m_syntheticSetZeroLayout = std::exchange(other.m_syntheticSetZeroLayout, VK_NULL_HANDLE);
     }
     return *this;
 }
@@ -315,6 +366,10 @@ void Pipeline::Destroy() noexcept
     if (m_layout != VK_NULL_HANDLE) {
         vkDestroyPipelineLayout(m_device, m_layout, nullptr);
         m_layout = VK_NULL_HANDLE;
+    }
+    if (m_syntheticSetZeroLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(m_device, m_syntheticSetZeroLayout, nullptr);
+        m_syntheticSetZeroLayout = VK_NULL_HANDLE;
     }
 }
 
