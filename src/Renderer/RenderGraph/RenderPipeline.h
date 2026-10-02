@@ -180,6 +180,14 @@ private:
     std::uint64_t m_hash = 0;
 };
 
+// Generic Core-owned key for a low-frequency, discoverable, string-named cross-feature handoff through
+// RenderPassBlackboard - NOT a substitute for a bounded, binding-stable slot registry (see
+// SceneServiceBlackboardKey(), Renderer/SceneServicesDescriptorSet.h, for that different shape). `name`
+// must be a string literal or otherwise have static storage duration - never a temporary buffer's pointer.
+// Only ever call this from the single thread that performs frame declaration (the same thread that calls
+// RenderPipeline::DeclareInto()) - never from a job-system worker thread, never cached across threads.
+RenderPassId NamedSceneResourceKey(const char* name, RenderViewId view) noexcept;
+
 // --- RenderPassDesc (design doc Section 2 - WITH a deliberate, documented
 // extension beyond the design doc's own shown shape) -----------------------
 //
