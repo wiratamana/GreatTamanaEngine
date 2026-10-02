@@ -89,6 +89,24 @@ void ProjectAssemblyRegistrationLedger::RecordPreOpaqueFeature(const std::string
     GetOrCreateEntryLocked(m_activeProjectStack.back()).preOpaqueFeatureNames.push_back(debugName);
 }
 
+void ProjectAssemblyRegistrationLedger::RecordPostOpaqueFeature(const std::string& debugName)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_activeProjectStack.empty()) {
+        return; // Safe no-op - no active BeginRecordingFor() bracket (e.g. an engine built-in registration).
+    }
+    GetOrCreateEntryLocked(m_activeProjectStack.back()).postOpaqueFeatureNames.push_back(debugName);
+}
+
+void ProjectAssemblyRegistrationLedger::RecordPostTransparentFeature(const std::string& debugName)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_activeProjectStack.empty()) {
+        return; // Safe no-op - no active BeginRecordingFor() bracket (e.g. an engine built-in registration).
+    }
+    GetOrCreateEntryLocked(m_activeProjectStack.back()).postTransparentFeatureNames.push_back(debugName);
+}
+
 void ProjectAssemblyRegistrationLedger::RecordPanel(const std::string& panelName)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
@@ -169,6 +187,18 @@ void ProjectAssemblyRegistrationLedger::UnregisterEverythingFor(const std::strin
     for (auto nameIt = entry.renderFeatureNames.rbegin(); nameIt != entry.renderFeatureNames.rend(); ++nameIt) {
         core.UnregisterProjectRenderFeature(nameIt->c_str());
     }
+    // PostOpaque/PostTransparent features are producers a renderFeatureNames
+    // entry may Fetch() off the blackboard, so they tear down AFTER the
+    // consumer (renderFeatureNames) and BEFORE the render-pass providers
+    // (renderPassNames) they themselves depend on.
+    for (auto nameIt = entry.postOpaqueFeatureNames.rbegin(); nameIt != entry.postOpaqueFeatureNames.rend();
+        ++nameIt) {
+        core.RemovePostOpaquePass(nameIt->c_str());
+    }
+    for (auto nameIt = entry.postTransparentFeatureNames.rbegin();
+        nameIt != entry.postTransparentFeatureNames.rend(); ++nameIt) {
+        core.RemovePostTransparentPass(nameIt->c_str());
+    }
     for (auto nameIt = entry.renderPassNames.rbegin(); nameIt != entry.renderPassNames.rend(); ++nameIt) {
         core.UnregisterProjectRenderPassProvider(nameIt->c_str());
     }
@@ -179,6 +209,8 @@ void ProjectAssemblyRegistrationLedger::UnregisterEverythingFor(const std::strin
         std::to_string(entry.panelNames.size()) + " panel(s), " +
         std::to_string(entry.preOpaqueFeatureNames.size()) + " pre-opaque feature(s), " +
         std::to_string(entry.renderFeatureNames.size()) + " render feature(s), " +
+        std::to_string(entry.postOpaqueFeatureNames.size()) + " post-opaque feature(s), " +
+        std::to_string(entry.postTransparentFeatureNames.size()) + " post-transparent feature(s), " +
         std::to_string(entry.renderPassNames.size()) + " render pass(es).");
 
     m_entries.erase(it);

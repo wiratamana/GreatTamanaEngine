@@ -75,6 +75,12 @@ public:
     // Core::AddPreOpaquePass()'s own success path (that call can
     // genuinely fail - duplicate name), never unconditionally.
     void RecordPreOpaqueFeature(const std::string& debugName);
+    // Called ONLY from Core::AddPostOpaquePass()'s own success path - that
+    // call can genuinely fail (duplicate name), so no over-eager/spurious
+    // name ever lands in the ledger.
+    void RecordPostOpaqueFeature(const std::string& debugName);
+    // Same contract, for Core::AddPostTransparentPass().
+    void RecordPostTransparentFeature(const std::string& debugName);
     void RecordPanel(const std::string& panelName);
     void RecordComponentType(const std::string& typeName);
 
@@ -87,6 +93,8 @@ public:
         // real teardown LOOP order (renderFeatureNames before renderPassNames)
         // is.
         std::vector<std::string> renderFeatureNames;
+        std::vector<std::string> postOpaqueFeatureNames;
+        std::vector<std::string> postTransparentFeatureNames;
         // better-render-pass-5 effort, BLOCK 3, PHASE4 - a Project
         // Assembly's own PreOpaque feature name(s)
         // (Core::AddPreOpaquePass(), better-render-pass-5 effort). Torn
