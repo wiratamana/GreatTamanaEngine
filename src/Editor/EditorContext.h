@@ -231,6 +231,21 @@ struct EditorContext {
     // phase's own completion report.
     VkDescriptorSet gbufferValidationOutputDescriptor = VK_NULL_HANDLE;
 
+    // task_manager/better-render-pass-7 campaign (better-render-pass-3
+    // campaign, BLOCK5 - Array/Cubemap Texture Resources), PHASE5
+    // (PHASE5_MANUAL_TIER2_VERIFICATION_AND_LIVE_SMOKE_TEST.md) - the
+    // "Scene" panel's own small, permanent "Show TextureArray Validation
+    // (debug)" checkbox (Panels/ScenePanel.cpp). Read by
+    // ImGuiEditorLayer::AddTextureArrayValidationPass() to decide whether to
+    // even declare the TextureArray Validation pass pair at all this frame.
+    // Unlike showBlurredSceneOutput/showGBufferValidationOutput above, this
+    // tool has no dedicated ImGui preview of its own - its 4 per-layer
+    // outputs are independently inspectable via
+    // GET /get_texture?texture_name=ManualVerifyArrayLayerN only (see
+    // src/Editor/TextureArrayValidation.h's own header comment), so this
+    // checkbox purely gates the pass declaration, nothing else.
+    bool showTextureArrayValidationOutput = false;
+
     // frame-debugger-1 campaign (task_manager/frame-debugger-1/
     // PHASE3_EDITOR_PAUSE_STEP_STATE_AND_TOOLBAR_UI.md) - true whenever the
     // user has toggled gameplay simulation paused via the toolbar's

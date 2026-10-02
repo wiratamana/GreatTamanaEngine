@@ -9,6 +9,7 @@
 #include "EditorContext.h"
 #include "EditorGpuMemoryNameOverlay.h"
 #include "GBufferValidation.h"
+#include "TextureArrayValidation.h"
 #include "GpuDrivenBatchTestSpawner.h"
 #include "ImGuiIdConflictGuard.h" // task_manager/editor-core-separation-10 campaign, PHASE1.
 #include "ImGuiMemoryTracker.h"
@@ -515,6 +516,29 @@ public:
         m_gbufferValidation.FinalizeForSampling(cmd);
     }
 
+    // task_manager/better-render-pass-7 campaign (better-render-pass-3
+    // campaign, BLOCK5 - Array/Cubemap Texture Resources), PHASE5 - see
+    // IEditorLayer::AddTextureArrayValidationPass()'s own doc comment.
+    // Gated on BOTH the "Show TextureArray Validation (debug)" toggle AND
+    // the Scene panel actually being visible last frame
+    // (m_ctx.sceneViewVisible) - mirrors AddGBufferValidationPass() above
+    // exactly, minus the sceneExtent parameter (this pass's own 64x64x4
+    // workload is entirely self-contained/fixed-size - see
+    // TextureArrayValidation.h's own header comment).
+    std::optional<IEditorLayer::TextureArrayValidationHandles> AddTextureArrayValidationPass(
+        rg::RenderGraphBuilder& builder, Renderer& renderer, rg::RenderPassToggleRegistry* toggleRegistry) override
+    {
+        if (!m_ctx.showTextureArrayValidationOutput || !m_ctx.sceneViewVisible) {
+            return std::nullopt;
+        }
+        return m_textureArrayValidation.AddPass(builder, renderer, toggleRegistry);
+    }
+
+    void FinalizeTextureArrayValidationForSampling(VkCommandBuffer cmd) override
+    {
+        m_textureArrayValidation.FinalizeForSampling(cmd);
+    }
+
     // editor-core-separation-26 campaign, PHASE6 - see
     // IEditorLayer::AddBlitValidationPass()'s own doc comment.
     std::optional<rg::TextureHandle> AddBlitValidationPass(
@@ -983,6 +1007,10 @@ public:
     // checkboxes already do.
     void SetShowBlurredSceneOutput(bool enabled) override { m_ctx.showBlurredSceneOutput = enabled; }
     void SetShowGBufferValidationOutput(bool enabled) override { m_ctx.showGBufferValidationOutput = enabled; }
+    void SetShowTextureArrayValidationOutput(bool enabled) override
+    {
+        m_ctx.showTextureArrayValidationOutput = enabled;
+    }
 
     // editor-core-separation-16 campaign (On-Engine Project Workflow
     // plan, BIG-STEP 2), PHASE4 - see IEditorLayer::
@@ -1122,6 +1150,15 @@ private:
     // No ImGui-facing preview view needed (Locked Decision 3 - verified
     // purely via GET /get_texture, no in-Editor display).
     BlitValidation m_blitValidation;
+
+    // task_manager/better-render-pass-7 campaign (better-render-pass-3
+    // campaign, BLOCK5 - Array/Cubemap Texture Resources), PHASE5 - see
+    // TextureArrayValidation.h. No ImGui-facing preview view needed (its 4
+    // per-layer outputs are independently inspectable via
+    // GET /get_texture?texture_name=ManualVerifyArrayLayerN only, mirroring
+    // m_blitValidation's own identical "no in-Editor display" precedent
+    // immediately above).
+    TextureArrayValidation m_textureArrayValidation;
 
     // The Scene view's own, independently-orbitable camera (see
     // EditorCamera.h) - updated once per frame by Panels/ScenePanel.cpp

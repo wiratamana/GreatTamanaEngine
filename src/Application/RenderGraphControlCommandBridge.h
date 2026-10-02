@@ -41,6 +41,12 @@ enum class RenderGraphControlCommandKind {
     SetFeaturePriority,
     SetBlurEnabled,
     SetGBufferEnabled,
+    // task_manager/better-render-pass-7 campaign (better-render-pass-3
+    // campaign, BLOCK5 - Array/Cubemap Texture Resources), PHASE5 - mirrors
+    // SetGBufferEnabled's own exact shape, for
+    // IEditorLayer::SetShowTextureArrayValidationOutput() (see
+    // src/Editor/TextureArrayValidation.h).
+    SetTextureArrayValidationEnabled,
 };
 
 struct RenderGraphControlSetPassEnabledCommand {
@@ -59,7 +65,7 @@ struct RenderGraphControlSetFeaturePriorityCommand {
 };
 
 struct RenderGraphControlSetBoolCommand {
-    bool enabled = false; // Used by both SetBlurEnabled and SetGBufferEnabled.
+    bool enabled = false; // Used by SetBlurEnabled/SetGBufferEnabled/SetTextureArrayValidationEnabled.
 };
 
 // One pending render-graph-control command, tagged by `kind` - only the ONE
@@ -72,6 +78,7 @@ struct RenderGraphControlCommandRequest {
     RenderGraphControlSetFeaturePriorityCommand setFeaturePriority;
     RenderGraphControlSetBoolCommand setBlurEnabled;
     RenderGraphControlSetBoolCommand setGBufferEnabled;
+    RenderGraphControlSetBoolCommand setTextureArrayValidationEnabled;
 };
 
 // One reported pass toggle state - a completely independent, Application-

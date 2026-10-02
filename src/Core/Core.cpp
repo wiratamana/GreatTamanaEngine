@@ -1773,6 +1773,22 @@ void Core::BuildFrame()
                         }
                     }
 
+                    // task_manager/better-render-pass-7 campaign
+                    // (better-render-pass-3 campaign, BLOCK5 - Array/Cubemap
+                    // Texture Resources), PHASE5 - see
+                    // IEditorLayer::AddTextureArrayValidationPass()'s own
+                    // doc comment.
+                    if (sceneVisibleForBlurValidation && m_editorLayer != nullptr) {
+                        if (const std::optional<IEditorLayer::TextureArrayValidationHandles> textureArrayHandles =
+                                m_editorLayer->AddTextureArrayValidationPass(
+                                    b, m_renderer, &m_renderPassToggleRegistry)) {
+                            outputs.push_back(textureArrayHandles->layer0);
+                            outputs.push_back(textureArrayHandles->layer1);
+                            outputs.push_back(textureArrayHandles->layer2);
+                            outputs.push_back(textureArrayHandles->layer3);
+                        }
+                    }
+
                     // editor-core-separation-26 campaign, PHASE6 (Locked
                     // Decision 3) - always declared when an Editor layer is
                     // present (no bespoke feature toggle of its own - see
@@ -1874,6 +1890,22 @@ void Core::BuildFrame()
                 "GBufferNormal", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
             m_renderGraph.NotifyDebugTextureStateOverride(
                 "GBufferVisualized", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
+
+            // task_manager/better-render-pass-7 campaign (better-render-pass-3
+            // campaign, BLOCK5 - Array/Cubemap Texture Resources), PHASE5 -
+            // see IEditorLayer::FinalizeTextureArrayValidationForSampling()'s
+            // own doc comment.
+            if (m_editorLayer != nullptr) {
+                m_editorLayer->FinalizeTextureArrayValidationForSampling(offscreenCmd);
+            }
+            m_renderGraph.NotifyDebugTextureStateOverride(
+                "ManualVerifyArrayLayer0", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
+            m_renderGraph.NotifyDebugTextureStateOverride(
+                "ManualVerifyArrayLayer1", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
+            m_renderGraph.NotifyDebugTextureStateOverride(
+                "ManualVerifyArrayLayer2", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
+            m_renderGraph.NotifyDebugTextureStateOverride(
+                "ManualVerifyArrayLayer3", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
 
             m_renderer.EndOffscreenRenderGraphRecording();
 

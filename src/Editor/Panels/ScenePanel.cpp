@@ -68,6 +68,17 @@ void BuildScenePanel(Game& game, Renderer& renderer, EditorContext& ctx, EditorC
             // completion report for the full reasoning).
             ImGui::Checkbox("Show GBuffer Validation (debug)", &ctx.showGBufferValidationOutput);
 
+            // task_manager/better-render-pass-7 campaign (better-render-pass-3
+            // campaign, BLOCK5), PHASE5 - a third, small, independently-
+            // toggleable debug checkbox: when on, the "TextureArrayValidation"
+            // compute pass pair is declared this frame (see
+            // src/Editor/TextureArrayValidation.h). Its 4 per-layer outputs
+            // are independently inspectable via
+            // GET /get_texture?texture_name=ManualVerifyArrayLayerN only -
+            // this checkbox never swaps the "Scene" panel's own displayed
+            // image (unlike the two checkboxes above).
+            ImGui::Checkbox("Show TextureArray Validation (debug)", &ctx.showTextureArrayValidationOutput);
+
             const bool showingBlurredOutput =
                 ctx.showBlurredSceneOutput && ctx.blurredSceneOutputDescriptor != VK_NULL_HANDLE;
             // Blurred output takes priority if somehow both debug toggles

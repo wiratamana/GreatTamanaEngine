@@ -781,6 +781,11 @@ int EditorHost::Run()
                 m_editorLayer->SetShowGBufferValidationOutput(rgcRequest->setGBufferEnabled.enabled);
                 rgcResult.success = true;
                 break;
+            case RenderGraphControlCommandKind::SetTextureArrayValidationEnabled:
+                m_editorLayer->SetShowTextureArrayValidationOutput(
+                    rgcRequest->setTextureArrayValidationEnabled.enabled);
+                rgcResult.success = true;
+                break;
             }
             m_renderGraphControlCommandBridge.FulfillCommand(rgcResult);
         }

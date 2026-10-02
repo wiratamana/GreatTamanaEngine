@@ -1078,6 +1078,12 @@ add_library(gte_editor STATIC
     src/Editor/BlitValidation.cpp
     src/Editor/GBufferValidation.h
     src/Editor/GBufferValidation.cpp
+    # task_manager/better-render-pass-7 campaign (better-render-pass-3
+    # campaign, BLOCK5 - Array/Cubemap Texture Resources), PHASE5 - the
+    # "TextureArray Validation" manual/Tier-2 verification harness (see
+    # src/Editor/TextureArrayValidation.h's own header comment).
+    src/Editor/TextureArrayValidation.h
+    src/Editor/TextureArrayValidation.cpp
     src/Editor/GpuDrivenBatchTestSpawner.h
     src/Editor/GpuDrivenBatchTestSpawner.cpp
     src/Editor/GpuSkinningValidation.h
@@ -1638,6 +1644,18 @@ if(TRUE)
     gte_add_shader(GreatTamanaEditor src/Shaders/GBufferValidation.vert)
     gte_add_shader(GreatTamanaEditor src/Shaders/GBufferValidation.frag)
     gte_add_shader(GreatTamanaEditor src/Shaders/GBufferCopy.comp)
+endif()
+
+# task_manager/better-render-pass-7 campaign (better-render-pass-3 campaign,
+# BLOCK5 - Array/Cubemap Texture Resources), PHASE5 - the "TextureArray
+# Validation" manual/Tier-2 verification harness's own 2 compute shaders
+# (src/Editor/TextureArrayValidation.h/.cpp). Always compiled/staged, since
+# TextureArrayValidation.cpp - the only thing that ever loads these - is
+# always compiled into gte_core today (same precedent as GBufferCopy.comp
+# above).
+if(TRUE)
+    gte_add_shader(GreatTamanaEditor src/Shaders/TextureArrayValidationFill.comp)
+    gte_add_shader(GreatTamanaEditor src/Shaders/TextureArrayValidationSlice.comp)
 endif()
 
 # Atmosphere Scattering + Aerial Perspective campaign, Phase 3

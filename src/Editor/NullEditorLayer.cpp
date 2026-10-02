@@ -52,6 +52,17 @@ public:
     }
     void FinalizeGBufferValidationForSampling(VkCommandBuffer /*cmd*/) override { }
 
+    // task_manager/better-render-pass-7 campaign (better-render-pass-3
+    // campaign, BLOCK5), PHASE5 - a release build never declares this pass
+    // pair at all, mirroring AddBlurValidationPass()/AddGBufferValidationPass()
+    // above exactly.
+    std::optional<TextureArrayValidationHandles> AddTextureArrayValidationPass(rg::RenderGraphBuilder& /*builder*/,
+        Renderer& /*renderer*/, rg::RenderPassToggleRegistry* /*toggleRegistry*/) override
+    {
+        return std::nullopt;
+    }
+    void FinalizeTextureArrayValidationForSampling(VkCommandBuffer /*cmd*/) override { }
+
     // editor-core-separation-26 campaign, PHASE6 - a release build never
     // declares this pass at all, mirroring AddBlurValidationPass()/
     // AddGBufferValidationPass() above exactly.
@@ -104,6 +115,7 @@ public:
     // FrameDebuggerSetEnabled() immediately above.
     void SetShowBlurredSceneOutput(bool /*enabled*/) override { }
     void SetShowGBufferValidationOutput(bool /*enabled*/) override { }
+    void SetShowTextureArrayValidationOutput(bool /*enabled*/) override { }
 
     // editor-core-separation-16 campaign (On-Engine Project Workflow plan,
     // BIG-STEP 2), PHASE4 - a release build has no "New Project..." window

@@ -430,6 +430,50 @@ public:
     // submitted - see Application::Run(). A no-op for NullEditorLayer.
     virtual void FinalizeGBufferValidationForSampling(VkCommandBuffer cmd) = 0;
 
+    // task_manager/better-render-pass-7 campaign (better-render-pass-3
+    // campaign, BLOCK5 - Array/Cubemap Texture Resources), PHASE5 (manual/
+    // Tier-2 verification + live smoke test) - result of
+    // AddTextureArrayValidationPass() below. Deliberately a SEPARATE, tiny,
+    // dependency-free struct (mirrors GBufferValidationHandles' own
+    // precedent immediately above) - EditorLayer.h must never depend on
+    // src/Editor/TextureArrayValidation.h. The CALLER (Core::BuildFrame())
+    // must add all four handles to that call's own finalOutputs root set,
+    // or RenderGraphCompiler's existing culling would silently drop
+    // whichever one never reaches a root.
+    struct TextureArrayValidationHandles {
+        rg::TextureHandle layer0{};
+        rg::TextureHandle layer1{};
+        rg::TextureHandle layer2{};
+        rg::TextureHandle layer3{};
+    };
+
+    // Declares (if this implementation's own "Show TextureArray Validation
+    // (debug)" toggle is on AND the "Scene" panel was visible last frame)
+    // this phase's own manual/Tier-2 verification harness: a throwaway
+    // COMPUTE pass pair proving RenderGraphResourcePool::AcquireTextureArray()
+    // + a real compute pass writing/reading a pooled TextureArray genuinely
+    // work end-to-end (see src/Editor/TextureArrayValidation.h for the full
+    // two-pass shape). Returns the 4 per-layer debug-slice TextureHandles -
+    // the CALLER must add every one to this call's own finalOutputs root
+    // set, or the pass's write will be silently culled - or std::nullopt if
+    // no pass was declared at all this frame (always std::nullopt for
+    // NullEditorLayer). `toggleRegistry` (default nullptr) mirrors every
+    // other AddXxxValidationPass() method's own independent-gating
+    // convention above.
+    virtual std::optional<TextureArrayValidationHandles> AddTextureArrayValidationPass(
+        rg::RenderGraphBuilder& builder, Renderer& renderer, rg::RenderPassToggleRegistry* toggleRegistry = nullptr) = 0;
+
+    // Transitions all 4 per-layer debug-slice outputs (if
+    // AddTextureArrayValidationPass() above actually declared a pass this
+    // frame - a safe no-op otherwise) to a real ShaderRead state, ready for
+    // GET /get_texture capture - mirrors FinalizeGBufferValidationForSampling()
+    // above. Must be called against the SAME command buffer the offscreen
+    // RenderGraph::Execute() call just recorded into, AFTER that call
+    // returns and BEFORE that command buffer is ended/submitted - see
+    // Core::BuildFrame(). A no-op for NullEditorLayer.
+    virtual void FinalizeTextureArrayValidationForSampling(VkCommandBuffer cmd) = 0;
+
+
     // editor-core-separation-26 campaign, PHASE6 (Locked Decision 3) - a
     // small, permanent, Debug-category live proof that AddBlitPass() works,
     // verified purely via GET /get_texture (no ImGui display/bespoke
@@ -769,6 +813,14 @@ public:
     // equivalent of SetShowBlurredSceneOutput() immediately above - same
     // contract, same reasoning, mirrors EditorContext::showGBufferValidationOutput.
     virtual void SetShowGBufferValidationOutput(bool enabled) = 0;
+
+    // task_manager/better-render-pass-7 campaign (better-render-pass-3
+    // campaign, BLOCK5 - Array/Cubemap Texture Resources), PHASE5 - the
+    // TextureArray Validation equivalent of SetShowBlurredSceneOutput()/
+    // SetShowGBufferValidationOutput() above - same contract, same
+    // reasoning, mirrors EditorContext::showTextureArrayValidationOutput.
+    // HTTP automation entry point: GET /render_graph/set_texture_array_validation_enabled.
+    virtual void SetShowTextureArrayValidationOutput(bool enabled) = 0;
 
     // editor-core-separation-16 campaign (On-Engine Project Workflow plan,
     // BIG-STEP 2), PHASE4 - hands the real ImGui implementation a live
