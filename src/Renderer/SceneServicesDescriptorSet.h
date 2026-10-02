@@ -23,6 +23,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -53,6 +54,42 @@ inline constexpr std::uint32_t kSceneServiceSlotCount = 8;
 // VK_IMAGE_VIEW_TYPE_2D view is not interchangeable with a
 // VK_IMAGE_VIEW_TYPE_3D one for a shader that declared `sampler3D`.
 enum class SceneServiceResourceKind : std::uint8_t { Image2D, Image3D };
+
+// A return value >= kSceneServiceSlotCount from any function below means
+// "no usable slot" - the one sentinel this whole API uses for every failure
+// shape.
+inline constexpr std::uint32_t kInvalidSceneServiceSlotIndex = kSceneServiceSlotCount;
+
+// Registers (or re-confirms, if already registered under this exact name) a
+// scene-service slot. Idempotent by debugName: a second call with the SAME
+// name returns the SAME index every time. An out-of-range preferredIndex, a
+// preferredIndex collision with a DIFFERENT name, a full registry, or a
+// null/empty debugName are all refused: GTE_LOG_ERROR once per distinct
+// (name, reason), return kInvalidSceneServiceSlotIndex (or, for a collision,
+// the EXISTING occupant's own index). A null/empty debugName re-logs on
+// EVERY such call (there is no name to key a "once" suppression entry on) -
+// this is the one deliberate exception to the "once per distinct (name,
+// reason)" promise above. Copies debugName into owned storage - the
+// caller's buffer may be freed immediately after this call returns.
+// Startup-only: refused once SceneServicesDescriptorSet::Rewrite() has
+// completed anywhere in the process for the first time. Never call from
+// code any frame-declare loop/render pass/provider invokes more than once.
+[[nodiscard]] std::uint32_t RegisterSceneServiceSlot(const char* debugName, SceneServiceResourceKind kind,
+    std::optional<std::uint32_t> preferredIndex = std::nullopt);
+
+// Registration-order enumeration (Editor/debug-facing only - Core never
+// interprets these strings). i must be < RegisteredSceneServiceSlotCount().
+std::size_t RegisteredSceneServiceSlotCount() noexcept;
+std::uint32_t RegisteredSceneServiceSlotIndexAt(std::size_t i) noexcept;
+
+// "<unregistered>" / SceneServiceResourceKind::Image2D for a slot index that
+// was never registered (or is out of range).
+const char* SceneServiceSlotDebugName(std::uint32_t slotIndex) noexcept;
+SceneServiceResourceKind SceneServiceSlotResourceKind(std::uint32_t slotIndex) noexcept;
+
+// Testing-only: clears every registered slot, the registration-order list,
+// the failure-memory table, and the Runtime Sealing latch.
+void ResetSceneServiceRegistryForTesting() noexcept;
 
 constexpr SceneServiceResourceKind SceneServiceSlotResourceKind(SceneServiceSlot slot) noexcept
 {

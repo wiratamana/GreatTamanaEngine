@@ -23,6 +23,7 @@
 
 #include <array>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace gte {
@@ -139,6 +140,7 @@ TEST(SceneServicesDescriptorSetTest, RewriteWithAllDefaultedSlotsReturnsAValidSe
     // masquerading as one - no Vulkan-level image-type query is even
     // necessary once the test holds a true const VolumeTexture&.
     EXPECT_EQ(sceneServices.DummyVolumetricFogTexture().Depth(), 1);
+    ResetSceneServiceRegistryForTesting();
 }
 
 // 2. Two different views, two different resolved inputs, two different
@@ -168,6 +170,7 @@ TEST(SceneServicesDescriptorSetTest, RewriteForTwoDifferentViewsProducesTwoDiffe
     EXPECT_NE(sceneServices.DescriptorSetFor(viewA), sceneServices.DescriptorSetFor(viewB));
     EXPECT_EQ(sceneServices.DescriptorSetFor(viewA), setA);
     EXPECT_EQ(sceneServices.DescriptorSetFor(viewB), setB);
+    ResetSceneServiceRegistryForTesting();
 }
 
 // 3. DescriptorSetFor() for a view Rewrite() was never called for reports
@@ -182,6 +185,179 @@ TEST(SceneServicesDescriptorSetTest, DescriptorSetForAnUnseenViewIsNullHandle)
     SceneServicesDescriptorSet sceneServices(fixture.GetRenderer());
     EXPECT_EQ(sceneServices.DescriptorSetFor(rg::RenderViewId::Named("NeverRewritten")),
         static_cast<VkDescriptorSet>(VK_NULL_HANDLE));
+    ResetSceneServiceRegistryForTesting();
+}
+
+// --- Additive runtime slot registry ----------------------------------------
+//
+// RegisterSceneServiceSlot()'s own registration/idempotency/failure-memory/
+// sealing contract - entirely Tier-1 (no live VkDevice needed) except the
+// one Tier-2 case at the end, mirroring the Tier-1/Tier-2 split above.
+
+TEST(SceneServiceSlotRegistryTest, SameNameReturnsSameIndexDifferentNameReturnsDifferentIndex)
+{
+    ResetSceneServiceRegistryForTesting();
+
+    const std::uint32_t firstX = RegisterSceneServiceSlot("X", SceneServiceResourceKind::Image2D);
+    const std::uint32_t secondX = RegisterSceneServiceSlot("X", SceneServiceResourceKind::Image2D);
+    EXPECT_EQ(firstX, secondX);
+
+    const std::uint32_t y = RegisterSceneServiceSlot("Y", SceneServiceResourceKind::Image2D);
+    EXPECT_NE(firstX, y);
+}
+
+TEST(SceneServiceSlotRegistryTest, ReRegisteringAnExistingNameWithADifferentKindKeepsTheOriginalKind)
+{
+    ResetSceneServiceRegistryForTesting();
+
+    const std::uint32_t index = RegisterSceneServiceSlot("X", SceneServiceResourceKind::Image2D);
+    (void)RegisterSceneServiceSlot("X", SceneServiceResourceKind::Image3D);
+    (void)RegisterSceneServiceSlot("X", SceneServiceResourceKind::Image3D);
+
+    EXPECT_EQ(SceneServiceSlotResourceKind(index), SceneServiceResourceKind::Image2D);
+}
+
+TEST(SceneServiceSlotRegistryTest, APreferredIndexCollisionReturnsTheExistingOccupantsIndex)
+{
+    ResetSceneServiceRegistryForTesting();
+
+    const std::uint32_t a = RegisterSceneServiceSlot("A", SceneServiceResourceKind::Image2D, 3u);
+    const std::uint32_t b = RegisterSceneServiceSlot("B", SceneServiceResourceKind::Image2D, 3u);
+
+    EXPECT_EQ(a, 3u);
+    EXPECT_EQ(b, 3u);
+    EXPECT_STREQ(SceneServiceSlotDebugName(3u), "A");
+}
+
+TEST(SceneServiceSlotRegistryTest, RepeatingAFailedPreferredIndexCollisionDoesNotCrash)
+{
+    ResetSceneServiceRegistryForTesting();
+
+    (void)RegisterSceneServiceSlot("A", SceneServiceResourceKind::Image2D, 3u);
+    (void)RegisterSceneServiceSlot("B", SceneServiceResourceKind::Image2D, 3u);
+    const std::uint32_t secondB = RegisterSceneServiceSlot("B", SceneServiceResourceKind::Image2D, 3u);
+
+    EXPECT_EQ(secondB, 3u);
+}
+
+TEST(SceneServiceSlotRegistryTest, RegisteringPastAFullRegistryReturnsInvalid)
+{
+    ResetSceneServiceRegistryForTesting();
+
+    for (std::uint32_t i = 0; i < kSceneServiceSlotCount; ++i) {
+        const std::string name = "Slot" + std::to_string(i);
+        (void)RegisterSceneServiceSlot(name.c_str(), SceneServiceResourceKind::Image2D);
+    }
+
+    const std::uint32_t ninth = RegisterSceneServiceSlot("Ninth", SceneServiceResourceKind::Image2D);
+    EXPECT_EQ(ninth, kInvalidSceneServiceSlotIndex);
+}
+
+TEST(SceneServiceSlotRegistryTest, RepeatingARegistrationAgainstAFullRegistryStillReturnsInvalid)
+{
+    ResetSceneServiceRegistryForTesting();
+
+    for (std::uint32_t i = 0; i < kSceneServiceSlotCount; ++i) {
+        const std::string name = "Slot" + std::to_string(i);
+        (void)RegisterSceneServiceSlot(name.c_str(), SceneServiceResourceKind::Image2D);
+    }
+
+    (void)RegisterSceneServiceSlot("Ninth", SceneServiceResourceKind::Image2D);
+    const std::uint32_t secondAttempt = RegisterSceneServiceSlot("Ninth", SceneServiceResourceKind::Image2D);
+    EXPECT_EQ(secondAttempt, kInvalidSceneServiceSlotIndex);
+}
+
+TEST(SceneServiceSlotRegistryTest, ResetClearsEverySlotAndEveryFailureMemoryEntry)
+{
+    ResetSceneServiceRegistryForTesting();
+
+    for (std::uint32_t i = 0; i < kSceneServiceSlotCount; ++i) {
+        const std::string name = "Slot" + std::to_string(i);
+        (void)RegisterSceneServiceSlot(name.c_str(), SceneServiceResourceKind::Image2D);
+    }
+    (void)RegisterSceneServiceSlot("Ninth", SceneServiceResourceKind::Image2D);
+
+    ResetSceneServiceRegistryForTesting();
+    EXPECT_EQ(RegisteredSceneServiceSlotCount(), 0u);
+
+    // A name used before the reset gets a fresh registration path afterward.
+    const std::uint32_t firstX = RegisterSceneServiceSlot("X", SceneServiceResourceKind::Image2D);
+    const std::uint32_t secondX = RegisterSceneServiceSlot("X", SceneServiceResourceKind::Image2D);
+    EXPECT_EQ(firstX, secondX);
+
+    // A name that failed before the reset can attempt registration again with no leftover suppression.
+    const std::uint32_t ninthAfterReset = RegisterSceneServiceSlot("Ninth", SceneServiceResourceKind::Image2D);
+    EXPECT_NE(ninthAfterReset, kInvalidSceneServiceSlotIndex);
+}
+
+TEST(SceneServiceSlotRegistryTest, DebugNameIsCopiedNotAliasedToTheCallersBuffer)
+{
+    ResetSceneServiceRegistryForTesting();
+
+    std::vector<char> buffer = { 'T', 'e', 'm', 'p', '\0' };
+    const std::uint32_t index = RegisterSceneServiceSlot(buffer.data(), SceneServiceResourceKind::Image2D);
+
+    for (char& c : buffer) {
+        c = 'Z';
+    }
+
+    EXPECT_STREQ(SceneServiceSlotDebugName(index), "Temp");
+}
+
+TEST(SceneServiceSlotRegistryTest, NullOrEmptyDebugNameIsRefused)
+{
+    ResetSceneServiceRegistryForTesting();
+
+    EXPECT_EQ(RegisterSceneServiceSlot(nullptr, SceneServiceResourceKind::Image2D), kInvalidSceneServiceSlotIndex);
+    EXPECT_EQ(RegisterSceneServiceSlot("", SceneServiceResourceKind::Image2D), kInvalidSceneServiceSlotIndex);
+}
+
+TEST(SceneServiceSlotRegistryTest, OutOfRangePreferredIndexIsRefused)
+{
+    ResetSceneServiceRegistryForTesting();
+
+    const std::uint32_t result =
+        RegisterSceneServiceSlot("Z", SceneServiceResourceKind::Image2D, kSceneServiceSlotCount);
+    EXPECT_EQ(result, kInvalidSceneServiceSlotIndex);
+}
+
+TEST(SceneServiceSlotRegistryTest, ReRegisteringAnExistingNameWithADifferentPreferredIndexKeepsTheOriginalIndex)
+{
+    ResetSceneServiceRegistryForTesting();
+
+    const std::uint32_t first = RegisterSceneServiceSlot("W", SceneServiceResourceKind::Image2D, 2u);
+    const std::uint32_t second = RegisterSceneServiceSlot("W", SceneServiceResourceKind::Image2D, 5u);
+    EXPECT_EQ(first, 2u);
+    EXPECT_EQ(second, 2u);
+
+    const std::uint32_t third = RegisterSceneServiceSlot("W", SceneServiceResourceKind::Image2D, 5u);
+    EXPECT_EQ(third, 2u);
+
+    // Repeating the already-held index is ordinary silent success.
+    const std::uint32_t fourth = RegisterSceneServiceSlot("W", SceneServiceResourceKind::Image2D, 2u);
+    EXPECT_EQ(fourth, 2u);
+}
+
+// Tier-2: confirms the Runtime Sealing latch is wired into Rewrite() for
+// real - once any real SceneServicesDescriptorSet has rewritten for any
+// view, every later registration attempt is refused.
+TEST(SceneServiceSlotRegistryTest, RegistrationIsRefusedAfterARealRewriteHasRunOnce)
+{
+    ResetSceneServiceRegistryForTesting();
+
+    HeadlessRenderGraphFixture fixture;
+    if (!fixture.IsUsable()) {
+        GTEST_SKIP() << fixture.SkipReason();
+    }
+
+    SceneServicesDescriptorSet sceneServices(fixture.GetRenderer());
+    std::array<SceneServicesDescriptorSet::ResolvedSlot, kSceneServiceSlotCount> resolved{};
+    sceneServices.Rewrite(rg::RenderViewId::Named("Game"), resolved);
+
+    const std::uint32_t result = RegisterSceneServiceSlot("PostSealName", SceneServiceResourceKind::Image2D);
+    EXPECT_EQ(result, kInvalidSceneServiceSlotIndex);
+
+    ResetSceneServiceRegistryForTesting();
 }
 
 } // namespace

@@ -2,10 +2,55 @@
 
 #include "Renderer.h"
 #include "Vulkan/DescriptorSetLayoutBuilder.h"
+#include "../Core/Logging.h"
 
 #include <cassert>
 #include <cstring>
 #include <string>
+
+namespace {
+
+struct SceneServiceSlotEntry {
+    bool registered = false;
+    std::string debugName;
+    gte::SceneServiceResourceKind kind = gte::SceneServiceResourceKind::Image2D;
+    bool hasLoggedKindMismatch = false;
+    bool hasLoggedPreferredIndexMismatch = false;
+};
+
+enum class SceneServiceRegistrationFailureReason { Collision, Exhaustion, InvalidPreferredIndex, PostSeal };
+
+struct SceneServiceRegistrationFailure {
+    std::string debugName;
+    SceneServiceRegistrationFailureReason reason;
+    std::uint32_t resultToReplay; // whatever this exact (name, reason) must keep returning.
+};
+
+std::array<SceneServiceSlotEntry, gte::kSceneServiceSlotCount>& SceneServiceSlotTable()
+{
+    static std::array<SceneServiceSlotEntry, gte::kSceneServiceSlotCount> table{};
+    return table;
+}
+
+std::vector<std::uint32_t>& SceneServiceRegistrationOrder()
+{
+    static std::vector<std::uint32_t> order;
+    return order;
+}
+
+std::vector<SceneServiceRegistrationFailure>& SceneServiceFailureMemory()
+{
+    static std::vector<SceneServiceRegistrationFailure> failures;
+    return failures;
+}
+
+bool& SceneServiceRegistrySealedFlag()
+{
+    static bool sealed = false;
+    return sealed;
+}
+
+} // namespace
 
 namespace gte {
 
@@ -40,6 +85,144 @@ rg::RenderPassId SceneServiceBlackboardKey(SceneServiceSlot slot, rg::RenderView
     }
 
     return rg::RenderPassId{ hash };
+}
+
+// --- Additive runtime slot registry ----------------------------------------
+//
+// Lets any built-in feature claim a scene-service slot by debug name at
+// startup instead of this header hand-naming every consumer. See this
+// header's own doc comments for the exact contract each function below
+// implements.
+
+std::uint32_t RegisterSceneServiceSlot(
+    const char* debugName, SceneServiceResourceKind kind, std::optional<std::uint32_t> preferredIndex)
+{
+    if (debugName == nullptr || debugName[0] == '\0') {
+        GTE_LOG_ERROR(
+            "SceneServicesDescriptorSet", "RegisterSceneServiceSlot() called with a null/empty debugName - refusing.");
+        return kInvalidSceneServiceSlotIndex;
+    }
+
+    std::vector<SceneServiceRegistrationFailure>& failures = SceneServiceFailureMemory();
+    for (const SceneServiceRegistrationFailure& failure : failures) {
+        if (failure.debugName == debugName) {
+            return failure.resultToReplay;
+        }
+    }
+
+    std::array<SceneServiceSlotEntry, kSceneServiceSlotCount>& table = SceneServiceSlotTable();
+    for (std::uint32_t i = 0; i < kSceneServiceSlotCount; ++i) {
+        SceneServiceSlotEntry& entry = table[i];
+        if (!entry.registered || entry.debugName != debugName) {
+            continue;
+        }
+        if (entry.kind != kind && !entry.hasLoggedKindMismatch) {
+            GTE_LOG_ERROR("SceneServicesDescriptorSet",
+                std::string("RegisterSceneServiceSlot(\"") + debugName
+                    + "\") re-registered with a different SceneServiceResourceKind than its existing slot - keeping "
+                      "the original kind.");
+            entry.hasLoggedKindMismatch = true;
+        }
+        if (preferredIndex.has_value() && *preferredIndex != i && !entry.hasLoggedPreferredIndexMismatch) {
+            GTE_LOG_ERROR("SceneServicesDescriptorSet",
+                std::string("RegisterSceneServiceSlot(\"") + debugName
+                    + "\") re-registered with a different preferredIndex than its existing slot - keeping the "
+                      "original index.");
+            entry.hasLoggedPreferredIndexMismatch = true;
+        }
+        return i;
+    }
+
+    if (SceneServiceRegistrySealedFlag()) {
+        GTE_LOG_ERROR("SceneServicesDescriptorSet",
+            std::string("RegisterSceneServiceSlot(\"") + debugName
+                + "\") called after the registry has already sealed (SceneServicesDescriptorSet::Rewrite() already "
+                  "ran once) - refusing.");
+        failures.push_back(SceneServiceRegistrationFailure{
+            debugName, SceneServiceRegistrationFailureReason::PostSeal, kInvalidSceneServiceSlotIndex });
+        return kInvalidSceneServiceSlotIndex;
+    }
+
+    if (preferredIndex.has_value() && *preferredIndex >= kSceneServiceSlotCount) {
+        GTE_LOG_ERROR("SceneServicesDescriptorSet",
+            std::string("RegisterSceneServiceSlot(\"") + debugName + "\") requested an out-of-range preferredIndex - "
+                                                                      "refusing.");
+        failures.push_back(SceneServiceRegistrationFailure{
+            debugName, SceneServiceRegistrationFailureReason::InvalidPreferredIndex, kInvalidSceneServiceSlotIndex });
+        return kInvalidSceneServiceSlotIndex;
+    }
+
+    std::uint32_t claimedIndex = kInvalidSceneServiceSlotIndex;
+    if (preferredIndex.has_value()) {
+        if (table[*preferredIndex].registered) {
+            GTE_LOG_ERROR("SceneServicesDescriptorSet",
+                std::string("RegisterSceneServiceSlot(\"") + debugName + "\") requested preferredIndex "
+                    + std::to_string(*preferredIndex) + " but it is already occupied by \""
+                    + table[*preferredIndex].debugName + "\" - refusing.");
+            failures.push_back(SceneServiceRegistrationFailure{
+                debugName, SceneServiceRegistrationFailureReason::Collision, *preferredIndex });
+            return *preferredIndex;
+        }
+        claimedIndex = *preferredIndex;
+    } else {
+        for (std::uint32_t i = 0; i < kSceneServiceSlotCount; ++i) {
+            if (!table[i].registered) {
+                claimedIndex = i;
+                break;
+            }
+        }
+        if (claimedIndex == kInvalidSceneServiceSlotIndex) {
+            GTE_LOG_ERROR("SceneServicesDescriptorSet",
+                std::string("RegisterSceneServiceSlot(\"") + debugName
+                    + "\") found no free slot - the registry is full.");
+            failures.push_back(SceneServiceRegistrationFailure{
+                debugName, SceneServiceRegistrationFailureReason::Exhaustion, kInvalidSceneServiceSlotIndex });
+            return kInvalidSceneServiceSlotIndex;
+        }
+    }
+
+    SceneServiceSlotEntry& claimed = table[claimedIndex];
+    claimed.registered = true;
+    claimed.debugName = debugName;
+    claimed.kind = kind;
+    SceneServiceRegistrationOrder().push_back(claimedIndex);
+    return claimedIndex;
+}
+
+std::size_t RegisteredSceneServiceSlotCount() noexcept
+{
+    return SceneServiceRegistrationOrder().size();
+}
+
+std::uint32_t RegisteredSceneServiceSlotIndexAt(std::size_t i) noexcept
+{
+    return SceneServiceRegistrationOrder()[i];
+}
+
+const char* SceneServiceSlotDebugName(std::uint32_t slotIndex) noexcept
+{
+    if (slotIndex >= kSceneServiceSlotCount || !SceneServiceSlotTable()[slotIndex].registered) {
+        return "<unregistered>";
+    }
+    return SceneServiceSlotTable()[slotIndex].debugName.c_str();
+}
+
+SceneServiceResourceKind SceneServiceSlotResourceKind(std::uint32_t slotIndex) noexcept
+{
+    if (slotIndex >= kSceneServiceSlotCount || !SceneServiceSlotTable()[slotIndex].registered) {
+        return SceneServiceResourceKind::Image2D;
+    }
+    return SceneServiceSlotTable()[slotIndex].kind;
+}
+
+void ResetSceneServiceRegistryForTesting() noexcept
+{
+    for (SceneServiceSlotEntry& entry : SceneServiceSlotTable()) {
+        entry = SceneServiceSlotEntry{};
+    }
+    SceneServiceRegistrationOrder().clear();
+    SceneServiceFailureMemory().clear();
+    SceneServiceRegistrySealedFlag() = false;
 }
 
 // --- SceneServicesDescriptorSet (PHASE2) -----------------------------------
@@ -98,6 +281,8 @@ SceneServicesDescriptorSet::~SceneServicesDescriptorSet()
 VkDescriptorSet SceneServicesDescriptorSet::Rewrite(
     rg::RenderViewId view, const std::array<ResolvedSlot, kSceneServiceSlotCount>& resolved)
 {
+    SceneServiceRegistrySealedFlag() = true; // Startup-only registration: this is the first-ever call's permanent cutoff.
+
     VkDescriptorSet set = VK_NULL_HANDLE;
     for (PerViewSet& entry : m_perViewSets) {
         if (entry.view == view) {
