@@ -9,6 +9,7 @@
 // m_blendDescriptorSetLayout below).
 #include "ProjectRenderFeatureCallback.h"
 #include "ProjectPreOpaqueCallback.h"
+#include "ProjectScenePassCallback.h"
 #include "RenderFeatureDebugEntry.h"
 #include "RenderFeatureNamePool.h"
 // better-render-pass-2 campaign, PHASE4 (PHASE4_DELETE_PLUGINS_FOLDER_AND_CMAKE.md) -
@@ -238,6 +239,38 @@ public:
     // keep it that way via SortAndDetectCollisionsInPreOpaqueList()
     // below) - the provider itself never re-sorts.
     const std::vector<PreOpaqueEntry>& PreOpaqueFeaturesInPriorityOrder() const noexcept { return m_preOpaque; }
+
+    // The PostOpaque sibling of PreOpaqueEntry above - a Project Assembly
+    // callback guaranteed to run after the current view's own opaque pass
+    // and before its own transparent pass. Shares ProjectScenePassCallback
+    // with PostTransparentEntry below (one callback shape for both stages).
+    struct PostOpaqueEntry {
+        std::string name;
+        std::int32_t priority = 0;
+        bool enabledOverride = true;
+        ProjectScenePassCallback callback;
+    };
+
+    bool RegisterPostOpaqueFeature(const std::string& name, std::int32_t priority, ProjectScenePassCallback callback);
+    bool UnregisterPostOpaqueFeature(const char* name);
+    const std::vector<PostOpaqueEntry>& PostOpaqueFeaturesInPriorityOrder() const noexcept { return m_postOpaque; }
+
+    // The PostTransparent sibling of PostOpaqueEntry above - guaranteed to
+    // run after the current view's own transparent pass.
+    struct PostTransparentEntry {
+        std::string name;
+        std::int32_t priority = 0;
+        bool enabledOverride = true;
+        ProjectScenePassCallback callback;
+    };
+
+    bool RegisterPostTransparentFeature(
+        const std::string& name, std::int32_t priority, ProjectScenePassCallback callback);
+    bool UnregisterPostTransparentFeature(const char* name);
+    const std::vector<PostTransparentEntry>& PostTransparentFeaturesInPriorityOrder() const noexcept
+    {
+        return m_postTransparent;
+    }
 private:
     struct Entry {
         GtePluginRenderFeatureDescriptor descriptor{};
@@ -312,6 +345,10 @@ private:
     // back to this one.
     PreOpaqueEntry* FindPreOpaqueEntryByName(const std::string& name);
 
+    // PostOpaque/PostTransparent siblings of FindPreOpaqueEntryByName() above.
+    PostOpaqueEntry* FindPostOpaqueEntryByName(const std::string& name);
+    PostTransparentEntry* FindPostTransparentEntryByName(const std::string& name);
+
     // PreOpaque sibling of SortAndDetectCollisionsInStage() above - the
     // SAME algorithm (stable sort by priority, same-priority collision
     // warning + lexical tie-break), against the new, smaller
@@ -320,6 +357,10 @@ private:
     // other per-kind helper here is a plain, concrete function, never a
     // template).
     static void SortAndDetectCollisionsInPreOpaqueList(std::vector<PreOpaqueEntry>& entries);
+
+    // PostOpaque/PostTransparent siblings of SortAndDetectCollisionsInPreOpaqueList() above.
+    static void SortAndDetectCollisionsInPostOpaqueList(std::vector<PostOpaqueEntry>& entries);
+    static void SortAndDetectCollisionsInPostTransparentList(std::vector<PostTransparentEntry>& entries);
 
     // editor-core-separation-23 campaign, PHASE5
     // (PHASE5_ORDERING_SAFETY_NET_AND_LIFETIME_CONFIRMATION.md, Step 3.2) - a
@@ -394,6 +435,8 @@ private:
     std::vector<Entry> m_postComposite; // sorted by priority ascending
     std::vector<Entry> m_preUi;         // sorted by priority ascending
     std::vector<PreOpaqueEntry> m_preOpaque; // sorted by priority ascending - see PreOpaqueEntry's own doc comment.
+    std::vector<PostOpaqueEntry> m_postOpaque;             // sorted by priority ascending
+    std::vector<PostTransparentEntry> m_postTransparent;   // sorted by priority ascending
     RenderFeatureNamePool m_namePool;
 
     // Keyed by RenderFeatureNamePool's own interned "<Name>_<View>_Private" names.

@@ -156,6 +156,60 @@ void RenderFeatureCompositor::SortAndDetectCollisionsInPreOpaqueList(std::vector
     }
 }
 
+void RenderFeatureCompositor::SortAndDetectCollisionsInPostOpaqueList(std::vector<PostOpaqueEntry>& entries)
+{
+    std::stable_sort(entries.begin(), entries.end(),
+        [](const PostOpaqueEntry& a, const PostOpaqueEntry& b) { return a.priority < b.priority; });
+
+    std::size_t i = 0;
+    while (i < entries.size()) {
+        std::size_t j = i;
+        while (j + 1 < entries.size() && entries[j + 1].priority == entries[i].priority) {
+            ++j;
+        }
+        if (j > i) {
+            for (std::size_t k = i; k < j; ++k) {
+                GTE_LOG_WARNING("RenderFeatureCompositor",
+                    entries[k].name + " and " + entries[k + 1].name + " both declared priority "
+                    + std::to_string(entries[k].priority) + " in stage PostOpaque - this is ambiguous; falling "
+                    "back to a stable, lexical name tie-break. Assign each feature a distinct priority to remove "
+                    "this warning.");
+            }
+            std::stable_sort(entries.begin() + static_cast<std::ptrdiff_t>(i),
+                entries.begin() + static_cast<std::ptrdiff_t>(j) + 1,
+                [](const PostOpaqueEntry& a, const PostOpaqueEntry& b) { return a.name < b.name; });
+        }
+        i = j + 1;
+    }
+}
+
+void RenderFeatureCompositor::SortAndDetectCollisionsInPostTransparentList(std::vector<PostTransparentEntry>& entries)
+{
+    std::stable_sort(entries.begin(), entries.end(),
+        [](const PostTransparentEntry& a, const PostTransparentEntry& b) { return a.priority < b.priority; });
+
+    std::size_t i = 0;
+    while (i < entries.size()) {
+        std::size_t j = i;
+        while (j + 1 < entries.size() && entries[j + 1].priority == entries[i].priority) {
+            ++j;
+        }
+        if (j > i) {
+            for (std::size_t k = i; k < j; ++k) {
+                GTE_LOG_WARNING("RenderFeatureCompositor",
+                    entries[k].name + " and " + entries[k + 1].name + " both declared priority "
+                    + std::to_string(entries[k].priority) + " in stage PostTransparent - this is ambiguous; falling "
+                    "back to a stable, lexical name tie-break. Assign each feature a distinct priority to remove "
+                    "this warning.");
+            }
+            std::stable_sort(entries.begin() + static_cast<std::ptrdiff_t>(i),
+                entries.begin() + static_cast<std::ptrdiff_t>(j) + 1,
+                [](const PostTransparentEntry& a, const PostTransparentEntry& b) { return a.name < b.name; });
+        }
+        i = j + 1;
+    }
+}
+
 // editor-core-separation-8 campaign, PHASE2 - shared lookup used by both
 // SetFeatureEnabled() and SetFeaturePriority(): searches m_postComposite then
 // m_preUi for an Entry whose descriptor.name matches `name` exactly. Returns
@@ -180,6 +234,27 @@ RenderFeatureCompositor::Entry* RenderFeatureCompositor::FindEntryByName(const s
 RenderFeatureCompositor::PreOpaqueEntry* RenderFeatureCompositor::FindPreOpaqueEntryByName(const std::string& name)
 {
     for (PreOpaqueEntry& entry : m_preOpaque) {
+        if (name == entry.name) {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
+RenderFeatureCompositor::PostOpaqueEntry* RenderFeatureCompositor::FindPostOpaqueEntryByName(const std::string& name)
+{
+    for (PostOpaqueEntry& entry : m_postOpaque) {
+        if (name == entry.name) {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
+RenderFeatureCompositor::PostTransparentEntry* RenderFeatureCompositor::FindPostTransparentEntryByName(
+    const std::string& name)
+{
+    for (PostTransparentEntry& entry : m_postTransparent) {
         if (name == entry.name) {
             return &entry;
         }
@@ -217,6 +292,14 @@ bool RenderFeatureCompositor::SetFeatureEnabled(const std::string& name, bool en
         preOpaqueEntry->enabledOverride = enabled;
         return true;
     }
+    if (PostOpaqueEntry* postOpaqueEntry = FindPostOpaqueEntryByName(name)) {
+        postOpaqueEntry->enabledOverride = enabled;
+        return true;
+    }
+    if (PostTransparentEntry* postTransparentEntry = FindPostTransparentEntryByName(name)) {
+        postTransparentEntry->enabledOverride = enabled;
+        return true;
+    }
     return false;
 }
 
@@ -245,6 +328,17 @@ bool RenderFeatureCompositor::SetFeaturePriority(const std::string& name, std::i
     if (PreOpaqueEntry* preOpaqueEntry = FindPreOpaqueEntryByName(name)) {
         preOpaqueEntry->priority = priority;
         SortAndDetectCollisionsInPreOpaqueList(m_preOpaque);
+        return true;
+    }
+
+    if (PostOpaqueEntry* postOpaqueEntry = FindPostOpaqueEntryByName(name)) {
+        postOpaqueEntry->priority = priority;
+        SortAndDetectCollisionsInPostOpaqueList(m_postOpaque);
+        return true;
+    }
+    if (PostTransparentEntry* postTransparentEntry = FindPostTransparentEntryByName(name)) {
+        postTransparentEntry->priority = priority;
+        SortAndDetectCollisionsInPostTransparentList(m_postTransparent);
         return true;
     }
 
@@ -285,6 +379,21 @@ bool RenderFeatureCompositor::RegisterProjectFeature(
             std::string("RegisterProjectFeature('") + descriptor.name
             + "') refused - a PreOpaque feature with this name is already registered (PreOpaque/PostComposite/"
             "PreUI feature names share one global namespace).");
+        return false;
+    }
+
+    if (FindPostOpaqueEntryByName(descriptor.name) != nullptr) {
+        GTE_LOG_WARNING("RenderFeatureCompositor",
+            std::string("RegisterProjectFeature('") + descriptor.name
+            + "') refused - a PostOpaque feature with this name is already registered (feature names share one "
+            "global namespace across every stage).");
+        return false;
+    }
+    if (FindPostTransparentEntryByName(descriptor.name) != nullptr) {
+        GTE_LOG_WARNING("RenderFeatureCompositor",
+            std::string("RegisterProjectFeature('") + descriptor.name
+            + "') refused - a PostTransparent feature with this name is already registered (feature names share "
+            "one global namespace across every stage).");
         return false;
     }
 
@@ -413,6 +522,18 @@ bool RenderFeatureCompositor::RegisterPreOpaqueFeature(
             "already registered (PreOpaque/PostComposite/PreUI feature names share one global namespace).");
         return false;
     }
+    if (FindPostOpaqueEntryByName(name) != nullptr) {
+        GTE_LOG_WARNING("RenderFeatureCompositor",
+            "RegisterPreOpaqueFeature('" + name + "') refused - a PostOpaque feature with this name is already "
+            "registered (feature names share one global namespace across every stage).");
+        return false;
+    }
+    if (FindPostTransparentEntryByName(name) != nullptr) {
+        GTE_LOG_WARNING("RenderFeatureCompositor",
+            "RegisterPreOpaqueFeature('" + name + "') refused - a PostTransparent feature with this name is "
+            "already registered (feature names share one global namespace across every stage).");
+        return false;
+    }
 
     PreOpaqueEntry entry;
     entry.name = name;
@@ -452,6 +573,139 @@ bool RenderFeatureCompositor::UnregisterPreOpaqueFeature(const char* name)
     return true;
 }
 
+bool RenderFeatureCompositor::RegisterPostOpaqueFeature(
+    const std::string& name, std::int32_t priority, ProjectScenePassCallback callback)
+{
+    AssertCalledFromMainThread();
+
+    if (FindPostOpaqueEntryByName(name) != nullptr) {
+        GTE_LOG_WARNING("RenderFeatureCompositor",
+            "RegisterPostOpaqueFeature('" + name + "') refused - a PostOpaque feature with this name is already "
+            "registered.");
+        return false;
+    }
+    if (FindPostTransparentEntryByName(name) != nullptr) {
+        GTE_LOG_WARNING("RenderFeatureCompositor",
+            "RegisterPostOpaqueFeature('" + name + "') refused - a PostTransparent feature with this name is "
+            "already registered (feature names share one global namespace across every stage).");
+        return false;
+    }
+    if (FindPreOpaqueEntryByName(name) != nullptr) {
+        GTE_LOG_WARNING("RenderFeatureCompositor",
+            "RegisterPostOpaqueFeature('" + name + "') refused - a PreOpaque feature with this name is already "
+            "registered (feature names share one global namespace across every stage).");
+        return false;
+    }
+    if (FindEntryByName(name) != nullptr) {
+        GTE_LOG_WARNING("RenderFeatureCompositor",
+            "RegisterPostOpaqueFeature('" + name + "') refused - a PostComposite/PreUI feature with this name is "
+            "already registered (feature names share one global namespace across every stage).");
+        return false;
+    }
+
+    PostOpaqueEntry entry;
+    entry.name = name;
+    entry.priority = priority;
+    entry.callback = std::move(callback);
+    m_postOpaque.push_back(std::move(entry));
+    SortAndDetectCollisionsInPostOpaqueList(m_postOpaque);
+
+    GTE_LOG_INFO("RenderFeatureCompositor", "RegisterPostOpaqueFeature('" + name + "') succeeded.");
+    return true;
+}
+
+bool RenderFeatureCompositor::UnregisterPostOpaqueFeature(const char* name)
+{
+    AssertCalledFromMainThread();
+
+    if (name == nullptr) {
+        return false;
+    }
+
+    const std::string nameStr = name;
+    const std::size_t sizeBefore = m_postOpaque.size();
+    m_postOpaque.erase(
+        std::remove_if(m_postOpaque.begin(), m_postOpaque.end(),
+            [&nameStr](const PostOpaqueEntry& e) { return nameStr == e.name; }),
+        m_postOpaque.end());
+
+    if (m_postOpaque.size() == sizeBefore) {
+        GTE_LOG_WARNING("RenderFeatureCompositor",
+            "UnregisterPostOpaqueFeature('" + nameStr + "') refused - no such PostOpaque feature is registered.");
+        return false;
+    }
+
+    GTE_LOG_INFO("RenderFeatureCompositor", "UnregisterPostOpaqueFeature('" + nameStr + "') succeeded.");
+    return true;
+}
+
+bool RenderFeatureCompositor::RegisterPostTransparentFeature(
+    const std::string& name, std::int32_t priority, ProjectScenePassCallback callback)
+{
+    AssertCalledFromMainThread();
+
+    if (FindPostTransparentEntryByName(name) != nullptr) {
+        GTE_LOG_WARNING("RenderFeatureCompositor",
+            "RegisterPostTransparentFeature('" + name + "') refused - a PostTransparent feature with this name is "
+            "already registered.");
+        return false;
+    }
+    if (FindPostOpaqueEntryByName(name) != nullptr) {
+        GTE_LOG_WARNING("RenderFeatureCompositor",
+            "RegisterPostTransparentFeature('" + name + "') refused - a PostOpaque feature with this name is "
+            "already registered (feature names share one global namespace across every stage).");
+        return false;
+    }
+    if (FindPreOpaqueEntryByName(name) != nullptr) {
+        GTE_LOG_WARNING("RenderFeatureCompositor",
+            "RegisterPostTransparentFeature('" + name + "') refused - a PreOpaque feature with this name is "
+            "already registered (feature names share one global namespace across every stage).");
+        return false;
+    }
+    if (FindEntryByName(name) != nullptr) {
+        GTE_LOG_WARNING("RenderFeatureCompositor",
+            "RegisterPostTransparentFeature('" + name + "') refused - a PostComposite/PreUI feature with this name "
+            "is already registered (feature names share one global namespace across every stage).");
+        return false;
+    }
+
+    PostTransparentEntry entry;
+    entry.name = name;
+    entry.priority = priority;
+    entry.callback = std::move(callback);
+    m_postTransparent.push_back(std::move(entry));
+    SortAndDetectCollisionsInPostTransparentList(m_postTransparent);
+
+    GTE_LOG_INFO("RenderFeatureCompositor", "RegisterPostTransparentFeature('" + name + "') succeeded.");
+    return true;
+}
+
+bool RenderFeatureCompositor::UnregisterPostTransparentFeature(const char* name)
+{
+    AssertCalledFromMainThread();
+
+    if (name == nullptr) {
+        return false;
+    }
+
+    const std::string nameStr = name;
+    const std::size_t sizeBefore = m_postTransparent.size();
+    m_postTransparent.erase(
+        std::remove_if(m_postTransparent.begin(), m_postTransparent.end(),
+            [&nameStr](const PostTransparentEntry& e) { return nameStr == e.name; }),
+        m_postTransparent.end());
+
+    if (m_postTransparent.size() == sizeBefore) {
+        GTE_LOG_WARNING("RenderFeatureCompositor",
+            "UnregisterPostTransparentFeature('" + nameStr
+            + "') refused - no such PostTransparent feature is registered.");
+        return false;
+    }
+
+    GTE_LOG_INFO("RenderFeatureCompositor", "UnregisterPostTransparentFeature('" + nameStr + "') succeeded.");
+    return true;
+}
+
 // better-render-pass-2 campaign, PHASE4 (PHASE4_DELETE_PLUGINS_FOLDER_AND_CMAKE.md) -
 // intentionally empty as of this campaign: `IPluginCapabilityOrchestrator`
 // requires an override (its own OnPluginsLoaded() is a pure virtual with no
@@ -476,7 +730,8 @@ void RenderFeatureCompositor::OnPluginsLoaded(const std::vector<IPluginModule*>&
 std::vector<RenderFeatureDebugEntry> RenderFeatureCompositor::DebugSnapshot() const
 {
     std::vector<RenderFeatureDebugEntry> snapshot;
-    snapshot.reserve(m_postComposite.size() + m_preUi.size() + m_preOpaque.size());
+    snapshot.reserve(m_postComposite.size() + m_preUi.size() + m_preOpaque.size() + m_postOpaque.size()
+        + m_postTransparent.size());
 
     auto appendStage = [&snapshot](const std::vector<Entry>& entries) {
         for (const Entry& entry : entries) {
@@ -506,6 +761,27 @@ std::vector<RenderFeatureDebugEntry> RenderFeatureCompositor::DebugSnapshot() co
         RenderFeatureDebugEntry debugEntry;
         debugEntry.name = entry.name;
         debugEntry.stage = "PreOpaque";
+        debugEntry.priority = entry.priority;
+        debugEntry.blendMode = "None";
+        debugEntry.enabled = entry.enabledOverride;
+        debugEntry.isProjectFeature = static_cast<bool>(entry.callback);
+        snapshot.push_back(std::move(debugEntry));
+    }
+
+    for (const PostOpaqueEntry& entry : m_postOpaque) {
+        RenderFeatureDebugEntry debugEntry;
+        debugEntry.name = entry.name;
+        debugEntry.stage = "PostOpaque";
+        debugEntry.priority = entry.priority;
+        debugEntry.blendMode = "None";
+        debugEntry.enabled = entry.enabledOverride;
+        debugEntry.isProjectFeature = static_cast<bool>(entry.callback);
+        snapshot.push_back(std::move(debugEntry));
+    }
+    for (const PostTransparentEntry& entry : m_postTransparent) {
+        RenderFeatureDebugEntry debugEntry;
+        debugEntry.name = entry.name;
+        debugEntry.stage = "PostTransparent";
         debugEntry.priority = entry.priority;
         debugEntry.blendMode = "None";
         debugEntry.enabled = entry.enabledOverride;
