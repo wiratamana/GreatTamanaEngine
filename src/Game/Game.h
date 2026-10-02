@@ -127,10 +127,21 @@ public:
     // branch (Scene View's own call site) - Scene View keeps drawing every
     // entity, batch-eligible or not, through the fully unmodified per-entity
     // path forever (Locked Design Decision 11, PHASE0_MASTER_STRATEGY.md).
+    //
+    // `sceneServicesSet` (Block 4, task_manager/better-render-pass-6,
+    // PHASE6_DRAW_CALL_THREADING_SCENEQUERY_RENDERSYSTEM_GAME.md) - optional,
+    // trailing, defaulted (VK_NULL_HANDLE) parameter, purely additive - every
+    // existing call site keeps compiling/behaving completely unchanged.
+    // Unlike `frameDebuggerCapture`/`maxDrawCount`/`batchedEntities` above,
+    // this IS forwarded into BOTH branches below - a Scene View and a Game
+    // View rendered in the same frame each need their own, independently
+    // correct scene-services data (PHASE0_MASTER_STRATEGY.md's own Goal
+    // section) - see Render()'s own body (Game.cpp) for how both branches
+    // reach it.
     void Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* viewProjectionOverride = nullptr,
         IFrameDebuggerCaptureRecorder* frameDebuggerCapture = nullptr,
         std::optional<std::size_t> maxDrawCount = std::nullopt,
-        const std::unordered_set<Entity>& batchedEntities = {});
+        const std::unordered_set<Entity>& batchedEntities = {}, VkDescriptorSet sceneServicesSet = VK_NULL_HANDLE);
 
 
     // Read-only-in-spirit access to the ECS World for the Editor's

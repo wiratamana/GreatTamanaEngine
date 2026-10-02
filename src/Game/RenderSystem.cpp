@@ -96,15 +96,16 @@ Mat4 RenderSystem::ResolveActiveCameraViewProjection(Registry& registry, float a
 
 void RenderSystem::Draw(Registry& registry, Renderer& renderer, float aspectWidthOverHeight,
     IFrameDebuggerCaptureRecorder* capture, std::optional<std::size_t> maxDrawCount,
-    const std::unordered_set<Entity>& batchedEntities)
+    const std::unordered_set<Entity>& batchedEntities, VkDescriptorSet sceneServicesSet)
 {
     Draw(registry, renderer, ResolveActiveCameraViewProjection(registry, aspectWidthOverHeight), capture, maxDrawCount,
-        batchedEntities);
+        batchedEntities, std::nullopt, sceneServicesSet);
 }
 
 void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& viewProjection,
     IFrameDebuggerCaptureRecorder* capture, std::optional<std::size_t> maxDrawCount,
-    const std::unordered_set<Entity>& batchedEntities, std::optional<PipelineHandle> pipelineOverride)
+    const std::unordered_set<Entity>& batchedEntities, std::optional<PipelineHandle> pipelineOverride,
+    VkDescriptorSet sceneServicesSet)
 {
     GTE_PROFILE_SCOPE("RenderSystem::Draw");
 
@@ -183,7 +184,7 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& view
                     registry, renderer, command.entity, *mesh, *pipeline, materialTexture, viewProjection);
             }
 
-            renderer.Submit(*pipeline, *mesh, command.model, viewProjection, descriptorSet);
+            renderer.Submit(*pipeline, *mesh, command.model, viewProjection, descriptorSet, sceneServicesSet);
         }
     }
 }

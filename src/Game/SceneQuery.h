@@ -4,6 +4,8 @@
 #include "Math/Mat4.h"
 #include "Renderer/PipelineHandle.h"
 
+#include <volk.h>
+
 #include <cstddef>
 #include <optional>
 #include <unordered_set>
@@ -68,6 +70,15 @@ struct SceneDrawRequest {
     // this one DrawScene() call only - see this struct's own LIFETIME
     // CONTRACT comment above.
     const std::unordered_set<Entity>* batchedEntities = nullptr;
+
+    // Block 4 (task_manager/better-render-pass-6) - the ONE resolved,
+    // per-view, per-frame "scene services" descriptor set (set = 1) to bind
+    // for every entity drawn by this one DrawScene() call - VK_NULL_HANDLE
+    // means "no scene services this call" (every existing/other caller stays
+    // unaffected). NEVER resolved per-entity - this is a single, call-scoped
+    // constant, mirroring pipelineOverride's own "one value for the whole
+    // call" contract above.
+    VkDescriptorSet sceneServicesSet = VK_NULL_HANDLE;
 };
 
 // The ONE new public convenience entry point every "redraw the scene for a

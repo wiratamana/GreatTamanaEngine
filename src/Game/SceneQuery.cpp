@@ -8,7 +8,7 @@ void DrawScene(RenderSystem& renderSystem, Registry& registry, Renderer& rendere
 {
     renderSystem.Draw(registry, renderer, request.viewProjection, request.frameDebuggerCapture, request.maxDrawCount,
         request.batchedEntities != nullptr ? *request.batchedEntities : std::unordered_set<Entity>{},
-        request.pipelineOverride);
+        request.pipelineOverride, request.sceneServicesSet);
 }
 
 } // namespace gte

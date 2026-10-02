@@ -206,9 +206,17 @@ public:
     // AddFrameDebuggerReplayPasses()'s own per-object replay steps, never
     // AddPresentPass()'s direct-render-to-swapchain fallback (Locked
     // Design Decision 11, PHASE0_MASTER_STRATEGY.md).
+    //
+    // `sceneServicesSet` (Block 4, task_manager/better-render-pass-6,
+    // PHASE6_DRAW_CALL_THREADING_SCENEQUERY_RENDERSYSTEM_GAME.md) - optional,
+    // trailing, defaulted (VK_NULL_HANDLE) parameter, purely additive - every
+    // existing call site keeps compiling/behaving completely unchanged.
+    // Forwarded, unchanged, straight into the Mat4& overload below (which
+    // owns the real per-command renderer.Submit() loop) - see that
+    // overload's own doc comment for the full contract.
     void Draw(Registry& registry, Renderer& renderer, float aspectWidthOverHeight,
         IFrameDebuggerCaptureRecorder* capture = nullptr, std::optional<std::size_t> maxDrawCount = std::nullopt,
-        const std::unordered_set<Entity>& batchedEntities = {});
+        const std::unordered_set<Entity>& batchedEntities = {}, VkDescriptorSet sceneServicesSet = VK_NULL_HANDLE);
 
     // Explicit-view-projection overload of Draw() above, for a caller that
     // already has its own view-projection matrix to render with instead of
@@ -258,10 +266,23 @@ public:
     // else Draw() does - a batched-and-excluded entity is skipped by its
     // own existing check before either the override or the per-entity
     // pipeline is ever looked at.
+    //
+    // `sceneServicesSet` (Block 4, task_manager/better-render-pass-6,
+    // PHASE6_DRAW_CALL_THREADING_SCENEQUERY_RENDERSYSTEM_GAME.md) - optional,
+    // trailing, defaulted (VK_NULL_HANDLE) parameter, purely additive - every
+    // existing call site (including the float-aspect overload above, which
+    // forwards it straight through) keeps compiling/behaving completely
+    // unchanged. This overload owns the real per-command loop, so it is the
+    // ONE place that actually forwards this single, call-scoped value into
+    // every renderer.Submit() call this method makes - never resolved
+    // per-entity/per-MeshRenderer (see SceneQuery.h's SceneDrawRequest::
+    // sceneServicesSet doc comment for the full "one value per view per
+    // frame" contract).
     void Draw(Registry& registry, Renderer& renderer, const Mat4& viewProjection,
         IFrameDebuggerCaptureRecorder* capture = nullptr, std::optional<std::size_t> maxDrawCount = std::nullopt,
         const std::unordered_set<Entity>& batchedEntities = {},
-        std::optional<PipelineHandle> pipelineOverride = std::nullopt);
+        std::optional<PipelineHandle> pipelineOverride = std::nullopt,
+        VkDescriptorSet sceneServicesSet = VK_NULL_HANDLE);
 
     // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
     // PHASE4 (task_manager/render-pass-5/

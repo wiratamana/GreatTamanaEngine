@@ -370,7 +370,7 @@ void Game::EnsureDefaultCameraExists()
 
 void Game::Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* viewProjectionOverride,
     IFrameDebuggerCaptureRecorder* frameDebuggerCapture, std::optional<std::size_t> maxDrawCount,
-    const std::unordered_set<Entity>& batchedEntities)
+    const std::unordered_set<Entity>& batchedEntities, VkDescriptorSet sceneServicesSet)
 {
     renderer.Clear(20, 20, 30, 255);
 
@@ -386,15 +386,24 @@ void Game::Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* v
         // NEVER forwarded into this branch (Locked Design Decision 11,
         // PHASE0_MASTER_STRATEGY.md) - Scene View keeps drawing every
         // entity, batch-eligible or not, through the fully unmodified
-        // per-entity path forever.
-        m_renderSystem.Draw(m_registry, renderer, *viewProjectionOverride);
+        // per-entity path forever. Block 4 (task_manager/better-render-pass-6)
+        // - sceneServicesSet IS forwarded here, unlike the parameters above -
+        // every intervening defaulted parameter (capture, maxDrawCount,
+        // batchedEntities, pipelineOverride) must be spelled out explicitly
+        // so sceneServicesSet lands in its real, trailing slot instead of
+        // silently binding to an earlier one.
+        m_renderSystem.Draw(m_registry, renderer, *viewProjectionOverride, nullptr, std::nullopt, {}, std::nullopt,
+            sceneServicesSet);
     } else {
         // frameDebuggerCapture is never dereferenced here (or anywhere else
         // in this file) - only forwarded onward, as a bare pointer, exactly
         // like PHASE1's own Step 3.1b requires for a CORE, always-compiled
         // file such as this one. See Game.h's own updated Render() comment.
-        m_renderSystem.Draw(
-            m_registry, renderer, aspectWidthOverHeight, frameDebuggerCapture, maxDrawCount, batchedEntities);
+        // This branch's own existing call already supplies all 6 positional
+        // arguments in order, so appending sceneServicesSet as a 7th is safe
+        // as-is - no intervening defaults to spell out.
+        m_renderSystem.Draw(m_registry, renderer, aspectWidthOverHeight, frameDebuggerCapture, maxDrawCount,
+            batchedEntities, sceneServicesSet);
     }
 }
 
