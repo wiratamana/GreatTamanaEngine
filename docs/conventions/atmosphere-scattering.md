@@ -73,6 +73,25 @@ whenever touching this feature:
   longer a "deliberate, out-of-scope non-goal" (see
   `task_manager/network-impl-6/PHASE0_MASTER_STRATEGY.md` for the full
   six-phase campaign that lifted this restriction).
+- **This is also the documented home for the Render Graph's `ResourceKind`
+  vocabulary in general, not just the `VolumeTexture` entry above - follow this
+  precedent for any future resource-kind addition.** The `better-render-pass-7`
+  campaign (BLOCK 5 of 6 of a separate `better-render-pass-3` campaign,
+  `task_manager/better-render-pass-7/PHASE0_MASTER_STRATEGY.md`,
+  `PHASE6_COMPLETION_REPORT.md`) added a genuine FOURTH kind,
+  `rg::ResourceKind::TextureArray`/`TextureArrayDesc`/`TextureArrayHandle`
+  (`src/Renderer/RenderGraph/RenderGraphTypes.h`, `src/Renderer/TextureArray2D.h`)
+  — a single Vulkan image with N layers (`Texture2DArray`) or a cubemap
+  (`VK_IMAGE_VIEW_TYPE_CUBE`/`_CUBE_ARRAY`), poolable/barrier-planned exactly
+  like plain `TextureDesc`/`TextureHandle` (unlike `VolumeTexture`, which is
+  import-only). **Deliberately deferred, unrelated to the Atmosphere feature
+  itself**: no per-layer/per-face `VkImageView` or per-layer write
+  declaration (so a real cascade-shadow/point-light-cubemap pass still cannot
+  render into one specific layer yet), no hardware depth-comparison sampler,
+  no mip-mapping, no new debug-texture-registry/Editor resource-list entry for
+  this kind, and no Tier-1 test for `RenderGraphResourcePool::AcquireTextureArray()`
+  (permanently Tier-2/manual-only). See that campaign's own
+  `PHASE6_COMPLETION_REPORT.md` for the full, itemized restatement.
 - **`AtmosphereParametersGpu`/`AtmosphereFrameUniforms`
   (`src/Renderer/Atmosphere/AtmosphereTypes.h`) are ALWAYS bound as read-only
   STORAGE buffers (`layout(std430, ...) readonly buffer`), NEVER a true

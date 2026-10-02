@@ -670,6 +670,44 @@ optimization touching the same four Atmosphere passes PHASE5 migrated here, for 
 compute/upload-skipping reason). See `task_manager/better-render-pass-1/CAMPAIGN_COMPLETION_REPORT.md` for
 the full ten-phase writeup.
 
+A further campaign, `better-render-pass-7` (six phases, implementing BLOCK 5 of
+6 of a separate, parallel `better-render-pass-3` campaign -
+`task_manager/better-render-pass-7/PHASE0_MASTER_STRATEGY.md`,
+`PHASE6_COMPLETION_REPORT.md`), gave the Render Graph a genuine FOURTH resource
+kind, `rg::ResourceKind::TextureArray`/`TextureArrayDesc`/`TextureArrayHandle`,
+representing a single Vulkan image with N layers (a `Texture2DArray`, e.g. a
+future cascade shadow map) or a cubemap (`VK_IMAGE_VIEW_TYPE_CUBE`/
+`_CUBE_ARRAY`) - poolable and barrier-planned exactly like plain
+`TextureDesc`/`TextureHandle` already is (NOT like `VolumeTextureDesc`, which
+stays import-only and was never touched). A new RAII class,
+`src/Renderer/TextureArray2D.h/.cpp`, owns one whole-array `VkImage`/
+`VkImageView`/sampler; `RenderGraphBuilder::CreateTextureArray()`/
+`ImportTextureArray()`/`PassBuilder::ReadTextureArray()`/`WriteTextureArray()`
+and `RenderGraphResourcePool::AcquireTextureArray()` complete the builder/pool
+wiring, and every existing `DispatchByKind()`/hand-rolled `ResourceKind` switch
+in the codebase - including 4 previously-hidden raw ternary chains in
+`RenderGraphCompiler.cpp` that a plain `DispatchByKind` grep alone would have
+missed - was audited and given a real 4th branch. **Deliberately, explicitly
+deferred, restated honestly rather than silently dropped**: no per-layer/
+per-face `VkImageView` (only one whole-array view exists - a real
+cascade-shadow/point-light-cubemap depth pass still needs a per-layer view
+mechanism AND a per-layer write-declaration entry point on `PassBuilder` before
+it can render into one specific layer, left for a future block, not this one),
+no hardware depth-comparison sampler (plain linear/clamp-to-edge only,
+mirroring `RenderTexture`'s own precedent), no mip-mapping, `VolumeTextureDesc`
+untouched, no new `RenderGraphDebugTextureArrayRegistry`, no new Editor
+Render-Graph resource-LIST entry (per-pass read/write rows already show it
+correctly), and no Tier-1 automated test for
+`RenderGraphResourcePool::AcquireTextureArray()` (permanently Tier-2/
+manual-only, same as `AcquireTexture()`/`AcquireBuffer()`). Verified with a
+full clean build and a full `ctest` regression pass (2192 tests, 100% of
+executed tests passing, 102 legitimate environment-gated skips), plus a live,
+HTTP-driven smoke test writing 4 distinct solid colors into 4 separate layers
+of a real, pooled `TextureArray` and confirming non-aliased storage. See
+`task_manager/better-render-pass-7/PHASE6_COMPLETION_REPORT.md` for the full
+six-phase writeup and the complete restatement of every deferred item left for
+a future cascade-shadow/point-light-cubemap-shadow block to pick up.
+
 Full history: `task_manager/render-pass-1/PHASE0_MASTER_STRATEGY.md`,
 `task_manager/render-pass-2/PHASE0_MASTER_STRATEGY.md`,
 `task_manager/render-pass-3/PHASE0_MASTER_STRATEGY.md`,
@@ -678,8 +716,9 @@ Full history: `task_manager/render-pass-1/PHASE0_MASTER_STRATEGY.md`,
 `task_manager/render-pass-7/PHASE0_MASTER_STRATEGY.md`,
 `task_manager/editor-core-separation-20/PHASE0_MASTER_STRATEGY.md`,
 `task_manager/editor-core-separation-21/PHASE0_MASTER_STRATEGY.md`,
-`task_manager/editor-core-separation-22/PHASE0_MASTER_STRATEGY.md`, and
-`task_manager/better-render-pass-1/PHASE0_MASTER_STRATEGY.md`, and each
+`task_manager/editor-core-separation-22/PHASE0_MASTER_STRATEGY.md`,
+`task_manager/better-render-pass-1/PHASE0_MASTER_STRATEGY.md`,
+`task_manager/better-render-pass-7/PHASE0_MASTER_STRATEGY.md`, and each
 `PHASEn_COMPLETION_REPORT.md`/`CAMPAIGN_COMPLETION_REPORT.md` in those same
 folders.
 
