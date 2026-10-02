@@ -14,6 +14,7 @@
 
 #include <gtest/gtest.h>
 
+#include <string>
 #include <vector>
 
 namespace gte::rg {
@@ -21,6 +22,19 @@ namespace {
 
 void NoOpExecute(PassContext&) { }
 void NoOpSetup(RenderGraphBuilder::PassBuilder&) { }
+
+// Counts non-overlapping occurrences of needle in haystack - used below to
+// assert a stderr warning fired exactly once, not merely "at least once".
+std::size_t CountOccurrences(const std::string& haystack, const std::string& needle)
+{
+    std::size_t count = 0;
+    std::size_t pos = 0;
+    while ((pos = haystack.find(needle, pos)) != std::string::npos) {
+        ++count;
+        pos += needle.size();
+    }
+    return count;
+}
 
 // editor-core-separation-25 campaign - a minimal, test-local, dual-interface
 // fake sink, mirroring RenderGraphSnapshotTests.cpp's own FakeMetadataSink
@@ -180,6 +194,115 @@ TEST(RenderPassBlackboardTest, BeginFrameNeverShrinksCapacityBelowItsPriorHighWa
         EXPECT_FALSE(blackboard.Fetch<int>(key).has_value());
     }
 }
+
+// --- NamedSceneResourceKey() --------------------------------------------
+
+TEST(NamedSceneResourceKeyTest, AllNameViewPairsProduceDistinctKeys)
+{
+    const std::vector<const char*> names = { "Test.Foo", "Test.Bar", "Test.Baz" };
+    const std::vector<RenderViewId> views = {
+        RenderViewId::Shared(),
+        RenderViewId::Named("A"),
+        RenderViewId::Named("B"),
+    };
+
+    std::vector<std::uint64_t> keys;
+    keys.reserve(names.size() * views.size());
+    for (const char* name : names) {
+        for (const RenderViewId& view : views) {
+            keys.push_back(NamedSceneResourceKey(name, view).hash);
+        }
+    }
+
+    ASSERT_EQ(keys.size(), 9u);
+    for (std::size_t i = 0; i < keys.size(); ++i) {
+        for (std::size_t j = i + 1; j < keys.size(); ++j) {
+            EXPECT_NE(keys[i], keys[j]) << "collision between pair index " << i << " and " << j;
+        }
+    }
+}
+
+TEST(NamedSceneResourceKeyTest, NullNameAndEmptyNameProduceTheSameKey)
+{
+    const RenderViewId view = RenderViewId::Named("Game");
+    const RenderPassId fromNull = NamedSceneResourceKey(nullptr, view);
+    const RenderPassId fromEmpty = NamedSceneResourceKey("", view);
+    EXPECT_TRUE(fromNull == fromEmpty);
+}
+
+TEST(NamedSceneResourceKeyTest, PublishUnderOneViewIsNotVisibleUnderADifferentView)
+{
+    RenderPassBlackboard blackboard;
+    blackboard.Publish<int>(NamedSceneResourceKey("Test.Foo", RenderViewId::Named("Game")), 42);
+
+    const std::optional<int> sameViewFetch =
+        blackboard.Fetch<int>(NamedSceneResourceKey("Test.Foo", RenderViewId::Named("Game")));
+    const std::optional<int> otherViewFetch =
+        blackboard.Fetch<int>(NamedSceneResourceKey("Test.Foo", RenderViewId::Named("Scene")));
+
+    ASSERT_TRUE(sameViewFetch.has_value());
+    EXPECT_EQ(*sameViewFetch, 42);
+    EXPECT_FALSE(otherViewFetch.has_value());
+}
+
+// Debug-only: RenderPassBlackboard::Publish()'s own double-publish warning
+// (RenderPipeline.h) compiles to nothing in a release (NDEBUG) build.
+#ifndef NDEBUG
+TEST(RenderPassBlackboardDoublePublishDiagnosticTest, TwoPublishesUnderTheSameKeyWarnExactlyOnce)
+{
+    RenderPassBlackboard blackboard;
+    const RenderPassId key = NamedSceneResourceKey("Test.DoublePublishA", RenderViewId::Shared());
+
+    testing::internal::CaptureStderr();
+    blackboard.Publish<int>(key, 1);
+    blackboard.Publish<int>(key, 2);
+    const std::string output = testing::internal::GetCapturedStderr();
+
+    EXPECT_EQ(CountOccurrences(output, "Publish()'d more than once"), 1u);
+}
+
+TEST(RenderPassBlackboardDoublePublishDiagnosticTest, TwoPublishesUnderDifferentKeysNeverWarn)
+{
+    RenderPassBlackboard blackboard;
+    const RenderPassId keyA = NamedSceneResourceKey("Test.DoublePublishB", RenderViewId::Shared());
+    const RenderPassId keyB = NamedSceneResourceKey("Test.DoublePublishC", RenderViewId::Shared());
+
+    testing::internal::CaptureStderr();
+    blackboard.Publish<int>(keyA, 1);
+    blackboard.Publish<int>(keyB, 2);
+    const std::string output = testing::internal::GetCapturedStderr();
+
+    EXPECT_EQ(CountOccurrences(output, "Publish()'d more than once"), 0u);
+}
+
+TEST(RenderPassBlackboardDoublePublishDiagnosticTest, SameNameUnderDifferentViewsNeverWarns)
+{
+    RenderPassBlackboard blackboard;
+    const RenderPassId gameKey = NamedSceneResourceKey("Test.DoublePublishSharedName", RenderViewId::Named("Game"));
+    const RenderPassId sceneKey = NamedSceneResourceKey("Test.DoublePublishSharedName", RenderViewId::Named("Scene"));
+
+    testing::internal::CaptureStderr();
+    blackboard.Publish<int>(gameKey, 1);
+    blackboard.Publish<int>(sceneKey, 2);
+    const std::string output = testing::internal::GetCapturedStderr();
+
+    EXPECT_EQ(CountOccurrences(output, "Publish()'d more than once"), 0u);
+}
+
+TEST(RenderPassBlackboardDoublePublishDiagnosticTest, ThreePublishesUnderTheSameKeyStillWarnExactlyOnce)
+{
+    RenderPassBlackboard blackboard;
+    const RenderPassId key = NamedSceneResourceKey("Test.DoublePublishD", RenderViewId::Shared());
+
+    testing::internal::CaptureStderr();
+    blackboard.Publish<int>(key, 1);
+    blackboard.Publish<int>(key, 2);
+    blackboard.Publish<int>(key, 3);
+    const std::string output = testing::internal::GetCapturedStderr();
+
+    EXPECT_EQ(CountOccurrences(output, "Publish()'d more than once"), 1u);
+}
+#endif // !NDEBUG
 
 // --- RenderPipeline::DeclareInto() -----------------------------------------
 
