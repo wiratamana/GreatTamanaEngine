@@ -268,8 +268,17 @@ void Renderer::BeginFrame()
 }
 
 void Renderer::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix, const Mat4& viewProjMatrix,
-    VkDescriptorSet materialDescriptorSet)
+    VkDescriptorSet materialDescriptorSet, VkDescriptorSet sceneServicesSet)
 {
+    // Global Scene Services Descriptor Set campaign (better-render-pass-6),
+    // PHASE5 - the ONE place that resolves pipeline.HasSceneServicesSet()'s
+    // gate: a non-null sceneServicesSet is only ever actually forwarded
+    // (down either path below) when `pipeline` itself was built with a real
+    // sceneServicesSetLayout (PHASE3) - passing one against a Pipeline with
+    // no set = 1 is exactly the backward-compatibility break this gate
+    // exists to prevent (PHASE0's global rule 1).
+    const VkDescriptorSet effectiveSceneServicesSet = pipeline.HasSceneServicesSet() ? sceneServicesSet : VK_NULL_HANDLE;
+
     // Phase 7 (RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md) -
     // while a render-graph pass is being recorded (BeginGraphPassRecording()
     // was called and hasn't been cleared yet - see Renderer.h), issue this
@@ -283,14 +292,14 @@ void Renderer::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& mo
         const std::uint32_t indexCount = hasIndexBuffer ? mesh.IndexCount() : 0;
         FrameRecorder::IssueDrawCommand(m_currentGraphPassCmd, pipeline.Native(), pipeline.Layout(),
             mesh.VertexBuffer(), mesh.VertexCount(), hasIndexBuffer ? mesh.IndexBuffer() : VK_NULL_HANDLE, indexCount,
-            modelMatrix, viewProjMatrix, materialDescriptorSet);
+            modelMatrix, viewProjMatrix, materialDescriptorSet, effectiveSceneServicesSet);
         if (m_currentGraphPassRecordDrawStats) {
             m_currentGraphPassRecordDrawStats(hasIndexBuffer, mesh.VertexCount(), indexCount);
         }
         return;
     }
 
-    m_frameRecorder.Submit(pipeline, mesh, modelMatrix, viewProjMatrix, materialDescriptorSet);
+    m_frameRecorder.Submit(pipeline, mesh, modelMatrix, viewProjMatrix, materialDescriptorSet, effectiveSceneServicesSet);
 }
 
 void Renderer::SubmitIndirect(const Pipeline& pipeline, const Mesh& mesh, VkBuffer indirectBuffer,
@@ -317,6 +326,19 @@ void Renderer::SubmitIndirect(const Pipeline& pipeline, const Mesh& mesh, VkBuff
     assert(mesh.HasIndexBuffer()
         && "Renderer::SubmitIndirect(): every indirect draw is VkDrawIndexedIndirectCommand-only (indexed meshes "
            "only) - see PHASE0_MASTER_STRATEGY.md's Locked Design Decision 6.");
+
+    // Global Scene Services Descriptor Set campaign (better-render-pass-6),
+    // PHASE5 - the ONE allowed functional touch this block makes to
+    // SubmitIndirect(): a debug-only misuse guard, never a redesign of its
+    // actual bind logic. SubmitIndirect()/IssueIndirectDrawCommand() never
+    // bind set 1 (PHASE0's second scope boundary) - a Pipeline that carries
+    // a sceneServicesSetLayout anyway (legal per Pipeline's own contiguous-
+    // pSetLayouts logic, PHASE3) would silently leave its real set = 1
+    // layout slot unbound every indirect draw, which is exactly the kind of
+    // silent misuse this assert exists to catch instead.
+    assert(!pipeline.HasSceneServicesSet()
+        && "Renderer::SubmitIndirect(): pipeline carries a sceneServicesSetLayout, but SubmitIndirect()/"
+           "IssueIndirectDrawCommand() never bind set 1 - see Block 4's Section 2 second scope boundary.");
 
     FrameRecorder::IssueIndirectDrawCommand(m_currentGraphPassCmd, pipeline.Native(), pipeline.Layout(),
         mesh.VertexBuffer(), mesh.IndexBuffer(), instanceBufferDescriptorSet, viewProjMatrix, indirectBuffer,

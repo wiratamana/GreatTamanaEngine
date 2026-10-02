@@ -10,7 +10,7 @@ namespace gte {
 
 void FrameRecorder::IssueDrawCommand(VkCommandBuffer cmd, VkPipeline pipeline, VkPipelineLayout layout,
     VkBuffer vertexBuffer, std::uint32_t vertexCount, VkBuffer indexBuffer, std::uint32_t indexCount,
-    const Mat4& model, const Mat4& viewProj, VkDescriptorSet materialDescriptorSet)
+    const Mat4& model, const Mat4& viewProj, VkDescriptorSet materialDescriptorSet, VkDescriptorSet sceneServicesSet)
 {
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
@@ -33,6 +33,15 @@ void FrameRecorder::IssueDrawCommand(VkCommandBuffer cmd, VkPipeline pipeline, V
     // pipeline (materialDescriptorSet stays VK_NULL_HANDLE otherwise).
     if (materialDescriptorSet != VK_NULL_HANDLE) {
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &materialDescriptorSet, 0, nullptr);
+    }
+
+    // Global Scene Services Descriptor Set campaign (better-render-pass-6),
+    // PHASE5 - bind `set = 1`, independently of the `set = 0` bind above,
+    // whenever a real scene-services set was resolved for this draw (see
+    // Renderer::Submit(), which already gated this against
+    // Pipeline::HasSceneServicesSet() before ever reaching here).
+    if (sceneServicesSet != VK_NULL_HANDLE) {
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, /*firstSet=*/1, 1, &sceneServicesSet, 0, nullptr);
     }
 
     const VkDeviceSize offset = 0;
@@ -125,7 +134,7 @@ void FrameRecorder::BeginFrame()
 }
 
 void FrameRecorder::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix,
-    const Mat4& viewProjMatrix, VkDescriptorSet materialDescriptorSet)
+    const Mat4& viewProjMatrix, VkDescriptorSet materialDescriptorSet, VkDescriptorSet sceneServicesSet)
 {
     DrawItem item;
     item.pipeline = pipeline.Native();
@@ -139,6 +148,7 @@ void FrameRecorder::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat
     item.model = modelMatrix;
     item.viewProj = viewProjMatrix;
     item.materialDescriptorSet = materialDescriptorSet;
+    item.sceneServicesSet = sceneServicesSet;
     m_drawQueue.push_back(item);
 }
 
@@ -292,7 +302,7 @@ DrawStats FrameRecorder::RecordFrame(VkCommandBuffer cmd, const RenderTarget& ta
 
         for (const DrawItem& item : m_drawQueue) {
             IssueDrawCommand(cmd, item.pipeline, item.layout, item.vertexBuffer, item.vertexCount, item.indexBuffer,
-                item.indexCount, item.model, item.viewProj, item.materialDescriptorSet);
+                item.indexCount, item.model, item.viewProj, item.materialDescriptorSet, item.sceneServicesSet);
 
             // Accumulated on the exact same path that just issued the real
             // vkCmdDraw/vkCmdDrawIndexed above - never before it, never

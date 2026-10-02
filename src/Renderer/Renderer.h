@@ -491,8 +491,26 @@ public:
     // VertexLayout::PositionNormalUv/useMaterialTexture (see Pipeline.h) -
     // see RenderSystem::Draw() for how a MeshRenderer's optional
     // TextureHandle resolves into this.
+    //
+    // `sceneServicesSet` (Global Scene Services Descriptor Set campaign,
+    // better-render-pass-6, PHASE5 - default VK_NULL_HANDLE, trailing) is
+    // bound as descriptor set 1 before the draw, but ONLY when `pipeline`
+    // itself actually carries a sceneServicesSetLayout
+    // (`pipeline.HasSceneServicesSet()`, PHASE3) - passing a non-null value
+    // against a Pipeline with no set = 1 is silently ignored (gated INSIDE
+    // this method's own body), never forwarded as-is; see
+    // Pipeline::HasSceneServicesSet() for why this gate must live here, not
+    // at a lower layer. Rebinding an unchanged set every Submit() call is
+    // harmless (Vulkan tolerates it) even though the REAL rewrite
+    // (`SceneServicesDescriptorSet::Rewrite()`, PHASE7) only happens once
+    // per view per frame - the real owning instance is Core's ONE
+    // SceneServicesDescriptorSet, resolved once per view by the
+    // `"RenderOpaque"` provider (PHASE7) and threaded down through
+    // RenderSystem::Draw()/Game::Render() (PHASE6) as one call-scoped
+    // constant, never per-entity.
     void Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix = Mat4::Identity(),
-        const Mat4& viewProjMatrix = Mat4::Identity(), VkDescriptorSet materialDescriptorSet = VK_NULL_HANDLE);
+        const Mat4& viewProjMatrix = Mat4::Identity(), VkDescriptorSet materialDescriptorSet = VK_NULL_HANDLE,
+        VkDescriptorSet sceneServicesSet = VK_NULL_HANDLE);
 
     // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
     // PHASE2 (task_manager/render-pass-5/
@@ -540,6 +558,15 @@ public:
     // comment for why an indirect draw's real object/triangle count is
     // fundamentally GPU-only knowledge this method must never block to read
     // back.
+    //
+    // Global Scene Services Descriptor Set campaign (better-render-pass-6),
+    // PHASE5 - debug-only asserts `!pipeline.HasSceneServicesSet()`: this
+    // method/`FrameRecorder::IssueIndirectDrawCommand()` never bind set 1,
+    // by deliberate, permanent scope decision (PHASE0's second scope
+    // boundary) - a Pipeline built with a sceneServicesSetLayout anyway
+    // (legal per Pipeline's own contiguous-pSetLayouts logic) is a caller-
+    // side misuse this assert catches instead of silently leaving set 1
+    // unbound.
     void SubmitIndirect(const Pipeline& pipeline, const Mesh& mesh, VkBuffer indirectBuffer,
         VkDeviceSize indirectOffset, std::uint32_t maxDrawCount, VkBuffer countBuffer, VkDeviceSize countBufferOffset,
         VkDescriptorSet instanceBufferDescriptorSet, const Mat4& viewProjMatrix = Mat4::Identity());

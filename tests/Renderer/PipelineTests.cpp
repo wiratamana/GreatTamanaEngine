@@ -21,12 +21,17 @@
 
 #include "Renderer/Pipeline.h"
 
+#include "Renderer/Mesh.h"
+#include "Renderer/MeshVertex.h"
+
 #include "../Fakes/HeadlessRenderGraphFixture.h"
 
 #include "Renderer/Renderer.h"
 #include "Renderer/Vulkan/DescriptorSetLayoutBuilder.h"
 
 #include <gtest/gtest.h>
+
+#include <cstdint>
 
 namespace gte {
 namespace {
@@ -86,6 +91,92 @@ TEST(PipelineTest, UnchangedConstructionWithNoSceneServicesSetLayoutReportsHasSc
     EXPECT_FALSE(pipeline.HasSceneServicesSet());
     EXPECT_NE(pipeline.Native(), static_cast<VkPipeline>(VK_NULL_HANDLE));
 }
+
+// PHASE5 (PHASE5_SUBMIT_AND_FRAMERECORDER_BIND_WIRING.md) - debug-only
+// death test for Renderer::SubmitIndirect()'s ONE allowed functional change
+// (PHASE0's second scope boundary): a Pipeline that carries a real
+// sceneServicesSetLayout (legal per Pipeline's own contiguous-pSetLayouts
+// logic, PHASE3) must never reach SubmitIndirect()'s actual bind logic -
+// this project's own ctest Debug build does NOT define NDEBUG, so assert()
+// stays LIVE, mirroring RenderViewRegistryTests.cpp's own
+// "probe-then-EXPECT_DEATH, freshly-constructed-inside-the-lambda fixture"
+// idiom exactly. A real, legally-indexed Mesh and a real
+// VertexLayout::PositionNormalInstanced Pipeline are used so the two
+// EARLIER asserts inside SubmitIndirect() (recording-in-progress,
+// mesh.HasIndexBuffer()) both pass cleanly first, proving THIS specific
+// assert (not an earlier one) is what fires.
+//
+// Pulled out into its own free function (rather than inline inside
+// EXPECT_DEATH's own statement argument) because the preprocessor's macro
+// argument splitting only respects PARENTHESES, never braces - an
+// aggregate initializer list's own top-level commas (see `vertices` below)
+// would otherwise be mis-parsed as extra EXPECT_DEATH() arguments.
+#ifndef NDEBUG
+
+void SubmitIndirectAgainstPipelineWithSceneServicesSet()
+{
+    HeadlessRenderGraphFixture fixture;
+    Renderer& renderer = fixture.GetRenderer();
+    const VkDevice device = renderer.GetVulkanContextInfo().device;
+
+    // Stands in for Core's real SceneServicesDescriptorSet::Layout()
+    // (PHASE2/PHASE7) - only Renderer::SubmitIndirect()'s own new misuse
+    // guard is under test here.
+    const VkDescriptorSetLayout throwawaySceneServicesLayout =
+        DescriptorSetLayoutBuilder(device).AddCombinedImageSampler(0, VK_SHADER_STAGE_FRAGMENT_BIT).Build();
+
+    Pipeline pipeline = renderer.CreatePipeline("shaders/MeshInstanced.vert.spv", "shaders/Mesh.frag.spv",
+        VertexLayout::PositionNormalInstanced, /*useMaterialTexture=*/false,
+        "RendererSubmitIndirectDeathTest.Pipeline", /*useInstanceBuffer=*/true, throwawaySceneServicesLayout);
+
+    // A trivial, real, indexed triangle - HasIndexBuffer() == true, so
+    // SubmitIndirect()'s own earlier mesh.HasIndexBuffer() assert passes
+    // cleanly before this phase's new assert is ever reached.
+    MeshVertex vertices[3]{};
+    vertices[0].position[0] = 0.0f;
+    vertices[0].position[1] = 0.0f;
+    vertices[0].position[2] = 0.0f;
+    vertices[1].position[0] = 1.0f;
+    vertices[1].position[1] = 0.0f;
+    vertices[1].position[2] = 0.0f;
+    vertices[2].position[0] = 0.0f;
+    vertices[2].position[1] = 1.0f;
+    vertices[2].position[2] = 0.0f;
+    for (MeshVertex& v : vertices) {
+        v.normal[0] = 0.0f;
+        v.normal[1] = 0.0f;
+        v.normal[2] = 1.0f;
+    }
+    std::uint32_t indices[3]{ 0, 1, 2 };
+    Mesh mesh = renderer.CreateMesh(
+        vertices, sizeof(vertices), 3, indices, sizeof(indices), 3, "RendererSubmitIndirectDeathTest.Mesh");
+
+    const VkDescriptorSet instanceBufferDescriptorSet =
+        renderer.AllocateComputeDescriptorSet(renderer.InstanceBufferDescriptorSetLayout());
+
+    // SubmitIndirect()'s FIRST assert requires a render-graph pass
+    // recording to already be in progress.
+    const VkCommandBuffer cmd = renderer.BeginOffscreenRenderGraphRecording();
+    renderer.BeginGraphPassRecording(cmd, {});
+
+    // indirectBuffer/countBuffer are never dereferenced - this phase's new
+    // assert fires before IssueIndirectDrawCommand() is ever called.
+    renderer.SubmitIndirect(pipeline, mesh, /*indirectBuffer=*/VK_NULL_HANDLE, /*indirectOffset=*/0,
+        /*maxDrawCount=*/1, /*countBuffer=*/VK_NULL_HANDLE, /*countBufferOffset=*/0, instanceBufferDescriptorSet);
+}
+
+TEST(RendererSubmitIndirectDeathTest, PipelineWithSceneServicesSetAsserts)
+{
+    {
+        HeadlessRenderGraphFixture probe;
+        if (!probe.IsUsable()) {
+            GTEST_SKIP() << probe.SkipReason();
+        }
+    }
+    EXPECT_DEATH(SubmitIndirectAgainstPipelineWithSceneServicesSet(), "");
+}
+
+#endif
 
 } // namespace
 } // namespace gte

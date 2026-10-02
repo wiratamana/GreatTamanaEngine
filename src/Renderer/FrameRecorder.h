@@ -57,8 +57,16 @@ public:
     // for the full seam this is part of. `materialDescriptorSet` (default
     // VK_NULL_HANDLE) is bound as descriptor set 0 right before this draw
     // when non-null - see Renderer::Submit()'s own matching parameter.
+    // `sceneServicesSet` (Global Scene Services Descriptor Set campaign,
+    // better-render-pass-6, PHASE5 - default VK_NULL_HANDLE, trailing) is
+    // bound as descriptor set 1 right before this draw when non-null - see
+    // Renderer::Submit()'s own matching, already-gated parameter (this
+    // (legacy/queued) path exists for type/call-site consistency with the
+    // render-graph-recording path below; no real production caller is
+    // expected to pass a non-default value here today).
     void Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix = Mat4::Identity(),
-        const Mat4& viewProjMatrix = Mat4::Identity(), VkDescriptorSet materialDescriptorSet = VK_NULL_HANDLE);
+        const Mat4& viewProjMatrix = Mat4::Identity(), VkDescriptorSet materialDescriptorSet = VK_NULL_HANDLE,
+        VkDescriptorSet sceneServicesSet = VK_NULL_HANDLE);
 
     // Phase 7 (RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md) -
     // issues ONE draw call's worth of real Vulkan commands directly against
@@ -74,10 +82,17 @@ public:
     // m_drawQueue/RecordFrame(). Never touches m_drawQueue or DrawStats
     // itself - purely a thin, stateless Vulkan-call wrapper, mirroring
     // RenderGraphBarrierPlanner's own EmitImageBarrier()/EmitBufferBarrier()
-    // "thin Vulkan-call half" precedent.
+    // "thin Vulkan-call half" precedent. `sceneServicesSet` (Global Scene
+    // Services Descriptor Set campaign, better-render-pass-6, PHASE5 -
+    // default VK_NULL_HANDLE via Submit()'s own already-gated parameter) is
+    // bound as descriptor set 1, immediately after the existing set-0
+    // materialDescriptorSet bind, when non-null - an independent,
+    // non-overlapping vkCmdBindDescriptorSets() call (Vulkan does not
+    // require rebinding set 0 just because set 1 is also bound).
     static void IssueDrawCommand(VkCommandBuffer cmd, VkPipeline pipeline, VkPipelineLayout layout,
         VkBuffer vertexBuffer, std::uint32_t vertexCount, VkBuffer indexBuffer, std::uint32_t indexCount,
-        const Mat4& model, const Mat4& viewProj, VkDescriptorSet materialDescriptorSet);
+        const Mat4& model, const Mat4& viewProj, VkDescriptorSet materialDescriptorSet,
+        VkDescriptorSet sceneServicesSet = VK_NULL_HANDLE);
 
     // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
     // PHASE2 (task_manager/render-pass-5/
@@ -177,6 +192,10 @@ private:
         // VK_NULL_HANDLE means "no material texture to bind" - see
         // Submit()'s own `materialDescriptorSet` parameter above.
         VkDescriptorSet materialDescriptorSet = VK_NULL_HANDLE;
+        // VK_NULL_HANDLE means "no scene-services set to bind" - see
+        // Submit()'s own `sceneServicesSet` parameter above (PHASE5, Global
+        // Scene Services Descriptor Set campaign, better-render-pass-6).
+        VkDescriptorSet sceneServicesSet = VK_NULL_HANDLE;
     };
 
     std::array<float, 4> m_clearColor{ 0.0f, 0.0f, 0.0f, 1.0f };
