@@ -225,6 +225,31 @@ GpuDrivenBatchNamePool& BatchNamePool()
     return pool;
 }
 
+// Shared by the "PostOpaqueFeatures"/"PostTransparentFeatures" providers
+// below - resolves the current view's own already-rendered color/depth into
+// a ScenePassReadHandles, or std::nullopt if this view has no renderTexture
+// or that renderTexture was never built with depth-sampled access enabled
+// (RenderTexture::DepthSampler() returns VK_NULL_HANDLE in that case). This
+// guard is what keeps both providers safe if the set of active views is
+// ever widened beyond today's Game/Scene pair.
+std::optional<ScenePassReadHandles> ResolveScenePassReadHandles(const RenderPassViewData* viewData)
+{
+    if (viewData == nullptr || viewData->renderTexture == nullptr) {
+        return std::nullopt;
+    }
+    if (viewData->renderTexture->DepthSampler() == VK_NULL_HANDLE) {
+        return std::nullopt;
+    }
+    ScenePassReadHandles handles;
+    handles.colorHandle = viewData->colorTarget;
+    handles.depthHandle = viewData->colorTarget; // Same underlying imported texture - color and depth are
+                                                  // two sub-resources of the one handle in this engine today.
+    handles.colorSampler = viewData->renderTexture->Sampler();
+    handles.depthImageView = viewData->renderTexture->Target().depthImageView;
+    handles.depthSampler = viewData->renderTexture->DepthSampler();
+    return handles;
+}
+
 } // namespace
 
 Core::Core(ISurfaceProvider& surfaceProvider, IHostServices& hostServices)
@@ -524,6 +549,82 @@ void Core::RemovePreOpaquePass(const char* debugName)
         return;
     }
     m_renderFeatureCompositorPtr->UnregisterPreOpaqueFeature(debugName);
+}
+
+// Same contract as AddPreOpaquePass() above, for the PostOpaque stage - see
+// that method's own doc comment (Core.h) for the full shared contract.
+bool Core::AddPostOpaquePass(const char* debugName, ProjectScenePassCallback callback, std::int32_t priority)
+{
+    if (m_renderFeatureCompositorPtr == nullptr) {
+        GTE_LOG_WARNING("Core", "AddPostOpaquePass('" + std::string(debugName != nullptr ? debugName : "<null>")
+            + "') failed - no RenderFeatureCompositor orchestrator is registered in this build.");
+        return false;
+    }
+    if (debugName == nullptr) {
+        GTE_LOG_WARNING("Core", "AddPostOpaquePass() failed - debugName is null.");
+        return false;
+    }
+    if (std::strlen(debugName) > 63) {
+        GTE_LOG_WARNING("Core", "AddPostOpaquePass('" + std::string(debugName)
+            + "') failed - name exceeds the 63-byte limit this engine's registration surfaces consistently "
+            "enforce; shorten it (never silently truncated).");
+        return false;
+    }
+
+    const bool registered =
+        m_renderFeatureCompositorPtr->RegisterPostOpaqueFeature(debugName, priority, std::move(callback));
+    if (registered) {
+        ProjectAssemblyRegistrationLedger::Instance().RecordPostOpaqueFeature(debugName);
+    }
+    return registered;
+}
+
+// Teardown counterpart of AddPostOpaquePass() immediately above. Null-safe;
+// a safe no-op if debugName was never successfully registered.
+void Core::RemovePostOpaquePass(const char* debugName)
+{
+    if (m_renderFeatureCompositorPtr == nullptr || debugName == nullptr) {
+        return;
+    }
+    m_renderFeatureCompositorPtr->UnregisterPostOpaqueFeature(debugName);
+}
+
+// Same contract as AddPreOpaquePass() above, for the PostTransparent stage -
+// see that method's own doc comment (Core.h) for the full shared contract.
+bool Core::AddPostTransparentPass(const char* debugName, ProjectScenePassCallback callback, std::int32_t priority)
+{
+    if (m_renderFeatureCompositorPtr == nullptr) {
+        GTE_LOG_WARNING("Core", "AddPostTransparentPass('" + std::string(debugName != nullptr ? debugName : "<null>")
+            + "') failed - no RenderFeatureCompositor orchestrator is registered in this build.");
+        return false;
+    }
+    if (debugName == nullptr) {
+        GTE_LOG_WARNING("Core", "AddPostTransparentPass() failed - debugName is null.");
+        return false;
+    }
+    if (std::strlen(debugName) > 63) {
+        GTE_LOG_WARNING("Core", "AddPostTransparentPass('" + std::string(debugName)
+            + "') failed - name exceeds the 63-byte limit this engine's registration surfaces consistently "
+            "enforce; shorten it (never silently truncated).");
+        return false;
+    }
+
+    const bool registered =
+        m_renderFeatureCompositorPtr->RegisterPostTransparentFeature(debugName, priority, std::move(callback));
+    if (registered) {
+        ProjectAssemblyRegistrationLedger::Instance().RecordPostTransparentFeature(debugName);
+    }
+    return registered;
+}
+
+// Teardown counterpart of AddPostTransparentPass() immediately above.
+// Null-safe; a safe no-op if debugName was never successfully registered.
+void Core::RemovePostTransparentPass(const char* debugName)
+{
+    if (m_renderFeatureCompositorPtr == nullptr || debugName == nullptr) {
+        return;
+    }
+    m_renderFeatureCompositorPtr->UnregisterPostTransparentFeature(debugName);
 }
 
 // better-render-pass-1 campaign, PHASE9 (Decision D3) - additive convenience
@@ -1406,6 +1507,145 @@ void Core::RegisterOffscreenRenderPipelineProviders()
         },
         rg::ProviderTiming::AfterDeferredPasses);
 
+    // "PostOpaqueFeatures" - ProviderScope::PerActiveView, AfterDeferredPasses.
+    // Registered strictly between "AtmosphereComposite" and
+    // "PluginRenderFeatures" for two independent, load-bearing reasons.
+    // (a) Blackboard visibility: RenderPipeline::DeclareOnePhase() invokes
+    // every provider in a phase in registration order, so anything a
+    // PostOpaque feature's own callback Publish()es onto frame.blackboard
+    // this frame is guaranteed visible to "PluginRenderFeatures" (the
+    // PostComposite/PreUI mechanism), which runs immediately afterward in
+    // the SAME phase. (b) Declaration-index ordering: "DrawSkyBackground" is
+    // tagged RenderPassEvent::AfterOpaques and declared during Phase 1
+    // (BeforeDeferredPasses), fully completed before Phase 2
+    // (AfterDeferredPasses, this provider's own phase) begins - so every
+    // PostOpaque feature's own pass gets a strictly LATER declaration index
+    // than "DrawSkyBackground"'s own, which combined with sharing the
+    // identical AfterOpaques tier is what lets RenderGraphCompiler::Compile()
+    // resolve "DrawSkyBackground" as the real writer a PostOpaque pass's own
+    // read depends on. If "DrawSkyBackground" (or any future AfterOpaques-
+    // tier, BeforeDeferredPasses-phase pass) is ever retimed to
+    // AfterDeferredPasses, this ordering guarantee reverts to a plain
+    // registration-order tie-break within whichever phase they then share -
+    // re-verify by hand against this function's own real source whenever
+    // either side of this relationship changes.
+    m_offscreenRenderPipeline.Register("PostOpaqueFeatures", rg::ProviderScope::PerActiveView,
+        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&) {
+            if (m_renderFeatureCompositorPtr == nullptr) {
+                return;
+            }
+            const RenderPassViewData* viewData = FindViewData(frame.currentView);
+            const std::optional<ScenePassReadHandles> handles = ResolveScenePassReadHandles(viewData);
+            if (!handles.has_value()) {
+                return;
+            }
+
+            for (const RenderFeatureCompositor::PostOpaqueEntry& entry :
+                m_renderFeatureCompositorPtr->PostOpaqueFeaturesInPriorityOrder()) {
+                if (!entry.enabledOverride) {
+                    continue;
+                }
+
+                const std::size_t before = frame.builder.DeclaredPassCount();
+                entry.callback(frame.builder, frame.blackboard, frame.currentView, *handles);
+                const std::size_t after = frame.builder.DeclaredPassCount();
+
+                const std::vector<std::size_t> tagViolations =
+                    FindPassesNotTaggedScenePass(frame.builder, before, after, rg::RenderPassEvent::AfterOpaques);
+                for (const std::size_t index : tagViolations) {
+                    const rg::RenderPassEvent actual = frame.builder.PassEventAt(index);
+                    GTE_LOG_WARNING("RenderFeatureCompositor",
+                        "PostOpaque feature '" + entry.name + "' declared a pass (declaration index "
+                        + std::to_string(index) + ") tagged RenderPassEvent::" + rg::ToString(actual)
+                        + " instead of the REQUIRED RenderPassEvent::AfterOpaques - this pass is not provably "
+                        "guaranteed to run in the right position. See "
+                        "docs/conventions/project-assembly-system.md's PostOpaque subsection.");
+                    assert(false
+                        && "A PostOpaque feature declared a pass not tagged RenderPassEvent::AfterOpaques - see "
+                           "the GTE_LOG_WARNING immediately above (category \"RenderFeatureCompositor\") for "
+                           "which feature and which pass.");
+                }
+
+                if (FindScenePassCallbackMissingReadDeclaration(
+                        frame.builder, before, after, handles->colorHandle, handles->depthHandle)) {
+                    GTE_LOG_WARNING("RenderFeatureCompositor",
+                        "PostOpaque feature '" + entry.name + "' declared at least one pass but never declared a "
+                        "ReadTexture() usage against the color/depth handles it was given - this is an "
+                        "undeclared, unbarriered GPU read if its own execute lambda samples them anyway. See "
+                        "docs/conventions/project-assembly-system.md's PostOpaque subsection.");
+                    assert(false
+                        && "A PostOpaque feature declared a pass without declaring a matching ReadTexture() - see "
+                           "the GTE_LOG_WARNING immediately above (category \"RenderFeatureCompositor\").");
+                }
+            }
+        },
+        rg::ProviderTiming::AfterDeferredPasses);
+
+    // "PostTransparentFeatures" - ProviderScope::PerActiveView,
+    // AfterDeferredPasses. Registered after "PostOpaqueFeatures" and before
+    // "PluginRenderFeatures", for the symmetric reason (a)/(b) above applied
+    // against "AtmosphereComposite" instead of "DrawSkyBackground":
+    // "AtmosphereComposite" is also tagged AfterTransparents and also
+    // already registered at ProviderTiming::AfterDeferredPasses, textually
+    // before this provider - so a PostTransparent feature's own pass gets a
+    // later declaration index than "AtmosphereComposite"'s own by the same
+    // "registered earlier within the same phase" rule. "AtmosphereComposite"
+    // only ever reads the view's color/depth and writes a separate output
+    // texture, so sharing its exact tier+phase is safe by construction today
+    // - this does not automatically generalize to some future third
+    // same-tier, same-phase provider that also writes into the view's own
+    // color/depth handle.
+    m_offscreenRenderPipeline.Register("PostTransparentFeatures", rg::ProviderScope::PerActiveView,
+        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&) {
+            if (m_renderFeatureCompositorPtr == nullptr) {
+                return;
+            }
+            const RenderPassViewData* viewData = FindViewData(frame.currentView);
+            const std::optional<ScenePassReadHandles> handles = ResolveScenePassReadHandles(viewData);
+            if (!handles.has_value()) {
+                return;
+            }
+
+            for (const RenderFeatureCompositor::PostTransparentEntry& entry :
+                m_renderFeatureCompositorPtr->PostTransparentFeaturesInPriorityOrder()) {
+                if (!entry.enabledOverride) {
+                    continue;
+                }
+
+                const std::size_t before = frame.builder.DeclaredPassCount();
+                entry.callback(frame.builder, frame.blackboard, frame.currentView, *handles);
+                const std::size_t after = frame.builder.DeclaredPassCount();
+
+                const std::vector<std::size_t> tagViolations = FindPassesNotTaggedScenePass(
+                    frame.builder, before, after, rg::RenderPassEvent::AfterTransparents);
+                for (const std::size_t index : tagViolations) {
+                    const rg::RenderPassEvent actual = frame.builder.PassEventAt(index);
+                    GTE_LOG_WARNING("RenderFeatureCompositor",
+                        "PostTransparent feature '" + entry.name + "' declared a pass (declaration index "
+                        + std::to_string(index) + ") tagged RenderPassEvent::" + rg::ToString(actual)
+                        + " instead of the REQUIRED RenderPassEvent::AfterTransparents - this pass is not "
+                        "provably guaranteed to run in the right position. See "
+                        "docs/conventions/project-assembly-system.md's PostTransparent subsection.");
+                    assert(false
+                        && "A PostTransparent feature declared a pass not tagged RenderPassEvent::AfterTransparents "
+                           "- see the GTE_LOG_WARNING immediately above (category \"RenderFeatureCompositor\").");
+                }
+
+                if (FindScenePassCallbackMissingReadDeclaration(
+                        frame.builder, before, after, handles->colorHandle, handles->depthHandle)) {
+                    GTE_LOG_WARNING("RenderFeatureCompositor",
+                        "PostTransparent feature '" + entry.name + "' declared at least one pass but never "
+                        "declared a ReadTexture() usage against the color/depth handles it was given - this is an "
+                        "undeclared, unbarriered GPU read if its own execute lambda samples them anyway. See "
+                        "docs/conventions/project-assembly-system.md's PostTransparent subsection.");
+                    assert(false
+                        && "A PostTransparent feature declared a pass without declaring a matching ReadTexture() - "
+                           "see the GTE_LOG_WARNING immediately above (category \"RenderFeatureCompositor\").");
+                }
+            }
+        },
+        rg::ProviderTiming::AfterDeferredPasses);
+
     // editor-core-separation-6 campaign, PHASE2
     // (PHASE2_PLUGIN_CAPABILITY_ORCHESTRATOR_REGISTRY_AND_RENDER_FEATURE_MIGRATION.md,
     // Step 3.4) - this provider's body collapses to the ONE generic loop over
@@ -1417,9 +1657,9 @@ void Core::RegisterOffscreenRenderPipelineProviders()
     // relocation of the exact loop body that used to live directly in this
     // lambda (editor-core-separation-3, PHASE3), so this is a pure,
     // zero-observable-behavior-change refactor: same warning text, same pass
-    // names, same "AfterDeferredPasses" timing, same LAST-Register(...)-call
-    // position in this function (still immediately after "AtmosphereComposite"'s
-    // own call, above).
+    // position in this function (still the LAST Register(...) call, after
+    // "AtmosphereComposite"/"PostOpaqueFeatures"/"PostTransparentFeatures",
+    // above).
     m_offscreenRenderPipeline.Register("PluginRenderFeatures", rg::ProviderScope::PerActiveView,
         [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
             for (auto& orchestrator : m_capabilityOrchestrators) {

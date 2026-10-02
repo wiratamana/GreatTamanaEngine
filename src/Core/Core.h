@@ -66,6 +66,9 @@
 // signature - mirrors ProjectRenderFeatureCallback.h's own free-standing,
 // zero-Core-dependency precedent immediately above.
 #include "Plugins/ProjectPreOpaqueCallback.h"
+// PostOpaque/PostTransparent stage callback shape - shared by
+// AddPostOpaquePass()/AddPostTransparentPass() below.
+#include "Plugins/ProjectScenePassCallback.h"
 // better-render-pass-2 campaign, PHASE4 (PHASE4_DELETE_PLUGINS_FOLDER_AND_CMAKE.md) -
 // relocated from "../../plugins/gte_plugin_abi/RenderFeatureDescriptor.h" into
 // gte_core's own tree (Landmine A-style relocation, missed by the original
@@ -441,6 +444,18 @@ public:
     // mirroring UnregisterProjectRenderFeature()'s own shape. Null-safe;
     // a safe no-op if debugName was never successfully registered.
     void RemovePreOpaquePass(const char* debugName);
+
+    // Same contract as AddPreOpaquePass()/RemovePreOpaquePass() above, for
+    // the PostOpaque stage - every pass the callback declares must carry
+    // rg::RenderPassEvent::AfterOpaques. See
+    // docs/conventions/project-assembly-system.md's PostOpaque subsection.
+    bool AddPostOpaquePass(const char* debugName, ProjectScenePassCallback callback, std::int32_t priority = 0);
+    void RemovePostOpaquePass(const char* debugName);
+
+    // Same contract, for the PostTransparent stage - every pass the
+    // callback declares must carry rg::RenderPassEvent::AfterTransparents.
+    bool AddPostTransparentPass(const char* debugName, ProjectScenePassCallback callback, std::int32_t priority = 0);
+    void RemovePostTransparentPass(const char* debugName);
 
     // better-render-pass-3 campaign, BLOCK 2 (Arbitrary Render Views) -
     // thin pass-throughs into m_renderViewRegistry (below). Mints (or
