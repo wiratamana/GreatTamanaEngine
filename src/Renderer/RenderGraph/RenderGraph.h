@@ -394,6 +394,22 @@ private:
         ResourceState state;
     };
 
+    // better-render-pass-3 campaign, BLOCK5, Phase 3 - the TextureArray
+    // sibling of PhysicalTexture/PhysicalBuffer/PhysicalVolumeTexture above.
+    // Needs BOTH `isImported` (unlike PhysicalVolumeTexture, which is always
+    // imported in practice) AND a real pooled-resolve path (see
+    // EnsureTextureArrayResolved() below) - TextureArray IS pooled, unlike
+    // VolumeTexture. A SINGLE `state` field (not a colorState/depthState
+    // split like PhysicalTexture) - a TextureArray has ONE homogeneous
+    // aspect (all-depth or all-color) across every layer, never a mixed
+    // color+depth companion pair the way a 2D PhysicalTexture can be.
+    struct PhysicalTextureArray {
+        bool resolved = false;
+        bool isImported = false;
+        TextureArrayTarget target;
+        ResourceState state;
+    };
+
     // editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
     // BIG-STEP 2), PHASE5 - found-and-fixed the SAME dangling-pointer hazard
     // RenderGraphNameSlotTable.h's own file-header comment documents in
@@ -422,10 +438,18 @@ private:
     // Atmosphere Scattering campaign, Phase 2.
     void EnsureVolumeTextureResolved(std::uint32_t index, const CompiledGraphInput& input,
         std::vector<PhysicalVolumeTexture>& physicalVolumeTextures);
+    // better-render-pass-3 campaign, BLOCK5, Phase 3 - mirrors
+    // EnsureVolumeTextureResolved() above for the IMPORT branch, AND
+    // EnsureTextureResolved()'s own RenderGraphResourcePool::AcquireTexture()
+    // call for the POOLED branch - TextureArray needs BOTH branches, unlike
+    // VolumeTexture (import-only).
+    void EnsureTextureArrayResolved(std::uint32_t index, const CompiledGraphInput& input,
+        std::vector<PhysicalTextureArray>& physicalTextureArrays);
 
     void ApplyUsageBarrierIfNeeded(VkCommandBuffer cmd, const ResourceUsage& usage, const CompiledGraphInput& input,
         std::vector<PhysicalTexture>& physicalTextures, std::vector<PhysicalBuffer>& physicalBuffers,
-        std::vector<PhysicalVolumeTexture>& physicalVolumeTextures);
+        std::vector<PhysicalVolumeTexture>& physicalVolumeTextures,
+        std::vector<PhysicalTextureArray>& physicalTextureArrays);
 
     // render-pass-6 campaign, PHASE2 (item 2.6) - extracted, zero-behavior-
     // change decomposition of ExecuteCompiledGraph()'s own six interleaved
@@ -436,7 +460,7 @@ private:
     // freshly-constructed std::function closures.
     PassContext BuildPassContext(VkCommandBuffer cmd, std::vector<PhysicalTexture>& physicalTextures,
         std::vector<PhysicalBuffer>& physicalBuffers, std::vector<PhysicalVolumeTexture>& physicalVolumeTextures,
-        DrawStats& passDrawStats);
+        std::vector<PhysicalTextureArray>& physicalTextureArrays, DrawStats& passDrawStats);
 
     // One VkRenderingAttachmentInfo per pass.colorAttachments entry, in that
     // exact order (== shader layout(location = N) out) - identical logic to
@@ -693,6 +717,14 @@ struct PassContext {
         VkImageView view = VK_NULL_HANDLE;
     };
 
+    // better-render-pass-3 campaign, BLOCK5, Phase 3 - the TextureArray
+    // sibling of ResolvedVolumeTexture above - "view only", no sampler field
+    // (see this struct's own resolveTextureArray() doc comment below for
+    // why).
+    struct ResolvedTextureArray {
+        VkImageView view = VK_NULL_HANDLE;
+    };
+
     // render-pass-6 campaign, PHASE3 (item 2.7) - plain, non-owning pointers
     // into RenderGraph::ExecuteCompiledGraph()'s own stack-local physicalX
     // vectors, set exactly once by RenderGraph::BuildPassContext() (see
@@ -711,6 +743,9 @@ struct PassContext {
     const std::vector<RenderGraph::PhysicalTexture>* textures = nullptr;
     const std::vector<RenderGraph::PhysicalBuffer>* buffers = nullptr;
     const std::vector<RenderGraph::PhysicalVolumeTexture>* volumeTextures = nullptr;
+    // better-render-pass-3 campaign, BLOCK5, Phase 3 - see textures/buffers/
+    // volumeTextures above for the exact same shape/lifetime reasoning.
+    const std::vector<RenderGraph::PhysicalTextureArray>* textureArrays = nullptr;
 
     // task_manager/better-render-pass-1 campaign, PHASE3
     // (PHASE3_ENGINE_COMMAND_BUFFER_AND_TYPE_SAFE_PUSH_CONSTANTS.md) - the
@@ -767,6 +802,15 @@ struct PassContext {
     // VK_IMAGE_LAYOUT_GENERAL) against the CURRENT physical image view
     // behind a declared handle.
     ResolvedVolumeTexture resolveVolumeTexture(VolumeTextureHandle handle) const noexcept;
+
+    // better-render-pass-3 campaign, BLOCK5, Phase 3 - the TextureArray
+    // sibling of resolveVolumeTexture() above, same "resolve whatever was
+    // already resolved" shape. Mirrors ResolvedVolumeTexture's own
+    // minimalism - "view only", no sampler field (TextureArray2D exposes
+    // its own Sampler() directly via PhysicalTextureArray if a future
+    // consumer needs it; do not speculatively add a field here until a
+    // real call site proves it needs more).
+    ResolvedTextureArray resolveTextureArray(TextureArrayHandle handle) const noexcept;
 
     // render-pass-6 campaign, PHASE3 (item 2.7) - recordDraw/
     // recordIndirectDraw deliberately stay small, non-owning CALLABLE

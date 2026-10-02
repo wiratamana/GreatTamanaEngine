@@ -170,9 +170,38 @@ void RenderGraph::EnsureVolumeTextureResolved(std::uint32_t index, const Compile
     vol.resolved = true;
 }
 
+// better-render-pass-3 campaign, BLOCK5, Phase 3 - mirrors
+// EnsureVolumeTextureResolved() above for the IMPORT branch, AND
+// EnsureTextureResolved()'s own RenderGraphResourcePool::AcquireTexture()
+// call for the POOLED branch - TextureArray needs BOTH branches, unlike
+// VolumeTexture (import-only in practice).
+void RenderGraph::EnsureTextureArrayResolved(std::uint32_t index, const CompiledGraphInput& input,
+    std::vector<PhysicalTextureArray>& physicalTextureArrays)
+{
+    PhysicalTextureArray& arr = physicalTextureArrays[index];
+    if (arr.resolved) {
+        return;
+    }
+
+    const TextureArrayImportInfo& importInfo = input.textureArrays[index].importInfo;
+    if (importInfo.isImported) {
+        arr.isImported = true;
+        arr.target = importInfo.externalTarget;
+        arr.state = ResourceState{ importInfo.currentLayout, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE };
+    } else {
+        arr.isImported = false;
+        TextureArray2D& textureArray =
+            m_resourcePool.AcquireTextureArray(input.textureArrays[index].desc, input.textureArrays[index].name);
+        arr.target = textureArray.Target();
+        arr.state = ResourceState{};
+    }
+    arr.resolved = true;
+}
+
 void RenderGraph::ApplyUsageBarrierIfNeeded(VkCommandBuffer cmd, const ResourceUsage& usage,
     const CompiledGraphInput& input, std::vector<PhysicalTexture>& physicalTextures,
-    std::vector<PhysicalBuffer>& physicalBuffers, std::vector<PhysicalVolumeTexture>& physicalVolumeTextures)
+    std::vector<PhysicalBuffer>& physicalBuffers, std::vector<PhysicalVolumeTexture>& physicalVolumeTextures,
+    std::vector<PhysicalTextureArray>& physicalTextureArrays)
 {
     // Atmosphere Scattering campaign, Phase 2 precheck
     // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md, Step
@@ -191,7 +220,8 @@ void RenderGraph::ApplyUsageBarrierIfNeeded(VkCommandBuffer cmd, const ResourceU
     // VolumeTexture), so `void` is what every lambda returns; each case's
     // existing body was moved verbatim into its own lambda, using the
     // lambda's own handle parameter instead of usage.texture/usage.buffer/
-    // usage.volumeTexture.
+    // usage.volumeTexture. better-render-pass-3 campaign, BLOCK5, Phase 3 -
+    // grew a 4th lambda for TextureArrayHandle.
     DispatchByKind(usage,
         [&](TextureHandle textureHandle) {
             EnsureTextureResolved(textureHandle.index, input, physicalTextures);
@@ -257,6 +287,27 @@ void RenderGraph::ApplyUsageBarrierIfNeeded(VkCommandBuffer cmd, const ResourceU
                 EmitImageBarrier(cmd, vol.target.image, range, vol.state, next);
             }
             vol.state = next;
+        },
+        [&](TextureArrayHandle textureArrayHandle) {
+            // better-render-pass-3 campaign, BLOCK5, Phase 3 - THIS is the
+            // one real difference from every other branch above:
+            // layerCount = arr.target.arrayLayers instead of a hardcoded 1 -
+            // a single VkImageMemoryBarrier2 covering every layer at once,
+            // per this campaign's own locked MVP decision (no per-layer
+            // independent barrier tracking).
+            EnsureTextureArrayResolved(textureArrayHandle.index, input, physicalTextureArrays);
+            PhysicalTextureArray& arr = physicalTextureArrays[textureArrayHandle.index];
+
+            const VkImageAspectFlags aspect = arr.target.hasDepth
+                ? static_cast<VkImageAspectFlags>(VK_IMAGE_ASPECT_DEPTH_BIT)
+                : static_cast<VkImageAspectFlags>(VK_IMAGE_ASPECT_COLOR_BIT);
+            const ResourceState next = RequiredStateFor(usage.access, arr.target.hasDepth);
+
+            if (RequiresBarrier(arr.state, next)) {
+                const VkImageSubresourceRange range{ aspect, 0, 1, 0, arr.target.arrayLayers };
+                EmitImageBarrier(cmd, arr.target.image, range, arr.state, next);
+            }
+            arr.state = next;
         });
 }
 
@@ -272,13 +323,16 @@ void RenderGraph::ApplyUsageBarrierIfNeeded(VkCommandBuffer cmd, const ResourceU
 // lifetime reasoning.
 PassContext RenderGraph::BuildPassContext(VkCommandBuffer cmd, std::vector<PhysicalTexture>& physicalTextures,
     std::vector<PhysicalBuffer>& physicalBuffers, std::vector<PhysicalVolumeTexture>& physicalVolumeTextures,
-    DrawStats& passDrawStats)
+    std::vector<PhysicalTextureArray>& physicalTextureArrays, DrawStats& passDrawStats)
 {
     PassContext ctx;
     ctx.cmd = cmd;
     ctx.textures = &physicalTextures;
     ctx.buffers = &physicalBuffers;
     ctx.volumeTextures = &physicalVolumeTextures;
+    // better-render-pass-3 campaign, BLOCK5, Phase 3 - mirrors
+    // ctx.volumeTextures above exactly.
+    ctx.textureArrays = &physicalTextureArrays;
     // task_manager/better-render-pass-1 campaign, PHASE3 - forwards this
     // RenderGraph's own non-owning m_renderer member into the PassContext,
     // so a pass's `execute` callback can call ctx.Cmd() to obtain a
@@ -317,6 +371,17 @@ PassContext::ResolvedVolumeTexture PassContext::resolveVolumeTexture(VolumeTextu
         return ResolvedVolumeTexture{ (*volumeTextures)[handle.index].target.imageView };
     }
     return ResolvedVolumeTexture{};
+}
+
+// better-render-pass-3 campaign, BLOCK5, Phase 3 - mirrors
+// resolveVolumeTexture() above exactly ("view only", no sampler).
+PassContext::ResolvedTextureArray PassContext::resolveTextureArray(TextureArrayHandle handle) const noexcept
+{
+    if (textureArrays != nullptr && handle.index < textureArrays->size()
+        && (*textureArrays)[handle.index].resolved) {
+        return ResolvedTextureArray{ (*textureArrays)[handle.index].target.imageView };
+    }
+    return ResolvedTextureArray{};
 }
 
 void PassContext::RecordDrawFn::operator()(
@@ -563,6 +628,8 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
     std::vector<PhysicalBuffer> physicalBuffers(input.buffers.size());
     // Atmosphere Scattering campaign, Phase 2.
     std::vector<PhysicalVolumeTexture> physicalVolumeTextures(input.volumeTextures.size());
+    // better-render-pass-3 campaign, BLOCK5, Phase 3.
+    std::vector<PhysicalTextureArray> physicalTextureArrays(input.textureArrays.size());
 
     RenderGraphNameSlotTable& timingSlots = isPipelined ? m_pipelinedTimingSlots : m_synchronousTimingSlots;
 
@@ -575,10 +642,12 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         // mirrors how a pass conceptually consumes its inputs before
         // producing its outputs.
         for (const ResourceUsage& usage : pass.reads) {
-            ApplyUsageBarrierIfNeeded(cmd, usage, input, physicalTextures, physicalBuffers, physicalVolumeTextures);
+            ApplyUsageBarrierIfNeeded(
+                cmd, usage, input, physicalTextures, physicalBuffers, physicalVolumeTextures, physicalTextureArrays);
         }
         for (const ResourceUsage& usage : pass.writes) {
-            ApplyUsageBarrierIfNeeded(cmd, usage, input, physicalTextures, physicalBuffers, physicalVolumeTextures);
+            ApplyUsageBarrierIfNeeded(
+                cmd, usage, input, physicalTextures, physicalBuffers, physicalVolumeTextures, physicalTextureArrays);
         }
 
         const std::int32_t timingSlot = timingSlots.AssignOrGetSlot(pass.name);
@@ -674,7 +743,8 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         // since UpdateDrawStatsFor(pass.name, passDrawStats) below still
         // needs to read it after pass.execute(ctx) returns.
         DrawStats passDrawStats;
-        PassContext ctx = BuildPassContext(cmd, physicalTextures, physicalBuffers, physicalVolumeTextures, passDrawStats);
+        PassContext ctx = BuildPassContext(
+            cmd, physicalTextures, physicalBuffers, physicalVolumeTextures, physicalTextureArrays, passDrawStats);
 
         bool didBeginRendering = false;
         if (hasColorWrite) {

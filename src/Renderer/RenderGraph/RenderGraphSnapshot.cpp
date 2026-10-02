@@ -81,6 +81,12 @@ std::string ResourceUsageName(const ResourceUsage& usage, const CompiledGraphInp
             if (h.index < input.volumeTextures.size() && input.volumeTextures[h.index].name != nullptr) {
                 name = input.volumeTextures[h.index].name;
             }
+        },
+        // better-render-pass-3 campaign, BLOCK5, Phase 3.
+        [&](TextureArrayHandle h) {
+            if (h.index < input.textureArrays.size() && input.textureArrays[h.index].name != nullptr) {
+                name = input.textureArrays[h.index].name;
+            }
         });
     return name;
 }

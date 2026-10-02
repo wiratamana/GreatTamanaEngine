@@ -73,6 +73,8 @@ const char* ToString(ResourceKind kind) noexcept
         return "Buffer";
     case ResourceKind::VolumeTexture:
         return "VolumeTexture";
+    case ResourceKind::TextureArray:
+        return "TextureArray";
     }
     return "Unknown";
 }

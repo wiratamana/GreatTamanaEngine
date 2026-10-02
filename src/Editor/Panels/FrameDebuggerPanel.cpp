@@ -210,8 +210,21 @@ void FrameDebuggerPanel::RequestShaderPropertyTexturePreview(const std::string& 
             return;
         }
         m_shaderPropertyPreviewExtent = VkExtent2D{ static_cast<std::uint32_t>(raw.width), static_cast<std::uint32_t>(raw.height) };
+    } else if (kind == rg::ResourceKind::TextureArray) {
+        // better-render-pass-3 campaign, BLOCK5, Phase 3 - no real
+        // texture-array preview exists yet (no per-layer VkImageView - see
+        // TextureArray2D.h's own header comment and this campaign's own
+        // Section 5 non-goal), so this row gets the exact same honest
+        // "not previewable" placeholder behavior the Buffer branch
+        // immediately below already uses - never a fabricated preview.
+        return;
     } else {
-        return; // rg::ResourceKind::Buffer - never reachable, no "View" button is ever drawn for it (Locked Design Decision #8).
+        // rg::ResourceKind::Buffer - no "View" button is ever drawn for a Buffer
+        // row at all (Locked Design Decision #8), so this branch is reachable
+        // ONLY for Buffer - TextureArray now has its own explicit branch
+        // immediately above, since its own "View" button IS drawn (see the
+        // isRenderGraphResource/kind check further down this file).
+        return;
     }
 
     m_shaderPropertyPreviewDescriptor = ImGui_ImplVulkan_AddTexture(
@@ -958,7 +971,16 @@ void FrameDebuggerPanel::BuildEventDetailsSection(const std::optional<FrameDebug
                     // only a real render-graph 2D/volume texture gets a "View"
                     // button - never a Buffer row, never a Material Texture row
                     // (isRenderGraphResource is already false for those).
-                    if (texture.isRenderGraphResource && texture.kind != rg::ResourceKind::Buffer) {
+                    // better-render-pass-3 campaign, BLOCK5, Phase 3 - ALSO never a
+                    // TextureArray row: no real texture-array preview exists yet
+                    // (see RequestShaderPropertyTexturePreview()'s own matching
+                    // TextureArray branch above, which just returns honestly) -
+                    // showing a "View" button that silently does nothing when
+                    // clicked would be exactly the kind of UI dishonesty this
+                    // codebase's own render-pass-toggle-honesty/side-channel-
+                    // honesty conventions exist to prevent.
+                    if (texture.isRenderGraphResource && texture.kind != rg::ResourceKind::Buffer
+                        && texture.kind != rg::ResourceKind::TextureArray) {
                         ImGui::SameLine();
                         const bool isCurrentlyViewing = (m_shaderPropertyPreviewName == texture.valueLabel);
                         if (isCurrentlyViewing) {

@@ -338,10 +338,14 @@ private:
     // `textureName`/`kind`, wiring the result into m_shaderPropertyPreview* above -
     // or, on a lookup miss OR a GPU upload failure (see this method's own .cpp
     // body), leaves m_shaderPropertyPreviewLookupFailed = true with no descriptor.
-    // See this method's own .cpp body for the full two-branch (Texture vs.
-    // VolumeTexture) recipe - never called for `kind == rg::ResourceKind::Buffer`
-    // (the caller never draws a "View" button for a Buffer row at all - Locked
-    // Design Decision #8).
+    // See this method's own .cpp body for the full three-branch (Texture vs.
+    // VolumeTexture vs. honest-failure TextureArray) recipe - never called for
+    // `kind == rg::ResourceKind::Buffer` OR `kind == rg::ResourceKind::TextureArray`
+    // (the caller never draws a "View" button for a Buffer row, or for a
+    // TextureArray row, at all - Locked Design Decision #8, extended by the
+    // better-render-pass-3 campaign, BLOCK5, Phase 3 to also cover TextureArray,
+    // since no real texture-array preview exists yet - see Section 5's own
+    // non-goal).
     void RequestShaderPropertyTexturePreview(const std::string& textureName, rg::ResourceKind kind);
 
     // task_manager/frame-debugger-9 campaign, PHASE2

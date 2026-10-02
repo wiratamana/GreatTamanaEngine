@@ -54,6 +54,20 @@ bool ContainsBufferHandle(std::span<const BufferHandle> handles, const BufferHan
     return false;
 }
 
+// better-render-pass-3 campaign, BLOCK5, Phase 3 - the TextureArrayHandle
+// sibling of ContainsVolumeTextureHandle() above, used by the root-marking
+// scan below (Compile()'s own Step 2) to resolve TextureArrayHandle::
+// finalTextureArrayOutputs root membership, mirroring that function verbatim.
+bool ContainsTextureArrayHandle(std::span<const TextureArrayHandle> handles, const TextureArrayHandle& handle)
+{
+    for (const TextureArrayHandle& candidate : handles) {
+        if (candidate == handle) {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 // render-pass-4 campaign, PHASE1
@@ -83,7 +97,8 @@ std::vector<RenderPassEventContradiction> DetectRenderPassEventContradictions(
         return DispatchByKind(a,
             [&](TextureHandle) { return a.texture == b.texture; },
             [&](BufferHandle) { return a.buffer == b.buffer; },
-            [&](VolumeTextureHandle) { return a.volumeTexture == b.volumeTexture; });
+            [&](VolumeTextureHandle) { return a.volumeTexture == b.volumeTexture; },
+            [&](TextureArrayHandle) { return a.textureArray == b.textureArray; });
     };
 
     for (std::size_t readerPos = 0; readerPos < processingOrder.size(); ++readerPos) {
@@ -124,9 +139,11 @@ std::vector<RenderPassEventContradiction> DetectRenderPassEventContradictions(
                             contradiction.readerPassIndex = readerIndex;
                             contradiction.writerPassIndex = otherIndex;
                             contradiction.resourceKind = read.kind;
-                            contradiction.resourceIndex = read.kind == ResourceKind::Texture ? read.texture.index
-                                : read.kind == ResourceKind::Buffer                          ? read.buffer.index
-                                                                                              : read.volumeTexture.index;
+                            contradiction.resourceIndex = DispatchByKind(read,
+                                [](TextureHandle h) { return h.index; },
+                                [](BufferHandle h) { return h.index; },
+                                [](VolumeTextureHandle h) { return h.index; },
+                                [](TextureArrayHandle h) { return h.index; });
                             contradictions.push_back(contradiction);
                             break; // One report per (reader, resource) pair is enough.
                         }
@@ -140,9 +157,11 @@ std::vector<RenderPassEventContradiction> DetectRenderPassEventContradictions(
                     contradiction.readerPassIndex = readerIndex;
                     contradiction.writerPassIndex = nearestWriterIndex;
                     contradiction.resourceKind = read.kind;
-                    contradiction.resourceIndex = read.kind == ResourceKind::Texture ? read.texture.index
-                        : read.kind == ResourceKind::Buffer                          ? read.buffer.index
-                                                                                       : read.volumeTexture.index;
+                    contradiction.resourceIndex = DispatchByKind(read,
+                        [](TextureHandle h) { return h.index; },
+                        [](BufferHandle h) { return h.index; },
+                        [](VolumeTextureHandle h) { return h.index; },
+                        [](TextureArrayHandle h) { return h.index; });
                     contradictions.push_back(contradiction);
                 }
             }
@@ -184,6 +203,8 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
     // Atmosphere Scattering campaign, Phase 2
     // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md).
     result.volumeTextureLifetimes.assign(input.volumeTextures.size(), ResourceLifetime{});
+    // better-render-pass-3 campaign, BLOCK5, Phase 3.
+    result.textureArrayLifetimes.assign(input.textureArrays.size(), ResourceLifetime{});
 
     if (passCount == 0) {
         return result;
@@ -235,6 +256,9 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
     std::vector<std::int32_t> firstTextureWriter(input.textures.size(), -1);
     std::vector<std::int32_t> firstBufferWriter(input.buffers.size(), -1);
     std::vector<std::int32_t> firstVolumeTextureWriter(input.volumeTextures.size(), -1);
+    // better-render-pass-3 campaign, BLOCK5, Phase 3 - same shape as
+    // firstVolumeTextureWriter above.
+    std::vector<std::int32_t> firstTextureArrayWriter(input.textureArrays.size(), -1);
     // render-pass-6 campaign, PHASE6 (item 2.2) - resolves a pointer directly
     // at the resolved firstXWriter slot for `usage`, mirroring
     // lastWriterSlotFor below (Step 1's own RAW/WAW scan) - a single shared
@@ -251,6 +275,9 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
             },
             [&](VolumeTextureHandle h) -> std::int32_t* {
                 return h.index < firstVolumeTextureWriter.size() ? &firstVolumeTextureWriter[h.index] : nullptr;
+            },
+            [&](TextureArrayHandle h) -> std::int32_t* {
+                return h.index < firstTextureArrayWriter.size() ? &firstTextureArrayWriter[h.index] : nullptr;
             });
     };
     for (std::int32_t pos = 0; pos < passCount; ++pos) {
@@ -326,6 +353,9 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
     // ResourceKind::VolumeTexture was ever added to the enum, so a future
     // fourth resource kind gets this same compile-time safety net too.
     std::vector<std::int32_t> lastVolumeTextureWriter(input.volumeTextures.size(), -1);
+    // better-render-pass-3 campaign, BLOCK5, Phase 3 - same shape as
+    // lastVolumeTextureWriter above.
+    std::vector<std::int32_t> lastTextureArrayWriter(input.textureArrays.size(), -1);
 
     // render-pass-6 campaign, PHASE6 (item 2.2) - the RAW-edge scan and the
     // WAW-edge scan below both need to "resolve a pointer directly at the
@@ -347,6 +377,9 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
             },
             [&](VolumeTextureHandle h) -> std::int32_t* {
                 return h.index < lastVolumeTextureWriter.size() ? &lastVolumeTextureWriter[h.index] : nullptr;
+            },
+            [&](TextureArrayHandle h) -> std::int32_t* {
+                return h.index < lastTextureArrayWriter.size() ? &lastTextureArrayWriter[h.index] : nullptr;
             });
     };
 
@@ -408,9 +441,11 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
                     contradiction.readerPassIndex = i;
                     contradiction.writerPassIndex = laterWriter;
                     contradiction.resourceKind = usage.kind;
-                    contradiction.resourceIndex = usage.kind == ResourceKind::Texture ? usage.texture.index
-                        : usage.kind == ResourceKind::Buffer                          ? usage.buffer.index
-                                                                                        : usage.volumeTexture.index;
+                    contradiction.resourceIndex = DispatchByKind(usage,
+                        [](TextureHandle h) { return h.index; },
+                        [](BufferHandle h) { return h.index; },
+                        [](VolumeTextureHandle h) { return h.index; },
+                        [](TextureArrayHandle h) { return h.index; });
                     fastContradictions.push_back(contradiction);
                 }
             } else if (input.passes[static_cast<std::size_t>(writer)].renderPassEvent > pass.renderPassEvent) {
@@ -419,9 +454,11 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
                 contradiction.readerPassIndex = i;
                 contradiction.writerPassIndex = writer;
                 contradiction.resourceKind = usage.kind;
-                contradiction.resourceIndex = usage.kind == ResourceKind::Texture ? usage.texture.index
-                    : usage.kind == ResourceKind::Buffer                          ? usage.buffer.index
-                                                                                    : usage.volumeTexture.index;
+                contradiction.resourceIndex = DispatchByKind(usage,
+                    [](TextureHandle h) { return h.index; },
+                    [](BufferHandle h) { return h.index; },
+                    [](VolumeTextureHandle h) { return h.index; },
+                    [](TextureArrayHandle h) { return h.index; });
                 fastContradictions.push_back(contradiction);
             }
         }
@@ -561,6 +598,12 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
                 [&](BufferHandle h) { return ContainsBufferHandle(input.finalBufferOutputs, h); },
                 [&](VolumeTextureHandle h) {
                     return ContainsVolumeTextureHandle(input.finalVolumeTextureOutputs, h);
+                },
+                // better-render-pass-3 campaign, BLOCK5, Phase 3 - mirrors the
+                // VolumeTextureHandle lambda above, NOT the TextureHandle one
+                // (no persistent-cache concept exists for TextureArray yet).
+                [&](TextureArrayHandle h) {
+                    return ContainsTextureArrayHandle(input.finalTextureArrayOutputs, h);
                 });
             if (isRoot) {
                 if (!kept[static_cast<std::size_t>(i)]) {
@@ -703,6 +746,12 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
                 [&](VolumeTextureHandle h) -> ResourceLifetime* {
                     return h.index < result.volumeTextureLifetimes.size()
                         ? &result.volumeTextureLifetimes[h.index]
+                        : nullptr;
+                },
+                // better-render-pass-3 campaign, BLOCK5, Phase 3.
+                [&](TextureArrayHandle h) -> ResourceLifetime* {
+                    return h.index < result.textureArrayLifetimes.size()
+                        ? &result.textureArrayLifetimes[h.index]
                         : nullptr;
                 });
             if (lifetime == nullptr) {

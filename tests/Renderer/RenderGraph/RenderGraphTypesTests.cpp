@@ -482,16 +482,19 @@ TEST(RenderGraphDispatchByKindTest, TextureUsageDispatchesOnlyToOnTextureWithThe
     bool onTextureCalled = false;
     bool onBufferCalled = false;
     bool onVolumeTextureCalled = false;
+    bool onTextureArrayCalled = false;
     TextureHandle received;
 
     DispatchByKind(usage,
         [&](TextureHandle h) { onTextureCalled = true; received = h; },
         [&](BufferHandle) { onBufferCalled = true; },
-        [&](VolumeTextureHandle) { onVolumeTextureCalled = true; });
+        [&](VolumeTextureHandle) { onVolumeTextureCalled = true; },
+        [&](TextureArrayHandle) { onTextureArrayCalled = true; });
 
     EXPECT_TRUE(onTextureCalled);
     EXPECT_FALSE(onBufferCalled);
     EXPECT_FALSE(onVolumeTextureCalled);
+    EXPECT_FALSE(onTextureArrayCalled);
     EXPECT_EQ(received, (TextureHandle{ 5, 2 }));
 }
 
@@ -501,16 +504,19 @@ TEST(RenderGraphDispatchByKindTest, BufferUsageDispatchesOnlyToOnBufferWithTheCo
     bool onTextureCalled = false;
     bool onBufferCalled = false;
     bool onVolumeTextureCalled = false;
+    bool onTextureArrayCalled = false;
     BufferHandle received;
 
     DispatchByKind(usage,
         [&](TextureHandle) { onTextureCalled = true; },
         [&](BufferHandle h) { onBufferCalled = true; received = h; },
-        [&](VolumeTextureHandle) { onVolumeTextureCalled = true; });
+        [&](VolumeTextureHandle) { onVolumeTextureCalled = true; },
+        [&](TextureArrayHandle) { onTextureArrayCalled = true; });
 
     EXPECT_FALSE(onTextureCalled);
     EXPECT_TRUE(onBufferCalled);
     EXPECT_FALSE(onVolumeTextureCalled);
+    EXPECT_FALSE(onTextureArrayCalled);
     EXPECT_EQ(received, (BufferHandle{ 3, 1 }));
 }
 
@@ -521,16 +527,19 @@ TEST(RenderGraphDispatchByKindTest, VolumeTextureUsageDispatchesOnlyToOnVolumeTe
     bool onTextureCalled = false;
     bool onBufferCalled = false;
     bool onVolumeTextureCalled = false;
+    bool onTextureArrayCalled = false;
     VolumeTextureHandle received;
 
     DispatchByKind(usage,
         [&](TextureHandle) { onTextureCalled = true; },
         [&](BufferHandle) { onBufferCalled = true; },
-        [&](VolumeTextureHandle h) { onVolumeTextureCalled = true; received = h; });
+        [&](VolumeTextureHandle h) { onVolumeTextureCalled = true; received = h; },
+        [&](TextureArrayHandle) { onTextureArrayCalled = true; });
 
     EXPECT_FALSE(onTextureCalled);
     EXPECT_FALSE(onBufferCalled);
     EXPECT_TRUE(onVolumeTextureCalled);
+    EXPECT_FALSE(onTextureArrayCalled);
     EXPECT_EQ(received, (VolumeTextureHandle{ 8, 3 }));
 }
 
@@ -545,7 +554,8 @@ TEST(RenderGraphDispatchByKindTest, DispatchByKindWithNonVoidReturnTypeProducesT
         return DispatchByKind(usage,
             [](TextureHandle) { return std::int32_t{ 10 }; },
             [](BufferHandle) { return std::int32_t{ 20 }; },
-            [](VolumeTextureHandle) { return std::int32_t{ 30 }; });
+            [](VolumeTextureHandle) { return std::int32_t{ 30 }; },
+            [](TextureArrayHandle) { return std::int32_t{ 40 }; });
     };
 
     EXPECT_EQ(dispatch(textureUsage), 10);

@@ -275,6 +275,8 @@ const char* ReadRowLabelForKind(rg::ResourceKind kind)
         return "Read Buffer";
     case rg::ResourceKind::VolumeTexture:
         return "Read Volume Texture";
+    case rg::ResourceKind::TextureArray:
+        return "Read Texture Array";
     }
     return "Read Texture";
 }
@@ -288,6 +290,8 @@ const char* WriteRowLabelForKind(rg::ResourceKind kind)
         return "Write Buffer";
     case rg::ResourceKind::VolumeTexture:
         return "Write Volume Texture";
+    case rg::ResourceKind::TextureArray:
+        return "Write Texture Array";
     }
     return "Write Texture";
 }

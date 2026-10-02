@@ -80,6 +80,10 @@ struct CompiledGraph {
     // Atmosphere Scattering campaign, Phase 2
     // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md).
     std::vector<ResourceLifetime> volumeTextureLifetimes;
+
+    // better-render-pass-3 campaign, BLOCK5, Phase 3 - see TextureArrayDesc
+    // (RenderGraphTypes.h). Mirrors volumeTextureLifetimes's exact shape.
+    std::vector<ResourceLifetime> textureArrayLifetimes;
 };
 
 // render-pass-4 campaign, PHASE1
