@@ -481,6 +481,26 @@ VolumeTexture Renderer::CreateVolumeTexture(
     return m_resources.CreateVolumeTexture(width, height, depth, format, debugName);
 }
 
+// better-render-pass-3 campaign, BLOCK5 - see this method's own declaration
+// (Renderer.h) for the full reasoning on why this is NOT a trivial one-line
+// forward like CreateVolumeTexture() immediately above.
+TextureArray2D Renderer::CreateTextureArray(int width, int height, int arrayLayers, VkFormat format, bool hasDepth,
+    bool isCubemap, bool allowStorageImageAccess, const char* debugName) const
+{
+    // VK_FORMAT_UNDEFINED resolves per hasDepth - mirrors CreateRenderTexture()'s
+    // own resolution line but branches by hasDepth instead of always resolving
+    // to ColorFormat(). This resolution MUST happen here, in Renderer, never
+    // inside GpuResourceFactory::CreateTextureArray() - that class has no
+    // ColorFormat() access and no color-format field of its own (confirmed:
+    // GpuResourceFactory::CreateRenderTexture() does zero format resolution of
+    // its own).
+    const VkFormat resolvedFormat = (format == VK_FORMAT_UNDEFINED)
+        ? (hasDepth ? DepthFormat() : ColorFormat())
+        : format;
+    return m_resources.CreateTextureArray(
+        width, height, arrayLayers, resolvedFormat, hasDepth, isCubemap, allowStorageImageAccess, debugName);
+}
+
 Renderer::VulkanContextInfo Renderer::GetVulkanContextInfo() const
 {
     VulkanContextInfo info;

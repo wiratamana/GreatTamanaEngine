@@ -38,6 +38,7 @@
 #include "RenderGraphTypes.h"
 #include "../Buffer.h"
 #include "../RenderTexture.h"
+#include "../TextureArray2D.h" // better-render-pass-3 campaign, BLOCK5
 
 #include <deque>
 
@@ -132,6 +133,12 @@ public:
     // completing the same API surface AcquireTexture() already provides.
     Buffer& AcquireBuffer(const BufferDesc& desc, const char* debugName);
 
+    // better-render-pass-3 campaign, BLOCK5 - mirrors AcquireTexture()
+    // EXACTLY (same desc-equality linear-scan-and-reuse shape), NOT
+    // AcquireVolumeTexture() (which does not exist - VolumeTexture is
+    // import-only/never pooled, unlike TextureArray).
+    TextureArray2D& AcquireTextureArray(const TextureArrayDesc& desc, const char* debugName);
+
     // Call once per frame, BEFORE realizing this frame's compiled graph -
     // marks every pooled entry as "not yet claimed this frame". Mirrors
     // FrameRecorder::BeginFrame()'s own "clear last frame's queue before
@@ -152,6 +159,14 @@ private:
         bool claimedThisFrame = false;
     };
 
+    // better-render-pass-3 campaign, BLOCK5 - TextureArray2D-owning sibling
+    // of TextureEntry/BufferEntry above.
+    struct TextureArrayEntry {
+        TextureArrayDesc desc;
+        TextureArray2D textureArray;
+        bool claimedThisFrame = false;
+    };
+
     Renderer* m_renderer = nullptr;
 
     // std::deque, not std::vector - see this class's own comment above for
@@ -159,6 +174,8 @@ private:
     // correctness requirement here, not a style preference.
     std::deque<TextureEntry> m_textureEntries;
     std::deque<BufferEntry> m_bufferEntries;
+    // better-render-pass-3 campaign, BLOCK5 - same std::deque reasoning.
+    std::deque<TextureArrayEntry> m_textureArrayEntries;
 };
 
 } // namespace gte::rg

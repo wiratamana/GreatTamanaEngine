@@ -32,6 +32,7 @@
 #include "RenderGraphPersistentResourceCache.h" // editor-core-separation-27 campaign, PHASE7
 #include "../RenderTarget.h"
 #include "../VolumeTarget.h"
+#include "../TextureArrayTarget.h" // better-render-pass-3 campaign, BLOCK5
 
 #include <volk.h>
 
@@ -110,6 +111,17 @@ struct VolumeTextureImportInfo {
     VkImageLayout currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 };
 
+// TextureArray sibling of VolumeTextureImportInfo above - better-render-
+// pass-3 campaign, BLOCK5. Points at the NEW TextureArrayTarget (NOT
+// VolumeTarget or RenderTarget - neither existing plain-view struct has the
+// right shape for this resource).
+struct TextureArrayImportInfo {
+    bool isImported = false;
+    TextureArrayTarget externalTarget{};
+    VkImageLayout currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+};
+
+
 // render-pass-6 campaign, PHASE5 (item 2.1,
 // task_manager/render-pass-6/PHASE5_RESOURCE_SLOT_VECTOR_COLLAPSE.md) -
 // REPLACES the old "textureDescs/textureNames/textureImportInfo trio, three
@@ -139,6 +151,13 @@ struct VolumeTextureSlot {
     VolumeTextureImportInfo importInfo;
 };
 
+struct TextureArraySlot {
+    TextureArrayDesc desc;
+    const char* name = nullptr;
+    TextureArrayImportInfo importInfo;
+};
+
+
 // The "raw material" handed off to Phase 3's compiler
 // (RenderGraphCompiler::Compile(CompiledGraphInput&&)) - NOT yet
 // "compiled" in any real sense (no ordering/culling has happened yet)
@@ -162,6 +181,9 @@ struct CompiledGraphInput {
 
     // Atmosphere Scattering campaign, Phase 2.
     std::vector<VolumeTextureSlot> volumeTextures;
+
+    // better-render-pass-3 campaign, BLOCK5.
+    std::vector<TextureArraySlot> textureArrays;
 
     // Atmosphere Scattering campaign, Phase 6
     // (ATMOSPHERE_PHASE6_AERIAL_PERSPECTIVE_FROXEL_VOLUME_v1.md) - fixes a
@@ -197,6 +219,17 @@ struct CompiledGraphInput {
     // Compile() reads THIS field directly off `input`, exactly like
     // finalVolumeTextureOutputs.
     std::vector<BufferHandle> finalBufferOutputs;
+
+    // better-render-pass-3 campaign, BLOCK5 - the TextureArrayHandle
+    // sibling of finalVolumeTextureOutputs/finalBufferOutputs above - a
+    // REQUIREMENT, not an open question, per this campaign's own planning
+    // doc: both VolumeTextureHandle and BufferHandle originally shipped
+    // without this and both needed it added later once a real pass existed
+    // whose ONLY write was that handle with no in-frame reader (a
+    // persistent cascade-shadow array re-read only by a LATER frame is
+    // exactly this shape). See RenderGraphBuilder::KeepTextureArrayOutput()
+    // below.
+    std::vector<TextureArrayHandle> finalTextureArrayOutputs;
 
     // editor-core-separation-27 campaign, PHASE2/PHASE8
     // (BIG_STEP_3_PERSISTENT_RESOURCE_CACHE_HONEST_LAYOUT_HISTORY_REV2_2026-09-30.txt,
@@ -338,6 +371,16 @@ public:
         void ReadVolumeTexture(VolumeTextureHandle handle, ResourceAccess access = ResourceAccess::ComputeShaderRead);
         void WriteVolumeTexture(VolumeTextureHandle handle, ResourceAccess access = ResourceAccess::ComputeShaderWrite);
 
+        // better-render-pass-3 campaign, BLOCK5 - WHOLE-ARRAY access only
+        // (no per-layer read/write entry point in this block - see
+        // TextureArrayDesc's own doc comment, RenderGraphTypes.h, and this
+        // campaign's Section 5 for exactly why). `WriteTextureArray()`'s
+        // default access mirrors `WriteTexture()`'s general-purpose,
+        // non-attachment compute-write convention - there is no
+        // attachment-style write for this resource kind in this block.
+        void ReadTextureArray(TextureArrayHandle handle, ResourceAccess access = ResourceAccess::ShaderRead);
+        void WriteTextureArray(TextureArrayHandle handle, ResourceAccess access = ResourceAccess::ComputeShaderWrite);
+
     private:
         PassRecord& m_pass;
     };
@@ -414,6 +457,20 @@ public:
     VolumeTextureHandle ImportVolumeTexture(
         const char* name, const VolumeTarget& externalVolumeTarget, VkImageLayout currentLayout);
 
+    // better-render-pass-3 campaign, BLOCK5 - declares a brand-new
+    // TRANSIENT (pooled) TextureArray this frame, mirroring CreateTexture()'s
+    // own exact shape (NOT ImportVolumeTexture()'s import-only shape -
+    // TextureArray IS pooled, unlike VolumeTexture). Two CreateTextureArray()
+    // calls with an identical `desc` still mint two DISTINCT handles.
+    TextureArrayHandle CreateTextureArray(const char* name, const TextureArrayDesc& desc);
+
+    // TextureArray sibling of ImportTexture()/ImportVolumeTexture() above -
+    // wraps an ALREADY-LIVE, externally-owned TextureArrayTarget as a graph
+    // resource. `currentLayout` is REQUIRED, with no default - same
+    // reasoning as ImportTexture()'s own `currentLayout` parameter.
+    TextureArrayHandle ImportTextureArray(
+        const char* name, const TextureArrayTarget& externalTarget, VkImageLayout currentLayout);
+
     // Atmosphere Scattering campaign, Phase 6
     // (ATMOSPHERE_PHASE6_AERIAL_PERSPECTIVE_FROXEL_VOLUME_v1.md) - marks
     // `handle` as a REQUIRED root the compiler must keep alive, the
@@ -444,6 +501,14 @@ public:
     // (idempotent - RenderGraphCompiler::Compile()'s own root-marking scan
     // only ever needs `handle` to appear at least once).
     void KeepBufferOutput(BufferHandle handle);
+
+    // better-render-pass-3 campaign, BLOCK5 - marks `handle` as a REQUIRED
+    // root the compiler must keep alive, the TextureArrayHandle counterpart
+    // of KeepVolumeTextureOutput()/KeepBufferOutput() above - see
+    // CompiledGraphInput::finalTextureArrayOutputs above for the full
+    // reasoning. Safe to call more than once for the same handle
+    // (idempotent).
+    void KeepTextureArrayOutput(TextureArrayHandle handle);
 
     // `name` must be a string literal (mirrors GTE_PROFILE_SCOPE's own
     // static-storage-duration requirement - see AGENTS.md, "Profiling").
@@ -792,6 +857,9 @@ private:
     // Atmosphere Scattering campaign, Phase 2.
     std::vector<VolumeTextureSlot> m_volumeTextures;
 
+    // better-render-pass-3 campaign, BLOCK5.
+    std::vector<TextureArraySlot> m_textureArrays;
+
     // Atmosphere Scattering campaign, Phase 6 - see
     // CompiledGraphInput::finalVolumeTextureOutputs above.
     std::vector<VolumeTextureHandle> m_finalVolumeTextureOutputs;
@@ -799,6 +867,10 @@ private:
     // editor-core-separation-26 campaign, PHASE1 - see
     // CompiledGraphInput::finalBufferOutputs above.
     std::vector<BufferHandle> m_finalBufferOutputs;
+
+    // better-render-pass-3 campaign, BLOCK5 - see
+    // CompiledGraphInput::finalTextureArrayOutputs above.
+    std::vector<TextureArrayHandle> m_finalTextureArrayOutputs;
 
     // editor-core-separation-27 campaign, PHASE2/PHASE8 - see
     // CompiledGraphInput::persistentCacheTextures above.

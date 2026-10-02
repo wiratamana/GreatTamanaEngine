@@ -59,12 +59,43 @@ Buffer& RenderGraphResourcePool::AcquireBuffer(const BufferDesc& desc, const cha
     return entry.buffer;
 }
 
+// better-render-pass-3 campaign, BLOCK5 - mirrors AcquireTexture() EXACTLY
+// (same desc-equality linear-scan-and-reuse shape), NOT AcquireVolumeTexture()
+// (which does not exist).
+TextureArray2D& RenderGraphResourcePool::AcquireTextureArray(const TextureArrayDesc& desc, const char* debugName)
+{
+    for (TextureArrayEntry& entry : m_textureArrayEntries) {
+        if (!entry.claimedThisFrame && entry.desc == desc) {
+            entry.claimedThisFrame = true;
+            return entry.textureArray;
+        }
+    }
+
+    // desc.format == VK_FORMAT_UNDEFINED is passed straight through - see
+    // AcquireTexture()'s own identical comment for why this is correct
+    // (Renderer::CreateTextureArray() itself resolves it per desc.hasDepth -
+    // NOT GpuResourceFactory::CreateTextureArray(), which has no
+    // ColorFormat()/DepthFormat() access at all - so every "default format"
+    // request still compares equal via TextureArrayDesc::operator==
+    // regardless).
+    TextureArrayEntry& entry = m_textureArrayEntries.emplace_back(TextureArrayEntry{ desc,
+        m_renderer->CreateTextureArray(static_cast<int>(desc.width), static_cast<int>(desc.height),
+            static_cast<int>(desc.arrayLayers), desc.format, desc.hasDepth, desc.isCubemap,
+            HasFlag(desc.usage, TextureUsage::Storage), debugName),
+        true });
+    return entry.textureArray;
+}
+
 void RenderGraphResourcePool::BeginFrame() noexcept
 {
     for (TextureEntry& entry : m_textureEntries) {
         entry.claimedThisFrame = false;
     }
     for (BufferEntry& entry : m_bufferEntries) {
+        entry.claimedThisFrame = false;
+    }
+    // better-render-pass-3 campaign, BLOCK5.
+    for (TextureArrayEntry& entry : m_textureArrayEntries) {
         entry.claimedThisFrame = false;
     }
 }

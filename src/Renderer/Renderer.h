@@ -15,6 +15,7 @@
 #include "RenderGraph/RenderGraphTypes.h"
 #include "RenderTexture.h"
 #include "Texture2D.h"
+#include "TextureArray2D.h" // better-render-pass-3 campaign, BLOCK5
 #include "VolumeTexture.h"
 #include "Vulkan/VulkanAllocator.h"
 #include "Vulkan/VulkanDevice.h"
@@ -834,6 +835,17 @@ public:
     VolumeTexture CreateVolumeTexture(
         int width, int height, int depth, VkFormat format, const char* debugName = nullptr) const;
 
+    // better-render-pass-3 campaign, BLOCK5 (Array and Cubemap Texture
+    // Resources) - see TextureArray2D.h. UNLIKE CreateVolumeTexture() above,
+    // this is NOT a trivial one-line forward: GpuResourceFactory has no
+    // ColorFormat()/DepthFormat() accessor of its own, so VK_FORMAT_UNDEFINED
+    // must be resolved HERE, branching on `hasDepth` - DepthFormat() when
+    // hasDepth == true, ColorFormat() when hasDepth == false (mirrors
+    // CreateRenderTexture()'s own "resolve, then forward" division of labor,
+    // but with a depth/color branch CreateRenderTexture() itself never
+    // needed, since it only ever resolves to ColorFormat()).
+    TextureArray2D CreateTextureArray(int width, int height, int arrayLayers, VkFormat format, bool hasDepth,
+        bool isCubemap, bool allowStorageImageAccess = false, const char* debugName = nullptr) const;
 
     // Aggregate live-memory totals across every Buffer/RenderTexture this
     // Renderer has ever created and not yet destroyed - see

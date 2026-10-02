@@ -114,6 +114,25 @@ struct VolumeTextureHandle {
     friend bool operator==(const VolumeTextureHandle&, const VolumeTextureHandle&) noexcept = default;
 };
 
+// better-render-pass-3 campaign, BLOCK5 (Array and Cubemap Texture
+// Resources) - a genuine FOURTH resource kind: a single Vulkan image with N
+// array layers (a Texture2DArray) or a cubemap (VK_IMAGE_VIEW_TYPE_CUBE/
+// _CUBE_ARRAY) - see src/Renderer/TextureArray2D.h. Same cheap POD
+// index+generation shape as TextureHandle/BufferHandle/VolumeTextureHandle
+// above, copied VERBATIM from VolumeTextureHandle's own shape (a plain POD
+// handle with no pooling-vs-import distinction baked into it - unlike
+// VolumeTexture, TextureArray IS pooled, see RenderGraphResourcePool::
+// AcquireTextureArray()).
+struct TextureArrayHandle {
+    std::uint32_t index = kInvalidIndex;
+    std::uint32_t generation = 0;
+
+    bool IsValid() const noexcept { return index != kInvalidIndex; }
+
+    friend bool operator==(const TextureArrayHandle&, const TextureArrayHandle&) noexcept = default;
+};
+
+
 
 struct PassHandle {
     std::uint32_t index = kInvalidIndex;
@@ -383,6 +402,50 @@ struct VolumeTextureDesc {
     friend bool operator==(const VolumeTextureDesc&, const VolumeTextureDesc&) noexcept = default;
 };
 
+// better-render-pass-3 campaign, BLOCK5 - a genuine FOURTH resource kind: a
+// single Vulkan image with N layers (a Texture2DArray, e.g. a 4-cascade
+// shadow map) or a cubemap (VK_IMAGE_VIEW_TYPE_CUBE/_CUBE_ARRAY). Poolable
+// and barrier-planned exactly like plain TextureDesc/TextureHandle already
+// is - NOT like VolumeTextureDesc, which is import-only with no pooling
+// counterpart. See src/Renderer/TextureArray2D.h for the owning RAII class.
+struct TextureArrayDesc {
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+    std::uint32_t arrayLayers = 1;   // e.g. 4 for a 4-cascade shadow map
+    VkFormat format = VK_FORMAT_UNDEFINED;
+    // DELIBERATE ASYMMETRY vs. TextureDesc::hasDepth (which defaults false):
+    // this defaults to TRUE because a shadow-cascade array is this struct's
+    // dominant real use case. hasDepth here does NOT mean "also allocate a
+    // second companion depth image" (TextureDesc's own meaning) - there is
+    // only ever ONE image. It selects WHICH KIND of homogeneous image every
+    // layer is:
+    //   true  (default): every layer is a depth image (VK_IMAGE_ASPECT_DEPTH_BIT,
+    //          VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | SAMPLED_BIT).
+    //          VK_FORMAT_UNDEFINED resolves to Renderer::DepthFormat() (NOT
+    //          ColorFormat() - these are two different, independently
+    //          negotiated device formats). usage.Storage must never combine
+    //          with hasDepth == true.
+    //   false: every layer is a color image (VK_IMAGE_ASPECT_COLOR_BIT,
+    //          VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | SAMPLED_BIT, plus
+    //          STORAGE_BIT when usage has TextureUsage::Storage).
+    //          VK_FORMAT_UNDEFINED resolves to Renderer::ColorFormat(),
+    //          exactly like plain TextureDesc.
+    // A caller building a color array/cubemap (e.g. a reflection-probe
+    // array) MUST pass hasDepth = false explicitly - never rely on the
+    // default for that case. Do not "fix" this asymmetry by changing the
+    // default.
+    bool hasDepth = true;
+    // VK_IMAGE_VIEW_TYPE_CUBE/_CUBE_ARRAY + VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT.
+    // Requires arrayLayers a positive multiple of 6, AND width == height
+    // (Vulkan requires square faces for a cube-compatible image) - enforced
+    // unconditionally (even in release) by GpuResourceFactory::CreateTextureArray(),
+    // NEVER by a debug-assert alone - see TextureArray2D.h.
+    bool isCubemap = false;
+    TextureUsage usage = TextureUsage::None;
+
+    friend bool operator==(const TextureArrayDesc&, const TextureArrayDesc&) noexcept = default;
+};
+
 // --- Pass metadata -----------------------------------------------------
 //
 // The pure record Phase 2's builder API fills in (one read/write
@@ -407,6 +470,13 @@ enum class ResourceKind : std::uint8_t {
     // unchecked out-of-bounds vector access in
     // RenderGraph::EnsureBufferResolved().
     VolumeTexture,
+    // better-render-pass-3 campaign, BLOCK5 - see TextureArrayDesc above.
+    // IMPORTANT: adding this enumerator breaks compilation at every
+    // DispatchByKind() call site and every hand-rolled exhaustive switch
+    // over ResourceKind until each one is updated - see this phase's own
+    // "THIS PHASE DOES NOT END WITH A GREEN BUILD" note and Phase 3 of the
+    // BLOCK5 campaign for the full fix list.
+    TextureArray,
 };
 
 // frame-debugger-6 campaign, PHASE1
@@ -639,6 +709,8 @@ struct ResourceUsage {
     TextureHandle texture;
     BufferHandle buffer;
     VolumeTextureHandle volumeTexture;
+    // better-render-pass-3 campaign, BLOCK5 - see TextureArrayDesc above.
+    TextureArrayHandle textureArray;
     ResourceAccess access = ResourceAccess::ShaderRead;
     // Atmosphere Scattering + Aerial Perspective campaign, Phase 7
     // (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE7_SKY_BACKGROUND_AND_COMPOSITE_PASSES_v1.md)
@@ -686,6 +758,16 @@ struct ResourceUsage {
         usage.access = access;
         return usage;
     }
+
+    // better-render-pass-3 campaign, BLOCK5.
+    static ResourceUsage ForTextureArray(TextureArrayHandle handle, ResourceAccess access) noexcept
+    {
+        ResourceUsage usage;
+        usage.kind = ResourceKind::TextureArray;
+        usage.textureArray = handle;
+        usage.access = access;
+        return usage;
+    }
 };
 
 // render-pass-6 campaign, PHASE6 (item 2.2) - REPLACES every independently
@@ -720,9 +802,9 @@ struct ResourceUsage {
 // `bool`, `std::string`, ...). This is a per-call-site choice, re-checked
 // independently at each of this template's own instantiations - it is never
 // a global constraint on DispatchByKind() itself.
-template <typename TextureFn, typename BufferFn, typename VolumeTextureFn>
+template <typename TextureFn, typename BufferFn, typename VolumeTextureFn, typename TextureArrayFn>
 auto DispatchByKind(const ResourceUsage& usage, TextureFn&& onTexture, BufferFn&& onBuffer,
-    VolumeTextureFn&& onVolumeTexture)
+    VolumeTextureFn&& onVolumeTexture, TextureArrayFn&& onTextureArray)
 {
     switch (usage.kind) {
     case ResourceKind::Texture:
@@ -731,35 +813,38 @@ auto DispatchByKind(const ResourceUsage& usage, TextureFn&& onTexture, BufferFn&
         return onBuffer(usage.buffer);
     case ResourceKind::VolumeTexture:
         return onVolumeTexture(usage.volumeTexture);
+    case ResourceKind::TextureArray:
+        return onTextureArray(usage.textureArray);
     }
-    // Unreachable in practice - the switch above is exhaustive over all 3
+    // Unreachable in practice - the switch above is exhaustive over all 4
     // current ResourceKind enumerators with no default: case, so this line
     // is only ever reached if a caller somehow constructed an out-of-range
     // ResourceKind value directly (never possible through any real
-    // ResourceUsage::ForTexture()/ForBuffer()/ForVolumeTexture() factory).
+    // ResourceUsage::ForTexture()/ForBuffer()/ForVolumeTexture()/
+    // ForTextureArray() factory).
     // Kept ONLY for the compiler's own "not all control paths return a
     // value" diagnostic on some compilers/warning levels (MSVC's C4715 in
     // particular, which can fire even for a switch that visibly covers
     // every named enumerator, since it cannot statically rule out a value
     // outside the enum's named range at runtime).
     //
-    // Deliberately DOES NOT call onTexture/onBuffer/onVolumeTexture again
-    // as a fallback (unlike naively mirroring IsWriteAccess()/ToString()'s
-    // own "return a safe sentinel" convention) - those two functions return
-    // a concrete, known, always-safe sentinel type (bool/const char*); this
-    // template's return type is caller-chosen and may be a pointer, a pair,
-    // or anything else with no safe default - and, more importantly,
-    // re-invoking one of the three callables here would silently RE-RUN
-    // real, possibly side-effecting per-kind logic (e.g. a barrier site
-    // emitting a second GPU barrier) for a usage.kind value that, if this
-    // line is ever genuinely reached, is already corrupt - doing nothing
-    // and failing loudly is strictly safer than doing something wrong. A
-    // thrown exception is valid for ANY deduced return type (including
-    // void), since a path that always throws never needs to produce a
-    // value.
-    assert(false && "DispatchByKind: ResourceUsage::kind held a value outside ResourceKind's 3 named enumerators");
+    // Deliberately DOES NOT call onTexture/onBuffer/onVolumeTexture/
+    // onTextureArray again as a fallback (unlike naively mirroring
+    // IsWriteAccess()/ToString()'s own "return a safe sentinel" convention)
+    // - those two functions return a concrete, known, always-safe sentinel
+    // type (bool/const char*); this template's return type is caller-chosen
+    // and may be a pointer, a pair, or anything else with no safe default -
+    // and, more importantly, re-invoking one of the four callables here
+    // would silently RE-RUN real, possibly side-effecting per-kind logic
+    // (e.g. a barrier site emitting a second GPU barrier) for a usage.kind
+    // value that, if this line is ever genuinely reached, is already
+    // corrupt - doing nothing and failing loudly is strictly safer than
+    // doing something wrong. A thrown exception is valid for ANY deduced
+    // return type (including void), since a path that always throws never
+    // needs to produce a value.
+    assert(false && "DispatchByKind: ResourceUsage::kind held a value outside ResourceKind's 4 named enumerators");
     throw std::logic_error(
-        "DispatchByKind: ResourceUsage::kind held a value outside ResourceKind's 3 named enumerators");
+        "DispatchByKind: ResourceUsage::kind held a value outside ResourceKind's 4 named enumerators");
 }
 
 // Forward-declared only - fully specified in Phase 6

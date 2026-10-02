@@ -85,6 +85,16 @@ void RenderGraphBuilder::PassBuilder::WriteVolumeTexture(VolumeTextureHandle han
     m_pass.writes.push_back(ResourceUsage::ForVolumeTexture(handle, access));
 }
 
+void RenderGraphBuilder::PassBuilder::ReadTextureArray(TextureArrayHandle handle, ResourceAccess access)
+{
+    m_pass.reads.push_back(ResourceUsage::ForTextureArray(handle, access));
+}
+
+void RenderGraphBuilder::PassBuilder::WriteTextureArray(TextureArrayHandle handle, ResourceAccess access)
+{
+    m_pass.writes.push_back(ResourceUsage::ForTextureArray(handle, access));
+}
+
 
 // --- RenderGraphBuilder ------------------------------------------------
 
@@ -198,6 +208,42 @@ VolumeTextureHandle RenderGraphBuilder::ImportVolumeTexture(
     return VolumeTextureHandle{ index, 1 };
 }
 
+// better-render-pass-3 campaign, BLOCK5 - mirrors CreateTexture()'s exact
+// assert-then-push-then-return-handle shape.
+TextureArrayHandle RenderGraphBuilder::CreateTextureArray(const char* name, const TextureArrayDesc& desc)
+{
+    assert(name != nullptr && name[0] != '\0' &&
+        "RenderGraphBuilder::CreateTextureArray requires a non-empty, static-storage-duration name");
+    const std::uint32_t index = static_cast<std::uint32_t>(m_textureArrays.size());
+    m_textureArrays.push_back(TextureArraySlot{ desc, name, TextureArrayImportInfo{} });
+    return TextureArrayHandle{ index, 1 };
+}
+
+// better-render-pass-3 campaign, BLOCK5 - mirrors ImportVolumeTexture()'s
+// exact import-info-population shape immediately above.
+TextureArrayHandle RenderGraphBuilder::ImportTextureArray(
+    const char* name, const TextureArrayTarget& externalTarget, VkImageLayout currentLayout)
+{
+    assert(name != nullptr && name[0] != '\0' &&
+        "RenderGraphBuilder::ImportTextureArray requires a non-empty, static-storage-duration name");
+    const std::uint32_t index = static_cast<std::uint32_t>(m_textureArrays.size());
+
+    TextureArrayDesc desc;
+    desc.width = externalTarget.extent.width;
+    desc.height = externalTarget.extent.height;
+    desc.arrayLayers = externalTarget.arrayLayers;
+    desc.format = externalTarget.format;
+    desc.hasDepth = externalTarget.hasDepth;
+
+    TextureArrayImportInfo importInfo;
+    importInfo.isImported = true;
+    importInfo.externalTarget = externalTarget;
+    importInfo.currentLayout = currentLayout;
+
+    m_textureArrays.push_back(TextureArraySlot{ desc, name, importInfo });
+    return TextureArrayHandle{ index, 1 };
+}
+
 void RenderGraphBuilder::KeepVolumeTextureOutput(VolumeTextureHandle handle)
 {
     m_finalVolumeTextureOutputs.push_back(handle);
@@ -210,6 +256,15 @@ void RenderGraphBuilder::KeepVolumeTextureOutput(VolumeTextureHandle handle)
 void RenderGraphBuilder::KeepBufferOutput(BufferHandle handle)
 {
     m_finalBufferOutputs.push_back(handle);
+}
+
+// better-render-pass-3 campaign, BLOCK5 - see
+// RenderGraphBuilder::KeepTextureArrayOutput()'s own declaration
+// (RenderGraphBuilder.h) for the full reasoning; mirrors
+// KeepVolumeTextureOutput()/KeepBufferOutput() above verbatim.
+void RenderGraphBuilder::KeepTextureArrayOutput(TextureArrayHandle handle)
+{
+    m_finalTextureArrayOutputs.push_back(handle);
 }
 
 // editor-core-separation-26 campaign, PHASE5
@@ -319,8 +374,10 @@ CompiledGraphInput RenderGraphBuilder::Finish()
     input.textures = std::move(m_textures);
     input.buffers = std::move(m_buffers);
     input.volumeTextures = std::move(m_volumeTextures);
+    input.textureArrays = std::move(m_textureArrays); // better-render-pass-3 campaign, BLOCK5
     input.finalVolumeTextureOutputs = std::move(m_finalVolumeTextureOutputs);
     input.finalBufferOutputs = std::move(m_finalBufferOutputs);
+    input.finalTextureArrayOutputs = std::move(m_finalTextureArrayOutputs); // better-render-pass-3 campaign, BLOCK5
     input.persistentCacheTextures = std::move(m_persistentCacheTextures);
     return input;
 }
