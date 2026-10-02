@@ -215,6 +215,10 @@ GpuDrivenBatchNamePool& BatchNamePool()
 
 Core::Core(ISurfaceProvider& surfaceProvider, IHostServices& hostServices)
     : m_renderer(surfaceProvider)
+    // Block 4 (task_manager/better-render-pass-6), PHASE7 - constructed
+    // immediately after m_renderer (declaration order matches Core.h - see
+    // m_sceneServicesDescriptorSet's own member doc comment there).
+    , m_sceneServicesDescriptorSet(m_renderer)
     // better-render-pass-3 campaign, BLOCK 2 (Arbitrary Render Views) -
     // needs a live Renderer&, constructed immediately after m_renderer
     // (declaration order matches Core.h - see m_renderViewRegistry's own
@@ -908,13 +912,27 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             IFrameDebuggerCaptureRecorder* frameDebuggerCapture =
                 isGameView ? m_currentFrameDebuggerCaptureForOffscreenPipeline : nullptr;
 
+            // Block 4 (task_manager/better-render-pass-6) - resolve THIS view's own
+            // published scene-service handles NOW, while frame.currentView/
+            // frame.blackboard are still correct for THIS specific invocation. Never
+            // move this below desc.setup/desc.execute's own construction, and never
+            // read frame.currentView/frame.blackboard from inside either lambda's body
+            // - see PHASE7_CORE_WIRING_RENDEROPAQUE_PROVIDER.md's own hazard warning.
+            std::array<std::optional<rg::TextureHandle>, kSceneServiceSlotCount> publishedServiceSlots{};
+            for (std::uint32_t slotIndex = 0; slotIndex < kSceneServiceSlotCount; ++slotIndex) {
+                const SceneServiceSlot slot = static_cast<SceneServiceSlot>(slotIndex);
+                publishedServiceSlots[slotIndex] =
+                    frame.blackboard.Fetch<rg::TextureHandle>(SceneServiceBlackboardKey(slot, frame.currentView));
+            }
+            const rg::RenderViewId currentViewForServices = frame.currentView; // plain by-value copy - see hazard warning above.
+
             rg::RenderPassDesc desc;
             desc.debugName = "RenderOpaque";
             desc.kind = rg::PassKind::Graphics;
             desc.order = rg::RenderPassEvent::Opaques;
             desc.view = frame.currentView;
             desc.legacyCategory = rg::RenderPassCategory::General;
-            desc.setup = [viewTarget, gpuSkinningBuffers](rg::RenderGraphBuilder::PassBuilder& pass) {
+            desc.setup = [viewTarget, gpuSkinningBuffers, publishedServiceSlots](rg::RenderGraphBuilder::PassBuilder& pass) {
                 // editor-core-separation-20 campaign, PHASE1 - no clear value here
                 // anymore: "ClearViewTarget" (registered above, BeforeEverything, deny-
                 // listed) now owns the ONE guaranteed clear of this exact resource,
@@ -925,15 +943,35 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 pass.WriteColorAttachment(viewTarget);
                 pass.WriteDepthStencilAttachment(viewTarget);
                 DeclareGpuSkinningReads(pass, gpuSkinningBuffers);
+                for (std::uint32_t slotIndex = 0; slotIndex < kSceneServiceSlotCount; ++slotIndex) {
+                    if (publishedServiceSlots[slotIndex].has_value()) {
+                        pass.ReadTexture(*publishedServiceSlots[slotIndex], rg::ResourceAccess::ShaderRead);
+                    }
+                }
             };
-            desc.execute = [this, aspectWidthOverHeight, isGameView, viewProjectionOverride, frameDebuggerCapture](
-                                rg::PassContext& ctx) {
+            desc.execute = [this, aspectWidthOverHeight, isGameView, viewProjectionOverride, frameDebuggerCapture,
+                                publishedServiceSlots, currentViewForServices](rg::PassContext& ctx) {
                 m_renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
+                std::array<SceneServicesDescriptorSet::ResolvedSlot, kSceneServiceSlotCount> resolvedServiceSlots{};
+                for (std::uint32_t slotIndex = 0; slotIndex < kSceneServiceSlotCount; ++slotIndex) {
+                    if (publishedServiceSlots[slotIndex].has_value()) {
+                        const rg::PassContext::ResolvedTexture resolved = ctx.resolveReadTexture(*publishedServiceSlots[slotIndex]);
+                        resolvedServiceSlots[slotIndex].view = resolved.view;
+                        resolvedServiceSlots[slotIndex].sampler = resolved.sampler;
+                    }
+                    // else: leave both VK_NULL_HANDLE - SceneServicesDescriptorSet::Rewrite()
+                    // substitutes its own dummy for any slot left this way (and also for a
+                    // slot that resolved but came back with a null view or null sampler -
+                    // see PHASE0 global rule 12).
+                }
+                const VkDescriptorSet sceneServicesSet =
+                    m_sceneServicesDescriptorSet.Rewrite(currentViewForServices, resolvedServiceSlots);
                 if (isGameView) {
                     m_game.Render(m_renderer, aspectWidthOverHeight, nullptr, frameDebuggerCapture, std::nullopt,
-                        m_gpuDrivenBatchedEntitiesThisFrame);
+                        m_gpuDrivenBatchedEntitiesThisFrame, sceneServicesSet);
                 } else {
-                    m_game.Render(m_renderer, aspectWidthOverHeight, &viewProjectionOverride);
+                    m_game.Render(m_renderer, aspectWidthOverHeight, &viewProjectionOverride, nullptr, std::nullopt, {},
+                        sceneServicesSet);
                 }
                 m_renderer.EndGraphPassRecording();
             };

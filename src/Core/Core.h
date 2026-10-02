@@ -20,6 +20,11 @@
 // the RenderFeatureBlend.comp pipeline, was already pulled fully in-house
 // by PHASE1).
 #include "../Renderer/Renderer.h"
+#include "../Renderer/SceneServicesDescriptorSet.h"
+// Block 4 (task_manager/better-render-pass-6), PHASE7
+// (PHASE7_CORE_WIRING_RENDEROPAQUE_PROVIDER.md) - Core owns ONE
+// SceneServicesDescriptorSet for its entire lifetime (m_sceneServicesDescriptorSet
+// below); its constructor takes a Renderer&.
 #include "../Renderer/RenderGraph/RenderGraph.h"
 #include "../Renderer/RenderGraph/RenderPipeline.h"
 // editor-core-separation-2 campaign, PHASE2 - Core only ever holds/forwards
@@ -664,6 +669,14 @@ private:
     // parameter) only; m_renderGraph needs m_renderer already constructed;
     // m_game/m_engineContext have no dependency on either.
     Renderer m_renderer;
+    // Block 4 (task_manager/better-render-pass-6) - the ONE reserved "scene
+    // services" descriptor set (set = 1) every Pipeline drawn through
+    // Renderer::Submit() during the Editor's offscreen "RenderOpaque" pass
+    // can optionally sample. Constructed AFTER m_renderer (declaration order
+    // matters here) since its constructor takes a Renderer&. Never torn down
+    // mid-process - lives for Core's entire lifetime, mirroring
+    // RenderViewRegistry's own convention.
+    SceneServicesDescriptorSet m_sceneServicesDescriptorSet;
     // better-render-pass-3 campaign, BLOCK 2 (Arbitrary Render Views) -
     // needs a live Renderer&, so it is declared (and initialized)
     // immediately after m_renderer, mirroring m_renderGraph's own identical
