@@ -162,9 +162,23 @@ public:
     // Mirrors `useMaterialTexture` above exactly, as a SEPARATE, unrelated
     // flag (never combined with it on the same call - Locked Design
     // Decision 8, PHASE0_MASTER_STRATEGY.md).
+    //
+    // Global Scene Services Descriptor Set campaign (better-render-pass-6),
+    // PHASE4 (task_manager/better-render-pass-6/PHASE4_CREATEPIPELINE_FACTORY_WIRING.md)
+    // - `sceneServicesSetLayout` (default VK_NULL_HANDLE) is a genuinely NEW,
+    // trailing parameter, forwarded straight through to Pipeline's own new
+    // `sceneServicesSetLayout` constructor parameter with ZERO interpretation
+    // at this layer - unlike `useMaterialTexture`/`useInstanceBuffer` (which
+    // resolve to a layout THIS factory itself owns), the real owning
+    // instance is Core's ONE SceneServicesDescriptorSet (wired in PHASE7),
+    // which this factory has no reach to and must not be given one. The
+    // caller passes SceneServicesDescriptorSet::Layout()'s result straight
+    // in. Every existing call site is unaffected (new trailing defaulted
+    // parameter).
     Pipeline CreatePipeline(VkFormat colorFormat, const std::string& vertexShaderSpirvPath,
         const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor,
-        bool useMaterialTexture = false, const char* debugName = nullptr, bool useInstanceBuffer = false) const;
+        bool useMaterialTexture = false, const char* debugName = nullptr, bool useInstanceBuffer = false,
+        VkDescriptorSetLayout sceneServicesSetLayout = VK_NULL_HANDLE) const;
 
     // Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE3 - the
     // N-color-format sibling of CreatePipeline() above, forwarding straight
@@ -176,10 +190,12 @@ public:
     // G-buffer pass) may write into targets of differing formats. Every
     // other parameter behaves identically to the single-format overload
     // above, including the new trailing `useInstanceBuffer` (render-pass-5
-    // campaign, PHASE2).
+    // campaign, PHASE2) and `sceneServicesSetLayout` (better-render-pass-6
+    // campaign, PHASE4 - same pure pass-through, zero interpretation here).
     Pipeline CreatePipeline(std::span<const VkFormat> colorFormats, const std::string& vertexShaderSpirvPath,
         const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor,
-        bool useMaterialTexture = false, const char* debugName = nullptr, bool useInstanceBuffer = false) const;
+        bool useMaterialTexture = false, const char* debugName = nullptr, bool useInstanceBuffer = false,
+        VkDescriptorSetLayout sceneServicesSetLayout = VK_NULL_HANDLE) const;
 
     // See Renderer::CreateComputePipeline() (Phase 2 -
     // COMPUTE_PHASE2_PIPELINE_INFRASTRUCTURE_STRATEGY_v1.md). Builds a

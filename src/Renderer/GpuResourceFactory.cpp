@@ -321,22 +321,23 @@ void GpuResourceFactory::ImmediateSubmit(const std::function<void(VkCommandBuffe
 
 Pipeline GpuResourceFactory::CreatePipeline(VkFormat colorFormat, const std::string& vertexShaderSpirvPath,
     const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout, bool useMaterialTexture,
-    const char* debugName, bool useInstanceBuffer) const
+    const char* debugName, bool useInstanceBuffer, VkDescriptorSetLayout sceneServicesSetLayout) const
 {
     const VkDescriptorSetLayout materialSetLayout = useMaterialTexture ? m_materialSetLayout : VK_NULL_HANDLE;
     const VkDescriptorSetLayout instanceBufferSetLayout = useInstanceBuffer ? m_instanceBufferSetLayout : VK_NULL_HANDLE;
     return Pipeline(m_device, colorFormat, m_depthFormat, vertexShaderSpirvPath, fragmentShaderSpirvPath, vertexLayout,
-        materialSetLayout, debugName, instanceBufferSetLayout);
+        materialSetLayout, debugName, instanceBufferSetLayout, sceneServicesSetLayout);
 }
 
 Pipeline GpuResourceFactory::CreatePipeline(std::span<const VkFormat> colorFormats,
     const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout,
-    bool useMaterialTexture, const char* debugName, bool useInstanceBuffer) const
+    bool useMaterialTexture, const char* debugName, bool useInstanceBuffer,
+    VkDescriptorSetLayout sceneServicesSetLayout) const
 {
     const VkDescriptorSetLayout materialSetLayout = useMaterialTexture ? m_materialSetLayout : VK_NULL_HANDLE;
     const VkDescriptorSetLayout instanceBufferSetLayout = useInstanceBuffer ? m_instanceBufferSetLayout : VK_NULL_HANDLE;
     return Pipeline(m_device, colorFormats, m_depthFormat, vertexShaderSpirvPath, fragmentShaderSpirvPath,
-        vertexLayout, materialSetLayout, debugName, instanceBufferSetLayout);
+        vertexLayout, materialSetLayout, debugName, instanceBufferSetLayout, sceneServicesSetLayout);
 }
 
 ComputePipeline GpuResourceFactory::CreateComputePipeline(const std::string& shaderSpirvPath,

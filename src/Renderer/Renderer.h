@@ -569,9 +569,20 @@ public:
     // `useMaterialTexture` above for the SEPARATE, unrelated
     // VertexLayout::PositionNormalInstanced concept - see
     // GpuResourceFactory::CreatePipeline()'s own matching comment.
+    // `sceneServicesSetLayout` (Global Scene Services Descriptor Set
+    // campaign, better-render-pass-6, PHASE4 - default VK_NULL_HANDLE,
+    // trailing) is forwarded straight through to GpuResourceFactory::
+    // CreatePipeline()'s own matching new parameter, which forwards it
+    // straight through to Pipeline's own new `sceneServicesSetLayout`
+    // constructor parameter - zero interpretation at either layer. The real
+    // owning instance is Core's ONE SceneServicesDescriptorSet (wired in
+    // PHASE7); the caller passes SceneServicesDescriptorSet::Layout()'s
+    // result straight in. Every existing call site is unaffected (new
+    // trailing defaulted parameter).
     Pipeline CreatePipeline(const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath,
         VertexLayout vertexLayout = VertexLayout::PositionColor, bool useMaterialTexture = false,
-        const char* debugName = nullptr, bool useInstanceBuffer = false) const;
+        const char* debugName = nullptr, bool useInstanceBuffer = false,
+        VkDescriptorSetLayout sceneServicesSetLayout = VK_NULL_HANDLE) const;
 
     // Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE3 - the
     // N-color-format sibling of CreatePipeline() above: builds a real
@@ -584,13 +595,15 @@ public:
     // caller decides every entry. Forwards straight into
     // GpuResourceFactory::CreatePipeline()'s own parallel span overload.
     // Every other parameter (`vertexLayout`/`useMaterialTexture`/
-    // `debugName`) behaves identically to the single-format overload above.
+    // `debugName`/`useInstanceBuffer`/`sceneServicesSetLayout`) behaves
+    // identically to the single-format overload above.
     // No existing call site needs to change - this is a genuinely new,
     // additive capability with zero real consumers until a future phase's
     // own G-buffer pass (task_manager/mrt-1/PHASE4_GBUFFER_VALIDATION_PASS_AND_SHADER.md).
     Pipeline CreatePipeline(std::span<const VkFormat> colorFormats, const std::string& vertexShaderSpirvPath,
         const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor,
-        bool useMaterialTexture = false, const char* debugName = nullptr, bool useInstanceBuffer = false) const;
+        bool useMaterialTexture = false, const char* debugName = nullptr, bool useInstanceBuffer = false,
+        VkDescriptorSetLayout sceneServicesSetLayout = VK_NULL_HANDLE) const;
 
     // Factory for compute pipelines (Phase 2 -
     // COMPUTE_PHASE2_PIPELINE_INFRASTRUCTURE_STRATEGY_v1.md) - so callers
