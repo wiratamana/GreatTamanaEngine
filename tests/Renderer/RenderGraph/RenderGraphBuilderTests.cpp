@@ -1243,6 +1243,76 @@ TEST(RenderGraphBuilderTest, AddBlitPassDefaultsViewScopeToSharedAndCategoryToGe
     EXPECT_EQ(metadata.tags, RenderPassTagMask{ 0u });
 }
 
+// --- PassReadsTexture() - read-only introspection over PassRecord::reads --
+
+TEST(RenderGraphBuilderTest, PassReadsTextureReturnsTrueForDeclaredColorRead)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle handle = builder.CreateTexture("Input", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+
+    builder.AddPass(
+        "ReadPass",
+        [&](RenderGraphBuilder::PassBuilder& pass) { pass.ReadTexture(handle, ResourceAccess::ShaderRead); },
+        NoOpExecute);
+
+    EXPECT_TRUE(builder.PassReadsTexture(0, handle));
+}
+
+// PassReadsTexture() must be blind to isDepthResource - a depth-aspect read
+// against the right handle counts as a match exactly like a color-aspect one.
+TEST(RenderGraphBuilderTest, PassReadsTextureReturnsTrueForDeclaredDepthRead)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle handle = builder.CreateTexture("Depth", TextureDesc{ 64, 64, VK_FORMAT_D32_SFLOAT, true });
+
+    builder.AddPass(
+        "DepthReadPass",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.ReadTexture(handle, ResourceAccess::ShaderRead, /*isDepthResource=*/true);
+        },
+        NoOpExecute);
+
+    EXPECT_TRUE(builder.PassReadsTexture(0, handle));
+}
+
+TEST(RenderGraphBuilderTest, PassReadsTextureReturnsFalseForUnreadHandle)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle readHandle = builder.CreateTexture("Input", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+    const TextureHandle otherHandle = builder.CreateTexture("Other", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+
+    builder.AddPass(
+        "ReadPass",
+        [&](RenderGraphBuilder::PassBuilder& pass) { pass.ReadTexture(readHandle, ResourceAccess::ShaderRead); },
+        NoOpExecute);
+
+    EXPECT_FALSE(builder.PassReadsTexture(0, otherHandle));
+}
+
+TEST(RenderGraphBuilderTest, PassReadsTextureReturnsFalseForPassWithZeroReads)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle handle = builder.CreateTexture("Output", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+
+    builder.AddPass(
+        "WriteOnlyPass",
+        [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(handle); },
+        NoOpExecute);
+
+    EXPECT_FALSE(builder.PassReadsTexture(0, handle));
+}
+
+#ifndef NDEBUG
+
+TEST(RenderGraphBuilderDeathTest, PassReadsTextureRejectsOutOfRangeIndex)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle handle = builder.CreateTexture("Output", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+
+    EXPECT_DEATH({ builder.PassReadsTexture(0, handle); }, "");
+}
+
+#endif // !NDEBUG
 
 } // namespace
 } // namespace gte::rg

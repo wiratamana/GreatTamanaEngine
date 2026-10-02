@@ -821,6 +821,23 @@ public:
         return m_passes[index].renderPassEvent;
     }
 
+    // True if the pass at declaration index `index` declared any read usage
+    // (texture kind only) against `handle`, regardless of its
+    // isDepthResource flag - a depth-aspect read and a color-aspect read
+    // against the same handle both count as a match. `index` must be <
+    // DeclaredPassCount() - asserted in debug builds, mirroring
+    // PassEventAt()'s own bound check.
+    bool PassReadsTexture(std::size_t index, TextureHandle handle) const
+    {
+        assert(index < m_passes.size() && "RenderGraphBuilder::PassReadsTexture() - index out of range");
+        for (const ResourceUsage& usage : m_passes[index].reads) {
+            if (usage.kind == ResourceKind::Texture && usage.texture == handle) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // Consumes this builder, handing its whole in-progress description
     // over to Phase 3's compiler. Safe to call at most meaningfully once
     // per builder instance (a builder is a one-frame-lifetime object, per
