@@ -2212,6 +2212,10 @@ set(GTE_TEST_SOURCES
     # src/Core/Plugins/RenderFeatureCompositor.h/.cpp is unconditionally
     # in gte_core's own source list.
     Core/Plugins/RenderFeatureCompositorPreOpaqueTests.cpp
+    # Trivial standalone-compile proof for the new
+    # src/Core/Plugins/ProjectScenePassCallback.h header. Unconditional,
+    # since that header is unconditionally in gte_core's own source list.
+    Core/Plugins/ProjectScenePassCallbackHeaderCompilesStandaloneTests.cpp
     # better-render-pass-3 campaign, BLOCK 2 (Arbitrary Render Views), PHASE2
     # (PHASE2_RENDER_VIEW_REGISTRY_CORE.md) - Tier-2 (real, headless GPU)
     # tests for the new RenderViewRegistry class. Unconditional, since
@@ -2322,6 +2326,13 @@ set(GTE_TEST_SOURCES
     # and src/Renderer/RenderGraph/RenderGraphCompiler.h/.cpp are
     # unconditionally in gte_core's own source list.
     Renderer/RenderGraph/PreOpaqueStageOrderingTests.cpp
+    # Tier-1 tests for the two pure safety-net functions in
+    # src/Core/Plugins/ProjectScenePassCallback.h -
+    # FindPassesNotTaggedScenePass()/FindScenePassCallbackMissingReadDeclaration().
+    # Unconditional, since that header and
+    # src/Renderer/RenderGraph/RenderGraphBuilder.h/.cpp are unconditionally
+    # in gte_core's own source list.
+    Renderer/RenderGraph/ScenePassSafetyNetTests.cpp
     Renderer/RenderGraph/RenderGraphBarrierPlannerTests.cpp
     Renderer/RenderGraph/RenderGraphNameSlotTableTests.cpp
     # task_manager/better-render-pass-1 campaign, PHASE1
