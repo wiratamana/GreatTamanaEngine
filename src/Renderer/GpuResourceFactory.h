@@ -8,6 +8,7 @@
 #include "Pipeline.h"
 #include "RenderTexture.h"
 #include "Texture2D.h"
+#include "TextureArray2D.h"
 #include "VolumeTexture.h"
 #include "Vulkan/VulkanAllocator.h"
 
@@ -296,6 +297,30 @@ public:
     VolumeTexture CreateVolumeTexture(
         int width, int height, int depth, VkFormat format, const char* debugName = nullptr) const;
 
+    // better-render-pass-3 campaign, BLOCK 5 (Array and Cubemap Texture
+    // Resources) - see TextureArray2D.h. `format` here must already be
+    // fully resolved - VK_FORMAT_UNDEFINED-as-"match ColorFormat()/
+    // DepthFormat()" is resolved by Renderer::CreateTextureArray() (never
+    // this method - see that method's own doc comment for why this is NOT
+    // a trivial one-line forward like Renderer::CreateVolumeTexture()'s own
+    // precedent), so a debug-only assert at the top of this method's own
+    // body documents that contract rather than re-resolving it here.
+    // Validates BOTH cubemap invariants (`isCubemap` requires `arrayLayers`
+    // to be a positive multiple of 6, and `width == height`) with a real,
+    // unconditional `throw std::runtime_error` BEFORE ever constructing a
+    // TextureArray2D - these are hard Vulkan API preconditions for
+    // VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT, not a caller-trust boundary, so
+    // they must never be debug-assert-only (mirrors
+    // FindMismatchedColorAttachmentExtent()'s own precedent for this exact
+    // category of problem). `allowStorageImageAccess` is only ever checked
+    // via SupportsStorageImageUsage() when it is actually requested AND
+    // `hasDepth == false` - never for the depth case (mirrors
+    // RenderTexture's own depth-companion creation, which trusts
+    // Renderer::DepthFormat() unconditionally, since that format was
+    // already globally validated once, at device-pick time, by
+    // VulkanDevice::PickDepthFormat()).
+    TextureArray2D CreateTextureArray(int width, int height, int arrayLayers, VkFormat format, bool hasDepth,
+        bool isCubemap, bool allowStorageImageAccess = false, const char* debugName = nullptr) const;
 
     // The ONE descriptor-set-layout (a single combined-image-sampler,
     // fragment stage, set = 0 binding = 0) every VertexLayout::

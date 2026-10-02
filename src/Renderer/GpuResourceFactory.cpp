@@ -4,6 +4,7 @@
 #include "Vulkan/DescriptorSetLayoutBuilder.h"
 #include "Vulkan/FormatCapabilities.h"
 
+#include <cassert>
 #include <cstddef>
 #include <limits>
 #include <stdexcept>
@@ -478,6 +479,43 @@ VolumeTexture GpuResourceFactory::CreateVolumeTexture(
             "VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT for the requested format.");
     }
     return VolumeTexture(m_allocator, m_memoryTracker, m_device, width, height, depth, format, debugName);
+}
+
+TextureArray2D GpuResourceFactory::CreateTextureArray(int width, int height, int arrayLayers, VkFormat format,
+    bool hasDepth, bool isCubemap, bool allowStorageImageAccess, const char* debugName) const
+{
+    // Caller-trust boundary: `format` must already be a concrete, resolved
+    // VkFormat by the time it reaches this method - VK_FORMAT_UNDEFINED
+    // resolution happens one layer up, in Renderer::CreateTextureArray()
+    // (see this method's own declaration comment in GpuResourceFactory.h).
+    assert(format != VK_FORMAT_UNDEFINED &&
+        "GpuResourceFactory::CreateTextureArray requires an already-resolved concrete format - "
+        "VK_FORMAT_UNDEFINED resolution happens one layer up, in Renderer::CreateTextureArray()");
+
+    // Hard Vulkan API preconditions for VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT
+    // - a real, unconditional throw, not a caller-trust boundary (see this
+    // method's own declaration comment).
+    if (isCubemap && (arrayLayers < 6 || arrayLayers % 6 != 0)) {
+        throw std::runtime_error(
+            "GpuResourceFactory::CreateTextureArray: isCubemap requires arrayLayers to be a "
+            "positive multiple of 6.");
+    }
+    if (isCubemap && width != height) {
+        throw std::runtime_error(
+            "GpuResourceFactory::CreateTextureArray: isCubemap requires width == height "
+            "(Vulkan requires square faces for a cube-compatible image).");
+    }
+
+    // Only ever checked when actually requested AND hasDepth == false -
+    // never for the depth case (see this method's own declaration comment).
+    if (allowStorageImageAccess && !hasDepth && !SupportsStorageImageUsage(m_physicalDevice, format)) {
+        throw std::runtime_error(
+            "GpuResourceFactory::CreateTextureArray: requested allowStorageImageAccess = true, but this "
+            "physical device does not support VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT for the requested format.");
+    }
+
+    return TextureArray2D(m_allocator, m_memoryTracker, m_device, width, height, arrayLayers, format, hasDepth,
+        isCubemap, allowStorageImageAccess, debugName);
 }
 
 

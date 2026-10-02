@@ -691,6 +691,9 @@ add_library(gte_core STATIC
     src/Renderer/VolumeTexture.cpp
     src/Renderer/VolumeTexture.h
     src/Renderer/VolumeTarget.h
+    src/Renderer/TextureArray2D.cpp
+    src/Renderer/TextureArray2D.h
+    src/Renderer/TextureArrayTarget.h
     src/Renderer/VolumeTexturePreviewMath.cpp
     src/Renderer/VolumeTexturePreviewMath.h
     src/Renderer/VolumeTexturePreviewRenderer.cpp
