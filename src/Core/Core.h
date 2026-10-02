@@ -56,6 +56,11 @@
 // free-standing, zero-Core-dependency header; RenderFeatureDescriptor.h has
 // zero dependencies beyond <cstdint>/<cstddef> (confirmed, PHASE0 Step 2).
 #include "Plugins/ProjectRenderFeatureCallback.h"
+// better-render-pass-5 effort, BLOCK 3, PHASE3 - Core::AddPreOpaquePass()/
+// RemovePreOpaquePass() below need ProjectPreOpaqueCallback by value/
+// signature - mirrors ProjectRenderFeatureCallback.h's own free-standing,
+// zero-Core-dependency precedent immediately above.
+#include "Plugins/ProjectPreOpaqueCallback.h"
 // better-render-pass-2 campaign, PHASE4 (PHASE4_DELETE_PLUGINS_FOLDER_AND_CMAKE.md) -
 // relocated from "../../plugins/gte_plugin_abi/RenderFeatureDescriptor.h" into
 // gte_core's own tree (Landmine A-style relocation, missed by the original
@@ -399,6 +404,31 @@ public:
     // reports "not found," the same harmless outcome as any other unknown
     // name - no separate length check needed here).
     void UnregisterProjectRenderFeature(const char* debugName);
+
+    // better-render-pass-5 effort, BLOCK 3, PHASE3 - a thin
+    // pass-through into m_renderFeatureCompositorPtr's own
+    // RegisterPreOpaqueFeature() (PHASE2) - mirrors
+    // RegisterProjectRenderFeature()'s own shape exactly, including the
+    // SAME null/length-check discipline, but reaches the PreOpaque-
+    // specific entry point, never RegisterProjectFeature()/Entry (see
+    // task_manager/better-render-pass-5/PHASE0_MASTER_STRATEGY.md's
+    // Locked Design Decision #1 for why these are deliberately separate
+    // front doors). `priority` defaults to 0 - PreOpaque features
+    // realistically number in the single digits per project (shadow
+    // maps, GI passes), so an explicit default avoids forcing every
+    // trivial caller to think about ordering relative to features it
+    // does not know about yet; a caller with a genuine ordering need
+    // against another PreOpaque feature still passes an explicit value.
+    // Returns false (logged, never crashes) if no
+    // RenderFeatureCompositor orchestrator exists in this build, if
+    // debugName is null, if debugName's length exceeds 63 bytes, or if
+    // RegisterPreOpaqueFeature() itself refuses (duplicate name).
+    bool AddPreOpaquePass(const char* debugName, ProjectPreOpaqueCallback callback, std::int32_t priority = 0);
+
+    // Teardown counterpart of AddPreOpaquePass() immediately above,
+    // mirroring UnregisterProjectRenderFeature()'s own shape. Null-safe;
+    // a safe no-op if debugName was never successfully registered.
+    void RemovePreOpaquePass(const char* debugName);
 
     // better-render-pass-3 campaign, BLOCK 2 (Arbitrary Render Views) -
     // thin pass-throughs into m_renderViewRegistry (below). Mints (or

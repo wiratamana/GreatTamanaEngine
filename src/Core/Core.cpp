@@ -453,6 +453,51 @@ void Core::UnregisterProjectRenderFeature(const char* debugName)
     m_renderFeatureCompositorPtr->UnregisterProjectFeature(debugName);
 }
 
+// better-render-pass-5 effort, BLOCK 3, PHASE3 - see this method's own
+// doc comment (Core.h) for the full contract.
+bool Core::AddPreOpaquePass(const char* debugName, ProjectPreOpaqueCallback callback, std::int32_t priority)
+{
+    if (m_renderFeatureCompositorPtr == nullptr) {
+        GTE_LOG_WARNING("Core", "AddPreOpaquePass('" + std::string(debugName != nullptr ? debugName : "<null>")
+            + "') failed - no RenderFeatureCompositor orchestrator is registered in this build.");
+        return false;
+    }
+    if (debugName == nullptr) {
+        GTE_LOG_WARNING("Core", "AddPreOpaquePass() failed - debugName is null.");
+        return false;
+    }
+    if (std::strlen(debugName) > 63) {
+        GTE_LOG_WARNING("Core", "AddPreOpaquePass('" + std::string(debugName)
+            + "') failed - name exceeds the 63-byte limit this engine's registration surfaces consistently "
+            "enforce; shorten it (never silently truncated).");
+        return false;
+    }
+
+    const bool registered =
+        m_renderFeatureCompositorPtr->RegisterPreOpaqueFeature(debugName, priority, std::move(callback));
+    if (registered) {
+        // editor-core-separation-23 campaign, PHASE4's own precedent,
+        // extended here - gated on success for the exact same reason
+        // RecordRenderFeature() already is (RegisterPreOpaqueFeature()
+        // can genuinely fail - duplicate name).
+        ProjectAssemblyRegistrationLedger::Instance().RecordPreOpaqueFeature(debugName);
+    }
+    return registered;
+}
+
+// better-render-pass-5 effort, BLOCK 3, PHASE3 - the teardown
+// counterpart of AddPreOpaquePass() immediately above. Null-safe;
+// forwards straight to UnregisterPreOpaqueFeature() - no length check
+// needed (an over-length name could never have been successfully
+// registered in the first place).
+void Core::RemovePreOpaquePass(const char* debugName)
+{
+    if (m_renderFeatureCompositorPtr == nullptr || debugName == nullptr) {
+        return;
+    }
+    m_renderFeatureCompositorPtr->UnregisterPreOpaqueFeature(debugName);
+}
+
 // better-render-pass-1 campaign, PHASE9 (Decision D3) - additive convenience
 // wrapper over RegisterProjectRenderFeature() immediately above: fixes stage
 // to RenderFeatureStage::PostComposite (the one, real "draw over the final
@@ -768,6 +813,80 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             // RenderGraph.cpp) - this pass's entire job is the load-op CLEAR its
             // attachment writes above request; it issues no draw call of its own.
             out.push_back(std::move(desc));
+        });
+
+    // "PreOpaqueFeatures" - ProviderScope::PerActiveView,
+    // BeforeDeferredPasses (the SAME phase "RenderOpaque" itself runs
+    // in - the DEFAULT ProviderTiming, left unspecified here exactly
+    // like "RenderOpaque"'s own Register() call below). better-render-
+    // pass-5 effort, BLOCK 3, PHASE3
+    // (task_manager/better-render-pass-5/PHASE3_CORE_PREOPAQUE_PROVIDER_AND_RUNTIME_GUARD.md).
+    // Registered TEXTUALLY before "RenderOpaque"'s own Register(...)
+    // call purely for human readability - this textual position is
+    // NEVER what guarantees ordering (PHASE0_MASTER_STRATEGY.md, Step
+    // 2): the real guarantee is entirely RenderPassEvent::PreOpaques
+    // (1000) being strictly less than RenderPassEvent::Opaques (2000),
+    // combined with every pass a PreOpaque callback declares being
+    // tagged that way - enforced by the DeclaredPassCount()/
+    // PassEventAt() check immediately below, which is the ONLY
+    // mechanism in this engine that can catch a pass mistakenly left at
+    // the implicit default RenderPassEvent::Opaques (the SAME tier
+    // "RenderOpaque" itself uses) - DetectRenderPassEventContradictions()
+    // only fires on a STRICT inequality and is structurally blind to an
+    // EQUAL-tier mistake. Deliberately registered as its OWN, separate
+    // provider rather than routed through the existing
+    // "PluginRenderFeatures" AfterDeferredPasses provider
+    // (RenderFeatureCompositor::ContributeRenderGraphPasses()) - that
+    // provider's own phase is reached strictly AFTER "RenderOpaque" has
+    // already been declared, unconditionally, regardless of any
+    // RenderPassEvent tag (see RenderPipeline.h's own ProviderTiming
+    // doc comment).
+    m_offscreenRenderPipeline.Register("PreOpaqueFeatures", rg::ProviderScope::PerActiveView,
+        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&) {
+            if (m_renderFeatureCompositorPtr == nullptr) {
+                return;
+            }
+
+            for (const RenderFeatureCompositor::PreOpaqueEntry& entry :
+                m_renderFeatureCompositorPtr->PreOpaqueFeaturesInPriorityOrder()) {
+                if (!entry.enabledOverride) {
+                    continue;
+                }
+
+                // better-render-pass-5 effort, BLOCK 3, PHASE3, Step 4 of
+                // the source spec - the real runtime safety net. Snapshot
+                // the pass count immediately before and after invoking
+                // this feature's own callback (which declares its own
+                // real pass(es) IMMEDIATELY, directly against
+                // frame.builder - exactly like "AtmosphereViewLut"
+                // already does), then hand the [before, after) range to
+                // FindPassesNotTaggedPreOpaque() (PHASE1,
+                // src/Core/Plugins/ProjectPreOpaqueCallback.h) - the PURE
+                // logic half of this check, Tier-1 tested in isolation
+                // (PHASE6). This function call site is the ONLY place in
+                // the engine that turns a non-empty result into the real
+                // GTE_LOG_WARNING + assert() side effects.
+                const std::size_t before = frame.builder.DeclaredPassCount();
+                entry.callback(frame.builder, frame.blackboard, frame.currentView); // Step 2.5 item 1 - 3-arg signature.
+                const std::size_t after = frame.builder.DeclaredPassCount();
+
+                const std::vector<std::size_t> violations =
+                    FindPassesNotTaggedPreOpaque(frame.builder, before, after);
+                for (const std::size_t index : violations) {
+                    const rg::RenderPassEvent actual = frame.builder.PassEventAt(index);
+                    GTE_LOG_WARNING("RenderFeatureCompositor",
+                        "PreOpaque feature '" + entry.name + "' declared a pass (declaration index "
+                        + std::to_string(index) + ") tagged RenderPassEvent::" + rg::ToString(actual)
+                        + " instead of the REQUIRED RenderPassEvent::PreOpaques - this pass is not "
+                        "provably guaranteed to run before \"RenderOpaque\" and may silently produce stale "
+                        "or missing data for whatever reads it. See "
+                        "docs/conventions/project-assembly-system.md's PreOpaque subsection.");
+                    assert(false
+                        && "A PreOpaque feature declared a pass not tagged RenderPassEvent::PreOpaques - see "
+                           "the GTE_LOG_WARNING immediately above (category \"RenderFeatureCompositor\") for "
+                           "which feature and which pass.");
+                }
+            }
         });
 
     // "RenderOpaque" - ProviderScope::PerActiveView.
