@@ -122,6 +122,40 @@ void RenderFeatureCompositor::SortAndDetectCollisionsInStage(std::vector<Entry>&
     }
 }
 
+// better-render-pass-5 effort, BLOCK 3, PHASE2 - PreOpaque sibling of
+// SortAndDetectCollisionsInStage() immediately above - identical
+// algorithm, against PreOpaqueEntry's own name/priority fields directly
+// (no nested .descriptor) and a fixed "PreOpaque" stage name in every
+// log line (there is only ever one PreOpaque list, unlike
+// SortAndDetectCollisionsInStage()'s own two callers for two different
+// stage names).
+void RenderFeatureCompositor::SortAndDetectCollisionsInPreOpaqueList(std::vector<PreOpaqueEntry>& entries)
+{
+    std::stable_sort(entries.begin(), entries.end(),
+        [](const PreOpaqueEntry& a, const PreOpaqueEntry& b) { return a.priority < b.priority; });
+
+    std::size_t i = 0;
+    while (i < entries.size()) {
+        std::size_t j = i;
+        while (j + 1 < entries.size() && entries[j + 1].priority == entries[i].priority) {
+            ++j;
+        }
+        if (j > i) {
+            for (std::size_t k = i; k < j; ++k) {
+                GTE_LOG_WARNING("RenderFeatureCompositor",
+                    entries[k].name + " and " + entries[k + 1].name + " both declared priority "
+                    + std::to_string(entries[k].priority) + " in stage PreOpaque - this is ambiguous; falling "
+                    "back to a stable, lexical name tie-break. Assign each feature a distinct priority to remove "
+                    "this warning.");
+            }
+            std::stable_sort(entries.begin() + static_cast<std::ptrdiff_t>(i),
+                entries.begin() + static_cast<std::ptrdiff_t>(j) + 1,
+                [](const PreOpaqueEntry& a, const PreOpaqueEntry& b) { return a.name < b.name; });
+        }
+        i = j + 1;
+    }
+}
+
 // editor-core-separation-8 campaign, PHASE2 - shared lookup used by both
 // SetFeatureEnabled() and SetFeaturePriority(): searches m_postComposite then
 // m_preUi for an Entry whose descriptor.name matches `name` exactly. Returns
@@ -135,6 +169,18 @@ RenderFeatureCompositor::Entry* RenderFeatureCompositor::FindEntryByName(const s
     }
     for (Entry& entry : m_preUi) {
         if (name == entry.descriptor.name) {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
+// better-render-pass-5 effort, BLOCK 3, PHASE2 - see this method's own
+// doc comment (RenderFeatureCompositor.h) for the full contract.
+RenderFeatureCompositor::PreOpaqueEntry* RenderFeatureCompositor::FindPreOpaqueEntryByName(const std::string& name)
+{
+    for (PreOpaqueEntry& entry : m_preOpaque) {
+        if (name == entry.name) {
             return &entry;
         }
     }
@@ -159,12 +205,19 @@ void RenderFeatureCompositor::AssertCalledFromMainThread() const
 // contract.
 bool RenderFeatureCompositor::SetFeatureEnabled(const std::string& name, bool enabled)
 {
-    Entry* entry = FindEntryByName(name);
-    if (entry == nullptr) {
-        return false;
+    if (Entry* entry = FindEntryByName(name)) {
+        entry->enabledOverride = enabled;
+        return true;
     }
-    entry->enabledOverride = enabled;
-    return true;
+    // better-render-pass-5 effort, BLOCK 3, PHASE2 - PreOpaque features
+    // live in a separate list/type - fall back to it only once the
+    // existing PostComposite/PreUI lookup has already reported "not
+    // found."
+    if (PreOpaqueEntry* preOpaqueEntry = FindPreOpaqueEntryByName(name)) {
+        preOpaqueEntry->enabledOverride = enabled;
+        return true;
+    }
+    return false;
 }
 
 // editor-core-separation-8 campaign, PHASE2 - host-side LIVE priority
@@ -172,29 +225,30 @@ bool RenderFeatureCompositor::SetFeatureEnabled(const std::string& name, bool en
 // contract.
 bool RenderFeatureCompositor::SetFeaturePriority(const std::string& name, std::int32_t priority)
 {
-    Entry* entry = FindEntryByName(name);
-    if (entry == nullptr) {
-        return false;
-    }
-    entry->descriptor.priority = priority;
+    if (Entry* entry = FindEntryByName(name)) {
+        entry->descriptor.priority = priority;
 
-    // Re-sort ONLY the stage this entry actually belongs to - determined by
-    // which vector FindEntryByName() actually found it in, not by
-    // entry->descriptor.stage alone (defensive: always re-derive from the
-    // real container to stay correct even if this class's own stage-routing
-    // rules ever change). NOTE: the re-sort below invalidates `entry` itself
-    // (std::stable_sort may reorder/relocate elements) - it is never
-    // dereferenced again after this point.
-    const bool isPostComposite =
-        std::find_if(m_postComposite.begin(), m_postComposite.end(),
-            [&name](const Entry& e) { return name == e.descriptor.name; })
-        != m_postComposite.end();
-    if (isPostComposite) {
-        SortAndDetectCollisionsInStage(m_postComposite, "PostComposite");
-    } else {
-        SortAndDetectCollisionsInStage(m_preUi, "PreUI");
+        const bool isPostComposite =
+            std::find_if(m_postComposite.begin(), m_postComposite.end(),
+                [&name](const Entry& e) { return name == e.descriptor.name; })
+            != m_postComposite.end();
+        if (isPostComposite) {
+            SortAndDetectCollisionsInStage(m_postComposite, "PostComposite");
+        } else {
+            SortAndDetectCollisionsInStage(m_preUi, "PreUI");
+        }
+        return true;
     }
-    return true;
+
+    // better-render-pass-5 effort, BLOCK 3, PHASE2 - see
+    // SetFeatureEnabled()'s own identical fallback comment above.
+    if (PreOpaqueEntry* preOpaqueEntry = FindPreOpaqueEntryByName(name)) {
+        preOpaqueEntry->priority = priority;
+        SortAndDetectCollisionsInPreOpaqueList(m_preOpaque);
+        return true;
+    }
+
+    return false;
 }
 
 // editor-core-separation-23 campaign, PHASE2
@@ -218,6 +272,19 @@ bool RenderFeatureCompositor::RegisterProjectFeature(
         GTE_LOG_WARNING("RenderFeatureCompositor",
             std::string("RegisterProjectFeature('") + descriptor.name
             + "') refused - a render feature with this name is already registered.");
+        return false;
+    }
+
+    // better-render-pass-5 effort, BLOCK 3, PHASE2 - PHASE0_MASTER_STRATEGY.md's
+    // Locked Design Decision #8 - the symmetric reverse of
+    // RegisterPreOpaqueFeature()'s own new cross-namespace check above:
+    // PreOpaque/PostComposite/PreUI feature names share one global
+    // namespace.
+    if (FindPreOpaqueEntryByName(descriptor.name) != nullptr) {
+        GTE_LOG_WARNING("RenderFeatureCompositor",
+            std::string("RegisterProjectFeature('") + descriptor.name
+            + "') refused - a PreOpaque feature with this name is already registered (PreOpaque/PostComposite/"
+            "PreUI feature names share one global namespace).");
         return false;
     }
 
@@ -322,6 +389,69 @@ bool RenderFeatureCompositor::UnregisterProjectFeature(const char* name)
     return true;
 }
 
+// better-render-pass-5 effort, BLOCK 3, PHASE2 - see this method's own
+// doc comment (RenderFeatureCompositor.h) for the full contract.
+bool RenderFeatureCompositor::RegisterPreOpaqueFeature(
+    const std::string& name, std::int32_t priority, ProjectPreOpaqueCallback callback)
+{
+    AssertCalledFromMainThread();
+
+    // better-render-pass-5 effort, BLOCK 3, PHASE2 - PHASE0_MASTER_STRATEGY.md's
+    // Locked Design Decision #8 (confirmed by explicit user decision,
+    // Step 2.5 item 3): PreOpaque feature names share ONE GLOBAL
+    // namespace with PostComposite/PreUI - check BOTH FindPreOpaqueEntryByName()
+    // AND FindEntryByName() before accepting a new PreOpaque registration.
+    if (FindPreOpaqueEntryByName(name) != nullptr) {
+        GTE_LOG_WARNING("RenderFeatureCompositor",
+            "RegisterPreOpaqueFeature('" + name + "') refused - a PreOpaque feature with this name is already "
+            "registered.");
+        return false;
+    }
+    if (FindEntryByName(name) != nullptr) {
+        GTE_LOG_WARNING("RenderFeatureCompositor",
+            "RegisterPreOpaqueFeature('" + name + "') refused - a PostComposite/PreUI feature with this name is "
+            "already registered (PreOpaque/PostComposite/PreUI feature names share one global namespace).");
+        return false;
+    }
+
+    PreOpaqueEntry entry;
+    entry.name = name;
+    entry.priority = priority;
+    entry.callback = std::move(callback);
+    m_preOpaque.push_back(std::move(entry));
+    SortAndDetectCollisionsInPreOpaqueList(m_preOpaque);
+
+    GTE_LOG_INFO("RenderFeatureCompositor", "RegisterPreOpaqueFeature('" + name + "') succeeded.");
+    return true;
+}
+
+// better-render-pass-5 effort, BLOCK 3, PHASE2 - see this method's own
+// doc comment (RenderFeatureCompositor.h) for the full contract.
+bool RenderFeatureCompositor::UnregisterPreOpaqueFeature(const char* name)
+{
+    AssertCalledFromMainThread();
+
+    if (name == nullptr) {
+        return false;
+    }
+
+    const std::string nameStr = name;
+    const std::size_t sizeBefore = m_preOpaque.size();
+    m_preOpaque.erase(
+        std::remove_if(m_preOpaque.begin(), m_preOpaque.end(),
+            [&nameStr](const PreOpaqueEntry& e) { return nameStr == e.name; }),
+        m_preOpaque.end());
+
+    if (m_preOpaque.size() == sizeBefore) {
+        GTE_LOG_WARNING("RenderFeatureCompositor",
+            "UnregisterPreOpaqueFeature('" + nameStr + "') refused - no such PreOpaque feature is registered.");
+        return false;
+    }
+
+    GTE_LOG_INFO("RenderFeatureCompositor", "UnregisterPreOpaqueFeature('" + nameStr + "') succeeded.");
+    return true;
+}
+
 // better-render-pass-2 campaign, PHASE4 (PHASE4_DELETE_PLUGINS_FOLDER_AND_CMAKE.md) -
 // intentionally empty as of this campaign: `IPluginCapabilityOrchestrator`
 // requires an override (its own OnPluginsLoaded() is a pure virtual with no
@@ -346,7 +476,7 @@ void RenderFeatureCompositor::OnPluginsLoaded(const std::vector<IPluginModule*>&
 std::vector<RenderFeatureDebugEntry> RenderFeatureCompositor::DebugSnapshot() const
 {
     std::vector<RenderFeatureDebugEntry> snapshot;
-    snapshot.reserve(m_postComposite.size() + m_preUi.size());
+    snapshot.reserve(m_postComposite.size() + m_preUi.size() + m_preOpaque.size());
 
     auto appendStage = [&snapshot](const std::vector<Entry>& entries) {
         for (const Entry& entry : entries) {
@@ -366,6 +496,22 @@ std::vector<RenderFeatureDebugEntry> RenderFeatureCompositor::DebugSnapshot() co
 
     appendStage(m_postComposite);
     appendStage(m_preUi);
+
+    // better-render-pass-5 effort, BLOCK 3, PHASE2 - PreOpaque features
+    // live in a separate list/type so this is a separate, inline loop
+    // rather than a call to the shared `appendStage` lambda above
+    // (PreOpaqueEntry has no nested `.descriptor`, and no real
+    // blendMode concept at all).
+    for (const PreOpaqueEntry& entry : m_preOpaque) {
+        RenderFeatureDebugEntry debugEntry;
+        debugEntry.name = entry.name;
+        debugEntry.stage = "PreOpaque";
+        debugEntry.priority = entry.priority;
+        debugEntry.blendMode = "None";
+        debugEntry.enabled = entry.enabledOverride;
+        debugEntry.isProjectFeature = static_cast<bool>(entry.callback);
+        snapshot.push_back(std::move(debugEntry));
+    }
 
     return snapshot;
 }

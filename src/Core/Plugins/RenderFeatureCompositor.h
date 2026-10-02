@@ -8,6 +8,7 @@
 // already pulled fully in-house by PHASE1 (see m_blendPipeline/
 // m_blendDescriptorSetLayout below).
 #include "ProjectRenderFeatureCallback.h"
+#include "ProjectPreOpaqueCallback.h"
 #include "RenderFeatureDebugEntry.h"
 #include "RenderFeatureNamePool.h"
 // better-render-pass-2 campaign, PHASE4 (PHASE4_DELETE_PLUGINS_FOLDER_AND_CMAKE.md) -
@@ -176,6 +177,67 @@ public:
     // a harmless, logged no-op either way.
     bool UnregisterProjectFeature(const char* name);
 
+    // better-render-pass-5 effort, BLOCK 3, PHASE2 - a Project
+    // Assembly's own PreOpaque feature. Deliberately NOT a reuse of
+    // Entry above (PHASE0_MASTER_STRATEGY.md's Locked Design Decision
+    // #5) - PreOpaque has no GPU-state slot, no blend mode, no private
+    // render target, no "screen so far" to composite onto (nothing has
+    // been drawn yet this point in the frame): it draws into its own,
+    // self-managed render view (Core::CreateRenderView()) and
+    // Publish()es its own result directly. Deliberately PUBLIC (not
+    // nested inside the private section like Entry) so the new
+    // "PreOpaqueFeatures" provider (Core.cpp, PHASE3 - a different
+    // translation unit) can name this type directly when iterating
+    // PreOpaqueFeaturesInPriorityOrder()'s result. `name` is a plain
+    // std::string (not a fixed char[64] like
+    // GtePluginRenderFeatureDescriptor::name) - there is no ABI
+    // boundary reason to bound it here; Core::AddPreOpaquePass() still
+    // enforces the SAME 63-byte reject-not-truncate discipline before
+    // ever constructing one of these, purely for human-readability/log
+    // consistency with every other registration surface in this
+    // engine, not because this struct itself needs it.
+    struct PreOpaqueEntry {
+        std::string name;
+        std::int32_t priority = 0;
+        bool enabledOverride = true; // mirrors Entry::enabledOverride - same host-side override semantics.
+        ProjectPreOpaqueCallback callback;
+    };
+
+    // The PreOpaque sibling of RegisterProjectFeature() above.
+    // Deliberately a SEPARATE entry point (not a new RenderFeatureStage
+    // case inside RegisterProjectFeature() itself) - see PreOpaqueEntry's
+    // own doc comment above for why PreOpaque's storage shape is
+    // genuinely different. `name` is assumed ALREADY LENGTH-VALIDATED by
+    // the caller (Core::AddPreOpaquePass(), PHASE3, mirrors
+    // Core::RegisterProjectRenderFeature()'s own identical "the Core
+    // layer rejects an over-length debugName before calling into this
+    // class at all" discipline) - this method never re-checks length
+    // itself. Returns false (GTE_LOG_WARNING, never crashes) if `name`
+    // is already registered as a PreOpaque feature, OR (PHASE0_MASTER_STRATEGY.md's
+    // Locked Design Decision #8 - confirmed by explicit user decision,
+    // Step 2.5 item 3) if `name` already belongs to an existing
+    // PostComposite/PreUI entry - PreOpaque feature names share ONE
+    // GLOBAL namespace with PostComposite/PreUI, never their own
+    // separate one, mirroring this engine's own existing precedent
+    // (RegisterProjectFeature()'s own duplicate check already treats
+    // m_postComposite/m_preUi as one shared namespace). Unlike
+    // RegisterProjectFeature(), there is no slot pool to exhaust and no
+    // unwired-stage case to refuse - PreOpaque IS the stage this method
+    // exists for.
+    bool RegisterPreOpaqueFeature(const std::string& name, std::int32_t priority, ProjectPreOpaqueCallback callback);
+
+    // Removes a previously-registered PreOpaque feature by name.
+    // Returns false (logged, never crashes) if no entry with that name
+    // exists.
+    bool UnregisterPreOpaqueFeature(const char* name);
+
+    // The new "PreOpaqueFeatures" RenderPipeline provider (Core.cpp,
+    // PHASE3) walks this accessor, in order, skipping any entry whose
+    // enabledOverride is currently false. Already sorted by priority
+    // ascending (RegisterPreOpaqueFeature()/SetFeaturePriority() both
+    // keep it that way via SortAndDetectCollisionsInPreOpaqueList()
+    // below) - the provider itself never re-sorts.
+    const std::vector<PreOpaqueEntry>& PreOpaqueFeaturesInPriorityOrder() const noexcept { return m_preOpaque; }
 private:
     struct Entry {
         GtePluginRenderFeatureDescriptor descriptor{};
@@ -241,6 +303,23 @@ private:
     // Returns nullptr if not found. Non-const overload only (both callers
     // mutate through it).
     Entry* FindEntryByName(const std::string& name);
+
+    // better-render-pass-5 effort, BLOCK 3, PHASE2 - PreOpaque sibling
+    // of FindEntryByName() above, returning the genuinely different
+    // PreOpaqueEntry* type (see that struct's own doc comment for why
+    // this cannot be the SAME function). SetFeatureEnabled()/
+    // SetFeaturePriority() each try FindEntryByName() first, then fall
+    // back to this one.
+    PreOpaqueEntry* FindPreOpaqueEntryByName(const std::string& name);
+
+    // PreOpaque sibling of SortAndDetectCollisionsInStage() above - the
+    // SAME algorithm (stable sort by priority, same-priority collision
+    // warning + lexical tie-break), against the new, smaller
+    // PreOpaqueEntry type. Deliberately a separate function rather than
+    // a template, matching this class's own existing style (every
+    // other per-kind helper here is a plain, concrete function, never a
+    // template).
+    static void SortAndDetectCollisionsInPreOpaqueList(std::vector<PreOpaqueEntry>& entries);
 
     // editor-core-separation-23 campaign, PHASE5
     // (PHASE5_ORDERING_SAFETY_NET_AND_LIFETIME_CONFIRMATION.md, Step 3.2) - a
@@ -314,6 +393,7 @@ private:
 
     std::vector<Entry> m_postComposite; // sorted by priority ascending
     std::vector<Entry> m_preUi;         // sorted by priority ascending
+    std::vector<PreOpaqueEntry> m_preOpaque; // sorted by priority ascending - see PreOpaqueEntry's own doc comment.
     RenderFeatureNamePool m_namePool;
 
     // Keyed by RenderFeatureNamePool's own interned "<Name>_<View>_Private" names.
