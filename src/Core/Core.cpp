@@ -65,6 +65,16 @@
 // call, added to RegisterProjectRenderPassProvider() below.
 #include "Plugins/ProjectAssemblyRegistrationLedger.h"
 
+// Block 4 (task_manager/better-render-pass-6), PHASE8
+// (PHASE8_EXAMPLE_SHADER_AND_FULL_VERIFICATION.md) - SpawnSceneServicesExampleEntity()'s
+// own Mesh/MeshRenderer/Transform/Name/ComputeLocalAABB() dependencies -
+// mirrors GpuDrivenBatchTestSpawner.cpp's own identical include set exactly.
+#include "../ECS/Components/MeshRenderer.h"
+#include "../ECS/Components/Name.h"
+#include "../ECS/Components/Transform.h"
+#include "../Renderer/Culling/CullingTypes.h"
+#include "../Renderer/MeshVertex.h"
+
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
@@ -259,6 +269,16 @@ Core::Core(ISurfaceProvider& surfaceProvider, IHostServices& hostServices)
     // these two methods on itself).
     RegisterOffscreenRenderPipelineProviders();
     RegisterPresentRenderPipelineProvider();
+
+    // Block 4 (task_manager/better-render-pass-6), PHASE8 - spawns the ONE
+    // permanent proof-of-contract entity (see SpawnSceneServicesExampleEntity()'s
+    // own doc comment, Core.h) once, here, mirroring
+    // RegisterOffscreenRenderPipelineProviders()/RegisterPresentRenderPipelineProvider()'s
+    // own "called exactly once, from the constructor" convention immediately
+    // above. Must run AFTER m_sceneServicesDescriptorSet already exists
+    // (true here - every member is fully constructed before this constructor
+    // BODY ever starts running) since it needs a real GetSceneServicesDescriptorSet().Layout().
+    SpawnSceneServicesExampleEntity();
 }
 
 // editor-core-separation-6 campaign, PHASE2 - defined here (out-of-line),
@@ -819,6 +839,71 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             out.push_back(std::move(desc));
         });
 
+    // Block 4 (task_manager/better-render-pass-6), PHASE8
+    // (PHASE8_EXAMPLE_SHADER_AND_FULL_VERIFICATION.md) - "SceneServicesExampleShadowFeature" -
+    // ProviderScope::PerActiveView, BeforeDeferredPasses (the DEFAULT
+    // ProviderTiming, same phase "RenderOpaque" itself runs in - left
+    // unspecified here exactly like "PreOpaqueFeatures"/"RenderOpaque" below).
+    // A small, PERMANENT, always-registered proof-of-contract feature -
+    // publishes a real, GPU-cleared, visibly dark texture into
+    // SceneServiceSlot::ShadowMap for the Game View ONLY (never Scene View -
+    // this asymmetry is the live, IN-SESSION proof that two concurrently-
+    // active views get independently-correct scene-service data the SAME
+    // frame, PHASE0's global rules 5/6/7 - no restart/rebuild needed to
+    // observe it, see PHASE8_COMPLETION_REPORT.md's own live-verification
+    // section). Registered TEXTUALLY (and RenderPassEvent-tier-wise:
+    // PreOpaques (1000) < Opaques (2000)) before "RenderOpaque"'s own
+    // Register(...) call below, so this provider's own Publish() below always
+    // runs first within this same DeclareOnePhase() pass (render-pass-3
+    // campaign, PHASE3 - provider callbacks run in registration order, one
+    // full per-view loop per provider, before the NEXT provider's own loop
+    // starts). Early-gated by ShouldDeclareBuiltInPassThisFrame() BEFORE its
+    // one real side effect (the blackboard Publish() at the bottom) - mirrors
+    // "DrawSkyBackground"'s own fix for the exact side-channel-leak bug class
+    // (editor-core-separation-22 campaign, PHASE1) - so toggling this OFF via
+    // the EXISTING GET /render_graph/set_pass_enabled?name=
+    // SceneServicesExampleShadowFeature&enabled=false route genuinely stops
+    // publishing, not merely stops the pass itself from reaching the graph.
+    // This is NOT a real shadow-map feature - Block 4 itself ships none
+    // (future work, see PHASE7_CORE_WIRING_RENDEROPAQUE_PROVIDER.md's own
+    // Step 1, item 3) - it exists purely so PHASE8's own live verification
+    // has something real to toggle/observe with zero new HTTP plumbing.
+    m_offscreenRenderPipeline.Register("SceneServicesExampleShadowFeature", rg::ProviderScope::PerActiveView,
+        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
+            if (!rg::ShouldDeclareBuiltInPassThisFrame(
+                    &m_renderPassToggleRegistry, "SceneServicesExampleShadowFeature")) {
+                return;
+            }
+            if (frame.currentView != rg::RenderViewId::Named("Game")) {
+                return; // Scene View deliberately never publishes - see this provider's own doc comment above.
+            }
+
+            const rg::TextureHandle shadowHandle = frame.builder.CreateTexture("SceneServicesExampleShadowTexture",
+                rg::TextureDesc{ /*width=*/4, /*height=*/4, VK_FORMAT_UNDEFINED, /*hasDepth=*/false,
+                    rg::TextureUsage::Sampled });
+
+            rg::RenderPassDesc desc;
+            desc.debugName = "SceneServicesExampleShadowFeature";
+            desc.kind = rg::PassKind::Graphics;
+            desc.order = rg::RenderPassEvent::PreOpaques;
+            desc.view = frame.currentView;
+            desc.legacyCategory = rg::RenderPassCategory::General;
+            desc.setup = [shadowHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
+                // A visibly dark gray clear - MeshWithShadow.frag's dummy
+                // fallback (SceneServicesDescriptorSet's own Image2D dummy) is
+                // opaque white (1.0, no darkening); this real published value
+                // is unmistakably darker, proving real-vs-dummy sampling.
+                pass.WriteColorAttachment(shadowHandle, std::array<float, 4>{ 0.08f, 0.08f, 0.08f, 1.0f });
+            };
+            // Deliberately no desc.execute - identical to "ClearViewTarget"'s
+            // own precedent above - the load-op CLEAR this setup requests is
+            // this pass's entire job.
+            out.push_back(std::move(desc));
+
+            frame.blackboard.Publish<rg::TextureHandle>(
+                SceneServiceBlackboardKey(SceneServiceSlot::ShadowMap, frame.currentView), shadowHandle);
+        });
+
     // "PreOpaqueFeatures" - ProviderScope::PerActiveView,
     // BeforeDeferredPasses (the SAME phase "RenderOpaque" itself runs
     // in - the DEFAULT ProviderTiming, left unspecified here exactly
@@ -1368,6 +1453,65 @@ void Core::RegisterPresentRenderPipelineProvider()
             AddPresentPass(frame.builder, m_game, m_renderer, m_swapchainImageThisFrame,
                 m_directGameRenderAspectThisFrame, m_recordImGuiThisFrame, gpuSkinningBuffers);
         });
+}
+
+// Block 4 (task_manager/better-render-pass-6), PHASE8
+// (PHASE8_EXAMPLE_SHADER_AND_FULL_VERIFICATION.md) - see this method's own
+// doc comment in Core.h for the full "why". Mirrors
+// src/Editor/GpuDrivenBatchTestSpawner.cpp's EnsureSharedMeshAndPipeline()/
+// Spawn() shape almost exactly (hand-authored indexed unit quad,
+// VertexLayout::PositionNormal, untextured) - the one real difference is the
+// shader pair (MeshWithShadow.frag instead of Mesh.frag) and the new
+// trailing sceneServicesSetLayout argument passed to CreatePipeline().
+void Core::SpawnSceneServicesExampleEntity()
+{
+    const MeshVertex vertices[4] = {
+        { { -0.5f, -0.5f, 0.0f }, { 0.0f, 0.0f, -1.0f } },
+        { { 0.5f, -0.5f, 0.0f }, { 0.0f, 0.0f, -1.0f } },
+        { { 0.5f, 0.5f, 0.0f }, { 0.0f, 0.0f, -1.0f } },
+        { { -0.5f, 0.5f, 0.0f }, { 0.0f, 0.0f, -1.0f } },
+    };
+    const std::uint32_t indices[6] = { 0, 1, 2, 2, 3, 0 };
+
+    Mesh mesh = m_renderer.CreateMesh(vertices, sizeof(vertices), 4, indices, sizeof(indices), 6,
+        "SceneServicesExampleEntity.Quad (Block 4 proof-of-contract content)");
+
+    std::vector<Vec3> positions;
+    positions.reserve(4);
+    for (const MeshVertex& v : vertices) {
+        positions.push_back(Vec3{ v.position[0], v.position[1], v.position[2] });
+    }
+    mesh.SetLocalBounds(ComputeLocalAABB(positions));
+
+    RenderSystem& renderSystem = m_game.GetRenderSystem();
+    const MeshHandle meshHandle = renderSystem.RegisterMesh(std::move(mesh));
+
+    // The ONE new fragment shader proving the whole Block 4 contract
+    // (PHASE8) - built through the REAL, sanctioned Renderer::CreatePipeline()
+    // path, passing m_sceneServicesDescriptorSet.Layout() as the new trailing
+    // sceneServicesSetLayout parameter (PHASE4) - zero other change needed
+    // for this specific shader to work.
+    Pipeline pipeline = m_renderer.CreatePipeline("shaders/Mesh.vert.spv", "shaders/MeshWithShadow.frag.spv",
+        VertexLayout::PositionNormal, /*useMaterialTexture=*/false,
+        "SceneServicesExampleEntity (MeshWithShadow.frag, Block 4 proof-of-contract)",
+        /*useInstanceBuffer=*/false, m_sceneServicesDescriptorSet.Layout());
+    const PipelineHandle pipelineHandle = renderSystem.RegisterPipeline(std::move(pipeline));
+
+    Registry& registry = m_game.GetRegistry();
+    const Entity entity = registry.CreateEntity();
+
+    // Comfortably inside the engine's own default Camera's frustum (Vec3{0,
+    // 0,-5}, identity rotation, looking down +Z - see
+    // Game::EnsureDefaultCameraExists()), mirroring
+    // GpuDrivenBatchTestSpawner.cpp's own identical depth choice.
+    Transform& transform = registry.AddComponent<Transform>(entity);
+    transform.position = Vec3{ 0.0f, 0.0f, 5.0f };
+
+    MeshRenderer& meshRenderer = registry.AddComponent<MeshRenderer>(entity);
+    meshRenderer.mesh = meshHandle;
+    meshRenderer.pipeline = pipelineHandle;
+
+    registry.AddComponent<Name>(entity, Name{ "SceneServicesExampleEntity" });
 }
 
 void Core::BuildFrame()

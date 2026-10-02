@@ -213,6 +213,13 @@ public:
     void Present();
 
     Renderer& GetRenderer() noexcept { return m_renderer; }
+    // Block 4 (task_manager/better-render-pass-6), PHASE8
+    // (PHASE8_EXAMPLE_SHADER_AND_FULL_VERIFICATION.md) - lets a caller
+    // building its own Pipeline against `set = 1` (e.g. this phase's own
+    // proof-of-contract MeshWithShadow.frag Pipeline, or a future PreOpaque
+    // feature) reach the ONE real owning instance's Layout() without ever
+    // constructing a second, duplicate SceneServicesDescriptorSet.
+    SceneServicesDescriptorSet& GetSceneServicesDescriptorSet() noexcept { return m_sceneServicesDescriptorSet; }
     Registry& GetRegistry() noexcept { return m_game.GetRegistry(); }
     Game& GetGame() noexcept { return m_game; }
     rg::RenderGraph& GetRenderGraph() noexcept { return m_renderGraph; }
@@ -650,6 +657,23 @@ private:
     // real body (relocated verbatim from
     // Application::RegisterPresentRenderPipelineProvider(), PHASE13).
     void RegisterPresentRenderPipelineProvider();
+
+    // Block 4 (task_manager/better-render-pass-6), PHASE8
+    // (PHASE8_EXAMPLE_SHADER_AND_FULL_VERIFICATION.md) - the one concrete,
+    // permanent proof that `layout(set = 1, binding = 0)` works end-to-end
+    // through the real Renderer::Submit()/"RenderOpaque" path (PHASE3-7):
+    // builds a real Mesh + a real Pipeline from the new MeshWithShadow.frag
+    // shader (passing GetSceneServicesDescriptorSet().Layout() as
+    // Renderer::CreatePipeline()'s PHASE4 trailing sceneServicesSetLayout
+    // parameter) and spawns ONE entity using it, directly through the
+    // ordinary MeshRenderer::pipeline field - never RenderSystem::Draw()'s
+    // separate pipelineOverride mechanism, which would force EVERY entity in
+    // a call to share this one Pipeline instead of just this one proof
+    // entity. Called exactly once, from the constructor, mirroring
+    // GpuDrivenBatchTestSpawner.cpp's own "hand-authored indexed unit quad +
+    // matching Pipeline, built once" shape (render-pass-5 campaign, PHASE6) -
+    // see Core.cpp for the full reasoning and implementation.
+    void SpawnSceneServicesExampleEntity();
 
     // render-pass-3 campaign, PHASE3 (Step 3.1) - looks up THIS frame's own
     // RenderPassViewData for `view` out of m_currentViewDataThisFrame
