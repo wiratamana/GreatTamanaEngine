@@ -242,6 +242,86 @@ TEST(RenderGraphCompilerTest, LifetimeBoundsSpanFromFirstWriterThroughLaterOfTwo
     EXPECT_EQ(finalLifetime.lastUsePassIndex, 3);
 }
 
+// --- TextureArray lifetime (better-render-pass-3 campaign, BLOCK5, Phase 4 -
+// task_manager/better-render-pass-7/PHASE4_TIER1_AUTOMATED_TESTS.md) --------
+//
+// Mirrors LifetimeBoundsSpanFromFirstWriterThroughLaterOfTwoReaders's own
+// shape above, substituting TextureArray for the write side: one pass
+// writes a TextureArray resource, a later pass reads it AND writes a real
+// finalOutputs-rooted plain Texture - correctly computing
+// compiled.textureArrayLifetimes[cascades.index]'s firstUsePassIndex/
+// lastUsePassIndex.
+//
+// IMPORTANT finding (per this phase document's own explicit instruction to
+// "reason through which one it is" before fixing anything): the phase
+// document's own illustrative sketch has "ReadCascades" doing NOTHING but
+// a bare ReadTextureArray() call, relying solely on
+// KeepTextureArrayOutput(cascades) to keep both passes alive. That shape
+// was tried FIRST, and it does NOT work - not because of a compiler bug,
+// but because of how this compiler's culling/root-marking has always
+// worked for EVERY resource kind (confirmed by re-reading
+// VolumeTextureOnlyWriteSurvivesCullingOnlyWhenExplicitlyKeptAsOutput
+// above): KeepTextureArrayOutput()/KeepVolumeTextureOutput() mark the
+// WRITE of that handle as a root, keeping the WRITER pass alive - they do
+// NOT, and structurally cannot, keep a READER-only pass alive if that
+// reader itself produces nothing anything else needs (exactly like
+// DeadBranchIsCulledAndItsResourceHasNoLifetime's own "C" pass above,
+// culled for writing a texture nobody reads). A reader pass with no write
+// of its own has no outgoing edge for backward reachability to ever reach
+// it. This is REAL, PRE-EXISTING, cross-resource-kind compiler behavior,
+// not something this phase changed or discovered a bug in - so this test
+// instead mirrors the REAL, already-proven
+// LifetimeBoundsSpanFromFirstWriterThroughLaterOfTwoReaders shape: the
+// reader also writes a plain Texture that is itself a real finalOutputs
+// root, which is exactly how a real future TextureArray consumer (e.g. a
+// shadow-cascade pass reading the array and writing a lit color output)
+// would actually be structured. KeepTextureArrayOutput() itself is
+// deliberately NOT called here, since it is not needed once a real
+// finalOutputs path exists (mirroring how LifetimeBoundsSpanFromFirstWriterThroughLaterOfTwoReaders
+// above never calls any Keep*Output() either) - it remains correctly
+// exercised by this file's existing root-marking coverage pattern for
+// VolumeTexture/Buffer (this phase's own master strategy's non-goal list
+// does not ask for a dedicated TextureArray-Keep test, and Phase 3's own
+// sub-agent double-check already confirmed the TextureArray root-marking
+// dispatch branch exists and is wired correctly by direct code reading).
+TEST(RenderGraphCompilerTest, TextureArrayLifetimeTracksFirstAndLastUsePassIndex)
+{
+    RenderGraphBuilder builder;
+    TextureArrayDesc desc;
+    desc.width = 1024;
+    desc.height = 1024;
+    desc.arrayLayers = 4;
+    desc.hasDepth = true;
+    const TextureArrayHandle cascades = builder.CreateTextureArray("Cascades", desc);
+    const TextureHandle output = builder.CreateTexture("CascadesPreview", MakeTextureDesc());
+
+    builder.AddPass(
+        "WriteCascades",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.WriteTextureArray(cascades, ResourceAccess::DepthStencilAttachmentReadWrite);
+        },
+        NoOpExecute); // index 0
+    builder.AddPass(
+        "ReadCascades",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.ReadTextureArray(cascades, ResourceAccess::ShaderRead);
+            pass.WriteColorAttachment(output);
+        },
+        NoOpExecute); // index 1 - its own real finalOutputs-reaching write keeps it (and, transitively, its reader dependency on WriteCascades) alive.
+
+    CompiledGraphInput input = builder.Finish();
+    const TextureHandle finalOutputs[] = { output };
+    const CompiledGraph compiled = Compile(input, finalOutputs);
+
+    EXPECT_TRUE(ExecutionOrderEquals(compiled.executionOrder, { 0, 1 }));
+    EXPECT_FALSE(input.passes[0].isCulled);
+    EXPECT_FALSE(input.passes[1].isCulled);
+
+    ASSERT_EQ(compiled.textureArrayLifetimes.size(), 1u);
+    EXPECT_EQ(compiled.textureArrayLifetimes[cascades.index].firstUsePassIndex, 0);
+    EXPECT_EQ(compiled.textureArrayLifetimes[cascades.index].lastUsePassIndex, 1);
+}
+
 // --- Determinism ---------------------------------------------------------------
 
 TEST(RenderGraphCompilerTest, CompilingTheSameGraphTwiceProducesByteIdenticalExecutionOrder)

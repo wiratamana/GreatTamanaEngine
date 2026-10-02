@@ -61,6 +61,42 @@ TEST(RenderGraphBuilderTest, CreateTextureMintsDistinctHandlesEvenWithIdenticalD
     EXPECT_FALSE(a == b);
 }
 
+// better-render-pass-3 campaign, BLOCK5, Phase 4
+// (task_manager/better-render-pass-7/PHASE4_TIER1_AUTOMATED_TESTS.md) -
+// TextureArray mirrors plain Texture's own distinct-handle-minting test
+// exactly (CreateTextureMintsDistinctHandlesEvenWithIdenticalDesc above).
+TEST(RenderGraphBuilderTest, CreateTextureArrayMintsDistinctHandlesEvenWithIdenticalDesc)
+{
+    RenderGraphBuilder builder;
+    TextureArrayDesc desc;
+    desc.width = 2048;
+    desc.height = 2048;
+    desc.arrayLayers = 4;
+    desc.format = VK_FORMAT_D32_SFLOAT;
+    desc.hasDepth = true;
+
+    const TextureArrayHandle a = builder.CreateTextureArray("CascadesA", desc);
+    const TextureArrayHandle b = builder.CreateTextureArray("CascadesB", desc);
+
+    EXPECT_TRUE(a.IsValid());
+    EXPECT_TRUE(b.IsValid());
+    EXPECT_FALSE(a == b);
+}
+
+// A one-line regression guard against someone later "fixing" the deliberate
+// asymmetry vs. plain TextureDesc::hasDepth (which defaults to false) -
+// TextureArrayDesc::hasDepth defaults to TRUE (a shadow-cascade array is
+// this struct's dominant real use case), per BLOCK5_ARRAY_AND_CUBEMAP_TEXTURE_RESOURCES.txt,
+// Section 2. No existing test anywhere in this suite covered this default
+// before this phase (confirmed by direct search).
+TEST(RenderGraphBuilderTest, TextureArrayDescDefaultsToDepthTrue)
+{
+    const TextureArrayDesc desc{};
+    EXPECT_TRUE(desc.hasDepth);
+    EXPECT_FALSE(desc.isCubemap);
+    EXPECT_EQ(desc.arrayLayers, 1u);
+}
+
 TEST(RenderGraphBuilderTest, CreateBufferMintsDistinctHandlesEvenWithIdenticalDesc)
 {
     RenderGraphBuilder builder;

@@ -469,6 +469,20 @@ TEST(RenderGraphResourceUsageTest, ForVolumeTextureSetsKindAndVolumeTextureField
     EXPECT_EQ(usage.access, ResourceAccess::ComputeShaderWrite);
 }
 
+// better-render-pass-3 campaign, BLOCK5, Phase 4
+// (task_manager/better-render-pass-7/PHASE4_TIER1_AUTOMATED_TESTS.md) -
+// mirrors ForVolumeTextureSetsKindAndVolumeTextureFields immediately above,
+// the exact existing VolumeTexture-kind pattern this file's own Phase 4
+// coverage check found and is instructed to parallel for TextureArray.
+TEST(RenderGraphResourceUsageTest, ForTextureArraySetsKindAndTextureArrayFields)
+{
+    const ResourceUsage usage =
+        ResourceUsage::ForTextureArray(TextureArrayHandle{ 9, 4 }, ResourceAccess::ShaderRead);
+    EXPECT_EQ(usage.kind, ResourceKind::TextureArray);
+    EXPECT_EQ(usage.textureArray, (TextureArrayHandle{ 9, 4 }));
+    EXPECT_EQ(usage.access, ResourceAccess::ShaderRead);
+}
+
 // --- DispatchByKind() (render-pass-6 campaign, PHASE6, item 2.2) ---------
 //
 // Confirms the generic dispatcher (RenderGraphTypes.h) routes to exactly
