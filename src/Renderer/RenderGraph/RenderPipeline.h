@@ -247,12 +247,22 @@ public:
     // this frame (last-publish-wins) rather than pushing a duplicate - a
     // linear scan for a matching key before appending is correct and cheap
     // at the realistic single-digit-to-low-tens key count design doc
-    // Section 11 already commits to.
+    // Section 11 already commits to. Debug builds also warn, exactly once per key per frame, if the same
+    // key is Publish()'d more than once this frame (a likely naming clash between two unrelated callers).
     template <typename T>
     void Publish(RenderPassId key, T value)
     {
         for (Slot& slot : m_slots) {
             if (slot.key == key) {
+#ifndef NDEBUG
+                if (!slot.alreadyWarnedThisFrame) {
+                    std::fprintf(stderr,
+                        "RenderPassBlackboard: key \"%s\" was Publish()'d more than once this frame - "
+                        "last-publish-wins; the earlier value is now lost.\n",
+                        DebugNameForPassId(key));
+                    slot.alreadyWarnedThisFrame = true;
+                }
+#endif
                 slot.value = std::any(std::move(value));
 #ifndef NDEBUG
                 slot.wasFetched = false; // A fresh publish this frame - not yet fetched again.
@@ -362,6 +372,7 @@ private:
         std::any value;
 #ifndef NDEBUG
         mutable bool wasFetched = false;
+        bool alreadyWarnedThisFrame = false;
 #endif
     };
 
