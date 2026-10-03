@@ -731,6 +731,8 @@ add_library(gte_core STATIC
     src/Renderer/Culling/GpuDrivenBatchCache.cpp
     src/Renderer/Culling/GpuDrivenBatchDebugInfo.h
     src/Renderer/IndirectDrawTypes.h
+    src/Renderer/VolumetricFroxelMath.h
+    src/Renderer/VolumetricFroxelMath.cpp
     src/Renderer/Atmosphere/AtmosphereTypes.h
     src/Renderer/Atmosphere/AtmosphereParameters.h
     src/Renderer/Atmosphere/AtmosphereParameters.cpp
@@ -1672,7 +1674,7 @@ endif()
 # this shader #includes, so an edit to it correctly triggers glslc to
 # recompile this (and every future atmosphere shader that also lists it).
 gte_add_shader(GreatTamanaEditor src/Shaders/AtmosphereTransmittanceLut.comp
-    EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl)
+    EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl src/Shaders/VolumetricFroxelMath.glsl)
 
 # Atmosphere Scattering + Aerial Perspective campaign, Phase 4
 # (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE4_MULTISCATTERING_LUT_v1.md)
@@ -1681,7 +1683,7 @@ gte_add_shader(GreatTamanaEditor src/Shaders/AtmosphereTransmittanceLut.comp
 # for the exact same reason (Locked Design Decision 4 - always-compiled core
 # rendering feature).
 gte_add_shader(GreatTamanaEditor src/Shaders/AtmosphereMultiScatteringLut.comp
-    EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl)
+    EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl src/Shaders/VolumetricFroxelMath.glsl)
 
 # Atmosphere Scattering + Aerial Perspective campaign, Phase 5
 # (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE5_SKYVIEW_LUT_v1.md)
@@ -1690,7 +1692,7 @@ gte_add_shader(GreatTamanaEditor src/Shaders/AtmosphereMultiScatteringLut.comp
 # LUT shaders above, for the exact same reason (Locked Design Decision 4 -
 # always-compiled core rendering feature).
 gte_add_shader(GreatTamanaEditor src/Shaders/AtmosphereSkyViewLut.comp
-    EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl)
+    EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl src/Shaders/VolumetricFroxelMath.glsl)
 
 # Atmosphere Scattering + Aerial Perspective campaign, Phase 6
 # (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE6_AERIAL_PERSPECTIVE_FROXEL_VOLUME_v1.md)
@@ -1699,7 +1701,7 @@ gte_add_shader(GreatTamanaEditor src/Shaders/AtmosphereSkyViewLut.comp
 # Scattering/Sky-View LUT shaders above, for the exact same reason (Locked
 # Design Decision 4 - always-compiled core rendering feature).
 gte_add_shader(GreatTamanaEditor src/Shaders/AtmosphereAerialPerspectiveVolume.comp
-    EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl)
+    EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl src/Shaders/VolumetricFroxelMath.glsl)
 
 # Atmosphere Scattering + Aerial Perspective campaign, Phase 7
 # (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE7_SKY_BACKGROUND_AND_COMPOSITE_PASSES_v1.md)
@@ -1713,9 +1715,9 @@ gte_add_shader(GreatTamanaEditor src/Shaders/AtmosphereAerialPerspectiveVolume.c
 # Editor-only Scene View.
 gte_add_shader(GreatTamanaEditor src/Shaders/AtmosphereSkyBackground.vert)
 gte_add_shader(GreatTamanaEditor src/Shaders/AtmosphereSkyBackground.frag
-    EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl)
+    EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl src/Shaders/VolumetricFroxelMath.glsl)
 gte_add_shader(GreatTamanaEditor src/Shaders/AtmosphereAerialPerspectiveComposite.comp
-    EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl)
+    EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl src/Shaders/VolumetricFroxelMath.glsl)
 
 # Atmosphere Scattering + Aerial Perspective campaign, Phase 9
 # (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE9_VALIDATION_DEBUG_TOOLING_AND_DOCS_v1.md,

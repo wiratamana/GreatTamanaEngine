@@ -560,27 +560,7 @@ vec2 ViewDirectionToSkyViewLutUv(vec3 direction, ivec2 lutSize, float viewHeight
 // one Z slice's near/far distance).
 // ----------------------------------------------------------------------
 
-// slice boundary -> view-space distance, in the SAME kilometers every
-// other AtmosphereMath.h/AtmosphereCommon.glsl quantity uses.
-float FroxelSliceToViewDepth(float slice, float sliceCount, float maxDistanceKm, float depthExponent)
-{
-    float u = clamp(slice / max(sliceCount, 1e-6), 0.0, 1.0);
-    return maxDistanceKm * pow(u, depthExponent);
-}
-
-// The inverse of FroxelSliceToViewDepth() above - view-space distance ->
-// (fractional) slice boundary. Not needed by this phase's own generation
-// pass (which only ever walks `slice` forward, an integer, and derives its
-// OWN distance via the forward function above), but declared now for a
-// LATER phase that needs to map a REAL on-screen pixel's own view-space
-// depth back into this volume's Z axis (Phase 7's aerial-perspective
-// composite pass) - mirrors this file's own "add the inverse too, for a
-// later phase" precedent (see HeightZenithToTransmittanceLutUv() above).
-float ViewDepthToFroxelSlice(float viewDepthKm, float sliceCount, float maxDistanceKm, float depthExponent)
-{
-    float u = clamp(viewDepthKm / max(maxDistanceKm, 1e-6), 0.0, 1.0);
-    return pow(u, 1.0 / max(depthExponent, 1e-6)) * sliceCount;
-}
+#include "VolumetricFroxelMath.glsl"
 
 // Froxel COLUMN (x, y) -> world-space view-ray DIRECTION - the X/Y
 // counterpart of the Z-slice mapping above. Reconstructs the direction by
