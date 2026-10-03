@@ -973,6 +973,21 @@ kind (`VolumeTexture`); this feature is always compiled in, with no
 
 Full convention: [docs/conventions/atmosphere-scattering.md](docs/conventions/atmosphere-scattering.md).
 
+## Volumetric Resources
+
+Any future feature needing a real 3D (`VK_IMAGE_TYPE_3D`) GPU-resident grid -
+not just the Atmosphere feature above, the one real shipped example today -
+should follow the generic `VolumeTexture` recipe: ownership/import, the two
+valid compute-dispatch shapes (per-cell-parallel vs. per-column-sequential),
+the mandatory `RenderGraphBuilder::KeepVolumeTextureOutput()` call a
+VolumeTexture-only-writing pass needs or it is silently culled, and both ways
+to make the result consumable. The slice-index/view-depth mapping the
+sequential shape needs, `FroxelSliceToViewDepth()`/`ViewDepthToFroxelSlice()`,
+is itself a shared, feature-free utility (`src/Renderer/VolumetricFroxelMath.h/.cpp`
++ `src/Shaders/VolumetricFroxelMath.glsl`), not Atmosphere-specific.
+
+Full convention: [docs/conventions/volumetric-resources.md](docs/conventions/volumetric-resources.md).
+
 ## Entity-Component-System (ECS)
 
 The engine's Scene/World data model lives under `src/ECS/` (`Entity`,

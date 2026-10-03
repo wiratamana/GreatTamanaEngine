@@ -129,6 +129,12 @@ than subsystem-specific):
   "Other Render Passes" structural fallback bucket, and the two additional
   permanent, automatic `FrameDebuggerCoverageChecker`/`FrameDebuggerSideChannelChecker`
   detectors (Clause B/Clause C).
+- **[Volumetric Resources](conventions/volumetric-resources.md)** — the generic
+  `VolumeTexture` recipe for any future 3D-grid-driven GPU feature: ownership/
+  import, both valid compute-dispatch shapes, the mandatory
+  `KeepVolumeTextureOutput()` call, and both ways to make the result
+  consumable — distinct from [Atmosphere Scattering](conventions/atmosphere-scattering.md)
+  above, which documents the one real shipped feature's own specific behavior.
 
 ## Changelog
 
