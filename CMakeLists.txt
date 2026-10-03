@@ -1769,6 +1769,11 @@ if(TRUE)
     gte_add_shader(GreatTamanaEditor src/Shaders/FrameDebuggerPreview.comp)
 endif()
 
+# Minimal, standalone worked examples of the two valid compute-dispatch
+# shapes for filling a VolumeTexture (see docs/conventions/volumetric-resources.md).
+gte_add_shader(GreatTamanaEditor src/Shaders/VolumetricFroxelExamplePerCellFill.comp)
+gte_add_shader(GreatTamanaEditor src/Shaders/VolumetricFroxelExamplePerColumnFill.comp
+    EXTRA_DEPENDS src/Shaders/VolumetricFroxelMath.glsl)
 
 
 # PHASE1_GTE_PLUGIN_ABI_FOUNDATION.md, Step 3.4 (PHASE0_MASTER_STRATEGY.md's

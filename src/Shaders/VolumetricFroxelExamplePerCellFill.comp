@@ -1,0 +1,24 @@
+#version 450
+
+// Minimal, standalone worked example of the PER-CELL-PARALLEL dispatch shape
+// for filling a VolumeTexture: one invocation per (x, y, z) cell, every cell
+// computed completely independently, with no cross-invocation dependency of
+// any kind - execution order never matters for a correctly-independent fill.
+// Each cell simply encodes its own coordinates, so a CPU-side readback can
+// verify every cell landed in the right place regardless of dispatch order.
+//
+// Binding convention: binding 0 is the single writeonly RWTexture output.
+
+layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
+
+layout(binding = 0, rgba16f) uniform writeonly image3D outputImage;
+
+void main()
+{
+    ivec3 cell = ivec3(gl_GlobalInvocationID);
+    ivec3 size = imageSize(outputImage);
+    if (cell.x >= size.x || cell.y >= size.y || cell.z >= size.z) {
+        return;
+    }
+    imageStore(outputImage, cell, vec4(float(cell.x), float(cell.y), float(cell.z), 1.0));
+}

@@ -165,7 +165,8 @@ RenderTexture Renderer::CreateRenderTexture(int width, int height, VkFormat form
 }
 
 Renderer::CapturedRawPixels Renderer::CaptureImagePixels(VkImage image, VkImageAspectFlags aspect, VkFormat format,
-    VkExtent2D extent, const rg::ResourceState& previousState, int bytesPerPixel) const
+    VkExtent2D extent, const rg::ResourceState& previousState, int bytesPerPixel, std::uint32_t zOffset,
+    std::uint32_t depth) const
 {
     assert((bytesPerPixel == 4 || bytesPerPixel == 8)
         && "CaptureImagePixels: every real caller today copies exactly 4 bytes/pixel (RGBA8/BGRA8 color, or any of "
@@ -173,7 +174,8 @@ Renderer::CapturedRawPixels Renderer::CaptureImagePixels(VkImage image, VkImageA
            "atmosphere-scattering-1 campaign's Phase 4 HDR VK_FORMAT_R16G16B16A16_SFLOAT color capture case) - "
            "re-derive this function's own size math before changing it for a genuinely different pixel size.");
 
-    const VkDeviceSize size = VkDeviceSize(extent.width) * extent.height * static_cast<VkDeviceSize>(bytesPerPixel);
+    const VkDeviceSize size =
+        VkDeviceSize(extent.width) * extent.height * depth * static_cast<VkDeviceSize>(bytesPerPixel);
     Buffer readback = CreateBuffer(size, VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemoryUsage::GpuToCpu, "CaptureReadback");
 
     const VkImageSubresourceRange range{ aspect, 0, 1, 0, 1 };
@@ -185,7 +187,8 @@ Renderer::CapturedRawPixels Renderer::CaptureImagePixels(VkImage image, VkImageA
         VkBufferImageCopy region{};
         region.imageSubresource.aspectMask = aspect;
         region.imageSubresource.layerCount = 1;
-        region.imageExtent = { extent.width, extent.height, 1 };
+        region.imageOffset = { 0, 0, static_cast<std::int32_t>(zOffset) };
+        region.imageExtent = { extent.width, extent.height, depth };
         vkCmdCopyImageToBuffer(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback.Native(), 1, &region);
 
         // Host-read visibility: a fence wait alone (ImmediateSubmit()'s own

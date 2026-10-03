@@ -2388,6 +2388,10 @@ set(GTE_TEST_SOURCES
     Renderer/RenderGraph/RenderGraphDebugTextureRegistryTests.cpp
     Renderer/RenderGraph/RenderGraphDebugVolumeTextureRegistryTests.cpp
     Renderer/RenderGraph/RenderPipelineTests.cpp
+    # Real, headless-GPU, numerically-asserted tests proving both valid
+    # compute-dispatch shapes for filling a VolumeTexture (see
+    # docs/conventions/volumetric-resources.md).
+    Renderer/RenderGraph/VolumeTextureExampleFeatureTests.cpp
     # Block 4 "Global Scene Services Descriptor Set" campaign
     # (task_manager/better-render-pass-6), PHASE3 - minimal, device-backed
     # smoke test for Pipeline's new, trailing, defaulted
@@ -2654,6 +2658,19 @@ add_executable(GreatTamanaEngineTests ${GTE_TEST_SOURCES})
 target_sources(GreatTamanaEngineTests PRIVATE "${CMAKE_BINARY_DIR}/shaders/BoxBlur.comp.spv")
 target_compile_definitions(GreatTamanaEngineTests PRIVATE
     GTE_TEST_BOXBLUR_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/BoxBlur.comp.spv"
+)
+
+# Same "already declared by root CMakeLists.txt's own gte_add_shader() call"
+# reasoning as GTE_TEST_BOXBLUR_SPV_PATH immediately above - these two
+# shaders are only ever registered against GreatTamanaEditor, never a second
+# time here.
+target_sources(GreatTamanaEngineTests PRIVATE
+    "${CMAKE_BINARY_DIR}/shaders/VolumetricFroxelExamplePerCellFill.comp.spv"
+    "${CMAKE_BINARY_DIR}/shaders/VolumetricFroxelExamplePerColumnFill.comp.spv"
+)
+target_compile_definitions(GreatTamanaEngineTests PRIVATE
+    GTE_TEST_FROXEL_PERCELL_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/VolumetricFroxelExamplePerCellFill.comp.spv"
+    GTE_TEST_FROXEL_PERCOLUMN_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/VolumetricFroxelExamplePerColumnFill.comp.spv"
 )
 
 # editor-core-separation-1 campaign, PHASE14

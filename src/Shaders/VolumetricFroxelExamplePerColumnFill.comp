@@ -1,0 +1,42 @@
+#version 450
+
+// Minimal, standalone worked example of the PER-COLUMN-SEQUENTIAL dispatch
+// shape for filling a VolumeTexture: one invocation per (x, y) column,
+// looping every Z slice internally, because each slice's stored value
+// genuinely depends on the running state accumulated by every slice before
+// it - mirrors AtmosphereAerialPerspectiveVolume.comp's own local-size-z=1
+// sequential-column shape exactly. Reuses VolumetricFroxelMath.glsl's
+// FroxelSliceToViewDepth() for real, proving that shared file is usable by a
+// second, independent shader.
+//
+// Binding convention: binding 0 is the single writeonly RWTexture output.
+// Push constants: maxDistanceKm/depthExponent - sliceCount is read directly
+// from imageSize(outputImage).z rather than also being pushed down.
+
+#include "VolumetricFroxelMath.glsl"
+
+layout(local_size_x = 4, local_size_y = 4, local_size_z = 1) in;
+
+layout(binding = 0, rgba16f) uniform writeonly image3D outputImage;
+
+layout(push_constant) uniform PushConstants {
+    float maxDistanceKm;
+    float depthExponent;
+} pc;
+
+void main()
+{
+    ivec3 size = imageSize(outputImage);
+    ivec2 column = ivec2(gl_GlobalInvocationID.xy);
+    if (column.x >= size.x || column.y >= size.y) {
+        return;
+    }
+
+    float sliceCount = float(size.z);
+    float runningTotal = 0.0;
+    for (int slice = 0; slice < size.z; ++slice) {
+        float viewDepthKm = FroxelSliceToViewDepth(float(slice), sliceCount, pc.maxDistanceKm, pc.depthExponent);
+        runningTotal += viewDepthKm;
+        imageStore(outputImage, ivec3(column, slice), vec4(runningTotal, runningTotal, runningTotal, 1.0));
+    }
+}
