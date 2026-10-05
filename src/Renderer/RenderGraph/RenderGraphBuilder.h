@@ -381,6 +381,19 @@ public:
         void ReadTextureArray(TextureArrayHandle handle, ResourceAccess access = ResourceAccess::ShaderRead);
         void WriteTextureArray(TextureArrayHandle handle, ResourceAccess access = ResourceAccess::ComputeShaderWrite);
 
+        // Declares a write to exactly one layer/face of this array
+        // resource (not the whole array - see WriteTextureArray() above,
+        // which stays whole-array-only and unmodified). At most one
+        // array-layer attachment may be declared per pass - asserted.
+        // `clearColor` is only meaningful for a color array
+        // (TextureArrayDesc::hasDepth == false); `clearDepth` only for a
+        // depth array (hasDepth == true) - passing the wrong one for this
+        // resource's own aspect is simply ignored by the executor, never
+        // asserted here (this builder has no resolved resource to check
+        // yet).
+        void WriteArrayLayer(TextureArrayHandle handle, std::uint32_t layerIndex, ResourceAccess access,
+            std::optional<std::array<float, 4>> clearColor = std::nullopt, std::optional<float> clearDepth = std::nullopt);
+
     private:
         PassRecord& m_pass;
     };

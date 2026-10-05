@@ -95,6 +95,23 @@ void RenderGraphBuilder::PassBuilder::WriteTextureArray(TextureArrayHandle handl
     m_pass.writes.push_back(ResourceUsage::ForTextureArray(handle, access));
 }
 
+void RenderGraphBuilder::PassBuilder::WriteArrayLayer(TextureArrayHandle handle, std::uint32_t layerIndex,
+    ResourceAccess access, std::optional<std::array<float, 4>> clearColor, std::optional<float> clearDepth)
+{
+    assert(!m_pass.arrayLayerAttachment.has_value() &&
+        "RenderGraphBuilder::PassBuilder::WriteArrayLayer: a pass may declare at most one "
+        "array-layer attachment - use a separate pass per layer.");
+
+    m_pass.writes.push_back(ResourceUsage::ForTextureArrayLayer(handle, layerIndex, access));
+
+    ArrayLayerAttachmentDesc desc;
+    desc.handle = handle;
+    desc.layerIndex = layerIndex;
+    desc.clearColor = clearColor;
+    desc.clearDepth = clearDepth;
+    m_pass.arrayLayerAttachment = desc;
+}
+
 
 // --- RenderGraphBuilder ------------------------------------------------
 

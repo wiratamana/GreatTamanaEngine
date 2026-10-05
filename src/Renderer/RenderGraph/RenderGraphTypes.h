@@ -729,6 +729,12 @@ struct ResourceUsage {
     // meant "the color half") is completely unaffected.
     bool isDepthResource = false;
 
+    // Per-layer/per-face write against a TextureArrayHandle (see
+    // ForTextureArrayLayer below). nullopt means "whole-array usage" -
+    // every ForTextureArray()-built usage is unaffected. Only meaningful
+    // when kind == ResourceKind::TextureArray.
+    std::optional<std::uint32_t> arrayLayerIndex;
+
     static ResourceUsage ForTexture(TextureHandle handle, ResourceAccess access, bool isDepthResource = false) noexcept
     {
         ResourceUsage usage;
@@ -766,6 +772,21 @@ struct ResourceUsage {
         usage.kind = ResourceKind::TextureArray;
         usage.textureArray = handle;
         usage.access = access;
+        return usage;
+    }
+
+    // Per-layer/per-face write - see arrayLayerIndex above. `access` is
+    // caller-supplied (e.g. ColorAttachmentWrite or
+    // DepthStencilAttachmentReadWrite - a TextureArray's aspect is a
+    // property of the resource, not the usage).
+    static ResourceUsage ForTextureArrayLayer(
+        TextureArrayHandle handle, std::uint32_t layerIndex, ResourceAccess access) noexcept
+    {
+        ResourceUsage usage;
+        usage.kind = ResourceKind::TextureArray;
+        usage.textureArray = handle;
+        usage.access = access;
+        usage.arrayLayerIndex = layerIndex;
         return usage;
     }
 };
@@ -872,6 +893,20 @@ struct PassContext;
 struct ColorAttachmentDesc {
     TextureHandle handle;
     std::optional<std::array<float, 4>> clearColor;
+};
+
+// The TextureArray-layer counterpart of ColorAttachmentDesc above - the
+// authoritative declaration of "this pass's one attachment is layer N of
+// this array resource", populated by WriteArrayLayer() in lockstep with a
+// matching ResourceUsage pushed onto pass.writes. Which aspect (color vs.
+// depth) this attachment targets is not stored here - it is a property of
+// the underlying TextureArrayDesc::hasDepth, read off the resolved
+// physical resource by the executor.
+struct ArrayLayerAttachmentDesc {
+    TextureArrayHandle handle;
+    std::uint32_t layerIndex = 0;
+    std::optional<std::array<float, 4>> clearColor; // meaningful only when the array is color (hasDepth == false)
+    std::optional<float> clearDepth;                 // meaningful only when the array is depth (hasDepth == true)
 };
 
 // Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE2 - PURE,
@@ -1101,6 +1136,11 @@ struct PassRecord {
     // the struct (never inserted in the middle), per this file's own header
     // comment.
     std::optional<BlitSpec> blitCommand;
+
+    // See ArrayLayerAttachmentDesc above. std::nullopt for every pass that
+    // never calls WriteArrayLayer(). At most one per pass -
+    // WriteArrayLayer() asserts against a second call on the same pass.
+    std::optional<ArrayLayerAttachmentDesc> arrayLayerAttachment;
 };
 
 } // namespace gte::rg
