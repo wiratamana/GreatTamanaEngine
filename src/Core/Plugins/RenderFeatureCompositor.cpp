@@ -12,6 +12,7 @@
 // alongside the code that needed them - see OnPluginsLoaded()'s own new,
 // empty body below and the deleted BlackboardAdapter class
 // (RenderFeatureCompositor.h).
+#include "RenderFeatureCameraData.h"
 #include "../Core.h"
 #include "../Logging.h"
 
@@ -1027,7 +1028,41 @@ void RenderFeatureCompositor::ContributeRenderGraphPasses(
             privateName, privateState.texture->Target(), VK_IMAGE_LAYOUT_UNDEFINED, privateState.texture->Sampler());
 
         if (entry.projectCallback) {
-            entry.projectCallback(frame.builder, privateTarget, extent);
+            const std::optional<RenderPassViewData> viewDataOpt = m_core.FindRenderPassViewData(frame.currentView);
+            const RenderPassViewData* viewData = viewDataOpt.has_value() ? &(*viewDataOpt) : nullptr;
+
+            // The color half is already a live, resolved handle/sampler pair
+            // (this chain's own accumulated "screen so far") - only the depth
+            // half (the current view's own depth buffer) needs resolving.
+            ScenePassReadHandles handles;
+            handles.colorHandle = currentInput;
+            handles.colorSampler = currentInputSampler;
+            if (viewData != nullptr) {
+                const rg::RenderGraphBuilder::ImportedTextureSamplers viewResolved =
+                    frame.builder.ResolveImportedTextureSamplers(viewData->colorTarget);
+                handles.depthHandle = viewData->colorTarget;
+                handles.depthImageView = viewResolved.depthImageView;
+                handles.depthSampler = viewResolved.depthSampler;
+            }
+
+            const RenderFeatureCameraData cameraData = ResolveRenderFeatureCameraData(frame.currentView, viewData);
+
+            const std::size_t before = frame.builder.DeclaredPassCount();
+            entry.projectCallback(
+                frame.builder, frame.blackboard, frame.currentView, privateTarget, extent, handles, cameraData);
+            const std::size_t after = frame.builder.DeclaredPassCount();
+
+            if (handles.depthSampler != VK_NULL_HANDLE
+                && FindMissingDeclaredDepthReadForResolve(frame.builder, before, after, handles.depthHandle)) {
+                GTE_LOG_WARNING("RenderFeatureCompositor",
+                    "Render feature '" + featureName + "' declared at least one pass but never declared a "
+                    "ReadTexture(..., isDepthResource=true) usage against the depth handle it was given - this is "
+                    "an undeclared, unbarriered GPU read if its own execute lambda samples it anyway. See "
+                    "docs/conventions/project-assembly-system.md's PostComposite/PreUI subsection.");
+                assert(false
+                    && "A render feature declared a pass without declaring a matching depth ReadTexture() - see "
+                       "the GTE_LOG_WARNING immediately above (category \"RenderFeatureCompositor\").");
+            }
         }
 
         rg::TextureHandle outputTarget;

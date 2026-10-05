@@ -422,6 +422,10 @@ add_library(gte_core STATIC
     # since Core.h only ever forward-declares that class). Header-only, no
     # .cpp.
     src/Core/Plugins/ProjectRenderFeatureCallback.h
+    # Per-view camera data (eye position, checked inverse view-projection) a
+    # render-feature callback can use for depth-based/camera-aware effects.
+    src/Core/Plugins/RenderFeatureCameraData.h
+    src/Core/Plugins/RenderFeatureCameraData.cpp
     # better-render-pass-2 campaign, PHASE4 (PHASE4_DELETE_PLUGINS_FOLDER_AND_CMAKE.md) -
     # relocated here, verbatim, from the now-deleted
     # plugins/gte_plugin_abi/RenderFeatureDescriptor.h (Landmine A-style
