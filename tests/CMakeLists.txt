@@ -2233,6 +2233,13 @@ set(GTE_TEST_SOURCES
     # src/Core/Plugins/ProjectScenePassCallback.h header. Unconditional,
     # since that header is unconditionally in gte_core's own source list.
     Core/Plugins/ProjectScenePassCallbackHeaderCompilesStandaloneTests.cpp
+    # Tier-1 tests for ResolveRenderFeatureCameraData()/
+    # RenderFeatureCameraDataWarningTracker (checked-inverse happy path,
+    # singular-matrix identity fallback, and the per-view "logged once"
+    # bookkeeping). Unconditional, since
+    # src/Core/Plugins/RenderFeatureCameraData.h/.cpp is unconditionally in
+    # gte_core's own source list.
+    Core/Plugins/RenderFeatureCameraDataTests.cpp
     # better-render-pass-3 campaign, BLOCK 2 (Arbitrary Render Views), PHASE2
     # (PHASE2_RENDER_VIEW_REGISTRY_CORE.md) - Tier-2 (real, headless GPU)
     # tests for the new RenderViewRegistry class. Unconditional, since
