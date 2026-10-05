@@ -1,8 +1,8 @@
 #include "AtmospherePanel.h"
 
 #include "../EditorContext.h"
-#include "../../Renderer/Atmosphere/AtmosphereParameters.h"
-#include "../../Renderer/Atmosphere/AtmosphereTypes.h"
+#include "../../Features/Atmosphere/AtmosphereParameters.h"
+#include "../../Features/Atmosphere/AtmosphereTypes.h"
 
 #include <imgui.h>
 

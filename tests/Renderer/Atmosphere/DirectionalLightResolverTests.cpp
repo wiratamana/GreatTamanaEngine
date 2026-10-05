@@ -5,7 +5,7 @@
 // ResolveActiveCameraViewProjection() tests exactly: a Registry-only test,
 // no Renderer/GPU/live Vulkan device involved at all.
 
-#include "Renderer/Atmosphere/DirectionalLightResolver.h"
+#include "Features/Atmosphere/DirectionalLightResolver.h"
 
 #include "ECS/Components/DirectionalLight.h"
 #include "ECS/Components/Transform.h"

@@ -14,18 +14,16 @@
 // AddGameViewPass()/AddSceneViewPass()/AddPresentPass()/AddGpuSkinningPasses()
 // are the direct precedent for this shape).
 //
-// Living under src/Application/ (not src/Renderer/Atmosphere/) for the
-// exact same Clean Architecture reason RenderPasses.h already gives:
-// Renderer/AtmosphereLutRenderer itself must never know which ECS Registry/
-// active Camera/EditorCamera is "the Game View" vs. "the Scene View" - that
-// engine-specific, Editor-aware knowledge belongs here, at the Application
-// composition-root layer.
+// Kept separate from AtmosphereLutRenderer itself for the same reason
+// RenderPasses.h keeps this logic out of Renderer: AtmosphereLutRenderer must
+// never know which ECS Registry/active Camera is "the Game View" vs. "the
+// Scene View" - that Editor-aware knowledge lives here instead.
 
-#include "../ECS/Registry.h"
-#include "../Math/Mat4.h"
-#include "../Math/Vec3.h"
-#include "../Renderer/Atmosphere/AtmosphereLutRenderer.h"
-#include "../Renderer/RenderGraph/RenderGraphTypes.h"
+#include "../../ECS/Registry.h"
+#include "../../Math/Mat4.h"
+#include "../../Math/Vec3.h"
+#include "AtmosphereLutRenderer.h"
+#include "../../Renderer/RenderGraph/RenderGraphTypes.h"
 
 #include <volk.h>
 

@@ -1,11 +1,11 @@
 #include "AtmospherePassSequence.h"
 
-#include "../ECS/Components/Camera.h"
-#include "../ECS/Components/Transform.h"
-#include "../ECS/TransformHierarchy.h"
-#include "../Renderer/Renderer.h"
-#include "../Renderer/RenderTexture.h"
-#include "../Renderer/RenderGraph/RenderGraphBuilder.h"
+#include "../../ECS/Components/Camera.h"
+#include "../../ECS/Components/Transform.h"
+#include "../../ECS/TransformHierarchy.h"
+#include "../../Renderer/Renderer.h"
+#include "../../Renderer/RenderTexture.h"
+#include "../../Renderer/RenderGraph/RenderGraphBuilder.h"
 
 namespace gte {
 

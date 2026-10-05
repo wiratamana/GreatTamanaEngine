@@ -5,7 +5,7 @@
 // Renderer/live GPU device involved at all - every function under test is
 // pure, taking/returning only plain float/Vec3 values.
 
-#include "Renderer/Atmosphere/AtmosphereAerialPerspectiveCompositeMath.h"
+#include "Features/Atmosphere/AtmosphereAerialPerspectiveCompositeMath.h"
 
 #include <gtest/gtest.h>
 

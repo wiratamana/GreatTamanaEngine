@@ -7,8 +7,8 @@
 // function under test is pure, taking/returning only plain
 // AtmosphereParametersGpu/Vec3/float values.
 
-#include "Renderer/Atmosphere/AtmosphereMath.h"
-#include "Renderer/Atmosphere/AtmosphereParameters.h"
+#include "Features/Atmosphere/AtmosphereMath.h"
+#include "Features/Atmosphere/AtmosphereParameters.h"
 
 #include <gtest/gtest.h>
 

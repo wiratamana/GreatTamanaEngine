@@ -660,8 +660,6 @@ add_library(gte_core STATIC
     src/Application/EngineCommandDispatch.cpp
     src/Application/RenderPasses.h
     src/Application/RenderPasses.cpp
-    src/Application/AtmospherePassSequence.h
-    src/Application/AtmospherePassSequence.cpp
     src/Event/Event.h
     src/Input/InputState.cpp
     src/Input/InputState.h
@@ -733,19 +731,24 @@ add_library(gte_core STATIC
     src/Renderer/IndirectDrawTypes.h
     src/Renderer/VolumetricFroxelMath.h
     src/Renderer/VolumetricFroxelMath.cpp
-    src/Renderer/Atmosphere/AtmosphereTypes.h
-    src/Renderer/Atmosphere/AtmosphereParameters.h
-    src/Renderer/Atmosphere/AtmosphereParameters.cpp
-    src/Renderer/Atmosphere/AtmosphereMath.h
-    src/Renderer/Atmosphere/AtmosphereMath.cpp
-    src/Renderer/Atmosphere/AtmosphereAerialPerspectiveCompositeMath.h
-    src/Renderer/Atmosphere/AtmosphereAerialPerspectiveCompositeMath.cpp
-    src/Renderer/Atmosphere/DirectionalLightResolver.h
-    src/Renderer/Atmosphere/DirectionalLightResolver.cpp
-    src/Renderer/Atmosphere/AtmosphereLutRenderer.h
-    src/Renderer/Atmosphere/AtmosphereLutRenderer.cpp
-    src/Renderer/Atmosphere/AtmosphereSkyBackgroundRenderer.h
-    src/Renderer/Atmosphere/AtmosphereSkyBackgroundRenderer.cpp
+    # src/Features/Atmosphere/ - the self-contained Atmosphere feature module.
+    src/Features/Atmosphere/AtmosphereTypes.h
+    src/Features/Atmosphere/AtmosphereParameters.h
+    src/Features/Atmosphere/AtmosphereParameters.cpp
+    src/Features/Atmosphere/AtmosphereMath.h
+    src/Features/Atmosphere/AtmosphereMath.cpp
+    src/Features/Atmosphere/AtmosphereAerialPerspectiveCompositeMath.h
+    src/Features/Atmosphere/AtmosphereAerialPerspectiveCompositeMath.cpp
+    src/Features/Atmosphere/DirectionalLightResolver.h
+    src/Features/Atmosphere/DirectionalLightResolver.cpp
+    src/Features/Atmosphere/AtmosphereLutRenderer.h
+    src/Features/Atmosphere/AtmosphereLutRenderer.cpp
+    src/Features/Atmosphere/AtmosphereSkyBackgroundRenderer.h
+    src/Features/Atmosphere/AtmosphereSkyBackgroundRenderer.cpp
+    src/Features/Atmosphere/AtmospherePassToggleLogic.h
+    src/Features/Atmosphere/AtmosphereRenderPassTags.h
+    src/Features/Atmosphere/AtmospherePassSequence.h
+    src/Features/Atmosphere/AtmospherePassSequence.cpp
     src/Renderer/Primitives/PrimitiveMeshGenerator.cpp
     src/Renderer/Primitives/PrimitiveMeshGenerator.h
     src/Renderer/Memory/GpuResourceHandle.h

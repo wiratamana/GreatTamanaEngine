@@ -56,7 +56,7 @@
 // for the full, independently-re-verified per-test checklist.
 
 #include "Editor/FrameDebuggerData.h"
-#include "Renderer/Atmosphere/AtmosphereRenderPassTags.h"
+#include "Features/Atmosphere/AtmosphereRenderPassTags.h"
 #include "Renderer/GpuSkinning/GpuSkinningRenderPassTags.h"
 #include "Renderer/RenderGraph/RenderPassGroupRegistry.h"
 

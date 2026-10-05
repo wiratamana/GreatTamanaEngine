@@ -2,7 +2,7 @@
 
 #include "../Math/Mat4.h"
 #include "../Math/Vec3.h"
-#include "../Renderer/Atmosphere/AtmosphereTypes.h"
+#include "../Features/Atmosphere/AtmosphereTypes.h"
 #include "../Renderer/RenderTexture.h"
 #include "../Renderer/Culling/GpuDrivenBatchDebugInfo.h"
 // editor-core-separation-6 campaign, PHASE7

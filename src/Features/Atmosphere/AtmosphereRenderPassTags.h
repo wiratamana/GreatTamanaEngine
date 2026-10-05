@@ -10,7 +10,7 @@
 // feature's own RegisterPassGroupLabel() call (AtmosphereLutRenderer's constructor) that
 // actually gives this bit its "Compute LUT" heading.
 
-#include "../RenderGraph/RenderGraphTypes.h"
+#include "../../Renderer/RenderGraph/RenderGraphTypes.h"
 
 namespace gte {
 

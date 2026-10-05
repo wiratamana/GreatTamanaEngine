@@ -1,8 +1,8 @@
 #include "AtmosphereSkyBackgroundRenderer.h"
 
-#include "../ComputeDescriptorSet.h"
-#include "../Renderer.h"
-#include "../Vulkan/DescriptorSetLayoutBuilder.h"
+#include "../../Renderer/ComputeDescriptorSet.h"
+#include "../../Renderer/Renderer.h"
+#include "../../Renderer/Vulkan/DescriptorSetLayoutBuilder.h"
 
 #include <cstring>
 #include <fstream>

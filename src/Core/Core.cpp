@@ -13,11 +13,11 @@
 // gte_core CMake target's own source list - see the design doc's Section 2.2
 // inventory - so no file physically moved for this phase; only WHICH
 // TRANSLATION UNIT includes them changed).
-#include "../Application/AtmospherePassSequence.h"
+#include "../Features/Atmosphere/AtmospherePassSequence.h"
 #include "../Application/RenderPasses.h"
 #include "../Profiling/FrameProfiler.h"
 #include "../Profiling/ScopeTimer.h"
-#include "../Renderer/Atmosphere/AtmosphereParameters.h"
+#include "../Features/Atmosphere/AtmosphereParameters.h"
 #include "../Renderer/GpuSkinning/GpuSkinningPipelines.h"
 #include "../Renderer/GpuSkinning/GpuSkinningRenderPassTags.h"
 #include "../Renderer/Culling/CullingPipelines.h"

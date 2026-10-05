@@ -83,15 +83,15 @@
 #include "AtmosphereTypes.h"
 #include "../../ECS/Registry.h"
 #include "../../Math/Vec3.h"
-#include "../Buffer.h"
-#include "../ComputeDescriptorSet.h"
-#include "../ComputePipeline.h"
-#include "../Renderer.h" // gte::Renderer::CapturedRawPixels - needed by CaptureAerialPerspectiveVolumeSliceImmediate() below (atmosphere-scattering-2, Phase 5). No circular include: Renderer.h never includes anything under Atmosphere/.
-#include "../RenderTexture.h"
-#include "../Texture2D.h"
-#include "../VolumeTexture.h"
-#include "../RenderGraph/RenderGraphBuilder.h"
-#include "../RenderGraph/RenderGraphTypes.h"
+#include "../../Renderer/Buffer.h"
+#include "../../Renderer/ComputeDescriptorSet.h"
+#include "../../Renderer/ComputePipeline.h"
+#include "../../Renderer/Renderer.h" // gte::Renderer::CapturedRawPixels - needed by CaptureAerialPerspectiveVolumeSliceImmediate() below (atmosphere-scattering-2, Phase 5). No circular include: Renderer.h never includes anything under Features/Atmosphere/.
+#include "../../Renderer/RenderTexture.h"
+#include "../../Renderer/Texture2D.h"
+#include "../../Renderer/VolumeTexture.h"
+#include "../../Renderer/RenderGraph/RenderGraphBuilder.h"
+#include "../../Renderer/RenderGraph/RenderGraphTypes.h"
 
 #include <volk.h>
 

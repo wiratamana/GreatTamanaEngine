@@ -8,7 +8,7 @@
 // RenderGraphBuilderTests.cpp/RenderPassTests.cpp's own established style
 // (a real RenderGraphBuilder instance with zero Vulkan device involved).
 
-#include "Renderer/Atmosphere/AtmosphereRenderPassTags.h"
+#include "Features/Atmosphere/AtmosphereRenderPassTags.h"
 #include "Renderer/RenderGraph/RenderPipeline.h"
 #include "Renderer/RenderGraph/RenderGraphDebugMetadataSink.h" // editor-core-separation-25 campaign, PHASE3
 

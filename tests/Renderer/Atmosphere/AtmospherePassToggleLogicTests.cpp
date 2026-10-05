@@ -1,4 +1,4 @@
-#include "Renderer/Atmosphere/AtmospherePassToggleLogic.h"
+#include "Features/Atmosphere/AtmospherePassToggleLogic.h"
 
 #include <gtest/gtest.h>
 

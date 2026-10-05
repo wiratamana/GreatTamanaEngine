@@ -18,7 +18,7 @@
 // `renderPassEvent` assertions (still real PassRecord fields, untouched by
 // this migration) are left completely unmodified.
 
-#include "Renderer/Atmosphere/AtmosphereRenderPassTags.h"
+#include "Features/Atmosphere/AtmosphereRenderPassTags.h"
 #include "Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "Renderer/RenderGraph/RenderGraphDebugMetadataSink.h"
 

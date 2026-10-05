@@ -55,7 +55,7 @@
 // or the wrong sample count) - any of those would produce deltas far
 // larger than 0.01 in practice.
 
-#include "../Renderer/Atmosphere/AtmosphereTypes.h"
+#include "../Features/Atmosphere/AtmosphereTypes.h"
 
 #include <cstddef>
 #include <string>

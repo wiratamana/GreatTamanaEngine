@@ -2,14 +2,14 @@
 
 #include "AtmosphereParameters.h"
 #include "DirectionalLightResolver.h"
-#include "../ComputeDispatch.h"
-#include "../RenderTarget.h"
-#include "../Renderer.h"
-#include "../RenderGraph/RenderGraph.h"
-#include "../RenderGraph/RenderPassGroupRegistry.h"
+#include "../../Renderer/ComputeDispatch.h"
+#include "../../Renderer/RenderTarget.h"
+#include "../../Renderer/Renderer.h"
+#include "../../Renderer/RenderGraph/RenderGraph.h"
+#include "../../Renderer/RenderGraph/RenderPassGroupRegistry.h"
 #include "AtmosphereRenderPassTags.h"
 #include "AtmospherePassToggleLogic.h"
-#include "../RenderGraph/RenderPassToggleRegistry.h"
+#include "../../Renderer/RenderGraph/RenderPassToggleRegistry.h"
 
 #include <algorithm>
 #include <cstdint>

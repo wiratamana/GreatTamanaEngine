@@ -7,7 +7,7 @@
 #include "../Application/RenderPassViewData.h"
 #include "../ECS/Entity.h"
 #include "../Game/Game.h"
-#include "../Renderer/Atmosphere/AtmosphereLutRenderer.h"
+#include "../Features/Atmosphere/AtmosphereLutRenderer.h"
 #include "../Renderer/Culling/GpuDrivenBatchCache.h"
 #include "../Renderer/Culling/GpuDrivenBatchDebugInfo.h"
 #include "../Renderer/MeshHandle.h"
