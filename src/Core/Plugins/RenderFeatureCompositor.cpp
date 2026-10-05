@@ -1063,6 +1063,22 @@ void RenderFeatureCompositor::ContributeRenderGraphPasses(
                     && "A render feature declared a pass without declaring a matching depth ReadTexture() - see "
                        "the GTE_LOG_WARNING immediately above (category \"RenderFeatureCompositor\").");
             }
+
+            // Every pass a PostComposite/PreUI feature declares must carry
+            // RenderPassEvent::AfterEverything - nothing else catches a
+            // mistagged-but-still-compiles-and-runs pass here.
+            if (const std::vector<std::size_t> mistagged =
+                    FindPassesNotTaggedAfterEverything(frame.builder, before, after);
+                !mistagged.empty()) {
+                GTE_LOG_WARNING("RenderFeatureCompositor",
+                    "Render feature '" + featureName + "' declared " + std::to_string(mistagged.size())
+                    + " pass(es) not tagged RenderPassEvent::AfterEverything - every PostComposite/PreUI pass "
+                    "must use this exact tag. See docs/conventions/project-assembly-system.md's PostComposite/"
+                    "PreUI subsection.");
+                assert(false
+                    && "A render feature declared a pass with a RenderPassEvent other than AfterEverything - see "
+                       "the GTE_LOG_WARNING immediately above (category \"RenderFeatureCompositor\").");
+            }
         }
 
         rg::TextureHandle outputTarget;

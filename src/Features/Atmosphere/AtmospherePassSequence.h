@@ -32,7 +32,6 @@
 namespace gte {
 
 class Renderer;
-class RenderTexture;
 
 namespace rg {
 class RenderGraphBuilder;
@@ -108,29 +107,22 @@ std::function<void(VkCommandBuffer)> MakeRecordSkyBackgroundCallback(AtmosphereL
     Renderer& renderer, const Mat4& viewProjection, const AtmosphereParametersGpu& atmosphereParameters,
     const AtmosphereFrameUniforms& frameUniforms, const char* skyViewLutName, float skyExposure);
 
-// Declares the Aerial Perspective Composite pass (Phase 7, Step 3.3) for
-// ONE view - MUST be called AFTER that view's own GameView/SceneView pass
-// has already been declared in the SAME builder call (this pass needs to
-// read that pass's own just-written color+depth this same frame).
-// `viewRenderTexture` is the view's own persistent RenderTexture
-// (m_gameView/m_sceneView, ImGuiEditorLayer.cpp) - MUST have been
-// constructed with allowDepthSampledAccess=true (see
-// DepthBuffer.h/RenderTexture.h) - its Sampler()/DepthSampler() are
-// resolved here directly, never via PassContext::resolveTexture() (which
-// has no depth-resolution path at all - see
+// Declares the Aerial Perspective Composite pass for ONE view - MUST be
+// called AFTER that view's own GameView/SceneView pass has already been
+// declared in the SAME builder call (this pass needs to read that pass's
+// own just-written color+depth this same frame). `sourceColorHandle` is read
+// for color; `sourceDepthHandle` is read for depth only - a separate handle,
+// since the two may come from physically different imported resources (see
 // AtmosphereLutRenderer::AddAerialPerspectiveCompositePass()'s own doc
-// comment). `sourceColorHandle` is the SAME TextureHandle
-// AddGameViewPass()/AddSceneViewPass() was given for this view, this same
-// frame. `aerialPerspectiveStrength` (Phase 8) is the Editor's
-// "Atmosphere" panel-tunable overall multiplier for the effect.
-// `maxDistanceKm`/`depthExponent` (atmosphere-scattering-2 campaign Phase 1)
-// are forwarded straight through, unchanged, to
-// AtmosphereLutRenderer::AddAerialPerspectiveCompositePass()'s own new
-// parameters of the same name - see that function's own doc comment. The
-// CALLER must add the returned TextureHandle to this call's own outputs
+// comment). `sourceColorSampler`/`sourceDepthView`/`sourceDepthSampler` are
+// the caller-resolved plain Vulkan objects actually bound to the shader.
+// `aerialPerspectiveStrength`/`maxDistanceKm`/`depthExponent` forward
+// straight through to AtmosphereLutRenderer::AddAerialPerspectiveCompositePass().
+// The CALLER must add the returned TextureHandle to this call's own outputs
 // root set.
 rg::TextureHandle AddAtmosphereCompositePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
-    AtmosphereLutRenderer& atmosphereLutRenderer, RenderTexture& viewRenderTexture, rg::TextureHandle sourceColorHandle,
+    AtmosphereLutRenderer& atmosphereLutRenderer, rg::TextureHandle sourceColorHandle, VkSampler sourceColorSampler,
+    rg::TextureHandle sourceDepthHandle, VkImageView sourceDepthView, VkSampler sourceDepthSampler,
     rg::VolumeTextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,
     const AtmosphereFrameUniforms& frameUniforms, Vec3 eyeWorldPosition, float aerialPerspectiveStrength,
     float maxDistanceKm, float depthExponent, VkExtent2D extent, const char* outputTextureName, rg::ViewScope viewScope,

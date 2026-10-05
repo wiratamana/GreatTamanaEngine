@@ -493,6 +493,25 @@ public:
     TextureArrayHandle ImportTextureArray(
         const char* name, const TextureArrayTarget& externalTarget, VkImageLayout currentLayout);
 
+    // Marks `handle` as a REQUIRED root the compiler must keep alive - the
+    // plain TextureHandle counterpart of KeepVolumeTextureOutput()/
+    // KeepBufferOutput()/KeepTextureArrayOutput() below. Needed by any
+    // PreOpaque/PostOpaque/PostTransparent callback that produces a plain 2D
+    // texture output with no in-frame reader of its own: a raw
+    // RenderPassProvider can already do this via
+    // RenderPassFrameContext::finalTextureOutputs; a Project Assembly
+    // callback has no access to that object at all. Drained by
+    // FinalTextureOutputs() below, NOT by Finish()/CompiledGraphInput -
+    // callers merge it into their own root set directly. Idempotent - safe
+    // to call more than once for the same handle.
+    void KeepTextureOutput(TextureHandle handle);
+
+    // Read-only accessor for KeepTextureOutput()'s own accumulated list -
+    // lets the one real merge site (Core.cpp, right after
+    // RenderPipeline::DeclareInto() returns) drain it without reaching into
+    // private state.
+    const std::vector<TextureHandle>& FinalTextureOutputs() const noexcept { return m_finalTextureOutputs; }
+
     // Atmosphere Scattering campaign, Phase 6
     // (ATMOSPHERE_PHASE6_AERIAL_PERSPECTIVE_FROXEL_VOLUME_v1.md) - marks
     // `handle` as a REQUIRED root the compiler must keep alive, the
@@ -930,6 +949,10 @@ private:
 
     // better-render-pass-3 campaign, BLOCK5.
     std::vector<TextureArraySlot> m_textureArrays;
+
+    // Backs KeepTextureOutput()/FinalTextureOutputs() above - drained
+    // directly by the caller, never by Finish()/CompiledGraphInput.
+    std::vector<TextureHandle> m_finalTextureOutputs;
 
     // Atmosphere Scattering campaign, Phase 6 - see
     // CompiledGraphInput::finalVolumeTextureOutputs above.

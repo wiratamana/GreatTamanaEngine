@@ -710,10 +710,11 @@ AtmosphereLutRenderer::EnsureAerialPerspectiveCompositeViewInitialized(
 
 rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveCompositePass(rg::RenderGraphBuilder& builder,
     Renderer& renderer, rg::TextureHandle sourceColorHandle, VkSampler sourceColorSampler,
-    VkImageView sourceDepthView, VkSampler sourceDepthSampler, rg::VolumeTextureHandle aerialPerspectiveVolumeHandle,
-    const char* aerialPerspectiveVolumeName, const Mat4& invViewProjection, Vec3 cameraWorldPosition,
-    float aerialPerspectiveStrength, float maxDistanceKm, float depthExponent, VkExtent2D extent,
-    const char* outputTextureName, rg::ViewScope viewScope, rg::RenderPassToggleRegistry* toggleRegistry)
+    rg::TextureHandle sourceDepthHandle, VkImageView sourceDepthView, VkSampler sourceDepthSampler,
+    rg::VolumeTextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,
+    const Mat4& invViewProjection, Vec3 cameraWorldPosition, float aerialPerspectiveStrength, float maxDistanceKm,
+    float depthExponent, VkExtent2D extent, const char* outputTextureName, rg::ViewScope viewScope,
+    rg::RenderPassToggleRegistry* toggleRegistry)
 {
     const bool passEnabledThisFrame = toggleRegistry == nullptr
         || toggleRegistry->NoteDeclaredAndCheckEnabled("AtmosphereAerialPerspectiveCompositePass");
@@ -764,16 +765,15 @@ rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveCompositePass(rg::R
 
     builder.AddRenderPass(
         "AtmosphereAerialPerspectiveCompositePass", rg::PassKind::Compute, viewScope, rg::RenderPassCategory::General,
-        [sourceColorHandle, aerialPerspectiveVolumeHandle, outputHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
+        [sourceColorHandle, sourceDepthHandle, aerialPerspectiveVolumeHandle,
+            outputHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
             // Real dependency declarations - order this pass strictly after
-            // whichever GameView/SceneView graphics pass wrote
-            // sourceColorHandle's color+depth this same frame. The SECOND
-            // ReadTexture() call (isDepthResource=true) is what actually
-            // closes this phase's own engine gap - see
-            // RenderGraphTypes.h's ResourceUsage::isDepthResource doc
-            // comment.
+            // whichever pass wrote sourceColorHandle's color and
+            // sourceDepthHandle's depth this same frame. The isDepthResource
+            // read is what actually closes the barrier-tracking gap - see
+            // RenderGraphTypes.h's ResourceUsage::isDepthResource doc comment.
             pass.ReadTexture(sourceColorHandle, rg::ResourceAccess::ShaderRead);
-            pass.ReadTexture(sourceColorHandle, rg::ResourceAccess::ShaderRead, /*isDepthResource=*/true);
+            pass.ReadTexture(sourceDepthHandle, rg::ResourceAccess::ShaderRead, /*isDepthResource=*/true);
             pass.ReadVolumeTexture(aerialPerspectiveVolumeHandle, rg::ResourceAccess::ShaderRead);
             pass.WriteTexture(outputHandle, rg::ResourceAccess::ComputeShaderWrite);
         },
@@ -813,15 +813,11 @@ rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveCompositePass(rg::R
             cmd.SetPushConstants(localPushConstants);
             cmd.DispatchOverSize(extent.width, extent.height, 1);
         },
-        // render-pass-3 campaign, PHASE4 (root-cause fix) - explicit
-        // RenderPassEvent::AfterTransparents, matching
-        // PHASE0_MASTER_STRATEGY.md's own intended mapping ("the Aerial
-        // Perspective Composite pass is AfterTransparents"). Without this,
-        // this pass silently defaulted to RenderPassEvent::Opaques (same as
-        // every other immediate-declare Atmosphere pass here) - see
-        // AddTransmittanceLutPass()'s own identical comment above for the
-        // full root-cause writeup.
-        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::AfterTransparents);
+        // Required tag for a PostComposite render-feature pass - every pass
+        // it declares must be provably ordered after the generic compositor
+        // chain's own seed point. See RenderFeatureCompositor's own
+        // AfterEverything-tag safety net for the check this enforces.
+        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::AfterEverything);
     return outputHandle;
 }
 

@@ -593,23 +593,34 @@ private:
     };
 
     // render-pass-3 campaign, PHASE3 - the shared body both DeclareInto()
-    // phases run: invoke every registered provider matching `timing` (in
-    // registration order, looping active views for PerActiveView ones),
-    // then sort the resulting deferred RenderPassDesc list by `order` and
-    // flush it into `builder` - see ProviderTiming's own doc comment for why
-    // this must happen exactly TWICE (once per phase) rather than once,
-    // globally, at the end.
+    // phases run: invoke every registered provider matching `timing`, then
+    // sort the resulting deferred RenderPassDesc list by `order` and flush
+    // it into `builder` - see ProviderTiming's own doc comment for why this
+    // must happen exactly TWICE (once per phase) rather than once, globally,
+    // at the end.
+    //
+    // Invocation happens in TWO passes over m_providers, not one: every
+    // Once-scope provider first (registration order), then every
+    // PerActiveView-scope provider (registration order, looping active
+    // views). A Once-scope provider is always a frame-shared producer (e.g.
+    // a lookup table computed once, consumed by every view) - it must run,
+    // and Publish() onto the blackboard, before ANY PerActiveView-scope
+    // provider in the same phase can Fetch() it, regardless of which order
+    // the two were registered in (a feature module is always constructed
+    // after Core, so its own Once-scope providers always register LATER in
+    // this vector than Core's own PerActiveView-scope ones - a single flat
+    // pass would silently starve them of their own shared data every frame).
     void DeclareOnePhase(RenderGraphBuilder& builder, RenderPassFrameContext& frame, ProviderTiming timing)
     {
         m_scratchCollected.clear(); // Reused, not reconstructed - see this class's own field comment below.
 
         for (const Entry& entry : m_providers) {
-            if (entry.timing != timing) {
-                continue;
-            }
-            if (entry.scope == ProviderScope::Once) {
+            if (entry.timing == timing && entry.scope == ProviderScope::Once) {
                 entry.provider(frame, m_scratchCollected);
-            } else { // PerActiveView
+            }
+        }
+        for (const Entry& entry : m_providers) {
+            if (entry.timing == timing && entry.scope == ProviderScope::PerActiveView) {
                 for (const RenderViewId& view : frame.activeViews) {
                     frame.currentView = view;
                     entry.provider(frame, m_scratchCollected);

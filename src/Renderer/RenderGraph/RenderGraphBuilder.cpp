@@ -289,6 +289,11 @@ TextureArrayHandle RenderGraphBuilder::ImportTextureArray(
     return TextureArrayHandle{ index, 1 };
 }
 
+void RenderGraphBuilder::KeepTextureOutput(TextureHandle handle)
+{
+    m_finalTextureOutputs.push_back(handle);
+}
+
 void RenderGraphBuilder::KeepVolumeTextureOutput(VolumeTextureHandle handle)
 {
     m_finalVolumeTextureOutputs.push_back(handle);

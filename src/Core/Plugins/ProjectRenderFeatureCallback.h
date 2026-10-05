@@ -42,12 +42,37 @@
 
 #include <volk.h>
 
+#include <cassert>
+#include <cstddef>
 #include <functional>
+#include <vector>
 
 namespace gte {
 
 using ProjectRenderFeatureCallback = std::function<void(rg::RenderGraphBuilder& builder,
     rg::RenderPassBlackboard& blackboard, rg::RenderViewId currentView, rg::TextureHandle privateTarget,
     VkExtent2D extent, const ScenePassReadHandles& currentViewHandles, const RenderFeatureCameraData& cameraData)>;
+
+// Pure, side-effect-free, directly Tier-1-testable - every PostComposite/
+// PreUI pass must be tagged EXACTLY RenderPassEvent::AfterEverything (see
+// this file's own top-of-file comment). Scans every pass in `builder` whose
+// declaration index is in the half-open range [before, after) and returns
+// the (absolute, builder-relative) indices of every one whose
+// RenderPassEvent is not AfterEverything. Empty result = every pass in
+// range was tagged correctly, including an empty range itself.
+inline std::vector<std::size_t> FindPassesNotTaggedAfterEverything(
+    const rg::RenderGraphBuilder& builder, std::size_t before, std::size_t after)
+{
+    assert(before <= after && after <= builder.DeclaredPassCount()
+        && "FindPassesNotTaggedAfterEverything() - [before, after) out of range");
+
+    std::vector<std::size_t> violations;
+    for (std::size_t index = before; index < after; ++index) {
+        if (builder.PassEventAt(index) != rg::RenderPassEvent::AfterEverything) {
+            violations.push_back(index);
+        }
+    }
+    return violations;
+}
 
 } // namespace gte

@@ -1764,6 +1764,14 @@ void Core::BuildFrame()
                     m_offscreenBlackboardThisFrame.ReportUnusedPublishesIfAny();
 #endif
 
+                    // A PreOpaque/PostOpaque/PostTransparent callback has no access to
+                    // RenderPassFrameContext::finalTextureOutputs - it marks a plain texture
+                    // output as a required root through the builder instead. Merge it into
+                    // this frame's own root set here.
+                    for (const rg::TextureHandle& handle : b.FinalTextureOutputs()) {
+                        frame.finalTextureOutputs.push_back(handle);
+                    }
+
                     std::vector<rg::TextureHandle> outputs = std::move(frame.finalTextureOutputs);
 
                     if (gameTarget != nullptr && frameDebuggerCapture != nullptr && m_editorLayer != nullptr

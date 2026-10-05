@@ -252,59 +252,37 @@ public:
         const AtmosphereParametersGpu& params, const AtmosphereFrameUniforms& frameUniforms,
         const char* skyViewLutName, float skyExposure);
 
-    // Phase 7 - declares this frame's Aerial Perspective Composite compute
-    // pass into `builder` for ONE view: reads `sourceColorHandle` (the
-    // view's own already-imported Game/Scene View TextureHandle, POST-Sky-
-    // Background-pass) for BOTH its color half (ShaderRead) and, via the
-    // new `isDepthResource=true` overload of PassBuilder::ReadTexture()
-    // (RenderGraphBuilder.h), its DEPTH half (requires that RenderTexture's
-    // own companion DepthBuffer to have been created with
-    // allowSampledAccess=true - see DepthBuffer.h/RenderTexture.h) -
-    // `sourceColorSampler`/`sourceDepthView`/`sourceDepthSampler` are the
-    // CALLER-resolved plain Vulkan objects behind that same handle (an
-    // IMPORTED texture's resolved sampler/depth view are never available
-    // via PassContext::resolveTexture() - mirrors
-    // ComputeBlurValidation::AddPass()'s own identical `sceneViewSampler`
-    // parameter/reasoning). Also reads `aerialPerspectiveVolumeHandle`
-    // (Phase 6's own output, looked up again by `aerialPerspectiveVolumeName`
-    // for its own trilinear sampler - see m_aerialPerspectiveVolumeViewStates)
-    // and writes a NEW, separate, persistent output RenderTexture registered
-    // under the literal name `outputTextureName`
-    // ("GameViewComposited"/"SceneViewComposited") - explicit
-    // VK_FORMAT_R8G8B8A8_UNORM (never the swapchain's own negotiated
-    // format), mirroring ComputeBlurValidation's own identical reasoning
-    // for why (this texture is never bound to the same Pipeline as the
-    // swapchain/Game/Scene views - only ever sampled via ImGui::Image()/
-    // `/get_game_view` - so there is no reason to inherit the swapchain's
-    // own uncertain storage-image-format support).
+    // Declares this frame's Aerial Perspective Composite compute pass into
+    // `builder`, for ONE view. `sourceColorHandle` is read as this pass's
+    // color input (ShaderRead); `sourceDepthHandle` is read for its DEPTH
+    // sub-resource only (ShaderRead, isDepthResource=true) - a SEPARATE
+    // handle, since color and depth may come from two physically different
+    // imported resources (e.g. color is a compositor-owned "screen so far"
+    // copy while depth stays the view's own real target). `sourceColorSampler`/
+    // `sourceDepthView`/`sourceDepthSampler` are the caller-resolved plain
+    // Vulkan objects actually bound to the shader - an imported texture's
+    // resolved sampler/depth view are never available via
+    // PassContext::resolveTexture(). Also reads `aerialPerspectiveVolumeHandle`
+    // (this frame's own AddAerialPerspectiveVolumePass() output, looked up
+    // again by `aerialPerspectiveVolumeName` for its trilinear sampler) and
+    // writes a persistent output RenderTexture under the literal name
+    // `outputTextureName` ("GameViewComposited"/"SceneViewComposited") -
+    // explicit VK_FORMAT_R8G8B8A8_UNORM, never the swapchain's own negotiated
+    // format.
     //
     // `invViewProjection`/`cameraWorldPosition` are this view's own current
-    // values, pushed as compute push constants (never a per-view uniform
-    // buffer - this pass's own per-view parameters are small enough that a
-    // buffer would be pure overhead, matching BoxBlur.comp's own simple
-    // push-constant convention). `aerialPerspectiveStrength` (Phase 8 -
-    // ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md) is the Editor's
-    // "Atmosphere" panel-tunable overall multiplier for the effect (1.0 =
-    // unchanged physical result, 0.0 = fully disabled/pass-through) - see
-    // AtmosphereAerialPerspectiveComposite.comp's own doc comment for the
-    // exact blend formula this scales. `maxDistanceKm`/`depthExponent`
-    // (atmosphere-scattering-2 campaign Phase 1) are this composite pass's
-    // OWN copy of the SAME two values AddAerialPerspectiveVolumePass()'s own
-    // frameUniforms fields use to GENERATE the volume this pass reads - this
-    // pass's Z-slice lookup must stay the exact inverse of that generation
-    // mapping, so both values are sourced from the SAME AtmosphereSettings
-    // fields as the volume-generation pass (see AtmospherePassSequence.cpp).
+    // values, pushed as compute push constants. `aerialPerspectiveStrength`
+    // is the overall effect multiplier (1.0 = unchanged, 0.0 = pass-through);
+    // `maxDistanceKm`/`depthExponent` must match the SAME AtmosphereSettings
+    // fields AddAerialPerspectiveVolumePass() used to generate the volume
+    // this pass reads.
     //
-    // Returns the composited output's TextureHandle - the CALLER must add
-    // it to this call's own outputs root set, or this pass's write will be
-    // silently culled the next time RenderGraphCompiler::Compile() runs
-    // (same contract as every AddXxxLutPass() above).
-    // `viewScope` (frame-debugger-6 campaign, PHASE1) - see
-    // AddSkyViewLutPass()'s own doc comment above for the identical
-    // reasoning.
+    // Returns the composited output's TextureHandle - the caller must add it
+    // to this call's own outputs root set, or this pass's write is silently
+    // culled the next time RenderGraphCompiler::Compile() runs.
     rg::TextureHandle AddAerialPerspectiveCompositePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
-        rg::TextureHandle sourceColorHandle, VkSampler sourceColorSampler, VkImageView sourceDepthView,
-        VkSampler sourceDepthSampler, rg::VolumeTextureHandle aerialPerspectiveVolumeHandle,
+        rg::TextureHandle sourceColorHandle, VkSampler sourceColorSampler, rg::TextureHandle sourceDepthHandle,
+        VkImageView sourceDepthView, VkSampler sourceDepthSampler, rg::VolumeTextureHandle aerialPerspectiveVolumeHandle,
         const char* aerialPerspectiveVolumeName, const Mat4& invViewProjection, Vec3 cameraWorldPosition,
         float aerialPerspectiveStrength, float maxDistanceKm, float depthExponent, VkExtent2D extent,
         const char* outputTextureName, rg::ViewScope viewScope,
