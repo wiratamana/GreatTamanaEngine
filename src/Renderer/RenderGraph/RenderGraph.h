@@ -723,6 +723,14 @@ struct PassContext {
         VkSampler sampler = VK_NULL_HANDLE;
     };
 
+    // The depth sub-resource sibling of ResolvedTexture above - a separate
+    // struct (never a widened ResolvedTexture) since a depth view/sampler
+    // belongs to a different sub-resource of the same TextureHandle.
+    struct ResolvedDepthTexture {
+        VkImageView view = VK_NULL_HANDLE;
+        VkSampler sampler = VK_NULL_HANDLE;
+    };
+
     // Atmosphere Scattering campaign, Phase 2
     // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md) - the
     // volume-texture sibling of ResolvedTexture above. RenderGraph never
@@ -793,10 +801,7 @@ struct PassContext {
     // PassBuilder::ReadTexture()) into its already-live VkImageView/
     // VkSampler pair, wired up by RenderGraph::Execute() right before
     // invoking this pass's `execute` callback. Returns a null view/sampler
-    // for a handle that never resolved to a physical texture this call
-    // (including an imported resource, which carries no VkSampler of its
-    // own - see RenderGraphBuilder::ImportTexture()'s own TextureImportInfo,
-    // which has no sampler field).
+    // for a handle that never resolved to a physical texture this call.
     ResolvedTexture resolveReadTexture(TextureHandle handle) const noexcept;
 
     // Phase 6 (COMPUTE_PHASE6_RENDERGRAPH_INTEGRATION_STRATEGY_v2.md) -
@@ -812,6 +817,12 @@ struct PassContext {
     // the CURRENT physical resource behind a declared handle, right before
     // calling Renderer::Dispatch().
     ResolvedTexture resolveTexture(TextureHandle handle) const noexcept { return resolveReadTexture(handle); }
+
+    // Resolves the DEPTH sub-resource of a texture this pass declared a read
+    // against with isDepthResource=true (ReadTexture(..., true)) into its
+    // live VkImageView/VkSampler pair. Returns an empty ResolvedDepthTexture
+    // for a handle with no depth sub-resource, or one not resolved this call.
+    ResolvedDepthTexture resolveDepthTexture(TextureHandle handle) const noexcept;
 
     // The buffer sibling of resolveTexture() above - resolves a declared
     // BufferHandle (via ReadBuffer()/WriteBuffer()) into its CURRENT

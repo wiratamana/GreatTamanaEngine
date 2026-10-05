@@ -860,6 +860,21 @@ public:
         return false;
     }
 
+    // Aspect-aware sibling of PassReadsTexture() above - true only when the
+    // read usage against `handle` also has isDepthResource set. Needed
+    // because a color-aspect-only read must NOT satisfy a depth-resolve
+    // safety check.
+    bool PassReadsTextureAsDepth(std::size_t index, TextureHandle handle) const
+    {
+        assert(index < m_passes.size() && "RenderGraphBuilder::PassReadsTextureAsDepth() - index out of range");
+        for (const ResourceUsage& usage : m_passes[index].reads) {
+            if (usage.kind == ResourceKind::Texture && usage.texture == handle && usage.isDepthResource) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // Consumes this builder, handing its whole in-progress description
     // over to Phase 3's compiler. Safe to call at most meaningfully once
     // per builder instance (a builder is a one-frame-lifetime object, per

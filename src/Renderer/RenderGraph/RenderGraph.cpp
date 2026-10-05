@@ -406,9 +406,36 @@ PassContext::ResolvedTexture PassContext::resolveReadTexture(TextureHandle handl
 {
     if (textures != nullptr && handle.index < textures->size() && (*textures)[handle.index].resolved) {
         const RenderGraph::PhysicalTexture& tex = (*textures)[handle.index];
-        return ResolvedTexture{ tex.target.imageView, tex.sampler };
+        ResolvedTexture result{ tex.target.imageView, tex.sampler };
+        if (result.view != VK_NULL_HANDLE && result.sampler == VK_NULL_HANDLE) {
+            assert(false && "PassContext::resolveReadTexture() - non-null view with a null sampler");
+            GTE_LOG_ERROR("RenderGraph",
+                "resolveReadTexture() - handle index " + std::to_string(handle.index)
+                    + " resolved a non-null view with a null sampler.");
+        }
+        return result;
     }
     return ResolvedTexture{};
+}
+
+// Depth sub-resource sibling of resolveReadTexture() above - same shape,
+// gated additionally on tex.hasDepth so a texture with no depth sub-resource
+// never returns a stale/zero depth view.
+PassContext::ResolvedDepthTexture PassContext::resolveDepthTexture(TextureHandle handle) const noexcept
+{
+    if (textures != nullptr && handle.index < textures->size() && (*textures)[handle.index].resolved
+        && (*textures)[handle.index].hasDepth) {
+        const RenderGraph::PhysicalTexture& tex = (*textures)[handle.index];
+        ResolvedDepthTexture result{ tex.target.depthImageView, tex.depthSampler };
+        if (result.view != VK_NULL_HANDLE && result.sampler == VK_NULL_HANDLE) {
+            assert(false && "PassContext::resolveDepthTexture() - non-null view with a null sampler");
+            GTE_LOG_ERROR("RenderGraph",
+                "resolveDepthTexture() - handle index " + std::to_string(handle.index)
+                    + " resolved a non-null view with a null sampler.");
+        }
+        return result;
+    }
+    return ResolvedDepthTexture{};
 }
 
 VkBuffer PassContext::resolveBuffer(BufferHandle handle) const noexcept

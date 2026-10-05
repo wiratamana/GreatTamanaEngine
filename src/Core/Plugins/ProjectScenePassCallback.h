@@ -113,4 +113,28 @@ inline bool FindScenePassCallbackMissingReadDeclaration(const rg::RenderGraphBui
     return true; // At least one pass was declared, and none of them read either handle.
 }
 
+// Depth-aspect-aware sibling of FindScenePassCallbackMissingReadDeclaration()
+// above, built on RenderGraphBuilder::PassReadsTextureAsDepth() instead of
+// the aspect-blind PassReadsTexture() - flags a violation even when a pass
+// in range declared a COLOR-only read against the same handle, since that
+// is not a valid declaration for resolving the DEPTH sub-resource. Returns
+// false whenever the range is empty, mirroring its sibling exactly.
+inline bool FindMissingDeclaredDepthReadForResolve(
+    const rg::RenderGraphBuilder& builder, std::size_t before, std::size_t after, rg::TextureHandle depthHandle)
+{
+    assert(before <= after && after <= builder.DeclaredPassCount()
+        && "FindMissingDeclaredDepthReadForResolve() - [before, after) out of range");
+
+    if (before == after) {
+        return false;
+    }
+
+    for (std::size_t index = before; index < after; ++index) {
+        if (builder.PassReadsTextureAsDepth(index, depthHandle)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace gte
