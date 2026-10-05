@@ -384,6 +384,20 @@ PassContext::ResolvedTextureArray PassContext::resolveTextureArray(TextureArrayH
     return ResolvedTextureArray{};
 }
 
+// Per-layer sibling of resolveTextureArray() above - same "resolve whatever
+// was already resolved" discipline, just returning the one layer's own view
+// (via TextureArrayTarget::LayerView()) plus the array's whole image.
+PassContext::ResolvedTextureArrayLayer PassContext::resolveArrayLayer(
+    TextureArrayHandle handle, std::uint32_t layerIndex) const noexcept
+{
+    if (textureArrays != nullptr && handle.index < textureArrays->size()
+        && (*textureArrays)[handle.index].resolved) {
+        const RenderGraph::PhysicalTextureArray& arr = (*textureArrays)[handle.index];
+        return ResolvedTextureArrayLayer{ arr.target.LayerView(layerIndex), arr.target.image };
+    }
+    return ResolvedTextureArrayLayer{};
+}
+
 void PassContext::RecordDrawFn::operator()(
     bool hasIndexBuffer, std::uint32_t vertexCount, std::uint32_t indexCount) const
 {
@@ -404,7 +418,7 @@ void PassContext::RecordIndirectDrawFn::operator()() const
 // PHASE2_EXECUTE_COMPILED_GRAPH_EXTRACTION.md.
 std::vector<VkRenderingAttachmentInfo> RenderGraph::BuildColorAttachmentInfos(
     const PassRecord& pass, const std::vector<PhysicalTexture>& physicalTextures,
-    std::vector<VkExtent2D>& outResolvedExtents) const
+    const std::vector<PhysicalTextureArray>& physicalTextureArrays, std::vector<VkExtent2D>& outResolvedExtents) const
 {
     // Multi-Render-Target (MRT) campaign (task_manager/mrt-1),
     // PHASE2 - one VkRenderingAttachmentInfo PER declared color
@@ -468,38 +482,115 @@ std::vector<VkRenderingAttachmentInfo> RenderGraph::BuildColorAttachmentInfos(
         }
         colorAttachmentInfos.push_back(colorAttachment);
     }
+
+    // A COLOR-kind array-layer attachment (WriteArrayLayer()) lands AFTER
+    // every pass.colorAttachments entry above - shader-visible as
+    // layout(location = pass.colorAttachments.size()). A DEPTH-kind one is
+    // handled entirely by BuildDepthAttachmentInfo() instead; a pass never
+    // contributes to both lists from the same arrayLayerAttachment.
+    if (pass.arrayLayerAttachment.has_value()) {
+        const ArrayLayerAttachmentDesc& arrDesc = *pass.arrayLayerAttachment;
+        assert(arrDesc.handle.index < physicalTextureArrays.size() &&
+            physicalTextureArrays[arrDesc.handle.index].resolved &&
+            "RenderGraph::BuildColorAttachmentInfos: pass.arrayLayerAttachment was never "
+            "resolved - WriteArrayLayer() must always also push a matching write onto "
+            "pass.writes.");
+        const PhysicalTextureArray& arr = physicalTextureArrays[arrDesc.handle.index];
+        if (!arr.target.hasDepth) {
+            outResolvedExtents.push_back(arr.target.extent);
+
+            VkRenderingAttachmentInfo colorAttachment{};
+            colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+            colorAttachment.imageView = arr.target.LayerView(arrDesc.layerIndex);
+            colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            if (arrDesc.clearColor.has_value()) {
+                colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+                const std::array<float, 4>& c = *arrDesc.clearColor;
+                colorAttachment.clearValue.color = { { c[0], c[1], c[2], c[3] } };
+            } else {
+                colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+            }
+            colorAttachmentInfos.push_back(colorAttachment);
+        }
+    }
+
     return colorAttachmentInfos;
 }
 
 // render-pass-6 campaign, PHASE2 (item 2.6) - extracted out of
 // ExecuteCompiledGraph() for readability, zero behavior change - see
 // PHASE2_EXECUTE_COMPILED_GRAPH_EXTRACTION.md. `depthHandle` alone signals
-// "no depth write this call" via its own IsValid() (see this method's
-// declaration in RenderGraph.h for the full reasoning) - identical logic/
-// identical produced VkRenderingAttachmentInfo fields to what used to be
-// written inline.
-std::optional<VkRenderingAttachmentInfo> RenderGraph::BuildDepthAttachmentInfo(
-    const PassRecord& pass, const std::vector<PhysicalTexture>& physicalTextures, TextureHandle depthHandle) const
+// "no plain-Texture depth write this call" via its own IsValid() (see this
+// method's declaration in RenderGraph.h for the full reasoning) - falls back
+// to pass.arrayLayerAttachment (a DEPTH-kind array-layer attachment) when
+// that isn't set, identical produced VkRenderingAttachmentInfo fields either
+// way.
+RenderGraph::DepthAttachmentResult RenderGraph::BuildDepthAttachmentInfo(const PassRecord& pass,
+    const std::vector<PhysicalTexture>& physicalTextures,
+    const std::vector<PhysicalTextureArray>& physicalTextureArrays, TextureHandle depthHandle) const
 {
-    if (!depthHandle.IsValid()) {
-        return std::nullopt;
+    DepthAttachmentResult result;
+
+    // Defensive - these two depth-target sources must never both be
+    // populated for one pass (catches an authoring mistake instead of
+    // silently keeping the plain-Texture one and dropping the
+    // array-layer one).
+    assert((!depthHandle.IsValid() || !pass.arrayLayerAttachment.has_value() ||
+               pass.arrayLayerAttachment->handle.index >= physicalTextureArrays.size() ||
+               !physicalTextureArrays[pass.arrayLayerAttachment->handle.index].target.hasDepth) &&
+           "RenderGraph::BuildDepthAttachmentInfo: pass declared BOTH a plain Texture depth "
+           "write and a DEPTH array-layer attachment - at most one depth target per pass.");
+
+    if (depthHandle.IsValid()) {
+        const PhysicalTexture& depthTex = physicalTextures[depthHandle.index];
+        result.extent = depthTex.target.extent;
+
+        VkRenderingAttachmentInfo depthAttachment{};
+        depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+        depthAttachment.imageView = depthTex.target.depthImageView;
+        depthAttachment.imageLayout = depthTex.target.depthHasStencil
+            ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+            : VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+        depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        if (pass.depthClearValue.has_value()) {
+            depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+            depthAttachment.clearValue.depthStencil = { *pass.depthClearValue, 0 };
+        } else {
+            depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+        }
+        result.info = depthAttachment;
+        return result;
     }
 
-    const PhysicalTexture& depthTex = physicalTextures[depthHandle.index];
-    VkRenderingAttachmentInfo depthAttachment{};
-    depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    depthAttachment.imageView = depthTex.target.depthImageView;
-    depthAttachment.imageLayout = depthTex.target.depthHasStencil
-        ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-        : VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
-    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    if (pass.depthClearValue.has_value()) {
-        depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        depthAttachment.clearValue.depthStencil = { *pass.depthClearValue, 0 };
-    } else {
-        depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+    if (pass.arrayLayerAttachment.has_value()) {
+        const ArrayLayerAttachmentDesc& arrDesc = *pass.arrayLayerAttachment;
+        assert(arrDesc.handle.index < physicalTextureArrays.size() &&
+            physicalTextureArrays[arrDesc.handle.index].resolved &&
+            "RenderGraph::BuildDepthAttachmentInfo: pass.arrayLayerAttachment was never resolved.");
+        const PhysicalTextureArray& arr = physicalTextureArrays[arrDesc.handle.index];
+        if (arr.target.hasDepth) {
+            result.extent = arr.target.extent;
+
+            VkRenderingAttachmentInfo depthAttachment{};
+            depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+            depthAttachment.imageView = arr.target.LayerView(arrDesc.layerIndex);
+            // TextureArray2D never allocates a stencil aspect - see
+            // TextureArray2D.cpp's own constructor (always
+            // VK_IMAGE_ASPECT_DEPTH_BIT alone when hasDepth == true).
+            depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+            depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            if (arrDesc.clearDepth.has_value()) {
+                depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+                depthAttachment.clearValue.depthStencil = { *arrDesc.clearDepth, 0 };
+            } else {
+                depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+            }
+            result.info = depthAttachment;
+        }
     }
-    return depthAttachment;
+
+    return result;
 }
 
 // render-pass-6 campaign, PHASE2 (item 2.6) - extracted verbatim out of
@@ -706,12 +797,12 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         // own ColorAttachmentDesc doc comment). Depth is UNCHANGED - still
         // found via the exact same pass.writes scan as before (a pass has at
         // most one depth/stencil attachment - out of scope for this
-        // campaign, see task_manager/mrt-1/PHASE0_MASTER_STRATEGY.md). A
-        // pass with no color attachments at all (e.g. a transfer-only/
-        // compute-only pass) gets no vkCmdBeginRendering bracket at all -
-        // its `execute` callback is invoked with a zero-extent PassContext
-        // and is expected to record whatever non-rendering Vulkan work it
-        // needs directly against `cmd`.
+        // campaign, see task_manager/mrt-1/PHASE0_MASTER_STRATEGY.md). Only a
+        // pass with no color attachment, no plain-Texture depth write, AND
+        // no array-layer attachment (pass.arrayLayerAttachment) at all gets
+        // no vkCmdBeginRendering bracket - its `execute` callback is then
+        // invoked with a zero-extent PassContext and is expected to record
+        // whatever non-rendering Vulkan work it needs directly against `cmd`.
         // render-pass-6 campaign, PHASE2 (item 2.6) - `hasDepthWrite` (the
         // original standalone bool this loop used to also maintain) was
         // dropped: depthHandle.IsValid() is exactly that same signal now
@@ -727,14 +818,15 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
                 depthHandle = usage.texture;
             }
         }
-        // This equivalence (hasColorWrite == !pass.colorAttachments.empty())
-        // holds because WriteColorAttachment() (PHASE1) is the ONLY call
-        // site anywhere in this codebase that ever constructs a
-        // ColorAttachmentWrite usage, and it ALWAYS pushes onto both
-        // pass.writes AND pass.colorAttachments in lockstep - see this
-        // campaign's own PHASE2 strategy document, Step 2, for the full
-        // "load-bearing fact" analysis.
-        const bool hasColorWrite = !pass.colorAttachments.empty();
+        // The bracket-opening condition is a three-way OR: a plain color
+        // attachment, a plain-Texture depth write, or an array-layer
+        // attachment (color or depth) - WriteColorAttachment() (PHASE1) is
+        // still the only call site that ever constructs a
+        // ColorAttachmentWrite usage, always in lockstep with
+        // pass.colorAttachments; WriteArrayLayer() is the array-layer
+        // sibling, always in lockstep with pass.arrayLayerAttachment.
+        const bool hasAnyAttachment =
+            !pass.colorAttachments.empty() || depthHandle.IsValid() || pass.arrayLayerAttachment.has_value();
 
         // render-pass-6 campaign, PHASE2 (item 2.6) - BuildPassContext()
         // extracted below (see this class's own header comment on that
@@ -747,7 +839,7 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
             cmd, physicalTextures, physicalBuffers, physicalVolumeTextures, physicalTextureArrays, passDrawStats);
 
         bool didBeginRendering = false;
-        if (hasColorWrite) {
+        if (hasAnyAttachment) {
             // render-pass-6 campaign, PHASE2 (item 2.6) - BuildColorAttachmentInfos()
             // extracted below; this function still owns the
             // FindMismatchedColorAttachmentExtent() check, the
@@ -756,7 +848,7 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
             // PHASE2_EXECUTE_COMPILED_GRAPH_EXTRACTION.md, Step 3.2.
             std::vector<VkExtent2D> resolvedExtents;
             const std::vector<VkRenderingAttachmentInfo> colorAttachmentInfos =
-                BuildColorAttachmentInfos(pass, physicalTextures, resolvedExtents);
+                BuildColorAttachmentInfos(pass, physicalTextures, physicalTextureArrays, resolvedExtents);
 
             // LOCKED (see task_manager/mrt-1/PHASE2_EXECUTE_LAYER_MRT_RECORDING.md's
             // own Step 3.2 "Decision 2"): a real, unconditional throw - never
@@ -764,32 +856,47 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
             // away. Built on the pure, Tier-1-tested decision function above
             // (RenderGraphTypes.h/.cpp), so this exact check has real,
             // VkDevice-free test coverage (RenderGraphTypesTests.cpp).
-            if (const std::optional<std::size_t> mismatchIndex =
-                    FindMismatchedColorAttachmentExtent(resolvedExtents)) {
-                const VkExtent2D& first = resolvedExtents[0];
-                const VkExtent2D& bad = resolvedExtents[*mismatchIndex];
-                throw std::runtime_error(
-                    "RenderGraph::ExecuteCompiledGraph: pass \"" +
-                    std::string(pass.name != nullptr ? pass.name : "<unnamed>") +
-                    "\" declared color attachments with mismatched extents - attachment 0 is " +
-                    std::to_string(first.width) + "x" + std::to_string(first.height) + ", attachment " +
-                    std::to_string(*mismatchIndex) + " is " + std::to_string(bad.width) + "x" +
-                    std::to_string(bad.height) +
-                    " - every color attachment on one pass must share the same extent (G-buffer-style "
-                    "targets are always rendered at the same resolution).");
+            // FindMismatchedColorAttachmentExtent() already returns nullopt
+            // vacuously for size() <= 1, so the size() > 1 guard below is a
+            // cheap, purely-for-clarity short-circuit, not a required fix.
+            if (resolvedExtents.size() > 1) {
+                if (const std::optional<std::size_t> mismatchIndex =
+                        FindMismatchedColorAttachmentExtent(resolvedExtents)) {
+                    const VkExtent2D& first = resolvedExtents[0];
+                    const VkExtent2D& bad = resolvedExtents[*mismatchIndex];
+                    throw std::runtime_error(
+                        "RenderGraph::ExecuteCompiledGraph: pass \"" +
+                        std::string(pass.name != nullptr ? pass.name : "<unnamed>") +
+                        "\" declared color attachments with mismatched extents - attachment 0 is " +
+                        std::to_string(first.width) + "x" + std::to_string(first.height) + ", attachment " +
+                        std::to_string(*mismatchIndex) + " is " + std::to_string(bad.width) + "x" +
+                        std::to_string(bad.height) +
+                        " - every color attachment on one pass must share the same extent (G-buffer-style "
+                        "targets are always rendered at the same resolution).");
+                }
             }
-            const VkExtent2D firstExtent = resolvedExtents[0];
 
-            const std::optional<VkRenderingAttachmentInfo> depthAttachmentInfo =
-                BuildDepthAttachmentInfo(pass, physicalTextures, depthHandle);
+            const DepthAttachmentResult depthResult =
+                BuildDepthAttachmentInfo(pass, physicalTextures, physicalTextureArrays, depthHandle);
+
+            // A depth-only pass (array-layer OR plain Texture) has an EMPTY
+            // resolvedExtents - the render-area/viewport size must then come
+            // from the depth attachment itself. Never index resolvedExtents[0]
+            // unconditionally once a depth-only pass can reach this code.
+            VkExtent2D firstExtent{};
+            if (!resolvedExtents.empty()) {
+                firstExtent = resolvedExtents[0];
+            } else if (depthResult.info.has_value()) {
+                firstExtent = depthResult.extent;
+            }
 
             VkRenderingInfo renderingInfo{};
             renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
             renderingInfo.renderArea = { { 0, 0 }, firstExtent };
             renderingInfo.layerCount = 1;
             renderingInfo.colorAttachmentCount = static_cast<std::uint32_t>(colorAttachmentInfos.size());
-            renderingInfo.pColorAttachments = colorAttachmentInfos.data();
-            renderingInfo.pDepthAttachment = depthAttachmentInfo.has_value() ? &depthAttachmentInfo.value() : nullptr;
+            renderingInfo.pColorAttachments = colorAttachmentInfos.empty() ? nullptr : colorAttachmentInfos.data();
+            renderingInfo.pDepthAttachment = depthResult.info.has_value() ? &depthResult.info.value() : nullptr;
 
             vkCmdBeginRendering(cmd, &renderingInfo);
 

@@ -1,4 +1,6 @@
-﻿#include "VulkanInstance.h"
+#include "VulkanInstance.h"
+
+#include "../../Core/Logging.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -33,15 +35,14 @@ VKAPI_ATTR VkBool32 VKAPI_CALL DebugMessengerCallback(
     const VkDebugUtilsMessengerCallbackDataEXT* callbackData,
     void* /*userData*/)
 {
-    const char* severityText = "INFO";
+    const std::string message = callbackData != nullptr ? callbackData->pMessage : "(no message)";
     if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
-        severityText = "ERROR";
+        GTE_LOG_ERROR("Vulkan", message);
     } else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
-        severityText = "WARNING";
+        GTE_LOG_WARNING("Vulkan", message);
+    } else {
+        GTE_LOG_INFO("Vulkan", message);
     }
-
-    std::fprintf(stderr, "[Vulkan][%s] %s\n", severityText,
-        callbackData != nullptr ? callbackData->pMessage : "(no message)");
     return VK_FALSE;
 }
 

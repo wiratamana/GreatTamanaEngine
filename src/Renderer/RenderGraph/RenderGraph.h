@@ -465,29 +465,47 @@ private:
     // One VkRenderingAttachmentInfo per pass.colorAttachments entry, in that
     // exact order (== shader layout(location = N) out) - identical logic to
     // what used to be written inline inside ExecuteCompiledGraph()'s
-    // `if (hasColorWrite) { ... }` block's own color-attachment loop. Also
-    // fills `outResolvedExtents` with each attachment's resolved VkExtent2D (in
-    // the same order), for FindMismatchedColorAttachmentExtent()'s own
-    // existing pure decision function to consume - the caller (
-    // ExecuteCompiledGraph()) is still the one that calls
-    // FindMismatchedColorAttachmentExtent() and throws on mismatch, unchanged.
+    // `if (hasColorWrite) { ... }` block's own color-attachment loop, PLUS
+    // (appended at the end, after every pass.colorAttachments entry) a
+    // single COLOR-kind array-layer attachment if pass.arrayLayerAttachment
+    // is set and its underlying array is not a depth one (a depth-kind
+    // array-layer attachment is handled entirely by BuildDepthAttachmentInfo()
+    // below instead). Also fills `outResolvedExtents` with each attachment's
+    // resolved VkExtent2D (in the same order), for
+    // FindMismatchedColorAttachmentExtent()'s own existing pure decision
+    // function to consume - the caller (ExecuteCompiledGraph()) is still the
+    // one that calls FindMismatchedColorAttachmentExtent() and throws on
+    // mismatch, unchanged.
     std::vector<VkRenderingAttachmentInfo> BuildColorAttachmentInfos(
         const PassRecord& pass, const std::vector<PhysicalTexture>& physicalTextures,
+        const std::vector<PhysicalTextureArray>& physicalTextureArrays,
         std::vector<VkExtent2D>& outResolvedExtents) const;
 
-    // The depth/stencil attachment for this pass, if it declared one - mirrors
-    // BuildColorAttachmentInfos() above, just for the single depth attachment a
-    // pass may have. `depthHandle` alone is sufficient to signal "no depth
-    // write this call": a default-constructed TextureHandle (what the caller's
-    // own `TextureHandle depthHandle;` local already is, unless the writes scan
-    // below finds a real DepthStencilAttachmentReadWrite usage) has
-    // `index == kInvalidIndex`, so `depthHandle.IsValid()` is exactly the
-    // `hasDepthWrite` signal this method needs - no separate bool parameter
-    // required. Returns std::nullopt whenever `!depthHandle.IsValid()` -
-    // identical logic/identical produced VkRenderingAttachmentInfo fields to
-    // what used to be written inline.
-    std::optional<VkRenderingAttachmentInfo> BuildDepthAttachmentInfo(
-        const PassRecord& pass, const std::vector<PhysicalTexture>& physicalTextures, TextureHandle depthHandle) const;
+    // The depth attachment for this pass - either a plain Texture-kind depth
+    // write, or an array-layer attachment whose underlying resource is a
+    // DEPTH array (TextureArrayTarget::hasDepth == true). `extent` is only
+    // meaningful when `info` is set, and is this attachment's own resolved
+    // size - needed by the caller as a fallback render-area/viewport size
+    // for a pass with ZERO color attachments (depth-only).
+    struct DepthAttachmentResult {
+        std::optional<VkRenderingAttachmentInfo> info;
+        VkExtent2D extent{};
+    };
+
+    // Mirrors BuildColorAttachmentInfos() above, just for the single depth
+    // attachment a pass may have. `depthHandle` alone is sufficient to
+    // signal "no plain-Texture depth write this call": a default-constructed
+    // TextureHandle (what the caller's own `TextureHandle depthHandle;`
+    // local already is, unless the writes scan below finds a real
+    // DepthStencilAttachmentReadWrite usage) has `index == kInvalidIndex`,
+    // so `depthHandle.IsValid()` is exactly the `hasDepthWrite` signal this
+    // method needs - no separate bool parameter required. Falls back to
+    // pass.arrayLayerAttachment when `!depthHandle.IsValid()` and that
+    // attachment's underlying array is a depth one; returns an empty
+    // DepthAttachmentResult (info == std::nullopt) otherwise.
+    DepthAttachmentResult BuildDepthAttachmentInfo(const PassRecord& pass,
+        const std::vector<PhysicalTexture>& physicalTextures,
+        const std::vector<PhysicalTextureArray>& physicalTextureArrays, TextureHandle depthHandle) const;
 
     // The two passive-registration loops that used to run inline at the bottom
     // of ExecuteCompiledGraph(), extracted verbatim (same fields, same skip
@@ -725,6 +743,14 @@ struct PassContext {
         VkImageView view = VK_NULL_HANDLE;
     };
 
+    // Per-layer sibling of ResolvedTextureArray above - view AND image (an
+    // attachment needs both: view for VkRenderingAttachmentInfo, image for a
+    // future manual barrier/debug dump).
+    struct ResolvedTextureArrayLayer {
+        VkImageView view = VK_NULL_HANDLE;
+        VkImage image = VK_NULL_HANDLE;
+    };
+
     // render-pass-6 campaign, PHASE3 (item 2.7) - plain, non-owning pointers
     // into RenderGraph::ExecuteCompiledGraph()'s own stack-local physicalX
     // vectors, set exactly once by RenderGraph::BuildPassContext() (see
@@ -811,6 +837,13 @@ struct PassContext {
     // consumer needs it; do not speculatively add a field here until a
     // real call site proves it needs more).
     ResolvedTextureArray resolveTextureArray(TextureArrayHandle handle) const noexcept;
+
+    // Resolves a layer this pass declared via WriteArrayLayer() into its
+    // already-live {view, image} pair - safe-null for anything not resolved
+    // this frame (mirrors resolveReadTexture()'s own discipline). Only an
+    // index bounds check beyond that is needed - the view comes straight
+    // from TextureArrayTarget::LayerView().
+    ResolvedTextureArrayLayer resolveArrayLayer(TextureArrayHandle handle, std::uint32_t layerIndex) const noexcept;
 
     // render-pass-6 campaign, PHASE3 (item 2.7) - recordDraw/
     // recordIndirectDraw deliberately stay small, non-owning CALLABLE
