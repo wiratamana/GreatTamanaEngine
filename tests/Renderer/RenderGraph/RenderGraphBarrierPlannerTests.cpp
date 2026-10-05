@@ -597,6 +597,62 @@ TEST(RenderGraphBarrierPlannerTest, RegressionMatchesFrameRecordersRenderOffscre
     EXPECT_EQ(barrier.newLayout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
+// --- DecideTextureArrayLayerTransition() - per-layer state tracking -------
+//
+// Proves two per-layer writes against the SAME handle, DIFFERENT layer
+// indices, do not alias: each layer's own ResourceState entry is tracked
+// independently, so both report "barrier required" even after the first
+// layer's own entry has already transitioned.
+TEST(RenderGraphBarrierPlannerTest, DecideTextureArrayLayerTransitionDoesNotAliasAcrossLayers)
+{
+    // Two independent layerStates entries, both default-constructed (a
+    // fresh resource, never touched).
+    ResourceState layer0State{};
+    ResourceState layer1State{};
+
+    const ResourceState next = RequiredStateFor(ResourceAccess::DepthStencilAttachmentReadWrite, /*isDepthResource=*/true);
+
+    const TextureArraySubresourceDecision decision0 =
+        DecideTextureArrayLayerTransition(layer0State, VK_IMAGE_ASPECT_DEPTH_BIT, /*layerIndex=*/0, next);
+    // Mirrors the real per-layer update step - done here explicitly so
+    // decision1 below observes the POST-update layer0State, exactly as the
+    // second of two real per-layer passes would.
+    layer0State = next;
+
+    const TextureArraySubresourceDecision decision1 =
+        DecideTextureArrayLayerTransition(layer1State, VK_IMAGE_ASPECT_DEPTH_BIT, /*layerIndex=*/1, next);
+
+    // The assertion this test exists for: layer 1's decision is independent
+    // of layer 0 already having transitioned to `next` - both require a
+    // barrier, since both layers independently started untouched.
+    EXPECT_TRUE(decision0.requiresBarrier);
+    EXPECT_TRUE(decision1.requiresBarrier);
+
+    EXPECT_EQ(decision0.range.baseArrayLayer, 0u);
+    EXPECT_EQ(decision1.range.baseArrayLayer, 1u);
+    EXPECT_EQ(decision0.range.layerCount, 1u);
+    EXPECT_EQ(decision1.range.layerCount, 1u);
+    EXPECT_EQ(decision0.range.aspectMask, static_cast<VkImageAspectFlags>(VK_IMAGE_ASPECT_DEPTH_BIT));
+}
+
+// A second call against the SAME, now-updated layer state correctly reports
+// "no barrier needed" - the behavior that distinguishes "correctly per-layer"
+// from "no tracking at all".
+TEST(RenderGraphBarrierPlannerTest, DecideTextureArrayLayerTransitionSkipsRedundantBarrierForSameLayer)
+{
+    ResourceState layerState{};
+    const ResourceState next = RequiredStateFor(ResourceAccess::ShaderRead, false);
+
+    const TextureArraySubresourceDecision first =
+        DecideTextureArrayLayerTransition(layerState, VK_IMAGE_ASPECT_COLOR_BIT, 0, next);
+    layerState = next;
+    const TextureArraySubresourceDecision second =
+        DecideTextureArrayLayerTransition(layerState, VK_IMAGE_ASPECT_COLOR_BIT, 0, next);
+
+    EXPECT_TRUE(first.requiresBarrier);
+    EXPECT_FALSE(second.requiresBarrier);
+}
+
 // --- isDepthResource assertion guard (debug builds only) -------------------
 //
 // Guarded by NDEBUG since a release build compiles assert() down to a

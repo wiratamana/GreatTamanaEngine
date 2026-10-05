@@ -97,6 +97,64 @@ TEST(RenderGraphBuilderTest, TextureArrayDescDefaultsToDepthTrue)
     EXPECT_EQ(desc.arrayLayers, 1u);
 }
 
+// WriteArrayLayer() - a pass declares a write to exactly one layer/face of
+// a TextureArray resource, recording both a per-layer ResourceUsage and a
+// dedicated attachment descriptor - mirrors WriteColorAttachment()'s own
+// lockstep writes/colorAttachments convention.
+TEST(RenderGraphBuilderTest, WriteArrayLayerRecordsArrayLayerIndexAndAttachmentDesc)
+{
+    RenderGraphBuilder builder;
+    TextureArrayDesc desc;
+    desc.width = 64;
+    desc.height = 64;
+    desc.arrayLayers = 4;
+    desc.hasDepth = true;
+    const TextureArrayHandle handle = builder.CreateTextureArray("Cascades", desc);
+
+    builder.AddPass(
+        "WritesLayer2",
+        [handle](RenderGraphBuilder::PassBuilder& pass) {
+            pass.WriteArrayLayer(handle, 2, ResourceAccess::DepthStencilAttachmentReadWrite);
+        },
+        NoOpExecute);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes.size(), 1u);
+    const PassRecord& pass = input.passes[0];
+
+    ASSERT_EQ(pass.writes.size(), 1u);
+    EXPECT_EQ(pass.writes[0].kind, ResourceKind::TextureArray);
+    EXPECT_EQ(pass.writes[0].textureArray, handle);
+    ASSERT_TRUE(pass.writes[0].arrayLayerIndex.has_value());
+    EXPECT_EQ(*pass.writes[0].arrayLayerIndex, 2u);
+
+    ASSERT_TRUE(pass.arrayLayerAttachment.has_value());
+    EXPECT_EQ(pass.arrayLayerAttachment->handle, handle);
+    EXPECT_EQ(pass.arrayLayerAttachment->layerIndex, 2u);
+}
+
+// Regression guard: a whole-array write (WriteTextureArray()) must leave
+// arrayLayerIndex/arrayLayerAttachment empty - the per-layer path above must
+// never affect this pre-existing, unmodified behavior.
+TEST(RenderGraphBuilderTest, WriteTextureArrayLeavesArrayLayerIndexEmpty)
+{
+    RenderGraphBuilder builder;
+    TextureArrayDesc desc;
+    const TextureArrayHandle handle = builder.CreateTextureArray("WholeArray", desc);
+
+    builder.AddPass(
+        "WritesWhole",
+        [handle](RenderGraphBuilder::PassBuilder& pass) {
+            pass.WriteTextureArray(handle, ResourceAccess::ComputeShaderWrite);
+        },
+        NoOpExecute);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes[0].writes.size(), 1u);
+    EXPECT_FALSE(input.passes[0].writes[0].arrayLayerIndex.has_value());
+    EXPECT_FALSE(input.passes[0].arrayLayerAttachment.has_value());
+}
+
 TEST(RenderGraphBuilderTest, CreateBufferMintsDistinctHandlesEvenWithIdenticalDesc)
 {
     RenderGraphBuilder builder;
