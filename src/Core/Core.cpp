@@ -5,19 +5,13 @@
 // (Core.h itself only ever forward-declares IEditorLayer).
 #include "../Editor/EditorLayer.h"
 
-// editor-core-separation-1 campaign, PHASE13
-// (PHASE13_CORE_FRAME_ORCHESTRATION_EXTRACTION.md) - every one of these was
-// already an unconditional, gte_core-safe #include in Application.cpp before
-// this phase (RenderPasses.h/AtmospherePassSequence.h/RenderPassViewData.h
-// live under src/Application/, but that whole folder already sits inside the
-// gte_core CMake target's own source list - see the design doc's Section 2.2
-// inventory - so no file physically moved for this phase; only WHICH
-// TRANSLATION UNIT includes them changed).
-#include "../Features/Atmosphere/AtmospherePassSequence.h"
+// RenderPasses.h/FrameProfiler.h/ScopeTimer.h back "GpuSkinning"/"Present"/
+// "ClearViewTarget" below - RenderPasses.h lives under src/Application/, but
+// that whole folder already sits inside the gte_core CMake target's own
+// source list.
 #include "../Application/RenderPasses.h"
 #include "../Profiling/FrameProfiler.h"
 #include "../Profiling/ScopeTimer.h"
-#include "../Features/Atmosphere/AtmosphereParameters.h"
 #include "../Renderer/GpuSkinning/GpuSkinningPipelines.h"
 #include "../Renderer/GpuSkinning/GpuSkinningRenderPassTags.h"
 #include "../Renderer/Culling/CullingPipelines.h"
@@ -113,46 +107,20 @@ constexpr double kFixedStepSeconds = 1.0 / 60.0;
 using rg::operator""_passId;
 constexpr rg::RenderPassId kGpuSkinningOutputsKey = "GpuSkinning.OutputBuffers"_passId;
 
-// render-pass-3 campaign, PHASE3 (Step 3.3) - every remaining blackboard key
-// this phase's own provider set needs.
-constexpr rg::RenderPassId kAtmosphereSharedLutKey = "Atmosphere.SharedLuts"_passId;
-constexpr rg::RenderPassId kAtmosphereViewLutGameKey = "Atmosphere.ViewLut.Game"_passId;
-constexpr rg::RenderPassId kAtmosphereViewLutSceneKey = "Atmosphere.ViewLut.Scene"_passId;
-constexpr rg::RenderPassId kGameSkyBackgroundCallbackKey = "Atmosphere.GameSkyBackgroundCallback"_passId;
-
-// editor-core-separation-3 campaign, PHASE3
-// (PHASE3_RUNTIME_RENDER_FEATURE_CAPABILITY.md) - REAL, LIVE-TESTING-
-// DISCOVERED addition (see ask_questions round-trip in this phase's own
-// completion report): "PluginRenderFeatures" must draw on top of the TRUE
-// final, POST-atmosphere-composite image ("GameViewComposited"/
-// "SceneViewComposited" - the one GET /get_game_view/the "Game" panel
-// actually display, per FrameDebuggerHistory.h's own doc comment on
-// compositedPreview), never the raw pre-composite "GameView"/"SceneView"
-// handle alone - a plugin pass writing only the latter is invisible in the
-// actually-displayed image, since nothing re-composites after it runs this
-// same frame. "AtmosphereComposite" publishes its own freshly-computed
-// composited TextureHandle under one of these two keys (mirroring
-// kAtmosphereViewLutGameKey/kAtmosphereViewLutSceneKey's own per-view-key
-// precedent immediately above) so "PluginRenderFeatures" can fetch it back.
-constexpr rg::RenderPassId kGameCompositedOutputKey = "Atmosphere.CompositedOutput.Game"_passId;
-constexpr rg::RenderPassId kSceneCompositedOutputKey = "Atmosphere.CompositedOutput.Scene"_passId;
-
-// Generic, feature-free successors to the two reserved keys immediately
-// above - see Core::ViewCompositedOutputKey()'s own doc comment (Core.h).
-// Unused until a feature's own composite pass publishes under them.
+// Generic, feature-free blackboard keys superseding this engine's old,
+// feature-prefixed composited-output keys - see Core::ViewCompositedOutputKey()'s
+// own doc comment (Core.h).
 constexpr rg::RenderPassId kViewCompositedOutputGameKey = "Core.ViewCompositedOutput.Game"_passId;
 constexpr rg::RenderPassId kViewCompositedOutputSceneKey = "Core.ViewCompositedOutput.Scene"_passId;
+
+// Generic key a feature may Publish() a Game-View-only replay callback
+// under for BuildFrame()'s own Frame Debugger replay dispatch - see this
+// file's own gameSkyBackgroundCallbackForReplay fetch, below.
+constexpr rg::RenderPassId kGameSkyBackgroundReplayCallbackKey = "Core.GameSkyBackgroundReplayCallback"_passId;
 
 // The scene-service slot index "SceneServicesExampleShadowFeature" claims at
 // startup and publishes its blackboard entry under every frame.
 constexpr std::uint32_t kSceneServicesExampleShadowSlotIndex = 0;
-
-// render-pass-3 campaign, PHASE3 (Step 3.3) - "AtmosphereSharedLut"'s own
-// blackboard payload.
-struct AtmosphereSharedLutBlackboardEntry {
-    AtmosphereSharedLutHandles handles;
-    AtmosphereParametersGpu parameters;
-};
 
 // Phase 4C - the one, tiny bridge from Renderer's own (Profiling-free)
 // GpuTimingSample::Status into Profiling::GpuSampleStatus.
@@ -346,8 +314,8 @@ void Core::RegisterBuiltinCapabilityOrchestrators()
     // editor-core-separation-6 campaign, PHASE4
     // (PHASE4_RENDER_FEATURE_COMPOSITOR_CORE_AND_ORDERING.md) - the real
     // `_v2` render-feature compositing pipeline - reuses the SAME m_renderer
-    // member AddAtmosphereCompositePass()/every other real pass in this file
-    // already reads (never a second, duplicate Renderer instance).
+    // member every other real pass in this file already reads (never a second,
+    // duplicate Renderer instance).
     //
     // editor-core-separation-6 campaign, PHASE7
     // (PHASE7_RENDER_GRAPH_PANEL_VISIBILITY.md) - m_renderFeatureCompositorPtr
@@ -391,7 +359,7 @@ void Core::LoadProjectAssemblies(const std::filesystem::path& outputDirectory, E
 // ProjectAssemblyHost, which only ever runs when GTE_ENABLE_PROJECT_ASSEMBLIES
 // is already on). m_offscreenRenderPipeline is confirmed the correct target:
 // it is the pipeline every production Game-View/Scene-View pass
-// ("AtmosphereSharedLut", "GpuSkinning", "AtmosphereViewLut", "RenderOpaque",
+// ("GpuSkinning", "RenderOpaque",
 // "GpuDrivenBatches", ...) registers onto (see
 // RegisterOffscreenRenderPipelineProviders() below) - m_presentRenderPipeline
 // is the separate, narrower pipeline used ONLY for the one "Present"
@@ -743,29 +711,13 @@ RenderTexture* Core::DispatchFinalizeForSamplingHook(const char* name, VkCommand
     return nullptr;
 }
 
-// editor-core-separation-6 campaign, PHASE2
-// (PHASE2_PLUGIN_CAPABILITY_ORCHESTRATOR_REGISTRY_AND_RENDER_FEATURE_MIGRATION.md,
-// Step 3.3) - the ENTIRE body is exactly the 3 lines that already computed
-// isGameView/compositedKey/pluginTarget inline in the old "PluginRenderFeatures"
-// provider body, plus the view's extent (needed by RenderFeatureCompositor,
-// PHASE4 - LegacyRenderFeatureOrchestrator itself simply never reads
-// `.extent`). Keeps kGameCompositedOutputKey/kSceneCompositedOutputKey
-// exactly where they already are (below) - no risk of a duplicate/
-// out-of-sync copy of those two rg::RenderPassId constants.
-//
-// editor-core-separation-6 campaign, PHASE4
-// (PHASE4_RENDER_FEATURE_COMPOSITOR_CORE_AND_ORDERING.md) - gained a real
-// `.sampler` resolution step (see PluginRenderFeatureTargetInfo::sampler's
-// own doc comment, Core.h, for why this method is no longer `const`).
-// `compositedTexture` resolves the SAME persistent RenderTexture
-// "AtmosphereComposite" (above) just registered `composited` under this
-// exact frame - `AtmosphereLutRenderer::CompositedOutput()` looks it up by
-// the SAME literal name ("GameViewComposited"/"SceneViewComposited")
-// "AtmosphereComposite" passed to `AddAtmosphereCompositePass()`'s own
-// `outputTextureName` parameter. Falls back to `viewData->renderTexture`'s
-// own sampler (the raw, pre-composite view target) in the same defensive
-// case `.target` itself already falls back to `viewData->colorTarget` -
-// see this method's own pre-existing caveat about that fallback case above.
+// The 3 lines that already computed isGameView/compositedKey/pluginTarget
+// inline in the old "PluginRenderFeatures" provider body, plus the view's
+// extent (needed by RenderFeatureCompositor). Falls back to
+// `viewData->colorTarget`/`viewData->renderTexture`'s own sampler whenever
+// nothing was published this frame under the generic composited-output key
+// (e.g. the deferred composite pass disabled, or no feature publishing a
+// composited output exists at all).
 std::optional<Core::PluginRenderFeatureTargetInfo> Core::FindPluginRenderFeatureTarget(
     const rg::RenderPassFrameContext& frame)
 {
@@ -774,20 +726,15 @@ std::optional<Core::PluginRenderFeatureTargetInfo> Core::FindPluginRenderFeature
         return std::nullopt;
     }
     const bool isGameView = (frame.currentView == rg::RenderViewId::Named("Game"));
-    const rg::RenderPassId compositedKey = isGameView ? kGameCompositedOutputKey : kSceneCompositedOutputKey;
-    const std::optional<rg::TextureHandle> composited = frame.blackboard.Fetch<rg::TextureHandle>(compositedKey);
+    const std::optional<ViewCompositedOutputEntry> composited =
+        frame.blackboard.Fetch<ViewCompositedOutputEntry>(ViewCompositedOutputKey(isGameView));
 
     PluginRenderFeatureTargetInfo info;
-    info.target = composited.value_or(viewData->colorTarget);
+    info.target = composited.has_value() ? composited->handle : viewData->colorTarget;
     info.extent = viewData->renderTexture != nullptr ? viewData->renderTexture->Extent() : VkExtent2D{};
-
-    RenderTexture* compositedTexture = composited.has_value()
-        ? m_atmosphereLutRenderer.CompositedOutput(isGameView ? "GameViewComposited" : "SceneViewComposited")
-        : nullptr;
-    info.sampler = compositedTexture != nullptr
-        ? compositedTexture->Sampler()
+    info.sampler = (composited.has_value() && composited->sampler != VK_NULL_HANDLE)
+        ? composited->sampler
         : (viewData->renderTexture != nullptr ? viewData->renderTexture->Sampler() : VK_NULL_HANDLE);
-
     return info;
 }
 
@@ -806,21 +753,6 @@ void Core::RegisterOffscreenRenderPipelineProviders()
     // editor-core-separation-8 campaign, PHASE1 - see RenderPassToggleRegistry.h's
     // own header comment for the full contract.
     m_offscreenRenderPipeline.SetPassToggleRegistry(&m_renderPassToggleRegistry);
-
-    // "AtmosphereSharedLut" - ProviderScope::Once, BeforeEverything.
-    m_offscreenRenderPipeline.Register("AtmosphereSharedLut", rg::ProviderScope::Once,
-        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&) {
-            AtmosphereSharedLutBlackboardEntry entry;
-            entry.parameters = MakeDefaultEarthAtmosphereParameters();
-            entry.parameters.groundAlbedo = entry.parameters.groundAlbedo * m_atmosphereSettings.groundAlbedoTint;
-            entry.handles = AddAtmosphereSharedLutPasses(
-                frame.builder, m_renderer, m_atmosphereLutRenderer, entry.parameters, &m_renderPassToggleRegistry);
-
-            frame.finalTextureOutputs.push_back(entry.handles.transmittanceLutHandle);
-            frame.finalTextureOutputs.push_back(entry.handles.multiScatteringLutHandle);
-
-            frame.blackboard.Publish<AtmosphereSharedLutBlackboardEntry>(kAtmosphereSharedLutKey, entry);
-        });
 
     // "GpuSkinning" - ProviderScope::Once.
     m_offscreenRenderPipeline.Register("GpuSkinning", rg::ProviderScope::Once,
@@ -880,59 +812,6 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 kGpuSkinningOutputsKey, m_gpuSkinningHandlesThisFrame);
         });
 
-    // "AtmosphereViewLut" - ProviderScope::PerActiveView, PreOpaques.
-    m_offscreenRenderPipeline.Register("AtmosphereViewLut", rg::ProviderScope::PerActiveView,
-        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&) {
-            const RenderPassViewData* viewData = FindViewData(frame.currentView);
-            if (viewData == nullptr) {
-                return;
-            }
-
-            const std::optional<AtmosphereSharedLutBlackboardEntry> sharedLuts =
-                frame.blackboard.Fetch<AtmosphereSharedLutBlackboardEntry>(kAtmosphereSharedLutKey);
-            if (!sharedLuts.has_value()) {
-                return;
-            }
-
-            const bool isGameView = (frame.currentView == rg::RenderViewId::Named("Game"));
-            const char* skyViewLutName = isGameView ? "AtmosphereSkyViewLut_GameView" : "AtmosphereSkyViewLut_SceneView";
-            const char* aerialVolumeName =
-                isGameView ? "AtmosphereAerialPerspectiveVolume_GameView" : "AtmosphereAerialPerspectiveVolume_SceneView";
-            const rg::ViewScope legacyViewScope = isGameView ? rg::ViewScope::GameView : rg::ViewScope::SceneView;
-
-            AtmosphereViewLutHandles viewLuts = AddAtmosphereViewLutPasses(frame.builder, m_renderer,
-                m_atmosphereLutRenderer, m_game.GetRegistry(), sharedLuts->parameters, m_atmosphereSettings,
-                sharedLuts->handles, viewData->eyeWorldPosition, viewData->viewProjection, skyViewLutName,
-                aerialVolumeName, legacyViewScope, &m_renderPassToggleRegistry);
-
-            frame.finalTextureOutputs.push_back(viewLuts.skyViewLutHandle);
-            frame.builder.KeepVolumeTextureOutput(viewLuts.aerialPerspectiveVolumeHandle);
-
-            // editor-core-separation-20 campaign, PHASE2 (Step 3.7, item 2b) -
-            // THE CONFIRMED CRASH FIX: viewLuts.aerialPerspectiveVolumeHandle can
-            // now legitimately be invalid this frame (e.g. AtmosphereTransmittanceLutPass
-            // disabled, cascading down) even though m_aerialPerspectiveVolumeViewStates
-            // still has a stale entry for aerialVolumeName from an earlier, successful
-            // frame - AddAerialPerspectiveVolumeDebugSlicePass() itself only checks
-            // MAP EXISTENCE, never THIS-FRAME HANDLE VALIDITY, so calling it
-            // unconditionally would declare pass.ReadVolumeTexture() against an
-            // invalid handle and crash the instant RenderGraph::Execute() tries to
-            // resolve it (EnsureVolumeTextureResolved() has no bounds check at all).
-            // LDD-5 still fully honored: AddAerialPerspectiveVolumeDebugSlicePass()'s
-            // own signature/body is untouched - only its caller gained this guard.
-            if (isGameView && viewLuts.aerialPerspectiveVolumeHandle.IsValid()) {
-                const rg::TextureHandle debugSlice = m_atmosphereLutRenderer.AddAerialPerspectiveVolumeDebugSlicePass(
-                    frame.builder, m_renderer, viewLuts.aerialPerspectiveVolumeHandle, aerialVolumeName,
-                    static_cast<std::uint32_t>(m_atmosphereSettings.aerialPerspectiveDebugSliceIndex),
-                    "AtmosphereAerialPerspectiveVolumeDebugSlice", rg::ViewScope::GameView,
-                    &m_renderPassToggleRegistry);
-                frame.finalTextureOutputs.push_back(debugSlice);
-            }
-
-            const rg::RenderPassId viewLutKey = isGameView ? kAtmosphereViewLutGameKey : kAtmosphereViewLutSceneKey;
-            frame.blackboard.Publish<AtmosphereViewLutHandles>(viewLutKey, viewLuts);
-        });
-
     // editor-core-separation-20 campaign, PHASE1 - "ClearViewTarget" -
     // ProviderScope::PerActiveView, BeforeEverything. The ONE guaranteed clear
     // of each active view's color+depth render target, decoupled from whether
@@ -968,10 +847,10 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             // persistent RenderTexture) gets NO automatic exemption from that
             // culling merely because it is externally visible outside the
             // graph. Nothing else in this file ever adds `viewTarget` itself to
-            // frame.finalTextureOutputs (only DERIVED handles - the Atmosphere
-            // LUT outputs, the composited output - are ever added as roots),
+            // frame.finalTextureOutputs (only DERIVED handles - feature LUT
+            // outputs, the composited output - are ever added as roots),
             // and the only pass that currently reads `viewTarget` back is
-            // "AtmosphereComposite" - so whenever that pass (or every pass,
+            // the deferred composite pass - so whenever that pass (or every pass,
             // this campaign's own primary repro case) is disabled/absent this
             // frame, NOTHING keeps this pass's own write alive without the line
             // below. This provider is the one pass guaranteed to run every
@@ -1104,7 +983,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 // the pass count immediately before and after invoking
                 // this feature's own callback (which declares its own
                 // real pass(es) IMMEDIATELY, directly against
-                // frame.builder - exactly like "AtmosphereViewLut"
+                // frame.builder - exactly like a registered pass provider
                 // already does), then hand the [before, after) range to
                 // FindPassesNotTaggedPreOpaque() (PHASE1,
                 // src/Core/Plugins/ProjectPreOpaqueCallback.h) - the PURE
@@ -1388,75 +1267,6 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             }
         });
 
-    // "DrawSkyBackground" - ProviderScope::PerActiveView, AfterOpaques.
-    m_offscreenRenderPipeline.Register("DrawSkyBackground", rg::ProviderScope::PerActiveView,
-        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
-            // editor-core-separation-22 campaign, PHASE1
-            // (task_manager/editor-core-separation-22/
-            // PHASE1_FIX_DRAWSKYBACKGROUND_TOGGLE_SIDE_CHANNEL_LEAK.md) -
-            // the confirmed root cause: this provider used to build
-            // `recordSkyBackground` and Publish() it to the blackboard
-            // UNCONDITIONALLY, before any toggle check - a disabled
-            // "DrawSkyBackground" pass still leaked its own visual effect
-            // through that cached callback into
-            // FrameDebuggerReplayPasses.cpp's own "sky step". This early
-            // guard runs BEFORE FindViewData()/any other work, for EVERY
-            // ProviderScope::PerActiveView invocation of this provider (once
-            // per active view, same frame) - so a disabled pass now performs
-            // NO side effect of any kind, for either view, this frame.
-            if (!rg::ShouldDeclareBuiltInPassThisFrame(&m_renderPassToggleRegistry, "DrawSkyBackground")) {
-                return;
-            }
-            const RenderPassViewData* viewData = FindViewData(frame.currentView);
-            if (viewData == nullptr) {
-                return;
-            }
-
-            const bool isGameView = (frame.currentView == rg::RenderViewId::Named("Game"));
-            const rg::RenderPassId viewLutKey = isGameView ? kAtmosphereViewLutGameKey : kAtmosphereViewLutSceneKey;
-            const std::optional<AtmosphereViewLutHandles> viewLuts =
-                frame.blackboard.Fetch<AtmosphereViewLutHandles>(viewLutKey);
-            const std::optional<AtmosphereSharedLutBlackboardEntry> sharedLuts =
-                frame.blackboard.Fetch<AtmosphereSharedLutBlackboardEntry>(kAtmosphereSharedLutKey);
-            if (!viewLuts.has_value() || !sharedLuts.has_value() || !viewLuts->skyViewLutHandle.IsValid()) {
-                return;
-            }
-
-            const char* skyViewLutName = isGameView ? "AtmosphereSkyViewLut_GameView" : "AtmosphereSkyViewLut_SceneView";
-            const std::function<void(VkCommandBuffer)> recordSkyBackground =
-                MakeRecordSkyBackgroundCallback(m_atmosphereLutRenderer, m_renderer, viewData->viewProjection,
-                    sharedLuts->parameters, viewLuts->frameUniforms, skyViewLutName, m_atmosphereSettings.skyExposure);
-
-            if (isGameView) {
-                frame.blackboard.Publish<std::function<void(VkCommandBuffer)>>(
-                    kGameSkyBackgroundCallbackKey, recordSkyBackground);
-            }
-
-            if (!recordSkyBackground) {
-                return;
-            }
-
-            const rg::TextureHandle viewTarget = viewData->colorTarget;
-
-            rg::RenderPassDesc desc;
-            desc.debugName = "DrawSkyBackground";
-            desc.kind = rg::PassKind::Graphics;
-            desc.order = rg::RenderPassEvent::AfterOpaques;
-            desc.view = frame.currentView;
-            desc.legacyCategory = rg::RenderPassCategory::General;
-            desc.drawKind = rg::RenderPassDrawKind::DrawQuad;
-            desc.setup = [viewTarget](rg::RenderGraphBuilder::PassBuilder& pass) {
-                pass.WriteColorAttachment(viewTarget);
-                pass.WriteDepthStencilAttachment(viewTarget);
-            };
-            desc.execute = [this, recordSkyBackground](rg::PassContext& ctx) {
-                m_renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-                recordSkyBackground(ctx.cmd);
-                m_renderer.EndGraphPassRecording();
-            };
-            out.push_back(std::move(desc));
-        });
-
     // "RenderTransparent" - ProviderScope::PerActiveView, Transparents.
     m_offscreenRenderPipeline.Register("RenderTransparent", rg::ProviderScope::PerActiveView,
         [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
@@ -1499,76 +1309,8 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             out.push_back(std::move(desc));
         });
 
-    // "AtmosphereComposite" - ProviderScope::PerActiveView, AfterTransparents,
-    // ProviderTiming::AfterDeferredPasses.
-    m_offscreenRenderPipeline.Register("AtmosphereComposite", rg::ProviderScope::PerActiveView,
-        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&) {
-            const RenderPassViewData* viewData = FindViewData(frame.currentView);
-            if (viewData == nullptr || viewData->renderTexture == nullptr) {
-                return;
-            }
-
-            // editor-core-separation-8 campaign, PHASE1 (Step 3.4b) - this
-            // provider calls frame.builder.AddRenderPass() (via
-            // AddAtmosphereCompositePass()) DIRECTLY and never reaches
-            // RenderPipeline::DeclareOnePhase()'s own flush loop at all (see
-            // PHASE0_MASTER_STRATEGY.md's own Step 2.1 corrected finding) -
-            // one of exactly 2 confirmed exceptions needing their own direct
-            // consult of the toggle registry.
-            const bool atmosphereCompositeEnabled = m_renderPassToggleRegistry.NoteDeclaredAndCheckEnabled("AtmosphereComposite");
-            if (!atmosphereCompositeEnabled) {
-                return;
-            }
-
-            const bool isGameView = (frame.currentView == rg::RenderViewId::Named("Game"));
-            const rg::RenderPassId viewLutKey = isGameView ? kAtmosphereViewLutGameKey : kAtmosphereViewLutSceneKey;
-            const std::optional<AtmosphereViewLutHandles> viewLuts =
-                frame.blackboard.Fetch<AtmosphereViewLutHandles>(viewLutKey);
-            if (!viewLuts.has_value() || !viewLuts->aerialPerspectiveVolumeHandle.IsValid()) {
-                return;
-            }
-
-            const char* aerialVolumeName =
-                isGameView ? "AtmosphereAerialPerspectiveVolume_GameView" : "AtmosphereAerialPerspectiveVolume_SceneView";
-            const char* outputTextureName = isGameView ? "GameViewComposited" : "SceneViewComposited";
-            const rg::ViewScope legacyViewScope = isGameView ? rg::ViewScope::GameView : rg::ViewScope::SceneView;
-
-            const rg::TextureHandle composited = AddAtmosphereCompositePass(frame.builder, m_renderer,
-                m_atmosphereLutRenderer, *viewData->renderTexture, viewData->colorTarget,
-                viewLuts->aerialPerspectiveVolumeHandle, aerialVolumeName, viewLuts->frameUniforms,
-                viewData->eyeWorldPosition, m_atmosphereSettings.aerialPerspectiveStrength,
-                m_atmosphereSettings.aerialPerspectiveMaxDistanceKm, m_atmosphereSettings.aerialPerspectiveDepthExponent,
-                viewData->renderTexture->Extent(), outputTextureName, legacyViewScope, &m_renderPassToggleRegistry);
-
-            if (!composited.IsValid()) {
-                // editor-core-separation-20 campaign, PHASE2 (Step 3.7, item 4b) -
-                // "AtmosphereAerialPerspectiveCompositePass" was individually toggled
-                // off this frame even though its own upstream volume is valid this
-                // frame - degrade gracefully: publish NOTHING under
-                // kGameCompositedOutputKey/kSceneCompositedOutputKey this frame, so
-                // FindPluginRenderFeatureTarget()'s own composited.value_or(...)
-                // correctly falls back to viewData->colorTarget (always valid by
-                // construction) instead of an invalid handle silently reaching a
-                // real ReadTexture()/WriteTexture() declaration on the
-                // "PluginRenderFeatures" pass.
-                return;
-            }
-
-            frame.finalTextureOutputs.push_back(composited);
-
-            // editor-core-separation-3 campaign, PHASE3 - publish this
-            // view's freshly-computed composited handle so
-            // "PluginRenderFeatures" (registered immediately after this
-            // provider, below) can draw on top of the TRUE final image -
-            // see kGameCompositedOutputKey/kSceneCompositedOutputKey's own
-            // doc comment above for the full "why".
-            frame.blackboard.Publish<rg::TextureHandle>(
-                isGameView ? kGameCompositedOutputKey : kSceneCompositedOutputKey, composited);
-        },
-        rg::ProviderTiming::AfterDeferredPasses);
-
     // "PostOpaqueFeatures" - ProviderScope::PerActiveView, AfterDeferredPasses.
-    // Registered strictly between "AtmosphereComposite" and
+    // Registered strictly between the deferred composite pass above and
     // "PluginRenderFeatures" for two independent, load-bearing reasons.
     // (a) Blackboard visibility: RenderPipeline::DeclareOnePhase() invokes
     // every provider in a phase in registration order, so anything a
@@ -1643,18 +1385,14 @@ void Core::RegisterOffscreenRenderPipelineProviders()
 
     // "PostTransparentFeatures" - ProviderScope::PerActiveView,
     // AfterDeferredPasses. Registered after "PostOpaqueFeatures" and before
-    // "PluginRenderFeatures", for the symmetric reason (a)/(b) above applied
-    // against "AtmosphereComposite" instead of "DrawSkyBackground":
-    // "AtmosphereComposite" is also tagged AfterTransparents and also
-    // already registered at ProviderTiming::AfterDeferredPasses, textually
-    // before this provider - so a PostTransparent feature's own pass gets a
-    // later declaration index than "AtmosphereComposite"'s own by the same
-    // "registered earlier within the same phase" rule. "AtmosphereComposite"
-    // only ever reads the view's color/depth and writes a separate output
-    // texture, so sharing its exact tier+phase is safe by construction today
-    // - this does not automatically generalize to some future third
-    // same-tier, same-phase provider that also writes into the view's own
-    // color/depth handle.
+    // "PluginRenderFeatures", for the same two reasons PostOpaqueFeatures'
+    // own doc comment above gives, applied against whatever AfterTransparents-
+    // tier, AfterDeferredPasses-phase pass is registered earlier (today: the
+    // deferred composite pass that reads the view's color/depth and writes a
+    // separate output texture) - sharing its exact tier+phase is safe by
+    // construction today, but does not automatically generalize to some
+    // future third same-tier, same-phase provider that also writes into the
+    // view's own color/depth handle.
     m_offscreenRenderPipeline.Register("PostTransparentFeatures", rg::ProviderScope::PerActiveView,
         [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&) {
             if (m_renderFeatureCompositorPtr == nullptr) {
@@ -1706,20 +1444,11 @@ void Core::RegisterOffscreenRenderPipelineProviders()
         },
         rg::ProviderTiming::AfterDeferredPasses);
 
-    // editor-core-separation-6 campaign, PHASE2
-    // (PHASE2_PLUGIN_CAPABILITY_ORCHESTRATOR_REGISTRY_AND_RENDER_FEATURE_MIGRATION.md,
-    // Step 3.4) - this provider's body collapses to the ONE generic loop over
-    // every registered IPluginCapabilityOrchestrator (m_capabilityOrchestrators,
-    // populated once by RegisterBuiltinCapabilityOrchestrators() - see the
-    // constructor above). Core itself no longer hand-codes a bespoke,
-    // capability-specific `for` loop here - LegacyRenderFeatureOrchestrator
-    // (src/Core/Plugins/LegacyRenderFeatureOrchestrator.h/.cpp) is a VERBATIM
-    // relocation of the exact loop body that used to live directly in this
-    // lambda (editor-core-separation-3, PHASE3), so this is a pure,
-    // zero-observable-behavior-change refactor: same warning text, same pass
-    // position in this function (still the LAST Register(...) call, after
-    // "AtmosphereComposite"/"PostOpaqueFeatures"/"PostTransparentFeatures",
-    // above).
+    // This provider's body is one generic loop over every registered
+    // IPluginCapabilityOrchestrator (m_capabilityOrchestrators, populated
+    // once by RegisterBuiltinCapabilityOrchestrators()). Still the LAST
+    // Register() call in this function, after every deferred-phase pass
+    // above.
     m_offscreenRenderPipeline.Register("PluginRenderFeatures", rg::ProviderScope::PerActiveView,
         [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
             for (auto& orchestrator : m_capabilityOrchestrators) {
@@ -1884,7 +1613,7 @@ void Core::BuildFrame()
                         const float aspect =
                             AspectRatioOf(static_cast<int>(extent.width), static_cast<int>(extent.height));
 
-                        const Vec3 gameEyeWorldPosition = ResolveActiveCameraWorldPosition(m_game.GetRegistry());
+                        const Vec3 gameEyeWorldPosition = RenderSystem::ResolveActiveCameraWorldPosition(m_game.GetRegistry());
                         const Mat4 gameViewProjection =
                             RenderSystem::ResolveActiveCameraViewProjection(m_game.GetRegistry(), aspect);
 
@@ -2027,7 +1756,7 @@ void Core::BuildFrame()
 
                     const std::optional<std::function<void(VkCommandBuffer)>> gameSkyBackgroundCallbackForReplay =
                         m_offscreenBlackboardThisFrame.Fetch<std::function<void(VkCommandBuffer)>>(
-                            kGameSkyBackgroundCallbackKey);
+                            kGameSkyBackgroundReplayCallbackKey);
 #ifndef NDEBUG
                     m_offscreenBlackboardThisFrame.ReportUnusedPublishesIfAny();
 #endif
@@ -2161,13 +1890,13 @@ void Core::BuildFrame()
                 m_renderGraph.NotifyDebugTextureStateOverride(
                     "GameView", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
 
-                m_atmosphereLutRenderer.FinalizeAerialPerspectiveCompositeForSampling(
-                    offscreenCmd, "GameViewComposited");
-                m_renderGraph.NotifyDebugTextureStateOverride(
-                    "GameViewComposited", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
-                if (m_editorLayer != nullptr) {
-                    m_editorLayer->SetGameViewCompositedTexture(
-                        m_atmosphereLutRenderer.CompositedOutput("GameViewComposited"));
+                RenderTexture* composited = DispatchFinalizeForSamplingHook("GameViewComposited", offscreenCmd);
+                if (composited != nullptr) {
+                    m_renderGraph.NotifyDebugTextureStateOverride(
+                        "GameViewComposited", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
+                    if (m_editorLayer != nullptr) {
+                        m_editorLayer->SetGameViewCompositedTexture(composited);
+                    }
                 }
             }
             if (sceneTarget != nullptr) {
@@ -2175,14 +1904,22 @@ void Core::BuildFrame()
                 m_renderGraph.NotifyDebugTextureStateOverride(
                     "SceneView", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
 
-                m_atmosphereLutRenderer.FinalizeAerialPerspectiveCompositeForSampling(
-                    offscreenCmd, "SceneViewComposited");
-                m_renderGraph.NotifyDebugTextureStateOverride(
-                    "SceneViewComposited", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
-                if (m_editorLayer != nullptr) {
-                    m_editorLayer->SetSceneViewCompositedTexture(
-                        m_atmosphereLutRenderer.CompositedOutput("SceneViewComposited"));
+                RenderTexture* composited = DispatchFinalizeForSamplingHook("SceneViewComposited", offscreenCmd);
+                if (composited != nullptr) {
+                    m_renderGraph.NotifyDebugTextureStateOverride(
+                        "SceneViewComposited", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
+                    if (m_editorLayer != nullptr) {
+                        m_editorLayer->SetSceneViewCompositedTexture(composited);
+                    }
                 }
+            }
+            // Generic sweep: any other registered finalize-for-sampling hook
+            // (today: none) runs unconditionally, once per frame.
+            for (const FinalizeForSamplingHookEntry& entry : m_finalizeForSamplingHooks) {
+                if (entry.name == "GameViewComposited" || entry.name == "SceneViewComposited") {
+                    continue;
+                }
+                entry.callback(offscreenCmd);
             }
             if (m_editorLayer != nullptr) {
                 m_editorLayer->FinalizeBlurValidationForSampling(offscreenCmd);

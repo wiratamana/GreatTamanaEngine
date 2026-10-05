@@ -1,31 +1,10 @@
 #include "AtmospherePassSequence.h"
 
-#include "../../ECS/Components/Camera.h"
-#include "../../ECS/Components/Transform.h"
-#include "../../ECS/TransformHierarchy.h"
 #include "../../Renderer/Renderer.h"
 #include "../../Renderer/RenderTexture.h"
 #include "../../Renderer/RenderGraph/RenderGraphBuilder.h"
 
 namespace gte {
-
-Vec3 ResolveActiveCameraWorldPosition(Registry& registry) noexcept
-{
-    ComponentStorage<Camera>& cameras = registry.Storage<Camera>();
-    for (std::size_t i = 0; i < cameras.Size(); ++i) {
-        const Camera& camera = cameras.ComponentAt(i);
-        if (!camera.active) {
-            continue;
-        }
-
-        const Entity entity = cameras.EntityAt(i);
-        if (registry.TryGetComponent<Transform>(entity) != nullptr) {
-            return ComputeWorldTransform(registry, entity).position;
-        }
-        return Vec3::Zero();
-    }
-    return Vec3::Zero();
-}
 
 AtmosphereSharedLutHandles AddAtmosphereSharedLutPasses(rg::RenderGraphBuilder& builder, Renderer& renderer,
     AtmosphereLutRenderer& atmosphereLutRenderer, const AtmosphereParametersGpu& atmosphereParameters,

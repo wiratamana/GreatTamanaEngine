@@ -18,6 +18,12 @@ const std::vector<KnownRiskBlackboardKeyRule>& KnownRiskBlackboardKeyRules()
         // sky even while "DrawSkyBackground" itself was disabled.
         { "Atmosphere.GameSkyBackgroundCallback"_passId, "Atmosphere.GameSkyBackgroundCallback", "DrawSkyBackground" },
 
+        // Core.cpp's own kGameSkyBackgroundReplayCallbackKey - the generic,
+        // feature-free twin of the entry above, gated by the same
+        // "DrawSkyBackground" toggle and published from the same early-
+        // guarded call site.
+        { "Core.GameSkyBackgroundReplayCallback"_passId, "Core.GameSkyBackgroundReplayCallback", "DrawSkyBackground" },
+
         // Core.cpp's kGpuSkinningOutputsKey - PHASE2's own ledger finding
         // #6/#9: already gated by "GpuSkinning"'s own early guard (the
         // pattern PHASE1's fix generalized FROM), but the exact same risk
@@ -25,14 +31,14 @@ const std::vector<KnownRiskBlackboardKeyRule>& KnownRiskBlackboardKeyRules()
         // it is currently broken.
         { "GpuSkinning.OutputBuffers"_passId, "GpuSkinning.OutputBuffers", "GpuSkinning" },
 
-        // Core.cpp's kGameCompositedOutputKey/kSceneCompositedOutputKey -
-        // PHASE2's own ledger finding #10: already gated by an explicit
+        // Core::ViewCompositedOutputKey()'s two reserved slots - PHASE2's
+        // own ledger finding #10: already gated by an explicit
         // `if (!composited.IsValid()) return;` immediately before Publish(),
-        // itself downstream of "AtmosphereComposite"'s own self-gated
+        // itself downstream of the deferred composite pass's own self-gated
         // NoteDeclaredAndCheckEnabled() check (finding #11) - same reasoning
         // as kGpuSkinningOutputsKey above, kept as a tripwire.
-        { "Atmosphere.CompositedOutput.Game"_passId, "Atmosphere.CompositedOutput.Game", "AtmosphereComposite" },
-        { "Atmosphere.CompositedOutput.Scene"_passId, "Atmosphere.CompositedOutput.Scene", "AtmosphereComposite" },
+        { "Core.ViewCompositedOutput.Game"_passId, "Core.ViewCompositedOutput.Game", "AtmosphereComposite" },
+        { "Core.ViewCompositedOutput.Scene"_passId, "Core.ViewCompositedOutput.Scene", "AtmosphereComposite" },
     };
     return kRules;
 }

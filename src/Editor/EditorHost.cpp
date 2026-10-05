@@ -184,8 +184,6 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
     , m_editorLayer(CreateEditorLayer(m_window, m_renderer))
     , m_game(m_core.GetGame())
     , m_engineContext(m_core.GetEngineContext())
-    , m_atmosphereSettings(m_core.GetAtmosphereSettings())
-    , m_atmosphereLutRenderer(m_core.GetAtmosphereLutRenderer())
     // network-impl-2 campaign, Phase 3 - hands FrameCaptureBridge's address
     // into NetworkServer's constructor (a defaulted pointer parameter - see
     // NetworkServer.h) so its /get_game_view route handler can reach it.
@@ -251,6 +249,11 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
     assert(m_editorLayer != nullptr && "EditorHost: m_editorLayer must be non-null before SetEditorLayerHook()");
     m_core.SetEditorLayerHook(m_editorLayer.get());
 
+    // Load by default for every run, per EditorHost's own composition-root
+    // role - never constructed by Core itself. Bound into the real ImGui
+    // layer immediately afterward so its own feature panel can reach it.
+    m_atmosphereFeature = std::make_unique<AtmosphereFeature>(m_core);
+    BindAtmosphereFeatureForEditorLayer(*m_editorLayer, *m_atmosphereFeature);
     // editor-core-separation-16 campaign (On-Engine Project Workflow plan,
     // BIG-STEP 2), PHASE4 - gives the real ImGui implementation
     // (ImGuiEditorLayer) a live IProjectLifecycleCapability* so its "New
@@ -865,7 +868,7 @@ int EditorHost::Run()
             // Phase 7 - captures "GameViewComposited" (the atmosphere-
             // composited output) instead of the original, pre-composite
             // render target.
-            RenderTexture* captureSource = m_atmosphereLutRenderer.CompositedOutput("GameViewComposited");
+            RenderTexture* captureSource = m_atmosphereFeature->Renderer().CompositedOutput("GameViewComposited");
             if (captureSource == nullptr) {
                 captureSource = gameTargetThisFrame;
             }
@@ -896,7 +899,7 @@ int EditorHost::Run()
             const std::vector<RenderFeatureDebugEntry> renderFeatureEntries =
                 renderFeatureCompositor != nullptr ? renderFeatureCompositor->DebugSnapshot()
                                                     : std::vector<RenderFeatureDebugEntry>{};
-            m_editorLayer->BuildUI(m_game, m_renderer, m_renderGraph, m_atmosphereSettings, m_atmosphereLutRenderer,
+            m_editorLayer->BuildUI(m_game, m_renderer, m_renderGraph,
                 m_core.GetGpuDrivenBatchDebugInfo(), renderFeatureEntries,
                 // editor-core-separation-8 campaign, PHASE3 - 2 new trailing
                 // arguments. NOTE: deliberately calling

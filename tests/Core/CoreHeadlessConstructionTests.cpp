@@ -94,15 +94,12 @@ TEST(CoreHeadlessConstructionTest, ConstructsWithoutCrashingAndExposesUsableAcce
     InputFrame input;
     core->Update(input, 1.0f / 60.0f);
 
-    // GetGpuDrivenBatchDebugInfo()/GetAtmosphereSettings()/
-    // GetAtmosphereLutRenderer()/GetGameViewTargetThisFrame() are the small,
-    // additive accessors PHASE13 added - none of them should crash or
-    // dereference a null m_editorLayer even though BuildFrame() was never
-    // called (they simply report the appropriate empty state that frame).
+    // GetGpuDrivenBatchDebugInfo()/GetGameViewTargetThisFrame() are small,
+    // additive accessors - neither should crash or dereference a null
+    // m_editorLayer even though BuildFrame() was never called (they simply
+    // report the appropriate empty state that frame).
     EXPECT_TRUE(core->GetGpuDrivenBatchDebugInfo().empty());
     EXPECT_EQ(core->GetGameViewTargetThisFrame(), nullptr);
-    (void)core->GetAtmosphereSettings();
-    (void)core->GetAtmosphereLutRenderer();
 }
 
 } // namespace gte

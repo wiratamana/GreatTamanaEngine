@@ -2,7 +2,6 @@
 
 #include "../Math/Mat4.h"
 #include "../Math/Vec3.h"
-#include "../Features/Atmosphere/AtmosphereTypes.h"
 #include "../Renderer/RenderTexture.h"
 #include "../Renderer/Culling/GpuDrivenBatchDebugInfo.h"
 // editor-core-separation-6 campaign, PHASE7
@@ -43,7 +42,6 @@ namespace gte {
 class Window;
 class Renderer;
 class Game;
-class AtmosphereLutRenderer;
 
 // Editor-only type (src/Editor/FrameDebuggerCapture.h) - forward-declared
 // ONLY (never #included here), since EditorLayer.h is a CORE, always-
@@ -311,29 +309,23 @@ public:
     // build).
     virtual Mat4 SceneViewProjection(float aspectWidthOverHeight) const = 0;
 
-    // Atmosphere Scattering + Aerial Perspective campaign, Phase 7 - the
-    // Scene view's own EditorCamera world-space eye position (its
-    // Transform's position - see EditorCamera::GetTransform()), needed to
-    // resolve the Scene View's own AtmosphereFrameUniforms (camera height
-    // above the virtual planet's ground) the same way
+    // The Scene view's own EditorCamera world-space eye position (its
+    // Transform's position - see EditorCamera::GetTransform()), needed by
+    // any feature resolving camera height above ground the same way
     // RenderSystem::ResolveActiveCameraViewProjection()'s ECS Camera
     // equivalent already is for the Game View. Always Vec3::Zero() for
     // NullEditorLayer (never actually consulted there in practice, for the
     // same reason SceneViewProjection() above never is either).
     virtual Vec3 SceneViewCameraWorldPosition() const = 0;
 
-
-    // Atmosphere Scattering + Aerial Perspective campaign, Phase 7
-    // (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE7_SKY_BACKGROUND_AND_COMPOSITE_PASSES_v1.md)
-    // - hands this implementation a stable RenderTexture* to display in the
-    // "Game" panel INSTEAD of GameViewTarget()'s own m_gameView, now that
-    // the atmosphere-composited output (a NEW, separate texture -
-    // "GameViewComposited" - written by a post-process pass AFTER
-    // Game::Render() finishes) is PERMANENTLY what gets displayed - never
-    // optional/debug-only, unlike the existing "Show Compute Blur (debug)"
-    // toggle. Called once per frame, AFTER Application::Run() has finished
-    // recording this frame's atmosphere composite pass (and finalized it
-    // for external sampling) - `texture` is nullptr on any frame the Game
+    // Hands this implementation a stable RenderTexture* to display in the
+    // "Game" panel INSTEAD of GameViewTarget()'s own m_gameView, whenever a
+    // feature publishes a final, post-process-composited output (a
+    // separate texture - "GameViewComposited" - written by a pass AFTER
+    // Game::Render() finishes) - never optional/debug-only, unlike the
+    // existing "Show Compute Blur (debug)" toggle. Called once per frame,
+    // once this frame's composite pass (if any) has finished and finalized
+    // it for external sampling - `texture` is nullptr on any frame the Game
     // view wasn't actually rendered at all (mirrors GameViewTarget()'s own
     // nullptr contract). A real implementation is expected to fall back to
     // its own original m_gameView whenever this is nullptr (e.g. the very
@@ -364,7 +356,7 @@ public:
     // NullEditorLayer, which never declares a pass at all). `renderer` is
     // the same Renderer Application already owns.
     // editor-core-separation-21 campaign, PHASE4 - `toggleRegistry` (default
-    // nullptr, mirroring AtmosphereLutRenderer's own established precedent)
+    // nullptr, mirroring an established nullable-toggle-registry precedent)
     // lets this method honestly consult RenderPassToggleRegistry::
     // NoteDeclaredAndCheckEnabled("ComputeBlurValidation") as an ADDITIONAL,
     // independent gate ON TOP OF the existing ctx.showBlurredSceneOutput
@@ -584,23 +576,8 @@ public:
     // (Panels/RenderGraphPanel.h) reads its LastSnapshot() to show which
     // passes ran/were culled last time each regime executed. Never mutated
     // by the Editor - purely observed, same spirit as `game`/`renderer`
-    // above. `atmosphereSettings` (Atmosphere Scattering + Aerial
-    // Perspective campaign, Phase 8 -
-    // ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md) is the SAME
-    // AtmosphereSettings Application owns (Application::m_atmosphereSettings) -
-    // the new "Atmosphere" panel (Panels/AtmospherePanel.h) reads/writes it
-    // directly by reference, the same way "Inspector" reads/writes a
-    // selected entity's Camera component - Application's own per-frame
-    // atmosphere pass-building code (AtmospherePassSequence.h/.cpp) reads
-    // whatever this panel most recently wrote. `atmosphereLutRenderer`
-    // (Phase 9 - ATMOSPHERE_PHASE9_VALIDATION_DEBUG_TOOLING_AND_DOCS_v1.md)
-    // is the SAME AtmosphereLutRenderer Application owns
-    // (Application::m_atmosphereLutRenderer) - the "Atmosphere" panel's new
-    // "Validate Transmittance LUT" button
-    // (src/Editor/AtmosphereTransmittanceLutValidation.h) reads back its
-    // real, currently-computed output texture through this reference.
-    // `gpuDrivenBatchDebugInfo` (GPU-Driven Frustum Culling + Indirect Draw
-    // campaign, render-pass-5, PHASE6) is this frame's freshly-built
+    // above. `gpuDrivenBatchDebugInfo` (GPU-Driven Frustum Culling + Indirect
+    // Draw campaign, render-pass-5, PHASE6) is this frame's freshly-built
     // "instances culled this frame" readout, one entry per real, eligible
     // GPU-driven batch (Game View only - Locked Design Decision 11,
     // PHASE0_MASTER_STRATEGY.md) - the "Render Graph" panel displays it
@@ -619,7 +596,6 @@ public:
     // to show). Placed LAST so every existing call site needs only one new
     // trailing argument, never a full argument-order rewrite.
     virtual void BuildUI(Game& game, Renderer& renderer, const rg::RenderGraph& renderGraph,
-        AtmosphereSettings& atmosphereSettings, AtmosphereLutRenderer& atmosphereLutRenderer,
         const std::vector<GpuDrivenBatchDebugInfo>& gpuDrivenBatchDebugInfo,
         const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries,
         // editor-core-separation-8 campaign, PHASE3 - NEVER null (Core owns

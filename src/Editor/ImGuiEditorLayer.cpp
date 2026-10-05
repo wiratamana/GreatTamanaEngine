@@ -1,8 +1,9 @@
 #include "EditorLayer.h"
 
 #include "ArrayLayerRenderValidation.h"
-#include "AtmosphereAerialPerspectiveSkyPurityValidation.h"
 #include "AtmosphereTransmittanceLutValidation.h"
+#include "EditorLayerAtmosphereBinding.h"
+#include "../Features/Atmosphere/AtmosphereFeature.h"
 #include "BlitValidation.h" // editor-core-separation-26 campaign, PHASE6.
 #include "ComputeBlurValidation.h"
 #include "DockLayout.h"
@@ -580,7 +581,6 @@ public:
     }
 
     void BuildUI(Game& game, Renderer& renderer, const rg::RenderGraph& renderGraph,
-        AtmosphereSettings& atmosphereSettings, AtmosphereLutRenderer& atmosphereLutRenderer,
         const std::vector<GpuDrivenBatchDebugInfo>& gpuDrivenBatchDebugInfo,
         const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries,
         rg::RenderPassToggleRegistry& renderPassToggleRegistry,
@@ -702,16 +702,19 @@ public:
         m_profilerPanel.Build(m_ctx);
         m_renderGraphPanel.Build(m_ctx, renderGraph, gpuDrivenBatchDebugInfo, renderFeatureEntries,
             renderPassToggleRegistry, renderFeatureCompositor);
-        // Atmosphere Scattering + Aerial Perspective campaign, Phase 8
-        // (ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md) - a small,
-        // stateless free-function panel (mirrors BuildMemoryPanel()'s own
-        // shape exactly, unlike ProfilerPanel/RenderGraphPanel's stateful-
-        // class exception - this panel has no cross-frame state of its
-        // own), docked alongside "Memory"/"Profiler"/"Render Graph"/
-        // "Project" (see DockLayout.cpp).
-        BuildAtmospherePanel(m_ctx, atmosphereSettings, renderer, atmosphereLutRenderer,
-            m_lastAtmosphereTransmittanceLutValidation, m_lastAerialPerspectiveLutInspection, renderGraph,
-            m_lastAerialPerspectiveSkyPurityResult);
+        // Atmosphere Scattering + Aerial Perspective campaign, Phase 8 - a
+        // small, stateless free-function panel (mirrors BuildMemoryPanel()'s
+        // own shape exactly, unlike ProfilerPanel/RenderGraphPanel's
+        // stateful-class exception) docked alongside "Memory"/"Profiler"/
+        // "Render Graph"/"Project" (see DockLayout.cpp). Guarded - null only
+        // if EditorHost somehow never bound a live AtmosphereFeature yet
+        // (never true by the first real frame - see EditorHost's own
+        // constructor).
+        if (m_atmosphereFeature != nullptr) {
+            BuildAtmospherePanel(m_ctx, m_atmosphereFeature->Settings(), renderer, m_atmosphereFeature->Renderer(),
+                m_lastAtmosphereTransmittanceLutValidation, m_lastAerialPerspectiveLutInspection, renderGraph,
+                m_lastAerialPerspectiveSkyPurityResult);
+        }
         // Job System Phase 7 (Editor "Jobs" Panel) - reads Job System Phase
         // 5's Profiling::BuildWorkerTimelinePoints() reshape internally; also
         // hosts the GPU Vertex Skinning campaign's own Phase 7 CPU/GPU
@@ -1067,6 +1070,11 @@ public:
     {
         m_hotReloadDebugCapability = capability;
     }
+
+    // Plain setter, not part of IEditorLayer - called exactly once, from
+    // EditorHost's constructor, via BindAtmosphereFeatureForEditorLayer()
+    // (EditorLayerAtmosphereBinding.h).
+    void SetAtmosphereFeature(AtmosphereFeature& feature) { m_atmosphereFeature = &feature; }
     bool FrameDebuggerCaptureNow() override { return m_frameDebuggerPanel.CaptureNowFromCommand(); }
     void FrameDebuggerSelectEvent(int index) override { m_frameDebuggerPanel.SelectEventFromCommand(index); }
     bool FrameDebuggerSetChannel(const std::string& channel) override
@@ -1373,6 +1381,10 @@ private:
     // Aerial Perspective Sky Purity" button, mirroring
     // m_lastAtmosphereTransmittanceLutValidation above exactly.
     std::optional<AtmosphereAerialPerspectiveSkyPurityResult> m_lastAerialPerspectiveSkyPurityResult;
+
+    // Bound once, via SetAtmosphereFeature(), from EditorHost's constructor
+    // body - null only before that call ever runs.
+    AtmosphereFeature* m_atmosphereFeature = nullptr;
 };
 
 } // namespace
@@ -1394,6 +1406,13 @@ std::unique_ptr<IEditorLayer> CreateEditorLayer(Window& window, Renderer& render
     // constructors during this phase, not assumed.
     EditorGpuMemoryNameOverlay::Install(*renderer.GetMemoryTracker());
     return std::make_unique<ImGuiEditorLayer>(window, renderer);
+}
+
+// static_cast is safe: every real call site resolves the layer via
+// CreateEditorLayer() above, which always constructs ImGuiEditorLayer.
+void BindAtmosphereFeatureForEditorLayer(IEditorLayer& layer, AtmosphereFeature& feature)
+{
+    static_cast<ImGuiEditorLayer&>(layer).SetAtmosphereFeature(feature);
 }
 
 } // namespace gte

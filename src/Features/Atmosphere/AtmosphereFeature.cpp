@@ -21,6 +21,10 @@ constexpr rg::RenderPassId kAtmosphereViewLutGameKey = "Atmosphere.ViewLut.Game"
 constexpr rg::RenderPassId kAtmosphereViewLutSceneKey = "Atmosphere.ViewLut.Scene"_passId;
 constexpr rg::RenderPassId kGameSkyBackgroundCallbackKey = "Atmosphere.GameSkyBackgroundCallback"_passId;
 
+// Mirrors Core.cpp's own identical, independently-declared copy of this
+// same literal - its Frame Debugger replay dispatch fetches this exact key.
+constexpr rg::RenderPassId kGameSkyBackgroundReplayCallbackKey = "Core.GameSkyBackgroundReplayCallback"_passId;
+
 // "AtmosphereSharedLut"'s own blackboard payload.
 struct AtmosphereSharedLutBlackboardEntry {
     AtmosphereSharedLutHandles handles;
@@ -131,6 +135,8 @@ void AtmosphereFeature::RegisterPasses()
             if (isGameView) {
                 frame.blackboard.Publish<std::function<void(VkCommandBuffer)>>(
                     kGameSkyBackgroundCallbackKey, recordSkyBackground);
+                frame.blackboard.Publish<std::function<void(VkCommandBuffer)>>(
+                    kGameSkyBackgroundReplayCallbackKey, recordSkyBackground);
             }
 
             if (!recordSkyBackground) {

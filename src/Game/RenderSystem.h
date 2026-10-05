@@ -7,6 +7,7 @@
 #include "ECS/Components/Transform.h"
 #include "ECS/Registry.h"
 #include "Math/Mat4.h"
+#include "Math/Vec3.h"
 #include "Renderer/Culling/GpuDrivenBatchCache.h"
 #include "Renderer/MaterialTexture.h"
 #include "Renderer/Mesh.h"
@@ -145,6 +146,13 @@ public:
     // (see tests/Game/RenderSystemTests.cpp) exactly like
     // CollectRenderables() above.
     static Mat4 ResolveActiveCameraViewProjection(Registry& registry, float aspectWidthOverHeight);
+
+    // Resolves the eye world-space position for the FIRST active ECS Camera
+    // entity - the Vec3-only sibling of ResolveActiveCameraViewProjection()
+    // above (same "first active Camera, in ComponentStorage<Camera> order"
+    // resolution), falling back to Vec3::Zero() when the Registry has no
+    // active Camera at all.
+    static Vec3 ResolveActiveCameraWorldPosition(Registry& registry) noexcept;
 
     // Resolves each DrawCommand's handles against this RenderSystem's own
     // Mesh/Pipeline/MaterialTexture pools and submits it to `renderer` - the

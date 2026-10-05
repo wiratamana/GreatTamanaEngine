@@ -39,16 +39,6 @@ class RenderGraphBuilder;
 class RenderPassToggleRegistry;
 } // namespace rg
 
-// Resolves the eye world-space position for the FIRST active ECS Camera
-// entity (mirrors RenderSystem::ResolveActiveCameraViewProjection()'s own
-// "first active Camera, in ComponentStorage<Camera> order" resolution
-// exactly, but returns just the world position) - falls back to
-// Vec3::Zero() when the Registry has no active Camera at all. Relocated
-// verbatim out of Application.cpp's own Phase 5 temporary helper (see
-// ATMOSPHERE_PHASE5_COMPLETION_REPORT.md's own "open question" about this
-// function's eventual home) - this IS that eventual, permanent home.
-Vec3 ResolveActiveCameraWorldPosition(Registry& registry) noexcept;
-
 // Declares the SHARED (once per FRAME, never once per view) Transmittance
 // LUT (Phase 3) + Multi-Scattering LUT (Phase 4) compute passes into
 // `builder` - the Transmittance/Multi-Scattering LUTs are view-INDEPENDENT,

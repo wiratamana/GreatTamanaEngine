@@ -10,7 +10,8 @@
 #include "EditorLayer.h"
 #include "../Game/Game.h"
 #include "../Network/NetworkServer.h"
-#include "../Features/Atmosphere/AtmosphereLutRenderer.h"
+#include "../Features/Atmosphere/AtmosphereFeature.h"
+#include "EditorLayerAtmosphereBinding.h"
 #include "../Renderer/Renderer.h"
 #include "../Renderer/RenderGraph/RenderGraph.h"
 #include "../Renderer/VolumeTexturePreviewRenderer.h"
@@ -120,6 +121,16 @@ private:
     EditorHostServices m_hostServices;
     Core m_core;
 
+    // DECLARATION ORDER IS LOAD-BEARING: must stay strictly after m_core
+    // (needs a live Core&) and strictly before m_editorLayer (which touches
+    // this feature's live state every frame) - destruction runs in reverse
+    // declaration order, so this guarantees AtmosphereFeature's own GPU
+    // resources are torn down before Core's Renderer/Vulkan device, and
+    // before m_editorLayer is gone. Re-run the "no cached GPU-visible handle
+    // anywhere in ImGuiEditorLayer's destructor/any panel" audit before ever
+    // moving this declaration.
+    std::unique_ptr<AtmosphereFeature> m_atmosphereFeature;
+
     // editor-core-separation-1 campaign, PHASE16 - REFERENCE members bound
     // to m_core's own real, owned instances, mirroring
     // Application::m_renderer/m_renderGraph/m_game/m_engineContext's exact
@@ -150,16 +161,6 @@ private:
     std::unique_ptr<IEditorLayer> m_editorLayer;
     Game& m_game;
     EngineContext& m_engineContext;
-
-    // editor-core-separation-1 campaign, PHASE16 - REFERENCE members bound
-    // to m_core's own real, owned AtmosphereSettings/AtmosphereLutRenderer
-    // instances - needed for two remaining host-level call sites:
-    // IEditorLayer::BuildUI() (the "Atmosphere" panel edits/reads them
-    // live) and the relocated Game-View FrameCaptureBridge success-path
-    // capture (reads m_atmosphereLutRenderer.CompositedOutput() as its
-    // capture source) - see Run()'s own body.
-    AtmosphereSettings& m_atmosphereSettings;
-    AtmosphereLutRenderer& m_atmosphereLutRenderer;
 
     // network-impl-6 campaign, Phase 4 - the GET /get_texture volume-texture
     // raymarch preview renderer. A genuinely lazy/on-demand class

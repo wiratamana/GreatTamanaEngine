@@ -94,6 +94,24 @@ Mat4 RenderSystem::ResolveActiveCameraViewProjection(Registry& registry, float a
     return Mat4::Identity();
 }
 
+Vec3 RenderSystem::ResolveActiveCameraWorldPosition(Registry& registry) noexcept
+{
+    ComponentStorage<Camera>& cameras = registry.Storage<Camera>();
+    for (std::size_t i = 0; i < cameras.Size(); ++i) {
+        const Camera& camera = cameras.ComponentAt(i);
+        if (!camera.active) {
+            continue;
+        }
+
+        const Entity entity = cameras.EntityAt(i);
+        if (registry.TryGetComponent<Transform>(entity) != nullptr) {
+            return ComputeWorldTransform(registry, entity).position;
+        }
+        return Vec3::Zero();
+    }
+    return Vec3::Zero();
+}
+
 void RenderSystem::Draw(Registry& registry, Renderer& renderer, float aspectWidthOverHeight,
     IFrameDebuggerCaptureRecorder* capture, std::optional<std::size_t> maxDrawCount,
     const std::unordered_set<Entity>& batchedEntities, VkDescriptorSet sceneServicesSet)

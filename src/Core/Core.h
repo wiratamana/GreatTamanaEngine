@@ -7,7 +7,6 @@
 #include "../Application/RenderPassViewData.h"
 #include "../ECS/Entity.h"
 #include "../Game/Game.h"
-#include "../Features/Atmosphere/AtmosphereLutRenderer.h"
 #include "../Renderer/Culling/GpuDrivenBatchCache.h"
 #include "../Renderer/Culling/GpuDrivenBatchDebugInfo.h"
 #include "../Renderer/MeshHandle.h"
@@ -150,7 +149,7 @@ struct FrameStats {
 // (PHASE13_CORE_FRAME_ORCHESTRATION_EXTRACTION.md) - Update()/BuildFrame()/
 // Present() now contain the REAL per-frame orchestration logic that used to
 // live inside Application::Run()'s own body: offscreen regime (Game
-// View + Scene View, Atmosphere passes, GPU-skinning dispatch requests,
+// View + Scene View, feature render passes, GPU-skinning dispatch requests,
 // GPU-driven batch culling readback), present regime (the swapchain-present
 // pass), and every render-graph-frame-building IEditorLayer call site
 // (Locked Design Decision #8's first bucket - GameViewTarget()/
@@ -275,18 +274,6 @@ public:
     {
         return m_offscreenBlackboardThisFrame;
     }
-
-    // PHASE13 - the SAME AtmosphereSettings/AtmosphereLutRenderer instances
-    // Core's own per-frame Atmosphere pass-building code (BuildFrame())
-    // reads/writes, now exposed so Application::Run()'s own
-    // IEditorLayer::BuildUI() call (host-level, unmoved - the "Atmosphere"
-    // panel edits atmosphereSettings live, and reads back
-    // atmosphereLutRenderer's real output textures for its own validation
-    // buttons) can keep reaching them by reference, exactly as it already
-    // does for Renderer/Game/RenderGraph (see Application.h's own
-    // m_renderer/m_game/m_renderGraph reference-member precedent, PHASE12).
-    AtmosphereSettings& GetAtmosphereSettings() noexcept { return m_atmosphereSettings; }
-    AtmosphereLutRenderer& GetAtmosphereLutRenderer() noexcept { return m_atmosphereLutRenderer; }
 
     // PHASE13 - this frame's already-resolved Game View render target (the
     // SAME value BuildFrame() itself just used internally this frame,
@@ -603,18 +590,10 @@ public:
     // never need FindViewData() directly, and never need a
     // `friend class LegacyRenderFeatureOrchestrator;` declaration either.
     //
-    // editor-core-separation-6 campaign, PHASE4 - NOT `const` (a real,
-    // confirmed adjustment from PHASE2's own original signature): resolving
-    // `.sampler` above needs AtmosphereLutRenderer::CompositedOutput(),
-    // which is itself a non-const method (it returns a non-const
-    // RenderTexture*, matching every other AtmosphereLutRenderer accessor -
-    // see that class's own header) - calling it from a `const Core*` would
-    // require either a `mutable` AtmosphereLutRenderer member or a parallel
-    // const overload on AtmosphereLutRenderer itself, both a larger,
-    // less-honest change than simply dropping `const` here. Confirmed via
-    // search_in_dir: the only real call site (LegacyRenderFeatureOrchestrator)
-    // already holds a non-const `Core&`, so this is a safe, zero-impact
-    // widening.
+    // Deliberately non-const: an earlier revision needed a non-const
+    // accessor this body no longer calls. Reverting to const would cost
+    // nothing today, but every real call site already holds a non-const
+    // Core&, so there is no reason to churn the signature.
     std::optional<PluginRenderFeatureTargetInfo> FindPluginRenderFeatureTarget(
         const rg::RenderPassFrameContext& frame);
 
@@ -897,20 +876,6 @@ private:
 
     // PHASE13 - see SetPresentImGuiRecorder()'s own doc comment above.
     std::function<void(VkCommandBuffer)> m_presentImGuiRecorder;
-
-    // Atmosphere Scattering + Aerial Perspective campaign - owns every
-    // atmosphere LUT/pass's ComputePipeline/descriptor set/output texture
-    // across frames. Relocated here (from Application, editor-core-
-    // separation-1 campaign, PHASE13) together with its only real per-frame
-    // consumer.
-    AtmosphereLutRenderer m_atmosphereLutRenderer;
-
-    // Atmosphere Scattering + Aerial Perspective campaign, Phase 8 - the
-    // small set of tunable, non-spatial atmosphere knobs edited live via the
-    // Editor's "Atmosphere" panel (host-level, unmoved) - see
-    // GetAtmosphereSettings()'s own doc comment above for why this stays
-    // reachable from the host.
-    AtmosphereSettings m_atmosphereSettings;
 
     // better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
     // `PluginHost m_pluginHost` (plus `LoadPlugins()`/`GetPluginHost()`,

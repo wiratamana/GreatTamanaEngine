@@ -1004,6 +1004,7 @@ add_library(gte_editor STATIC
     src/Editor/EditorHostServices.cpp
     src/Editor/EditorHost.h
     src/Editor/EditorHost.cpp
+    src/Editor/EditorLayerAtmosphereBinding.h
     src/Editor/EditorContext.h
     src/Editor/ProjectRootPath.h
     src/Editor/ProjectRootPath.cpp

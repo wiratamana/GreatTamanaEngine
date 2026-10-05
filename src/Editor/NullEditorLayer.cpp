@@ -82,7 +82,6 @@ public:
     }
     void RenderSceneGrid(Renderer& /*renderer*/, VkCommandBuffer /*cmd*/, const Mat4& /*sceneViewProjection*/) override { }
     void BuildUI(Game& /*game*/, Renderer& /*renderer*/, const rg::RenderGraph& /*renderGraph*/,
-        AtmosphereSettings& /*atmosphereSettings*/, AtmosphereLutRenderer& /*atmosphereLutRenderer*/,
         const std::vector<GpuDrivenBatchDebugInfo>& /*gpuDrivenBatchDebugInfo*/,
         const std::vector<RenderFeatureDebugEntry>& /*renderFeatureEntries*/,
         rg::RenderPassToggleRegistry& /*renderPassToggleRegistry*/,
