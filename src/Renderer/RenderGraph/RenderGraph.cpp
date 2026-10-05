@@ -187,13 +187,14 @@ void RenderGraph::EnsureTextureArrayResolved(std::uint32_t index, const Compiled
     if (importInfo.isImported) {
         arr.isImported = true;
         arr.target = importInfo.externalTarget;
-        arr.state = ResourceState{ importInfo.currentLayout, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE };
+        arr.layerStates.assign(arr.target.arrayLayers,
+            ResourceState{ importInfo.currentLayout, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE });
     } else {
         arr.isImported = false;
         TextureArray2D& textureArray =
             m_resourcePool.AcquireTextureArray(input.textureArrays[index].desc, input.textureArrays[index].name);
         arr.target = textureArray.Target();
-        arr.state = ResourceState{};
+        arr.layerStates.assign(arr.target.arrayLayers, ResourceState{});
     }
     arr.resolved = true;
 }
@@ -289,12 +290,12 @@ void RenderGraph::ApplyUsageBarrierIfNeeded(VkCommandBuffer cmd, const ResourceU
             vol.state = next;
         },
         [&](TextureArrayHandle textureArrayHandle) {
-            // better-render-pass-3 campaign, BLOCK5, Phase 3 - THIS is the
-            // one real difference from every other branch above:
-            // layerCount = arr.target.arrayLayers instead of a hardcoded 1 -
-            // a single VkImageMemoryBarrier2 covering every layer at once,
-            // per this campaign's own locked MVP decision (no per-layer
-            // independent barrier tracking).
+            // State is tracked PER LAYER (arr.layerStates) - a per-layer
+            // usage (usage.arrayLayerIndex has a value) reads/writes
+            // exactly one entry; a whole-array usage (ReadTextureArray()/
+            // WriteTextureArray()) must check/update every entry, since
+            // two per-layer writes against different layers in the same
+            // frame must never silently share one tracked state.
             EnsureTextureArrayResolved(textureArrayHandle.index, input, physicalTextureArrays);
             PhysicalTextureArray& arr = physicalTextureArrays[textureArrayHandle.index];
 
@@ -303,11 +304,63 @@ void RenderGraph::ApplyUsageBarrierIfNeeded(VkCommandBuffer cmd, const ResourceU
                 : static_cast<VkImageAspectFlags>(VK_IMAGE_ASPECT_COLOR_BIT);
             const ResourceState next = RequiredStateFor(usage.access, arr.target.hasDepth);
 
-            if (RequiresBarrier(arr.state, next)) {
-                const VkImageSubresourceRange range{ aspect, 0, 1, 0, arr.target.arrayLayers };
-                EmitImageBarrier(cmd, arr.target.image, range, arr.state, next);
+            if (usage.arrayLayerIndex.has_value()) {
+                const std::uint32_t layer = *usage.arrayLayerIndex;
+                assert(layer < arr.layerStates.size() &&
+                    "RenderGraph::ApplyUsageBarrierIfNeeded: arrayLayerIndex out of range for this handle's arrayLayers.");
+                const TextureArraySubresourceDecision decision =
+                    DecideTextureArrayLayerTransition(arr.layerStates[layer], aspect, layer, next);
+                if (decision.requiresBarrier) {
+                    EmitImageBarrier(cmd, arr.target.image, decision.range, arr.layerStates[layer], next);
+                }
+                arr.layerStates[layer] = next;
+            } else {
+                // Whole-array usage - re-synchronizes every layer. A
+                // single barrier covering the full range is only correct
+                // when every layer currently differing from `next` shares
+                // the exact same previous state (layerStates[0] as the
+                // "representative" previous state is only safe then) - so
+                // first check, with a flat per-index pass, whether that
+                // actually holds right now.
+                bool allLayersMatchFirst = true;
+                for (const ResourceState& layerState : arr.layerStates) {
+                    if (!(layerState == arr.layerStates[0])) {
+                        allLayersMatchFirst = false;
+                        break;
+                    }
+                }
+
+                if (allLayersMatchFirst) {
+                    // Common case (every layer already agrees) - exactly
+                    // one barrier for the full range.
+                    if (RequiresBarrier(arr.layerStates[0], next)) {
+                        const VkImageSubresourceRange range{ aspect, 0, 1, 0, arr.target.arrayLayers };
+                        EmitImageBarrier(cmd, arr.target.image, range, arr.layerStates[0], next);
+                    }
+                } else {
+                    // Layers have diverged (e.g. a whole-array re-sync
+                    // after only some layers were individually rewritten
+                    // since the last whole-array usage) - a single barrier
+                    // using any one layer's state as "the" previous state
+                    // would be wrong for every other layer that disagrees
+                    // with it. Fall back to one barrier per layer that
+                    // actually needs one, reusing
+                    // DecideTextureArrayLayerTransition() verbatim - still
+                    // a flat, per-index comparison, never a cross-pass
+                    // dependency graph.
+                    for (std::uint32_t layer = 0; layer < arr.target.arrayLayers; ++layer) {
+                        const TextureArraySubresourceDecision decision =
+                            DecideTextureArrayLayerTransition(arr.layerStates[layer], aspect, layer, next);
+                        if (decision.requiresBarrier) {
+                            EmitImageBarrier(cmd, arr.target.image, decision.range, arr.layerStates[layer], next);
+                        }
+                    }
+                }
+
+                for (ResourceState& layerState : arr.layerStates) {
+                    layerState = next;
+                }
             }
-            arr.state = next;
         });
 }
 

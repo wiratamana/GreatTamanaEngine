@@ -394,20 +394,19 @@ private:
         ResourceState state;
     };
 
-    // better-render-pass-3 campaign, BLOCK5, Phase 3 - the TextureArray
-    // sibling of PhysicalTexture/PhysicalBuffer/PhysicalVolumeTexture above.
-    // Needs BOTH `isImported` (unlike PhysicalVolumeTexture, which is always
-    // imported in practice) AND a real pooled-resolve path (see
-    // EnsureTextureArrayResolved() below) - TextureArray IS pooled, unlike
-    // VolumeTexture. A SINGLE `state` field (not a colorState/depthState
-    // split like PhysicalTexture) - a TextureArray has ONE homogeneous
-    // aspect (all-depth or all-color) across every layer, never a mixed
-    // color+depth companion pair the way a 2D PhysicalTexture can be.
+    // TextureArray sibling of PhysicalTexture/PhysicalBuffer/
+    // PhysicalVolumeTexture above. Needs BOTH `isImported` (unlike
+    // PhysicalVolumeTexture, which is always imported in practice) AND a
+    // real pooled-resolve path (see EnsureTextureArrayResolved() below) -
+    // TextureArray IS pooled, unlike VolumeTexture. PER-LAYER tracked
+    // state (`layerStates`, sized to `target.arrayLayers` at resolve time)
+    // - a per-layer usage reads/writes exactly one entry; a whole-array
+    // usage checks/updates every entry (see ApplyUsageBarrierIfNeeded()).
     struct PhysicalTextureArray {
         bool resolved = false;
         bool isImported = false;
         TextureArrayTarget target;
-        ResourceState state;
+        std::vector<ResourceState> layerStates;
     };
 
     // editor-core-separation-13 campaign (Project Assembly Hot Reload plan,

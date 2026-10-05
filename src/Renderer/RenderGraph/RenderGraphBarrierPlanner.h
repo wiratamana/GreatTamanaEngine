@@ -138,6 +138,25 @@ bool IsColorAttachmentWriteAccess(ResourceAccess access) noexcept;
 // ANY difference in layout, stage mask, or access mask alone.
 bool RequiresBarrier(const ResourceState& previous, const ResourceState& next) noexcept;
 
+// Pure decision: the per-layer counterpart of RequiresBarrier() above, for
+// a TextureArrayHandle usage that targets exactly one layer (see
+// ResourceUsage::arrayLayerIndex). Does NOT mutate `layerState` itself -
+// the caller decides whether to emit a barrier and update the tracked
+// state afterward, mirroring every other ApplyUsageBarrierIfNeeded()
+// branch's own "if (RequiresBarrier(...)) { ...emit... } state = next;"
+// shape. Reuses RequiresBarrier() rather than reimplementing it - its own
+// value is naming the per-layer VkImageSubresourceRange construction
+// (baseArrayLayer = layerIndex, layerCount = 1) as a reusable, pure,
+// Tier-1-testable unit.
+struct TextureArraySubresourceDecision {
+    bool requiresBarrier = false;
+    VkImageSubresourceRange range{};
+};
+
+TextureArraySubresourceDecision DecideTextureArrayLayerTransition(
+    const ResourceState& layerState, VkImageAspectFlags aspect, std::uint32_t layerIndex,
+    const ResourceState& next) noexcept;
+
 // Pure: populates a VkImageMemoryBarrier2 from two already-decided
 // ResourceStates - no Vulkan call of any kind, just filling in a plain POD
 // struct's fields (srcQueueFamilyIndex/dstQueueFamilyIndex are always

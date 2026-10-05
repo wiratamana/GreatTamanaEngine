@@ -147,6 +147,16 @@ bool RequiresBarrier(const ResourceState& previous, const ResourceState& next) n
     return !(previous == next);
 }
 
+TextureArraySubresourceDecision DecideTextureArrayLayerTransition(
+    const ResourceState& layerState, VkImageAspectFlags aspect, std::uint32_t layerIndex,
+    const ResourceState& next) noexcept
+{
+    TextureArraySubresourceDecision decision;
+    decision.requiresBarrier = RequiresBarrier(layerState, next);
+    decision.range = VkImageSubresourceRange{ aspect, 0, 1, layerIndex, 1 };
+    return decision;
+}
+
 VkImageMemoryBarrier2 BuildImageMemoryBarrier2(
     VkImage image, VkImageSubresourceRange subresourceRange, const ResourceState& previous, const ResourceState& next) noexcept
 {
