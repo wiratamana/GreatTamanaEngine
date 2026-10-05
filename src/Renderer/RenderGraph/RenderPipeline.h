@@ -507,6 +507,9 @@ enum class ProviderTiming { BeforeDeferredPasses, AfterDeferredPasses };
 
 class RenderPipeline {
 public:
+    // No duplicate-name rejection here (reuse silently coexists) - treat
+    // "AtmosphereSharedLut"/"AtmosphereViewLut"/"DrawSkyBackground"/
+    // "AtmosphereComposite" as permanently reserved names, never reused.
     // render-pass-3 campaign, PHASE3 - new, TRAILING, DEFAULTED `timing`
     // parameter (ProviderTiming::BeforeDeferredPasses default) - every
     // pre-existing 3-argument Register() call site (PHASE2's own

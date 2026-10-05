@@ -2730,3 +2730,10 @@ sdl3_copy_runtime_dll(GreatTamanaEngineTests)
 # discovery tries to run it.
 include(GoogleTest)
 gtest_discover_tests(GreatTamanaEngineTests)
+
+# Fails (non-zero) if Core.h/Core.cpp/EditorLayer.h ever mention "Atmosphere"
+# again - see tools/ci/atmosphere_core_decoupling_check/CheckAtmosphereCoreDecoupling.cmake.
+add_test(NAME AtmosphereCoreDecouplingCheck
+    COMMAND "${CMAKE_COMMAND}" -D "GTE_REPO_ROOT=${CMAKE_SOURCE_DIR}"
+            -P "${CMAKE_SOURCE_DIR}/tools/ci/atmosphere_core_decoupling_check/CheckAtmosphereCoreDecoupling.cmake"
+)
