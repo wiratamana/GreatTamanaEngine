@@ -25,7 +25,7 @@ namespace gte {
 class ILogSink {
 public:
     virtual ~ILogSink() = default;
-    virtual void Log(LogLevel level, std::string_view category, std::string_view message) = 0;
+    virtual void Log(LogLevel level, std::string_view category, std::string_view message, bool isBlocking = false) = 0;
 };
 
 // Install-once, idempotent (safe to call more than once - see LogSink.cpp
@@ -53,6 +53,6 @@ bool IsLogSinkInstalled() noexcept;
 // silent no-op if none is. Never called directly by feature code - see
 // the GTE_LOG_* macros (Core/Logging.h), which already guard this call
 // behind IsLogSinkInstalled() themselves.
-void LogToActiveSink(LogLevel level, std::string_view category, std::string_view message);
+void LogToActiveSink(LogLevel level, std::string_view category, std::string_view message, bool isBlocking);
 
 } // namespace gte

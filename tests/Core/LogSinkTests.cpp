@@ -45,11 +45,12 @@ public:
         LogLevel level;
         std::string category;
         std::string message;
+        bool isBlocking = false;
     };
 
-    void Log(LogLevel level, std::string_view category, std::string_view message) override
+    void Log(LogLevel level, std::string_view category, std::string_view message, bool isBlocking = false) override
     {
-        entries.push_back(Recorded{ level, std::string(category), std::string(message) });
+        entries.push_back(Recorded{ level, std::string(category), std::string(message), isBlocking });
     }
 
     std::vector<Recorded> entries;
@@ -145,6 +146,21 @@ TEST_F(LogSinkTest, GTE_LOG_MacrosRouteThroughLogToActiveSinkWhenASinkIsInstalle
     EXPECT_EQ(sink.entries[0].level, LogLevel::Error);
     EXPECT_EQ(sink.entries[0].category, "SomeCategory");
     EXPECT_EQ(sink.entries[0].message, "an error message");
+}
+
+TEST_F(LogSinkTest, GTE_LOG_ERROR_BLOCKINGSetsIsBlockingTrueWhilePlainGTE_LOG_ERRORDoesNot)
+{
+    RecordingLogSink sink;
+    InstallLogSink(&sink);
+
+    GTE_LOG_ERROR("SomeCategory", "a plain error message");
+    GTE_LOG_ERROR_BLOCKING("SomeCategory", "a blocking error message");
+
+    ASSERT_EQ(sink.entries.size(), 2u);
+    EXPECT_EQ(sink.entries[0].level, LogLevel::Error);
+    EXPECT_FALSE(sink.entries[0].isBlocking);
+    EXPECT_EQ(sink.entries[1].level, LogLevel::Error);
+    EXPECT_TRUE(sink.entries[1].isBlocking);
 }
 
 } // namespace

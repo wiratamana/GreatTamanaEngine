@@ -60,7 +60,7 @@ double SecondsSinceFirstLog() noexcept
 // into (what was then) Logger.h. Do NOT re-add definitions of either
 // function here - or in this file's own Logger.h - ever again.
 
-void Logger::Log(LogLevel level, const std::string& category, const std::string& message)
+void Logger::Log(LogLevel level, const std::string& category, const std::string& message, bool isBlocking)
 {
     const std::uint64_t frameNumber = s_currentFrame.load(std::memory_order_relaxed);
     const double timestampSeconds = SecondsSinceFirstLog();
@@ -80,6 +80,7 @@ void Logger::Log(LogLevel level, const std::string& category, const std::string&
     entry.level = level;
     entry.category = category;
     entry.message = message;
+    entry.isBlocking = isBlocking;
 
     s_entries.push_back(std::move(entry));
     if (s_entries.size() > Logger::kCapacity) {
@@ -117,6 +118,9 @@ std::vector<LogEntry> Logger::Query(const LogQueryFilter& filter)
                 continue;
             }
             if (filter.hasFrameMax && entry.frameNumber > filter.frameMax) {
+                continue;
+            }
+            if (filter.onlyBlocking && !entry.isBlocking) {
                 continue;
             }
             result.push_back(entry);

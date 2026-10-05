@@ -73,7 +73,7 @@ public:
     // note in PHASE1_CORE_LOGGER_MODULE.md): it locks a mutex and
     // allocates (std::string/LogEntry copies), either of which can
     // theoretically throw.
-    static void Log(LogLevel level, const std::string& category, const std::string& message);
+    static void Log(LogLevel level, const std::string& category, const std::string& message, bool isBlocking = false);
 
     // Called ONCE per real engine frame, from Application::Run() (Phase 2)
     // - stamps every LogEntry recorded AFTER this call with `frameNumber`
@@ -128,9 +128,9 @@ public:
 // #if at all.
 class LoggerLogSink : public ILogSink {
 public:
-    void Log(LogLevel level, std::string_view category, std::string_view message) override
+    void Log(LogLevel level, std::string_view category, std::string_view message, bool isBlocking = false) override
     {
-        Logger::Log(level, std::string(category), std::string(message));
+        Logger::Log(level, std::string(category), std::string(message), isBlocking);
     }
 
     // Meyers singleton - lazily constructed on first use, destroyed at

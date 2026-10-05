@@ -90,6 +90,7 @@ struct LogEntry {
     LogLevel level = LogLevel::Info;
     std::string category;
     std::string message;
+    bool isBlocking = false;       // True for a failure an automated caller must treat as blocking (e.g. GET /get_blocking_errors).
 };
 
 // Query parameters for Logger::Query() - every field is a filter that is
@@ -108,6 +109,7 @@ struct LogQueryFilter {
     bool hasFrameMax = false;
     std::uint64_t frameMax = 0;        // Inclusive.
     std::size_t limit = 0;             // 0 = no limit. Otherwise keep only the NEWEST `limit` matches.
+    bool onlyBlocking = false;         // True = only entries with isBlocking == true match.
 };
 
 // editor-core-separation-2 campaign, PHASE3
@@ -131,7 +133,7 @@ inline constexpr std::size_t kLogCapacity = 2000;
 // be included at every GTE_LOG_* call site in the engine - only whoever
 // installs/queries the sink directly needs to include LogSink.h.
 bool IsLogSinkInstalled() noexcept;
-void LogToActiveSink(LogLevel level, std::string_view category, std::string_view message);
+void LogToActiveSink(LogLevel level, std::string_view category, std::string_view message, bool isBlocking = false);
 
 } // namespace gte
 
@@ -166,3 +168,6 @@ void LogToActiveSink(LogLevel level, std::string_view category, std::string_view
     (::gte::IsLogSinkInstalled() ? (void)::gte::LogToActiveSink(::gte::LogLevel::Warning, (category), (message)) : (void)0)
 #define GTE_LOG_ERROR(category, message) \
     (::gte::IsLogSinkInstalled() ? (void)::gte::LogToActiveSink(::gte::LogLevel::Error, (category), (message)) : (void)0)
+// Same as GTE_LOG_ERROR but flags the entry isBlocking=true for an automated caller to detect.
+#define GTE_LOG_ERROR_BLOCKING(category, message) \
+    (::gte::IsLogSinkInstalled() ? (void)::gte::LogToActiveSink(::gte::LogLevel::Error, (category), (message), true) : (void)0)

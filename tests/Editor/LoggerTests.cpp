@@ -254,6 +254,29 @@ TEST(LoggerTest, LogMacrosReachLoggerWithCorrectLevelCategoryMessage)
     EXPECT_EQ(results[3].message, "macro error message");
 }
 
+TEST(LoggerTest, BlockingErrorMacroSetsIsBlockingAndOnlyBlockingFilterReturnsJustThatEntry)
+{
+    Logger::Clear();
+
+    GTE_LOG_ERROR("PlainErrorCategory", "plain error message");
+    GTE_LOG_ERROR_BLOCKING("BlockingErrorCategory", "blocking error message");
+
+    const std::vector<LogEntry> all = Logger::Query(LogQueryFilter{});
+    ASSERT_EQ(all.size(), 2u);
+    EXPECT_EQ(all[0].level, LogLevel::Error);
+    EXPECT_FALSE(all[0].isBlocking);
+    EXPECT_EQ(all[1].level, LogLevel::Error);
+    EXPECT_TRUE(all[1].isBlocking);
+
+    LogQueryFilter filter;
+    filter.onlyBlocking = true;
+    const std::vector<LogEntry> blockingOnly = Logger::Query(filter);
+    ASSERT_EQ(blockingOnly.size(), 1u);
+    EXPECT_EQ(blockingOnly[0].category, "BlockingErrorCategory");
+    EXPECT_EQ(blockingOnly[0].message, "blocking error message");
+    EXPECT_TRUE(blockingOnly[0].isBlocking);
+}
+
 TEST(LoggerTest, ConcurrentLogging_NoCrashAndStrictlyAscendingUniqueIds)
 {
     Logger::Clear();

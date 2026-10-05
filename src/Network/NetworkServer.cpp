@@ -1248,6 +1248,29 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
             "application/json");
     });
 
+    // GET /get_blocking_errors - same shape/filters as /get_logs above, just
+    // pre-filtered to isBlocking entries, so a caller can cheaply check
+    // "is anything blocking right now?" in one call.
+    server.Get("/get_blocking_errors", [logQueryCapability](const httplib::Request& req, httplib::Response& res) {
+        ParsedGetLogsQuery parsed = ParseGetLogsQuery(req.get_param_value("since_id"),
+            "", "", "", "", "", "");
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        parsed.filter.onlyBlocking = true;
+        if (logQueryCapability == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("log query capability not available"), "application/json");
+            return;
+        }
+        const std::vector<LogEntry> entries = logQueryCapability->Query(parsed.filter);
+        res.set_content(
+            BuildGetLogsResponseJson(entries, logQueryCapability->IsEnabled(), logQueryCapability->LatestEntryId()),
+            "application/json");
+    });
+
     // task_manager/logger-1 campaign, PHASE3 - POST /clear_logs. Same
     // "no bridge needed" shape as GET /get_logs above.
     // editor-core-separation-2 campaign, PHASE3 - same nullable-capability

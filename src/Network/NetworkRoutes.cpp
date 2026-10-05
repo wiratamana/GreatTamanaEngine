@@ -1009,6 +1009,7 @@ std::string BuildGetLogsResponseJson(
         item["level"] = ToString(entry.level);
         item["category"] = entry.category;
         item["message"] = entry.message;
+        item["is_blocking"] = entry.isBlocking;
         arr.push_back(std::move(item));
     }
 

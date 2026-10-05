@@ -23,11 +23,11 @@ bool IsLogSinkInstalled() noexcept
     return s_activeSink.load(std::memory_order_acquire) != nullptr;
 }
 
-void LogToActiveSink(LogLevel level, std::string_view category, std::string_view message)
+void LogToActiveSink(LogLevel level, std::string_view category, std::string_view message, bool isBlocking)
 {
     ILogSink* sink = s_activeSink.load(std::memory_order_acquire);
     if (sink != nullptr) {
-        sink->Log(level, category, message);
+        sink->Log(level, category, message, isBlocking);
     }
 }
 

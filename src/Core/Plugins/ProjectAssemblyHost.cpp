@@ -110,9 +110,12 @@ bool ProjectAssemblyHost::TryLoadOneAssembly(
         return false; // Not a Project Assembly output - ignore silently.
     }
 
+    // Suppress the OS "entry point not found" dialog; restore the mode right after.
+    UINT previousErrorMode = SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX);
     HMODULE module = LoadLibraryW(dllPath.c_str());
+    SetErrorMode(previousErrorMode);
     if (module == nullptr) {
-        GTE_LOG_WARNING("ProjectAssembly", "Failed to LoadLibraryW: " + dllPath.string() + " (GetLastError=" + std::to_string(GetLastError()) + ")");
+        GTE_LOG_ERROR_BLOCKING("ProjectAssembly", "Failed to load Project Assembly '" + fileName + "' (GetLastError=" + std::to_string(GetLastError()) + "). This usually means it was built against an older/incompatible engine version - rebuild it and relaunch.");
         return false;
     }
 
