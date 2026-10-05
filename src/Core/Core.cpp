@@ -1617,8 +1617,8 @@ void Core::BuildFrame()
                         const Mat4 gameViewProjection =
                             RenderSystem::ResolveActiveCameraViewProjection(m_game.GetRegistry(), aspect);
 
-                        const rg::TextureHandle h =
-                            b.ImportTexture("GameView", gameTarget->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
+                        const rg::TextureHandle h = b.ImportTexture("GameView", gameTarget->Target(),
+                            VK_IMAGE_LAYOUT_UNDEFINED, gameTarget->Sampler(), gameTarget->DepthSampler());
 
                         RenderPassViewData gameViewData;
                         gameViewData.id = rg::RenderViewId::Named("Game");
@@ -1728,8 +1728,8 @@ void Core::BuildFrame()
                         const Mat4 sceneViewProjection = m_editorLayer->SceneViewProjection(aspect);
                         const Vec3 sceneEyeWorldPosition = m_editorLayer->SceneViewCameraWorldPosition();
 
-                        const rg::TextureHandle h =
-                            b.ImportTexture("SceneView", sceneTarget->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
+                        const rg::TextureHandle h = b.ImportTexture("SceneView", sceneTarget->Target(),
+                            VK_IMAGE_LAYOUT_UNDEFINED, sceneTarget->Sampler(), sceneTarget->DepthSampler());
 
                         RenderPassViewData sceneViewData;
                         sceneViewData.id = rg::RenderViewId::Named("Scene");

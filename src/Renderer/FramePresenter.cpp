@@ -436,6 +436,7 @@ bool FramePresenter::PresentViaRenderGraph(rg::RenderGraph& graph, bool needsSwa
     // RENDERGRAPH_PHASE6_COMPLETION_REPORT.md's own Step 3.5 guidance.
     graph.Execute(cmd, rg::ExecuteTimingMode::PipelinedDeferredReadback,
         [&](rg::RenderGraphBuilder& builder) -> std::vector<rg::TextureHandle> {
+            // The swapchain image is never sampled, only presented - no sampler exists for it.
             const rg::TextureHandle swapchainHandle =
                 builder.ImportTexture("Swapchain", target, VK_IMAGE_LAYOUT_UNDEFINED);
             return build(builder, swapchainHandle);

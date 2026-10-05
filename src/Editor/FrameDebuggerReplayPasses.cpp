@@ -152,8 +152,8 @@ std::vector<rg::TextureHandle> FrameDebuggerCaptureContext::AddReplayPasses(rg::
     for (std::size_t i = 0; i < totalStepCount; ++i) {
         const char* passName = ReplayStepPassName(i); // Step 3.3b - NEVER a per-call temporary.
 
-        const rg::TextureHandle destHandle =
-            builder.ImportTexture(passName, destinations[i].Target(), VK_IMAGE_LAYOUT_UNDEFINED);
+        const rg::TextureHandle destHandle = builder.ImportTexture(passName, destinations[i].Target(),
+            VK_IMAGE_LAYOUT_UNDEFINED, destinations[i].Sampler(), destinations[i].DepthSampler());
 
         // frame-debugger-8 campaign, PHASE2 - THE fix. `isSkyStep` is true
         // for EXACTLY ONE index: the extra, dedicated step this phase adds

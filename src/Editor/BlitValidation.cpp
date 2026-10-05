@@ -36,10 +36,10 @@ rg::TextureHandle BlitValidation::AddPass(rg::RenderGraphBuilder& builder, Rende
 {
     EnsureInitialized(renderer);
 
-    const rg::TextureHandle sourceHandle =
-        builder.ImportTexture("BlitValidationSource", m_source->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
-    const rg::TextureHandle outputHandle =
-        builder.ImportTexture("BlitValidationOutput", m_output->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
+    const rg::TextureHandle sourceHandle = builder.ImportTexture("BlitValidationSource", m_source->Target(),
+        VK_IMAGE_LAYOUT_UNDEFINED, m_source->Sampler(), m_source->DepthSampler());
+    const rg::TextureHandle outputHandle = builder.ImportTexture("BlitValidationOutput", m_output->Target(),
+        VK_IMAGE_LAYOUT_UNDEFINED, m_output->Sampler(), m_output->DepthSampler());
 
     // docs/conventions/render-pass-toggle-honesty.md's iron rule, using this
     // codebase's own MANDATED helper for it (RenderPassToggleGuard.h's

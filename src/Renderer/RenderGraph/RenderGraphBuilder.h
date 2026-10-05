@@ -65,6 +65,11 @@ struct TextureImportInfo {
     // actually in right now. See ImportTexture()'s own comment for why
     // this has no default to silently fall back on.
     VkImageLayout currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    // Only meaningful when isImported == true - the already-live color/
+    // depth sampler for this resource, supplied by the caller at import
+    // time (VK_NULL_HANDLE when that sub-resource genuinely has none).
+    VkSampler colorSampler = VK_NULL_HANDLE;
+    VkSampler depthSampler = VK_NULL_HANDLE;
 };
 
 // Buffer sibling of TextureImportInfo above - see
@@ -428,7 +433,11 @@ public:
     // what layout a resource is actually in at the point you're importing
     // it, that uncertainty needs resolving upstream first, never guessed
     // at here.
-    TextureHandle ImportTexture(const char* name, const RenderTarget& externalTarget, VkImageLayout currentLayout);
+    // `colorSampler`/`depthSampler` are this resource's already-live
+    // color/depth samplers (VK_NULL_HANDLE only when that sub-resource
+    // genuinely has no sampler, e.g. the swapchain).
+    TextureHandle ImportTexture(const char* name, const RenderTarget& externalTarget, VkImageLayout currentLayout,
+        VkSampler colorSampler = VK_NULL_HANDLE, VkSampler depthSampler = VK_NULL_HANDLE);
 
     // Buffer sibling of ImportTexture() above - GPU Vertex Skinning
     // campaign, Phase 3

@@ -183,8 +183,8 @@ IEditorLayer::ArrayLayerRenderValidationHandles ArrayLayerRenderValidation::AddP
         &handles.layer3 };
 
     for (std::size_t i = 0; i < kLayerOutputNames.size(); ++i) {
-        const rg::TextureHandle outputHandle =
-            builder.ImportTexture(kLayerOutputNames[i], m_layerOutputs[i]->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
+        const rg::TextureHandle outputHandle = builder.ImportTexture(kLayerOutputNames[i], m_layerOutputs[i]->Target(),
+            VK_IMAGE_LAYOUT_UNDEFINED, m_layerOutputs[i]->Sampler(), m_layerOutputs[i]->DepthSampler());
         *handleSlots[i] = outputHandle;
 
         const std::uint32_t layerIndex = static_cast<std::uint32_t>(i);

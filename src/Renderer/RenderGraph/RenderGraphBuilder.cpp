@@ -143,7 +143,8 @@ BufferHandle RenderGraphBuilder::CreateBuffer(const char* name, const BufferDesc
     return BufferHandle{ index, 1 };
 }
 
-TextureHandle RenderGraphBuilder::ImportTexture(const char* name, const RenderTarget& externalTarget, VkImageLayout currentLayout)
+TextureHandle RenderGraphBuilder::ImportTexture(const char* name, const RenderTarget& externalTarget,
+    VkImageLayout currentLayout, VkSampler colorSampler, VkSampler depthSampler)
 {
     assert(name != nullptr && name[0] != '\0' &&
         "RenderGraphBuilder::ImportTexture requires a non-empty, static-storage-duration name");
@@ -165,6 +166,8 @@ TextureHandle RenderGraphBuilder::ImportTexture(const char* name, const RenderTa
     importInfo.isImported = true;
     importInfo.externalTarget = externalTarget;
     importInfo.currentLayout = currentLayout;
+    importInfo.colorSampler = colorSampler;
+    importInfo.depthSampler = depthSampler;
 
     m_textures.push_back(TextureSlot{ desc, name, importInfo });
     return TextureHandle{ index, 1 };
@@ -320,8 +323,9 @@ void RenderGraphBuilder::AddBlitPass(const char* name, const BlitSpec& spec, Ren
 TextureHandle RenderGraphBuilder::MintPersistentHandle(
     const RenderGraphPersistentResourceCache::ResolvedTexture& resolved)
 {
-    const TextureHandle handle =
-        ImportTexture(resolved.combinedKey->c_str(), resolved.texture->Target(), resolved.lastKnownLayout);
+    // Persistent cache entries are always color-only (Section 7) - no depth sampler to pass.
+    const TextureHandle handle = ImportTexture(
+        resolved.combinedKey->c_str(), resolved.texture->Target(), resolved.lastKnownLayout, resolved.texture->Sampler());
     m_persistentCacheTextures.push_back(handle);
     return handle;
 }

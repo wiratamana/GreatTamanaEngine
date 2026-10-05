@@ -367,6 +367,7 @@ private:
         bool hasDepth = false;
         RenderTarget target;
         VkSampler sampler = VK_NULL_HANDLE;
+        VkSampler depthSampler = VK_NULL_HANDLE;
         ResourceState colorState;
         ResourceState depthState;
     };

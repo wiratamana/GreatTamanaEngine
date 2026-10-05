@@ -998,8 +998,9 @@ void RenderFeatureCompositor::ContributeRenderGraphPasses(
 
     const char* seedName = m_namePool.SeedName(viewName);
     BlendStageState& seedState = EnsureBlendStageState(seedName, extent);
-    const rg::TextureHandle seedHandle =
-        frame.builder.ImportTexture(seedName, seedState.texture->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
+    // No depth sub-resource - this chain's targets are color-only.
+    const rg::TextureHandle seedHandle = frame.builder.ImportTexture(
+        seedName, seedState.texture->Target(), VK_IMAGE_LAYOUT_UNDEFINED, seedState.texture->Sampler());
     DispatchBlend(frame.builder, resolved->target, resolved->sampler, resolved->target, resolved->sampler,
         seedHandle, seedState, m_namePool.SeedCopyPassName(viewName), extent, RenderFeatureBlendMode::Replace);
 
@@ -1021,8 +1022,9 @@ void RenderFeatureCompositor::ContributeRenderGraphPasses(
 
         const char* privateName = m_namePool.PrivateName(gpuStateKey, viewName);
         PrivateTargetState& privateState = EnsurePrivateTargetState(privateName, extent);
-        const rg::TextureHandle privateTarget =
-            frame.builder.ImportTexture(privateName, privateState.texture->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
+        // No depth sub-resource - this chain's targets are color-only.
+        const rg::TextureHandle privateTarget = frame.builder.ImportTexture(
+            privateName, privateState.texture->Target(), VK_IMAGE_LAYOUT_UNDEFINED, privateState.texture->Sampler());
 
         if (entry.projectCallback) {
             entry.projectCallback(frame.builder, privateTarget, extent);
@@ -1039,7 +1041,9 @@ void RenderFeatureCompositor::ContributeRenderGraphPasses(
         } else {
             const char* accumName = m_namePool.AccumName(gpuStateKey, viewName);
             outputState = &EnsureBlendStageState(accumName, extent);
-            outputTarget = frame.builder.ImportTexture(accumName, outputState->texture->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
+            // No depth sub-resource - this chain's targets are color-only.
+            outputTarget = frame.builder.ImportTexture(
+                accumName, outputState->texture->Target(), VK_IMAGE_LAYOUT_UNDEFINED, outputState->texture->Sampler());
         }
 
         DispatchBlend(frame.builder, currentInput, currentInputSampler, privateTarget,

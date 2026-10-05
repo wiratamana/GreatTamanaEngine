@@ -70,7 +70,8 @@ void RenderGraph::EnsureTextureResolved(
         // sync that already orders frames elsewhere).
         tex.isImported = true;
         tex.target = importInfo.externalTarget;
-        tex.sampler = VK_NULL_HANDLE; // TextureImportInfo carries no sampler of its own.
+        tex.sampler = importInfo.colorSampler; // the real, already-live sampler the caller supplied at import time.
+        tex.depthSampler = importInfo.depthSampler;
         tex.hasDepth = importInfo.externalTarget.depthImage != VK_NULL_HANDLE;
         tex.colorState =
             ResourceState{ importInfo.currentLayout, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE };
@@ -89,6 +90,7 @@ void RenderGraph::EnsureTextureResolved(
         tex.isImported = false;
         tex.target = renderTexture.Target();
         tex.sampler = renderTexture.Sampler();
+        tex.depthSampler = renderTexture.DepthSampler();
         tex.hasDepth = input.textures[index].desc.hasDepth;
         // A freshly-claimed pooled entry (whether brand-new or reused from
         // a previous frame) always starts this call's tracking at the

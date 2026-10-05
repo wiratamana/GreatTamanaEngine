@@ -134,10 +134,10 @@ GBufferValidationHandles GBufferValidation::AddPass(
     // of this pass's own writes fully overwrites every in-bounds pixel
     // every time it runs, so the previous frame's actual contents/layout
     // never need to be preserved.
-    const rg::TextureHandle albedoHandle =
-        builder.ImportTexture("GBufferAlbedo", m_albedoOutput->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
-    const rg::TextureHandle normalHandle =
-        builder.ImportTexture("GBufferNormal", m_normalOutput->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
+    const rg::TextureHandle albedoHandle = builder.ImportTexture("GBufferAlbedo", m_albedoOutput->Target(),
+        VK_IMAGE_LAYOUT_UNDEFINED, m_albedoOutput->Sampler(), m_albedoOutput->DepthSampler());
+    const rg::TextureHandle normalHandle = builder.ImportTexture("GBufferNormal", m_normalOutput->Target(),
+        VK_IMAGE_LAYOUT_UNDEFINED, m_normalOutput->Sampler(), m_normalOutput->DepthSampler());
 
     // The MRT graphics pass itself - PHASE1-3's own mechanism's first real
     // consumer. Reuses m_albedoOutput's own companion DepthBuffer (every
@@ -193,8 +193,8 @@ GBufferValidationHandles GBufferValidation::AddPass(
     const bool copyEnabled =
         toggleRegistry == nullptr || toggleRegistry->NoteDeclaredAndCheckEnabled("GBufferValidationCopy");
     if (copyEnabled) {
-        visualizedHandle =
-            builder.ImportTexture("GBufferVisualized", m_visualizedOutput->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
+        visualizedHandle = builder.ImportTexture("GBufferVisualized", m_visualizedOutput->Target(),
+            VK_IMAGE_LAYOUT_UNDEFINED, m_visualizedOutput->Sampler(), m_visualizedOutput->DepthSampler());
 
         builder.AddRenderPass(
             "GBufferValidationCopy", rg::PassKind::Compute, rg::ViewScope::SceneView, rg::RenderPassCategory::Debug,

@@ -204,8 +204,9 @@ rg::TextureHandle AtmosphereLutRenderer::AddTransmittanceLutPass(
     // pass's own compute write fully overwrites every in-bounds texel every
     // time it runs, so whatever layout/contents this texture was left in
     // last frame never needs to be preserved.
-    const rg::TextureHandle outputHandle =
-        builder.ImportTexture("AtmosphereTransmittanceLut", target, VK_IMAGE_LAYOUT_UNDEFINED);
+    // Texture2D has no depth sub-resource - color sampler only.
+    const rg::TextureHandle outputHandle = builder.ImportTexture(
+        "AtmosphereTransmittanceLut", target, VK_IMAGE_LAYOUT_UNDEFINED, m_transmittanceLutOutput->Sampler());
 
     builder.AddRenderPass(
         "AtmosphereTransmittanceLutPass", rg::PassKind::Compute, rg::ViewScope::Shared, rg::RenderPassCategory::General,
@@ -306,8 +307,9 @@ rg::TextureHandle AtmosphereLutRenderer::AddMultiScatteringLutPass(rg::RenderGra
 
     EnsureMultiScatteringLutInitialized(renderer);
 
-    const rg::TextureHandle outputHandle = builder.ImportTexture(
-        "AtmosphereMultiScatteringLut", m_multiScatteringLutOutput->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
+    const rg::TextureHandle outputHandle = builder.ImportTexture("AtmosphereMultiScatteringLut",
+        m_multiScatteringLutOutput->Target(), VK_IMAGE_LAYOUT_UNDEFINED, m_multiScatteringLutOutput->Sampler(),
+        m_multiScatteringLutOutput->DepthSampler());
 
     builder.AddRenderPass(
         "AtmosphereMultiScatteringLutPass", rg::PassKind::Compute, rg::ViewScope::Shared, rg::RenderPassCategory::General,
@@ -448,8 +450,8 @@ rg::TextureHandle AtmosphereLutRenderer::AddSkyViewLutPass(rg::RenderGraphBuilde
     // single call, exactly like AddTransmittanceLutPass()'s own contract.
     viewState.frameUniformsBuffer->Upload(&frameUniforms, sizeof(AtmosphereFrameUniforms));
 
-    const rg::TextureHandle outputHandle =
-        builder.ImportTexture(outputTextureName, viewState.output->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
+    const rg::TextureHandle outputHandle = builder.ImportTexture(outputTextureName, viewState.output->Target(),
+        VK_IMAGE_LAYOUT_UNDEFINED, viewState.output->Sampler(), viewState.output->DepthSampler());
 
     builder.AddRenderPass(
         "AtmosphereSkyViewLutPass", rg::PassKind::Compute, viewScope, rg::RenderPassCategory::General,
@@ -735,8 +737,8 @@ rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveCompositePass(rg::R
         viewState.output->Resize(static_cast<int>(extent.width), static_cast<int>(extent.height));
     }
 
-    const rg::TextureHandle outputHandle =
-        builder.ImportTexture(outputTextureName, viewState.output->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
+    const rg::TextureHandle outputHandle = builder.ImportTexture(outputTextureName, viewState.output->Target(),
+        VK_IMAGE_LAYOUT_UNDEFINED, viewState.output->Sampler(), viewState.output->DepthSampler());
 
     // The Phase 6 Aerial Perspective Volume's own trilinear sampler - looked
     // up by name (the SAME name this frame's own AddAerialPerspectiveVolumePass()
@@ -946,8 +948,8 @@ rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveVolumeDebugSlicePas
     AerialPerspectiveVolumeDebugSliceViewState& viewState =
         EnsureAerialPerspectiveVolumeDebugSliceViewInitialized(renderer, outputTextureName, volumeWidth, volumeHeight);
 
-    const rg::TextureHandle outputHandle =
-        builder.ImportTexture(outputTextureName, viewState.output->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
+    const rg::TextureHandle outputHandle = builder.ImportTexture(outputTextureName, viewState.output->Target(),
+        VK_IMAGE_LAYOUT_UNDEFINED, viewState.output->Sampler(), viewState.output->DepthSampler());
 
     AerialPerspectiveVolumeDebugSlicePushConstants pushConstants{};
     pushConstants.sliceIndex = clampedSliceIndex;
