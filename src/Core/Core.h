@@ -86,6 +86,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
 #include <unordered_set>
 #include <vector>
 
@@ -381,9 +382,15 @@ public:
     // IPluginRenderPassBuilder_v3). Forwards onto m_offscreenRenderPipeline
     // (confirmed correct target - see Core.cpp for the reasoning: this is the
     // pipeline every production Game-View/Scene-View pass registers onto;
-    // m_presentRenderPipeline is the separate, narrower pipeline used ONLY
-    // for the one "Present" swapchain-blit provider).
-    void RegisterProjectRenderPassProvider(const char* debugName, rg::ProviderScope scope, rg::RenderPassProvider provider);
+    // for the one "Present" swapchain-blit provider). `timing` is a
+    // trailing, defaulted parameter (default matches every pre-existing call
+    // site's own implicit behavior) forwarded straight into the underlying
+    // pipeline's 4-argument Register() overload - lets a caller whose pass
+    // must run in RenderPipeline's second, deferred-flush phase
+    // (rg::ProviderTiming::AfterDeferredPasses) express that without a
+    // second, parallel registration method.
+    void RegisterProjectRenderPassProvider(const char* debugName, rg::ProviderScope scope,
+        rg::RenderPassProvider provider, rg::ProviderTiming timing = rg::ProviderTiming::BeforeDeferredPasses);
 
     // editor-core-separation-13 campaign, PHASE3 - the teardown counterpart of
     // RegisterProjectRenderPassProvider() (immediately above), called ONLY by
@@ -611,6 +618,49 @@ public:
     std::optional<PluginRenderFeatureTargetInfo> FindPluginRenderFeatureTarget(
         const rg::RenderPassFrameContext& frame);
 
+    // Read-only pass-through for RenderPipeline-registered callers that need
+    // this frame's per-view render-target/eye-position/view-projection data
+    // but have no access to Core's own private FindViewData()/
+    // m_currentViewDataThisFrame. Returns std::nullopt when `view` has no
+    // known RenderPassViewData this frame.
+    std::optional<RenderPassViewData> FindRenderPassViewData(rg::RenderViewId view) const noexcept;
+
+    // Generic, feature-free payload any feature publishing a composited
+    // final-image output for a view may Publish() under
+    // ViewCompositedOutputKey(). Carries a real VkSampler alongside the
+    // TextureHandle because the handle alone (an opaque render-graph logical
+    // identifier) cannot answer "what Vulkan sampler does this resolve to"
+    // outside of PassContext::resolveTexture(), which is unavailable at
+    // declare time.
+    struct ViewCompositedOutputEntry {
+        rg::TextureHandle handle;
+        VkSampler sampler = VK_NULL_HANDLE;
+    };
+
+    // "Game" -> the Game View's reserved key; anything else -> the Scene
+    // View's reserved key. Exactly two reserved slots exist; there is no
+    // per-arbitrary-view generalization here (mirrors every other
+    // Game/Scene-only reserved-name convention already in this file).
+    static rg::RenderPassId ViewCompositedOutputKey(bool isGameView) noexcept;
+
+    // A feature's own composited-output finalize step, run once per
+    // registered name after the offscreen render graph has executed this
+    // frame, with the SAME VkCommandBuffer BuildFrame() already has in hand.
+    // Returns the finalized RenderTexture* to report for `name` this frame,
+    // or nullptr if there is nothing to report (e.g. that view was not
+    // rendered at all). Must never throw - it runs inside the same try/catch
+    // that already wraps the whole offscreen Execute() call.
+    using FinalizeForSamplingCallback = std::function<RenderTexture*(VkCommandBuffer cmd)>;
+
+    // Called exactly once per feature, from that feature's own constructor,
+    // on the same thread that constructs Core (never a worker/network
+    // thread, never again after startup - no Unregister exists). `name` must
+    // be a stable string (a string literal is fine). Returns false (logged,
+    // never crashes) if `name` is already registered - a genuine duplicate
+    // registration is a programmer error, refused outright, never silently
+    // overwritten or allowed to coexist.
+    bool RegisterFinalizeForSamplingHook(const char* name, FinalizeForSamplingCallback callback);
+
 private:
     // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
     // PHASE5 - one eligible batch's own THIS-FRAME render data, ready for the
@@ -695,6 +745,12 @@ private:
     // (below). Relocated verbatim from Application::FindViewData(), PHASE13.
     const RenderPassViewData* FindViewData(rg::RenderViewId view) const noexcept;
 
+    // Finds `name` in m_finalizeForSamplingHooks and invokes it with `cmd`;
+    // returns its result, or nullptr if no hook is registered under `name`.
+    // A hook callback must never throw - it runs inside the same try/catch
+    // that already wraps the whole offscreen Execute() call.
+    RenderTexture* DispatchFinalizeForSamplingHook(const char* name, VkCommandBuffer cmd);
+
     // Declared first - independent of every other member below, and not
     // itself part of the ctor initializer-list ordering concern the real
     // owned members are (it uses its own default member initializer,
@@ -758,6 +814,16 @@ private:
     // owned value member (no Vulkan/heavy dependency, needs no lazy
     // construction).
     rg::RenderPassToggleRegistry m_renderPassToggleRegistry;
+
+    // Backing store for RegisterFinalizeForSamplingHook()/
+    // DispatchFinalizeForSamplingHook() (above). Realistic hook count is 1-3,
+    // never worth a hashed lookup - mirrors FindViewData()'s own linear-scan
+    // precedent.
+    struct FinalizeForSamplingHookEntry {
+        std::string name;
+        FinalizeForSamplingCallback callback;
+    };
+    std::vector<FinalizeForSamplingHookEntry> m_finalizeForSamplingHooks;
 
     // editor-core-separation-22 campaign, PHASE6
     // (PHASE6_IRON_RULE_V2_BIDIRECTIONAL_DETECTOR.md, Step 3.3 item 2) -

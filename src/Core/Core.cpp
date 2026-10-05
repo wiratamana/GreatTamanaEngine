@@ -137,6 +137,12 @@ constexpr rg::RenderPassId kGameSkyBackgroundCallbackKey = "Atmosphere.GameSkyBa
 constexpr rg::RenderPassId kGameCompositedOutputKey = "Atmosphere.CompositedOutput.Game"_passId;
 constexpr rg::RenderPassId kSceneCompositedOutputKey = "Atmosphere.CompositedOutput.Scene"_passId;
 
+// Generic, feature-free successors to the two reserved keys immediately
+// above - see Core::ViewCompositedOutputKey()'s own doc comment (Core.h).
+// Unused until a feature's own composite pass publishes under them.
+constexpr rg::RenderPassId kViewCompositedOutputGameKey = "Core.ViewCompositedOutput.Game"_passId;
+constexpr rg::RenderPassId kViewCompositedOutputSceneKey = "Core.ViewCompositedOutput.Scene"_passId;
+
 // The scene-service slot index "SceneServicesExampleShadowFeature" claims at
 // startup and publishes its blackboard entry under every frame.
 constexpr std::uint32_t kSceneServicesExampleShadowSlotIndex = 0;
@@ -389,17 +395,20 @@ void Core::LoadProjectAssemblies(const std::filesystem::path& outputDirectory, E
 // "GpuDrivenBatches", ...) registers onto (see
 // RegisterOffscreenRenderPipelineProviders() below) - m_presentRenderPipeline
 // is the separate, narrower pipeline used ONLY for the one "Present"
-// swapchain-blit provider, the wrong target for a general-purpose content
-// pass. Safe to call any time after Core's own constructor has run (a
-// Project Assembly's GTE_RegisterProject runs from EditorHost.cpp's
-// constructor body, strictly after Core's own construction) - Register()
-// merely appends to an internal std::vector read fresh, in full, every
-// frame by DeclareInto(), so registering after construction but before the
-// first real frame renders behaves identically to registering during
+// pass. `timing` forwards straight into the underlying 4-argument
+// Register() overload, defaulting to its own BeforeDeferredPasses default -
+// every pre-existing 3-argument call site keeps compiling unmodified. Safe
+// to call any time after Core's own constructor has run (a Project
+// Assembly's GTE_RegisterProject runs from EditorHost.cpp's constructor
+// body, strictly after Core's own construction) - Register() merely appends
+// to an internal std::vector read fresh, in full, every frame by
+// DeclareInto(), so registering after construction but before the first
+// real frame renders behaves identically to registering during
 // construction.
-void Core::RegisterProjectRenderPassProvider(const char* debugName, rg::ProviderScope scope, rg::RenderPassProvider provider)
+void Core::RegisterProjectRenderPassProvider(const char* debugName, rg::ProviderScope scope,
+    rg::RenderPassProvider provider, rg::ProviderTiming timing)
 {
-    m_offscreenRenderPipeline.Register(debugName, scope, std::move(provider));
+    m_offscreenRenderPipeline.Register(debugName, scope, std::move(provider), timing);
     // editor-core-separation-13 campaign, PHASE3 - safe no-op outside an
     // active ProjectAssemblyRegistrationLedger::BeginRecordingFor() bracket.
     ProjectAssemblyRegistrationLedger::Instance().RecordRenderPass(debugName);
@@ -678,6 +687,57 @@ const RenderPassViewData* Core::FindViewData(rg::RenderViewId view) const noexce
     for (const RenderPassViewData& viewData : m_currentViewDataThisFrame) {
         if (viewData.id == view) {
             return &viewData;
+        }
+    }
+    return nullptr;
+}
+
+// Public, read-only pass-through onto FindViewData() immediately above, for
+// RenderPipeline-registered callers outside Core.cpp that hold a
+// RenderViewId but no access to Core's own private state.
+std::optional<RenderPassViewData> Core::FindRenderPassViewData(rg::RenderViewId view) const noexcept
+{
+    const RenderPassViewData* viewData = FindViewData(view);
+    return viewData != nullptr ? std::optional<RenderPassViewData>(*viewData) : std::nullopt;
+}
+
+// Generic replacement for kGameCompositedOutputKey/kSceneCompositedOutputKey
+// above - resolves to one of the two new kViewCompositedOutput*Key constants.
+// Not yet published or fetched anywhere this phase.
+rg::RenderPassId Core::ViewCompositedOutputKey(bool isGameView) noexcept
+{
+    return isGameView ? kViewCompositedOutputGameKey : kViewCompositedOutputSceneKey;
+}
+
+// RegisterFinalizeForSamplingHook()'s own doc comment (Core.h) states the
+// full contract: called once, at construction time, main-thread-only, no
+// Unregister. A duplicate name is refused - logged unconditionally (so a
+// release build still leaves a discoverable trace) and asserted in debug
+// builds, mirroring DetectRenderPassEventContradictions()'s own precedent
+// (docs/conventions/render-pass-toggle-honesty.md) rather than
+// RegisterSceneServiceSlot()'s idempotent-re-registration one, since this
+// mechanism has no legitimate non-error duplicate case.
+bool Core::RegisterFinalizeForSamplingHook(const char* name, FinalizeForSamplingCallback callback)
+{
+    for (const FinalizeForSamplingHookEntry& entry : m_finalizeForSamplingHooks) {
+        if (entry.name == name) {
+            GTE_LOG_ERROR("Core", std::string("RegisterFinalizeForSamplingHook: duplicate name '") + name + "' - refused.");
+            assert(false && "RegisterFinalizeForSamplingHook: duplicate name - see the GTE_LOG_ERROR immediately above.");
+            return false;
+        }
+    }
+    m_finalizeForSamplingHooks.push_back({ name, std::move(callback) });
+    return true;
+}
+
+// Linear scan (realistic hook count is 1-3, mirrors FindViewData()'s own
+// precedent) - returns nullptr both when `name` is not registered and when
+// the registered callback itself returns nullptr.
+RenderTexture* Core::DispatchFinalizeForSamplingHook(const char* name, VkCommandBuffer cmd)
+{
+    for (FinalizeForSamplingHookEntry& entry : m_finalizeForSamplingHooks) {
+        if (entry.name == name) {
+            return entry.callback ? entry.callback(cmd) : nullptr;
         }
     }
     return nullptr;
