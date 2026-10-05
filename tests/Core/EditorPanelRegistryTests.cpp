@@ -282,7 +282,6 @@ public:
         ::gte::EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Profiler");
         ::gte::EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Render Graph");
         ::gte::EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Jobs");
-        ::gte::EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Atmosphere");
         ::gte::EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Log");
     }
 };

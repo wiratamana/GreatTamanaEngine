@@ -1,8 +1,8 @@
 #pragma once
 
-#include "../AtmosphereAerialPerspectiveLutInspection.h"
-#include "../AtmosphereAerialPerspectiveSkyPurityValidation.h"
-#include "../AtmosphereTransmittanceLutValidation.h"
+#include "AtmosphereAerialPerspectiveLutInspection.h"
+#include "AtmosphereAerialPerspectiveSkyPurityValidation.h"
+#include "AtmosphereTransmittanceLutValidation.h"
 
 #include <optional>
 

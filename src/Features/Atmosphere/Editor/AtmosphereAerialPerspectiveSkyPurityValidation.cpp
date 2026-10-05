@@ -1,9 +1,9 @@
 #include "AtmosphereAerialPerspectiveSkyPurityValidation.h"
 
-#include "../Features/Atmosphere/AtmosphereAerialPerspectiveCompositeMath.h"
-#include "../Renderer/Renderer.h"
-#include "../Renderer/RenderGraph/RenderGraph.h"
-#include "../Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
+#include "../AtmosphereAerialPerspectiveCompositeMath.h"
+#include "../../../Renderer/Renderer.h"
+#include "../../../Renderer/RenderGraph/RenderGraph.h"
+#include "../../../Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
 
 #include <algorithm>
 #include <cmath>

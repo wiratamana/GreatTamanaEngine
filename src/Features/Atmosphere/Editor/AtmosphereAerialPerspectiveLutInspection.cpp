@@ -1,8 +1,8 @@
 #include "AtmosphereAerialPerspectiveLutInspection.h"
 
-#include "../Encoding/HdrColorVisualization.h"
-#include "../Features/Atmosphere/AtmosphereLutRenderer.h"
-#include "../Renderer/Renderer.h"
+#include "../../../Encoding/HdrColorVisualization.h"
+#include "../AtmosphereLutRenderer.h"
+#include "../../../Renderer/Renderer.h"
 
 #include <algorithm>
 #include <cmath>

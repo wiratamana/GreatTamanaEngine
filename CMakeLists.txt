@@ -1104,12 +1104,16 @@ add_library(gte_editor STATIC
     src/Editor/GpuDrivenBatchTestSpawner.cpp
     src/Editor/GpuSkinningValidation.h
     src/Editor/GpuSkinningValidation.cpp
-    src/Editor/AtmosphereTransmittanceLutValidation.h
-    src/Editor/AtmosphereTransmittanceLutValidation.cpp
-    src/Editor/AtmosphereAerialPerspectiveLutInspection.h
-    src/Editor/AtmosphereAerialPerspectiveLutInspection.cpp
-    src/Editor/AtmosphereAerialPerspectiveSkyPurityValidation.h
-    src/Editor/AtmosphereAerialPerspectiveSkyPurityValidation.cpp
+    src/Features/Atmosphere/Editor/AtmosphereTransmittanceLutValidation.h
+    src/Features/Atmosphere/Editor/AtmosphereTransmittanceLutValidation.cpp
+    src/Features/Atmosphere/Editor/AtmosphereAerialPerspectiveLutInspection.h
+    src/Features/Atmosphere/Editor/AtmosphereAerialPerspectiveLutInspection.cpp
+    src/Features/Atmosphere/Editor/AtmosphereAerialPerspectiveSkyPurityValidation.h
+    src/Features/Atmosphere/Editor/AtmosphereAerialPerspectiveSkyPurityValidation.cpp
+    src/Features/Atmosphere/Editor/AtmospherePanel.h
+    src/Features/Atmosphere/Editor/AtmospherePanel.cpp
+    src/Features/Atmosphere/Editor/AtmospherePluginPanelModule.h
+    src/Features/Atmosphere/Editor/AtmospherePluginPanelModule.cpp
     src/Editor/TransformGizmo.h
     src/Editor/TransformGizmo.cpp
     src/Editor/DockLayout.h
@@ -1216,8 +1220,6 @@ add_library(gte_editor STATIC
     src/Editor/Panels/JobsPanel.cpp
     src/Editor/Panels/LogPanel.h
     src/Editor/Panels/LogPanel.cpp
-    src/Editor/Panels/AtmospherePanel.h
-    src/Editor/Panels/AtmospherePanel.cpp
     src/Editor/Panels/FrameDebuggerPanel.h
     src/Editor/Panels/FrameDebuggerPanel.cpp
     # editor-core-separation-3 campaign, PHASE4

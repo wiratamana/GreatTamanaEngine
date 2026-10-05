@@ -249,11 +249,6 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
     assert(m_editorLayer != nullptr && "EditorHost: m_editorLayer must be non-null before SetEditorLayerHook()");
     m_core.SetEditorLayerHook(m_editorLayer.get());
 
-    // Load by default for every run, per EditorHost's own composition-root
-    // role - never constructed by Core itself. Bound into the real ImGui
-    // layer immediately afterward so its own feature panel can reach it.
-    m_atmosphereFeature = std::make_unique<AtmosphereFeature>(m_core);
-    BindAtmosphereFeatureForEditorLayer(*m_editorLayer, *m_atmosphereFeature);
     // editor-core-separation-16 campaign (On-Engine Project Workflow plan,
     // BIG-STEP 2), PHASE4 - gives the real ImGui implementation
     // (ImGuiEditorLayer) a live IProjectLifecycleCapability* so its "New
@@ -366,7 +361,6 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
     EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Profiler");
     EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Render Graph");
     EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Jobs");
-    EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Atmosphere");
     EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Log");
 #if GTE_ENABLE_PROJECT_PANEL
     EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Project");
@@ -397,6 +391,12 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
 #if GTE_ENABLE_PROJECT_ASSEMBLIES
     m_core.LoadProjectAssemblies(ResolveProjectAssemblyOutputDirectory(gte::ExecutableDirectory()), this);
 #endif
+
+    // Constructed after every RegisterBuiltinPanelName() call above, then
+    // bound as a plugin panel - preserves the "built-ins first, plugins
+    // after" EditorPanelRegistry order (see EditorLayerAtmosphereBinding.h).
+    m_atmosphereFeature = std::make_unique<AtmosphereFeature>(m_core);
+    BindAtmosphereFeatureForEditorLayer(*m_editorLayer, *m_atmosphereFeature, m_renderer, m_renderGraph);
 
     // editor-core-separation-1 campaign, PHASE16 - wires the ONE real
     // ISceneIOCapability implementation this engine ships

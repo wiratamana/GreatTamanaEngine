@@ -1,7 +1,10 @@
 #include "EditorLayer.h"
 
+#include <cassert>
+
 #include "ArrayLayerRenderValidation.h"
-#include "AtmosphereTransmittanceLutValidation.h"
+#include "../Core/Logging.h"
+#include "../Features/Atmosphere/Editor/AtmospherePluginPanelModule.h"
 #include "EditorLayerAtmosphereBinding.h"
 #include "../Features/Atmosphere/AtmosphereFeature.h"
 #include "BlitValidation.h" // editor-core-separation-26 campaign, PHASE6.
@@ -21,7 +24,6 @@
 #include "Plugins/PluginPanelDrawContextAdapter.h" // editor-core-separation-3 campaign, PHASE4.
 #include "../Core/EditorPanelRegistry.h" // editor-core-separation-3 campaign, PHASE4.
 #include "../Core/EditorPanelModule.h" // relocated here, better-render-pass-2 PHASE1.
-#include "Panels/AtmospherePanel.h"
 #include "Panels/FrameDebuggerPanel.h"
 #include "Panels/GamePanel.h"
 #include "Panels/HierarchyPanel.h"
@@ -702,19 +704,6 @@ public:
         m_profilerPanel.Build(m_ctx);
         m_renderGraphPanel.Build(m_ctx, renderGraph, gpuDrivenBatchDebugInfo, renderFeatureEntries,
             renderPassToggleRegistry, renderFeatureCompositor);
-        // Atmosphere Scattering + Aerial Perspective campaign, Phase 8 - a
-        // small, stateless free-function panel (mirrors BuildMemoryPanel()'s
-        // own shape exactly, unlike ProfilerPanel/RenderGraphPanel's
-        // stateful-class exception) docked alongside "Memory"/"Profiler"/
-        // "Render Graph"/"Project" (see DockLayout.cpp). Guarded - null only
-        // if EditorHost somehow never bound a live AtmosphereFeature yet
-        // (never true by the first real frame - see EditorHost's own
-        // constructor).
-        if (m_atmosphereFeature != nullptr) {
-            BuildAtmospherePanel(m_ctx, m_atmosphereFeature->Settings(), renderer, m_atmosphereFeature->Renderer(),
-                m_lastAtmosphereTransmittanceLutValidation, m_lastAerialPerspectiveLutInspection, renderGraph,
-                m_lastAerialPerspectiveSkyPurityResult);
-        }
         // Job System Phase 7 (Editor "Jobs" Panel) - reads Job System Phase
         // 5's Profiling::BuildWorkerTimelinePoints() reshape internally; also
         // hosts the GPU Vertex Skinning campaign's own Phase 7 CPU/GPU
@@ -797,29 +786,10 @@ public:
         m_boneViewer.Build(registry, renderer, m_ctx, m_modelRigCache, game.GetPhysicsSystem());
 #endif
 
-#if GTE_ENABLE_PROJECT_ASSEMBLIES
-        // editor-core-separation-11 campaign (Project Assembly system),
-        // PHASE7, Finding G fix (PHASE0_MASTER_STRATEGY.md section 2.4) - this gate
-        // used to be GTE_ENABLE_PLUGINS only, the flag for the OTHER,
-        // unrelated gte_plugin_abi system, then was WIDENED to
-        // `#if GTE_ENABLE_PLUGINS || GTE_ENABLE_PROJECT_ASSEMBLIES` so a
-        // Project Assembly panel wasn't left with a visible-but-blank dock
-        // tab whenever a developer had GTE_ENABLE_PLUGINS=OFF.
-        // better-render-pass-2 campaign, PHASE2
-        // (PHASE2_DISABLE_RUNTIME_CALL_SITES.md) - GTE_ENABLE_PLUGINS is
-        // going away entirely (PHASE4 of that campaign), so this gate is
-        // narrowed back down to GTE_ENABLE_PROJECT_ASSEMBLIES alone - safe,
-        // because the loop body only ever iterates whatever is ACTUALLY
-        // present in the registry at runtime, and nothing populates it via
-        // the ABI plugin system anymore (Core::LoadPlugins() is never
-        // invoked, as of this same PHASE2).
-        // editor-core-separation-3 campaign, PHASE4
-        // (PHASE4_EDITOR_PANEL_CAPABILITY_AND_REGISTRY.md) - every loaded
-        // plugin exposing IEditorPanelModule_v1 gets its own real, dockable
-        // panel here, with zero hardcoded knowledge of any specific plugin.
-        // Begin()/End() themselves are called HOST-SIDE (this function),
-        // never by the plugin - only the CONTENT between them goes through
-        // the curated IPluginPanelDrawContext (PluginPanelDrawContextAdapter).
+        // Draws every registered plugin panel generically - a permanent,
+        // built-in panel (e.g. "Atmosphere") registers through this exact
+        // same path as an external Project Assembly panel. Begin()/End()
+        // happen here; only the content goes through PluginPanelDrawContextAdapter.
         for (const auto& entry : EditorPanelRegistry::Instance().PluginPanels()) {
             if (ImGui::Begin(entry.name.c_str())) {
                 PluginPanelDrawContextAdapter drawContext;
@@ -827,7 +797,6 @@ public:
             }
             ImGui::End(); // Always called, matching ImGui::Begin()'s own documented contract, even when Begin() returned false.
         }
-#endif
     }
 
     void Render(VkCommandBuffer cmd) override
@@ -1073,8 +1042,23 @@ public:
 
     // Plain setter, not part of IEditorLayer - called exactly once, from
     // EditorHost's constructor, via BindAtmosphereFeatureForEditorLayer()
-    // (EditorLayerAtmosphereBinding.h).
-    void SetAtmosphereFeature(AtmosphereFeature& feature) { m_atmosphereFeature = &feature; }
+    // (EditorLayerAtmosphereBinding.h), strictly AFTER every
+    // RegisterBuiltinPanelName() call. The early return (not a bare
+    // assert()) is the real re-entrancy guard - it runs in every build
+    // configuration, before the destructive unique_ptr reassignment below
+    // can destroy an already-registered module while EditorPanelRegistry
+    // still holds a raw pointer to it.
+    void SetAtmosphereFeature(AtmosphereFeature& feature, Renderer& renderer, const rg::RenderGraph& renderGraph)
+    {
+        if (m_atmospherePanelModule != nullptr) {
+            GTE_LOG_ERROR_BLOCKING("Atmosphere",
+                "SetAtmosphereFeature() called more than once for the same ImGuiEditorLayer instance - ignoring.");
+            assert(false && "SetAtmosphereFeature() must only ever be called once");
+            return;
+        }
+        m_atmospherePanelModule = std::make_unique<AtmospherePluginPanelModule>(m_ctx, renderer, renderGraph, feature);
+        EditorPanelRegistry::Instance().RegisterPluginPanel("Atmosphere", m_atmospherePanelModule.get());
+    }
     bool FrameDebuggerCaptureNow() override { return m_frameDebuggerPanel.CaptureNowFromCommand(); }
     void FrameDebuggerSelectEvent(int index) override { m_frameDebuggerPanel.SelectEventFromCommand(index); }
     bool FrameDebuggerSetChannel(const std::string& channel) override
@@ -1358,33 +1342,11 @@ private:
     // exactly who reads/writes it.
     EditorContext m_ctx;
 
-    // Atmosphere Scattering + Aerial Perspective campaign, Phase 9
-    // (ATMOSPHERE_PHASE9_VALIDATION_DEBUG_TOOLING_AND_DOCS_v1.md, Step 3.1)
-    // - the "Atmosphere" panel's own "last result" readout for its
-    // "Validate Transmittance LUT" button (Panels/AtmospherePanel.cpp) -
-    // owned HERE (not inside that stateless free-function panel itself),
-    // mirroring how this class already owns every other panel's genuinely
-    // cross-frame state (m_gameView/m_sceneView/m_blurValidation/...).
-    // std::nullopt until the button is clicked at least once this session.
-    std::optional<AtmosphereTransmittanceLutValidationResult> m_lastAtmosphereTransmittanceLutValidation;
-
-    // atmosphere-scattering-2 campaign, Phase 5
-    // (task_manager/atmosphere-scattering-2/PHASE5_AERIAL_LUT_NUMERIC_VALIDATION_TOOL.md)
-    // - the "Atmosphere" panel's own "last result" readout for its "Inspect
-    // Aerial Perspective LUT" button, mirroring
-    // m_lastAtmosphereTransmittanceLutValidation above exactly.
-    std::optional<AtmosphereAerialPerspectiveLutInspectionResult> m_lastAerialPerspectiveLutInspection;
-
-    // atmosphere-scattering-4 campaign, Phase 3
-    // (task_manager/atmosphere-scattering-4/PHASE3_REGRESSION_DIAGNOSTIC_TOOLING.md)
-    // - the "Atmosphere" panel's own "last result" readout for its "Validate
-    // Aerial Perspective Sky Purity" button, mirroring
-    // m_lastAtmosphereTransmittanceLutValidation above exactly.
-    std::optional<AtmosphereAerialPerspectiveSkyPurityResult> m_lastAerialPerspectiveSkyPurityResult;
-
     // Bound once, via SetAtmosphereFeature(), from EditorHost's constructor
-    // body - null only before that call ever runs.
-    AtmosphereFeature* m_atmosphereFeature = nullptr;
+    // body - null only before that call ever runs. Owns the "Atmosphere"
+    // panel's own cross-frame validation-result state directly (see
+    // AtmospherePluginPanelModule).
+    std::unique_ptr<AtmospherePluginPanelModule> m_atmospherePanelModule;
 };
 
 } // namespace
@@ -1408,11 +1370,15 @@ std::unique_ptr<IEditorLayer> CreateEditorLayer(Window& window, Renderer& render
     return std::make_unique<ImGuiEditorLayer>(window, renderer);
 }
 
-// static_cast is safe: every real call site resolves the layer via
-// CreateEditorLayer() above, which always constructs ImGuiEditorLayer.
-void BindAtmosphereFeatureForEditorLayer(IEditorLayer& layer, AtmosphereFeature& feature)
+// Requires a real ImGuiEditorLayer - NullEditorLayer has no Atmosphere panel
+// to bind to, and would fail this dynamic_cast loudly instead of corrupting
+// memory through an invalid static_cast.
+void BindAtmosphereFeatureForEditorLayer(IEditorLayer& layer, AtmosphereFeature& feature,
+    Renderer& renderer, const rg::RenderGraph& renderGraph)
 {
-    static_cast<ImGuiEditorLayer&>(layer).SetAtmosphereFeature(feature);
+    auto* const concrete = dynamic_cast<ImGuiEditorLayer*>(&layer);
+    assert(concrete != nullptr && "BindAtmosphereFeatureForEditorLayer() requires a real ImGuiEditorLayer");
+    concrete->SetAtmosphereFeature(feature, renderer, renderGraph);
 }
 
 } // namespace gte

@@ -12,7 +12,7 @@
 // no automated test here, mirroring AtmosphereTransmittanceLutValidation's
 // own accepted precedent).
 
-#include "Editor/AtmosphereAerialPerspectiveLutInspection.h"
+#include "Features/Atmosphere/Editor/AtmosphereAerialPerspectiveLutInspection.h"
 
 #include <cmath>
 #include <cstdint>

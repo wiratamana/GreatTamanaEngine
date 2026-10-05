@@ -85,15 +85,10 @@ void BuildDefaultDockLayout(ImGuiID dockspaceId, ImVec2 size)
     // unconditionally alongside Memory/Profiler/Render Graph" treatment; it
     // has no GTE_ENABLE_PROJECT_PANEL dependency either.
     ImGui::DockBuilderDockWindow("Jobs", bottom);
-    // "Atmosphere" (Atmosphere Scattering + Aerial Perspective campaign,
-    // Phase 8 - Panels/AtmospherePanel.h) - same "docked unconditionally
-    // alongside Memory/Profiler/Render Graph/Jobs" treatment; it has no
-    // GTE_ENABLE_PROJECT_PANEL dependency either.
-    ImGui::DockBuilderDockWindow("Atmosphere", bottom);
     // "Log" (task_manager/logger-1 campaign, PHASE4 - Panels/LogPanel.h) -
     // same "docked unconditionally alongside Memory/Profiler/Render
-    // Graph/Jobs/Atmosphere" treatment; it has no GTE_ENABLE_PROJECT_PANEL
-    // dependency either.
+    // Graph/Jobs" treatment; it has no GTE_ENABLE_PROJECT_PANEL dependency
+    // either.
     ImGui::DockBuilderDockWindow("Log", bottom);
 #if GTE_ENABLE_PROJECT_PANEL
     // Tabbed alongside "Memory" - Unity's own default layout also puts
@@ -101,10 +96,9 @@ void BuildDefaultDockLayout(ImGuiID dockspaceId, ImVec2 size)
     ImGui::DockBuilderDockWindow("Project", bottom);
 #endif
 
-    // editor-core-separation-3 campaign, PHASE4 - every plugin panel gets
-    // tabbed into the SAME bottom node as Memory/Profiler/Render
-    // Graph/Jobs/Atmosphere/Log, generically, with zero hardcoded knowledge of
-    // any specific plugin (source design doc, Section 6).
+    // Every plugin panel (built-in, like "Atmosphere", or an external
+    // Project Assembly panel) gets tabbed into the SAME bottom node,
+    // generically, with zero hardcoded knowledge of any specific one.
     for (const auto& entry : EditorPanelRegistry::Instance().PluginPanels()) {
         ImGui::DockBuilderDockWindow(entry.name.c_str(), bottom);
     }

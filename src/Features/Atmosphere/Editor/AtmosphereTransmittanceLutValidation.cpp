@@ -1,9 +1,9 @@
 #include "AtmosphereTransmittanceLutValidation.h"
 
-#include "../Features/Atmosphere/AtmosphereLutRenderer.h"
-#include "../Features/Atmosphere/AtmosphereMath.h"
-#include "../Renderer/Renderer.h"
-#include "../Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
+#include "../AtmosphereLutRenderer.h"
+#include "../AtmosphereMath.h"
+#include "../../../Renderer/Renderer.h"
+#include "../../../Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
 
 #include <algorithm>
 #include <cmath>

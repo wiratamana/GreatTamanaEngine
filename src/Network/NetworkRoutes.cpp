@@ -10,10 +10,12 @@
 // one compile-time constant (closes Defect C).
 
 #include "Core/Plugins/ProjectAssemblyNameValidation.h"
+#include "../Core/Plugins/HotReloadEngineStateMutex.h"
 
 #include <nlohmann/json.hpp>
 
 #include <cmath>
+#include <mutex>
 
 namespace gte::Network {
 
@@ -556,7 +558,10 @@ ParsedActivateTabQuery ParseActivateTabQuery(const std::string& nameParam)
     }
     result.valid = true;
     result.tabName = nameParam;
-    result.notFound = !EditorPanelRegistry::Instance().IsKnownName(nameParam);
+    {
+        std::lock_guard<std::mutex> lock(GetHotReloadEngineStateMutex());
+        result.notFound = !EditorPanelRegistry::Instance().IsKnownName(nameParam);
+    }
     return result;
 }
 
@@ -584,9 +589,14 @@ std::string BuildUnknownTabNameResponseJson(const std::string& tabName)
 
 std::string BuildListTabsResponseJson()
 {
+    std::vector<std::string> names;
+    {
+        std::lock_guard<std::mutex> lock(GetHotReloadEngineStateMutex());
+        names = EditorPanelRegistry::Instance().AllNames();
+    }
     nlohmann::json body;
     body["tabs"] = nlohmann::json::array();
-    for (const std::string& name : EditorPanelRegistry::Instance().AllNames()) {
+    for (const std::string& name : names) {
         body["tabs"].push_back(name);
     }
     return body.dump();

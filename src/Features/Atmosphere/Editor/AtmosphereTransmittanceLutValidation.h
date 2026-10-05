@@ -55,7 +55,7 @@
 // or the wrong sample count) - any of those would produce deltas far
 // larger than 0.01 in practice.
 
-#include "../Features/Atmosphere/AtmosphereTypes.h"
+#include "../AtmosphereTypes.h"
 
 #include <cstddef>
 #include <string>
@@ -101,7 +101,7 @@ std::string ToDiagnosticString(const AtmosphereTransmittanceLutValidationResult&
 // this session. `params` should normally be
 // AtmosphereParameters::MakeDefaultEarthAtmosphereParameters() - this LUT's
 // own physical constants are never affected by
-// AtmosphereSettings::groundAlbedoTint (see AtmosphereMath.h's own
+// AtmosphereSettings::groundAlbedo (see AtmosphereMath.h's own
 // ComputeExtinctionCoefficientAtHeight(), which never reads groundAlbedo at
 // all).
 AtmosphereTransmittanceLutValidationResult ValidateAtmosphereTransmittanceLut(Renderer& renderer,
