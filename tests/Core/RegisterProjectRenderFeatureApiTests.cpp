@@ -84,7 +84,7 @@ TEST(RegisterProjectRenderFeatureApiTest, DebugNameOfExactly63BytesSucceeds)
     ASSERT_EQ(name63.size(), 63u);
 
     const bool registered = core->RegisterProjectRenderFeature(name63.c_str(), RenderFeatureStage::PostComposite,
-        RenderFeatureBlendMode::Replace, 0, [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { });
+        RenderFeatureBlendMode::Replace, 0, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { });
     EXPECT_TRUE(registered);
 
     RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
@@ -113,7 +113,7 @@ TEST(RegisterProjectRenderFeatureApiTest, DebugNameOf64BytesIsRejectedAndNeverTr
     const std::string name64Prefix63 = name64.substr(0, 63);
 
     const bool registered = core->RegisterProjectRenderFeature(name64.c_str(), RenderFeatureStage::PostComposite,
-        RenderFeatureBlendMode::Replace, 0, [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { });
+        RenderFeatureBlendMode::Replace, 0, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { });
     EXPECT_FALSE(registered);
 
     RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
@@ -133,7 +133,7 @@ TEST(RegisterProjectRenderFeatureApiTest, AMuchLongerDebugNameIsAlsoRejected)
     const std::string longName(200, 'C');
 
     const bool registered = core->RegisterProjectRenderFeature(longName.c_str(), RenderFeatureStage::PostComposite,
-        RenderFeatureBlendMode::Replace, 0, [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { });
+        RenderFeatureBlendMode::Replace, 0, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { });
     EXPECT_FALSE(registered);
 
     RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
@@ -151,14 +151,14 @@ TEST(RegisterProjectRenderFeatureApiTest, UnderlyingCompositorRefusalPropagatesB
 
     // Duplicate-name refusal.
     ASSERT_TRUE(core->RegisterProjectRenderFeature("CoreApi_Test_DuplicateOriginal", RenderFeatureStage::PostComposite,
-        RenderFeatureBlendMode::Replace, 0, [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { }));
+        RenderFeatureBlendMode::Replace, 0, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { }));
     EXPECT_FALSE(core->RegisterProjectRenderFeature("CoreApi_Test_DuplicateOriginal", RenderFeatureStage::PostComposite,
-        RenderFeatureBlendMode::Replace, 0, [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { }));
+        RenderFeatureBlendMode::Replace, 0, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { }));
 
     // Unwired-stage refusal (RenderFeatureStage::PreOpaque is declared for
     // ABI future-proofing only - never actually wired).
     EXPECT_FALSE(core->RegisterProjectRenderFeature("CoreApi_Test_UnwiredStage", RenderFeatureStage::PreOpaque,
-        RenderFeatureBlendMode::Replace, 0, [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { }));
+        RenderFeatureBlendMode::Replace, 0, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { }));
 }
 
 // 5. UnregisterProjectRenderFeature() on a name that was never registered is
@@ -173,7 +173,7 @@ TEST(RegisterProjectRenderFeatureApiTest, UnregisterOnANeverRegisteredNameIsASaf
     // Still constructible/usable afterward - the real proof of "no crash".
     EXPECT_TRUE(core->RegisterProjectRenderFeature("CoreApi_Test_StillUsableAfterNoOpUnregister",
         RenderFeatureStage::PostComposite, RenderFeatureBlendMode::Replace, 0,
-        [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { }));
+        [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { }));
 }
 
 // A full register -> unregister -> re-register round trip through the Core
@@ -186,7 +186,7 @@ TEST(RegisterProjectRenderFeatureApiTest, RegisterUnregisterReRegisterRoundTripS
     const char* name = "CoreApi_Test_RoundTrip";
     ASSERT_TRUE(core->RegisterProjectRenderFeature(
         name, RenderFeatureStage::PostComposite, RenderFeatureBlendMode::Replace, 0,
-        [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { }));
+        [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { }));
 
     core->UnregisterProjectRenderFeature(name);
 
@@ -196,7 +196,7 @@ TEST(RegisterProjectRenderFeatureApiTest, RegisterUnregisterReRegisterRoundTripS
 
     EXPECT_TRUE(core->RegisterProjectRenderFeature(
         name, RenderFeatureStage::PostComposite, RenderFeatureBlendMode::Replace, 0,
-        [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { }));
+        [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { }));
     EXPECT_NE(FindByName(compositor->DebugSnapshot(), name), nullptr);
 }
 
@@ -213,14 +213,14 @@ TEST(RegisterProjectRenderFeatureApiTest, NullDebugNameIsRefusedWithoutCrashing)
     GTE_SKIP_IF_NO_HEADLESS_CORE(core);
 
     EXPECT_FALSE(core->RegisterProjectRenderFeature(nullptr, RenderFeatureStage::PostComposite,
-        RenderFeatureBlendMode::Replace, 0, [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { }));
+        RenderFeatureBlendMode::Replace, 0, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { }));
 
     // Must not crash, and must not leave the compositor in a weird state -
     // a subsequent, valid registration still works fine afterward.
     core->UnregisterProjectRenderFeature(nullptr);
     EXPECT_TRUE(core->RegisterProjectRenderFeature("CoreApi_Test_StillUsableAfterNullDebugName",
         RenderFeatureStage::PostComposite, RenderFeatureBlendMode::Replace, 0,
-        [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { }));
+        [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { }));
 }
 
 // better-render-pass-1 campaign, PHASE9 (Part B, Decision D3) - Tier-1 tests
@@ -239,7 +239,7 @@ TEST(RegisterProjectRenderFeatureApiTest, AddScreenPostProcessPassWithNoExplicit
 
     const bool registered = core->AddScreenPostProcessPass(
         "CoreApi_Test_ScreenPostProcess_AutoPriority",
-        [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { });
+        [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { });
     EXPECT_TRUE(registered);
 
     RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
@@ -258,7 +258,7 @@ TEST(RegisterProjectRenderFeatureApiTest, AddScreenPostProcessPassWithExplicitPr
 
     const bool registered = core->AddScreenPostProcessPass(
         "CoreApi_Test_ScreenPostProcess_ExplicitPriority",
-        [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { },
+        [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { },
         RenderFeatureBlendMode::Replace,
         /*priority=*/777);
     EXPECT_TRUE(registered);
@@ -283,10 +283,10 @@ TEST(RegisterProjectRenderFeatureApiTest, TwoAutoPriorityCallsInSequenceGetDisti
 
     ASSERT_TRUE(core->AddScreenPostProcessPass(
         "CoreApi_Test_ScreenPostProcess_AutoPriority_First",
-        [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { }));
+        [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { }));
     ASSERT_TRUE(core->AddScreenPostProcessPass(
         "CoreApi_Test_ScreenPostProcess_AutoPriority_Second",
-        [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { }));
+        [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { }));
 
     RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
     ASSERT_NE(compositor, nullptr);

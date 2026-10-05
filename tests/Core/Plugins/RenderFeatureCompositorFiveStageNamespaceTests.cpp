@@ -43,12 +43,12 @@ bool RegisterUnderStage(RenderFeatureCompositor& compositor, const std::string& 
     if (stageLabel == "PostComposite") {
         return compositor.RegisterProjectFeature(
             MakeRenderFeatureDescriptor(name.c_str(), RenderFeatureStage::PostComposite, 0, RenderFeatureBlendMode::Replace),
-            [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { });
+            [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { });
     }
     if (stageLabel == "PreUI") {
         return compositor.RegisterProjectFeature(
             MakeRenderFeatureDescriptor(name.c_str(), RenderFeatureStage::PreUI, 0, RenderFeatureBlendMode::Replace),
-            [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { });
+            [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { });
     }
     if (stageLabel == "PreOpaque") {
         return compositor.RegisterPreOpaqueFeature(

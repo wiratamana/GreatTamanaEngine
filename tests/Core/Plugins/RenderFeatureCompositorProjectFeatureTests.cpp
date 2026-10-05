@@ -88,7 +88,7 @@ TEST(RenderFeatureCompositorProjectFeatureTest, RegisterProjectFeatureSucceedsFo
     const GtePluginRenderFeatureDescriptor descriptor = MakeRenderFeatureDescriptor(
         "PF_Test_FreshUniqueName", RenderFeatureStage::PostComposite, 0, RenderFeatureBlendMode::Replace);
     const bool registered = compositor->RegisterProjectFeature(
-        descriptor, [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { });
+        descriptor, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { });
     EXPECT_TRUE(registered);
 
     const std::vector<RenderFeatureDebugEntry> snapshot = compositor->DebugSnapshot();
@@ -112,10 +112,10 @@ TEST(RenderFeatureCompositorProjectFeatureTest, RegisteringADuplicateNameFailsWi
     const GtePluginRenderFeatureDescriptor descriptor = MakeRenderFeatureDescriptor(
         "PF_Test_DuplicateOriginal", RenderFeatureStage::PostComposite, 0, RenderFeatureBlendMode::Replace);
     ASSERT_TRUE(compositor->RegisterProjectFeature(
-        descriptor, [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { }));
+        descriptor, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { }));
 
     const bool duplicateRegistered = compositor->RegisterProjectFeature(
-        descriptor, [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { });
+        descriptor, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { });
     EXPECT_FALSE(duplicateRegistered);
 
     // The duplicate attempt must not have consumed a slot - 16 OTHER,
@@ -127,7 +127,7 @@ TEST(RenderFeatureCompositorProjectFeatureTest, RegisteringADuplicateNameFailsWi
         const GtePluginRenderFeatureDescriptor fillerDescriptor =
             MakeRenderFeatureDescriptor(name.c_str(), RenderFeatureStage::PostComposite, 0, RenderFeatureBlendMode::Replace);
         EXPECT_TRUE(compositor->RegisterProjectFeature(
-            fillerDescriptor, [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { }))
+        fillerDescriptor, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { }))
             << "filler #" << i;
     }
 }
@@ -150,7 +150,7 @@ TEST(RenderFeatureCompositorProjectFeatureTest, UnregisterFreesItsSlotForReuseBy
         const GtePluginRenderFeatureDescriptor descriptor =
             MakeRenderFeatureDescriptor(name.c_str(), RenderFeatureStage::PostComposite, 0, RenderFeatureBlendMode::Replace);
         ASSERT_TRUE(compositor->RegisterProjectFeature(
-            descriptor, [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { }))
+        descriptor, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { }))
             << "exhaust #" << i;
     }
 
@@ -158,7 +158,7 @@ TEST(RenderFeatureCompositorProjectFeatureTest, UnregisterFreesItsSlotForReuseBy
     const GtePluginRenderFeatureDescriptor overflowDescriptor = MakeRenderFeatureDescriptor(
         "PF_Test_ReuseOverflowBeforeFree", RenderFeatureStage::PostComposite, 0, RenderFeatureBlendMode::Replace);
     EXPECT_FALSE(compositor->RegisterProjectFeature(
-        overflowDescriptor, [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { }));
+        overflowDescriptor, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { }));
 
     // Unregister exactly ONE of the 16.
     EXPECT_TRUE(compositor->UnregisterProjectFeature("PF_Test_ReuseExhaust_0"));
@@ -168,7 +168,7 @@ TEST(RenderFeatureCompositorProjectFeatureTest, UnregisterFreesItsSlotForReuseBy
     const GtePluginRenderFeatureDescriptor reuseDescriptor = MakeRenderFeatureDescriptor(
         "PF_Test_ReuseAfterFree", RenderFeatureStage::PostComposite, 0, RenderFeatureBlendMode::Replace);
     EXPECT_TRUE(compositor->RegisterProjectFeature(
-        reuseDescriptor, [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { }));
+        reuseDescriptor, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { }));
 }
 
 // 4. Registering kMaxConcurrentProjectRenderFeatures + 1 distinctly-named
@@ -186,14 +186,14 @@ TEST(RenderFeatureCompositorProjectFeatureTest, TheSeventeenthRegistrationFailsA
         const GtePluginRenderFeatureDescriptor descriptor =
             MakeRenderFeatureDescriptor(name.c_str(), RenderFeatureStage::PostComposite, 0, RenderFeatureBlendMode::Replace);
         ASSERT_TRUE(compositor->RegisterProjectFeature(
-            descriptor, [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { }))
+        descriptor, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { }))
             << "registration #" << i;
     }
 
     const GtePluginRenderFeatureDescriptor seventeenthDescriptor = MakeRenderFeatureDescriptor(
         "PF_Test_SeventeenthCheck_Seventeenth", RenderFeatureStage::PostComposite, 0, RenderFeatureBlendMode::Replace);
     EXPECT_FALSE(compositor->RegisterProjectFeature(
-        seventeenthDescriptor, [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { }));
+        seventeenthDescriptor, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { }));
 
     const std::vector<RenderFeatureDebugEntry> snapshot = compositor->DebugSnapshot();
     for (int i = 0; i < 16; ++i) {
@@ -230,7 +230,7 @@ TEST(RenderFeatureCompositorProjectFeatureTest, AnUnwiredStageIsRefusedWithoutLe
     const GtePluginRenderFeatureDescriptor unwiredDescriptor = MakeRenderFeatureDescriptor(
         "PF_Test_UnwiredStage", RenderFeatureStage::PreOpaque, 0, RenderFeatureBlendMode::Replace);
     EXPECT_FALSE(compositor->RegisterProjectFeature(
-        unwiredDescriptor, [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { }));
+        unwiredDescriptor, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { }));
 
     // The refused entry must never appear in DebugSnapshot() either (never
     // pushed into m_postComposite/m_preUi).
@@ -242,7 +242,7 @@ TEST(RenderFeatureCompositorProjectFeatureTest, AnUnwiredStageIsRefusedWithoutLe
         const GtePluginRenderFeatureDescriptor fillerDescriptor =
             MakeRenderFeatureDescriptor(name.c_str(), RenderFeatureStage::PostComposite, 0, RenderFeatureBlendMode::Replace);
         EXPECT_TRUE(compositor->RegisterProjectFeature(
-            fillerDescriptor, [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { }))
+        fillerDescriptor, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { }))
             << "filler #" << i;
     }
 }
@@ -261,7 +261,7 @@ TEST(RenderFeatureCompositorProjectFeatureTest, DebugSnapshotEntryIsMarkedAsProj
     const GtePluginRenderFeatureDescriptor descriptor = MakeRenderFeatureDescriptor(
         "PF_Test_DebugSnapshotMarking", RenderFeatureStage::PreUI, 5, RenderFeatureBlendMode::AlphaOver);
     ASSERT_TRUE(compositor->RegisterProjectFeature(
-        descriptor, [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { }));
+        descriptor, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { }));
 
     const std::vector<RenderFeatureDebugEntry> snapshot = compositor->DebugSnapshot();
     const RenderFeatureDebugEntry* found = FindByName(snapshot, "PF_Test_DebugSnapshotMarking");
@@ -302,7 +302,7 @@ TEST(RenderFeatureCompositorProjectFeatureTest, AFailedUnregisterAttemptNeverLea
         const GtePluginRenderFeatureDescriptor fillerDescriptor =
             MakeRenderFeatureDescriptor(name.c_str(), RenderFeatureStage::PostComposite, 0, RenderFeatureBlendMode::Replace);
         EXPECT_TRUE(compositor->RegisterProjectFeature(
-            fillerDescriptor, [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { }))
+        fillerDescriptor, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { }))
             << "filler #" << i;
     }
 }

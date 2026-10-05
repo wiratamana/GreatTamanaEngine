@@ -99,7 +99,7 @@ TEST(RenderFeatureCompositorPostOpaqueTest, NameAlreadyUsedByAPostCompositeEntry
     const GtePluginRenderFeatureDescriptor postCompositeDescriptor = MakeRenderFeatureDescriptor(
         "POp_Test_CrossNamespaceCollision", RenderFeatureStage::PostComposite, 0, RenderFeatureBlendMode::Replace);
     ASSERT_TRUE(compositor->RegisterProjectFeature(
-        postCompositeDescriptor, [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { }));
+        postCompositeDescriptor, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { }));
 
     EXPECT_FALSE(compositor->RegisterPostOpaqueFeature("POp_Test_CrossNamespaceCollision", 0,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
@@ -119,7 +119,7 @@ TEST(RenderFeatureCompositorPostOpaqueTest, RegisterProjectFeatureRefusesANameAl
     const GtePluginRenderFeatureDescriptor postCompositeDescriptor = MakeRenderFeatureDescriptor(
         "POp_Test_ReverseCrossNamespaceCollision", RenderFeatureStage::PostComposite, 0, RenderFeatureBlendMode::Replace);
     EXPECT_FALSE(compositor->RegisterProjectFeature(
-        postCompositeDescriptor, [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { }));
+        postCompositeDescriptor, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { }));
 }
 
 TEST(RenderFeatureCompositorPostOpaqueTest, UnregisterOnAnUnknownNameFailsHarmlessly)

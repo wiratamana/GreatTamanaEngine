@@ -285,7 +285,7 @@ TEST(ProjectAssemblyRegistrationLedgerTest, FullRoundTripThroughARealRenderFeatu
 
     ledger.BeginRecordingFor(projectName);
     const bool registered = core->RegisterProjectRenderFeature(featureName.c_str(), RenderFeatureStage::PostComposite,
-        RenderFeatureBlendMode::Replace, 0, [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { });
+        RenderFeatureBlendMode::Replace, 0, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { });
     ledger.EndRecording();
     ASSERT_TRUE(registered);
 
@@ -403,7 +403,7 @@ TEST(ProjectAssemblyRegistrationLedgerTest, UnregisterEverythingForTearsDownBoth
 
     ledger.BeginRecordingFor(projectName);
     ASSERT_TRUE(core->RegisterProjectRenderFeature(featureName.c_str(), RenderFeatureStage::PostComposite,
-        RenderFeatureBlendMode::Replace, 0, [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { }));
+        RenderFeatureBlendMode::Replace, 0, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { }));
     core->RegisterProjectRenderPassProvider(renderPassName.c_str(), rg::ProviderScope::Once,
         [](const rg::RenderPassFrameContext&, std::vector<rg::RenderPassDesc>&) { });
     ledger.EndRecording();
@@ -578,7 +578,7 @@ TEST(ProjectAssemblyRegistrationLedgerTest, UnregisterEverythingForTearsDownRend
 
     ledger.BeginRecordingFor(projectName);
     ASSERT_TRUE(core->RegisterProjectRenderFeature(renderFeatureName.c_str(), RenderFeatureStage::PostComposite,
-        RenderFeatureBlendMode::Replace, 0, [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { }));
+        RenderFeatureBlendMode::Replace, 0, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { }));
     ASSERT_TRUE(core->AddPostOpaquePass(postOpaqueFeatureName.c_str(),
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
     core->RegisterProjectRenderPassProvider(renderPassName.c_str(), rg::ProviderScope::Once,

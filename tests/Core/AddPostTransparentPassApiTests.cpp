@@ -172,7 +172,7 @@ TEST(AddPostTransparentPassApiTest, NameAlreadyUsedByAPostCompositeEntryIsRefuse
         "CoreApi_PostTransparent_CollidesWithPostComposite", RenderFeatureStage::PostComposite, 0,
         RenderFeatureBlendMode::Replace);
     ASSERT_TRUE(
-        compositor->RegisterProjectFeature(descriptor, [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { }));
+        compositor->RegisterProjectFeature(descriptor, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { }));
 
     EXPECT_FALSE(core->AddPostTransparentPass("CoreApi_PostTransparent_CollidesWithPostComposite",
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
@@ -188,7 +188,7 @@ TEST(AddPostTransparentPassApiTest, NameAlreadyUsedByAPreUiEntryIsRefused)
     const GtePluginRenderFeatureDescriptor descriptor = MakeRenderFeatureDescriptor(
         "CoreApi_PostTransparent_CollidesWithPreUi", RenderFeatureStage::PreUI, 0, RenderFeatureBlendMode::Replace);
     ASSERT_TRUE(
-        compositor->RegisterProjectFeature(descriptor, [](rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D) { }));
+        compositor->RegisterProjectFeature(descriptor, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { }));
 
     EXPECT_FALSE(core->AddPostTransparentPass("CoreApi_PostTransparent_CollidesWithPreUi",
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
