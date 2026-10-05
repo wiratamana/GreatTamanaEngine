@@ -1,0 +1,37 @@
+#version 450
+
+// src/Editor/ArrayLayerRenderValidation.h/.cpp's own extraction/
+// visualization pass: samples ONE layer of a depth TextureArray back into
+// its own plain, separately-registered 2D RenderTexture output, so it
+// becomes GET /get_texture-capturable (TextureArray itself has no direct
+// debug-texture-registry counterpart - see
+// src/Editor/TextureArrayValidation.h's own header comment for the
+// established precedent this mirrors). Binding 0 is a COMBINED IMAGE
+// SAMPLER (sampler2DArray), not a storage image - the array is depth-only
+// and therefore never storage-image-capable (see TextureArray2D.cpp's own
+// constructor assert) - binding 1 is the output image2D.
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(binding = 0) uniform sampler2DArray srcArray;
+layout(binding = 1, rgba8) uniform writeonly image2D dstLayer;
+
+layout(push_constant) uniform PushConstants {
+    uint layerIndex;
+} pc;
+
+void main()
+{
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 destSize = imageSize(dstLayer);
+    if (coord.x >= destSize.x || coord.y >= destSize.y) {
+        // The dispatch's own ceiling-division group count can legitimately
+        // cover more threads than there are real texels - those extra
+        // invocations simply do nothing.
+        return;
+    }
+
+    ivec3 srcSize = textureSize(srcArray, 0);
+    vec2 uv = (vec2(coord) + 0.5) / vec2(srcSize.xy);
+    float depth = texture(srcArray, vec3(uv, float(pc.layerIndex))).r;
+    imageStore(dstLayer, coord, vec4(depth, depth, depth, 1.0));
+}

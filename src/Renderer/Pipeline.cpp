@@ -52,8 +52,8 @@ Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFo
     // rather than an #include of that header). Debug-only, mirroring every
     // other cap-style assert in this codebase (e.g.
     // RenderGraphBuilder::PassBuilder::WriteColorAttachment()).
-    assert(!colorFormats.empty() && colorFormats.size() <= kPipelineMaxColorAttachments
-        && "Pipeline: colorFormats must be non-empty and no larger than kPipelineMaxColorAttachments (8).");
+    assert(colorFormats.size() <= kPipelineMaxColorAttachments
+        && "Pipeline: colorFormats must be no larger than kPipelineMaxColorAttachments (8).");
 
     // Shader modules are only needed transiently, to build the VkPipeline
     // below - both are destroyed before this constructor returns (success

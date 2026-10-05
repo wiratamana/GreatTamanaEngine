@@ -1086,6 +1086,10 @@ add_library(gte_editor STATIC
     # src/Editor/TextureArrayValidation.h's own header comment).
     src/Editor/TextureArrayValidation.h
     src/Editor/TextureArrayValidation.cpp
+    # Per-layer TextureArray render-target validation harness (see
+    # src/Editor/ArrayLayerRenderValidation.h's own header comment).
+    src/Editor/ArrayLayerRenderValidation.h
+    src/Editor/ArrayLayerRenderValidation.cpp
     src/Editor/GpuDrivenBatchTestSpawner.h
     src/Editor/GpuDrivenBatchTestSpawner.cpp
     src/Editor/GpuSkinningValidation.h
@@ -1658,6 +1662,15 @@ endif()
 if(TRUE)
     gte_add_shader(GreatTamanaEditor src/Shaders/TextureArrayValidationFill.comp)
     gte_add_shader(GreatTamanaEditor src/Shaders/TextureArrayValidationSlice.comp)
+endif()
+
+# Per-layer TextureArray render-target validation harness's own 2 shaders
+# (src/Editor/ArrayLayerRenderValidation.h/.cpp). Always compiled/staged,
+# same precedent as TextureArrayValidationFill.comp/Slice.comp above.
+if(TRUE)
+    gte_add_shader(GreatTamanaEditor src/Shaders/ArrayLayerRenderValidation.vert)
+    gte_add_shader(GreatTamanaEditor src/Shaders/ArrayLayerRenderValidation.frag)
+    gte_add_shader(GreatTamanaEditor src/Shaders/ArrayLayerRenderValidationVisualize.comp)
 endif()
 
 # Atmosphere Scattering + Aerial Perspective campaign, Phase 3

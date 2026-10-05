@@ -79,6 +79,17 @@ void BuildScenePanel(Game& game, Renderer& renderer, EditorContext& ctx, EditorC
             // image (unlike the two checkboxes above).
             ImGui::Checkbox("Show TextureArray Validation (debug)", &ctx.showTextureArrayValidationOutput);
 
+            // A fourth, small, independently-toggleable debug checkbox:
+            // when on, the per-layer array write/extraction pass pair is
+            // declared this frame (see
+            // src/Editor/ArrayLayerRenderValidation.h). Its 4 per-layer
+            // outputs are independently inspectable via
+            // GET /get_texture?texture_name=ArrayLayerRenderValidationLayerN
+            // only - this checkbox never swaps the "Scene" panel's own
+            // displayed image either, mirroring the checkbox above.
+            ImGui::Checkbox(
+                "Show Array Layer Render Validation (debug)", &ctx.showArrayLayerRenderValidationOutput);
+
             const bool showingBlurredOutput =
                 ctx.showBlurredSceneOutput && ctx.blurredSceneOutputDescriptor != VK_NULL_HANDLE;
             // Blurred output takes priority if somehow both debug toggles

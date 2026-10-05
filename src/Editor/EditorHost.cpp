@@ -786,6 +786,11 @@ int EditorHost::Run()
                     rgcRequest->setTextureArrayValidationEnabled.enabled);
                 rgcResult.success = true;
                 break;
+            case RenderGraphControlCommandKind::SetArrayLayerRenderValidationEnabled:
+                m_editorLayer->SetShowArrayLayerRenderValidationOutput(
+                    rgcRequest->setArrayLayerRenderValidationEnabled.enabled);
+                rgcResult.success = true;
+                break;
             }
             m_renderGraphControlCommandBridge.FulfillCommand(rgcResult);
         }

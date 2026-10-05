@@ -47,6 +47,11 @@ enum class RenderGraphControlCommandKind {
     // IEditorLayer::SetShowTextureArrayValidationOutput() (see
     // src/Editor/TextureArrayValidation.h).
     SetTextureArrayValidationEnabled,
+    // Array Layer Render Validation equivalent of
+    // SetTextureArrayValidationEnabled above, for
+    // IEditorLayer::SetShowArrayLayerRenderValidationOutput() (see
+    // src/Editor/ArrayLayerRenderValidation.h).
+    SetArrayLayerRenderValidationEnabled,
 };
 
 struct RenderGraphControlSetPassEnabledCommand {
@@ -65,7 +70,7 @@ struct RenderGraphControlSetFeaturePriorityCommand {
 };
 
 struct RenderGraphControlSetBoolCommand {
-    bool enabled = false; // Used by SetBlurEnabled/SetGBufferEnabled/SetTextureArrayValidationEnabled.
+    bool enabled = false; // Used by SetBlurEnabled/SetGBufferEnabled/SetTextureArrayValidationEnabled/SetArrayLayerRenderValidationEnabled.
 };
 
 // One pending render-graph-control command, tagged by `kind` - only the ONE
@@ -79,6 +84,7 @@ struct RenderGraphControlCommandRequest {
     RenderGraphControlSetBoolCommand setBlurEnabled;
     RenderGraphControlSetBoolCommand setGBufferEnabled;
     RenderGraphControlSetBoolCommand setTextureArrayValidationEnabled;
+    RenderGraphControlSetBoolCommand setArrayLayerRenderValidationEnabled;
 };
 
 // One reported pass toggle state - a completely independent, Application-

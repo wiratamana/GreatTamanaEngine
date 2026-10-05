@@ -759,6 +759,30 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         RespondWithRenderGraphControlCommandResult(res, submit);
     });
 
+    // Array Layer Render Validation equivalent of
+    // "/render_graph/set_texture_array_validation_enabled" above, for
+    // IEditorLayer::SetShowArrayLayerRenderValidationOutput() (see
+    // src/Editor/ArrayLayerRenderValidation.h).
+    server.Get("/render_graph/set_array_layer_render_validation_enabled",
+        [renderGraphControlCommandBridge](const httplib::Request& req, httplib::Response& res) {
+        const ParsedRenderGraphSetBoolQuery parsed = ParseRenderGraphSetBoolQuery(req.get_param_value("enabled"));
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        if (renderGraphControlCommandBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("render graph control command bridge not available"), "application/json");
+            return;
+        }
+        RenderGraphControlCommandRequest request;
+        request.kind = RenderGraphControlCommandKind::SetArrayLayerRenderValidationEnabled;
+        request.setArrayLayerRenderValidationEnabled.enabled = parsed.enabled;
+        const RenderGraphControlCommandBridge::SubmitResult submit = renderGraphControlCommandBridge->SubmitAndWait(request);
+        RespondWithRenderGraphControlCommandResult(res, submit);
+    });
+
     // network-impl-3 campaign, Phase 5
     // (PHASE5_NETWORK_POST_ROUTES_AND_COMMAND_DISPATCH.md) - the engine's
     // first POST routes, and its first routes that MUTATE the ECS world.

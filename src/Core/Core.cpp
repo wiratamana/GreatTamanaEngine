@@ -2024,6 +2024,20 @@ void Core::BuildFrame()
                         }
                     }
 
+                    // See IEditorLayer::AddArrayLayerRenderValidationPass()'s
+                    // own doc comment.
+                    if (sceneVisibleForBlurValidation && m_editorLayer != nullptr) {
+                        if (const std::optional<IEditorLayer::ArrayLayerRenderValidationHandles>
+                                arrayLayerRenderValidationHandles =
+                                    m_editorLayer->AddArrayLayerRenderValidationPass(
+                                        b, m_renderer, &m_renderPassToggleRegistry)) {
+                            outputs.push_back(arrayLayerRenderValidationHandles->layer0);
+                            outputs.push_back(arrayLayerRenderValidationHandles->layer1);
+                            outputs.push_back(arrayLayerRenderValidationHandles->layer2);
+                            outputs.push_back(arrayLayerRenderValidationHandles->layer3);
+                        }
+                    }
+
                     // editor-core-separation-26 campaign, PHASE6 (Locked
                     // Decision 3) - always declared when an Editor layer is
                     // present (no bespoke feature toggle of its own - see
@@ -2141,6 +2155,20 @@ void Core::BuildFrame()
                 "ManualVerifyArrayLayer2", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
             m_renderGraph.NotifyDebugTextureStateOverride(
                 "ManualVerifyArrayLayer3", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
+
+            // See IEditorLayer::FinalizeArrayLayerRenderValidationForSampling()'s
+            // own doc comment.
+            if (m_editorLayer != nullptr) {
+                m_editorLayer->FinalizeArrayLayerRenderValidationForSampling(offscreenCmd);
+            }
+            m_renderGraph.NotifyDebugTextureStateOverride(
+                "ArrayLayerRenderValidationLayer0", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
+            m_renderGraph.NotifyDebugTextureStateOverride(
+                "ArrayLayerRenderValidationLayer1", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
+            m_renderGraph.NotifyDebugTextureStateOverride(
+                "ArrayLayerRenderValidationLayer2", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
+            m_renderGraph.NotifyDebugTextureStateOverride(
+                "ArrayLayerRenderValidationLayer3", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
 
             m_renderer.EndOffscreenRenderGraphRecording();
 

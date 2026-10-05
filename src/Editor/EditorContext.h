@@ -246,6 +246,16 @@ struct EditorContext {
     // checkbox purely gates the pass declaration, nothing else.
     bool showTextureArrayValidationOutput = false;
 
+    // The "Scene" panel's own small, permanent "Show Array Layer Render
+    // Validation (debug)" checkbox. Read by
+    // ImGuiEditorLayer::AddArrayLayerRenderValidationPass() to decide
+    // whether to even declare the pass pair at all this frame. Mirrors
+    // showTextureArrayValidationOutput above exactly - purely gates the
+    // pass declaration, nothing else (its 4 per-layer outputs are only
+    // inspectable via
+    // GET /get_texture?texture_name=ArrayLayerRenderValidationLayerN).
+    bool showArrayLayerRenderValidationOutput = false;
+
     // frame-debugger-1 campaign (task_manager/frame-debugger-1/
     // PHASE3_EDITOR_PAUSE_STEP_STATE_AND_TOOLBAR_UI.md) - true whenever the
     // user has toggled gameplay simulation paused via the toolbar's

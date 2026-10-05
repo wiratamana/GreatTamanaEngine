@@ -473,6 +473,46 @@ public:
     // Core::BuildFrame(). A no-op for NullEditorLayer.
     virtual void FinalizeTextureArrayValidationForSampling(VkCommandBuffer cmd) = 0;
 
+    // Live validation harness for the per-layer TextureArray render-target
+    // mechanism (WriteArrayLayer()/resolveArrayLayer() - see
+    // src/Editor/ArrayLayerRenderValidation.h for the full shape). Mirrors
+    // TextureArrayValidationHandles above exactly - EditorLayer.h must never
+    // depend on src/Editor/ArrayLayerRenderValidation.h. The CALLER
+    // (Core::BuildFrame()) must add all four handles to that call's own
+    // finalOutputs root set.
+    struct ArrayLayerRenderValidationHandles {
+        rg::TextureHandle layer0{};
+        rg::TextureHandle layer1{};
+        rg::TextureHandle layer2{};
+        rg::TextureHandle layer3{};
+    };
+
+    // Declares (if this implementation's own "Show Array Layer Render
+    // Validation (debug)" toggle is on AND the "Scene" panel was visible
+    // last frame) a 4-layer depth TextureArray plus 4 per-layer write
+    // passes and 4 extraction/visualization passes (see
+    // src/Editor/ArrayLayerRenderValidation.h for the full shape). Returns
+    // the 4 per-layer debug-slice TextureHandles - the CALLER must add
+    // every one to this call's own finalOutputs root set, or the pass's
+    // write will be silently culled - or std::nullopt if no pass was
+    // declared at all this frame (always std::nullopt for NullEditorLayer).
+    // `toggleRegistry` (default nullptr) mirrors every other
+    // AddXxxValidationPass() method's own independent-gating convention
+    // above.
+    virtual std::optional<ArrayLayerRenderValidationHandles> AddArrayLayerRenderValidationPass(
+        rg::RenderGraphBuilder& builder, Renderer& renderer, rg::RenderPassToggleRegistry* toggleRegistry = nullptr) = 0;
+
+    // Transitions all 4 per-layer debug-slice outputs (if
+    // AddArrayLayerRenderValidationPass() above actually declared a pass
+    // this frame - a safe no-op otherwise) to a real ShaderRead state,
+    // ready for GET /get_texture capture - mirrors
+    // FinalizeTextureArrayValidationForSampling() above. Must be called
+    // against the SAME command buffer the offscreen RenderGraph::Execute()
+    // call just recorded into, AFTER that call returns and BEFORE that
+    // command buffer is ended/submitted - see Core::BuildFrame(). A no-op
+    // for NullEditorLayer.
+    virtual void FinalizeArrayLayerRenderValidationForSampling(VkCommandBuffer cmd) = 0;
+
 
     // editor-core-separation-26 campaign, PHASE6 (Locked Decision 3) - a
     // small, permanent, Debug-category live proof that AddBlitPass() works,
@@ -821,6 +861,13 @@ public:
     // reasoning, mirrors EditorContext::showTextureArrayValidationOutput.
     // HTTP automation entry point: GET /render_graph/set_texture_array_validation_enabled.
     virtual void SetShowTextureArrayValidationOutput(bool enabled) = 0;
+
+    // Array Layer Render Validation equivalent of
+    // SetShowTextureArrayValidationOutput() above - same contract, same
+    // reasoning, mirrors EditorContext::showArrayLayerRenderValidationOutput.
+    // HTTP automation entry point:
+    // GET /render_graph/set_array_layer_render_validation_enabled.
+    virtual void SetShowArrayLayerRenderValidationOutput(bool enabled) = 0;
 
     // editor-core-separation-16 campaign (On-Engine Project Workflow plan,
     // BIG-STEP 2), PHASE4 - hands the real ImGui implementation a live

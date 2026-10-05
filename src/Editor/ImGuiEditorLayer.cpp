@@ -1,5 +1,6 @@
 #include "EditorLayer.h"
 
+#include "ArrayLayerRenderValidation.h"
 #include "AtmosphereAerialPerspectiveSkyPurityValidation.h"
 #include "AtmosphereTransmittanceLutValidation.h"
 #include "BlitValidation.h" // editor-core-separation-26 campaign, PHASE6.
@@ -539,6 +540,24 @@ public:
         m_textureArrayValidation.FinalizeForSampling(cmd);
     }
 
+    // See IEditorLayer::AddArrayLayerRenderValidationPass()'s own doc
+    // comment. Gated on BOTH the "Show Array Layer Render Validation
+    // (debug)" toggle AND the Scene panel actually being visible last frame
+    // - mirrors AddTextureArrayValidationPass() above exactly.
+    std::optional<IEditorLayer::ArrayLayerRenderValidationHandles> AddArrayLayerRenderValidationPass(
+        rg::RenderGraphBuilder& builder, Renderer& renderer, rg::RenderPassToggleRegistry* toggleRegistry) override
+    {
+        if (!m_ctx.showArrayLayerRenderValidationOutput || !m_ctx.sceneViewVisible) {
+            return std::nullopt;
+        }
+        return m_arrayLayerRenderValidation.AddPass(builder, renderer, toggleRegistry);
+    }
+
+    void FinalizeArrayLayerRenderValidationForSampling(VkCommandBuffer cmd) override
+    {
+        m_arrayLayerRenderValidation.FinalizeForSampling(cmd);
+    }
+
     // editor-core-separation-26 campaign, PHASE6 - see
     // IEditorLayer::AddBlitValidationPass()'s own doc comment.
     std::optional<rg::TextureHandle> AddBlitValidationPass(
@@ -1011,6 +1030,10 @@ public:
     {
         m_ctx.showTextureArrayValidationOutput = enabled;
     }
+    void SetShowArrayLayerRenderValidationOutput(bool enabled) override
+    {
+        m_ctx.showArrayLayerRenderValidationOutput = enabled;
+    }
 
     // editor-core-separation-16 campaign (On-Engine Project Workflow
     // plan, BIG-STEP 2), PHASE4 - see IEditorLayer::
@@ -1159,6 +1182,12 @@ private:
     // m_blitValidation's own identical "no in-Editor display" precedent
     // immediately above).
     TextureArrayValidation m_textureArrayValidation;
+
+    // See ArrayLayerRenderValidation.h. No ImGui-facing preview view needed
+    // (its 4 per-layer outputs are independently inspectable via
+    // GET /get_texture?texture_name=ArrayLayerRenderValidationLayerN only,
+    // mirroring m_textureArrayValidation's own identical precedent above).
+    ArrayLayerRenderValidation m_arrayLayerRenderValidation;
 
     // The Scene view's own, independently-orbitable camera (see
     // EditorCamera.h) - updated once per frame by Panels/ScenePanel.cpp

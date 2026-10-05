@@ -63,6 +63,15 @@ public:
     }
     void FinalizeTextureArrayValidationForSampling(VkCommandBuffer /*cmd*/) override { }
 
+    // A release build never declares this pass pair at all, mirroring
+    // AddTextureArrayValidationPass() immediately above exactly.
+    std::optional<ArrayLayerRenderValidationHandles> AddArrayLayerRenderValidationPass(rg::RenderGraphBuilder& /*builder*/,
+        Renderer& /*renderer*/, rg::RenderPassToggleRegistry* /*toggleRegistry*/) override
+    {
+        return std::nullopt;
+    }
+    void FinalizeArrayLayerRenderValidationForSampling(VkCommandBuffer /*cmd*/) override { }
+
     // editor-core-separation-26 campaign, PHASE6 - a release build never
     // declares this pass at all, mirroring AddBlurValidationPass()/
     // AddGBufferValidationPass() above exactly.
@@ -116,6 +125,7 @@ public:
     void SetShowBlurredSceneOutput(bool /*enabled*/) override { }
     void SetShowGBufferValidationOutput(bool /*enabled*/) override { }
     void SetShowTextureArrayValidationOutput(bool /*enabled*/) override { }
+    void SetShowArrayLayerRenderValidationOutput(bool /*enabled*/) override { }
 
     // editor-core-separation-16 campaign (On-Engine Project Workflow plan,
     // BIG-STEP 2), PHASE4 - a release build has no "New Project..." window
