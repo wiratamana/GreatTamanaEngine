@@ -13,10 +13,12 @@ namespace gte {
 // two: this is what lets RenderGraphBuilder.h stay decoupled from
 // TextureArray2D.h's own (heavier) header.
 //
-// There is only ONE VkImageView here, covering the WHOLE array/cube - see
-// TextureArray2D's own header comment for exactly why there is no
-// per-layer/per-face view in this resource yet (better-render-pass-3
-// campaign, BLOCK5, Section 5).
+// Two kinds of VkImageView are exposed: `imageView` (the WHOLE array/cube)
+// and `layerViews` (one per layer, via LayerView()) - both owned and
+// destroyed by the TextureArray2D instance this struct describes, never by a
+// consumer of this struct. `layerViews` is a non-owning pointer into that
+// instance's own, stable per-layer view storage - safe to hold onto for as
+// long as the owning TextureArray2D is alive.
 struct TextureArrayTarget {
     VkImage image = VK_NULL_HANDLE;
     VkImageView imageView = VK_NULL_HANDLE; // whole-array/whole-cube view - see TextureArray2D.h
@@ -28,6 +30,25 @@ struct TextureArrayTarget {
     // TextureArrayDesc::hasDepth's own meaning exactly - see
     // RenderGraphTypes.h once a future phase adds TextureArrayDesc).
     bool hasDepth = false;
+
+    // Sampler suitable for reading this array/cubemap in a shader - see
+    // TextureArray2D::Sampler() for its exact policy.
+    VkSampler sampler = VK_NULL_HANDLE;
+
+    // Non-owning pointer into the owning TextureArray2D's own per-layer view
+    // vector (built once, at construction - see TextureArray2D.h). Stable for
+    // as long as the owning TextureArray2D is alive (a pooled instance lives
+    // inside RenderGraphResourcePool's own std::deque, which never relocates
+    // already-constructed elements).
+    const VkImageView* layerViews = nullptr;
+    std::uint32_t layerViewCount = 0;
+
+    // Bounds-checked accessor - VK_NULL_HANDLE if layerViews is null or
+    // layerIndex is out of range.
+    VkImageView LayerView(std::uint32_t layerIndex) const noexcept
+    {
+        return (layerViews != nullptr && layerIndex < layerViewCount) ? layerViews[layerIndex] : VK_NULL_HANDLE;
+    }
 };
 
 } // namespace gte

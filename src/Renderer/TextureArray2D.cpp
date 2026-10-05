@@ -101,14 +101,45 @@ TextureArray2D::TextureArray2D(VmaAllocator allocator, std::shared_ptr<GpuMemory
     viewInfo.subresourceRange.baseMipLevel = 0;
     viewInfo.subresourceRange.levelCount = 1;
     viewInfo.subresourceRange.baseArrayLayer = 0;
-    // The WHOLE array/cube - the one and only view this class ever creates
-    // (see this class's own header comment).
+    // The WHOLE array/cube - this class's one whole-array view (see LayerView()
+    // below for the per-layer counterpart).
     viewInfo.subresourceRange.layerCount = m_arrayLayers;
 
     if (vkCreateImageView(m_device, &viewInfo, nullptr, &m_imageView) != VK_SUCCESS) {
         m_tracker->Untrack(m_handle);
         vmaDestroyImage(m_allocator, m_image, m_allocation);
         throw std::runtime_error("TextureArray2D: vkCreateImageView failed.");
+    }
+
+    // One VK_IMAGE_VIEW_TYPE_2D view per layer, baseArrayLayer = i,
+    // layerCount = 1 - reuses viewInfo's already-built components/aspectMask
+    // so every per-layer view is byte-identical to the whole-array view
+    // except viewType/baseArrayLayer/layerCount.
+    m_layerViews.reserve(m_arrayLayers);
+    for (std::uint32_t i = 0; i < m_arrayLayers; ++i) {
+        VkImageViewCreateInfo layerViewInfo{};
+        layerViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        layerViewInfo.image = m_image;
+        layerViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        layerViewInfo.format = m_format;
+        layerViewInfo.components = viewInfo.components;
+        layerViewInfo.subresourceRange.aspectMask = viewInfo.subresourceRange.aspectMask;
+        layerViewInfo.subresourceRange.baseMipLevel = 0;
+        layerViewInfo.subresourceRange.levelCount = 1;
+        layerViewInfo.subresourceRange.baseArrayLayer = i;
+        layerViewInfo.subresourceRange.layerCount = 1;
+
+        VkImageView layerView = VK_NULL_HANDLE;
+        if (vkCreateImageView(m_device, &layerViewInfo, nullptr, &layerView) != VK_SUCCESS) {
+            for (VkImageView existing : m_layerViews) {
+                vkDestroyImageView(m_device, existing, nullptr);
+            }
+            vkDestroyImageView(m_device, m_imageView, nullptr);
+            m_tracker->Untrack(m_handle);
+            vmaDestroyImage(m_allocator, m_image, m_allocation);
+            throw std::runtime_error("TextureArray2D: vkCreateImageView (per-layer) failed.");
+        }
+        m_layerViews.push_back(layerView);
     }
 
     // Plain linear, clamp-to-edge, no comparison - for BOTH the color and
@@ -129,6 +160,9 @@ TextureArray2D::TextureArray2D(VmaAllocator allocator, std::shared_ptr<GpuMemory
     samplerInfo.compareEnable = VK_FALSE;
 
     if (vkCreateSampler(m_device, &samplerInfo, nullptr, &m_sampler) != VK_SUCCESS) {
+        for (VkImageView existing : m_layerViews) {
+            vkDestroyImageView(m_device, existing, nullptr);
+        }
         vkDestroyImageView(m_device, m_imageView, nullptr);
         m_tracker->Untrack(m_handle);
         vmaDestroyImage(m_allocator, m_image, m_allocation);
@@ -149,6 +183,7 @@ TextureArray2D::TextureArray2D(TextureArray2D&& other) noexcept
     , m_image(std::exchange(other.m_image, VK_NULL_HANDLE))
     , m_allocation(std::exchange(other.m_allocation, VK_NULL_HANDLE))
     , m_imageView(std::exchange(other.m_imageView, VK_NULL_HANDLE))
+    , m_layerViews(std::move(other.m_layerViews))
     , m_sampler(std::exchange(other.m_sampler, VK_NULL_HANDLE))
     , m_width(std::exchange(other.m_width, 0))
     , m_height(std::exchange(other.m_height, 0))
@@ -171,6 +206,7 @@ TextureArray2D& TextureArray2D::operator=(TextureArray2D&& other) noexcept
         m_image = std::exchange(other.m_image, VK_NULL_HANDLE);
         m_allocation = std::exchange(other.m_allocation, VK_NULL_HANDLE);
         m_imageView = std::exchange(other.m_imageView, VK_NULL_HANDLE);
+        m_layerViews = std::move(other.m_layerViews);
         m_sampler = std::exchange(other.m_sampler, VK_NULL_HANDLE);
         m_width = std::exchange(other.m_width, 0);
         m_height = std::exchange(other.m_height, 0);
@@ -189,6 +225,10 @@ void TextureArray2D::Destroy() noexcept
         vkDestroySampler(m_device, m_sampler, nullptr);
         m_sampler = VK_NULL_HANDLE;
     }
+    for (VkImageView layerView : m_layerViews) {
+        vkDestroyImageView(m_device, layerView, nullptr);
+    }
+    m_layerViews.clear();
     if (m_imageView != VK_NULL_HANDLE) {
         vkDestroyImageView(m_device, m_imageView, nullptr);
         m_imageView = VK_NULL_HANDLE;
@@ -212,6 +252,9 @@ TextureArrayTarget TextureArray2D::Target() const noexcept
     target.arrayLayers = m_arrayLayers;
     target.format = m_format;
     target.hasDepth = m_hasDepth;
+    target.layerViews = m_layerViews.data();
+    target.layerViewCount = static_cast<std::uint32_t>(m_layerViews.size());
+    target.sampler = m_sampler;
     return target;
 }
 

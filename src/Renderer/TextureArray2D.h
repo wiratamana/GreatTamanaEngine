@@ -5,6 +5,7 @@
 #include "Vulkan/VulkanAllocator.h"
 
 #include <memory>
+#include <vector>
 
 namespace gte {
 
@@ -72,17 +73,13 @@ namespace gte {
 // always). Whether a future shadow-cascade-consuming block wants a real
 // hardware PCF comparison sampler (`compareEnable = VK_TRUE`,
 // VK_COMPARE_OP_LESS) instead is a real, legitimate, OPEN design question -
-// deciding it is explicitly OUT OF SCOPE for this class, exactly like the
-// per-layer-view gap below.
+// deciding it is explicitly OUT OF SCOPE for this class.
 //
-// IMPORTANT, STATED PLAINLY: this class creates exactly ONE VkImageView,
-// covering the WHOLE array/cube. There is no per-layer/per-face VkImageView
-// anywhere in this class, and therefore no way for a graphics pass to
-// render into one specific layer/face of this resource yet - a real
-// cascade-shadow pass (rendering into layer i only) needs a
-// `baseArrayLayer = i, layerCount = 1, viewType = VK_IMAGE_VIEW_TYPE_2D`
-// view, which does not exist after this class. This is a deliberate,
-// acknowledged, DEFERRED gap for a future block, not an oversight.
+// IMPORTANT: this class owns BOTH a whole-array VkImageView (View()) AND a
+// per-layer VkImageView for every layer (LayerView(i)), built eagerly, once,
+// at construction time - a real cascade-shadow pass renders into layer i via
+// LayerView(i) (baseArrayLayer = i, layerCount = 1, VK_IMAGE_VIEW_TYPE_2D),
+// while View() stays the whole-array/whole-cube view used for sampling.
 //
 // Construct via Renderer::CreateTextureArray()/GpuResourceFactory::
 // CreateTextureArray() (never directly) - exactly like every other GPU
@@ -113,9 +110,16 @@ public:
     TextureArray2D& operator=(TextureArray2D&& other) noexcept;
 
     VkImage Image() const noexcept { return m_image; }
-    // The one and only VkImageView this class creates - covers the WHOLE
-    // array/cube (see this class's own header comment).
+    // Whole-array/whole-cube VkImageView - see this class's own header comment.
     VkImageView View() const noexcept { return m_imageView; }
+    // Bounds-checked per-layer view accessor - VK_NULL_HANDLE if layerIndex
+    // is out of range. The per-layer counterpart of View() above, usable
+    // directly as a vkCmdBeginRendering color/depth attachment for exactly
+    // that layer.
+    VkImageView LayerView(std::uint32_t layerIndex) const noexcept
+    {
+        return layerIndex < m_layerViews.size() ? m_layerViews[layerIndex] : VK_NULL_HANDLE;
+    }
     // Sampler suitable for reading this array/cubemap in a shader once
     // whichever pass writes it has finished - plain linear, clamp-to-edge,
     // no comparison (see this class's own header comment for why).
@@ -147,6 +151,10 @@ private:
     VkImage m_image = VK_NULL_HANDLE;
     VmaAllocation m_allocation = VK_NULL_HANDLE;
     VkImageView m_imageView = VK_NULL_HANDLE;
+    // Per-layer view, built eagerly at construction (see this class's own
+    // constructor) - baseArrayLayer = i, layerCount = 1, VK_IMAGE_VIEW_TYPE_2D,
+    // one per layer. Destroyed alongside m_imageView in Destroy().
+    std::vector<VkImageView> m_layerViews;
     VkSampler m_sampler = VK_NULL_HANDLE;
     int m_width = 0;
     int m_height = 0;
