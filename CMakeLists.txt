@@ -749,6 +749,8 @@ add_library(gte_core STATIC
     src/Features/Atmosphere/AtmosphereRenderPassTags.h
     src/Features/Atmosphere/AtmospherePassSequence.h
     src/Features/Atmosphere/AtmospherePassSequence.cpp
+    src/Features/Atmosphere/AtmosphereFeature.h
+    src/Features/Atmosphere/AtmosphereFeature.cpp
     src/Renderer/Primitives/PrimitiveMeshGenerator.cpp
     src/Renderer/Primitives/PrimitiveMeshGenerator.h
     src/Renderer/Memory/GpuResourceHandle.h
