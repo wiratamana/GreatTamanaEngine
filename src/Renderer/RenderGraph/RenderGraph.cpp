@@ -407,7 +407,7 @@ PassContext::ResolvedTexture PassContext::resolveReadTexture(TextureHandle handl
     if (textures != nullptr && handle.index < textures->size() && (*textures)[handle.index].resolved) {
         const RenderGraph::PhysicalTexture& tex = (*textures)[handle.index];
         ResolvedTexture result{ tex.target.imageView, tex.sampler };
-        if (result.view != VK_NULL_HANDLE && result.sampler == VK_NULL_HANDLE) {
+        if (IsResolvedViewMissingItsSampler(result.view, result.sampler)) {
             assert(false && "PassContext::resolveReadTexture() - non-null view with a null sampler");
             GTE_LOG_ERROR("RenderGraph",
                 "resolveReadTexture() - handle index " + std::to_string(handle.index)
@@ -427,7 +427,7 @@ PassContext::ResolvedDepthTexture PassContext::resolveDepthTexture(TextureHandle
         && (*textures)[handle.index].hasDepth) {
         const RenderGraph::PhysicalTexture& tex = (*textures)[handle.index];
         ResolvedDepthTexture result{ tex.target.depthImageView, tex.depthSampler };
-        if (result.view != VK_NULL_HANDLE && result.sampler == VK_NULL_HANDLE) {
+        if (IsResolvedViewMissingItsSampler(result.view, result.sampler)) {
             assert(false && "PassContext::resolveDepthTexture() - non-null view with a null sampler");
             GTE_LOG_ERROR("RenderGraph",
                 "resolveDepthTexture() - handle index " + std::to_string(handle.index)

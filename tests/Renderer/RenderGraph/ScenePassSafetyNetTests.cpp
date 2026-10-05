@@ -188,4 +188,77 @@ TEST(ScenePassSafetyNetTest, FindScenePassCallbackMissingReadDeclarationReturnsF
     EXPECT_FALSE(FindScenePassCallbackMissingReadDeclaration(builder, before, after, colorHandle, depthHandle));
 }
 
+// --- FindMissingDeclaredDepthReadForResolve() -------------------------------
+//
+// Depth-aspect-aware sibling of FindScenePassCallbackMissingReadDeclaration()
+// above, built on PassReadsTextureAsDepth() instead of the aspect-blind
+// PassReadsTexture() - covers Safety Net #1's own four required cases.
+
+TEST(ScenePassSafetyNetTest, FindMissingDeclaredDepthReadForResolveReturnsTrueWhenNoReadAtAll)
+{
+    rg::RenderGraphBuilder builder;
+    const rg::TextureHandle depthHandle = builder.CreateTexture("Depth", MakeTextureDesc());
+    const rg::TextureHandle output = builder.CreateTexture("Output", MakeTextureDesc());
+
+    const std::size_t before = builder.DeclaredPassCount();
+    builder.AddRenderPass(
+        "MyProject.NoReadAtAll", rg::PassKind::Graphics,
+        [&](rg::RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(output); }, NoOpExecute,
+        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::AfterOpaques);
+    const std::size_t after = builder.DeclaredPassCount();
+
+    EXPECT_TRUE(FindMissingDeclaredDepthReadForResolve(builder, before, after, depthHandle));
+}
+
+// A color-only read against the SAME handle still counts as a violation -
+// this check must be depth-aspect-specific, unlike its sibling above.
+TEST(ScenePassSafetyNetTest, FindMissingDeclaredDepthReadForResolveReturnsTrueForAColorOnlyReadOnTheSameHandle)
+{
+    rg::RenderGraphBuilder builder;
+    const rg::TextureHandle depthHandle = builder.CreateTexture("Depth", MakeTextureDesc());
+    const rg::TextureHandle output = builder.CreateTexture("Output", MakeTextureDesc());
+
+    const std::size_t before = builder.DeclaredPassCount();
+    builder.AddRenderPass(
+        "MyProject.ColorOnlyRead", rg::PassKind::Graphics,
+        [&](rg::RenderGraphBuilder::PassBuilder& pass) {
+            pass.ReadTexture(depthHandle, rg::ResourceAccess::ShaderRead);
+            pass.WriteColorAttachment(output);
+        },
+        NoOpExecute, rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::AfterOpaques);
+    const std::size_t after = builder.DeclaredPassCount();
+
+    EXPECT_TRUE(FindMissingDeclaredDepthReadForResolve(builder, before, after, depthHandle));
+}
+
+TEST(ScenePassSafetyNetTest, FindMissingDeclaredDepthReadForResolveReturnsFalseForACorrectlyDeclaredDepthRead)
+{
+    rg::RenderGraphBuilder builder;
+    const rg::TextureHandle depthHandle = builder.CreateTexture("Depth", MakeTextureDesc());
+    const rg::TextureHandle output = builder.CreateTexture("Output", MakeTextureDesc());
+
+    const std::size_t before = builder.DeclaredPassCount();
+    builder.AddRenderPass(
+        "MyProject.CorrectDepthRead", rg::PassKind::Graphics,
+        [&](rg::RenderGraphBuilder::PassBuilder& pass) {
+            pass.ReadTexture(depthHandle, rg::ResourceAccess::ShaderRead, /*isDepthResource=*/true);
+            pass.WriteColorAttachment(output);
+        },
+        NoOpExecute, rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::AfterOpaques);
+    const std::size_t after = builder.DeclaredPassCount();
+
+    EXPECT_FALSE(FindMissingDeclaredDepthReadForResolve(builder, before, after, depthHandle));
+}
+
+TEST(ScenePassSafetyNetTest, FindMissingDeclaredDepthReadForResolveReturnsFalseWhenRangeIsEmpty)
+{
+    rg::RenderGraphBuilder builder;
+    const rg::TextureHandle depthHandle = builder.CreateTexture("Depth", MakeTextureDesc());
+
+    const std::size_t before = builder.DeclaredPassCount();
+    const std::size_t after = builder.DeclaredPassCount();
+
+    EXPECT_FALSE(FindMissingDeclaredDepthReadForResolve(builder, before, after, depthHandle));
+}
+
 } // namespace gte

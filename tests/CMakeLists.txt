@@ -2392,6 +2392,10 @@ set(GTE_TEST_SOURCES
     # compute-dispatch shapes for filling a VolumeTexture (see
     # docs/conventions/volumetric-resources.md).
     Renderer/RenderGraph/VolumeTextureExampleFeatureTests.cpp
+    # Tier-2 (real, headless GPU) proof that PassContext::resolveDepthTexture()
+    # works correctly even with no prior same-frame depth-attachment write
+    # against that resource - see src/Renderer/RenderGraph/RenderGraph.h/.cpp.
+    Renderer/RenderGraph/ResolveDepthTextureTests.cpp
     # Block 4 "Global Scene Services Descriptor Set" campaign
     # (task_manager/better-render-pass-6), PHASE3 - minimal, device-backed
     # smoke test for Pipeline's new, trailing, defaulted

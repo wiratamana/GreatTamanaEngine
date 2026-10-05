@@ -63,6 +63,11 @@ const char* ToString(ResourceAccess access) noexcept
     return "Unknown";
 }
 
+bool IsResolvedViewMissingItsSampler(VkImageView view, VkSampler sampler) noexcept
+{
+    return view != VK_NULL_HANDLE && sampler == VK_NULL_HANDLE;
+}
+
 // Render Pass campaign (task_manager/render-pass-1), PHASE1 - see
 // RenderGraphTypes.h's own comment on PassKind for why this exists.
 const char* ToString(PassKind kind) noexcept

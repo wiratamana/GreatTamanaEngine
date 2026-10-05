@@ -1372,5 +1372,114 @@ TEST(RenderGraphBuilderDeathTest, PassReadsTextureRejectsOutOfRangeIndex)
 
 #endif // !NDEBUG
 
+// --- PassReadsTextureAsDepth() - aspect-aware sibling of PassReadsTexture() -
+
+TEST(RenderGraphBuilderTest, PassReadsTextureAsDepthReturnsTrueForDeclaredDepthAspectReadOnExactHandle)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle handle = builder.CreateTexture("Depth", TextureDesc{ 64, 64, VK_FORMAT_D32_SFLOAT, true });
+
+    builder.AddPass(
+        "DepthReadPass",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.ReadTexture(handle, ResourceAccess::ShaderRead, /*isDepthResource=*/true);
+        },
+        NoOpExecute);
+
+    EXPECT_TRUE(builder.PassReadsTextureAsDepth(0, handle));
+}
+
+// A color-aspect-only read against the SAME handle must not satisfy the
+// depth-aspect check - this is the whole reason this sibling exists
+// separately from the aspect-blind PassReadsTexture().
+TEST(RenderGraphBuilderTest, PassReadsTextureAsDepthReturnsFalseForColorAspectReadOnSameHandle)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle handle = builder.CreateTexture("Depth", TextureDesc{ 64, 64, VK_FORMAT_D32_SFLOAT, true });
+
+    builder.AddPass(
+        "ColorReadPass",
+        [&](RenderGraphBuilder::PassBuilder& pass) { pass.ReadTexture(handle, ResourceAccess::ShaderRead); },
+        NoOpExecute);
+
+    EXPECT_FALSE(builder.PassReadsTextureAsDepth(0, handle));
+}
+
+// A depth-aspect read against a DIFFERENT handle must not match either.
+TEST(RenderGraphBuilderTest, PassReadsTextureAsDepthReturnsFalseForDepthAspectReadOnDifferentHandle)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle depthHandle = builder.CreateTexture("Depth", TextureDesc{ 64, 64, VK_FORMAT_D32_SFLOAT, true });
+    const TextureHandle otherHandle = builder.CreateTexture("Other", TextureDesc{ 64, 64, VK_FORMAT_D32_SFLOAT, true });
+
+    builder.AddPass(
+        "DepthReadPass",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.ReadTexture(depthHandle, ResourceAccess::ShaderRead, /*isDepthResource=*/true);
+        },
+        NoOpExecute);
+
+    EXPECT_FALSE(builder.PassReadsTextureAsDepth(0, otherHandle));
+}
+
+#ifndef NDEBUG
+
+TEST(RenderGraphBuilderDeathTest, PassReadsTextureAsDepthRejectsOutOfRangeIndex)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle handle = builder.CreateTexture("Depth", TextureDesc{ 64, 64, VK_FORMAT_D32_SFLOAT, true });
+
+    EXPECT_DEATH({ builder.PassReadsTextureAsDepth(0, handle); }, "");
+}
+
+#endif // !NDEBUG
+
+// --- ResolveImportedTextureSamplers() - the declare-time, PassContext-
+// independent counterpart of PassContext::resolveReadTexture()/
+// resolveDepthTexture() ------------------------------------------------------
+
+TEST(RenderGraphBuilderTest, ResolveImportedTextureSamplersReturnsRealSamplersForAnImportedHandle)
+{
+    RenderGraphBuilder builder;
+    const RenderTarget gameViewTarget = MakeFakeGameViewTarget();
+    const VkSampler colorSampler = reinterpret_cast<VkSampler>(static_cast<std::uintptr_t>(0xC0105A));
+    const VkSampler depthSampler = reinterpret_cast<VkSampler>(static_cast<std::uintptr_t>(0xD3975A));
+    const TextureHandle imported = builder.ImportTexture(
+        "GameView", gameViewTarget, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, colorSampler, depthSampler);
+
+    const RenderGraphBuilder::ImportedTextureSamplers resolved = builder.ResolveImportedTextureSamplers(imported);
+    EXPECT_EQ(resolved.colorSampler, colorSampler);
+    EXPECT_EQ(resolved.depthImageView, gameViewTarget.depthImageView);
+    EXPECT_EQ(resolved.depthSampler, depthSampler);
+}
+
+// A transient (CreateTexture()-minted) handle has no import info at all -
+// resolves to an all-null value, never asserts/throws.
+TEST(RenderGraphBuilderTest, ResolveImportedTextureSamplersReturnsAllNullForATransientHandle)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle transient =
+        builder.CreateTexture("Scratch", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+
+    const RenderGraphBuilder::ImportedTextureSamplers resolved = builder.ResolveImportedTextureSamplers(transient);
+    EXPECT_EQ(resolved.colorSampler, VK_NULL_HANDLE);
+    EXPECT_EQ(resolved.depthImageView, VK_NULL_HANDLE);
+    EXPECT_EQ(resolved.depthSampler, VK_NULL_HANDLE);
+}
+
+// An out-of-range handle resolves to an all-null value too - same "no
+// match, not an error" convention as PassReadsTexture().
+TEST(RenderGraphBuilderTest, ResolveImportedTextureSamplersReturnsAllNullForAnOutOfRangeHandle)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle outOfRange{ 999, 1 };
+
+    const RenderGraphBuilder::ImportedTextureSamplers resolved = builder.ResolveImportedTextureSamplers(outOfRange);
+    EXPECT_EQ(resolved.colorSampler, VK_NULL_HANDLE);
+    EXPECT_EQ(resolved.depthImageView, VK_NULL_HANDLE);
+    EXPECT_EQ(resolved.depthSampler, VK_NULL_HANDLE);
+}
+
+
 } // namespace
 } // namespace gte::rg

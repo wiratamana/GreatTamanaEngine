@@ -419,6 +419,28 @@ TEST(RenderGraphResourceAccessTest, ToStringProducesDistinctNamesForDistinctEnum
     EXPECT_STREQ(ToString(ResourceAccess::VertexShaderStorageRead), "VertexShaderStorageRead");
 }
 
+// --- IsResolvedViewMissingItsSampler() - Safety Net #2's pure predicate ---
+
+TEST(RenderGraphIsResolvedViewMissingItsSamplerTest, FalseWhenViewIsNull)
+{
+    const VkSampler sampler = reinterpret_cast<VkSampler>(static_cast<std::uintptr_t>(0x1234));
+    EXPECT_FALSE(IsResolvedViewMissingItsSampler(VK_NULL_HANDLE, sampler));
+    EXPECT_FALSE(IsResolvedViewMissingItsSampler(VK_NULL_HANDLE, VK_NULL_HANDLE));
+}
+
+TEST(RenderGraphIsResolvedViewMissingItsSamplerTest, FalseWhenViewAndSamplerAreBothNonNull)
+{
+    const VkImageView view = reinterpret_cast<VkImageView>(static_cast<std::uintptr_t>(0x5678));
+    const VkSampler sampler = reinterpret_cast<VkSampler>(static_cast<std::uintptr_t>(0x1234));
+    EXPECT_FALSE(IsResolvedViewMissingItsSampler(view, sampler));
+}
+
+TEST(RenderGraphIsResolvedViewMissingItsSamplerTest, TrueWhenViewIsNonNullAndSamplerIsNull)
+{
+    const VkImageView view = reinterpret_cast<VkImageView>(static_cast<std::uintptr_t>(0x5678));
+    EXPECT_TRUE(IsResolvedViewMissingItsSampler(view, VK_NULL_HANDLE));
+}
+
 // --- PassRecord / ResourceUsage - basic plain-data sanity -----------------
 //
 // Not compared for equality (see RenderGraphTypes.h's own comment on

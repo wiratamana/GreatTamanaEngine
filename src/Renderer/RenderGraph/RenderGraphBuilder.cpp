@@ -6,6 +6,8 @@
     // Same relative path RenderGraph.cpp/RenderPassGroupRegistry.cpp already use from this exact
     // folder.
 
+#include <string>
+
 namespace gte::rg {
 
 // --- RenderGraphBuilder::PassBuilder ---------------------------------------
@@ -171,6 +173,29 @@ TextureHandle RenderGraphBuilder::ImportTexture(const char* name, const RenderTa
 
     m_textures.push_back(TextureSlot{ desc, name, importInfo });
     return TextureHandle{ index, 1 };
+}
+
+// Declare-time sibling of PassContext::resolveReadTexture()/resolveDepthTexture()
+// - see this method's own doc comment (RenderGraphBuilder.h). Built only from
+// TextureImportInfo, already stored synchronously the instant ImportTexture()
+// was called - no compile/execute/resolve step needed for an imported handle.
+RenderGraphBuilder::ImportedTextureSamplers RenderGraphBuilder::ResolveImportedTextureSamplers(
+    TextureHandle handle) const noexcept
+{
+    if (handle.index >= m_textures.size() || !m_textures[handle.index].importInfo.isImported) {
+        return ImportedTextureSamplers{};
+    }
+    const TextureImportInfo& importInfo = m_textures[handle.index].importInfo;
+    ImportedTextureSamplers resolved{
+        importInfo.colorSampler, importInfo.externalTarget.depthImageView, importInfo.depthSampler
+    };
+    if (IsResolvedViewMissingItsSampler(resolved.depthImageView, resolved.depthSampler)) {
+        assert(false && "RenderGraphBuilder::ResolveImportedTextureSamplers() - non-null depth view with a null sampler");
+        GTE_LOG_ERROR("RenderGraphBuilder",
+            "ResolveImportedTextureSamplers() - handle index " + std::to_string(handle.index)
+                + " resolved a non-null depth view with a null sampler.");
+    }
+    return resolved;
 }
 
 BufferHandle RenderGraphBuilder::ImportBuffer(const char* name, VkBuffer externalBuffer, VkDeviceSize size)

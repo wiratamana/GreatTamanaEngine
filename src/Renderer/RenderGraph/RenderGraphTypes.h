@@ -266,6 +266,14 @@ bool IsWriteAccess(ResourceAccess access) noexcept;
 // nullptr.
 const char* ToString(ResourceAccess access) noexcept;
 
+// True exactly when a resolved view is non-null but its paired sampler is
+// null - a plumbing mistake somewhere upstream of a resolve call. Pure and
+// Vulkan-call-free so it is directly Tier-1-testable; shared by every
+// resolve path (PassContext::resolveReadTexture()/resolveDepthTexture(),
+// RenderGraphBuilder::ResolveImportedTextureSamplers()) that needs to guard
+// against this exact shape.
+bool IsResolvedViewMissingItsSampler(VkImageView view, VkSampler sampler) noexcept;
+
 // --- TextureUsage ---------------------------------------------------------
 //
 // better-render-pass-1 campaign, PHASE8

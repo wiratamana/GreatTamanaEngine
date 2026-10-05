@@ -875,6 +875,23 @@ public:
         return false;
     }
 
+    // Declare-time counterpart of rg::PassContext::resolveReadTexture()/
+    // resolveDepthTexture() - for a caller that needs an IMPORTED handle's
+    // real sampler(s) before any pass has executed (PassContext only exists
+    // inside a pass's own execute callback, which does not exist yet at
+    // declaration time). Reads straight off this handle's already-complete
+    // TextureImportInfo (populated synchronously by ImportTexture() itself).
+    struct ImportedTextureSamplers {
+        VkSampler colorSampler = VK_NULL_HANDLE;
+        VkImageView depthImageView = VK_NULL_HANDLE;
+        VkSampler depthSampler = VK_NULL_HANDLE;
+    };
+
+    // Returns an all-null value for a transient (CreateTexture()-minted)
+    // handle, or an out-of-range one - mirrors PassReadsTexture()'s own
+    // "no match, not an error" convention, never an assert/throw.
+    ImportedTextureSamplers ResolveImportedTextureSamplers(TextureHandle handle) const noexcept;
+
     // Consumes this builder, handing its whole in-progress description
     // over to Phase 3's compiler. Safe to call at most meaningfully once
     // per builder instance (a builder is a one-frame-lifetime object, per
