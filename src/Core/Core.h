@@ -216,12 +216,8 @@ public:
     void Present();
 
     Renderer& GetRenderer() noexcept { return m_renderer; }
-    // Block 4 (task_manager/better-render-pass-6), PHASE8
-    // (PHASE8_EXAMPLE_SHADER_AND_FULL_VERIFICATION.md) - lets a caller
-    // building its own Pipeline against `set = 1` (e.g. this phase's own
-    // proof-of-contract MeshWithShadow.frag Pipeline, or a future PreOpaque
-    // feature) reach the ONE real owning instance's Layout() without ever
-    // constructing a second, duplicate SceneServicesDescriptorSet.
+    // Exposes the one shared descriptor set's layout so a Pipeline can bind
+    // against descriptor set 1, instead of constructing its own duplicate.
     SceneServicesDescriptorSet& GetSceneServicesDescriptorSet() noexcept { return m_sceneServicesDescriptorSet; }
     Registry& GetRegistry() noexcept { return m_game.GetRegistry(); }
     Game& GetGame() noexcept { return m_game; }
@@ -414,24 +410,12 @@ public:
     // name - no separate length check needed here).
     void UnregisterProjectRenderFeature(const char* debugName);
 
-    // better-render-pass-5 effort, BLOCK 3, PHASE3 - a thin
-    // pass-through into m_renderFeatureCompositorPtr's own
-    // RegisterPreOpaqueFeature() (PHASE2) - mirrors
-    // RegisterProjectRenderFeature()'s own shape exactly, including the
-    // SAME null/length-check discipline, but reaches the PreOpaque-
-    // specific entry point, never RegisterProjectFeature()/Entry (see
-    // task_manager/better-render-pass-5/PHASE0_MASTER_STRATEGY.md's
-    // Locked Design Decision #1 for why these are deliberately separate
-    // front doors). `priority` defaults to 0 - PreOpaque features
-    // realistically number in the single digits per project (shadow
-    // maps, GI passes), so an explicit default avoids forcing every
-    // trivial caller to think about ordering relative to features it
-    // does not know about yet; a caller with a genuine ordering need
-    // against another PreOpaque feature still passes an explicit value.
-    // Returns false (logged, never crashes) if no
-    // RenderFeatureCompositor orchestrator exists in this build, if
-    // debugName is null, if debugName's length exceeds 63 bytes, or if
-    // RegisterPreOpaqueFeature() itself refuses (duplicate name).
+    // Registers a PreOpaque render feature with the compositor. `priority`
+    // defaults to 0; pass an explicit value only if ordering against another
+    // PreOpaque feature matters.
+    // Returns false (logged, never crashes) if no compositor exists in this
+    // build, debugName is null/too long (>63 bytes), or the name is a
+    // duplicate.
     bool AddPreOpaquePass(const char* debugName, ProjectPreOpaqueCallback callback, std::int32_t priority = 0);
 
     // Teardown counterpart of AddPreOpaquePass() immediately above,
@@ -708,23 +692,6 @@ private:
     // real body (relocated verbatim from
     // Application::RegisterPresentRenderPipelineProvider(), PHASE13).
     void RegisterPresentRenderPipelineProvider();
-
-    // Block 4 (task_manager/better-render-pass-6), PHASE8
-    // (PHASE8_EXAMPLE_SHADER_AND_FULL_VERIFICATION.md) - the one concrete,
-    // permanent proof that `layout(set = 1, binding = 0)` works end-to-end
-    // through the real Renderer::Submit()/"RenderOpaque" path (PHASE3-7):
-    // builds a real Mesh + a real Pipeline from the new MeshWithShadow.frag
-    // shader (passing GetSceneServicesDescriptorSet().Layout() as
-    // Renderer::CreatePipeline()'s PHASE4 trailing sceneServicesSetLayout
-    // parameter) and spawns ONE entity using it, directly through the
-    // ordinary MeshRenderer::pipeline field - never RenderSystem::Draw()'s
-    // separate pipelineOverride mechanism, which would force EVERY entity in
-    // a call to share this one Pipeline instead of just this one proof
-    // entity. Called exactly once, from the constructor, mirroring
-    // GpuDrivenBatchTestSpawner.cpp's own "hand-authored indexed unit quad +
-    // matching Pipeline, built once" shape (render-pass-5 campaign, PHASE6) -
-    // see Core.cpp for the full reasoning and implementation.
-    void SpawnSceneServicesExampleEntity();
 
     // render-pass-3 campaign, PHASE3 (Step 3.1) - looks up THIS frame's own
     // RenderPassViewData for `view` out of m_currentViewDataThisFrame

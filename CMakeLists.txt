@@ -1548,15 +1548,6 @@ gte_add_shader(GreatTamanaEditor src/Shaders/Triangle.frag)
 gte_add_shader(GreatTamanaEditor src/Shaders/Mesh.vert)
 gte_add_shader(GreatTamanaEditor src/Shaders/Mesh.frag)
 
-# Block 4 "Global Scene Services Descriptor Set" (task_manager/better-render-pass-6),
-# PHASE8 (PHASE8_EXAMPLE_SHADER_AND_FULL_VERIFICATION.md) - the proof-of-contract
-# fragment shader sampling `layout(set = 1, binding = 0)`, reusing Mesh.vert
-# above UNCHANGED (same PositionNormal vertex input - no new vertex shader
-# needed, mirroring how MeshInstanced.vert below reuses Mesh.frag unchanged
-# in the opposite direction). Unconditional, same reason as Mesh.vert/frag
-# above - Core.cpp (which loads this) is always compiled into gte_core.
-gte_add_shader(GreatTamanaEditor src/Shaders/MeshWithShadow.frag)
-
 # GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
 # PHASE2 (task_manager/render-pass-5/
 # PHASE2_INSTANCED_DRAW_PRIMITIVE_AND_INDIRECT_SUBMIT.md) - the new
