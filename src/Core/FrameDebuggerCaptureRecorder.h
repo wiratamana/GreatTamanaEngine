@@ -85,7 +85,7 @@ public:
     virtual std::vector<rg::TextureHandle> AddReplayPasses(rg::RenderGraphBuilder& builder, Game& game,
         Renderer& renderer, float aspectWidthOverHeight, std::size_t objectCount,
         const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers,
-        const std::function<void(VkCommandBuffer)>& recordSkyBackground, RenderTexture& gameTarget,
+        const std::function<void(VkCommandBuffer)>& recordBackgroundStep, RenderTexture& gameTarget,
         rg::RenderPassToggleRegistry* toggleRegistry = nullptr) = 0;
 };
 

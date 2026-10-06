@@ -292,7 +292,7 @@ struct EditorContext {
     // editor-core-separation-21 campaign, PHASE2
     // (PHASE2_FIX_AERIAL_PERSPECTIVE_COMPOSITE_TOGGLE_LIE.md) - set to true by
     // Panels/RenderGraphPanel.cpp's own two checkbox click sites (BuildPassRow()/
-    // BuildDisabledBuiltInPassesSection()) the instant a built-in pass's
+    // BuildAllBuiltInPassesSection()) the instant a built-in pass's
     // RenderPassToggleRegistry::SetEnabled() call actually flips ANY pass's
     // (name, enabled) pair this frame (see
     // RenderPassToggleChangeDetectionLogic.h's own DidRenderPassToggleEnabledStatesChange()).

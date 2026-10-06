@@ -470,38 +470,27 @@ void BuildRenderFeaturesSection(
     }
 }
 
-// editor-core-separation-8 campaign, PHASE4
-// (PHASE4_RENDER_GRAPH_PANEL_CONTROLS.md, Step 3.2) - the ONLY place a
-// built-in pass the caller has switched OFF is still visible at all (see
-// PHASE0_MASTER_STRATEGY.md's Step 2.4 - a disabled pass leaves ZERO trace
-// in rg::RenderGraphMetadata, since it is never declared into the graph at
-// all). Reads renderPassToggleRegistry.ListAll() directly - the registry
-// itself, not the metadata, is this section's own source of truth.
+// Lists every toggle-registered built-in pass, enabled or disabled - a
+// feature-owned pass that is enabled but not shown anywhere else (e.g. one
+// registered only through RegisterProjectRenderPassProvider(), outside the
+// "Render Features" list) must still be discoverable here.
 //
 // Uses ScopedUniqueId (see ImGuiUniqueId.h) exactly like BuildPassRow()
 // above - task_manager/editor-core-separation-10 campaign, PHASE2.
-void BuildDisabledBuiltInPassesSection(rg::RenderPassToggleRegistry& renderPassToggleRegistry)
+void BuildAllBuiltInPassesSection(rg::RenderPassToggleRegistry& renderPassToggleRegistry)
 {
     const std::vector<rg::RenderPassToggleState> allStates = renderPassToggleRegistry.ListAll();
-    std::vector<rg::RenderPassToggleState> disabled;
-    for (const rg::RenderPassToggleState& state : allStates) {
-        if (!state.enabled) {
-            disabled.push_back(state);
-        }
-    }
 
-    ImGui::SeparatorText("Disabled Built-In Passes");
-    if (disabled.empty()) {
-        ImGui::TextDisabled("Every known built-in pass is currently enabled.");
+    ImGui::SeparatorText("All Built-In Passes");
+    if (allStates.empty()) {
+        ImGui::TextDisabled("No built-in pass has registered a toggle state yet this session.");
         return;
     }
-    for (std::size_t i = 0; i < disabled.size(); ++i) {
-        const rg::RenderPassToggleState& state = disabled[i];
-        // task_manager/editor-core-separation-10 campaign, PHASE2 - same
-        // fix as BuildPassRow() above: index-scoped, not name-scoped.
-        ScopedUniqueId idScope(static_cast<int>(i), "RenderGraphPanel::BuildDisabledBuiltInPassesSection", state.name.c_str());
+    for (std::size_t i = 0; i < allStates.size(); ++i) {
+        const rg::RenderPassToggleState& state = allStates[i];
+        ScopedUniqueId idScope(static_cast<int>(i), "RenderGraphPanel::BuildAllBuiltInPassesSection", state.name.c_str());
 
-        bool enabled = false; // always false here by construction (this loop only ever sees disabled entries).
+        bool enabled = state.enabled;
         if (ImGui::Checkbox("##Enabled", &enabled)) {
             renderPassToggleRegistry.SetEnabled(state.name, enabled);
         }
@@ -584,15 +573,10 @@ void RenderGraphPanel::Build(EditorContext& ctx, const rg::RenderGraph& renderGr
     // EditorContext::renderPassToggleRegistryChangedThisFrame's own doc
     // comment for the full contract this feeds.
     const std::vector<rg::RenderPassToggleState> toggleStatesBeforeThisPanelsOwnUi = renderPassToggleRegistry.ListAll();
-    // editor-core-separation-8 campaign, PHASE4
-    // (PHASE4_RENDER_GRAPH_PANEL_CONTROLS.md, Step 3.4) - placed immediately
-    // after Render Features and BEFORE the two regime sections, so a
-    // caller sees "what's currently OFF" before scrolling past the (often
-    // much longer) live pass/resource tables - mirrors this file's own
-    // existing placement rationale for GPU-Driven Batches/Render Features
-    // above ("this panel's own newest, most immediately actionable live
-    // signal, shown early").
-    BuildDisabledBuiltInPassesSection(renderPassToggleRegistry);
+    // Placed immediately after Render Features and BEFORE the two regime
+    // sections, so every built-in pass (on or off) is visible before
+    // scrolling past the (often much longer) live pass/resource tables.
+    BuildAllBuiltInPassesSection(renderPassToggleRegistry);
     ImGui::Spacing();
 
     BuildRegimeSection(

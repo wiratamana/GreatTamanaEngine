@@ -127,6 +127,14 @@ AtmosphereAerialPerspectiveSkyPurityResult ValidateAerialPerspectiveSkyPurity(Re
         return result;
     }
 
+    // A disabled/stale pass leaves the post-composite texture's own stamp
+    // stuck on an earlier frame - nothing to validate, not a pass/fail.
+    if (postSnapshot->lastUpdatedFrameCounter != renderGraph.CurrentDebugTextureFrameCounter()) {
+        result.failureReason = std::string("\"") + compositedColorTextureName
+            + "\" was not written this frame - nothing to validate.";
+        return result;
+    }
+
     if (preSnapshot->target.extent.width != postSnapshot->target.extent.width
         || preSnapshot->target.extent.height != postSnapshot->target.extent.height) {
         result.failureReason = "Pre-composite and post-composite textures have different extents this frame.";

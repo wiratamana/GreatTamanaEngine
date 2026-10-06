@@ -18,11 +18,7 @@
 #include "../Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../Renderer/RenderGraph/RenderGraphDebugTextureRegistry.h"
-// editor-core-separation-22 campaign, PHASE1
-// (task_manager/editor-core-separation-22/
-// PHASE1_FIX_DRAWSKYBACKGROUND_TOGGLE_SIDE_CHANNEL_LEAK.md) - the generic,
-// early toggle guard used by the "DrawSkyBackground" provider below (Step
-// 3.2 of that phase file).
+// The generic, early toggle guard used by the "IndirectDraw" check below.
 #include "../Renderer/RenderGraph/RenderPassToggleGuard.h"
 
 // editor-core-separation-22 campaign, PHASE3
@@ -58,6 +54,7 @@
 // BIG-STEP 2), PHASE3 - RecordRenderPass()'s own no-op-outside-a-bracket
 // call, added to RegisterProjectRenderPassProvider() below.
 #include "Plugins/ProjectAssemblyRegistrationLedger.h"
+#include "ViewBackgroundReplayKey.h"
 
 #include <cassert>
 #include <cstdint>
@@ -102,11 +99,6 @@ constexpr rg::RenderPassId kGpuSkinningOutputsKey = "GpuSkinning.OutputBuffers"_
 // own doc comment (Core.h).
 constexpr rg::RenderPassId kViewCompositedOutputGameKey = "Core.ViewCompositedOutput.Game"_passId;
 constexpr rg::RenderPassId kViewCompositedOutputSceneKey = "Core.ViewCompositedOutput.Scene"_passId;
-
-// Generic key a feature may Publish() a Game-View-only replay callback
-// under for BuildFrame()'s own Frame Debugger replay dispatch - see this
-// file's own gameSkyBackgroundCallbackForReplay fetch, below.
-constexpr rg::RenderPassId kGameSkyBackgroundReplayCallbackKey = "Core.GameSkyBackgroundReplayCallback"_passId;
 
 // Phase 4C - the one, tiny bridge from Renderer's own (Profiling-free)
 // GpuTimingSample::Status into Profiling::GpuSampleStatus.
@@ -677,6 +669,24 @@ bool Core::RegisterFinalizeForSamplingHook(const char* name, FinalizeForSampling
     return true;
 }
 
+// Duplicate name refused the same way RegisterFinalizeForSamplingHook()
+// refuses one - no legitimate duplicate case exists here either.
+bool Core::RegisterViewContentPassName(const char* name)
+{
+    if (name == nullptr) {
+        return false;
+    }
+    for (const std::string& existing : m_viewContentPassNames) {
+        if (existing == name) {
+            GTE_LOG_ERROR("Core", std::string("RegisterViewContentPassName: duplicate name '") + name + "' - refused.");
+            assert(false && "RegisterViewContentPassName: duplicate name - see the GTE_LOG_ERROR above.");
+            return false;
+        }
+    }
+    m_viewContentPassNames.emplace_back(name);
+    return true;
+}
+
 // Linear scan (realistic hook count is 1-3, mirrors FindViewData()'s own
 // precedent) - returns nullptr both when `name` is not registered and when
 // the registered callback itself returns nullptr. Caches the result onto
@@ -807,23 +817,11 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 kGpuSkinningOutputsKey, m_gpuSkinningHandlesThisFrame);
         });
 
-    // editor-core-separation-20 campaign, PHASE1 - "ClearViewTarget" -
-    // ProviderScope::PerActiveView, BeforeEverything. The ONE guaranteed clear
-    // of each active view's color+depth render target, decoupled from whether
-    // "RenderOpaque" itself is enabled this frame - see
-    // task_manager/editor-core-separation-20/PHASE1_GUARANTEED_VIEW_TARGET_CLEAR.md
-    // for the full "why" (a confirmed, live bug: disabling "RenderOpaque" via
-    // the "Render Graph" panel/HTTP used to leave this exact resource
-    // completely uncleared for the whole frame, since "DrawSkyBackground"
-    // deliberately never clears either - relying on RenderOpaque's own EQUAL-
-    // depth-test setup instead). RenderPassEvent::BeforeEverything makes
-    // RenderGraphCompiler::Compile()'s own effective-order sort
-    // (render-pass-4 campaign) place this pass before every other pass
-    // touching the same resource, regardless of provider registration order -
-    // this is genuinely load-bearing here, not just documentation. Permanently
-    // denylisted (RenderPassToggleRegistry::IsDenyListed(), updated below) -
-    // can never be turned off via the panel/HTTP, exactly like "Present": a
-    // view with no defined clear has no safe fallback content to show.
+    // "ClearViewTarget" - PerActiveView, BeforeEverything. Guarantees every
+    // active view's color+depth target is cleared each frame, independent of
+    // whether "RenderOpaque" itself runs - BeforeEverything forces this pass
+    // first regardless of registration order. Permanently denylisted (never
+    // toggleable): a view with no clear has no safe fallback content.
     m_offscreenRenderPipeline.Register("ClearViewTarget", rg::ProviderScope::PerActiveView,
         [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
             const RenderPassViewData* viewData = FindViewData(frame.currentView);
@@ -833,32 +831,13 @@ void Core::RegisterOffscreenRenderPipelineProviders()
 
             const rg::TextureHandle viewTarget = viewData->colorTarget;
 
-            // CRITICAL - not decorative. RenderGraphCompiler::Compile() only
-            // keeps a declared pass alive if its own write is reachable
-            // (directly or transitively) from this frame's finalOutputs/
-            // finalVolumeTextureOutputs root set (RenderGraphCompiler.h's own
-            // "Step 2: backward reachability from finalOutputs" doc comment) -
-            // an imported/externally-owned resource (like this view's own
-            // persistent RenderTexture) gets NO automatic exemption from that
-            // culling merely because it is externally visible outside the
-            // graph. Nothing else in this file ever adds `viewTarget` itself to
-            // frame.finalTextureOutputs (only DERIVED handles - feature LUT
-            // outputs, the composited output - are ever added as roots),
-            // and the only pass that currently reads `viewTarget` back is
-            // the deferred composite pass - so whenever that pass (or every pass,
-            // this campaign's own primary repro case) is disabled/absent this
-            // frame, NOTHING keeps this pass's own write alive without the line
-            // below. This provider is the one pass guaranteed to run every
-            // frame for every active view (deny-listed, PerActiveView), so it
-            // is the correct, single place to make this guarantee - every OTHER
-            // real writer of viewTarget (RenderOpaque/DrawSkyBackground/
-            // RenderTransparent, whichever of them are enabled this frame) then
-            // survives culling too, via the ordinary write-after-write
-            // dependency chain back to this pass's own write. This exact
-            // "multiple writers to one resource that is itself listed in
-            // finalOutputs" shape is an already-tested, proven-safe pattern in
-            // this codebase - see RenderGraphCompilerTests.cpp's own
-            // MultipleWritersToSameResourcePreserveWriteAfterWriteOrder test.
+            // CRITICAL - not decorative. This pass runs every frame for every
+            // active view (deny-listed, PerActiveView), so adding viewTarget
+            // to finalTextureOutputs here is what keeps its write (and every
+            // other real writer of the same target - RenderOpaque, the
+            // feature-registered view-content pass tagged AfterOpaques,
+            // RenderTransparent) alive through RenderGraphCompiler's
+            // reachability culling, even when every other writer is disabled.
             frame.finalTextureOutputs.push_back(viewTarget);
 
             rg::RenderPassDesc desc;
@@ -991,13 +970,9 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             desc.view = frame.currentView;
             desc.legacyCategory = rg::RenderPassCategory::General;
             desc.setup = [viewTarget, gpuSkinningBuffers, publishedServiceSlots](rg::RenderGraphBuilder::PassBuilder& pass) {
-                // editor-core-separation-20 campaign, PHASE1 - no clear value here
-                // anymore: "ClearViewTarget" (registered above, BeforeEverything, deny-
-                // listed) now owns the ONE guaranteed clear of this exact resource,
-                // every frame, regardless of whether THIS pass is itself enabled. LOAD
-                // is therefore correct and intentional here, mirroring
-                // "DrawSkyBackground"'s own pre-existing identical choice against the
-                // SAME resource, just below.
+                // LOAD is intentional here - "ClearViewTarget" (registered
+                // above) already owns the one guaranteed clear of this
+                // resource every frame, regardless of whether this pass runs.
                 pass.WriteColorAttachment(viewTarget);
                 pass.WriteDepthStencilAttachment(viewTarget);
                 DeclareGpuSkinningReads(pass, gpuSkinningBuffers);
@@ -1036,14 +1011,11 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             out.push_back(std::move(desc));
         });
 
-    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-    // PHASE5 - "GpuDrivenBatches" - ProviderScope::PerActiveView.
+    // "GpuDrivenBatches" - PerActiveView.
     //
-    // CORRECTNESS-CRITICAL PLACEMENT REQUIREMENT (unchanged from before this
-    // phase's own relocation - see the original Application.cpp's own
-    // identical warning, now here verbatim): this Register(...) call MUST
-    // stay TEXTUALLY AFTER "RenderOpaque"'s own Register(...) call and
-    // TEXTUALLY BEFORE "DrawSkyBackground"'s own Register(...) call.
+    // CORRECTNESS-CRITICAL PLACEMENT: this Register(...) call must stay
+    // TEXTUALLY AFTER "RenderOpaque"'s own Register(...) call and TEXTUALLY
+    // BEFORE the feature-registered view-content pass tagged AfterOpaques.
     m_offscreenRenderPipeline.Register("GpuDrivenBatches", rg::ProviderScope::PerActiveView,
         [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
             if (frame.currentView != rg::RenderViewId::Named("Game")) {
@@ -1247,28 +1219,15 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             out.push_back(std::move(desc));
         });
 
-    // "PostOpaqueFeatures" - ProviderScope::PerActiveView, AfterDeferredPasses.
-    // Registered strictly between the deferred composite pass above and
-    // "PluginRenderFeatures" for two independent, load-bearing reasons.
-    // (a) Blackboard visibility: RenderPipeline::DeclareOnePhase() invokes
-    // every provider in a phase in registration order, so anything a
-    // PostOpaque feature's own callback Publish()es onto frame.blackboard
-    // this frame is guaranteed visible to "PluginRenderFeatures" (the
-    // PostComposite/PreUI mechanism), which runs immediately afterward in
-    // the SAME phase. (b) Declaration-index ordering: "DrawSkyBackground" is
-    // tagged RenderPassEvent::AfterOpaques and declared during Phase 1
-    // (BeforeDeferredPasses), fully completed before Phase 2
-    // (AfterDeferredPasses, this provider's own phase) begins - so every
-    // PostOpaque feature's own pass gets a strictly LATER declaration index
-    // than "DrawSkyBackground"'s own, which combined with sharing the
-    // identical AfterOpaques tier is what lets RenderGraphCompiler::Compile()
-    // resolve "DrawSkyBackground" as the real writer a PostOpaque pass's own
-    // read depends on. If "DrawSkyBackground" (or any future AfterOpaques-
-    // tier, BeforeDeferredPasses-phase pass) is ever retimed to
-    // AfterDeferredPasses, this ordering guarantee reverts to a plain
-    // registration-order tie-break within whichever phase they then share -
-    // re-verify by hand against this function's own real source whenever
-    // either side of this relationship changes.
+    // "PostOpaqueFeatures" - PerActiveView, AfterDeferredPasses. Registered
+    // strictly between the deferred composite pass above and
+    // "PluginRenderFeatures" so (a) anything published onto frame.blackboard
+    // here is visible to "PluginRenderFeatures" in the same phase, and
+    // (b) every PostOpaque pass gets a later declaration index than the
+    // feature-registered view-content pass tagged AfterOpaques (both share
+    // that tier), letting RenderGraphCompiler resolve it as the real writer
+    // a PostOpaque pass's read depends on. Re-verify if either side's own
+    // timing/phase is ever retimed.
     m_offscreenRenderPipeline.Register("PostOpaqueFeatures", rg::ProviderScope::PerActiveView,
         [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&) {
             if (m_renderFeatureCompositorPtr == nullptr) {
@@ -1642,9 +1601,9 @@ void Core::BuildFrame()
 
                     m_offscreenRenderPipeline.DeclareInto(b, frame);
 
-                    const std::optional<std::function<void(VkCommandBuffer)>> gameSkyBackgroundCallbackForReplay =
+                    const std::optional<std::function<void(VkCommandBuffer)>> viewBackgroundCallbackForReplay =
                         m_offscreenBlackboardThisFrame.Fetch<std::function<void(VkCommandBuffer)>>(
-                            kGameSkyBackgroundReplayCallbackKey);
+                            kViewBackgroundReplayCallbackKey);
 #ifndef NDEBUG
                     m_offscreenBlackboardThisFrame.ReportUnusedPublishesIfAny();
 #endif
@@ -1664,12 +1623,12 @@ void Core::BuildFrame()
                         const std::vector<rg::BufferHandle> gpuSkinningBuffersForReplay =
                             m_offscreenBlackboardThisFrame.Fetch<std::vector<rg::BufferHandle>>(kGpuSkinningOutputsKey)
                                 .value_or(std::vector<rg::BufferHandle>{});
-                        const std::function<void(VkCommandBuffer)> recordGameSkyBackground =
-                            gameSkyBackgroundCallbackForReplay.value_or(std::function<void(VkCommandBuffer)>{});
+                        const std::function<void(VkCommandBuffer)> recordViewBackground =
+                            viewBackgroundCallbackForReplay.value_or(std::function<void(VkCommandBuffer)>{});
                         const std::size_t objectCount = m_game.CountGameViewDrawCommandsThisFrame();
                         const std::vector<rg::TextureHandle> replayStepHandles = frameDebuggerCapture->AddReplayPasses(
                             b, m_game, m_renderer, gameAspectForReplay, objectCount, gpuSkinningBuffersForReplay,
-                            recordGameSkyBackground, *gameTarget, &m_renderPassToggleRegistry);
+                            recordViewBackground, *gameTarget, &m_renderPassToggleRegistry);
                         for (const rg::TextureHandle& replayHandle : replayStepHandles) {
                             outputs.push_back(replayHandle);
                         }
@@ -1790,9 +1749,11 @@ void Core::BuildFrame()
                 if (composited != nullptr) {
                     m_renderGraph.NotifyDebugTextureStateOverride(
                         "GameViewComposited", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
-                    if (m_editorLayer != nullptr) {
-                        m_editorLayer->SetGameViewCompositedTexture(composited);
-                    }
+                }
+                if (m_editorLayer != nullptr) {
+                    // Pass through as-is, every frame, including null - readers
+                    // already fall back to the live view on their own.
+                    m_editorLayer->SetGameViewCompositedTexture(composited);
                 }
             }
             if (sceneTarget != nullptr) {
@@ -1804,9 +1765,9 @@ void Core::BuildFrame()
                 if (composited != nullptr) {
                     m_renderGraph.NotifyDebugTextureStateOverride(
                         "SceneViewComposited", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
-                    if (m_editorLayer != nullptr) {
-                        m_editorLayer->SetSceneViewCompositedTexture(composited);
-                    }
+                }
+                if (m_editorLayer != nullptr) {
+                    m_editorLayer->SetSceneViewCompositedTexture(composited);
                 }
             }
             // Generic sweep: any other registered finalize-for-sampling hook
@@ -1894,12 +1855,18 @@ void Core::BuildFrame()
         }
     }
 
+    // GPU stats for every registered view-content pass (RenderOpaque/
+    // RenderTransparent plus whatever features registered via
+    // RegisterViewContentPassName()) - same name list for both views, so
+    // built once rather than duplicated per view.
+    std::vector<rg::PassGpuStats> viewContentStats;
+    viewContentStats.reserve(m_viewContentPassNames.size());
+    for (const std::string& passName : m_viewContentPassNames) {
+        viewContentStats.push_back(m_renderGraph.LastKnownStatsFor(passName.c_str()));
+    }
+
     if (gameTarget != nullptr) {
-        const rg::PassGpuStats gameViewStats = rg::CombinePassGpuStats({
-            m_renderGraph.LastKnownStatsFor("RenderOpaque"),
-            m_renderGraph.LastKnownStatsFor("DrawSkyBackground"),
-            m_renderGraph.LastKnownStatsFor("RenderTransparent"),
-        });
+        const rg::PassGpuStats gameViewStats = rg::CombinePassGpuStats(viewContentStats);
         Profiling::FrameProfiler::Instance().SetGpuPassDrawStats(Profiling::GpuPass::GameView,
             Profiling::GpuSampleStatus::Present, gameViewStats.drawStats.drawCallCount,
             gameViewStats.drawStats.triangleCount);
@@ -1907,11 +1874,7 @@ void Core::BuildFrame()
             ToProfilingGpuSampleStatus(gameViewStats.timing.status), gameViewStats.timing.milliseconds);
     }
     if (sceneTarget != nullptr) {
-        const rg::PassGpuStats sceneViewStats = rg::CombinePassGpuStats({
-            m_renderGraph.LastKnownStatsFor("RenderOpaque"),
-            m_renderGraph.LastKnownStatsFor("DrawSkyBackground"),
-            m_renderGraph.LastKnownStatsFor("RenderTransparent"),
-        });
+        const rg::PassGpuStats sceneViewStats = rg::CombinePassGpuStats(viewContentStats);
         Profiling::FrameProfiler::Instance().SetGpuPassDrawStats(Profiling::GpuPass::SceneView,
             Profiling::GpuSampleStatus::Present, sceneViewStats.drawStats.drawCallCount,
             sceneViewStats.drawStats.triangleCount);

@@ -210,7 +210,7 @@ public:
     std::vector<rg::TextureHandle> AddReplayPasses(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer,
         float aspectWidthOverHeight, std::size_t objectCount,
         const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers,
-        const std::function<void(VkCommandBuffer)>& recordSkyBackground, RenderTexture& gameTarget,
+        const std::function<void(VkCommandBuffer)>& recordBackgroundStep, RenderTexture& gameTarget,
         rg::RenderPassToggleRegistry* toggleRegistry = nullptr) override;
 
     // Clears every recorded fact back to the empty/default state - call
@@ -246,19 +246,12 @@ public:
     // see FrameDebuggerDrawRecord's own doc comment above.
     const std::vector<FrameDebuggerDrawRecord>& DrawRecords() const noexcept { return m_drawRecords; }
 
-    // task_manager/frame-debugger-7 campaign, PHASE3
-    // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step
-    // 3.4) - called ONCE by AddFrameDebuggerReplayPasses()
-    // (src/Application/RenderPasses.cpp), at Render-Graph-pass-declaration
-    // time (a live Renderer& already exists there), on an explicit
-    // capture-trigger frame only. Hands over N real, retained
-    // RenderTexture objects - one per real object drawn this frame's
-    // "GameView" pass, in the SAME order as DrawRecords() (see that
-    // function's own doc comment for the one documented case this
-    // ordering assumption could theoretically diverge in) - each one
-    // holding the real, accumulated Game View image exactly as it looked
-    // after objects [0..i] were redrawn from scratch. Move-only
-    // (RenderTexture itself is move-only), mirroring
+    // Called once by AddReplayPasses() above, on an explicit capture-trigger
+    // frame only. Hands over N real, retained RenderTexture objects - one
+    // per real object drawn this frame's "GameView" pass, in the SAME order
+    // as DrawRecords(), each holding the real, accumulated Game View image
+    // exactly as it looked after objects [0..i] were redrawn from scratch.
+    // Move-only (RenderTexture itself is move-only), mirroring
     // FrameDebuggerComputePassPreview's own vector-of-move-only-struct
     // precedent (FrameDebuggerHistory.h). Filled with FRESH (garbage/
     // uninitialized) content at the time this is called - each replay
@@ -266,21 +259,17 @@ public:
     // its destination later this SAME Execute() call - so a caller must
     // never read these textures back before this whole Execute() call has
     // returned.
-    // frame-debugger-8 campaign, PHASE2 - as of this campaign, N may be ONE
-    // GREATER than the real object count: AddFrameDebuggerReplayPasses()
-    // (src/Application/RenderPasses.cpp) now appends exactly one additional,
-    // dedicated "sky step" destination (index == the real object count)
-    // whenever a Sky Background draw callback exists this frame, holding
-    // "every real object AND the sky" rather than one more per-object state
-    // - see that function's own doc comment in RenderPasses.h for the full
-    // "entities first, sky last" ordering contract.
     //
-    // IMPORTANT ordering requirement for TriggerCapture()/CaptureFrame()
-    // (Phase 4's own job to act on) - this vector must be read/moved OUT
-    // of this FrameDebuggerCaptureContext into permanent storage strictly
-    // BEFORE the next armed frame's Reset() call below wipes it, i.e.
-    // inside TriggerCapture() itself, which the Step 3.0 two-bool
-    // handshake already guarantees runs later this SAME frame.
+    // N may be ONE GREATER than the real object count: AddReplayPasses()
+    // appends one additional, dedicated background step (index == the real
+    // object count) whenever a background-draw callback exists this frame,
+    // holding "every real object AND the background" - entities first,
+    // background last.
+    //
+    // IMPORTANT ordering requirement for TriggerCapture()/CaptureFrame() -
+    // this vector must be read/moved OUT of this FrameDebuggerCaptureContext
+    // into permanent storage strictly BEFORE the next armed frame's Reset()
+    // call below wipes it.
     void SetReplayStepPreviews(std::vector<RenderTexture>&& previews) noexcept
     {
         m_replayStepPreviews = std::move(previews);

@@ -618,16 +618,16 @@ public:
     // Game nor Scene view rendered this frame at all).
     RenderTexture* GetFinalizedTextureByName(const char* name) const noexcept;
 
+    // Registers `name` as another pass whose GPU stats fold into this
+    // engine's per-view stats. Call once per feature, from its
+    // constructor, main-thread-only. No Unregister.
+    bool RegisterViewContentPassName(const char* name);
+
 private:
-    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-    // PHASE5 - one eligible batch's own THIS-FRAME render data, ready for the
-    // "GpuDrivenBatches" provider (registered in
-    // RegisterOffscreenRenderPipelineProviders(), between "RenderOpaque"'s
-    // own Register() call and "DrawSkyBackground"'s own Register() call -
-    // see that function's own comment) to declare its three passes against.
-    // Relocated verbatim from Application.h (editor-core-separation-1
-    // campaign, PHASE13) - see that file's own former doc comment (now here)
-    // for the full reasoning, unchanged.
+    // One eligible GPU-driven batch's own per-frame render data - the
+    // "GpuDrivenBatches" provider (registered between "RenderOpaque" and
+    // the feature-registered view-content pass tagged AfterOpaques) declares
+    // its three passes against this.
     struct GpuDrivenBatchRenderData {
         MeshHandle mesh;
         PipelineHandle originalPipeline;
@@ -769,6 +769,11 @@ private:
         RenderTexture* lastResult = nullptr;
     };
     std::vector<FinalizeForSamplingHookEntry> m_finalizeForSamplingHooks;
+
+    // Backing store for RegisterViewContentPassName(). Seeded with Core's
+    // own two built-in view-content passes; this is the one place allowed
+    // to name its own passes directly.
+    std::vector<std::string> m_viewContentPassNames{ "RenderOpaque", "RenderTransparent" };
 
     // editor-core-separation-22 campaign, PHASE6
     // (PHASE6_IRON_RULE_V2_BIDIRECTIONAL_DETECTOR.md, Step 3.3 item 2) -

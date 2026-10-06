@@ -35,6 +35,10 @@ private:
     // m_core. Called once, from the constructor.
     void RegisterPasses();
 
+    // outputTextureName's output, or nullptr if the render graph did not
+    // write it this frame (disabled/stale-pass guard).
+    RenderTexture* FreshCompositedOutput(const char* outputTextureName);
+
     Core& m_core;
     rg::RenderPassToggleRegistry* m_toggleRegistry = nullptr;
     AtmosphereSettings m_settings;

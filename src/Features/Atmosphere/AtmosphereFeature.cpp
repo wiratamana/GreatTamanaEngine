@@ -5,6 +5,7 @@
 #include "AtmospherePassSequence.h"
 #include "../../Core/Core.h"
 #include "../../Core/Plugins/BuiltinFeatureModuleRegistry.h"
+#include "../../Core/ViewBackgroundReplayKey.h"
 #include "../../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../../Renderer/RenderGraph/RenderPassToggleGuard.h"
 #include "../../Renderer/RenderGraph/RenderPassToggleRegistry.h"
@@ -23,10 +24,6 @@ constexpr rg::RenderPassId kAtmosphereSharedLutKey = "Atmosphere.SharedLuts"_pas
 constexpr rg::RenderPassId kAtmosphereViewLutGameKey = "Atmosphere.ViewLut.Game"_passId;
 constexpr rg::RenderPassId kAtmosphereViewLutSceneKey = "Atmosphere.ViewLut.Scene"_passId;
 constexpr rg::RenderPassId kGameSkyBackgroundCallbackKey = "Atmosphere.GameSkyBackgroundCallback"_passId;
-
-// Mirrors Core.cpp's own identical, independently-declared copy of this
-// same literal - its Frame Debugger replay dispatch fetches this exact key.
-constexpr rg::RenderPassId kGameSkyBackgroundReplayCallbackKey = "Core.GameSkyBackgroundReplayCallback"_passId;
 
 // "AtmosphereSharedLut"'s own blackboard payload.
 struct AtmosphereSharedLutBlackboardEntry {
@@ -160,7 +157,7 @@ void AtmosphereFeature::RegisterPasses()
                 frame.blackboard.Publish<std::function<void(VkCommandBuffer)>>(
                     kGameSkyBackgroundCallbackKey, recordSkyBackground);
                 frame.blackboard.Publish<std::function<void(VkCommandBuffer)>>(
-                    kGameSkyBackgroundReplayCallbackKey, recordSkyBackground);
+                    kViewBackgroundReplayCallbackKey, recordSkyBackground);
             }
 
             if (!recordSkyBackground) {
@@ -187,6 +184,9 @@ void AtmosphereFeature::RegisterPasses()
             };
             out.push_back(std::move(desc));
         });
+
+    // Folds "DrawSkyBackground" into Core's generic view-content GPU stats.
+    m_core.RegisterViewContentPassName("DrawSkyBackground");
 
     // "AtmosphereComposite" - PostComposite, via
     // Core::RegisterProjectRenderFeature(). Reserved priority, deliberately
@@ -252,15 +252,33 @@ void AtmosphereFeature::RegisterPasses()
     assert(compositeRegistered && "AtmosphereComposite registration failed - see the GTE_LOG_WARNING above.");
 
     // AtmosphereComposite's own finalize-for-sampling step, one hook per view
-    // output name.
+    // output name. FreshCompositedOutput() reports nullptr on a stale/
+    // disabled frame instead of replaying a leftover cached texture.
     m_core.RegisterFinalizeForSamplingHook("GameViewComposited", [this](VkCommandBuffer cmd) -> RenderTexture* {
         m_renderer.FinalizeAerialPerspectiveCompositeForSampling(cmd, "GameViewComposited");
-        return m_renderer.CompositedOutput("GameViewComposited");
+        return FreshCompositedOutput("GameViewComposited");
     });
     m_core.RegisterFinalizeForSamplingHook("SceneViewComposited", [this](VkCommandBuffer cmd) -> RenderTexture* {
         m_renderer.FinalizeAerialPerspectiveCompositeForSampling(cmd, "SceneViewComposited");
-        return m_renderer.CompositedOutput("SceneViewComposited");
+        return FreshCompositedOutput("SceneViewComposited");
     });
+}
+
+// Returns outputTextureName's output, or nullptr if the render graph did
+// not write it this frame - reuses RenderGraph's own debug-texture frame
+// counter, so a disabled/stale pass reports honestly instead of replaying
+// a leftover cached texture forever.
+RenderTexture* AtmosphereFeature::FreshCompositedOutput(const char* outputTextureName)
+{
+    RenderTexture* output = m_renderer.CompositedOutput(outputTextureName);
+    if (output == nullptr) {
+        return nullptr;
+    }
+    const rg::RenderGraph& graph = m_core.GetRenderGraph();
+    const std::optional<rg::DebugTextureSnapshot> snapshot = graph.DebugTextureSnapshotFor(outputTextureName);
+    const bool freshThisFrame =
+        snapshot.has_value() && snapshot->lastUpdatedFrameCounter == graph.CurrentDebugTextureFrameCounter();
+    return freshThisFrame ? output : nullptr;
 }
 
 namespace {
