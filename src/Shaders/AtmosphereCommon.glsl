@@ -54,7 +54,7 @@ struct AtmosphereParametersGpu {
 
     float planetRadiusKm;
     float atmosphereThicknessKm;
-    float _pad0;
+    float multiScatteringStrength;
     float _pad1;
 };
 

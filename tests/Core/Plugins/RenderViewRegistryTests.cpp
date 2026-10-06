@@ -65,8 +65,9 @@ TEST(RenderViewRegistryTest, MismatchedDescOnExistingNameIsRefusedAndLoggedExact
 
     class RecordingLogSink : public ILogSink {
     public:
-        void Log(LogLevel level, std::string_view category, std::string_view message) override
+        void Log(LogLevel level, std::string_view category, std::string_view message, bool isBlocking = false) override
         {
+            (void)isBlocking;
             if (category == "RenderViewRegistry" && level == LogLevel::Error
                 && message.find("DIFFERENT desc") != std::string_view::npos) {
                 ++errorCount;

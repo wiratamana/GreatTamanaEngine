@@ -136,4 +136,9 @@ void TransmittanceLutUvToHeightZenith(
     outUpDot = std::max(lutGridV * 2.0f - 1.0f, -0.999f);
 }
 
+float ReciprocalScaleHeightFromKm(float scaleHeightKm) noexcept
+{
+    return 1.0f / std::max(scaleHeightKm, kMinScaleHeightKm);
+}
+
 } // namespace gte

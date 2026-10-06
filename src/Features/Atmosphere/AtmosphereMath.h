@@ -144,4 +144,10 @@ float CornetteShanksMiePhaseFunction(float g, float cosTheta) noexcept;
 void TransmittanceLutUvToHeightZenith(
     const AtmosphereParametersGpu& params, float lutGridU, float lutGridV, float& outHeightKm, float& outUpDot) noexcept;
 
+inline constexpr float kMinScaleHeightKm = 0.01f;
+
+// Converts a scale height (km) to AtmosphereParametersGpu's reciprocal form.
+// Clamps to kMinScaleHeightKm, so a divide-by-zero is impossible.
+float ReciprocalScaleHeightFromKm(float scaleHeightKm) noexcept;
+
 } // namespace gte

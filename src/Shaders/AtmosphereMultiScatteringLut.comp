@@ -207,6 +207,7 @@ void main()
     // approximates the infinite sum of every higher-order (3rd, 4th, ...)
     // scattering bounce from just the 2nd-order estimate above.
     vec3 multiScatteringResponse = secondOrderScattering / max(vec3(1.0) - multipleScatteringFraction, vec3(1e-5));
+    multiScatteringResponse *= atmosphereParameters.multiScatteringStrength;
 
     imageStore(multiScatteringLutImage, texel, vec4(multiScatteringResponse, 0.0));
 }

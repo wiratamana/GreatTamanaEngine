@@ -76,9 +76,10 @@ public:
         std::string message;
     };
 
-    void Log(LogLevel level, std::string_view category, std::string_view message) override
+    void Log(LogLevel level, std::string_view category, std::string_view message, bool isBlocking = false) override
     {
         entries.push_back(Recorded{ level, std::string(category), std::string(message) });
+        (void)isBlocking;
     }
 
     std::vector<Recorded> entries;

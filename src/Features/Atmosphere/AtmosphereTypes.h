@@ -117,13 +117,11 @@ struct AtmosphereParametersGpu {
     Vec3 groundAlbedo = Vec3(0.3f, 0.3f, 0.3f);
     float ozoneTentHalfWidthKm = 15.0f;
 
-    // Group 6 (16 bytes): planet/atmosphere sizing, plus two explicitly
-    // reserved padding floats (never silently relying on compiler-inserted
-    // tail padding) so this whole struct's size is a clean multiple of 16
-    // bytes throughout.
+    // Group 6 (16 bytes): planet/atmosphere sizing, a multi-scattering
+    // strength multiplier, plus one reserved padding float.
     float planetRadiusKm = 6371.0f;
     float atmosphereThicknessKm = 100.0f;
-    float _pad0 = 0.0f;
+    float multiScatteringStrength = 1.0f;
     float _pad1 = 0.0f;
 };
 static_assert(sizeof(AtmosphereParametersGpu) == 96,
@@ -214,28 +212,24 @@ static_assert(sizeof(AtmosphereFrameUniforms) == 128,
     "Phase 1 aerial perspective tunables) - 48 + 64 + 16 = 128 bytes total - "
     "see each group's own doc comment above.");
 
-// Atmosphere Scattering + Aerial Perspective campaign, Phase 8
-// (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md)
-// - a SHORT, deliberately curated list of genuinely tunable, non-spatial
-// atmosphere knobs, edited live via the Editor's new "Atmosphere" panel
-// (src/Editor/Panels/AtmospherePanel.h/.cpp). Owned by Application
-// (Application::m_atmosphereSettings), NOT by EditorContext (which is
-// Editor-UI-state only - see AGENTS.md's "Editor Module Structure" section)
-// and NOT stored on any ECS entity/component - there is exactly one of
-// these per running session, mirroring this campaign's own Locked Design
-// Decision 3 ("exactly one global AtmosphereSettings per scene").
-//
-// Deliberately does NOT duplicate AtmosphereParametersGpu's own physical
-// constants (Rayleigh/Mie/ozone coefficients, planet/atmosphere sizing) -
-// those stay AtmosphereParameters.cpp's fixed defaults; nobody needs to
-// live-tune them, and Phase 8's own strategy document explicitly warns
-// against turning this into "every field of AtmosphereParametersGpu".
+// Tunable atmosphere knobs, edited live via the Editor's "Atmosphere" panel.
+// Physical fields mirror AtmosphereParametersGpu, rebuilt every frame (see
+// AtmosphereFeature.cpp). Owned by Application, not EditorContext/ECS -
+// exactly one per running session.
 struct AtmosphereSettings {
-    // Multiplies AtmosphereParametersGpu::groundAlbedo (component-wise) -
-    // lets a user tint how much light the ground bounce term (the
-    // Multi-Scattering LUT's own ground-reflection contribution) reflects
-    // back, without hand-editing the underlying physical constant.
-    Vec3 groundAlbedoTint = Vec3::One();
+    Vec3 rayleighScattering = Vec3(0.0058f, 0.0135f, 0.0331f);
+    float rayleighScaleHeightKm = 8.0f; // Scale height (km) - NOT the GPU struct's reciprocal, see AtmosphereMath.h.
+    Vec3 mieScattering = Vec3(0.006f, 0.006f, 0.006f);
+    float miePhaseG = 0.76f;
+    Vec3 mieAbsorption = Vec3(0.00066f, 0.00066f, 0.00066f);
+    float mieScaleHeightKm = 1.2f; // Scale height (km) - see rayleighScaleHeightKm above.
+    Vec3 ozoneAbsorption = Vec3(0.00065f, 0.00188f, 0.00008f);
+    float ozoneTentCenterKm = 25.0f;
+    Vec3 groundAlbedo = Vec3(0.3f, 0.3f, 0.3f); // Fraction of light the ground reflects back.
+    float ozoneTentHalfWidthKm = 15.0f;
+    float planetRadiusKm = 6371.0f;
+    float atmosphereThicknessKm = 100.0f;
+    float multiScatteringStrength = 1.0f;
 
     // Overall multiplier for the Aerial Perspective Composite pass's
     // effect strength - 1.0 reproduces the unscaled physical result
