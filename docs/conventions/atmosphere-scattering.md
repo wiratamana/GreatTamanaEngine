@@ -16,8 +16,8 @@ whenever touching this feature:
   formula this campaign uses — the exact same discipline this file already
   establishes for `Animation/VertexSkinning.cpp` under
   [GPU Vertex Skinning](gpu-vertex-skinning.md)
-  above.** Every `.comp`/`.frag` shader under `src/Shaders/Atmosphere*` (via
-  the shared `src/Shaders/AtmosphereCommon.glsl` include) is a faithful GLSL
+  above.** Every `.comp`/`.frag` shader under `src/Features/Atmosphere/Shaders/` (via
+  the shared `src/Features/Atmosphere/Shaders/AtmosphereCommon.glsl` include) is a faithful GLSL
   transcription of this file's own math, written and checked BY HAND against
   it — if a shader and this CPU oracle ever disagree, the CPU oracle is right
   by definition and the SHADER is what needs fixing, never the reverse. This

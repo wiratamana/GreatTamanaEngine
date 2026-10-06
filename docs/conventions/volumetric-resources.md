@@ -114,7 +114,7 @@ cmd.DispatchOverSize(kSize, kSize, kSize);
 
 Correct whenever a slice's value genuinely depends on the previous slice's
 running state along the same column. This is the real shipped feature's own
-case: `src/Shaders/AtmosphereAerialPerspectiveVolume.comp`
+  case: `src/Features/Atmosphere/Shaders/AtmosphereAerialPerspectiveVolume.comp`
 (`local_size_x=8, local_size_y=8, local_size_z=1`), dispatched by
 `AtmosphereLutRenderer::AddAerialPerspectiveVolumePass()`
 (`src/Renderer/Atmosphere/AtmosphereLutRenderer.cpp`, lines 574-656) via
@@ -263,7 +263,7 @@ separately extracted, shared, feature-free utility:
   test, `tests/Renderer/VolumetricFroxelMathTests.cpp`.
 - `src/Shaders/VolumetricFroxelMath.glsl` — the GLSL mirror, byte-identical
   formula, same parameter names/order in both languages. `#include`d by both
-  `src/Shaders/AtmosphereCommon.glsl` (the shipped Atmosphere feature's own
+  `src/Features/Atmosphere/Shaders/AtmosphereCommon.glsl` (the shipped Atmosphere feature's own
   include, replacing what used to be an inline copy) and
   `src/Shaders/VolumetricFroxelExamplePerColumnFill.comp` (this page's own
   per-column example above) — real proof this file is genuinely reusable by a

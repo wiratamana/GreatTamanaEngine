@@ -7,7 +7,7 @@ namespace gte {
 // ============================================================================
 // AtmosphereAerialPerspectiveCompositeMath.h - the PERMANENT CPU ORACLE for
 // the Aerial Perspective Composite pass's own per-pixel BRANCH + FINAL BLEND
-// decision (src/Shaders/AtmosphereAerialPerspectiveComposite.comp's main()).
+// decision (src/Features/Atmosphere/Shaders/AtmosphereAerialPerspectiveComposite.comp's main()).
 // ============================================================================
 // atmosphere-scattering-4 campaign - see
 // task_manager/atmosphere-scattering-4/PHASE0_MASTER_STRATEGY.md and

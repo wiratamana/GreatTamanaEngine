@@ -138,7 +138,7 @@ float CornetteShanksMiePhaseFunction(float g, float cosTheta) noexcept;
 // at all until that phase invented it (Phase 1 only required the density/
 // transmittance formulas above, not this) - so this C++ port is instead
 // checked BY HAND against the real GLSL source
-// (src/Shaders/AtmosphereCommon.glsl) for byte-for-byte formula
+// (src/Features/Atmosphere/Shaders/AtmosphereCommon.glsl) for byte-for-byte formula
 // equivalence, confirmed identical: `heightKm = mix(0, thickness,
 // clamp(u, 0, 1))` and `upDot = max(v * 2 - 1, -0.999)`.
 void TransmittanceLutUvToHeightZenith(

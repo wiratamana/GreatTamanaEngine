@@ -110,6 +110,13 @@ than subsystem-specific):
   by the `better-render-pass-2` campaign; the file is kept as a short pointer
   notice plus the original, now-historical ABI-versioned `.dll` plugin system
   design, verbatim, for the record.
+- **[Engine Feature Modules](conventions/engine-feature-module.md)** — the
+  successor to the above: how to write a first-party, built-into-the-engine
+  render feature (`IEngineFeatureModule`/`BuiltinFeatureModuleRegistry`/
+  `GTE_REGISTER_BUILTIN_FEATURE_MODULE`, plus the optional Editor-panel half),
+  the `src/Features/<Name>/` folder convention, and the generic, zero-CMake-
+  touch build auto-discovery every feature folder gets for free. Atmosphere
+  Scattering (below) is the one real, shipped feature built this way.
 - **[Project Assembly System](conventions/project-assembly-system.md)** — the
   per-developer `Projects/<Name>/` source tree that compiles into two `.dll`s
   (`<Name>_Game.dll`/`<Name>_Editor.dll`) linked directly against

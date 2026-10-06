@@ -83,7 +83,7 @@ function(gte_add_shader TARGET SOURCE)
     add_custom_command(
         OUTPUT "${COMPILED}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/shaders"
-        COMMAND "${GLSLC_EXECUTABLE}" "${SOURCE_ABSOLUTE}" -o "${COMPILED}"
+        COMMAND "${GLSLC_EXECUTABLE}" "${SOURCE_ABSOLUTE}" -I "${CMAKE_SOURCE_DIR}/src/Shaders" -o "${COMPILED}"
         DEPENDS "${SOURCE_ABSOLUTE}" ${EXTRA_DEPENDS_ABSOLUTE}
         COMMENT "Compiling shader ${SOURCE} -> ${COMPILED}"
         VERBATIM
@@ -99,4 +99,87 @@ function(gte_add_shader TARGET SOURCE)
                 "$<TARGET_FILE_DIR:${TARGET}>/shaders/${SHADER_NAME}.spv"
         COMMENT "Staging ${SHADER_NAME}.spv next to ${TARGET}"
     )
+endfunction()
+
+# gte_add_shaders_in_dir(<target> <dir-relative-to-CMAKE_SOURCE_DIR>)
+#
+# Auto-discovers every *.vert/*.frag/*.comp file DIRECTLY inside <dir> (not
+# recursive - one flat "Shaders" folder per feature) and registers each one
+# via gte_add_shader(), so a brand-new shader file needs ZERO CMakeLists.txt
+# edit - just drop it in the folder; CONFIGURE_DEPENDS re-runs CMake's
+# configure step automatically when the folder's contents change.
+#
+# EXTRA_DEPENDS (see gte_add_shader()'s own big comment above, for WHY this
+# is needed for correct incremental rebuild) is auto-detected too, per file:
+# this function scans the shader source's own text for every
+# `#include "Foo.glsl"` directive, resolves Foo.glsl using the EXACT SAME
+# two-step rule glslc itself uses (first relative to the INCLUDING file's own
+# directory, then falling back to the shared src/Shaders/ pool - see the `-I`
+# flag added to gte_add_shader()'s own glslc invocation above), and then
+# repeats the scan on every header it just found - so a TRANSITIVE include
+# (e.g. AtmosphereCommon.glsl itself #include-ing VolumetricFroxelMath.glsl)
+# is tracked correctly too, exactly like every hand-written EXTRA_DEPENDS list
+# in this project used to list by hand before this function existed.
+function(gte_add_shaders_in_dir TARGET DIR)
+    set(GTE_SHADERS_DIR_ABSOLUTE "${CMAKE_SOURCE_DIR}/${DIR}")
+
+    file(GLOB GTE_SHADER_SOURCES_ABSOLUTE
+         CONFIGURE_DEPENDS
+         "${GTE_SHADERS_DIR_ABSOLUTE}/*.vert"
+         "${GTE_SHADERS_DIR_ABSOLUTE}/*.frag"
+         "${GTE_SHADERS_DIR_ABSOLUTE}/*.comp")
+
+    foreach(GTE_SHADER_ABSOLUTE ${GTE_SHADER_SOURCES_ABSOLUTE})
+        file(RELATIVE_PATH GTE_SHADER_RELATIVE "${CMAKE_SOURCE_DIR}" "${GTE_SHADER_ABSOLUTE}")
+
+        set(GTE_INCLUDE_WORKLIST "${GTE_SHADER_ABSOLUTE}")
+        set(GTE_INCLUDE_VISITED "")
+        set(GTE_EXTRA_DEPENDS_ABSOLUTE "")
+
+        while(GTE_INCLUDE_WORKLIST)
+            list(GET GTE_INCLUDE_WORKLIST 0 GTE_INCLUDE_CURRENT)
+            list(REMOVE_AT GTE_INCLUDE_WORKLIST 0)
+
+            if(NOT GTE_INCLUDE_CURRENT IN_LIST GTE_INCLUDE_VISITED)
+                list(APPEND GTE_INCLUDE_VISITED "${GTE_INCLUDE_CURRENT}")
+
+                if(EXISTS "${GTE_INCLUDE_CURRENT}")
+                    file(STRINGS "${GTE_INCLUDE_CURRENT}" GTE_INCLUDE_LINES
+                         REGEX "^[ \t]*#include[ \t]+\"[^\"]+\"")
+                    get_filename_component(GTE_INCLUDE_CURRENT_DIR "${GTE_INCLUDE_CURRENT}" DIRECTORY)
+
+                    foreach(GTE_INCLUDE_LINE ${GTE_INCLUDE_LINES})
+                        string(REGEX REPLACE "^[ \t]*#include[ \t]+\"([^\"]+)\".*" "\\1"
+                               GTE_INCLUDE_NAME "${GTE_INCLUDE_LINE}")
+
+                        set(GTE_INCLUDE_RESOLVED "")
+                        if(EXISTS "${GTE_INCLUDE_CURRENT_DIR}/${GTE_INCLUDE_NAME}")
+                            set(GTE_INCLUDE_RESOLVED "${GTE_INCLUDE_CURRENT_DIR}/${GTE_INCLUDE_NAME}")
+                        elseif(EXISTS "${CMAKE_SOURCE_DIR}/src/Shaders/${GTE_INCLUDE_NAME}")
+                            set(GTE_INCLUDE_RESOLVED "${CMAKE_SOURCE_DIR}/src/Shaders/${GTE_INCLUDE_NAME}")
+                        endif()
+
+                        if(GTE_INCLUDE_RESOLVED)
+                            if(NOT GTE_INCLUDE_RESOLVED IN_LIST GTE_EXTRA_DEPENDS_ABSOLUTE)
+                                list(APPEND GTE_EXTRA_DEPENDS_ABSOLUTE "${GTE_INCLUDE_RESOLVED}")
+                            endif()
+                            list(APPEND GTE_INCLUDE_WORKLIST "${GTE_INCLUDE_RESOLVED}")
+                        endif()
+                    endforeach()
+                endif()
+            endif()
+        endwhile()
+
+        set(GTE_EXTRA_DEPENDS_RELATIVE "")
+        foreach(GTE_DEP_ABSOLUTE ${GTE_EXTRA_DEPENDS_ABSOLUTE})
+            file(RELATIVE_PATH GTE_DEP_RELATIVE "${CMAKE_SOURCE_DIR}" "${GTE_DEP_ABSOLUTE}")
+            list(APPEND GTE_EXTRA_DEPENDS_RELATIVE "${GTE_DEP_RELATIVE}")
+        endforeach()
+
+        if(GTE_EXTRA_DEPENDS_RELATIVE)
+            gte_add_shader(${TARGET} "${GTE_SHADER_RELATIVE}" EXTRA_DEPENDS ${GTE_EXTRA_DEPENDS_RELATIVE})
+        else()
+            gte_add_shader(${TARGET} "${GTE_SHADER_RELATIVE}")
+        endif()
+    endforeach()
 endfunction()

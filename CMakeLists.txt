@@ -894,15 +894,12 @@ add_library(gte_core STATIC
     src/Encoding/HdrColorVisualization.cpp
 )
 
-# Atmosphere feature module - DELIBERATE, SCOPED EXCEPTION to this file's
-# otherwise-universal "hand-maintained list, not a glob" rule - required so
-# deleting src/Features/Atmosphere/ needs zero edit here. Keep this scoped to
-# this one feature folder; do not switch to a repo-wide blanket glob.
-file(GLOB GTE_FEATURE_ATMOSPHERE_CORE_SOURCES
-     CONFIGURE_DEPENDS
-     "${CMAKE_SOURCE_DIR}/src/Features/Atmosphere/*.h"
-     "${CMAKE_SOURCE_DIR}/src/Features/Atmosphere/*.cpp")
-target_sources(gte_core PRIVATE ${GTE_FEATURE_ATMOSPHERE_CORE_SOURCES})
+# Atmosphere feature module's (and every other feature's) gte_core source
+# auto-discovery now happens generically, in ONE place, further down (in the
+# "Feature module auto-discovery" block, right after gte_editor is defined,
+# since that same block also handles the Editor-tier half). This used to be
+# its own hand-maintained, Atmosphere-only glob block here; it no longer
+# needs to be.
 
 # better-render-pass-2 campaign, PHASE4 (PHASE4_DELETE_PLUGINS_FOLDER_AND_CMAKE.md) -
 # GTE_PLUGIN_RUNTIME_OUTPUT_DIR (the <exe dir>/plugins/ runtime folder every
@@ -1218,14 +1215,37 @@ add_library(gte_editor STATIC
     src/Editor/ImGuiEditorLayer.cpp
 )
 
-# Atmosphere feature module's Editor-tier half - DELIBERATE, SCOPED
-# EXCEPTION, see the matching gte_core glob above for the full reasoning.
-file(GLOB GTE_FEATURE_ATMOSPHERE_EDITOR_SOURCES
-     CONFIGURE_DEPENDS
-     "${CMAKE_SOURCE_DIR}/src/Features/Atmosphere/Editor/*.h"
-     "${CMAKE_SOURCE_DIR}/src/Features/Atmosphere/Editor/*.cpp")
-target_sources(gte_editor PRIVATE ${GTE_FEATURE_ATMOSPHERE_EDITOR_SOURCES})
+# Feature module auto-discovery - GENERIC, works for ANY current or future
+# src/Features/<Name>/ folder (Atmosphere, Shadow, etc.) with ZERO per-feature
+# CMakeLists.txt edit required, ever. Replaces the old per-feature
+# hand-written glob blocks (one for Atmosphere's gte_core half, one for its
+# gte_editor half) that used to need a brand-new copy/pasted block for every
+# new feature folder.
+# For each src/Features/<Name>/ directory found:
+#   - <Name>/*.h, <Name>/*.cpp               -> gte_core
+#   - <Name>/Editor/*.h, <Name>/Editor/*.cpp -> gte_editor (only if an
+#     Editor/ subfolder actually exists - a Game-only feature can omit it)
+# Shader auto-discovery (<Name>/Shaders/) is handled separately, further down,
+# after the GreatTamanaEditor executable target exists - see
+# gte_add_shaders_in_dir() in cmake/CompileShaders.cmake.
+file(GLOB GTE_FEATURE_DIRS CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/Features/*")
+foreach(GTE_FEATURE_DIR ${GTE_FEATURE_DIRS})
+    if(IS_DIRECTORY "${GTE_FEATURE_DIR}")
+        file(GLOB GTE_FEATURE_CORE_SOURCES
+             CONFIGURE_DEPENDS
+             "${GTE_FEATURE_DIR}/*.h"
+             "${GTE_FEATURE_DIR}/*.cpp")
+        target_sources(gte_core PRIVATE ${GTE_FEATURE_CORE_SOURCES})
 
+        if(IS_DIRECTORY "${GTE_FEATURE_DIR}/Editor")
+            file(GLOB GTE_FEATURE_EDITOR_SOURCES
+                 CONFIGURE_DEPENDS
+                 "${GTE_FEATURE_DIR}/Editor/*.h"
+                 "${GTE_FEATURE_DIR}/Editor/*.cpp")
+            target_sources(gte_editor PRIVATE ${GTE_FEATURE_EDITOR_SOURCES})
+        endif()
+    endif()
+endforeach()
 # The "Project" panel (see GTE_ENABLE_PROJECT_PANEL above) is independently
 # toggleable even within the always-built Editor library - only
 # compiled/linked in when ALSO on. ProjectPanelData.h/.cpp is the pure,
@@ -1660,74 +1680,32 @@ if(TRUE)
     gte_add_shader(GreatTamanaEditor src/Shaders/ArrayLayerRenderValidationVisualize.comp)
 endif()
 
-# Atmosphere Scattering + Aerial Perspective campaign, Phase 3
-# (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE3_TRANSMITTANCE_LUT_v1.md)
-# - the Transmittance LUT compute shader (src/Renderer/Atmosphere/
-# AtmosphereLutRenderer.h/.cpp). Unconditional (NOT gated behind
-# GTE_ENABLE_EDITOR, unlike BoxBlur.comp above) - this campaign's own Locked
-# Design Decision 4 (ATMOSPHERE_PHASE0_MASTER_STRATEGY_v1.md) makes atmosphere
-# scattering an always-compiled core rendering feature, the same tier as the
-# Render Graph or GPU Vertex Skinning, with no on/off switch of its own -
-# AtmosphereLutRenderer.cpp (the only thing that ever loads this shader) is
-# compiled into gte_core unconditionally (see gte_core's own target_sources()
-# list above). EXTRA_DEPENDS lists the shared AtmosphereCommon.glsl include
-# this shader #includes, so an edit to it correctly triggers glslc to
-# recompile this (and every future atmosphere shader that also lists it).
-gte_add_shader(GreatTamanaEditor src/Shaders/AtmosphereTransmittanceLut.comp
-    EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl src/Shaders/VolumetricFroxelMath.glsl)
+# Atmosphere Scattering + Aerial Perspective campaign shaders used to be
+# hand-listed here (8 manual gte_add_shader() calls + hand-written
+# EXTRA_DEPENDS lists), one per phase of that campaign. They have since moved
+# into src/Features/Atmosphere/Shaders/ (mirroring the folder's own C++/.h
+# layout) and are now auto-discovered by the generic per-feature "Shaders"
+# folder loop right below, which also auto-detects EXTRA_DEPENDS (including
+# transitive #include chains, e.g. AtmosphereCommon.glsl's own #include of the
+# shared VolumetricFroxelMath.glsl) - see gte_add_shaders_in_dir() in
+# cmake/CompileShaders.cmake. Nothing Atmosphere-specific remains to
+# hand-maintain here.
 
-# Atmosphere Scattering + Aerial Perspective campaign, Phase 4
-# (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE4_MULTISCATTERING_LUT_v1.md)
-# - the Multi-Scattering LUT compute shader. Same unconditional (NOT
-# GTE_ENABLE_EDITOR-gated) treatment as the Transmittance LUT shader above,
-# for the exact same reason (Locked Design Decision 4 - always-compiled core
-# rendering feature).
-gte_add_shader(GreatTamanaEditor src/Shaders/AtmosphereMultiScatteringLut.comp
-    EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl src/Shaders/VolumetricFroxelMath.glsl)
-
-# Atmosphere Scattering + Aerial Perspective campaign, Phase 5
-# (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE5_SKYVIEW_LUT_v1.md)
-# - the Sky-View LUT compute shader. Same unconditional (NOT
-# GTE_ENABLE_EDITOR-gated) treatment as the Transmittance/Multi-Scattering
-# LUT shaders above, for the exact same reason (Locked Design Decision 4 -
-# always-compiled core rendering feature).
-gte_add_shader(GreatTamanaEditor src/Shaders/AtmosphereSkyViewLut.comp
-    EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl src/Shaders/VolumetricFroxelMath.glsl)
-
-# Atmosphere Scattering + Aerial Perspective campaign, Phase 6
-# (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE6_AERIAL_PERSPECTIVE_FROXEL_VOLUME_v1.md)
-# - the Aerial Perspective froxel-volume compute shader. Same unconditional
-# (NOT GTE_ENABLE_EDITOR-gated) treatment as the Transmittance/Multi-
-# Scattering/Sky-View LUT shaders above, for the exact same reason (Locked
-# Design Decision 4 - always-compiled core rendering feature).
-gte_add_shader(GreatTamanaEditor src/Shaders/AtmosphereAerialPerspectiveVolume.comp
-    EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl src/Shaders/VolumetricFroxelMath.glsl)
-
-# Atmosphere Scattering + Aerial Perspective campaign, Phase 7
-# (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE7_SKY_BACKGROUND_AND_COMPOSITE_PASSES_v1.md)
-# - the Sky Background pass (a graphics vert/frag pair, drawn via
-# AtmosphereSkyBackgroundRenderer.h/.cpp) and the Aerial Perspective
-# Composite pass (a compute shader). Same unconditional (NOT
-# GTE_ENABLE_EDITOR-gated) treatment as every other atmosphere shader above,
-# for the exact same reason (Locked Design Decision 4 - always-compiled core
-# rendering feature) - this pass runs in BOTH the Game View (which still
-# renders even in a -DGTE_ENABLE_EDITOR=OFF release build) and the
-# Editor-only Scene View.
-gte_add_shader(GreatTamanaEditor src/Shaders/AtmosphereSkyBackground.vert)
-gte_add_shader(GreatTamanaEditor src/Shaders/AtmosphereSkyBackground.frag
-    EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl src/Shaders/VolumetricFroxelMath.glsl)
-gte_add_shader(GreatTamanaEditor src/Shaders/AtmosphereAerialPerspectiveComposite.comp
-    EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl src/Shaders/VolumetricFroxelMath.glsl)
-
-# Atmosphere Scattering + Aerial Perspective campaign, Phase 9
-# (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE9_VALIDATION_DEBUG_TOOLING_AND_DOCS_v1.md,
-# Step 3.2) - the volume-texture debug-visibility gap Phase 2 deliberately
-# deferred. Same unconditional (NOT GTE_ENABLE_EDITOR-gated) treatment as
-# every other atmosphere shader above - this pass is wired into the SAME
-# always-running Game View pass sequence as the rest of this campaign's
-# shaders. Does NOT #include AtmosphereCommon.glsl, so no EXTRA_DEPENDS.
-gte_add_shader(GreatTamanaEditor src/Shaders/AtmosphereAerialPerspectiveVolumeDebugSlice.comp)
-
+# Auto-discovers every src/Features/<Name>/Shaders/ folder (a subfolder
+# LITERALLY named "Shaders" - locked to this one exact name on purpose, for
+# now; not an arbitrary-subfolder wildcard) and registers every
+# *.vert/*.frag/*.comp file found inside via gte_add_shaders_in_dir(), with
+# zero manual gte_add_shader()/EXTRA_DEPENDS bookkeeping needed, ever, for any
+# current or future feature (Atmosphere, Shadow, etc.). Must run AFTER
+# add_executable(GreatTamanaEditor ...) above, since gte_add_shader() attaches
+# sources directly to that target.
+file(GLOB GTE_FEATURE_DIRS_FOR_SHADERS CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/Features/*")
+foreach(GTE_FEATURE_DIR_FOR_SHADERS ${GTE_FEATURE_DIRS_FOR_SHADERS})
+    if(IS_DIRECTORY "${GTE_FEATURE_DIR_FOR_SHADERS}/Shaders")
+        file(RELATIVE_PATH GTE_FEATURE_SHADERS_DIR_RELATIVE "${CMAKE_SOURCE_DIR}" "${GTE_FEATURE_DIR_FOR_SHADERS}/Shaders")
+        gte_add_shaders_in_dir(GreatTamanaEditor "${GTE_FEATURE_SHADERS_DIR_RELATIVE}")
+    endif()
+endforeach()
 # network-impl-6 campaign, Phase 3
 # (task_manager/network-impl-6/PHASE3_VOLUME_RAYMARCH_PREVIEW_RENDERER.md) -
 # the raymarch preview thumbnail compute pass behind GET /get_texture's

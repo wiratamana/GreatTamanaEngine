@@ -4,18 +4,19 @@
 // campaign (see task_manager/atmosphere-scattering-1/
 // ATMOSPHERE_PHASE0_MASTER_STRATEGY_v1.md). Populated starting Phase 3
 // (ATMOSPHERE_PHASE3_TRANSMITTANCE_LUT_v1.md) - see
-// src/Renderer/Atmosphere/AtmosphereMath.h's own file comment for why the
+// src/Features/Atmosphere/AtmosphereMath.h's own file comment for why the
 // CPU side is written FIRST and treated as the permanent ground truth
 // ("oracle") every GLSL function here faithfully reproduces (SAME function
 // names, SAME per-step numerical method), never the other way around. If a
 // future GPU kernel and that CPU oracle ever disagree, the CPU oracle is
 // right by definition and the GLSL here is what needs fixing.
 //
-// Every .comp/.frag file that #includes this one must also list it in its
-// own gte_add_shader(... EXTRA_DEPENDS src/Shaders/AtmosphereCommon.glsl)
-// call in the root CMakeLists.txt, so an edit here correctly triggers glslc
-// to recompile every shader that depends on it (see
-// cmake/CompileShaders.cmake's own EXTRA_DEPENDS doc comment).
+// Every .comp/.frag file that #includes this one no longer needs to list it
+// by hand in a gte_add_shader(... EXTRA_DEPENDS ...) call - the generic
+// gte_add_shaders_in_dir() helper (cmake/CompileShaders.cmake) auto-detects
+// this (and every further #include this file itself has, transitively) by
+// scanning the shader source's own text, so an edit here still correctly
+// triggers glslc to recompile every shader that depends on it.
 //
 // COORDINATE CONVENTION - identical to AtmosphereMath.h's own: the planet's
 // CENTER is the origin of the local coordinate frame every function below

@@ -1095,11 +1095,43 @@ was KEPT, with the one real Vulkan pipeline it needs pulled fully into `RenderFe
 ABI-plugin caller of any kind. `RenderFeatureNamePool.h` and `IPluginCapabilityOrchestrator.h` (plus its
 generic `Core::m_capabilityOrchestrators` vector mechanism) both survive unconditionally, unrelated to
 the ABI deletion - `RenderFeatureCompositor` is simply their one remaining registered
-implementor/consumer today. See "Project Assembly System" below for the one remaining, non-ABI way to
-add a loadable render-feature/Editor-panel module to this engine, and
-`docs/conventions/plugin-architecture.md` (now a short pointer notice followed by the original design's
-full content, kept verbatim as a historical record, never deleted) for the complete, original writeup of
-the now-removed system.
+implementor/consumer today. See "Engine Feature Modules" and "Project Assembly System" below for the two
+remaining, non-ABI ways to add a render-feature/Editor-panel module to this
+engine today, and `docs/conventions/plugin-architecture.md` (now a short
+pointer notice followed by the original design's full content, kept
+verbatim as a historical record, never deleted) for the complete, original
+writeup of the now-removed system.
+
+## Engine Feature Modules
+
+The successor to the removed ABI plugin system, for a **first-party,
+permanent engine feature** (as opposed to Project Assembly's out-of-tree,
+per-developer `.dll`, see below): a feature implements `IEngineFeatureModule`
+(`src/Core/Plugins/IEngineFeatureModule.h`) inside its own
+`src/Features/<Name>/` folder and self-registers a factory at static-init
+time via `GTE_REGISTER_BUILTIN_FEATURE_MODULE("<Name>", &CreateXModule)` —
+`BuiltinFeatureModuleRegistry::CreateAll(Core&)` (called once, by
+`EditorHost`) constructs one instance per registered factory, wrapped in
+`try`/`catch` so one broken feature cannot take the others down. `Core.cpp`
+has zero mentions of this registry at all; `EditorHost.cpp`'s only
+involvement is two fully generic lines naming no feature. An optional
+Editor-tier Inspector panel mirrors this exactly
+(`IEditorPanelModule_v1`/`BuiltinFeatureEditorPanelRegistry`/
+`GTE_REGISTER_BUILTIN_FEATURE_EDITOR_PANEL`), matched generically by
+`ModuleName()` string. **Atmosphere Scattering** (see below) is the one
+real, shipped feature built this way. A brand-new feature folder (core
+sources, an optional `Editor/` subfolder, an optional `Shaders/` subfolder)
+needs **zero lines added or edited in root `CMakeLists.txt`, ever** —
+auto-discovered generically via a `src/Features/*/` glob loop (build
+sources) and a second loop that auto-registers every shader inside a
+subfolder literally named `Shaders` (`gte_add_shaders_in_dir()`,
+`cmake/CompileShaders.cmake`, which also auto-detects `EXTRA_DEPENDS`,
+recursively, by scanning each shader's own `#include` lines) - verified by
+an actual clean build and an actual incremental build, both succeeding,
+after physically relocating every one of Atmosphere's own shader files into
+`src/Features/Atmosphere/Shaders/` as proof.
+
+Full convention: [docs/conventions/engine-feature-module.md](docs/conventions/engine-feature-module.md).
 
 ## Project Assembly System
 
