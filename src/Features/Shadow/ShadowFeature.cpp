@@ -119,13 +119,16 @@ void ShadowFeature::RegisterPasses()
                 [shadowHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
                     pass.WriteDepthStencilAttachment(shadowHandle, /*clearDepth=*/1.0f);
                 },
-                [this, lightViewProj](rg::PassContext&) {
+                [this, lightViewProj](rg::PassContext& ctx) {
                     // Only reaches VertexLayout::PositionNormal meshes -
                     // RenderSystem::Draw()'s guard skips the rest.
+                    Renderer& renderer = m_core.GetRenderer();
+                    renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
                     SceneDrawRequest request;
                     request.viewProjection = lightViewProj; // Real light-space matrix, never Identity.
                     request.pipelineOverride = m_depthPipeline;
-                    gte::DrawScene(m_core.GetGame().GetRenderSystem(), m_core.GetRegistry(), m_core.GetRenderer(), request);
+                    gte::DrawScene(m_core.GetGame().GetRenderSystem(), m_core.GetRegistry(), renderer, request);
+                    renderer.EndGraphPassRecording();
                 },
                 rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::PreOpaques);
 
@@ -199,7 +202,7 @@ void ShadowFeature::RegisterPasses()
             const ShadowSettings safeSettings = SanitizeShadowSettings(m_settings);
             m_compositeRenderer.AddCompositePass(builder, m_core.GetRenderer(), isGameView ? "Game" : "Scene",
                 privateTarget, extent, currentViewHandles.colorHandle, currentViewHandles.colorSampler,
-                mask->maskHandle, safeSettings.strength);
+                mask->maskHandle, currentViewHandles.depthHandle, safeSettings.strength);
         });
     assert(compositeRegistered && "Shadow.Composite registration failed - see the GTE_LOG_WARNING above.");
 }

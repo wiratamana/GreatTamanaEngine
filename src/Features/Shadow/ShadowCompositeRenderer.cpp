@@ -3,6 +3,7 @@
 #include "../../Renderer/ComputeDescriptorSet.h"
 #include "../../Renderer/Renderer.h"
 #include "../../Renderer/RenderGraph/RenderGraphBuilder.h"
+#include "../../Renderer/RenderGraph/RenderGraph.h"
 #include "../../Renderer/Vulkan/DescriptorSetLayoutBuilder.h"
 
 #include <cstring>
@@ -217,16 +218,20 @@ VkDescriptorSet ShadowCompositeRenderer::EnsureViewDescriptorSet(Renderer& rende
 
 void ShadowCompositeRenderer::AddCompositePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
     const char* viewKey, rg::TextureHandle privateTarget, VkExtent2D extent, rg::TextureHandle sceneColorHandle,
-    VkSampler sceneColorSampler, rg::TextureHandle maskHandle, float strength)
+    VkSampler sceneColorSampler, rg::TextureHandle maskHandle, rg::TextureHandle sceneDepthHandle, float strength)
 {
     EnsurePipeline(renderer);
     const VkDescriptorSet descriptorSet = EnsureViewDescriptorSet(renderer, viewKey);
 
     builder.AddRenderPass(
         "Shadow.Composite.Draw", rg::PassKind::Graphics, rg::ViewScope::Shared, rg::RenderPassCategory::General,
-        [privateTarget, sceneColorHandle, maskHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
+        [privateTarget, sceneColorHandle, maskHandle, sceneDepthHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
             pass.ReadTexture(sceneColorHandle, rg::ResourceAccess::ShaderRead);
             pass.ReadTexture(maskHandle, rg::ResourceAccess::ShaderRead);
+            // Declare-only: this pass never samples scene depth, but
+            // RenderFeatureCompositor requires every PostComposite feature to
+            // acknowledge the view's depth sub-resource it was handed.
+            pass.ReadTexture(sceneDepthHandle, rg::ResourceAccess::ShaderRead, /*isDepthResource=*/true);
             pass.WriteColorAttachment(privateTarget);
         },
         [this, descriptorSet, sceneColorHandle, sceneColorSampler, maskHandle, extent, strength](rg::PassContext& ctx) {

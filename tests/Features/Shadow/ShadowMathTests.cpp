@@ -22,7 +22,7 @@ TEST(ShadowMathTest, SunStraightOverheadNeverNaNs)
     }
 }
 
-TEST(ShadowMathTest, FortyFiveDegreeSunProducesExpectedEyePosition)
+TEST(ShadowMathTest, FortyFiveDegreeSunProducesExpectedNearPlaneCenter)
 {
     const Vec3 directionTowardSun = Normalize(Vec3(0.0f, 1.0f, -1.0f));
     const Vec3 sceneCenter = Vec3::Zero();
@@ -35,12 +35,16 @@ TEST(ShadowMathTest, FortyFiveDegreeSunProducesExpectedEyePosition)
     Mat4 invViewProj;
     ASSERT_TRUE(viewProj.TryInverse(invViewProj));
 
-    // The light's own eye must project to NDC (0, 0, 0) - the near-plane center.
-    const Vec3 reconstructedEye = ReconstructWorldPositionFromDepth(invViewProj, 0.0f, 0.0f, 0.0f);
-    const Vec3 expectedEye = sceneCenter - Normalize(-directionTowardSun) * (halfExtent + nearZ);
-    EXPECT_NEAR(reconstructedEye.x, expectedEye.x, 1e-3f);
-    EXPECT_NEAR(reconstructedEye.y, expectedEye.y, 1e-3f);
-    EXPECT_NEAR(reconstructedEye.z, expectedEye.z, 1e-3f);
+    // Depth 0 is the near plane - one nearZ unit in front of the light's own
+    // eye along its forward axis, not the eye position itself.
+    const Vec3 forward = Normalize(-directionTowardSun);
+    const Vec3 eye = sceneCenter - forward * (halfExtent + nearZ);
+    const Vec3 expectedNearPlaneCenter = eye + forward * nearZ;
+
+    const Vec3 reconstructedNearPlaneCenter = ReconstructWorldPositionFromDepth(invViewProj, 0.0f, 0.0f, 0.0f);
+    EXPECT_NEAR(reconstructedNearPlaneCenter.x, expectedNearPlaneCenter.x, 1e-3f);
+    EXPECT_NEAR(reconstructedNearPlaneCenter.y, expectedNearPlaneCenter.y, 1e-3f);
+    EXPECT_NEAR(reconstructedNearPlaneCenter.z, expectedNearPlaneCenter.z, 1e-3f);
 }
 
 TEST(ShadowMathTest, ReconstructWorldPositionRoundTripsThroughACamera)

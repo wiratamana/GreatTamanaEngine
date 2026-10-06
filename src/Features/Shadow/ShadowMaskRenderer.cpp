@@ -1,6 +1,7 @@
 #include "ShadowMaskRenderer.h"
 
 #include "../../Renderer/Renderer.h"
+#include "../../Renderer/RenderGraph/RenderGraph.h"
 
 #include <cassert>
 #include <cstring>

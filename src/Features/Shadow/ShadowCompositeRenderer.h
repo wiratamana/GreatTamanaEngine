@@ -27,9 +27,14 @@ public:
     // `viewKey` ("Game"/"Scene") selects this view's own independent
     // descriptor set - see this class's own comment above. Must be a stable
     // string for this renderer's lifetime; a string literal is fine.
+    // `sceneDepthHandle` is never sampled by this pass - it is declared as a
+    // read-only dependency purely so the render graph's barrier planner sees
+    // this feature acknowledge the current view's depth sub-resource, per
+    // RenderFeatureCompositor's mandatory-depth-read-declaration contract.
     void AddCompositePass(rg::RenderGraphBuilder& builder, Renderer& renderer, const char* viewKey,
         rg::TextureHandle privateTarget, VkExtent2D extent, rg::TextureHandle sceneColorHandle,
-        VkSampler sceneColorSampler, rg::TextureHandle maskHandle, float strength);
+        VkSampler sceneColorSampler, rg::TextureHandle maskHandle, rg::TextureHandle sceneDepthHandle,
+        float strength);
 
 private:
     void EnsurePipeline(Renderer& renderer);
