@@ -1,16 +1,13 @@
-// Unit tests for the render-pass-3 campaign's PHASE1
-// (task_manager/render-pass-3/PHASE1_CORE_VOCABULARY_AND_BLACKBOARD.md) new
-// declaration layer (src/Renderer/RenderGraph/RenderPipeline.h) -
-// RenderPassId/RenderViewId hashing, RenderPassBlackboard's Publish()/
-// Fetch()/BeginFrame() contract, and RenderPipeline::DeclareInto()'s
-// Once/PerActiveView provider scoping + ordering + legacy-field-stamping
-// behavior. Entirely Tier-1 - no live VkDevice needed, mirroring
-// RenderGraphBuilderTests.cpp/RenderPassTests.cpp's own established style
-// (a real RenderGraphBuilder instance with zero Vulkan device involved).
+﻿// Unit tests for the declaration layer (src/Renderer/RenderGraph/
+// RenderPipeline.h) - RenderPassId/RenderViewId hashing,
+// RenderPassBlackboard's Publish()/Fetch()/BeginFrame() contract, and
+// RenderPipeline::DeclareInto()'s Once/PerActiveView provider scoping +
+// ordering + legacy-field-stamping behavior. Entirely Tier-1 - no live
+// VkDevice needed (a real RenderGraphBuilder instance, zero Vulkan device
+// involved).
 
-#include "Features/Atmosphere/AtmosphereRenderPassTags.h"
 #include "Renderer/RenderGraph/RenderPipeline.h"
-#include "Renderer/RenderGraph/RenderGraphDebugMetadataSink.h" // editor-core-separation-25 campaign, PHASE3
+#include "Renderer/RenderGraph/RenderGraphDebugMetadataSink.h"
 
 #include <gtest/gtest.h>
 
@@ -19,6 +16,10 @@
 
 namespace gte::rg {
 namespace {
+
+// A domain-agnostic tag bit used purely as fixture data for tests below -
+// unrelated to any specific render feature.
+constexpr RenderPassTag kTestLutPassTag{ 1ull << 0 };
 
 void NoOpExecute(PassContext&) { }
 void NoOpSetup(RenderGraphBuilder::PassBuilder&) { }
@@ -36,10 +37,9 @@ std::size_t CountOccurrences(const std::string& haystack, const std::string& nee
     return count;
 }
 
-// editor-core-separation-25 campaign - a minimal, test-local, dual-interface
-// fake sink, mirroring RenderGraphSnapshotTests.cpp's own FakeMetadataSink
-// exactly (see that file for the full rationale) - needed here since
-// RenderPipeline::DeclareInto() ultimately calls the SAME
+// A minimal, test-local, dual-interface fake sink, mirroring
+// RenderGraphSnapshotTests.cpp's own FakeMetadataSink exactly - needed here
+// since RenderPipeline::DeclareInto() ultimately calls the SAME
 // RenderGraphBuilder::AddRenderPass() chokepoint that no longer stores
 // category/drawKind/tags directly on PassRecord.
 class FakeMetadataSink : public IPassDebugMetadataSink, public IPassDebugMetadataProvider {
@@ -471,7 +471,7 @@ TEST(RenderPipelineTest, LegacyCategoryAndDrawKindSurviveUnchangedIntoTheProduce
             desc.debugName = "DrawSkyBackground";
             desc.kind = PassKind::Graphics;
             desc.legacyCategory = RenderPassCategory::General;
-            desc.tags = kAtmosphereLutPassTag.bit;
+            desc.tags = kTestLutPassTag.bit;
             desc.drawKind = RenderPassDrawKind::DrawQuad;
             desc.order = RenderPassEvent::AfterOpaques;
             desc.setup = NoOpSetup;
@@ -496,7 +496,7 @@ TEST(RenderPipelineTest, LegacyCategoryAndDrawKindSurviveUnchangedIntoTheProduce
     PassDebugMetadata metadata;
     ASSERT_TRUE(sink.QueryPassDebugMetadata(0, metadata));
     EXPECT_EQ(metadata.category, RenderPassCategory::General);
-    EXPECT_EQ(metadata.tags, kAtmosphereLutPassTag.bit);
+    EXPECT_EQ(metadata.tags, kTestLutPassTag.bit);
     EXPECT_EQ(metadata.drawKind, RenderPassDrawKind::DrawQuad);
 }
 

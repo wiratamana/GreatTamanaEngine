@@ -703,12 +703,28 @@ bool Core::RegisterFinalizeForSamplingHook(const char* name, FinalizeForSampling
 
 // Linear scan (realistic hook count is 1-3, mirrors FindViewData()'s own
 // precedent) - returns nullptr both when `name` is not registered and when
-// the registered callback itself returns nullptr.
+// the registered callback itself returns nullptr. Caches the result onto
+// the matching entry so GetFinalizedTextureByName() can read it back later
+// this same frame without re-invoking the callback.
 RenderTexture* Core::DispatchFinalizeForSamplingHook(const char* name, VkCommandBuffer cmd)
 {
     for (FinalizeForSamplingHookEntry& entry : m_finalizeForSamplingHooks) {
         if (entry.name == name) {
-            return entry.callback ? entry.callback(cmd) : nullptr;
+            entry.lastResult = entry.callback ? entry.callback(cmd) : nullptr;
+            return entry.lastResult;
+        }
+    }
+    return nullptr;
+}
+
+// Plain, non-invoking read of whatever DispatchFinalizeForSamplingHook()
+// already cached for `name` THIS frame - see FinalizeForSamplingHookEntry's
+// own doc comment (Core.h) for the full cache-reset/write contract.
+RenderTexture* Core::GetFinalizedTextureByName(const char* name) const noexcept
+{
+    for (const FinalizeForSamplingHookEntry& entry : m_finalizeForSamplingHooks) {
+        if (entry.name == name) {
+            return entry.lastResult;
         }
     }
     return nullptr;
@@ -1552,6 +1568,15 @@ void Core::BuildFrame()
     // BOTH.
     m_renderGraph.BeginPersistentResourceFrame();
 
+    // Reset every finalize-for-sampling hook's cached result UNCONDITIONALLY,
+    // before any early-exit below - a hook's callback does not necessarily
+    // run every frame (e.g. neither Game nor Scene view rendered at all this
+    // frame), and GetFinalizedTextureByName() must report that honestly
+    // rather than returning a stale, possibly several-frames-old pointer.
+    for (FinalizeForSamplingHookEntry& entry : m_finalizeForSamplingHooks) {
+        entry.lastResult = nullptr;
+    }
+
     // editor-core-separation-1 campaign, PHASE13 (Locked Design Decision #8's
     // first bucket) - GameViewTarget()/SceneViewTarget()/
     // PrepareFrameDebuggerCaptureContext() are called ONLY here, through
@@ -1926,11 +1951,11 @@ void Core::BuildFrame()
             }
             // Generic sweep: any other registered finalize-for-sampling hook
             // (today: none) runs unconditionally, once per frame.
-            for (const FinalizeForSamplingHookEntry& entry : m_finalizeForSamplingHooks) {
+            for (FinalizeForSamplingHookEntry& entry : m_finalizeForSamplingHooks) {
                 if (entry.name == "GameViewComposited" || entry.name == "SceneViewComposited") {
                     continue;
                 }
-                entry.callback(offscreenCmd);
+                entry.lastResult = entry.callback(offscreenCmd);
             }
             if (m_editorLayer != nullptr) {
                 m_editorLayer->FinalizeBlurValidationForSampling(offscreenCmd);

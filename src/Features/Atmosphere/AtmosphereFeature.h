@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../../Core/Plugins/IEngineFeatureModule.h"
 #include "AtmosphereLutRenderer.h"
 #include "AtmosphereTypes.h"
 
@@ -13,9 +14,9 @@ class RenderPassToggleRegistry;
 
 // The ONE object owning everything feature-specific - AtmosphereSettings/
 // AtmosphereLutRenderer and every one of this feature's render-graph pass
-// registrations. Constructed and torn down by whichever bootstrap code
-// decides this feature should exist for this run - never by Core itself.
-class AtmosphereFeature {
+// registrations. Constructed by BuiltinFeatureModuleRegistry's own factory
+// (see the bottom of AtmosphereFeature.cpp) - never directly by Core.
+class AtmosphereFeature final : public IEngineFeatureModule {
 public:
     explicit AtmosphereFeature(Core& core);
 
@@ -23,6 +24,8 @@ public:
     AtmosphereFeature& operator=(const AtmosphereFeature&) = delete;
     AtmosphereFeature(AtmosphereFeature&&) = delete;
     AtmosphereFeature& operator=(AtmosphereFeature&&) = delete;
+
+    const char* ModuleName() const override { return "Atmosphere"; }
 
     AtmosphereSettings& Settings() noexcept { return m_settings; }
     AtmosphereLutRenderer& Renderer() noexcept { return m_renderer; }
@@ -37,9 +40,5 @@ private:
     AtmosphereSettings m_settings;
     AtmosphereLutRenderer m_renderer;
 };
-
-// Shaped exactly like this engine's own external-Project registration-
-// function convention - see Core::RegisterProjectRenderPassProvider().
-void RegisterAtmosphereFeature(Core& core);
 
 } // namespace gte

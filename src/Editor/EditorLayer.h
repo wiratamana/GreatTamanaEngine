@@ -81,6 +81,11 @@ class RenderPassBlackboard; // editor-core-separation-22 campaign, PHASE6 - Buil
 // header itself only ever passes the pointer through, never dereferences it.
 class RenderFeatureCompositor;
 
+// Generic "a built-in feature module" contract (src/Core/Plugins/
+// IEngineFeatureModule.h) - forward-declared only, see
+// AttachBuiltinFeatureModules() below.
+class IEngineFeatureModule;
+
 // editor-core-separation-16 campaign (On-Engine Project Workflow plan,
 // BIG-STEP 2), PHASE4 - forward-declared only, mirrors
 // "class RenderFeatureCompositor;" immediately above: this header only
@@ -943,6 +948,15 @@ public:
     // core-separation-1 campaign, PHASE8 - see GpuDrivenTestBatchSpawnResult's
     // own doc comment above).
     virtual GpuDrivenTestBatchSpawnResult SpawnGpuDrivenTestBatch(Game& game, Renderer& renderer, std::uint32_t instanceCount) = 0;
+
+    // Hands every built-in feature module constructed this session (see
+    // src/Core/Plugins/BuiltinFeatureModuleRegistry.h) to the real Editor
+    // implementation, exactly once, right after EditorHost constructs them -
+    // each module whose ModuleName() matches a registered
+    // BuiltinFeatureEditorPanelRegistry factory gets its own Editor panel
+    // built and registered. Always a safe no-op for NullEditorLayer.
+    virtual void AttachBuiltinFeatureModules(const std::vector<std::unique_ptr<IEngineFeatureModule>>& modules,
+        Renderer& renderer, const rg::RenderGraph& renderGraph) = 0;
 };
 
 // Constructs the real ImGui-backed editor layer. editor-core-separation-1

@@ -17,6 +17,9 @@
 // BIG-STEP 3), PHASE3 - PerformProjectAssemblyHotReload(), called from this
 // file's own new Run() drain point below.
 #include "../Core/Plugins/ProjectAssemblyHotReload.h"
+// Generic built-in-feature-module registry - replaces a direct, named
+// construction of any concrete feature.
+#include "../Core/Plugins/BuiltinFeatureModuleRegistry.h"
 #include "ProjectRootPath.h" // editor-core-separation-3 campaign, PHASE2 - ExecutableDirectory().
 #include "../Core/EditorPanelRegistry.h" // editor-core-separation-3 campaign, PHASE4.
 // editor-core-separation-6 campaign, PHASE7
@@ -393,10 +396,11 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
 #endif
 
     // Constructed after every RegisterBuiltinPanelName() call above, then
-    // bound as a plugin panel - preserves the "built-ins first, plugins
-    // after" EditorPanelRegistry order (see EditorLayerAtmosphereBinding.h).
-    m_atmosphereFeature = std::make_unique<AtmosphereFeature>(m_core);
-    BindAtmosphereFeatureForEditorLayer(*m_editorLayer, *m_atmosphereFeature, m_renderer, m_renderGraph);
+    // bound as plugin panels - preserves the "built-ins first, plugins
+    // after" EditorPanelRegistry order. Generic: EditorHost never names a
+    // concrete built-in feature module (see BuiltinFeatureModuleRegistry.h).
+    m_builtinFeatureModules = BuiltinFeatureModuleRegistry::Instance().CreateAll(m_core);
+    m_editorLayer->AttachBuiltinFeatureModules(m_builtinFeatureModules, m_renderer, m_renderGraph);
 
     // editor-core-separation-1 campaign, PHASE16 - wires the ONE real
     // ISceneIOCapability implementation this engine ships
@@ -864,11 +868,9 @@ int EditorHost::Run()
             m_captureBridge.FailPendingRequest(FrameCaptureKind::GameView, FrameCaptureFailureReason::TargetNotAvailable);
         }
         if (gameTargetThisFrame != nullptr && m_captureBridge.IsCaptureRequested(FrameCaptureKind::GameView)) {
-            // Atmosphere Scattering + Aerial Perspective campaign,
-            // Phase 7 - captures "GameViewComposited" (the atmosphere-
-            // composited output) instead of the original, pre-composite
-            // render target.
-            RenderTexture* captureSource = m_atmosphereFeature->Renderer().CompositedOutput("GameViewComposited");
+            // A feature may publish a composited, post-process final output
+            // under this generic name - see Core::GetFinalizedTextureByName().
+            RenderTexture* captureSource = m_core.GetFinalizedTextureByName("GameViewComposited");
             if (captureSource == nullptr) {
                 captureSource = gameTargetThisFrame;
             }
@@ -1019,11 +1021,8 @@ int EditorHost::Run()
                     const VkFormat format = wantsDepth ? snapshot->target.depthFormat : snapshot->target.format;
                     const rg::ResourceState state = wantsDepth ? snapshot->depthState : snapshot->colorState;
 
-                    // Atmosphere Scattering + Aerial Perspective campaign,
-                    // Phase 4 - the FIRST capturable color texture that is
-                    // genuinely NOT 4 bytes/pixel (VK_FORMAT_R16G16B16A16_SFLOAT
-                    // is 8 - see AtmosphereLutRenderer's own Multi-Scattering
-                    // LUT output).
+                    // The first capturable color texture genuinely NOT
+                    // 4 bytes/pixel (VK_FORMAT_R16G16B16A16_SFLOAT is 8).
                     const bool isHdrColor = !wantsDepth && format == VK_FORMAT_R16G16B16A16_SFLOAT;
                     const int bytesPerPixel = isHdrColor ? 8 : 4;
 
@@ -1090,16 +1089,8 @@ int EditorHost::Run()
 
                     m_renderer.WaitForGpuIdle();
 
-                    // atmosphere-scattering-2 campaign, Phase 4 - auto-detect
-                    // the Aerial Perspective volume by name so its preview
-                    // uses the atmosphere-aware transmittance/in-scattering
-                    // interpretation instead of the generic density/color
-                    // one - zero new HTTP endpoint/query parameter.
-                    //
-                    // frame-debugger-5 campaign, PHASE4 - this rule is now a
-                    // shared, named, pure function
-                    // (VolumeTexturePreviewRenderer.h's
-                    // SelectVolumeTexturePreviewInterpretation()).
+                    // Auto-detects a volume texture's preview interpretation
+                    // from its name (see SelectVolumeTexturePreviewInterpretation()).
                     const VolumeTexturePreviewInterpretation interpretation =
                         SelectVolumeTexturePreviewInterpretation(requestedName);
 

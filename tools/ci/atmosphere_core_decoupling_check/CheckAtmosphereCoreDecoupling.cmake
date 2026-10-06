@@ -13,6 +13,7 @@ set(GTE_FILES_TO_CHECK
     "${GTE_REPO_ROOT}/src/Core/Core.h"
     "${GTE_REPO_ROOT}/src/Core/Core.cpp"
     "${GTE_REPO_ROOT}/src/Editor/EditorLayer.h"
+    "${GTE_REPO_ROOT}/src/Editor/EditorHost.cpp"
 )
 
 set(GTE_TOTAL_HITS 0)
@@ -35,7 +36,7 @@ foreach(GTE_FILE ${GTE_FILES_TO_CHECK})
 endforeach()
 
 if(GTE_TOTAL_HITS GREATER 0)
-    message(FATAL_ERROR "AtmosphereCoreDecouplingCheck: FAIL - ${GTE_TOTAL_HITS} total mention(s) of 'Atmosphere' found above. Core.h/Core.cpp/EditorLayer.h must never name a concrete built-in feature again.")
+    message(FATAL_ERROR "AtmosphereCoreDecouplingCheck: FAIL - ${GTE_TOTAL_HITS} total mention(s) of 'Atmosphere' found above. Core.h/Core.cpp/EditorLayer.h/EditorHost.cpp must never name a concrete built-in feature again.")
 else()
-    message(STATUS "AtmosphereCoreDecouplingCheck: PASS - zero mentions of 'Atmosphere' in src/Core/Core.h, src/Core/Core.cpp, src/Editor/EditorLayer.h.")
+    message(STATUS "AtmosphereCoreDecouplingCheck: PASS - zero mentions of 'Atmosphere' in src/Core/Core.h, src/Core/Core.cpp, src/Editor/EditorLayer.h, src/Editor/EditorHost.cpp.")
 endif()

@@ -4,6 +4,7 @@
 #include "AtmosphereParameters.h"
 #include "AtmospherePassSequence.h"
 #include "../../Core/Core.h"
+#include "../../Core/Plugins/BuiltinFeatureModuleRegistry.h"
 #include "../../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../../Renderer/RenderGraph/RenderPassToggleGuard.h"
 #include "../../Renderer/RenderGraph/RenderPassToggleRegistry.h"
@@ -262,18 +263,13 @@ void AtmosphereFeature::RegisterPasses()
     });
 }
 
-void RegisterAtmosphereFeature(Core& core)
+namespace {
+std::unique_ptr<IEngineFeatureModule> CreateAtmosphereFeatureModule(Core& core)
 {
-    // Not currently called anywhere - EditorHost owns AtmosphereFeature
-    // directly via std::make_unique<AtmosphereFeature>(m_core) instead (see
-    // EditorHost.cpp). Kept so a future bootstrap path (e.g. a real external
-    // .dll's own exported entry point) can wire this feature up with a single
-    // call, without needing to manage the instance's own lifetime itself.
-    // Intentionally leaks for the life of the process - the same guarantee
-    // every other "always on, no teardown" registration in this engine
-    // already has.
-    static AtmosphereFeature* const instance = new AtmosphereFeature(core);
-    (void)instance;
+    return std::make_unique<AtmosphereFeature>(core);
 }
+} // namespace
+
+GTE_REGISTER_BUILTIN_FEATURE_MODULE("Atmosphere", &CreateAtmosphereFeatureModule);
 
 } // namespace gte

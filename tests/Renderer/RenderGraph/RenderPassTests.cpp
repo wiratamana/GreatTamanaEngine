@@ -1,24 +1,12 @@
-// Unit tests for the Render Pass campaign's PHASE1
-// (task_manager/render-pass-1/PHASE1_RENDER_PASS_CORE_ABSTRACTION.md) new
-// chokepoint, RenderGraphBuilder::AddRenderPass() - a thin, lightweight
-// wrapper around the pre-existing AddPass()/AddComputePass() methods that
-// additionally stamps PassRecord::kind/category in one place. No live
-// VkDevice/Renderer/Registry involved at all - mirrors
-// RenderGraphBuilderTests.cpp's own Tier-1 style exactly.
+﻿// Unit tests for RenderGraphBuilder::AddRenderPass() - a thin wrapper around
+// AddPass()/AddComputePass() that additionally stamps PassRecord::kind/
+// category in one place. No live VkDevice/Renderer/Registry involved at all.
 //
-// editor-core-separation-25 campaign, PHASE3
-// (PHASE3_PASSRECORD_FIELD_MIGRATION_AND_SNAPSHOT_REWIRING.md) - a re-audit
-// of PassRecord::category/::drawKind/::tags direct readers found this file
-// asserting on `input.passes[0].category`/`.drawKind`/`.tags` directly -
-// PassRecord no longer stores any of the three (see RenderGraphTypes.h's
-// own PassRecord doc comment). Every such assertion below was rewritten to
-// install a small, test-local, dual-interface fake sink (mirroring
-// RenderGraphSnapshotTests.cpp's own FakeMetadataSink exactly) and check
-// what AddRenderPass() reported to IT instead - `kind`/`viewScope`/
-// `renderPassEvent` assertions (still real PassRecord fields, untouched by
-// this migration) are left completely unmodified.
+// Assertions on pass category/drawKind/tags go through a small, test-local,
+// dual-interface fake sink (mirroring RenderGraphSnapshotTests.cpp's own
+// FakeMetadataSink) rather than reading PassRecord fields directly, since
+// PassRecord itself no longer stores any of the three.
 
-#include "Features/Atmosphere/AtmosphereRenderPassTags.h"
 #include "Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "Renderer/RenderGraph/RenderGraphDebugMetadataSink.h"
 
@@ -27,11 +15,15 @@
 namespace gte::rg {
 namespace {
 
+// A domain-agnostic tag bit used purely as fixture data for tests below -
+// unrelated to any specific render feature.
+constexpr RenderPassTag kTestLutPassTag{ 1ull << 0 };
+
 void NoOpExecute(PassContext&) { }
 
-// editor-core-separation-25 campaign - a minimal, test-local, dual-interface
-// fake sink, mirroring RenderGraphSnapshotTests.cpp's own FakeMetadataSink
-// exactly (see that file for the full rationale).
+// A minimal, test-local, dual-interface fake sink, mirroring
+// RenderGraphSnapshotTests.cpp's own FakeMetadataSink exactly (see that file
+// for the full rationale).
 class FakeMetadataSink : public IPassDebugMetadataSink, public IPassDebugMetadataProvider {
 public:
     void OnPassDeclared(std::size_t declarationIndexThisFrame, RenderPassCategory category, RenderPassDrawKind drawKind,
@@ -120,7 +112,7 @@ TEST(RenderPassTest, AddRenderPassFourArgumentOverloadStampsViewScopeCategoryAnd
     builder.AddRenderPass(
         "AtmosphereSkyViewLutPass", PassKind::Compute, ViewScope::GameView, RenderPassCategory::General,
         [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute, RenderPassDrawKind::DrawMesh,
-        RenderPassEvent::Opaques, kAtmosphereLutPassTag.bit);
+        RenderPassEvent::Opaques, kTestLutPassTag.bit);
 
     const CompiledGraphInput input = builder.Finish();
     ASSERT_EQ(input.passes.size(), 1u);
@@ -131,7 +123,7 @@ TEST(RenderPassTest, AddRenderPassFourArgumentOverloadStampsViewScopeCategoryAnd
     PassDebugMetadata metadata;
     ASSERT_TRUE(sink.QueryPassDebugMetadata(0, metadata));
     EXPECT_EQ(metadata.category, RenderPassCategory::General);
-    EXPECT_EQ(metadata.tags, kAtmosphereLutPassTag.bit);
+    EXPECT_EQ(metadata.tags, kTestLutPassTag.bit);
 }
 
 TEST(RenderPassTest, AddRenderPassFourArgumentOverloadWorksForGraphicsKindToo)

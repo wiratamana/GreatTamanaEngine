@@ -4,59 +4,18 @@
 // gte::rg::RenderGraphSnapshot + FrameDebuggerCaptureContext, mirroring
 // tests/Renderer/RenderGraph/RenderGraphSnapshotTests.cpp's own "hand-built
 // snapshot in, real result out" precedent. Only built when GTE_ENABLE_EDITOR
-// is ON, since FrameDebuggerData.h/.cpp are only compiled into gte_core then
-// (see the root CMakeLists.txt's "Editor Module Structure") - the same
-// "zero-touch when off" rule already applied to
-// tests/Editor/FrameDebuggerDataTests.cpp/FrameDebuggerCaptureTests.cpp.
+// is ON, since FrameDebuggerData.h/.cpp are only compiled into gte_core then.
 //
-// task_manager/frame-debugger-3 campaign, PHASE2
-// (PHASE2_FRAME_DEBUGGER_SNAPSHOT_BUILDER.md).
-//
-// frame-debugger-5 campaign, PHASE2
-// (PHASE2_GENERIC_COMPUTE_DISPATCH_EVENT_TREE_DISCOVERY.md) - every test
-// below that used to feed BuildRealFrameDebuggerSnapshot() a caller-supplied
-// `gpuSkinningPassNamesThisFrame` name list (REMOVED - see
-// PHASE0_MASTER_STRATEGY.md's Locked Design Decision #2/#6) was rewritten to
-// instead mark the relevant RenderGraphPassSnapshot's own `kind`
-// flag (PHASE1) - discovery is now purely generic. The old, single, always-
-// after-"GameView" "GPU Skinning"/"AtmosphereAerialPerspectiveCompositePass"
-// special-cased tree shape is also gone, replaced by the SPLIT
-// "Compute Dispatches (Pre-GameView)"/"Compute Dispatches (Post-GameView)"
-// group pair (Locked Design Decision #8) - see each rewritten test's own
-// comment below for exactly what changed.
-//
-// Render Pass campaign (task_manager/render-pass-1), PHASE4
-// (PHASE4_FRAME_DEBUGGER_GENERIC_TREE_REWORK.md) - the old monolithic
-// "GameView" PASS was already split by PHASE2 of this campaign into
-// "RenderOpaque"/"DrawSkyBackground"/"RenderTransparent"; every fixture below
-// that used to name its pivot pass "GameView" now names it "RenderOpaque"
-// instead (the pivot lookup itself was retargeted - see
-// BuildRealFrameDebuggerSnapshot()'s own updated doc comment), every
-// "GameView"/"GameView (Entity Draw)" literal assertion is now
-// "RenderOpaque"/"RenderOpaque (Entity Draw)", and several NEW tests were
-// added covering the "Compute LUT" vs. "Compute Dispatches (Pre-GameView)"
-// category split (3.2), the new "DrawSkyBackground" leaf (3.3), the
-// `RenderTransparent`-never-appears-when-absent behavior (3.5), and the
-// Debug-category-pass exclusion regression this phase's own pre-check found
-// (3.3b) - see each test's own comment.
-//
-// Frame Debugger Pass-Ownership campaign (task_manager/render-pass-2),
-// PHASE3 (PHASE3_TEST_SUITE_MIGRATION_AND_DOCS_UPDATE.md) - PHASE2 turned
-// EVERY real pass leaf this file builds (except "RenderOpaque" itself, which
-// keeps its own untouched per-entity mechanism) into a real "v PassName"
-// parent OWNING exactly one real, independently-selectable child event row
-// (WrapPassWithOwnedChildEvent()) - every wrapped pass now consumes TWO
-// consecutive `nextEventIndex` values instead of one. This phase re-verified
-// all 31 pre-existing tests below against that new shape (updating the ones
-// that hardcoded an old flat shape/old eventIndex/totalEventCount number),
-// and added 4 new tests covering the fix itself (dual-selectability for both
-// a wrapped Graphics-kind AND a wrapped Compute-kind pass,
-// RenderPassDrawKind-driven child labeling including the Blit scaffold
-// value, and the Compute-LUT-sub-pass case) - see PHASE3_COMPLETION_REPORT.md
-// for the full, independently-re-verified per-test checklist.
+// Compute-dispatch discovery is purely generic, driven by each
+// RenderGraphPassSnapshot's own `kind` flag, and grouped into "Compute
+// Dispatches (Pre-GameView)"/"Compute Dispatches (Post-GameView)". Every
+// real pass leaf below (except "RenderOpaque" itself, which keeps its own
+// per-entity mechanism) is wrapped as a "v PassName" parent owning exactly
+// one real, independently-selectable child event row
+// (WrapPassWithOwnedChildEvent()) - each wrapped pass consumes TWO
+// consecutive `nextEventIndex` values instead of one.
 
 #include "Editor/FrameDebuggerData.h"
-#include "Features/Atmosphere/AtmosphereRenderPassTags.h"
 #include "Renderer/GpuSkinning/GpuSkinningRenderPassTags.h"
 #include "Renderer/RenderGraph/RenderPassGroupRegistry.h"
 
@@ -65,6 +24,10 @@
 namespace gte {
 namespace {
 
+// A domain-agnostic tag bit used purely as fixture data for tests below -
+// unrelated to any specific render feature.
+constexpr rg::RenderPassTag kTestLutPassTag{ 1ull << 0 };
+
 rg::RenderGraphPassSnapshot MakePass(const std::string& name)
 {
     rg::RenderGraphPassSnapshot pass;
@@ -72,25 +35,17 @@ rg::RenderGraphPassSnapshot MakePass(const std::string& name)
     return pass;
 }
 
-// frame-debugger-5 campaign, PHASE2 - a plain graphics pass with
-// kind == rg::PassKind::Compute, exactly as RenderGraphBuilder::AddComputePass()
-// (PHASE1) now stamps for every real compute dispatch in this engine.
-//
-// render-pass-3 campaign, PHASE4 - ALSO now defaults `renderPassEvent` to
-// `RenderPassEvent::PreOpaques`, mirroring how every REAL pre-view compute
-// pass in this engine is actually tagged in production (GpuSkinning/every
-// Atmosphere LUT pass - see PHASE0_MASTER_STRATEGY.md's own intended
-// RenderPassEvent mapping, and PHASE2/PHASE3's own completion reports
-// confirming those real passes carry exactly this value). This is required
-// for BuildRealFrameDebuggerSnapshot()'s new FindViewRegionPivot() lookup
-// (which finds the first pass whose renderPassEvent >= Opaques) to keep
-// treating every fixture's "RenderOpaque" pass (built via the plain,
-// unmodified MakePass() - default renderPassEvent is Opaques) as the pivot,
-// exactly like the OLD name-based FindPassByName(..., "RenderOpaque") always
-// did - without this, a synthetic pre-view compute pass built via this
-// helper would share "RenderOpaque"'s own default Opaques value and
-// incorrectly become the pivot itself purely by sitting earlier in the
-// fixture's own passesInExecutionOrder vector.
+// A plain graphics pass with kind == rg::PassKind::Compute and
+// renderPassEvent defaulted to PreOpaques, mirroring how every real pre-view
+// compute pass in this engine is actually tagged in production. Required so
+// BuildRealFrameDebuggerSnapshot()'s FindViewRegionPivot() lookup (which
+// finds the first pass whose renderPassEvent >= Opaques) keeps treating
+// every fixture's "RenderOpaque" pass (built via the plain, unmodified
+// MakePass() - default renderPassEvent is Opaques) as the pivot - without
+// this, a synthetic pre-view compute pass built via this helper would share
+// "RenderOpaque"'s own default Opaques value and incorrectly become the
+// pivot itself purely by sitting earlier in the fixture's own
+// passesInExecutionOrder vector.
 rg::RenderGraphPassSnapshot MakeComputePass(const std::string& name)
 {
     rg::RenderGraphPassSnapshot pass = MakePass(name);
@@ -243,26 +198,18 @@ TEST(FrameDebuggerSnapshotBuilderTest, RenderOpaqueWithNoComputePassesProducesEx
     EXPECT_EQ(leaf.details->zTest, "Less");
 }
 
-// REWRITTEN (was TwoPreGameViewComputePassesProduceOnePreGameViewGroup) -
-// Render Pass campaign, PHASE4 - this is now the "Compute LUT" vs. "Compute
-// Dispatches (Pre-GameView)" category-split regression test (Step 3.6's own
-// required "mixed" fixture): one AtmosphereLut-category pass ("SkyLutPass")
-// and one GpuSkinning-category pass ("SkinPass_A") in the SAME fixture,
-// declared in an order that DELIBERATELY puts the non-LUT pass BEFORE the
-// LUT pass in real execution order - proving the tree's PRESENTATION order
-// ("Compute LUT" always first) is a fixed rule, never tied to real
-// interleaved execution order.
-//
-// REWRITTEN AGAIN (Frame Debugger Pass-Ownership campaign,
-// task_manager/render-pass-2, PHASE3) - each wrapped compute pass now also
-// owns a real "Compute Dispatch" child event, consuming one extra
-// nextEventIndex value - totalEventCount and every eventIndex from
-// "SkyLutPass" onward shift accordingly; child-event assertions added for
-// both compute leaves.
+// "Compute LUT" vs. "Compute Dispatches (Pre-GameView)" category-split
+// regression test: one LUT-category pass ("SkyLutPass") and one
+// GpuSkinning-category pass ("SkinPass_A") in the SAME fixture, declared in
+// an order that DELIBERATELY puts the non-LUT pass BEFORE the LUT pass in
+// real execution order - proving the tree's PRESENTATION order ("Compute
+// LUT" always first) is a fixed rule, never tied to real interleaved
+// execution order. Each wrapped compute pass also owns a real
+// "Compute Dispatch" child event, consuming one extra nextEventIndex value.
 TEST(FrameDebuggerSnapshotBuilderTest, MixedComputeLutAndPreGameViewCategoriesProduceBothGroupsInFixedOrder)
 {
     rg::ResetPassGroupRegistryForTesting();
-    rg::RegisterPassGroupLabel(kAtmosphereLutPassTag, "Compute LUT");
+    rg::RegisterPassGroupLabel(kTestLutPassTag, "Compute LUT");
     rg::RenderGraphSnapshot graphSnapshot;
 
     rg::RenderGraphPassSnapshot bufferPass = MakeComputePass("SkinPass_A");
@@ -272,7 +219,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, MixedComputeLutAndPreGameViewCategoriesPr
     graphSnapshot.passesInExecutionOrder.push_back(bufferPass);
 
     rg::RenderGraphPassSnapshot lutPass = MakeComputePass("SkyLutPass");
-    lutPass.tags = kAtmosphereLutPassTag.bit;
+    lutPass.tags = kTestLutPassTag.bit;
     lutPass.writeNames.push_back("TransmittanceLut");
     lutPass.writeKinds.push_back(rg::ResourceKind::Texture);
     graphSnapshot.passesInExecutionOrder.push_back(lutPass);
@@ -320,22 +267,18 @@ TEST(FrameDebuggerSnapshotBuilderTest, MixedComputeLutAndPreGameViewCategoriesPr
     EXPECT_EQ(renderOpaqueLeaf.eventIndex, 4); // Sequential across the WHOLE tree.
 }
 
-// NEW - Render Pass campaign, PHASE4 - proves a pre-view compute pass tagged
-// ONLY AtmosphereLut produces ONLY the "Compute LUT" group, never an empty
-// "Compute Dispatches (Pre-GameView)" sibling.
-//
-// render-pass-2 campaign, PHASE3 - CONFIRMED UNCHANGED as written: only
-// checks root.children.size()/names, no index/count-on-wrapped-node
-// assertions. See ComputeLutSubPassAlsoOwnsAComputeDispatchChild (below) for
-// the new, dedicated test proving the wrapped-child fact for this exact
-// fixture shape.
+// Proves a pre-view compute pass tagged ONLY with the LUT category produces
+// ONLY the "Compute LUT" group, never an empty "Compute Dispatches
+// (Pre-GameView)" sibling. Only checks root.children.size()/names - see
+// ComputeLutSubPassAlsoOwnsAComputeDispatchChild (below) for the dedicated
+// test proving the wrapped-child fact for this exact fixture shape.
 TEST(FrameDebuggerSnapshotBuilderTest, OnlyAtmosphereLutCategoryPreGameViewPassProducesOnlyComputeLutGroup)
 {
     rg::ResetPassGroupRegistryForTesting();
-    rg::RegisterPassGroupLabel(kAtmosphereLutPassTag, "Compute LUT");
+    rg::RegisterPassGroupLabel(kTestLutPassTag, "Compute LUT");
     rg::RenderGraphSnapshot graphSnapshot;
     rg::RenderGraphPassSnapshot lutPass = MakeComputePass("AtmosphereTransmittanceLutPass");
-    lutPass.tags = kAtmosphereLutPassTag.bit;
+    lutPass.tags = kTestLutPassTag.bit;
     graphSnapshot.passesInExecutionOrder.push_back(lutPass);
     graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
@@ -1591,10 +1534,10 @@ TEST(FrameDebuggerSnapshotBuilderTest, GraphicsChildEventLabelMatchesRenderPassD
 TEST(FrameDebuggerSnapshotBuilderTest, ComputeLutSubPassAlsoOwnsAComputeDispatchChild)
 {
     rg::ResetPassGroupRegistryForTesting();
-    rg::RegisterPassGroupLabel(kAtmosphereLutPassTag, "Compute LUT");
+    rg::RegisterPassGroupLabel(kTestLutPassTag, "Compute LUT");
     rg::RenderGraphSnapshot graphSnapshot;
     rg::RenderGraphPassSnapshot lutPass = MakeComputePass("AtmosphereTransmittanceLutPass");
-    lutPass.tags = kAtmosphereLutPassTag.bit;
+    lutPass.tags = kTestLutPassTag.bit;
     graphSnapshot.passesInExecutionOrder.push_back(lutPass);
     graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
@@ -1611,19 +1554,12 @@ TEST(FrameDebuggerSnapshotBuilderTest, ComputeLutSubPassAlsoOwnsAComputeDispatch
     EXPECT_EQ(lutGroup.children[0].children[0].name, "Compute Dispatch");
 }
 
-// NEW - render-pass-7 campaign, PHASE4 (Core Campaign 1's own final proof) -
-// the literal, automated, permanent regression guard for the source
-// strategy document's own central claim (CORE_EXPANSION_STRATEGY_v2.md,
-// Section 1.1): "a future plugin... gets equivalent treatment" without
-// editing Core. Registers a synthetic, TEST-LOCAL-ONLY tag/heading pair that
-// has NO relationship to any real feature (a deliberately unused bit, well
-// clear of the two real production bits this campaign actually chose -
-// kAtmosphereLutPassTag = bit 0, kGpuSkinningDispatchPassTag = bit 1 - see
-// PHASE3_COMPLETION_REPORT.md), and confirms BuildRealFrameDebuggerSnapshot()
-// - whose own compiled code never once mentions this string, this tag, or
-// this test - still correctly buckets it purely from registry DATA. If this
-// test ever starts failing, the Core/Layer-2 boundary this whole campaign
-// exists to establish has regressed.
+// Registers a synthetic, TEST-LOCAL-ONLY tag/heading pair with no
+// relationship to any real feature (a deliberately unused bit, well clear
+// of kTestLutPassTag/kGpuSkinningDispatchPassTag), and confirms
+// BuildRealFrameDebuggerSnapshot() - whose own compiled code never once
+// mentions this string, this tag, or this test - still correctly buckets it
+// purely from registry DATA.
 TEST(FrameDebuggerSnapshotBuilderTest, ASyntheticThirdPartyTagAndHeadingGetsGroupedWithZeroProductionCodeAwareness)
 {
     rg::ResetPassGroupRegistryForTesting();

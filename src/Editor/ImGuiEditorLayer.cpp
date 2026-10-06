@@ -4,9 +4,7 @@
 
 #include "ArrayLayerRenderValidation.h"
 #include "../Core/Logging.h"
-#include "../Features/Atmosphere/Editor/AtmospherePluginPanelModule.h"
-#include "EditorLayerAtmosphereBinding.h"
-#include "../Features/Atmosphere/AtmosphereFeature.h"
+#include "BuiltinFeatureEditorPanelRegistry.h"
 #include "BlitValidation.h" // editor-core-separation-26 campaign, PHASE6.
 #include "ComputeBlurValidation.h"
 #include "DockLayout.h"
@@ -1040,24 +1038,21 @@ public:
         m_hotReloadDebugCapability = capability;
     }
 
-    // Plain setter, not part of IEditorLayer - called exactly once, from
-    // EditorHost's constructor, via BindAtmosphereFeatureForEditorLayer()
-    // (EditorLayerAtmosphereBinding.h), strictly AFTER every
-    // RegisterBuiltinPanelName() call. The early return (not a bare
-    // assert()) is the real re-entrancy guard - it runs in every build
-    // configuration, before the destructive unique_ptr reassignment below
-    // can destroy an already-registered module while EditorPanelRegistry
-    // still holds a raw pointer to it.
-    void SetAtmosphereFeature(AtmosphereFeature& feature, Renderer& renderer, const rg::RenderGraph& renderGraph)
+    // Looks up each module's own Editor panel factory (if any) in
+    // BuiltinFeatureEditorPanelRegistry and registers it exactly once -
+    // called by EditorHost right after BuiltinFeatureModuleRegistry::
+    // CreateAll() returns.
+    void AttachBuiltinFeatureModules(const std::vector<std::unique_ptr<IEngineFeatureModule>>& modules,
+        Renderer& renderer, const rg::RenderGraph& renderGraph) override
     {
-        if (m_atmospherePanelModule != nullptr) {
-            GTE_LOG_ERROR_BLOCKING("Atmosphere",
-                "SetAtmosphereFeature() called more than once for the same ImGuiEditorLayer instance - ignoring.");
-            assert(false && "SetAtmosphereFeature() must only ever be called once");
-            return;
+        for (const auto& module : modules) {
+            std::unique_ptr<IEditorPanelModule_v1> panel =
+                BuiltinFeatureEditorPanelRegistry::Instance().TryCreatePanel(*module, m_ctx, renderer, renderGraph);
+            if (panel != nullptr) {
+                EditorPanelRegistry::Instance().RegisterPluginPanel(panel->GetPanelName(), panel.get());
+                m_builtinFeaturePanelModules.push_back(std::move(panel));
+            }
         }
-        m_atmospherePanelModule = std::make_unique<AtmospherePluginPanelModule>(m_ctx, renderer, renderGraph, feature);
-        EditorPanelRegistry::Instance().RegisterPluginPanel("Atmosphere", m_atmospherePanelModule.get());
     }
     bool FrameDebuggerCaptureNow() override { return m_frameDebuggerPanel.CaptureNowFromCommand(); }
     void FrameDebuggerSelectEvent(int index) override { m_frameDebuggerPanel.SelectEventFromCommand(index); }
@@ -1342,11 +1337,10 @@ private:
     // exactly who reads/writes it.
     EditorContext m_ctx;
 
-    // Bound once, via SetAtmosphereFeature(), from EditorHost's constructor
-    // body - null only before that call ever runs. Owns the "Atmosphere"
-    // panel's own cross-frame validation-result state directly (see
-    // AtmospherePluginPanelModule).
-    std::unique_ptr<AtmospherePluginPanelModule> m_atmospherePanelModule;
+    // Owns every built-in feature module's own Editor panel, keyed by
+    // registration order via AttachBuiltinFeatureModules() above - never
+    // unregistered, lives for the rest of the process.
+    std::vector<std::unique_ptr<IEditorPanelModule_v1>> m_builtinFeaturePanelModules;
 };
 
 } // namespace
@@ -1368,17 +1362,6 @@ std::unique_ptr<IEditorLayer> CreateEditorLayer(Window& window, Renderer& render
     // constructors during this phase, not assumed.
     EditorGpuMemoryNameOverlay::Install(*renderer.GetMemoryTracker());
     return std::make_unique<ImGuiEditorLayer>(window, renderer);
-}
-
-// Requires a real ImGuiEditorLayer - NullEditorLayer has no Atmosphere panel
-// to bind to, and would fail this dynamic_cast loudly instead of corrupting
-// memory through an invalid static_cast.
-void BindAtmosphereFeatureForEditorLayer(IEditorLayer& layer, AtmosphereFeature& feature,
-    Renderer& renderer, const rg::RenderGraph& renderGraph)
-{
-    auto* const concrete = dynamic_cast<ImGuiEditorLayer*>(&layer);
-    assert(concrete != nullptr && "BindAtmosphereFeatureForEditorLayer() requires a real ImGuiEditorLayer");
-    concrete->SetAtmosphereFeature(feature, renderer, renderGraph);
 }
 
 } // namespace gte

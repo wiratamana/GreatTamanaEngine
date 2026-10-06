@@ -163,6 +163,12 @@ public:
         result.errorMessage = "GPU-driven test batch spawning is not available in this build (the Editor module is not compiled in)";
         return result;
     }
+
+    // A release/Player build has no Editor panels.
+    void AttachBuiltinFeatureModules(const std::vector<std::unique_ptr<IEngineFeatureModule>>& /*modules*/,
+        Renderer& /*renderer*/, const rg::RenderGraph& /*renderGraph*/) override
+    {
+    }
 };
 
 } // namespace

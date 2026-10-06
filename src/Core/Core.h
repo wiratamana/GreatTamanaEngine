@@ -640,6 +640,13 @@ public:
     // overwritten or allowed to coexist.
     bool RegisterFinalizeForSamplingHook(const char* name, FinalizeForSamplingCallback callback);
 
+    // Read-only lookup of the result RegisterFinalizeForSamplingHook()'s own
+    // callback for `name` last produced THIS frame (cached by BuildFrame() -
+    // never invokes the callback itself). Returns nullptr if `name` is not
+    // registered, or if that hook has not run yet this frame (e.g. neither
+    // Game nor Scene view rendered this frame at all).
+    RenderTexture* GetFinalizedTextureByName(const char* name) const noexcept;
+
 private:
     // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
     // PHASE5 - one eligible batch's own THIS-FRAME render data, ready for the
@@ -801,6 +808,11 @@ private:
     struct FinalizeForSamplingHookEntry {
         std::string name;
         FinalizeForSamplingCallback callback;
+        // This frame's cached result - reset to nullptr unconditionally at
+        // the top of BuildFrame(), written once the callback actually runs
+        // (if it runs at all this frame). GetFinalizedTextureByName() reads
+        // this directly; it never invokes the callback itself.
+        RenderTexture* lastResult = nullptr;
     };
     std::vector<FinalizeForSamplingHookEntry> m_finalizeForSamplingHooks;
 

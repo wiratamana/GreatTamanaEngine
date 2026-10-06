@@ -403,6 +403,11 @@ add_library(gte_core STATIC
     # .h/.cpp files outright - RenderFeatureCompositor is this interface's
     # one surviving implementor (Locked Conclusion D3, PHASE0_MASTER_STRATEGY.md).
     src/Core/Plugins/IPluginCapabilityOrchestrator.h
+    # Generic registry of built-in (same-binary) feature modules - lets a
+    # built-in feature self-register without Core ever naming it by type.
+    src/Core/Plugins/IEngineFeatureModule.h
+    src/Core/Plugins/BuiltinFeatureModuleRegistry.h
+    src/Core/Plugins/BuiltinFeatureModuleRegistry.cpp
     # editor-core-separation-6 campaign, PHASE4
     # (PHASE4_RENDER_FEATURE_COMPOSITOR_CORE_AND_ORDERING.md) - the third
     # real IPluginCapabilityOrchestrator implementation, the real `_v2`
@@ -735,26 +740,6 @@ add_library(gte_core STATIC
     src/Renderer/IndirectDrawTypes.h
     src/Renderer/VolumetricFroxelMath.h
     src/Renderer/VolumetricFroxelMath.cpp
-    # src/Features/Atmosphere/ - the self-contained Atmosphere feature module.
-    src/Features/Atmosphere/AtmosphereTypes.h
-    src/Features/Atmosphere/AtmosphereParameters.h
-    src/Features/Atmosphere/AtmosphereParameters.cpp
-    src/Features/Atmosphere/AtmosphereMath.h
-    src/Features/Atmosphere/AtmosphereMath.cpp
-    src/Features/Atmosphere/AtmosphereAerialPerspectiveCompositeMath.h
-    src/Features/Atmosphere/AtmosphereAerialPerspectiveCompositeMath.cpp
-    src/Features/Atmosphere/DirectionalLightResolver.h
-    src/Features/Atmosphere/DirectionalLightResolver.cpp
-    src/Features/Atmosphere/AtmosphereLutRenderer.h
-    src/Features/Atmosphere/AtmosphereLutRenderer.cpp
-    src/Features/Atmosphere/AtmosphereSkyBackgroundRenderer.h
-    src/Features/Atmosphere/AtmosphereSkyBackgroundRenderer.cpp
-    src/Features/Atmosphere/AtmospherePassToggleLogic.h
-    src/Features/Atmosphere/AtmosphereRenderPassTags.h
-    src/Features/Atmosphere/AtmospherePassSequence.h
-    src/Features/Atmosphere/AtmospherePassSequence.cpp
-    src/Features/Atmosphere/AtmosphereFeature.h
-    src/Features/Atmosphere/AtmosphereFeature.cpp
     src/Renderer/Primitives/PrimitiveMeshGenerator.cpp
     src/Renderer/Primitives/PrimitiveMeshGenerator.h
     src/Renderer/Memory/GpuResourceHandle.h
@@ -909,6 +894,16 @@ add_library(gte_core STATIC
     src/Encoding/HdrColorVisualization.cpp
 )
 
+# Atmosphere feature module - DELIBERATE, SCOPED EXCEPTION to this file's
+# otherwise-universal "hand-maintained list, not a glob" rule - required so
+# deleting src/Features/Atmosphere/ needs zero edit here. Keep this scoped to
+# this one feature folder; do not switch to a repo-wide blanket glob.
+file(GLOB GTE_FEATURE_ATMOSPHERE_CORE_SOURCES
+     CONFIGURE_DEPENDS
+     "${CMAKE_SOURCE_DIR}/src/Features/Atmosphere/*.h"
+     "${CMAKE_SOURCE_DIR}/src/Features/Atmosphere/*.cpp")
+target_sources(gte_core PRIVATE ${GTE_FEATURE_ATMOSPHERE_CORE_SOURCES})
+
 # better-render-pass-2 campaign, PHASE4 (PHASE4_DELETE_PLUGINS_FOLDER_AND_CMAKE.md) -
 # GTE_PLUGIN_RUNTIME_OUTPUT_DIR (the <exe dir>/plugins/ runtime folder every
 # built plugin .dll used to be copied into, editor-core-separation-3
@@ -1008,7 +1003,8 @@ add_library(gte_editor STATIC
     src/Editor/EditorHostServices.cpp
     src/Editor/EditorHost.h
     src/Editor/EditorHost.cpp
-    src/Editor/EditorLayerAtmosphereBinding.h
+    src/Editor/BuiltinFeatureEditorPanelRegistry.h
+    src/Editor/BuiltinFeatureEditorPanelRegistry.cpp
     src/Editor/EditorContext.h
     src/Editor/ProjectRootPath.h
     src/Editor/ProjectRootPath.cpp
@@ -1104,16 +1100,6 @@ add_library(gte_editor STATIC
     src/Editor/GpuDrivenBatchTestSpawner.cpp
     src/Editor/GpuSkinningValidation.h
     src/Editor/GpuSkinningValidation.cpp
-    src/Features/Atmosphere/Editor/AtmosphereTransmittanceLutValidation.h
-    src/Features/Atmosphere/Editor/AtmosphereTransmittanceLutValidation.cpp
-    src/Features/Atmosphere/Editor/AtmosphereAerialPerspectiveLutInspection.h
-    src/Features/Atmosphere/Editor/AtmosphereAerialPerspectiveLutInspection.cpp
-    src/Features/Atmosphere/Editor/AtmosphereAerialPerspectiveSkyPurityValidation.h
-    src/Features/Atmosphere/Editor/AtmosphereAerialPerspectiveSkyPurityValidation.cpp
-    src/Features/Atmosphere/Editor/AtmospherePanel.h
-    src/Features/Atmosphere/Editor/AtmospherePanel.cpp
-    src/Features/Atmosphere/Editor/AtmospherePluginPanelModule.h
-    src/Features/Atmosphere/Editor/AtmospherePluginPanelModule.cpp
     src/Editor/TransformGizmo.h
     src/Editor/TransformGizmo.cpp
     src/Editor/DockLayout.h
@@ -1231,6 +1217,14 @@ add_library(gte_editor STATIC
     src/Editor/Plugins/PluginPanelDrawContextAdapter.cpp
     src/Editor/ImGuiEditorLayer.cpp
 )
+
+# Atmosphere feature module's Editor-tier half - DELIBERATE, SCOPED
+# EXCEPTION, see the matching gte_core glob above for the full reasoning.
+file(GLOB GTE_FEATURE_ATMOSPHERE_EDITOR_SOURCES
+     CONFIGURE_DEPENDS
+     "${CMAKE_SOURCE_DIR}/src/Features/Atmosphere/Editor/*.h"
+     "${CMAKE_SOURCE_DIR}/src/Features/Atmosphere/Editor/*.cpp")
+target_sources(gte_editor PRIVATE ${GTE_FEATURE_ATMOSPHERE_EDITOR_SOURCES})
 
 # The "Project" panel (see GTE_ENABLE_PROJECT_PANEL above) is independently
 # toggleable even within the always-built Editor library - only
@@ -1454,43 +1448,24 @@ add_executable(GreatTamanaEditor src/main.cpp)
 # alone, no gte_editor involved at all).
 target_link_libraries(GreatTamanaEditor PRIVATE gte_editor)
 
-# better-render-pass-3 campaign, BLOCK1 PHASE4
-# (PHASE4_SMOKE_TEST_AND_FULL_REGRESSION.md) - LIVE, CONFIRMED ROOT-CAUSE FIX,
-# found and fixed in THIS phase (not merely theorized): a GNU ld static
-# archive (gte_core.a) only extracts an object file (.o) from the archive if
-# something ALREADY linked has an unresolved reference into it. A brand-new,
-# self-contained translation unit whose ONLY public entry point
-# (gte::DrawScene, src/Game/SceneQuery.cpp, this same Block's PHASE2) is never
-# called from ANYWHERE inside gte_core/gte_editor/GreatTamanaEditor's own
-# main.cpp is therefore genuinely never linked into the final
-# GreatTamanaEditor.exe binary at all, regardless of the
-# "--export-all-symbols" flag below (you cannot export a symbol that was
-# never linked into the binary in the first place). Confirmed live: linking
-# Projects/SceneQueryProbe/'s own _Game.dll against GreatTamanaEditor.exe's
-# import library failed with "undefined reference to gte::DrawScene(...)"
-# until this fix was added. This undermines this engine's own documented
-# "a Project Assembly .dll resolves its unresolved gte_core/gte_editor
-# references straight back into this ALREADY-RUNNING image" promise
-# (editor-core-separation-11 campaign, LDD2, see the comment block
-# immediately below) for ANY currently-internally-unused gte_core symbol, not
-# only gte::DrawScene - so the fix is applied generically (wrap the WHOLE
-# gte_core static archive), not as a narrow, symbol-specific patch. GNU ld's
-# --whole-archive forces EVERY object file inside gte_core.a to be linked
-# into GreatTamanaEditor.exe unconditionally, so every public gte_core symbol
-# - used internally or not - is genuinely present in the final binary and
-# therefore exportable by --export-all-symbols below. Scoped to gte_core only
-# (not gte_editor) since that is where this Block's own new code
-# (SceneQuery.cpp) lives and where the confirmed failure was reproduced;
-# gte_editor has no known "orphan" translation unit reachable only from a
-# Project Assembly today. CMake still separately propagates gte_core as a
+# A GNU ld static archive only extracts an object file (.o) from the
+# archive if something ALREADY linked has an unresolved reference into it -
+# a self-registering translation unit whose only side effect is a static
+# initializer (e.g. a feature module or Editor panel registering itself
+# into a generic registry) is never referenced by name from anywhere else,
+# so without this flag its object file is silently dropped from the final
+# link and its self-registration never runs. --whole-archive forces EVERY
+# object file inside an archive to be linked unconditionally - applied to
+# BOTH gte_core.a and gte_editor.a, since each now hosts this kind of
+# self-registering module. CMake still separately propagates gte_core as a
 # normal (non-whole-archive) dependency of gte_editor's own PUBLIC link
-# requirement - this is harmless and produces no duplicate-symbol error: by
-# the time that second, ordinary mention of gte_core.a is processed, every
-# one of its symbols is already resolved by the explicit --whole-archive pass
-# below, so GNU ld's normal archive scan finds nothing left to extract from
-# it.
+# requirement - harmless and produces no duplicate-symbol error: by the
+# time that second, ordinary mention of gte_core.a is processed, every one
+# of its symbols is already resolved by the explicit --whole-archive pass
+# below, so GNU ld's normal archive scan finds nothing left to extract
+# from it.
 target_link_options(GreatTamanaEditor PRIVATE
-    "-Wl,--whole-archive" "$<TARGET_FILE:gte_core>" "-Wl,--no-whole-archive")
+    "-Wl,--whole-archive" "$<TARGET_FILE:gte_core>" "$<TARGET_FILE:gte_editor>" "-Wl,--no-whole-archive")
 
 # editor-core-separation-11 campaign (Project Assembly system), PHASE3 - the
 # Locked Architecture Decision (LDD2, PHASE0_MASTER_STRATEGY.md): makes this

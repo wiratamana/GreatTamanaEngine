@@ -1,9 +1,6 @@
-// Unit tests for the Atmosphere Scattering + Aerial Perspective campaign's
-// Phase 8 DirectionalLight resolution helper
-// (src/Renderer/Atmosphere/DirectionalLightResolver.h/.cpp) - mirrors
-// tests/Game/RenderSystemTests.cpp's own
-// ResolveActiveCameraViewProjection() tests exactly: a Registry-only test,
-// no Renderer/GPU/live Vulkan device involved at all.
+// Unit tests for the active-DirectionalLight resolution helper
+// (src/Features/Atmosphere/DirectionalLightResolver.h/.cpp) - a Registry-only
+// test, no Renderer/GPU/live Vulkan device involved at all.
 
 #include "Features/Atmosphere/DirectionalLightResolver.h"
 
@@ -44,11 +41,10 @@ TEST(DirectionalLightResolverTest, SkipsInactiveLightAndFallsBackToPlaceholder)
     EXPECT_TRUE(ApproximatelyEqual(resolved.directionTowardSun, expectedDirection));
 }
 
-// A non-trivial rotation regression check (per this phase's own strategy
-// document's explicit instruction) - a DirectionalLight entity whose
-// Transform is rotated 90 degrees around the world Y (yaw) axis faces
-// +X instead of the default +Z, so the direction TOWARD the sun must be
-// the negation of +X, i.e. -X.
+// A non-trivial rotation check - a DirectionalLight entity whose Transform
+// is rotated 90 degrees around the world Y (yaw) axis faces +X instead of
+// the default +Z, so the direction TOWARD the sun must be the negation of
+// +X, i.e. -X.
 TEST(DirectionalLightResolverTest, ResolvesDirectionAsNegationOfEntityForwardForNonTrivialRotation)
 {
     Registry registry;

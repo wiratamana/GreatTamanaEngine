@@ -1,16 +1,10 @@
-// Unit tests for the atmosphere-scattering-2 campaign's Phase 5 aggregation
-// helpers (src/Editor/AtmosphereAerialPerspectiveLutInspection.h/.cpp) - see
-// task_manager/atmosphere-scattering-2/PHASE5_AERIAL_LUT_NUMERIC_VALIDATION_TOOL.md,
-// Step 3.1. Only actually compiled/linked when GTE_ENABLE_EDITOR is ON, since
-// this file itself is only ever compiled into gte_core then (see the root
-// CMakeLists.txt's "Editor Module Structure") - see tests/CMakeLists.txt.
-//
+// Unit tests for the Aerial Perspective LUT inspection aggregation helpers
+// (src/Features/Atmosphere/Editor/AtmosphereAerialPerspectiveLutInspection.h/.cpp).
 // No Vulkan/Renderer/live GPU device involved at all -
 // AccumulateAerialPerspectiveSliceStats()/FinalizeAerialPerspectiveLutInspection()
 // are pure functions over plain byte buffers/structs (the GPU-touching
 // orchestration function, InspectAerialPerspectiveVolume(), is Tier-2 and has
-// no automated test here, mirroring AtmosphereTransmittanceLutValidation's
-// own accepted precedent).
+// no automated test here).
 
 #include "Features/Atmosphere/Editor/AtmosphereAerialPerspectiveLutInspection.h"
 
@@ -204,10 +198,7 @@ TEST(AtmosphereAerialPerspectiveLutInspectionTest, DiagnosticStringReportsDimens
     EXPECT_NE(text.find("128x128x32"), std::string::npos);
 }
 
-// ---------------------------------------------------------------------
-// FinalizeAerialPerspectiveBandSummary (atmosphere-scattering-3 campaign,
-// Phase 1 - see task_manager/atmosphere-scattering-3/
-// PHASE1_ROOT_CAUSE_INSTRUMENTATION_AND_REGRESSION_TESTS.md, Step 3.3)
+// --- FinalizeAerialPerspectiveBandSummary -----------------------------
 // ---------------------------------------------------------------------
 
 TEST(AtmosphereAerialPerspectiveLutInspectionTest, BandSummaryReductionMatchesHandComputedMean)

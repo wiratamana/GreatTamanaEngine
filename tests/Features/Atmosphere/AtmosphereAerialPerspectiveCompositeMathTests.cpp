@@ -1,9 +1,7 @@
-// Unit tests for the atmosphere-scattering-4 campaign's Phase 1 CPU oracle
-// (src/Renderer/Atmosphere/AtmosphereAerialPerspectiveCompositeMath.h/.cpp) -
-// see task_manager/atmosphere-scattering-4/
-// PHASE1_COMPOSITE_DECISION_CPU_ORACLE_AND_TESTS.md, Step 3.4. No Vulkan/
-// Renderer/live GPU device involved at all - every function under test is
-// pure, taking/returning only plain float/Vec3 values.
+// Unit tests for the Aerial Perspective Composite pass's CPU oracle
+// (src/Features/Atmosphere/AtmosphereAerialPerspectiveCompositeMath.h/.cpp).
+// No Vulkan/Renderer/live GPU device involved at all - every function under
+// test is pure, taking/returning only plain float/Vec3 values.
 
 #include "Features/Atmosphere/AtmosphereAerialPerspectiveCompositeMath.h"
 
@@ -93,11 +91,10 @@ TEST(ComputeAerialPerspectiveCompositeColorTest, PartialStrengthInterpolatesLine
     EXPECT_NEAR(result.z, 0.775f, 1e-5f);
 }
 
-// --- atmosphere-scattering-4 Phase 4: widened regression coverage ----------
-// (task_manager/atmosphere-scattering-4/PHASE4_REGRESSION_SAFETY_DOCS_AND_FULL_BUILD.md,
-// Step 3.1) - locks in that the UNCHANGED, real-opaque-geometry side of the
-// branch stays depth-independent and correctly blended, and broadens the
-// bypass-threshold boundary sweep beyond Phase 1's original 4 cases.
+// --- Widened regression coverage -------------------------------------------
+// Locks in that the real-opaque-geometry side of the branch stays
+// depth-independent and correctly blended, and broadens the bypass-threshold
+// boundary sweep.
 
 TEST(ComputeAerialPerspectiveCompositeColorTest, NeverBypassesForAnyDepthStrictlyBelowThreshold)
 {

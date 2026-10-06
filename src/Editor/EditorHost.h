@@ -10,8 +10,6 @@
 #include "EditorLayer.h"
 #include "../Game/Game.h"
 #include "../Network/NetworkServer.h"
-#include "../Features/Atmosphere/AtmosphereFeature.h"
-#include "EditorLayerAtmosphereBinding.h"
 #include "../Renderer/Renderer.h"
 #include "../Renderer/RenderGraph/RenderGraph.h"
 #include "../Renderer/VolumeTexturePreviewRenderer.h"
@@ -38,6 +36,8 @@
 #include "FrameDebuggerPassMetadataRecorder.h"
 
 namespace gte {
+
+class IEngineFeatureModule;
 
 // editor-core-separation-1 campaign, PHASE15
 // (PHASE15_EDITORHOST_COMPOSITION_ROOT_CORE_CONSTRUCTION.md) - the new
@@ -123,13 +123,11 @@ private:
 
     // DECLARATION ORDER IS LOAD-BEARING: must stay strictly after m_core
     // (needs a live Core&) and strictly before m_editorLayer (which touches
-    // this feature's live state every frame) - destruction runs in reverse
-    // declaration order, so this guarantees AtmosphereFeature's own GPU
-    // resources are torn down before Core's Renderer/Vulkan device, and
-    // before m_editorLayer is gone. Re-run the "no cached GPU-visible handle
-    // anywhere in ImGuiEditorLayer's destructor/any panel" audit before ever
-    // moving this declaration.
-    std::unique_ptr<AtmosphereFeature> m_atmosphereFeature;
+    // every module's live state every frame) - destruction runs in reverse
+    // declaration order, so every module's GPU resources are torn down
+    // before Core's Renderer/Vulkan device, and before m_editorLayer is
+    // gone.
+    std::vector<std::unique_ptr<IEngineFeatureModule>> m_builtinFeatureModules;
 
     // editor-core-separation-1 campaign, PHASE16 - REFERENCE members bound
     // to m_core's own real, owned instances, mirroring

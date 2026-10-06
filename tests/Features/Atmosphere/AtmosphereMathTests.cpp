@@ -1,11 +1,8 @@
-// Unit tests for the Atmosphere Scattering + Aerial Perspective campaign's
-// Phase 1 CPU oracle (src/Renderer/Atmosphere/AtmosphereMath.h/.cpp,
-// AtmosphereParameters.h/.cpp) - see
-// task_manager/atmosphere-scattering-1/
-// ATMOSPHERE_PHASE1_REFERENCE_ANALYSIS_AND_PHYSICAL_MODEL_FOUNDATIONS_v1.md,
-// Step 3.5. No Vulkan/Renderer/live GPU device involved at all - every
-// function under test is pure, taking/returning only plain
-// AtmosphereParametersGpu/Vec3/float values.
+// Unit tests for the Atmosphere feature's CPU math oracle
+// (src/Features/Atmosphere/AtmosphereMath.h/.cpp, AtmosphereParameters.h/.cpp).
+// No Vulkan/Renderer/live GPU device involved at all - every function under
+// test is pure, taking/returning only plain AtmosphereParametersGpu/Vec3/
+// float values.
 
 #include "Features/Atmosphere/AtmosphereMath.h"
 #include "Features/Atmosphere/AtmosphereParameters.h"
@@ -300,13 +297,40 @@ TEST(AtmosphereMathTest, TransmittanceLutUvToHeightZenithMapsVOneToUpDotOne)
     EXPECT_NEAR(upDot, 1.0f, 1e-6f);
 }
 
+// --- ReciprocalScaleHeightFromKm() ------------------------------------------
+
+TEST(AtmosphereMathTest, ReciprocalScaleHeightFromKmComputesExactReciprocalForNormalValue)
+{
+    EXPECT_NEAR(ReciprocalScaleHeightFromKm(8.0f), 1.0f / 8.0f, 1e-6f);
+}
+
+TEST(AtmosphereMathTest, ReciprocalScaleHeightFromKmAtExactlyTheMinimum)
+{
+    EXPECT_NEAR(ReciprocalScaleHeightFromKm(kMinScaleHeightKm), 1.0f / kMinScaleHeightKm, 1e-3f);
+}
+
+TEST(AtmosphereMathTest, ReciprocalScaleHeightFromKmClampsBelowTheMinimum)
+{
+    const float result = ReciprocalScaleHeightFromKm(0.0001f);
+    EXPECT_NEAR(result, 1.0f / kMinScaleHeightKm, 1e-3f);
+    EXPECT_FALSE(std::isnan(result));
+    EXPECT_FALSE(std::isinf(result));
+}
+
+TEST(AtmosphereMathTest, ReciprocalScaleHeightFromKmClampsNegativeValue)
+{
+    const float result = ReciprocalScaleHeightFromKm(-5.0f);
+    EXPECT_NEAR(result, 1.0f / kMinScaleHeightKm, 1e-3f);
+    EXPECT_FALSE(std::isnan(result));
+    EXPECT_FALSE(std::isinf(result));
+}
+
 // --- AtmosphereParameters.h -------------------------------------------------
 
 TEST(AtmosphereParametersTest, DefaultEarthParametersMatchTheCitedReferenceValues)
 {
-    // Spot-check a handful of fields directly against
-    // task_manager/atmosphere-scattering-1/ATMOSPHERE_REFERENCE_NOTES.md's
-    // own citation table (transcribed from _reference/pl-sky/src/app.c).
+    // Spot-check a handful of fields directly against the reference values
+    // transcribed from _reference/pl-sky/src/app.c.
     const AtmosphereParametersGpu params = MakeDefaultEarthAtmosphereParameters();
 
     EXPECT_FLOAT_EQ(params.planetRadiusKm, 6371.0f);

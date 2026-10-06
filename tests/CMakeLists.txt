@@ -2161,6 +2161,10 @@ set(GTE_TEST_SOURCES
     # additions. Unconditional, since src/Core/Plugins/ProjectAssemblyHost.h/.cpp
     # is unconditionally in gte_core's own source list.
     Core/Plugins/ProjectAssemblyHostTests.cpp
+    # Permanent presence check for BuiltinFeatureModuleRegistry's static
+    # self-registration mechanism - Tier-2 (real, headless GPU, needs a real
+    # Core, see tests/Fakes/HeadlessSurfaceProvider.h).
+    Core/Plugins/BuiltinFeatureModuleRegistryPresenceTests.cpp
     # editor-core-separation-13 campaign, PHASE4 - Tier-1 tests for the new
     # ProjectAssemblyBuildRunner::BackupProjectAssemblyBinaries()/
     # RestoreProjectAssemblyBinariesFromBackup()/
@@ -2346,10 +2350,6 @@ set(GTE_TEST_SOURCES
     Renderer/RenderTextureColorlessTests.cpp
     Renderer/GpuSkinning/GpuSkinningTypesTests.cpp
     Renderer/Culling/CullingTypesTests.cpp
-    Renderer/Atmosphere/AtmosphereMathTests.cpp
-    Renderer/Atmosphere/AtmosphereAerialPerspectiveCompositeMathTests.cpp
-    Renderer/Atmosphere/DirectionalLightResolverTests.cpp
-    Renderer/Atmosphere/AtmospherePassToggleLogicTests.cpp
     Renderer/VolumetricFroxelMathTests.cpp
     Renderer/RenderGraph/RenderGraphTypesTests.cpp
     Renderer/RenderGraph/RenderGraphBuilderTests.cpp
@@ -2564,7 +2564,6 @@ if(TRUE)
         Editor/FrameDebuggerHistoryTests.cpp
         Editor/FrameDebuggerSnapshotBuilderTests.cpp
         Editor/FrameDebuggerPreviewProcessingTests.cpp
-        Editor/AtmosphereAerialPerspectiveLutInspectionTests.cpp
         # editor-core-separation-7 campaign, PHASE3 - gte_editor-tier "Export
         # DOT" pure functions (src/Editor/RenderGraphDotExport.h/.cpp).
         Editor/RenderGraphDotExportTests.cpp
@@ -2648,6 +2647,21 @@ endif()
 
 add_executable(GreatTamanaEngineTests ${GTE_TEST_SOURCES})
 
+# Atmosphere feature module's own test files - DELIBERATE, SCOPED EXCEPTION,
+# mirroring the matching production-source globs in the root CMakeLists.txt.
+# A file(GLOB ...) over a folder that does not exist on disk simply returns
+# an empty list, so deleting src/Features/Atmosphere/ (and this mirrored
+# test tree) needs zero edit here.
+file(GLOB GTE_FEATURE_ATMOSPHERE_TEST_SOURCES
+     CONFIGURE_DEPENDS
+     "${CMAKE_SOURCE_DIR}/tests/Features/Atmosphere/*.cpp")
+file(GLOB GTE_FEATURE_ATMOSPHERE_EDITOR_TEST_SOURCES
+     CONFIGURE_DEPENDS
+     "${CMAKE_SOURCE_DIR}/tests/Features/Atmosphere/Editor/*.cpp")
+target_sources(GreatTamanaEngineTests PRIVATE
+    ${GTE_FEATURE_ATMOSPHERE_TEST_SOURCES}
+    ${GTE_FEATURE_ATMOSPHERE_EDITOR_TEST_SOURCES})
+
 # task_manager/better-render-pass-1 campaign, PHASE1
 # (PHASE1_SPIRV_REFLECT_DEPENDENCY_AND_SHADER_REFLECTION_CORE.md) -
 # Renderer/Vulkan/ShaderReflectionTests.cpp asserts gte::ReflectComputeShader()
@@ -2720,6 +2734,18 @@ target_link_libraries(GreatTamanaEngineTests PRIVATE
     GTest::gtest
     GTest::gtest_main
 )
+
+# A self-registering translation unit whose only side effect is a static
+# initializer (e.g. a built-in feature module registering itself into
+# BuiltinFeatureModuleRegistry) is never referenced by name from anywhere
+# else in the link - a GNU ld static archive only extracts an object file
+# if something already linked has an unresolved reference into it, so
+# without this flag that object file is silently dropped from this test
+# binary and Core/Plugins/BuiltinFeatureModuleRegistryPresenceTests.cpp
+# would wrongly observe an empty registry. Mirrors the identical fix on
+# GreatTamanaEditor's own target_link_options() (root CMakeLists.txt).
+target_link_options(GreatTamanaEngineTests PRIVATE
+    "-Wl,--whole-archive" "$<TARGET_FILE:gte_core>" "$<TARGET_FILE:gte_editor>" "-Wl,--no-whole-archive")
 
 # Editor/ImGuiMemoryTrackerTests.cpp (above) includes <imgui.h> directly -
 # gte_editor links imgui PRIVATE (see the root CMakeLists.txt), so that
