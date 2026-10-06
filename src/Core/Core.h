@@ -435,34 +435,21 @@ public:
     bool AddPostTransparentPass(const char* debugName, ProjectScenePassCallback callback, std::int32_t priority = 0);
     void RemovePostTransparentPass(const char* debugName);
 
-    // better-render-pass-3 campaign, BLOCK 2 (Arbitrary Render Views) -
-    // thin pass-throughs into m_renderViewRegistry (below). Mints (or
-    // returns the already-existing) persistent, named render view -
-    // mirrors RegisterProjectRenderPassProvider()'s own "thin wrapper +
-    // orchestrator member" shape exactly, but is NOT itself a pass
-    // registration: it only hands back an identity + a target. The pass
-    // that WRITES into the returned target must still be registered
-    // separately, via RegisterProjectRenderPassProvider() above - NEVER
-    // AddScreenPostProcessPass() below, whose callback signature carries
-    // no RenderPassFrameContext and therefore cannot perform the
-    // mandatory `frame.finalTextureOutputs.push_back(handle)` root-set
-    // push a brand-new view's writer pass needs (see
-    // RenderPipeline.h's own finalTextureOutputs doc comment, and
-    // RenderGraphCompiler::Compile()'s backward-reachability culling -
-    // skipping this push means the pass silently never executes, with
-    // no crash, no log, nothing visibly wrong). `depthOnly` (default
-    // false) translates to RenderViewDesc{ hasColor = !depthOnly,
-    // hasDepth = true } - a depth-only view always keeps its depth half
-    // and never allocates a color image (see RenderTexture's own
-    // createColorImage constructor parameter). `name` has no lifetime
-    // requirement of its own here - RenderViewRegistry copies it into
-    // its own std::string key immediately - but the SEPARATE name string
-    // later passed to RenderGraphBuilder::ImportTexture() every frame (to
-    // import this view's target) DOES need static/stable storage
-    // duration; see RenderViewRegistry.h's own doc comments for the full
-    // reasoning.
+    // Mints (or returns the already-existing) persistent, named render
+    // view, owned by m_renderViewRegistry. The pass that WRITES into the
+    // returned target must still be registered separately, via
+    // RegisterProjectRenderPassProvider() above - NEVER
+    // AddScreenPostProcessPass() below (its callback signature cannot
+    // perform the mandatory root-set push a new view's writer pass needs).
+    //
+    // depthOnly=true => no color image, depth target only.
+    // allowDepthSampledAccess=true also opts the depth image into
+    // VK_IMAGE_USAGE_SAMPLED_BIT + a real sampler, so a later pass can read
+    // it back as a texture. Refused when the view has no depth at all (see
+    // RenderViewRegistry::CreateOrGetView()). Existing 3/4-arg call sites
+    // keep compiling unchanged.
     rg::RenderViewId CreateRenderView(const char* name, std::uint32_t width, std::uint32_t height,
-        bool depthOnly = false);
+        bool depthOnly = false, bool allowDepthSampledAccess = false);
     RenderTexture* FindRenderViewTarget(rg::RenderViewId view) const noexcept;
 
     // better-render-pass-1 campaign, PHASE9 (Decision D3) - additive

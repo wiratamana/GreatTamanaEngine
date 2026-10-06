@@ -371,22 +371,22 @@ void Core::UnregisterProjectRenderPassProvider(const char* debugName)
     m_offscreenRenderPipeline.Unregister(debugName);
 }
 
-// better-render-pass-3 campaign, BLOCK 2 (Arbitrary Render Views) - thin
-// pass-throughs into m_renderViewRegistry. `depthOnly` (default false)
+// Thin pass-throughs into m_renderViewRegistry. `depthOnly` (default false)
 // translates to RenderViewDesc{ hasColor = !depthOnly, hasDepth = true } -
 // a depth-only view always keeps its depth half and never allocates a
-// color image (RenderTexture's own createColorImage constructor
-// parameter, PHASE1). See Core.h's own doc comment on
+// color image. See Core.h's own doc comment on
 // CreateRenderView()/FindRenderViewTarget() for the full "why
 // RegisterProjectRenderPassProvider(), never AddScreenPostProcessPass()"
 // reasoning the writer pass itself must follow.
-rg::RenderViewId Core::CreateRenderView(const char* name, std::uint32_t width, std::uint32_t height, bool depthOnly)
+rg::RenderViewId Core::CreateRenderView(const char* name, std::uint32_t width, std::uint32_t height,
+    bool depthOnly, bool allowDepthSampledAccess)
 {
     RenderViewDesc desc;
     desc.width = width;
     desc.height = height;
     desc.hasColor = !depthOnly;
     desc.hasDepth = true;
+    desc.allowDepthSampledAccess = allowDepthSampledAccess;
     return m_renderViewRegistry.CreateOrGetView(name, desc);
 }
 

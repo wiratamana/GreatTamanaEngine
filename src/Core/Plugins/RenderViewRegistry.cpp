@@ -13,6 +13,9 @@ bool DescsMatchForSameName(const RenderViewDesc& a, const RenderViewDesc& b) noe
     if (a.width != b.width || a.height != b.height || a.hasColor != b.hasColor || a.hasDepth != b.hasDepth) {
         return false;
     }
+    if (a.hasDepth && a.allowDepthSampledAccess != b.allowDepthSampledAccess) {
+        return false;
+    }
     if (!a.hasColor) {
         return true; // colorFormat is meaningless for either side - never compared.
     }
@@ -39,6 +42,9 @@ RenderViewRegistry::RenderViewRegistry(Renderer& renderer) noexcept
 
 rg::RenderViewId RenderViewRegistry::CreateOrGetView(const char* name, const RenderViewDesc& desc)
 {
+    assert(std::this_thread::get_id() == m_mainThreadId
+        && "RenderViewRegistry::CreateOrGetView is main-thread-only - called from a different thread.");
+
     assert(name != nullptr && name[0] != '\0'
         && "RenderViewRegistry::CreateOrGetView requires a non-empty name");
     if (name == nullptr || name[0] == '\0') {
@@ -60,6 +66,15 @@ rg::RenderViewId RenderViewRegistry::CreateOrGetView(const char* name, const Ren
         GTE_LOG_ERROR("RenderViewRegistry",
             std::string("CreateOrGetView(\"") + name + "\") requested with hasColor == false AND hasDepth == "
             "false - refusing.");
+        return rg::RenderViewId::Shared();
+    }
+
+    assert((!desc.allowDepthSampledAccess || desc.hasDepth)
+        && "RenderViewRegistry::CreateOrGetView: allowDepthSampledAccess requested on a view with hasDepth == false");
+    if (desc.allowDepthSampledAccess && !desc.hasDepth) {
+        GTE_LOG_ERROR("RenderViewRegistry",
+            std::string("CreateOrGetView(\"") + name + "\") requested with allowDepthSampledAccess == true AND "
+            "hasDepth == false - refusing.");
         return rg::RenderViewId::Shared();
     }
 
@@ -87,7 +102,7 @@ rg::RenderViewId RenderViewRegistry::CreateOrGetView(const char* name, const Ren
                 // `it->first` outlives this RenderTexture for the registry's
                 // entire process lifetime).
                 /*debugName=*/it->first.c_str(), /*depthDebugName=*/it->first.c_str(),
-                /*allowStorageImageAccess=*/false, /*allowDepthSampledAccess=*/false,
+                /*allowStorageImageAccess=*/false, /*allowDepthSampledAccess=*/desc.allowDepthSampledAccess,
                 /*createDepthCompanion=*/desc.hasDepth, /*createColorImage=*/desc.hasColor));
             it->second.id = rg::RenderViewId::Named(it->first.c_str());
             it->second.desc = desc;
@@ -116,6 +131,8 @@ rg::RenderViewId RenderViewRegistry::CreateOrGetView(const char* name, const Ren
 
 RenderTexture* RenderViewRegistry::FindViewTarget(rg::RenderViewId view) const noexcept
 {
+    assert(std::this_thread::get_id() == m_mainThreadId
+        && "RenderViewRegistry::FindViewTarget is main-thread-only - called from a different thread.");
     for (auto& [name, entry] : m_views) {
         if (entry.target.has_value() && entry.id == view) {
             return &const_cast<RenderTexture&>(*entry.target);

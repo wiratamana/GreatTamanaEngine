@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <thread>
 #include <unordered_map>
 
 #include <volk.h>
@@ -36,6 +37,11 @@ struct RenderViewDesc {
                              // DescsMatchForSameName() below, which
                              // deliberately excludes this field from
                              // comparison in that case.
+
+    // Opts the depth image into VK_IMAGE_USAGE_SAMPLED_BIT + a real
+    // sampler, so a later pass can read this view's depth back as a
+    // texture. Meaningless when hasDepth is false.
+    bool allowDepthSampledAccess = false;
 };
 
 // Equality used ONLY to detect "same name, different desc" misuse in
@@ -75,6 +81,11 @@ public:
 
 private:
     Renderer* m_renderer;
+
+    // Set once at construction, on the engine's own main thread.
+    // CreateOrGetView() and FindViewTarget() both assert every call still
+    // comes from this thread.
+    const std::thread::id m_mainThreadId = std::this_thread::get_id();
 
     struct Entry {
         rg::RenderViewId id;
