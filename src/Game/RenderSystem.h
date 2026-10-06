@@ -249,31 +249,24 @@ public:
     // Game-View caller ever supplies a real, non-empty value, and it does
     // so by forwarding straight into this same overload.
     //
-    // `pipelineOverride` (better-render-pass-3 campaign, PHASE1,
-    // PHASE1_RENDERSYSTEM_DRAW_PIPELINE_OVERRIDE.md) - optional, trailing,
-    // defaulted (std::nullopt) parameter, purely additive - every existing
-    // call site (including the float-aspect overload above, which never
-    // supplies it) keeps compiling/behaving completely unchanged. When set,
-    // it OVERRIDES every entity's own MeshRenderer::pipeline for this one
-    // call only - every renderable draws through this ONE Pipeline instead
-    // of its own resolved one. This is what a shadow-map/depth-prepass/
-    // GI-voxelize pass needs: identical geometry, identical transforms, a
-    // completely different shader, with zero per-entity special-casing.
-    // Caller responsibility, NOT automatically checked: the Pipeline passed
-    // here must be built with a VertexLayout (Renderer/Pipeline.h) that
-    // every targeted entity's own Mesh vertex buffer actually matches - a
-    // Mesh carries no record of its own vertex layout, so there is no way
-    // for this method to detect a mismatch; submitting a Mesh built for one
-    // layout against a Pipeline expecting a different one is undefined
-    // behavior at the Vulkan level, not a safely-skipped draw. If this
-    // handle is stale/invalid/never-registered, this method logs exactly
-    // ONE GTE_LOG_WARNING (see RenderSystem.cpp) and then silently skips
-    // every entity for this call - it does not assert, and it does not
-    // fall back to each entity's own original pipeline. `batchedEntities`
-    // composes with this exactly as it already composes with everything
-    // else Draw() does - a batched-and-excluded entity is skipped by its
-    // own existing check before either the override or the per-entity
-    // pipeline is ever looked at.
+    // `pipelineOverride` - optional, trailing, defaulted (std::nullopt)
+    // parameter, purely additive. When set, it OVERRIDES every entity's own
+    // MeshRenderer::pipeline for this one call only - every renderable draws
+    // through this ONE Pipeline instead of its own resolved one. This is
+    // what a depth-only/alternate-shader pass needs: identical geometry,
+    // identical transforms, a completely different shader, with zero
+    // per-entity special-casing.
+    //
+    // An entity whose own pipeline's VertexLayoutKind() does not match the
+    // override Pipeline's is skipped (never drawn - undefined behavior at
+    // the Vulkan level otherwise), logged at most once per distinct handle.
+    // If the override handle itself is stale/invalid/never-registered,
+    // every entity for this call is skipped instead, also logged at most
+    // once per handle - never a crash, never a silent fall-back to each
+    // entity's own original pipeline. `batchedEntities` composes with this
+    // exactly as it already composes with everything else Draw() does - a
+    // batched-and-excluded entity is skipped by its own existing check
+    // before either the override or the per-entity pipeline is looked at.
     //
     // `sceneServicesSet` (Block 4, task_manager/better-render-pass-6,
     // PHASE6_DRAW_CALL_THREADING_SCENEQUERY_RENDERSYSTEM_GAME.md) - optional,
@@ -335,6 +328,12 @@ private:
     ResourcePool<Mesh, MeshHandle> m_meshes;
     ResourcePool<Pipeline, PipelineHandle> m_pipelines;
     ResourcePool<MaterialTexture, TextureHandle> m_textures;
+
+    // Draw()'s pipelineOverride warn-once state. Single-threaded only - Draw()
+    // has no concurrent call sites today. Never cleared: growth is bounded by
+    // the number of distinct bad handles ever seen, not by frame count.
+    std::unordered_set<PipelineHandle> m_warnedBadOverrideHandles;
+    std::unordered_set<PipelineHandle> m_warnedVertexLayoutMismatchHandles;
 };
 
 } // namespace gte

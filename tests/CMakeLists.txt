@@ -246,34 +246,12 @@
 #                                            Vulkan-header-free, same
 #                                            precedent as AtmosphereMath.h
 #                                            above.
-#   - Renderer/Atmosphere/DirectionalLightResolverTests.cpp - Atmosphere
-#                                            Scattering + Aerial Perspective
-#                                            campaign, Phase 8 (task_manager/
-#                                            atmosphere-scattering-1/
-#                                            ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md)
-#                                            - ResolveActiveDirectionalLight()
-#                                            (src/Renderer/Atmosphere/
-#                                            DirectionalLightResolver.h/.cpp):
-#                                            an empty Registry (and one with
-#                                            only an INACTIVE DirectionalLight)
-#                                            falls back to the exact Phase 5
-#                                            placeholder direction/illuminance,
-#                                            a non-trivial 90-degree yaw
-#                                            rotation resolves the direction
-#                                            TOWARD the sun as the correct
-#                                            negation of the entity's own
-#                                            forward vector (the sign-error
-#                                            regression this phase's own
-#                                            strategy document explicitly
-#                                            asked for), color/illuminance-lux
-#                                            are combined into the expected
-#                                            shader-space scale, a parented
-#                                            light follows its parent's
-#                                            resolved world rotation, and a
-#                                            zero-lux light produces zero
-#                                            sunIlluminance. No Renderer/GPU/
-#                                            live Vulkan device involved at
-#                                            all - a plain Registry is enough.
+#   - Game/Lighting/DirectionalLightResolverTests.cpp - ResolveActiveDirectionalLight()
+#                                            (src/Game/Lighting/DirectionalLightResolver.h/.cpp):
+#                                            placeholder fallback, sign-correct direction
+#                                            resolution, parent-transform following, and
+#                                            color/illuminance scaling. Registry-only, no
+#                                            Renderer/GPU/Vulkan device involved.
 #   - Renderer/RenderGraph/RenderGraphTypesTests.cpp - Render Graph Phase 1's
 #                                            pure vocabulary (handles/
 #                                            ResourceAccess/TextureDesc/
@@ -2338,6 +2316,7 @@ set(GTE_TEST_SOURCES
     Renderer/VertexTests.cpp
     Renderer/PrimitiveMeshGeneratorTests.cpp
     Renderer/ResourcePoolTests.cpp
+    Renderer/PipelineHandleTests.cpp
     Renderer/DrawStatsTests.cpp
     Renderer/GpuTimingTests.cpp
     Renderer/ComputeDispatchTests.cpp
@@ -2449,6 +2428,7 @@ set(GTE_TEST_SOURCES
     ECS/Reflection/ComponentTypeRegistryTests.cpp
     ECS/Reflection/BuiltinComponentReflectionTests.cpp
     Game/RenderSystemTests.cpp
+    Game/Lighting/DirectionalLightResolverTests.cpp
     # better-render-pass-3 campaign, BLOCK1 PHASE3
     # (task_manager/better-render-pass-3/PHASE3_TIER2_VERIFICATION_TESTS.md)
     # - Tier-2 (real, headless GPU, tests/Fakes/HeadlessRenderGraphFixture.h)
@@ -2647,20 +2627,22 @@ endif()
 
 add_executable(GreatTamanaEngineTests ${GTE_TEST_SOURCES})
 
-# Atmosphere feature module's own test files - DELIBERATE, SCOPED EXCEPTION,
-# mirroring the matching production-source globs in the root CMakeLists.txt.
-# A file(GLOB ...) over a folder that does not exist on disk simply returns
-# an empty list, so deleting src/Features/Atmosphere/ (and this mirrored
-# test tree) needs zero edit here.
-file(GLOB GTE_FEATURE_ATMOSPHERE_TEST_SOURCES
-     CONFIGURE_DEPENDS
-     "${CMAKE_SOURCE_DIR}/tests/Features/Atmosphere/*.cpp")
-file(GLOB GTE_FEATURE_ATMOSPHERE_EDITOR_TEST_SOURCES
-     CONFIGURE_DEPENDS
-     "${CMAKE_SOURCE_DIR}/tests/Features/Atmosphere/Editor/*.cpp")
-target_sources(GreatTamanaEngineTests PRIVATE
-    ${GTE_FEATURE_ATMOSPHERE_TEST_SOURCES}
-    ${GTE_FEATURE_ATMOSPHERE_EDITOR_TEST_SOURCES})
+# Every Feature module's own test files, generic over any current or
+# future tests/Features/<Name>/ folder, mirroring the matching
+# production-source discovery in the root CMakeLists.txt. A missing folder
+# just globs empty - deleting a src/Features/<Name>/ tree needs zero edit
+# here.
+file(GLOB GTE_FEATURE_TEST_DIRS CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/tests/Features/*")
+foreach(GTE_FEATURE_TEST_DIR ${GTE_FEATURE_TEST_DIRS})
+    if(IS_DIRECTORY "${GTE_FEATURE_TEST_DIR}")
+        file(GLOB GTE_FEATURE_TEST_SOURCES CONFIGURE_DEPENDS "${GTE_FEATURE_TEST_DIR}/*.cpp")
+        target_sources(GreatTamanaEngineTests PRIVATE ${GTE_FEATURE_TEST_SOURCES})
+        if(IS_DIRECTORY "${GTE_FEATURE_TEST_DIR}/Editor")
+            file(GLOB GTE_FEATURE_EDITOR_TEST_SOURCES CONFIGURE_DEPENDS "${GTE_FEATURE_TEST_DIR}/Editor/*.cpp")
+            target_sources(GreatTamanaEngineTests PRIVATE ${GTE_FEATURE_EDITOR_TEST_SOURCES})
+        endif()
+    endif()
+endforeach()
 
 # task_manager/better-render-pass-1 campaign, PHASE1
 # (PHASE1_SPIRV_REFLECT_DEPENDENCY_AND_SHADER_REFLECTION_CORE.md) -

@@ -1,6 +1,7 @@
-﻿#pragma once
+#pragma once
 
 #include <cstdint>
+#include <functional>
 
 namespace gte {
 
@@ -31,3 +32,15 @@ struct PipelineHandle {
 inline constexpr PipelineHandle kInvalidPipelineHandle{};
 
 } // namespace gte
+
+// Lets PipelineHandle be used directly as an unordered_map/unordered_set
+// key. Mirrors Entity's own specialization (see ECS/Entity.h).
+namespace std {
+template <>
+struct hash<gte::PipelineHandle> {
+    std::size_t operator()(const gte::PipelineHandle& h) const noexcept
+    {
+        return static_cast<std::size_t>((static_cast<std::uint64_t>(h.index) << 32) | h.generation);
+    }
+};
+} // namespace std

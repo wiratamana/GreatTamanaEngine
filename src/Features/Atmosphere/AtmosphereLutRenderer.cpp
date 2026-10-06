@@ -1,7 +1,7 @@
 #include "AtmosphereLutRenderer.h"
 
 #include "AtmosphereParameters.h"
-#include "DirectionalLightResolver.h"
+#include "../../Game/Lighting/DirectionalLightResolver.h"
 #include "../../Renderer/ComputeDispatch.h"
 #include "../../Renderer/RenderTarget.h"
 #include "../../Renderer/Renderer.h"

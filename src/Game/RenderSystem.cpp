@@ -137,26 +137,22 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& view
     // thing as "successfully resolved draws"). std::nullopt (every
     // pre-existing call site) means "no cutoff" - iterate every command,
     // exactly the pre-PHASE3 behavior.
-    // better-render-pass-3 campaign, PHASE1 - resolved ONCE here, before the
-    // loop (not per-DrawCommand - see RenderSystem.h's own doc comment on
-    // this parameter for the full "LDD-1: inline resolution" reasoning). A
-    // bad/stale/never-registered pipelineOverride handle is a call-scoped
-    // (not per-entity) silent skip of EVERY entity this call would have
-    // drawn - overridePipeline stays nullptr, so the existing
-    // "mesh != nullptr && pipeline != nullptr" guard below already skips
-    // every DrawCommand with zero new conditional logic - only the one
-    // warning log below is new.
+    // Resolved once here, before the loop - a bad/stale/never-registered
+    // pipelineOverride is a call-scoped skip of every entity this call would
+    // have drawn. Warned at most once per distinct handle (see
+    // m_warnedBadOverrideHandles's own doc comment in RenderSystem.h).
     const bool hasPipelineOverride = pipelineOverride.has_value();
     const Pipeline* overridePipeline = hasPipelineOverride ? m_pipelines.TryGet(*pipelineOverride) : nullptr;
 
-    if (hasPipelineOverride && overridePipeline == nullptr) {
+    if (hasPipelineOverride && overridePipeline == nullptr
+        && m_warnedBadOverrideHandles.insert(*pipelineOverride).second) {
         GTE_LOG_WARNING("RenderSystem",
             "Draw(): pipelineOverride does not resolve to a live Pipeline (stale, never-registered, or "
-            "already-removed handle) - every entity in this call is being skipped this frame. Check the "
-            "override handle passed in.");
+            "already-removed handle) - every entity in this call is skipped. Logged once per handle.");
     }
 
     std::size_t consideredCount = 0;
+    std::size_t vertexLayoutMismatchCount = 0;
     for (const DrawCommand& command : commands) {
         if (maxDrawCount.has_value() && consideredCount >= *maxDrawCount) {
             break;
@@ -174,7 +170,19 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& view
         }
 
         const Mesh* mesh = m_meshes.TryGet(command.mesh);
-        const Pipeline* pipeline = hasPipelineOverride ? overridePipeline : m_pipelines.TryGet(command.pipeline);
+        const Pipeline* originalPipeline = m_pipelines.TryGet(command.pipeline);
+
+        // An override only binds safely against a matching vertex layout -
+        // a mismatched entity is skipped, never drawn through a Pipeline
+        // expecting a different vertex stride/attributes (undefined behavior
+        // at the Vulkan level otherwise).
+        if (hasPipelineOverride && originalPipeline != nullptr && overridePipeline != nullptr
+            && originalPipeline->VertexLayoutKind() != overridePipeline->VertexLayoutKind()) {
+            ++vertexLayoutMismatchCount;
+            continue;
+        }
+
+        const Pipeline* pipeline = hasPipelineOverride ? overridePipeline : originalPipeline;
         if (mesh != nullptr && pipeline != nullptr) {
             const MaterialTexture* materialTexture = m_textures.TryGet(command.texture);
             const VkDescriptorSet descriptorSet =
@@ -204,6 +212,13 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& view
 
             renderer.Submit(*pipeline, *mesh, command.model, viewProjection, descriptorSet, sceneServicesSet);
         }
+    }
+
+    if (hasPipelineOverride && vertexLayoutMismatchCount > 0
+        && m_warnedVertexLayoutMismatchHandles.insert(*pipelineOverride).second) {
+        GTE_LOG_WARNING("RenderSystem",
+            "Draw(): pipelineOverride's vertex layout does not match some entities' own pipeline - those "
+            "entities are skipped this call. Logged once per handle.");
     }
 }
 

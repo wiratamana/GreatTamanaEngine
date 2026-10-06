@@ -107,7 +107,7 @@ whenever touching this feature:
   to drive the atmosphere's own sun direction/illuminance — it is explicitly
   NOT wired into `Mesh.frag`/`TexturedMesh.frag`/`MeshPreview.frag`'s existing
   fixed-direction lambert term, and this campaign adds no point/spot light of
-  any kind.** `src/Renderer/Atmosphere/DirectionalLightResolver.h`'s
+  any kind.** `src/Game/Lighting/DirectionalLightResolver.h`'s
   `ResolveActiveDirectionalLight()` picks the FIRST entity (in
   `ComponentStorage<DirectionalLight>` order) with `active == true`, exactly
   mirroring `RenderSystem::ResolveActiveCameraViewProjection()`'s own

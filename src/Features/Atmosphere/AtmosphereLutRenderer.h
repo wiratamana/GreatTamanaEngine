@@ -575,7 +575,7 @@ private:
 // IEditorLayer::SceneViewCameraWorldPosition()). `registry` is used to
 // resolve the real, first-active ECS DirectionalLight entity (Phase 8 -
 // ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md) via
-// Renderer/Atmosphere/DirectionalLightResolver.h's
+// Game/Lighting/DirectionalLightResolver.h's
 // ResolveActiveDirectionalLight() - falling back to that same helper's own
 // hardcoded placeholder sun whenever the Registry has no active
 // DirectionalLight at all (a scene with no Sun entity still renders a

@@ -858,6 +858,8 @@ add_library(gte_core STATIC
     src/Game/RenderSystem.h
     src/Game/SceneQuery.cpp
     src/Game/SceneQuery.h
+    src/Game/Lighting/DirectionalLightResolver.h
+    src/Game/Lighting/DirectionalLightResolver.cpp
     src/Profiling/ProfilingTypes.h
     src/Profiling/ProfilingClock.h
     src/Profiling/ProfilingClock.cpp
