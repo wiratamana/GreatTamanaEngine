@@ -120,39 +120,33 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, float aspectWidt
         batchedEntities, std::nullopt, sceneServicesSet);
 }
 
+namespace {
+// Readable name for a GTE_LOG_WARNING message - RenderSystem.cpp only, not
+// part of any public header.
+const char* VertexLayoutDebugName(VertexLayout layout)
+{
+    switch (layout) {
+    case VertexLayout::PositionColor: return "PositionColor";
+    case VertexLayout::PositionNormal: return "PositionNormal";
+    case VertexLayout::PositionNormalUv: return "PositionNormalUv";
+    case VertexLayout::PositionNormalInstanced: return "PositionNormalInstanced";
+    }
+    return "Unknown";
+}
+} // namespace
+
 void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& viewProjection,
     IFrameDebuggerCaptureRecorder* capture, std::optional<std::size_t> maxDrawCount,
-    const std::unordered_set<Entity>& batchedEntities, std::optional<PipelineHandle> pipelineOverride,
+    const std::unordered_set<Entity>& batchedEntities, std::optional<PipelineOverrideSet> pipelineOverrideSet,
     VkDescriptorSet sceneServicesSet)
 {
     GTE_PROFILE_SCOPE("RenderSystem::Draw");
 
     const std::vector<DrawCommand> commands = CollectRenderables(registry);
-
-    // task_manager/frame-debugger-7 campaign, PHASE3
-    // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step
-    // 3.2) - `maxDrawCount`, when set, stops iterating after that many
-    // COMMANDS have been considered (the loop's own iteration count - see
-    // this method's own header doc comment for why this is NOT the same
-    // thing as "successfully resolved draws"). std::nullopt (every
-    // pre-existing call site) means "no cutoff" - iterate every command,
-    // exactly the pre-PHASE3 behavior.
-    // Resolved once here, before the loop - a bad/stale/never-registered
-    // pipelineOverride is a call-scoped skip of every entity this call would
-    // have drawn. Warned at most once per distinct handle (see
-    // m_warnedBadOverrideHandles's own doc comment in RenderSystem.h).
-    const bool hasPipelineOverride = pipelineOverride.has_value();
-    const Pipeline* overridePipeline = hasPipelineOverride ? m_pipelines.TryGet(*pipelineOverride) : nullptr;
-
-    if (hasPipelineOverride && overridePipeline == nullptr
-        && m_warnedBadOverrideHandles.insert(*pipelineOverride).second) {
-        GTE_LOG_WARNING("RenderSystem",
-            "Draw(): pipelineOverride does not resolve to a live Pipeline (stale, never-registered, or "
-            "already-removed handle) - every entity in this call is skipped. Logged once per handle.");
-    }
+    const bool hasOverrideSet = pipelineOverrideSet.has_value();
 
     std::size_t consideredCount = 0;
-    std::size_t vertexLayoutMismatchCount = 0;
+
     for (const DrawCommand& command : commands) {
         if (maxDrawCount.has_value() && consideredCount >= *maxDrawCount) {
             break;
@@ -171,18 +165,34 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& view
 
         const Mesh* mesh = m_meshes.TryGet(command.mesh);
         const Pipeline* originalPipeline = m_pipelines.TryGet(command.pipeline);
+        const Pipeline* pipeline = originalPipeline;
 
-        // An override only binds safely against a matching vertex layout -
-        // a mismatched entity is skipped, never drawn through a Pipeline
-        // expecting a different vertex stride/attributes (undefined behavior
-        // at the Vulkan level otherwise).
-        if (hasPipelineOverride && originalPipeline != nullptr && overridePipeline != nullptr
-            && originalPipeline->VertexLayoutKind() != overridePipeline->VertexLayoutKind()) {
-            ++vertexLayoutMismatchCount;
-            continue;
+        if (hasOverrideSet) {
+            if (originalPipeline == nullptr) {
+                continue; // Unresolvable own pipeline - nothing to key the lookup on.
+            }
+            const VertexLayout entityLayout = originalPipeline->VertexLayoutKind();
+            const std::optional<PipelineHandle> perLayout = ResolveOverridePipeline(*pipelineOverrideSet, entityLayout);
+            if (!perLayout.has_value()) {
+                if (m_warnedMissingOverrideLayouts.insert(entityLayout).second) {
+                    GTE_LOG_WARNING("RenderSystem",
+                        std::string("Draw(): pipelineOverrideSet has no entry for VertexLayout::") +
+                        VertexLayoutDebugName(entityLayout) +
+                        " - entities with this layout are skipped this call. Logged once per layout.");
+                }
+                continue; // This entity's layout has no override entry - skip, never fall back.
+            }
+            pipeline = m_pipelines.TryGet(*perLayout);
+            if (pipeline == nullptr) {
+                if (m_warnedStaleOverrideSetHandles.insert(*perLayout).second) {
+                    GTE_LOG_WARNING("RenderSystem",
+                        "Draw(): pipelineOverrideSet has an entry that does not resolve to a live Pipeline "
+                        "(stale handle) - entities needing this layout are skipped. Logged once per handle.");
+                }
+                continue;
+            }
         }
 
-        const Pipeline* pipeline = hasPipelineOverride ? overridePipeline : originalPipeline;
         if (mesh != nullptr && pipeline != nullptr) {
             const MaterialTexture* materialTexture = m_textures.TryGet(command.texture);
             const VkDescriptorSet descriptorSet =
@@ -191,20 +201,8 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& view
             // editor-core-separation-2 campaign, PHASE2 -
             // zero-overhead-when-disarmed: this call collapses to one
             // already-taken "is this pointer null" branch when `capture` is
-            // nullptr (the common case - every frame until PHASE3 wires a
-            // real arming trigger, and every ordinary frame afterward) - no
-            // string formatting, no vector work happens. See
-            // task_manager/frame-debugger-3/
-            // PHASE1_RENDERER_CAPTURE_INSTRUMENTATION.md's own Step 2. The
-            // `#if GTE_ENABLE_EDITOR` wrapper that used to surround this
-            // block is GONE - the null-check itself is now the only gating
-            // needed, since RecordFrameDebuggerDraw() is a virtual method on
-            // the complete IFrameDebuggerCaptureRecorder interface `capture`
-            // points to (RenderSystem.h's own #include of src/Core/
-            // FrameDebuggerCaptureRecorder.h), reachable through gte_core.a
-            // alone with zero undefined-reference risk - never a
-            // gte_editor-only free-function symbol called by name anymore
-            // (see this file's own updated top-of-file comment).
+            // nullptr (the common case) - no string formatting, no vector
+            // work happens.
             if (capture != nullptr) {
                 capture->RecordFrameDebuggerDraw(
                     registry, renderer, command.entity, *mesh, *pipeline, materialTexture, viewProjection);
@@ -212,13 +210,6 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& view
 
             renderer.Submit(*pipeline, *mesh, command.model, viewProjection, descriptorSet, sceneServicesSet);
         }
-    }
-
-    if (hasPipelineOverride && vertexLayoutMismatchCount > 0
-        && m_warnedVertexLayoutMismatchHandles.insert(*pipelineOverride).second) {
-        GTE_LOG_WARNING("RenderSystem",
-            "Draw(): pipelineOverride's vertex layout does not match some entities' own pipeline - those "
-            "entities are skipped this call. Logged once per handle.");
     }
 }
 

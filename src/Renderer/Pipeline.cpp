@@ -218,8 +218,9 @@ Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFo
         // happen to occupy descriptor set 0 - never used together on the
         // same Pipeline today (Locked Design Decision 8,
         // PHASE0_MASTER_STRATEGY.md: textured instanced batches are out of
-        // scope this campaign), asserted below (debug builds only).
+        // scope this campaign).
         m_hasSceneServicesSet = (sceneServicesSetLayout != VK_NULL_HANDLE);
+        m_hasMaterialSet = (materialSetLayout != VK_NULL_HANDLE);
 
         assert(!(materialSetLayout != VK_NULL_HANDLE && instanceBufferSetLayout != VK_NULL_HANDLE)
             && "Pipeline: materialSetLayout and instanceBufferSetLayout are mutually exclusive - no Pipeline needs "
@@ -338,6 +339,7 @@ Pipeline::Pipeline(Pipeline&& other) noexcept
     , m_debugName(std::move(other.m_debugName))
     , m_vertexLayout(other.m_vertexLayout)
     , m_hasSceneServicesSet(other.m_hasSceneServicesSet)
+    , m_hasMaterialSet(other.m_hasMaterialSet)
     , m_syntheticSetZeroLayout(std::exchange(other.m_syntheticSetZeroLayout, VK_NULL_HANDLE))
 {
 }
@@ -352,6 +354,7 @@ Pipeline& Pipeline::operator=(Pipeline&& other) noexcept
         m_debugName = std::move(other.m_debugName);
         m_vertexLayout = other.m_vertexLayout;
         m_hasSceneServicesSet = other.m_hasSceneServicesSet;
+        m_hasMaterialSet = other.m_hasMaterialSet;
         m_syntheticSetZeroLayout = std::exchange(other.m_syntheticSetZeroLayout, VK_NULL_HANDLE);
     }
     return *this;

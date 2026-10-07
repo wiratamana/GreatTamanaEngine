@@ -377,21 +377,11 @@ void Game::Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* v
     EnsureDefaultCameraExists();
 
     if (viewProjectionOverride != nullptr) {
-        // task_manager/frame-debugger-7 campaign, PHASE3 - maxDrawCount is
-        // NEVER forwarded into this branch (mirrors frameDebuggerCapture's
-        // own exact rule, above/Game.h's own doc comment) - this branch is
-        // Scene View's own call site, out of scope for the whole Frame
-        // Debugger feature. GPU-Driven Frustum Culling + Indirect Draw
-        // campaign (render-pass-5), PHASE5 - batchedEntities is likewise
-        // NEVER forwarded into this branch (Locked Design Decision 11,
-        // PHASE0_MASTER_STRATEGY.md) - Scene View keeps drawing every
-        // entity, batch-eligible or not, through the fully unmodified
-        // per-entity path forever. Block 4 (task_manager/better-render-pass-6)
-        // - sceneServicesSet IS forwarded here, unlike the parameters above -
-        // every intervening defaulted parameter (capture, maxDrawCount,
-        // batchedEntities, pipelineOverride) must be spelled out explicitly
-        // so sceneServicesSet lands in its real, trailing slot instead of
-        // silently binding to an earlier one.
+        // Scene View's own call site: maxDrawCount/batchedEntities never
+        // forward into this branch, frameDebuggerCapture stays nullptr. Every
+        // intervening defaulted parameter (capture, maxDrawCount,
+        // batchedEntities, pipelineOverrideSet) must be spelled out so
+        // sceneServicesSet lands in its real, trailing slot.
         m_renderSystem.Draw(m_registry, renderer, *viewProjectionOverride, nullptr, std::nullopt, {}, std::nullopt,
             sceneServicesSet);
     } else {

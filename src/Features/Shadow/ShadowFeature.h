@@ -5,6 +5,7 @@
 #include "ShadowMaskRenderer.h"
 #include "ShadowCompositeRenderer.h"
 
+#include "../../Game/SceneQuery.h"
 #include "../../Renderer/Pipeline.h"
 #include "../../Renderer/PipelineHandle.h"
 
@@ -30,15 +31,26 @@ public:
 
 private:
     void RegisterPasses();
-    void EnsureDepthPipelineBuilt(Renderer& renderer);
+    void EnsureDepthPipelinesBuilt(Renderer& renderer);
 
     Core& m_core;
     ShadowSettings m_settings;
 
-    // Lazily built, process-lifetime - owned by RenderSystem's own pool.
-    PipelineHandle m_depthPipeline;
+    // Lazily built, process-lifetime - one entry per supported vertex layout
+    // (PositionColor/PositionNormal/PositionNormalUv - PositionNormalInstanced
+    // intentionally left unset, see EnsureDepthPipelinesBuilt()'s own comment).
+    // Owned by RenderSystem's own Pipeline pool.
+    PipelineOverrideSet m_depthPipelines;
+    bool m_depthPipelinesBuilt = false;
 
-    // Locked on Shadow.DepthPass's first frame - see ShadowTypes.h.
+    // Retry backoff for a persistently failing build - avoids retrying at
+    // full frame rate forever when the underlying failure never clears (e.g.
+    // a broken shader directory).
+    std::uint32_t m_depthPipelineFailedAttempts = 0;
+    std::uint32_t m_depthPipelineRetryCooldownFramesRemaining = 0;
+    bool m_depthPipelineGaveUp = false; // Logged once, stops all further retries.
+
+    // Locked on the depth pass's first frame - see ShadowTypes.h.
     bool m_mapResolutionLocked = false;
     bool m_mapResolutionMismatchWarned = false; // Logged at most once per process.
     std::uint32_t m_mapResolutionInUse = 0;

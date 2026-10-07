@@ -504,12 +504,10 @@
 #                                            Renderer/live GPU involved.
 #                                            RenderSystem::Draw() itself is
 #                                            Tier 2 (needs a live Renderer),
-#                                            see the note below. Its new
-#                                            pipelineOverride parameter
-#                                            (better-render-pass-3 campaign,
-#                                            BLOCK1 PHASE1) IS now Tier-2
-#                                            tested, in the new sibling file
-#                                            Game/RenderSystemDrawPipelineOverrideTests.cpp
+#                                            see the note below. Its optional
+#                                            pipelineOverrideSet parameter IS
+#                                            Tier-2 tested, in the sibling file
+#                                            Game/RenderSystemDrawPipelineOverrideSetTests.cpp
 #                                            immediately below - everything
 #                                            else about Draw() (resolving
 #                                            meshes/textures/maxDrawCount/
@@ -517,6 +515,10 @@
 #                                            override) remains untested at
 #                                            Tier 2, an accepted, pre-existing
 #                                            gap that phase does not close.
+#   - Game/SceneQueryTests.cpp               - ResolveOverridePipeline()'s pure
+#                                            per-VertexLayout resolve/nullopt
+#                                            decision (src/Game/SceneQuery.h) -
+#                                            no Renderer/Pipeline pool involved.
 #   - Game/RenderBatchingTests.cpp           - GPU-Driven Frustum Culling +
 #                                            Indirect Draw campaign
 #                                            (render-pass-5), PHASE4
@@ -2429,16 +2431,14 @@ set(GTE_TEST_SOURCES
     ECS/Reflection/BuiltinComponentReflectionTests.cpp
     Game/RenderSystemTests.cpp
     Game/Lighting/DirectionalLightResolverTests.cpp
-    # better-render-pass-3 campaign, BLOCK1 PHASE3
-    # (task_manager/better-render-pass-3/PHASE3_TIER2_VERIFICATION_TESTS.md)
-    # - Tier-2 (real, headless GPU, tests/Fakes/HeadlessRenderGraphFixture.h)
-    # tests for RenderSystem::Draw()'s new optional pipelineOverride
-    # parameter (PHASE1) - a nullopt override draws each entity through its
-    # own pipeline, a valid override forces every entity through that one
-    # Pipeline, and an invalid/stale override skips every entity and logs
-    # exactly one GTE_LOG_WARNING ("RenderSystem" category), never per
-    # entity and never when the override is absent or resolves successfully.
-    Game/RenderSystemDrawPipelineOverrideTests.cpp
+    Game/SceneQueryTests.cpp
+    # Tier-2 (real, headless GPU, tests/Fakes/HeadlessRenderGraphFixture.h)
+    # tests for RenderSystem::Draw()'s optional pipelineOverrideSet
+    # parameter - a nullopt set draws each entity through its own pipeline, a
+    # populated set resolves per entity by VertexLayout, a missing-layout
+    # entry skips those entities and logs once per layout, and a stale
+    # per-layout handle skips those entities and logs once per handle.
+    Game/RenderSystemDrawPipelineOverrideSetTests.cpp
     Game/RenderBatchingTests.cpp
     Game/GameEntityCommandsTests.cpp
     Game/GameUpdateFreezeGatingTests.cpp

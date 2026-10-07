@@ -11,11 +11,17 @@
 #include "Renderer/Culling/GpuDrivenBatchCache.h"
 #include "Renderer/MaterialTexture.h"
 #include "Renderer/Mesh.h"
-#include "Renderer/MeshHandle.h"
 #include "Renderer/Pipeline.h"
 #include "Renderer/PipelineHandle.h"
 #include "Renderer/ResourcePool.h"
 #include "Renderer/TextureHandle.h"
+// RenderSystem.h now #includes SceneQuery.h, for PipelineOverrideSet's full
+// definition - a std::optional<PipelineOverrideSet> function parameter below
+// needs a complete type. SceneQuery.h only forward-declares RenderSystem (no
+// #include of RenderSystem.h), so this is a one-directional include only -
+// never let SceneQuery.h #include RenderSystem.h back (only SceneQuery.cpp,
+// a translation unit, may do that), or this becomes a real header cycle.
+#include "SceneQuery.h"
 // editor-core-separation-2 campaign, PHASE2 - RenderSystem.h now #includes
 // the gte_core-owned IFrameDebuggerCaptureRecorder interface (src/Core/
 // FrameDebuggerCaptureRecorder.h) instead of forward-declaring the concrete,
@@ -86,6 +92,16 @@ public:
     MeshHandle RegisterMesh(Mesh&& mesh) { return m_meshes.Insert(std::move(mesh)); }
     PipelineHandle RegisterPipeline(Pipeline&& pipeline) { return m_pipelines.Insert(std::move(pipeline)); }
     TextureHandle RegisterTexture(MaterialTexture&& texture) { return m_textures.Insert(std::move(texture)); }
+
+    // Frees a previously-registered Pipeline's slot. Only safe to call for a
+    // handle guaranteed to be unreferenced by any entity's MeshRenderer -
+    // this pool tracks no back-references, so removing a handle still in
+    // use elsewhere just makes those entities silently stop drawing
+    // (TryGet() returns nullptr, Draw() skips them like any stale handle).
+    // Exists for same-call rollback of a just-inserted, not-yet-exposed
+    // pipeline (see ShadowFeature::EnsureDepthPipelinesBuilt()) - not a
+    // general-purpose live-unload API.
+    bool UnregisterPipeline(PipelineHandle handle) { return m_pipelines.Remove(handle); }
 
     // Direct, mutable access to an already-registered Mesh by handle -
     // needed by Game::UpdateSkeletalAnimators() (src/Game/Game.cpp) to call
@@ -249,24 +265,18 @@ public:
     // Game-View caller ever supplies a real, non-empty value, and it does
     // so by forwarding straight into this same overload.
     //
-    // `pipelineOverride` - optional, trailing, defaulted (std::nullopt)
-    // parameter, purely additive. When set, it OVERRIDES every entity's own
-    // MeshRenderer::pipeline for this one call only - every renderable draws
-    // through this ONE Pipeline instead of its own resolved one. This is
-    // what a depth-only/alternate-shader pass needs: identical geometry,
-    // identical transforms, a completely different shader, with zero
-    // per-entity special-casing.
-    //
-    // An entity whose own pipeline's VertexLayoutKind() does not match the
-    // override Pipeline's is skipped (never drawn - undefined behavior at
-    // the Vulkan level otherwise), logged at most once per distinct handle.
-    // If the override handle itself is stale/invalid/never-registered,
-    // every entity for this call is skipped instead, also logged at most
-    // once per handle - never a crash, never a silent fall-back to each
-    // entity's own original pipeline. `batchedEntities` composes with this
-    // exactly as it already composes with everything else Draw() does - a
-    // batched-and-excluded entity is skipped by its own existing check
-    // before either the override or the per-entity pipeline is looked at.
+    // `pipelineOverrideSet` - optional, trailing, defaulted (std::nullopt)
+    // parameter, purely additive. When set, resolves per entity via
+    // ResolveOverridePipeline() (SceneQuery.h) against the entity's own
+    // pipeline's VertexLayoutKind() - lets one call draw primitives,
+    // untextured meshes, and textured meshes each through their own matching
+    // override pipeline. An entity whose layout has no entry is skipped
+    // entirely (warned once per distinct VertexLayout); a stale per-layout
+    // handle is skipped too (warned once per distinct handle) - never a
+    // crash, never a silent fall-back to the entity's own original pipeline.
+    // `batchedEntities` composes with this exactly as it already composes
+    // with everything else Draw() does - a batched-and-excluded entity is
+    // skipped by its own existing check first.
     //
     // `sceneServicesSet` (Block 4, task_manager/better-render-pass-6,
     // PHASE6_DRAW_CALL_THREADING_SCENEQUERY_RENDERSYSTEM_GAME.md) - optional,
@@ -282,7 +292,7 @@ public:
     void Draw(Registry& registry, Renderer& renderer, const Mat4& viewProjection,
         IFrameDebuggerCaptureRecorder* capture = nullptr, std::optional<std::size_t> maxDrawCount = std::nullopt,
         const std::unordered_set<Entity>& batchedEntities = {},
-        std::optional<PipelineHandle> pipelineOverride = std::nullopt,
+        std::optional<PipelineOverrideSet> pipelineOverrideSet = std::nullopt,
         VkDescriptorSet sceneServicesSet = VK_NULL_HANDLE);
 
     // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
@@ -329,11 +339,19 @@ private:
     ResourcePool<Pipeline, PipelineHandle> m_pipelines;
     ResourcePool<MaterialTexture, TextureHandle> m_textures;
 
-    // Draw()'s pipelineOverride warn-once state. Single-threaded only - Draw()
-    // has no concurrent call sites today. Never cleared: growth is bounded by
-    // the number of distinct bad handles ever seen, not by frame count.
-    std::unordered_set<PipelineHandle> m_warnedBadOverrideHandles;
-    std::unordered_set<PipelineHandle> m_warnedVertexLayoutMismatchHandles;
+    // Draw()'s pipelineOverrideSet warn-once state. Single-threaded only -
+    // Draw() has no concurrent call sites today. Never cleared: growth is
+    // bounded by the number of distinct layouts/bad handles ever seen, not
+    // by frame count.
+    //
+    // Warn once per distinct VertexLayout that has no override entry - same
+    // per-key granularity as the stale-handle set below, not a single
+    // fires-once-ever flag, so a missing PositionColor entry and a missing
+    // PositionNormalUv entry are each reported.
+    std::unordered_set<VertexLayout> m_warnedMissingOverrideLayouts;
+
+    // Warn once per distinct stale per-layout handle.
+    std::unordered_set<PipelineHandle> m_warnedStaleOverrideSetHandles;
 };
 
 } // namespace gte

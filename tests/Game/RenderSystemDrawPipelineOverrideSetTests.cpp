@@ -1,6 +1,9 @@
 // Tier-2 (real, headless GPU) tests for RenderSystem::Draw()'s optional
-// pipelineOverride parameter - valid/invalid/mismatched-vertex-layout
-// overrides, and the once-per-handle warning-log discipline around each.
+// pipelineOverrideSet parameter - a nullopt set draws each entity through its
+// own pipeline, a populated set resolves per entity by VertexLayout, a
+// missing-layout entry skips that layout's entities and warns once per
+// layout, and a stale per-layout handle skips entities needing it and warns
+// once per handle.
 //
 // Verifies "which Pipeline did entity X actually draw with" via
 // IFrameDebuggerCaptureRecorder::RecordFrameDebuggerDraw()'s own resolved
@@ -127,7 +130,7 @@ Pipeline MakePositionColorPipeline(Renderer& renderer, const char* debugName)
 
 } // namespace
 
-TEST(RenderSystemDrawPipelineOverrideTest, NulloptOverrideDrawsEachEntityThroughItsOwnPipeline)
+TEST(RenderSystemDrawPipelineOverrideSetTest, NulloptOverrideSetDrawsEachEntityThroughItsOwnPipeline)
 {
     HeadlessRenderGraphFixture fixture;
     if (!fixture.IsUsable()) {
@@ -166,115 +169,7 @@ TEST(RenderSystemDrawPipelineOverrideTest, NulloptOverrideDrawsEachEntityThrough
     }
 }
 
-TEST(RenderSystemDrawPipelineOverrideTest, ValidOverrideForcesEveryEntityThroughTheOverridePipeline)
-{
-    HeadlessRenderGraphFixture fixture;
-    if (!fixture.IsUsable()) {
-        GTEST_SKIP() << fixture.SkipReason();
-    }
-    Renderer& renderer = fixture.GetRenderer();
-    RenderSystem renderSystem;
-
-    const MeshHandle meshHandle = renderSystem.RegisterMesh(MakeQuadMesh(renderer, "Quad"));
-    const PipelineHandle pipelineAHandle =
-        renderSystem.RegisterPipeline(MakePositionNormalPipeline(renderer, "PipelineA"));
-    const PipelineHandle pipelineBHandle =
-        renderSystem.RegisterPipeline(MakePositionNormalPipeline(renderer, "PipelineB"));
-    const PipelineHandle overrideHandle =
-        renderSystem.RegisterPipeline(MakePositionNormalPipeline(renderer, "OverridePipeline"));
-
-    Registry registry;
-    const Entity entityA = registry.CreateEntity();
-    registry.AddComponent<Transform>(entityA);
-    registry.AddComponent<MeshRenderer>(entityA, MeshRenderer{ meshHandle, pipelineAHandle });
-
-    const Entity entityB = registry.CreateEntity();
-    registry.AddComponent<Transform>(entityB);
-    registry.AddComponent<MeshRenderer>(entityB, MeshRenderer{ meshHandle, pipelineBHandle });
-
-    RecordingFrameDebuggerCapture capture;
-    renderSystem.Draw(registry, renderer, Mat4::Identity(), &capture, /*maxDrawCount=*/std::nullopt,
-        /*batchedEntities=*/{}, overrideHandle);
-
-    ASSERT_EQ(capture.recorded.size(), 2u);
-    const Pipeline* overridePipeline = renderSystem.TryGetPipeline(overrideHandle);
-    ASSERT_NE(overridePipeline, nullptr);
-    for (const auto& entry : capture.recorded) {
-        EXPECT_EQ(entry.pipeline, overridePipeline);
-    }
-}
-
-TEST(RenderSystemDrawPipelineOverrideTest, InvalidOverrideSkipsEveryEntityAndLogsExactlyOneWarning)
-{
-    HeadlessRenderGraphFixture fixture;
-    if (!fixture.IsUsable()) {
-        GTEST_SKIP() << fixture.SkipReason();
-    }
-    Renderer& renderer = fixture.GetRenderer();
-    RenderSystem renderSystem;
-
-    const MeshHandle meshHandle = renderSystem.RegisterMesh(MakeQuadMesh(renderer, "Quad"));
-    const PipelineHandle pipelineAHandle =
-        renderSystem.RegisterPipeline(MakePositionNormalPipeline(renderer, "PipelineA"));
-
-    Registry registry;
-    const Entity entityA = registry.CreateEntity();
-    registry.AddComponent<Transform>(entityA);
-    registry.AddComponent<MeshRenderer>(entityA, MeshRenderer{ meshHandle, pipelineAHandle });
-
-    const PipelineHandle neverRegisteredHandle{ 9999u, 9999u }; // Never returned by RegisterPipeline() above.
-
-    RecordingLogSink sink;
-    ScopedLogSinkInstall logGuard(&sink);
-    RecordingFrameDebuggerCapture capture;
-
-    renderSystem.Draw(registry, renderer, Mat4::Identity(), &capture, /*maxDrawCount=*/std::nullopt,
-        /*batchedEntities=*/{}, neverRegisteredHandle);
-
-    EXPECT_TRUE(capture.recorded.empty());
-
-    int matchingWarningCount = 0;
-    for (const auto& entry : sink.entries) {
-        if (entry.category == "RenderSystem" && entry.level == LogLevel::Warning) {
-            ++matchingWarningCount;
-        }
-    }
-    EXPECT_EQ(matchingWarningCount, 1);
-}
-
-TEST(RenderSystemDrawPipelineOverrideTest, NoWarningIsLoggedWhenOverrideIsNulloptOrResolvesSuccessfully)
-{
-    HeadlessRenderGraphFixture fixture;
-    if (!fixture.IsUsable()) {
-        GTEST_SKIP() << fixture.SkipReason();
-    }
-    Renderer& renderer = fixture.GetRenderer();
-    RenderSystem renderSystem;
-
-    const MeshHandle meshHandle = renderSystem.RegisterMesh(MakeQuadMesh(renderer, "Quad"));
-    const PipelineHandle pipelineAHandle =
-        renderSystem.RegisterPipeline(MakePositionNormalPipeline(renderer, "PipelineA"));
-
-    Registry registry;
-    const Entity entityA = registry.CreateEntity();
-    registry.AddComponent<Transform>(entityA);
-    registry.AddComponent<MeshRenderer>(entityA, MeshRenderer{ meshHandle, pipelineAHandle });
-
-    RecordingLogSink sink;
-    ScopedLogSinkInstall logGuard(&sink);
-    RecordingFrameDebuggerCapture capture;
-
-    renderSystem.Draw(registry, renderer, Mat4::Identity(), &capture); // pipelineOverride defaults to std::nullopt.
-    renderSystem.Draw(registry, renderer, Mat4::Identity(), &capture, /*maxDrawCount=*/std::nullopt,
-        /*batchedEntities=*/{}, pipelineAHandle); // a VALID override.
-
-    for (const auto& entry : sink.entries) {
-        EXPECT_FALSE(entry.category == "RenderSystem" && entry.level == LogLevel::Warning)
-            << "Unexpected RenderSystem warning: " << entry.message;
-    }
-}
-
-TEST(RenderSystemDrawPipelineOverrideTest, MismatchedVertexLayoutOverrideSkipsOnlyMismatchedEntitiesAndLogsOnce)
+TEST(RenderSystemDrawPipelineOverrideSetTest, PopulatedSetRoutesEachEntityThroughItsOwnMatchingOverrideLayout)
 {
     HeadlessRenderGraphFixture fixture;
     if (!fixture.IsUsable()) {
@@ -289,32 +184,75 @@ TEST(RenderSystemDrawPipelineOverrideTest, MismatchedVertexLayoutOverrideSkipsOn
         renderSystem.RegisterPipeline(MakePositionNormalPipeline(renderer, "PipelineA"));
     const PipelineHandle pipelineBHandle =
         renderSystem.RegisterPipeline(MakePositionColorPipeline(renderer, "PipelineB"));
-    const PipelineHandle overrideHandle =
-        renderSystem.RegisterPipeline(MakePositionColorPipeline(renderer, "OverridePipeline"));
+    const PipelineHandle overrideNormalHandle =
+        renderSystem.RegisterPipeline(MakePositionNormalPipeline(renderer, "OverrideNormal"));
+    const PipelineHandle overrideColorHandle =
+        renderSystem.RegisterPipeline(MakePositionColorPipeline(renderer, "OverrideColor"));
 
     Registry registry;
-    // entityA's own pipeline (PositionNormal) MISMATCHES the override
-    // (PositionColor) - must be skipped, never drawn.
-    const Entity entityA = registry.CreateEntity();
+    const Entity entityA = registry.CreateEntity(); // PositionNormal.
     registry.AddComponent<Transform>(entityA);
     registry.AddComponent<MeshRenderer>(entityA, MeshRenderer{ normalMeshHandle, pipelineAHandle });
 
-    // entityB's own pipeline (PositionColor) MATCHES the override's layout -
-    // still drawn, through the override Pipeline.
-    const Entity entityB = registry.CreateEntity();
+    const Entity entityB = registry.CreateEntity(); // PositionColor.
     registry.AddComponent<Transform>(entityB);
     registry.AddComponent<MeshRenderer>(entityB, MeshRenderer{ colorMeshHandle, pipelineBHandle });
+
+    PipelineOverrideSet overrides;
+    overrides.byLayout[static_cast<std::size_t>(VertexLayout::PositionNormal)] = overrideNormalHandle;
+    overrides.byLayout[static_cast<std::size_t>(VertexLayout::PositionColor)] = overrideColorHandle;
+
+    RecordingFrameDebuggerCapture capture;
+    renderSystem.Draw(registry, renderer, Mat4::Identity(), &capture, /*maxDrawCount=*/std::nullopt,
+        /*batchedEntities=*/{}, overrides);
+
+    ASSERT_EQ(capture.recorded.size(), 2u);
+    const Pipeline* overrideNormalPipeline = renderSystem.TryGetPipeline(overrideNormalHandle);
+    const Pipeline* overrideColorPipeline = renderSystem.TryGetPipeline(overrideColorHandle);
+    for (const auto& entry : capture.recorded) {
+        if (entry.entity == entityA) {
+            EXPECT_EQ(entry.pipeline, overrideNormalPipeline);
+        } else if (entry.entity == entityB) {
+            EXPECT_EQ(entry.pipeline, overrideColorPipeline);
+        } else {
+            ADD_FAILURE() << "Unexpected entity recorded.";
+        }
+    }
+}
+
+TEST(RenderSystemDrawPipelineOverrideSetTest, MissingLayoutEntrySkipsThoseEntitiesAndWarnsOncePerLayout)
+{
+    HeadlessRenderGraphFixture fixture;
+    if (!fixture.IsUsable()) {
+        GTEST_SKIP() << fixture.SkipReason();
+    }
+    Renderer& renderer = fixture.GetRenderer();
+    RenderSystem renderSystem;
+
+    const MeshHandle meshHandle = renderSystem.RegisterMesh(MakeQuadMesh(renderer, "Quad"));
+    const PipelineHandle pipelineAHandle =
+        renderSystem.RegisterPipeline(MakePositionNormalPipeline(renderer, "PipelineA"));
+
+    Registry registry;
+    const Entity entityA = registry.CreateEntity();
+    registry.AddComponent<Transform>(entityA);
+    registry.AddComponent<MeshRenderer>(entityA, MeshRenderer{ meshHandle, pipelineAHandle });
+
+    // Empty override set - PositionNormal has no entry.
+    const PipelineOverrideSet overrides;
 
     RecordingLogSink sink;
     ScopedLogSinkInstall logGuard(&sink);
     RecordingFrameDebuggerCapture capture;
 
-    renderSystem.Draw(registry, renderer, Mat4::Identity(), &capture, /*maxDrawCount=*/std::nullopt,
-        /*batchedEntities=*/{}, overrideHandle);
+    // Same missing layout, across several consecutive "frames" - the warning
+    // must fire once total, not once per call.
+    for (int frame = 0; frame < 3; ++frame) {
+        renderSystem.Draw(registry, renderer, Mat4::Identity(), &capture, /*maxDrawCount=*/std::nullopt,
+            /*batchedEntities=*/{}, overrides);
+    }
 
-    ASSERT_EQ(capture.recorded.size(), 1u);
-    EXPECT_EQ(capture.recorded[0].entity, entityB);
-    EXPECT_EQ(capture.recorded[0].pipeline, renderSystem.TryGetPipeline(overrideHandle));
+    EXPECT_TRUE(capture.recorded.empty());
 
     int matchingWarningCount = 0;
     for (const auto& entry : sink.entries) {
@@ -325,7 +263,7 @@ TEST(RenderSystemDrawPipelineOverrideTest, MismatchedVertexLayoutOverrideSkipsOn
     EXPECT_EQ(matchingWarningCount, 1);
 }
 
-TEST(RenderSystemDrawPipelineOverrideTest, RepeatedDrawCallsWithTheSameBadOverrideLogExactlyOneWarningTotal)
+TEST(RenderSystemDrawPipelineOverrideSetTest, StalePerLayoutHandleSkipsThoseEntitiesAndWarnsOncePerHandle)
 {
     HeadlessRenderGraphFixture fixture;
     if (!fixture.IsUsable()) {
@@ -344,16 +282,16 @@ TEST(RenderSystemDrawPipelineOverrideTest, RepeatedDrawCallsWithTheSameBadOverri
     registry.AddComponent<MeshRenderer>(entityA, MeshRenderer{ meshHandle, pipelineAHandle });
 
     const PipelineHandle neverRegisteredHandle{ 9999u, 9999u }; // Never returned by RegisterPipeline() above.
+    PipelineOverrideSet overrides;
+    overrides.byLayout[static_cast<std::size_t>(VertexLayout::PositionNormal)] = neverRegisteredHandle;
 
     RecordingLogSink sink;
     ScopedLogSinkInstall logGuard(&sink);
     RecordingFrameDebuggerCapture capture;
 
-    // Same bad override handle, across several consecutive "frames" - the
-    // warning must fire once total, not once per call.
     for (int frame = 0; frame < 3; ++frame) {
         renderSystem.Draw(registry, renderer, Mat4::Identity(), &capture, /*maxDrawCount=*/std::nullopt,
-            /*batchedEntities=*/{}, neverRegisteredHandle);
+            /*batchedEntities=*/{}, overrides);
     }
 
     EXPECT_TRUE(capture.recorded.empty());

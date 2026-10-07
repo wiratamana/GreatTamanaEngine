@@ -7,10 +7,9 @@
 // Draw() itself (the non-pure half that actually resolves handles and calls
 // Renderer::Submit()) is intentionally NOT tested here - it needs a live
 // Renderer, same "Tier 2, not implemented yet" boundary as Buffer/
-// RenderTexture/Pipeline (see tests/CMakeLists.txt). Its new, optional
-// pipelineOverride parameter (better-render-pass-3 campaign, BLOCK1 PHASE1)
-// IS now Tier-2 tested, in the sibling file
-// Game/RenderSystemDrawPipelineOverrideTests.cpp - everything else about
+// RenderTexture/Pipeline (see tests/CMakeLists.txt). Its optional
+// pipelineOverrideSet parameter IS Tier-2 tested, in the sibling file
+// Game/RenderSystemDrawPipelineOverrideSetTests.cpp - everything else about
 // Draw() remains Tier-2-untested, unchanged, as before.
 
 #include "Game/RenderSystem.h"

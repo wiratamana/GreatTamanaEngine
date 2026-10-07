@@ -12,6 +12,8 @@
 #include <algorithm>
 #include <cassert>
 #include <memory>
+#include <stdexcept>
+#include <vector>
 
 namespace gte {
 
@@ -50,16 +52,70 @@ ShadowFeature::ShadowFeature(Core& core)
     RegisterPasses();
 }
 
-void ShadowFeature::EnsureDepthPipelineBuilt(Renderer& renderer)
+// Builds one depth-only Pipeline per supported vertex layout
+// (PositionColor/PositionNormal/PositionNormalUv). Not transactional across
+// repeated calls: on a build failure, rolls back only what THIS attempt
+// inserted (ResourcePool slots from earlier, already-succeeded frames are
+// untouched), then backs off for kRetryCooldownFrames before trying again,
+// giving up permanently after kMaxBuildAttempts total failures.
+void ShadowFeature::EnsureDepthPipelinesBuilt(Renderer& renderer)
 {
-    if (m_depthPipeline.IsValid()) {
+    constexpr std::uint32_t kRetryCooldownFrames = 120; // ~2s at 60 FPS.
+    constexpr std::uint32_t kMaxBuildAttempts = 5;
+
+    if (m_depthPipelinesBuilt || m_depthPipelineGaveUp) {
         return;
     }
-    // Empty colorFormats span == depth-only Pipeline.
-    m_depthPipeline = m_core.GetGame().GetRenderSystem().RegisterPipeline(
-        renderer.CreatePipeline(std::span<const VkFormat>{}, "shaders/ShadowDepth.vert.spv",
-            "shaders/ShadowDepth.frag.spv", VertexLayout::PositionNormal, /*useMaterialTexture=*/false,
-            "ShadowDepth.vert/.frag (PositionNormal, depth-only)"));
+
+    if (m_depthPipelineRetryCooldownFramesRemaining > 0) {
+        --m_depthPipelineRetryCooldownFramesRemaining;
+        return; // Still cooling down from the last failed attempt.
+    }
+
+    RenderSystem& renderSystem = m_core.GetGame().GetRenderSystem();
+    std::vector<PipelineHandle> insertedThisAttempt;
+
+    auto build = [&](VertexLayout layout, const char* vert, const char* debugName) {
+        const PipelineHandle handle = renderSystem.RegisterPipeline(
+            renderer.CreatePipeline(std::span<const VkFormat>{}, vert, "shaders/ShadowDepth.frag.spv", layout,
+                /*useMaterialTexture=*/false, debugName));
+        insertedThisAttempt.push_back(handle);
+        m_depthPipelines.byLayout[static_cast<std::size_t>(layout)] = handle;
+    };
+
+    try {
+        build(VertexLayout::PositionColor, "shaders/ShadowDepthPositionColor.vert.spv",
+            "ShadowDepthPositionColor.vert/ShadowDepth.frag (PositionColor, depth-only)");
+        build(VertexLayout::PositionNormal, "shaders/ShadowDepthPositionNormal.vert.spv",
+            "ShadowDepthPositionNormal.vert/ShadowDepth.frag (PositionNormal, depth-only)");
+        build(VertexLayout::PositionNormalUv, "shaders/ShadowDepthPositionNormalUv.vert.spv",
+            "ShadowDepthPositionNormalUv.vert/ShadowDepth.frag (PositionNormalUv, depth-only)");
+        // PositionNormalInstanced intentionally left unset - GPU-driven
+        // batched entities cast through the brute-force PositionNormal path.
+    } catch (const std::exception& e) {
+        for (const PipelineHandle handle : insertedThisAttempt) {
+            renderSystem.UnregisterPipeline(handle);
+        }
+        m_depthPipelines = PipelineOverrideSet{}; // Drop any half-built entries too.
+        ++m_depthPipelineFailedAttempts;
+
+        if (m_depthPipelineFailedAttempts >= kMaxBuildAttempts) {
+            m_depthPipelineGaveUp = true;
+            GTE_LOG_WARNING("Shadow", std::string("EnsureDepthPipelinesBuilt(): pipeline build failed ('") +
+                e.what() + "') after " + std::to_string(m_depthPipelineFailedAttempts) +
+                " attempts - giving up. Depth casting stays disabled for the rest of this process.");
+            return;
+        }
+
+        m_depthPipelineRetryCooldownFramesRemaining = kRetryCooldownFrames;
+        GTE_LOG_WARNING("Shadow", std::string("EnsureDepthPipelinesBuilt(): pipeline build failed ('") + e.what() +
+            "') - rolled back this attempt's pipelines. Retrying in " + std::to_string(kRetryCooldownFrames) +
+            " frames (attempt " + std::to_string(m_depthPipelineFailedAttempts) + "/" +
+            std::to_string(kMaxBuildAttempts) + ").");
+        return; // m_depthPipelinesBuilt stays false - retried after cooldown, no leak accumulates meanwhile.
+    }
+
+    m_depthPipelinesBuilt = true;
 }
 
 void ShadowFeature::RegisterPasses()
@@ -74,7 +130,7 @@ void ShadowFeature::RegisterPasses()
             }
 
             Renderer& renderer = m_core.GetRenderer();
-            EnsureDepthPipelineBuilt(renderer);
+            EnsureDepthPipelinesBuilt(renderer);
 
             // Lock mapResolution on first use - see ShadowTypes.h. Never 0.
             if (!m_mapResolutionLocked) {
@@ -120,13 +176,11 @@ void ShadowFeature::RegisterPasses()
                     pass.WriteDepthStencilAttachment(shadowHandle, /*clearDepth=*/1.0f);
                 },
                 [this, lightViewProj](rg::PassContext& ctx) {
-                    // Only reaches VertexLayout::PositionNormal meshes -
-                    // RenderSystem::Draw()'s guard skips the rest.
                     Renderer& renderer = m_core.GetRenderer();
                     renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
                     SceneDrawRequest request;
                     request.viewProjection = lightViewProj; // Real light-space matrix, never Identity.
-                    request.pipelineOverride = m_depthPipeline;
+                    request.pipelineOverrideSet = m_depthPipelines;
                     gte::DrawScene(m_core.GetGame().GetRenderSystem(), m_core.GetRegistry(), renderer, request);
                     renderer.EndGraphPassRecording();
                 },

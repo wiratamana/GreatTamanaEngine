@@ -282,6 +282,13 @@ void Renderer::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& mo
     // exists to prevent (PHASE0's global rule 1).
     const VkDescriptorSet effectiveSceneServicesSet = pipeline.HasSceneServicesSet() ? sceneServicesSet : VK_NULL_HANDLE;
 
+    // Never bind descriptor set 0 against a pipeline layout that declares no
+    // material set - a depth-only pipeline (zero descriptor sets) paired
+    // with a textured entity's real material texture would otherwise trip
+    // VUID-vkCmdBindDescriptorSets-firstSet-00360.
+    const VkDescriptorSet effectiveMaterialDescriptorSet =
+        pipeline.HasMaterialSet() ? materialDescriptorSet : VK_NULL_HANDLE;
+
     // Phase 7 (RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md) -
     // while a render-graph pass is being recorded (BeginGraphPassRecording()
     // was called and hasn't been cleared yet - see Renderer.h), issue this
@@ -295,14 +302,15 @@ void Renderer::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& mo
         const std::uint32_t indexCount = hasIndexBuffer ? mesh.IndexCount() : 0;
         FrameRecorder::IssueDrawCommand(m_currentGraphPassCmd, pipeline.Native(), pipeline.Layout(),
             mesh.VertexBuffer(), mesh.VertexCount(), hasIndexBuffer ? mesh.IndexBuffer() : VK_NULL_HANDLE, indexCount,
-            modelMatrix, viewProjMatrix, materialDescriptorSet, effectiveSceneServicesSet);
+            modelMatrix, viewProjMatrix, effectiveMaterialDescriptorSet, effectiveSceneServicesSet);
         if (m_currentGraphPassRecordDrawStats) {
             m_currentGraphPassRecordDrawStats(hasIndexBuffer, mesh.VertexCount(), indexCount);
         }
         return;
     }
 
-    m_frameRecorder.Submit(pipeline, mesh, modelMatrix, viewProjMatrix, materialDescriptorSet, effectiveSceneServicesSet);
+    m_frameRecorder.Submit(
+        pipeline, mesh, modelMatrix, viewProjMatrix, effectiveMaterialDescriptorSet, effectiveSceneServicesSet);
 }
 
 void Renderer::SubmitIndirect(const Pipeline& pipeline, const Mesh& mesh, VkBuffer indirectBuffer,

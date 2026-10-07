@@ -92,6 +92,55 @@ TEST(PipelineTest, UnchangedConstructionWithNoSceneServicesSetLayoutReportsHasSc
     EXPECT_NE(pipeline.Native(), static_cast<VkPipeline>(VK_NULL_HANDLE));
 }
 
+// Mirrors the two SceneServicesSetLayout tests above, for Pipeline's
+// materialSetLayout parameter + HasMaterialSet() accessor.
+
+TEST(PipelineTest, MaterialSetLayoutProducesHasMaterialSetTrue)
+{
+    HeadlessRenderGraphFixture fixture;
+    if (!fixture.IsUsable()) {
+        GTEST_SKIP() << fixture.SkipReason();
+    }
+
+    Renderer& renderer = fixture.GetRenderer();
+    const VkDevice device = renderer.GetVulkanContextInfo().device;
+
+    // A small, throwaway, 1-binding layout - only Pipeline's own
+    // materialSetLayout-is-non-null bookkeeping is under test here, not
+    // whether it is binding-compatible with a real MaterialTexture.
+    const VkDescriptorSetLayout throwawayMaterialLayout =
+        DescriptorSetLayoutBuilder(device).AddCombinedImageSampler(0, VK_SHADER_STAGE_FRAGMENT_BIT).Build();
+
+    Pipeline pipeline(device, renderer.ColorFormat(), renderer.DepthFormat(), "shaders/TexturedMesh.vert.spv",
+        "shaders/TexturedMesh.frag.spv", VertexLayout::PositionNormalUv, throwawayMaterialLayout,
+        "PipelineTest.MaterialSetLayout");
+
+    EXPECT_TRUE(pipeline.HasMaterialSet());
+    EXPECT_NE(pipeline.Native(), static_cast<VkPipeline>(VK_NULL_HANDLE));
+
+    vkDestroyDescriptorSetLayout(device, throwawayMaterialLayout, nullptr);
+}
+
+TEST(PipelineTest, UnchangedConstructionWithNoMaterialSetLayoutReportsHasMaterialSetFalse)
+{
+    HeadlessRenderGraphFixture fixture;
+    if (!fixture.IsUsable()) {
+        GTEST_SKIP() << fixture.SkipReason();
+    }
+
+    Renderer& renderer = fixture.GetRenderer();
+    const VkDevice device = renderer.GetVulkanContextInfo().device;
+
+    // Every positional argument up through debugName, exactly as any
+    // pre-existing call site would supply - materialSetLayout left at its
+    // default (VK_NULL_HANDLE).
+    Pipeline pipeline(device, renderer.ColorFormat(), renderer.DepthFormat(), "shaders/Triangle.vert.spv",
+        "shaders/Triangle.frag.spv", VertexLayout::PositionColor, VK_NULL_HANDLE, "PipelineTest.NoMaterialSet");
+
+    EXPECT_FALSE(pipeline.HasMaterialSet());
+    EXPECT_NE(pipeline.Native(), static_cast<VkPipeline>(VK_NULL_HANDLE));
+}
+
 // PHASE5 (PHASE5_SUBMIT_AND_FRAMERECORDER_BIND_WIRING.md) - debug-only
 // death test for Renderer::SubmitIndirect()'s ONE allowed functional change
 // (PHASE0's second scope boundary): a Pipeline that carries a real

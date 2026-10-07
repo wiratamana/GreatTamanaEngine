@@ -67,6 +67,17 @@ enum class VertexLayout {
     PositionNormalInstanced,
 };
 
+// Number of VertexLayout enumerators. Keep in sync with the enum above.
+inline constexpr std::size_t kVertexLayoutCount = 4;
+
+// PipelineOverrideSet::byLayout (SceneQuery.h) is sized off this constant and
+// indexed with an unchecked operator[] in ResolveOverridePipeline() - if a
+// new VertexLayout is ever added without bumping this constant, that is a
+// silent out-of-bounds read, not a safely-skipped draw. Catch it at compile
+// time instead.
+static_assert(kVertexLayoutCount == static_cast<std::size_t>(VertexLayout::PositionNormalInstanced) + 1,
+    "kVertexLayoutCount must equal the enum's last entry + 1 - add a new case and bump this constant together.");
+
 // Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE3 - the
 // maximum number of color attachments a single Pipeline can be built
 // against. Mirrors gte::rg::kMaxColorAttachments
@@ -236,6 +247,14 @@ public:
     // never called with a Pipeline built this way.
     bool HasSceneServicesSet() const noexcept { return m_hasSceneServicesSet; }
 
+    // True iff built with a non-null materialSetLayout - this Pipeline's
+    // VkPipelineLayout actually declares a descriptor set at index 0 for a
+    // material texture. Mirrors HasSceneServicesSet(). A depth-only pipeline
+    // built with useMaterialTexture = false reports false here, which is what
+    // lets Renderer::Submit() safely drop a non-null materialDescriptorSet
+    // instead of binding it against a pipeline layout with no set 0.
+    bool HasMaterialSet() const noexcept { return m_hasMaterialSet; }
+
 private:
     void Destroy() noexcept;
 
@@ -248,6 +267,9 @@ private:
     // Global Scene Services Descriptor Set campaign (better-render-pass-6),
     // PHASE3 - see HasSceneServicesSet() above.
     bool m_hasSceneServicesSet = false;
+
+    // See HasMaterialSet() above.
+    bool m_hasMaterialSet = false;
     // Owned ONLY when this Pipeline needed a zero-binding filler at set = 0
     // (sceneServicesSetLayout != VK_NULL_HANDLE AND neither
     // materialSetLayout nor instanceBufferSetLayout was supplied).
