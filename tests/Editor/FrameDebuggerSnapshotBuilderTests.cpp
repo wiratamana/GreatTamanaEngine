@@ -1264,6 +1264,54 @@ TEST(FrameDebuggerSnapshotBuilderTest, DrawSkyBackgroundLeafSurvivesAlongsideCom
     EXPECT_EQ(snapshot.totalEventCount, 8);
 }
 
+// Phase A (frame-debugger rehaul) - privateWriteTextureName exclusion rule.
+// A leaf that writes the shared "GameView" buffer (RenderOpaque,
+// DrawSkyBackground) must get privateWriteTextureName == std::nullopt, while
+// a genuine private-resource leaf (a Compute LUT pass writing its own
+// texture) must get it populated with that resource's own name.
+TEST(FrameDebuggerSnapshotBuilderTest, PrivateWriteTextureNameExcludesGameViewButPopulatesForPrivateResource)
+{
+    rg::RenderGraphSnapshot graphSnapshot;
+
+    rg::RenderGraphPassSnapshot lutPass = MakeComputePass("SkyLutPass");
+    lutPass.writeNames.push_back("TransmittanceLut");
+    lutPass.writeKinds.push_back(rg::ResourceKind::Texture);
+    graphSnapshot.passesInExecutionOrder.push_back(lutPass);
+
+    rg::RenderGraphPassSnapshot renderOpaque = MakePass("RenderOpaque");
+    renderOpaque.writeNames.push_back("GameView");
+    renderOpaque.writeKinds.push_back(rg::ResourceKind::Texture);
+    graphSnapshot.passesInExecutionOrder.push_back(renderOpaque);
+
+    rg::RenderGraphPassSnapshot skyPass = MakePass("DrawSkyBackground");
+    skyPass.drawKind = rg::RenderPassDrawKind::DrawQuad;
+    skyPass.writeNames.push_back("GameView");
+    skyPass.writeKinds.push_back(rg::ResourceKind::Texture);
+    graphSnapshot.passesInExecutionOrder.push_back(skyPass);
+
+    const FrameDebuggerCaptureContext capture;
+    const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
+
+    ASSERT_EQ(snapshot.rootNodes.size(), 1u);
+    const FrameDebuggerEventNode& root = snapshot.rootNodes[0];
+    ASSERT_EQ(root.children.size(), 3u); // "Compute Dispatches (Pre-GameView)" group + RenderOpaque + DrawSkyBackground.
+
+    const FrameDebuggerEventNode& preGroup = root.children[0];
+    ASSERT_EQ(preGroup.children.size(), 1u);
+    const FrameDebuggerEventNode& lutLeaf = preGroup.children[0];
+    ASSERT_TRUE(lutLeaf.details.has_value());
+    ASSERT_TRUE(lutLeaf.details->privateWriteTextureName.has_value());
+    EXPECT_EQ(*lutLeaf.details->privateWriteTextureName, "TransmittanceLut");
+
+    const FrameDebuggerEventNode& renderOpaqueLeaf = root.children[1];
+    ASSERT_TRUE(renderOpaqueLeaf.details.has_value());
+    EXPECT_FALSE(renderOpaqueLeaf.details->privateWriteTextureName.has_value());
+
+    const FrameDebuggerEventNode& skyLeaf = root.children[2];
+    ASSERT_TRUE(skyLeaf.details.has_value());
+    EXPECT_FALSE(skyLeaf.details->privateWriteTextureName.has_value());
+}
+
 // NEW - Render Pass campaign, PHASE4, Step 3.5 - the concrete proof the
 // "RenderTransparent" mechanism is genuinely generic, not just "generic in
 // theory": since that pass never actually declares itself in the graph

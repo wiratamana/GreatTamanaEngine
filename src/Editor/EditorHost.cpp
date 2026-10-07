@@ -486,6 +486,11 @@ int EditorHost::Run()
         // RenderGraphTimestampPool.
         m_renderGraph.SetGpuTimingCaptureEnabled(Profiling::FrameProfiler::Instance().IsCaptureEnabled());
 
+        // Event snapshot capture (Frame Debugger per-pass preview) is gated
+        // the same way: only pay the vkCmdCopyImage2 cost while the Frame
+        // Debugger itself is enabled, never unconditionally in every build.
+        m_renderGraph.SetEventSnapshotCaptureEnabled(m_editorLayer->FrameDebuggerGetState().enabled);
+
         // Clear last frame's transient "just pressed/released" flags and
         // per-frame mouse/wheel deltas before this frame's events arrive.
         inputState.BeginFrame();

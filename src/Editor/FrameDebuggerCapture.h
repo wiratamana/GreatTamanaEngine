@@ -272,6 +272,14 @@ public:
     // Meaningful only when HasRetainedEventImage() is true.
     const rg::EventSnapshotResource& RetainedEventImage() const noexcept { return m_retainedEventImage; }
 
+    // True if the retained image above is a DEPTH-only capture (a pass that
+    // wrote depth but no color, e.g. Shadow.DepthPass.Draw) rather than
+    // color - set inside FlushPendingCapture(). Meaningful only when
+    // HasRetainedEventImage() is true. A caller must branch on this, never
+    // assume color - see CommandBuffer::Draw()'s own "color when both are
+    // present, depth only when color is absent" preference.
+    bool RetainedEventIsDepth() const noexcept { return m_retainedEventIsDepth; }
+
     // Every DISTINCT, non-empty real Pipeline debug name recorded via
     // RecordDraw() since the last Reset(), in first-seen order.
     const std::vector<std::string>& PipelineDebugNames() const noexcept { return m_pipelineDebugNames; }
@@ -367,6 +375,7 @@ private:
     VkDevice m_eventCaptureDevice = VK_NULL_HANDLE;
     int m_armedEventIndex = -1;
     int m_retainedEventIndex = -1;
+    bool m_retainedEventIsDepth = false; // see RetainedEventIsDepth() above.
     struct PendingEventCapture {
         VkImage image = VK_NULL_HANDLE;
         VkExtent2D extent{};

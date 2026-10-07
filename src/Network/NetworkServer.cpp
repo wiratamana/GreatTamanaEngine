@@ -623,6 +623,9 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
     // "index" parsing (identical shape - a plain, required event index) -
     // never a second, near-duplicate parser. A NEW route, additive only -
     // every one of the seven routes above stays byte-for-byte unchanged.
+    // CURRENTLY ALWAYS 404/found==false end-to-end - see
+    // Core/FrameDebuggerEventSink.h's own doc comment for why (zero real
+    // CommandBuffer::Draw() call sites exist in this engine yet).
     server.Get("/frame_debugger/get_event_texture",
         [frameDebuggerCommandBridge](const httplib::Request& req, httplib::Response& res) {
             const ParsedFrameDebuggerSelectEventQuery parsed =

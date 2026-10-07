@@ -1,11 +1,14 @@
 #pragma once
 
-// Cheap, always-on "what did this pass just write" capture: after a pass's
-// real GPU work records, its color/depth write target is copied into a
-// small, pooled scratch image instead of redrawing the whole scene again to
-// reconstruct the same information. Mirrors RenderGraphTimestampPool's own
-// shape exactly - same name-free, positional slot table, same two-layer
-// on/off gate, same frame-in-flight-safe physical region split.
+// Gated "what did this pass just write" capture: after a pass's real GPU
+// work records, its color/depth write target is copied into a small, pooled
+// scratch image instead of redrawing the whole scene again to reconstruct
+// the same information. Disarmed by default (m_captureEnabled == false) -
+// only pays its vkCmdCopyImage2+barrier cost while something actually turns
+// it on (see RenderGraph::SetEventSnapshotCaptureEnabled()). Mirrors
+// RenderGraphTimestampPool's own shape exactly - same name-free, positional
+// slot table, same two-layer on/off gate, same frame-in-flight-safe
+// physical region split.
 
 #include "RenderGraphBarrierPlanner.h"
 #include "RenderGraphNameSlotTable.h"
@@ -147,7 +150,10 @@ private:
     VmaAllocator m_allocator = VK_NULL_HANDLE;
     std::shared_ptr<GpuMemoryTracker> m_tracker;
     VkDevice m_device = VK_NULL_HANDLE;
-    bool m_captureEnabled = true;
+    // Defaults OFF - only EditorHost's per-frame pump (driven by the Frame
+    // Debugger's own enabled state) ever turns this on. Never on by default
+    // in any build, including Player/Release.
+    bool m_captureEnabled = false;
     std::uint32_t m_slotBudget = 0;
     std::uint32_t m_regionCount = 1;
     std::uint32_t m_activeRegion = 0;

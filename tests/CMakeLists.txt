@@ -2389,6 +2389,10 @@ set(GTE_TEST_SOURCES
     Renderer/RenderGraph/RenderGraphSnapshotFormattingTests.cpp
     Renderer/RenderGraph/RenderGraphMetadataTests.cpp
     Renderer/RenderGraph/RenderGraphDebugTextureRegistryTests.cpp
+    # Tier-2 (real, headless GPU) proof that RegisterDebugTextureSnapshots()
+    # (RenderGraph.cpp) copies a real VkSampler into DebugTextureSnapshot -
+    # the Prerequisite struct fix EnsurePreviewDescriptor() depends on.
+    Renderer/RenderGraph/RenderGraphDebugTextureSnapshotSamplerTests.cpp
     Renderer/RenderGraph/RenderGraphDebugVolumeTextureRegistryTests.cpp
     Renderer/RenderGraph/RenderPipelineTests.cpp
     # Real, headless-GPU, numerically-asserted tests proving both valid

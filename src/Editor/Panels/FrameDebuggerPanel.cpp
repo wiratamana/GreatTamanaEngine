@@ -3,6 +3,7 @@
 #include "../EditorContext.h"
 #include "../MemoryPanelData.h" // gte::ToString(VkFormat) - reused for the real render-target format label (PHASE3).
 #include "../../Encoding/HdrColorVisualization.h" // task_manager/frame-debugger-9 campaign, PHASE3 - Encoding::ConvertHdrRgba16fToRgba8().
+#include "../../Encoding/DepthVisualization.h" // Encoding::ConvertDepthToGrayscaleRgba8() - depth-only per-draw event captures.
 #include "../../Encoding/PixelConversion.h" // PHASE3 - Encoding::ConvertBgraToRgbaInPlace().
 #include "../../Encoding/PngEncoder.h" // Frame Debugger per-draw event capture - Encoding::EncodeRgba8ToPng().
 #include "../../Encoding/SingleChannelVisualization.h"
@@ -1433,12 +1434,20 @@ FrameDebuggerEventTextureResult FrameDebuggerPanel::GetEventTextureFromCommand(i
         return result;
     }
 
+    // Real aspect this exact capture was taken with - a depth-only pass
+    // (e.g. Shadow.DepthPass.Draw) retains a depth image here, never color.
+    // See CommandBuffer::Draw()'s own "color when both are present, depth
+    // only when color is absent" preference, mirrored by
+    // FrameDebuggerCaptureContext::FlushPendingCapture().
+    const bool isDepth = m_captureContext.RetainedEventIsDepth();
+    const VkImageAspectFlags aspect = isDepth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+
     // Same rare, explicit, human/LLM-driven stall GET /get_texture already
     // pays - never called from a per-frame path.
     m_frameRenderer->WaitForGpuIdle();
 
-    const Renderer::CapturedRawPixels raw = m_frameRenderer->CaptureImagePixels(
-        retained.Image(), VK_IMAGE_ASPECT_COLOR_BIT, retained.Format(), retained.Extent(),
+    Renderer::CapturedRawPixels raw = m_frameRenderer->CaptureImagePixels(
+        retained.Image(), aspect, retained.Format(), retained.Extent(),
         rg::ResourceState{ VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
             VK_ACCESS_2_SHADER_READ_BIT });
     if (raw.pixels.empty()) {
@@ -1447,7 +1456,13 @@ FrameDebuggerEventTextureResult FrameDebuggerPanel::GetEventTextureFromCommand(i
 
     std::vector<std::uint8_t> converted;
     const std::uint8_t* encodePixels = raw.pixels.data();
-    if (raw.format == VK_FORMAT_R16G16B16A16_SFLOAT) {
+    if (isDepth) {
+        // Safe in-place conversion - mirrors EditorHost.cpp's identical
+        // GET /get_texture depth-channel branch.
+        if (!Encoding::ConvertDepthToGrayscaleRgba8(raw.pixels.data(), raw.format, raw.width, raw.height, raw.pixels.data())) {
+            return result; // Depth format not recognized - fail cleanly.
+        }
+    } else if (raw.format == VK_FORMAT_R16G16B16A16_SFLOAT) {
         converted.resize(static_cast<std::size_t>(raw.width) * static_cast<std::size_t>(raw.height) * 4);
         if (!Encoding::ConvertHdrRgba16fToRgba8(raw.pixels.data(), raw.format, raw.width, raw.height, converted.data())) {
             return result;
@@ -1456,10 +1471,7 @@ FrameDebuggerEventTextureResult FrameDebuggerPanel::GetEventTextureFromCommand(i
     } else if (IsBgraFormat(raw.format)) {
         Encoding::ConvertBgraToRgbaInPlace(raw.pixels.data(), raw.width, raw.height);
     }
-    // else: already tightly-packed RGBA8 - no conversion needed. A captured
-    // depth attachment is never routed here - this method only ever reads
-    // the COLOR half (see CommandBuffer::Draw()'s own "color when both are
-    // present" preference, mirrored by NoteCommandResult()'s own caller).
+    // else: already tightly-packed RGBA8 - no conversion needed.
 
     result.found = true;
     result.pixels = Encoding::EncodeRgba8ToPng(encodePixels, raw.width, raw.height);

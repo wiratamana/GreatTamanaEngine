@@ -355,9 +355,10 @@ public:
     // own rendering bracket closes.
     void SetFrameDebuggerEventSink(FrameDebuggerEventSink* sink) noexcept { m_frameDebuggerEventSink = sink; }
 
-    // Cheap, always-on per-pass write-target capture - see
+    // Per-pass write-target capture - disarmed by default, see
     // RenderGraphEventSnapshotPool.h's own class comment. Gated the same
-    // two-layer way as GPU timing (SetCaptureEnabled() at runtime).
+    // two-layer way as GPU timing: EditorHost's per-frame pump drives this
+    // from the Frame Debugger's own enabled state (SetCaptureEnabled() at runtime).
     void SetEventSnapshotCaptureEnabled(bool enabled) noexcept { m_eventSnapshotPool.SetCaptureEnabled(enabled); }
 
     // One real pass write captured this Execute() call, keyed positionally

@@ -727,7 +727,10 @@ public:
     // re-arms capture for `eventIndex` if it wasn't already armed (so a
     // caller that keeps polling the same index eventually gets a real
     // image, once the next captured frame actually produces one). Always
-    // `found == false` for NullEditorLayer.
+    // `found == false` for NullEditorLayer. CURRENTLY ALWAYS `found ==
+    // false` for the real implementation too - see
+    // Core/FrameDebuggerEventSink.h's own doc comment for why (zero real
+    // CommandBuffer::Draw() call sites exist anywhere in this engine yet).
     virtual FrameDebuggerEventTextureResult FrameDebuggerGetEventTexture(int eventIndex) = 0;
 
     // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),

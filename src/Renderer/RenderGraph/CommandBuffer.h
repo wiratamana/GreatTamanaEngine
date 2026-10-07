@@ -172,7 +172,11 @@ public:
     // DrawIndexed(). Opens/closes its own BeginGraphPassRecording()/
     // EndGraphPassRecording() bracket, same as Dispatch() above, so a pass
     // author never has to call either Renderer method directly even for a
-    // pure graphics draw issued through CommandBuffer.
+    // pure graphics draw issued through CommandBuffer. This is also the one
+    // place FrameDebuggerEventSink::NoteCommandResult() is wired - see that
+    // interface's own doc comment for the current "zero real call sites"
+    // caveat; a vertex-less/no-Mesh overload would be needed before a
+    // full-screen-triangle pass could ever use this method.
     void Draw(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix = Mat4::Identity(),
         const Mat4& viewProjMatrix = Mat4::Identity(), VkDescriptorSet materialDescriptorSet = VK_NULL_HANDLE);
 

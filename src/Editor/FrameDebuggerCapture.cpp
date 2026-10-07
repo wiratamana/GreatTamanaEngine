@@ -170,6 +170,7 @@ void FrameDebuggerCaptureContext::FlushPendingCapture(VkCommandBuffer cmd)
         m_eventCaptureDevice, capture.image, capture.extent, capture.format, capture.aspect, srcState,
         "FrameDebuggerPerDrawEventSnapshot");
     m_retainedEventIndex = m_armedEventIndex;
+    m_retainedEventIsDepth = isDepth;
 }
 
 } // namespace gte
