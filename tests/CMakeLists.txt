@@ -2343,6 +2343,10 @@ set(GTE_TEST_SOURCES
     Renderer/RenderGraph/RenderGraphBuilderTests.cpp
     Renderer/RenderGraph/RenderPassTests.cpp
     Renderer/RenderGraph/RenderGraphCompilerTests.cpp
+    # Unit tests for RenderGraphBuilder::AddBlitPass() - replaces the old
+    # always-on BlitValidation production pass with real, device-free
+    # compile/cull coverage.
+    Renderer/RenderGraph/RenderGraphBlitPassTests.cpp
     # better-render-pass-5 effort, BLOCK 3, PHASE1/PHASE6 - Tier-1 tests
     # for the new PreOpaque stage ordering guarantee and the
     # FindPassesNotTaggedPreOpaque() runtime safety-net logic.

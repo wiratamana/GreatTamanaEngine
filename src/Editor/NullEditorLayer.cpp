@@ -34,52 +34,6 @@ public:
     Vec3 SceneViewCameraWorldPosition() const override { return Vec3::Zero(); }
     void SetGameViewCompositedTexture(RenderTexture* /*texture*/) override { }
     void SetSceneViewCompositedTexture(RenderTexture* /*texture*/) override { }
-    std::optional<rg::TextureHandle> AddBlurValidationPass(rg::RenderGraphBuilder& /*builder*/,
-        Renderer& /*renderer*/, rg::TextureHandle /*sceneViewHandle*/, VkExtent2D /*sceneExtent*/,
-        rg::RenderPassToggleRegistry* /*toggleRegistry*/) override
-    {
-        return std::nullopt;
-    }
-    void FinalizeBlurValidationForSampling(VkCommandBuffer /*cmd*/) override { }
-
-    // task_manager/mrt-1 campaign, PHASE4 - a release build never declares
-    // this pass at all, mirroring AddBlurValidationPass()/
-    // FinalizeBlurValidationForSampling() above exactly.
-    std::optional<GBufferValidationHandles> AddGBufferValidationPass(rg::RenderGraphBuilder& /*builder*/,
-        Renderer& /*renderer*/, VkExtent2D /*sceneExtent*/, rg::RenderPassToggleRegistry* /*toggleRegistry*/) override
-    {
-        return std::nullopt;
-    }
-    void FinalizeGBufferValidationForSampling(VkCommandBuffer /*cmd*/) override { }
-
-    // task_manager/better-render-pass-7 campaign (better-render-pass-3
-    // campaign, BLOCK5), PHASE5 - a release build never declares this pass
-    // pair at all, mirroring AddBlurValidationPass()/AddGBufferValidationPass()
-    // above exactly.
-    std::optional<TextureArrayValidationHandles> AddTextureArrayValidationPass(rg::RenderGraphBuilder& /*builder*/,
-        Renderer& /*renderer*/, rg::RenderPassToggleRegistry* /*toggleRegistry*/) override
-    {
-        return std::nullopt;
-    }
-    void FinalizeTextureArrayValidationForSampling(VkCommandBuffer /*cmd*/) override { }
-
-    // A release build never declares this pass pair at all, mirroring
-    // AddTextureArrayValidationPass() immediately above exactly.
-    std::optional<ArrayLayerRenderValidationHandles> AddArrayLayerRenderValidationPass(rg::RenderGraphBuilder& /*builder*/,
-        Renderer& /*renderer*/, rg::RenderPassToggleRegistry* /*toggleRegistry*/) override
-    {
-        return std::nullopt;
-    }
-    void FinalizeArrayLayerRenderValidationForSampling(VkCommandBuffer /*cmd*/) override { }
-
-    // editor-core-separation-26 campaign, PHASE6 - a release build never
-    // declares this pass at all, mirroring AddBlurValidationPass()/
-    // AddGBufferValidationPass() above exactly.
-    std::optional<rg::TextureHandle> AddBlitValidationPass(rg::RenderGraphBuilder& /*builder*/,
-        Renderer& /*renderer*/, rg::RenderPassToggleRegistry* /*toggleRegistry*/) override
-    {
-        return std::nullopt; // Headless/Player build - no Frame Debugger, no Debug-category passes at all.
-    }
     void RenderSceneGrid(Renderer& /*renderer*/, VkCommandBuffer /*cmd*/, const Mat4& /*sceneViewProjection*/) override { }
     void BuildUI(Game& /*game*/, Renderer& /*renderer*/, const rg::RenderGraph& /*renderGraph*/,
         const std::vector<GpuDrivenBatchDebugInfo>& /*gpuDrivenBatchDebugInfo*/,
@@ -117,14 +71,6 @@ public:
     // affect at all).
     void FrameDebuggerOpenWindow() override { }
     void FrameDebuggerSetEnabled(bool /*enabled*/) override { }
-
-    // editor-core-separation-8 campaign, PHASE3 - a release build has no
-    // Blur/GBuffer debug checkboxes to affect at all, mirroring
-    // FrameDebuggerSetEnabled() immediately above.
-    void SetShowBlurredSceneOutput(bool /*enabled*/) override { }
-    void SetShowGBufferValidationOutput(bool /*enabled*/) override { }
-    void SetShowTextureArrayValidationOutput(bool /*enabled*/) override { }
-    void SetShowArrayLayerRenderValidationOutput(bool /*enabled*/) override { }
 
     // editor-core-separation-16 campaign (On-Engine Project Workflow plan,
     // BIG-STEP 2), PHASE4 - a release build has no "New Project..." window

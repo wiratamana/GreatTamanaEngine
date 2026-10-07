@@ -137,40 +137,26 @@ class RenderFeatureCompositor;
 struct FrameStats {
 };
 
-// gte_core's own public facade (design doc, Section 5; PHASE0's Locked
-// Design Decision #8's own EXTENDED contract). Constructed by injecting an
+// gte_core's own public facade. Constructed by injecting an
 // ISurfaceProvider& (the host's own window/surface abstraction) and an
 // IHostServices& (the host's own logging/diagnostics hook) - Core itself
 // never sees SDL, ImGui, or any concrete Editor type by name; the ONE
 // exception is the nullable IEditorLayer* hook above, consulted only
 // through a forward-declared pointer, never a concrete Editor include.
 //
-// editor-core-separation-1 campaign, PHASE13
-// (PHASE13_CORE_FRAME_ORCHESTRATION_EXTRACTION.md) - Update()/BuildFrame()/
-// Present() now contain the REAL per-frame orchestration logic that used to
-// live inside Application::Run()'s own body: offscreen regime (Game
-// View + Scene View, feature render passes, GPU-skinning dispatch requests,
-// GPU-driven batch culling readback), present regime (the swapchain-present
-// pass), and every render-graph-frame-building IEditorLayer call site
-// (Locked Design Decision #8's first bucket - GameViewTarget()/
-// SceneViewTarget()/SceneViewProjection()/SceneViewCameraWorldPosition()/
-// RenderSceneGrid()/AddBlurValidationPass()/FinalizeBlurValidationForSampling()/
-// AddGBufferValidationPass()/FinalizeGBufferValidationForSampling()/
-// SetGameViewCompositedTexture()/SetSceneViewCompositedTexture()/
-// PrepareFrameDebuggerCaptureContext()/ConsumePendingFrameDebuggerReplayRequest()),
-// reached ONLY through the null-checked m_editorLayer hook below. See
-// PHASE13_COMPLETION_REPORT.md for the full, itemized accounting of every
-// one of Application::Run()'s ~30 IEditorLayer call sites' new home.
+// Update()/BuildFrame()/Present() contain the real per-frame orchestration
+// logic: offscreen regime (Game View + Scene View, feature render passes,
+// GPU-skinning dispatch requests, GPU-driven batch culling readback),
+// present regime (the swapchain-present pass), and every render-graph-
+// frame-building IEditorLayer call site, reached only through the
+// null-checked m_editorLayer hook below.
 //
-// A handful of small, ADDITIVE accessors beyond Core's own originally-frozen
-// minimum (design doc Section 5.3: "Exposed OUT... At minimum:... whatever
-// draw-stats/profiling data the Editor UI displays") were added this phase,
-// each documented at its own declaration below, so host-level code
-// (Application::Run() today, EditorHost later) can keep reaching data that
-// physically moved into Core without Core ever calling back into a host-level
-// automation bridge/IEditorLayer method itself (design doc Section 6.1: "Core
-// stays a pure engine facade: no HTTP server, no automation-bridge knowledge,
-// ever").
+// A handful of small, additive accessors beyond Core's own minimal surface
+// exist so host-level code (Application::Run(), EditorHost) can keep
+// reaching data that lives inside Core, without Core ever calling back
+// into a host-level automation bridge/IEditorLayer method itself - Core
+// stays a pure engine facade: no HTTP server, no automation-bridge
+// knowledge, ever.
 class Core {
 public:
     Core(ISurfaceProvider& surfaceProvider, IHostServices& hostServices);

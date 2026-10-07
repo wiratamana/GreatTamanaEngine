@@ -1518,10 +1518,6 @@ void Core::BuildFrame()
                         }
                     }
 
-                    rg::TextureHandle sceneColorHandleForBlurValidation{};
-                    VkExtent2D sceneExtentForBlurValidation{};
-                    bool sceneVisibleForBlurValidation = false;
-
                     if (sceneTarget != nullptr) {
                         const VkExtent2D extent = sceneTarget->Extent();
                         const float aspect =
@@ -1553,10 +1549,6 @@ void Core::BuildFrame()
                         m_currentViewDataThisFrame.push_back(sceneViewData);
 
                         frame.activeViews.push_back(rg::RenderViewId::Named("Scene"));
-
-                        sceneColorHandleForBlurValidation = h;
-                        sceneExtentForBlurValidation = extent;
-                        sceneVisibleForBlurValidation = true;
                     }
 
                     m_offscreenRenderPipeline.DeclareInto(b, frame);
@@ -1591,71 +1583,6 @@ void Core::BuildFrame()
                             recordViewBackground, *gameTarget, &m_renderPassToggleRegistry);
                         for (const rg::TextureHandle& replayHandle : replayStepHandles) {
                             outputs.push_back(replayHandle);
-                        }
-                    }
-
-                    if (sceneVisibleForBlurValidation && m_editorLayer != nullptr) {
-                        if (const std::optional<rg::TextureHandle> blurHandle = m_editorLayer->AddBlurValidationPass(
-                                b, m_renderer, sceneColorHandleForBlurValidation, sceneExtentForBlurValidation,
-                                &m_renderPassToggleRegistry)) {
-                            outputs.push_back(*blurHandle);
-                        }
-                    }
-
-                    if (sceneVisibleForBlurValidation && m_editorLayer != nullptr) {
-                        if (const std::optional<GBufferValidationHandles> gbufferHandles =
-                                m_editorLayer->AddGBufferValidationPass(
-                                    b, m_renderer, sceneExtentForBlurValidation, &m_renderPassToggleRegistry)) {
-                            outputs.push_back(gbufferHandles->albedo);
-                            outputs.push_back(gbufferHandles->normal);
-                            outputs.push_back(gbufferHandles->visualized);
-                        }
-                    }
-
-                    // task_manager/better-render-pass-7 campaign
-                    // (better-render-pass-3 campaign, BLOCK5 - Array/Cubemap
-                    // Texture Resources), PHASE5 - see
-                    // IEditorLayer::AddTextureArrayValidationPass()'s own
-                    // doc comment.
-                    if (sceneVisibleForBlurValidation && m_editorLayer != nullptr) {
-                        if (const std::optional<IEditorLayer::TextureArrayValidationHandles> textureArrayHandles =
-                                m_editorLayer->AddTextureArrayValidationPass(
-                                    b, m_renderer, &m_renderPassToggleRegistry)) {
-                            outputs.push_back(textureArrayHandles->layer0);
-                            outputs.push_back(textureArrayHandles->layer1);
-                            outputs.push_back(textureArrayHandles->layer2);
-                            outputs.push_back(textureArrayHandles->layer3);
-                        }
-                    }
-
-                    // See IEditorLayer::AddArrayLayerRenderValidationPass()'s
-                    // own doc comment.
-                    if (sceneVisibleForBlurValidation && m_editorLayer != nullptr) {
-                        if (const std::optional<IEditorLayer::ArrayLayerRenderValidationHandles>
-                                arrayLayerRenderValidationHandles =
-                                    m_editorLayer->AddArrayLayerRenderValidationPass(
-                                        b, m_renderer, &m_renderPassToggleRegistry)) {
-                            outputs.push_back(arrayLayerRenderValidationHandles->layer0);
-                            outputs.push_back(arrayLayerRenderValidationHandles->layer1);
-                            outputs.push_back(arrayLayerRenderValidationHandles->layer2);
-                            outputs.push_back(arrayLayerRenderValidationHandles->layer3);
-                        }
-                    }
-
-                    // editor-core-separation-26 campaign, PHASE6 (Locked
-                    // Decision 3) - always declared when an Editor layer is
-                    // present (no bespoke feature toggle of its own - see
-                    // IEditorLayer::AddBlitValidationPass()'s own doc
-                    // comment). This outputs.push_back() is NOT optional/
-                    // cosmetic - "BlitValidationOutput"'s TextureHandle has
-                    // zero in-frame readers; without reaching this Execute()
-                    // call's own finalOutputs root set,
-                    // RenderGraphCompiler::Compile() culls the whole
-                    // "BlitValidationBlit" pass every single frame.
-                    if (m_editorLayer != nullptr) {
-                        if (const std::optional<rg::TextureHandle> blitValidationHandle =
-                                m_editorLayer->AddBlitValidationPass(b, m_renderer, &m_renderPassToggleRegistry)) {
-                            outputs.push_back(*blitValidationHandle);
                         }
                     }
 
@@ -1738,52 +1665,6 @@ void Core::BuildFrame()
                 }
                 entry.lastResult = entry.callback(offscreenCmd);
             }
-            if (m_editorLayer != nullptr) {
-                m_editorLayer->FinalizeBlurValidationForSampling(offscreenCmd);
-            }
-            m_renderGraph.NotifyDebugTextureStateOverride(
-                "BlurredSceneOutput", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
-
-            if (m_editorLayer != nullptr) {
-                m_editorLayer->FinalizeGBufferValidationForSampling(offscreenCmd);
-            }
-            m_renderGraph.NotifyDebugTextureStateOverride(
-                "GBufferAlbedo", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
-            m_renderGraph.NotifyDebugTextureStateOverride(
-                "GBufferNormal", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
-            m_renderGraph.NotifyDebugTextureStateOverride(
-                "GBufferVisualized", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
-
-            // task_manager/better-render-pass-7 campaign (better-render-pass-3
-            // campaign, BLOCK5 - Array/Cubemap Texture Resources), PHASE5 -
-            // see IEditorLayer::FinalizeTextureArrayValidationForSampling()'s
-            // own doc comment.
-            if (m_editorLayer != nullptr) {
-                m_editorLayer->FinalizeTextureArrayValidationForSampling(offscreenCmd);
-            }
-            m_renderGraph.NotifyDebugTextureStateOverride(
-                "ManualVerifyArrayLayer0", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
-            m_renderGraph.NotifyDebugTextureStateOverride(
-                "ManualVerifyArrayLayer1", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
-            m_renderGraph.NotifyDebugTextureStateOverride(
-                "ManualVerifyArrayLayer2", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
-            m_renderGraph.NotifyDebugTextureStateOverride(
-                "ManualVerifyArrayLayer3", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
-
-            // See IEditorLayer::FinalizeArrayLayerRenderValidationForSampling()'s
-            // own doc comment.
-            if (m_editorLayer != nullptr) {
-                m_editorLayer->FinalizeArrayLayerRenderValidationForSampling(offscreenCmd);
-            }
-            m_renderGraph.NotifyDebugTextureStateOverride(
-                "ArrayLayerRenderValidationLayer0", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
-            m_renderGraph.NotifyDebugTextureStateOverride(
-                "ArrayLayerRenderValidationLayer1", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
-            m_renderGraph.NotifyDebugTextureStateOverride(
-                "ArrayLayerRenderValidationLayer2", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
-            m_renderGraph.NotifyDebugTextureStateOverride(
-                "ArrayLayerRenderValidationLayer3", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
-
             m_renderer.EndOffscreenRenderGraphRecording();
 
             // GPU-Driven Frustum Culling + Indirect Draw campaign

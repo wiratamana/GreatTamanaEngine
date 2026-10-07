@@ -2,17 +2,12 @@
 
 #include <cassert>
 
-#include "ArrayLayerRenderValidation.h"
 #include "../Core/Logging.h"
 #include "BuiltinFeatureEditorPanelRegistry.h"
-#include "BlitValidation.h" // editor-core-separation-26 campaign, PHASE6.
-#include "ComputeBlurValidation.h"
 #include "DockLayout.h"
 #include "EditorCamera.h"
 #include "EditorContext.h"
 #include "EditorGpuMemoryNameOverlay.h"
-#include "GBufferValidation.h"
-#include "TextureArrayValidation.h"
 #include "GpuDrivenBatchTestSpawner.h"
 #include "ImGuiIdConflictGuard.h" // task_manager/editor-core-separation-10 campaign, PHASE1.
 #include "ImGuiMemoryTracker.h"
@@ -278,11 +273,6 @@ public:
 
         ReleaseGameViewDescriptor();
         ReleaseSceneViewDescriptor();
-        ReleaseBlurredSceneOutputDescriptor();
-        // task_manager/mrt-1 campaign, PHASE4 - same "release BEFORE
-        // ImGui_ImplVulkan_Shutdown()" requirement as ReleaseBlurredSceneOutputDescriptor()
-        // immediately above.
-        ReleaseGBufferValidationOutputDescriptor();
         // task_manager/frame-debugger-3 campaign, PHASE4 - same "release
         // BEFORE ImGui_ImplVulkan_Shutdown()" requirement as
         // Release*Descriptor() above (m_frameDebuggerPanel is declared,
@@ -464,110 +454,6 @@ public:
     void SetGameViewCompositedTexture(RenderTexture* texture) override { m_gameViewComposited = texture; }
     void SetSceneViewCompositedTexture(RenderTexture* texture) override { m_sceneViewComposited = texture; }
 
-
-    // Phase 7 (COMPUTE_PHASE7_VALIDATION_TESTING_TOOLING_STRATEGY_v2.md) -
-    // see IEditorLayer::AddBlurValidationPass()'s own doc comment. Gated
-    // on BOTH the "Show Compute Blur (debug)" toggle AND the Scene panel
-    // actually being visible last frame (m_ctx.sceneViewVisible) AND a
-    // non-degenerate extent - mirroring GameViewTarget()/SceneViewTarget()'s
-    // own "only resize/act when the extent is non-zero" guard.
-    std::optional<rg::TextureHandle> AddBlurValidationPass(rg::RenderGraphBuilder& builder, Renderer& renderer,
-        rg::TextureHandle sceneViewHandle, VkExtent2D sceneExtent,
-        rg::RenderPassToggleRegistry* toggleRegistry) override
-    {
-        if (!m_ctx.showBlurredSceneOutput || !m_ctx.sceneViewVisible) {
-            return std::nullopt;
-        }
-        if (sceneExtent.width == 0 || sceneExtent.height == 0) {
-            return std::nullopt;
-        }
-        // editor-core-separation-21 campaign, PHASE4 - an ADDITIONAL,
-        // independent gate on top of the ctx.showBlurredSceneOutput toggle
-        // above, fixing PHASE3's confirmed-lie finding #21 (this pass's own
-        // per-row "Enabled" checkbox in the "Render Graph" panel used to be
-        // 100% cosmetic).
-        if (toggleRegistry != nullptr && !toggleRegistry->NoteDeclaredAndCheckEnabled("ComputeBlurValidation")) {
-            return std::nullopt;
-        }
-        return m_blurValidation.AddPass(builder, renderer, sceneViewHandle, m_sceneView.Sampler(), sceneExtent);
-    }
-
-    void FinalizeBlurValidationForSampling(VkCommandBuffer cmd) override { m_blurValidation.FinalizeForSampling(cmd); }
-
-    // task_manager/mrt-1 campaign, PHASE4 - see
-    // IEditorLayer::AddGBufferValidationPass()'s own doc comment. Gated on
-    // BOTH the "Show GBuffer Validation (debug)" toggle AND the Scene
-    // panel actually being visible last frame (m_ctx.sceneViewVisible) AND
-    // a non-degenerate extent - mirrors AddBlurValidationPass() above
-    // exactly, minus the Scene-View-texture-read parameter this pass does
-    // not need (see GBufferValidation.h's own header comment).
-    std::optional<GBufferValidationHandles> AddGBufferValidationPass(rg::RenderGraphBuilder& builder,
-        Renderer& renderer, VkExtent2D sceneExtent, rg::RenderPassToggleRegistry* toggleRegistry) override
-    {
-        if (!m_ctx.showGBufferValidationOutput || !m_ctx.sceneViewVisible) {
-            return std::nullopt;
-        }
-        if (sceneExtent.width == 0 || sceneExtent.height == 0) {
-            return std::nullopt;
-        }
-        return m_gbufferValidation.AddPass(builder, renderer, sceneExtent, toggleRegistry);
-    }
-
-    void FinalizeGBufferValidationForSampling(VkCommandBuffer cmd) override
-    {
-        m_gbufferValidation.FinalizeForSampling(cmd);
-    }
-
-    // task_manager/better-render-pass-7 campaign (better-render-pass-3
-    // campaign, BLOCK5 - Array/Cubemap Texture Resources), PHASE5 - see
-    // IEditorLayer::AddTextureArrayValidationPass()'s own doc comment.
-    // Gated on BOTH the "Show TextureArray Validation (debug)" toggle AND
-    // the Scene panel actually being visible last frame
-    // (m_ctx.sceneViewVisible) - mirrors AddGBufferValidationPass() above
-    // exactly, minus the sceneExtent parameter (this pass's own 64x64x4
-    // workload is entirely self-contained/fixed-size - see
-    // TextureArrayValidation.h's own header comment).
-    std::optional<IEditorLayer::TextureArrayValidationHandles> AddTextureArrayValidationPass(
-        rg::RenderGraphBuilder& builder, Renderer& renderer, rg::RenderPassToggleRegistry* toggleRegistry) override
-    {
-        if (!m_ctx.showTextureArrayValidationOutput || !m_ctx.sceneViewVisible) {
-            return std::nullopt;
-        }
-        return m_textureArrayValidation.AddPass(builder, renderer, toggleRegistry);
-    }
-
-    void FinalizeTextureArrayValidationForSampling(VkCommandBuffer cmd) override
-    {
-        m_textureArrayValidation.FinalizeForSampling(cmd);
-    }
-
-    // See IEditorLayer::AddArrayLayerRenderValidationPass()'s own doc
-    // comment. Gated on BOTH the "Show Array Layer Render Validation
-    // (debug)" toggle AND the Scene panel actually being visible last frame
-    // - mirrors AddTextureArrayValidationPass() above exactly.
-    std::optional<IEditorLayer::ArrayLayerRenderValidationHandles> AddArrayLayerRenderValidationPass(
-        rg::RenderGraphBuilder& builder, Renderer& renderer, rg::RenderPassToggleRegistry* toggleRegistry) override
-    {
-        if (!m_ctx.showArrayLayerRenderValidationOutput || !m_ctx.sceneViewVisible) {
-            return std::nullopt;
-        }
-        return m_arrayLayerRenderValidation.AddPass(builder, renderer, toggleRegistry);
-    }
-
-    void FinalizeArrayLayerRenderValidationForSampling(VkCommandBuffer cmd) override
-    {
-        m_arrayLayerRenderValidation.FinalizeForSampling(cmd);
-    }
-
-    // editor-core-separation-26 campaign, PHASE6 - see
-    // IEditorLayer::AddBlitValidationPass()'s own doc comment.
-    std::optional<rg::TextureHandle> AddBlitValidationPass(
-        rg::RenderGraphBuilder& builder, Renderer& renderer,
-        rg::RenderPassToggleRegistry* toggleRegistry) override
-    {
-        return m_blitValidation.AddPass(builder, renderer, toggleRegistry);
-    }
-
     // See IEditorLayer::RenderSceneGrid()'s own doc comment. Always called by
     // Application::Run() whenever "Scene" was rendered at all this frame (see
     // AddSceneViewPass()'s own new recordSceneOverlay parameter,
@@ -645,45 +531,6 @@ public:
                 m_lastKnownSceneView = sceneSource->View();
             }
         }
-        // Phase 7 - the blurred output's own ImGui descriptor, recreated
-        // whenever ComputeBlurValidation's underlying VkImageView actually
-        // changed (a resize, or its very first creation) - tracked via
-        // m_lastKnownBlurredView rather than "created once, never again"
-        // like gameViewDescriptor/sceneViewDescriptor above, since
-        // ComputeBlurValidation::AddPass() may resize its own RenderTexture
-        // out from under this class at any time this frame's earlier
-        // Execute() call (see Application::Run()), unlike m_gameView/
-        // m_sceneView, which only ever resize via THIS class's own
-        // GameViewTarget()/SceneViewTarget() (hence the ReleaseXDescriptor()
-        // + "== VK_NULL_HANDLE" pattern above already being sufficient for
-        // them).
-        if (RenderTexture* blurredOutput = m_blurValidation.OutputTexture()) {
-            if (m_ctx.blurredSceneOutputDescriptor == VK_NULL_HANDLE || blurredOutput->View() != m_lastKnownBlurredView) {
-                ReleaseBlurredSceneOutputDescriptor();
-                m_ctx.blurredSceneOutputDescriptor = ImGui_ImplVulkan_AddTexture(
-                    blurredOutput->Sampler(), blurredOutput->View(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-                m_lastKnownBlurredView = blurredOutput->View();
-            }
-        }
-
-        // task_manager/mrt-1 campaign, PHASE4 - the GBuffer Validation
-        // pass's own "visualized" (copy-of-albedo) output ImGui
-        // descriptor, tracked the exact same "recreate whenever the
-        // underlying view actually changed" way blurredOutput's own
-        // descriptor is above (m_gbufferValidation.AddPass() may resize
-        // its own RenderTextures out from under this class at any time
-        // this frame's earlier Execute() call, exactly like
-        // ComputeBlurValidation's own identical reasoning).
-        if (RenderTexture* gbufferVisualized = m_gbufferValidation.OutputTexture()) {
-            if (m_ctx.gbufferValidationOutputDescriptor == VK_NULL_HANDLE
-                || gbufferVisualized->View() != m_lastKnownGBufferValidationView) {
-                ReleaseGBufferValidationOutputDescriptor();
-                m_ctx.gbufferValidationOutputDescriptor = ImGui_ImplVulkan_AddTexture(
-                    gbufferVisualized->Sampler(), gbufferVisualized->View(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-                m_lastKnownGBufferValidationView = gbufferVisualized->View();
-            }
-        }
-
         BuildHierarchyPanel(game, renderer, m_ctx);
 #if GTE_ENABLE_PROJECT_PANEL
         BuildInspectorPanel(registry, m_ctx, renderer, m_assetPreview, m_assetPreviewMesh, m_boneViewer,
@@ -985,21 +832,6 @@ public:
     void FrameDebuggerOpenWindow() override { m_frameDebuggerPanel.RequestOpenWindow(m_ctx); }
     void FrameDebuggerSetEnabled(bool enabled) override { m_frameDebuggerPanel.SetEnabledFromCommand(m_ctx, enabled); }
 
-    // editor-core-separation-8 campaign, PHASE3 - see EditorLayer.h's own
-    // doc comments for the full contract; both simply flip the matching
-    // EditorContext bool directly, exactly like ScenePanel.cpp's own two
-    // checkboxes already do.
-    void SetShowBlurredSceneOutput(bool enabled) override { m_ctx.showBlurredSceneOutput = enabled; }
-    void SetShowGBufferValidationOutput(bool enabled) override { m_ctx.showGBufferValidationOutput = enabled; }
-    void SetShowTextureArrayValidationOutput(bool enabled) override
-    {
-        m_ctx.showTextureArrayValidationOutput = enabled;
-    }
-    void SetShowArrayLayerRenderValidationOutput(bool enabled) override
-    {
-        m_ctx.showArrayLayerRenderValidationOutput = enabled;
-    }
-
     // editor-core-separation-16 campaign (On-Engine Project Workflow
     // plan, BIG-STEP 2), PHASE4 - see IEditorLayer::
     // SetProjectLifecycleCapability()'s own doc comment for the full
@@ -1083,93 +915,20 @@ private:
         }
     }
 
-    void ReleaseBlurredSceneOutputDescriptor()
-    {
-        if (m_ctx.blurredSceneOutputDescriptor != VK_NULL_HANDLE) {
-            ImGui_ImplVulkan_RemoveTexture(m_ctx.blurredSceneOutputDescriptor);
-            m_ctx.blurredSceneOutputDescriptor = VK_NULL_HANDLE;
-            m_lastKnownBlurredView = VK_NULL_HANDLE;
-        }
-    }
-
-    // task_manager/mrt-1 campaign, PHASE4 - see ReleaseBlurredSceneOutputDescriptor()
-    // above's own identical shape/reasoning, applied to the GBuffer
-    // Validation pass's own "visualized" output descriptor instead.
-    void ReleaseGBufferValidationOutputDescriptor()
-    {
-        if (m_ctx.gbufferValidationOutputDescriptor != VK_NULL_HANDLE) {
-            ImGui_ImplVulkan_RemoveTexture(m_ctx.gbufferValidationOutputDescriptor);
-            m_ctx.gbufferValidationOutputDescriptor = VK_NULL_HANDLE;
-            m_lastKnownGBufferValidationView = VK_NULL_HANDLE;
-        }
-    }
-
     VkDevice m_device = VK_NULL_HANDLE;
     ImGuiContext* m_context = nullptr;
     RenderTexture m_gameView;
     RenderTexture m_sceneView;
 
-    // Atmosphere Scattering + Aerial Perspective campaign, Phase 7 - see
-    // IEditorLayer::SetGameViewCompositedTexture()/
-    // SetSceneViewCompositedTexture()'s own doc comments. Non-owning -
-    // Application (via AtmosphereLutRenderer) owns the real
-    // RenderTexture(s) these point at. m_lastKnownGameView/
-    // m_lastKnownSceneView track whichever VkImageView
-    // m_ctx.gameViewDescriptor/sceneViewDescriptor were last created
-    // against (mirrors m_lastKnownBlurredView's own identical role below),
-    // so BuildUI() can tell whenever the displayed source's own underlying
-    // view changed (composited texture created for the first time, OR
-    // resized) and needs a fresh ImGui descriptor.
+    // Non-owning pointers to a composited Game/Scene view texture, set by
+    // SetGameViewCompositedTexture()/SetSceneViewCompositedTexture().
+    // m_lastKnownGameView/m_lastKnownSceneView track the last VkImageView
+    // an ImGui descriptor was created against, so BuildUI() can tell when
+    // a fresh descriptor is needed.
     RenderTexture* m_gameViewComposited = nullptr;
     RenderTexture* m_sceneViewComposited = nullptr;
     VkImageView m_lastKnownGameView = VK_NULL_HANDLE;
     VkImageView m_lastKnownSceneView = VK_NULL_HANDLE;
-
-    // Phase 7 (COMPUTE_PHASE7_VALIDATION_TESTING_TOOLING_STRATEGY_v2.md) -
-    // the compute-shader campaign's own texture-side validation workload
-    // (a compute box-blur post-process reading m_sceneView, writing its
-    // own persistent RWTexture output) - see ComputeBlurValidation.h.
-    // m_lastKnownBlurredView tracks whichever VkImageView
-    // m_ctx.blurredSceneOutputDescriptor was last created against, so
-    // BuildUI() above can tell a resize happened (a NEW VkImageView) and
-    // needs a fresh ImGui descriptor, even though the resize itself
-    // happens earlier in the frame (during the offscreen RenderGraph::
-    // Execute() call, inside AddBlurValidationPass() above), entirely
-    // outside this class's own GameViewTarget()/SceneViewTarget()-style
-    // "resize on demand" methods.
-    ComputeBlurValidation m_blurValidation;
-    VkImageView m_lastKnownBlurredView = VK_NULL_HANDLE;
-
-    // task_manager/mrt-1 campaign, PHASE4 - the campaign's own first real
-    // MRT consumer (see GBufferValidation.h). m_lastKnownGBufferValidationView
-    // mirrors m_lastKnownBlurredView's own identical role immediately
-    // above, tracking whichever VkImageView m_ctx.gbufferValidationOutputDescriptor
-    // was last created against (the "visualized"/copy-of-albedo output
-    // only - the albedo/normal outputs themselves have no ImGui preview of
-    // their own, see this campaign's own PHASE4_COMPLETION_REPORT.md for
-    // the reasoning).
-    GBufferValidation m_gbufferValidation;
-    VkImageView m_lastKnownGBufferValidationView = VK_NULL_HANDLE;
-
-    // editor-core-separation-26 campaign, PHASE6 - see BlitValidation.h.
-    // No ImGui-facing preview view needed (Locked Decision 3 - verified
-    // purely via GET /get_texture, no in-Editor display).
-    BlitValidation m_blitValidation;
-
-    // task_manager/better-render-pass-7 campaign (better-render-pass-3
-    // campaign, BLOCK5 - Array/Cubemap Texture Resources), PHASE5 - see
-    // TextureArrayValidation.h. No ImGui-facing preview view needed (its 4
-    // per-layer outputs are independently inspectable via
-    // GET /get_texture?texture_name=ManualVerifyArrayLayerN only, mirroring
-    // m_blitValidation's own identical "no in-Editor display" precedent
-    // immediately above).
-    TextureArrayValidation m_textureArrayValidation;
-
-    // See ArrayLayerRenderValidation.h. No ImGui-facing preview view needed
-    // (its 4 per-layer outputs are independently inspectable via
-    // GET /get_texture?texture_name=ArrayLayerRenderValidationLayerN only,
-    // mirroring m_textureArrayValidation's own identical precedent above).
-    ArrayLayerRenderValidation m_arrayLayerRenderValidation;
 
     // The Scene view's own, independently-orbitable camera (see
     // EditorCamera.h) - updated once per frame by Panels/ScenePanel.cpp

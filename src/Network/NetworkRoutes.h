@@ -1050,26 +1050,12 @@ struct ParsedRenderGraphSetFeaturePriorityQuery {
 ParsedRenderGraphSetFeaturePriorityQuery ParseRenderGraphSetFeaturePriorityQuery(
     const std::string& nameParam, const std::string& priorityParam);
 
-// Parsed, validated GET /render_graph/set_blur_enabled (and, with an
-// identical shape, /set_gbuffer_enabled) query. "enabled" must be exactly
-// "true" or "false".
-struct ParsedRenderGraphSetBoolQuery {
-    bool valid = false;
-    std::string errorMessage;
-    bool enabled = false;
-};
-ParsedRenderGraphSetBoolQuery ParseRenderGraphSetBoolQuery(const std::string& enabledParam);
-
-// Builds the response body shared by every /render_graph/* MUTATION route
-// (set_pass_enabled/set_feature_enabled/set_feature_priority/
-// set_blur_enabled/set_gbuffer_enabled):
+// Builds the response body shared by every /render_graph/* mutation route
+// (set_pass_enabled/set_feature_enabled/set_feature_priority):
 //   - success == true  -> {"success":true}
 //   - success == false -> {"success":false,"error":"<errorMessage>"}
-// Deliberately narrower than BuildFrameDebuggerCommandResponseJson() (no
-// "state" echo) - PHASE0_MASTER_STRATEGY.md's own locked contract for this
-// campaign's mutation endpoints never echoes a rich resulting state; a
-// caller wanting fresh state makes a SEPARATE GET /render_graph/passes or
-// GET /render_graph call instead.
+// A caller wanting fresh state makes a separate GET /render_graph/passes
+// or GET /render_graph call instead.
 std::string BuildRenderGraphControlCommandResponseJson(bool success, const std::string& errorMessage);
 
 // A plain, RenderGraphControlCommandBridge-independent view of one known

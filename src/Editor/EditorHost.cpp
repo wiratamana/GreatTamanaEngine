@@ -698,16 +698,8 @@ int EditorHost::Run()
             m_frameDebuggerCommandBridge.FulfillCommand(fdResult);
         }
 
-        // editor-core-separation-8 campaign, PHASE5
-        // (PHASE5_CROSS_THREAD_BRIDGE_AND_HTTP_ENDPOINTS.md) - drains at most
-        // ONE pending render-graph-control command per frame, at the SAME
-        // point in the loop every other bridge's own pump immediately above
-        // already runs. Built-in-pass/plugin-feature mutations go straight
-        // to m_core (Core-owned state); Blur/GBuffer mutations go through
-        // m_editorLayer (Editor-owned EditorContext state) - see
-        // PHASE0_MASTER_STRATEGY.md's Step 2.6 for exactly why these two
-        // categories are routed differently even though they share this one
-        // bridge.
+        // Drains at most one pending render-graph-control command per frame.
+        // Built-in-pass/plugin-feature mutations go straight to m_core.
         if (const std::optional<RenderGraphControlCommandRequest> rgcRequest =
                 m_renderGraphControlCommandBridge.TryPeekPendingCommandRequest()) {
             GTE_PROFILE_SCOPE("EditorHost::ExecuteRenderGraphControlCommand");
@@ -781,24 +773,6 @@ int EditorHost::Run()
                 }
                 break;
             }
-            case RenderGraphControlCommandKind::SetBlurEnabled:
-                m_editorLayer->SetShowBlurredSceneOutput(rgcRequest->setBlurEnabled.enabled);
-                rgcResult.success = true;
-                break;
-            case RenderGraphControlCommandKind::SetGBufferEnabled:
-                m_editorLayer->SetShowGBufferValidationOutput(rgcRequest->setGBufferEnabled.enabled);
-                rgcResult.success = true;
-                break;
-            case RenderGraphControlCommandKind::SetTextureArrayValidationEnabled:
-                m_editorLayer->SetShowTextureArrayValidationOutput(
-                    rgcRequest->setTextureArrayValidationEnabled.enabled);
-                rgcResult.success = true;
-                break;
-            case RenderGraphControlCommandKind::SetArrayLayerRenderValidationEnabled:
-                m_editorLayer->SetShowArrayLayerRenderValidationOutput(
-                    rgcRequest->setArrayLayerRenderValidationEnabled.enabled);
-                rgcResult.success = true;
-                break;
             }
             m_renderGraphControlCommandBridge.FulfillCommand(rgcResult);
         }

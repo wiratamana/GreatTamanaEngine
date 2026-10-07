@@ -262,15 +262,8 @@ void RespondWithFrameDebuggerCommandResult(
         "application/json");
 }
 
-// editor-core-separation-8 campaign, PHASE5
-// (PHASE5_CROSS_THREAD_BRIDGE_AND_HTTP_ENDPOINTS.md) - shared tail for
-// every /render_graph/* MUTATION route (set_pass_enabled/
-// set_feature_enabled/set_feature_priority/set_blur_enabled/
-// set_gbuffer_enabled) - mirrors RespondWithFrameDebuggerCommandResult()'s
-// own exact alreadyPending/timedOut/outcome.success mapping immediately
-// above. GET /render_graph/passes does NOT use this helper - it is
-// read-only and has its own response shape (mirrors /frame_debugger/state's
-// own special-cased handling).
+// Shared response mapping for every /render_graph/* mutation route.
+// GET /render_graph/passes is read-only and has its own response shape.
 void RespondWithRenderGraphControlCommandResult(
     httplib::Response& res, const RenderGraphControlCommandBridge::SubmitResult& submit)
 {
@@ -582,19 +575,9 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         res.set_content(BuildFrameDebuggerStateResponseJson(ToFrameDebuggerStateResponseView(submit.result->state)), "application/json");
     });
 
-    // editor-core-separation-8 campaign, PHASE5
-    // (PHASE5_CROSS_THREAD_BRIDGE_AND_HTTP_ENDPOINTS.md) -
     // GET /render_graph/set_pass_enabled, /passes, /set_feature_enabled,
-    // /set_feature_priority, /set_blur_enabled, /set_gbuffer_enabled. Every
-    // route below shares the SAME shape as every other bridge-backed route
-    // in this file: parse (NetworkRoutes.h) -> bridge-unavailable (503)
-    // check -> build a RenderGraphControlCommandRequest ->
-    // RenderGraphControlCommandBridge::SubmitAndWait() ->
-    // RespondWithRenderGraphControlCommandResult() maps alreadyPending/
-    // timedOut/outcome to a status code + response body - EXCEPT
-    // /render_graph/passes, which is read-only and has its own response
-    // shape (mirrors /frame_debugger/state's own special-cased handling
-    // immediately above).
+    // /set_feature_priority. Each parses its query, checks the bridge is
+    // available, then submits through RenderGraphControlCommandBridge.
     server.Get("/render_graph/set_pass_enabled",
         [renderGraphControlCommandBridge](const httplib::Request& req, httplib::Response& res) {
         const ParsedRenderGraphSetPassEnabledQuery parsed =
@@ -690,95 +673,6 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         request.kind = RenderGraphControlCommandKind::SetFeaturePriority;
         request.setFeaturePriority.name = parsed.name;
         request.setFeaturePriority.priority = parsed.priority;
-        const RenderGraphControlCommandBridge::SubmitResult submit = renderGraphControlCommandBridge->SubmitAndWait(request);
-        RespondWithRenderGraphControlCommandResult(res, submit);
-    });
-
-    server.Get("/render_graph/set_blur_enabled",
-        [renderGraphControlCommandBridge](const httplib::Request& req, httplib::Response& res) {
-        const ParsedRenderGraphSetBoolQuery parsed = ParseRenderGraphSetBoolQuery(req.get_param_value("enabled"));
-        if (!parsed.valid) {
-            res.status = 400;
-            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
-            return;
-        }
-        if (renderGraphControlCommandBridge == nullptr) {
-            res.status = 503;
-            res.set_content(BuildGenericErrorResponseJson("render graph control command bridge not available"), "application/json");
-            return;
-        }
-        RenderGraphControlCommandRequest request;
-        request.kind = RenderGraphControlCommandKind::SetBlurEnabled;
-        request.setBlurEnabled.enabled = parsed.enabled;
-        const RenderGraphControlCommandBridge::SubmitResult submit = renderGraphControlCommandBridge->SubmitAndWait(request);
-        RespondWithRenderGraphControlCommandResult(res, submit);
-    });
-
-    server.Get("/render_graph/set_gbuffer_enabled",
-        [renderGraphControlCommandBridge](const httplib::Request& req, httplib::Response& res) {
-        const ParsedRenderGraphSetBoolQuery parsed = ParseRenderGraphSetBoolQuery(req.get_param_value("enabled"));
-        if (!parsed.valid) {
-            res.status = 400;
-            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
-            return;
-        }
-        if (renderGraphControlCommandBridge == nullptr) {
-            res.status = 503;
-            res.set_content(BuildGenericErrorResponseJson("render graph control command bridge not available"), "application/json");
-            return;
-        }
-        RenderGraphControlCommandRequest request;
-        request.kind = RenderGraphControlCommandKind::SetGBufferEnabled;
-        request.setGBufferEnabled.enabled = parsed.enabled;
-        const RenderGraphControlCommandBridge::SubmitResult submit = renderGraphControlCommandBridge->SubmitAndWait(request);
-        RespondWithRenderGraphControlCommandResult(res, submit);
-    });
-
-    // task_manager/better-render-pass-7 campaign (better-render-pass-3
-    // campaign, BLOCK5 - Array/Cubemap Texture Resources), PHASE5 - mirrors
-    // "/render_graph/set_gbuffer_enabled" above exactly, for
-    // IEditorLayer::SetShowTextureArrayValidationOutput() (see
-    // src/Editor/TextureArrayValidation.h).
-    server.Get("/render_graph/set_texture_array_validation_enabled",
-        [renderGraphControlCommandBridge](const httplib::Request& req, httplib::Response& res) {
-        const ParsedRenderGraphSetBoolQuery parsed = ParseRenderGraphSetBoolQuery(req.get_param_value("enabled"));
-        if (!parsed.valid) {
-            res.status = 400;
-            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
-            return;
-        }
-        if (renderGraphControlCommandBridge == nullptr) {
-            res.status = 503;
-            res.set_content(BuildGenericErrorResponseJson("render graph control command bridge not available"), "application/json");
-            return;
-        }
-        RenderGraphControlCommandRequest request;
-        request.kind = RenderGraphControlCommandKind::SetTextureArrayValidationEnabled;
-        request.setTextureArrayValidationEnabled.enabled = parsed.enabled;
-        const RenderGraphControlCommandBridge::SubmitResult submit = renderGraphControlCommandBridge->SubmitAndWait(request);
-        RespondWithRenderGraphControlCommandResult(res, submit);
-    });
-
-    // Array Layer Render Validation equivalent of
-    // "/render_graph/set_texture_array_validation_enabled" above, for
-    // IEditorLayer::SetShowArrayLayerRenderValidationOutput() (see
-    // src/Editor/ArrayLayerRenderValidation.h).
-    server.Get("/render_graph/set_array_layer_render_validation_enabled",
-        [renderGraphControlCommandBridge](const httplib::Request& req, httplib::Response& res) {
-        const ParsedRenderGraphSetBoolQuery parsed = ParseRenderGraphSetBoolQuery(req.get_param_value("enabled"));
-        if (!parsed.valid) {
-            res.status = 400;
-            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
-            return;
-        }
-        if (renderGraphControlCommandBridge == nullptr) {
-            res.status = 503;
-            res.set_content(BuildGenericErrorResponseJson("render graph control command bridge not available"), "application/json");
-            return;
-        }
-        RenderGraphControlCommandRequest request;
-        request.kind = RenderGraphControlCommandKind::SetArrayLayerRenderValidationEnabled;
-        request.setArrayLayerRenderValidationEnabled.enabled = parsed.enabled;
         const RenderGraphControlCommandBridge::SubmitResult submit = renderGraphControlCommandBridge->SubmitAndWait(request);
         RespondWithRenderGraphControlCommandResult(res, submit);
     });

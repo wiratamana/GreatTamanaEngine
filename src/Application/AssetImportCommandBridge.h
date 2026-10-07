@@ -1,29 +1,12 @@
 #pragma once
 
-// The FIFTH sanctioned cross-thread bridge - see AGENTS.md, "Networking",
-// and task_manager/stl-parser-2/PHASE0_MASTER_STRATEGY.md's Locked Design
-// Decision #1/#9 for why this is its own, new, dedicated bridge type rather
-// than a new EngineCommandKind/EditorUiCommandKind value bolted onto an
-// existing one. Structurally IDENTICAL to EditorUiCommandBridge (single
-// global slot, mutex + condition_variable) - mirrors that class's own
-// SubmitAndWait()/IsCommandPending()/TryPeekPendingCommandRequest()/
-// FulfillCommand() shape exactly.
-//
-// Lets a future network route handler (POST /import_asset - PHASE2) ask the
-// main thread to import an external file into the Editor's "Project"
-// folder, using the SAME live AssetDatabase instance ProjectPanel already
-// owns - see IEditorLayer::ImportExternalAssetIntoProject()
-// (src/Editor/EditorLayer.h) for the real work this bridge's request
-// ultimately drives.
-//
-// Owned by Application (the composition root), constructed alongside the
-// four existing bridges, BEFORE NetworkServer (so its address can be handed
-// into NetworkServer's constructor) - see Application.h.
+// Cross-thread bridge for a network-driven external-asset import into the
+// Editor's "Project" folder, via the same AssetDatabase instance the
+// Project panel owns. See SyncCommandBridge.h for the handoff mechanism.
 
-#include <condition_variable>
+#include "SyncCommandBridge.h"
+
 #include <cstdint>
-#include <mutex>
-#include <optional>
 #include <string>
 
 namespace gte {
@@ -35,8 +18,7 @@ enum class AssetImportCommandKind {
 // Plain request payload for one ImportExternalFile command.
 struct ImportExternalFileCommand {
     std::string sourceAbsolutePath;
-    // "" means "import directly into the Project root" - see
-    // PHASE0_MASTER_STRATEGY.md's Locked Design Decision #2.
+    // "" means "import directly into the Project root".
     std::string destinationRelativeFolder;
 };
 
@@ -45,20 +27,14 @@ struct AssetImportCommandRequest {
     ImportExternalFileCommand importExternalFile;
 };
 
-// Outcome of one ImportExternalFile command - deliberately PLAIN SCALARS
-// ONLY (no std::filesystem::path, no Guid type) so this header stays
-// completely free of any src/Assets/ dependency, mirroring
-// EditorLayer.h's own "TabActivationResult is a tiny, dependency-free
-// mirror, never the real cross-layer type" precedent, applied one layer
-// further down this same cross-thread boundary.
+// Outcome of one ImportExternalFile command - plain scalars only, no
+// std::filesystem::path/Guid type, so this header stays free of any
+// src/Assets/ dependency.
 //
-// - projectAvailable == false: the Editor's "Project" panel does not exist
-//   in this build (GTE_ENABLE_EDITOR or GTE_ENABLE_PROJECT_PANEL is OFF) -
-//   every other field is meaningless. NetworkServer.cpp (PHASE2) maps this
-//   to HTTP 503.
-// - projectAvailable == true, success == false: the import itself failed
-//   (bad destinationRelativeFolder, source file missing/corrupt/unreadable,
-//   etc) - `message` explains why. NetworkServer.cpp maps this to HTTP 400.
+// - projectAvailable == false: the Editor's Project panel does not exist in
+//   this build - every other field is meaningless.
+// - projectAvailable == true, success == false: the import itself failed -
+//   `message` explains why.
 // - success == true: every field below is meaningful.
 struct ImportExternalFileOutcome {
     bool projectAvailable = true;
@@ -67,7 +43,7 @@ struct ImportExternalFileOutcome {
 
     std::string finalRelativePath; // relative to the Project root, forward slashes
     std::string finalAbsolutePath;
-    std::string guid; // Guid::ToString() format, or "" if not applicable (e.g. a plain file copy)
+    std::string guid; // Guid::ToString() format, or "" if not applicable
 
     bool convertedToMeshAsset = false;
     std::string meshSourceFormat; // "stl" / "pmx" / "" (meaningful only when convertedToMeshAsset)
@@ -83,41 +59,16 @@ struct AssetImportCommandResult {
     ImportExternalFileOutcome importExternalFile;
 };
 
-class AssetImportCommandBridge {
+// A real import can legitimately take a long time (large mesh parse) - this
+// bridge needs headroom the shared template's 3000ms default does not give
+// it. Thin forwarding override restores the correct default; the mechanism
+// itself is fully inherited.
+class AssetImportCommandBridge : public SyncCommandBridge<AssetImportCommandRequest, AssetImportCommandResult> {
 public:
-    AssetImportCommandBridge() = default;
-    ~AssetImportCommandBridge() = default;
-
-    AssetImportCommandBridge(const AssetImportCommandBridge&) = delete;
-    AssetImportCommandBridge& operator=(const AssetImportCommandBridge&) = delete;
-
-    // --- Called from the NETWORK thread (a route handler) only ----------
-
-    struct SubmitResult {
-        std::optional<AssetImportCommandResult> result;
-        bool alreadyPending = false;
-        bool timedOut = false;
-    };
-    // PHASE0's Locked Design Decision #6 - default timeout is 120000ms
-    // (120 seconds), NOT the 3000ms every other bridge defaults to - a
-    // large, real import (the reference terrain.stl) genuinely needs this
-    // much headroom parsing synchronously on the main thread (Locked
-    // Design Decision #1).
-    SubmitResult SubmitAndWait(AssetImportCommandRequest request, int timeoutMilliseconds = 120000);
-
-    // --- Called from the MAIN thread (Application::Run()) only ----------
-
-    bool IsCommandPending() const;
-    std::optional<AssetImportCommandRequest> TryPeekPendingCommandRequest() const;
-    void FulfillCommand(AssetImportCommandResult result);
-
-private:
-    mutable std::mutex m_mutex;
-    std::condition_variable m_conditionVariable;
-    bool m_requested = false;
-    bool m_fulfilled = false;
-    AssetImportCommandRequest m_request;
-    AssetImportCommandResult m_result;
+    SubmitResult SubmitAndWait(AssetImportCommandRequest request, int timeoutMilliseconds = 120000)
+    {
+        return SyncCommandBridge::SubmitAndWait(std::move(request), timeoutMilliseconds);
+    }
 };
 
 } // namespace gte

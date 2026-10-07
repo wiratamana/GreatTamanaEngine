@@ -41,70 +41,10 @@ void BuildScenePanel(Game& game, Renderer& renderer, EditorContext& ctx, EditorC
             ctx.desiredSceneExtent.width = static_cast<std::uint32_t>(avail.x);
             ctx.desiredSceneExtent.height = static_cast<std::uint32_t>(avail.y);
 
-            // Phase 7 of the compute-shader campaign
-            // (COMPUTE_PHASE7_VALIDATION_TESTING_TOOLING_STRATEGY_v2.md) -
-            // a small, permanent, clearly-labeled debug toggle: when on
-            // (and a blurred output actually exists, i.e. the pass has run
-            // at least once), "Scene" displays the compute box-blur
-            // validation pass's own output instead of the normal Scene
-            // view - see IEditorLayer::AddBlurValidationPass()/
-            // ImGuiEditorLayer::BuildUI() for how ctx.blurredSceneOutputDescriptor
-            // gets (re)created.
-            ImGui::Checkbox("Show Compute Blur (debug)", &ctx.showBlurredSceneOutput);
-
-            // task_manager/mrt-1 campaign, PHASE4
-            // (PHASE4_GBUFFER_VALIDATION_PASS_AND_SHADER.md) - a second,
-            // small, independently-toggleable debug checkbox: when on (and
-            // the GBuffer Validation pass's own "visualized" copy-of-
-            // albedo output actually exists), "Scene" displays THAT
-            // instead of the normal Scene view - see
-            // IEditorLayer::AddGBufferValidationPass()/
-            // ImGuiEditorLayer::BuildUI() for how
-            // ctx.gbufferValidationOutputDescriptor gets (re)created. The
-            // pass's own real albedo/normal outputs are independently
-            // inspectable via GET /get_texture/GET /list_textures - this
-            // checkbox only swaps in the small "visualized" copy, never
-            // either of those two directly (see this phase's own
-            // completion report for the full reasoning).
-            ImGui::Checkbox("Show GBuffer Validation (debug)", &ctx.showGBufferValidationOutput);
-
-            // task_manager/better-render-pass-7 campaign (better-render-pass-3
-            // campaign, BLOCK5), PHASE5 - a third, small, independently-
-            // toggleable debug checkbox: when on, the "TextureArrayValidation"
-            // compute pass pair is declared this frame (see
-            // src/Editor/TextureArrayValidation.h). Its 4 per-layer outputs
-            // are independently inspectable via
-            // GET /get_texture?texture_name=ManualVerifyArrayLayerN only -
-            // this checkbox never swaps the "Scene" panel's own displayed
-            // image (unlike the two checkboxes above).
-            ImGui::Checkbox("Show TextureArray Validation (debug)", &ctx.showTextureArrayValidationOutput);
-
-            // A fourth, small, independently-toggleable debug checkbox:
-            // when on, the per-layer array write/extraction pass pair is
-            // declared this frame (see
-            // src/Editor/ArrayLayerRenderValidation.h). Its 4 per-layer
-            // outputs are independently inspectable via
-            // GET /get_texture?texture_name=ArrayLayerRenderValidationLayerN
-            // only - this checkbox never swaps the "Scene" panel's own
-            // displayed image either, mirroring the checkbox above.
-            ImGui::Checkbox(
-                "Show Array Layer Render Validation (debug)", &ctx.showArrayLayerRenderValidationOutput);
-
-            const bool showingBlurredOutput =
-                ctx.showBlurredSceneOutput && ctx.blurredSceneOutputDescriptor != VK_NULL_HANDLE;
-            // Blurred output takes priority if somehow both debug toggles
-            // are on at once - a rare, harmless combination neither this
-            // panel nor either debug tool needs to forbid outright.
-            const bool showingGBufferValidationOutput = !showingBlurredOutput && ctx.showGBufferValidationOutput
-                && ctx.gbufferValidationOutputDescriptor != VK_NULL_HANDLE;
-            const VkDescriptorSet imageDescriptor = showingBlurredOutput
-                ? ctx.blurredSceneOutputDescriptor
-                : (showingGBufferValidationOutput ? ctx.gbufferValidationOutputDescriptor : ctx.sceneViewDescriptor);
-
-            // Its own RenderTexture now (ctx.sceneViewDescriptor) - "Scene"
+            // Its own RenderTexture (ctx.sceneViewDescriptor) - "Scene"
             // no longer displays the same image as "Game".
             ImGui::Image(
-                static_cast<ImTextureID>(reinterpret_cast<intptr_t>(imageDescriptor)),
+                static_cast<ImTextureID>(reinterpret_cast<intptr_t>(ctx.sceneViewDescriptor)),
                 avail);
 
 #if GTE_ENABLE_PROJECT_PANEL

@@ -21,8 +21,8 @@ TEST(ShaderReflectionTests, ReflectsBoxBlurComputeShaderBindingsPushConstantsAnd
     const gte::ShaderReflectionResult result = gte::ReflectComputeShader(GTE_TEST_BOXBLUR_SPV_PATH);
 
     // Shaders/BoxBlur.comp's own documented binding convention (see that
-    // file's header comment, and ComputeBlurValidation.cpp): binding 0 is a
-    // combined-image-sampler input, binding 1 is a storage-image output.
+    // file's header comment): binding 0 is a combined-image-sampler input,
+    // binding 1 is a storage-image output.
     ASSERT_EQ(result.descriptorBindings.size(), 2u);
 
     const gte::ReflectedDescriptorBinding* binding0 = nullptr;

@@ -1154,21 +1154,6 @@ ParsedRenderGraphSetFeaturePriorityQuery ParseRenderGraphSetFeaturePriorityQuery
     return result;
 }
 
-ParsedRenderGraphSetBoolQuery ParseRenderGraphSetBoolQuery(const std::string& enabledParam)
-{
-    ParsedRenderGraphSetBoolQuery result;
-    if (enabledParam == "true") {
-        result.enabled = true;
-    } else if (enabledParam == "false") {
-        result.enabled = false;
-    } else {
-        result.errorMessage = "missing or invalid required query parameter: enabled - must be \"true\" or \"false\"";
-        return result;
-    }
-    result.valid = true;
-    return result;
-}
-
 std::string BuildRenderGraphControlCommandResponseJson(bool success, const std::string& errorMessage)
 {
     nlohmann::json body;

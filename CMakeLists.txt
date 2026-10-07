@@ -623,27 +623,12 @@ add_library(gte_core STATIC
     src/Application/FrameCaptureBridge.h
     src/Application/FrameCaptureBridge.cpp
     src/Application/EngineCommandBridge.h
-    src/Application/EngineCommandBridge.cpp
     src/Application/EditorUiCommandBridge.h
-    src/Application/EditorUiCommandBridge.cpp
     src/Application/AssetImportCommandBridge.h
-    src/Application/AssetImportCommandBridge.cpp
-    # editor-core-separation-17 campaign (On-Engine Project Workflow plan,
-    # BIG-STEP 3), PHASE2 - ProjectLifecycleLoadCommandBridge, confirmed to
-    # belong in this SAME gte_core source list as every other
-    # src/Application/*.cpp bridge above.
     src/Application/ProjectLifecycleLoadCommandBridge.h
-    src/Application/ProjectLifecycleLoadCommandBridge.cpp
     src/Application/FrameDebuggerCommandBridge.h
-    src/Application/FrameDebuggerCommandBridge.cpp
-    # editor-core-separation-8 campaign, PHASE5
-    # (PHASE5_CROSS_THREAD_BRIDGE_AND_HTTP_ENDPOINTS.md) - the new
-    # RenderGraphControlCommandBridge, confirmed (Step 3.7) to belong in this
-    # SAME gte_core source list as every other src/Application/*.cpp bridge
-    # above - there is no separate gte_application CMake target in this
-    # codebase.
     src/Application/RenderGraphControlCommandBridge.h
-    src/Application/RenderGraphControlCommandBridge.cpp
+    src/Application/SyncCommandBridge.h
     # editor-core-separation-14 campaign (Project Assembly Hot Reload plan,
     # BIG-STEP 3), PHASE3 - ProjectAssemblyHotReloadCommandBridge, confirmed
     # to belong in this SAME gte_core source list as every other
@@ -1080,29 +1065,8 @@ add_library(gte_editor STATIC
     src/Editor/SceneGridMath.cpp
     src/Editor/SceneGridRenderer.h
     src/Editor/SceneGridRenderer.cpp
-    src/Editor/ComputeBlurValidation.h
-    src/Editor/ComputeBlurValidation.cpp
-    # editor-core-separation-26 campaign, PHASE6 - the one part of that
-    # whole campaign that needed a real, brand-new source file (see
-    # src/Editor/BlitValidation.h/.cpp's own header comment).
-    src/Editor/BlitValidation.h
-    src/Editor/BlitValidation.cpp
-    src/Editor/GBufferValidation.h
-    src/Editor/GBufferValidation.cpp
-    # task_manager/better-render-pass-7 campaign (better-render-pass-3
-    # campaign, BLOCK5 - Array/Cubemap Texture Resources), PHASE5 - the
-    # "TextureArray Validation" manual/Tier-2 verification harness (see
-    # src/Editor/TextureArrayValidation.h's own header comment).
-    src/Editor/TextureArrayValidation.h
-    src/Editor/TextureArrayValidation.cpp
-    # Per-layer TextureArray render-target validation harness (see
-    # src/Editor/ArrayLayerRenderValidation.h's own header comment).
-    src/Editor/ArrayLayerRenderValidation.h
-    src/Editor/ArrayLayerRenderValidation.cpp
     src/Editor/GpuDrivenBatchTestSpawner.h
     src/Editor/GpuDrivenBatchTestSpawner.cpp
-    src/Editor/GpuSkinningValidation.h
-    src/Editor/GpuSkinningValidation.cpp
     src/Editor/TransformGizmo.h
     src/Editor/TransformGizmo.cpp
     src/Editor/DockLayout.h
@@ -1607,29 +1571,15 @@ if(GTE_ENABLE_PROJECT_PANEL)
 endif()
 
 # The Editor's "Scene" panel infinite ground grid (Unity-style procedural
-# shader grid - see task_manager/editor-enchancements-1/PHASE0_MASTER_STRATEGY.md).
-# Always compiled/staged, since src/Editor/SceneGridRenderer.cpp (PHASE3) -
-# the only thing that ever loads these - is always compiled into gte_core
-# today (unlike MeshPreview.vert/frag above, this does NOT additionally need
-# GTE_ENABLE_PROJECT_PANEL - SceneGridRenderer has no dependency on the
-# Project panel at all). editor-core-separation-1 campaign, PHASE8 - this
-# `if(TRUE)` is a temporary placeholder, see the main Editor source list's
-# own comment above for the full reasoning.
-if(TRUE)
-    gte_add_shader(GreatTamanaEditor src/Shaders/SceneGrid.vert)
-    gte_add_shader(GreatTamanaEditor src/Shaders/SceneGrid.frag)
-endif()
+# shader grid). Always compiled/staged - src/Editor/SceneGridRenderer.cpp is
+# always compiled into gte_core.
+gte_add_shader(GreatTamanaEditor src/Shaders/SceneGrid.vert)
+gte_add_shader(GreatTamanaEditor src/Shaders/SceneGrid.frag)
 
-# Phase 7 of the compute-shader campaign
-# (COMPUTE_PHASE7_VALIDATION_TESTING_TOOLING_STRATEGY_v2.md) - the compute
-# box-blur validation shader (src/Editor/ComputeBlurValidation.h/.cpp).
-# Always compiled/staged, since ComputeBlurValidation.cpp - the only thing
-# that ever loads it - is always compiled into gte_core today.
-# editor-core-separation-1 campaign, PHASE8 - this `if(TRUE)` is a temporary
-# placeholder, see the main Editor source list's own comment above.
-if(TRUE)
-    gte_add_shader(GreatTamanaEditor src/Shaders/BoxBlur.comp)
-endif()
+# Permanent SPIR-V reflection test fixture for
+# tests/Renderer/Vulkan/ShaderReflectionTests.cpp - the only remaining
+# consumer. Not a shipped production effect.
+gte_add_shader(GreatTamanaEditor src/Shaders/BoxBlur.comp)
 
 # better-render-pass-2 campaign, PHASE5 (PHASE5_CLEAN_RENDER_FEATURE_COMPOSITOR_INTERNALS.md,
 # STEP 5.3) - the `gte.builtin.blit_fullscreen` plugin registry operation's own
@@ -1637,45 +1587,6 @@ endif()
 # `src/Shaders/PluginBlitFullscreen.vert`/`.frag` themselves - ABI-only, their
 # one registrant (`PluginRenderOperationRegistry::RegisterBlitFullscreen()`)
 # was already deleted in PHASE3 of this same campaign.
-
-# task_manager/mrt-1 campaign (Multi-Render-Target / G-Buffer support),
-# PHASE4 (PHASE4_GBUFFER_VALIDATION_PASS_AND_SHADER.md) - the "GBuffer
-# Validation" debug pass's own shaders (src/Editor/GBufferValidation.h/.cpp):
-# GBufferValidation.vert/.frag (the 2-color-attachment MRT pass itself) and
-# GBufferCopy.comp (the second pass's own trivial imageLoad/imageStore
-# copy). Always compiled/staged, since GBufferValidation.cpp - the only
-# thing that ever loads these - is always compiled into gte_core today
-# (same precedent as BoxBlur.comp/SceneGrid.vert/frag above - this is the
-# CORRECT precedent for an Editor-only debug pass, NOT Mesh.frag/
-# TexturedMesh.frag's own unconditional registration, which is for core,
-# always-compiled gameplay shaders instead). editor-core-separation-1
-# campaign, PHASE8 - this `if(TRUE)` is a temporary placeholder.
-if(TRUE)
-    gte_add_shader(GreatTamanaEditor src/Shaders/GBufferValidation.vert)
-    gte_add_shader(GreatTamanaEditor src/Shaders/GBufferValidation.frag)
-    gte_add_shader(GreatTamanaEditor src/Shaders/GBufferCopy.comp)
-endif()
-
-# task_manager/better-render-pass-7 campaign (better-render-pass-3 campaign,
-# BLOCK5 - Array/Cubemap Texture Resources), PHASE5 - the "TextureArray
-# Validation" manual/Tier-2 verification harness's own 2 compute shaders
-# (src/Editor/TextureArrayValidation.h/.cpp). Always compiled/staged, since
-# TextureArrayValidation.cpp - the only thing that ever loads these - is
-# always compiled into gte_core today (same precedent as GBufferCopy.comp
-# above).
-if(TRUE)
-    gte_add_shader(GreatTamanaEditor src/Shaders/TextureArrayValidationFill.comp)
-    gte_add_shader(GreatTamanaEditor src/Shaders/TextureArrayValidationSlice.comp)
-endif()
-
-# Per-layer TextureArray render-target validation harness's own 2 shaders
-# (src/Editor/ArrayLayerRenderValidation.h/.cpp). Always compiled/staged,
-# same precedent as TextureArrayValidationFill.comp/Slice.comp above.
-if(TRUE)
-    gte_add_shader(GreatTamanaEditor src/Shaders/ArrayLayerRenderValidation.vert)
-    gte_add_shader(GreatTamanaEditor src/Shaders/ArrayLayerRenderValidation.frag)
-    gte_add_shader(GreatTamanaEditor src/Shaders/ArrayLayerRenderValidationVisualize.comp)
-endif()
 
 # Atmosphere Scattering + Aerial Perspective campaign shaders used to be
 # hand-listed here (8 manual gte_add_shader() calls + hand-written

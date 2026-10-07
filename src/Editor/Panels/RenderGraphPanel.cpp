@@ -594,20 +594,6 @@ void RenderGraphPanel::Build(EditorContext& ctx, const rg::RenderGraph& renderGr
     if (rg::DidRenderPassToggleEnabledStatesChange(toggleStatesBeforeThisPanelsOwnUi, renderPassToggleRegistry.ListAll())) {
         ctx.renderPassToggleRegistryChangedThisFrame = true;
     }
-    // editor-core-separation-8 campaign, PHASE4 (Step 3.4) - a natural final
-    // "debug toggles" grouping, placed AFTER both regime sections and BEFORE
-    // "Export" - the exact same EditorContext bools ScenePanel.cpp's own two
-    // checkboxes already flip (never a copy/duplicate field), so this panel
-    // finally becomes a genuine one-stop place to toggle them too. These are
-    // PLAIN, direct EditorContext field writes, NOT routed through
-    // IEditorLayer - mirrors ScenePanel.cpp's own existing checkboxes exactly
-    // (see PHASE4_RENDER_GRAPH_PANEL_CONTROLS.md's Step 3.4 for why the 2
-    // IEditorLayer setters PHASE3 added exist only for the HTTP path,
-    // PHASE5).
-    ImGui::Spacing();
-    ImGui::SeparatorText("Debug Passes");
-    ImGui::Checkbox("Show Compute Blur (debug)", &ctx.showBlurredSceneOutput);
-    ImGui::Checkbox("Show GBuffer Validation (debug)", &ctx.showGBufferValidationOutput);
 
     // editor-core-separation-7 campaign, PHASE3 - the real "Export DOT"
     // implementation, finally wired up (disabled since the original Render
