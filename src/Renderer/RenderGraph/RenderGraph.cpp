@@ -30,6 +30,8 @@ RenderGraph::RenderGraph(Renderer& renderer)
     , m_timestampPool(QueryVulkanContextInfo(renderer).device, QueryVulkanContextInfo(renderer).graphicsQueue,
           QueryVulkanContextInfo(renderer).graphicsQueueFamily, QueryVulkanContextInfo(renderer).timestampCapability,
           kSynchronousTimingSlotBudget, kPipelinedTimingSlotBudget, kGpuTimingFramesInFlight)
+    , m_eventSnapshotPool(renderer.GetVmaAllocator(), renderer.GetMemoryTracker(), QueryVulkanContextInfo(renderer).device,
+          kEventSnapshotSlotBudget, kGpuTimingFramesInFlight)
 {
     // editor-core-separation-26 campaign, PHASE6 - see RenderGraph.h's own
     // m_renderer doc comment.
@@ -393,6 +395,9 @@ PassContext RenderGraph::BuildPassContext(VkCommandBuffer cmd, std::vector<Physi
     // so a pass's `execute` callback can call ctx.Cmd() to obtain a
     // CommandBuffer (CommandBuffer.h).
     ctx.renderer = m_renderer;
+    // Only ever non-null on an armed capture frame - see
+    // RenderGraph::SetFrameDebuggerEventSink()'s own doc comment.
+    ctx.eventSink = m_frameDebuggerEventSink;
     ctx.recordDraw.drawStats = &passDrawStats;
     ctx.recordIndirectDraw.drawStats = &passDrawStats;
     return ctx;
@@ -703,6 +708,8 @@ void RenderGraph::RegisterDebugTextureSnapshots(ExecuteTimingMode timingMode, co
         snapshot.regime = timingMode; // ExecuteCompiledGraph()'s own parameter - confirmed live, exact spelling.
         snapshot.target = tex.target;
         snapshot.hasDepth = tex.hasDepth;
+        snapshot.sampler = tex.sampler;
+        snapshot.depthSampler = tex.depthSampler;
         snapshot.colorState = tex.colorState;
         snapshot.depthState = tex.depthState;
         snapshot.lastUpdatedFrameCounter = m_debugTextureFrameCounter;
@@ -790,6 +797,12 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
             UpdateTimingFor(name, ResolveAndConvertTiming(raw));
         }
     }
+
+    // Cheap, always-on per-pass write-target capture - reset once per
+    // regime per real Execute() call, same cadence as the timing preamble
+    // immediately above.
+    m_eventSnapshotPool.BeginFrame(isPipelined, pipelinedBufferIndex);
+    m_eventSnapshotsThisFrame.clear();
 
     // Deliberately NOT wrapped in try/catch here - see this class's own
     // Execute() doc comment / RENDERGRAPH_PHASE6_EXECUTION_ENGINE_STRATEGY_v2.md's
@@ -1006,6 +1019,21 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
             vkCmdSetScissor(cmd, 0, 1, &scissor);
 
             ctx.colorAttachmentExtent = firstExtent;
+
+            // Resolved here (never inside BuildPassContext() itself - the
+            // image isn't resolved yet at that point) - attachment 0 only,
+            // mirroring the event-snapshot pool's own "one representative
+            // image per pass" policy.
+            if (!pass.colorAttachments.empty()) {
+                const PhysicalTexture& colorTex = physicalTextures[pass.colorAttachments.front().handle.index];
+                ctx.writeTargetColorImage = colorTex.target.image;
+                ctx.writeTargetColorFormat = colorTex.target.format;
+            }
+            if (depthResult.info.has_value() && depthHandle.IsValid()) {
+                const PhysicalTexture& depthTex = physicalTextures[depthHandle.index];
+                ctx.writeTargetDepthImage = depthTex.target.depthImage;
+                ctx.writeTargetDepthFormat = depthTex.target.depthFormat;
+            }
             didBeginRendering = true;
         }
 
@@ -1090,6 +1118,41 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         m_timestampPool.WriteEnd(cmd, isPipelined, pipelinedBufferIndex, timingSlot);
         if (isPipelined && timingSlot != kNoNameSlot) {
             m_pipelinedHasWritten[static_cast<std::size_t>(timingSlot)][pipelinedBufferIndex] = true;
+        }
+
+        // Cheap, always-on per-pass write-target capture - replaces
+        // redrawing the whole scene to reconstruct "what did this pass
+        // produce". One vkCmdCopyImage2 per real color/depth write this
+        // pass just produced, keyed positionally, never by name.
+        if (m_eventSnapshotPool.IsCaptureEnabled()) {
+            for (const ResourceUsage& usage : pass.writes) {
+                if (usage.kind != ResourceKind::Texture) {
+                    continue; // color/depth images only - buffers are out of scope here.
+                }
+                PhysicalTexture& tex = physicalTextures[usage.texture.index];
+                const bool isDepth = TargetsDepthState(usage.access);
+                const VkImage image = isDepth ? tex.target.depthImage : tex.target.image;
+                if (image == VK_NULL_HANDLE) {
+                    continue;
+                }
+                const VkFormat format = isDepth ? tex.target.depthFormat : tex.target.format;
+                const VkImageAspectFlags aspect = isDepth
+                    ? (VK_IMAGE_ASPECT_DEPTH_BIT | (tex.target.depthHasStencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0))
+                    : static_cast<VkImageAspectFlags>(VK_IMAGE_ASPECT_COLOR_BIT);
+                ResourceState& state = isDepth ? tex.depthState : tex.colorState;
+
+                const std::int32_t eventSlot =
+                    m_eventSnapshotPool.CaptureAfterPass(cmd, image, tex.target.extent, format, aspect, state);
+                m_eventSnapshotsThisFrame.push_back({ pass.name, usage.texture, eventSlot,
+                    m_eventSnapshotPool.RegionFor(isPipelined, pipelinedBufferIndex) });
+            }
+        }
+
+        // Per-draw-call granularity: flushes whatever NoteCommandResult()
+        // noted during THIS pass's own recording, now that its rendering
+        // bracket has fully closed - a safe no-op whenever nothing matched.
+        if (m_frameDebuggerEventSink != nullptr) {
+            m_frameDebuggerEventSink->FlushPendingCapture(cmd);
         }
 
         // B.1 - drawStats only; timing is populated separately (see

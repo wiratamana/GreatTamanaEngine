@@ -54,6 +54,8 @@
 #include "RenderGraphDebugMetadataSink.h" // editor-core-separation-25 campaign, PHASE4
 #include "RenderGraphDebugTextureRegistry.h"
 #include "RenderGraphDebugVolumeTextureRegistry.h"
+#include "RenderGraphEventSnapshotPool.h"
+#include "../../Core/FrameDebuggerEventSink.h"
 #include "RenderGraphNameSlotTable.h"
 #include "RenderGraphPersistentResourceCache.h" // editor-core-separation-27 campaign, PHASE7
 #include "RenderGraphResourcePool.h"
@@ -345,6 +347,36 @@ public:
     void SetDebugMetadataSink(IPassDebugMetadataSink* sink) noexcept { m_debugMetadataSink = sink; }
     void SetDebugMetadataProvider(IPassDebugMetadataProvider* provider) noexcept { m_debugMetadataProvider = provider; }
 
+    // Installed once by Editor-tier startup code, same convention as
+    // SetDebugMetadataSink() above - null forever in a Player-style build.
+    // Forwarded into every pass's own PassContext::eventSink (see
+    // BuildPassContext()), and flushed once per pass via
+    // FrameDebuggerEventSink::FlushPendingCapture() right after that pass's
+    // own rendering bracket closes.
+    void SetFrameDebuggerEventSink(FrameDebuggerEventSink* sink) noexcept { m_frameDebuggerEventSink = sink; }
+
+    // Cheap, always-on per-pass write-target capture - see
+    // RenderGraphEventSnapshotPool.h's own class comment. Gated the same
+    // two-layer way as GPU timing (SetCaptureEnabled() at runtime).
+    void SetEventSnapshotCaptureEnabled(bool enabled) noexcept { m_eventSnapshotPool.SetCaptureEnabled(enabled); }
+
+    // One real pass write captured this Execute() call, keyed positionally
+    // (never by name) - see RenderGraphEventSnapshotPool::CaptureAfterPass().
+    struct FrameDebuggerEventSnapshotRef {
+        const char* passName = nullptr; // static-storage, same lifetime rule as PassRecord::name.
+        TextureHandle resource;
+        std::int32_t slot = kNoNameSlot;
+        std::uint32_t region = 0; // RenderGraphEventSnapshotPool::RegionFor() result - pass to ReadSnapshot() unchanged.
+    };
+    const std::vector<FrameDebuggerEventSnapshotRef>& EventSnapshotsThisFrame() const noexcept
+    {
+        return m_eventSnapshotsThisFrame;
+    }
+
+    // Read-only access to the pool itself, for whoever consumes
+    // EventSnapshotsThisFrame()'s own FrameDebuggerEventSnapshotRef entries.
+    const RenderGraphEventSnapshotPool& EventSnapshotPool() const noexcept { return m_eventSnapshotPool; }
+
 private:
     // render-pass-6 campaign, PHASE3 (item 2.7) - `PassContext` (fully
     // defined at the bottom of this file, AFTER this class) needs read
@@ -548,6 +580,12 @@ private:
     static constexpr std::uint32_t kSynchronousTimingSlotBudget = 16;
     static constexpr std::uint32_t kPipelinedTimingSlotBudget = 8;
 
+    // Generously covers every real color/depth write a surviving pass set
+    // could produce in one Execute() call - degrades gracefully (silently
+    // returns kNoNameSlot for any write past this budget) rather than ever
+    // growing at runtime.
+    static constexpr std::uint32_t kEventSnapshotSlotBudget = 64;
+
     RenderGraphResourcePool m_resourcePool;
 
     // editor-core-separation-27 campaign, PHASE7 - mirrors m_resourcePool's
@@ -574,6 +612,11 @@ private:
     IPassDebugMetadataSink* m_debugMetadataSink = nullptr;
     IPassDebugMetadataProvider* m_debugMetadataProvider = nullptr;
 
+    // Installed once by Editor-tier startup code (see
+    // SetFrameDebuggerEventSink() above) - null forever in a Player-style
+    // build, same convention as m_debugMetadataSink immediately above.
+    FrameDebuggerEventSink* m_frameDebuggerEventSink = nullptr;
+
     // B.1 (B1_REAL_GPU_TIMING_STRATEGY_v1.md) - constructed from
     // Renderer::GetVulkanContextInfo()'s own device/graphicsQueue/
     // graphicsQueueFamily/timestampCapability fields (see RenderGraph.cpp) -
@@ -582,6 +625,14 @@ private:
     RenderGraphTimestampPool m_timestampPool;
     RenderGraphNameSlotTable m_synchronousTimingSlots{ kSynchronousTimingSlotBudget };
     RenderGraphNameSlotTable m_pipelinedTimingSlots{ kPipelinedTimingSlotBudget };
+
+    // Constructed alongside m_timestampPool, sharing the same
+    // kGpuTimingFramesInFlight constant for its own pipelined-region count -
+    // see RenderGraphEventSnapshotPool.h's own class comment.
+    RenderGraphEventSnapshotPool m_eventSnapshotPool;
+    // Cleared and refilled once per ExecuteCompiledGraph() call - see
+    // EventSnapshotsThisFrame() above.
+    std::vector<FrameDebuggerEventSnapshotRef> m_eventSnapshotsThisFrame;
 
     // PHASE1 (render-pass-6 campaign, item 2.4) - names whose timing-slot
     // overflow has already been reported this process lifetime, per regime -
@@ -718,6 +769,16 @@ struct PassContext {
     // implementation comment).
     VkExtent2D colorAttachmentExtent{};
 
+    // Resolved image/format behind this pass's own attachment 0, right
+    // where colorAttachmentExtent above is assigned - attachment 1+ of a
+    // Multi-Render-Target pass is out of scope (one representative image
+    // per pass, matching the event-snapshot pool's own policy). Left at
+    // VK_NULL_HANDLE/VK_FORMAT_UNDEFINED for a pass with no such attachment.
+    VkImage writeTargetColorImage = VK_NULL_HANDLE;
+    VkFormat writeTargetColorFormat = VK_FORMAT_UNDEFINED;
+    VkImage writeTargetDepthImage = VK_NULL_HANDLE;
+    VkFormat writeTargetDepthFormat = VK_FORMAT_UNDEFINED;
+
     struct ResolvedTexture {
         VkImageView view = VK_NULL_HANDLE;
         VkSampler sampler = VK_NULL_HANDLE;
@@ -796,6 +857,13 @@ struct PassContext {
     // meaningful when this is non-null (CommandBuffer itself defensively
     // asserts/no-ops on a null Renderer - see CommandBuffer.h).
     Renderer* renderer = nullptr;
+
+    // Set exactly once by RenderGraph::BuildPassContext(), mirroring
+    // `renderer` above - null on every frame the installed
+    // FrameDebuggerEventSink (RenderGraph::SetFrameDebuggerEventSink()) is
+    // itself null, so a Player-style build pays one null-pointer branch per
+    // Draw()/Dispatch() call and nothing else.
+    FrameDebuggerEventSink* eventSink = nullptr;
 
     // Resolves a texture this pass declared as a READ (via
     // PassBuilder::ReadTexture()) into its already-live VkImageView/
@@ -933,7 +1001,14 @@ struct PassContext {
     // PassContext (renderer/recordDraw.drawStats simply stay null - every
     // CommandBuffer method defensively asserts/no-ops on that, see
     // CommandBuffer.h).
-    CommandBuffer Cmd() const noexcept { return CommandBuffer(cmd, renderer, recordDraw.drawStats); }
+    CommandBuffer Cmd() const noexcept
+    {
+        return CommandBuffer(cmd, renderer, recordDraw.drawStats,
+            CommandBuffer::WriteTargetInfo{
+                writeTargetColorImage, colorAttachmentExtent, writeTargetColorFormat, writeTargetDepthImage,
+                writeTargetDepthFormat },
+            eventSink);
+    }
 };
 
 } // namespace gte::rg

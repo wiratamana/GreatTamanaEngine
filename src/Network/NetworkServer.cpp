@@ -231,6 +231,7 @@ FrameDebuggerStateResponseView ToFrameDebuggerStateResponseView(const FrameDebug
     view.channel = outcome.channel;
     view.levelsBlack = outcome.levelsBlack;
     view.levelsWhite = outcome.levelsWhite;
+    view.perDrawEventCount = outcome.perDrawEventCount;
     return view;
 }
 
@@ -260,6 +261,48 @@ void RespondWithFrameDebuggerCommandResult(
     res.set_content(BuildFrameDebuggerCommandResponseJson(result.success,
         result.success ? "" : "frame debugger command could not be applied - see the reported state for why", stateView),
         "application/json");
+}
+
+// GET /frame_debugger/get_event_texture's own response shape - an IMAGE
+// (same raw-PNG/base64-JSON negotiation GET /get_texture already uses via
+// ResolveCaptureResponseFormat()/BuildCaptureJsonBody()), never the generic
+// {"success":...,"state":{...}} shape every other /frame_debugger/* route
+// uses - this route's whole point is handing back a real picture.
+void WriteFrameDebuggerEventTextureResponse(
+    const FrameDebuggerCommandBridge::SubmitResult& submit, const httplib::Request& req, httplib::Response& res)
+{
+    if (submit.alreadyPending) {
+        res.status = 503;
+        res.set_content(BuildGenericErrorResponseJson("another frame debugger command is already in progress"), "application/json");
+        return;
+    }
+    if (submit.timedOut) {
+        res.status = 504;
+        res.set_content(BuildGenericErrorResponseJson("frame debugger command timed out"), "application/json");
+        return;
+    }
+
+    const FrameDebuggerEventTextureOutcome& eventTexture = submit.result->eventTexture;
+    if (!eventTexture.found) {
+        res.status = 404;
+        res.set_content(BuildGenericErrorResponseJson(
+            "no captured image for this event index yet - capture was (re)armed for it; poll again after the "
+            "next captured frame"),
+            "application/json");
+        return;
+    }
+
+    const CaptureResponseFormat format =
+        ResolveCaptureResponseFormat(req.get_param_value("format"), req.get_header_value("Accept"));
+    if (format == CaptureResponseFormat::RawPng) {
+        res.set_content(
+            reinterpret_cast<const char*>(eventTexture.pixels.data()), eventTexture.pixels.size(), "image/png");
+    } else {
+        const std::string base64 = Encoding::EncodeBase64(eventTexture.pixels);
+        res.set_content(
+            BuildCaptureJsonBody(static_cast<int>(eventTexture.width), static_cast<int>(eventTexture.height), base64),
+            "application/json");
+    }
 }
 
 // Shared response mapping for every /render_graph/* mutation route.
@@ -574,6 +617,33 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         res.status = 200;
         res.set_content(BuildFrameDebuggerStateResponseJson(ToFrameDebuggerStateResponseView(submit.result->state)), "application/json");
     });
+
+    // Per-draw event capture - GET /frame_debugger/get_event_texture?index=N.
+    // Reuses ParseFrameDebuggerSelectEventQuery()'s own required-integer
+    // "index" parsing (identical shape - a plain, required event index) -
+    // never a second, near-duplicate parser. A NEW route, additive only -
+    // every one of the seven routes above stays byte-for-byte unchanged.
+    server.Get("/frame_debugger/get_event_texture",
+        [frameDebuggerCommandBridge](const httplib::Request& req, httplib::Response& res) {
+            const ParsedFrameDebuggerSelectEventQuery parsed =
+                ParseFrameDebuggerSelectEventQuery(req.get_param_value("index"));
+            if (!parsed.valid) {
+                res.status = 400;
+                res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+                return;
+            }
+            if (frameDebuggerCommandBridge == nullptr) {
+                res.status = 503;
+                res.set_content(
+                    BuildGenericErrorResponseJson("frame debugger command bridge not available"), "application/json");
+                return;
+            }
+            FrameDebuggerCommandRequest request;
+            request.kind = FrameDebuggerCommandKind::GetEventTexture;
+            request.getEventTexture.index = parsed.index;
+            const FrameDebuggerCommandBridge::SubmitResult submit = frameDebuggerCommandBridge->SubmitAndWait(request);
+            WriteFrameDebuggerEventTextureResponse(submit, req, res);
+        });
 
     // GET /render_graph/set_pass_enabled, /passes, /set_feature_enabled,
     // /set_feature_priority. Each parses its query, checks the bridge is

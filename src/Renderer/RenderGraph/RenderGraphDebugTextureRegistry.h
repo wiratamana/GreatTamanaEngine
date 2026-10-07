@@ -47,6 +47,14 @@ struct DebugTextureSnapshot {
     RenderTarget target; // target.image/imageView/extent/format is the COLOR half; target.depthImage/depthImageView/depthFormat is the optional depth half (see RenderTarget.h).
     bool hasDepth = false;
 
+    // The real, live VkSampler for each half - target itself carries none
+    // (RenderTarget.h is image/imageView/extent/format only). Required to
+    // back an ImGui descriptor at all (ImGui_ImplVulkan_AddTexture() needs a
+    // real VkSampler, never just a VkImageView). depthSampler is meaningful
+    // only when hasDepth is true.
+    VkSampler sampler = VK_NULL_HANDLE;
+    VkSampler depthSampler = VK_NULL_HANDLE;
+
     ResourceState colorState; // layout/stage/access this registry LAST believes the color image is actually in.
     ResourceState depthState; // meaningful only when hasDepth is true.
 

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdio>
+#include <string_view>
 
 namespace gte {
 
@@ -178,6 +179,15 @@ namespace {
 // a comment" precedent for). If RenderPasses.cpp's own kGameClearColor ever
 // changes, update this constant to match.
 constexpr float kFrameDebuggerGameClearColor[4] = { 20.0f / 255.0f, 20.0f / 255.0f, 30.0f / 255.0f, 1.0f };
+
+// The shared Game View/Scene View color buffer's resource name - see
+// Core.cpp's `b.ImportTexture("GameView", ...)`. A leaf whose pass writes
+// this exact resource keeps using stepPreviewKind/stepPreviewIndex (that
+// buffer gets rewritten by many passes in one frame, so only the capture's
+// own retained preview textures know "as of THIS step"); any OTHER written
+// resource is pass-private, so its own current RenderGraphDebugTextureRegistry
+// entry already IS "as of this step" (nothing else writes it afterward).
+constexpr std::string_view kGameViewResourceName = "GameView";
 
 // Finds the first pass in `passes` whose name exactly matches `name`, or
 // nullptr if none does - a plain linear scan, exactly as cheap/simple as
@@ -400,6 +410,14 @@ FrameDebuggerEventNode BuildComputeDispatchLeaf(
     // real, raw pass NAME is used here instead, which is always true and
     // never fabricated.
     details.shaderName = pass.name;
+
+    // Private-resource fast path - see kGameViewResourceName's own doc
+    // comment above. A compute pass always writes a private resource (no
+    // compute pass ever writes "GameView" directly), so this is almost
+    // always populated here.
+    if (!pass.writeNames.empty() && pass.writeNames.front() != kGameViewResourceName) {
+        details.privateWriteTextureName = pass.writeNames.front();
+    }
 
     details.blendMode = "n/a (compute pass)";
     details.zClip = "n/a (compute pass)";
@@ -694,6 +712,14 @@ FrameDebuggerEventNode BuildGraphicsPassLeaf(
     details.stepPreviewKind = stepPreviewKind;
     details.passName = pass.name;
     details.shaderName = pass.name;
+
+    // Private-resource fast path - see kGameViewResourceName's own doc
+    // comment above. Empty for "DrawSkyBackground"/any other pass that
+    // writes the shared "GameView" buffer - those keep using
+    // stepPreviewKind/stepPreviewIndex above unchanged.
+    if (!pass.writeNames.empty() && pass.writeNames.front() != kGameViewResourceName) {
+        details.privateWriteTextureName = pass.writeNames.front();
+    }
 
     const FrameDebuggerStandardPipelineState pipelineState =
         (pass.name == "DrawSkyBackground") ? DescribeSkyBackgroundPipelineState() : DescribeStandardPipelineState();

@@ -1,5 +1,7 @@
 #include "FrameDebuggerCapture.h"
 
+#include "../Renderer/Renderer.h"
+
 #include <algorithm>
 #include <utility>
 
@@ -124,6 +126,50 @@ void FrameDebuggerCaptureContext::Reset()
     // comment (FrameDebuggerCapture.h) for why this must be empty on every
     // frame that isn't itself a capture-trigger frame.
     m_replayStepPreviews.clear();
+    // Snapshots the PREVIOUS frame's own total before zeroing the counter
+    // for the next one - see LastFrameEventCount()'s own doc comment.
+    m_lastFrameEventCount = m_nextEventIndex;
+    m_nextEventIndex = 0;
+}
+
+void FrameDebuggerCaptureContext::InitializeEventCapture(Renderer& renderer) noexcept
+{
+    m_eventCaptureAllocator = renderer.GetVmaAllocator();
+    m_eventCaptureTracker = renderer.GetMemoryTracker();
+    m_eventCaptureDevice = renderer.GetVulkanContextInfo().device;
+}
+
+void FrameDebuggerCaptureContext::NoteCommandResult(
+    VkImage image, VkExtent2D extent, VkFormat format, VkImageAspectFlags aspect)
+{
+    if (m_armedEventIndex < 0) {
+        NextEventIndex(); // Keep this frame's counter advancing even while disarmed.
+        return;
+    }
+    const int index = NextEventIndex();
+    if (index != m_armedEventIndex) {
+        return;
+    }
+    m_pendingEventCapture = PendingEventCapture{ image, extent, format, aspect };
+}
+
+void FrameDebuggerCaptureContext::FlushPendingCapture(VkCommandBuffer cmd)
+{
+    if (!m_pendingEventCapture.has_value() || m_eventCaptureAllocator == VK_NULL_HANDLE) {
+        return;
+    }
+    const PendingEventCapture capture = *m_pendingEventCapture;
+    m_pendingEventCapture.reset();
+
+    const bool isDepth = (capture.aspect & VK_IMAGE_ASPECT_DEPTH_BIT) != 0;
+    rg::ResourceState srcState = rg::RequiredStateFor(
+        isDepth ? rg::ResourceAccess::DepthStencilAttachmentReadWrite : rg::ResourceAccess::ColorAttachmentWrite,
+        isDepth);
+
+    rg::CopyImageIntoSnapshot(cmd, m_retainedEventImage, m_eventCaptureAllocator, m_eventCaptureTracker,
+        m_eventCaptureDevice, capture.image, capture.extent, capture.format, capture.aspect, srcState,
+        "FrameDebuggerPerDrawEventSnapshot");
+    m_retainedEventIndex = m_armedEventIndex;
 }
 
 } // namespace gte

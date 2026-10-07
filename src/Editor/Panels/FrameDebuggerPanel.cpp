@@ -4,6 +4,7 @@
 #include "../MemoryPanelData.h" // gte::ToString(VkFormat) - reused for the real render-target format label (PHASE3).
 #include "../../Encoding/HdrColorVisualization.h" // task_manager/frame-debugger-9 campaign, PHASE3 - Encoding::ConvertHdrRgba16fToRgba8().
 #include "../../Encoding/PixelConversion.h" // PHASE3 - Encoding::ConvertBgraToRgbaInPlace().
+#include "../../Encoding/PngEncoder.h" // Frame Debugger per-draw event capture - Encoding::EncodeRgba8ToPng().
 #include "../../Encoding/SingleChannelVisualization.h"
 #include "../../Renderer/RenderGraph/RenderGraph.h"
 #include "../../Renderer/RenderGraph/RenderPassToggleRegistry.h" // editor-core-separation-21 campaign, PHASE5 - IsEnabled() lookup for the honesty detector.
@@ -245,6 +246,35 @@ void FrameDebuggerPanel::EnsurePreviewDescriptor()
 {
     const FrameDebuggerHistoryEntry* entry = m_currentCapture.CurrentEntry();
 
+    const std::optional<FrameDebuggerEventDetails> selectedDetails =
+        (entry != nullptr) ? FindEventDetailsByIndex(entry->snapshot, m_selectedEventIndex) : std::nullopt;
+
+    // Fast path for a leaf touching a PRIVATE render-graph resource (a
+    // compute LUT pass, a depth-only pass, ...) - checked FIRST, falling
+    // through to the unchanged path below on a miss. Same desiredView/
+    // desiredSampler convention the unchanged fallback path below already
+    // uses - zero stall, zero CPU readback, matching every other branch's
+    // cost profile. See FrameDebuggerEventDetails::privateWriteTextureName's
+    // own doc comment (FrameDebuggerData.h) for why this is always correct
+    // "as of this step" with no replay/redraw needed.
+    std::optional<rg::DebugTextureSnapshot> privatePreview;
+    if (selectedDetails.has_value() && selectedDetails->privateWriteTextureName.has_value()
+        && m_frameRenderGraph != nullptr) {
+        privatePreview = m_frameRenderGraph->DebugTextureSnapshotFor(*selectedDetails->privateWriteTextureName);
+    }
+    if (privatePreview.has_value() && privatePreview->target.imageView != VK_NULL_HANDLE) {
+        const VkImageView desiredView = privatePreview->target.imageView;
+        const VkSampler desiredSampler = privatePreview->sampler;
+        if (m_previewDescriptor != VK_NULL_HANDLE && desiredView == m_lastKnownPreviewView) {
+            return; // Already wrapping the right VkImageView - nothing to do.
+        }
+        ReleasePreviewDescriptor();
+        m_previewDescriptor =
+            ImGui_ImplVulkan_AddTexture(desiredSampler, desiredView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_lastKnownPreviewView = desiredView;
+        return;
+    }
+
     // task_manager/frame-debugger-7 campaign, PHASE4
     // (PHASE4_PREVIEW_WIRING_AND_DATA_MODEL.md, Step 3.4) - REWRITTEN. The
     // old `isViewingGameViewLeaf`/`selectedComputePassPreview` boolean-soup
@@ -259,13 +289,9 @@ void FrameDebuggerPanel::EnsurePreviewDescriptor()
     // (see ChooseFrameDebuggerPreviewSource()'s own doc comment).
     FrameDebuggerStepPreviewKind stepPreviewKind = FrameDebuggerStepPreviewKind::PostComposite;
     int stepPreviewIndex = -1;
-    if (entry != nullptr) {
-        const std::optional<FrameDebuggerEventDetails> details =
-            FindEventDetailsByIndex(entry->snapshot, m_selectedEventIndex);
-        if (details.has_value()) {
-            stepPreviewKind = details->stepPreviewKind;
-            stepPreviewIndex = details->stepPreviewIndex;
-        }
+    if (selectedDetails.has_value()) {
+        stepPreviewKind = selectedDetails->stepPreviewKind;
+        stepPreviewIndex = selectedDetails->stepPreviewIndex;
     }
 
     // Does the selected PerObjectStep leaf's own stepPreviewIndex actually
@@ -1129,6 +1155,12 @@ void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg:
     // this class's own destructor (see ~FrameDebuggerPanel()).
     m_device = renderer.GetVulkanContextInfo().device;
 
+    // Per-draw event capture - cheap/idempotent, see
+    // FrameDebuggerCaptureContext::InitializeEventCapture()'s own doc
+    // comment for why this must run unconditionally, every call, before the
+    // early-return below.
+    m_captureContext.InitializeEventCapture(renderer);
+
     if (!ctx.frameDebuggerWindowOpen) {
         return;
     }
@@ -1383,7 +1415,57 @@ FrameDebuggerStateSnapshotView FrameDebuggerPanel::BuildStateSnapshotView(const 
 
     view.levelsBlack = m_levelsBlack;
     view.levelsWhite = m_levelsWhite;
+    view.perDrawEventCount = m_captureContext.LastFrameEventCount();
     return view;
+}
+
+FrameDebuggerEventTextureResult FrameDebuggerPanel::GetEventTextureFromCommand(int eventIndex)
+{
+    m_captureContext.ArmEventIndex(eventIndex);
+
+    FrameDebuggerEventTextureResult result;
+    if (!m_captureContext.HasRetainedEventImage() || m_frameRenderer == nullptr) {
+        return result; // Just (re)armed, or no Renderer cached yet - caller polls again.
+    }
+
+    const rg::EventSnapshotResource& retained = m_captureContext.RetainedEventImage();
+    if (retained.Image() == VK_NULL_HANDLE) {
+        return result;
+    }
+
+    // Same rare, explicit, human/LLM-driven stall GET /get_texture already
+    // pays - never called from a per-frame path.
+    m_frameRenderer->WaitForGpuIdle();
+
+    const Renderer::CapturedRawPixels raw = m_frameRenderer->CaptureImagePixels(
+        retained.Image(), VK_IMAGE_ASPECT_COLOR_BIT, retained.Format(), retained.Extent(),
+        rg::ResourceState{ VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+            VK_ACCESS_2_SHADER_READ_BIT });
+    if (raw.pixels.empty()) {
+        return result;
+    }
+
+    std::vector<std::uint8_t> converted;
+    const std::uint8_t* encodePixels = raw.pixels.data();
+    if (raw.format == VK_FORMAT_R16G16B16A16_SFLOAT) {
+        converted.resize(static_cast<std::size_t>(raw.width) * static_cast<std::size_t>(raw.height) * 4);
+        if (!Encoding::ConvertHdrRgba16fToRgba8(raw.pixels.data(), raw.format, raw.width, raw.height, converted.data())) {
+            return result;
+        }
+        encodePixels = converted.data();
+    } else if (IsBgraFormat(raw.format)) {
+        Encoding::ConvertBgraToRgbaInPlace(raw.pixels.data(), raw.width, raw.height);
+    }
+    // else: already tightly-packed RGBA8 - no conversion needed. A captured
+    // depth attachment is never routed here - this method only ever reads
+    // the COLOR half (see CommandBuffer::Draw()'s own "color when both are
+    // present" preference, mirrored by NoteCommandResult()'s own caller).
+
+    result.found = true;
+    result.pixels = Encoding::EncodeRgba8ToPng(encodePixels, raw.width, raw.height);
+    result.width = static_cast<std::uint32_t>(raw.width);
+    result.height = static_cast<std::uint32_t>(raw.height);
+    return result;
 }
 
 } // namespace gte

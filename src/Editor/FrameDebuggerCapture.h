@@ -1,10 +1,15 @@
 #pragma once
 
 #include "../Core/FrameDebuggerCaptureRecorder.h"
+#include "../Core/FrameDebuggerEventSink.h"
 #include "../Math/Mat4.h"
 #include "../Renderer/RenderTexture.h" // frame-debugger-7 campaign, PHASE3 - m_replayStepPreviews below.
+#include "../Renderer/RenderGraph/RenderGraphBarrierPlanner.h" // ResourceState/RequiredStateFor() - per-draw event capture.
+#include "../Renderer/RenderGraph/RenderGraphEventSnapshotPool.h" // EventSnapshotResource/CopyImageIntoSnapshot() - per-draw event capture.
 
 #include <cstdint>
+#include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -151,7 +156,7 @@ FrameDebuggerStandardPipelineState DescribeSkyBackgroundPipelineState();
 // passes nullptr, pays nothing beyond RenderSystem::Draw()'s own single,
 // already-resolved "is this pointer null" branch per draw call - no string
 // formatting, no vector work, no allocation of any kind.
-class FrameDebuggerCaptureContext : public IFrameDebuggerCaptureRecorder {
+class FrameDebuggerCaptureContext : public IFrameDebuggerCaptureRecorder, public FrameDebuggerEventSink {
 public:
     // Records one real, already-resolved draw call. `pipelineDebugName`
     // should be `pipeline.DebugName()` (Pipeline.h) - empty is tolerated
@@ -219,6 +224,53 @@ public:
     // FrameDebuggerCaptureContext is already in this same empty state, so
     // this never strictly needs to be called before the very first frame.
     void Reset();
+
+    // Live per-frame event counter - one fresh index per call, numbering
+    // EVERY real CommandBuffer::Draw()/Dispatch() recorded this armed
+    // frame, across EVERY pass (never just RenderOpaque's own per-entity
+    // children). A DELIBERATELY SEPARATE index space from the event tree's
+    // own eventIndex numbering (BuildRealFrameDebuggerSnapshot(),
+    // FrameDebuggerData.cpp) - the tree's own counter numbers leaves/
+    // passes/owned-child-events, built ONCE per frame after recording
+    // finishes; this one numbers every live recording call, during
+    // recording itself. The two are never assumed to agree.
+    int NextEventIndex() noexcept { return m_nextEventIndex++; }
+
+    // The live NextEventIndex() high-water mark as of the end of the LAST
+    // armed frame (i.e. how many events that frame actually recorded) -
+    // snapshotted by Reset() right before it zeroes the counter for the
+    // next frame.
+    int LastFrameEventCount() const noexcept { return m_lastFrameEventCount; }
+
+    // Must be called once before this class is ever installed as a
+    // FrameDebuggerEventSink (RenderGraph::SetFrameDebuggerEventSink()) -
+    // binds the allocator/tracker/device its own retained scratch slot is
+    // built through. Cheap/idempotent - safe to call again every Build().
+    void InitializeEventCapture(Renderer& renderer) noexcept;
+
+    // Re-arms per-draw capture for a new NextEventIndex() value - takes
+    // effect starting the NEXT captured frame (never a live mid-frame image
+    // swap). The retention budget is O(1): only the currently-armed index's
+    // own image is ever kept, in ONE resized-in-place scratch slot, never a
+    // growing pool - a 500-object scene means ~500 NoteCommandResult() calls
+    // every frame, so retaining more than the ONE currently-selected one
+    // would reintroduce the exact VRAM blow-up this mechanism replaces.
+    void ArmEventIndex(int index) noexcept { m_armedEventIndex = index; }
+
+    // FrameDebuggerEventSink overrides - see that interface's own doc
+    // comment (Core/FrameDebuggerEventSink.h) for the split between the two.
+    void NoteCommandResult(VkImage image, VkExtent2D extent, VkFormat format, VkImageAspectFlags aspect) override;
+    void FlushPendingCapture(VkCommandBuffer cmd) override;
+
+    // True once the currently-armed index's own image has actually been
+    // captured at least once since it was armed.
+    bool HasRetainedEventImage() const noexcept
+    {
+        return m_armedEventIndex >= 0 && m_retainedEventIndex == m_armedEventIndex;
+    }
+
+    // Meaningful only when HasRetainedEventImage() is true.
+    const rg::EventSnapshotResource& RetainedEventImage() const noexcept { return m_retainedEventImage; }
 
     // Every DISTINCT, non-empty real Pipeline debug name recorded via
     // RecordDraw() since the last Reset(), in first-seen order.
@@ -303,6 +355,26 @@ private:
     // task_manager/frame-debugger-7 campaign, PHASE3 - see
     // SetReplayStepPreviews()/ReplayStepPreviews() above.
     std::vector<RenderTexture> m_replayStepPreviews;
+
+    // See NextEventIndex()/LastFrameEventCount() above.
+    int m_nextEventIndex = 0;
+    int m_lastFrameEventCount = 0;
+
+    // Per-draw event capture (see InitializeEventCapture()/ArmEventIndex()/
+    // NoteCommandResult()/FlushPendingCapture() above).
+    VmaAllocator m_eventCaptureAllocator = VK_NULL_HANDLE;
+    std::shared_ptr<GpuMemoryTracker> m_eventCaptureTracker;
+    VkDevice m_eventCaptureDevice = VK_NULL_HANDLE;
+    int m_armedEventIndex = -1;
+    int m_retainedEventIndex = -1;
+    struct PendingEventCapture {
+        VkImage image = VK_NULL_HANDLE;
+        VkExtent2D extent{};
+        VkFormat format = VK_FORMAT_UNDEFINED;
+        VkImageAspectFlags aspect = 0;
+    };
+    std::optional<PendingEventCapture> m_pendingEventCapture;
+    rg::EventSnapshotResource m_retainedEventImage;
 };
 
 } // namespace gte

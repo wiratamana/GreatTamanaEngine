@@ -64,6 +64,7 @@
 #include <volk.h>
 
 #include "../DrawStats.h"
+#include "../../Core/FrameDebuggerEventSink.h"
 #include "../../Math/Mat4.h"
 
 #include <cstdint>
@@ -92,12 +93,30 @@ constexpr bool PushConstantSizeMatches(std::uint32_t suppliedSize, std::uint32_t
 
 class CommandBuffer {
 public:
+    // Which real color/depth attachment this pass's own write target is -
+    // see PassContext::Cmd() (RenderGraph.h), the one real caller. Defaulted
+    // (every field VK_NULL_HANDLE/VK_FORMAT_UNDEFINED) for a pass with no
+    // such attachment, or any pre-existing call site built before this
+    // field existed.
+    struct WriteTargetInfo {
+        VkImage colorImage = VK_NULL_HANDLE;
+        VkExtent2D colorExtent{};
+        VkFormat colorFormat = VK_FORMAT_UNDEFINED;
+        VkImage depthImage = VK_NULL_HANDLE;
+        VkFormat depthFormat = VK_FORMAT_UNDEFINED;
+    };
+
     // `renderer`/`passDrawStats` may be nullptr only for a default-
     // constructed/never-handed-to-a-real-pass PassContext (see
     // RenderGraph.h) - every method below defensively asserts/no-ops rather
     // than dereferencing a null Renderer, mirroring PassContext's own
     // resolve*() methods' existing defensive-null-check discipline.
-    CommandBuffer(VkCommandBuffer cmd, Renderer* renderer, DrawStats* passDrawStats) noexcept;
+    // `writeTarget`/`eventSink` are trailing and defaulted so every
+    // pre-existing call site keeps compiling unmodified - `eventSink` stays
+    // null until an Editor-tier caller installs one via
+    // RenderGraph::SetFrameDebuggerEventSink().
+    CommandBuffer(VkCommandBuffer cmd, Renderer* renderer, DrawStats* passDrawStats,
+        WriteTargetInfo writeTarget = {}, FrameDebuggerEventSink* eventSink = nullptr) noexcept;
 
     // Raw escape hatch for anything this class doesn't cover yet.
     VkCommandBuffer Native() const noexcept { return m_cmd; }
@@ -170,6 +189,8 @@ private:
     VkCommandBuffer m_cmd = VK_NULL_HANDLE;
     Renderer* m_renderer = nullptr;
     DrawStats* m_passDrawStats = nullptr;
+    WriteTargetInfo m_writeTarget;
+    FrameDebuggerEventSink* m_eventSink = nullptr;
 
     const ComputePipeline* m_boundComputePipeline = nullptr;
     VkDescriptorSet m_boundDescriptorSet = VK_NULL_HANDLE;

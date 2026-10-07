@@ -895,6 +895,14 @@ public:
     {
         return m_frameDebuggerPanel.BuildStateSnapshotView(m_ctx);
     }
+    FrameDebuggerEventSink* FrameDebuggerGetEventSinkForInstall() override
+    {
+        return m_frameDebuggerPanel.EventSinkForInstall();
+    }
+    FrameDebuggerEventTextureResult FrameDebuggerGetEventTexture(int eventIndex) override
+    {
+        return m_frameDebuggerPanel.GetEventTextureFromCommand(eventIndex);
+    }
 
 private:
     void ReleaseGameViewDescriptor()

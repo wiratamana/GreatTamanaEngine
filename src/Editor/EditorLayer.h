@@ -24,6 +24,7 @@
 // already-open `namespace gte { ... }` here would create a bogus nested
 // `gte::gte` namespace instead of extending the real `gte` namespace.
 #include "../Core/FrameDebuggerCaptureRecorder.h"
+#include "../Core/FrameDebuggerEventSink.h" // Frame Debugger per-draw event capture - see FrameDebuggerGetEventSinkForInstall() below.
 
 #include <cstdint>
 #include <memory>
@@ -196,6 +197,25 @@ struct FrameDebuggerStateSnapshotView {
     std::string channel = "all";
     float levelsBlack = 0.0f;
     float levelsWhite = 1.0f;
+
+    // Per-draw event capture - the live NextEventIndex() high-water mark
+    // for whichever frame is currently captured (0 until a real capture has
+    // happened at least once). A NEW, additive field - every existing
+    // field's own name/type/meaning is unchanged.
+    int perDrawEventCount = 0;
+};
+
+// Per-draw event capture - one real event's own captured image, by its
+// NextEventIndex() value (see FrameDebuggerCaptureContext.h). `pixels` is
+// already-PNG-encoded bytes, the same encoding GET /get_texture already
+// returns. `found` is false whenever that exact index has never been
+// captured yet (including the normal "just armed, wait for the next
+// captured frame" case) - the caller is expected to poll again.
+struct FrameDebuggerEventTextureResult {
+    bool found = false;
+    std::vector<std::uint8_t> pixels;
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
 };
 
 // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
@@ -693,6 +713,22 @@ public:
     // Debugger's real state currently is. All-default for NullEditorLayer
     // (enabled == false, windowOpen == false, channel == "all", ...).
     virtual FrameDebuggerStateSnapshotView FrameDebuggerGetState() const = 0;
+
+    // Returns this session's one, stable FrameDebuggerEventSink instance for
+    // Editor-tier startup code to install onto the live RenderGraph exactly
+    // once (mirrors RenderGraph::SetDebugMetadataSink()'s own "install once,
+    // on the one persistent owning object" placement) - nullptr for
+    // NullEditorLayer (a release build has no Frame Debugger to install one
+    // for).
+    virtual FrameDebuggerEventSink* FrameDebuggerGetEventSinkForInstall() = 0;
+
+    // GET /frame_debugger/get_event_texture - returns whichever real
+    // per-draw event's image is CURRENTLY retained for `eventIndex`, and
+    // re-arms capture for `eventIndex` if it wasn't already armed (so a
+    // caller that keeps polling the same index eventually gets a real
+    // image, once the next captured frame actually produces one). Always
+    // `found == false` for NullEditorLayer.
+    virtual FrameDebuggerEventTextureResult FrameDebuggerGetEventTexture(int eventIndex) = 0;
 
     // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
     // PHASE6 (task_manager/render-pass-5/PHASE6_EDITOR_TOOLING_AND_LIVE_VALIDATION.md)

@@ -727,6 +727,7 @@ nlohmann::json FrameDebuggerStateToJson(const FrameDebuggerStateResponseView& st
     body["channel"] = state.channel;
     body["levelsBlack"] = state.levelsBlack;
     body["levelsWhite"] = state.levelsWhite;
+    body["perDrawEventCount"] = state.perDrawEventCount;
     return body;
 }
 

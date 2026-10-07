@@ -169,6 +169,16 @@ struct FrameDebuggerEventDetails {
     // own "never insert a field in the middle" precedent above.
     FrameDebuggerStepPreviewKind stepPreviewKind = FrameDebuggerStepPreviewKind::PostComposite;
     int stepPreviewIndex = -1;
+
+    // Set only for a leaf touching a PRIVATE (non-"GameView") render-graph
+    // resource (a compute LUT pass, a depth-only pass, ...) - that resource's
+    // own current RenderGraphDebugTextureRegistry entry already reflects
+    // exactly what this leaf's pass produced, since nothing else writes it
+    // afterward. Empty for every leaf touching the shared Game View/Scene
+    // View buffer, which keeps using stepPreviewKind/stepPreviewIndex above
+    // unchanged - see BuildRealFrameDebuggerSnapshot()'s own module-local
+    // kGameViewResourceName constant for the exact exclusion rule.
+    std::optional<std::string> privateWriteTextureName;
 };
 
 // One row of the left-hand event tree (see the reference screenshot's

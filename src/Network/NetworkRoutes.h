@@ -715,6 +715,12 @@ struct FrameDebuggerStateResponseView {
     std::string channel = "all";
     float levelsBlack = 0.0f;
     float levelsWhite = 1.0f;
+
+    // Per-draw event capture - a NEW, additive field; every existing field's
+    // own name/type/meaning is unchanged. See
+    // FrameDebuggerStateOutcome::perDrawEventCount's own doc comment
+    // (src/Application/FrameDebuggerCommandBridge.h).
+    int perDrawEventCount = 0;
 };
 
 // Builds GET /frame_debugger/state's entire response body (a flat object,

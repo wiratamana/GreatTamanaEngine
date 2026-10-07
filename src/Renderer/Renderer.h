@@ -872,6 +872,12 @@ public:
     // EditorGpuMemoryNameOverlay::GetDebugName()).
     std::shared_ptr<GpuMemoryTracker> GetMemoryTracker() const noexcept { return m_resources.GetMemoryTracker(); }
 
+    // The raw VmaAllocator backing every Buffer/RenderTexture this Renderer
+    // creates - lets a collaborator (e.g. gte::rg::RenderGraph's own scratch
+    // copy-image pools) allocate through the exact same allocator instead of
+    // opening a second, independent one.
+    VmaAllocator GetVmaAllocator() const noexcept { return m_allocator.Native(); }
+
     // The REAL, driver-reported memory usage/budget for every Vulkan memory
     // heap on this device (see VulkanAllocator::GetHeapBudgets()) - distinct
     // from GetMemoryTotals()/GetMemoryResources() above, which only tally

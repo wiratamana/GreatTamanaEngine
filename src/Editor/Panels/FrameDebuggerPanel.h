@@ -260,6 +260,15 @@ public:
     // other /frame_debugger/* response's own "state" field) reports.
     FrameDebuggerStateSnapshotView BuildStateSnapshotView(const EditorContext& ctx) const;
 
+    // This session's one, stable per-draw FrameDebuggerEventSink instance -
+    // see IEditorLayer::FrameDebuggerGetEventSinkForInstall()'s own doc
+    // comment (EditorLayer.h). Valid for this whole object's lifetime.
+    FrameDebuggerEventSink* EventSinkForInstall() noexcept { return &m_captureContext; }
+
+    // GET /frame_debugger/get_event_texture's real implementation - see
+    // IEditorLayer::FrameDebuggerGetEventTexture()'s own doc comment.
+    FrameDebuggerEventTextureResult GetEventTextureFromCommand(int eventIndex);
+
 private:
     void BuildToolbarRow(EditorContext& ctx);
     void BuildFrameStepperRow(const FrameDebuggerSnapshot& snapshot);

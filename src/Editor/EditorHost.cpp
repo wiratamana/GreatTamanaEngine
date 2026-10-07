@@ -243,6 +243,14 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
     m_renderGraph.SetDebugMetadataSink(&m_passMetadataRecorder);
     m_renderGraph.SetDebugMetadataProvider(&m_passMetadataRecorder);
 
+    // Per-draw event capture - installs this session's one, stable
+    // FrameDebuggerEventSink instance (owned by m_editorLayer's own Frame
+    // Debugger panel) onto the live RenderGraph, mirroring the two calls
+    // immediately above exactly. Null for NullEditorLayer (a release build).
+    if (FrameDebuggerEventSink* eventSink = m_editorLayer->FrameDebuggerGetEventSinkForInstall()) {
+        m_renderGraph.SetFrameDebuggerEventSink(eventSink);
+    }
+
     // PHASE0_MASTER_STRATEGY.md's Locked Design Decision #8 - the ONE new
     // wiring call this whole campaign exists to add: Core::BuildFrame()'s
     // own render-graph-frame-building hooks (Phase 13) need a genuinely
@@ -683,6 +691,16 @@ int EditorHost::Run()
             case FrameDebuggerCommandKind::GetState:
                 fdResult.success = true;
                 break;
+            case FrameDebuggerCommandKind::GetEventTexture: {
+                const FrameDebuggerEventTextureResult eventTexture =
+                    m_editorLayer->FrameDebuggerGetEventTexture(fdRequest->getEventTexture.index);
+                fdResult.success = eventTexture.found;
+                fdResult.eventTexture.found = eventTexture.found;
+                fdResult.eventTexture.pixels = eventTexture.pixels;
+                fdResult.eventTexture.width = eventTexture.width;
+                fdResult.eventTexture.height = eventTexture.height;
+                break;
+            }
             }
 
             const FrameDebuggerStateSnapshotView stateView = m_editorLayer->FrameDebuggerGetState();
@@ -694,6 +712,7 @@ int EditorHost::Run()
             fdResult.state.channel = stateView.channel;
             fdResult.state.levelsBlack = stateView.levelsBlack;
             fdResult.state.levelsWhite = stateView.levelsWhite;
+            fdResult.state.perDrawEventCount = stateView.perDrawEventCount;
 
             m_frameDebuggerCommandBridge.FulfillCommand(fdResult);
         }

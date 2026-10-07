@@ -95,6 +95,11 @@ public:
     bool FrameDebuggerSetChannel(const std::string& /*channel*/) override { return false; }
     void FrameDebuggerSetLevels(float /*black*/, float /*white*/) override { }
     FrameDebuggerStateSnapshotView FrameDebuggerGetState() const override { return FrameDebuggerStateSnapshotView{}; }
+    FrameDebuggerEventSink* FrameDebuggerGetEventSinkForInstall() override { return nullptr; }
+    FrameDebuggerEventTextureResult FrameDebuggerGetEventTexture(int /*eventIndex*/) override
+    {
+        return FrameDebuggerEventTextureResult{};
+    }
 
     // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
     // PHASE6 - a release build has no Editor-only validation spawn tooling
