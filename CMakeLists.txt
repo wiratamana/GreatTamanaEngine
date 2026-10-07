@@ -778,6 +778,8 @@ add_library(gte_core STATIC
     src/Renderer/RenderGraph/RenderGraphNameSlotTable.h
     src/Renderer/RenderGraph/RenderGraphTimestampPool.h
     src/Renderer/RenderGraph/RenderGraphTimestampPool.cpp
+    src/Renderer/RenderGraph/RenderGraphEventSnapshotPool.h
+    src/Renderer/RenderGraph/RenderGraphEventSnapshotPool.cpp
     # task_manager/better-render-pass-1 campaign, PHASE3
     # (PHASE3_ENGINE_COMMAND_BUFFER_AND_TYPE_SAFE_PUSH_CONSTANTS.md) - R1/R4:
     # the engine-owned, pass-author-facing CommandBuffer facade over
