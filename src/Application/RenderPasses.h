@@ -80,7 +80,6 @@ namespace gte {
 
 class Game;
 class Renderer;
-class RenderTexture;
 
 namespace rg {
 class RenderGraphBuilder;
@@ -271,20 +270,6 @@ void AddRenderTransparentPass(rg::RenderGraphBuilder& builder, Game& game, Rende
 void AddPresentPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer, rg::TextureHandle swapchainImage,
     std::optional<float> directGameRenderAspect, const std::function<void(VkCommandBuffer)>& recordImGui,
     const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers = {});
-
-// Transitions `texture`'s COLOR image from the ColorAttachmentWrite state a
-// GameView/SceneView pass (above) leaves it in, to a real ShaderRead state -
-// needed because Dear ImGui samples the Game/Scene RenderTexture entirely
-// on its own, outside the render graph's own resource model, via its own
-// descriptor set (see RENDERGRAPH_PHASE0_MASTER_STRATEGY_v2.md's V2
-// Revision Note 4) - no pass ever declares a ReadTexture() for it, so
-// nothing inside the graph itself would ever trigger this transition.
-// Must be called against the SAME command buffer the render graph's
-// offscreen Execute() call just recorded into, AFTER that call returns (so
-// the pass's own vkCmdBeginRendering/vkCmdEndRendering bracket has already
-// closed) and BEFORE that command buffer is ended/submitted - see
-// Application::Run().
-void FinalizeRenderTextureForExternalSampling(VkCommandBuffer cmd, RenderTexture& texture);
 
 // GPU Vertex Skinning campaign, Phase 5, Step 3.3 ("Who actually issues the
 // vkCmdDispatch?") - declares one AddComputePass() per distinct model +

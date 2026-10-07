@@ -30,15 +30,6 @@ const std::vector<KnownRiskBlackboardKeyRule>& KnownRiskBlackboardKeyRules()
         // SHAPE - kept here as a permanent regression tripwire, not because
         // it is currently broken.
         { "GpuSkinning.OutputBuffers"_passId, "GpuSkinning.OutputBuffers", "GpuSkinning" },
-
-        // Core::ViewCompositedOutputKey()'s two reserved slots - PHASE2's
-        // own ledger finding #10: already gated by an explicit
-        // `if (!composited.IsValid()) return;` immediately before Publish(),
-        // itself downstream of the deferred composite pass's own self-gated
-        // NoteDeclaredAndCheckEnabled() check (finding #11) - same reasoning
-        // as kGpuSkinningOutputsKey above, kept as a tripwire.
-        { "Core.ViewCompositedOutput.Game"_passId, "Core.ViewCompositedOutput.Game", "AtmosphereComposite" },
-        { "Core.ViewCompositedOutput.Scene"_passId, "Core.ViewCompositedOutput.Scene", "AtmosphereComposite" },
     };
     return kRules;
 }

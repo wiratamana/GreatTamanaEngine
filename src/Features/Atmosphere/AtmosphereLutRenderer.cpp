@@ -739,7 +739,8 @@ rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveCompositePass(rg::R
     }
 
     const rg::TextureHandle outputHandle = builder.ImportTexture(outputTextureName, viewState.output->Target(),
-        VK_IMAGE_LAYOUT_UNDEFINED, viewState.output->Sampler(), viewState.output->DepthSampler());
+        VK_IMAGE_LAYOUT_UNDEFINED, viewState.output->Sampler(), viewState.output->DepthSampler(),
+        &*viewState.output);
 
     // The Phase 6 Aerial Perspective Volume's own trilinear sampler - looked
     // up by name (the SAME name this frame's own AddAerialPerspectiveVolumePass()
@@ -837,10 +838,7 @@ void AtmosphereLutRenderer::FinalizeAerialPerspectiveCompositeForSampling(VkComm
         return;
     }
 
-    const rg::ResourceState previous = rg::RequiredStateFor(rg::ResourceAccess::ComputeShaderWrite, false);
-    const rg::ResourceState next = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
-    const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-    rg::EmitImageBarrier(cmd, it->second.output->Image(), range, previous, next);
+    it->second.output->FinalizeForExternalSampling(cmd);
 }
 
 // atmosphere-scattering-2 campaign, Phase 5 - see this method's own
@@ -893,9 +891,8 @@ AtmosphereLutRenderer::EnsureAerialPerspectiveVolumeDebugSliceViewInitialized(
     // rgba16f - matches the aerial-perspective volume's own HDR format
     // exactly, so a captured slice preserves the volume's real
     // in-scattering/transmittance magnitudes (never clipped to [0, 1] like
-    // an 8-bit Texture2D would). GET /get_texture's own existing
-    // isHdrColor check (Application.cpp) already handles this format,
-    // unchanged by this phase.
+    // an 8-bit Texture2D would). GET /get_texture's own format-driven
+    // conversion (EditorHost.cpp) already handles this format.
     state.output.emplace(renderer.CreateRenderTexture(width, height, VK_FORMAT_R16G16B16A16_SFLOAT, outputTextureName,
         /*depthDebugName=*/nullptr, /*allowStorageImageAccess=*/true));
 
@@ -1108,7 +1105,7 @@ Renderer::CapturedRawPixels AtmosphereLutRenderer::CaptureAerialPerspectiveVolum
 
     const VkExtent2D extent{ static_cast<std::uint32_t>(volumeWidth), static_cast<std::uint32_t>(volumeHeight) };
     return renderer.CaptureImagePixels(outputImage, VK_IMAGE_ASPECT_COLOR_BIT, VK_FORMAT_R16G16B16A16_SFLOAT, extent,
-        outputWriteState, /*bytesPerPixel=*/8);
+        outputWriteState);
 }
 
 

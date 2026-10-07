@@ -171,7 +171,8 @@ IEditorLayer::TextureArrayValidationHandles TextureArrayValidation::AddPass(
 
     for (std::size_t i = 0; i < kLayerOutputNames.size(); ++i) {
         const rg::TextureHandle outputHandle = builder.ImportTexture(kLayerOutputNames[i], m_layerOutputs[i]->Target(),
-            VK_IMAGE_LAYOUT_UNDEFINED, m_layerOutputs[i]->Sampler(), m_layerOutputs[i]->DepthSampler());
+            VK_IMAGE_LAYOUT_UNDEFINED, m_layerOutputs[i]->Sampler(), m_layerOutputs[i]->DepthSampler(),
+            &*m_layerOutputs[i]);
         *handleSlots[i] = outputHandle;
 
         const std::uint32_t layerIndex = static_cast<std::uint32_t>(i);
@@ -218,13 +219,9 @@ void TextureArrayValidation::FinalizeForSampling(VkCommandBuffer cmd)
     }
     m_writtenThisFrame = false;
 
-    const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-    const rg::ResourceState previous = rg::RequiredStateFor(rg::ResourceAccess::ComputeShaderWrite, false);
-    const rg::ResourceState next = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
-
-    for (const auto& output : m_layerOutputs) {
+    for (auto& output : m_layerOutputs) {
         if (output.has_value()) {
-            rg::EmitImageBarrier(cmd, output->Image(), range, previous, next);
+            output->FinalizeForExternalSampling(cmd);
         }
     }
 }

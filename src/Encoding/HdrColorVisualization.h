@@ -13,9 +13,9 @@ namespace gte::Encoding {
 // to handle: `GET /get_texture` capturing a HDR (16-bit-per-channel float)
 // color texture. Every capturable texture before this phase (Game/Scene/
 // Swapchain views, the Transmittance LUT) was always exactly 4 bytes/pixel
-// (an 8-bit-per-channel format) - see Renderer::CaptureImagePixels()'s own
-// "bytesPerPixel must be exactly 4 for every real caller today" doc comment,
-// written before this phase existed. This phase's own Multi-Scattering LUT
+// (an 8-bit-per-channel format) - see Renderer::CaptureImagePixels(), which
+// derives bytes/pixel internally from the format via BytesPerTexelForFormat()
+// (Renderer/VulkanFormatInfo.h). This phase's own Multi-Scattering LUT
 // (`AtmosphereLutRenderer::AddMultiScatteringLutPass()`) is the FIRST
 // capturable texture in the engine's history that genuinely needs an HDR
 // format (VK_FORMAT_R16G16B16A16_SFLOAT, 8 bytes/pixel) - a multi-scattering

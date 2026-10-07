@@ -3,6 +3,7 @@
 #include "../Core/ISurfaceProvider.h"
 #include "RenderGraph/RenderGraph.h"
 #include "RenderGraph/RenderGraphBarrierPlanner.h"
+#include "VulkanFormatInfo.h"
 
 #include <cassert>
 #include <cstring>
@@ -165,14 +166,12 @@ RenderTexture Renderer::CreateRenderTexture(int width, int height, VkFormat form
 }
 
 Renderer::CapturedRawPixels Renderer::CaptureImagePixels(VkImage image, VkImageAspectFlags aspect, VkFormat format,
-    VkExtent2D extent, const rg::ResourceState& previousState, int bytesPerPixel, std::uint32_t zOffset,
-    std::uint32_t depth) const
+    VkExtent2D extent, const rg::ResourceState& previousState, std::uint32_t zOffset, std::uint32_t depth) const
 {
-    assert((bytesPerPixel == 4 || bytesPerPixel == 8)
-        && "CaptureImagePixels: every real caller today copies exactly 4 bytes/pixel (RGBA8/BGRA8 color, or any of "
-           "this engine's 3 possible depth formats via their DEPTH aspect alone) OR exactly 8 bytes/pixel (the "
-           "atmosphere-scattering-1 campaign's Phase 4 HDR VK_FORMAT_R16G16B16A16_SFLOAT color capture case) - "
-           "re-derive this function's own size math before changing it for a genuinely different pixel size.");
+    const int bytesPerPixel = BytesPerTexelForFormat(format);
+    if (bytesPerPixel == 0) {
+        return CapturedRawPixels{}; // Unsupported format - pixels stays empty, caller fails cleanly.
+    }
 
     const VkDeviceSize size =
         VkDeviceSize(extent.width) * extent.height * depth * static_cast<VkDeviceSize>(bytesPerPixel);

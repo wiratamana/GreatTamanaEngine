@@ -2,6 +2,7 @@
 
 #include "DepthBuffer.h"
 #include "Memory/GpuMemoryTracker.h"
+#include "RenderGraph/RenderGraphBarrierPlanner.h"
 #include "RenderTarget.h"
 #include "Vulkan/VulkanAllocator.h"
 
@@ -176,6 +177,19 @@ public:
     // comment).
     VkSampler DepthSampler() const noexcept { return m_depthBuffer ? m_depthBuffer->Sampler() : VK_NULL_HANDLE; }
 
+    // Last known GPU barrier state of the color image - the single source
+    // of truth a caller reads instead of guessing. Written back by the
+    // render graph (see RenderGraphBuilder::ImportTexture()'s own
+    // `trackedOwner` parameter) once per frame, and by
+    // FinalizeForExternalSampling() below.
+    rg::ResourceState CurrentState() const noexcept { return m_currentState; }
+    void SetCurrentState(rg::ResourceState state) noexcept { m_currentState = state; }
+
+    // Transitions the color image from whatever CurrentState() says it is
+    // actually in right now to ShaderRead, and records that as the new
+    // current state. Replaces every caller's own previous hardcoded guess.
+    void FinalizeForExternalSampling(VkCommandBuffer cmd);
+
 private:
     void Create(int width, int height);
     void Destroy() noexcept;
@@ -203,6 +217,10 @@ private:
     VkImageView m_imageView = VK_NULL_HANDLE;
     VkSampler m_sampler = VK_NULL_HANDLE;
     VkExtent2D m_extent{};
+
+    // Last known GPU barrier state of the color image - VK_IMAGE_LAYOUT_UNDEFINED
+    // matches a freshly created image. See CurrentState()/SetCurrentState().
+    rg::ResourceState m_currentState{};
 
     // This RenderTexture's own companion depth buffer - see the class
     // comment for why one shared DepthBuffer per RenderTexture (rather than

@@ -23,9 +23,9 @@
 // Instead, this file implements a small, explicit, HAND-MAINTAINED allowlist
 // of "known-risk blackboard keys" - every key PHASE2's own audit ledger
 // (PHASE2_COMPLETION_REPORT.md) identified as carrying this exact risk
-// shape, whether it was a Confirmed-Lie there (kGameSkyBackgroundCallbackKey/
-// kGameSkyBackgroundReplayCallbackKey) or already Already-Honest but
-// structurally identical (kGpuSkinningOutputsKey/the ViewCompositedOutput pair).
+// shape, whether a confirmed leak (kGameSkyBackgroundCallbackKey/
+// kGameSkyBackgroundReplayCallbackKey) or already-honest but structurally
+// identical (kGpuSkinningOutputsKey).
 // ANY FUTURE NEW BLACKBOARD KEY WITH THIS SAME RISK SHAPE MUST BE MANUALLY
 // ADDED TO KnownRiskBlackboardKeyRules() BELOW BY WHOEVER ADDS IT - this is
 // NOT automatic, and this file does not claim otherwise.

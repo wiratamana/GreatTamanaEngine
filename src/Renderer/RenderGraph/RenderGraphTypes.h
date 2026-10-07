@@ -46,6 +46,14 @@
 #include <stdexcept>
 #include <vector>
 
+// Forward declaration must live in its own plain `namespace gte { ... }`
+// block, as a SIBLING of `namespace gte::rg { ... }` below - declaring it
+// directly inside the nested gte::rg block would instead declare the
+// wrong type, gte::rg::RenderTexture.
+namespace gte {
+class RenderTexture;
+} // namespace gte
+
 namespace gte::rg {
 
 // Sentinel "no slot assigned yet" index shared by every handle type below -

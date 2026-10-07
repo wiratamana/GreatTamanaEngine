@@ -70,6 +70,11 @@ struct TextureImportInfo {
     // time (VK_NULL_HANDLE when that sub-resource genuinely has none).
     VkSampler colorSampler = VK_NULL_HANDLE;
     VkSampler depthSampler = VK_NULL_HANDLE;
+    // Only meaningful when isImported == true - the RenderTexture that owns
+    // this image, if any. ExecuteCompiledGraph() mirrors this physical
+    // texture's real final state back onto `trackedOwner` once per frame,
+    // so a caller never has to guess its own barrier state again.
+    RenderTexture* trackedOwner = nullptr;
 };
 
 // Buffer sibling of TextureImportInfo above - see
@@ -422,22 +427,24 @@ public:
     // exactly like a CreateTexture()-minted one - a pass author cannot
     // tell the difference from the handle alone.
     //
-    // `currentLayout` is REQUIRED, with no default: the caller must state
-    // exactly what VkImageLayout this image is ACTUALLY in right now
-    // (VK_IMAGE_LAYOUT_UNDEFINED for a freshly-acquired swapchain image;
-    // VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL for a Game/Scene
-    // RenderTexture left in that state by last frame's graph - see Phase
-    // 5/6 for how this seeds that resource's tracked state). Guessing this
-    // wrong is a silent correctness bug (a barrier built with the wrong
-    // oldLayout/srcAccessMask), not a compile error - if you don't know
-    // what layout a resource is actually in at the point you're importing
-    // it, that uncertainty needs resolving upstream first, never guessed
-    // at here.
+    // `currentLayout` is REQUIRED, with no default: pass
+    // VK_IMAGE_LAYOUT_UNDEFINED when the first pass this frame fully
+    // overwrites the resource via a clear load op (the previous layout is
+    // then irrelevant); otherwise pass the resource's own actual
+    // `CurrentState().layout` (e.g. a RenderTexture - see
+    // RenderTexture::CurrentState()). Guessing this wrong is a silent
+    // correctness bug (a barrier built with the wrong oldLayout/
+    // srcAccessMask), not a compile error.
     // `colorSampler`/`depthSampler` are this resource's already-live
     // color/depth samplers (VK_NULL_HANDLE only when that sub-resource
     // genuinely has no sampler, e.g. the swapchain).
+    // `trackedOwner` (optional) - the RenderTexture that owns this image.
+    // When set, ExecuteCompiledGraph() mirrors this image's real final
+    // barrier state back onto it once per frame, via SetCurrentState() -
+    // see RenderTexture::FinalizeForExternalSampling().
     TextureHandle ImportTexture(const char* name, const RenderTarget& externalTarget, VkImageLayout currentLayout,
-        VkSampler colorSampler = VK_NULL_HANDLE, VkSampler depthSampler = VK_NULL_HANDLE);
+        VkSampler colorSampler = VK_NULL_HANDLE, VkSampler depthSampler = VK_NULL_HANDLE,
+        RenderTexture* trackedOwner = nullptr);
 
     // Buffer sibling of ImportTexture() above - GPU Vertex Skinning
     // campaign, Phase 3

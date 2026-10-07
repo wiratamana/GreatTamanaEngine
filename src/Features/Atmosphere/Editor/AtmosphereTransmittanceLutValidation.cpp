@@ -117,7 +117,7 @@ AtmosphereTransmittanceLutValidationResult ValidateAtmosphereTransmittanceLut(
 
     const VkExtent2D extent{ static_cast<std::uint32_t>(result.width), static_cast<std::uint32_t>(result.height) };
     const Renderer::CapturedRawPixels raw = renderer.CaptureImagePixels(
-        texture->Image(), VK_IMAGE_ASPECT_COLOR_BIT, VK_FORMAT_R8G8B8A8_UNORM, extent, assumedCurrentState, 4);
+        texture->Image(), VK_IMAGE_ASPECT_COLOR_BIT, VK_FORMAT_R8G8B8A8_UNORM, extent, assumedCurrentState);
 
     double deltaSum = 0.0;
     double maxDelta = 0.0;

@@ -97,7 +97,7 @@ TEST(VolumeTextureExampleFeatureTest, PerCellParallelFillWritesEveryCellsOwnCoor
     for (std::uint32_t z = 0; z < kSize; ++z) {
         const Renderer::CapturedRawPixels captured = fixture.GetRenderer().CaptureImagePixels(snapshot->target.image,
             VK_IMAGE_ASPECT_COLOR_BIT, snapshot->target.format, VkExtent2D{ kSize, kSize }, snapshot->state,
-            /*bytesPerPixel=*/8, /*zOffset=*/z, /*depth=*/1);
+            /*zOffset=*/z, /*depth=*/1);
         ASSERT_EQ(captured.pixels.size(), static_cast<std::size_t>(kSize) * kSize * 8);
 
         for (std::uint32_t y = 0; y < kSize; ++y) {
@@ -188,7 +188,7 @@ TEST(VolumeTextureExampleFeatureTest, PerColumnSequentialFillMatchesTheCpuOracle
     for (std::uint32_t z = 0; z < kDepth; ++z) {
         const Renderer::CapturedRawPixels captured = fixture.GetRenderer().CaptureImagePixels(snapshot->target.image,
             VK_IMAGE_ASPECT_COLOR_BIT, snapshot->target.format, VkExtent2D{ kWidth, kHeight }, snapshot->state,
-            /*bytesPerPixel=*/8, /*zOffset=*/z, /*depth=*/1);
+            /*zOffset=*/z, /*depth=*/1);
         ASSERT_EQ(captured.pixels.size(), static_cast<std::size_t>(kWidth) * kHeight * 8);
 
         const float expected = expectedRunningTotalPerSlice[z];

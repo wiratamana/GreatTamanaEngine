@@ -143,16 +143,12 @@ public:
         rg::RenderPassToggleRegistry* toggleRegistry = nullptr);
 
     // Transitions all three outputs from whatever write state AddPass()
-    // above leaves them in (ColorAttachmentWrite for albedo/normal,
-    // ComputeShaderWrite for the visualized copy) to a real ShaderRead
-    // state - mirrors ComputeBlurValidation::FinalizeForSampling() (the
-    // compute half) plus RenderPasses.h's own
-    // FinalizeRenderTextureForExternalSampling() (the graphics half). Must
-    // be called against the SAME command buffer the offscreen
-    // RenderGraph::Execute() call just recorded into, AFTER that call
-    // returns and BEFORE that command buffer is ended/submitted - see
-    // Application::Run(). A safe no-op whenever AddPass() above was not
-    // actually called this frame.
+    // above leaves them in to a real ShaderRead state - each via its own
+    // RenderTexture::FinalizeForExternalSampling(). Must be called against
+    // the SAME command buffer the offscreen RenderGraph::Execute() call
+    // just recorded into, AFTER that call returns and BEFORE that command
+    // buffer is ended/submitted - see Application::Run(). A safe no-op
+    // whenever AddPass() above was not actually called this frame.
     void FinalizeForSampling(VkCommandBuffer cmd);
 
     // The visualized (copy-of-albedo) output RenderTexture - used by the

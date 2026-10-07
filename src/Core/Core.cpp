@@ -94,12 +94,6 @@ constexpr double kFixedStepSeconds = 1.0 / 60.0;
 using rg::operator""_passId;
 constexpr rg::RenderPassId kGpuSkinningOutputsKey = "GpuSkinning.OutputBuffers"_passId;
 
-// Generic, feature-free blackboard keys superseding this engine's old,
-// feature-prefixed composited-output keys - see Core::ViewCompositedOutputKey()'s
-// own doc comment (Core.h).
-constexpr rg::RenderPassId kViewCompositedOutputGameKey = "Core.ViewCompositedOutput.Game"_passId;
-constexpr rg::RenderPassId kViewCompositedOutputSceneKey = "Core.ViewCompositedOutput.Scene"_passId;
-
 // Phase 4C - the one, tiny bridge from Renderer's own (Profiling-free)
 // GpuTimingSample::Status into Profiling::GpuSampleStatus.
 Profiling::GpuSampleStatus ToProfilingGpuSampleStatus(GpuTimingSample::Status status) noexcept
@@ -640,14 +634,6 @@ std::optional<RenderPassViewData> Core::FindRenderPassViewData(rg::RenderViewId 
     return viewData != nullptr ? std::optional<RenderPassViewData>(*viewData) : std::nullopt;
 }
 
-// Generic replacement for kGameCompositedOutputKey/kSceneCompositedOutputKey
-// above - resolves to one of the two new kViewCompositedOutput*Key constants.
-// Not yet published or fetched anywhere this phase.
-rg::RenderPassId Core::ViewCompositedOutputKey(bool isGameView) noexcept
-{
-    return isGameView ? kViewCompositedOutputGameKey : kViewCompositedOutputSceneKey;
-}
-
 // RegisterFinalizeForSamplingHook()'s own doc comment (Core.h) states the
 // full contract: called once, at construction time, main-thread-only, no
 // Unregister. A duplicate name is refused - logged unconditionally (so a
@@ -689,9 +675,7 @@ bool Core::RegisterViewContentPassName(const char* name)
 
 // Linear scan (realistic hook count is 1-3, mirrors FindViewData()'s own
 // precedent) - returns nullptr both when `name` is not registered and when
-// the registered callback itself returns nullptr. Caches the result onto
-// the matching entry so GetFinalizedTextureByName() can read it back later
-// this same frame without re-invoking the callback.
+// the registered callback itself returns nullptr.
 RenderTexture* Core::DispatchFinalizeForSamplingHook(const char* name, VkCommandBuffer cmd)
 {
     for (FinalizeForSamplingHookEntry& entry : m_finalizeForSamplingHooks) {
@@ -703,26 +687,9 @@ RenderTexture* Core::DispatchFinalizeForSamplingHook(const char* name, VkCommand
     return nullptr;
 }
 
-// Plain, non-invoking read of whatever DispatchFinalizeForSamplingHook()
-// already cached for `name` THIS frame - see FinalizeForSamplingHookEntry's
-// own doc comment (Core.h) for the full cache-reset/write contract.
-RenderTexture* Core::GetFinalizedTextureByName(const char* name) const noexcept
-{
-    for (const FinalizeForSamplingHookEntry& entry : m_finalizeForSamplingHooks) {
-        if (entry.name == name) {
-            return entry.lastResult;
-        }
-    }
-    return nullptr;
-}
-
-// The 3 lines that already computed isGameView/compositedKey/pluginTarget
-// inline in the old "PluginRenderFeatures" provider body, plus the view's
-// extent (needed by RenderFeatureCompositor). Falls back to
-// `viewData->colorTarget`/`viewData->renderTexture`'s own sampler whenever
-// nothing was published this frame under the generic composited-output key
-// (e.g. the deferred composite pass disabled, or no feature publishing a
-// composited output exists at all).
+// Always the view's own real target - never a feature's composited output.
+// See Core.h's own doc comment: a composited-output override mechanism was
+// considered and deleted before any feature ever published through it.
 std::optional<Core::PluginRenderFeatureTargetInfo> Core::FindPluginRenderFeatureTarget(
     const rg::RenderPassFrameContext& frame)
 {
@@ -730,19 +697,13 @@ std::optional<Core::PluginRenderFeatureTargetInfo> Core::FindPluginRenderFeature
     if (viewData == nullptr) {
         return std::nullopt;
     }
-    const bool isGameView = (frame.currentView == rg::RenderViewId::Named("Game"));
-    const std::optional<ViewCompositedOutputEntry> composited =
-        frame.blackboard.Fetch<ViewCompositedOutputEntry>(ViewCompositedOutputKey(isGameView));
 
     PluginRenderFeatureTargetInfo info;
-    info.target = composited.has_value() ? composited->handle : viewData->colorTarget;
+    info.target = viewData->colorTarget;
     info.extent = viewData->renderTexture != nullptr ? viewData->renderTexture->Extent() : VkExtent2D{};
-    info.sampler = (composited.has_value() && composited->sampler != VK_NULL_HANDLE)
-        ? composited->sampler
-        : (viewData->renderTexture != nullptr ? viewData->renderTexture->Sampler() : VK_NULL_HANDLE);
+    info.sampler = viewData->renderTexture != nullptr ? viewData->renderTexture->Sampler() : VK_NULL_HANDLE;
     return info;
 }
-
 
 // render-pass-3 campaign, PHASE2/PHASE3 - registers every remaining
 // production pass onto m_offscreenRenderPipeline. Relocated verbatim from
@@ -1390,8 +1351,7 @@ void Core::BuildFrame()
     // Reset every finalize-for-sampling hook's cached result UNCONDITIONALLY,
     // before any early-exit below - a hook's callback does not necessarily
     // run every frame (e.g. neither Game nor Scene view rendered at all this
-    // frame), and GetFinalizedTextureByName() must report that honestly
-    // rather than returning a stale, possibly several-frames-old pointer.
+    // frame), so a stale, several-frames-old pointer never lingers.
     for (FinalizeForSamplingHookEntry& entry : m_finalizeForSamplingHooks) {
         entry.lastResult = nullptr;
     }
@@ -1465,7 +1425,7 @@ void Core::BuildFrame()
                             RenderSystem::ResolveActiveCameraViewProjection(m_game.GetRegistry(), aspect);
 
                         const rg::TextureHandle h = b.ImportTexture("GameView", gameTarget->Target(),
-                            VK_IMAGE_LAYOUT_UNDEFINED, gameTarget->Sampler(), gameTarget->DepthSampler());
+                            VK_IMAGE_LAYOUT_UNDEFINED, gameTarget->Sampler(), gameTarget->DepthSampler(), gameTarget);
 
                         RenderPassViewData gameViewData;
                         gameViewData.id = rg::RenderViewId::Named("Game");
@@ -1576,7 +1536,7 @@ void Core::BuildFrame()
                         const Vec3 sceneEyeWorldPosition = m_editorLayer->SceneViewCameraWorldPosition();
 
                         const rg::TextureHandle h = b.ImportTexture("SceneView", sceneTarget->Target(),
-                            VK_IMAGE_LAYOUT_UNDEFINED, sceneTarget->Sampler(), sceneTarget->DepthSampler());
+                            VK_IMAGE_LAYOUT_UNDEFINED, sceneTarget->Sampler(), sceneTarget->DepthSampler(), sceneTarget);
 
                         RenderPassViewData sceneViewData;
                         sceneViewData.id = rg::RenderViewId::Named("Scene");
@@ -1741,7 +1701,7 @@ void Core::BuildFrame()
 
             // Manual finalize.
             if (gameTarget != nullptr) {
-                FinalizeRenderTextureForExternalSampling(offscreenCmd, *gameTarget);
+                gameTarget->FinalizeForExternalSampling(offscreenCmd);
                 m_renderGraph.NotifyDebugTextureStateOverride(
                     "GameView", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
 
@@ -1757,7 +1717,7 @@ void Core::BuildFrame()
                 }
             }
             if (sceneTarget != nullptr) {
-                FinalizeRenderTextureForExternalSampling(offscreenCmd, *sceneTarget);
+                sceneTarget->FinalizeForExternalSampling(offscreenCmd);
                 m_renderGraph.NotifyDebugTextureStateOverride(
                     "SceneView", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
 

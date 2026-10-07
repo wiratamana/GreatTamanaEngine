@@ -146,7 +146,7 @@ BufferHandle RenderGraphBuilder::CreateBuffer(const char* name, const BufferDesc
 }
 
 TextureHandle RenderGraphBuilder::ImportTexture(const char* name, const RenderTarget& externalTarget,
-    VkImageLayout currentLayout, VkSampler colorSampler, VkSampler depthSampler)
+    VkImageLayout currentLayout, VkSampler colorSampler, VkSampler depthSampler, RenderTexture* trackedOwner)
 {
     assert(name != nullptr && name[0] != '\0' &&
         "RenderGraphBuilder::ImportTexture requires a non-empty, static-storage-duration name");
@@ -170,6 +170,7 @@ TextureHandle RenderGraphBuilder::ImportTexture(const char* name, const RenderTa
     importInfo.currentLayout = currentLayout;
     importInfo.colorSampler = colorSampler;
     importInfo.depthSampler = depthSampler;
+    importInfo.trackedOwner = trackedOwner;
 
     m_textures.push_back(TextureSlot{ desc, name, importInfo });
     return TextureHandle{ index, 1 };

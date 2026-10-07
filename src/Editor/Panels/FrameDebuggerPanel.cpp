@@ -4,6 +4,7 @@
 #include "../MemoryPanelData.h" // gte::ToString(VkFormat) - reused for the real render-target format label (PHASE3).
 #include "../../Encoding/HdrColorVisualization.h" // task_manager/frame-debugger-9 campaign, PHASE3 - Encoding::ConvertHdrRgba16fToRgba8().
 #include "../../Encoding/PixelConversion.h" // PHASE3 - Encoding::ConvertBgraToRgbaInPlace().
+#include "../../Encoding/SingleChannelVisualization.h"
 #include "../../Renderer/RenderGraph/RenderGraph.h"
 #include "../../Renderer/RenderGraph/RenderPassToggleRegistry.h" // editor-core-separation-21 campaign, PHASE5 - IsEnabled() lookup for the honesty detector.
 #include "../../Renderer/RenderGraph/RenderPipeline.h" // editor-core-separation-22 campaign, PHASE6 - rg::RenderPassBlackboard::WasPublishedThisFrame() for the Clause C detector.
@@ -154,32 +155,38 @@ void FrameDebuggerPanel::RequestShaderPropertyTexturePreview(const std::string& 
 
         m_frameRenderer->WaitForGpuIdle(); // Rare, explicit, human-driven - same accepted cost GET /get_texture already pays.
 
-        const bool isHdrColor = (snapshot->target.format == VK_FORMAT_R16G16B16A16_SFLOAT);
-        const int bytesPerPixel = isHdrColor ? 8 : 4;
-        // NON-const, deliberately (found during this document's own double-check):
-        // the BGRA branch below mutates raw.pixels IN PLACE. A `const`-qualified
-        // local here would make that mutation only reachable via a const_cast on a
-        // truly-const object - technically undefined behavior, and NOT how
-        // Application.cpp's own GET /get_texture handler declares its own,
-        // otherwise-identical local (`Renderer::CapturedRawPixels raw = ...;`, no
-        // `const`) - copy that exactly, not a `const`-qualified variant.
+        // NON-const, deliberately: the BGRA/single-channel branches below
+        // mutate/read raw.pixels, and CaptureImagePixels() already hands us
+        // a buffer we own exclusively.
         Renderer::CapturedRawPixels raw = m_frameRenderer->CaptureImagePixels(
             snapshot->target.image, VK_IMAGE_ASPECT_COLOR_BIT, snapshot->target.format,
-            snapshot->target.extent, snapshot->colorState, bytesPerPixel);
+            snapshot->target.extent, snapshot->colorState);
 
-        std::vector<std::uint8_t> hdrConverted;
+        if (raw.pixels.empty()) {
+            // BytesPerTexelForFormat() didn't recognize this format.
+            m_shaderPropertyPreviewName = textureName;
+            m_shaderPropertyPreviewLookupFailed = true;
+            return;
+        }
+
+        std::vector<std::uint8_t> converted;
         const std::uint8_t* rgba8Pixels = raw.pixels.data();
         bool ok = true;
-        if (isHdrColor) {
-            hdrConverted.resize(static_cast<std::size_t>(raw.width) * static_cast<std::size_t>(raw.height) * 4);
-            ok = Encoding::ConvertHdrRgba16fToRgba8(raw.pixels.data(), raw.format, raw.width, raw.height, hdrConverted.data());
-            rgba8Pixels = hdrConverted.data();
+        if (raw.format == VK_FORMAT_R16G16B16A16_SFLOAT) {
+            converted.resize(static_cast<std::size_t>(raw.width) * static_cast<std::size_t>(raw.height) * 4);
+            ok = Encoding::ConvertHdrRgba16fToRgba8(raw.pixels.data(), raw.format, raw.width, raw.height, converted.data());
+            rgba8Pixels = converted.data();
+        } else if (raw.format == VK_FORMAT_R8_UNORM) {
+            converted.resize(static_cast<std::size_t>(raw.width) * static_cast<std::size_t>(raw.height) * 4);
+            ok = Encoding::Convert1ChannelToGrayscaleRgba8(raw.pixels.data(), raw.format, raw.width, raw.height, converted.data());
+            rgba8Pixels = converted.data();
         } else if (IsBgraFormat(raw.format)) {
             // Safe in-place swizzle - CaptureImagePixels() already handed us a
             // buffer we own exclusively, and `raw` is non-const (see above), so
             // no const_cast is needed at all.
             Encoding::ConvertBgraToRgbaInPlace(raw.pixels.data(), raw.width, raw.height);
         }
+        // else: already tightly-packed RGBA8 - no conversion needed.
 
         if (!ok) {
             m_shaderPropertyPreviewName = textureName;

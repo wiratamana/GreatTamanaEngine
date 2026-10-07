@@ -1109,6 +1109,22 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
     RegisterDebugTextureSnapshots(timingMode, input, physicalTextures);
     RegisterDebugVolumeTextureSnapshots(timingMode, input, physicalVolumeTextures);
 
+    // Mirror each imported, owner-tagged texture's real final barrier state
+    // back onto the RenderTexture that owns it - the single source of truth
+    // for "what state is this image actually in right now" moves from every
+    // caller's own guess to this one spot. Skips an unresolved physical
+    // texture (no pass touched it this execution) exactly like
+    // RegisterDebugTextureSnapshots()'s own guard above.
+    for (std::size_t i = 0; i < input.textures.size(); ++i) {
+        if (!physicalTextures[i].resolved) {
+            continue;
+        }
+        const TextureImportInfo& importInfo = input.textures[i].importInfo;
+        if (importInfo.isImported && importInfo.trackedOwner != nullptr) {
+            importInfo.trackedOwner->SetCurrentState(physicalTextures[i].colorState);
+        }
+    }
+
     // editor-core-separation-27 campaign, PHASE8 (BIG_STEP_3, Section
     // 5.1/5.5) - honest layout recording, every regime, every call (a
     // persistent texture's real color image layout must survive frame-to-

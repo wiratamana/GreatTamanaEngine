@@ -103,19 +103,16 @@ public:
     rg::TextureHandle AddPass(rg::RenderGraphBuilder& builder, Renderer& renderer, rg::TextureHandle sceneViewHandle,
         VkSampler sceneViewSampler, VkExtent2D sceneExtent);
 
-    // Transitions the blurred output texture from the ComputeShaderWrite
-    // state AddPass() above leaves it in (VK_IMAGE_LAYOUT_GENERAL) to a
-    // real ShaderRead state, ready for Dear ImGui to sample it directly
-    // (mirrors RenderPasses.h's own FinalizeRenderTextureForExternalSampling()
-    // for the Game/Scene views, applied here against ComputeShaderWrite as
-    // the "previous" access instead of ColorAttachmentWrite). Must be
-    // called against the SAME command buffer the offscreen
-    // RenderGraph::Execute() call just recorded into, AFTER that call
-    // returns and BEFORE that command buffer is ended/submitted - see
-    // Application::Run(). A safe no-op whenever AddPass() above was not
-    // actually called this frame (the debug toggle is off, or the "Scene"
-    // panel wasn't visible) - tracked internally, never assumed from the
-    // caller's own condition.
+    // Transitions the blurred output texture from whatever state AddPass()
+    // above left it in to a real ShaderRead state, via its own
+    // RenderTexture::FinalizeForExternalSampling() - ready for Dear ImGui
+    // to sample it directly. Must be called against the SAME command
+    // buffer the offscreen RenderGraph::Execute() call just recorded into,
+    // AFTER that call returns and BEFORE that command buffer is
+    // ended/submitted - see Application::Run(). A safe no-op whenever
+    // AddPass() above was not actually called this frame (the debug toggle
+    // is off, or the "Scene" panel wasn't visible) - tracked internally,
+    // never assumed from the caller's own condition.
     void FinalizeForSampling(VkCommandBuffer cmd);
 
     // The blurred output RenderTexture itself, or nullptr before AddPass()

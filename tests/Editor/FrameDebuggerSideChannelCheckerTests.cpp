@@ -137,8 +137,7 @@ TEST(FrameDebuggerSideChannelCheckerTest, RealKnownRiskBlackboardKeyRulesContain
 
     EXPECT_NE(gatingToggleNames.find("DrawSkyBackground"), gatingToggleNames.end());
     EXPECT_NE(gatingToggleNames.find("GpuSkinning"), gatingToggleNames.end());
-    EXPECT_NE(gatingToggleNames.find("AtmosphereComposite"), gatingToggleNames.end());
-    EXPECT_GE(rules.size(), 4u); // Sky callback + GPU Skinning + Game/Scene composited output.
+    EXPECT_GE(rules.size(), 3u); // GameSkyBackgroundCallback + GameSkyBackgroundReplayCallback + GpuSkinning.OutputBuffers.
 }
 
 } // namespace

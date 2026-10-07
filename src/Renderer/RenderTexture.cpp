@@ -50,6 +50,7 @@ RenderTexture::RenderTexture(RenderTexture&& other) noexcept
     , m_imageView(std::exchange(other.m_imageView, VK_NULL_HANDLE))
     , m_sampler(std::exchange(other.m_sampler, VK_NULL_HANDLE))
     , m_extent(other.m_extent)
+    , m_currentState(std::exchange(other.m_currentState, rg::ResourceState{}))
     , m_depthBuffer(std::move(other.m_depthBuffer))
 {
 }
@@ -75,6 +76,7 @@ RenderTexture& RenderTexture::operator=(RenderTexture&& other) noexcept
         m_imageView = std::exchange(other.m_imageView, VK_NULL_HANDLE);
         m_sampler = std::exchange(other.m_sampler, VK_NULL_HANDLE);
         m_extent = other.m_extent;
+        m_currentState = std::exchange(other.m_currentState, rg::ResourceState{});
         m_depthBuffer = std::move(other.m_depthBuffer);
     }
     return *this;
@@ -84,6 +86,9 @@ void RenderTexture::Resize(int width, int height)
 {
     Destroy();
     Create(width, height);
+    // A brand-new VkImage is back at UNDEFINED - never carry over whatever
+    // state the old, now-destroyed image happened to end its life in.
+    m_currentState = rg::ResourceState{};
 }
 
 RenderTarget RenderTexture::Target() const noexcept
@@ -240,6 +245,15 @@ void RenderTexture::Destroy() noexcept
         m_image = VK_NULL_HANDLE;
         m_allocation = VK_NULL_HANDLE;
     }
+}
+
+void RenderTexture::FinalizeForExternalSampling(VkCommandBuffer cmd)
+{
+    assert(m_image != VK_NULL_HANDLE && "FinalizeForExternalSampling: no color image to transition");
+    const rg::ResourceState next = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
+    const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+    rg::EmitImageBarrier(cmd, m_image, range, m_currentState, next);
+    m_currentState = next;
 }
 
 } // namespace gte

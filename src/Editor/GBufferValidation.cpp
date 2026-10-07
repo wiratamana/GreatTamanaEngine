@@ -135,9 +135,9 @@ GBufferValidationHandles GBufferValidation::AddPass(
     // every time it runs, so the previous frame's actual contents/layout
     // never need to be preserved.
     const rg::TextureHandle albedoHandle = builder.ImportTexture("GBufferAlbedo", m_albedoOutput->Target(),
-        VK_IMAGE_LAYOUT_UNDEFINED, m_albedoOutput->Sampler(), m_albedoOutput->DepthSampler());
+        VK_IMAGE_LAYOUT_UNDEFINED, m_albedoOutput->Sampler(), m_albedoOutput->DepthSampler(), &*m_albedoOutput);
     const rg::TextureHandle normalHandle = builder.ImportTexture("GBufferNormal", m_normalOutput->Target(),
-        VK_IMAGE_LAYOUT_UNDEFINED, m_normalOutput->Sampler(), m_normalOutput->DepthSampler());
+        VK_IMAGE_LAYOUT_UNDEFINED, m_normalOutput->Sampler(), m_normalOutput->DepthSampler(), &*m_normalOutput);
 
     // The MRT graphics pass itself - PHASE1-3's own mechanism's first real
     // consumer. Reuses m_albedoOutput's own companion DepthBuffer (every
@@ -194,7 +194,8 @@ GBufferValidationHandles GBufferValidation::AddPass(
         toggleRegistry == nullptr || toggleRegistry->NoteDeclaredAndCheckEnabled("GBufferValidationCopy");
     if (copyEnabled) {
         visualizedHandle = builder.ImportTexture("GBufferVisualized", m_visualizedOutput->Target(),
-            VK_IMAGE_LAYOUT_UNDEFINED, m_visualizedOutput->Sampler(), m_visualizedOutput->DepthSampler());
+            VK_IMAGE_LAYOUT_UNDEFINED, m_visualizedOutput->Sampler(), m_visualizedOutput->DepthSampler(),
+            &*m_visualizedOutput);
 
         builder.AddRenderPass(
             "GBufferValidationCopy", rg::PassKind::Compute, rg::ViewScope::SceneView, rg::RenderPassCategory::Debug,
@@ -235,29 +236,20 @@ GBufferValidationHandles GBufferValidation::AddPass(
 
 void GBufferValidation::FinalizeForSampling(VkCommandBuffer cmd)
 {
-    const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-
-    // albedo/normal: written by a real graphics pass (ColorAttachmentWrite)
-    // - mirrors RenderPasses.h's own
-    // FinalizeRenderTextureForExternalSampling(). Only transitioned when
-    // this half genuinely wrote something THIS frame (editor-core-
+    // albedo/normal: written by a real graphics pass. Only transitioned
+    // when this half genuinely wrote something THIS frame (editor-core-
     // separation-21 campaign, PHASE4 - independently toggle-gated now).
     if (m_graphicsWrittenThisFrame) {
         m_graphicsWrittenThisFrame = false;
-        const rg::ResourceState previous = rg::RequiredStateFor(rg::ResourceAccess::ColorAttachmentWrite, false);
-        const rg::ResourceState next = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
-        rg::EmitImageBarrier(cmd, m_albedoOutput->Image(), range, previous, next);
-        rg::EmitImageBarrier(cmd, m_normalOutput->Image(), range, previous, next);
+        m_albedoOutput->FinalizeForExternalSampling(cmd);
+        m_normalOutput->FinalizeForExternalSampling(cmd);
     }
 
-    // visualized: written by the compute copy pass (ComputeShaderWrite) -
-    // mirrors ComputeBlurValidation::FinalizeForSampling() exactly. Only
-    // transitioned when this half genuinely wrote something THIS frame.
+    // visualized: written by the compute copy pass. Only transitioned when
+    // this half genuinely wrote something THIS frame.
     if (m_copyWrittenThisFrame) {
         m_copyWrittenThisFrame = false;
-        const rg::ResourceState previous = rg::RequiredStateFor(rg::ResourceAccess::ComputeShaderWrite, false);
-        const rg::ResourceState next = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
-        rg::EmitImageBarrier(cmd, m_visualizedOutput->Image(), range, previous, next);
+        m_visualizedOutput->FinalizeForExternalSampling(cmd);
     }
 }
 

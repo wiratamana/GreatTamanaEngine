@@ -531,40 +531,22 @@ public:
         return m_renderFeatureCompositorPtr;
     }
 
-    // editor-core-separation-6 campaign, PHASE2
-    // (PHASE2_PLUGIN_CAPABILITY_ORCHESTRATOR_REGISTRY_AND_RENDER_FEATURE_MIGRATION.md,
-    // Step 3.3) - a PUBLIC NESTED type of Core itself (never a free-standing
-    // namespace gte struct), so both LegacyRenderFeatureOrchestrator (this
-    // phase) and RenderFeatureCompositor (PHASE4, which additionally needs
-    // `.extent`) can resolve "this view's current plugin-facing target"
-    // through ONE shared accessor instead of independently re-deriving
-    // isGameView/compositedKey/pluginTarget inline themselves.
+    // "This view's current plugin-facing target" - shared by
+    // LegacyRenderFeatureOrchestrator and RenderFeatureCompositor so neither
+    // re-derives the view's color target/extent/sampler on its own.
     struct PluginRenderFeatureTargetInfo {
         rg::TextureHandle target;
         VkExtent2D extent{};
-        // editor-core-separation-6 campaign, PHASE4
-        // (PHASE4_RENDER_FEATURE_COMPOSITOR_CORE_AND_ORDERING.md) -
-        // RenderFeatureCompositor (unlike LegacyRenderFeatureOrchestrator,
-        // which never reads this field) needs a REAL VkSampler for `target`
-        // to seed its own blend chain by sampling the view's CURRENT
-        // composited image - an imported TextureHandle's own
-        // PassContext::resolveTexture() never carries a sampler (see
-        // RenderGraph.cpp). See FindPluginRenderFeatureTarget()'s own
-        // updated doc comment (Core.cpp) for exactly how this is resolved.
+        // Real VkSampler for `target` - an imported TextureHandle alone
+        // carries no sampler (PassContext::resolveTexture() never returns
+        // one), so RenderFeatureCompositor needs this to seed its blend
+        // chain by sampling the view's current image directly.
         VkSampler sampler = VK_NULL_HANDLE;
     };
 
-    // Returns std::nullopt when `frame.currentView` has no known
-    // RenderPassViewData this frame (mirrors FindViewData()'s own nullptr
-    // return, translated into optional form for this public accessor).
-    // Calls the private FindViewData() internally - callers outside Core.cpp
-    // never need FindViewData() directly, and never need a
-    // `friend class LegacyRenderFeatureOrchestrator;` declaration either.
-    //
-    // Deliberately non-const: an earlier revision needed a non-const
-    // accessor this body no longer calls. Reverting to const would cost
-    // nothing today, but every real call site already holds a non-const
-    // Core&, so there is no reason to churn the signature.
+    // Always resolves to the view's own real target - never a feature's
+    // composited output. Returns std::nullopt when `frame.currentView` has
+    // no known RenderPassViewData this frame.
     std::optional<PluginRenderFeatureTargetInfo> FindPluginRenderFeatureTarget(
         const rg::RenderPassFrameContext& frame);
 
@@ -574,24 +556,6 @@ public:
     // m_currentViewDataThisFrame. Returns std::nullopt when `view` has no
     // known RenderPassViewData this frame.
     std::optional<RenderPassViewData> FindRenderPassViewData(rg::RenderViewId view) const noexcept;
-
-    // Generic, feature-free payload any feature publishing a composited
-    // final-image output for a view may Publish() under
-    // ViewCompositedOutputKey(). Carries a real VkSampler alongside the
-    // TextureHandle because the handle alone (an opaque render-graph logical
-    // identifier) cannot answer "what Vulkan sampler does this resolve to"
-    // outside of PassContext::resolveTexture(), which is unavailable at
-    // declare time.
-    struct ViewCompositedOutputEntry {
-        rg::TextureHandle handle;
-        VkSampler sampler = VK_NULL_HANDLE;
-    };
-
-    // "Game" -> the Game View's reserved key; anything else -> the Scene
-    // View's reserved key. Exactly two reserved slots exist; there is no
-    // per-arbitrary-view generalization here (mirrors every other
-    // Game/Scene-only reserved-name convention already in this file).
-    static rg::RenderPassId ViewCompositedOutputKey(bool isGameView) noexcept;
 
     // A feature's own composited-output finalize step, run once per
     // registered name after the offscreen render graph has executed this
@@ -610,13 +574,6 @@ public:
     // registration is a programmer error, refused outright, never silently
     // overwritten or allowed to coexist.
     bool RegisterFinalizeForSamplingHook(const char* name, FinalizeForSamplingCallback callback);
-
-    // Read-only lookup of the result RegisterFinalizeForSamplingHook()'s own
-    // callback for `name` last produced THIS frame (cached by BuildFrame() -
-    // never invokes the callback itself). Returns nullptr if `name` is not
-    // registered, or if that hook has not run yet this frame (e.g. neither
-    // Game nor Scene view rendered this frame at all).
-    RenderTexture* GetFinalizedTextureByName(const char* name) const noexcept;
 
     // Registers `name` as another pass whose GPU stats fold into this
     // engine's per-view stats. Call once per feature, from its
@@ -763,9 +720,8 @@ private:
         std::string name;
         FinalizeForSamplingCallback callback;
         // This frame's cached result - reset to nullptr unconditionally at
-        // the top of BuildFrame(), written once the callback actually runs
-        // (if it runs at all this frame). GetFinalizedTextureByName() reads
-        // this directly; it never invokes the callback itself.
+        // the top of BuildFrame(), written once DispatchFinalizeForSamplingHook()
+        // actually runs it (if it runs at all this frame).
         RenderTexture* lastResult = nullptr;
     };
     std::vector<FinalizeForSamplingHookEntry> m_finalizeForSamplingHooks;

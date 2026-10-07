@@ -299,20 +299,16 @@ public:
     RenderTexture* CompositedOutput(const char* outputTextureName) noexcept;
 
     // Transitions `outputTextureName`'s own composited output texture from
-    // the ComputeShaderWrite state AddAerialPerspectiveCompositePass() above
-    // leaves it in (VK_IMAGE_LAYOUT_GENERAL) to a real ShaderRead state,
-    // ready for Dear ImGui/`GET /get_game_view`/`GET /get_texture` to sample
-    // it directly - mirrors RenderPasses.h's own
-    // FinalizeRenderTextureForExternalSampling() for the Game/Scene views
-    // themselves, applied here against ComputeShaderWrite as the "previous"
-    // access instead of ColorAttachmentWrite (matches
-    // ComputeBlurValidation::FinalizeForSampling()'s own identical
-    // reasoning for its own compute-written output). Must be called against
-    // the SAME command buffer the offscreen RenderGraph::Execute() call just
-    // recorded into, AFTER that call returns and BEFORE that command buffer
-    // is ended/submitted - see Application::Run(). A safe no-op if
-    // `outputTextureName` has never been passed to
-    // AddAerialPerspectiveCompositePass() at all this session.
+    // whatever write state AddAerialPerspectiveCompositePass() above leaves
+    // it in to a real ShaderRead state, via its own
+    // RenderTexture::FinalizeForExternalSampling() - ready for Dear ImGui/
+    // `GET /get_game_view`/`GET /get_texture` to sample it directly. Must
+    // be called against the SAME command buffer the offscreen
+    // RenderGraph::Execute() call just recorded into, AFTER that call
+    // returns and BEFORE that command buffer is ended/submitted - see
+    // Application::Run(). A safe no-op if `outputTextureName` has never
+    // been passed to AddAerialPerspectiveCompositePass() at all this
+    // session.
     void FinalizeAerialPerspectiveCompositeForSampling(VkCommandBuffer cmd, const char* outputTextureName);
 
     // Phase 9 (ATMOSPHERE_PHASE9_VALIDATION_DEBUG_TOOLING_AND_DOCS_v1.md,
@@ -356,9 +352,9 @@ public:
     // - never clipped to [0, 1]) under the literal name
     // `outputTextureName` - so it becomes automatically
     // GET /get_texture/GET /list_textures-capturable with zero further
-    // networking changes (GET /get_texture's own existing isHdrColor check
-    // already handles VK_FORMAT_R16G16B16A16_SFLOAT, unchanged by this
-    // phase). `debugSliceIndex` is clamped to [0, volume depth - 1]
+    // networking changes (GET /get_texture's own format-driven conversion
+    // already handles VK_FORMAT_R16G16B16A16_SFLOAT). `debugSliceIndex` is
+    // clamped to [0, volume depth - 1]
     // internally - never out of bounds even if the Editor's own slider
     // briefly disagrees with the volume's real depth.
     //

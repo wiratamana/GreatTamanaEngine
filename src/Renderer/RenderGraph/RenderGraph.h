@@ -260,9 +260,9 @@ public:
     // the small number of call sites that perform a graph-EXTERNAL manual
     // image-layout transition on an already-registered named texture right
     // after this RenderGraph's own ExecuteCompiledGraph() call returns (today:
-    // Application::Run()'s two FinalizeRenderTextureForExternalSampling() call
-    // sites for "GameView"/"SceneView", FramePresenter.cpp's own "Swapchain"
-    // finalize, and ComputeBlurValidation::FinalizeForSampling()'s
+    // Core::BuildFrame()'s two RenderTexture::FinalizeForExternalSampling()
+    // call sites for "GameView"/"SceneView", FramePresenter.cpp's own
+    // "Swapchain" finalize, and ComputeBlurValidation::FinalizeForSampling()'s
     // "BlurredSceneOutput" finalize - see Phase 3, which corrected an earlier
     // revision's "only two call sites" undercount). A safe no-op if `name`
     // is not yet a known entry (see RenderGraphDebugTextureRegistry::

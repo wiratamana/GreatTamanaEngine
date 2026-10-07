@@ -81,7 +81,7 @@ rg::TextureHandle ComputeBlurValidation::AddPass(rg::RenderGraphBuilder& builder
     // overwrites every in-bounds pixel every time it runs, so the
     // previous frame's actual contents/layout never need to be preserved.
     const rg::TextureHandle outputHandle = builder.ImportTexture("BlurredSceneOutput", m_blurredOutput->Target(),
-        VK_IMAGE_LAYOUT_UNDEFINED, m_blurredOutput->Sampler(), m_blurredOutput->DepthSampler());
+        VK_IMAGE_LAYOUT_UNDEFINED, m_blurredOutput->Sampler(), m_blurredOutput->DepthSampler(), &*m_blurredOutput);
 
     builder.AddRenderPass(
         "ComputeBlurValidation", rg::PassKind::Compute, rg::ViewScope::SceneView, rg::RenderPassCategory::Debug, // Confirmed Scene-View-only - see Application.cpp's own AddBlurValidationPass() call site (frame-debugger-6, PHASE1). Debug category (render-pass-1 campaign, PHASE5) - this pass's invisibility from the Frame Debugger's Game-View-only tree comes ENTIRELY from the ViewScope::SceneView filter above; RenderPassCategory::Debug itself no longer implies any hiding at all (editor-core-separation-22 campaign, PHASE4 corrected its meaning to "a real, visible, optional/debug-flavored FEATURE pass" - see RenderGraphTypes.h).
@@ -151,10 +151,7 @@ void ComputeBlurValidation::FinalizeForSampling(VkCommandBuffer cmd)
     }
     m_writtenThisFrame = false;
 
-    const rg::ResourceState previous = rg::RequiredStateFor(rg::ResourceAccess::ComputeShaderWrite, false);
-    const rg::ResourceState next = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
-    const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-    rg::EmitImageBarrier(cmd, m_blurredOutput->Image(), range, previous, next);
+    m_blurredOutput->FinalizeForExternalSampling(cmd);
 }
 
 } // namespace gte

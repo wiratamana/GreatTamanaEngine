@@ -2265,6 +2265,10 @@ set(GTE_TEST_SOURCES
     Encoding/PixelConversionTests.cpp
     Encoding/DepthVisualizationTests.cpp
     Encoding/PngEncoderTests.cpp
+    # Tier-2 (real, headless GPU) round-trip test for
+    # Convert1ChannelToGrayscaleRgba8() - single-channel (VK_FORMAT_R8_UNORM)
+    # capture -> grayscale RGBA8 -> PNG encode -> PNG decode.
+    Encoding/SingleChannelVisualizationTests.cpp
     Assets/AssetTypesTests.cpp
     Assets/GtaFileTests.cpp
     Assets/AssetDatabaseTests.cpp
@@ -2329,6 +2333,9 @@ set(GTE_TEST_SOURCES
     # - Tier-2 (real, headless GPU, tests/Fakes/HeadlessRenderGraphFixture.h)
     # tests for RenderTexture's new createColorImage constructor parameter.
     Renderer/RenderTextureColorlessTests.cpp
+    # Tier-2 (real, headless GPU) test for RenderTexture's own tracked
+    # barrier state - RenderTexture::CurrentState()/FinalizeForExternalSampling().
+    Renderer/RenderTextureTests.cpp
     Renderer/GpuSkinning/GpuSkinningTypesTests.cpp
     Renderer/Culling/CullingTypesTests.cpp
     Renderer/VolumetricFroxelMathTests.cpp

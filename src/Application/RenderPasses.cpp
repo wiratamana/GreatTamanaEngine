@@ -6,7 +6,6 @@
 #include "../Renderer/GpuSkinning/GpuSkinningPipelines.h"
 #include "../Renderer/GpuSkinning/GpuSkinningRenderPassTags.h"
 #include "../Renderer/Renderer.h"
-#include "../Renderer/RenderTexture.h"
 #include "../Renderer/RenderGraph/RenderGraph.h"
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../Renderer/RenderGraph/RenderPassToggleRegistry.h"
@@ -196,14 +195,6 @@ void AddPresentPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& rende
                 recordImGui(ctx.cmd);
             }
         });
-}
-
-void FinalizeRenderTextureForExternalSampling(VkCommandBuffer cmd, RenderTexture& texture)
-{
-    const rg::ResourceState previous = rg::RequiredStateFor(rg::ResourceAccess::ColorAttachmentWrite, false);
-    const rg::ResourceState next = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
-    const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-    rg::EmitImageBarrier(cmd, texture.Image(), range, previous, next);
 }
 
 std::vector<rg::BufferHandle> AddGpuSkinningPasses(

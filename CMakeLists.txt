@@ -894,6 +894,10 @@ add_library(gte_core STATIC
     src/Encoding/DepthVisualization.cpp
     src/Encoding/HdrColorVisualization.h
     src/Encoding/HdrColorVisualization.cpp
+    src/Encoding/SingleChannelVisualization.h
+    src/Encoding/SingleChannelVisualization.cpp
+    src/Renderer/VulkanFormatInfo.h
+    src/Renderer/VulkanFormatInfo.cpp
 )
 
 # Atmosphere feature module's (and every other feature's) gte_core source

@@ -375,9 +375,9 @@ public:
     // Transitions the blurred-output texture (if AddBlurValidationPass()
     // above actually declared a pass this frame - a safe no-op otherwise)
     // from its compute-write state to a real ShaderRead state, ready for
-    // this implementation's own ImGui::Image() display - mirrors
-    // RenderPasses.h's FinalizeRenderTextureForExternalSampling() for the
-    // Game/Scene views. Must be called against the SAME command buffer
+    // this implementation's own ImGui::Image() display, via the texture's
+    // own RenderTexture::FinalizeForExternalSampling(). Must be called
+    // against the SAME command buffer
     // the offscreen RenderGraph::Execute() call just recorded into, AFTER
     // that call returns and BEFORE that command buffer is ended/submitted
     // - see Application::Run(). A no-op for NullEditorLayer.
@@ -416,15 +416,12 @@ public:
 
     // Transitions all three GBuffer Validation outputs (if
     // AddGBufferValidationPass() above actually declared a pass this frame
-    // - a safe no-op otherwise) to a real ShaderRead state, ready for this
-    // implementation's own ImGui::Image() display / GET /get_texture
-    // capture - mirrors FinalizeBlurValidationForSampling() above (the
-    // compute-written visualized output) plus RenderPasses.h's own
-    // FinalizeRenderTextureForExternalSampling() (the graphics-written
-    // albedo/normal outputs). Must be called against the SAME command
-    // buffer the offscreen RenderGraph::Execute() call just recorded into,
-    // AFTER that call returns and BEFORE that command buffer is ended/
-    // submitted - see Application::Run(). A no-op for NullEditorLayer.
+    // - a safe no-op otherwise) to a real ShaderRead state, each via its
+    // own RenderTexture::FinalizeForExternalSampling(). Must be called
+    // against the SAME command buffer the offscreen RenderGraph::Execute()
+    // call just recorded into, AFTER that call returns and BEFORE that
+    // command buffer is ended/submitted - see Application::Run(). A no-op
+    // for NullEditorLayer.
     virtual void FinalizeGBufferValidationForSampling(VkCommandBuffer cmd) = 0;
 
     // task_manager/better-render-pass-7 campaign (better-render-pass-3

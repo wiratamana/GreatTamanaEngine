@@ -150,13 +150,12 @@ AtmosphereAerialPerspectiveSkyPurityResult ValidateAerialPerspectiveSkyPurity(Re
 
     const Renderer::CapturedRawPixels depthRaw = renderer.CaptureImagePixels(preSnapshot->target.depthImage,
         VK_IMAGE_ASPECT_DEPTH_BIT, preSnapshot->target.depthFormat, preSnapshot->target.extent,
-        preSnapshot->depthState, 4);
+        preSnapshot->depthState);
     const Renderer::CapturedRawPixels preColorRaw = renderer.CaptureImagePixels(preSnapshot->target.image,
-        VK_IMAGE_ASPECT_COLOR_BIT, preSnapshot->target.format, preSnapshot->target.extent, preSnapshot->colorState,
-        4);
+        VK_IMAGE_ASPECT_COLOR_BIT, preSnapshot->target.format, preSnapshot->target.extent, preSnapshot->colorState);
     const Renderer::CapturedRawPixels postColorRaw = renderer.CaptureImagePixels(postSnapshot->target.image,
         VK_IMAGE_ASPECT_COLOR_BIT, postSnapshot->target.format, postSnapshot->target.extent,
-        postSnapshot->colorState, 4);
+        postSnapshot->colorState);
 
     std::size_t skyPixelCount = 0;
     std::size_t mismatching = 0;

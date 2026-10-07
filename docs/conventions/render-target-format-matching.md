@@ -57,3 +57,7 @@ whenever adding a real graphics pipeline or a new render target:
   geometry) never existed until now - don't reintroduce a render target or
   pipeline that skips a depth attachment/depth test, even for something that
   "looks flat," without a specific reason.
+- **A `RenderTexture`'s GPU barrier state is never guessed by a caller.**
+  It is always read via `CurrentState()` and written back via
+  `SetCurrentState()` - see `RenderTexture::FinalizeForExternalSampling()`
+  and `RenderGraphBuilder::ImportTexture()`'s `trackedOwner` parameter.
