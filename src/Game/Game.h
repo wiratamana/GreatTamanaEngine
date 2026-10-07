@@ -69,79 +69,32 @@ public:
     // INSIDE this method's own body, not by the caller skipping the call.
     void Update(const EngineContext& engineContext, const InputState& input);
 
-    // Sets the clear color and, via RenderSystem::Draw(), queues this
-    // frame's draw calls for every entity that has a MeshRenderer.
-    // `aspectWidthOverHeight` is the aspect ratio of whichever render
-    // target this call's draws will land in (a Game view and a Scene view,
-    // each with their own RenderTexture/aspect, can each call this once per
-    // frame - see RenderSystem::Draw()). By default (viewProjectionOverride
-    // == nullptr) the view-projection matrix is resolved from whichever ECS
-    // entity has the active Camera component (see ECS/Components/Camera.h)
-    // - what the Editor's "Game" view uses. Passing a non-null
-    // viewProjectionOverride instead renders with THAT matrix verbatim,
-    // bypassing ECS camera resolution entirely - what the Editor's "Scene"
-    // view uses instead, to render through its own independently-
-    // orbitable EditorCamera (src/Editor/EditorCamera.h) rather than
-    // whatever ECS entity happens to be the active gameplay Camera. Game
-    // itself has no idea the Editor/EditorCamera exist either way - this is
-    // just a plain Mat4*, decided by Application (the composition root),
-    // same spirit as everything else in this comment. Does NOT call
-    // Renderer::Present()/RenderOffscreen() itself - *where* this frame
-    // ends up (the swapchain, fullscreen, or one of the Editor's off-screen
-    // "Game view"/"Scene view" RenderTextures) is decided by Application
-    // too. See Application::Run().
+    // Sets the clear color and, via RenderSystem::Draw(), queues this frame's
+    // draw calls for every entity that has a MeshRenderer. `aspectWidthOverHeight`
+    // is the aspect ratio of whichever render target this call's draws will
+    // land in (Game view and Scene view each call this once per frame with
+    // their own aspect). `viewProjectionOverride` (default nullptr) resolves
+    // the view-projection from the active ECS Camera when null (Game view);
+    // when non-null, renders with that matrix instead, bypassing ECS camera
+    // resolution (Scene view's own independently-orbitable EditorCamera).
+    // Does NOT call Renderer::Present()/RenderOffscreen() itself - where this
+    // frame ends up is decided by Application.
     //
-    // task_manager/frame-debugger-3 campaign, PHASE3
-    // (PHASE3_FRAME_HISTORY_RING_BUFFER_AND_CAPTURE_TRIGGER.md, Step 3.4b) -
-    // `frameDebuggerCapture` (new, defaulted parameter) is forwarded
-    // straight through to the float-aspect RenderSystem::Draw() overload
-    // ONLY (the branch taken when viewProjectionOverride == nullptr) -
-    // never into the viewProjectionOverride branch, since THAT branch is
-    // what Scene View's own call site uses (out of scope for the whole
-    // Frame Debugger feature - see PHASE0_MASTER_STRATEGY.md's Locked
-    // Design Decision #7). nullptr (the default) on every existing call
-    // site until Application::Run() arms a real one for the Game-View-
-    // driving call only (see RenderPasses.h's AddGameViewPass()).
+    // `frameDebuggerCapture`/`maxDrawCount`/`batchedEntities`/`cmd` are all
+    // optional, defaulted, and forwarded ONLY into the Game-View branch
+    // (viewProjectionOverride == nullptr) - Scene View never receives any of
+    // them. `sceneServicesSet` is the one exception: forwarded into BOTH
+    // branches, since Scene View and Game View each need their own correct
+    // scene-services data for the same frame.
     //
-    // task_manager/frame-debugger-7 campaign, PHASE3
-    // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step
-    // 3.2) - `maxDrawCount` (new, defaulted, LAST parameter) is forwarded
-    // straight through to whichever internal RenderSystem::Draw() overload
-    // this call ends up using (the `Mat4&` overload when
-    // viewProjectionOverride != nullptr, the float-aspect overload
-    // otherwise), unchanged - see RenderSystem::Draw()'s own updated doc
-    // comment for the exact stop-early semantics. std::nullopt (the
-    // default) on every existing call site - a real value is only ever
-    // passed by this phase's own AddFrameDebuggerReplayPasses()
-    // (src/Application/RenderPasses.cpp), each one of its N replay passes
-    // requesting a different cutoff (`i + 1`) so pass `i` redraws exactly
-    // objects `[0..i]`.
-    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-    // PHASE5 (task_manager/render-pass-5/
-    // PHASE5_RENDERGRAPH_PASS_WIRING_AND_PRODUCTION_CUTOVER.md, Section 3.3)
-    // - `batchedEntities` (new, defaulted, TRAILING parameter, empty by
-    // default) is forwarded straight through to the float-aspect
-    // RenderSystem::Draw() overload ONLY (the branch taken when
-    // viewProjectionOverride == nullptr) - mirrors `frameDebuggerCapture`'s
-    // own exact rule above. NEVER forwarded into the viewProjectionOverride
-    // branch (Scene View's own call site) - Scene View keeps drawing every
-    // entity, batch-eligible or not, through the fully unmodified per-entity
-    // path forever (Locked Design Decision 11, PHASE0_MASTER_STRATEGY.md).
-    //
-    // `sceneServicesSet` (Block 4, task_manager/better-render-pass-6,
-    // PHASE6_DRAW_CALL_THREADING_SCENEQUERY_RENDERSYSTEM_GAME.md) - optional,
-    // trailing, defaulted (VK_NULL_HANDLE) parameter, purely additive - every
-    // existing call site keeps compiling/behaving completely unchanged.
-    // Unlike `frameDebuggerCapture`/`maxDrawCount`/`batchedEntities` above,
-    // this IS forwarded into BOTH branches below - a Scene View and a Game
-    // View rendered in the same frame each need their own, independently
-    // correct scene-services data (PHASE0_MASTER_STRATEGY.md's own Goal
-    // section) - see Render()'s own body (Game.cpp) for how both branches
-    // reach it.
+    // `cmd` is a pointer to the render-graph CommandBuffer the calling pass
+    // is already recording through - see RenderSystem::Draw()'s own `cmd`
+    // doc comment for what routing a draw through it changes.
     void Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* viewProjectionOverride = nullptr,
         IFrameDebuggerCaptureRecorder* frameDebuggerCapture = nullptr,
         std::optional<std::size_t> maxDrawCount = std::nullopt,
-        const std::unordered_set<Entity>& batchedEntities = {}, VkDescriptorSet sceneServicesSet = VK_NULL_HANDLE);
+        const std::unordered_set<Entity>& batchedEntities = {}, VkDescriptorSet sceneServicesSet = VK_NULL_HANDLE,
+        rg::CommandBuffer* cmd = nullptr);
 
 
     // Read-only-in-spirit access to the ECS World for the Editor's

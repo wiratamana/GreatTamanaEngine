@@ -80,6 +80,7 @@ class Renderer;
 }
 
 namespace gte::rg {
+class RenderPassToggleRegistry;
 
 // `PassContext` is forward-declared by RenderGraphTypes.h (`struct
 // PassContext;`) and used, still only as a reference, by
@@ -361,6 +362,17 @@ public:
     // from the Frame Debugger's own enabled state (SetCaptureEnabled() at runtime).
     void SetEventSnapshotCaptureEnabled(bool enabled) noexcept { m_eventSnapshotPool.SetCaptureEnabled(enabled); }
 
+    // Independent runtime kill-switch for the per-pass write-target capture
+    // above, consulted alongside (never instead of) SetEventSnapshotCaptureEnabled().
+    // Lets "Render Graph" panel disable just this mechanism without touching
+    // the Frame Debugger's own enabled state. nullptr (default) means always
+    // enabled - matches every other RenderPassToggleRegistry consumer's
+    // "unset = old behavior" convention.
+    void SetRenderPassToggleRegistry(RenderPassToggleRegistry* registry) noexcept
+    {
+        m_renderPassToggleRegistry = registry;
+    }
+
     // One real pass write captured this Execute() call, keyed positionally
     // (never by name) - see RenderGraphEventSnapshotPool::CaptureAfterPass().
     struct FrameDebuggerEventSnapshotRef {
@@ -617,6 +629,12 @@ private:
     // SetFrameDebuggerEventSink() above) - null forever in a Player-style
     // build, same convention as m_debugMetadataSink immediately above.
     FrameDebuggerEventSink* m_frameDebuggerEventSink = nullptr;
+
+    // See SetRenderPassToggleRegistry() above - owned by Core
+    // (m_renderPassToggleRegistry), set once at construction. Set to
+    // nullptr here means "always enabled" (checked alongside, not replacing,
+    // m_eventSnapshotPool's own SetCaptureEnabled() gate).
+    RenderPassToggleRegistry* m_renderPassToggleRegistry = nullptr;
 
     // B.1 (B1_REAL_GPU_TIMING_STRATEGY_v1.md) - constructed from
     // Renderer::GetVulkanContextInfo()'s own device/graphicsQueue/

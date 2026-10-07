@@ -20,19 +20,13 @@
 // Application::Run() used to do by hand for that same block: `setup`
 // declares exactly one color-attachment write (plus, for Game/Scene, one
 // depth-attachment write) against the handle it's given; `execute` calls
-// Game::Render() (unchanged for every parameter this comment already
-// described here - `renderer`, `aspectWidthOverHeight`,
-// `viewProjectionOverride` - task_manager/frame-debugger-3/PHASE3 added one
-// new, always-defaulted, campaign-specific trailing parameter,
-// `frameDebuggerCapture`, on AddRenderOpaquePass() only (RENAMED from
-// AddGameViewPass() by the Render Pass campaign's own PHASE2,
-// task_manager/render-pass-1 - see that function's own doc comment below)
-// inside a
-// Renderer::BeginGraphPassRecording()/EndGraphPassRecording() bracket, so
-// every Renderer::Submit() call Game/RenderSystem already makes internally
-// keeps working completely unmodified - the render graph integration
-// happens entirely BELOW Renderer::Submit(), never inside
-// Game/RenderSystem/ECS.
+// Game::Render(). AddRenderOpaquePass() builds a gte::rg::CommandBuffer from
+// its own PassContext and threads it into Game::Render() so
+// RenderSystem::Draw()'s per-entity loop issues every resolved draw through
+// CommandBuffer::Draw() (per-draw-call granularity for the Frame Debugger) -
+// CommandBuffer::Draw() opens/closes its own BeginGraphPassRecording()/
+// EndGraphPassRecording() bracket per draw internally, so this pass no
+// longer wraps game.Render() in one itself.
 //
 // GPU Vertex Skinning campaign, Phase 5
 // (GPU_SKINNING_PHASE5_RUNTIME_CPU_GPU_SWITCH_STRATEGY_v2.md, Step 3.3)

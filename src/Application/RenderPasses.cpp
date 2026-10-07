@@ -56,15 +56,23 @@ void AddRenderOpaquePass(rg::RenderGraphBuilder& builder, Game& game, Renderer& 
             DeclareGpuSkinningReads(pass, gpuSkinningOutputBuffers);
         },
         [&game, &renderer, aspectWidthOverHeight, frameDebuggerCapture](rg::PassContext& ctx) {
-            renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
+            // Per-draw-call granularity: builds a CommandBuffer from this
+            // pass's own PassContext and threads it into Game::Render() so
+            // RenderSystem::Draw()'s per-entity loop issues every resolved
+            // draw through CommandBuffer::Draw() instead of calling
+            // renderer.Submit() directly - CommandBuffer::Draw() opens/
+            // closes its own BeginGraphPassRecording()/EndGraphPassRecording()
+            // bracket per draw, so this pass no longer needs to do so itself
+            // (see CommandBuffer.h's own doc comment).
+            rg::CommandBuffer cmd = ctx.Cmd();
             // frameDebuggerCapture is forwarded onward, as a bare pointer,
             // into game.Render() below - exactly like PHASE1's own Step
             // 3.1b requires for a CORE, always-compiled file such as this
             // one (see task_manager/frame-debugger-3/
             // PHASE3_FRAME_HISTORY_RING_BUFFER_AND_CAPTURE_TRIGGER.md's own
             // Step 3.4b).
-            game.Render(renderer, aspectWidthOverHeight, nullptr, frameDebuggerCapture);
-            renderer.EndGraphPassRecording();
+            game.Render(renderer, aspectWidthOverHeight, nullptr, frameDebuggerCapture, std::nullopt, {},
+                VK_NULL_HANDLE, &cmd);
         });
 }
 

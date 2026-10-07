@@ -69,7 +69,7 @@ void CommandBuffer::DispatchOverSize(std::uint32_t width, std::uint32_t height, 
 }
 
 void CommandBuffer::Draw(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix,
-    const Mat4& viewProjMatrix, VkDescriptorSet materialDescriptorSet)
+    const Mat4& viewProjMatrix, VkDescriptorSet materialDescriptorSet, VkDescriptorSet sceneServicesSet)
 {
     assert(m_renderer != nullptr
         && "CommandBuffer::Draw(): no Renderer available - this CommandBuffer was not built from a real "
@@ -79,7 +79,7 @@ void CommandBuffer::Draw(const Pipeline& pipeline, const Mesh& mesh, const Mat4&
     }
 
     m_renderer->BeginGraphPassRecording(m_cmd, MakeRecordDrawStatsCallback());
-    m_renderer->Submit(pipeline, mesh, modelMatrix, viewProjMatrix, materialDescriptorSet);
+    m_renderer->Submit(pipeline, mesh, modelMatrix, viewProjMatrix, materialDescriptorSet, sceneServicesSet);
     m_renderer->EndGraphPassRecording();
 
     // Prefers color when a pass writes both (the common opaque-draw case);

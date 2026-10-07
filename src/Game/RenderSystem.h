@@ -43,6 +43,14 @@
 #include <unordered_set>
 #include <vector>
 
+// Per-draw-call granularity (Phase C) - RenderSystem::Draw() only ever needs
+// a POINTER to CommandBuffer, forwarded in from whichever render-graph pass
+// is already recording (see Draw()'s own `cmd` parameter below), so a plain
+// forward declare is enough - never #include CommandBuffer.h from a header.
+namespace gte::rg {
+class CommandBuffer;
+}
+
 namespace gte {
 
 class Renderer;
@@ -236,11 +244,14 @@ public:
     // trailing, defaulted (VK_NULL_HANDLE) parameter, purely additive - every
     // existing call site keeps compiling/behaving completely unchanged.
     // Forwarded, unchanged, straight into the Mat4& overload below (which
-    // owns the real per-command renderer.Submit() loop) - see that
-    // overload's own doc comment for the full contract.
+    // owns the real per-command renderer.Submit()/CommandBuffer::Draw()
+    // loop) - see that overload's own doc comment for the full contract.
+    // `cmd` - see the Mat4& overload below's own doc comment; forwarded
+    // straight through, unchanged.
     void Draw(Registry& registry, Renderer& renderer, float aspectWidthOverHeight,
         IFrameDebuggerCaptureRecorder* capture = nullptr, std::optional<std::size_t> maxDrawCount = std::nullopt,
-        const std::unordered_set<Entity>& batchedEntities = {}, VkDescriptorSet sceneServicesSet = VK_NULL_HANDLE);
+        const std::unordered_set<Entity>& batchedEntities = {}, VkDescriptorSet sceneServicesSet = VK_NULL_HANDLE,
+        rg::CommandBuffer* cmd = nullptr);
 
     // Explicit-view-projection overload of Draw() above, for a caller that
     // already has its own view-projection matrix to render with instead of
@@ -289,11 +300,21 @@ public:
     // per-entity/per-MeshRenderer (see SceneQuery.h's SceneDrawRequest::
     // sceneServicesSet doc comment for the full "one value per view per
     // frame" contract).
+    //
+    // `cmd` (Frame Debugger Unity-Style Rehaul, per-draw-call granularity) -
+    // optional, trailing, defaulted (nullptr) pointer to the render-graph
+    // CommandBuffer already recording this pass. When non-null, every
+    // resolved draw goes through cmd->Draw() (which also feeds
+    // FrameDebuggerEventSink::NoteCommandResult()) instead of
+    // renderer.Submit() directly - both paths issue the identical Vulkan
+    // work, see CommandBuffer::Draw()'s own doc comment. nullptr (the
+    // default) preserves the renderer.Submit() path unchanged for every
+    // call site not yet migrated (Scene View, replay passes, DrawScene()).
     void Draw(Registry& registry, Renderer& renderer, const Mat4& viewProjection,
         IFrameDebuggerCaptureRecorder* capture = nullptr, std::optional<std::size_t> maxDrawCount = std::nullopt,
         const std::unordered_set<Entity>& batchedEntities = {},
         std::optional<PipelineOverrideSet> pipelineOverrideSet = std::nullopt,
-        VkDescriptorSet sceneServicesSet = VK_NULL_HANDLE);
+        VkDescriptorSet sceneServicesSet = VK_NULL_HANDLE, rg::CommandBuffer* cmd = nullptr);
 
     // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
     // PHASE4 (task_manager/render-pass-5/

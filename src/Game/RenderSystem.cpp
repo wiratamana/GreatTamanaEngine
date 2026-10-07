@@ -4,6 +4,7 @@
 #include "ECS/TransformHierarchy.h"
 #include "Profiling/ScopeTimer.h"
 #include "Renderer/Renderer.h"
+#include "Renderer/RenderGraph/CommandBuffer.h"
 
 // editor-core-separation-2 campaign, PHASE2 - the free function
 // gte::RecordFrameDebuggerDraws() (declared in RenderSystem.h,
@@ -114,10 +115,10 @@ Vec3 RenderSystem::ResolveActiveCameraWorldPosition(Registry& registry) noexcept
 
 void RenderSystem::Draw(Registry& registry, Renderer& renderer, float aspectWidthOverHeight,
     IFrameDebuggerCaptureRecorder* capture, std::optional<std::size_t> maxDrawCount,
-    const std::unordered_set<Entity>& batchedEntities, VkDescriptorSet sceneServicesSet)
+    const std::unordered_set<Entity>& batchedEntities, VkDescriptorSet sceneServicesSet, rg::CommandBuffer* cmd)
 {
     Draw(registry, renderer, ResolveActiveCameraViewProjection(registry, aspectWidthOverHeight), capture, maxDrawCount,
-        batchedEntities, std::nullopt, sceneServicesSet);
+        batchedEntities, std::nullopt, sceneServicesSet, cmd);
 }
 
 namespace {
@@ -138,7 +139,7 @@ const char* VertexLayoutDebugName(VertexLayout layout)
 void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& viewProjection,
     IFrameDebuggerCaptureRecorder* capture, std::optional<std::size_t> maxDrawCount,
     const std::unordered_set<Entity>& batchedEntities, std::optional<PipelineOverrideSet> pipelineOverrideSet,
-    VkDescriptorSet sceneServicesSet)
+    VkDescriptorSet sceneServicesSet, rg::CommandBuffer* cmd)
 {
     GTE_PROFILE_SCOPE("RenderSystem::Draw");
 
@@ -208,7 +209,16 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& view
                     registry, renderer, command.entity, *mesh, *pipeline, materialTexture, viewProjection);
             }
 
-            renderer.Submit(*pipeline, *mesh, command.model, viewProjection, descriptorSet, sceneServicesSet);
+            // Per-draw-call granularity: a non-null `cmd` routes this draw
+            // through gte::rg::CommandBuffer::Draw() instead, which feeds
+            // FrameDebuggerEventSink::NoteCommandResult() for the Frame
+            // Debugger's per-draw-call texture capture - see RenderSystem.h's
+            // own `cmd` doc comment. Both paths issue identical Vulkan work.
+            if (cmd != nullptr) {
+                cmd->Draw(*pipeline, *mesh, command.model, viewProjection, descriptorSet, sceneServicesSet);
+            } else {
+                renderer.Submit(*pipeline, *mesh, command.model, viewProjection, descriptorSet, sceneServicesSet);
+            }
         }
     }
 }

@@ -1,6 +1,7 @@
 #include "RenderGraph.h"
 
 #include "../Renderer.h"
+#include "RenderPassToggleRegistry.h"
 #include "../../Core/Logging.h" // PHASE1 (render-pass-6 campaign, item 2.4) - GTE_LOG_WARNING for slot-budget overflow. Moved from Editor/Logger.h to Core/Logging.h by editor-core-separation-1's own PHASE3 (PHASE3_LOGGING_GLOBAL_LOGSINK_EXTRACTION.md) - gte_core must never include anything under src/Editor/.
 
 #include <cassert>
@@ -395,8 +396,10 @@ PassContext RenderGraph::BuildPassContext(VkCommandBuffer cmd, std::vector<Physi
     // so a pass's `execute` callback can call ctx.Cmd() to obtain a
     // CommandBuffer (CommandBuffer.h).
     ctx.renderer = m_renderer;
-    // Only ever non-null on an armed capture frame - see
-    // RenderGraph::SetFrameDebuggerEventSink()'s own doc comment.
+    // Installed once, permanently, at Editor startup (EditorHost's
+    // constructor) - never armed/disarmed per frame. Per-draw gating
+    // happens downstream, inside FrameDebuggerCaptureContext::
+    // NoteCommandResult()'s own armed-index comparison.
     ctx.eventSink = m_frameDebuggerEventSink;
     ctx.recordDraw.drawStats = &passDrawStats;
     ctx.recordIndirectDraw.drawStats = &passDrawStats;
@@ -1123,8 +1126,14 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         // Cheap, always-on per-pass write-target capture - replaces
         // redrawing the whole scene to reconstruct "what did this pass
         // produce". One vkCmdCopyImage2 per real color/depth write this
-        // pass just produced, keyed positionally, never by name.
-        if (m_eventSnapshotPool.IsCaptureEnabled()) {
+        // pass just produced, keyed positionally, never by name. Gated by
+        // BOTH SetEventSnapshotCaptureEnabled() (the Frame Debugger's own
+        // enabled state) AND an independent "FrameDebuggerEventSnapshot"
+        // kill-switch in RenderPassToggleRegistry, so this mechanism can be
+        // disabled on its own without disabling the whole Frame Debugger.
+        const bool eventSnapshotKillSwitchEnabled = m_renderPassToggleRegistry == nullptr
+            || m_renderPassToggleRegistry->NoteDeclaredAndCheckEnabled("FrameDebuggerEventSnapshot");
+        if (m_eventSnapshotPool.IsCaptureEnabled() && eventSnapshotKillSwitchEnabled) {
             for (const ResourceUsage& usage : pass.writes) {
                 if (usage.kind != ResourceKind::Texture) {
                     continue; // color/depth images only - buffers are out of scope here.

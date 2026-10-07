@@ -720,6 +720,11 @@ void Core::RegisterOffscreenRenderPipelineProviders()
     // own header comment for the full contract.
     m_offscreenRenderPipeline.SetPassToggleRegistry(&m_renderPassToggleRegistry);
 
+    // Independent kill-switch for RenderGraph's own per-pass write-target
+    // capture (Frame Debugger event snapshots) - see RenderGraph::
+    // SetRenderPassToggleRegistry()'s own doc comment.
+    m_renderGraph.SetRenderPassToggleRegistry(&m_renderPassToggleRegistry);
+
     // "GpuSkinning" - ProviderScope::Once.
     m_offscreenRenderPipeline.Register("GpuSkinning", rg::ProviderScope::Once,
         [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
@@ -961,8 +966,13 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 const VkDescriptorSet sceneServicesSet =
                     m_sceneServicesDescriptorSet.Rewrite(currentViewForServices, resolvedServiceSlots);
                 if (isGameView) {
+                    // Per-draw-call granularity: only the Game View branch feeds a
+                    // real CommandBuffer in, mirroring frameDebuggerCapture's own
+                    // Game-View-only restriction - Scene View keeps drawing through
+                    // renderer.Submit() via the manual Begin/End bracket above.
+                    rg::CommandBuffer cmd = ctx.Cmd();
                     m_game.Render(m_renderer, aspectWidthOverHeight, nullptr, frameDebuggerCapture, std::nullopt,
-                        m_gpuDrivenBatchedEntitiesThisFrame, sceneServicesSet);
+                        m_gpuDrivenBatchedEntitiesThisFrame, sceneServicesSet, &cmd);
                 } else {
                     m_game.Render(m_renderer, aspectWidthOverHeight, &viewProjectionOverride, nullptr, std::nullopt, {},
                         sceneServicesSet);

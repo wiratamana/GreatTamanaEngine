@@ -370,14 +370,14 @@ void Game::EnsureDefaultCameraExists()
 
 void Game::Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* viewProjectionOverride,
     IFrameDebuggerCaptureRecorder* frameDebuggerCapture, std::optional<std::size_t> maxDrawCount,
-    const std::unordered_set<Entity>& batchedEntities, VkDescriptorSet sceneServicesSet)
+    const std::unordered_set<Entity>& batchedEntities, VkDescriptorSet sceneServicesSet, rg::CommandBuffer* cmd)
 {
     renderer.Clear(20, 20, 30, 255);
 
     EnsureDefaultCameraExists();
 
     if (viewProjectionOverride != nullptr) {
-        // Scene View's own call site: maxDrawCount/batchedEntities never
+        // Scene View's own call site: maxDrawCount/batchedEntities/cmd never
         // forward into this branch, frameDebuggerCapture stays nullptr. Every
         // intervening defaulted parameter (capture, maxDrawCount,
         // batchedEntities, pipelineOverrideSet) must be spelled out so
@@ -389,11 +389,9 @@ void Game::Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* v
         // in this file) - only forwarded onward, as a bare pointer, exactly
         // like PHASE1's own Step 3.1b requires for a CORE, always-compiled
         // file such as this one. See Game.h's own updated Render() comment.
-        // This branch's own existing call already supplies all 6 positional
-        // arguments in order, so appending sceneServicesSet as a 7th is safe
-        // as-is - no intervening defaults to spell out.
+        // `cmd` forwards the same way - never dereferenced here either.
         m_renderSystem.Draw(m_registry, renderer, aspectWidthOverHeight, frameDebuggerCapture, maxDrawCount,
-            batchedEntities, sceneServicesSet);
+            batchedEntities, sceneServicesSet, cmd);
     }
 }
 

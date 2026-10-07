@@ -8,13 +8,10 @@ namespace gte {
 // attachment - note it if a Frame Debugger-equivalent observer is armed for
 // it". No Editor/ImGui/RenderGraph type appears here - this is the
 // engine-layer half; the Editor-layer implementation lives elsewhere.
-//
-// CURRENTLY INERT: only gte::rg::CommandBuffer::Draw() calls
-// NoteCommandResult() today, and no real pass in this engine goes through
-// that method yet (every real graphics pass either bypasses CommandBuffer
-// entirely or calls vkCmdDraw directly via its Native() escape hatch). Until
-// some real pass is migrated onto CommandBuffer::Draw(), GET
-// /frame_debugger/get_event_texture always returns found == false.
+// gte::rg::CommandBuffer::Draw() is the only call site wired to
+// NoteCommandResult() - a real draw only feeds it once a pass actually
+// issues its vkCmdDraw through CommandBuffer rather than Renderer::Submit()
+// directly (see RenderSystem::Draw()'s own `cmd` parameter).
 //
 // Split into two calls, deliberately NOT one combined "capture now" call:
 // NoteCommandResult() fires WHILE the owning pass's dynamic-rendering

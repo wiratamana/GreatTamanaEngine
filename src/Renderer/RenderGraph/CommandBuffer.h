@@ -1,65 +1,26 @@
 #pragma once
 
-// task_manager/better-render-pass-1 campaign, PHASE3
-// (PHASE3_ENGINE_COMMAND_BUFFER_AND_TYPE_SAFE_PUSH_CONSTANTS.md) - R1/R4: a
-// brand-new, engine-owned, pass-author-facing facade over the real Vulkan
-// recording a compute/graphics render-graph pass issues today via several
-// separate calls made by hand at every real pass's own `execute` callback
-// (see CullingPipelines.cpp/AtmosphereLutRenderer.cpp/
-// ComputeBlurValidation.cpp for ~26 existing
-// `renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-// renderer.Dispatch(...); renderer.EndGraphPassRecording();` call sites).
-// `gte::rg::PassContext::Cmd()` (RenderGraph.h) builds one of these, fresh,
-// every time a pass's `execute` callback calls it - this class is NEVER
-// stored/held onto beyond that one call, mirroring PassContext's own
-// lifetime discipline exactly (see RenderGraph.h's own PassContext doc
-// comment).
-//
-// PURE, ADDITIVE INFRASTRUCTURE - this phase migrates ZERO real pass body.
-// Every existing pass keeps calling Renderer::BeginGraphPassRecording()/
-// Dispatch()/Submit()/EndGraphPassRecording() directly, completely
-// unmodified - CommandBuffer is a NEW, alternative, opt-in way to do the
-// exact same thing, not something existing call sites are forced onto
-// (future phases - PHASE4 onward - migrate real passes onto it one batch at
-// a time).
-//
-// --- Dispatch-accumulation state machine (confirmed via `ask_questions`
-// during this phase's own implementation - see PHASE3_COMPLETION_REPORT.md)
-// ---
+// Pass-author-facing facade over the real Vulkan recording a compute/
+// graphics render-graph pass issues (bind pipeline, push constants,
+// dispatch/draw). gte::rg::PassContext::Cmd() (RenderGraph.h) builds one of
+// these, fresh, every time a pass's `execute` callback calls it - never
+// stored/held onto beyond that one call.
 //
 // BindComputePipeline()/BindDescriptorSet()/SetPushConstants() only
-// ACCUMULATE state on this CommandBuffer instance - none of them touch the
-// GPU. This is a deliberately DIFFERENT shape than Renderer::Dispatch()'s
-// existing all-in-one signature (which already binds the pipeline +
-// optionally binds ONE descriptor set + optionally pushes constants +
-// dispatches, all in a single call) - CommandBuffer exists specifically so a
-// pass author can write the client's own rough two-statement sketch
-// (`cmd.BindComputePipeline(...); cmd.SetPushConstants(...);
-// cmd.Dispatch(...);`) instead. Only Dispatch()/DispatchOverSize() itself
-// actually issues the real Renderer::BeginGraphPassRecording()/Dispatch()/
-// EndGraphPassRecording() bracket, using whatever was most recently
-// bound/set.
+// ACCUMULATE state on this instance - none of them touch the GPU. Only
+// Dispatch()/DispatchOverSize() actually issues the real
+// Renderer::BeginGraphPassRecording()/Dispatch()/EndGraphPassRecording()
+// bracket, using whatever was most recently bound/set.
 //
-// --- Draw() shape ---
-//
-// Draw() is a single, thin, ONE-CALL forwarder straight to Renderer::Submit()
-// - this engine's whole graphics draw model is already matrix-push-constant-
-// based, never a separate BindPipeline()+Draw() two-step the way compute is,
-// so there is no graphics-side "BindPipeline()" on this class at all.
-// Deliberately only ONE draw method - no separate DrawIndexed(): confirmed
-// directly against Renderer::Submit()'s real implementation (Renderer.cpp)
-// and FrameRecorder::RecordFrame() that both already branch on
-// Mesh::HasIndexBuffer() internally and issue the correct indexed/
-// non-indexed draw command either way, so a single Mesh parameter already
-// transparently covers both cases.
+// Draw() is a single, thin forwarder straight to Renderer::Submit() - no
+// separate BindPipeline()+Draw() two-step like compute, and no separate
+// DrawIndexed() (Renderer::Submit() already branches on
+// Mesh::HasIndexBuffer() internally for both).
 //
 // Both Dispatch()/DispatchOverSize() AND Draw() open/close their own
-// Renderer::BeginGraphPassRecording()/EndGraphPassRecording() bracket
-// internally, automatically, EVERY call - the pass author never calls either
-// of those two Renderer methods themselves when going through CommandBuffer
-// (R1's own explicit requirement: "CommandBuffer must NOT require its caller
-// to also separately call renderer.BeginGraphPassRecording()/
-// EndGraphPassRecording()").
+// BeginGraphPassRecording()/EndGraphPassRecording() bracket internally, every
+// call - a pass author never calls either Renderer method directly when
+// going through CommandBuffer.
 
 #include <volk.h>
 
@@ -80,12 +41,11 @@ class Renderer;
 namespace gte::rg {
 
 // Pure, Tier-1-testable logic behind SetPushConstants<T>()'s debug-only
-// size-mismatch assertion (R4) - `reflectedSize == 0` means "this
-// ComputePipeline was built via the MANUAL path (ComputePipeline.h) and has
-// no reflected push-constant metadata to check against at all", which must
-// always report a match regardless of `suppliedSize` (a manually-built
-// pipeline's own caller-supplied VkPushConstantRange is simply trusted,
-// exactly as it was before this phase existed).
+// size-mismatch assertion - `reflectedSize == 0` means "this ComputePipeline
+// was built via the MANUAL path (ComputePipeline.h) and has no reflected
+// push-constant metadata to check against at all", which must always report
+// a match regardless of `suppliedSize` (a manually-built pipeline's own
+// caller-supplied VkPushConstantRange is simply trusted).
 constexpr bool PushConstantSizeMatches(std::uint32_t suppliedSize, std::uint32_t reflectedSize) noexcept
 {
     return reflectedSize == 0 || suppliedSize == reflectedSize;
@@ -128,7 +88,7 @@ public:
     // THIS CommandBuffer instance - does not itself touch the GPU.
     void BindComputePipeline(const ComputePipeline& pipeline) noexcept { m_boundComputePipeline = &pipeline; }
 
-    // Escape hatch (R1) - the one descriptor set Dispatch() binds as set 0,
+    // Escape hatch - the one descriptor set Dispatch() binds as set 0,
     // for any pass not yet using a bindless/reflection-driven binding model.
     void BindDescriptorSet(VkDescriptorSet set) noexcept { m_boundDescriptorSet = set; }
 
@@ -143,7 +103,7 @@ public:
     // metadata (PushConstantSizeMatches() above) - turning the old silent
     // hand-sync bug class (a hand-restated `VkPushConstantRange::size`
     // literal silently drifting out of sync with the real GLSL block) into a
-    // caught assertion (R4).
+    // caught assertion.
     void SetPushConstants(const void* data, std::uint32_t size) noexcept;
 
     template <typename T>
@@ -177,11 +137,13 @@ public:
     // author never has to call either Renderer method directly even for a
     // pure graphics draw issued through CommandBuffer. This is also the one
     // place FrameDebuggerEventSink::NoteCommandResult() is wired - see that
-    // interface's own doc comment for the current "zero real call sites"
-    // caveat; a vertex-less/no-Mesh overload would be needed before a
-    // full-screen-triangle pass could ever use this method.
+    // interface's own doc comment for the real per-draw gating this now
+    // feeds (RenderOpaque's per-entity loop, RenderSystem::Draw()).
+    // `sceneServicesSet` mirrors Renderer::Submit()'s own trailing parameter
+    // exactly - forwarded unchanged, never resolved here.
     void Draw(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix = Mat4::Identity(),
-        const Mat4& viewProjMatrix = Mat4::Identity(), VkDescriptorSet materialDescriptorSet = VK_NULL_HANDLE);
+        const Mat4& viewProjMatrix = Mat4::Identity(), VkDescriptorSet materialDescriptorSet = VK_NULL_HANDLE,
+        VkDescriptorSet sceneServicesSet = VK_NULL_HANDLE);
 
 private:
     // Shared by Dispatch()/Draw() - both open their own
