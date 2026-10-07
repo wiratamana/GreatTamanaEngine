@@ -950,7 +950,6 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             };
             desc.execute = [this, aspectWidthOverHeight, isGameView, viewProjectionOverride, frameDebuggerCapture,
                                 publishedServiceSlots, currentViewForServices](rg::PassContext& ctx) {
-                m_renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
                 std::array<SceneServicesDescriptorSet::ResolvedSlot, kSceneServiceSlotCount> resolvedServiceSlots{};
                 for (std::uint32_t slotIndex = 0; slotIndex < kSceneServiceSlotCount; ++slotIndex) {
                     if (publishedServiceSlots[slotIndex].has_value()) {
@@ -966,18 +965,20 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 const VkDescriptorSet sceneServicesSet =
                     m_sceneServicesDescriptorSet.Rewrite(currentViewForServices, resolvedServiceSlots);
                 if (isGameView) {
-                    // Per-draw-call granularity: only the Game View branch feeds a
-                    // real CommandBuffer in, mirroring frameDebuggerCapture's own
-                    // Game-View-only restriction - Scene View keeps drawing through
-                    // renderer.Submit() via the manual Begin/End bracket above.
+                    // Per-draw-call granularity: CommandBuffer::Draw() opens/closes
+                    // its own BeginGraphPassRecording()/EndGraphPassRecording()
+                    // bracket per entity draw - do not wrap another one here.
                     rg::CommandBuffer cmd = ctx.Cmd();
                     m_game.Render(m_renderer, aspectWidthOverHeight, nullptr, frameDebuggerCapture, std::nullopt,
                         m_gpuDrivenBatchedEntitiesThisFrame, sceneServicesSet, &cmd);
                 } else {
+                    // Scene View draws straight through renderer.Submit() - owns
+                    // its own single Begin/End bracket since nothing else does.
+                    m_renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
                     m_game.Render(m_renderer, aspectWidthOverHeight, &viewProjectionOverride, nullptr, std::nullopt, {},
                         sceneServicesSet);
+                    m_renderer.EndGraphPassRecording();
                 }
-                m_renderer.EndGraphPassRecording();
             };
             out.push_back(std::move(desc));
         });

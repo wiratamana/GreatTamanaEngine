@@ -621,11 +621,13 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
     // Per-draw event capture - GET /frame_debugger/get_event_texture?index=N.
     // Reuses ParseFrameDebuggerSelectEventQuery()'s own required-integer
     // "index" parsing (identical shape - a plain, required event index) -
-    // never a second, near-duplicate parser. A NEW route, additive only -
-    // every one of the seven routes above stays byte-for-byte unchanged.
-    // CURRENTLY ALWAYS 404/found==false end-to-end - see
-    // Core/FrameDebuggerEventSink.h's own doc comment for why (zero real
-    // CommandBuffer::Draw() call sites exist in this engine yet).
+    // never a second, near-duplicate parser.
+    // Reachable end-to-end: RenderSystem::Draw()'s own `cmd` parameter feeds
+    // gte::rg::CommandBuffer::Draw(), which calls
+    // FrameDebuggerEventSink::NoteCommandResult()/FlushPendingCapture() per
+    // draw - see Core/FrameDebuggerEventSink.h. Still returns 404/found==false
+    // until the requested event index has actually been (re)armed and a
+    // matching frame has been captured.
     server.Get("/frame_debugger/get_event_texture",
         [frameDebuggerCommandBridge](const httplib::Request& req, httplib::Response& res) {
             const ParsedFrameDebuggerSelectEventQuery parsed =

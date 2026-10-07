@@ -190,12 +190,14 @@ void AddPresentPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& rende
         [&game, &renderer, directGameRenderAspect, recordImGui](rg::PassContext& ctx) {
             if (directGameRenderAspect.has_value()) {
                 renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-                // task_manager/frame-debugger-3 campaign, PHASE3, Step 3.4b
-                // - deliberately NO frameDebuggerCapture argument here at
-                // all (relies on Game::Render()'s own nullptr default) -
-                // see this file's own RenderPasses.h AddPresentPass() doc
-                // comment for why this fallback branch must NEVER receive
-                // a real capture pointer.
+                // Fallback regime: no CommandBuffer is threaded through here,
+                // so RenderSystem::Draw() never calls CommandBuffer::Draw()
+                // in this branch - Frame Debugger per-draw capture cannot
+                // fire for a frame rendered this way. This IS reachable with
+                // Frame Debugger armed: arming only needs the window open and
+                // enabled (FrameDebuggerPanel::PrepareCaptureContextForThisFrame()),
+                // independent of gameViewVisible/sceneViewVisible - both views
+                // being hidden/collapsed at once is enough to land here.
                 game.Render(renderer, *directGameRenderAspect);
                 renderer.EndGraphPassRecording();
             }
