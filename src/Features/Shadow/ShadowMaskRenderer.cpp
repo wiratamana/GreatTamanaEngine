@@ -67,6 +67,18 @@ rg::TextureHandle ShadowMaskRenderer::AddMaskPass(rg::RenderGraphBuilder& builde
     EnsurePipelineBuilt(renderer);
     ViewState& viewState = EnsureViewState(renderer, outputName, viewExtent);
 
+    // The Game/Scene view can resize after this ViewState's first frame
+    // (editor docking layout settles, panel resize, etc) - re-create the
+    // output at the new size instead of silently sampling/writing a
+    // stale-resolution texture forever.
+    const VkExtent2D currentExtent = viewState.output->Extent();
+    if (currentExtent.width != viewExtent.width || currentExtent.height != viewExtent.height) {
+        vkDeviceWaitIdle(m_device);
+        const int resizedWidth = viewExtent.width > 0 ? static_cast<int>(viewExtent.width) : 1;
+        const int resizedHeight = viewExtent.height > 0 ? static_cast<int>(viewExtent.height) : 1;
+        viewState.output->Resize(resizedWidth, resizedHeight);
+    }
+
     ShadowMaskParamsGpu params{};
     std::memcpy(params.invViewProjection, invViewProjection.Data(), sizeof(params.invViewProjection));
     std::memcpy(params.lightViewProjection, lightViewProjection.Data(), sizeof(params.lightViewProjection));

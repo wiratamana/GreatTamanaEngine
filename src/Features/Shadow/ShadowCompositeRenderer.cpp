@@ -79,7 +79,6 @@ void ShadowCompositeRenderer::EnsurePipeline(Renderer& renderer)
     m_device = renderer.GetVulkanContextInfo().device;
     const VkDevice device = m_device;
     const VkFormat colorFormat = renderer.ColorFormat();
-    const VkFormat depthFormat = renderer.DepthFormat();
 
     // Binding 0 = sceneColor, binding 1 = shadowMask - fragment-stage
     // combined image samplers, see ShadowComposite.frag.
@@ -171,11 +170,14 @@ void ShadowCompositeRenderer::EnsurePipeline(Renderer& renderer)
             throw std::runtime_error("ShadowCompositeRenderer: vkCreatePipelineLayout failed.");
         }
 
+        // No depth attachment - this pass's private target is color-only
+        // (see RenderFeatureCompositor's own "color-only" private/accum
+        // target convention); must NOT declare depthAttachmentFormat here,
+        // since no WriteDepthStencilAttachment() is ever bound for it.
         VkPipelineRenderingCreateInfo renderingInfo{};
         renderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
         renderingInfo.colorAttachmentCount = 1;
         renderingInfo.pColorAttachmentFormats = &colorFormat;
-        renderingInfo.depthAttachmentFormat = depthFormat;
 
         VkGraphicsPipelineCreateInfo pipelineInfo{};
         pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
