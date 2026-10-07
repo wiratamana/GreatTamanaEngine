@@ -996,16 +996,11 @@ ParsedSpawnGpuDrivenTestBatchRequest ParseSpawnGpuDrivenTestBatchRequest(const s
 std::string BuildSpawnGpuDrivenTestBatchResponseJson(bool success, const std::string& errorMessage,
     std::uint32_t instanceCount);
 
-// --- editor-core-separation-8 campaign, PHASE5
-// (PHASE5_CROSS_THREAD_BRIDGE_AND_HTTP_ENDPOINTS.md) -
 // GET /render_graph/set_pass_enabled, /passes, /set_feature_enabled,
-// /set_feature_priority, /set_blur_enabled, /set_gbuffer_enabled. Every
-// function below stays PURE - no httplib/socket/thread/Core/Editor/
-// RenderGraphControlCommandBridge dependency of any kind, exactly like
-// every other function in this file (see this file's own header comment).
-// NetworkServer.cpp is the one place that converts a parsed query into a
-// real RenderGraphControlCommandRequest and calls
-// RenderGraphControlCommandBridge::SubmitAndWait().
+// /set_feature_priority query parsing and response building.
+// Every function below stays pure: no httplib/socket/thread/Core/Editor
+// dependency. NetworkServer.cpp converts a parsed query into a real
+// RenderGraphControlCommandRequest and calls RenderGraphControlCommandBridge::SubmitAndWait().
 
 // Parsed, validated GET /render_graph/set_pass_enabled query. `valid ==
 // false` means `errorMessage` explains exactly why (a 400 response).

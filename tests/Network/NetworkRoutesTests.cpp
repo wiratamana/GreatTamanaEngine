@@ -1425,19 +1425,14 @@ TEST(ClearLogsEndToEndTests, ClearEmptiesBufferAndReportsPreviousCount)
     EXPECT_EQ(Logger::EntryCount(), 0u);
 }
 
-// --- editor-core-separation-8 campaign, PHASE5
-// (PHASE5_CROSS_THREAD_BRIDGE_AND_HTTP_ENDPOINTS.md) -
 // GET /render_graph/set_pass_enabled, /passes, /set_feature_enabled,
-// /set_feature_priority, /set_blur_enabled, /set_gbuffer_enabled request
-// parsing/response building.
+// /set_feature_priority request parsing/response building.
 
 using gte::Network::BuildRenderGraphControlCommandResponseJson;
 using gte::Network::BuildRenderGraphControlPassStatesResponseJson;
-using gte::Network::ParseRenderGraphSetBoolQuery;
 using gte::Network::ParseRenderGraphSetFeatureEnabledQuery;
 using gte::Network::ParseRenderGraphSetFeaturePriorityQuery;
 using gte::Network::ParseRenderGraphSetPassEnabledQuery;
-using gte::Network::ParsedRenderGraphSetBoolQuery;
 using gte::Network::ParsedRenderGraphSetFeatureEnabledQuery;
 using gte::Network::ParsedRenderGraphSetFeaturePriorityQuery;
 using gte::Network::ParsedRenderGraphSetPassEnabledQuery;
@@ -1511,27 +1506,6 @@ TEST(ParseRenderGraphSetFeaturePriorityQueryTests, RejectsEmptyNameOrNonIntegerP
 
     const ParsedRenderGraphSetFeaturePriorityQuery trailingGarbage = ParseRenderGraphSetFeaturePriorityQuery("Demo", "3abc");
     EXPECT_FALSE(trailingGarbage.valid);
-}
-
-TEST(ParseRenderGraphSetBoolQueryTests, AcceptsTrueAndFalse)
-{
-    const ParsedRenderGraphSetBoolQuery trueCase = ParseRenderGraphSetBoolQuery("true");
-    ASSERT_TRUE(trueCase.valid) << trueCase.errorMessage;
-    EXPECT_TRUE(trueCase.enabled);
-
-    const ParsedRenderGraphSetBoolQuery falseCase = ParseRenderGraphSetBoolQuery("false");
-    ASSERT_TRUE(falseCase.valid) << falseCase.errorMessage;
-    EXPECT_FALSE(falseCase.enabled);
-}
-
-TEST(ParseRenderGraphSetBoolQueryTests, RejectsMissingOrInvalidValue)
-{
-    const ParsedRenderGraphSetBoolQuery missing = ParseRenderGraphSetBoolQuery("");
-    EXPECT_FALSE(missing.valid);
-    EXPECT_EQ(missing.errorMessage, "missing or invalid required query parameter: enabled - must be \"true\" or \"false\"");
-
-    const ParsedRenderGraphSetBoolQuery wrongCase = ParseRenderGraphSetBoolQuery("TRUE");
-    EXPECT_FALSE(wrongCase.valid);
 }
 
 TEST(BuildRenderGraphControlCommandResponseJsonTests, SuccessShapeHasNoErrorField)
