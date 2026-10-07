@@ -91,20 +91,23 @@ constexpr bool PushConstantSizeMatches(std::uint32_t suppliedSize, std::uint32_t
     return reflectedSize == 0 || suppliedSize == reflectedSize;
 }
 
+// A pass's write-target attachment - see PassContext::Cmd() (RenderGraph.h).
+// Free, namespace-scope struct (not nested in CommandBuffer): a nested
+// struct with default member initializers can't be used as `= {}` in a
+// default argument of its own still-incomplete enclosing class.
+struct CommandBufferWriteTargetInfo {
+    VkImage colorImage = VK_NULL_HANDLE;
+    VkExtent2D colorExtent{};
+    VkFormat colorFormat = VK_FORMAT_UNDEFINED;
+    VkImage depthImage = VK_NULL_HANDLE;
+    VkFormat depthFormat = VK_FORMAT_UNDEFINED;
+};
+
 class CommandBuffer {
 public:
-    // Which real color/depth attachment this pass's own write target is -
-    // see PassContext::Cmd() (RenderGraph.h), the one real caller. Defaulted
-    // (every field VK_NULL_HANDLE/VK_FORMAT_UNDEFINED) for a pass with no
-    // such attachment, or any pre-existing call site built before this
-    // field existed.
-    struct WriteTargetInfo {
-        VkImage colorImage = VK_NULL_HANDLE;
-        VkExtent2D colorExtent{};
-        VkFormat colorFormat = VK_FORMAT_UNDEFINED;
-        VkImage depthImage = VK_NULL_HANDLE;
-        VkFormat depthFormat = VK_FORMAT_UNDEFINED;
-    };
+    // Alias so every call site spelled as `CommandBuffer::WriteTargetInfo`
+    // keeps compiling unchanged.
+    using WriteTargetInfo = CommandBufferWriteTargetInfo;
 
     // `renderer`/`passDrawStats` may be nullptr only for a default-
     // constructed/never-handed-to-a-real-pass PassContext (see
