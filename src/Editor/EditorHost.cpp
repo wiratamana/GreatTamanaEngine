@@ -868,13 +868,16 @@ int EditorHost::Run()
             m_captureBridge.FailPendingRequest(FrameCaptureKind::GameView, FrameCaptureFailureReason::TargetNotAvailable);
         }
         if (gameTargetThisFrame != nullptr && m_captureBridge.IsCaptureRequested(FrameCaptureKind::GameView)) {
-            // A feature may publish a composited, post-process final output
-            // under this generic name - see Core::GetFinalizedTextureByName().
-            RenderTexture* captureSource = m_core.GetFinalizedTextureByName("GameViewComposited");
-            if (captureSource == nullptr) {
-                captureSource = gameTargetThisFrame;
-            }
-            Renderer::CapturedRawPixels raw = m_renderer.CaptureRenderTexturePixels(*captureSource);
+            // Always capture the real Game View target - the render graph's
+            // PostComposite blend chain (Core::Plugins/RenderFeatureCompositor)
+            // always fully resolves every registered feature's contribution
+            // back into THIS texture, regardless of how many features are
+            // registered or in what order. A per-feature "*Composited" side
+            // texture (see Core::GetFinalizedTextureByName()) only reflects
+            // that ONE feature's own early position in the chain - it goes
+            // stale the moment any other feature runs after it, so it must
+            // never be treated as "the final frame" here.
+            Renderer::CapturedRawPixels raw = m_renderer.CaptureRenderTexturePixels(*gameTargetThisFrame);
             if (IsBgraFormat(raw.format)) {
                 Encoding::ConvertBgraToRgbaInPlace(raw.pixels.data(), raw.width, raw.height);
             }

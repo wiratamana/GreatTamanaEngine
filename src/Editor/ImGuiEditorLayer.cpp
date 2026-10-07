@@ -615,24 +615,20 @@ public:
         // GameViewTarget()/SceneViewTarget() invalidated the previous one
         // (a resize). Each panel owns its own descriptor/texture.
         //
-        // Atmosphere Scattering + Aerial Perspective campaign, Phase 7 -
-        // PERMANENTLY prefers m_gameViewComposited/m_sceneViewComposited
-        // (the atmosphere-composited output - see
-        // IEditorLayer::SetGameViewCompositedTexture()'s own doc comment)
-        // over m_gameView/m_sceneView whenever a composited texture is
-        // available this frame, falling back to the original pre-composite
-        // texture only on a frame where the composite pass hasn't produced
-        // one yet (e.g. the very first frame). Since the composited
-        // texture's own underlying VkImageView can change (a resize) at any
-        // time during THIS frame's earlier offscreen Execute() call -
-        // outside this class's own GameViewTarget()/SceneViewTarget()-style
-        // "resize on demand" methods, exactly like ComputeBlurValidation's
-        // own output below - both descriptors are now tracked the SAME
-        // "recreate whenever the underlying view actually changed" way the
-        // blurred output already was, rather than "created once, never
-        // again".
+        // The "Game"/"Scene" panels always display the real m_gameView/
+        // m_sceneView target directly. The render graph's PostComposite
+        // blend chain (Core::Plugins/RenderFeatureCompositor) always fully
+        // resolves every registered feature's contribution back into THOSE
+        // textures by construction, regardless of how many features are
+        // registered or in what order - a per-feature "*Composited" side
+        // texture (m_gameViewComposited/m_sceneViewComposited, still kept
+        // around purely for FrameDebuggerPanel's own before/after
+        // comparison below) only reflects that ONE feature's own early
+        // position in the chain, so it must never be preferred here - doing
+        // so would silently hide any OTHER feature's contribution the
+        // moment it runs later in the same chain.
         {
-            RenderTexture* gameSource = (m_gameViewComposited != nullptr) ? m_gameViewComposited : &m_gameView;
+            RenderTexture* gameSource = &m_gameView;
             if (m_ctx.gameViewDescriptor == VK_NULL_HANDLE || gameSource->View() != m_lastKnownGameView) {
                 ReleaseGameViewDescriptor();
                 m_ctx.gameViewDescriptor = ImGui_ImplVulkan_AddTexture(
@@ -641,7 +637,7 @@ public:
             }
         }
         {
-            RenderTexture* sceneSource = (m_sceneViewComposited != nullptr) ? m_sceneViewComposited : &m_sceneView;
+            RenderTexture* sceneSource = &m_sceneView;
             if (m_ctx.sceneViewDescriptor == VK_NULL_HANDLE || sceneSource->View() != m_lastKnownSceneView) {
                 ReleaseSceneViewDescriptor();
                 m_ctx.sceneViewDescriptor = ImGui_ImplVulkan_AddTexture(
@@ -649,7 +645,6 @@ public:
                 m_lastKnownSceneView = sceneSource->View();
             }
         }
-
         // Phase 7 - the blurred output's own ImGui descriptor, recreated
         // whenever ComputeBlurValidation's underlying VkImageView actually
         // changed (a resize, or its very first creation) - tracked via
