@@ -875,6 +875,8 @@ add_library(gte_core STATIC
     src/Encoding/Base64.cpp
     src/Encoding/PixelConversion.h
     src/Encoding/PixelConversion.cpp
+    src/Encoding/CapturedPixelConversion.h
+    src/Encoding/CapturedPixelConversion.cpp
     src/Encoding/PngEncoder.h
     src/Encoding/PngEncoder.cpp
     src/Encoding/DepthVisualization.h
@@ -1157,6 +1159,11 @@ add_library(gte_editor STATIC
     # - not a gte_core sibling of RenderGraphMetadata.h/.cpp).
     src/Editor/RenderGraphDotExport.h
     src/Editor/RenderGraphDotExport.cpp
+    # Render Graph panel's pure layout math and its RAII texture-preview slot.
+    src/Editor/RenderGraphLayout.h
+    src/Editor/RenderGraphLayout.cpp
+    src/Editor/RenderGraphTexturePreview.h
+    src/Editor/RenderGraphTexturePreview.cpp
     src/Editor/Panels/HierarchyPanel.h
     src/Editor/Panels/HierarchyPanel.cpp
     src/Editor/Panels/InspectorPanel.h

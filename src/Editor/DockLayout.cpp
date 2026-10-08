@@ -77,18 +77,17 @@ void BuildDefaultDockLayout(ImGuiID dockspaceId, ImVec2 size)
     // alongside "Memory", exactly like "Memory" itself - it has no
     // GTE_ENABLE_PROJECT_PANEL dependency at all.
     ImGui::DockBuilderDockWindow("Profiler", bottom);
-    // "Render Graph" (Phase 8 - Panels/RenderGraphPanel.h) - same "docked
-    // unconditionally alongside Memory/Profiler" treatment; it has no
+    // "Render Graph" is NOT docked here - it is a floating window (see
+    // Panels/RenderGraphPanel.h) with its own default size, same precedent
+    // as FrameDebuggerPanel. Its node canvas needs real screen space, not a
+    // quarter-height strip shared with four other panels.
+    // "Jobs" (Job System Phase 7 - Panels/JobsPanel.h) - docked
+    // unconditionally alongside Memory/Profiler; it has no
     // GTE_ENABLE_PROJECT_PANEL dependency either.
-    ImGui::DockBuilderDockWindow("Render Graph", bottom);
-    // "Jobs" (Job System Phase 7 - Panels/JobsPanel.h) - same "docked
-    // unconditionally alongside Memory/Profiler/Render Graph" treatment; it
-    // has no GTE_ENABLE_PROJECT_PANEL dependency either.
     ImGui::DockBuilderDockWindow("Jobs", bottom);
     // "Log" (task_manager/logger-1 campaign, PHASE4 - Panels/LogPanel.h) -
-    // same "docked unconditionally alongside Memory/Profiler/Render
-    // Graph/Jobs" treatment; it has no GTE_ENABLE_PROJECT_PANEL dependency
-    // either.
+    // same "docked unconditionally alongside Memory/Profiler/Jobs"
+    // treatment; it has no GTE_ENABLE_PROJECT_PANEL dependency either.
     ImGui::DockBuilderDockWindow("Log", bottom);
 #if GTE_ENABLE_PROJECT_PANEL
     // Tabbed alongside "Memory" - Unity's own default layout also puts

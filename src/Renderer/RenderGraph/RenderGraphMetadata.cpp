@@ -41,6 +41,7 @@ RenderGraphPassMetadata BuildPassMetadata(const RenderGraphPassSnapshot& pass)
     metadata.drawKind = ToString(pass.drawKind);
     metadata.viewScope = ToString(pass.viewScope);
     metadata.renderPassEvent = ToString(pass.renderPassEvent);
+    metadata.renderPassEventOrder = static_cast<std::uint32_t>(pass.renderPassEvent);
 
     const std::optional<std::size_t> groupIndex = FindPassGroupIndexForTags(pass.tags);
     metadata.tagGroupLabel = groupIndex.has_value()
@@ -336,6 +337,7 @@ void to_json(nlohmann::json& j, const RenderGraphPassMetadata& pass)
         { "draw_kind", pass.drawKind },
         { "view_scope", pass.viewScope },
         { "render_pass_event", pass.renderPassEvent },
+        { "render_pass_event_order", pass.renderPassEventOrder },
         { "tag_group_label",
             pass.tagGroupLabel.has_value() ? nlohmann::json(*pass.tagGroupLabel) : nlohmann::json(nullptr) },
         { "reads", pass.reads },

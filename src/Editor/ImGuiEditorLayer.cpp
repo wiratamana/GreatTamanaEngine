@@ -542,7 +542,7 @@ public:
         BuildGamePanel(m_ctx);
         BuildMemoryPanel(m_ctx, renderer);
         m_profilerPanel.Build(m_ctx);
-        m_renderGraphPanel.Build(m_ctx, renderGraph, gpuDrivenBatchDebugInfo, renderFeatureEntries,
+        m_renderGraphPanel.Build(m_ctx, renderer, renderGraph, gpuDrivenBatchDebugInfo, renderFeatureEntries,
             renderPassToggleRegistry, renderFeatureCompositor);
         // Job System Phase 7 (Editor "Jobs" Panel) - reads Job System Phase
         // 5's Profiling::BuildWorkerTimelinePoints() reshape internally; also

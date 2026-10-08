@@ -3,6 +3,7 @@
 #include "../EditorContext.h"
 #include "../MemoryPanelData.h" // gte::ToString(VkFormat) - reused for the real render-target format label (PHASE3).
 #include "../../Encoding/HdrColorVisualization.h" // task_manager/frame-debugger-9 campaign, PHASE3 - Encoding::ConvertHdrRgba16fToRgba8().
+#include "../../Encoding/CapturedPixelConversion.h" // gte::Encoding::IsBgraFormat() - the one canonical copy.
 #include "../../Encoding/DepthVisualization.h" // Encoding::ConvertDepthToGrayscaleRgba8() - depth-only per-draw event captures.
 #include "../../Encoding/PixelConversion.h" // PHASE3 - Encoding::ConvertBgraToRgbaInPlace().
 #include "../../Encoding/PngEncoder.h" // Frame Debugger per-draw event capture - Encoding::EncodeRgba8ToPng().
@@ -40,15 +41,6 @@ void BuildPropertyRow(const char* label, const std::string& value)
     ImGui::TextUnformatted(label);
     ImGui::SameLine(150.0f);
     ImGui::TextUnformatted(value.c_str());
-}
-
-// task_manager/frame-debugger-9 campaign, PHASE3 - byte-for-byte duplicate of
-// Application.cpp's own anonymous-namespace IsBgraFormat() (src/Editor/ may
-// never #include src/Application/ headers - Clean Architecture, AGENTS.md).
-// Keep in sync with that copy if it ever changes.
-bool IsBgraFormat(VkFormat format) noexcept
-{
-    return format == VK_FORMAT_B8G8R8A8_UNORM || format == VK_FORMAT_B8G8R8A8_SRGB;
 }
 
 } // namespace
@@ -182,7 +174,7 @@ void FrameDebuggerPanel::RequestShaderPropertyTexturePreview(const std::string& 
             converted.resize(static_cast<std::size_t>(raw.width) * static_cast<std::size_t>(raw.height) * 4);
             ok = Encoding::Convert1ChannelToGrayscaleRgba8(raw.pixels.data(), raw.format, raw.width, raw.height, converted.data());
             rgba8Pixels = converted.data();
-        } else if (IsBgraFormat(raw.format)) {
+        } else if (Encoding::IsBgraFormat(raw.format)) {
             // Safe in-place swizzle - CaptureImagePixels() already handed us a
             // buffer we own exclusively, and `raw` is non-const (see above), so
             // no const_cast is needed at all.
@@ -1468,7 +1460,7 @@ FrameDebuggerEventTextureResult FrameDebuggerPanel::GetEventTextureFromCommand(i
             return result;
         }
         encodePixels = converted.data();
-    } else if (IsBgraFormat(raw.format)) {
+    } else if (Encoding::IsBgraFormat(raw.format)) {
         Encoding::ConvertBgraToRgbaInPlace(raw.pixels.data(), raw.width, raw.height);
     }
     // else: already tightly-packed RGBA8 - no conversion needed.

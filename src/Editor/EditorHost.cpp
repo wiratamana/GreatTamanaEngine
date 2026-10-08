@@ -31,6 +31,7 @@
 #include "../Application/EventTranslator.h"
 #include "../Application/EngineCommandDispatch.h"
 #include "../Application/MemorySnapshotBuilder.h"
+#include "../Encoding/CapturedPixelConversion.h" // gte::Encoding::IsBgraFormat() - the one canonical copy.
 #include "../Encoding/DepthVisualization.h"
 #include "../Encoding/HdrColorVisualization.h"
 #include "../Encoding/PixelConversion.h"
@@ -58,32 +59,10 @@ namespace gte {
 
 namespace {
 
-// editor-core-separation-1 campaign, PHASE16 - relocated verbatim from
-// Application.cpp (network-impl-2 campaign, Phase 3) - true for the two
-// BGRA channel-order formats VulkanSwapchain.cpp's ChooseSurfaceFormat() is
-// actually known to negotiate (it prefers VK_FORMAT_B8G8R8A8_UNORM but
-// falls back to formats.front(), i.e. whatever the platform/driver reports
-// first, if that exact combination isn't available). An unrecognized
-// BGRA-like variant this two-value check doesn't catch would silently
-// produce a channel-swapped (red/blue reversed) PNG with no error at all -
-// an accepted, narrow risk (see network-impl-2's own Non-Goals) - if a
-// future "screenshot has wrong colors" report ever shows up, start here.
-bool IsBgraFormat(VkFormat format) noexcept
-{
-    return format == VK_FORMAT_B8G8R8A8_UNORM || format == VK_FORMAT_B8G8R8A8_SRGB;
-}
-
-// network-impl-4 campaign, Phase 5 - GET /list_textures' own small,
-// human-readable resolution helpers, relocated verbatim from
-// Application.cpp. Both are deliberately narrow (only the enumerators/
-// formats this engine's render graph can actually produce today), mirroring
-// IsBgraFormat()'s own "accepted narrow risk, documented" precedent
-// immediately above - an unrecognized regime can never actually occur
-// (ExecuteTimingMode has exactly two enumerators, both handled), and an
-// unrecognized VkFormat falls back to a safe, clearly-labeled numeric string
-// rather than a crash or a silently-wrong label, mirroring
-// src/Editor/MemoryPanelData.cpp's own ToString(VkFormat) fallback
-// convention.
+// GET /list_textures' own small, human-readable resolution helpers.
+// Deliberately narrow (only the enumerators/formats this engine's render
+// graph can actually produce today) - an unrecognized regime/format falls
+// back to a safe, clearly-labeled string rather than a crash.
 const char* ToDebugTextureRegimeString(rg::ExecuteTimingMode mode)
 {
     switch (mode) {
@@ -875,7 +854,7 @@ int EditorHost::Run()
             // the chain - it goes stale once any later feature runs, so it
             // must never be treated as "the final frame" here.
             Renderer::CapturedRawPixels raw = m_renderer.CaptureRenderTexturePixels(*gameTargetThisFrame);
-            if (IsBgraFormat(raw.format)) {
+            if (Encoding::IsBgraFormat(raw.format)) {
                 Encoding::ConvertBgraToRgbaInPlace(raw.pixels.data(), raw.width, raw.height);
             }
             std::vector<std::uint8_t> png = Encoding::EncodeRgba8ToPng(raw.pixels.data(), raw.width, raw.height);
@@ -959,7 +938,7 @@ int EditorHost::Run()
         // Renderer::PresentViaRenderGraph() call already fence-waits before
         // returning).
         if (std::optional<CapturedSwapchainPixels> raw = m_renderer.TakeLastCompletedSwapchainCapture()) {
-            if (IsBgraFormat(raw->format)) {
+            if (Encoding::IsBgraFormat(raw->format)) {
                 Encoding::ConvertBgraToRgbaInPlace(raw->pixels.data(), raw->width, raw->height);
             }
             std::vector<std::uint8_t> png = Encoding::EncodeRgba8ToPng(raw->pixels.data(), raw->width, raw->height);
@@ -1048,7 +1027,7 @@ int EditorHost::Run()
                             converted.resize(static_cast<std::size_t>(raw.width) * static_cast<std::size_t>(raw.height) * 4);
                             ok = Encoding::Convert1ChannelToGrayscaleRgba8(raw.pixels.data(), raw.format, raw.width, raw.height, converted.data());
                             encodePixels = converted.data();
-                        } else if (IsBgraFormat(raw.format)) {
+                        } else if (Encoding::IsBgraFormat(raw.format)) {
                             Encoding::ConvertBgraToRgbaInPlace(raw.pixels.data(), raw.width, raw.height);
                         }
                         // else: already tightly-packed RGBA8 (e.g.

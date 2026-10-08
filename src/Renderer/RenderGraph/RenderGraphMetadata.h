@@ -68,6 +68,7 @@ struct RenderGraphPassMetadata {
     std::string drawKind;          // rg::ToString(RenderPassDrawKind)
     std::string viewScope;         // rg::ToString(ViewScope) (PHASE1's new function)
     std::string renderPassEvent;   // rg::ToString(RenderPassEvent)
+    std::uint32_t renderPassEventOrder = 0; // static_cast<std::uint32_t>(RenderPassEvent) - sortable, unlike the text above.
     std::optional<std::string> tagGroupLabel; // RenderPassGroupRegistry::FindPassGroupIndexForTags() result, or nullopt.
     std::vector<RenderGraphResourceRefMetadata> reads;
     std::vector<RenderGraphResourceRefMetadata> writes;

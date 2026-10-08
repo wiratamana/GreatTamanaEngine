@@ -4,479 +4,49 @@
 #include "../RenderGraphDotExport.h"
 #include "../../Core/Logging.h"
 #include "../../Core/Plugins/RenderFeatureCompositor.h"
+#include "../../Encoding/CapturedPixelConversion.h"
 #include "../../Renderer/RenderGraph/RenderGraph.h"
-#include "../../Renderer/RenderGraph/RenderGraphSnapshotFormatting.h"
 #include "../../Renderer/RenderGraph/RenderPassToggleChangeDetectionLogic.h"
+#include "../../Renderer/Renderer.h"
 #include "../ImGuiUniqueId.h"
 
 #include <imgui.h>
 
-#include <cstdint>
-#include <cstdio>
+#include <algorithm>
 #include <cstddef>
-#include <string>
+#include <cstdint>
+#include <exception>
+#include <unordered_map>
 #include <vector>
 
 namespace gte {
 
 namespace {
 
-// editor-core-separation-7 campaign, PHASE3
-// (PHASE3_EDITOR_PANEL_DATA_DRIVEN_MIGRATION_AND_EXPORT_DOT.md) - the ONLY
-// new helper this migration needs: rg::RenderGraphPassMetadata::reads/writes
-// are now std::vector<rg::RenderGraphResourceRefMetadata> (name+kind pairs,
-// PHASE2) rather than a plain std::vector<std::string> - this table only
-// ever showed NAMES before this phase (never kind text, confirmed against
-// the ORIGINAL BuildPassRow() below), so this extracts just the `.name`
-// field before handing the result to rg::JoinNames(), for a truly
-// byte-identical visual result. The `.kind` field exists for PHASE4's JSON
-// consumer, not because this ImGui table needs to start showing it.
-std::vector<std::string> ExtractResourceRefNames(const std::vector<rg::RenderGraphResourceRefMetadata>& refs)
+// Linear search - regime.passes is at most a few dozen entries this frame.
+const rg::RenderGraphPassMetadata* FindPassByName(const rg::RenderGraphRegimeMetadata& regime, const std::string& name)
 {
-    std::vector<std::string> names;
-    names.reserve(refs.size());
-    for (const rg::RenderGraphResourceRefMetadata& ref : refs) {
-        names.push_back(ref.name);
-    }
-    return names;
-}
-
-// editor-core-separation-22 campaign, PHASE5
-// (PHASE5_UNIFY_DUPLICATE_PASS_ROWS_RENDER_GRAPH_PANEL.md, Step 3.4) - one
-// RAW, ungrouped instance's own Draws/Tris/GPU Time/Reads/Writes columns
-// (columns 2-6 - "Enabled"/"Pass" are handled by the caller, differently,
-// for a raw sub-row vs. the grouped summary row). Shared by BOTH the
-// click-to-expand raw-breakdown sub-rows below AND nothing else today (the
-// grouped summary row's own columns use SUMMED/combined values, a genuinely
-// different shape - see BuildGroupedPassRow() below) - kept as its own
-// function anyway since "one instance's own stats columns" is a real,
-// nameable concept a future caller (e.g. a possible future JSON reveal
-// endpoint) may also want.
-void BuildInstanceStatsColumns(const rg::RenderGraphPassMetadata& pass)
-{
-    ImGui::TableSetColumnIndex(2);
-    if (pass.isCulled) {
-        ImGui::TextDisabled("culled");
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Culled: no path from this pass's declared writes to this call's own "
-                               "final output(s) was found - see RenderGraphCompiler.h.");
-        }
-    } else {
-        ImGui::Text("%u", pass.drawCallCount);
-    }
-
-    ImGui::TableSetColumnIndex(3);
-    if (!pass.isCulled) {
-        ImGui::Text("%u", pass.triangleCount);
-    } else {
-        ImGui::TextDisabled("-");
-    }
-
-    ImGui::TableSetColumnIndex(4);
-    if (!pass.isCulled) {
-        ImGui::TextUnformatted(pass.gpuTimingText.c_str());
-    } else {
-        ImGui::TextDisabled("-");
-    }
-
-    ImGui::TableSetColumnIndex(5);
-    const std::string reads = rg::JoinNames(ExtractResourceRefNames(pass.reads));
-    ImGui::TextUnformatted(reads.c_str());
-
-    ImGui::TableSetColumnIndex(6);
-    const std::string writes = rg::JoinNames(ExtractResourceRefNames(pass.writes));
-    ImGui::TextUnformatted(writes.c_str());
-}
-
-// editor-core-separation-22 campaign, PHASE5 (Step 3.4) - one RAW,
-// ungrouped instance's own sub-row, indented under its own group's
-// click-to-expand tree row (BuildGroupedPassRow() below). Non-interactive
-// (plain text only, no checkbox/button) - no new ImGui ID uniqueness risk,
-// so this deliberately does NOT open its own ScopedUniqueId scope (nothing
-// here needs a stable per-iteration ID).
-void BuildRawInstanceSubRow(const rg::RenderGraphPassMetadata& instance)
-{
-    ImGui::TableNextRow();
-
-    ImGui::TableSetColumnIndex(0); // "Enabled" column - blank for a raw sub-row (the checkbox above already controls every instance of this name at once).
-    ImGui::TextDisabled("-");
-
-    ImGui::TableSetColumnIndex(1);
-    ImGui::Indent();
-    const std::string label = std::string("- ") + instance.viewScope; // plain ASCII prefix (never a UTF-8 glyph literal here - this codebase's own char8_t/std::string interop across MinGW is inconsistent, see this phase's own build log) - the leading "- " plus this row's own ImGui::Indent() below is enough to read as "a child of the row above".
-    if (instance.isCulled) {
-        ImGui::TextDisabled("%s", label.c_str());
-    } else {
-        ImGui::TextUnformatted(label.c_str());
-    }
-    ImGui::Unindent();
-
-    BuildInstanceStatsColumns(instance);
-}
-
-// editor-core-separation-8 campaign, PHASE4
-// (PHASE4_RENDER_GRAPH_PANEL_CONTROLS.md, Step 3.1) - the new FIRST column,
-// "Enabled". Placed before "Pass" (rather than appended at the end) so an
-// unchecked box sits immediately to the LEFT of the pass name it controls -
-// every other column below is simply shifted by a uniform +1 index. This is
-// the first place in this file a checkbox actually MUTATES Core-owned state
-// (rg::RenderPassToggleRegistry) directly from the Editor UI, per
-// PHASE0_MASTER_STRATEGY.md's Step 2.6 (same thread, no bridge needed).
-//
-// editor-core-separation-22 campaign, PHASE5
-// (PHASE5_UNIFY_DUPLICATE_PASS_ROWS_RENDER_GRAPH_PANEL.md) - REWORKED to
-// render exactly ONE row per rg::RenderGraphGroupedPassMetadata group
-// (renamed from BuildPassRow(), which rendered one row per raw, ungrouped
-// snapshot entry - the exact "two RenderOpaque rows here, one row there"
-// cardinality mismatch this whole phase exists to close, see
-// PHASE0_MASTER_STRATEGY.md's Root Cause #1). The pass name column is now a
-// click-to-expand ImGui::TreeNodeEx() (locked decision, via ask_questions,
-// see PHASE5_COMPLETION_REPORT.md) - expanding it reveals the RAW,
-// ungrouped, per-view-instance breakdown this group was built from (Step
-// 3.4), so nothing the old, ungrouped table used to show is actually lost,
-// merely one click away instead of always-on-screen. A single-instance
-// group (this name was declared by only one view/regime this frame) is
-// rendered as a plain, non-expandable Leaf - there is no meaningful raw
-// breakdown to reveal for it.
-void BuildGroupedPassRow(int rowIndex, const rg::RenderGraphGroupedPassMetadata& pass, rg::RenderPassToggleRegistry& renderPassToggleRegistry)
-{
-    // task_manager/editor-core-separation-10 campaign, PHASE2 - THE fix for
-    // the reported bug: this row's ImGui ID scope is keyed by its own loop
-    // index (always distinct per row, per frame, by construction). Now that
-    // every row is genuinely ONE unique pass NAME per regime (this phase's
-    // own fix), a plain name-keyed scope would actually be safe too - but
-    // this stays index-scoped anyway, matching this whole file's own
-    // established discipline (task_manager/editor-core-separation-10,
-    // PHASE2) rather than re-litigating a settled convention for zero
-    // benefit.
-    ScopedUniqueId idScope(rowIndex, "RenderGraphPanel::BuildGroupedPassRow", pass.name.c_str());
-
-    ImGui::TableNextRow();
-
-    ImGui::TableSetColumnIndex(0);
-    bool enabled = renderPassToggleRegistry.IsEnabled(pass.name);
-    // Uniqueness now comes entirely from the ScopedUniqueId scope above -
-    // this literal, un-suffixed label is intentional and correct.
-    if (ImGui::Checkbox("##Enabled", &enabled)) {
-        renderPassToggleRegistry.SetEnabled(pass.name, enabled);
-    }
-    if (ImGui::IsItemHovered()) {
-        // editor-core-separation-22 campaign, PHASE5 - tooltip text updated:
-        // the OLD premise ("if this same name appears in BOTH the Offscreen
-        // Regime table (Game View + Scene View share it)...") no longer
-        // applies now that there is only ever ONE row per name in this
-        // table - but the underlying caveat (toggling here affects every
-        // instance of this name at once, there is no per-view control) is
-        // still just as true and still worth stating.
-        ImGui::SetTooltip("Unchecking this disables \"%s\" starting next frame - it will stop appearing in this "
-                           "table entirely once disabled (see the \"Disabled Built-In Passes\" section below). "
-                           "This one row already represents every instance of this pass name across every active "
-                           "view this frame (%s) - toggling here affects all of them at once; there is no "
-                           "per-view control (see PHASE0_MASTER_STRATEGY.md's Step 2.1).",
-            pass.name.c_str(), pass.viewLabel.c_str());
-    }
-
-    ImGui::TableSetColumnIndex(1); // was 0
-    const bool expandable = pass.instances.size() > 1;
-    ImGuiTreeNodeFlags treeFlags = ImGuiTreeNodeFlags_SpanAvailWidth;
-    if (!expandable) {
-        treeFlags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-    }
-    char label[320];
-    std::snprintf(label, sizeof(label), "%s  (%s)", pass.name.empty() ? "(unnamed)" : pass.name.c_str(),
-        pass.viewLabel.c_str());
-    if (pass.isCulled) {
-        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-    }
-    const bool opened = ImGui::TreeNodeEx(label, treeFlags);
-    if (pass.isCulled) {
-        ImGui::PopStyleColor();
-    }
-    if (ImGui::IsItemHovered() && expandable) {
-        ImGui::SetTooltip("Click to reveal the raw, per-view breakdown this row was grouped from (%zu instances).",
-            pass.instances.size());
-    }
-
-    ImGui::TableSetColumnIndex(2); // was 1
-    if (pass.isCulled) {
-        ImGui::TextDisabled("culled");
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Culled: EVERY instance of this pass name was culled this frame - no path from any "
-                               "of them to this call's own final output(s) was found - see RenderGraphCompiler.h.");
-        }
-    } else {
-        ImGui::Text("%u", pass.drawCallCount);
-    }
-
-    ImGui::TableSetColumnIndex(3); // was 2
-    if (!pass.isCulled) {
-        ImGui::Text("%u", pass.triangleCount);
-    } else {
-        ImGui::TextDisabled("-");
-    }
-
-    ImGui::TableSetColumnIndex(4); // was 3
-    if (!pass.isCulled) {
-        ImGui::TextUnformatted(pass.gpuTimingText.c_str());
-    } else {
-        ImGui::TextDisabled("-");
-    }
-
-    ImGui::TableSetColumnIndex(5); // was 4
-    const std::string reads = rg::JoinNames(pass.reads);
-    ImGui::TextUnformatted(reads.c_str());
-
-    ImGui::TableSetColumnIndex(6); // was 5
-    const std::string writes = rg::JoinNames(pass.writes);
-    ImGui::TextUnformatted(writes.c_str());
-
-    if (opened && expandable) {
-        for (const rg::RenderGraphPassMetadata& instance : pass.instances) {
-            BuildRawInstanceSubRow(instance);
-        }
-        ImGui::TreePop();
-    }
-}
-
-// editor-core-separation-22 campaign, PHASE5 - now groups `regime.passes`
-// by name (rg::GroupPassMetadataByName()) before iterating, and calls
-// BuildGroupedPassRow() (renamed from BuildPassRow()) once per GROUP
-// instead of once per raw snapshot entry - this is the actual fix for the
-// "two rows here, one row there" cardinality mismatch
-// (PHASE0_MASTER_STRATEGY.md's Root Cause #1).
-void BuildPassTable(
-    const char* tableId, const rg::RenderGraphRegimeMetadata& regime, rg::RenderPassToggleRegistry& renderPassToggleRegistry)
-{
-    if (regime.passes.empty()) {
-        ImGui::TextDisabled("No passes were declared the last time this regime ran.");
-        return;
-    }
-
-    const std::vector<rg::RenderGraphGroupedPassMetadata> groupedPasses = rg::GroupPassMetadataByName(regime.passes);
-
-    // ImGuiTableFlags_NoSavedSettings is REQUIRED here, not cosmetic - see
-    // the matching comment on BuildResourceTable()'s own tableFlags below for
-    // the full "why": without it, a column's width/weight can get corrupted
-    // (an observed real case: the two stretch columns below, "Reads"/
-    // "Writes", persisted into imgui.ini with Weight=nan after this table
-    // was first laid out at a degenerate zero/near-zero available width -
-    // e.g. the very first frame this panel's dock tab existed but wasn't
-    // yet the visible/selected one) and, once written to disk, silently
-    // keeps reloading that same NaN weight on every future launch -
-    // collapsing both columns down to an unreadable "..", and reportedly
-    // crashing the app outright the moment a user tries to drag (expand)
-    // one of them back out, since ImGui's stretch-weight redistribution
-    // math has no NaN-recovery path. NoSavedSettings makes this table
-    // always start each session from the sane, freshly-computed
-    // proportional widths declared below, so a corrupted weight can never
-    // survive to be reloaded.
-    constexpr ImGuiTableFlags tableFlags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable
-        | ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings;
-    // editor-core-separation-8 campaign, PHASE4 - column count is now 7 (was
-    // 6): the new "Enabled" column is the FIRST TableSetupColumn() call
-    // below, matching BuildGroupedPassRow()'s own new column-index-0
-    // checkbox exactly. Every other TableSetupColumn() call below is
-    // unchanged.
-    if (ImGui::BeginTable(tableId, 7, tableFlags)) {
-        ImGui::TableSetupColumn("Enabled", ImGuiTableColumnFlags_WidthFixed, 60.0f);
-        ImGui::TableSetupColumn("Pass", ImGuiTableColumnFlags_WidthFixed, 170.0f); // widened slightly (was 110.0f) - now also carries the "(Game+Scene)"/"(Game only)"/"(Scene only)"/"Shared" view-label badge (PHASE5).
-        ImGui::TableSetupColumn("Draws", ImGuiTableColumnFlags_WidthFixed, 55.0f);
-        ImGui::TableSetupColumn("Tris", ImGuiTableColumnFlags_WidthFixed, 65.0f);
-        ImGui::TableSetupColumn("GPU Time", ImGuiTableColumnFlags_WidthFixed, 130.0f); // widened (was 75.0f) - now shows a per-view breakdown ("Game: 0.12 ms, Scene: 0.08 ms") for a multi-instance group, not just a single number.
-        ImGui::TableSetupColumn("Reads");
-        ImGui::TableSetupColumn("Writes");
-        ImGui::TableHeadersRow();
-
-        for (std::size_t i = 0; i < groupedPasses.size(); ++i) {
-            BuildGroupedPassRow(static_cast<int>(i), groupedPasses[i], renderPassToggleRegistry);
-        }
-
-        ImGui::EndTable();
-    }
-}
-
-void BuildResourceTable(const char* tableId, const rg::RenderGraphRegimeMetadata& regime)
-{
-    if (regime.resources.empty()) {
-        ImGui::TextDisabled("No resources were declared the last time this regime ran.");
-        return;
-    }
-
-    // ImGuiTableFlags_NoSavedSettings is REQUIRED here, not cosmetic - see
-    // BuildPassTable()'s own tableFlags comment above for the full "why":
-    // this table's own "Lifetime" stretch column hit the exact same
-    // persisted-NaN-weight corruption (confirmed directly in a real
-    // imgui.ini: "[Table][0xF8B6D9C2,3] ... Column 2 Weight=nan") - fixed the
-    // same way, for the same reason.
-    constexpr ImGuiTableFlags tableFlags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable
-        | ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings;
-    if (ImGui::BeginTable(tableId, 3, tableFlags)) {
-        ImGui::TableSetupColumn("Resource", ImGuiTableColumnFlags_WidthFixed, 130.0f);
-        ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthFixed, 80.0f);
-        ImGui::TableSetupColumn("Lifetime");
-        ImGui::TableHeadersRow();
-
-        for (const rg::RenderGraphResourceMetadata& resource : regime.resources) {
-            ImGui::TableNextRow();
-
-            ImGui::TableSetColumnIndex(0);
-            ImGui::TextUnformatted(resource.name.empty() ? "(unnamed)" : resource.name.c_str());
-
-            ImGui::TableSetColumnIndex(1);
-            ImGui::TextUnformatted(resource.isImported ? "Imported" : "Transient");
-
-            ImGui::TableSetColumnIndex(2);
-            if (resource.firstUsePassIndex < 0) {
-                ImGui::TextDisabled("never used (fully culled)");
-            } else {
-                // firstUsePassName/lastUsePassName are already resolved by
-                // BuildRenderGraphMetadata() via the SAME
-                // rg::ResolvePassNameAtSurvivingIndex() this table used to
-                // call directly (PHASE0_MASTER_STRATEGY.md's Locked Design
-                // Decision #10) - always has_value() whenever the matching
-                // index is >= 0 (guaranteed by construction), the "?"
-                // fallback below is purely defensive.
-                ImGui::Text("%s -> %s", resource.firstUsePassName.has_value() ? resource.firstUsePassName->c_str() : "?",
-                    resource.lastUsePassName.has_value() ? resource.lastUsePassName->c_str() : "?");
-            }
-        }
-
-        ImGui::EndTable();
-    }
-}
-
-void BuildRegimeSection(const char* label, const char* idSuffix, const rg::RenderGraphRegimeMetadata& regime,
-    rg::RenderPassToggleRegistry& renderPassToggleRegistry)
-{
-    ImGui::SeparatorText(label);
-
-    const std::string passTableId = std::string("RgPasses##") + idSuffix;
-    BuildPassTable(passTableId.c_str(), regime, renderPassToggleRegistry);
-
-    ImGui::Spacing();
-    ImGui::TextDisabled("Resources");
-    const std::string resourceTableId = std::string("RgResources##") + idSuffix;
-    BuildResourceTable(resourceTableId.c_str(), regime);
-}
-
-// GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-// PHASE6 (task_manager/render-pass-5/PHASE6_EDITOR_TOOLING_AND_LIVE_VALIDATION.md,
-// Section 3.1) - one small line per eligible batch: "<batch>: N / M
-// instances visible" - N is the GPU-computed, culling-survived count
-// (visibleCount - a deliberately delayed GPU readback, per
-// GpuDrivenBatchDebugInfo's own doc comment), M is the CPU-known real
-// instance count. Kept clearly labeled as two DIFFERENT kinds of number
-// (PHASE2's own documented rule) - "pending" (never a fabricated 0) for the
-// rare frame visibleCount hasn't been read back yet at all.
-void BuildGpuDrivenBatchesSection(const std::vector<GpuDrivenBatchDebugInfo>& batches)
-{
-    ImGui::SeparatorText("GPU-Driven Batches (instances culled this frame)");
-    if (batches.empty()) {
-        ImGui::TextDisabled(
-            "No GPU-driven-eligible batch is live this frame (Game View only - see PHASE0_MASTER_STRATEGY.md's "
-            "Locked Design Decision 11/7).");
-        return;
-    }
-
-    for (const GpuDrivenBatchDebugInfo& batch : batches) {
-        const std::string name = batch.batchName.empty() ? "(unnamed)" : batch.batchName;
-        if (batch.visibleCount.has_value()) {
-            const std::uint32_t culled =
-                (batch.instanceCount > *batch.visibleCount) ? (batch.instanceCount - *batch.visibleCount) : 0u;
-            ImGui::Text("%s: %u / %u instances visible (%u culled)", name.c_str(), *batch.visibleCount,
-                batch.instanceCount, culled);
-        } else {
-            ImGui::Text("%s: pending / %u instances (GPU readback not yet available)", name.c_str(),
-                batch.instanceCount);
+    for (const rg::RenderGraphPassMetadata& pass : regime.passes) {
+        if (pass.name == name) {
+            return &pass;
         }
     }
+    return nullptr;
 }
 
-// editor-core-separation-6 campaign, PHASE7
-// (PHASE7_RENDER_GRAPH_PANEL_VISIBILITY.md) - one line per registered
-// render-feature entry, mirroring BuildGpuDrivenBatchesSection()'s own exact
-// shape immediately above: a free function taking a small, already-CPU-side-
-// collected std::vector<RenderFeatureDebugEntry>, `ImGui::SeparatorText(...)`
-// + a loop of `ImGui::Text(...)` calls - no new ImGui widget kind, no new
-// panel, no per-frame GPU readback. `entries` is never frozen by this
-// panel's own Pause control (unlike the two RenderGraphSnapshot regimes and
-// the GPU-driven-batch readout above).
-//
-// editor-core-separation-8 campaign, PHASE4
-// (PHASE4_RENDER_GRAPH_PANEL_CONTROLS.md, Step 3.3) - gains a per-entry
-// "Enabled" checkbox and an editable priority field, both live-mutating
-// `renderFeatureCompositor` directly (main-thread-only, same as
-// BuildPassRow()'s new checkbox above - see PHASE0_MASTER_STRATEGY.md's Step
-// 2.6). `renderFeatureCompositor == nullptr` (a degraded build) means the
-// widgets still render but any edit is silently a no-op - mirrors this whole
-// campaign's "null bridge/pointer degrades gracefully, never crashes"
-// discipline; deliberately NOT wrapped in ImGui::BeginDisabled() for this,
-// since a transient null is not a real, reachable, steady-state UI mode
-// worth a special disabled-look here.
-//
-// better-render-pass-2 campaign, PHASE5 (PHASE5_CLEAN_RENDER_FEATURE_COMPOSITOR_INTERNALS.md,
-// STEP 5.2.4) - renamed from BuildPluginRenderFeaturesSection()/"Plugin
-// Render Features" to BuildRenderFeaturesSection()/"Render Features" - the
-// `plugins/gte_plugin_abi` ABI system this section used to describe is fully
-// removed as of this campaign; every surviving entry here is a Project
-// Assembly render feature (see entry.isProjectFeature's own "[Project]" tag
-// below). Purely cosmetic - zero behavior change.
-void BuildRenderFeaturesSection(
-    const std::vector<RenderFeatureDebugEntry>& entries, RenderFeatureCompositor* renderFeatureCompositor)
+// Fixed palette, cycles by index - stable color per timeline segment.
+ImU32 PickTimelineSegmentColor(std::uint32_t index)
 {
-    ImGui::SeparatorText("Render Features");
-    if (entries.empty()) {
-        ImGui::TextDisabled("No render features are currently registered.");
-        return;
-    }
-
-    for (std::size_t i = 0; i < entries.size(); ++i) {
-        const RenderFeatureDebugEntry& entry = entries[i];
-        // task_manager/editor-core-separation-10 campaign, PHASE2 - was a
-        // bare ImGui::PushID(entry.name.c_str())/PopID() pair with the same
-        // LATENT "two entries could share a name" shape as the reported
-        // bug, even though no real collision has ever been observed here.
-        ScopedUniqueId idScope(static_cast<int>(i), "RenderGraphPanel::BuildRenderFeaturesSection", entry.name.c_str());
-
-        bool enabled = entry.enabled;
-        if (ImGui::Checkbox("##FeatureEnabled", &enabled) && renderFeatureCompositor != nullptr) {
-            renderFeatureCompositor->SetFeatureEnabled(entry.name, enabled);
-        }
-        ImGui::SameLine();
-
-        int priority = entry.priority;
-        ImGui::SetNextItemWidth(80.0f);
-        if (ImGui::InputInt("##FeaturePriority", &priority) && renderFeatureCompositor != nullptr) {
-            renderFeatureCompositor->SetFeaturePriority(entry.name, priority);
-        }
-        ImGui::SameLine();
-
-        ImGui::Text("[%s] %s - blend %s%s", entry.stage.c_str(), entry.name.c_str(), entry.blendMode.c_str(),
-            entry.enabled ? "" : " (DISABLED)");
-
-        // better-render-pass-2 campaign, PHASE4 (PHASE4_DELETE_PLUGINS_FOLDER_AND_CMAKE.md) -
-        // the "[v3]" tag block (if (entry.isV3) { ... }) removed outright,
-        // alongside RenderFeatureDebugEntry::isV3 itself.
-        // editor-core-separation-23 campaign, PHASE2 - see
-        // RenderFeatureDebugEntry.h's own doc comment (isProjectFeature) for
-        // the full "why".
-        if (entry.isProjectFeature) {
-            ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.6f, 1.0f, 0.5f, 1.0f), "[Project]");
-        }
-        // No manual ImGui::PopID() anymore - ScopedUniqueId's destructor
-        // handles it when idScope goes out of scope at the end of this
-        // loop body.
-    }
+    static constexpr ImU32 kPalette[] = {
+        IM_COL32(70, 130, 180, 255), IM_COL32(180, 90, 70, 255), IM_COL32(90, 170, 90, 255),
+        IM_COL32(170, 140, 60, 255), IM_COL32(140, 90, 170, 255), IM_COL32(60, 160, 160, 255),
+    };
+    return kPalette[index % (sizeof(kPalette) / sizeof(kPalette[0]))];
 }
 
-// Lists every toggle-registered built-in pass, enabled or disabled - a
-// feature-owned pass that is enabled but not shown anywhere else (e.g. one
-// registered only through RegisterProjectRenderPassProvider(), outside the
-// "Render Features" list) must still be discoverable here.
-//
-// Uses ScopedUniqueId (see ImGuiUniqueId.h) exactly like BuildPassRow()
-// above - task_manager/editor-core-separation-10 campaign, PHASE2.
+// Lists every toggle-registered built-in pass, enabled or disabled - a pass
+// currently absent from this frame's snapshot (disabled, or never declared
+// yet this session) still needs to be re-enablable here.
 void BuildAllBuiltInPassesSection(rg::RenderPassToggleRegistry& renderPassToggleRegistry)
 {
     const std::vector<rg::RenderPassToggleState> allStates = renderPassToggleRegistry.ListAll();
@@ -503,118 +73,472 @@ void BuildAllBuiltInPassesSection(rg::RenderPassToggleRegistry& renderPassToggle
     }
 }
 
+// One line per GPU-driven-eligible batch: "<batch>: N / M instances
+// visible" - N is the GPU-computed, culling-survived count, M is the
+// CPU-known real instance count. "pending" (never a fabricated 0) for a
+// frame visibleCount hasn't been read back yet at all.
+void BuildGpuDrivenBatchesSection(const std::vector<GpuDrivenBatchDebugInfo>& batches)
+{
+    ImGui::SeparatorText("GPU-Driven Batches (instances culled this frame)");
+    if (batches.empty()) {
+        ImGui::TextDisabled("No GPU-driven-eligible batch is live this frame (Game View only).");
+        return;
+    }
+
+    for (const GpuDrivenBatchDebugInfo& batch : batches) {
+        const std::string name = batch.batchName.empty() ? "(unnamed)" : batch.batchName;
+        if (batch.visibleCount.has_value()) {
+            const std::uint32_t culled =
+                (batch.instanceCount > *batch.visibleCount) ? (batch.instanceCount - *batch.visibleCount) : 0u;
+            ImGui::Text("%s: %u / %u instances visible (%u culled)", name.c_str(), *batch.visibleCount,
+                batch.instanceCount, culled);
+        } else {
+            ImGui::Text("%s: pending / %u instances (GPU readback not yet available)", name.c_str(),
+                batch.instanceCount);
+        }
+    }
+}
+
+// One row per registered render-feature entry - an "Enabled" checkbox and
+// an editable priority field, both live-mutating `renderFeatureCompositor`
+// directly. `renderFeatureCompositor == nullptr` (a degraded build) means
+// the widgets still render but any edit is silently a no-op.
+void BuildRenderFeaturesSection(
+    const std::vector<RenderFeatureDebugEntry>& entries, RenderFeatureCompositor* renderFeatureCompositor)
+{
+    ImGui::SeparatorText("Render Features");
+    if (entries.empty()) {
+        ImGui::TextDisabled("No render features are currently registered.");
+        return;
+    }
+
+    for (std::size_t i = 0; i < entries.size(); ++i) {
+        const RenderFeatureDebugEntry& entry = entries[i];
+        ScopedUniqueId idScope(static_cast<int>(i), "RenderGraphPanel::BuildRenderFeaturesSection", entry.name.c_str());
+
+        bool enabled = entry.enabled;
+        if (ImGui::Checkbox("##FeatureEnabled", &enabled) && renderFeatureCompositor != nullptr) {
+            renderFeatureCompositor->SetFeatureEnabled(entry.name, enabled);
+        }
+        ImGui::SameLine();
+
+        int priority = entry.priority;
+        ImGui::SetNextItemWidth(80.0f);
+        if (ImGui::InputInt("##FeaturePriority", &priority) && renderFeatureCompositor != nullptr) {
+            renderFeatureCompositor->SetFeaturePriority(entry.name, priority);
+        }
+        ImGui::SameLine();
+
+        ImGui::Text("[%s] %s - blend %s%s", entry.stage.c_str(), entry.name.c_str(), entry.blendMode.c_str(),
+            entry.enabled ? "" : " (DISABLED)");
+
+        if (entry.isProjectFeature) {
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.6f, 1.0f, 0.5f, 1.0f), "[Project]");
+        }
+    }
+}
+
 } // namespace
 
-void RenderGraphPanel::Build(EditorContext& ctx, const rg::RenderGraph& renderGraph,
+void RenderGraphPanel::Build(EditorContext& ctx, Renderer& renderer, const rg::RenderGraph& renderGraph,
     const std::vector<GpuDrivenBatchDebugInfo>& gpuDrivenBatchDebugInfo,
     const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries,
-    rg::RenderPassToggleRegistry& renderPassToggleRegistry, RenderFeatureCompositor* renderFeatureCompositor)
+    rg::RenderPassToggleRegistry& renderPassToggleRegistry,
+    RenderFeatureCompositor* renderFeatureCompositor)
 {
-    ImGui::Begin("Render Graph");
+    ImGui::SetNextWindowSize(ImVec2(1100.0f, 700.0f), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Render Graph")) {
+        ImGui::End();
+        return;
+    }
 
-    const bool wasPaused = m_paused;
-    ImGui::Checkbox("Pause", &m_paused);
-    ImGui::SameLine();
-    ImGui::TextDisabled("(freezes only this panel's own display - the graph keeps running underneath)");
-
-    // See RenderGraphPanel.h's own doc comment for why direction 2 (staying
-    // paused) and direction 3 (un-pausing) both need no code here at all -
-    // every section below simply reads m_paused's current value each frame,
-    // exactly like ProfilerPanel::Build() already does for its own Pause.
-    //
-    // editor-core-separation-7 campaign, PHASE3
-    // (PHASE3_EDITOR_PANEL_DATA_DRIVEN_MIGRATION_AND_EXPORT_DOT.md) - this
-    // panel now builds ONE rg::RenderGraphMetadata per frame (or reuses the
-    // frozen one) instead of reaching into RenderGraphSnapshot/
-    // GpuDrivenBatchDebugInfo/RenderFeatureDebugEntry directly.
-    // BuildRenderGraphMetadata() is called AT MOST once per Build() call:
-    // either into m_frozenMetadata on the pause-transition frame, or into
-    // liveMetadata for immediate display - never both.
-    if (m_paused && !wasPaused) {
+    if (!m_paused) {
         m_frozenMetadata = rg::BuildRenderGraphMetadata(
             renderGraph.LastSnapshot(rg::ExecuteTimingMode::SynchronousImmediateReadback),
-            renderGraph.LastSnapshot(rg::ExecuteTimingMode::PipelinedDeferredReadback), gpuDrivenBatchDebugInfo,
-            renderFeatureEntries);
+            renderGraph.LastSnapshot(rg::ExecuteTimingMode::PipelinedDeferredReadback),
+            gpuDrivenBatchDebugInfo, renderFeatureEntries);
     }
 
-    rg::RenderGraphMetadata liveMetadata;
-    if (!m_paused) {
-        liveMetadata = rg::BuildRenderGraphMetadata(
-            renderGraph.LastSnapshot(rg::ExecuteTimingMode::SynchronousImmediateReadback),
-            renderGraph.LastSnapshot(rg::ExecuteTimingMode::PipelinedDeferredReadback), gpuDrivenBatchDebugInfo,
-            renderFeatureEntries);
+    // Resolves any tab click BEFORE regime/grouped/layout are computed below
+    // - otherwise the switch would only visibly take effect next frame.
+    BuildRegimeTabs();
+
+    const rg::RenderGraphRegimeMetadata& regime = (m_regimeChoice == RegimeChoice::Offscreen)
+        ? m_frozenMetadata.offscreenRegime
+        : m_frozenMetadata.presentRegime;
+    const std::vector<rg::RenderGraphGroupedPassMetadata> grouped = rg::GroupPassMetadataByName(regime.passes);
+    const GraphLayout layout = ComputeGraphLayout(regime);
+
+    // Snapshotted BEFORE any checkbox-drawing section below runs this frame,
+    // compared again AFTER the whole body - so a toggle flip anywhere (Pass
+    // Tree, "All Built-In Passes", or the Inspector's Render Features tab)
+    // is never missed.
+    const std::vector<rg::RenderPassToggleState> toggleStatesBefore = renderPassToggleRegistry.ListAll();
+
+    BuildToolbar(regime);
+    ImGui::Separator();
+
+    const float bodyHeight = ImGui::GetContentRegionAvail().y - m_timelineHeight;
+    ImGui::BeginChild("RenderGraphBody", ImVec2(0.0f, bodyHeight), false);
+
+    ImGui::BeginChild("PassTree", ImVec2(m_leftPaneWidth, 0.0f), true);
+    BuildPassTree(grouped, renderPassToggleRegistry);
+    ImGui::EndChild();
+
+    ImGui::SameLine();
+    ImGui::InvisibleButton("##PassTreeSplitter", ImVec2(6.0f, bodyHeight));
+    if (ImGui::IsItemActive()) {
+        m_leftPaneWidth += ImGui::GetIO().MouseDelta.x;
     }
-    const rg::RenderGraphMetadata& metadata = m_paused ? m_frozenMetadata : liveMetadata;
+    ImGui::SameLine();
 
-    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-    // PHASE6 - placed FIRST (right after the Pause row), before the two
-    // regime sections below - the "instances culled this frame" readout is
-    // this panel's own newest, most immediately actionable live signal, and
-    // this placement keeps it visible without scrolling past both regimes'
-    // own (often much longer) pass/resource tables.
-    BuildGpuDrivenBatchesSection(metadata.gpuDrivenBatches);
-    ImGui::Spacing();
+    ImGui::BeginChild("GraphCanvas", ImVec2(-m_rightPaneWidth, 0.0f), true, ImGuiWindowFlags_HorizontalScrollbar);
+    BuildGraphCanvas(layout, regime);
+    ImGui::EndChild();
 
-    // editor-core-separation-6 campaign, PHASE7
-    // (PHASE7_RENDER_GRAPH_PANEL_VISIBILITY.md) - placed right after the
-    // GPU-Driven Batches section (same "live, actionable ordering signal,
-    // shown early, before the two much-longer regime pass/resource tables"
-    // placement logic that section's own comment already documents).
-    BuildRenderFeaturesSection(metadata.renderFeatures, renderFeatureCompositor);
-    ImGui::Spacing();
+    ImGui::SameLine();
+    ImGui::InvisibleButton("##InspectorSplitter", ImVec2(6.0f, bodyHeight));
+    if (ImGui::IsItemActive()) {
+        m_rightPaneWidth -= ImGui::GetIO().MouseDelta.x;
+    }
+    ImGui::SameLine();
 
-    // editor-core-separation-21 campaign, PHASE2
-    // (PHASE2_FIX_AERIAL_PERSPECTIVE_COMPOSITE_TOGGLE_LIE.md) - snapshotted
-    // BEFORE any of this panel's own checkbox-drawing sections below run this
-    // frame, so the comparison right after BOTH BuildRegimeSection() calls
-    // (the last section whose own BuildPassRow() can call
-    // renderPassToggleRegistry.SetEnabled()) can tell "did a checkbox click
-    // somewhere in this whole block actually flip anything". See
-    // EditorContext::renderPassToggleRegistryChangedThisFrame's own doc
-    // comment for the full contract this feeds.
-    const std::vector<rg::RenderPassToggleState> toggleStatesBeforeThisPanelsOwnUi = renderPassToggleRegistry.ListAll();
-    // Placed immediately after Render Features and BEFORE the two regime
-    // sections, so every built-in pass (on or off) is visible before
-    // scrolling past the (often much longer) live pass/resource tables.
-    BuildAllBuiltInPassesSection(renderPassToggleRegistry);
-    ImGui::Spacing();
+    ImGui::BeginChild("Inspector", ImVec2(0.0f, 0.0f), true);
+    BuildInspector(regime, renderPassToggleRegistry, renderer, renderGraph,
+        m_frozenMetadata.gpuDrivenBatches, m_frozenMetadata.renderFeatures, renderFeatureCompositor);
+    ImGui::EndChild();
 
-    BuildRegimeSection(
-        "Offscreen Regime (Game View + Scene View)", "Offscreen", metadata.offscreenRegime, renderPassToggleRegistry);
-    ImGui::Spacing();
-    BuildRegimeSection("Pipelined Regime (Present)", "Present", metadata.presentRegime, renderPassToggleRegistry);
+    ImGui::EndChild(); // RenderGraphBody
 
-    // editor-core-separation-21 campaign, PHASE2 - the "after" half of the
-    // comparison started above: if any checkbox this panel drew anywhere in
-    // this whole block actually changed the registry, tell the Frame
-    // Debugger (via the shared EditorContext flag) to request a fresh
-    // capture on the very next frame it runs, instead of silently leaving a
-    // stale, now-contradicting event tree on screen (PHASE1_COMPLETION_REPORT.md's
-    // confirmed root cause).
-    if (rg::DidRenderPassToggleEnabledStatesChange(toggleStatesBeforeThisPanelsOwnUi, renderPassToggleRegistry.ListAll())) {
+    if (rg::DidRenderPassToggleEnabledStatesChange(toggleStatesBefore, renderPassToggleRegistry.ListAll())) {
         ctx.renderPassToggleRegistryChangedThisFrame = true;
     }
 
-    // editor-core-separation-7 campaign, PHASE3 - the real "Export DOT"
-    // implementation, finally wired up (disabled since the original Render
-    // Graph campaign's own Phase 8 - see the old tooltip text this replaces).
-    // BuildRenderGraphDot()/ExportRenderGraphDotToFile() both consume this
-    // SAME `metadata` object (src/Editor/RenderGraphDotExport.h/.cpp - see
-    // PHASE0_MASTER_STRATEGY.md's Locked Design Decision #14 for why this
-    // lives under src/Editor/, not src/Renderer/RenderGraph/).
-    ImGui::Spacing();
-    ImGui::SeparatorText("Export");
+    ImGui::Separator();
+    ImGui::BeginChild("Timeline", ImVec2(0.0f, m_timelineHeight), true);
+    BuildTimeline(regime);
+    ImGui::EndChild();
+
+    ImGui::End();
+}
+
+void RenderGraphPanel::BuildRegimeTabs()
+{
+    if (!ImGui::BeginTabBar("##RegimeTabs")) {
+        return;
+    }
+    if (ImGui::BeginTabItem("Offscreen (Game/Scene View)")) {
+        m_regimeChoice = RegimeChoice::Offscreen;
+        ImGui::EndTabItem();
+    }
+    if (ImGui::BeginTabItem("Present")) {
+        m_regimeChoice = RegimeChoice::Present;
+        ImGui::EndTabItem();
+    }
+    ImGui::EndTabBar();
+}
+
+void RenderGraphPanel::BuildToolbar(const rg::RenderGraphRegimeMetadata& regime)
+{
+    ImGui::Checkbox("Pause", &m_paused);
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(200.0f);
+    ImGui::InputTextWithHint("##Search", "Filter by pass name", m_searchFilter, sizeof(m_searchFilter));
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(120.0f);
+    ImGui::SliderFloat("Zoom", &m_zoom, 0.5f, 2.0f, "%.1fx");
+    ImGui::SameLine();
+
+    double totalGpuMs = 0.0;
+    for (const rg::RenderGraphPassMetadata& pass : regime.passes) {
+        if (pass.gpuTimingMilliseconds.has_value()) {
+            totalGpuMs += *pass.gpuTimingMilliseconds;
+        }
+    }
+    ImGui::Text("Total GPU: %.2f ms", totalGpuMs);
+
+    ImGui::SameLine();
     if (ImGui::Button("Export DOT")) {
-        const std::string path = ExportRenderGraphDotToFile(metadata);
+        const std::string path = ExportRenderGraphDotToFile(m_frozenMetadata);
         if (!path.empty()) {
             GTE_LOG_INFO("RenderGraphPanel", "Exported Render Graph DOT file to: " + path);
         } else {
-            GTE_LOG_WARNING("RenderGraphPanel", "Failed to export Render Graph DOT file - could not open "
-                                                 "render_graph_export.dot for writing.");
+            GTE_LOG_WARNING("RenderGraphPanel", "Failed to export Render Graph DOT file.");
         }
     }
 
-    ImGui::End();
+    if (regime.timingSlotBudgetExhausted) {
+        ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.1f, 1.0f),
+            "Warning: GPU timing slot budget exhausted - some pass timings are stale.");
+    }
+}
+
+void RenderGraphPanel::BuildPassTree(
+    const std::vector<rg::RenderGraphGroupedPassMetadata>& grouped, rg::RenderPassToggleRegistry& toggles)
+{
+    std::unordered_map<std::string, std::vector<const rg::RenderGraphGroupedPassMetadata*>> byCategory;
+    for (const rg::RenderGraphGroupedPassMetadata& row : grouped) {
+        if (m_searchFilter[0] != '\0' && row.name.find(m_searchFilter) == std::string::npos) {
+            continue;
+        }
+        const std::string category = row.instances.empty() ? "Unknown" : row.instances.front().category;
+        byCategory[category].push_back(&row);
+    }
+
+    for (const auto& [category, rows] : byCategory) {
+        if (!ImGui::CollapsingHeader(category.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
+            continue;
+        }
+        for (const rg::RenderGraphGroupedPassMetadata* row : rows) {
+            ImGui::PushID(row->name.c_str());
+
+            bool enabled = toggles.IsEnabled(row->name);
+            if (ImGui::Checkbox("##Enabled", &enabled)) {
+                toggles.SetEnabled(row->name, enabled);
+            }
+            ImGui::SameLine();
+
+            const bool isSelected = m_selectedPassName.has_value() && *m_selectedPassName == row->name;
+            if (ImGui::Selectable(row->name.c_str(), isSelected)) {
+                m_selectedPassName = row->name;
+            }
+
+            ImGui::PopID();
+        }
+    }
+
+    // The one path that still shows a pass after it has disabled itself out
+    // of `grouped` above.
+    BuildAllBuiltInPassesSection(toggles);
+}
+
+void RenderGraphPanel::BuildGraphCanvas(const GraphLayout& layout, const rg::RenderGraphRegimeMetadata& regime)
+{
+    constexpr float kColumnWidth = 220.0f;
+    constexpr float kRowHeight = 90.0f;
+    constexpr float kNodeWidth = 180.0f;
+    constexpr float kNodeHeight = 56.0f;
+
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+
+    std::unordered_map<std::string, ImVec2> centerByPass;
+    std::uint32_t maxColumn = 0;
+    std::uint32_t maxRow = 0;
+
+    for (const GraphNodeLayout& node : layout.nodes) {
+        maxColumn = std::max(maxColumn, node.column);
+        maxRow = std::max(maxRow, node.row);
+
+        const ImVec2 topLeft(
+            origin.x + static_cast<float>(node.column) * kColumnWidth * m_zoom,
+            origin.y + static_cast<float>(node.row) * kRowHeight * m_zoom);
+        const ImVec2 size(kNodeWidth * m_zoom, kNodeHeight * m_zoom);
+        const ImVec2 bottomRight(topLeft.x + size.x, topLeft.y + size.y);
+        centerByPass[node.passName] = ImVec2((topLeft.x + bottomRight.x) * 0.5f, (topLeft.y + bottomRight.y) * 0.5f);
+
+        const rg::RenderGraphPassMetadata* pass = FindPassByName(regime, node.passName);
+        const bool culled = pass != nullptr && pass->isCulled;
+        const bool selected = m_selectedPassName.has_value() && *m_selectedPassName == node.passName;
+
+        const ImU32 fillColor = culled ? IM_COL32(60, 60, 60, 160) : IM_COL32(70, 110, 160, 220);
+        const ImU32 borderColor = selected ? IM_COL32(255, 200, 0, 255) : IM_COL32(20, 20, 20, 255);
+
+        drawList->AddRectFilled(topLeft, bottomRight, fillColor, 4.0f);
+        drawList->AddRect(topLeft, bottomRight, borderColor, 4.0f, 0, selected ? 2.5f : 1.0f);
+        drawList->AddText(ImVec2(topLeft.x + 6.0f, topLeft.y + 6.0f), IM_COL32_WHITE, node.passName.c_str());
+
+        ImGui::SetCursorScreenPos(topLeft);
+        ImGui::PushID(node.passName.c_str());
+        ImGui::InvisibleButton("##Node", size);
+        if (ImGui::IsItemClicked()) {
+            m_selectedPassName = node.passName;
+        }
+        ImGui::PopID();
+    }
+
+    for (const GraphEdgeLayout& edge : layout.edges) {
+        const auto fromIt = centerByPass.find(edge.fromPass);
+        const auto toIt = centerByPass.find(edge.toPass);
+        if (fromIt == centerByPass.end() || toIt == centerByPass.end()) {
+            continue; // Endpoint culled out of this layout - nothing to draw.
+        }
+        const ImVec2 p1 = fromIt->second;
+        const ImVec2 p4 = toIt->second;
+        const ImVec2 p2(p1.x + (p4.x - p1.x) * 0.5f, p1.y);
+        const ImVec2 p3(p1.x + (p4.x - p1.x) * 0.5f, p4.y);
+        drawList->AddBezierCubic(p1, p2, p3, p4, IM_COL32(200, 200, 200, 160), 1.5f);
+    }
+
+    const float canvasWidth = layout.nodes.empty() ? 0.0f : static_cast<float>(maxColumn + 1) * kColumnWidth * m_zoom;
+    const float canvasHeight = layout.nodes.empty() ? 0.0f : static_cast<float>(maxRow + 1) * kRowHeight * m_zoom;
+    ImGui::Dummy(ImVec2(canvasWidth, canvasHeight)); // Reserves scroll extent for ImGuiWindowFlags_HorizontalScrollbar.
+}
+
+void RenderGraphPanel::BuildInspector(const rg::RenderGraphRegimeMetadata& regime,
+    rg::RenderPassToggleRegistry& toggles, Renderer& renderer, const rg::RenderGraph& renderGraph,
+    const std::vector<GpuDrivenBatchDebugInfo>& gpuDrivenBatchDebugInfo,
+    const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries,
+    RenderFeatureCompositor* renderFeatureCompositor)
+{
+    if (!ImGui::BeginTabBar("##InspectorTabs")) {
+        return;
+    }
+
+    if (ImGui::BeginTabItem("Pass")) {
+        BuildSelectedPassTab(regime, toggles, renderer, renderGraph);
+        ImGui::EndTabItem();
+    }
+    if (ImGui::BeginTabItem("Features && Batches")) {
+        BuildGpuDrivenBatchesSection(gpuDrivenBatchDebugInfo);
+        ImGui::Spacing();
+        BuildRenderFeaturesSection(renderFeatureEntries, renderFeatureCompositor);
+        ImGui::EndTabItem();
+    }
+
+    ImGui::EndTabBar();
+}
+
+void RenderGraphPanel::BuildSelectedPassTab(const rg::RenderGraphRegimeMetadata& regime,
+    rg::RenderPassToggleRegistry& toggles, Renderer& renderer, const rg::RenderGraph& renderGraph)
+{
+    if (!m_selectedPassName.has_value()) {
+        ImGui::TextDisabled("Select a pass to inspect it.");
+        return;
+    }
+
+    const rg::RenderGraphPassMetadata* pass = FindPassByName(regime, *m_selectedPassName);
+    if (pass == nullptr) {
+        ImGui::TextDisabled("Pass not present in the current snapshot.");
+        return;
+    }
+
+    ImGui::TextUnformatted(pass->name.c_str());
+    ImGui::Separator();
+    ImGui::Text("Kind: %s", pass->kind.c_str());
+    ImGui::Text("Category: %s", pass->category.c_str());
+    ImGui::Text("Draw kind: %s", pass->drawKind.c_str());
+    ImGui::Text("View scope: %s", pass->viewScope.c_str());
+    ImGui::Text("Culled: %s", pass->isCulled ? "yes" : "no");
+    ImGui::Text("Draw calls: %u", pass->drawCallCount);
+    ImGui::Text("Triangles: %u", pass->triangleCount);
+    ImGui::Text("GPU time: %s", pass->gpuTimingText.c_str());
+
+    if (!pass->isCulled && ImGui::Button("Disable This Pass")) {
+        toggles.SetEnabled(pass->name, false);
+    }
+
+    ImGui::Separator();
+    ImGui::TextUnformatted("Writes");
+    for (const rg::RenderGraphResourceRefMetadata& write : pass->writes) {
+        ImGui::BulletText("%s (%s)", write.name.c_str(), write.kind.c_str());
+        if (write.kind == "Texture") {
+            ImGui::SameLine();
+            ImGui::PushID(write.name.c_str());
+            if (ImGui::SmallButton("View")) {
+                RequestTexturePreview(write.name, renderer, renderGraph);
+            }
+            ImGui::PopID();
+        }
+    }
+
+    ImGui::TextUnformatted("Reads");
+    for (const rg::RenderGraphResourceRefMetadata& read : pass->reads) {
+        ImGui::BulletText("%s (%s)", read.name.c_str(), read.kind.c_str());
+    }
+
+    if (m_texturePreview.Descriptor() != VK_NULL_HANDLE) {
+        ImGui::Separator();
+        ImGui::Text("Preview: %s (%dx%d)", m_texturePreview.ResourceName().c_str(),
+            m_texturePreview.Width(), m_texturePreview.Height());
+        ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(m_texturePreview.Descriptor())),
+            ImVec2(256.0f, 256.0f));
+    }
+}
+
+// This engine's RenderGraphResourcePool only reuses a pool entry across
+// FRAMES when a new request matches an identical TextureDesc/BufferDesc -
+// it does NOT alias two differently-shaped resources within one frame.
+// Label it honestly; never draw this as cross-pass aliasing.
+void RenderGraphPanel::BuildTimeline(const rg::RenderGraphRegimeMetadata& regime)
+{
+    double totalGpuMs = 0.0;
+    for (const rg::RenderGraphPassMetadata& pass : regime.passes) {
+        if (pass.gpuTimingMilliseconds.has_value()) {
+            totalGpuMs += *pass.gpuTimingMilliseconds;
+        }
+    }
+    if (totalGpuMs <= 0.0) {
+        ImGui::TextDisabled("No GPU timing data for this regime yet.");
+        return;
+    }
+
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    const ImVec2 cursor = ImGui::GetCursorScreenPos();
+    const float barWidth = ImGui::GetContentRegionAvail().x;
+    constexpr float kBarHeight = 28.0f;
+
+    float x = cursor.x;
+    std::uint32_t segmentIndex = 0;
+    for (const rg::RenderGraphPassMetadata& pass : regime.passes) {
+        if (!pass.gpuTimingMilliseconds.has_value()) {
+            continue;
+        }
+        const float segmentWidth = static_cast<float>(*pass.gpuTimingMilliseconds / totalGpuMs) * barWidth;
+        const ImU32 color = PickTimelineSegmentColor(segmentIndex++);
+        const ImVec2 segMin(x, cursor.y);
+        const ImVec2 segMax(x + segmentWidth, cursor.y + kBarHeight);
+
+        drawList->AddRectFilled(segMin, segMax, color);
+        if (segmentWidth > 40.0f) {
+            drawList->AddText(ImVec2(segMin.x + 4.0f, segMin.y + 6.0f), IM_COL32_BLACK, pass.name.c_str());
+        }
+        if (ImGui::IsMouseHoveringRect(segMin, segMax)) {
+            ImGui::SetTooltip("%s: %.3f ms", pass.name.c_str(), *pass.gpuTimingMilliseconds);
+        }
+        x += segmentWidth;
+    }
+    ImGui::Dummy(ImVec2(barWidth, kBarHeight));
+}
+
+// General-purpose "preview ANY pass's output, regardless of its current
+// Vulkan layout" path: a one-shot CPU capture + re-upload. Only resources
+// the engine explicitly finalizes for external sampling carry a guaranteed
+// VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL - directly wrapping an arbitrary
+// pass's own live imageView would be a validation-layer violation waiting
+// to happen. The single vkDeviceWaitIdle() per click is a reasonable price
+// for a rare, human-driven debug action, never a hot path.
+void RenderGraphPanel::RequestTexturePreview(
+    const std::string& resourceName, Renderer& renderer, const rg::RenderGraph& renderGraph)
+{
+    const std::optional<rg::DebugTextureSnapshot> snapshot = renderGraph.DebugTextureSnapshotFor(resourceName);
+    if (!snapshot.has_value()) {
+        m_texturePreview.Release(); // Safe: gated internally on "is there anything to wait for".
+        return;
+    }
+
+    renderer.WaitForGpuIdle(); // One-shot, user-driven - not a per-frame cost.
+    const Renderer::CapturedRawPixels raw = renderer.CaptureImagePixels(
+        snapshot->target.image, VK_IMAGE_ASPECT_COLOR_BIT, snapshot->target.format,
+        snapshot->target.extent, snapshot->colorState);
+    if (raw.pixels.empty()) {
+        m_texturePreview.Release();
+        return;
+    }
+
+    const std::vector<std::uint8_t> rgba8 = Encoding::ConvertCapturedPixelsToRgba8(raw);
+    if (rgba8.empty()) {
+        m_texturePreview.Release(); // Unrecognized format.
+        return;
+    }
+
+    try {
+        m_texturePreview.Request(renderer.GetVulkanContextInfo().device, resourceName,
+            renderer.CreateTexture2D(rgba8.data(), raw.width, raw.height, "RenderGraphPreview"));
+    } catch (const std::exception&) {
+        m_texturePreview.Release(); // vmaCreateImage/vkCreateImageView failure - rare, not fatal.
+    }
 }
 
 } // namespace gte

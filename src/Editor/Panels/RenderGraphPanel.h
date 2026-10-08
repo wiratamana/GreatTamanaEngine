@@ -1,107 +1,73 @@
 #pragma once
 
 #include "../../Core/Plugins/RenderFeatureDebugEntry.h"
+#include "../../Renderer/Culling/GpuDrivenBatchDebugInfo.h"
 #include "../../Renderer/RenderGraph/RenderGraphMetadata.h"
-// editor-core-separation-8 campaign, PHASE3 - a small, plain, dependency-free
-// gte_core header (a sibling of RenderGraphMetadata.h/RenderPipeline.h) -
-// direct #include is fine here, mirroring RenderGraphMetadata.h's own
-// precedent immediately above exactly.
 #include "../../Renderer/RenderGraph/RenderPassToggleRegistry.h"
+#include "../RenderGraphLayout.h"
+#include "../RenderGraphTexturePreview.h"
 #include "../EditorLayer.h"
 
+#include <cstdint>
+#include <optional>
+#include <string>
 #include <vector>
 
 namespace gte {
 
 struct EditorContext;
-
-// editor-core-separation-8 campaign, PHASE2/PHASE3 - forward-declared only,
-// mirrors EditorLayer.h's own forward-declare-only precedent exactly (the
-// REAL header, src/Core/Plugins/RenderFeatureCompositor.h, is heavy and is
-// only #included by RenderGraphPanel.cpp, once it actually calls a method on
-// this pointer - PHASE4).
+class Renderer;
 class RenderFeatureCompositor;
 
 namespace rg {
 class RenderGraph;
 } // namespace rg
 
-// Phase 8 (RENDERGRAPH_PHASE8_EDITOR_DEBUG_TOOLING_STRATEGY_v1.md, part 8 of
-// the wider RENDERGRAPH_PHASE0_MASTER_STRATEGY_v2.md campaign) - a Unity-
-// Memory-Profiler/"Profiler"-window-style **"Render Graph"** panel, docked
-// alongside "Memory"/"Profiler" along the bottom (see DockLayout.cpp): a
-// live, honest view of exactly what gte::rg::RenderGraph::Execute() decided
-// the last time each of this engine's two real submission regimes ran (see
-// RenderGraph.h's own ExecuteTimingMode) - which passes ran (in real
-// execution order), which were culled (and why), each surviving pass's
-// declared reads/writes plus its draw-call/triangle/GPU-timing stats, and
-// every declared resource's computed lifetime (see
-// src/Renderer/RenderGraph/RenderGraphSnapshot.h for the underlying data
-// model this panel is a thin ImGui-table wrapper around).
+// Node-canvas view of one RenderGraph::Execute() call: pass tree (left),
+// graph canvas (center), inspector (right), GPU timeline (bottom). Both the
+// Offscreen (Game/Scene View) and Present regimes stay reachable via a
+// toolbar tab - this panel never hides either one.
 //
-// A small STATEFUL CLASS, not a stateless free function like every other
-// panel under src/Editor/Panels/ - mirrors Panels/ProfilerPanel.h's own
-// precedent exactly (AGENTS.md, "Editor Module Structure" pre-approves this
-// exception for a panel with real persistent state of its own): this
-// panel's "Pause" control needs to freeze a snapshot across frames, the
-// same real, already-established reason ProfilerPanel/BoneViewerWindow are
-// also small stateful classes. Still called explicitly BY NAME from
-// ImGuiEditorLayer::BuildUI() - no IEditorPanel interface introduced.
-//
-// Deliberately has NO "Capture" control (unlike "Profiler", which has both
-// Capture and Pause) - building a RenderGraphSnapshot costs nothing beyond
-// copying already-computed small strings/vectors once per Execute() call
-// (no new Vulkan call, no new GPU cost at all - it's pure CPU-side
-// reflection of work the graph was doing anyway), so there is no
-// meaningful "disable snapshot capture" runtime toggle to offer.
+// A floating window, not docked into the bottom strip with Memory/Profiler/
+// Jobs/Log - a node canvas needs real screen space (see DockLayout.cpp).
 class RenderGraphPanel {
 public:
-    // `renderGraph` is the SAME gte::rg::RenderGraph Application owns and
-    // drives every frame (see Application::m_renderGraph) - this panel only
-    // ever reads its two LastSnapshot() results, never mutates it.
-    // `gpuDrivenBatchDebugInfo` (GPU-Driven Frustum Culling + Indirect Draw
-    // campaign, render-pass-5, PHASE6) is this frame's freshly-built
-    // "instances culled this frame" readout - see
-    // IEditorLayer::BuildUI()'s own doc comment (EditorLayer.h) for the full
-    // contract. Always empty on a frame with no eligible GPU-driven batch.
-    // `renderFeatureEntries` (editor-core-separation-6 campaign, PHASE7 -
-    // PHASE7_RENDER_GRAPH_PANEL_VISIBILITY.md) is this frame's freshly-built
-    // snapshot of every loaded `_v2` render-feature plugin's own REAL,
-    // resolved ordering decision - see IEditorLayer::BuildUI()'s own doc
-    // comment (EditorLayer.h) for the full contract. Always empty when there
-    // is no compositor/no loaded `_v2` plugin this session. Placed LAST so
-    // this new argument is a pure addition to this method's own signature.
-    // `renderPassToggleRegistry`/`renderFeatureCompositor` (editor-core-
-    // separation-8 campaign, PHASE3 - see IEditorLayer::BuildUI()'s own doc
-    // comment (EditorLayer.h) for the full contract) are Core's own
-    // PHASE1/PHASE2 objects, threaded straight through unchanged - the
-    // former is NEVER null, the latter is nullable (mirrors
-    // Core::GetRenderFeatureCompositor()'s own existing nullability). PHASE3
-    // itself does not yet use either (signature-only widening); PHASE4 wires
-    // the real "Enabled" checkbox column/per-feature controls through them.
-    void Build(EditorContext& ctx, const rg::RenderGraph& renderGraph,
+    void Build(EditorContext& ctx, Renderer& renderer, const rg::RenderGraph& renderGraph,
         const std::vector<GpuDrivenBatchDebugInfo>& gpuDrivenBatchDebugInfo,
         const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries,
         rg::RenderPassToggleRegistry& renderPassToggleRegistry,
         RenderFeatureCompositor* renderFeatureCompositor);
 
 private:
-    // See ProfilerPanel::m_paused's own doc comment for the full Pause
-    // state machine (false->true captures a frozen snapshot once; staying
-    // true or un-pausing back to false both need no extra code at all,
-    // since every section below just reads m_paused's current value).
-    bool m_paused = false;
+    enum class RegimeChoice : std::uint8_t { Offscreen, Present };
 
-    // The frozen metadata captured at the moment m_paused most recently
-    // became true - editor-core-separation-7 campaign, PHASE3
-    // (PHASE3_EDITOR_PANEL_DATA_DRIVEN_MIGRATION_AND_EXPORT_DOT.md): this ONE
-    // field replaces the old three separate frozen fields
-    // (m_frozenOffscreenSnapshot/m_frozenPresentSnapshot/
-    // m_frozenGpuDrivenBatchDebugInfo) - rg::RenderGraphMetadata already folds
-    // in both regimes PLUS the GPU-driven-batch readout PLUS the plugin
-    // render-feature readout (see PHASE0_MASTER_STRATEGY.md's Locked Design
-    // Decisions #1/#2), so ONE frozen copy is enough.
+    void BuildRegimeTabs();
+    void BuildToolbar(const rg::RenderGraphRegimeMetadata& regime);
+    void BuildPassTree(const std::vector<rg::RenderGraphGroupedPassMetadata>& grouped,
+        rg::RenderPassToggleRegistry& toggles);
+    void BuildGraphCanvas(const GraphLayout& layout, const rg::RenderGraphRegimeMetadata& regime);
+    void BuildInspector(const rg::RenderGraphRegimeMetadata& regime, rg::RenderPassToggleRegistry& toggles,
+        Renderer& renderer, const rg::RenderGraph& renderGraph,
+        const std::vector<GpuDrivenBatchDebugInfo>& gpuDrivenBatchDebugInfo,
+        const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries,
+        RenderFeatureCompositor* renderFeatureCompositor);
+    void BuildSelectedPassTab(const rg::RenderGraphRegimeMetadata& regime, rg::RenderPassToggleRegistry& toggles,
+        Renderer& renderer, const rg::RenderGraph& renderGraph);
+    void BuildTimeline(const rg::RenderGraphRegimeMetadata& regime);
+    void RequestTexturePreview(const std::string& resourceName, Renderer& renderer, const rg::RenderGraph& renderGraph);
+
+    bool m_paused = false;
     rg::RenderGraphMetadata m_frozenMetadata;
+
+    RegimeChoice m_regimeChoice = RegimeChoice::Present;
+    char m_searchFilter[128] = {};
+    float m_zoom = 1.0f;
+    float m_leftPaneWidth = 260.0f;
+    float m_rightPaneWidth = 320.0f;
+    float m_timelineHeight = 120.0f;
+    std::optional<std::string> m_selectedPassName;
+
+    RenderGraphTexturePreview m_texturePreview;
 };
 
 } // namespace gte
