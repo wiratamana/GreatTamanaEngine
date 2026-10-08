@@ -5,6 +5,7 @@
 // from RenderPipeline::DeclareOnePhase(), the Render Graph panel, and
 // RenderGraphControlCommandBridge's pump, all on the main thread.
 
+#include <deque>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -50,8 +51,15 @@ public:
     // blit) and "ClearViewTarget" (the view's one guaranteed clear).
     static bool IsDenyListed(const std::string& name) noexcept;
 
+    // Max simultaneous entries with everDeclaredThisSession == false. Bounds
+    // damage from typo'd/garbage HTTP input; a real pass is never evicted -
+    // NoteDeclaredAndCheckEnabled() promotes it out of ghost tracking the
+    // moment it actually runs once.
+    static constexpr std::size_t kMaxGhostEntries = 256;
+
 private:
     std::unordered_map<std::string, RenderPassToggleState> m_entries;
+    std::deque<std::string> m_ghostInsertionOrder; // FIFO, ghost entries only.
 };
 
 } // namespace gte::rg

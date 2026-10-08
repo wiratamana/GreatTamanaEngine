@@ -1,5 +1,7 @@
 #include "RenderPassToggleRegistry.h"
 
+#include "../../Core/Logging.h"
+
 #include <algorithm>
 
 namespace gte::rg {
@@ -18,6 +20,12 @@ bool RenderPassToggleRegistry::NoteDeclaredAndCheckEnabled(const std::string& na
         it = m_entries.emplace(name, std::move(state)).first;
         return it->second.enabled;
     }
+    if (!it->second.everDeclaredThisSession) {
+        // Promote: this was a ghost (set via SetEnabled before ever
+        // running) - it just proved itself real. Drop it from ghost
+        // tracking so it can never be evicted.
+        std::erase(m_ghostInsertionOrder, name);
+    }
     it->second.everDeclaredThisSession = true;
     return it->second.enabled;
 }
@@ -28,15 +36,33 @@ bool RenderPassToggleRegistry::SetEnabled(const std::string& name, bool enabled)
         return false;
     }
     auto it = m_entries.find(name);
-    if (it == m_entries.end()) {
-        RenderPassToggleState state;
-        state.name = name;
-        state.enabled = enabled;
-        state.everDeclaredThisSession = false;
-        m_entries.emplace(name, std::move(state));
+    if (it != m_entries.end()) {
+        it->second.enabled = enabled;
         return true;
     }
-    it->second.enabled = enabled;
+
+    // Unknown name: either a legitimate pre-disable of a pass that has not
+    // run yet this session, or a typo from an HTTP client. Cannot tell them
+    // apart - accept it, but cap the damage.
+    if (m_ghostInsertionOrder.size() >= kMaxGhostEntries) {
+        const std::string oldest = m_ghostInsertionOrder.front();
+        m_ghostInsertionOrder.pop_front();
+        m_entries.erase(oldest);
+        GTE_LOG_WARNING("RenderPassToggleRegistry",
+            "Evicted ghost pass toggle '" + oldest + "' - kMaxGhostEntries ("
+            + std::to_string(kMaxGhostEntries) + ") reached.");
+    }
+
+    RenderPassToggleState state;
+    state.name = name;
+    state.enabled = enabled;
+    state.everDeclaredThisSession = false;
+    m_entries.emplace(name, std::move(state));
+    m_ghostInsertionOrder.push_back(name);
+
+    GTE_LOG_WARNING("RenderPassToggleRegistry",
+        "SetEnabled('" + name + "') created a never-declared-this-session entry - confirm this is a real pass "
+        "name, not a typo.");
     return true;
 }
 

@@ -114,5 +114,33 @@ TEST(RenderPassToggleRegistryTest, ListAllReturnsEntriesSortedByNameLexically)
     EXPECT_EQ(all[2].name, "RenderTransparent");
 }
 
+TEST(RenderPassToggleRegistryTest, GhostEntryCountIsCappedAndOldestIsEvicted)
+{
+    RenderPassToggleRegistry registry;
+    for (std::size_t i = 0; i < RenderPassToggleRegistry::kMaxGhostEntries; ++i) {
+        ASSERT_TRUE(registry.SetEnabled("Ghost" + std::to_string(i), false));
+    }
+    ASSERT_TRUE(registry.HasEntry("Ghost0"));
+
+    ASSERT_TRUE(registry.SetEnabled("OneMoreGhost", false));
+
+    EXPECT_FALSE(registry.HasEntry("Ghost0")); // Oldest evicted.
+    EXPECT_TRUE(registry.HasEntry("OneMoreGhost"));
+    EXPECT_EQ(registry.ListAll().size(), RenderPassToggleRegistry::kMaxGhostEntries);
+}
+
+TEST(RenderPassToggleRegistryTest, PassThatActuallyRunsIsNeverEvictedAsAGhost)
+{
+    RenderPassToggleRegistry registry;
+    ASSERT_TRUE(registry.SetEnabled("RealPass", true));
+    registry.NoteDeclaredAndCheckEnabled("RealPass"); // Promotes it out of ghost tracking.
+
+    for (std::size_t i = 0; i < RenderPassToggleRegistry::kMaxGhostEntries; ++i) {
+        registry.SetEnabled("Ghost" + std::to_string(i), false);
+    }
+
+    EXPECT_TRUE(registry.HasEntry("RealPass"));
+}
+
 } // namespace
 } // namespace gte::rg
