@@ -285,6 +285,11 @@ public:
         // comment, FrameDebuggerPanel.h, for the full "why") - same ordering
         // requirement as ReleasePreviewDescriptor() immediately above.
         m_frameDebuggerPanel.ReleaseShaderPropertyTexturePreview();
+        // m_renderGraphPanel is declared after m_context (same ordering
+        // problem as m_frameDebuggerPanel above) - release its texture
+        // preview descriptor explicitly before Shutdown() tears down the
+        // backend it was allocated from.
+        m_renderGraphPanel.ReleaseTexturePreview();
 #if GTE_ENABLE_PROJECT_PANEL
         // Must release its own GPU texture/ImGui descriptor(s) BEFORE
         // ImGui_ImplVulkan_Shutdown() below - member destruction order

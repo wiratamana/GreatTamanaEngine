@@ -2562,6 +2562,9 @@ if(TRUE)
         # editor-core-separation-7 campaign, PHASE3 - gte_editor-tier "Export
         # DOT" pure functions (src/Editor/RenderGraphDotExport.h/.cpp).
         Editor/RenderGraphDotExportTests.cpp
+        # ComputeGraphLayout() (src/Editor/RenderGraphLayout.h/.cpp) - pure
+        # pass/edge grid layout, hand-fabricated RenderGraphRegimeMetadata.
+        Editor/RenderGraphLayoutTests.cpp
         Network/LogEndpointsEndToEndTests.cpp
         # editor-core-separation-12 campaign, PHASE3 - Project Assembly Hot
         # Reload plan (BIG-STEP 1)'s 7 new GET/POST /project_assembly/*

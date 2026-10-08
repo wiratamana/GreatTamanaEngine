@@ -38,6 +38,12 @@ public:
         rg::RenderPassToggleRegistry& renderPassToggleRegistry,
         RenderFeatureCompositor* renderFeatureCompositor);
 
+    // Releases m_texturePreview's live ImGui/Vulkan descriptor, if any.
+    // Call explicitly BEFORE ImGui_ImplVulkan_Shutdown() - this class is
+    // declared after the ImGui context, so its own destructor alone runs
+    // too late.
+    void ReleaseTexturePreview() { m_texturePreview.Release(); }
+
 private:
     enum class RegimeChoice : std::uint8_t { Offscreen, Present };
 
