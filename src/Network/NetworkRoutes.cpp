@@ -1155,12 +1155,16 @@ ParsedRenderGraphSetFeaturePriorityQuery ParseRenderGraphSetFeaturePriorityQuery
     return result;
 }
 
-std::string BuildRenderGraphControlCommandResponseJson(bool success, const std::string& errorMessage)
+std::string BuildRenderGraphControlCommandResponseJson(
+    bool success, const std::string& errorMessage, std::optional<bool> windowOpen)
 {
     nlohmann::json body;
     body["success"] = success;
     if (!success) {
         body["error"] = errorMessage;
+    }
+    if (windowOpen.has_value()) {
+        body["window_open"] = *windowOpen;
     }
     return body.dump();
 }

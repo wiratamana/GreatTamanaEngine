@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -1052,12 +1053,17 @@ ParsedRenderGraphSetFeaturePriorityQuery ParseRenderGraphSetFeaturePriorityQuery
     const std::string& nameParam, const std::string& priorityParam);
 
 // Builds the response body shared by every /render_graph/* mutation route
-// (set_pass_enabled/set_feature_enabled/set_feature_priority):
+// (set_pass_enabled/set_feature_enabled/set_feature_priority/
+// set_display_regime):
 //   - success == true  -> {"success":true}
 //   - success == false -> {"success":false,"error":"<errorMessage>"}
-// A caller wanting fresh state makes a separate GET /render_graph/passes
-// or GET /render_graph call instead.
-std::string BuildRenderGraphControlCommandResponseJson(bool success, const std::string& errorMessage);
+// `windowOpen` is set only by set_display_regime - adds "window_open": bool,
+// false meaning the "Render Graph" panel is currently closed and nothing is
+// visibly affected by this call. Every other route leaves it nullopt and
+// omits the field entirely. A caller wanting fresh state makes a separate
+// GET /render_graph/passes or GET /render_graph call instead.
+std::string BuildRenderGraphControlCommandResponseJson(
+    bool success, const std::string& errorMessage, std::optional<bool> windowOpen = std::nullopt);
 
 // A plain, RenderGraphControlCommandBridge-independent view of one known
 // built-in pass's toggle state, for

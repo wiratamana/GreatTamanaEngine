@@ -432,5 +432,34 @@ TEST(FrameCaptureBridgeTest, PublishingEmptyListClearsPreviousEntries)
     EXPECT_TRUE(bridge.GetPublishedTextureList().empty());
 }
 
+// GET /get_window on a title that is currently docked into the main
+// viewport (no separate swapchain for EditorHost to read from) must
+// resolve to TargetNotAvailable - never a timeout, never a crash, never a
+// silently empty image. EditorHost itself fails the request this way the
+// instant it finds no ImGui_ImplVulkanH_Window for the given title; this
+// test proves the bridge's own half of that contract carries the title
+// through correctly and delivers the failure promptly.
+TEST(FrameCaptureBridgeTest, NamedWindowRequestForACurrentlyDockedTitleReturnsTargetNotAvailableQuickly)
+{
+    FrameCaptureBridge bridge;
+
+    std::thread failer([&bridge] {
+        for (int i = 0; i < 200 && !bridge.IsCaptureRequested(FrameCaptureKind::NamedWindow); ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        EXPECT_EQ(bridge.RequestedWindowTitle(), "Render Graph");
+        bridge.FailPendingRequest(FrameCaptureKind::NamedWindow, FrameCaptureFailureReason::TargetNotAvailable);
+    });
+
+    const FrameCaptureBridge::RequestResult result =
+        bridge.RequestCaptureAndWait(FrameCaptureKind::NamedWindow, 5000, "Render Graph");
+    failer.join();
+
+    EXPECT_FALSE(result.alreadyPending);
+    EXPECT_FALSE(result.image.has_value());
+    ASSERT_TRUE(result.failure.has_value());
+    EXPECT_EQ(*result.failure, FrameCaptureFailureReason::TargetNotAvailable);
+}
+
 } // namespace
 } // namespace gte

@@ -61,12 +61,15 @@ struct RenderGraphControlPassStateOutcome {
 // Outcome of one RenderGraphControlCommandRequest. `success` is false for
 // SetBuiltInPassEnabled on a deny-listed name, or SetFeatureEnabled/
 // SetFeaturePriority on an unrecognized feature name. `passStates` is
-// populated only for ListPassStates.
+// populated only for ListPassStates. `windowOpen` is populated only for
+// SetDisplayedRegime - true if the "Render Graph" window was open (and
+// therefore actually displaying the new regime) at the moment it was applied.
 struct RenderGraphControlCommandResult {
     RenderGraphControlCommandKind kind = RenderGraphControlCommandKind::ListPassStates;
     bool success = true;
     std::string errorMessage;
     std::vector<RenderGraphControlPassStateOutcome> passStates;
+    bool windowOpen = false;
 };
 
 class RenderGraphControlCommandBridge

@@ -1555,4 +1555,53 @@ TEST(BuildRenderGraphControlPassStatesResponseJsonTests, ProducesExpectedShapeFo
     EXPECT_EQ(parsed["passes"][1]["ever_declared_this_session"], false);
 }
 
+// GET /render_graph/set_display_regime request parsing - the 7th
+// /render_graph/* mutation route.
+
+using gte::Network::ParseRenderGraphSetDisplayRegimeQuery;
+using gte::Network::ParsedRenderGraphSetDisplayRegimeQuery;
+
+TEST(ParseRenderGraphSetDisplayRegimeQueryTest, AcceptsPresentAndOffscreen)
+{
+    const ParsedRenderGraphSetDisplayRegimeQuery present = ParseRenderGraphSetDisplayRegimeQuery("present");
+    ASSERT_TRUE(present.valid) << present.errorMessage;
+    EXPECT_TRUE(present.present);
+
+    const ParsedRenderGraphSetDisplayRegimeQuery offscreen = ParseRenderGraphSetDisplayRegimeQuery("offscreen");
+    ASSERT_TRUE(offscreen.valid) << offscreen.errorMessage;
+    EXPECT_FALSE(offscreen.present);
+}
+
+TEST(ParseRenderGraphSetDisplayRegimeQueryTest, RejectsAnythingOtherThanPresentOrOffscreen)
+{
+    const ParsedRenderGraphSetDisplayRegimeQuery empty = ParseRenderGraphSetDisplayRegimeQuery("");
+    EXPECT_FALSE(empty.valid);
+    EXPECT_EQ(empty.errorMessage, "missing or invalid required query parameter: regime - must be \"present\" or \"offscreen\"");
+
+    const ParsedRenderGraphSetDisplayRegimeQuery wrongCase = ParseRenderGraphSetDisplayRegimeQuery("Present");
+    EXPECT_FALSE(wrongCase.valid);
+
+    const ParsedRenderGraphSetDisplayRegimeQuery bogus = ParseRenderGraphSetDisplayRegimeQuery("bogus");
+    EXPECT_FALSE(bogus.valid);
+}
+
+TEST(BuildRenderGraphControlCommandResponseJsonTests, OmitsWindowOpenWhenNotSupplied)
+{
+    const std::string body = BuildRenderGraphControlCommandResponseJson(true, "");
+    const nlohmann::json parsed = nlohmann::json::parse(body);
+    EXPECT_EQ(parsed["success"], true);
+    EXPECT_FALSE(parsed.contains("window_open"));
+}
+
+TEST(BuildRenderGraphControlCommandResponseJsonTests, IncludesWindowOpenWhenSupplied)
+{
+    const std::string openBody = BuildRenderGraphControlCommandResponseJson(true, "", true);
+    const nlohmann::json openParsed = nlohmann::json::parse(openBody);
+    EXPECT_EQ(openParsed["window_open"], true);
+
+    const std::string closedBody = BuildRenderGraphControlCommandResponseJson(true, "", false);
+    const nlohmann::json closedParsed = nlohmann::json::parse(closedBody);
+    EXPECT_EQ(closedParsed["window_open"], false);
+}
+
 } // namespace

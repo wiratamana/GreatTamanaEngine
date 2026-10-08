@@ -47,7 +47,7 @@
 // "IEditorLayer::BuildUI" scoped block).
 #include "../Renderer/RenderGraph/RenderGraphMetadata.h"
 
-// GET /get_window's own capture path - any floating or docked ImGui window,
+// GET /get_window's own capture path - floating (undocked) ImGui windows only,
 // by title. ImGuiWindow/ImGui::FindWindowByName() are internal API
 // (imgui_internal.h, not part of ImGui's stable public header) - there is
 // no supported public alternative to resolve a window by its exact title.
@@ -785,7 +785,8 @@ int EditorHost::Run()
                 break;
             }
             case RenderGraphControlCommandKind::SetDisplayedRegime: {
-                m_editorLayer->SetRenderGraphDisplayedRegime(rgcRequest->setDisplayedRegime.present);
+                rgcResult.windowOpen =
+                    m_editorLayer->SetRenderGraphDisplayedRegime(rgcRequest->setDisplayedRegime.present);
                 rgcResult.success = true;
                 break;
             }
@@ -964,8 +965,8 @@ int EditorHost::Run()
         // a release build, see NullEditorLayer::RenderPlatformWindows()).
         m_editorLayer->RenderPlatformWindows();
 
-        // GET /get_window's own capture path - any floating or docked ImGui
-        // window, by title. Must run AFTER RenderPlatformWindows() above:
+        // GET /get_window's own capture path - floating (undocked) ImGui
+        // windows only, by title. Must run AFTER RenderPlatformWindows() above:
         // that call is what actually submits+presents a floating window's
         // own separate swapchain image this frame.
         if (m_captureBridge.IsCaptureRequested(FrameCaptureKind::NamedWindow)) {

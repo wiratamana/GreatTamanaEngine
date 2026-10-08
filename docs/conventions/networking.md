@@ -702,3 +702,13 @@ registering a new named texture:
   failure modes. See
   `task_manager/editor-core-separation-8/PHASE0_MASTER_STRATEGY.md` for the
   full six-phase campaign writeup.
+
+- **`GET /render_graph/set_display_regime?regime=<present|offscreen>`** - the
+  7th `/render_graph/*` mutation route, added after the six-route contract
+  above. Flips which regime the "Render Graph" panel displays
+  (`present` -> `RenderGraphRegimeChoice::Present`, `offscreen` ->
+  `RenderGraphRegimeChoice::Offscreen`). `400` for any other `regime` value.
+  Response is `{"success":true,"window_open":<bool>}` - `window_open` is
+  `false` when the "Render Graph" panel is currently closed, so nothing is
+  visibly affected by this call even though the underlying
+  `EditorContext::renderGraphDisplayedRegime` field still changed.

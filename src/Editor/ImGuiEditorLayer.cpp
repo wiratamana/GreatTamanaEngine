@@ -838,9 +838,11 @@ public:
 
     // Mirrors the Render Graph panel's own toolbar Regime combo - an HTTP
     // command flips the same EditorContext field a human click would.
-    void SetRenderGraphDisplayedRegime(bool present) override
+    // Returns whether the "Render Graph" window was actually open to see it.
+    bool SetRenderGraphDisplayedRegime(bool present) override
     {
         m_ctx.renderGraphDisplayedRegime = present ? RenderGraphRegimeChoice::Present : RenderGraphRegimeChoice::Offscreen;
+        return m_ctx.renderGraphWindowOpen;
     }
 
     // editor-core-separation-16 campaign (On-Engine Project Workflow

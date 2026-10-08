@@ -121,7 +121,7 @@ public:
     {
     }
 
-    void SetRenderGraphDisplayedRegime(bool /*present*/) override { }
+    bool SetRenderGraphDisplayedRegime(bool /*present*/) override { return false; }
 };
 
 } // namespace

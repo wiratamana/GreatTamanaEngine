@@ -32,6 +32,7 @@
 #include <httplib.h>
 
 #include <cstdio>
+#include <optional>
 
 // API verified directly against the actually-vendored
 // third_party/httplib/httplib.h (pinned at tag v0.54.1 - see
@@ -164,10 +165,11 @@ void RegisterGetTextureRoute(httplib::Server& server, FrameCaptureBridge* captur
     });
 }
 
-// GET /get_window?name=<ImGui window title> - captures ANY floating or
-// docked ImGui window by title, closing the gap /get_swapchain (main OS
-// window only) and /get_game_view/get_texture cannot reach: a panel the
-// user dragged outside the main viewport, into its own separate OS window.
+// GET /get_window?name=<ImGui window title> - captures a floating
+// (undocked) ImGui window by title, closing the gap /get_swapchain
+// (main OS window only) cannot reach: a panel the user dragged out
+// into its own OS window. Docked windows are not reachable here - see
+// /get_swapchain.
 void RegisterGetWindowRoute(httplib::Server& server, FrameCaptureBridge* captureBridge)
 {
     server.Get("/get_window", [captureBridge](const httplib::Request& req, httplib::Response& res) {
@@ -367,7 +369,11 @@ void RespondWithRenderGraphControlCommandResult(
     }
     const RenderGraphControlCommandResult& result = *submit.result;
     res.status = result.success ? 200 : 409;
-    res.set_content(BuildRenderGraphControlCommandResponseJson(result.success, result.errorMessage), "application/json");
+    const std::optional<bool> windowOpen = (result.kind == RenderGraphControlCommandKind::SetDisplayedRegime)
+        ? std::optional<bool>(result.windowOpen)
+        : std::nullopt;
+    res.set_content(
+        BuildRenderGraphControlCommandResponseJson(result.success, result.errorMessage, windowOpen), "application/json");
 }
 
 // The one, hand-written route table for this campaign - see

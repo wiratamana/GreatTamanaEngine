@@ -47,9 +47,12 @@ enum class FrameCaptureKind {
     // texture, which channel) - see RequestedTextureName()/
     // RequestedTextureChannel() below.
     NamedTexture,
-    // GET /get_window?name=<ImGui window title> - any floating or docked
-    // ImGui window, captured by title. Own dedicated slot/storage, never
-    // shared with NamedTexture - see RequestedWindowTitle() below.
+    // GET /get_window?name=<ImGui window title> - captures a FLOATING
+    // (undocked) ImGui window by title. A window still docked into the
+    // main viewport has no separate swapchain to read from; use
+    // GET /get_swapchain for the main window instead. Own dedicated
+    // slot/storage, never shared with NamedTexture - see
+    // RequestedWindowTitle() below.
     NamedWindow,
 };
 
