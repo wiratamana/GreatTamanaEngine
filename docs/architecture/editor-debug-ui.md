@@ -220,8 +220,9 @@ CMake adds:
   Phase 6 (benchmark mode), which will own the real, shared CSV exporter -
   see `TODO.md`.
 - **Render Graph panel:** a Unity-Profiler-window-style **"Render Graph"**
-  panel (`src/Editor/Panels/RenderGraphPanel.h/.cpp`, docked alongside
-  "Memory"/"Profiler" along the bottom — see `DockLayout.cpp`), added as
+  panel (`src/Editor/Panels/RenderGraphPanel.h/.cpp`, a floating window by
+  default (same as the Frame Debugger panel) - see `DockLayout.cpp` for why;
+  use `GET /get_window`, not `GET /get_swapchain`, to capture it), added as
   Phase 8 of the Render Graph campaign (see [Rendering](rendering.md) and
   `RENDERGRAPH_CAMPAIGN_COMPLETION_REPORT.md`) once the engine's real
   Game/Scene/Present passes were fully migrated onto

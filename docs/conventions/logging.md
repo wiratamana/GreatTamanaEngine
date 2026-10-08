@@ -117,7 +117,7 @@ touching this module or adding a new call site:
 `BuildLogQueryFilter()`, `FilterByEnabledLevels()`, `ColorForLevel()`,
 `FormatLogEntryLine()`) plus `src/Editor/Panels/LogPanel.h/.cpp` (the actual
 ImGui window) give the Editor a real, working, Unity-Console-style panel
-docked alongside "Memory"/"Profiler"/"Render Graph"/"Atmosphere"/"Jobs"/
+docked alongside "Memory"/"Profiler"/"Atmosphere"/"Jobs"/
 "Project" - registered in `EditorPanelRegistry`/`DockLayout.cpp` under the
 exact panel name `"Log"` (so `GET /activate_tab?name=Log`/`GET /list_tabs`
 already work with zero further Network-layer code). Four always-on-by-default
