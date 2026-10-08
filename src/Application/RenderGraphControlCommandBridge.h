@@ -17,6 +17,7 @@ enum class RenderGraphControlCommandKind {
     ListPassStates,
     SetFeatureEnabled,
     SetFeaturePriority,
+    SetDisplayedRegime,
 };
 
 struct RenderGraphControlSetPassEnabledCommand {
@@ -34,6 +35,12 @@ struct RenderGraphControlSetFeaturePriorityCommand {
     std::int32_t priority = 0;
 };
 
+// Which Render Graph regime the panel should display - true means
+// "Present", false means "Offscreen (Game/Scene View)".
+struct RenderGraphControlSetDisplayedRegimeCommand {
+    bool present = false;
+};
+
 // One pending render-graph-control command, tagged by `kind` - only the
 // field matching `kind` is meaningful.
 struct RenderGraphControlCommandRequest {
@@ -41,6 +48,7 @@ struct RenderGraphControlCommandRequest {
     RenderGraphControlSetPassEnabledCommand setPassEnabled;
     RenderGraphControlSetFeatureEnabledCommand setFeatureEnabled;
     RenderGraphControlSetFeaturePriorityCommand setFeaturePriority;
+    RenderGraphControlSetDisplayedRegimeCommand setDisplayedRegime;
 };
 
 // One reported pass toggle state.

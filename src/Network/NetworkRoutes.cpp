@@ -1181,6 +1181,21 @@ std::string BuildRenderGraphControlPassStatesResponseJson(
     body["passes"] = std::move(arr);
     return body.dump();
 }
+
+ParsedRenderGraphSetDisplayRegimeQuery ParseRenderGraphSetDisplayRegimeQuery(const std::string& regimeParam)
+{
+    ParsedRenderGraphSetDisplayRegimeQuery parsed;
+    if (regimeParam == "present") {
+        parsed.valid = true;
+        parsed.present = true;
+    } else if (regimeParam == "offscreen") {
+        parsed.valid = true;
+        parsed.present = false;
+    } else {
+        parsed.errorMessage = "missing or invalid required query parameter: regime - must be \"present\" or \"offscreen\"";
+    }
+    return parsed;
+}
 // --- editor-core-separation-12 campaign (Project Assembly Hot Reload plan,
 // BIG-STEP 1) - see NetworkRoutes.h's own doc comments above each
 // declaration for the exact, locked response/validation shapes implemented

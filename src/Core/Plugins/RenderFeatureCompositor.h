@@ -337,6 +337,12 @@ private:
     // mutate through it).
     Entry* FindEntryByName(const std::string& name);
 
+    // True iff `enabledOverride` is true AND, only when `name` is ALSO a
+    // real, independently-known toggle-registry entry, that registry's own
+    // flag is true too. Never creates a toggle-registry entry as a side
+    // effect of reading it - see RenderPassToggleRegistry::HasEntry().
+    bool IsEffectivelyEnabled(const std::string& name, bool enabledOverride) const;
+
     // better-render-pass-5 effort, BLOCK 3, PHASE2 - PreOpaque sibling
     // of FindEntryByName() above, returning the genuinely different
     // PreOpaqueEntry* type (see that struct's own doc comment for why

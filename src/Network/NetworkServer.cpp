@@ -164,6 +164,51 @@ void RegisterGetTextureRoute(httplib::Server& server, FrameCaptureBridge* captur
     });
 }
 
+// GET /get_window?name=<ImGui window title> - captures ANY floating or
+// docked ImGui window by title, closing the gap /get_swapchain (main OS
+// window only) and /get_game_view/get_texture cannot reach: a panel the
+// user dragged outside the main viewport, into its own separate OS window.
+void RegisterGetWindowRoute(httplib::Server& server, FrameCaptureBridge* captureBridge)
+{
+    server.Get("/get_window", [captureBridge](const httplib::Request& req, httplib::Response& res) {
+        const std::string title = req.get_param_value("name");
+        if (title.empty()) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson("missing required query parameter 'name'"), "application/json");
+            return;
+        }
+        if (captureBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("capture bridge not available"), "application/json");
+            return;
+        }
+        const FrameCaptureBridge::RequestResult result =
+            captureBridge->RequestCaptureAndWait(FrameCaptureKind::NamedWindow, 3000, title);
+        if (result.alreadyPending) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("a /get_window capture is already in progress"), "application/json");
+            return;
+        }
+        if (result.failure.has_value()) {
+            res.status = (*result.failure == FrameCaptureFailureReason::TimedOut) ? 504 : 409;
+            res.set_content(BuildGenericErrorResponseJson(
+                "window '" + title + "' is not currently a separate floating OS window - drag it out of the "
+                "main viewport at least once this session, or call /get_swapchain if it is still docked"),
+                "application/json");
+            return;
+        }
+        const CapturedPngImage& image = *result.image;
+        const CaptureResponseFormat format =
+            ResolveCaptureResponseFormat(req.get_param_value("format"), req.get_header_value("Accept"));
+        if (format == CaptureResponseFormat::RawPng) {
+            res.set_content(reinterpret_cast<const char*>(image.pngBytes.data()), image.pngBytes.size(), "image/png");
+        } else {
+            const std::string base64 = Encoding::EncodeBase64(image.pngBytes);
+            res.set_content(BuildCaptureJsonBody(image.width, image.height, base64), "application/json");
+        }
+    });
+}
+
 // network-impl-4 campaign, Phase 5 - GET /list_textures, the discoverability
 // companion to /get_texture. Needs NO RenderGraph/rg::-namespaced type or
 // header at all - Application.cpp (Phase 5, Step 3.4) already resolved
@@ -356,6 +401,11 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
     // discoverability companion, GET /list_textures.
     RegisterGetTextureRoute(server, captureBridge);
     RegisterListTexturesRoute(server, captureBridge);
+
+    // AI visual debugging - captures a specific floating/docked ImGui
+    // window by title, for a panel a /get_swapchain full-desktop capture
+    // cannot reach (one dragged outside the main OS viewport).
+    RegisterGetWindowRoute(server, captureBridge);
 
     // editor-core-separation-7 campaign, PHASE4 - GET /render_graph, the
     // real, current-frame render-graph metadata endpoint this whole campaign
@@ -748,6 +798,29 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         request.kind = RenderGraphControlCommandKind::SetFeaturePriority;
         request.setFeaturePriority.name = parsed.name;
         request.setFeaturePriority.priority = parsed.priority;
+        const RenderGraphControlCommandBridge::SubmitResult submit = renderGraphControlCommandBridge->SubmitAndWait(request);
+        RespondWithRenderGraphControlCommandResult(res, submit);
+    });
+
+    // AI visual debugging - flips which regime the "Render Graph" panel
+    // currently displays, with no ImGui click required.
+    server.Get("/render_graph/set_display_regime",
+        [renderGraphControlCommandBridge](const httplib::Request& req, httplib::Response& res) {
+        const ParsedRenderGraphSetDisplayRegimeQuery parsed =
+            ParseRenderGraphSetDisplayRegimeQuery(req.get_param_value("regime"));
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        if (renderGraphControlCommandBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("render graph control command bridge not available"), "application/json");
+            return;
+        }
+        RenderGraphControlCommandRequest request;
+        request.kind = RenderGraphControlCommandKind::SetDisplayedRegime;
+        request.setDisplayedRegime.present = parsed.present;
         const RenderGraphControlCommandBridge::SubmitResult submit = renderGraphControlCommandBridge->SubmitAndWait(request);
         RespondWithRenderGraphControlCommandResult(res, submit);
     });

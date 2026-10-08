@@ -47,6 +47,14 @@
 // "IEditorLayer::BuildUI" scoped block).
 #include "../Renderer/RenderGraph/RenderGraphMetadata.h"
 
+// GET /get_window's own capture path - any floating or docked ImGui window,
+// by title. ImGuiWindow/ImGui::FindWindowByName() are internal API
+// (imgui_internal.h, not part of ImGui's stable public header) - there is
+// no supported public alternative to resolve a window by its exact title.
+#include <imgui.h>
+#include <imgui_internal.h>
+#include <backends/imgui_impl_vulkan.h>
+
 #include <SDL3/SDL.h>
 
 #include <cassert>
@@ -710,7 +718,7 @@ int EditorHost::Run()
             rgcResult.kind = rgcRequest->kind;
             switch (rgcRequest->kind) {
             case RenderGraphControlCommandKind::SetBuiltInPassEnabled: {
-                const bool applied = m_core.GetRenderPassToggleRegistryMutable().SetEnabled(
+                const bool applied = m_core.SetBuiltInRenderPassEnabled(
                     rgcRequest->setPassEnabled.name, rgcRequest->setPassEnabled.enabled);
                 rgcResult.success = applied;
                 if (!applied) {
@@ -774,6 +782,11 @@ int EditorHost::Run()
                             "\"" + rgcRequest->setFeaturePriority.name + "\" matches no loaded plugin render feature.";
                     }
                 }
+                break;
+            }
+            case RenderGraphControlCommandKind::SetDisplayedRegime: {
+                m_editorLayer->SetRenderGraphDisplayedRegime(rgcRequest->setDisplayedRegime.present);
+                rgcResult.success = true;
                 break;
             }
             }
@@ -950,6 +963,46 @@ int EditorHost::Run()
         // window (Dear ImGui multi-viewport/"platform windows" - a no-op in
         // a release build, see NullEditorLayer::RenderPlatformWindows()).
         m_editorLayer->RenderPlatformWindows();
+
+        // GET /get_window's own capture path - any floating or docked ImGui
+        // window, by title. Must run AFTER RenderPlatformWindows() above:
+        // that call is what actually submits+presents a floating window's
+        // own separate swapchain image this frame.
+        if (m_captureBridge.IsCaptureRequested(FrameCaptureKind::NamedWindow)) {
+            const std::string title = m_captureBridge.RequestedWindowTitle();
+            ImGuiWindow* window = ImGui::FindWindowByName(title.c_str());
+            ImGui_ImplVulkanH_Window* platformWindow = (window != nullptr && window->Viewport != nullptr)
+                ? ImGui_ImplVulkanH_GetWindowDataFromViewport(window->Viewport)
+                : nullptr;
+
+            if (platformWindow == nullptr || platformWindow->Swapchain == VK_NULL_HANDLE) {
+                // Either the title is wrong, or this window is still docked
+                // into the main viewport - fail fast instead of waiting out
+                // a timeout; the caller should use /get_swapchain instead.
+                m_captureBridge.FailPendingRequest(FrameCaptureKind::NamedWindow, FrameCaptureFailureReason::TargetNotAvailable);
+            } else {
+                const ImGui_ImplVulkanH_Frame& frame = platformWindow->Frames[platformWindow->FrameIndex];
+                const VkExtent2D extent{
+                    static_cast<std::uint32_t>(platformWindow->Width), static_cast<std::uint32_t>(platformWindow->Height) };
+                const rg::ResourceState presentState{
+                    VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, VK_ACCESS_2_NONE };
+
+                const Renderer::CapturedRawPixels raw = m_renderer.CaptureImagePixels(
+                    frame.Backbuffer, VK_IMAGE_ASPECT_COLOR_BIT, platformWindow->SurfaceFormat.format, extent, presentState);
+
+                if (raw.pixels.empty()) {
+                    m_captureBridge.FailPendingRequest(FrameCaptureKind::NamedWindow, FrameCaptureFailureReason::TargetNotAvailable);
+                } else {
+                    std::vector<std::uint8_t> pixels = raw.pixels;
+                    if (Encoding::IsBgraFormat(raw.format)) {
+                        Encoding::ConvertBgraToRgbaInPlace(pixels.data(), raw.width, raw.height);
+                    }
+                    std::vector<std::uint8_t> png = Encoding::EncodeRgba8ToPng(pixels.data(), raw.width, raw.height);
+                    m_captureBridge.FulfillPendingRequest(
+                        FrameCaptureKind::NamedWindow, CapturedPngImage{ std::move(png), raw.width, raw.height });
+                }
+            }
+        }
 
         // network-impl-4 campaign, Phase 4 - GET /get_texture's own capture
         // path. Placed here (unconditionally, once per Run() iteration,

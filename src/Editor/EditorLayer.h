@@ -760,6 +760,12 @@ public:
     // built and registered. Always a safe no-op for NullEditorLayer.
     virtual void AttachBuiltinFeatureModules(const std::vector<std::unique_ptr<IEngineFeatureModule>>& modules,
         Renderer& renderer, const rg::RenderGraph& renderGraph) = 0;
+
+    // Sets which regime the "Render Graph" panel currently displays -
+    // true for "Present", false for "Offscreen (Game/Scene View)". Mirrors
+    // the panel's own toolbar Regime combo so an HTTP command and a human
+    // click always agree. A no-op for NullEditorLayer.
+    virtual void SetRenderGraphDisplayedRegime(bool present) = 0;
 };
 
 // Constructs the real ImGui-backed editor layer. editor-core-separation-1

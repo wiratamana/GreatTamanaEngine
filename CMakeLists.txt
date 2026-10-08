@@ -1002,6 +1002,7 @@ add_library(gte_editor STATIC
     src/Editor/BuiltinFeatureEditorPanelRegistry.h
     src/Editor/BuiltinFeatureEditorPanelRegistry.cpp
     src/Editor/EditorContext.h
+    src/Editor/RenderGraphRegimeChoice.h
     src/Editor/ProjectRootPath.h
     src/Editor/ProjectRootPath.cpp
     src/Editor/SceneIO.h

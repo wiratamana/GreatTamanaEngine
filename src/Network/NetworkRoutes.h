@@ -1079,6 +1079,15 @@ struct RenderGraphControlPassStateResponseView {
 std::string BuildRenderGraphControlPassStatesResponseJson(
     const std::vector<RenderGraphControlPassStateResponseView>& passStates);
 
+// Parsed, validated GET /render_graph/set_display_regime query. "regime"
+// must be exactly "present" or "offscreen".
+struct ParsedRenderGraphSetDisplayRegimeQuery {
+    bool valid = false;
+    std::string errorMessage;
+    bool present = false;
+};
+ParsedRenderGraphSetDisplayRegimeQuery ParseRenderGraphSetDisplayRegimeQuery(const std::string& regimeParam);
+
 // --- editor-core-separation-12 campaign (Project Assembly Hot Reload plan,
 // BIG-STEP 1) - 7 new routes: 5 OBSERVE (status/ledger/loaded_assemblies/
 // component_types/scene_snapshot), 2 TRIGGER (compile_only/hot_reload).

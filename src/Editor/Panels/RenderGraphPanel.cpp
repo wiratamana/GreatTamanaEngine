@@ -126,7 +126,7 @@ void RenderGraphPanel::Build(
         }
     }
 
-    const rg::RenderGraphRegimeMetadata& regime = (m_regimeChoice == RegimeChoice::Offscreen)
+    const rg::RenderGraphRegimeMetadata& regime = (ctx.renderGraphDisplayedRegime == RenderGraphRegimeChoice::Offscreen)
         ? m_frozenMetadata.offscreenRegime
         : m_frozenMetadata.presentRegime;
     const std::vector<rg::RenderGraphGroupedPassMetadata> grouped = rg::GroupPassMetadataByName(regime.passes);
@@ -137,7 +137,7 @@ void RenderGraphPanel::Build(
     // Tree or Isolate Pass) is never missed.
     const std::vector<rg::RenderPassToggleState> toggleStatesBefore = renderPassToggleRegistry.ListAll();
 
-    BuildToolbar(regime);
+    BuildToolbar(ctx, regime);
     ImGui::Separator();
 
     const float bodyHeight = ImGui::GetContentRegionAvail().y - m_timelineHeight;
@@ -198,7 +198,7 @@ void RenderGraphPanel::Build(
     ImGui::End();
 }
 
-void RenderGraphPanel::BuildToolbar(const rg::RenderGraphRegimeMetadata& regime)
+void RenderGraphPanel::BuildToolbar(EditorContext& ctx, const rg::RenderGraphRegimeMetadata& regime)
 {
     if (ImGui::Button("Capture Frame")) {
         m_forceSingleCapture = true;
@@ -209,10 +209,10 @@ void RenderGraphPanel::BuildToolbar(const rg::RenderGraphRegimeMetadata& regime)
     ImGui::SameLine();
 
     static constexpr const char* kRegimeLabels[] = { "Offscreen (Game/Scene View)", "Present" };
-    int regimeIndex = static_cast<int>(m_regimeChoice);
+    int regimeIndex = static_cast<int>(ctx.renderGraphDisplayedRegime);
     ImGui::SetNextItemWidth(200.0f);
     if (ImGui::Combo("Regime", &regimeIndex, kRegimeLabels, 2)) {
-        m_regimeChoice = static_cast<RegimeChoice>(regimeIndex);
+        ctx.renderGraphDisplayedRegime = static_cast<RenderGraphRegimeChoice>(regimeIndex);
     }
     ImGui::SameLine();
 
@@ -281,29 +281,37 @@ bool RenderGraphPanel::PassMatchesFilters(const rg::RenderGraphGroupedPassMetada
 void RenderGraphPanel::BuildPassTree(
     const std::vector<rg::RenderGraphGroupedPassMetadata>& grouped, rg::RenderPassToggleRegistry& toggles)
 {
-    std::unordered_map<std::string, std::vector<const rg::RenderGraphGroupedPassMetadata*>> byGroup;
+    std::unordered_map<std::string, const rg::RenderGraphGroupedPassMetadata*> liveByName;
     for (const rg::RenderGraphGroupedPassMetadata& row : grouped) {
-        if (!PassMatchesFilters(row)) {
-            continue;
+        liveByName[row.name] = &row;
+        if (!row.instances.empty() && row.instances.front().tagGroupLabel.has_value()) {
+            m_lastKnownGroupLabel[row.name] = *row.instances.front().tagGroupLabel;
         }
-        const std::optional<std::string>& label =
-            row.instances.empty() ? std::nullopt : row.instances.front().tagGroupLabel;
-        byGroup[label.value_or("Ungrouped")].push_back(&row);
     }
 
-    // Fold every toggle-registered pass absent from this frame's snapshot
-    // (disabled, or never declared this session) into its own dimmed
-    // bucket - never a second parallel list.
-    std::vector<rg::RenderPassToggleState> disabledNotInSnapshot;
+    // Every known pass, always visible - grouped by its real tag label,
+    // never by snapshot presence. `toggles.ListAll()` already includes
+    // every pass ever declared or ever mutated this session.
+    std::unordered_map<std::string, std::vector<rg::RenderPassToggleState>> byGroup;
     for (const rg::RenderPassToggleState& state : toggles.ListAll()) {
-        const bool presentInSnapshot = std::any_of(grouped.begin(), grouped.end(),
-            [&](const rg::RenderGraphGroupedPassMetadata& row) { return row.name == state.name; });
-        if (!presentInSnapshot) {
-            disabledNotInSnapshot.push_back(state);
+        const auto liveIt = liveByName.find(state.name);
+        const rg::RenderGraphGroupedPassMetadata* live = (liveIt == liveByName.end()) ? nullptr : liveIt->second;
+
+        if (live != nullptr) {
+            if (!PassMatchesFilters(*live)) {
+                continue;
+            }
+        } else {
+            if (m_searchFilter[0] != '\0' && state.name.find(m_searchFilter) == std::string::npos) {
+                continue;
+            }
+            if (m_kindFilter != QueueKindFilter::All) {
+                continue; // Queue kind is unknown for a pass not running this frame.
+            }
         }
-    }
-    if (!disabledNotInSnapshot.empty()) {
-        byGroup["Disabled / Not Running"]; // Ensure the header renders even with zero snapshot rows.
+
+        const auto labelIt = m_lastKnownGroupLabel.find(state.name);
+        byGroup[labelIt != m_lastKnownGroupLabel.end() ? labelIt->second : "Ungrouped"].push_back(state);
     }
 
     // Sorted heading order - deterministic, independent of unordered_map's
@@ -320,43 +328,17 @@ void RenderGraphPanel::BuildPassTree(
         if (!ImGui::CollapsingHeader(label.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
             continue;
         }
-        for (const rg::RenderGraphGroupedPassMetadata* row : byGroup[label]) {
-            DrawPassTreeRow(*row, toggles);
-        }
-        if (label == "Disabled / Not Running") {
-            for (const rg::RenderPassToggleState& state : disabledNotInSnapshot) {
-                DrawDisabledPassRow(state, toggles);
-            }
+        for (const rg::RenderPassToggleState& state : byGroup[label]) {
+            const auto liveIt = liveByName.find(state.name);
+            DrawPassTreeRow(state, liveIt == liveByName.end() ? nullptr : liveIt->second, toggles);
         }
     }
 }
 
-void RenderGraphPanel::DrawPassTreeRow(
-    const rg::RenderGraphGroupedPassMetadata& row, rg::RenderPassToggleRegistry& toggles)
-{
-    ImGui::PushID(row.name.c_str());
-    bool enabled = toggles.IsEnabled(row.name);
-    if (ImGui::Checkbox("##Enabled", &enabled)) {
-        toggles.SetEnabled(row.name, enabled);
-    }
-    ImGui::SameLine();
-
-    if (row.isCulled) {
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.55f, 0.55f, 0.55f, 1.0f));
-    }
-    const bool isSelected = m_selectedPassName.has_value() && *m_selectedPassName == row.name;
-    const std::string label = row.isCulled ? (row.name + " (CULLED)") : row.name;
-    if (ImGui::Selectable(label.c_str(), isSelected)) {
-        m_selectedPassName = row.name;
-    }
-    if (row.isCulled) {
-        ImGui::PopStyleColor();
-    }
-    ImGui::PopID();
-}
-
-void RenderGraphPanel::DrawDisabledPassRow(
-    const rg::RenderPassToggleState& state, rg::RenderPassToggleRegistry& toggles)
+// One row for one pass, in every case - no parallel "disabled row"
+// function. Checkbox always reflects the registry's own real flag.
+void RenderGraphPanel::DrawPassTreeRow(const rg::RenderPassToggleState& state,
+    const rg::RenderGraphGroupedPassMetadata* liveRow, rg::RenderPassToggleRegistry& toggles)
 {
     ImGui::PushID(state.name.c_str());
     bool enabled = state.enabled;
@@ -364,10 +346,30 @@ void RenderGraphPanel::DrawDisabledPassRow(
         toggles.SetEnabled(state.name, enabled);
     }
     ImGui::SameLine();
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
-    ImGui::TextUnformatted(
-        state.everDeclaredThisSession ? (state.name + " (disabled)").c_str() : (state.name + " (never run yet)").c_str());
-    ImGui::PopStyleColor();
+
+    std::string label = state.name;
+    bool dim = false;
+    if (liveRow == nullptr) {
+        // Never say "disabled" unless the registry's own flag is false.
+        label += state.enabled
+            ? (state.everDeclaredThisSession ? " (not active this frame)" : " (never run yet)")
+            : " (disabled)";
+        dim = true;
+    } else if (liveRow->isCulled) {
+        label += " (CULLED)";
+        dim = true;
+    }
+
+    if (dim) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.55f, 0.55f, 0.55f, 1.0f));
+    }
+    const bool isSelected = m_selectedPassName.has_value() && *m_selectedPassName == state.name;
+    if (ImGui::Selectable(label.c_str(), isSelected)) {
+        m_selectedPassName = state.name;
+    }
+    if (dim) {
+        ImGui::PopStyleColor();
+    }
     ImGui::PopID();
 }
 

@@ -120,6 +120,8 @@ public:
         Renderer& /*renderer*/, const rg::RenderGraph& /*renderGraph*/) override
     {
     }
+
+    void SetRenderGraphDisplayedRegime(bool /*present*/) override { }
 };
 
 } // namespace

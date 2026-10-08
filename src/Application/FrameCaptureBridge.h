@@ -47,6 +47,10 @@ enum class FrameCaptureKind {
     // texture, which channel) - see RequestedTextureName()/
     // RequestedTextureChannel() below.
     NamedTexture,
+    // GET /get_window?name=<ImGui window title> - any floating or docked
+    // ImGui window, captured by title. Own dedicated slot/storage, never
+    // shared with NamedTexture - see RequestedWindowTitle() below.
+    NamedWindow,
 };
 
 // network-impl-4 campaign, Phase 4 - which half of a named texture a
@@ -204,6 +208,13 @@ public:
     std::string RequestedTextureName() const;
     DebugTextureChannel RequestedTextureChannel() const;
 
+    // Valid ONLY when IsCaptureRequested(FrameCaptureKind::NamedWindow) is
+    // currently true - the ImGui window title the pending request asked
+    // for. Returns "" if nothing is currently pending for this kind.
+    // Reuses RequestCaptureAndWait()'s existing `textureName` parameter as
+    // the requested window title - no signature change needed.
+    std::string RequestedWindowTitle() const;
+
     // Delivers a successfully captured+encoded image to whichever network
     // thread is waiting on `kind` (a safe no-op, doing nothing, if nothing
     // is currently pending for `kind` - e.g. the main thread producing a
@@ -286,6 +297,11 @@ private:
     // RequestedTextureChannel() under the same lock).
     std::string m_requestedTextureName;
     DebugTextureChannel m_requestedTextureChannel = DebugTextureChannel::Color;
+
+    // Own dedicated slot - never shares storage/locking with
+    // m_namedTextureSlot. Guarded by m_namedWindowSlot.mutex.
+    Slot m_namedWindowSlot;
+    std::string m_requestedWindowTitle;
 
     // network-impl-4 campaign, Phase 5 - GET /list_textures support. Guarded
     // by its own dedicated mutex, independent of every Slot above.

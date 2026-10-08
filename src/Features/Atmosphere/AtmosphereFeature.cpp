@@ -206,12 +206,11 @@ void AtmosphereFeature::RegisterPasses()
                 return; // Nothing safe to compute this frame for this view.
             }
 
-            // This callback reaches `builder` directly, bypassing
-            // RenderPipeline::DeclareOnePhase()'s own toggle choke point -
-            // must consult the registry itself.
-            if (!m_toggleRegistry->NoteDeclaredAndCheckEnabled("AtmosphereComposite")) {
-                return;
-            }
+            // The outer ContributeRenderGraphPasses() filter already applied
+            // both gates (host override AND toggle registry) before this
+            // callback ran - this is bookkeeping only, marking "declared
+            // this session" for GET /render_graph/passes, never a gate.
+            m_toggleRegistry->NoteDeclaredAndCheckEnabled("AtmosphereComposite");
 
             const bool isGameView = (currentView == rg::RenderViewId::Named("Game"));
             const rg::RenderPassId viewLutKey = isGameView ? kAtmosphereViewLutGameKey : kAtmosphereViewLutSceneKey;

@@ -23,8 +23,9 @@ class RenderGraph;
 // Node-canvas view of one RenderGraph::Execute() call: pass tree (left),
 // graph canvas or sortable table (center), inspector (right), GPU timeline
 // (bottom). Both the Offscreen (Game/Scene View) and Present regimes stay
-// reachable via the toolbar's own Regime combo - this panel never hides
-// either one.
+// reachable via the toolbar's own Regime combo (EditorContext::
+// renderGraphDisplayedRegime, also settable over HTTP) - this panel never
+// hides either one.
 //
 // A floating window, not docked into the bottom strip with Memory/Profiler/
 // Jobs/Log - a node canvas needs real screen space (see DockLayout.cpp).
@@ -45,15 +46,17 @@ public:
     void ReleaseTexturePreview() { m_texturePreview.Release(); }
 
 private:
-    enum class RegimeChoice : std::uint8_t { Offscreen, Present };
     enum class ViewMode : std::uint8_t { Graph, Table };
     enum class QueueKindFilter : std::uint8_t { All, Graphics, Compute };
 
-    void BuildToolbar(const rg::RenderGraphRegimeMetadata& regime);
+    void BuildToolbar(EditorContext& ctx, const rg::RenderGraphRegimeMetadata& regime);
     void BuildPassTree(const std::vector<rg::RenderGraphGroupedPassMetadata>& grouped,
         rg::RenderPassToggleRegistry& toggles);
-    void DrawPassTreeRow(const rg::RenderGraphGroupedPassMetadata& row, rg::RenderPassToggleRegistry& toggles);
-    void DrawDisabledPassRow(const rg::RenderPassToggleState& state, rg::RenderPassToggleRegistry& toggles);
+    // One row for every known pass - no separate "disabled row" function.
+    // `liveRow` is nullptr when this pass produced no snapshot row this
+    // frame (still drawn, honestly labeled, never silently hidden).
+    void DrawPassTreeRow(const rg::RenderPassToggleState& state,
+        const rg::RenderGraphGroupedPassMetadata* liveRow, rg::RenderPassToggleRegistry& toggles);
     void BuildGraphCanvas(const GraphLayout& layout, const rg::RenderGraphRegimeMetadata& regime);
     void BuildPassTable(const std::vector<rg::RenderGraphGroupedPassMetadata>& grouped);
     void BuildInspector(const rg::RenderGraphRegimeMetadata& regime, rg::RenderPassToggleRegistry& toggles,
@@ -76,7 +79,11 @@ private:
     // Kept in lockstep with m_frozenMetadata so pausing freezes both alike.
     std::unordered_map<std::string, std::string> m_frozenResourceResolutionText;
 
-    RegimeChoice m_regimeChoice = RegimeChoice::Present;
+    // Last tag-group label seen for a pass name, across either regime this
+    // session - keeps a pass in its real group even on a frame the
+    // currently-selected regime doesn't run it at all.
+    std::unordered_map<std::string, std::string> m_lastKnownGroupLabel;
+
     QueueKindFilter m_kindFilter = QueueKindFilter::All;
     ViewMode m_viewMode = ViewMode::Graph;
     char m_searchFilter[128] = {};

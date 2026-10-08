@@ -836,6 +836,13 @@ public:
     void FrameDebuggerOpenWindow() override { m_frameDebuggerPanel.RequestOpenWindow(m_ctx); }
     void FrameDebuggerSetEnabled(bool enabled) override { m_frameDebuggerPanel.SetEnabledFromCommand(m_ctx, enabled); }
 
+    // Mirrors the Render Graph panel's own toolbar Regime combo - an HTTP
+    // command flips the same EditorContext field a human click would.
+    void SetRenderGraphDisplayedRegime(bool present) override
+    {
+        m_ctx.renderGraphDisplayedRegime = present ? RenderGraphRegimeChoice::Present : RenderGraphRegimeChoice::Offscreen;
+    }
+
     // editor-core-separation-16 campaign (On-Engine Project Workflow
     // plan, BIG-STEP 2), PHASE4 - see IEditorLayer::
     // SetProjectLifecycleCapability()'s own doc comment for the full

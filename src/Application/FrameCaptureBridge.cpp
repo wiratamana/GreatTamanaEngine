@@ -11,8 +11,9 @@ FrameCaptureBridge::Slot& FrameCaptureBridge::SlotFor(FrameCaptureKind kind)
     case FrameCaptureKind::Swapchain: return m_swapchainSlot;
     case FrameCaptureKind::GameView: return m_gameViewSlot;
     case FrameCaptureKind::NamedTexture: return m_namedTextureSlot;
+    case FrameCaptureKind::NamedWindow: return m_namedWindowSlot;
     }
-    return m_namedTextureSlot; // Unreachable - every enumerator handled above (no default: case, mirroring this codebase's own exhaustive-switch convention, e.g. RenderGraphTypes.h). Silences a "not all control paths return a value" warning on a compiler that doesn't prove the switch exhaustive on its own.
+    return m_namedTextureSlot; // Unreachable - every enumerator handled above.
 }
 
 const FrameCaptureBridge::Slot& FrameCaptureBridge::SlotFor(FrameCaptureKind kind) const
@@ -21,6 +22,7 @@ const FrameCaptureBridge::Slot& FrameCaptureBridge::SlotFor(FrameCaptureKind kin
     case FrameCaptureKind::Swapchain: return m_swapchainSlot;
     case FrameCaptureKind::GameView: return m_gameViewSlot;
     case FrameCaptureKind::NamedTexture: return m_namedTextureSlot;
+    case FrameCaptureKind::NamedWindow: return m_namedWindowSlot;
     }
     return m_namedTextureSlot; // Unreachable - see the non-const overload's own comment above.
 }
@@ -49,6 +51,10 @@ FrameCaptureBridge::RequestResult FrameCaptureBridge::RequestCaptureAndWait(Fram
         // RequestedTextureName()/RequestedTextureChannel()).
         m_requestedTextureName = textureName;
         m_requestedTextureChannel = channel;
+    } else if (kind == FrameCaptureKind::NamedWindow) {
+        // Same discipline as the NamedTexture branch above, under this
+        // slot's own lock (`slot` already resolved to m_namedWindowSlot).
+        m_requestedWindowTitle = textureName;
     }
 
     slot.requested = true;
@@ -102,6 +108,15 @@ DebugTextureChannel FrameCaptureBridge::RequestedTextureChannel() const
         return DebugTextureChannel::Color;
     }
     return m_requestedTextureChannel;
+}
+
+std::string FrameCaptureBridge::RequestedWindowTitle() const
+{
+    std::lock_guard<std::mutex> lock(m_namedWindowSlot.mutex);
+    if (!m_namedWindowSlot.requested) {
+        return std::string();
+    }
+    return m_requestedWindowTitle;
 }
 
 void FrameCaptureBridge::FulfillPendingRequest(FrameCaptureKind kind, CapturedPngImage image)

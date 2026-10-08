@@ -238,6 +238,19 @@ RenderFeatureCompositor::Entry* RenderFeatureCompositor::FindEntryByName(const s
     return nullptr;
 }
 
+// One shared combined gate for "is this feature really running": reads
+// BOTH the host-side override AND (only when the name is independently
+// known there too) the toggle registry's own flag - never auto-creates a
+// toggle-registry entry as a side effect of reading it.
+bool RenderFeatureCompositor::IsEffectivelyEnabled(const std::string& name, bool enabledOverride) const
+{
+    if (!enabledOverride) {
+        return false;
+    }
+    const rg::RenderPassToggleRegistry& toggles = m_core.GetRenderPassToggleRegistryMutable();
+    return !toggles.HasEntry(name) || toggles.IsEnabled(name);
+}
+
 // better-render-pass-5 effort, BLOCK 3, PHASE2 - see this method's own
 // doc comment (RenderFeatureCompositor.h) for the full contract.
 RenderFeatureCompositor::PreOpaqueEntry* RenderFeatureCompositor::FindPreOpaqueEntryByName(const std::string& name)
@@ -284,32 +297,35 @@ void RenderFeatureCompositor::AssertCalledFromMainThread() const
            "different thread.");
 }
 
-// editor-core-separation-8 campaign, PHASE2 - host-side enable/disable
-// override. See RenderFeatureCompositor.h's own doc comment for the full
-// contract.
+// Host-side enable/disable override. Single exit point - the toggle
+// registry mirror-write below happens exactly once, and only when
+// HasEntry() already says `name` lives there too (never upserts a ghost
+// pass-tree row for an ordinary render feature unrelated to the registry).
 bool RenderFeatureCompositor::SetFeatureEnabled(const std::string& name, bool enabled)
 {
+    bool found = false;
     if (Entry* entry = FindEntryByName(name)) {
         entry->enabledOverride = enabled;
-        return true;
-    }
-    // better-render-pass-5 effort, BLOCK 3, PHASE2 - PreOpaque features
-    // live in a separate list/type - fall back to it only once the
-    // existing PostComposite/PreUI lookup has already reported "not
-    // found."
-    if (PreOpaqueEntry* preOpaqueEntry = FindPreOpaqueEntryByName(name)) {
+        found = true;
+    } else if (PreOpaqueEntry* preOpaqueEntry = FindPreOpaqueEntryByName(name)) {
         preOpaqueEntry->enabledOverride = enabled;
-        return true;
-    }
-    if (PostOpaqueEntry* postOpaqueEntry = FindPostOpaqueEntryByName(name)) {
+        found = true;
+    } else if (PostOpaqueEntry* postOpaqueEntry = FindPostOpaqueEntryByName(name)) {
         postOpaqueEntry->enabledOverride = enabled;
-        return true;
-    }
-    if (PostTransparentEntry* postTransparentEntry = FindPostTransparentEntryByName(name)) {
+        found = true;
+    } else if (PostTransparentEntry* postTransparentEntry = FindPostTransparentEntryByName(name)) {
         postTransparentEntry->enabledOverride = enabled;
-        return true;
+        found = true;
     }
-    return false;
+    if (!found) {
+        return false;
+    }
+
+    rg::RenderPassToggleRegistry& toggles = m_core.GetRenderPassToggleRegistryMutable();
+    if (toggles.HasEntry(name)) {
+        toggles.SetEnabled(name, enabled);
+    }
+    return true;
 }
 
 // editor-core-separation-8 campaign, PHASE2 - host-side LIVE priority
@@ -730,29 +746,27 @@ void RenderFeatureCompositor::OnPluginsLoaded(const std::vector<IPluginModule*>&
 {
 }
 
-// editor-core-separation-6 campaign, PHASE7
-// (PHASE7_RENDER_GRAPH_PANEL_VISIBILITY.md) - see this method's own doc
-// comment (RenderFeatureCompositor.h) for the full contract. Walks the exact
-// same combined (m_postComposite, then m_preUi) order
-// ContributeRenderGraphPasses() itself uses, so the panel's displayed order
-// always matches the REAL execution order this frame.
+// A read-only snapshot of this compositor's own REAL, resolved ordering
+// decision - walks the exact same combined (m_postComposite, then m_preUi)
+// order ContributeRenderGraphPasses() itself uses, so the panel's displayed
+// order always matches the real execution order this frame. `enabled`
+// reports the COMBINED gate (IsEffectivelyEnabled()) - never just the raw
+// host override - so a dual-citizen name like "AtmosphereComposite" never
+// shows "enabled" here while the toggle registry silently vetoes it.
 std::vector<RenderFeatureDebugEntry> RenderFeatureCompositor::DebugSnapshot() const
 {
     std::vector<RenderFeatureDebugEntry> snapshot;
     snapshot.reserve(m_postComposite.size() + m_preUi.size() + m_preOpaque.size() + m_postOpaque.size()
         + m_postTransparent.size());
 
-    auto appendStage = [&snapshot](const std::vector<Entry>& entries) {
+    auto appendStage = [&snapshot, this](const std::vector<Entry>& entries) {
         for (const Entry& entry : entries) {
             RenderFeatureDebugEntry debugEntry;
             debugEntry.name = entry.descriptor.name;
             debugEntry.stage = ToString(entry.descriptor.stage);
             debugEntry.priority = entry.descriptor.priority;
             debugEntry.blendMode = ToString(entry.descriptor.blendMode);
-            debugEntry.enabled = entry.enabledOverride;
-            // editor-core-separation-23 campaign, PHASE2 - see
-            // RenderFeatureDebugEntry.h's own doc comment (isProjectFeature)
-            // for the full "why".
+            debugEntry.enabled = IsEffectivelyEnabled(entry.descriptor.name, entry.enabledOverride);
             debugEntry.isProjectFeature = static_cast<bool>(entry.projectCallback);
             snapshot.push_back(std::move(debugEntry));
         }
@@ -761,18 +775,17 @@ std::vector<RenderFeatureDebugEntry> RenderFeatureCompositor::DebugSnapshot() co
     appendStage(m_postComposite);
     appendStage(m_preUi);
 
-    // better-render-pass-5 effort, BLOCK 3, PHASE2 - PreOpaque features
-    // live in a separate list/type so this is a separate, inline loop
-    // rather than a call to the shared `appendStage` lambda above
-    // (PreOpaqueEntry has no nested `.descriptor`, and no real
-    // blendMode concept at all).
+    // PreOpaque/PostOpaque/PostTransparent features live in separate
+    // lists/types (no nested `.descriptor`, no real blendMode concept) so
+    // each gets its own small, inline loop rather than the shared
+    // `appendStage` lambda above.
     for (const PreOpaqueEntry& entry : m_preOpaque) {
         RenderFeatureDebugEntry debugEntry;
         debugEntry.name = entry.name;
         debugEntry.stage = "PreOpaque";
         debugEntry.priority = entry.priority;
         debugEntry.blendMode = "None";
-        debugEntry.enabled = entry.enabledOverride;
+        debugEntry.enabled = IsEffectivelyEnabled(entry.name, entry.enabledOverride);
         debugEntry.isProjectFeature = static_cast<bool>(entry.callback);
         snapshot.push_back(std::move(debugEntry));
     }
@@ -783,7 +796,7 @@ std::vector<RenderFeatureDebugEntry> RenderFeatureCompositor::DebugSnapshot() co
         debugEntry.stage = "PostOpaque";
         debugEntry.priority = entry.priority;
         debugEntry.blendMode = "None";
-        debugEntry.enabled = entry.enabledOverride;
+        debugEntry.enabled = IsEffectivelyEnabled(entry.name, entry.enabledOverride);
         debugEntry.isProjectFeature = static_cast<bool>(entry.callback);
         snapshot.push_back(std::move(debugEntry));
     }
@@ -793,7 +806,7 @@ std::vector<RenderFeatureDebugEntry> RenderFeatureCompositor::DebugSnapshot() co
         debugEntry.stage = "PostTransparent";
         debugEntry.priority = entry.priority;
         debugEntry.blendMode = "None";
-        debugEntry.enabled = entry.enabledOverride;
+        debugEntry.enabled = IsEffectivelyEnabled(entry.name, entry.enabledOverride);
         debugEntry.isProjectFeature = static_cast<bool>(entry.callback);
         snapshot.push_back(std::move(debugEntry));
     }
@@ -968,13 +981,15 @@ void RenderFeatureCompositor::ContributeRenderGraphPasses(
     combinedList.insert(combinedList.end(), m_postComposite.begin(), m_postComposite.end());
     combinedList.insert(combinedList.end(), m_preUi.begin(), m_preUi.end());
 
-    // editor-core-separation-8 campaign, PHASE2 - a host-disabled render
-    // feature is skipped entirely from this frame's compositing chain (never
-    // contributes a pass, never consumes a private/blend target this frame) -
-    // the entry itself is never removed from m_postComposite/m_preUi
-    // (DebugSnapshot()/GET /render_graph keeps reporting it, disabled).
+    // A feature that is effectively disabled (host override, or the toggle
+    // registry's own flag for a dual-citizen name like "AtmosphereComposite")
+    // is skipped entirely from this frame's compositing chain - the entry
+    // itself is never removed from m_postComposite/m_preUi (DebugSnapshot()/
+    // GET /render_graph keeps reporting it, disabled).
     combinedList.erase(std::remove_if(combinedList.begin(), combinedList.end(),
-        [](const Entry& entry) { return !entry.enabledOverride; }), combinedList.end());
+        [this](const Entry& entry) {
+            return !IsEffectivelyEnabled(entry.descriptor.name, entry.enabledOverride);
+        }), combinedList.end());
     if (combinedList.empty()) {
         return;
     }

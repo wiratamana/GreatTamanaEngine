@@ -226,17 +226,21 @@ public:
         return m_gpuDrivenBatchDebugInfoLastFrame;
     }
 
-    // editor-core-separation-8 campaign, PHASE1 - the ONE registry instance
-    // shared by BOTH m_offscreenRenderPipeline and m_presentRenderPipeline (see
-    // the constructor-time wiring, Core.cpp). Non-const, non-null (a plain owned
-    // member, never a pointer) - the "Render Graph" panel (PHASE4) and
-    // RenderGraphControlCommandBridge's pump (PHASE5) both mutate THROUGH this
-    // exact reference, on the main thread only (see
-    // RenderPassToggleRegistry.h's own header comment for why no mutex is
-    // needed).
+    // The ONE registry instance shared by both m_offscreenRenderPipeline and
+    // m_presentRenderPipeline. Main-thread-only (no mutex needed) - the
+    // "Render Graph" panel and RenderGraphControlCommandBridge's pump both
+    // mutate through this exact reference.
     rg::RenderPassToggleRegistry& GetRenderPassToggleRegistryMutable() noexcept
     {
         return m_renderPassToggleRegistry;
+    }
+
+    // The one blessed mutation path for a built-in pass's enabled flag.
+    // Returns false for a deny-listed name - see
+    // RenderPassToggleRegistry::IsDenyListed().
+    bool SetBuiltInRenderPassEnabled(const std::string& name, bool enabled)
+    {
+        return m_renderPassToggleRegistry.SetEnabled(name, enabled);
     }
 
     // editor-core-separation-22 campaign, PHASE6

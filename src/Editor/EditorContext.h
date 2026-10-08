@@ -2,7 +2,7 @@
 
 #include "Selection.h"
 #include "TransformGizmo.h"
-
+#include "RenderGraphRegimeChoice.h"
 #include <chrono>
 #include <string>
 
@@ -222,6 +222,10 @@ struct EditorContext {
     // is open. Toggled by "Window > Render Graph" menu item and the window's
     // own titlebar close button. Defaults to true (always visible on launch).
     bool renderGraphWindowOpen = true;
+
+    // Which regime the "Render Graph" panel shows. One shared field so a
+    // human's toolbar click and an HTTP command always agree.
+    RenderGraphRegimeChoice renderGraphDisplayedRegime = RenderGraphRegimeChoice::Present;
 
     // True when the floating "Render Features" window
     // (Panels/RenderFeaturesPanel.h) is open - GPU-driven-batch culling
