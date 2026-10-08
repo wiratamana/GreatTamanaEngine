@@ -66,10 +66,6 @@ public:
     // `name` belongs to. Returns false if `name` matches no registered feature.
     bool SetFeaturePriority(const std::string& name, std::int32_t priority);
 
-    // Persistent (never recreated per frame) descriptor-set cache, keyed by
-    // a caller-chosen stable key. Lazily allocates once per distinct `key`.
-    ComputeDescriptorSet& EnsureV3OpDescriptorSet(const std::string& key, VkDescriptorSetLayout layout);
-
     // One real registration entry point - owner is explicit, never inferred.
     // `descriptor` must already be built via MakeRenderFeatureDescriptor().
     // Returns false (logged, never crashes) if the name already exists in
@@ -114,7 +110,25 @@ public:
     // already length-validated by the caller. Returns false (logged) if
     // `name` is already registered as PreOpaque, PostOpaque, PostTransparent,
     // PostComposite, or PreUI - all feature names share one global namespace.
-    bool RegisterPreOpaqueFeature(const std::string& name, std::int32_t priority, ProjectPreOpaqueCallback callback);
+    // Owner-fixed wrapper (Project) over RegisterPreOpaqueFeatureInternal() -
+    // see RegisterBuiltInPreOpaqueFeature() immediately below for the
+    // Engine-owned sibling, same "thin owner-fixed wrapper" shape as
+    // RegisterFeature()/RegisterProjectFeature()/RegisterBuiltInFeature().
+    bool RegisterPreOpaqueFeature(const std::string& name, std::int32_t priority, ProjectPreOpaqueCallback callback)
+    {
+        return RegisterPreOpaqueFeatureInternal(name, priority, std::move(callback), RenderFeatureOwner::Project);
+    }
+
+    // Engine-owned sibling of RegisterPreOpaqueFeature() immediately above -
+    // same preconditions/refusal rules, marks the registered entry
+    // RenderFeatureOwner::Engine so DebugSnapshot() reports isProjectFeature
+    // == false for it (Core::AddBuiltInPreOpaquePass() is the only intended
+    // caller - never recorded in ProjectAssemblyRegistrationLedger).
+    bool RegisterBuiltInPreOpaqueFeature(
+        const std::string& name, std::int32_t priority, ProjectPreOpaqueCallback callback)
+    {
+        return RegisterPreOpaqueFeatureInternal(name, priority, std::move(callback), RenderFeatureOwner::Engine);
+    }
 
     // Removes a previously-registered PreOpaque feature by name.
     // Returns false (logged, never crashes) if no entry with that name
@@ -141,7 +155,18 @@ public:
         RenderFeatureOwner owner = RenderFeatureOwner::Project;
     };
 
-    bool RegisterPostOpaqueFeature(const std::string& name, std::int32_t priority, ProjectScenePassCallback callback);
+    // Owner-fixed wrappers over RegisterPostOpaqueFeatureInternal() - same
+    // "thin owner-fixed wrapper" shape as RegisterPreOpaqueFeature()/
+    // RegisterBuiltInPreOpaqueFeature() above.
+    bool RegisterPostOpaqueFeature(const std::string& name, std::int32_t priority, ProjectScenePassCallback callback)
+    {
+        return RegisterPostOpaqueFeatureInternal(name, priority, std::move(callback), RenderFeatureOwner::Project);
+    }
+    bool RegisterBuiltInPostOpaqueFeature(
+        const std::string& name, std::int32_t priority, ProjectScenePassCallback callback)
+    {
+        return RegisterPostOpaqueFeatureInternal(name, priority, std::move(callback), RenderFeatureOwner::Engine);
+    }
     bool UnregisterPostOpaqueFeature(const char* name);
     const std::vector<PostOpaqueEntry>& PostOpaqueFeaturesInPriorityOrder() const noexcept { return m_postOpaque; }
 
@@ -155,14 +180,35 @@ public:
         RenderFeatureOwner owner = RenderFeatureOwner::Project;
     };
 
+    // Owner-fixed wrappers over RegisterPostTransparentFeatureInternal() -
+    // same shape as above.
     bool RegisterPostTransparentFeature(
-        const std::string& name, std::int32_t priority, ProjectScenePassCallback callback);
+        const std::string& name, std::int32_t priority, ProjectScenePassCallback callback)
+    {
+        return RegisterPostTransparentFeatureInternal(name, priority, std::move(callback), RenderFeatureOwner::Project);
+    }
+    bool RegisterBuiltInPostTransparentFeature(
+        const std::string& name, std::int32_t priority, ProjectScenePassCallback callback)
+    {
+        return RegisterPostTransparentFeatureInternal(name, priority, std::move(callback), RenderFeatureOwner::Engine);
+    }
     bool UnregisterPostTransparentFeature(const char* name);
     const std::vector<PostTransparentEntry>& PostTransparentFeaturesInPriorityOrder() const noexcept
     {
         return m_postTransparent;
     }
 private:
+    // Real registration bodies - owner is explicit, never inferred. Public
+    // RegisterXFeature()/RegisterBuiltInXFeature() above are thin,
+    // owner-fixed wrappers; callers always use one of those, never these
+    // directly.
+    bool RegisterPreOpaqueFeatureInternal(
+        const std::string& name, std::int32_t priority, ProjectPreOpaqueCallback callback, RenderFeatureOwner owner);
+    bool RegisterPostOpaqueFeatureInternal(
+        const std::string& name, std::int32_t priority, ProjectScenePassCallback callback, RenderFeatureOwner owner);
+    bool RegisterPostTransparentFeatureInternal(
+        const std::string& name, std::int32_t priority, ProjectScenePassCallback callback, RenderFeatureOwner owner);
+
     struct Entry {
         GtePluginRenderFeatureDescriptor descriptor{};
         bool enabledOverride = true; // Host-side override; defaults true.
@@ -280,10 +326,6 @@ private:
     // they never collide, since interned names always carry either "_Accum"
     // or "_Seed" as an unambiguous suffix).
     std::unordered_map<std::string, BlendStageState> m_blendStageStates;
-
-    // Keyed by a plain std::string key. Persistent for the process lifetime -
-    // never cleared/recreated per frame.
-    std::unordered_map<std::string, ComputeDescriptorSet> m_v3OpDescriptorSets;
 
     // Generously sized against realistic usage - comfortably far below the
     // shared compute-descriptor-set pool's fixed capacity.

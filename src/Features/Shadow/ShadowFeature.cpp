@@ -126,8 +126,10 @@ void ShadowFeature::EnsureDepthPipelinesBuilt(Renderer& renderer)
 
 void ShadowFeature::RegisterPasses()
 {
-    // "Shadow.DepthPass" - PreOpaque.
-    const bool depthRegistered = m_core.AddPreOpaquePass(
+    // "Shadow.DepthPass" - PreOpaque, built-in engine feature, via
+    // Core::AddBuiltInPreOpaquePass() (reports isProjectFeature == false in
+    // DebugSnapshot()/GET /render_graph - this is the engine's own pass).
+    const bool depthRegistered = m_core.AddBuiltInPreOpaquePass(
         "Shadow.DepthPass",
         [this](rg::RenderGraphBuilder& builder, rg::RenderPassBlackboard& blackboard, rg::RenderViewId currentView) {
             const std::optional<RenderPassViewData> viewData = m_core.FindRenderPassViewData(currentView);
@@ -200,8 +202,10 @@ void ShadowFeature::RegisterPasses()
         kShadowDepthPassPriority);
     assert(depthRegistered && "Shadow.DepthPass registration failed - see the GTE_LOG_WARNING above.");
 
-    // "Shadow.Mask" - PostOpaque, AfterOpaques.
-    const bool maskRegistered = m_core.AddPostOpaquePass(
+    // "Shadow.Mask" - PostOpaque, AfterOpaques, built-in engine feature, via
+    // Core::AddBuiltInPostOpaquePass() (reports isProjectFeature == false in
+    // DebugSnapshot()/GET /render_graph - this is the engine's own pass).
+    const bool maskRegistered = m_core.AddBuiltInPostOpaquePass(
         "Shadow.Mask",
         [this](rg::RenderGraphBuilder& builder, rg::RenderPassBlackboard& blackboard, rg::RenderViewId currentView,
             const ScenePassReadHandles& currentViewHandles) {

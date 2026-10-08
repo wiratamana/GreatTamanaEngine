@@ -502,9 +502,11 @@ bool RenderFeatureCompositor::UnregisterProjectFeature(const char* name)
 }
 
 // better-render-pass-5 effort, BLOCK 3, PHASE2 - see this method's own
-// doc comment (RenderFeatureCompositor.h) for the full contract.
-bool RenderFeatureCompositor::RegisterPreOpaqueFeature(
-    const std::string& name, std::int32_t priority, ProjectPreOpaqueCallback callback)
+// doc comment (RenderFeatureCompositor.h) for the full contract. Owner is
+// explicit, never inferred - the public RegisterPreOpaqueFeature()/
+// RegisterBuiltInPreOpaqueFeature() wrappers each fix it to one value.
+bool RenderFeatureCompositor::RegisterPreOpaqueFeatureInternal(
+    const std::string& name, std::int32_t priority, ProjectPreOpaqueCallback callback, RenderFeatureOwner owner)
 {
     AssertCalledFromMainThread();
 
@@ -542,6 +544,7 @@ bool RenderFeatureCompositor::RegisterPreOpaqueFeature(
     entry.name = name;
     entry.priority = priority;
     entry.callback = std::move(callback);
+    entry.owner = owner;
     m_preOpaque.push_back(std::move(entry));
     SortAndDetectCollisionsInPreOpaqueList(m_preOpaque);
 
@@ -576,8 +579,10 @@ bool RenderFeatureCompositor::UnregisterPreOpaqueFeature(const char* name)
     return true;
 }
 
-bool RenderFeatureCompositor::RegisterPostOpaqueFeature(
-    const std::string& name, std::int32_t priority, ProjectScenePassCallback callback)
+// Owner is explicit, never inferred - the public RegisterPostOpaqueFeature()/
+// RegisterBuiltInPostOpaqueFeature() wrappers each fix it to one value.
+bool RenderFeatureCompositor::RegisterPostOpaqueFeatureInternal(
+    const std::string& name, std::int32_t priority, ProjectScenePassCallback callback, RenderFeatureOwner owner)
 {
     AssertCalledFromMainThread();
 
@@ -610,6 +615,7 @@ bool RenderFeatureCompositor::RegisterPostOpaqueFeature(
     entry.name = name;
     entry.priority = priority;
     entry.callback = std::move(callback);
+    entry.owner = owner;
     m_postOpaque.push_back(std::move(entry));
     SortAndDetectCollisionsInPostOpaqueList(m_postOpaque);
 
@@ -642,8 +648,10 @@ bool RenderFeatureCompositor::UnregisterPostOpaqueFeature(const char* name)
     return true;
 }
 
-bool RenderFeatureCompositor::RegisterPostTransparentFeature(
-    const std::string& name, std::int32_t priority, ProjectScenePassCallback callback)
+// Owner is explicit, never inferred - the public RegisterPostTransparentFeature()/
+// RegisterBuiltInPostTransparentFeature() wrappers each fix it to one value.
+bool RenderFeatureCompositor::RegisterPostTransparentFeatureInternal(
+    const std::string& name, std::int32_t priority, ProjectScenePassCallback callback, RenderFeatureOwner owner)
 {
     AssertCalledFromMainThread();
 
@@ -676,6 +684,7 @@ bool RenderFeatureCompositor::RegisterPostTransparentFeature(
     entry.name = name;
     entry.priority = priority;
     entry.callback = std::move(callback);
+    entry.owner = owner;
     m_postTransparent.push_back(std::move(entry));
     SortAndDetectCollisionsInPostTransparentList(m_postTransparent);
 
@@ -849,21 +858,6 @@ RenderFeatureCompositor::BlendStageState& RenderFeatureCompositor::EnsureBlendSt
     BlendStageState& state = EnsureBlendStageDescriptorOnly(internedName);
     EnsureTextureSized(state.texture, internedName, extent);
     return state;
-}
-
-// editor-core-separation-9 campaign, PHASE2 - see this method's own doc
-// comment (RenderFeatureCompositor.h) for the full, load-bearing reasoning.
-ComputeDescriptorSet& RenderFeatureCompositor::EnsureV3OpDescriptorSet(
-    const std::string& key, VkDescriptorSetLayout layout)
-{
-    const auto existing = m_v3OpDescriptorSets.find(key);
-    if (existing != m_v3OpDescriptorSets.end()) {
-        return existing->second;
-    }
-
-    ComputeDescriptorSet descriptorSet(m_renderer.AllocateComputeDescriptorSet(layout));
-    const auto inserted = m_v3OpDescriptorSets.emplace(key, std::move(descriptorSet));
-    return inserted.first->second;
 }
 
 // Builds the shared blend pipeline (RenderFeatureBlend.comp) - binding 0/1

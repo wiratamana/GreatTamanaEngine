@@ -509,6 +509,31 @@ void Core::RemovePreOpaquePass(const char* debugName)
     m_renderFeatureCompositorPtr->UnregisterPreOpaqueFeature(debugName);
 }
 
+// Engine-owned sibling of AddPreOpaquePass() immediately above - see this
+// method's own doc comment (Core.h) for the full contract. Deliberately
+// bypasses ProjectAssemblyRegistrationLedger, exactly like
+// RegisterBuiltInRenderFeature() does for the PostComposite/PreUI stages.
+bool Core::AddBuiltInPreOpaquePass(const char* debugName, ProjectPreOpaqueCallback callback, std::int32_t priority)
+{
+    if (m_renderFeatureCompositorPtr == nullptr) {
+        GTE_LOG_WARNING("Core", "AddBuiltInPreOpaquePass('" + std::string(debugName != nullptr ? debugName : "<null>")
+            + "') failed - no RenderFeatureCompositor orchestrator is registered in this build.");
+        return false;
+    }
+    if (debugName == nullptr) {
+        GTE_LOG_WARNING("Core", "AddBuiltInPreOpaquePass() failed - debugName is null.");
+        return false;
+    }
+    if (std::strlen(debugName) > 63) {
+        GTE_LOG_WARNING("Core", "AddBuiltInPreOpaquePass('" + std::string(debugName)
+            + "') failed - name exceeds the 63-byte limit this engine's registration surfaces consistently "
+            "enforce; shorten it (never silently truncated).");
+        return false;
+    }
+
+    return m_renderFeatureCompositorPtr->RegisterBuiltInPreOpaqueFeature(debugName, priority, std::move(callback));
+}
+
 // Same contract as AddPreOpaquePass() above, for the PostOpaque stage - see
 // that method's own doc comment (Core.h) for the full shared contract.
 bool Core::AddPostOpaquePass(const char* debugName, ProjectScenePassCallback callback, std::int32_t priority)
@@ -547,6 +572,30 @@ void Core::RemovePostOpaquePass(const char* debugName)
     m_renderFeatureCompositorPtr->UnregisterPostOpaqueFeature(debugName);
 }
 
+// Engine-owned sibling of AddPostOpaquePass() immediately above - same
+// contract as AddBuiltInPreOpaquePass() above, for the PostOpaque stage.
+// Deliberately bypasses ProjectAssemblyRegistrationLedger.
+bool Core::AddBuiltInPostOpaquePass(const char* debugName, ProjectScenePassCallback callback, std::int32_t priority)
+{
+    if (m_renderFeatureCompositorPtr == nullptr) {
+        GTE_LOG_WARNING("Core", "AddBuiltInPostOpaquePass('" + std::string(debugName != nullptr ? debugName : "<null>")
+            + "') failed - no RenderFeatureCompositor orchestrator is registered in this build.");
+        return false;
+    }
+    if (debugName == nullptr) {
+        GTE_LOG_WARNING("Core", "AddBuiltInPostOpaquePass() failed - debugName is null.");
+        return false;
+    }
+    if (std::strlen(debugName) > 63) {
+        GTE_LOG_WARNING("Core", "AddBuiltInPostOpaquePass('" + std::string(debugName)
+            + "') failed - name exceeds the 63-byte limit this engine's registration surfaces consistently "
+            "enforce; shorten it (never silently truncated).");
+        return false;
+    }
+
+    return m_renderFeatureCompositorPtr->RegisterBuiltInPostOpaqueFeature(debugName, priority, std::move(callback));
+}
+
 // Same contract as AddPreOpaquePass() above, for the PostTransparent stage -
 // see that method's own doc comment (Core.h) for the full shared contract.
 bool Core::AddPostTransparentPass(const char* debugName, ProjectScenePassCallback callback, std::int32_t priority)
@@ -583,6 +632,35 @@ void Core::RemovePostTransparentPass(const char* debugName)
         return;
     }
     m_renderFeatureCompositorPtr->UnregisterPostTransparentFeature(debugName);
+}
+
+// Engine-owned sibling of AddPostTransparentPass() immediately above - same
+// contract as AddBuiltInPreOpaquePass() above, for the PostTransparent
+// stage. No real built-in caller exists today - added for symmetry with
+// the other two stages' AddBuiltIn... siblings. Deliberately bypasses
+// ProjectAssemblyRegistrationLedger.
+bool Core::AddBuiltInPostTransparentPass(
+    const char* debugName, ProjectScenePassCallback callback, std::int32_t priority)
+{
+    if (m_renderFeatureCompositorPtr == nullptr) {
+        GTE_LOG_WARNING("Core",
+            "AddBuiltInPostTransparentPass('" + std::string(debugName != nullptr ? debugName : "<null>")
+            + "') failed - no RenderFeatureCompositor orchestrator is registered in this build.");
+        return false;
+    }
+    if (debugName == nullptr) {
+        GTE_LOG_WARNING("Core", "AddBuiltInPostTransparentPass() failed - debugName is null.");
+        return false;
+    }
+    if (std::strlen(debugName) > 63) {
+        GTE_LOG_WARNING("Core", "AddBuiltInPostTransparentPass('" + std::string(debugName)
+            + "') failed - name exceeds the 63-byte limit this engine's registration surfaces consistently "
+            "enforce; shorten it (never silently truncated).");
+        return false;
+    }
+
+    return m_renderFeatureCompositorPtr->RegisterBuiltInPostTransparentFeature(
+        debugName, priority, std::move(callback));
 }
 
 // better-render-pass-1 campaign, PHASE9 (Decision D3) - additive convenience

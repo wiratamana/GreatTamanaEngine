@@ -218,4 +218,31 @@ TEST(RenderFeatureCompositorPostTransparentTest, PostTransparentFeaturesInPriori
     }
 }
 
+// Debug fix D1 (RENDER_GRAPH_BUG_REPORT.txt) - a built-in engine
+// PostTransparent feature (RegisterBuiltInPostTransparentFeature()) must
+// report isProjectFeature == false in DebugSnapshot() - a Project-owned
+// PostTransparent feature registered right alongside it must still report
+// true. No real built-in PostTransparent caller exists today - added for
+// symmetry/coverage with the PreOpaque/PostOpaque siblings.
+TEST(RenderFeatureCompositorPostTransparentTest, BuiltInFeatureReportsIsProjectFeatureFalse)
+{
+    GTE_SKIP_IF_NO_HEADLESS_CORE(core);
+
+    RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
+    ASSERT_NE(compositor, nullptr);
+
+    ASSERT_TRUE(compositor->RegisterBuiltInPostTransparentFeature("PTr_Test_EngineProbe", 0,
+        [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
+    ASSERT_TRUE(compositor->RegisterPostTransparentFeature("PTr_Test_ProjectProbe", 1,
+        [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
+
+    const std::vector<RenderFeatureDebugEntry> snapshot = compositor->DebugSnapshot();
+    const RenderFeatureDebugEntry* engineEntry = FindByName(snapshot, "PTr_Test_EngineProbe");
+    const RenderFeatureDebugEntry* projectEntry = FindByName(snapshot, "PTr_Test_ProjectProbe");
+    ASSERT_NE(engineEntry, nullptr);
+    ASSERT_NE(projectEntry, nullptr);
+    EXPECT_FALSE(engineEntry->isProjectFeature);
+    EXPECT_TRUE(projectEntry->isProjectFeature);
+}
+
 } // namespace gte

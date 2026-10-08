@@ -73,11 +73,14 @@ void AtmosphereFeature::RegisterPasses()
             frame.blackboard.Publish<AtmosphereSharedLutBlackboardEntry>(kAtmosphereSharedLutKey, entry);
         });
 
-    // "AtmosphereViewLut" - PreOpaque, via Core::AddPreOpaquePass(). No other
-    // PreOpaque feature exists in a real session today, so priority 0 has
-    // nothing to collide with - confirmed by inspection, not assumed.
+    // "AtmosphereViewLut" - PreOpaque, built-in engine feature, via
+    // Core::AddBuiltInPreOpaquePass() (reports isProjectFeature == false in
+    // DebugSnapshot()/GET /render_graph - this is the engine's own pass, not
+    // a Project Assembly's). No other PreOpaque feature exists in a real
+    // session today, so priority 0 has nothing to collide with - confirmed
+    // by inspection, not assumed.
     static constexpr std::int32_t kAtmosphereViewLutPriority = 0;
-    const bool viewLutRegistered = m_core.AddPreOpaquePass("AtmosphereViewLut",
+    const bool viewLutRegistered = m_core.AddBuiltInPreOpaquePass("AtmosphereViewLut",
         [this](rg::RenderGraphBuilder& builder, rg::RenderPassBlackboard& blackboard, rg::RenderViewId currentView) {
             const std::optional<RenderPassViewData> viewData = m_core.FindRenderPassViewData(currentView);
             if (!viewData.has_value()) {

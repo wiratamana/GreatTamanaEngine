@@ -199,4 +199,34 @@ TEST(RenderFeatureCompositorPreOpaqueTest, SamePriorityCollisionFallsBackToLexic
     EXPECT_NE(FindByName(snapshot, "PO_Test_CollisionB"), nullptr);
 }
 
+// Debug fix D1 (RENDER_GRAPH_BUG_REPORT.txt) - a built-in engine PreOpaque
+// feature (RegisterBuiltInPreOpaqueFeature(), the real-world shape of
+// ShadowFeature.cpp's "Shadow.DepthPass"/AtmosphereFeature.cpp's
+// "AtmosphereViewLut") must report isProjectFeature == false in
+// DebugSnapshot() - a Project-owned PreOpaque feature registered right
+// alongside it must still report true. Mirrors
+// RenderFeatureCompositorProjectFeatureTests.cpp's own
+// BuiltInFeatureReportsIsProjectFeatureFalse for the PostComposite/PreUI
+// stage.
+TEST(RenderFeatureCompositorPreOpaqueTest, BuiltInFeatureReportsIsProjectFeatureFalse)
+{
+    GTE_SKIP_IF_NO_HEADLESS_CORE(core);
+
+    RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
+    ASSERT_NE(compositor, nullptr);
+
+    ASSERT_TRUE(compositor->RegisterBuiltInPreOpaqueFeature("PO_Test_EngineProbe", 0,
+        [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId) { }));
+    ASSERT_TRUE(compositor->RegisterPreOpaqueFeature("PO_Test_ProjectProbe", 1,
+        [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId) { }));
+
+    const std::vector<RenderFeatureDebugEntry> snapshot = compositor->DebugSnapshot();
+    const RenderFeatureDebugEntry* engineEntry = FindByName(snapshot, "PO_Test_EngineProbe");
+    const RenderFeatureDebugEntry* projectEntry = FindByName(snapshot, "PO_Test_ProjectProbe");
+    ASSERT_NE(engineEntry, nullptr);
+    ASSERT_NE(projectEntry, nullptr);
+    EXPECT_FALSE(engineEntry->isProjectFeature);
+    EXPECT_TRUE(projectEntry->isProjectFeature);
+}
+
 } // namespace gte

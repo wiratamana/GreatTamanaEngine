@@ -220,4 +220,32 @@ TEST(RenderFeatureCompositorPostOpaqueTest, PostOpaqueFeaturesInPriorityOrderRet
     }
 }
 
+// Debug fix D1 (RENDER_GRAPH_BUG_REPORT.txt) - a built-in engine PostOpaque
+// feature (RegisterBuiltInPostOpaqueFeature(), the real-world shape of
+// ShadowFeature.cpp's "Shadow.Mask") must report isProjectFeature == false
+// in DebugSnapshot() - a Project-owned PostOpaque feature registered right
+// alongside it must still report true. Mirrors
+// RenderFeatureCompositorPreOpaqueTests.cpp's own identical test for the
+// PreOpaque stage.
+TEST(RenderFeatureCompositorPostOpaqueTest, BuiltInFeatureReportsIsProjectFeatureFalse)
+{
+    GTE_SKIP_IF_NO_HEADLESS_CORE(core);
+
+    RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
+    ASSERT_NE(compositor, nullptr);
+
+    ASSERT_TRUE(compositor->RegisterBuiltInPostOpaqueFeature("POp_Test_EngineProbe", 0,
+        [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
+    ASSERT_TRUE(compositor->RegisterPostOpaqueFeature("POp_Test_ProjectProbe", 1,
+        [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
+
+    const std::vector<RenderFeatureDebugEntry> snapshot = compositor->DebugSnapshot();
+    const RenderFeatureDebugEntry* engineEntry = FindByName(snapshot, "POp_Test_EngineProbe");
+    const RenderFeatureDebugEntry* projectEntry = FindByName(snapshot, "POp_Test_ProjectProbe");
+    ASSERT_NE(engineEntry, nullptr);
+    ASSERT_NE(projectEntry, nullptr);
+    EXPECT_FALSE(engineEntry->isProjectFeature);
+    EXPECT_TRUE(projectEntry->isProjectFeature);
+}
+
 } // namespace gte

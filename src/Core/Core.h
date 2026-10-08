@@ -399,6 +399,15 @@ public:
     // duplicate.
     bool AddPreOpaquePass(const char* debugName, ProjectPreOpaqueCallback callback, std::int32_t priority = 0);
 
+    // Engine-owned sibling of AddPreOpaquePass() immediately above - same
+    // preconditions/refusal rules, but marks the registered entry
+    // RenderFeatureOwner::Engine (DebugSnapshot() then reports
+    // isProjectFeature == false for it) and is never recorded in
+    // ProjectAssemblyRegistrationLedger (a built-in feature lives for the
+    // process lifetime, never torn down by project hot-reload) - mirrors
+    // RegisterBuiltInRenderFeature()'s own exact shape above.
+    bool AddBuiltInPreOpaquePass(const char* debugName, ProjectPreOpaqueCallback callback, std::int32_t priority = 0);
+
     // Teardown counterpart of AddPreOpaquePass() immediately above,
     // mirroring UnregisterProjectRenderFeature()'s own shape. Null-safe;
     // a safe no-op if debugName was never successfully registered.
@@ -409,11 +418,22 @@ public:
     // rg::RenderPassEvent::AfterOpaques. See
     // docs/conventions/project-assembly-system.md's PostOpaque subsection.
     bool AddPostOpaquePass(const char* debugName, ProjectScenePassCallback callback, std::int32_t priority = 0);
+
+    // Engine-owned sibling of AddPostOpaquePass() immediately above - same
+    // contract as AddBuiltInPreOpaquePass() above, for the PostOpaque stage.
+    bool AddBuiltInPostOpaquePass(const char* debugName, ProjectScenePassCallback callback, std::int32_t priority = 0);
     void RemovePostOpaquePass(const char* debugName);
 
     // Same contract, for the PostTransparent stage - every pass the
     // callback declares must carry rg::RenderPassEvent::AfterTransparents.
     bool AddPostTransparentPass(const char* debugName, ProjectScenePassCallback callback, std::int32_t priority = 0);
+
+    // Engine-owned sibling of AddPostTransparentPass() immediately above -
+    // same contract as AddBuiltInPreOpaquePass() above, for the
+    // PostTransparent stage. No real built-in caller exists today - added
+    // for symmetry with the other two stages' AddBuiltIn... siblings.
+    bool AddBuiltInPostTransparentPass(
+        const char* debugName, ProjectScenePassCallback callback, std::int32_t priority = 0);
     void RemovePostTransparentPass(const char* debugName);
 
     // Mints (or returns the already-existing) persistent, named render
