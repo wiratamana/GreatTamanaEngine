@@ -54,7 +54,11 @@
 
 #include "RenderGraphTypes.h"
 
+#include <volk.h>
+
 #include <cstddef>
+#include <string>
+
 
 namespace gte::rg {
 
@@ -106,6 +110,13 @@ public:
     // only ever knows this must be called once per fresh declaration - it
     // never learns what the real implementation clears.
     virtual void BeginFrame() = 0;
+
+    // Fires once per WRITE usage that actually required a barrier, at
+    // execute time (RenderGraph::Execute()'s own per-pass barrier loop).
+    // declarationIndex matches OnPassDeclared()'s own index space (same
+    // pass, same frame).
+    virtual void OnResourceBarrierApplied(std::size_t declarationIndex, const std::string& resourceName,
+        VkImageLayout oldLayout, VkImageLayout newLayout) = 0;
 };
 
 // READ side. Core-owned, pure-virtual, opaque - the ONE piece of NEW
@@ -140,6 +151,13 @@ public:
     // RenderGraphPassSnapshot's own category/drawKind/tags fields at their
     // own struct defaults for that one pass), never a hard failure.
     virtual bool QueryPassDebugMetadata(std::size_t declarationIndex, PassDebugMetadata& outMetadata) const = 0;
+
+    // Returns true and fills outLabel when a barrier transition label was
+    // recorded for this (declarationIndex, resourceName) pair this frame.
+    // False means "no barrier was applied this frame" - never a hard
+    // failure, same defensive convention as QueryPassDebugMetadata().
+    virtual bool QueryBarrierTransitionLabel(
+        std::size_t declarationIndex, const std::string& resourceName, std::string& outLabel) const = 0;
 };
 
 } // namespace gte::rg

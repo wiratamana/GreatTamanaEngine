@@ -440,6 +440,7 @@ add_library(gte_core STATIC
     src/Core/Plugins/RenderFeatureDescriptor.h
     src/Core/Plugins/RenderFeatureCompositor.h
     src/Core/Plugins/RenderFeatureCompositor.cpp
+    src/Core/Plugins/PostProcessingPassTags.h
     # better-render-pass-3 campaign, BLOCK 2 (Arbitrary Render Views), PHASE2
     # (PHASE2_RENDER_VIEW_REGISTRY_CORE.md) - the new registry owning every
     # dynamically-created, named render view's persistent RenderTexture.
@@ -472,6 +473,7 @@ add_library(gte_core STATIC
     src/Core/IHostServices.h
     src/Core/Core.h
     src/Core/Core.cpp
+    src/Core/SceneRenderingPassTags.h
     # better-render-pass-1 campaign, PHASE9 (Decision D3) - the pure,
     # Tier-1-testable counter-increment logic backing
     # Core::AddScreenPostProcessPass()'s own RUNTIME auto-priority
@@ -1178,6 +1180,8 @@ add_library(gte_editor STATIC
     src/Editor/Panels/ProfilerPanel.cpp
     src/Editor/Panels/RenderGraphPanel.h
     src/Editor/Panels/RenderGraphPanel.cpp
+    src/Editor/Panels/RenderFeaturesPanel.h
+    src/Editor/Panels/RenderFeaturesPanel.cpp
     src/Editor/Panels/JobsPanel.h
     src/Editor/Panels/JobsPanel.cpp
     src/Editor/Panels/LogPanel.h

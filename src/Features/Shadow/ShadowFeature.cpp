@@ -8,6 +8,8 @@
 #include "../../Game/Lighting/DirectionalLightResolver.h"
 #include "../../Game/SceneQuery.h"
 #include "../../Renderer/RenderGraph/RenderGraphBuilder.h"
+#include "../../Renderer/RenderGraph/RenderPassGroupRegistry.h"
+#include "ShadowRenderPassTags.h"
 
 #include <algorithm>
 #include <cassert>
@@ -49,6 +51,10 @@ ShadowFeature::ShadowFeature(Core& core)
     : m_core(core)
     , m_settings()
 {
+    // This feature registers its OWN Render Graph panel grouping heading
+    // for its OWN tag, from its OWN file - idempotent, safe even if more
+    // than one instance is ever constructed in the same process.
+    rg::RegisterPassGroupLabel(kShadowPassTag, "Shadow");
     RegisterPasses();
 }
 
@@ -184,7 +190,7 @@ void ShadowFeature::RegisterPasses()
                     gte::DrawScene(m_core.GetGame().GetRenderSystem(), m_core.GetRegistry(), renderer, request);
                     renderer.EndGraphPassRecording();
                 },
-                rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::PreOpaques);
+                rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::PreOpaques, kShadowPassTag.bit);
 
             builder.KeepTextureOutput(shadowHandle);
 

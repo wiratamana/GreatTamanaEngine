@@ -216,4 +216,28 @@ void EmitBufferBarrier(
     vkCmdPipelineBarrier2(cmd, &dependencyInfo);
 }
 
+const char* ShortLayoutLabel(VkImageLayout layout) noexcept
+{
+    switch (layout) {
+    case VK_IMAGE_LAYOUT_UNDEFINED:
+        return "Undefined";
+    case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+        return "RT";
+    case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
+        return "Depth Test";
+    case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+        return "Shader Read";
+    case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+        return "Transfer Src";
+    case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+        return "Transfer Dst";
+    case VK_IMAGE_LAYOUT_GENERAL:
+        return "General (Storage)";
+    case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
+        return "Present";
+    default:
+        return "Other";
+    }
+}
+
 } // namespace gte::rg

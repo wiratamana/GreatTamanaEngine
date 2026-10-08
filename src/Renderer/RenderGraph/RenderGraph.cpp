@@ -207,7 +207,7 @@ void RenderGraph::EnsureTextureArrayResolved(std::uint32_t index, const Compiled
 void RenderGraph::ApplyUsageBarrierIfNeeded(VkCommandBuffer cmd, const ResourceUsage& usage,
     const CompiledGraphInput& input, std::vector<PhysicalTexture>& physicalTextures,
     std::vector<PhysicalBuffer>& physicalBuffers, std::vector<PhysicalVolumeTexture>& physicalVolumeTextures,
-    std::vector<PhysicalTextureArray>& physicalTextureArrays)
+    std::vector<PhysicalTextureArray>& physicalTextureArrays, AppliedBarrierInfo* outBarrierInfo)
 {
     // Atmosphere Scattering campaign, Phase 2 precheck
     // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md, Step
@@ -265,6 +265,9 @@ void RenderGraph::ApplyUsageBarrierIfNeeded(VkCommandBuffer cmd, const ResourceU
                     : static_cast<VkImageAspectFlags>(VK_IMAGE_ASPECT_COLOR_BIT);
                 const VkImageSubresourceRange range{ aspect, 0, 1, 0, 1 };
                 EmitImageBarrier(cmd, image, range, state, next);
+                if (outBarrierInfo != nullptr) {
+                    *outBarrierInfo = AppliedBarrierInfo{ true, state.layout, next.layout };
+                }
             }
             state = next;
         },
@@ -291,6 +294,9 @@ void RenderGraph::ApplyUsageBarrierIfNeeded(VkCommandBuffer cmd, const ResourceU
             if (RequiresBarrier(vol.state, next)) {
                 const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
                 EmitImageBarrier(cmd, vol.target.image, range, vol.state, next);
+                if (outBarrierInfo != nullptr) {
+                    *outBarrierInfo = AppliedBarrierInfo{ true, vol.state.layout, next.layout };
+                }
             }
             vol.state = next;
         },
@@ -317,6 +323,9 @@ void RenderGraph::ApplyUsageBarrierIfNeeded(VkCommandBuffer cmd, const ResourceU
                     DecideTextureArrayLayerTransition(arr.layerStates[layer], aspect, layer, next);
                 if (decision.requiresBarrier) {
                     EmitImageBarrier(cmd, arr.target.image, decision.range, arr.layerStates[layer], next);
+                    if (outBarrierInfo != nullptr) {
+                        *outBarrierInfo = AppliedBarrierInfo{ true, arr.layerStates[layer].layout, next.layout };
+                    }
                 }
                 arr.layerStates[layer] = next;
             } else {
@@ -835,8 +844,18 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
                 cmd, usage, input, physicalTextures, physicalBuffers, physicalVolumeTextures, physicalTextureArrays);
         }
         for (const ResourceUsage& usage : pass.writes) {
-            ApplyUsageBarrierIfNeeded(
-                cmd, usage, input, physicalTextures, physicalBuffers, physicalVolumeTextures, physicalTextureArrays);
+            AppliedBarrierInfo barrierInfo;
+            ApplyUsageBarrierIfNeeded(cmd, usage, input, physicalTextures, physicalBuffers, physicalVolumeTextures,
+                physicalTextureArrays, &barrierInfo);
+            // editor-core-separation-25 campaign (barrier labels) - reports
+            // this WRITE's real before/after layout transition to the
+            // installed sink, if any, so the Editor Inspector can show it
+            // next to the pass's own output resource - never computed on
+            // this hot Vulkan recording path, only forwarded.
+            if (barrierInfo.applied && m_debugMetadataSink != nullptr) {
+                m_debugMetadataSink->OnResourceBarrierApplied(passHandle.index, ResourceUsageName(usage, input),
+                    barrierInfo.oldLayout, barrierInfo.newLayout);
+            }
         }
 
         const std::int32_t timingSlot = timingSlots.AssignOrGetSlot(pass.name);
@@ -1254,8 +1273,21 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         };
     }
 
+    // editor-core-separation-25 campaign (barrier labels) - same "built
+    // fresh, empty when no provider installed" shape as metadataLookup
+    // immediately above.
+    std::function<bool(std::size_t, const std::string&, std::string&)> barrierLabelLookup;
+    if (m_debugMetadataProvider != nullptr) {
+        IPassDebugMetadataProvider* provider = m_debugMetadataProvider;
+        barrierLabelLookup =
+            [provider](std::size_t declarationIndex, const std::string& resourceName, std::string& outLabel) {
+                return provider->QueryBarrierTransitionLabel(declarationIndex, resourceName, outLabel);
+            };
+    }
+
     RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input,
-        [this](const char* name) { return LastKnownStatsFor(name); }, timingSlotBudgetExhausted, metadataLookup);
+        [this](const char* name) { return LastKnownStatsFor(name); }, timingSlotBudgetExhausted, metadataLookup,
+        barrierLabelLookup);
     if (!isPipelined) {
         m_synchronousSnapshot = std::move(snapshot);
     } else {

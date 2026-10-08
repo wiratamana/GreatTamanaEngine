@@ -63,6 +63,36 @@ const char* ToString(ResourceAccess access) noexcept
     return "Unknown";
 }
 
+// Editor Inspector display label - which pipeline stage/binding point a
+// declared access resolves to. Deliberately NO `default:` case, mirroring
+// ToString(ResourceAccess) above.
+const char* BindingStageLabel(ResourceAccess access) noexcept
+{
+    switch (access) {
+    case ResourceAccess::ColorAttachmentWrite:
+        return "Color Attachment";
+    case ResourceAccess::DepthStencilAttachmentReadWrite:
+        return "Depth Test";
+    case ResourceAccess::ShaderRead:
+        return "Pixel Shader";
+    case ResourceAccess::TransferSrc:
+        return "Transfer Source";
+    case ResourceAccess::TransferDst:
+        return "Transfer Destination";
+    case ResourceAccess::ComputeShaderRead:
+        return "Compute Shader";
+    case ResourceAccess::ComputeShaderWrite:
+        return "Compute Shader";
+    case ResourceAccess::IndirectCommandRead:
+        return "Indirect Command";
+    case ResourceAccess::VertexBufferRead:
+        return "Vertex Input";
+    case ResourceAccess::VertexShaderStorageRead:
+        return "Vertex Shader";
+    }
+    return "Unknown";
+}
+
 bool IsResolvedViewMissingItsSampler(VkImageView view, VkSampler sampler) noexcept
 {
     return view != VK_NULL_HANDLE && sampler == VK_NULL_HANDLE;

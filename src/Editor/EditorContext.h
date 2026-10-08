@@ -223,13 +223,20 @@ struct EditorContext {
     // own titlebar close button. Defaults to true (always visible on launch).
     bool renderGraphWindowOpen = true;
 
+    // True when the floating "Render Features" window
+    // (Panels/RenderFeaturesPanel.h) is open - GPU-driven-batch culling
+    // readout + render-feature priority/enable authoring, split out of the
+    // Render Graph panel. Toggled by "Window > Render Features" menu item
+    // and the window's own titlebar close button. Defaults to false.
+    bool renderFeaturesWindowOpen = false;
+
     // Set true in RenderGraphPanel::Build() when a before/after snapshot
     // diff (DidRenderPassToggleEnabledStatesChange) detects any pass toggle
-    // checkbox flip this frame (Pass Tree, All Built-In Passes, or Render
-    // Features tab). Read-and-cleared by FrameDebuggerPanel::Build() to
-    // trigger a fresh capture so a toggled pass doesn't linger with stale
-    // debugger data.
+    // checkbox flip this frame (Pass Tree, or Isolate Pass). Read-and-cleared
+    // by FrameDebuggerPanel::Build() to trigger a fresh capture so a toggled
+    // pass doesn't linger with stale debugger data.
     bool renderPassToggleRegistryChangedThisFrame = false;
+
 
     // editor-core-separation-16 campaign (On-Engine Project Workflow plan,
     // BIG-STEP 2), PHASE4 - true whenever NewProjectWindow.h's floating

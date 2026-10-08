@@ -143,6 +143,20 @@ struct RenderGraphPassSnapshot {
     std::vector<ResourceKind> readKinds;
     std::vector<ResourceKind> writeKinds;
 
+    // Editor Inspector binding-stage display - PARALLEL to readNames/
+    // writeNames exactly like readKinds/writeKinds above. The declared
+    // ResourceAccess for each entry, resolved into a human label via
+    // rg::BindingStageLabel() at the RenderGraphMetadata layer.
+    std::vector<ResourceAccess> readAccess;
+    std::vector<ResourceAccess> writeAccess;
+
+    // PARALLEL to writeNames - one barrier transition label per declared
+    // write ("" when no barrier was applied this frame for that write, or
+    // no sink is installed). Resolved once, at snapshot-build time, via the
+    // optional barrierLabelLookup callback (see BuildRenderGraphSnapshot()
+    // below) - never recomputed on the hot Vulkan recording path.
+    std::vector<std::string> writeBarrierLabels;
+
     // Deliberately left at its default (an empty DrawStats, an Absent
     // GpuTimingSample) for a CULLED pass - see BuildRenderGraphSnapshot()'s
     // own doc comment below for why.
@@ -238,8 +252,23 @@ struct RenderGraphSnapshot {
 // (e.g. a lambda closing over a small local table), which is exactly what
 // keeps this function itself Tier-1-testable with no live sink/RenderGraph
 // at all.
+// A THIRD, NEW, trailing, DEFAULTED parameter - resolves ONE declared
+// write's barrier transition label by (declarationIndex, resourceName),
+// exactly mirroring metadataLookup's own "empty means nothing available"
+// convention immediately above. In production, RenderGraph::
+// ExecuteCompiledGraph() supplies a real lookup backed by its own installed
+// IPassDebugMetadataProvider::QueryBarrierTransitionLabel().
 RenderGraphSnapshot BuildRenderGraphSnapshot(const CompiledGraph& compiled, const CompiledGraphInput& input,
     const std::function<PassGpuStats(const char*)>& statsLookup, bool timingSlotBudgetExhausted = false,
-    const std::function<bool(std::size_t, PassDebugMetadata&)>& metadataLookup = {});
+    const std::function<bool(std::size_t, PassDebugMetadata&)>& metadataLookup = {},
+    const std::function<bool(std::size_t, const std::string&, std::string&)>& barrierLabelLookup = {});
+
+// Resolves a declared usage's resource name from whichever of
+// CompiledGraphInput's texture/buffer/volume-texture/texture-array tables
+// actually applies. Degrades to an empty string for a stale or
+// out-of-range index - a display helper, never an assertion. Shared by
+// RenderGraphSnapshot.cpp's own BuildPassSnapshot() and RenderGraph.cpp's
+// barrier-applied sink call, so both resolve a usage's name identically.
+std::string ResourceUsageName(const ResourceUsage& usage, const CompiledGraphInput& input);
 
 } // namespace gte::rg

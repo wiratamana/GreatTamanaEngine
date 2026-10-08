@@ -5,6 +5,7 @@
 #include "../../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../../Renderer/RenderGraph/RenderGraph.h"
 #include "../../Renderer/Vulkan/DescriptorSetLayoutBuilder.h"
+#include "ShadowRenderPassTags.h"
 
 #include <cstring>
 #include <fstream>
@@ -262,7 +263,7 @@ void ShadowCompositeRenderer::AddCompositePass(rg::RenderGraphBuilder& builder, 
                 cmd.Native(), m_pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pushConstants), &pushConstants);
             vkCmdDraw(cmd.Native(), 3, 1, 0, 0);
         },
-        rg::RenderPassDrawKind::DrawQuad, rg::RenderPassEvent::AfterEverything);
+        rg::RenderPassDrawKind::DrawQuad, rg::RenderPassEvent::AfterEverything, kShadowPassTag.bit);
 }
 
 } // namespace gte

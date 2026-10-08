@@ -63,8 +63,10 @@ TEST(RenderGraphMetadataTest, SurvivingPassWithRegisteredTagResolvesTagGroupLabe
     pass.tags = 0x1;
     pass.readNames = { "Input" };
     pass.readKinds = { ResourceKind::Texture };
+    pass.readAccess = { ResourceAccess::ShaderRead };
     pass.writeNames = { "Output" };
     pass.writeKinds = { ResourceKind::Texture };
+    pass.writeAccess = { ResourceAccess::ColorAttachmentWrite };
 
     RenderGraphSnapshot offscreen;
     offscreen.passesInExecutionOrder.push_back(pass);
@@ -140,8 +142,10 @@ TEST(RenderGraphMetadataTest, CulledPassIsStillFullyDescribedWithZeroedStatsAndN
     pass.renderPassEvent = RenderPassEvent::AfterTransparents;
     pass.readNames = { "SomeInput" };
     pass.readKinds = { ResourceKind::Buffer };
+    pass.readAccess = { ResourceAccess::ShaderRead };
     pass.writeNames = { "DeadEnd" };
     pass.writeKinds = { ResourceKind::VolumeTexture };
+    pass.writeAccess = { ResourceAccess::ComputeShaderWrite };
     // pass.stats left at its default (empty DrawStats, Absent GpuTimingSample)
     // - exactly what BuildRenderGraphSnapshot() itself always leaves a culled
     // pass with.
@@ -330,8 +334,10 @@ TEST(RenderGraphMetadataTest, ToJsonProducesExpectedTopLevelShapeAndNullHandling
     RenderGraphPassSnapshot pass = MakeSurvivingPass("RenderOpaque");
     pass.readNames = { "Depth" };
     pass.readKinds = { ResourceKind::Texture };
+    pass.readAccess = { ResourceAccess::ShaderRead };
     pass.writeNames = { "Color" };
     pass.writeKinds = { ResourceKind::Texture };
+    pass.writeAccess = { ResourceAccess::ColorAttachmentWrite };
     pass.stats.drawStats.drawCallCount = 2;
     pass.stats.drawStats.triangleCount = 20;
     // tags == 0, no registered label -> tagGroupLabel stays nullopt -> JSON null.

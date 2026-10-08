@@ -11,22 +11,30 @@ namespace gte::rg {
 
 namespace {
 
-// Zips `names`/`kinds` (same-length parallel arrays on RenderGraphPassSnapshot
-// - a hard, load-bearing, pre-existing invariant elsewhere in the engine, see
-// PHASE2_RENDERGRAPH_METADATA_MODEL_AND_JSON.md's own Step 3.2) into the
-// JSON-friendlier "one array of {name,kind} structs" shape. Defensively
-// clamped to the shorter of the two vectors rather than asserting - this
-// phase does not need to newly defend an invariant that already holds
-// elsewhere, but a silent out-of-bounds read would be strictly worse than a
-// silently-shorter result.
-std::vector<RenderGraphResourceRefMetadata> BuildResourceRefs(
-    const std::vector<std::string>& names, const std::vector<ResourceKind>& kinds)
+// Zips `names`/`kinds`/`access` (same-length parallel arrays on
+// RenderGraphPassSnapshot - a hard, load-bearing, pre-existing invariant
+// elsewhere in the engine) into the JSON-friendlier "one array of
+// {name,kind,bindingStageLabel} structs" shape. Defensively clamped to the
+// shortest of the three vectors rather than asserting - a silent
+// out-of-bounds read would be strictly worse than a silently-shorter
+// result. `barrierLabels`, when non-null, is RenderGraphPassSnapshot's own
+// writeBarrierLabels (nullptr for a reads call - reads never carry one).
+std::vector<RenderGraphResourceRefMetadata> BuildResourceRefs(const std::vector<std::string>& names,
+    const std::vector<ResourceKind>& kinds, const std::vector<ResourceAccess>& access,
+    const std::vector<std::string>* barrierLabels)
 {
     std::vector<RenderGraphResourceRefMetadata> refs;
-    const std::size_t count = names.size() < kinds.size() ? names.size() : kinds.size();
+    const std::size_t count = std::min({ names.size(), kinds.size(), access.size() });
     refs.reserve(count);
     for (std::size_t i = 0; i < count; ++i) {
-        refs.push_back(RenderGraphResourceRefMetadata{ names[i], ToString(kinds[i]) });
+        RenderGraphResourceRefMetadata ref;
+        ref.name = names[i];
+        ref.kind = ToString(kinds[i]);
+        ref.bindingStageLabel = BindingStageLabel(access[i]);
+        if (barrierLabels != nullptr && i < barrierLabels->size() && !(*barrierLabels)[i].empty()) {
+            ref.barrierTransitionLabel = (*barrierLabels)[i];
+        }
+        refs.push_back(std::move(ref));
     }
     return refs;
 }
@@ -48,8 +56,8 @@ RenderGraphPassMetadata BuildPassMetadata(const RenderGraphPassSnapshot& pass)
         ? std::optional<std::string>(PassGroupLabelUiHeadingAt(*groupIndex))
         : std::nullopt;
 
-    metadata.reads = BuildResourceRefs(pass.readNames, pass.readKinds);
-    metadata.writes = BuildResourceRefs(pass.writeNames, pass.writeKinds);
+    metadata.reads = BuildResourceRefs(pass.readNames, pass.readKinds, pass.readAccess, nullptr);
+    metadata.writes = BuildResourceRefs(pass.writeNames, pass.writeKinds, pass.writeAccess, &pass.writeBarrierLabels);
 
     // Always falls out correctly for a culled pass, without any special-case
     // branch here - a culled pass's own `stats` is always left at its
@@ -324,6 +332,10 @@ void to_json(nlohmann::json& j, const RenderGraphResourceRefMetadata& ref)
     j = nlohmann::json{
         { "name", ref.name },
         { "kind", ref.kind },
+        { "binding_stage_label", ref.bindingStageLabel },
+        { "barrier_transition_label",
+            ref.barrierTransitionLabel.has_value() ? nlohmann::json(*ref.barrierTransitionLabel)
+                                                    : nlohmann::json(nullptr) },
     };
 }
 

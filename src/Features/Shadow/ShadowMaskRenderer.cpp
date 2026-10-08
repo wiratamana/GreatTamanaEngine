@@ -2,6 +2,7 @@
 
 #include "../../Renderer/Renderer.h"
 #include "../../Renderer/RenderGraph/RenderGraph.h"
+#include "ShadowRenderPassTags.h"
 
 #include <cassert>
 #include <cstring>
@@ -120,7 +121,7 @@ rg::TextureHandle ShadowMaskRenderer::AddMaskPass(rg::RenderGraphBuilder& builde
             cmd.BindDescriptorSet(viewState.descriptorSet.Native());
             cmd.DispatchOverSize(viewExtent.width, viewExtent.height, 1);
         },
-        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::AfterOpaques);
+        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::AfterOpaques, kShadowPassTag.bit);
 
     return outputHandle;
 }

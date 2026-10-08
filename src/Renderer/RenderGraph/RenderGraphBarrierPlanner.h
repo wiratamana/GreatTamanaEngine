@@ -49,6 +49,9 @@
 
 #include <volk.h>
 
+#include <string>
+
+
 namespace gte::rg {
 
 // A resource's known GPU-visible state at one point in time - what layout
@@ -187,5 +190,17 @@ void EmitImageBarrier(
 // Thin Vulkan-call buffer counterpart - see EmitImageBarrier() above.
 void EmitBufferBarrier(
     VkCommandBuffer cmd, VkBuffer buffer, VkDeviceSize offset, VkDeviceSize size, const ResourceState& previous, const ResourceState& next);
+
+// Short Editor-display label for one VkImageLayout value - e.g. "RT",
+// "Shader Read". Falls back to "Other" for anything not explicitly listed.
+const char* ShortLayoutLabel(VkImageLayout layout) noexcept;
+
+// "<old> -> <new>" barrier transition label for the Editor Inspector's
+// "OUTPUT TARGETS" section - built once, at execute time, never recomputed
+// on a hot Vulkan recording path.
+inline std::string BarrierTransitionLabel(VkImageLayout oldLayout, VkImageLayout newLayout)
+{
+    return std::string(ShortLayoutLabel(oldLayout)) + " -> " + ShortLayoutLabel(newLayout);
+}
 
 } // namespace gte::rg

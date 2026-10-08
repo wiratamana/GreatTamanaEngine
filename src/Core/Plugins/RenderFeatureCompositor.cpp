@@ -13,10 +13,12 @@
 // empty body below and the deleted BlackboardAdapter class
 // (RenderFeatureCompositor.h).
 #include "RenderFeatureCameraData.h"
+#include "PostProcessingPassTags.h"
 #include "../Core.h"
 #include "../Logging.h"
 
 #include "../../Renderer/ComputeDispatch.h"
+#include "../../Renderer/RenderGraph/RenderPassGroupRegistry.h"
 
 #include <algorithm>
 #include <cassert>
@@ -76,6 +78,11 @@ RenderFeatureCompositor::RenderFeatureCompositor(Core& core, Renderer& renderer)
     : m_core(core)
     , m_renderer(renderer)
 {
+    // Render Graph panel grouping heading for this compositor's own
+    // blend-chain compute dispatches - idempotent, safe to call every
+    // construction.
+    rg::RegisterPassGroupLabel(kPostProcessingPassTag, "Post Processing");
+
     // editor-core-separation-23 campaign, PHASE2 - the bounded, reusable
     // GPU-state slot free-list, fully populated at construction time. See
     // this class's own kMaxConcurrentProjectRenderFeatures/
@@ -938,7 +945,7 @@ void RenderFeatureCompositor::DispatchBlend(rg::RenderGraphBuilder& builder, rg:
                 &pushConstants, sizeof(pushConstants), groupCounts.width, groupCounts.height, groupCounts.depth);
             m_renderer.EndGraphPassRecording();
         },
-        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::AfterEverything);
+        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::AfterEverything, kPostProcessingPassTag.bit);
 }
 
 // editor-core-separation-6 campaign, PHASE4/PHASE5 - the real end-to-end

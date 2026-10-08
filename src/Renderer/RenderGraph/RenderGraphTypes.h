@@ -274,6 +274,11 @@ bool IsWriteAccess(ResourceAccess access) noexcept;
 // nullptr.
 const char* ToString(ResourceAccess access) noexcept;
 
+// Short binding-stage label for a declared resource access - Editor
+// Inspector display only, never consulted by RenderGraph.cpp/
+// RenderGraphCompiler.cpp. Never returns nullptr.
+const char* BindingStageLabel(ResourceAccess access) noexcept;
+
 // True exactly when a resolved view is non-null but its paired sampler is
 // null - a plumbing mistake somewhere upstream of a resolve call. Pure and
 // Vulkan-call-free so it is directly Tier-1-testable; shared by every

@@ -26,6 +26,7 @@
 #include "Panels/MemoryPanel.h"
 #include "Panels/ProfilerPanel.h"
 #include "Panels/RenderGraphPanel.h"
+#include "Panels/RenderFeaturesPanel.h"
 #include "SceneGridRenderer.h"
 #if GTE_ENABLE_PROJECT_PANEL
 #include "AssetPreviewMesh.h"
@@ -547,8 +548,8 @@ public:
         BuildGamePanel(m_ctx);
         BuildMemoryPanel(m_ctx, renderer);
         m_profilerPanel.Build(m_ctx);
-        m_renderGraphPanel.Build(m_ctx, renderer, renderGraph, gpuDrivenBatchDebugInfo, renderFeatureEntries,
-            renderPassToggleRegistry, renderFeatureCompositor);
+        m_renderGraphPanel.Build(m_ctx, renderer, renderGraph, renderPassToggleRegistry);
+        m_renderFeaturesPanel.Build(m_ctx, gpuDrivenBatchDebugInfo, renderFeatureEntries, renderFeatureCompositor);
         // Job System Phase 7 (Editor "Jobs" Panel) - reads Job System Phase
         // 5's Profiling::BuildWorkerTimelinePoints() reshape internally; also
         // hosts the GPU Vertex Skinning campaign's own Phase 7 CPU/GPU
@@ -975,6 +976,12 @@ private:
     // the gte::rg::RenderGraph Application already owns and drives every
     // frame, passed into BuildUI() above.
     RenderGraphPanel m_renderGraphPanel;
+
+    // The Editor "Render Features" panel (Panels/RenderFeaturesPanel.h) -
+    // GPU-driven-batch culling readout + render-feature priority/enable
+    // authoring, split out of the Render Graph panel. Independently
+    // opened/closed via ctx.renderFeaturesWindowOpen.
+    RenderFeaturesPanel m_renderFeaturesPanel;
 
     // The Editor "Jobs" panel (Panels/JobsPanel.h), docked alongside
     // "Memory"/"Profiler" (DockLayout.cpp). Not gated behind

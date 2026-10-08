@@ -36,33 +36,13 @@ PassGpuStats CombinePassGpuStats(const std::vector<PassGpuStats>& stats)
     return combined;
 }
 
-namespace {
-
 // Resolves one declared read/write's resource name, from whichever of
-// CompiledGraphInput::textures/buffers/volumeTextures' own `name` field
-// actually applies to its kind - mirrors how RenderGraph.cpp itself resolves a
-// ResourceUsage's target (see ApplyUsageBarrierIfNeeded()), just for a NAME
-// instead of a physical resource. Never reads out of bounds (a stale/invalid
-// index degrades to an empty string rather than crashing) - defensive, since
-// this function's whole job is to build a DISPLAY artifact, never to assert
-// correctness that Phase 1-3's own code already guarantees elsewhere.
-//
-// frame-debugger-5 campaign, PHASE1
-// (PHASE1_RENDERGRAPH_COMPUTE_DISPATCH_CHOKEPOINT_INFRASTRUCTURE.md) -
-// REQUIRED companion fix: this used to be a plain two-way
-// `if (kind == Texture) {...} else {assume Buffer}` shape - the exact hazard
-// RenderGraphCompiler.cpp/RenderGraph.cpp both explicitly document having
-// already audited and converted away from when ResourceKind::VolumeTexture
-// was first added (Atmosphere Scattering campaign, Phase 2) - this one file
-// was missed by that audit, silently resolving every VolumeTexture usage to
-// an empty string. Was fixed to a real, exhaustive, `default:`-less
-// three-way `switch (usage.kind)`, mirroring that same established
-// convention, so a future fourth ResourceKind fails to compile here too,
-// until this function is updated to match. render-pass-6 campaign, PHASE6
-// (item 2.2) - that hand-rolled switch was converted to a DispatchByKind()
-// call (RenderGraphTypes.h) - same "no default: case, ever" exhaustiveness
-// guarantee, just routed through the shared dispatcher every other
-// ResourceKind branch in the codebase now uses too.
+// CompiledGraphInput's texture/buffer/volume-texture/texture-array tables
+// actually applies to its kind. Never reads out of bounds (a stale/invalid
+// index degrades to an empty string rather than crashing) - a display
+// helper, never an assertion. Exported (declared in RenderGraphSnapshot.h)
+// so RenderGraph.cpp's own barrier-applied sink call resolves a usage's
+// name through this exact same function, never a second copy.
 std::string ResourceUsageName(const ResourceUsage& usage, const CompiledGraphInput& input)
 {
     std::string name;
@@ -91,9 +71,12 @@ std::string ResourceUsageName(const ResourceUsage& usage, const CompiledGraphInp
     return name;
 }
 
+namespace {
+
 RenderGraphPassSnapshot BuildPassSnapshot(const PassRecord& pass, std::size_t declarationIndex,
     const CompiledGraphInput& input, bool isCulled, const std::function<PassGpuStats(const char*)>& statsLookup,
-    const std::function<bool(std::size_t, PassDebugMetadata&)>& metadataLookup)
+    const std::function<bool(std::size_t, PassDebugMetadata&)>& metadataLookup,
+    const std::function<bool(std::size_t, const std::string&, std::string&)>& barrierLabelLookup)
 {
     RenderGraphPassSnapshot snapshot;
     snapshot.name = pass.name != nullptr ? pass.name : "";
@@ -121,16 +104,29 @@ RenderGraphPassSnapshot BuildPassSnapshot(const PassRecord& pass, std::size_t de
 
     snapshot.readNames.reserve(pass.reads.size());
     snapshot.readKinds.reserve(pass.reads.size());          // frame-debugger-5, PHASE1
+    snapshot.readAccess.reserve(pass.reads.size());
     for (const ResourceUsage& usage : pass.reads) {
         snapshot.readNames.push_back(ResourceUsageName(usage, input));
         snapshot.readKinds.push_back(usage.kind);           // frame-debugger-5, PHASE1
+        snapshot.readAccess.push_back(usage.access);
     }
 
     snapshot.writeNames.reserve(pass.writes.size());
     snapshot.writeKinds.reserve(pass.writes.size());        // frame-debugger-5, PHASE1
+    snapshot.writeAccess.reserve(pass.writes.size());
+    snapshot.writeBarrierLabels.reserve(pass.writes.size());
     for (const ResourceUsage& usage : pass.writes) {
-        snapshot.writeNames.push_back(ResourceUsageName(usage, input));
+        const std::string writeName = ResourceUsageName(usage, input);
+        snapshot.writeNames.push_back(writeName);
         snapshot.writeKinds.push_back(usage.kind);          // frame-debugger-5, PHASE1
+        snapshot.writeAccess.push_back(usage.access);
+
+        std::string barrierLabel;
+        if (barrierLabelLookup && barrierLabelLookup(declarationIndex, writeName, barrierLabel)) {
+            snapshot.writeBarrierLabels.push_back(std::move(barrierLabel));
+        } else {
+            snapshot.writeBarrierLabels.emplace_back();
+        }
     }
 
     // See this file's header comment - a culled pass's stats are
@@ -147,7 +143,8 @@ RenderGraphPassSnapshot BuildPassSnapshot(const PassRecord& pass, std::size_t de
 
 RenderGraphSnapshot BuildRenderGraphSnapshot(const CompiledGraph& compiled, const CompiledGraphInput& input,
     const std::function<PassGpuStats(const char*)>& statsLookup, bool timingSlotBudgetExhausted,
-    const std::function<bool(std::size_t, PassDebugMetadata&)>& metadataLookup)
+    const std::function<bool(std::size_t, PassDebugMetadata&)>& metadataLookup,
+    const std::function<bool(std::size_t, const std::string&, std::string&)>& barrierLabelLookup)
 {
     RenderGraphSnapshot snapshot;
     snapshot.timingSlotBudgetExhausted = timingSlotBudgetExhausted; // PHASE1 (render-pass-6 campaign, item 2.4)
@@ -161,8 +158,8 @@ RenderGraphSnapshot BuildRenderGraphSnapshot(const CompiledGraph& compiled, cons
         if (handle.index >= input.passes.size()) {
             continue; // Defensive - never expected against a real Compile() result.
         }
-        snapshot.passesInExecutionOrder.push_back(BuildPassSnapshot(
-            input.passes[handle.index], handle.index, input, /*isCulled=*/false, statsLookup, metadataLookup));
+        snapshot.passesInExecutionOrder.push_back(BuildPassSnapshot(input.passes[handle.index], handle.index, input,
+            /*isCulled=*/false, statsLookup, metadataLookup, barrierLabelLookup));
     }
 
     // Culled passes appended afterwards, in their original declaration
@@ -176,7 +173,7 @@ RenderGraphSnapshot BuildRenderGraphSnapshot(const CompiledGraph& compiled, cons
             continue;
         }
         snapshot.passesInExecutionOrder.push_back(
-            BuildPassSnapshot(pass, i, input, /*isCulled=*/true, statsLookup, metadataLookup));
+            BuildPassSnapshot(pass, i, input, /*isCulled=*/true, statsLookup, metadataLookup, barrierLabelLookup));
     }
 
     snapshot.resources.reserve(input.textures.size() + input.buffers.size());

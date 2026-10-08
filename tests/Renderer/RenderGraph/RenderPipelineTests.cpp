@@ -1,4 +1,4 @@
-﻿// Unit tests for the declaration layer (src/Renderer/RenderGraph/
+// Unit tests for the declaration layer (src/Renderer/RenderGraph/
 // RenderPipeline.h) - RenderPassId/RenderViewId hashing,
 // RenderPassBlackboard's Publish()/Fetch()/BeginFrame() contract, and
 // RenderPipeline::DeclareInto()'s Once/PerActiveView provider scoping +
@@ -53,6 +53,9 @@ public:
 
     void BeginFrame() override { m_table.clear(); }
 
+    // Test-local stub - no test in this file exercises barrier labels.
+    void OnResourceBarrierApplied(std::size_t, const std::string&, VkImageLayout, VkImageLayout) override {}
+
     bool QueryPassDebugMetadata(std::size_t declarationIndex, PassDebugMetadata& outMetadata) const override
     {
         if (declarationIndex >= m_table.size()) {
@@ -61,6 +64,8 @@ public:
         outMetadata = m_table[declarationIndex];
         return true;
     }
+
+    bool QueryBarrierTransitionLabel(std::size_t, const std::string&, std::string&) const override { return false; }
 
 private:
     std::vector<PassDebugMetadata> m_table;

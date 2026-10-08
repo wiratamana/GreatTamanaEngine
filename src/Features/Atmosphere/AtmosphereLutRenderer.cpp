@@ -89,11 +89,11 @@ struct AerialPerspectiveVolumeDebugSlicePushConstants {
 
 AtmosphereLutRenderer::AtmosphereLutRenderer()
 {
-    // render-pass-7 campaign, PHASE3 - this feature registers its OWN Frame Debugger
-    // grouping heading for its OWN tag, from its OWN file - Core never learns this string
-    // exists. Idempotent (RenderPassGroupRegistry.h) - safe even if more than one instance
-    // of this class is ever constructed in the same process (e.g. Tier-1 tests).
-    rg::RegisterPassGroupLabel(kAtmosphereLutPassTag, "Compute LUT");
+    // This feature registers its OWN Render Graph panel grouping heading
+    // for its OWN tag, from its OWN file - Core never learns this string
+    // exists. Idempotent - safe even if more than one instance of this
+    // class is ever constructed in the same process (e.g. Tier-1 tests).
+    rg::RegisterPassGroupLabel(kAtmosphereLutPassTag, "Atmosphere / Sky");
 }
 
 AtmosphereLutRenderer::~AtmosphereLutRenderer()

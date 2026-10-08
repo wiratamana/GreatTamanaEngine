@@ -5,6 +5,7 @@
 #include "AtmospherePassSequence.h"
 #include "../../Core/Core.h"
 #include "../../Core/Plugins/BuiltinFeatureModuleRegistry.h"
+#include "../../Core/SceneRenderingPassTags.h"
 #include "../../Core/ViewBackgroundReplayKey.h"
 #include "../../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../../Renderer/RenderGraph/RenderPassToggleGuard.h"
@@ -173,6 +174,7 @@ void AtmosphereFeature::RegisterPasses()
             desc.view = frame.currentView;
             desc.legacyCategory = rg::RenderPassCategory::General;
             desc.drawKind = rg::RenderPassDrawKind::DrawQuad;
+            desc.tags = kSceneRenderingPassTag.bit;
             desc.setup = [viewTarget](rg::RenderGraphBuilder::PassBuilder& pass) {
                 pass.WriteColorAttachment(viewTarget);
                 pass.WriteDepthStencilAttachment(viewTarget);

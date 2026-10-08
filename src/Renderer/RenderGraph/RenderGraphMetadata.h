@@ -52,7 +52,13 @@ namespace gte::rg {
 // same-length parallel arrays it has to zip itself.
 struct RenderGraphResourceRefMetadata {
     std::string name;
-    std::string kind; // rg::ToString(ResourceKind) - "Texture" | "Buffer" | "VolumeTexture".
+    std::string kind; // rg::ToString(ResourceKind) - "Texture" | "Buffer" | "VolumeTexture" | "TextureArray".
+    std::string bindingStageLabel; // rg::BindingStageLabel(ResourceAccess) at declaration time.
+    // "<old> -> <new>" barrier transition label - only ever set for a WRITE
+    // that actually required a barrier this frame (see
+    // IPassDebugMetadataSink::OnResourceBarrierApplied()). nullopt for every
+    // read, and for a write with no barrier applied this frame.
+    std::optional<std::string> barrierTransitionLabel;
 };
 
 // One pass, fully presentation-ready - every enum already resolved to its

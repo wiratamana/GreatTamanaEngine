@@ -1,9 +1,12 @@
 #pragma once
 
+#include "../Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
 #include "../Renderer/RenderGraph/RenderGraphDebugMetadataSink.h"
 
 #include <cassert>
 #include <cstddef>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace gte {
@@ -57,6 +60,7 @@ public:
         // AddRenderPass() alone.
         assert(declarationIndexThisFrame == m_table.size());
         m_table.push_back(rg::PassDebugMetadata{ category, drawKind, tags });
+        m_barrierLabelsByIndex.emplace_back();
     }
 
     // Called exactly once per fresh graph declaration, directly by
@@ -66,7 +70,24 @@ public:
     // high-water mark - mirrors RenderPassBlackboard::BeginFrame()'s own
     // discipline, never its lookup shape (see this class's own doc comment
     // above).
-    void BeginFrame() override { m_table.clear(); }
+    void BeginFrame() override
+    {
+        m_table.clear();
+        m_barrierLabelsByIndex.clear();
+    }
+
+    // Fires once per WRITE usage that actually required a barrier, at
+    // execute time (RenderGraph::Execute()'s own per-pass barrier loop) -
+    // see IPassDebugMetadataSink::OnResourceBarrierApplied()'s own doc
+    // comment for the full contract.
+    void OnResourceBarrierApplied(std::size_t declarationIndex, const std::string& resourceName,
+        VkImageLayout oldLayout, VkImageLayout newLayout) override
+    {
+        if (declarationIndex >= m_barrierLabelsByIndex.size()) {
+            return; // Defensive - never expected against a real OnPassDeclared()-grown table.
+        }
+        m_barrierLabelsByIndex[declarationIndex][resourceName] = rg::BarrierTransitionLabel(oldLayout, newLayout);
+    }
 
     // Defensive, never-throwing read accessor - see
     // IPassDebugMetadataProvider::QueryPassDebugMetadata()'s own doc
@@ -80,6 +101,24 @@ public:
         return true;
     }
 
+    // Defensive, never-throwing read accessor - see
+    // IPassDebugMetadataProvider::QueryBarrierTransitionLabel()'s own doc
+    // comment (RenderGraphDebugMetadataSink.h) for the full contract.
+    bool QueryBarrierTransitionLabel(
+        std::size_t declarationIndex, const std::string& resourceName, std::string& outLabel) const override
+    {
+        if (declarationIndex >= m_barrierLabelsByIndex.size()) {
+            return false;
+        }
+        const auto& labelsForPass = m_barrierLabelsByIndex[declarationIndex];
+        const auto it = labelsForPass.find(resourceName);
+        if (it == labelsForPass.end()) {
+            return false;
+        }
+        outLabel = it->second;
+        return true;
+    }
+
     // TEST-ONLY: how many entries this table currently holds - lets a test
     // assert the table's own size directly, without needing to know any
     // particular declarationIndex's value in advance. Never called by
@@ -88,6 +127,11 @@ public:
 
 private:
     std::vector<rg::PassDebugMetadata> m_table;
+
+    // Parallel to m_table (same index space, same lifetime) - one resource-
+    // name-keyed map of barrier transition labels per declared pass, filled
+    // by OnResourceBarrierApplied(), read back by QueryBarrierTransitionLabel().
+    std::vector<std::unordered_map<std::string, std::string>> m_barrierLabelsByIndex;
 };
 
 } // namespace gte
