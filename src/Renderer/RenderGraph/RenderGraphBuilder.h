@@ -236,7 +236,7 @@ struct CompiledGraphInput {
     // doc: both VolumeTextureHandle and BufferHandle originally shipped
     // without this and both needed it added later once a real pass existed
     // whose ONLY write was that handle with no in-frame reader (a
-    // persistent cascade-shadow array re-read only by a LATER frame is
+    // persistent multi-layer image array re-read only by a LATER frame is
     // exactly this shape). See RenderGraphBuilder::KeepTextureArrayOutput()
     // below.
     std::vector<TextureArrayHandle> finalTextureArrayOutputs;
@@ -645,8 +645,9 @@ public:
 
     // Render Pass campaign (task_manager/render-pass-1), PHASE1 - the ONE,
     // OFFICIAL entry point every real pass declaration in this engine should
-    // use from now on (Application layer AND Renderer layer alike - see
-    // AtmosphereLutRenderer.cpp for a Renderer-layer example, PHASE3). A thin,
+    // use from now on (Application layer AND Renderer layer alike - see any
+    // feature's own Renderer-layer pass-declaring class for an example,
+    // PHASE3). A thin,
     // lightweight wrapper around the two pre-existing methods below - it adds
     // NO new capability of its own beyond stamping `kind`/`category` in one
     // place, by design (PHASE0's Locked Design Decision #1: no polymorphic

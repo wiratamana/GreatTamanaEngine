@@ -14,11 +14,11 @@
 // no way to "undo" a side effect the provider lambda already performed
 // before returning.
 //
-// This is the generalized sibling of
-// src/Renderer/Atmosphere/AtmospherePassToggleLogic.h's
-// ShouldDeclareAtmospherePassThisFrame() - deliberately smaller and with NO
-// atmosphere-specific concept (no upstream-handle-validity folding) baked
-// in, so PHASE2/PHASE3 of this same campaign (the systemic audit/fix) can
+// This is the generalized sibling of a feature-layer toggle-logic
+// header's own ShouldDeclarePassThisFrame()-shaped helper - deliberately
+// smaller and with NO feature-specific concept (no upstream-handle-validity
+// folding) baked in, so PHASE2/PHASE3 of this same campaign (the systemic
+// audit/fix) can
 // reuse this ONE helper for every OTHER Core.cpp/plugin-adapter provider
 // found to have the identical bug shape, without inventing a new,
 // bespoke, one-off guard each time.

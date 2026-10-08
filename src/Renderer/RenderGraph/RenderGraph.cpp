@@ -241,8 +241,8 @@ void RenderGraph::ApplyUsageBarrierIfNeeded(VkCommandBuffer cmd, const ResourceU
             // ("there is no way today to declare... a distinct usage") by ALSO
             // consulting the usage's own explicit `isDepthResource` flag
             // (RenderGraphTypes.h's ResourceUsage/PassBuilder::ReadTexture()) -
-            // this is what lets the Aerial Perspective Composite pass declare a
-            // ShaderRead against the DEPTH half of the Game/Scene View's own
+            // this is what lets a composite-style pass declare a ShaderRead
+            // against the DEPTH half of the Game/Scene View's own
             // already-imported TextureHandle (which also carries a color
             // image), without needing a second, separately-imported handle for
             // the same physical depth image. TargetsDepthState() itself

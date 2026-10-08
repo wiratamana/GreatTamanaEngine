@@ -394,7 +394,7 @@ struct RenderPassFrameContext {
 
     // render-pass-3 campaign, PHASE3 (PHASE3_FULL_PRODUCTION_PASS_MIGRATION_AND_VIEW_UNIFICATION.md,
     // Step 3.3b) - a real, load-bearing gap PHASE1 left open: some legacy
-    // Application-layer free functions this phase wraps (the Atmosphere
+    // Application-layer free functions this phase wraps (a feature's own
     // pass sequence, AddGpuSkinningPasses()/AddPresentPass() for the
     // "Present" provider) themselves call `RenderGraphBuilder::AddRenderPass()`/
     // `ImportTexture()`/`KeepVolumeTextureOutput()` directly, sometimes more
@@ -437,7 +437,7 @@ struct RenderPassFrameContext {
     // constness) would otherwise be read-only from inside a provider -
     // making PHASE1's own stated intent ("any provider... simply appends it
     // here directly") actually inexpressible until this phase's first real
-    // consumer (the Atmosphere-wrapping providers, Step 3.3) needed it for
+    // consumer (a feature-wrapping provider, Step 3.3) needed it for
     // real. A confirmed, narrow, additive fix - see this phase's own
     // completion report.
     mutable std::vector<TextureHandle> finalTextureOutputs;
@@ -464,26 +464,26 @@ enum class ProviderScope { Once, PerActiveView };
 // render-pass-3 campaign, PHASE3 (PHASE3_FULL_PRODUCTION_PASS_MIGRATION_AND_VIEW_UNIFICATION.md)
 // - a real, LIVE-VERIFICATION-CONFIRMED gap in this mechanism's own Step
 // 3.3b design, fixed here. A provider that reaches `frame.builder` directly
-// (Step 3.3b - the Atmosphere-wrapping/"Present" providers) declares its own
-// real pass(es) IMMEDIATELY, DURING DeclareInto()'s own provider-invocation
-// loop - but a provider using the ordinary DEFERRED RenderPassDesc mechanism
-// (e.g. "RenderOpaque"/"DrawSkyBackground") only actually calls
-// `builder.AddRenderPass()` at the very END of that same DeclareInto() call,
-// after every provider has already run and the collected list has been
-// sorted. That means ANY immediate provider - no matter where it is
-// registered relative to a deferred one - always lands in the underlying
-// pass list BEFORE every deferred pass, regardless of RenderPassEvent. This
-// is harmless for a provider with no ordering requirement against the
-// deferred set (e.g. "AtmosphereSharedLut"/"AtmosphereViewLut", which must
-// run BEFORE "RenderOpaque" anyway), but it is a REAL, CONFIRMED CORRECTNESS
-// BUG for "AtmosphereComposite" specifically: it READS the same texture
-// handle "RenderOpaque"/"DrawSkyBackground" WRITE, so it must be declared
-// STRICTLY AFTER them - live testing during this phase caught this exact
-// failure mode (RenderGraphCompiler::Compile()'s own resource-versioning
-// scan builds a reader's dependency edge against whatever writer it has
-// ALREADY SEEN so far in declaration order, never a writer declared later -
-// with Composite declared first, "RenderOpaque"'s own write became
-// unreachable from any kept root and was silently CULLED).
+// (Step 3.3b - an immediate-style provider) declares its own real pass(es)
+// IMMEDIATELY, DURING DeclareInto()'s own provider-invocation loop - but a
+// provider using the ordinary DEFERRED RenderPassDesc mechanism (e.g. two
+// deferred providers, "ProviderA" writing a texture and "ProviderB" reading
+// it) only actually calls `builder.AddRenderPass()` at the very END of that
+// same DeclareInto() call, after every provider has already run and the
+// collected list has been sorted. That means ANY immediate provider - no
+// matter where it is registered relative to a deferred one - always lands
+// in the underlying pass list BEFORE every deferred pass, regardless of
+// RenderPassEvent. This is harmless for an immediate provider with no
+// ordering requirement against the deferred set, but it is a REAL,
+// CONFIRMED CORRECTNESS BUG for an immediate provider that READS a texture
+// handle an earlier-registered deferred provider WRITES: it must be
+// declared STRICTLY AFTER that writer - live testing during this phase
+// caught this exact failure mode (RenderGraphCompiler::Compile()'s own
+// resource-versioning scan builds a reader's dependency edge against
+// whatever writer it has ALREADY SEEN so far in declaration order, never a
+// writer declared later - with the reading provider declared first, the
+// deferred writer's own pass became unreachable from any kept root and was
+// silently CULLED).
 //
 // ProviderTiming resolves this generically (not just for these three
 // providers): `BeforeDeferredPasses` (the default - unchanged behavior for
@@ -508,8 +508,9 @@ enum class ProviderTiming { BeforeDeferredPasses, AfterDeferredPasses };
 class RenderPipeline {
 public:
     // No duplicate-name rejection here (reuse silently coexists) - treat
-    // "AtmosphereSharedLut"/"AtmosphereViewLut"/"DrawSkyBackground"/
-    // "AtmosphereComposite" as permanently reserved names, never reused.
+    // any provider-owned debugName the engine itself depends on for
+    // ordering (e.g. "ProviderA"/"ProviderB"/"ProviderC"/"ProviderD") as
+    // permanently reserved names, never reused.
     // render-pass-3 campaign, PHASE3 - new, TRAILING, DEFAULTED `timing`
     // parameter (ProviderTiming::BeforeDeferredPasses default) - every
     // pre-existing 3-argument Register() call site (PHASE2's own

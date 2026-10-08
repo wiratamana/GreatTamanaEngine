@@ -529,8 +529,8 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
     // pass kept" property was ALSO a genuine correctness GAP, not just a
     // safety guarantee: it meant a VolumeTextureHandle could NEVER be a
     // root either, so a pass whose only write was a VolumeTextureHandle
-    // (e.g. this campaign's own Phase 6 aerial-perspective froxel volume)
-    // was ALWAYS silently culled, no matter what it declared - discovered
+    // (e.g. a feature-owned volumetric data pass) was ALWAYS silently
+    // culled, no matter what it declared - discovered
     // directly by this phase's own real workload (see
     // ATMOSPHERE_PHASE6_COMPLETION_REPORT.md). Fixed here by ALSO checking
     // `input.finalVolumeTextureOutputs` (populated via

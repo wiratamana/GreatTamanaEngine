@@ -100,8 +100,9 @@ enum class RenderPassEventContradictionKind : std::uint8_t {
     // BEFORE it in `processingOrder` - but `writerPassIndex` (declared
     // somewhere AFTER it in `processingOrder`) writes that exact same
     // resource. This is the precise, confirmed root-cause pattern behind
-    // the documented, already-occurred "AtmosphereComposite silently
-    // culls RenderOpaque" bug (see PHASE0_MASTER_STRATEGY.md, Step 2) -
+    // the documented, already-occurred "a later-declared writer's own pass
+    // got silently culled out from under an earlier reader" bug (see
+    // PHASE0_MASTER_STRATEGY.md, Step 2) -
     // `Compile()`'s own RAW-edge scan can never link this read to that
     // write, because "the most recent pass, among those declared so far,
     // that wrote it" (RenderGraphCompiler.cpp's own header comment) never
@@ -199,8 +200,9 @@ std::vector<RenderPassEventContradiction> DetectRenderPassEventContradictions(
 // dependency always wins), but it now determines execution order between
 // passes with no real dependency on each other, and it now determines which
 // writer a read resolves to when a naive declaration-order-only scan would
-// otherwise miss it (the historical "AtmosphereComposite silently culls
-// RenderOpaque" bug shape - see PHASE0_MASTER_STRATEGY.md). This does NOT
+// otherwise miss it (the historical "a later-declared writer's own pass got
+// silently culled out from under an earlier reader" bug shape - see
+// PHASE0_MASTER_STRATEGY.md). This does NOT
 // make an incorrectly-tagged RenderPassEvent value harmless - see
 // DetectRenderPassEventContradictions() above, now checked against this same
 // effective order.

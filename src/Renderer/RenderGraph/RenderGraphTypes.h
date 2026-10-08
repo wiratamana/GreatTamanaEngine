@@ -423,20 +423,19 @@ struct VolumeTextureDesc {
     friend bool operator==(const VolumeTextureDesc&, const VolumeTextureDesc&) noexcept = default;
 };
 
-// better-render-pass-3 campaign, BLOCK5 - a genuine FOURTH resource kind: a
-// single Vulkan image with N layers (a Texture2DArray, e.g. a 4-cascade
-// shadow map) or a cubemap (VK_IMAGE_VIEW_TYPE_CUBE/_CUBE_ARRAY). Poolable
-// and barrier-planned exactly like plain TextureDesc/TextureHandle already
-// is - NOT like VolumeTextureDesc, which is import-only with no pooling
-// counterpart. See src/Renderer/TextureArray2D.h for the owning RAII class.
+// A single Vulkan image with N layers (a Texture2DArray) or a cubemap
+// (VK_IMAGE_VIEW_TYPE_CUBE/_CUBE_ARRAY). Poolable and barrier-planned
+// exactly like plain TextureDesc/TextureHandle - unlike VolumeTextureDesc,
+// which is import-only with no pooling counterpart.
+// See src/Renderer/TextureArray2D.h for the owning RAII class.
 struct TextureArrayDesc {
     std::uint32_t width = 0;
     std::uint32_t height = 0;
-    std::uint32_t arrayLayers = 1;   // e.g. 4 for a 4-cascade shadow map
+    std::uint32_t arrayLayers = 1;   // Layer count for a multi-layer poolable image, e.g. 4.
     VkFormat format = VK_FORMAT_UNDEFINED;
     // DELIBERATE ASYMMETRY vs. TextureDesc::hasDepth (which defaults false):
-    // this defaults to TRUE because a shadow-cascade array is this struct's
-    // dominant real use case. hasDepth here does NOT mean "also allocate a
+    // this defaults to TRUE because a multi-layer depth image array is
+    // this struct's dominant real use case. hasDepth here does NOT mean "also allocate a
     // second companion depth image" (TextureDesc's own meaning) - there is
     // only ever ONE image. It selects WHICH KIND of homogeneous image every
     // layer is:
@@ -508,12 +507,12 @@ enum class ResourceKind : std::uint8_t {
 // AddComputePass()'s new 4-argument overloads below) - never guessed/
 // derived from a pass's own name or resource names. `Shared` (the default -
 // see PassRecord::viewScope below) means "this pass is not duplicated per
-// view" (e.g. the Transmittance/Multi-Scattering LUTs, computed once per
-// frame; GPU Skinning dispatches). A pass tagged GameView/SceneView exists
-// as a genuinely separate PassRecord instance per view that calls it - see
-// AtmospherePassSequence.cpp's own AddAtmosphereViewLutPasses(), called once
-// per view, each call producing its own distinct PassRecord(s) even when two
-// calls happen to share an identical literal pass `name` string.
+// view" (e.g. a once-per-frame lookup-table precompute pass, or GPU
+// Skinning dispatches). A pass tagged GameView/SceneView exists as a
+// genuinely separate PassRecord instance per view that calls it - see a
+// feature's own per-view pass-registration helper, called once per view,
+// each call producing its own distinct PassRecord(s) even when two calls
+// happen to share an identical literal pass `name` string.
 //
 // editor-core-separation-25 campaign, PHASE3
 // (PHASE3_PASSRECORD_FIELD_MIGRATION_AND_SNAPSHOT_REWIRING.md, TR6) - given
@@ -620,8 +619,8 @@ enum class RenderPassDrawKind : std::uint8_t {
         // own per-entity children, the N FrameDebuggerReplayStepN debug
         // replay passes, a future real "RenderTransparent").
     DrawQuad, // A full-screen/screen-space triangle-or-quad draw with no
-        // per-object identity (e.g. "DrawSkyBackground" - see
-        // AtmosphereSkyBackgroundRenderer.cpp's own vkCmdDraw(cmd, 3, 1, 0, 0)).
+        // per-object identity (e.g. a full-screen composite pass's own
+        // vkCmdDraw(cmd, 3, 1, 0, 0)).
     Blit, // A raw image copy/blit - see this enum's own header comment
         // above for why this is a real-but-unused scaffold value today.
 };
@@ -633,7 +632,7 @@ const char* ToString(RenderPassDrawKind drawKind) noexcept;
 // Fixed 64-bit bitmask (design doc Section 0, point 4) - a tag test stays a
 // free bitwise AND. No feature-specific tag VALUES live here - per the
 // design doc's own Section 7, those belong in each feature's own header
-// (e.g. a future AtmosphereTags::Lut), never in this shared core file.
+// (e.g. a future FeatureTags::SomeValue), never in this shared core file.
 //
 // render-pass-7 campaign (task_manager/render-pass-7), PHASE1
 // (PHASE1_TAG_VOCABULARY_AND_THREADING.md, "Core Campaign 1 - De-hardcode
@@ -689,10 +688,10 @@ using RenderPassTagMask = std::uint64_t;
 // now determines execution order between passes that have NO real
 // dependency on each other, and it now determines which writer a read
 // resolves to when a naive declaration-order-only scan would otherwise miss
-// it entirely (the historical "AtmosphereComposite silently culls
-// RenderOpaque" bug shape - see PHASE0_MASTER_STRATEGY.md/
-// PHASE2_REAL_RENDERPASSEVENT_ORDERING_ENFORCEMENT.md under
-// task_manager/render-pass-4/ for the full history). This alone still does
+// it entirely (the historical "a later-declared writer's own pass got
+// silently culled out from under an earlier reader" bug shape - see
+// PHASE0_MASTER_STRATEGY.md/PHASE2_REAL_RENDERPASSEVENT_ORDERING_ENFORCEMENT.md
+// under task_manager/render-pass-4/ for the full history). This alone still does
 // NOT make an incorrectly-tagged RenderPassEvent value harmless - see
 // DetectRenderPassEventContradictions() (RenderGraphCompiler.h), now checked
 // against this same effective order.

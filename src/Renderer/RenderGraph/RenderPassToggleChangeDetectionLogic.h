@@ -8,8 +8,9 @@
 // editor-core-separation-21 campaign, PHASE2
 // (task_manager/editor-core-separation-21/PHASE2_FIX_AERIAL_PERSPECTIVE_COMPOSITE_TOGGLE_LIE.md)
 // - a small, pure, dependency-free comparison extracted specifically so it is
-// Tier-1-testable (mirrors AtmospherePassToggleLogic.h's own precedent of
-// extracting a decision out of its one real call site into its own header).
+// Tier-1-testable (mirrors a feature-layer toggle-logic header's own
+// precedent of extracting a decision out of its one real call site into
+// its own header).
 //
 // Confirmed root cause (PHASE1_COMPLETION_REPORT.md): the render-pass toggle
 // mechanism itself was always honest - the ACTUAL bug was that nothing ever

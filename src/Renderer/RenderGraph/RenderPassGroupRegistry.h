@@ -16,7 +16,7 @@ namespace gte::rg {
 // registry exists to serve without breaking.
 //
 // PHASE2 is pure, additive vocabulary + mechanism with ZERO real consumers wired up yet -
-// PHASE3 (Atmosphere self-registration) and PHASE4 (the Frame Debugger consumer) are the
+// PHASE3 (a feature's own self-registration) and PHASE4 (the Frame Debugger consumer) are the
 // first real callers, not this phase. Always compiled in both GTE_ENABLE_EDITOR=ON and =OFF
 // builds - unlike RenderPipeline.cpp's own debug-only PassIdDebugNameRegistry(), this facility
 // must work identically in release, since it drives real, always-visible Editor UI.
@@ -56,8 +56,8 @@ std::optional<std::size_t> FindPassGroupIndexForTags(RenderPassTagMask tags) noe
 // FrameProfiler::ResetForTesting() / RenderPassBlackboard::SlotCapacityForTesting()) - clears
 // every registered entry. REQUIRED so Tier-1 tests never leak state into each other via this
 // otherwise-global, process-lifetime registry - call this at the start of every test that
-// touches this registry (directly, or indirectly via constructing a self-registering class
-// like AtmosphereLutRenderer, PHASE3).
+// touches this registry (directly, or indirectly via constructing any
+// self-registering feature-layer class, PHASE3).
 void ResetPassGroupRegistryForTesting() noexcept;
 
 } // namespace gte::rg
