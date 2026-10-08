@@ -987,6 +987,13 @@ int EditorHost::Run()
                 const rg::ResourceState presentState{
                     VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, VK_ACCESS_2_NONE };
 
+                // This backbuffer is only queued this frame (ImGui's own
+                // fence-wait happens at the START of its NEXT frame), and it
+                // is not tracked by the render graph's barrier planner - so,
+                // same as the NamedTexture capture above, a full device
+                // stall is the only correct option for this one-shot,
+                // user/AI-driven debug readback.
+                m_renderer.WaitForGpuIdle();
                 const Renderer::CapturedRawPixels raw = m_renderer.CaptureImagePixels(
                     frame.Backbuffer, VK_IMAGE_ASPECT_COLOR_BIT, platformWindow->SurfaceFormat.format, extent, presentState);
 
