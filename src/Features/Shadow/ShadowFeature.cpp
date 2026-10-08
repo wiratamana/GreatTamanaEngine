@@ -245,8 +245,8 @@ void ShadowFeature::RegisterPasses()
         });
     assert(maskRegistered && "Shadow.Mask registration failed - see the GTE_LOG_WARNING above.");
 
-    // "Shadow.Composite" - PostComposite, RenderFeatureBlendMode::ScreenSpaceMask.
-    const bool compositeRegistered = m_core.RegisterProjectRenderFeature("Shadow.Composite",
+    // "Shadow.Composite" - built-in PostComposite feature, RenderFeatureBlendMode::ScreenSpaceMask.
+    const bool compositeRegistered = m_core.RegisterBuiltInRenderFeature("Shadow.Composite",
         RenderFeatureStage::PostComposite, RenderFeatureBlendMode::ScreenSpaceMask, kShadowCompositePriority,
         [this](rg::RenderGraphBuilder& builder, rg::RenderPassBlackboard& blackboard, rg::RenderViewId currentView,
             rg::TextureHandle privateTarget, VkExtent2D extent, const ScenePassReadHandles& currentViewHandles,

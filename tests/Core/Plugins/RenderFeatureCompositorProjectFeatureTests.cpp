@@ -307,4 +307,33 @@ TEST(RenderFeatureCompositorProjectFeatureTest, AFailedUnregisterAttemptNeverLea
     }
 }
 
+// 10. A built-in engine feature (RegisterBuiltInFeature()) must report
+// isProjectFeature == false in DebugSnapshot() - a project feature with
+// another name registered right alongside it must still report true.
+TEST(RenderFeatureCompositorProjectFeatureTest, BuiltInFeatureReportsIsProjectFeatureFalse)
+{
+    GTE_SKIP_IF_NO_HEADLESS_CORE(core);
+
+    RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
+    ASSERT_NE(compositor, nullptr);
+
+    const GtePluginRenderFeatureDescriptor engineDescriptor = MakeRenderFeatureDescriptor(
+        "PF_Test_EngineProbe", RenderFeatureStage::PostComposite, 0, RenderFeatureBlendMode::Replace);
+    ASSERT_TRUE(compositor->RegisterBuiltInFeature(
+        engineDescriptor, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { }));
+
+    const GtePluginRenderFeatureDescriptor projectDescriptor = MakeRenderFeatureDescriptor(
+        "PF_Test_ProjectProbe", RenderFeatureStage::PostComposite, 1, RenderFeatureBlendMode::Replace);
+    ASSERT_TRUE(compositor->RegisterProjectFeature(
+        projectDescriptor, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { }));
+
+    const std::vector<RenderFeatureDebugEntry> snapshot = compositor->DebugSnapshot();
+    const RenderFeatureDebugEntry* engineEntry = FindByName(snapshot, "PF_Test_EngineProbe");
+    const RenderFeatureDebugEntry* projectEntry = FindByName(snapshot, "PF_Test_ProjectProbe");
+    ASSERT_NE(engineEntry, nullptr);
+    ASSERT_NE(projectEntry, nullptr);
+    EXPECT_FALSE(engineEntry->isProjectFeature);
+    EXPECT_TRUE(projectEntry->isProjectFeature);
+}
+
 } // namespace gte

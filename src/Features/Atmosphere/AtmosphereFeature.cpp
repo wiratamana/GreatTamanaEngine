@@ -190,14 +190,12 @@ void AtmosphereFeature::RegisterPasses()
     // Folds "DrawSkyBackground" into Core's generic view-content GPU stats.
     m_core.RegisterViewContentPassName("DrawSkyBackground");
 
-    // "AtmosphereComposite" - PostComposite, via
-    // Core::RegisterProjectRenderFeature(). Reserved priority, deliberately
-    // far below any Project Assembly's auto-assigned screen post-process
-    // priority (ScreenPostProcessPassPriorityAssignment.h) - always runs
-    // first among PostComposite features, mirroring its own effective
-    // ordering today.
+    // "AtmosphereComposite" - built-in PostComposite feature. Reserved
+    // priority, deliberately far below any Project Assembly's own
+    // auto-assigned screen post-process priority - always runs first among
+    // PostComposite features.
     static constexpr std::int32_t kAtmosphereCompositePriority = -1000;
-    const bool compositeRegistered = m_core.RegisterProjectRenderFeature("AtmosphereComposite",
+    const bool compositeRegistered = m_core.RegisterBuiltInRenderFeature("AtmosphereComposite",
         RenderFeatureStage::PostComposite, RenderFeatureBlendMode::AlphaOver, kAtmosphereCompositePriority,
         [this](rg::RenderGraphBuilder& builder, rg::RenderPassBlackboard& blackboard, rg::RenderViewId currentView,
             rg::TextureHandle privateTarget, VkExtent2D extent, const ScenePassReadHandles& currentViewHandles,

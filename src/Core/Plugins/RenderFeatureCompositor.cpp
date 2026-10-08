@@ -1,17 +1,5 @@
 #include "RenderFeatureCompositor.h"
 
-// better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
-// #include "PluginRenderPassBuilderAdapter_v2.h"/"PluginRenderPassBuilderAdapter_v3.h"
-// removed - both classes are deleted outright this phase (ABI-only).
-//
-// better-render-pass-2 campaign, PHASE4 (PHASE4_DELETE_PLUGINS_FOLDER_AND_CMAKE.md) -
-// the direct #includes of "../../../plugins/gte_plugin_abi/IPluginModule.h"/
-// "GtePluginModuleInfo.h"/"IPluginRenderPassBuilder_v3.h" this file used to
-// need (OnPluginsLoaded()'s own plugin-discovery scan body, the
-// BlackboardAdapter/IPluginBlackboard implementation) are removed outright,
-// alongside the code that needed them - see OnPluginsLoaded()'s own new,
-// empty body below and the deleted BlackboardAdapter class
-// (RenderFeatureCompositor.h).
 #include "RenderFeatureCameraData.h"
 #include "PostProcessingPassTags.h"
 #include "../Core.h"
@@ -84,11 +72,7 @@ RenderFeatureCompositor::RenderFeatureCompositor(Core& core, Renderer& renderer)
     rg::RegisterPassGroupLabel(kPostProcessingPassTag, "Post Processing");
     rg::RegisterPassGroupLabel(kProjectFeatureGroupTag, "Project Features");
 
-    // editor-core-separation-23 campaign, PHASE2 - the bounded, reusable
-    // GPU-state slot free-list, fully populated at construction time. See
-    // this class's own kMaxConcurrentProjectRenderFeatures/
-    // m_freeProjectFeatureSlots doc comments (RenderFeatureCompositor.h) for
-    // the full reasoning.
+    // Bounded, reusable GPU-state slot free-list, fully populated here.
     for (int i = 0; i < kMaxConcurrentProjectRenderFeatures; ++i) {
         m_freeProjectFeatureSlots.push_back(i);
     }
@@ -370,53 +354,49 @@ bool RenderFeatureCompositor::SetFeaturePriority(const std::string& name, std::i
     return false;
 }
 
-// editor-core-separation-23 campaign, PHASE2
-// (PHASE2_REGISTER_PROJECT_FEATURE_AND_SLOT_POOL.md, Step 3.3) - see this
-// method's own doc comment (RenderFeatureCompositor.h) for the full contract.
-bool RenderFeatureCompositor::RegisterProjectFeature(
-    const GtePluginRenderFeatureDescriptor& descriptor, ProjectRenderFeatureCallback callback)
+// One real registration entry point - see this method's own doc comment
+// (RenderFeatureCompositor.h) for the full contract.
+bool RenderFeatureCompositor::RegisterFeature(
+    const GtePluginRenderFeatureDescriptor& descriptor, ProjectRenderFeatureCallback callback, RenderFeatureOwner owner)
 {
     AssertCalledFromMainThread();
 
     if (m_freeProjectFeatureSlots.empty()) {
         GTE_LOG_WARNING("RenderFeatureCompositor",
-            std::string("RegisterProjectFeature('") + descriptor.name + "') refused - every one of the "
+            std::string("RegisterFeature('") + descriptor.name + "') refused - every one of the "
             + std::to_string(kMaxConcurrentProjectRenderFeatures)
             + " kMaxConcurrentProjectRenderFeatures slots is currently claimed by another still-registered "
-              "project render feature.");
+              "render feature.");
         return false;
     }
 
     if (FindEntryByName(descriptor.name) != nullptr) {
         GTE_LOG_WARNING("RenderFeatureCompositor",
-            std::string("RegisterProjectFeature('") + descriptor.name
+            std::string("RegisterFeature('") + descriptor.name
             + "') refused - a render feature with this name is already registered.");
         return false;
     }
 
-    // better-render-pass-5 effort, BLOCK 3, PHASE2 - PHASE0_MASTER_STRATEGY.md's
-    // Locked Design Decision #8 - the symmetric reverse of
-    // RegisterPreOpaqueFeature()'s own new cross-namespace check above:
-    // PreOpaque/PostComposite/PreUI feature names share one global
-    // namespace.
+    // PreOpaque/PostComposite/PreUI/PostOpaque/PostTransparent feature names
+    // share one global namespace.
     if (FindPreOpaqueEntryByName(descriptor.name) != nullptr) {
         GTE_LOG_WARNING("RenderFeatureCompositor",
-            std::string("RegisterProjectFeature('") + descriptor.name
-            + "') refused - a PreOpaque feature with this name is already registered (PreOpaque/PostComposite/"
-            "PreUI feature names share one global namespace).");
+            std::string("RegisterFeature('") + descriptor.name
+            + "') refused - a PreOpaque feature with this name is already registered (feature names share one "
+            "global namespace across every stage).");
         return false;
     }
 
     if (FindPostOpaqueEntryByName(descriptor.name) != nullptr) {
         GTE_LOG_WARNING("RenderFeatureCompositor",
-            std::string("RegisterProjectFeature('") + descriptor.name
+            std::string("RegisterFeature('") + descriptor.name
             + "') refused - a PostOpaque feature with this name is already registered (feature names share one "
             "global namespace across every stage).");
         return false;
     }
     if (FindPostTransparentEntryByName(descriptor.name) != nullptr) {
         GTE_LOG_WARNING("RenderFeatureCompositor",
-            std::string("RegisterProjectFeature('") + descriptor.name
+            std::string("RegisterFeature('") + descriptor.name
             + "') refused - a PostTransparent feature with this name is already registered (feature names share "
             "one global namespace across every stage).");
         return false;
@@ -429,6 +409,7 @@ bool RenderFeatureCompositor::RegisterProjectFeature(
     entry.projectCallback = std::move(callback);
     entry.descriptor = descriptor;
     entry.projectFeatureSlot = claimedSlot;
+    entry.owner = owner;
 
     if (entry.descriptor.stage == RenderFeatureStage::PreOpaque
         || entry.descriptor.stage == RenderFeatureStage::PostOpaque
@@ -436,9 +417,8 @@ bool RenderFeatureCompositor::RegisterProjectFeature(
         // An unwired stage never claims a permanent slot; release it back
         // before returning.
         GTE_LOG_WARNING("RenderFeatureCompositor",
-            std::string(entry.descriptor.name) + " declared a RenderFeatureStage that is not wired in this "
-            "engine build - this feature will not run any frame. See "
-            "task_manager/editor-core-separation-6/PHASE0_MASTER_STRATEGY.md's Locked Design Decision #1.");
+            std::string(entry.descriptor.name) + " declared a RenderFeatureStage that is not wired for "
+            "RegisterFeature() - this feature will not run any frame.");
         m_freeProjectFeatureSlots.push_back(claimedSlot);
         return false;
     }
@@ -449,9 +429,7 @@ bool RenderFeatureCompositor::RegisterProjectFeature(
     SortAndDetectCollisionsInStage(targetStage, isPreUi ? "PreUI" : "PostComposite");
 
     // Re-seed the name pool for the newly-added entry, for BOTH known views -
-    // the string fed into PrivateName()/AccumName()/BlendPassName() is the
-    // slot-derived gpuStateKey, never descriptor.name (PHASE0_MASTER_STRATEGY.md's
-    // Locked Decision #4).
+    // keyed by the slot-derived gpuStateKey, never descriptor.name.
     const std::string gpuStateKey = "ProjectFeatureSlot" + std::to_string(claimedSlot);
     static constexpr const char* kViewNames[] = { "Game", "Scene" };
     for (const char* viewName : kViewNames) {
@@ -461,7 +439,7 @@ bool RenderFeatureCompositor::RegisterProjectFeature(
     }
 
     GTE_LOG_INFO("RenderFeatureCompositor",
-        std::string("RegisterProjectFeature('") + descriptor.name + "') succeeded - claimed GPU-state slot "
+        std::string("RegisterFeature('") + descriptor.name + "') succeeded - claimed GPU-state slot "
         + std::to_string(claimedSlot) + ".");
     return true;
 }
@@ -731,17 +709,8 @@ bool RenderFeatureCompositor::UnregisterPostTransparentFeature(const char* name)
     return true;
 }
 
-// better-render-pass-2 campaign, PHASE4 (PHASE4_DELETE_PLUGINS_FOLDER_AND_CMAKE.md) -
-// intentionally empty as of this campaign: `IPluginCapabilityOrchestrator`
-// requires an override (its own OnPluginsLoaded() is a pure virtual with no
-// default body - IPluginCapabilityOrchestrator.h), but nothing calls this
-// anymore (Decision D2, PHASE0_MASTER_STRATEGY.md Section 2.4 - provably true
-// since PHASE2 of this same campaign removed EditorHost.cpp's one-and-only
-// Core::LoadPlugins() call site) - kept only to satisfy the pure-virtual
-// contract. The former body (the `_v2`/`_v3` plugin-discovery scan, stage
-// collision detection, and name-pool pre-warm loop) is deleted outright,
-// along with the `Entry::moduleV2`/`moduleV3` fields it populated
-// (RenderFeatureCompositor.h).
+// Intentionally empty - IPluginCapabilityOrchestrator requires an override
+// but nothing calls this anymore.
 void RenderFeatureCompositor::OnPluginsLoaded(const std::vector<IPluginModule*>& /*modules*/)
 {
 }
@@ -767,7 +736,7 @@ std::vector<RenderFeatureDebugEntry> RenderFeatureCompositor::DebugSnapshot() co
             debugEntry.priority = entry.descriptor.priority;
             debugEntry.blendMode = ToString(entry.descriptor.blendMode);
             debugEntry.enabled = IsEffectivelyEnabled(entry.descriptor.name, entry.enabledOverride);
-            debugEntry.isProjectFeature = static_cast<bool>(entry.projectCallback);
+            debugEntry.isProjectFeature = (entry.owner == RenderFeatureOwner::Project);
             snapshot.push_back(std::move(debugEntry));
         }
     };
@@ -786,7 +755,7 @@ std::vector<RenderFeatureDebugEntry> RenderFeatureCompositor::DebugSnapshot() co
         debugEntry.priority = entry.priority;
         debugEntry.blendMode = "None";
         debugEntry.enabled = IsEffectivelyEnabled(entry.name, entry.enabledOverride);
-        debugEntry.isProjectFeature = static_cast<bool>(entry.callback);
+        debugEntry.isProjectFeature = (entry.owner == RenderFeatureOwner::Project);
         snapshot.push_back(std::move(debugEntry));
     }
 
@@ -797,7 +766,7 @@ std::vector<RenderFeatureDebugEntry> RenderFeatureCompositor::DebugSnapshot() co
         debugEntry.priority = entry.priority;
         debugEntry.blendMode = "None";
         debugEntry.enabled = IsEffectivelyEnabled(entry.name, entry.enabledOverride);
-        debugEntry.isProjectFeature = static_cast<bool>(entry.callback);
+        debugEntry.isProjectFeature = (entry.owner == RenderFeatureOwner::Project);
         snapshot.push_back(std::move(debugEntry));
     }
     for (const PostTransparentEntry& entry : m_postTransparent) {
@@ -807,7 +776,7 @@ std::vector<RenderFeatureDebugEntry> RenderFeatureCompositor::DebugSnapshot() co
         debugEntry.priority = entry.priority;
         debugEntry.blendMode = "None";
         debugEntry.enabled = IsEffectivelyEnabled(entry.name, entry.enabledOverride);
-        debugEntry.isProjectFeature = static_cast<bool>(entry.callback);
+        debugEntry.isProjectFeature = (entry.owner == RenderFeatureOwner::Project);
         snapshot.push_back(std::move(debugEntry));
     }
 
@@ -897,20 +866,9 @@ ComputeDescriptorSet& RenderFeatureCompositor::EnsureV3OpDescriptorSet(
     return inserted.first->second;
 }
 
-// better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
-// DispatchOps() (the `_v2` uber-shader dispatch, RenderFeatureOps.comp)
-// removed outright - its only real caller, PluginRenderPassBuilderAdapter_v2,
-// is deleted this same phase, and its own RenderFeatureOpsPushConstants
-// parameter type lived in the now-deleted PluginRenderOperationRegistry.h.
-
-// better-render-pass-2 campaign, PHASE1 (PHASE1_RELOCATE_SHARED_DEPENDENCIES.md) -
-// the shared blend pipeline (RenderFeatureBlend.comp) construction, RELOCATED
-// here VERBATIM from PluginRenderOperationRegistry::EnsureBuiltinsRegistered() -
-// same descriptor bindings (binding 0/1 = CombinedImageSampler for dstIn/srcIn,
-// binding 2 = StorageImage for destination), same real SPIR-V-reflection-based
-// CreateComputePipeline()/ReflectedDescriptorSetLayout() path. Idempotent -
-// safe to call more than once per frame, from more than one call site (see
-// this method's own doc comment, RenderFeatureCompositor.h).
+// Builds the shared blend pipeline (RenderFeatureBlend.comp) - binding 0/1
+// are CombinedImageSampler for dstIn/srcIn, binding 2 is StorageImage for
+// destination. Idempotent.
 void RenderFeatureCompositor::EnsureBlendPipelineInitialized()
 {
     if (m_blendPipeline.has_value()) {
@@ -959,20 +917,11 @@ void RenderFeatureCompositor::DispatchBlend(rg::RenderGraphBuilder& builder, rg:
         rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::AfterEverything, tagMask);
 }
 
-// editor-core-separation-6 campaign, PHASE4/PHASE5 - the real end-to-end
-// pipeline: seed the chain (closing the same-physical-image read+write
-// hazard for the N == 1 case), then walk every entry in this view's
-// combined (PostComposite, then PreUI) list, giving each its own private
-// target to draw into and its own dedicated blend dispatch (real,
-// multi-mode RenderFeatureBlend.comp as of PHASE5) into either the next
-// accumulator or (for the LAST entry) directly into the view's own real,
-// final handle (PHASE0_MASTER_STRATEGY.md's Locked Design Decision #10).
-//
-// better-render-pass-2 campaign, PHASE4 (PHASE4_DELETE_PLUGINS_FOLDER_AND_CMAKE.md) -
-// the per-entry loop below only ever has the entry.projectCallback branch now
-// (PHASE3 of that same campaign already removed the moduleV2/moduleV3
-// branches, since neither field could ever be set anymore) - this phase
-// removed the fields themselves.
+// Seeds the chain (closes the same-physical-image read+write hazard for the
+// N == 1 case), then walks every entry in this view's combined
+// (PostComposite, then PreUI) list, giving each its own private target to
+// draw into and its own blend dispatch into either the next accumulator or
+// (for the last entry) directly into the view's own final handle.
 void RenderFeatureCompositor::ContributeRenderGraphPasses(
     const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&)
 {
