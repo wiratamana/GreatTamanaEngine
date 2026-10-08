@@ -27,6 +27,7 @@ namespace gte {
 namespace {
 
 constexpr float kMinPaneWidth = 120.0f; // Never let a splitter collapse a pane to zero/negative width.
+constexpr float kMinCanvasWidth = 200.0f; // Minimum width always reserved for the graph canvas itself.
 constexpr float kSplitterWidth = 6.0f; // Matches the two InvisibleButton splitters used below.
 
 // Linear search - regime.passes is at most a few dozen entries this frame.
@@ -41,16 +42,16 @@ const rg::RenderGraphPassMetadata* FindPassByName(const rg::RenderGraphRegimeMet
 }
 
 // Prints ", <width>x<height>, <format>" on the current line - a no-op if
-// this resource has no live DebugTextureSnapshot right now.
-void BuildResourceResolutionText(const rg::RenderGraph& renderGraph, const std::string& resourceName)
+// this resource has no frozen resolution text cached for it.
+void BuildResourceResolutionText(
+    const std::unordered_map<std::string, std::string>& frozenResolutionText, const std::string& resourceName)
 {
-    const std::optional<rg::DebugTextureSnapshot> snapshot = renderGraph.DebugTextureSnapshotFor(resourceName);
-    if (!snapshot.has_value()) {
+    const auto it = frozenResolutionText.find(resourceName);
+    if (it == frozenResolutionText.end()) {
         return;
     }
     ImGui::SameLine();
-    ImGui::TextDisabled(
-        "%ux%u, %s", snapshot->target.extent.width, snapshot->target.extent.height, ToString(snapshot->target.format).c_str());
+    ImGui::TextDisabled("%s", it->second.c_str());
 }
 
 // Fixed palette, cycles by index - stable color per timeline segment.
@@ -158,6 +159,32 @@ void BuildRenderFeaturesSection(
     }
 }
 
+// Snapshots "<width>x<height>, <format>" for every Texture write/read in
+// `regime`, merging into `out` - skips a resource with no live snapshot.
+void CollectResourceResolutionText(const rg::RenderGraphRegimeMetadata& regime, const rg::RenderGraph& renderGraph,
+    std::unordered_map<std::string, std::string>& out)
+{
+    const auto collect = [&](const rg::RenderGraphResourceRefMetadata& ref) {
+        if (ref.kind != "Texture") {
+            return;
+        }
+        const std::optional<rg::DebugTextureSnapshot> snapshot = renderGraph.DebugTextureSnapshotFor(ref.name);
+        if (!snapshot.has_value()) {
+            return;
+        }
+        out[ref.name] = std::to_string(snapshot->target.extent.width) + "x"
+            + std::to_string(snapshot->target.extent.height) + ", " + ToString(snapshot->target.format);
+    };
+    for (const rg::RenderGraphPassMetadata& pass : regime.passes) {
+        for (const rg::RenderGraphResourceRefMetadata& write : pass.writes) {
+            collect(write);
+        }
+        for (const rg::RenderGraphResourceRefMetadata& read : pass.reads) {
+            collect(read);
+        }
+    }
+}
+
 } // namespace
 
 void RenderGraphPanel::Build(EditorContext& ctx, Renderer& renderer, const rg::RenderGraph& renderGraph,
@@ -177,6 +204,10 @@ void RenderGraphPanel::Build(EditorContext& ctx, Renderer& renderer, const rg::R
             renderGraph.LastSnapshot(rg::ExecuteTimingMode::SynchronousImmediateReadback),
             renderGraph.LastSnapshot(rg::ExecuteTimingMode::PipelinedDeferredReadback),
             gpuDrivenBatchDebugInfo, renderFeatureEntries);
+
+        m_frozenResourceResolutionText.clear();
+        CollectResourceResolutionText(m_frozenMetadata.offscreenRegime, renderGraph, m_frozenResourceResolutionText);
+        CollectResourceResolutionText(m_frozenMetadata.presentRegime, renderGraph, m_frozenResourceResolutionText);
     }
 
     // Resolves any tab click BEFORE regime/grouped/layout are computed below
@@ -201,12 +232,15 @@ void RenderGraphPanel::Build(EditorContext& ctx, Renderer& renderer, const rg::R
     const float bodyHeight = ImGui::GetContentRegionAvail().y - m_timelineHeight;
     ImGui::BeginChild("RenderGraphBody", ImVec2(0.0f, bodyHeight), false);
     // Clamp both splitters so neither pane can be dragged to zero/negative
-    // width or crowd its neighbor out entirely - mirrors ProjectPanel.cpp's
-    // own splitter-clamp pattern.
+    // width, and the center canvas always keeps a minimum width too - each
+    // pane's own bound accounts for the OTHER pane's current width.
     const float totalAvailWidth = ImGui::GetContentRegionAvail().x;
-    const float maxPaneWidth = std::max(kMinPaneWidth, totalAvailWidth - kMinPaneWidth - 2.0f * kSplitterWidth);
-    m_leftPaneWidth = std::clamp(m_leftPaneWidth, kMinPaneWidth, maxPaneWidth);
-    m_rightPaneWidth = std::clamp(m_rightPaneWidth, kMinPaneWidth, maxPaneWidth);
+    const float maxLeftPaneWidth =
+        std::max(kMinPaneWidth, totalAvailWidth - m_rightPaneWidth - kMinCanvasWidth - 2.0f * kSplitterWidth);
+    const float maxRightPaneWidth =
+        std::max(kMinPaneWidth, totalAvailWidth - m_leftPaneWidth - kMinCanvasWidth - 2.0f * kSplitterWidth);
+    m_leftPaneWidth = std::clamp(m_leftPaneWidth, kMinPaneWidth, maxLeftPaneWidth);
+    m_rightPaneWidth = std::clamp(m_rightPaneWidth, kMinPaneWidth, maxRightPaneWidth);
 
     ImGui::BeginChild("PassTree", ImVec2(m_leftPaneWidth, 0.0f), true);
     BuildPassTree(grouped, renderPassToggleRegistry);
@@ -460,7 +494,7 @@ void RenderGraphPanel::BuildSelectedPassTab(const rg::RenderGraphRegimeMetadata&
     for (const rg::RenderGraphResourceRefMetadata& write : pass->writes) {
         ImGui::BulletText("%s (%s)", write.name.c_str(), write.kind.c_str());
         if (write.kind == "Texture") {
-            BuildResourceResolutionText(renderGraph, write.name);
+            BuildResourceResolutionText(m_frozenResourceResolutionText, write.name);
             ImGui::SameLine();
             ImGui::PushID(write.name.c_str());
             if (ImGui::SmallButton("View")) {
@@ -474,7 +508,7 @@ void RenderGraphPanel::BuildSelectedPassTab(const rg::RenderGraphRegimeMetadata&
     for (const rg::RenderGraphResourceRefMetadata& read : pass->reads) {
         ImGui::BulletText("%s (%s)", read.name.c_str(), read.kind.c_str());
         if (read.kind == "Texture") {
-            BuildResourceResolutionText(renderGraph, read.name);
+            BuildResourceResolutionText(m_frozenResourceResolutionText, read.name);
         }
     }
 

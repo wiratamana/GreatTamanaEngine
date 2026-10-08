@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace gte {
@@ -64,6 +65,10 @@ private:
 
     bool m_paused = false;
     rg::RenderGraphMetadata m_frozenMetadata;
+
+    // Resource name -> "<W>x<H>, <FORMAT>" text, rebuilt only while unpaused.
+    // Kept in lockstep with m_frozenMetadata so pausing freezes both alike.
+    std::unordered_map<std::string, std::string> m_frozenResourceResolutionText;
 
     RegimeChoice m_regimeChoice = RegimeChoice::Present;
     char m_searchFilter[128] = {};
