@@ -1,6 +1,7 @@
 #include "RenderGraphPanel.h"
 
 #include "../EditorContext.h"
+#include "../MemoryPanelData.h"
 #include "../RenderGraphDotExport.h"
 #include "../../Core/Logging.h"
 #include "../../Core/Plugins/RenderFeatureCompositor.h"
@@ -16,12 +17,17 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <optional>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
 namespace gte {
 
 namespace {
+
+constexpr float kMinPaneWidth = 120.0f; // Never let a splitter collapse a pane to zero/negative width.
+constexpr float kSplitterWidth = 6.0f; // Matches the two InvisibleButton splitters used below.
 
 // Linear search - regime.passes is at most a few dozen entries this frame.
 const rg::RenderGraphPassMetadata* FindPassByName(const rg::RenderGraphRegimeMetadata& regime, const std::string& name)
@@ -32,6 +38,19 @@ const rg::RenderGraphPassMetadata* FindPassByName(const rg::RenderGraphRegimeMet
         }
     }
     return nullptr;
+}
+
+// Prints ", <width>x<height>, <format>" on the current line - a no-op if
+// this resource has no live DebugTextureSnapshot right now.
+void BuildResourceResolutionText(const rg::RenderGraph& renderGraph, const std::string& resourceName)
+{
+    const std::optional<rg::DebugTextureSnapshot> snapshot = renderGraph.DebugTextureSnapshotFor(resourceName);
+    if (!snapshot.has_value()) {
+        return;
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled(
+        "%ux%u, %s", snapshot->target.extent.width, snapshot->target.extent.height, ToString(snapshot->target.format).c_str());
 }
 
 // Fixed palette, cycles by index - stable color per timeline segment.
@@ -181,13 +200,20 @@ void RenderGraphPanel::Build(EditorContext& ctx, Renderer& renderer, const rg::R
 
     const float bodyHeight = ImGui::GetContentRegionAvail().y - m_timelineHeight;
     ImGui::BeginChild("RenderGraphBody", ImVec2(0.0f, bodyHeight), false);
+    // Clamp both splitters so neither pane can be dragged to zero/negative
+    // width or crowd its neighbor out entirely - mirrors ProjectPanel.cpp's
+    // own splitter-clamp pattern.
+    const float totalAvailWidth = ImGui::GetContentRegionAvail().x;
+    const float maxPaneWidth = std::max(kMinPaneWidth, totalAvailWidth - kMinPaneWidth - 2.0f * kSplitterWidth);
+    m_leftPaneWidth = std::clamp(m_leftPaneWidth, kMinPaneWidth, maxPaneWidth);
+    m_rightPaneWidth = std::clamp(m_rightPaneWidth, kMinPaneWidth, maxPaneWidth);
 
     ImGui::BeginChild("PassTree", ImVec2(m_leftPaneWidth, 0.0f), true);
     BuildPassTree(grouped, renderPassToggleRegistry);
     ImGui::EndChild();
 
     ImGui::SameLine();
-    ImGui::InvisibleButton("##PassTreeSplitter", ImVec2(6.0f, bodyHeight));
+    ImGui::InvisibleButton("##PassTreeSplitter", ImVec2(kSplitterWidth, bodyHeight));
     if (ImGui::IsItemActive()) {
         m_leftPaneWidth += ImGui::GetIO().MouseDelta.x;
     }
@@ -198,7 +224,7 @@ void RenderGraphPanel::Build(EditorContext& ctx, Renderer& renderer, const rg::R
     ImGui::EndChild();
 
     ImGui::SameLine();
-    ImGui::InvisibleButton("##InspectorSplitter", ImVec2(6.0f, bodyHeight));
+    ImGui::InvisibleButton("##InspectorSplitter", ImVec2(kSplitterWidth, bodyHeight));
     if (ImGui::IsItemActive()) {
         m_rightPaneWidth -= ImGui::GetIO().MouseDelta.x;
     }
@@ -434,6 +460,7 @@ void RenderGraphPanel::BuildSelectedPassTab(const rg::RenderGraphRegimeMetadata&
     for (const rg::RenderGraphResourceRefMetadata& write : pass->writes) {
         ImGui::BulletText("%s (%s)", write.name.c_str(), write.kind.c_str());
         if (write.kind == "Texture") {
+            BuildResourceResolutionText(renderGraph, write.name);
             ImGui::SameLine();
             ImGui::PushID(write.name.c_str());
             if (ImGui::SmallButton("View")) {
@@ -446,6 +473,9 @@ void RenderGraphPanel::BuildSelectedPassTab(const rg::RenderGraphRegimeMetadata&
     ImGui::TextUnformatted("Reads");
     for (const rg::RenderGraphResourceRefMetadata& read : pass->reads) {
         ImGui::BulletText("%s (%s)", read.name.c_str(), read.kind.c_str());
+        if (read.kind == "Texture") {
+            BuildResourceResolutionText(renderGraph, read.name);
+        }
     }
 
     if (m_texturePreview.Descriptor() != VK_NULL_HANDLE) {
