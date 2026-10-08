@@ -419,6 +419,44 @@ TEST(RenderGraphResourceAccessTest, ToStringProducesDistinctNamesForDistinctEnum
     EXPECT_STREQ(ToString(ResourceAccess::VertexShaderStorageRead), "VertexShaderStorageRead");
 }
 
+// --- BindingStageLabel() - one case per enumerator, non-empty, non-null ---
+
+TEST(RenderGraphResourceAccessTest, BindingStageLabelCoversEveryEnumeratorNonNullNonEmpty)
+{
+    const ResourceAccess values[] = {
+        ResourceAccess::ColorAttachmentWrite,
+        ResourceAccess::DepthStencilAttachmentReadWrite,
+        ResourceAccess::ShaderRead,
+        ResourceAccess::TransferSrc,
+        ResourceAccess::TransferDst,
+        ResourceAccess::ComputeShaderRead,
+        ResourceAccess::ComputeShaderWrite,
+        ResourceAccess::IndirectCommandRead,
+        ResourceAccess::VertexBufferRead,
+        ResourceAccess::VertexShaderStorageRead,
+    };
+
+    for (const ResourceAccess value : values) {
+        const char* label = BindingStageLabel(value);
+        ASSERT_NE(label, nullptr);
+        EXPECT_GT(std::string_view(label).size(), 0u);
+    }
+}
+
+TEST(RenderGraphResourceAccessTest, BindingStageLabelMatchesDocumentedStringPerEnumerator)
+{
+    EXPECT_STREQ(BindingStageLabel(ResourceAccess::ColorAttachmentWrite), "Color Attachment");
+    EXPECT_STREQ(BindingStageLabel(ResourceAccess::DepthStencilAttachmentReadWrite), "Depth Test");
+    EXPECT_STREQ(BindingStageLabel(ResourceAccess::ShaderRead), "Pixel Shader");
+    EXPECT_STREQ(BindingStageLabel(ResourceAccess::TransferSrc), "Transfer Source");
+    EXPECT_STREQ(BindingStageLabel(ResourceAccess::TransferDst), "Transfer Destination");
+    EXPECT_STREQ(BindingStageLabel(ResourceAccess::ComputeShaderRead), "Compute Shader");
+    EXPECT_STREQ(BindingStageLabel(ResourceAccess::ComputeShaderWrite), "Compute Shader");
+    EXPECT_STREQ(BindingStageLabel(ResourceAccess::IndirectCommandRead), "Indirect Command");
+    EXPECT_STREQ(BindingStageLabel(ResourceAccess::VertexBufferRead), "Vertex Input");
+    EXPECT_STREQ(BindingStageLabel(ResourceAccess::VertexShaderStorageRead), "Vertex Shader");
+}
+
 // --- IsResolvedViewMissingItsSampler() - Safety Net #2's pure predicate ---
 
 TEST(RenderGraphIsResolvedViewMissingItsSamplerTest, FalseWhenViewIsNull)

@@ -89,6 +89,76 @@ TEST(RenderGraphMetadataTest, SurvivingPassWithRegisteredTagResolvesTagGroupLabe
     ResetPassGroupRegistryForTesting();
 }
 
+// --- BuildResourceRefs(): bindingStageLabel / barrierTransitionLabel ------
+//
+// Every existing IPassDebugMetadataProvider test fake elsewhere in this
+// suite hardcodes QueryBarrierTransitionLabel() to return false, so the
+// "a barrier label WAS found" path through BuildResourceRefs() (this
+// file's own production code) is only exercised directly here, against a
+// hand-built RenderGraphPassSnapshot whose writeBarrierLabels already
+// carries a real, non-empty entry - mirroring exactly what
+// RenderGraphSnapshot.cpp's own BuildRenderGraphSnapshot() would have
+// written there had a real sink reported one.
+
+TEST(RenderGraphMetadataTest, WriteWithNonEmptyBarrierLabelPopulatesBarrierTransitionLabel)
+{
+    ResetPassGroupRegistryForTesting();
+
+    RenderGraphPassSnapshot pass = MakeSurvivingPass("RenderOpaque");
+    pass.readNames = { "Depth" };
+    pass.readKinds = { ResourceKind::Texture };
+    pass.readAccess = { ResourceAccess::ShaderRead };
+    pass.writeNames = { "Color" };
+    pass.writeKinds = { ResourceKind::Texture };
+    pass.writeAccess = { ResourceAccess::ColorAttachmentWrite };
+    pass.writeBarrierLabels = { "Undefined -> RT" };
+
+    RenderGraphSnapshot offscreen;
+    offscreen.passesInExecutionOrder.push_back(pass);
+    const RenderGraphSnapshot present;
+
+    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {}, {});
+
+    ASSERT_EQ(metadata.offscreenRegime.passes.size(), 1u);
+    const RenderGraphPassMetadata& built = metadata.offscreenRegime.passes[0];
+
+    ASSERT_EQ(built.reads.size(), 1u);
+    EXPECT_EQ(built.reads[0].bindingStageLabel, "Pixel Shader"); // BindingStageLabel(ShaderRead).
+    EXPECT_FALSE(built.reads[0].barrierTransitionLabel.has_value()); // reads never carry one.
+
+    ASSERT_EQ(built.writes.size(), 1u);
+    EXPECT_EQ(built.writes[0].bindingStageLabel, "Color Attachment"); // BindingStageLabel(ColorAttachmentWrite).
+    ASSERT_TRUE(built.writes[0].barrierTransitionLabel.has_value());
+    EXPECT_EQ(*built.writes[0].barrierTransitionLabel, "Undefined -> RT");
+
+    ResetPassGroupRegistryForTesting();
+}
+
+TEST(RenderGraphMetadataTest, WriteWithEmptyBarrierLabelStaysNullopt)
+{
+    ResetPassGroupRegistryForTesting();
+
+    RenderGraphPassSnapshot pass = MakeSurvivingPass("RenderOpaque");
+    pass.writeNames = { "Color" };
+    pass.writeKinds = { ResourceKind::Texture };
+    pass.writeAccess = { ResourceAccess::ColorAttachmentWrite };
+    pass.writeBarrierLabels = { "" }; // no barrier applied this frame for this write.
+
+    RenderGraphSnapshot offscreen;
+    offscreen.passesInExecutionOrder.push_back(pass);
+    const RenderGraphSnapshot present;
+
+    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {}, {});
+
+    ASSERT_EQ(metadata.offscreenRegime.passes.size(), 1u);
+    const RenderGraphPassMetadata& built = metadata.offscreenRegime.passes[0];
+
+    ASSERT_EQ(built.writes.size(), 1u);
+    EXPECT_FALSE(built.writes[0].barrierTransitionLabel.has_value());
+
+    ResetPassGroupRegistryForTesting();
+}
+
 TEST(RenderGraphMetadataTest, PassWithNoRegisteredTagHasNulloptTagGroupLabel)
 {
     ResetPassGroupRegistryForTesting();

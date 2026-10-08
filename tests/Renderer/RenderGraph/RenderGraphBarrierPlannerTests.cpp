@@ -653,6 +653,40 @@ TEST(RenderGraphBarrierPlannerTest, DecideTextureArrayLayerTransitionSkipsRedund
     EXPECT_FALSE(second.requiresBarrier);
 }
 
+// --- ShortLayoutLabel() / BarrierTransitionLabel() - Editor Inspector ------
+// --- display labels (editor-core-separation-7 campaign) --------------------
+
+TEST(RenderGraphShortLayoutLabelTest, ReturnsDocumentedLabelForEveryNamedLayout)
+{
+    EXPECT_STREQ(ShortLayoutLabel(VK_IMAGE_LAYOUT_UNDEFINED), "Undefined");
+    EXPECT_STREQ(ShortLayoutLabel(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL), "RT");
+    EXPECT_STREQ(ShortLayoutLabel(VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL), "Depth Test");
+    EXPECT_STREQ(ShortLayoutLabel(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL), "Shader Read");
+    EXPECT_STREQ(ShortLayoutLabel(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL), "Transfer Src");
+    EXPECT_STREQ(ShortLayoutLabel(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL), "Transfer Dst");
+    EXPECT_STREQ(ShortLayoutLabel(VK_IMAGE_LAYOUT_GENERAL), "General (Storage)");
+    EXPECT_STREQ(ShortLayoutLabel(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR), "Present");
+}
+
+TEST(RenderGraphShortLayoutLabelTest, FallsBackToOtherForAnyUnlistedLayout)
+{
+    EXPECT_STREQ(ShortLayoutLabel(VK_IMAGE_LAYOUT_PREINITIALIZED), "Other");
+    EXPECT_STREQ(ShortLayoutLabel(VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL), "Other");
+}
+
+TEST(RenderGraphBarrierTransitionLabelTest, ConcatenatesOldAndNewShortLayoutLabelsWithArrow)
+{
+    const std::string label =
+        BarrierTransitionLabel(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    EXPECT_EQ(label, "RT -> Shader Read");
+}
+
+TEST(RenderGraphBarrierTransitionLabelTest, ConcatenatesUndefinedToColorAttachmentEntryTransition)
+{
+    const std::string label = BarrierTransitionLabel(VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    EXPECT_EQ(label, "Undefined -> RT");
+}
+
 // --- isDepthResource assertion guard (debug builds only) -------------------
 //
 // Guarded by NDEBUG since a release build compiles assert() down to a
