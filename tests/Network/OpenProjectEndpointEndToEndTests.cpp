@@ -1,40 +1,10 @@
 // End-to-end tests for POST /project_assembly/open_project and GET
-// /project_assembly/list_projects - editor-core-separation-17 campaign
-// (On-Engine Project Workflow plan, BIG-STEP 3, "Open Project"), PHASE5
-// (PHASE5_FULL_LIVE_VERIFICATION_AND_CAMPAIGN_CLOSEOUT.md, Section 3.1).
-// Mirrors tests/Network/CreateProjectEndpointEndToEndTests.cpp's own exact
-// fixture shape (a real gte::Network::NetworkServer on an ephemeral port, a
-// real httplib::Client, Network::TestHelpers::WaitUntilAcceptingConnections)
-// wired against a real gte::EditorProjectLifecycleCapability instance (the
-// 9th constructor argument) - option (b) from that file's own precedent:
-// test the real production resolution path directly, against THIS repo's
-// own real, current build tree, using genuinely unique/disposable project
-// names created and torn down per-test, never the persistent
-// ProjectAssemblyProbe fixture for anything that WRITES to disk.
-//
-// Tier-0/Tier-1 fixtures are created directly on disk (no HTTP route exists
-// to produce those specific tiers) as one-level-deep folders under the same
-// real Projects/ source root a genuine POST /project_assembly/create_project
-// call resolves to (obtained per-test by actually creating one real,
-// disposable project first via that route, then reading its own parent
-// directory - exactly the same technique
-// CreateProjectEndpointEndToEndTests.cpp::InvalidNamesAreRejectedBeforeAnyFilesystemWrite
-// already uses). Tier-2 coverage is simply that same real created project,
-// since a freshly create_project'd folder has real Game source but no
-// compiled .dll yet - exactly ProjectValidityTier::NotCompiled's own
-// definition (PHASE1_TIER_CLASSIFICATION_MODEL.md).
-//
-// Tier-3/Tier-4 coverage deliberately points at the real, persistent
-// ProjectAssemblyProbe fixture instead (read-only from this file's own
-// point of view - never deleted/recreated/modified), guarded by a runtime
-// skip if ProjectAssemblyProbe_Game.dll does not exist yet in this build's
-// own output directory - mirrors this repository's existing, legitimate
-// environment-gated skip convention (PHASE5's own strategy file, Section
-// 3.1's closing paragraph).
+// /project_assembly/list_projects, against a real NetworkServer + real
+// EditorProjectLifecycleCapability. Tier-0/Tier-1/Tier-2 fixtures are built
+// directly on disk under a genuinely created, disposable project's own
+// Projects/ parent directory (no HTTP route produces Tier-0/Tier-1 directly).
 #include "Editor/ActiveProjectAssemblyState.h"
 #include "Editor/EditorProjectLifecycleCapability.h"
-#include "Editor/ProjectRootPath.h" // gte::ExecutableDirectory()
-#include "Core/Plugins/ProjectAssemblyBuildRunner.h" // ResolveProjectAssemblyOutputDirectory()
 #include "Network/NetworkServer.h"
 
 #include "NetworkTestHelpers.h"
@@ -306,41 +276,6 @@ TEST_F(OpenProjectEndpointEndToEndTest, OpenProjectRejectsAllFourInvalidNameShap
     EXPECT_EQ(before.hasActiveProject, after.hasActiveProject);
     EXPECT_EQ(before.name, after.name);
     EXPECT_EQ(before.sourceDirectory, after.sourceDirectory);
-}
-
-// Tier-3/Tier-4 coverage - deliberately points at the real, persistent
-// ProjectAssemblyProbe fixture (read-only from this test's own point of
-// view - never deleted/recreated/modified), guarded by a runtime skip if
-// this build's own output directory does not yet contain a compiled
-// ProjectAssemblyProbe_Game.dll - mirrors this repository's existing,
-// legitimate environment-gated skip convention.
-TEST_F(OpenProjectEndpointEndToEndTest, OpenProjectOnRealCompiledProbeMarksItActiveWithoutTouchingItsFiles)
-{
-    const std::filesystem::path outputDirectory = ResolveProjectAssemblyOutputDirectory(gte::ExecutableDirectory());
-    const std::filesystem::path probeDllPath = outputDirectory / "ProjectAssemblyProbe_Game.dll";
-    if (!std::filesystem::exists(probeDllPath)) {
-        GTEST_SKIP() << "ProjectAssemblyProbe_Game.dll does not exist yet at " << probeDllPath.string()
-                     << " - this build's own output directory has not compiled the probe fixture yet";
-    }
-
-    const httplib::Result listRes = m_client->Get("/project_assembly/list_projects");
-    ASSERT_TRUE(listRes != nullptr);
-    ASSERT_EQ(listRes->status, 200);
-    const nlohmann::json listBody = nlohmann::json::parse(listRes->body);
-    const std::string probeTier = FindTierForName(listBody, "ProjectAssemblyProbe");
-    EXPECT_TRUE(probeTier == "Compiled" || probeTier == "AlreadyLoaded")
-        << "unexpected tier for ProjectAssemblyProbe: '" << probeTier << "'";
-
-    const httplib::Result openRes = m_client->Post("/project_assembly/open_project?name=ProjectAssemblyProbe");
-    ASSERT_TRUE(openRes != nullptr);
-    EXPECT_EQ(openRes->status, 200);
-    const nlohmann::json openBody = nlohmann::json::parse(openRes->body);
-    ASSERT_TRUE(openBody.contains("status_message"));
-    EXPECT_FALSE(openBody["status_message"].get<std::string>().empty());
-
-    const ActiveProjectAssemblyInfo active = ActiveProjectAssemblyState::Instance().GetActive();
-    EXPECT_TRUE(active.hasActiveProject);
-    EXPECT_EQ(active.name, "ProjectAssemblyProbe");
 }
 
 } // namespace

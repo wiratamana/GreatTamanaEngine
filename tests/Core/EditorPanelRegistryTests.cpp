@@ -190,12 +190,9 @@ TEST(EditorPanelRegistryTest, UnregisterPluginPanel_RemovesFromBothAllNamesAndPl
 
 TEST(EditorPanelRegistryTest, UnregisterPluginPanel_ThenReRegisteringSameNameSucceedsWithoutCollisionRefusal)
 {
-    // This is the exact regression this phase exists to prevent: the
-    // external plan's own sketch left m_allNames untouched, which would
-    // make this second RegisterPluginPanel() call be silently refused by
-    // IsKnownName()'s own collision guard - precisely what every reload
-    // after the first does, for the campaign's own permanent
-    // ProjectAssemblyProbe fixture's "Probe Panel".
+    // Regression guard: re-registering the same name after an unregister
+    // must not be refused by IsKnownName()'s own collision guard - this is
+    // exactly what a Project Assembly panel reload does every time.
     FakeEditorPanelModule firstModule("Test_Plugin_Panel_Kappa");
     EditorPanelRegistry::Instance().RegisterPluginPanel("Test_Plugin_Panel_Kappa", &firstModule);
     EditorPanelRegistry::Instance().UnregisterPluginPanel("Test_Plugin_Panel_Kappa");

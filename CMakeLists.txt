@@ -795,6 +795,7 @@ add_library(gte_core STATIC
     src/Renderer/RenderGraph/RenderGraphSnapshot.cpp
     src/Renderer/RenderGraph/RenderGraphSnapshotFormatting.h
     src/Renderer/RenderGraph/RenderGraphSnapshotFormatting.cpp
+    src/Renderer/RenderGraph/RenderGraphDebugResourceRegistryT.h
     src/Renderer/RenderGraph/RenderGraphDebugTextureRegistry.h
     src/Renderer/RenderGraph/RenderGraphDebugMetadataSink.h
     src/Renderer/RenderGraph/RenderGraphDebugTextureRegistry.cpp
@@ -1091,23 +1092,15 @@ add_library(gte_editor STATIC
     src/Editor/ImGuiIdConflictTracker.cpp
     src/Editor/ImGuiIdConflictGuard.h
     src/Editor/ImGuiIdConflictGuard.cpp
-    # task_manager/editor-core-separation-21 campaign, PHASE5
-    # (PHASE5_IRON_RULE_PERMANENT_MISMATCH_DETECTOR.md) - the permanent,
-    # self-enforcing "Render Pass Honesty" detector (RenderPassHonestyChecker
-    # is the pure, Tier-1-tested logic; RenderPassHonestyGuard is the
-    # Logger-aware singleton wrapper around it) - mirrors
-    # ImGuiIdConflictTracker/ImGuiIdConflictGuard's own exact precedent
-    # immediately above.
+    # Render Graph/Frame Debugger consistency detectors - each Checker.h is
+    # pure, Tier-1-tested detection logic; each Guard.h is a Logger-aware
+    # singleton wrapper sharing RenderGraphConsistencyGuard.h's generic
+    # dedup bookkeeping, with its own distinct log category.
+    src/Editor/RenderGraphConsistencyGuard.h
     src/Editor/RenderPassHonestyChecker.h
     src/Editor/RenderPassHonestyChecker.cpp
     src/Editor/RenderPassHonestyGuard.h
     src/Editor/RenderPassHonestyGuard.cpp
-    # task_manager/editor-core-separation-22 campaign, PHASE6
-    # (PHASE6_IRON_RULE_V2_BIDIRECTIONAL_DETECTOR.md) - TWO new detectors,
-    # each mirroring RenderPassHonestyChecker/RenderPassHonestyGuard's own
-    # exact "pure logic + Logger-aware singleton wrapper" precedent
-    # immediately above: Clause B ("ran but not shown") and Clause C
-    # ("disabled side effect still visible").
     src/Editor/FrameDebuggerCoverageChecker.h
     src/Editor/FrameDebuggerCoverageChecker.cpp
     src/Editor/FrameDebuggerCoverageGuard.h

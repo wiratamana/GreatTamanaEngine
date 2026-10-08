@@ -302,15 +302,12 @@ TEST_F(CreateAssetEndpointEndToEndTest, SameNameDifferentCaseCalledTwiceRejectsS
     RestoreActiveProjectAssemblyState(before);
 }
 
-// Scenario 6 (editor-core-separation-24 campaign, PHASE7, design doc Step 5,
-// STEP 3.1 item 2) - kind=screen_post_process_pass against this file's own
-// scratch project fixture, which has an Assets/ folder but NO
+// Scenario 6 - kind=screen_post_process_pass against this file's own scratch
+// project fixture, which has an Assets/ folder but NO
 // <ScratchProjectName>Game.cpp file at all. This means
-// TryAutoWireRegisterCall() hits its own "file cannot be opened" branch -
-// mirrors the real Projects/ProjectAssemblyProbe/ case PHASE6's own live
-// check exercises (that project's own Game-half file is named
-// HelloGame.cpp, never <ProjectName>Game.cpp) - so the reminder message here
-// MUST be the fallback (never-auto-wired) wording, never the auto-wired one.
+// TryAutoWireRegisterCall() hits its own "file cannot be opened" branch, so
+// the reminder message here MUST be the fallback (never-auto-wired) wording,
+// never the auto-wired one.
 TEST_F(CreateAssetEndpointEndToEndTest, ScreenPostProcessPassScaffoldWritesExpectedFileWithFallbackReminder)
 {
     const ActiveProjectAssemblyInfo before =

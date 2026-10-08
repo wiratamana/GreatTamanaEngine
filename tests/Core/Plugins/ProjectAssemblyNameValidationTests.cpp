@@ -45,7 +45,7 @@ TEST(ProjectAssemblyNameValidationTest, AcceptsGenuinelyValidNames)
     EXPECT_TRUE(IsValid("_LeadingUnderscore"));
     EXPECT_TRUE(IsValid("_"));
     EXPECT_TRUE(IsValid("Project_Assembly_2"));
-    EXPECT_TRUE(IsValid("ProjectAssemblyProbe")); // the one real, existing project name - must never regress.
+    EXPECT_TRUE(IsValid("ProjectAssemblyProbe")); // a realistic project-style name - must stay valid.
 }
 
 TEST(ProjectAssemblyNameValidationTest, ErrorMessageIsPopulatedOnlyOnFailure)

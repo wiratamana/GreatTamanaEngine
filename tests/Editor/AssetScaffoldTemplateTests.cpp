@@ -421,12 +421,9 @@ TEST(AssetScaffoldTemplateTest, ScreenPostProcessPassOldProjectMissingGameCppFal
     ActiveProjectStateRestorer restorer;
     TempScratchProjectDirectory scratch("ScreenPassOldProjectMissingFile");
     ActiveProjectAssemblyState::Instance().SetActive("ScratchProject", scratch.Path());
-    // Deliberately do NOT create Assets/ScratchProjectGame.cpp at all - mirrors
-    // Projects/ProjectAssemblyProbe/'s own real, confirmed situation (its
-    // Game-half source file is named Assets/HelloGame.cpp, NOT
-    // Assets/ProjectAssemblyProbeGame.cpp - TryAutoWireRegisterCall()'s
-    // computed target path therefore does not exist AT ALL for that real
-    // fixture, exercised here in miniature with a scratch project).
+    // Deliberately do NOT create Assets/ScratchProjectGame.cpp at all -
+    // TryAutoWireRegisterCall()'s computed target path must not exist for
+    // this scenario to exercise the fallback branch.
 
     EditorProjectLifecycleCapability capability;
     const IAssetScaffoldingCapability::ScaffoldOutcome outcome =

@@ -78,10 +78,11 @@ RenderFeatureCompositor::RenderFeatureCompositor(Core& core, Renderer& renderer)
     : m_core(core)
     , m_renderer(renderer)
 {
-    // Render Graph panel grouping heading for this compositor's own
+    // Render Graph panel grouping headings for this compositor's own
     // blend-chain compute dispatches - idempotent, safe to call every
     // construction.
     rg::RegisterPassGroupLabel(kPostProcessingPassTag, "Post Processing");
+    rg::RegisterPassGroupLabel(kProjectFeatureGroupTag, "Project Features");
 
     // editor-core-separation-23 campaign, PHASE2 - the bounded, reusable
     // GPU-state slot free-list, fully populated at construction time. See
@@ -908,13 +909,10 @@ void RenderFeatureCompositor::EnsureBlendPipelineInitialized()
 
 void RenderFeatureCompositor::DispatchBlend(rg::RenderGraphBuilder& builder, rg::TextureHandle dstIn,
     VkSampler dstInSampler, rg::TextureHandle srcIn, VkSampler srcInSampler, rg::TextureHandle destination,
-    BlendStageState& state, const char* debugName, VkExtent2D extent, RenderFeatureBlendMode blendMode)
+    BlendStageState& state, const char* debugName, VkExtent2D extent, RenderFeatureBlendMode blendMode,
+    rg::RenderPassTagMask tagMask)
 {
-    // better-render-pass-2 campaign, PHASE1 - ensures m_blendPipeline is ready
-    // even on the rare path where this is reached without
-    // EnsureBlendStageDescriptorOnly() having run first this process
-    // lifetime (defense-in-depth; idempotent, cheap no-op after the first
-    // real call from either call site).
+    // Idempotent - safe to call from more than one call site per frame.
     EnsureBlendPipelineInitialized();
     builder.AddRenderPass(debugName, rg::PassKind::Compute, rg::ViewScope::Shared, rg::RenderPassCategory::General,
         [dstIn, srcIn, destination](rg::RenderGraphBuilder::PassBuilder& pass) {
@@ -945,7 +943,7 @@ void RenderFeatureCompositor::DispatchBlend(rg::RenderGraphBuilder& builder, rg:
                 &pushConstants, sizeof(pushConstants), groupCounts.width, groupCounts.height, groupCounts.depth);
             m_renderer.EndGraphPassRecording();
         },
-        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::AfterEverything, kPostProcessingPassTag.bit);
+        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::AfterEverything, tagMask);
 }
 
 // editor-core-separation-6 campaign, PHASE4/PHASE5 - the real end-to-end
@@ -990,18 +988,11 @@ void RenderFeatureCompositor::ContributeRenderGraphPasses(
     const std::string viewName = isGameView ? "Game" : "Scene";
     const VkExtent2D extent = resolved->extent;
 
-    // Seed the chain - see this class's own header comment for exactly why:
-    // without this, `currentInput` and the LAST entry's own `outputTarget`
-    // would be the SAME handle (resolved->target) in the SAME dispatch
-    // whenever the combined list has exactly one entry (N == 1) - a real GPU
-    // hazard (a compute pass reading and writing the exact same storage
-    // image in one dispatch). The seed dispatch is always a plain Replace
-    // copy, regardless of any individual feature's own declared blend mode.
-    //
-    // better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
-    // this used to be sourced via m_operationRegistry.EnsureBuiltinsRegistered()/
-    // GetDevice() - PluginRenderOperationRegistry is deleted outright (ABI-only),
-    // so this now reads the SAME real VkDevice directly off Renderer instead.
+    // Seed the chain: without this, `currentInput` and the LAST entry's own
+    // `outputTarget` would be the SAME handle in the SAME dispatch whenever
+    // the combined list has exactly one entry - a real GPU hazard (a compute
+    // pass reading and writing the exact same storage image in one
+    // dispatch). The seed dispatch is always a plain Replace copy.
     m_device = m_renderer.GetVulkanContextInfo().device;
 
     const char* seedName = m_namePool.SeedName(viewName);
@@ -1010,7 +1001,8 @@ void RenderFeatureCompositor::ContributeRenderGraphPasses(
     const rg::TextureHandle seedHandle = frame.builder.ImportTexture(
         seedName, seedState.texture->Target(), VK_IMAGE_LAYOUT_UNDEFINED, seedState.texture->Sampler());
     DispatchBlend(frame.builder, resolved->target, resolved->sampler, resolved->target, resolved->sampler,
-        seedHandle, seedState, m_namePool.SeedCopyPassName(viewName), extent, RenderFeatureBlendMode::Replace);
+        seedHandle, seedState, m_namePool.SeedCopyPassName(viewName), extent, RenderFeatureBlendMode::Replace,
+        kPostProcessingPassTag.bit);
 
     rg::TextureHandle currentInput = seedHandle;
     VkSampler currentInputSampler = seedState.texture->Sampler();
@@ -1106,7 +1098,8 @@ void RenderFeatureCompositor::ContributeRenderGraphPasses(
 
         DispatchBlend(frame.builder, currentInput, currentInputSampler, privateTarget,
             privateState.texture->Sampler(), outputTarget, *outputState, m_namePool.BlendPassName(gpuStateKey, viewName),
-            extent, entry.descriptor.blendMode);
+            extent, entry.descriptor.blendMode,
+            entry.projectCallback ? kProjectFeatureGroupTag.bit : kPostProcessingPassTag.bit);
 
         currentInput = outputTarget;
         currentInputSampler = isLast ? VK_NULL_HANDLE : outputState->texture->Sampler();

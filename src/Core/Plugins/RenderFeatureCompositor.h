@@ -388,8 +388,8 @@ private:
     // call that consumes its result at every real call site in this file.
     void EnsureBlendPipelineInitialized();
 
-    // The real, permanent blend/seed dispatch (RenderFeatureBlend.comp,
-    // PHASE5) - `state` supplies the dedicated descriptor set this dispatch
+    // The real, permanent blend/seed dispatch (RenderFeatureBlend.comp) -
+    // `state` supplies the dedicated descriptor set this dispatch
     // rewrites/binds; its own `.texture` field is irrelevant here (the
     // destination handle is passed explicitly, since the LAST entry in a
     // view's combined list writes into a handle `state` itself never owns).
@@ -397,10 +397,13 @@ private:
     // RenderFeatureCompositor's own per-view "seed" dispatch always passes
     // RenderFeatureBlendMode::Replace explicitly, regardless of any
     // individual feature's own declared blend mode; every per-feature
-    // dispatch passes that feature's own `descriptor.blendMode`.
+    // dispatch passes that feature's own `descriptor.blendMode`. `tagMask`
+    // picks this dispatch's own Render Graph panel grouping bit - callers
+    // pass kProjectFeatureGroupTag.bit for a project feature's own blend,
+    // kPostProcessingPassTag.bit otherwise.
     void DispatchBlend(rg::RenderGraphBuilder& builder, rg::TextureHandle dstIn, VkSampler dstInSampler,
         rg::TextureHandle srcIn, VkSampler srcInSampler, rg::TextureHandle destination, BlendStageState& state,
-        const char* debugName, VkExtent2D extent, RenderFeatureBlendMode blendMode);
+        const char* debugName, VkExtent2D extent, RenderFeatureBlendMode blendMode, rg::RenderPassTagMask tagMask);
 
     Core& m_core;
     Renderer& m_renderer;

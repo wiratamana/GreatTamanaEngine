@@ -142,14 +142,9 @@ std::string ReplaceAll(std::string text, const std::string& token, const std::st
     return text;
 }
 
-// Kind 1 - Render Pass (Assets/<Name>RenderPass.cpp, ONE file). Grounded
-// directly in Projects/ProjectAssemblyProbe/Assets/HelloGame.cpp's own real,
-// live, currently-compiling call shape (RenderPassProvider's real two-
-// parameter lambda signature, ProviderScope's real two-value enum -
-// PHASE0_MASTER_STRATEGY.md, Section 2, corrects the master-plan file's own
-// factually-wrong Kind-1 template sketch). Defines an ordinary, non-exported
-// free function - NEVER calls GTE_DEFINE_PROJECT_EXPORTS_GAME() itself (Risk
-// register item 1, PHASE0_MASTER_STRATEGY.md) - so wiring in more than one
+// Kind 1 - Render Pass (Assets/<Name>RenderPass.cpp, ONE file). Defines an
+// ordinary, non-exported free function - never calls
+// GTE_DEFINE_PROJECT_EXPORTS_GAME() itself, so wiring in more than one
 // scaffolded Render Pass into the same project's RegisterProject() never
 // produces a duplicate GTE_RegisterProject linker error.
 std::string BuildRenderPassCppContent(const std::string& name)
@@ -173,12 +168,10 @@ std::string BuildRenderPassCppContent(const std::string& name)
         "            // TODO: mint any transient texture via frame.builder.CreateTexture()\n"
         "            // BEFORE constructing a gte::rg::RenderPassDesc below, then append it\n"
         "            // via outPasses.push_back(std::move(desc)) - see\n"
-        "            // docs/conventions/project-assembly-system.md, \"Capability #2\",\n"
-        "            // Findings B/E/F, and Assets/HelloGame.cpp in\n"
-        "            // Projects/ProjectAssemblyProbe/ for a complete, real, working\n"
-        "            // example to copy from. If your pass writes a transient texture\n"
-        "            // nobody else reads, also append it to frame.finalTextureOutputs,\n"
-        "            // or RenderGraphCompiler's backward-reachability culling scan will\n"
+        "            // docs/conventions/project-assembly-system.md, \"Capability #2\".\n"
+        "            // If your pass writes a transient texture nobody else reads, also\n"
+        "            // append it to frame.finalTextureOutputs, or\n"
+        "            // RenderGraphCompiler's backward-reachability culling scan will\n"
         "            // silently drop this whole pass.\n"
         "            (void)frame;\n"
         "            (void)outPasses;\n"
@@ -223,14 +216,13 @@ std::string BuildComputePassCppContent(const std::string& name)
         "\n"
         "void Register__NAME__ComputePass(gte::Core& core)\n"
         "{\n"
-        "    // TODO: build g___NAME__ComputePipeline on first use (see\n"
-        "    // Projects/ProjectAssemblyProbe/Assets/HelloGame.cpp for a complete,\n"
-        "    // real, working example - Renderer::CreateComputePipeline(), NEVER a\n"
-        "    // raw ComputePipeline constructor call), referencing the compiled\n"
-        "    // shader at the bare relative path\n"
-        "    // \"project_assemblies/shaders/__NAME__.comp.spv\", then register a\n"
-        "    // render pass provider the same way the generated __NAME__RenderPass.cpp\n"
-        "    // (if you also created one) does, whose execute step dispatches it.\n"
+        "    // TODO: build g___NAME__ComputePipeline on first use via\n"
+        "    // Renderer::CreateComputePipeline() (NEVER a raw ComputePipeline\n"
+        "    // constructor call), referencing the compiled shader at the bare\n"
+        "    // relative path \"project_assemblies/shaders/__NAME__.comp.spv\", then\n"
+        "    // register a render pass provider the same way the generated\n"
+        "    // __NAME__RenderPass.cpp (if you also created one) does, whose execute\n"
+        "    // step dispatches it.\n"
         "    (void)core;\n"
         "}\n";
     return ReplaceAll(kTemplate, "__NAME__", name);
@@ -330,8 +322,7 @@ std::string BuildScreenPostProcessPassCppContent(const std::string& name, std::i
         "                    // Intentionally empty - the clear color above IS the\n"
         "                    // entire effect for this starting point. TODO:\n"
         "                    // replace with a real draw or compute dispatch once\n"
-        "                    // you're ready - see\n"
-        "                    // Projects/ProjectAssemblyProbe/Assets/HelloGame.cpp.\n"
+        "                    // you're ready.\n"
         "                },\n"
         "                gte::rg::RenderPassDrawKind::DrawQuad, gte::rg::RenderPassEvent::AfterEverything);\n"
         "        },\n"
