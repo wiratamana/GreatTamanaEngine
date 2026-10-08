@@ -5,93 +5,60 @@
 
 #include <cassert>
 #include <cstddef>
+#include <deque>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 namespace gte {
 
-// editor-core-separation-25 campaign - "Core/Editor Separation: PassRecord
-// Debug Metadata Sink". The REAL implementation of BOTH
-// rg::IPassDebugMetadataSink (write) and rg::IPassDebugMetadataProvider
-// (read) - see RenderGraphDebugMetadataSink.h's own header comment for the
-// full contract each base class promises. Lives entirely under
-// src/Editor/ - i.e. compiled exclusively into the separate `gte_editor`
-// static library, never `gte_core` (this codebase has no
-// `GTE_ENABLE_EDITOR` preprocessor macro anymore - see AGENTS.md's
-// "`gte_core` / `gte_editor` Library Separation" section) - only ever
-// constructed/installed by Editor-tier startup code (see PHASE4),
-// mirroring EditorGpuMemoryNameOverlay's own placement exactly.
+// Real implementation of rg::IPassDebugMetadataSink (write) and
+// rg::IPassDebugMetadataProvider (read). Compiled only into gte_editor -
+// never gte_core. A Player-style build links gte_core alone, so this class
+// is never constructed there and every installed sink pointer stays null.
 //
-// PER-FRAME TABLE, NEVER PERMANENT (source doc, Section 4): a PassRecord
-// has no stable identity across frames ("a PassRecord is never 'upserted
-// by name'; every AddPass() call mints a brand new PassRecord every
-// frame" - RenderGraphTypes.h's own PassRecord doc comment), so a
-// permanent, ever-growing map would leak forever across a session. This
-// class instead CLEARS-BUT-KEEPS-CAPACITY once per fresh graph
-// declaration (BeginFrame()), mirroring RenderPassBlackboard::BeginFrame()'s
-// own established clearing discipline - but NEVER its scan-by-key LOOKUP
-// shape. m_table is a plain, dense, contiguously-indexed std::vector,
-// appended to via exactly one push_back() per OnPassDeclared() call, with
-// NO key comparison of any kind, ever - a future maintainer who instead
-// reaches for RenderPassBlackboard's own scan-by-key container shape would
-// still be functionally correct, just needlessly O(n) per declared pass
-// and O(n^2) across one graph's whole declaration, for a feature whose
-// entire point is to be free when the Editor is compiled out and cheap
-// when it isn't.
+// A PassRecord has no stable identity across frames, so this table is
+// cleared (but keeps capacity) once per fresh graph declaration via
+// BeginFrame() - never a permanent, ever-growing map.
 //
-// declarationIndexThisFrame is always exactly == m_table.size() at the
-// moment OnPassDeclared() fires - a dense, monotonically increasing
-// 0, 1, 2, ... sequence with no gaps, produced in the exact same order
-// PassRecord entries themselves are appended to RenderGraphBuilder's own
-// m_passes (since OnPassDeclared() is only ever called from inside
-// AddRenderPass(), the ONE call site that fires it - AddPass()/
-// AddComputePass() never call it at all, see RenderGraphTypes.h's own
-// PassRecord doc comment / source doc Section 2 for why those two
-// primitives are permanently out of this campaign's scope).
+// declarationIndexThisFrame is always exactly == m_table.size() when
+// OnPassDeclared() fires - a dense 0, 1, 2, ... sequence with no gaps,
+// matching RenderGraphBuilder's own pass declaration order.
 class FrameDebuggerPassMetadataRecorder final : public rg::IPassDebugMetadataSink,
                                                  public rg::IPassDebugMetadataProvider {
 public:
     void OnPassDeclared(std::size_t declarationIndexThisFrame, rg::RenderPassCategory category,
         rg::RenderPassDrawKind drawKind, rg::RenderPassTagMask tags) override
     {
-        // See this class's own doc comment above - a plain push_back,
-        // never a find/insert-by-key. Fires exactly once per pass, from
-        // AddRenderPass() alone.
         assert(declarationIndexThisFrame == m_table.size());
         m_table.push_back(rg::PassDebugMetadata{ category, drawKind, tags });
         m_barrierLabelsByIndex.emplace_back();
     }
 
-    // Called exactly once per fresh graph declaration, directly by
-    // RenderGraph::Execute() itself (never by RenderGraphBuilder, never by
-    // a pass author) - see PHASE4 for the exact call site. Clears entries
-    // but keeps whatever capacity was already reserved from a previous
-    // high-water mark - mirrors RenderPassBlackboard::BeginFrame()'s own
-    // discipline, never its lookup shape (see this class's own doc comment
-    // above).
+    // Called once per fresh graph declaration, directly by RenderGraph::Execute().
+    // Clears entries but keeps reserved capacity from the previous high-water mark.
     void BeginFrame() override
     {
         m_table.clear();
         m_barrierLabelsByIndex.clear();
     }
 
-    // Fires once per WRITE usage that actually required a barrier, at
-    // execute time (RenderGraph::Execute()'s own per-pass barrier loop) -
-    // see IPassDebugMetadataSink::OnResourceBarrierApplied()'s own doc
-    // comment for the full contract.
+    // Fires once per WRITE usage that actually required a barrier, at execute
+    // time, in the exact order RenderGraph::Execute()'s writes-loop applies them.
+    // A single pass can legally write the same resource name more than once
+    // (e.g. color + depth-stencil attachment of one combined render target) -
+    // each occurrence is queued per-name, FIFO, so a later query consumes
+    // labels in the same order they were produced instead of collapsing them.
     void OnResourceBarrierApplied(std::size_t declarationIndex, const std::string& resourceName,
         VkImageLayout oldLayout, VkImageLayout newLayout) override
     {
         if (declarationIndex >= m_barrierLabelsByIndex.size()) {
             return; // Defensive - never expected against a real OnPassDeclared()-grown table.
         }
-        m_barrierLabelsByIndex[declarationIndex][resourceName] = rg::BarrierTransitionLabel(oldLayout, newLayout);
+        m_barrierLabelsByIndex[declarationIndex][resourceName].push_back(
+            rg::BarrierTransitionLabel(oldLayout, newLayout));
     }
 
-    // Defensive, never-throwing read accessor - see
-    // IPassDebugMetadataProvider::QueryPassDebugMetadata()'s own doc
-    // comment (RenderGraphDebugMetadataSink.h) for the full contract.
     bool QueryPassDebugMetadata(std::size_t declarationIndex, rg::PassDebugMetadata& outMetadata) const override
     {
         if (declarationIndex >= m_table.size()) {
@@ -101,37 +68,40 @@ public:
         return true;
     }
 
-    // Defensive, never-throwing read accessor - see
-    // IPassDebugMetadataProvider::QueryBarrierTransitionLabel()'s own doc
-    // comment (RenderGraphDebugMetadataSink.h) for the full contract.
+    // Consumes one label from this (declarationIndex, resourceName) pair's FIFO
+    // queue, in the same write order RenderGraphSnapshot.cpp's own write loop
+    // queries it. Returns false (never throws) once the queue runs dry - e.g.
+    // a read-only usage, or more queries than barriers actually applied.
     bool QueryBarrierTransitionLabel(
         std::size_t declarationIndex, const std::string& resourceName, std::string& outLabel) const override
     {
         if (declarationIndex >= m_barrierLabelsByIndex.size()) {
             return false;
         }
-        const auto& labelsForPass = m_barrierLabelsByIndex[declarationIndex];
-        const auto it = labelsForPass.find(resourceName);
-        if (it == labelsForPass.end()) {
+        auto& labelQueues = m_barrierLabelsByIndex[declarationIndex];
+        const auto it = labelQueues.find(resourceName);
+        if (it == labelQueues.end() || it->second.empty()) {
             return false;
         }
-        outLabel = it->second;
+        outLabel = it->second.front();
+        it->second.pop_front();
         return true;
     }
 
-    // TEST-ONLY: how many entries this table currently holds - lets a test
-    // assert the table's own size directly, without needing to know any
-    // particular declarationIndex's value in advance. Never called by
-    // production code.
+    // TEST-ONLY: current entry count, for tests that assert table size directly.
     std::size_t EntryCountForTesting() const noexcept { return m_table.size(); }
 
 private:
     std::vector<rg::PassDebugMetadata> m_table;
 
-    // Parallel to m_table (same index space, same lifetime) - one resource-
-    // name-keyed map of barrier transition labels per declared pass, filled
-    // by OnResourceBarrierApplied(), read back by QueryBarrierTransitionLabel().
-    std::vector<std::unordered_map<std::string, std::string>> m_barrierLabelsByIndex;
+    // Parallel to m_table. Per declared pass, one FIFO queue of barrier
+    // labels per resource name - NOT a single label per name, so repeated
+    // writes to the same resource (color attachment + depth-stencil
+    // attachment of one combined target) each get their own, correctly
+    // ordered label instead of the last write silently overwriting the first.
+    // mutable: QueryBarrierTransitionLabel() consumes (pops) as it reads,
+    // which is an internal read-cursor detail, not observable sink state.
+    mutable std::vector<std::unordered_map<std::string, std::deque<std::string>>> m_barrierLabelsByIndex;
 };
 
 } // namespace gte

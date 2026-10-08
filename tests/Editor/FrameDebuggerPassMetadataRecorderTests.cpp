@@ -1,14 +1,7 @@
 // Unit tests for FrameDebuggerPassMetadataRecorder
-// (src/Editor/FrameDebuggerPassMetadataRecorder.h) - editor-core-separation-25
-// campaign, PHASE2
-// (task_manager/editor-core-separation-25/PHASE2_EDITOR_FRAME_DEBUGGER_PASS_METADATA_RECORDER.md).
-//
-// Genuinely Tier 1: pure, hand-fabricated calls directly against one
-// FrameDebuggerPassMetadataRecorder instance - no RenderGraphBuilder/
-// RenderGraph/live device involved anywhere, exactly as the phase plan
-// requires. Each case below maps directly to a specific correctness
-// requirement from the source design document and PHASE0_MASTER_STRATEGY.md's
-// own Locked Decisions.
+// (src/Editor/FrameDebuggerPassMetadataRecorder.h). Pure, hand-fabricated
+// calls against one recorder instance - no RenderGraphBuilder/RenderGraph/
+// live device involved.
 
 #include "Editor/FrameDebuggerPassMetadataRecorder.h"
 
@@ -165,6 +158,70 @@ TEST(FrameDebuggerPassMetadataRecorderTest, MultipleBeginFrameCyclesNeverLeakBet
         ASSERT_TRUE(recorder.QueryPassDebugMetadata(2, out));
         EXPECT_EQ(out.tags, 32ULL);
     }
+}
+
+TEST(FrameDebuggerPassMetadataRecorderTest, BarrierLabelRoundTripsForSingleWrite)
+{
+    FrameDebuggerPassMetadataRecorder recorder;
+    recorder.OnPassDeclared(0, RenderPassCategory::General, RenderPassDrawKind::DrawMesh, /*tags=*/0ULL);
+
+    recorder.OnResourceBarrierApplied(0, "HDR_Scene", VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+    std::string label;
+    ASSERT_TRUE(recorder.QueryBarrierTransitionLabel(0, "HDR_Scene", label));
+    EXPECT_EQ(label, "Undefined -> RT");
+}
+
+TEST(FrameDebuggerPassMetadataRecorderTest, QueryWithNoBarrierAppliedReturnsFalse)
+{
+    FrameDebuggerPassMetadataRecorder recorder;
+    recorder.OnPassDeclared(0, RenderPassCategory::General, RenderPassDrawKind::DrawMesh, /*tags=*/0ULL);
+
+    std::string label = "untouched";
+    EXPECT_FALSE(recorder.QueryBarrierTransitionLabel(0, "G_Color", label));
+    EXPECT_EQ(label, "untouched");
+}
+
+// Reproduces the real bug: one pass writes the SAME resource name twice
+// (color attachment + depth-stencil attachment of one combined render
+// target). Each write must keep its own, independently correct label -
+// never both rows reporting whichever barrier was recorded last.
+TEST(FrameDebuggerPassMetadataRecorderTest, DuplicateResourceNameWritesKeepIndependentLabels)
+{
+    FrameDebuggerPassMetadataRecorder recorder;
+    recorder.OnPassDeclared(0, RenderPassCategory::General, RenderPassDrawKind::DrawMesh, /*tags=*/0ULL);
+
+    // Color attachment write, applied first.
+    recorder.OnResourceBarrierApplied(0, "SceneView", VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    // Depth-stencil attachment write to the SAME resolved name, applied second.
+    recorder.OnResourceBarrierApplied(
+        0, "SceneView", VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+
+    // Queried in the same order RenderGraphSnapshot.cpp's write loop queries them.
+    std::string colorLabel;
+    ASSERT_TRUE(recorder.QueryBarrierTransitionLabel(0, "SceneView", colorLabel));
+    EXPECT_EQ(colorLabel, "Undefined -> RT");
+
+    std::string depthLabel;
+    ASSERT_TRUE(recorder.QueryBarrierTransitionLabel(0, "SceneView", depthLabel));
+    EXPECT_EQ(depthLabel, "Undefined -> Depth Test");
+
+    // A third query for the same name, with nothing left queued, is a clean miss.
+    std::string thirdLabel = "untouched";
+    EXPECT_FALSE(recorder.QueryBarrierTransitionLabel(0, "SceneView", thirdLabel));
+    EXPECT_EQ(thirdLabel, "untouched");
+}
+
+TEST(FrameDebuggerPassMetadataRecorderTest, BarrierLabelsDoNotLeakAcrossDeclarationIndices)
+{
+    FrameDebuggerPassMetadataRecorder recorder;
+    recorder.OnPassDeclared(0, RenderPassCategory::General, RenderPassDrawKind::DrawMesh, /*tags=*/0ULL);
+    recorder.OnPassDeclared(1, RenderPassCategory::General, RenderPassDrawKind::DrawMesh, /*tags=*/0ULL);
+
+    recorder.OnResourceBarrierApplied(0, "SceneView", VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+    std::string label;
+    EXPECT_FALSE(recorder.QueryBarrierTransitionLabel(1, "SceneView", label));
 }
 
 } // namespace
