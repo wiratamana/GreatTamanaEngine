@@ -9,40 +9,30 @@ namespace gte {
 struct EditorContext;
 class Game;
 
-// Job System Phase 7 (Editor "Jobs" Panel -
-// task_manager/job_system/JOBSYSTEM_PHASE7_EDITOR_JOBS_PANEL.md): a Unity-
-// Profiler-Timeline-style panel, docked alongside "Memory"/"Profiler"/
-// "Render Graph" (see DockLayout.cpp) - a live, per-worker horizontal
-// timeline (Idle vs. named, colored job spans) for the last-completed
-// frame's Job System activity, reading exclusively from Job System Phase 5's
+// Editor "Jobs" panel: a Unity-Profiler-Timeline-style panel, docked
+// alongside "Memory"/"Profiler" (see DockLayout.cpp) - a live, per-worker
+// horizontal timeline (Idle vs. named, colored job spans) for the
+// last-completed frame's Job System activity, reading exclusively from
 // Profiling::BuildWorkerTimelinePoints()/ComputeDistinctWorkerCount()
-// reshape (src/Profiling/WorkerTimelineData.h) - no new engine-level
-// tracking is added by this panel at all.
+// (src/Profiling/WorkerTimelineData.h).
 //
-// A small STATEFUL CLASS, not a stateless free function like most panels
-// under src/Editor/Panels/ - mirrors Panels/ProfilerPanel.h/
-// Panels/RenderGraphPanel.h's own precedent exactly (AGENTS.md, "Editor
-// Module Structure" pre-approves this exception for a panel that needs a
-// Pause-frozen snapshot surviving across frames, while the underlying data
-// capture keeps running underneath it unaffected). Still called explicitly
-// BY NAME from ImGuiEditorLayer::BuildUI() - no IEditorPanel interface
-// introduced.
+// A small stateful class, not a stateless free function like most panels
+// under src/Editor/Panels/ - mirrors Panels/ProfilerPanel.h's own precedent:
+// needs a Pause-frozen snapshot surviving across frames while the
+// underlying data capture keeps running underneath it. Still called
+// explicitly by name from ImGuiEditorLayer::BuildUI() - no IEditorPanel
+// interface introduced.
 //
 // Deliberately has NO OWN "Capture" toggle - shares
 // Profiling::FrameProfiler's existing capture flag with "Profiler" (see
-// Panels/ProfilerPanel.cpp's own Capture checkbox) rather than introducing a
-// second, independently-stateful toggle over the exact same underlying data
-// source (see JOBSYSTEM_PHASE7_EDITOR_JOBS_PANEL.md, Step 3.4, point 5).
+// Panels/ProfilerPanel.cpp's own Capture checkbox) rather than introducing
+// a second, independently-stateful toggle over the same underlying data.
 //
-// GPU Vertex Skinning campaign, Phase 7 (Editor Toggle & Profiling UX -
-// task_manager/gpu_skinning/GPU_SKINNING_PHASE7_EDITOR_PROFILING_UX_STRATEGY_v1.md):
-// also hosts the engine-wide CPU (Job System) / GPU (Compute) vertex
-// skinning mode toggle (Step 3.1 - this panel was chosen over "Render
-// Graph" specifically because a user watching THIS panel's own worker
-// timeline is exactly who benefits from seeing, right next to it, the
-// control that makes "SkinVertices" entries appear/disappear from it), which
-// is why Build() now also takes a Game& - the ONE new dependency this class
-// has beyond Profiling::FrameProfiler::Instance()/Jobs::JobSystem::Instance().
+// Also hosts the engine-wide CPU (Job System) / GPU (Compute) vertex
+// skinning mode toggle, since a user watching this panel's worker timeline
+// benefits from seeing "SkinVertices" entries appear/disappear right next
+// to the control that causes it - this is why Build() takes a Game&, the
+// one dependency beyond Profiling::FrameProfiler/Jobs::JobSystem.
 class JobsPanel {
 public:
     void Build(EditorContext& ctx, Game& game);

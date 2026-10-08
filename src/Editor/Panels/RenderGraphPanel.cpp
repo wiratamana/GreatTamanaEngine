@@ -193,8 +193,12 @@ void RenderGraphPanel::Build(EditorContext& ctx, Renderer& renderer, const rg::R
     rg::RenderPassToggleRegistry& renderPassToggleRegistry,
     RenderFeatureCompositor* renderFeatureCompositor)
 {
+    if (!ctx.renderGraphWindowOpen) {
+        return;
+    }
+
     ImGui::SetNextWindowSize(ImVec2(1100.0f, 700.0f), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("Render Graph")) {
+    if (!ImGui::Begin("Render Graph", &ctx.renderGraphWindowOpen)) {
         ImGui::End();
         return;
     }

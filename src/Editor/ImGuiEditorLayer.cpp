@@ -558,13 +558,11 @@ public:
         // BuildHierarchyPanel()/BuildScenePanel() above, which already take
         // `game` for their own reasons).
         m_jobsPanel.Build(m_ctx, game);
-        // task_manager/logger-1 campaign, PHASE4 - the Editor "Log" panel
-        // (Panels/LogPanel.h), docked alongside "Memory"/"Profiler"/"Render
-        // Graph"/"Jobs"/"Atmosphere" (see DockLayout.cpp). A small,
-        // stateful, non-polymorphic class (mirrors JobsPanel above), with
-        // no cross-panel dependency of its own beyond EditorContext - it
-        // reads/mutates Editor/Logger.h's own already-thread-safe state
-        // directly, no bridge (see AGENTS.md, "Logging").
+        // The Editor "Log" panel (Panels/LogPanel.h), docked alongside
+        // "Memory"/"Profiler"/"Jobs"/"Atmosphere" (see DockLayout.cpp). A
+        // small, stateful class with no cross-panel dependency beyond
+        // EditorContext - reads/mutates Editor/Logger.h's own thread-safe
+        // state directly, no bridge needed.
         m_logPanel.Build(m_ctx);
         // task_manager/frame-debugger-2 campaign (PHASE2) - the Editor's
         // on-demand "Frame Debugger" floating window (Panels/
@@ -969,27 +967,25 @@ private:
     // switch (see AGENTS.md, "Profiling").
     ProfilerPanel m_profilerPanel;
 
-    // The Editor's "Render Graph" panel (Phase 8 -
-    // RENDERGRAPH_PHASE8_EDITOR_DEBUG_TOOLING_STRATEGY_v1.md - see
-    // Panels/RenderGraphPanel.h) - docked alongside "Memory"/"Profiler"
-    // (DockLayout.cpp). Also not gated behind GTE_ENABLE_PROJECT_PANEL - it
-    // only depends on the gte::rg::RenderGraph Application already owns and
-    // drives every frame, passed into BuildUI() above.
+    // The Editor "Render Graph" panel (Panels/RenderGraphPanel.h) - a
+    // floating window, independently opened/closed via
+    // ctx.renderGraphWindowOpen (see EditorContext.h) and the
+    // "Window > Render Graph" menu item, not part of the fixed dock
+    // layout. Not gated behind GTE_ENABLE_PROJECT_PANEL - only depends on
+    // the gte::rg::RenderGraph Application already owns and drives every
+    // frame, passed into BuildUI() above.
     RenderGraphPanel m_renderGraphPanel;
 
-    // Job System Phase 7 (Editor "Jobs" Panel -
-    // task_manager/job_system/JOBSYSTEM_PHASE7_EDITOR_JOBS_PANEL.md - see
-    // Panels/JobsPanel.h) - docked alongside "Memory"/"Profiler"/"Render
-    // Graph" (DockLayout.cpp). Also not gated behind GTE_ENABLE_PROJECT_PANEL -
-    // it only depends on gte::Profiling::FrameProfiler/gte::Jobs::JobSystem,
-    // both of which are always compiled regardless of that switch.
+    // The Editor "Jobs" panel (Panels/JobsPanel.h), docked alongside
+    // "Memory"/"Profiler" (DockLayout.cpp). Not gated behind
+    // GTE_ENABLE_PROJECT_PANEL - depends only on
+    // gte::Profiling::FrameProfiler/gte::Jobs::JobSystem.
     JobsPanel m_jobsPanel;
 
-    // task_manager/logger-1 campaign, PHASE4 (Editor "Log" Panel UI - see
-    // Panels/LogPanel.h) - docked alongside "Memory"/"Profiler"/"Render
-    // Graph"/"Jobs"/"Atmosphere" (DockLayout.cpp). Also not gated behind
-    // GTE_ENABLE_PROJECT_PANEL - it only depends on Editor/Logger.h's own
-    // always-compiled-in-an-Editor-build, thread-safe static state.
+    // The Editor "Log" panel (Panels/LogPanel.h), docked alongside
+    // "Memory"/"Profiler"/"Jobs"/"Atmosphere" (DockLayout.cpp). Not gated
+    // behind GTE_ENABLE_PROJECT_PANEL - depends only on Editor/Logger.h's
+    // own thread-safe static state.
     LogPanel m_logPanel;
 
     // task_manager/frame-debugger-2 campaign (PHASE2) - the Editor's

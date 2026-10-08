@@ -218,25 +218,17 @@ struct EditorContext {
     // why).
     bool frameDebuggerWindowOpen = false;
 
-    // editor-core-separation-21 campaign, PHASE2
-    // (PHASE2_FIX_AERIAL_PERSPECTIVE_COMPOSITE_TOGGLE_LIE.md) - set to true by
-    // Panels/RenderGraphPanel.cpp's own two checkbox click sites (BuildPassRow()/
-    // BuildAllBuiltInPassesSection()) the instant a built-in pass's
-    // RenderPassToggleRegistry::SetEnabled() call actually flips ANY pass's
-    // (name, enabled) pair this frame (see
-    // RenderPassToggleChangeDetectionLogic.h's own DidRenderPassToggleEnabledStatesChange()).
-    // Consumed (read-and-cleared) by FrameDebuggerPanel::Build(), called LATER
-    // this SAME frame from ImGuiEditorLayer::BuildUI() - the fourth Frame
-    // Debugger capture TRIGGER (joining the Enable-edge/Step/explicit
-    // "Capture" button triggers already documented in AGENTS.md's "Frame
-    // Debugger" section), fixing PHASE1_COMPLETION_REPORT.md's confirmed root
-    // cause: a disabled pass used to keep showing up as a real, populated
-    // Frame Debugger leaf until a human/HTTP caller remembered to request a
-    // SECOND capture after the toggle. The OTHER mutation path
-    // (GET /render_graph/set_pass_enabled, EditorHost.cpp's
-    // RenderGraphControlCommandBridge pump) does not go through this flag at
-    // all - that pump runs BEFORE BuildUI() even starts, so it instead calls
-    // IEditorLayer::FrameDebuggerCaptureNow() directly at its own call site.
+    // True when the floating "Render Graph" window (Panels/RenderGraphPanel.h)
+    // is open. Toggled by "Window > Render Graph" menu item and the window's
+    // own titlebar close button. Defaults to true (always visible on launch).
+    bool renderGraphWindowOpen = true;
+
+    // Set true in RenderGraphPanel::Build() when a before/after snapshot
+    // diff (DidRenderPassToggleEnabledStatesChange) detects any pass toggle
+    // checkbox flip this frame (Pass Tree, All Built-In Passes, or Render
+    // Features tab). Read-and-cleared by FrameDebuggerPanel::Build() to
+    // trigger a fresh capture so a toggled pass doesn't linger with stale
+    // debugger data.
     bool renderPassToggleRegistryChangedThisFrame = false;
 
     // editor-core-separation-16 campaign (On-Engine Project Workflow plan,

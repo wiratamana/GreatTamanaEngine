@@ -167,6 +167,9 @@ void BuildDockspaceAndMenuBar(
             // even if it was closed via its own titlebar [x] rather than
             // this menu.
             ImGui::MenuItem("Frame Debugger", nullptr, &ctx.frameDebuggerWindowOpen);
+            // Render Graph is a floating window too (not docked), same
+            // open/close convention as Frame Debugger above.
+            ImGui::MenuItem("Render Graph", nullptr, &ctx.renderGraphWindowOpen);
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Project")) {
