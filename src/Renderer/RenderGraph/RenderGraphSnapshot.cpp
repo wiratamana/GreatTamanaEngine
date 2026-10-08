@@ -2,9 +2,8 @@
 
 namespace gte::rg {
 
-// Render Pass campaign (task_manager/render-pass-1), PHASE2 - see this
-// function's own doc comment in RenderGraphSnapshot.h for the full
-// contract/rule.
+// See this function's own doc comment in RenderGraphSnapshot.h for the
+// full contract.
 PassGpuStats CombinePassGpuStats(const std::vector<PassGpuStats>& stats)
 {
     PassGpuStats combined;
@@ -40,9 +39,9 @@ PassGpuStats CombinePassGpuStats(const std::vector<PassGpuStats>& stats)
 // CompiledGraphInput's texture/buffer/volume-texture/texture-array tables
 // actually applies to its kind. Never reads out of bounds (a stale/invalid
 // index degrades to an empty string rather than crashing) - a display
-// helper, never an assertion. Exported (declared in RenderGraphSnapshot.h)
-// so RenderGraph.cpp's own barrier-applied sink call resolves a usage's
-// name through this exact same function, never a second copy.
+// helper, never an assertion. Exported so RenderGraph.cpp's own
+// barrier-applied sink call resolves a usage's name through this exact
+// same function, never a second copy.
 std::string ResourceUsageName(const ResourceUsage& usage, const CompiledGraphInput& input)
 {
     std::string name;
@@ -62,7 +61,6 @@ std::string ResourceUsageName(const ResourceUsage& usage, const CompiledGraphInp
                 name = input.volumeTextures[h.index].name;
             }
         },
-        // better-render-pass-3 campaign, BLOCK5, Phase 3.
         [&](TextureArrayHandle h) {
             if (h.index < input.textureArrays.size() && input.textureArrays[h.index].name != nullptr) {
                 name = input.textureArrays[h.index].name;
@@ -81,18 +79,16 @@ RenderGraphPassSnapshot BuildPassSnapshot(const PassRecord& pass, std::size_t de
     RenderGraphPassSnapshot snapshot;
     snapshot.name = pass.name != nullptr ? pass.name : "";
     snapshot.isCulled = isCulled;
-    snapshot.kind = pass.kind; // Render Pass campaign PHASE1 (task_manager/render-pass-1) - renamed from isComputePass
-    snapshot.viewScope = pass.viewScope; // frame-debugger-6, PHASE1
-    snapshot.renderPassEvent = pass.renderPassEvent; // render-pass-3 campaign, PHASE1
+    snapshot.kind = pass.kind;
+    snapshot.viewScope = pass.viewScope;
+    snapshot.renderPassEvent = pass.renderPassEvent;
 
-    // editor-core-separation-25 campaign - category/drawKind/tags no
-    // longer live on PassRecord. snapshot.category/.drawKind/.tags start
-    // at RenderGraphPassSnapshot's own struct defaults (General/DrawMesh/0)
-    // and are only overwritten when metadataLookup is supplied AND
-    // actually has an entry for this exact declarationIndex - this is the
-    // graceful, zero-behavior-change fallback for a headless build (no
-    // sink ever installed) and for every pre-existing test/call site that
-    // does not pass a metadataLookup at all.
+    // category/drawKind/tags no longer live on PassRecord - they start at
+    // RenderGraphPassSnapshot's own struct defaults (General/DrawMesh/0) and
+    // are only overwritten when metadataLookup is supplied AND actually has
+    // an entry for this exact declarationIndex. This is the graceful
+    // fallback for a headless build (no sink installed) and for any
+    // call site that does not pass a metadataLookup at all.
     if (metadataLookup) {
         PassDebugMetadata metadata;
         if (metadataLookup(declarationIndex, metadata)) {
@@ -103,22 +99,22 @@ RenderGraphPassSnapshot BuildPassSnapshot(const PassRecord& pass, std::size_t de
     }
 
     snapshot.readNames.reserve(pass.reads.size());
-    snapshot.readKinds.reserve(pass.reads.size());          // frame-debugger-5, PHASE1
+    snapshot.readKinds.reserve(pass.reads.size());
     snapshot.readAccess.reserve(pass.reads.size());
     for (const ResourceUsage& usage : pass.reads) {
         snapshot.readNames.push_back(ResourceUsageName(usage, input));
-        snapshot.readKinds.push_back(usage.kind);           // frame-debugger-5, PHASE1
+        snapshot.readKinds.push_back(usage.kind);
         snapshot.readAccess.push_back(usage.access);
     }
 
     snapshot.writeNames.reserve(pass.writes.size());
-    snapshot.writeKinds.reserve(pass.writes.size());        // frame-debugger-5, PHASE1
+    snapshot.writeKinds.reserve(pass.writes.size());
     snapshot.writeAccess.reserve(pass.writes.size());
     snapshot.writeBarrierLabels.reserve(pass.writes.size());
     for (const ResourceUsage& usage : pass.writes) {
         const std::string writeName = ResourceUsageName(usage, input);
         snapshot.writeNames.push_back(writeName);
-        snapshot.writeKinds.push_back(usage.kind);          // frame-debugger-5, PHASE1
+        snapshot.writeKinds.push_back(usage.kind);
         snapshot.writeAccess.push_back(usage.access);
 
         std::string barrierLabel;
@@ -147,13 +143,13 @@ RenderGraphSnapshot BuildRenderGraphSnapshot(const CompiledGraph& compiled, cons
     const std::function<bool(std::size_t, const std::string&, std::string&)>& barrierLabelLookup)
 {
     RenderGraphSnapshot snapshot;
-    snapshot.timingSlotBudgetExhausted = timingSlotBudgetExhausted; // PHASE1 (render-pass-6 campaign, item 2.4)
+    snapshot.timingSlotBudgetExhausted = timingSlotBudgetExhausted;
     snapshot.passesInExecutionOrder.reserve(compiled.executionOrder.size() + input.passes.size());
 
     // Surviving passes first, in real execution order. handle.index IS this
-    // pass's own declarationIndex - the SAME index space
-    // CompiledGraphInput::passes already uses (PassHandle::index), so no new
-    // correlation problem is introduced.
+    // pass's own declarationIndex - the same index space
+    // CompiledGraphInput::passes already uses (PassHandle::index), so no
+    // new correlation problem is introduced.
     for (const PassHandle& handle : compiled.executionOrder) {
         if (handle.index >= input.passes.size()) {
             continue; // Defensive - never expected against a real Compile() result.
@@ -164,9 +160,7 @@ RenderGraphSnapshot BuildRenderGraphSnapshot(const CompiledGraph& compiled, cons
 
     // Culled passes appended afterwards, in their original declaration
     // order - still visible, per this file's own header comment. The loop
-    // index IS this pass's own declarationIndex (an explicit index loop,
-    // replacing the old range-for that had no index to give
-    // BuildPassSnapshot()).
+    // index IS this pass's own declarationIndex.
     for (std::size_t i = 0; i < input.passes.size(); ++i) {
         const PassRecord& pass = input.passes[i];
         if (!pass.isCulled) {
@@ -192,11 +186,7 @@ RenderGraphSnapshot BuildRenderGraphSnapshot(const CompiledGraph& compiled, cons
     for (std::size_t i = 0; i < input.buffers.size(); ++i) {
         RenderGraphResourceSnapshot resource;
         resource.name = input.buffers[i].name != nullptr ? input.buffers[i].name : "";
-        // GPU Vertex Skinning campaign, Phase 3
-        // (GPU_SKINNING_PHASE3_RENDERGRAPH_SYNCHRONIZATION_STRATEGY_v2.md) -
-        // a buffer resource CAN now be imported (RenderGraphBuilder::
-        // ImportBuffer()) - mirrors the texture branch immediately above,
-        // which was already correct.
+        // A buffer resource can be imported too, same as a texture above.
         resource.isImported = input.buffers[i].importInfo.isImported;
         if (i < compiled.bufferLifetimes.size()) {
             resource.firstUsePassIndex = compiled.bufferLifetimes[i].firstUsePassIndex;

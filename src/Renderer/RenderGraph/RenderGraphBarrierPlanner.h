@@ -1,49 +1,19 @@
 #pragma once
 
-// Phase 5 (RENDERGRAPH_PHASE5_BARRIER_SYNTHESIS_STRATEGY_v2.md, part 5 of
-// the wider RENDERGRAPH_PHASE0_MASTER_STRATEGY_v2.md campaign) - "Automatic
-// GPU Safety Rules": replaces FrameRecorder::RecordFrame()'s hand-written,
-// fixed-shape barrier code (exactly one color image, one optional depth
-// image, oldLayout always VK_IMAGE_LAYOUT_UNDEFINED, finalLayout always one
-// of exactly two hardcoded choices - see src/Renderer/FrameRecorder.cpp)
-// with a small, DATA-DRIVEN barrier planner: given a resource's PREVIOUS
-// known state (layout, access mask, pipeline stage) and its NEXT declared
-// ResourceAccess (Phase 1 - see RenderGraphTypes.h), produce the exact
-// VkImageMemoryBarrier2/VkBufferMemoryBarrier2 needed to transition between
-// them - correctly, for an arbitrary number of passes touching an arbitrary
-// number of resources in an arbitrary order.
+// Data-driven Vulkan Synchronization2 barrier planner: given a resource's
+// previous known state and its next declared ResourceAccess, produces the
+// exact VkImageMemoryBarrier2/VkBufferMemoryBarrier2 needed to transition
+// between them, for any number of passes touching any number of resources
+// in any order.
 //
-// Split into a PURE decision half (Tier-1-testable - RequiredStateFor()/
-// RequiresBarrier()/BuildImageMemoryBarrier2()/BuildBufferMemoryBarrier2(),
-// none of which ever touch a live VkDevice/VkCommandBuffer - constructing a
-// VkImageMemoryBarrier2/VkBufferMemoryBarrier2 is just populating a plain
-// POD struct, no Vulkan call involved) and a THIN Vulkan-call half
-// (EmitImageBarrier()/EmitBufferBarrier(), Tier 2 - simply building via the
-// pure half above and then calling vkCmdPipelineBarrier2) - the exact same
-// split this campaign's own Phase 1 established for ResourceAccess, and the
-// exact same split GpuTiming.h (pure) / GpuTimingService.cpp (Vulkan calls)
-// already proved out successfully in this same codebase.
-//
-// Per-resource state TRACKING across a whole compiled pass list (walking
-// CompiledGraph::executionOrder, calling RequiredStateFor()/RequiresBarrier()
-// for every declared read/write, and overwriting the tracked "current state"
-// as it goes) is explicitly Phase 6's job (the execution engine), not this
-// file's - this file only provides the two pure per-transition decisions
-// and the thin Vulkan-call wrappers Phase 6 will drive in a loop. See
-// RENDERGRAPH_PHASE5_BARRIER_SYNTHESIS_STRATEGY_v2.md, Step 3.2.
-//
-// MVP scope is a SINGLE color attachment plus an optional depth attachment
-// per pass - full MRT (multi-color-attachment) support is explicitly out of
-// scope here and moved to Phase 9, alongside the matching Pipeline
-// multi-format-attachment change it actually requires (see that phase's own
-// V2 Revision Note 1). This file has no attachment-COUNT concept at all -
-// it operates purely per-resource, so it is unaffected either way; the
-// "single color attachment" constraint lives entirely in Phase 6's
-// PassContext/RenderTarget resolution, not here.
-//
-// Nothing outside src/Renderer/RenderGraph/ includes this header yet, and
-// nothing calls into it from production code yet - Phase 6 is the first
-// real consumer.
+// Split into a pure decision half (RequiredStateFor/RequiresBarrier/
+// BuildImageMemoryBarrier2/BuildBufferMemoryBarrier2 - no live VkDevice/
+// VkCommandBuffer involved, just POD construction) and a thin Vulkan-call
+// half (EmitImageBarrier/EmitBufferBarrier - builds via the pure half, then
+// issues a single vkCmdPipelineBarrier2). Per-resource state TRACKING
+// across a compiled pass list is the execution engine's job, not this
+// file's - this file only provides the per-transition decision and the
+// thin call wrappers the engine drives in a loop.
 
 #include "RenderGraphTypes.h"
 
