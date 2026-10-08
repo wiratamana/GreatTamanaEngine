@@ -285,7 +285,7 @@ void RenderGraphPanel::BuildPassTree(
     for (const rg::RenderGraphGroupedPassMetadata& row : grouped) {
         liveByName[row.name] = &row;
         if (!row.instances.empty() && row.instances.front().tagGroupLabel.has_value()) {
-            m_lastKnownGroupLabel[row.name] = *row.instances.front().tagGroupLabel;
+            m_groupingCache.Observe(row.name, *row.instances.front().tagGroupLabel);
         }
     }
 
@@ -310,8 +310,7 @@ void RenderGraphPanel::BuildPassTree(
             }
         }
 
-        const auto labelIt = m_lastKnownGroupLabel.find(state.name);
-        byGroup[labelIt != m_lastKnownGroupLabel.end() ? labelIt->second : "Ungrouped"].push_back(state);
+        byGroup[m_groupingCache.Resolve(state.name)].push_back(state);
     }
 
     // Sorted heading order - deterministic, independent of unordered_map's

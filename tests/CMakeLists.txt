@@ -2422,6 +2422,7 @@ set(GTE_TEST_SOURCES
     # stages, combined into one file.
     Renderer/RenderGraph/PostOpaqueRenderPipelineBlackboardQualificationTests.cpp
     Renderer/RenderGraph/RenderPassToggleRegistryTests.cpp
+    Renderer/RenderGraph/RenderGraphGroupingCacheTests.cpp
     Renderer/RenderGraph/RenderPassGroupRegistryTests.cpp
     Renderer/RenderGraph/RenderPassToggleChangeDetectionLogicTests.cpp
     Renderer/RenderGraph/RenderPassToggleGuardTests.cpp
