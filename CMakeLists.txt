@@ -441,6 +441,7 @@ add_library(gte_core STATIC
     src/Core/Plugins/RenderFeatureCompositor.h
     src/Core/Plugins/RenderFeatureCompositor.cpp
     src/Core/Plugins/PostProcessingPassTags.h
+    src/Core/Plugins/ProjectAuthoredPassTags.h
     # better-render-pass-3 campaign, BLOCK 2 (Arbitrary Render Views), PHASE2
     # (PHASE2_RENDER_VIEW_REGISTRY_CORE.md) - the new registry owning every
     # dynamically-created, named render view's persistent RenderTexture.

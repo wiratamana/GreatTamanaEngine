@@ -406,7 +406,8 @@ core.RegisterProjectRenderFeature(
                 pass.WriteColorAttachment(privateTarget, std::array<float, 4>{ 1.0f, 0.0f, 0.0f, 0.15f });
             },
             [](gte::rg::PassContext&) {},
-            gte::rg::RenderPassDrawKind::DrawQuad, gte::rg::RenderPassEvent::AfterEverything);
+            gte::rg::RenderPassDrawKind::DrawQuad, gte::rg::RenderPassEvent::AfterEverything,
+            gte::kProjectAuthoredPassTag.bit);
     });
 ```
 

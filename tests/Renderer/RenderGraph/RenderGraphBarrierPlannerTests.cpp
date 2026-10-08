@@ -653,8 +653,7 @@ TEST(RenderGraphBarrierPlannerTest, DecideTextureArrayLayerTransitionSkipsRedund
     EXPECT_FALSE(second.requiresBarrier);
 }
 
-// --- ShortLayoutLabel() / BarrierTransitionLabel() - Editor Inspector ------
-// --- display labels (editor-core-separation-7 campaign) --------------------
+// --- ShortLayoutLabel() / BarrierTransitionLabel() - Editor Inspector display labels ---
 
 TEST(RenderGraphShortLayoutLabelTest, ReturnsDocumentedLabelForEveryNamedLayout)
 {

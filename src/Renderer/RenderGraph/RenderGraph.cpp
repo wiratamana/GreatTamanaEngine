@@ -847,11 +847,9 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
             AppliedBarrierInfo barrierInfo;
             ApplyUsageBarrierIfNeeded(cmd, usage, input, physicalTextures, physicalBuffers, physicalVolumeTextures,
                 physicalTextureArrays, &barrierInfo);
-            // editor-core-separation-25 campaign (barrier labels) - reports
-            // this WRITE's real before/after layout transition to the
-            // installed sink, if any, so the Editor Inspector can show it
-            // next to the pass's own output resource - never computed on
-            // this hot Vulkan recording path, only forwarded.
+            // Reports this write's real before/after layout transition to the installed
+            // sink, if any, so the Editor Inspector can show it next to the pass's own
+            // output resource. Never computed on this hot Vulkan recording path, only forwarded.
             if (barrierInfo.applied && m_debugMetadataSink != nullptr) {
                 m_debugMetadataSink->OnResourceBarrierApplied(passHandle.index, ResourceUsageName(usage, input),
                     barrierInfo.oldLayout, barrierInfo.newLayout);
@@ -1273,9 +1271,7 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         };
     }
 
-    // editor-core-separation-25 campaign (barrier labels) - same "built
-    // fresh, empty when no provider installed" shape as metadataLookup
-    // immediately above.
+    // Built fresh, empty when no provider installed - same shape as metadataLookup above.
     std::function<bool(std::size_t, const std::string&, std::string&)> barrierLabelLookup;
     if (m_debugMetadataProvider != nullptr) {
         IPassDebugMetadataProvider* provider = m_debugMetadataProvider;

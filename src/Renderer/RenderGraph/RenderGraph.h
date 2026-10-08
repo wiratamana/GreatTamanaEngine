@@ -491,16 +491,11 @@ private:
     void EnsureTextureArrayResolved(std::uint32_t index, const CompiledGraphInput& input,
         std::vector<PhysicalTextureArray>& physicalTextureArrays);
 
-    // editor-core-separation-25 campaign (barrier labels) - reports whether
-    // a barrier was actually emitted for this usage, and its before/after
-    // VkImageLayout, so a caller building this frame's debug snapshot can
-    // forward it to an installed IPassDebugMetadataSink without this
-    // function itself knowing anything about sinks/snapshots. Meaningful
-    // only for an image-based usage (Texture/VolumeTexture/TextureArray) -
-    // a Buffer usage never touches outBarrierInfo (buffers have no
-    // VkImageLayout concept). nullptr (the default) costs one branch and
-    // skips every assignment - every pre-existing call site compiles and
-    // behaves completely unmodified.
+    // Reports whether a barrier was actually emitted for this usage, plus its before/after
+    // VkImageLayout, so a caller can forward it to an installed IPassDebugMetadataSink
+    // without this function knowing anything about sinks/snapshots. Only meaningful for
+    // an image-based usage (Texture/VolumeTexture/TextureArray); a Buffer usage never
+    // touches outBarrierInfo. nullptr (the default) skips every assignment.
     struct AppliedBarrierInfo {
         bool applied = false;
         VkImageLayout oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;

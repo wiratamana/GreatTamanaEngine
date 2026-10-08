@@ -20,6 +20,7 @@
 #include "../Renderer/RenderGraph/RenderGraphDebugTextureRegistry.h"
 #include "../Renderer/RenderGraph/RenderPassGroupRegistry.h"
 #include "SceneRenderingPassTags.h"
+#include "Plugins/ProjectAuthoredPassTags.h"
 // The generic, early toggle guard used by the "IndirectDraw" check below.
 #include "../Renderer/RenderGraph/RenderPassToggleGuard.h"
 
@@ -730,6 +731,9 @@ void Core::RegisterOffscreenRenderPipelineProviders()
     // Render Graph panel grouping heading for this engine's own core
     // scene-drawing passes - idempotent, safe to call every construction.
     rg::RegisterPassGroupLabel(kSceneRenderingPassTag, "Scene Rendering");
+
+    // Grouping heading for every scaffolded project's own generated passes.
+    rg::RegisterPassGroupLabel(kProjectAuthoredPassTag, "Hot Reload Probes");
 
     // "GpuSkinning" - ProviderScope::Once.
     m_offscreenRenderPipeline.Register("GpuSkinning", rg::ProviderScope::Once,
