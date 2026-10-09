@@ -1,10 +1,10 @@
 #include "FrameDebuggerData.h"
-#include "../Renderer/RenderGraph/RenderPassGroupRegistry.h"
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdio>
 #include <string_view>
+#include <unordered_map>
 
 namespace gte {
 
@@ -798,26 +798,16 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
     // PHASE0_MASTER_STRATEGY.md's Step 2.2).
     std::vector<bool> claimed(graphSnapshot.passesInExecutionOrder.size(), false);
 
-    // render-pass-7 campaign, PHASE4 (Core Campaign 1's own final step) -
-    // this loop buckets each surviving pre-GameView compute pass by
-    // whichever Frame-Debugger-heading TAG (if any) it carries, per the
-    // generic gte::rg::RenderPassGroupRegistry (see RenderPassGroupRegistry.h,
-    // PHASE2) - Core has NO knowledge of which specific Layer-2 module
-    // registered which heading, or how many headings exist. One
-    // FrameDebuggerEventNode bucket is built per CURRENTLY REGISTERED
-    // (tag -> heading) pair, in REGISTRATION ORDER, before the loop even
-    // starts; a pass whose tags match no registered heading falls into the
-    // generic "Compute Dispatches (Pre-GameView)" fallback bucket instead.
-    // Today exactly ONE heading ("Compute LUT") is registered in production,
-    // by the Atmosphere feature's own AtmosphereLutRenderer constructor
-    // (PHASE3) - which is why this loop's real, observed output is still
-    // byte-identical to the old hardcoded two-bucket shape. A SINGLE forward
-    // loop over [0, pivotIndex) still assigns eventIndex in true
-    // chronological execution order (interleaved across every bucket,
-    // exactly as before this phase) - only the TREE PRESENTATION order
-    // (every registered heading, in registration order, THEN the generic
-    // fallback bucket) is fixed, per the Locked Design Decision - never tied
-    // to real interleaved execution order.
+    // This loop buckets each surviving pre-GameView compute pass by its own
+    // owningFeatureName (set automatically the moment it was declared via
+    // AddRenderPass() - see RenderFeatureScope.h). One FrameDebuggerEventNode
+    // bucket is built per DISTINCT owner, in FIRST-SEEN order this frame; a
+    // pass with no real owner ("ENGINE_UNOWNED") falls into the generic
+    // "Compute Dispatches (Pre-GameView)" fallback bucket instead. A SINGLE
+    // forward loop over [0, pivotIndex) still assigns eventIndex in true
+    // chronological execution order (interleaved across every bucket) -
+    // only the TREE PRESENTATION order (first-seen owner order, then the
+    // generic fallback bucket) is fixed, never tied to execution order.
     //
     // editor-core-separation-22 campaign, PHASE4 - this loop ONLY EVER
     // inspects Compute-kind passes (unchanged) - a Graphics-kind pass sitting
@@ -826,13 +816,7 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
     // Passes" sweep instead (see that sweep's own comment at the bottom of
     // this function for why this is now correct instead of a silent drop).
     std::vector<FrameDebuggerEventNode> labeledGroups;
-    labeledGroups.reserve(rg::PassGroupLabelCount());
-    for (std::size_t g = 0; g < rg::PassGroupLabelCount(); ++g) {
-        FrameDebuggerEventNode group;
-        group.name = rg::PassGroupLabelUiHeadingAt(g);
-        group.isDrawCall = false;
-        labeledGroups.push_back(std::move(group));
-    }
+    std::unordered_map<std::string, std::size_t> labeledGroupIndexByOwner;
 
     FrameDebuggerEventNode preGameViewGroup;
     preGameViewGroup.name = "Compute Dispatches (Pre-GameView)";
@@ -864,13 +848,22 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
         FrameDebuggerEventNode leaf =
             BuildComputeDispatchLeaf(pass, nextEventIndex++, FrameDebuggerStepPreviewKind::NotYetDrawn);
         leaf = WrapPassWithOwnedChildEvent(std::move(leaf), nextEventIndex++, "Compute Dispatch");
-        // render-pass-7 campaign, PHASE4 - genuinely generic bucket lookup,
-        // replacing the old hardcoded RenderPassCategory::AtmosphereLut
-        // check (removed by PHASE3's own if(false) placeholder). Core never
-        // learns which tag/heading belongs to which Layer-2 feature here.
-        const std::optional<std::size_t> groupIndex = rg::FindPassGroupIndexForTags(pass.tags);
-        if (groupIndex.has_value()) {
-            labeledGroups[*groupIndex].children.push_back(std::move(leaf));
+        // Buckets by this pass's own owningFeatureName - Core never learns
+        // which feature this name belongs to, it only groups by the string.
+        if (!pass.owningFeatureName.empty() && pass.owningFeatureName != "ENGINE_UNOWNED") {
+            const auto existing = labeledGroupIndexByOwner.find(pass.owningFeatureName);
+            std::size_t groupIndex;
+            if (existing == labeledGroupIndexByOwner.end()) {
+                FrameDebuggerEventNode group;
+                group.name = pass.owningFeatureName;
+                group.isDrawCall = false;
+                groupIndex = labeledGroups.size();
+                labeledGroups.push_back(std::move(group));
+                labeledGroupIndexByOwner.emplace(pass.owningFeatureName, groupIndex);
+            } else {
+                groupIndex = existing->second;
+            }
+            labeledGroups[groupIndex].children.push_back(std::move(leaf));
         } else {
             preGameViewGroup.children.push_back(std::move(leaf));
         }
@@ -878,10 +871,8 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
 
     // Only add a group at all if something real actually survived this frame
     // in THAT bucket - mirrors this tree's own "never an empty, misleading
-    // group" rule, applied independently to each bucket. Registered headings
-    // are appended first, in registration order, THEN the generic fallback -
-    // identical presentation order to the old hardcoded
-    // computeLutGroup-then-preGameViewGroup sequence.
+    // group" rule, applied independently to each bucket. Owner groups are
+    // appended first, in first-seen order, THEN the generic fallback.
     for (FrameDebuggerEventNode& group : labeledGroups) {
         if (!group.children.empty()) {
             root.children.push_back(std::move(group));

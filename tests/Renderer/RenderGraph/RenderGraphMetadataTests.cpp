@@ -10,9 +10,6 @@
 // RenderGraphCompiler::Compile() call anywhere in this file.
 
 #include "Renderer/RenderGraph/RenderGraphMetadata.h"
-
-#include "Renderer/RenderGraph/RenderPassGroupRegistry.h"
-
 #include <gtest/gtest.h>
 
 namespace gte::rg {
@@ -30,8 +27,6 @@ RenderGraphPassSnapshot MakeSurvivingPass(const char* name)
 
 TEST(RenderGraphMetadataTest, EmptySnapshotsProduceEmptyMetadata)
 {
-    ResetPassGroupRegistryForTesting();
-
     const RenderGraphSnapshot offscreen;
     const RenderGraphSnapshot present;
 
@@ -52,15 +47,12 @@ TEST(RenderGraphMetadataTest, EmptySnapshotsProduceEmptyMetadata)
     EXPECT_TRUE(metadata.renderFeatures.empty());
 }
 
-// --- tagGroupLabel resolution ---------------------------------------------
+// --- owningFeatureName resolution ------------------------------------------
 
-TEST(RenderGraphMetadataTest, SurvivingPassWithRegisteredTagResolvesTagGroupLabel)
+TEST(RenderGraphMetadataTest, SurvivingPassOwningFeatureNameIsCopiedThrough)
 {
-    ResetPassGroupRegistryForTesting();
-    RegisterPassGroupLabel(RenderPassTag{ 0x1 }, "Compute LUT");
-
     RenderGraphPassSnapshot pass = MakeSurvivingPass("AtmosphereTransmittanceLutPass");
-    pass.tags = 0x1;
+    pass.owningFeatureName = "Atmosphere / Sky";
     pass.readNames = { "Input" };
     pass.readKinds = { ResourceKind::Texture };
     pass.readAccess = { ResourceAccess::ShaderRead };
@@ -76,8 +68,7 @@ TEST(RenderGraphMetadataTest, SurvivingPassWithRegisteredTagResolvesTagGroupLabe
 
     ASSERT_EQ(metadata.offscreenRegime.passes.size(), 1u);
     const RenderGraphPassMetadata& built = metadata.offscreenRegime.passes[0];
-    ASSERT_TRUE(built.tagGroupLabel.has_value());
-    EXPECT_EQ(*built.tagGroupLabel, "Compute LUT");
+    EXPECT_EQ(built.owningFeatureName, "Atmosphere / Sky");
 
     ASSERT_EQ(built.reads.size(), 1u);
     EXPECT_EQ(built.reads[0].name, "Input");
@@ -85,8 +76,6 @@ TEST(RenderGraphMetadataTest, SurvivingPassWithRegisteredTagResolvesTagGroupLabe
     ASSERT_EQ(built.writes.size(), 1u);
     EXPECT_EQ(built.writes[0].name, "Output");
     EXPECT_EQ(built.writes[0].kind, "Texture");
-
-    ResetPassGroupRegistryForTesting();
 }
 
 // --- BuildResourceRefs(): bindingStageLabel / barrierTransitionLabel ------
@@ -102,7 +91,6 @@ TEST(RenderGraphMetadataTest, SurvivingPassWithRegisteredTagResolvesTagGroupLabe
 
 TEST(RenderGraphMetadataTest, WriteWithNonEmptyBarrierLabelPopulatesBarrierTransitionLabel)
 {
-    ResetPassGroupRegistryForTesting();
 
     RenderGraphPassSnapshot pass = MakeSurvivingPass("RenderOpaque");
     pass.readNames = { "Depth" };
@@ -131,12 +119,10 @@ TEST(RenderGraphMetadataTest, WriteWithNonEmptyBarrierLabelPopulatesBarrierTrans
     ASSERT_TRUE(built.writes[0].barrierTransitionLabel.has_value());
     EXPECT_EQ(*built.writes[0].barrierTransitionLabel, "Undefined -> RT");
 
-    ResetPassGroupRegistryForTesting();
 }
 
 TEST(RenderGraphMetadataTest, WriteWithEmptyBarrierLabelStaysNullopt)
 {
-    ResetPassGroupRegistryForTesting();
 
     RenderGraphPassSnapshot pass = MakeSurvivingPass("RenderOpaque");
     pass.writeNames = { "Color" };
@@ -156,15 +142,12 @@ TEST(RenderGraphMetadataTest, WriteWithEmptyBarrierLabelStaysNullopt)
     ASSERT_EQ(built.writes.size(), 1u);
     EXPECT_FALSE(built.writes[0].barrierTransitionLabel.has_value());
 
-    ResetPassGroupRegistryForTesting();
 }
 
-TEST(RenderGraphMetadataTest, PassWithNoRegisteredTagHasNulloptTagGroupLabel)
+TEST(RenderGraphMetadataTest, PassWithNoOwningFeatureNameStaysEmptyString)
 {
-    ResetPassGroupRegistryForTesting();
-
     RenderGraphPassSnapshot pass = MakeSurvivingPass("RenderOpaque");
-    pass.tags = 0; // no tags at all - the common case today.
+    // owningFeatureName never set - the struct's own default (empty string).
 
     RenderGraphSnapshot offscreen;
     offscreen.passesInExecutionOrder.push_back(pass);
@@ -173,16 +156,13 @@ TEST(RenderGraphMetadataTest, PassWithNoRegisteredTagHasNulloptTagGroupLabel)
     const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {}, {});
 
     ASSERT_EQ(metadata.offscreenRegime.passes.size(), 1u);
-    EXPECT_FALSE(metadata.offscreenRegime.passes[0].tagGroupLabel.has_value());
+    EXPECT_TRUE(metadata.offscreenRegime.passes[0].owningFeatureName.empty());
 }
 
-TEST(RenderGraphMetadataTest, PassWithUnregisteredTagBitHasNulloptTagGroupLabel)
+TEST(RenderGraphMetadataTest, PassWithEngineUnownedSentinelIsCopiedThroughVerbatim)
 {
-    ResetPassGroupRegistryForTesting();
-    RegisterPassGroupLabel(RenderPassTag{ 0x1 }, "Compute LUT");
-
     RenderGraphPassSnapshot pass = MakeSurvivingPass("GpuSkinning");
-    pass.tags = 0x2; // a real bit, but nobody registered a label for it.
+    pass.owningFeatureName = "ENGINE_UNOWNED"; // declared with no active RenderFeatureScope.
 
     RenderGraphSnapshot offscreen;
     offscreen.passesInExecutionOrder.push_back(pass);
@@ -191,16 +171,13 @@ TEST(RenderGraphMetadataTest, PassWithUnregisteredTagBitHasNulloptTagGroupLabel)
     const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {}, {});
 
     ASSERT_EQ(metadata.offscreenRegime.passes.size(), 1u);
-    EXPECT_FALSE(metadata.offscreenRegime.passes[0].tagGroupLabel.has_value());
-
-    ResetPassGroupRegistryForTesting();
+    EXPECT_EQ(metadata.offscreenRegime.passes[0].owningFeatureName, "ENGINE_UNOWNED");
 }
 
 // --- Culled pass: still fully describable, stats/timing at their defaults --
 
 TEST(RenderGraphMetadataTest, CulledPassIsStillFullyDescribedWithZeroedStatsAndNATiming)
 {
-    ResetPassGroupRegistryForTesting();
 
     RenderGraphPassSnapshot pass;
     pass.name = "UnusedPass";
@@ -254,7 +231,6 @@ TEST(RenderGraphMetadataTest, CulledPassIsStillFullyDescribedWithZeroedStatsAndN
 
 TEST(RenderGraphMetadataTest, ResourceWithValidUseIndicesResolvesBothPassNames)
 {
-    ResetPassGroupRegistryForTesting();
 
     RenderGraphSnapshot offscreen;
     offscreen.passesInExecutionOrder.push_back(MakeSurvivingPass("WritePass"));
@@ -285,7 +261,6 @@ TEST(RenderGraphMetadataTest, ResourceWithValidUseIndicesResolvesBothPassNames)
 
 TEST(RenderGraphMetadataTest, NeverUsedResourceHasNulloptPassNamesForNegativeIndices)
 {
-    ResetPassGroupRegistryForTesting();
 
     RenderGraphSnapshot offscreen;
     offscreen.passesInExecutionOrder.push_back(MakeSurvivingPass("SomePass"));
@@ -315,7 +290,6 @@ TEST(RenderGraphMetadataTest, NeverUsedResourceHasNulloptPassNamesForNegativeInd
 
 TEST(RenderGraphMetadataTest, PresentGpuTimingProducesMatchingTextAndNumericMilliseconds)
 {
-    ResetPassGroupRegistryForTesting();
 
     RenderGraphPassSnapshot pass = MakeSurvivingPass("TimedPass");
     pass.stats.timing.status = GpuTimingSample::Status::Present;
@@ -342,7 +316,6 @@ TEST(RenderGraphMetadataTest, PresentGpuTimingProducesMatchingTextAndNumericMill
 
 TEST(RenderGraphMetadataTest, TimingSlotBudgetExhaustedIsCopiedThroughPerRegime)
 {
-    ResetPassGroupRegistryForTesting();
 
     RenderGraphSnapshot offscreen;
     offscreen.timingSlotBudgetExhausted = true;
@@ -359,7 +332,6 @@ TEST(RenderGraphMetadataTest, TimingSlotBudgetExhaustedIsCopiedThroughPerRegime)
 
 TEST(RenderGraphMetadataTest, GpuDrivenBatchesAndRenderFeaturesAreCopiedThroughUnchanged)
 {
-    ResetPassGroupRegistryForTesting();
 
     GpuDrivenBatchDebugInfo batch;
     batch.batchName = "GpuDrivenBatch0";
@@ -399,7 +371,6 @@ TEST(RenderGraphMetadataTest, GpuDrivenBatchesAndRenderFeaturesAreCopiedThroughU
 
 TEST(RenderGraphMetadataTest, ToJsonProducesExpectedTopLevelShapeAndNullHandling)
 {
-    ResetPassGroupRegistryForTesting();
 
     RenderGraphPassSnapshot pass = MakeSurvivingPass("RenderOpaque");
     pass.readNames = { "Depth" };
@@ -410,7 +381,7 @@ TEST(RenderGraphMetadataTest, ToJsonProducesExpectedTopLevelShapeAndNullHandling
     pass.writeAccess = { ResourceAccess::ColorAttachmentWrite };
     pass.stats.drawStats.drawCallCount = 2;
     pass.stats.drawStats.triangleCount = 20;
-    // tags == 0, no registered label -> tagGroupLabel stays nullopt -> JSON null.
+    // owningFeatureName never set -> stays empty -> JSON "".
     // stats.timing stays at its default (Absent) -> gpu_timing_milliseconds JSON null.
 
     RenderGraphSnapshot offscreen;
@@ -445,7 +416,7 @@ TEST(RenderGraphMetadataTest, ToJsonProducesExpectedTopLevelShapeAndNullHandling
     const nlohmann::json& jsonPass = j["offscreen_regime"]["passes"][0];
     EXPECT_EQ(jsonPass["name"].get<std::string>(), "RenderOpaque");
     EXPECT_FALSE(jsonPass["is_culled"].get<bool>());
-    EXPECT_TRUE(jsonPass["tag_group_label"].is_null());
+    EXPECT_EQ(jsonPass["owning_feature_name"].get<std::string>(), "");
     EXPECT_TRUE(jsonPass["gpu_timing_milliseconds"].is_null());
     EXPECT_EQ(jsonPass["gpu_timing_text"].get<std::string>(), "N/A");
     EXPECT_EQ(jsonPass["draw_call_count"].get<std::uint32_t>(), 2u);

@@ -1,6 +1,5 @@
 #pragma once
 
-#include "../../Renderer/RenderGraph/RenderGraphGroupingCache.h"
 #include "../../Renderer/RenderGraph/RenderGraphMetadata.h"
 #include "../../Renderer/RenderGraph/RenderPassToggleRegistry.h"
 #include "../RenderGraphLayout.h"
@@ -79,11 +78,6 @@ private:
     // Resource name -> "<W>x<H>, <FORMAT>" text, rebuilt only while unpaused.
     // Kept in lockstep with m_frozenMetadata so pausing freezes both alike.
     std::unordered_map<std::string, std::string> m_frozenResourceResolutionText;
-
-    // Last tag-group label seen for a pass name, across either regime this
-    // session - keeps a pass in its real group even on a frame the
-    // currently-selected regime doesn't run it at all.
-    rg::RenderGraphGroupingCache m_groupingCache;
 
     QueueKindFilter m_kindFilter = QueueKindFilter::All;
     ViewMode m_viewMode = ViewMode::Graph;

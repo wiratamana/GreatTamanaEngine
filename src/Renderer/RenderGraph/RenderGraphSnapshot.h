@@ -107,10 +107,10 @@ struct RenderGraphPassSnapshot {
     // below for why.
     PassGpuStats stats;
 
-    // Which conceptual group(s) this pass belongs to. Copied straight
-    // through for both a surviving and a culled pass, same as the fields
-    // above.
-    RenderPassTagMask tags = 0;
+    // Which feature owns this pass. Copied straight through for both a
+    // surviving and a culled pass, same as the fields above. "ENGINE_UNOWNED"
+    // only for a pass declared with no active RenderFeatureScope at all.
+    std::string owningFeatureName;
 };
 
 // One resource, ready to display.

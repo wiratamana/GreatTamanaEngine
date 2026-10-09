@@ -13,14 +13,11 @@
 #include "../Profiling/FrameProfiler.h"
 #include "../Profiling/ScopeTimer.h"
 #include "../Renderer/GpuSkinning/GpuSkinningPipelines.h"
-#include "../Renderer/GpuSkinning/GpuSkinningRenderPassTags.h"
 #include "../Renderer/Culling/CullingPipelines.h"
 #include "../Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../Renderer/RenderGraph/RenderGraphDebugTextureRegistry.h"
-#include "../Renderer/RenderGraph/RenderPassGroupRegistry.h"
-#include "SceneRenderingPassTags.h"
-#include "Plugins/ProjectAuthoredPassTags.h"
+#include "../Renderer/RenderGraph/RenderFeatureScope.h"
 // The generic, early toggle guard used by the "IndirectDraw" check below.
 #include "../Renderer/RenderGraph/RenderPassToggleGuard.h"
 
@@ -819,13 +816,6 @@ void Core::RegisterOffscreenRenderPipelineProviders()
     // SetRenderPassToggleRegistry()'s own doc comment.
     m_renderGraph.SetRenderPassToggleRegistry(&m_renderPassToggleRegistry);
 
-    // Render Graph panel grouping heading for this engine's own core
-    // scene-drawing passes - idempotent, safe to call every construction.
-    rg::RegisterPassGroupLabel(kSceneRenderingPassTag, "Scene Rendering");
-
-    // Grouping heading for every scaffolded project's own generated passes.
-    rg::RegisterPassGroupLabel(kProjectAuthoredPassTag, "Hot Reload Probes");
-
     // "GpuSkinning" - ProviderScope::Once.
     m_offscreenRenderPipeline.Register("GpuSkinning", rg::ProviderScope::Once,
         [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
@@ -839,7 +829,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             // own choke point can never see/disable this whole stage by
             // that name - one of exactly 2 confirmed exceptions needing
             // their own direct consult of the toggle registry.
-            if (!m_renderPassToggleRegistry.NoteDeclaredAndCheckEnabled("GpuSkinning")) {
+            if (!m_renderPassToggleRegistry.IsEnabled("GpuSkinning")) {
                 return;
             }
 
@@ -852,7 +842,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 desc.kind = rg::PassKind::Compute;
                 desc.order = rg::RenderPassEvent::PreOpaques;
                 desc.view = rg::RenderViewId::Shared();
-                desc.tags = kGpuSkinningDispatchPassTag.bit;
+                desc.owningFeatureName = "GPU Skinning";
                 desc.setup = [handle](rg::RenderGraphBuilder::PassBuilder& pass) {
                     pass.WriteBuffer(handle, rg::ResourceAccess::ComputeShaderWrite);
                 };
@@ -913,7 +903,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             desc.order = rg::RenderPassEvent::BeforeEverything;
             desc.view = frame.currentView;
             desc.legacyCategory = rg::RenderPassCategory::General;
-            desc.tags = kSceneRenderingPassTag.bit;
+            desc.owningFeatureName = "Scene Rendering";
             desc.setup = [viewTarget](rg::RenderGraphBuilder::PassBuilder& pass) {
                 pass.WriteColorAttachment(viewTarget, kGameClearColor);
                 pass.WriteDepthStencilAttachment(viewTarget, kGameClearDepth);
@@ -977,6 +967,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 // the engine that turns a non-empty result into the real
                 // GTE_LOG_WARNING + assert() side effects.
                 const std::size_t before = frame.builder.DeclaredPassCount();
+                const rg::RenderFeatureScope scope(frame.builder, entry.name);
                 entry.callback(frame.builder, frame.blackboard, frame.currentView); // Step 2.5 item 1 - 3-arg signature.
                 const std::size_t after = frame.builder.DeclaredPassCount();
 
@@ -1037,7 +1028,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             desc.order = rg::RenderPassEvent::Opaques;
             desc.view = frame.currentView;
             desc.legacyCategory = rg::RenderPassCategory::General;
-            desc.tags = kSceneRenderingPassTag.bit;
+            desc.owningFeatureName = "Scene Rendering";
             desc.setup = [viewTarget, gpuSkinningBuffers, publishedServiceSlots](rg::RenderGraphBuilder::PassBuilder& pass) {
                 // LOAD is intentional here - "ClearViewTarget" (registered
                 // above) already owns the one guaranteed clear of this
@@ -1119,21 +1110,16 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 const MeshHandle meshHandle = batch.mesh;
                 const PipelineHandle originalPipelineHandle = batch.originalPipeline;
 
-                // editor-core-separation-22 campaign, PHASE3
-                // (PHASE2_COMPLETION_REPORT.md finding #19,
-                // GpuDrivenBatchEntityExclusionLogic.h) - resolves THIS batch's
-                // own "<batch> IndirectDraw" pass toggle state EARLY, before
-                // that pass's own RenderPassDesc is even built below. Safe to
-                // call here: RenderPassToggleRegistry::NoteDeclaredAndCheckEnabled()
-                // is idempotent within a frame for a given name (see
-                // RenderPassToggleGuard.h's own doc comment) - RenderPipeline::
-                // DeclareOnePhase()'s own later, generic gate re-checks this
-                // exact name again once this batch's IndirectDraw desc reaches
-                // it below, and is guaranteed to agree with this answer.
-                // RenderOpaque's own exclusion set must only ever contain this
-                // batch's entities when this pass is actually going to draw
-                // them - never merely because the batch was ELIGIBLE for
-                // batching at collection time.
+                // Resolves THIS batch's own "<batch> IndirectDraw" pass
+                // toggle state EARLY, before that pass's own RenderPassDesc
+                // is even built below - RenderPipeline::DeclareOnePhase()'s
+                // own later, generic gate re-checks this exact name again
+                // once this batch's IndirectDraw desc reaches it below, and
+                // is guaranteed to agree with this answer (both read the
+                // same registry entry). RenderOpaque's own exclusion set
+                // must only ever contain this batch's entities when this
+                // pass is actually going to draw them - never merely because
+                // the batch was ELIGIBLE for batching at collection time.
                 const bool indirectDrawEnabledThisFrame = rg::ShouldDeclareBuiltInPassThisFrame(
                     &m_renderPassToggleRegistry, batch.indirectDrawPassName);
                 AppendGpuDrivenBatchEntityExclusionsIfIndirectDrawEnabled(
@@ -1146,6 +1132,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                     desc.kind = rg::PassKind::Compute;
                     desc.order = rg::RenderPassEvent::Opaques;
                     desc.view = frame.currentView;
+                    desc.owningFeatureName = "GPU Driven Batches";
                     desc.setup = [countHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
                         pass.WriteBuffer(countHandle, rg::ResourceAccess::TransferDst);
                     };
@@ -1162,6 +1149,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                     desc.kind = rg::PassKind::Compute;
                     desc.order = rg::RenderPassEvent::Opaques;
                     desc.view = frame.currentView;
+                    desc.owningFeatureName = "GPU Driven Batches";
                     desc.setup = [inputHandle, indirectHandle, countHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
                         pass.ReadBuffer(inputHandle, rg::ResourceAccess::ComputeShaderRead);
                         pass.WriteBuffer(indirectHandle, rg::ResourceAccess::ComputeShaderWrite);
@@ -1213,6 +1201,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                     desc.order = rg::RenderPassEvent::Opaques;
                     desc.view = frame.currentView;
                     desc.legacyCategory = rg::RenderPassCategory::General;
+                    desc.owningFeatureName = "GPU Driven Batches";
                     desc.setup = [viewTarget, indirectHandle, countHandle, inputHandle](
                                      rg::RenderGraphBuilder::PassBuilder& pass) {
                         pass.WriteColorAttachment(viewTarget);
@@ -1282,6 +1271,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             desc.order = rg::RenderPassEvent::Transparents;
             desc.view = frame.currentView;
             desc.legacyCategory = rg::RenderPassCategory::General;
+            desc.owningFeatureName = "Scene Rendering";
             desc.setup = [viewTarget](rg::RenderGraphBuilder::PassBuilder& pass) {
                 pass.WriteColorAttachment(viewTarget);
                 pass.WriteDepthStencilAttachment(viewTarget);
@@ -1321,6 +1311,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 }
 
                 const std::size_t before = frame.builder.DeclaredPassCount();
+                const rg::RenderFeatureScope scope(frame.builder, entry.name);
                 entry.callback(frame.builder, frame.blackboard, frame.currentView, *handles);
                 const std::size_t after = frame.builder.DeclaredPassCount();
 
@@ -1383,6 +1374,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 }
 
                 const std::size_t before = frame.builder.DeclaredPassCount();
+                const rg::RenderFeatureScope scope(frame.builder, entry.name);
                 entry.callback(frame.builder, frame.blackboard, frame.currentView, *handles);
                 const std::size_t after = frame.builder.DeclaredPassCount();
 
@@ -1442,6 +1434,12 @@ void Core::RegisterPresentRenderPipelineProvider()
 
     m_presentRenderPipeline.Register("Present", rg::ProviderScope::Once,
         [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&) {
+            // This provider's lambda never populates its own deferred desc
+            // out-vector - it calls AddGpuSkinningPasses()/AddPresentPass()
+            // directly and synchronously instead (Pathway B in spirit, even
+            // though reached through a "Once" provider) - open the scope as
+            // the very first statement, covering both nested calls.
+            const rg::RenderFeatureScope scope(frame.builder, "Present");
             const std::vector<rg::BufferHandle> gpuSkinningBuffers = m_needsDirectGameRenderThisFrame
                 ? AddGpuSkinningPasses(frame.builder, m_game, m_renderer, &m_renderPassToggleRegistry)
                 : std::vector<rg::BufferHandle>{};

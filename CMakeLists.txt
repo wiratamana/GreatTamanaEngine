@@ -440,8 +440,6 @@ add_library(gte_core STATIC
     src/Core/Plugins/RenderFeatureDescriptor.h
     src/Core/Plugins/RenderFeatureCompositor.h
     src/Core/Plugins/RenderFeatureCompositor.cpp
-    src/Core/Plugins/PostProcessingPassTags.h
-    src/Core/Plugins/ProjectAuthoredPassTags.h
     # better-render-pass-3 campaign, BLOCK 2 (Arbitrary Render Views), PHASE2
     # (PHASE2_RENDER_VIEW_REGISTRY_CORE.md) - the new registry owning every
     # dynamically-created, named render view's persistent RenderTexture.
@@ -474,7 +472,6 @@ add_library(gte_core STATIC
     src/Core/IHostServices.h
     src/Core/Core.h
     src/Core/Core.cpp
-    src/Core/SceneRenderingPassTags.h
     # better-render-pass-1 campaign, PHASE9 (Decision D3) - the pure,
     # Tier-1-testable counter-increment logic backing
     # Core::AddScreenPostProcessPass()'s own RUNTIME auto-priority
@@ -806,8 +803,7 @@ add_library(gte_core STATIC
     src/Renderer/RenderGraph/RenderPipeline.cpp
     src/Renderer/RenderGraph/RenderPassToggleRegistry.h
     src/Renderer/RenderGraph/RenderPassToggleRegistry.cpp
-    src/Renderer/RenderGraph/RenderPassGroupRegistry.h
-    src/Renderer/RenderGraph/RenderPassGroupRegistry.cpp
+    src/Renderer/RenderGraph/RenderFeatureScope.h
     src/Renderer/RenderGraph/RenderGraphMetadata.h
     src/Renderer/RenderGraph/RenderGraphMetadata.cpp
     src/Game/Instantiation/EntityInstantiator.cpp

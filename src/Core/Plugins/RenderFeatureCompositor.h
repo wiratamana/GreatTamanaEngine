@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -295,10 +296,11 @@ private:
     // the descriptor set this dispatch rewrites/binds - its own `.texture`
     // field is irrelevant here since the destination handle is passed
     // explicitly. `blendMode` selects the blend formula via push constant;
-    // `tagMask` picks this dispatch's Render Graph panel grouping bit.
+    // `groupHeading` picks this dispatch's Render Graph panel sidebar
+    // heading - opened as this method's own RenderFeatureScope internally.
     void DispatchBlend(rg::RenderGraphBuilder& builder, rg::TextureHandle dstIn, VkSampler dstInSampler,
         rg::TextureHandle srcIn, VkSampler srcInSampler, rg::TextureHandle destination, BlendStageState& state,
-        const char* debugName, VkExtent2D extent, RenderFeatureBlendMode blendMode, rg::RenderPassTagMask tagMask);
+        const char* debugName, VkExtent2D extent, RenderFeatureBlendMode blendMode, std::string_view groupHeading);
 
     Core& m_core;
     Renderer& m_renderer;

@@ -455,13 +455,12 @@ std::string FormatMatrixProperty(const FrameDebuggerMatrixProperty& matrix);
 // "RenderOpaque" instead. The tree shape is now:
 //
 //   "Game View" (root, cosmetic label, UNCHANGED - see `root.name` below)
-//     |-- "Compute LUT"                        (every compute pass before the pivot carrying a tag
-//     |                                          registered via RenderPassGroupRegistry - today that
-//     |                                          is Atmosphere's own tag, but this header must never
-//     |                                          say so as if it were a permanent rule)
+//     |-- "Atmosphere / Sky"                   (every compute pass before the pivot whose own
+//     |                                          owningFeatureName is "Atmosphere / Sky" - this
+//     |                                          header must never say so as if it were permanent)
 //     |     |-- "AtmosphereTransmittanceLutPass"       (v-parent - owns exactly one child, see below)
 //     |     |     `-- "Compute Dispatch"
-//     |     `-- ... one such v-parent per surviving pass carrying that registered tag
+//     |     `-- ... one such v-parent per surviving pass sharing that owner
 //     |-- "Compute Dispatches (Pre-GameView)"   (every OTHER category compute pass before the pivot)
 //     |     `-- ... same v-parent/"Compute Dispatch" child shape as above, per surviving pass
 //     |-- "RenderOpaque" leaf                   (the old "GameView" leaf, renamed - same per-entity

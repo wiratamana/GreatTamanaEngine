@@ -1,10 +1,7 @@
 #include "RenderGraphBuilder.h"
 
-#include "../../Core/Logging.h" // editor-core-separation-27 campaign, PHASE8 - GTE_LOG_ERROR for
-    // GetOrCreatePersistentTexture()'s own "no persistent cache installed" refusal branch - the
-    // FIRST GTE_LOG_ERROR call site in this file (confirmed via search_in_dir before this phase).
-    // Same relative path RenderGraph.cpp/RenderPassGroupRegistry.cpp already use from this exact
-    // folder.
+#include "../../Core/Logging.h" // GTE_LOG_ERROR for GetOrCreatePersistentTexture()'s own
+    // "no persistent cache installed" refusal branch.
 
 #include <string>
 
@@ -318,13 +315,13 @@ void RenderGraphBuilder::KeepTextureArrayOutput(TextureArrayHandle handle)
     m_finalTextureArrayOutputs.push_back(handle);
 }
 
-// editor-core-separation-26 campaign, PHASE5
-// (PHASE5_ADDBLITPASS_BUILDER_ENTRYPOINT.md) - see AddBlitPass()'s own
-// declaration (RenderGraphBuilder.h) for the full reasoning. This is NOT
-// built on top of AddPass()/AddComputePass() - it constructs its own
-// PassRecord directly, mirroring AddPass()'s own internal shape.
-void RenderGraphBuilder::AddBlitPass(const char* name, const BlitSpec& spec, RenderPassEvent renderPassEvent,
-    ViewScope viewScope, RenderPassCategory category, RenderPassTagMask tags)
+// The real, official pass-declaration entry point for a raw image blit/copy
+// - see AddBlitPass()'s own declaration (RenderGraphBuilder.h). NOT built on
+// top of AddPass()/AddComputePass() - constructs its own PassRecord
+// directly, mirroring AddPass()'s own internal shape, then derives ownership
+// and registers with the toggle registry exactly like AddRenderPass() does.
+void RenderGraphBuilder::AddBlitPass(
+    const char* name, const BlitSpec& spec, RenderPassEvent renderPassEvent, ViewScope viewScope, RenderPassCategory category)
 {
     assert(name != nullptr && name[0] != '\0' &&
         "RenderGraphBuilder::AddBlitPass requires a non-empty, static-storage-duration pass name");
@@ -341,8 +338,12 @@ void RenderGraphBuilder::AddBlitPass(const char* name, const BlitSpec& spec, Ren
     passBuilder.ReadTexture(spec.src, ResourceAccess::TransferSrc, spec.srcIsDepth);
     passBuilder.WriteTexture(spec.dst, ResourceAccess::TransferDst, spec.dstIsDepth);
 
+    const std::string_view owner = CurrentOwningFeatureName();
     if (m_debugMetadataSink != nullptr) {
-        m_debugMetadataSink->OnPassDeclared(m_passes.size() - 1, category, RenderPassDrawKind::Blit, tags);
+        m_debugMetadataSink->OnPassDeclared(m_passes.size() - 1, category, RenderPassDrawKind::Blit, owner);
+    }
+    if (m_passToggleRegistry != nullptr) {
+        m_passToggleRegistry->NoteDeclaredWithOwner(name, owner);
     }
 }
 

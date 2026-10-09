@@ -1178,6 +1178,7 @@ std::string BuildRenderGraphControlPassStatesResponseJson(
         item["name"] = state.name;
         item["enabled"] = state.enabled;
         item["ever_declared_this_session"] = state.everDeclaredThisSession;
+        item["owning_feature_name"] = state.owningFeatureName;
         arr.push_back(std::move(item));
     }
 

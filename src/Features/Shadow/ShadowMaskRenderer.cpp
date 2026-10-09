@@ -2,7 +2,7 @@
 
 #include "../../Renderer/Renderer.h"
 #include "../../Renderer/RenderGraph/RenderGraph.h"
-#include "ShadowRenderPassTags.h"
+#include "../../Renderer/RenderGraph/RenderFeatureScope.h"
 
 #include <cassert>
 #include <cstring>
@@ -64,6 +64,7 @@ rg::TextureHandle ShadowMaskRenderer::AddMaskPass(rg::RenderGraphBuilder& builde
     if (!shadowMapHandle.IsValid()) {
         return rg::TextureHandle{};
     }
+    const rg::RenderFeatureScope scope(builder, "Shadow");
 
     EnsurePipelineBuilt(renderer);
     ViewState& viewState = EnsureViewState(renderer, outputName, viewExtent);
@@ -121,7 +122,7 @@ rg::TextureHandle ShadowMaskRenderer::AddMaskPass(rg::RenderGraphBuilder& builde
             cmd.BindDescriptorSet(viewState.descriptorSet.Native());
             cmd.DispatchOverSize(viewExtent.width, viewExtent.height, 1);
         },
-        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::AfterOpaques, kShadowPassTag.bit);
+        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::AfterOpaques);
 
     return outputHandle;
 }

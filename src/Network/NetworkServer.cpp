@@ -758,6 +758,7 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
             view.name = outcome.name;
             view.enabled = outcome.enabled;
             view.everDeclaredThisSession = outcome.everDeclaredThisSession;
+            view.owningFeatureName = outcome.owningFeatureName;
             views.push_back(std::move(view));
         }
         res.status = 200;

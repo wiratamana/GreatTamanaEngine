@@ -443,37 +443,13 @@
 #                                            registry (see
 #                                            src/Renderer/RenderGraph/
 #                                            RenderPassToggleRegistry.h) -
-#                                            NoteDeclaredAndCheckEnabled()'s
+#                                            NoteDeclaredWithOwner()'s
 #                                            auto-discovery contract,
 #                                            SetEnabled()'s deny-list refusal
 #                                            for "Present", IsEnabled()'s safe
 #                                            default for an unknown name, and
 #                                            ListAll()'s deterministic,
 #                                            lexically-sorted iteration order.
-#   - Renderer/RenderGraph/RenderPassGroupRegistryTests.cpp - render-pass-7
-#                                            campaign's PHASE2
-#                                            (task_manager/render-pass-7/
-#                                            PHASE2_PASS_GROUP_REGISTRY.md) -
-#                                            the new, generic Core facility
-#                                            (see src/Renderer/RenderGraph/
-#                                            RenderPassGroupRegistry.h) that
-#                                            lets a Layer-2 module register a
-#                                            Frame-Debugger-tree heading for
-#                                            its own RenderPassTag: register/
-#                                            count/lookup-by-index round-trip,
-#                                            FindPassGroupIndexForTags()'s
-#                                            exact-bit/no-bit/multi-bit-first-
-#                                            wins cases, same-tag-same-heading
-#                                            idempotency, same-tag-different-
-#                                            heading in-place update (count
-#                                            unchanged), first-registered-wins
-#                                            ordering across two distinct tags,
-#                                            and ResetPassGroupRegistryForTesting()
-#                                            actually clearing state. Pure
-#                                            Tier 1 - no Vulkan device
-#                                            involved, zero real consumers
-#                                            wired up yet (PHASE3/PHASE4 are
-#                                            the first real callers).
 #   - Renderer/RenderGraph/RenderPassToggleChangeDetectionLogicTests.cpp
 #                                            - editor-core-separation-21
 #                                            campaign's PHASE2
@@ -2422,8 +2398,6 @@ set(GTE_TEST_SOURCES
     # stages, combined into one file.
     Renderer/RenderGraph/PostOpaqueRenderPipelineBlackboardQualificationTests.cpp
     Renderer/RenderGraph/RenderPassToggleRegistryTests.cpp
-    Renderer/RenderGraph/RenderGraphGroupingCacheTests.cpp
-    Renderer/RenderGraph/RenderPassGroupRegistryTests.cpp
     Renderer/RenderGraph/RenderPassToggleChangeDetectionLogicTests.cpp
     Renderer/RenderGraph/RenderPassToggleGuardTests.cpp
     # task_manager/better-render-pass-1 campaign, PHASE3

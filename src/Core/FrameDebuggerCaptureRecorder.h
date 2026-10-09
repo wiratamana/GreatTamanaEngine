@@ -73,11 +73,9 @@ public:
     // which becomes the implicit `this`), same semantics, same call site
     // (Core::BuildFrame()).
     //
-    // editor-core-separation-21 campaign, PHASE4 (fixing PHASE3's
-    // confirmed-lie finding #24) - `toggleRegistry` (default nullptr) lets
-    // this method honestly consult RenderPassToggleRegistry::
-    // NoteDeclaredAndCheckEnabled("FrameDebuggerReplay") ONCE, as a single
-    // whole-mechanism switch (mirroring AddGpuSkinningPasses()'s own
+    // `toggleRegistry` (default nullptr) lets this method honestly consult
+    // RenderPassToggleRegistry::IsEnabled("FrameDebuggerReplay") ONCE, as a
+    // single whole-mechanism switch (mirroring AddGpuSkinningPasses()'s own
     // "GpuSkinning" whole-stage precedent) rather than per dynamically-
     // named "FrameDebuggerReplayStepN" pass - these are ephemeral, one-
     // capture-lifetime debug tooling passes, not real content, so one

@@ -56,6 +56,7 @@ struct RenderGraphControlPassStateOutcome {
     std::string name;
     bool enabled = false;
     bool everDeclaredThisSession = false;
+    std::string owningFeatureName; // Which feature owns this pass - lets an AI agent debug ownership over HTTP.
 };
 
 // Outcome of one RenderGraphControlCommandRequest. `success` is false for

@@ -10,6 +10,7 @@
 // to prove it is NEVER invoked by AddPass()/Finish() themselves.
 
 #include "Renderer/RenderGraph/RenderGraphBuilder.h"
+#include "Renderer/RenderGraph/RenderFeatureScope.h"
 
 #include <gtest/gtest.h>
 
@@ -1068,10 +1069,10 @@ TEST(RenderGraphBuilderDeathTest, AddPassRejectsEmptyName)
 class FakeMetadataSink : public IPassDebugMetadataSink, public IPassDebugMetadataProvider {
 public:
     void OnPassDeclared(std::size_t declarationIndexThisFrame, RenderPassCategory category, RenderPassDrawKind drawKind,
-        RenderPassTagMask tags) override
+        std::string_view owningFeatureName) override
     {
         ASSERT_EQ(declarationIndexThisFrame, m_table.size());
-        m_table.push_back(PassDebugMetadata{ category, drawKind, tags });
+        m_table.push_back(PassDebugMetadata{ category, drawKind, std::string(owningFeatureName) });
     }
 
     void BeginFrame() override { m_table.clear(); }
@@ -1102,14 +1103,20 @@ TEST(RenderGraphBuilderTest, AddRenderPassCallsSinkExactlyOnceWithCorrectDeclara
     FakeMetadataSink sink;
     builder.SetDebugMetadataSink(&sink);
 
-    builder.AddRenderPass(
-        "PassZero", PassKind::Graphics, ViewScope::GameView, RenderPassCategory::General,
-        [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute, RenderPassDrawKind::DrawQuad,
-        RenderPassEvent::Opaques, RenderPassTagMask{ 0x1u });
-    builder.AddRenderPass(
-        "PassOne", PassKind::Compute, ViewScope::SceneView, RenderPassCategory::Debug,
-        [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute, RenderPassDrawKind::Blit,
-        RenderPassEvent::PreOpaques, RenderPassTagMask{ 0x2u });
+    {
+        const RenderFeatureScope scope(builder, "FeatureA");
+        builder.AddRenderPass(
+            "PassZero", PassKind::Graphics, ViewScope::GameView, RenderPassCategory::General,
+            [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute, RenderPassDrawKind::DrawQuad,
+            RenderPassEvent::Opaques);
+    }
+    {
+        const RenderFeatureScope scope(builder, "FeatureB");
+        builder.AddRenderPass(
+            "PassOne", PassKind::Compute, ViewScope::SceneView, RenderPassCategory::Debug,
+            [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute, RenderPassDrawKind::Blit,
+            RenderPassEvent::PreOpaques);
+    }
 
     EXPECT_EQ(sink.EntryCountForTesting(), 2u);
 
@@ -1117,13 +1124,13 @@ TEST(RenderGraphBuilderTest, AddRenderPassCallsSinkExactlyOnceWithCorrectDeclara
     ASSERT_TRUE(sink.QueryPassDebugMetadata(0, first));
     EXPECT_EQ(first.category, RenderPassCategory::General);
     EXPECT_EQ(first.drawKind, RenderPassDrawKind::DrawQuad);
-    EXPECT_EQ(first.tags, RenderPassTagMask{ 0x1u });
+    EXPECT_EQ(first.owningFeatureName, "FeatureA");
 
     PassDebugMetadata second;
     ASSERT_TRUE(sink.QueryPassDebugMetadata(1, second));
     EXPECT_EQ(second.category, RenderPassCategory::Debug);
     EXPECT_EQ(second.drawKind, RenderPassDrawKind::Blit);
-    EXPECT_EQ(second.tags, RenderPassTagMask{ 0x2u });
+    EXPECT_EQ(second.owningFeatureName, "FeatureB");
 }
 
 // A builder with NO sink installed at all never crashes when AddRenderPass()
@@ -1236,7 +1243,7 @@ TEST(RenderGraphBuilderTest, AddBlitPassWithSrcIsDepthTrueProducesDepthFlaggedRe
     EXPECT_TRUE(input.passes[0].reads[0].isDepthResource);
 }
 
-TEST(RenderGraphBuilderTest, AddBlitPassCallsSinkWithBlitDrawKindAndSuppliedCategoryAndTags)
+TEST(RenderGraphBuilderTest, AddBlitPassCallsSinkWithBlitDrawKindAndSuppliedCategoryAndOwner)
 {
     RenderGraphBuilder builder;
     FakeMetadataSink sink;
@@ -1250,15 +1257,17 @@ TEST(RenderGraphBuilderTest, AddBlitPassCallsSinkWithBlitDrawKindAndSuppliedCate
     spec.src = srcHandle;
     spec.dst = dstHandle;
 
-    builder.AddBlitPass("TestBlit", spec, RenderPassEvent::Opaques, ViewScope::Shared,
-        RenderPassCategory::Debug, RenderPassTagMask{ 0x4u });
+    {
+        const RenderFeatureScope scope(builder, "FeatureC");
+        builder.AddBlitPass("TestBlit", spec, RenderPassEvent::Opaques, ViewScope::Shared, RenderPassCategory::Debug);
+    }
 
     ASSERT_EQ(sink.EntryCountForTesting(), 1u);
     PassDebugMetadata metadata;
     ASSERT_TRUE(sink.QueryPassDebugMetadata(0, metadata));
     EXPECT_EQ(metadata.drawKind, RenderPassDrawKind::Blit);
     EXPECT_EQ(metadata.category, RenderPassCategory::Debug);
-    EXPECT_EQ(metadata.tags, RenderPassTagMask{ 0x4u });
+    EXPECT_EQ(metadata.owningFeatureName, "FeatureC");
 }
 
 TEST(RenderGraphBuilderTest, AddBlitPassCallerSuppliedRenderPassEventReachesPassRecordUnchanged)
@@ -1303,7 +1312,8 @@ TEST(RenderGraphBuilderTest, AddBlitPassDefaultsViewScopeToSharedAndCategoryToGe
     PassDebugMetadata metadata;
     ASSERT_TRUE(sink.QueryPassDebugMetadata(0, metadata));
     EXPECT_EQ(metadata.category, RenderPassCategory::General);
-    EXPECT_EQ(metadata.tags, RenderPassTagMask{ 0u });
+    // No RenderFeatureScope open at all here - the sentinel owner name.
+    EXPECT_EQ(metadata.owningFeatureName, "ENGINE_UNOWNED");
 }
 
 // --- PassReadsTexture() - read-only introspection over PassRecord::reads --

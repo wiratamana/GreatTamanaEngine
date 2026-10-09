@@ -1,8 +1,8 @@
 #pragma once
 
-// Core-owned hook pair for passing per-pass debug metadata (category,
-// draw kind, tags, barrier transition labels) out to the Editor's Frame
-// Debugger without Core ever storing or interpreting any of it itself.
+// Core-owned hook pair for passing per-pass debug metadata (category, draw
+// kind, owning feature name, barrier transition labels) out to the Editor's
+// Frame Debugger without Core ever storing or interpreting any of it itself.
 //
 // IPassDebugMetadataSink is the write side, called as passes are declared.
 // IPassDebugMetadataProvider is the read side, queried back when a frame
@@ -17,16 +17,18 @@
 
 #include <cstddef>
 #include <string>
+#include <string_view>
 
 
 namespace gte::rg {
 
-// Pass category/draw-kind/tag payload passed through the sink instead of
-// being stored permanently on the hot PassRecord struct.
+// Pass category/draw-kind/owning-feature payload passed through the sink
+// instead of being stored permanently on the hot PassRecord struct.
 struct PassDebugMetadata {
     RenderPassCategory category = RenderPassCategory::General;
     RenderPassDrawKind drawKind = RenderPassDrawKind::DrawMesh;
-    RenderPassTagMask tags = 0;
+    // Empty only if never declared through AddRenderPass()/AddBlitPass().
+    std::string owningFeatureName;
 };
 
 // Write-only interface for recording per-pass debug metadata as passes are
@@ -38,7 +40,7 @@ public:
     // Called once per declared pass, in declaration order starting at 0
     // each frame (declarationIndexThisFrame has no gaps).
     virtual void OnPassDeclared(std::size_t declarationIndexThisFrame, RenderPassCategory category,
-        RenderPassDrawKind drawKind, RenderPassTagMask tags) = 0;
+        RenderPassDrawKind drawKind, std::string_view owningFeatureName) = 0;
 
     // Called once per fresh graph declaration, before any pass is declared,
     // to reset whatever per-frame state the real implementation keeps.

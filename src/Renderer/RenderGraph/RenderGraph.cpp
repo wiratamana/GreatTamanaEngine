@@ -1149,7 +1149,7 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         // kill-switch in RenderPassToggleRegistry, so this mechanism can be
         // disabled on its own without disabling the whole Frame Debugger.
         const bool eventSnapshotKillSwitchEnabled = m_renderPassToggleRegistry == nullptr
-            || m_renderPassToggleRegistry->NoteDeclaredAndCheckEnabled("FrameDebuggerEventSnapshot");
+            || m_renderPassToggleRegistry->IsEnabled("FrameDebuggerEventSnapshot");
         if (m_eventSnapshotPool.IsCaptureEnabled() && eventSnapshotKillSwitchEnabled) {
             for (const ResourceUsage& usage : pass.writes) {
                 if (usage.kind != ResourceKind::Texture) {

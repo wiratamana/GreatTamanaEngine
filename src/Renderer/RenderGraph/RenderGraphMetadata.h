@@ -47,8 +47,7 @@ struct RenderGraphResourceRefMetadata {
 };
 
 // One pass, fully presentation-ready - every enum already resolved to its
-// ToString() text, GPU timing already formatted, tagGroupLabel resolved via
-// RenderPassGroupRegistry (at most one label).
+// ToString() text, GPU timing already formatted.
 struct RenderGraphPassMetadata {
     std::string name;
     bool isCulled = false;
@@ -58,7 +57,7 @@ struct RenderGraphPassMetadata {
     std::string viewScope;         // rg::ToString(ViewScope)
     std::string renderPassEvent;   // rg::ToString(RenderPassEvent)
     std::uint32_t renderPassEventOrder = 0; // static_cast<std::uint32_t>(RenderPassEvent) - sortable, unlike the text above.
-    std::optional<std::string> tagGroupLabel; // RenderPassGroupRegistry::FindPassGroupIndexForTags() result, or nullopt.
+    std::string owningFeatureName; // Which feature owns this pass - always real, never optional.
     std::vector<RenderGraphResourceRefMetadata> reads;
     std::vector<RenderGraphResourceRefMetadata> writes;
     std::uint32_t drawCallCount = 0;   // 0 for a culled pass.

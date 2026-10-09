@@ -25,8 +25,8 @@ TEST(RenderPassToggleGuardTest, NullRegistryAlwaysReturnsTrue)
 TEST(RenderPassToggleGuardTest, RealRegistryWithNameEnabledReturnsTrue)
 {
     RenderPassToggleRegistry registry;
-    // Auto-discovers "DrawSkyBackground", defaulting to enabled = true - see
-    // NoteDeclaredAndCheckEnabled()'s own header comment.
+    // An unknown name reads as enabled by default - see IsEnabled()'s own
+    // header comment.
     EXPECT_TRUE(ShouldDeclareBuiltInPassThisFrame(&registry, "DrawSkyBackground"));
 }
 

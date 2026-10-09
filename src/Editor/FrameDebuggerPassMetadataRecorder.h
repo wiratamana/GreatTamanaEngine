@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <deque>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -28,10 +29,10 @@ class FrameDebuggerPassMetadataRecorder final : public rg::IPassDebugMetadataSin
                                                  public rg::IPassDebugMetadataProvider {
 public:
     void OnPassDeclared(std::size_t declarationIndexThisFrame, rg::RenderPassCategory category,
-        rg::RenderPassDrawKind drawKind, rg::RenderPassTagMask tags) override
+        rg::RenderPassDrawKind drawKind, std::string_view owningFeatureName) override
     {
         assert(declarationIndexThisFrame == m_table.size());
-        m_table.push_back(rg::PassDebugMetadata{ category, drawKind, tags });
+        m_table.push_back(rg::PassDebugMetadata{ category, drawKind, std::string(owningFeatureName) });
         m_barrierLabelsByIndex.emplace_back();
     }
 

@@ -83,18 +83,18 @@ RenderGraphPassSnapshot BuildPassSnapshot(const PassRecord& pass, std::size_t de
     snapshot.viewScope = pass.viewScope;
     snapshot.renderPassEvent = pass.renderPassEvent;
 
-    // category/drawKind/tags no longer live on PassRecord - they start at
-    // RenderGraphPassSnapshot's own struct defaults (General/DrawMesh/0) and
-    // are only overwritten when metadataLookup is supplied AND actually has
-    // an entry for this exact declarationIndex. This is the graceful
-    // fallback for a headless build (no sink installed) and for any
-    // call site that does not pass a metadataLookup at all.
+    // category/drawKind/owningFeatureName no longer live on PassRecord - they
+    // start at RenderGraphPassSnapshot's own struct defaults (General/
+    // DrawMesh/empty) and are only overwritten when metadataLookup is
+    // supplied AND actually has an entry for this exact declarationIndex.
+    // This is the graceful fallback for a headless build (no sink
+    // installed) and for any call site that does not pass a metadataLookup.
     if (metadataLookup) {
         PassDebugMetadata metadata;
         if (metadataLookup(declarationIndex, metadata)) {
             snapshot.category = metadata.category;
             snapshot.drawKind = metadata.drawKind;
-            snapshot.tags = metadata.tags;
+            snapshot.owningFeatureName = metadata.owningFeatureName;
         }
     }
 

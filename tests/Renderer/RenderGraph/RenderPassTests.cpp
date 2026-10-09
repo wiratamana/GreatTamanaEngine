@@ -2,22 +2,19 @@
 // AddPass()/AddComputePass() that additionally stamps PassRecord::kind/
 // category in one place. No live VkDevice/Renderer/Registry involved at all.
 //
-// Assertions on pass category/drawKind/tags go through a small, test-local,
-// dual-interface fake sink (mirroring RenderGraphSnapshotTests.cpp's own
-// FakeMetadataSink) rather than reading PassRecord fields directly, since
+// Assertions on pass category/drawKind/owningFeatureName go through a small,
+// test-local, dual-interface fake sink (mirroring RenderGraphSnapshotTests.cpp's
+// own FakeMetadataSink) rather than reading PassRecord fields directly, since
 // PassRecord itself no longer stores any of the three.
 
 #include "Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "Renderer/RenderGraph/RenderGraphDebugMetadataSink.h"
+#include "Renderer/RenderGraph/RenderFeatureScope.h"
 
 #include <gtest/gtest.h>
 
 namespace gte::rg {
 namespace {
-
-// A domain-agnostic tag bit used purely as fixture data for tests below -
-// unrelated to any specific render feature.
-constexpr RenderPassTag kTestLutPassTag{ 1ull << 0 };
 
 void NoOpExecute(PassContext&) { }
 
@@ -27,10 +24,10 @@ void NoOpExecute(PassContext&) { }
 class FakeMetadataSink : public IPassDebugMetadataSink, public IPassDebugMetadataProvider {
 public:
     void OnPassDeclared(std::size_t declarationIndexThisFrame, RenderPassCategory category, RenderPassDrawKind drawKind,
-        RenderPassTagMask tags) override
+        std::string_view owningFeatureName) override
     {
         ASSERT_EQ(declarationIndexThisFrame, m_table.size());
-        m_table.push_back(PassDebugMetadata{ category, drawKind, tags });
+        m_table.push_back(PassDebugMetadata{ category, drawKind, std::string(owningFeatureName) });
     }
 
     void BeginFrame() override { m_table.clear(); }
@@ -108,16 +105,17 @@ TEST(RenderPassTest, AddRenderPassWithComputeKindRunsSetupAndStampsComputeKind)
 
 // --- 4-argument AddRenderPass() overload: explicit ViewScope + category ---
 
-TEST(RenderPassTest, AddRenderPassFourArgumentOverloadStampsViewScopeCategoryAndTags)
+TEST(RenderPassTest, AddRenderPassFourArgumentOverloadStampsViewScopeCategoryAndOwner)
 {
     RenderGraphBuilder builder;
     FakeMetadataSink sink;
     builder.SetDebugMetadataSink(&sink);
 
+    const RenderFeatureScope scope(builder, "AtmosphereLut");
     builder.AddRenderPass(
         "AtmosphereSkyViewLutPass", PassKind::Compute, ViewScope::GameView, RenderPassCategory::General,
         [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute, RenderPassDrawKind::DrawMesh,
-        RenderPassEvent::Opaques, kTestLutPassTag.bit);
+        RenderPassEvent::Opaques);
 
     const CompiledGraphInput input = builder.Finish();
     ASSERT_EQ(input.passes.size(), 1u);
@@ -128,7 +126,7 @@ TEST(RenderPassTest, AddRenderPassFourArgumentOverloadStampsViewScopeCategoryAnd
     PassDebugMetadata metadata;
     ASSERT_TRUE(sink.QueryPassDebugMetadata(0, metadata));
     EXPECT_EQ(metadata.category, RenderPassCategory::General);
-    EXPECT_EQ(metadata.tags, kTestLutPassTag.bit);
+    EXPECT_EQ(metadata.owningFeatureName, "AtmosphereLut");
 }
 
 TEST(RenderPassTest, AddRenderPassFourArgumentOverloadWorksForGraphicsKindToo)
@@ -255,24 +253,23 @@ TEST(RenderPassTest, AddRenderPassFourArgumentOverloadStoresExplicitDrawKind)
     EXPECT_EQ(metadata.drawKind, RenderPassDrawKind::DrawQuad);
 }
 
-// --- render-pass-7 campaign (task_manager/render-pass-7), PHASE1 - new
-// trailing, defaulted RenderPassTagMask parameter -------------------------
+// --- Pass ownership: derived from an open RenderFeatureScope, never passed
+// as an argument ------------------------------------------------------------
 
-// The full (now 9-argument) overload stamps an explicit, non-zero `tags`
-// argument onto the resulting PassRecord alongside every other field this
-// overload already stamps - mirrors
-// AddRenderPassFourArgumentOverloadStampsViewScopeAndCategory's own fixture
-// shape.
-TEST(RenderPassTest, AddRenderPassNineArgumentOverloadStampsTagsAlongsideEveryOtherField)
+// The full (now 8-argument) overload picks up whichever RenderFeatureScope
+// is open at the moment it is called, alongside every other field this
+// overload already stamps.
+TEST(RenderPassTest, AddRenderPassEightArgumentOverloadStampsOwnerFromOpenScope)
 {
     RenderGraphBuilder builder;
     FakeMetadataSink sink;
     builder.SetDebugMetadataSink(&sink);
 
+    const RenderFeatureScope scope(builder, "Shadow");
     builder.AddRenderPass(
         "AtmosphereSkyViewLutPass", PassKind::Compute, ViewScope::GameView, RenderPassCategory::General,
         [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute, RenderPassDrawKind::DrawQuad,
-        RenderPassEvent::PreOpaques, RenderPassTagMask{ 0x4u });
+        RenderPassEvent::PreOpaques);
 
     const CompiledGraphInput input = builder.Finish();
     ASSERT_EQ(input.passes.size(), 1u);
@@ -283,13 +280,12 @@ TEST(RenderPassTest, AddRenderPassNineArgumentOverloadStampsTagsAlongsideEveryOt
     ASSERT_TRUE(sink.QueryPassDebugMetadata(0, metadata));
     EXPECT_EQ(metadata.category, RenderPassCategory::General);
     EXPECT_EQ(metadata.drawKind, RenderPassDrawKind::DrawQuad);
-    EXPECT_EQ(metadata.tags, RenderPassTagMask{ 0x4u });
+    EXPECT_EQ(metadata.owningFeatureName, "Shadow");
 }
 
-// The full (now 9-argument) overload defaults its new trailing `tags`
-// parameter to 0 when the caller omits it entirely - every pre-existing
-// call site of this overload relies on exactly this.
-TEST(RenderPassTest, AddRenderPassNineArgumentOverloadDefaultsTagsToZeroWhenOmitted)
+// The full (now 8-argument) overload stamps the loud "ENGINE_UNOWNED"
+// sentinel when no RenderFeatureScope is open at all.
+TEST(RenderPassTest, AddRenderPassEightArgumentOverloadDefaultsToEngineUnownedWhenNoScopeOpen)
 {
     RenderGraphBuilder builder;
     FakeMetadataSink sink;
@@ -304,33 +300,34 @@ TEST(RenderPassTest, AddRenderPassNineArgumentOverloadDefaultsTagsToZeroWhenOmit
 
     PassDebugMetadata metadata;
     ASSERT_TRUE(sink.QueryPassDebugMetadata(0, metadata));
-    EXPECT_EQ(metadata.tags, RenderPassTagMask{ 0 });
+    EXPECT_EQ(metadata.owningFeatureName, "ENGINE_UNOWNED");
 }
 
-// The convenience (now 7-argument) overload forwards an explicit `tags`
-// value all the way through into the underlying PassRecord - proving it
-// genuinely FORWARDS the argument, not just defaults it.
-TEST(RenderPassTest, AddRenderPassSevenArgumentOverloadStoresExplicitTags)
+// The convenience (now 6-argument) overload also picks up whichever
+// RenderFeatureScope is open at the moment it is called - proving it
+// genuinely reads the SAME scope stack the full overload does.
+TEST(RenderPassTest, AddRenderPassSixArgumentConvenienceOverloadStampsOwnerFromOpenScope)
 {
     RenderGraphBuilder builder;
     FakeMetadataSink sink;
     builder.SetDebugMetadataSink(&sink);
 
+    const RenderFeatureScope scope(builder, "GPU Skinning");
     builder.AddRenderPass(
         "TestPass", PassKind::Graphics, [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute,
-        RenderPassDrawKind::DrawMesh, RenderPassEvent::Opaques, RenderPassTagMask{ 0x8u });
+        RenderPassDrawKind::DrawMesh, RenderPassEvent::Opaques);
 
     const CompiledGraphInput input = builder.Finish();
     ASSERT_EQ(input.passes.size(), 1u);
 
     PassDebugMetadata metadata;
     ASSERT_TRUE(sink.QueryPassDebugMetadata(0, metadata));
-    EXPECT_EQ(metadata.tags, RenderPassTagMask{ 0x8u });
+    EXPECT_EQ(metadata.owningFeatureName, "GPU Skinning");
 }
 
-// The convenience (now 7-argument) overload also defaults its new trailing
-// `tags` parameter to 0 when omitted.
-TEST(RenderPassTest, AddRenderPassSevenArgumentOverloadDefaultsTagsToZeroWhenOmitted)
+// The convenience (now 6-argument) overload also stamps "ENGINE_UNOWNED"
+// when no RenderFeatureScope is open.
+TEST(RenderPassTest, AddRenderPassSixArgumentConvenienceOverloadDefaultsToEngineUnownedWhenNoScopeOpen)
 {
     RenderGraphBuilder builder;
     FakeMetadataSink sink;
@@ -344,7 +341,7 @@ TEST(RenderPassTest, AddRenderPassSevenArgumentOverloadDefaultsTagsToZeroWhenOmi
 
     PassDebugMetadata metadata;
     ASSERT_TRUE(sink.QueryPassDebugMetadata(0, metadata));
-    EXPECT_EQ(metadata.tags, RenderPassTagMask{ 0 });
+    EXPECT_EQ(metadata.owningFeatureName, "ENGINE_UNOWNED");
 }
 
 } // namespace

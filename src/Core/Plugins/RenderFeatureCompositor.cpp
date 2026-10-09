@@ -1,12 +1,11 @@
 #include "RenderFeatureCompositor.h"
 
 #include "RenderFeatureCameraData.h"
-#include "PostProcessingPassTags.h"
 #include "../Core.h"
 #include "../Logging.h"
 
 #include "../../Renderer/ComputeDispatch.h"
-#include "../../Renderer/RenderGraph/RenderPassGroupRegistry.h"
+#include "../../Renderer/RenderGraph/RenderFeatureScope.h"
 
 #include <algorithm>
 #include <cassert>
@@ -66,12 +65,6 @@ RenderFeatureCompositor::RenderFeatureCompositor(Core& core, Renderer& renderer)
     : m_core(core)
     , m_renderer(renderer)
 {
-    // Render Graph panel grouping headings for this compositor's own
-    // blend-chain compute dispatches - idempotent, safe to call every
-    // construction.
-    rg::RegisterPassGroupLabel(kPostProcessingPassTag, "Post Processing");
-    rg::RegisterPassGroupLabel(kProjectFeatureGroupTag, "Project Features");
-
     // Bounded, reusable GPU-state slot free-list, fully populated here.
     for (int i = 0; i < kMaxConcurrentProjectRenderFeatures; ++i) {
         m_freeProjectFeatureSlots.push_back(i);
@@ -875,8 +868,10 @@ void RenderFeatureCompositor::EnsureBlendPipelineInitialized()
 void RenderFeatureCompositor::DispatchBlend(rg::RenderGraphBuilder& builder, rg::TextureHandle dstIn,
     VkSampler dstInSampler, rg::TextureHandle srcIn, VkSampler srcInSampler, rg::TextureHandle destination,
     BlendStageState& state, const char* debugName, VkExtent2D extent, RenderFeatureBlendMode blendMode,
-    rg::RenderPassTagMask tagMask)
+    std::string_view groupHeading)
 {
+    const rg::RenderFeatureScope scope(builder, groupHeading);
+
     // Idempotent - safe to call from more than one call site per frame.
     EnsureBlendPipelineInitialized();
     builder.AddRenderPass(debugName, rg::PassKind::Compute, rg::ViewScope::Shared, rg::RenderPassCategory::General,
@@ -908,7 +903,7 @@ void RenderFeatureCompositor::DispatchBlend(rg::RenderGraphBuilder& builder, rg:
                 &pushConstants, sizeof(pushConstants), groupCounts.width, groupCounts.height, groupCounts.depth);
             m_renderer.EndGraphPassRecording();
         },
-        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::AfterEverything, tagMask);
+        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::AfterEverything);
 }
 
 // Seeds the chain (closes the same-physical-image read+write hazard for the
@@ -960,7 +955,7 @@ void RenderFeatureCompositor::ContributeRenderGraphPasses(
         seedName, seedState.texture->Target(), VK_IMAGE_LAYOUT_UNDEFINED, seedState.texture->Sampler());
     DispatchBlend(frame.builder, resolved->target, resolved->sampler, resolved->target, resolved->sampler,
         seedHandle, seedState, m_namePool.SeedCopyPassName(viewName), extent, RenderFeatureBlendMode::Replace,
-        kPostProcessingPassTag.bit);
+        "Post Processing");
 
     rg::TextureHandle currentInput = seedHandle;
     VkSampler currentInputSampler = seedState.texture->Sampler();
@@ -985,6 +980,11 @@ void RenderFeatureCompositor::ContributeRenderGraphPasses(
             privateName, privateState.texture->Target(), VK_IMAGE_LAYOUT_UNDEFINED, privateState.texture->Sampler());
 
         if (entry.projectCallback) {
+            // Scoped to JUST this callback - destructs at this if-block's
+            // own closing brace, strictly before DispatchBlend() runs
+            // later in this same loop iteration, so the blend pass below
+            // never inherits this feature's own heading.
+            const rg::RenderFeatureScope scope(frame.builder, featureName);
             const std::optional<RenderPassViewData> viewDataOpt = m_core.FindRenderPassViewData(frame.currentView);
             const RenderPassViewData* viewData = viewDataOpt.has_value() ? &(*viewDataOpt) : nullptr;
 
@@ -1057,7 +1057,7 @@ void RenderFeatureCompositor::ContributeRenderGraphPasses(
         DispatchBlend(frame.builder, currentInput, currentInputSampler, privateTarget,
             privateState.texture->Sampler(), outputTarget, *outputState, m_namePool.BlendPassName(gpuStateKey, viewName),
             extent, entry.descriptor.blendMode,
-            entry.projectCallback ? kProjectFeatureGroupTag.bit : kPostProcessingPassTag.bit);
+            entry.projectCallback ? "Project Features" : "Post Processing");
 
         currentInput = outputTarget;
         currentInputSampler = isLast ? VK_NULL_HANDLE : outputState->texture->Sampler();

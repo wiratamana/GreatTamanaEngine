@@ -6,10 +6,10 @@
 
 namespace gte::rg {
 
-bool RenderPassToggleRegistry::NoteDeclaredAndCheckEnabled(const std::string& name)
+void RenderPassToggleRegistry::NoteDeclaredWithOwner(const std::string& name, std::string_view owningFeatureName)
 {
     if (name.empty()) {
-        return true;
+        return;
     }
     auto it = m_entries.find(name);
     if (it == m_entries.end()) {
@@ -17,8 +17,9 @@ bool RenderPassToggleRegistry::NoteDeclaredAndCheckEnabled(const std::string& na
         state.name = name;
         state.enabled = true;
         state.everDeclaredThisSession = true;
-        it = m_entries.emplace(name, std::move(state)).first;
-        return it->second.enabled;
+        state.owningFeatureName = std::string(owningFeatureName);
+        m_entries.emplace(name, std::move(state));
+        return;
     }
     if (!it->second.everDeclaredThisSession) {
         // Promote: this was a ghost (set via SetEnabled before ever
@@ -27,7 +28,9 @@ bool RenderPassToggleRegistry::NoteDeclaredAndCheckEnabled(const std::string& na
         std::erase(m_ghostInsertionOrder, name);
     }
     it->second.everDeclaredThisSession = true;
-    return it->second.enabled;
+    if (it->second.owningFeatureName.empty()) {
+        it->second.owningFeatureName = std::string(owningFeatureName); // First sight wins, sticky for the session.
+    }
 }
 
 bool RenderPassToggleRegistry::SetEnabled(const std::string& name, bool enabled)
@@ -86,11 +89,9 @@ std::vector<RenderPassToggleState> RenderPassToggleRegistry::ListAll() const
 
 bool RenderPassToggleRegistry::IsDenyListed(const std::string& name) noexcept
 {
-    // editor-core-separation-20 campaign, PHASE1 - "ClearViewTarget" added:
-    // the ONE guaranteed clear of the Game/Scene View target every frame -
-    // disabling it would defeat the entire fix this pass exists for (see
-    // task_manager/editor-core-separation-20/PHASE0_MASTER_STRATEGY.md's
-    // Root Cause #1) with no in-process recovery, exactly like "Present".
+    // "ClearViewTarget" - the ONE guaranteed clear of the Game/Scene View
+    // target every frame - disabling it would leave a view with no safe
+    // fallback content, with no in-process recovery, exactly like "Present".
     return name == "Present" || name == "ClearViewTarget";
 }
 

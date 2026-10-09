@@ -14,6 +14,7 @@
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "FrameDebuggerCapture.h"
 #include "../Renderer/RenderGraph/RenderPassToggleRegistry.h"
+#include "../Renderer/RenderGraph/RenderFeatureScope.h"
 
 #include <cstdio>
 #include <deque>
@@ -62,9 +63,13 @@ std::vector<rg::TextureHandle> FrameDebuggerCaptureContext::AddReplayPasses(rg::
 
     // One whole-mechanism on/off switch, checked before any per-step
     // RenderTexture/pass declaration.
-    if (toggleRegistry != nullptr && !toggleRegistry->NoteDeclaredAndCheckEnabled("FrameDebuggerReplay")) {
+    if (toggleRegistry != nullptr && !toggleRegistry->IsEnabled("FrameDebuggerReplay")) {
         return destHandles;
     }
+    // AddRenderPass() auto-registers every pass it declares, including
+    // these N ephemeral replay passes - give them a real owner so none of
+    // them ever lands under "ENGINE_UNOWNED" in the Render Graph panel.
+    const rg::RenderFeatureScope scope(builder, "Frame Debugger");
 
     // A scene with zero mesh entities still draws the background every
     // frame, so it must still get exactly one selectable replay step.

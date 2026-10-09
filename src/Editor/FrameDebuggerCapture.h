@@ -188,16 +188,11 @@ public:
         const std::string& pipelineDebugName, const std::string& materialTextureDebugName,
         std::uint32_t triangleCount);
 
-    // Render Pass campaign (task_manager/render-pass-1), PHASE4 - the
-    // `frame-debugger-8` campaign's own `RecordSkyBackgroundDraw()` method
-    // was REMOVED here (it used to be called once, from
-    // AddDrawSkyBackgroundPass()'s own `execute` lambda, to fabricate a
-    // draw record for the Sky Background full-screen-triangle draw). It is
-    // no longer needed at all - "DrawSkyBackground" is now a real, separate
-    // Render Graph pass (PHASE2), generically discovered by
-    // BuildRealFrameDebuggerSnapshot()'s own view-region walk exactly like
-    // any other real Graphics-kind pass, with no fabricated
-    // FrameDebuggerDrawRecord required.
+    // The `frame-debugger-8` campaign's own `RecordSkyBackgroundDraw()`
+    // method was REMOVED - "DrawSkyBackground" is a real, separate Render
+    // Graph pass, generically discovered by BuildRealFrameDebuggerSnapshot()'s
+    // own view-region walk exactly like any other Graphics-kind pass, with no
+    // fabricated FrameDebuggerDrawRecord required.
 
     // editor-core-separation-2 campaign, PHASE2 - the two
     // IFrameDebuggerCaptureRecorder overrides (src/Core/

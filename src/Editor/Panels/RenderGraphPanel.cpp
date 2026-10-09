@@ -284,12 +284,11 @@ void RenderGraphPanel::BuildPassTree(
     std::unordered_map<std::string, const rg::RenderGraphGroupedPassMetadata*> liveByName;
     for (const rg::RenderGraphGroupedPassMetadata& row : grouped) {
         liveByName[row.name] = &row;
-        if (!row.instances.empty() && row.instances.front().tagGroupLabel.has_value()) {
-            m_groupingCache.Observe(row.name, *row.instances.front().tagGroupLabel);
-        }
     }
 
-    // Every known pass, always visible - grouped by its real tag label,
+    // Every known pass, always visible - grouped directly off the toggle
+    // registry's own sticky owningFeatureName field (set once, the instant
+    // a pass is first declared, for the rest of the process's life) -
     // never by snapshot presence. `toggles.ListAll()` already includes
     // every pass ever declared or ever mutated this session.
     std::unordered_map<std::string, std::vector<rg::RenderPassToggleState>> byGroup;
@@ -310,7 +309,7 @@ void RenderGraphPanel::BuildPassTree(
             }
         }
 
-        byGroup[m_groupingCache.Resolve(state.name)].push_back(state);
+        byGroup[state.owningFeatureName].push_back(state);
     }
 
     // Sorted heading order - deterministic, independent of unordered_map's

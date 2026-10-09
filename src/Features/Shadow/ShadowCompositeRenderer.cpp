@@ -5,7 +5,7 @@
 #include "../../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../../Renderer/RenderGraph/RenderGraph.h"
 #include "../../Renderer/Vulkan/DescriptorSetLayoutBuilder.h"
-#include "ShadowRenderPassTags.h"
+#include "../../Renderer/RenderGraph/RenderFeatureScope.h"
 
 #include <cstring>
 #include <fstream>
@@ -223,6 +223,7 @@ void ShadowCompositeRenderer::AddCompositePass(rg::RenderGraphBuilder& builder, 
     const char* viewKey, rg::TextureHandle privateTarget, VkExtent2D extent, rg::TextureHandle sceneColorHandle,
     VkSampler sceneColorSampler, rg::TextureHandle maskHandle, rg::TextureHandle sceneDepthHandle, float strength)
 {
+    const rg::RenderFeatureScope scope(builder, "Shadow");
     EnsurePipeline(renderer);
     const VkDescriptorSet descriptorSet = EnsureViewDescriptorSet(renderer, viewKey);
 
@@ -263,7 +264,7 @@ void ShadowCompositeRenderer::AddCompositePass(rg::RenderGraphBuilder& builder, 
                 cmd.Native(), m_pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pushConstants), &pushConstants);
             vkCmdDraw(cmd.Native(), 3, 1, 0, 0);
         },
-        rg::RenderPassDrawKind::DrawQuad, rg::RenderPassEvent::AfterEverything, kShadowPassTag.bit);
+        rg::RenderPassDrawKind::DrawQuad, rg::RenderPassEvent::AfterEverything);
 }
 
 } // namespace gte

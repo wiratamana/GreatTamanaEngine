@@ -28,8 +28,9 @@
 // here besides RenderGraphTypes.h itself.
 
 #include "RenderGraphTypes.h"
-#include "RenderGraphDebugMetadataSink.h" // editor-core-separation-25 campaign, PHASE3
-#include "RenderGraphPersistentResourceCache.h" // editor-core-separation-27 campaign, PHASE7
+#include "RenderGraphDebugMetadataSink.h"
+#include "RenderGraphPersistentResourceCache.h"
+#include "RenderPassToggleRegistry.h"
 #include "../RenderTarget.h"
 #include "../VolumeTarget.h"
 #include "../TextureArrayTarget.h" // better-render-pass-3 campaign, BLOCK5
@@ -39,6 +40,8 @@
 #include <cassert>
 #include <cstdint>
 #include <functional>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -643,142 +646,68 @@ public:
         m_passes.back().viewScope = viewScope;
     }
 
-    // Render Pass campaign (task_manager/render-pass-1), PHASE1 - the ONE,
-    // OFFICIAL entry point every real pass declaration in this engine should
-    // use from now on (Application layer AND Renderer layer alike - see any
-    // feature's own Renderer-layer pass-declaring class for an example,
-    // PHASE3). A thin,
-    // lightweight wrapper around the two pre-existing methods below - it adds
-    // NO new capability of its own beyond stamping `kind`/`category` in one
-    // place, by design (PHASE0's Locked Design Decision #1: no polymorphic
-    // pass-object hierarchy). AddPass()/AddComputePass() themselves are NOT
-    // removed or deprecated - they remain the low-level primitives this method
-    // (and Tier-1 tests) are built on, and existing test-only call sites are
+    // The ONE, OFFICIAL entry point every real pass declaration in this
+    // engine uses. A thin wrapper around the two primitives above - it adds
+    // no new capability beyond stamping `kind`/`category`/`drawKind`/
+    // `renderPassEvent` in one place (no polymorphic pass-object hierarchy).
+    // AddPass()/AddComputePass() are NOT removed - test-only call sites are
     // free to keep using them directly.
-    // PHASE1 - new, TRAILING, DEFAULTED `drawKind` parameter (see
-    // RenderPassDrawKind's own doc comment, RenderGraphTypes.h) - purely
-    // descriptive metadata for the Editor Frame Debugger's child-event-
-    // labeling purposes (PHASE2 of that campaign), stamped in the same
-    // one place `category` already is. A trailing defaulted plain-type
-    // parameter added after the two template-deduced lambda parameters
-    // does not interact with template argument deduction at all, so
-    // EVERY pre-existing call site of this overload (which only ever
-    // supplies `name`/`kind`/`viewScope`/`category`/`setup`/`execute`)
-    // compiles completely unmodified.
-    // render-pass-3 campaign (task_manager/render-pass-3), PHASE1
-    // (PHASE1_CORE_VOCABULARY_AND_BLACKBOARD.md) - a SECOND new, TRAILING,
-    // DEFAULTED parameter, `renderPassEvent` (see RenderPassEvent's own doc
-    // comment, RenderGraphTypes.h), added the exact same way `drawKind` was
-    // by the render-pass-2 campaign - mirroring that identical precedent
-    // one more time, so every pre-existing call site of EITHER overload
-    // (which never mentions this new parameter at all) compiles completely
-    // unmodified. This is the ONE new thing RenderGraphBuilder.h's public
-    // surface needs for the whole render-pass-3 campaign (PHASE0_MASTER_
-    // STRATEGY.md's Locked Design Decision 5) - the new RenderPipeline
-    // declaration layer (src/Renderer/RenderGraph/RenderPipeline.h)
-    // translates its own opaque RenderPassDesc::order into this parameter
-    // before calling into this exact, otherwise-unchanged chokepoint.
-    // render-pass-4 campaign, PHASE1
-    // (task_manager/render-pass-4/PHASE1_DEPENDENCY_EVENT_CONTRADICTION_SAFETY_NET.md)
-    // - the stamped `renderPassEvent` value is cross-checked against
-    // this pass's real, declared resource dependencies by
-    // RenderGraphCompiler::Compile() - see RenderPassEvent's own doc
-    // comment (RenderGraphTypes.h).
-    // - the stamped `renderPassEvent` value is now ALSO real, load-bearing
-    // ordering input Compile() stable-sorts every pass by - see that same
-    // doc comment for the full write-up.
-    // render-pass-7 campaign (task_manager/render-pass-7), PHASE1
-    // (PHASE1_TAG_VOCABULARY_AND_THREADING.md, "Core Campaign 1 -
-    // De-hardcode RenderPassCategory") - a THIRD new, TRAILING, DEFAULTED
-    // parameter, `tags` (see RenderPassTagMask's own doc comment,
-    // RenderGraphTypes.h), added the exact same way `drawKind`/
-    // `renderPassEvent` were by the render-pass-2/render-pass-3 campaigns -
-    // mirroring that identical precedent one more time, so every
-    // pre-existing call site of EITHER overload (which never mentions this
-    // new parameter at all) compiles completely unmodified. Defaults to 0
-    // (no tags) - purely descriptive metadata, read by NOTHING in
-    // RenderGraph.cpp/RenderGraphCompiler.cpp/RenderGraphBarrierPlanner.cpp.
+    //
+    // Ownership is derived, never passed: this is the ONE place that reads
+    // the currently-open RenderFeatureScope (CurrentOwningFeatureName()) and
+    // writes both the debug-metadata sink and the pass toggle registry -
+    // see RenderFeatureScope.h. There is no way to declare a pass through
+    // this chokepoint without it becoming toggle-registry-known with a real
+    // owner.
     template <typename SetupFn, typename ExecuteFn>
     void AddRenderPass(const char* name, PassKind kind, ViewScope viewScope, RenderPassCategory category,
         SetupFn&& setup, ExecuteFn&& execute, RenderPassDrawKind drawKind = RenderPassDrawKind::DrawMesh,
-        RenderPassEvent renderPassEvent = RenderPassEvent::Opaques, RenderPassTagMask tags = 0)
+        RenderPassEvent renderPassEvent = RenderPassEvent::Opaques)
     {
         if (kind == PassKind::Compute) {
             AddComputePass(name, viewScope, std::forward<SetupFn>(setup), std::forward<ExecuteFn>(execute));
         } else {
             AddPass(name, viewScope, std::forward<SetupFn>(setup), std::forward<ExecuteFn>(execute));
         }
-        m_passes.back().renderPassEvent = renderPassEvent; // render-pass-3 campaign, PHASE1 - UNCHANGED, still real ordering input, not migrated
-        // editor-core-separation-25 campaign - category/drawKind/tags no
-        // longer stored on PassRecord (see RenderGraphTypes.h's own
-        // PassRecord doc comment) - forwarded to the installed sink
-        // instead, exactly once per declared pass, only if a sink is
-        // actually installed (a headless/Player build's builder never has
-        // one - this is the ONE branch that build pays for this feature).
+        m_passes.back().renderPassEvent = renderPassEvent;
+
+        const std::string_view owner = CurrentOwningFeatureName();
         if (m_debugMetadataSink != nullptr) {
-            m_debugMetadataSink->OnPassDeclared(m_passes.size() - 1, category, drawKind, tags);
+            m_debugMetadataSink->OnPassDeclared(m_passes.size() - 1, category, drawKind, owner);
+        }
+        if (m_passToggleRegistry != nullptr && name != nullptr && name[0] != '\0') {
+            m_passToggleRegistry->NoteDeclaredWithOwner(name, owner);
         }
     }
 
     // Convenience overload defaulting `viewScope` to Shared and `category` to
-    // General - for the (today, majority of) real call sites that need
-    // neither. Mirrors AddPass()'s own pre-existing 3-arg/4-arg overload pair
-    // exactly. Also forwards the new trailing, defaulted `drawKind` parameter
-    // (Frame Debugger Pass-Ownership campaign, task_manager/render-pass-2,
-    // PHASE1), the new trailing, defaulted `renderPassEvent` parameter
-    // (render-pass-3 campaign, PHASE1), AND the new trailing, defaulted
-    // `tags` parameter (render-pass-7 campaign, PHASE1) - same "trailing
-    // defaulted plain-type parameter never touches template deduction"
-    // reasoning as the overload above, so every pre-existing 4-argument call
-    // site compiles completely unmodified. render-pass-4 campaign, PHASE1 -
-    // same cross-check note as the overload above applies here too (this
-    // overload simply forwards into it). render-pass-4 campaign, PHASE2 -
-    // same "now ALSO real, load-bearing ordering input" note applies here
-    // too, for the same reason.
+    // General - for the (majority of) real call sites that need neither.
     template <typename SetupFn, typename ExecuteFn>
     void AddRenderPass(const char* name, PassKind kind, SetupFn&& setup, ExecuteFn&& execute,
         RenderPassDrawKind drawKind = RenderPassDrawKind::DrawMesh,
-        RenderPassEvent renderPassEvent = RenderPassEvent::Opaques, RenderPassTagMask tags = 0)
+        RenderPassEvent renderPassEvent = RenderPassEvent::Opaques)
     {
         AddRenderPass(name, kind, ViewScope::Shared, RenderPassCategory::General,
-            std::forward<SetupFn>(setup), std::forward<ExecuteFn>(execute), drawKind, renderPassEvent, tags);
+            std::forward<SetupFn>(setup), std::forward<ExecuteFn>(execute), drawKind, renderPassEvent);
     }
 
-    // editor-core-separation-26 campaign, PHASE5
-    // (PHASE5_ADDBLITPASS_BUILDER_ENTRYPOINT.md) - the real, official,
-    // first-class pass-declaration entry point for a raw image blit/copy
-    // (vkCmdBlitImage) - mirrors AddRenderPass()'s own trailing-defaulted-
-    // parameter convention, but is NOT built on top of AddPass()/
-    // AddComputePass() (neither accepts a setup/execute callback pair shaped
-    // like a blit needs - a blit has no callback at all): this constructs its
-    // own PassRecord directly, the ONE new function in this whole campaign
-    // that does so. Declares ReadTexture(spec.src, ResourceAccess::TransferSrc,
-    // spec.srcIsDepth) and WriteTexture(spec.dst, ResourceAccess::TransferDst,
-    // spec.dstIsDepth) internally (using PHASE2's new isDepthResource
-    // parameter), stores `spec` on PassRecord::blitCommand, stamps
-    // `pass.kind = PassKind::Blit`, and forwards
-    // drawKind = RenderPassDrawKind::Blit (ALWAYS this fixed value - never a
-    // caller-supplied parameter, since a blit pass's draw-kind is always,
-    // definitionally, Blit) to the installed debug-metadata sink, exactly
-    // like AddRenderPass() already does for its own category/drawKind/tags
-    // parameters.
+    // The official entry point for a raw image blit/copy (vkCmdBlitImage) -
+    // NOT built on AddPass()/AddComputePass() (neither accepts a blit's
+    // shape - no setup/execute callback at all): constructs its own
+    // PassRecord directly. Declares ReadTexture(spec.src, TransferSrc) and
+    // WriteTexture(spec.dst, TransferDst) internally, stores `spec` on
+    // PassRecord::blitCommand, stamps `pass.kind = PassKind::Blit`, and
+    // forwards drawKind = RenderPassDrawKind::Blit (always fixed) to the
+    // installed debug-metadata sink - mirrors AddRenderPass()'s own owner
+    // derivation and toggle-registry registration exactly.
     //
-    // `renderPassEvent` deliberately has NO special-cased default beyond the
-    // ordinary RenderPassEvent::Opaques every other pass-declaring method
-    // already defaults to: a blit with no real in-frame reader has no data
-    // dependency to order it by, so it MUST have an explicit way to be placed
-    // at a real RenderPassEvent tier - a caller with a genuine ordering
-    // requirement (e.g. "this blit must run AFTER every transparent draw")
-    // supplies its own explicit value here, exactly like any other pass.
-    //
-    // Still pure data as of this phase - PHASE6 supplies the actual
-    // vkCmdBlitImage call, directly inside RenderGraph::ExecuteCompiledGraph(),
-    // never via a pass-author-supplied callback.
+    // `renderPassEvent` has no special-cased default: a blit with no real
+    // in-frame reader has no data dependency to order it by, so it must
+    // have an explicit way to be placed at a real RenderPassEvent tier.
     void AddBlitPass(const char* name, const BlitSpec& spec,
         RenderPassEvent renderPassEvent = RenderPassEvent::Opaques,
         ViewScope viewScope = ViewScope::Shared,
-        RenderPassCategory category = RenderPassCategory::General,
-        RenderPassTagMask tags = 0);
+        RenderPassCategory category = RenderPassCategory::General);
 
     // editor-core-separation-25 campaign - optional, nullable, zero-cost-
     // when-absent. Forwarded into this builder by RenderGraph::Execute()'s
@@ -926,6 +855,24 @@ public:
     // return an empty CompiledGraphInput, since every table was moved out.
     CompiledGraphInput Finish();
 
+    // RAII scope marking "every pass declared while this is alive belongs
+    // to this named feature" - pushed/popped here; never call these
+    // directly, use RenderFeatureScope (RenderFeatureScope.h) instead.
+    void PushOwningFeatureScope(std::string_view name) { m_owningFeatureScope.push_back(std::string(name)); }
+    void PopOwningFeatureScope() noexcept { m_owningFeatureScope.pop_back(); }
+
+    // Top of the owning-feature stack, or a loud sentinel if none is open -
+    // a pass carrying this sentinel in a real capture is a bug to fix, not
+    // a fallback to tolerate.
+    std::string_view CurrentOwningFeatureName() const noexcept
+    {
+        static constexpr std::string_view kEngineUnowned = "ENGINE_UNOWNED";
+        return m_owningFeatureScope.empty() ? kEngineUnowned : std::string_view(m_owningFeatureScope.back());
+    }
+
+    // Wired once by RenderGraph::Execute(), next to SetDebugMetadataSink().
+    void SetPassToggleRegistry(RenderPassToggleRegistry* registry) noexcept { m_passToggleRegistry = registry; }
+
 private:
     // editor-core-separation-27 campaign, PHASE8 - the ONE place either
     // GetOrCreatePersistentTexture() overload mints this frame's real
@@ -944,6 +891,14 @@ private:
     // editor-core-separation-25 campaign - optional, nullable, zero-cost-
     // when-absent. See SetDebugMetadataSink() above.
     IPassDebugMetadataSink* m_debugMetadataSink = nullptr;
+
+    // Stack of owned strings (not string_view) - a pushed name can come
+    // from a short-lived std::string; copying a few bytes per scope-open
+    // is free, a dangling view is not.
+    std::vector<std::string> m_owningFeatureScope;
+
+    // Not owned. Wired once by RenderGraph::Execute(). Null in headless/Player builds.
+    RenderPassToggleRegistry* m_passToggleRegistry = nullptr;
 
     // render-pass-6 campaign, PHASE5 (item 2.1) - REPLACES the old 9
     // parallel vectors (m_textureDescs/m_textureNames/m_textureImportInfo,

@@ -12,14 +12,11 @@
 #include <gtest/gtest.h>
 
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace gte::rg {
 namespace {
-
-// A domain-agnostic tag bit used purely as fixture data for tests below -
-// unrelated to any specific render feature.
-constexpr RenderPassTag kTestLutPassTag{ 1ull << 0 };
 
 void NoOpExecute(PassContext&) { }
 void NoOpSetup(RenderGraphBuilder::PassBuilder&) { }
@@ -41,14 +38,14 @@ std::size_t CountOccurrences(const std::string& haystack, const std::string& nee
 // RenderGraphSnapshotTests.cpp's own FakeMetadataSink exactly - needed here
 // since RenderPipeline::DeclareInto() ultimately calls the SAME
 // RenderGraphBuilder::AddRenderPass() chokepoint that no longer stores
-// category/drawKind/tags directly on PassRecord.
+// category/drawKind/owningFeatureName directly on PassRecord.
 class FakeMetadataSink : public IPassDebugMetadataSink, public IPassDebugMetadataProvider {
 public:
     void OnPassDeclared(std::size_t declarationIndexThisFrame, RenderPassCategory category, RenderPassDrawKind drawKind,
-        RenderPassTagMask tags) override
+        std::string_view owningFeatureName) override
     {
         ASSERT_EQ(declarationIndexThisFrame, m_table.size());
-        m_table.push_back(PassDebugMetadata{ category, drawKind, tags });
+        m_table.push_back(PassDebugMetadata{ category, drawKind, std::string(owningFeatureName) });
     }
 
     void BeginFrame() override { m_table.clear(); }
@@ -476,7 +473,7 @@ TEST(RenderPipelineTest, LegacyCategoryAndDrawKindSurviveUnchangedIntoTheProduce
             desc.debugName = "DrawSkyBackground";
             desc.kind = PassKind::Graphics;
             desc.legacyCategory = RenderPassCategory::General;
-            desc.tags = kTestLutPassTag.bit;
+            desc.owningFeatureName = "TestLut";
             desc.drawKind = RenderPassDrawKind::DrawQuad;
             desc.order = RenderPassEvent::AfterOpaques;
             desc.setup = NoOpSetup;
@@ -501,18 +498,12 @@ TEST(RenderPipelineTest, LegacyCategoryAndDrawKindSurviveUnchangedIntoTheProduce
     PassDebugMetadata metadata;
     ASSERT_TRUE(sink.QueryPassDebugMetadata(0, metadata));
     EXPECT_EQ(metadata.category, RenderPassCategory::General);
-    EXPECT_EQ(metadata.tags, kTestLutPassTag.bit);
+    EXPECT_EQ(metadata.owningFeatureName, "TestLut");
     EXPECT_EQ(metadata.drawKind, RenderPassDrawKind::DrawQuad);
 }
 
-// render-pass-7 campaign (task_manager/render-pass-7), PHASE1 - THE MOST
-// IMPORTANT new test for this phase: a dedicated regression test for the
-// real, confirmed dead-field bug this phase fixes (PHASE0_MASTER_STRATEGY.md,
-// Step 2.4) - RenderPassDesc::tags used to be silently DROPPED by
-// DeclareOnePhase() every single frame, for every provider, since the
-// underlying builder.AddRenderPass() call never forwarded it. This test
-// fails against the pre-PHASE1 code (desc.tags never reaches the produced
-// PassRecord) and passes after this phase's fix.
+// Regression test: a provider-set owningFeatureName must survive
+// DeclareOnePhase()'s own flush loop and reach the installed sink.
 TEST(RenderPipelineTest, DeclareIntoForwardsTagsOntoTheUnderlyingPassRecord)
 {
     RenderPipeline pipeline;
@@ -521,7 +512,7 @@ TEST(RenderPipelineTest, DeclareIntoForwardsTagsOntoTheUnderlyingPassRecord)
         [](const RenderPassFrameContext&, std::vector<RenderPassDesc>& outPasses) {
             RenderPassDesc desc;
             desc.debugName = "TaggedPass";
-            desc.tags = 0x4u;
+            desc.owningFeatureName = "TaggedFeature";
             desc.setup = NoOpSetup;
             desc.execute = NoOpExecute;
             outPasses.push_back(desc);
@@ -541,7 +532,7 @@ TEST(RenderPipelineTest, DeclareIntoForwardsTagsOntoTheUnderlyingPassRecord)
 
     PassDebugMetadata metadata;
     ASSERT_TRUE(sink.QueryPassDebugMetadata(0, metadata));
-    EXPECT_EQ(metadata.tags, 0x4u);
+    EXPECT_EQ(metadata.owningFeatureName, "TaggedFeature");
 }
 
 TEST(RenderPipelineTest, UnregisterRemovesAMatchingProviderByDebugNameContent)

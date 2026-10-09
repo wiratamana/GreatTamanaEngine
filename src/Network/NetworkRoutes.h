@@ -1077,11 +1077,12 @@ struct RenderGraphControlPassStateResponseView {
     std::string name;
     bool enabled = false;
     bool everDeclaredThisSession = false;
+    std::string owningFeatureName; // Mirrors RenderPassToggleState 1:1.
 };
 
 // Builds GET /render_graph/passes' entire response body:
 // {"passes":[{"name":"RenderOpaque","enabled":true,
-//             "ever_declared_this_session":true}, ...]}
+//             "ever_declared_this_session":true,"owning_feature_name":"Shadow"}, ...]}
 std::string BuildRenderGraphControlPassStatesResponseJson(
     const std::vector<RenderGraphControlPassStateResponseView>& passStates);
 

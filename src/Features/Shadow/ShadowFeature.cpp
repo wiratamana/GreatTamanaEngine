@@ -7,9 +7,7 @@
 #include "../../Core/Plugins/RenderFeatureCameraData.h"
 #include "../../Game/Lighting/DirectionalLightResolver.h"
 #include "../../Game/SceneQuery.h"
-#include "../../Renderer/RenderGraph/RenderGraphBuilder.h"
-#include "../../Renderer/RenderGraph/RenderPassGroupRegistry.h"
-#include "ShadowRenderPassTags.h"
+#include "../../Renderer/RenderGraph/RenderFeatureScope.h"
 
 #include <algorithm>
 #include <cassert>
@@ -51,10 +49,6 @@ ShadowFeature::ShadowFeature(Core& core)
     : m_core(core)
     , m_settings()
 {
-    // This feature registers its OWN Render Graph panel grouping heading
-    // for its OWN tag, from its OWN file - idempotent, safe even if more
-    // than one instance is ever constructed in the same process.
-    rg::RegisterPassGroupLabel(kShadowPassTag, "Shadow");
     RegisterPasses();
 }
 
@@ -132,6 +126,12 @@ void ShadowFeature::RegisterPasses()
     const bool depthRegistered = m_core.AddBuiltInPreOpaquePass(
         "Shadow.DepthPass",
         [this](rg::RenderGraphBuilder& builder, rg::RenderPassBlackboard& blackboard, rg::RenderViewId currentView) {
+            // Shares one literal "Shadow" heading across all 3 of this
+            // feature's own stages (depth pass, mask, composite) - each
+            // registered under its own distinct feature name, so the
+            // generic per-registration-name scope alone would otherwise
+            // split them into 3 separate sidebar headings.
+            const rg::RenderFeatureScope scope(builder, "Shadow");
             const std::optional<RenderPassViewData> viewData = m_core.FindRenderPassViewData(currentView);
             if (!viewData.has_value()) {
                 return; // No per-view data yet this frame - safe no-op.
@@ -192,7 +192,7 @@ void ShadowFeature::RegisterPasses()
                     gte::DrawScene(m_core.GetGame().GetRenderSystem(), m_core.GetRegistry(), renderer, request);
                     renderer.EndGraphPassRecording();
                 },
-                rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::PreOpaques, kShadowPassTag.bit);
+                rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::PreOpaques);
 
             builder.KeepTextureOutput(shadowHandle);
 

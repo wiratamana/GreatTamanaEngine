@@ -749,6 +749,7 @@ int EditorHost::Run()
                     outcome.name = state.name;
                     outcome.enabled = state.enabled;
                     outcome.everDeclaredThisSession = state.everDeclaredThisSession;
+                    outcome.owningFeatureName = state.owningFeatureName;
                     rgcResult.passStates.push_back(std::move(outcome));
                 }
                 rgcResult.success = true;

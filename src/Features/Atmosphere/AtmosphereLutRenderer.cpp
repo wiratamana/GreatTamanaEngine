@@ -6,8 +6,7 @@
 #include "../../Renderer/RenderTarget.h"
 #include "../../Renderer/Renderer.h"
 #include "../../Renderer/RenderGraph/RenderGraph.h"
-#include "../../Renderer/RenderGraph/RenderPassGroupRegistry.h"
-#include "AtmosphereRenderPassTags.h"
+#include "../../Renderer/RenderGraph/RenderFeatureScope.h"
 #include "AtmospherePassToggleLogic.h"
 #include "../../Renderer/RenderGraph/RenderPassToggleRegistry.h"
 
@@ -87,14 +86,7 @@ struct AerialPerspectiveVolumeDebugSlicePushConstants {
 
 } // namespace
 
-AtmosphereLutRenderer::AtmosphereLutRenderer()
-{
-    // This feature registers its OWN Render Graph panel grouping heading
-    // for its OWN tag, from its OWN file - Core never learns this string
-    // exists. Idempotent - safe even if more than one instance of this
-    // class is ever constructed in the same process (e.g. Tier-1 tests).
-    rg::RegisterPassGroupLabel(kAtmosphereLutPassTag, "Atmosphere / Sky");
-}
+AtmosphereLutRenderer::AtmosphereLutRenderer() = default;
 
 AtmosphereLutRenderer::~AtmosphereLutRenderer()
 {
@@ -176,10 +168,11 @@ rg::TextureHandle AtmosphereLutRenderer::AddTransmittanceLutPass(
     rg::RenderPassToggleRegistry* toggleRegistry)
 {
     const bool passEnabledThisFrame =
-        toggleRegistry == nullptr || toggleRegistry->NoteDeclaredAndCheckEnabled("AtmosphereTransmittanceLutPass");
+        toggleRegistry == nullptr || toggleRegistry->IsEnabled("AtmosphereTransmittanceLutPass");
     if (!ShouldDeclareAtmospherePassThisFrame(passEnabledThisFrame, /*allUpstreamHandlesValid=*/true)) {
         return rg::TextureHandle{};
     }
+    const rg::RenderFeatureScope scope(builder, "Atmosphere / Sky");
 
     EnsureTransmittanceLutInitialized(renderer, params);
 
@@ -244,7 +237,7 @@ rg::TextureHandle AtmosphereLutRenderer::AddTransmittanceLutPass(
         // "RenderOpaque" in real execution order, it was being picked as
         // the pivot instead, confirmed via live testing. drawKind stays at
         // its own default (DrawMesh) - irrelevant for a Compute-kind pass.
-        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::PreOpaques, kAtmosphereLutPassTag.bit);
+        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::PreOpaques);
 
     return outputHandle;
 }
@@ -298,10 +291,11 @@ rg::TextureHandle AtmosphereLutRenderer::AddMultiScatteringLutPass(rg::RenderGra
     rg::RenderPassToggleRegistry* toggleRegistry)
 {
     const bool passEnabledThisFrame =
-        toggleRegistry == nullptr || toggleRegistry->NoteDeclaredAndCheckEnabled("AtmosphereMultiScatteringLutPass");
+        toggleRegistry == nullptr || toggleRegistry->IsEnabled("AtmosphereMultiScatteringLutPass");
     if (!ShouldDeclareAtmospherePassThisFrame(passEnabledThisFrame, transmittanceLutHandle.IsValid())) {
         return rg::TextureHandle{};
     }
+    const rg::RenderFeatureScope scope(builder, "Atmosphere / Sky");
 
     (void)params; // Already uploaded into m_atmosphereParametersBuffer by AddTransmittanceLutPass() this same frame.
 
@@ -362,7 +356,7 @@ rg::TextureHandle AtmosphereLutRenderer::AddMultiScatteringLutPass(rg::RenderGra
         },
         // render-pass-3 campaign, PHASE4 (root-cause fix) - see
         // AddTransmittanceLutPass()'s own identical comment above.
-        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::PreOpaques, kAtmosphereLutPassTag.bit);
+        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::PreOpaques);
 
     return outputHandle;
 }
@@ -434,11 +428,12 @@ rg::TextureHandle AtmosphereLutRenderer::AddSkyViewLutPass(rg::RenderGraphBuilde
     rg::ViewScope viewScope, rg::RenderPassToggleRegistry* toggleRegistry)
 {
     const bool passEnabledThisFrame =
-        toggleRegistry == nullptr || toggleRegistry->NoteDeclaredAndCheckEnabled("AtmosphereSkyViewLutPass");
+        toggleRegistry == nullptr || toggleRegistry->IsEnabled("AtmosphereSkyViewLutPass");
     if (!ShouldDeclareAtmospherePassThisFrame(
             passEnabledThisFrame, transmittanceLutHandle.IsValid() && multiScatteringLutHandle.IsValid())) {
         return rg::TextureHandle{};
     }
+    const rg::RenderFeatureScope scope(builder, "Atmosphere / Sky");
 
     (void)params; // Already uploaded into m_atmosphereParametersBuffer by AddTransmittanceLutPass() this same frame.
 
@@ -505,7 +500,7 @@ rg::TextureHandle AtmosphereLutRenderer::AddSkyViewLutPass(rg::RenderGraphBuilde
         // render-pass-3 campaign, PHASE4 (root-cause fix) - see
         // AddTransmittanceLutPass()'s own identical comment above (this
         // per-view LUT pass also runs strictly before "RenderOpaque").
-        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::PreOpaques, kAtmosphereLutPassTag.bit);
+        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::PreOpaques);
 
     return outputHandle;
 }
@@ -580,11 +575,12 @@ rg::VolumeTextureHandle AtmosphereLutRenderer::AddAerialPerspectiveVolumePass(rg
     rg::ViewScope viewScope, rg::RenderPassToggleRegistry* toggleRegistry)
 {
     const bool passEnabledThisFrame = toggleRegistry == nullptr
-        || toggleRegistry->NoteDeclaredAndCheckEnabled("AtmosphereAerialPerspectiveVolumePass");
+        || toggleRegistry->IsEnabled("AtmosphereAerialPerspectiveVolumePass");
     if (!ShouldDeclareAtmospherePassThisFrame(
             passEnabledThisFrame, transmittanceLutHandle.IsValid() && multiScatteringLutHandle.IsValid())) {
         return rg::VolumeTextureHandle{};
     }
+    const rg::RenderFeatureScope scope(builder, "Atmosphere / Sky");
 
     (void)params; // Already uploaded into m_atmosphereParametersBuffer by AddTransmittanceLutPass() this same frame.
 
@@ -653,7 +649,7 @@ rg::VolumeTextureHandle AtmosphereLutRenderer::AddAerialPerspectiveVolumePass(rg
         // render-pass-3 campaign, PHASE4 (root-cause fix) - see
         // AddTransmittanceLutPass()'s own identical comment above (this
         // per-view volume pass also runs strictly before "RenderOpaque").
-        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::PreOpaques, kAtmosphereLutPassTag.bit);
+        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::PreOpaques);
 
     return outputHandle;
 }
@@ -717,13 +713,13 @@ rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveCompositePass(rg::R
     rg::RenderPassToggleRegistry* toggleRegistry)
 {
     const bool passEnabledThisFrame = toggleRegistry == nullptr
-        || toggleRegistry->NoteDeclaredAndCheckEnabled("AtmosphereAerialPerspectiveCompositePass");
+        || toggleRegistry->IsEnabled("AtmosphereAerialPerspectiveCompositePass");
     const bool willDeclare =
         ShouldDeclareAtmospherePassThisFrame(passEnabledThisFrame, aerialPerspectiveVolumeHandle.IsValid());
     if (!willDeclare) {
         return rg::TextureHandle{};
     }
-
+    const rg::RenderFeatureScope scope(builder, "Atmosphere / Sky");
     EnsureAerialPerspectiveCompositeInitialized(renderer);
     AerialPerspectiveCompositeViewState& viewState =
         EnsureAerialPerspectiveCompositeViewInitialized(renderer, outputTextureName, extent);
@@ -906,14 +902,13 @@ rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveVolumeDebugSlicePas
     std::uint32_t debugSliceIndex, const char* outputTextureName, rg::ViewScope viewScope,
     rg::RenderPassToggleRegistry* toggleRegistry)
 {
-    // editor-core-separation-21 campaign, PHASE4 (fixing PHASE3's
-    // confirmed-lie finding #6) - checked BEFORE any resource
-    // initialization/lookup, mirroring every other toggle-aware
-    // AddXxxPass() method in this class.
+    // Checked BEFORE any resource initialization/lookup, mirroring every
+    // other toggle-aware AddXxxPass() method in this class.
     if (toggleRegistry != nullptr
-        && !toggleRegistry->NoteDeclaredAndCheckEnabled("AtmosphereAerialPerspectiveVolumeDebugSlicePass")) {
+        && !toggleRegistry->IsEnabled("AtmosphereAerialPerspectiveVolumeDebugSlicePass")) {
         return rg::TextureHandle{};
     }
+    const rg::RenderFeatureScope scope(builder, "Atmosphere / Sky");
 
     EnsureAerialPerspectiveVolumeDebugSliceInitialized(renderer);
 
@@ -987,7 +982,7 @@ rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveVolumeDebugSlicePas
         // debug-visibility slice pass also runs strictly before
         // "RenderOpaque" - see Application.cpp's own "AtmosphereViewLut"
         // provider, which declares it right after AddAtmosphereViewLutPasses()).
-        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::PreOpaques, kAtmosphereLutPassTag.bit);
+        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::PreOpaques);
 
     return outputHandle;
 }

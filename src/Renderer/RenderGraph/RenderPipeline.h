@@ -13,17 +13,15 @@
 //
 // PHASE0_MASTER_STRATEGY.md's own Locked Design Decision 5 is why
 // RenderPipeline::DeclareInto() below TRANSLATES its own opaque
-// RenderPassId/RenderPassTagMask/RenderViewId/RenderPassEvent vocabulary
-// into the EXISTING, byte-for-byte-unchanged ViewScope/RenderPassCategory/
-// RenderPassDrawKind values before calling into
-// RenderGraphBuilder::AddRenderPass() - that old vocabulary is never
-// deleted, and this new layer is the ONLY thing that ever sees the new
-// opaque types. RenderPassEvent, and (as of the render-pass-7 campaign,
-// PHASE1) RenderPassTag/RenderPassTagMask too, are the two exceptions to
-// "every new PHASE1 type lives in this file": both live in
+// RenderPassId/RenderViewId/RenderPassEvent vocabulary into the EXISTING,
+// byte-for-byte-unchanged ViewScope/RenderPassCategory/RenderPassDrawKind
+// values before calling into RenderGraphBuilder::AddRenderPass() - that old
+// vocabulary is never deleted, and this new layer is the ONLY thing that
+// ever sees the new opaque types. RenderPassEvent is the one exception to
+// "every new PHASE1 type lives in this file" - it lives in
 // RenderGraphTypes.h instead, next to PassRecord/RenderGraphPassSnapshot,
-// which each is also threaded onto - see that file's own comments on
-// RenderPassEvent/RenderPassTag for why.
+// which it is also threaded onto - see that file's own comment on
+// RenderPassEvent for why.
 //
 // namespace gte::rg, mirroring every other Render Graph file - this is
 // still "the render graph module," just the declaration-layer half of it
@@ -49,6 +47,7 @@
 // unchanged by this - PHASE2's entire behavior change lives inside
 // RenderGraphCompiler::Compile() itself.
 
+#include "RenderFeatureScope.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphTypes.h"
 #include "RenderPassToggleRegistry.h"
@@ -121,15 +120,6 @@ consteval RenderPassId operator""_passId(const char* s, std::size_t n) noexcept
 void RegisterPassIdDebugName(RenderPassId id, const char* name) noexcept;
 const char* DebugNameForPassId(RenderPassId id) noexcept; // "<unknown>" if never registered.
 #endif
-
-// render-pass-7 campaign (task_manager/render-pass-7), PHASE1 - RenderPassTag/
-// RenderPassTagMask RELOCATED to RenderGraphTypes.h (see that file's own doc
-// comment on RenderPassTag for the full "why") - PassRecord/
-// RenderGraphPassSnapshot need this type, and a lower file cannot depend on
-// a higher one. This file already #includes RenderGraphTypes.h (above), so
-// every use of gte::rg::RenderPassTag/RenderPassTagMask below (e.g.
-// RenderPassDesc::tags) keeps compiling unmodified - only the physical
-// header moved.
 
 // --- RenderViewId (design doc Section 7) -----------------------------------
 //
@@ -206,7 +196,11 @@ struct RenderPassDesc {
     // load-bearing ordering input (Compile() stable-sorts every pass by
     // this field) - see that same doc comment for the full write-up.
     RenderPassEvent order = RenderPassEvent::Opaques;
-    RenderPassTagMask tags = 0;
+    // Set directly by the provider (e.g. desc.owningFeatureName = "Scene
+    // Rendering";) - read by DeclareOnePhase()'s own flush loop below, NOT
+    // RenderFeatureScope: this two-phase collect/flush split has no live
+    // scope stack left by the time it flushes.
+    std::string owningFeatureName;
     RenderViewId view = RenderViewId::Shared();
 
     // render-pass-3 campaign, PHASE1 - deliberate, documented EXTENSION
@@ -643,26 +637,26 @@ private:
             // Application always sets one).
             const ViewScope translatedViewScope =
                 m_legacyViewScopeTranslator ? m_legacyViewScopeTranslator(desc.view) : ViewScope::Shared;
-            // editor-core-separation-8 campaign, PHASE1 - the ONE generic
-            // choke point every DEFERRED-style built-in pass (and any other
-            // provider using this same RenderPassDesc mechanism) funnels
-            // through, every frame - see RenderPassToggleRegistry.h's own
-            // header comment. Falls back to "always enabled" whenever no
-            // registry was ever injected (mirrors m_legacyViewScopeTranslator's
-            // own identical "unset = old behavior" discipline immediately
-            // above).
+            // The ONE generic choke point every DEFERRED-style built-in pass
+            // (and any other provider using this same RenderPassDesc
+            // mechanism) funnels through, every frame - see
+            // RenderPassToggleRegistry.h's own header comment. Falls back to
+            // "always enabled" whenever no registry was ever injected
+            // (mirrors m_legacyViewScopeTranslator's own identical
+            // "unset = old behavior" discipline immediately above). A plain,
+            // read-only IsEnabled() check - AddRenderPass() itself handles
+            // real registration the moment it actually runs, below.
             if (m_passToggleRegistry != nullptr && desc.debugName != nullptr
-                && !m_passToggleRegistry->NoteDeclaredAndCheckEnabled(desc.debugName)) {
+                && !m_passToggleRegistry->IsEnabled(desc.debugName)) {
                 continue; // Disabled - skipped entirely, exactly as if never declared.
             }
-            // render-pass-7 campaign (task_manager/render-pass-7), PHASE1 -
-            // forwards desc.tags as a new trailing argument, fixing the
-            // real, confirmed dead-field bug (PHASE0_MASTER_STRATEGY.md,
-            // Step 2.4): RenderPassDesc::tags used to be silently dropped
-            // here every frame, for every provider - it now finally reaches
-            // a real PassRecord.
+            // Bridges desc.owningFeatureName (captured by the provider,
+            // across the collect/flush split) into a real, live
+            // RenderFeatureScope, opened and closed around EACH individual
+            // desc - this is the only scope-open site for a Pathway-A pass.
+            const RenderFeatureScope scope(builder, desc.owningFeatureName);
             builder.AddRenderPass(desc.debugName, desc.kind, translatedViewScope, desc.legacyCategory, desc.setup,
-                desc.execute, desc.drawKind, desc.order, desc.tags);
+                desc.execute, desc.drawKind, desc.order);
         }
     }
 

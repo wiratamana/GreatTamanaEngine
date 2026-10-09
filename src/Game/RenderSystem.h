@@ -150,9 +150,8 @@ public:
     // own exact shape so that future work is a pure additive change to
     // MeshRenderer + a real filter added HERE, never a new parallel
     // mechanism. `registry`'s parameter name is deliberately kept (even
-    // though unused today) so the signature stays stable for that future
-    // change. See src/Application/RenderPasses.cpp's AddRenderTransparentPass()
-    // for this method's one production call site.
+    // No production call site exists yet - a future transparency feature is
+    // this method's intended first consumer.
     static std::vector<DrawCommand> CollectTransparentRenderables(Registry& registry);
 
     // Pure camera-resolution step, the Camera equivalent of

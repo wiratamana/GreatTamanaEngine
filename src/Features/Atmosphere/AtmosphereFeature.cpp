@@ -5,7 +5,6 @@
 #include "AtmospherePassSequence.h"
 #include "../../Core/Core.h"
 #include "../../Core/Plugins/BuiltinFeatureModuleRegistry.h"
-#include "../../Core/SceneRenderingPassTags.h"
 #include "../../Core/ViewBackgroundReplayKey.h"
 #include "../../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../../Renderer/RenderGraph/RenderPassToggleGuard.h"
@@ -177,7 +176,7 @@ void AtmosphereFeature::RegisterPasses()
             desc.view = frame.currentView;
             desc.legacyCategory = rg::RenderPassCategory::General;
             desc.drawKind = rg::RenderPassDrawKind::DrawQuad;
-            desc.tags = kSceneRenderingPassTag.bit;
+            desc.owningFeatureName = "Scene Rendering";
             desc.setup = [viewTarget](rg::RenderGraphBuilder::PassBuilder& pass) {
                 pass.WriteColorAttachment(viewTarget);
                 pass.WriteDepthStencilAttachment(viewTarget);
@@ -209,9 +208,10 @@ void AtmosphereFeature::RegisterPasses()
 
             // The outer ContributeRenderGraphPasses() filter already applied
             // both gates (host override AND toggle registry) before this
-            // callback ran - this is bookkeeping only, marking "declared
-            // this session" for GET /render_graph/passes, never a gate.
-            m_toggleRegistry->NoteDeclaredAndCheckEnabled("AtmosphereComposite");
+            // callback ran - this just marks "declared this session" for
+            // GET /render_graph/passes, never a gate, grouped under its own
+            // feature's heading.
+            m_toggleRegistry->NoteDeclaredWithOwner("AtmosphereComposite", "Atmosphere / Sky");
 
             const bool isGameView = (currentView == rg::RenderViewId::Named("Game"));
             const rg::RenderPassId viewLutKey = isGameView ? kAtmosphereViewLutGameKey : kAtmosphereViewLutSceneKey;

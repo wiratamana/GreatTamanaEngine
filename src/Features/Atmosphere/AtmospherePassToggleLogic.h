@@ -17,11 +17,11 @@
 //
 // This header deliberately does NOT include RenderPassToggleRegistry.h or
 // RenderGraphTypes.h - every caller resolves its own two booleans FIRST
-// (`toggleRegistry == nullptr || toggleRegistry->NoteDeclaredAndCheckEnabled(name)`
-// for the first; a logical AND of every relevant TextureHandle::IsValid()/
-// VolumeTextureHandle::IsValid() call for the second) and passes them in as
-// plain bool values - this keeps this function usable from a Tier-1 test
-// with no dependency on either type at all.
+// (`toggleRegistry == nullptr || toggleRegistry->IsEnabled(name)` for the
+// first; a logical AND of every relevant TextureHandle::IsValid()/
+// VolumeTextureHandle::IsValid() call for the second) and passes them in
+// as plain bool values - this keeps this function usable from a Tier-1
+// test with no dependency on either type at all.
 //
 // A caller with NO upstream handle to check at all (AddTransmittanceLutPass,
 // the very first pass in the chain) passes `allUpstreamHandlesValid = true`

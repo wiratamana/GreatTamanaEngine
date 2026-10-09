@@ -1,7 +1,6 @@
 #include "RenderGraphMetadata.h"
 
 #include "RenderGraphSnapshotFormatting.h"
-#include "RenderPassGroupRegistry.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -49,10 +48,7 @@ RenderGraphPassMetadata BuildPassMetadata(const RenderGraphPassSnapshot& pass)
     metadata.renderPassEvent = ToString(pass.renderPassEvent);
     metadata.renderPassEventOrder = static_cast<std::uint32_t>(pass.renderPassEvent);
 
-    const std::optional<std::size_t> groupIndex = FindPassGroupIndexForTags(pass.tags);
-    metadata.tagGroupLabel = groupIndex.has_value()
-        ? std::optional<std::string>(PassGroupLabelUiHeadingAt(*groupIndex))
-        : std::nullopt;
+    metadata.owningFeatureName = pass.owningFeatureName;
 
     metadata.reads = BuildResourceRefs(pass.readNames, pass.readKinds, pass.readAccess, nullptr);
     metadata.writes = BuildResourceRefs(pass.writeNames, pass.writeKinds, pass.writeAccess, &pass.writeBarrierLabels);
@@ -318,8 +314,7 @@ void to_json(nlohmann::json& j, const RenderGraphPassMetadata& pass)
         { "view_scope", pass.viewScope },
         { "render_pass_event", pass.renderPassEvent },
         { "render_pass_event_order", pass.renderPassEventOrder },
-        { "tag_group_label",
-            pass.tagGroupLabel.has_value() ? nlohmann::json(*pass.tagGroupLabel) : nlohmann::json(nullptr) },
+        { "owning_feature_name", pass.owningFeatureName },
         { "reads", pass.reads },
         { "writes", pass.writes },
         { "draw_call_count", pass.drawCallCount },

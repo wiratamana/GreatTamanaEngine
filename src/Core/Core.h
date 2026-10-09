@@ -765,9 +765,8 @@ private:
     // immediately before calling m_offscreenRenderPipeline.DeclareInto().
     std::vector<RenderPassViewData> m_currentViewDataThisFrame;
 
-    // render-pass-3 campaign, PHASE2 - Game-View-only (see RenderPasses.h's
-    // own AddRenderOpaquePass() doc comment on why a real, non-null capture
-    // pointer is NEVER handed to Scene View/Present).
+    // Game-View-only - a real, non-null capture pointer is never handed to
+    // Scene View/Present.
     IFrameDebuggerCaptureRecorder* m_currentFrameDebuggerCaptureForOffscreenPipeline = nullptr;
 
     // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),

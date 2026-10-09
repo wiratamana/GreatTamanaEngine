@@ -627,36 +627,6 @@ enum class RenderPassDrawKind : std::uint8_t {
 
 const char* ToString(RenderPassDrawKind drawKind) noexcept;
 
-// --- RenderPassTag / RenderPassTagMask (design doc Section 7) --------------
-//
-// Fixed 64-bit bitmask (design doc Section 0, point 4) - a tag test stays a
-// free bitwise AND. No feature-specific tag VALUES live here - per the
-// design doc's own Section 7, those belong in each feature's own header
-// (e.g. a future FeatureTags::SomeValue), never in this shared core file.
-//
-// render-pass-7 campaign (task_manager/render-pass-7), PHASE1
-// (PHASE1_TAG_VOCABULARY_AND_THREADING.md, "Core Campaign 1 - De-hardcode
-// RenderPassCategory") - RELOCATED here from RenderPipeline.h, where the
-// render-pass-3 campaign originally defined this type. Reason: PassRecord/
-// RenderGraphPassSnapshot (both below/in RenderGraphSnapshot.h, genuinely
-// lower, more-Core files that RenderPipeline.h itself #includes) need a
-// `tags` field of this exact type, and a lower file cannot depend on a
-// higher one - this is the IDENTICAL reasoning RenderPassEvent's own doc
-// comment above already documents for itself. RenderPassEvent's own doc
-// comment used to describe itself as "the one exception to 'every new
-// PHASE1 type lives in RenderPipeline.h'" - RenderPassTag/RenderPassTagMask
-// is now a SECOND such exception, for the identical reason (see
-// RenderPipeline.h's own updated header comment, which now names both).
-// Nothing in RenderGraph.cpp/RenderGraphCompiler.cpp/
-// RenderGraphBarrierPlanner.cpp reads a RenderPassTagMask value - purely
-// descriptive metadata, mirroring category/drawKind/viewScope's own
-// identical rule (see PassRecord::tags' own doc comment below).
-
-struct RenderPassTag {
-    std::uint64_t bit = 0;
-};
-using RenderPassTagMask = std::uint64_t;
-
 // render-pass-3 campaign (task_manager/render-pass-3), PHASE1
 // (PHASE1_CORE_VOCABULARY_AND_BLACKBOARD.md) - a descriptive SORT HINT for
 // the new RenderPipeline declaration layer (src/Renderer/RenderGraph/
@@ -1084,25 +1054,13 @@ struct PassRecord {
     std::optional<std::array<float, 4>> colorClearValue;
     std::optional<float> depthClearValue;
 
-    // editor-core-separation-25 campaign, PHASE3
-    // (PHASE3_PASSRECORD_FIELD_MIGRATION_AND_SNAPSHOT_REWIRING.md) - category/
-    // drawKind/tags USED TO live here (RenderPassCategory category;
-    // RenderPassDrawKind drawKind; RenderPassTagMask tags;) - each,
-    // individually, PURELY DESCRIPTIVE metadata read by NOTHING in
-    // RenderGraph.cpp/RenderGraphCompiler.cpp/RenderGraphBarrierPlanner.cpp,
-    // with their only real reader being the Editor's Frame Debugger. All
-    // three have been REMOVED from this hot, always-live struct and moved to
-    // a brand-new, Core-owned, opaque, zero-cost-when-absent hook instead -
-    // see RenderGraphDebugMetadataSink.h's own PassDebugMetadata/
-    // IPassDebugMetadataSink/IPassDebugMetadataProvider. The one production
-    // WRITE call site (RenderGraphBuilder::AddRenderPass()) now forwards
-    // these three values into an installed IPassDebugMetadataSink* instead
-    // of stamping them here; the one Core READ call site
-    // (RenderGraphSnapshot.cpp's BuildPassSnapshot()) now resolves them via
-    // a caller-supplied metadataLookup callable instead of reading them off
-    // this struct. PassRecord::kind/::viewScope (below/above) are NOT part
-    // of this migration - they remain real fields on this struct, forever
-    // (see the source document's own Section 2 for the full reasoning).
+    // category/drawKind/owningFeatureName are deliberately NOT stored on
+    // this hot, always-live struct - each is PURELY DESCRIPTIVE metadata
+    // read only by the Editor's Frame Debugger, so each lives on a
+    // separate, Core-owned, zero-cost-when-absent hook instead - see
+    // RenderGraphDebugMetadataSink.h's own PassDebugMetadata/
+    // IPassDebugMetadataSink/IPassDebugMetadataProvider. PassRecord::kind/
+    // ::viewScope (above) are real fields on this struct regardless.
 
     // render-pass-3 campaign, PHASE1 - a SORT HINT (see RenderPassEvent's
     // own doc comment above - as of render-pass-4 PHASE2, a REAL,
@@ -1143,11 +1101,6 @@ struct PassRecord {
     // Size is bounded by kMaxColorAttachments (asserted in
     // WriteColorAttachment(), never here).
     std::vector<ColorAttachmentDesc> colorAttachments;
-
-    // editor-core-separation-25 campaign, PHASE3 - `tags` USED TO live here
-    // too (RenderPassTagMask tags = 0;) - see this struct's own doc comment
-    // above (where category/drawKind used to sit) for the full migration
-    // note; it applies to `tags` identically.
 
     // editor-core-separation-26 campaign, PHASE3
     // (PHASE3_BLITSPEC_PASSKIND_AND_PURE_HELPERS.md) - only meaningful when

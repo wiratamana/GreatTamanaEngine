@@ -16,17 +16,11 @@
 // consecutive `nextEventIndex` values instead of one.
 
 #include "Editor/FrameDebuggerData.h"
-#include "Renderer/GpuSkinning/GpuSkinningRenderPassTags.h"
-#include "Renderer/RenderGraph/RenderPassGroupRegistry.h"
 
 #include <gtest/gtest.h>
 
 namespace gte {
 namespace {
-
-// A domain-agnostic tag bit used purely as fixture data for tests below -
-// unrelated to any specific render feature.
-constexpr rg::RenderPassTag kTestLutPassTag{ 1ull << 0 };
 
 rg::RenderGraphPassSnapshot MakePass(const std::string& name)
 {
@@ -208,18 +202,15 @@ TEST(FrameDebuggerSnapshotBuilderTest, RenderOpaqueWithNoComputePassesProducesEx
 // "Compute Dispatch" child event, consuming one extra nextEventIndex value.
 TEST(FrameDebuggerSnapshotBuilderTest, MixedComputeLutAndPreGameViewCategoriesProduceBothGroupsInFixedOrder)
 {
-    rg::ResetPassGroupRegistryForTesting();
-    rg::RegisterPassGroupLabel(kTestLutPassTag, "Compute LUT");
     rg::RenderGraphSnapshot graphSnapshot;
 
     rg::RenderGraphPassSnapshot bufferPass = MakeComputePass("SkinPass_A");
-    bufferPass.tags = kGpuSkinningDispatchPassTag.bit;
     bufferPass.writeNames.push_back("SkinnedVertexBuffer");
     bufferPass.writeKinds.push_back(rg::ResourceKind::Buffer);
     graphSnapshot.passesInExecutionOrder.push_back(bufferPass);
 
     rg::RenderGraphPassSnapshot lutPass = MakeComputePass("SkyLutPass");
-    lutPass.tags = kTestLutPassTag.bit;
+    lutPass.owningFeatureName = "Compute LUT";
     lutPass.writeNames.push_back("TransmittanceLut");
     lutPass.writeKinds.push_back(rg::ResourceKind::Texture);
     graphSnapshot.passesInExecutionOrder.push_back(lutPass);
@@ -274,11 +265,9 @@ TEST(FrameDebuggerSnapshotBuilderTest, MixedComputeLutAndPreGameViewCategoriesPr
 // test proving the wrapped-child fact for this exact fixture shape.
 TEST(FrameDebuggerSnapshotBuilderTest, OnlyAtmosphereLutCategoryPreGameViewPassProducesOnlyComputeLutGroup)
 {
-    rg::ResetPassGroupRegistryForTesting();
-    rg::RegisterPassGroupLabel(kTestLutPassTag, "Compute LUT");
     rg::RenderGraphSnapshot graphSnapshot;
     rg::RenderGraphPassSnapshot lutPass = MakeComputePass("AtmosphereTransmittanceLutPass");
-    lutPass.tags = kTestLutPassTag.bit;
+    lutPass.owningFeatureName = "Compute LUT";
     graphSnapshot.passesInExecutionOrder.push_back(lutPass);
     graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
@@ -1574,18 +1563,13 @@ TEST(FrameDebuggerSnapshotBuilderTest, GraphicsChildEventLabelMatchesRenderPassD
     }
 }
 
-// Step 3.5 test 3 - extends
-// OnlyAtmosphereLutCategoryPreGameViewPassProducesOnlyComputeLutGroup's own
-// fixture with the ONE assertion that test deliberately left as merely
-// OPTIONAL: a "Compute LUT" sub-pass also owns a real "Compute Dispatch"
-// child event, exactly like every other wrapped compute pass.
+// A "Compute LUT" sub-pass also owns a real "Compute Dispatch" child
+// event, exactly like every other wrapped compute pass.
 TEST(FrameDebuggerSnapshotBuilderTest, ComputeLutSubPassAlsoOwnsAComputeDispatchChild)
 {
-    rg::ResetPassGroupRegistryForTesting();
-    rg::RegisterPassGroupLabel(kTestLutPassTag, "Compute LUT");
     rg::RenderGraphSnapshot graphSnapshot;
     rg::RenderGraphPassSnapshot lutPass = MakeComputePass("AtmosphereTransmittanceLutPass");
-    lutPass.tags = kTestLutPassTag.bit;
+    lutPass.owningFeatureName = "Compute LUT";
     graphSnapshot.passesInExecutionOrder.push_back(lutPass);
     graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
@@ -1602,21 +1586,13 @@ TEST(FrameDebuggerSnapshotBuilderTest, ComputeLutSubPassAlsoOwnsAComputeDispatch
     EXPECT_EQ(lutGroup.children[0].children[0].name, "Compute Dispatch");
 }
 
-// Registers a synthetic, TEST-LOCAL-ONLY tag/heading pair with no
-// relationship to any real feature (a deliberately unused bit, well clear
-// of kTestLutPassTag/kGpuSkinningDispatchPassTag), and confirms
-// BuildRealFrameDebuggerSnapshot() - whose own compiled code never once
-// mentions this string, this tag, or this test - still correctly buckets it
-// purely from registry DATA.
+// Confirms a pass's owningFeatureName string alone drives its sidebar
+// group - BuildRealFrameDebuggerSnapshot() never hardcodes any feature name.
 TEST(FrameDebuggerSnapshotBuilderTest, ASyntheticThirdPartyTagAndHeadingGetsGroupedWithZeroProductionCodeAwareness)
 {
-    rg::ResetPassGroupRegistryForTesting();
-    constexpr rg::RenderPassTag kFakeFuturePluginTag{ 1ull << 40 };
-    rg::RegisterPassGroupLabel(kFakeFuturePluginTag, "Totally Fake Future Plugin Group");
-
     rg::RenderGraphSnapshot graphSnapshot;
     rg::RenderGraphPassSnapshot fakePluginPass = MakeComputePass("SyntheticFuturePluginPass");
-    fakePluginPass.tags = kFakeFuturePluginTag.bit;
+    fakePluginPass.owningFeatureName = "Totally Fake Future Plugin Group";
     graphSnapshot.passesInExecutionOrder.push_back(fakePluginPass);
     graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
@@ -1625,9 +1601,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, ASyntheticThirdPartyTagAndHeadingGetsGrou
 
     ASSERT_EQ(snapshot.rootNodes.size(), 1u);
     const FrameDebuggerEventNode& root = snapshot.rootNodes[0];
-    // "Totally Fake Future Plugin Group" + "RenderOpaque" leaf, nothing else
-    // - no "Compute LUT" group at all, since ResetPassGroupRegistryForTesting()
-    // wiped out even that registration for this test.
+    // "Totally Fake Future Plugin Group" + "RenderOpaque" leaf, nothing else.
     ASSERT_EQ(root.children.size(), 2u);
     const FrameDebuggerEventNode& fakeGroup = root.children[0];
     EXPECT_FALSE(fakeGroup.isDrawCall);
