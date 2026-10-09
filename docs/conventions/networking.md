@@ -585,10 +585,10 @@ registering a new named texture:
   string - `kind`, `category`, `draw_kind`, `view_scope`,
   `render_pass_event` - every GPU timing value already resolved to BOTH a
   display string (`gpu_timing_text`) AND a raw nullable number
-  (`gpu_timing_milliseconds`), every pass's `RenderPassTagMask` already
-  resolved to at most one human `tag_group_label` via
-  `RenderPassGroupRegistry` - `null` when untagged or tagged but nobody
-  registered a heading, and every resource carrying both its raw
+  (`gpu_timing_milliseconds`), every pass carrying a plain `owning_feature_name`
+  string field - always populated, never a lookup/registry resolution, set
+  automatically the moment that pass is declared under an open
+  `rg::RenderFeatureScope` - and every resource carrying both its raw
   `first_use_pass_index`/`last_use_pass_index` AND the already-resolved
   `first_use_pass_name`/`last_use_pass_name`, `null` when never used),
   `gpu_driven_batches` (the same "instances culled this frame" readout the

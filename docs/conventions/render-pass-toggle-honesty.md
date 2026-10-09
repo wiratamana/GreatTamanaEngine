@@ -8,68 +8,51 @@ must not appear as an executed leaf anywhere the Frame Debugger or the "Render
 Graph" panel can show it. If a pass runs, the Frame Debugger MUST show it.
 There is no acceptable middle ground.
 
-## How a pass must consult `RenderPassToggleRegistry`
+## How a pass's ownership/registration actually works
 
 `src/Renderer/RenderGraph/RenderPassToggleRegistry.h` (`rg::RenderPassToggleRegistry`)
-is the ONE registry every togglable pass name is recorded in. There are two
-structurally different ways a pass reaches the render graph, and only one of
-them is automatically honest:
+is the ONE registry every togglable pass name is recorded in. Registration is
+now AUTOMATIC, not something a pass author manually calls:
 
-- **The generic `RenderPipeline::DeclareOnePhase()` flush loop** (the majority
-  of passes — `Core.cpp`'s `RegisterOffscreenRenderPipelineProviders()`/
-  `RegisterPresentRenderPipelineProvider()` providers that `out.push_back(desc)`
-  into their own `std::vector<rg::RenderPassDesc>&` parameter) is automatically
-  gated — `DeclareOnePhase()` itself calls `NoteDeclaredAndCheckEnabled()` for
-  every pushed `desc.name`, generically, with zero special-case code needed by
-  the provider author.
-- **Any pass declared via a DIRECT `builder.AddRenderPass()` (or
-  `frame.builder.AddRenderPass()`) call inside a provider's own lambda, bypassing
-  that generic flush loop entirely, gets NO automatic gating whatsoever.** This
-  is exactly the shape that caused every "lie" the `editor-core-separation-21`
-  campaign found and fixed (see `AGENTS.md`'s "Render Pass System" section for
-  the full campaign writeup): the "Render Graph" panel's `BuildPassRow()` draws
-  an identical-looking, apparently-functional "Enabled" checkbox for EVERY pass
-  name that appears in a captured `RenderGraphSnapshot`, with zero knowledge of
-  which declaration path produced it — toggling a direct-`AddRenderPass()`
-  pass's checkbox looks exactly as functional as toggling a generic one, but
-  does absolutely nothing unless that specific call site was hand-written to
-  separately consult the registry.
-
-**If you are writing a new pass that bypasses the generic flush loop (a direct
-`AddRenderPass()` call inside your own provider/helper function), you MUST add
-this guard yourself, as the very first statement, before any resource
-creation/lookup**:
+- **`rg::RenderFeatureScope`** (`src/Renderer/RenderGraph/RenderFeatureScope.h`)
+  is an RAII marker: open one around a block of declaration code (e.g.
+  `const rg::RenderFeatureScope scope(builder, "Atmosphere / Sky");`) and every
+  pass declared through `RenderGraphBuilder::AddRenderPass()`/`AddBlitPass()`
+  while it is alive is automatically tagged with that feature name and
+  registered via `RenderPassToggleRegistry::NoteDeclaredWithOwner()` - no
+  separate registry call needed at the declaration site.
+- **A pass that wants to SKIP its own GPU work when disabled** (not merely
+  "don't bother registering it twice") reads the registry back, read-only,
+  via `rg::ShouldDeclareBuiltInPassThisFrame(registry, name)`
+  (`RenderPassToggleGuard.h`) at the very top of its own declaration function,
+  before any resource creation/lookup or side effect:
 
 ```cpp
-if (toggleRegistry != nullptr
-    && !toggleRegistry->NoteDeclaredAndCheckEnabled("YourPassName")) {
-    return /* an empty/default-constructed result — never partially declare */;
+if (!rg::ShouldDeclareBuiltInPassThisFrame(toggleRegistry, "YourPassName")) {
+    return; // an empty/default-constructed result - never partially declare
 }
+const rg::RenderFeatureScope scope(builder, "Your Feature Name");
 ```
 
-Thread a `rg::RenderPassToggleRegistry* toggleRegistry = nullptr` parameter
-(trailing, defaulted, so every existing call site keeps compiling) all the way
-from the real registry instance (`Core::m_renderPassToggleRegistry`) down to
-your declaration function — mirror any of `AtmosphereLutRenderer`'s five
-methods, `PluginRenderPassBuilderAdapter::AddFullscreenClearPass()`,
-`GBufferValidation::AddPass()`, `AddGpuSkinningPasses()`, or
-`FrameDebuggerCaptureContext::AddReplayPasses()` for the exact, already-proven
-pattern.
+See `AtmosphereLutRenderer.cpp`'s 6 `AddXxxPass()` methods (e.g.
+`AddTransmittanceLutPass()`) for the exact, already-proven pattern: an early
+`IsEnabled()`-backed guard, then an open `RenderFeatureScope`, then a plain
+`builder.AddRenderPass()` call - ownership and toggle registration both happen
+automatically inside that one call, with zero registry call of its own.
 
 **Many dynamically-named passes behind one umbrella switch**: if your pass
 declares an unbounded/session-growing set of dynamically-named leaves (e.g. one
 per GPU-skinned dispatch, one per Frame Debugger replay step), do NOT register
-a separate toggle-registry entry per dynamic name — that would clutter the
+a separate toggle-registry entry per dynamic name - that would clutter the
 "Render Graph" panel's checkbox list with an unbounded, ever-growing list for
 zero practical benefit. Instead, consult ONE, whole-mechanism registry entry
 (e.g. `"GpuSkinning"`, `"FrameDebuggerReplay"`) once, at the very top of your
 declaration function, gating every dynamically-named leaf it would otherwise
-produce that frame. This exact shape is what `AddGpuSkinningPasses()`'s
-direct-render-to-swapchain fallback and `AddReplayPasses()` both do.
+produce that frame.
 
 **A pass with its own separate, real, bespoke feature toggle (e.g.
 `ctx.showBlurredSceneOutput`) still needs its own registry consult on top of
-that bespoke toggle** — the two are independent, additional layers of
+that bespoke toggle** - the two are independent, additional layers of
 granularity, not substitutes for each other. `ComputeBlurValidation`'s/
 `GBufferValidation`'s own real toggle decides whether the FEATURE runs at all;
 the registry consult is what makes that SAME pass's row in the "Render Graph"

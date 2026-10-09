@@ -26,7 +26,8 @@ enforce, both closed by the `editor-core-separation-22` campaign
 ## The rule: gate every side effect, not just the `RenderPassDesc`
 
 `render-pass-toggle-honesty.md` already establishes the guard pattern
-(`toggleRegistry->NoteDeclaredAndCheckEnabled(name)`) for whether a pass's own
+(`rg::ShouldDeclareBuiltInPassThisFrame(registry, name)`, read-only, run
+BEFORE any side effect) for whether a pass's own
 `RenderPassDesc` reaches `builder.AddRenderPass()`. This convention closes a
 DIFFERENT, subtler gap: a provider can be perfectly honest about whether ITS
 OWN pass declares, while still leaking a side effect that happens BEFORE that
