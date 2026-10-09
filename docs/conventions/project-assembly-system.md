@@ -399,15 +399,16 @@ core.RegisterProjectRenderFeature(
     "ProjectAssemblyProbe.ScreenTint", gte::RenderFeatureStage::PostComposite,
     gte::RenderFeatureBlendMode::AlphaOver,
     /*priority=*/100,
-    [](gte::rg::RenderGraphBuilder& builder, gte::rg::TextureHandle privateTarget, VkExtent2D /*extent*/) {
+    [](gte::rg::RenderGraphBuilder& builder, gte::rg::RenderPassBlackboard& /*blackboard*/,
+        gte::rg::RenderViewId /*currentView*/, gte::rg::TextureHandle privateTarget, VkExtent2D /*extent*/,
+        const gte::ScenePassReadHandles& /*currentViewHandles*/, const gte::RenderFeatureCameraData& /*cameraData*/) {
         builder.AddRenderPass(
             "ProjectAssemblyProbe.ScreenTint.Clear", gte::rg::PassKind::Graphics,
             [privateTarget](gte::rg::RenderGraphBuilder::PassBuilder& pass) {
                 pass.WriteColorAttachment(privateTarget, std::array<float, 4>{ 1.0f, 0.0f, 0.0f, 0.15f });
             },
             [](gte::rg::PassContext&) {},
-            gte::rg::RenderPassDrawKind::DrawQuad, gte::rg::RenderPassEvent::AfterEverything,
-            gte::kProjectAuthoredPassTag.bit);
+            gte::rg::RenderPassDrawKind::DrawQuad, gte::rg::RenderPassEvent::AfterEverything);
     });
 ```
 
