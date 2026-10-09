@@ -64,8 +64,16 @@ inline constexpr std::uint32_t kInvalidSceneServiceSlotIndex = kSceneServiceSlot
 // Startup-only: refused once SceneServicesDescriptorSet::Rewrite() has
 // completed anywhere in the process for the first time. Never call from
 // code any frame-declare loop/render pass/provider invokes more than once.
+//
+// `isDepthResource` MUST be true for a slot whose real published texture is
+// ever a depth-format image (e.g. a shadow map) - the generic per-slot
+// render-graph read declaration (Core.cpp's RenderOpaque) has no other way
+// to know which physical half (color vs depth) of an imported handle to
+// synchronize/transition. Getting this wrong leaves the real depth image in
+// the wrong Vulkan image layout when a shader samples it - undefined
+// behavior that can crash a GPU driver outright.
 [[nodiscard]] std::uint32_t RegisterSceneServiceSlot(const char* debugName, SceneServiceResourceKind kind,
-    std::optional<std::uint32_t> preferredIndex = std::nullopt);
+    std::optional<std::uint32_t> preferredIndex = std::nullopt, bool isDepthResource = false);
 
 // Registration-order enumeration (Editor/debug-facing only - Core never
 // interprets these strings). i must be < RegisteredSceneServiceSlotCount().
@@ -76,6 +84,11 @@ std::uint32_t RegisteredSceneServiceSlotIndexAt(std::size_t i) noexcept;
 // was never registered (or is out of range).
 const char* SceneServiceSlotDebugName(std::uint32_t slotIndex) noexcept;
 SceneServiceResourceKind SceneServiceSlotResourceKind(std::uint32_t slotIndex) noexcept;
+
+// False ("color aspect") for a slot index that was never registered (or is
+// out of range) - see RegisterSceneServiceSlot()'s own `isDepthResource` doc
+// comment above for why a generic reader needs this.
+bool SceneServiceSlotIsDepthResource(std::uint32_t slotIndex) noexcept;
 
 // Testing-only: clears every registered slot, the registration-order list,
 // the failure-memory table, and the Runtime Sealing latch.
@@ -152,11 +165,6 @@ public:
     const VolumeTexture& DummyImage3DTexture() const noexcept { return m_dummyImage3DTexture; }
 
 private:
-    // Shared by both Rewrite()'s and UpdateGlobalUniformBlock()'s own
-    // lazy-alloc branch - writes the dummy buffer into binding 8 of `set`.
-    // Only ever called immediately after `set` is freshly allocated.
-    void WriteDummyGlobalUniformBlockBinding(VkDescriptorSet set);
-
     Renderer* m_renderer = nullptr;
     VkDevice m_device = VK_NULL_HANDLE; // cached at construction, for Destroy().
     VkDescriptorSetLayout m_layout = VK_NULL_HANDLE; // owned - hand-built, NOT reflected; must be destroyed by this class.
@@ -183,9 +191,11 @@ private:
     //
     // ROBUSTNESS: binding 8 has NO per-call fallback the way bindings 0-7
     // do inside Rewrite()'s own loop (that loop only ever touches indices
-    // 0..kSceneServiceSlotCount-1). Without an owned dummy UBO, a brand-new
-    // per-view set would leave binding 8 completely unwritten the instant
-    // it is allocated - sampling an unwritten binding is undefined behavior.
+    // 0..kSceneServiceSlotCount-1). A brand-new per-view set's binding 8 is
+    // written with this dummy buffer as PART OF Rewrite()'s own single
+    // batched vkUpdateDescriptorSets call (never a separate call - two
+    // back-to-back descriptor-set updates against a freshly allocated set
+    // is a known crash trigger on at least one targeted Vulkan driver).
     // Built ONCE in the constructor, zero-filled.
     Buffer m_dummyGlobalUniformBuffer;
 

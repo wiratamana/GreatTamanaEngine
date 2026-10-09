@@ -1038,7 +1038,14 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 DeclareGpuSkinningReads(pass, gpuSkinningBuffers);
                 for (std::uint32_t slotIndex = 0; slotIndex < kSceneServiceSlotCount; ++slotIndex) {
                     if (publishedServiceSlots[slotIndex].has_value()) {
-                        pass.ReadTexture(*publishedServiceSlots[slotIndex], rg::ResourceAccess::ShaderRead);
+                        // isDepthResource MUST match the slot's own registration
+                        // (SceneServiceSlotIsDepthResource) - e.g. the ShadowMap
+                        // slot's real texture is a depth image; getting this
+                        // wrong makes the barrier planner synchronize the WRONG
+                        // physical half of the resource, leaving the real image
+                        // in the wrong Vulkan layout when a shader samples it.
+                        pass.ReadTexture(*publishedServiceSlots[slotIndex], rg::ResourceAccess::ShaderRead,
+                            SceneServiceSlotIsDepthResource(slotIndex));
                     }
                 }
             };
@@ -1047,9 +1054,25 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 std::array<SceneServicesDescriptorSet::ResolvedSlot, kSceneServiceSlotCount> resolvedServiceSlots{};
                 for (std::uint32_t slotIndex = 0; slotIndex < kSceneServiceSlotCount; ++slotIndex) {
                     if (publishedServiceSlots[slotIndex].has_value()) {
-                        const rg::PassContext::ResolvedTexture resolved = ctx.resolveReadTexture(*publishedServiceSlots[slotIndex]);
-                        resolvedServiceSlots[slotIndex].view = resolved.view;
-                        resolvedServiceSlots[slotIndex].sampler = resolved.sampler;
+                        // Depth-kind slots (e.g. ShadowMap) were declared via
+                        // pass.ReadTexture(..., isDepthResource=true) above and
+                        // physically live in a handle's DEPTH sub-resource -
+                        // resolveReadTexture() only ever returns the COLOR half,
+                        // so a depth slot MUST resolve through
+                        // resolveDepthTexture() instead, or it silently binds a
+                        // null/wrong view against a resource left in the wrong
+                        // Vulkan image layout.
+                        if (SceneServiceSlotIsDepthResource(slotIndex)) {
+                            const rg::PassContext::ResolvedDepthTexture resolved =
+                                ctx.resolveDepthTexture(*publishedServiceSlots[slotIndex]);
+                            resolvedServiceSlots[slotIndex].view = resolved.view;
+                            resolvedServiceSlots[slotIndex].sampler = resolved.sampler;
+                        } else {
+                            const rg::PassContext::ResolvedTexture resolved =
+                                ctx.resolveReadTexture(*publishedServiceSlots[slotIndex]);
+                            resolvedServiceSlots[slotIndex].view = resolved.view;
+                            resolvedServiceSlots[slotIndex].sampler = resolved.sampler;
+                        }
                     }
                     // else: leave both VK_NULL_HANDLE - SceneServicesDescriptorSet::Rewrite()
                     // substitutes its own dummy for any slot left this way (and also for a

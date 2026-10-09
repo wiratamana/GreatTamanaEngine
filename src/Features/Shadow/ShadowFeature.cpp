@@ -52,8 +52,10 @@ ShadowFeature::ShadowFeature(Core& core)
 {
     // Scene Services slot 0 - durable shader-binding contract, every lit
     // material shader hardcodes `layout(set = 1, binding = 0) uniform
-    // sampler2D sceneOcclusionMap`.
-    m_shadowMapSlot = RegisterSceneServiceSlot("ShadowMap", SceneServiceResourceKind::Image2D, /*preferredIndex=*/0);
+    // sampler2D sceneOcclusionMap`. isDepthResource=true - this slot's real
+    // published texture is always a depth-format shadow map, never color.
+    m_shadowMapSlot = RegisterSceneServiceSlot(
+        "ShadowMap", SceneServiceResourceKind::Image2D, /*preferredIndex=*/0, /*isDepthResource=*/true);
     RegisterPasses();
 }
 

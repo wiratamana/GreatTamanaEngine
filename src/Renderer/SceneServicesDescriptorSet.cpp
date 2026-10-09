@@ -14,6 +14,7 @@ struct SceneServiceSlotEntry {
     bool registered = false;
     std::string debugName;
     gte::SceneServiceResourceKind kind = gte::SceneServiceResourceKind::Image2D;
+    bool isDepthResource = false;
     bool hasLoggedKindMismatch = false;
     bool hasLoggedPreferredIndexMismatch = false;
 };
@@ -94,7 +95,8 @@ rg::RenderPassId SceneServiceBlackboardKey(std::uint32_t slotIndex, rg::RenderVi
 // implements.
 
 std::uint32_t RegisterSceneServiceSlot(
-    const char* debugName, SceneServiceResourceKind kind, std::optional<std::uint32_t> preferredIndex)
+    const char* debugName, SceneServiceResourceKind kind, std::optional<std::uint32_t> preferredIndex,
+    bool isDepthResource)
 {
     if (debugName == nullptr || debugName[0] == '\0') {
         GTE_LOG_ERROR(
@@ -184,6 +186,7 @@ std::uint32_t RegisterSceneServiceSlot(
     claimed.registered = true;
     claimed.debugName = debugName;
     claimed.kind = kind;
+    claimed.isDepthResource = isDepthResource;
     SceneServiceRegistrationOrder().push_back(claimedIndex);
     return claimedIndex;
 }
@@ -212,6 +215,14 @@ SceneServiceResourceKind SceneServiceSlotResourceKind(std::uint32_t slotIndex) n
         return SceneServiceResourceKind::Image2D;
     }
     return SceneServiceSlotTable()[slotIndex].kind;
+}
+
+bool SceneServiceSlotIsDepthResource(std::uint32_t slotIndex) noexcept
+{
+    if (slotIndex >= kSceneServiceSlotCount || !SceneServiceSlotTable()[slotIndex].registered) {
+        return false;
+    }
+    return SceneServiceSlotTable()[slotIndex].isDepthResource;
 }
 
 void ResetSceneServiceRegistryForTesting() noexcept
@@ -298,14 +309,14 @@ VkDescriptorSet SceneServicesDescriptorSet::Rewrite(
             break;
         }
     }
-    if (set == VK_NULL_HANDLE) {
+    const bool freshlyAllocated = (set == VK_NULL_HANDLE);
+    if (freshlyAllocated) {
         set = m_renderer->AllocateComputeDescriptorSet(m_layout);
         m_perViewSets.push_back(PerViewSet{ view, set });
-        WriteDummyGlobalUniformBlockBinding(set); // binding 8 has no per-slot fallback below - cover it here.
     }
 
     std::array<VkDescriptorImageInfo, kSceneServiceSlotCount> imageInfos{};
-    std::array<VkWriteDescriptorSet, kSceneServiceSlotCount> writes{};
+    std::array<VkWriteDescriptorSet, kSceneServiceSlotCount + 1> writes{};
 
     for (std::uint32_t i = 0; i < kSceneServiceSlotCount; ++i) {
         VkImageView view_ = resolved[i].view;
@@ -340,7 +351,26 @@ VkDescriptorSet SceneServicesDescriptorSet::Rewrite(
         writes[i].pImageInfo = &imageInfos[i];
     }
 
-    vkUpdateDescriptorSets(m_device, kSceneServiceSlotCount, writes.data(), 0, nullptr);
+    // binding 8 has no per-slot fallback above - a freshly allocated set
+    // needs it written too, batched into this SAME call (never a separate
+    // vkUpdateDescriptorSets - two back-to-back updates against a brand-new
+    // set is a known crash trigger on at least one targeted Vulkan driver).
+    VkDescriptorBufferInfo dummyBufferInfo{};
+    std::uint32_t writeCount = kSceneServiceSlotCount;
+    if (freshlyAllocated) {
+        dummyBufferInfo = { m_dummyGlobalUniformBuffer.Native(), 0, kSceneGlobalUniformBlockSize };
+        VkWriteDescriptorSet& dummyWrite = writes[kSceneServiceSlotCount];
+        dummyWrite = VkWriteDescriptorSet{};
+        dummyWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        dummyWrite.dstSet = set;
+        dummyWrite.dstBinding = kSceneServiceSlotCount;
+        dummyWrite.descriptorCount = 1;
+        dummyWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        dummyWrite.pBufferInfo = &dummyBufferInfo;
+        writeCount = kSceneServiceSlotCount + 1;
+    }
+
+    vkUpdateDescriptorSets(m_device, writeCount, writes.data(), 0, nullptr);
     return set;
 }
 
@@ -361,18 +391,6 @@ const Texture2D& SceneServicesDescriptorSet::DummyImage2DTextureFor(std::uint32_
     return m_dummyImage2DTextures.at(slotIndex);
 }
 
-void SceneServicesDescriptorSet::WriteDummyGlobalUniformBlockBinding(VkDescriptorSet set)
-{
-    VkDescriptorBufferInfo bufferInfo{ m_dummyGlobalUniformBuffer.Native(), 0, kSceneGlobalUniformBlockSize };
-    VkWriteDescriptorSet write{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-    write.dstSet = set;
-    write.dstBinding = kSceneServiceSlotCount;
-    write.descriptorCount = 1;
-    write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    write.pBufferInfo = &bufferInfo;
-    vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
-}
-
 void SceneServicesDescriptorSet::UpdateGlobalUniformBlock(rg::RenderViewId view, std::span<const std::byte> bytes)
 {
     assert(bytes.size() <= static_cast<std::size_t>(kSceneGlobalUniformBlockSize)
@@ -385,12 +403,16 @@ void SceneServicesDescriptorSet::UpdateGlobalUniformBlock(rg::RenderViewId view,
             break;
         }
     }
-    if (entry == nullptr) {
+    const bool freshlyCreatedBuffer = (entry == nullptr);
+    if (freshlyCreatedBuffer) {
         m_perViewUniformBuffers.push_back(PerViewUniformBuffer{ view,
             m_renderer->CreateBuffer(kSceneGlobalUniformBlockSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
                 BufferMemoryUsage::CpuToGpu, "SceneGlobalUniformBlock") });
         entry = &m_perViewUniformBuffers.back();
     }
+    // Every frame just memcpy's fresh bytes into this view's OWN already-
+    // mapped buffer - the buffer HANDLE never changes again after today, so
+    // the descriptor set below never needs to be touched again either.
     entry->buffer.Upload(bytes.data(), bytes.size());
 
     // Lazily allocate+register the shared per-view set here too - do NOT
@@ -407,22 +429,29 @@ void SceneServicesDescriptorSet::UpdateGlobalUniformBlock(rg::RenderViewId view,
             break;
         }
     }
-    if (set == VK_NULL_HANDLE) {
+    const bool freshlyAllocatedSet = (set == VK_NULL_HANDLE);
+    if (freshlyAllocatedSet) {
         set = m_renderer->AllocateComputeDescriptorSet(m_layout);
         m_perViewSets.push_back(PerViewSet{ view, set });
-        // Same safety net as Rewrite()'s own lazy-alloc branch - the real
-        // write immediately below overwrites this with real data.
-        WriteDummyGlobalUniformBlockBinding(set);
     }
 
-    VkDescriptorBufferInfo bufferInfo{ entry->buffer.Native(), 0, kSceneGlobalUniformBlockSize };
-    VkWriteDescriptorSet write{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-    write.dstSet = set;
-    write.dstBinding = kSceneServiceSlotCount;
-    write.descriptorCount = 1;
-    write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    write.pBufferInfo = &bufferInfo;
-    vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
+    // Binding 8 only ever needs to be POINTED at this view's buffer ONCE -
+    // re-running vkUpdateDescriptorSets every frame against a set that may
+    // still be in-flight on the GPU is unsafe and a known crash trigger on
+    // at least one targeted Vulkan driver. Only touch it the one frame
+    // either the buffer or the set is brand new; every later frame just
+    // relies on the Upload() above to refresh the bytes this SAME binding
+    // already points at.
+    if (freshlyCreatedBuffer || freshlyAllocatedSet) {
+        VkDescriptorBufferInfo bufferInfo{ entry->buffer.Native(), 0, kSceneGlobalUniformBlockSize };
+        VkWriteDescriptorSet write{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        write.dstSet = set;
+        write.dstBinding = kSceneServiceSlotCount;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        write.pBufferInfo = &bufferInfo;
+        vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
+    }
 }
 
 } // namespace gte
