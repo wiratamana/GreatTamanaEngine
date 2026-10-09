@@ -333,10 +333,11 @@ void UnregisterProjectRenderFeature(const char* debugName);
 `ProjectRenderFeatureCallback` (`src/Core/Plugins/ProjectRenderFeatureCallback.h`,
 a brand-new, free-standing header — never nested inside `RenderFeatureCompositor`,
 so `Core.h` can keep forward-declaring that still-incomplete class) is
-`std::function<void(rg::RenderGraphBuilder&, rg::TextureHandle, VkExtent2D)>` —
-handed the current frame's real Game View/Scene View PRIVATE compositing target
-and its extent, directly, with no adapter object in between. Call it from your
-own `_Game.dll`'s `RegisterProject()` entry point, exactly once per feature.
+`std::function<void(rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, VkExtent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&)>` —
+handed the current frame's RenderGraphBuilder, blackboard, view identity, PRIVATE compositing
+target, its extent, a read-only color/depth handle struct, and per-view camera data, directly,
+with no adapter object in between. Call it from your own `_Game.dll`'s `RegisterProject()` entry
+point, exactly once per feature.
 
 `RegisterProjectRenderFeature()` REJECTS (never silently truncates) any
 `debugName` longer than 63 bytes — the first call site in this engine building
