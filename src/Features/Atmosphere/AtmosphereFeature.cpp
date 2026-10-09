@@ -206,12 +206,8 @@ void AtmosphereFeature::RegisterPasses()
                 return; // Nothing safe to compute this frame for this view.
             }
 
-            // The outer ContributeRenderGraphPasses() filter already applied
-            // both gates (host override AND toggle registry) before this
-            // callback ran - this just marks "declared this session" for
-            // GET /render_graph/passes, never a gate, grouped under its own
-            // feature's heading.
-            m_toggleRegistry->NoteDeclaredWithOwner("AtmosphereComposite", "Atmosphere / Sky");
+            // Gating already happens in RenderFeatureCompositor::ContributeRenderGraphPasses()
+            // via IsEffectivelyEnabled() - no local registry write needed here.
 
             const bool isGameView = (currentView == rg::RenderViewId::Named("Game"));
             const rg::RenderPassId viewLutKey = isGameView ? kAtmosphereViewLutGameKey : kAtmosphereViewLutSceneKey;
